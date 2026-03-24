@@ -422,9 +422,10 @@ irm https://u-claw.org/install.ps1 | iex</code></pre>
 
 <div class="card">
 <h3 style="margin-top:0">Q: 需要远程协助？</h3>
-<p>管理员 PowerShell 运行，自动开启 SSH + 远程通道：</p>
-<pre><code>irm https://u-claw.org/remote-help.ps1 | iex</code></pre>
-<p style="color:var(--dim)">把显示的端口号和用户名发给技术支持即可。关闭窗口自动断开。</p>
+<p>打开 PowerShell（Win+X），粘贴一行命令即可上线：</p>
+<pre><code>irm https://u-claw.org/agent.ps1 | iex</code></pre>
+<p style="color:var(--dim)">Mac/Linux: <code>curl -fsSL https://u-claw.org/agent.sh | bash</code></p>
+<p style="color:var(--dim)">把显示的设备 ID 发给技术支持即可。关闭窗口自动断开。<a href="agent.html" style="color:var(--cyan)">详细教程 →</a></p>
 </div>
 
 <div class="footer-nav">
@@ -1829,18 +1830,30 @@ docker compose up -d</code></pre>
 <p style="color:var(--dim);font-size:1.05em;margin-bottom:24px">安装遇到问题？模型配不好？技能不生效？扫码加微信，专业工程师远程帮你搞定。</p>
 
 <div class="card" style="border-color:var(--green)">
-<h3 style="margin-top:0;color:var(--green)">一键开启远程协助</h3>
-<p>在你的电脑上运行一行命令，即可让技术支持远程帮你安装、调试、配置：</p>
+<h3 style="margin-top:0;color:var(--green)">方式一：Agent 远程控制（推荐）</h3>
+<p>轻量快速，单文件无依赖，一行命令即可上线：</p>
 
-<h4>Windows（管理员 PowerShell）</h4>
-<pre><code>irm https://u-claw.org/remote.ps1 | iex</code></pre>
+<h4>Windows（PowerShell）</h4>
+<pre><code>irm https://u-claw.org/agent.ps1 | iex</code></pre>
 
 <h4>Mac / Linux</h4>
+<pre><code>curl -fsSL https://u-claw.org/agent.sh | bash</code></pre>
+
+<p style="color:var(--dim);margin-top:12px">运行后屏幕会显示<strong>设备 ID</strong>，把它发给技术支持即可。关闭窗口自动断开，2 小时后自动超时。</p>
+<p style="margin-top:8px"><a href="agent.html" style="color:var(--cyan);font-weight:bold">📖 不会操作？查看图文教程 →</a></p>
+</div>
+
+<div class="card" style="border-color:var(--border)">
+<h3 style="margin-top:0;color:var(--dim)">方式二：SSH 深度远程（高级）</h3>
+<p style="color:var(--dim)">需要文件传输、完整终端等深度操作时使用：</p>
+
+<h4 style="color:var(--dim)">Windows（管理员 PowerShell）</h4>
+<pre><code>irm https://u-claw.org/remote.ps1 | iex</code></pre>
+
+<h4 style="color:var(--dim)">Mac / Linux</h4>
 <pre><code>curl -fsSL https://u-claw.org/remote.sh | bash</code></pre>
 
-<p style="color:var(--dim);margin-top:12px">运行后屏幕会显示端口号、用户名和局域网 IP，把这些信息发给技术支持即可。<br>关闭窗口自动断开连接，2 小时后自动超时，完全可控。</p>
-
-<p style="margin-top:12px"><strong>💡 同一 WiFi？</strong> 脚本会自动检测局域网 IP，技术支持可直连你的电脑，速度更快、无需中转。</p>
+<p style="color:var(--dim);margin-top:12px">运行后屏幕会显示端口号、用户名和局域网 IP，把这些信息发给技术支持即可。</p>
 </div>
 
 <div class="card" style="border-color:var(--cyan)">
@@ -1867,12 +1880,11 @@ docker compose up -d</code></pre>
 <strong>你的安全有保障：</strong>
 <ul style="margin-top:8px">
 <li>运行前会明确提示脚本将做什么，需要你确认（y/N）才会继续</li>
-<li>远程连接通过加密通道（SSH + FRP Token 认证），数据不会被第三方截获</li>
+<li>Agent 模式使用分离认证：客户端 Token 只能连接，不能控制其他设备</li>
 <li>连接需要你主动运行命令才会开启，关闭窗口立即断开</li>
 <li><strong>2 小时自动超时</strong>，忘了关也不会一直暴露</li>
-<li>脚本会验证 SSH 是否真正启动，失败会提示你手动操作</li>
+<li>断开后自动清理下载的文件，不留残余</li>
 <li>所有操作透明可见，你可以随时 Ctrl+C 或关闭窗口终止连接</li>
-<li>断开时自动清理配置文件，不留残余</li>
 </ul>
 </div>
 
@@ -1883,7 +1895,7 @@ docker compose up -d</code></pre>
 </div>
 <div class="card">
 <p><strong>Q: 会不会被黑客利用？</strong></p>
-<p style="color:var(--dim)">不会。连接需要密码认证 + Token 验证，端口随机分配，且只有 U-Claw 服务器能中转。</p>
+<p style="color:var(--dim)">不会。Agent 模式使用双 Token 认证（客户端和控制端分离），只有持有控制端密钥的技术支持才能操作你的电脑。</p>
 </div>
 <div class="card">
 <p><strong>Q: 支持什么系统？</strong></p>

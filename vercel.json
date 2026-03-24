@@ -1,3 +1,26 @@
 {
-  "outputDirectory": "website"
+  "outputDirectory": "website",
+  "headers": [
+    {
+      "source": "/downloads/agent.exe",
+      "headers": [
+        { "key": "Content-Type", "value": "application/octet-stream" },
+        { "key": "Content-Disposition", "value": "attachment; filename=agent.exe" }
+      ]
+    },
+    {
+      "source": "/downloads/agent",
+      "headers": [
+        { "key": "Content-Type", "value": "application/octet-stream" },
+        { "key": "Content-Disposition", "value": "attachment; filename=agent" }
+      ]
+    },
+    {
+      "source": "/downloads/agent-linux",
+      "headers": [
+        { "key": "Content-Type", "value": "application/octet-stream" },
+        { "key": "Content-Disposition", "value": "attachment; filename=agent-linux" }
+      ]
+    }
+  ]
 }

@@ -16,6 +16,7 @@ social-assets/
 .download-cache/
 *.dmg
 *.exe
+!website/downloads/agent.exe
 *.blockmap
 builder-debug.yml
 
