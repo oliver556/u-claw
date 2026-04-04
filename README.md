@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[中文](#中文) | [English](#english) | [📖 完整教程](https://u-claw.org/tutorial.html)
+[中文](#中文) | [English](#english) | [日本語](#日本語) | [📖 完整教程](https://u-claw.org/tutorial.html)
 
 ---
 
@@ -426,6 +426,171 @@ Right-click the script → Open.
 - WeChat: hecare888
 - GitHub: [@dongsheng123132](https://github.com/dongsheng123132)
 - Website: [u-claw.org](https://u-claw.org)
+
+---
+
+---
+
+<a id="日本語"></a>
+
+## 日本語
+
+### これは何？
+
+U-Claw（虾盘 / シャーパン）は、[OpenClaw](https://github.com/openclaw/openclaw)（オープンソース AI アシスタントフレームワーク）を USB メモリに入れて持ち運べるようにする**チュートリアル + ソースコード一式**です。任意の PC に差し込み、ダブルクリックするだけで AI が使えます。
+
+コードベースがそのまま USB のファイル構造になっています。`setup.sh` で大きな依存ファイルをダウンロードした後、`portable/` ディレクトリを USB にコピーすれば完成です。
+
+> 📖 **[完全チュートリアル](https://u-claw.org/tutorial.html)** — ゼロからの手動インストール、モデル設定、チャットプラットフォーム連携。
+
+### ワンラインインストール（推奨）
+
+USB 不要。コマンド一行で PC に直接インストール：
+
+```bash
+# Mac / Linux
+curl -fsSL https://u-claw.org/install.sh | bash
+
+# Windows (PowerShell を管理者として実行)
+irm https://u-claw.org/install.ps1 | iex
+```
+
+自動で Node.js ダウンロード → OpenClaw インストール → スキル設定 → AI モデル設定 → 起動スクリプト生成まで完了します。中国ミラーを使用。
+
+詳細は [`install/README.md`](install/README.md) を参照。
+
+### クイックスタート：ポータブル USB の作成
+
+```bash
+# 1. クローン
+git clone https://github.com/dongsheng123132/u-claw.git
+
+# 2. 依存ファイルをダウンロード（Node.js + OpenClaw、約1分）
+cd u-claw/portable && bash setup.sh
+
+# 3. USB にコピー
+cp -R portable/ /Volumes/YOUR_USB/U-Claw/   # Mac
+# Windows はエクスプローラーでドラッグ＆ドロップ
+```
+
+**完了！** USB を差し込み、起動スクリプトをダブルクリックするだけ。
+
+### USB の機能一覧
+
+| 機能 | Mac | Windows |
+|------|-----|---------|
+| **インストール不要で実行** | `Mac-Start.command` | `Windows-Start.bat` |
+| **メニュー** | `Mac-Menu.command` | `Windows-Menu.bat` |
+| **PC にインストール** | `Mac-Install.command` | `Windows-Install.bat` |
+| **初回設定** | `Config.html` | `Config.html` |
+
+### ファイル構造
+
+```
+U-Claw/                          ← フォルダごと USB にコピー
+├── Mac-Start.command             Mac 起動スクリプト
+├── Mac-Menu.command              Mac メニュー
+├── Mac-Install.command           Mac にインストール
+├── Windows-Start.bat             Windows 起動スクリプト
+├── Windows-Menu.bat              Windows メニュー
+├── Windows-Install.bat           Windows にインストール
+├── Config.html                   初回設定ページ
+├── setup.sh                      依存ダウンロード（開発者向け）
+├── app/                          ← 大きな依存ファイル（setup.sh でDL、git 管理外）
+│   ├── core/                        OpenClaw + QQ プラグイン
+│   └── runtime/
+│       ├── node-mac-arm64/          Mac Apple Silicon
+│       ├── node-mac-x64/           Mac Intel
+│       └── node-win-x64/           Windows 64-bit
+└── data/                         ← ユーザーデータ（git 管理外）
+    ├── .openclaw/                   設定ファイル
+    ├── memory/                      AI メモリ
+    └── backups/                     バックアップ
+```
+
+### Linux ブータブル USB
+
+OS がなくても大丈夫。任意の PC を USB から Ubuntu + AI で起動できます：
+
+- 本リポジトリ内：[`bootable/`](bootable/) ディレクトリ（他のモジュールと完全に独立）
+- 独立リポジトリ：[u-claw-linux](https://github.com/dongsheng123132/u-claw-linux)（同じ内容、単独クローン向け）
+
+Ventoy + Ubuntu 24.04 LTS + 永続化ストレージ対応。Windows 上で 4 ステップの PowerShell スクリプトを実行して作成。詳細は [`bootable/README.md`](bootable/README.md) を参照。
+
+### デスクトップアプリ（Electron）
+
+```bash
+cd u-claw-app
+bash setup.sh            # ワンクリックで開発環境セットアップ
+npm run dev              # 開発モードで実行
+npm run build:mac-arm64  # ビルド → release/*.dmg
+npm run build:win        # ビルド → release/*.exe
+```
+
+### 対応 AI モデル
+
+**中国国産モデル（VPN 不要）：**
+
+| モデル | 推奨用途 |
+|--------|----------|
+| DeepSeek | プログラミング最適、超低価格 |
+| Kimi K2.5 | 長文ドキュメント、256K コンテキスト |
+| Qwen (通義千問) | 無料枠が大きい |
+| GLM (智谱) | 学術向け |
+| MiniMax | 音声・マルチモーダル |
+| Doubao (豆包) | 火山エンジン |
+
+**国際モデル：** Claude・GPT・Gemini（中国からは VPN またはリレーが必要）
+
+### 対応チャットプラットフォーム
+
+| プラットフォーム | 状態 | 備考 |
+|------------------|------|------|
+| QQ | ✅ プリインストール | AppID + Secret を入力 |
+| 飛書 (Lark) | ✅ 内蔵 | 企業向け |
+| Telegram | ✅ 内蔵 | 海外向け |
+| WhatsApp | ✅ 内蔵 | Baileys プロトコル |
+| Discord | ✅ 内蔵 | — |
+| WeChat | ✅ コミュニティプラグイン | iPad プロトコル |
+
+### 開発 & コントリビュート
+
+```bash
+git clone https://github.com/dongsheng123132/u-claw.git
+cd u-claw/portable && bash setup.sh
+bash Mac-Start.command   # Mac でテスト
+```
+
+**対応プラットフォーム：**
+
+| プラットフォーム | 状態 | 備考 |
+|------------------|------|------|
+| Mac Apple Silicon (M1-M4) | ✅ | ポータブル + デスクトップ |
+| Mac Intel (x64) | ✅ | ポータブル + デスクトップ |
+| Windows x64 | 🚧 開発中 | ポータブル + デスクトップ |
+| Linux x64（ブータブル USB） | ✅ | [`bootable/`](bootable/) ディレクトリ |
+
+PR 歓迎！特に：Windows スクリプトの改善、ドキュメント翻訳。
+
+### FAQ
+
+**Q: VPN は必要ですか？**
+不要です。インストール・実行ともに中国ミラーを使用。中国国産モデルの API は直接接続できます。
+
+**Q: USB メモリの容量はどのくらい必要ですか？**
+4GB 以上（フルで約 2.3GB）。
+
+**Q: 再配布できますか？**
+MIT ライセンスです。自由にコピー・配布できます。
+
+**Q: Mac で「未確認の開発元」と表示されますか？**
+スクリプトを右クリック → 「開く」を選択してください。
+
+### お問い合わせ
+
+- WeChat: hecare888
+- GitHub: [@dongsheng123132](https://github.com/dongsheng123132)
+- ウェブサイト: [u-claw.org](https://u-claw.org)
 
 ---
 
