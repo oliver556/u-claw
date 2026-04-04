@@ -53,7 +53,8 @@ irm https://u-claw.org/install.ps1 | iex
 git clone https://github.com/dongsheng123132/u-claw.git
 
 # 2. 补齐大依赖（Node.js + OpenClaw，国内镜像，约 1 分钟）
-cd u-claw/portable && bash setup.sh   # Windows可用setup.ps1
+cd u-claw/portable && bash setup.sh   # Mac / Linux
+# Windows 用户：双击 setup.bat，或 PowerShell 中运行 setup.ps1
 
 # 3. 拷贝到 U 盘
 cp -R portable/ /Volumes/你的U盘/U-Claw/   # Mac
@@ -251,7 +252,8 @@ See [`install/README.md`](install/README.md) for details.
 git clone https://github.com/dongsheng123132/u-claw.git
 
 # 2. Download dependencies (Node.js + OpenClaw, ~1 min)
-cd u-claw/portable && bash setup.sh
+cd u-claw/portable && bash setup.sh   # Mac / Linux
+# Windows: double-click setup.bat, or run setup.ps1 in PowerShell
 
 # 3. Copy to USB drive
 cp -R portable/ /Volumes/YOUR_USB/U-Claw/   # Mac
