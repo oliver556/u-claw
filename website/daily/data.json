@@ -1,14 +1,14 @@
 {
   "latest": {
-    "date": "2026-04-04",
+    "date": "2026-04-05",
     "tip": {
       "title": {
-        "zh": "一键切换模型：快速调用不同国产大模型",
-        "en": "One-Click Model Switching: Quickly Access Different Domestic LLMs"
+        "zh": "一键切换模型：无需重启，快速对比不同AI的回答",
+        "en": "One-Click Model Switching: Compare AI Responses Instantly Without Restarting"
       },
       "content": {
-        "zh": "在 U-Claw 主界面或聊天窗口中，点击右上角的模型名称（如“DeepSeek”），会弹出所有 8 个预装国产模型的列表。无需进入复杂设置，直接点击即可瞬间切换。这个技巧特别适合对比不同模型对同一问题的回答风格和准确性，或在某个模型暂时响应缓慢时快速切换到备用模型，确保工作流不中断。",
-        "en": "In the U-Claw main interface or chat window, click the model name (e.g., 'DeepSeek') in the top-right corner to see a list of all 8 pre-installed domestic models. Switch instantly with a single click, no need for complex settings. This is perfect for comparing how different models answer the same question or for quickly switching to a backup model if one becomes slow, ensuring your workflow remains uninterrupted."
+        "zh": "在U-Claw的Web界面或聊天窗口中，点击模型名称下拉菜单，即可在DeepSeek、Kimi、通义千问等8大国产模型间即时切换。无需重启服务或重新加载页面，同一个问题可以快速发送给不同模型，横向对比它们的回答风格和准确度，帮助你为不同任务选择最合适的AI助手。",
+        "en": "In U-Claw's web interface or chat window, click the model name dropdown to instantly switch between 8 major domestic models like DeepSeek, Kimi, and Tongyi Qianwen. No need to restart the service or reload the page. You can quickly send the same question to different models to compare their response styles and accuracy side-by-side, helping you choose the most suitable AI assistant for various tasks."
       },
       "tag": {
         "zh": "技巧",
@@ -17,12 +17,12 @@
     },
     "case": {
       "title": {
-        "zh": "离线环境下的紧急代码调试助手",
-        "en": "Emergency Code Debugging Assistant in Offline Environments"
+        "zh": "离线会议纪要：用U-Claw快速整理飞书群聊记录",
+        "en": "Offline Meeting Minutes: Quickly Organize Feishu Group Chat Records with U-Claw"
       },
       "content": {
-        "zh": "程序员小李在客户现场进行部署，网络受限。遇到一段复杂的 Python 数据处理脚本报错，无法上网搜索。他立即插入 U-Claw 虾盘，在便携模式下启动 OpenClaw，将报错信息和代码片段粘贴给内置的 DeepSeek 模型。AI 不仅精准指出了 pandas 版本兼容性问题，还提供了修改后的代码和解释。小李快速修复了问题，全程离线，保障了客户数据安全，赢得了客户信任。",
-        "en": "Programmer Xiao Li was deploying a system at a client site with restricted internet access. A complex Python data processing script threw an error, and he couldn't search online. He immediately plugged in the U-Claw drive, launched OpenClaw in portable mode, and pasted the error message and code snippet to the built-in DeepSeek model. The AI precisely identified a pandas version compatibility issue, provided corrected code, and an explanation. Xiao Li fixed the problem quickly, entirely offline, ensuring client data security and earning their trust."
+        "zh": "市场部小张的团队在飞书上进行了产品脑暴会。他将完整的群聊记录导出为文本文件，在离线环境下插入U-Claw虾盘。通过内置的“文档总结”技能，他让AI快速提取了会议的核心议题、关键决策和待办事项，并生成了格式清晰的会议纪要。整个过程完全离线，保障了内部讨论的隐私安全。",
+        "en": "Xiao Zhang from the marketing department had a product brainstorming session with his team on Feishu. He exported the complete group chat history as a text file and inserted the U-Claw drive in an offline environment. Using the built-in 'Document Summarization' skill, he had the AI quickly extract the meeting's core topics, key decisions, and action items, generating a well-formatted meeting minutes. The entire process was completely offline, ensuring the privacy and security of internal discussions."
       },
       "tag": {
         "zh": "案例",
@@ -31,6 +31,37 @@
     }
   },
   "history": [
+    {
+      "date": "2026-04-04",
+      "tip": {
+        "title": {
+          "zh": "一键切换模型：快速调用不同国产大模型",
+          "en": "One-Click Model Switching: Quickly Access Different Domestic LLMs"
+        },
+        "content": {
+          "zh": "在 U-Claw 主界面或聊天窗口中，点击右上角的模型名称（如“DeepSeek”），会弹出所有 8 个预装国产模型的列表。无需进入复杂设置，直接点击即可瞬间切换。这个技巧特别适合对比不同模型对同一问题的回答风格和准确性，或在某个模型暂时响应缓慢时快速切换到备用模型，确保工作流不中断。",
+          "en": "In the U-Claw main interface or chat window, click the model name (e.g., 'DeepSeek') in the top-right corner to see a list of all 8 pre-installed domestic models. Switch instantly with a single click, no need for complex settings. This is perfect for comparing how different models answer the same question or for quickly switching to a backup model if one becomes slow, ensuring your workflow remains uninterrupted."
+        },
+        "tag": {
+          "zh": "技巧",
+          "en": "Tip"
+        }
+      },
+      "case": {
+        "title": {
+          "zh": "离线环境下的紧急代码调试助手",
+          "en": "Emergency Code Debugging Assistant in Offline Environments"
+        },
+        "content": {
+          "zh": "程序员小李在客户现场进行部署，网络受限。遇到一段复杂的 Python 数据处理脚本报错，无法上网搜索。他立即插入 U-Claw 虾盘，在便携模式下启动 OpenClaw，将报错信息和代码片段粘贴给内置的 DeepSeek 模型。AI 不仅精准指出了 pandas 版本兼容性问题，还提供了修改后的代码和解释。小李快速修复了问题，全程离线，保障了客户数据安全，赢得了客户信任。",
+          "en": "Programmer Xiao Li was deploying a system at a client site with restricted internet access. A complex Python data processing script threw an error, and he couldn't search online. He immediately plugged in the U-Claw drive, launched OpenClaw in portable mode, and pasted the error message and code snippet to the built-in DeepSeek model. The AI precisely identified a pandas version compatibility issue, provided corrected code, and an explanation. Xiao Li fixed the problem quickly, entirely offline, ensuring client data security and earning their trust."
+        },
+        "tag": {
+          "zh": "案例",
+          "en": "Case"
+        }
+      }
+    },
     {
       "date": "2026-04-03",
       "tip": {
