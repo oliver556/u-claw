@@ -955,6 +955,23 @@ document.getElementById('keyInput').addEventListener('input', function() {
     document.getElementById('balanceLine').textContent = '粘贴 Key 后自动查询余额';
   }
 });
+
+// URL 参数自动填入 Key（从 U 盘 switch.html 跳转过来时携带）
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const key = params.get('key') || params.get('api_key') || '';
+  if (key && key.startsWith('sk-')) {
+    const inp = document.getElementById('keyInput');
+    inp.value = key;
+    updateHint(key);
+    if (validateKey(key)) queryBalance(key);
+    // 滚动到充值区
+    setTimeout(() => {
+      const el = document.getElementById('recharge');
+      if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }, 300);
+  }
+})();
 </script>
 </body>
 </html>
