@@ -532,7 +532,7 @@ curl "https://api.u-claw.org/v1/dashboard/billing/usage?start_date=2020-01-01&en
   <div class="live-test">
     <h4>🔬 余额查询测试</h4>
     <div class="test-input-row">
-      <input type="text" id="testKey" class="test-input" placeholder="sk-xp-..." spellcheck="false">
+      <input type="text" id="testKey" class="test-input" placeholder="sk-xp-... 或 sk-KKnD..." spellcheck="false">
       <button class="btn-test" id="testBtn" onclick="runTest()">发送请求</button>
     </div>
     <div class="test-result" id="testResult">等待输入 Key...</div>
@@ -625,14 +625,38 @@ window.addEventListener('scroll', () => {
   });
 });
 
+// ── 频率限制：60秒内最多5次 ──
+const _rl = { count: 0, reset: 0 };
+function checkRateLimit() {
+  const now = Date.now();
+  if (now > _rl.reset) { _rl.count = 0; _rl.reset = now + 60000; }
+  if (_rl.count >= 5) {
+    const wait = Math.ceil((_rl.reset - now) / 1000);
+    throw new Error('请求过于频繁，请 ' + wait + ' 秒后再试');
+  }
+  _rl.count++;
+}
+
+// ── Key 格式严格校验 ──
+// 格式1：sk-xp- + 32位十六进制（前端自生成）
+// 格式2：sk- + 48位字母数字（new-api 后台创建）
+function validateKey(key) {
+  return /^sk-xp-[0-9a-f]{32}$/.test(key) || /^sk-[A-Za-z0-9]{48}$/.test(key);
+}
+
 // 在线测试
 async function runTest() {
   const key = document.getElementById('testKey').value.trim();
   const btn = document.getElementById('testBtn');
   const out = document.getElementById('testResult');
-  if (!key || !key.startsWith('sk-')) {
+  if (!validateKey(key)) {
     out.className = 'test-result err';
-    out.textContent = '错误：请输入有效的 API Key（以 sk- 开头）';
+    out.textContent = '错误：请输入有效的 API Key（sk- 开头）';
+    return;
+  }
+  try { checkRateLimit(); } catch(e) {
+    out.className = 'test-result err';
+    out.textContent = e.message;
     return;
   }
   btn.disabled = true; btn.textContent = '请求中...';

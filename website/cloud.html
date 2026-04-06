@@ -669,7 +669,7 @@
     <p class="section-desc" style="margin:0 auto;">粘贴你的 API Key，实时查询剩余额度</p>
     <div class="balance-card">
       <div class="bal-input-row">
-        <input type="text" id="balKey" class="bal-input" placeholder="sk-xp-..." spellcheck="false" autocomplete="off">
+        <input type="text" id="balKey" class="bal-input" placeholder="sk-xp-... 或 sk-KKnD..." spellcheck="false" autocomplete="off">
         <button class="btn-query" id="queryBtn" onclick="doQueryBalance()">查询余额</button>
       </div>
       <div class="bal-err" id="balErr"></div>
@@ -776,7 +776,7 @@
       </div>
       <div class="faq-item">
         <div class="faq-q">Key 格式是什么？可以自己生成吗？</div>
-        <div class="faq-a">格式为 sk-xp- 开头 + 32位随机字符串。点"帮我生成一个"自动生成，也可以粘贴已有的 Key。</div>
+        <div class="faq-a">有两种格式：前端自动生成的是 sk-xp- 开头；在 new-api 后台创建的 token 是 sk- 开头 + 48位字母数字。两种都支持查询余额和使用 API。</div>
       </div>
     </div>
   </div>
@@ -868,7 +868,27 @@ function selectAmt(amount) {
   document.getElementById('recharge').scrollIntoView({behavior: 'smooth'});
 }
 
+// ── 频率限制：60秒内最多5次查询 ──
+const _rl = { count: 0, reset: 0 };
+function checkRateLimit() {
+  const now = Date.now();
+  if (now > _rl.reset) { _rl.count = 0; _rl.reset = now + 60000; }
+  if (_rl.count >= 5) {
+    const wait = Math.ceil((_rl.reset - now) / 1000);
+    throw new Error('查询过于频繁，请 ' + wait + ' 秒后再试');
+  }
+  _rl.count++;
+}
+
+// ── Key 格式校验：兼容两种格式 ──
+// 格式1：sk-xp- + 32位十六进制（前端自生成）
+// 格式2：sk- + 48位字母数字（new-api 后台创建的 token）
+function validateKey(key) {
+  return /^sk-xp-[0-9a-f]{32}$/.test(key) || /^sk-[A-Za-z0-9]{48}$/.test(key);
+}
+
 async function fetchBalance(key) {
+  checkRateLimit();
   const headers = {Authorization: 'Bearer ' + key};
   const today = new Date().toISOString().slice(0,10);
   const [subResp, usageResp] = await Promise.all([
@@ -884,6 +904,7 @@ async function fetchBalance(key) {
 }
 
 async function queryBalance(key) {
+  if (!validateKey(key)) return; // 输入中自动触发的，格式不对直接静默忽略
   const line = document.getElementById('balanceLine');
   line.textContent = '查询中...';
   try {
@@ -899,8 +920,8 @@ async function doQueryBalance() {
   const btn = document.getElementById('queryBtn');
   const errEl = document.getElementById('balErr');
   const resEl = document.getElementById('balResult');
-  if (!key || !key.startsWith('sk-')) {
-    errEl.textContent = '请输入有效的 API Key（以 sk- 开头）';
+  if (!validateKey(key)) {
+    errEl.textContent = 'Key 格式不正确，请输入有效的 API Key（sk- 开头）';
     errEl.classList.add('show'); resEl.classList.remove('show'); return;
   }
   btn.disabled = true; btn.textContent = '查询中...';
@@ -927,9 +948,9 @@ document.getElementById('balKey').addEventListener('keydown', function(e) {
 document.getElementById('keyInput').addEventListener('input', function() {
   const key = this.value.trim();
   updateHint(key);
-  if (key.length > 10) {
+  if (validateKey(key)) {
     clearTimeout(this._t);
-    this._t = setTimeout(() => queryBalance(key), 800);
+    this._t = setTimeout(() => queryBalance(key), 1000);
   } else {
     document.getElementById('balanceLine').textContent = '粘贴 Key 后自动查询余额';
   }
