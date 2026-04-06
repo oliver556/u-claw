@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>虾盘云 — 充值</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#09090b;
+  --card:#18181b;
+  --card-hover:#1c1c20;
+  --border:#27272a;
+  --border-active:#3f3f46;
+  --text:#fafafa;
+  --text-muted:#a1a1aa;
+  --text-dim:#52525b;
+  --blue:#3b82f6;
+  --blue-glow:rgba(59,130,246,0.12);
+  --green:#22c55e;
+  --green-glow:rgba(34,197,94,0.12);
+  --orange:#f97316;
+  --orange-dark:#ea580c;
+  --orange-glow:rgba(249,115,22,0.15);
+  --yellow:#eab308;
+  --red:#ef4444;
+  --radius:12px;
+}
+body{font-family:-apple-system,"Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+.header{padding:20px 28px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;background:var(--card)}
+.logo{width:40px;height:40px;border-radius:10px;border:1px solid var(--border)}
+.header-title{font-size:1.05em;font-weight:700;color:var(--text)}
+.header-sub{font-size:.78em;color:var(--text-muted);margin-top:2px}
+
+.container{max-width:520px;margin:0 auto;padding:28px 20px 80px}
+
+.section{display:none}
+.section.active{display:block}
+
+/* 余额卡片 */
+.balance-card{
+  background:linear-gradient(135deg,rgba(249,115,22,0.08) 0%,var(--card) 100%);
+  border:1px solid rgba(249,115,22,0.3);
+  border-radius:var(--radius);
+  padding:20px;
+  margin-bottom:20px;
+  position:relative;overflow:hidden;
+}
+.balance-card::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,var(--orange-glow) 0%,transparent 60%);
+  pointer-events:none;
+}
+.balance-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.balance-title{font-size:.82em;font-weight:700;color:var(--orange);display:flex;align-items:center;gap:6px}
+.balance-refresh{
+  background:rgba(249,115,22,0.12);border:1px solid rgba(249,115,22,0.25);
+  color:var(--orange);border-radius:6px;padding:4px 10px;
+  font-size:.72em;cursor:pointer;font-family:inherit;transition:all .15s;
+}
+.balance-refresh:hover{background:rgba(249,115,22,0.22)}
+.balance-refresh:disabled{opacity:.4;cursor:default}
+
+.key-row{
+  background:rgba(0,0,0,0.3);border:1px solid var(--border);
+  border-radius:8px;padding:10px 14px;margin-bottom:12px;
+}
+.key-label{font-size:.72em;color:var(--text-dim);margin-bottom:4px}
+.key-inner{display:flex;align-items:center;gap:8px}
+.key-val{
+  flex:1;font-size:.72em;color:var(--orange);
+  font-family:"Consolas","Courier New",monospace;
+  letter-spacing:.02em;word-break:break-all;line-height:1.5;
+}
+.copy-btn{
+  background:rgba(249,115,22,0.15);border:1px solid rgba(249,115,22,0.3);
+  color:var(--orange);border-radius:6px;padding:4px 10px;
+  font-size:.72em;font-weight:600;cursor:pointer;white-space:nowrap;
+  transition:all .15s;font-family:inherit;
+}
+.copy-btn:hover{background:rgba(249,115,22,0.25)}
+
+.balance-row{
+  display:flex;align-items:center;gap:10px;
+  background:rgba(0,0,0,0.25);border:1px solid var(--border);
+  border-radius:8px;padding:10px 14px;
+}
+.balance-label{font-size:.75em;color:var(--text-dim);white-space:nowrap}
+.balance-val{
+  flex:1;font-size:1.1em;font-weight:700;
+  font-family:"Consolas","Courier New",monospace;
+}
+.balance-val.ok{color:var(--green)}
+.balance-val.warn{color:var(--yellow)}
+.balance-val.low{color:var(--red)}
+.balance-val.dim{color:var(--text-dim)}
+
+/* 充值表单区 */
+.form-card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius);padding:20px;margin-bottom:16px;
+}
+.form-card-title{
+  font-size:.9em;font-weight:700;color:var(--text);
+  margin-bottom:16px;display:flex;align-items:center;gap:8px;
+}
+
+/* 金额选择 */
+.amount-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.amount-btn{
+  background:rgba(255,255,255,0.03);border:1px solid var(--border);
+  border-radius:9px;padding:12px 8px;text-align:center;
+  cursor:pointer;transition:all .15s;
+}
+.amount-btn:hover{border-color:var(--border-active);background:rgba(255,255,255,0.06)}
+.amount-btn.selected{
+  border-color:var(--orange);
+  background:rgba(249,115,22,0.1);
+  box-shadow:0 0 0 1px var(--orange);
+}
+.amount-cny{font-size:1.05em;font-weight:700;color:var(--text)}
+.amount-quota{font-size:.68em;color:var(--text-dim);margin-top:2px}
+.amount-btn.selected .amount-cny{color:var(--orange)}
+.amount-btn.selected .amount-quota{color:rgba(249,115,22,0.6)}
+
+.custom-wrap{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.custom-prefix{font-size:.9em;color:var(--text-muted);white-space:nowrap}
+input[type="number"],input[type="text"]{
+  flex:1;padding:10px 13px;
+  background:#0c0c0f;border:1px solid var(--border);
+  border-radius:9px;color:var(--text);font-size:.92em;
+  outline:none;transition:border-color .2s;font-family:inherit;
+  -moz-appearance:textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none}
+input:focus{border-color:var(--orange)}
+.input-hint{font-size:.76em;color:var(--text-dim);margin-top:5px}
+
+/* 支付二维码 */
+.qr-section{margin-bottom:16px}
+.qr-tabs{display:flex;gap:6px;margin-bottom:12px}
+.qr-tab{
+  padding:6px 14px;border-radius:7px;font-size:.8em;font-weight:600;
+  cursor:pointer;border:1px solid var(--border);background:transparent;
+  color:var(--text-muted);font-family:inherit;transition:all .15s;
+}
+.qr-tab.active{
+  background:rgba(34,197,94,0.12);border-color:rgba(34,197,94,0.35);
+  color:var(--green);
+}
+.qr-box{
+  background:rgba(0,0,0,0.3);border:1px solid var(--border);
+  border-radius:10px;padding:16px;text-align:center;display:none;
+}
+.qr-box.active{display:block}
+.qr-img{
+  width:180px;height:180px;object-fit:contain;
+  border-radius:10px;border:2px solid var(--border);
+  background:#fff;margin:0 auto 10px;display:block;
+}
+.qr-placeholder{
+  width:180px;height:180px;border-radius:10px;
+  border:2px dashed var(--border);background:rgba(0,0,0,0.3);
+  margin:0 auto 10px;display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:8px;color:var(--text-dim);font-size:.8em;
+}
+.qr-name{font-size:.82em;color:var(--text-muted);font-weight:600}
+.qr-sub{font-size:.72em;color:var(--text-dim);margin-top:2px}
+
+/* 截图上传 */
+.upload-area{
+  border:2px dashed var(--border);border-radius:10px;
+  padding:28px 20px;text-align:center;cursor:pointer;
+  transition:all .2s;position:relative;overflow:hidden;
+  background:rgba(0,0,0,0.2);
+}
+.upload-area:hover{border-color:var(--border-active);background:rgba(255,255,255,0.02)}
+.upload-area.has-file{border-color:var(--green);border-style:solid;background:rgba(34,197,94,0.05)}
+.upload-area input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-icon{font-size:2em;margin-bottom:8px;color:var(--text-dim)}
+.upload-text{font-size:.84em;color:var(--text-muted)}
+.upload-sub{font-size:.74em;color:var(--text-dim);margin-top:4px}
+.upload-preview{max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;display:none;margin:0 auto}
+
+/* 提交按钮 */
+.submit-btn{
+  width:100%;padding:14px;border:none;border-radius:10px;
+  font-size:.96em;font-weight:700;cursor:pointer;
+  font-family:inherit;transition:all .2s;
+  background:linear-gradient(135deg,var(--orange),var(--orange-dark));
+  color:#fff;
+  box-shadow:0 4px 16px rgba(249,115,22,0.3);
+}
+.submit-btn:hover{box-shadow:0 6px 20px rgba(249,115,22,0.4);transform:translateY(-1px)}
+.submit-btn:active{transform:translateY(0)}
+.submit-btn:disabled{
+  background:var(--border);color:var(--text-dim);
+  cursor:not-allowed;box-shadow:none;transform:none;
+}
+
+/* 成功页 */
+.success-view{text-align:center;padding:50px 20px}
+.success-icon{font-size:3.5em;margin-bottom:20px}
+.success-title{font-size:1.3em;font-weight:700;color:var(--green);margin-bottom:10px}
+.success-desc{color:var(--text-muted);font-size:.88em;line-height:1.8;margin-bottom:24px}
+.success-tip{
+  background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);
+  border-radius:10px;padding:14px 18px;
+  font-size:.82em;color:var(--text-muted);line-height:1.8;text-align:left;
+}
+.back-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  margin-top:24px;padding:10px 22px;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:8px;color:var(--text-muted);font-size:.88em;
+  cursor:pointer;font-family:inherit;transition:all .15s;
+}
+.back-btn:hover{border-color:var(--border-active);color:var(--text)}
+
+/* Key 未找到提示 */
+.key-input-section{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius);padding:20px;margin-bottom:20px;
+}
+.key-input-title{font-size:.88em;font-weight:600;color:var(--text-muted);margin-bottom:10px}
+.key-input-wrap{display:flex;gap:8px}
+.key-input-wrap input{flex:1}
+.key-confirm-btn{
+  padding:10px 16px;border:none;border-radius:9px;
+  background:var(--blue);color:#fff;font-size:.86em;font-weight:600;
+  cursor:pointer;white-space:nowrap;font-family:inherit;transition:background .15s;
+}
+.key-confirm-btn:hover{background:#2563eb}
+
+/* Toast */
+.toast{
+  position:fixed;top:20px;right:20px;
+  background:#22c55e;color:#fff;
+  padding:10px 20px;border-radius:8px;
+  font-size:.84em;font-weight:500;
+  opacity:0;transform:translateY(-8px);
+  transition:all .25s;z-index:999;pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.error{background:var(--red)}
+.toast.info{background:var(--blue)}
+
+/* 分割线 */
+.divider{height:1px;background:var(--border);margin:16px 0}
+
+label{display:block;font-size:.82em;color:var(--text-muted);font-weight:500;margin-bottom:8px}
+
+@media(max-width:480px){
+  .amount-grid{grid-template-columns:repeat(2,1fr)}
+  .header{padding:16px 18px}
+  .container{padding:20px 14px 80px}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <img class="logo" src="assets/logo.png" alt="logo" onerror="this.style.display='none'">
+  <div>
+    <div class="header-title">虾盘云 — 充值</div>
+    <div class="header-sub">充值后余额实时到账，一般10分钟内审核</div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Key 手动输入区（自动隐藏） -->
+  <div class="key-input-section" id="keyInputSection" style="display:none">
+    <div class="key-input-title">未检测到 API Key，请手动粘贴</div>
+    <div class="key-input-wrap">
+      <input type="text" id="manualKeyInput" placeholder="sk-xp-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+      <button class="key-confirm-btn" onclick="confirmManualKey()">确认</button>
+    </div>
+  </div>
+
+  <!-- 主表单 -->
+  <div class="section active" id="mainSection">
+
+    <!-- 余额卡片 -->
+    <div class="balance-card">
+      <div class="balance-header">
+        <div class="balance-title">🦐 虾盘云 · 我的账户</div>
+        <button class="balance-refresh" id="refreshBtn" onclick="loadBalance()">刷新余额</button>
+      </div>
+      <div class="key-row">
+        <div class="key-label">我的专属 Key</div>
+        <div class="key-inner">
+          <div class="key-val" id="keyDisplay">检测中...</div>
+          <button class="copy-btn" onclick="copyKey()">复制</button>
+        </div>
+      </div>
+      <div class="balance-row">
+        <div class="balance-label">当前余额</div>
+        <div class="balance-val dim" id="balanceVal">加载中...</div>
+      </div>
+    </div>
+
+    <!-- 充值金额 -->
+    <div class="form-card">
+      <div class="form-card-title">💰 选择充值金额</div>
+
+      <div class="amount-grid">
+        <div class="amount-btn" onclick="selectAmount(20)" data-amt="20">
+          <div class="amount-cny">¥20</div>
+          <div class="amount-quota">+1000万</div>
+        </div>
+        <div class="amount-btn" onclick="selectAmount(50)" data-amt="50">
+          <div class="amount-cny">¥50</div>
+          <div class="amount-quota">+2500万</div>
+        </div>
+        <div class="amount-btn" onclick="selectAmount(100)" data-amt="100">
+          <div class="amount-cny">¥100</div>
+          <div class="amount-quota">+5000万</div>
+        </div>
+        <div class="amount-btn" onclick="selectAmount(0)" data-amt="0">
+          <div class="amount-cny">自定</div>
+          <div class="amount-quota">输入金额</div>
+        </div>
+      </div>
+
+      <div id="customWrap" style="display:none;margin-bottom:8px">
+        <div class="custom-wrap">
+          <span class="custom-prefix">¥</span>
+          <input type="number" id="customAmt" placeholder="请输入金额（最低¥10）" min="10" max="9999" oninput="onCustomInput()">
+        </div>
+        <div class="input-hint">¥1 = 50万 quota，¥10 起充</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- 支付二维码 -->
+      <div class="qr-section">
+        <label>扫码付款</label>
+        <div class="qr-tabs">
+          <button class="qr-tab active" onclick="switchQr('alipay',this)">支付宝</button>
+          <button class="qr-tab" onclick="switchQr('wechat',this)">微信</button>
+        </div>
+        <div class="qr-box active" id="qr-alipay">
+          <div class="qr-placeholder" id="qr-alipay-placeholder">
+            <div style="font-size:2em">📱</div>
+            <div>支付宝收款码</div>
+            <div style="font-size:.68em;margin-top:4px;opacity:.6">（管理员配置后显示）</div>
+          </div>
+          <img class="qr-img" id="qr-alipay-img" src="" alt="支付宝收款码" style="display:none" onerror="this.style.display='none';document.getElementById('qr-alipay-placeholder').style.display='flex'">
+          <div class="qr-name">支付宝</div>
+          <div class="qr-sub">扫码付款，备注填写您的 apikey</div>
+        </div>
+        <div class="qr-box" id="qr-wechat">
+          <div class="qr-placeholder" id="qr-wechat-placeholder">
+            <div style="font-size:2em">💚</div>
+            <div>微信收款码</div>
+            <div style="font-size:.68em;margin-top:4px;opacity:.6">（管理员配置后显示）</div>
+          </div>
+          <img class="qr-img" id="qr-wechat-img" src="" alt="微信收款码" style="display:none" onerror="this.style.display='none';document.getElementById('qr-wechat-placeholder').style.display='flex'">
+          <div class="qr-name">微信支付</div>
+          <div class="qr-sub">扫码付款，备注填写您的 apikey</div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- 上传截图 -->
+      <label>上传付款截图 <span style="color:var(--text-dim);font-weight:400">（可选，有图更快审核）</span></label>
+      <div class="upload-area" id="uploadArea" onclick="document.getElementById('screenshotInput').click()">
+        <input type="file" id="screenshotInput" accept="image/*" style="display:none" onchange="onFileSelect(event)">
+        <div id="uploadPlaceholder">
+          <div class="upload-icon">📸</div>
+          <div class="upload-text">点击上传付款截图</div>
+          <div class="upload-sub">支持 JPG / PNG，不超过 5MB</div>
+        </div>
+        <img id="uploadPreview" class="upload-preview">
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- 备注 -->
+      <label style="margin-top:4px">备注 <span style="color:var(--text-dim);font-weight:400">（可选）</span></label>
+      <input type="text" id="noteInput" placeholder="如有疑问可在此备注，管理员会看到">
+
+    </div>
+
+    <button class="submit-btn" id="submitBtn" onclick="submitRecharge()">提交充值申请</button>
+
+  </div><!-- /mainSection -->
+
+  <!-- 成功页 -->
+  <div class="section" id="successSection">
+    <div class="success-view">
+      <div class="success-icon">✅</div>
+      <div class="success-title">申请已提交！</div>
+      <div class="success-desc">
+        您的充值申请已成功提交。<br>
+        管理员会在微信上收到通知，一般 <strong style="color:var(--orange)">10分钟内</strong> 完成审核充值。
+      </div>
+      <div class="success-tip">
+        <strong style="color:var(--text)">审核完成后：</strong><br>
+        · 余额自动到账，无需任何操作<br>
+        · 刷新余额即可看到最新数字<br>
+        · 如超过1小时未到账，微信联系管理员
+      </div>
+      <button class="back-btn" onclick="goBack()">← 返回查看余额</button>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── 配置 ──────────────────────────────────────────────
+const API_BASE = 'https://api.u-claw.org';
+const RECHARGE_API = API_BASE + '/recharge';
+
+// 管理员在服务器配置好后，把二维码图片路径填在这里
+// 也可以通过 /recharge/config 接口动态获取
+const QR_ALIPAY = '';   // 如 'https://api.u-claw.org/recharge/qr/alipay.jpg'
+const QR_WECHAT = '';   // 如 'https://api.u-claw.org/recharge/qr/wechat.jpg'
+
+// ── 状态 ──────────────────────────────────────────────
+let currentKey = '';
+let selectedAmount = 0;   // 0 = 自定义
+let screenshotB64 = '';
+let screenshotMime = 'image/jpeg';
+
+// ── 初始化 ──────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  initKey();
+  loadQrCodes();
+});
+
+function initKey() {
+  // 优先从 URL 参数获取 key
+  const params = new URLSearchParams(window.location.search);
+  let key = params.get('key') || params.get('api_key') || '';
+
+  // 其次尝试从 localStorage 读取
+  if (!key) key = localStorage.getItem('xiapan_key') || '';
+
+  // 尝试从 providers.json 读取（通过 config-server 本地服务）
+  if (!key) {
+    fetchKeyFromConfigServer().then(k => {
+      if (k) {
+        setKey(k);
+      } else {
+        showKeyInput();
+      }
+    });
+    return;
+  }
+
+  setKey(key);
+}
+
+async function fetchKeyFromConfigServer() {
+  try {
+    // launcher 会启动本地 config-server（通常在 localhost:18799）
+    const ports = [18799, 18798, 18797, 18796, 18789];
+    for (const port of ports) {
+      try {
+        const r = await fetch(`http://localhost:${port}/config`, {signal: AbortSignal.timeout(800)});
+        if (r.ok) {
+          const cfg = await r.json();
+          const key = cfg?.providers?.xiapanyun?.api_key || '';
+          if (key) return key;
+        }
+      } catch(e) { /* 端口未开放，继续 */ }
+    }
+  } catch(e) {}
+  return '';
+}
+
+function setKey(key) {
+  currentKey = key;
+  localStorage.setItem('xiapan_key', key);
+  const masked = key.length > 14 ? key.slice(0, 10) + '...' + key.slice(-6) : key;
+  document.getElementById('keyDisplay').textContent = masked;
+  document.getElementById('keyInputSection').style.display = 'none';
+  loadBalance();
+}
+
+function showKeyInput() {
+  document.getElementById('keyInputSection').style.display = 'block';
+  document.getElementById('keyDisplay').textContent = '未检测到';
+  document.getElementById('balanceVal').textContent = '—';
+  document.getElementById('balanceVal').className = 'balance-val dim';
+}
+
+function confirmManualKey() {
+  const val = document.getElementById('manualKeyInput').value.trim();
+  if (val.length < 8) {
+    showToast('Key 格式不对，请重新确认', 'error'); return;
+  }
+  setKey(val);
+}
+
+async function loadBalance() {
+  if (!currentKey) return;
+  const btn = document.getElementById('refreshBtn');
+  const valEl = document.getElementById('balanceVal');
+  btn.disabled = true;
+  btn.textContent = '加载中...';
+  valEl.textContent = '加载中...';
+  valEl.className = 'balance-val dim';
+
+  try {
+    const [subRes, usageRes] = await Promise.all([
+      fetch(API_BASE + '/v1/dashboard/billing/subscription', {headers: {'Authorization': 'Bearer ' + currentKey}}),
+      fetch(API_BASE + '/v1/dashboard/billing/usage?start_date=' + getMonthStart(), {headers: {'Authorization': 'Bearer ' + currentKey}})
+    ]);
+
+    if (!subRes.ok) throw new Error('key无效或网络错误');
+    const sub = await subRes.json();
+    const usage = usageRes.ok ? await usageRes.json() : {total_usage: 0};
+
+    const total = sub.hard_limit_usd || 0;
+    const used = (usage.total_usage || 0) / 100;
+    const remaining = Math.max(0, total - used);
+
+    let cls = 'ok';
+    if (remaining < 1) cls = 'low';
+    else if (remaining < 5) cls = 'warn';
+
+    valEl.textContent = '¥' + (remaining * 7.2).toFixed(2) + ' 剩余（共充值 ¥' + (total * 7.2).toFixed(2) + '）';
+    valEl.className = 'balance-val ' + cls;
+  } catch(e) {
+    valEl.textContent = '查询失败（' + e.message + '）';
+    valEl.className = 'balance-val low';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '刷新余额';
+  }
+}
+
+function getMonthStart() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-01';
+}
+
+// ── 二维码 ──────────────────────────────────────────────
+async function loadQrCodes() {
+  try {
+    const r = await fetch(RECHARGE_API + '/config', {signal: AbortSignal.timeout(3000)});
+    if (r.ok) {
+      const cfg = await r.json();
+      if (cfg.qr_alipay) showQrImg('alipay', cfg.qr_alipay);
+      if (cfg.qr_wechat) showQrImg('wechat', cfg.qr_wechat);
+    }
+  } catch(e) {
+    // 服务器未部署时静默失败，用静态配置兜底
+    if (QR_ALIPAY) showQrImg('alipay', QR_ALIPAY);
+    if (QR_WECHAT) showQrImg('wechat', QR_WECHAT);
+  }
+}
+
+function showQrImg(type, src) {
+  const img = document.getElementById('qr-' + type + '-img');
+  const placeholder = document.getElementById('qr-' + type + '-placeholder');
+  img.src = src;
+  img.style.display = 'block';
+  placeholder.style.display = 'none';
+}
+
+function switchQr(type, btn) {
+  document.querySelectorAll('.qr-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.qr-box').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('qr-' + type).classList.add('active');
+}
+
+// ── 金额选择 ──────────────────────────────────────────────
+function selectAmount(amt) {
+  document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
+  document.querySelector(`.amount-btn[data-amt="${amt}"]`).classList.add('selected');
+  selectedAmount = amt;
+  document.getElementById('customWrap').style.display = amt === 0 ? 'block' : 'none';
+  if (amt !== 0) document.getElementById('customAmt').value = '';
+}
+
+function onCustomInput() {
+  const v = parseFloat(document.getElementById('customAmt').value) || 0;
+  selectedAmount = v;
+}
+
+function getEffectiveAmount() {
+  if (selectedAmount === 0) {
+    return parseFloat(document.getElementById('customAmt').value) || 0;
+  }
+  return selectedAmount;
+}
+
+// ── 截图上传 ──────────────────────────────────────────────
+function onFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('图片不超过5MB', 'error'); return;
+  }
+  screenshotMime = file.type || 'image/jpeg';
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const dataUrl = ev.target.result;
+    screenshotB64 = dataUrl.split(',')[1];
+    // 预览
+    const preview = document.getElementById('uploadPreview');
+    preview.src = dataUrl;
+    preview.style.display = 'block';
+    document.getElementById('uploadPlaceholder').style.display = 'none';
+    document.getElementById('uploadArea').classList.add('has-file');
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── 提交 ──────────────────────────────────────────────
+async function submitRecharge() {
+  if (!currentKey) { showToast('请先输入您的 API Key', 'error'); return; }
+
+  const amount = getEffectiveAmount();
+  if (amount < 10) { showToast('充值金额最低 ¥10', 'error'); return; }
+  // 截图可选，不强制
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = '提交中...';
+
+  try {
+    const payload = {
+      api_key: currentKey,
+      amount_cny: amount,
+      screenshot_b64: screenshotB64,
+      screenshot_mime: screenshotMime,
+      note: document.getElementById('noteInput').value.trim()
+    };
+
+    const res = await fetch(RECHARGE_API + '/submit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '服务器错误');
+
+    // 成功
+    document.getElementById('mainSection').classList.remove('active');
+    document.getElementById('successSection').classList.add('active');
+
+  } catch(e) {
+    showToast('提交失败：' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = '提交充值申请';
+  }
+}
+
+function goBack() {
+  document.getElementById('successSection').classList.remove('active');
+  document.getElementById('mainSection').classList.add('active');
+  // 重置表单
+  screenshotB64 = '';
+  document.getElementById('uploadPreview').style.display = 'none';
+  document.getElementById('uploadPlaceholder').style.display = 'block';
+  document.getElementById('uploadArea').classList.remove('has-file');
+  document.getElementById('screenshotInput').value = '';
+  document.getElementById('noteInput').value = '';
+  document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('customWrap').style.display = 'none';
+  document.getElementById('submitBtn').disabled = false;
+  document.getElementById('submitBtn').textContent = '提交充值申请';
+  loadBalance();
+}
+
+// ── 工具 ──────────────────────────────────────────────
+function copyKey() {
+  if (!currentKey) return;
+  navigator.clipboard.writeText(currentKey).then(() => showToast('Key 已复制')).catch(() => {
+    const el = document.createElement('textarea');
+    el.value = currentKey;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    showToast('Key 已复制');
+  });
+}
+
+let toastTimer;
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
