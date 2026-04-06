@@ -322,6 +322,16 @@ input:focus { border-color: #ff6b35; }
                             </div>
                         </div>
                     </div>
+                    <div class="model-card channel-card" style="grid-column: 1 / -1; border-color: #07c160;" onclick="startWeChatLogin(event)">
+                        <h4>💬 微信 <span class="tag" style="background:rgba(7,193,96,0.2);color:#07c160;">个人微信</span></h4>
+                        <p>扫码接入个人微信，用微信聊天控制 AI</p>
+                        <div class="channel-form" id="form-wechat" onclick="event.stopPropagation()" style="max-height:none;overflow:visible;">
+                            <div id="wechat-qr" style="text-align:center;padding:16px;">
+                                <p style="color:#888;font-size:0.85em;">点击此卡片开始扫码</p>
+                            </div>
+                            <div id="wechat-status" style="text-align:center;color:#888;font-size:0.85em;"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -516,6 +526,96 @@ function toggleChannel(card, type) {
         card.classList.add('selected');
         var firstInput = form.querySelector('input');
         if (firstInput) setTimeout(function() { firstInput.focus(); }, 100);
+    }
+}
+
+// --- WeChat login ---
+var wechatSession = null;
+var wechatPolling = false;
+
+async function startWeChatLogin(e) {
+    var form = document.getElementById('form-wechat');
+    // If form is already open and showing QR, don't restart
+    if (form.classList.contains('open') && wechatPolling) {
+        return;
+    }
+
+    // Toggle form open
+    var card = form.closest('.channel-card');
+    if (!form.classList.contains('open')) {
+        form.classList.add('open');
+        card.classList.add('selected');
+    }
+
+    var qrDiv = document.getElementById('wechat-qr');
+    var statusDiv = document.getElementById('wechat-status');
+    qrDiv.innerHTML = '<p style="color:#888;">正在获取二维码...</p>';
+    statusDiv.textContent = '';
+
+    try {
+        var res = await fetch('/api/wechat/start', { method: 'POST' });
+        var data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        wechatSession = data.sessionKey;
+        qrDiv.innerHTML = '<img src="' + data.qrcodeUrl + '" style="width:200px;height:200px;image-rendering:pixelated;border-radius:8px;">';
+        statusDiv.textContent = '请用微信扫描上方二维码';
+        statusDiv.style.color = '#07c160';
+
+        // Start polling
+        wechatPolling = true;
+        pollWeChatStatus();
+    } catch (err) {
+        qrDiv.innerHTML = '<p style="color:#f44336;">获取二维码失败</p>';
+        statusDiv.textContent = err.message;
+        statusDiv.style.color = '#f44336';
+    }
+}
+
+async function pollWeChatStatus() {
+    if (!wechatSession || !wechatPolling) return;
+
+    try {
+        var res = await fetch('/api/wechat/status?session=' + encodeURIComponent(wechatSession));
+        var data = await res.json();
+
+        var qrDiv = document.getElementById('wechat-qr');
+        var statusDiv = document.getElementById('wechat-status');
+
+        if (data.status === 'confirmed') {
+            wechatPolling = false;
+            qrDiv.innerHTML = '<div style="font-size:3em;">&#10004;</div>';
+            statusDiv.innerHTML = '<span style="color:#4caf50;font-weight:600;">微信连接成功！</span><br><span style="font-size:0.8em;">账号: ' +
+                (data.accountId || '') + (data.pluginInstalled ? '' : '<br>⚠️ 插件未安装，请重启 Gateway') + '<br>需重启 Gateway 生效</span>';
+            statusDiv.style.color = '#4caf50';
+            showToast('微信连接成功！');
+            return;
+        }
+
+        if (data.status === 'refreshed') {
+            qrDiv.innerHTML = '<img src="' + data.qrcodeUrl + '" style="width:200px;height:200px;image-rendering:pixelated;border-radius:8px;">';
+            statusDiv.textContent = '二维码已刷新，请重新扫码';
+            statusDiv.style.color = '#ff6b35';
+        } else if (data.status === 'scaned') {
+            statusDiv.textContent = '已扫码，请在手机上确认...';
+            statusDiv.style.color = '#07c160';
+        } else if (data.status === 'expired') {
+            wechatPolling = false;
+            qrDiv.innerHTML = '<p style="color:#888;">二维码已过期，<a href="#" onclick="startWeChatLogin(event);return false;" style="color:#ff6b35;">重新获取</a></p>';
+            statusDiv.textContent = data.message || '';
+            statusDiv.style.color = '#f44336';
+            return;
+        } else if (data.status === 'error') {
+            wechatPolling = false;
+            qrDiv.innerHTML = '<p style="color:#f44336;">连接失败</p>';
+            statusDiv.textContent = data.message || 'Unknown error';
+            statusDiv.style.color = '#f44336';
+            return;
+        }
+        // wait -> continue polling
+        setTimeout(pollWeChatStatus, 1500);
+    } catch (err) {
+        setTimeout(pollWeChatStatus, 3000);
     }
 }
 
