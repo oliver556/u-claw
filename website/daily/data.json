@@ -1,14 +1,14 @@
 {
   "latest": {
-    "date": "2026-04-05",
+    "date": "2026-04-06",
     "tip": {
       "title": {
-        "zh": "一键切换模型：无需重启，快速对比不同AI的回答",
-        "en": "One-Click Model Switching: Compare AI Responses Instantly Without Restarting"
+        "zh": "一键切换模型：快速找到最适合的AI助手",
+        "en": "One-Click Model Switching: Quickly Find the Best AI Assistant"
       },
       "content": {
-        "zh": "在U-Claw的Web界面或聊天窗口中，点击模型名称下拉菜单，即可在DeepSeek、Kimi、通义千问等8大国产模型间即时切换。无需重启服务或重新加载页面，同一个问题可以快速发送给不同模型，横向对比它们的回答风格和准确度，帮助你为不同任务选择最合适的AI助手。",
-        "en": "In U-Claw's web interface or chat window, click the model name dropdown to instantly switch between 8 major domestic models like DeepSeek, Kimi, and Tongyi Qianwen. No need to restart the service or reload the page. You can quickly send the same question to different models to compare their response styles and accuracy side-by-side, helping you choose the most suitable AI assistant for various tasks."
+        "zh": "在U-Claw的Web界面或聊天平台中，点击右上角的模型名称，即可在8大国产模型间快速切换。例如，需要长文本分析时选Kimi，编程任务用DeepSeek，创意写作试智谱GLM。无需重启服务，切换后立即生效，让不同AI各展所长。",
+        "en": "In U-Claw's web interface or chat platforms, click the model name in the top right corner to quickly switch between 8 major domestic models. For example, choose Kimi for long-text analysis, DeepSeek for programming tasks, and GLM for creative writing. No service restart is needed—switching takes effect immediately, allowing different AIs to showcase their strengths."
       },
       "tag": {
         "zh": "技巧",
@@ -17,12 +17,12 @@
     },
     "case": {
       "title": {
-        "zh": "离线会议纪要：用U-Claw快速整理飞书群聊记录",
-        "en": "Offline Meeting Minutes: Quickly Organize Feishu Group Chat Records with U-Claw"
+        "zh": "离线会议纪要：用U-Claw快速整理飞书讨论内容",
+        "en": "Offline Meeting Minutes: Using U-Claw to Quickly Organize Feishu Discussion Content"
       },
       "content": {
-        "zh": "市场部小张的团队在飞书上进行了产品脑暴会。他将完整的群聊记录导出为文本文件，在离线环境下插入U-Claw虾盘。通过内置的“文档总结”技能，他让AI快速提取了会议的核心议题、关键决策和待办事项，并生成了格式清晰的会议纪要。整个过程完全离线，保障了内部讨论的隐私安全。",
-        "en": "Xiao Zhang from the marketing department had a product brainstorming session with his team on Feishu. He exported the complete group chat history as a text file and inserted the U-Claw drive in an offline environment. Using the built-in 'Document Summarization' skill, he had the AI quickly extract the meeting's core topics, key decisions, and action items, generating a well-formatted meeting minutes. The entire process was completely offline, ensuring the privacy and security of internal discussions."
+        "zh": "市场团队在飞书群进行产品讨论，涉及大量功能点。将聊天记录导出为文本后，通过U-Claw的“文档总结”技能，选择通义千问模型，5分钟内生成结构化纪要：包括决策项、待办任务、争议点。全程离线，保护商业机密，效率提升3倍。",
+        "en": "The marketing team discussed product features in a Feishu group, generating extensive conversation. After exporting the chat history as text, using U-Claw's 'Document Summary' skill with the Qwen model produced a structured minutes document within 5 minutes, including decisions, action items, and debate points. The entire process was offline, protecting business confidentiality and tripling efficiency."
       },
       "tag": {
         "zh": "案例",
@@ -31,6 +31,37 @@
     }
   },
   "history": [
+    {
+      "date": "2026-04-05",
+      "tip": {
+        "title": {
+          "zh": "一键切换模型：无需重启，快速对比不同AI的回答",
+          "en": "One-Click Model Switching: Compare AI Responses Instantly Without Restarting"
+        },
+        "content": {
+          "zh": "在U-Claw的Web界面或聊天窗口中，点击模型名称下拉菜单，即可在DeepSeek、Kimi、通义千问等8大国产模型间即时切换。无需重启服务或重新加载页面，同一个问题可以快速发送给不同模型，横向对比它们的回答风格和准确度，帮助你为不同任务选择最合适的AI助手。",
+          "en": "In U-Claw's web interface or chat window, click the model name dropdown to instantly switch between 8 major domestic models like DeepSeek, Kimi, and Tongyi Qianwen. No need to restart the service or reload the page. You can quickly send the same question to different models to compare their response styles and accuracy side-by-side, helping you choose the most suitable AI assistant for various tasks."
+        },
+        "tag": {
+          "zh": "技巧",
+          "en": "Tip"
+        }
+      },
+      "case": {
+        "title": {
+          "zh": "离线会议纪要：用U-Claw快速整理飞书群聊记录",
+          "en": "Offline Meeting Minutes: Quickly Organize Feishu Group Chat Records with U-Claw"
+        },
+        "content": {
+          "zh": "市场部小张的团队在飞书上进行了产品脑暴会。他将完整的群聊记录导出为文本文件，在离线环境下插入U-Claw虾盘。通过内置的“文档总结”技能，他让AI快速提取了会议的核心议题、关键决策和待办事项，并生成了格式清晰的会议纪要。整个过程完全离线，保障了内部讨论的隐私安全。",
+          "en": "Xiao Zhang from the marketing department had a product brainstorming session with his team on Feishu. He exported the complete group chat history as a text file and inserted the U-Claw drive in an offline environment. Using the built-in 'Document Summarization' skill, he had the AI quickly extract the meeting's core topics, key decisions, and action items, generating a well-formatted meeting minutes. The entire process was completely offline, ensuring the privacy and security of internal discussions."
+        },
+        "tag": {
+          "zh": "案例",
+          "en": "Case"
+        }
+      }
+    },
     {
       "date": "2026-04-04",
       "tip": {
