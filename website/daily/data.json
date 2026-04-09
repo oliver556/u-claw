@@ -1,14 +1,14 @@
 {
   "latest": {
-    "date": "2026-04-08",
+    "date": "2026-04-09",
     "tip": {
       "title": {
-        "zh": "一键切换模型：快速找到最适合的AI助手",
-        "en": "One-Click Model Switching: Quickly Find Your Best AI Assistant"
+        "zh": "一键切换便携模式与本地安装模式",
+        "en": "One-Click Switch Between Portable and Installed Mode"
       },
       "content": {
-        "zh": "在U-Claw主界面右下角，点击当前模型名称（如“DeepSeek”），会弹出所有8个国产模型的切换菜单。无需进入复杂设置，即可在对话中实时切换。特别适合对比不同模型对同一问题的回答质量，或根据任务类型（编程/写作/分析）选择专家模型。切换后对话历史会自动保留。",
-        "en": "Click the current model name (e.g., 'DeepSeek') in the bottom-right corner of the U-Claw main interface to open a menu for switching between all 8 domestic models. Switch models in real-time during a conversation without entering complex settings. Perfect for comparing different models' responses to the same query or selecting the best model for specific tasks (coding/writing/analysis). Conversation history is preserved after switching."
+        "zh": "U-Claw 支持两种使用模式。在启动器界面，点击右上角的齿轮图标，选择“模式切换”。便携模式下，所有配置和模型数据都保存在U盘中，随U盘移动。本地安装模式则将软件和常用模型安装到电脑硬盘，运行更流畅。根据你的使用场景，可以随时一键切换，无需重新配置。",
+        "en": "U-Claw supports two usage modes. In the launcher interface, click the gear icon in the top right and select 'Mode Switch'. In Portable Mode, all configurations and model data are saved on the USB drive, moving with it. Installed Mode installs the software and common models to your computer's hard drive for smoother operation. You can switch between them with one click anytime based on your needs, without reconfiguration."
       },
       "tag": {
         "zh": "技巧",
@@ -17,12 +17,12 @@
     },
     "case": {
       "title": {
-        "zh": "离线环境下的紧急代码调试：程序员出差救星",
-        "en": "Emergency Code Debugging Offline: A Lifesaver for Traveling Developers"
+        "zh": "离线会议纪要：用U-Claw快速整理飞书群聊记录",
+        "en": "Offline Meeting Minutes: Quickly Organize Feishu Group Chat Records with U-Claw"
       },
       "content": {
-        "zh": "张工程师在高铁上遇到生产环境Bug，但列车网络不稳定。他插入U-Claw虾盘，启动便携模式，选择智谱GLM模型分析错误日志。AI不仅定位到数据库连接池泄漏问题，还生成了具体的修复代码和回滚方案。全程无需网络，15分钟解决问题，避免了系统停机风险。",
-        "en": "Engineer Zhang encountered a production bug on a high-speed train with unstable internet. He plugged in the U-Claw drive, launched portable mode, and selected the GLM model to analyze error logs. The AI pinpointed a database connection pool leak and generated specific fix code with a rollback plan. The entire process required no internet, resolving the issue in 15 minutes and preventing system downtime."
+        "zh": "市场部小张需要整理一小时的飞书群语音会议纪要。他在公司内网（无外网）环境下，将U-Claw插入电脑，启动飞书机器人技能。他让机器人接入指定的会议群，并发送指令：“总结过去一小时的聊天记录，按议题分点列出结论和待办事项。” U-Claw调用本地的DeepSeek模型，在几分钟内生成了一份结构清晰的纪要，并直接通过机器人回复到群内，高效且保护了内部信息不外泄。",
+        "en": "Xiao Zhang from the marketing department needed to summarize a one-hour voice meeting from a Feishu group. Working on the company intranet (no external internet), he plugged in the U-Claw, started the Feishu bot skill, and connected it to the specific meeting group. He sent the command: 'Summarize the chat records from the past hour, list conclusions and action items by topic.' U-Claw utilized the local DeepSeek model and generated a well-structured summary within minutes, replying directly to the group via the bot. This was efficient and kept internal information secure."
       },
       "tag": {
         "zh": "案例",
@@ -31,6 +31,37 @@
     }
   },
   "history": [
+    {
+      "date": "2026-04-08",
+      "tip": {
+        "title": {
+          "zh": "一键切换模型：快速找到最适合的AI助手",
+          "en": "One-Click Model Switching: Quickly Find Your Best AI Assistant"
+        },
+        "content": {
+          "zh": "在U-Claw主界面右下角，点击当前模型名称（如“DeepSeek”），会弹出所有8个国产模型的切换菜单。无需进入复杂设置，即可在对话中实时切换。特别适合对比不同模型对同一问题的回答质量，或根据任务类型（编程/写作/分析）选择专家模型。切换后对话历史会自动保留。",
+          "en": "Click the current model name (e.g., 'DeepSeek') in the bottom-right corner of the U-Claw main interface to open a menu for switching between all 8 domestic models. Switch models in real-time during a conversation without entering complex settings. Perfect for comparing different models' responses to the same query or selecting the best model for specific tasks (coding/writing/analysis). Conversation history is preserved after switching."
+        },
+        "tag": {
+          "zh": "技巧",
+          "en": "Tip"
+        }
+      },
+      "case": {
+        "title": {
+          "zh": "离线环境下的紧急代码调试：程序员出差救星",
+          "en": "Emergency Code Debugging Offline: A Lifesaver for Traveling Developers"
+        },
+        "content": {
+          "zh": "张工程师在高铁上遇到生产环境Bug，但列车网络不稳定。他插入U-Claw虾盘，启动便携模式，选择智谱GLM模型分析错误日志。AI不仅定位到数据库连接池泄漏问题，还生成了具体的修复代码和回滚方案。全程无需网络，15分钟解决问题，避免了系统停机风险。",
+          "en": "Engineer Zhang encountered a production bug on a high-speed train with unstable internet. He plugged in the U-Claw drive, launched portable mode, and selected the GLM model to analyze error logs. The AI pinpointed a database connection pool leak and generated specific fix code with a rollback plan. The entire process required no internet, resolving the issue in 15 minutes and preventing system downtime."
+        },
+        "tag": {
+          "zh": "案例",
+          "en": "Case"
+        }
+      }
+    },
     {
       "date": "2026-04-07",
       "tip": {
