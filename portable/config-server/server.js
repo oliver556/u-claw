@@ -398,6 +398,8 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const config = JSON.parse(body);
+        // 清除旧版废弃键，防止 OpenClaw 报 "agent.* was moved" 错误
+        delete config.agent;
         const dir = path.dirname(CONFIG_PATH);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));

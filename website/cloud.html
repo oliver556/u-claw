@@ -483,11 +483,13 @@
     </div>
     <pre><span class="c-comment">// 虾盘 U 盘已预装此配置，注册后填入 apiKey 即用</span>
 {
-  <span class="c-key">"agent"</span>: {
-    <span class="c-key">"model"</span>:   <span class="c-str">"deepseek-chat"</span>,
-    <span class="c-key">"apiKey"</span>:  <span class="c-str">"sk-xp-your-key-here"</span>,
-    <span class="c-key">"baseUrl"</span>: <span class="c-url">"https://api.u-claw.org/v1"</span>
-  }
+  <span class="c-key">"models"</span>: { <span class="c-key">"mode"</span>: <span class="c-str">"merge"</span>, <span class="c-key">"providers"</span>: {
+    <span class="c-key">"uclaw"</span>: {
+      <span class="c-key">"baseUrl"</span>: <span class="c-url">"https://api.u-claw.org/v1"</span>,
+      <span class="c-key">"apiKey"</span>:  <span class="c-str">"sk-xp-your-key-here"</span>
+    }
+  }},
+  <span class="c-key">"agents"</span>: { <span class="c-key">"defaults"</span>: { <span class="c-key">"model"</span>: { <span class="c-key">"primary"</span>: <span class="c-str">"uclaw/deepseek-chat"</span> }}}
 }</pre>
   </div>
 </div>
@@ -594,11 +596,13 @@
       </div>
       <pre><span class="c-comment">// 出厂预装，插上 U 盘即生效</span>
 {
-  <span class="c-key">"agent"</span>: {
-    <span class="c-key">"model"</span>:   <span class="c-str">"deepseek-chat"</span>,
-    <span class="c-key">"apiKey"</span>:  <span class="c-str">"注册后填入你的 Key"</span>,
-    <span class="c-key">"baseUrl"</span>: <span class="c-url">"https://api.u-claw.org/v1"</span>
-  }
+  <span class="c-key">"models"</span>: { <span class="c-key">"mode"</span>: <span class="c-str">"merge"</span>, <span class="c-key">"providers"</span>: {
+    <span class="c-key">"uclaw"</span>: {
+      <span class="c-key">"baseUrl"</span>: <span class="c-url">"https://api.u-claw.org/v1"</span>,
+      <span class="c-key">"apiKey"</span>:  <span class="c-str">"注册后填入你的 Key"</span>
+    }
+  }},
+  <span class="c-key">"agents"</span>: { <span class="c-key">"defaults"</span>: { <span class="c-key">"model"</span>: { <span class="c-key">"primary"</span>: <span class="c-str">"uclaw/deepseek-chat"</span> }}}
 }</pre>
     </div>
   </div>

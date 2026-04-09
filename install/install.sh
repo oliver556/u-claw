@@ -887,11 +887,18 @@ else
     "mode": "local",
     "auth": { "token": "uclaw" }
   },
-  "agent": {
-    "model": "$MODEL_NAME",
-    "apiKey": "$API_KEY",
-    "baseUrl": "$BASE_URL"
-  }
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "custom": {
+        "baseUrl": "$BASE_URL",
+        "apiKey": "$API_KEY",
+        "api": "openai-completions",
+        "models": [{ "id": "$MODEL_NAME" }]
+      }
+    }
+  },
+  "agents": { "defaults": { "model": { "primary": "custom/$MODEL_NAME" } } }
 }
 CFGEOF
         elif [ "$PROVIDER" = "anthropic" ]; then
@@ -901,11 +908,17 @@ CFGEOF
     "mode": "local",
     "auth": { "token": "uclaw" }
   },
-  "agent": {
-    "model": "$MODEL_NAME",
-    "apiKey": "$API_KEY",
-    "provider": "anthropic"
-  }
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "anthropic": {
+        "apiKey": "$API_KEY",
+        "api": "anthropic",
+        "models": [{ "id": "$MODEL_NAME" }]
+      }
+    }
+  },
+  "agents": { "defaults": { "model": { "primary": "anthropic/$MODEL_NAME" } } }
 }
 CFGEOF
         elif [ "$PROVIDER" = "openai" ]; then
@@ -915,11 +928,17 @@ CFGEOF
     "mode": "local",
     "auth": { "token": "uclaw" }
   },
-  "agent": {
-    "model": "$MODEL_NAME",
-    "apiKey": "$API_KEY",
-    "provider": "openai"
-  }
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "openai": {
+        "apiKey": "$API_KEY",
+        "api": "openai-completions",
+        "models": [{ "id": "$MODEL_NAME" }]
+      }
+    }
+  },
+  "agents": { "defaults": { "model": { "primary": "openai/$MODEL_NAME" } } }
 }
 CFGEOF
         fi

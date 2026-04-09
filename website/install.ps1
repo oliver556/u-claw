@@ -520,31 +520,46 @@ if ($hasConfig) {
 
     # Write config
     if ($cfg.provider -eq "custom" -and $cfg.baseUrl) {
+        $providerName = "custom"
         $configJson = @"
 {
   "gateway": {
     "mode": "local",
     "auth": { "token": "uclaw" }
   },
-  "agent": {
-    "model": "$($cfg.model)",
-    "apiKey": "$apiKey",
-    "baseUrl": "$($cfg.baseUrl)"
-  }
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "$providerName": {
+        "baseUrl": "$($cfg.baseUrl)",
+        "apiKey": "$apiKey",
+        "api": "openai-completions",
+        "models": [{ "id": "$($cfg.model)" }]
+      }
+    }
+  },
+  "agents": { "defaults": { "model": { "primary": "$providerName/$($cfg.model)" } } }
 }
 "@
     } else {
+        $providerName = $cfg.provider
         $configJson = @"
 {
   "gateway": {
     "mode": "local",
     "auth": { "token": "uclaw" }
   },
-  "agent": {
-    "model": "$($cfg.model)",
-    "apiKey": "$apiKey",
-    "provider": "$($cfg.provider)"
-  }
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "$providerName": {
+        "apiKey": "$apiKey",
+        "api": "$(if ($providerName -eq 'anthropic') {'anthropic'} else {'openai-completions'})",
+        "models": [{ "id": "$($cfg.model)" }]
+      }
+    }
+  },
+  "agents": { "defaults": { "model": { "primary": "$providerName/$($cfg.model)" } } }
 }
 "@
     }

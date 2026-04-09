@@ -603,6 +603,8 @@ async function launchOpenClaw() {
         try {
             const res = await fetch('/api/config');
             const existing = res.ok ? await res.json() : {};
+            // 清除旧版废弃键，防止 OpenClaw 报 "agent.* was moved" 错误
+            delete existing.agent;
             existing.channels = Object.assign(existing.channels || {}, channels);
             await fetch('/api/config', {
                 method: 'POST',

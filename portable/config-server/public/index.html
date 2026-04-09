@@ -642,6 +642,8 @@ async function saveChannelsAndOpen() {
         try {
             var res = await fetch('/api/config');
             var existing = res.ok ? await res.json() : {};
+            // 清除旧版废弃键，防止 OpenClaw 报 "agent.* was moved" 错误
+            delete existing.agent;
             existing.channels = Object.assign(existing.channels || {}, channels);
             await fetch('/api/config', {
                 method: 'POST',
@@ -652,7 +654,7 @@ async function saveChannelsAndOpen() {
         } catch(e) {}
     }
 
-    window.open('http://127.0.0.1:18789/#token=uclaw', '_blank');
+    window.open(gatewayUrl(), '_blank');
 }
 
 // --- View config ---
@@ -677,15 +679,35 @@ function showToast(msg, isError) {
     setTimeout(function() { t.className = 'toast'; }, 3000);
 }
 
+// --- Find active gateway port (18789-18799) ---
+var _gatewayPort = null;
+async function findGatewayPort() {
+    for (var p = 18789; p <= 18799; p++) {
+        try {
+            await fetch('http://127.0.0.1:' + p + '/', { mode: 'no-cors' });
+            _gatewayPort = p;
+            return p;
+        } catch(e) {}
+    }
+    _gatewayPort = null;
+    return null;
+}
+
+function gatewayUrl() {
+    var p = _gatewayPort || 18789;
+    return 'http://127.0.0.1:' + p + '/#token=uclaw';
+}
+
 // --- Check gateway status ---
 async function checkGateway() {
     var dot = document.getElementById('statusDot');
     var text = document.getElementById('statusText');
-    try {
-        await fetch('http://127.0.0.1:18789/', { mode: 'no-cors' });
+    var port = await findGatewayPort();
+    if (port) {
         dot.className = 'dot on';
-        text.innerHTML = 'Gateway 运行中 · <a href="http://127.0.0.1:18789/#token=uclaw" target="_blank">打开 Dashboard →</a>';
-    } catch(e) {
+        text.innerHTML = 'Gateway 运行中 (端口 ' + port + ') · <a href="' + gatewayUrl() + '" target="_blank">打开 Dashboard →</a>';
+        document.getElementById('gatewayUrl').textContent = 'http://127.0.0.1:' + port;
+    } else {
         dot.className = 'dot off';
         text.innerHTML = 'Gateway 未启动 · 请先运行 Windows-Start.bat 或 Mac-Start.command';
     }

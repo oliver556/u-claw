@@ -592,11 +592,15 @@ cp -R portable/ /Volumes/你的U盘/U-Claw/</code></pre>
 <h2>配置文件格式</h2>
 <pre><code>{
   "gateway": {"mode": "local", "auth": {"token": "uclaw"}},
-  "agent": {
-    "model": "deepseek-chat",
-    "apiKey": "sk-xxx",
-    "baseUrl": "https://api.deepseek.com/v1"
-  },
+  "models": {"mode": "merge", "providers": {
+    "deepseek": {
+      "baseUrl": "https://api.deepseek.com/v1",
+      "apiKey": "sk-xxx",
+      "api": "openai-completions",
+      "models": [{"id": "deepseek-chat"}]
+    }
+  }},
+  "agents": {"defaults": {"model": {"primary": "deepseek/deepseek-chat"}}},
   "channels": {"qqbot": {"token": "appid:secret"}}
 }</code></pre>
 </div>

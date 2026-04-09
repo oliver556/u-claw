@@ -172,21 +172,38 @@ function switchOS(os) {
     document.querySelectorAll('.os-tab')[os === 'mac' ? 0 : 1].classList.add('active');
 }
 
-// Check if gateway is running
-function checkStatus() {
-    fetch('http://127.0.0.1:18789/', { mode: 'no-cors', cache: 'no-cache' })
-        .then(() => {
-            document.getElementById('statusDot').className = 'status-dot on';
-            document.getElementById('statusText').textContent = 'OpenClaw 运行中';
-            const link = document.getElementById('statusLink');
-            link.style.display = 'inline';
-            link.href = 'http://127.0.0.1:18789/#token=uclaw';
-        })
-        .catch(() => {
-            document.getElementById('statusDot').className = 'status-dot off';
-            document.getElementById('statusText').textContent = 'OpenClaw 未运行 — 请先双击启动脚本';
-            document.getElementById('statusLink').style.display = 'none';
-        });
+// Check if gateway is running (scan 18789-18799)
+var _gwPort = null;
+async function checkStatus() {
+    var found = null;
+    if (_gwPort) {
+        // Fast path: check last known port first
+        try {
+            await fetch('http://127.0.0.1:' + _gwPort + '/', { mode: 'no-cors', cache: 'no-cache' });
+            found = _gwPort;
+        } catch(e) { _gwPort = null; }
+    }
+    if (!found) {
+        for (var p = 18789; p <= 18799; p++) {
+            try {
+                await fetch('http://127.0.0.1:' + p + '/', { mode: 'no-cors', cache: 'no-cache' });
+                found = p;
+                _gwPort = p;
+                break;
+            } catch(e) {}
+        }
+    }
+    if (found) {
+        document.getElementById('statusDot').className = 'status-dot on';
+        document.getElementById('statusText').textContent = 'OpenClaw 运行中 (端口 ' + found + ')';
+        var link = document.getElementById('statusLink');
+        link.style.display = 'inline';
+        link.href = 'http://127.0.0.1:' + found + '/#token=uclaw';
+    } else {
+        document.getElementById('statusDot').className = 'status-dot off';
+        document.getElementById('statusText').textContent = 'OpenClaw 未运行 — 请先双击启动脚本';
+        document.getElementById('statusLink').style.display = 'none';
+    }
 }
 checkStatus();
 setInterval(checkStatus, 5000);

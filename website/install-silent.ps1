@@ -198,31 +198,46 @@ if ($SkipConfig) {
     }
 
     if ($resolvedProvider -eq "custom" -and $resolvedBaseUrl) {
+        $pName = "custom"
         $configJson = @"
 {
   "gateway": {
     "mode": "local",
     "auth": { "token": "uclaw" }
   },
-  "agent": {
-    "model": "$resolvedModel",
-    "apiKey": "$ApiKey",
-    "baseUrl": "$resolvedBaseUrl"
-  }
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "$pName": {
+        "baseUrl": "$resolvedBaseUrl",
+        "apiKey": "$ApiKey",
+        "api": "openai-completions",
+        "models": [{ "id": "$resolvedModel" }]
+      }
+    }
+  },
+  "agents": { "defaults": { "model": { "primary": "$pName/$resolvedModel" } } }
 }
 "@
     } else {
+        $pName = $resolvedProvider
         $configJson = @"
 {
   "gateway": {
     "mode": "local",
     "auth": { "token": "uclaw" }
   },
-  "agent": {
-    "model": "$resolvedModel",
-    "apiKey": "$ApiKey",
-    "provider": "$resolvedProvider"
-  }
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "$pName": {
+        "apiKey": "$ApiKey",
+        "api": "$(if ($pName -eq 'anthropic') {'anthropic'} else {'openai-completions'})",
+        "models": [{ "id": "$resolvedModel" }]
+      }
+    }
+  },
+  "agents": { "defaults": { "model": { "primary": "$pName/$resolvedModel" } } }
 }
 "@
     }
