@@ -1,14 +1,14 @@
 {
   "latest": {
-    "date": "2026-04-09",
+    "date": "2026-04-10",
     "tip": {
       "title": {
-        "zh": "一键切换便携模式与本地安装模式",
-        "en": "One-Click Switch Between Portable and Installed Mode"
+        "zh": "一键切换模型：快速找到最适合的AI助手",
+        "en": "One-Click Model Switching: Quickly Find the Best AI Assistant"
       },
       "content": {
-        "zh": "U-Claw 支持两种使用模式。在启动器界面，点击右上角的齿轮图标，选择“模式切换”。便携模式下，所有配置和模型数据都保存在U盘中，随U盘移动。本地安装模式则将软件和常用模型安装到电脑硬盘，运行更流畅。根据你的使用场景，可以随时一键切换，无需重新配置。",
-        "en": "U-Claw supports two usage modes. In the launcher interface, click the gear icon in the top right and select 'Mode Switch'. In Portable Mode, all configurations and model data are saved on the USB drive, moving with it. Installed Mode installs the software and common models to your computer's hard drive for smoother operation. You can switch between them with one click anytime based on your needs, without reconfiguration."
+        "zh": "在U-Claw主界面，点击右上角的模型名称（如“DeepSeek”），会弹出所有8个国产模型的列表。无需进入复杂设置，直接点击即可瞬间切换。每个模型都有其擅长领域：Kimi长文本分析、通义千问编程、智谱GLM逻辑推理。根据当前任务类型快速切换，效率倍增。",
+        "en": "On the U-Claw main interface, click the model name in the top right corner (e.g., 'DeepSeek') to see a list of all 8 domestic models. Switch instantly with one click, no need for complex settings. Each model has its strengths: Kimi for long-text analysis, Tongyi Qianwen for programming, and GLM for logical reasoning. Quickly switch based on your task to double your efficiency."
       },
       "tag": {
         "zh": "技巧",
@@ -17,12 +17,12 @@
     },
     "case": {
       "title": {
-        "zh": "离线会议纪要：用U-Claw快速整理飞书群聊记录",
-        "en": "Offline Meeting Minutes: Quickly Organize Feishu Group Chat Records with U-Claw"
+        "zh": "离线会议纪要：用U-Claw在无网环境下整理飞书讨论",
+        "en": "Offline Meeting Minutes: Using U-Claw to Organize Feishu Discussions Without Internet"
       },
       "content": {
-        "zh": "市场部小张需要整理一小时的飞书群语音会议纪要。他在公司内网（无外网）环境下，将U-Claw插入电脑，启动飞书机器人技能。他让机器人接入指定的会议群，并发送指令：“总结过去一小时的聊天记录，按议题分点列出结论和待办事项。” U-Claw调用本地的DeepSeek模型，在几分钟内生成了一份结构清晰的纪要，并直接通过机器人回复到群内，高效且保护了内部信息不外泄。",
-        "en": "Xiao Zhang from the marketing department needed to summarize a one-hour voice meeting from a Feishu group. Working on the company intranet (no external internet), he plugged in the U-Claw, started the Feishu bot skill, and connected it to the specific meeting group. He sent the command: 'Summarize the chat records from the past hour, list conclusions and action items by topic.' U-Claw utilized the local DeepSeek model and generated a well-structured summary within minutes, replying directly to the group via the bot. This was efficient and kept internal information secure."
+        "zh": "销售团队在客户工厂进行封闭演示，现场无网络。通过U-Claw便携模式，将飞书群里的讨论记录（提前导出为txt文件）导入。使用“文档总结”技能，让Kimi模型快速提取关键决策、待办事项和责任人，生成结构化会议纪要。随后用“表格生成”技能创建任务跟踪表，全程离线完成，演示结束立即同步。",
+        "en": "A sales team was giving a closed demo at a client's factory with no internet. Using U-Claw's portable mode, they imported the Feishu group chat log (exported as a txt file in advance). They used the 'Document Summary' skill with the Kimi model to quickly extract key decisions, action items, and responsible persons, generating structured meeting minutes. Then, the 'Table Generation' skill created a task tracker—all done offline and synced immediately after the demo."
       },
       "tag": {
         "zh": "案例",
@@ -31,6 +31,37 @@
     }
   },
   "history": [
+    {
+      "date": "2026-04-09",
+      "tip": {
+        "title": {
+          "zh": "一键切换便携模式与本地安装模式",
+          "en": "One-Click Switch Between Portable and Installed Mode"
+        },
+        "content": {
+          "zh": "U-Claw 支持两种使用模式。在启动器界面，点击右上角的齿轮图标，选择“模式切换”。便携模式下，所有配置和模型数据都保存在U盘中，随U盘移动。本地安装模式则将软件和常用模型安装到电脑硬盘，运行更流畅。根据你的使用场景，可以随时一键切换，无需重新配置。",
+          "en": "U-Claw supports two usage modes. In the launcher interface, click the gear icon in the top right and select 'Mode Switch'. In Portable Mode, all configurations and model data are saved on the USB drive, moving with it. Installed Mode installs the software and common models to your computer's hard drive for smoother operation. You can switch between them with one click anytime based on your needs, without reconfiguration."
+        },
+        "tag": {
+          "zh": "技巧",
+          "en": "Tip"
+        }
+      },
+      "case": {
+        "title": {
+          "zh": "离线会议纪要：用U-Claw快速整理飞书群聊记录",
+          "en": "Offline Meeting Minutes: Quickly Organize Feishu Group Chat Records with U-Claw"
+        },
+        "content": {
+          "zh": "市场部小张需要整理一小时的飞书群语音会议纪要。他在公司内网（无外网）环境下，将U-Claw插入电脑，启动飞书机器人技能。他让机器人接入指定的会议群，并发送指令：“总结过去一小时的聊天记录，按议题分点列出结论和待办事项。” U-Claw调用本地的DeepSeek模型，在几分钟内生成了一份结构清晰的纪要，并直接通过机器人回复到群内，高效且保护了内部信息不外泄。",
+          "en": "Xiao Zhang from the marketing department needed to summarize a one-hour voice meeting from a Feishu group. Working on the company intranet (no external internet), he plugged in the U-Claw, started the Feishu bot skill, and connected it to the specific meeting group. He sent the command: 'Summarize the chat records from the past hour, list conclusions and action items by topic.' U-Claw utilized the local DeepSeek model and generated a well-structured summary within minutes, replying directly to the group via the bot. This was efficient and kept internal information secure."
+        },
+        "tag": {
+          "zh": "案例",
+          "en": "Case"
+        }
+      }
+    },
     {
       "date": "2026-04-08",
       "tip": {
