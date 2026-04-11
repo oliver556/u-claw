@@ -1,14 +1,14 @@
 {
   "latest": {
-    "date": "2026-04-10",
+    "date": "2026-04-11",
     "tip": {
       "title": {
-        "zh": "一键切换模型：快速找到最适合的AI助手",
-        "en": "One-Click Model Switching: Quickly Find the Best AI Assistant"
+        "zh": "一键切换便携模式与电脑安装模式",
+        "en": "One-Click Switch Between Portable and Installed Mode"
       },
       "content": {
-        "zh": "在U-Claw主界面，点击右上角的模型名称（如“DeepSeek”），会弹出所有8个国产模型的列表。无需进入复杂设置，直接点击即可瞬间切换。每个模型都有其擅长领域：Kimi长文本分析、通义千问编程、智谱GLM逻辑推理。根据当前任务类型快速切换，效率倍增。",
-        "en": "On the U-Claw main interface, click the model name in the top right corner (e.g., 'DeepSeek') to see a list of all 8 domestic models. Switch instantly with one click, no need for complex settings. Each model has its strengths: Kimi for long-text analysis, Tongyi Qianwen for programming, and GLM for logical reasoning. Quickly switch based on your task to double your efficiency."
+        "zh": "U-Claw 的灵活性在于模式切换。在 U 盘根目录找到 `switch_mode.bat` (Windows) 或 `switch_mode.sh` (macOS/Linux) 脚本。运行后，它会自动检测当前模式并提示切换。从便携模式切换到电脑安装，会将核心文件复制到本地并创建启动项；反之则会将配置备份回 U 盘。这让你在不同电脑间迁移工作环境或决定永久安装时无比轻松。",
+        "en": "U-Claw's flexibility lies in mode switching. Locate the `switch_mode.bat` (Windows) or `switch_mode.sh` (macOS/Linux) script in the USB drive's root directory. Running it automatically detects the current mode and prompts for a switch. Switching from portable to installed mode copies core files locally and creates startup entries; the reverse backs up configurations to the USB drive. This makes migrating your workspace between computers or deciding on a permanent installation effortless."
       },
       "tag": {
         "zh": "技巧",
@@ -17,12 +17,12 @@
     },
     "case": {
       "title": {
-        "zh": "离线会议纪要：用U-Claw在无网环境下整理飞书讨论",
-        "en": "Offline Meeting Minutes: Using U-Claw to Organize Feishu Discussions Without Internet"
+        "zh": "离线环境下的多平台会议纪要自动生成",
+        "en": "Automated Multi-Platform Meeting Minutes Generation in Offline Environments"
       },
       "content": {
-        "zh": "销售团队在客户工厂进行封闭演示，现场无网络。通过U-Claw便携模式，将飞书群里的讨论记录（提前导出为txt文件）导入。使用“文档总结”技能，让Kimi模型快速提取关键决策、待办事项和责任人，生成结构化会议纪要。随后用“表格生成”技能创建任务跟踪表，全程离线完成，演示结束立即同步。",
-        "en": "A sales team was giving a closed demo at a client's factory with no internet. Using U-Claw's portable mode, they imported the Feishu group chat log (exported as a txt file in advance). They used the 'Document Summary' skill with the Kimi model to quickly extract key decisions, action items, and responsible persons, generating structured meeting minutes. Then, the 'Table Generation' skill created a task tracker—all done offline and synced immediately after the demo."
+        "zh": "小王在一家涉密单位工作，无法连接外网。他需要在内部会议后，将飞书群里的讨论快速整理成结构化纪要。他将 U-Claw 虾盘插入内网电脑，启动便携模式，配置飞书机器人接收群消息。会议中，他@机器人标记关键发言。会后，触发预装的“会议纪要生成”技能，AI 自动总结讨论要点、待办事项和决策，并格式化为 Word 文档。全程离线，安全高效地完成了信息整理。",
+        "en": "Xiao Wang works in a confidential unit without external internet access. He needs to quickly structure meeting minutes from Feishu group discussions after internal meetings. He plugs the U-Claw USB drive into his intranet computer, starts portable mode, and configures a Feishu bot to receive group messages. During the meeting, he @mentions the bot to flag key points. Afterwards, he triggers the pre-installed 'Meeting Minutes Generation' skill. The AI automatically summarizes discussion points, action items, and decisions, formatting them into a Word document. The entire process is offline, completing information organization securely and efficiently."
       },
       "tag": {
         "zh": "案例",
@@ -31,6 +31,37 @@
     }
   },
   "history": [
+    {
+      "date": "2026-04-10",
+      "tip": {
+        "title": {
+          "zh": "一键切换模型：快速找到最适合的AI助手",
+          "en": "One-Click Model Switching: Quickly Find the Best AI Assistant"
+        },
+        "content": {
+          "zh": "在U-Claw主界面，点击右上角的模型名称（如“DeepSeek”），会弹出所有8个国产模型的列表。无需进入复杂设置，直接点击即可瞬间切换。每个模型都有其擅长领域：Kimi长文本分析、通义千问编程、智谱GLM逻辑推理。根据当前任务类型快速切换，效率倍增。",
+          "en": "On the U-Claw main interface, click the model name in the top right corner (e.g., 'DeepSeek') to see a list of all 8 domestic models. Switch instantly with one click, no need for complex settings. Each model has its strengths: Kimi for long-text analysis, Tongyi Qianwen for programming, and GLM for logical reasoning. Quickly switch based on your task to double your efficiency."
+        },
+        "tag": {
+          "zh": "技巧",
+          "en": "Tip"
+        }
+      },
+      "case": {
+        "title": {
+          "zh": "离线会议纪要：用U-Claw在无网环境下整理飞书讨论",
+          "en": "Offline Meeting Minutes: Using U-Claw to Organize Feishu Discussions Without Internet"
+        },
+        "content": {
+          "zh": "销售团队在客户工厂进行封闭演示，现场无网络。通过U-Claw便携模式，将飞书群里的讨论记录（提前导出为txt文件）导入。使用“文档总结”技能，让Kimi模型快速提取关键决策、待办事项和责任人，生成结构化会议纪要。随后用“表格生成”技能创建任务跟踪表，全程离线完成，演示结束立即同步。",
+          "en": "A sales team was giving a closed demo at a client's factory with no internet. Using U-Claw's portable mode, they imported the Feishu group chat log (exported as a txt file in advance). They used the 'Document Summary' skill with the Kimi model to quickly extract key decisions, action items, and responsible persons, generating structured meeting minutes. Then, the 'Table Generation' skill created a task tracker—all done offline and synced immediately after the demo."
+        },
+        "tag": {
+          "zh": "案例",
+          "en": "Case"
+        }
+      }
+    },
     {
       "date": "2026-04-09",
       "tip": {
