@@ -1,14 +1,14 @@
 {
   "latest": {
-    "date": "2026-04-11",
+    "date": "2026-04-12",
     "tip": {
       "title": {
-        "zh": "一键切换便携模式与电脑安装模式",
-        "en": "One-Click Switch Between Portable and Installed Mode"
+        "zh": "一键切换模型：快速调用不同AI能力",
+        "en": "One-Click Model Switching: Quickly Access Different AI Capabilities"
       },
       "content": {
-        "zh": "U-Claw 的灵活性在于模式切换。在 U 盘根目录找到 `switch_mode.bat` (Windows) 或 `switch_mode.sh` (macOS/Linux) 脚本。运行后，它会自动检测当前模式并提示切换。从便携模式切换到电脑安装，会将核心文件复制到本地并创建启动项；反之则会将配置备份回 U 盘。这让你在不同电脑间迁移工作环境或决定永久安装时无比轻松。",
-        "en": "U-Claw's flexibility lies in mode switching. Locate the `switch_mode.bat` (Windows) or `switch_mode.sh` (macOS/Linux) script in the USB drive's root directory. Running it automatically detects the current mode and prompts for a switch. Switching from portable to installed mode copies core files locally and creates startup entries; the reverse backs up configurations to the USB drive. This makes migrating your workspace between computers or deciding on a permanent installation effortless."
+        "zh": "在U-Claw的聊天界面，点击输入框上方的模型名称（如“DeepSeek”），会弹出所有8个预装国产模型列表。无需进入复杂设置，直接点击即可瞬间切换。这让你能根据任务需求，灵活选择最合适的模型。例如，写代码时用DeepSeek，长文档分析用Kimi，创意写作则切换至通义千问。",
+        "en": "In U-Claw's chat interface, click the model name (e.g., 'DeepSeek') above the input box to pop up a list of all 8 pre-installed domestic models. Switch instantly with a single click, no need for complex settings. This allows you to flexibly choose the most suitable model for the task. For example, use DeepSeek for coding, Kimi for long document analysis, and switch to Tongyi Qianwen for creative writing."
       },
       "tag": {
         "zh": "技巧",
@@ -17,12 +17,12 @@
     },
     "case": {
       "title": {
-        "zh": "离线环境下的多平台会议纪要自动生成",
-        "en": "Automated Multi-Platform Meeting Minutes Generation in Offline Environments"
+        "zh": "离线会议纪要：用U-Claw快速整理飞书录音",
+        "en": "Offline Meeting Minutes: Quickly Organize Feishu Recordings with U-Claw"
       },
       "content": {
-        "zh": "小王在一家涉密单位工作，无法连接外网。他需要在内部会议后，将飞书群里的讨论快速整理成结构化纪要。他将 U-Claw 虾盘插入内网电脑，启动便携模式，配置飞书机器人接收群消息。会议中，他@机器人标记关键发言。会后，触发预装的“会议纪要生成”技能，AI 自动总结讨论要点、待办事项和决策，并格式化为 Word 文档。全程离线，安全高效地完成了信息整理。",
-        "en": "Xiao Wang works in a confidential unit without external internet access. He needs to quickly structure meeting minutes from Feishu group discussions after internal meetings. He plugs the U-Claw USB drive into his intranet computer, starts portable mode, and configures a Feishu bot to receive group messages. During the meeting, he @mentions the bot to flag key points. Afterwards, he triggers the pre-installed 'Meeting Minutes Generation' skill. The AI automatically summarizes discussion points, action items, and decisions, formatting them into a Word document. The entire process is offline, completing information organization securely and efficiently."
+        "zh": "市场部小张在无网络环境的飞机上，需要整理一小时的飞书会议录音。他将录音文件拷贝到U-Claw的便携模式中，启动内置的“音频转文字”技能，选择通义千问模型进行高精度转录。10分钟后，AI不仅生成了完整文字稿，还自动提炼了关键决策、待办事项和责任人，并格式化为标准的会议纪要。小张直接在U盘里完成编辑，落地后即可同步。",
+        "en": "Zhang from the marketing department needed to organize a one-hour Feishu meeting recording during a flight with no internet. He copied the audio file to U-Claw's portable mode, launched the built-in 'Audio to Text' skill, and selected the Tongyi Qianwen model for high-accuracy transcription. Within 10 minutes, the AI not only generated a full transcript but also automatically extracted key decisions, action items, and responsible persons, formatting it into standard meeting minutes. Zhang completed the editing directly on the U盘 and synced it upon landing."
       },
       "tag": {
         "zh": "案例",
@@ -31,6 +31,37 @@
     }
   },
   "history": [
+    {
+      "date": "2026-04-11",
+      "tip": {
+        "title": {
+          "zh": "一键切换便携模式与电脑安装模式",
+          "en": "One-Click Switch Between Portable and Installed Mode"
+        },
+        "content": {
+          "zh": "U-Claw 的灵活性在于模式切换。在 U 盘根目录找到 `switch_mode.bat` (Windows) 或 `switch_mode.sh` (macOS/Linux) 脚本。运行后，它会自动检测当前模式并提示切换。从便携模式切换到电脑安装，会将核心文件复制到本地并创建启动项；反之则会将配置备份回 U 盘。这让你在不同电脑间迁移工作环境或决定永久安装时无比轻松。",
+          "en": "U-Claw's flexibility lies in mode switching. Locate the `switch_mode.bat` (Windows) or `switch_mode.sh` (macOS/Linux) script in the USB drive's root directory. Running it automatically detects the current mode and prompts for a switch. Switching from portable to installed mode copies core files locally and creates startup entries; the reverse backs up configurations to the USB drive. This makes migrating your workspace between computers or deciding on a permanent installation effortless."
+        },
+        "tag": {
+          "zh": "技巧",
+          "en": "Tip"
+        }
+      },
+      "case": {
+        "title": {
+          "zh": "离线环境下的多平台会议纪要自动生成",
+          "en": "Automated Multi-Platform Meeting Minutes Generation in Offline Environments"
+        },
+        "content": {
+          "zh": "小王在一家涉密单位工作，无法连接外网。他需要在内部会议后，将飞书群里的讨论快速整理成结构化纪要。他将 U-Claw 虾盘插入内网电脑，启动便携模式，配置飞书机器人接收群消息。会议中，他@机器人标记关键发言。会后，触发预装的“会议纪要生成”技能，AI 自动总结讨论要点、待办事项和决策，并格式化为 Word 文档。全程离线，安全高效地完成了信息整理。",
+          "en": "Xiao Wang works in a confidential unit without external internet access. He needs to quickly structure meeting minutes from Feishu group discussions after internal meetings. He plugs the U-Claw USB drive into his intranet computer, starts portable mode, and configures a Feishu bot to receive group messages. During the meeting, he @mentions the bot to flag key points. Afterwards, he triggers the pre-installed 'Meeting Minutes Generation' skill. The AI automatically summarizes discussion points, action items, and decisions, formatting them into a Word document. The entire process is offline, completing information organization securely and efficiently."
+        },
+        "tag": {
+          "zh": "案例",
+          "en": "Case"
+        }
+      }
+    },
     {
       "date": "2026-04-10",
       "tip": {
