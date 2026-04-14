@@ -1,14 +1,14 @@
 {
   "latest": {
-    "date": "2026-04-13",
+    "date": "2026-04-14",
     "tip": {
       "title": {
-        "zh": "一键切换模型：快速找到最适合的AI助手",
-        "en": "One-Click Model Switching: Quickly Find the Best AI Assistant"
+        "zh": "一键切换模型：快速找到最佳AI助手",
+        "en": "One-Click Model Switching: Find Your Best AI Assistant Instantly"
       },
       "content": {
-        "zh": "在U-Claw的聊天界面，点击输入框上方的模型名称（如“DeepSeek”），会弹出所有8个国产模型的列表。无需进入复杂设置，即可在不同模型间快速切换。例如，写代码时切换到智谱GLM，分析长文档时切换到Kimi，让每个任务都使用最擅长的模型，效率倍增。",
-        "en": "In the U-Claw chat interface, click the model name (e.g., 'DeepSeek') above the input box to pop up a list of all 8 domestic models. You can quickly switch between models without entering complex settings. For instance, switch to GLM for coding, or to Kimi for analyzing long documents, ensuring each task uses the most capable model for maximum efficiency."
+        "zh": "在U-Claw Web界面或聊天平台中，输入 `/model list` 可查看所有可用模型。要切换模型，只需输入 `/model use <模型名称>`，例如 `/model use deepseek`。系统会立即切换，无需重启。此功能让你能根据任务需求（如编程、写作、分析）灵活选择最合适的国产大模型，充分发挥各模型特长。",
+        "en": "In the U-Claw web interface or chat platform, type `/model list` to see all available models. To switch models, simply enter `/model use <model_name>`, e.g., `/model use deepseek`. The system switches instantly without needing a restart. This feature allows you to flexibly choose the most suitable domestic LLM (e.g., for coding, writing, analysis) based on your task, leveraging the strengths of each model."
       },
       "tag": {
         "zh": "技巧",
@@ -17,12 +17,12 @@
     },
     "case": {
       "title": {
-        "zh": "离线会议纪要：用U-Claw快速整理飞书录音",
-        "en": "Offline Meeting Minutes: Quickly Organize Feishu Recordings with U-Claw"
+        "zh": "离线环境下的紧急代码调试",
+        "en": "Emergency Code Debugging in an Offline Environment"
       },
       "content": {
-        "zh": "市场部小王在出差高铁上需要整理一场飞书会议录音。他使用U-Claw的便携模式，将录音文件拖入聊天窗口，并选择“文档总结”技能。U-Claw调用通义千问模型，在完全离线环境下，几分钟内就生成了清晰的会议纪要、待办事项和关键结论，让他能在到达客户现场前完成报告。",
-        "en": "Xiao Wang from the marketing department needed to organize a Feishu meeting recording while on a business trip by high-speed rail. Using U-Claw's portable mode, he dragged the audio file into the chat window and selected the 'Document Summary' skill. U-Claw invoked the Qwen model and, in a completely offline environment, generated clear meeting minutes, action items, and key conclusions within minutes, allowing him to complete the report before arriving at the client site."
+        "zh": "程序员小王在公司内网开发，无法访问外部AI。遇到一个复杂的Python多线程Bug，卡住两小时。他插入U-Claw虾盘，在飞书群里@机器人，将错误日志和代码片段发送过去。通过指令切换到DeepSeek-Coder模型，AI迅速分析了线程锁竞争问题，给出了修复代码和原理说明。小王十分钟内解决了问题，保障了项目进度。",
+        "en": "Developer Xiao Wang was coding on the company's internal network with no external AI access. He hit a complex Python multithreading bug and was stuck for two hours. He plugged in the U-Claw drive, @mentioned the bot in the Feishu group, and sent the error logs and code snippets. Using a command to switch to the DeepSeek-Coder model, the AI quickly analyzed the thread lock contention issue, provided fix code and explanations. Xiao Wang resolved the problem within ten minutes, ensuring project progress."
       },
       "tag": {
         "zh": "案例",
@@ -31,6 +31,37 @@
     }
   },
   "history": [
+    {
+      "date": "2026-04-13",
+      "tip": {
+        "title": {
+          "zh": "一键切换模型：快速找到最适合的AI助手",
+          "en": "One-Click Model Switching: Quickly Find the Best AI Assistant"
+        },
+        "content": {
+          "zh": "在U-Claw的聊天界面，点击输入框上方的模型名称（如“DeepSeek”），会弹出所有8个国产模型的列表。无需进入复杂设置，即可在不同模型间快速切换。例如，写代码时切换到智谱GLM，分析长文档时切换到Kimi，让每个任务都使用最擅长的模型，效率倍增。",
+          "en": "In the U-Claw chat interface, click the model name (e.g., 'DeepSeek') above the input box to pop up a list of all 8 domestic models. You can quickly switch between models without entering complex settings. For instance, switch to GLM for coding, or to Kimi for analyzing long documents, ensuring each task uses the most capable model for maximum efficiency."
+        },
+        "tag": {
+          "zh": "技巧",
+          "en": "Tip"
+        }
+      },
+      "case": {
+        "title": {
+          "zh": "离线会议纪要：用U-Claw快速整理飞书录音",
+          "en": "Offline Meeting Minutes: Quickly Organize Feishu Recordings with U-Claw"
+        },
+        "content": {
+          "zh": "市场部小王在出差高铁上需要整理一场飞书会议录音。他使用U-Claw的便携模式，将录音文件拖入聊天窗口，并选择“文档总结”技能。U-Claw调用通义千问模型，在完全离线环境下，几分钟内就生成了清晰的会议纪要、待办事项和关键结论，让他能在到达客户现场前完成报告。",
+          "en": "Xiao Wang from the marketing department needed to organize a Feishu meeting recording while on a business trip by high-speed rail. Using U-Claw's portable mode, he dragged the audio file into the chat window and selected the 'Document Summary' skill. U-Claw invoked the Qwen model and, in a completely offline environment, generated clear meeting minutes, action items, and key conclusions within minutes, allowing him to complete the report before arriving at the client site."
+        },
+        "tag": {
+          "zh": "案例",
+          "en": "Case"
+        }
+      }
+    },
     {
       "date": "2026-04-12",
       "tip": {
