@@ -194,6 +194,50 @@ MIT 协议，随便复制分发。
 **Q: Mac 提示"未验证的开发者"？**
 右键脚本 → 打开。
 
+**Q: setup.bat / setup.sh 执行失败，提示模块找不到？**
+通常是 npm install 过程中网络中断导致 `node_modules` 不完整。解决步骤：
+1. 删除不完整的依赖：`rmdir /s /q portable\app\core\node_modules`（Windows）或 `rm -rf portable/app/core/node_modules`（Mac）
+2. 切换淘宝镜像重新安装：`cd portable/app/core && npm install --registry=https://registry.npmmirror.com`
+
+**Q: 系统已有 Node.js v24，安装失败？**
+Node.js v24 是最新开发版，部分依赖尚不兼容。需要 **v20 或 v22 LTS**。删除已下载的 runtime 目录后重新运行 setup，它会自动下载内置的 Node v22：
+```bash
+# Windows
+rmdir /s /q portable\app\runtime\node-win-x64
+setup.bat
+
+# Mac
+rm -rf portable/app/runtime/node-mac-arm64
+bash setup.sh
+```
+
+**Q: Mac 上提示 `.toSorted is not a function`？**
+系统旧版 Node.js 被检测到并跳过了内置版本下载，但旧版 Node 不支持 `.toSorted()`（需要 v20+）。删除 runtime 目录让脚本重新下载内置 Node v22：
+```bash
+rm -rf portable/app/runtime/node-mac-arm64
+bash setup.sh
+```
+
+**Q: 如何同时配置多个 AI 模型并切换？**
+支持同时配置多个 provider！打开 `Config.html` → 在 Providers 区域点击「添加」，逐个填入各模型的 API Key 和地址（如 DeepSeek、Kimi、通义等）→ 保存后，在聊天界面左上角下拉菜单随时切换。配置持久保存在 U 盘上。
+
+**Q: U 盘安装后无法创建文件 / 写入失败？**
+两种可能：① U 盘侧面有物理写保护开关，拨到解锁位置；② U 盘格式不兼容，建议格式化为 **exFAT**（Mac/Windows/Linux 三端均支持读写）。
+
+**Q: 从 Ubuntu 向 U 盘复制时符号链接丢失？**
+`node_modules/.bin/` 下有大量符号链接，FAT32/exFAT 在直接 `cp -R` 时会跳过。用 `rsync -aL` 可将符号链接展开为真实文件：
+```bash
+rsync -aL --progress portable/ /media/YOUR_USB/U-Claw/
+```
+
+**Q: QQbot 报错 `Unknown channel: qqbot`？**
+Bundle 里的 `@sliverp/qqbot` 是未编译的 TypeScript 源码，需要先编译：
+```bash
+cd portable/app/core/node_modules/@sliverp/qqbot
+npm install && npm run build
+```
+正式 Release 包已修复此问题，建议从 [Releases](https://github.com/dongsheng123132/u-claw/releases) 下载最新版。
+
 ### 联系
 
 - 微信: hecare888
@@ -412,6 +456,50 @@ MIT license — copy and share freely.
 
 **Q: Mac says "unverified developer"?**
 Right-click the script → Open.
+
+**Q: setup.bat / setup.sh fails with "module not found"?**
+Usually caused by a network interruption during `npm install`, leaving `node_modules` incomplete. Fix:
+1. Delete incomplete dependencies: `rmdir /s /q portable\app\core\node_modules` (Windows) or `rm -rf portable/app/core/node_modules` (Mac)
+2. Reinstall using China mirror: `cd portable/app/core && npm install --registry=https://registry.npmmirror.com`
+
+**Q: Already have Node.js v24 and installation fails?**
+Node.js v24 is a dev release — some dependencies aren't compatible yet. You need **v20 or v22 LTS**. Delete the runtime folder to force a fresh download of the bundled Node v22:
+```bash
+# Windows
+rmdir /s /q portable\app\runtime\node-win-x64
+setup.bat
+
+# Mac
+rm -rf portable/app/runtime/node-mac-arm64
+bash setup.sh
+```
+
+**Q: Mac shows `.toSorted is not a function`?**
+Your system Node.js was detected and the bundled version was skipped, but the system version is too old (needs v20+). Delete the runtime folder to re-download the bundled Node v22:
+```bash
+rm -rf portable/app/runtime/node-mac-arm64
+bash setup.sh
+```
+
+**Q: How do I use multiple AI models / providers?**
+Multiple providers are supported! Open `Config.html` → click "Add" in the Providers section → enter API Key and endpoint for each model (DeepSeek, Kimi, Qwen, etc.) → save. Switch between models via the dropdown in the chat interface. Config is saved persistently on the USB drive.
+
+**Q: USB drive shows "cannot create file" / write errors?**
+Two possibilities: ① The USB drive has a physical write-protect switch on the side — slide it to unlock; ② Format incompatibility — format the drive as **exFAT** (supported on Mac/Windows/Linux).
+
+**Q: Symlinks missing when copying from Ubuntu to USB?**
+`node_modules/.bin/` contains many symlinks that get skipped during direct `cp -R`. Use `rsync -aL` to expand symlinks into real files:
+```bash
+rsync -aL --progress portable/ /media/YOUR_USB/U-Claw/
+```
+
+**Q: QQbot error: `Unknown channel: qqbot`?**
+The bundled `@sliverp/qqbot` is uncompiled TypeScript source. Compile it manually:
+```bash
+cd portable/app/core/node_modules/@sliverp/qqbot
+npm install && npm run build
+```
+This is fixed in the latest [Release](https://github.com/dongsheng123132/u-claw/releases) — downloading the pre-built release is recommended.
 
 ### Contact
 

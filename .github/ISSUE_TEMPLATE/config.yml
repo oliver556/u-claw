@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 完整教程
+    url: https://u-claw.org/tutorial.html
+    about: 从零开始的安装教程，含模型配置、平台接入
+  - name: 🔍 查看 FAQ
+    url: https://github.com/dongsheng123132/u-claw#faq
+    about: 常见问题解答，先看这里
+  - name: 💬 联系作者（微信）
+    url: https://u-claw.org/guide.html#remote-support
+    about: 远程协助安装，微信 hecare888
