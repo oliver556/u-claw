@@ -238,14 +238,26 @@ npm install && npm run build
 ```
 正式 Release 包已修复此问题，建议从 [Releases](https://github.com/dongsheng123132/u-claw/releases) 下载最新版。
 
-### 联系
+### 联系 & 合作
 
-- 微信: hecare888
+<img src="assets/wechat-qr.jpg" width="220" alt="微信二维码 — 贺去病 ai 工作室" align="right" />
+
+- 微信: hecare888（或扫右侧二维码）
 - Telegram: [@dsds8848](https://t.me/dsds8848)
 - Twitter/X: [@Bitplus888](https://x.com/Bitplus888)
 - Email: [hefangsheng@gmail.com](mailto:hefangsheng@gmail.com)
 - GitHub: [@dongsheng123132](https://github.com/dongsheng123132)
 - 官网: [u-claw.org](https://u-claw.org)
+
+**🤝 招募代理 / 带货合作**
+
+虾盘 3.0 体验极佳，退货率极低，售后由我们负责——你只管卖货：
+
+- **抖店 / 直播带货**：提供最高佣金比例，产品已在多个直播间验证转化
+- **代理分销**：买断或按单分润均可谈，支持定制版本
+- **技术合作**：有开发能力者欢迎深度合作
+
+有意向请微信联系（备注「代理合作」优先处理）。
 
 ---
 
@@ -501,14 +513,26 @@ npm install && npm run build
 ```
 This is fixed in the latest [Release](https://github.com/dongsheng123132/u-claw/releases) — downloading the pre-built release is recommended.
 
-### Contact
+### Contact & Partnership
 
+<img src="assets/wechat-qr.jpg" width="220" alt="WeChat QR — He Qubing AI Studio" align="right" />
+
+- WeChat: hecare888 (or scan QR on the right)
 - Telegram: [@dsds8848](https://t.me/dsds8848)
 - Twitter/X: [@Bitplus888](https://x.com/Bitplus888)
 - Email: [hefangsheng@gmail.com](mailto:hefangsheng@gmail.com)
 - GitHub: [@dongsheng123132](https://github.com/dongsheng123132)
-- WeChat: hecare888
 - Website: [u-claw.org](https://u-claw.org)
+
+**🤝 Reseller / Affiliate Program**
+
+U-Claw 3.0 delivers excellent user experience with very low return rates. We handle all after-sales support — you focus on selling:
+
+- **Live commerce / TikTok shop**: Top commission rates, proven conversion in live streams
+- **Reseller / distribution**: Revenue share or wholesale, custom branded versions available
+- **Technical partnership**: Deep collaboration welcome for developers
+
+Interested? WeChat hecare888 (mention "partnership" for priority response).
 
 ---
 
