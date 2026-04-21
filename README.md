@@ -536,4 +536,4 @@ Interested? WeChat hecare888 (mention "partnership" for priority response).
 
 ---
 
-**Made with 🦞 by [dongsheng](https://github.com/dongsheng123132)**
+**Made with 🦞 by [贺去病 ai 工作室](https://github.com/dongsheng123132)**
