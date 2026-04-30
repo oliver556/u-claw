@@ -15,7 +15,7 @@ set "APP_DIR=%UCLAW_DIR%app"
 set "INSTALL_TARGET=%USERPROFILE%\.uclaw"
 set "MIRROR=https://registry.npmmirror.com"
 set "NODE_MIRROR=https://npmmirror.com/mirrors/node"
-set "NODE_VER=v22.14.0"
+set "NODE_VER=v22.22.1"
 
 REM ---- Step 1: Check environment ----
 echo   [1/4] 检查环境...
@@ -33,13 +33,16 @@ if exist "%USB_NODE%" (
             echo   Node.js: 检查系统版本 %%v
             set "SYS_VER=%%v"
         )
-        REM Check if version >= 20
+        REM Use only supported LTS majors. Newer Current releases can break native deps.
         for /f "tokens=1 delims=." %%m in ("!SYS_VER:v=!") do set "MAJOR=%%m"
-        if !MAJOR! geq 20 (
+        if !MAJOR! equ 20 (
+            echo   Node.js: 使用系统的 !SYS_VER!
+            set "USE_NODE=system"
+        ) else if !MAJOR! equ 22 (
             echo   Node.js: 使用系统的 !SYS_VER!
             set "USE_NODE=system"
         ) else (
-            echo   Node.js: 系统版本太低 ^(!SYS_VER!^), 需要 v20+
+            echo   Node.js: 系统版本不兼容 ^(!SYS_VER!^), 将使用内置 v22 LTS
             set "USE_NODE=download"
         )
     ) else (
