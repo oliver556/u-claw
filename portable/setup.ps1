@@ -141,6 +141,47 @@ function Install-TarNodeRuntime {
     }
 }
 
+function Ensure-QQPluginBuild {
+    param(
+        [string]$CoreDir,
+        [string]$NpmCmd
+    )
+
+    $qqDir = Join-Path $CoreDir "node_modules\@sliverp\qqbot"
+    if (-not (Test-Path -Path $qqDir -PathType Container)) {
+        return
+    }
+
+    $distIndex = Join-Path $qqDir "dist\index.js"
+    if (-not (Test-Path -Path $distIndex -PathType Leaf)) {
+        Write-Step "->" "Building QQ plugin runtime files..." "Cyan"
+        Push-Location $qqDir
+        try {
+            & $NpmCmd install --include=dev --registry=$mirror
+            & $NpmCmd run build
+            & $NpmCmd prune --omit=dev
+        }
+        catch {
+            Write-Step "WARN" "QQ plugin build command failed; continuing setup." "Yellow"
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
+    $nestedOpenClaw = Join-Path $qqDir "node_modules\openclaw"
+    if (Test-Path -Path $nestedOpenClaw -PathType Container) {
+        Remove-Item -Path $nestedOpenClaw -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path -Path $distIndex -PathType Leaf) {
+        Write-Step "OK" "QQ plugin runtime files are ready." "Green"
+    }
+    else {
+        Write-Step "WARN" "QQ plugin is installed but dist/index.js is missing." "Yellow"
+    }
+}
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  U-Claw Portable Setup" -ForegroundColor Cyan
@@ -206,6 +247,8 @@ else {
     }
     Write-Step "OK" "QQ plugin installation finished." "Green"
 }
+
+Ensure-QQPluginBuild -CoreDir $coreDir -NpmCmd $npmCmd
 
 $skillsCn = Join-Path $scriptDir "skills-cn"
 $skillsTarget = Join-Path $coreDir "node_modules\openclaw\skills"

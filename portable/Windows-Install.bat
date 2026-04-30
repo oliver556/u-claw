@@ -139,6 +139,24 @@ if "!USE_OPENCLAW!"=="usb" (
     echo   OpenClaw 下载安装完成!
 )
 
+set "QQ_DIR=%INSTALL_TARGET%\core\node_modules\@sliverp\qqbot"
+if exist "!QQ_DIR!" (
+    if not exist "!QQ_DIR!\dist\index.js" (
+        echo   编译 QQbot 插件运行文件...
+        pushd "!QQ_DIR!"
+        call "!INSTALL_NPM!" install --include=dev --registry=%MIRROR% >nul 2>&1
+        call "!INSTALL_NPM!" run build >nul 2>&1
+        call "!INSTALL_NPM!" prune --omit=dev >nul 2>&1
+        popd
+    )
+    if exist "!QQ_DIR!\node_modules\openclaw" rmdir /s /q "!QQ_DIR!\node_modules\openclaw" 2>nul
+    if exist "!QQ_DIR!\dist\index.js" (
+        echo   QQbot 插件运行文件已就绪!
+    ) else (
+        echo   [WARNING] QQbot 插件缺少 dist\index.js
+    )
+)
+
 REM ---- Copy extensions (WeChat plugin etc.) ----
 if exist "%APP_DIR%\extensions\openclaw-weixin\openclaw.plugin.json" (
     echo   Installing WeChat plugin...

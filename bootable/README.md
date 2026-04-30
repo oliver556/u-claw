@@ -81,6 +81,67 @@ cd path\to\u-claw\bootable
 .\4-copy-to-usb.ps1
 ```
 
+## 自动脚本失败时的手动兜底流程
+
+> 由 @wzf9 在 issue #28 反馈整理，适合 Ventoy/ISO 自动下载失败、网络不稳定或需要离线制作的场景。
+
+1. **Ventoy 下载或安装失败**
+   - 手动下载 Ventoy Windows 版：https://github.com/ventoy/Ventoy/releases
+   - 解压后运行 `Ventoy2Disk.exe`
+   - 选择目标 U 盘并点击 Install
+   - 注意：这一步会格式化 U 盘，先备份数据
+
+2. **Ubuntu ISO 自动下载失败**
+   - 手动下载 Ubuntu 24.04.4 Desktop ISO：
+     https://releases.ubuntu.com/24.04/ubuntu-24.04.4-desktop-amd64.iso
+   - 手动下载 SHA256SUMS：
+     https://releases.ubuntu.com/24.04/SHA256SUMS
+   - 将 ISO 放到 `bootable\.download-cache\ubuntu-24.04.4-desktop-amd64.iso`
+   - 可用 PowerShell 校验哈希：
+
+```powershell
+(Get-FileHash -Algorithm SHA256 ".\.download-cache\ubuntu-24.04.4-desktop-amd64.iso").Hash -eq "3a4c9877b483ab46d7c3fbe165a0db275e1ae3cfe56a5657e5a47c2f99a99d1e"
+```
+
+3. **继续创建持久化文件**
+
+```powershell
+.\3-create-persistence.ps1
+```
+
+如果脚本提示没有 WSL 或只能创建空文件，首次进入 Ubuntu 后需要手动格式化：
+
+```bash
+sudo mkfs.ext4 -F -L casper-rw /media/*/Ventoy/persistence.dat
+```
+
+格式化完成后重启，持久化才会生效。
+
+4. **拷贝到 U 盘**
+   - 优先运行：
+
+```powershell
+.\4-copy-to-usb.ps1
+```
+
+   - 如果自动拷贝失败，也可以手动放到 Ventoy 数据分区根目录：
+
+| 本地路径 | U 盘目标 |
+|---------|----------|
+| `bootable\linux-setup\` | `u-claw-linux\` |
+| `bootable\ventoy\` | `ventoy\` |
+| `bootable\.download-cache\persistence.dat` | `persistence.dat` |
+| `bootable\.download-cache\ubuntu-24.04.4-desktop-amd64.iso` | `ubuntu-24.04.4-desktop-amd64.iso` |
+
+5. **目标电脑启动**
+   - 从 U 盘启动，Ventoy 菜单选择 Ubuntu
+   - 如遇 Secure Boot 拦截，进 BIOS 关闭 Secure Boot
+   - 进入 Ubuntu 桌面后运行：
+
+```bash
+sudo bash /media/*/Ventoy/u-claw-linux/setup-openclaw.sh
+```
+
 ## 每一步做了什么
 
 ### Step 1: 写入 Ventoy 引导 (`1-prepare-usb.ps1`)

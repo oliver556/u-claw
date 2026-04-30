@@ -97,6 +97,8 @@ for %%p in (arm64 x64) do (
 
 :skip_mac_download
 
+set "NPM_BIN=%NODE_TARGET%\npm.cmd"
+
 REM ---- 2. Install OpenClaw ----
 if exist "%CORE_DIR%\node_modules\openclaw" goto skip_openclaw_install
 
@@ -107,7 +109,6 @@ if not exist "%CORE_DIR%\package.json" (
     echo { "name": "u-claw-core", "version": "1.0.0", "private": true, "dependencies": { "openclaw": "latest" } } > "%CORE_DIR%\package.json"
 )
 
-set "NPM_BIN=%NODE_TARGET%\npm.cmd"
 cd /d "%CORE_DIR%"
 call "%NPM_BIN%" install --prefix "%CORE_DIR%" --registry="%MIRROR%"
 
@@ -131,6 +132,27 @@ goto qq_install_done
 :skip_qq_install
 echo   [OK] QQ Plugin exists, skipping
 :qq_install_done
+
+set "QQ_DIR=%CORE_DIR%\node_modules\@sliverp\qqbot"
+if not exist "%QQ_DIR%" goto qq_build_done
+
+if exist "%QQ_DIR%\dist\index.js" goto qq_build_cleanup
+
+echo   [BUILD] Building QQ Plugin runtime files...
+pushd "%QQ_DIR%"
+call "%NPM_BIN%" install --include=dev --registry="%MIRROR%" >nul 2>&1
+call "%NPM_BIN%" run build >nul 2>&1
+call "%NPM_BIN%" prune --omit=dev >nul 2>&1
+popd
+
+:qq_build_cleanup
+if exist "%QQ_DIR%\node_modules\openclaw" rmdir /s /q "%QQ_DIR%\node_modules\openclaw" 2>nul
+if exist "%QQ_DIR%\dist\index.js" (
+    echo   [OK] QQ Plugin runtime files ready
+) else (
+    echo   [WARNING] QQ Plugin dist\index.js is missing
+)
+:qq_build_done
 
 REM ---- 4. Install China-optimized skills ----
 set "SKILLS_CN=%SCRIPT_DIR%skills-cn"
