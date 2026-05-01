@@ -224,7 +224,13 @@ if (Test-Path -Path (Join-Path $coreDir "node_modules\openclaw") -PathType Conta
 }
 else {
     Write-Step "->" "Installing OpenClaw..." "Cyan"
-    & $npmCmd install --prefix $coreDir --registry=$mirror
+    Push-Location $coreDir
+    try {
+        & $npmCmd install --prefix $coreDir --registry=$mirror
+    }
+    finally {
+        Pop-Location
+    }
 
     if (Test-Path -Path (Join-Path $coreDir "node_modules\openclaw") -PathType Container) {
         Write-Step "OK" "OpenClaw installation completed." "Green"
@@ -240,10 +246,14 @@ if (Test-Path -Path (Join-Path $coreDir "node_modules\@sliverp\qqbot") -PathType
 }
 else {
     Write-Step "->" "Installing QQ plugin..." "Cyan"
+    Push-Location $coreDir
     try {
-        & $npmCmd install @sliverp/qqbot@latest --prefix $coreDir --registry=$mirror 2>$null
+        & $npmCmd install "@sliverp/qqbot@latest" --prefix $coreDir --registry=$mirror 2>$null
     }
     catch {
+    }
+    finally {
+        Pop-Location
     }
     Write-Step "OK" "QQ plugin installation finished." "Green"
 }
