@@ -6,6 +6,9 @@
 # ============================================================
 
 set -e
+set -o pipefail
+# 注意：未启用 `set -u` —— 第 5 步交互式分支会有意把 API_KEY/BASE_URL/KEY_LABEL 等未赋值的变量
+# 用 [-z "$X"] 检测后再写配置；启用 -u 会破坏这条降级路径。改用显式 `: "${VAR:=}"` 默认值过于侵入。
 
 # ---- 颜色定义 ----
 GREEN='\033[0;32m'
@@ -186,8 +189,16 @@ PKGJSON
     fi
 
     echo -e "  ${CYAN}↓${NC} 从国内镜像安装..."
-    run_npm install --prefix "$CORE_DIR" --registry="$MIRROR" 2>&1 | tail -5
-    echo -e "  ${GREEN}✓${NC} OpenClaw 安装完成"
+    NPM_LOG=$(mktemp /tmp/uclaw-npm.XXXXXX.log)
+    if run_npm install --prefix "$CORE_DIR" --registry="$MIRROR" >"$NPM_LOG" 2>&1; then
+        tail -5 "$NPM_LOG"
+        rm -f "$NPM_LOG"
+        echo -e "  ${GREEN}✓${NC} OpenClaw 安装完成"
+    else
+        echo -e "  ${RED}✗ OpenClaw 安装失败,完整日志见 $NPM_LOG${NC}"
+        tail -20 "$NPM_LOG"
+        exit 1
+    fi
 fi
 
 echo ""
@@ -889,6 +900,11 @@ else
             echo -e "  ${CYAN}$KEY_HINT${NC}"
         fi
 
+        # 转义 API_KEY 中可能破坏 JSON 的字符 (反斜杠和双引号)。这里只处理这两个，
+        # 因为合法的 API key 极少包含控制字符。如果用户粘贴了奇怪的内容,至少 JSON 仍然可解析。
+        API_KEY_JSON=${API_KEY//\\/\\\\}
+        API_KEY_JSON=${API_KEY_JSON//\"/\\\"}
+
         # 写配置文件
         if [ "$PROVIDER" = "custom" ] && [ -n "$BASE_URL" ]; then
             cat > "$CONFIG_PATH" << CFGEOF
@@ -902,7 +918,7 @@ else
     "providers": {
       "custom": {
         "baseUrl": "$BASE_URL",
-        "apiKey": "$API_KEY",
+        "apiKey": "$API_KEY_JSON",
         "api": "openai-completions",
         "models": [{ "id": "$MODEL_NAME" }]
       }
@@ -922,7 +938,7 @@ CFGEOF
     "mode": "merge",
     "providers": {
       "anthropic": {
-        "apiKey": "$API_KEY",
+        "apiKey": "$API_KEY_JSON",
         "api": "anthropic",
         "models": [{ "id": "$MODEL_NAME" }]
       }
@@ -942,7 +958,7 @@ CFGEOF
     "mode": "merge",
     "providers": {
       "openai": {
-        "apiKey": "$API_KEY",
+        "apiKey": "$API_KEY_JSON",
         "api": "openai-completions",
         "models": [{ "id": "$MODEL_NAME" }]
       }

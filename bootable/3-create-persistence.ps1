@@ -73,10 +73,17 @@ if ($wslDistro) {
     $sizeMB = $sizeGB * 1024
     $tmpFile = "/tmp/uclaw_persistence.dat"
 
-    wsl -d $wslDistro -- sh -c "rm -f $tmpFile; dd if=/dev/zero of=$tmpFile bs=1M count=0 seek=$sizeMB 2>/dev/null; mkfs.ext4 -F -L casper-rw $tmpFile 2>/dev/null; echo DONE"
+    # Chain with && so a failed dd aborts before mkfs; capture marker on success only.
+    $wslOutput = wsl -d $wslDistro -- sh -c "rm -f $tmpFile && dd if=/dev/zero of=$tmpFile bs=1M count=0 seek=$sizeMB 2>/dev/null && mkfs.ext4 -F -L casper-rw $tmpFile >/dev/null 2>&1 && echo DONE"
+    if ($wslOutput -notmatch "DONE") {
+        Write-Host "[ERROR] WSL failed to create/format ext4 image (dd or mkfs.ext4 returned non-zero)." -ForegroundColor Red
+        wsl -d $wslDistro -- rm -f $tmpFile 2>$null
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
 
-    # Copy out via \\wsl$
-    $wslNetPath = "\\wsl$\$wslDistro\tmp\uclaw_persistence.dat"
+    # Copy out via \\wsl$ — use ${wslDistro} so PowerShell does not greedily extend the variable name into the path segment.
+    $wslNetPath = "\\wsl`$\${wslDistro}\tmp\uclaw_persistence.dat"
     if (Test-Path $wslNetPath) {
         Write-Host "[INFO] Copying from WSL to cache..." -ForegroundColor Yellow
         Copy-Item -Path $wslNetPath -Destination $PersistencePath -Force
@@ -132,15 +139,11 @@ if ($wslDistro) {
         Write-Host "[INFO] Found docker-desktop WSL with mkfs.ext4, creating ext4 image..." -ForegroundColor Green
         $tmpFile = "/tmp/uclaw_persistence.dat"
 
-        # Create sparse file and format in docker-desktop WSL
-        wsl -d $dockerWSL -- dd if=/dev/zero of=$tmpFile bs=1M count=0 seek=$sizeMB 2>$null
-        wsl -d $dockerWSL -- /sbin/mkfs.ext4 -F -L casper-rw $tmpFile 2>$null
+        # Create sparse file and format in docker-desktop WSL — chain with && so a dd failure aborts before mkfs/cp.
+        $dockerOutput = wsl -d $dockerWSL -- sh -c "rm -f $tmpFile && dd if=/dev/zero of=$tmpFile bs=1M count=0 seek=$sizeMB 2>/dev/null && /sbin/mkfs.ext4 -F -L casper-rw $tmpFile >/dev/null 2>&1 && cp $tmpFile /mnt/host/c/uclaw_persistence_tmp.dat && echo DONE"
 
-        # Copy out via /mnt/host/c/ (docker-desktop mounts C: there)
         $tmpHostPath = "C:\uclaw_persistence_tmp.dat"
-        wsl -d $dockerWSL -- cp $tmpFile /mnt/host/c/uclaw_persistence_tmp.dat 2>$null
-
-        if (Test-Path $tmpHostPath) {
+        if (($dockerOutput -match "DONE") -and (Test-Path $tmpHostPath)) {
             Move-Item -Path $tmpHostPath -Destination $PersistencePath -Force
             wsl -d $dockerWSL -- rm -f $tmpFile 2>$null
             $formatted = $true

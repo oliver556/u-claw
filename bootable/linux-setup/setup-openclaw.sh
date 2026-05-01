@@ -62,20 +62,29 @@ if [[ -x "$NODE_DIR/bin/node" ]]; then
 fi
 
 if [[ ! -x "$NODE_DIR/bin/node" ]]; then
-    TMPFILE=$(mktemp /tmp/node-XXXXXX.tar.xz)
-    # Try China mirror first, then official
+    if ! TMPFILE=$(mktemp /tmp/node-XXXXXX.tar.xz); then
+        echo "[ERROR] mktemp failed (cannot create temp file in /tmp). Disk full?"
+        exit 1
+    fi
+    # Ensure partial downloads are cleaned up no matter how the script exits.
+    trap 'rm -f "$TMPFILE"' EXIT
+
+    # Try China mirror first, then official. On failure, drop the partial file before retrying.
     if curl -fSL --connect-timeout 10 -o "$TMPFILE" "${NODE_MIRROR}/${NODE_VERSION}/${NODE_ARCHIVE}" 2>/dev/null; then
         echo "      Downloaded from China mirror."
-    elif curl -fSL --connect-timeout 10 -o "$TMPFILE" "${NODE_OFFICIAL}/${NODE_VERSION}/${NODE_ARCHIVE}" 2>/dev/null; then
-        echo "      Downloaded from official mirror."
     else
-        echo "[ERROR] Failed to download Node.js. Please check your network."
         rm -f "$TMPFILE"
-        exit 1
+        if curl -fSL --connect-timeout 10 -o "$TMPFILE" "${NODE_OFFICIAL}/${NODE_VERSION}/${NODE_ARCHIVE}" 2>/dev/null; then
+            echo "      Downloaded from official mirror."
+        else
+            echo "[ERROR] Failed to download Node.js. Please check your network."
+            exit 1
+        fi
     fi
     mkdir -p "$NODE_DIR"
     tar -xJf "$TMPFILE" --strip-components=1 -C "$NODE_DIR"
     rm -f "$TMPFILE"
+    trap - EXIT
     echo "      Node.js extracted to $NODE_DIR"
 fi
 
@@ -196,7 +205,10 @@ if [[ "$INSTALL_SSH" =~ ^[Yy]$ ]]; then
     echo ""
     echo "      Set a password for SSH login (user: $REAL_USER):"
     passwd "$REAL_USER"
-    LOCAL_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)(?!127\.)\d+\.\d+\.\d+\.\d+' | head -1)
+    # `set -o pipefail` makes the pipeline fail when grep finds no match, which would abort the whole script
+    # on a host with no non-loopback NIC. Tolerate that case and just leave LOCAL_IP empty.
+    LOCAL_IP=$(ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)(?!127\.)\d+\.\d+\.\d+\.\d+' | head -1 || true)
+    [[ -z "$LOCAL_IP" ]] && LOCAL_IP="<your-ip>"
     echo ""
     echo "      SSH enabled! Connect from another computer:"
     echo "      ssh ${REAL_USER}@${LOCAL_IP}"
@@ -226,10 +238,10 @@ if [[ -f "$SCRIPT_DIR/test-installation.sh" ]]; then
     echo ""
 fi
 
-# 运行快速测试
+# 运行快速测试 — 主流程已 `set -o pipefail`,test 脚本失败不应让整个 setup 退出 (我们已经走完安装).
 echo "Running quick installation test..."
 if [[ -f "$SCRIPT_DIR/test-installation.sh" ]]; then
-    bash "$SCRIPT_DIR/test-installation.sh" | tail -20
+    bash "$SCRIPT_DIR/test-installation.sh" 2>&1 | tail -20 || true
 fi
 echo "  First time? Configure your AI model in the browser after startup."
 echo "============================================"
