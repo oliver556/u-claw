@@ -115,7 +115,7 @@ if "!USE_NODE!"=="usb" (
     echo   解压中...
     mkdir "%INSTALL_TARGET%\runtime\node-win-x64" 2>nul
     powershell -command "Expand-Archive -Path '%TEMP%\!NODE_ZIP!' -DestinationPath '%TEMP%\node-extract' -Force"
-    xcopy /s /e /q /y "%TEMP%\node-%NODE_VER%-win-x64\*" "%INSTALL_TARGET%\runtime\node-win-x64\" >nul
+    xcopy /s /e /q /y "%TEMP%\node-extract\node-%NODE_VER%-win-x64\*" "%INSTALL_TARGET%\runtime\node-win-x64\" >nul
     rmdir /s /q "%TEMP%\node-extract" 2>nul
     del "%TEMP%\!NODE_ZIP!" 2>nul
 

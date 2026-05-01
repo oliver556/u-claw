@@ -72,8 +72,13 @@ mkdir -p "$STATE_DIR" "$DATA_DIR/memory" "$DATA_DIR/backups" "$DATA_DIR/logs"
 
 # ---- 5. Default config ----
 if [ ! -f "$CONFIG_FILE" ]; then
-    echo -e "  ${YELLOW}First run - creating default config...${NC}"
-    cat > "$CONFIG_FILE" << 'CFGEOF'
+    if [ -f "$DATA_DIR/config.json" ]; then
+        echo -e "  ${YELLOW}Migrating legacy config...${NC}"
+        cp "$DATA_DIR/config.json" "$CONFIG_FILE"
+        echo -e "  ${GREEN}Config migrated${NC}"
+    else
+        echo -e "  ${YELLOW}First run - creating default config...${NC}"
+        cat > "$CONFIG_FILE" << 'CFGEOF'
 {
   "gateway": {
     "mode": "local",
@@ -81,13 +86,9 @@ if [ ! -f "$CONFIG_FILE" ]; then
   }
 }
 CFGEOF
-    echo -e "  ${GREEN}Config created${NC}"
+        echo -e "  ${GREEN}Config created${NC}"
+    fi
     echo ""
-fi
-
-# Sync config from legacy location
-if [ -f "$DATA_DIR/config.json" ] && [ ! -f "$CONFIG_FILE" ]; then
-    cp "$DATA_DIR/config.json" "$CONFIG_FILE"
 fi
 
 # ---- 6. Set environment (portable mode) ----

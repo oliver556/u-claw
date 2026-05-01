@@ -46,17 +46,18 @@ if not exist "%DATA_DIR%\memory" mkdir "%DATA_DIR%\memory"
 if not exist "%DATA_DIR%\backups" mkdir "%DATA_DIR%\backups"
 if not exist "%DATA_DIR%\logs" mkdir "%DATA_DIR%\logs"
 
-REM Default config
+REM Default config (migrate legacy if present, otherwise create)
 if not exist "%STATE_DIR%\openclaw.json" (
-    echo   First run - creating default config...
-    (echo {"gateway":{"mode":"local","auth":{"token":"uclaw"}}})>"%STATE_DIR%\openclaw.json"
-    echo   Config created
+    if exist "%DATA_DIR%\config.json" (
+        echo   Migrating legacy config...
+        copy "%DATA_DIR%\config.json" "%STATE_DIR%\openclaw.json" >nul
+        echo   Config migrated
+    ) else (
+        echo   First run - creating default config...
+        (echo {"gateway":{"mode":"local","auth":{"token":"uclaw"}}})>"%STATE_DIR%\openclaw.json"
+        echo   Config created
+    )
     echo.
-)
-
-REM Sync config from legacy location
-if exist "%DATA_DIR%\config.json" if not exist "%STATE_DIR%\openclaw.json" (
-    copy "%DATA_DIR%\config.json" "%STATE_DIR%\openclaw.json" >nul
 )
 
 REM Check dependencies
