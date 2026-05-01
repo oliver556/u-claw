@@ -121,7 +121,7 @@ if [ "$USE_SYSTEM_NODE" = "false" ]; then
     if [ -f "$NODE_INSTALL_DIR/bin/node" ]; then
         echo -e "  ${GREEN}✓${NC} Node.js 已存在，跳过下载"
         INSTALL_NODE="$NODE_INSTALL_DIR/bin/node"
-        INSTALL_NPM="$NODE_INSTALL_DIR/bin/npm"
+        INSTALL_NPM="$NODE_INSTALL_DIR/bin/npm-cli.js"
     else
         echo -e "  ${CYAN}↓${NC} 从国内镜像下载 Node.js $NODE_VERSION ($PLATFORM)..."
         TARBALL="node-${NODE_VERSION}-${PLATFORM}.tar.gz"
@@ -144,13 +144,23 @@ if [ "$USE_SYSTEM_NODE" = "false" ]; then
         if [ -f "$NODE_INSTALL_DIR/bin/node" ]; then
             echo -e "  ${GREEN}✓${NC} Node.js 安装完成"
             INSTALL_NODE="$NODE_INSTALL_DIR/bin/node"
-            INSTALL_NPM="$NODE_INSTALL_DIR/bin/npm"
+            INSTALL_NPM="$NODE_INSTALL_DIR/lib/node_modules/npm/bin/npm-cli.js"
         else
             echo -e "  ${RED}✗ Node.js 下载失败${NC}"
             exit 1
         fi
     fi
 fi
+
+# Helper: invoke npm. For bundled Node we have npm-cli.js (run via node).
+# For system Node, INSTALL_NPM is the npm shell wrapper (executable).
+run_npm() {
+    if [ "$USE_SYSTEM_NODE" = "true" ]; then
+        "$INSTALL_NPM" "$@"
+    else
+        "$INSTALL_NODE" "$INSTALL_NPM" "$@"
+    fi
+}
 
 echo ""
 
@@ -176,7 +186,7 @@ PKGJSON
     fi
 
     echo -e "  ${CYAN}↓${NC} 从国内镜像安装..."
-    "$INSTALL_NODE" "$INSTALL_NPM" install --prefix "$CORE_DIR" --registry="$MIRROR" 2>&1 | tail -5
+    run_npm install --prefix "$CORE_DIR" --registry="$MIRROR" 2>&1 | tail -5
     echo -e "  ${GREEN}✓${NC} OpenClaw 安装完成"
 fi
 
@@ -191,7 +201,7 @@ if [ -d "$CORE_DIR/node_modules/@sliverp/qqbot" ]; then
     echo -e "  ${GREEN}✓${NC} QQ 插件已安装，跳过"
 else
     echo -e "  ${CYAN}↓${NC} 安装 QQ 插件..."
-    "$INSTALL_NODE" "$INSTALL_NPM" install @sliverp/qqbot@latest --prefix "$CORE_DIR" --registry="$MIRROR" 2>/dev/null || {
+    run_npm install @sliverp/qqbot@latest --prefix "$CORE_DIR" --registry="$MIRROR" 2>/dev/null || {
         echo -e "  ${YELLOW}⚠${NC}  QQ 插件安装失败（不影响主功能）"
     }
     if [ -d "$CORE_DIR/node_modules/@sliverp/qqbot" ]; then

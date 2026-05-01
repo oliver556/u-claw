@@ -93,12 +93,18 @@ if ($sysNode) {
     if ($major -ge 20) {
         Write-Green "  [OK] System Node.js $sysVer found, reusing"
         $INSTALL_NODE = "node"
-        $npmCmd = (Get-Command npm -ErrorAction SilentlyContinue).Source
-        $npmRoot = Split-Path (Split-Path $npmCmd)
-        $NPM_CLI = "$npmRoot\node_modules\npm\bin\npm-cli.js"
-        if (-not (Test-Path $NPM_CLI)) {
-            $npmPrefix = & node -e "console.log(process.execPath.replace(/[\\\/]node\.exe$/i,''))" 2>$null
-            $NPM_CLI = "$npmPrefix\node_modules\npm\bin\npm-cli.js"
+        # Resolve npm-cli.js next to node.exe; fall back to npm.cmd as a launcher.
+        $nodeExeDir = Split-Path $sysNode.Source -Parent
+        $candidates = @(
+            "$nodeExeDir\node_modules\npm\bin\npm-cli.js",
+            "$env:APPDATA\npm\node_modules\npm\bin\npm-cli.js",
+            "$env:ProgramFiles\nodejs\node_modules\npm\bin\npm-cli.js"
+        )
+        $NPM_CLI = $null
+        foreach ($p in $candidates) { if (Test-Path $p) { $NPM_CLI = $p; break } }
+        if (-not $NPM_CLI) {
+            # Last resort: use npm.cmd directly (don't pass through node.exe)
+            $NPM_CLI = (Get-Command npm -ErrorAction SilentlyContinue).Source
         }
         $USE_SYSTEM_NODE = $true
     }
