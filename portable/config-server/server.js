@@ -5,8 +5,10 @@ const path = require('path');
 const { deflateSync } = require('zlib');
 const crypto = require('crypto');
 
-const PORT = 18788;
+const PORT_RANGE_START = 18788;
+const PORT_RANGE_END = 18798;
 const CONFIG_PATH = path.join(__dirname, '../data/.openclaw/openclaw.json');
+const RUNTIME_PATH = path.join(__dirname, '../data/.openclaw/runtime.json');
 
 // ── WeChat Login State ──────────────────────────────────────────────────────
 const DEFAULT_WECHAT_BASE_URL = 'https://ilinkai.weixin.qq.com';
@@ -500,8 +502,31 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`\n🦞 U-Claw Config Center`);
-  console.log(`   http://127.0.0.1:${PORT}`);
-  console.log(`\n   Config file: ${CONFIG_PATH}\n`);
-});
+function listenWithFallback(port) {
+  server.once('error', (err) => {
+    if (err && err.code === 'EADDRINUSE' && port < PORT_RANGE_END) {
+      console.log(`   Port ${port} busy, trying ${port + 1}…`);
+      setImmediate(() => listenWithFallback(port + 1));
+      return;
+    }
+    console.error(`Config server failed to bind: ${err && err.message ? err.message : err}`);
+    process.exit(1);
+  });
+  server.listen(port, '127.0.0.1', () => {
+    console.log(`\n🦞 U-Claw Config Center`);
+    console.log(`   http://127.0.0.1:${port}`);
+    console.log(`\n   Config file: ${CONFIG_PATH}\n`);
+    // Persist the live port so Config.html / launchers can discover it after restarts.
+    try {
+      fs.mkdirSync(path.dirname(RUNTIME_PATH), { recursive: true });
+      const existing = fs.existsSync(RUNTIME_PATH) ? JSON.parse(fs.readFileSync(RUNTIME_PATH, 'utf8')) : {};
+      existing.configServerPort = port;
+      existing.configServerUpdatedAt = new Date().toISOString();
+      fs.writeFileSync(RUNTIME_PATH, JSON.stringify(existing, null, 2));
+    } catch (err) {
+      console.warn(`   Warning: could not write ${RUNTIME_PATH}: ${err.message}`);
+    }
+  });
+}
+
+listenWithFallback(PORT_RANGE_START);

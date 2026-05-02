@@ -12,15 +12,22 @@ import { buildApiKey } from './xiapan-client.mjs';
 
 const PROVIDER_ID = 'uclaw-cloud';
 
+// Mirror ClawX commercial schema: keep models[] empty and steer model selection
+// via agents.defaults.model.primary + fallbacks. OpenClaw 2026.4.x accepts both
+// shapes, but the empty-models form lets the runtime auto-discover model ids
+// from /v1/models without us hard-coding a list that drifts from the backend.
 const DEFAULT_PROVIDER_TEMPLATE = {
   baseUrl: 'https://api.u-claw.org/v1',
   api: 'openai-completions',
-  models: [
-    { id: 'deepseek-chat', name: 'DeepSeek Chat' },
-    { id: 'qwen-plus', name: 'Qwen Plus' },
-    { id: 'qwen-turbo', name: 'Qwen Turbo' },
-  ],
+  models: [],
 };
+
+const DEFAULT_PRIMARY_MODEL = `${PROVIDER_ID}/deepseek-v4-flash`;
+const DEFAULT_FALLBACK_MODELS = [
+  `${PROVIDER_ID}/deepseek-chat`,
+  `${PROVIDER_ID}/qwen-plus`,
+  `${PROVIDER_ID}/qwen-turbo`,
+];
 
 function readJsonSafe(filePath) {
   if (!existsSync(filePath)) return null;
@@ -46,6 +53,32 @@ function ensureModelsContainer(config) {
     config.models.providers = {};
   }
   return config.models.providers;
+}
+
+// Set agents.defaults.model.primary to uclaw-cloud only when the user has not
+// configured a primary model already. If they've picked a different provider
+// (e.g. DeepSeek BYOK), leave their choice untouched.
+function ensureAgentsDefaults(config) {
+  if (!config.agents || typeof config.agents !== 'object') {
+    config.agents = {};
+  }
+  if (!config.agents.defaults || typeof config.agents.defaults !== 'object') {
+    config.agents.defaults = {};
+  }
+  const defaults = config.agents.defaults;
+  if (!defaults.model || typeof defaults.model !== 'object') {
+    defaults.model = {};
+  }
+  let changed = false;
+  if (!defaults.model.primary) {
+    defaults.model.primary = DEFAULT_PRIMARY_MODEL;
+    changed = true;
+  }
+  if (!Array.isArray(defaults.model.fallbacks) || defaults.model.fallbacks.length === 0) {
+    defaults.model.fallbacks = [...DEFAULT_FALLBACK_MODELS];
+    changed = true;
+  }
+  return changed;
 }
 
 export async function bootstrapXiapan({ configPath, appRoot, log = console } = {}) {
@@ -74,6 +107,9 @@ export async function bootstrapXiapan({ configPath, appRoot, log = console } = {
         `[bootstrap-xiapan] uclaw-cloud apiKey already configured (different fingerprint). `
         + `Current source=${fingerprintInfo.source}. Use Config UI to rebind if needed.`,
       );
+      // Still ensure agents.defaults exists so the runtime knows to use uclaw-cloud
+      const changedDefaults = ensureAgentsDefaults(config);
+      if (changedDefaults) writeJson(configPath, config);
       return {
         ok: true,
         action: 'kept',
@@ -82,9 +118,14 @@ export async function bootstrapXiapan({ configPath, appRoot, log = console } = {
       };
     }
     if (existing.apiKey === apiKey) {
+      const changedDefaults = ensureAgentsDefaults(config);
+      if (changedDefaults) {
+        writeJson(configPath, config);
+        log.info?.('[bootstrap-xiapan] Added agents.defaults to existing config');
+      }
       return {
         ok: true,
-        action: 'noop',
+        action: changedDefaults ? 'agents-defaults-added' : 'noop',
         source: fingerprintInfo.source,
         apiKey,
       };
@@ -97,8 +138,9 @@ export async function bootstrapXiapan({ configPath, appRoot, log = console } = {
     baseUrl: existing?.baseUrl || DEFAULT_PROVIDER_TEMPLATE.baseUrl,
     api: existing?.api || DEFAULT_PROVIDER_TEMPLATE.api,
     apiKey,
-    models: existing?.models?.length ? existing.models : DEFAULT_PROVIDER_TEMPLATE.models,
+    models: existing?.models ?? DEFAULT_PROVIDER_TEMPLATE.models,
   };
+  ensureAgentsDefaults(config);
 
   writeJson(configPath, config);
   log.info?.(
