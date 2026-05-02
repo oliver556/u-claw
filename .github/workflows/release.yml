@@ -32,6 +32,19 @@ jobs:
           cp -R portable/. "$stage_dir/"
           rm -rf "$stage_dir/app" "$stage_dir/data/logs" 2>/dev/null || true
 
+      - name: Normalize line endings (CRLF for Windows scripts, LF for shell)
+        run: |
+          tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          stage_dir="dist/u-claw-portable-${tag_name}"
+          # Windows batch files MUST be CRLF — cmd.exe mis-parses LF-only files
+          find "$stage_dir" -type f \( -name '*.bat' -o -name '*.cmd' -o -name '*.ps1' \) -print0 \
+            | xargs -0 -I {} sh -c 'sed -i "s/\r$//; s/$/\r/" "{}"'
+          # Ensure shell scripts stay LF (mac/linux double-click won't run otherwise)
+          find "$stage_dir" -type f \( -name '*.sh' -o -name '*.command' -o -name '*.mjs' -o -name '*.js' \) -print0 \
+            | xargs -0 -I {} sh -c 'sed -i "s/\r$//" "{}"'
+          # Restore +x on shell entry points
+          chmod +x "$stage_dir"/*.sh "$stage_dir"/*.command 2>/dev/null || true
+
       - name: Zip skeleton
         run: |
           tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
