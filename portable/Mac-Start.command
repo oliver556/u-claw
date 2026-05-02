@@ -106,6 +106,11 @@ if [ ! -d "$CORE_DIR/node_modules" ]; then
     echo ""
 fi
 
+# ---- 7b. Bind device fingerprint and inject Xiapan Cloud apiKey ----
+echo -e "  ${CYAN}Binding device fingerprint to Xiapan Cloud...${NC}"
+UCLAW_APP_ROOT="$UCLAW_DIR" "$NODE_BIN" "$UCLAW_DIR/lib/bootstrap-xiapan.mjs" "$CONFIG_FILE" || true
+echo ""
+
 # ---- 8. Find available port ----
 PORT=18789
 while lsof -i :$PORT >/dev/null 2>&1; do

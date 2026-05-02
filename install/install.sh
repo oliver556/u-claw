@@ -176,13 +176,14 @@ if [ -d "$CORE_DIR/node_modules/openclaw" ]; then
     echo -e "  ${GREEN}✓${NC} OpenClaw 已安装，跳过"
 else
     if [ ! -f "$CORE_DIR/package.json" ]; then
-        cat > "$CORE_DIR/package.json" << 'PKGJSON'
+        OPENCLAW_VERSION="2026.4.29"
+        cat > "$CORE_DIR/package.json" << PKGJSON
 {
   "name": "u-claw-core",
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "openclaw": "latest"
+    "openclaw": "$OPENCLAW_VERSION"
   }
 }
 PKGJSON

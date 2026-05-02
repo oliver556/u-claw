@@ -7,13 +7,14 @@
   "license": "MIT",
   "homepage": "https://u-claw.org",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
-    "build:mac": "electron-builder --mac",
-    "build:mac-arm64": "electron-builder --mac --arm64",
-    "build:mac-x64": "electron-builder --mac --x64",
-    "build:win": "electron-builder --win",
-    "build:all": "electron-builder --mac --win",
+    "sync-lib": "node scripts/sync-lib.js",
+    "start": "npm run sync-lib && electron .",
+    "dev": "npm run sync-lib && electron . --dev",
+    "build:mac": "npm run sync-lib && electron-builder --mac",
+    "build:mac-arm64": "npm run sync-lib && electron-builder --mac --arm64",
+    "build:mac-x64": "npm run sync-lib && electron-builder --mac --x64",
+    "build:win": "npm run sync-lib && electron-builder --win",
+    "build:all": "npm run sync-lib && electron-builder --mac --win",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {

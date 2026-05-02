@@ -105,8 +105,14 @@ if exist "%CORE_DIR%\node_modules\openclaw" goto skip_openclaw_install
 echo   [INSTALL] Installing OpenClaw...
 if not exist "%CORE_DIR%" mkdir "%CORE_DIR%" 2>nul
 
+REM Read pinned OpenClaw version from repo root
+set "OPENCLAW_VERSION_FILE=%~dp0..\OPENCLAW_VERSION"
+set "OPENCLAW_VERSION=2026.4.29"
+if exist "%OPENCLAW_VERSION_FILE%" (
+    for /f "usebackq delims=" %%v in ("%OPENCLAW_VERSION_FILE%") do set "OPENCLAW_VERSION=%%v"
+)
 if not exist "%CORE_DIR%\package.json" (
-    echo { "name": "u-claw-core", "version": "1.0.0", "private": true, "dependencies": { "openclaw": "latest" } } > "%CORE_DIR%\package.json"
+    echo { "name": "u-claw-core", "version": "1.0.0", "private": true, "dependencies": { "openclaw": "%OPENCLAW_VERSION%" } } > "%CORE_DIR%\package.json"
 )
 
 cd /d "%CORE_DIR%"

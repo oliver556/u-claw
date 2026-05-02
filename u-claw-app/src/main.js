@@ -89,6 +89,20 @@ function ensureConfig() {
   }
 }
 
+async function bindXiapanCloud() {
+  try {
+    const mod = await import(path.join(__dirname, 'lib/bootstrap-xiapan.mjs'));
+    const result = await mod.bootstrapXiapan({
+      configPath,
+      appRoot: userDataPath,
+      log: console,
+    });
+    console.log(`[${APP_NAME}] xiapan bind: ${result.action || 'noop'} (source=${result.source})`);
+  } catch (err) {
+    console.warn(`[${APP_NAME}] xiapan bind failed:`, err.message);
+  }
+}
+
 function getConfig() {
   try {
     return JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -445,6 +459,7 @@ app.whenReady().then(async () => {
 
   // Setup
   ensureConfig();
+  await bindXiapanCloud();
   createMenu();
   setupIPC();
   createWindow();

@@ -72,6 +72,12 @@ if not exist "%CORE_DIR%\node_modules" (
     echo.
 )
 
+REM Bind device fingerprint and inject Xiapan Cloud apiKey into openclaw.json
+echo   Binding device fingerprint to Xiapan Cloud...
+set "UCLAW_APP_ROOT=%UCLAW_DIR%"
+"%NODE_BIN%" "%UCLAW_DIR%lib\bootstrap-xiapan.mjs" "%STATE_DIR%\openclaw.json"
+echo.
+
 REM Auto-install WeChat plugin if available
 set "WECHAT_PLUGIN_SRC=%APP_DIR%\extensions\openclaw-weixin"
 set "WECHAT_PLUGIN_DST=%USERPROFILE%\.openclaw\extensions\openclaw-weixin"

@@ -391,6 +391,71 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // API: Xiapan Cloud status (fingerprint + apiKey + balance)
+  if (req.url === '/api/xiapan/status' && req.method === 'GET') {
+    (async () => {
+      try {
+        const fpMod = await import('../lib/fingerprint.mjs');
+        const xpMod = await import('../lib/xiapan-client.mjs');
+        const portableRoot = path.join(__dirname, '..');
+        const fp = await fpMod.getFingerprint(portableRoot);
+        const apiKey = xpMod.buildApiKey(fp.fingerprint);
+        const balance = await xpMod.getBalance(apiKey);
+        const rechargeUrl = xpMod.getRechargeUrl(apiKey);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          source: fp.source,
+          apiKey,
+          rechargeUrl,
+          balance,
+        }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    })();
+    return;
+  }
+
+  // API: Re-run bootstrap to inject the uclaw-cloud provider
+  if (req.url === '/api/xiapan/bind' && req.method === 'POST') {
+    (async () => {
+      try {
+        const mod = await import('../lib/bootstrap-xiapan.mjs');
+        const portableRoot = path.join(__dirname, '..');
+        const result = await mod.bootstrapXiapan({
+          configPath: CONFIG_PATH,
+          appRoot: portableRoot,
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    })();
+    return;
+  }
+
+  // API: Remove uclaw-cloud provider so the next bind regenerates it
+  if (req.url === '/api/xiapan/unbind' && req.method === 'POST') {
+    try {
+      if (fs.existsSync(CONFIG_PATH)) {
+        const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+        if (config.models && config.models.providers && config.models.providers['uclaw-cloud']) {
+          delete config.models.providers['uclaw-cloud'];
+          fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+        }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
   // API: Save config
   if (req.url === '/api/config' && req.method === 'POST') {
     let body = '';

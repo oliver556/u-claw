@@ -22,6 +22,18 @@ U-Claw（虾盘）是一个**制作教程 + 全套源代码**，教你把 [OpenC
 
 > 📖 **[完整教程](https://u-claw.org/tutorial.html)** — 从零开始的手工安装指南、模型配置、聊天平台接入，小白也能看懂。
 
+### 🔗 内置虾盘云：开箱即用
+
+每个 U-Claw 实例首次启动会**自动**根据当前 U 盘 / 硬盘的指纹生成一个 `sk-...` 形式的虾盘云 apiKey，并写入 `data/.openclaw/openclaw.json`。打开 Config.html 就能看到这张「已绑定虾盘云」横幅（指纹来源、Key、余额）。
+
+- **不送 token**：余额初始为 0，需自行充值（[u-claw.org/cloud.html](https://u-claw.org/cloud.html)）
+- **指纹规则**：
+  - 从 U 盘根目录启动 → 绑定该 U 盘的硬件指纹（USB Serial + PNPDeviceID）
+  - 从硬盘启动（电脑安装版 / Electron App）→ 绑定主板 + 系统盘指纹
+  - Mac/Linux 走 Hardware UUID / `/etc/machine-id` + 启动盘 UUID
+- **换机 / 换盘**：换 U 盘或换电脑后，新的指纹会生成新的 Key；旧 Key 的余额仍归属原指纹（在 Config.html 点「解绑」可触发重新绑定）
+- **隐私**：指纹只用于本地生成 Key，不上传，无登录
+
 ### 一键安装（推荐）
 
 不需要 U 盘，一行命令直接装到电脑：
@@ -107,6 +119,19 @@ npm run dev              # 开发模式运行
 npm run build:mac-arm64  # 打包 → release/*.dmg
 npm run build:win        # 打包 → release/*.exe
 ```
+
+### 直接下载发行版
+
+[GitHub Releases](https://github.com/dongsheng123132/u-claw/releases) 提供四种打包好的产物：
+
+- `u-claw-portable-windows-vX.Y.Z.zip` — Windows 便携版（解压即用）
+- `u-claw-portable-mac-vX.Y.Z.zip` — Mac 便携版
+- `U-Claw Setup vX.Y.Z.exe` — Windows 桌面安装包
+- `U-Claw-vX.Y.Z-arm64.dmg` — Mac 桌面安装包
+
+> ⚠️ 安装包未签名：
+> - **Windows**：双击 `.exe` 时 SmartScreen 会拦，点「更多信息」→「仍要运行」
+> - **Mac**：首次启动如被 Gatekeeper 拦，执行 `xattr -rd com.apple.quarantine /Applications/U-Claw.app` 或在 Finder 里右键→打开
 
 ### 支持的 AI 模型
 
