@@ -16,9 +16,9 @@ const DEFAULT_PROVIDER_TEMPLATE = {
   baseUrl: 'https://api.u-claw.org/v1',
   api: 'openai-completions',
   models: [
-    { id: 'deepseek-chat', label: 'DeepSeek Chat' },
-    { id: 'qwen-plus', label: 'Qwen Plus' },
-    { id: 'qwen-turbo', label: 'Qwen Turbo' },
+    { id: 'deepseek-chat', name: 'DeepSeek Chat' },
+    { id: 'qwen-plus', name: 'Qwen Plus' },
+    { id: 'qwen-turbo', name: 'Qwen Turbo' },
   ],
 };
 
