@@ -15,87 +15,34 @@ permissions:
   contents: write
 
 jobs:
-  portable-windows:
-    name: Portable Windows zip
-    runs-on: windows-latest
+  portable-skeleton:
+    name: Portable skeleton zip (cross-platform)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read OpenClaw version
-        id: openclaw_version
-        shell: bash
-        run: |
-          version=$(tr -d '[:space:]' < OPENCLAW_VERSION)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Run portable setup (Windows)
-        shell: cmd
-        run: |
-          cd portable
-          call setup.bat
-
-      - name: Stage portable folder
-        shell: bash
+      - name: Stage portable skeleton (no node_modules, no Node.js runtime)
         run: |
           mkdir -p dist
           tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          stage_dir="dist/u-claw-portable-windows-${tag_name}"
+          stage_dir="dist/u-claw-portable-${tag_name}"
           mkdir -p "$stage_dir"
+          # Copy source skeleton only — first launch will download Node.js + OpenClaw
+          # via portable/setup.sh / setup.bat (China mirror, ~1 minute).
           cp -R portable/. "$stage_dir/"
-          # Drop dev-only large files we don't ship
-          rm -rf "$stage_dir/data/logs" 2>/dev/null || true
+          rm -rf "$stage_dir/app" "$stage_dir/data/logs" 2>/dev/null || true
 
-      - name: Zip portable
-        shell: pwsh
-        run: |
-          $tag = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { '${{ github.event.inputs.tag }}' }
-          $stage = "dist/u-claw-portable-windows-$tag"
-          $out = "dist/u-claw-portable-windows-$tag.zip"
-          Compress-Archive -Path "$stage/*" -DestinationPath $out -CompressionLevel Optimal
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: portable-windows
-          path: dist/u-claw-portable-windows-*.zip
-
-  portable-mac:
-    name: Portable macOS zip
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Run portable setup (mac)
-        run: |
-          cd portable
-          bash setup.sh
-
-      - name: Stage portable folder
-        run: |
-          mkdir -p dist
-          tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          stage_dir="dist/u-claw-portable-mac-${tag_name}"
-          mkdir -p "$stage_dir"
-          cp -R portable/. "$stage_dir/"
-          rm -rf "$stage_dir/data/logs" 2>/dev/null || true
-
-      - name: Zip portable
+      - name: Zip skeleton
         run: |
           tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
           cd dist
-          zip -qry "u-claw-portable-mac-${tag_name}.zip" "u-claw-portable-mac-${tag_name}"
+          zip -qry "u-claw-portable-${tag_name}.zip" "u-claw-portable-${tag_name}"
+          ls -lh "u-claw-portable-${tag_name}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: portable-mac
-          path: dist/u-claw-portable-mac-*.zip
+          name: portable-skeleton
+          path: dist/u-claw-portable-*.zip
 
   desktop-windows:
     name: Electron Windows installer
@@ -160,7 +107,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [portable-windows, portable-mac, desktop-windows, desktop-mac]
+    needs: [portable-skeleton, desktop-windows, desktop-mac]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -193,15 +140,20 @@ jobs:
           body: |
             ## U-Claw ${{ steps.tag.outputs.tag }}
 
-            - 内置虾盘云：首次启动自动绑定本机/U盘指纹，生成 `sk-...` apiKey
+            - 内置虾盘云：首次启动自动绑定本机/U盘指纹，生成 `sk-uc-...` apiKey
             - OpenClaw runtime: `${{ steps.openclaw_version.outputs.version }}`
             - 充值入口：https://u-claw.org/cloud.html
 
-            > Windows 安装包未做代码签名，首次运行需在 SmartScreen 选择"仍要运行"。
-            > macOS DMG 未做公证，首次启动需 `xattr -rd com.apple.quarantine /Applications/U-Claw.app` 或右键打开。
+            ### 下载
+
+            - **Windows 桌面版**：`U-Claw.Setup.*.exe`（安装到电脑）或 `U-Claw.*.exe`（免安装绿色版）
+            - **macOS 桌面版**：`U-Claw-*-arm64.dmg`（Apple Silicon）或 `U-Claw-*.dmg`（Intel）
+            - **便携骨架（U 盘版）**：`u-claw-portable-*.zip`（约 1 MB，首次启动自动下载 Node.js + OpenClaw，国内镜像约 1 分钟）
+
+            > Windows 安装包未做代码签名，首次运行 SmartScreen 选择「仍要运行」。
+            > macOS DMG 未做公证，首次启动 `xattr -rd com.apple.quarantine /Applications/U-Claw.app` 或右键打开。
           files: |
-            artifacts/portable-windows/*
-            artifacts/portable-mac/*
+            artifacts/portable-skeleton/*
             artifacts/desktop-windows/*
             artifacts/desktop-mac/*
           fail_on_unmatched_files: false
