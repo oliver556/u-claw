@@ -98,10 +98,12 @@ export OPENCLAW_CONFIG_PATH="$CONFIG_FILE"
 
 # ---- 7. Check dependencies ----
 if [ ! -d "$CORE_DIR/node_modules" ]; then
-    echo -e "  ${YELLOW}First run - installing dependencies...${NC}"
-    echo "  (Using China mirror)"
+    echo -e "  ${YELLOW}[WARN] node_modules not found${NC}"
+    echo "  This release should ship with deps pre-installed."
+    echo "  Falling back to npm install (USB drives may take 20+ min)."
+    echo "  TIP: re-download u-claw-portable-*.zip with bundled deps."
     cd "$CORE_DIR"
-    "$NODE_BIN" "$NODE_DIR/bin/npm" install --registry=https://registry.npmmirror.com 2>&1
+    "$NODE_BIN" "$NODE_DIR/bin/npm" install --registry=https://registry.npmmirror.com --ignore-scripts --no-audit --no-fund --omit=dev 2>&1
     echo -e "  ${GREEN}Dependencies installed${NC}"
     echo ""
 fi
@@ -110,6 +112,16 @@ fi
 echo -e "  ${CYAN}Binding device fingerprint to Xiapan Cloud...${NC}"
 UCLAW_APP_ROOT="$UCLAW_DIR" "$NODE_BIN" "$UCLAW_DIR/lib/bootstrap-xiapan.mjs" "$CONFIG_FILE" || true
 echo ""
+
+# ---- 7c. Async update check (non-blocking, 5s timeout, silent failure) ----
+# Writes data/.openclaw/update-available.json if a newer version is on OSS.
+# Welcome.html / Config.html read this file and show a banner.
+# Version file lookup: portable/OPENCLAW_VERSION (USB) → ../OPENCLAW_VERSION (dev)
+VERSION_FILE="$UCLAW_DIR/OPENCLAW_VERSION"
+[ -f "$VERSION_FILE" ] || VERSION_FILE="$UCLAW_DIR/../OPENCLAW_VERSION"
+if [ -f "$VERSION_FILE" ]; then
+    "$NODE_BIN" "$UCLAW_DIR/lib/check-update.mjs" "$VERSION_FILE" "$STATE_DIR" >/dev/null 2>&1 &
+fi
 
 # ---- 8. Find available port ----
 PORT=18789

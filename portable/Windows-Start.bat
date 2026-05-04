@@ -62,11 +62,19 @@ if not exist "%STATE_DIR%\openclaw.json" (
 
 REM Check dependencies
 if not exist "%CORE_DIR%\node_modules" (
-    echo   First run - installing dependencies...
-    echo   Using China mirror, please wait...
+    echo   ========================================
+    echo   [WARN] node_modules not found
+    echo   ========================================
+    echo   This release should ship with deps pre-installed.
+    echo   Falling back to npm install (USB drives may take 20+ minutes).
+    echo.
+    echo   TIP: Re-download u-claw-portable-*.zip from GitHub releases,
+    echo        which includes pre-installed deps (~200 MB).
+    echo.
+    echo   File system: NTFS recommended. exFAT/FAT32 will be very slow.
     echo.
     cd /d "%CORE_DIR%"
-    call "%NPM_BIN%" install --registry=https://registry.npmmirror.com
+    call "%NPM_BIN%" install --registry=https://registry.npmmirror.com --ignore-scripts --no-audit --no-fund --omit=dev
     echo.
     echo   Dependencies installed!
     echo.
@@ -77,6 +85,17 @@ echo   Binding device fingerprint to Xiapan Cloud...
 set "UCLAW_APP_ROOT=%UCLAW_DIR%"
 "%NODE_BIN%" "%UCLAW_DIR%lib\bootstrap-xiapan.mjs" "%STATE_DIR%\openclaw.json"
 echo.
+
+REM Async update check (non-blocking, 5s timeout, silent failure)
+REM Writes data\.openclaw\update-available.json if a newer version is on OSS.
+REM Welcome.html / Config.html read this file and show a banner.
+REM Version file lookup order: portable/OPENCLAW_VERSION (USB), then repo-root ../OPENCLAW_VERSION (dev)
+set "VERSION_FILE=%UCLAW_DIR%OPENCLAW_VERSION"
+if not exist "%VERSION_FILE%" set "VERSION_FILE=%UCLAW_DIR%..\OPENCLAW_VERSION"
+if exist "%VERSION_FILE%" (
+    start /B "" "%NODE_BIN%" "%UCLAW_DIR%lib\check-update.mjs" "%VERSION_FILE%" "%STATE_DIR%" >nul 2>&1
+)
+
 
 REM Auto-install WeChat plugin if available
 set "WECHAT_PLUGIN_SRC=%APP_DIR%\extensions\openclaw-weixin"
