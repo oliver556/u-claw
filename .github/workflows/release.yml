@@ -34,7 +34,8 @@ jobs:
       - name: Pre-install Node.js (Windows) and OpenClaw deps
         run: |
           tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          stage_dir="dist/u-claw-portable-windows-${tag_name}"
+          # Absolute paths so `cd "$core_dir"` later doesn't break `du`/`find`
+          stage_dir="$(pwd)/dist/u-claw-portable-windows-${tag_name}"
           openclaw_version=$(tr -d '[:space:]' < OPENCLAW_VERSION)
           node_version="v22.22.1"
           mirror_node="https://npmmirror.com/mirrors/node"
