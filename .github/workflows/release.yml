@@ -86,19 +86,12 @@ jobs:
             --no-fund \
             --omit=dev
 
-          # Pre-install OpenClaw's bundled runtime deps so first-run staging is a no-op
-          # (read deps from openclaw package.json and install them flat)
-          if [ -f "node_modules/openclaw/package.json" ]; then
-            deps=$(node -e "const p=require('./node_modules/openclaw/package.json');console.log(Object.entries(p.dependencies||{}).map(([k,v])=>k+'@'+v).join(' '))")
-            if [ -n "$deps" ]; then
-              echo "Pre-installing $(echo $deps | wc -w) OpenClaw bundled deps..."
-              npm install $deps \
-                --registry="$mirror_npm" \
-                --ignore-scripts \
-                --no-audit \
-                --no-fund
-            fi
-          fi
+          # Note: do NOT pre-install OpenClaw's bundled runtime deps.
+          # First v2.1.3 attempt did this and the zip ballooned to 540MB
+          # because clawdbot drags in @node-llama-cpp (701MB local LLM
+          # binaries). Stanley's v2026.5.2 package only installs `openclaw`
+          # main package (153MB total) and lets OpenClaw lazy-stage the
+          # subset of bundled deps it actually needs at runtime.
 
           # 5) Install QQ plugin
           npm install @sliverp/qqbot@latest \
@@ -117,14 +110,14 @@ jobs:
             done
           fi
 
-          # 7) Prune large optional deps that customer rarely needs.
-          #    Lesson from 5916ff5: previous full-bundle hit 3.4GB and
-          #    blew past GitHub's 2GB single-asset limit because of
-          #    node-llama-cpp / sharp prebuilds. Even with --ignore-scripts
-          #    these may pull bundled binaries, so explicitly remove them.
-          for big_dep in node-llama-cpp sharp @img canvas; do
-            find "$core_dir/node_modules" -type d -name "$big_dep" -prune -exec rm -rf {} + 2>/dev/null || true
+          # 7) Belt-and-suspenders: even though we don't pre-install bundled
+          # deps, openclaw's own dependencies might still pull large native
+          # binaries. Prune known offenders just in case.
+          echo "Before prune: $(du -sm "$core_dir/node_modules" | cut -f1) MB"
+          for big_pat in '@node-llama-cpp' 'node-llama-cpp'; do
+            find "$core_dir/node_modules" -maxdepth 3 -type d -name "$big_pat" -prune -exec rm -rf {} + 2>/dev/null || true
           done
+          echo "After prune:  $(du -sm "$core_dir/node_modules" | cut -f1) MB"
 
           du -sh "$stage_dir"
           echo "Portable bundle staged: $stage_dir"
