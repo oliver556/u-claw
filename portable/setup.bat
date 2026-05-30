@@ -111,6 +111,10 @@ set "OPENCLAW_VERSION=2026.4.29"
 if exist "%OPENCLAW_VERSION_FILE%" (
     for /f "usebackq delims=" %%v in ("%OPENCLAW_VERSION_FILE%") do set "OPENCLAW_VERSION=%%v"
 )
+REM Copy version file into portable/ so USB users can read it without repo root
+if exist "%OPENCLAW_VERSION_FILE%" (
+    copy /y "%OPENCLAW_VERSION_FILE%" "%~dp0OPENCLAW_VERSION" >nul 2>&1
+)
 if not exist "%CORE_DIR%\package.json" (
     echo { "name": "u-claw-core", "version": "1.0.0", "private": true, "dependencies": { "openclaw": "%OPENCLAW_VERSION%" } } > "%CORE_DIR%\package.json"
 )

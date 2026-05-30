@@ -114,6 +114,8 @@ else
     OPENCLAW_VERSION="2026.4.29"
     if [ -f "$OPENCLAW_VERSION_FILE" ]; then
         OPENCLAW_VERSION="$(tr -d '[:space:]' < "$OPENCLAW_VERSION_FILE")"
+        # Copy version file into portable/ so USB users can read it without repo root
+        cp "$OPENCLAW_VERSION_FILE" "$(dirname "$0")/OPENCLAW_VERSION" 2>/dev/null || true
     fi
     if [ ! -f "$CORE_DIR/package.json" ]; then
         cat > "$CORE_DIR/package.json" << PKGJSON

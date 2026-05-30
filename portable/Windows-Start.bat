@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul 2>&1
 title U-Claw - Portable AI Agent
 
@@ -64,6 +64,7 @@ if not exist "%STATE_DIR%\openclaw.json" (
 )
 
 REM Check dependencies
+REM Note: avoid unescaped parens inside this block — cmd.exe treats ) as block-end.
 if not exist "%CORE_DIR%\node_modules" (
     echo   ========================================
     echo   [WARN] node_modules not found
