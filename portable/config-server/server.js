@@ -419,6 +419,50 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // API: Update status — read update-available.json written by check-update.mjs
+  // Returns { available: false } if no info or stale; otherwise the manifest payload.
+  if (req.url === '/api/update-status' && req.method === 'GET') {
+    try {
+      const stateDir = process.env.OPENCLAW_STATE_DIR
+        || path.join(__dirname, '../data/.openclaw');
+      const updateFile = path.join(stateDir, 'update-available.json');
+      if (!fs.existsSync(updateFile)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ available: false, reason: 'no-check-yet' }));
+        return;
+      }
+      const payload = JSON.parse(fs.readFileSync(updateFile, 'utf8'));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(payload));
+    } catch (err) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ available: false, reason: 'read-failed', error: err.message }));
+    }
+    return;
+  }
+
+  // API: Trigger update check on demand (so users can press a "Check now" button)
+  if (req.url === '/api/update-check' && req.method === 'POST') {
+    (async () => {
+      try {
+        const mod = await import('../lib/check-update.mjs');
+        const portableRoot = path.join(__dirname, '..');
+        const versionFilePath = fs.existsSync(path.join(portableRoot, 'OPENCLAW_VERSION'))
+          ? path.join(portableRoot, 'OPENCLAW_VERSION')
+          : path.join(portableRoot, '..', 'OPENCLAW_VERSION');
+        const stateDir = process.env.OPENCLAW_STATE_DIR
+          || path.join(portableRoot, 'data/.openclaw');
+        const result = await mod.checkUpdate({ versionFilePath, stateDir });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    })();
+    return;
+  }
+
   // API: Re-run bootstrap to inject the uclaw-cloud provider
   if (req.url === '/api/xiapan/bind' && req.method === 'POST') {
     (async () => {
