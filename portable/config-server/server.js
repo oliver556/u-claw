@@ -524,6 +524,37 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // API: Report a bug — user fills title/description in the web UI; this endpoint
+  // attaches fingerprint/version/logs locally and forwards to api.u-claw.org.
+  if (req.url === '/api/report-bug' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 2 * 1024 * 1024) req.destroy(); // 2MB cap on user input
+    });
+    req.on('end', () => {
+      (async () => {
+        try {
+          const data = body ? JSON.parse(body) : {};
+          const mod = await import('../lib/report-bug.mjs');
+          const portableRoot = path.join(__dirname, '..');
+          const result = await mod.submitBugReport({
+            title: data.title,
+            description: data.description,
+            appRoot: portableRoot,
+            includeLogs: data.includeLogs !== false, // 默认带日志，用户可勾掉
+          });
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      })();
+    });
+    return;
+  }
+
   // Serve static files
   const filePath = req.url === '/'
     ? path.join(__dirname, 'public/index.html')

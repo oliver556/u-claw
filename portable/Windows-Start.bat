@@ -78,6 +78,8 @@ if not exist "%CORE_DIR%\node_modules" (
     echo   File system: NTFS recommended. exFAT/FAT32 will be very slow.
     echo.
     cd /d "%CORE_DIR%"
+    REM 把 npm 缓存留在盘内，避免污染系统 %APPDATA%\npm-cache（拔盘不留痕）
+    set "npm_config_cache=%APP_DIR%\.npm-cache"
     call "%NPM_BIN%" install --registry=https://registry.npmmirror.com --ignore-scripts --no-audit --no-fund --omit=dev
     echo.
     echo   Dependencies installed!
@@ -123,6 +125,8 @@ if %errorlevel%==0 (
     set /a PORT+=1
     if %PORT% gtr 18799 (
         echo   No available port 18789-18799
+        REM 自动上报：端口全被占，gateway 无法启动（detach、静默、失败不影响）
+        start /B "" "%NODE_BIN%" "%UCLAW_DIR%lib\report-bug.mjs" --auto --title "gateway-no-free-port" --desc "Ports 18789-18799 all in use" --root "%UCLAW_DIR%." >nul 2>&1
         pause
         exit /b 1
     )
@@ -157,7 +161,14 @@ echo.
 cd /d "%CORE_DIR%"
 set "OPENCLAW_MJS=%CORE_DIR%\node_modules\openclaw\openclaw.mjs"
 "%NODE_BIN%" "%OPENCLAW_MJS%" gateway run --allow-unconfigured --force --port %PORT%
+set "GW_EXIT=%errorlevel%"
 
 echo.
+REM 自动上报：gateway 异常退出（退出码非 0 且非 Ctrl+C/0xC000013A=-1073741510）
+REM 用户正常 Ctrl+C 停止不上报，避免噪音。detach、静默、失败不影响。
+if not "%GW_EXIT%"=="0" if not "%GW_EXIT%"=="-1073741510" (
+    echo   OpenClaw exited unexpectedly (code %GW_EXIT%), reporting...
+    start /B "" "%NODE_BIN%" "%UCLAW_DIR%lib\report-bug.mjs" --auto --title "gateway-exited-code-%GW_EXIT%" --desc "Gateway exited with code %GW_EXIT% on port %PORT%" --root "%UCLAW_DIR%." >nul 2>&1
+)
 echo   OpenClaw stopped.
 pause

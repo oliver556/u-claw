@@ -103,6 +103,8 @@ if [ ! -d "$CORE_DIR/node_modules" ]; then
     echo "  Falling back to npm install (USB drives may take 20+ min)."
     echo "  TIP: re-download u-claw-portable-*.zip with bundled deps."
     cd "$CORE_DIR"
+    # 把 npm 缓存留在盘内，避免污染系统 ~/.npm（拔盘不留痕）
+    npm_config_cache="$APP_DIR/.npm-cache" \
     "$NODE_BIN" "$NODE_DIR/bin/npm" install --registry=https://registry.npmmirror.com --ignore-scripts --no-audit --no-fund --omit=dev 2>&1
     echo -e "  ${GREEN}Dependencies installed${NC}"
     echo ""
@@ -130,6 +132,9 @@ while lsof -i :$PORT >/dev/null 2>&1; do
     PORT=$((PORT + 1))
     if [ $PORT -gt 18799 ]; then
         echo -e "  ${RED}No available port (18789-18799)${NC}"
+        # 自动上报：端口全占，gateway 无法启动（后台、静默、失败不影响）
+        UCLAW_APP_ROOT="$UCLAW_DIR" "$NODE_BIN" "$UCLAW_DIR/lib/report-bug.mjs" \
+            --auto --title "gateway-no-free-port" --desc "Ports 18789-18799 all in use" --root "$UCLAW_DIR" >/dev/null 2>&1 &
         read -p "  Press Enter to exit..."
         exit 1
     fi
@@ -183,3 +188,15 @@ cleanup() {
 trap cleanup INT TERM
 
 wait $GW_PID
+GW_EXIT=$?
+
+# 自动上报：gateway 异常退出。Ctrl+C 走 trap cleanup（exit 0）不会到这；
+# 走到这里说明 gateway 自己退了。退出码非 0 才上报，避免噪音。后台、静默、失败不影响。
+if [ "$GW_EXIT" -ne 0 ]; then
+    echo -e "  ${YELLOW}OpenClaw exited unexpectedly (code $GW_EXIT), reporting...${NC}"
+    UCLAW_APP_ROOT="$UCLAW_DIR" "$NODE_BIN" "$UCLAW_DIR/lib/report-bug.mjs" \
+        --auto --title "gateway-exited-code-$GW_EXIT" --desc "Gateway exited with code $GW_EXIT on port $PORT" --root "$UCLAW_DIR" >/dev/null 2>&1 &
+fi
+kill $CONFIG_PID 2>/dev/null
+echo ""
+echo -e "  🦞 U-Claw stopped."

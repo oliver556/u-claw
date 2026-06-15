@@ -410,6 +410,26 @@ input:focus { border-color: #ff6b35; }
             </div>
         </div>
     </div>
+
+    <div class="section active skills-section" style="display:block; margin-top: 8px;">
+        <h2>🐛 反馈 / 报 Bug</h2>
+        <p class="desc">遇到问题？一键反馈给我们，会自动附带版本号和最近日志（不含你的 API Key），方便我们排查。</p>
+        <div class="form-group">
+            <label>问题标题 <span style="color:#888;font-weight:normal">（必填，简短描述）</span></label>
+            <input type="text" id="bugTitle" placeholder="例如：点击打开 Dashboard 没反应" maxlength="200">
+        </div>
+        <div class="form-group">
+            <label>详细描述 <span style="color:#888;font-weight:normal">（可选）</span></label>
+            <textarea id="bugDesc" rows="4" placeholder="发生了什么？做了哪些操作？" style="width:100%;padding:12px;border-radius:8px;background:#1a1a1a;border:1px solid #333;color:#eee;font-family:inherit;font-size:0.95em;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+        <div class="form-group" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="bugLogs" checked style="width:auto;margin:0">
+            <label for="bugLogs" style="margin:0;font-weight:normal">附带最近运行日志（推荐，帮助定位问题）</label>
+        </div>
+        <div class="btn-row">
+            <button class="btn btn-primary" id="bugSubmitBtn" onclick="submitBug()">提交反馈</button>
+        </div>
+    </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -703,6 +723,32 @@ async function viewConfig() {
             text.replace(/</g, '&lt;') + '</pre>');
     } catch (e) {
         showToast('读取配置失败: ' + e.message, true);
+    }
+}
+
+// --- Bug report ---
+async function submitBug() {
+    var title = document.getElementById('bugTitle').value.trim();
+    if (title.length < 3) { showToast('请填写问题标题（至少 3 个字）', true); return; }
+    var desc = document.getElementById('bugDesc').value.trim();
+    var includeLogs = document.getElementById('bugLogs').checked;
+    var btn = document.getElementById('bugSubmitBtn');
+    btn.disabled = true; btn.textContent = '提交中…';
+    try {
+        var res = await fetch('/api/report-bug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title, description: desc, includeLogs: includeLogs })
+        });
+        var data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.reason || data.error || '提交失败');
+        showToast('反馈已提交，编号 #' + data.id + '，谢谢！');
+        document.getElementById('bugTitle').value = '';
+        document.getElementById('bugDesc').value = '';
+    } catch (e) {
+        showToast('提交失败：' + e.message, true);
+    } finally {
+        btn.disabled = false; btn.textContent = '提交反馈';
     }
 }
 

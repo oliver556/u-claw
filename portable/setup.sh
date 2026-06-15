@@ -130,10 +130,10 @@ else
 PKGJSON
     fi
 
-    # Install with China mirror
+    # Install with China mirror（缓存留盘内，拔盘不留痕）
     NODE_BIN="$NODE_TARGET/bin/node"
     NPM_BIN="$NODE_TARGET/bin/npm"
-    "$NODE_BIN" "$NPM_BIN" install --prefix "$CORE_DIR" --registry="$MIRROR"
+    npm_config_cache="$APP_DIR/.npm-cache" "$NODE_BIN" "$NPM_BIN" install --prefix "$CORE_DIR" --registry="$MIRROR"
 
     echo -e "  ${GREEN}✓${NC} OpenClaw 安装完成"
 fi
@@ -145,7 +145,7 @@ else
     echo -e "  ${CYAN}↓${NC} 安装 QQ 插件..."
     NODE_BIN="$NODE_TARGET/bin/node"
     NPM_BIN="$NODE_TARGET/bin/npm"
-    "$NODE_BIN" "$NPM_BIN" install @sliverp/qqbot@latest --prefix "$CORE_DIR" --registry="$MIRROR" 2>/dev/null || true
+    npm_config_cache="$APP_DIR/.npm-cache" "$NODE_BIN" "$NPM_BIN" install @sliverp/qqbot@latest --prefix "$CORE_DIR" --registry="$MIRROR" 2>/dev/null || true
     echo -e "  ${GREEN}✓${NC} QQ 插件安装完成"
 fi
 
