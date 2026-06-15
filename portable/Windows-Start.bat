@@ -144,18 +144,24 @@ start /B "" "%NODE_BIN%" "%CONFIG_SERVER%\server.js" >nul 2>&1
 REM Wait for config server to start
 timeout /t 2 /nobreak >nul
 
-REM Open both Dashboard and Config Center
-echo   Opening Dashboard and Config Center...
-timeout /t 1 /nobreak >nul
-
-REM Open OpenClaw Dashboard first
-start "" http://127.0.0.1:%PORT%/#token=uclaw
-
-REM Open Config Center (Node.js web UI) second
+REM IMPORTANT: 不要在 gateway 启动前就开 Dashboard 浏览器！
+REM 慢 U 盘上 OpenClaw 首次启动要 staging bundled deps（几十秒），
+REM 过早打开 http://127.0.0.1:18789 会"拒绝连接"，是 issue #46/#48 的根因。
+REM 改为后台等待器：轮询端口，gateway 真正 LISTENING 后再开 Dashboard。
+echo   Opening Config Center...
 start "" http://127.0.0.1:18788/
 
-echo   Browsers opened. Starting OpenClaw Gateway on port %PORT%...
+REM 后台等待器：每 2s 探测 %PORT%，最多 ~5 分钟（150 次），监听到就开 Dashboard
+start /B "" cmd /c ""%UCLAW_DIR%lib\wait-gateway.bat" %PORT%"
+
+echo.
+echo   ========================================
+echo   Starting OpenClaw Gateway on port %PORT%...
+echo   First run on a USB drive may take 30-90 seconds
+echo   (unpacking bundled components). Please wait;
+echo   the Dashboard opens automatically when ready.
 echo   DO NOT close this window while using U-Claw!
+echo   ========================================
 echo.
 
 cd /d "%CORE_DIR%"
