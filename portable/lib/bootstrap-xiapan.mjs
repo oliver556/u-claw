@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getFingerprint } from './fingerprint.mjs';
-import { buildApiKey } from './xiapan-client.mjs';
+import { buildApiKey, provisionApiKey } from './xiapan-client.mjs';
 
 const PROVIDER_ID = 'uclaw-cloud';
 
@@ -95,41 +95,42 @@ export async function bootstrapXiapan({ configPath, appRoot, log = console } = {
     return { ok: false, reason: 'fingerprint-failed' };
   }
 
-  const apiKey = buildApiKey(fingerprintInfo.fingerprint);
-
   const config = readJsonSafe(configPath) || { gateway: { mode: 'local', auth: { token: 'uclaw' } } };
   const providers = ensureModelsContainer(config);
   const existing = providers[PROVIDER_ID];
 
-  if (existing && typeof existing === 'object') {
-    if (existing.apiKey && existing.apiKey !== apiKey) {
-      log.info?.(
-        `[bootstrap-xiapan] uclaw-cloud apiKey already configured (different fingerprint). `
-        + `Current source=${fingerprintInfo.source}. Use Config UI to rebind if needed.`,
-      );
-      // Still ensure agents.defaults exists so the runtime knows to use uclaw-cloud
-      const changedDefaults = ensureAgentsDefaults(config);
-      if (changedDefaults) writeJson(configPath, config);
-      return {
-        ok: true,
-        action: 'kept',
-        source: fingerprintInfo.source,
-        apiKey: existing.apiKey,
-      };
+  // 幂等：配置里已有 uclaw-cloud apiKey → 保持不动，不再打网络 provision。
+  // （后端 provision 本身也按 deviceId 幂等，但客户端先短路可避免每次启动都请求。）
+  if (existing && typeof existing === 'object' && existing.apiKey) {
+    const changedDefaults = ensureAgentsDefaults(config);
+    if (changedDefaults) {
+      writeJson(configPath, config);
+      log.info?.('[bootstrap-xiapan] Added agents.defaults to existing config');
     }
-    if (existing.apiKey === apiKey) {
-      const changedDefaults = ensureAgentsDefaults(config);
-      if (changedDefaults) {
-        writeJson(configPath, config);
-        log.info?.('[bootstrap-xiapan] Added agents.defaults to existing config');
-      }
-      return {
-        ok: true,
-        action: changedDefaults ? 'agents-defaults-added' : 'noop',
-        source: fingerprintInfo.source,
-        apiKey,
-      };
+    return {
+      ok: true,
+      action: changedDefaults ? 'agents-defaults-added' : 'noop',
+      source: fingerprintInfo.source,
+      apiKey: existing.apiKey,
+    };
+  }
+
+  // 首启（配置里还没有 cloud key）：静默开户。把指纹送到虾盘云后台自动开一个带
+  // 试用额度的 token。成功 → 用后端真正注册过的 key（可直接聊天，解决 Invalid token）。
+  // 失败（离线/后端不可达）→ 回退到指纹派生 key，至少配置不空、不阻塞启动。
+  let apiKey = buildApiKey(fingerprintInfo.fingerprint);
+  let provisioned = false;
+  try {
+    const prov = await provisionApiKey(fingerprintInfo.fingerprint, { source: 'uclaw-portable' });
+    if (prov.ok && prov.apiKey) {
+      apiKey = prov.apiKey;
+      provisioned = true;
+      log.info?.(`[bootstrap-xiapan] Provisioned cloud token (reused=${prov.reused})`);
+    } else {
+      log.info?.(`[bootstrap-xiapan] Provision skipped (${prov.reason}); using fingerprint key`);
     }
+  } catch (err) {
+    log.info?.(`[bootstrap-xiapan] Provision failed (${err.message}); using fingerprint key`);
   }
 
   providers[PROVIDER_ID] = {
@@ -144,11 +145,13 @@ export async function bootstrapXiapan({ configPath, appRoot, log = console } = {
 
   writeJson(configPath, config);
   log.info?.(
-    `[bootstrap-xiapan] Wrote uclaw-cloud provider (source=${fingerprintInfo.source}, key=${apiKey.slice(0, 12)}…)`,
+    `[bootstrap-xiapan] Wrote uclaw-cloud provider (source=${fingerprintInfo.source}, `
+    + `provisioned=${provisioned}, key=${apiKey.slice(0, 12)}…)`,
   );
   return {
     ok: true,
-    action: existing ? 'updated' : 'created',
+    action: 'created',
+    provisioned,
     source: fingerprintInfo.source,
     apiKey,
   };

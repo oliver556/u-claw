@@ -89,3 +89,30 @@ export function getRechargeUrl(apiKey) {
   // Page already has #recharge anchor; preserve it
   return `${url.toString()}#recharge`;
 }
+
+// 首启静默开户：把设备指纹送到虾盘云后台，自动创建一个 token 并附带试用额度。
+// 后端按 deviceId 幂等（同一台机器永远拿同一个 token，刷不出额度），不重启容器。
+// 返回 { ok, apiKey, reused } —— apiKey 是后端真正注册过的 key（可直接聊天）。
+// 失败时返回 { ok:false, reason }，调用方应回退到指纹派生 key（至少配置不空）。
+export async function provisionApiKey(fingerprint, { source = 'uclaw-portable' } = {}) {
+  if (!fingerprint || !/^[0-9a-f]{64}$/i.test(fingerprint)) {
+    return { ok: false, reason: 'bad-fingerprint' };
+  }
+  const base = getApiBase();              // https://api.u-claw.org/v1
+  const root = base.replace(/\/v1$/, ''); // https://api.u-claw.org
+  const url = `${root}/internal/token/provision`;
+  try {
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: fingerprint.toLowerCase(), source }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success || !data.data || !data.data.apiKey) {
+      return { ok: false, reason: data.message || `http-${res.status}` };
+    }
+    return { ok: true, apiKey: data.data.apiKey, reused: !!data.reused };
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+}
