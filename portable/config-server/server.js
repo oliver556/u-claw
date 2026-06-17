@@ -443,6 +443,40 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // API: Discover local models (Ollama / LM Studio)
+  // 借鉴 RealShocky/openclaw-windows：自动探测本机已装的本地模型，
+  // 用户无需手填 baseUrl/模型名，直接点选即可（便携版纯离线推理卖点）。
+  // 静默失败：探测不到就返回空数组，不影响 Config 页面。
+  if (req.url === '/api/local-models' && req.method === 'GET') {
+    (async () => {
+      const probes = [
+        { provider: 'ollama',   label: 'Ollama',    base: 'http://127.0.0.1:11434/v1', api: 'http://127.0.0.1:11434/api/tags' },
+        { provider: 'lmstudio', label: 'LM Studio', base: 'http://127.0.0.1:1234/v1',  api: 'http://127.0.0.1:1234/v1/models' },
+      ];
+      const found = [];
+      await Promise.all(probes.map(async (p) => {
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 1200);
+          const r = await fetch(p.api, { signal: ctrl.signal });
+          clearTimeout(t);
+          if (!r.ok) return;
+          const data = await r.json();
+          // Ollama: { models:[{name}] } | LM Studio (OpenAI-style): { data:[{id}] }
+          const models = Array.isArray(data.models)
+            ? data.models.map(m => m.name).filter(Boolean)
+            : Array.isArray(data.data)
+              ? data.data.map(m => m.id).filter(Boolean)
+              : [];
+          if (models.length) found.push({ provider: p.provider, label: p.label, base: p.base, models });
+        } catch { /* 探测失败：该 provider 未运行，跳过 */ }
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ providers: found }));
+    })();
+    return;
+  }
+
   // API: Save config
   if (req.url === '/api/config' && req.method === 'POST') {
     let body = '';

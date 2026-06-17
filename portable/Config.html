@@ -237,6 +237,13 @@ input:focus { border-color: #ff6b35; }
             </div>
         </div>
 
+        <!-- 本地模型自动发现（Ollama / LM Studio）-->
+        <div id="localModelsBox" style="display:none; margin-top:6px;">
+            <h3 style="color:#4caf50; font-size:0.95em; margin:12px 0 4px;">💻 检测到本机本地模型 <span class="tag free">离线·免费</span></h3>
+            <p class="desc" style="margin-bottom:10px;">无需 API Key，纯本地推理。点选即用：</p>
+            <div class="model-grid" id="localModelGrid"></div>
+        </div>
+
         <div class="btn-row">
             <button class="btn btn-primary" id="nextStep1" disabled>下一步 →</button>
         </div>
@@ -329,6 +336,21 @@ input:focus { border-color: #ff6b35; }
                                 <label>App Secret</label>
                                 <input type="text" id="ch-feishu-secret" placeholder="应用密钥">
                                 <p class="hint"><a href="https://open.feishu.cn/app" target="_blank">→ 从飞书开放平台获取</a></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="model-card channel-card" onclick="toggleChannel(this, 'dingtalk')">
+                        <h4>📲 钉钉 <span class="tag cn">国内·最易</span></h4>
+                        <p>WebSocket 接入，免公网 IP</p>
+                        <div class="channel-form" id="form-dingtalk" onclick="event.stopPropagation()">
+                            <div class="form-group">
+                                <label>Client ID (AppKey)</label>
+                                <input type="text" id="ch-dingtalk-clientid" placeholder="dingxxx...">
+                            </div>
+                            <div class="form-group">
+                                <label>Client Secret (AppSecret)</label>
+                                <input type="text" id="ch-dingtalk-secret" placeholder="应用密钥">
+                                <p class="hint"><a href="https://open-dev.dingtalk.com" target="_blank">→ 从钉钉开放平台创建机器人应用</a></p>
                             </div>
                         </div>
                     </div>
@@ -438,10 +460,15 @@ function setupStep2() {
         'uclaw-cloud': '虾盘云', minimax: 'MiniMax', kimi: 'Kimi (月之暗面)', deepseek: 'DeepSeek',
         zai: '智谱 GLM', qwen: '通义千问', doubao: '豆包',
         openai: 'OpenAI', anthropic: 'Anthropic Claude', groq: 'Groq',
-        siliconflow: '硅基流动', custom: '自定义'
+        siliconflow: '硅基流动', custom: '自定义',
+        ollama: 'Ollama（本地）', lmstudio: 'LM Studio（本地）'
     };
     const name = providerNames[selectedProvider] || selectedProvider;
-    document.getElementById('step2desc').textContent = `请填写 ${name} 的 API Key`;
+    document.getElementById('step2desc').textContent = selectedLocal
+        ? `${name} 是本地模型，无需 API Key，直接点「保存并启动」即可`
+        : `请填写 ${name} 的 API Key`;
+    // 本地模型隐藏 Key 获取信息框
+    document.getElementById('buyInfo').style.display = selectedLocal ? 'none' : 'block';
 
     // Buy links
     const card = document.querySelector(`#step1 .model-card[data-provider="${selectedProvider}"]`);
@@ -514,8 +541,13 @@ function buildOpenClawConfig(provider, base, model, apiKey) {
 
 // --- Save config ---
 async function saveConfig() {
-    const apiKey = document.getElementById('apiKey').value.trim();
-    if (!apiKey) { showToast('请填写 API Key', true); return; }
+    let apiKey = document.getElementById('apiKey').value.trim();
+    // 本地模型（Ollama/LM Studio）不需要真实 Key，OpenClaw 配置结构里仍要有 apiKey 字段
+    if (selectedLocal) {
+        if (!apiKey) apiKey = 'local';
+    } else if (!apiKey) {
+        showToast('请填写 API Key', true); return;
+    }
 
     let base = selectedBase;
     let model = selectedModel;
@@ -582,6 +614,52 @@ async function loadConfig() {
 }
 loadConfig();
 
+// --- 本地模型自动发现（Ollama / LM Studio）---
+// 探测 /api/local-models，发现本机已运行的本地模型就动态生成卡片，点选即用、无需 Key。
+async function discoverLocalModels() {
+    try {
+        const res = await fetch('/api/local-models');
+        if (!res.ok) return;
+        const { providers } = await res.json();
+        if (!providers || !providers.length) return;
+
+        const grid = document.getElementById('localModelGrid');
+        grid.innerHTML = '';
+        providers.forEach(p => {
+            // 每个本地 provider 最多展示前 6 个模型，避免列表过长
+            p.models.slice(0, 6).forEach(modelId => {
+                const card = document.createElement('div');
+                card.className = 'model-card';
+                card.dataset.provider = p.provider;     // ollama / lmstudio
+                card.dataset.base = p.base;
+                card.dataset.model = modelId;
+                card.dataset.local = '1';               // 标记：本地模型免 Key
+                card.innerHTML = `
+                    <span class="check">✓</span>
+                    <h4>${p.label} <span class="tag free">本地</span></h4>
+                    <p>${modelId}</p>`;
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.model-card').forEach(c => c.classList.remove('selected'));
+                    card.classList.add('selected');
+                    selectedProvider = p.provider;
+                    selectedBase = p.base;
+                    selectedModel = modelId;
+                    selectedLocal = true;
+                    document.getElementById('nextStep1').disabled = false;
+                });
+                grid.appendChild(card);
+            });
+        });
+        document.getElementById('localModelsBox').style.display = 'block';
+    } catch { /* 无本地模型或探测失败：静默 */ }
+}
+let selectedLocal = false;
+// 选云端卡片时重置本地标记
+document.querySelectorAll('#step1 > .model-grid .model-card').forEach(c => {
+    c.addEventListener('click', () => { selectedLocal = false; });
+});
+discoverLocalModels();
+
 // Allow direct step preview via URL param, e.g. ?step=3
 const stepParam = new URLSearchParams(window.location.search).get('step');
 if (stepParam) goStep(parseInt(stepParam));
@@ -640,6 +718,10 @@ async function launchOpenClaw() {
     const wcBotId = document.getElementById('ch-wecom-botid')?.value.trim();
     const wcSecret = document.getElementById('ch-wecom-secret')?.value.trim();
     if (wcBotId && wcSecret) channels.wecom = { enabled: true, botId: wcBotId, secret: wcSecret };
+
+    const ddId = document.getElementById('ch-dingtalk-clientid')?.value.trim();
+    const ddSecret = document.getElementById('ch-dingtalk-secret')?.value.trim();
+    if (ddId && ddSecret) channels.dingtalk = { enabled: true, clientId: ddId, clientSecret: ddSecret };
 
     // 2. Save channel config if any (merge into existing config)
     if (Object.keys(channels).length > 0) {
