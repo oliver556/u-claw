@@ -182,6 +182,15 @@ jobs:
           cd u-claw-app
           npm install --registry=https://registry.npmmirror.com
 
+      - name: Sync version from tag
+        shell: bash
+        run: |
+          tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          ver="${tag_name#v}"   # strip leading v -> 2.1.5
+          cd u-claw-app
+          npm version "$ver" --no-git-tag-version --allow-same-version
+          echo "桌面版版本号已同步为 $ver"
+
       - name: Build Windows installer
         shell: cmd
         run: |
@@ -212,6 +221,14 @@ jobs:
         run: |
           cd u-claw-app
           npm install --registry=https://registry.npmmirror.com
+
+      - name: Sync version from tag
+        run: |
+          tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          ver="${tag_name#v}"   # strip leading v -> 2.1.5
+          cd u-claw-app
+          npm version "$ver" --no-git-tag-version --allow-same-version
+          echo "桌面版版本号已同步为 $ver"
 
       - name: Build macOS DMG
         run: |
