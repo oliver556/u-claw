@@ -151,26 +151,6 @@ input:focus { border-color: #ff6b35; }
     <h1><span class="lobster">🦞</span> U-Claw Pro</h1>
     <p class="subtitle">便携版 — 选择模型，填入 API Key，一键启动</p>
 
-    <!-- Xiapan Cloud bound banner: shown when bootstrap has injected uclaw-cloud -->
-    <div class="xp-banner" id="xpBanner" style="display:none; background:linear-gradient(135deg,#2a1f1f,#1f2a1f); border:1px solid #ff6b35; border-radius:10px; padding:16px 18px; margin-bottom:18px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-            <div style="flex:1; min-width:240px;">
-                <div style="font-size:0.95em; color:#ff6b35; font-weight:600;">🔗 已绑定虾盘云 · 开箱即用</div>
-                <div style="font-size:0.82em; color:#bbb; margin-top:4px;">
-                    指纹来源: <span id="xpSource">—</span>
-                    · Key: <code id="xpKeyShort" style="background:#222; padding:2px 6px; border-radius:4px;">—</code>
-                    · 余额: <span id="xpBalance">—</span>
-                </div>
-                <div id="xpHint" style="font-size:0.75em; color:#888; margin-top:4px;">余额为 0 时无法调用 AI，请先充值</div>
-            </div>
-            <div style="display:flex; gap:8px;">
-                <button class="btn" id="xpRecharge" style="background:#ff6b35; color:#fff; padding:8px 16px; font-size:0.85em;">前往充值 →</button>
-                <button class="btn" id="xpRefresh" style="background:#333; color:#ccc; padding:8px 12px; font-size:0.85em;">刷新</button>
-                <button class="btn" id="xpRebind" style="background:#222; color:#888; padding:8px 12px; font-size:0.8em;" title="清除绑定后重启 U-Claw 即可重新生成 Key">解绑</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Steps -->
     <div class="steps">
         <div class="step active" data-step="1"><span class="num">1</span>选模型</div>
@@ -181,26 +161,32 @@ input:focus { border-color: #ff6b35; }
     <!-- Step 1: Select Model -->
     <div class="section active" id="step1">
         <h2>选择 AI 模型</h2>
-        <p class="desc">选择你要使用的模型，推荐国内用户用 MiniMax / Kimi / DeepSeek</p>
+        <p class="desc">最省心：用「虾盘云」一个 Key 调用国内外全部大模型（中转站）。也可用下面各家自己的官方 Key。</p>
 
         <div class="model-grid">
-            <div class="model-card" data-provider="minimax" data-base="https://api.minimax.chat/v1" data-model="MiniMax-Text-01">
+            <div class="model-card" data-provider="uclaw-cloud" data-base="https://api.u-claw.org/v1" data-model="deepseek-v4-flash">
                 <span class="check">✓</span>
-                <h4>MiniMax <span class="tag hot">推荐</span><span class="tag cn">国内</span></h4>
-                <p>MiniMax-Text-01，速度快，性价比高</p>
-                <a class="buy-link" href="https://platform.minimaxi.com/" target="_blank">→ 获取 API Key</a>
-            </div>
-            <div class="model-card" data-provider="kimi" data-base="https://api.moonshot.cn/v1" data-model="moonshot-v1-auto">
-                <span class="check">✓</span>
-                <h4>Kimi (月之暗面) <span class="tag cn">国内</span><span class="tag fast">快</span></h4>
-                <p>moonshot-v1-auto，智能选模型</p>
-                <a class="buy-link" href="https://platform.moonshot.cn/" target="_blank">→ 获取 API Key</a>
+                <h4>虾盘云 <span class="tag hot">首选</span><span class="tag">中转站</span></h4>
+                <p>一个 Key 用 DeepSeek / Claude / GPT / 通义 等国内外全部大模型，无需翻墙</p>
+                <a class="buy-link" href="https://u-claw.org/cloud.html" target="_blank">→ 注册并获取 API Key</a>
             </div>
             <div class="model-card" data-provider="deepseek" data-base="https://api.deepseek.com/v1" data-model="deepseek-chat">
                 <span class="check">✓</span>
                 <h4>DeepSeek <span class="tag cn">国内</span><span class="tag cheap">便宜</span></h4>
-                <p>deepseek-chat，超低价格</p>
+                <p>deepseek-chat / deepseek-v4，超低价格</p>
                 <a class="buy-link" href="https://platform.deepseek.com/" target="_blank">→ 获取 API Key</a>
+            </div>
+            <div class="model-card" data-provider="minimax" data-base="https://api.minimax.chat/v1" data-model="MiniMax-M2">
+                <span class="check">✓</span>
+                <h4>MiniMax <span class="tag cn">国内</span></h4>
+                <p>MiniMax-M2，速度快，性价比高</p>
+                <a class="buy-link" href="https://platform.minimaxi.com/" target="_blank">→ 获取 API Key</a>
+            </div>
+            <div class="model-card" data-provider="kimi" data-base="https://api.moonshot.cn/v1" data-model="kimi-k2-turbo-preview">
+                <span class="check">✓</span>
+                <h4>Kimi (月之暗面) <span class="tag cn">国内</span><span class="tag fast">快</span></h4>
+                <p>kimi-k2，长上下文强</p>
+                <a class="buy-link" href="https://platform.moonshot.cn/" target="_blank">→ 获取 API Key</a>
             </div>
             <div class="model-card" data-provider="zai" data-base="" data-model="glm-5">
                 <span class="check">✓</span>
@@ -208,28 +194,28 @@ input:focus { border-color: #ff6b35; }
                 <p>glm-5（zai provider），免费额度可用</p>
                 <a class="buy-link" href="https://open.bigmodel.cn/" target="_blank">→ 获取 API Key</a>
             </div>
-            <div class="model-card" data-provider="qwen" data-base="https://dashscope.aliyuncs.com/compatible-mode/v1" data-model="qwen-turbo">
+            <div class="model-card" data-provider="qwen" data-base="https://dashscope.aliyuncs.com/compatible-mode/v1" data-model="qwen-plus">
                 <span class="check">✓</span>
                 <h4>通义千问 <span class="tag cn">国内</span><span class="tag free">有免费</span></h4>
-                <p>qwen-turbo，阿里云出品</p>
+                <p>qwen-plus / qwen3-max，阿里云出品</p>
                 <a class="buy-link" href="https://dashscope.console.aliyun.com/" target="_blank">→ 获取 API Key</a>
             </div>
-            <div class="model-card" data-provider="doubao" data-base="https://ark.cn-beijing.volces.com/api/v3" data-model="doubao-1.5-pro-32k">
+            <div class="model-card" data-provider="doubao" data-base="https://ark.cn-beijing.volces.com/api/v3" data-model="doubao-seed-1-6-250615">
                 <span class="check">✓</span>
                 <h4>豆包 (字节) <span class="tag cn">国内</span><span class="tag fast">快</span></h4>
-                <p>doubao-1.5-pro，字节跳动</p>
+                <p>doubao-seed-1.6，字节跳动</p>
                 <a class="buy-link" href="https://console.volcengine.com/ark" target="_blank">→ 获取 API Key</a>
             </div>
-            <div class="model-card" data-provider="openai" data-base="https://api.openai.com/v1" data-model="gpt-4o">
+            <div class="model-card" data-provider="openai" data-base="https://api.openai.com/v1" data-model="gpt-5.4">
                 <span class="check">✓</span>
                 <h4>OpenAI <span class="tag hot">强</span></h4>
-                <p>GPT-4o，需翻墙或中转</p>
+                <p>GPT-5.4，需翻墙或中转</p>
                 <a class="buy-link" href="https://platform.openai.com/" target="_blank">→ 获取 API Key</a>
             </div>
-            <div class="model-card" data-provider="anthropic" data-base="https://api.anthropic.com/v1" data-model="claude-sonnet-4-20250514">
+            <div class="model-card" data-provider="anthropic" data-base="https://api.anthropic.com/v1" data-model="claude-opus-4-6">
                 <span class="check">✓</span>
                 <h4>Claude <span class="tag hot">强</span></h4>
-                <p>Claude Sonnet 4，需翻墙或中转</p>
+                <p>Claude Opus 4.6 / Sonnet 4.6，需翻墙或中转</p>
                 <a class="buy-link" href="https://console.anthropic.com/" target="_blank">→ 获取 API Key</a>
             </div>
             <div class="model-card" data-provider="groq" data-base="https://api.groq.com/openai/v1" data-model="llama-3.3-70b-versatile">
@@ -408,50 +394,6 @@ input:focus { border-color: #ff6b35; }
 <div class="toast" id="toast"></div>
 
 <script>
-// --- Xiapan Cloud banner ---
-async function loadXiapanStatus() {
-    const banner = document.getElementById('xpBanner');
-    try {
-        const res = await fetch('/api/xiapan/status');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data || !data.apiKey) return;
-
-        document.getElementById('xpSource').textContent = ({
-            usb: 'U 盘', disk: '硬盘', mac: 'Mac', linux: 'Linux', seed: '本机种子', test: '测试',
-        })[data.source] || data.source;
-        document.getElementById('xpKeyShort').textContent = data.apiKey.slice(0, 14) + '…';
-        const bal = data.balance || {};
-        if (bal.ok) {
-            const usd = bal.remainingUsd != null ? bal.remainingUsd.toFixed(2) : '0.00';
-            const tokens = (bal.remainingTokens || 0).toLocaleString();
-            document.getElementById('xpBalance').textContent = `$${usd} (${tokens} tokens)`;
-            document.getElementById('xpHint').textContent = bal.remainingUsd > 0
-                ? '可直接使用 deepseek-chat / qwen-plus / qwen-turbo'
-                : '余额为 0，点击右侧前往充值';
-        } else if (bal.reason && bal.reason.includes('401')) {
-            document.getElementById('xpBalance').textContent = '未注册';
-            document.getElementById('xpHint').textContent = '首次使用：点「前往充值」即可在虾盘云页面注册并充值，秒到账';
-        } else {
-            document.getElementById('xpBalance').textContent = '查询失败';
-            document.getElementById('xpHint').textContent = '请检查网络或 api.u-claw.org 服务状态';
-        }
-
-        document.getElementById('xpRecharge').onclick = () => window.open(data.rechargeUrl, '_blank');
-        document.getElementById('xpRefresh').onclick = () => loadXiapanStatus();
-        document.getElementById('xpRebind').onclick = async () => {
-            if (!confirm('解绑后下次启动 U-Claw 会重新生成 Key（基于当前设备指纹）。\n现有 Key 的余额仍归属当前指纹，更换 U 盘 / 电脑后才需要解绑。\n\n确认解绑？')) return;
-            await fetch('/api/xiapan/unbind', { method: 'POST' });
-            showToast('已解绑，请重启 U-Claw');
-        };
-
-        banner.style.display = 'block';
-    } catch (err) {
-        // network error or endpoint missing — leave banner hidden
-    }
-}
-loadXiapanStatus();
-
 // --- State ---
 let selectedProvider = null;
 let selectedBase = '';
@@ -470,7 +412,9 @@ document.querySelectorAll('#step1 .model-card').forEach(card => {
     });
 });
 
-document.getElementById('nextStep1').addEventListener('click', () => goStep(2));
+document.getElementById('nextStep1').addEventListener('click', () => {
+    goStep(2);
+});
 
 // --- Steps ---
 function goStep(n) {
@@ -491,7 +435,7 @@ function setupStep2() {
     document.getElementById('customFields').style.display = isCustom ? 'block' : 'none';
 
     const providerNames = {
-        minimax: 'MiniMax', kimi: 'Kimi (月之暗面)', deepseek: 'DeepSeek',
+        'uclaw-cloud': '虾盘云', minimax: 'MiniMax', kimi: 'Kimi (月之暗面)', deepseek: 'DeepSeek',
         zai: '智谱 GLM', qwen: '通义千问', doubao: '豆包',
         openai: 'OpenAI', anthropic: 'Anthropic Claude', groq: 'Groq',
         siliconflow: '硅基流动', custom: '自定义'

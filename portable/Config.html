@@ -151,26 +151,6 @@ input:focus { border-color: #ff6b35; }
     <h1><span class="lobster">🦞</span> U-Claw Pro</h1>
     <p class="subtitle">便携版 — 选择模型，填入 API Key，一键启动</p>
 
-    <!-- Xiapan Cloud bound banner: shown when bootstrap has injected uclaw-cloud -->
-    <div class="xp-banner" id="xpBanner" style="display:none; background:linear-gradient(135deg,#2a1f1f,#1f2a1f); border:1px solid #ff6b35; border-radius:10px; padding:16px 18px; margin-bottom:18px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-            <div style="flex:1; min-width:240px;">
-                <div style="font-size:0.95em; color:#ff6b35; font-weight:600;">🔗 已绑定虾盘云 · 开箱即用</div>
-                <div style="font-size:0.82em; color:#bbb; margin-top:4px;">
-                    指纹来源: <span id="xpSource">—</span>
-                    · Key: <code id="xpKeyShort" style="background:#222; padding:2px 6px; border-radius:4px;">—</code>
-                    · 余额: <span id="xpBalance">—</span>
-                </div>
-                <div id="xpHint" style="font-size:0.75em; color:#888; margin-top:4px;">余额为 0 时无法调用 AI，请先充值</div>
-            </div>
-            <div style="display:flex; gap:8px;">
-                <button class="btn" id="xpRecharge" style="background:#ff6b35; color:#fff; padding:8px 16px; font-size:0.85em;">前往充值 →</button>
-                <button class="btn" id="xpRefresh" style="background:#333; color:#ccc; padding:8px 12px; font-size:0.85em;">刷新</button>
-                <button class="btn" id="xpRebind" style="background:#222; color:#888; padding:8px 12px; font-size:0.8em;" title="清除绑定后重启 U-Claw 即可重新生成 Key">解绑</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Steps -->
     <div class="steps">
         <div class="step active" data-step="1"><span class="num">1</span>选模型</div>
@@ -181,13 +161,14 @@ input:focus { border-color: #ff6b35; }
     <!-- Step 1: Select Model -->
     <div class="section active" id="step1">
         <h2>选择 AI 模型</h2>
-        <p class="desc">最省心：直接用「虾盘云」一个 Key 用全部模型，插上即用、已含试用额度。也可用下面各家自己的 Key。</p>
+        <p class="desc">最省心：用「虾盘云」一个 Key 调用国内外全部大模型（中转站）。也可用下面各家自己的官方 Key。</p>
 
         <div class="model-grid">
-            <div class="model-card" data-provider="uclaw-cloud" data-base="https://api.u-claw.org/v1" data-model="deepseek-v4-flash" data-zerokey="1">
+            <div class="model-card" data-provider="uclaw-cloud" data-base="https://api.u-claw.org/v1" data-model="deepseek-v4-flash">
                 <span class="check">✓</span>
-                <h4>虾盘云 <span class="tag hot">首选</span><span class="tag free">含试用额度</span></h4>
-                <p>插上即用，无需申请 Key。一个账号用 DeepSeek / Claude / GPT / 通义等全部模型</p>
+                <h4>虾盘云 <span class="tag hot">首选</span><span class="tag">中转站</span></h4>
+                <p>一个 Key 用 DeepSeek / Claude / GPT / 通义 等国内外全部大模型，无需翻墙</p>
+                <a class="buy-link" href="https://u-claw.org/cloud.html" target="_blank">→ 注册并获取 API Key</a>
             </div>
             <div class="model-card" data-provider="deepseek" data-base="https://api.deepseek.com/v1" data-model="deepseek-chat">
                 <span class="check">✓</span>
@@ -413,55 +394,10 @@ input:focus { border-color: #ff6b35; }
 <div class="toast" id="toast"></div>
 
 <script>
-// --- Xiapan Cloud banner ---
-async function loadXiapanStatus() {
-    const banner = document.getElementById('xpBanner');
-    try {
-        const res = await fetch('/api/xiapan/status');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data || !data.apiKey) return;
-
-        document.getElementById('xpSource').textContent = ({
-            usb: 'U 盘', disk: '硬盘', mac: 'Mac', linux: 'Linux', seed: '本机种子', test: '测试',
-        })[data.source] || data.source;
-        document.getElementById('xpKeyShort').textContent = data.apiKey.slice(0, 14) + '…';
-        const bal = data.balance || {};
-        if (bal.ok) {
-            const usd = bal.remainingUsd != null ? bal.remainingUsd.toFixed(2) : '0.00';
-            const tokens = (bal.remainingTokens || 0).toLocaleString();
-            document.getElementById('xpBalance').textContent = `$${usd} (${tokens} tokens)`;
-            document.getElementById('xpHint').textContent = bal.remainingUsd > 0
-                ? '已含试用额度，可直接用 deepseek-v4 / claude / gpt / 通义 等全部模型'
-                : '试用额度已用完，点击右侧充值即可继续，秒到账';
-        } else if (bal.reason && bal.reason.includes('401')) {
-            document.getElementById('xpBalance').textContent = '未注册';
-            document.getElementById('xpHint').textContent = '首次使用：点「前往充值」即可在虾盘云页面注册并充值，秒到账';
-        } else {
-            document.getElementById('xpBalance').textContent = '查询失败';
-            document.getElementById('xpHint').textContent = '请检查网络或 api.u-claw.org 服务状态';
-        }
-
-        document.getElementById('xpRecharge').onclick = () => window.open(data.rechargeUrl, '_blank');
-        document.getElementById('xpRefresh').onclick = () => loadXiapanStatus();
-        document.getElementById('xpRebind').onclick = async () => {
-            if (!confirm('解绑后下次启动 U-Claw 会重新生成 Key（基于当前设备指纹）。\n现有 Key 的余额仍归属当前指纹，更换 U 盘 / 电脑后才需要解绑。\n\n确认解绑？')) return;
-            await fetch('/api/xiapan/unbind', { method: 'POST' });
-            showToast('已解绑，请重启 U-Claw');
-        };
-
-        banner.style.display = 'block';
-    } catch (err) {
-        // network error or endpoint missing — leave banner hidden
-    }
-}
-loadXiapanStatus();
-
 // --- State ---
 let selectedProvider = null;
 let selectedBase = '';
 let selectedModel = '';
-let selectedZeroKey = false; // 虾盘云等已自动开户、无需用户填 Key 的 provider
 
 // --- Model cards ---
 document.querySelectorAll('#step1 .model-card').forEach(card => {
@@ -472,21 +408,12 @@ document.querySelectorAll('#step1 .model-card').forEach(card => {
         selectedProvider = card.dataset.provider;
         selectedBase = card.dataset.base;
         selectedModel = card.dataset.model;
-        selectedZeroKey = card.dataset.zerokey === '1';
-        const nextBtn = document.getElementById('nextStep1');
-        nextBtn.disabled = false;
-        // 虾盘云已自动开户，跳过填 Key，按钮直接变「启动」
-        nextBtn.textContent = selectedZeroKey ? '直接启动 🚀' : '下一步 →';
+        document.getElementById('nextStep1').disabled = false;
     });
 });
 
 document.getElementById('nextStep1').addEventListener('click', () => {
-    if (selectedZeroKey) {
-        // 虾盘云：已有自动开户的 key（在 uclaw-cloud provider 里），无需填，直接保存启动
-        saveZeroKeyConfig();
-    } else {
-        goStep(2);
-    }
+    goStep(2);
 });
 
 // --- Steps ---
@@ -508,7 +435,7 @@ function setupStep2() {
     document.getElementById('customFields').style.display = isCustom ? 'block' : 'none';
 
     const providerNames = {
-        minimax: 'MiniMax', kimi: 'Kimi (月之暗面)', deepseek: 'DeepSeek',
+        'uclaw-cloud': '虾盘云', minimax: 'MiniMax', kimi: 'Kimi (月之暗面)', deepseek: 'DeepSeek',
         zai: '智谱 GLM', qwen: '通义千问', doubao: '豆包',
         openai: 'OpenAI', anthropic: 'Anthropic Claude', groq: 'Groq',
         siliconflow: '硅基流动', custom: '自定义'
@@ -583,42 +510,6 @@ function buildOpenClawConfig(provider, base, model, apiKey) {
         },
         agents: { defaults: { model: { primary: providerName + '/' + model } } }
     };
-}
-
-// --- 虾盘云：已自动开户，无需填 Key。只把默认模型指回 uclaw-cloud 并保存 ---
-async function saveZeroKeyConfig() {
-    try {
-        // 读现有配置（bootstrap 已写入 uclaw-cloud provider + 自动开户的 key）
-        const cur = await fetch('/api/config').then(r => r.ok ? r.json() : {}).catch(() => ({}));
-        const config = (cur && typeof cur === 'object') ? cur : {};
-
-        // 确保 uclaw-cloud provider 存在；若缺（极少数 bootstrap 失败），提示去充值页
-        const hasCloud = config.models && config.models.providers && config.models.providers['uclaw-cloud'] && config.models.providers['uclaw-cloud'].apiKey;
-        if (!hasCloud) {
-            showToast('虾盘云尚未就绪，请重启 U-Claw 或检查网络后重试', true);
-            return;
-        }
-
-        // 把默认模型指回虾盘云
-        config.agents = config.agents || {};
-        config.agents.defaults = config.agents.defaults || {};
-        config.agents.defaults.model = config.agents.defaults.model || {};
-        config.agents.defaults.model.primary = 'uclaw-cloud/' + (selectedModel || 'deepseek-v4-flash');
-
-        const res = await fetch('/api/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
-        });
-        if (!res.ok) throw new Error('保存失败');
-
-        showToast('已选择虾盘云，启动中…');
-        goStep(3);
-        const port = getPort();
-        document.getElementById('gatewayUrl').textContent = 'http://127.0.0.1:' + port;
-    } catch (e) {
-        showToast('保存失败: ' + e.message, true);
-    }
 }
 
 // --- Save config ---

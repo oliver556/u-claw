@@ -110,12 +110,7 @@ if [ ! -d "$CORE_DIR/node_modules" ]; then
     echo ""
 fi
 
-# ---- 7b. Bind device fingerprint and inject Xiapan Cloud apiKey ----
-echo -e "  ${CYAN}Binding device fingerprint to Xiapan Cloud...${NC}"
-UCLAW_APP_ROOT="$UCLAW_DIR" "$NODE_BIN" "$UCLAW_DIR/lib/bootstrap-xiapan.mjs" "$CONFIG_FILE" || true
-echo ""
-
-# ---- 7c. Async update check (non-blocking, 5s timeout, silent failure) ----
+# ---- 7b. Async update check (non-blocking, 5s timeout, silent failure) ----
 # Writes data/.openclaw/update-available.json if a newer version is on OSS.
 # Welcome.html / Config.html read this file and show a banner.
 # Version file lookup: portable/OPENCLAW_VERSION (USB) → ../OPENCLAW_VERSION (dev)
@@ -132,9 +127,6 @@ while lsof -i :$PORT >/dev/null 2>&1; do
     PORT=$((PORT + 1))
     if [ $PORT -gt 18799 ]; then
         echo -e "  ${RED}No available port (18789-18799)${NC}"
-        # 自动上报：端口全占，gateway 无法启动（后台、静默、失败不影响）
-        UCLAW_APP_ROOT="$UCLAW_DIR" "$NODE_BIN" "$UCLAW_DIR/lib/report-bug.mjs" \
-            --auto --title "gateway-no-free-port" --desc "Ports 18789-18799 all in use" --root "$UCLAW_DIR" >/dev/null 2>&1 &
         read -p "  Press Enter to exit..."
         exit 1
     fi
@@ -190,12 +182,9 @@ trap cleanup INT TERM
 wait $GW_PID
 GW_EXIT=$?
 
-# 自动上报：gateway 异常退出。Ctrl+C 走 trap cleanup（exit 0）不会到这；
-# 走到这里说明 gateway 自己退了。退出码非 0 才上报，避免噪音。后台、静默、失败不影响。
+# Ctrl+C 走 trap cleanup（exit 0）不会到这；走到这里说明 gateway 自己退了。
 if [ "$GW_EXIT" -ne 0 ]; then
-    echo -e "  ${YELLOW}OpenClaw exited unexpectedly (code $GW_EXIT), reporting...${NC}"
-    UCLAW_APP_ROOT="$UCLAW_DIR" "$NODE_BIN" "$UCLAW_DIR/lib/report-bug.mjs" \
-        --auto --title "gateway-exited-code-$GW_EXIT" --desc "Gateway exited with code $GW_EXIT on port $PORT" --root "$UCLAW_DIR" >/dev/null 2>&1 &
+    echo -e "  ${YELLOW}OpenClaw exited unexpectedly (code $GW_EXIT)${NC}"
 fi
 kill $CONFIG_PID 2>/dev/null
 echo ""

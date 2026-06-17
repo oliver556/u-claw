@@ -22,17 +22,13 @@ U-Claw（虾盘）是一个**制作教程 + 全套源代码**，教你把 [OpenC
 
 > 📖 **[完整教程](https://u-claw.org/tutorial.html)** — 从零开始的手工安装指南、模型配置、聊天平台接入，小白也能看懂。
 
-### 🔗 内置虾盘云：开箱即用
+### 🧩 模型随便选：国内外大模型都能用
 
-每个 U-Claw 实例首次启动会**自动**根据当前 U 盘 / 硬盘的指纹生成一个 `sk-...` 形式的虾盘云 apiKey，并写入 `data/.openclaw/openclaw.json`。打开 Config.html 就能看到这张「已绑定虾盘云」横幅（指纹来源、Key、余额）。
+U-Claw 是纯开源工具，**不绑定设备、不打指纹、不上传任何数据**。首次启动会自动打开 Config 页面，选一个模型、填入自己的 API Key 即可一键启动：
 
-- **不送 token**：余额初始为 0，需自行充值（[u-claw.org/cloud.html](https://u-claw.org/cloud.html)）
-- **指纹规则**：
-  - 从 U 盘根目录启动 → 绑定该 U 盘的硬件指纹（USB Serial + PNPDeviceID）
-  - 从硬盘启动（电脑安装版 / Electron App）→ 绑定主板 + 系统盘指纹
-  - Mac/Linux 走 Hardware UUID / `/etc/machine-id` + 启动盘 UUID
-- **换机 / 换盘**：换 U 盘或换电脑后，新的指纹会生成新的 Key；旧 Key 的余额仍归属原指纹（在 Config.html 点「解绑」可触发重新绑定）
-- **隐私**：指纹只用于本地生成 Key，不上传，无登录
+- **虾盘云（首选 · 中转站）**：一个 Key 调用 DeepSeek / Claude / GPT / 通义 等国内外全部大模型，无需翻墙。注册并充值：[u-claw.org/cloud.html](https://u-claw.org/cloud.html)
+- **各家官方 Key 也行**：DeepSeek、通义千问、Kimi、智谱 GLM、豆包、MiniMax（国内）/ OpenAI、Claude、Groq（国外）/ 硅基流动、任意 OpenAI 兼容地址（自定义）
+- **配置只存在本地** `data/.openclaw/openclaw.json`，拔盘不留痕
 
 ### 一键安装（推荐）
 

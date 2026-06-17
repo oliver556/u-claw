@@ -10,9 +10,6 @@ const APP_DIR = path.resolve(__dirname, '..');
 const PORTABLE_DIR = path.resolve(APP_DIR, '..', 'portable');
 
 const COPIES = [
-  { from: path.join(PORTABLE_DIR, 'lib', 'fingerprint.mjs'),       to: path.join(APP_DIR, 'src', 'lib', 'fingerprint.mjs') },
-  { from: path.join(PORTABLE_DIR, 'lib', 'xiapan-client.mjs'),     to: path.join(APP_DIR, 'src', 'lib', 'xiapan-client.mjs') },
-  { from: path.join(PORTABLE_DIR, 'lib', 'bootstrap-xiapan.mjs'),  to: path.join(APP_DIR, 'src', 'lib', 'bootstrap-xiapan.mjs') },
   { from: path.join(PORTABLE_DIR, 'Config.html'),                  to: path.join(APP_DIR, 'resources', 'Config.html') },
 ];
 

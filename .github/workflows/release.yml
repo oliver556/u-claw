@@ -262,9 +262,9 @@ jobs:
           body: |
             ## U-Claw ${{ steps.tag.outputs.tag }}
 
-            - 内置虾盘云：首次启动自动绑定本机/U盘指纹，生成 `sk-uc-...` apiKey
+            - 开箱即配：打开 Config 选模型填 Key 即可，支持虾盘云中转站及 DeepSeek / 通义 / Claude / GPT 等国内外大模型
             - OpenClaw runtime: `${{ steps.openclaw_version.outputs.version }}`
-            - 充值入口：https://u-claw.org/cloud.html
+            - 虾盘云注册：https://u-claw.org/cloud.html
 
             ### 下载
 

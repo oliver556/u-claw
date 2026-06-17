@@ -393,32 +393,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // API: Xiapan Cloud status (fingerprint + apiKey + balance)
-  if (req.url === '/api/xiapan/status' && req.method === 'GET') {
-    (async () => {
-      try {
-        const fpMod = await import('../lib/fingerprint.mjs');
-        const xpMod = await import('../lib/xiapan-client.mjs');
-        const portableRoot = path.join(__dirname, '..');
-        const fp = await fpMod.getFingerprint(portableRoot);
-        const apiKey = xpMod.buildApiKey(fp.fingerprint);
-        const balance = await xpMod.getBalance(apiKey);
-        const rechargeUrl = xpMod.getRechargeUrl(apiKey);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          source: fp.source,
-          apiKey,
-          rechargeUrl,
-          balance,
-        }));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      }
-    })();
-    return;
-  }
-
   // API: Update status — read update-available.json written by check-update.mjs
   // Returns { available: false } if no info or stale; otherwise the manifest payload.
   if (req.url === '/api/update-status' && req.method === 'GET') {
@@ -463,45 +437,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // API: Re-run bootstrap to inject the uclaw-cloud provider
-  if (req.url === '/api/xiapan/bind' && req.method === 'POST') {
-    (async () => {
-      try {
-        const mod = await import('../lib/bootstrap-xiapan.mjs');
-        const portableRoot = path.join(__dirname, '..');
-        const result = await mod.bootstrapXiapan({
-          configPath: CONFIG_PATH,
-          appRoot: portableRoot,
-        });
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(result));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      }
-    })();
-    return;
-  }
-
-  // API: Remove uclaw-cloud provider so the next bind regenerates it
-  if (req.url === '/api/xiapan/unbind' && req.method === 'POST') {
-    try {
-      if (fs.existsSync(CONFIG_PATH)) {
-        const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-        if (config.models && config.models.providers && config.models.providers['uclaw-cloud']) {
-          delete config.models.providers['uclaw-cloud'];
-          fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
-        }
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
-    } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
-  }
-
   // API: Save config
   if (req.url === '/api/config' && req.method === 'POST') {
     let body = '';
@@ -520,37 +455,6 @@ const server = http.createServer((req, res) => {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
-    });
-    return;
-  }
-
-  // API: Report a bug — user fills title/description in the web UI; this endpoint
-  // attaches fingerprint/version/logs locally and forwards to api.u-claw.org.
-  if (req.url === '/api/report-bug' && req.method === 'POST') {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk;
-      if (body.length > 2 * 1024 * 1024) req.destroy(); // 2MB cap on user input
-    });
-    req.on('end', () => {
-      (async () => {
-        try {
-          const data = body ? JSON.parse(body) : {};
-          const mod = await import('../lib/report-bug.mjs');
-          const portableRoot = path.join(__dirname, '..');
-          const result = await mod.submitBugReport({
-            title: data.title,
-            description: data.description,
-            appRoot: portableRoot,
-            includeLogs: data.includeLogs !== false, // 默认带日志，用户可勾掉
-          });
-          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(result));
-        } catch (err) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: err.message }));
-        }
-      })();
     });
     return;
   }

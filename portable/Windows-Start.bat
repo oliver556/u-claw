@@ -86,12 +86,6 @@ if not exist "%CORE_DIR%\node_modules" (
     echo.
 )
 
-REM Bind device fingerprint and inject Xiapan Cloud apiKey into openclaw.json
-echo   Binding device fingerprint to Xiapan Cloud...
-set "UCLAW_APP_ROOT=%UCLAW_DIR%"
-"%NODE_BIN%" "%UCLAW_DIR%lib\bootstrap-xiapan.mjs" "%STATE_DIR%\openclaw.json"
-echo.
-
 REM Async update check (non-blocking, 5s timeout, silent failure)
 REM Writes data\.openclaw\update-available.json if a newer version is on OSS.
 REM Welcome.html / Config.html read this file and show a banner.
@@ -125,8 +119,6 @@ if %errorlevel%==0 (
     set /a PORT+=1
     if %PORT% gtr 18799 (
         echo   No available port 18789-18799
-        REM 自动上报：端口全被占，gateway 无法启动（detach、静默、失败不影响）
-        start /B "" "%NODE_BIN%" "%UCLAW_DIR%lib\report-bug.mjs" --auto --title "gateway-no-free-port" --desc "Ports 18789-18799 all in use" --root "%UCLAW_DIR%." >nul 2>&1
         pause
         exit /b 1
     )
@@ -170,11 +162,8 @@ set "OPENCLAW_MJS=%CORE_DIR%\node_modules\openclaw\openclaw.mjs"
 set "GW_EXIT=%errorlevel%"
 
 echo.
-REM 自动上报：gateway 异常退出（退出码非 0 且非 Ctrl+C/0xC000013A=-1073741510）
-REM 用户正常 Ctrl+C 停止不上报，避免噪音。detach、静默、失败不影响。
 if not "%GW_EXIT%"=="0" if not "%GW_EXIT%"=="-1073741510" (
-    echo   OpenClaw exited unexpectedly (code %GW_EXIT%), reporting...
-    start /B "" "%NODE_BIN%" "%UCLAW_DIR%lib\report-bug.mjs" --auto --title "gateway-exited-code-%GW_EXIT%" --desc "Gateway exited with code %GW_EXIT% on port %PORT%" --root "%UCLAW_DIR%." >nul 2>&1
+    echo   OpenClaw exited unexpectedly ^(code %GW_EXIT%^)
 )
 echo   OpenClaw stopped.
 pause
