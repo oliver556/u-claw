@@ -279,9 +279,9 @@ jobs:
           body: |
             ## U-Claw ${{ steps.tag.outputs.tag }}
 
-            - 开箱即配：打开 Config 选模型填 Key 即可，支持虾盘云中转站及 DeepSeek / 通义 / Claude / GPT 等国内外大模型
+            - 打开 Config 选模型、填入自己的 API Key 即可使用，支持 DeepSeek / 通义 / Claude / GPT 等国内外大模型
+            - 想用「虾盘云」中转站（一个 Key 调用国内外全部模型、免翻墙）：先到 https://cloud.u-claw.org 注册并创建 Key
             - OpenClaw runtime: `${{ steps.openclaw_version.outputs.version }}`
-            - 虾盘云注册：https://u-claw.org/cloud.html
 
             ### 下载
 
