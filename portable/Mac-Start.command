@@ -95,6 +95,11 @@ fi
 export OPENCLAW_HOME="$DATA_DIR"
 export OPENCLAW_STATE_DIR="$STATE_DIR"
 export OPENCLAW_CONFIG_PATH="$CONFIG_FILE"
+# U-Claw opens the local dashboard directly; disable mDNS/Bonjour discovery.
+# On macOS the bonjour plugin auto-starts and advertises the gateway on the LAN
+# (_openclaw-gw._tcp.local), which is unnecessary for local use and triggers
+# "no IPv4 address available on utunN" warnings on machines with VPN/Tailscale.
+export OPENCLAW_DISABLE_BONJOUR=1
 
 # ---- 7. Check dependencies ----
 if [ ! -d "$CORE_DIR/node_modules" ]; then
@@ -148,17 +153,38 @@ OPENCLAW_MJS="$CORE_DIR/node_modules/openclaw/openclaw.mjs"
 "$NODE_BIN" "$OPENCLAW_MJS" gateway run --allow-unconfigured --force --port $PORT &
 GW_PID=$!
 
-# ---- 11. Wait for gateway, then open browser ----
-for i in $(seq 1 30); do
-    sleep 0.5
+# ---- 11. 是否已配置模型？openclaw.json 含 "providers" 即视为已配置 (issue #24) ----
+# 已配置：只开 Dashboard，不再每次弹配置页。未配置（首次）：开 Config Center 引导填 Key。
+MODEL_CONFIGURED=0
+if grep -q '"providers"' "$CONFIG_FILE" 2>/dev/null; then
+    MODEL_CONFIGURED=1
+fi
+
+# ---- 12. Wait for gateway, then open browser ----
+# 首次启动会 staging ~35 个 bundled deps，慢盘上实测可达 90 秒以上，期间端口还没
+# LISTENING。轮询上限必须覆盖这段，否则浏览器在 gateway ready 前就放弃打开，用户
+# 看到"拒绝连接"以为坏了（同 Windows issue #46/#48）。最多等 ~3 分钟（180×1s）。
+echo -e "  ${YELLOW}首次启动需准备运行环境，约 30-90 秒，请稍候...${NC}"
+GATEWAY_READY=0
+for i in $(seq 1 180); do
     if curl -s -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
-        # Open Dashboard
-        open "http://127.0.0.1:$PORT/#token=uclaw" 2>/dev/null || true
-        # Open Config Center
-        open "http://127.0.0.1:18788/" 2>/dev/null || true
+        GATEWAY_READY=1
+        if [ "$MODEL_CONFIGURED" = "1" ]; then
+            # 已配置：只开 Dashboard
+            open "http://127.0.0.1:$PORT/#token=uclaw" 2>/dev/null || true
+        else
+            # 首次：开 Config Center 引导填 Key
+            open "http://127.0.0.1:18788/" 2>/dev/null || true
+        fi
         break
     fi
+    sleep 1
 done
+if [ "$GATEWAY_READY" != "1" ]; then
+    # 超时回退：gateway 还没就绪也别让用户干等，先开 Config Center
+    echo -e "  ${YELLOW}Gateway 启动较慢，先打开配置中心...${NC}"
+    open "http://127.0.0.1:18788/" 2>/dev/null || true
+fi
 
 echo -e "  ${GREEN}════════════════════════════════${NC}"
 echo -e "  ${GREEN}🦞 U-Claw is running!${NC}"

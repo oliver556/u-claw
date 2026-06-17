@@ -131,9 +131,12 @@ PKGJSON
     fi
 
     # Install with China mirror（缓存留盘内，拔盘不留痕）
+    # --ignore-scripts 必须加：openclaw 的 preinstall 脚本会调系统 `node`，但便携版
+    # 用的是 app/runtime 下的 node（不在 PATH），未装 Node 的 Mac 用户会因
+    # "node: command not found" 安装失败 (code 127)。与 Mac-Start.command 的 fallback 对齐。
     NODE_BIN="$NODE_TARGET/bin/node"
     NPM_BIN="$NODE_TARGET/bin/npm"
-    npm_config_cache="$APP_DIR/.npm-cache" "$NODE_BIN" "$NPM_BIN" install --prefix "$CORE_DIR" --registry="$MIRROR"
+    npm_config_cache="$APP_DIR/.npm-cache" "$NODE_BIN" "$NPM_BIN" install --prefix "$CORE_DIR" --registry="$MIRROR" --ignore-scripts --no-audit --no-fund --omit=dev
 
     echo -e "  ${GREEN}✓${NC} OpenClaw 安装完成"
 fi
@@ -145,7 +148,7 @@ else
     echo -e "  ${CYAN}↓${NC} 安装 QQ 插件..."
     NODE_BIN="$NODE_TARGET/bin/node"
     NPM_BIN="$NODE_TARGET/bin/npm"
-    npm_config_cache="$APP_DIR/.npm-cache" "$NODE_BIN" "$NPM_BIN" install @sliverp/qqbot@latest --prefix "$CORE_DIR" --registry="$MIRROR" 2>/dev/null || true
+    npm_config_cache="$APP_DIR/.npm-cache" "$NODE_BIN" "$NPM_BIN" install @sliverp/qqbot@latest --prefix "$CORE_DIR" --registry="$MIRROR" --ignore-scripts --no-audit --no-fund --omit=dev 2>/dev/null || true
     echo -e "  ${GREEN}✓${NC} QQ 插件安装完成"
 fi
 
