@@ -110,6 +110,32 @@ jobs:
             done
           fi
 
+          # 6b) Install WeChat (Weixin) plugin into app/extensions/openclaw-weixin
+          # 官方 npm 包 @tencent-weixin/openclaw-weixin 自带 dist/index.js(发布时已编译,无需 build)。
+          # config-server/server.js 把 app/extensions/openclaw-weixin 当作插件源,扫码登录后整目录
+          # copy 到 ~/.openclaw/extensions/。它硬要求插件目录内 node_modules/qrcode-terminal 存在
+          # (server.js:52),而 npm 会把该依赖提升到顶层,故下面显式 copy 进插件的 node_modules。
+          wx_tmp="$(mktemp -d)"
+          (
+            cd "$wx_tmp"
+            echo '{"name":"wx-tmp","version":"1.0.0","private":true}' > package.json
+            npm install @tencent-weixin/openclaw-weixin@latest \
+              --registry="$mirror_npm" --no-audit --no-fund
+          )
+          wx_pkg="$wx_tmp/node_modules/@tencent-weixin/openclaw-weixin"
+          if [ -f "$wx_pkg/dist/index.js" ] && [ -f "$wx_pkg/openclaw.plugin.json" ]; then
+            wx_dest="$app_dir/extensions/openclaw-weixin"
+            mkdir -p "$wx_dest"
+            cp -R "$wx_pkg/." "$wx_dest/"
+            # 把 qrcode-terminal(被 npm 提升到顶层)放进插件自己的 node_modules
+            mkdir -p "$wx_dest/node_modules"
+            cp -R "$wx_tmp/node_modules/qrcode-terminal" "$wx_dest/node_modules/qrcode-terminal"
+            echo "WeChat plugin installed: $(du -sm "$wx_dest" | cut -f1) MB"
+          else
+            echo "WARN: WeChat plugin install failed, skipping (dist/index.js or openclaw.plugin.json missing)"
+          fi
+          rm -rf "$wx_tmp"
+
           # 7) Belt-and-suspenders: even though we don't pre-install bundled
           # deps, openclaw's own dependencies might still pull large native
           # binaries. Prune known offenders just in case.

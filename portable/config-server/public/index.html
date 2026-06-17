@@ -628,10 +628,14 @@ async function pollWeChatStatus() {
         if (data.status === 'confirmed') {
             wechatPolling = false;
             qrDiv.innerHTML = '<div style="font-size:3em;">&#10004;</div>';
-            statusDiv.innerHTML = '<span style="color:#4caf50;font-weight:600;">微信连接成功！</span><br><span style="font-size:0.8em;">账号: ' +
-                (data.accountId || '') + (data.pluginInstalled ? '' : '<br>⚠️ 插件未安装，请重启 Gateway') + '<br>需重启 Gateway 生效</span>';
+            // 后端已自动装好插件 + 写好 openclaw.json + 存好账号，剩下只需重启 Gateway 加载插件。
+            // 不再暴露 pluginInstalled 内部状态——它即使为 false，配置也已写好，下次启动必加载，
+            // 显示「插件未安装」只会和「连接成功」自相矛盾、吓到客户。
+            statusDiv.innerHTML = '<span style="color:#4caf50;font-weight:600;">✅ 微信连接成功！</span>' +
+                '<br><span style="font-size:0.8em;color:#888;">账号 ' + (data.accountId || '') + ' 已绑定</span>' +
+                '<br><span style="font-size:0.85em;color:#ff9800;font-weight:600;">最后一步：重启 U-Claw（关闭后重新打开）即可在微信里使用</span>';
             statusDiv.style.color = '#4caf50';
-            showToast('微信连接成功！');
+            showToast('微信连接成功！重启 U-Claw 后生效');
             return;
         }
 

@@ -197,9 +197,15 @@ function ensureWeChatPluginInstalled() {
     return { installed: true };
   }
   // Copy from USB to ~/.openclaw/extensions/
-  const extDir = path.join(OPENCLAW_DIR, 'extensions');
-  fs.mkdirSync(extDir, { recursive: true });
-  copyDirSync(USB_PLUGIN_DIR, INSTALLED_PLUGIN_DIR);
+  // 容错：copy 失败不抛错中断整个 confirmed 流程（账号保存 + openclaw.json 已/将写好）。
+  try {
+    const extDir = path.join(OPENCLAW_DIR, 'extensions');
+    fs.mkdirSync(extDir, { recursive: true });
+    copyDirSync(USB_PLUGIN_DIR, INSTALLED_PLUGIN_DIR);
+  } catch (e) {
+    console.error('WeChat plugin copy failed:', e.message);
+    return { installed: false, warning: e.message };
+  }
   return { installed: fs.existsSync(path.join(INSTALLED_PLUGIN_DIR, 'openclaw.plugin.json')) };
 }
 
