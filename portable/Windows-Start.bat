@@ -49,6 +49,17 @@ if not exist "%DATA_DIR%\memory" mkdir "%DATA_DIR%\memory"
 if not exist "%DATA_DIR%\backups" mkdir "%DATA_DIR%\backups"
 if not exist "%DATA_DIR%\logs" mkdir "%DATA_DIR%\logs"
 
+REM ── 加速：把"重 IO、可重建"的缓存从 U 盘搬到本机硬盘 ──────────────────
+REM portable-cache.mjs 算出本机缓存目录（%LOCALAPPDATA%\U-Claw\slot，UUID 隔离，
+REM 换盘符仍复用），并把 .openclaw\browser 做成 junction 指向本机盘。
+REM 浏览器 user-data（几百 MB 随机小写）和 V8 编译缓存因此落本机 SSD，不再拖慢 U 盘。
+REM 静默失败：取不到就跳过，缓存留 U 盘，照常启动。
+for /f "usebackq tokens=1,* delims==" %%a in (`""%NODE_BIN%" "%UCLAW_DIR%lib\portable-cache.mjs" "%STATE_DIR%" "%UCLAW_DIR%" 2^>nul"`) do (
+    if "%%a"=="UCLAW_COMPILE_CACHE_DIR" set "NODE_COMPILE_CACHE=%%b"
+    if "%%a"=="UCLAW_CACHE_ROOT" set "UCLAW_CACHE_ROOT=%%b"
+)
+if defined NODE_COMPILE_CACHE echo   Cache on local disk: %UCLAW_CACHE_ROOT%
+
 REM Default config (migrate legacy if present, otherwise create)
 if not exist "%STATE_DIR%\openclaw.json" (
     if exist "%DATA_DIR%\config.json" (
@@ -133,18 +144,50 @@ echo   Starting Config Center on port 18788...
 set "CONFIG_SERVER=%UCLAW_DIR%config-server"
 start /B "" "%NODE_BIN%" "%CONFIG_SERVER%\server.js" >nul 2>&1
 
-REM Wait for config server to start
-timeout /t 2 /nobreak >nul
+REM 等 Config Server 就绪 —— 动态探测而非写死等待。
+REM 它通常 <1s 就起来，写死 timeout /t 2 是白等。改为每 ~0.3s 探测 18788，
+REM 最多 ~6s（20 次）兜底。监听到就立刻往下走。
+set /a CFG_TRIES=0
+:wait_config
+netstat -an | findstr ":18788 " | findstr "LISTENING" >nul 2>&1
+if %errorlevel%==0 goto :config_ready
+set /a CFG_TRIES+=1
+if %CFG_TRIES% geq 20 goto :config_ready
+ping -n 1 -w 300 127.0.0.1 >nul 2>&1
+goto :wait_config
+:config_ready
 
 REM IMPORTANT: 不要在 gateway 启动前就开 Dashboard 浏览器！
 REM 慢 U 盘上 OpenClaw 首次启动要 staging bundled deps（几十秒），
 REM 过早打开 http://127.0.0.1:18789 会"拒绝连接"，是 issue #46/#48 的根因。
-REM 改为后台等待器：轮询端口，gateway 真正 LISTENING 后再开 Dashboard。
-echo   Opening Config Center...
-start "" http://127.0.0.1:18788/
+REM 方案：立刻打开本地"启动首屏"loading.html，给用户即时反馈（移植自 4.0 splash）。
+REM 首屏自己轮询 /ready，gateway 真就绪后自动跳 Dashboard——天然解决拒连。
 
-REM 后台等待器：每 2s 探测 %PORT%，最多 ~5 分钟（150 次），监听到就开 Dashboard
+REM 是否已配置模型？openclaw.json 含 providers 即视为已配置 (issue #24)。
+REM 未配置（首次）：先开 Config Center 引导填 Key。
+set "MODEL_CONFIGURED="
+findstr /C:"providers" "%STATE_DIR%\openclaw.json" >nul 2>&1
+if %errorlevel%==0 set "MODEL_CONFIGURED=1"
+
+REM 立刻开启动首屏（带 port 参数，就绪后自动跳 Dashboard）
+REM 用 file:/// URL（正斜杠）+ 转义 & ，确保 query string 能传给浏览器。
+echo   Opening startup screen...
+set "LOADING_PATH=%UCLAW_DIR%lib\loading.html"
+set "LOADING_URL=file:///%LOADING_PATH:\=/%?port=%PORT%&token=uclaw"
+start "" "%LOADING_URL%"
+
+if not defined MODEL_CONFIGURED (
+    echo   First-time setup - opening Config Center...
+    start "" http://127.0.0.1:18788/
+)
+
+REM 后台等待器兜底：万一首屏页没起作用（浏览器拦本地 fetch 等），
+REM 仍轮询端口，gateway LISTENING 后开 Dashboard。
 start /B "" cmd /c ""%UCLAW_DIR%lib\wait-gateway.bat" %PORT%"
+
+REM gateway 首轮预热（后台、静默、非阻塞）：就绪后先唤醒 config/model 子系统，
+REM 用户首次点发送时不再等。移植自 4.0 first-turn-prewarm。
+start /B "" "%NODE_BIN%" "%UCLAW_DIR%lib\prewarm.mjs" %PORT% uclaw >nul 2>&1
 
 echo.
 echo   ========================================

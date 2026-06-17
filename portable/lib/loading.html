@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>U-Claw 正在启动…</title>
+<!--
+  启动首屏（移植自 v2 u-clawx 4.0 的 splash 思路）。
+  双击启动脚本后立刻打开本页，给用户即时反馈，消除"黑窗假死"体感。
+  本页每秒自查 gateway 是否就绪（fetch /ready），就绪后自动跳转 Dashboard。
+
+  端口通过 URL 查询参数传入：loading.html?port=18789
+  （启动脚本打开时拼好。默认 18789。）
+-->
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+.box {
+  text-align: center;
+  max-width: 460px;
+  padding: 40px;
+}
+.logo { font-size: 64px; line-height: 1; margin-bottom: 18px; }
+h1 { font-size: 1.7em; font-weight: 600; margin-bottom: 8px; }
+.tip { opacity: .85; font-size: 1.02em; line-height: 1.6; margin-bottom: 28px; }
+.spinner {
+  width: 46px; height: 46px;
+  margin: 0 auto 24px;
+  border: 4px solid rgba(255,255,255,.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.bar {
+  height: 6px; width: 100%;
+  background: rgba(255,255,255,.2);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.bar > i {
+  display: block; height: 100%; width: 30%;
+  background: #fff; border-radius: 999px;
+  animation: slide 1.6s ease-in-out infinite;
+}
+@keyframes slide {
+  0%   { margin-left: -30%; }
+  100% { margin-left: 100%; }
+}
+.status { font-size: .95em; opacity: .9; min-height: 1.4em; }
+.elapsed { font-size: .82em; opacity: .6; margin-top: 6px; }
+.note {
+  margin-top: 30px; font-size: .82em; opacity: .65; line-height: 1.6;
+}
+a.manual { color: #fff; text-decoration: underline; opacity: .9; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="logo">🦞</div>
+    <h1>U-Claw 正在启动</h1>
+    <div class="tip">首次从 U 盘启动需要展开内置组件，<br>稍等片刻，就绪后会自动打开。</div>
+    <div class="spinner"></div>
+    <div class="bar"><i></i></div>
+    <div class="status" id="status">正在等待 OpenClaw 网关…</div>
+    <div class="elapsed" id="elapsed"></div>
+    <div class="note">
+      慢 U 盘首次启动通常 30–90 秒。<br>
+      如果迟迟没反应，可手动打开
+      <a class="manual" id="manual" href="#">控制台</a>。
+    </div>
+  </div>
+
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var port = parseInt(params.get('port'), 10) || 18789;
+  var token = params.get('token') || 'uclaw';
+  var base = 'http://127.0.0.1:' + port;
+  var dashboard = base + '/#token=' + encodeURIComponent(token);
+  var configCenter = 'http://127.0.0.1:18788/';
+
+  document.getElementById('manual').href = dashboard;
+
+  var startedAt = Date.now();
+  var redirected = false;
+
+  function fmt(ms) {
+    var s = Math.floor(ms / 1000);
+    return '已等待 ' + s + ' 秒';
+  }
+
+  function tickElapsed() {
+    document.getElementById('elapsed').textContent = fmt(Date.now() - startedAt);
+  }
+  setInterval(tickElapsed, 1000);
+  tickElapsed();
+
+  function goDashboard() {
+    if (redirected) return;
+    redirected = true;
+    document.getElementById('status').textContent = '网关已就绪，正在打开控制台…';
+    setTimeout(function () { location.replace(dashboard); }, 400);
+  }
+
+  function poll() {
+    if (redirected) return;
+    // /ready 就绪即跳。no-cors 下拿不到 status，但 fetch 成功 resolve 就说明端口活了。
+    fetch(base + '/ready', { mode: 'no-cors', cache: 'no-store' })
+      .then(function () { goDashboard(); })
+      .catch(function () {
+        // 端口还没起，继续等
+        setTimeout(poll, 1000);
+      });
+  }
+  poll();
+
+  // 兜底：5 分钟还没起来，提示去控制台
+  setTimeout(function () {
+    if (!redirected) {
+      document.getElementById('status').innerHTML =
+        '启动较慢，可先打开 <a class="manual" href="' + configCenter + '">配置中心</a> 检查';
+    }
+  }, 300000);
+})();
+</script>
+</body>
+</html>

@@ -126,8 +126,23 @@ Pure-Node, zero-dependency `.mjs` modules (use `fetch` + `node:zlib` only). All 
 | File | Purpose |
 |------|---------|
 | `check-update.mjs` / `publish-latest.mjs` | Portable self-update: check installed vs latest `OPENCLAW_VERSION`; publish helper. |
-| `wait-gateway.bat` | Windows helper: poll until gateway port is LISTENING before opening the dashboard (fixes startup race). |
+| `portable-cache.mjs` | **启动加速核心**：把"重 IO、可重建"的缓存从 U 盘搬到本机硬盘。算出本机缓存根（win `%LOCALAPPDATA%\U-Claw\<slot>` / mac `~/Library/Caches/U-Claw` / linux `$XDG_CACHE_HOME`，UUID 隔离让换盘符仍复用），输出 `NODE_COMPILE_CACHE` 路径，并把 `data/.openclaw/browser` 做成 junction(win)/symlink(mac) 指向本机盘——浏览器 user-data 的海量随机小写不再砸 U 盘。CLI 打印 `KEY=VALUE` 供启动脚本 source。静默失败：取不到就缓存留 U 盘照常启动。 |
+| `prewarm.mjs` | gateway 首轮预热：端口就绪后后台静默 GET `/ready`→`/status`→`/models`（带 `x-openclaw-token`），把 config/model 子系统在 runtime 内存里热起来，用户首次点发送不再等。零依赖、短超时、后台 detach。 |
+| `loading.html` | 启动首屏（splash）：双击启动后立刻打开，给即时反馈消除"黑窗假死"。本页每秒 fetch `/ready`，gateway 真就绪后自动 `location.replace` 跳 Dashboard——天然规避"gateway 没起就开 Dashboard 拒连"(issue #46/#48)。端口经 `?port=` 传入。 |
+| `wait-gateway.bat` | Windows 兜底：现由 `loading.html` 首屏轮询并自动跳转；本脚本退居兜底——万一首屏 `file://` fetch 被浏览器拦，仍轮询端口、就绪后开 Dashboard。 |
 | `maintain.sh` | Maintenance/diagnostics script. |
+
+### 启动加速（吸收自 v2 u-clawx 4.0 的工程经验，2026-06-17）
+
+便携版从 U 盘启动慢，瓶颈在 **U 盘随机小写 IO** + **首屏无反馈** + **首轮冷启动**。移植 4.0 的 4 个可在纯脚本层复刻的手段：
+
+1. **缓存搬本机**（`portable-cache.mjs`）：浏览器 user-data（OpenClaw 硬编码在 `CONFIG_DIR/browser/`，无单独环境变量，故用 junction/symlink 重定向）+ V8 编译缓存（`NODE_COMPILE_CACHE`）落本机 SSD。业务数据（`openclaw.json`、`memory`、账号）仍留 U 盘，便携性不变。UUID 隔离让 D:→E: 换盘符仍命中同一份本机缓存。
+2. **Node 编译缓存**：`openclaw.mjs` 本就调 `module.enableCompileCache()`，但默认落系统 temp（可能被清）。启动脚本显式把 `NODE_COMPILE_CACHE` 指向本机固定目录，二次启动稳定命中。
+3. **启动首屏**（`loading.html`）：双击即弹，自轮询自跳转。
+4. **首轮预热**（`prewarm.mjs`）：后台唤醒 config/model。
+5. **动态探测**：Windows 把写死的 `timeout /t 2`（等 config-server）改成轮询 18788，省掉白等。
+
+> 注：OpenClaw 自身的临时/lock/chrome-mcp 文件已走 `os.tmpdir()`（系统 temp，**不在 U 盘**），无需处理；真正落 U 盘的只有 `OPENCLAW_HOME=data/` 下的内容。
 
 > **纯开源,无追踪**: 这个开源版**不含**设备指纹 (`fingerprint.mjs`)、自动开户 (`bootstrap-xiapan.mjs`/`xiapan-client.mjs`)、崩溃上报 (`report-bug.mjs`) 等商业版逻辑——这些已在 2026-06-17 移除。U-Claw 不绑定设备、不打指纹、不向 `api.u-claw.org` 上传任何数据。
 

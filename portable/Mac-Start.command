@@ -70,6 +70,19 @@ echo ""
 # ---- 4. Init data directories ----
 mkdir -p "$STATE_DIR" "$DATA_DIR/memory" "$DATA_DIR/backups" "$DATA_DIR/logs"
 
+# ---- 4b. 加速：把"重 IO、可重建"的缓存从 U 盘搬到本机硬盘 ----
+# portable-cache.mjs 算出本机缓存目录(~/Library/Caches/U-Claw/slot，UUID 隔离，
+# 换盘符仍复用)，并把 .openclaw/browser 做成 symlink 指向本机盘。
+# 浏览器 user-data(几百 MB 随机小写)和 V8 编译缓存因此落本机盘，不再拖慢 U 盘。
+# 静默失败：取不到就跳过，缓存留 U 盘，照常启动。
+while IFS='=' read -r _k _v; do
+    case "$_k" in
+        UCLAW_COMPILE_CACHE_DIR) export NODE_COMPILE_CACHE="$_v" ;;
+        UCLAW_CACHE_ROOT) UCLAW_CACHE_ROOT="$_v" ;;
+    esac
+done < <("$NODE_BIN" "$UCLAW_DIR/lib/portable-cache.mjs" "$STATE_DIR" "$UCLAW_DIR" 2>/dev/null)
+[ -n "$NODE_COMPILE_CACHE" ] && echo -e "  ${GREEN}Cache on local disk:${NC} $UCLAW_CACHE_ROOT"
+
 # ---- 5. Default config ----
 if [ ! -f "$CONFIG_FILE" ]; then
     if [ -f "$DATA_DIR/config.json" ]; then
@@ -160,31 +173,33 @@ if grep -q '"providers"' "$CONFIG_FILE" 2>/dev/null; then
     MODEL_CONFIGURED=1
 fi
 
-# ---- 12. Wait for gateway, then open browser ----
-# 首次启动会 staging ~35 个 bundled deps，慢盘上实测可达 90 秒以上，期间端口还没
-# LISTENING。轮询上限必须覆盖这段，否则浏览器在 gateway ready 前就放弃打开，用户
-# 看到"拒绝连接"以为坏了（同 Windows issue #46/#48）。最多等 ~3 分钟（180×1s）。
+# ---- 12. 立刻打开"启动首屏"，给用户即时反馈（移植自 4.0 splash）----
+# 首屏 loading.html 自己轮询 /ready，gateway 真就绪后自动跳 Dashboard——天然解决
+# "gateway 没起就开 Dashboard 拒连"的问题（同 Windows issue #46/#48）。
 echo -e "  ${YELLOW}首次启动需准备运行环境，约 30-90 秒，请稍候...${NC}"
-GATEWAY_READY=0
-for i in $(seq 1 180); do
-    if curl -s -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
-        GATEWAY_READY=1
-        if [ "$MODEL_CONFIGURED" = "1" ]; then
-            # 已配置：只开 Dashboard
-            open "http://127.0.0.1:$PORT/#token=uclaw" 2>/dev/null || true
-        else
-            # 首次：开 Config Center 引导填 Key
-            open "http://127.0.0.1:18788/" 2>/dev/null || true
-        fi
-        break
-    fi
-    sleep 1
-done
-if [ "$GATEWAY_READY" != "1" ]; then
-    # 超时回退：gateway 还没就绪也别让用户干等，先开 Config Center
-    echo -e "  ${YELLOW}Gateway 启动较慢，先打开配置中心...${NC}"
+# 用 file:// URL 确保 query string（?port=）能传给浏览器；裸路径 open 会把整串当文件名。
+open "file://$UCLAW_DIR/lib/loading.html?port=$PORT&token=uclaw" 2>/dev/null || true
+# 首次未配置：再开 Config Center 引导填 Key
+if [ "$MODEL_CONFIGURED" != "1" ]; then
     open "http://127.0.0.1:18788/" 2>/dev/null || true
 fi
+
+# ---- 12b. gateway 首轮预热（后台、静默、非阻塞）----
+# 就绪后先唤醒 config/model 子系统，用户首次点发送时不再等。移植自 4.0 first-turn-prewarm。
+"$NODE_BIN" "$UCLAW_DIR/lib/prewarm.mjs" "$PORT" uclaw >/dev/null 2>&1 &
+
+# ---- 12c. 兜底：万一首屏页的 file:// fetch 被浏览器拦，仍轮询端口后开 Dashboard ----
+# 慢盘首启可达 90s+，轮询上限覆盖这段。最多 ~3 分钟（180×1s）。
+(
+    for i in $(seq 1 180); do
+        if curl -s -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
+            # 首屏页通常已自己跳转；这里仅作兜底，open 同一 URL 浏览器会复用已有标签。
+            [ "$MODEL_CONFIGURED" = "1" ] && open "http://127.0.0.1:$PORT/#token=uclaw" 2>/dev/null || true
+            exit 0
+        fi
+        sleep 1
+    done
+) &
 
 echo -e "  ${GREEN}════════════════════════════════${NC}"
 echo -e "  ${GREEN}🦞 U-Claw is running!${NC}"
