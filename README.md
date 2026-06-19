@@ -104,30 +104,16 @@ U-Claw/                          ← 整个拷到 U 盘
 
 基于 Ventoy + Ubuntu 24.04 LTS + 持久化存储，在 Windows 上运行 4 步 PowerShell 脚本即可制作。详见 [`bootable/README.md`](bootable/README.md)。
 
-### 桌面安装版（Electron App）
-
-除了 U 盘便携版，还有桌面 App 版本：
-
-```bash
-cd u-claw-app
-bash setup.sh            # 一键安装开发环境（国内镜像）
-npm run dev              # 开发模式运行
-npm run build:mac-arm64  # 打包 → release/*.dmg
-npm run build:win        # 打包 → release/*.exe
-```
+> **关于桌面安装版（Electron）**：`u-claw-app/` 的 Electron 桌面版（`.exe` 安装版 / 绿色版 / `.dmg`）**已于 2026-06-19 停止发布并归档**，原因见 [`u-claw-app/DEPRECATED.md`](u-claw-app/DEPRECATED.md)。U-Claw 现在只发布「便携 U 盘版」——这才是产品的本质：插上 U 盘、解压即用。
 
 ### 直接下载发行版
 
-[GitHub Releases](https://github.com/dongsheng123132/u-claw/releases) 提供四种打包好的产物：
+[GitHub Releases](https://github.com/dongsheng123132/u-claw/releases) 提供便携 U 盘版：
 
-- `u-claw-portable-windows-vX.Y.Z.zip` — Windows 便携版（解压即用）
-- `u-claw-portable-mac-vX.Y.Z.zip` — Mac 便携版
-- `U-Claw Setup vX.Y.Z.exe` — Windows 桌面安装包
-- `U-Claw-vX.Y.Z-arm64.dmg` — Mac 桌面安装包
+- `u-claw-portable-windows-vX.Y.Z.zip` — Windows 便携完整版（已预装 Node + OpenClaw，**解压到 U 盘双击 `Windows-Start.bat` 即用**）
+- **Mac**：源码在 [`portable/`](portable/) 目录，`bash setup.sh` 自动下载 Node + OpenClaw（国内镜像约 1 分钟），双击 `Mac-Start.command` 启动
 
-> ⚠️ 安装包未签名：
-> - **Windows**：双击 `.exe` 时 SmartScreen 会拦，点「更多信息」→「仍要运行」
-> - **Mac**：首次启动如被 Gatekeeper 拦，执行 `xattr -rd com.apple.quarantine /Applications/U-Claw.app` 或在 Finder 里右键→打开
+> ⚠️ **U 盘请用 NTFS 格式**（不要 exFAT/FAT32）：Node.js 在 exFAT 上 IO 极慢且不支持符号链接，可能导致启动失败。
 
 ### 支持的 AI 模型
 
@@ -177,9 +163,9 @@ bash Mac-Start.command   # Mac 测试
 
 | 平台 | 状态 | 说明 |
 |------|------|------|
-| Mac Apple Silicon (M1-M4) | ✅ | 便携版 + 桌面版 |
-| Mac Intel (x64) | ✅ | 便携版 + 桌面版 |
-| Windows x64 | 🚧 开发中 | 便携版 + 桌面版 |
+| Mac Apple Silicon (M1-M4) | ✅ | 便携版 |
+| Mac Intel (x64) | ✅ | 便携版 |
+| Windows x64 | 🚧 开发中 | 便携版 |
 | Linux x64（可启动 U 盘） | ✅ | [`bootable/`](bootable/) 目录 |
 
 欢迎 PR！特别需要：Windows 脚本完善、教程翻译。
@@ -368,15 +354,7 @@ No operating system? No problem. Boot any computer from USB into Ubuntu + AI:
 
 Based on Ventoy + Ubuntu 24.04 LTS + persistence. 4-step PowerShell scripts on Windows. See [`bootable/README.md`](bootable/README.md) for details.
 
-### Desktop App (Electron)
-
-```bash
-cd u-claw-app
-bash setup.sh            # One-click dev setup (China mirrors)
-npm run dev              # Dev mode
-npm run build:mac-arm64  # Build → release/*.dmg
-npm run build:win        # Build → release/*.exe
-```
+> **About the Electron desktop app**: `u-claw-app/` (the `.exe` installer / portable / `.dmg` builds) was **deprecated and is no longer published as of 2026-06-19** — see [`u-claw-app/DEPRECATED.md`](u-claw-app/DEPRECATED.md). U-Claw now ships only the portable USB build, which is the product's essence: plug in the USB and run.
 
 ### Supported AI Models
 

@@ -8,7 +8,12 @@ const http = require('http');
 const APP_NAME = 'U-Claw';
 const DEFAULT_PORT = 18789;
 const MAX_PORT = 18799;
-const GATEWAY_STARTUP_TIMEOUT = 30000;
+// First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
+// fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
+// room so we never hard-fail with a scary dialog before the engine is up. The
+// loading.html splash polls and the window navigates as soon as the gateway is
+// ready, so a long ceiling only matters on a genuinely stuck start.
+const GATEWAY_STARTUP_TIMEOUT = 180000;
 
 // ── Paths ──
 const isDev = process.argv.includes('--dev');
@@ -214,12 +219,20 @@ function startGateway(port) {
     const nodeBin = getNodeBin();
     console.log(`[${APP_NAME}] Using Node.js: ${nodeBin}`);
 
+    // Persist the V8 compile cache to a fixed local dir under userData so the
+    // gateway's heavy first-run compile is paid only once. userDataPath is stable
+    // across launches even for the portable exe (which self-extracts to a random
+    // temp dir each time), so the cache survives and subsequent starts are fast.
+    const compileCacheDir = path.join(userDataPath, '.cache', 'v8-compile-cache');
+    try { fs.mkdirSync(compileCacheDir, { recursive: true }); } catch {}
+
     const env = {
       ...process.env,
       OPENCLAW_HOME: userDataPath,
       OPENCLAW_STATE_DIR: configDir,
       OPENCLAW_CONFIG_PATH: configPath,
       OPENCLAW_EMBEDDED_IN: APP_NAME,
+      NODE_COMPILE_CACHE: compileCacheDir,
     };
 
     if (process.platform === 'win32') {

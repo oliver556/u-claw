@@ -14,6 +14,8 @@ on:
 permissions:
   contents: write
 
+# 产品只发「便携 U 盘版」(portable/ — .bat/.command 解压即用)。
+# Electron 桌面版 (u-claw-app/) 已于 2026-06-19 停发并归档,详见 u-claw-app/DEPRECATED.md。
 jobs:
   portable-windows-full:
     name: Portable Windows full bundle (Node + OpenClaw pre-installed)
@@ -211,87 +213,9 @@ jobs:
           name: portable-windows-full
           path: dist/u-claw-portable-windows-*.zip
 
-  desktop-windows:
-    name: Electron Windows installer
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        shell: cmd
-        run: |
-          cd u-claw-app
-          npm install --registry=https://registry.npmmirror.com
-
-      - name: Sync version from tag
-        shell: bash
-        run: |
-          tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          ver="${tag_name#v}"   # strip leading v -> 2.1.5
-          cd u-claw-app
-          npm version "$ver" --no-git-tag-version --allow-same-version
-          echo "桌面版版本号已同步为 $ver"
-
-      - name: Build Windows installer
-        shell: cmd
-        run: |
-          cd u-claw-app
-          npm run build:win
-        env:
-          # Skip code signing — we ship unsigned. README documents the SmartScreen workaround.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-windows
-          path: |
-            u-claw-app/release/*.exe
-            u-claw-app/release/*.exe.blockmap
-
-  desktop-mac:
-    name: Electron macOS DMG
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: |
-          cd u-claw-app
-          npm install --registry=https://registry.npmmirror.com
-
-      - name: Sync version from tag
-        run: |
-          tag_name="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          ver="${tag_name#v}"   # strip leading v -> 2.1.5
-          cd u-claw-app
-          npm version "$ver" --no-git-tag-version --allow-same-version
-          echo "桌面版版本号已同步为 $ver"
-
-      - name: Build macOS DMG
-        run: |
-          cd u-claw-app
-          npm run build:mac-arm64
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-mac
-          path: |
-            u-claw-app/release/*.dmg
-            u-claw-app/release/*.dmg.blockmap
-
   publish:
     name: Publish GitHub Release
-    needs: [portable-windows-full, desktop-windows, desktop-mac]
+    needs: [portable-windows-full]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -331,20 +255,13 @@ jobs:
 
             ### 下载
 
-            - **Windows 桌面版**：`U-Claw.Setup.*.exe`（安装到电脑）或 `U-Claw.*.exe`（免安装绿色版）
-            - **macOS 桌面版**：`U-Claw-*-arm64.dmg`（Apple Silicon）或 `U-Claw-*.dmg`（Intel）
-            - **Windows 便携完整版（U 盘版）**：`u-claw-portable-windows-*.zip`（约 150-200 MB，已预装 Node.js + OpenClaw，**解压即用，零网络依赖**）
-            - **macOS 便携骨架（开发者）**：源码在 `portable/` 目录，`bash setup.sh` 自动下载 Node + OpenClaw（国内镜像约 1 分钟）
+            - **Windows 便携完整版（U 盘版）**：`u-claw-portable-windows-*.zip`（约 150-200 MB，已预装 Node.js + OpenClaw，**解压即用，零网络依赖**）。解压到 U 盘后双击 `Windows-Start.bat` 启动。
+            - **macOS 便携版**：源码在 `portable/` 目录，`bash setup.sh` 自动下载 Node + OpenClaw（国内镜像约 1 分钟），双击 `Mac-Start.command` 启动。
 
             > **U 盘格式建议**：请用 **NTFS** 格式化 U 盘（NOT exFAT/FAT32）。Node.js 在 exFAT 上 IO 极慢且不支持符号链接，可能导致启动失败。
             > Windows 下右键 U 盘 → 格式化 → 文件系统选择 NTFS。
-
-            > Windows 安装包未做代码签名，首次运行 SmartScreen 选择「仍要运行」。
-            > macOS DMG 未做公证，首次启动 `xattr -rd com.apple.quarantine /Applications/U-Claw.app` 或右键打开。
           files: |
             artifacts/portable-windows-full/*
-            artifacts/desktop-windows/*
-            artifacts/desktop-mac/*
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
