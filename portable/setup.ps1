@@ -204,7 +204,10 @@ if ($AllPlatforms) {
 
 $packageJsonPath = Join-Path $coreDir "package.json"
 if (-not (Test-Path -Path $packageJsonPath -PathType Leaf)) {
-    $openclawVersionFile = Join-Path $PSScriptRoot "..\OPENCLAW_VERSION"
+    $openclawVersionFile = Join-Path $PSScriptRoot "OPENCLAW_VERSION"
+    if (-not (Test-Path -Path $openclawVersionFile -PathType Leaf)) {
+        $openclawVersionFile = Join-Path $PSScriptRoot "..\OPENCLAW_VERSION"
+    }
     $openclawVersion = "2026.4.29"
     if (Test-Path -Path $openclawVersionFile -PathType Leaf) {
         $openclawVersion = (Get-Content -Path $openclawVersionFile -Raw).Trim()
