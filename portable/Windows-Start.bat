@@ -49,11 +49,11 @@ if not exist "%DATA_DIR%\memory" mkdir "%DATA_DIR%\memory"
 if not exist "%DATA_DIR%\backups" mkdir "%DATA_DIR%\backups"
 if not exist "%DATA_DIR%\logs" mkdir "%DATA_DIR%\logs"
 
-REM ── 加速：把"重 IO、可重建"的缓存从 U 盘搬到本机硬盘 ──────────────────
-REM portable-cache.mjs 算出本机缓存目录（%LOCALAPPDATA%\U-Claw\slot，UUID 隔离，
-REM 换盘符仍复用），并把 .openclaw\browser 做成 junction 指向本机盘。
-REM 浏览器 user-data（几百 MB 随机小写）和 V8 编译缓存因此落本机 SSD，不再拖慢 U 盘。
-REM 静默失败：取不到就跳过，缓存留 U 盘，照常启动。
+REM Startup cache acceleration.
+REM portable-cache.mjs chooses a local-disk cache slot and redirects
+REM .openclaw\browser there with a junction when possible.
+REM Browser user data and V8 compile cache stay off the USB drive.
+REM If this fails, startup continues with the cache on the USB drive.
 for /f "usebackq tokens=1,* delims==" %%a in (`""%NODE_BIN%" "%UCLAW_DIR%lib\portable-cache.mjs" "%STATE_DIR%" "%UCLAW_DIR%" 2^>nul"`) do (
     if "%%a"=="UCLAW_COMPILE_CACHE_DIR" set "NODE_COMPILE_CACHE=%%b"
     if "%%a"=="UCLAW_CACHE_ROOT" set "UCLAW_CACHE_ROOT=%%b"
@@ -89,7 +89,7 @@ if not exist "%CORE_DIR%\node_modules" (
     echo   File system: NTFS recommended. exFAT/FAT32 will be very slow.
     echo.
     cd /d "%CORE_DIR%"
-    REM 把 npm 缓存留在盘内，避免污染系统 %APPDATA%\npm-cache（拔盘不留痕）
+    REM Keep npm cache inside the portable app instead of system APPDATA.
     set "npm_config_cache=%APP_DIR%\.npm-cache"
     call "%NPM_BIN%" install --registry=https://registry.npmmirror.com --ignore-scripts --no-audit --no-fund --omit=dev
     echo.
@@ -144,9 +144,9 @@ echo   Starting Config Center on port 18788...
 set "CONFIG_SERVER=%UCLAW_DIR%config-server"
 start /B "" "%NODE_BIN%" "%CONFIG_SERVER%\server.js" >nul 2>&1
 
-REM 等 Config Server 就绪 —— 动态探测而非写死等待。
-REM 它通常 <1s 就起来，写死 timeout /t 2 是白等。改为每 ~0.3s 探测 18788，
-REM 最多 ~6s（20 次）兜底。监听到就立刻往下走。
+REM Wait for Config Server with polling instead of a fixed delay.
+REM It is usually ready in under one second. Poll about every 0.3 seconds,
+REM up to about 6 seconds, then continue anyway.
 set /a CFG_TRIES=0
 :wait_config
 netstat -an | findstr ":18788 " | findstr "LISTENING" >nul 2>&1
@@ -157,36 +157,25 @@ ping -n 1 -w 300 127.0.0.1 >nul 2>&1
 goto :wait_config
 :config_ready
 
-REM IMPORTANT: 不要在 gateway 启动前就开 Dashboard 浏览器！
-REM 慢 U 盘上 OpenClaw 首次启动要 staging bundled deps（几十秒），
-REM 过早打开 http://127.0.0.1:18789 会"拒绝连接"，是 issue #46/#48 的根因。
-REM 方案：立刻打开本地"启动首屏"loading.html，给用户即时反馈（移植自 4.0 splash）。
-REM 首屏自己轮询 /ready，gateway 真就绪后自动跳 Dashboard——天然解决拒连。
+REM Do not open Dashboard before the gateway is ready.
+REM Slow USB drives may need tens of seconds to stage bundled deps.
+REM Open the local startup page now, and always open Config Center too.
+REM Config Center lets users change models, recharge/get keys, and connect channels.
 
-REM 是否已配置模型？openclaw.json 含 providers 即视为已配置 (issue #24)。
-REM 未配置（首次）：先开 Config Center 引导填 Key。
-set "MODEL_CONFIGURED="
-findstr /C:"providers" "%STATE_DIR%\openclaw.json" >nul 2>&1
-if %errorlevel%==0 set "MODEL_CONFIGURED=1"
-
-REM 立刻开启动首屏（带 port 参数，就绪后自动跳 Dashboard）
-REM 用 file:/// URL（正斜杠）+ 转义 & ，确保 query string 能传给浏览器。
+REM Open startup page with the gateway port and token in the query string.
 echo   Opening startup screen...
 set "LOADING_PATH=%UCLAW_DIR%lib\loading.html"
 set "LOADING_URL=file:///%LOADING_PATH:\=/%?port=%PORT%&token=uclaw"
 start "" "%LOADING_URL%"
 
-if not defined MODEL_CONFIGURED (
-    echo   First-time setup - opening Config Center...
-    start "" http://127.0.0.1:18788/
-)
+echo   Opening Config Center...
+start "" http://127.0.0.1:18788/
 
-REM 后台等待器兜底：万一首屏页没起作用（浏览器拦本地 fetch 等），
-REM 仍轮询端口，gateway LISTENING 后开 Dashboard。
+REM Fallback watcher: if the startup page cannot poll from file URLs,
+REM keep polling and reopen Config Center after the gateway is ready.
 start /B "" cmd /c ""%UCLAW_DIR%lib\wait-gateway.bat" %PORT%"
 
-REM gateway 首轮预热（后台、静默、非阻塞）：就绪后先唤醒 config/model 子系统，
-REM 用户首次点发送时不再等。移植自 4.0 first-turn-prewarm。
+REM Prewarm gateway in the background after it becomes ready.
 start /B "" "%NODE_BIN%" "%UCLAW_DIR%lib\prewarm.mjs" %PORT% uclaw >nul 2>&1
 
 echo.
@@ -194,7 +183,7 @@ echo   ========================================
 echo   Starting OpenClaw Gateway on port %PORT%...
 echo   First run on a USB drive may take 30-90 seconds
 echo   (unpacking bundled components). Please wait;
-echo   the Dashboard opens automatically when ready.
+echo   Config Center is open for model, key, recharge, and channel setup.
 echo   DO NOT close this window while using U-Claw!
 echo   ========================================
 echo.

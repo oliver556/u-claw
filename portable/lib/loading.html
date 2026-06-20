@@ -7,7 +7,12 @@
 <!--
   启动首屏（移植自 v2 u-clawx 4.0 的 splash 思路）。
   双击启动脚本后立刻打开本页，给用户即时反馈，消除"黑窗假死"体感。
-  本页每秒自查 gateway 是否就绪（fetch /ready），就绪后自动跳转 Dashboard。
+  本页每秒自查 gateway 是否就绪（fetch /ready）。
+
+  就绪后【不自动跳转】，而是停在选择页，给两个大按钮：
+    🚀 进入 Dashboard（开始聊天）
+    ⚙️ 配置 / 改模型（打开配置中心）
+  让用户自己决定去聊天还是改配置——避免"配过模型就被冲进 Dashboard、想改配置还得自己翻标签"。
 
   端口通过 URL 查询参数传入：loading.html?port=18789
   （启动脚本打开时拼好。默认 18789。）
@@ -63,22 +68,74 @@ h1 { font-size: 1.7em; font-weight: 600; margin-bottom: 8px; }
   margin-top: 30px; font-size: .82em; opacity: .65; line-height: 1.6;
 }
 a.manual { color: #fff; text-decoration: underline; opacity: .9; }
+
+/* —— 就绪后的选择页 —— */
+.ready-wrap { display: none; }
+body.ready .loading-wrap { display: none; }
+body.ready .ready-wrap { display: block; }
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 26px;
+}
+.btn {
+  display: block;
+  text-decoration: none;
+  color: #fff;
+  border-radius: 14px;
+  padding: 20px 22px;
+  font-size: 1.15em;
+  font-weight: 600;
+  line-height: 1.35;
+  cursor: pointer;
+  border: 2px solid rgba(255,255,255,.35);
+  background: rgba(255,255,255,.12);
+  transition: transform .12s ease, background .2s ease, box-shadow .2s ease;
+}
+.btn:hover { transform: translateY(-2px); background: rgba(255,255,255,.22); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.btn:active { transform: translateY(0); }
+.btn .sub { display: block; font-size: .68em; font-weight: 400; opacity: .8; margin-top: 4px; }
+.btn-primary { background: #ff7a45; border-color: #ff7a45; }
+.btn-primary:hover { background: #ff6a30; }
+.foot { margin-top: 24px; font-size: .82em; opacity: .65; line-height: 1.6; }
 </style>
 </head>
 <body>
   <div class="box">
-    <div class="logo">🦞</div>
-    <h1>U-Claw 正在启动</h1>
-    <div class="tip">首次从 U 盘启动需要展开内置组件，<br>稍等片刻，就绪后会自动打开。</div>
-    <div class="spinner"></div>
-    <div class="bar"><i></i></div>
-    <div class="status" id="status">正在等待 OpenClaw 网关…</div>
-    <div class="elapsed" id="elapsed"></div>
-    <div class="note">
-      慢 U 盘首次启动通常 30–90 秒。<br>
-      如果迟迟没反应，可手动打开
-      <a class="manual" id="manual" href="#">控制台</a>。
+
+    <!-- 启动中 -->
+    <div class="loading-wrap">
+      <div class="logo">🦞</div>
+      <h1>U-Claw 正在启动</h1>
+      <div class="tip">首次从 U 盘启动需要展开内置组件，<br>稍等片刻，就绪后会提示你下一步。</div>
+      <div class="spinner"></div>
+      <div class="bar"><i></i></div>
+      <div class="status" id="status">正在等待 OpenClaw 网关…</div>
+      <div class="elapsed" id="elapsed"></div>
+      <div class="note">
+        慢 U 盘首次启动通常 30–90 秒。<br>
+        如果迟迟没反应，可先打开
+        <a class="manual" id="manual" href="#">配置中心</a>。
+      </div>
     </div>
+
+    <!-- 就绪后：让用户自己选 -->
+    <div class="ready-wrap">
+      <div class="logo">🦞</div>
+      <h1>U-Claw 已就绪</h1>
+      <div class="tip">选择下一步 — 直接开始聊天，或先去配置模型和渠道。</div>
+      <div class="actions">
+        <a class="btn btn-primary" id="goDash">🚀 进入 Dashboard
+          <span class="sub">开始和 AI 聊天</span>
+        </a>
+        <a class="btn" id="goConfig">⚙️ 配置 / 改模型
+          <span class="sub">填写或更换模型 Key、充值、连接微信等渠道</span>
+        </a>
+      </div>
+      <div class="foot">没配过模型或余额不足？先点「配置 / 改模型」处理 Key 或充值。</div>
+    </div>
+
   </div>
 
 <script>
@@ -90,10 +147,12 @@ a.manual { color: #fff; text-decoration: underline; opacity: .9; }
   var dashboard = base + '/#token=' + encodeURIComponent(token);
   var configCenter = 'http://127.0.0.1:18788/';
 
-  document.getElementById('manual').href = dashboard;
+  document.getElementById('manual').href = configCenter;
+  document.getElementById('goDash').href = dashboard;
+  document.getElementById('goConfig').href = configCenter;
 
   var startedAt = Date.now();
-  var redirected = false;
+  var ready = false;
 
   function fmt(ms) {
     var s = Math.floor(ms / 1000);
@@ -101,23 +160,23 @@ a.manual { color: #fff; text-decoration: underline; opacity: .9; }
   }
 
   function tickElapsed() {
+    if (ready) return;
     document.getElementById('elapsed').textContent = fmt(Date.now() - startedAt);
   }
   setInterval(tickElapsed, 1000);
   tickElapsed();
 
-  function goDashboard() {
-    if (redirected) return;
-    redirected = true;
-    document.getElementById('status').textContent = '网关已就绪，正在打开控制台…';
-    setTimeout(function () { location.replace(dashboard); }, 400);
+  function showChoice() {
+    if (ready) return;
+    ready = true;
+    document.body.classList.add('ready');
   }
 
   function poll() {
-    if (redirected) return;
-    // /ready 就绪即跳。no-cors 下拿不到 status，但 fetch 成功 resolve 就说明端口活了。
+    if (ready) return;
+    // /ready 就绪即显示选择页。no-cors 下拿不到 status，但 fetch 成功 resolve 就说明端口活了。
     fetch(base + '/ready', { mode: 'no-cors', cache: 'no-store' })
-      .then(function () { goDashboard(); })
+      .then(function () { showChoice(); })
       .catch(function () {
         // 端口还没起，继续等
         setTimeout(poll, 1000);
@@ -127,7 +186,7 @@ a.manual { color: #fff; text-decoration: underline; opacity: .9; }
 
   // 兜底：5 分钟还没起来，提示去控制台
   setTimeout(function () {
-    if (!redirected) {
+    if (!ready) {
       document.getElementById('status').innerHTML =
         '启动较慢，可先打开 <a class="manual" href="' + configCenter + '">配置中心</a> 检查';
     }

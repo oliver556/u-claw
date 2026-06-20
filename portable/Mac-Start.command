@@ -166,35 +166,23 @@ OPENCLAW_MJS="$CORE_DIR/node_modules/openclaw/openclaw.mjs"
 "$NODE_BIN" "$OPENCLAW_MJS" gateway run --allow-unconfigured --force --port $PORT &
 GW_PID=$!
 
-# ---- 11. 是否已配置模型？openclaw.json 含 "providers" 即视为已配置 (issue #24) ----
-# 已配置：只开 Dashboard，不再每次弹配置页。未配置（首次）：开 Config Center 引导填 Key。
-MODEL_CONFIGURED=0
-if grep -q '"providers"' "$CONFIG_FILE" 2>/dev/null; then
-    MODEL_CONFIGURED=1
-fi
-
-# ---- 12. 立刻打开"启动首屏"，给用户即时反馈（移植自 4.0 splash）----
-# 首屏 loading.html 自己轮询 /ready，gateway 真就绪后自动跳 Dashboard——天然解决
-# "gateway 没起就开 Dashboard 拒连"的问题（同 Windows issue #46/#48）。
+# ---- 11. 立刻打开"启动首屏"，给用户即时反馈（移植自 4.0 splash）----
+# 首屏 loading.html 自己轮询 /ready，就绪后停在选择页，不再自动冲进 Dashboard。
 echo -e "  ${YELLOW}首次启动需准备运行环境，约 30-90 秒，请稍候...${NC}"
 # 用 file:// URL 确保 query string（?port=）能传给浏览器；裸路径 open 会把整串当文件名。
 open "file://$UCLAW_DIR/lib/loading.html?port=$PORT&token=uclaw" 2>/dev/null || true
-# 首次未配置：再开 Config Center 引导填 Key
-if [ "$MODEL_CONFIGURED" != "1" ]; then
-    open "http://127.0.0.1:18788/" 2>/dev/null || true
-fi
+# 每次都打开 Config Center，方便改模型、充值/获取 Key、连接微信等渠道。
+open "http://127.0.0.1:18788/" 2>/dev/null || true
 
-# ---- 12b. gateway 首轮预热（后台、静默、非阻塞）----
+# ---- 11b. gateway 首轮预热（后台、静默、非阻塞）----
 # 就绪后先唤醒 config/model 子系统，用户首次点发送时不再等。移植自 4.0 first-turn-prewarm。
 "$NODE_BIN" "$UCLAW_DIR/lib/prewarm.mjs" "$PORT" uclaw >/dev/null 2>&1 &
 
-# ---- 12c. 兜底：万一首屏页的 file:// fetch 被浏览器拦，仍轮询端口后开 Dashboard ----
+# ---- 11c. 兜底：万一首屏页的 file:// fetch 被浏览器拦，仍静默轮询端口 ----
 # 慢盘首启可达 90s+，轮询上限覆盖这段。最多 ~3 分钟（180×1s）。
 (
     for i in $(seq 1 180); do
         if curl -s -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
-            # 首屏页通常已自己跳转；这里仅作兜底，open 同一 URL 浏览器会复用已有标签。
-            [ "$MODEL_CONFIGURED" = "1" ] && open "http://127.0.0.1:$PORT/#token=uclaw" 2>/dev/null || true
             exit 0
         fi
         sleep 1

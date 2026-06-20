@@ -45,6 +45,41 @@ test('portable Windows launchers disable OpenClaw bonjour discovery', () => {
   }
 });
 
+test('Windows startup keeps Config Center available even after model setup', () => {
+  const script = readRepoFile('portable', 'Windows-Start.bat');
+
+  assert.match(
+    script,
+    /Opening Config Center[\s\S]*start "" http:\/\/127\.0\.0\.1:18788\//,
+    'Windows-Start.bat should always open Config Center for model/channel changes',
+  );
+  assert.doesNotMatch(
+    script,
+    /if not defined MODEL_CONFIGURED/,
+    'Config Center should not be gated on first-time setup only',
+  );
+});
+
+test('Windows gateway fallback does not force-open Dashboard', () => {
+  const script = readRepoFile('portable', 'lib', 'wait-gateway.bat');
+
+  assert.match(
+    script,
+    /:timeout[\s\S]*start "" http:\/\/127\.0\.0\.1:18788\//,
+    'wait-gateway.bat should return users to Config Center on timeout',
+  );
+  assert.doesNotMatch(
+    script,
+    /#token=uclaw/,
+    'fallback should not push configured users straight into Dashboard',
+  );
+  assert.doesNotMatch(
+    lineOf(script, ':ready') + '\n' + lineOf(script, 'exit /b 0'),
+    /start ""/,
+    'ready fallback should not open duplicate browser tabs',
+  );
+});
+
 test('PowerShell installer generated start.bat disables OpenClaw bonjour discovery', () => {
   const script = readRepoFile('install', 'install.ps1');
 
