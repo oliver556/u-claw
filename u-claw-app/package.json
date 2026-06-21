@@ -1,6 +1,6 @@
 {
   "name": "u-claw",
-  "version": "2.1.8",
+  "version": "2.1.9",
   "description": "U-Claw - AI 助手桌面版，插上 U 盘就能用",
   "main": "src/main.js",
   "author": "U-Claw <hello@u-claw.org> (https://u-claw.org)",
@@ -56,7 +56,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "hardenedRuntime": false,
@@ -66,19 +69,31 @@
       "title": "U-Claw",
       "icon": "assets/icon.icns",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico"
@@ -95,7 +110,9 @@
       "shortcutName": "U-Claw"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "assets/icon.png",
       "category": "Development"
     }
