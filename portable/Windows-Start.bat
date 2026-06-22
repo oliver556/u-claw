@@ -75,7 +75,7 @@ if not exist "%STATE_DIR%\openclaw.json" (
 )
 
 REM Check dependencies
-REM Note: avoid unescaped parens inside this block — cmd.exe treats ) as block-end.
+REM Note: avoid unescaped parens inside this block -- cmd.exe treats ) as block-end.
 if not exist "%CORE_DIR%\node_modules" (
     echo   ========================================
     echo   [WARN] node_modules not found
@@ -95,6 +95,19 @@ if not exist "%CORE_DIR%\node_modules" (
     echo.
     echo   Dependencies installed!
     echo.
+)
+
+REM Intranet/self-hosted model fix: keep the configured model host(s) off any
+REM corporate HTTP_PROXY/HTTPS_PROXY. OpenClaw routes ALL fetch through the env
+REM proxy when it is set, which breaks calls to internal model endpoints
+REM (e.g. http://10.x / 192.168.x / a machine-room IP). Add those hosts + loopback
+REM to NO_PROXY so they connect directly. Silent no-op when no proxy/model is set.
+for /f "usebackq tokens=1,* delims==" %%a in (`""%NODE_BIN%" "%UCLAW_DIR%lib\resolve-no-proxy.mjs" "%STATE_DIR%\openclaw.json" 2^>nul"`) do (
+    if "%%a"=="UCLAW_NO_PROXY" set "NO_PROXY=%%b"
+)
+if defined NO_PROXY (
+    set "no_proxy=%NO_PROXY%"
+    echo   Direct-connect (NO_PROXY): %NO_PROXY%
 )
 
 REM Async update check (non-blocking, 5s timeout, silent failure)

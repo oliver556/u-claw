@@ -138,6 +138,21 @@ if [ -f "$VERSION_FILE" ]; then
     "$NODE_BIN" "$UCLAW_DIR/lib/check-update.mjs" "$VERSION_FILE" "$STATE_DIR" >/dev/null 2>&1 &
 fi
 
+# ---- 7c. Intranet/self-hosted model fix ----
+# Keep the configured model host(s) off any corporate HTTP_PROXY/HTTPS_PROXY.
+# OpenClaw routes ALL fetch through the env proxy when it is set, which breaks
+# calls to internal model endpoints (http://10.x / 192.168.x / a machine-room IP).
+# Add those hosts + loopback to NO_PROXY so they connect directly.
+# Silent no-op when no proxy/model is configured.
+NO_PROXY_LINE="$("$NODE_BIN" "$UCLAW_DIR/lib/resolve-no-proxy.mjs" "$CONFIG_FILE" 2>/dev/null)"
+case "$NO_PROXY_LINE" in
+    UCLAW_NO_PROXY=*)
+        export NO_PROXY="${NO_PROXY_LINE#UCLAW_NO_PROXY=}"
+        export no_proxy="$NO_PROXY"
+        echo "  Direct-connect (NO_PROXY): $NO_PROXY"
+        ;;
+esac
+
 # ---- 8. Find available port ----
 PORT=18789
 while lsof -i :$PORT >/dev/null 2>&1; do

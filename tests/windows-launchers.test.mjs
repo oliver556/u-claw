@@ -80,6 +80,73 @@ test('Windows gateway fallback does not force-open Dashboard', () => {
   );
 });
 
+test('portable launchers route configured model hosts around the system proxy', () => {
+  const winStart = readRepoFile('portable', 'Windows-Start.bat');
+  assert.match(
+    winStart,
+    /resolve-no-proxy\.mjs[\s\S]*UCLAW_NO_PROXY[\s\S]*set "NO_PROXY=/,
+    'Windows-Start.bat should set NO_PROXY from resolve-no-proxy.mjs',
+  );
+
+  const macStart = readRepoFile('portable', 'Mac-Start.command');
+  assert.match(
+    macStart,
+    /resolve-no-proxy\.mjs[\s\S]*export NO_PROXY=/,
+    'Mac-Start.command should export NO_PROXY from resolve-no-proxy.mjs',
+  );
+});
+
+test('customer-facing .bat launchers are pure ASCII (cmd.exe mis-parses UTF-8 Chinese on GBK Windows)', () => {
+  // Non-ASCII bytes in a .bat get read as GBK by Chinese Windows cmd.exe, which
+  // garbles parsing ("usebackq is not a command"). Chinese UX must live in the
+  // node tools' stdout (rendered fine under chcp 65001), never in the .bat itself.
+  for (const name of [
+    'Windows-Start.bat',
+    'Windows-IntranetFix.bat',
+    'Windows-LocalModel.bat',
+    'OpenClaw-Doctor.bat',
+  ]) {
+    const bytes = readFileSync(join(repoRoot, 'portable', name));
+    const offending = bytes.findIndex((b) => b > 0x7f);
+    assert.equal(offending, -1, `${name} has a non-ASCII byte at offset ${offending}`);
+    assert.ok(bytes.includes(0x0d), `${name} must use CRLF line endings`);
+  }
+});
+
+test('macOS .command launchers are LF-only (CRLF breaks #!/bin/bash on macOS)', () => {
+  for (const name of [
+    'Mac-Start.command',
+    'Mac-IntranetFix.command',
+    'Mac-LocalModel.command',
+    'Mac-OpenClaw-Doctor.command',
+  ]) {
+    const bytes = readFileSync(join(repoRoot, 'portable', name));
+    const cr = bytes.indexOf(0x0d);
+    assert.equal(cr, -1, `${name} has a CR byte at offset ${cr} (must be LF-only)`);
+    assert.ok(bytes.toString('utf8').startsWith('#!/bin/bash'), `${name} must start with a clean shebang`);
+  }
+});
+
+test('macOS local-model / intranet launchers call the shared cross-platform scripts', () => {
+  assert.match(readRepoFile('portable', 'Mac-IntranetFix.command'), /lib\/intranet-check\.mjs/);
+  assert.match(readRepoFile('portable', 'Mac-LocalModel.command'), /lib\/setup-local-model\.mjs/);
+  assert.match(readRepoFile('portable', 'Mac-OpenClaw-Doctor.command'), /doctor --non-interactive/);
+});
+
+test('local-model setup launcher calls setup-local-model.mjs', () => {
+  const bat = readRepoFile('portable', 'Windows-LocalModel.bat');
+  assert.match(bat, /lib\\setup-local-model\.mjs/);
+});
+
+test('OpenClaw doctor launcher is read-only (no destructive repair flags)', () => {
+  const bat = readRepoFile('portable', 'OpenClaw-Doctor.bat');
+  assert.match(bat, /OPENCLAW_MJS%" doctor --non-interactive/);
+  // Must not auto-apply repairs that could overwrite user config/state.
+  assert.doesNotMatch(bat, /doctor[^\n]*--fix/);
+  assert.doesNotMatch(bat, /doctor[^\n]*--repair/);
+  assert.doesNotMatch(bat, /doctor[^\n]*--force/);
+});
+
 test('PowerShell installer generated start.bat disables OpenClaw bonjour discovery', () => {
   const script = readRepoFile('install', 'install.ps1');
 
