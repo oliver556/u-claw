@@ -107,7 +107,8 @@ for /f "usebackq tokens=1,* delims==" %%a in (`""%NODE_BIN%" "%UCLAW_DIR%lib\res
 )
 if defined NO_PROXY (
     set "no_proxy=%NO_PROXY%"
-    echo   Direct-connect (NO_PROXY): %NO_PROXY%
+    REM Note: no unescaped parens in echo inside this IF block - cmd treats ) as block-end.
+    echo   Direct-connect via NO_PROXY: %NO_PROXY%
 )
 
 REM Async update check (non-blocking, 5s timeout, silent failure)
@@ -134,7 +135,30 @@ if exist "%WECHAT_PLUGIN_SRC%\openclaw.plugin.json" (
     )
 )
 
-REM Find available port
+REM Start Config Server in background
+echo   Starting Config Center on port 18788...
+set "CONFIG_SERVER=%UCLAW_DIR%config-server"
+set "RUNTIME_JSON=%STATE_DIR%\runtime.json"
+del "%RUNTIME_JSON%" >nul 2>&1
+start /B "" "%NODE_BIN%" "%CONFIG_SERVER%\server.js" >nul 2>&1
+
+REM Wait for Config Server with polling instead of a fixed delay.
+REM It writes runtime.json with the actual fallback port when ready.
+set /a CFG_TRIES=0
+:wait_config
+if exist "%RUNTIME_JSON%" goto :config_ready
+set /a CFG_TRIES+=1
+if %CFG_TRIES% geq 20 goto :config_ready
+ping -n 1 -w 300 127.0.0.1 >nul 2>&1
+goto :wait_config
+:config_ready
+set "CONFIG_PORT=18788"
+if exist "%RUNTIME_JSON%" (
+    for /f "usebackq tokens=*" %%p in (`powershell -NoProfile -Command "try { (Get-Content -Raw '%RUNTIME_JSON%' | ConvertFrom-Json).configServerPort } catch {}" 2^>nul`) do set "CONFIG_PORT=%%p"
+)
+echo   Config Center port: %CONFIG_PORT%
+
+REM Find available gateway port after Config Center has bound its port.
 set PORT=18789
 :check_port
 netstat -an | findstr ":%PORT% " | findstr "LISTENING" >nul 2>&1
@@ -152,24 +176,6 @@ if %errorlevel%==0 (
 echo   Starting OpenClaw on port %PORT%...
 echo.
 
-REM Start Config Server in background
-echo   Starting Config Center on port 18788...
-set "CONFIG_SERVER=%UCLAW_DIR%config-server"
-start /B "" "%NODE_BIN%" "%CONFIG_SERVER%\server.js" >nul 2>&1
-
-REM Wait for Config Server with polling instead of a fixed delay.
-REM It is usually ready in under one second. Poll about every 0.3 seconds,
-REM up to about 6 seconds, then continue anyway.
-set /a CFG_TRIES=0
-:wait_config
-netstat -an | findstr ":18788 " | findstr "LISTENING" >nul 2>&1
-if %errorlevel%==0 goto :config_ready
-set /a CFG_TRIES+=1
-if %CFG_TRIES% geq 20 goto :config_ready
-ping -n 1 -w 300 127.0.0.1 >nul 2>&1
-goto :wait_config
-:config_ready
-
 REM Do not open Dashboard before the gateway is ready.
 REM Slow USB drives may need tens of seconds to stage bundled deps.
 REM Open the local startup page now, and always open Config Center too.
@@ -182,11 +188,11 @@ set "LOADING_URL=file:///%LOADING_PATH:\=/%?port=%PORT%&token=uclaw"
 start "" "%LOADING_URL%"
 
 echo   Opening Config Center...
-start "" http://127.0.0.1:18788/
+start "" http://127.0.0.1:%CONFIG_PORT%/
 
 REM Fallback watcher: if the startup page cannot poll from file URLs,
 REM keep polling and reopen Config Center after the gateway is ready.
-start /B "" cmd /c ""%UCLAW_DIR%lib\wait-gateway.bat" %PORT%"
+start /B "" cmd /c ""%UCLAW_DIR%lib\wait-gateway.bat" %PORT% %CONFIG_PORT%"
 
 REM Prewarm gateway in the background after it becomes ready.
 start /B "" "%NODE_BIN%" "%UCLAW_DIR%lib\prewarm.mjs" %PORT% uclaw >nul 2>&1

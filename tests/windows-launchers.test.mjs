@@ -50,7 +50,7 @@ test('Windows startup keeps Config Center available even after model setup', () 
 
   assert.match(
     script,
-    /Opening Config Center[\s\S]*start "" http:\/\/127\.0\.0\.1:18788\//,
+    /Opening Config Center[\s\S]*start "" http:\/\/127\.0\.0\.1:%CONFIG_PORT%\//,
     'Windows-Start.bat should always open Config Center for model/channel changes',
   );
   assert.doesNotMatch(
@@ -65,7 +65,7 @@ test('Windows gateway fallback does not force-open Dashboard', () => {
 
   assert.match(
     script,
-    /:timeout[\s\S]*start "" http:\/\/127\.0\.0\.1:18788\//,
+    /:timeout[\s\S]*start "" http:\/\/127\.0\.0\.1:%CONFIG_PORT%\//,
     'wait-gateway.bat should return users to Config Center on timeout',
   );
   assert.doesNotMatch(
@@ -145,6 +145,48 @@ test('OpenClaw doctor launcher is read-only (no destructive repair flags)', () =
   assert.doesNotMatch(bat, /doctor[^\n]*--fix/);
   assert.doesNotMatch(bat, /doctor[^\n]*--repair/);
   assert.doesNotMatch(bat, /doctor[^\n]*--force/);
+});
+
+// cmd.exe treats ')' as the end of an IF/FOR ( ... ) block, so an unescaped paren in
+// an `echo` *inside* a block aborts parsing ("was unexpected at this time") and the
+// window flash-closes. This shipped once in v2.1.10 (echo Direct-connect (NO_PROXY)).
+// Track block depth structurally and flag any unescaped ( or ) in echoes inside a block.
+function unescapedParenEchoesInsideBlocks(bat) {
+  const offenders = [];
+  let depth = 0;
+  for (const raw of bat.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (depth > 0 && /^echo\b/i.test(line)) {
+      // cmd eats an unescaped ')' that sits at the END of an echo (cosmetic: the ')'
+      // just disappears). The flash-exit only happens when a ')' is followed by more
+      // text on the line (e.g. "(NO_PROXY): value" → ')' closes the block, ": value"
+      // then errors). So: drop escaped ^), drop trailing ')'/whitespace, and flag any
+      // ')' that survives (meaning it had text after it).
+      let s = line.replace(/\^\)/g, '').replace(/[)\s]+$/, '');
+      if (s.includes(')')) offenders.push(raw.trim());
+    }
+    // structural depth: ') else (' keeps depth; leading ')' closes; if/for line ending in '(' opens
+    if (/^\)\s*else\b.*\($/i.test(line)) { /* same depth */ }
+    else if (/^\)/.test(line)) depth = Math.max(0, depth - 1);
+    if (/^\($/.test(line) || /\b(if|for)\b.*[^^]\(\s*$/i.test(line)) depth += 1;
+  }
+  return offenders;
+}
+
+test('Windows launchers have no unescaped parens in echoes inside IF/FOR blocks (v2.1.10 flash-exit regression)', () => {
+  for (const name of [
+    'Windows-Start.bat',
+    'Windows-IntranetFix.bat',
+    'Windows-LocalModel.bat',
+    'OpenClaw-Doctor.bat',
+    'Windows-Diagnose.bat',
+    'Windows-Menu.bat',
+    'Windows-Install.bat',
+  ]) {
+    const bat = readRepoFile('portable', name);
+    const offenders = unescapedParenEchoesInsideBlocks(bat);
+    assert.deepEqual(offenders, [], `${name} has unescaped parens in block echo(es): ${offenders.join(' | ')}`);
+  }
 });
 
 test('PowerShell installer generated start.bat disables OpenClaw bonjour discovery', () => {

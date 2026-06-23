@@ -246,7 +246,13 @@ async function handleWeChatStatus(sessionKey) {
     return { status: 'expired', message: 'Session expired' };
   }
 
-  const result = await pollWeChatQrStatus(login.apiBaseUrl, login.qrcode);
+  // 状态轮询用 pollBaseUrl（IDC 重定向后会指向新主机）；二维码获取/刷新始终用原始
+  // apiBaseUrl（与官方插件一致：refresh 回到固定主机，只有 status 轮询跟随重定向）。
+  const result = await pollWeChatQrStatus(login.pollBaseUrl || login.apiBaseUrl, login.qrcode);
+  // 微信登录状态流转日志（跳过高频的 wait，便于排查"扫码卡死"类问题）。
+  if (result.status && result.status !== 'wait') {
+    console.log(`[wechat] status=${result.status}` + (result.redirect_host ? ` redirect_host=${result.redirect_host}` : ''));
+  }
 
   if (result.status === 'expired') {
     // Try to refresh QR code
@@ -261,6 +267,8 @@ async function handleWeChatStatus(sessionKey) {
     login.qrcode = refreshed.qrcode;
     login.qrcodeUrl = newQr;
     login.startedAt = Date.now();
+    // 新二维码来自原始主机，重置轮询主机，避免拿新码去轮询旧的重定向主机。
+    login.pollBaseUrl = null;
     return { status: 'refreshed', qrcodeUrl: newQr };
   }
 
@@ -300,6 +308,18 @@ async function handleWeChatStatus(sessionKey) {
       pluginInstalled: pluginResult.installed,
       message: 'WeChat connected! Restart Gateway to activate.',
     };
+  }
+
+  // IDC 重定向：用户扫码后，ilink 服务端可能要求把后续轮询切换到另一个数据中心主机
+  // (status=scaned_but_redirect + redirect_host)。必须跟着切，否则一直轮询旧主机，
+  // 扫码后永远等不到 confirmed——表现为「扫了码却卡死不前进」。
+  // 同款逻辑见官方插件 openclaw-weixin/src/auth/login-qr.ts 的 scaned_but_redirect 分支。
+  if (result.status === 'scaned_but_redirect') {
+    if (result.redirect_host) {
+      login.pollBaseUrl = 'https://' + result.redirect_host;
+    }
+    // 对前端按「已扫码」处理：显示提示并继续轮询，下一轮已指向新主机。
+    return { status: 'scaned' };
   }
 
   return { status: result.status };

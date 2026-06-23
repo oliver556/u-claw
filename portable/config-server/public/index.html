@@ -678,7 +678,9 @@ async function saveChannelsAndOpen() {
     var channels = {};
 
     var tgToken = document.getElementById('ch-telegram-token').value.trim();
-    if (tgToken) channels.telegram = { enabled: true, token: tgToken, dmPolicy: 'pairing' };
+    // OpenClaw 顶层 telegram 渠道只认 botToken（旧 token 别名仅在 accounts.<id> 里有效）。
+    // 之前写成 token 会被静默忽略 → Telegram 接不上。
+    if (tgToken) channels.telegram = { enabled: true, botToken: tgToken, dmPolicy: 'pairing' };
 
     var qqId = document.getElementById('ch-qqbot-appid').value.trim();
     var qqSecret = document.getElementById('ch-qqbot-secret').value.trim();

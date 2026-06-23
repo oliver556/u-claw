@@ -477,12 +477,12 @@ echo   Fetching latest version...
 for /f "tokens=*" %%v in ('"%NODE_BIN%" -e "const https=require('https');https.get('https://registry.npmmirror.com/openclaw/latest',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{console.log(JSON.parse(d).version)}catch(e){console.log('error')}})})" 2^>nul') do set LATEST_VER=%%v
 
 if "!LATEST_VER!"=="" (
-    echo   Could not fetch latest version (network issue?)
+    echo   Could not fetch latest version ^(network issue?^)
     pause
     goto :menu
 )
 if "!LATEST_VER!"=="error" (
-    echo   Could not fetch latest version (network issue?)
+    echo   Could not fetch latest version ^(network issue?^)
     pause
     goto :menu
 )
@@ -550,7 +550,7 @@ if !BK_COUNT! gtr 3 (
         echo   Cleaned !DEL_NUM! old backups.
     )
 ) else (
-    echo   Backups: !BK_COUNT! (no cleanup needed)
+    echo   Backups: !BK_COUNT! ^(no cleanup needed^)
 )
 
 REM Clean old logs (>7 days)
@@ -598,7 +598,7 @@ if "%plgchoice%"=="b" (
     echo.
     echo   Common plugins:
     echo     @icesword760/openclaw-wechat  - WeChat
-    echo     @nicepkg/openclaw-plugin-qq   - QQ (community)
+    echo     @nicepkg/openclaw-plugin-qq   - QQ ^(community^)
     echo.
     set /p plgname="  Plugin name (empty to cancel): "
     if not "!plgname!"=="" (
