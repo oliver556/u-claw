@@ -19,13 +19,13 @@
         {
           "role": "user",
           "content": "[REDACTED USER TEXT:short]",
-          "timestamp": 1786128514043,
+          "timestamp": 1786129709920,
           "idempotencyKey": "contract-tool-run-1:user",
           "__openclaw": {
             "senderIsOwner": true,
-            "id": "b3bba23a",
+            "id": "e4ea4c4f",
             "idempotencyKey": "contract-tool-run-1:user",
-            "recordTimestampMs": 1786128515642,
+            "recordTimestampMs": 1786129711040,
             "seq": 1
           }
         },
@@ -58,11 +58,11 @@
             }
           },
           "stopReason": "toolUse",
-          "timestamp": 1786128515661,
+          "timestamp": 1786129711053,
           "responseId": "chatcmpl-contract",
           "__openclaw": {
-            "id": "33910b2b",
-            "recordTimestampMs": 1786128515697,
+            "id": "9185ea43",
+            "recordTimestampMs": 1786129711082,
             "seq": 2
           }
         },
@@ -77,10 +77,10 @@
             }
           ],
           "isError": false,
-          "timestamp": 1786128515773,
+          "timestamp": 1786129711147,
           "__openclaw": {
-            "id": "36d314d3",
-            "recordTimestampMs": 1786128515776,
+            "id": "0f04dd8a",
+            "recordTimestampMs": 1786129711150,
             "seq": 3
           }
         },
@@ -110,11 +110,11 @@
             }
           },
           "stopReason": "stop",
-          "timestamp": 1786128515782,
+          "timestamp": 1786129711153,
           "responseId": "chatcmpl-contract",
           "__openclaw": {
-            "id": "58235002",
-            "recordTimestampMs": 1786128515805,
+            "id": "94dd09f7",
+            "recordTimestampMs": 1786129711172,
             "seq": 4
           }
         }
@@ -147,7 +147,7 @@
           "surface": "webchat",
           "chatType": "direct"
         },
-        "updatedAt": 1786128515839,
+        "updatedAt": 1786129711211,
         "archived": false,
         "pinned": false,
         "unread": false,
@@ -169,9 +169,9 @@
         "fastAutoOnSeconds": 60,
         "totalTokensFresh": false,
         "status": "done",
-        "startedAt": 1786128515617,
-        "endedAt": 1786128515837,
-        "runtimeMs": 220,
+        "startedAt": 1786129711025,
+        "endedAt": 1786129711197,
+        "runtimeMs": 172,
         "effectiveResponseUsage": "off",
         "modelProvider": "contract",
         "model": "contract-model",
@@ -184,7 +184,7 @@
           "channel": "webchat"
         },
         "lastChannel": "webchat",
-        "hasActiveRun": true,
+        "hasActiveRun": false,
         "activeRunIds": []
       },
       "thinkingLevel": "off"
