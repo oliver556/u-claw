@@ -60,6 +60,22 @@ test("uses NodeNext for Node workspaces and Bundler for frontend", async () => {
   assert.equal(frontend.compilerOptions.moduleResolution, "Bundler");
 });
 
+test("typechecks Node workspace tests without emitting them from builds", async () => {
+  for (const workspace of ["shared", "adapter", "desktop"]) {
+    const [workspacePackage, typecheckConfig, buildConfig] = await Promise.all([
+      readJson(`${workspace}/package.json`),
+      readJson(`${workspace}/tsconfig.json`),
+      readJson(`${workspace}/tsconfig.build.json`)
+    ]);
+
+    assert.equal(typecheckConfig.compilerOptions.noEmit, true);
+    assert.deepEqual(typecheckConfig.include, ["src", "tests"]);
+    assert.equal(buildConfig.compilerOptions.noEmit, false);
+    assert.deepEqual(buildConfig.include, ["src"]);
+    assert.match(workspacePackage.scripts.build, /tsconfig\.build\.json/);
+  }
+});
+
 test("typechecks frontend tests without emitting them from builds", async () => {
   const [frontendPackage, frontendConfig, frontendBuildConfig] = await Promise.all([
     readJson("frontend/package.json"),
