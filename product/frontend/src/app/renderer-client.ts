@@ -105,7 +105,7 @@ let sequence = 0;
 const nextId = (prefix: string) => `${prefix}-${++sequence}`;
 
 export function createRendererClient(bridge: RendererClientBridge): RendererClient {
-  type SendQueueState = { queue: EventQueue<MessageEvent> };
+  type SendQueueState = { queue: EventQueue<MessageEvent>; cancelStreamRequested: boolean };
   const sendQueues = new Map<string, SendQueueState>();
   const subscriptionQueues = new Map<string, EventQueue<unknown>>();
   let unsubscribe: (() => void) | undefined;
@@ -179,7 +179,7 @@ export function createRendererClient(bridge: RendererClientBridge): RendererClie
       watch: (sessionId, signal) => subscribe("chat.watch", { sessionId }, signal),
       send: (input, signal) => {
         const queue = new EventQueue<MessageEvent>(true);
-        const state = { queue };
+        const state: SendQueueState = { queue, cancelStreamRequested: false };
         return (async function* () {
           let runId: string | undefined;
           let cancelPending: (() => void) | undefined;
@@ -193,8 +193,8 @@ export function createRendererClient(bridge: RendererClientBridge): RendererClie
                 queue.cancel();
                 return;
               }
-              sendQueues.delete(input.clientRequestId);
               queue.cancel();
+              state.cancelStreamRequested = true;
               void invokeRaw("chat.cancel-stream", { clientRequestId: input.clientRequestId }).catch(() => undefined);
             };
             signal?.addEventListener("abort", cancelPending, { once: true });
@@ -216,8 +216,10 @@ export function createRendererClient(bridge: RendererClientBridge): RendererClie
             if (cancelPending) signal?.removeEventListener("abort", cancelPending);
             const ownsStream = sendQueues.get(input.clientRequestId) === state;
             if (ownsStream) sendQueues.delete(input.clientRequestId);
-            if (signal?.aborted && runId) await invokeRaw("chat.abort", { runId }).catch(() => undefined);
-            if (ownsStream) await invokeRaw("chat.cancel-stream", { clientRequestId: input.clientRequestId }).catch(() => undefined);
+            if (ownsStream && signal?.aborted && runId) await invokeRaw("chat.abort", { runId }).catch(() => undefined);
+            if (ownsStream && !state.cancelStreamRequested) {
+              await invokeRaw("chat.cancel-stream", { clientRequestId: input.clientRequestId }).catch(() => undefined);
+            }
           }
         })();
       },

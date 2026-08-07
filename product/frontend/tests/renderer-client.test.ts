@@ -74,4 +74,29 @@ describe("createRendererClient", () => {
     await expect(secondNext).resolves.toEqual({ value: { type: "started", runId: "run-2", sessionId: "session-1" }, done: false });
     client.dispose();
   });
+
+  it("does not abort a shared runId when an older send loses ownership", async () => {
+    const invoke = vi.fn(async (request: ClientIpcRequest): Promise<IpcResponse> => {
+      if (request.method === "chat.send") {
+        return { method: request.method, requestId: request.requestId, ok: true, result: { clientRequestId: "same", runId: "shared-run" } };
+      }
+      return { method: request.method, requestId: request.requestId, ok: true, result: null } as IpcResponse;
+    });
+    const client = createRendererClient({ invoke, subscribe: () => vi.fn() });
+    const input = { sessionId: "session-1", clientRequestId: "same", blocks: [{ type: "text" as const, text: "hello", format: "plain" as const }] };
+    const oldController = new AbortController();
+    const first = client.chat.send(input, oldController.signal)[Symbol.asyncIterator]();
+    const firstNext = first.next();
+    await vi.waitFor(() => expect(invoke.mock.calls.filter(([request]) => request.method === "chat.send")).toHaveLength(1));
+
+    const second = client.chat.send(input)[Symbol.asyncIterator]();
+    void second.next();
+    oldController.abort();
+    await expect(firstNext).resolves.toEqual({ value: undefined, done: true });
+    await Promise.resolve();
+
+    expect(invoke.mock.calls.filter(([request]) => request.method === "chat.abort")).toHaveLength(0);
+    expect(invoke.mock.calls.filter(([request]) => request.method === "chat.cancel-stream")).toHaveLength(0);
+    client.dispose();
+  });
 });
