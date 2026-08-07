@@ -1,7 +1,7 @@
 import { UClawErrorSchema } from "@uclaw/shared";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type z } from "zod";
 
 import { AsyncEventQueue, OpenClawClient, UClawUnsupportedError, type OpenClawTransport } from "../src/openclaw-client.js";
@@ -17,7 +17,6 @@ class FakeTransport implements OpenClawTransport {
   readonly fixtures = new Map<string, JsonValue>();
   readonly fixtureQueues = new Map<string, JsonValue[]>();
   readonly requestGates = new Map<string, Promise<JsonValue>>();
-  readonly requestSignals: Array<AbortSignal | undefined> = [];
   readonly eventListeners = new Set<{ event: string; listener: (frame: EventFrame) => void }>();
   readonly sequenceGapListeners = new Set<(gap: { expected: number; received: number }) => void>();
   readonly closeListeners = new Set<(error: Error) => void>();
@@ -64,10 +63,9 @@ class FakeTransport implements OpenClawTransport {
   }
 
   readonly router = {
-    request: async <T>(method: string, params: JsonValue, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> => {
+    request: async <T>(method: string, params: JsonValue, schema: z.ZodType<T>): Promise<T> => {
       this.calls.push(method);
       this.requests.push({ method, params });
-      this.requestSignals.push(signal);
       const queued = this.fixtureQueues.get(method)?.shift();
       return schema.parse(await (this.requestGates.get(method) ?? Promise.resolve(queued ?? this.fixtures.get(method))));
     },
@@ -220,10 +218,34 @@ describe("OpenClawClient", () => {
     const controller = new AbortController();
     const iterator = client.chat.send({ sessionId: "session-1", clientRequestId: "request-1", blocks: [{ type: "text", text: "hello", format: "plain" }] }, controller.signal)[Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toMatchObject({ value: { type: "started" } });
-    expect(transport.requestSignals.at(-1)).toBe(controller.signal);
     const waiting = iterator.next();
     controller.abort();
     await expect(waiting).resolves.toEqual({ value: undefined, done: true });
+  });
+
+  it("aborts a late accepted run after local pre-start cancellation", async () => {
+    const transport = new FakeTransport();
+    transport.fixtures.set("chat.abort", {});
+    let acceptSend: (value: JsonValue) => void = () => undefined;
+    transport.requestGates.set("chat.send", new Promise((resolve) => { acceptSend = resolve; }));
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+    const controller = new AbortController();
+    const iterator = client.chat.send({
+      sessionId: "session-1", clientRequestId: "request-late-accepted", blocks: [{ type: "text", text: "cancel", format: "plain" }],
+    }, controller.signal)[Symbol.asyncIterator]();
+    const first = iterator.next();
+    await Promise.resolve();
+
+    controller.abort();
+    const localResult = await Promise.race([
+      first,
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 20)),
+    ]);
+    acceptSend({ runId: "run-late-accepted", status: "accepted" });
+
+    expect(localResult).toEqual({ value: undefined, done: true });
+    await vi.waitFor(() => expect(transport.requests).toContainEqual({ method: "chat.abort", params: { runId: "run-late-accepted" } }));
   });
 
   it("removes chat listener when send RPC rejects", async () => {

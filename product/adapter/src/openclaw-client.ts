@@ -345,12 +345,32 @@ export class OpenClawClient implements UClawClient {
       else enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
     })];
     try {
-      const accepted = await this.options.transport.router.request("chat.send", {
+      if (signal?.aborted === true) return;
+      const acceptedRequest = this.options.transport.router.request("chat.send", {
         sessionKey: input.sessionId,
         message: text,
         idempotencyKey: input.clientRequestId,
         ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
-      }, SendResponseSchema, signal);
+      }, SendResponseSchema);
+      let removeAbortListener = (): void => undefined;
+      const cancellation = new Promise<{ kind: "cancelled" }>((resolve) => {
+        const onAbort = (): void => resolve({ kind: "cancelled" });
+        removeAbortListener = () => signal?.removeEventListener("abort", onAbort);
+        if (signal?.aborted === true) onAbort();
+        else signal?.addEventListener("abort", onAbort, { once: true });
+      });
+      const outcome = await Promise.race([
+        acceptedRequest.then((accepted) => ({ kind: "accepted" as const, accepted })),
+        cancellation,
+      ]);
+      removeAbortListener();
+      if (outcome.kind === "cancelled") {
+        void acceptedRequest
+          .then((accepted) => this.chat.abort(accepted.runId))
+          .catch(() => undefined);
+        return;
+      }
+      const accepted = outcome.accepted;
       expectedRunId = accepted.runId;
       for (const mapped of buffered.splice(0)) enqueue(mapped);
       yield { type: "started", runId: accepted.runId, sessionId: input.sessionId };
