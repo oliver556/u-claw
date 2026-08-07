@@ -34,7 +34,7 @@ import { ReconnectPolicy, type SequenceGap } from "./reconnect.js";
 import { AdapterServiceError, RpcClosedError, RpcProtocolError, RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
 
 interface OpenClawRouter {
-  request<T>(method: string, params: JsonValue, schema: z.ZodType<T>): Promise<T>;
+  request<T>(method: string, params: JsonValue, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T>;
   onEvent(event: string, listener: (frame: EventFrame) => void): () => void;
   onSequenceGap(listener: (gap: SequenceGap) => void): () => void;
   onClose(listener: (error: Error) => void): () => void;
@@ -350,7 +350,7 @@ export class OpenClawClient implements UClawClient {
         message: text,
         idempotencyKey: input.clientRequestId,
         ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
-      }, SendResponseSchema);
+      }, SendResponseSchema, signal);
       expectedRunId = accepted.runId;
       for (const mapped of buffered.splice(0)) enqueue(mapped);
       yield { type: "started", runId: accepted.runId, sessionId: input.sessionId };
