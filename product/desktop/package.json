@@ -6,7 +6,7 @@
   "main": "dist/entry.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-preload.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -15,6 +15,7 @@
     "@uclaw/shared": "0.1.0"
   },
   "devDependencies": {
+    "esbuild": "^0.28.0",
     "electron": "^40.4.0",
     "vitest": "^3.2.4"
   }
