@@ -362,7 +362,79 @@ describe("runDesktopMain", () => {
     })).rejects.toThrow("exited before readiness");
 
     expect(createWindow).not.toHaveBeenCalled();
-    expect(selectPort.mock.calls).toEqual([[[]], [[18793]]]);
+    expect(selectPort).toHaveBeenCalledTimes(1);
+    expect(selectPort).toHaveBeenNthCalledWith(1, [], expect.any(AbortSignal));
     expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("aborts readiness on quit without spawning another port or creating a window", async () => {
+    class FakeChild extends EventEmitter {
+      pid: number;
+      exitCode: number | null = null;
+      killed = false;
+      kill = vi.fn((signal?: NodeJS.Signals | number) => {
+        if (signal === "SIGTERM") {
+          queueMicrotask(() => {
+            this.exitCode = 0;
+            this.emit("exit", 0, null);
+          });
+        }
+        return true;
+      });
+      constructor(pid: number) {
+        super();
+        this.pid = pid;
+      }
+    }
+    const children = [new FakeChild(8130), new FakeChild(8131)];
+    const spawn = vi.fn(() => children[spawn.mock.calls.length - 1]!);
+    const listeners = new Map<string, (event?: { preventDefault(): void }) => void>();
+    let finishFetch: ((value: { ok: boolean }) => void) | undefined;
+    let fetchSignal: AbortSignal | undefined;
+    const fetch = vi.fn((_url: string, init: { signal: AbortSignal }) => {
+      fetchSignal = init.signal;
+      return new Promise<{ ok: boolean }>((resolve) => { finishFetch = resolve; });
+    });
+    const createWindow = vi.fn(async () => ({
+      show: vi.fn(),
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      restore: vi.fn(),
+      focus: vi.fn(),
+    }));
+    const pending = runDesktopMain({
+      spawn,
+      buildGatewayLaunchOptions: (port) => ({ executable: "node", args: [String(port)] }),
+      requiredMethods: [],
+      probeCapabilities: vi.fn(async () => ({ helloOk: true, methods: [] })),
+      dispatchClient: vi.fn(),
+      selectPort: async (excluded) => excluded.length === 0 ? 18789 : 18790,
+      fetch,
+      now: () => 0,
+      sleep: vi.fn(async () => undefined),
+    }, {
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn((event: string, listener: (event?: { preventDefault(): void }) => void) => {
+          listeners.set(event, listener);
+        }),
+      },
+      createWindow,
+      registerIpc: vi.fn(() => vi.fn()),
+    });
+    while (fetch.mock.calls.length === 0) await Promise.resolve();
+
+    const quitEvent = { preventDefault: vi.fn() };
+    listeners.get("before-quit")?.(quitEvent);
+    finishFetch?.({ ok: true });
+
+    await expect(pending).resolves.toBeNull();
+    expect(quitEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(fetchSignal?.aborted).toBe(true);
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(children[0].kill).toHaveBeenCalledWith("SIGTERM");
+    expect(createWindow).not.toHaveBeenCalled();
   });
 });
