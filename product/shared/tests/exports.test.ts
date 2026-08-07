@@ -21,7 +21,7 @@ describe("public type exports", () => {
   });
 
   it("uses family-specific approval service inputs", () => {
-    expectTypeOf<Parameters<ApprovalService["resolveExec"]>[0]>().toMatchTypeOf<{ family: "exec" }>();
-    expectTypeOf<Parameters<ApprovalService["resolvePlugin"]>[0]>().toMatchTypeOf<{ family: "plugin" }>();
+    expectTypeOf<Parameters<ApprovalService["resolveExec"]>[0]>().toMatchTypeOf<{ ref: { family: "exec" } }>();
+    expectTypeOf<Parameters<ApprovalService["resolvePlugin"]>[0]>().toMatchTypeOf<{ ref: { family: "plugin" } }>();
   });
 });

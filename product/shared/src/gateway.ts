@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { ISODateTimeSchema, ModelRefSchema } from "./common.js";
-import { UClawErrorSchema } from "./errors.js";
+import { RendererSafeTextSchema, UClawErrorSchema } from "./errors.js";
 
 export const ProtocolVersionSchema = z.literal(4);
 export type ProtocolVersion = z.infer<typeof ProtocolVersionSchema>;
@@ -87,7 +87,7 @@ export const GatewayStatusWireSchema = z
     businessAvailable: z.boolean(),
     since: ISODateTimeSchema,
     attempt: z.number().int().nonnegative(),
-    endpointLabel: z.string().optional(),
+    endpointLabel: RendererSafeTextSchema.optional(),
     openClawVersion: z.string().optional(),
     activeModel: ModelRefSchema.optional(),
     usb: GatewayUsbStatusSchema,
