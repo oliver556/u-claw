@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { RendererSafeSummarySchema, UClawErrorSchema, normalizeKey } from "../src/index.js";
+import {
+  RendererSafeSummarySchema,
+  RendererSafeTextSchema,
+  UClawErrorSchema,
+  normalizeKey,
+} from "../src/index.js";
 
 describe("error contracts", () => {
   it("parses a renderer-safe error", () => {
@@ -63,6 +68,24 @@ describe("error contracts", () => {
     });
 
     expect(parsed.message).toBe(message);
+  });
+
+  it.each([
+    ["Bearer raw-secret-value", "Bearer [REDACTED]"],
+    ["Bearer authentication required", "Bearer authentication required"],
+    ["Bearer required", "Bearer required"],
+    ["Bearer missing", "Bearer missing"],
+    ["Bearer expired", "Bearer expired"],
+    ["Bearer configured", "Bearer configured"],
+    ["Bearer not configured", "Bearer not configured"],
+    ["Bearer unavailable", "Bearer unavailable"],
+    ["Bearer invalid", "Bearer invalid"],
+    ["Bearer redacted", "Bearer redacted"],
+    ["Token: not configured", "Token: not configured"],
+    ["access_token=not configured", "access_token=not configured"],
+    ["Authorization: Bearer not configured", "Authorization: Bearer not configured"],
+  ])("redacts credential text with exact output: %s", (input, expected) => {
+    expect(RendererSafeTextSchema.parse(input)).toBe(expected);
   });
 
   it.each([
