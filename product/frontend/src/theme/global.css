@@ -50,11 +50,14 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .window-controls button { display: grid; place-items: center; }
 .window-controls button:hover { background: var(--uclaw-bg-hover); }
 .window-controls .window-close:hover { color: var(--uclaw-on-accent); background: var(--uclaw-close-hover); }
+.window-error { position: absolute; z-index: 20; top: 52px; right: 8px; max-width: min(360px, calc(100vw - 16px)); padding: 7px 10px; border: 1px solid var(--uclaw-error); border-radius: 6px; color: var(--uclaw-error); background: var(--uclaw-error-bg); box-shadow: 0 4px 14px var(--uclaw-shadow); font-size: 12px; -webkit-app-region: no-drag; }
 
 .workspace-grid { min-width: 0; min-height: 0; display: grid; grid-template-columns: 72px 264px minmax(470px, 1fr) 300px; transition: grid-template-columns 160ms cubic-bezier(.16,1,.3,1); }
 .workspace-grid.sessions-collapsed { grid-template-columns: 72px 0 minmax(470px, 1fr) 300px; }
 .workspace-grid.context-collapsed { grid-template-columns: 72px 264px minmax(470px, 1fr) 0; }
 .workspace-grid.sessions-collapsed.context-collapsed { grid-template-columns: 72px 0 minmax(470px, 1fr) 0; }
+.workspace-grid.secondary-layout { grid-template-columns: 72px minmax(0, 1fr); }
+.workspace-grid.secondary-layout .main-canvas { grid-column: 2; }
 
 .primary-rail { position: relative; z-index: 15; min-height: 0; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-right: 1px solid var(--uclaw-border-secondary); background: var(--uclaw-bg-sidebar); }
 .primary-rail { grid-column: 1; }
@@ -165,8 +168,9 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .status-line { min-height: 44px; display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--uclaw-border-secondary); }
 .status-line strong { color: var(--uclaw-success); font-weight: 600; }
 
-.dialog-mask { position: fixed; inset: 0; z-index: 80; display: flex; justify-content: center; align-items: flex-start; padding-top: 80px; background: var(--uclaw-bg-mask); }
-.command-dialog { width: min(620px, calc(100% - 32px)); min-height: 52px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 0 14px; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); box-shadow: 0 16px 48px var(--uclaw-shadow); }
+.command-modal { top: 80px; padding-bottom: 0; }
+.command-modal .ant-modal-content { overflow: hidden; padding: 0; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); box-shadow: 0 16px 48px var(--uclaw-shadow); }
+.command-dialog { width: 100%; min-height: 52px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 0 14px; }
 .command-dialog input { width: 100%; height: 50px; border: 0; outline: 0; background: transparent; }
 
 @media (max-width: 1180px) {
@@ -201,6 +205,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
   .window-controls { width: 44px; height: 44px; grid-template-columns: 44px; }
   .window-controls .window-close:hover { color: inherit; background: var(--uclaw-bg-hover); }
   .workspace-grid, .workspace-grid.sessions-collapsed, .workspace-grid.context-collapsed, .workspace-grid.sessions-collapsed.context-collapsed { display: block; min-height: 0; }
+  .workspace-grid.secondary-layout { display: block; }
   .primary-rail { position: fixed; z-index: 50; inset: auto 0 0; height: 58px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; padding: 4px 10px; border-top: 1px solid var(--uclaw-border-secondary); border-right: 0; }
   .primary-rail > .rail-link { width: auto; min-width: 44px; min-height: 50px; display: flex; }
   .more-menu { position: fixed; z-index: 51; right: 10px; bottom: 64px; width: 244px; display: grid; padding: 6px; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); box-shadow: 0 12px 32px var(--uclaw-shadow); }

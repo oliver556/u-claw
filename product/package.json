@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present && npm run smoke:dist",
-    "smoke:dist": "node shared/dist/index.js && node adapter/dist/index.js && node desktop/dist/index.js",
+    "smoke:dist": "node shared/dist/index.js && node adapter/dist/index.js && node desktop/dist/index.js && npm run smoke:file -w @uclaw/frontend",
     "test": "node --test scripts/workspace.test.mjs && npm run test --workspaces --if-present",
     "test:e2e": "playwright test",
     "typecheck": "npm run typecheck --workspaces --if-present"

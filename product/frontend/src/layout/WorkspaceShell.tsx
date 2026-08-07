@@ -73,9 +73,14 @@ export function WorkspaceShell() {
   }, []);
 
   return <div className="app-shell">
-    <a className="skip-link" href="#main">跳到主要内容</a>
+    <a className="skip-link" href="#main" onClick={(event) => {
+      event.preventDefault();
+      document.getElementById("main")?.focus();
+    }}>跳到主要内容</a>
     <AppTitlebar />
-    <div className={`workspace-grid${sessionsOpen ? "" : " sessions-collapsed"}${contextOpen ? "" : " context-collapsed"}`}>
+    <div className={isWork
+      ? `workspace-grid${sessionsOpen ? "" : " sessions-collapsed"}${contextOpen ? "" : " context-collapsed"}`
+      : "workspace-grid secondary-layout"}>
       <PrimaryRail />
       {isWork && sessionsOpen ? <SessionPanel onClose={() => setSessionsOpen(false)} /> : null}
       <main id="main" className="main-canvas" tabIndex={-1}>

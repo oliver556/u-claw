@@ -1,5 +1,5 @@
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { primaryRoutes } from "../app/routes";
@@ -8,20 +8,53 @@ export function PrimaryRail() {
   const { pathname } = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 680);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const moreItemRefs = useRef<Array<HTMLAnchorElement | null>>([]);
   const directRoutes = primaryRoutes.slice(0, 4);
   const moreRoutes = primaryRoutes.slice(4);
 
   useEffect(() => {
-    const updateViewport = () => setIsMobile(window.innerWidth <= 680);
+    const updateViewport = () => {
+      const mobile = window.innerWidth <= 680;
+      setIsMobile(mobile);
+      if (!mobile) setMoreOpen(false);
+    };
     window.addEventListener("resize", updateViewport);
     return () => window.removeEventListener("resize", updateViewport);
   }, []);
 
-  const toggleFromKeyboard = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === "Enter" || event.key === " ") {
+  useEffect(() => setMoreOpen(false), [pathname]);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    moreItemRefs.current[0]?.focus();
+    const closeOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (moreButtonRef.current?.contains(target) || moreMenuRef.current?.contains(target)) return;
+      setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", closeOutside);
+    return () => document.removeEventListener("mousedown", closeOutside);
+  }, [moreOpen]);
+
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
       event.preventDefault();
-      setMoreOpen((open) => !open);
+      setMoreOpen(false);
+      moreButtonRef.current?.focus();
+      return;
     }
+
+    const currentIndex = moreItemRefs.current.indexOf(document.activeElement as HTMLAnchorElement);
+    let nextIndex: number | undefined;
+    if (event.key === "ArrowDown") nextIndex = (currentIndex + 1) % moreRoutes.length;
+    if (event.key === "ArrowUp") nextIndex = (currentIndex - 1 + moreRoutes.length) % moreRoutes.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = moreRoutes.length - 1;
+    if (nextIndex === undefined) return;
+    event.preventDefault();
+    moreItemRefs.current[nextIndex]?.focus();
   };
 
   return (
@@ -31,13 +64,13 @@ export function PrimaryRail() {
           <Icon aria-hidden="true" /><span>{label}</span>
         </Link>
       ))}
-      {isMobile ? <button className={`rail-link mobile-more${moreOpen ? " active" : ""}`} type="button" aria-label="更多" aria-expanded={moreOpen} onClick={() => setMoreOpen((open) => !open)} onKeyDown={toggleFromKeyboard}>
+      {isMobile ? <button ref={moreButtonRef} className={`rail-link mobile-more${moreOpen ? " active" : ""}`} type="button" aria-label="更多" aria-expanded={moreOpen} aria-haspopup="menu" onClick={() => setMoreOpen((open) => !open)}>
         <MoreHorizontal aria-hidden="true" /><span>更多</span>
       </button> : null}
       {moreOpen ? (
-        <div className="more-menu" role="menu" aria-label="更多导航">
-          {moreRoutes.map(({ path, label, icon: Icon }) => (
-            <Link key={path} role="menuitem" to={path} aria-label={label} onKeyDown={(event) => event.key === "Enter" && event.currentTarget.click()} onClick={() => setMoreOpen(false)}>
+        <div ref={moreMenuRef} className="more-menu" role="menu" aria-label="更多导航" onKeyDown={onMenuKeyDown}>
+          {moreRoutes.map(({ path, label, icon: Icon }, index) => (
+            <Link ref={(node) => { moreItemRefs.current[index] = node; }} key={path} role="menuitem" to={path} aria-label={label} onClick={() => setMoreOpen(false)}>
               <Icon aria-hidden="true" /><span>{label}</span>
             </Link>
           ))}

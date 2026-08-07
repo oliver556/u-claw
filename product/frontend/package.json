@@ -8,11 +8,13 @@
   "scripts": {
     "build": "vite build && tsc -p tsconfig.build.json",
     "dev": "vite",
+    "smoke:file": "node tests/dist-file.smoke.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",
+    "@uclaw/shared": "0.1.0",
     "antd": "^5.29.3",
     "lucide-react": "^0.468.0",
     "react": "^19.2.4",
