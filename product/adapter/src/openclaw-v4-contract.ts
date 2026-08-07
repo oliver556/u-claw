@@ -87,7 +87,15 @@ export const OpenClawHistoryFixtureSchema = RpcCaseSchema(
   "chat.history",
   z.object({ sessionKey: z.string().min(1), limit: z.number().int().positive().optional() }).strict(),
   SuccessFrameSchema.extend({ payload: OpenClawHistoryResponseSchema }),
-);
+).superRefine((value, context) => {
+  if (value.requestFrame.params.sessionKey !== value.responseFrame.payload.sessionKey) {
+    context.addIssue({
+      code: "custom",
+      path: ["responseFrame", "payload", "sessionKey"],
+      message: "chat.history response sessionKey must match request sessionKey",
+    });
+  }
+});
 
 export const OpenClawMessageGetResponseSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), message: OpenClawHistoryMessageSchema }).passthrough(),
