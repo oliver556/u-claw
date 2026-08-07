@@ -1,7 +1,7 @@
 import type { CapabilitySet, GatewayStatus, Session, SessionSummary, UClawClient } from "@uclaw/shared";
 import { FolderArchive, PanelLeft, PanelRight } from "lucide-react";
 import { Tooltip } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 
 import { routeForPath } from "../app/routes";
@@ -29,10 +29,16 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState<Record<string, string[]>>({});
+  const selectionRequest = useRef(0);
 
   const selectSession = useCallback(async (sessionId: string) => {
-    try { setActiveSession(await client.sessions.get(sessionId)); }
-    catch (error) { setSessionError(error instanceof Error ? error.message : "会话打开失败"); }
+    const request = ++selectionRequest.current;
+    try {
+      const session = await client.sessions.get(sessionId);
+      if (request === selectionRequest.current) setActiveSession(session);
+    } catch (error) {
+      if (request === selectionRequest.current) setSessionError(error instanceof Error ? error.message : "会话打开失败");
+    }
   }, [client]);
 
   const loadSessions = useCallback(async () => {
@@ -79,6 +85,7 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
   const createSession = async () => {
     try {
       const created = await client.sessions.create({ title: "新会话" });
+      selectionRequest.current += 1;
       setSessions((current) => [...current, created]);
       setActiveSession(created);
       if (window.innerWidth <= 680) setSessionsOpen(false);
@@ -88,11 +95,11 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
     }
   };
 
-  const refreshSessions = async () => {
+  const refreshSessions = async (sessionId: string) => {
     try {
-      const page = await client.sessions.list();
+      const [page, refreshed] = await Promise.all([client.sessions.list(), client.sessions.get(sessionId)]);
       setSessions(page.items);
-      if (activeSession !== undefined) setActiveSession(await client.sessions.get(activeSession.id));
+      setActiveSession((current) => current?.id === sessionId ? refreshed : current);
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : "会话刷新失败");
     }
@@ -111,7 +118,7 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
       <main id="main" className="main-canvas" tabIndex={-1}>
         {isWork ? activeSession === undefined
           ? <section className="work-canvas workspace-placeholder"><header className="canvas-head"><div className="canvas-title">{!sessionsOpen ? <Tooltip title="展开会话栏"><button className="icon-button" type="button" aria-label="展开会话栏" onClick={() => setSessionsOpen(true)}><PanelLeft /></button></Tooltip> : null}<strong>工作区</strong></div>{!contextOpen ? <Tooltip title="展开上下文舱"><button className="icon-button" type="button" aria-label="展开上下文舱" onClick={() => setContextOpen(true)}><PanelRight /></button></Tooltip> : null}</header><div className="conversation-state"><FolderArchive /><strong>{sessionState === "loading" ? "正在准备工作区" : "还没有会话"}</strong></div></section>
-          : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={() => void refreshSessions()} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
+          : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
           : <SecondaryView title={route.label} description={route.description} />}
       </main>
       {isWork && contextOpen ? <ContextPanel client={client} session={activeSession} capabilities={capabilities} activity={activeSession === undefined ? [] : activity[activeSession.id] ?? []} onClose={() => setContextOpen(false)} /> : null}

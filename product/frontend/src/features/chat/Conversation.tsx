@@ -17,7 +17,7 @@ interface ConversationProps {
   draft: string;
   onDraftChange(value: string): void;
   onActivity(message: string): void;
-  onSendSuccess(): void;
+  onSendSuccess(sessionId: string): void;
   openSessions(): void;
   openContext(): void;
 }
@@ -42,8 +42,18 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const activeRunId = useRef<string | undefined>(undefined);
   const sendController = useRef<AbortController | undefined>(undefined);
   const stopRequested = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      sendController.current?.abort();
+    };
+  }, []);
 
   const onStreamEvent = useCallback((event: MessageEvent) => {
+    if (!mounted.current) return;
     if (event.type === "started") {
       activeRunId.current = event.runId;
       onActivity("响应已开始");
@@ -105,26 +115,29 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     };
     try {
       const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId: requestId(), blocks: [{ type: "text", text, format: "plain" }] }, controller.signal));
+      if (!mounted.current) return;
       if (terminal?.type === "error") restoreFailedDraft(terminal.error.message);
       else if (terminal?.type === "final") {
         onDraftChange("");
-        onSendSuccess();
+        onSendSuccess(session.id);
       }
     } catch (error) {
-      restoreFailedDraft(error instanceof Error ? error.message : "发送失败");
+      if (mounted.current && !stopRequested.current) restoreFailedDraft(error instanceof Error ? error.message : "发送失败");
     } finally {
       activeRunId.current = undefined;
       sendController.current = undefined;
       stopRequested.current = false;
-      setSending(false);
+      if (mounted.current) setSending(false);
     }
   };
 
   const stop = async () => {
     stopRequested.current = true;
-    sendController.current?.abort();
     const runId = activeRunId.current;
-    if (runId === undefined) return;
+    if (runId === undefined) {
+      sendController.current?.abort();
+      return;
+    }
     try { await client.chat.abort(runId); }
     catch (error) { setSendError(error instanceof Error ? error.message : "停止失败"); }
   };

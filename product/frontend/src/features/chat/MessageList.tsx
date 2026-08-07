@@ -1,4 +1,5 @@
 import type { ApprovalDecision, ApprovalRequest, Message, ToolCall } from "@uclaw/shared";
+import { Fragment } from "react";
 
 import { ApprovalCard } from "../approvals/ApprovalCard";
 import { ToolRun } from "../tools/ToolRun";
@@ -26,10 +27,15 @@ export function MessageList({ messages, stream, pendingApprovals, pendingTools, 
   if (messages.length === 0 && stream.order.length === 0 && pendingApprovals.length === 0 && pendingTools.length === 0) {
     return <div className="conversation-empty"><span className="brand-mark compact"><i /><i /><i /></span><strong>开始一段新会话</strong><p>输入任务，U-Claw 会在需要工具或权限时明确告知。</p></div>;
   }
+  const streamToolIds = new Set(stream.order.flatMap((runId) => stream.runs[runId].tools.map((tool) => tool.id)));
+  const streamApprovalIds = new Set(stream.order.flatMap((runId) => stream.runs[runId].approvals.map((approval) => approval.id)));
   return <>{messages.map((message) => <MessageFrame key={message.id} message={message} />)}
     {stream.order.map((runId) => {
       const run = stream.runs[runId];
-      if (run.finalMessage) return <MessageFrame key={runId} message={run.finalMessage} />;
+      if (run.finalMessage) return <Fragment key={runId}><MessageFrame message={run.finalMessage} />
+        {run.tools.map((tool) => <ToolRun key={tool.id} tool={tool} />)}
+        {run.approvals.map((approval) => <ApprovalCard key={approval.id} approval={approval} canResolve={canResolveApprovals} onResolve={onResolveApproval} />)}
+      </Fragment>;
       return <article className="message assistant-message" key={runId}>
         <header><span className="brand-mark compact"><i /><i /><i /></span><strong>U-Claw</strong><small>{run.terminal === "aborted" ? "已停止" : run.terminal === "error" ? "失败" : "生成中"}</small></header>
         {run.text ? <MessageContent blocks={[{ id: `${runId}-stream`, type: "text", text: run.text, format: "markdown" }]} /> : null}
@@ -38,7 +44,7 @@ export function MessageList({ messages, stream, pendingApprovals, pendingTools, 
         {run.errorMessage ? <p className="stream-note">{run.errorMessage}</p> : null}
       </article>;
     })}
-    {pendingTools.map((tool) => <ToolRun key={tool.id} tool={tool} />)}
-    {pendingApprovals.map((approval) => <ApprovalCard key={approval.id} approval={approval} canResolve={canResolveApprovals} onResolve={onResolveApproval} />)}
+    {pendingTools.filter((tool) => !streamToolIds.has(tool.id)).map((tool) => <ToolRun key={tool.id} tool={tool} />)}
+    {pendingApprovals.filter((approval) => !streamApprovalIds.has(approval.id)).map((approval) => <ApprovalCard key={approval.id} approval={approval} canResolve={canResolveApprovals} onResolve={onResolveApproval} />)}
   </>;
 }

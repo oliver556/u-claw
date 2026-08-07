@@ -4,6 +4,7 @@ import "@testing-library/jest-dom/vitest";
 
 import type { MessageEvent, UClawClient } from "@uclaw/shared";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/app/App";
@@ -28,6 +29,12 @@ function deferredStream() {
   emit = (event) => { values.push(event); waiter?.(); waiter = undefined; };
   finish = () => { finish = undefined; waiter?.(); waiter = undefined; };
   return { stream: stream(), emit, finish };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
 }
 
 function clientFixture(overrides: Partial<UClawClient> = {}): UClawClient {
@@ -88,6 +95,24 @@ describe("chat workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
     expect(await within(main).findByText("第二段历史")).toBeVisible();
     expect(within(main).queryByText("第一段历史")).not.toBeInTheDocument();
+  });
+
+  it("ignores stale session responses that resolve out of order", async () => {
+    const client = clientFixture();
+    render(<App client={client} />);
+    expect(await screen.findByRole("heading", { name: "发布检查" })).toBeVisible();
+    const sessionOne = deferred<Awaited<ReturnType<UClawClient["sessions"]["get"]>>>();
+    const sessionTwo = deferred<Awaited<ReturnType<UClawClient["sessions"]["get"]>>>();
+    vi.mocked(client.sessions.get).mockImplementation((id) => id === "session-1" ? sessionOne.promise : sessionTwo.promise);
+
+    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /发布检查/ }));
+    sessionOne.resolve({ id: "session-1", title: "发布检查", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" });
+    await act(async () => undefined);
+    sessionTwo.resolve({ id: "session-2", title: "知识库调研", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" });
+    await act(async () => undefined);
+
+    expect(screen.getByRole("heading", { name: "发布检查" })).toBeVisible();
   });
 
   it("creates and selects an empty session", async () => {
@@ -154,6 +179,23 @@ describe("chat workspace", () => {
     expect(screen.getAllByText("检查完成")).toHaveLength(1);
   });
 
+  it("completes sends after the StrictMode effect replay", async () => {
+    const base = clientFixture();
+    const send = vi.fn(async function* () {
+      yield { type: "started" as const, runId: "run-strict", sessionId: "session-1" };
+      yield { type: "final" as const, runId: "run-strict", message: { id: "strict-final", sessionId: "session-1", runId: "run-strict", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    });
+    const client = clientFixture({ chat: { ...base.chat, send } });
+    render(<StrictMode><App client={client} /></StrictMode>);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "StrictMode 发送" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeVisible());
+    expect(composer).toHaveValue("");
+    expect(screen.queryByText("发送失败")).not.toBeInTheDocument();
+  });
+
   it("stops a send before started and aborts as soon as run id arrives", async () => {
     const pending = deferredStream();
     const base = clientFixture();
@@ -172,6 +214,59 @@ describe("chat workspace", () => {
     expect(abort).not.toHaveBeenCalled();
     pending.emit({ type: "started", runId: "run-stop", sessionId: "session-1" });
     await waitFor(() => expect(abort).toHaveBeenCalledWith("run-stop"));
+    pending.emit({ type: "aborted", runId: "run-stop", reason: "Stopped" });
+    await waitFor(() => expect(screen.getByText("Stopped")).toBeVisible());
+    expect(screen.queryByText("发送失败")).not.toBeInTheDocument();
+  });
+
+  it("uses protocol abort after started without cancelling the iterator signal", async () => {
+    let release!: () => void;
+    let sentSignal: AbortSignal | undefined;
+    const abort = vi.fn(async () => { release(); });
+    const base = clientFixture();
+    const send = vi.fn((_input: Parameters<UClawClient["chat"]["send"]>[0], signal?: AbortSignal) => {
+      sentSignal = signal;
+      return (async function* () {
+        yield { type: "started" as const, runId: "run-aware", sessionId: "session-1" };
+        await new Promise<void>((resolve, reject) => {
+          release = resolve;
+          signal?.addEventListener("abort", () => reject(new Error("signal aborted")), { once: true });
+        });
+        yield { type: "aborted" as const, runId: "run-aware", reason: "Stopped" };
+      })();
+    });
+    const client = clientFixture({ chat: { ...base.chat, send, abort } });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "协议停止" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止生成" })).toBeVisible());
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
+
+    await waitFor(() => expect(abort).toHaveBeenCalledWith("run-aware"));
+    expect(sentSignal?.aborted).toBe(false);
+    await waitFor(() => expect(screen.getByText("Stopped")).toBeVisible());
+    expect(screen.queryByText("发送失败")).not.toBeInTheDocument();
+  });
+
+  it("does not let an old send completion reactivate its session after switching", async () => {
+    const pending = deferredStream();
+    let signal: AbortSignal | undefined;
+    const base = clientFixture();
+    const client = clientFixture({ chat: { ...base.chat, send: vi.fn((_input, value) => { signal = value; return pending.stream; }) } });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "旧会话发送" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    pending.emit({ type: "started", runId: "run-old", sessionId: "session-1" });
+    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    expect(await screen.findByRole("heading", { name: "知识库调研" })).toBeVisible();
+    expect(signal?.aborted).toBe(true);
+    pending.emit({ type: "final", runId: "run-old", message: { id: "old-final", sessionId: "session-1", runId: "run-old", role: "assistant", status: "completed", blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } });
+    pending.finish();
+    await act(async () => undefined);
+
+    expect(screen.getByRole("heading", { name: "知识库调研" })).toBeVisible();
   });
 
   it("restores failed message to composer for retry", async () => {
