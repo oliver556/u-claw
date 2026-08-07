@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { spawn as spawnChild } from "node:child_process";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -37,6 +38,22 @@ describe("GatewayProcessManager", () => {
     expect(manager.getState()).toMatchObject({ phase: "running", pid: 4123 });
   });
 
+  it("consumes a real ENOENT spawn error and throws a stable startup error", async () => {
+    const manager = new GatewayProcessManager({ spawn: spawnChild });
+
+    expect(() => manager.start({
+      executable: "/uclaw/definitely-missing/gateway-binary",
+      args: [],
+    })).toThrow("Gateway process failed to start.");
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(manager.getOwnedPid()).toBeNull();
+    expect(manager.getState()).toEqual({
+      phase: "failed",
+      message: "Gateway process failed to start.",
+    });
+  });
+
   it("shares one stop completion and sends SIGTERM once", async () => {
     const child = new FakeChild();
     child.kill.mockImplementation(() => {
@@ -69,18 +86,38 @@ describe("GatewayProcessManager", () => {
     expect(manager.getOwnedPid()).toBeNull();
   });
 
-  it("rejects stop with the child error and clears ownership", async () => {
+  it("retains ownership after kill error and escalates until exit", async () => {
+    vi.useFakeTimers();
     const child = new FakeChild();
-    child.kill.mockImplementation(() => {
-      queueMicrotask(() => child.emit("error", new Error("direct child failed")));
+    child.kill.mockImplementation((signal?: NodeJS.Signals | number) => {
+      if (signal === "SIGTERM") {
+        queueMicrotask(() => child.emit("error", new Error("kill failed")));
+      }
+      if (signal === "SIGKILL") {
+        setTimeout(() => {
+          child.exitCode = 137;
+          child.emit("exit", null, "SIGKILL");
+        }, 1);
+      }
       return true;
     });
-    const manager = new GatewayProcessManager({ spawn: () => child });
+    const manager = new GatewayProcessManager({
+      spawn: () => child,
+      stopTimeoutMs: 50,
+      killTimeoutMs: 20,
+    });
     manager.start({ executable: "node", args: [] });
 
-    await expect(manager.stop()).rejects.toThrow("direct child failed");
+    const stopping = manager.stop();
+    await Promise.resolve();
+    expect(manager.getOwnedPid()).toBe(4123);
+
+    await vi.advanceTimersByTimeAsync(51);
+    await stopping;
+    expect(child.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
+    expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
     expect(manager.getOwnedPid()).toBeNull();
-    expect(manager.getState()).toMatchObject({ phase: "failed" });
+    expect(manager.getState()).toEqual({ phase: "stopped" });
   });
 
   it("escalates after timeout only while the captured PID is still owned", async () => {
@@ -133,6 +170,10 @@ describe("GatewayProcessManager", () => {
       stopTimeoutMs: 50,
       killTimeoutMs: 20,
     });
+    child.kill.mockImplementation(() => {
+      queueMicrotask(() => child.emit("error", new Error("kill syscall failed")));
+      return false;
+    });
     manager.start({ executable: "node", args: [] });
 
     const rejected = expect(manager.stop()).rejects.toThrow("did not exit after SIGKILL");
@@ -141,6 +182,7 @@ describe("GatewayProcessManager", () => {
 
     expect(manager.getState()).toMatchObject({ phase: "failed" });
     expect(manager.getOwnedPid()).toBe(4123);
+    expect(child.kill.mock.calls).toEqual([["SIGTERM"], ["SIGKILL"]]);
   });
 
   it("clears ownership when its child exits", () => {

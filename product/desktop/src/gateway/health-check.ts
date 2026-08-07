@@ -107,8 +107,14 @@ export async function checkGatewayHealth({
 
   const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
   const serviceReady = await endpointAvailable(fetch, `${normalizedBaseUrl}/ready`, now, deadlineMs);
+  if (!isProcessAlive()) {
+    return { processAlive: false, serviceReady: false, businessAvailable: false, checkedAtMs };
+  }
   const businessAvailable = serviceReady
     ? await probeBusinessAvailability(probeCapabilities, requiredMethods, now, deadlineMs)
     : false;
-  return { processAlive, serviceReady, businessAvailable, checkedAtMs };
+  const sameProcessAlive = isProcessAlive();
+  return sameProcessAlive
+    ? { processAlive: true, serviceReady, businessAvailable, checkedAtMs }
+    : { processAlive: false, serviceReady: false, businessAvailable: false, checkedAtMs };
 }
