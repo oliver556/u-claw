@@ -156,6 +156,21 @@ describe("OpenClawClient", () => {
     expect(UClawErrorSchema.parse((unavailable as { uclawError: unknown }).uclawError).code).toBe("NOT_FOUND");
   });
 
+  it("rejects chat.history responses for a different session", async () => {
+    const history = contractFixture("chat.history.json");
+    const mismatched = structuredClone(history.responseFrame.payload);
+    mismatched.sessionKey = "agent:dev:other";
+    const transport = new FakeTransport();
+    transport.helloMethods.push("chat.history");
+    transport.fixtures.set("chat.history", mismatched);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const error = await client.chat.list("agent:dev:main").catch((reason: unknown) => reason) as { uclawError: unknown };
+    expect(UClawErrorSchema.parse(error.uclawError)).toMatchObject({ code: "PROTOCOL_MAPPING_FAILED", retryable: false });
+    expect(transport.requests.at(-1)).toEqual({ method: "chat.history", params: { sessionKey: "agent:dev:main" } });
+  });
+
   it("resolves observed approval decisions, rejects allow-session, and selects a model", async () => {
     const approvals = contractFixture("approvals.json");
     const transport = new FakeTransport();
