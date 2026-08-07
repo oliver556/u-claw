@@ -321,4 +321,48 @@ describe("runDesktopMain", () => {
     expect(child.kill).toHaveBeenCalledTimes(1);
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
   });
+
+  it("does not create a window when the owned gateway exits during health fetch", async () => {
+    class FakeChild extends EventEmitter {
+      pid = 8125;
+      exitCode: number | null = null;
+      killed = false;
+      kill = vi.fn(() => true);
+    }
+    const child = new FakeChild();
+    const selectPort = vi.fn(async (excluded: readonly number[]) => {
+      if (excluded.length > 0) throw new Error("no other candidate");
+      return 18793;
+    });
+    const createWindow = vi.fn();
+
+    await expect(runDesktopMain({
+      spawn: vi.fn(() => child),
+      buildGatewayLaunchOptions: () => ({ executable: "node", args: [] }),
+      requiredMethods: [],
+      probeCapabilities: vi.fn(),
+      dispatchClient: vi.fn(),
+      selectPort,
+      fetch: vi.fn(async () => {
+        child.exitCode = 1;
+        child.emit("exit", 1, null);
+        return { ok: true };
+      }),
+      now: () => 0,
+      sleep: vi.fn(),
+    }, {
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow,
+      registerIpc: vi.fn(),
+    })).rejects.toThrow("exited before readiness");
+
+    expect(createWindow).not.toHaveBeenCalled();
+    expect(selectPort.mock.calls).toEqual([[[]], [[18793]]]);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
 });
