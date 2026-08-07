@@ -6,7 +6,7 @@ import { ToolRiskSchema } from "./tools.js";
 
 export const SecretStateSchema = z
   .object({
-    state: z.enum(["missing", "configured", "invalid"]),
+    configured: z.boolean(),
     hint: RendererSafeTextSchema.optional(),
   })
   .strict();
@@ -21,19 +21,19 @@ const ConfigurationFieldBaseSchema = z.object({
 const ConfigurationOptionSchema = z.object({ value: z.string(), label: z.string() }).strict();
 
 export const ConfigurationFieldSchema = z.discriminatedUnion("kind", [
-  ConfigurationFieldBaseSchema.extend({ kind: z.literal("text"), value: z.string().optional() }).strict(),
+  ConfigurationFieldBaseSchema.extend({ kind: z.literal("text"), value: z.string().nullable().optional() }).strict(),
   ConfigurationFieldBaseSchema.extend({ kind: z.literal("secret"), secret: SecretStateSchema }).strict(),
-  ConfigurationFieldBaseSchema.extend({ kind: z.literal("url"), value: z.url().optional() }).strict(),
-  ConfigurationFieldBaseSchema.extend({ kind: z.literal("number"), value: z.number().optional() }).strict(),
-  ConfigurationFieldBaseSchema.extend({ kind: z.literal("boolean"), value: z.boolean().optional() }).strict(),
+  ConfigurationFieldBaseSchema.extend({ kind: z.literal("url"), value: z.url().nullable().optional() }).strict(),
+  ConfigurationFieldBaseSchema.extend({ kind: z.literal("number"), value: z.number().nullable().optional() }).strict(),
+  ConfigurationFieldBaseSchema.extend({ kind: z.literal("boolean"), value: z.boolean().nullable().optional() }).strict(),
   ConfigurationFieldBaseSchema.extend({
     kind: z.literal("select"),
-    value: z.string().optional(),
+    value: z.string().nullable().optional(),
     options: z.array(ConfigurationOptionSchema),
   }).strict(),
   ConfigurationFieldBaseSchema.extend({
     kind: z.literal("multi-select"),
-    value: z.array(z.string()).optional(),
+    value: z.array(z.string()).nullable().optional(),
     options: z.array(ConfigurationOptionSchema),
   }).strict(),
 ]);
@@ -179,7 +179,7 @@ export const LogSummarySchema = z
     timestamp: ISODateTimeSchema,
     level: z.enum(["debug", "info", "warning", "error"]),
     source: z.enum(["launcher", "desktop", "adapter", "gateway", "openclaw", "channel"]),
-    message: z.string(),
+    message: RendererSafeTextSchema,
     correlationId: z.string().optional(),
   })
   .strict();

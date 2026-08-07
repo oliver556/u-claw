@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { FileRefSchema } from "../src/index.js";
+import { BasenameSchema, FileRefSchema } from "../src/index.js";
 
 const file = {
   id: "file-1",
@@ -26,4 +26,13 @@ describe("controlled relative paths", () => {
   ])("rejects unsafe relative path: %s", (relativePath) => {
     expect(() => FileRefSchema.parse({ ...file, relativePath })).toThrow();
   });
+
+  it("allows normal localized basenames", () => {
+    expect(BasenameSchema.parse("会议 记录.md")).toBe("会议 记录.md");
+  });
+
+  it.each(["/etc/passwd", "folder/file.txt", "folder\\file.txt", ".", "..", "bad\0name"])(
+    "rejects unsafe basename: %s",
+    (name) => expect(() => FileRefSchema.parse({ ...file, name })).toThrow(),
+  );
 });

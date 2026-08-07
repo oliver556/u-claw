@@ -5,6 +5,7 @@ import {
   ResolveExecApprovalInputSchema,
   ResolvePluginApprovalInputSchema,
   ToolCallSchema,
+  toApprovalRef,
 } from "../src/index.js";
 
 describe("tool contracts", () => {
@@ -47,6 +48,30 @@ describe("tool contracts", () => {
     ).toMatchObject({ state });
   });
 
+  it("rejects the erroneous pending summary state", () => {
+    expect(() => ToolCallSchema.parse({
+      id: "tool-1",
+      sessionId: "session-1",
+      toolId: "files.read",
+      displayName: "Read file",
+      state: "pending",
+      risk: "low",
+    })).toThrow();
+  });
+
+  it("rejects secrets in tool summary keys and string values", () => {
+    const base = {
+      id: "tool-1",
+      sessionId: "session-1",
+      toolId: "files.read",
+      displayName: "Read file",
+      state: "running",
+      risk: "low",
+    };
+    expect(() => ToolCallSchema.parse({ ...base, inputSummary: { access_token: "redacted" } })).toThrow();
+    expect(() => ToolCallSchema.parse({ ...base, outputSummary: { status: "Bearer actual-token" } })).toThrow();
+  });
+
   it("keeps exec and plugin approvals structurally distinct", () => {
     const base = {
       id: "approval-1",
@@ -87,9 +112,20 @@ describe("tool contracts", () => {
   });
 
   it("separates exec and plugin resolve inputs at runtime", () => {
-    expect(ResolveExecApprovalInputSchema.parse({ family: "exec", requestId: "same-id", decision: "deny" })).toBeTruthy();
-    expect(ResolvePluginApprovalInputSchema.parse({ family: "plugin", requestId: "same-id", decision: "deny" })).toBeTruthy();
-    expect(() => ResolveExecApprovalInputSchema.parse({ family: "plugin", requestId: "same-id", decision: "deny" })).toThrow();
-    expect(() => ResolvePluginApprovalInputSchema.parse({ family: "exec", requestId: "same-id", decision: "deny" })).toThrow();
+    const plugin = ApprovalRequestSchema.parse({
+      id: "same-id",
+      family: "plugin",
+      subject: { kind: "plugin", id: "plugin-1" },
+      title: "Install plugin",
+      description: "Install selected plugin",
+      risk: "high",
+      permissions: [{ kind: "other", scope: "plugin.install", description: "Install plugin" }],
+      choices: ["allow-once", "deny"],
+      status: "pending",
+    });
+    const pluginRef = toApprovalRef(plugin);
+
+    expect(ResolvePluginApprovalInputSchema.parse({ ref: pluginRef, decision: "deny" })).toBeTruthy();
+    expect(() => ResolveExecApprovalInputSchema.parse({ ref: pluginRef, decision: "deny" })).toThrow();
   });
 });

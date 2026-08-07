@@ -52,10 +52,17 @@ export const ControlledRelativePathSchema = z.string().min(1).superRefine((path,
 });
 export type ControlledRelativePath = z.infer<typeof ControlledRelativePathSchema>;
 
+export const BasenameSchema = z.string().min(1).superRefine((name, context) => {
+  if (name === "." || name === ".." || name.includes("/") || name.includes("\\") || name.includes("\0")) {
+    context.addIssue({ code: "custom", message: "File name must be a basename" });
+  }
+});
+export type Basename = z.infer<typeof BasenameSchema>;
+
 export const FileRefSchema = z
   .object({
     id: z.string().min(1),
-    name: z.string().min(1),
+    name: BasenameSchema,
     mediaType: z.string().min(1),
     size: z.number().int().nonnegative(),
     kind: z.enum(["attachment", "workspace", "artifact", "log-export"]),

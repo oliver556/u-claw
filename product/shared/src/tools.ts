@@ -1,10 +1,9 @@
 import { z } from "zod";
 
-import { ISODateTimeSchema, ResourceRefSchema, StringMapValueSchema } from "./common.js";
-import { UClawErrorSummarySchema } from "./errors.js";
+import { ISODateTimeSchema, ResourceRefSchema } from "./common.js";
+import { RendererSafeSummarySchema, UClawErrorSummarySchema } from "./errors.js";
 
 export const ToolStateSchema = z.enum([
-  "pending",
   "queued",
   "waiting-authorization",
   "running",
@@ -27,8 +26,8 @@ export const ToolCallSchema = z
     displayName: z.string().min(1),
     state: ToolStateSchema,
     risk: ToolRiskSchema,
-    inputSummary: z.record(z.string(), StringMapValueSchema).optional(),
-    outputSummary: z.record(z.string(), StringMapValueSchema).optional(),
+    inputSummary: RendererSafeSummarySchema.optional(),
+    outputSummary: RendererSafeSummarySchema.optional(),
     startedAt: ISODateTimeSchema.optional(),
     finishedAt: ISODateTimeSchema.optional(),
     error: UClawErrorSummarySchema.optional(),
@@ -79,10 +78,29 @@ export const ApprovalRequestSchema = z.discriminatedUnion("family", [
 ]);
 export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
 
+export const ExecApprovalRefSchema = z
+  .object({ family: z.literal("exec"), id: z.string().min(1) })
+  .strict();
+export type ExecApprovalRef = z.infer<typeof ExecApprovalRefSchema>;
+
+export const PluginApprovalRefSchema = z
+  .object({ family: z.literal("plugin"), id: z.string().min(1) })
+  .strict();
+export type PluginApprovalRef = z.infer<typeof PluginApprovalRefSchema>;
+
+export const ApprovalRefSchema = z.discriminatedUnion("family", [
+  ExecApprovalRefSchema,
+  PluginApprovalRefSchema,
+]);
+export type ApprovalRef = z.infer<typeof ApprovalRefSchema>;
+
+export function toApprovalRef(request: ApprovalRequest): ApprovalRef {
+  return ApprovalRefSchema.parse({ family: request.family, id: request.id });
+}
+
 export const ResolveExecApprovalInputSchema = z
   .object({
-    family: z.literal("exec"),
-    requestId: z.string().min(1),
+    ref: ExecApprovalRefSchema,
     decision: ApprovalDecisionSchema,
   })
   .strict();
@@ -90,8 +108,7 @@ export type ResolveExecApprovalInput = z.infer<typeof ResolveExecApprovalInputSc
 
 export const ResolvePluginApprovalInputSchema = z
   .object({
-    family: z.literal("plugin"),
-    requestId: z.string().min(1),
+    ref: PluginApprovalRefSchema,
     decision: ApprovalDecisionSchema,
   })
   .strict();

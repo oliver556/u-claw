@@ -86,6 +86,7 @@ export const ClientIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("files.read-text"), requestId: RequestIdSchema, params: z.object({ fileId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("diagnostics.list"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
   z.object({ method: z.literal("diagnostics.list-logs"), requestId: RequestIdSchema, params: PageRequestSchema }).strict(),
+  z.object({ method: z.literal("subscriptions.cancel"), requestId: RequestIdSchema, params: z.object({ subscriptionId: SubscriptionIdSchema }).strict() }).strict(),
 ]);
 export type ClientIpcRequest = z.infer<typeof ClientIpcRequestSchema>;
 
@@ -116,6 +117,7 @@ export const ClientIpcSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("files.read-text"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ file: FileSummarySchema, content: z.string(), encoding: z.literal("utf-8") }).strict() }).strict(),
   z.object({ method: z.literal("diagnostics.list"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(DiagnosticSummarySchema) }).strict(),
   z.object({ method: z.literal("diagnostics.list-logs"), requestId: RequestIdSchema, ok: z.literal(true), result: PageResponseSchema(LogSummarySchema) }).strict(),
+  z.object({ method: z.literal("subscriptions.cancel"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
 ]);
 export type ClientIpcSuccessResponse = z.infer<typeof ClientIpcSuccessResponseSchema>;
 
@@ -128,6 +130,7 @@ export const ClientIpcFailureResponseSchema = z
       "tools.list", "tools.get-call", "approvals.list-pending", "approvals.resolve-exec", "approvals.resolve-plugin",
       "models.list", "models.select-for-session", "skills.list", "channels.list",
       "files.list", "files.read-text", "diagnostics.list", "diagnostics.list-logs",
+      "subscriptions.cancel",
     ]),
     requestId: RequestIdSchema,
     ok: z.literal(false),
@@ -139,7 +142,7 @@ export type ClientIpcFailureResponse = z.infer<typeof ClientIpcFailureResponseSc
 export const ClientIpcEventSchema = z.discriminatedUnion("event", [
   z.object({ event: z.literal("gateway.status"), subscriptionId: SubscriptionIdSchema, payload: GatewayStatusWireSchema }).strict(),
   z.object({ event: z.literal("chat.watch-event"), subscriptionId: SubscriptionIdSchema, payload: MessageEventSchema }).strict(),
-  z.object({ event: z.literal("chat.send-event"), subscriptionId: SubscriptionIdSchema, clientRequestId: z.string().min(1), payload: MessageEventSchema }).strict(),
+  z.object({ event: z.literal("chat.send-event"), clientRequestId: z.string().min(1), payload: MessageEventSchema }).strict(),
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
