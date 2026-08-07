@@ -197,10 +197,22 @@ describe("chat workspace", () => {
   });
 
   it("stops a send before started and aborts as soon as run id arrives", async () => {
-    const pending = deferredStream();
+    const start = deferred<void>();
+    const terminal = deferred<void>();
+    let sentSignal: AbortSignal | undefined;
     const base = clientFixture();
-    const abort = vi.fn(async () => undefined);
-    const sendStream = vi.fn((_input: Parameters<UClawClient["chat"]["send"]>[0], _signal?: AbortSignal) => pending.stream);
+    const abort = vi.fn(async () => { terminal.resolve(); });
+    const sendStream = vi.fn((_input: Parameters<UClawClient["chat"]["send"]>[0], signal?: AbortSignal) => {
+      sentSignal = signal;
+      return (async function* () {
+        await start.promise;
+        if (signal?.aborted) throw new Error("signal aborted before started");
+        yield { type: "started" as const, runId: "run-stop", sessionId: "session-1" };
+        await terminal.promise;
+        if (signal?.aborted) throw new Error("signal aborted before terminal");
+        yield { type: "aborted" as const, runId: "run-stop", reason: "Stopped" };
+      })();
+    });
     const client = clientFixture({ chat: { ...base.chat, send: sendStream, abort } });
     render(<App client={client} />);
     const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
@@ -210,12 +222,12 @@ describe("chat workspace", () => {
     await waitFor(() => expect(sendButton).toBeEnabled());
     fireEvent.click(sendButton);
     fireEvent.click(await screen.findByRole("button", { name: "停止生成" }));
-    expect(sendStream.mock.calls[0][1]).toMatchObject({ aborted: true });
+    expect(sentSignal?.aborted).toBe(false);
     expect(abort).not.toHaveBeenCalled();
-    pending.emit({ type: "started", runId: "run-stop", sessionId: "session-1" });
+    start.resolve();
     await waitFor(() => expect(abort).toHaveBeenCalledWith("run-stop"));
-    pending.emit({ type: "aborted", runId: "run-stop", reason: "Stopped" });
     await waitFor(() => expect(screen.getByText("Stopped")).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeVisible());
     expect(screen.queryByText("发送失败")).not.toBeInTheDocument();
   });
 
@@ -267,6 +279,31 @@ describe("chat workspace", () => {
     await act(async () => undefined);
 
     expect(screen.getByRole("heading", { name: "知识库调研" })).toBeVisible();
+  });
+
+  it("removes a stream approval after resolving it once", async () => {
+    const base = clientFixture();
+    const approval = { id: "approval-stream", family: "exec" as const, sessionId: "session-1", toolCallId: "tool-stream", subject: { kind: "toolCall" as const, id: "tool-stream" }, title: "Inspect workspace", description: "Read files", risk: "high" as const, permissions: [{ kind: "file-read" as const, scope: "fixture", description: "Read fixture" }], choices: ["allow-once" as const, "deny" as const], status: "pending" as const };
+    const resolveExec = vi.fn(async () => undefined);
+    const send = vi.fn(async function* () {
+      yield { type: "started" as const, runId: "run-approval", sessionId: "session-1" };
+      yield { type: "approval" as const, runId: "run-approval", approval };
+      yield { type: "final" as const, runId: "run-approval", message: { id: "approval-final", sessionId: "session-1", runId: "run-approval", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    });
+    const client = clientFixture({
+      gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send", "chat.abort"]), events: new Set(["chat"]), features: { attachments: false, approvalResolve: true } })) },
+      chat: { ...base.chat, send },
+      approvals: { ...base.approvals, resolveExec },
+    });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "授权测试" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    const card = await screen.findByLabelText(/命令执行授权/);
+    fireEvent.click(within(card).getByRole("button", { name: "允许一次" }));
+
+    await waitFor(() => expect(screen.queryByLabelText(/命令执行授权/)).not.toBeInTheDocument());
+    expect(resolveExec).toHaveBeenCalledOnce();
   });
 
   it("restores failed message to composer for retry", async () => {

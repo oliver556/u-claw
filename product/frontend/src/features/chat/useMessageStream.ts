@@ -21,7 +21,18 @@ export interface StreamState {
 
 export const initialStreamState: StreamState = { runs: {}, order: [] };
 
-export function messageEventReducer(state: StreamState, event: MessageEvent): StreamState {
+type StreamAction = MessageEvent | { type: "dismiss-approval"; approvalId: string };
+
+export function messageEventReducer(state: StreamState, event: StreamAction): StreamState {
+  if (event.type === "dismiss-approval") {
+    return {
+      ...state,
+      runs: Object.fromEntries(Object.entries(state.runs).map(([runId, run]) => [runId, {
+        ...run,
+        approvals: run.approvals.filter((approval) => approval.id !== event.approvalId),
+      }])),
+    };
+  }
   const current = state.runs[event.runId];
   const run: StreamRun = current ?? { runId: event.runId, text: "", tools: [], approvals: [] };
   if (run.terminal !== undefined) return state;
@@ -76,5 +87,9 @@ export function useMessageStream(onEvent?: (event: MessageEvent) => void) {
     }
   }, [onEvent]);
 
-  return { state, consume };
+  const dismissApproval = useCallback((approvalId: string) => {
+    dispatch({ type: "dismiss-approval", approvalId });
+  }, []);
+
+  return { state, consume, dismissApproval };
 }
