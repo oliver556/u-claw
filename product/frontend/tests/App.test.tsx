@@ -2,6 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
+import type { IpcResponse, WindowIpcRequest } from "@uclaw/shared";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -34,6 +35,20 @@ describe("U-Claw application shell", () => {
 
     expect(screen.getByRole("heading", { name: "文件" })).toBeVisible();
     expect(screen.getByRole("link", { name: "文件" })).toHaveAttribute("aria-current", "page");
+    expect(document.querySelector(".workspace-grid")).toHaveClass("secondary-layout");
+    expect(screen.queryByLabelText("会话栏")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();
+  });
+
+  it("focuses main content from the skip link without changing hash routes", () => {
+    renderApp();
+    fireEvent.click(screen.getByRole("link", { name: "文件" }));
+    expect(window.location.hash).toBe("#/files");
+
+    fireEvent.click(screen.getByRole("link", { name: "跳到主要内容" }));
+
+    expect(screen.getByRole("main")).toHaveFocus();
+    expect(window.location.hash).toBe("#/files");
   });
 
   it("collapses and restores both side panels", () => {
@@ -51,7 +66,7 @@ describe("U-Claw application shell", () => {
   });
 
   it("routes Windows controls through the injected bridge", () => {
-    const invoke = vi.fn().mockResolvedValue({ ok: true });
+    const invoke = vi.fn(async (request: WindowIpcRequest): Promise<IpcResponse> => ({ ...request, ok: true, result: null }));
     window.uclaw = { window: { invoke } };
     renderApp();
 
@@ -67,7 +82,7 @@ describe("U-Claw application shell", () => {
   });
 
   it("toggles maximize when the draggable titlebar is double-clicked", () => {
-    const invoke = vi.fn().mockResolvedValue({ ok: true });
+    const invoke = vi.fn(async (request: WindowIpcRequest): Promise<IpcResponse> => ({ ...request, ok: true, result: null }));
     window.uclaw = { window: { invoke } };
     renderApp();
 
@@ -84,7 +99,7 @@ describe("U-Claw application shell", () => {
     const unsubscribe = vi.fn();
     window.uclaw = {
       window: {
-        invoke: vi.fn().mockResolvedValue({ ok: true }),
+        invoke: vi.fn(async (request: WindowIpcRequest): Promise<IpcResponse> => ({ ...request, ok: true, result: null })),
         onMaximizedChange: (listener) => {
           reportMaximized = listener;
           return unsubscribe;
@@ -108,14 +123,31 @@ describe("U-Claw application shell", () => {
 
     const more = screen.getByRole("button", { name: "更多" });
     more.focus();
-    fireEvent.keyDown(more, { key: "Enter" });
+    fireEvent.click(more);
     const menu = screen.getByRole("menu", { name: "更多导航" });
     expect(menu).toBeVisible();
 
     const system = within(menu).getByRole("menuitem", { name: "系统" });
-    system.focus();
-    fireEvent.keyDown(system, { key: "Enter" });
+    expect(within(menu).getByRole("menuitem", { name: "连接" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(system).toHaveFocus();
+    fireEvent.click(system);
     expect(screen.getByRole("heading", { name: "系统" })).toBeVisible();
+  });
+
+  it("closes the narrow More menu with Escape and outside interaction", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    renderApp();
+
+    const more = screen.getByRole("button", { name: "更多" });
+    fireEvent.click(more);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(more).toHaveFocus();
+
+    fireEvent.click(more);
+    fireEvent.mouseDown(screen.getByRole("main"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("updates primary navigation when the window becomes narrow", () => {
@@ -133,10 +165,59 @@ describe("U-Claw application shell", () => {
 
   it("opens and closes global search with keyboard", () => {
     renderApp();
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(screen.getByRole("dialog", { name: "全局搜索" })).toBeVisible();
+    const trigger = screen.getByRole("button", { name: "打开全局搜索" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "全局搜索" });
+    expect(dialog).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "全局搜索" })).toHaveFocus();
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(dialog, { key: "Escape", keyCode: 27 });
     expect(screen.queryByRole("dialog", { name: "全局搜索" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("opens global search from Ctrl+K", () => {
+    renderApp();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.getByRole("dialog", { name: "全局搜索" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "全局搜索" })).toHaveFocus();
+  });
+
+  it("reports unavailable and failed window controls accessibly", async () => {
+    renderApp();
+    fireEvent.click(screen.getByRole("button", { name: "最小化" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("窗口控制不可用");
+
+    cleanup();
+    const invoke = vi.fn(async (request: WindowIpcRequest): Promise<IpcResponse> => ({
+      method: request.method,
+      requestId: request.requestId,
+      ok: false as const,
+      error: {
+        code: "OPERATION_FAILED" as const,
+        message: "窗口操作被拒绝",
+        retryable: false,
+        recoveryActions: [],
+        causeDetails: {},
+      },
+    }));
+    window.uclaw = { window: { invoke } };
+    renderApp();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("窗口操作被拒绝");
+  });
+
+  it("supports arrow-key context tabs with linked tabpanels", () => {
+    renderApp();
+    const files = screen.getByRole("tab", { name: "文件" });
+    const memory = screen.getByRole("tab", { name: "记忆" });
+
+    files.focus();
+    fireEvent.keyDown(files, { key: "ArrowRight" });
+    expect(memory).toHaveFocus();
+    expect(memory).toHaveAttribute("aria-selected", "true");
+    expect(memory).toHaveAttribute("aria-controls", "context-panel-memory");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "context-panel-memory");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "context-tab-memory");
   });
 });

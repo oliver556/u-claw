@@ -22,7 +22,7 @@ test("all six primary destinations are reachable", async ({ page }) => {
 
   for (const [label, path] of destinations) {
     await page.getByRole("link", { name: label }).click();
-    await expect(page).toHaveURL(new RegExp(`${path === "/" ? "/$" : `${path}$`}`));
+    await expect(page).toHaveURL(new RegExp(`#${path}$`));
     await expect(page.getByRole("link", { name: label })).toHaveAttribute("aria-current", "page");
   }
 });
@@ -30,6 +30,9 @@ test("all six primary destinations are reachable", async ({ page }) => {
 for (const viewport of [
   { width: 1440, height: 900 },
   { width: 960, height: 640 },
+  { width: 1180, height: 700 },
+  { width: 900, height: 700 },
+  { width: 680, height: 800 },
   { width: 901, height: 640 },
   { width: 390, height: 844 },
 ]) {
@@ -61,7 +64,7 @@ test("mobile navigation reaches destinations hidden under More", async ({ page }
   await page.goto("/");
   await page.getByRole("button", { name: "更多" }).click();
   await page.getByRole("menuitem", { name: "系统" }).click();
-  await expect(page).toHaveURL(/\/system$/);
+  await expect(page).toHaveURL(/#\/system$/);
 });
 
 test("mobile titlebar and icon controls preserve touch target sizes", async ({ page }) => {
@@ -91,4 +94,35 @@ test("icon-only window controls expose tooltips", async ({ page }) => {
 
   await page.getByRole("button", { name: "最大化" }).hover();
   await expect(page.getByRole("tooltip", { name: "最大化" })).toBeVisible();
+});
+
+test("secondary destinations use the full workspace beside navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.getByRole("link", { name: "文件" }).click();
+
+  const rail = await page.getByRole("navigation", { name: "主导航" }).boundingBox();
+  const main = await page.getByRole("main").boundingBox();
+  expect(main?.x).toBe(rail!.x + rail!.width);
+  expect(main?.width).toBe(1440 - rail!.width);
+  await expect(page.locator(".workspace-grid")).toHaveClass(/secondary-layout/);
+});
+
+test("global search traps focus and restores the trigger", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 640 });
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "打开全局搜索" });
+  await trigger.focus();
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "全局搜索" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "全局搜索" })).toBeFocused();
+  for (let index = 0; index < 6; index += 1) {
+    await page.keyboard.press("Tab");
+    await expect(dialog.locator(":focus")).toHaveCount(1);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
 });
