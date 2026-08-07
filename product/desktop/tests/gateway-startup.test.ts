@@ -8,7 +8,7 @@ describe("startGatewayAndCreateWindow", () => {
     const show = vi.fn(() => order.push("show"));
     const start = vi.fn((launch) => {
       order.push(`start:${launch.args.at(-1)}`);
-      return 4321;
+      return { pid: 4321, instanceId: 1 };
     });
     const health = [
       { processAlive: true, serviceReady: true, businessAvailable: false, checkedAtMs: 1 },
@@ -89,7 +89,7 @@ describe("startGatewayAndCreateWindow", () => {
     const createWindow = vi.fn();
     await expect(startGatewayAndCreateWindow({
       selectPort: vi.fn(async () => 18789),
-      gatewayProcess: { start: vi.fn(() => 4321), stop },
+      gatewayProcess: { start: vi.fn(() => ({ pid: 4321, instanceId: 1 })), stop },
       buildLaunchOptions: () => ({ executable: "node", args: ["gateway"] }),
       checkHealth: vi.fn(async () => ({
         processAlive: false,
@@ -105,5 +105,94 @@ describe("startGatewayAndCreateWindow", () => {
     })).rejects.toThrow("exited");
     expect(stop).toHaveBeenCalledOnce();
     expect(createWindow).not.toHaveBeenCalled();
+  });
+
+  it("excludes a raced port and retries when that gateway instance exits before readiness", async () => {
+    const selectPort = vi.fn(async (excluded: readonly number[]) => excluded.length === 0 ? 18789 : 18790);
+    const start = vi.fn()
+      .mockReturnValueOnce({ pid: 4321, instanceId: 1 })
+      .mockReturnValueOnce({ pid: 4321, instanceId: 2 });
+    const stop = vi.fn(async () => undefined);
+    const checkHealth = vi.fn(async (
+      port: number,
+      _deadline: number,
+      identity: { pid: number; instanceId: number },
+    ) => ({
+      processAlive: identity.instanceId === 2,
+      serviceReady: identity.instanceId === 2,
+      businessAvailable: identity.instanceId === 2,
+      checkedAtMs: port,
+    }));
+
+    const result = await startGatewayAndCreateWindow({
+      selectPort,
+      gatewayProcess: { start, stop },
+      buildLaunchOptions: (port) => ({ executable: "node", args: [String(port)] }),
+      checkHealth,
+      now: () => 0,
+      sleep: vi.fn(),
+      timeoutMs: 1_000,
+      pollIntervalMs: 10,
+      createWindow: async () => ({ show: vi.fn() }),
+    });
+
+    expect(result).toMatchObject({ port: 18790, pid: 4321, instanceId: 2 });
+    expect(selectPort.mock.calls).toEqual([[[]], [[18789]]]);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(checkHealth.mock.calls.map(([port, , identity]) => [port, identity.instanceId]))
+      .toEqual([[18789, 1], [18790, 2]]);
+  });
+
+  it("retries the next candidate after a synchronous EADDRINUSE start failure", async () => {
+    const addressInUse = Object.assign(new Error("bind failed"), { code: "EADDRINUSE" });
+    const selectPort = vi.fn(async (excluded: readonly number[]) => excluded.length === 0 ? 18789 : 18790);
+    const start = vi.fn()
+      .mockImplementationOnce(() => { throw addressInUse; })
+      .mockReturnValueOnce({ pid: 4330, instanceId: 2 });
+    const stop = vi.fn(async () => undefined);
+
+    const result = await startGatewayAndCreateWindow({
+      selectPort,
+      gatewayProcess: { start, stop },
+      buildLaunchOptions: (port) => ({ executable: "node", args: [String(port)] }),
+      checkHealth: vi.fn(async () => ({
+        processAlive: true,
+        serviceReady: true,
+        businessAvailable: true,
+        checkedAtMs: 0,
+      })),
+      now: () => 0,
+      sleep: vi.fn(),
+      timeoutMs: 1_000,
+      pollIntervalMs: 10,
+      createWindow: async () => ({ show: vi.fn() }),
+    });
+
+    expect(result).toMatchObject({ port: 18790, pid: 4330, instanceId: 2 });
+    expect(selectPort.mock.calls).toEqual([[[]], [[18789]]]);
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("preserves the startup error when rollback also fails", async () => {
+    const startupError = new Error("readiness root cause");
+    const cleanupError = new Error("cleanup failed");
+    const caught = await startGatewayAndCreateWindow({
+      selectPort: async () => 18789,
+      gatewayProcess: {
+        start: vi.fn(() => ({ pid: 4321, instanceId: 1 })),
+        stop: vi.fn(async () => { throw cleanupError; }),
+      },
+      buildLaunchOptions: () => ({ executable: "node", args: ["gateway"] }),
+      checkHealth: vi.fn(async () => { throw startupError; }),
+      now: () => 0,
+      sleep: vi.fn(),
+      timeoutMs: 1_000,
+      pollIntervalMs: 10,
+      createWindow: vi.fn(),
+    }).catch((error: unknown) => error);
+
+    expect(caught).toBeInstanceOf(AggregateError);
+    expect((caught as AggregateError).errors).toEqual([startupError, cleanupError]);
+    expect((caught as Error & { cause?: unknown }).cause).toBe(startupError);
   });
 });

@@ -14,13 +14,14 @@ export interface GatewayChildProcess {
   kill(signal?: NodeJS.Signals | number): boolean;
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
   once(event: "error", listener: (error: Error) => void): this;
+  once(event: "close", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
 }
 
 export interface SpawnOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   shell: false;
-  stdio: "pipe";
+  stdio: "ignore";
   windowsHide: true;
 }
 
@@ -37,15 +38,34 @@ export interface GatewayLaunchOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+export interface GatewayProcessIdentity {
+  pid: number;
+  instanceId: number;
+}
+
 export interface GatewayProcessManagerOptions {
   spawn: SpawnGateway;
   stopTimeoutMs?: number;
   killTimeoutMs?: number;
 }
 
+type GatewayCompletion =
+  | { kind: "exit" | "close"; code: number | null }
+  | { kind: "error"; error: Error };
+
+interface OwnedGatewayProcess {
+  child: GatewayChildProcess;
+  pid: number;
+  instanceId: number;
+  completion: Promise<GatewayCompletion>;
+  outcome: GatewayCompletion | null;
+  settle(outcome: GatewayCompletion): void;
+  stopPromise: Promise<void> | null;
+}
+
 export class GatewayProcessManager extends EventEmitter {
-  private child: GatewayChildProcess | null = null;
-  private ownedPid: number | null = null;
+  private owned: OwnedGatewayProcess | null = null;
+  private nextInstanceId = 1;
   private state: GatewayProcessState = { phase: "stopped" };
   private readonly stopTimeoutMs: number;
   private readonly killTimeoutMs: number;
@@ -61,7 +81,11 @@ export class GatewayProcessManager extends EventEmitter {
   }
 
   getOwnedPid(): number | null {
-    return this.ownedPid;
+    return this.owned?.pid ?? null;
+  }
+
+  getOwnedInstanceId(): number | null {
+    return this.owned?.instanceId ?? null;
   }
 
   private setState(state: GatewayProcessState): void {
@@ -69,39 +93,50 @@ export class GatewayProcessManager extends EventEmitter {
     this.emit("state", state);
   }
 
-  start({ executable, args, cwd, env }: GatewayLaunchOptions): number {
-    if (this.child) throw new Error("Gateway process is already owned.");
+  start({ executable, args, cwd, env }: GatewayLaunchOptions): GatewayProcessIdentity {
+    if (this.owned) throw new Error("Gateway process is already owned.");
     this.setState({ phase: "starting" });
 
     try {
       const child = this.options.spawn(executable, [...args], {
         shell: false,
-        stdio: "pipe",
+        stdio: "ignore",
         windowsHide: true,
         ...(cwd === undefined ? {} : { cwd }),
         ...(env === undefined ? {} : { env }),
       });
       if (!child.pid) throw new Error("Gateway process did not provide a PID.");
 
-      this.child = child;
-      this.ownedPid = child.pid;
-      child.once("exit", (code) => {
-        if (this.child !== child) return;
-        const wasStopping = this.state.phase === "stopping";
-        this.child = null;
-        this.ownedPid = null;
-        this.setState(code === 0 || wasStopping
-          ? { phase: "stopped" }
-          : { phase: "failed", message: `Gateway exited with code ${code ?? "unknown"}.` });
-      });
-      child.once("error", (error) => {
-        if (this.child !== child) return;
-        this.child = null;
-        this.ownedPid = null;
-        this.setState({ phase: "failed", message: error.message });
-      });
+      let resolveCompletion!: (outcome: GatewayCompletion) => void;
+      const owned: OwnedGatewayProcess = {
+        child,
+        pid: child.pid,
+        instanceId: this.nextInstanceId++,
+        completion: new Promise((resolve) => { resolveCompletion = resolve; }),
+        outcome: null,
+        settle: (outcome) => {
+          if (owned.outcome) return;
+          owned.outcome = outcome;
+          resolveCompletion(outcome);
+          if (this.owned !== owned) return;
+          const wasStopping = this.state.phase === "stopping";
+          this.owned = null;
+          if (outcome.kind === "error") {
+            this.setState({ phase: "failed", message: outcome.error.message });
+            return;
+          }
+          this.setState(outcome.code === 0 || wasStopping
+            ? { phase: "stopped" }
+            : { phase: "failed", message: `Gateway exited with code ${outcome.code ?? "unknown"}.` });
+        },
+        stopPromise: null,
+      };
+      this.owned = owned;
+      child.once("exit", (code) => owned.settle({ kind: "exit", code }));
+      child.once("error", (error) => owned.settle({ kind: "error", error }));
+      child.once("close", (code) => owned.settle({ kind: "close", code }));
       this.setState({ phase: "running", pid: child.pid });
-      return child.pid;
+      return { pid: child.pid, instanceId: owned.instanceId };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Gateway spawn failed.";
       this.setState({ phase: "failed", message });
@@ -110,33 +145,62 @@ export class GatewayProcessManager extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    const child = this.child;
-    const pid = this.ownedPid;
-    if (!child || pid === null) return;
-
-    this.setState({ phase: "stopping", pid });
-    const waitForExit = (timeoutMs: number): Promise<boolean> => new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve(false), timeoutMs);
-      child.once("exit", () => {
-        clearTimeout(timeout);
-        resolve(true);
-      });
+    const owned = this.owned;
+    if (!owned) return;
+    owned.stopPromise ??= this.stopOwned(owned).finally(() => {
+      owned.stopPromise = null;
     });
+    return owned.stopPromise;
+  }
 
-    const gracefulExit = waitForExit(this.stopTimeoutMs);
-    if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
-    if (await gracefulExit) return;
-    if (this.child !== child || this.ownedPid !== pid || child.pid !== pid) {
+  private async stopOwned(owned: OwnedGatewayProcess): Promise<void> {
+    const { child, pid } = owned;
+    this.setState({ phase: "stopping", pid });
+    if (child.exitCode !== null) owned.settle({ kind: "exit", code: child.exitCode });
+    else if (!child.killed) child.kill("SIGTERM");
+
+    let outcome = await this.waitForCompletion(owned, this.stopTimeoutMs);
+    if (outcome) return this.finishStop(outcome);
+    if (child.exitCode !== null) {
+      owned.settle({ kind: "exit", code: child.exitCode });
+      return;
+    }
+    if (this.owned !== owned || child.pid !== pid) {
       const message = "Gateway process ownership changed before SIGKILL.";
       this.setState({ phase: "failed", message });
       throw new Error(message);
     }
-    const forcedExit = waitForExit(this.killTimeoutMs);
+
     child.kill("SIGKILL");
-    if (await forcedExit) return;
+    outcome = await this.waitForCompletion(owned, this.killTimeoutMs);
+    if (outcome) return this.finishStop(outcome);
+    if (child.exitCode !== null) {
+      owned.settle({ kind: "exit", code: child.exitCode });
+      return;
+    }
 
     const message = "Gateway process did not exit after SIGKILL.";
     this.setState({ phase: "failed", message });
     throw new Error(message);
+  }
+
+  private async waitForCompletion(
+    owned: OwnedGatewayProcess,
+    timeoutMs: number,
+  ): Promise<GatewayCompletion | null> {
+    if (owned.outcome) return owned.outcome;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        owned.completion,
+        new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null), timeoutMs); }),
+      ]);
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+  }
+
+  private finishStop(outcome: GatewayCompletion): void {
+    if (outcome.kind === "error") throw outcome.error;
   }
 }

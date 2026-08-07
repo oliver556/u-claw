@@ -14,4 +14,11 @@ describe("selectGatewayPort", () => {
     await expect(selectGatewayPort({ probe })).rejects.toThrow("18789-18799");
     expect(probe).toHaveBeenCalledTimes(11);
   });
+
+  it("skips ports excluded after a startup race", async () => {
+    const probe = vi.fn(async () => true);
+    await expect(selectGatewayPort({ probe, excludedPorts: [18789, 18790] })).resolves.toBe(18791);
+    expect(probe).toHaveBeenCalledOnce();
+    expect(probe).toHaveBeenCalledWith(18791, "127.0.0.1");
+  });
 });

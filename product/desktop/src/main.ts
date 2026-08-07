@@ -17,6 +17,7 @@ import {
   createMainWindow,
   createWindowControls,
   type BrowserWindowConstructor,
+  type DesktopWindow,
 } from "./window.js";
 
 export interface DesktopAppLike {
@@ -55,8 +56,8 @@ export function validateRendererUrl(value: string | undefined): string | undefin
 
 export interface BootstrapDesktopDependencies<TWindow extends AppWindowLike> {
   app: DesktopAppLike;
-  createWindow(): Promise<TWindow>;
-  registerIpc(window: TWindow): void;
+  createWindow(registerIpc: (window: TWindow) => (() => void) | void): Promise<TWindow>;
+  registerIpc(window: TWindow): (() => void) | void;
   stopGateway(): Promise<void> | void;
 }
 
@@ -78,16 +79,25 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
     window.focus();
   });
   let shutdownStarted = false;
+  let cleanupDone = false;
   app.on("before-quit", (event) => {
-    if (shutdownStarted) return;
+    if (cleanupDone) return;
     event?.preventDefault();
+    if (shutdownStarted) return;
     shutdownStarted = true;
     try {
       void Promise.resolve(stopGateway()).then(
-        () => app.quit(),
-        () => app.quit(),
+        () => {
+          cleanupDone = true;
+          app.quit();
+        },
+        () => {
+          cleanupDone = true;
+          app.quit();
+        },
       );
     } catch {
+      cleanupDone = true;
       app.quit();
     }
   });
@@ -95,11 +105,18 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
 
   try {
     await app.whenReady();
-    window = await createWindow();
-    registerIpc(window);
+    window = await createWindow(registerIpc);
     return window;
   } catch (error) {
-    await stopGateway();
+    try {
+      await stopGateway();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Desktop startup failed and gateway cleanup failed.",
+        { cause: error },
+      );
+    }
     throw error;
   }
 }
@@ -110,7 +127,7 @@ export interface DesktopMainOptions {
   requiredMethods: readonly string[];
   probeCapabilities(port: number, signal: AbortSignal): Promise<GatewayCapabilityProbeResult>;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
-  selectPort?(): Promise<number>;
+  selectPort?(excludedPorts: readonly number[]): Promise<number>;
   fetch?: GatewayHealthDependencies["fetch"];
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -122,8 +139,8 @@ export interface DesktopMainOptions {
 
 export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
   app: DesktopAppLike;
-  createWindow(): Promise<TWindow>;
-  registerIpc(window: TWindow, dispatchClient: DesktopMainOptions["dispatchClient"]): void;
+  createWindow(registerIpc: (window: TWindow) => (() => void) | void): Promise<TWindow>;
+  registerIpc(window: TWindow, dispatchClient: DesktopMainOptions["dispatchClient"]): () => void;
 }
 
 const defaultSleep = (milliseconds: number): Promise<void> => new Promise((resolve) => {
@@ -141,25 +158,23 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
   });
   const fetchHealth = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const now = options.now ?? Date.now;
-  let stopPromise: Promise<void> | null = null;
-  const stopGateway = (): Promise<void> => {
-    stopPromise ??= gatewayProcess.stop();
-    return stopPromise;
-  };
+  const stopGateway = (): Promise<void> => gatewayProcess.stop();
 
   return bootstrapDesktopApp({
     app: runtime.app,
     stopGateway,
-    createWindow: async () => {
+    createWindow: async (registerIpc) => {
       const started = await startGatewayAndCreateWindow({
-        selectPort: options.selectPort ?? (() => selectGatewayPort()),
+        selectPort: options.selectPort ?? ((excludedPorts) => selectGatewayPort({ excludedPorts })),
         gatewayProcess: {
           start: (launchOptions) => gatewayProcess.start(launchOptions),
           stop: stopGateway,
         },
         buildLaunchOptions: options.buildGatewayLaunchOptions,
-        checkHealth: (port, deadlineMs) => checkGatewayHealth({
-          isProcessAlive: () => gatewayProcess.getOwnedPid() !== null,
+        checkHealth: (port, deadlineMs, identity) => checkGatewayHealth({
+          isProcessAlive: () =>
+            gatewayProcess.getOwnedPid() === identity.pid &&
+            gatewayProcess.getOwnedInstanceId() === identity.instanceId,
           baseUrl: `http://127.0.0.1:${port}`,
           fetch: fetchHealth,
           now,
@@ -171,7 +186,7 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
         sleep: options.sleep ?? defaultSleep,
         timeoutMs: options.readinessTimeoutMs ?? 30_000,
         pollIntervalMs: options.readinessPollIntervalMs ?? 250,
-        createWindow: runtime.createWindow,
+        createWindow: () => runtime.createWindow(registerIpc),
       });
       return started.window;
     },
@@ -186,18 +201,20 @@ export function resolvePreloadPath(moduleDir: string): string {
 export async function startElectronMain(options: DesktopMainOptions): Promise<void> {
   const { app, BrowserWindow, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
-  await runDesktopMain(options, {
+  await runDesktopMain<DesktopWindow>(options, {
     app,
-    createWindow: () => createMainWindow({
+    createWindow: (registerIpc) => createMainWindow({
       BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
       preloadPath: resolvePreloadPath(moduleDir),
       rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
       rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
       openExternal: (url) => shell.openExternal(url),
       showWhenReady: false,
+      beforeLoad: registerIpc,
     }),
     registerIpc: (window, dispatchClient) => registerDesktopIpc({
       ipcMain: ipcMain as unknown as IpcMainLike,
+      authorizedWebContents: window.webContents,
       windowControls: createWindowControls(window),
       dispatchClient,
     }),

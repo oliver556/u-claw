@@ -70,12 +70,16 @@ describe("bootstrapDesktopApp", () => {
           listeners.set(event, listener);
         }),
       },
-      createWindow: vi.fn(async () => ({
-        isDestroyed: () => false,
-        isMinimized: () => false,
-        restore: vi.fn(),
-        focus: vi.fn(),
-      })),
+      createWindow: vi.fn(async (registerIpc) => {
+        const window = {
+          isDestroyed: () => false,
+          isMinimized: () => false,
+          restore: vi.fn(),
+          focus: vi.fn(),
+        };
+        registerIpc(window);
+        return window;
+      }),
       registerIpc: vi.fn(),
       stopGateway,
     });
@@ -87,6 +91,44 @@ describe("bootstrapDesktopApp", () => {
 
     finishStop?.();
     await Promise.resolve();
+    expect(quit).toHaveBeenCalledOnce();
+  });
+
+  it("prevents every quit attempt until cleanup completes", async () => {
+    const listeners = new Map<string, (event?: { preventDefault(): void }) => void>();
+    const quit = vi.fn();
+    let finishStop: (() => void) | undefined;
+    const stopGateway = vi.fn(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+    await bootstrapDesktopApp({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit,
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn((event: string, listener: (event?: { preventDefault(): void }) => void) => {
+          listeners.set(event, listener);
+        }),
+      },
+      createWindow: vi.fn(async () => ({
+        isDestroyed: () => false,
+        isMinimized: () => false,
+        restore: vi.fn(),
+        focus: vi.fn(),
+      })),
+      registerIpc: vi.fn(),
+      stopGateway,
+    });
+    const first = { preventDefault: vi.fn() };
+    const second = { preventDefault: vi.fn() };
+
+    listeners.get("before-quit")?.(first);
+    listeners.get("before-quit")?.(second);
+    expect(first.preventDefault).toHaveBeenCalledOnce();
+    expect(second.preventDefault).toHaveBeenCalledOnce();
+    expect(stopGateway).toHaveBeenCalledOnce();
+
+    finishStop?.();
+    await Promise.resolve();
+    listeners.get("before-quit")?.({ preventDefault: vi.fn() });
     expect(quit).toHaveBeenCalledOnce();
   });
 
@@ -115,16 +157,40 @@ describe("bootstrapDesktopApp", () => {
         whenReady: vi.fn(async () => undefined),
         on: vi.fn(),
       },
-      createWindow: vi.fn(async () => ({
-        isDestroyed: () => false,
-        isMinimized: () => false,
-        restore: vi.fn(),
-        focus: vi.fn(),
-      })),
+      createWindow: vi.fn(async (registerIpc) => {
+        const window = {
+          isDestroyed: () => false,
+          isMinimized: () => false,
+          restore: vi.fn(),
+          focus: vi.fn(),
+        };
+        registerIpc(window);
+        return window;
+      }),
       registerIpc: vi.fn(() => { throw new Error("IPC failed"); }),
       stopGateway,
     })).rejects.toThrow("IPC failed");
     expect(stopGateway).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a window startup error when gateway cleanup also fails", async () => {
+    const startupError = new Error("window startup failed");
+    const cleanupError = new Error("gateway cleanup failed");
+    const caught = await bootstrapDesktopApp({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow: vi.fn(async () => { throw startupError; }),
+      registerIpc: vi.fn(),
+      stopGateway: vi.fn(async () => { throw cleanupError; }),
+    }).catch((error: unknown) => error);
+
+    expect(caught).toBeInstanceOf(AggregateError);
+    expect((caught as AggregateError).errors).toEqual([startupError, cleanupError]);
+    expect((caught as Error & { cause?: unknown }).cause).toBe(startupError);
   });
 });
 
@@ -191,7 +257,10 @@ describe("runDesktopMain", () => {
           listeners.set(event, listener);
         }),
       },
-      createWindow: vi.fn(async () => window),
+      createWindow: vi.fn(async (registerIpc) => {
+        registerIpc(window);
+        return window;
+      }),
       registerIpc,
     });
 

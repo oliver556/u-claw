@@ -5,18 +5,21 @@ import { createMainWindow, type BrowserWindowOptionsLike } from "../src/window.j
 
 describe("createMainWindow", () => {
   it("creates a hidden frameless window with an isolated sandboxed renderer", async () => {
-    const loadURL = vi.fn(async () => undefined);
+    const loadURL = vi.fn(async (_url: string) => undefined);
     const show = vi.fn();
     const send = vi.fn();
     const windowListeners = new Map<string, () => void>();
+    const order: string[] = [];
     const webContentsListeners = new Map<string, (...args: unknown[]) => void>();
     const once = vi.fn((event: string, listener: () => void) => {
       if (event === "ready-to-show") listener();
+      else windowListeners.set(event, listener);
     });
     let options: BrowserWindowOptionsLike | undefined;
 
     class FakeBrowserWindow {
       webContents = {
+        mainFrame: {},
         on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
           webContentsListeners.set(event, listener);
         }),
@@ -26,7 +29,10 @@ describe("createMainWindow", () => {
       constructor(received: BrowserWindowOptionsLike) {
         options = received;
       }
-      loadURL = loadURL;
+      loadURL = vi.fn(async (url: string) => {
+        order.push(`load:${url}`);
+        return loadURL(url);
+      });
       once = once;
       on = vi.fn((event: string, listener: () => void) => windowListeners.set(event, listener));
       show = show;
@@ -41,11 +47,17 @@ describe("createMainWindow", () => {
       focus = vi.fn();
     }
 
+    const disposeIpc = vi.fn();
     await createMainWindow({
       BrowserWindow: FakeBrowserWindow,
       preloadPath: "/runtime/preload.js",
       rendererUrl: "http://127.0.0.1:5173",
       openExternal: vi.fn(async () => undefined),
+      beforeLoad: (window) => {
+        order.push("register-ipc");
+        expect(window.webContents).toBeDefined();
+        return disposeIpc;
+      },
     });
 
     expect(options).toMatchObject({
@@ -62,6 +74,10 @@ describe("createMainWindow", () => {
     });
     expect(loadURL).toHaveBeenCalledWith("http://127.0.0.1:5173");
     expect(show).toHaveBeenCalledOnce();
+    expect(order).toEqual(["register-ipc", "load:http://127.0.0.1:5173"]);
+
+    windowListeners.get("closed")?.();
+    expect(disposeIpc).toHaveBeenCalledOnce();
 
     webContentsListeners.get("did-finish-load")?.();
     windowListeners.get("maximize")?.();
