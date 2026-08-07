@@ -28,6 +28,11 @@ interface ScheduledSleep {
   resolve(): void;
 }
 
+interface MessageSubscriber {
+  sessionId: string;
+  queue: AsyncEventQueue<MessageEvent>;
+}
+
 export class ManualClock implements Clock {
   private currentMs: number;
   private readonly sleeps: ScheduledSleep[] = [];
@@ -100,6 +105,7 @@ export class MockUClawClient implements UClawClient {
   private readonly approvalRequests: ApprovalRequest[];
   private readonly abortedRuns = new Set<string>();
   private readonly statusSubscribers = new Set<AsyncEventQueue<GatewayStatus>>();
+  private readonly messageSubscribers = new Set<MessageSubscriber>();
   private status: GatewayStatus;
   private runCounter = 0;
   private sessionCounter = 1;
@@ -111,7 +117,7 @@ export class MockUClawClient implements UClawClient {
     const capabilities = capabilitySetFromWire(CapabilitySetWireSchema.parse({
       protocolVersion: 4,
       methods: OPENCLAW_IMPLEMENTED_METHODS,
-      events: ["chat", "session.tool", "exec.approval.requested", "plugin.approval.requested"],
+      events: ["chat"],
       features: { attachments: false, approvalResolve: false },
     }));
     this.status = {
@@ -233,35 +239,46 @@ export class MockUClawClient implements UClawClient {
   private async *watchMessages(sessionId: string, signal?: AbortSignal): AsyncIterable<MessageEvent> {
     this.requireSession(sessionId);
     if (signal?.aborted === true) return;
+    const subscriber: MessageSubscriber = { sessionId, queue: new AsyncEventQueue<MessageEvent>() };
+    this.messageSubscribers.add(subscriber);
+    try {
+      while (true) {
+        const item = await subscriber.queue.next(signal);
+        if (item.done) return;
+        yield item.value;
+      }
+    } finally {
+      this.messageSubscribers.delete(subscriber);
+    }
   }
 
   private async *sendMessage(input: SendMessageInput, signal?: AbortSignal): AsyncIterable<MessageEvent> {
     this.requireSession(input.sessionId);
     if (input.blocks.some((block) => block.type === "attachment")) throw new UClawUnsupportedError("chat.send.attachments");
     const runId = `run-${++this.runCounter}`;
-    yield MessageEventSchema.parse({ type: "started", runId, sessionId: input.sessionId });
+    yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "started", runId, sessionId: input.sessionId }));
     if (this.isRunAborted(runId, signal)) {
-      yield MessageEventSchema.parse({ type: "aborted", runId, reason: "Cancelled" });
+      yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "aborted", runId, reason: "Cancelled" }));
       return;
     }
     await this.clock.sleep(this.streamDelayMs);
     if (this.isRunAborted(runId, signal)) {
-      yield MessageEventSchema.parse({ type: "aborted", runId, reason: "Cancelled" });
+      yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "aborted", runId, reason: "Cancelled" }));
       return;
     }
-    yield MessageEventSchema.parse({ type: "delta", runId, mode: "append", text: "Fixture " });
+    yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "delta", runId, mode: "append", text: "Fixture " }));
     await this.clock.sleep(this.streamDelayMs);
     if (this.isRunAborted(runId, signal)) {
-      yield MessageEventSchema.parse({ type: "aborted", runId, reason: "Cancelled" });
+      yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "aborted", runId, reason: "Cancelled" }));
       return;
     }
-    yield MessageEventSchema.parse({ type: "delta", runId, mode: "replace", text: "Fixture response" });
+    yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "delta", runId, mode: "replace", text: "Fixture response" }));
     const message = MessageSchema.parse({
       id: `message-${++this.messageCounter}`, sessionId: input.sessionId, runId, role: "assistant", status: "completed",
       blocks: [{ id: `block-${this.messageCounter}`, type: "text", text: "Fixture response", format: "plain" }], createdAt: this.clock.now(),
     });
     this.requireMessages(input.sessionId).push(message);
-    yield MessageEventSchema.parse({ type: "final", runId, message });
+    yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "final", runId, message }));
   }
 
   private requireSession(sessionId: string): Session {
@@ -286,6 +303,13 @@ export class MockUClawClient implements UClawClient {
   private publishStatus(status: GatewayStatus): void {
     this.status = status;
     for (const subscriber of this.statusSubscribers) subscriber.push(status);
+  }
+
+  private publishMessage(sessionId: string, event: MessageEvent): MessageEvent {
+    for (const subscriber of this.messageSubscribers) {
+      if (subscriber.sessionId === sessionId) subscriber.queue.push(event);
+    }
+    return event;
   }
 
   private notFound(subject: string): AdapterServiceError {

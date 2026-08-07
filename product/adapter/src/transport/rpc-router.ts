@@ -130,6 +130,7 @@ export class RpcRouter {
   private readonly eventListeners = new Map<string, Set<(event: EventFrame) => void>>();
   private readonly sequenceGapListeners = new Set<(gap: SequenceGap) => void>();
   private readonly closeListeners = new Set<(error: RpcClosedError) => void>();
+  private readonly unorderedControlEvents = new Set(["connect.challenge"]);
   private readonly sequenceDetector: SequenceGapDetector;
   private readonly requestTimeoutMs: number;
   private readonly onDiagnostic: (message: string) => void;
@@ -216,7 +217,12 @@ export class RpcRouter {
     }
     const frame = parsed.data;
     if (frame.type === "event") {
-      const decision = frame.seq === undefined ? "accepted" : this.sequenceDetector.observe(frame.seq);
+      const controlEvent = this.unorderedControlEvents.has(frame.event);
+      const decision = controlEvent
+        ? "accepted"
+        : frame.seq === undefined
+          ? this.sequenceDetector.isDesynced ? "desynced" : "accepted"
+          : this.sequenceDetector.observe(frame.seq);
       if (decision !== "accepted") return;
       for (const listener of this.eventListeners.get(frame.event) ?? []) listener(frame);
       return;
