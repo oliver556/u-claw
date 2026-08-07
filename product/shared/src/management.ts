@@ -1,25 +1,42 @@
 import { z } from "zod";
 
 import { FileRefSchema, ISODateTimeSchema, ResourceRefSchema } from "./common.js";
-import { UClawErrorSummarySchema } from "./errors.js";
+import { RendererSafeTextSchema, UClawErrorSummarySchema } from "./errors.js";
 import { ToolRiskSchema } from "./tools.js";
 
 export const SecretStateSchema = z
-  .object({ configured: z.boolean(), hint: z.string().optional() })
+  .object({
+    state: z.enum(["missing", "configured", "invalid"]),
+    hint: RendererSafeTextSchema.optional(),
+  })
   .strict();
 export type SecretState = z.infer<typeof SecretStateSchema>;
 
-export const ConfigurationFieldSchema = z
-  .object({
-    key: z.string().min(1),
-    label: z.string().min(1),
-    kind: z.enum(["text", "secret", "url", "number", "boolean", "select", "multi-select"]),
-    required: z.boolean(),
-    value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]).optional(),
-    secret: SecretStateSchema.optional(),
-    options: z.array(z.object({ value: z.string(), label: z.string() }).strict()).optional(),
-  })
-  .strict();
+const ConfigurationFieldBaseSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  required: z.boolean(),
+}).strict();
+
+const ConfigurationOptionSchema = z.object({ value: z.string(), label: z.string() }).strict();
+
+export const ConfigurationFieldSchema = z.discriminatedUnion("kind", [
+  ConfigurationFieldBaseSchema.extend({ kind: z.literal("text"), value: z.string().optional() }).strict(),
+  ConfigurationFieldBaseSchema.extend({ kind: z.literal("secret"), secret: SecretStateSchema }).strict(),
+  ConfigurationFieldBaseSchema.extend({ kind: z.literal("url"), value: z.url().optional() }).strict(),
+  ConfigurationFieldBaseSchema.extend({ kind: z.literal("number"), value: z.number().optional() }).strict(),
+  ConfigurationFieldBaseSchema.extend({ kind: z.literal("boolean"), value: z.boolean().optional() }).strict(),
+  ConfigurationFieldBaseSchema.extend({
+    kind: z.literal("select"),
+    value: z.string().optional(),
+    options: z.array(ConfigurationOptionSchema),
+  }).strict(),
+  ConfigurationFieldBaseSchema.extend({
+    kind: z.literal("multi-select"),
+    value: z.array(z.string()).optional(),
+    options: z.array(ConfigurationOptionSchema),
+  }).strict(),
+]);
 export type ConfigurationField = z.infer<typeof ConfigurationFieldSchema>;
 
 export const ModelSummarySchema = z

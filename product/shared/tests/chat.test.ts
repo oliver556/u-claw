@@ -83,4 +83,21 @@ describe("chat contracts", () => {
       MessageEventSchema.parse({ type: "delta", runId: "run-1", mode: "merge", text: "x" }),
     ).toThrow();
   });
+
+  it("requires final messages to be completed and match the event run", () => {
+    expect(() =>
+      MessageEventSchema.parse({
+        type: "final",
+        runId: "run-1",
+        message: { ...message, status: "streaming" },
+      }),
+    ).toThrow();
+    expect(() =>
+      MessageEventSchema.parse({
+        type: "final",
+        runId: "run-1",
+        message: { ...message, runId: "run-2" },
+      }),
+    ).toThrow();
+  });
 });

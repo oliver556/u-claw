@@ -10,7 +10,12 @@ import type {
   SkillSummary,
   ToolSummary,
 } from "./management.js";
-import type { ApprovalDecision, ApprovalRequest, ToolCall } from "./tools.js";
+import type {
+  ApprovalRequest,
+  ResolveExecApprovalInput,
+  ResolvePluginApprovalInput,
+  ToolCall,
+} from "./tools.js";
 
 export interface GatewayService {
   negotiate(): Promise<CapabilitySet>;
@@ -41,8 +46,8 @@ export interface ToolService {
 
 export interface ApprovalService {
   listPending(sessionId?: string): Promise<ApprovalRequest[]>;
-  resolveExec(requestId: string, decision: ApprovalDecision): Promise<void>;
-  resolvePlugin(requestId: string, decision: ApprovalDecision): Promise<void>;
+  resolveExec(input: ResolveExecApprovalInput): Promise<void>;
+  resolvePlugin(input: ResolvePluginApprovalInput): Promise<void>;
 }
 
 export interface ModelService {
