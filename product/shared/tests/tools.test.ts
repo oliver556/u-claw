@@ -59,7 +59,7 @@ describe("tool contracts", () => {
     })).toThrow();
   });
 
-  it("rejects secrets in tool summary keys and string values", () => {
+  it("redacts secret tool summary values without rejecting normal counters", () => {
     const base = {
       id: "tool-1",
       sessionId: "session-1",
@@ -68,8 +68,14 @@ describe("tool contracts", () => {
       state: "running",
       risk: "low",
     };
-    expect(() => ToolCallSchema.parse({ ...base, inputSummary: { access_token: "redacted" } })).toThrow();
-    expect(() => ToolCallSchema.parse({ ...base, outputSummary: { status: "Bearer actual-token" } })).toThrow();
+    const parsed = ToolCallSchema.parse({
+      ...base,
+      inputSummary: { access_token: "actual-token", tokenCount: 42, apiKeyStatus: "configured" },
+      outputSummary: { status: "Bearer actual-token" },
+    });
+
+    expect(parsed.inputSummary).toEqual({ access_token: "[REDACTED]", tokenCount: 42, apiKeyStatus: "configured" });
+    expect(parsed.outputSummary).toEqual({ status: "Bearer [REDACTED]" });
   });
 
   it("keeps exec and plugin approvals structurally distinct", () => {
