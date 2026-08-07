@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import type { IpcResponse, WindowIpcRequest } from "@uclaw/shared";
+import type { ClientIpcEvent, ClientIpcRequest, IpcResponse, WindowIpcRequest } from "@uclaw/shared";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +24,24 @@ describe("U-Claw application shell", () => {
     delete window.uclaw;
   });
 
+  it("uses the preload client bridge instead of Mock in Electron", async () => {
+    const subscribers = new Set<(event: ClientIpcEvent) => void>();
+    const invoke = vi.fn(async (request: ClientIpcRequest): Promise<IpcResponse> => {
+      if (request.method === "sessions.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [], nextCursor: null, hasMore: false } };
+      if (request.method === "gateway.negotiate") return { method: request.method, requestId: request.requestId, ok: true, result: { protocolVersion: 4, methods: [], events: [], features: {} } };
+      if (request.method === "gateway.watch-status" || request.method === "subscriptions.cancel") return { method: request.method, requestId: request.requestId, ok: true, result: null };
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = {
+      client: { invoke, subscribe: (listener) => { subscribers.add(listener); return () => subscribers.delete(listener); } },
+    };
+
+    renderApp();
+
+    expect((await screen.findAllByText("还没有会话")).length).toBeGreaterThan(0);
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "sessions.list", params: {} }));
+  });
+
   it("exposes six primary destinations and marks Work current", () => {
     renderApp();
 
@@ -43,6 +61,19 @@ describe("U-Claw application shell", () => {
     expect(document.querySelector(".workspace-grid")).toHaveClass("secondary-layout");
     expect(screen.queryByLabelText("会话栏")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();
+  });
+
+  it("opens advanced console through fixed window IPC without a URL", async () => {
+    const invoke = vi.fn(async (request: WindowIpcRequest): Promise<IpcResponse> => ({
+      method: request.method, requestId: request.requestId, ok: true, result: null,
+    }));
+    window.uclaw = { window: { invoke } };
+    renderApp();
+    fireEvent.click(screen.getByRole("link", { name: "系统" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开高级控制台" }));
+
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "open-advanced-console", params: {} }));
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain("url");
   });
 
   it("focuses main content from the skip link without changing hash routes", () => {

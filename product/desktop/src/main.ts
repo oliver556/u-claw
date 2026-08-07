@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ClientIpcRequest } from "@uclaw/shared";
+import type { ClientIpcRequest, UClawClient } from "@uclaw/shared";
 
 import { GatewayProcessManager, type SpawnGateway } from "./gateway/gateway-process.js";
 import {
@@ -14,6 +14,7 @@ import { startGatewayAndCreateWindow, type ShowableWindow } from "./gateway/star
 import type { IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import {
+  createAdvancedConsoleController,
   createMainWindow,
   createWindowControls,
   type BrowserWindowConstructor,
@@ -133,6 +134,7 @@ export interface DesktopMainOptions {
   requiredMethods: readonly string[];
   probeCapabilities(port: number, signal: AbortSignal): Promise<GatewayCapabilityProbeResult>;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
+  client?: UClawClient;
   selectPort?(excludedPorts: readonly number[], signal: AbortSignal): Promise<number>;
   fetch?: GatewayHealthDependencies["fetch"];
   now?: () => number;
@@ -224,10 +226,32 @@ export function resolvePreloadPath(moduleDir: string): string {
   return join(moduleDir, "preload.cjs");
 }
 
+export function requireElectronClient(client: UClawClient | undefined): UClawClient {
+  if (!client) throw new Error("Desktop production wiring must provide a real UClawClient.");
+  return client;
+}
+
 export async function startElectronMain(options: DesktopMainOptions): Promise<void> {
   const { app, BrowserWindow, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
-  await runDesktopMain<DesktopWindow>(options, {
+  const client = requireElectronClient(options.client);
+  let gatewayPort: number | undefined;
+  const openAdvancedConsole = createAdvancedConsoleController({
+    BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
+    getGatewayPort: () => {
+      if (gatewayPort === undefined) throw new Error("Gateway port is unavailable.");
+      return gatewayPort;
+    },
+    openExternal: (url) => shell.openExternal(url),
+  });
+  const runtimeOptions: DesktopMainOptions = {
+    ...options,
+    buildGatewayLaunchOptions: (port) => {
+      gatewayPort = port;
+      return options.buildGatewayLaunchOptions(port);
+    },
+  };
+  await runDesktopMain<DesktopWindow>(runtimeOptions, {
     app,
     createWindow: (registerIpc, signal) => {
       signal.throwIfAborted();
@@ -244,8 +268,12 @@ export async function startElectronMain(options: DesktopMainOptions): Promise<vo
     registerIpc: (window, dispatchClient) => registerDesktopIpc({
       ipcMain: ipcMain as unknown as IpcMainLike,
       authorizedWebContents: window.webContents,
-      windowControls: createWindowControls(window),
+      windowControls: {
+        ...createWindowControls(window),
+        openAdvancedConsole,
+      },
       dispatchClient,
+      client,
     }),
   });
 }

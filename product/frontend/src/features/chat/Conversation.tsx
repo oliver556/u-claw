@@ -154,7 +154,13 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     }
   };
 
-  const titleMeta = useMemo(() => session.model?.label ?? "默认模型", [session.model?.label]);
+  const titleMeta = useMemo(() => {
+    const label = session.model?.label ?? "默认模型";
+    if (capabilities !== undefined && !capabilities.methods.has("models.list")) {
+      return `${label} · 当前连接不支持模型列表`;
+    }
+    return label;
+  }, [capabilities, session.model?.label]);
 
   return <section className="work-canvas">
     <header className="canvas-head">
