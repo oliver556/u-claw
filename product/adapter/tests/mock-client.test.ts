@@ -20,7 +20,13 @@ describe("MockUClawClient", () => {
     const eventsPromise = collect(client.chat.send({ sessionId: page.items[0].id, clientRequestId: "request-1", blocks: [{ type: "text", text: "hello", format: "plain" }] }));
     await clock.runAll();
     const events = await eventsPromise;
-    expect(events.map((event) => event.type)).toEqual(["started", "delta", "delta", "final"]);
+    expect(events.map((event) => event.type)).toEqual(["started", "delta", "tool", "approval", "delta", "final"]);
+    const history = await client.chat.list(page.items[0].id);
+    expect(history.items.map((message) => message.role)).toEqual(["assistant", "user", "assistant"]);
+    expect((await client.sessions.get(page.items[0].id))).toMatchObject({
+      title: "hello",
+      lastMessagePreview: "Fixture response",
+    });
   });
 
   it("aborts only the requested run", async () => {
@@ -82,7 +88,20 @@ describe("MockUClawClient", () => {
     controller.abort();
     const watched = await watchedPromise;
     expect(watched).toEqual(sent);
-    expect(watched.map((event) => event.type)).toEqual(["started", "delta", "delta", "final"]);
+    expect(watched.map((event) => event.type)).toEqual(["started", "delta", "tool", "approval", "delta", "final"]);
+  });
+
+  it("publishes controllable disconnect and recovery states", async () => {
+    const client = new MockUClawClient();
+    const controller = new AbortController();
+    const statuses = client.gateway.watchStatus(controller.signal)[Symbol.asyncIterator]();
+    expect((await statuses.next()).value?.businessAvailable).toBe(true);
+
+    client.setConnectionAvailable(false);
+    await expect(statuses.next()).resolves.toMatchObject({ value: { connectionState: "failed", businessAvailable: false } });
+    client.setConnectionAvailable(true);
+    await expect(statuses.next()).resolves.toMatchObject({ value: { connectionState: "ready", businessAvailable: true } });
+    controller.abort();
   });
 
   it("throws UNSUPPORTED for management capabilities without fixtures", async () => {
