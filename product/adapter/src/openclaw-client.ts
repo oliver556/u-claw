@@ -163,6 +163,7 @@ export interface OpenClawClientOptions {
   reconnectPolicy?: ReconnectPolicy;
   maxStartupRetries?: number;
   onResyncRequired?: (gap: SequenceGap) => void | Promise<void>;
+  onApprovalsChanged?: (sessionId: string) => void | Promise<void>;
 }
 
 export class OpenClawClient implements UClawClient {
@@ -179,7 +180,8 @@ export class OpenClawClient implements UClawClient {
   private statusSince: string;
   private statusAttempt = 0;
   private readonly statusSubscribers = new Set<AsyncEventQueue<GatewayStatus>>();
-  private readonly activeSendRuns = new Map<string, Set<string>>();
+  private readonly toolCallRuns = new Map<string, Map<string, string>>();
+  private readonly notifiedApprovalFrames = new WeakSet<object>();
   private resyncing = false;
 
   constructor(private readonly options: OpenClawClientOptions) {
@@ -315,7 +317,6 @@ export class OpenClawClient implements UClawClient {
       }
       if (mapped.runId !== expectedRunId) return;
       const terminal = mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error";
-      if (terminal) this.removeActiveRun(input.sessionId, expectedRunId);
       queue.push(mapped, terminal);
     };
     const removers = [this.options.transport.router.onClose((error) => queue.fail(this.disconnectedError(error))), this.options.transport.router.onEvent("chat", (frame) => {
@@ -323,15 +324,22 @@ export class OpenClawClient implements UClawClient {
       if (raw.success) enqueue(mapChatEvent(raw.data));
     }), this.options.transport.router.onEvent("session.tool", (frame) => {
       const raw = OpenClawSessionToolPayloadSchema.safeParse(frame.payload);
-      if (raw.success) enqueue(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapOpenClawSessionToolEvent(raw.data) }));
+      if (raw.success) {
+        this.recordToolRun(raw.data);
+        enqueue(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapOpenClawSessionToolEvent(raw.data) }));
+      }
     }), this.options.transport.router.onEvent("exec.approval.requested", (frame) => {
       const raw = OpenClawExecApprovalEventSchema.safeParse(frame.payload);
-      const runId = raw.success && raw.data.request.sessionKey === input.sessionId ? this.activeRunForSession(input.sessionId) : undefined;
-      if (raw.success && runId !== undefined && runId === expectedRunId) enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
+      if (!raw.success || raw.data.request.sessionKey !== input.sessionId) return;
+      const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
+      if (runId === undefined) this.notifyApprovalsChanged(frame, input.sessionId);
+      else if (runId === expectedRunId) enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
     }), this.options.transport.router.onEvent("plugin.approval.requested", (frame) => {
       const raw = OpenClawPluginApprovalEventSchema.safeParse(frame.payload);
-      const runId = raw.success && raw.data.request.sessionKey === input.sessionId ? this.activeRunForSession(input.sessionId) : undefined;
-      if (raw.success && runId !== undefined && runId === expectedRunId) enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
+      if (!raw.success || raw.data.request.sessionKey !== input.sessionId) return;
+      const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
+      if (runId === undefined) this.notifyApprovalsChanged(frame, input.sessionId);
+      else if (runId === expectedRunId) enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
     })];
     try {
       const accepted = await this.options.transport.router.request("chat.send", {
@@ -341,7 +349,6 @@ export class OpenClawClient implements UClawClient {
         ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       }, SendResponseSchema);
       expectedRunId = accepted.runId;
-      this.addActiveRun(input.sessionId, accepted.runId);
       for (const mapped of buffered.splice(0)) enqueue(mapped);
       yield { type: "started", runId: accepted.runId, sessionId: input.sessionId };
       while (true) {
@@ -350,7 +357,6 @@ export class OpenClawClient implements UClawClient {
         yield item.value;
       }
     } finally {
-      if (expectedRunId !== undefined) this.removeActiveRun(input.sessionId, expectedRunId);
       for (const remove of removers) remove();
     }
   }
@@ -362,15 +368,22 @@ export class OpenClawClient implements UClawClient {
       if (raw.success && raw.data.sessionKey === sessionId) queue.push(mapChatEvent(raw.data));
     }), this.options.transport.router.onEvent("session.tool", (frame) => {
       const raw = OpenClawSessionToolPayloadSchema.safeParse(frame.payload);
-      if (raw.success && raw.data.sessionKey === sessionId) queue.push(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapOpenClawSessionToolEvent(raw.data) }));
+      if (raw.success) {
+        this.recordToolRun(raw.data);
+        if (raw.data.sessionKey === sessionId) queue.push(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapOpenClawSessionToolEvent(raw.data) }));
+      }
     }), this.options.transport.router.onEvent("exec.approval.requested", (frame) => {
       const raw = OpenClawExecApprovalEventSchema.safeParse(frame.payload);
-      const runId = raw.success && raw.data.request.sessionKey === sessionId ? this.activeRunForSession(sessionId) : undefined;
-      if (raw.success && runId !== undefined) queue.push(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
+      if (!raw.success || raw.data.request.sessionKey !== sessionId) return;
+      const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
+      if (runId === undefined) this.notifyApprovalsChanged(frame, sessionId);
+      else queue.push(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
     }), this.options.transport.router.onEvent("plugin.approval.requested", (frame) => {
       const raw = OpenClawPluginApprovalEventSchema.safeParse(frame.payload);
-      const runId = raw.success && raw.data.request.sessionKey === sessionId ? this.activeRunForSession(sessionId) : undefined;
-      if (raw.success && runId !== undefined) queue.push(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
+      if (!raw.success || raw.data.request.sessionKey !== sessionId) return;
+      const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
+      if (runId === undefined) this.notifyApprovalsChanged(frame, sessionId);
+      else queue.push(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
     })];
     try {
       while (signal?.aborted !== true) {
@@ -491,22 +504,27 @@ export class OpenClawClient implements UClawClient {
     throw new UClawUnsupportedError(capability);
   }
 
-  private addActiveRun(sessionId: string, runId: string): void {
-    const runs = this.activeSendRuns.get(sessionId) ?? new Set<string>();
-    runs.add(runId);
-    this.activeSendRuns.set(sessionId, runs);
+  private recordToolRun(event: z.infer<typeof OpenClawSessionToolPayloadSchema>): void {
+    const sessionRuns = this.toolCallRuns.get(event.sessionKey);
+    if (event.data.phase === "start") {
+      const runs = sessionRuns ?? new Map<string, string>();
+      runs.set(event.data.toolCallId, event.runId);
+      this.toolCallRuns.set(event.sessionKey, runs);
+      return;
+    }
+    sessionRuns?.delete(event.data.toolCallId);
+    if (sessionRuns?.size === 0) this.toolCallRuns.delete(event.sessionKey);
   }
 
-  private removeActiveRun(sessionId: string, runId: string): void {
-    const runs = this.activeSendRuns.get(sessionId);
-    if (runs === undefined) return;
-    runs.delete(runId);
-    if (runs.size === 0) this.activeSendRuns.delete(sessionId);
+  private approvalRunId(sessionId: string | null | undefined, toolCallId: string | null | undefined): string | undefined {
+    if (!sessionId || !toolCallId) return undefined;
+    return this.toolCallRuns.get(sessionId)?.get(toolCallId);
   }
 
-  private activeRunForSession(sessionId: string): string | undefined {
-    const runs = this.activeSendRuns.get(sessionId);
-    return runs?.size === 1 ? runs.values().next().value : undefined;
+  private notifyApprovalsChanged(frame: EventFrame, sessionId: string): void {
+    if (this.notifiedApprovalFrames.has(frame)) return;
+    this.notifiedApprovalFrames.add(frame);
+    void Promise.resolve(this.options.onApprovalsChanged?.(sessionId)).catch(() => undefined);
   }
 
   private notFound(operation: string): AdapterServiceError {

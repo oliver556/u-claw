@@ -1,12 +1,15 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { WebSocket, WebSocketServer } from "ws";
+
+import { cleanupCaptureResources } from "./capture-cleanup.mjs";
+import { prepareCaptureStateDir } from "./capture-state.mjs";
 
 const packageDir = resolve(process.env.OPENCLAW_PACKAGE_DIR ?? join(homedir(), ".uclaw/core/node_modules/openclaw"));
 const nodeBin = process.env.OPENCLAW_NODE_BIN ?? process.execPath;
@@ -199,14 +202,8 @@ async function startProxy() {
   return proxy;
 }
 
-async function stopChild(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill("SIGINT");
-  await Promise.race([once(child, "exit"), timeout(5_000, "Gateway shutdown")]);
-}
-
 async function main() {
-  await rm(stateDir, { recursive: true, force: true });
+  await prepareCaptureStateDir(stateDir);
   await mkdir(outputDir, { recursive: true });
   await mkdir(join(stateDir, "workspace"), { recursive: true });
   const config = {
@@ -372,14 +369,18 @@ async function main() {
     await writeFile(join(outputDir, "sessions.patch.json"), `${JSON.stringify(sessionsPatch, null, 2)}\n`);
     await writeFile(join(outputDir, "raw-frames.json"), `${JSON.stringify(rawFrames, null, 2)}\n`);
   } finally {
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(join(outputDir, "raw-frames.debug.json"), `${JSON.stringify(rawFrames, null, 2)}\n`);
-    await writeFile(join(outputDir, "gateway-events.debug.json"), `${JSON.stringify(gatewayEvents, null, 2)}\n`);
-    requester?.stop();
-    client?.stop();
-    if (proxy) await new Promise((resolveClose) => proxy.close(resolveClose));
-    if (modelServer) await new Promise((resolveClose) => modelServer.close(resolveClose));
-    await stopChild(gateway);
+    await cleanupCaptureResources({
+      requester,
+      client,
+      proxy,
+      modelServer,
+      gateway,
+      writeDebug: async () => {
+        await mkdir(outputDir, { recursive: true });
+        await writeFile(join(outputDir, "raw-frames.debug.json"), `${JSON.stringify(rawFrames, null, 2)}\n`);
+        await writeFile(join(outputDir, "gateway-events.debug.json"), `${JSON.stringify(gatewayEvents, null, 2)}\n`);
+      },
+    });
   }
 }
 
