@@ -1,0 +1,22 @@
+{
+  "name": "uclaw-product",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "24.15.0"
+  },
+  "workspaces": [
+    "shared",
+    "adapter",
+    "desktop",
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "node --test scripts/workspace.test.mjs && npm run test --workspace @uclaw/frontend",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
