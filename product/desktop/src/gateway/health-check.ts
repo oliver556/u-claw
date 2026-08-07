@@ -12,6 +12,7 @@ export interface GatewayHealthDependencies {
   }): Promise<HealthFetchResponse>;
   now(): number;
   deadlineMs: number;
+  signal: AbortSignal;
   requiredMethods?: readonly string[];
   probeCapabilities?(signal: AbortSignal): Promise<GatewayCapabilityProbeResult>;
 }
@@ -33,6 +34,7 @@ async function endpointAvailable(
   url: string,
   now: () => number,
   deadlineMs: number,
+  parentSignal: AbortSignal,
 ): Promise<boolean> {
   try {
     const response = await withDeadline(
@@ -43,6 +45,7 @@ async function endpointAvailable(
       }),
       now,
       deadlineMs,
+      parentSignal,
     );
     return response.ok;
   } catch {
@@ -55,10 +58,11 @@ async function probeBusinessAvailability(
   requiredMethods: readonly string[],
   now: () => number,
   deadlineMs: number,
+  parentSignal: AbortSignal,
 ): Promise<boolean> {
   if (!probeCapabilities) return false;
   try {
-    const result = await withDeadline(probeCapabilities, now, deadlineMs);
+    const result = await withDeadline(probeCapabilities, now, deadlineMs, parentSignal);
     if (!result.helloOk) return false;
     const methods = result.methods instanceof Set
       ? result.methods
@@ -73,8 +77,10 @@ async function withDeadline<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   now: () => number,
   deadlineMs: number,
+  parentSignal: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
+  const signal = AbortSignal.any([controller.signal, parentSignal]);
   const remainingMs = Math.max(0, deadlineMs - now());
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
@@ -83,10 +89,16 @@ async function withDeadline<T>(
       reject(new Error("Gateway health check timed out."));
     }, remainingMs);
   });
+  let rejectAbort!: (error: unknown) => void;
+  const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = reject; });
+  const onAbort = (): void => rejectAbort(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
   try {
-    return await Promise.race([operation(controller.signal), deadline]);
+    return await Promise.race([operation(signal), deadline, aborted]);
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
+    signal.removeEventListener("abort", onAbort);
   }
 }
 
@@ -96,6 +108,7 @@ export async function checkGatewayHealth({
   fetch,
   now,
   deadlineMs,
+  signal,
   requiredMethods = [],
   probeCapabilities,
 }: GatewayHealthDependencies): Promise<GatewayHealthStatus> {
@@ -106,12 +119,18 @@ export async function checkGatewayHealth({
   }
 
   const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
-  const serviceReady = await endpointAvailable(fetch, `${normalizedBaseUrl}/ready`, now, deadlineMs);
+  const serviceReady = await endpointAvailable(
+    fetch,
+    `${normalizedBaseUrl}/ready`,
+    now,
+    deadlineMs,
+    signal,
+  );
   if (!isProcessAlive()) {
     return { processAlive: false, serviceReady: false, businessAvailable: false, checkedAtMs };
   }
   const businessAvailable = serviceReady
-    ? await probeBusinessAvailability(probeCapabilities, requiredMethods, now, deadlineMs)
+    ? await probeBusinessAvailability(probeCapabilities, requiredMethods, now, deadlineMs, signal)
     : false;
   const sameProcessAlive = isProcessAlive();
   return sameProcessAlive

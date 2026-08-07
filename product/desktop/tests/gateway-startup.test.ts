@@ -1,6 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { startGatewayAndCreateWindow } from "../src/gateway/startup.js";
+import {
+  startGatewayAndCreateWindow as startGatewayAndCreateWindowRaw,
+  type GatewayStartupDependencies,
+  type ShowableWindow,
+} from "../src/gateway/startup.js";
+
+function startGatewayAndCreateWindow<TWindow extends ShowableWindow>(
+  options: Omit<GatewayStartupDependencies<TWindow>, "signal"> & { signal?: AbortSignal },
+) {
+  return startGatewayAndCreateWindowRaw({
+    signal: new AbortController().signal,
+    ...options,
+  });
+}
 
 describe("startGatewayAndCreateWindow", () => {
   it("selects a port, starts the owned gateway, waits for business readiness, then shows the window", async () => {
@@ -107,7 +120,7 @@ describe("startGatewayAndCreateWindow", () => {
     expect(createWindow).not.toHaveBeenCalled();
   });
 
-  it("excludes a raced port and retries when that gateway instance exits before readiness", async () => {
+  it("does not retry another port when the gateway exits before readiness", async () => {
     const selectPort = vi.fn(async (excluded: readonly number[]) => excluded.length === 0 ? 18789 : 18790);
     const start = vi.fn()
       .mockReturnValueOnce({ pid: 4321, instanceId: 1 })
@@ -124,7 +137,7 @@ describe("startGatewayAndCreateWindow", () => {
       checkedAtMs: port,
     }));
 
-    const result = await startGatewayAndCreateWindow({
+    await expect(startGatewayAndCreateWindow({
       selectPort,
       gatewayProcess: { start, stop },
       buildLaunchOptions: (port) => ({ executable: "node", args: [String(port)] }),
@@ -134,17 +147,20 @@ describe("startGatewayAndCreateWindow", () => {
       timeoutMs: 1_000,
       pollIntervalMs: 10,
       createWindow: async () => ({ show: vi.fn() }),
-    });
+    })).rejects.toThrow("exited before readiness");
 
-    expect(result).toMatchObject({ port: 18790, pid: 4321, instanceId: 2 });
-    expect(selectPort.mock.calls).toEqual([[[]], [[18789]]]);
+    expect(selectPort).toHaveBeenCalledTimes(1);
+    expect(selectPort).toHaveBeenNthCalledWith(1, [], expect.any(AbortSignal));
+    expect(start).toHaveBeenCalledOnce();
     expect(stop).toHaveBeenCalledOnce();
     expect(checkHealth.mock.calls.map(([port, , identity]) => [port, identity.instanceId]))
-      .toEqual([[18789, 1], [18790, 2]]);
+      .toEqual([[18789, 1]]);
   });
 
   it("retries the next candidate after a synchronous EADDRINUSE start failure", async () => {
-    const addressInUse = Object.assign(new Error("bind failed"), { code: "EADDRINUSE" });
+    const addressInUse = new Error("gateway start failed", {
+      cause: Object.assign(new Error("bind failed"), { code: "EADDRINUSE" }),
+    });
     const selectPort = vi.fn(async (excluded: readonly number[]) => excluded.length === 0 ? 18789 : 18790);
     const start = vi.fn()
       .mockImplementationOnce(() => { throw addressInUse; })
@@ -169,8 +185,34 @@ describe("startGatewayAndCreateWindow", () => {
     });
 
     expect(result).toMatchObject({ port: 18790, pid: 4330, instanceId: 2 });
-    expect(selectPort.mock.calls).toEqual([[[]], [[18789]]]);
+    expect(selectPort).toHaveBeenCalledTimes(2);
+    expect(selectPort).toHaveBeenNthCalledWith(1, [], expect.any(AbortSignal));
+    expect(selectPort).toHaveBeenNthCalledWith(2, [18789], expect.any(AbortSignal));
     expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a non-EADDRINUSE start failure", async () => {
+    const selectPort = vi.fn(async (excluded: readonly number[]) => excluded.length === 0 ? 18789 : 18790);
+    const startError = new Error("configuration failed", {
+      cause: Object.assign(new Error("permission denied"), { code: "EACCES" }),
+    });
+    const start = vi.fn(() => { throw startError; });
+
+    await expect(startGatewayAndCreateWindow({
+      selectPort,
+      gatewayProcess: { start, stop: vi.fn() },
+      buildLaunchOptions: (port) => ({ executable: "node", args: [String(port)] }),
+      checkHealth: vi.fn(),
+      now: () => 0,
+      sleep: vi.fn(),
+      timeoutMs: 1_000,
+      pollIntervalMs: 10,
+      createWindow: vi.fn(),
+    })).rejects.toBe(startError);
+
+    expect(selectPort).toHaveBeenCalledTimes(1);
+    expect(selectPort).toHaveBeenNthCalledWith(1, [], expect.any(AbortSignal));
+    expect(start).toHaveBeenCalledOnce();
   });
 
   it("preserves the startup error when rollback also fails", async () => {
