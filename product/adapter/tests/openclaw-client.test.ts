@@ -17,6 +17,7 @@ class FakeTransport implements OpenClawTransport {
   readonly fixtures = new Map<string, JsonValue>();
   readonly fixtureQueues = new Map<string, JsonValue[]>();
   readonly requestGates = new Map<string, Promise<JsonValue>>();
+  readonly requestSignals: Array<AbortSignal | undefined> = [];
   readonly eventListeners = new Set<{ event: string; listener: (frame: EventFrame) => void }>();
   readonly sequenceGapListeners = new Set<(gap: { expected: number; received: number }) => void>();
   readonly closeListeners = new Set<(error: Error) => void>();
@@ -63,9 +64,10 @@ class FakeTransport implements OpenClawTransport {
   }
 
   readonly router = {
-    request: async <T>(method: string, params: JsonValue, schema: z.ZodType<T>): Promise<T> => {
+    request: async <T>(method: string, params: JsonValue, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> => {
       this.calls.push(method);
       this.requests.push({ method, params });
+      this.requestSignals.push(signal);
       const queued = this.fixtureQueues.get(method)?.shift();
       return schema.parse(await (this.requestGates.get(method) ?? Promise.resolve(queued ?? this.fixtures.get(method))));
     },
@@ -218,6 +220,7 @@ describe("OpenClawClient", () => {
     const controller = new AbortController();
     const iterator = client.chat.send({ sessionId: "session-1", clientRequestId: "request-1", blocks: [{ type: "text", text: "hello", format: "plain" }] }, controller.signal)[Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toMatchObject({ value: { type: "started" } });
+    expect(transport.requestSignals.at(-1)).toBe(controller.signal);
     const waiting = iterator.next();
     controller.abort();
     await expect(waiting).resolves.toEqual({ value: undefined, done: true });

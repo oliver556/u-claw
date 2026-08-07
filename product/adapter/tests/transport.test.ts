@@ -4,7 +4,7 @@ import { z } from "zod";
 import { GatewayWebSocket, type WebSocketLike } from "../src/transport/gateway-websocket.js";
 import { UClawErrorSchema } from "@uclaw/shared";
 
-import { RpcClosedError, RpcRemoteError, RpcRouter, RpcTimeoutError, type JsonValue } from "../src/transport/rpc-router.js";
+import { RpcCancelledError, RpcClosedError, RpcRemoteError, RpcRouter, RpcTimeoutError, type JsonValue } from "../src/transport/rpc-router.js";
 
 class FakeSocket implements WebSocketLike {
   readonly sent: string[] = [];
@@ -66,6 +66,22 @@ describe("RpcRouter", () => {
     const closedError = await pending.catch((error: unknown) => error);
     expect(closedError).toBeInstanceOf(RpcClosedError);
     expect(UClawErrorSchema.parse((closedError as RpcClosedError).uclawError).code).toBe("GATEWAY_DISCONNECTED");
+    vi.useRealTimers();
+  });
+
+  it("cancels a pending request immediately without waiting for timeout", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const router = new RpcRouter(socket, { requestTimeoutMs: 10_000 });
+    const controller = new AbortController();
+    const request = router.request("chat.send", {}, z.object({ runId: z.string() }), controller.signal);
+
+    controller.abort();
+
+    const error = await request.catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(RpcCancelledError);
+    expect(UClawErrorSchema.parse((error as RpcCancelledError).uclawError).code).toBe("CANCELLED");
+    expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
   });
 
