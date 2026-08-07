@@ -83,8 +83,16 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
     const tools = OpenClawSessionToolFixtureSchema.parse(fixture("session.tool.json"));
 
     expect(mapOpenClawHistoryResponse(history.responseFrame.payload).map((message) => message.role)).toContain("user");
-    expect(mapOpenClawMessageGetResponse(messageGet.success.responseFrame.payload)).toMatchObject({ role: "user" });
-    expect(mapOpenClawMessageGetResponse(messageGet.unavailable.responseFrame.payload)).toBeUndefined();
+    expect(mapOpenClawMessageGetResponse(
+      messageGet.success.responseFrame.payload,
+      messageGet.success.requestFrame.params.sessionKey,
+    )).toMatchObject({ role: "user", sessionId: messageGet.success.requestFrame.params.sessionKey });
+    expect(mapOpenClawMessageGetResponse(
+      messageGet.unavailable.responseFrame.payload,
+      messageGet.unavailable.requestFrame.params.sessionKey,
+    )).toBeUndefined();
+    // @ts-expect-error sessionKey is required to preserve request identity.
+    expect(() => mapOpenClawMessageGetResponse(messageGet.success.responseFrame.payload)).toThrow();
     expect(mapOpenClawSessionToolEvent(tools.start)).toMatchObject({ toolId: "sessions_list", state: "running" });
     expect(mapOpenClawSessionToolEvent(tools.result)).toMatchObject({ toolId: "sessions_list", state: "succeeded" });
 
@@ -103,6 +111,20 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
     expect(textValues.length).toBeGreaterThan(0);
     expect(textValues.every((text) => /^\[REDACTED (?:USER|ASSISTANT) TEXT:(?:empty|short|medium|long)\]$/.test(text))).toBe(true);
     expect(JSON.stringify(conversationMessages)).not.toMatch(/(?:api[_-]?key|authorization|bearer |password|secret|sk-(?:proj-)?[A-Za-z0-9_-]{8,})/i);
+  });
+
+  it("rejects session.tool fixtures whose start and result identities differ", () => {
+    const mutations = [
+      (value: any) => { value.result.payload.sessionKey = "agent:dev:other"; },
+      (value: any) => { value.result.payload.runId = "other-run"; },
+      (value: any) => { value.result.payload.data.toolCallId = "other-tool-call"; },
+      (value: any) => { value.result.payload.data.name = "other_tool"; },
+    ];
+    for (const mutate of mutations) {
+      const tools = structuredClone(fixture("session.tool.json"));
+      mutate(tools);
+      expect(OpenClawSessionToolFixtureSchema.safeParse(tools).success).toBe(false);
+    }
   });
 
   it("rejects fixtures whose RPC methods do not match their captured operation", () => {
