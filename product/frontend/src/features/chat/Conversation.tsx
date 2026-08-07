@@ -43,6 +43,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const sendController = useRef<AbortController | undefined>(undefined);
   const stopRequested = useRef(false);
   const mounted = useRef(true);
+  const resolvingApprovals = useRef(new Set<string>());
 
   useEffect(() => {
     mounted.current = true;
@@ -64,7 +65,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     else if (event.type === "aborted") onActivity("响应已停止");
     else if (event.type === "error") onActivity(`响应失败：${event.error.message}`);
   }, [client, onActivity]);
-  const { state: stream, consume } = useMessageStream(onStreamEvent);
+  const { state: stream, consume, dismissApproval } = useMessageStream(onStreamEvent);
 
   const loadHistory = useCallback(async () => {
     setHistoryState("loading");
@@ -134,20 +135,22 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const stop = async () => {
     stopRequested.current = true;
     const runId = activeRunId.current;
-    if (runId === undefined) {
-      sendController.current?.abort();
-      return;
-    }
+    if (runId === undefined) return;
     try { await client.chat.abort(runId); }
     catch (error) { setSendError(error instanceof Error ? error.message : "停止失败"); }
   };
 
   const handleApproval = async (approval: ApprovalRequest, decision: ApprovalDecision) => {
+    if (resolvingApprovals.current.has(approval.id)) return;
+    resolvingApprovals.current.add(approval.id);
     try {
       await resolveApproval(client, approval, decision);
       setPendingApprovals((current) => current.filter((item) => item.id !== approval.id));
+      dismissApproval(approval.id);
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "授权处理失败");
+    } finally {
+      resolvingApprovals.current.delete(approval.id);
     }
   };
 
