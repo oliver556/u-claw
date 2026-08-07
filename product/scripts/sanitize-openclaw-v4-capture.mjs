@@ -1,15 +1,32 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { readFile, writeFile, mkdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { promisify } from "node:util";
 
-const captureDir = resolve(process.env.OPENCLAW_CAPTURE_OUTPUT_DIR ?? "/tmp/uclaw-openclaw-v4-capture/capture");
+const execFileAsync = promisify(execFile);
+const captureStateDir = resolve(process.env.OPENCLAW_CAPTURE_STATE_DIR ?? "/tmp/uclaw-openclaw-v4-capture");
+const captureDir = resolve(process.env.OPENCLAW_CAPTURE_OUTPUT_DIR ?? join(captureStateDir, "capture"));
 const fixtureDir = resolve(process.env.OPENCLAW_FIXTURE_OUTPUT_DIR ?? "adapter/fixtures/openclaw-2026.7.1-2");
 const packageDir = resolve(process.env.OPENCLAW_PACKAGE_DIR ?? join(homedir(), ".uclaw/core/node_modules/openclaw"));
+const nodeBin = process.env.OPENCLAW_NODE_BIN ?? process.execPath;
 const harnessPath = resolve("scripts/capture-openclaw-v4.mjs");
+const sanitizerPath = resolve("scripts/sanitize-openclaw-v4-capture.mjs");
 const schemaPath = join(packageDir, "dist/schema-BuOFpc7K.js");
+const buildInfoPath = join(packageDir, "dist/build-info.json");
+const installLockPath = resolve(packageDir, "../../package-lock.json");
 const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi;
 const uuidMap = new Map();
+const canonicalStateDir = await realpath(captureStateDir).catch(() => captureStateDir);
+const canonicalCaptureDir = await realpath(captureDir).catch(() => captureDir);
+const pathReplacements = [
+  [canonicalCaptureDir, "/tmp/openclaw-contract/capture"],
+  [captureDir, "/tmp/openclaw-contract/capture"],
+  [canonicalStateDir, "/tmp/openclaw-contract"],
+  [captureStateDir, "/tmp/openclaw-contract"],
+].filter(([source], index, entries) => source.length > 1 && entries.findIndex(([candidate]) => candidate === source) === index)
+  .sort(([left], [right]) => right.length - left.length);
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -20,10 +37,8 @@ async function readJson(name) {
 }
 
 function sanitizeString(value) {
-  return value
-    .replaceAll("/private/tmp/uclaw-openclaw-v4-capture", "/tmp/openclaw-contract")
-    .replaceAll("/tmp/uclaw-openclaw-v4-capture", "/tmp/openclaw-contract")
-    .replace(uuidPattern, (uuid) => {
+  const normalizedPath = pathReplacements.reduce((current, [source, target]) => current.replaceAll(source, target), value);
+  return normalizedPath.replace(uuidPattern, (uuid) => {
       const normalized = uuid.toLowerCase();
       if (!uuidMap.has(normalized)) uuidMap.set(normalized, `00000000-0000-4000-8000-${String(uuidMap.size + 1).padStart(12, "0")}`);
       return uuidMap.get(normalized);
@@ -171,21 +186,48 @@ const fixtures = {
   },
 };
 
+const serializedFixtures = JSON.stringify(fixtures);
+for (const [source] of pathReplacements) {
+  if (serializedFixtures.includes(source)) throw new Error(`Sanitized fixtures still contain capture path: ${source}`);
+}
+if (serializedFixtures.includes(homedir())) throw new Error("Sanitized fixtures still contain the current home directory");
+
 const fixtureSha256 = {};
 for (const [name, value] of Object.entries(fixtures)) fixtureSha256[name] = await writeFixture(name, value);
 
 const packageJson = JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"));
+const buildInfo = JSON.parse(await readFile(buildInfoPath, "utf8"));
+const installLock = JSON.parse(await readFile(installLockPath, "utf8"));
+const installedRelease = installLock.packages?.["node_modules/openclaw"];
+const expectedRelease = {
+  version: "2026.7.1-2",
+  buildCommit: "0790d9f593ad30c940ed93b5872a8cf6d6f3cf8c",
+  tarballSuffix: "/openclaw-2026.7.1-2.tgz",
+  tarballIntegrity: "sha512-ycF3yPcbjN6bUPeaUx6Mh6vze1hQWoD3CT/wWcmD7a8xaHHHRUaAlaq+lFxMHf1ssEgODVAwjlzYqp2twkYZ7g==",
+};
+if (packageJson.version !== expectedRelease.version || buildInfo.commit !== expectedRelease.buildCommit
+  || installedRelease?.version !== expectedRelease.version || !installedRelease?.resolved?.endsWith(expectedRelease.tarballSuffix)
+  || installedRelease?.integrity !== expectedRelease.tarballIntegrity) {
+  throw new Error("Installed OpenClaw release identity does not match the locked contract runtime");
+}
+const { stdout: nodeVersionOutput } = await execFileAsync(nodeBin, ["--version"]);
+const nodeVersion = nodeVersionOutput.trim().replace(/^v/, "");
 const provenance = {
   openClawVersion: packageJson.version,
-  buildCommit: "0790d9f593ad30c940ed93b5872a8cf6d6f3cf8c",
-  npmTarballSha1: "4583b987ea7277230ce1c7b2b8535d3e219f57ac",
+  buildCommit: buildInfo.commit,
+  buildCommitSource: basename(buildInfoPath),
+  npmTarballResolved: installedRelease.resolved,
+  npmTarballIntegrity: installedRelease.integrity,
+  npmTarballIdentitySource: "package-lock.json#packages[node_modules/openclaw]",
   installedPackageJsonSha256: sha256(await readFile(join(packageDir, "package.json"))),
   installedRuntimeSchema: basename(schemaPath),
   installedRuntimeSchemaSha256: sha256(await readFile(schemaPath)),
   captureHarnessSha256: sha256(await readFile(harnessPath)),
+  sanitizerSha256: sha256(await readFile(sanitizerPath)),
+  nodeVersionSource: "OPENCLAW_NODE_BIN --version",
   capturedAt: new Date(fixtures["session.tool.json"].start.payload.ts).toISOString(),
   capture: {
-    runtime: `OpenClaw Gateway ${packageJson.version} on Node.js 24.16.0`,
+    runtime: `OpenClaw Gateway ${packageJson.version} on Node.js ${nodeVersion}`,
     transport: "GatewayClient through a loopback WebSocket frame-capture proxy",
     model: "loopback OpenAI-compatible deterministic tool-call server",
     redaction: "UUIDs and temporary paths replaced consistently; user/assistant/tool-result text replaced with structured placeholders; synthetic attachment bytes retained; sessions.patch and sessions.list store derived field projections because raw entries contain unrelated prompt/tool diagnostics",
