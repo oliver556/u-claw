@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/app/App";
@@ -15,6 +15,7 @@ describe("U-Claw application shell", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    delete window.uclaw;
   });
 
   it("exposes six primary destinations and marks Work current", () => {
@@ -55,7 +56,7 @@ describe("U-Claw application shell", () => {
     renderApp();
 
     fireEvent.click(screen.getByRole("button", { name: "最小化" }));
-    fireEvent.click(screen.getByRole("button", { name: "最大化或还原" }));
+    fireEvent.click(screen.getByRole("button", { name: "最大化" }));
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
 
     expect(invoke.mock.calls.map(([request]) => request.method)).toEqual(["minimize", "toggle-maximize", "close"]);
@@ -63,6 +64,42 @@ describe("U-Claw application shell", () => {
       expect(request).toMatchObject({ params: {} });
       expect(request.requestId).toMatch(/^window-/);
     }
+  });
+
+  it("toggles maximize when the draggable titlebar is double-clicked", () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true });
+    window.uclaw = { window: { invoke } };
+    renderApp();
+
+    fireEvent.doubleClick(document.querySelector(".titlebar")!);
+
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "toggle-maximize",
+      params: {},
+    }));
+  });
+
+  it("shows the restore control when preload reports a maximized window", () => {
+    let reportMaximized: ((maximized: boolean) => void) | undefined;
+    const unsubscribe = vi.fn();
+    window.uclaw = {
+      window: {
+        invoke: vi.fn().mockResolvedValue({ ok: true }),
+        onMaximizedChange: (listener) => {
+          reportMaximized = listener;
+          return unsubscribe;
+        },
+      },
+    };
+    const { unmount } = renderApp();
+
+    act(() => reportMaximized?.(true));
+    expect(screen.getByRole("button", { name: "还原" })).toBeVisible();
+    act(() => reportMaximized?.(false));
+    expect(screen.getByRole("button", { name: "最大化" })).toBeVisible();
+
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledOnce();
   });
 
   it("opens the narrow-screen More menu and navigates with keyboard", () => {

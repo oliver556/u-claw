@@ -170,18 +170,14 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .command-dialog input { width: 100%; height: 50px; border: 0; outline: 0; background: transparent; }
 
 @media (max-width: 1180px) {
-  .workspace-grid { grid-template-columns: 72px 220px minmax(430px, 1fr) 250px; }
-  .workspace-grid.sessions-collapsed { grid-template-columns: 72px 0 minmax(430px, 1fr) 250px; }
-  .workspace-grid.context-collapsed { grid-template-columns: 72px 220px minmax(430px, 1fr) 0; }
+  .workspace-grid { grid-template-columns: 72px clamp(150px, 16vw, 188px) minmax(470px, 1fr) clamp(200px, 18vw, 220px); }
+  .workspace-grid.sessions-collapsed { grid-template-columns: 72px 0 minmax(470px, 1fr) clamp(200px, 18vw, 220px); }
+  .workspace-grid.context-collapsed { grid-template-columns: 72px clamp(150px, 16vw, 188px) minmax(470px, 1fr) 0; }
   .titlebar { grid-template-columns: minmax(180px, 1fr) minmax(240px, 360px) minmax(250px, 1fr) 138px; }
   .runtime-status { gap: 9px; }
 }
 
 @media (min-width: 901px) and (max-width: 1000px) {
-  .workspace-grid { grid-template-columns: 72px 178px minmax(470px, 1fr) 238px; }
-  .workspace-grid.sessions-collapsed { grid-template-columns: 72px 0 minmax(470px, 1fr) 238px; }
-  .workspace-grid.context-collapsed { grid-template-columns: 72px 178px minmax(470px, 1fr) 0; }
-  .workspace-grid.sessions-collapsed.context-collapsed { grid-template-columns: 72px 0 minmax(470px, 1fr) 0; }
   .session-panel > header { padding-left: 12px; }
   .panel-edge-close { right: 46px; }
 }
@@ -196,9 +192,10 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 }
 
 @media (max-width: 680px) {
-  .app-shell { grid-template-rows: 50px minmax(0, 1fr) 58px; }
+  .app-shell { grid-template-rows: 48px minmax(0, 1fr) 58px; }
   .app-shell::before { display: none; }
-  .titlebar { height: 50px; grid-template-columns: minmax(0, 1fr) 44px 44px; }
+  .titlebar { height: 48px; grid-template-columns: minmax(0, 1fr) 44px 44px; }
+  .command-search { width: 44px; min-width: 44px; height: 44px; place-content: center; padding: 0; }
   .titlebar-brand { padding-left: 14px; }
   .workspace-name, .window-controls button:first-child, .window-controls button:nth-child(2) { display: none; }
   .window-controls { width: 44px; height: 44px; grid-template-columns: 44px; }
@@ -210,8 +207,12 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
   .more-menu a { min-height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 6px; }
   .more-menu a:hover { background: var(--uclaw-bg-hover); }
   .main-canvas { height: 100%; }
-  .session-panel { position: fixed; z-index: 40; top: 50px; left: 0; bottom: 58px; width: min(320px, calc(100vw - 36px)); box-shadow: 10px 0 28px var(--uclaw-shadow); }
-  .context-panel { top: 50px; bottom: 58px; width: min(320px, calc(100vw - 36px)); }
+  .session-panel { position: fixed; z-index: 40; top: 48px; left: 0; bottom: 58px; width: min(320px, calc(100vw - 36px)); box-shadow: 10px 0 28px var(--uclaw-shadow); }
+  .context-panel { top: 48px; bottom: 58px; width: min(320px, calc(100vw - 36px)); grid-template-rows: 58px 44px minmax(0, 1fr) 42px; }
+  .icon-button, .panel-edge-close { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+  .panel-edge-close { top: 5px; right: 48px; }
+  .context-tabs button { min-height: 44px; }
+  .composer button { min-width: 44px; min-height: 44px; }
   .work-canvas { grid-template-rows: 64px minmax(0, 1fr) auto; }
   .canvas-head { padding: 0 12px; }
   .canvas-actions > button:first-child { display: none; }

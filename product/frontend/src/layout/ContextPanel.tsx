@@ -1,4 +1,5 @@
 import { Activity, Brain, FileText, Folder, HardDrive, X } from "lucide-react";
+import { Tooltip } from "antd";
 import { useState } from "react";
 
 const tabs = ["文件", "记忆", "活动"] as const;
@@ -8,7 +9,7 @@ export function ContextPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <aside className="context-panel" aria-label="上下文舱">
-      <header><h2>上下文</h2><button className="icon-button" type="button" aria-label="收起上下文舱" onClick={onClose}><X /></button></header>
+      <header><h2>上下文</h2><Tooltip title="收起上下文舱"><button className="icon-button" type="button" aria-label="收起上下文舱" onClick={onClose}><X aria-hidden="true" /></button></Tooltip></header>
       <div className="context-tabs" role="tablist" aria-label="上下文类型">
         {tabs.map((tab) => <button key={tab} type="button" role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)}>{tab}</button>)}
       </div>
