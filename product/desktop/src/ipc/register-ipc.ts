@@ -13,6 +13,11 @@ import { CLIENT_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
+  removeHandler(channel: string): void;
+}
+
+export interface AuthorizedWebContents {
+  mainFrame: unknown;
 }
 
 export interface WindowControls {
@@ -23,6 +28,7 @@ export interface WindowControls {
 
 export interface RegisterIpcDependencies {
   ipcMain: IpcMainLike;
+  authorizedWebContents: AuthorizedWebContents;
   windowControls: WindowControls;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
 }
@@ -58,10 +64,22 @@ function ensureCorrelatedResponse(response: unknown, request: ClientIpcRequest):
 
 export function registerIpc({
   ipcMain,
+  authorizedWebContents,
   windowControls,
   dispatchClient,
-}: RegisterIpcDependencies): void {
-  ipcMain.handle(WINDOW_IPC_CHANNEL, async (_event, payload) => {
+}: RegisterIpcDependencies): () => void {
+  const authorize = (event: unknown): void => {
+    const candidate = event as { sender?: unknown; senderFrame?: unknown };
+    if (
+      candidate.sender !== authorizedWebContents ||
+      candidate.senderFrame !== authorizedWebContents.mainFrame
+    ) {
+      throw safeError("FORBIDDEN", "IPC sender is not authorized.");
+    }
+  };
+
+  ipcMain.handle(WINDOW_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
     const parsed = WindowIpcRequestSchema.safeParse(payload);
     if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid window IPC request.");
 
@@ -89,7 +107,8 @@ export function registerIpc({
     }
   });
 
-  ipcMain.handle(CLIENT_IPC_CHANNEL, async (_event, payload) => {
+  ipcMain.handle(CLIENT_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
     const parsed = ClientIpcRequestSchema.safeParse(payload);
     if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid client IPC request.");
 
@@ -114,4 +133,12 @@ export function registerIpc({
       throw safeError("UNKNOWN", "Invalid client IPC response.");
     }
   });
+
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    ipcMain.removeHandler(WINDOW_IPC_CHANNEL);
+    ipcMain.removeHandler(CLIENT_IPC_CHANNEL);
+  };
 }

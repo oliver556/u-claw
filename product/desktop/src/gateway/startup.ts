@@ -1,9 +1,9 @@
-import type { GatewayLaunchOptions } from "./gateway-process.js";
+import type { GatewayLaunchOptions, GatewayProcessIdentity } from "./gateway-process.js";
 import type { GatewayHealthStatus } from "./health-check.js";
 import { GATEWAY_PORT_MAX, GATEWAY_PORT_MIN } from "./port-selector.js";
 
 export interface GatewayProcessController {
-  start(options: GatewayLaunchOptions): number;
+  start(options: GatewayLaunchOptions): GatewayProcessIdentity;
   stop(): Promise<void>;
 }
 
@@ -12,10 +12,14 @@ export interface ShowableWindow {
 }
 
 export interface GatewayStartupDependencies<TWindow extends ShowableWindow> {
-  selectPort(): Promise<number>;
+  selectPort(excludedPorts: readonly number[]): Promise<number>;
   gatewayProcess: GatewayProcessController;
   buildLaunchOptions(port: number): unknown;
-  checkHealth(port: number, deadlineMs: number): Promise<GatewayHealthStatus>;
+  checkHealth(
+    port: number,
+    deadlineMs: number,
+    identity: GatewayProcessIdentity,
+  ): Promise<GatewayHealthStatus>;
   now(): number;
   sleep(milliseconds: number): Promise<void>;
   timeoutMs: number;
@@ -27,6 +31,7 @@ export interface GatewayStartupResult<TWindow extends ShowableWindow> {
   window: TWindow;
   port: number;
   pid: number;
+  instanceId: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -64,6 +69,7 @@ async function waitForGatewayReadiness(
   options: Pick<GatewayStartupDependencies<ShowableWindow>,
     "checkHealth" | "now" | "sleep" | "timeoutMs" | "pollIntervalMs">,
   port: number,
+  identity: GatewayProcessIdentity,
 ): Promise<void> {
   if (options.timeoutMs <= 0 || options.pollIntervalMs < 0) {
     throw new Error("Invalid gateway readiness timing options.");
@@ -71,7 +77,7 @@ async function waitForGatewayReadiness(
   const deadline = options.now() + options.timeoutMs;
 
   while (true) {
-    const status = await options.checkHealth(port, deadline);
+    const status = await options.checkHealth(port, deadline, identity);
     if (!status.processAlive) throw new Error("Gateway process exited before readiness.");
     if (status.serviceReady && status.businessAvailable) return;
     if (options.now() >= deadline) throw new Error("Gateway readiness timed out.");
@@ -82,20 +88,62 @@ async function waitForGatewayReadiness(
 export async function startGatewayAndCreateWindow<TWindow extends ShowableWindow>(
   options: GatewayStartupDependencies<TWindow>,
 ): Promise<GatewayStartupResult<TWindow>> {
-  const port = await options.selectPort();
-  if (!Number.isInteger(port) || port < GATEWAY_PORT_MIN || port > GATEWAY_PORT_MAX) {
-    throw new Error(`Gateway port must be within ${GATEWAY_PORT_MIN}-${GATEWAY_PORT_MAX}.`);
-  }
-  const launchOptions = validateGatewayLaunchOptions(options.buildLaunchOptions(port));
-  const pid = options.gatewayProcess.start(launchOptions);
+  const excludedPorts: number[] = [];
+  let lastPortRaceError: unknown;
 
+  while (excludedPorts.length <= GATEWAY_PORT_MAX - GATEWAY_PORT_MIN) {
+    let port: number;
+    try {
+      port = await options.selectPort([...excludedPorts]);
+    } catch (error) {
+      throw lastPortRaceError ?? error;
+    }
+    if (excludedPorts.includes(port)) throw lastPortRaceError;
+    if (!Number.isInteger(port) || port < GATEWAY_PORT_MIN || port > GATEWAY_PORT_MAX) {
+      throw new Error(`Gateway port must be within ${GATEWAY_PORT_MIN}-${GATEWAY_PORT_MAX}.`);
+    }
+    const launchOptions = validateGatewayLaunchOptions(options.buildLaunchOptions(port));
+    let identity: GatewayProcessIdentity;
+    try {
+      identity = options.gatewayProcess.start(launchOptions);
+    } catch (error) {
+      if (!isAddressInUseError(error)) throw error;
+      excludedPorts.push(port);
+      lastPortRaceError = error;
+      continue;
+    }
+
+    try {
+      await waitForGatewayReadiness(options, port, identity);
+      const window = await options.createWindow();
+      window.show();
+      return { window, port, ...identity };
+    } catch (error) {
+      await rollbackOrThrow(error, () => options.gatewayProcess.stop());
+      if (!(error instanceof Error) || error.message !== "Gateway process exited before readiness.") {
+        throw error;
+      }
+      excludedPorts.push(port);
+      lastPortRaceError = error;
+    }
+  }
+
+  throw lastPortRaceError ?? new Error("Gateway startup failed.");
+}
+
+function isAddressInUseError(error: unknown): boolean {
+  return typeof error === "object" && error !== null &&
+    "code" in error && (error as { code?: unknown }).code === "EADDRINUSE";
+}
+
+async function rollbackOrThrow(error: unknown, stop: () => Promise<void>): Promise<void> {
   try {
-    await waitForGatewayReadiness(options, port);
-    const window = await options.createWindow();
-    window.show();
-    return { window, port, pid };
-  } catch (error) {
-    await options.gatewayProcess.stop();
-    throw error;
+    await stop();
+  } catch (cleanupError) {
+    throw new AggregateError(
+      [error, cleanupError],
+      "Gateway startup failed and cleanup failed.",
+      { cause: error },
+    );
   }
 }

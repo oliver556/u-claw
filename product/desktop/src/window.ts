@@ -2,6 +2,7 @@ import { installNavigationPolicy, type WebContentsLike } from "./security/naviga
 import { WINDOW_MAXIMIZED_EVENT_CHANNEL } from "./ipc/channels.js";
 
 export interface DesktopWebContents extends WebContentsLike {
+  mainFrame: unknown;
   on(event: "will-navigate", listener: Parameters<WebContentsLike["on"]>[1]): void;
   on(event: "did-finish-load", listener: () => void): void;
   send(channel: string, payload: unknown): void;
@@ -12,6 +13,7 @@ export interface DesktopWindow {
   loadURL(url: string): Promise<unknown>;
   loadFile?(path: string): Promise<unknown>;
   once(event: "ready-to-show", listener: () => void): void;
+  once(event: "closed", listener: () => void): void;
   on(event: "maximize" | "unmaximize", listener: () => void): void;
   show(): void;
   minimize(): void;
@@ -49,6 +51,7 @@ export interface CreateMainWindowOptions {
   rendererFile?: string;
   openExternal(url: string): Promise<unknown>;
   showWhenReady?: boolean;
+  beforeLoad?(window: DesktopWindow): (() => void) | void;
 }
 
 export async function createMainWindow({
@@ -58,6 +61,7 @@ export async function createMainWindow({
   rendererFile,
   openExternal,
   showWhenReady = true,
+  beforeLoad,
 }: CreateMainWindowOptions): Promise<DesktopWindow> {
   const window = new BrowserWindow({
     frame: false,
@@ -80,6 +84,8 @@ export async function createMainWindow({
   window.on("maximize", () => sendMaximized(true));
   window.on("unmaximize", () => sendMaximized(false));
   if (showWhenReady) window.once("ready-to-show", () => window.show());
+  const dispose = beforeLoad?.(window);
+  if (dispose) window.once("closed", dispose);
 
   if (rendererUrl) {
     await window.loadURL(rendererUrl);

@@ -1,5 +1,6 @@
-import { isAbsolute } from "node:path";
-import { pathToFileURL } from "node:url";
+import { realpath } from "node:fs/promises";
+import { dirname, isAbsolute, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { startElectronMain, type DesktopMainOptions } from "./main.js";
 
@@ -13,10 +14,29 @@ export async function loadProductionDesktopOptions(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<DesktopMainOptions> {
   const modulePath = environment[WIRING_MODULE_ENV];
-  if (!modulePath || !isAbsolute(modulePath)) {
-    throw new Error(`${WIRING_MODULE_ENV} must contain an absolute module path.`);
+  if (!modulePath) {
+    throw new Error("Desktop production wiring is not configured.");
   }
-  const wiring = await import(pathToFileURL(modulePath).href) as ProductionWiringModule;
+  if (!isAbsolute(modulePath)) {
+    throw new Error("Desktop production wiring must use an absolute path within controlled runtime roots.");
+  }
+
+  const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const allowedRoots = [desktopRoot, ...(resourcesPath ? [resourcesPath] : [])];
+  const [resolvedModulePath, ...resolvedRoots] = await Promise.all([
+    realpath(modulePath),
+    ...allowedRoots.map((root) => realpath(root)),
+  ]);
+  const allowed = resolvedRoots.some((root) => {
+    const childPath = relative(root, resolvedModulePath);
+    return childPath !== "" && !childPath.startsWith("..") && !isAbsolute(childPath);
+  });
+  if (!allowed) {
+    throw new Error("Desktop production wiring is outside controlled runtime roots.");
+  }
+
+  const wiring = await import(pathToFileURL(resolvedModulePath).href) as ProductionWiringModule;
   if (typeof wiring.createDesktopMainOptions !== "function") {
     throw new Error("Desktop wiring module must export createDesktopMainOptions().");
   }
