@@ -3,6 +3,15 @@ import { fileURLToPath } from "node:url";
 
 import type { ClientIpcRequest } from "@uclaw/shared";
 
+import { GatewayProcessManager, type SpawnGateway } from "./gateway/gateway-process.js";
+import {
+  checkGatewayHealth,
+  type GatewayCapabilityProbeResult,
+  type GatewayHealthDependencies,
+} from "./gateway/health-check.js";
+import { selectGatewayPort } from "./gateway/port-selector.js";
+import { startGatewayAndCreateWindow, type ShowableWindow } from "./gateway/startup.js";
+import type { IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import {
   createMainWindow,
@@ -48,7 +57,7 @@ export interface BootstrapDesktopDependencies<TWindow extends AppWindowLike> {
   app: DesktopAppLike;
   createWindow(): Promise<TWindow>;
   registerIpc(window: TWindow): void;
-  stopGateway?(): Promise<void> | void;
+  stopGateway(): Promise<void> | void;
 }
 
 export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
@@ -70,11 +79,14 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
   });
   let shutdownStarted = false;
   app.on("before-quit", (event) => {
-    if (!stopGateway || shutdownStarted) return;
+    if (shutdownStarted) return;
     event?.preventDefault();
     shutdownStarted = true;
     try {
-      void Promise.resolve(stopGateway()).finally(() => app.quit());
+      void Promise.resolve(stopGateway()).then(
+        () => app.quit(),
+        () => app.quit(),
+      );
     } catch {
       app.quit();
     }
@@ -87,10 +99,74 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
   return window;
 }
 
-export async function startElectronMain(): Promise<void> {
+export interface DesktopMainOptions {
+  spawn: SpawnGateway;
+  buildGatewayLaunchOptions(port: number): unknown;
+  requiredMethods: readonly string[];
+  probeCapabilities(port: number): Promise<GatewayCapabilityProbeResult>;
+  dispatchClient(request: ClientIpcRequest): Promise<unknown>;
+  selectPort?(): Promise<number>;
+  fetch?: GatewayHealthDependencies["fetch"];
+  now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
+  readinessTimeoutMs?: number;
+  readinessPollIntervalMs?: number;
+  gatewayStopTimeoutMs?: number;
+}
+
+export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
+  app: DesktopAppLike;
+  createWindow(): Promise<TWindow>;
+  registerIpc(window: TWindow, dispatchClient: DesktopMainOptions["dispatchClient"]): void;
+}
+
+const defaultSleep = (milliseconds: number): Promise<void> => new Promise((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
+
+export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWindow>(
+  options: DesktopMainOptions,
+  runtime: DesktopMainRuntime<TWindow>,
+): Promise<TWindow | null> {
+  const gatewayProcess = new GatewayProcessManager({
+    spawn: options.spawn,
+    stopTimeoutMs: options.gatewayStopTimeoutMs,
+  });
+  const fetchHealth = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
+  const now = options.now ?? Date.now;
+
+  return bootstrapDesktopApp({
+    app: runtime.app,
+    stopGateway: () => gatewayProcess.stop(),
+    createWindow: async () => {
+      const started = await startGatewayAndCreateWindow({
+        selectPort: options.selectPort ?? (() => selectGatewayPort()),
+        gatewayProcess,
+        buildLaunchOptions: options.buildGatewayLaunchOptions,
+        checkHealth: (port) => checkGatewayHealth({
+          isProcessAlive: () => gatewayProcess.getOwnedPid() !== null,
+          baseUrl: `http://127.0.0.1:${port}`,
+          fetch: fetchHealth,
+          now,
+          requiredMethods: options.requiredMethods,
+          probeCapabilities: () => options.probeCapabilities(port),
+        }),
+        now,
+        sleep: options.sleep ?? defaultSleep,
+        timeoutMs: options.readinessTimeoutMs ?? 30_000,
+        pollIntervalMs: options.readinessPollIntervalMs ?? 250,
+        createWindow: runtime.createWindow,
+      });
+      return started.window;
+    },
+    registerIpc: (window) => runtime.registerIpc(window, options.dispatchClient),
+  });
+}
+
+export async function startElectronMain(options: DesktopMainOptions): Promise<void> {
   const { app, BrowserWindow, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
-  await bootstrapDesktopApp({
+  await runDesktopMain(options, {
     app,
     createWindow: () => createMainWindow({
       BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -98,25 +174,12 @@ export async function startElectronMain(): Promise<void> {
       rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
       rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
       openExternal: (url) => shell.openExternal(url),
+      showWhenReady: false,
     }),
-    registerIpc: (window) => registerDesktopIpc({
-      ipcMain,
+    registerIpc: (window, dispatchClient) => registerDesktopIpc({
+      ipcMain: ipcMain as unknown as IpcMainLike,
       windowControls: createWindowControls(window),
-      dispatchClient: async (_request: ClientIpcRequest) => {
-        throw {
-          code: "UNAVAILABLE",
-          message: "Client transport is not configured.",
-          retryable: true,
-          recoveryActions: ["retry"],
-          causeDetails: {},
-        };
-      },
+      dispatchClient,
     }),
-  });
-}
-
-if (process.versions.electron) {
-  void startElectronMain().catch(() => {
-    process.exitCode = 1;
   });
 }
