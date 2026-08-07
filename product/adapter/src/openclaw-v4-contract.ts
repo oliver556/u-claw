@@ -196,7 +196,23 @@ export const OpenClawSessionToolEventSchema = z.object({
 export const OpenClawSessionToolFixtureSchema = z.object({
   start: OpenClawSessionToolEventSchema,
   result: OpenClawSessionToolEventSchema,
-}).strict();
+}).strict().superRefine((value, context) => {
+  const identityFields = [
+    { path: ["sessionKey"], start: value.start.payload.sessionKey, result: value.result.payload.sessionKey },
+    { path: ["runId"], start: value.start.payload.runId, result: value.result.payload.runId },
+    { path: ["data", "toolCallId"], start: value.start.payload.data.toolCallId, result: value.result.payload.data.toolCallId },
+    { path: ["data", "name"], start: value.start.payload.data.name, result: value.result.payload.data.name },
+  ] as const;
+  for (const identity of identityFields) {
+    if (identity.start !== identity.result) {
+      context.addIssue({
+        code: "custom",
+        path: ["result", "payload", ...identity.path],
+        message: "session.tool start and result identities must match",
+      });
+    }
+  }
+});
 
 export const OpenClawSessionsPatchFixtureSchema = z.object({
   rename: RpcCaseSchema("sessions.patch", z.object({ key: z.string().min(1), label: z.string().min(1) }).strict(), ResponseFrameSchema),
@@ -270,11 +286,12 @@ export function mapOpenClawHistoryResponse(input: z.input<typeof OpenClawHistory
 
 export function mapOpenClawMessageGetResponse(
   input: z.input<typeof OpenClawMessageGetResponseSchema>,
-  sessionKey?: string,
+  sessionKey: string,
 ): Message | undefined {
+  const validatedSessionKey = z.string().min(1).parse(sessionKey);
   const response = OpenClawMessageGetResponseSchema.parse(input);
   if (!response.ok) return undefined;
-  return mapOpenClawHistoryMessage(sessionKey ?? response.message.__openclaw.id, response.message);
+  return mapOpenClawHistoryMessage(validatedSessionKey, response.message);
 }
 
 function approvalChoices(decisions: readonly z.infer<typeof ApprovalDecisionSchema>[] | undefined) {
