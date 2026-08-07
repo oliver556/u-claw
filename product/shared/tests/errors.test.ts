@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { UClawErrorSchema } from "../src/index.js";
+import { RendererSafeSummarySchema, UClawErrorSchema, normalizeKey } from "../src/index.js";
 
 describe("error contracts", () => {
   it("parses a renderer-safe error", () => {
@@ -21,7 +21,7 @@ describe("error contracts", () => {
         message: "请求失败",
         retryable: false,
         recoveryActions: [],
-        causeDetails: { upstreamCode: "Bearer raw-secret-value" },
+        causeDetails: { upstreamCode: "Authorization: Bearer raw-secret-value" },
       });
 
     expect(JSON.stringify(parsed)).not.toContain("raw-secret-value");
@@ -29,7 +29,7 @@ describe("error contracts", () => {
 
   it.each([
     "Authorization: Basic Zm9vOmJhcg==",
-    "Bearer raw-secret-value",
+    "Authorization: Bearer raw-secret-value",
     "ghp_123456789012345678901234567890123456",
     "AKIAIOSFODNN7EXAMPLE",
     "api_key=top-secret-value",
@@ -47,14 +47,22 @@ describe("error contracts", () => {
     expect(parsed.message).not.toBe(message);
   });
 
-  it.each(["Authorization: required", "Token: expired"])("allows non-secret status text: %s", (message) => {
-    expect(UClawErrorSchema.parse({
+  it.each([
+    "Authorization: Bearer required",
+    "Authorization: required",
+    "Bearer authentication required",
+    "Token: expired.",
+    "Cookie: missing",
+  ])("allows non-secret status text: %s", (message) => {
+    const parsed = UClawErrorSchema.parse({
       code: "AUTHORIZATION_REQUIRED",
       message,
       retryable: false,
       recoveryActions: [],
       causeDetails: {},
-    })).toBeTruthy();
+    });
+
+    expect(parsed.message).toBe(message);
   });
 
   it.each([
@@ -93,5 +101,57 @@ describe("error contracts", () => {
         causeDetails: { arbitrary: "not allowed" },
       }),
     ).toThrow();
+  });
+
+  it.each([
+    ["apiKey", "api_key"],
+    ["access-token", "access_token"],
+    ["auth token", "auth_token"],
+    ["session.cookie", "session_cookie"],
+    ["privateKey", "private_key"],
+  ])("normalizes contextual key %s", (input, expected) => {
+    expect(normalizeKey(input)).toBe(expected);
+  });
+
+  it("redacts nonempty sensitive values while preserving metrics and safe statuses", () => {
+    const parsed = RendererSafeSummarySchema.parse({
+      apiKey: "context-secret-1",
+      access_token: "context-secret-2",
+      authToken: "context-secret-3",
+      sessionCookie: true,
+      privateKey: ["line-1", "line-2"],
+      token: 123456,
+      client_password: false,
+      tokenCount: 42,
+      inputTokens: 10,
+      outputTokens: 20,
+      maxTokens: 100,
+      apiKeyStatus: "configured",
+      tokenStatus: "expired",
+      refreshToken: "not configured.",
+      configured: true,
+      present: false,
+      enabled: true,
+    });
+
+    expect(parsed).toMatchObject({
+      apiKey: "[REDACTED]",
+      access_token: "[REDACTED]",
+      authToken: "[REDACTED]",
+      sessionCookie: "[REDACTED]",
+      privateKey: "[REDACTED]",
+      token: "[REDACTED]",
+      client_password: "[REDACTED]",
+      tokenCount: 42,
+      inputTokens: 10,
+      outputTokens: 20,
+      maxTokens: 100,
+      apiKeyStatus: "configured",
+      tokenStatus: "expired",
+      refreshToken: "not configured.",
+      configured: true,
+      present: false,
+      enabled: true,
+    });
   });
 });

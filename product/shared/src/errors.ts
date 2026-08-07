@@ -41,11 +41,23 @@ export const RecoveryActionSchema = z.enum([
 export type RecoveryAction = z.infer<typeof RecoveryActionSchema>;
 
 const REDACTED = "[REDACTED]";
-const safeCredentialStatus = /^(?:required|missing|expired|configured|invalid|redacted|unset|none)$/i;
-const sensitiveContextKeys = new Set([
+const safeCredentialStatus = /^(?:required|missing|expired|configured|not configured|unavailable|invalid|redacted|unset|none)$/i;
+const explicitlySafeContextKeys = new Set([
+  "token_count",
+  "input_tokens",
+  "output_tokens",
+  "max_tokens",
+  "api_key_status",
+  "token_status",
+  "configured",
+  "present",
+  "enabled",
+]);
+const exactSensitiveContextKeys = new Set([
   "authorization",
   "cookie",
   "password",
+  "private_key",
   "secret",
   "token",
   "api_key",
@@ -56,12 +68,32 @@ const sensitiveContextKeys = new Set([
   "aws_secret_access_key",
 ]);
 
+export function normalizeKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+}
+
+function isSafeCredentialStatus(value: string): boolean {
+  return safeCredentialStatus.test(value.trim().replace(/[.!?,;:]+$/g, "").trim());
+}
+
+function isSensitiveContextKey(key: string): boolean {
+  const normalizedKey = normalizeKey(key);
+  if (explicitlySafeContextKeys.has(normalizedKey)) return false;
+  return exactSensitiveContextKeys.has(normalizedKey) ||
+    /_(?:token|secret|password|cookie|private_key)$/.test(normalizedKey);
+}
+
 function redactCapturedValue(
   match: string,
   prefix: string,
   value: string,
 ): string {
-  return safeCredentialStatus.test(value.trim()) ? match : `${prefix}${REDACTED}`;
+  return isSafeCredentialStatus(value) ? match : `${prefix}${REDACTED}`;
 }
 
 export function redactRendererText(text: string, contextKey?: string): string {
@@ -73,7 +105,6 @@ export function redactRendererText(text: string, contextKey?: string): string {
       redactCapturedValue,
     )
     .replace(/(\btoken\s*[:=]\s*)([^\s,;]+)/gi, redactCapturedValue)
-    .replace(/(\bbearer\s+)([A-Za-z0-9._~+/=-]+)/gi, `$1${REDACTED}`)
     .replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}\b/g, REDACTED)
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, REDACTED)
     .replace(/\bxox[bp]-[A-Za-z0-9-]{16,}\b/g, REDACTED)
@@ -83,8 +114,7 @@ export function redactRendererText(text: string, contextKey?: string): string {
     .replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, REDACTED);
 
   if (contextKey !== undefined && redacted === text) {
-    const normalizedKey = contextKey.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-    if (sensitiveContextKeys.has(normalizedKey) && !safeCredentialStatus.test(text.trim())) {
+    if (isSensitiveContextKey(contextKey) && text !== "" && !isSafeCredentialStatus(text)) {
       redacted = REDACTED;
     }
   }
@@ -103,19 +133,38 @@ export const RendererSafeScalarSchema = z.union([
 ]);
 export type RendererSafeScalar = z.infer<typeof RendererSafeScalarSchema>;
 
+export const RendererSafeValueSchema = z.union([
+  RendererSafeScalarSchema,
+  z.array(RendererSafeScalarSchema),
+]);
+export type RendererSafeValue = z.infer<typeof RendererSafeValueSchema>;
+
 export function redactRendererRecord(
-  summary: Record<string, RendererSafeScalar>,
-): Record<string, RendererSafeScalar> {
+  summary: Record<string, RendererSafeValue>,
+): Record<string, RendererSafeValue> {
   return Object.fromEntries(
-    Object.entries(summary).map(([key, value]) => [
-      key,
-      typeof value === "string" ? redactRendererText(value, key) : value,
-    ]),
+    Object.entries(summary).map(([key, value]) => {
+      if (isSensitiveContextKey(key)) {
+        if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) {
+          return [key, value];
+        }
+        if (typeof value === "string" && isSafeCredentialStatus(value)) {
+          return [key, value];
+        }
+        return [key, REDACTED];
+      }
+
+      if (typeof value === "string") return [key, redactRendererText(value)];
+      if (Array.isArray(value)) {
+        return [key, value.map((item) => typeof item === "string" ? redactRendererText(item) : item)];
+      }
+      return [key, value];
+    }),
   );
 }
 
 export const RendererSafeSummarySchema = z
-  .record(z.string(), RendererSafeScalarSchema)
+  .record(z.string(), RendererSafeValueSchema)
   .transform(redactRendererRecord);
 export type RendererSafeSummary = z.infer<typeof RendererSafeSummarySchema>;
 
