@@ -27,11 +27,21 @@ describe("chat mapper", () => {
     const message = mapMessage({ id: "m-1", sessionKey: "session-1", role: "assistant", status: "completed", blocks: [{ id: "b-1", type: "future" }], createdAt: now });
     expect(message.blocks[0]).toEqual({ id: "b-1", type: "unsupported", originalType: "future", summary: "Unsupported content" });
   });
+
+  it("rejects extra raw chat fields", () => {
+    const raw = { id: "m-1", sessionKey: "session-1", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: now, extra: "forbidden" };
+    expect(() => mapMessage(raw)).toThrow();
+  });
 });
 
 describe("session and tool mappers", () => {
   it("maps validated sessions", () => {
     expect(mapSession({ sessionKey: "session-1", title: "Chat", createdAt: now, updatedAt: now, pinned: false, status: "idle" })).toMatchObject({ id: "session-1", title: "Chat" });
+  });
+
+  it("rejects extra raw session fields", () => {
+    const raw = { sessionKey: "session-1", title: "Chat", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const, extra: "forbidden" };
+    expect(() => mapSession(raw)).toThrow();
   });
 
   it.each([
@@ -45,5 +55,15 @@ describe("session and tool mappers", () => {
     const base = { id: "approval-1", title: "Confirm", description: "Needs access", risk: "high" as const, permissions: [{ kind: "process" as const, scope: "command", description: "Run command" }], choices: ["deny" as const], status: "pending" as const };
     expect(mapExecApproval({ ...base, toolCallId: "tool-1" })).toMatchObject({ family: "exec", subject: { kind: "toolCall" } });
     expect(mapPluginApproval({ ...base, pluginId: "plugin-1" })).toMatchObject({ family: "plugin", subject: { kind: "plugin", id: "plugin-1" } });
+  });
+
+  it("rejects extra raw tool fields", () => {
+    const raw = { toolCallId: "tool-1", sessionKey: "session-1", toolId: "exec", displayName: "Execute", state: "running" as const, risk: "high" as const, extra: "forbidden" };
+    expect(() => mapToolCall(raw)).toThrow();
+  });
+
+  it("rejects extra raw approval fields", () => {
+    const raw = { id: "approval-1", title: "Confirm", description: "Needs access", risk: "high" as const, permissions: [{ kind: "process" as const, scope: "command", description: "Run command" }], choices: ["deny" as const], status: "pending" as const, toolCallId: "tool-1", extra: "forbidden" };
+    expect(() => mapExecApproval(raw)).toThrow();
   });
 });

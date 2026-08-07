@@ -6,7 +6,7 @@ export { ManualClock, MockUClawClient } from "./mock/mock-client.js";
 export { OpenClawClient, UClawUnsupportedError } from "./openclaw-client.js";
 export type { OpenClawClientOptions, OpenClawTransport } from "./openclaw-client.js";
 export { ReconnectPolicy, SequenceGapDetector, systemClock } from "./reconnect.js";
-export type { Clock, ReconnectPolicyOptions, SequenceGap } from "./reconnect.js";
+export type { Clock, ReconnectPolicyOptions, SequenceDecision, SequenceGap } from "./reconnect.js";
 export { redactAdapterLog, redactAdapterRecord } from "./redaction.js";
 export { GatewayWebSocket, HelloOkSchema } from "./transport/gateway-websocket.js";
 export type {

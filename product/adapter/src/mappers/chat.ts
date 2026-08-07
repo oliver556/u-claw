@@ -11,7 +11,7 @@ import { z } from "zod";
 const ErrorSummarySchema = z.object({
   code: z.string().optional(),
   message: z.string().min(1),
-});
+}).strict();
 
 const RawBlockSchema = z.object({
   id: z.string().min(1),
@@ -23,7 +23,7 @@ const RawBlockSchema = z.object({
   filename: z.string().optional(),
   toolCallId: z.string().min(1).optional(),
   level: z.enum(["info", "warning", "error"]).optional(),
-});
+}).strict();
 
 export const RawMessageSchema = z.object({
   id: z.string().min(1),
@@ -34,15 +34,15 @@ export const RawMessageSchema = z.object({
   blocks: z.array(RawBlockSchema),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1).optional(),
-  model: z.object({ id: z.string().min(1), label: z.string().min(1), providerId: z.string().min(1).optional() }).optional(),
+  model: z.object({ id: z.string().min(1), label: z.string().min(1), providerId: z.string().min(1).optional() }).strict().optional(),
   error: ErrorSummarySchema.optional(),
-});
+}).strict();
 
 export const RawChatEventSchema = z.discriminatedUnion("state", [
-  z.object({ state: z.literal("delta"), runId: z.string().min(1), sessionKey: z.string().min(1), deltaText: z.string(), replace: z.boolean().optional() }),
-  z.object({ state: z.literal("final"), runId: z.string().min(1), sessionKey: z.string().min(1), message: RawMessageSchema }),
-  z.object({ state: z.literal("aborted"), runId: z.string().min(1), sessionKey: z.string().min(1), errorMessage: z.string().optional() }),
-  z.object({ state: z.literal("error"), runId: z.string().min(1), sessionKey: z.string().min(1), errorKind: z.string().optional(), errorMessage: z.string().min(1).optional() }),
+  z.object({ state: z.literal("delta"), runId: z.string().min(1), sessionKey: z.string().min(1), deltaText: z.string(), replace: z.boolean().optional() }).strict(),
+  z.object({ state: z.literal("final"), runId: z.string().min(1), sessionKey: z.string().min(1), message: RawMessageSchema }).strict(),
+  z.object({ state: z.literal("aborted"), runId: z.string().min(1), sessionKey: z.string().min(1), errorMessage: z.string().optional() }).strict(),
+  z.object({ state: z.literal("error"), runId: z.string().min(1), sessionKey: z.string().min(1), errorKind: z.string().optional(), errorMessage: z.string().min(1).optional() }).strict(),
 ]);
 
 function mapBlock(input: z.infer<typeof RawBlockSchema>): ContentBlock {

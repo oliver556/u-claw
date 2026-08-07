@@ -71,6 +71,47 @@ describe("RpcRouter", () => {
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).not.toContain("sk-proj");
   });
+
+  it("suppresses a duplicate before one subscriber receives it", () => {
+    const socket = new FakeSocket();
+    const router = new RpcRouter(socket);
+    const received: number[] = [];
+    router.onEvent("chat", (frame) => received.push(frame.seq ?? -1));
+    const frame = JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 4 });
+    socket.emit("message", frame);
+    socket.emit("message", frame);
+    expect(received).toEqual([4]);
+  });
+
+  it("observes a duplicate once before broadcasting to two subscribers", () => {
+    const socket = new FakeSocket();
+    const router = new RpcRouter(socket);
+    const first: number[] = [];
+    const second: number[] = [];
+    router.onEvent("chat", (frame) => first.push(frame.seq ?? -1));
+    router.onEvent("chat", (frame) => second.push(frame.seq ?? -1));
+    const frame = JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 8 });
+    socket.emit("message", frame);
+    socket.emit("message", frame);
+    expect(first).toEqual([8]);
+    expect(second).toEqual([8]);
+  });
+
+  it("suppresses one gap frame for two subscribers and requests one resync", () => {
+    const socket = new FakeSocket();
+    const router = new RpcRouter(socket);
+    const first: number[] = [];
+    const second: number[] = [];
+    const gaps: Array<{ expected: number; received: number }> = [];
+    router.onEvent("chat", (frame) => first.push(frame.seq ?? -1));
+    router.onEvent("chat", (frame) => second.push(frame.seq ?? -1));
+    router.onSequenceGap((gap) => gaps.push(gap));
+    socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 10 }));
+    socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 12 }));
+    expect(first).toEqual([10]);
+    expect(second).toEqual([10]);
+    expect(gaps).toEqual([{ expected: 11, received: 12 }]);
+  });
 });
 
 describe("GatewayWebSocket", () => {
