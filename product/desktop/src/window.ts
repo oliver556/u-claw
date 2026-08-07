@@ -1,10 +1,18 @@
 import { installNavigationPolicy, type WebContentsLike } from "./security/navigation-policy.js";
+import { WINDOW_MAXIMIZED_EVENT_CHANNEL } from "./ipc/channels.js";
+
+export interface DesktopWebContents extends WebContentsLike {
+  on(event: "will-navigate", listener: Parameters<WebContentsLike["on"]>[1]): void;
+  on(event: "did-finish-load", listener: () => void): void;
+  send(channel: string, payload: unknown): void;
+}
 
 export interface DesktopWindow {
-  webContents: WebContentsLike;
+  webContents: DesktopWebContents;
   loadURL(url: string): Promise<unknown>;
   loadFile?(path: string): Promise<unknown>;
   once(event: "ready-to-show", listener: () => void): void;
+  on(event: "maximize" | "unmaximize", listener: () => void): void;
   show(): void;
   minimize(): void;
   maximize(): void;
@@ -65,6 +73,12 @@ export async function createMainWindow({
   });
 
   installNavigationPolicy({ webContents: window.webContents, openExternal });
+  const sendMaximized = (maximized: boolean): void => {
+    window.webContents.send(WINDOW_MAXIMIZED_EVENT_CHANNEL, maximized);
+  };
+  window.webContents.on("did-finish-load", () => sendMaximized(window.isMaximized()));
+  window.on("maximize", () => sendMaximized(true));
+  window.on("unmaximize", () => sendMaximized(false));
   if (showWhenReady) window.once("ready-to-show", () => window.show());
 
   if (rendererUrl) {

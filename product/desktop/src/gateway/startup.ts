@@ -15,7 +15,7 @@ export interface GatewayStartupDependencies<TWindow extends ShowableWindow> {
   selectPort(): Promise<number>;
   gatewayProcess: GatewayProcessController;
   buildLaunchOptions(port: number): unknown;
-  checkHealth(port: number): Promise<GatewayHealthStatus>;
+  checkHealth(port: number, deadlineMs: number): Promise<GatewayHealthStatus>;
   now(): number;
   sleep(milliseconds: number): Promise<void>;
   timeoutMs: number;
@@ -71,7 +71,7 @@ async function waitForGatewayReadiness(
   const deadline = options.now() + options.timeoutMs;
 
   while (true) {
-    const status = await options.checkHealth(port);
+    const status = await options.checkHealth(port, deadline);
     if (!status.processAlive) throw new Error("Gateway process exited before readiness.");
     if (status.serviceReady && status.businessAvailable) return;
     if (options.now() >= deadline) throw new Error("Gateway readiness timed out.");

@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { checkGatewayHealth } from "../src/gateway/health-check.js";
 
 describe("checkGatewayHealth", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("does not probe HTTP when the process is dead", async () => {
     const fetch = vi.fn();
     const status = await checkGatewayHealth({
@@ -10,6 +12,7 @@ describe("checkGatewayHealth", () => {
       baseUrl: "http://127.0.0.1:18789",
       fetch,
       now: () => 1234,
+      deadlineMs: 1334,
     });
 
     expect(status).toEqual({
@@ -29,6 +32,7 @@ describe("checkGatewayHealth", () => {
       baseUrl: "http://127.0.0.1:18789/",
       fetch,
       now: () => 2345,
+      deadlineMs: 2445,
     });
 
     expect(status).toEqual({
@@ -48,6 +52,7 @@ describe("checkGatewayHealth", () => {
       baseUrl: "http://127.0.0.1:18789",
       fetch,
       now: () => 3456,
+      deadlineMs: 3556,
       requiredMethods: ["chat.send", "sessions.list"],
       probeCapabilities: async () => ({
         helloOk: true,
@@ -67,6 +72,7 @@ describe("checkGatewayHealth", () => {
       baseUrl: "http://127.0.0.1:18789",
       fetch: vi.fn().mockResolvedValue({ ok: true }),
       now: () => 4567,
+      deadlineMs: 4667,
       requiredMethods: ["chat.send", "sessions.list"],
     };
 
@@ -78,5 +84,53 @@ describe("checkGatewayHealth", () => {
       ...base,
       probeCapabilities: async () => ({ helloOk: true, methods: ["chat.send"] }),
     })).resolves.toMatchObject({ businessAvailable: false });
+  });
+
+  it("hard-times out a hanging fetch and aborts its signal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    let signal: AbortSignal | undefined;
+    const pending = checkGatewayHealth({
+      isProcessAlive: () => true,
+      baseUrl: "http://127.0.0.1:18789",
+      fetch: vi.fn((_url, init) => {
+        signal = (init as { signal?: AbortSignal }).signal;
+        return new Promise<never>(() => undefined);
+      }),
+      now: Date.now,
+      deadlineMs: 1_100,
+    });
+    let settled = false;
+    void pending.finally(() => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(true);
+    expect(signal?.aborted).toBe(true);
+    await expect(pending).resolves.toMatchObject({ serviceReady: false, businessAvailable: false });
+  });
+
+  it("hard-times out a hanging capability probe", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(2_000);
+    let signal: AbortSignal | undefined;
+    const pending = checkGatewayHealth({
+      isProcessAlive: () => true,
+      baseUrl: "http://127.0.0.1:18789",
+      fetch: vi.fn(async () => ({ ok: true })),
+      probeCapabilities: (receivedSignal) => {
+        signal = receivedSignal;
+        return new Promise(() => undefined);
+      },
+      requiredMethods: ["chat.send"],
+      now: Date.now,
+      deadlineMs: 2_100,
+    });
+    let settled = false;
+    void pending.finally(() => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(true);
+    expect(signal?.aborted).toBe(true);
+    await expect(pending).resolves.toMatchObject({ serviceReady: true, businessAvailable: false });
   });
 });

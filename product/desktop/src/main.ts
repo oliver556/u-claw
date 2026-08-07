@@ -108,7 +108,7 @@ export interface DesktopMainOptions {
   spawn: SpawnGateway;
   buildGatewayLaunchOptions(port: number): unknown;
   requiredMethods: readonly string[];
-  probeCapabilities(port: number): Promise<GatewayCapabilityProbeResult>;
+  probeCapabilities(port: number, signal: AbortSignal): Promise<GatewayCapabilityProbeResult>;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
   selectPort?(): Promise<number>;
   fetch?: GatewayHealthDependencies["fetch"];
@@ -117,6 +117,7 @@ export interface DesktopMainOptions {
   readinessTimeoutMs?: number;
   readinessPollIntervalMs?: number;
   gatewayStopTimeoutMs?: number;
+  gatewayKillTimeoutMs?: number;
 }
 
 export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
@@ -136,6 +137,7 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
   const gatewayProcess = new GatewayProcessManager({
     spawn: options.spawn,
     stopTimeoutMs: options.gatewayStopTimeoutMs,
+    killTimeoutMs: options.gatewayKillTimeoutMs,
   });
   const fetchHealth = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const now = options.now ?? Date.now;
@@ -156,13 +158,14 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
           stop: stopGateway,
         },
         buildLaunchOptions: options.buildGatewayLaunchOptions,
-        checkHealth: (port) => checkGatewayHealth({
+        checkHealth: (port, deadlineMs) => checkGatewayHealth({
           isProcessAlive: () => gatewayProcess.getOwnedPid() !== null,
           baseUrl: `http://127.0.0.1:${port}`,
           fetch: fetchHealth,
           now,
+          deadlineMs,
           requiredMethods: options.requiredMethods,
-          probeCapabilities: () => options.probeCapabilities(port),
+          probeCapabilities: (signal) => options.probeCapabilities(port, signal),
         }),
         now,
         sleep: options.sleep ?? defaultSleep,
@@ -176,6 +179,10 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
   });
 }
 
+export function resolvePreloadPath(moduleDir: string): string {
+  return join(moduleDir, "preload.cjs");
+}
+
 export async function startElectronMain(options: DesktopMainOptions): Promise<void> {
   const { app, BrowserWindow, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -183,7 +190,7 @@ export async function startElectronMain(options: DesktopMainOptions): Promise<vo
     app,
     createWindow: () => createMainWindow({
       BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
-      preloadPath: join(moduleDir, "preload.js"),
+      preloadPath: resolvePreloadPath(moduleDir),
       rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
       rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
       openExternal: (url) => shell.openExternal(url),

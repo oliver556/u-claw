@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { bootstrapDesktopApp, runDesktopMain, validateRendererUrl } from "../src/main.js";
 
@@ -142,6 +142,8 @@ describe("validateRendererUrl", () => {
 });
 
 describe("runDesktopMain", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("wires the injected gateway lifecycle through readiness and app shutdown", async () => {
     class FakeChild extends EventEmitter {
       pid = 8123;
@@ -194,7 +196,7 @@ describe("runDesktopMain", () => {
     });
 
     expect(buildGatewayLaunchOptions).toHaveBeenCalledWith(18791);
-    expect(probeCapabilities).toHaveBeenCalledWith(18791);
+    expect(probeCapabilities).toHaveBeenCalledWith(18791, expect.any(AbortSignal));
     expect(show).toHaveBeenCalledOnce();
     expect(registerIpc).toHaveBeenCalledWith(window, expect.any(Function));
 
@@ -202,5 +204,52 @@ describe("runDesktopMain", () => {
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     child.exitCode = 0;
     child.emit("exit", 0, null);
+  });
+
+  it("times out a hanging health request and rolls back the gateway", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    class FakeChild extends EventEmitter {
+      pid = 8124;
+      exitCode: number | null = null;
+      killed = false;
+      kill = vi.fn((signal?: NodeJS.Signals | number) => {
+        if (signal === "SIGTERM") {
+          setTimeout(() => {
+            this.exitCode = 0;
+            this.emit("exit", 0, null);
+          }, 1);
+        }
+        return true;
+      });
+    }
+    const child = new FakeChild();
+    const pending = runDesktopMain({
+      spawn: () => child,
+      buildGatewayLaunchOptions: () => ({ executable: "node", args: [] }),
+      requiredMethods: [],
+      probeCapabilities: vi.fn(),
+      dispatchClient: vi.fn(),
+      selectPort: async () => 18792,
+      fetch: () => new Promise<never>(() => undefined),
+      now: Date.now,
+      sleep: vi.fn(async () => undefined),
+      readinessTimeoutMs: 100,
+    }, {
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow: vi.fn(),
+      registerIpc: vi.fn(),
+    });
+    const rejected = expect(pending).rejects.toThrow("readiness timed out");
+
+    await vi.advanceTimersByTimeAsync(101);
+    await rejected;
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
   });
 });

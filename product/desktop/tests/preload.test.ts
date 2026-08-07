@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CLIENT_IPC_CHANNEL,
   CLIENT_IPC_EVENT_CHANNEL,
+  WINDOW_MAXIMIZED_EVENT_CHANNEL,
   WINDOW_IPC_CHANNEL,
 } from "../src/ipc/channels.js";
 import { installPreloadBridge } from "../src/ipc/preload-bridge.js";
@@ -30,6 +31,7 @@ describe("installPreloadBridge", () => {
     expect(api).not.toHaveProperty("ipcRenderer");
     expect(api).not.toHaveProperty("invoke");
     expect(Object.keys(api?.client as object)).toEqual(["invoke", "subscribe"]);
+    expect(Object.keys(api?.window as object)).toEqual(["invoke", "onMaximizedChange"]);
 
     await (api?.window as { invoke: (request: unknown) => Promise<unknown> }).invoke({
       method: "minimize",
@@ -46,6 +48,36 @@ describe("installPreloadBridge", () => {
       }),
     ).rejects.toThrow();
     expect(invoke).not.toHaveBeenCalledWith(CLIENT_IPC_CHANNEL, expect.objectContaining({ method: "exec" }));
+  });
+
+  it("subscribes to fixed maximize state events and cleans up the exact listener", () => {
+    let maximizeListener: ((_event: unknown, payload: unknown) => void) | undefined;
+    const on = vi.fn((channel: string, listener: typeof maximizeListener) => {
+      if (channel === WINDOW_MAXIMIZED_EVENT_CHANNEL) maximizeListener = listener;
+    });
+    const removeListener = vi.fn();
+    const reportInvalidEvent = vi.fn();
+    let api: Record<string, unknown> | undefined;
+    installPreloadBridge({
+      contextBridge: { exposeInMainWorld: (_name, exposed) => { api = exposed; } },
+      ipcRenderer: { invoke: vi.fn(), on, removeListener },
+      reportInvalidEvent,
+    });
+    const receive = vi.fn();
+    const unsubscribe = (api?.window as {
+      onMaximizedChange(listener: (maximized: boolean) => void): () => void;
+    }).onMaximizedChange(receive);
+
+    maximizeListener?.({}, true);
+    maximizeListener?.({}, "true");
+    expect(receive).toHaveBeenCalledOnce();
+    expect(receive).toHaveBeenCalledWith(true);
+    expect(reportInvalidEvent).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Invalid window maximized event.",
+    }));
+
+    unsubscribe();
+    expect(removeListener).toHaveBeenCalledWith(WINDOW_MAXIMIZED_EVENT_CHANNEL, maximizeListener);
   });
 
   it("parses events on one fixed channel and removes the exact listener on unsubscribe", () => {
