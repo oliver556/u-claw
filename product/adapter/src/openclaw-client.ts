@@ -31,7 +31,7 @@ import {
 } from "./mappers/tool.js";
 import type { GatewayWebSocketState, HelloOk } from "./transport/gateway-websocket.js";
 import { ReconnectPolicy, type SequenceGap } from "./reconnect.js";
-import { AdapterServiceError, RpcClosedError, RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
+import { AdapterServiceError, RpcClosedError, RpcProtocolError, RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
 
 interface OpenClawRouter {
   request<T>(method: string, params: JsonValue, schema: z.ZodType<T>): Promise<T>;
@@ -240,6 +240,7 @@ export class OpenClawClient implements UClawClient {
     list: async (sessionId, request) => {
       this.requireMethod("chat.history");
       const raw = await this.options.transport.router.request("chat.history", { sessionKey: sessionId, ...(request ?? {}) }, OpenClawHistoryResponseSchema);
+      if (raw.sessionKey !== sessionId) throw new RpcProtocolError("chat.history");
       return { items: mapOpenClawHistoryResponse(raw), nextCursor: null, hasMore: false };
     },
     get: async (sessionId, messageId) => {
