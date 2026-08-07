@@ -12,6 +12,7 @@ import {
 import {
   CLIENT_IPC_CHANNEL,
   CLIENT_IPC_EVENT_CHANNEL,
+  WINDOW_MAXIMIZED_EVENT_CHANNEL,
   WINDOW_IPC_CHANNEL,
 } from "./channels.js";
 
@@ -69,9 +70,20 @@ export function installPreloadBridge({
     ipcRenderer.on(CLIENT_IPC_EVENT_CHANNEL, receive);
     return () => ipcRenderer.removeListener(CLIENT_IPC_EVENT_CHANNEL, receive);
   };
+  const onMaximizedChange = (listener: (maximized: boolean) => void): (() => void) => {
+    const receive = (_event: unknown, payload: unknown): void => {
+      if (typeof payload !== "boolean") {
+        reportInvalidEvent(new Error("Invalid window maximized event."));
+        return;
+      }
+      listener(payload);
+    };
+    ipcRenderer.on(WINDOW_MAXIMIZED_EVENT_CHANNEL, receive);
+    return () => ipcRenderer.removeListener(WINDOW_MAXIMIZED_EVENT_CHANNEL, receive);
+  };
 
   contextBridge.exposeInMainWorld("uclaw", Object.freeze({
-    window: Object.freeze({ invoke: invokeWindow }),
+    window: Object.freeze({ invoke: invokeWindow, onMaximizedChange }),
     client: Object.freeze({ invoke: invokeClient, subscribe }),
   }));
 }

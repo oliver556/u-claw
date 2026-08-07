@@ -40,6 +40,7 @@ export interface GatewayLaunchOptions {
 export interface GatewayProcessManagerOptions {
   spawn: SpawnGateway;
   stopTimeoutMs?: number;
+  killTimeoutMs?: number;
 }
 
 export class GatewayProcessManager extends EventEmitter {
@@ -47,10 +48,12 @@ export class GatewayProcessManager extends EventEmitter {
   private ownedPid: number | null = null;
   private state: GatewayProcessState = { phase: "stopped" };
   private readonly stopTimeoutMs: number;
+  private readonly killTimeoutMs: number;
 
   constructor(private readonly options: GatewayProcessManagerOptions) {
     super();
     this.stopTimeoutMs = options.stopTimeoutMs ?? 5_000;
+    this.killTimeoutMs = options.killTimeoutMs ?? 2_000;
   }
 
   getState(): GatewayProcessState {
@@ -84,9 +87,10 @@ export class GatewayProcessManager extends EventEmitter {
       this.ownedPid = child.pid;
       child.once("exit", (code) => {
         if (this.child !== child) return;
+        const wasStopping = this.state.phase === "stopping";
         this.child = null;
         this.ownedPid = null;
-        this.setState(code === 0
+        this.setState(code === 0 || wasStopping
           ? { phase: "stopped" }
           : { phase: "failed", message: `Gateway exited with code ${code ?? "unknown"}.` });
       });
@@ -111,25 +115,28 @@ export class GatewayProcessManager extends EventEmitter {
     if (!child || pid === null) return;
 
     this.setState({ phase: "stopping", pid });
-    if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
-
-    await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        if (
-          this.child === child &&
-          this.ownedPid === pid &&
-          child.pid === pid &&
-          child.exitCode === null
-        ) {
-          child.kill("SIGKILL");
-        }
-        resolve();
-      }, this.stopTimeoutMs);
-
+    const waitForExit = (timeoutMs: number): Promise<boolean> => new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(false), timeoutMs);
       child.once("exit", () => {
         clearTimeout(timeout);
-        resolve();
+        resolve(true);
       });
     });
+
+    const gracefulExit = waitForExit(this.stopTimeoutMs);
+    if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
+    if (await gracefulExit) return;
+    if (this.child !== child || this.ownedPid !== pid || child.pid !== pid) {
+      const message = "Gateway process ownership changed before SIGKILL.";
+      this.setState({ phase: "failed", message });
+      throw new Error(message);
+    }
+    const forcedExit = waitForExit(this.killTimeoutMs);
+    child.kill("SIGKILL");
+    if (await forcedExit) return;
+
+    const message = "Gateway process did not exit after SIGKILL.";
+    this.setState({ phase: "failed", message });
+    throw new Error(message);
   }
 }
