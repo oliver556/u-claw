@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { isElectronMainProcess, runElectronEntry } from "../src/entry.js";
+import {
+  isElectronMainProcess,
+  loadProductionDesktopOptions,
+  runElectronEntry,
+} from "../src/entry.js";
 import type { DesktopMainOptions } from "../src/main.js";
 
 describe("Electron production entry", () => {
@@ -36,5 +40,29 @@ describe("Electron production entry", () => {
     expect(loadOptions).toHaveBeenCalledOnce();
     expect(startElectronMain).toHaveBeenCalledOnce();
     expect(startElectronMain).toHaveBeenCalledWith(options);
+  });
+
+  it("fails with a stable error when production wiring is not configured", async () => {
+    await expect(loadProductionDesktopOptions({})).rejects.toThrow(
+      "Desktop production wiring is not configured.",
+    );
+  });
+
+  it("rejects an absolute wiring module outside controlled runtime roots", async () => {
+    const outsideDesktopRoot = new URL("../../shared/dist/index.js", import.meta.url);
+    await expect(loadProductionDesktopOptions({
+      UCLAW_DESKTOP_WIRING_MODULE: outsideDesktopRoot.pathname,
+    })).rejects.toThrow("outside controlled runtime roots");
+  });
+
+  it("loads the fixed factory export from a real module under the packaged desktop root", async () => {
+    const fixture = new URL("./fixtures/production-wiring.mjs", import.meta.url);
+    const options = await loadProductionDesktopOptions({
+      UCLAW_DESKTOP_WIRING_MODULE: fixture.pathname,
+    });
+
+    expect(options.requiredMethods).toEqual(["gateway.get-status"]);
+    expect(typeof options.spawn).toBe("function");
+    expect(typeof options.dispatchClient).toBe("function");
   });
 });

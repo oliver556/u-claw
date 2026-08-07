@@ -32,9 +32,55 @@ describe("GatewayProcessManager", () => {
     expect(spawn).toHaveBeenCalledWith(
       "/runtime/node.exe",
       ["openclaw.js", "gateway", "--port", "18789"],
-      expect.objectContaining({ shell: false, cwd: "/runtime" }),
+      expect.objectContaining({ shell: false, stdio: "ignore", cwd: "/runtime" }),
     );
     expect(manager.getState()).toMatchObject({ phase: "running", pid: 4123 });
+  });
+
+  it("shares one stop completion and sends SIGTERM once", async () => {
+    const child = new FakeChild();
+    child.kill.mockImplementation(() => {
+      queueMicrotask(() => {
+        child.exitCode = 0;
+        child.emit("close", 0, null);
+      });
+      return true;
+    });
+    const manager = new GatewayProcessManager({ spawn: () => child });
+    manager.start({ executable: "node", args: [] });
+
+    await Promise.all([manager.stop(), manager.stop()]);
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(manager.getOwnedPid()).toBeNull();
+  });
+
+  it("does not SIGKILL when exitCode becomes available at the graceful timeout boundary", async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild();
+    const manager = new GatewayProcessManager({ spawn: () => child, stopTimeoutMs: 50, killTimeoutMs: 20 });
+    manager.start({ executable: "node", args: [] });
+    setTimeout(() => { child.exitCode = 0; }, 50);
+
+    const stopping = manager.stop();
+    await vi.advanceTimersByTimeAsync(50);
+    await stopping;
+
+    expect(child.kill).not.toHaveBeenCalledWith("SIGKILL");
+    expect(manager.getOwnedPid()).toBeNull();
+  });
+
+  it("rejects stop with the child error and clears ownership", async () => {
+    const child = new FakeChild();
+    child.kill.mockImplementation(() => {
+      queueMicrotask(() => child.emit("error", new Error("direct child failed")));
+      return true;
+    });
+    const manager = new GatewayProcessManager({ spawn: () => child });
+    manager.start({ executable: "node", args: [] });
+
+    await expect(manager.stop()).rejects.toThrow("direct child failed");
+    expect(manager.getOwnedPid()).toBeNull();
+    expect(manager.getState()).toMatchObject({ phase: "failed" });
   });
 
   it("escalates after timeout only while the captured PID is still owned", async () => {

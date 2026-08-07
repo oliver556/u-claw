@@ -6,6 +6,9 @@ import { registerIpc } from "../src/ipc/register-ipc.js";
 describe("registerIpc", () => {
   function setup() {
     const handlers = new Map<string, (_event: unknown, payload: unknown) => Promise<unknown>>();
+    const removeHandler = vi.fn((channel: string) => handlers.delete(channel));
+    const mainFrame = {};
+    const authorizedWebContents = { mainFrame };
     const minimize = vi.fn();
     const dispatchClient = vi.fn(async (request: { method: string; requestId: string }) => ({
       method: request.method,
@@ -13,8 +16,9 @@ describe("registerIpc", () => {
       ok: true,
       result: [],
     }));
-    registerIpc({
-      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    const dispose = registerIpc({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler },
+      authorizedWebContents,
       windowControls: {
         minimize,
         toggleMaximize: vi.fn(),
@@ -22,7 +26,8 @@ describe("registerIpc", () => {
       },
       dispatchClient,
     });
-    return { handlers, minimize, dispatchClient };
+    const event = { sender: authorizedWebContents, senderFrame: mainFrame };
+    return { handlers, minimize, dispatchClient, dispose, removeHandler, event, authorizedWebContents };
   }
 
   it("registers only the fixed shared-contract channels", () => {
@@ -31,10 +36,10 @@ describe("registerIpc", () => {
   });
 
   it("rejects an arbitrary command payload with a safe UClawError", async () => {
-    const { handlers, dispatchClient } = setup();
+    const { handlers, dispatchClient, event } = setup();
     const handler = handlers.get(CLIENT_IPC_CHANNEL)!;
 
-    await expect(handler({}, {
+    await expect(handler(event, {
       method: "exec",
       requestId: "bad-1",
       params: { command: "secret-token-value", path: "/etc/passwd" },
@@ -48,8 +53,8 @@ describe("registerIpc", () => {
   });
 
   it("routes validated window operations separately", async () => {
-    const { handlers, minimize, dispatchClient } = setup();
-    const response = await handlers.get(WINDOW_IPC_CHANNEL)!({}, {
+    const { handlers, minimize, dispatchClient, event } = setup();
+    const response = await handlers.get(WINDOW_IPC_CHANNEL)!(event, {
       method: "minimize",
       requestId: "window-1",
       params: {},
@@ -60,15 +65,45 @@ describe("registerIpc", () => {
     expect(response).toEqual({ method: "minimize", requestId: "window-1", ok: true, result: null });
   });
 
+  it("rejects requests from another sender and from subframes", async () => {
+    const { handlers, dispatchClient, event, authorizedWebContents } = setup();
+    const payload = { method: "tools.list", requestId: "client-auth", params: {} };
+
+    await expect(handlers.get(CLIENT_IPC_CHANNEL)!({ ...event, sender: {} }, payload))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(handlers.get(CLIENT_IPC_CHANNEL)!({
+      sender: authorizedWebContents,
+      senderFrame: {},
+    }, payload)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(dispatchClient).not.toHaveBeenCalled();
+  });
+
+  it("removes both fixed handlers when disposed", () => {
+    const { dispose, handlers, removeHandler } = setup();
+    dispose();
+    dispose();
+
+    expect(removeHandler.mock.calls).toEqual([
+      [WINDOW_IPC_CHANNEL],
+      [CLIENT_IPC_CHANNEL],
+    ]);
+    expect(handlers.size).toBe(0);
+  });
+
   it("rejects a malformed client response without exposing its secret", async () => {
     const handlers = new Map<string, (_event: unknown, payload: unknown) => Promise<unknown>>();
+    const authorizedWebContents = { mainFrame: undefined };
     registerIpc({
-      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents,
       windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
       dispatchClient: vi.fn(async () => ({ token: "sk-super-secret-token" })),
     });
 
-    const error = await handlers.get(CLIENT_IPC_CHANNEL)!({}, {
+    const error = await handlers.get(CLIENT_IPC_CHANNEL)!({
+      sender: authorizedWebContents,
+      senderFrame: undefined,
+    }, {
       method: "tools.list",
       requestId: "client-1",
       params: {},
@@ -80,13 +115,18 @@ describe("registerIpc", () => {
 
   it("returns a safe failure response when a validated client operation fails", async () => {
     const handlers = new Map<string, (_event: unknown, payload: unknown) => Promise<unknown>>();
+    const authorizedWebContents = { mainFrame: undefined };
     registerIpc({
-      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents,
       windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
       dispatchClient: vi.fn(async () => { throw new Error("password=hunter2 internal failure"); }),
     });
 
-    await expect(handlers.get(CLIENT_IPC_CHANNEL)!({}, {
+    await expect(handlers.get(CLIENT_IPC_CHANNEL)!({
+      sender: authorizedWebContents,
+      senderFrame: undefined,
+    }, {
       method: "tools.list",
       requestId: "client-2",
       params: {},
