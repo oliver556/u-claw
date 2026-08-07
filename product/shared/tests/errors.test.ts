@@ -15,16 +15,16 @@ describe("error contracts", () => {
     ).toMatchObject({ code: "GATEWAY_DISCONNECTED", retryable: true });
   });
 
-  it("rejects raw secrets in cause details", () => {
-    expect(() =>
-      UClawErrorSchema.parse({
+  it("redacts raw secrets in cause details", () => {
+    const parsed = UClawErrorSchema.parse({
         code: "UNKNOWN",
         message: "请求失败",
         retryable: false,
         recoveryActions: [],
-        causeDetails: { upstream: "Bearer raw-secret-value" },
-      }),
-    ).toThrow();
+        causeDetails: { upstreamCode: "Bearer raw-secret-value" },
+      });
+
+    expect(JSON.stringify(parsed)).not.toContain("raw-secret-value");
   });
 
   it.each([
@@ -34,16 +34,17 @@ describe("error contracts", () => {
     "AKIAIOSFODNN7EXAMPLE",
     "api_key=top-secret-value",
     "token=top-secret-value",
-  ])("rejects representative secret leakage in message: %s", (message) => {
-    expect(() =>
-      UClawErrorSchema.parse({
+  ])("redacts representative secret leakage in message: %s", (message) => {
+    const parsed = UClawErrorSchema.parse({
         code: "UNKNOWN",
         message,
         retryable: false,
         recoveryActions: [],
         causeDetails: {},
-      }),
-    ).toThrow();
+      });
+
+    expect(parsed.message).toContain("[REDACTED]");
+    expect(parsed.message).not.toBe(message);
   });
 
   it.each(["Authorization: required", "Token: expired"])("allows non-secret status text: %s", (message) => {
@@ -65,14 +66,23 @@ describe("error contracts", () => {
     "API Key: actual-secret",
     "aws_secret_access_key=actual-secret-value",
     "github_pat_1234567890123456789012345678901234567890",
-  ])("rejects assigned credential text: %s", (message) => {
-    expect(() => UClawErrorSchema.parse({
+    "xoxb-1234567890-1234567890-secret",
+    "AIzaSyD12345678901234567890123456789012",
+    "sk_live_123456789012345678901234",
+    "rk_live_123456789012345678901234",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123456",
+    "Set-Cookie: session=actual-cookie",
+  ])("redacts assigned credential text: %s", (message) => {
+    const parsed = UClawErrorSchema.parse({
       code: "UNKNOWN",
       message,
       retryable: false,
       recoveryActions: [],
       causeDetails: {},
-    })).toThrow();
+    });
+
+    expect(parsed.message).toContain("[REDACTED]");
+    expect(parsed.message).not.toBe(message);
   });
 
   it("rejects non-allowlisted cause detail fields", () => {

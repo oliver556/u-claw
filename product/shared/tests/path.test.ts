@@ -35,4 +35,28 @@ describe("controlled relative paths", () => {
     "rejects unsafe basename: %s",
     (name) => expect(() => FileRefSchema.parse({ ...file, name })).toThrow(),
   );
+
+  it.each([
+    "C:secret.txt",
+    "file.txt:stream",
+    "bad<name.txt",
+    "bad>name.txt",
+    "bad\"name.txt",
+    "bad|name.txt",
+    "bad?name.txt",
+    "bad*name.txt",
+    "trailing.",
+    "trailing ",
+    "CON",
+    "con.txt",
+    "PRN.log",
+    "AUX",
+    "NUL.txt",
+    "COM1",
+    "com9.md",
+    "LPT1",
+    "lpt9.txt",
+  ])("rejects Windows-invalid basename: %s", (name) => {
+    expect(() => BasenameSchema.parse(name)).toThrow();
+  });
 });

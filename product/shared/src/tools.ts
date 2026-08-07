@@ -94,6 +94,9 @@ export const ApprovalRefSchema = z.discriminatedUnion("family", [
 ]);
 export type ApprovalRef = z.infer<typeof ApprovalRefSchema>;
 
+export function toApprovalRef(request: ExecApprovalRequest): ExecApprovalRef;
+export function toApprovalRef(request: PluginApprovalRequest): PluginApprovalRef;
+export function toApprovalRef(request: ApprovalRequest): ApprovalRef;
 export function toApprovalRef(request: ApprovalRequest): ApprovalRef {
   return ApprovalRefSchema.parse({ family: request.family, id: request.id });
 }
