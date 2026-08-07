@@ -67,6 +67,10 @@ export class SequenceGapDetector {
 
   constructor(private readonly onResyncRequired: (gap: SequenceGap) => void) {}
 
+  get isDesynced(): boolean {
+    return this.desynced;
+  }
+
   observe(sourceSequence: number): SequenceDecision {
     if (this.desynced) return "desynced";
     if (this.lastSequence === undefined) {
