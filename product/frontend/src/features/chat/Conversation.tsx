@@ -14,6 +14,10 @@ interface ConversationProps {
   gatewayStatus?: GatewayStatus;
   sessionsOpen: boolean;
   contextOpen: boolean;
+  draft: string;
+  onDraftChange(value: string): void;
+  onActivity(message: string): void;
+  onSendSuccess(): void;
   openSessions(): void;
   openContext(): void;
 }
@@ -27,20 +31,29 @@ export async function resolveApproval(client: Pick<UClawClient, "approvals">, ap
   return client.approvals.resolvePlugin({ ref: { family: "plugin", id: approval.id }, decision });
 }
 
-export function Conversation({ client, session, capabilities, gatewayStatus, sessionsOpen, contextOpen, openSessions, openContext }: ConversationProps) {
+export function Conversation({ client, session, capabilities, gatewayStatus, sessionsOpen, contextOpen, draft, onDraftChange, onActivity, onSendSuccess, openSessions, openContext }: ConversationProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">("loading");
   const [historyError, setHistoryError] = useState<string>();
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [pendingTools, setPendingTools] = useState<ToolCall[]>([]);
-  const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string>();
   const activeRunId = useRef<string | undefined>(undefined);
+  const sendController = useRef<AbortController | undefined>(undefined);
+  const stopRequested = useRef(false);
 
   const onStreamEvent = useCallback((event: MessageEvent) => {
-    if (event.type === "started") activeRunId.current = event.runId;
-  }, []);
+    if (event.type === "started") {
+      activeRunId.current = event.runId;
+      onActivity("响应已开始");
+      if (stopRequested.current) void client.chat.abort(event.runId).catch(() => undefined);
+    } else if (event.type === "tool") onActivity(`工具：${event.tool.displayName}`);
+    else if (event.type === "approval") onActivity(`等待授权：${event.approval.title}`);
+    else if (event.type === "final") onActivity("响应已完成");
+    else if (event.type === "aborted") onActivity("响应已停止");
+    else if (event.type === "error") onActivity(`响应失败：${event.error.message}`);
+  }, [client, onActivity]);
   const { state: stream, consume } = useMessageStream(onStreamEvent);
 
   const loadHistory = useCallback(async () => {
@@ -73,9 +86,12 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const send = async () => {
     const text = draft.trim();
     if (text.length === 0 || sending || unavailable) return;
-    setDraft("");
     setSendError(undefined);
     setSending(true);
+    stopRequested.current = false;
+    const controller = new AbortController();
+    sendController.current = controller;
+    onActivity("消息已发送");
     const optimistic: Message = {
       id: `local-${requestId()}`, sessionId: session.id, role: "user", status: "completed",
       blocks: [{ id: `local-block-${requestId()}`, type: "text", text, format: "plain" }],
@@ -84,21 +100,29 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     setMessages((current) => [...current, optimistic]);
     const restoreFailedDraft = (message: string) => {
       setMessages((current) => current.filter((item) => item.id !== optimistic.id));
-      setDraft(text);
+      onDraftChange(text);
       setSendError(message);
     };
     try {
-      const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId: requestId(), blocks: [{ type: "text", text, format: "plain" }] }));
+      const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId: requestId(), blocks: [{ type: "text", text, format: "plain" }] }, controller.signal));
       if (terminal?.type === "error") restoreFailedDraft(terminal.error.message);
+      else if (terminal?.type === "final") {
+        onDraftChange("");
+        onSendSuccess();
+      }
     } catch (error) {
       restoreFailedDraft(error instanceof Error ? error.message : "发送失败");
     } finally {
       activeRunId.current = undefined;
+      sendController.current = undefined;
+      stopRequested.current = false;
       setSending(false);
     }
   };
 
   const stop = async () => {
+    stopRequested.current = true;
+    sendController.current?.abort();
     const runId = activeRunId.current;
     if (runId === undefined) return;
     try { await client.chat.abort(runId); }
@@ -131,6 +155,6 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
       {historyState === "ready" ? <MessageList messages={messages} stream={stream} pendingApprovals={pendingApprovals} pendingTools={pendingTools} canResolveApprovals={canResolveApprovals} onResolveApproval={(approval, decision) => void handleApproval(approval, decision)} /> : null}
     </div>
     {sendError ? <div className="send-error" role="alert"><AlertCircle /><span><strong>发送失败</strong>{sendError}</span></div> : null}
-    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} onChange={setDraft} onSend={() => void send()} onStop={() => void stop()} />
+    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} onChange={onDraftChange} onSend={() => void send()} onStop={() => void stop()} />
   </section>;
 }

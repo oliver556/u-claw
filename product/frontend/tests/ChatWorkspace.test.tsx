@@ -3,11 +3,11 @@
 import "@testing-library/jest-dom/vitest";
 
 import type { MessageEvent, UClawClient } from "@uclaw/shared";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/app/App";
-import { initialStreamState, messageEventReducer } from "../src/features/chat/useMessageStream";
+import { initialStreamState, messageEventReducer, useMessageStream } from "../src/features/chat/useMessageStream";
 
 function deferredStream() {
   let emit: ((event: MessageEvent) => void) | undefined;
@@ -107,6 +107,30 @@ describe("chat workspace", () => {
     expect(within(sidebar).queryByRole("button", { name: /发布检查/ })).not.toBeInTheDocument();
   });
 
+  it("keeps separate drafts while switching sessions", async () => {
+    render(<App client={clientFixture()} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    await waitFor(() => expect(composer).toBeEnabled());
+    fireEvent.change(composer, { target: { value: "发布会话草稿" } });
+    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue(""));
+    fireEvent.change(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" }), { target: { value: "知识库草稿" } });
+    fireEvent.click(screen.getByRole("button", { name: /发布检查/ }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue("发布会话草稿"));
+    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue("知识库草稿"));
+  });
+
+  it("updates activity context when the active session changes", async () => {
+    render(<App client={clientFixture()} />);
+    const panel = screen.getByRole("complementary", { name: "上下文舱" });
+    fireEvent.click(screen.getByRole("tab", { name: "活动" }));
+    expect(await within(panel).findByText(/发布检查/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    expect(await within(panel).findByText(/知识库调研/)).toBeVisible();
+    expect(within(panel).queryByText(/发布检查/)).not.toBeInTheDocument();
+  });
+
   it("sends text, renders append and replace deltas, then finalizes once", async () => {
     const pending = deferredStream();
     const client = clientFixture({ chat: { ...clientFixture().chat, send: vi.fn(() => pending.stream) } });
@@ -115,7 +139,7 @@ describe("chat workspace", () => {
     const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
     fireEvent.change(composer, { target: { value: "检查发布目录" } });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
-    expect(screen.getByText("检查发布目录")).toBeVisible();
+    expect(screen.getAllByText("检查发布目录").some((element) => element.matches(".message p"))).toBe(true);
 
     pending.emit({ type: "started", runId: "run-1", sessionId: "session-1" });
     pending.emit({ type: "delta", runId: "run-1", mode: "append", text: "正在" });
@@ -130,22 +154,24 @@ describe("chat workspace", () => {
     expect(screen.getAllByText("检查完成")).toHaveLength(1);
   });
 
-  it("stops active run", async () => {
+  it("stops a send before started and aborts as soon as run id arrives", async () => {
     const pending = deferredStream();
     const base = clientFixture();
     const abort = vi.fn(async () => undefined);
-    const client = clientFixture({ chat: { ...base.chat, send: vi.fn(() => pending.stream), abort } });
+    const sendStream = vi.fn((_input: Parameters<UClawClient["chat"]["send"]>[0], _signal?: AbortSignal) => pending.stream);
+    const client = clientFixture({ chat: { ...base.chat, send: sendStream, abort } });
     render(<App client={client} />);
     const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
     await waitFor(() => expect(composer).toBeEnabled());
     fireEvent.change(composer, { target: { value: "停止测试" } });
-    const send = screen.getByRole("button", { name: "发送消息" });
-    await waitFor(() => expect(send).toBeEnabled());
-    fireEvent.click(send);
-    pending.emit({ type: "started", runId: "run-stop", sessionId: "session-1" });
-
+    const sendButton = screen.getByRole("button", { name: "发送消息" });
+    await waitFor(() => expect(sendButton).toBeEnabled());
+    fireEvent.click(sendButton);
     fireEvent.click(await screen.findByRole("button", { name: "停止生成" }));
-    expect(abort).toHaveBeenCalledWith("run-stop");
+    expect(sendStream.mock.calls[0][1]).toMatchObject({ aborted: true });
+    expect(abort).not.toHaveBeenCalled();
+    pending.emit({ type: "started", runId: "run-stop", sessionId: "session-1" });
+    await waitFor(() => expect(abort).toHaveBeenCalledWith("run-stop"));
   });
 
   it("restores failed message to composer for retry", async () => {
@@ -187,5 +213,24 @@ describe("messageEventReducer", () => {
     const aborted = messageEventReducer(started, { type: "aborted", runId: "run-1", reason: "Stopped" });
     const errored = messageEventReducer(aborted, { type: "error", runId: "run-1", error: { code: "UNKNOWN", message: "late", retryable: false, recoveryActions: [], causeDetails: {} } });
     expect(errored.runs["run-1"].terminal).toBe("aborted");
+  });
+});
+
+describe("useMessageStream", () => {
+  it("returns the first terminal event and closes the iterator", async () => {
+    const final: MessageEvent = { type: "final", runId: "run-1", message: { id: "message-1", sessionId: "session-1", runId: "run-1", role: "assistant", status: "completed", blocks: [], createdAt: "2026-08-08T08:00:00.000Z" } };
+    const lateError: MessageEvent = { type: "error", runId: "run-1", error: { code: "UNKNOWN", message: "late", retryable: false, recoveryActions: [], causeDetails: {} } };
+    const events: MessageEvent[] = [{ type: "started", runId: "run-1", sessionId: "session-1" }, final, lateError];
+    const close = vi.fn(async () => ({ done: true as const, value: undefined }));
+    const source: AsyncIterable<MessageEvent> = { [Symbol.asyncIterator]: () => ({ next: vi.fn(async () => events.length > 0 ? { done: false as const, value: events.shift()! } : { done: true as const, value: undefined }), return: close }) };
+    const onEvent = vi.fn();
+    const { result } = renderHook(() => useMessageStream(onEvent));
+    let terminal: MessageEvent | undefined;
+
+    await act(async () => { terminal = await result.current.consume(source); });
+
+    expect(terminal).toEqual(final);
+    expect(onEvent.mock.calls.map(([event]) => event.type)).toEqual(["started", "final"]);
+    expect(close).toHaveBeenCalledOnce();
   });
 });
