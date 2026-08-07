@@ -245,7 +245,8 @@ describe("real OpenClaw gateway mainline", () => {
 
   it("redacts command and cwd from approval responses", async () => {
     const sensitiveApproval = {
-      id: "approval-1", family: "exec" as const, subject: { kind: "operation" as const, id: "approval-1" },
+      id: "approval-1", family: "exec" as const,
+      subject: { kind: "operation" as const, id: "approval-1", label: "rm -rf /private/data via http://127.0.0.1:18789 sk-secret-token" },
       title: "Approve command", description: "rm -rf /private/data", risk: "high" as const,
       permissions: [{ kind: "process" as const, scope: "/private/data", description: "Execute command" }],
       choices: ["deny" as const], status: "pending" as const,
@@ -253,7 +254,12 @@ describe("real OpenClaw gateway mainline", () => {
     const client = {
       gateway: { negotiate: vi.fn(), getStatus: vi.fn(), watchStatus: vi.fn(), reconnect: vi.fn() },
       sessions: { list: vi.fn(), get: vi.fn(), create: vi.fn(), remove: vi.fn() },
-      chat: { list: vi.fn(), get: vi.fn(), watch: vi.fn(), send: vi.fn(), abort: vi.fn() },
+      chat: {
+        list: vi.fn(), get: vi.fn(), send: vi.fn(), abort: vi.fn(),
+        watch: async function* () {
+          yield { type: "aborted" as const, runId: "run-sensitive", reason: "rm -rf /private/data via http://127.0.0.1:18789 sk-secret-token" };
+        },
+      },
       tools: { list: vi.fn(), getCall: vi.fn(async () => ({
         id: "tool-1", sessionId: "session-1", toolId: "exec", displayName: "Execute", state: "running", risk: "high",
         inputSummary: { command: "rm -rf /private/data", cwd: "/private/data" },
@@ -272,6 +278,9 @@ describe("real OpenClaw gateway mainline", () => {
     expect(tool).toMatchObject({ id: "tool-1", state: "running" });
     expect(JSON.stringify(tool)).not.toContain("rm -rf");
     expect(JSON.stringify(tool)).not.toContain("/private/data");
+    const aborted = await rendererClient.chat.watch("session-1")[Symbol.asyncIterator]().next();
+    expect(aborted.value).toEqual({ type: "aborted", runId: "run-sensitive", reason: "Generation was stopped." });
+    expect(JSON.stringify([approvals, aborted])).not.toMatch(/rm -rf|\/private\/data|127\.0\.0\.1|sk-secret-token/);
   });
 
   it("projects session details without renderer-visible metadata", async () => {

@@ -173,7 +173,13 @@ function rendererSafeApproval(approval: ApprovalRequest): ApprovalRequest {
   const common = {
     id: approval.id,
     ...(approval.sessionId === undefined ? {} : { sessionId: approval.sessionId }),
-    subject: approval.subject,
+    subject: {
+      kind: approval.subject.kind,
+      id: approval.subject.id,
+      ...(approval.subject.label === undefined ? {} : {
+        label: approval.family === "exec" ? "OpenClaw operation" : "OpenClaw plugin",
+      }),
+    },
     title: approval.family === "exec" ? "Command execution approval" : "Plugin operation approval",
     description: approval.family === "exec"
       ? "OpenClaw requests permission to run a command."
@@ -198,6 +204,7 @@ function rendererSafeMessageEvent(event: MessageEvent): MessageEvent {
   if (event.type === "tool") return { ...event, tool: rendererSafeTool(event.tool) };
   if (event.type === "error") return { ...event, error: toRendererSafeError(event.error) };
   if (event.type === "final") return { ...event, message: rendererSafeMessage(event.message) };
+  if (event.type === "aborted" && event.reason !== undefined) return { ...event, reason: "Generation was stopped." };
   return event;
 }
 
@@ -249,23 +256,33 @@ export function toRendererSafeResponse(response: IpcResponse): IpcResponse {
 }
 
 export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDependencies) {
-  const subscriptions = new Map<string, AbortController>();
-  const sends = new Map<string, { controller: AbortController; iterator: AsyncIterator<MessageEvent> }>();
-  const emit = (event: ClientIpcEvent): void => sendEvent(IpcEventSchema.parse(event));
+  type SubscriptionState = { controller: AbortController };
+  type SendState = { controller: AbortController; iterator: AsyncIterator<MessageEvent> };
+  const subscriptions = new Map<string, SubscriptionState>();
+  const sends = new Map<string, SendState>();
+  let disposed = false;
+  const emit = (event: ClientIpcEvent): void => {
+    if (!disposed) sendEvent(IpcEventSchema.parse(event));
+  };
+  const returnIterator = async (iterator: AsyncIterator<MessageEvent>): Promise<void> => {
+    try { await iterator.return?.(); } catch { /* Stream cleanup is best effort. */ }
+  };
 
   const runSubscription = async (
     subscriptionId: string,
-    controller: AbortController,
+    state: SubscriptionState,
     source: AsyncIterable<unknown>,
     mapEvent: (payload: unknown) => ClientIpcEvent,
   ): Promise<void> => {
     let failure: UClawError | undefined;
     try {
-      for await (const payload of source) emit(mapEvent(payload));
+      for await (const payload of source) {
+        if (!disposed && subscriptions.get(subscriptionId) === state) emit(mapEvent(payload));
+      }
     } catch (error) {
-      failure = toRendererSafeError(error);
+      if (!disposed && subscriptions.get(subscriptionId) === state) failure = toRendererSafeError(error);
     } finally {
-      if (subscriptions.get(subscriptionId) === controller) {
+      if (!disposed && subscriptions.get(subscriptionId) === state) {
         subscriptions.delete(subscriptionId);
         emit({ event: "subscription.closed", subscriptionId, ...(failure === undefined ? {} : { error: failure }) });
       }
@@ -283,9 +300,10 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
         case "gateway.get-status": return success(request, rendererSafeGatewayStatus(await client.gateway.getStatus()));
         case "gateway.watch-status": {
           const controller = new AbortController();
-          subscriptions.get(request.params.subscriptionId)?.abort();
-          subscriptions.set(request.params.subscriptionId, controller);
-          void runSubscription(request.params.subscriptionId, controller, client.gateway.watchStatus(controller.signal), (payload) => ({
+          subscriptions.get(request.params.subscriptionId)?.controller.abort();
+          const state = { controller };
+          subscriptions.set(request.params.subscriptionId, state);
+          void runSubscription(request.params.subscriptionId, state, client.gateway.watchStatus(controller.signal), (payload) => ({
             event: "gateway.status", subscriptionId: request.params.subscriptionId,
             payload: rendererSafeGatewayStatus(payload as Awaited<ReturnType<UClawClient["gateway"]["getStatus"]>>),
           }));
@@ -310,9 +328,10 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
         case "chat.get": return success(request, rendererSafeMessage(await client.chat.get(request.params.sessionId, request.params.messageId)));
         case "chat.watch": {
           const controller = new AbortController();
-          subscriptions.get(request.params.subscriptionId)?.abort();
-          subscriptions.set(request.params.subscriptionId, controller);
-          void runSubscription(request.params.subscriptionId, controller, client.chat.watch(request.params.sessionId, controller.signal), (payload) => ({
+          subscriptions.get(request.params.subscriptionId)?.controller.abort();
+          const state = { controller };
+          subscriptions.set(request.params.subscriptionId, state);
+          void runSubscription(request.params.subscriptionId, state, client.chat.watch(request.params.sessionId, controller.signal), (payload) => ({
             event: "chat.watch-event", subscriptionId: request.params.subscriptionId,
             payload: rendererSafeMessageEvent(payload as MessageEvent),
           }));
@@ -321,13 +340,21 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
         case "chat.send": {
           const controller = new AbortController();
           const iterator = client.chat.send(request.params, controller.signal)[Symbol.asyncIterator]();
-          sends.get(request.params.clientRequestId)?.controller.abort();
-          sends.set(request.params.clientRequestId, { controller, iterator });
+          const previous = sends.get(request.params.clientRequestId);
+          previous?.controller.abort();
+          if (previous) void returnIterator(previous.iterator);
+          const state = { controller, iterator };
+          sends.set(request.params.clientRequestId, state);
           const first = await iterator.next();
-          if (first.done || first.value.type !== "started") {
-            sends.delete(request.params.clientRequestId);
+          if (disposed || sends.get(request.params.clientRequestId) !== state) {
             controller.abort();
-            await iterator.return?.();
+            await returnIterator(iterator);
+            throw new Error("Chat stream was replaced.");
+          }
+          if (first.done || first.value.type !== "started") {
+            if (sends.get(request.params.clientRequestId) === state) sends.delete(request.params.clientRequestId);
+            controller.abort();
+            await returnIterator(iterator);
             throw new Error("Chat stream did not start.");
           }
           emit({ event: "chat.send-event", clientRequestId: request.params.clientRequestId, payload: rendererSafeMessageEvent(first.value) });
@@ -336,16 +363,18 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
               while (true) {
                 const next = await iterator.next();
                 if (next.done) return;
-                emit({ event: "chat.send-event", clientRequestId: request.params.clientRequestId, payload: rendererSafeMessageEvent(next.value) });
+                if (!disposed && sends.get(request.params.clientRequestId) === state) {
+                  emit({ event: "chat.send-event", clientRequestId: request.params.clientRequestId, payload: rendererSafeMessageEvent(next.value) });
+                }
               }
             } catch (error) {
-              emit({
+              if (!disposed && sends.get(request.params.clientRequestId) === state) emit({
                 event: "chat.send-event", clientRequestId: request.params.clientRequestId,
                 payload: { type: "error", runId: first.value.runId, error: toRendererSafeError(error) },
               });
             } finally {
-              if (sends.get(request.params.clientRequestId)?.iterator === iterator) sends.delete(request.params.clientRequestId);
-              await iterator.return?.();
+              if (sends.get(request.params.clientRequestId) === state) sends.delete(request.params.clientRequestId);
+              await returnIterator(iterator);
             }
           })();
           return success(request, { clientRequestId: request.params.clientRequestId, runId: first.value.runId });
@@ -356,7 +385,7 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
           if (active) {
             sends.delete(request.params.clientRequestId);
             active.controller.abort();
-            await active.iterator.return?.();
+            await returnIterator(active.iterator);
           }
           return success(request, null);
         }
@@ -376,7 +405,12 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
         case "files.read-text": return success(request, await client.files.readText(request.params.fileId));
         case "diagnostics.list": return success(request, (await client.diagnostics.list()).map(rendererSafeDiagnostic));
         case "diagnostics.list-logs": return success(request, await client.diagnostics.listLogs(request.params));
-        case "subscriptions.cancel": subscriptions.get(request.params.subscriptionId)?.abort(); subscriptions.delete(request.params.subscriptionId); return success(request, null);
+        case "subscriptions.cancel": {
+          const active = subscriptions.get(request.params.subscriptionId);
+          subscriptions.delete(request.params.subscriptionId);
+          active?.controller.abort();
+          return success(request, null);
+        }
       }
     } catch (error) {
       return IpcResponseSchema.parse({
@@ -385,13 +419,17 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
     }
   };
   dispatch.dispose = () => {
-    for (const controller of subscriptions.values()) controller.abort();
+    if (disposed) return;
+    disposed = true;
+    const activeSubscriptions = [...subscriptions.values()];
     subscriptions.clear();
-    for (const { controller, iterator } of sends.values()) {
-      controller.abort();
-      void iterator.return?.();
-    }
+    for (const { controller } of activeSubscriptions) controller.abort();
+    const activeSends = [...sends.values()];
     sends.clear();
+    for (const { controller, iterator } of activeSends) {
+      controller.abort();
+      void returnIterator(iterator);
+    }
   };
   return dispatch;
 }

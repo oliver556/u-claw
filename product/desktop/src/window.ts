@@ -72,13 +72,26 @@ export function createAdvancedConsoleController({
   openExternal,
 }: CreateAdvancedConsoleControllerOptions): () => Promise<void> {
   let current: DesktopWindow | undefined;
+  let pending: Promise<DesktopWindow> | undefined;
   return async () => {
     if (current && !current.isDestroyed()) {
       if (current.isMinimized()) current.restore();
       current.focus();
       return;
     }
-    const created = await createAdvancedConsoleWindow({ BrowserWindow, gatewayPort: getGatewayPort(), openExternal });
+    if (pending) {
+      const created = await pending;
+      if (!created.isDestroyed()) created.focus();
+      return;
+    }
+    const creating = createAdvancedConsoleWindow({ BrowserWindow, gatewayPort: getGatewayPort(), openExternal });
+    pending = creating;
+    let created: DesktopWindow;
+    try {
+      created = await creating;
+    } finally {
+      if (pending === creating) pending = undefined;
+    }
     current = created;
     created.once("closed", () => {
       if (current === created) current = undefined;
@@ -150,12 +163,17 @@ export async function createMainWindow({
   const dispose = beforeLoad?.(window);
   if (dispose) window.once("closed", dispose);
 
-  if (rendererUrl) {
-    await window.loadURL(rendererUrl);
-  } else if (rendererFile && window.loadFile) {
-    await window.loadFile(rendererFile);
-  } else {
-    throw new Error("A renderer URL or file is required.");
+  try {
+    if (rendererUrl) {
+      await window.loadURL(rendererUrl);
+    } else if (rendererFile && window.loadFile) {
+      await window.loadFile(rendererFile);
+    } else {
+      throw new Error("A renderer URL or file is required.");
+    }
+  } catch (error) {
+    if (!window.isDestroyed()) window.close();
+    throw error;
   }
 
   return window;
