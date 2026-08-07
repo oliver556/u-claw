@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-import { StringMapValueSchema } from "./common.js";
-
 export const UClawErrorCodeSchema = z.enum([
   "UNKNOWN",
   "INVALID_ARGUMENT",
@@ -42,29 +40,39 @@ export const RecoveryActionSchema = z.enum([
 ]);
 export type RecoveryAction = z.infer<typeof RecoveryActionSchema>;
 
-const sensitiveDetailKey = /(?:api[-_]?key|authorization|cookie|password|secret|token)/i;
-const rawSecretValue = /\bBearer\s+\S+|\b(?:api|pk|sk)[-_][A-Za-z0-9_-]{8,}/i;
+const secretDetectors = [
+  /authorization\s*:/i,
+  /\bbearer\s+[A-Za-z0-9._~+/=-]+/i,
+  /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\b(?:api[-_ ]?key|token)\s*[:=]\s*\S+/i,
+  /\bsk-[A-Za-z0-9_-]{8,}\b/i,
+];
+
+export const RendererSafeTextSchema = z.string().superRefine((value, context) => {
+  if (secretDetectors.some((detector) => detector.test(value))) {
+    context.addIssue({ code: "custom", message: "Renderer text contains secret material" });
+  }
+});
+export type RendererSafeText = z.infer<typeof RendererSafeTextSchema>;
 
 export const CauseDetailsSchema = z
-  .record(z.string(), StringMapValueSchema)
-  .superRefine((details, context) => {
-    for (const key of Object.keys(details)) {
-      if (sensitiveDetailKey.test(key)) {
-        context.addIssue({ code: "custom", message: `Sensitive cause detail is forbidden: ${key}` });
-      }
-    }
-    for (const value of Object.values(details)) {
-      if (typeof value === "string" && rawSecretValue.test(value)) {
-        context.addIssue({ code: "custom", message: "Raw secret in cause details is forbidden" });
-      }
-    }
-  });
+  .object({
+    diagnosticCode: RendererSafeTextSchema.optional(),
+    operation: RendererSafeTextSchema.optional(),
+    status: RendererSafeTextSchema.optional(),
+    field: RendererSafeTextSchema.optional(),
+    capability: RendererSafeTextSchema.optional(),
+    upstreamCode: RendererSafeTextSchema.optional(),
+    retryAfterMs: z.number().int().nonnegative().optional(),
+  })
+  .strict();
 export type CauseDetails = z.infer<typeof CauseDetailsSchema>;
 
 export const UClawErrorSummarySchema = z
   .object({
     code: UClawErrorCodeSchema,
-    message: z.string().min(1),
+    message: RendererSafeTextSchema.pipe(z.string().min(1)),
     retryable: z.boolean(),
   })
   .strict();
@@ -73,7 +81,7 @@ export type UClawErrorSummary = z.infer<typeof UClawErrorSummarySchema>;
 export const UClawErrorSchema = z
   .object({
     code: UClawErrorCodeSchema,
-    message: z.string().min(1),
+    message: RendererSafeTextSchema.pipe(z.string().min(1)),
     retryable: z.boolean(),
     recoveryActions: z.array(RecoveryActionSchema).default([]),
     causeDetails: CauseDetailsSchema.default({}),

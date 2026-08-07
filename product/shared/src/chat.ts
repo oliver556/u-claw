@@ -68,7 +68,7 @@ export const SendMessageInputSchema = z
   .strict();
 export type SendMessageInput = z.infer<typeof SendMessageInputSchema>;
 
-export const MessageEventSchema = z.discriminatedUnion("type", [
+const MessageEventUnionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("started"), runId: z.string().min(1), sessionId: z.string().min(1) }).strict(),
   z.object({ type: z.literal("delta"), runId: z.string().min(1), mode: z.enum(["append", "replace"]), text: z.string() }).strict(),
   z.object({ type: z.literal("tool"), runId: z.string().min(1), tool: ToolCallSchema }).strict(),
@@ -77,11 +77,29 @@ export const MessageEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("aborted"), runId: z.string().min(1), reason: z.string().optional() }).strict(),
   z.object({ type: z.literal("error"), runId: z.string().min(1), error: UClawErrorSchema }).strict(),
 ]);
+export const MessageEventSchema = MessageEventUnionSchema.superRefine((event, context) => {
+  if (event.type !== "final") return;
+  if (event.message.status !== "completed") {
+    context.addIssue({ code: "custom", path: ["message", "status"], message: "Final message must be completed" });
+  }
+  if (event.message.runId !== undefined && event.message.runId !== event.runId) {
+    context.addIssue({ code: "custom", path: ["message", "runId"], message: "Final message runId must match event runId" });
+  }
+});
 export type MessageEvent = z.infer<typeof MessageEventSchema>;
 
-export const TerminalMessageEventSchema = z.discriminatedUnion("type", [
+const TerminalMessageEventUnionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("final"), runId: z.string().min(1), message: MessageSchema }).strict(),
   z.object({ type: z.literal("aborted"), runId: z.string().min(1), reason: z.string().optional() }).strict(),
   z.object({ type: z.literal("error"), runId: z.string().min(1), error: UClawErrorSchema }).strict(),
 ]);
+export const TerminalMessageEventSchema = TerminalMessageEventUnionSchema.superRefine((event, context) => {
+  if (event.type !== "final") return;
+  if (event.message.status !== "completed") {
+    context.addIssue({ code: "custom", path: ["message", "status"], message: "Final message must be completed" });
+  }
+  if (event.message.runId !== undefined && event.message.runId !== event.runId) {
+    context.addIssue({ code: "custom", path: ["message", "runId"], message: "Final message runId must match event runId" });
+  }
+});
 export type TerminalMessageEvent = z.infer<typeof TerminalMessageEventSchema>;

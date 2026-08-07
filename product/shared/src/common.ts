@@ -39,6 +39,19 @@ export const ResourceRefSchema = z
   .strict();
 export type ResourceRef = z.infer<typeof ResourceRefSchema>;
 
+export const ControlledRelativePathSchema = z.string().min(1).superRefine((path, context) => {
+  if (path.includes("\0")) {
+    context.addIssue({ code: "custom", message: "Relative path must not contain NUL" });
+  }
+  if (path.startsWith("/") || path.startsWith("\\") || /^[A-Za-z]:/.test(path)) {
+    context.addIssue({ code: "custom", message: "Absolute paths are forbidden" });
+  }
+  if (path.split(/[\\/]/).some((segment) => segment === "" || segment === "." || segment === "..")) {
+    context.addIssue({ code: "custom", message: "Relative path contains an unsafe segment" });
+  }
+});
+export type ControlledRelativePath = z.infer<typeof ControlledRelativePathSchema>;
+
 export const FileRefSchema = z
   .object({
     id: z.string().min(1),
@@ -46,7 +59,7 @@ export const FileRefSchema = z
     mediaType: z.string().min(1),
     size: z.number().int().nonnegative(),
     kind: z.enum(["attachment", "workspace", "artifact", "log-export"]),
-    relativePath: z.string().min(1).optional(),
+    relativePath: ControlledRelativePathSchema.optional(),
   })
   .strict();
 export type FileRef = z.infer<typeof FileRefSchema>;

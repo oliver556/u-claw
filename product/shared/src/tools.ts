@@ -3,7 +3,15 @@ import { z } from "zod";
 import { ISODateTimeSchema, ResourceRefSchema, StringMapValueSchema } from "./common.js";
 import { UClawErrorSummarySchema } from "./errors.js";
 
-export const ToolStateSchema = z.enum(["pending", "running", "succeeded", "failed", "cancelled"]);
+export const ToolStateSchema = z.enum([
+  "pending",
+  "queued",
+  "waiting-authorization",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
 export type ToolState = z.infer<typeof ToolStateSchema>;
 
 export const ToolRiskSchema = z.enum(["low", "medium", "high", "critical", "unknown"]);
@@ -47,11 +55,11 @@ const ApprovalRequestBaseSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
   risk: ToolRiskSchema,
-  permissions: z.array(ApprovalPermissionSchema),
+  permissions: z.array(ApprovalPermissionSchema).min(1),
   choices: z.array(ApprovalDecisionSchema).min(1),
   expiresAt: ISODateTimeSchema.optional(),
   status: z.enum(["pending", "resolved", "expired", "cancelled"]),
-});
+}).strict();
 
 export const ExecApprovalRequestSchema = ApprovalRequestBaseSchema.extend({
   family: z.literal("exec"),
@@ -70,3 +78,21 @@ export const ApprovalRequestSchema = z.discriminatedUnion("family", [
   PluginApprovalRequestSchema,
 ]);
 export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
+
+export const ResolveExecApprovalInputSchema = z
+  .object({
+    family: z.literal("exec"),
+    requestId: z.string().min(1),
+    decision: ApprovalDecisionSchema,
+  })
+  .strict();
+export type ResolveExecApprovalInput = z.infer<typeof ResolveExecApprovalInputSchema>;
+
+export const ResolvePluginApprovalInputSchema = z
+  .object({
+    family: z.literal("plugin"),
+    requestId: z.string().min(1),
+    decision: ApprovalDecisionSchema,
+  })
+  .strict();
+export type ResolvePluginApprovalInput = z.infer<typeof ResolvePluginApprovalInputSchema>;
