@@ -3,6 +3,8 @@ import { Modal, Tooltip } from "antd";
 import { Copy, Cpu, HardDrive, Maximize2, Minus, Radio, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { semanticCssVariables } from "../theme/tokens";
+
 declare global {
   interface Window {
     uclaw?: {
@@ -21,9 +23,15 @@ export function AppTitlebar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const [windowError, setWindowError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const searchOpenRef = useRef(false);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const openSearch = useCallback(() => {
+    if (searchOpenRef.current) {
+      searchRef.current?.focus();
+      return;
+    }
+    searchOpenRef.current = true;
     previousFocusRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
@@ -31,6 +39,7 @@ export function AppTitlebar() {
   }, []);
 
   const closeSearch = useCallback(() => {
+    searchOpenRef.current = false;
     setSearchOpen(false);
     previousFocusRef.current?.focus();
   }, []);
@@ -41,10 +50,11 @@ export function AppTitlebar() {
         event.preventDefault();
         openSearch();
       }
+      if (event.key === "Escape" && searchOpenRef.current) closeSearch();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openSearch]);
+  }, [closeSearch, openSearch]);
 
   const invokeWindow = useCallback(async (method: WindowIpcRequest["method"]) => {
     const invoke = window.uclaw?.window?.invoke;
@@ -103,11 +113,11 @@ export function AppTitlebar() {
         className="command-modal"
         closable={false}
         footer={null}
-        getContainer={false}
         keyboard
         maskClosable
         onCancel={closeSearch}
         open={searchOpen}
+        style={semanticCssVariables}
         title={<span className="sr-only">全局搜索</span>}
         width={620}
         afterOpenChange={(open) => open && searchRef.current?.focus()}
