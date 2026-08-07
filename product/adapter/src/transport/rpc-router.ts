@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { redactAdapterLog } from "../redaction.js";
+import { SequenceGapDetector, type SequenceGap } from "../reconnect.js";
 
 export type JsonValue = z.output<ReturnType<typeof z.json>>;
 
@@ -89,6 +90,8 @@ export class RpcRouter {
   private nextId = 0;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly eventListeners = new Map<string, Set<(event: EventFrame) => void>>();
+  private readonly sequenceGapListeners = new Set<(gap: SequenceGap) => void>();
+  private readonly sequenceDetector: SequenceGapDetector;
   private readonly requestTimeoutMs: number;
   private readonly onDiagnostic: (message: string) => void;
   private readonly idFactory: () => string;
@@ -98,6 +101,9 @@ export class RpcRouter {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
     this.onDiagnostic = options.onDiagnostic ?? (() => undefined);
     this.idFactory = options.idFactory ?? (() => `rpc-${++this.nextId}`);
+    this.sequenceDetector = new SequenceGapDetector((gap) => {
+      for (const listener of this.sequenceGapListeners) listener(gap);
+    });
     socket.addEventListener("message", this.handleMessage);
     socket.addEventListener("close", this.handleClose);
   }
@@ -120,6 +126,11 @@ export class RpcRouter {
     listeners.add(listener);
     this.eventListeners.set(event, listeners);
     return () => listeners.delete(listener);
+  }
+
+  onSequenceGap(listener: (gap: SequenceGap) => void): () => void {
+    this.sequenceGapListeners.add(listener);
+    return () => this.sequenceGapListeners.delete(listener);
   }
 
   close(): void {
@@ -147,6 +158,8 @@ export class RpcRouter {
     }
     const frame = parsed.data;
     if (frame.type === "event") {
+      const decision = frame.seq === undefined ? "accepted" : this.sequenceDetector.observe(frame.seq);
+      if (decision !== "accepted") return;
       for (const listener of this.eventListeners.get(frame.event) ?? []) listener(frame);
       return;
     }
@@ -178,5 +191,6 @@ export class RpcRouter {
     }
     this.pending.clear();
     this.eventListeners.clear();
+    this.sequenceGapListeners.clear();
   };
 }

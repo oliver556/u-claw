@@ -12,8 +12,10 @@ class FakeTransport implements OpenClawTransport {
   readonly calls: string[] = [];
   readonly fixtures = new Map<string, JsonValue>();
   readonly eventListeners = new Set<(frame: EventFrame) => void>();
+  readonly sequenceGapListeners = new Set<(gap: { expected: number; received: number }) => void>();
   readonly connectFailures: Error[] = [];
   connectCalls = 0;
+  private lastSequence: number | undefined;
 
   async connect(): Promise<HelloOk> {
     this.connectCalls += 1;
@@ -28,9 +30,20 @@ class FakeTransport implements OpenClawTransport {
     };
   }
 
-  close(): void {}
+  close(): void { this.lastSequence = undefined; }
 
   emit(event: string, payload: JsonValue, seq: number): void {
+    if (this.lastSequence !== undefined) {
+      if (seq <= this.lastSequence) return;
+      const expected = this.lastSequence + 1;
+      this.lastSequence = seq;
+      if (seq !== expected) {
+        for (const listener of this.sequenceGapListeners) listener({ expected, received: seq });
+        return;
+      }
+    } else {
+      this.lastSequence = seq;
+    }
     const frame = { type: "event" as const, event, payload, seq };
     for (const listener of this.eventListeners) listener(frame);
   }
@@ -43,6 +56,10 @@ class FakeTransport implements OpenClawTransport {
     onEvent: (_event: string, listener: (frame: EventFrame) => void) => {
       this.eventListeners.add(listener);
       return () => this.eventListeners.delete(listener);
+    },
+    onSequenceGap: (listener: (gap: { expected: number; received: number }) => void) => {
+      this.sequenceGapListeners.add(listener);
+      return () => this.sequenceGapListeners.delete(listener);
     },
   };
 }
@@ -126,6 +143,7 @@ describe("OpenClawClient", () => {
     const gaps: Array<{ expected: number; received: number }> = [];
     const controller = new AbortController();
     const client = new OpenClawClient({ transport, onResyncRequired: (gap) => gaps.push(gap) });
+    await client.gateway.negotiate();
     const iterator = client.chat.watch("session-1", controller.signal)[Symbol.asyncIterator]();
     const first = iterator.next();
     transport.emit("chat", { state: "delta", runId: "run-1", sessionKey: "session-1", deltaText: "A" }, 7);

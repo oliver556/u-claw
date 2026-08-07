@@ -27,13 +27,13 @@ export const RawToolCallSchema = z.object({
   startedAt: z.string().min(1).optional(),
   finishedAt: z.string().min(1).optional(),
   errorMessage: z.string().min(1).optional(),
-});
+}).strict();
 
 const PermissionSchema = z.object({
   kind: z.enum(["file-read", "file-write", "process", "network", "credential", "other"]),
   scope: z.string().min(1),
   description: z.string().min(1),
-});
+}).strict();
 
 const ApprovalBase = {
   id: z.string().min(1),
@@ -47,8 +47,8 @@ const ApprovalBase = {
   status: z.enum(["pending", "resolved", "expired", "cancelled"]),
 };
 
-export const RawExecApprovalSchema = z.object({ ...ApprovalBase, toolCallId: z.string().min(1).optional() });
-export const RawPluginApprovalSchema = z.object({ ...ApprovalBase, pluginId: z.string().min(1) });
+export const RawExecApprovalSchema = z.object({ ...ApprovalBase, toolCallId: z.string().min(1).optional() }).strict();
+export const RawPluginApprovalSchema = z.object({ ...ApprovalBase, pluginId: z.string().min(1) }).strict();
 
 function toolState(state: z.infer<typeof RawToolCallSchema>["state"]): ToolState {
   return ({ pending: "queued", approval: "waiting-authorization", running: "running", done: "succeeded", error: "failed", aborted: "cancelled" } as const)[state];

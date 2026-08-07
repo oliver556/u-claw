@@ -7,13 +7,13 @@ export const RawSessionSchema = z.object({
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
   lastMessagePreview: z.string().optional(),
-  model: z.object({ id: z.string().min(1), label: z.string().min(1), providerId: z.string().min(1).optional() }).optional(),
+  model: z.object({ id: z.string().min(1), label: z.string().min(1), providerId: z.string().min(1).optional() }).strict().optional(),
   pinned: z.boolean(),
   groupId: z.string().nullable().optional(),
   status: z.enum(["idle", "running", "waiting-authorization", "failed"]),
   revision: z.string().optional(),
   metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
-});
+}).strict();
 
 export function mapSession(payload: z.input<typeof RawSessionSchema>): Session {
   const raw = RawSessionSchema.parse(payload);
