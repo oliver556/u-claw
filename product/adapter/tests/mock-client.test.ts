@@ -64,6 +64,25 @@ describe("MockUClawClient", () => {
       "chat.history", "chat.message.get", "chat.send", "chat.abort",
       "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
     ]);
+    expect([...capabilities.events]).toEqual(["chat"]);
+  });
+
+  it("keeps chat watch open and forwards send events until abort", async () => {
+    const clock = new ManualClock("2026-08-07T12:00:00.000Z");
+    const client = new MockUClawClient({ clock });
+    const sessionId = (await client.sessions.list()).items[0].id;
+    const controller = new AbortController();
+    const watchedPromise = collect(client.chat.watch(sessionId, controller.signal));
+    const sentPromise = collect(client.chat.send({
+      sessionId, clientRequestId: "request-watch",
+      blocks: [{ type: "text", text: "hello", format: "plain" }],
+    }));
+    await clock.runAll();
+    const sent = await sentPromise;
+    controller.abort();
+    const watched = await watchedPromise;
+    expect(watched).toEqual(sent);
+    expect(watched.map((event) => event.type)).toEqual(["started", "delta", "delta", "final"]);
   });
 
   it("throws UNSUPPORTED for management capabilities without fixtures", async () => {

@@ -138,6 +138,31 @@ describe("RpcRouter", () => {
     expect(received).toEqual([10, 13]);
   });
 
+  it("blocks unsequenced business events while desynced without blocking RPC responses", async () => {
+    const socket = new FakeSocket();
+    const router = new RpcRouter(socket);
+    const received: string[] = [];
+    for (const event of ["chat", "session.tool", "exec.approval.requested", "plugin.approval.requested"]) {
+      router.onEvent(event, () => received.push(event));
+    }
+    socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 10 }));
+    socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 12 }));
+    socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {} }));
+    socket.emit("message", JSON.stringify({ type: "event", event: "session.tool", payload: {} }));
+    socket.emit("message", JSON.stringify({ type: "event", event: "exec.approval.requested", payload: {} }));
+    socket.emit("message", JSON.stringify({ type: "event", event: "plugin.approval.requested", payload: {} }));
+
+    const request = router.request("still-responsive", {}, z.object({ value: z.number() }).strict());
+    const frame = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    socket.emit("message", JSON.stringify({ type: "res", id: frame.id, ok: true, payload: { value: 1 } }));
+
+    expect(received).toEqual(["chat"]);
+    await expect(request).resolves.toEqual({ value: 1 });
+    router.resetSequence(12);
+    socket.emit("message", JSON.stringify({ type: "event", event: "session.tool", payload: {} }));
+    expect(received).toEqual(["chat", "session.tool"]);
+  });
+
   it("cleans a pending request when socket.send throws synchronously", async () => {
     vi.useFakeTimers();
     const socket = new FakeSocket();
