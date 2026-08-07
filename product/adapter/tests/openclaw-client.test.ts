@@ -1,4 +1,6 @@
 import { UClawErrorSchema } from "@uclaw/shared";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type z } from "zod";
 
@@ -11,7 +13,9 @@ import { RpcRemoteError, type EventFrame, type JsonValue } from "../src/transpor
 class FakeTransport implements OpenClawTransport {
   state = "idle" as const;
   readonly calls: string[] = [];
+  readonly requests: Array<{ method: string; params: JsonValue }> = [];
   readonly fixtures = new Map<string, JsonValue>();
+  readonly fixtureQueues = new Map<string, JsonValue[]>();
   readonly requestGates = new Map<string, Promise<JsonValue>>();
   readonly eventListeners = new Set<(frame: EventFrame) => void>();
   readonly sequenceGapListeners = new Set<(gap: { expected: number; received: number }) => void>();
@@ -57,9 +61,11 @@ class FakeTransport implements OpenClawTransport {
   }
 
   readonly router = {
-    request: async <T>(method: string, _params: JsonValue, schema: z.ZodType<T>): Promise<T> => {
+    request: async <T>(method: string, params: JsonValue, schema: z.ZodType<T>): Promise<T> => {
       this.calls.push(method);
-      return schema.parse(await (this.requestGates.get(method) ?? Promise.resolve(this.fixtures.get(method))));
+      this.requests.push({ method, params });
+      const queued = this.fixtureQueues.get(method)?.shift();
+      return schema.parse(await (this.requestGates.get(method) ?? Promise.resolve(queued ?? this.fixtures.get(method))));
     },
     onEvent: (_event: string, listener: (frame: EventFrame) => void) => {
       this.eventListeners.add(listener);
@@ -81,6 +87,7 @@ class FakeTransport implements OpenClawTransport {
 }
 
 describe("OpenClawClient", () => {
+  const contractFixture = (name: string): any => JSON.parse(readFileSync(resolve(import.meta.dirname, `../fixtures/openclaw-2026.7.1-2/${name}`), "utf8"));
   it("negotiates hello capabilities and maps session list", async () => {
     const transport = new FakeTransport();
     transport.fixtures.set("sessions.list", {
@@ -104,10 +111,10 @@ describe("OpenClawClient", () => {
     expect(transport.connectCalls).toBe(1);
   });
 
-  it("keeps unsupported attachment and approval resolve capabilities closed", async () => {
+  it("keeps unsupported attachment and unimplemented management capabilities closed", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push(
-      "exec.approval.resolve", "plugin.approval.resolve", "models.list", "sessions.patch.model",
+      "models.list",
       "skills.status", "channels.status", "files.list", "files.readText", "diagnostics.list", "logs.tail",
     );
     const client = new OpenClawClient({ transport });
@@ -116,15 +123,73 @@ describe("OpenClawClient", () => {
 
     const stream = client.chat.send({ sessionId, clientRequestId: "request-1", blocks: [{ type: "attachment", attachmentId: "attachment-1" }] });
     await expect(stream[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(UClawUnsupportedError);
-    const unsupported = await client.approvals.resolveExec({ ref: { family: "exec", id: "approval-1" }, decision: "deny" }).catch((error: unknown) => error);
-    expect(unsupported).toBeInstanceOf(UClawUnsupportedError);
-    expect(UClawErrorSchema.parse((unsupported as UClawUnsupportedError).uclawError)).toMatchObject({
-      code: "UNSUPPORTED", retryable: false, causeDetails: { capability: "exec.approval.resolve" },
-    });
     expect(capabilities.methods.has("exec.approval.resolve")).toBe(false);
     expect(capabilities.methods.has("plugin.approval.resolve")).toBe(false);
     expect([...capabilities.methods]).toEqual(["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list"]);
     expect(transport.calls).toEqual([]);
+  });
+
+  it("maps real history and chat.message.get envelopes", async () => {
+    const history = contractFixture("chat.history.json");
+    const messageGet = contractFixture("chat.message.get.json");
+    const transport = new FakeTransport();
+    transport.helloMethods.push("chat.history", "chat.message.get");
+    transport.fixtures.set("chat.history", history.responseFrame.payload);
+    transport.fixtures.set("chat.message.get", messageGet.success.responseFrame.payload);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const page = await client.chat.list("agent:dev:main");
+    expect(page.items.map((message) => message.role)).toEqual(["user", "assistant", "tool", "assistant"]);
+    expect(page).toMatchObject({ nextCursor: null, hasMore: false });
+    const messageId = messageGet.success.requestFrame.params.messageId;
+    await expect(client.chat.get("agent:dev:main", messageId)).resolves.toMatchObject({
+      id: messageId,
+      sessionId: "agent:dev:main",
+      role: "user",
+    });
+    transport.fixtures.set("chat.message.get", messageGet.unavailable.responseFrame.payload);
+    const unavailable = await client.chat.get("agent:dev:main", "message-contract-missing").catch((error: unknown) => error);
+    expect(UClawErrorSchema.parse((unavailable as { uclawError: unknown }).uclawError).code).toBe("NOT_FOUND");
+  });
+
+  it("resolves observed approval decisions, rejects allow-session, and selects a model", async () => {
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    transport.helloMethods.push("exec.approval.resolve", "plugin.approval.resolve", "sessions.patch");
+    transport.fixtures.set("exec.approval.resolve", { ok: true });
+    transport.fixtures.set("plugin.approval.resolve", { ok: true });
+    transport.fixtures.set("sessions.patch", { ok: true, key: "session-1" });
+    const execOther = structuredClone(approvals.exec.allowOnce.event.payload);
+    execOther.id = "exec-other-session";
+    execOther.request.sessionKey = "agent:dev:other";
+    const pluginOther = structuredClone(approvals.plugin.allowOnce.event.payload);
+    pluginOther.id = "plugin-other-session";
+    pluginOther.request.sessionKey = "agent:dev:other";
+    transport.fixtures.set("exec.approval.list", [...approvals.exec.allowOnce.listing.responseFrame.payload, execOther]);
+    transport.fixtures.set("plugin.approval.list", [...approvals.plugin.allowOnce.listing.responseFrame.payload, pluginOther]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.approvals.listPending("agent:dev:main")).resolves.toMatchObject([
+      { family: "exec", choices: ["allow-once", "deny"] },
+      { family: "plugin", choices: ["allow-once", "deny"] },
+    ]);
+    await expect(client.approvals.listPending("agent:dev:other")).resolves.toMatchObject([
+      { id: "exec-other-session", family: "exec" },
+      { id: "plugin-other-session", family: "plugin" },
+    ]);
+    await client.approvals.resolveExec({ ref: { family: "exec", id: "exec-1" }, decision: "allow-once" });
+    await client.approvals.resolvePlugin({ ref: { family: "plugin", id: "plugin-1" }, decision: "deny" });
+    await client.models.selectForSession("session-1", "provider/model-1");
+    const unsupported = await client.approvals.resolveExec({ ref: { family: "exec", id: "exec-1" }, decision: "allow-session" }).catch((error: unknown) => error);
+    expect(unsupported).toBeInstanceOf(UClawUnsupportedError);
+    expect((unsupported as UClawUnsupportedError).uclawError.code).toBe("UNSUPPORTED");
+    expect(transport.requests.slice(4)).toEqual([
+      { method: "exec.approval.resolve", params: { id: "exec-1", decision: "allow-once" } },
+      { method: "plugin.approval.resolve", params: { id: "plugin-1", decision: "deny" } },
+      { method: "sessions.patch", params: { key: "session-1", model: "provider/model-1" } },
+    ]);
   });
 
   it("stops local stream waiting when AbortSignal aborts", async () => {
@@ -201,19 +266,80 @@ describe("OpenClawClient", () => {
   });
 
   it("routes tool and separate approval families into message watch", async () => {
+    const tools = contractFixture("session.tool.json");
+    const approvals = contractFixture("approvals.json");
     const transport = new FakeTransport();
+    transport.fixtures.set("chat.send", { runId: "run-approval-1", status: "accepted" });
     const client = new OpenClawClient({ transport });
-    const iterator = client.chat.watch("session-1")[Symbol.asyncIterator]();
+    await client.gateway.negotiate();
+    const send = client.chat.send({
+      sessionId: "agent:dev:main",
+      clientRequestId: "request-approval-1",
+      blocks: [{ type: "text", text: "approve", format: "plain" }],
+    })[Symbol.asyncIterator]();
+    await expect(send.next()).resolves.toMatchObject({ value: { type: "started", runId: "run-approval-1" } });
+    const iterator = client.chat.watch("agent:dev:main")[Symbol.asyncIterator]();
     const tool = iterator.next();
-    transport.emit("session.tool", { toolCallId: "tool-1", sessionKey: "session-1", runId: "run-1", toolId: "exec", displayName: "Execute", state: "running", risk: "high" }, 1);
-    await expect(tool).resolves.toMatchObject({ value: { type: "tool", runId: "run-1" } });
+    transport.emit("session.tool", tools.start.payload, 1);
+    await expect(tool).resolves.toMatchObject({ value: { type: "tool", runId: "contract-tool-run-1", tool: { toolId: "sessions_list", state: "running" } } });
     const exec = iterator.next();
-    transport.emit("exec.approval.requested", { runId: "run-1", request: { id: "exec-1", sessionKey: "session-1", title: "Confirm", description: "Run", risk: "high", permissions: [{ kind: "process", scope: "fixture", description: "Run" }], choices: ["deny"], status: "pending", toolCallId: "tool-1" } }, 2);
-    await expect(exec).resolves.toMatchObject({ value: { type: "approval", approval: { family: "exec" } } });
+    const sentExec = send.next();
+    const otherSessionExec = structuredClone(approvals.exec.allowOnce.event.payload);
+    otherSessionExec.id = "exec-other-session-event";
+    otherSessionExec.request.sessionKey = "agent:dev:other";
+    transport.emit("exec.approval.requested", otherSessionExec, 2);
+    transport.emit("exec.approval.requested", approvals.exec.allowOnce.event.payload, 3);
+    await expect(exec).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: approvals.exec.allowOnce.event.payload.id, family: "exec" } } });
+    await expect(sentExec).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: approvals.exec.allowOnce.event.payload.id, family: "exec" } } });
     const plugin = iterator.next();
-    transport.emit("plugin.approval.requested", { runId: "run-1", request: { id: "plugin-1", title: "Confirm", description: "Enable", risk: "medium", permissions: [{ kind: "other", scope: "fixture", description: "Enable" }], choices: ["deny"], status: "pending", pluginId: "fixture" } }, 3);
-    await expect(plugin).resolves.toMatchObject({ value: { type: "approval", approval: { family: "plugin" } } });
+    const sentPlugin = send.next();
+    transport.emit("plugin.approval.requested", approvals.plugin.allowOnce.event.payload, 4);
+    await expect(plugin).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { family: "plugin" } } });
+    await expect(sentPlugin).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { family: "plugin" } } });
+    await send.return?.();
     await iterator.return?.();
+  });
+
+  it("does not guess approval ownership for concurrent sends in one session", async () => {
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    transport.fixtureQueues.set("chat.send", [
+      { runId: "run-concurrent-1", status: "accepted" },
+      { runId: "run-concurrent-2", status: "accepted" },
+    ]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+    const input = (clientRequestId: string) => ({
+      sessionId: "agent:dev:main",
+      clientRequestId,
+      blocks: [{ type: "text" as const, text: "concurrent", format: "plain" as const }],
+    });
+    const first = client.chat.send(input("concurrent-1"))[Symbol.asyncIterator]();
+    const second = client.chat.send(input("concurrent-2"))[Symbol.asyncIterator]();
+    await first.next();
+    await second.next();
+
+    transport.emit("exec.approval.requested", approvals.exec.allowOnce.event.payload, 1);
+    const finalMessage = (runId: string) => ({
+      state: "final",
+      runId,
+      sessionKey: "agent:dev:main",
+      message: {
+        id: `message-${runId}`,
+        sessionKey: "agent:dev:main",
+        runId,
+        role: "assistant",
+        status: "completed",
+        blocks: [],
+        createdAt: "2026-08-08T00:00:00.000Z",
+      },
+    });
+    transport.emit("chat", finalMessage("run-concurrent-1"), 2);
+    transport.emit("chat", finalMessage("run-concurrent-2"), 3);
+    await expect(first.next()).resolves.toMatchObject({ value: { type: "final", runId: "run-concurrent-1" } });
+    await expect(second.next()).resolves.toMatchObject({ value: { type: "final", runId: "run-concurrent-2" } });
+    await first.return?.();
+    await second.return?.();
   });
 
   it("triggers resync instead of mapping a source sequence gap", async () => {

@@ -1,0 +1,193 @@
+{
+  "requestFrame": {
+    "type": "req",
+    "id": "00000000-0000-4000-8000-000000000022",
+    "method": "chat.history",
+    "params": {
+      "sessionKey": "agent:dev:main",
+      "limit": 20
+    }
+  },
+  "responseFrame": {
+    "type": "res",
+    "id": "00000000-0000-4000-8000-000000000022",
+    "ok": true,
+    "payload": {
+      "sessionKey": "agent:dev:main",
+      "sessionId": "00000000-0000-4000-8000-000000000023",
+      "messages": [
+        {
+          "role": "user",
+          "content": "[REDACTED USER TEXT:short]",
+          "timestamp": 1786128514043,
+          "idempotencyKey": "contract-tool-run-1:user",
+          "__openclaw": {
+            "senderIsOwner": true,
+            "id": "b3bba23a",
+            "idempotencyKey": "contract-tool-run-1:user",
+            "recordTimestampMs": 1786128515642,
+            "seq": 1
+          }
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_contract_sessions",
+              "name": "sessions_list",
+              "arguments": {},
+              "partialArgs": "{}"
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "contract",
+          "model": "contract-model",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "totalTokens": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1786128515661,
+          "responseId": "chatcmpl-contract",
+          "__openclaw": {
+            "id": "33910b2b",
+            "recordTimestampMs": 1786128515697,
+            "seq": 2
+          }
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "call_contract_sessions",
+          "toolName": "sessions_list",
+          "content": [
+            {
+              "type": "text",
+              "text": "[REDACTED TOOL RESULT]"
+            }
+          ],
+          "isError": false,
+          "timestamp": 1786128515773,
+          "__openclaw": {
+            "id": "36d314d3",
+            "recordTimestampMs": 1786128515776,
+            "seq": 3
+          }
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "[REDACTED ASSISTANT TEXT:short]"
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "contract",
+          "model": "contract-model",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "totalTokens": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1786128515782,
+          "responseId": "chatcmpl-contract",
+          "__openclaw": {
+            "id": "58235002",
+            "recordTimestampMs": 1786128515805,
+            "seq": 4
+          }
+        }
+      ],
+      "defaults": {
+        "modelProvider": "contract",
+        "model": "contract-model",
+        "contextTokens": 131072,
+        "agentRuntime": {
+          "id": "auto",
+          "source": "implicit"
+        },
+        "thinkingLevels": [
+          {
+            "id": "off",
+            "label": "off"
+          }
+        ],
+        "thinkingOptions": [
+          "off"
+        ],
+        "thinkingDefault": "off"
+      },
+      "sessionInfo": {
+        "key": "agent:dev:main",
+        "kind": "direct",
+        "chatType": "direct",
+        "origin": {
+          "provider": "webchat",
+          "surface": "webchat",
+          "chatType": "direct"
+        },
+        "updatedAt": 1786128515839,
+        "archived": false,
+        "pinned": false,
+        "unread": false,
+        "sessionId": "00000000-0000-4000-8000-000000000023",
+        "systemSent": true,
+        "abortedLastRun": false,
+        "thinkingLevels": [
+          {
+            "id": "off",
+            "label": "off"
+          }
+        ],
+        "thinkingOptions": [
+          "off"
+        ],
+        "thinkingDefault": "off",
+        "effectiveFastMode": false,
+        "effectiveFastModeSource": "default",
+        "fastAutoOnSeconds": 60,
+        "totalTokensFresh": false,
+        "status": "done",
+        "startedAt": 1786128515617,
+        "endedAt": 1786128515837,
+        "runtimeMs": 220,
+        "effectiveResponseUsage": "off",
+        "modelProvider": "contract",
+        "model": "contract-model",
+        "agentRuntime": {
+          "id": "auto",
+          "source": "implicit"
+        },
+        "contextTokens": 131072,
+        "deliveryContext": {
+          "channel": "webchat"
+        },
+        "lastChannel": "webchat",
+        "hasActiveRun": true,
+        "activeRunIds": []
+      },
+      "thinkingLevel": "off"
+    }
+  }
+}

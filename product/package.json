@@ -14,7 +14,10 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present && npm run smoke:dist",
     "smoke:dist": "node shared/dist/index.js && node adapter/dist/index.js && node desktop/dist/index.js && npm run smoke:file -w @uclaw/frontend",
-    "test": "node --test scripts/workspace.test.mjs && npm run test --workspaces --if-present",
+    "test": "node --test scripts/workspace.test.mjs && npm run test:contract && npm run test --workspaces --if-present",
+    "test:contract": "vitest run tests/contract",
+    "capture:openclaw-v4": "node scripts/capture-openclaw-v4.mjs",
+    "sanitize:openclaw-v4": "node scripts/sanitize-openclaw-v4-capture.mjs",
     "test:e2e": "playwright test",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

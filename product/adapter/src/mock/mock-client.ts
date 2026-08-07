@@ -20,7 +20,7 @@ import {
 } from "@uclaw/shared";
 
 import type { Clock } from "../reconnect.js";
-import { AsyncEventQueue, OPENCLAW_IMPLEMENTED_METHODS, UClawUnsupportedError } from "../openclaw-client.js";
+import { AsyncEventQueue, UClawUnsupportedError } from "../openclaw-client.js";
 import { AdapterServiceError } from "../transport/rpc-router.js";
 
 interface ScheduledSleep {
@@ -116,7 +116,11 @@ export class MockUClawClient implements UClawClient {
     this.streamDelayMs = options.streamDelayMs ?? 1;
     const capabilities = capabilitySetFromWire(CapabilitySetWireSchema.parse({
       protocolVersion: 4,
-      methods: OPENCLAW_IMPLEMENTED_METHODS,
+      methods: [
+        "sessions.list", "sessions.get", "sessions.create", "sessions.delete",
+        "chat.history", "chat.message.get", "chat.send", "chat.abort",
+        "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
+      ],
       events: ["chat"],
       features: { attachments: false, approvalResolve: false },
     }));

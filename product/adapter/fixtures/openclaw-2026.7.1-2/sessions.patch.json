@@ -1,0 +1,125 @@
+{
+  "rename": {
+    "requestFrame": {
+      "type": "req",
+      "id": "00000000-0000-4000-8000-000000000026",
+      "method": "sessions.patch",
+      "params": {
+        "key": "agent:dev:main",
+        "label": "Contract Renamed"
+      }
+    },
+    "responseFrame": {
+      "type": "res",
+      "id": "00000000-0000-4000-8000-000000000026",
+      "ok": true,
+      "payload": {
+        "ok": true,
+        "key": "agent:dev:main",
+        "entry": {
+          "sessionId": "00000000-0000-4000-8000-000000000023",
+          "label": "Contract Renamed"
+        },
+        "resolved": {
+          "modelProvider": "contract",
+          "model": "contract-model"
+        }
+      }
+    }
+  },
+  "model": {
+    "requestFrame": {
+      "type": "req",
+      "id": "00000000-0000-4000-8000-000000000027",
+      "method": "sessions.patch",
+      "params": {
+        "key": "agent:dev:main",
+        "model": "contract/contract-alt-model"
+      }
+    },
+    "responseFrame": {
+      "type": "res",
+      "id": "00000000-0000-4000-8000-000000000027",
+      "ok": true,
+      "payload": {
+        "ok": true,
+        "key": "agent:dev:main",
+        "entry": {
+          "sessionId": "00000000-0000-4000-8000-000000000023",
+          "label": "Contract Renamed",
+          "providerOverride": "contract",
+          "modelOverride": "contract-alt-model",
+          "modelOverrideSource": "user"
+        },
+        "resolved": {
+          "modelProvider": "contract",
+          "model": "contract-alt-model"
+        }
+      }
+    }
+  },
+  "modelReadback": {
+    "requestFrame": {
+      "type": "req",
+      "id": "00000000-0000-4000-8000-000000000028",
+      "method": "sessions.list",
+      "params": {}
+    },
+    "responseFrame": {
+      "type": "res",
+      "id": "00000000-0000-4000-8000-000000000028",
+      "ok": true,
+      "payload": {
+        "sessions": [
+          {
+            "key": "agent:dev:main",
+            "label": "Contract Renamed",
+            "modelProvider": "contract",
+            "model": "contract-alt-model"
+          }
+        ]
+      }
+    }
+  },
+  "baseHash": {
+    "requestFrame": {
+      "type": "req",
+      "id": "00000000-0000-4000-8000-000000000029",
+      "method": "sessions.patch",
+      "params": {
+        "key": "agent:dev:main",
+        "label": "Should Not Apply",
+        "baseHash": "contract-stale-base-hash"
+      }
+    },
+    "responseFrame": {
+      "type": "res",
+      "id": "00000000-0000-4000-8000-000000000029",
+      "ok": false,
+      "error": {
+        "code": "INVALID_REQUEST",
+        "message": "invalid sessions.patch params: at root: unexpected property 'baseHash'"
+      }
+    }
+  },
+  "duplicateLabel": {
+    "requestFrame": {
+      "type": "req",
+      "id": "00000000-0000-4000-8000-000000000030",
+      "method": "sessions.patch",
+      "params": {
+        "key": "agent:dev:dashboard:contract-2",
+        "label": "Contract Renamed"
+      }
+    },
+    "responseFrame": {
+      "type": "res",
+      "id": "00000000-0000-4000-8000-000000000030",
+      "ok": false,
+      "error": {
+        "code": "INVALID_REQUEST",
+        "message": "label already in use: Contract Renamed"
+      }
+    }
+  }
+}

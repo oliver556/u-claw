@@ -11,14 +11,22 @@ import {
 } from "@uclaw/shared";
 import { z } from "zod";
 
-import { mapChatEvent, mapMessage, RawChatEventSchema, RawMessageSchema } from "./mappers/chat.js";
+import { mapChatEvent, RawChatEventSchema } from "./mappers/chat.js";
 import { mapSession, mapSessionSummary, RawSessionSchema } from "./mappers/session.js";
 import {
-  mapExecApproval,
-  mapPluginApproval,
+  OpenClawExecApprovalEventSchema,
+  OpenClawHistoryResponseSchema,
+  OpenClawMessageGetResponseSchema,
+  OpenClawPluginApprovalEventSchema,
+  OpenClawSessionToolPayloadSchema,
+  mapOpenClawExecApproval,
+  mapOpenClawHistoryResponse,
+  mapOpenClawMessageGetResponse,
+  mapOpenClawPluginApproval,
+  mapOpenClawSessionToolEvent,
+} from "./openclaw-v4-contract.js";
+import {
   mapToolCall,
-  RawExecApprovalSchema,
-  RawPluginApprovalSchema,
   RawToolCallSchema,
 } from "./mappers/tool.js";
 import type { GatewayWebSocketState, HelloOk } from "./transport/gateway-websocket.js";
@@ -58,6 +66,7 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "sessions.list", "sessions.get", "sessions.create", "sessions.delete",
   "chat.history", "chat.message.get", "chat.send", "chat.abort",
   "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
+  "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch",
 ] as const;
 
 const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);
@@ -71,14 +80,10 @@ const SessionPageSchema = z.object({
   hasMore: z.boolean().default(false),
 }).strict();
 
-const MessagePageSchema = z.object({
-  messages: z.array(RawMessageSchema),
-  nextCursor: z.string().nullable().default(null),
-  hasMore: z.boolean().default(false),
-}).strict();
-
 const SendResponseSchema = z.object({ runId: z.string().min(1), status: z.string().min(1) }).strict();
 const EmptyResponseSchema = z.union([z.object({}).strict(), z.null()]);
+const ResolveApprovalResponseSchema = z.object({ ok: z.literal(true) }).passthrough();
+const SessionsPatchResponseSchema = z.object({ ok: z.literal(true), key: z.string().min(1) }).passthrough();
 const ToolCatalogSchema = z.object({
   tools: z.array(z.object({
     id: z.string().min(1),
@@ -92,10 +97,8 @@ const ToolCatalogSchema = z.object({
 }).strict();
 
 const ToolCallResponseSchema = z.object({ toolCall: RawToolCallSchema }).strict();
-const ExecApprovalPageSchema = z.object({ requests: z.array(RawExecApprovalSchema) }).strict();
-const PluginApprovalPageSchema = z.object({ requests: z.array(RawPluginApprovalSchema) }).strict();
-const ExecApprovalEventSchema = z.object({ runId: z.string().min(1), request: RawExecApprovalSchema }).strict();
-const PluginApprovalEventSchema = z.object({ runId: z.string().min(1), request: RawPluginApprovalSchema }).strict();
+const ExecApprovalListSchema = z.array(OpenClawExecApprovalEventSchema);
+const PluginApprovalListSchema = z.array(OpenClawPluginApprovalEventSchema);
 
 interface QueueWaiter<T> {
   resolve(result: IteratorResult<T>): void;
@@ -176,6 +179,7 @@ export class OpenClawClient implements UClawClient {
   private statusSince: string;
   private statusAttempt = 0;
   private readonly statusSubscribers = new Set<AsyncEventQueue<GatewayStatus>>();
+  private readonly activeSendRuns = new Map<string, Set<string>>();
   private resyncing = false;
 
   constructor(private readonly options: OpenClawClientOptions) {
@@ -232,12 +236,15 @@ export class OpenClawClient implements UClawClient {
   readonly chat: UClawClient["chat"] = {
     list: async (sessionId, request) => {
       this.requireMethod("chat.history");
-      const raw = await this.options.transport.router.request("chat.history", { sessionKey: sessionId, ...(request ?? {}) }, MessagePageSchema);
-      return { items: raw.messages.map(mapMessage), nextCursor: raw.nextCursor, hasMore: raw.hasMore };
+      const raw = await this.options.transport.router.request("chat.history", { sessionKey: sessionId, ...(request ?? {}) }, OpenClawHistoryResponseSchema);
+      return { items: mapOpenClawHistoryResponse(raw), nextCursor: null, hasMore: false };
     },
     get: async (sessionId, messageId) => {
       this.requireMethod("chat.message.get");
-      return mapMessage(await this.options.transport.router.request("chat.message.get", { sessionKey: sessionId, messageId }, RawMessageSchema));
+      const raw = await this.options.transport.router.request("chat.message.get", { sessionKey: sessionId, messageId }, OpenClawMessageGetResponseSchema);
+      const message = mapOpenClawMessageGetResponse(raw, sessionId);
+      if (message === undefined) throw this.notFound("chat.message.get");
+      return message;
     },
     watch: (sessionId, signal) => this.watchChat(sessionId, signal),
     send: (input, signal) => this.sendChat(input, signal),
@@ -264,16 +271,31 @@ export class OpenClawClient implements UClawClient {
       this.requireMethod("plugin.approval.list");
       const params: JsonValue = sessionId === undefined ? {} : { sessionKey: sessionId };
       const [exec, plugin] = await Promise.all([
-        this.options.transport.router.request("exec.approval.list", params, ExecApprovalPageSchema),
-        this.options.transport.router.request("plugin.approval.list", params, PluginApprovalPageSchema),
+        this.options.transport.router.request("exec.approval.list", params, ExecApprovalListSchema),
+        this.options.transport.router.request("plugin.approval.list", params, PluginApprovalListSchema),
       ]);
-      return [...exec.requests.map(mapExecApproval), ...plugin.requests.map(mapPluginApproval)];
+      const pending = [...exec.map(mapOpenClawExecApproval), ...plugin.map(mapOpenClawPluginApproval)];
+      return sessionId === undefined ? pending : pending.filter((request) => request.sessionId === sessionId);
     },
-    resolveExec: async () => { throw new UClawUnsupportedError("exec.approval.resolve"); },
-    resolvePlugin: async () => { throw new UClawUnsupportedError("plugin.approval.resolve"); },
+    resolveExec: async (input) => {
+      if (input.decision === "allow-session") throw new UClawUnsupportedError("exec.approval.resolve.allow-session");
+      this.requireMethod("exec.approval.resolve");
+      await this.options.transport.router.request("exec.approval.resolve", { id: input.ref.id, decision: input.decision }, ResolveApprovalResponseSchema);
+    },
+    resolvePlugin: async (input) => {
+      if (input.decision === "allow-session") throw new UClawUnsupportedError("plugin.approval.resolve.allow-session");
+      this.requireMethod("plugin.approval.resolve");
+      await this.options.transport.router.request("plugin.approval.resolve", { id: input.ref.id, decision: input.decision }, ResolveApprovalResponseSchema);
+    },
   };
 
-  readonly models: UClawClient["models"] = { list: async () => this.unsupported("models.list"), selectForSession: async () => this.unsupported("sessions.patch.model") };
+  readonly models: UClawClient["models"] = {
+    list: async () => this.unsupported("models.list"),
+    selectForSession: async (sessionId, modelId) => {
+      this.requireMethod("sessions.patch");
+      await this.options.transport.router.request("sessions.patch", { key: sessionId, model: modelId }, SessionsPatchResponseSchema);
+    },
+  };
   readonly skills: UClawClient["skills"] = { list: async () => this.unsupported("skills.status") };
   readonly channels: UClawClient["channels"] = { list: async () => this.unsupported("channels.status") };
   readonly files: UClawClient["files"] = { list: async () => this.unsupported("files.list"), readText: async () => this.unsupported("files.readText") };
@@ -293,20 +315,23 @@ export class OpenClawClient implements UClawClient {
       }
       if (mapped.runId !== expectedRunId) return;
       const terminal = mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error";
+      if (terminal) this.removeActiveRun(input.sessionId, expectedRunId);
       queue.push(mapped, terminal);
     };
     const removers = [this.options.transport.router.onClose((error) => queue.fail(this.disconnectedError(error))), this.options.transport.router.onEvent("chat", (frame) => {
       const raw = RawChatEventSchema.safeParse(frame.payload);
       if (raw.success) enqueue(mapChatEvent(raw.data));
     }), this.options.transport.router.onEvent("session.tool", (frame) => {
-      const raw = RawToolCallSchema.safeParse(frame.payload);
-      if (raw.success && raw.data.runId !== undefined) enqueue(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapToolCall(raw.data) }));
+      const raw = OpenClawSessionToolPayloadSchema.safeParse(frame.payload);
+      if (raw.success) enqueue(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapOpenClawSessionToolEvent(raw.data) }));
     }), this.options.transport.router.onEvent("exec.approval.requested", (frame) => {
-      const raw = ExecApprovalEventSchema.safeParse(frame.payload);
-      if (raw.success) enqueue(MessageEventSchema.parse({ type: "approval", runId: raw.data.runId, approval: mapExecApproval(raw.data.request) }));
+      const raw = OpenClawExecApprovalEventSchema.safeParse(frame.payload);
+      const runId = raw.success && raw.data.request.sessionKey === input.sessionId ? this.activeRunForSession(input.sessionId) : undefined;
+      if (raw.success && runId !== undefined && runId === expectedRunId) enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
     }), this.options.transport.router.onEvent("plugin.approval.requested", (frame) => {
-      const raw = PluginApprovalEventSchema.safeParse(frame.payload);
-      if (raw.success) enqueue(MessageEventSchema.parse({ type: "approval", runId: raw.data.runId, approval: mapPluginApproval(raw.data.request) }));
+      const raw = OpenClawPluginApprovalEventSchema.safeParse(frame.payload);
+      const runId = raw.success && raw.data.request.sessionKey === input.sessionId ? this.activeRunForSession(input.sessionId) : undefined;
+      if (raw.success && runId !== undefined && runId === expectedRunId) enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
     })];
     try {
       const accepted = await this.options.transport.router.request("chat.send", {
@@ -316,6 +341,7 @@ export class OpenClawClient implements UClawClient {
         ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       }, SendResponseSchema);
       expectedRunId = accepted.runId;
+      this.addActiveRun(input.sessionId, accepted.runId);
       for (const mapped of buffered.splice(0)) enqueue(mapped);
       yield { type: "started", runId: accepted.runId, sessionId: input.sessionId };
       while (true) {
@@ -324,6 +350,7 @@ export class OpenClawClient implements UClawClient {
         yield item.value;
       }
     } finally {
+      if (expectedRunId !== undefined) this.removeActiveRun(input.sessionId, expectedRunId);
       for (const remove of removers) remove();
     }
   }
@@ -334,14 +361,16 @@ export class OpenClawClient implements UClawClient {
       const raw = RawChatEventSchema.safeParse(frame.payload);
       if (raw.success && raw.data.sessionKey === sessionId) queue.push(mapChatEvent(raw.data));
     }), this.options.transport.router.onEvent("session.tool", (frame) => {
-      const raw = RawToolCallSchema.safeParse(frame.payload);
-      if (raw.success && raw.data.sessionKey === sessionId && raw.data.runId !== undefined) queue.push(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapToolCall(raw.data) }));
+      const raw = OpenClawSessionToolPayloadSchema.safeParse(frame.payload);
+      if (raw.success && raw.data.sessionKey === sessionId) queue.push(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapOpenClawSessionToolEvent(raw.data) }));
     }), this.options.transport.router.onEvent("exec.approval.requested", (frame) => {
-      const raw = ExecApprovalEventSchema.safeParse(frame.payload);
-      if (raw.success && raw.data.request.sessionKey === sessionId) queue.push(MessageEventSchema.parse({ type: "approval", runId: raw.data.runId, approval: mapExecApproval(raw.data.request) }));
+      const raw = OpenClawExecApprovalEventSchema.safeParse(frame.payload);
+      const runId = raw.success && raw.data.request.sessionKey === sessionId ? this.activeRunForSession(sessionId) : undefined;
+      if (raw.success && runId !== undefined) queue.push(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
     }), this.options.transport.router.onEvent("plugin.approval.requested", (frame) => {
-      const raw = PluginApprovalEventSchema.safeParse(frame.payload);
-      if (raw.success && (raw.data.request.sessionKey === undefined || raw.data.request.sessionKey === sessionId)) queue.push(MessageEventSchema.parse({ type: "approval", runId: raw.data.runId, approval: mapPluginApproval(raw.data.request) }));
+      const raw = OpenClawPluginApprovalEventSchema.safeParse(frame.payload);
+      const runId = raw.success && raw.data.request.sessionKey === sessionId ? this.activeRunForSession(sessionId) : undefined;
+      if (raw.success && runId !== undefined) queue.push(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
     })];
     try {
       while (signal?.aborted !== true) {
@@ -396,7 +425,10 @@ export class OpenClawClient implements UClawClient {
         protocolVersion: 4,
         methods: hello.features.methods.filter((method) => implementedMethods.has(method)),
         events: hello.features.events.filter((event) => implementedEvents.has(event)),
-        features: { attachments: false, approvalResolve: false },
+        features: {
+          attachments: false,
+          approvalResolve: hello.features.methods.includes("exec.approval.resolve") && hello.features.methods.includes("plugin.approval.resolve"),
+        },
       });
       this.reconnectAttempt = 0;
       this.setStatus("ready", 0);
@@ -457,5 +489,31 @@ export class OpenClawClient implements UClawClient {
 
   private unsupported(capability: string): never {
     throw new UClawUnsupportedError(capability);
+  }
+
+  private addActiveRun(sessionId: string, runId: string): void {
+    const runs = this.activeSendRuns.get(sessionId) ?? new Set<string>();
+    runs.add(runId);
+    this.activeSendRuns.set(sessionId, runs);
+  }
+
+  private removeActiveRun(sessionId: string, runId: string): void {
+    const runs = this.activeSendRuns.get(sessionId);
+    if (runs === undefined) return;
+    runs.delete(runId);
+    if (runs.size === 0) this.activeSendRuns.delete(sessionId);
+  }
+
+  private activeRunForSession(sessionId: string): string | undefined {
+    const runs = this.activeSendRuns.get(sessionId);
+    return runs?.size === 1 ? runs.values().next().value : undefined;
+  }
+
+  private notFound(operation: string): AdapterServiceError {
+    const message = "OpenClaw message was not found";
+    return new AdapterServiceError(message, UClawErrorSchema.parse({
+      code: "NOT_FOUND", message, retryable: false,
+      recoveryActions: [], causeDetails: { operation },
+    }));
   }
 }
