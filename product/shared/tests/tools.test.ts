@@ -71,11 +71,11 @@ describe("tool contracts", () => {
     const parsed = ToolCallSchema.parse({
       ...base,
       inputSummary: { access_token: "actual-token", tokenCount: 42, apiKeyStatus: "configured" },
-      outputSummary: { status: "Bearer actual-token" },
+      outputSummary: { status: "Authorization: Bearer actual-token" },
     });
 
     expect(parsed.inputSummary).toEqual({ access_token: "[REDACTED]", tokenCount: 42, apiKeyStatus: "configured" });
-    expect(parsed.outputSummary).toEqual({ status: "Bearer [REDACTED]" });
+    expect(parsed.outputSummary).toEqual({ status: "Authorization: Bearer [REDACTED]" });
   });
 
   it("keeps exec and plugin approvals structurally distinct", () => {
