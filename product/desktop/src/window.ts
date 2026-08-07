@@ -40,6 +40,7 @@ export interface CreateMainWindowOptions {
   rendererUrl?: string;
   rendererFile?: string;
   openExternal(url: string): Promise<unknown>;
+  showWhenReady?: boolean;
 }
 
 export async function createMainWindow({
@@ -48,6 +49,7 @@ export async function createMainWindow({
   rendererUrl,
   rendererFile,
   openExternal,
+  showWhenReady = true,
 }: CreateMainWindowOptions): Promise<DesktopWindow> {
   const window = new BrowserWindow({
     frame: false,
@@ -63,7 +65,7 @@ export async function createMainWindow({
   });
 
   installNavigationPolicy({ webContents: window.webContents, openExternal });
-  window.once("ready-to-show", () => window.show());
+  if (showWhenReady) window.once("ready-to-show", () => window.show());
 
   if (rendererUrl) {
     await window.loadURL(rendererUrl);

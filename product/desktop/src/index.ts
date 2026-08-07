@@ -2,6 +2,7 @@ export { packageName } from "./package-name.js";
 export * from "./gateway/gateway-process.js";
 export * from "./gateway/health-check.js";
 export * from "./gateway/port-selector.js";
+export * from "./gateway/startup.js";
 export * from "./ipc/channels.js";
 export * from "./ipc/preload-bridge.js";
 export * from "./ipc/register-ipc.js";

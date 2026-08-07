@@ -7,6 +7,13 @@ export interface GatewayHealthDependencies {
   baseUrl: string;
   fetch(url: string, init: { method: "GET"; headers: { accept: "application/json" } }): Promise<HealthFetchResponse>;
   now(): number;
+  requiredMethods?: readonly string[];
+  probeCapabilities?(): Promise<GatewayCapabilityProbeResult>;
+}
+
+export interface GatewayCapabilityProbeResult {
+  helloOk: boolean;
+  methods: readonly string[] | ReadonlySet<string>;
 }
 
 export interface GatewayHealthStatus {
@@ -31,11 +38,30 @@ async function endpointAvailable(
   }
 }
 
+async function probeBusinessAvailability(
+  probeCapabilities: GatewayHealthDependencies["probeCapabilities"],
+  requiredMethods: readonly string[],
+): Promise<boolean> {
+  if (!probeCapabilities) return false;
+  try {
+    const result = await probeCapabilities();
+    if (!result.helloOk) return false;
+    const methods = result.methods instanceof Set
+      ? result.methods
+      : new Set(result.methods);
+    return requiredMethods.every((method) => methods.has(method));
+  } catch {
+    return false;
+  }
+}
+
 export async function checkGatewayHealth({
   isProcessAlive,
   baseUrl,
   fetch,
   now,
+  requiredMethods = [],
+  probeCapabilities,
 }: GatewayHealthDependencies): Promise<GatewayHealthStatus> {
   const processAlive = isProcessAlive();
   const checkedAtMs = now();
@@ -46,7 +72,7 @@ export async function checkGatewayHealth({
   const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
   const serviceReady = await endpointAvailable(fetch, `${normalizedBaseUrl}/ready`);
   const businessAvailable = serviceReady
-    ? await endpointAvailable(fetch, `${normalizedBaseUrl}/status`)
+    ? await probeBusinessAvailability(probeCapabilities, requiredMethods)
     : false;
   return { processAlive, serviceReady, businessAvailable, checkedAtMs };
 }
