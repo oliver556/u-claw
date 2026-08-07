@@ -5,6 +5,7 @@ import {
   MessageSchema,
   SessionSchema,
   ToolCallSchema,
+  UClawErrorSchema,
   capabilitySetFromWire,
   type ApprovalRequest,
   type GatewayStatus,
@@ -19,7 +20,8 @@ import {
 } from "@uclaw/shared";
 
 import type { Clock } from "../reconnect.js";
-import { UClawUnsupportedError } from "../openclaw-client.js";
+import { AsyncEventQueue, OPENCLAW_IMPLEMENTED_METHODS, UClawUnsupportedError } from "../openclaw-client.js";
+import { AdapterServiceError } from "../transport/rpc-router.js";
 
 interface ScheduledSleep {
   at: number;
@@ -97,6 +99,7 @@ export class MockUClawClient implements UClawClient {
   private readonly toolCalls: ToolCall[];
   private readonly approvalRequests: ApprovalRequest[];
   private readonly abortedRuns = new Set<string>();
+  private readonly statusSubscribers = new Set<AsyncEventQueue<GatewayStatus>>();
   private status: GatewayStatus;
   private runCounter = 0;
   private sessionCounter = 1;
@@ -107,9 +110,9 @@ export class MockUClawClient implements UClawClient {
     this.streamDelayMs = options.streamDelayMs ?? 1;
     const capabilities = capabilitySetFromWire(CapabilitySetWireSchema.parse({
       protocolVersion: 4,
-      methods: ["sessions.list", "chat.history", "chat.send", "chat.abort", "tools.catalog", "exec.approval.list", "plugin.approval.list"],
+      methods: OPENCLAW_IMPLEMENTED_METHODS,
       events: ["chat", "session.tool", "exec.approval.requested", "plugin.approval.requested"],
-      features: { attachments: false },
+      features: { attachments: false, approvalResolve: false },
     }));
     this.status = {
       connectionState: "ready", protocolVersion: 4, phase: "available",
@@ -149,9 +152,15 @@ export class MockUClawClient implements UClawClient {
     getStatus: async () => this.status,
     watchStatus: (signal) => this.watchGatewayStatus(signal),
     reconnect: async () => {
-      this.status = { ...this.status, connectionState: "reconnecting", phase: "degraded", businessAvailable: false, attempt: this.status.attempt + 1 };
+      this.publishStatus({
+        ...this.status, connectionState: "reconnecting", phase: "degraded",
+        serviceReady: false, businessAvailable: false, since: this.clock.now(), attempt: this.status.attempt + 1,
+      });
       await this.clock.sleep(800);
-      this.status = { ...this.status, connectionState: "ready", phase: "available", businessAvailable: true, since: this.clock.now() };
+      this.publishStatus({
+        ...this.status, connectionState: "ready", phase: "available",
+        serviceReady: true, businessAvailable: true, since: this.clock.now(), attempt: 0,
+      });
     },
   };
 
@@ -166,7 +175,7 @@ export class MockUClawClient implements UClawClient {
     },
     remove: async (sessionId) => {
       const index = this.sessionItems.findIndex((session) => session.id === sessionId);
-      if (index < 0) throw new Error("Session not found");
+      if (index < 0) throw this.notFound("Session");
       this.sessionItems.splice(index, 1);
       this.messages.delete(sessionId);
     },
@@ -176,7 +185,7 @@ export class MockUClawClient implements UClawClient {
     list: async (sessionId, request) => page(this.requireMessages(sessionId), request),
     get: async (sessionId, messageId) => {
       const message = this.requireMessages(sessionId).find((item) => item.id === messageId);
-      if (message === undefined) throw new Error("Message not found");
+      if (message === undefined) throw this.notFound("Message");
       return message;
     },
     watch: (sessionId, signal) => this.watchMessages(sessionId, signal),
@@ -188,7 +197,7 @@ export class MockUClawClient implements UClawClient {
     list: async () => [{ id: "exec", name: "Execute command", source: "built-in", available: true, risk: "high" }],
     getCall: async (toolCallId) => {
       const call = this.toolCalls.find((item) => item.id === toolCallId);
-      if (call === undefined) throw new Error("Tool call not found");
+      if (call === undefined) throw this.notFound("Tool call");
       return call;
     },
   };
@@ -207,7 +216,18 @@ export class MockUClawClient implements UClawClient {
 
   private async *watchGatewayStatus(signal?: AbortSignal): AsyncIterable<GatewayStatus> {
     if (signal?.aborted === true) return;
-    yield this.status;
+    const queue = new AsyncEventQueue<GatewayStatus>();
+    this.statusSubscribers.add(queue);
+    try {
+      yield this.status;
+      while (true) {
+        const item = await queue.next(signal);
+        if (item.done) return;
+        yield item.value;
+      }
+    } finally {
+      this.statusSubscribers.delete(queue);
+    }
   }
 
   private async *watchMessages(sessionId: string, signal?: AbortSignal): AsyncIterable<MessageEvent> {
@@ -246,7 +266,7 @@ export class MockUClawClient implements UClawClient {
 
   private requireSession(sessionId: string): Session {
     const session = this.sessionItems.find((item) => item.id === sessionId);
-    if (session === undefined) throw new Error("Session not found");
+    if (session === undefined) throw this.notFound("Session");
     return session;
   }
 
@@ -261,5 +281,18 @@ export class MockUClawClient implements UClawClient {
 
   private unsupported(capability: string): never {
     throw new UClawUnsupportedError(capability);
+  }
+
+  private publishStatus(status: GatewayStatus): void {
+    this.status = status;
+    for (const subscriber of this.statusSubscribers) subscriber.push(status);
+  }
+
+  private notFound(subject: string): AdapterServiceError {
+    const message = `${subject} not found`;
+    return new AdapterServiceError(message, UClawErrorSchema.parse({
+      code: "NOT_FOUND", message, retryable: false,
+      recoveryActions: [], causeDetails: {},
+    }));
   }
 }

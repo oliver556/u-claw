@@ -1,6 +1,7 @@
+import { UClawErrorSchema, type RecoveryAction, type UClawErrorCode } from "@uclaw/shared";
 import { z } from "zod";
 
-import { RpcRouter, type JsonValue } from "./rpc-router.js";
+import { AdapterServiceError, RpcRouter, type JsonValue } from "./rpc-router.js";
 
 export interface WebSocketLike {
   send(data: string): void;
@@ -56,6 +57,17 @@ export interface GatewayWebSocketOptions {
   onDiagnostic?: (message: string) => void;
 }
 
+function gatewayError(
+  code: UClawErrorCode,
+  message: string,
+  retryable: boolean,
+  recoveryActions: RecoveryAction[] = [],
+): AdapterServiceError {
+  return new AdapterServiceError(message, UClawErrorSchema.parse({
+    code, message, retryable, recoveryActions, causeDetails: { operation: "gateway.connect" },
+  }));
+}
+
 export class GatewayWebSocket {
   state: GatewayWebSocketState = "idle";
   private socket: WebSocketLike | undefined;
@@ -64,16 +76,24 @@ export class GatewayWebSocket {
   constructor(private readonly options: GatewayWebSocketOptions) {}
 
   get router(): RpcRouter {
-    if (this.activeRouter === undefined) throw new Error("Gateway is not connected");
+    if (this.activeRouter === undefined) {
+      throw gatewayError("GATEWAY_DISCONNECTED", "Gateway is not connected", true, ["reconnect"]);
+    }
     return this.activeRouter;
   }
 
   connect(): Promise<HelloOk> {
     if (this.state === "connecting" || this.state === "authenticating") {
-      return Promise.reject(new Error("Gateway connection already in progress"));
+      return Promise.reject(gatewayError("CONFLICT", "Gateway connection already in progress", false));
     }
     this.state = "connecting";
-    const socket = this.options.webSocketFactory(this.options.url);
+    let socket: WebSocketLike;
+    try {
+      socket = this.options.webSocketFactory(this.options.url);
+    } catch {
+      this.state = "failed";
+      return Promise.reject(gatewayError("GATEWAY_DISCONNECTED", "Gateway WebSocket failed", true, ["reconnect"]));
+    }
     this.socket = socket;
     const router = new RpcRouter(socket, {
       requestTimeoutMs: this.options.requestTimeoutMs,
@@ -84,7 +104,7 @@ export class GatewayWebSocket {
     return new Promise<HelloOk>((resolve, reject) => {
       let settled = false;
       let removeChallenge = (): void => undefined;
-      const handshakeTimeout = setTimeout(() => fail(new Error("Gateway challenge timed out")), this.options.challengeTimeoutMs ?? 750);
+      const handshakeTimeout = setTimeout(() => fail(gatewayError("TIMEOUT", "Gateway challenge timed out", true, ["retry"])), this.options.challengeTimeoutMs ?? 750);
       const fail = (reason: Error): void => {
         if (settled) return;
         settled = true;
@@ -93,17 +113,21 @@ export class GatewayWebSocket {
         socket.removeEventListener("error", onError);
         socket.removeEventListener("close", onClose);
         router.close();
-        socket.close(1002, "handshake failed");
         this.state = "failed";
+        try {
+          socket.close(1002, "handshake failed");
+        } catch {
+          // Preserve the original normalized handshake failure.
+        }
         reject(reason);
       };
-      const onError = (): void => fail(new Error("Gateway WebSocket failed"));
+      const onError = (): void => fail(gatewayError("GATEWAY_DISCONNECTED", "Gateway WebSocket failed", true, ["reconnect"]));
       const onClose = (): void => {
         if (this.state === "ready") {
           this.state = "closed";
           return;
         }
-        if (this.state !== "closed") fail(new Error("Gateway WebSocket closed during handshake"));
+        if (this.state !== "closed") fail(gatewayError("GATEWAY_DISCONNECTED", "Gateway WebSocket closed during handshake", true, ["reconnect"]));
       };
       socket.addEventListener("error", onError);
       socket.addEventListener("close", onClose);
@@ -112,7 +136,7 @@ export class GatewayWebSocket {
         removeChallenge = router.onEvent("connect.challenge", (frame) => {
           const challenge = ChallengeSchema.safeParse(frame.payload);
           if (!challenge.success) {
-            fail(new Error("Gateway challenge failed validation"));
+            fail(gatewayError("PROTOCOL_MAPPING_FAILED", "Gateway challenge failed validation", false, ["open-diagnostics"]));
             return;
           }
           removeChallenge();
@@ -120,8 +144,8 @@ export class GatewayWebSocket {
           let supplied: z.output<typeof ConnectParamsSchema>;
           try {
             supplied = ConnectParamsSchema.parse(this.options.connectParams(challenge.data));
-          } catch (error) {
-            fail(error instanceof Error ? error : new Error("Gateway connect parameters failed"));
+          } catch {
+            fail(gatewayError("INVALID_ARGUMENT", "Gateway connect parameters failed", false));
             return;
           }
           const params: JsonValue = {
@@ -150,7 +174,12 @@ export class GatewayWebSocket {
 
   close(): void {
     this.activeRouter?.close();
-    this.socket?.close(1000, "client closed");
-    this.state = "closed";
+    try {
+      this.socket?.close(1000, "client closed");
+      this.state = "closed";
+    } catch {
+      this.state = "failed";
+      throw gatewayError("GATEWAY_DISCONNECTED", "Gateway WebSocket failed to close", true, ["reconnect"]);
+    }
   }
 }

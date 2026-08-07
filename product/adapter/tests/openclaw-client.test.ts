@@ -2,7 +2,7 @@ import { UClawErrorSchema } from "@uclaw/shared";
 import { describe, expect, it } from "vitest";
 import { type z } from "zod";
 
-import { OpenClawClient, UClawUnsupportedError, type OpenClawTransport } from "../src/openclaw-client.js";
+import { AsyncEventQueue, OpenClawClient, UClawUnsupportedError, type OpenClawTransport } from "../src/openclaw-client.js";
 import { ManualClock } from "../src/mock/mock-client.js";
 import { ReconnectPolicy } from "../src/reconnect.js";
 import type { HelloOk } from "../src/transport/gateway-websocket.js";
@@ -106,16 +106,24 @@ describe("OpenClawClient", () => {
 
   it("keeps unsupported attachment and approval resolve capabilities closed", async () => {
     const transport = new FakeTransport();
-    transport.helloMethods.push("exec.approval.resolve", "plugin.approval.resolve");
+    transport.helloMethods.push(
+      "exec.approval.resolve", "plugin.approval.resolve", "models.list", "sessions.patch.model",
+      "skills.status", "channels.status", "files.list", "files.readText", "diagnostics.list", "logs.tail",
+    );
     const client = new OpenClawClient({ transport });
     const capabilities = await client.gateway.negotiate();
     const sessionId = "session-1";
 
     const stream = client.chat.send({ sessionId, clientRequestId: "request-1", blocks: [{ type: "attachment", attachmentId: "attachment-1" }] });
     await expect(stream[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(UClawUnsupportedError);
-    await expect(client.approvals.resolveExec({ ref: { family: "exec", id: "approval-1" }, decision: "deny" })).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    const unsupported = await client.approvals.resolveExec({ ref: { family: "exec", id: "approval-1" }, decision: "deny" }).catch((error: unknown) => error);
+    expect(unsupported).toBeInstanceOf(UClawUnsupportedError);
+    expect(UClawErrorSchema.parse((unsupported as UClawUnsupportedError).uclawError)).toMatchObject({
+      code: "UNSUPPORTED", retryable: false, causeDetails: { capability: "exec.approval.resolve" },
+    });
     expect(capabilities.methods.has("exec.approval.resolve")).toBe(false);
     expect(capabilities.methods.has("plugin.approval.resolve")).toBe(false);
+    expect([...capabilities.methods]).toEqual(["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list"]);
     expect(transport.calls).toEqual([]);
   });
 
@@ -265,6 +273,17 @@ describe("OpenClawClient", () => {
     await expect(iterator.next()).resolves.toEqual({ value: undefined, done: true });
   });
 
+  it("settles every pending queue waiter when a terminal value arrives", async () => {
+    const queue = new AsyncEventQueue<number>();
+    const first = queue.next();
+    const second = queue.next();
+    queue.push(1, true);
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { value: 1, done: false },
+      { value: undefined, done: true },
+    ]);
+  });
+
   it("rejects extra fields in known page responses", async () => {
     const transport = new FakeTransport();
     transport.fixtures.set("sessions.list", { sessions: [], nextCursor: null, hasMore: false, extra: true });
@@ -286,7 +305,10 @@ describe("OpenClawClient", () => {
     await clock.advance(800);
     await reconnect;
     expect(transport.connectCalls).toBe(2);
-    expect((await client.gateway.getStatus()).attempt).toBe(0);
+    await expect(statuses.next()).resolves.toMatchObject({ value: { connectionState: "connecting", attempt: 1 } });
+    const ready = (await statuses.next()).value;
+    expect(ready).toMatchObject({ connectionState: "ready", attempt: 0 });
+    expect(await client.gateway.getStatus()).toEqual(ready);
     await statuses.return?.();
   });
 

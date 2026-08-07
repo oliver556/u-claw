@@ -189,6 +189,16 @@ describe("RpcRouter", () => {
 });
 
 describe("GatewayWebSocket", () => {
+  it("normalizes WebSocket factory failures", async () => {
+    const gateway = new GatewayWebSocket({
+      url: "ws://gateway.test",
+      webSocketFactory: () => { throw new Error("factory failed"); },
+      connectParams: () => ({ client: { id: "u-claw-desktop", mode: "desktop" }, role: "operator", scopes: ["operator.read"] }),
+    });
+    const error = await Promise.resolve().then(() => gateway.connect()).catch((reason: unknown) => reason) as { uclawError: unknown };
+    expect(UClawErrorSchema.parse(error.uclawError).code).toBe("GATEWAY_DISCONNECTED");
+  });
+
   it("performs challenge, protocol v4 connect, then parses hello-ok", async () => {
     const socket = new FakeSocket();
     const gateway = new GatewayWebSocket({
@@ -248,7 +258,8 @@ describe("GatewayWebSocket", () => {
     const connection = gateway.connect();
     socket.emit("open");
     socket.emit("message", JSON.stringify({ type: "event", event: "connect.challenge", payload: { nonce: "n-1", ts: 1 }, seq: 1 }));
-    await expect(connection).rejects.toThrow("signature unavailable");
+    const error = await connection.catch((reason: unknown) => reason) as { uclawError: unknown };
+    expect(UClawErrorSchema.parse(error.uclawError).code).toBe("INVALID_ARGUMENT");
     expect(gateway.state).toBe("failed");
   });
 
@@ -265,7 +276,9 @@ describe("GatewayWebSocket", () => {
     const assertion = expect(connection).rejects.toThrow("challenge timed out");
     socket.emit("open");
     await vi.advanceTimersByTimeAsync(20);
+    const error = await connection.catch((reason: unknown) => reason) as { uclawError: unknown };
     await assertion;
+    expect(UClawErrorSchema.parse(error.uclawError).code).toBe("TIMEOUT");
     vi.useRealTimers();
   });
 });
