@@ -89,6 +89,43 @@ describe("bootstrapDesktopApp", () => {
     await Promise.resolve();
     expect(quit).toHaveBeenCalledOnce();
   });
+
+  it("rolls back the gateway once when window creation fails", async () => {
+    const stopGateway = vi.fn(async () => undefined);
+    await expect(bootstrapDesktopApp({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow: vi.fn(async () => { throw new Error("window failed"); }),
+      registerIpc: vi.fn(),
+      stopGateway,
+    })).rejects.toThrow("window failed");
+    expect(stopGateway).toHaveBeenCalledOnce();
+  });
+
+  it("rolls back the gateway once when IPC registration fails", async () => {
+    const stopGateway = vi.fn(async () => undefined);
+    await expect(bootstrapDesktopApp({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow: vi.fn(async () => ({
+        isDestroyed: () => false,
+        isMinimized: () => false,
+        restore: vi.fn(),
+        focus: vi.fn(),
+      })),
+      registerIpc: vi.fn(() => { throw new Error("IPC failed"); }),
+      stopGateway,
+    })).rejects.toThrow("IPC failed");
+    expect(stopGateway).toHaveBeenCalledOnce();
+  });
 });
 
 describe("validateRendererUrl", () => {
