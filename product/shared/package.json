@@ -7,10 +7,13 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --test ../scripts/workspace.test.mjs",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
   }
 }

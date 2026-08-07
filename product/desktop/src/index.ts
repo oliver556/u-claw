@@ -1,1 +1,1 @@
-export const packageName = "@uclaw/desktop";
+export { packageName } from "./package-name.js";

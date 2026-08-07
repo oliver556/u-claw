@@ -12,8 +12,9 @@
     "frontend"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "test": "node --test scripts/workspace.test.mjs && npm run test --workspace @uclaw/frontend",
+    "build": "npm run build --workspaces --if-present && npm run smoke:dist",
+    "smoke:dist": "node shared/dist/index.js && node adapter/dist/index.js && node desktop/dist/index.js",
+    "test": "node --test scripts/workspace.test.mjs && npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {

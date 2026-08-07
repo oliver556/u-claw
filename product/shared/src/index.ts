@@ -1,3 +1,1 @@
-import { z } from "zod";
-
-export const packageName = z.literal("@uclaw/shared").value;
+export { packageName } from "./package-name.js";
