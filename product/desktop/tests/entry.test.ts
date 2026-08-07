@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -51,14 +52,14 @@ describe("Electron production entry", () => {
   it("rejects an absolute wiring module outside controlled runtime roots", async () => {
     const outsideDesktopRoot = new URL("../../shared/dist/index.js", import.meta.url);
     await expect(loadProductionDesktopOptions({
-      UCLAW_DESKTOP_WIRING_MODULE: outsideDesktopRoot.pathname,
+      UCLAW_DESKTOP_WIRING_MODULE: fileURLToPath(outsideDesktopRoot),
     })).rejects.toThrow("outside controlled runtime roots");
   });
 
   it("loads the fixed factory export from a real module under the packaged desktop root", async () => {
     const fixture = new URL("./fixtures/production-wiring.mjs", import.meta.url);
     const options = await loadProductionDesktopOptions({
-      UCLAW_DESKTOP_WIRING_MODULE: fixture.pathname,
+      UCLAW_DESKTOP_WIRING_MODULE: fileURLToPath(fixture),
     });
 
     expect(options.requiredMethods).toEqual(["gateway.get-status"]);
