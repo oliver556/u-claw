@@ -24,8 +24,15 @@ describe("chat mapper", () => {
   });
 
   it("maps unknown content blocks to unsupported", () => {
-    const message = mapMessage({ id: "m-1", sessionKey: "session-1", role: "assistant", status: "completed", blocks: [{ id: "b-1", type: "future" }], createdAt: now });
+    const futureBlock = { id: "b-1", type: "future", value: "private" };
+    const message = mapMessage({ id: "m-1", sessionKey: "session-1", role: "assistant", status: "completed", blocks: [futureBlock], createdAt: now });
     expect(message.blocks[0]).toEqual({ id: "b-1", type: "unsupported", originalType: "future", summary: "Unsupported content" });
+  });
+
+  it("rejects fields from a different known block variant", () => {
+    const mixedBlock = { id: "b-1", type: "text", text: "hello", format: "plain" as const, code: "forbidden" };
+    const raw = { id: "m-1", sessionKey: "session-1", role: "assistant" as const, status: "completed" as const, blocks: [mixedBlock], createdAt: now };
+    expect(() => mapMessage(raw)).toThrow();
   });
 
   it("rejects extra raw chat fields", () => {

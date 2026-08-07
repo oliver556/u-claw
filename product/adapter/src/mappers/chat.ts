@@ -13,17 +13,20 @@ const ErrorSummarySchema = z.object({
   message: z.string().min(1),
 }).strict();
 
-const RawBlockSchema = z.object({
+const KnownRawBlockSchema = z.discriminatedUnion("type", [
+  z.object({ id: z.string().min(1), type: z.literal("text"), text: z.string(), format: z.enum(["plain", "markdown"]) }).strict(),
+  z.object({ id: z.string().min(1), type: z.literal("code"), code: z.string(), language: z.string().optional(), filename: z.string().optional() }).strict(),
+  z.object({ id: z.string().min(1), type: z.literal("tool-call"), toolCallId: z.string().min(1) }).strict(),
+  z.object({ id: z.string().min(1), type: z.literal("notice"), level: z.enum(["info", "warning", "error"]), text: z.string() }).strict(),
+]);
+
+const knownBlockTypes = new Set(["text", "code", "tool-call", "notice"]);
+const UnknownRawBlockSchema = z.object({
   id: z.string().min(1),
-  type: z.string().min(1),
-  text: z.string().optional(),
-  format: z.enum(["plain", "markdown"]).optional(),
-  code: z.string().optional(),
-  language: z.string().optional(),
-  filename: z.string().optional(),
-  toolCallId: z.string().min(1).optional(),
-  level: z.enum(["info", "warning", "error"]).optional(),
-}).strict();
+  type: z.string().min(1).refine((type) => !knownBlockTypes.has(type), "Known block must match its schema"),
+}).strip().transform(({ id, type }) => ({ id, type }));
+
+const RawBlockSchema = z.union([KnownRawBlockSchema, UnknownRawBlockSchema]);
 
 export const RawMessageSchema = z.object({
   id: z.string().min(1),
@@ -46,30 +49,27 @@ export const RawChatEventSchema = z.discriminatedUnion("state", [
 ]);
 
 function mapBlock(input: z.infer<typeof RawBlockSchema>): ContentBlock {
-  if (input.type === "text") {
-    return { id: input.id, type: "text", text: z.string().parse(input.text), format: z.enum(["plain", "markdown"]).parse(input.format) };
+  const known = KnownRawBlockSchema.safeParse(input);
+  if (!known.success) {
+    return { id: input.id, type: "unsupported", originalType: input.type, summary: "Unsupported content" };
   }
-  if (input.type === "code") {
+  const block = known.data;
+  if (block.type === "text") {
+    return { id: block.id, type: "text", text: block.text, format: block.format };
+  }
+  if (block.type === "code") {
     return {
-      id: input.id,
+      id: block.id,
       type: "code",
-      code: z.string().parse(input.code),
-      ...(typeof input.language === "string" ? { language: input.language } : {}),
-      ...(typeof input.filename === "string" ? { filename: input.filename } : {}),
+      code: block.code,
+      ...(block.language === undefined ? {} : { language: block.language }),
+      ...(block.filename === undefined ? {} : { filename: block.filename }),
     };
   }
-  if (input.type === "tool-call") {
-    return { id: input.id, type: "tool-call", toolCallId: z.string().min(1).parse(input.toolCallId) };
+  if (block.type === "tool-call") {
+    return { id: block.id, type: "tool-call", toolCallId: block.toolCallId };
   }
-  if (input.type === "notice") {
-    return {
-      id: input.id,
-      type: "notice",
-      level: z.enum(["info", "warning", "error"]).parse(input.level),
-      text: z.string().parse(input.text),
-    };
-  }
-  return { id: input.id, type: "unsupported", originalType: input.type, summary: "Unsupported content" };
+  return { id: block.id, type: "notice", level: block.level, text: block.text };
 }
 
 function errorCode(code: string | undefined): "TIMEOUT" | "CANCELLED" | "UNKNOWN" {
