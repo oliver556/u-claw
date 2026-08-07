@@ -14,12 +14,16 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",
+    "@uclaw/adapter": "0.1.0",
     "@uclaw/shared": "0.1.0",
     "antd": "^5.29.3",
     "lucide-react": "^0.468.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-router-dom": "^7.5.3"
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.5.3",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
