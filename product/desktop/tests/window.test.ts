@@ -47,6 +47,50 @@ describe("createMainWindow", () => {
     await open();
     expect(instances).toHaveLength(2);
   });
+  it("coalesces concurrent advanced console opens while the window loads", async () => {
+    let finishLoad: (() => void) | undefined;
+    const loading = new Promise<void>((resolve) => { finishLoad = resolve; });
+    const instances: ConsoleWindow[] = [];
+    class ConsoleWindow {
+      webContents = { mainFrame: {}, on: vi.fn(), setWindowOpenHandler: vi.fn(), send: vi.fn() };
+      constructor(_options: BrowserWindowOptionsLike) { instances.push(this); }
+      loadURL = vi.fn(() => loading);
+      once = vi.fn(); on = vi.fn(); show = vi.fn(); minimize = vi.fn(); maximize = vi.fn(); unmaximize = vi.fn();
+      isMaximized = vi.fn(() => false); close = vi.fn(); isDestroyed = vi.fn(() => false); isMinimized = vi.fn(() => false);
+      restore = vi.fn(); focus = vi.fn();
+    }
+    const open = createAdvancedConsoleController({ BrowserWindow: ConsoleWindow, getGatewayPort: () => 18789, openExternal: vi.fn() });
+
+    const first = open();
+    const second = open();
+    expect(instances).toHaveLength(1);
+    finishLoad?.();
+    await Promise.all([first, second]);
+    expect(instances).toHaveLength(1);
+  });
+
+  it.each(["url", "file"] as const)("closes the main window and disposes IPC when %s loading fails", async (source) => {
+    const listeners = new Map<string, () => void>();
+    const close = vi.fn(() => listeners.get("closed")?.());
+    class FailingWindow {
+      webContents = { mainFrame: {}, on: vi.fn(), setWindowOpenHandler: vi.fn(), send: vi.fn() };
+      loadURL = vi.fn(async () => { throw new Error("renderer load failed"); });
+      loadFile = vi.fn(async () => { throw new Error("renderer load failed"); });
+      once = vi.fn((event: string, listener: () => void) => listeners.set(event, listener));
+      on = vi.fn(); show = vi.fn(); minimize = vi.fn(); maximize = vi.fn(); unmaximize = vi.fn(); isMaximized = vi.fn(() => false);
+      close = close; isDestroyed = vi.fn(() => false); isMinimized = vi.fn(() => false); restore = vi.fn(); focus = vi.fn();
+    }
+    const disposeIpc = vi.fn();
+
+    await expect(createMainWindow({
+      BrowserWindow: FailingWindow,
+      preloadPath: "/runtime/preload.js",
+      ...(source === "url" ? { rendererUrl: "http://127.0.0.1:5173" } : { rendererFile: "/runtime/index.html" }),
+      openExternal: vi.fn(), beforeLoad: () => disposeIpc,
+    })).rejects.toThrow("renderer load failed");
+    expect(close).toHaveBeenCalledOnce();
+    expect(disposeIpc).toHaveBeenCalledOnce();
+  });
   it("creates a hidden frameless window with an isolated sandboxed renderer", async () => {
     const loadURL = vi.fn(async (_url: string) => undefined);
     const show = vi.fn();

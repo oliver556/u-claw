@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 
 import type { ClientIpcEvent, ClientIpcRequest, IpcResponse, WindowIpcRequest } from "@uclaw/shared";
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,6 +41,29 @@ describe("U-Claw application shell", () => {
 
     expect((await screen.findAllByText("还没有会话")).length).toBeGreaterThan(0);
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "sessions.list", params: {} }));
+  });
+
+  it("keeps one preload event listener through StrictMode replay and removes it on unmount", async () => {
+    const subscribers = new Set<(event: ClientIpcEvent) => void>();
+    const unsubscribe = vi.fn((listener: (event: ClientIpcEvent) => void) => subscribers.delete(listener));
+    const invoke = vi.fn(async (request: ClientIpcRequest): Promise<IpcResponse> => {
+      if (request.method === "sessions.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [], nextCursor: null, hasMore: false } };
+      if (request.method === "gateway.negotiate") return { method: request.method, requestId: request.requestId, ok: true, result: { protocolVersion: 4, methods: [], events: [], features: {} } };
+      if (request.method === "gateway.watch-status" || request.method === "subscriptions.cancel") return { method: request.method, requestId: request.requestId, ok: true, result: null };
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = {
+      client: { invoke, subscribe: (listener) => { subscribers.add(listener); return () => { unsubscribe(listener); }; } },
+    };
+
+    const { unmount } = render(<StrictMode><App /></StrictMode>);
+    expect((await screen.findAllByText("还没有会话")).length).toBeGreaterThan(0);
+    expect(subscribers.size).toBe(1);
+
+    unmount();
+    await Promise.resolve();
+    expect(subscribers.size).toBe(0);
+    expect(unsubscribe).toHaveBeenCalled();
   });
 
   it("exposes six primary destinations and marks Work current", () => {

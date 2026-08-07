@@ -45,10 +45,15 @@ const defaultClient: UClawClient = {
 
 export function App({ client }: { client?: UClawClient }) {
   const preloadBridge = window.uclaw?.client;
-  const resolvedClient = useMemo(
-    () => client ?? (preloadBridge ? createRendererClient(preloadBridge) : defaultClient),
+  const rendererClient = useMemo(
+    () => client === undefined && preloadBridge ? createRendererClient(preloadBridge) : undefined,
     [client, preloadBridge],
   );
+  const resolvedClient = useMemo(
+    () => client ?? rendererClient ?? defaultClient,
+    [client, rendererClient],
+  );
+  useEffect(() => () => rendererClient?.dispose(), [rendererClient]);
   useEffect(() => {
     if (client !== undefined || preloadBridge !== undefined) return;
     const controllableMock = mockClient as MockUClawClient & { setConnectionAvailable(available: boolean): void };
