@@ -41,12 +41,18 @@ class EventQueue<T> {
   private ended = false;
   private failure: UClawError | undefined;
 
+  constructor(private readonly closeOnTerminalValue = false) {}
+
   push(value: T): void {
     if (this.ended) return;
     const waiter = this.waiters.shift();
     if (waiter) waiter.resolve({ value, done: false });
     else this.values.push(value);
-    if ((value as { type?: string }).type === "final" || (value as { type?: string }).type === "aborted" || (value as { type?: string }).type === "error") this.end();
+    if (this.closeOnTerminalValue && (
+      (value as { type?: string }).type === "final" ||
+      (value as { type?: string }).type === "aborted" ||
+      (value as { type?: string }).type === "error"
+    )) this.end();
   }
 
   end(): void {
@@ -141,7 +147,7 @@ export function createRendererClient(bridge: RendererClientBridge): UClawClient 
       get: (sessionId, messageId) => invoke("chat.get", { sessionId, messageId }),
       watch: (sessionId, signal) => subscribe("chat.watch", { sessionId }, signal),
       send: (input, signal) => {
-        const queue = new EventQueue<MessageEvent>();
+        const queue = new EventQueue<MessageEvent>(true);
         sendQueues.set(input.clientRequestId, queue);
         return (async function* () {
           let runId: string | undefined;

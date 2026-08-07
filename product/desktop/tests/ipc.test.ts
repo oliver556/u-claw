@@ -193,4 +193,92 @@ describe("registerIpc", () => {
       },
     });
   });
+
+  it("does not trust renderer-unsafe text inside an otherwise valid UClawError", async () => {
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => Promise<unknown>>();
+    const authorizedWebContents = { mainFrame: undefined };
+    registerIpc({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents,
+      windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
+      dispatchClient: vi.fn(async () => { throw {
+        code: "OPERATION_FAILED", message: "Run rm -rf /private/work via http://127.0.0.1:18789", retryable: true,
+        recoveryActions: ["retry"], causeDetails: { operation: "cwd=/private/work" }, correlationId: "sk-secret-token",
+      }; }),
+    });
+
+    const response = await handlers.get(CLIENT_IPC_CHANNEL)!({ sender: authorizedWebContents, senderFrame: undefined }, {
+      method: "tools.list", requestId: "client-valid-unsafe", params: {},
+    });
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: "OPERATION_FAILED", message: "Client operation failed.", retryable: true, recoveryActions: ["retry"], causeDetails: {} },
+    });
+    expect(JSON.stringify(response)).not.toMatch(/rm -rf|\/private\/work|127\.0\.0\.1|sk-secret-token/);
+  });
+
+  it("projects a resolved failure response before returning it to renderer", async () => {
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => Promise<unknown>>();
+    const authorizedWebContents = { mainFrame: undefined };
+    registerIpc({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents,
+      windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
+      dispatchClient: vi.fn(async () => ({
+        method: "tools.list", requestId: "client-resolved-unsafe", ok: false,
+        error: {
+          code: "OPERATION_FAILED", message: "Run rm -rf /private/work via http://127.0.0.1:18789", retryable: true,
+          recoveryActions: ["retry"], causeDetails: { operation: "cwd=/private/work" }, correlationId: "sk-secret-token",
+        },
+      })),
+    });
+
+    const response = await handlers.get(CLIENT_IPC_CHANNEL)!({ sender: authorizedWebContents, senderFrame: undefined }, {
+      method: "tools.list", requestId: "client-resolved-unsafe", params: {},
+    });
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: "OPERATION_FAILED", message: "Client operation failed.", retryable: true, recoveryActions: ["retry"], causeDetails: {} },
+    });
+    expect(JSON.stringify(response)).not.toMatch(/rm -rf|\/private\/work|127\.0\.0\.1|sk-secret-token/);
+  });
+
+  it("projects nested errors in resolved success responses from the fallback dispatcher", async () => {
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => Promise<unknown>>();
+    const authorizedWebContents = { mainFrame: undefined };
+    const unsafeSummary = {
+      code: "OPERATION_FAILED", message: "Run rm -rf /private/work via http://127.0.0.1:18789", retryable: true,
+    };
+    const unsafeError = {
+      ...unsafeSummary, recoveryActions: ["retry"], causeDetails: { operation: "cwd=/private/work" }, correlationId: "sk-secret-token",
+    };
+    const results: Record<string, unknown> = {
+      "gateway.get-status": {
+        connectionState: "failed", protocolVersion: 4, phase: "failed", processAlive: false, serviceReady: false,
+        businessAvailable: false, since: "2026-08-08T08:00:00.000Z", attempt: 1,
+        usb: { state: "available", dataWritable: true }, error: unsafeError,
+      },
+      "models.list": [{ id: "model-1", label: "Model", providerId: "provider-1", available: false, locality: "cloud", capabilities: ["text"], unavailableReason: unsafeSummary }],
+      "channels.list": [{ id: "channel-1", kind: "telegram", name: "Telegram", configured: true, enabled: true, state: "error", error: unsafeSummary }],
+      "diagnostics.list": [{ id: "diagnostic-1", label: "Gateway", state: "failed", repairable: true, error: unsafeSummary }],
+    };
+    registerIpc({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents,
+      windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
+      dispatchClient: vi.fn(async (request) => ({
+        method: request.method, requestId: request.requestId, ok: true, result: results[request.method],
+      })),
+    });
+
+    const responses = [];
+    for (const [index, method] of Object.keys(results).entries()) {
+      responses.push(await handlers.get(CLIENT_IPC_CHANNEL)!({ sender: authorizedWebContents, senderFrame: undefined }, {
+        method, requestId: `client-success-${index}`, params: {},
+      }));
+    }
+    const serialized = JSON.stringify(responses);
+    expect(serialized.match(/Client operation failed\./g)).toHaveLength(4);
+    expect(serialized).not.toMatch(/rm -rf|\/private\/work|127\.0\.0\.1|sk-secret-token/);
+  });
 });
