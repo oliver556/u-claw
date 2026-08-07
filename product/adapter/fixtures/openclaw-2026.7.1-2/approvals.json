@@ -1,0 +1,953 @@
+{
+  "exec": {
+    "allowOnce": {
+      "event": {
+        "type": "event",
+        "event": "exec.approval.requested",
+        "payload": {
+          "id": "exec-contract-allow-once",
+          "request": {
+            "command": "/usr/bin/printf exec-contract-allow-once",
+            "commandArgv": [
+              "/usr/bin/printf",
+              "exec-contract-allow-once"
+            ],
+            "systemRunBinding": null,
+            "systemRunPlan": null,
+            "cwd": "/tmp",
+            "nodeId": null,
+            "host": "gateway",
+            "security": "allowlist",
+            "ask": "always",
+            "warningText": null,
+            "commandAnalysis": {
+              "commandCount": 1,
+              "nestedCommandCount": 0,
+              "riskKinds": [],
+              "warningLines": []
+            },
+            "unavailableDecisions": [
+              "allow-always"
+            ],
+            "allowedDecisions": [
+              "allow-once",
+              "deny"
+            ],
+            "agentId": null,
+            "resolvedPath": null,
+            "sessionKey": "agent:dev:main",
+            "turnSourceChannel": null,
+            "turnSourceTo": null,
+            "turnSourceAccountId": null,
+            "turnSourceThreadId": null
+          },
+          "createdAtMs": 1786128518658,
+          "expiresAtMs": 1786128533658
+        }
+      },
+      "listing": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000005",
+          "method": "exec.approval.list",
+          "params": {}
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000005",
+          "ok": true,
+          "payload": [
+            {
+              "id": "exec-contract-allow-once",
+              "request": {
+                "command": "/usr/bin/printf exec-contract-allow-once",
+                "commandArgv": [
+                  "/usr/bin/printf",
+                  "exec-contract-allow-once"
+                ],
+                "systemRunBinding": null,
+                "systemRunPlan": null,
+                "cwd": "/tmp",
+                "nodeId": null,
+                "host": "gateway",
+                "security": "allowlist",
+                "ask": "always",
+                "warningText": null,
+                "commandAnalysis": {
+                  "commandCount": 1,
+                  "nestedCommandCount": 0,
+                  "riskKinds": [],
+                  "warningLines": []
+                },
+                "unavailableDecisions": [
+                  "allow-always"
+                ],
+                "allowedDecisions": [
+                  "allow-once",
+                  "deny"
+                ],
+                "agentId": null,
+                "resolvedPath": null,
+                "sessionKey": "agent:dev:main",
+                "turnSourceChannel": null,
+                "turnSourceTo": null,
+                "turnSourceAccountId": null,
+                "turnSourceThreadId": null
+              },
+              "createdAtMs": 1786128518658,
+              "expiresAtMs": 1786128533658
+            }
+          ]
+        },
+        "result": [
+          {
+            "id": "exec-contract-allow-once",
+            "request": {
+              "command": "/usr/bin/printf exec-contract-allow-once",
+              "commandArgv": [
+                "/usr/bin/printf",
+                "exec-contract-allow-once"
+              ],
+              "systemRunBinding": null,
+              "systemRunPlan": null,
+              "cwd": "/tmp",
+              "nodeId": null,
+              "host": "gateway",
+              "security": "allowlist",
+              "ask": "always",
+              "warningText": null,
+              "commandAnalysis": {
+                "commandCount": 1,
+                "nestedCommandCount": 0,
+                "riskKinds": [],
+                "warningLines": []
+              },
+              "unavailableDecisions": [
+                "allow-always"
+              ],
+              "allowedDecisions": [
+                "allow-once",
+                "deny"
+              ],
+              "agentId": null,
+              "resolvedPath": null,
+              "sessionKey": "agent:dev:main",
+              "turnSourceChannel": null,
+              "turnSourceTo": null,
+              "turnSourceAccountId": null,
+              "turnSourceThreadId": null
+            },
+            "createdAtMs": 1786128518658,
+            "expiresAtMs": 1786128533658
+          }
+        ]
+      },
+      "resolution": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000006",
+          "method": "exec.approval.resolve",
+          "params": {
+            "id": "exec-contract-allow-once",
+            "decision": "allow-once"
+          }
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000006",
+          "ok": true,
+          "payload": {
+            "ok": true
+          }
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "requestResult": {
+        "status": "accepted",
+        "id": "exec-contract-allow-once",
+        "deliveryRoute": "approval-client",
+        "createdAtMs": 1786128518658,
+        "expiresAtMs": 1786128533658
+      }
+    },
+    "deny": {
+      "event": {
+        "type": "event",
+        "event": "exec.approval.requested",
+        "payload": {
+          "id": "exec-contract-deny",
+          "request": {
+            "command": "/usr/bin/printf exec-contract-deny",
+            "commandArgv": [
+              "/usr/bin/printf",
+              "exec-contract-deny"
+            ],
+            "systemRunBinding": null,
+            "systemRunPlan": null,
+            "cwd": "/tmp",
+            "nodeId": null,
+            "host": "gateway",
+            "security": "allowlist",
+            "ask": "always",
+            "warningText": null,
+            "commandAnalysis": {
+              "commandCount": 1,
+              "nestedCommandCount": 0,
+              "riskKinds": [],
+              "warningLines": []
+            },
+            "unavailableDecisions": [
+              "allow-always"
+            ],
+            "allowedDecisions": [
+              "allow-once",
+              "deny"
+            ],
+            "agentId": null,
+            "resolvedPath": null,
+            "sessionKey": "agent:dev:main",
+            "turnSourceChannel": null,
+            "turnSourceTo": null,
+            "turnSourceAccountId": null,
+            "turnSourceThreadId": null
+          },
+          "createdAtMs": 1786128518663,
+          "expiresAtMs": 1786128533663
+        }
+      },
+      "listing": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000007",
+          "method": "exec.approval.list",
+          "params": {}
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000007",
+          "ok": true,
+          "payload": [
+            {
+              "id": "exec-contract-deny",
+              "request": {
+                "command": "/usr/bin/printf exec-contract-deny",
+                "commandArgv": [
+                  "/usr/bin/printf",
+                  "exec-contract-deny"
+                ],
+                "systemRunBinding": null,
+                "systemRunPlan": null,
+                "cwd": "/tmp",
+                "nodeId": null,
+                "host": "gateway",
+                "security": "allowlist",
+                "ask": "always",
+                "warningText": null,
+                "commandAnalysis": {
+                  "commandCount": 1,
+                  "nestedCommandCount": 0,
+                  "riskKinds": [],
+                  "warningLines": []
+                },
+                "unavailableDecisions": [
+                  "allow-always"
+                ],
+                "allowedDecisions": [
+                  "allow-once",
+                  "deny"
+                ],
+                "agentId": null,
+                "resolvedPath": null,
+                "sessionKey": "agent:dev:main",
+                "turnSourceChannel": null,
+                "turnSourceTo": null,
+                "turnSourceAccountId": null,
+                "turnSourceThreadId": null
+              },
+              "createdAtMs": 1786128518663,
+              "expiresAtMs": 1786128533663
+            }
+          ]
+        },
+        "result": [
+          {
+            "id": "exec-contract-deny",
+            "request": {
+              "command": "/usr/bin/printf exec-contract-deny",
+              "commandArgv": [
+                "/usr/bin/printf",
+                "exec-contract-deny"
+              ],
+              "systemRunBinding": null,
+              "systemRunPlan": null,
+              "cwd": "/tmp",
+              "nodeId": null,
+              "host": "gateway",
+              "security": "allowlist",
+              "ask": "always",
+              "warningText": null,
+              "commandAnalysis": {
+                "commandCount": 1,
+                "nestedCommandCount": 0,
+                "riskKinds": [],
+                "warningLines": []
+              },
+              "unavailableDecisions": [
+                "allow-always"
+              ],
+              "allowedDecisions": [
+                "allow-once",
+                "deny"
+              ],
+              "agentId": null,
+              "resolvedPath": null,
+              "sessionKey": "agent:dev:main",
+              "turnSourceChannel": null,
+              "turnSourceTo": null,
+              "turnSourceAccountId": null,
+              "turnSourceThreadId": null
+            },
+            "createdAtMs": 1786128518663,
+            "expiresAtMs": 1786128533663
+          }
+        ]
+      },
+      "resolution": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000008",
+          "method": "exec.approval.resolve",
+          "params": {
+            "id": "exec-contract-deny",
+            "decision": "deny"
+          }
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000008",
+          "ok": true,
+          "payload": {
+            "ok": true
+          }
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "requestResult": {
+        "status": "accepted",
+        "id": "exec-contract-deny",
+        "deliveryRoute": "approval-client",
+        "createdAtMs": 1786128518663,
+        "expiresAtMs": 1786128533663
+      }
+    },
+    "unavailable": {
+      "event": {
+        "type": "event",
+        "event": "exec.approval.requested",
+        "payload": {
+          "id": "exec-contract-unavailable",
+          "request": {
+            "command": "/usr/bin/printf exec-contract-unavailable",
+            "commandArgv": [
+              "/usr/bin/printf",
+              "exec-contract-unavailable"
+            ],
+            "systemRunBinding": null,
+            "systemRunPlan": null,
+            "cwd": "/tmp",
+            "nodeId": null,
+            "host": "gateway",
+            "security": "allowlist",
+            "ask": "always",
+            "warningText": null,
+            "commandAnalysis": {
+              "commandCount": 1,
+              "nestedCommandCount": 0,
+              "riskKinds": [],
+              "warningLines": []
+            },
+            "unavailableDecisions": [
+              "allow-always"
+            ],
+            "allowedDecisions": [
+              "allow-once",
+              "deny"
+            ],
+            "agentId": null,
+            "resolvedPath": null,
+            "sessionKey": "agent:dev:main",
+            "turnSourceChannel": null,
+            "turnSourceTo": null,
+            "turnSourceAccountId": null,
+            "turnSourceThreadId": null
+          },
+          "createdAtMs": 1786128518685,
+          "expiresAtMs": 1786128533685
+        }
+      },
+      "listing": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000009",
+          "method": "exec.approval.list",
+          "params": {}
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000009",
+          "ok": true,
+          "payload": [
+            {
+              "id": "exec-contract-unavailable",
+              "request": {
+                "command": "/usr/bin/printf exec-contract-unavailable",
+                "commandArgv": [
+                  "/usr/bin/printf",
+                  "exec-contract-unavailable"
+                ],
+                "systemRunBinding": null,
+                "systemRunPlan": null,
+                "cwd": "/tmp",
+                "nodeId": null,
+                "host": "gateway",
+                "security": "allowlist",
+                "ask": "always",
+                "warningText": null,
+                "commandAnalysis": {
+                  "commandCount": 1,
+                  "nestedCommandCount": 0,
+                  "riskKinds": [],
+                  "warningLines": []
+                },
+                "unavailableDecisions": [
+                  "allow-always"
+                ],
+                "allowedDecisions": [
+                  "allow-once",
+                  "deny"
+                ],
+                "agentId": null,
+                "resolvedPath": null,
+                "sessionKey": "agent:dev:main",
+                "turnSourceChannel": null,
+                "turnSourceTo": null,
+                "turnSourceAccountId": null,
+                "turnSourceThreadId": null
+              },
+              "createdAtMs": 1786128518685,
+              "expiresAtMs": 1786128533685
+            }
+          ]
+        },
+        "result": [
+          {
+            "id": "exec-contract-unavailable",
+            "request": {
+              "command": "/usr/bin/printf exec-contract-unavailable",
+              "commandArgv": [
+                "/usr/bin/printf",
+                "exec-contract-unavailable"
+              ],
+              "systemRunBinding": null,
+              "systemRunPlan": null,
+              "cwd": "/tmp",
+              "nodeId": null,
+              "host": "gateway",
+              "security": "allowlist",
+              "ask": "always",
+              "warningText": null,
+              "commandAnalysis": {
+                "commandCount": 1,
+                "nestedCommandCount": 0,
+                "riskKinds": [],
+                "warningLines": []
+              },
+              "unavailableDecisions": [
+                "allow-always"
+              ],
+              "allowedDecisions": [
+                "allow-once",
+                "deny"
+              ],
+              "agentId": null,
+              "resolvedPath": null,
+              "sessionKey": "agent:dev:main",
+              "turnSourceChannel": null,
+              "turnSourceTo": null,
+              "turnSourceAccountId": null,
+              "turnSourceThreadId": null
+            },
+            "createdAtMs": 1786128518685,
+            "expiresAtMs": 1786128533685
+          }
+        ]
+      },
+      "resolution": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000010",
+          "method": "exec.approval.resolve",
+          "params": {
+            "id": "exec-contract-unavailable",
+            "decision": "allow-always"
+          }
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000010",
+          "ok": false,
+          "error": {
+            "code": "INVALID_REQUEST",
+            "message": "allow-always is unavailable because the effective policy requires approval every time",
+            "details": {
+              "reason": "APPROVAL_ALLOW_ALWAYS_UNAVAILABLE"
+            }
+          }
+        },
+        "error": {
+          "name": "GatewayClientRequestError",
+          "message": "allow-always is unavailable because the effective policy requires approval every time",
+          "code": "INVALID_REQUEST",
+          "details": {
+            "reason": "APPROVAL_ALLOW_ALWAYS_UNAVAILABLE"
+          }
+        }
+      },
+      "cleanup": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000011",
+          "method": "exec.approval.resolve",
+          "params": {
+            "id": "exec-contract-unavailable",
+            "decision": "deny"
+          }
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000011",
+          "ok": true,
+          "payload": {
+            "ok": true
+          }
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "requestResult": {
+        "status": "accepted",
+        "id": "exec-contract-unavailable",
+        "deliveryRoute": "approval-client",
+        "createdAtMs": 1786128518685,
+        "expiresAtMs": 1786128533685
+      }
+    }
+  },
+  "plugin": {
+    "allowOnce": {
+      "event": {
+        "type": "event",
+        "event": "plugin.approval.requested",
+        "payload": {
+          "id": "plugin:00000000-0000-4000-8000-000000000012",
+          "request": {
+            "pluginId": "contract-plugin",
+            "title": "Contract approval",
+            "description": "[REDACTED OPERATION]",
+            "severity": "warning",
+            "toolName": "contract_tool",
+            "toolCallId": "plugin-contract-allow-once",
+            "allowedDecisions": [
+              "allow-once",
+              "deny"
+            ],
+            "agentId": null,
+            "sessionKey": "agent:dev:main",
+            "turnSourceChannel": null,
+            "turnSourceTo": null,
+            "turnSourceAccountId": null,
+            "turnSourceThreadId": null
+          },
+          "createdAtMs": 1786128518715,
+          "expiresAtMs": 1786128533715
+        }
+      },
+      "listing": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000013",
+          "method": "plugin.approval.list",
+          "params": {}
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000013",
+          "ok": true,
+          "payload": [
+            {
+              "id": "plugin:00000000-0000-4000-8000-000000000012",
+              "request": {
+                "pluginId": "contract-plugin",
+                "title": "Contract approval",
+                "description": "[REDACTED OPERATION]",
+                "severity": "warning",
+                "toolName": "contract_tool",
+                "toolCallId": "plugin-contract-allow-once",
+                "allowedDecisions": [
+                  "allow-once",
+                  "deny"
+                ],
+                "agentId": null,
+                "sessionKey": "agent:dev:main",
+                "turnSourceChannel": null,
+                "turnSourceTo": null,
+                "turnSourceAccountId": null,
+                "turnSourceThreadId": null
+              },
+              "createdAtMs": 1786128518715,
+              "expiresAtMs": 1786128533715
+            }
+          ]
+        },
+        "result": [
+          {
+            "id": "plugin:00000000-0000-4000-8000-000000000012",
+            "request": {
+              "pluginId": "contract-plugin",
+              "title": "Contract approval",
+              "description": "[REDACTED OPERATION]",
+              "severity": "warning",
+              "toolName": "contract_tool",
+              "toolCallId": "plugin-contract-allow-once",
+              "allowedDecisions": [
+                "allow-once",
+                "deny"
+              ],
+              "agentId": null,
+              "sessionKey": "agent:dev:main",
+              "turnSourceChannel": null,
+              "turnSourceTo": null,
+              "turnSourceAccountId": null,
+              "turnSourceThreadId": null
+            },
+            "createdAtMs": 1786128518715,
+            "expiresAtMs": 1786128533715
+          }
+        ]
+      },
+      "resolution": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000014",
+          "method": "plugin.approval.resolve",
+          "params": {
+            "id": "plugin:00000000-0000-4000-8000-000000000012",
+            "decision": "allow-once"
+          }
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000014",
+          "ok": true,
+          "payload": {
+            "ok": true
+          }
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "requestResult": {
+        "status": "accepted",
+        "id": "plugin:00000000-0000-4000-8000-000000000012",
+        "deliveryRoute": "approval-client",
+        "createdAtMs": 1786128518715,
+        "expiresAtMs": 1786128533715
+      }
+    },
+    "deny": {
+      "event": {
+        "type": "event",
+        "event": "plugin.approval.requested",
+        "payload": {
+          "id": "plugin:00000000-0000-4000-8000-000000000015",
+          "request": {
+            "pluginId": "contract-plugin",
+            "title": "Contract approval",
+            "description": "[REDACTED OPERATION]",
+            "severity": "warning",
+            "toolName": "contract_tool",
+            "toolCallId": "plugin-contract-deny",
+            "allowedDecisions": [
+              "allow-once",
+              "deny"
+            ],
+            "agentId": null,
+            "sessionKey": "agent:dev:main",
+            "turnSourceChannel": null,
+            "turnSourceTo": null,
+            "turnSourceAccountId": null,
+            "turnSourceThreadId": null
+          },
+          "createdAtMs": 1786128518735,
+          "expiresAtMs": 1786128533735
+        }
+      },
+      "listing": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000016",
+          "method": "plugin.approval.list",
+          "params": {}
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000016",
+          "ok": true,
+          "payload": [
+            {
+              "id": "plugin:00000000-0000-4000-8000-000000000015",
+              "request": {
+                "pluginId": "contract-plugin",
+                "title": "Contract approval",
+                "description": "[REDACTED OPERATION]",
+                "severity": "warning",
+                "toolName": "contract_tool",
+                "toolCallId": "plugin-contract-deny",
+                "allowedDecisions": [
+                  "allow-once",
+                  "deny"
+                ],
+                "agentId": null,
+                "sessionKey": "agent:dev:main",
+                "turnSourceChannel": null,
+                "turnSourceTo": null,
+                "turnSourceAccountId": null,
+                "turnSourceThreadId": null
+              },
+              "createdAtMs": 1786128518735,
+              "expiresAtMs": 1786128533735
+            }
+          ]
+        },
+        "result": [
+          {
+            "id": "plugin:00000000-0000-4000-8000-000000000015",
+            "request": {
+              "pluginId": "contract-plugin",
+              "title": "Contract approval",
+              "description": "[REDACTED OPERATION]",
+              "severity": "warning",
+              "toolName": "contract_tool",
+              "toolCallId": "plugin-contract-deny",
+              "allowedDecisions": [
+                "allow-once",
+                "deny"
+              ],
+              "agentId": null,
+              "sessionKey": "agent:dev:main",
+              "turnSourceChannel": null,
+              "turnSourceTo": null,
+              "turnSourceAccountId": null,
+              "turnSourceThreadId": null
+            },
+            "createdAtMs": 1786128518735,
+            "expiresAtMs": 1786128533735
+          }
+        ]
+      },
+      "resolution": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000017",
+          "method": "plugin.approval.resolve",
+          "params": {
+            "id": "plugin:00000000-0000-4000-8000-000000000015",
+            "decision": "deny"
+          }
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000017",
+          "ok": true,
+          "payload": {
+            "ok": true
+          }
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "requestResult": {
+        "status": "accepted",
+        "id": "plugin:00000000-0000-4000-8000-000000000015",
+        "deliveryRoute": "approval-client",
+        "createdAtMs": 1786128518735,
+        "expiresAtMs": 1786128533735
+      }
+    },
+    "unavailable": {
+      "event": {
+        "type": "event",
+        "event": "plugin.approval.requested",
+        "payload": {
+          "id": "plugin:00000000-0000-4000-8000-000000000018",
+          "request": {
+            "pluginId": "contract-plugin",
+            "title": "Contract approval",
+            "description": "[REDACTED OPERATION]",
+            "severity": "warning",
+            "toolName": "contract_tool",
+            "toolCallId": "plugin-contract-unavailable",
+            "allowedDecisions": [
+              "allow-once",
+              "deny"
+            ],
+            "agentId": null,
+            "sessionKey": "agent:dev:main",
+            "turnSourceChannel": null,
+            "turnSourceTo": null,
+            "turnSourceAccountId": null,
+            "turnSourceThreadId": null
+          },
+          "createdAtMs": 1786128518758,
+          "expiresAtMs": 1786128533758
+        }
+      },
+      "listing": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000019",
+          "method": "plugin.approval.list",
+          "params": {}
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000019",
+          "ok": true,
+          "payload": [
+            {
+              "id": "plugin:00000000-0000-4000-8000-000000000018",
+              "request": {
+                "pluginId": "contract-plugin",
+                "title": "Contract approval",
+                "description": "[REDACTED OPERATION]",
+                "severity": "warning",
+                "toolName": "contract_tool",
+                "toolCallId": "plugin-contract-unavailable",
+                "allowedDecisions": [
+                  "allow-once",
+                  "deny"
+                ],
+                "agentId": null,
+                "sessionKey": "agent:dev:main",
+                "turnSourceChannel": null,
+                "turnSourceTo": null,
+                "turnSourceAccountId": null,
+                "turnSourceThreadId": null
+              },
+              "createdAtMs": 1786128518758,
+              "expiresAtMs": 1786128533758
+            }
+          ]
+        },
+        "result": [
+          {
+            "id": "plugin:00000000-0000-4000-8000-000000000018",
+            "request": {
+              "pluginId": "contract-plugin",
+              "title": "Contract approval",
+              "description": "[REDACTED OPERATION]",
+              "severity": "warning",
+              "toolName": "contract_tool",
+              "toolCallId": "plugin-contract-unavailable",
+              "allowedDecisions": [
+                "allow-once",
+                "deny"
+              ],
+              "agentId": null,
+              "sessionKey": "agent:dev:main",
+              "turnSourceChannel": null,
+              "turnSourceTo": null,
+              "turnSourceAccountId": null,
+              "turnSourceThreadId": null
+            },
+            "createdAtMs": 1786128518758,
+            "expiresAtMs": 1786128533758
+          }
+        ]
+      },
+      "resolution": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000020",
+          "method": "plugin.approval.resolve",
+          "params": {
+            "id": "plugin:00000000-0000-4000-8000-000000000018",
+            "decision": "allow-always"
+          }
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000020",
+          "ok": false,
+          "error": {
+            "code": "INVALID_REQUEST",
+            "message": "allow-always is unavailable for this plugin approval",
+            "details": {
+              "allowedDecisions": [
+                "allow-once",
+                "deny"
+              ]
+            }
+          }
+        },
+        "error": {
+          "name": "GatewayClientRequestError",
+          "message": "allow-always is unavailable for this plugin approval",
+          "code": "INVALID_REQUEST",
+          "details": {
+            "allowedDecisions": [
+              "allow-once",
+              "deny"
+            ]
+          }
+        }
+      },
+      "cleanup": {
+        "requestFrame": {
+          "type": "req",
+          "id": "00000000-0000-4000-8000-000000000021",
+          "method": "plugin.approval.resolve",
+          "params": {
+            "id": "plugin:00000000-0000-4000-8000-000000000018",
+            "decision": "deny"
+          }
+        },
+        "responseFrame": {
+          "type": "res",
+          "id": "00000000-0000-4000-8000-000000000021",
+          "ok": true,
+          "payload": {
+            "ok": true
+          }
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "requestResult": {
+        "status": "accepted",
+        "id": "plugin:00000000-0000-4000-8000-000000000018",
+        "deliveryRoute": "approval-client",
+        "createdAtMs": 1786128518758,
+        "expiresAtMs": 1786128533758
+      }
+    }
+  }
+}
