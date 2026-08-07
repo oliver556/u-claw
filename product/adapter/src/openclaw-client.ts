@@ -21,12 +21,13 @@ import {
   RawToolCallSchema,
 } from "./mappers/tool.js";
 import type { GatewayWebSocketState, HelloOk } from "./transport/gateway-websocket.js";
-import { ReconnectPolicy, SequenceGapDetector, type SequenceGap } from "./reconnect.js";
+import { ReconnectPolicy, type SequenceGap } from "./reconnect.js";
 import { RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
 
 interface OpenClawRouter {
   request<T>(method: string, params: JsonValue, schema: z.ZodType<T>): Promise<T>;
   onEvent(event: string, listener: (frame: EventFrame) => void): () => void;
+  onSequenceGap(listener: (gap: SequenceGap) => void): () => void;
 }
 
 export interface OpenClawTransport {
@@ -127,14 +128,15 @@ export class OpenClawClient implements UClawClient {
   private hello: HelloOk | undefined;
   private readonly now: () => string;
   private readonly reconnectPolicy: ReconnectPolicy;
-  private readonly sequenceDetector: SequenceGapDetector;
+  private readonly onResyncRequired: (gap: SequenceGap) => void;
+  private removeSequenceGapListener: (() => void) | undefined;
   private negotiation: Promise<CapabilitySet> | undefined;
   private reconnectAttempt = 0;
 
   constructor(private readonly options: OpenClawClientOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.reconnectPolicy = options.reconnectPolicy ?? new ReconnectPolicy();
-    this.sequenceDetector = new SequenceGapDetector(options.onResyncRequired ?? (() => undefined));
+    this.onResyncRequired = options.onResyncRequired ?? (() => undefined);
   }
 
   readonly gateway: UClawClient["gateway"] = {
@@ -143,10 +145,11 @@ export class OpenClawClient implements UClawClient {
     watchStatus: (signal) => this.watchGatewayStatus(signal),
     reconnect: async () => {
       await this.reconnectPolicy.wait(this.reconnectAttempt);
+      this.removeSequenceGapListener?.();
+      this.removeSequenceGapListener = undefined;
       this.options.transport.close();
       this.capabilities = undefined;
       this.hello = undefined;
-      this.sequenceDetector.reset();
       try {
         await this.gateway.negotiate();
         this.reconnectAttempt = 0;
@@ -244,19 +247,15 @@ export class OpenClawClient implements UClawClient {
       if (mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error") queue.end();
     };
     const removers = [this.options.transport.router.onEvent("chat", (frame) => {
-      if (this.hasSequenceGap(frame)) return;
       const raw = RawChatEventSchema.safeParse(frame.payload);
       if (raw.success) enqueue(mapChatEvent(raw.data));
     }), this.options.transport.router.onEvent("session.tool", (frame) => {
-      if (this.hasSequenceGap(frame)) return;
       const raw = RawToolCallSchema.safeParse(frame.payload);
       if (raw.success && raw.data.runId !== undefined) enqueue(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapToolCall(raw.data) }));
     }), this.options.transport.router.onEvent("exec.approval.requested", (frame) => {
-      if (this.hasSequenceGap(frame)) return;
       const raw = ExecApprovalEventSchema.safeParse(frame.payload);
       if (raw.success) enqueue(MessageEventSchema.parse({ type: "approval", runId: raw.data.runId, approval: mapExecApproval(raw.data.request) }));
     }), this.options.transport.router.onEvent("plugin.approval.requested", (frame) => {
-      if (this.hasSequenceGap(frame)) return;
       const raw = PluginApprovalEventSchema.safeParse(frame.payload);
       if (raw.success) enqueue(MessageEventSchema.parse({ type: "approval", runId: raw.data.runId, approval: mapPluginApproval(raw.data.request) }));
     })];
@@ -283,19 +282,15 @@ export class OpenClawClient implements UClawClient {
   private async *watchChat(sessionId: string, signal?: AbortSignal): AsyncIterable<MessageEvent> {
     const queue = new AsyncEventQueue<MessageEvent>();
     const removers = [this.options.transport.router.onEvent("chat", (frame) => {
-      if (this.hasSequenceGap(frame)) return;
       const raw = RawChatEventSchema.safeParse(frame.payload);
       if (raw.success && raw.data.sessionKey === sessionId) queue.push(mapChatEvent(raw.data));
     }), this.options.transport.router.onEvent("session.tool", (frame) => {
-      if (this.hasSequenceGap(frame)) return;
       const raw = RawToolCallSchema.safeParse(frame.payload);
       if (raw.success && raw.data.sessionKey === sessionId && raw.data.runId !== undefined) queue.push(MessageEventSchema.parse({ type: "tool", runId: raw.data.runId, tool: mapToolCall(raw.data) }));
     }), this.options.transport.router.onEvent("exec.approval.requested", (frame) => {
-      if (this.hasSequenceGap(frame)) return;
       const raw = ExecApprovalEventSchema.safeParse(frame.payload);
       if (raw.success && raw.data.request.sessionKey === sessionId) queue.push(MessageEventSchema.parse({ type: "approval", runId: raw.data.runId, approval: mapExecApproval(raw.data.request) }));
     }), this.options.transport.router.onEvent("plugin.approval.requested", (frame) => {
-      if (this.hasSequenceGap(frame)) return;
       const raw = PluginApprovalEventSchema.safeParse(frame.payload);
       if (raw.success && (raw.data.request.sessionKey === undefined || raw.data.request.sessionKey === sessionId)) queue.push(MessageEventSchema.parse({ type: "approval", runId: raw.data.runId, approval: mapPluginApproval(raw.data.request) }));
     })];
@@ -337,6 +332,7 @@ export class OpenClawClient implements UClawClient {
     if (this.capabilities !== undefined) return Promise.resolve(this.capabilities);
     if (this.negotiation !== undefined) return this.negotiation;
     this.negotiation = this.connectWithStartupRetry().then((hello) => {
+      this.ensureSequenceGapListener();
       this.hello = hello;
       this.capabilities = capabilitySetFromWire({
         protocolVersion: 4,
@@ -362,8 +358,9 @@ export class OpenClawClient implements UClawClient {
     }
   }
 
-  private hasSequenceGap(frame: EventFrame): boolean {
-    return frame.seq === undefined ? false : this.sequenceDetector.observe(frame.seq);
+  private ensureSequenceGapListener(): void {
+    if (this.removeSequenceGapListener !== undefined) return;
+    this.removeSequenceGapListener = this.options.transport.router.onSequenceGap(this.onResyncRequired);
   }
 
   private unsupported(capability: string): never {

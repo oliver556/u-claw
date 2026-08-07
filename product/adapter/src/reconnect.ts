@@ -59,22 +59,24 @@ export interface SequenceGap {
   received: number;
 }
 
+export type SequenceDecision = "accepted" | "duplicate" | "gap";
+
 export class SequenceGapDetector {
   private lastSequence: number | undefined;
 
   constructor(private readonly onResyncRequired: (gap: SequenceGap) => void) {}
 
-  observe(sourceSequence: number): boolean {
+  observe(sourceSequence: number): SequenceDecision {
     if (this.lastSequence === undefined) {
       this.lastSequence = sourceSequence;
-      return false;
+      return "accepted";
     }
-    if (sourceSequence === this.lastSequence) return false;
+    if (sourceSequence <= this.lastSequence) return "duplicate";
     const expected = this.lastSequence + 1;
     this.lastSequence = sourceSequence;
-    if (sourceSequence === expected) return false;
+    if (sourceSequence === expected) return "accepted";
     this.onResyncRequired({ expected, received: sourceSequence });
-    return true;
+    return "gap";
   }
 
   reset(): void {

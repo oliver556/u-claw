@@ -19,12 +19,13 @@ describe("ReconnectPolicy", () => {
 });
 
 describe("SequenceGapDetector", () => {
-  it("triggers resync on a gap without requesting replay", () => {
+  it("returns accepted, duplicate, and gap explicitly", () => {
     const resync: Array<{ expected: number; received: number }> = [];
     const detector = new SequenceGapDetector((gap) => resync.push(gap));
-    expect(detector.observe(7)).toBe(false);
-    expect(detector.observe(8)).toBe(false);
-    expect(detector.observe(10)).toBe(true);
+    expect(detector.observe(7)).toBe("accepted");
+    expect(detector.observe(7)).toBe("duplicate");
+    expect(detector.observe(8)).toBe("accepted");
+    expect(detector.observe(10)).toBe("gap");
     expect(resync).toEqual([{ expected: 9, received: 10 }]);
   });
 });
