@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -22,6 +23,8 @@ import {
 } from "../../adapter/src/index.js";
 
 const fixturesDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../adapter/fixtures/openclaw-2026.7.1-2");
+const productDir = resolve(fixturesDir, "../../..");
+const fixtureNames = ["attachments.json", "approvals.json", "chat.history.json", "chat.message.get.json", "session.tool.json", "sessions.patch.json", "provenance.json"];
 
 function fixture(name: string): unknown {
   return JSON.parse(readFileSync(resolve(fixturesDir, name), "utf8"));
@@ -107,15 +110,33 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
       openClawVersion: string;
       buildCommit: string;
       captureHarnessSha256: string;
+      sanitizerSha256: string;
+      npmTarballResolved: string;
+      npmTarballIntegrity: string;
+      capture: { runtime: string };
       rawCaptureSha256: Record<string, string>;
       fixtureSha256: Record<string, string>;
     };
     expect(provenance).toMatchObject({
       openClawVersion: "2026.7.1-2",
       buildCommit: "0790d9f593ad30c940ed93b5872a8cf6d6f3cf8c",
+      npmTarballResolved: expect.stringMatching(/\/openclaw-2026\.7\.1-2\.tgz$/),
+      npmTarballIntegrity: "sha512-ycF3yPcbjN6bUPeaUx6Mh6vze1hQWoD3CT/wWcmD7a8xaHHHRUaAlaq+lFxMHf1ssEgODVAwjlzYqp2twkYZ7g==",
+      capture: { runtime: "OpenClaw Gateway 2026.7.1-2 on Node.js 24.15.0" },
     });
-    expect(provenance.captureHarnessSha256).toHaveLength(64);
+    expect(provenance.captureHarnessSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/capture-openclaw-v4.mjs"))).digest("hex"));
+    expect(provenance.sanitizerSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/sanitize-openclaw-v4-capture.mjs"))).digest("hex"));
     expect(Object.keys(provenance.rawCaptureSha256)).toHaveLength(6);
     for (const [name, expected] of Object.entries(provenance.fixtureSha256)) expect(sha256(name)).toBe(expected);
+  });
+
+  it("keeps every fixture free of machine paths, usernames, and credential material", () => {
+    const contents = fixtureNames.map((name) => readFileSync(resolve(fixturesDir, name), "utf8")).join("\n");
+    const userName = basename(homedir());
+    expect(contents).not.toContain(homedir());
+    expect(contents.toLowerCase()).not.toContain(userName.toLowerCase());
+    expect(contents).not.toMatch(/\/(?:Users|home|private|var|Volumes)\//);
+    expect(contents).not.toMatch(/\/tmp\/(?!openclaw-contract(?:\/|"))/);
+    expect(contents).not.toMatch(/(?:gh[pousr]_|github_pat_|AKIA[0-9A-Z]{16}|xox[bp]-|AIza[0-9A-Za-z_-]{20,}|sk-(?:proj-)?[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{8,})/i);
   });
 });

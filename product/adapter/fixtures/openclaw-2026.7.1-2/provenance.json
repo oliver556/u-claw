@@ -1,32 +1,37 @@
 {
   "openClawVersion": "2026.7.1-2",
   "buildCommit": "0790d9f593ad30c940ed93b5872a8cf6d6f3cf8c",
-  "npmTarballSha1": "4583b987ea7277230ce1c7b2b8535d3e219f57ac",
+  "buildCommitSource": "build-info.json",
+  "npmTarballResolved": "https://registry.npmmirror.com/openclaw/-/openclaw-2026.7.1-2.tgz",
+  "npmTarballIntegrity": "sha512-ycF3yPcbjN6bUPeaUx6Mh6vze1hQWoD3CT/wWcmD7a8xaHHHRUaAlaq+lFxMHf1ssEgODVAwjlzYqp2twkYZ7g==",
+  "npmTarballIdentitySource": "package-lock.json#packages[node_modules/openclaw]",
   "installedPackageJsonSha256": "695b6ee36df7fc69606dc390cf97bb2ca809114337b18c573707637cd2a4e3db",
   "installedRuntimeSchema": "schema-BuOFpc7K.js",
   "installedRuntimeSchemaSha256": "b5b672dd1ce3579e2b030567ef192355374c052934cb4e252b793e08647d54ab",
   "captureHarnessSha256": "399b58338d4a846f15251da62739401d3199910a5e8d6ea15396824398bd56ec",
-  "capturedAt": "2026-08-07T18:48:35.702Z",
+  "sanitizerSha256": "7f0e87b31df2813eb6d7dcff9dbfcfc757691d14a02a9e52edb466e61f741658",
+  "nodeVersionSource": "OPENCLAW_NODE_BIN --version",
+  "capturedAt": "2026-08-07T19:08:31.086Z",
   "capture": {
-    "runtime": "OpenClaw Gateway 2026.7.1-2 on Node.js 24.16.0",
+    "runtime": "OpenClaw Gateway 2026.7.1-2 on Node.js 24.15.0",
     "transport": "GatewayClient through a loopback WebSocket frame-capture proxy",
     "model": "loopback OpenAI-compatible deterministic tool-call server",
     "redaction": "UUIDs and temporary paths replaced consistently; user/assistant/tool-result text replaced with structured placeholders; synthetic attachment bytes retained; sessions.patch and sessions.list store derived field projections because raw entries contain unrelated prompt/tool diagnostics"
   },
   "rawCaptureSha256": {
-    "attachments.json": "3b54627c45311ff65fdc014faa02b8a45552bb89da39481b301b35871ade4daf",
-    "approvals.json": "72f5e2406dfc14c8b14c26b65747cf24e32b7a46251a9635400b545ba50b08dd",
-    "chat.history.json": "d35ea99b83e1f87f790b2591a2a1712d591a81af42394454722fee6d14c6c27d",
-    "chat.message.get.json": "420387de04071bd8fb0ec573c27f3da78f0e11ef1cd950ec0355da5576bc6e86",
-    "session.tool.json": "17c4c500294a575deb2fe8b7b953d8bc281dd765b489da505ab574721931f89c",
-    "sessions.patch.json": "d5a497227f81c167585992c337f19a660c11ca65ff297a354db1ca2555c5deae"
+    "attachments.json": "0620a06a0eb5c9ebc398ed1a67a6d0159672e3e82219bd30ca0c016d8afaf80c",
+    "approvals.json": "37df37bfd40473e26ff911414c95b476e1fb3feb10df9b8d29c2ae8321791c9e",
+    "chat.history.json": "e7d8cc48c660727324d15c0b6f1d45ee30e1c0b4cad910173a5aadf4cbe3786a",
+    "chat.message.get.json": "565226b866b8b4861aab92d440bc3dbd439b6ec99e6dec4d0b30fc4d71278d09",
+    "session.tool.json": "bb667e348778c6a7754de0ffe2929a544154fdfa8ec9bba8a16e85196c8c4692",
+    "sessions.patch.json": "228a7adcd4e493f73083c224cf5ca55b60604cdc6909d8c9033b136d894cad97"
   },
   "fixtureSha256": {
-    "attachments.json": "3f28013cec443cf4a759b5700bc862bf2effdc8ec68cef5566a88160704af5b5",
-    "approvals.json": "7cbec2ebccfcd535620085c71924834818761bc6d276e472930d69733851acda",
-    "chat.history.json": "1eb419aef2ddb69fc37dd8f71a7b80e2143652db268ed2a3941df1dc32293ab4",
-    "chat.message.get.json": "54f5329112bb4adc633158c0e45a9cc01749a101b7ebc39ea6904fa78092491f",
-    "session.tool.json": "bffadc407dc11861929682f76d0a5e3f994142ef488fe33cdf84cdb8d5d470ae",
+    "attachments.json": "c6f45323a25d5dcb0250214b1af46ccf2765a0d856cc0ab136a8935427d9e341",
+    "approvals.json": "39a85896efe2798d0745f192d632280960e9a57361dc29c5af8d59b9bb4ae286",
+    "chat.history.json": "525935101d371db1fa1bc8c2b104cb5ea1953f141d15c0524e71e64590592a82",
+    "chat.message.get.json": "aa8b6192c0840238e15756d707f044b35e85f8253471c7fe1c60857c08209326",
+    "session.tool.json": "b3a8abe99ed201c767a5c6b6c2a27cf5e1447c688187bef408fb5fb07b9d5ce6",
     "sessions.patch.json": "40b7af76fd56736c5fb1b59a2ef4053823e7278194feb753d2ea555fa54b8bd6"
   }
 }
