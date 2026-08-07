@@ -12,6 +12,8 @@ describe("IPC contracts", () => {
   it("keeps window control separate from client methods", () => {
     expect(WindowIpcRequestSchema.parse({ method: "minimize", requestId: "request-1", params: {} })).toBeTruthy();
     expect(() => ClientIpcRequestSchema.parse({ method: "minimize", requestId: "request-1", params: {} })).toThrow();
+    expect(WindowIpcRequestSchema.parse({ method: "open-advanced-console", requestId: "request-2", params: {} })).toBeTruthy();
+    expect(() => WindowIpcRequestSchema.parse({ method: "open-advanced-console", requestId: "request-3", params: { url: "https://evil.example" } })).toThrow();
   });
 
   it("parses a typed window failure response", () => {
@@ -34,7 +36,7 @@ describe("IPC contracts", () => {
       ["gateway.negotiate", {}], ["gateway.get-status", {}], ["gateway.watch-status", { subscriptionId: "sub-1" }], ["gateway.reconnect", {}],
       ["sessions.list", {}], ["sessions.get", { sessionId: "s" }], ["sessions.create", {}], ["sessions.remove", { sessionId: "s" }],
       ["chat.list", { sessionId: "s" }], ["chat.get", { sessionId: "s", messageId: "m" }], ["chat.watch", { sessionId: "s", subscriptionId: "sub-2" }],
-      ["chat.send", { sessionId: "s", clientRequestId: "c", blocks: [{ type: "text", text: "hi", format: "plain" }] }], ["chat.abort", { runId: "r" }],
+      ["chat.send", { sessionId: "s", clientRequestId: "c", blocks: [{ type: "text", text: "hi", format: "plain" }] }], ["chat.abort", { runId: "r" }], ["chat.cancel-stream", { clientRequestId: "c" }],
       ["tools.list", {}], ["tools.get-call", { toolCallId: "t" }], ["approvals.list-pending", {}],
       ["approvals.resolve-exec", { ref: { family: "exec", id: "a" }, decision: "deny" }], ["approvals.resolve-plugin", { ref: { family: "plugin", id: "a" }, decision: "deny" }],
       ["models.list", {}], ["models.select-for-session", { sessionId: "s", modelId: "m" }], ["skills.list", {}], ["channels.list", {}],
@@ -52,6 +54,8 @@ describe("IPC contracts", () => {
     expect(ClientIpcRequestSchema.parse({ method: "chat.watch", requestId: "request-2", params: { sessionId: "session-1", subscriptionId: "sub-2" } })).toBeTruthy();
     expect(ClientIpcRequestSchema.parse({ method: "subscriptions.cancel", requestId: "request-3", params: { subscriptionId: "sub-1" } })).toBeTruthy();
     expect(ClientIpcSuccessResponseSchema.parse({ method: "subscriptions.cancel", requestId: "request-3", ok: true, result: null })).toBeTruthy();
+    expect(ClientIpcEventSchema.parse({ event: "subscription.closed", subscriptionId: "sub-1" })).toBeTruthy();
+    expect(ClientIpcEventSchema.parse({ event: "subscription.closed", subscriptionId: "sub-2", error: { code: "GATEWAY_DISCONNECTED", message: "Disconnected", retryable: true, recoveryActions: ["reconnect"], causeDetails: {} } })).toBeTruthy();
   });
 
   it("returns a typed accepted result for chat sends", () => {

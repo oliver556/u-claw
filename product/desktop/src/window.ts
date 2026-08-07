@@ -33,7 +33,7 @@ export interface BrowserWindowOptionsLike {
   minWidth: number;
   minHeight: number;
   webPreferences: {
-    preload: string;
+    preload?: string;
     contextIsolation: boolean;
     sandbox: boolean;
     nodeIntegration: boolean;
@@ -52,6 +52,69 @@ export interface CreateMainWindowOptions {
   openExternal(url: string): Promise<unknown>;
   showWhenReady?: boolean;
   beforeLoad?(window: DesktopWindow): (() => void) | void;
+}
+
+export interface CreateAdvancedConsoleWindowOptions {
+  BrowserWindow: BrowserWindowConstructor;
+  gatewayPort: number;
+  openExternal(url: string): Promise<unknown>;
+}
+
+export interface CreateAdvancedConsoleControllerOptions {
+  BrowserWindow: BrowserWindowConstructor;
+  getGatewayPort(): number;
+  openExternal(url: string): Promise<unknown>;
+}
+
+export function createAdvancedConsoleController({
+  BrowserWindow,
+  getGatewayPort,
+  openExternal,
+}: CreateAdvancedConsoleControllerOptions): () => Promise<void> {
+  let current: DesktopWindow | undefined;
+  return async () => {
+    if (current && !current.isDestroyed()) {
+      if (current.isMinimized()) current.restore();
+      current.focus();
+      return;
+    }
+    const created = await createAdvancedConsoleWindow({ BrowserWindow, gatewayPort: getGatewayPort(), openExternal });
+    current = created;
+    created.once("closed", () => {
+      if (current === created) current = undefined;
+    });
+  };
+}
+
+export async function createAdvancedConsoleWindow({
+  BrowserWindow,
+  gatewayPort,
+  openExternal,
+}: CreateAdvancedConsoleWindowOptions): Promise<DesktopWindow> {
+  if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65_535) {
+    throw new Error("Advanced console Gateway port is invalid.");
+  }
+  const url = new URL(`http://127.0.0.1:${gatewayPort}/`);
+  const window = new BrowserWindow({
+    frame: true,
+    show: false,
+    minWidth: 800,
+    minHeight: 600,
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  installNavigationPolicy({
+    webContents: window.webContents,
+    openExternal,
+    allowedNavigationOrigins: [url.origin],
+  });
+  window.once("ready-to-show", () => window.show());
+  try {
+    await window.loadURL(url.href);
+  } catch (error) {
+    window.close();
+    throw error;
+  }
+  return window;
 }
 
 export async function createMainWindow({

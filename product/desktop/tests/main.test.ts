@@ -2,7 +2,13 @@ import { EventEmitter } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { bootstrapDesktopApp, runDesktopMain, validateRendererUrl } from "../src/main.js";
+import { bootstrapDesktopApp, requireElectronClient, runDesktopMain, validateRendererUrl } from "../src/main.js";
+
+describe("Electron client wiring", () => {
+  it("rejects production startup without a real UClawClient", () => {
+    expect(() => requireElectronClient(undefined)).toThrow("UClawClient");
+  });
+});
 
 describe("bootstrapDesktopApp", () => {
   it("quits immediately when another instance owns the lock", async () => {

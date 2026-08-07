@@ -16,6 +16,7 @@
     "smoke:dist": "node shared/dist/index.js && node adapter/dist/index.js && node desktop/dist/index.js && npm run smoke:file -w @uclaw/frontend",
     "test": "node --test scripts/*.test.mjs && npm run test:contract && npm run test --workspaces --if-present",
     "test:contract": "vitest run tests/contract",
+    "test:integration": "vitest run tests/integration",
     "capture:openclaw-v4": "node scripts/capture-openclaw-v4.mjs",
     "sanitize:openclaw-v4": "node scripts/sanitize-openclaw-v4-capture.mjs",
     "test:e2e": "playwright test",

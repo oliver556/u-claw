@@ -203,6 +203,8 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .secondary-content { max-width: 980px; display: grid; gap: 24px; margin: 0 auto; padding: 30px 32px; }
 .status-line { min-height: 44px; display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--uclaw-border-secondary); }
 .status-line strong { color: var(--uclaw-success); font-weight: 600; }
+.secondary-command { min-height: 36px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; color: var(--uclaw-primary-text); }
+.secondary-command:hover { background: var(--uclaw-bg-hover); }
 
 .command-modal { top: 80px; padding-bottom: 0; }
 .command-modal .ant-modal-content { overflow: hidden; padding: 0; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); box-shadow: 0 16px 48px var(--uclaw-shadow); }

@@ -1,5 +1,5 @@
 import type { CapabilitySet, GatewayStatus, Session, SessionSummary, UClawClient } from "@uclaw/shared";
-import { FolderArchive, PanelLeft, PanelRight } from "lucide-react";
+import { FolderArchive, PanelLeft, PanelRight, SquareTerminal } from "lucide-react";
 import { Tooltip } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
@@ -11,8 +11,13 @@ import { AppTitlebar } from "./AppTitlebar";
 import { ContextPanel } from "./ContextPanel";
 import { PrimaryRail } from "./PrimaryRail";
 
-function SecondaryView({ title, description }: { title: string; description: string }) {
-  return <section className="secondary-view"><header><h1>{title}</h1><p>{description}</p></header><div className="secondary-content"><div className="status-line"><i className="status-dot success" /><span>U 盘工作区可用</span><strong>已就绪</strong></div><div className="empty-panel"><FolderArchive /><strong>{title}入口已连接</strong><p>当前阶段保留稳定入口和运行状态。</p></div></div></section>;
+function SecondaryView({ title, description, system }: { title: string; description: string; system: boolean }) {
+  const openAdvancedConsole = () => {
+    const invoke = window.uclaw?.window?.invoke;
+    if (!invoke) return;
+    void invoke({ method: "open-advanced-console", requestId: `console-${Date.now()}`, params: {} });
+  };
+  return <section className="secondary-view"><header><h1>{title}</h1><p>{description}</p></header><div className="secondary-content"><div className="status-line"><i className="status-dot success" /><span>U 盘工作区可用</span><strong>已就绪</strong></div><div className="empty-panel"><FolderArchive /><strong>{title}入口已连接</strong><p>当前阶段保留稳定入口和运行状态。</p>{system ? <button className="secondary-command" type="button" onClick={openAdvancedConsole}><SquareTerminal />打开高级控制台</button> : null}</div></div></section>;
 }
 
 export function WorkspaceShell({ client }: { client: UClawClient }) {
@@ -119,7 +124,7 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
         {isWork ? activeSession === undefined
           ? <section className="work-canvas workspace-placeholder"><header className="canvas-head"><div className="canvas-title">{!sessionsOpen ? <Tooltip title="展开会话栏"><button className="icon-button" type="button" aria-label="展开会话栏" onClick={() => setSessionsOpen(true)}><PanelLeft /></button></Tooltip> : null}<strong>工作区</strong></div>{!contextOpen ? <Tooltip title="展开上下文舱"><button className="icon-button" type="button" aria-label="展开上下文舱" onClick={() => setContextOpen(true)}><PanelRight /></button></Tooltip> : null}</header><div className="conversation-state"><FolderArchive /><strong>{sessionState === "loading" ? "正在准备工作区" : "还没有会话"}</strong></div></section>
           : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
-          : <SecondaryView title={route.label} description={route.description} />}
+          : <SecondaryView title={route.label} description={route.description} system={route.path === "/system"} />}
       </main>
       {isWork && contextOpen ? <ContextPanel client={client} session={activeSession} capabilities={capabilities} activity={activeSession === undefined ? [] : activity[activeSession.id] ?? []} onClose={() => setContextOpen(false)} /> : null}
     </div>

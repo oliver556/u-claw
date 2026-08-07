@@ -34,6 +34,7 @@ export const WindowIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("minimize"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
   z.object({ method: z.literal("toggle-maximize"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
   z.object({ method: z.literal("close"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
+  z.object({ method: z.literal("open-advanced-console"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
 ]);
 export type WindowIpcRequest = z.infer<typeof WindowIpcRequestSchema>;
 
@@ -41,12 +42,13 @@ export const WindowIpcSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("minimize"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
   z.object({ method: z.literal("toggle-maximize"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
   z.object({ method: z.literal("close"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+  z.object({ method: z.literal("open-advanced-console"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
 ]);
 export type WindowIpcSuccessResponse = z.infer<typeof WindowIpcSuccessResponseSchema>;
 
 export const WindowIpcFailureResponseSchema = z
   .object({
-    method: z.enum(["minimize", "toggle-maximize", "close"]),
+    method: z.enum(["minimize", "toggle-maximize", "close", "open-advanced-console"]),
     requestId: RequestIdSchema,
     ok: z.literal(false),
     error: UClawErrorSchema,
@@ -73,6 +75,7 @@ export const ClientIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("chat.watch"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), subscriptionId: SubscriptionIdSchema }).strict() }).strict(),
   z.object({ method: z.literal("chat.send"), requestId: RequestIdSchema, params: SendMessageInputSchema }).strict(),
   z.object({ method: z.literal("chat.abort"), requestId: RequestIdSchema, params: z.object({ runId: z.string().min(1) }).strict() }).strict(),
+  z.object({ method: z.literal("chat.cancel-stream"), requestId: RequestIdSchema, params: z.object({ clientRequestId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("tools.list"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
   z.object({ method: z.literal("tools.get-call"), requestId: RequestIdSchema, params: z.object({ toolCallId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("approvals.list-pending"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1).optional() }).strict() }).strict(),
@@ -104,6 +107,7 @@ export const ClientIpcSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("chat.watch"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
   z.object({ method: z.literal("chat.send"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ clientRequestId: z.string().min(1), runId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("chat.abort"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+  z.object({ method: z.literal("chat.cancel-stream"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
   z.object({ method: z.literal("tools.list"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(ToolSummarySchema) }).strict(),
   z.object({ method: z.literal("tools.get-call"), requestId: RequestIdSchema, ok: z.literal(true), result: ToolCallSchema }).strict(),
   z.object({ method: z.literal("approvals.list-pending"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(ApprovalRequestSchema) }).strict(),
@@ -126,7 +130,7 @@ export const ClientIpcFailureResponseSchema = z
     method: z.enum([
       "gateway.negotiate", "gateway.get-status", "gateway.watch-status", "gateway.reconnect",
       "sessions.list", "sessions.get", "sessions.create", "sessions.remove",
-      "chat.list", "chat.get", "chat.watch", "chat.send", "chat.abort",
+      "chat.list", "chat.get", "chat.watch", "chat.send", "chat.abort", "chat.cancel-stream",
       "tools.list", "tools.get-call", "approvals.list-pending", "approvals.resolve-exec", "approvals.resolve-plugin",
       "models.list", "models.select-for-session", "skills.list", "channels.list",
       "files.list", "files.read-text", "diagnostics.list", "diagnostics.list-logs",
@@ -143,6 +147,7 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
   z.object({ event: z.literal("gateway.status"), subscriptionId: SubscriptionIdSchema, payload: GatewayStatusWireSchema }).strict(),
   z.object({ event: z.literal("chat.watch-event"), subscriptionId: SubscriptionIdSchema, payload: MessageEventSchema }).strict(),
   z.object({ event: z.literal("chat.send-event"), clientRequestId: z.string().min(1), payload: MessageEventSchema }).strict(),
+  z.object({ event: z.literal("subscription.closed"), subscriptionId: SubscriptionIdSchema, error: UClawErrorSchema.optional() }).strict(),
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 

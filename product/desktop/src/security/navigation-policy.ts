@@ -11,6 +11,7 @@ export interface NavigationPolicyDependencies {
   webContents: WebContentsLike;
   openExternal(url: string): Promise<unknown>;
   allowedProtocols?: readonly string[];
+  allowedNavigationOrigins?: readonly string[];
 }
 
 export function isAllowedExternalUrl(
@@ -29,6 +30,7 @@ export function installNavigationPolicy({
   webContents,
   openExternal,
   allowedProtocols = ["https:"],
+  allowedNavigationOrigins = [],
 }: NavigationPolicyDependencies): void {
   const safelyOpen = (url: string): void => {
     if (!isAllowedExternalUrl(url, allowedProtocols)) return;
@@ -36,6 +38,11 @@ export function installNavigationPolicy({
   };
 
   webContents.on("will-navigate", (event, url) => {
+    try {
+      if (allowedNavigationOrigins.includes(new URL(url).origin)) return;
+    } catch {
+      // Invalid URLs remain blocked.
+    }
     event.preventDefault();
     safelyOpen(url);
   });
