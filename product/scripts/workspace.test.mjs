@@ -36,6 +36,7 @@ test("declares the required workspace package names", async () => {
 });
 
 test("runs every workspace test from the root", () => {
+  assert.match(rootPackage.scripts.test, /npm run test:contract/);
   assert.match(rootPackage.scripts.test, /npm run test --workspaces --if-present/);
 });
 

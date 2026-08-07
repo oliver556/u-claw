@@ -5,6 +5,29 @@ export { mapExecApproval, mapPluginApproval, mapToolCall } from "./mappers/tool.
 export { ManualClock, MockUClawClient } from "./mock/mock-client.js";
 export { OpenClawClient, UClawUnsupportedError } from "./openclaw-client.js";
 export type { OpenClawClientOptions, OpenClawTransport } from "./openclaw-client.js";
+export {
+  OpenClawApprovalsFixtureSchema,
+  OpenClawAttachmentFixtureSchema,
+  OpenClawExecApprovalEventSchema,
+  OpenClawHistoryFixtureSchema,
+  OpenClawHistoryMessageSchema,
+  OpenClawHistoryResponseSchema,
+  OpenClawMessageGetFixtureSchema,
+  OpenClawMessageGetResponseSchema,
+  OpenClawPluginApprovalEventSchema,
+  OpenClawSessionToolEventSchema,
+  OpenClawSessionToolFixtureSchema,
+  OpenClawSessionToolPayloadSchema,
+  OpenClawSessionsPatchFixtureSchema,
+  mapOpenClawAttachmentEvidence,
+  mapOpenClawExecApproval,
+  mapOpenClawHistoryMessage,
+  mapOpenClawHistoryResponse,
+  mapOpenClawMessageGetResponse,
+  mapOpenClawPluginApproval,
+  mapOpenClawSessionToolEvent,
+  mapOpenClawSessionsPatchEvidence,
+} from "./openclaw-v4-contract.js";
 export { ReconnectPolicy, SequenceGapDetector, systemClock } from "./reconnect.js";
 export type { Clock, ReconnectPolicyOptions, SequenceDecision, SequenceGap } from "./reconnect.js";
 export { redactAdapterLog, redactAdapterRecord } from "./redaction.js";

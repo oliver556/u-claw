@@ -1,0 +1,265 @@
+{
+  "start": {
+    "type": "event",
+    "event": "session.tool",
+    "payload": {
+      "runId": "contract-tool-run-1",
+      "stream": "tool",
+      "data": {
+        "phase": "start",
+        "name": "sessions_list",
+        "toolCallId": "call_contract_sessions",
+        "args": {}
+      },
+      "sessionKey": "agent:dev:main",
+      "agentId": "dev",
+      "seq": 2,
+      "ts": 1786128515702,
+      "isHeartbeat": false,
+      "session": {
+        "key": "agent:dev:main",
+        "kind": "direct",
+        "chatType": "direct",
+        "origin": {
+          "provider": "webchat",
+          "surface": "webchat",
+          "chatType": "direct"
+        },
+        "updatedAt": 1786128515633,
+        "archived": false,
+        "pinned": false,
+        "unread": false,
+        "sessionId": "00000000-0000-4000-8000-000000000023",
+        "systemSent": true,
+        "abortedLastRun": false,
+        "thinkingLevels": [
+          {
+            "id": "off",
+            "label": "off"
+          },
+          {
+            "id": "minimal",
+            "label": "minimal"
+          },
+          {
+            "id": "low",
+            "label": "low"
+          },
+          {
+            "id": "medium",
+            "label": "medium"
+          },
+          {
+            "id": "high",
+            "label": "high"
+          }
+        ],
+        "thinkingOptions": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "thinkingDefault": "off",
+        "effectiveFastMode": false,
+        "effectiveFastModeSource": "default",
+        "fastAutoOnSeconds": 60,
+        "totalTokensFresh": false,
+        "estimatedCostUsd": 0,
+        "status": "running",
+        "startedAt": 1786128515617,
+        "effectiveResponseUsage": "off",
+        "modelProvider": "contract",
+        "model": "contract-model",
+        "agentRuntime": {
+          "id": "auto",
+          "source": "implicit"
+        },
+        "contextTokens": 131072,
+        "deliveryContext": {
+          "channel": "webchat"
+        },
+        "lastChannel": "webchat"
+      },
+      "updatedAt": 1786128515633,
+      "sessionId": "00000000-0000-4000-8000-000000000023",
+      "kind": "direct",
+      "chatType": "direct",
+      "origin": {
+        "provider": "webchat",
+        "surface": "webchat",
+        "chatType": "direct"
+      },
+      "deliveryContext": {
+        "channel": "webchat"
+      },
+      "systemSent": true,
+      "lastChannel": "webchat",
+      "totalTokensFresh": false,
+      "goal": null,
+      "contextTokens": 131072,
+      "estimatedCostUsd": 0,
+      "effectiveResponseUsage": "off",
+      "modelProvider": "contract",
+      "model": "contract-model",
+      "status": "running",
+      "startedAt": 1786128515617,
+      "abortedLastRun": false
+    }
+  },
+  "result": {
+    "type": "event",
+    "event": "session.tool",
+    "payload": {
+      "runId": "contract-tool-run-1",
+      "stream": "tool",
+      "data": {
+        "phase": "result",
+        "name": "sessions_list",
+        "toolCallId": "call_contract_sessions",
+        "isError": false,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "[REDACTED TOOL RESULT]"
+            }
+          ],
+          "details": {
+            "count": 1,
+            "sessions": [
+              {
+                "key": "***",
+                "agentId": "dev",
+                "kind": "other",
+                "channel": "webchat",
+                "origin": {
+                  "provider": "webchat"
+                },
+                "deliveryContext": {
+                  "channel": "webchat"
+                },
+                "updatedAt": 1786128515633,
+                "archived": false,
+                "pinned": false,
+                "sessionId": "00000000-0000-4000-8000-000000000023",
+                "model": "contract-model",
+                "contextTokens": 131072,
+                "status": "running",
+                "startedAt": 1786128515617,
+                "effectiveFastMode": false,
+                "effectiveFastModeSource": "default",
+                "fastAutoOnSeconds": 60,
+                "systemSent": true,
+                "abortedLastRun": false,
+                "lastChannel": "webchat",
+                "transcriptPath": "/tmp/openclaw-contract/agents/dev/sessions/00000000-0000-4000-8000-000000000023.jsonl"
+              }
+            ],
+            "visibility": {
+              "mode": "tree",
+              "restricted": true,
+              "warning": "Session visibility is restricted (effective tools.sessions.visibility=tree). Results may omit sessions outside the current scope. The count field reflects only sessions within the current scope."
+            }
+          }
+        }
+      },
+      "sessionKey": "agent:dev:main",
+      "agentId": "dev",
+      "seq": 4,
+      "ts": 1786128515771,
+      "isHeartbeat": false,
+      "session": {
+        "key": "agent:dev:main",
+        "kind": "direct",
+        "chatType": "direct",
+        "origin": {
+          "provider": "webchat",
+          "surface": "webchat",
+          "chatType": "direct"
+        },
+        "updatedAt": 1786128515633,
+        "archived": false,
+        "pinned": false,
+        "unread": false,
+        "sessionId": "00000000-0000-4000-8000-000000000023",
+        "systemSent": true,
+        "abortedLastRun": false,
+        "thinkingLevels": [
+          {
+            "id": "off",
+            "label": "off"
+          },
+          {
+            "id": "minimal",
+            "label": "minimal"
+          },
+          {
+            "id": "low",
+            "label": "low"
+          },
+          {
+            "id": "medium",
+            "label": "medium"
+          },
+          {
+            "id": "high",
+            "label": "high"
+          }
+        ],
+        "thinkingOptions": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "thinkingDefault": "off",
+        "effectiveFastMode": false,
+        "effectiveFastModeSource": "default",
+        "fastAutoOnSeconds": 60,
+        "totalTokensFresh": false,
+        "estimatedCostUsd": 0,
+        "status": "running",
+        "startedAt": 1786128515617,
+        "effectiveResponseUsage": "off",
+        "modelProvider": "contract",
+        "model": "contract-model",
+        "agentRuntime": {
+          "id": "auto",
+          "source": "implicit"
+        },
+        "contextTokens": 131072,
+        "deliveryContext": {
+          "channel": "webchat"
+        },
+        "lastChannel": "webchat"
+      },
+      "updatedAt": 1786128515633,
+      "sessionId": "00000000-0000-4000-8000-000000000023",
+      "kind": "direct",
+      "chatType": "direct",
+      "origin": {
+        "provider": "webchat",
+        "surface": "webchat",
+        "chatType": "direct"
+      },
+      "deliveryContext": {
+        "channel": "webchat"
+      },
+      "systemSent": true,
+      "lastChannel": "webchat",
+      "totalTokensFresh": false,
+      "goal": null,
+      "contextTokens": 131072,
+      "estimatedCostUsd": 0,
+      "effectiveResponseUsage": "off",
+      "modelProvider": "contract",
+      "model": "contract-model",
+      "status": "running",
+      "startedAt": 1786128515617,
+      "abortedLastRun": false
+    }
+  }
+}

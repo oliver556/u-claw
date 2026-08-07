@@ -1,0 +1,54 @@
+{
+  "success": {
+    "requestFrame": {
+      "type": "req",
+      "id": "00000000-0000-4000-8000-000000000024",
+      "method": "chat.message.get",
+      "params": {
+        "sessionKey": "agent:dev:main",
+        "messageId": "b3bba23a"
+      }
+    },
+    "responseFrame": {
+      "type": "res",
+      "id": "00000000-0000-4000-8000-000000000024",
+      "ok": true,
+      "payload": {
+        "ok": true,
+        "message": {
+          "role": "user",
+          "content": "[REDACTED USER TEXT:short]",
+          "timestamp": 1786128514043,
+          "idempotencyKey": "contract-tool-run-1:user",
+          "__openclaw": {
+            "senderIsOwner": true,
+            "id": "b3bba23a",
+            "idempotencyKey": "contract-tool-run-1:user",
+            "recordTimestampMs": 1786128515642,
+            "seq": 1
+          }
+        }
+      }
+    }
+  },
+  "unavailable": {
+    "requestFrame": {
+      "type": "req",
+      "id": "00000000-0000-4000-8000-000000000025",
+      "method": "chat.message.get",
+      "params": {
+        "sessionKey": "agent:dev:main",
+        "messageId": "message-contract-missing"
+      }
+    },
+    "responseFrame": {
+      "type": "res",
+      "id": "00000000-0000-4000-8000-000000000025",
+      "ok": true,
+      "payload": {
+        "ok": false,
+        "unavailableReason": "not_found"
+      }
+    }
+  }
+}

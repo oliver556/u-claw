@@ -1,0 +1,139 @@
+{
+  "cases": [
+    {
+      "kind": "image",
+      "requestFrame": {
+        "type": "req",
+        "id": "00000000-0000-4000-8000-000000000001",
+        "method": "chat.send",
+        "params": {
+          "sessionKey": "agent:dev:main",
+          "message": "ATTACHMENT_CASE:image",
+          "attachments": [
+            {
+              "type": "image",
+              "fileName": "fixture.png",
+              "mimeType": "image/png",
+              "content": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII="
+            }
+          ],
+          "idempotencyKey": "contract-attachment-image"
+        }
+      },
+      "responseFrame": {
+        "type": "res",
+        "id": "00000000-0000-4000-8000-000000000001",
+        "ok": true,
+        "payload": {
+          "runId": "contract-attachment-image",
+          "status": "started",
+          "serverTiming": {
+            "receivedToAckMs": 898.62,
+            "loadSessionMs": 0.391,
+            "prepareAttachmentsMs": 897.745
+          }
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "requestFrame": {
+        "type": "req",
+        "id": "00000000-0000-4000-8000-000000000002",
+        "method": "chat.send",
+        "params": {
+          "sessionKey": "agent:dev:main",
+          "message": "ATTACHMENT_CASE:text",
+          "attachments": [
+            {
+              "type": "file",
+              "fileName": "fixture.txt",
+              "mimeType": "text/plain",
+              "content": "Y29udHJhY3Q="
+            }
+          ],
+          "idempotencyKey": "contract-attachment-text"
+        }
+      },
+      "responseFrame": {
+        "type": "res",
+        "id": "00000000-0000-4000-8000-000000000002",
+        "ok": true,
+        "payload": {
+          "runId": "contract-attachment-text",
+          "status": "started",
+          "serverTiming": {
+            "receivedToAckMs": 28.882,
+            "loadSessionMs": 0.274,
+            "prepareAttachmentsMs": 28.168
+          }
+        }
+      }
+    },
+    {
+      "kind": "mime-mismatch",
+      "requestFrame": {
+        "type": "req",
+        "id": "00000000-0000-4000-8000-000000000003",
+        "method": "chat.send",
+        "params": {
+          "sessionKey": "agent:dev:main",
+          "message": "ATTACHMENT_CASE:mime-mismatch",
+          "attachments": [
+            {
+              "type": "image",
+              "fileName": "fixture.png",
+              "mimeType": "not-a-mime",
+              "content": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII="
+            }
+          ],
+          "idempotencyKey": "contract-attachment-mime-mismatch"
+        }
+      },
+      "responseFrame": {
+        "type": "res",
+        "id": "00000000-0000-4000-8000-000000000003",
+        "ok": true,
+        "payload": {
+          "runId": "contract-attachment-mime-mismatch",
+          "status": "started",
+          "serverTiming": {
+            "receivedToAckMs": 25.322,
+            "loadSessionMs": 0.371,
+            "prepareAttachmentsMs": 24.604
+          }
+        }
+      }
+    },
+    {
+      "kind": "oversized",
+      "requestFrame": {
+        "type": "req",
+        "id": "00000000-0000-4000-8000-000000000004",
+        "method": "chat.send",
+        "params": {
+          "sessionKey": "agent:dev:main",
+          "message": "ATTACHMENT_CASE:oversized",
+          "attachments": [
+            {
+              "type": "file",
+              "fileName": "oversized.bin",
+              "mimeType": "application/octet-stream",
+              "content": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE="
+            }
+          ],
+          "idempotencyKey": "contract-attachment-oversized"
+        }
+      },
+      "responseFrame": {
+        "type": "res",
+        "id": "00000000-0000-4000-8000-000000000004",
+        "ok": false,
+        "error": {
+          "code": "INVALID_REQUEST",
+          "message": "Error: attachment oversized.bin: exceeds size limit (1049 > 1048 bytes)"
+        }
+      }
+    }
+  ]
+}
