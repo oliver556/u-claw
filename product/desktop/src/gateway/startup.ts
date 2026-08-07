@@ -12,19 +12,21 @@ export interface ShowableWindow {
 }
 
 export interface GatewayStartupDependencies<TWindow extends ShowableWindow> {
-  selectPort(excludedPorts: readonly number[]): Promise<number>;
+  selectPort(excludedPorts: readonly number[], signal: AbortSignal): Promise<number>;
   gatewayProcess: GatewayProcessController;
   buildLaunchOptions(port: number): unknown;
   checkHealth(
     port: number,
     deadlineMs: number,
     identity: GatewayProcessIdentity,
+    signal: AbortSignal,
   ): Promise<GatewayHealthStatus>;
   now(): number;
-  sleep(milliseconds: number): Promise<void>;
+  sleep(milliseconds: number, signal: AbortSignal): Promise<void>;
   timeoutMs: number;
   pollIntervalMs: number;
-  createWindow(): Promise<TWindow>;
+  createWindow(signal: AbortSignal): Promise<TWindow>;
+  signal: AbortSignal;
 }
 
 export interface GatewayStartupResult<TWindow extends ShowableWindow> {
@@ -67,7 +69,7 @@ export function validateGatewayLaunchOptions(value: unknown): GatewayLaunchOptio
 
 async function waitForGatewayReadiness(
   options: Pick<GatewayStartupDependencies<ShowableWindow>,
-    "checkHealth" | "now" | "sleep" | "timeoutMs" | "pollIntervalMs">,
+    "checkHealth" | "now" | "sleep" | "timeoutMs" | "pollIntervalMs" | "signal">,
   port: number,
   identity: GatewayProcessIdentity,
 ): Promise<void> {
@@ -77,11 +79,13 @@ async function waitForGatewayReadiness(
   const deadline = options.now() + options.timeoutMs;
 
   while (true) {
-    const status = await options.checkHealth(port, deadline, identity);
+    options.signal.throwIfAborted();
+    const status = await options.checkHealth(port, deadline, identity, options.signal);
+    options.signal.throwIfAborted();
     if (!status.processAlive) throw new Error("Gateway process exited before readiness.");
     if (status.serviceReady && status.businessAvailable) return;
     if (options.now() >= deadline) throw new Error("Gateway readiness timed out.");
-    await options.sleep(options.pollIntervalMs);
+    await raceWithAbort(options.sleep(options.pollIntervalMs, options.signal), options.signal);
   }
 }
 
@@ -92,10 +96,15 @@ export async function startGatewayAndCreateWindow<TWindow extends ShowableWindow
   let lastPortRaceError: unknown;
 
   while (excludedPorts.length <= GATEWAY_PORT_MAX - GATEWAY_PORT_MIN) {
+    options.signal.throwIfAborted();
     let port: number;
     try {
-      port = await options.selectPort([...excludedPorts]);
+      port = await raceWithAbort(
+        options.selectPort([...excludedPorts], options.signal),
+        options.signal,
+      );
     } catch (error) {
+      if (options.signal.aborted) throw options.signal.reason;
       throw lastPortRaceError ?? error;
     }
     if (excludedPorts.includes(port)) throw lastPortRaceError;
@@ -103,11 +112,12 @@ export async function startGatewayAndCreateWindow<TWindow extends ShowableWindow
       throw new Error(`Gateway port must be within ${GATEWAY_PORT_MIN}-${GATEWAY_PORT_MAX}.`);
     }
     const launchOptions = validateGatewayLaunchOptions(options.buildLaunchOptions(port));
+    options.signal.throwIfAborted();
     let identity: GatewayProcessIdentity;
     try {
       identity = options.gatewayProcess.start(launchOptions);
     } catch (error) {
-      if (!isAddressInUseError(error)) throw error;
+      if (options.signal.aborted || !isAddressInUseError(error)) throw error;
       excludedPorts.push(port);
       lastPortRaceError = error;
       continue;
@@ -115,25 +125,35 @@ export async function startGatewayAndCreateWindow<TWindow extends ShowableWindow
 
     try {
       await waitForGatewayReadiness(options, port, identity);
-      const window = await options.createWindow();
+      options.signal.throwIfAborted();
+      const window = await options.createWindow(options.signal);
+      options.signal.throwIfAborted();
       window.show();
       return { window, port, ...identity };
     } catch (error) {
       await rollbackOrThrow(error, () => options.gatewayProcess.stop());
-      if (!(error instanceof Error) || error.message !== "Gateway process exited before readiness.") {
-        throw error;
-      }
-      excludedPorts.push(port);
-      lastPortRaceError = error;
+      throw error;
     }
   }
 
   throw lastPortRaceError ?? new Error("Gateway startup failed.");
 }
 
-function isAddressInUseError(error: unknown): boolean {
-  return typeof error === "object" && error !== null &&
-    "code" in error && (error as { code?: unknown }).code === "EADDRINUSE";
+function isAddressInUseError(error: unknown, seen = new Set<object>()): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if (seen.has(error)) return false;
+  seen.add(error);
+  if ("code" in error && (error as { code?: unknown }).code === "EADDRINUSE") return true;
+  return "cause" in error && isAddressInUseError((error as { cause?: unknown }).cause, seen);
+}
+
+function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    void operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 async function rollbackOrThrow(error: unknown, stop: () => Promise<void>): Promise<void> {

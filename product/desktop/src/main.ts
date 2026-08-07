@@ -59,6 +59,8 @@ export interface BootstrapDesktopDependencies<TWindow extends AppWindowLike> {
   createWindow(registerIpc: (window: TWindow) => (() => void) | void): Promise<TWindow>;
   registerIpc(window: TWindow): (() => void) | void;
   stopGateway(): Promise<void> | void;
+  abortStartup?(): void;
+  startupSignal?: AbortSignal;
 }
 
 export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
@@ -66,6 +68,8 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
   createWindow,
   registerIpc,
   stopGateway,
+  abortStartup,
+  startupSignal,
 }: BootstrapDesktopDependencies<TWindow>): Promise<TWindow | null> {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -83,6 +87,7 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
   app.on("before-quit", (event) => {
     if (cleanupDone) return;
     event?.preventDefault();
+    abortStartup?.();
     if (shutdownStarted) return;
     shutdownStarted = true;
     try {
@@ -117,6 +122,7 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
         { cause: error },
       );
     }
+    if (startupSignal?.aborted) return null;
     throw error;
   }
 }
@@ -127,10 +133,10 @@ export interface DesktopMainOptions {
   requiredMethods: readonly string[];
   probeCapabilities(port: number, signal: AbortSignal): Promise<GatewayCapabilityProbeResult>;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
-  selectPort?(excludedPorts: readonly number[]): Promise<number>;
+  selectPort?(excludedPorts: readonly number[], signal: AbortSignal): Promise<number>;
   fetch?: GatewayHealthDependencies["fetch"];
   now?: () => number;
-  sleep?: (milliseconds: number) => Promise<void>;
+  sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readinessTimeoutMs?: number;
   readinessPollIntervalMs?: number;
   gatewayStopTimeoutMs?: number;
@@ -139,13 +145,28 @@ export interface DesktopMainOptions {
 
 export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
   app: DesktopAppLike;
-  createWindow(registerIpc: (window: TWindow) => (() => void) | void): Promise<TWindow>;
+  createWindow(
+    registerIpc: (window: TWindow) => (() => void) | void,
+    signal: AbortSignal,
+  ): Promise<TWindow>;
   registerIpc(window: TWindow, dispatchClient: DesktopMainOptions["dispatchClient"]): () => void;
 }
 
-const defaultSleep = (milliseconds: number): Promise<void> => new Promise((resolve) => {
-  setTimeout(resolve, milliseconds);
-});
+const defaultSleep = (milliseconds: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const cleanup = (): void => signal.removeEventListener("abort", onAbort);
+    const timeout = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, milliseconds);
+    const onAbort = (): void => {
+      clearTimeout(timeout);
+      cleanup();
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
 
 export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWindow>(
   options: DesktopMainOptions,
@@ -158,11 +179,14 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
   });
   const fetchHealth = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const now = options.now ?? Date.now;
+  const startupController = new AbortController();
   const stopGateway = (): Promise<void> => gatewayProcess.stop();
 
   return bootstrapDesktopApp({
     app: runtime.app,
     stopGateway,
+    abortStartup: () => startupController.abort(new DOMException("Desktop shutdown requested.", "AbortError")),
+    startupSignal: startupController.signal,
     createWindow: async (registerIpc) => {
       const started = await startGatewayAndCreateWindow({
         selectPort: options.selectPort ?? ((excludedPorts) => selectGatewayPort({ excludedPorts })),
@@ -171,7 +195,7 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
           stop: stopGateway,
         },
         buildLaunchOptions: options.buildGatewayLaunchOptions,
-        checkHealth: (port, deadlineMs, identity) => checkGatewayHealth({
+        checkHealth: (port, deadlineMs, identity, signal) => checkGatewayHealth({
           isProcessAlive: () =>
             gatewayProcess.getOwnedPid() === identity.pid &&
             gatewayProcess.getOwnedInstanceId() === identity.instanceId,
@@ -179,6 +203,7 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
           fetch: fetchHealth,
           now,
           deadlineMs,
+          signal,
           requiredMethods: options.requiredMethods,
           probeCapabilities: (signal) => options.probeCapabilities(port, signal),
         }),
@@ -186,7 +211,8 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
         sleep: options.sleep ?? defaultSleep,
         timeoutMs: options.readinessTimeoutMs ?? 30_000,
         pollIntervalMs: options.readinessPollIntervalMs ?? 250,
-        createWindow: () => runtime.createWindow(registerIpc),
+        createWindow: (signal) => runtime.createWindow(registerIpc, signal),
+        signal: startupController.signal,
       });
       return started.window;
     },
@@ -203,15 +229,18 @@ export async function startElectronMain(options: DesktopMainOptions): Promise<vo
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   await runDesktopMain<DesktopWindow>(options, {
     app,
-    createWindow: (registerIpc) => createMainWindow({
-      BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
-      preloadPath: resolvePreloadPath(moduleDir),
-      rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
-      rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
-      openExternal: (url) => shell.openExternal(url),
-      showWhenReady: false,
-      beforeLoad: registerIpc,
-    }),
+    createWindow: (registerIpc, signal) => {
+      signal.throwIfAborted();
+      return createMainWindow({
+        BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
+        preloadPath: resolvePreloadPath(moduleDir),
+        rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
+        rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
+        openExternal: (url) => shell.openExternal(url),
+        showWhenReady: false,
+        beforeLoad: registerIpc,
+      });
+    },
     registerIpc: (window, dispatchClient) => registerDesktopIpc({
       ipcMain: ipcMain as unknown as IpcMainLike,
       authorizedWebContents: window.webContents,

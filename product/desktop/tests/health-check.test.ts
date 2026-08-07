@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { checkGatewayHealth } from "../src/gateway/health-check.js";
+import {
+  checkGatewayHealth as checkGatewayHealthRaw,
+  type GatewayHealthDependencies,
+} from "../src/gateway/health-check.js";
+
+function checkGatewayHealth(
+  dependencies: Omit<GatewayHealthDependencies, "signal"> & { signal?: AbortSignal },
+) {
+  return checkGatewayHealthRaw({
+    signal: new AbortController().signal,
+    ...dependencies,
+  });
+}
 
 describe("checkGatewayHealth", () => {
   afterEach(() => vi.useRealTimers());
