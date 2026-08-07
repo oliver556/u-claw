@@ -59,6 +59,17 @@ export class RpcTimeoutError extends AdapterServiceError {
   }
 }
 
+export class RpcCancelledError extends AdapterServiceError {
+  constructor(readonly method: string) {
+    const message = `RPC cancelled: ${method}`;
+    super(message, UClawErrorSchema.parse({
+      code: "CANCELLED", message, retryable: false,
+      recoveryActions: [], causeDetails: { operation: method },
+    }));
+    this.name = "RpcCancelledError";
+  }
+}
+
 export class RpcClosedError extends AdapterServiceError {
   constructor() {
     const message = "Gateway connection closed";
@@ -109,7 +120,7 @@ interface PendingRequest<T = JsonValue> {
   schema: z.ZodType<T>;
   resolve(value: T): void;
   reject(reason: Error): void;
-  timeout: ReturnType<typeof setTimeout>;
+  cleanup(): void;
 }
 
 export interface RpcSocketLike {
@@ -148,19 +159,31 @@ export class RpcRouter {
     socket.addEventListener("close", this.handleClose);
   }
 
-  request<T>(method: string, params: JsonValue, schema: z.ZodType<T>): Promise<T> {
+  request<T>(method: string, params: JsonValue, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
     if (this.closed) return Promise.reject(new RpcClosedError());
+    if (signal?.aborted) return Promise.reject(new RpcCancelledError(method));
     const id = this.idFactory();
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
+        signal?.removeEventListener("abort", onAbort);
         reject(new RpcTimeoutError(method));
       }, this.requestTimeoutMs);
-      this.pending.set(id, { method, schema, resolve, reject, timeout } as PendingRequest);
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const onAbort = (): void => {
+        if (!this.pending.delete(id)) return;
+        cleanup();
+        reject(new RpcCancelledError(method));
+      };
+      this.pending.set(id, { method, schema, resolve, reject, cleanup } as PendingRequest);
+      signal?.addEventListener("abort", onAbort, { once: true });
       try {
         this.socket.send(JSON.stringify({ type: "req", id, method, params }));
       } catch {
-        clearTimeout(timeout);
+        cleanup();
         this.pending.delete(id);
         reject(new RpcClosedError());
       }
@@ -233,7 +256,7 @@ export class RpcRouter {
       return;
     }
     this.pending.delete(frame.id);
-    clearTimeout(pending.timeout);
+    pending.cleanup();
     if (!frame.ok) {
       pending.reject(new RpcRemoteError(frame.error.code, frame.error.message, frame.error.retryable, frame.error.retryAfterMs));
       return;
@@ -251,7 +274,7 @@ export class RpcRouter {
     this.closed = true;
     const error = new RpcClosedError();
     for (const request of this.pending.values()) {
-      clearTimeout(request.timeout);
+      request.cleanup();
       request.reject(error);
     }
     this.pending.clear();
