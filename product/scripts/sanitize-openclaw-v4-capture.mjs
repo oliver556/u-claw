@@ -12,6 +12,8 @@ const fixtureDir = resolve(process.env.OPENCLAW_FIXTURE_OUTPUT_DIR ?? "adapter/f
 const packageDir = resolve(process.env.OPENCLAW_PACKAGE_DIR ?? join(homedir(), ".uclaw/core/node_modules/openclaw"));
 const nodeBin = process.env.OPENCLAW_NODE_BIN ?? process.execPath;
 const harnessPath = resolve("scripts/capture-openclaw-v4.mjs");
+const captureStateHelperPath = resolve("scripts/capture-state.mjs");
+const captureCleanupHelperPath = resolve("scripts/capture-cleanup.mjs");
 const sanitizerPath = resolve("scripts/sanitize-openclaw-v4-capture.mjs");
 const schemaPath = join(packageDir, "dist/schema-BuOFpc7K.js");
 const buildInfoPath = join(packageDir, "dist/build-info.json");
@@ -223,6 +225,8 @@ const provenance = {
   installedRuntimeSchema: basename(schemaPath),
   installedRuntimeSchemaSha256: sha256(await readFile(schemaPath)),
   captureHarnessSha256: sha256(await readFile(harnessPath)),
+  captureStateHelperSha256: sha256(await readFile(captureStateHelperPath)),
+  captureCleanupHelperSha256: sha256(await readFile(captureCleanupHelperPath)),
   sanitizerSha256: sha256(await readFile(sanitizerPath)),
   nodeVersionSource: "OPENCLAW_NODE_BIN --version",
   capturedAt: new Date(fixtures["session.tool.json"].start.payload.ts).toISOString(),

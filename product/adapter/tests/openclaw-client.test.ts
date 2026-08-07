@@ -17,7 +17,7 @@ class FakeTransport implements OpenClawTransport {
   readonly fixtures = new Map<string, JsonValue>();
   readonly fixtureQueues = new Map<string, JsonValue[]>();
   readonly requestGates = new Map<string, Promise<JsonValue>>();
-  readonly eventListeners = new Set<(frame: EventFrame) => void>();
+  readonly eventListeners = new Set<{ event: string; listener: (frame: EventFrame) => void }>();
   readonly sequenceGapListeners = new Set<(gap: { expected: number; received: number }) => void>();
   readonly closeListeners = new Set<(error: Error) => void>();
   readonly connectFailures: Error[] = [];
@@ -57,7 +57,9 @@ class FakeTransport implements OpenClawTransport {
       this.lastSequence = seq;
     }
     const frame = { type: "event" as const, event, payload, seq };
-    for (const listener of this.eventListeners) listener(frame);
+    for (const registered of this.eventListeners) {
+      if (registered.event === event) registered.listener(frame);
+    }
   }
 
   readonly router = {
@@ -67,9 +69,10 @@ class FakeTransport implements OpenClawTransport {
       const queued = this.fixtureQueues.get(method)?.shift();
       return schema.parse(await (this.requestGates.get(method) ?? Promise.resolve(queued ?? this.fixtures.get(method))));
     },
-    onEvent: (_event: string, listener: (frame: EventFrame) => void) => {
-      this.eventListeners.add(listener);
-      return () => this.eventListeners.delete(listener);
+    onEvent: (event: string, listener: (frame: EventFrame) => void) => {
+      const registered = { event, listener };
+      this.eventListeners.add(registered);
+      return () => this.eventListeners.delete(registered);
     },
     onSequenceGap: (listener: (gap: { expected: number; received: number }) => void) => {
       this.sequenceGapListeners.add(listener);
@@ -269,8 +272,9 @@ describe("OpenClawClient", () => {
     const tools = contractFixture("session.tool.json");
     const approvals = contractFixture("approvals.json");
     const transport = new FakeTransport();
+    const approvalChanges: string[] = [];
     transport.fixtures.set("chat.send", { runId: "run-approval-1", status: "accepted" });
-    const client = new OpenClawClient({ transport });
+    const client = new OpenClawClient({ transport, onApprovalsChanged: (sessionId) => { approvalChanges.push(sessionId); } });
     await client.gateway.negotiate();
     const send = client.chat.send({
       sessionId: "agent:dev:main",
@@ -279,35 +283,44 @@ describe("OpenClawClient", () => {
     })[Symbol.asyncIterator]();
     await expect(send.next()).resolves.toMatchObject({ value: { type: "started", runId: "run-approval-1" } });
     const iterator = client.chat.watch("agent:dev:main")[Symbol.asyncIterator]();
-    const tool = iterator.next();
-    transport.emit("session.tool", tools.start.payload, 1);
-    await expect(tool).resolves.toMatchObject({ value: { type: "tool", runId: "contract-tool-run-1", tool: { toolId: "sessions_list", state: "running" } } });
-    const exec = iterator.next();
-    const sentExec = send.next();
+    const toolEvent = structuredClone(tools.start.payload);
+    toolEvent.runId = "run-approval-1";
+    toolEvent.data.toolCallId = "tool-call-approval-1";
+    const watchedTool = iterator.next();
+    const sentTool = send.next();
+    transport.emit("session.tool", toolEvent, 1);
+    await expect(watchedTool).resolves.toMatchObject({ value: { type: "tool", runId: "run-approval-1" } });
+    await expect(sentTool).resolves.toMatchObject({ value: { type: "tool", runId: "run-approval-1" } });
+
+    const exactPlugin = structuredClone(approvals.plugin.allowOnce.event.payload);
+    exactPlugin.request.toolCallId = "tool-call-approval-1";
+    const watchedApproval = iterator.next();
+    const sentApproval = send.next();
+    transport.emit("plugin.approval.requested", exactPlugin, 2);
+    await expect(watchedApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: exactPlugin.id, family: "plugin" } } });
+    await expect(sentApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: exactPlugin.id, family: "plugin" } } });
+
     const otherSessionExec = structuredClone(approvals.exec.allowOnce.event.payload);
     otherSessionExec.id = "exec-other-session-event";
     otherSessionExec.request.sessionKey = "agent:dev:other";
-    transport.emit("exec.approval.requested", otherSessionExec, 2);
-    transport.emit("exec.approval.requested", approvals.exec.allowOnce.event.payload, 3);
-    await expect(exec).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: approvals.exec.allowOnce.event.payload.id, family: "exec" } } });
-    await expect(sentExec).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: approvals.exec.allowOnce.event.payload.id, family: "exec" } } });
-    const plugin = iterator.next();
-    const sentPlugin = send.next();
-    transport.emit("plugin.approval.requested", approvals.plugin.allowOnce.event.payload, 4);
-    await expect(plugin).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { family: "plugin" } } });
-    await expect(sentPlugin).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { family: "plugin" } } });
+    transport.emit("exec.approval.requested", otherSessionExec, 3);
+    transport.emit("exec.approval.requested", approvals.exec.allowOnce.event.payload, 4);
+    await Promise.resolve();
+    expect(approvalChanges).toEqual(["agent:dev:main"]);
     await send.return?.();
     await iterator.return?.();
   });
 
-  it("does not guess approval ownership for concurrent sends in one session", async () => {
+  it("correlates approvals by tool call across concurrent sends in one session", async () => {
+    const tools = contractFixture("session.tool.json");
     const approvals = contractFixture("approvals.json");
     const transport = new FakeTransport();
+    const approvalChanges: string[] = [];
     transport.fixtureQueues.set("chat.send", [
       { runId: "run-concurrent-1", status: "accepted" },
       { runId: "run-concurrent-2", status: "accepted" },
     ]);
-    const client = new OpenClawClient({ transport });
+    const client = new OpenClawClient({ transport, onApprovalsChanged: (sessionId) => { approvalChanges.push(sessionId); } });
     await client.gateway.negotiate();
     const input = (clientRequestId: string) => ({
       sessionId: "agent:dev:main",
@@ -319,7 +332,31 @@ describe("OpenClawClient", () => {
     await first.next();
     await second.next();
 
-    transport.emit("exec.approval.requested", approvals.exec.allowOnce.event.payload, 1);
+    const toolEvent = (runId: string, toolCallId: string) => {
+      const event = structuredClone(tools.start.payload);
+      event.runId = runId;
+      event.data.toolCallId = toolCallId;
+      return event;
+    };
+    transport.emit("session.tool", toolEvent("run-concurrent-1", "tool-concurrent-1"), 1);
+    transport.emit("session.tool", toolEvent("run-concurrent-2", "tool-concurrent-2"), 2);
+    await expect(first.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-concurrent-1" } });
+    await expect(second.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-concurrent-2" } });
+
+    const approvalEvent = (id: string, toolCallId: string) => {
+      const event = structuredClone(approvals.plugin.allowOnce.event.payload);
+      event.id = id;
+      event.request.toolCallId = toolCallId;
+      return event;
+    };
+    transport.emit("plugin.approval.requested", approvalEvent("plugin-concurrent-1", "tool-concurrent-1"), 3);
+    transport.emit("plugin.approval.requested", approvalEvent("plugin-concurrent-2", "tool-concurrent-2"), 4);
+    await expect(first.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-concurrent-1", approval: { id: "plugin-concurrent-1" } } });
+    await expect(second.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-concurrent-2", approval: { id: "plugin-concurrent-2" } } });
+
+    transport.emit("exec.approval.requested", approvals.exec.allowOnce.event.payload, 5);
+    await Promise.resolve();
+    expect(approvalChanges).toEqual(["agent:dev:main"]);
     const finalMessage = (runId: string) => ({
       state: "final",
       runId,
@@ -334,10 +371,52 @@ describe("OpenClawClient", () => {
         createdAt: "2026-08-08T00:00:00.000Z",
       },
     });
-    transport.emit("chat", finalMessage("run-concurrent-1"), 2);
-    transport.emit("chat", finalMessage("run-concurrent-2"), 3);
+    transport.emit("chat", finalMessage("run-concurrent-1"), 6);
+    transport.emit("chat", finalMessage("run-concurrent-2"), 7);
     await expect(first.next()).resolves.toMatchObject({ value: { type: "final", runId: "run-concurrent-1" } });
     await expect(second.next()).resolves.toMatchObject({ value: { type: "final", runId: "run-concurrent-2" } });
+    await first.return?.();
+    await second.return?.();
+  });
+
+  it("keeps identical tool call ids isolated across sessions", async () => {
+    const tools = contractFixture("session.tool.json");
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    const approvalChanges: string[] = [];
+    const client = new OpenClawClient({ transport, onApprovalsChanged: (sessionId) => { approvalChanges.push(sessionId); } });
+    await client.gateway.negotiate();
+    const first = client.chat.watch("agent:dev:first")[Symbol.asyncIterator]();
+    const second = client.chat.watch("agent:dev:second")[Symbol.asyncIterator]();
+    const toolEvent = (sessionKey: string, runId: string) => {
+      const event = structuredClone(tools.start.payload);
+      event.sessionKey = sessionKey;
+      event.runId = runId;
+      event.data.toolCallId = "shared-tool-call";
+      return event;
+    };
+    const firstTool = first.next();
+    const secondTool = second.next();
+    transport.emit("session.tool", toolEvent("agent:dev:first", "run-first"), 1);
+    transport.emit("session.tool", toolEvent("agent:dev:second", "run-second"), 2);
+    await expect(firstTool).resolves.toMatchObject({ value: { type: "tool", runId: "run-first" } });
+    await expect(secondTool).resolves.toMatchObject({ value: { type: "tool", runId: "run-second" } });
+
+    const approvalEvent = (sessionKey: string, id: string) => {
+      const event = structuredClone(approvals.plugin.allowOnce.event.payload);
+      event.id = id;
+      event.request.sessionKey = sessionKey;
+      event.request.toolCallId = "shared-tool-call";
+      return event;
+    };
+    const firstApproval = first.next();
+    const secondApproval = second.next();
+    transport.emit("plugin.approval.requested", approvalEvent("agent:dev:first", "approval-first"), 3);
+    transport.emit("plugin.approval.requested", approvalEvent("agent:dev:second", "approval-second"), 4);
+    await Promise.resolve();
+    expect(approvalChanges).toEqual([]);
+    await expect(firstApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-first", approval: { id: "approval-first" } } });
+    await expect(secondApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-second", approval: { id: "approval-second" } } });
     await first.return?.();
     await second.return?.();
   });

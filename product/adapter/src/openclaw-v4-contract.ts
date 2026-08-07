@@ -10,7 +10,6 @@ import {
 } from "@uclaw/shared";
 import { z } from "zod";
 
-const JsonRecordSchema = z.record(z.string(), z.unknown());
 const GatewayErrorSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
@@ -33,8 +32,29 @@ const RequestFrameSchema = z.object({
   type: z.literal("req"),
   id: z.string().min(1),
   method: z.string().min(1),
-  params: JsonRecordSchema,
+  params: z.record(z.string(), z.unknown()),
 }).passthrough();
+
+function RpcCaseSchema<Method extends string, Params extends z.ZodTypeAny, Response extends z.ZodType<{ id: string }>>(
+  method: Method,
+  params: Params,
+  responseFrame: Response,
+) {
+  return z.object({
+    requestFrame: RequestFrameSchema.extend({ method: z.literal(method), params }),
+    responseFrame,
+  }).passthrough().superRefine((value, context) => {
+    if ((value.responseFrame as { id: string }).id !== value.requestFrame.id) {
+      context.addIssue({
+        code: "custom",
+        path: ["responseFrame", "id"],
+        message: "Response id must match request id",
+      });
+    }
+  });
+}
+
+const EmptyParamsSchema = z.object({}).strict();
 
 const OpenClawRecordSchema = z.object({
   id: z.string().min(1),
@@ -63,20 +83,22 @@ export const OpenClawHistoryResponseSchema = z.object({
   messages: z.array(OpenClawHistoryMessageSchema),
 }).passthrough();
 
-export const OpenClawHistoryFixtureSchema = z.object({
-  requestFrame: RequestFrameSchema,
-  responseFrame: SuccessFrameSchema.extend({ payload: OpenClawHistoryResponseSchema }),
-}).strict();
+export const OpenClawHistoryFixtureSchema = RpcCaseSchema(
+  "chat.history",
+  z.object({ sessionKey: z.string().min(1), limit: z.number().int().positive().optional() }).strict(),
+  SuccessFrameSchema.extend({ payload: OpenClawHistoryResponseSchema }),
+);
 
 export const OpenClawMessageGetResponseSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), message: OpenClawHistoryMessageSchema }).passthrough(),
   z.object({ ok: z.literal(false), unavailableReason: z.string().min(1) }).passthrough(),
 ]);
 
-const MessageGetCaseSchema = z.object({
-  requestFrame: RequestFrameSchema,
-  responseFrame: SuccessFrameSchema.extend({ payload: OpenClawMessageGetResponseSchema }),
-}).strict();
+const MessageGetCaseSchema = RpcCaseSchema(
+  "chat.message.get",
+  z.object({ sessionKey: z.string().min(1), messageId: z.string().min(1) }).strict(),
+  SuccessFrameSchema.extend({ payload: OpenClawMessageGetResponseSchema }),
+);
 
 export const OpenClawMessageGetFixtureSchema = z.object({
   success: MessageGetCaseSchema,
@@ -123,26 +145,31 @@ const ApprovalEventFrameSchema = <T extends z.ZodTypeAny>(event: string, payload
   event: z.literal(event),
   payload,
 }).passthrough();
-const ResolutionSchema = z.object({
-  requestFrame: RequestFrameSchema,
-  responseFrame: ResponseFrameSchema,
-}).passthrough();
-const ApprovalCaseSchema = <T extends z.ZodTypeAny>(event: string, payload: T) => z.object({
+const ApprovalCaseSchema = <T extends z.ZodTypeAny>(family: "exec" | "plugin", event: string, payload: T) => z.object({
   event: ApprovalEventFrameSchema(event, payload),
-  listing: ResolutionSchema,
-  resolution: ResolutionSchema,
+  listing: RpcCaseSchema(`${family}.approval.list`, EmptyParamsSchema, ResponseFrameSchema),
+  resolution: RpcCaseSchema(
+    `${family}.approval.resolve`,
+    z.object({ id: z.string().min(1), decision: ApprovalDecisionSchema }).strict(),
+    ResponseFrameSchema,
+  ),
+  cleanup: RpcCaseSchema(
+    `${family}.approval.resolve`,
+    z.object({ id: z.string().min(1), decision: ApprovalDecisionSchema }).strict(),
+    ResponseFrameSchema,
+  ).optional(),
 }).passthrough();
 
 export const OpenClawApprovalsFixtureSchema = z.object({
   exec: z.object({
-    allowOnce: ApprovalCaseSchema("exec.approval.requested", OpenClawExecApprovalEventSchema),
-    deny: ApprovalCaseSchema("exec.approval.requested", OpenClawExecApprovalEventSchema),
-    unavailable: ApprovalCaseSchema("exec.approval.requested", OpenClawExecApprovalEventSchema),
+    allowOnce: ApprovalCaseSchema("exec", "exec.approval.requested", OpenClawExecApprovalEventSchema),
+    deny: ApprovalCaseSchema("exec", "exec.approval.requested", OpenClawExecApprovalEventSchema),
+    unavailable: ApprovalCaseSchema("exec", "exec.approval.requested", OpenClawExecApprovalEventSchema),
   }).strict(),
   plugin: z.object({
-    allowOnce: ApprovalCaseSchema("plugin.approval.requested", OpenClawPluginApprovalEventSchema),
-    deny: ApprovalCaseSchema("plugin.approval.requested", OpenClawPluginApprovalEventSchema),
-    unavailable: ApprovalCaseSchema("plugin.approval.requested", OpenClawPluginApprovalEventSchema),
+    allowOnce: ApprovalCaseSchema("plugin", "plugin.approval.requested", OpenClawPluginApprovalEventSchema),
+    deny: ApprovalCaseSchema("plugin", "plugin.approval.requested", OpenClawPluginApprovalEventSchema),
+    unavailable: ApprovalCaseSchema("plugin", "plugin.approval.requested", OpenClawPluginApprovalEventSchema),
   }).strict(),
 }).strict();
 
@@ -171,13 +198,16 @@ export const OpenClawSessionToolFixtureSchema = z.object({
   result: OpenClawSessionToolEventSchema,
 }).strict();
 
-const PatchCaseSchema = z.object({ requestFrame: RequestFrameSchema, responseFrame: ResponseFrameSchema }).strict();
 export const OpenClawSessionsPatchFixtureSchema = z.object({
-  rename: PatchCaseSchema,
-  model: PatchCaseSchema,
-  modelReadback: PatchCaseSchema,
-  baseHash: PatchCaseSchema,
-  duplicateLabel: PatchCaseSchema,
+  rename: RpcCaseSchema("sessions.patch", z.object({ key: z.string().min(1), label: z.string().min(1) }).strict(), ResponseFrameSchema),
+  model: RpcCaseSchema("sessions.patch", z.object({ key: z.string().min(1), model: z.string().min(1) }).strict(), ResponseFrameSchema),
+  modelReadback: RpcCaseSchema("sessions.list", EmptyParamsSchema, ResponseFrameSchema),
+  baseHash: RpcCaseSchema("sessions.patch", z.object({
+    key: z.string().min(1),
+    label: z.string().min(1),
+    baseHash: z.string().min(1),
+  }).strict(), ResponseFrameSchema),
+  duplicateLabel: RpcCaseSchema("sessions.patch", z.object({ key: z.string().min(1), label: z.string().min(1) }).strict(), ResponseFrameSchema),
 }).strict();
 
 const AttachmentSchema = z.object({
@@ -186,14 +216,19 @@ const AttachmentSchema = z.object({
   mimeType: z.string().min(1),
   content: z.string(),
 }).passthrough();
-const AttachmentCaseSchema = z.object({
+const AttachmentRpcCaseSchema = RpcCaseSchema(
+  "chat.send",
+  z.object({
+    sessionKey: z.string().min(1),
+    message: z.string(),
+    attachments: z.array(AttachmentSchema).length(1),
+    idempotencyKey: z.string().min(1),
+  }).strict(),
+  ResponseFrameSchema,
+);
+const AttachmentCaseSchema = AttachmentRpcCaseSchema.and(z.object({
   kind: z.enum(["image", "text", "oversized", "mime-mismatch"]),
-  requestFrame: RequestFrameSchema.extend({
-    method: z.literal("chat.send"),
-    params: z.object({ attachments: z.array(AttachmentSchema).length(1) }).passthrough(),
-  }),
-  responseFrame: ResponseFrameSchema,
-}).strict();
+}).passthrough());
 export const OpenClawAttachmentFixtureSchema = z.object({ cases: z.array(AttachmentCaseSchema) }).strict();
 
 function toIso(timestamp: number): string {
