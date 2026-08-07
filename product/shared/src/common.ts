@@ -53,7 +53,14 @@ export const ControlledRelativePathSchema = z.string().min(1).superRefine((path,
 export type ControlledRelativePath = z.infer<typeof ControlledRelativePathSchema>;
 
 export const BasenameSchema = z.string().min(1).superRefine((name, context) => {
-  if (name === "." || name === ".." || name.includes("/") || name.includes("\\") || name.includes("\0")) {
+  const stem = name.split(".", 1)[0];
+  if (
+    name === "." ||
+    name === ".." ||
+    /[<>:"/\\|?*\u0000-\u001f]/.test(name) ||
+    /[. ]$/.test(name) ||
+    /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)
+  ) {
     context.addIssue({ code: "custom", message: "File name must be a basename" });
   }
 });
