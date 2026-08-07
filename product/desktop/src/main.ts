@@ -93,10 +93,15 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
   });
   app.on("window-all-closed", () => app.quit());
 
-  await app.whenReady();
-  window = await createWindow();
-  registerIpc(window);
-  return window;
+  try {
+    await app.whenReady();
+    window = await createWindow();
+    registerIpc(window);
+    return window;
+  } catch (error) {
+    await stopGateway();
+    throw error;
+  }
 }
 
 export interface DesktopMainOptions {
@@ -134,14 +139,22 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
   });
   const fetchHealth = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const now = options.now ?? Date.now;
+  let stopPromise: Promise<void> | null = null;
+  const stopGateway = (): Promise<void> => {
+    stopPromise ??= gatewayProcess.stop();
+    return stopPromise;
+  };
 
   return bootstrapDesktopApp({
     app: runtime.app,
-    stopGateway: () => gatewayProcess.stop(),
+    stopGateway,
     createWindow: async () => {
       const started = await startGatewayAndCreateWindow({
         selectPort: options.selectPort ?? (() => selectGatewayPort()),
-        gatewayProcess,
+        gatewayProcess: {
+          start: (launchOptions) => gatewayProcess.start(launchOptions),
+          stop: stopGateway,
+        },
         buildLaunchOptions: options.buildGatewayLaunchOptions,
         checkHealth: (port) => checkGatewayHealth({
           isProcessAlive: () => gatewayProcess.getOwnedPid() !== null,
