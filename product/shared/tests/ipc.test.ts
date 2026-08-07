@@ -118,6 +118,7 @@ describe("IPC contracts", () => {
     const normalGatewayResponse = IpcResponseSchema.parse({ method: "gateway.get-status", requestId: "request-normal", ok: true, result: { ...gateway, endpointLabel: "Authorization: required" } });
     const toolResponse = IpcResponseSchema.parse({ method: "tools.get-call", requestId: "request-2", ok: true, result: { id: "tool-1", sessionId: "session-1", toolId: "status", displayName: "Status", state: "running", risk: "low", inputSummary: { tokenCount: 42, apiKeyStatus: "configured" }, outputSummary: { "api-key": "ipc-secret-1", "access-token": "ipc-secret-2", authToken: "ipc-secret-3", sessionCookie: true, privateKey: ["ipc-secret-4"], token: 123456 } } });
     const logResponse = IpcResponseSchema.parse({ method: "diagnostics.list-logs", requestId: "request-3", ok: true, result: { items: [{ id: "log-1", timestamp: "2026-08-07T00:00:00.000Z", level: "error", source: "adapter", message: "Cookie: session=actual-cookie" }], nextCursor: null, hasMore: false } });
+    const bearerLogResponse = IpcResponseSchema.parse({ method: "diagnostics.list-logs", requestId: "request-bearer", ok: true, result: { items: [{ id: "log-bearer", timestamp: "2026-08-07T00:00:00.000Z", level: "error", source: "adapter", message: "Bearer ipc-log-secret" }], nextCursor: null, hasMore: false } });
     const normalLogResponse = IpcResponseSchema.parse({ method: "diagnostics.list-logs", requestId: "request-4", ok: true, result: { items: [{ id: "log-2", timestamp: "2026-08-07T00:00:00.000Z", level: "warning", source: "adapter", message: "Cookie: missing" }], nextCursor: null, hasMore: false } });
     const errorResponse = IpcResponseSchema.parse({ method: "gateway.get-status", requestId: "request-5", ok: false, error: { code: "UNAUTHORIZED", message: "Authorization: Basic Zm9vOmJhcg==", retryable: false, recoveryActions: ["open-settings"], causeDetails: {} } });
     const normalErrorResponse = IpcResponseSchema.parse({ method: "gateway.get-status", requestId: "request-6", ok: false, error: { code: "AUTHORIZATION_REQUIRED", message: "Token: expired", retryable: false, recoveryActions: ["open-settings"], causeDetails: {} } });
@@ -127,6 +128,7 @@ describe("IPC contracts", () => {
     expect(JSON.stringify(toolResponse)).not.toContain("ipc-secret-");
     expect(JSON.stringify(toolResponse)).not.toContain("123456");
     expect(JSON.stringify(logResponse)).not.toContain("actual-cookie");
+    expect(bearerLogResponse).toMatchObject({ result: { items: [{ message: "Bearer [REDACTED]" }] } });
     expect(JSON.stringify(errorResponse)).not.toContain("Zm9vOmJhcg==");
     expect(JSON.stringify(normalGatewayResponse)).toContain("Authorization: required");
     expect(JSON.stringify(toolResponse)).toContain('"tokenCount":42');

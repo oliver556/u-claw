@@ -41,7 +41,7 @@ export const RecoveryActionSchema = z.enum([
 export type RecoveryAction = z.infer<typeof RecoveryActionSchema>;
 
 const REDACTED = "[REDACTED]";
-const safeCredentialStatus = /^(?:required|missing|expired|configured|not configured|unavailable|invalid|redacted|unset|none)$/i;
+const safeCredentialStatus = /^(?:authentication required|required|missing|expired|configured|not configured|unavailable|invalid|redacted|unset|none)$/i;
 const explicitlySafeContextKeys = new Set([
   "token_count",
   "input_tokens",
@@ -98,13 +98,20 @@ function redactCapturedValue(
 
 export function redactRendererText(text: string, contextKey?: string): string {
   let redacted = text
-    .replace(/(\bauthorization\s*:\s*(?:bearer|basic)\s+)([^\s,;]+)/gi, redactCapturedValue)
-    .replace(/(\b(?:set-cookie|cookie)\s*:\s*)([^\r\n]+)/gi, redactCapturedValue)
     .replace(
-      /(\b(?:password|client[-_ ]?secret|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|aws[-_ ]?secret[-_ ]?access[-_ ]?key|aws[-_ ]?access[-_ ]?key[-_ ]?id)\s*[:=]\s*)([^\s,;]+)/gi,
+      /(\bauthorization\s*:\s*(?:bearer|basic)\s+)(authentication\s+required|not\s+configured|[^\s,;]+)/gi,
       redactCapturedValue,
     )
-    .replace(/(\btoken\s*[:=]\s*)([^\s,;]+)/gi, redactCapturedValue)
+    .replace(/(\b(?:set-cookie|cookie)\s*:\s*)([^\r\n]+)/gi, redactCapturedValue)
+    .replace(
+      /(\b(?:password|client[-_ ]?secret|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|aws[-_ ]?secret[-_ ]?access[-_ ]?key|aws[-_ ]?access[-_ ]?key[-_ ]?id)\s*[:=]\s*)(not\s+configured|[^\s,;]+)/gi,
+      redactCapturedValue,
+    )
+    .replace(/(\btoken\s*[:=]\s*)(not\s+configured|[^\s,;]+)/gi, redactCapturedValue)
+    .replace(
+      /(\bbearer\s+)(authentication\s+required|not\s+configured|[^\s,;]+)/gi,
+      redactCapturedValue,
+    )
     .replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}\b/g, REDACTED)
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, REDACTED)
     .replace(/\bxox[bp]-[A-Za-z0-9-]{16,}\b/g, REDACTED)
