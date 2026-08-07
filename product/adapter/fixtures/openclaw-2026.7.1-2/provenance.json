@@ -8,12 +8,17 @@
   "installedPackageJsonSha256": "695b6ee36df7fc69606dc390cf97bb2ca809114337b18c573707637cd2a4e3db",
   "installedRuntimeSchema": "schema-BuOFpc7K.js",
   "installedRuntimeSchemaSha256": "b5b672dd1ce3579e2b030567ef192355374c052934cb4e252b793e08647d54ab",
-  "captureHarnessSha256": "4dc347c7a675baa424dd12e343b853fbd4bc977532fa469fe8cb9f8b042b54f6",
+  "captureHarnessSha256": "67ef185337cde08c2726cdb8417225df94af195fe8c4b585fafa90bbd4c5d487",
   "captureStateHelperSha256": "67f99aa679fd8556c4db0bd75763e33914db0412dd528c65b44187ba998f127c",
   "captureCleanupHelperSha256": "0c9c5d03f0bc57196b174a5e9bfb064621e68c1470c773c2401afd8707ada455",
-  "sanitizerSha256": "8769cbed0ae354ea50a1e12d227c26f9770aed8e832aa0b6e5785ba7c1a2a319",
+  "captureWaitHelperSha256": "2644e6dcaaf448da6afeef8822f3d52180277d3df61b7d764bc6e59cc2f6113d",
+  "sanitizerSha256": "abe040545fd77ba4484788ac75ba89edb92fc7d61d9ffe0d2ab2d95f9783253d",
   "nodeVersionSource": "OPENCLAW_NODE_BIN --version",
   "capturedAt": "2026-08-07T19:08:31.086Z",
+  "captureArtifact": {
+    "id": "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260807T190831086Z",
+    "kind": "raw-wire-json-v1"
+  },
   "capture": {
     "runtime": "OpenClaw Gateway 2026.7.1-2 on Node.js 24.15.0",
     "transport": "GatewayClient through a loopback WebSocket frame-capture proxy",

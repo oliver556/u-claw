@@ -196,6 +196,7 @@ export class OpenClawClient implements UClawClient {
     getStatus: async () => this.gatewayStatus(),
     watchStatus: (signal) => this.watchGatewayStatus(signal),
     reconnect: async () => {
+      this.toolCallRuns.clear();
       this.setStatus("reconnecting", this.reconnectAttempt + 1);
       await this.reconnectPolicy.wait(this.reconnectAttempt);
       this.removeSequenceGapListener?.();
@@ -311,12 +312,13 @@ export class OpenClawClient implements UClawClient {
     let expectedRunId: string | undefined;
     const buffered: MessageEvent[] = [];
     const enqueue = (mapped: MessageEvent): void => {
+      const terminal = mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error";
+      if (terminal) this.clearToolRunsForRun(input.sessionId, mapped.runId);
       if (expectedRunId === undefined) {
         buffered.push(mapped);
         return;
       }
       if (mapped.runId !== expectedRunId) return;
-      const terminal = mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error";
       queue.push(mapped, terminal);
     };
     const removers = [this.options.transport.router.onClose((error) => queue.fail(this.disconnectedError(error))), this.options.transport.router.onEvent("chat", (frame) => {
@@ -333,13 +335,13 @@ export class OpenClawClient implements UClawClient {
       if (!raw.success || raw.data.request.sessionKey !== input.sessionId) return;
       const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
       if (runId === undefined) this.notifyApprovalsChanged(frame, input.sessionId);
-      else if (runId === expectedRunId) enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
+      else enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
     }), this.options.transport.router.onEvent("plugin.approval.requested", (frame) => {
       const raw = OpenClawPluginApprovalEventSchema.safeParse(frame.payload);
       if (!raw.success || raw.data.request.sessionKey !== input.sessionId) return;
       const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
       if (runId === undefined) this.notifyApprovalsChanged(frame, input.sessionId);
-      else if (runId === expectedRunId) enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
+      else enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
     })];
     try {
       const accepted = await this.options.transport.router.request("chat.send", {
@@ -357,6 +359,7 @@ export class OpenClawClient implements UClawClient {
         yield item.value;
       }
     } finally {
+      if (expectedRunId !== undefined) this.clearToolRunsForRun(input.sessionId, expectedRunId);
       for (const remove of removers) remove();
     }
   }
@@ -365,7 +368,13 @@ export class OpenClawClient implements UClawClient {
     const queue = new AsyncEventQueue<MessageEvent>();
     const removers = [this.options.transport.router.onClose((error) => queue.fail(this.disconnectedError(error))), this.options.transport.router.onEvent("chat", (frame) => {
       const raw = RawChatEventSchema.safeParse(frame.payload);
-      if (raw.success && raw.data.sessionKey === sessionId) queue.push(mapChatEvent(raw.data));
+      if (raw.success && raw.data.sessionKey === sessionId) {
+        const mapped = mapChatEvent(raw.data);
+        if (mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error") {
+          this.clearToolRunsForRun(sessionId, mapped.runId);
+        }
+        queue.push(mapped);
+      }
     }), this.options.transport.router.onEvent("session.tool", (frame) => {
       const raw = OpenClawSessionToolPayloadSchema.safeParse(frame.payload);
       if (raw.success) {
@@ -470,6 +479,7 @@ export class OpenClawClient implements UClawClient {
     if (this.removeSequenceGapListener !== undefined) return;
     this.removeSequenceGapListener = this.options.transport.router.onSequenceGap((gap) => this.handleSequenceGap(gap));
     this.removeCloseListener = this.options.transport.router.onClose(() => {
+      this.toolCallRuns.clear();
       if (this.statusState !== "reconnecting") this.setStatus("closed");
     });
   }
@@ -519,6 +529,15 @@ export class OpenClawClient implements UClawClient {
   private approvalRunId(sessionId: string | null | undefined, toolCallId: string | null | undefined): string | undefined {
     if (!sessionId || !toolCallId) return undefined;
     return this.toolCallRuns.get(sessionId)?.get(toolCallId);
+  }
+
+  private clearToolRunsForRun(sessionId: string, runId: string): void {
+    const sessionRuns = this.toolCallRuns.get(sessionId);
+    if (sessionRuns === undefined) return;
+    for (const [toolCallId, mappedRunId] of sessionRuns) {
+      if (mappedRunId === runId) sessionRuns.delete(toolCallId);
+    }
+    if (sessionRuns.size === 0) this.toolCallRuns.delete(sessionId);
   }
 
   private notifyApprovalsChanged(frame: EventFrame, sessionId: string): void {

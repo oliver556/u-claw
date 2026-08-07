@@ -25,6 +25,15 @@ import {
 const fixturesDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../adapter/fixtures/openclaw-2026.7.1-2");
 const productDir = resolve(fixturesDir, "../../..");
 const fixtureNames = ["attachments.json", "approvals.json", "chat.history.json", "chat.message.get.json", "session.tool.json", "sessions.patch.json", "provenance.json"];
+const captureArtifactTrustAnchor = "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260807T190831086Z";
+const rawCaptureTrustAnchor = {
+  "attachments.json": "0620a06a0eb5c9ebc398ed1a67a6d0159672e3e82219bd30ca0c016d8afaf80c",
+  "approvals.json": "37df37bfd40473e26ff911414c95b476e1fb3feb10df9b8d29c2ae8321791c9e",
+  "chat.history.json": "e7d8cc48c660727324d15c0b6f1d45ee30e1c0b4cad910173a5aadf4cbe3786a",
+  "chat.message.get.json": "565226b866b8b4861aab92d440bc3dbd439b6ec99e6dec4d0b30fc4d71278d09",
+  "session.tool.json": "bb667e348778c6a7754de0ffe2929a544154fdfa8ec9bba8a16e85196c8c4692",
+  "sessions.patch.json": "228a7adcd4e493f73083c224cf5ca55b60604cdc6909d8c9033b136d894cad97",
+} as const;
 
 function fixture(name: string): unknown {
   return JSON.parse(readFileSync(resolve(fixturesDir, name), "utf8"));
@@ -32,6 +41,11 @@ function fixture(name: string): unknown {
 
 function sha256(name: string): string {
   return createHash("sha256").update(readFileSync(resolve(fixturesDir, name))).digest("hex");
+}
+
+function expectTrustedRawCapture(provenance: { captureArtifact?: unknown; rawCaptureSha256?: unknown }): void {
+  expect(provenance.captureArtifact).toEqual({ id: captureArtifactTrustAnchor, kind: "raw-wire-json-v1" });
+  expect(provenance.rawCaptureSha256).toEqual(rawCaptureTrustAnchor);
 }
 
 describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
@@ -164,6 +178,12 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
     }
   });
 
+  it("rejects chat.history responses captured for another session", () => {
+    const history = structuredClone(fixture("chat.history.json")) as any;
+    history.responseFrame.payload.sessionKey = "agent:dev:other";
+    expect(OpenClawHistoryFixtureSchema.safeParse(history).success).toBe(false);
+  });
+
   it("locks package, runtime schema, capture harness, raw captures, and fixture hashes", () => {
     const provenance = fixture("provenance.json") as {
       openClawVersion: string;
@@ -171,10 +191,12 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
       captureHarnessSha256: string;
       captureStateHelperSha256: string;
       captureCleanupHelperSha256: string;
+      captureWaitHelperSha256: string;
       sanitizerSha256: string;
       npmTarballResolved: string;
       npmTarballIntegrity: string;
       capture: { runtime: string };
+      captureArtifact: { id: string; kind: string };
       rawCaptureSha256: Record<string, string>;
       fixtureSha256: Record<string, string>;
     };
@@ -185,12 +207,20 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
       npmTarballIntegrity: "sha512-ycF3yPcbjN6bUPeaUx6Mh6vze1hQWoD3CT/wWcmD7a8xaHHHRUaAlaq+lFxMHf1ssEgODVAwjlzYqp2twkYZ7g==",
       capture: { runtime: "OpenClaw Gateway 2026.7.1-2 on Node.js 24.15.0" },
     });
+    expectTrustedRawCapture(provenance);
     expect(provenance.captureHarnessSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/capture-openclaw-v4.mjs"))).digest("hex"));
     expect(provenance.captureStateHelperSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/capture-state.mjs"))).digest("hex"));
     expect(provenance.captureCleanupHelperSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/capture-cleanup.mjs"))).digest("hex"));
+    expect(provenance.captureWaitHelperSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/capture-wait.mjs"))).digest("hex"));
     expect(provenance.sanitizerSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/sanitize-openclaw-v4-capture.mjs"))).digest("hex"));
     expect(Object.keys(provenance.rawCaptureSha256)).toHaveLength(6);
     for (const [name, expected] of Object.entries(provenance.fixtureSha256)) expect(sha256(name)).toBe(expected);
+  });
+
+  it("rejects provenance whose independently anchored raw capture hash is replaced", () => {
+    const provenance = structuredClone(fixture("provenance.json")) as any;
+    provenance.rawCaptureSha256["chat.history.json"] = "0".repeat(64);
+    expect(() => expectTrustedRawCapture(provenance)).toThrow();
   });
 
   it("keeps every fixture free of machine paths, usernames, and credential material", () => {
