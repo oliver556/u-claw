@@ -22,12 +22,14 @@ import {
 } from "./mappers/tool.js";
 import type { GatewayWebSocketState, HelloOk } from "./transport/gateway-websocket.js";
 import { ReconnectPolicy, type SequenceGap } from "./reconnect.js";
-import { RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
+import { AdapterServiceError, RpcClosedError, RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
 
 interface OpenClawRouter {
   request<T>(method: string, params: JsonValue, schema: z.ZodType<T>): Promise<T>;
   onEvent(event: string, listener: (frame: EventFrame) => void): () => void;
   onSequenceGap(listener: (gap: SequenceGap) => void): () => void;
+  onClose(listener: (error: Error) => void): () => void;
+  resetSequence(sourceSequence?: number): void;
 }
 
 export interface OpenClawTransport {
@@ -51,16 +53,16 @@ const SessionPageSchema = z.object({
   sessions: z.array(RawSessionSchema),
   nextCursor: z.string().nullable().default(null),
   hasMore: z.boolean().default(false),
-});
+}).strict();
 
 const MessagePageSchema = z.object({
   messages: z.array(RawMessageSchema),
   nextCursor: z.string().nullable().default(null),
   hasMore: z.boolean().default(false),
-});
+}).strict();
 
-const SendResponseSchema = z.object({ runId: z.string().min(1), status: z.string().min(1) });
-const EmptyResponseSchema = z.union([z.object({}), z.null()]);
+const SendResponseSchema = z.object({ runId: z.string().min(1), status: z.string().min(1) }).strict();
+const EmptyResponseSchema = z.union([z.object({}).strict(), z.null()]);
 const ToolCatalogSchema = z.object({
   tools: z.array(z.object({
     id: z.string().min(1),
@@ -70,46 +72,64 @@ const ToolCatalogSchema = z.object({
     sourceId: z.string().optional(),
     available: z.boolean(),
     risk: z.enum(["low", "medium", "high", "critical", "unknown"]),
-  })),
-});
+  }).strict()),
+}).strict();
 
-const ToolCallResponseSchema = z.object({ toolCall: RawToolCallSchema });
-const ExecApprovalPageSchema = z.object({ requests: z.array(RawExecApprovalSchema) });
-const PluginApprovalPageSchema = z.object({ requests: z.array(RawPluginApprovalSchema) });
-const ExecApprovalEventSchema = z.object({ runId: z.string().min(1), request: RawExecApprovalSchema });
-const PluginApprovalEventSchema = z.object({ runId: z.string().min(1), request: RawPluginApprovalSchema });
+const ToolCallResponseSchema = z.object({ toolCall: RawToolCallSchema }).strict();
+const ExecApprovalPageSchema = z.object({ requests: z.array(RawExecApprovalSchema) }).strict();
+const PluginApprovalPageSchema = z.object({ requests: z.array(RawPluginApprovalSchema) }).strict();
+const ExecApprovalEventSchema = z.object({ runId: z.string().min(1), request: RawExecApprovalSchema }).strict();
+const PluginApprovalEventSchema = z.object({ runId: z.string().min(1), request: RawPluginApprovalSchema }).strict();
+
+interface QueueWaiter<T> {
+  resolve(result: IteratorResult<T>): void;
+  reject(error: Error): void;
+}
 
 class AsyncEventQueue<T> {
   private readonly values: T[] = [];
-  private readonly waiters: Array<(result: IteratorResult<T>) => void> = [];
+  private readonly waiters: Array<QueueWaiter<T>> = [];
   private ended = false;
+  private failure: Error | undefined;
 
-  push(value: T): void {
+  push(value: T, terminal = false): void {
+    if (this.ended) return;
+    if (terminal) this.ended = true;
     const waiter = this.waiters.shift();
     if (waiter === undefined) this.values.push(value);
-    else waiter({ value, done: false });
+    else waiter.resolve({ value, done: false });
   }
 
-  end(): void {
+  fail(error: Error): void {
+    if (this.ended) return;
     this.ended = true;
-    for (const waiter of this.waiters.splice(0)) waiter({ value: undefined, done: true });
+    this.failure = error;
+    for (const waiter of this.waiters.splice(0)) waiter.reject(error);
   }
 
   async next(signal?: AbortSignal): Promise<IteratorResult<T>> {
     const value = this.values.shift();
     if (value !== undefined) return { value, done: false };
+    if (this.failure !== undefined) throw this.failure;
     if (this.ended || signal?.aborted === true) return { value: undefined, done: true };
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const waiter = (result: IteratorResult<T>): void => {
         signal?.removeEventListener("abort", onAbort);
         resolve(result);
       };
+      const queuedWaiter: QueueWaiter<T> = {
+        resolve: waiter,
+        reject: (error) => {
+          signal?.removeEventListener("abort", onAbort);
+          reject(error);
+        },
+      };
       const onAbort = (): void => {
-        const index = this.waiters.indexOf(waiter);
+        const index = this.waiters.indexOf(queuedWaiter);
         if (index >= 0) this.waiters.splice(index, 1);
         waiter({ value: undefined, done: true });
       };
-      this.waiters.push(waiter);
+      this.waiters.push(queuedWaiter);
       signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
@@ -120,7 +140,7 @@ export interface OpenClawClientOptions {
   now?: () => string;
   reconnectPolicy?: ReconnectPolicy;
   maxStartupRetries?: number;
-  onResyncRequired?: (gap: SequenceGap) => void;
+  onResyncRequired?: (gap: SequenceGap) => void | Promise<void>;
 }
 
 export class OpenClawClient implements UClawClient {
@@ -128,15 +148,22 @@ export class OpenClawClient implements UClawClient {
   private hello: HelloOk | undefined;
   private readonly now: () => string;
   private readonly reconnectPolicy: ReconnectPolicy;
-  private readonly onResyncRequired: (gap: SequenceGap) => void;
+  private readonly onResyncRequired: ((gap: SequenceGap) => void | Promise<void>) | undefined;
   private removeSequenceGapListener: (() => void) | undefined;
+  private removeCloseListener: (() => void) | undefined;
   private negotiation: Promise<CapabilitySet> | undefined;
   private reconnectAttempt = 0;
+  private statusState: GatewayConnectionState = "idle";
+  private statusSince: string;
+  private statusAttempt = 0;
+  private readonly statusSubscribers = new Set<AsyncEventQueue<GatewayStatus>>();
+  private resyncing = false;
 
   constructor(private readonly options: OpenClawClientOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
+    this.statusSince = this.now();
     this.reconnectPolicy = options.reconnectPolicy ?? new ReconnectPolicy();
-    this.onResyncRequired = options.onResyncRequired ?? (() => undefined);
+    this.onResyncRequired = options.onResyncRequired;
   }
 
   readonly gateway: UClawClient["gateway"] = {
@@ -144,17 +171,24 @@ export class OpenClawClient implements UClawClient {
     getStatus: async () => this.gatewayStatus(),
     watchStatus: (signal) => this.watchGatewayStatus(signal),
     reconnect: async () => {
+      this.statusAttempt = this.reconnectAttempt + 1;
+      this.setStatus("reconnecting");
       await this.reconnectPolicy.wait(this.reconnectAttempt);
       this.removeSequenceGapListener?.();
       this.removeSequenceGapListener = undefined;
+      this.removeCloseListener?.();
+      this.removeCloseListener = undefined;
       this.options.transport.close();
       this.capabilities = undefined;
       this.hello = undefined;
       try {
         await this.gateway.negotiate();
         this.reconnectAttempt = 0;
+        this.statusAttempt = 0;
       } catch (error) {
         this.reconnectAttempt += 1;
+        this.statusAttempt = this.reconnectAttempt;
+        this.setStatus("failed");
         throw error;
       }
     },
@@ -243,10 +277,10 @@ export class OpenClawClient implements UClawClient {
         return;
       }
       if (mapped.runId !== expectedRunId) return;
-      queue.push(mapped);
-      if (mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error") queue.end();
+      const terminal = mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error";
+      queue.push(mapped, terminal);
     };
-    const removers = [this.options.transport.router.onEvent("chat", (frame) => {
+    const removers = [this.options.transport.router.onClose((error) => queue.fail(this.disconnectedError(error))), this.options.transport.router.onEvent("chat", (frame) => {
       const raw = RawChatEventSchema.safeParse(frame.payload);
       if (raw.success) enqueue(mapChatEvent(raw.data));
     }), this.options.transport.router.onEvent("session.tool", (frame) => {
@@ -269,7 +303,7 @@ export class OpenClawClient implements UClawClient {
       expectedRunId = accepted.runId;
       for (const mapped of buffered.splice(0)) enqueue(mapped);
       yield { type: "started", runId: accepted.runId, sessionId: input.sessionId };
-      while (signal?.aborted !== true) {
+      while (true) {
         const item = await queue.next(signal);
         if (item.done) return;
         yield item.value;
@@ -281,7 +315,7 @@ export class OpenClawClient implements UClawClient {
 
   private async *watchChat(sessionId: string, signal?: AbortSignal): AsyncIterable<MessageEvent> {
     const queue = new AsyncEventQueue<MessageEvent>();
-    const removers = [this.options.transport.router.onEvent("chat", (frame) => {
+    const removers = [this.options.transport.router.onClose((error) => queue.fail(this.disconnectedError(error))), this.options.transport.router.onEvent("chat", (frame) => {
       const raw = RawChatEventSchema.safeParse(frame.payload);
       if (raw.success && raw.data.sessionKey === sessionId) queue.push(mapChatEvent(raw.data));
     }), this.options.transport.router.onEvent("session.tool", (frame) => {
@@ -307,19 +341,27 @@ export class OpenClawClient implements UClawClient {
 
   private async *watchGatewayStatus(signal?: AbortSignal): AsyncIterable<GatewayStatus> {
     if (signal?.aborted === true) return;
-    yield this.gatewayStatus();
+    const queue = new AsyncEventQueue<GatewayStatus>();
+    this.statusSubscribers.add(queue);
+    try {
+      yield this.gatewayStatus();
+      while (true) {
+        const item = await queue.next(signal);
+        if (item.done) return;
+        yield item.value;
+      }
+    } finally {
+      this.statusSubscribers.delete(queue);
+    }
   }
 
   private gatewayStatus(): GatewayStatus {
-    const stateMap: Record<GatewayWebSocketState, GatewayConnectionState> = {
-      idle: "idle", connecting: "connecting", authenticating: "authenticating", ready: "ready", failed: "failed", closed: "closed",
-    };
-    const ready = this.options.transport.state === "ready";
+    const ready = this.statusState === "ready";
     return {
-      connectionState: stateMap[this.options.transport.state], protocolVersion: 4,
-      phase: ready ? "available" : this.options.transport.state === "failed" ? "failed" : "starting",
-      processAlive: this.options.transport.state !== "closed", serviceReady: ready, businessAvailable: ready,
-      since: this.now(), attempt: 0, ...(this.hello === undefined ? {} : { openClawVersion: this.hello.server.version }),
+      connectionState: this.statusState, protocolVersion: 4,
+      phase: ready ? "available" : this.statusState === "failed" ? "failed" : this.statusState === "closed" ? "stopped" : this.statusState === "idle" ? "idle" : "starting",
+      processAlive: this.statusState !== "closed", serviceReady: ready, businessAvailable: ready,
+      since: this.statusSince, attempt: this.statusAttempt, ...(this.hello === undefined ? {} : { openClawVersion: this.hello.server.version }),
       usb: { state: "available", dataWritable: true }, ...(this.capabilities === undefined ? {} : { capabilities: this.capabilities }),
     };
   }
@@ -331,16 +373,21 @@ export class OpenClawClient implements UClawClient {
   private negotiate(): Promise<CapabilitySet> {
     if (this.capabilities !== undefined) return Promise.resolve(this.capabilities);
     if (this.negotiation !== undefined) return this.negotiation;
+    this.setStatus("connecting");
     this.negotiation = this.connectWithStartupRetry().then((hello) => {
-      this.ensureSequenceGapListener();
+      this.ensureTransportListeners();
       this.hello = hello;
       this.capabilities = capabilitySetFromWire({
         protocolVersion: 4,
-        methods: hello.features.methods,
+        methods: hello.features.methods.filter((method) => method !== "exec.approval.resolve" && method !== "plugin.approval.resolve"),
         events: hello.features.events,
         features: { attachments: false, approvalResolve: false },
       });
+      this.setStatus("ready");
       return this.capabilities;
+    }).catch((error) => {
+      this.setStatus("failed");
+      throw error;
     }).finally(() => { this.negotiation = undefined; });
     return this.negotiation;
   }
@@ -358,9 +405,37 @@ export class OpenClawClient implements UClawClient {
     }
   }
 
-  private ensureSequenceGapListener(): void {
+  private ensureTransportListeners(): void {
     if (this.removeSequenceGapListener !== undefined) return;
-    this.removeSequenceGapListener = this.options.transport.router.onSequenceGap(this.onResyncRequired);
+    this.removeSequenceGapListener = this.options.transport.router.onSequenceGap((gap) => this.handleSequenceGap(gap));
+    this.removeCloseListener = this.options.transport.router.onClose(() => {
+      if (this.statusState !== "reconnecting") this.setStatus("closed");
+    });
+  }
+
+  private handleSequenceGap(gap: SequenceGap): void {
+    if (this.resyncing) return;
+    this.resyncing = true;
+    const resync = this.onResyncRequired === undefined
+      ? Promise.reject(new RpcClosedError())
+      : Promise.resolve().then(() => this.onResyncRequired?.(gap));
+    void resync.then(() => {
+      this.options.transport.router.resetSequence(gap.received);
+    }, () => this.gateway.reconnect()).catch(() => undefined).finally(() => {
+      this.resyncing = false;
+    });
+  }
+
+  private setStatus(state: GatewayConnectionState): void {
+    if (this.statusState === state) return;
+    this.statusState = state;
+    this.statusSince = this.now();
+    const status = this.gatewayStatus();
+    for (const subscriber of this.statusSubscribers) subscriber.push(status);
+  }
+
+  private disconnectedError(error: Error): AdapterServiceError {
+    return error instanceof AdapterServiceError ? error : new RpcClosedError();
   }
 
   private unsupported(capability: string): never {

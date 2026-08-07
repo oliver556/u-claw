@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { GatewayWebSocket, type WebSocketLike } from "../src/transport/gateway-websocket.js";
+import { UClawErrorSchema } from "@uclaw/shared";
+
 import { RpcClosedError, RpcRemoteError, RpcRouter, RpcTimeoutError, type JsonValue } from "../src/transport/rpc-router.js";
 
 class FakeSocket implements WebSocketLike {
   readonly sent: string[] = [];
+  sendError: Error | undefined;
   private readonly listeners = new Map<string, Set<(event: { data?: string }) => void>>();
 
   addEventListener(type: "open" | "message" | "close" | "error", listener: (event: { data?: string }) => void): void {
@@ -18,7 +21,10 @@ class FakeSocket implements WebSocketLike {
     this.listeners.get(type)?.delete(listener);
   }
 
-  send(data: string): void { this.sent.push(data); }
+  send(data: string): void {
+    if (this.sendError !== undefined) throw this.sendError;
+    this.sent.push(data);
+  }
   close(): void { this.emit("close"); }
   emit(type: "open" | "close" | "error"): void;
   emit(type: "message", data: string): void;
@@ -39,7 +45,9 @@ describe("RpcRouter", () => {
     socket.emit("message", JSON.stringify({ type: "res", id: firstFrame.id, ok: false, error: { code: "NOPE", message: "denied" } }));
 
     await expect(second).resolves.toEqual({ value: 2 });
-    await expect(first).rejects.toBeInstanceOf(RpcRemoteError);
+    const remoteError = await first.catch((error: unknown) => error);
+    expect(remoteError).toBeInstanceOf(RpcRemoteError);
+    expect(() => UClawErrorSchema.parse((remoteError as RpcRemoteError).uclawError)).not.toThrow();
   });
 
   it("rejects timed out requests and all pending requests on close", async () => {
@@ -49,11 +57,15 @@ describe("RpcRouter", () => {
     const timedOut = router.request("slow", {}, z.object({}));
     const timeoutAssertion = expect(timedOut).rejects.toBeInstanceOf(RpcTimeoutError);
     await vi.advanceTimersByTimeAsync(25);
+    const timeoutError = await timedOut.catch((error: unknown) => error);
     await timeoutAssertion;
+    expect(UClawErrorSchema.parse((timeoutError as RpcTimeoutError).uclawError).code).toBe("TIMEOUT");
 
     const pending = router.request("pending", {}, z.object({}));
     socket.emit("close");
-    await expect(pending).rejects.toBeInstanceOf(RpcClosedError);
+    const closedError = await pending.catch((error: unknown) => error);
+    expect(closedError).toBeInstanceOf(RpcClosedError);
+    expect(UClawErrorSchema.parse((closedError as RpcClosedError).uclawError).code).toBe("GATEWAY_DISCONNECTED");
     vi.useRealTimers();
   });
 
@@ -108,9 +120,71 @@ describe("RpcRouter", () => {
     router.onSequenceGap((gap) => gaps.push(gap));
     socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 10 }));
     socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 12 }));
+    socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 13 }));
     expect(first).toEqual([10]);
     expect(second).toEqual([10]);
     expect(gaps).toEqual([{ expected: 11, received: 12 }]);
+  });
+
+  it("accepts events again only after sequence state is explicitly seeded", () => {
+    const socket = new FakeSocket();
+    const router = new RpcRouter(socket);
+    const received: number[] = [];
+    router.onEvent("chat", (frame) => received.push(frame.seq ?? -1));
+    socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 10 }));
+    socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 12 }));
+    router.resetSequence(12);
+    socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: {}, seq: 13 }));
+    expect(received).toEqual([10, 13]);
+  });
+
+  it("cleans a pending request when socket.send throws synchronously", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    socket.sendError = new Error("send failed");
+    const router = new RpcRouter(socket, { requestTimeoutMs: 25 });
+    await expect(router.request("broken", {}, z.object({}))).rejects.toMatchObject({
+      uclawError: { code: "GATEWAY_DISCONNECTED" },
+    });
+    await vi.advanceTimersByTimeAsync(25);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("notifies close subscribers once", () => {
+    const socket = new FakeSocket();
+    const router = new RpcRouter(socket);
+    const listener = vi.fn();
+    router.onClose(listener);
+    socket.emit("close");
+    socket.emit("close");
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("rejects extra fields in known envelopes and nested errors", async () => {
+    const socket = new FakeSocket();
+    const diagnostics: string[] = [];
+    const router = new RpcRouter(socket, { requestTimeoutMs: 20, onDiagnostic: (message) => diagnostics.push(message) });
+    const request = router.request("strict", {}, z.object({}).strict());
+    const frame = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    socket.emit("message", JSON.stringify({ type: "res", id: frame.id, ok: false, error: { code: "NOPE", message: "denied", extra: true } }));
+    expect(diagnostics).toEqual(["Ignored unknown Gateway frame"]);
+    router.close();
+    await expect(request).rejects.toBeInstanceOf(RpcClosedError);
+  });
+
+  it("normalizes response schema failures", async () => {
+    const socket = new FakeSocket();
+    const router = new RpcRouter(socket);
+    const request = router.request("strict", {}, z.object({ value: z.number() }).strict());
+    const frame = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    socket.emit("message", JSON.stringify({ type: "res", id: frame.id, ok: true, payload: { value: "wrong" } }));
+    const error = await request.catch((reason: unknown) => reason) as { uclawError: unknown };
+    expect(UClawErrorSchema.parse(error.uclawError)).toMatchObject({
+      code: "PROTOCOL_MAPPING_FAILED",
+      retryable: false,
+      recoveryActions: ["open-diagnostics"],
+    });
   });
 });
 
@@ -149,6 +223,19 @@ describe("GatewayWebSocket", () => {
     expect(gateway.state).toBe("ready");
     socket.emit("close");
     expect(gateway.state).toBe("closed");
+  });
+
+  it("rejects extra fields in known challenge payloads", async () => {
+    const socket = new FakeSocket();
+    const gateway = new GatewayWebSocket({
+      url: "ws://gateway.test",
+      webSocketFactory: () => socket,
+      connectParams: () => ({ client: { id: "u-claw-desktop", mode: "desktop" }, role: "operator", scopes: ["operator.read"] }),
+    });
+    const connection = gateway.connect();
+    socket.emit("open");
+    socket.emit("message", JSON.stringify({ type: "event", event: "connect.challenge", payload: { nonce: "n-1", ts: 1, extra: true }, seq: 1 }));
+    await expect(connection).rejects.toThrow("challenge failed validation");
   });
 
   it("rejects when connect params fail instead of leaving handshake pending", async () => {

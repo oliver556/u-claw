@@ -59,27 +59,33 @@ export interface SequenceGap {
   received: number;
 }
 
-export type SequenceDecision = "accepted" | "duplicate" | "gap";
+export type SequenceDecision = "accepted" | "duplicate" | "gap" | "desynced";
 
 export class SequenceGapDetector {
   private lastSequence: number | undefined;
+  private desynced = false;
 
   constructor(private readonly onResyncRequired: (gap: SequenceGap) => void) {}
 
   observe(sourceSequence: number): SequenceDecision {
+    if (this.desynced) return "desynced";
     if (this.lastSequence === undefined) {
       this.lastSequence = sourceSequence;
       return "accepted";
     }
     if (sourceSequence <= this.lastSequence) return "duplicate";
     const expected = this.lastSequence + 1;
-    this.lastSequence = sourceSequence;
-    if (sourceSequence === expected) return "accepted";
+    if (sourceSequence === expected) {
+      this.lastSequence = sourceSequence;
+      return "accepted";
+    }
+    this.desynced = true;
     this.onResyncRequired({ expected, received: sourceSequence });
     return "gap";
   }
 
-  reset(): void {
-    this.lastSequence = undefined;
+  reset(sourceSequence?: number): void {
+    this.lastSequence = sourceSequence;
+    this.desynced = false;
   }
 }

@@ -57,5 +57,7 @@ describe("MockUClawClient", () => {
     await expect(client.channels.list()).rejects.toMatchObject({ code: "UNSUPPORTED" });
     await expect(client.files.list()).rejects.toMatchObject({ code: "UNSUPPORTED" });
     await expect(client.diagnostics.list()).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    await expect(client.approvals.resolveExec({ ref: { family: "exec", id: "approval-exec-1" }, decision: "deny" })).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    await expect(client.approvals.resolvePlugin({ ref: { family: "plugin", id: "approval-plugin-1" }, decision: "deny" })).rejects.toMatchObject({ code: "UNSUPPORTED" });
   });
 });

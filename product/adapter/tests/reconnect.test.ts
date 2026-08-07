@@ -26,6 +26,15 @@ describe("SequenceGapDetector", () => {
     expect(detector.observe(7)).toBe("duplicate");
     expect(detector.observe(8)).toBe("accepted");
     expect(detector.observe(10)).toBe("gap");
+    expect(detector.observe(11)).toBe("desynced");
     expect(resync).toEqual([{ expected: 9, received: 10 }]);
+  });
+
+  it("accepts the next event after reset seeds a synchronized sequence", () => {
+    const detector = new SequenceGapDetector(() => undefined);
+    expect(detector.observe(10)).toBe("accepted");
+    expect(detector.observe(12)).toBe("gap");
+    detector.reset(12);
+    expect(detector.observe(13)).toBe("accepted");
   });
 });

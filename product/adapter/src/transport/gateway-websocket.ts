@@ -12,11 +12,11 @@ export interface WebSocketLike {
 const ChallengeSchema = z.object({
   nonce: z.string().min(1),
   ts: z.union([z.string(), z.number()]),
-});
+}).strict();
 export type GatewayChallenge = z.infer<typeof ChallengeSchema>;
 
 const ConnectParamsSchema = z.object({
-  client: z.object({ id: z.literal("u-claw-desktop"), mode: z.string().min(1) }),
+  client: z.object({ id: z.literal("u-claw-desktop"), mode: z.string().min(1) }).strict(),
   role: z.literal("operator"),
   scopes: z.array(z.string().min(1)),
   caps: z.array(z.string().min(1)).default([]),
@@ -32,16 +32,17 @@ export type GatewayConnectParams = z.input<typeof ConnectParamsSchema>;
 export const HelloOkSchema = z.object({
   type: z.literal("hello-ok"),
   protocol: z.literal(4),
-  server: z.object({ version: z.string().min(1) }),
+  server: z.object({ version: z.string().min(1) }).strict(),
   features: z.object({
     methods: z.array(z.string()),
     events: z.array(z.string()),
-  }),
+  }).strict(),
+  auth: z.object({ deviceToken: z.string().min(1) }).strict().optional(),
   policy: z.object({
     maxPayload: z.number().int().positive(),
     maxBufferedBytes: z.number().int().positive(),
-  }),
-});
+  }).strict(),
+}).strict().transform(({ auth: _auth, ...hello }) => hello);
 export type HelloOk = z.infer<typeof HelloOkSchema>;
 
 export type GatewayWebSocketState = "idle" | "connecting" | "authenticating" | "ready" | "failed" | "closed";

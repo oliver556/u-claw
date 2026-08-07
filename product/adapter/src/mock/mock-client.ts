@@ -195,8 +195,8 @@ export class MockUClawClient implements UClawClient {
 
   readonly approvals: UClawClient["approvals"] = {
     listPending: async (sessionId) => this.approvalRequests.filter((request) => request.status === "pending" && (sessionId === undefined || request.sessionId === sessionId)),
-    resolveExec: async (input) => this.resolveApproval("exec", input.ref.id),
-    resolvePlugin: async (input) => this.resolveApproval("plugin", input.ref.id),
+    resolveExec: async () => this.unsupported("exec.approval.resolve"),
+    resolvePlugin: async () => this.unsupported("plugin.approval.resolve"),
   };
 
   readonly models: UClawClient["models"] = { list: async () => this.unsupported("models.list"), selectForSession: async () => this.unsupported("sessions.patch.model") };
@@ -257,12 +257,6 @@ export class MockUClawClient implements UClawClient {
   private requireMessages(sessionId: string): Message[] {
     this.requireSession(sessionId);
     return this.messages.get(sessionId) ?? [];
-  }
-
-  private resolveApproval(family: ApprovalRequest["family"], id: string): void {
-    const index = this.approvalRequests.findIndex((request) => request.family === family && request.id === id);
-    if (index < 0) throw new Error("Approval not found");
-    this.approvalRequests[index] = ApprovalRequestSchema.parse({ ...this.approvalRequests[index], status: "resolved" });
   }
 
   private unsupported(capability: string): never {
