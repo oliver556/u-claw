@@ -1,1 +1,1 @@
-export const packageName = "@uclaw/adapter";
+export { packageName } from "./package-name.js";
