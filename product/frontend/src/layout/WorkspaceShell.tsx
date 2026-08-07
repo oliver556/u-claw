@@ -1,4 +1,5 @@
 import { ChevronRight, Code2, FolderArchive, PanelLeft, PanelRight, Plus, Search } from "lucide-react";
+import { Tooltip } from "antd";
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 
@@ -15,7 +16,7 @@ const sessions = [
 
 function SessionPanel({ onClose }: { onClose: () => void }) {
   return <aside className="session-panel" aria-label="会话栏">
-    <header><div><small>工作台</small><h1>最近会话</h1></div><button className="icon-button primary-soft" type="button" aria-label="新建会话"><Plus /></button></header>
+    <header><div><small>工作台</small><h1>最近会话</h1></div><Tooltip title="新建会话"><button className="icon-button primary-soft" type="button" aria-label="新建会话"><Plus aria-hidden="true" /></button></Tooltip></header>
     <label className="session-search"><Search /><span className="sr-only">搜索会话</span><input type="search" placeholder="搜索会话" /></label>
     <div className="session-list">
       <p className="panel-label">今天</p>
@@ -24,7 +25,7 @@ function SessionPanel({ onClose }: { onClose: () => void }) {
       </button>)}
     </div>
     <div className="storage-summary"><span><i className="status-dot success" />数据写入正常</span><strong>空间充足</strong></div>
-    <button className="panel-edge-close" type="button" aria-label="收起会话栏" onClick={onClose}><PanelLeft /></button>
+    <Tooltip title="收起会话栏"><button className="panel-edge-close" type="button" aria-label="收起会话栏" onClick={onClose}><PanelLeft aria-hidden="true" /></button></Tooltip>
   </aside>;
 }
 
@@ -32,10 +33,10 @@ function WorkCanvas({ sessionsOpen, contextOpen, openSessions, openContext }: { 
   return <section className="work-canvas">
     <header className="canvas-head">
       <div className="canvas-title">
-        {!sessionsOpen ? <button className="icon-button" type="button" aria-label="展开会话栏" onClick={openSessions}><PanelLeft /></button> : null}
+        {!sessionsOpen ? <Tooltip title="展开会话栏"><button className="icon-button" type="button" aria-label="展开会话栏" onClick={openSessions}><PanelLeft aria-hidden="true" /></button></Tooltip> : null}
         <div><h2>整理产品发布清单</h2><p>工作区：U:\U-Claw\Projects <span>自动保存</span></p></div>
       </div>
-      <div className="canvas-actions"><button type="button"><FolderArchive />归档</button>{!contextOpen ? <button className="icon-button" type="button" aria-label="展开上下文舱" onClick={openContext}><PanelRight /></button> : null}</div>
+      <div className="canvas-actions"><button type="button"><FolderArchive />归档</button>{!contextOpen ? <Tooltip title="展开上下文舱"><button className="icon-button" type="button" aria-label="展开上下文舱" onClick={openContext}><PanelRight aria-hidden="true" /></button></Tooltip> : null}</div>
     </header>
     <div className="conversation">
       <p className="conversation-date">今天 14:26</p>
