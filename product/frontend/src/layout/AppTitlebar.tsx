@@ -1,4 +1,4 @@
-import type { IpcResponse, WindowIpcRequest } from "@uclaw/shared";
+import type { ClientIpcEvent, ClientIpcRequest, IpcResponse, WindowIpcRequest } from "@uclaw/shared";
 import { Modal, Tooltip } from "antd";
 import { Copy, Cpu, HardDrive, Maximize2, Minus, Radio, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -11,6 +11,10 @@ declare global {
       window?: {
         invoke?: (request: WindowIpcRequest) => Promise<IpcResponse>;
         onMaximizedChange?: (listener: (isMaximized: boolean) => void) => () => void;
+      };
+      client?: {
+        invoke(request: ClientIpcRequest): Promise<IpcResponse>;
+        subscribe(listener: (event: ClientIpcEvent) => void): () => void;
       };
     };
   }
@@ -100,7 +104,7 @@ export function AppTitlebar() {
         <div className="runtime-status" aria-label="运行状态">
           <span className="status-item"><i className="status-dot success" /><HardDrive aria-hidden="true" />U 盘已连接</span>
           <span className="status-item"><i className="status-dot success" /><Radio aria-hidden="true" />Gateway</span>
-          <span className="model-status"><Cpu aria-hidden="true" />GPT-5.2</span>
+          <span className="model-status"><Cpu aria-hidden="true" />模型随会话</span>
         </div>
         <div className="window-controls" aria-label="窗口控制">
           <Tooltip title="最小化"><button type="button" aria-label="最小化" onClick={() => void invokeWindow("minimize")}><Minus aria-hidden="true" /></button></Tooltip>

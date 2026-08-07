@@ -1,8 +1,9 @@
 import { ManualClock, MockUClawClient } from "@uclaw/adapter";
 import type { UClawClient } from "@uclaw/shared";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 import { AppProviders } from "./providers";
+import { createRendererClient } from "./renderer-client";
 import { WorkspaceShell } from "../layout/WorkspaceShell";
 
 const clock = new ManualClock("2026-08-08T08:00:00.000Z");
@@ -43,14 +44,18 @@ const defaultClient: UClawClient = {
 };
 
 export function App({ client }: { client?: UClawClient }) {
-  const resolvedClient = client ?? defaultClient;
+  const preloadBridge = window.uclaw?.client;
+  const resolvedClient = useMemo(
+    () => client ?? (preloadBridge ? createRendererClient(preloadBridge) : defaultClient),
+    [client, preloadBridge],
+  );
   useEffect(() => {
-    if (client !== undefined) return;
+    if (client !== undefined || preloadBridge !== undefined) return;
     const controllableMock = mockClient as MockUClawClient & { setConnectionAvailable(available: boolean): void };
     const setConnection = (event: Event) => controllableMock.setConnectionAvailable((event as CustomEvent<boolean>).detail);
     window.addEventListener("uclaw:mock-connection", setConnection);
     return () => window.removeEventListener("uclaw:mock-connection", setConnection);
-  }, [client]);
+  }, [client, preloadBridge]);
   return (
     <AppProviders>
       <WorkspaceShell client={resolvedClient} />

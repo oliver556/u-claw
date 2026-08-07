@@ -7,9 +7,11 @@ import {
   type ClientIpcRequest,
   type IpcResponse,
   type UClawError,
+  type UClawClient,
 } from "@uclaw/shared";
 
-import { CLIENT_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { createClientDispatcher } from "./client-dispatcher.js";
+import { CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -18,12 +20,14 @@ export interface IpcMainLike {
 
 export interface AuthorizedWebContents {
   mainFrame: unknown;
+  send?(channel: string, payload: unknown): void;
 }
 
 export interface WindowControls {
   minimize(): void;
   toggleMaximize(): void;
   close(): void;
+  openAdvancedConsole?(): void | Promise<void>;
 }
 
 export interface RegisterIpcDependencies {
@@ -31,6 +35,7 @@ export interface RegisterIpcDependencies {
   authorizedWebContents: AuthorizedWebContents;
   windowControls: WindowControls;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
+  client?: UClawClient;
 }
 
 function safeError(
@@ -67,7 +72,13 @@ export function registerIpc({
   authorizedWebContents,
   windowControls,
   dispatchClient,
+  client,
 }: RegisterIpcDependencies): () => void {
+  const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
+    client,
+    sendEvent: (event) => authorizedWebContents.send?.(CLIENT_IPC_EVENT_CHANNEL, event),
+  });
+  const dispatch = clientDispatcher ?? dispatchClient;
   const authorize = (event: unknown): void => {
     const candidate = event as { sender?: unknown; senderFrame?: unknown };
     if (
@@ -88,6 +99,10 @@ export function registerIpc({
       if (request.method === "minimize") windowControls.minimize();
       if (request.method === "toggle-maximize") windowControls.toggleMaximize();
       if (request.method === "close") windowControls.close();
+      if (request.method === "open-advanced-console") {
+        if (!windowControls.openAdvancedConsole) throw safeError("UNAVAILABLE", "Advanced console is unavailable.");
+        await windowControls.openAdvancedConsole();
+      }
       return IpcResponseSchema.parse({
         method: request.method,
         requestId: request.requestId,
@@ -114,7 +129,7 @@ export function registerIpc({
 
     let response: unknown;
     try {
-      response = await dispatchClient(parsed.data);
+      response = await dispatch(parsed.data);
     } catch (error) {
       const known = UClawErrorSchema.safeParse(error);
       return IpcResponseSchema.parse({
@@ -138,6 +153,7 @@ export function registerIpc({
   return () => {
     if (disposed) return;
     disposed = true;
+    clientDispatcher?.dispose();
     ipcMain.removeHandler(WINDOW_IPC_CHANNEL);
     ipcMain.removeHandler(CLIENT_IPC_CHANNEL);
   };

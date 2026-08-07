@@ -75,6 +75,16 @@ function clientFixture(overrides: Partial<UClawClient> = {}): UClawClient {
 }
 
 describe("chat workspace", () => {
+  it("shows current model while clearly degrading unavailable model discovery", async () => {
+    const client = clientFixture();
+    vi.mocked(client.sessions.get).mockResolvedValue({
+      id: "session-1", title: "发布检查", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z",
+      pinned: false, status: "idle", model: { id: "openai/gpt-5", label: "GPT-5", providerId: "openai" },
+    });
+    render(<App client={client} />);
+
+    expect(await within(screen.getByRole("main")).findByText(/GPT-5/)).toHaveTextContent("当前连接不支持模型列表");
+  });
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
