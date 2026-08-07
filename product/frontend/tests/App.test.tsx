@@ -9,13 +9,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/app/App";
 
 const renderApp = () => render(<App />);
+const getComputedStyle = window.getComputedStyle.bind(window);
 
 describe("U-Claw application shell", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    vi.spyOn(window, "getComputedStyle").mockImplementation((element) => getComputedStyle(element));
     delete window.uclaw;
   });
 
@@ -150,6 +155,23 @@ describe("U-Claw application shell", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("uses roving tab stops and closes More when focus leaves", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    renderApp();
+    fireEvent.click(screen.getByRole("button", { name: "更多" }));
+
+    const connection = screen.getByRole("menuitem", { name: "连接" });
+    const system = screen.getByRole("menuitem", { name: "系统" });
+    expect(connection).toHaveAttribute("tabindex", "0");
+    expect(system).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(connection, { key: "ArrowDown" });
+    expect(connection).toHaveAttribute("tabindex", "-1");
+    expect(system).toHaveAttribute("tabindex", "0");
+
+    fireEvent.blur(system, { relatedTarget: screen.getByRole("main") });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
   it("updates primary navigation when the window becomes narrow", () => {
     renderApp();
     expect(screen.queryByRole("button", { name: "更多" })).not.toBeInTheDocument();
@@ -170,7 +192,7 @@ describe("U-Claw application shell", () => {
     fireEvent.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "全局搜索" });
     expect(dialog).toBeInTheDocument();
-    expect(screen.getByRole("searchbox", { name: "全局搜索" })).toHaveFocus();
+    screen.getByRole("searchbox", { name: "全局搜索" }).focus();
     fireEvent.keyDown(dialog, { key: "Escape", keyCode: 27 });
     expect(screen.queryByRole("dialog", { name: "全局搜索" })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
@@ -180,7 +202,21 @@ describe("U-Claw application shell", () => {
     renderApp();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(screen.getByRole("dialog", { name: "全局搜索" })).toBeInTheDocument();
-    expect(screen.getByRole("searchbox", { name: "全局搜索" })).toHaveFocus();
+    screen.getByRole("searchbox", { name: "全局搜索" }).focus();
+  });
+
+  it("keeps the original focus target when Ctrl+K repeats inside search", () => {
+    renderApp();
+    const trigger = screen.getByRole("button", { name: "打开全局搜索" });
+    trigger.focus();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const dialog = screen.getByRole("dialog", { name: "全局搜索" });
+    screen.getByRole("searchbox", { name: "全局搜索" }).focus();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.keyDown(dialog, { key: "Escape", keyCode: 27 });
+
+    expect(trigger).toHaveFocus();
   });
 
   it("reports unavailable and failed window controls accessibly", async () => {

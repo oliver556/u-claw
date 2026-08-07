@@ -67,6 +67,17 @@ test("mobile navigation reaches destinations hidden under More", async ({ page }
   await expect(page).toHaveURL(/#\/system$/);
 });
 
+test("mobile More menu closes when Tab moves focus away", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "更多" }).click();
+  await expect(page.getByRole("menuitem", { name: "连接" })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+
+  await expect(page.getByRole("menu", { name: "更多导航" })).toBeHidden();
+});
+
 test("mobile titlebar and icon controls preserve touch target sizes", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -125,4 +136,21 @@ test("global search traps focus and restores the trigger", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test("global search portal does not move the workspace grid", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 640 });
+  await page.goto("/");
+  const workspace = page.locator(".workspace-grid");
+  const before = await workspace.boundingBox();
+
+  await page.getByRole("button", { name: "打开全局搜索" }).click();
+  await expect(page.getByRole("dialog", { name: "全局搜索" })).toBeVisible();
+  await expect(page.locator(".command-modal .ant-modal-content")).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  expect(await workspace.boundingBox()).toEqual(before);
+  await expect(page.locator(".app-shell > .ant-modal-root")).toHaveCount(0);
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "全局搜索" })).toBeHidden();
+  expect(await workspace.boundingBox()).toEqual(before);
 });
