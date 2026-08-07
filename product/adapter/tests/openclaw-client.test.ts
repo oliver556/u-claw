@@ -379,6 +379,49 @@ describe("OpenClawClient", () => {
     await second.return?.();
   });
 
+  it("buffers a correlated approval received before chat.send responds", async () => {
+    const tools = contractFixture("session.tool.json");
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    let acceptSend: (value: JsonValue) => void = () => undefined;
+    transport.requestGates.set("chat.send", new Promise((resolve) => { acceptSend = resolve; }));
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+    const send = client.chat.send({
+      sessionId: "agent:dev:main",
+      clientRequestId: "request-race",
+      blocks: [{ type: "text", text: "race", format: "plain" }],
+    })[Symbol.asyncIterator]();
+    const started = send.next();
+    await Promise.resolve();
+    const tool = structuredClone(tools.start.payload);
+    tool.runId = "run-race";
+    tool.data.toolCallId = "tool-race";
+    transport.emit("session.tool", tool, 1);
+    const approval = structuredClone(approvals.plugin.allowOnce.event.payload);
+    approval.request.toolCallId = "tool-race";
+    transport.emit("plugin.approval.requested", approval, 2);
+    acceptSend({ runId: "run-race", status: "accepted" });
+    await expect(started).resolves.toMatchObject({ value: { type: "started", runId: "run-race" } });
+    transport.emit("chat", {
+      state: "final",
+      runId: "run-race",
+      sessionKey: "agent:dev:main",
+      message: {
+        id: "message-race",
+        sessionKey: "agent:dev:main",
+        runId: "run-race",
+        role: "assistant",
+        status: "completed",
+        blocks: [],
+        createdAt: "2026-08-08T00:00:00.000Z",
+      },
+    }, 3);
+    await expect(send.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-race" } });
+    await expect(send.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-race" } });
+    await expect(send.next()).resolves.toMatchObject({ value: { type: "final", runId: "run-race" } });
+  });
+
   it("keeps identical tool call ids isolated across sessions", async () => {
     const tools = contractFixture("session.tool.json");
     const approvals = contractFixture("approvals.json");
@@ -419,6 +462,89 @@ describe("OpenClawClient", () => {
     await expect(secondApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-second", approval: { id: "approval-second" } } });
     await first.return?.();
     await second.return?.();
+  });
+
+  it("does not bind late approvals after a run reaches a terminal event", async () => {
+    const tools = contractFixture("session.tool.json");
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    const approvalChanges: string[] = [];
+    transport.fixtures.set("chat.send", { runId: "run-terminal", status: "accepted" });
+    const client = new OpenClawClient({ transport, onApprovalsChanged: (sessionId) => { approvalChanges.push(sessionId); } });
+    await client.gateway.negotiate();
+    const send = client.chat.send({
+      sessionId: "agent:dev:main",
+      clientRequestId: "request-terminal",
+      blocks: [{ type: "text", text: "terminal", format: "plain" }],
+    })[Symbol.asyncIterator]();
+    await send.next();
+    const tool = structuredClone(tools.start.payload);
+    tool.runId = "run-terminal";
+    tool.data.toolCallId = "tool-terminal";
+    transport.emit("session.tool", tool, 1);
+    await send.next();
+    transport.emit("chat", {
+      state: "final",
+      runId: "run-terminal",
+      sessionKey: "agent:dev:main",
+      message: {
+        id: "message-terminal",
+        sessionKey: "agent:dev:main",
+        runId: "run-terminal",
+        role: "assistant",
+        status: "completed",
+        blocks: [],
+        createdAt: "2026-08-08T00:00:00.000Z",
+      },
+    }, 2);
+    await send.next();
+
+    const watch = client.chat.watch("agent:dev:main")[Symbol.asyncIterator]();
+    const next = watch.next();
+    const lateApproval = structuredClone(approvals.plugin.allowOnce.event.payload);
+    lateApproval.request.toolCallId = "tool-terminal";
+    transport.emit("plugin.approval.requested", lateApproval, 3);
+    transport.emit("chat", { state: "delta", runId: "run-other", sessionKey: "agent:dev:main", deltaText: "next" }, 4);
+    await expect(next).resolves.toMatchObject({ value: { type: "delta", runId: "run-other" } });
+    expect(approvalChanges).toEqual(["agent:dev:main"]);
+    await watch.return?.();
+  });
+
+  it("clears tool approval associations across disconnect and reconnect", async () => {
+    const tools = contractFixture("session.tool.json");
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    const clock = new ManualClock();
+    const approvalChanges: string[] = [];
+    const client = new OpenClawClient({
+      transport,
+      reconnectPolicy: new ReconnectPolicy({ clock, random: () => 0.5 }),
+      onApprovalsChanged: (sessionId) => { approvalChanges.push(sessionId); },
+    });
+    await client.gateway.negotiate();
+    const watch = client.chat.watch("agent:dev:main")[Symbol.asyncIterator]();
+    const first = watch.next();
+    const tool = structuredClone(tools.start.payload);
+    tool.runId = "run-disconnected";
+    tool.data.toolCallId = "tool-disconnected";
+    transport.emit("session.tool", tool, 1);
+    await first;
+    const closed = watch.next();
+    transport.close();
+    await closed.catch(() => undefined);
+    const reconnect = client.gateway.reconnect();
+    await clock.advance(800);
+    await reconnect;
+
+    const afterReconnect = client.chat.watch("agent:dev:main")[Symbol.asyncIterator]();
+    const next = afterReconnect.next();
+    const lateApproval = structuredClone(approvals.plugin.allowOnce.event.payload);
+    lateApproval.request.toolCallId = "tool-disconnected";
+    transport.emit("plugin.approval.requested", lateApproval, 1);
+    transport.emit("chat", { state: "delta", runId: "run-new", sessionKey: "agent:dev:main", deltaText: "new" }, 2);
+    await expect(next).resolves.toMatchObject({ value: { type: "delta", runId: "run-new" } });
+    expect(approvalChanges).toEqual(["agent:dev:main"]);
+    await afterReconnect.return?.();
   });
 
   it("triggers resync instead of mapping a source sequence gap", async () => {

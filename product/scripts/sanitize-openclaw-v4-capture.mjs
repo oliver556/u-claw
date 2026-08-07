@@ -14,6 +14,7 @@ const nodeBin = process.env.OPENCLAW_NODE_BIN ?? process.execPath;
 const harnessPath = resolve("scripts/capture-openclaw-v4.mjs");
 const captureStateHelperPath = resolve("scripts/capture-state.mjs");
 const captureCleanupHelperPath = resolve("scripts/capture-cleanup.mjs");
+const captureWaitHelperPath = resolve("scripts/capture-wait.mjs");
 const sanitizerPath = resolve("scripts/sanitize-openclaw-v4-capture.mjs");
 const schemaPath = join(packageDir, "dist/schema-BuOFpc7K.js");
 const buildInfoPath = join(packageDir, "dist/build-info.json");
@@ -227,9 +228,14 @@ const provenance = {
   captureHarnessSha256: sha256(await readFile(harnessPath)),
   captureStateHelperSha256: sha256(await readFile(captureStateHelperPath)),
   captureCleanupHelperSha256: sha256(await readFile(captureCleanupHelperPath)),
+  captureWaitHelperSha256: sha256(await readFile(captureWaitHelperPath)),
   sanitizerSha256: sha256(await readFile(sanitizerPath)),
   nodeVersionSource: "OPENCLAW_NODE_BIN --version",
   capturedAt: new Date(fixtures["session.tool.json"].start.payload.ts).toISOString(),
+  captureArtifact: {
+    id: "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260807T190831086Z",
+    kind: "raw-wire-json-v1",
+  },
   capture: {
     runtime: `OpenClaw Gateway ${packageJson.version} on Node.js ${nodeVersion}`,
     transport: "GatewayClient through a loopback WebSocket frame-capture proxy",

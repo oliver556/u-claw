@@ -10,6 +10,7 @@ import { WebSocket, WebSocketServer } from "ws";
 
 import { cleanupCaptureResources } from "./capture-cleanup.mjs";
 import { prepareCaptureStateDir } from "./capture-state.mjs";
+import { waitForEvent as waitForCapturedEvent } from "./capture-wait.mjs";
 
 const packageDir = resolve(process.env.OPENCLAW_PACKAGE_DIR ?? join(homedir(), ".uclaw/core/node_modules/openclaw"));
 const nodeBin = process.env.OPENCLAW_NODE_BIN ?? process.execPath;
@@ -23,24 +24,8 @@ const sessionKey = "agent:dev:main";
 const rawFrames = [];
 const gatewayEvents = [];
 
-function timeout(ms, label) {
-  return new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), ms));
-}
-
 function waitForEvent(predicate, label, ms = 20_000) {
-  const found = gatewayEvents.find(predicate);
-  if (found) return Promise.resolve(found);
-  return Promise.race([
-    new Promise((resolveEvent) => {
-      const timer = setInterval(() => {
-        const event = gatewayEvents.find(predicate);
-        if (!event) return;
-        clearInterval(timer);
-        resolveEvent(event);
-      }, 20);
-    }),
-    timeout(ms, label),
-  ]);
+  return waitForCapturedEvent(gatewayEvents, predicate, label, ms);
 }
 
 function gatewayErrorEvidence(error) {
