@@ -10,7 +10,7 @@ import {
   type UClawClient,
 } from "@uclaw/shared";
 
-import { createClientDispatcher } from "./client-dispatcher.js";
+import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
 import { CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
@@ -64,7 +64,7 @@ function ensureCorrelatedResponse(response: unknown, request: ClientIpcRequest):
   }).success) {
     throw new Error("Client dispatcher returned a window response.");
   }
-  return parsed;
+  return toRendererSafeResponse(parsed);
 }
 
 export function registerIpc({
@@ -116,7 +116,7 @@ export function registerIpc({
         requestId: request.requestId,
         ok: false,
         error: known.success
-          ? known.data
+          ? toRendererSafeError(known.data)
           : safeError("OPERATION_FAILED", "Window operation failed."),
       });
     }
@@ -137,7 +137,7 @@ export function registerIpc({
         requestId: parsed.data.requestId,
         ok: false,
         error: known.success
-          ? known.data
+          ? toRendererSafeError(known.data)
           : safeError("UNKNOWN", "Client operation failed."),
       });
     }

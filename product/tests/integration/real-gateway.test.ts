@@ -273,4 +273,138 @@ describe("real OpenClaw gateway mainline", () => {
     expect(JSON.stringify(tool)).not.toContain("rm -rf");
     expect(JSON.stringify(tool)).not.toContain("/private/data");
   });
+
+  it("projects session details without renderer-visible metadata", async () => {
+    const session = {
+      id: "session-sensitive", title: "Safe title", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z",
+      pinned: false, status: "idle" as const, revision: "7",
+      metadata: {
+        token: "sk-secret-token", cwd: "/private/work", path: "C:\\Users\\secret", endpoint: "http://127.0.0.1:18789/private",
+      },
+    };
+    const client = {
+      gateway: { negotiate: vi.fn(), getStatus: vi.fn(), watchStatus: vi.fn(), reconnect: vi.fn() },
+      sessions: { list: vi.fn(), get: vi.fn(async () => session), create: vi.fn(async () => session), remove: vi.fn() },
+      chat: { list: vi.fn(), get: vi.fn(), watch: vi.fn(), send: vi.fn(), abort: vi.fn() },
+      tools: { list: vi.fn(), getCall: vi.fn() }, approvals: { listPending: vi.fn(), resolveExec: vi.fn(), resolvePlugin: vi.fn() },
+      models: { list: vi.fn(), selectForSession: vi.fn() }, skills: { list: vi.fn() }, channels: { list: vi.fn() },
+      files: { list: vi.fn(), readText: vi.fn() }, diagnostics: { list: vi.fn(), listLogs: vi.fn() },
+    } as unknown as UClawClient;
+    const rendererClient = bridgeFor(client);
+
+    const received = [await rendererClient.sessions.get(session.id), await rendererClient.sessions.create({ title: "Safe title" })];
+    expect(received).toMatchObject([{ id: session.id, revision: "7" }, { id: session.id, revision: "7" }]);
+    expect(received.every((item) => item.metadata === undefined)).toBe(true);
+    const serialized = JSON.stringify(received);
+    for (const secret of ["sk-secret-token", "/private/work", "C:\\Users\\secret", "http://127.0.0.1:18789/private"]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it("projects every legal UClawError to an opaque renderer-safe error", async () => {
+    const unsafeError = {
+      code: "OPERATION_FAILED" as const,
+      message: "Run rm -rf /private/work at http://127.0.0.1:18789 with sk-secret-token",
+      retryable: true,
+      recoveryActions: ["retry" as const],
+      causeDetails: { operation: "cwd=/private/work command=rm -rf" },
+      correlationId: "http://127.0.0.1:18789/private",
+    };
+    const client = {
+      gateway: { negotiate: vi.fn(), getStatus: vi.fn(), watchStatus: vi.fn(), reconnect: vi.fn() },
+      sessions: { list: vi.fn(), get: vi.fn(async () => { throw unsafeError; }), create: vi.fn(), remove: vi.fn() },
+      chat: { list: vi.fn(), get: vi.fn(), watch: vi.fn(), send: vi.fn(), abort: vi.fn() },
+      tools: { list: vi.fn(), getCall: vi.fn() }, approvals: { listPending: vi.fn(), resolveExec: vi.fn(), resolvePlugin: vi.fn() },
+      models: { list: vi.fn(), selectForSession: vi.fn() }, skills: { list: vi.fn() }, channels: { list: vi.fn() },
+      files: { list: vi.fn(), readText: vi.fn() }, diagnostics: { list: vi.fn(), listLogs: vi.fn() },
+    } as unknown as UClawClient;
+    const rendererClient = bridgeFor(client);
+
+    const error = await rendererClient.sessions.get("session-1").catch((reason: unknown) => reason) as Error & Record<string, unknown>;
+    expect(error).toMatchObject({ code: "OPERATION_FAILED", retryable: true, recoveryActions: ["retry"], causeDetails: {} });
+    expect(error.message).toBe("Client operation failed.");
+    expect(error.correlationId).toBeUndefined();
+    const serialized = `${error.message} ${JSON.stringify(error)}`;
+    for (const secret of ["rm -rf", "/private/work", "http://127.0.0.1:18789", "sk-secret-token"]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it("projects nested error fields across renderer-facing management DTOs", async () => {
+    const unsafeSummary = {
+      code: "OPERATION_FAILED" as const,
+      message: "Run rm -rf /private/work at http://127.0.0.1:18789 with sk-secret-token",
+      retryable: true,
+    };
+    const unsafeError = {
+      ...unsafeSummary,
+      recoveryActions: ["retry" as const],
+      causeDetails: { operation: "cwd=/private/work command=rm -rf" },
+      correlationId: "http://127.0.0.1:18789/private",
+    };
+    const gatewayStatus = {
+      connectionState: "failed" as const, protocolVersion: 4 as const, phase: "failed" as const,
+      processAlive: false, serviceReady: false, businessAvailable: false,
+      since: "2026-08-08T08:00:00.000Z", attempt: 1,
+      usb: { state: "available" as const, dataWritable: true }, error: unsafeError,
+    };
+    const client = {
+      gateway: {
+        negotiate: vi.fn(), getStatus: vi.fn(async () => gatewayStatus), reconnect: vi.fn(),
+        watchStatus: async function* () { yield gatewayStatus; },
+      },
+      sessions: { list: vi.fn(), get: vi.fn(), create: vi.fn(), remove: vi.fn() },
+      chat: { list: vi.fn(), get: vi.fn(), watch: vi.fn(), send: vi.fn(), abort: vi.fn() },
+      tools: { list: vi.fn(), getCall: vi.fn() }, approvals: { listPending: vi.fn(), resolveExec: vi.fn(), resolvePlugin: vi.fn() },
+      models: { list: vi.fn(async () => [{ id: "model-1", label: "Model", providerId: "provider-1", available: false, locality: "cloud", capabilities: ["text"], unavailableReason: unsafeSummary }]), selectForSession: vi.fn() },
+      skills: { list: vi.fn() },
+      channels: { list: vi.fn(async () => [{ id: "channel-1", kind: "telegram", name: "Telegram", configured: true, enabled: true, state: "error", error: unsafeSummary }]) },
+      files: { list: vi.fn(), readText: vi.fn() },
+      diagnostics: { list: vi.fn(async () => [{ id: "diagnostic-1", label: "Gateway", state: "failed", repairable: true, error: unsafeSummary }]), listLogs: vi.fn() },
+    } as unknown as UClawClient;
+    const rendererClient = bridgeFor(client);
+
+    const watched = await rendererClient.gateway.watchStatus()[Symbol.asyncIterator]().next();
+    const received = [
+      await rendererClient.gateway.getStatus(), watched.value,
+      ...(await rendererClient.models.list()), ...(await rendererClient.channels.list()), ...(await rendererClient.diagnostics.list()),
+    ];
+    expect(received.map((item) => item?.error ?? item?.unavailableReason)).toEqual([
+      expect.objectContaining({ code: "OPERATION_FAILED", message: "Client operation failed.", retryable: true }),
+      expect.objectContaining({ code: "OPERATION_FAILED", message: "Client operation failed.", retryable: true }),
+      expect.objectContaining({ code: "OPERATION_FAILED", message: "Client operation failed.", retryable: true }),
+      expect.objectContaining({ code: "OPERATION_FAILED", message: "Client operation failed.", retryable: true }),
+      expect.objectContaining({ code: "OPERATION_FAILED", message: "Client operation failed.", retryable: true }),
+    ]);
+    const serialized = JSON.stringify(received);
+    for (const secret of ["rm -rf", "/private/work", "http://127.0.0.1:18789", "sk-secret-token"]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it("keeps chat.watch open across terminal events from multiple runs", async () => {
+    const message = (runId: string) => ({
+      type: "final" as const, runId,
+      message: {
+        id: `message-${runId}`, sessionId: "session-1", runId, role: "assistant" as const, status: "completed" as const,
+        blocks: [], createdAt: "2026-08-08T08:00:00.000Z",
+      },
+    });
+    const client = {
+      gateway: { negotiate: vi.fn(), getStatus: vi.fn(), watchStatus: vi.fn(), reconnect: vi.fn() },
+      sessions: { list: vi.fn(), get: vi.fn(), create: vi.fn(), remove: vi.fn() },
+      chat: {
+        list: vi.fn(), get: vi.fn(), send: vi.fn(), abort: vi.fn(),
+        watch: async function* () { yield message("run-1"); yield message("run-2"); },
+      },
+      tools: { list: vi.fn(), getCall: vi.fn() }, approvals: { listPending: vi.fn(), resolveExec: vi.fn(), resolvePlugin: vi.fn() },
+      models: { list: vi.fn(), selectForSession: vi.fn() }, skills: { list: vi.fn() }, channels: { list: vi.fn() },
+      files: { list: vi.fn(), readText: vi.fn() }, diagnostics: { list: vi.fn(), listLogs: vi.fn() },
+    } as unknown as UClawClient;
+    const rendererClient = bridgeFor(client);
+    const events = [];
+    for await (const event of rendererClient.chat.watch("session-1")) events.push(event);
+
+    expect(events.map((event) => event.runId)).toEqual(["run-1", "run-2"]);
+  });
 });
