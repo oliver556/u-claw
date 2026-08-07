@@ -133,4 +133,51 @@ describe("checkGatewayHealth", () => {
     expect(signal?.aborted).toBe(true);
     await expect(pending).resolves.toMatchObject({ serviceReady: true, businessAvailable: false });
   });
+
+  it("rechecks process identity after fetch before reporting service readiness", async () => {
+    let alive = true;
+    const probeCapabilities = vi.fn();
+    const status = await checkGatewayHealth({
+      isProcessAlive: () => alive,
+      baseUrl: "http://127.0.0.1:18789",
+      fetch: vi.fn(async () => {
+        alive = false;
+        return { ok: true };
+      }),
+      probeCapabilities,
+      now: () => 3_000,
+      deadlineMs: 3_100,
+    });
+
+    expect(status).toEqual({
+      processAlive: false,
+      serviceReady: false,
+      businessAvailable: false,
+      checkedAtMs: 3_000,
+    });
+    expect(probeCapabilities).not.toHaveBeenCalled();
+  });
+
+  it("rechecks process identity after capability probe before reporting business readiness", async () => {
+    let alive = true;
+    const status = await checkGatewayHealth({
+      isProcessAlive: () => alive,
+      baseUrl: "http://127.0.0.1:18789",
+      fetch: vi.fn(async () => ({ ok: true })),
+      probeCapabilities: vi.fn(async () => {
+        alive = false;
+        return { helloOk: true, methods: ["chat.send"] };
+      }),
+      requiredMethods: ["chat.send"],
+      now: () => 4_000,
+      deadlineMs: 4_100,
+    });
+
+    expect(status).toEqual({
+      processAlive: false,
+      serviceReady: false,
+      businessAvailable: false,
+      checkedAtMs: 4_000,
+    });
+  });
 });
