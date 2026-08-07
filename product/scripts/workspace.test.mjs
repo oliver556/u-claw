@@ -39,11 +39,11 @@ test("runs every workspace test from the root", () => {
   assert.match(rootPackage.scripts.test, /npm run test --workspaces --if-present/);
 });
 
-test("runs Node workspace entry points after builds", () => {
+test("runs workspace smoke checks after builds", () => {
   assert.match(rootPackage.scripts.build, /npm run smoke:dist/);
   assert.equal(
     rootPackage.scripts["smoke:dist"],
-    "node shared/dist/index.js && node adapter/dist/index.js && node desktop/dist/index.js"
+    "node shared/dist/index.js && node adapter/dist/index.js && node desktop/dist/index.js && npm run smoke:file -w @uclaw/frontend"
   );
 });
 
