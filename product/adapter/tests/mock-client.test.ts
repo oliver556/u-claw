@@ -1,3 +1,4 @@
+import { UClawErrorSchema } from "@uclaw/shared";
 import { describe, expect, it } from "vitest";
 
 import { MockUClawClient, ManualClock } from "../src/mock/mock-client.js";
@@ -44,10 +45,25 @@ describe("MockUClawClient", () => {
     const client = new MockUClawClient({ clock });
     expect(await client.tools.getCall("tool-call-1")).toMatchObject({ state: "waiting-authorization" });
     expect((await client.approvals.listPending()).map((request) => request.family)).toEqual(["exec", "plugin"]);
+    const statuses = client.gateway.watchStatus()[Symbol.asyncIterator]();
+    expect((await statuses.next()).value?.connectionState).toBe("ready");
     const reconnect = client.gateway.reconnect();
+    await expect(statuses.next()).resolves.toMatchObject({ value: { connectionState: "reconnecting", attempt: 1 } });
     await clock.runAll();
     await reconnect;
-    expect((await client.gateway.getStatus()).connectionState).toBe("ready");
+    const ready = (await statuses.next()).value;
+    expect(ready).toMatchObject({ connectionState: "ready", attempt: 0 });
+    expect(await client.gateway.getStatus()).toEqual(ready);
+    await statuses.return?.();
+  });
+
+  it("declares every implemented method and no unsupported method", async () => {
+    const capabilities = await new MockUClawClient().gateway.negotiate();
+    expect([...capabilities.methods]).toEqual([
+      "sessions.list", "sessions.get", "sessions.create", "sessions.delete",
+      "chat.history", "chat.message.get", "chat.send", "chat.abort",
+      "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
+    ]);
   });
 
   it("throws UNSUPPORTED for management capabilities without fixtures", async () => {
@@ -59,5 +75,13 @@ describe("MockUClawClient", () => {
     await expect(client.diagnostics.list()).rejects.toMatchObject({ code: "UNSUPPORTED" });
     await expect(client.approvals.resolveExec({ ref: { family: "exec", id: "approval-exec-1" }, decision: "deny" })).rejects.toMatchObject({ code: "UNSUPPORTED" });
     await expect(client.approvals.resolvePlugin({ ref: { family: "plugin", id: "approval-plugin-1" }, decision: "deny" })).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    const unsupported = await client.models.list().catch((error: unknown) => error) as { uclawError: unknown };
+    expect(UClawErrorSchema.parse(unsupported.uclawError).code).toBe("UNSUPPORTED");
+  });
+
+  it("normalizes public not-found errors", async () => {
+    const client = new MockUClawClient();
+    const error = await client.sessions.get("missing").catch((reason: unknown) => reason) as { uclawError: unknown };
+    expect(UClawErrorSchema.parse(error.uclawError)).toMatchObject({ code: "NOT_FOUND", retryable: false });
   });
 });

@@ -1,5 +1,6 @@
 import {
   capabilitySetFromWire,
+  UClawErrorSchema,
   type CapabilitySet,
   type GatewayConnectionState,
   type GatewayStatus,
@@ -39,15 +40,30 @@ export interface OpenClawTransport {
   close(): void;
 }
 
-export class UClawUnsupportedError extends Error {
+export class UClawUnsupportedError extends AdapterServiceError {
   readonly code = "UNSUPPORTED";
   readonly retryable = false;
 
   constructor(capability: string) {
-    super(`Capability is not supported: ${capability}`);
+    const message = `Capability is not supported: ${capability}`;
+    super(message, UClawErrorSchema.parse({
+      code: "UNSUPPORTED", message, retryable: false,
+      recoveryActions: [], causeDetails: { capability },
+    }));
     this.name = "UClawUnsupportedError";
   }
 }
+
+export const OPENCLAW_IMPLEMENTED_METHODS = [
+  "sessions.list", "sessions.get", "sessions.create", "sessions.delete",
+  "chat.history", "chat.message.get", "chat.send", "chat.abort",
+  "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
+] as const;
+
+const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);
+const implementedEvents = new Set([
+  "chat", "session.tool", "exec.approval.requested", "plugin.approval.requested",
+]);
 
 const SessionPageSchema = z.object({
   sessions: z.array(RawSessionSchema),
@@ -86,7 +102,7 @@ interface QueueWaiter<T> {
   reject(error: Error): void;
 }
 
-class AsyncEventQueue<T> {
+export class AsyncEventQueue<T> {
   private readonly values: T[] = [];
   private readonly waiters: Array<QueueWaiter<T>> = [];
   private ended = false;
@@ -98,6 +114,9 @@ class AsyncEventQueue<T> {
     const waiter = this.waiters.shift();
     if (waiter === undefined) this.values.push(value);
     else waiter.resolve({ value, done: false });
+    if (terminal) {
+      for (const pending of this.waiters.splice(0)) pending.resolve({ value: undefined, done: true });
+    }
   }
 
   fail(error: Error): void {
@@ -171,8 +190,7 @@ export class OpenClawClient implements UClawClient {
     getStatus: async () => this.gatewayStatus(),
     watchStatus: (signal) => this.watchGatewayStatus(signal),
     reconnect: async () => {
-      this.statusAttempt = this.reconnectAttempt + 1;
-      this.setStatus("reconnecting");
+      this.setStatus("reconnecting", this.reconnectAttempt + 1);
       await this.reconnectPolicy.wait(this.reconnectAttempt);
       this.removeSequenceGapListener?.();
       this.removeSequenceGapListener = undefined;
@@ -183,12 +201,9 @@ export class OpenClawClient implements UClawClient {
       this.hello = undefined;
       try {
         await this.gateway.negotiate();
-        this.reconnectAttempt = 0;
-        this.statusAttempt = 0;
       } catch (error) {
         this.reconnectAttempt += 1;
-        this.statusAttempt = this.reconnectAttempt;
-        this.setStatus("failed");
+        this.setStatus("failed", this.reconnectAttempt);
         throw error;
       }
     },
@@ -379,11 +394,12 @@ export class OpenClawClient implements UClawClient {
       this.hello = hello;
       this.capabilities = capabilitySetFromWire({
         protocolVersion: 4,
-        methods: hello.features.methods.filter((method) => method !== "exec.approval.resolve" && method !== "plugin.approval.resolve"),
-        events: hello.features.events,
+        methods: hello.features.methods.filter((method) => implementedMethods.has(method)),
+        events: hello.features.events.filter((event) => implementedEvents.has(event)),
         features: { attachments: false, approvalResolve: false },
       });
-      this.setStatus("ready");
+      this.reconnectAttempt = 0;
+      this.setStatus("ready", 0);
       return this.capabilities;
     }).catch((error) => {
       this.setStatus("failed");
@@ -426,9 +442,10 @@ export class OpenClawClient implements UClawClient {
     });
   }
 
-  private setStatus(state: GatewayConnectionState): void {
-    if (this.statusState === state) return;
+  private setStatus(state: GatewayConnectionState, attempt = this.statusAttempt): void {
+    if (this.statusState === state && this.statusAttempt === attempt) return;
     this.statusState = state;
+    this.statusAttempt = attempt;
     this.statusSince = this.now();
     const status = this.gatewayStatus();
     for (const subscriber of this.statusSubscribers) subscriber.push(status);
