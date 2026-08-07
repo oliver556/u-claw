@@ -14,6 +14,10 @@ export interface RendererClientBridge {
   subscribe(listener: (event: ClientIpcEvent) => void): () => void;
 }
 
+export interface RendererClient extends UClawClient {
+  dispose(): void;
+}
+
 export class RendererClientError extends Error implements UClawError {
   readonly code: UClawError["code"];
   readonly retryable: boolean;
@@ -60,6 +64,11 @@ class EventQueue<T> {
     for (const waiter of this.waiters.splice(0)) waiter.resolve({ value: undefined, done: true });
   }
 
+  cancel(): void {
+    this.values.splice(0);
+    this.end();
+  }
+
   fail(error: UClawError): void {
     this.failure = error;
     this.ended = true;
@@ -67,6 +76,10 @@ class EventQueue<T> {
   }
 
   next(signal?: AbortSignal): Promise<IteratorResult<T>> {
+    if (signal?.aborted) {
+      this.cancel();
+      return Promise.resolve({ value: undefined, done: true });
+    }
     const value = this.values.shift();
     if (value !== undefined) return Promise.resolve({ value, done: false });
     if (this.failure) return Promise.reject(new RendererClientError(this.failure));
@@ -75,6 +88,7 @@ class EventQueue<T> {
       const onAbort = () => {
         const index = this.waiters.indexOf(waiter);
         if (index >= 0) this.waiters.splice(index, 1);
+        this.cancel();
         resolve({ value: undefined, done: true });
       };
       const waiter = {
@@ -90,11 +104,13 @@ class EventQueue<T> {
 let sequence = 0;
 const nextId = (prefix: string) => `${prefix}-${++sequence}`;
 
-export function createRendererClient(bridge: RendererClientBridge): UClawClient {
-  const sendQueues = new Map<string, EventQueue<MessageEvent>>();
+export function createRendererClient(bridge: RendererClientBridge): RendererClient {
+  type SendQueueState = { queue: EventQueue<MessageEvent> };
+  const sendQueues = new Map<string, SendQueueState>();
   const subscriptionQueues = new Map<string, EventQueue<unknown>>();
-  bridge.subscribe((event) => {
-    if (event.event === "chat.send-event") sendQueues.get(event.clientRequestId)?.push(event.payload);
+  let unsubscribe: (() => void) | undefined;
+  const onEvent = (event: ClientIpcEvent): void => {
+    if (event.event === "chat.send-event") sendQueues.get(event.clientRequestId)?.queue.push(event.payload);
     else if (event.event === "subscription.closed") {
       const queue = subscriptionQueues.get(event.subscriptionId);
       if (event.error) queue?.fail(event.error);
@@ -103,13 +119,20 @@ export function createRendererClient(bridge: RendererClientBridge): UClawClient 
     else subscriptionQueues.get(event.subscriptionId)?.push(
       event.event === "gateway.status" ? gatewayStatusFromWire(event.payload) : event.payload,
     );
-  });
+  };
+  const ensureSubscribed = (): void => {
+    unsubscribe ??= bridge.subscribe(onEvent);
+  };
 
-  const invoke = async <T>(method: ClientIpcRequest["method"], params: object): Promise<T> => {
+  const invokeRaw = async <T>(method: ClientIpcRequest["method"], params: object): Promise<T> => {
     const request = { method, requestId: nextId("renderer"), params } as ClientIpcRequest;
     const response = await bridge.invoke(request);
     if (!response.ok) throw new RendererClientError(response.error);
     return response.result as T;
+  };
+  const invoke = async <T>(method: ClientIpcRequest["method"], params: object): Promise<T> => {
+    ensureSubscribed();
+    return invokeRaw(method, params);
   };
 
   const subscribe = <T>(method: "gateway.watch-status" | "chat.watch", params: object, signal?: AbortSignal): AsyncIterable<T> => {
@@ -117,7 +140,14 @@ export function createRendererClient(bridge: RendererClientBridge): UClawClient 
     const queue = new EventQueue<T>();
     subscriptionQueues.set(subscriptionId, queue as EventQueue<unknown>);
     return (async function* () {
+      const cancel = () => {
+        if (subscriptionQueues.get(subscriptionId) === queue) subscriptionQueues.delete(subscriptionId);
+        queue.cancel();
+        void invokeRaw("subscriptions.cancel", { subscriptionId }).catch(() => undefined);
+      };
+      signal?.addEventListener("abort", cancel, { once: true });
       try {
+        if (signal?.aborted) return;
         await invoke(method, { ...params, subscriptionId });
         while (true) {
           const next = await queue.next(signal);
@@ -125,8 +155,9 @@ export function createRendererClient(bridge: RendererClientBridge): UClawClient 
           yield next.value;
         }
       } finally {
-        subscriptionQueues.delete(subscriptionId);
-        await invoke("subscriptions.cancel", { subscriptionId }).catch(() => undefined);
+        signal?.removeEventListener("abort", cancel);
+        if (subscriptionQueues.get(subscriptionId) === queue) subscriptionQueues.delete(subscriptionId);
+        await invokeRaw("subscriptions.cancel", { subscriptionId }).catch(() => undefined);
       }
     })();
   };
@@ -148,14 +179,24 @@ export function createRendererClient(bridge: RendererClientBridge): UClawClient 
       watch: (sessionId, signal) => subscribe("chat.watch", { sessionId }, signal),
       send: (input, signal) => {
         const queue = new EventQueue<MessageEvent>(true);
-        sendQueues.set(input.clientRequestId, queue);
+        const state = { queue };
         return (async function* () {
           let runId: string | undefined;
           let cancelPending: (() => void) | undefined;
           try {
             if (signal?.aborted) return;
+            sendQueues.get(input.clientRequestId)?.queue.cancel();
+            sendQueues.set(input.clientRequestId, state);
             const pending = invoke<{ runId: string }>("chat.send", input);
-            cancelPending = () => { void invoke("chat.cancel-stream", { clientRequestId: input.clientRequestId }).catch(() => undefined); };
+            cancelPending = () => {
+              if (sendQueues.get(input.clientRequestId) !== state) {
+                queue.cancel();
+                return;
+              }
+              sendQueues.delete(input.clientRequestId);
+              queue.cancel();
+              void invokeRaw("chat.cancel-stream", { clientRequestId: input.clientRequestId }).catch(() => undefined);
+            };
             signal?.addEventListener("abort", cancelPending, { once: true });
             let accepted: { runId: string };
             try {
@@ -165,6 +206,7 @@ export function createRendererClient(bridge: RendererClientBridge): UClawClient 
               throw error;
             }
             runId = accepted.runId;
+            if (signal?.aborted) return;
             while (true) {
               const next = await queue.next(signal);
               if (next.done) return;
@@ -172,9 +214,10 @@ export function createRendererClient(bridge: RendererClientBridge): UClawClient 
             }
           } finally {
             if (cancelPending) signal?.removeEventListener("abort", cancelPending);
-            sendQueues.delete(input.clientRequestId);
-            if (signal?.aborted && runId) await invoke("chat.abort", { runId }).catch(() => undefined);
-            await invoke("chat.cancel-stream", { clientRequestId: input.clientRequestId }).catch(() => undefined);
+            const ownsStream = sendQueues.get(input.clientRequestId) === state;
+            if (ownsStream) sendQueues.delete(input.clientRequestId);
+            if (signal?.aborted && runId) await invokeRaw("chat.abort", { runId }).catch(() => undefined);
+            if (ownsStream) await invokeRaw("chat.cancel-stream", { clientRequestId: input.clientRequestId }).catch(() => undefined);
           }
         })();
       },
@@ -189,5 +232,19 @@ export function createRendererClient(bridge: RendererClientBridge): UClawClient 
     skills: { list: () => invoke("skills.list", {}) }, channels: { list: () => invoke("channels.list", {}) },
     files: { list: (parentId, page = {}) => invoke("files.list", { ...(parentId ? { parentId } : {}), ...page }), readText: (fileId) => invoke("files.read-text", { fileId }) },
     diagnostics: { list: () => invoke("diagnostics.list", {}), listLogs: (page = {}) => invoke("diagnostics.list-logs", page) },
+    dispose: () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      for (const [subscriptionId, queue] of subscriptionQueues) {
+        queue.cancel();
+        void invokeRaw("subscriptions.cancel", { subscriptionId }).catch(() => undefined);
+      }
+      subscriptionQueues.clear();
+      for (const [clientRequestId, state] of sendQueues) {
+        state.queue.cancel();
+        void invokeRaw("chat.cancel-stream", { clientRequestId }).catch(() => undefined);
+      }
+      sendQueues.clear();
+    },
   };
 }
