@@ -105,11 +105,50 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
     expect(JSON.stringify(conversationMessages)).not.toMatch(/(?:api[_-]?key|authorization|bearer |password|secret|sk-(?:proj-)?[A-Za-z0-9_-]{8,})/i);
   });
 
+  it("rejects fixtures whose RPC methods do not match their captured operation", () => {
+    const history = structuredClone(fixture("chat.history.json")) as any;
+    history.requestFrame.method = "chat.send";
+    expect(OpenClawHistoryFixtureSchema.safeParse(history).success).toBe(false);
+
+    const messageGet = structuredClone(fixture("chat.message.get.json")) as any;
+    messageGet.success.requestFrame.method = "chat.history";
+    expect(OpenClawMessageGetFixtureSchema.safeParse(messageGet).success).toBe(false);
+
+    const approvals = structuredClone(fixture("approvals.json")) as any;
+    approvals.exec.allowOnce.listing.requestFrame.method = "plugin.approval.list";
+    expect(OpenClawApprovalsFixtureSchema.safeParse(approvals).success).toBe(false);
+
+    const sessions = structuredClone(fixture("sessions.patch.json")) as any;
+    sessions.modelReadback.requestFrame.method = "sessions.patch";
+    expect(OpenClawSessionsPatchFixtureSchema.safeParse(sessions).success).toBe(false);
+
+    const attachments = structuredClone(fixture("attachments.json")) as any;
+    attachments.cases[0].requestFrame.method = "chat.history";
+    expect(OpenClawAttachmentFixtureSchema.safeParse(attachments).success).toBe(false);
+  });
+
+  it("rejects fixtures whose RPC response id does not match the request id", () => {
+    const cases: Array<[any, any, (value: any) => any]> = [
+      [OpenClawHistoryFixtureSchema, fixture("chat.history.json"), (value) => value],
+      [OpenClawMessageGetFixtureSchema, fixture("chat.message.get.json"), (value) => value.success],
+      [OpenClawApprovalsFixtureSchema, fixture("approvals.json"), (value) => value.exec.unavailable.cleanup],
+      [OpenClawSessionsPatchFixtureSchema, fixture("sessions.patch.json"), (value) => value.model],
+      [OpenClawAttachmentFixtureSchema, fixture("attachments.json"), (value) => value.cases[0]],
+    ];
+    for (const [schema, raw, selectCase] of cases) {
+      const mutated = structuredClone(raw);
+      selectCase(mutated).responseFrame.id = "mismatched-response-id";
+      expect(schema.safeParse(mutated).success).toBe(false);
+    }
+  });
+
   it("locks package, runtime schema, capture harness, raw captures, and fixture hashes", () => {
     const provenance = fixture("provenance.json") as {
       openClawVersion: string;
       buildCommit: string;
       captureHarnessSha256: string;
+      captureStateHelperSha256: string;
+      captureCleanupHelperSha256: string;
       sanitizerSha256: string;
       npmTarballResolved: string;
       npmTarballIntegrity: string;
@@ -125,6 +164,8 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
       capture: { runtime: "OpenClaw Gateway 2026.7.1-2 on Node.js 24.15.0" },
     });
     expect(provenance.captureHarnessSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/capture-openclaw-v4.mjs"))).digest("hex"));
+    expect(provenance.captureStateHelperSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/capture-state.mjs"))).digest("hex"));
+    expect(provenance.captureCleanupHelperSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/capture-cleanup.mjs"))).digest("hex"));
     expect(provenance.sanitizerSha256).toBe(createHash("sha256").update(readFileSync(resolve(productDir, "scripts/sanitize-openclaw-v4-capture.mjs"))).digest("hex"));
     expect(Object.keys(provenance.rawCaptureSha256)).toHaveLength(6);
     for (const [name, expected] of Object.entries(provenance.fixtureSha256)) expect(sha256(name)).toBe(expected);
