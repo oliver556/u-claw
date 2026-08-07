@@ -1,0 +1,72 @@
+import { z } from "zod";
+
+import { ISODateTimeSchema, ResourceRefSchema, StringMapValueSchema } from "./common.js";
+import { UClawErrorSummarySchema } from "./errors.js";
+
+export const ToolStateSchema = z.enum(["pending", "running", "succeeded", "failed", "cancelled"]);
+export type ToolState = z.infer<typeof ToolStateSchema>;
+
+export const ToolRiskSchema = z.enum(["low", "medium", "high", "critical", "unknown"]);
+export type ToolRisk = z.infer<typeof ToolRiskSchema>;
+
+export const ToolCallSchema = z
+  .object({
+    id: z.string().min(1),
+    sessionId: z.string().min(1),
+    runId: z.string().min(1).optional(),
+    messageId: z.string().min(1).optional(),
+    toolId: z.string().min(1),
+    displayName: z.string().min(1),
+    state: ToolStateSchema,
+    risk: ToolRiskSchema,
+    inputSummary: z.record(z.string(), StringMapValueSchema).optional(),
+    outputSummary: z.record(z.string(), StringMapValueSchema).optional(),
+    startedAt: ISODateTimeSchema.optional(),
+    finishedAt: ISODateTimeSchema.optional(),
+    error: UClawErrorSummarySchema.optional(),
+  })
+  .strict();
+export type ToolCall = z.infer<typeof ToolCallSchema>;
+
+export const ApprovalPermissionSchema = z
+  .object({
+    kind: z.enum(["file-read", "file-write", "process", "network", "credential", "other"]),
+    scope: z.string().min(1),
+    description: z.string().min(1),
+  })
+  .strict();
+export type ApprovalPermission = z.infer<typeof ApprovalPermissionSchema>;
+
+export const ApprovalDecisionSchema = z.enum(["allow-once", "allow-session", "deny"]);
+export type ApprovalDecision = z.infer<typeof ApprovalDecisionSchema>;
+
+const ApprovalRequestBaseSchema = z.object({
+  id: z.string().min(1),
+  sessionId: z.string().min(1).optional(),
+  subject: ResourceRefSchema,
+  title: z.string().min(1),
+  description: z.string().min(1),
+  risk: ToolRiskSchema,
+  permissions: z.array(ApprovalPermissionSchema),
+  choices: z.array(ApprovalDecisionSchema).min(1),
+  expiresAt: ISODateTimeSchema.optional(),
+  status: z.enum(["pending", "resolved", "expired", "cancelled"]),
+});
+
+export const ExecApprovalRequestSchema = ApprovalRequestBaseSchema.extend({
+  family: z.literal("exec"),
+  toolCallId: z.string().min(1).optional(),
+}).strict();
+export type ExecApprovalRequest = z.infer<typeof ExecApprovalRequestSchema>;
+
+export const PluginApprovalRequestSchema = ApprovalRequestBaseSchema.extend({
+  family: z.literal("plugin"),
+  subject: ResourceRefSchema.extend({ kind: z.literal("plugin") }),
+}).strict();
+export type PluginApprovalRequest = z.infer<typeof PluginApprovalRequestSchema>;
+
+export const ApprovalRequestSchema = z.discriminatedUnion("family", [
+  ExecApprovalRequestSchema,
+  PluginApprovalRequestSchema,
+]);
+export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
