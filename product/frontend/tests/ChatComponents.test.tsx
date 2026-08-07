@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApprovalCard } from "../src/features/approvals/ApprovalCard";
 import { resolveApproval } from "../src/features/chat/Conversation";
 import { MessageContent } from "../src/features/chat/MessageContent";
+import { MessageList } from "../src/features/chat/MessageList";
 import { ToolRun } from "../src/features/tools/ToolRun";
 
 afterEach(cleanup);
@@ -38,6 +39,20 @@ describe("ToolRun", () => {
     render(<ToolRun tool={tool} />);
     expect(screen.getByRole("status")).toHaveTextContent(label);
     cleanup();
+  });
+});
+
+describe("MessageList", () => {
+  it("keeps final run tools and approvals visible without duplicating pending items", () => {
+    const tool: ToolCall = { id: "tool-final", sessionId: "session-1", runId: "run-1", toolId: "exec", displayName: "Inspect workspace", state: "waiting-authorization", risk: "high" };
+    const approval: ApprovalRequest = { id: "approval-final", family: "exec", sessionId: "session-1", toolCallId: tool.id, subject: { kind: "toolCall", id: tool.id }, title: "Inspect workspace", description: "Read files", risk: "high", permissions: [{ kind: "file-read", scope: "fixture", description: "Read fixture" }], choices: ["allow-once", "deny"], status: "pending" };
+    const message = { id: "message-final", sessionId: "session-1", runId: "run-1", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:00:00.000Z" };
+    const stream = { order: ["run-1"], runs: { "run-1": { runId: "run-1", sessionId: "session-1", text: "", tools: [tool], approvals: [approval], terminal: "final" as const, finalMessage: message } } };
+
+    render(<MessageList messages={[]} stream={stream} pendingTools={[tool]} pendingApprovals={[approval]} canResolveApprovals={false} onResolveApproval={vi.fn()} />);
+
+    expect(screen.getAllByRole("status").filter((item) => item.textContent?.includes("Inspect workspace"))).toHaveLength(1);
+    expect(screen.getAllByLabelText(/命令执行授权/)).toHaveLength(1);
   });
 });
 
