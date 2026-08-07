@@ -79,6 +79,10 @@ test("mobile titlebar and icon controls preserve touch target sizes", async ({ p
     expect(box?.width).toBeGreaterThanOrEqual(44);
     expect(box?.height).toBeGreaterThanOrEqual(44);
   }
+
+  await page.getByRole("button", { name: "展开会话栏" }).click();
+  const sessionSearch = await page.locator(".session-search").boundingBox();
+  expect(sessionSearch?.height).toBeGreaterThanOrEqual(44);
 });
 
 test("icon-only window controls expose tooltips", async ({ page }) => {
