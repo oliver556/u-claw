@@ -17,5 +17,5 @@ export type {
   HelloOk,
   WebSocketLike,
 } from "./transport/gateway-websocket.js";
-export { RpcClosedError, RpcRemoteError, RpcRouter, RpcTimeoutError } from "./transport/rpc-router.js";
+export { AdapterServiceError, RpcClosedError, RpcProtocolError, RpcRemoteError, RpcRouter, RpcTimeoutError } from "./transport/rpc-router.js";
 export type { EventFrame, JsonValue, RpcRouterOptions, RpcSocketLike } from "./transport/rpc-router.js";

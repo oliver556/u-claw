@@ -1,3 +1,4 @@
+import { UClawErrorCodeSchema, UClawErrorSchema, type UClawError } from "@uclaw/shared";
 import { z } from "zod";
 
 import { redactAdapterLog } from "../redaction.js";
@@ -11,14 +12,14 @@ const EventFrameSchema = z.object({
   payload: z.json(),
   seq: z.number().int().nonnegative().optional(),
   stateVersion: z.number().int().nonnegative().optional(),
-});
+}).strict();
 
 const SuccessResponseSchema = z.object({
   type: z.literal("res"),
   id: z.string().min(1),
   ok: z.literal(true),
   payload: z.json(),
-});
+}).strict();
 
 const ErrorResponseSchema = z.object({
   type: z.literal("res"),
@@ -29,8 +30,8 @@ const ErrorResponseSchema = z.object({
     message: z.string().min(1),
     retryable: z.boolean().optional(),
     retryAfterMs: z.number().int().nonnegative().optional(),
-  }),
-});
+  }).strict(),
+}).strict();
 
 const IncomingFrameSchema = z.union([
   EventFrameSchema,
@@ -40,29 +41,66 @@ const IncomingFrameSchema = z.union([
 
 export type EventFrame = z.infer<typeof EventFrameSchema>;
 
-export class RpcTimeoutError extends Error {
+export class AdapterServiceError extends Error {
+  constructor(message: string, readonly uclawError: UClawError) {
+    super(message);
+    this.name = "AdapterServiceError";
+  }
+}
+
+export class RpcTimeoutError extends AdapterServiceError {
   constructor(readonly method: string) {
-    super(`RPC timed out: ${method}`);
+    const message = `RPC timed out: ${method}`;
+    super(message, UClawErrorSchema.parse({
+      code: "TIMEOUT", message, retryable: true,
+      recoveryActions: ["retry"], causeDetails: { operation: method },
+    }));
     this.name = "RpcTimeoutError";
   }
 }
 
-export class RpcClosedError extends Error {
+export class RpcClosedError extends AdapterServiceError {
   constructor() {
-    super("Gateway connection closed");
+    const message = "Gateway connection closed";
+    super(message, UClawErrorSchema.parse({
+      code: "GATEWAY_DISCONNECTED", message, retryable: true,
+      recoveryActions: ["reconnect"], causeDetails: {},
+    }));
     this.name = "RpcClosedError";
   }
 }
 
-export class RpcRemoteError extends Error {
+export class RpcRemoteError extends AdapterServiceError {
   constructor(
     readonly code: string,
     message: string,
     readonly retryable = false,
     readonly retryAfterMs?: number,
   ) {
-    super(redactAdapterLog(message));
+    const safeMessage = redactAdapterLog(message);
+    const knownCode = UClawErrorCodeSchema.safeParse(code);
+    super(safeMessage, UClawErrorSchema.parse({
+      code: knownCode.success ? knownCode.data : "OPERATION_FAILED",
+      message: safeMessage,
+      retryable,
+      recoveryActions: retryable ? ["retry"] : [],
+      causeDetails: {
+        upstreamCode: code,
+        ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+      },
+    }));
     this.name = "RpcRemoteError";
+  }
+}
+
+export class RpcProtocolError extends AdapterServiceError {
+  constructor(readonly method: string) {
+    const message = "Gateway response failed validation";
+    super(message, UClawErrorSchema.parse({
+      code: "PROTOCOL_MAPPING_FAILED", message, retryable: false,
+      recoveryActions: ["open-diagnostics"], causeDetails: { operation: method },
+    }));
+    this.name = "RpcProtocolError";
   }
 }
 
@@ -91,6 +129,7 @@ export class RpcRouter {
   private readonly pending = new Map<string, PendingRequest>();
   private readonly eventListeners = new Map<string, Set<(event: EventFrame) => void>>();
   private readonly sequenceGapListeners = new Set<(gap: SequenceGap) => void>();
+  private readonly closeListeners = new Set<(error: RpcClosedError) => void>();
   private readonly sequenceDetector: SequenceGapDetector;
   private readonly requestTimeoutMs: number;
   private readonly onDiagnostic: (message: string) => void;
@@ -117,7 +156,13 @@ export class RpcRouter {
         reject(new RpcTimeoutError(method));
       }, this.requestTimeoutMs);
       this.pending.set(id, { method, schema, resolve, reject, timeout } as PendingRequest);
-      this.socket.send(JSON.stringify({ type: "req", id, method, params }));
+      try {
+        this.socket.send(JSON.stringify({ type: "req", id, method, params }));
+      } catch {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        reject(new RpcClosedError());
+      }
     });
   }
 
@@ -131,6 +176,19 @@ export class RpcRouter {
   onSequenceGap(listener: (gap: SequenceGap) => void): () => void {
     this.sequenceGapListeners.add(listener);
     return () => this.sequenceGapListeners.delete(listener);
+  }
+
+  onClose(listener: (error: RpcClosedError) => void): () => void {
+    if (this.closed) {
+      listener(new RpcClosedError());
+      return () => undefined;
+    }
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
+  }
+
+  resetSequence(sourceSequence?: number): void {
+    this.sequenceDetector.reset(sourceSequence);
   }
 
   close(): void {
@@ -176,7 +234,7 @@ export class RpcRouter {
     }
     const payload = pending.schema.safeParse(frame.payload);
     if (!payload.success) {
-      pending.reject(new RpcRemoteError("PROTOCOL_MAPPING_FAILED", "Gateway response failed validation"));
+      pending.reject(new RpcProtocolError(pending.method));
       return;
     }
     pending.resolve(payload.data);
@@ -185,11 +243,14 @@ export class RpcRouter {
   private readonly handleClose = (): void => {
     if (this.closed) return;
     this.closed = true;
+    const error = new RpcClosedError();
     for (const request of this.pending.values()) {
       clearTimeout(request.timeout);
-      request.reject(new RpcClosedError());
+      request.reject(error);
     }
     this.pending.clear();
+    for (const listener of this.closeListeners) listener(error);
+    this.closeListeners.clear();
     this.eventListeners.clear();
     this.sequenceGapListeners.clear();
   };
