@@ -1,5 +1,6 @@
 import { ManualClock, MockUClawClient } from "@uclaw/adapter";
 import type { UClawClient } from "@uclaw/shared";
+import { useEffect } from "react";
 
 import { AppProviders } from "./providers";
 import { WorkspaceShell } from "../layout/WorkspaceShell";
@@ -15,15 +16,19 @@ const defaultClient: UClawClient = {
       const source = mockClient.chat.send(input, signal);
       return (async function* autoAdvance() {
         const iterator = source[Symbol.asyncIterator]();
-        let first = true;
-        while (true) {
-          const nextPromise = iterator.next();
-          if (!first) await new Promise((resolve) => window.setTimeout(resolve, 180));
-          await clock.runAll();
-          const next = await nextPromise;
-          if (next.done) return;
-          first = false;
-          yield next.value;
+        try {
+          let first = true;
+          while (true) {
+            const nextPromise = iterator.next();
+            if (!first) await new Promise((resolve) => window.setTimeout(resolve, 180));
+            await clock.runAll();
+            const next = await nextPromise;
+            if (next.done) return;
+            first = false;
+            yield next.value;
+          }
+        } finally {
+          await iterator.return?.();
         }
       })();
     },
@@ -37,10 +42,18 @@ const defaultClient: UClawClient = {
   diagnostics: mockClient.diagnostics,
 };
 
-export function App({ client = defaultClient }: { client?: UClawClient }) {
+export function App({ client }: { client?: UClawClient }) {
+  const resolvedClient = client ?? defaultClient;
+  useEffect(() => {
+    if (client !== undefined) return;
+    const controllableMock = mockClient as MockUClawClient & { setConnectionAvailable(available: boolean): void };
+    const setConnection = (event: Event) => controllableMock.setConnectionAvailable((event as CustomEvent<boolean>).detail);
+    window.addEventListener("uclaw:mock-connection", setConnection);
+    return () => window.removeEventListener("uclaw:mock-connection", setConnection);
+  }, [client]);
   return (
     <AppProviders>
-      <WorkspaceShell client={client} />
+      <WorkspaceShell client={resolvedClient} />
     </AppProviders>
   );
 }

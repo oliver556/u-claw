@@ -27,6 +27,8 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
   const [activeSession, setActiveSession] = useState<Session>();
   const [capabilities, setCapabilities] = useState<CapabilitySet>();
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus>();
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [activity, setActivity] = useState<Record<string, string[]>>({});
 
   const selectSession = useCallback(async (sessionId: string) => {
     try { setActiveSession(await client.sessions.get(sessionId)); }
@@ -86,6 +88,20 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
     }
   };
 
+  const refreshSessions = async () => {
+    try {
+      const page = await client.sessions.list();
+      setSessions(page.items);
+      if (activeSession !== undefined) setActiveSession(await client.sessions.get(activeSession.id));
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : "会话刷新失败");
+    }
+  };
+
+  const appendActivity = (sessionId: string, message: string) => {
+    setActivity((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), message] }));
+  };
+
   return <div className="app-shell">
     <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById("main")?.focus(); }}>跳到主要内容</a>
     <AppTitlebar />
@@ -95,10 +111,10 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
       <main id="main" className="main-canvas" tabIndex={-1}>
         {isWork ? activeSession === undefined
           ? <section className="work-canvas workspace-placeholder"><header className="canvas-head"><div className="canvas-title">{!sessionsOpen ? <Tooltip title="展开会话栏"><button className="icon-button" type="button" aria-label="展开会话栏" onClick={() => setSessionsOpen(true)}><PanelLeft /></button></Tooltip> : null}<strong>工作区</strong></div>{!contextOpen ? <Tooltip title="展开上下文舱"><button className="icon-button" type="button" aria-label="展开上下文舱" onClick={() => setContextOpen(true)}><PanelRight /></button></Tooltip> : null}</header><div className="conversation-state"><FolderArchive /><strong>{sessionState === "loading" ? "正在准备工作区" : "还没有会话"}</strong></div></section>
-          : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
+          : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={() => void refreshSessions()} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
           : <SecondaryView title={route.label} description={route.description} />}
       </main>
-      {isWork && contextOpen ? <ContextPanel onClose={() => setContextOpen(false)} /> : null}
+      {isWork && contextOpen ? <ContextPanel client={client} session={activeSession} capabilities={capabilities} activity={activeSession === undefined ? [] : activity[activeSession.id] ?? []} onClose={() => setContextOpen(false)} /> : null}
     </div>
   </div>;
 }

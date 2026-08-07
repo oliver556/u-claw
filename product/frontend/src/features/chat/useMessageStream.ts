@@ -61,13 +61,19 @@ export function useMessageStream(onEvent?: (event: MessageEvent) => void) {
   const [state, dispatch] = useReducer(messageEventReducer, initialStreamState);
 
   const consume = useCallback(async (source: AsyncIterable<MessageEvent>) => {
-    let terminal: MessageEvent | undefined;
-    for await (const event of source) {
-      dispatch(event);
-      onEvent?.(event);
-      if (event.type === "final" || event.type === "aborted" || event.type === "error") terminal = event;
+    const iterator = source[Symbol.asyncIterator]();
+    try {
+      while (true) {
+        const item = await iterator.next();
+        if (item.done) return undefined;
+        const event = item.value;
+        dispatch(event);
+        onEvent?.(event);
+        if (event.type === "final" || event.type === "aborted" || event.type === "error") return event;
+      }
+    } finally {
+      await iterator.return?.();
     }
-    return terminal;
   }, [onEvent]);
 
   return { state, consume };

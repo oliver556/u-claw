@@ -220,6 +220,19 @@ export class MockUClawClient implements UClawClient {
   readonly files: UClawClient["files"] = { list: async () => this.unsupported("files.list"), readText: async () => this.unsupported("files.readText") };
   readonly diagnostics: UClawClient["diagnostics"] = { list: async () => this.unsupported("diagnostics.list"), listLogs: async () => this.unsupported("logs.tail") };
 
+  setConnectionAvailable(available: boolean): void {
+    this.publishStatus({
+      ...this.status,
+      connectionState: available ? "ready" : "failed",
+      phase: available ? "available" : "failed",
+      processAlive: available,
+      serviceReady: available,
+      businessAvailable: available,
+      since: this.clock.now(),
+      attempt: 0,
+    });
+  }
+
   private async *watchGatewayStatus(signal?: AbortSignal): AsyncIterable<GatewayStatus> {
     if (signal?.aborted === true) return;
     const queue = new AsyncEventQueue<GatewayStatus>();
@@ -255,6 +268,12 @@ export class MockUClawClient implements UClawClient {
   private async *sendMessage(input: SendMessageInput, signal?: AbortSignal): AsyncIterable<MessageEvent> {
     this.requireSession(input.sessionId);
     if (input.blocks.some((block) => block.type === "attachment")) throw new UClawUnsupportedError("chat.send.attachments");
+    const text = input.blocks.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n");
+    const userMessage = MessageSchema.parse({
+      id: `message-${++this.messageCounter}`, sessionId: input.sessionId, role: "user", status: "completed",
+      blocks: [{ id: `block-${this.messageCounter}`, type: "text", text, format: "plain" }], createdAt: this.clock.now(),
+    });
+    this.requireMessages(input.sessionId).push(userMessage);
     const runId = `run-${++this.runCounter}`;
     yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "started", runId, sessionId: input.sessionId }));
     if (this.isRunAborted(runId, signal)) {
@@ -267,6 +286,20 @@ export class MockUClawClient implements UClawClient {
       return;
     }
     yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "delta", runId, mode: "append", text: "Fixture " }));
+    const tool = ToolCallSchema.parse({
+      id: `tool-call-${runId}`, sessionId: input.sessionId, runId, toolId: "exec", displayName: "Inspect workspace",
+      state: "waiting-authorization", risk: "high", inputSummary: { command: "fixture inspect" },
+    });
+    const approval = ApprovalRequestSchema.parse({
+      id: `approval-${runId}`, family: "exec", sessionId: input.sessionId, toolCallId: tool.id,
+      subject: { kind: "toolCall", id: tool.id }, title: "Inspect workspace", description: "Allow fixture workspace inspection",
+      risk: "high", permissions: [{ kind: "file-read", scope: "fixture", description: "Read fixture workspace" }],
+      choices: ["allow-once", "deny"], status: "pending",
+    });
+    this.toolCalls.push(tool);
+    this.approvalRequests.push(approval);
+    yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "tool", runId, tool }));
+    yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "approval", runId, approval }));
     await this.clock.sleep(this.streamDelayMs);
     if (this.isRunAborted(runId, signal)) {
       yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "aborted", runId, reason: "Cancelled" }));
@@ -278,6 +311,15 @@ export class MockUClawClient implements UClawClient {
       blocks: [{ id: `block-${this.messageCounter}`, type: "text", text: "Fixture response", format: "plain" }], createdAt: this.clock.now(),
     });
     this.requireMessages(input.sessionId).push(message);
+    const sessionIndex = this.sessionItems.findIndex((session) => session.id === input.sessionId);
+    const session = this.sessionItems[sessionIndex];
+    this.sessionItems[sessionIndex] = SessionSchema.parse({
+      ...session,
+      title: text.trim().slice(0, 48) || session.title,
+      lastMessagePreview: "Fixture response",
+      updatedAt: this.clock.now(),
+      status: "idle",
+    });
     yield this.publishMessage(input.sessionId, MessageEventSchema.parse({ type: "final", runId, message }));
   }
 

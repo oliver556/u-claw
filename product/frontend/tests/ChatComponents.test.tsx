@@ -14,18 +14,19 @@ import { ToolRun } from "../src/features/tools/ToolRun";
 afterEach(cleanup);
 
 describe("MessageContent", () => {
-  it("allows http links without creating in-app navigation links", () => {
+  it("allows https links without creating in-app navigation links", () => {
     const blocks: ContentBlock[] = [{ id: "markdown", type: "text", format: "markdown", text: "查看[帮助](https://example.com/help)" }];
     render(<MessageContent blocks={blocks} />);
     expect(screen.getByRole("link", { name: "帮助" })).toMatchObject({ target: "_blank", rel: "noreferrer noopener" });
   });
 
-  it("renders unsafe protocols as inert text", () => {
-    const blocks: ContentBlock[] = [{ id: "markdown", type: "text", format: "markdown", text: "[危险](javascript:alert(1))" }];
+  it.each(["http://example.com/help", "/local/help", "javascript:alert(1)"])("renders %s as inert text", (href) => {
+    const blocks: ContentBlock[] = [{ id: "markdown", type: "text", format: "markdown", text: `[不可打开](${href})` }];
     render(<MessageContent blocks={blocks} />);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.getByText("危险")).toBeVisible();
+    expect(screen.getByText("不可打开")).toBeVisible();
   });
+
 });
 
 describe("ToolRun", () => {
