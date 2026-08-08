@@ -30,8 +30,11 @@ export interface DesktopWindow {
 export interface BrowserWindowOptionsLike {
   frame: boolean;
   show: boolean;
+  width?: number;
+  height?: number;
   minWidth: number;
   minHeight: number;
+  backgroundColor?: string;
   webPreferences: {
     preload?: string;
     contextIsolation: boolean;
@@ -142,8 +145,11 @@ export async function createMainWindow({
   const window = new BrowserWindow({
     frame: false,
     show: false,
+    width: 1440,
+    height: 900,
     minWidth: 960,
     minHeight: 640,
+    backgroundColor: "#f5f5f5",
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

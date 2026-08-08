@@ -2,7 +2,8 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import type { ClientIpcEvent, ClientIpcRequest, IpcResponse, WindowIpcRequest } from "@uclaw/shared";
+import { ManualClock, MockUClawClient } from "@uclaw/adapter";
+import type { ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, UClawClient, WindowIpcRequest } from "@uclaw/shared";
 import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +12,32 @@ import { App } from "../src/app/App";
 
 const renderApp = () => render(<App />);
 const getComputedStyle = window.getComputedStyle.bind(window);
+
+const statusFixture = (overrides: Partial<GatewayStatus> = {}): GatewayStatus => ({
+  connectionState: "ready",
+  protocolVersion: 4,
+  phase: "available",
+  processAlive: true,
+  serviceReady: true,
+  businessAvailable: true,
+  since: "2026-08-09T00:00:00.000Z",
+  attempt: 1,
+  usb: { state: "available", dataWritable: true, displayName: "U-Claw" },
+  ...overrides,
+});
+
+function clientWithStatus(status: GatewayStatus, reconnect: UClawClient["gateway"]["reconnect"] = async () => undefined): UClawClient {
+  const mock = new MockUClawClient({ clock: new ManualClock("2026-08-09T00:00:00.000Z") });
+  return {
+    ...mock,
+    gateway: {
+      ...mock.gateway,
+      getStatus: async () => status,
+      watchStatus: async function* () { yield status; },
+      reconnect,
+    },
+  };
+}
 
 describe("U-Claw application shell", () => {
   afterEach(() => {
@@ -40,6 +67,8 @@ describe("U-Claw application shell", () => {
     renderApp();
 
     expect((await screen.findAllByText("还没有会话")).length).toBeGreaterThan(0);
+    expect(screen.getByText("U 盘检测中")).toBeVisible();
+    expect(screen.getByText("Gateway 启动中")).toBeVisible();
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "sessions.list", params: {} }));
   });
 
@@ -98,6 +127,89 @@ describe("U-Claw application shell", () => {
 
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "open-advanced-console", params: {} }));
     expect(JSON.stringify(invoke.mock.calls)).not.toContain("url");
+  });
+
+  it("keeps live USB, Gateway, and model status visible with Chinese recovery actions", async () => {
+    const status = {
+      connectionState: "degraded",
+      protocolVersion: 4,
+      phase: "degraded",
+      processAlive: true,
+      serviceReady: true,
+      businessAvailable: false,
+      since: "2026-08-09T00:00:00.000Z",
+      attempt: 1,
+      activeModel: { id: "gpt-5", label: "GPT-5" },
+      usb: { state: "read-only", dataWritable: false, displayName: "U-Claw" },
+      error: {
+        code: "USB_READ_ONLY",
+        message: "U 盘数据目录只读",
+        retryable: false,
+        recoveryActions: ["open-diagnostics", "safe-exit"],
+        causeDetails: {},
+      },
+    } satisfies GatewayStatus;
+    const mock = new MockUClawClient({ clock: new ManualClock("2026-08-09T00:00:00.000Z") });
+    const reconnect = vi.fn(async () => undefined);
+    const client: UClawClient = {
+      ...mock,
+      gateway: {
+        ...mock.gateway,
+        getStatus: async () => status,
+        watchStatus: async function* () { yield status; },
+        reconnect,
+      },
+    };
+    const invoke = vi.fn(async (request: WindowIpcRequest): Promise<IpcResponse> => ({ ...request, ok: true, result: null }));
+    window.uclaw = { window: { invoke } };
+
+    render(<App client={client} />);
+
+    expect(await screen.findByText("U 盘只读")).toBeVisible();
+    expect(screen.getByText("Gateway 异常")).toBeVisible();
+    expect(screen.getByText("GPT-5")).toBeVisible();
+    expect(screen.getByText("U 盘数据目录只读").closest("[role=alert]")).toHaveTextContent("错误码：USB_READ_ONLY");
+    fireEvent.click(screen.getByRole("link", { name: "查看诊断" }));
+    expect(screen.getByRole("heading", { name: "系统" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "安全退出" }));
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "close", params: {} }));
+    expect(reconnect).not.toHaveBeenCalled();
+  });
+
+  it("marks an available but unwritable USB drive as warning", async () => {
+    const client = clientWithStatus(statusFixture({
+      usb: { state: "available", dataWritable: false, displayName: "U-Claw" },
+    }));
+
+    render(<App client={client} />);
+
+    const label = await screen.findByText("U 盘不可写");
+    const dot = label.closest(".status-item")?.querySelector(".status-dot");
+    expect(dot).toHaveClass("warning");
+    expect(dot).not.toHaveClass("success");
+  });
+
+  it("reports a rejected reconnect without an unhandled promise", async () => {
+    const reconnect = vi.fn(async () => { throw new Error("reconnect failed"); });
+    const client = clientWithStatus(statusFixture({
+      connectionState: "failed",
+      phase: "failed",
+      businessAvailable: false,
+      error: {
+        code: "GATEWAY_FAILED",
+        message: "Gateway 启动失败",
+        retryable: true,
+        recoveryActions: ["reconnect"],
+        causeDetails: {},
+      },
+    }), reconnect);
+
+    render(<App client={client} />);
+    const recovery = (await screen.findByText("Gateway 启动失败")).closest("[role=alert]");
+    fireEvent.click(within(recovery as HTMLElement).getByRole("button", { name: "重新连接" }));
+
+    expect(await screen.findByText("重新连接失败，请重试")).toBeVisible();
+    expect(reconnect).toHaveBeenCalledOnce();
   });
 
   it("focuses main content from the skip link without changing hash routes", () => {
@@ -300,11 +412,11 @@ describe("U-Claw application shell", () => {
 
   it("supports arrow-key context tabs with linked tabpanels", () => {
     renderApp();
-    const files = screen.getByRole("tab", { name: "文件" });
+    const [firstTab] = screen.getAllByRole("tab");
     const memory = screen.getByRole("tab", { name: "记忆" });
 
-    files.focus();
-    fireEvent.keyDown(files, { key: "ArrowRight" });
+    firstTab!.focus();
+    fireEvent.keyDown(firstTab!, { key: "ArrowRight" });
     expect(memory).toHaveFocus();
     expect(memory).toHaveAttribute("aria-selected", "true");
     expect(memory).toHaveAttribute("aria-controls", "context-panel-memory");
