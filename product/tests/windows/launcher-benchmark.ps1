@@ -859,13 +859,6 @@ function Throw-BenchmarkError {
     throw [LauncherBenchmarkError]::new($Code)
 }
 
-function Write-BenchmarkDiagnostic {
-    param([Parameter(Mandatory)][string]$Code)
-    if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
-        [Console]::Error.WriteLine(('LAUNCHER_BENCHMARK_DIAGNOSTIC_' + $Code))
-    }
-}
-
 function Get-CanonicalAbsolutePath {
     param([Parameter(Mandatory)][string]$InputPath)
 
@@ -1290,27 +1283,18 @@ function Invoke-MandatoryCases {
 
     $newline = Get-CandidateNewline $Candidate.Id
     $ready = '{"status":"ready","candidate":"' + $Candidate.Id + '"}' + $newline
-    $caseDiagnosticPrefix = 'CANDIDATE_' + $Candidate.Id.ToUpperInvariant() + '_CASE_'
     $cases = [ordered]@{}
     $cases['valid-manifest'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['valid-manifest']) 0 $ready '' $null
-    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'VALID_MANIFEST')
     $cases['invalid-sha256'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['invalid-sha256']) 1 '' ('E_PACKAGE_INVALID' + $newline) $null
-    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'INVALID_SHA256')
     $cases['path-traversal'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['path-traversal']) 1 '' ('E_MANIFEST_INVALID' + $newline) $null
-    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'PATH_TRAVERSAL')
     $cases['absolute-path'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['absolute-path']) 1 '' ('E_MANIFEST_INVALID' + $newline) $null
-    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'ABSOLUTE_PATH')
     $cases['absolute-path-unc'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['absolute-path-unc']) 1 '' ('E_MANIFEST_INVALID' + $newline) $null
-    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'ABSOLUTE_PATH_UNC')
     $cases['unicode-space-path'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['unicode-space-path']) 0 $ready '' $null
-    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'UNICODE_SPACE_PATH')
     $cases['sdk-path-removed'] = Invoke-WithoutSdkPath {
         param($sdkFreePath)
         Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['sdk-path-removed']) 0 $ready '' $sdkFreePath
     }
-    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'SDK_PATH_REMOVED')
     $cases['cli-invalid-arguments'] = Test-ExpectedInvocation $Candidate @('--private-secret-path') 1 '' ('E_ARGUMENTS' + $newline) $null
-    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'CLI_INVALID_ARGUMENTS')
     return $cases
 }
 
@@ -1385,21 +1369,15 @@ function Assert-SafeReportValue {
 }
 
 function Invoke-LauncherBenchmark {
-    Write-BenchmarkDiagnostic 'START'
     $safeGoExe = Assert-RegularExecutable $GoExe
     $safeDotnetExe = Assert-RegularExecutable $DotnetExe
     $safeOutputPath = Assert-SafeOutputPath $OutputPath
-    Write-BenchmarkDiagnostic 'PATHS_VALIDATED'
     $commitSha = Resolve-CommitSha
-    Write-BenchmarkDiagnostic 'COMMIT_RESOLVED'
     $goMetadata = Read-BuildMetadata $safeGoExe 'go'
-    Write-BenchmarkDiagnostic 'GO_METADATA_READ'
     $dotnetMetadata = Read-BuildMetadata $safeDotnetExe 'dotnet'
-    Write-BenchmarkDiagnostic 'DOTNET_METADATA_READ'
     if ($goMetadata.commitSha -cne $commitSha -or $dotnetMetadata.commitSha -cne $commitSha) {
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_COMMIT_MISMATCH'
     }
-    Write-BenchmarkDiagnostic 'METADATA_MATCHED'
 
     $candidates = @(
         [pscustomobject]@{ Id = 'go'; Executable = $safeGoExe; Metadata = $goMetadata },
@@ -1410,49 +1388,24 @@ function Invoke-LauncherBenchmark {
     try {
         $fixturesByCandidate = @{}
         $caseResults = @{}
-        $firstMandatoryFailure = $null
         $timings = @{ go = [Collections.Generic.List[double]]::new(); dotnet = [Collections.Generic.List[double]]::new() }
         foreach ($candidate in $candidates) {
-            $candidateDiagnosticPrefix = 'CANDIDATE_' + $candidate.Id.ToUpperInvariant()
-            Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_START')
             $candidateRoot = Join-Path $temporaryRoot $candidate.Id
             [void][IO.Directory]::CreateDirectory($candidateRoot)
             $fixturesByCandidate[$candidate.Id] = New-CandidateFixtures $candidateRoot
-            Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_FIXTURES_CREATED')
             $caseResults[$candidate.Id] = Invoke-MandatoryCases $candidate $fixturesByCandidate[$candidate.Id]
-            Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_CASES_COMPLETED')
-            if ($null -eq $firstMandatoryFailure) {
-                foreach ($case in $caseResults[$candidate.Id].GetEnumerator()) {
-                    if (-not $case.Value) {
-                        $firstMandatoryFailure = 'MANDATORY_FAILURE_' + $candidate.Id.ToUpperInvariant() + '_' +
-                            $case.Key.ToString().ToUpperInvariant().Replace('-', '_')
-                        break
-                    }
-                }
-            }
-        }
-        Write-BenchmarkDiagnostic 'CASES_COMPLETED'
-        if ($null -ne $firstMandatoryFailure) {
-            Write-BenchmarkDiagnostic $firstMandatoryFailure
         }
 
         foreach ($candidate in $candidates) {
-            $warmupDiagnosticPrefix = 'WARMUP_' + $candidate.Id.ToUpperInvariant()
-            Write-BenchmarkDiagnostic ($warmupDiagnosticPrefix + '_START')
             [void](Invoke-TimedReady $candidate $fixturesByCandidate[$candidate.Id]['valid-manifest'])
-            Write-BenchmarkDiagnostic ($warmupDiagnosticPrefix + '_COMPLETED')
         }
         for ($iteration = 0; $iteration -lt $Iterations; $iteration++) {
             $iterationCandidates = if ($iteration % 2 -eq 0) { $candidates } else { @($candidates[1], $candidates[0]) }
             foreach ($candidate in $iterationCandidates) {
-                $timingDiagnosticPrefix = 'TIMING_' + ($iteration + 1) + '_' + $candidate.Id.ToUpperInvariant()
-                Write-BenchmarkDiagnostic ($timingDiagnosticPrefix + '_START')
                 $elapsed = Invoke-TimedReady $candidate $fixturesByCandidate[$candidate.Id]['valid-manifest']
                 $timings[$candidate.Id].Add($elapsed)
-                Write-BenchmarkDiagnostic ($timingDiagnosticPrefix + '_COMPLETED')
             }
         }
-        Write-BenchmarkDiagnostic 'TIMINGS_COMPLETED'
 
         $candidateReports = [ordered]@{}
         foreach ($candidate in $candidates) {
@@ -1481,7 +1434,6 @@ function Invoke-LauncherBenchmark {
             candidates = $candidateReports
         }
         Write-AtomicReport $safeOutputPath $report
-        Write-BenchmarkDiagnostic 'REPORT_WRITTEN'
     }
     finally {
         if (Test-Path -LiteralPath $temporaryRoot) { Remove-Item -LiteralPath $temporaryRoot -Recurse }
