@@ -179,6 +179,10 @@ test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH 
 
 test("PowerShell harness contains descendants in a kill-on-close Windows Job Object", async () => {
   const source = await readFile(harnessUrl, "utf8");
+  const invokeSource = source.slice(
+    source.indexOf("function Invoke-CapturedProcess"),
+    source.indexOf("function Invoke-Taskkill"),
+  );
   for (const api of [
     "CreateJobObjectW",
     "SetInformationJobObject",
@@ -197,6 +201,13 @@ test("PowerShell harness contains descendants in a kill-on-close Windows Job Obj
   assert.match(source, /finally[\s\S]{0,500}\$job\.Dispose\(\)[\s\S]{0,300}\$process\.Dispose\(\)/);
   assert.match(source, /\$job\.Dispose\(\)[\s\S]{0,200}\$jobDisposeFailed\s*=\s*\$true[\s\S]{0,300}PROCESS_JOB_FAILED/);
   assert.doesNotMatch(source, /PROCESS_CAPTURE_TIMEOUT[\s\S]{0,240}Stop-TimedOutProcess/);
+  assert.ok(invokeSource.indexOf("Initialize-ProcessJob") < invokeSource.indexOf("[Diagnostics.Stopwatch]::StartNew()"));
+  assert.ok(invokeSource.indexOf("[LauncherProcessJob]::new()") < invokeSource.indexOf("[Diagnostics.Stopwatch]::StartNew()"));
+  assert.match(invokeSource, /\$stopwatch\s*=\s*\[Diagnostics\.Stopwatch\]::StartNew\(\)\s*\r?\n\s*if \(-not \$process\.Start\(\)\)/);
+  assert.ok(invokeSource.indexOf("$process.Start()") < invokeSource.indexOf("$job.Assign($process.Handle)"));
+  assert.ok(invokeSource.indexOf("$job.Assign($process.Handle)") < invokeSource.indexOf("ReadToEndAsync()"));
+  assert.ok(invokeSource.indexOf("$stopwatch.Stop()") < invokeSource.indexOf("return [pscustomobject]"));
+  assert.ok(invokeSource.indexOf("return [pscustomobject]") < invokeSource.indexOf("$job.Dispose()"));
 });
 
 test("PowerShell harness preserves each candidate's exact newline contract", async () => {

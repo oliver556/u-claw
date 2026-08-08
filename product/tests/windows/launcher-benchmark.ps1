@@ -410,8 +410,8 @@ function Invoke-CapturedProcess {
 
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
-    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
     $job = $null
+    $stopwatch = $null
     try {
         Initialize-ProcessJob
         try {
@@ -420,6 +420,7 @@ function Invoke-CapturedProcess {
         catch {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
         }
+        $stopwatch = [Diagnostics.Stopwatch]::StartNew()
         if (-not $process.Start()) {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_FAILED'
         }
@@ -449,7 +450,9 @@ function Invoke-CapturedProcess {
         }
     }
     finally {
-        $stopwatch.Stop()
+        if ($null -ne $stopwatch) {
+            $stopwatch.Stop()
+        }
         $jobDisposeFailed = $false
         if ($null -ne $job) {
             try { $job.Dispose() } catch { $jobDisposeFailed = $true }
