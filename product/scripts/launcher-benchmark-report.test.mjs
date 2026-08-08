@@ -149,6 +149,34 @@ test("selects the faster candidate at the exact decimal p95 threshold", () => {
   assert.equal(result.reason, "p95-margin");
 });
 
+test("tolerates decimal representation error at exact p95 thresholds", () => {
+  const boundaries = [
+    { better: 0.232, worse: 0.29 },
+    ...[0.07, 2.3, 12_345.67].map((worse) => ({
+      better: worse * (1 - 0.20),
+      worse,
+    })),
+  ];
+
+  for (const { better, worse } of boundaries) {
+    const result = decideLauncher(reports({
+      go: { p95Ms: better, exeBytes: 8_000_000 },
+      dotnet: { p95Ms: worse, exeBytes: 8_000_000 },
+    }));
+    assert.equal(result.selected, "go", `${better} vs ${worse}`);
+    assert.equal(result.reason, "p95-margin", `${better} vs ${worse}`);
+  }
+});
+
+test("does not treat a clearly sub-threshold p95 margin as 20 percent", () => {
+  const result = decideLauncher(reports({
+    go: { p95Ms: 0.24, exeBytes: 8_000_000 },
+    dotnet: { p95Ms: 0.29, exeBytes: 8_000_000 },
+  }));
+  assert.equal(result.selected, "go");
+  assert.equal(result.reason, "documented-tie-breaker");
+});
+
 test("uses the executable median size margin when p95 is within 20 percent", () => {
   const result = decideLauncher(reports({
     go: { p95Ms: 30, exeBytes: 6_000_000 },

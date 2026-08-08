@@ -113,7 +113,11 @@ function marginDecision(summary, eligible, field, threshold, reason) {
   if (worseValue === 0) {
     return null;
   }
-  const meetsThreshold = summary[better][field] <= worseValue * (1 - threshold);
+  const betterValue = summary[better][field];
+  const boundary = worseValue * (1 - threshold);
+  const scale = Math.max(1, Math.abs(betterValue), Math.abs(worseValue), Math.abs(boundary));
+  const tolerance = Number.EPSILON * scale * 4;
+  const meetsThreshold = betterValue <= boundary + tolerance;
   return meetsThreshold ? { selected: better, reason, summary } : null;
 }
 
