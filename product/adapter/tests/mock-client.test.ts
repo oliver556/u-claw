@@ -178,6 +178,16 @@ describe("MockUClawClient", () => {
     await expect(client.models.list()).rejects.toMatchObject({ code: "UNSUPPORTED" });
   });
 
+  it("rejects a model without provider/model identity", async () => {
+    const client = new MockUClawClient();
+    const sessionId = (await client.sessions.list()).items[0].id;
+
+    const error = await client.models.selectForSession(sessionId, "contract-model").catch((reason: unknown) => reason) as { uclawError: unknown };
+
+    expect(UClawErrorSchema.parse(error.uclawError)).toMatchObject({ code: "MODEL_UNAVAILABLE", retryable: false });
+    await expect(client.sessions.get(sessionId)).resolves.not.toHaveProperty("model");
+  });
+
   it("normalizes public not-found errors", async () => {
     const client = new MockUClawClient();
     const error = await client.sessions.get("missing").catch((reason: unknown) => reason) as { uclawError: unknown };

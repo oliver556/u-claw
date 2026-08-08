@@ -572,6 +572,55 @@ describe("OpenClawClient", () => {
     ]);
   });
 
+  it("finds the selected session model on a later sessions.list page", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.patch");
+    transport.fixtures.set("sessions.patch", { ok: true, key: "agent:dev:target" });
+    transport.fixtureQueues.set("sessions.list", [
+      {
+        sessions: [{ key: "agent:dev:other", modelProvider: "contract", model: "contract-other" }],
+        nextCursor: "page-2",
+        hasMore: true,
+      },
+      {
+        sessions: [{ key: "agent:dev:target", modelProvider: "contract", model: "contract-target" }],
+        nextCursor: null,
+        hasMore: false,
+      },
+    ]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await client.models.selectForSession("agent:dev:target", "contract/contract-target");
+
+    expect(transport.requests).toEqual([
+      { method: "sessions.patch", params: { key: "agent:dev:target", model: "contract/contract-target" } },
+      { method: "sessions.list", params: {} },
+      { method: "sessions.list", params: { cursor: "page-2" } },
+    ]);
+  });
+
+  it("rejects a repeated sessions.list readback cursor", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.patch");
+    transport.fixtures.set("sessions.patch", { ok: true, key: "agent:dev:target" });
+    transport.fixtureQueues.set("sessions.list", [
+      { sessions: [], nextCursor: "page-2", hasMore: true },
+      { sessions: [], nextCursor: "page-2", hasMore: true },
+    ]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const error = await client.models.selectForSession("agent:dev:target", "contract/contract-target").catch((reason: unknown) => reason) as { uclawError: unknown };
+
+    expect(UClawErrorSchema.parse(error.uclawError)).toMatchObject({ code: "PROTOCOL_MAPPING_FAILED" });
+    expect(transport.requests).toEqual([
+      { method: "sessions.patch", params: { key: "agent:dev:target", model: "contract/contract-target" } },
+      { method: "sessions.list", params: {} },
+      { method: "sessions.list", params: { cursor: "page-2" } },
+    ]);
+  });
+
   it("reports MODEL_UNAVAILABLE when sessions.patch rejects a selected model", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push("sessions.patch");
@@ -638,6 +687,31 @@ describe("OpenClawClient", () => {
       { method: "sessions.patch", params: { key: "agent:dev:main", model: "contract/contract-main" } },
       { method: "sessions.list", params: {} },
       { method: "sessions.patch", params: { key: "agent:dev:other", model: "contract/contract-alt" } },
+      { method: "sessions.list", params: {} },
+    ]);
+  });
+
+  it("continues the global model write queue after a failed selection", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.patch");
+    transport.requestGateQueues.set("sessions.patch", [
+      Promise.reject(new RpcRemoteError("INVALID_REQUEST", "invalid sessions.patch params")),
+      Promise.resolve({ ok: true, key: "agent:dev:second" }),
+    ]);
+    transport.fixtures.set("sessions.list", {
+      sessions: [{ key: "agent:dev:second", modelProvider: "contract", model: "contract-second" }],
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const first = client.models.selectForSession("agent:dev:first", "contract/contract-first");
+    const second = client.models.selectForSession("agent:dev:second", "contract/contract-second");
+
+    await expect(first).rejects.toMatchObject({ uclawError: { code: "OPERATION_FAILED" } });
+    await expect(second).resolves.toBeUndefined();
+    expect(transport.requests).toEqual([
+      { method: "sessions.patch", params: { key: "agent:dev:first", model: "contract/contract-first" } },
+      { method: "sessions.patch", params: { key: "agent:dev:second", model: "contract/contract-second" } },
       { method: "sessions.list", params: {} },
     ]);
   });

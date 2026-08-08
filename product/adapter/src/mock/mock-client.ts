@@ -20,7 +20,7 @@ import {
 } from "@uclaw/shared";
 
 import type { Clock } from "../reconnect.js";
-import { AsyncEventQueue, UClawUnsupportedError } from "../openclaw-client.js";
+import { AsyncEventQueue, ModelUnavailableError, UClawUnsupportedError } from "../openclaw-client.js";
 import { AdapterServiceError } from "../transport/rpc-router.js";
 
 interface ScheduledSleep {
@@ -258,11 +258,12 @@ export class MockUClawClient implements UClawClient {
       const sessionIndex = this.sessionItems.findIndex((session) => session.id === sessionId);
       const session = this.requireSession(sessionId);
       const separator = modelId.indexOf("/");
-      const providerId = separator > 0 ? modelId.slice(0, separator) : undefined;
-      const label = separator > 0 ? modelId.slice(separator + 1) : modelId;
+      if (separator <= 0 || separator === modelId.length - 1) throw new ModelUnavailableError();
+      const providerId = modelId.slice(0, separator);
+      const label = modelId.slice(separator + 1);
       this.sessionItems[sessionIndex] = SessionSchema.parse({
         ...session,
-        model: { id: modelId, label, ...(providerId === undefined ? {} : { providerId }) },
+        model: { id: modelId, label, providerId },
         updatedAt: this.clock.now(),
       });
     },
