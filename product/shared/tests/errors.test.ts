@@ -179,4 +179,34 @@ describe("error contracts", () => {
       enabled: true,
     });
   });
+
+  it.each([
+    "failed at /Users/alice/private/chat.txt",
+    "failed at /home/alice/private/chat.txt",
+    "failed at C:\\Users\\alice\\private\\chat.txt",
+    "failed at file:///Users/alice/private/chat.txt",
+    "failed at /Users/Alice Smith/private/chat.txt",
+    "failed at /etc/u-claw/config.json",
+    "failed at D:\\private\\chat.txt",
+    "failed at C:/Users/alice/private/chat.txt",
+    "failed at \\\\server\\share\\private\\chat.txt",
+  ])("redacts local filesystem paths from renderer-safe text: %s", (message) => {
+    const parsed = RendererSafeTextSchema.parse(message);
+
+    expect(parsed).toBe("failed at [REDACTED]");
+    expect(parsed).not.toContain("alice");
+    expect(parsed).not.toContain("chat.txt");
+  });
+
+  it.each([
+    [
+      'gateway failed: {"api_key":"unprefixed-secret","access_token":1234567890,"body":"private conversation body"}',
+      "[REDACTED]",
+    ],
+    ['failed at "/Users/alice/private/chat.txt"', 'failed at "[REDACTED]"'],
+    ["opened '/etc/u-claw/config.json'", "opened '[REDACTED]'"],
+    ['Authorization: Bearer "abc def"', "Authorization: Bearer [REDACTED]"],
+  ])("fully redacts quoted or structured sensitive text: %s", (message, expected) => {
+    expect(RendererSafeTextSchema.parse(message)).toBe(expected);
+  });
 });

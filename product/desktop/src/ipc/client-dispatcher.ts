@@ -7,6 +7,9 @@ import {
   GatewayStatusWireSchema,
   MessageSchema,
   ModelSummarySchema,
+  LogSummarySchema,
+  RecoveryActionSchema,
+  UClawErrorCodeSchema,
   RendererSafeSummarySchema,
   SessionSchema,
   SessionSummarySchema,
@@ -26,6 +29,7 @@ import {
   type Message,
   type MessageEvent,
   type ModelSummary,
+  type LogSummary,
   type Session,
   type SessionSummary,
   type ToolCall,
@@ -75,14 +79,39 @@ const rendererErrorMessages: Record<UClawError["code"], string> = {
 };
 
 export function toRendererSafeError(error: unknown): UClawError {
-  const direct = UClawErrorSchema.safeParse(error);
+  const direct = parseRendererErrorCandidate(error);
   if (direct.success) return rendererSafeError(direct.data);
-  const nested = UClawErrorSchema.safeParse((error as { uclawError?: unknown } | null)?.uclawError);
+  const nested = parseRendererErrorCandidate((error as { uclawError?: unknown } | null)?.uclawError);
   if (nested.success) return rendererSafeError(nested.data);
   return rendererSafeError(UClawErrorSchema.parse({
     code: "UNKNOWN", message: "Client operation failed.", retryable: false,
     recoveryActions: [], causeDetails: {},
   }));
+}
+
+function safeCorrelationId(value: unknown): string | undefined {
+  if (typeof value !== "string" || !/^(?:corr-)?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return undefined;
+  return redactRendererText(value) === value ? value : undefined;
+}
+
+function parseRendererErrorCandidate(value: unknown): ReturnType<typeof UClawErrorSchema.safeParse> {
+  const candidate = value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
+  const code = UClawErrorCodeSchema.safeParse(candidate.code);
+  const recoveryActions = Array.isArray(candidate.recoveryActions)
+    ? candidate.recoveryActions.flatMap((action) => {
+        const parsed = RecoveryActionSchema.safeParse(action);
+        return parsed.success ? [parsed.data] : [];
+      })
+    : [];
+  const correlationId = safeCorrelationId(candidate.correlationId);
+  return UClawErrorSchema.safeParse({
+    code: code.success ? code.data : candidate.code,
+    message: "Client operation failed.",
+    retryable: candidate.retryable,
+    recoveryActions,
+    causeDetails: {},
+    ...(correlationId === undefined ? {} : { correlationId }),
+  });
 }
 
 function rendererSafeError(error: UClawError): UClawError {
@@ -92,6 +121,7 @@ function rendererSafeError(error: UClawError): UClawError {
     retryable: error.retryable,
     recoveryActions: error.recoveryActions,
     causeDetails: {},
+    ...(safeCorrelationId(error.correlationId) === undefined ? {} : { correlationId: error.correlationId }),
   });
 }
 
@@ -128,11 +158,45 @@ function rendererSafeChannel(channel: ChannelSummary): ChannelSummary {
   });
 }
 
-function rendererSafeDiagnostic(diagnostic: DiagnosticSummary): DiagnosticSummary {
+function rendererSafeDiagnostic(diagnostic: DiagnosticSummary, index = 0): DiagnosticSummary {
   return DiagnosticSummarySchema.parse({
-    ...diagnostic,
+    id: `diagnostic-${index + 1}`,
+    label: "System diagnostic",
+    state: diagnostic.state,
+    summary: `Diagnostic ${diagnostic.state}.`,
+    repairable: diagnostic.repairable,
     ...(diagnostic.error === undefined ? {} : { error: rendererSafeErrorSummary(diagnostic.error) }),
   });
+}
+
+const logSourceLabels: Record<LogSummary["source"], string> = {
+  launcher: "Launcher",
+  desktop: "Desktop",
+  adapter: "Adapter",
+  gateway: "Gateway",
+  openclaw: "OpenClaw",
+  channel: "Channel",
+};
+
+function rendererSafeLog(log: LogSummary, index: number): LogSummary {
+  const correlationId = safeCorrelationId(log.correlationId);
+  return LogSummarySchema.parse({
+    id: `log-${index + 1}`,
+    timestamp: log.timestamp,
+    level: log.level,
+    source: log.source,
+    message: `${logSourceLabels[log.source]} ${log.level} event.`,
+    ...(correlationId === undefined ? {} : { correlationId }),
+  });
+}
+
+function rendererSafeLogPage(page: Awaited<ReturnType<UClawClient["diagnostics"]["listLogs"]>>) {
+  const nextCursor = page.nextCursor === null ? null : safeCorrelationId(page.nextCursor) ?? null;
+  return {
+    items: page.items.map(rendererSafeLog),
+    nextCursor,
+    hasMore: nextCursor === null ? false : page.hasMore,
+  };
 }
 
 function rendererSafeSessionSummary(session: SessionSummary): SessionSummary {
@@ -315,6 +379,7 @@ export function toRendererSafeResponse(response: IpcResponse): IpcResponse {
     case "models.list": result = response.result.map(rendererSafeModel); break;
     case "channels.list": result = response.result.map(rendererSafeChannel); break;
     case "diagnostics.list": result = response.result.map(rendererSafeDiagnostic); break;
+    case "diagnostics.list-logs": result = rendererSafeLogPage(response.result); break;
   }
   return IpcResponseSchema.parse({ ...response, result });
 }
@@ -472,7 +537,7 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
         }
         case "files.read-text": return success(request, await client.files.readText(request.params.fileId));
         case "diagnostics.list": return success(request, (await client.diagnostics.list()).map(rendererSafeDiagnostic));
-        case "diagnostics.list-logs": return success(request, await client.diagnostics.listLogs(request.params));
+        case "diagnostics.list-logs": return success(request, rendererSafeLogPage(await client.diagnostics.listLogs(request.params)));
         case "subscriptions.cancel": {
           const active = subscriptions.get(request.params.subscriptionId);
           subscriptions.delete(request.params.subscriptionId);

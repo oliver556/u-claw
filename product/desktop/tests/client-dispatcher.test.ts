@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ClientIpcEvent, ClientIpcRequest, GatewayStatus, MessageEvent, ToolCall, UClawClient } from "@uclaw/shared";
 
-import { createClientDispatcher } from "../src/ipc/client-dispatcher.js";
+import { createClientDispatcher, toRendererSafeError } from "../src/ipc/client-dispatcher.js";
 
 class ControlledIterator<T> implements AsyncIterable<T>, AsyncIterator<T> {
   private readonly waiting: Array<{ resolve(value: IteratorResult<T>): void; reject(error: unknown): void }> = [];
@@ -35,6 +35,105 @@ const status = (attempt: number): GatewayStatus => ({
 });
 
 describe("createClientDispatcher stream ownership", () => {
+  it("preserves safe error controls while dropping cause, stack, and unsafe correlation data", () => {
+    const safe = toRendererSafeError({
+      code: "NETWORK_UNREACHABLE",
+      message: "failed at /Users/alice/private/chat.txt",
+      retryable: true,
+      recoveryActions: ["retry", "open-diagnostics"],
+      causeDetails: { operation: "gateway.connect" },
+      correlationId: "corr-550e8400-e29b-41d4-a716-446655440000",
+      cause: { headers: { Authorization: "Bearer cause-secret" }, body: "private conversation body" },
+      stack: "Error: cause-secret at /Users/alice/private/chat.txt",
+    });
+
+    expect(safe).toEqual({
+      code: "NETWORK_UNREACHABLE",
+      message: "Network is unreachable.",
+      retryable: true,
+      recoveryActions: ["retry", "open-diagnostics"],
+      causeDetails: {},
+      correlationId: "corr-550e8400-e29b-41d4-a716-446655440000",
+    });
+    expect(JSON.stringify(safe)).not.toMatch(/cause-secret|private conversation body|\/Users\/alice|"stack"|"cause"/);
+
+    const unsafeCorrelation = toRendererSafeError({
+      code: "TIMEOUT",
+      message: "timeout",
+      retryable: true,
+      recoveryActions: ["retry"],
+      causeDetails: {},
+      correlationId: "Authorization: Bearer correlation-secret",
+    });
+    expect(unsafeCorrelation).not.toHaveProperty("correlationId");
+
+    for (const correlationId of ["987654321", "pk_live_1234567890123456", "arbitraryBearerLikeCredential123"]) {
+      expect(toRendererSafeError({
+        code: "TIMEOUT",
+        message: "timeout",
+        retryable: true,
+        recoveryActions: ["retry"],
+        causeDetails: {},
+        correlationId,
+      })).not.toHaveProperty("correlationId");
+    }
+  });
+
+  it("projects logs and diagnostics to safe export fields without conversation or path content", async () => {
+    const dispatcher = createClientDispatcher({
+      client: clientWith({
+        diagnostics: {
+          list: vi.fn(async () => [{
+            id: "private conversation body diagnostic-secret",
+            label: "Authorization: Bearer diagnostic-secret",
+            state: "failed" as const,
+            summary: "private conversation body at /Users/alice/private/chat.txt",
+            repairable: true,
+            error: { code: "NETWORK_UNREACHABLE" as const, message: "raw upstream failure", retryable: true },
+          }]),
+          listLogs: vi.fn(async () => ({
+            items: [{
+              id: "private conversation body log-secret",
+              timestamp: "2026-08-09T08:00:00.000Z",
+              level: "error" as const,
+              source: "gateway" as const,
+              message: "private conversation body Authorization: Bearer log-secret at C:\\Users\\alice\\chat.txt",
+              correlationId: "550e8400-e29b-41d4-a716-446655440000",
+              headers: { Cookie: "session=log-cookie" },
+              stack: "log-secret",
+            }],
+            nextCursor: null,
+            hasMore: false,
+            rawPayload: { token: 1234567890 },
+          }) as never),
+        },
+      }),
+      sendEvent: vi.fn(),
+    });
+
+    const diagnosticResponse = await dispatcher(request("diagnostics.list", "diagnostics-1", {}));
+    const logResponse = await dispatcher(request("diagnostics.list-logs", "logs-1", {}));
+    const serialized = JSON.stringify([diagnosticResponse, logResponse]);
+
+    expect(diagnosticResponse).toMatchObject({ ok: true, result: [{
+      id: "diagnostic-1",
+      label: "System diagnostic",
+      state: "failed",
+      summary: "Diagnostic failed.",
+      repairable: true,
+      error: { code: "NETWORK_UNREACHABLE", message: "Network is unreachable.", retryable: true },
+    }] });
+    expect(logResponse).toMatchObject({ ok: true, result: { items: [{
+      id: "log-1",
+      level: "error",
+      source: "gateway",
+      message: "Gateway error event.",
+      correlationId: "550e8400-e29b-41d4-a716-446655440000",
+    }], nextCursor: null, hasMore: false } });
+    expect(serialized).not.toMatch(/diagnostic-secret|log-secret|log-cookie|private conversation body|1234567890|alice|chat\.txt|headers|stack|rawPayload/);
+    dispatcher.dispose();
+  });
+
   it("preserves bounded benign tool summaries while redacting renderer-sensitive values", async () => {
     const unsafeTool = {
       id: "tool-summary", sessionId: "session-1", toolId: "exec", displayName: "Run tests",
