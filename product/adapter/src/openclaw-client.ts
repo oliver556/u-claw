@@ -68,7 +68,7 @@ export class UClawUnsupportedError extends AdapterServiceError {
   }
 }
 
-class ModelUnavailableError extends AdapterServiceError {
+export class ModelUnavailableError extends AdapterServiceError {
   constructor() {
     const message = "Selected model is unavailable or did not become active in this session";
     super(message, UClawErrorSchema.parse({
@@ -130,6 +130,8 @@ const SessionModelReadbackSchema = z.object({
     modelProvider: z.string().min(1),
     model: z.string().min(1),
   }).passthrough()),
+  nextCursor: z.string().min(1).nullable().optional(),
+  hasMore: z.boolean().optional(),
 }).passthrough();
 const ToolCatalogSchema = z.object({
   tools: z.array(z.object({
@@ -448,14 +450,7 @@ export class OpenClawClient implements UClawClient {
           throw error;
         }
 
-        const readback = await this.options.transport.router.request("sessions.list", {}, SessionModelReadbackSchema);
-        const session = readback.sessions.find((entry) => entry.key === sessionId);
-        const separator = modelId.indexOf("/");
-        const providerId = separator > 0 ? modelId.slice(0, separator) : undefined;
-        const model = separator > 0 ? modelId.slice(separator + 1) : undefined;
-        if (session === undefined || providerId === undefined || model === undefined || session.modelProvider !== providerId || session.model !== model) {
-          throw new ModelUnavailableError();
-        }
+        await this.verifySessionModelReadback(sessionId, modelId);
       });
     },
   };
@@ -801,6 +796,34 @@ export class OpenClawClient implements UClawClient {
     const current = this.sessionWriteQueue.catch(() => undefined).then(operation);
     this.sessionWriteQueue = current;
     await current;
+  }
+
+  private async verifySessionModelReadback(sessionId: string, modelId: string): Promise<void> {
+    const separator = modelId.indexOf("/");
+    if (separator <= 0 || separator === modelId.length - 1) throw new ModelUnavailableError();
+    const providerId = modelId.slice(0, separator);
+    const model = modelId.slice(separator + 1);
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+    while (true) {
+      const readback = await this.options.transport.router.request(
+        "sessions.list",
+        cursor === undefined ? {} : { cursor },
+        SessionModelReadbackSchema,
+      );
+      const session = readback.sessions.find((entry) => entry.key === sessionId);
+      if (session !== undefined) {
+        if (session.modelProvider === providerId && session.model === model) return;
+        throw new ModelUnavailableError();
+      }
+      if (readback.hasMore !== true) throw new ModelUnavailableError();
+      const nextCursor = readback.nextCursor;
+      if (nextCursor === undefined || nextCursor === null || seenCursors.has(nextCursor)) {
+        throw new RpcProtocolError("sessions.list");
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    }
   }
 
   private recordToolRun(tool: ToolCall): boolean {
