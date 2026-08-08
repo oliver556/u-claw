@@ -45,6 +45,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string>();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const attachmentsRef = useRef<Attachment[]>([]);
   const [models, setModels] = useState<Array<{ id: string; label: string; available: boolean }>>([]);
   const [modelState, setModelState] = useState<"idle" | "loading" | "error" | "selecting">("idle");
   const activeRunId = useRef<string | undefined>(undefined);
@@ -148,15 +149,21 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   };
 
   const invalidateSendIntent = () => { sendIntentId.current = undefined; };
+  const updateAttachments = (update: (current: Attachment[]) => Attachment[]) => {
+    const next = update(attachmentsRef.current);
+    attachmentsRef.current = next;
+    setAttachments(next);
+    return next;
+  };
 
   const prepareAttachment = async (id: string) => {
-    setAttachments((current) => current.map((item) => item.id === id ? { ...item, state: "validating" } : item));
+    updateAttachments((current) => current.map((item) => item.id === id ? { ...item, state: "validating" } : item));
     try {
       const states = await attachmentInvoke("prepare", { attachmentId: id }) as Attachment[];
       const latest = states.at(-1);
-      if (latest) setAttachments((current) => current.map((item) => item.id === id ? latest : item));
+      if (latest) updateAttachments((current) => current.map((item) => item.id === id ? latest : item));
     } catch (error) {
-      setAttachments((current) => current.map((item) => item.id === id ? { ...item, state: "failed", error: { code: "OPERATION_FAILED", message: error instanceof Error ? error.message : "附件处理失败", retryable: true } } : item));
+      updateAttachments((current) => current.map((item) => item.id === id ? { ...item, state: "failed", error: { code: "OPERATION_FAILED", message: error instanceof Error ? error.message : "附件处理失败", retryable: true } } : item));
     }
   };
 
@@ -164,7 +171,8 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     for (const input of inputs) {
       try {
         const attachment = await attachmentInvoke("import", input) as Attachment;
-        setAttachments((current) => [...current.filter((item) => item.id !== attachment.id), attachment]);
+        if (!attachmentsRef.current.some((item) => item.id === attachment.id)) invalidateSendIntent();
+        updateAttachments((current) => [...current.filter((item) => item.id !== attachment.id), attachment]);
         void prepareAttachment(attachment.id);
       } catch (error) {
         setSendError(error instanceof Error ? error.message : "添加附件失败");
@@ -175,10 +183,14 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const selectAttachments = async () => {
     try {
       const selected = await attachmentInvoke("select", {}) as Attachment[];
-      const knownIds = new Set(attachments.map((attachment) => attachment.id));
-      const additions = selected.filter((attachment) => !knownIds.has(attachment.id));
+      const knownIds = new Set(attachmentsRef.current.map((attachment) => attachment.id));
+      const additions = selected.filter((attachment) => {
+        if (knownIds.has(attachment.id)) return false;
+        knownIds.add(attachment.id);
+        return true;
+      });
       if (additions.length > 0) invalidateSendIntent();
-      setAttachments((current) => [...current, ...additions.filter((item) => !current.some((known) => known.id === item.id))]);
+      updateAttachments((current) => [...current, ...additions]);
       additions.forEach((attachment) => void prepareAttachment(attachment.id));
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "选择附件失败");
@@ -186,17 +198,21 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   };
 
   const dropFiles = async (files: File[]) => {
-    invalidateSendIntent();
-    const inputs = await Promise.all(files.map(async (file) => {
-      const contentBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error("读取附件失败"));
-        reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
-        reader.readAsDataURL(file);
-      });
-      return { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, contentBase64 };
-    }));
-    await addAttachmentInputs(inputs);
+    if (files.length === 0) return;
+    try {
+      const inputs = await Promise.all(files.map(async (file) => {
+        const contentBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error("读取附件失败"));
+          reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
+          reader.readAsDataURL(file);
+        });
+        return { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, contentBase64 };
+      }));
+      await addAttachmentInputs(inputs);
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "添加附件失败");
+    }
   };
 
   const refreshAttachmentStates = async (sent: Attachment[]) => {
@@ -205,7 +221,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
       try { return await attachmentInvoke("get", { attachmentId: attachment.id }) as Attachment; }
       catch { return { ...attachment, state: "failed" as const, error: { code: "OPERATION_FAILED" as const, message: "附件发送失败", retryable: true } }; }
     }));
-    setAttachments((current) => current.map((attachment) => refreshed.find((item) => item.id === attachment.id) ?? attachment));
+    updateAttachments((current) => current.map((attachment) => refreshed.find((item) => item.id === attachment.id) ?? attachment));
   };
 
   const send = async () => {
@@ -242,7 +258,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
       else if (terminal?.type === "final") {
         onDraftChange("");
         const sentIds = new Set(readyAttachments.map((attachment) => attachment.id));
-        setAttachments((current) => current.filter((attachment) => !sentIds.has(attachment.id)));
+        updateAttachments((current) => current.filter((attachment) => !sentIds.has(attachment.id)));
         await Promise.all(readyAttachments.map((attachment) => attachmentInvoke("remove", { attachmentId: attachment.id }).catch(() => undefined)));
         sendIntentId.current = undefined;
         onSendSuccess(session.id);
@@ -320,6 +336,6 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
         {historyPageState === "error" ? <div className="history-page-error" role="alert"><span>{historyPageError}</span><button type="button" onClick={() => void loadMoreHistory()}><RotateCw />重试加载</button></div> : null}</> : null}
     </div>
     {sendError ? <div className="send-error" role="alert"><AlertCircle /><span><strong>发送失败</strong>{sendError}</span></div> : null}
-    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); setAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
+    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); updateAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
   </section>;
 }
