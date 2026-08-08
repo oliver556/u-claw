@@ -150,8 +150,11 @@ describe("createMainWindow", () => {
     expect(options).toMatchObject({
       frame: false,
       show: false,
+      width: 1440,
+      height: 900,
       minWidth: 960,
       minHeight: 640,
+      backgroundColor: "#f5f5f5",
       webPreferences: {
         preload: "/runtime/preload.js",
         contextIsolation: true,

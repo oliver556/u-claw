@@ -1,7 +1,8 @@
-import type { ClientIpcEvent, ClientIpcRequest, IpcResponse, WindowIpcRequest } from "@uclaw/shared";
+import type { ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, RecoveryAction, WindowIpcRequest } from "@uclaw/shared";
 import { Modal, Tooltip } from "antd";
-import { Copy, Cpu, HardDrive, Maximize2, Minus, Radio, Search, X } from "lucide-react";
+import { Copy, Cpu, HardDrive, Maximize2, Minus, Radio, RotateCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { semanticCssVariables } from "../theme/tokens";
 
@@ -22,7 +23,33 @@ declare global {
 
 let windowRequestSequence = 0;
 
-export function AppTitlebar() {
+function usbStatus(status: GatewayStatus | undefined): { label: string; tone: "success" | "warning" | "error" } {
+  if (status === undefined) return { label: "U 盘检测中", tone: "warning" };
+  if (status?.usb.state === "read-only") return { label: "U 盘只读", tone: "warning" };
+  if (status?.usb.state === "missing") return { label: "U 盘未连接", tone: "error" };
+  if (status?.usb.state === "error") return { label: "U 盘异常", tone: "error" };
+  if (status.usb.dataWritable === false) return { label: "U 盘不可写", tone: "warning" };
+  return { label: "U 盘可用", tone: "success" };
+}
+
+function gatewayStatus(status: GatewayStatus | undefined): { label: string; tone: "success" | "warning" | "error" } {
+  if (status?.businessAvailable) return { label: "Gateway 已就绪", tone: "success" };
+  if (status?.connectionState === "failed" || status?.phase === "failed") return { label: "Gateway 失败", tone: "error" };
+  if (status?.connectionState === "degraded" || status?.phase === "degraded") return { label: "Gateway 异常", tone: "warning" };
+  return { label: "Gateway 启动中", tone: "warning" };
+}
+
+function recoveryLabel(action: RecoveryAction): string {
+  return {
+    retry: "重试",
+    reconnect: "重新连接",
+    "open-settings": "打开设置",
+    "open-diagnostics": "查看诊断",
+    "safe-exit": "安全退出",
+  }[action];
+}
+
+export function AppTitlebar({ status, onReconnect }: { status?: GatewayStatus; onReconnect(): Promise<void> }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [windowError, setWindowError] = useState<string | null>(null);
@@ -87,6 +114,9 @@ export function AppTitlebar() {
     if ((event.target as HTMLElement).closest("button, input")) return;
     void invokeWindow("toggle-maximize");
   };
+  const usb = usbStatus(status);
+  const gateway = gatewayStatus(status);
+  const recoveryActions = status?.error?.recoveryActions ?? [];
 
   return (
     <>
@@ -102,9 +132,9 @@ export function AppTitlebar() {
           </button>
         </Tooltip>
         <div className="runtime-status" aria-label="运行状态">
-          <span className="status-item"><i className="status-dot success" /><HardDrive aria-hidden="true" />U 盘已连接</span>
-          <span className="status-item"><i className="status-dot success" /><Radio aria-hidden="true" />Gateway</span>
-          <span className="model-status"><Cpu aria-hidden="true" />模型随会话</span>
+          <span className="status-item"><i className={`status-dot ${usb.tone}`} /><HardDrive aria-hidden="true" />{usb.label}</span>
+          <span className="status-item"><i className={`status-dot ${gateway.tone}`} /><Radio aria-hidden="true" />{gateway.label}</span>
+          <span className="model-status"><Cpu aria-hidden="true" />{status?.activeModel?.label ?? "模型加载中"}</span>
         </div>
         <div className="window-controls" aria-label="窗口控制">
           <Tooltip title="最小化"><button type="button" aria-label="最小化" onClick={() => void invokeWindow("minimize")}><Minus aria-hidden="true" /></button></Tooltip>
@@ -112,6 +142,13 @@ export function AppTitlebar() {
           <Tooltip title="关闭"><button className="window-close" type="button" aria-label="关闭" onClick={() => void invokeWindow("close")}><X aria-hidden="true" /></button></Tooltip>
         </div>
         {windowError ? <div className="window-error" role="alert">{windowError}</div> : null}
+        {status?.error ? <div className="runtime-recovery" role="alert"><strong>{status.error.message}</strong><span>错误码：{status.error.code}</span><div>{recoveryActions.map((action) => {
+          if (action === "open-diagnostics" || action === "open-settings") return <Link key={action} to="/system">{recoveryLabel(action)}</Link>;
+          if (action === "safe-exit") return <button key={action} type="button" onClick={() => void invokeWindow("close")}>{recoveryLabel(action)}</button>;
+          return <button key={action} type="button" onClick={() => {
+            void onReconnect().catch(() => setWindowError("重新连接失败，请重试"));
+          }}><RotateCw aria-hidden="true" />{recoveryLabel(action)}</button>;
+        })}</div></div> : null}
       </header>
       <Modal
         className="command-modal"

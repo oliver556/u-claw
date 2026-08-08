@@ -116,7 +116,7 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
 
   return <div className="app-shell">
     <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById("main")?.focus(); }}>跳到主要内容</a>
-    <AppTitlebar />
+    <AppTitlebar status={gatewayStatus} onReconnect={() => client.gateway.reconnect()} />
     <div className={isWork ? `workspace-grid${sessionsOpen ? "" : " sessions-collapsed"}${contextOpen ? "" : " context-collapsed"}` : "workspace-grid secondary-layout"}>
       <PrimaryRail />
       {isWork && sessionsOpen ? <SessionSidebar sessions={sessions} activeSessionId={activeSession?.id} state={sessionState} error={sessionError} onSelect={(id) => void selectSession(id)} onCreate={() => void createSession()} onRetry={() => void loadSessions()} onClose={() => setSessionsOpen(false)} /> : null}
