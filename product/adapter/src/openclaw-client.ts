@@ -68,6 +68,17 @@ export class UClawUnsupportedError extends AdapterServiceError {
   }
 }
 
+class ModelUnavailableError extends AdapterServiceError {
+  constructor() {
+    const message = "Selected model is unavailable or did not become active in this session";
+    super(message, UClawErrorSchema.parse({
+      code: "MODEL_UNAVAILABLE", message, retryable: false,
+      recoveryActions: ["open-settings"], causeDetails: { operation: "sessions.patch" },
+    }));
+    this.name = "ModelUnavailableError";
+  }
+}
+
 export const OPENCLAW_IMPLEMENTED_METHODS = [
   "sessions.list", "sessions.describe", "sessions.create", "sessions.delete",
   "chat.history", "chat.message.get", "chat.send", "chat.abort",
@@ -104,6 +115,13 @@ const SessionsDeleteResponseSchema = z.object({
 }).strict();
 const ResolveApprovalResponseSchema = z.object({ ok: z.literal(true) }).passthrough();
 const SessionsPatchResponseSchema = z.object({ ok: z.literal(true), key: z.string().min(1) }).passthrough();
+const SessionModelReadbackSchema = z.object({
+  sessions: z.array(z.object({
+    key: z.string().min(1),
+    modelProvider: z.string().min(1),
+    model: z.string().min(1),
+  }).passthrough()),
+}).passthrough();
 const ToolCatalogSchema = z.object({
   tools: z.array(z.object({
     id: z.string().min(1),
@@ -240,6 +258,7 @@ export class OpenClawClient implements UClawClient {
   private statusSince: string;
   private statusAttempt = 0;
   private readonly statusSubscribers = new Set<AsyncEventQueue<GatewayStatus>>();
+  private readonly sessionWriteQueues = new Map<string, Promise<void>>();
   private readonly toolCallRuns = new Map<string, Map<string, { runId: string; tool: ToolCall }>>();
   private readonly approvalRequests = new Map<string, ApprovalRequest>();
   private readonly approvalDecisions = new Map<string, "allow-once" | "deny">();
@@ -410,7 +429,25 @@ export class OpenClawClient implements UClawClient {
     list: async () => this.unsupported("models.list"),
     selectForSession: async (sessionId, modelId) => {
       this.requireMethod("sessions.patch");
-      await this.options.transport.router.request("sessions.patch", { key: sessionId, model: modelId }, SessionsPatchResponseSchema);
+      this.requireMethod("sessions.list");
+      await this.serializeSessionWrite(sessionId, async () => {
+        try {
+          const patched = await this.options.transport.router.request("sessions.patch", { key: sessionId, model: modelId }, SessionsPatchResponseSchema);
+          if (patched.key !== sessionId) throw new RpcProtocolError("sessions.patch");
+        } catch (error) {
+          if (error instanceof RpcRemoteError && error.code === "INVALID_REQUEST") throw new ModelUnavailableError();
+          throw error;
+        }
+
+        const readback = await this.options.transport.router.request("sessions.list", {}, SessionModelReadbackSchema);
+        const session = readback.sessions.find((entry) => entry.key === sessionId);
+        const separator = modelId.indexOf("/");
+        const providerId = separator > 0 ? modelId.slice(0, separator) : undefined;
+        const model = separator > 0 ? modelId.slice(separator + 1) : undefined;
+        if (session === undefined || providerId === undefined || model === undefined || session.modelProvider !== providerId || session.model !== model) {
+          throw new ModelUnavailableError();
+        }
+      });
     },
   };
   readonly skills: UClawClient["skills"] = { list: async () => this.unsupported("skills.status") };
@@ -749,6 +786,17 @@ export class OpenClawClient implements UClawClient {
 
   private unsupported(capability: string): never {
     throw new UClawUnsupportedError(capability);
+  }
+
+  private async serializeSessionWrite(sessionId: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.sessionWriteQueues.get(sessionId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    this.sessionWriteQueues.set(sessionId, current);
+    try {
+      await current;
+    } finally {
+      if (this.sessionWriteQueues.get(sessionId) === current) this.sessionWriteQueues.delete(sessionId);
+    }
   }
 
   private recordToolRun(tool: ToolCall): boolean {

@@ -116,6 +116,7 @@ describe("MockUClawClient", () => {
       "sessions.patch",
       "chat.history", "chat.message.get", "chat.send", "chat.abort",
       "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
+      "sessions.patch",
     ]);
     expect([...capabilities.events]).toEqual(["chat"]);
   });
@@ -162,6 +163,19 @@ describe("MockUClawClient", () => {
     await expect(client.approvals.resolvePlugin({ ref: { family: "plugin", id: "approval-plugin-1" }, decision: "deny" })).rejects.toMatchObject({ code: "UNSUPPORTED" });
     const unsupported = await client.models.list().catch((error: unknown) => error) as { uclawError: unknown };
     expect(UClawErrorSchema.parse(unsupported.uclawError).code).toBe("UNSUPPORTED");
+  });
+
+  it("keeps each session's selected model after switching sessions", async () => {
+    const client = new MockUClawClient();
+    const main = (await client.sessions.list()).items[0];
+    const other = await client.sessions.create({ title: "Other" });
+
+    await client.models.selectForSession(main.id, "contract/contract-main");
+    await client.models.selectForSession(other.id, "contract/contract-alt");
+
+    await expect(client.sessions.get(main.id)).resolves.toMatchObject({ model: { id: "contract/contract-main", providerId: "contract", label: "contract-main" } });
+    await expect(client.sessions.get(other.id)).resolves.toMatchObject({ model: { id: "contract/contract-alt", providerId: "contract", label: "contract-alt" } });
+    await expect(client.models.list()).rejects.toMatchObject({ code: "UNSUPPORTED" });
   });
 
   it("normalizes public not-found errors", async () => {
