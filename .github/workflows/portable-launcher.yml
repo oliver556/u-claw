@@ -1,0 +1,120 @@
+name: Portable launcher
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/portable-launcher.yml'
+      - 'product/launcher/**'
+      - 'product/packaging/**'
+      - 'product/scripts/portable-launcher-workflow.test.mjs'
+      - 'product/scripts/runtime-manifest*'
+      - 'product/tests/packaging/runtime-package.test.mjs'
+      - 'product/tests/windows/launcher-e2e.ps1'
+      - 'product/tests/windows/fixtures/portable-runtime*.go'
+      - 'product/package.json'
+      - 'product/package-lock.json'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Windows portable launcher lifecycle
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.0'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: npm
+          cache-dependency-path: product/package-lock.json
+
+      - name: Install locked Node dependencies
+        shell: pwsh
+        run: npm ci --ignore-scripts --prefix product
+
+      - name: Test workflow and packaging contracts
+        shell: pwsh
+        run: |
+          npm run test:portable-launcher --prefix product
+          if ($LASTEXITCODE -ne 0) { throw 'Portable launcher contract tests failed' }
+          node --test product/tests/packaging/runtime-package.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime packaging tests failed' }
+
+      - name: Test formal Go launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location product\launcher
+          try {
+            go test -race ./...
+            if ($LASTEXITCODE -ne 0) { throw 'Go launcher race tests failed' }
+          }
+          finally {
+            Pop-Location
+          }
+
+      - name: Build windowsgui launcher and fixture runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path $PWD 'product\.portable-launcher\bin'
+          [void][IO.Directory]::CreateDirectory($outputRoot)
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          Push-Location product\launcher
+          try {
+            if (Test-Path -LiteralPath rsrc_windows_amd64.syso) { throw 'Launcher resource output already exists' }
+            try {
+              go run github.com/akavel/rsrc@v0.10.2 -manifest app.manifest -arch amd64 -o rsrc_windows_amd64.syso
+              if ($LASTEXITCODE -ne 0) { throw 'Launcher manifest generation failed' }
+              go build -trimpath -ldflags '-s -w -H windowsgui' -o (Join-Path $outputRoot 'U-Claw.exe') .
+              if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed' }
+            }
+            finally {
+              Remove-Item -LiteralPath rsrc_windows_amd64.syso -Force -ErrorAction SilentlyContinue
+            }
+          }
+          finally {
+            Pop-Location
+          }
+          go test product\tests\windows\fixtures\portable-runtime.go product\tests\windows\fixtures\portable-runtime_test.go
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture runtime tests failed' }
+          go build -trimpath -o (Join-Path $outputRoot 'portable-runtime.exe') product\tests\windows\fixtures\portable-runtime.go
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture runtime build failed' }
+
+      - name: Windows PowerShell 5.1 portable lifecycle gate
+        shell: powershell
+        run: |
+          .\product\tests\windows\launcher-e2e.ps1 `
+            -LauncherExe product\.portable-launcher\bin\U-Claw.exe `
+            -FixtureExe product\.portable-launcher\bin\portable-runtime.exe `
+            -DiagnosticsPath product\.portable-launcher\diagnostics\windows-powershell-5.json `
+            -CaseName windows-powershell-5
+
+      - name: PowerShell 7 portable lifecycle gate
+        shell: pwsh
+        run: |
+          .\product\tests\windows\launcher-e2e.ps1 `
+            -LauncherExe product\.portable-launcher\bin\U-Claw.exe `
+            -FixtureExe product\.portable-launcher\bin\portable-runtime.exe `
+            -DiagnosticsPath product\.portable-launcher\diagnostics\powershell-7.json `
+            -CaseName powershell-7
+
+      - name: Upload sanitized lifecycle diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-launcher-diagnostics
+          path: product/.portable-launcher/diagnostics/*.json
+          if-no-files-found: warn

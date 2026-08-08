@@ -2,7 +2,7 @@
 
 > 日期：2026-08-08
 >
-> 状态：待用户复核
+> 状态：Task 9A 已完成；正式 Launcher 选定 Go
 >
 > 范围：Task 9 Step 1，仅用于 Go 与 .NET 8 NativeAOT 启动器选型
 
@@ -102,3 +102,19 @@ GitHub Hosted Runner 可产生“预选结论”。正式 Launcher 可按该结�
 - Win10/Win11 真实用户环境和长时间运行。
 - Electron + OpenClaw 完整 runtime 管理。
 - 正式 Launcher 的原子解压、版本缓存、单实例和中断恢复。
+
+## 8. 选型结果
+
+Task 9A 已由 GitHub Hosted Windows Runner 完成三次独立试验：
+
+- Actions run：`31260704973`
+- 汇总 artifact：`launcher-benchmark-results`
+- Artifact ID：`9022738910`
+- Artifact digest：`sha256:66c6261d35827d488357f5f84eb73022e44777c6cbc3831b76d80411cb1ce42b`
+- Go：mandatory gate 通过，P95 `21.7459ms`，EXE `2591744` bytes
+- .NET 8 NativeAOT：mandatory gate 通过，P95 `29.9361ms`，EXE `3173888` bytes
+- `decision.json`：`selected=go`、`reason=p95-margin`
+
+Go P95 比 NativeAOT 低约 27%，达到 20% 的性能优先门槛，因此正式 Launcher 只保留 Go 实现。
+
+该结论仍是 Hosted Runner 技术预选，不代表物理 U 盘、Defender、Win10/Win11 或长期插盘运行验收完成。正式 Launcher 改用 Go 1.25+，因为原子缓存依赖 Go 1.25 增加的 `os.Root.MkdirAll`、`os.Root.RemoveAll` 和 `os.Root.Rename`；Task 9A 的 Go 1.24.4 仅用于语言选型基准。
