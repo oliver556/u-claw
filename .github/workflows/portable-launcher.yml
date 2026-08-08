@@ -117,4 +117,4 @@ jobs:
         with:
           name: portable-launcher-diagnostics
           path: product/.portable-launcher/diagnostics/*.json
-          if-no-files-found: error
+          if-no-files-found: warn

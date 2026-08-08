@@ -68,7 +68,7 @@ export async function buildRuntime(options) {
       portable: true,
       strict: true,
     }, inventory.entries);
-    const archiveHandle = await open(temporaryArchive, "r");
+    const archiveHandle = await open(temporaryArchive, "r+");
     await archiveHandle.sync();
     await archiveHandle.close();
     const archiveInfo = await lstat(temporaryArchive);
