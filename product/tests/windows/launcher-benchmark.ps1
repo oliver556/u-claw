@@ -859,6 +859,13 @@ function Throw-BenchmarkError {
     throw [LauncherBenchmarkError]::new($Code)
 }
 
+function Write-BenchmarkDiagnostic {
+    param([Parameter(Mandatory)][string]$Code)
+    if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
+        [Console]::Error.WriteLine(('LAUNCHER_BENCHMARK_DIAGNOSTIC_' + $Code))
+    }
+}
+
 function Get-CanonicalAbsolutePath {
     param([Parameter(Mandatory)][string]$InputPath)
 
@@ -1369,15 +1376,21 @@ function Assert-SafeReportValue {
 }
 
 function Invoke-LauncherBenchmark {
+    Write-BenchmarkDiagnostic 'START'
     $safeGoExe = Assert-RegularExecutable $GoExe
     $safeDotnetExe = Assert-RegularExecutable $DotnetExe
     $safeOutputPath = Assert-SafeOutputPath $OutputPath
+    Write-BenchmarkDiagnostic 'PATHS_VALIDATED'
     $commitSha = Resolve-CommitSha
+    Write-BenchmarkDiagnostic 'COMMIT_RESOLVED'
     $goMetadata = Read-BuildMetadata $safeGoExe 'go'
+    Write-BenchmarkDiagnostic 'GO_METADATA_READ'
     $dotnetMetadata = Read-BuildMetadata $safeDotnetExe 'dotnet'
+    Write-BenchmarkDiagnostic 'DOTNET_METADATA_READ'
     if ($goMetadata.commitSha -cne $commitSha -or $dotnetMetadata.commitSha -cne $commitSha) {
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_COMMIT_MISMATCH'
     }
+    Write-BenchmarkDiagnostic 'METADATA_MATCHED'
 
     $candidates = @(
         [pscustomobject]@{ Id = 'go'; Executable = $safeGoExe; Metadata = $goMetadata },
@@ -1395,6 +1408,7 @@ function Invoke-LauncherBenchmark {
             $fixturesByCandidate[$candidate.Id] = New-CandidateFixtures $candidateRoot
             $caseResults[$candidate.Id] = Invoke-MandatoryCases $candidate $fixturesByCandidate[$candidate.Id]
         }
+        Write-BenchmarkDiagnostic 'CASES_COMPLETED'
 
         foreach ($candidate in $candidates) {
             [void](Invoke-TimedReady $candidate $fixturesByCandidate[$candidate.Id]['valid-manifest'])
@@ -1406,6 +1420,7 @@ function Invoke-LauncherBenchmark {
                 $timings[$candidate.Id].Add($elapsed)
             }
         }
+        Write-BenchmarkDiagnostic 'TIMINGS_COMPLETED'
 
         $candidateReports = [ordered]@{}
         foreach ($candidate in $candidates) {
@@ -1434,6 +1449,7 @@ function Invoke-LauncherBenchmark {
             candidates = $candidateReports
         }
         Write-AtomicReport $safeOutputPath $report
+        Write-BenchmarkDiagnostic 'REPORT_WRITTEN'
     }
     finally {
         if (Test-Path -LiteralPath $temporaryRoot) { Remove-Item -LiteralPath $temporaryRoot -Recurse }
