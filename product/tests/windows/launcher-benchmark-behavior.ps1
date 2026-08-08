@@ -58,6 +58,7 @@ function Invoke-HarnessProcess {
             $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
             try { & $taskkill /PID $process.Id /T /F *> $null } catch {}
             try { [void]$process.WaitForExit(10000) } catch {}
+            $script:behaviorPhase = 'HARNESS_PROCESS_TIMEOUT'
             throw 'LAUNCHER_BENCHMARK_BEHAVIOR_TIMEOUT'
         }
         return [pscustomobject]@{
@@ -82,6 +83,7 @@ $originalTimingRoot = $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT
 $originalCounter = $env:LAUNCHER_BENCHMARK_FAKE_COUNTER
 $originalPidFile = $env:LAUNCHER_BENCHMARK_FAKE_CHILD_PID_FILE
 $behaviorExitCode = 0
+$behaviorPhase = 'SETUP'
 
 try {
     [void][IO.Directory]::CreateDirectory($absoluteRoot)
@@ -109,6 +111,7 @@ try {
         $timingRoot = Join-Path $absoluteRoot 'timing-state'
         [void][IO.Directory]::CreateDirectory($timingRoot)
         $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $timingRoot
+        $behaviorPhase = 'VALID_METADATA'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe $reportPath $absoluteRoot
         $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $null
         Assert-True ($result.ExitCode -eq 0) ('relative benchmark failed: ' + $result.Stderr)
@@ -127,6 +130,7 @@ try {
         $duplicate = '{"schemaVersion":1,"candidate":"go","candidate":"go","commitSha":"' +
             $commitSha + '","buildMs":1,"toolchainVersion":"fake-compatibility-1"}'
         [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $duplicate, [Text.UTF8Encoding]::new($false))
+        $behaviorPhase = 'DUPLICATE_METADATA'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
             (Join-Path $relativeRoot 'duplicate.json') $absoluteRoot
         Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
@@ -135,6 +139,7 @@ try {
         $nullSidecar = '{"schemaVersion":1,"candidate":"go","commitSha":"' + $commitSha +
             '","buildMs":null,"toolchainVersion":"fake-compatibility-1"}'
         [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $nullSidecar, [Text.UTF8Encoding]::new($false))
+        $behaviorPhase = 'NULL_METADATA'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
             (Join-Path $relativeRoot 'null.json') $absoluteRoot
         Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
@@ -143,6 +148,7 @@ try {
         $unknownSidecar = '{"schemaVersion":1,"candidate":"go","commitSha":"' + $commitSha +
             '","buildMs":1,"toolchainVersion":"fake-compatibility-1","unknown":"value"}'
         [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $unknownSidecar, [Text.UTF8Encoding]::new($false))
+        $behaviorPhase = 'UNKNOWN_FIELD'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
             (Join-Path $relativeRoot 'unknown.json') $absoluteRoot
         Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
@@ -151,6 +157,7 @@ try {
         $invalidEscapeSidecar = '{"schemaVersion":1,"candidate":"go","commitSha":"' + $commitSha +
             '","buildMs":1,"toolchainVersion":"invalid\qescape"}'
         [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $invalidEscapeSidecar, [Text.UTF8Encoding]::new($false))
+        $behaviorPhase = 'INVALID_ESCAPE'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
             (Join-Path $relativeRoot 'invalid-escape.json') $absoluteRoot
         Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
@@ -159,12 +166,14 @@ try {
         $escapedNewlineShaSidecar = '{"schemaVersion":1,"candidate":"go","commitSha":"' + $commitSha +
             '\n","buildMs":1,"toolchainVersion":"fake-compatibility-1"}'
         [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $escapedNewlineShaSidecar, [Text.UTF8Encoding]::new($false))
+        $behaviorPhase = 'ESCAPED_NEWLINE_SHA'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
             (Join-Path $relativeRoot 'escaped-newline-sha.json') $absoluteRoot
         Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
             'escaped newline sha sidecar did not return fixed error'
 
         [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $validGoSidecar, [Text.Encoding]::Unicode)
+        $behaviorPhase = 'UTF16_ENCODING'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
             (Join-Path $relativeRoot 'utf-16.json') $absoluteRoot
         Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
@@ -178,6 +187,7 @@ try {
         $invalidUtf8[$invalidUtf8Prefix.Length] = 0xFF
         [Array]::Copy($invalidUtf8Suffix, 0, $invalidUtf8, $invalidUtf8Prefix.Length + 1, $invalidUtf8Suffix.Length)
         [IO.File]::WriteAllBytes((Join-Path $repositoryRoot ($goExe + '.build.json')), $invalidUtf8)
+        $behaviorPhase = 'INVALID_UTF8'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
             (Join-Path $relativeRoot 'invalid-utf-8.json') $absoluteRoot
         Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
@@ -188,6 +198,7 @@ try {
         $fakeChildPidPath = Join-Path $absoluteRoot 'fake-child.pid'
         $env:LAUNCHER_BENCHMARK_FAKE_COUNTER = $counterPath
         $env:LAUNCHER_BENCHMARK_FAKE_CHILD_PID_FILE = $fakeChildPidPath
+        $behaviorPhase = 'CAPTURE_TIMEOUT'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
             (Join-Path $relativeRoot 'capture-timeout.json') $absoluteRoot
         Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_PROCESS_CAPTURE_TIMEOUT: benchmark failed`r`n") `
@@ -206,8 +217,9 @@ try {
     }
 }
 catch {
-    if ($_.Exception.Message -cne 'LAUNCHER_BENCHMARK_BEHAVIOR_TIMEOUT') { throw }
-    [Console]::Error.WriteLine('LAUNCHER_BENCHMARK_BEHAVIOR_TIMEOUT: behavior test failed')
+    $failureCode = 'LAUNCHER_BENCHMARK_BEHAVIOR_FAILED_' + $behaviorPhase
+    [Console]::Error.WriteLine(($failureCode + ': behavior test failed'))
+    [Console]::Out.WriteLine(('::error title=Launcher benchmark behavior gate::' + $failureCode))
     $behaviorExitCode = 1
 }
 finally {

@@ -337,6 +337,11 @@ test("Windows behavior test covers Task 4 compatibility cases", async () => {
   assert.match(source, /utf-16/i);
   assert.match(source, /invalid utf-8/i);
   assert.match(source, /escaped newline sha/i);
+  assert.match(source, /\$behaviorPhase\s*=\s*['"]VALID_METADATA['"]/);
+  assert.match(source, /\$behaviorPhase\s*=\s*['"]INVALID_UTF8['"]/);
+  assert.match(source, /\$script:behaviorPhase\s*=\s*['"]HARNESS_PROCESS_TIMEOUT['"]/);
+  assert.match(source, /::error title=Launcher benchmark behavior gate::['"]\s*\+\s*\$failureCode/);
+  assert.doesNotMatch(source, /\$_\.Exception\.(Message|StackTrace)/);
   assert.match(source, /relative/i);
   assert.match(source, /trailing-backslash/i);
   assert.match(source, /fake-child/i);
