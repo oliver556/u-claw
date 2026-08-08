@@ -1,0 +1,262 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"reflect"
+	"testing"
+	"time"
+)
+
+type recordingReporter struct {
+	states   []State
+	failures [][2]string
+	closed   bool
+}
+
+func (reporter *recordingReporter) State(state State) {
+	reporter.states = append(reporter.states, state)
+}
+
+func (reporter *recordingReporter) Fail(code string, message string) {
+	reporter.failures = append(reporter.failures, [2]string{code, message})
+}
+
+func (reporter *recordingReporter) Close() {
+	reporter.closed = true
+}
+
+type fakeInstanceLock struct {
+	closed bool
+}
+
+func (lock *fakeInstanceLock) Close() error {
+	lock.closed = true
+	return nil
+}
+
+type fakeChildProcess struct {
+	waitErr error
+	stopped bool
+}
+
+func (process *fakeChildProcess) Wait() error {
+	return process.waitErr
+}
+
+func (process *fakeChildProcess) Stop() error {
+	process.stopped = true
+	return nil
+}
+
+type blockingChildProcess struct {
+	result  chan error
+	stopped bool
+}
+
+func (process *blockingChildProcess) Wait() error {
+	return <-process.result
+}
+
+func (process *blockingChildProcess) Stop() error {
+	process.stopped = true
+	process.result <- errors.New("stopped")
+	return nil
+}
+
+func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fakeInstanceLock, *ProcessSpec) {
+	t.Helper()
+	root := t.TempDir()
+	paths := PortablePaths{
+		USBRoot:     root,
+		PackageRoot: filepath.Join(root, ".uclaw"),
+		DataDir:     filepath.Join(root, ".uclaw", "data"),
+		CacheRoot:   filepath.Join(t.TempDir(), "runtime"),
+	}
+	manifest := validRuntimeManifest()
+	manifest.Entrypoint = `electron\electron.exe`
+	lock := &fakeInstanceLock{}
+	var startedSpec ProcessSpec
+	return Dependencies{
+		Paths:       paths,
+		Reporter:    reporter,
+		USBInterval: time.Hour,
+		ReadManifest: func(path string) (Manifest, error) {
+			if path != filepath.Join(paths.PackageRoot, "version.json") {
+				t.Fatalf("manifest path = %q", path)
+			}
+			return manifest, nil
+		},
+		ProbeDataDirectory: func(packageRoot string, dataDir string) error {
+			if packageRoot != paths.PackageRoot || dataDir != paths.DataDir {
+				t.Fatalf("probe paths = %q, %q", packageRoot, dataDir)
+			}
+			return nil
+		},
+		AcquireInstanceLock: func(dataDir string) (InstanceLock, error) {
+			if dataDir != paths.DataDir {
+				t.Fatalf("lock path = %q", dataDir)
+			}
+			return lock, nil
+		},
+		PrepareRuntime: func(_ context.Context, cacheRoot string, packageRoot string, got Manifest, extracting func()) (CacheResult, error) {
+			if cacheRoot != paths.CacheRoot || packageRoot != paths.PackageRoot || !reflect.DeepEqual(got, manifest) {
+				t.Fatalf("runtime inputs differ")
+			}
+			extracting()
+			return CacheResult{Path: filepath.Join(paths.CacheRoot, manifest.RuntimeID)}, nil
+		},
+		StartProcess: func(spec ProcessSpec) (ChildProcess, error) {
+			startedSpec = spec
+			return &fakeChildProcess{}, nil
+		},
+		MonitorUSB: func(ctx context.Context, _ string, _ time.Duration) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}, lock, &startedSpec
+}
+
+func TestRunReportsExtractingLaunchSequence(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, lock, startedSpec := successfulDependencies(t, reporter)
+	if err := Run(context.Background(), deps); err != nil {
+		t.Fatal(err)
+	}
+	wantStates := []State{
+		StateStarting,
+		StateValidatingUSB,
+		StateCheckingRuntime,
+		StateExtractingRuntime,
+		StateStartingApp,
+		StateReady,
+	}
+	if !reflect.DeepEqual(reporter.states, wantStates) {
+		t.Fatalf("states = %v", reporter.states)
+	}
+	if !reporter.closed || !lock.closed {
+		t.Fatalf("cleanup reporter=%v lock=%v", reporter.closed, lock.closed)
+	}
+	wantEntrypoint := filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID, "electron", "electron.exe")
+	if startedSpec.Path != wantEntrypoint || startedSpec.Dir != filepath.Dir(wantEntrypoint) {
+		t.Fatalf("process path/dir = %q, %q", startedSpec.Path, startedSpec.Dir)
+	}
+	if !reflect.DeepEqual(startedSpec.Env, []string{"UCLAW_DATA_DIR=" + deps.Paths.DataDir}) {
+		t.Fatalf("process env = %v", startedSpec.Env)
+	}
+}
+
+func TestRunSkipsExtractingStateForReusableRuntime(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.PrepareRuntime = func(_ context.Context, _ string, _ string, manifest Manifest, _ func()) (CacheResult, error) {
+		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, manifest.RuntimeID), Reused: true}, nil
+	}
+	if err := Run(context.Background(), deps); err != nil {
+		t.Fatal(err)
+	}
+	wantStates := []State{StateStarting, StateValidatingUSB, StateCheckingRuntime, StateStartingApp, StateReady}
+	if !reflect.DeepEqual(reporter.states, wantStates) {
+		t.Fatalf("states = %v", reporter.states)
+	}
+}
+
+func TestRunMapsFailureWithoutLeakingSensitiveDetails(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	secret := `C:\Users\private-user\.uclaw token=secret message=private`
+	deps.AcquireInstanceLock = func(string) (InstanceLock, error) {
+		return nil, errors.Join(ErrInstanceRunning, errors.New(secret))
+	}
+	err := Run(context.Background(), deps)
+	if !errors.Is(err, ErrInstanceRunning) {
+		t.Fatalf("returned %v", err)
+	}
+	want := [][2]string{{"E_INSTANCE_RUNNING", "U-Claw 已在使用这个 U 盘数据目录。"}}
+	if !reflect.DeepEqual(reporter.failures, want) {
+		t.Fatalf("failures = %#v", reporter.failures)
+	}
+	if !reporter.closed {
+		t.Fatal("reporter was not closed")
+	}
+}
+
+func TestRunStopsProcessWhenUSBDisconnects(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	process := &blockingChildProcess{result: make(chan error, 1)}
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
+	deps.MonitorUSB = func(context.Context, string, time.Duration) error { return ErrUSBDisconnected }
+
+	err := Run(context.Background(), deps)
+	if !errors.Is(err, ErrUSBDisconnected) {
+		t.Fatalf("returned %v", err)
+	}
+	if !process.stopped {
+		t.Fatal("process was not stopped")
+	}
+	want := [][2]string{{"E_USB_DISCONNECTED", "U 盘已断开，请重新插入后再启动。"}}
+	if !reflect.DeepEqual(reporter.failures, want) {
+		t.Fatalf("failures = %#v", reporter.failures)
+	}
+}
+
+func TestRunCancellationStopsProcessWithoutFailureDialog(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	process := &blockingChildProcess{result: make(chan error, 1)}
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	deps.MonitorUSB = func(ctx context.Context, _ string, _ time.Duration) error {
+		cancel()
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	err := Run(ctx, deps)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("returned %v", err)
+	}
+	if !process.stopped || len(reporter.failures) != 0 {
+		t.Fatalf("stopped=%v failures=%v", process.stopped, reporter.failures)
+	}
+}
+
+func TestRunMapsProcessStartErrors(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		return nil, errors.New("CreateProcess failed at C:\\private")
+	}
+	if err := Run(context.Background(), deps); err == nil {
+		t.Fatal("process start failure was ignored")
+	}
+	want := [][2]string{{"E_APP_START_FAILED", "无法启动 U-Claw，请重新启动。"}}
+	if !reflect.DeepEqual(reporter.failures, want) {
+		t.Fatalf("failures = %#v", reporter.failures)
+	}
+}
+
+func TestStateTextUsesFixedChineseStatus(t *testing.T) {
+	want := map[State]string{
+		StateStarting:          "正在启动 U-Claw...",
+		StateValidatingUSB:     "正在检查 U 盘数据目录...",
+		StateCheckingRuntime:   "正在检查运行环境...",
+		StateExtractingRuntime: "首次启动，正在准备运行环境...",
+		StateStartingApp:       "正在打开 U-Claw...",
+		StateReady:             "U-Claw 已就绪。",
+	}
+	for state, text := range want {
+		if got := stateText(state); got != text {
+			t.Fatalf("state %s text = %q", state, got)
+		}
+	}
+}
+
+func TestDiagnosticMapsExtractionFailureToCacheFailure(t *testing.T) {
+	code, message := diagnosticFor(ErrExtractionFailed)
+	if code != "E_CACHE_FAILED" || message != "无法准备本机运行缓存，请检查磁盘空间。" {
+		t.Fatalf("diagnostic = %q, %q", code, message)
+	}
+}

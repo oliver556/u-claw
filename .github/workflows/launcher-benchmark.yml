@@ -1,0 +1,244 @@
+name: Launcher benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/launcher-benchmark.yml'
+      - 'product/benchmarks/launcher/**'
+      - 'product/scripts/launcher-benchmark-report.mjs'
+      - 'product/scripts/launcher-benchmark-report.test.mjs'
+      - 'product/tests/windows/launcher-benchmark*'
+      - 'product/tests/windows/fixtures/fake-launcher*.go'
+      - 'product/package.json'
+      - 'product/package-lock.json'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Windows launcher benchmark trial ${{ matrix.trial }}
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        trial: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.4'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.408'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: npm
+          cache-dependency-path: product/package-lock.json
+
+      - name: Install report validator dependencies
+        shell: pwsh
+        run: npm ci --ignore-scripts --prefix product
+
+      - name: Test launcher benchmark report tools
+        shell: pwsh
+        run: npm run test:launcher-benchmark --prefix product
+
+      - name: Build and test Go candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidateRoot = Join-Path $PWD 'product\.launcher-benchmark\candidates'
+          [void][IO.Directory]::CreateDirectory($candidateRoot)
+          $goExe = Join-Path $candidateRoot 'uclaw-launcher-go.exe'
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          Push-Location product\benchmarks\launcher\go
+          try {
+            go test ./...
+            if ($LASTEXITCODE -ne 0) { throw 'Go tests failed' }
+            if (Test-Path -LiteralPath rsrc_windows_amd64.syso) { throw 'Go resource output already exists' }
+            try {
+              go run github.com/akavel/rsrc@v0.10.2 -manifest app.manifest -arch amd64 -o rsrc_windows_amd64.syso
+              if ($LASTEXITCODE -ne 0) { throw 'Go manifest resource generation failed' }
+              $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+              go build -trimpath -ldflags '-s -w' -o $goExe .
+              $stopwatch.Stop()
+              if ($LASTEXITCODE -ne 0) { throw 'Go build failed' }
+            }
+            finally {
+              Remove-Item -LiteralPath rsrc_windows_amd64.syso -Force -ErrorAction SilentlyContinue
+            }
+          }
+          finally {
+            Pop-Location
+          }
+          $metadata = [ordered]@{
+            schemaVersion = 1
+            candidate = 'go'
+            commitSha = '${{ github.sha }}'.ToLowerInvariant()
+            buildMs = $stopwatch.Elapsed.TotalMilliseconds
+            toolchainVersion = (& go version).Trim()
+          }
+          $sidecar = $goExe + '.build.json'
+          $temporary = $sidecar + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+          [IO.File]::WriteAllText($temporary, (($metadata | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+          [IO.File]::Move($temporary, $sidecar)
+
+      - name: Self-test and publish NativeAOT candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = Join-Path $PWD 'product\benchmarks\launcher\dotnet\UClaw.Launcher.Benchmark.csproj'
+          dotnet run --project $project -c Release -- --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'NativeAOT source self-test failed' }
+          $candidateRoot = Join-Path $PWD 'product\.launcher-benchmark\candidates'
+          $publishRoot = Join-Path $PWD 'product\.launcher-benchmark\nativeaot-publish'
+          [void][IO.Directory]::CreateDirectory($candidateRoot)
+          $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+          dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishAot=true -o $publishRoot
+          $stopwatch.Stop()
+          if ($LASTEXITCODE -ne 0) { throw 'NativeAOT publish failed' }
+          $publishedExecutables = @(Get-ChildItem -LiteralPath $publishRoot -Filter '*.exe' -File -Recurse)
+          if ($publishedExecutables.Count -ne 1) { throw 'NativeAOT publish must contain exactly one executable' }
+          if (@(Get-ChildItem -LiteralPath $publishRoot -Filter '*.dll' -File -Recurse).Count -ne 0) {
+            throw 'NativeAOT publish contains DLL runtime dependencies'
+          }
+          $dotnetExe = Join-Path $candidateRoot 'uclaw-launcher-dotnet.exe'
+          Copy-Item -LiteralPath $publishedExecutables[0].FullName -Destination $dotnetExe
+          & $dotnetExe --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Published NativeAOT self-test failed' }
+          $metadata = [ordered]@{
+            schemaVersion = 1
+            candidate = 'dotnet'
+            commitSha = '${{ github.sha }}'.ToLowerInvariant()
+            buildMs = $stopwatch.Elapsed.TotalMilliseconds
+            toolchainVersion = (& dotnet --version).Trim()
+          }
+          $sidecar = $dotnetExe + '.build.json'
+          $temporary = $sidecar + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+          [IO.File]::WriteAllText($temporary, (($metadata | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+          [IO.File]::Move($temporary, $sidecar)
+
+      - name: Verify asInvoker application manifests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $windowsKitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $mt = Get-ChildItem -LiteralPath $windowsKitsBin -Directory |
+            Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'x64\mt.exe')) } |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1 |
+            ForEach-Object { Join-Path $_.FullName 'x64\mt.exe' }
+          if (-not $mt) { throw 'Windows SDK x64 mt.exe not found' }
+          $candidateRoot = Join-Path $PWD 'product\.launcher-benchmark\candidates'
+          $goExe = Join-Path $candidateRoot 'uclaw-launcher-go.exe'
+          $dotnetExe = Join-Path $candidateRoot 'uclaw-launcher-dotnet.exe'
+          foreach ($executable in @($goExe, $dotnetExe)) {
+            if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "Candidate executable not found: $executable" }
+            $extractedManifest = Join-Path $env:RUNNER_TEMP (([IO.Path]::GetFileName($executable)) + '.' + [Guid]::NewGuid().ToString('N') + '.manifest')
+            try {
+              & $mt "-inputresource:$executable;#1" "-out:$extractedManifest"
+              if ($LASTEXITCODE -ne 0) { throw "Manifest extraction failed: $executable" }
+              [xml]$manifest = Get-Content -LiteralPath $extractedManifest -Raw
+              $levels = @($manifest.SelectNodes("//*[local-name()='requestedExecutionLevel']"))
+              if ($levels.Count -ne 1) { throw "Expected exactly one requestedExecutionLevel: $executable" }
+              if ($levels[0].GetAttribute('level') -cne 'asInvoker') { throw "Manifest level must be asInvoker: $executable" }
+              if ($levels[0].GetAttribute('uiAccess') -cne 'false') { throw "Manifest uiAccess must be false: $executable" }
+            }
+            finally {
+              Remove-Item -LiteralPath $extractedManifest -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Windows PowerShell 5.1 behavior compatibility gate
+        shell: powershell
+        run: .\product\tests\windows\launcher-benchmark-behavior.ps1
+
+      - name: PowerShell 7 behavior compatibility gate
+        shell: pwsh
+        run: .\product\tests\windows\launcher-benchmark-behavior.ps1
+
+      - name: Run formal benchmark trial
+        shell: pwsh
+        run: |
+          $reportRoot = 'product\.launcher-benchmark\reports'
+          [void][IO.Directory]::CreateDirectory($reportRoot)
+          pwsh -NoProfile -File product\tests\windows\launcher-benchmark.ps1 `
+            -GoExe product\.launcher-benchmark\candidates\uclaw-launcher-go.exe `
+            -DotnetExe product\.launcher-benchmark\candidates\uclaw-launcher-dotnet.exe `
+            -Iterations 20 `
+            -Trial '${{ matrix.trial }}' `
+            -OutputPath "$reportRoot\trial-${{ matrix.trial }}.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Formal launcher benchmark failed' }
+
+      - name: Validate trial report
+        shell: pwsh
+        run: node product\scripts\launcher-benchmark-report.mjs validate "product\.launcher-benchmark\reports\trial-${{ matrix.trial }}.json"
+
+      - name: Upload isolated trial report
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-benchmark-trial-${{ matrix.trial }}
+          path: product/.launcher-benchmark/reports/trial-${{ matrix.trial }}.json
+          if-no-files-found: error
+
+      - name: Require mandatory safety cases
+        shell: pwsh
+        run: node product\scripts\launcher-benchmark-report.mjs require-mandatory "product\.launcher-benchmark\reports\trial-${{ matrix.trial }}.json"
+
+  aggregate:
+    name: Aggregate launcher benchmark trials
+    needs: benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: npm
+          cache-dependency-path: product/package-lock.json
+
+      - name: Install report validator dependencies
+        run: npm ci --ignore-scripts --prefix product
+
+      - name: Download trial reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: launcher-benchmark-trial-*
+          path: launcher-benchmark-results
+          merge-multiple: true
+
+      - name: Validate and aggregate reports
+        run: |
+          node product/scripts/launcher-benchmark-report.mjs validate launcher-benchmark-results/trial-1.json
+          node product/scripts/launcher-benchmark-report.mjs validate launcher-benchmark-results/trial-2.json
+          node product/scripts/launcher-benchmark-report.mjs validate launcher-benchmark-results/trial-3.json
+          node product/scripts/launcher-benchmark-report.mjs require-mandatory launcher-benchmark-results/trial-1.json
+          node product/scripts/launcher-benchmark-report.mjs require-mandatory launcher-benchmark-results/trial-2.json
+          node product/scripts/launcher-benchmark-report.mjs require-mandatory launcher-benchmark-results/trial-3.json
+          node product/scripts/launcher-benchmark-report.mjs decide launcher-benchmark-results/trial-1.json launcher-benchmark-results/trial-2.json launcher-benchmark-results/trial-3.json --output launcher-benchmark-results/decision.json
+
+      - name: Upload aggregate result
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-benchmark-results
+          path: |
+            launcher-benchmark-results/trial-1.json
+            launcher-benchmark-results/trial-2.json
+            launcher-benchmark-results/trial-3.json
+            launcher-benchmark-results/decision.json
+          if-no-files-found: error
