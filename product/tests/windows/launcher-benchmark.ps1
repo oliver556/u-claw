@@ -1437,13 +1437,19 @@ function Invoke-LauncherBenchmark {
         }
 
         foreach ($candidate in $candidates) {
+            $warmupDiagnosticPrefix = 'WARMUP_' + $candidate.Id.ToUpperInvariant()
+            Write-BenchmarkDiagnostic ($warmupDiagnosticPrefix + '_START')
             [void](Invoke-TimedReady $candidate $fixturesByCandidate[$candidate.Id]['valid-manifest'])
+            Write-BenchmarkDiagnostic ($warmupDiagnosticPrefix + '_COMPLETED')
         }
         for ($iteration = 0; $iteration -lt $Iterations; $iteration++) {
             $iterationCandidates = if ($iteration % 2 -eq 0) { $candidates } else { @($candidates[1], $candidates[0]) }
             foreach ($candidate in $iterationCandidates) {
+                $timingDiagnosticPrefix = 'TIMING_' + ($iteration + 1) + '_' + $candidate.Id.ToUpperInvariant()
+                Write-BenchmarkDiagnostic ($timingDiagnosticPrefix + '_START')
                 $elapsed = Invoke-TimedReady $candidate $fixturesByCandidate[$candidate.Id]['valid-manifest']
                 $timings[$candidate.Id].Add($elapsed)
+                Write-BenchmarkDiagnostic ($timingDiagnosticPrefix + '_COMPLETED')
             }
         }
         Write-BenchmarkDiagnostic 'TIMINGS_COMPLETED'

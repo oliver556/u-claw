@@ -169,6 +169,8 @@ test("PowerShell harness consumes strict auditable build sidecars", async () => 
   assert.match(source, /Write-BenchmarkDiagnostic \(\$caseDiagnosticPrefix \+ 'SDK_PATH_REMOVED'\)/);
   assert.match(source, /\$firstMandatoryFailure\s*=\s*['"]MANDATORY_FAILURE_['"]/);
   assert.match(source, /Write-BenchmarkDiagnostic \$firstMandatoryFailure/);
+  assert.match(source, /Write-BenchmarkDiagnostic \(\$warmupDiagnosticPrefix \+ '_START'\)/);
+  assert.match(source, /Write-BenchmarkDiagnostic \(\$timingDiagnosticPrefix \+ '_START'\)/);
   assert.match(source, /Write-BenchmarkDiagnostic 'REPORT_WRITTEN'/);
   assert.match(source, /Console\]::Error\.WriteLine\(['"]LAUNCHER_BENCHMARK_METADATA_PARSER_(?:INIT|PARSE)['"]\)/);
   assert.match(source, /try\s*\{[\s\S]{0,600}Initialize-BuildMetadataParser[\s\S]{0,600}LauncherBuildMetadataParser\]::Parse/);
@@ -354,7 +356,7 @@ test("Windows behavior test covers Task 4 compatibility cases", async () => {
   assert.match(source, /escaped newline sha/i);
   assert.match(source, /\$behaviorPhase\s*=\s*['"]VALID_METADATA['"]/);
   assert.match(source, /VALID_METADATA['"]\s*\+\s*['"]_['"]\s*\+\s*\$fixedCode/);
-  assert.match(source, /\[regex\]::Matches\([^\r\n]*LAUNCHER_BENCHMARK_DIAGNOSTIC_/i);
+  assert.match(source, /\[regex\]::Matches\([^\r\n]*LAUNCHER_BENCHMARK_DIAGNOSTIC_\[A-Z0-9_\]/i);
   assert.match(source, /\$fixedCodeMatches\s*=\s*@\(\[regex\]::Matches\([^\r\n]*\^\(LAUNCHER_BENCHMARK_/i);
   assert.match(source, /\$diagnosticMatches\[-1\]\.Value\s*\+\s*['"]_['"]\s*\+\s*\$fixedCodeMatches\[-1\]\.Groups\[1\]\.Value/i);
   assert.match(source, /\$behaviorPhase\s*=\s*['"]INVALID_UTF8['"]/);
