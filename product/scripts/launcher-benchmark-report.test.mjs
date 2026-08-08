@@ -154,9 +154,12 @@ test("PowerShell harness consumes strict auditable build sidecars", async () => 
   assert.match(source, /Add-Type/);
   assert.match(source, /function Initialize-BuildMetadataParser/);
   assert.match(source, /try\s*\{[\s\S]{0,600}Initialize-BuildMetadataParser[\s\S]{0,600}LauncherBuildMetadataParser\]::Parse/);
-  assert.match(source, /Reflection\.Assembly\]::Load\(['"]System\.Runtime\.Serialization['"]\)/);
-  assert.match(source, /Reflection\.Assembly\]::Load\(['"]System\.Xml\.Linq['"]\)/);
-  assert.doesNotMatch(source, /JsonReaderWriterFactory\]\.Assembly\.Location|XElement\]\.Assembly\.Location/);
+  const serializationLoadIndex = source.indexOf("Add-Type -AssemblyName System.Runtime.Serialization");
+  const serializationReferenceIndex = source.indexOf("JsonReaderWriterFactory].Assembly.Location");
+  const xmlLoadIndex = source.indexOf("Add-Type -AssemblyName System.Xml.Linq");
+  const xmlReferenceIndex = source.indexOf("XElement].Assembly.Location");
+  assert.ok(serializationLoadIndex >= 0 && serializationLoadIndex < serializationReferenceIndex);
+  assert.ok(xmlLoadIndex >= 0 && xmlLoadIndex < xmlReferenceIndex);
   assert.doesNotMatch(source, /'System\.Runtime\.Serialization\.dll'|'System\.Xml\.Linq\.dll'/);
   assert.doesNotMatch(source, /ReadAllText\([^\r\n]*\)\s*\|\s*ConvertFrom-Json/);
   assert.doesNotMatch(source, /LastWriteTime|CreationTime|buildMs\s*=\s*0\b/);

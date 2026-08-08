@@ -671,12 +671,12 @@ function Initialize-BuildMetadataParser {
     if ('LauncherBuildMetadataParser' -as [type]) {
         return
     }
-    $runtimeSerializationAssembly = [Reflection.Assembly]::Load('System.Runtime.Serialization')
-    $xmlLinqAssembly = [Reflection.Assembly]::Load('System.Xml.Linq')
+    Add-Type -AssemblyName System.Runtime.Serialization
+    Add-Type -AssemblyName System.Xml.Linq
     $metadataParserReferences = @(
         [System.Text.RegularExpressions.Regex].Assembly.Location,
-        $runtimeSerializationAssembly.Location,
-        $xmlLinqAssembly.Location
+        [System.Runtime.Serialization.Json.JsonReaderWriterFactory].Assembly.Location,
+        [System.Xml.Linq.XElement].Assembly.Location
     ) | Select-Object -Unique
     Add-Type -TypeDefinition $metadataParserSource -ReferencedAssemblies $metadataParserReferences
 }
@@ -783,9 +783,6 @@ function Read-BuildMetadata {
         return [LauncherBuildMetadataParser]::Parse($sidecarItem.FullName, $Candidate)
     }
     catch {
-        if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
-            [Console]::Error.WriteLine(($_.Exception.GetType().FullName + ': ' + $_.Exception.Message))
-        }
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
     }
 }
