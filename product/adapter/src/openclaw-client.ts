@@ -79,6 +79,15 @@ class ModelUnavailableError extends AdapterServiceError {
   }
 }
 
+function isInvalidModelError(error: RpcRemoteError): boolean {
+  if (error.code !== "INVALID_REQUEST") return false;
+  const message = error.uclawError.message;
+  return /\bmodel(?:\s+["'`]?[A-Za-z0-9._:/-]+["'`]?)?\s+(?:is\s+)?unavailable\b/i.test(message) ||
+    /\binvalid\s+model\b/i.test(message) ||
+    /\bmodel(?:\s+["'`]?[A-Za-z0-9._:/-]+["'`]?)?\s+(?:was\s+)?not\s+found\b/i.test(message) ||
+    /\bnot\s+found\s+model\b/i.test(message);
+}
+
 export const OPENCLAW_IMPLEMENTED_METHODS = [
   "sessions.list", "sessions.describe", "sessions.create", "sessions.delete",
   "chat.history", "chat.message.get", "chat.send", "chat.abort",
@@ -258,7 +267,7 @@ export class OpenClawClient implements UClawClient {
   private statusSince: string;
   private statusAttempt = 0;
   private readonly statusSubscribers = new Set<AsyncEventQueue<GatewayStatus>>();
-  private readonly sessionWriteQueues = new Map<string, Promise<void>>();
+  private sessionWriteQueue: Promise<void> = Promise.resolve();
   private readonly toolCallRuns = new Map<string, Map<string, { runId: string; tool: ToolCall }>>();
   private readonly approvalRequests = new Map<string, ApprovalRequest>();
   private readonly approvalDecisions = new Map<string, "allow-once" | "deny">();
@@ -430,12 +439,12 @@ export class OpenClawClient implements UClawClient {
     selectForSession: async (sessionId, modelId) => {
       this.requireMethod("sessions.patch");
       this.requireMethod("sessions.list");
-      await this.serializeSessionWrite(sessionId, async () => {
+      await this.serializeSessionWrite(async () => {
         try {
           const patched = await this.options.transport.router.request("sessions.patch", { key: sessionId, model: modelId }, SessionsPatchResponseSchema);
           if (patched.key !== sessionId) throw new RpcProtocolError("sessions.patch");
         } catch (error) {
-          if (error instanceof RpcRemoteError && error.code === "INVALID_REQUEST") throw new ModelUnavailableError();
+          if (error instanceof RpcRemoteError && isInvalidModelError(error)) throw new ModelUnavailableError();
           throw error;
         }
 
@@ -788,15 +797,10 @@ export class OpenClawClient implements UClawClient {
     throw new UClawUnsupportedError(capability);
   }
 
-  private async serializeSessionWrite(sessionId: string, operation: () => Promise<void>): Promise<void> {
-    const previous = this.sessionWriteQueues.get(sessionId) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(operation);
-    this.sessionWriteQueues.set(sessionId, current);
-    try {
-      await current;
-    } finally {
-      if (this.sessionWriteQueues.get(sessionId) === current) this.sessionWriteQueues.delete(sessionId);
-    }
+  private async serializeSessionWrite(operation: () => Promise<void>): Promise<void> {
+    const current = this.sessionWriteQueue.catch(() => undefined).then(operation);
+    this.sessionWriteQueue = current;
+    await current;
   }
 
   private recordToolRun(tool: ToolCall): boolean {
