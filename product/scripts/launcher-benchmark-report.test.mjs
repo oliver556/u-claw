@@ -386,7 +386,10 @@ test("Windows behavior test bounds harness processes and kills timeout trees", a
   assert.doesNotMatch(source, /Start-Process[^\n]*-Wait/);
   assert.match(source, /WaitForExit\(120000\)/);
   assert.doesNotMatch(source, /WaitForExit\(\)/);
-  assert.match(source, /\$process\.Refresh\(\)/);
+  const handleIndex = source.indexOf("$processHandle = $process.Handle");
+  const waitIndex = source.indexOf("$process.WaitForExit(120000)");
+  assert.ok(handleIndex >= 0 && handleIndex < waitIndex);
+  assert.doesNotMatch(source, /\$process\.Refresh\(\)/);
   assert.match(source, /\$exitCode\s*=\s*\$process\.ExitCode/);
   assert.match(source, /ExitCode\s*=\s*\$exitCode/);
   assert.match(source, /taskkill\.exe[\s\S]{0,300}\/T[\s\S]{0,100}\/F/i);

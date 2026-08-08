@@ -53,6 +53,8 @@ function Invoke-HarnessProcess {
     )
     $process = Start-Process -FilePath $shellExe -ArgumentList $arguments -WorkingDirectory $RepositoryRoot `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
+    # Windows PowerShell loses ExitCode after redirected processes exit unless the handle is cached.
+    $processHandle = $process.Handle
     try {
         if (-not $process.WaitForExit(120000)) {
             $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
@@ -61,7 +63,6 @@ function Invoke-HarnessProcess {
             $script:behaviorPhase = 'HARNESS_PROCESS_TIMEOUT'
             throw 'LAUNCHER_BENCHMARK_BEHAVIOR_TIMEOUT'
         }
-        $process.Refresh()
         $exitCode = $process.ExitCode
         return [pscustomobject]@{
             ExitCode = $exitCode
