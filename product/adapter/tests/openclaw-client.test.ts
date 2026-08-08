@@ -280,9 +280,13 @@ describe("OpenClawClient", () => {
 
   it("reports partial approval and tool event capabilities independently", async () => {
     const transport = new FakeTransport();
+    const approvals = contractFixture("approvals.json");
     transport.helloMethods.push("exec.approval.resolve");
     transport.helloEvents.push("exec.approval.requested", "session.tool");
-    const capabilities = await new OpenClawClient({ transport }).gateway.negotiate();
+    transport.fixtures.set("exec.approval.list", approvals.exec.allowOnce.listing.responseFrame.payload);
+    transport.helloMethods = transport.helloMethods.filter((method) => method !== "plugin.approval.list");
+    const client = new OpenClawClient({ transport });
+    const capabilities = await client.gateway.negotiate();
 
     expect(capabilities.features).toMatchObject({
       execApproval: true,
@@ -290,6 +294,8 @@ describe("OpenClawClient", () => {
       approvalResolve: false,
       toolTrace: true,
     });
+    await expect(client.approvals.listPending()).resolves.toMatchObject([{ family: "exec" }]);
+    expect(transport.calls).toEqual(["exec.approval.list"]);
   });
 
   it("keeps unsupported attachment and unimplemented management capabilities closed", async () => {
@@ -485,11 +491,9 @@ describe("OpenClawClient", () => {
     transport.fixtures.set("exec.approval.list", [...approvals.exec.allowOnce.listing.responseFrame.payload, execOther]);
     transport.fixtures.set("plugin.approval.list", [...approvals.plugin.allowOnce.listing.responseFrame.payload, pluginOther]);
     const approvalChanges: string[] = [];
-    const toolChanges: Array<{ state: string }> = [];
     const client = new OpenClawClient({
       transport,
       onApprovalsChanged: (sessionId) => { approvalChanges.push(sessionId); },
-      onToolCallChanged: (toolCall) => { toolChanges.push(toolCall); },
     });
     await client.gateway.negotiate();
 
@@ -512,7 +516,7 @@ describe("OpenClawClient", () => {
     await client.approvals.resolveExec({ ref: { family: "exec", id: execId }, decision: "allow-once" });
     await client.approvals.resolvePlugin({ ref: { family: "plugin", id: pluginId }, decision: "deny" });
     expect(approvalChanges).toEqual(["agent:dev:main", "agent:dev:main"]);
-    expect(toolChanges).toMatchObject([{ state: "cancelled" }]);
+    await expect(watch.next()).resolves.toMatchObject({ value: { type: "tool", tool: { state: "cancelled" } } });
     await watch.return?.();
     await client.models.selectForSession("session-1", "provider/model-1");
     const unsupported = await client.approvals.resolveExec({ ref: { family: "exec", id: "exec-1" }, decision: "allow-session" }).catch((error: unknown) => error);
@@ -649,9 +653,13 @@ describe("OpenClawClient", () => {
 
     const exactPlugin = structuredClone(approvals.plugin.allowOnce.event.payload);
     exactPlugin.request.toolCallId = "tool-call-approval-1";
+    const watchedWaiting = iterator.next();
+    const sentWaiting = send.next();
+    transport.emit("plugin.approval.requested", exactPlugin, 2);
+    await expect(watchedWaiting).resolves.toMatchObject({ value: { type: "tool", tool: { state: "waiting-authorization" } } });
+    await expect(sentWaiting).resolves.toMatchObject({ value: { type: "tool", tool: { state: "waiting-authorization" } } });
     const watchedApproval = iterator.next();
     const sentApproval = send.next();
-    transport.emit("plugin.approval.requested", exactPlugin, 2);
     await expect(watchedApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: exactPlugin.id, family: "plugin" } } });
     await expect(sentApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: exactPlugin.id, family: "plugin" } } });
 
@@ -706,6 +714,8 @@ describe("OpenClawClient", () => {
     };
     transport.emit("plugin.approval.requested", approvalEvent("plugin-concurrent-1", "tool-concurrent-1"), 3);
     transport.emit("plugin.approval.requested", approvalEvent("plugin-concurrent-2", "tool-concurrent-2"), 4);
+    await expect(first.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-concurrent-1", tool: { state: "waiting-authorization" } } });
+    await expect(second.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-concurrent-2", tool: { state: "waiting-authorization" } } });
     await expect(first.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-concurrent-1", approval: { id: "plugin-concurrent-1" } } });
     await expect(second.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-concurrent-2", approval: { id: "plugin-concurrent-2" } } });
 
@@ -773,6 +783,7 @@ describe("OpenClawClient", () => {
       },
     }, 3);
     await expect(send.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-race" } });
+    await expect(send.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-race", tool: { state: "waiting-authorization" } } });
     await expect(send.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-race" } });
     await expect(send.next()).resolves.toMatchObject({ value: { type: "final", runId: "run-race" } });
   });
@@ -807,14 +818,16 @@ describe("OpenClawClient", () => {
       event.request.toolCallId = "shared-tool-call";
       return event;
     };
-    const firstApproval = first.next();
-    const secondApproval = second.next();
+    const firstWaiting = first.next();
+    const secondWaiting = second.next();
     transport.emit("plugin.approval.requested", approvalEvent("agent:dev:first", "approval-first"), 3);
     transport.emit("plugin.approval.requested", approvalEvent("agent:dev:second", "approval-second"), 4);
     await Promise.resolve();
     expect(approvalChanges).toEqual([]);
-    await expect(firstApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-first", approval: { id: "approval-first" } } });
-    await expect(secondApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-second", approval: { id: "approval-second" } } });
+    await expect(firstWaiting).resolves.toMatchObject({ value: { type: "tool", runId: "run-first", tool: { state: "waiting-authorization" } } });
+    await expect(secondWaiting).resolves.toMatchObject({ value: { type: "tool", runId: "run-second", tool: { state: "waiting-authorization" } } });
+    await expect(first.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-first", approval: { id: "approval-first" } } });
+    await expect(second.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-second", approval: { id: "approval-second" } } });
     await first.return?.();
     await second.return?.();
   });
@@ -862,6 +875,26 @@ describe("OpenClawClient", () => {
     transport.emit("chat", { state: "delta", runId: "run-other", sessionKey: "agent:dev:main", deltaText: "next" }, 4);
     await expect(next).resolves.toMatchObject({ value: { type: "delta", runId: "run-other" } });
     expect(approvalChanges).toEqual(["agent:dev:main"]);
+    await watch.return?.();
+  });
+
+  it("keeps a denied approval cancelled when tool start arrives late", async () => {
+    const tools = contractFixture("session.tool.json");
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    transport.helloMethods.push("plugin.approval.resolve");
+    transport.fixtures.set("plugin.approval.resolve", { ok: true });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+    const watch = client.chat.watch("agent:dev:main")[Symbol.asyncIterator]();
+    const next = watch.next();
+    const approval = structuredClone(approvals.plugin.deny.event.payload);
+    transport.emit("plugin.approval.requested", approval, 1);
+    await client.approvals.resolvePlugin({ ref: { family: "plugin", id: approval.id }, decision: "deny" });
+    const start = structuredClone(tools.start.payload);
+    start.data.toolCallId = approval.request.toolCallId;
+    transport.emit("session.tool", start, 2);
+    await expect(next).resolves.toMatchObject({ value: { type: "tool", tool: { state: "cancelled" } } });
     await watch.return?.();
   });
 
