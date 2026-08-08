@@ -82,7 +82,7 @@ const SessionPageSchema = z.object({
   totalCount: z.number().int().nonnegative().optional(),
   limitApplied: z.number().int().positive().nullable().optional(),
   offset: z.number().int().nonnegative().optional(),
-  nextOffset: z.number().int().nonnegative().nullable().optional(),
+  nextOffset: z.number().nonnegative().refine(Number.isInteger).nullable().optional(),
   hasMore: z.boolean().default(false),
   defaults: z.unknown().optional(),
 }).strict();
@@ -132,6 +132,14 @@ function decodeOffsetCursor(cursor: string | undefined): number {
     }));
   }
   return offset;
+}
+
+function encodeNextOffset(method: string, hasMore: boolean, nextOffset: number | null | undefined, currentOffset: number): string | null {
+  if (!hasMore) return null;
+  if (nextOffset === null || nextOffset === undefined || !Number.isSafeInteger(nextOffset) || nextOffset <= currentOffset) {
+    throw new RpcProtocolError(method);
+  }
+  return String(nextOffset);
 }
 
 function uniqueById<T extends { id: string }>(items: T[]): T[] {
@@ -272,10 +280,7 @@ export class OpenClawClient implements UClawClient {
         includeLastMessage: true,
       }, SessionPageSchema);
       const items = uniqueById(raw.sessions.map(mapSessionSummary));
-      const nextCursor = raw.hasMore && raw.nextOffset !== undefined && raw.nextOffset !== null
-        ? String(raw.nextOffset)
-        : null;
-      if (raw.hasMore && nextCursor === null) throw new RpcProtocolError("sessions.list");
+      const nextCursor = encodeNextOffset("sessions.list", raw.hasMore, raw.nextOffset, offset);
       return { items, nextCursor, hasMore: raw.hasMore };
     },
     get: async (sessionId) => {
@@ -295,7 +300,8 @@ export class OpenClawClient implements UClawClient {
       this.requireMethod("sessions.patch");
       this.requireMethod("sessions.describe");
       return this.serializeSessionMutation(sessionId, async () => {
-        await this.options.transport.router.request("sessions.patch", { key: sessionId, label: title }, SessionsPatchResponseSchema);
+        const result = await this.options.transport.router.request("sessions.patch", { key: sessionId, label: title }, SessionsPatchResponseSchema);
+        if (result.key !== sessionId) throw new RpcProtocolError("sessions.patch");
         return this.readSession(sessionId);
       });
     },
@@ -305,6 +311,7 @@ export class OpenClawClient implements UClawClient {
       const result = await this.serializeSessionMutation(sessionId, () => this.options.transport.router.request(
         "sessions.delete", { key: sessionId, deleteTranscript: true }, SessionsDeleteResponseSchema,
       ));
+      if (result.key !== sessionId) throw new RpcProtocolError("sessions.delete");
       if (!result.deleted) throw this.notFound("sessions.delete");
     },
   };
@@ -320,8 +327,7 @@ export class OpenClawClient implements UClawClient {
         ...(paged ? { offset } : {}),
       }, OpenClawHistoryResponseSchema);
       if (raw.sessionKey !== sessionId) throw new RpcProtocolError("chat.history");
-      const nextCursor = raw.hasMore === true && raw.nextOffset !== undefined ? String(raw.nextOffset) : null;
-      if (raw.hasMore === true && nextCursor === null) throw new RpcProtocolError("chat.history");
+      const nextCursor = encodeNextOffset("chat.history", raw.hasMore === true, raw.nextOffset, offset);
       return { items: uniqueById(mapOpenClawHistoryResponse(raw)), nextCursor, hasMore: raw.hasMore ?? false };
     },
     get: async (sessionId, messageId) => {
@@ -544,7 +550,9 @@ export class OpenClawClient implements UClawClient {
       key: sessionId, includeDerivedTitles: true, includeLastMessage: true,
     }, SessionDescribeResponseSchema);
     if (raw.session === null) throw this.notFound("sessions.describe");
-    return mapSession(raw.session);
+    const session = mapSession(raw.session);
+    if (session.id !== sessionId) throw new RpcProtocolError("sessions.describe");
+    return session;
   }
 
   private async serializeSessionMutation<T>(sessionId: string, mutation: () => Promise<T>): Promise<T> {

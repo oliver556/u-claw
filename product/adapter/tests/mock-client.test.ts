@@ -25,6 +25,26 @@ describe("MockUClawClient", () => {
     await expect(client.sessions.get(created.id)).rejects.toMatchObject({ uclawError: { code: "NOT_FOUND" } });
   });
 
+  it.each(["1junk", "1e2", "-1", String(Number.MAX_SAFE_INTEGER + 1)])("rejects malformed mock pagination cursor %s", async (cursor) => {
+    const client = new MockUClawClient();
+
+    await expect(client.sessions.list({ cursor })).rejects.toMatchObject({ uclawError: { code: "INVALID_ARGUMENT" } });
+    await expect(client.chat.list("session-1", { cursor })).rejects.toMatchObject({ uclawError: { code: "INVALID_ARGUMENT" } });
+  });
+
+  it("filters mock sessions by query before pagination", async () => {
+    const client = new MockUClawClient();
+    const alpha = await client.sessions.create({ title: "Alpha" });
+    const release = await client.sessions.create({ title: "Release Candidate" });
+
+    await expect(client.sessions.list({ query: "RELEASE", limit: 1 })).resolves.toMatchObject({
+      items: [{ id: release.id }], nextCursor: null, hasMore: false,
+    });
+    await expect(client.sessions.list({ query: alpha.id.toUpperCase() })).resolves.toMatchObject({
+      items: [{ id: alpha.id }], nextCursor: null, hasMore: false,
+    });
+  });
+
   it("refuses fake revision protection for session mutations", async () => {
     const client = new MockUClawClient();
     const created = await client.sessions.create({ title: "Created" });

@@ -89,12 +89,24 @@ export interface MockUClawClientOptions {
 }
 
 function page<T>(items: T[], request?: PageRequest): Page<T> {
-  const offset = request?.cursor === undefined ? 0 : Number.parseInt(request.cursor, 10);
-  const safeOffset = Number.isFinite(offset) && offset >= 0 ? offset : 0;
+  const offset = decodeCursor(request?.cursor);
   const limit = request?.limit ?? items.length;
-  const selected = items.slice(safeOffset, safeOffset + limit);
-  const nextOffset = safeOffset + selected.length;
+  const selected = items.slice(offset, offset + limit);
+  const nextOffset = offset + selected.length;
   return { items: selected, nextCursor: nextOffset < items.length ? String(nextOffset) : null, hasMore: nextOffset < items.length };
+}
+
+function decodeCursor(cursor: string | undefined): number {
+  if (cursor === undefined) return 0;
+  const offset = /^(?:0|[1-9]\d*)$/.test(cursor) ? Number(cursor) : Number.NaN;
+  if (!Number.isSafeInteger(offset)) {
+    const message = "Invalid pagination cursor";
+    throw new AdapterServiceError(message, UClawErrorSchema.parse({
+      code: "INVALID_ARGUMENT", message, retryable: false,
+      recoveryActions: [], causeDetails: { field: "cursor" },
+    }));
+  }
+  return offset;
 }
 
 export class MockUClawClient implements UClawClient {
@@ -180,7 +192,13 @@ export class MockUClawClient implements UClawClient {
   };
 
   readonly sessions: UClawClient["sessions"] = {
-    list: async (request) => page(this.sessionItems, request),
+    list: async (request) => {
+      const query = request?.query?.trim().toLowerCase();
+      const items = query === undefined || query.length === 0 ? this.sessionItems : this.sessionItems.filter((session) => [
+        session.id, session.title, session.model?.id, session.model?.label,
+      ].some((value) => value?.toLowerCase().includes(query) === true));
+      return page(items, request);
+    },
     get: async (sessionId) => this.requireSession(sessionId),
     create: async (input) => {
       const session = SessionSchema.parse({ id: `session-${++this.sessionCounter}`, title: input?.title ?? "New session", createdAt: this.clock.now(), updatedAt: this.clock.now(), pinned: false, status: "idle", ...(input?.modelId === undefined ? {} : { model: { id: input.modelId, label: input.modelId } }) });
