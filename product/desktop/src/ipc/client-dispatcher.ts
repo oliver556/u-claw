@@ -15,6 +15,8 @@ import {
   UClawErrorSummarySchema,
   capabilitySetToWire,
   gatewayStatusToWire,
+  normalizeKey,
+  redactRendererText,
   type ClientIpcEvent,
   type ClientIpcRequest,
   type ApprovalRequest,
@@ -209,6 +211,60 @@ function rendererSafeMessageEvent(event: MessageEvent): MessageEvent {
   return event;
 }
 
+const MAX_TOOL_SUMMARY_FIELDS = 16;
+const MAX_TOOL_SUMMARY_ARRAY_ITEMS = 8;
+const MAX_TOOL_SUMMARY_TEXT = 256;
+const MAX_TOOL_SUMMARY_TEXT_TOTAL = 2_048;
+const TOOL_SUMMARY_REDACTED = "[REDACTED]";
+
+function rendererSafeToolSummary(summary: unknown) {
+  const projected: Record<string, string | number | boolean | null | Array<string | number | boolean | null>> = {};
+  if (summary === null || typeof summary !== "object" || Array.isArray(summary)) {
+    return RendererSafeSummarySchema.parse(projected);
+  }
+
+  let remainingText = MAX_TOOL_SUMMARY_TEXT_TOTAL;
+  const safeText = (value: string, key: string): string | undefined => {
+    if (remainingText <= 0) return undefined;
+    const normalizedKey = normalizeKey(key);
+    const exposesCommand = /(?:^|_)(?:command|cmd|cwd)(?:_|$)/.test(normalizedKey);
+    const exposesAbsolutePath = /(?:^|[^/])\/(?!\/)[^\s]+/.test(value) ||
+      /(?:[A-Za-z]:[\\/]|\\\\)[^\s]+/.test(value);
+    const redacted = exposesCommand || exposesAbsolutePath
+      ? TOOL_SUMMARY_REDACTED
+      : redactRendererText(value, key);
+    const limit = Math.min(MAX_TOOL_SUMMARY_TEXT, remainingText);
+    const bounded = redacted.length <= limit
+      ? redacted
+      : limit <= 3 ? ".".repeat(limit) : redacted.slice(0, limit - 3) + "...";
+    remainingText -= bounded.length;
+    return bounded;
+  };
+
+  for (const [index, [rawKey, rawValue]] of Object.entries(summary).slice(0, MAX_TOOL_SUMMARY_FIELDS).entries()) {
+    const key = rawKey.length <= 64 && !/[\\/]/.test(rawKey) ? rawKey : `field_${index + 1}`;
+    if (typeof rawValue === "string") {
+      const value = safeText(rawValue, key);
+      if (value !== undefined) projected[key] = value;
+    } else if (typeof rawValue === "number" || typeof rawValue === "boolean" || rawValue === null) {
+      projected[key] = rawValue;
+    } else if (Array.isArray(rawValue)) {
+      const values: Array<string | number | boolean | null> = [];
+      for (const item of rawValue.slice(0, MAX_TOOL_SUMMARY_ARRAY_ITEMS)) {
+        if (typeof item === "string") {
+          const value = safeText(item, key);
+          if (value !== undefined) values.push(value);
+        } else if (typeof item === "number" || typeof item === "boolean" || item === null) values.push(item);
+        else values.push(TOOL_SUMMARY_REDACTED);
+      }
+      projected[key] = values;
+    } else {
+      projected[key] = TOOL_SUMMARY_REDACTED;
+    }
+  }
+  return RendererSafeSummarySchema.parse(projected);
+}
+
 function rendererSafeTool(tool: ToolCall): ToolCall {
   return ToolCallSchema.parse({
     id: tool.id,
@@ -219,8 +275,8 @@ function rendererSafeTool(tool: ToolCall): ToolCall {
     displayName: "OpenClaw tool",
     state: tool.state,
     risk: tool.risk,
-    ...(tool.inputSummary === undefined ? {} : { inputSummary: RendererSafeSummarySchema.parse(tool.inputSummary) }),
-    ...(tool.outputSummary === undefined ? {} : { outputSummary: RendererSafeSummarySchema.parse(tool.outputSummary) }),
+    ...(tool.inputSummary === undefined ? {} : { inputSummary: rendererSafeToolSummary(tool.inputSummary) }),
+    ...(tool.outputSummary === undefined ? {} : { outputSummary: rendererSafeToolSummary(tool.outputSummary) }),
     ...(tool.startedAt === undefined ? {} : { startedAt: tool.startedAt }),
     ...(tool.finishedAt === undefined ? {} : { finishedAt: tool.finishedAt }),
     ...(tool.error === undefined ? {} : {

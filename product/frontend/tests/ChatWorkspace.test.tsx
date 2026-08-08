@@ -395,6 +395,65 @@ describe("chat workspace", () => {
     expect(send.mock.calls[2]![0].clientRequestId).not.toBe(send.mock.calls[1]![0].clientRequestId);
   });
 
+  it("rotates clientRequestId only when the attachment picker adds an attachment", async () => {
+    const base = clientFixture();
+    const attachment = { id: "attachment-new", file: { id: "file-new", name: "new.txt", mediaType: "text/plain", size: 4, kind: "attachment" as const }, state: "ready" as const, progress: 1 };
+    let selectCount = 0;
+    const invoke = vi.fn(async (request: { method: string; requestId: string }) => ({
+      method: request.method, requestId: request.requestId, ok: true,
+      result: request.method === "select" ? (++selectCount === 1 ? [] : [attachment]) : request.method === "prepare" ? [attachment] : null,
+    }));
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    let attempt = 0;
+    const send = vi.fn((input: Parameters<UClawClient["chat"]["send"]>[0]) => (async function* () {
+      attempt += 1;
+      if (attempt < 3) throw new Error("send failed");
+      yield { type: "started" as const, runId: "run-picker", sessionId: input.sessionId };
+      yield { type: "final" as const, runId: "run-picker", message: { id: "final-picker", sessionId: input.sessionId, runId: "run-picker", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    })());
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send } });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "选择附件" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await screen.findByText("send failed");
+
+    fireEvent.click(screen.getByRole("button", { name: "添加附件" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "select" })));
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].clientRequestId).toBe(send.mock.calls[0]![0].clientRequestId);
+
+    fireEvent.click(screen.getByRole("button", { name: "添加附件" }));
+    expect(await screen.findByText("new.txt")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+    expect(send.mock.calls[2]![0].clientRequestId).not.toBe(send.mock.calls[1]![0].clientRequestId);
+  });
+
+  it("rotates clientRequestId after an aborted terminal event", async () => {
+    const base = clientFixture();
+    let attempt = 0;
+    const send = vi.fn((input: Parameters<UClawClient["chat"]["send"]>[0]) => (async function* () {
+      attempt += 1;
+      yield { type: "started" as const, runId: `run-aborted-${attempt}`, sessionId: input.sessionId };
+      if (attempt === 1) {
+        yield { type: "aborted" as const, runId: "run-aborted-1", reason: "Stopped" };
+        return;
+      }
+      yield { type: "final" as const, runId: "run-aborted-2", message: { id: "final-aborted", sessionId: input.sessionId, runId: "run-aborted-2", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    })());
+    const client = clientFixture({ chat: { ...base.chat, send } });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "停止后重发" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await screen.findByText("Stopped");
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].clientRequestId).not.toBe(send.mock.calls[0]![0].clientRequestId);
+  });
+
   it("clears successful attachments so a later text-only send is not blocked", async () => {
     const base = clientFixture();
     const attachment = { id: "attachment-1", file: { id: "file-1", name: "report.txt", mediaType: "text/plain", size: 4, kind: "attachment" as const }, state: "ready" as const, progress: 1 };
@@ -426,7 +485,14 @@ describe("chat workspace", () => {
     const failed = { ...ready, state: "failed" as const, error: { code: "OPERATION_FAILED" as const, message: "上传失败", retryable: true } };
     const invoke = vi.fn(async (request: { method: string; requestId: string }) => ({ method: request.method, requestId: request.requestId, ok: true, result: request.method === "select" ? [ready] : request.method === "get" ? failed : request.method === "prepare" ? [ready] : null }));
     window.uclaw = { attachments: { invoke: invoke as never } };
-    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send: vi.fn(async function* () { throw new Error("send failed"); }) } });
+    let attempt = 0;
+    const send = vi.fn((input: Parameters<UClawClient["chat"]["send"]>[0]) => (async function* () {
+      attempt += 1;
+      if (attempt === 1) throw new Error("send failed");
+      yield { type: "started" as const, runId: "run-attachment-retry", sessionId: input.sessionId };
+      yield { type: "final" as const, runId: "run-attachment-retry", message: { id: "final-attachment-retry", sessionId: input.sessionId, runId: "run-attachment-retry", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    })());
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send } });
     render(<App client={client} />);
     fireEvent.click(await screen.findByRole("button", { name: "添加附件" }));
     const composer = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
@@ -438,6 +504,10 @@ describe("chat workspace", () => {
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "get", params: { attachmentId: "attachment-failed" } }));
     fireEvent.click(screen.getByRole("button", { name: "重试 failed.txt" }));
     await waitFor(() => expect(invoke.mock.calls.filter(([request]) => request.method === "prepare").length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].clientRequestId).toBe(send.mock.calls[0]![0].clientRequestId);
   });
 
   it("resets session paging metadata after a successful refresh", async () => {

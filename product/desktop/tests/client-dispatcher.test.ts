@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ClientIpcEvent, ClientIpcRequest, GatewayStatus, MessageEvent, UClawClient } from "@uclaw/shared";
+import type { ClientIpcEvent, ClientIpcRequest, GatewayStatus, MessageEvent, ToolCall, UClawClient } from "@uclaw/shared";
 
 import { createClientDispatcher } from "../src/ipc/client-dispatcher.js";
 
@@ -35,17 +35,27 @@ const status = (attempt: number): GatewayStatus => ({
 });
 
 describe("createClientDispatcher stream ownership", () => {
-  it("preserves validated tool summaries while keeping sensitive values redacted", async () => {
+  it("preserves bounded benign tool summaries while redacting renderer-sensitive values", async () => {
+    const unsafeTool = {
+      id: "tool-summary", sessionId: "session-1", toolId: "exec", displayName: "Run tests",
+      state: "failed", risk: "high",
+      inputSummary: {
+        command: "rm -rf /private/data",
+        cwd: "/private/data",
+        embeddedPath: "cwd:/private/embedded",
+        windowsPath: "C:\\Users\\private\\project",
+        tokenCount: 42,
+        status: "tests failed",
+        longText: "x".repeat(10_000),
+        nested: { deeper: { secret: "must-not-cross" } },
+      },
+      outputSummary: { configured: true, token: "secret-value" },
+      error: { code: "OPERATION_FAILED", message: "process failed", retryable: true },
+    } as unknown as ToolCall;
     const dispatcher = createClientDispatcher({
       client: clientWith({ tools: {
         list: vi.fn(),
-        getCall: vi.fn(async () => ({
-          id: "tool-summary", sessionId: "session-1", toolId: "exec", displayName: "Run tests",
-          state: "failed" as const, risk: "high" as const,
-          inputSummary: { command: "npm test", tokenCount: 42 },
-          outputSummary: { configured: true, token: "secret-value" },
-          error: { code: "OPERATION_FAILED" as const, message: "process failed", retryable: true },
-        })),
+        getCall: vi.fn(async () => unsafeTool),
       } }),
       sendEvent: vi.fn(),
     });
@@ -53,10 +63,16 @@ describe("createClientDispatcher stream ownership", () => {
     const response = await dispatcher(request("tools.get-call", "tool-1", { toolCallId: "tool-summary" }));
 
     expect(response).toMatchObject({ ok: true, result: {
-      inputSummary: { command: "npm test", tokenCount: 42 },
+      inputSummary: {
+        command: "[REDACTED]", cwd: "[REDACTED]", embeddedPath: "[REDACTED]", windowsPath: "[REDACTED]",
+        tokenCount: 42, status: "tests failed", nested: "[REDACTED]",
+      },
       outputSummary: { configured: true, token: "[REDACTED]" },
       error: { code: "OPERATION_FAILED", message: "Tool operation failed.", retryable: true },
     } });
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toMatch(/rm -rf|\/private\/(?:data|embedded)|C:\\\\Users|must-not-cross|secret-value/);
+    expect(serialized.length).toBeLessThanOrEqual(4_096);
     dispatcher.dispose();
   });
 

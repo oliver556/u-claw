@@ -173,11 +173,13 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   };
 
   const selectAttachments = async () => {
-    invalidateSendIntent();
     try {
       const selected = await attachmentInvoke("select", {}) as Attachment[];
-      setAttachments((current) => [...current, ...selected.filter((item) => !current.some((known) => known.id === item.id))]);
-      selected.forEach((attachment) => void prepareAttachment(attachment.id));
+      const knownIds = new Set(attachments.map((attachment) => attachment.id));
+      const additions = selected.filter((attachment) => !knownIds.has(attachment.id));
+      if (additions.length > 0) invalidateSendIntent();
+      setAttachments((current) => [...current, ...additions.filter((item) => !current.some((known) => known.id === item.id))]);
+      additions.forEach((attachment) => void prepareAttachment(attachment.id));
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "选择附件失败");
     }
@@ -236,6 +238,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
         restoreFailedDraft(terminal.error.message);
         await refreshAttachmentStates(readyAttachments);
       }
+      else if (terminal?.type === "aborted") sendIntentId.current = undefined;
       else if (terminal?.type === "final") {
         onDraftChange("");
         const sentIds = new Set(readyAttachments.map((attachment) => attachment.id));
@@ -317,6 +320,6 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
         {historyPageState === "error" ? <div className="history-page-error" role="alert"><span>{historyPageError}</span><button type="button" onClick={() => void loadMoreHistory()}><RotateCw />重试加载</button></div> : null}</> : null}
     </div>
     {sendError ? <div className="send-error" role="alert"><AlertCircle /><span><strong>发送失败</strong>{sendError}</span></div> : null}
-    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { invalidateSendIntent(); void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); setAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
+    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); setAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
   </section>;
 }
