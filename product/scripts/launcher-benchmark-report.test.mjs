@@ -167,14 +167,15 @@ test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH 
   assert.match(source, /SetHandleInformation/);
   assert.match(source, /PROC_THREAD_ATTRIBUTE_HANDLE_LIST/);
   assert.match(source, /SafeFileHandle/);
+  assert.match(source, /CountdownEvent/);
   assert.match(source, /DeleteProcThreadAttributeList/);
   assert.match(source, /Marshal\.FreeHGlobal/);
-  assert.match(source, /Task\.Factory\.StartNew[\s\S]{0,300}ReadToEnd\(\)/);
+  assert.match(source, /Task\.Factory\.StartNew[\s\S]{0,500}ReadToEnd\(\)/);
   assert.match(source, /WaitForExit\(\$TimeoutMs\)/);
   assert.match(source, /TerminateProcess/);
   assert.match(source, /WaitForSingleObject/);
   assert.match(source, /\[Threading\.Tasks\.Task\]::WaitAll\([^\r\n]*\$CaptureTimeoutMs\)/);
-  assert.doesNotMatch(source, /Diagnostics\.ProcessStartInfo|\.ArgumentList\b|taskkill\.exe/);
+  assert.doesNotMatch(source, /Diagnostics\.ProcessStartInfo|\.ArgumentList\b|taskkill\.exe|Thread\.Sleep|Start-Sleep/);
   assert.match(source, /\[Diagnostics\.Stopwatch\]::StartNew\(\)/);
   assert.match(source, /finally[\s\S]{0,240}Remove-Item\s+-LiteralPath/i);
   assert.match(source, /finally[\s\S]{0,180}\$env:PATH\s*=\s*\$originalPath/i);
@@ -203,7 +204,10 @@ test("PowerShell harness contains descendants in a kill-on-close Windows Job Obj
   assert.match(source, /LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED/);
   assert.match(source, /function Initialize-ProcessJob[\s\S]{0,500}Add-Type[\s\S]{0,300}catch[\s\S]{0,200}PROCESS_JOB_FAILED/);
   assert.match(source, /\$job\s*=\s*\[LauncherProcessJob\]::new\(\)[\s\S]{0,200}catch[\s\S]{0,200}PROCESS_JOB_FAILED/);
-  assert.match(source, /CreateProcessW[\s\S]{0,1000}AssignProcessToJobObject[\s\S]{0,500}ResumeThread[\s\S]{0,500}Task\.Factory\.StartNew/);
+  assert.match(source, /PrepareCapture[\s\S]{0,500}Task\.Factory\.StartNew[\s\S]{0,500}captureReady\.Wait/);
+  assert.match(source, /Task\.Factory\.StartNew[\s\S]{0,200}captureReady\.Signal\(\)[\s\S]{0,100}ReadToEnd\(\)/);
+  assert.match(source, /Task\.Factory\.StartNew[\s\S]{0,1000}CreateProcessW[\s\S]{0,1000}AssignProcessToJobObject[\s\S]{0,500}ResumeThread/);
+  assert.match(source, /CloseParentWriteHandles\(\)[\s\S]{0,200}WaitForCaptureTasks\(5000\)/);
   assert.match(source, /CreateProcessW[\s\S]{0,500}CloseParentWriteHandles[\s\S]{0,300}AssignProcessToJobObject/);
   assert.match(source, /AssignProcessToJobObject[\s\S]{0,300}TerminateSuspendedProcess/);
   assert.match(source, /ResumeThread[\s\S]{0,300}TerminateSuspendedProcess/);
@@ -213,7 +217,7 @@ test("PowerShell harness contains descendants in a kill-on-close Windows Job Obj
   assert.ok(invokeSource.indexOf("Initialize-ProcessJob") < invokeSource.indexOf("[Diagnostics.Stopwatch]::StartNew()"));
   assert.ok(invokeSource.indexOf("[LauncherProcessJob]::new()") < invokeSource.indexOf("[Diagnostics.Stopwatch]::StartNew()"));
   assert.ok(invokeSource.indexOf("$job.PrepareProcess") < invokeSource.indexOf("[Diagnostics.Stopwatch]::StartNew()"));
-  assert.match(invokeSource, /\$stopwatch\s*=\s*\[Diagnostics\.Stopwatch\]::StartNew\(\)\s*\r?\n\s*\$runner\.Start\(\)/);
+  assert.match(invokeSource, /\$runner\.PrepareCapture\(\)\s*\r?\n\s*\$stopwatch\s*=\s*\[Diagnostics\.Stopwatch\]::StartNew\(\)\s*\r?\n\s*\$runner\.Start\(\)/);
   assert.ok(invokeSource.indexOf("$stopwatch.Stop()") < invokeSource.indexOf("return [pscustomobject]"));
   assert.ok(invokeSource.indexOf("return [pscustomobject]") < invokeSource.indexOf("$job.Dispose()"));
 });

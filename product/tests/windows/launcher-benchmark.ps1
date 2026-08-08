@@ -119,6 +119,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
 
@@ -219,6 +220,8 @@ public sealed class LauncherProcessJob : IDisposable
         private SafeFileHandle stderrSafeHandle;
         private StreamReader stdoutReader;
         private StreamReader stderrReader;
+        private readonly CountdownEvent captureReady = new CountdownEvent(2);
+        private bool capturePrepared;
         private bool started;
         private bool disposed;
 
@@ -242,14 +245,28 @@ public sealed class LauncherProcessJob : IDisposable
                 try { if (stderrReader != null) stderrReader.Dispose(); } catch { }
                 try { if (stdoutSafeHandle != null) stdoutSafeHandle.Dispose(); } catch { }
                 try { if (stderrSafeHandle != null) stderrSafeHandle.Dispose(); } catch { }
+                try { captureReady.Dispose(); } catch { }
                 CleanupHandles(false);
                 throw;
             }
         }
 
+        public void PrepareCapture()
+        {
+            if (disposed || started || capturePrepared) throw new InvalidOperationException();
+            StdoutTask = Task.Factory.StartNew(
+                () => { captureReady.Signal(); return stdoutReader.ReadToEnd(); },
+                TaskCreationOptions.LongRunning);
+            StderrTask = Task.Factory.StartNew(
+                () => { captureReady.Signal(); return stderrReader.ReadToEnd(); },
+                TaskCreationOptions.LongRunning);
+            if (!captureReady.Wait(5000)) throw new Win32Exception(1460);
+            capturePrepared = true;
+        }
+
         public void Start()
         {
-            if (disposed || started) throw new InvalidOperationException();
+            if (disposed || started || !capturePrepared) throw new InvalidOperationException();
             if (!CreateProcessW(
                 filePath, commandLine, IntPtr.Zero, IntPtr.Zero, true, PROCESS_CREATION_FLAGS,
                 environmentBlock, null, ref startupInfo, out processInformation))
@@ -275,12 +292,6 @@ public sealed class LauncherProcessJob : IDisposable
                     TerminateSuspendedProcess();
                     throw new Win32Exception(error);
                 }
-                StdoutTask = Task.Factory.StartNew(
-                    () => stdoutReader.ReadToEnd(),
-                    TaskCreationOptions.LongRunning);
-                StderrTask = Task.Factory.StartNew(
-                    () => stderrReader.ReadToEnd(),
-                    TaskCreationOptions.LongRunning);
             }
             catch
             {
@@ -314,10 +325,13 @@ public sealed class LauncherProcessJob : IDisposable
             if (disposed) return;
             disposed = true;
             Exception failure = null;
-            try { if (stdoutReader != null) stdoutReader.Dispose(); } catch (Exception error) { failure = error; }
+            try { CloseParentWriteHandles(); } catch (Exception error) { failure = error; }
+            try { WaitForCaptureTasks(5000); } catch (Exception error) { if (failure == null) failure = error; }
+            try { if (stdoutReader != null) stdoutReader.Dispose(); } catch (Exception error) { if (failure == null) failure = error; }
             try { if (stderrReader != null) stderrReader.Dispose(); } catch (Exception error) { if (failure == null) failure = error; }
             try { if (stdoutSafeHandle != null) stdoutSafeHandle.Dispose(); } catch (Exception error) { if (failure == null) failure = error; }
             try { if (stderrSafeHandle != null) stderrSafeHandle.Dispose(); } catch (Exception error) { if (failure == null) failure = error; }
+            try { captureReady.Dispose(); } catch (Exception error) { if (failure == null) failure = error; }
             try { CleanupHandles(true); } catch (Exception error) { if (failure == null) failure = error; }
             if (failure != null) throw failure;
             GC.SuppressFinalize(this);
@@ -406,9 +420,20 @@ public sealed class LauncherProcessJob : IDisposable
 
         private void CloseParentWriteHandles()
         {
-            CloseOwnedHandle(ref stdinHandle, true);
-            CloseOwnedHandle(ref stdoutWriteHandle, true);
-            CloseOwnedHandle(ref stderrWriteHandle, true);
+            Exception failure = null;
+            TryClose(ref stdinHandle, ref failure);
+            TryClose(ref stdoutWriteHandle, ref failure);
+            TryClose(ref stderrWriteHandle, ref failure);
+            if (failure != null) throw failure;
+        }
+
+        private void WaitForCaptureTasks(int timeoutMs)
+        {
+            var tasks = new List<Task>();
+            if (StdoutTask != null) tasks.Add(StdoutTask);
+            if (StderrTask != null) tasks.Add(StderrTask);
+            if (tasks.Count != 0 && !Task.WaitAll(tasks.ToArray(), timeoutMs))
+                throw new Win32Exception(1460);
         }
 
         private void TerminateSuspendedProcess()
@@ -474,13 +499,6 @@ public sealed class LauncherProcessJob : IDisposable
             {
                 failure = LastWin32Exception();
             }
-        }
-
-        private static void CloseOwnedHandle(ref IntPtr value, bool throwOnFailure)
-        {
-            Exception failure = null;
-            TryClose(ref value, ref failure);
-            if (throwOnFailure && failure != null) throw failure;
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
@@ -828,6 +846,7 @@ function Invoke-CapturedProcess {
         catch {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
         }
+        $runner.PrepareCapture()
         $stopwatch = [Diagnostics.Stopwatch]::StartNew()
         $runner.Start()
         $stdoutTask = $runner.StdoutTask
