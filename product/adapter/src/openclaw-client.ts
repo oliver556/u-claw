@@ -709,7 +709,7 @@ export class OpenClawClient implements UClawClient {
       this.hello = hello;
       const hasDescribe = hello.features.methods.includes("sessions.describe");
       const methods = hello.features.methods.filter((method) => implementedMethods.has(method)
-        && (hasDescribe || (method !== "sessions.create" && method !== "sessions.patch")));
+        && (hasDescribe || method !== "sessions.create"));
       const execApproval = hello.features.methods.includes("exec.approval.list") &&
         hello.features.methods.includes("exec.approval.resolve") &&
         hello.features.events.includes("exec.approval.requested");

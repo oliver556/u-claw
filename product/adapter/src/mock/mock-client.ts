@@ -134,7 +134,6 @@ export class MockUClawClient implements UClawClient {
         "sessions.patch",
         "chat.history", "chat.message.get", "chat.send", "chat.abort",
         "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
-        "sessions.patch",
       ],
       events: ["chat"],
       features: { attachments: false, approvalResolve: false },
