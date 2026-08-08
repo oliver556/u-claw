@@ -15,20 +15,40 @@
 
 ```powershell
 $ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.Major -ne 7) {
+  throw 'Current shell must be PowerShell 7'
+}
 Get-Command git, node, go, dotnet, powershell.exe, pwsh | Select-Object Name, Source
-node --version
-if ($LASTEXITCODE -ne 0) { throw 'Node version check failed' }
-go version
+$nodeVersion = (& node --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -cne 'v24.15.0') { throw 'Node must be v24.15.0' }
+$goVersion = (& go version).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Go version check failed' }
-dotnet --version
-if ($LASTEXITCODE -ne 0) { throw '.NET version check failed' }
-powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
-if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell version check failed' }
-pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
-if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 version check failed' }
+$goVersionTokens = @($goVersion -split '\s+')
+if ($goVersionTokens -notcontains 'go1.24.4' -or $goVersionTokens -notcontains 'windows/amd64') {
+  throw 'Go must be go1.24.4 windows/amd64'
+}
+$dotnetVersion = (& dotnet --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $dotnetVersion -cne '8.0.408') { throw '.NET SDK must be 8.0.408' }
+$windowsPowerShellVersion = (& powershell.exe -NoProfile -Command '$v = $PSVersionTable.PSVersion; "$($v.Major).$($v.Minor)"').Trim()
+if ($LASTEXITCODE -ne 0 -or $windowsPowerShellVersion -cne '5.1') { throw 'Windows PowerShell must be 5.1' }
+$pwshMajor = (& pwsh -NoProfile -Command '$PSVersionTable.PSVersion.Major.ToString()').Trim()
+if ($LASTEXITCODE -ne 0 -or $pwshMajor -cne '7') { throw 'PowerShell must be major version 7' }
 ```
 
-预期 Node 输出 `v24.15.0`，Go 输出包含 `go1.24.4 windows/amd64`，.NET 输出 `8.0.408`，Windows PowerShell 输出 `5.1.*`，`pwsh` 输出 `7.*`。缺少命令或版本不同，停止；不要把结果与 CI 固定环境混用。
+上述检查同时验证当前 shell 为 PowerShell 7、子 shell `powershell.exe` 为 5.1、子 shell `pwsh` major 为 7。缺少命令或版本不同会立即停止；不要把结果与 CI 固定环境混用。
+
+## 行为兼容门禁
+
+正式构建和基准只用 PowerShell 7 (`pwsh`)。构建候选、运行任何正式 trial 或生成 decision 前，必须先在 Windows PowerShell 5.1 和 PowerShell 7 分别通过行为门禁：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\product\tests\windows\launcher-benchmark-behavior.ps1
+if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell behavior gate failed' }
+pwsh -NoProfile -File .\product\tests\windows\launcher-benchmark-behavior.ps1
+if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 behavior gate failed' }
+```
+
+该脚本编译 fake 候选并验证带引号 PATH、最近秩 percentile、严格 sidecar、超时后的 child process cleanup 等兼容与安全行为。
 
 ## Windows 本地复现
 
@@ -53,20 +73,33 @@ if ($LASTEXITCODE -ne 0 -or $commitSha -cnotmatch '^[0-9a-f]{40}$') { throw 'Inv
 
 $goExe = Join-Path $candidateRoot 'uclaw-launcher-go.exe'
 if (Test-Path -LiteralPath $goExe) { throw 'Go candidate output already exists' }
+$hadCgoEnabled = Test-Path Env:CGO_ENABLED
+$originalCgoEnabled = $env:CGO_ENABLED
+$hadGoos = Test-Path Env:GOOS
+$originalGoos = $env:GOOS
+$hadGoarch = Test-Path Env:GOARCH
+$originalGoarch = $env:GOARCH
 $env:CGO_ENABLED = '0'
 $env:GOOS = 'windows'
 $env:GOARCH = 'amd64'
-Push-Location product\benchmarks\launcher\go
 try {
-  go test ./...
-  if ($LASTEXITCODE -ne 0) { throw 'Go tests failed' }
-  $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-  go build -trimpath -ldflags '-s -w' -o $goExe .
-  if ($LASTEXITCODE -ne 0) { $stopwatch.Stop(); throw 'Go build failed' }
-  $stopwatch.Stop()
+  Push-Location product\benchmarks\launcher\go
+  try {
+    go test ./...
+    if ($LASTEXITCODE -ne 0) { throw 'Go tests failed' }
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    go build -trimpath -ldflags '-s -w' -o $goExe .
+    if ($LASTEXITCODE -ne 0) { $stopwatch.Stop(); throw 'Go build failed' }
+    $stopwatch.Stop()
+  }
+  finally {
+    Pop-Location
+  }
 }
 finally {
-  Pop-Location
+  if ($hadCgoEnabled) { $env:CGO_ENABLED = $originalCgoEnabled } else { Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue }
+  if ($hadGoos) { $env:GOOS = $originalGoos } else { Remove-Item Env:GOOS -ErrorAction SilentlyContinue }
+  if ($hadGoarch) { $env:GOARCH = $originalGoarch } else { Remove-Item Env:GOARCH -ErrorAction SilentlyContinue }
 }
 $goToolchainVersion = (& go version).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Go version capture failed' }
@@ -153,27 +186,16 @@ node product\scripts\launcher-benchmark-report.mjs decide product\.launcher-benc
 if ($LASTEXITCODE -ne 0) { throw 'Decision failed' }
 ```
 
-只有三份报告属于同一 `commitSha`，且三份都通过 mandatory gate 后，`decision.json` 才是 provisional decision。本地单机运行三次不等于三台独立 hosted runner，不得把它描述为 CI 证据。
-
-## 行为兼容门禁
-
-正式基准只用 PowerShell 7 (`pwsh`)。行为门禁必须分别在 Windows PowerShell 5.1 和 PowerShell 7 执行：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\product\tests\windows\launcher-benchmark-behavior.ps1
-if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell behavior gate failed' }
-pwsh -NoProfile -File .\product\tests\windows\launcher-benchmark-behavior.ps1
-if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 behavior gate failed' }
-```
-
-该脚本编译 fake 候选并验证带引号 PATH、最近秩 percentile、严格 sidecar、超时后的 child process cleanup 等兼容与安全行为。
+只有 Windows PowerShell 5.1 和 PowerShell 7 双行为门禁都成功、三份报告属于同一 `commitSha`，且三份都通过 mandatory gate 后，`decision.json` 才是 provisional decision。本地单机运行三次不等于三台独立 hosted runner，不得把它描述为 CI 证据。
 
 ## CI 与 artifact
 
 分支先 push，且操作者拥有 GitHub Actions workflow dispatch 权限后，才能手动触发：
 
 ```powershell
-gh workflow run launcher-benchmark.yml --ref <branch>
+$branch = 'codex/task9-launcher-benchmark'
+if ([string]::IsNullOrWhiteSpace($branch)) { throw 'Branch must not be empty' }
+gh workflow run launcher-benchmark.yml --ref $branch
 if ($LASTEXITCODE -ne 0) { throw 'Workflow dispatch failed' }
 ```
 
@@ -183,9 +205,53 @@ if ($LASTEXITCODE -ne 0) { throw 'Workflow dispatch failed' }
 
 `product\.launcher-benchmark`、任何 `.tmp`、EXE、DLL、PDB、`bin`、`obj`、trial JSON 和 decision JSON 都是本地产物，不得提交。sidecar 必须与对应 EXE 同目录，也不得提交。运行前使用新的输出路径；不要覆盖或篡改已有报告。
 
-提交前删除这些本地产物，再运行以下门禁。报告、日志和提交内容不得包含用户绝对路径、用户名或 secret。
+提交前只删除仓库内固定的 benchmark 输出根目录和 .NET `bin`/`obj`。脚本先证明 `$work` 等于预期目录，并逐一校验其他清理路径在仓库内固定位置；拒绝 reparse point，删除后用 `Test-Path` 确认不存在，再检查 Git。报告、日志和提交内容不得包含用户绝对路径、用户名或 secret。
 
 ```powershell
+$ErrorActionPreference = 'Stop'
+$repositoryRoot = (& git rev-parse --show-toplevel).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Repository root lookup failed' }
+$repositoryRoot = [IO.Path]::GetFullPath($repositoryRoot)
+$currentDirectory = [IO.Path]::GetFullPath($PWD)
+if (-not $currentDirectory.Equals($repositoryRoot, [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Cleanup must run from repository root'
+}
+
+$expectedWork = [IO.Path]::GetFullPath([IO.Path]::Combine($repositoryRoot, 'product', '.launcher-benchmark'))
+$work = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'product\.launcher-benchmark'))
+if (-not $work.Equals($expectedWork, [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Unexpected benchmark cleanup path'
+}
+$repositoryPrefix = $repositoryRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if (-not $work.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Benchmark cleanup path is outside repository'
+}
+
+$buildOutputs = @(
+  [IO.Path]::GetFullPath([IO.Path]::Combine($repositoryRoot, 'product', 'benchmarks', 'launcher', 'dotnet', 'bin')),
+  [IO.Path]::GetFullPath([IO.Path]::Combine($repositoryRoot, 'product', 'benchmarks', 'launcher', 'dotnet', 'obj'))
+)
+$expectedBuildOutputs = @(
+  [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'product\benchmarks\launcher\dotnet\bin')),
+  [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'product\benchmarks\launcher\dotnet\obj'))
+)
+for ($index = 0; $index -lt $buildOutputs.Count; $index++) {
+  if (-not $buildOutputs[$index].Equals($expectedBuildOutputs[$index], [StringComparison]::OrdinalIgnoreCase) -or
+      -not $buildOutputs[$index].StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Unexpected .NET cleanup path'
+  }
+}
+
+foreach ($path in @($work) + $buildOutputs) {
+  if (Test-Path -LiteralPath $path) {
+    $item = Get-Item -LiteralPath $path -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Cleanup path is a reparse point' }
+    Remove-Item -LiteralPath $path -Recurse -Force
+  }
+  if (Test-Path -LiteralPath $path) { throw 'Benchmark cleanup failed' }
+}
+if (Test-Path -LiteralPath $work) { throw 'Benchmark cleanup failed' }
+
 $status = (& git status --short)
 if ($LASTEXITCODE -ne 0) { throw 'Git status check failed' }
 if ($status) { throw ('Working tree is not clean:' + [Environment]::NewLine + ($status -join [Environment]::NewLine)) }
