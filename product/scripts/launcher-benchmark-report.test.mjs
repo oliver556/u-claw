@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -13,6 +13,11 @@ import { decideLauncher, validateTrialReport } from "./launcher-benchmark-report
 const scriptPath = fileURLToPath(new URL("./launcher-benchmark-report.mjs", import.meta.url));
 const schemaUrl = new URL("../tests/windows/launcher-benchmark.schema.json", import.meta.url);
 const harnessUrl = new URL("../tests/windows/launcher-benchmark.ps1", import.meta.url);
+const behaviorTestUrl = new URL(
+  "../tests/windows/launcher-benchmark-behavior.ps1",
+  import.meta.url,
+);
+const workflowUrl = new URL("../../.github/workflows/launcher-benchmark.yml", import.meta.url);
 const fixtureUrl = new URL(
   "../tests/packaging/fixtures/launcher-trial.example.json",
   import.meta.url,
@@ -144,21 +149,82 @@ test("PowerShell harness stays compatible with Windows PowerShell 5.1", async ()
   assert.doesNotMatch(source, /GetFullPath\(\$InputPath\s*,|\.ArgumentList\b|\.Environment\[['"]PATH['"]\]|\.Kill\(\$true\)|SHA256\]::HashData|\[Convert\]::ToHexString/);
 });
 
-test("future Windows harness workflow must gate PowerShell 5.1 and pwsh", async (t) => {
-  const directoryUrl = new URL("../../.github/workflows/", import.meta.url);
-  const workflowNames = (await readdir(directoryUrl)).filter((name) => name.endsWith(".yml"));
-  const workflowSource = (await Promise.all(
-    workflowNames.map((name) => readFile(new URL(name, directoryUrl), "utf8")),
-  )).join("\n");
-  if (!workflowSource.includes("launcher-benchmark.ps1")) {
-    t.skip("Task 5 has not wired the Windows behavior gate yet");
-    return;
+test("Windows launcher workflow has pinned tools, isolated trials, and safe triggers", async () => {
+  const workflowSource = await readFile(workflowUrl, "utf8");
+  assert.match(workflowSource, /workflow_dispatch:/);
+  assert.match(workflowSource, /pull_request:[\s\S]*paths:/);
+  assert.match(workflowSource, /permissions:\s*\n\s*contents:\s*read/);
+  assert.match(workflowSource, /runs-on:\s*windows-2022/);
+  assert.match(workflowSource, /fail-fast:\s*false/);
+  assert.match(workflowSource, /trial:\s*\[1,\s*2,\s*3\]/);
+  assert.match(workflowSource, /runs-on:\s*ubuntu-latest/);
+  for (const action of [
+    "actions/checkout@v4",
+    "actions/setup-go@v5",
+    "actions/setup-dotnet@v4",
+    "actions/setup-node@v4",
+    "actions/upload-artifact@v4",
+    "actions/download-artifact@v4",
+  ]) {
+    assert.match(workflowSource, new RegExp(action.replace("/", "\\/")));
   }
+  assert.match(workflowSource, /node-version:\s*['"]?24\.15\.0/);
+  assert.match(workflowSource, /go-version:\s*['"]?1\.24\.4/);
+  assert.match(workflowSource, /dotnet-version:\s*['"]?8\.0\.408/);
+  assert.doesNotMatch(workflowSource, /pull_request_target|\bsecrets\b|RunAs|Start-Process[^\n]*-Verb/i);
+});
+
+test("Windows launcher workflow builds measured sidecars and validates every trial", async () => {
+  const workflowSource = await readFile(workflowUrl, "utf8");
+  assert.match(workflowSource, /CGO_ENABLED[^\n]*0/);
+  assert.match(workflowSource, /GOOS[^\n]*windows/);
+  assert.match(workflowSource, /GOARCH[^\n]*amd64/);
+  assert.match(workflowSource, /go test/);
+  assert.match(workflowSource, /dotnet[^\n]*--self-test/);
+  assert.match(workflowSource, /dotnet publish/);
+  assert.match(workflowSource, /PublishAot=true/);
+  assert.match(workflowSource, /Stopwatch/);
+  assert.match(workflowSource, /go version/);
+  assert.match(workflowSource, /dotnet --version/);
+  assert.match(workflowSource, /\.build\.json/);
+  for (const field of ["schemaVersion", "candidate", "commitSha", "buildMs", "toolchainVersion"]) {
+    assert.match(workflowSource, new RegExp(field));
+  }
+  assert.doesNotMatch(workflowSource, /buildMs\s*[:=]\s*0\b/);
+  assert.match(workflowSource, /-Iterations\s+20/);
+  assert.match(workflowSource, /-Trial\s+['"]?\$\{\{ matrix\.trial \}\}/);
+  assert.match(workflowSource, /launcher-benchmark-report\.mjs validate/);
+});
+
+test("Windows harness workflow gates PowerShell 5.1 and pwsh with behavior tests", async () => {
+  const workflowSource = await readFile(workflowUrl, "utf8");
   assert.match(workflowSource, /shell:\s*powershell\b/);
   assert.match(workflowSource, /shell:\s*pwsh\b/);
-  assert.match(workflowSource, /fake-child/i);
-  assert.match(workflowSource, /PROCESS_CAPTURE_TIMEOUT/);
-  assert.match(workflowSource, /Get-Process/);
+  assert.match(workflowSource, /launcher-benchmark-behavior\.ps1/g);
+});
+
+test("Windows workflow uploads unique trials and aggregates exactly four JSON files", async () => {
+  const workflowSource = await readFile(workflowUrl, "utf8");
+  assert.match(workflowSource, /name:\s*launcher-benchmark-trial-\$\{\{ matrix\.trial \}\}/);
+  assert.match(workflowSource, /needs:\s*benchmark/);
+  assert.match(workflowSource, /pattern:\s*launcher-benchmark-trial-\*/);
+  assert.match(workflowSource, /merge-multiple:\s*true/);
+  assert.match(workflowSource, /launcher-benchmark-report\.mjs decide[\s\S]*trial-1\.json[\s\S]*trial-2\.json[\s\S]*trial-3\.json[\s\S]*--output[\s\S]*decision\.json/);
+  assert.match(workflowSource, /path:\s*\|[\s\S]*trial-1\.json[\s\S]*trial-2\.json[\s\S]*trial-3\.json[\s\S]*decision\.json/);
+});
+
+test("Windows behavior test covers Task 4 compatibility cases", async () => {
+  const source = await readFile(behaviorTestUrl, "utf8");
+  assert.match(source, /Iterations['"],\s*['"]7/);
+  assert.match(source, /p50Ms[\s\S]*p95Ms/);
+  assert.match(source, /duplicate/i);
+  assert.match(source, /null/i);
+  assert.match(source, /relative/i);
+  assert.match(source, /trailing-backslash/i);
+  assert.match(source, /fake-child/i);
+  assert.match(source, /PROCESS_CAPTURE_TIMEOUT/);
+  assert.match(source, /Get-Process/);
+  assert.doesNotMatch(source, /RunAs|SetEnvironmentVariable\([^\n]*(Machine|User)|\bsetx\b|HKLM:|HKCU:/i);
 });
 
 test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH restoration", async () => {
