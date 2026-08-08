@@ -116,7 +116,6 @@ describe("MockUClawClient", () => {
       "sessions.patch",
       "chat.history", "chat.message.get", "chat.send", "chat.abort",
       "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
-      "sessions.patch",
     ]);
     expect([...capabilities.events]).toEqual(["chat"]);
   });

@@ -272,12 +272,18 @@ describe("OpenClawClient", () => {
     expect(transport.connectCalls).toBe(1);
   });
 
-  it("keeps create and patch capabilities closed when authoritative describe readback is unavailable", async () => {
+  it("keeps create closed but preserves model patch when describe readback is unavailable", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push("sessions.create", "sessions.patch");
     const capabilities = await new OpenClawClient({ transport }).gateway.negotiate();
     expect(capabilities.methods.has("sessions.create")).toBe(false);
-    expect(capabilities.methods.has("sessions.patch")).toBe(false);
+    expect(capabilities.methods.has("sessions.patch")).toBe(true);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+    await expect(client.sessions.rename!("agent:dev:main", "Renamed")).rejects.toMatchObject({
+      uclawError: { code: "UNSUPPORTED", causeDetails: { capability: "sessions.describe" } },
+    });
+    expect(transport.requests).toEqual([]);
   });
 
   it("reports partial approval and tool event capabilities independently", async () => {
