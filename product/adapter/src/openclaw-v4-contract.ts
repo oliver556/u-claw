@@ -82,7 +82,7 @@ export const OpenClawHistoryResponseSchema = z.object({
   sessionId: z.string().min(1),
   messages: z.array(OpenClawHistoryMessageSchema),
   offset: z.number().int().nonnegative().optional(),
-  nextOffset: z.number().int().nonnegative().optional(),
+  nextOffset: z.number().nonnegative().refine(Number.isInteger).optional(),
   hasMore: z.boolean().optional(),
   totalMessages: z.number().int().nonnegative().optional(),
 }).passthrough();

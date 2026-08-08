@@ -8,7 +8,7 @@ import { AsyncEventQueue, OpenClawClient, UClawUnsupportedError, type OpenClawTr
 import { ManualClock } from "../src/mock/mock-client.js";
 import { ReconnectPolicy } from "../src/reconnect.js";
 import type { HelloOk } from "../src/transport/gateway-websocket.js";
-import { RpcRemoteError, type EventFrame, type JsonValue } from "../src/transport/rpc-router.js";
+import { RpcProtocolError, RpcRemoteError, type EventFrame, type JsonValue } from "../src/transport/rpc-router.js";
 
 class FakeTransport implements OpenClawTransport {
   state = "idle" as const;
@@ -130,6 +130,19 @@ describe("OpenClawClient", () => {
     });
   });
 
+  it.each([
+    { cursor: undefined, nextOffset: 0 },
+    { cursor: "2", nextOffset: 1 },
+    { cursor: undefined, nextOffset: Number.MAX_SAFE_INTEGER + 1 },
+  ])("rejects invalid sessions.list nextOffset $nextOffset from cursor $cursor", async ({ cursor, nextOffset }) => {
+    const transport = new FakeTransport();
+    transport.fixtures.set("sessions.list", { sessions: [], nextOffset, hasMore: true });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.sessions.list(cursor === undefined ? undefined : { cursor })).rejects.toBeInstanceOf(RpcProtocolError);
+  });
+
   it("uses describe for get and authoritative readback after create and rename", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push("sessions.describe", "sessions.create", "sessions.patch");
@@ -165,6 +178,17 @@ describe("OpenClawClient", () => {
     expect(transport.requests).toEqual([]);
   });
 
+  it("rejects a rename response for a different session", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.describe", "sessions.patch");
+    transport.fixtures.set("sessions.patch", { ok: true, key: "agent:dev:other" });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.sessions.rename?.("agent:dev:created", "Renamed")).rejects.toBeInstanceOf(RpcProtocolError);
+    expect(transport.calls).toEqual(["sessions.patch"]);
+  });
+
   it("deletes with the locked sessions.delete shape and refuses fake revision protection", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push("sessions.delete");
@@ -175,6 +199,28 @@ describe("OpenClawClient", () => {
     await client.sessions.remove("agent:dev:old");
     expect(transport.requests.at(-1)).toEqual({ method: "sessions.delete", params: { key: "agent:dev:old", deleteTranscript: true } });
     await expect(client.sessions.remove("agent:dev:old", "fake-cas")).rejects.toBeInstanceOf(UClawUnsupportedError);
+  });
+
+  it("rejects a delete response for a different session", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.delete");
+    transport.fixtures.set("sessions.delete", { ok: true, key: "agent:dev:other", deleted: true, archived: [] });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.sessions.remove("agent:dev:old")).rejects.toBeInstanceOf(RpcProtocolError);
+  });
+
+  it("rejects a sessions.describe response for a different session", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.describe");
+    transport.fixtures.set("sessions.describe", {
+      session: { key: "agent:dev:other", label: "Other", updatedAt: 1786129700000, pinned: false },
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.sessions.get("agent:dev:expected")).rejects.toBeInstanceOf(RpcProtocolError);
   });
 
   it("maps offset history pages in chronological order without duplicate ids", async () => {
@@ -195,6 +241,23 @@ describe("OpenClawClient", () => {
       items: [{ id: "message-1" }, { id: "message-2" }], nextCursor: "3", hasMore: true,
     });
     expect(transport.requests.at(-1)).toEqual({ method: "chat.history", params: { sessionKey: "agent:dev:main", limit: 3, offset: 0 } });
+  });
+
+  it.each([
+    { cursor: undefined, nextOffset: 0 },
+    { cursor: "2", nextOffset: 1 },
+    { cursor: undefined, nextOffset: Number.MAX_SAFE_INTEGER + 1 },
+  ])("rejects invalid chat.history nextOffset $nextOffset from cursor $cursor", async ({ cursor, nextOffset }) => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("chat.history");
+    transport.fixtures.set("chat.history", {
+      sessionKey: "agent:dev:main", sessionId: "upstream-session", messages: [], nextOffset, hasMore: true,
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const request = cursor === undefined ? undefined : { cursor };
+    await expect(client.chat.list("agent:dev:main", request)).rejects.toBeInstanceOf(RpcProtocolError);
   });
 
   it("shares an in-flight negotiation", async () => {
