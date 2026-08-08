@@ -56,6 +56,16 @@ const explicitlySafeContextKeys = new Set([
 const exactSensitiveContextKeys = new Set([
   "authorization",
   "cookie",
+  "headers",
+  "request_headers",
+  "response_headers",
+  "body",
+  "content",
+  "conversation",
+  "message",
+  "messages",
+  "prompt",
+  "text",
   "password",
   "private_key",
   "secret",
@@ -85,7 +95,7 @@ function isSensitiveContextKey(key: string): boolean {
   const normalizedKey = normalizeKey(key);
   if (explicitlySafeContextKeys.has(normalizedKey)) return false;
   return exactSensitiveContextKeys.has(normalizedKey) ||
-    /_(?:token|secret|password|cookie|private_key)$/.test(normalizedKey);
+    /(?:^|_)(?:authorization|cookie|credentials?|headers?|key|password|private_key|secret|token)(?:_|$)/.test(normalizedKey);
 }
 
 function redactCapturedValue(
@@ -97,19 +107,21 @@ function redactCapturedValue(
 }
 
 export function redactRendererText(text: string, contextKey?: string): string {
+  if (/[{[]\s*"[^"\r\n]+"\s*:/.test(text)) return REDACTED;
+
   let redacted = text
     .replace(
-      /(\bauthorization\s*:\s*(?:bearer|basic)\s+)(authentication\s+required|not\s+configured|[^\s,;]+)/gi,
+      /(\bauthorization\s*:\s*(?:bearer|basic)\s+)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|authentication\s+required|not\s+configured|[^\s,;]+)/gi,
       redactCapturedValue,
     )
     .replace(/(\b(?:set-cookie|cookie)\s*:\s*)([^\r\n]+)/gi, redactCapturedValue)
     .replace(
-      /(\b(?:password|client[-_ ]?secret|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|aws[-_ ]?secret[-_ ]?access[-_ ]?key|aws[-_ ]?access[-_ ]?key[-_ ]?id)\s*[:=]\s*)(not\s+configured|[^\s,;]+)/gi,
+      /(\b(?:password|client[-_ ]?secret|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|aws[-_ ]?secret[-_ ]?access[-_ ]?key|aws[-_ ]?access[-_ ]?key[-_ ]?id)\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|not\s+configured|[^\s,;]+)/gi,
       redactCapturedValue,
     )
     .replace(/(\btoken\s*[:=]\s*)(not\s+configured|[^\s,;]+)/gi, redactCapturedValue)
     .replace(
-      /(\bbearer\s+)(authentication\s+required|not\s+configured|[^\s,;]+)/gi,
+      /(\bbearer\s+)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|authentication\s+required|not\s+configured|[^\s,;]+)/gi,
       redactCapturedValue,
     )
     .replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}\b/g, REDACTED)
@@ -118,7 +130,12 @@ export function redactRendererText(text: string, contextKey?: string): string {
     .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, REDACTED)
     .replace(/\b(?:sk|rk)_live_[A-Za-z0-9_-]{16,}\b/g, REDACTED)
     .replace(/\bsk-(?:proj-)?[A-Za-z0-9_-]{8,}\b/gi, REDACTED)
-    .replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, REDACTED);
+    .replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, REDACTED)
+    .replace(/\bfile:\/\/\/[^\r\n"'<>]*/gi, REDACTED)
+    .replace(/\b[A-Za-z]:[\\/][^\r\n"'<>]*/g, REDACTED)
+    .replace(/\\\\[^\r\n"'<>]*/g, REDACTED)
+    .replace(/(^|[\s("'=:])\/(?:Users|home|private|Volumes|var\/folders|etc|tmp|opt|root|usr\/local|workspace|data|mnt)(?:\/[^\r\n"'<>]*)?/g, `$1${REDACTED}`)
+    .replace(/~\/[^\r\n"'<>]*/g, REDACTED);
 
   if (contextKey !== undefined && redacted === text) {
     if (isSensitiveContextKey(contextKey) && text !== "" && !isSafeCredentialStatus(text)) {
@@ -127,6 +144,54 @@ export function redactRendererText(text: string, contextKey?: string): string {
   }
 
   return redacted;
+}
+
+export type RendererRedactedValue =
+  | string
+  | number
+  | boolean
+  | null
+  | RendererRedactedValue[]
+  | { [key: string]: RendererRedactedValue };
+
+const safeRecordTextKeys = new Set(["status", "state", "outcome", "level", "source", "api_key_status", "token_status"]);
+const safeRecordTextValue = /^(?:idle|ready|pending|running|completed|failed|success|succeeded|warning|error|debug|info|cancelled|canceled|aborted|missing|expired|configured|not configured|unavailable|invalid|redacted|unset|none)$/i;
+const safeRecordBooleanKeys = new Set(["configured", "enabled", "present", "retryable", "success"]);
+const safeRecordNumberKeys = new Set(["count", "duration_ms", "exit_code", "input_tokens", "max_tokens", "output_tokens", "token_count"]);
+
+export function redactRendererValue(value: unknown, contextKey?: string): RendererRedactedValue {
+  return redactUnknown(value, contextKey);
+}
+
+function redactUnknown(
+  value: unknown,
+  contextKey: string | undefined,
+): RendererRedactedValue {
+  if (contextKey !== undefined && isSensitiveContextKey(contextKey)) {
+    if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) return value as null | "" | [];
+    if (typeof value === "string" && isSafeCredentialStatus(value)) return value;
+    return REDACTED;
+  }
+  if (contextKey !== undefined) {
+    const normalizedKey = normalizeKey(contextKey);
+    if (typeof value === "string" && safeRecordTextKeys.has(normalizedKey) && safeRecordTextValue.test(value.trim())) {
+      return redactRendererText(value, contextKey);
+    }
+    if (typeof value === "boolean" && safeRecordBooleanKeys.has(normalizedKey)) return value;
+    if (typeof value === "number" && Number.isFinite(value) && safeRecordNumberKeys.has(normalizedKey)) return value;
+    return REDACTED;
+  }
+  if (typeof value === "string") return redactRendererText(value, contextKey);
+  if (value === null) return value;
+  if (typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return REDACTED;
+
+  const result: Record<string, RendererRedactedValue> = {};
+  for (const [index, [rawKey, rawValue]] of Object.entries(value).slice(0, 64).entries()) {
+    const safeKey = rawKey.length <= 64 && /^[A-Za-z0-9_.-]+$/.test(rawKey) && redactRendererText(rawKey) === rawKey;
+    const key = safeKey ? rawKey : `field_${index + 1}`;
+    result[key] = redactUnknown(rawValue, rawKey);
+  }
+  return result;
 }
 
 export const RendererSafeTextSchema = z.string().transform((value) => redactRendererText(value));

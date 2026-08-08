@@ -1,7 +1,6 @@
-import { UClawErrorCodeSchema, UClawErrorSchema, type UClawError } from "@uclaw/shared";
+import { UClawErrorCodeSchema, UClawErrorSchema, redactRendererText, type UClawError } from "@uclaw/shared";
 import { z } from "zod";
 
-import { redactAdapterLog } from "../redaction.js";
 import { SequenceGapDetector, type SequenceGap } from "../reconnect.js";
 
 export type JsonValue = z.output<ReturnType<typeof z.json>>;
@@ -88,7 +87,7 @@ export class RpcRemoteError extends AdapterServiceError {
     readonly retryable = false,
     readonly retryAfterMs?: number,
   ) {
-    const safeMessage = redactAdapterLog(message);
+    const safeMessage = redactRendererText(message);
     const knownCode = UClawErrorCodeSchema.safeParse(code);
     super(safeMessage, UClawErrorSchema.parse({
       code: knownCode.success ? knownCode.data : "OPERATION_FAILED",

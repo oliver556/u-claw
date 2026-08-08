@@ -100,6 +100,24 @@ describe("RpcRouter", () => {
     expect(diagnostics[0]).not.toContain("sk-proj");
   });
 
+  it("does not copy malformed Gateway payloads into diagnostics", () => {
+    const socket = new FakeSocket();
+    const diagnostics: string[] = [];
+    const router = new RpcRouter(socket, { onDiagnostic: (message) => diagnostics.push(message) });
+    const payload = {
+      type: "mystery",
+      headers: { Authorization: "Bearer gateway-secret", Cookie: "session=gateway-cookie" },
+      body: [{ content: "private conversation body" }, { token: 987654321 }],
+      path: "C:\\Users\\alice\\private\\chat.txt",
+    };
+
+    socket.emit("message", JSON.stringify(payload));
+
+    expect(diagnostics).toEqual(["Ignored unknown Gateway frame"]);
+    expect(JSON.stringify(diagnostics)).not.toMatch(/gateway-secret|gateway-cookie|private conversation body|987654321|alice|chat\.txt/);
+    router.close();
+  });
+
   it("suppresses a duplicate before one subscriber receives it", () => {
     const socket = new FakeSocket();
     const router = new RpcRouter(socket);
