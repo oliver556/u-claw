@@ -19,6 +19,44 @@
     "id": "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260807T190831086Z",
     "kind": "raw-wire-json-v1"
   },
+  "modelCatalogCaptureArtifact": {
+    "id": "openclaw-2026.7.1-2-models-list-protocol-v4-node-24.15.0",
+    "kind": "raw-wire-json-v1",
+    "transport": "GatewayClient through a loopback WebSocket frame-capture proxy",
+    "sanitization": "Request and response UUIDs replaced consistently; only synthetic loopback provider rows retained"
+  },
+  "modelCatalogProtocolEvidence": {
+    "method": "models.list",
+    "requiredScope": "operator.read",
+    "pickerRequest": {
+      "view": "configured"
+    },
+    "allowedViews": [
+      "default",
+      "configured",
+      "all"
+    ],
+    "publishedResponseFields": [
+      "id",
+      "name",
+      "provider",
+      "alias",
+      "available",
+      "contextWindow",
+      "reasoning"
+    ],
+    "observedAdditionalResponseFields": [
+      "api",
+      "input"
+    ],
+    "sources": [
+      "docs/gateway/protocol.md",
+      "dist/core-descriptors-DRUtdasO.js",
+      "dist/models-BxhDHfd4.js",
+      "dist/models-list-result-D6lGV0YW.js",
+      "dist/schema-BuOFpc7K.js"
+    ]
+  },
   "capture": {
     "runtime": "OpenClaw Gateway 2026.7.1-2 on Node.js 24.15.0",
     "transport": "GatewayClient through a loopback WebSocket frame-capture proxy",
@@ -30,6 +68,7 @@
     "approvals.json": "37df37bfd40473e26ff911414c95b476e1fb3feb10df9b8d29c2ae8321791c9e",
     "chat.history.json": "e7d8cc48c660727324d15c0b6f1d45ee30e1c0b4cad910173a5aadf4cbe3786a",
     "chat.message.get.json": "565226b866b8b4861aab92d440bc3dbd439b6ec99e6dec4d0b30fc4d71278d09",
+    "models.list.json": "f12bf7ea608ec51e83fb0035f6c79f7cad21582742a3179cd38a2cad3af722e6",
     "session.tool.json": "bb667e348778c6a7754de0ffe2929a544154fdfa8ec9bba8a16e85196c8c4692",
     "sessions.patch.json": "228a7adcd4e493f73083c224cf5ca55b60604cdc6909d8c9033b136d894cad97"
   },
@@ -38,6 +77,7 @@
     "approvals.json": "39a85896efe2798d0745f192d632280960e9a57361dc29c5af8d59b9bb4ae286",
     "chat.history.json": "525935101d371db1fa1bc8c2b104cb5ea1953f141d15c0524e71e64590592a82",
     "chat.message.get.json": "aa8b6192c0840238e15756d707f044b35e85f8253471c7fe1c60857c08209326",
+    "models.list.json": "0b2ba2a4d28f98741a70843773ed9c62b45b9622c4ee6d646f1e629e51fad0c1",
     "session.tool.json": "b3a8abe99ed201c767a5c6b6c2a27cf5e1447c688187bef408fb5fb07b9d5ce6",
     "sessions.patch.json": "40b7af76fd56736c5fb1b59a2ef4053823e7278194feb753d2ea555fa54b8bd6"
   }

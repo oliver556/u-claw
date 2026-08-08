@@ -1,0 +1,64 @@
+{
+  "configured": {
+    "requestFrame": {
+      "type": "req",
+      "id": "00000000-0000-4000-8000-000000000001",
+      "method": "models.list",
+      "params": {
+        "view": "configured"
+      }
+    },
+    "responseFrame": {
+      "type": "res",
+      "id": "00000000-0000-4000-8000-000000000001",
+      "ok": true,
+      "payload": {
+        "models": [
+          {
+            "id": "contract-alt-model",
+            "name": "Contract Alt Model",
+            "provider": "contract",
+            "api": "openai-completions",
+            "contextWindow": 131072,
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "available": true
+          },
+          {
+            "id": "contract-model",
+            "name": "Contract Model",
+            "provider": "contract",
+            "api": "openai-completions",
+            "contextWindow": 131072,
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "available": true
+          }
+        ]
+      }
+    }
+  },
+  "invalidView": {
+    "requestFrame": {
+      "type": "req",
+      "id": "00000000-0000-4000-8000-000000000002",
+      "method": "models.list",
+      "params": {
+        "view": "invalid"
+      }
+    },
+    "responseFrame": {
+      "type": "res",
+      "id": "00000000-0000-4000-8000-000000000002",
+      "ok": false,
+      "error": {
+        "code": "INVALID_REQUEST",
+        "message": "invalid models.list params: at /view: must be equal to constant; at /view: must match a schema in anyOf"
+      }
+    }
+  }
+}

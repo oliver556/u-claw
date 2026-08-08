@@ -3,6 +3,7 @@ export { AttachmentManager, AttachmentServiceError } from "./attachments.js";
 export type { AttachmentManagerOptions, OpenClawAttachment } from "./attachments.js";
 export { mapChatEvent, mapMessage } from "./mappers/chat.js";
 export { mapSession, mapSessionSummary } from "./mappers/session.js";
+export { mapOpenClawModel, RawOpenClawModelSchema, RawOpenClawModelsListResponseSchema } from "./mappers/model.js";
 export { mapExecApproval, mapPluginApproval, mapToolCall } from "./mappers/tool.js";
 export { ManualClock, MockUClawClient } from "./mock/mock-client.js";
 export { OpenClawClient, UClawUnsupportedError } from "./openclaw-client.js";
