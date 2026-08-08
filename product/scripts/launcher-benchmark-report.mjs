@@ -104,6 +104,16 @@ async function main(argv) {
     await readTrialReport(args[0]);
     return;
   }
+  if (command === "require-mandatory" && args.length === 1) {
+    const report = await readTrialReport(args[0]);
+    if (candidateIds.some((id) => !report.candidates[id].mandatoryPassed)) {
+      throw new CliError(
+        "LAUNCHER_BENCHMARK_MANDATORY_FAILED",
+        "mandatory benchmark cases failed",
+      );
+    }
+    return;
+  }
   if (command === "decide") {
     const outputIndex = args.indexOf("--output");
     if (args.length !== 5 || outputIndex !== 3 || args[4].length === 0) {

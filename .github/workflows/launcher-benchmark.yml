@@ -20,12 +20,15 @@ jobs:
   benchmark:
     name: Windows launcher benchmark trial ${{ matrix.trial }}
     runs-on: windows-2022
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         trial: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v5
         with:
@@ -134,7 +137,10 @@ jobs:
             -Trial '${{ matrix.trial }}' `
             -OutputPath "$reportRoot\trial-${{ matrix.trial }}.json"
           if ($LASTEXITCODE -ne 0) { throw 'Formal launcher benchmark failed' }
-          node product\scripts\launcher-benchmark-report.mjs validate "$reportRoot\trial-${{ matrix.trial }}.json"
+
+      - name: Validate trial report
+        shell: pwsh
+        run: node product\scripts\launcher-benchmark-report.mjs validate "product\.launcher-benchmark\reports\trial-${{ matrix.trial }}.json"
 
       - name: Upload isolated trial report
         uses: actions/upload-artifact@v4
@@ -143,12 +149,19 @@ jobs:
           path: product/.launcher-benchmark/reports/trial-${{ matrix.trial }}.json
           if-no-files-found: error
 
+      - name: Require mandatory safety cases
+        shell: pwsh
+        run: node product\scripts\launcher-benchmark-report.mjs require-mandatory "product\.launcher-benchmark\reports\trial-${{ matrix.trial }}.json"
+
   aggregate:
     name: Aggregate launcher benchmark trials
     needs: benchmark
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -171,6 +184,9 @@ jobs:
           node product/scripts/launcher-benchmark-report.mjs validate launcher-benchmark-results/trial-1.json
           node product/scripts/launcher-benchmark-report.mjs validate launcher-benchmark-results/trial-2.json
           node product/scripts/launcher-benchmark-report.mjs validate launcher-benchmark-results/trial-3.json
+          node product/scripts/launcher-benchmark-report.mjs require-mandatory launcher-benchmark-results/trial-1.json
+          node product/scripts/launcher-benchmark-report.mjs require-mandatory launcher-benchmark-results/trial-2.json
+          node product/scripts/launcher-benchmark-report.mjs require-mandatory launcher-benchmark-results/trial-3.json
           node product/scripts/launcher-benchmark-report.mjs decide launcher-benchmark-results/trial-1.json launcher-benchmark-results/trial-2.json launcher-benchmark-results/trial-3.json --output launcher-benchmark-results/decision.json
 
       - name: Upload aggregate result

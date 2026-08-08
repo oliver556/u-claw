@@ -158,6 +158,12 @@ test("Windows launcher workflow has pinned tools, isolated trials, and safe trig
   assert.match(workflowSource, /fail-fast:\s*false/);
   assert.match(workflowSource, /trial:\s*\[1,\s*2,\s*3\]/);
   assert.match(workflowSource, /runs-on:\s*ubuntu-latest/);
+  assert.match(workflowSource, /benchmark:[\s\S]*timeout-minutes:\s*45/);
+  assert.match(workflowSource, /aggregate:[\s\S]*timeout-minutes:\s*10/);
+  assert.equal(
+    [...workflowSource.matchAll(/uses:\s*actions\/checkout@v4\s*\n\s*with:\s*\n\s*persist-credentials:\s*false/g)].length,
+    2,
+  );
   for (const action of [
     "actions/checkout@v4",
     "actions/setup-go@v5",
@@ -217,6 +223,26 @@ test("Windows workflow uploads unique trials and aggregates exactly four JSON fi
   assert.match(workflowSource, /path:\s*\|[\s\S]*trial-1\.json[\s\S]*trial-2\.json[\s\S]*trial-3\.json[\s\S]*decision\.json/);
 });
 
+test("Windows workflow uploads diagnostics before mandatory gate and gates aggregation", async () => {
+  const workflowSource = await readFile(workflowUrl, "utf8");
+  const aggregateIndex = workflowSource.indexOf("\n  aggregate:");
+  const benchmarkSource = workflowSource.slice(0, aggregateIndex);
+  const aggregateSource = workflowSource.slice(aggregateIndex);
+  const validateIndex = benchmarkSource.indexOf("launcher-benchmark-report.mjs validate");
+  const uploadIndex = benchmarkSource.indexOf("name: Upload isolated trial report");
+  const gateIndex = benchmarkSource.indexOf("launcher-benchmark-report.mjs require-mandatory");
+  assert.ok(validateIndex >= 0 && validateIndex < uploadIndex && uploadIndex < gateIndex);
+  assert.match(aggregateSource, /needs:\s*benchmark/);
+  assert.equal(
+    [...aggregateSource.matchAll(/launcher-benchmark-report\.mjs require-mandatory/g)].length,
+    3,
+  );
+  assert.ok(
+    aggregateSource.lastIndexOf("launcher-benchmark-report.mjs require-mandatory")
+      < aggregateSource.indexOf("launcher-benchmark-report.mjs decide"),
+  );
+});
+
 test("Windows behavior test covers Task 4 compatibility cases", async () => {
   const source = await readFile(behaviorTestUrl, "utf8");
   assert.match(source, /Iterations['"],\s*['"]7/);
@@ -232,6 +258,16 @@ test("Windows behavior test covers Task 4 compatibility cases", async () => {
   assert.match(source, /PROCESS_CAPTURE_TIMEOUT/);
   assert.match(source, /Get-Process/);
   assert.doesNotMatch(source, /RunAs|SetEnvironmentVariable\([^\n]*(Machine|User)|\bsetx\b|HKLM:|HKCU:/i);
+});
+
+test("Windows behavior test bounds harness processes and kills timeout trees", async () => {
+  const source = await readFile(behaviorTestUrl, "utf8");
+  assert.match(source, /Start-Process[\s\S]{0,300}-PassThru/);
+  assert.doesNotMatch(source, /Start-Process[^\n]*-Wait/);
+  assert.match(source, /WaitForExit\(120000\)/);
+  assert.doesNotMatch(source, /WaitForExit\(\)/);
+  assert.match(source, /taskkill\.exe[\s\S]{0,300}\/T[\s\S]{0,100}\/F/i);
+  assert.match(source, /LAUNCHER_BENCHMARK_BEHAVIOR_TIMEOUT/);
 });
 
 test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH restoration", async () => {
@@ -602,6 +638,7 @@ test("CLI validates reports and writes a decision", async (t) => {
   }));
 
   assert.equal(runCli("validate", files[0]).status, 0);
+  assert.equal(runCli("require-mandatory", files[0]).status, 0);
 
   const invalidFile = path.join(directory, "invalid.json");
   await writeFile(invalidFile, JSON.stringify({ ...makeTrial(1), trial: 4 }));
@@ -617,6 +654,41 @@ test("CLI validates reports and writes a decision", async (t) => {
   const decision = runCli("decide", ...files, "--output", output);
   assert.equal(decision.status, 0, decision.stderr);
   assert.deepEqual(JSON.parse(await readFile(output, "utf8")), decideLauncher(reports()));
+});
+
+test("CLI mandatory gate rejects one failed candidate before decision", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "uclaw-launcher-gate-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const failed = { mandatoryPassed: false, cases: { "valid-manifest": false } };
+  const trialReports = [makeTrial(1, { go: failed }), makeTrial(2), makeTrial(3)];
+  const files = await Promise.all(trialReports.map(async (report, index) => {
+    const file = path.join(directory, `trial-${index + 1}.json`);
+    await writeFile(file, JSON.stringify(report));
+    return file;
+  }));
+  const output = path.join(directory, "decision.json");
+  let decisionInvoked = false;
+
+  const gate = runCli("require-mandatory", files[0]);
+  if (gate.status === 0) {
+    decisionInvoked = true;
+    runCli("decide", ...files, "--output", output);
+  }
+
+  assert.notEqual(gate.status, 0);
+  assert.equal(
+    gate.stderr,
+    "LAUNCHER_BENCHMARK_MANDATORY_FAILED: mandatory benchmark cases failed\n",
+  );
+  assert.equal(decisionInvoked, false);
+  await assert.rejects(readFile(output, "utf8"), { code: "ENOENT" });
+
+  const invalidFile = path.join(directory, "invalid.json");
+  await writeFile(invalidFile, JSON.stringify({ ...makeTrial(1), trial: 4 }));
+  assert.equal(
+    runCli("require-mandatory", invalidFile).stderr,
+    "LAUNCHER_BENCHMARK_INVALID_REPORT: report validation failed\n",
+  );
 });
 
 test("CLI refuses to overwrite an existing decision", async (t) => {

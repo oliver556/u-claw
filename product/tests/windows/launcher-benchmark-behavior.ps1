@@ -52,11 +52,22 @@ function Invoke-HarnessProcess {
         '-OutputPath', $OutputPath
     )
     $process = Start-Process -FilePath $shellExe -ArgumentList $arguments -WorkingDirectory $RepositoryRoot `
-        -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -Wait -PassThru
-    return [pscustomobject]@{
-        ExitCode = $process.ExitCode
-        Stdout = [IO.File]::ReadAllText($stdoutPath)
-        Stderr = [IO.File]::ReadAllText($stderrPath)
+        -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
+    try {
+        if (-not $process.WaitForExit(120000)) {
+            $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+            try { & $taskkill /PID $process.Id /T /F *> $null } catch {}
+            try { [void]$process.WaitForExit(10000) } catch {}
+            throw 'LAUNCHER_BENCHMARK_BEHAVIOR_TIMEOUT'
+        }
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            Stdout = [IO.File]::ReadAllText($stdoutPath)
+            Stderr = [IO.File]::ReadAllText($stderrPath)
+        }
+    }
+    finally {
+        $process.Dispose()
     }
 }
 
@@ -70,6 +81,7 @@ $originalPath = $env:PATH
 $originalTimingRoot = $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT
 $originalCounter = $env:LAUNCHER_BENCHMARK_FAKE_COUNTER
 $originalPidFile = $env:LAUNCHER_BENCHMARK_FAKE_CHILD_PID_FILE
+$behaviorExitCode = 0
 
 try {
     [void][IO.Directory]::CreateDirectory($absoluteRoot)
@@ -150,6 +162,11 @@ try {
         Pop-Location
     }
 }
+catch {
+    if ($_.Exception.Message -cne 'LAUNCHER_BENCHMARK_BEHAVIOR_TIMEOUT') { throw }
+    [Console]::Error.WriteLine('LAUNCHER_BENCHMARK_BEHAVIOR_TIMEOUT: behavior test failed')
+    $behaviorExitCode = 1
+}
 finally {
     $env:PATH = $originalPath
     $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $originalTimingRoot
@@ -157,3 +174,5 @@ finally {
     $env:LAUNCHER_BENCHMARK_FAKE_CHILD_PID_FILE = $originalPidFile
     if (Test-Path -LiteralPath $absoluteRoot) { Remove-Item -LiteralPath $absoluteRoot -Recurse }
 }
+
+if ($behaviorExitCode -ne 0) { exit $behaviorExitCode }
