@@ -140,6 +140,12 @@ try {
         }
         $env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS = $null
         $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $null
+        if ($null -eq $result.ExitCode) {
+            $behaviorPhase = 'VALID_HARNESS_EXIT_NULL'
+        }
+        elseif ($result.ExitCode -ne 0) {
+            $behaviorPhase = 'VALID_HARNESS_EXIT_NONZERO'
+        }
         Assert-True ($result.ExitCode -eq 0) ('relative benchmark failed: ' + $result.Stderr)
         $behaviorPhase = 'VALID_REPORT_READ'
         $report = Get-Content -LiteralPath (Join-Path $repositoryRoot $reportPath) -Raw | ConvertFrom-Json
