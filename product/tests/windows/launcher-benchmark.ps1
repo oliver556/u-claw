@@ -951,7 +951,7 @@ function Read-BuildMetadata {
     }
     catch {
         if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
-            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_METADATA_PARSER_INIT'
+            [Console]::Error.WriteLine('LAUNCHER_BENCHMARK_METADATA_PARSER_INIT')
         }
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
     }
@@ -965,7 +965,7 @@ function Read-BuildMetadata {
     }
     catch {
         if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
-            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_METADATA_PARSER_PARSE'
+            [Console]::Error.WriteLine('LAUNCHER_BENCHMARK_METADATA_PARSER_PARSE')
         }
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
     }

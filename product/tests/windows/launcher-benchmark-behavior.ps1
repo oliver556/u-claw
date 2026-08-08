@@ -116,8 +116,13 @@ try {
         $behaviorPhase = 'VALID_METADATA'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe $reportPath $absoluteRoot
         if ($result.ExitCode -ne 0) {
-            $fixedCode = @($result.Stderr -split ':', 2)[0]
-            if ($fixedCode -cmatch '\ALAUNCHER_BENCHMARK_[A-Z_]+\z') {
+            if ($result.Stderr -cmatch 'LAUNCHER_BENCHMARK_METADATA_PARSER_(?:INIT|PARSE)') {
+                $behaviorPhase = 'VALID_METADATA' + '_' + $Matches[0]
+            }
+            else {
+                $fixedCode = @($result.Stderr -split ':', 2)[0]
+            }
+            if ($behaviorPhase -ceq 'VALID_METADATA' -and $fixedCode -cmatch '\ALAUNCHER_BENCHMARK_[A-Z_]+\z') {
                 $behaviorPhase = 'VALID_METADATA' + '_' + $fixedCode
             }
         }
