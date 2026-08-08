@@ -33,11 +33,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Runtime.Serialization.Json;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Xml;
-using System.Xml.Linq;
 
 public sealed class LauncherBuildMetadata
 {
@@ -52,22 +49,15 @@ public static class LauncherBuildMetadataParser
 {
     public static LauncherBuildMetadata Parse(string path, string expectedCandidate)
     {
-        XElement root;
+        string json;
         using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-        using (XmlDictionaryReader reader = JsonReaderWriterFactory.CreateJsonReader(
-            stream, Encoding.UTF8, XmlDictionaryReaderQuotas.Max, null))
+        using (StreamReader reader = new StreamReader(
+            stream, new UTF8Encoding(false, true), false))
         {
-            root = XElement.Load(reader, LoadOptions.None);
+            json = reader.ReadToEnd();
         }
 
-        if (JsonType(root) != "object") throw new FormatException();
-        var members = new Dictionary<string, XElement>(StringComparer.Ordinal);
-        foreach (XElement element in root.Elements())
-        {
-            string name = element.Name.LocalName;
-            if (members.ContainsKey(name)) throw new FormatException("duplicate member");
-            members.Add(name, element);
-        }
+        var members = new StrictJsonReader(json).ReadObject();
 
         string[] expected = { "schemaVersion", "candidate", "commitSha", "buildMs", "toolchainVersion" };
         if (members.Count != expected.Length) throw new FormatException();
@@ -78,17 +68,17 @@ public static class LauncherBuildMetadataParser
 
         int schemaVersion;
         double buildMs;
-        if (JsonType(members["schemaVersion"]) != "number" ||
-            !Int32.TryParse(members["schemaVersion"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out schemaVersion) ||
+        if (members["schemaVersion"].Kind != JsonValueKind.Number ||
+            !Int32.TryParse(members["schemaVersion"].Text, NumberStyles.None, CultureInfo.InvariantCulture, out schemaVersion) ||
             schemaVersion != 1 ||
-            JsonType(members["candidate"]) != "string" || members["candidate"].Value != expectedCandidate ||
-            JsonType(members["commitSha"]) != "string" ||
-            !Regex.IsMatch(members["commitSha"].Value, "^[0-9a-f]{40}$", RegexOptions.CultureInvariant) ||
-            JsonType(members["buildMs"]) != "number" ||
-            !Double.TryParse(members["buildMs"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out buildMs) ||
+            members["candidate"].Kind != JsonValueKind.String || members["candidate"].Text != expectedCandidate ||
+            members["commitSha"].Kind != JsonValueKind.String ||
+            !Regex.IsMatch(members["commitSha"].Text, "\\A[0-9a-f]{40}\\z", RegexOptions.CultureInvariant) ||
+            members["buildMs"].Kind != JsonValueKind.Number ||
+            !Double.TryParse(members["buildMs"].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out buildMs) ||
             Double.IsNaN(buildMs) || Double.IsInfinity(buildMs) || buildMs < 0 ||
-            JsonType(members["toolchainVersion"]) != "string" ||
-            String.IsNullOrWhiteSpace(members["toolchainVersion"].Value))
+            members["toolchainVersion"].Kind != JsonValueKind.String ||
+            String.IsNullOrWhiteSpace(members["toolchainVersion"].Text))
         {
             throw new FormatException();
         }
@@ -96,17 +86,207 @@ public static class LauncherBuildMetadataParser
         return new LauncherBuildMetadata
         {
             SchemaVersion = schemaVersion,
-            Candidate = members["candidate"].Value,
-            CommitSha = members["commitSha"].Value,
+            Candidate = members["candidate"].Text,
+            CommitSha = members["commitSha"].Text,
             BuildMs = buildMs,
-            ToolchainVersion = members["toolchainVersion"].Value,
+            ToolchainVersion = members["toolchainVersion"].Text,
         };
     }
+}
 
-    private static string JsonType(XElement element)
+public enum JsonValueKind
+{
+    String,
+    Number,
+}
+
+public sealed class JsonValue
+{
+    public JsonValueKind Kind { get; private set; }
+    public string Text { get; private set; }
+
+    public JsonValue(JsonValueKind kind, string text)
     {
-        XAttribute attribute = element.Attribute("type");
-        return attribute == null ? "string" : attribute.Value;
+        Kind = kind;
+        Text = text;
+    }
+}
+
+public sealed class StrictJsonReader
+{
+    private readonly string json;
+    private int position;
+
+    public StrictJsonReader(string json)
+    {
+        if (json == null) throw new ArgumentNullException("json");
+        this.json = json;
+    }
+
+    public Dictionary<string, JsonValue> ReadObject()
+    {
+        var members = new Dictionary<string, JsonValue>(StringComparer.Ordinal);
+        SkipWhitespace();
+        Expect('{');
+        SkipWhitespace();
+        if (TryRead('}'))
+        {
+            SkipWhitespace();
+            RequireEnd();
+            return members;
+        }
+
+        while (true)
+        {
+            string name = ReadString();
+            if (members.ContainsKey(name)) throw new FormatException("duplicate member");
+            SkipWhitespace();
+            Expect(':');
+            SkipWhitespace();
+            members.Add(name, ReadValue());
+            SkipWhitespace();
+            if (TryRead('}')) break;
+            Expect(',');
+            SkipWhitespace();
+        }
+
+        SkipWhitespace();
+        RequireEnd();
+        return members;
+    }
+
+    private JsonValue ReadValue()
+    {
+        if (Peek() == '"')
+        {
+            return new JsonValue(JsonValueKind.String, ReadString());
+        }
+        return new JsonValue(JsonValueKind.Number, ReadNumber());
+    }
+
+    private string ReadString()
+    {
+        Expect('"');
+        var value = new StringBuilder();
+        while (position < json.Length)
+        {
+            char current = json[position++];
+            if (current == '"') return value.ToString();
+            if (current < 0x20) throw new FormatException();
+            if (current != '\\')
+            {
+                value.Append(current);
+                continue;
+            }
+
+            if (position >= json.Length) throw new FormatException();
+            char escaped = json[position++];
+            switch (escaped)
+            {
+                case '"': value.Append('"'); break;
+                case '\\': value.Append('\\'); break;
+                case '/': value.Append('/'); break;
+                case 'b': value.Append('\b'); break;
+                case 'f': value.Append('\f'); break;
+                case 'n': value.Append('\n'); break;
+                case 'r': value.Append('\r'); break;
+                case 't': value.Append('\t'); break;
+                case 'u': value.Append(ReadUnicodeEscape()); break;
+                default: throw new FormatException("invalid escape");
+            }
+        }
+        throw new FormatException();
+    }
+
+    private char ReadUnicodeEscape()
+    {
+        if (position + 4 > json.Length) throw new FormatException();
+        int value = 0;
+        for (int index = 0; index < 4; index++)
+        {
+            char digit = json[position++];
+            value <<= 4;
+            if (digit >= '0' && digit <= '9') value += digit - '0';
+            else if (digit >= 'a' && digit <= 'f') value += digit - 'a' + 10;
+            else if (digit >= 'A' && digit <= 'F') value += digit - 'A' + 10;
+            else throw new FormatException();
+        }
+        return (char)value;
+    }
+
+    private string ReadNumber()
+    {
+        int start = position;
+        TryRead('-');
+        if (TryRead('0'))
+        {
+            if (IsDigit(Peek())) throw new FormatException();
+        }
+        else
+        {
+            RequireDigit('1', '9');
+            while (IsDigit(Peek())) position++;
+        }
+
+        if (TryRead('.'))
+        {
+            RequireDigit('0', '9');
+            while (IsDigit(Peek())) position++;
+        }
+        char exponent = Peek();
+        if (exponent == 'e' || exponent == 'E')
+        {
+            position++;
+            char sign = Peek();
+            if (sign == '+' || sign == '-') position++;
+            RequireDigit('0', '9');
+            while (IsDigit(Peek())) position++;
+        }
+        return json.Substring(start, position - start);
+    }
+
+    private void SkipWhitespace()
+    {
+        while (position < json.Length)
+        {
+            char current = json[position];
+            if (current != ' ' && current != '\t' && current != '\r' && current != '\n') return;
+            position++;
+        }
+    }
+
+    private char Peek()
+    {
+        return position < json.Length ? json[position] : '\0';
+    }
+
+    private bool TryRead(char expected)
+    {
+        if (Peek() != expected) return false;
+        position++;
+        return true;
+    }
+
+    private void Expect(char expected)
+    {
+        if (!TryRead(expected)) throw new FormatException();
+    }
+
+    private void RequireDigit(char minimum, char maximum)
+    {
+        char current = Peek();
+        if (current < minimum || current > maximum) throw new FormatException();
+        position++;
+    }
+
+    private static bool IsDigit(char value)
+    {
+        return value >= '0' && value <= '9';
+    }
+
+    private void RequireEnd()
+    {
+        if (position != json.Length) throw new FormatException();
     }
 }
 '@
@@ -671,14 +851,7 @@ function Initialize-BuildMetadataParser {
     if ('LauncherBuildMetadataParser' -as [type]) {
         return
     }
-    Add-Type -AssemblyName System.Runtime.Serialization
-    Add-Type -AssemblyName System.Xml.Linq
-    $metadataParserReferences = @(
-        [System.Text.RegularExpressions.Regex].Assembly.Location,
-        [System.Runtime.Serialization.Json.JsonReaderWriterFactory].Assembly.Location,
-        [System.Xml.Linq.XElement].Assembly.Location
-    ) | Select-Object -Unique
-    Add-Type -TypeDefinition $metadataParserSource -ReferencedAssemblies $metadataParserReferences
+    Add-Type -TypeDefinition $metadataParserSource
 }
 
 function Throw-BenchmarkError {

@@ -139,6 +139,49 @@ try {
             (Join-Path $relativeRoot 'null.json') $absoluteRoot
         Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
             'null sidecar did not return fixed error'
+
+        $unknownSidecar = '{"schemaVersion":1,"candidate":"go","commitSha":"' + $commitSha +
+            '","buildMs":1,"toolchainVersion":"fake-compatibility-1","unknown":"value"}'
+        [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $unknownSidecar, [Text.UTF8Encoding]::new($false))
+        $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
+            (Join-Path $relativeRoot 'unknown.json') $absoluteRoot
+        Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
+            'unknown sidecar field did not return fixed error'
+
+        $invalidEscapeSidecar = '{"schemaVersion":1,"candidate":"go","commitSha":"' + $commitSha +
+            '","buildMs":1,"toolchainVersion":"invalid\qescape"}'
+        [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $invalidEscapeSidecar, [Text.UTF8Encoding]::new($false))
+        $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
+            (Join-Path $relativeRoot 'invalid-escape.json') $absoluteRoot
+        Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
+            'invalid escape sidecar did not return fixed error'
+
+        $escapedNewlineShaSidecar = '{"schemaVersion":1,"candidate":"go","commitSha":"' + $commitSha +
+            '\n","buildMs":1,"toolchainVersion":"fake-compatibility-1"}'
+        [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $escapedNewlineShaSidecar, [Text.UTF8Encoding]::new($false))
+        $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
+            (Join-Path $relativeRoot 'escaped-newline-sha.json') $absoluteRoot
+        Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
+            'escaped newline sha sidecar did not return fixed error'
+
+        [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $validGoSidecar, [Text.Encoding]::Unicode)
+        $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
+            (Join-Path $relativeRoot 'utf-16.json') $absoluteRoot
+        Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
+            'utf-16 sidecar did not return fixed error'
+
+        $invalidUtf8Prefix = [Text.Encoding]::ASCII.GetBytes('{"schemaVersion":1,"candidate":"go","commitSha":"' +
+            $commitSha + '","buildMs":1,"toolchainVersion":"invalid-')
+        $invalidUtf8Suffix = [Text.Encoding]::ASCII.GetBytes('utf-8"}')
+        $invalidUtf8 = [byte[]]::new($invalidUtf8Prefix.Length + 1 + $invalidUtf8Suffix.Length)
+        [Array]::Copy($invalidUtf8Prefix, 0, $invalidUtf8, 0, $invalidUtf8Prefix.Length)
+        $invalidUtf8[$invalidUtf8Prefix.Length] = 0xFF
+        [Array]::Copy($invalidUtf8Suffix, 0, $invalidUtf8, $invalidUtf8Prefix.Length + 1, $invalidUtf8Suffix.Length)
+        [IO.File]::WriteAllBytes((Join-Path $repositoryRoot ($goExe + '.build.json')), $invalidUtf8)
+        $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe `
+            (Join-Path $relativeRoot 'invalid-utf-8.json') $absoluteRoot
+        Assert-True ($result.ExitCode -ne 0 -and $result.Stderr -ceq "LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA: benchmark failed`r`n") `
+            'invalid utf-8 sidecar did not return fixed error'
         [IO.File]::WriteAllText((Join-Path $repositoryRoot ($goExe + '.build.json')), $validGoSidecar, [Text.UTF8Encoding]::new($false))
 
         $counterPath = Join-Path $absoluteRoot 'fake-counter.txt'
