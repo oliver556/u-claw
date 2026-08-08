@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { FileRefSchema, ISODateTimeSchema, ModelRefSchema, ResourceRefSchema, StringMapValueSchema } from "./common.js";
+import { FileRefSchema, ISODateTimeSchema, ModelRefSchema, PageRequestSchema, ResourceRefSchema, StringMapValueSchema } from "./common.js";
 import { UClawErrorSchema, UClawErrorSummarySchema } from "./errors.js";
 import { ApprovalRequestSchema, ToolCallSchema } from "./tools.js";
 
@@ -8,7 +8,7 @@ export const SessionSummarySchema = z
   .object({
     id: z.string().min(1),
     title: z.string(),
-    createdAt: ISODateTimeSchema,
+    createdAt: ISODateTimeSchema.optional(),
     updatedAt: ISODateTimeSchema,
     lastMessagePreview: z.string().optional(),
     model: ModelRefSchema.optional(),
@@ -24,6 +24,17 @@ export const SessionSchema = SessionSummarySchema.extend({
   metadata: z.record(z.string(), StringMapValueSchema).optional(),
 }).strict();
 export type Session = z.infer<typeof SessionSchema>;
+
+export const SessionListRequestSchema = PageRequestSchema.extend({
+  query: z.string().min(1).optional(),
+}).strict();
+export type SessionListRequest = z.infer<typeof SessionListRequestSchema>;
+
+export const CreateSessionInputSchema = z.object({
+  title: z.string().trim().min(1).optional(),
+  modelId: z.string().min(1).optional(),
+}).strict();
+export type CreateSessionInput = z.infer<typeof CreateSessionInputSchema>;
 
 export const ContentBlockSchema = z.discriminatedUnion("type", [
   z.object({ id: z.string(), type: z.literal("text"), text: z.string(), format: z.enum(["plain", "markdown"]) }).strict(),

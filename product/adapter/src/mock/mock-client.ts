@@ -85,6 +85,7 @@ export class ManualClock implements Clock {
 export interface MockUClawClientOptions {
   clock?: ManualClock;
   streamDelayMs?: number;
+  historySize?: number;
 }
 
 function page<T>(items: T[], request?: PageRequest): Page<T> {
@@ -117,7 +118,8 @@ export class MockUClawClient implements UClawClient {
     const capabilities = capabilitySetFromWire(CapabilitySetWireSchema.parse({
       protocolVersion: 4,
       methods: [
-        "sessions.list", "sessions.get", "sessions.create", "sessions.delete",
+        "sessions.list", "sessions.describe", "sessions.create", "sessions.delete",
+        "sessions.patch",
         "chat.history", "chat.message.get", "chat.send", "chat.abort",
         "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
       ],
@@ -133,10 +135,13 @@ export class MockUClawClient implements UClawClient {
     };
     const session = SessionSchema.parse({ id: "session-1", title: "Welcome", createdAt: this.clock.now(), updatedAt: this.clock.now(), pinned: false, status: "idle", revision: "1" });
     this.sessionItems = [session];
-    this.messages.set(session.id, [MessageSchema.parse({
-      id: "message-1", sessionId: session.id, role: "assistant", status: "completed",
-      blocks: [{ id: "block-1", type: "text", text: "Ready", format: "plain" }], createdAt: this.clock.now(),
-    })]);
+    const historySize = Math.max(1, Math.floor(options.historySize ?? 1));
+    this.messages.set(session.id, Array.from({ length: historySize }, (_, index) => MessageSchema.parse({
+      id: `message-${index + 1}`, sessionId: session.id, role: "assistant", status: "completed",
+      blocks: [{ id: `block-${index + 1}`, type: "text", text: index === 0 ? "Ready" : `History ${index + 1}`, format: "plain" }],
+      createdAt: this.clock.now(),
+    })));
+    this.messageCounter = historySize;
     this.toolCalls = [ToolCallSchema.parse({
       id: "tool-call-1", sessionId: session.id, runId: "run-pending", toolId: "exec", displayName: "Execute command",
       state: "waiting-authorization", risk: "high", inputSummary: { command: "echo fixture" },
@@ -182,6 +187,15 @@ export class MockUClawClient implements UClawClient {
       this.sessionItems.push(session);
       this.messages.set(session.id, []);
       return session;
+    },
+    rename: async (sessionId, title) => {
+      const index = this.sessionItems.findIndex((session) => session.id === sessionId);
+      if (index < 0) throw this.notFound("Session");
+      const current = this.sessionItems[index];
+      const revision = String(Number.parseInt(current.revision ?? "0", 10) + 1);
+      const renamed = SessionSchema.parse({ ...current, title, updatedAt: this.clock.now(), revision });
+      this.sessionItems[index] = renamed;
+      return renamed;
     },
     remove: async (sessionId) => {
       const index = this.sessionItems.findIndex((session) => session.id === sessionId);

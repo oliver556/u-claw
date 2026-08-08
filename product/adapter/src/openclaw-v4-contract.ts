@@ -81,11 +81,19 @@ export const OpenClawHistoryResponseSchema = z.object({
   sessionKey: z.string().min(1),
   sessionId: z.string().min(1),
   messages: z.array(OpenClawHistoryMessageSchema),
+  offset: z.number().int().nonnegative().optional(),
+  nextOffset: z.number().int().nonnegative().optional(),
+  hasMore: z.boolean().optional(),
+  totalMessages: z.number().int().nonnegative().optional(),
 }).passthrough();
 
 export const OpenClawHistoryFixtureSchema = RpcCaseSchema(
   "chat.history",
-  z.object({ sessionKey: z.string().min(1), limit: z.number().int().positive().optional() }).strict(),
+  z.object({
+    sessionKey: z.string().min(1),
+    limit: z.number().int().positive().optional(),
+    offset: z.number().int().nonnegative().optional(),
+  }).strict(),
   SuccessFrameSchema.extend({ payload: OpenClawHistoryResponseSchema }),
 ).superRefine((value, context) => {
   if (value.requestFrame.params.sessionKey !== value.responseFrame.payload.sessionKey) {
@@ -289,7 +297,13 @@ export function mapOpenClawHistoryMessage(sessionKey: string, input: z.input<typ
 
 export function mapOpenClawHistoryResponse(input: z.input<typeof OpenClawHistoryResponseSchema>): Message[] {
   const response = OpenClawHistoryResponseSchema.parse(input);
-  return response.messages.map((message) => mapOpenClawHistoryMessage(response.sessionKey, message));
+  const unique = new Map<string, z.infer<typeof OpenClawHistoryMessageSchema>>();
+  for (const message of response.messages) {
+    if (!unique.has(message.__openclaw.id)) unique.set(message.__openclaw.id, message);
+  }
+  return [...unique.values()]
+    .sort((left, right) => left.__openclaw.seq - right.__openclaw.seq || left.timestamp - right.timestamp)
+    .map((message) => mapOpenClawHistoryMessage(response.sessionKey, message));
 }
 
 export function mapOpenClawMessageGetResponse(

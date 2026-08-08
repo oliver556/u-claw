@@ -10,6 +10,18 @@ async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
 }
 
 describe("MockUClawClient", () => {
+  it("supports session create, rename, delete, and stable pagination", async () => {
+    const client = new MockUClawClient({ historySize: 5 });
+    const created = await client.sessions.create({ title: "Created" });
+    await expect(client.sessions.rename?.(created.id, "Renamed")).resolves.toMatchObject({ title: "Renamed" });
+    const first = await client.chat.list("session-1", { limit: 2 });
+    const second = await client.chat.list("session-1", { cursor: first.nextCursor ?? undefined, limit: 2 });
+    expect(first.items.map((message) => message.id)).toEqual(["message-1", "message-2"]);
+    expect(second.items.map((message) => message.id)).toEqual(["message-3", "message-4"]);
+    await client.sessions.remove(created.id);
+    await expect(client.sessions.get(created.id)).rejects.toMatchObject({ uclawError: { code: "NOT_FOUND" } });
+  });
+
   it("lists sessions/history and deterministically streams send", async () => {
     const clock = new ManualClock("2026-08-07T12:00:00.000Z");
     const client = new MockUClawClient({ clock });
@@ -66,7 +78,8 @@ describe("MockUClawClient", () => {
   it("declares every implemented method and no unsupported method", async () => {
     const capabilities = await new MockUClawClient().gateway.negotiate();
     expect([...capabilities.methods]).toEqual([
-      "sessions.list", "sessions.get", "sessions.create", "sessions.delete",
+      "sessions.list", "sessions.describe", "sessions.create", "sessions.delete",
+      "sessions.patch",
       "chat.history", "chat.message.get", "chat.send", "chat.abort",
       "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
     ]);

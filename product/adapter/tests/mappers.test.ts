@@ -46,6 +46,27 @@ describe("session and tool mappers", () => {
     expect(mapSession({ sessionKey: "session-1", title: "Chat", createdAt: now, updatedAt: now, pinned: false, status: "idle" })).toMatchObject({ id: "session-1", title: "Chat" });
   });
 
+  it("maps locked OpenClaw session rows without inventing created timestamps", () => {
+    expect(mapSession({
+      key: "agent:dev:main",
+      label: "Release",
+      updatedAt: 1786129711211,
+      pinned: true,
+      category: "delivery",
+      hasActiveRun: true,
+      modelProvider: "contract",
+      model: "contract-model",
+    })).toEqual({
+      id: "agent:dev:main",
+      title: "Release",
+      updatedAt: "2026-08-07T19:08:31.211Z",
+      pinned: true,
+      groupId: "delivery",
+      status: "running",
+      model: { id: "contract/contract-model", label: "contract-model", providerId: "contract" },
+    });
+  });
+
   it("rejects extra raw session fields", () => {
     const raw = { sessionKey: "session-1", title: "Chat", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const, extra: "forbidden" };
     expect(() => mapSession(raw)).toThrow();
