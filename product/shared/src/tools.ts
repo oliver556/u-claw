@@ -6,6 +6,7 @@ import { RendererSafeSummarySchema, UClawErrorSummarySchema } from "./errors.js"
 const SafeOpaqueIdSchema = z.string().min(1).refine(
   (value) => !/^(?:[A-Za-z]:[\\/]|[\\/]|file:)/i.test(value) &&
     !/^(?:gh[pousr]_|github_pat_|xox[a-z]-|sk-(?:proj-)?|AIza|AKIA)[A-Za-z0-9_-]{8,}$/i.test(value) &&
+    !/^(?:sk|rk)_live_[A-Za-z0-9_-]{16,}$/.test(value) &&
     !/^eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/.test(value),
   "Opaque ID must not be a filesystem path or token",
 );

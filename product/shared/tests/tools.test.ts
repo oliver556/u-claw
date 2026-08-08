@@ -140,6 +140,10 @@ describe("tool contracts", () => {
     "C:\\Users\\private\\tool",
     "file:///tmp/tool",
     "ghp_123456789012345678901234567890123456",
+    "sk_live_123456789012345678901234",
+    "rk_live_123456789012345678901234",
+    "sk-1234567890123456",
+    "sk-proj-1234567890123456",
     "xoxa-12345678901234567890",
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnopqrstuvwxyz123456",
   ])("rejects unsafe opaque ids: %s", (id) => {
