@@ -14,7 +14,7 @@
       "sessionKey": "agent:dev:main",
       "agentId": "dev",
       "seq": 2,
-      "ts": 1786129711086,
+      "ts": 1786217514952,
       "isHeartbeat": false,
       "session": {
         "key": "agent:dev:main",
@@ -25,7 +25,7 @@
           "surface": "webchat",
           "chatType": "direct"
         },
-        "updatedAt": 1786129711037,
+        "updatedAt": 1786217514901,
         "archived": false,
         "pinned": false,
         "unread": false,
@@ -68,7 +68,7 @@
         "totalTokensFresh": false,
         "estimatedCostUsd": 0,
         "status": "running",
-        "startedAt": 1786129711025,
+        "startedAt": 1786217514889,
         "effectiveResponseUsage": "off",
         "modelProvider": "contract",
         "model": "contract-model",
@@ -82,7 +82,7 @@
         },
         "lastChannel": "webchat"
       },
-      "updatedAt": 1786129711037,
+      "updatedAt": 1786217514901,
       "sessionId": "00000000-0000-4000-8000-000000000023",
       "kind": "direct",
       "chatType": "direct",
@@ -104,7 +104,7 @@
       "modelProvider": "contract",
       "model": "contract-model",
       "status": "running",
-      "startedAt": 1786129711025,
+      "startedAt": 1786217514889,
       "abortedLastRun": false
     }
   },
@@ -140,14 +140,14 @@
                 "deliveryContext": {
                   "channel": "webchat"
                 },
-                "updatedAt": 1786129711037,
+                "updatedAt": 1786217514901,
                 "archived": false,
                 "pinned": false,
                 "sessionId": "00000000-0000-4000-8000-000000000023",
                 "model": "contract-model",
                 "contextTokens": 131072,
                 "status": "running",
-                "startedAt": 1786129711025,
+                "startedAt": 1786217514889,
                 "effectiveFastMode": false,
                 "effectiveFastModeSource": "default",
                 "fastAutoOnSeconds": 60,
@@ -168,7 +168,7 @@
       "sessionKey": "agent:dev:main",
       "agentId": "dev",
       "seq": 4,
-      "ts": 1786129711145,
+      "ts": 1786217515008,
       "isHeartbeat": false,
       "session": {
         "key": "agent:dev:main",
@@ -179,7 +179,7 @@
           "surface": "webchat",
           "chatType": "direct"
         },
-        "updatedAt": 1786129711037,
+        "updatedAt": 1786217514901,
         "archived": false,
         "pinned": false,
         "unread": false,
@@ -222,7 +222,7 @@
         "totalTokensFresh": false,
         "estimatedCostUsd": 0,
         "status": "running",
-        "startedAt": 1786129711025,
+        "startedAt": 1786217514889,
         "effectiveResponseUsage": "off",
         "modelProvider": "contract",
         "model": "contract-model",
@@ -236,7 +236,7 @@
         },
         "lastChannel": "webchat"
       },
-      "updatedAt": 1786129711037,
+      "updatedAt": 1786217514901,
       "sessionId": "00000000-0000-4000-8000-000000000023",
       "kind": "direct",
       "chatType": "direct",
@@ -258,7 +258,7 @@
       "modelProvider": "contract",
       "model": "contract-model",
       "status": "running",
-      "startedAt": 1786129711025,
+      "startedAt": 1786217514889,
       "abortedLastRun": false
     }
   }

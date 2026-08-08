@@ -10,6 +10,8 @@ import {
 } from "@uclaw/shared";
 import { z } from "zod";
 
+import { RawOpenClawModelsListResponseSchema } from "./mappers/model.js";
+
 const GatewayErrorSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
@@ -55,6 +57,46 @@ function RpcCaseSchema<Method extends string, Params extends z.ZodTypeAny, Respo
 }
 
 const EmptyParamsSchema = z.object({}).strict();
+
+const StrictModelsListRequestSchema = <T extends z.ZodTypeAny>(params: T) => z.object({
+  type: z.literal("req"),
+  id: z.string().min(1),
+  method: z.literal("models.list"),
+  params,
+}).strict();
+
+const ModelsListConfiguredCaseSchema = z.object({
+  requestFrame: StrictModelsListRequestSchema(z.object({ view: z.literal("configured") }).strict()),
+  responseFrame: z.object({
+    type: z.literal("res"),
+    id: z.string().min(1),
+    ok: z.literal(true),
+    payload: RawOpenClawModelsListResponseSchema,
+  }).strict(),
+}).strict().superRefine((value, context) => {
+  if (value.responseFrame.id !== value.requestFrame.id) {
+    context.addIssue({ code: "custom", path: ["responseFrame", "id"], message: "Response id must match request id" });
+  }
+});
+
+const ModelsListInvalidViewCaseSchema = z.object({
+  requestFrame: StrictModelsListRequestSchema(z.object({ view: z.literal("invalid") }).strict()),
+  responseFrame: z.object({
+    type: z.literal("res"),
+    id: z.string().min(1),
+    ok: z.literal(false),
+    error: z.object({ code: z.literal("INVALID_REQUEST"), message: z.string().min(1) }).strict(),
+  }).strict(),
+}).strict().superRefine((value, context) => {
+  if (value.responseFrame.id !== value.requestFrame.id) {
+    context.addIssue({ code: "custom", path: ["responseFrame", "id"], message: "Response id must match request id" });
+  }
+});
+
+export const OpenClawModelsListFixtureSchema = z.object({
+  configured: ModelsListConfiguredCaseSchema,
+  invalidView: ModelsListInvalidViewCaseSchema,
+}).strict();
 
 const OpenClawRecordSchema = z.object({
   id: z.string().min(1),

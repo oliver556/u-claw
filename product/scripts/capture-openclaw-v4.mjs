@@ -28,6 +28,14 @@ function waitForEvent(predicate, label, ms = 20_000) {
   return waitForCapturedEvent(gatewayEvents, predicate, label, ms);
 }
 
+function withTimeout(promise, ms, label) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
 function gatewayErrorEvidence(error) {
   return {
     name: error?.name ?? "Error",
@@ -269,7 +277,7 @@ async function main() {
       });
       client.start();
     });
-    await Promise.race([hello, timeout(10_000, "Gateway hello")]);
+    await withTimeout(hello, 10_000, "Gateway hello");
     const requesterHello = new Promise((resolveHello, reject) => {
       requester = new GatewayClient({
         url: `ws://127.0.0.1:${proxyPort}`,
@@ -284,7 +292,11 @@ async function main() {
       });
       requester.start();
     });
-    await Promise.race([requesterHello, timeout(10_000, "requester Gateway hello")]);
+    await withTimeout(requesterHello, 10_000, "requester Gateway hello");
+    const modelsList = {
+      configured: await captureRequest(client, "models.list", { view: "configured" }),
+      invalidView: await captureRequest(client, "models.list", { view: "invalid" }),
+    };
     await client.request("sessions.subscribe", {});
     await client.request("sessions.create", { key: sessionKey, agentId: "dev" });
     const sendResult = await client.request("chat.send", {
@@ -349,6 +361,7 @@ async function main() {
     await writeFile(join(outputDir, "session.tool.json"), `${JSON.stringify({ sendResult, start, result }, null, 2)}\n`);
     await writeFile(join(outputDir, "chat.history.json"), `${JSON.stringify(historyEvidence, null, 2)}\n`);
     await writeFile(join(outputDir, "chat.message.get.json"), `${JSON.stringify({ success: messageGet, unavailable: messageUnavailable }, null, 2)}\n`);
+    await writeFile(join(outputDir, "models.list.json"), `${JSON.stringify(modelsList, null, 2)}\n`);
     await writeFile(join(outputDir, "attachments.json"), `${JSON.stringify({ cases: attachments }, null, 2)}\n`);
     await writeFile(join(outputDir, "approvals.json"), `${JSON.stringify(approvals, null, 2)}\n`);
     await writeFile(join(outputDir, "sessions.patch.json"), `${JSON.stringify(sessionsPatch, null, 2)}\n`);

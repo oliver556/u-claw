@@ -8,22 +8,16 @@
   "installedPackageJsonSha256": "695b6ee36df7fc69606dc390cf97bb2ca809114337b18c573707637cd2a4e3db",
   "installedRuntimeSchema": "schema-BuOFpc7K.js",
   "installedRuntimeSchemaSha256": "b5b672dd1ce3579e2b030567ef192355374c052934cb4e252b793e08647d54ab",
-  "captureHarnessSha256": "67ef185337cde08c2726cdb8417225df94af195fe8c4b585fafa90bbd4c5d487",
+  "captureHarnessSha256": "31c4a36e9195b8d248a9b7f79b106bb23070365dcda3d62f1492488f302a98bb",
   "captureStateHelperSha256": "67f99aa679fd8556c4db0bd75763e33914db0412dd528c65b44187ba998f127c",
   "captureCleanupHelperSha256": "0c9c5d03f0bc57196b174a5e9bfb064621e68c1470c773c2401afd8707ada455",
   "captureWaitHelperSha256": "2644e6dcaaf448da6afeef8822f3d52180277d3df61b7d764bc6e59cc2f6113d",
-  "sanitizerSha256": "abe040545fd77ba4484788ac75ba89edb92fc7d61d9ffe0d2ab2d95f9783253d",
+  "sanitizerSha256": "ca8ed7dc0d7c6a896582864f45d4908f14b5ae5a145adf8c276f4d8f1bac53dd",
   "nodeVersionSource": "OPENCLAW_NODE_BIN --version",
-  "capturedAt": "2026-08-07T19:08:31.086Z",
+  "capturedAt": "2026-08-08T19:31:54.952Z",
   "captureArtifact": {
-    "id": "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260807T190831086Z",
+    "id": "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260808T193154952Z",
     "kind": "raw-wire-json-v1"
-  },
-  "modelCatalogCaptureArtifact": {
-    "id": "openclaw-2026.7.1-2-models-list-protocol-v4-node-24.15.0",
-    "kind": "raw-wire-json-v1",
-    "transport": "GatewayClient through a loopback WebSocket frame-capture proxy",
-    "sanitization": "Request and response UUIDs replaced consistently; only synthetic loopback provider rows retained"
   },
   "modelCatalogProtocolEvidence": {
     "method": "models.list",
@@ -64,21 +58,21 @@
     "redaction": "UUIDs and temporary paths replaced consistently; user/assistant/tool-result text replaced with structured placeholders; synthetic attachment bytes retained; sessions.patch and sessions.list store derived field projections because raw entries contain unrelated prompt/tool diagnostics"
   },
   "rawCaptureSha256": {
-    "attachments.json": "0620a06a0eb5c9ebc398ed1a67a6d0159672e3e82219bd30ca0c016d8afaf80c",
-    "approvals.json": "37df37bfd40473e26ff911414c95b476e1fb3feb10df9b8d29c2ae8321791c9e",
-    "chat.history.json": "e7d8cc48c660727324d15c0b6f1d45ee30e1c0b4cad910173a5aadf4cbe3786a",
-    "chat.message.get.json": "565226b866b8b4861aab92d440bc3dbd439b6ec99e6dec4d0b30fc4d71278d09",
-    "models.list.json": "f12bf7ea608ec51e83fb0035f6c79f7cad21582742a3179cd38a2cad3af722e6",
-    "session.tool.json": "bb667e348778c6a7754de0ffe2929a544154fdfa8ec9bba8a16e85196c8c4692",
-    "sessions.patch.json": "228a7adcd4e493f73083c224cf5ca55b60604cdc6909d8c9033b136d894cad97"
+    "attachments.json": "b0b615e0d4a341e271d61cfa92f31e89e58eee45bc811bddf8435b588b924088",
+    "approvals.json": "1682555a2460ef3545ebb2e14e146dc0b687395f2f9e78a364d55d4e8e2e87c2",
+    "chat.history.json": "ef401e0bb57be5fbc55819f799e33a1b15c922e366c0f2d8052b5b564c89f32d",
+    "chat.message.get.json": "ea9d4066af2e49b3708b9f7a7738a41b80415748363be6a0f80c5fb4ada4dc21",
+    "models.list.json": "f4c95f4babdb5c77ba24c4fb6d3907da514e029c0095815c797cd8dcff3af297",
+    "session.tool.json": "35431f0d4ed3cf5220e18d1eaa8c3a228f473b920b815034f234c8e5aad1b0eb",
+    "sessions.patch.json": "e621c16f1d7ba9bbb37afced2cfc15f55e3370f25a3c1eb7e9953daef77542b7"
   },
   "fixtureSha256": {
-    "attachments.json": "c6f45323a25d5dcb0250214b1af46ccf2765a0d856cc0ab136a8935427d9e341",
-    "approvals.json": "39a85896efe2798d0745f192d632280960e9a57361dc29c5af8d59b9bb4ae286",
-    "chat.history.json": "525935101d371db1fa1bc8c2b104cb5ea1953f141d15c0524e71e64590592a82",
-    "chat.message.get.json": "aa8b6192c0840238e15756d707f044b35e85f8253471c7fe1c60857c08209326",
-    "models.list.json": "0b2ba2a4d28f98741a70843773ed9c62b45b9622c4ee6d646f1e629e51fad0c1",
-    "session.tool.json": "b3a8abe99ed201c767a5c6b6c2a27cf5e1447c688187bef408fb5fb07b9d5ce6",
-    "sessions.patch.json": "40b7af76fd56736c5fb1b59a2ef4053823e7278194feb753d2ea555fa54b8bd6"
+    "attachments.json": "71f52543389888f26d85e3c3b014a6303dc95486a142e05dffb64f569f4e80b7",
+    "approvals.json": "6a2349029ca90f0083f23f3c9b2e77f04f272228be9668a76ceaba1254ecb84d",
+    "chat.history.json": "4891c0acb9513636107816feff66399b7af86bc8df17ee5eaec73d4d17e5ad6d",
+    "chat.message.get.json": "fcdd6a1c951c8dae4c728953e10170054d16360c95a02547aa9d9b71af95b93e",
+    "models.list.json": "170447284d7a5373df8d31a61f25069cc6ba0fd632c9b10bae1c2261637495d6",
+    "session.tool.json": "27439209a3517b3589fb6b2309f1e335b66b6844656541f364ee2e55bbce16e2",
+    "sessions.patch.json": "f06349600235d36352ee817fab3803de968645fc2f235906d71585a7792501e9"
   }
 }
