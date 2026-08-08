@@ -171,7 +171,7 @@ export function createRendererClient(bridge: RendererClientBridge): RendererClie
     },
     sessions: {
       list: (page = {}) => invoke("sessions.list", page), get: (sessionId) => invoke("sessions.get", { sessionId }),
-      create: (input = {}) => invoke("sessions.create", input), remove: (sessionId, revision) => invoke("sessions.remove", { sessionId, ...(revision ? { revision } : {}) }),
+      create: (input = {}) => invoke("sessions.create", input), rename: (sessionId, title) => invoke("sessions.rename", { sessionId, title }), remove: (sessionId, revision) => invoke("sessions.remove", { sessionId, ...(revision ? { revision } : {}) }),
     },
     chat: {
       list: (sessionId, page = {}) => invoke("chat.list", { sessionId, ...page }),

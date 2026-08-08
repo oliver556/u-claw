@@ -34,7 +34,7 @@ describe("IPC contracts", () => {
   it("expresses every public client method as an explicit request", () => {
     const requests = [
       ["gateway.negotiate", {}], ["gateway.get-status", {}], ["gateway.watch-status", { subscriptionId: "sub-1" }], ["gateway.reconnect", {}],
-      ["sessions.list", {}], ["sessions.get", { sessionId: "s" }], ["sessions.create", {}], ["sessions.remove", { sessionId: "s" }],
+      ["sessions.list", {}], ["sessions.get", { sessionId: "s" }], ["sessions.create", {}], ["sessions.rename", { sessionId: "s", title: "新的会话名" }], ["sessions.remove", { sessionId: "s" }],
       ["chat.list", { sessionId: "s" }], ["chat.get", { sessionId: "s", messageId: "m" }], ["chat.watch", { sessionId: "s", subscriptionId: "sub-2" }],
       ["chat.send", { sessionId: "s", clientRequestId: "c", blocks: [{ type: "text", text: "hi", format: "plain" }] }], ["chat.abort", { runId: "r" }], ["chat.cancel-stream", { clientRequestId: "c" }],
       ["tools.list", {}], ["tools.get-call", { toolCallId: "t" }], ["approvals.list-pending", {}],

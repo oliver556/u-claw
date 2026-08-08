@@ -17,5 +17,8 @@ export function ToolRun({ tool }: { tool: ToolCall }) {
     <span><strong>{tool.displayName}</strong><small>{tool.toolId}</small></span>
     <span className="tool-status"><StatusIcon className={tool.state === "running" ? "spin" : ""} />{label}</span>
     <ChevronRight aria-hidden="true" />
+    {tool.inputSummary !== undefined ? <pre className="tool-summary">输入：{JSON.stringify(tool.inputSummary, null, 2)}</pre> : null}
+    {tool.outputSummary !== undefined ? <pre className="tool-summary">输出：{JSON.stringify(tool.outputSummary, null, 2)}</pre> : null}
+    {tool.error !== undefined ? <p className="tool-error">{tool.error.message}</p> : null}
   </div>;
 }

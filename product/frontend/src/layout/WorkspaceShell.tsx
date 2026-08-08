@@ -27,6 +27,9 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
   const [sessionsOpen, setSessionsOpen] = useState(() => window.innerWidth > 680);
   const [contextOpen, setContextOpen] = useState(() => window.innerWidth > 680);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [nextSessionCursor, setNextSessionCursor] = useState<string | null>(null);
+  const [hasMoreSessions, setHasMoreSessions] = useState(false);
+  const [creatingSession, setCreatingSession] = useState(false);
   const [sessionState, setSessionState] = useState<"loading" | "ready" | "error">("loading");
   const [sessionError, setSessionError] = useState<string>();
   const [activeSession, setActiveSession] = useState<Session>();
@@ -52,6 +55,8 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
     try {
       const page = await client.sessions.list();
       setSessions(page.items);
+      setNextSessionCursor(page.nextCursor);
+      setHasMoreSessions(page.hasMore);
       setSessionState("ready");
       if (page.items.length > 0) await selectSession(page.items[0].id);
       else setActiveSession(undefined);
@@ -88,6 +93,8 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
   }, []);
 
   const createSession = async () => {
+    if (creatingSession) return;
+    setCreatingSession(true);
     try {
       const created = await client.sessions.create({ title: "新会话" });
       selectionRequest.current += 1;
@@ -97,6 +104,53 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : "新建会话失败");
       setSessionState("error");
+    } finally {
+      setCreatingSession(false);
+    }
+  };
+
+  const loadMoreSessions = async () => {
+    if (!hasMoreSessions || nextSessionCursor === null) return;
+    try {
+      const page = await client.sessions.list({ cursor: nextSessionCursor });
+      setSessions((current) => {
+        const known = new Set(current.map((session) => session.id));
+        return [...current, ...page.items.filter((session) => !known.has(session.id))];
+      });
+      setNextSessionCursor(page.nextCursor);
+      setHasMoreSessions(page.hasMore);
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : "加载更多会话失败");
+    }
+  };
+
+  const renameSession = async (summary: SessionSummary) => {
+    const title = window.prompt("会话名称", summary.title)?.trim();
+    if (title === undefined || title === "" || title === summary.title) return;
+    if (client.sessions.rename === undefined) {
+      setSessionError("当前连接不支持重命名会话");
+      return;
+    }
+    try {
+      const renamed = await client.sessions.rename(summary.id, title);
+      setSessions((current) => current.map((item) => item.id === renamed.id ? renamed : item));
+      setActiveSession((current) => current?.id === renamed.id ? renamed : current);
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : "重命名会话失败");
+    }
+  };
+
+  const removeSession = async (summary: SessionSummary) => {
+    try {
+      await client.sessions.remove(summary.id);
+      setSessions((current) => current.filter((item) => item.id !== summary.id));
+      if (activeSession?.id === summary.id) {
+        const next = sessions.find((item) => item.id !== summary.id);
+        if (next) await selectSession(next.id);
+        else setActiveSession(undefined);
+      }
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : "主会话无法删除，已恢复显示");
     }
   };
 
@@ -119,11 +173,11 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
     <AppTitlebar status={gatewayStatus} onReconnect={() => client.gateway.reconnect()} />
     <div className={isWork ? `workspace-grid${sessionsOpen ? "" : " sessions-collapsed"}${contextOpen ? "" : " context-collapsed"}` : "workspace-grid secondary-layout"}>
       <PrimaryRail />
-      {isWork && sessionsOpen ? <SessionSidebar sessions={sessions} activeSessionId={activeSession?.id} state={sessionState} error={sessionError} onSelect={(id) => void selectSession(id)} onCreate={() => void createSession()} onRetry={() => void loadSessions()} onClose={() => setSessionsOpen(false)} /> : null}
+      {isWork && sessionsOpen ? <SessionSidebar sessions={sessions} activeSessionId={activeSession?.id} state={sessionState} error={sessionError} creating={creatingSession} hasMore={hasMoreSessions} onSelect={(id) => void selectSession(id)} onCreate={() => void createSession()} onRename={(session) => void renameSession(session)} onRemove={(session) => void removeSession(session)} onLoadMore={() => void loadMoreSessions()} onRetry={() => void loadSessions()} onClose={() => setSessionsOpen(false)} /> : null}
       <main id="main" className="main-canvas" tabIndex={-1}>
         {isWork ? activeSession === undefined
           ? <section className="work-canvas workspace-placeholder"><header className="canvas-head"><div className="canvas-title">{!sessionsOpen ? <Tooltip title="展开会话栏"><button className="icon-button" type="button" aria-label="展开会话栏" onClick={() => setSessionsOpen(true)}><PanelLeft /></button></Tooltip> : null}<strong>工作区</strong></div>{!contextOpen ? <Tooltip title="展开上下文舱"><button className="icon-button" type="button" aria-label="展开上下文舱" onClick={() => setContextOpen(true)}><PanelRight /></button></Tooltip> : null}</header><div className="conversation-state"><FolderArchive /><strong>{sessionState === "loading" ? "正在准备工作区" : "还没有会话"}</strong></div></section>
-          : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
+          : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} onSessionUpdated={(sessionId) => void refreshSessions(sessionId)} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
           : <SecondaryView title={route.label} description={route.description} system={route.path === "/system"} />}
       </main>
       {isWork && contextOpen ? <ContextPanel client={client} session={activeSession} capabilities={capabilities} activity={activeSession === undefined ? [] : activity[activeSession.id] ?? []} onClose={() => setContextOpen(false)} /> : null}
