@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "U-Claw P1-T23 Windows acceptance evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "startedAtUtc", "completedAtUtc", "status", "environment", "device", "artifacts", "cases", "blockers"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "format": "uuid" },
+    "startedAtUtc": { "type": "string", "format": "date-time" },
+    "completedAtUtc": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["passed", "failed", "blocked"] },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["osFamily", "osCaption", "osBuild", "architecture", "accountInAdministrators", "tokenElevated", "standardUser", "defenderAntivirusEnabled", "defenderRealtimeProtectionEnabled", "machineIdentitySha256", "machineRole"],
+      "properties": {
+        "osFamily": { "enum": ["windows-10", "windows-11"] },
+        "osCaption": { "type": "string", "minLength": 1 },
+        "osBuild": { "type": "string", "pattern": "^[0-9]+$" },
+        "architecture": { "type": "string", "minLength": 1 },
+        "accountInAdministrators": { "type": "boolean" },
+        "tokenElevated": { "type": "boolean" },
+        "standardUser": { "type": "boolean" },
+        "defenderAntivirusEnabled": { "type": "boolean" },
+        "defenderRealtimeProtectionEnabled": { "type": "boolean" },
+        "machineIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "machineRole": { "enum": ["machine-a", "machine-b"] }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["driveLetter", "driveType", "busType", "model", "deviceIdentitySha256", "physicalUsbVerified", "simulatedEvidence"],
+      "properties": {
+        "driveLetter": { "type": "string", "pattern": "^[A-Za-z]:\\\\$" },
+        "driveType": { "type": "string", "minLength": 1 },
+        "busType": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "deviceIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "physicalUsbVerified": { "type": "boolean" },
+        "simulatedEvidence": { "type": "boolean" }
+      }
+    },
+    "artifacts": { "type": "array", "minItems": 3, "items": { "$ref": "#/$defs/artifact" } },
+    "cases": { "type": "array", "minItems": 8, "items": { "$ref": "#/$defs/case" } },
+    "blockers": { "type": "array", "items": { "$ref": "#/$defs/summaryBlocker" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "name", "bytes", "sha256"],
+      "properties": { "kind": { "type": "string", "minLength": 1 }, "name": { "type": "string", "minLength": 1 }, "bytes": { "type": "integer", "minimum": 0 }, "sha256": { "$ref": "#/$defs/sha256" } }
+    },
+    "blocker": {
+      "type": "object", "additionalProperties": false, "required": ["code", "message"],
+      "properties": { "code": { "type": "string", "minLength": 1 }, "message": { "type": "string", "minLength": 1 } }
+    },
+    "summaryBlocker": {
+      "type": "object", "additionalProperties": false, "required": ["caseId", "code", "message"],
+      "properties": { "caseId": { "type": "string", "minLength": 1 }, "code": { "type": "string", "minLength": 1 }, "message": { "type": "string", "minLength": 1 } }
+    },
+    "assertion": {
+      "type": "object", "additionalProperties": false, "required": ["name", "passed", "actual"],
+      "properties": { "name": { "type": "string", "minLength": 1 }, "passed": { "type": "boolean" }, "actual": { "type": "string" } }
+    },
+    "case": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "caseId", "status", "startedAtUtc", "completedAtUtc", "assertions", "artifacts", "blockers"],
+      "properties": {
+        "schemaVersion": { "const": 1 }, "caseId": { "type": "string", "pattern": "^[A-Za-z0-9-]+$" }, "status": { "enum": ["passed", "failed", "blocked"] },
+        "startedAtUtc": { "type": "string", "format": "date-time" }, "completedAtUtc": { "type": "string", "format": "date-time" },
+        "assertions": { "type": "array", "items": { "$ref": "#/$defs/assertion" } }, "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } }, "blockers": { "type": "array", "items": { "$ref": "#/$defs/blocker" } }
+      }
+    }
+  }
+}

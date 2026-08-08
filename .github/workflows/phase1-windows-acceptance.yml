@@ -1,0 +1,76 @@
+name: Phase 1 Windows acceptance contracts
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/phase1-windows-acceptance.yml'
+      - 'product/tests/windows/first-launch.ps1'
+      - 'product/tests/windows/second-launch.ps1'
+      - 'product/tests/windows/portable-data-audit.ps1'
+      - 'product/tests/windows/process-cleanup.ps1'
+      - 'product/tests/windows/phase1-acceptance*'
+      - 'product/tests/windows/phase1-requirements.json'
+      - 'product/tests/windows/README-P1-T23.md'
+      - 'product/tests/windows/fixtures/p1-t23-case.template.json'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: PowerShell compatibility and blocked-path gate
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+
+      - name: Test static acceptance contracts
+        shell: pwsh
+        run: node --test product/tests/windows/phase1-acceptance.contract.test.mjs
+
+      - name: Parse scripts with Windows PowerShell 5.1 and PowerShell 7
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = Get-ChildItem product\tests\windows\*.ps1 | Where-Object { $_.Name -in @(
+            'first-launch.ps1', 'second-launch.ps1', 'portable-data-audit.ps1',
+            'process-cleanup.ps1', 'phase1-acceptance.ps1'
+          ) }
+          foreach ($script in $scripts) {
+            powershell.exe -NoProfile -Command "`$null = [scriptblock]::Create([IO.File]::ReadAllText('$($script.FullName)'))"
+            if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell parse failed: $($script.Name)" }
+            pwsh -NoProfile -Command "`$null = [scriptblock]::Create([IO.File]::ReadAllText('$($script.FullName)'))"
+            if ($LASTEXITCODE -ne 0) { throw "PowerShell 7 parse failed: $($script.Name)" }
+          }
+
+      - name: Prove simulated directories remain blocked
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $env:RUNNER_TEMP 'p1-t23-simulated.json'
+          powershell.exe -NoProfile -File product\tests\windows\phase1-acceptance.ps1 `
+            -ReleaseRoot $PWD `
+            -EvidencePath $evidence `
+            -AllowSimulatedDrive
+          if ($LASTEXITCODE -ne 2) { throw "Expected blocked exit 2, got $LASTEXITCODE" }
+          $report = Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
+          if ($report.status -cne 'blocked') { throw 'Simulated report must be blocked' }
+          if ($report.device.physicalUsbVerified) { throw 'Simulated report cannot verify physical USB' }
+          if (-not @($report.blockers | Where-Object { $_.code -eq 'SIMULATED_DRIVE_NOT_ACCEPTANCE_EVIDENCE' })) {
+            throw 'Simulated-evidence blocker missing'
+          }
+
+      - name: Upload non-acceptance smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-t23-hosted-smoke-blocked
+          path: ${{ runner.temp }}/p1-t23-simulated.json
+          if-no-files-found: warn
