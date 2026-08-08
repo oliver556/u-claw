@@ -353,6 +353,8 @@ test("Windows behavior test covers Task 4 compatibility cases", async () => {
   assert.match(source, /\$behaviorPhase\s*=\s*['"]VALID_METADATA['"]/);
   assert.match(source, /VALID_METADATA['"]\s*\+\s*['"]_['"]\s*\+\s*\$fixedCode/);
   assert.match(source, /\[regex\]::Matches\([^\r\n]*LAUNCHER_BENCHMARK_DIAGNOSTIC_/i);
+  assert.match(source, /\$fixedCodeMatches\s*=\s*@\(\[regex\]::Matches\([^\r\n]*\^\(LAUNCHER_BENCHMARK_/i);
+  assert.match(source, /\$diagnosticMatches\[-1\]\.Value\s*\+\s*['"]_['"]\s*\+\s*\$fixedCodeMatches\[-1\]\.Groups\[1\]\.Value/i);
   assert.match(source, /\$behaviorPhase\s*=\s*['"]INVALID_UTF8['"]/);
   assert.match(source, /\$script:behaviorPhase\s*=\s*['"]HARNESS_PROCESS_TIMEOUT['"]/);
   assert.match(source, /::error title=Launcher benchmark behavior gate::['"]\s*\+\s*\$failureCode/);
