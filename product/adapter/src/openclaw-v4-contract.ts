@@ -322,19 +322,51 @@ function approvalChoices(decisions: readonly z.infer<typeof ApprovalDecisionSche
   );
 }
 
+function safeSummary(value: unknown): Record<string, string | number | boolean | null | Array<string | number | boolean | null>> {
+  if (value === null) return { kind: "null" };
+  if (Array.isArray(value)) return { kind: "array", itemCount: value.length };
+  if (typeof value !== "object") return { kind: typeof value };
+
+  const entries = Object.entries(value).slice(0, 16);
+  const summary: Record<string, string | number | boolean | null | Array<string | number | boolean | null>> = {
+    fieldCount: Object.keys(value).length,
+  };
+  for (const [key, fieldValue] of entries) {
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) continue;
+    if (typeof fieldValue === "number" || typeof fieldValue === "boolean" || fieldValue === null) {
+      summary[key] = fieldValue;
+    } else if (Array.isArray(fieldValue)) {
+      summary[`${key}Count`] = fieldValue.length;
+    } else if (typeof fieldValue === "object") {
+      summary[`${key}FieldCount`] = fieldValue === null ? 0 : Object.keys(fieldValue).length;
+    }
+  }
+  return summary;
+}
+
+function safeIdentifier(value: string | null | undefined, fallback: string): string {
+  if (value === undefined || value === null) return fallback;
+  if (/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)) return value;
+  if (/^@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) return value;
+  return fallback;
+}
+
 export function mapOpenClawExecApproval(input: unknown): ExecApprovalRequest {
   const wrapped = ApprovalEventFrameSchema("exec.approval.requested", OpenClawExecApprovalEventSchema).safeParse(input);
   const event = OpenClawExecApprovalEventSchema.parse(wrapped.success ? wrapped.data.payload : input);
-  const command = event.request.command ?? event.request.commandArgv?.join(" ") ?? "OpenClaw command";
   return ExecApprovalRequestSchema.parse({
     id: event.id,
     family: "exec",
     ...(event.request.sessionKey ? { sessionId: event.request.sessionKey } : {}),
     subject: { kind: "operation", id: event.id },
     title: "Approve command",
-    description: command,
+    description: "OpenClaw requests permission to execute a command",
     risk: event.request.warningText ? "high" : "medium",
-    permissions: [{ kind: "process", scope: event.request.cwd ?? event.request.host ?? "gateway", description: "Execute command" }],
+    permissions: [{
+      kind: "process",
+      scope: event.request.host === "gateway" ? "gateway" : "restricted-host",
+      description: "Execute a command through OpenClaw",
+    }],
     choices: approvalChoices(event.request.allowedDecisions),
     expiresAt: toIso(event.expiresAtMs),
     status: "pending",
@@ -345,17 +377,18 @@ export function mapOpenClawExecApproval(input: unknown): ExecApprovalRequest {
 export function mapOpenClawPluginApproval(input: unknown): PluginApprovalRequest {
   const wrapped = ApprovalEventFrameSchema("plugin.approval.requested", OpenClawPluginApprovalEventSchema).safeParse(input);
   const event = OpenClawPluginApprovalEventSchema.parse(wrapped.success ? wrapped.data.payload : input);
-  const pluginId = event.request.pluginId ?? "unknown-plugin";
-  const description = event.request.description ?? "OpenClaw plugin operation";
+  const pluginId = safeIdentifier(event.request.pluginId, "unknown-plugin");
+  const toolName = safeIdentifier(event.request.toolName, pluginId);
+  const description = "OpenClaw requests permission for a plugin operation";
   return PluginApprovalRequestSchema.parse({
     id: event.id,
     family: "plugin",
     ...(event.request.sessionKey ? { sessionId: event.request.sessionKey } : {}),
     subject: { kind: "plugin", id: pluginId },
-    title: event.request.title ?? "Approve plugin operation",
+    title: "Approve plugin operation",
     description,
     risk: event.request.severity === "critical" ? "critical" : event.request.severity === "warning" ? "high" : "medium",
-    permissions: [{ kind: "other", scope: event.request.toolName ?? pluginId, description }],
+    permissions: [{ kind: "other", scope: toolName, description }],
     choices: approvalChoices(event.request.allowedDecisions),
     expiresAt: toIso(event.expiresAtMs),
     status: "pending",
@@ -366,14 +399,21 @@ export function mapOpenClawSessionToolEvent(input: unknown): ToolCall {
   const wrapped = OpenClawSessionToolEventSchema.safeParse(input);
   const event = OpenClawSessionToolPayloadSchema.parse(wrapped.success ? wrapped.data.payload : input);
   const failed = event.data.phase === "result" && event.data.isError === true;
+  const toolId = safeIdentifier(event.data.name, "unknown-tool");
   return ToolCallSchema.parse({
     id: event.data.toolCallId,
     sessionId: event.sessionKey,
     runId: event.runId,
-    toolId: event.data.name,
-    displayName: event.data.name,
+    toolId,
+    displayName: toolId === "unknown-tool" ? "Unknown tool" : toolId,
     state: event.data.phase === "start" ? "running" : failed ? "failed" : "succeeded",
     risk: "unknown",
+    ...(event.data.phase === "start" && event.data.args !== undefined
+      ? { inputSummary: safeSummary(event.data.args) }
+      : {}),
+    ...(event.data.phase === "result" && event.data.result !== undefined
+      ? { outputSummary: safeSummary(event.data.result) }
+      : {}),
     ...(event.data.phase === "start" ? { startedAt: toIso(event.ts) } : { finishedAt: toIso(event.ts) }),
     ...(failed ? { error: { code: "OPERATION_FAILED", message: "OpenClaw tool call failed", retryable: false } } : {}),
   });
