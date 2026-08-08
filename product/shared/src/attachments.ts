@@ -3,6 +3,9 @@ import { z } from "zod";
 import { BasenameSchema, FileRefSchema } from "./common.js";
 import { UClawErrorSummarySchema } from "./errors.js";
 
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENT_BASE64_LENGTH = Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4;
+
 export const AttachmentStateSchema = z.enum([
   "selected", "validating", "ready", "uploading", "attached", "failed", "cancelled",
 ]);
@@ -21,7 +24,7 @@ export const AttachmentImportInputSchema = z.object({
   name: BasenameSchema,
   mediaType: z.string().min(1),
   size: z.number().int().nonnegative(),
-  contentBase64: z.string(),
+  contentBase64: z.string().max(MAX_ATTACHMENT_BASE64_LENGTH),
 }).strict();
 export type AttachmentImportInput = z.infer<typeof AttachmentImportInputSchema>;
 

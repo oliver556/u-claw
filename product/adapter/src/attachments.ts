@@ -1,6 +1,7 @@
 import {
   AttachmentImportInputSchema,
   AttachmentSchema,
+  MAX_ATTACHMENT_BYTES,
   UClawErrorSchema,
   type Attachment,
   type AttachmentImportInput,
@@ -40,10 +41,15 @@ export class AttachmentServiceError extends AdapterServiceError {
 const IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const FILE_MEDIA_TYPES = new Set(["text/plain", "application/pdf"]);
 
-function decodeBase64(content: string): Buffer {
+function decodedBase64Length(content: string): number {
   if (content === "" || !/^[A-Za-z0-9+/]*={0,2}$/.test(content) || content.length % 4 !== 0) {
     throw new AttachmentServiceError("INVALID_ARGUMENT", "附件内容编码无效。");
   }
+  const padding = content.endsWith("==") ? 2 : content.endsWith("=") ? 1 : 0;
+  return (content.length / 4) * 3 - padding;
+}
+
+function decodeBase64(content: string): Buffer {
   const bytes = Buffer.from(content, "base64");
   if (bytes.toString("base64") !== content) throw new AttachmentServiceError("INVALID_ARGUMENT", "附件内容编码无效。");
   return bytes;
@@ -68,12 +74,16 @@ export class AttachmentManager implements AttachmentService {
   private readonly createId: () => string;
 
   constructor(options: AttachmentManagerOptions = {}) {
-    this.maxBytes = options.maxBytes ?? 10 * 1024 * 1024;
+    this.maxBytes = options.maxBytes ?? MAX_ATTACHMENT_BYTES;
     this.createId = options.createId ?? (() => globalThis.crypto.randomUUID());
   }
 
   async import(input: AttachmentImportInput): Promise<Attachment> {
     const parsed = AttachmentImportInputSchema.parse(input);
+    const encodedBytes = decodedBase64Length(parsed.contentBase64);
+    if (encodedBytes > this.maxBytes) {
+      throw new AttachmentServiceError("FILE_TOO_LARGE", `附件超过大小限制（${encodedBytes} > ${this.maxBytes} bytes）。`);
+    }
     const bytes = decodeBase64(parsed.contentBase64);
     if (parsed.size !== bytes.byteLength) throw new AttachmentServiceError("INVALID_ARGUMENT", "附件大小与内容不一致。");
     if (bytes.byteLength > this.maxBytes) throw new AttachmentServiceError("FILE_TOO_LARGE", `附件超过大小限制（${bytes.byteLength} > ${this.maxBytes} bytes）。`);
@@ -124,7 +134,7 @@ export class AttachmentManager implements AttachmentService {
 
   resolveForSend(id: string): OpenClawAttachment {
     const stored = this.require(id);
-    if (!["ready", "failed", "attached"].includes(stored.attachment.state)) {
+    if (stored.attachment.state !== "ready" && stored.attachment.state !== "attached") {
       throw new AttachmentServiceError("INVALID_ARGUMENT", "附件尚未准备完成。");
     }
     return {
@@ -147,7 +157,11 @@ export class AttachmentManager implements AttachmentService {
 
   markFailed(id: string, error: UClawErrorSummary): void {
     const stored = this.require(id);
-    stored.attachment = AttachmentSchema.parse({ ...stored.attachment, state: "failed", error });
+    stored.attachment = AttachmentSchema.parse({
+      ...stored.attachment,
+      state: "failed",
+      error: { code: error.code, message: "附件发送失败。", retryable: error.retryable },
+    });
   }
 
   private require(id: string): StoredAttachment {

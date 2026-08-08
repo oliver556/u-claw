@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -36,14 +36,48 @@ describe("AttachmentManager", () => {
     expect((mismatch as AttachmentServiceError).uclawError.code).toBe("FILE_TYPE_UNSUPPORTED");
   });
 
+  it("rejects encoded payloads over the configured limit before Buffer allocation", async () => {
+    const manager = new AttachmentManager({ maxBytes: 8 });
+    const bufferFrom = vi.spyOn(Buffer, "from");
+    try {
+      const error = await manager.import({
+        name: "large.txt", mediaType: "text/plain", size: 9, contentBase64: "MTIzNDU2Nzg5",
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(AttachmentServiceError);
+      expect((error as AttachmentServiceError).uclawError.code).toBe("FILE_TOO_LARGE");
+      expect(bufferFrom).not.toHaveBeenCalled();
+    } finally {
+      bufferFrom.mockRestore();
+    }
+  });
+
   it("moves failed attachments back through validating and ready on retry", async () => {
     const manager = new AttachmentManager();
     const imported = await manager.import({ name: "fixture.txt", mediaType: "text/plain", size: 8, contentBase64: "Y29udHJhY3Q=" });
     manager.markUploading(imported.id, 0.5);
     manager.markFailed(imported.id, { code: "UNAVAILABLE", message: "发送失败", retryable: true });
+    expect(() => manager.resolveForSend(imported.id)).toThrow(AttachmentServiceError);
+    expect(await manager.get(imported.id)).toMatchObject({
+      state: "failed",
+      error: { code: "UNAVAILABLE", message: "附件发送失败。", retryable: true },
+    });
     const states = [];
     for await (const attachment of manager.prepare(imported.id)) states.push(attachment.state);
     expect(states).toEqual(["validating", "ready"]);
+    expect(() => manager.resolveForSend(imported.id)).not.toThrow();
+  });
+
+  it("never exposes raw Gateway failure paths, credentials, or message text", async () => {
+    const manager = new AttachmentManager();
+    const imported = await manager.import({ name: "fixture.txt", mediaType: "text/plain", size: 8, contentBase64: "Y29udHJhY3Q=" });
+    manager.markFailed(imported.id, {
+      code: "UNAVAILABLE",
+      message: "C:\\Users\\alice\\secret.txt /home/alice/private.txt token=sk-secret123 prompt=private-body",
+      retryable: true,
+    });
+    const serialized = JSON.stringify(await manager.get(imported.id));
+    expect(serialized).toContain("附件发送失败。");
+    expect(serialized).not.toMatch(/Users|\/home|sk-secret123|private-body/);
   });
 
   it("does not regress an attached terminal state during prepare", async () => {

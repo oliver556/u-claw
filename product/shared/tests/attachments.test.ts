@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { AttachmentImportInputSchema, AttachmentIpcRequestSchema, AttachmentSchema } from "../src/index.js";
+import {
+  AttachmentImportInputSchema,
+  AttachmentIpcRequestSchema,
+  AttachmentSchema,
+  MAX_ATTACHMENT_BASE64_LENGTH,
+} from "../src/index.js";
 
 describe("attachment contracts", () => {
   it("models queue progress and retryable failures without exposing a path", () => {
@@ -21,5 +26,14 @@ describe("attachment contracts", () => {
     expect(AttachmentIpcRequestSchema.parse({ method: "import", requestId: "request-1", params: input })).toBeTruthy();
     expect(AttachmentIpcRequestSchema.parse({ method: "get", requestId: "request-get", params: { attachmentId: "attachment-1" } })).toBeTruthy();
     expect(() => AttachmentIpcRequestSchema.parse({ method: "import", requestId: "request-2", params: { ...input, path: "C:\\secret.txt" } })).toThrow();
+  });
+
+  it("rejects oversized Base64 before attachment import", () => {
+    expect(() => AttachmentImportInputSchema.parse({
+      name: "large.txt",
+      mediaType: "text/plain",
+      size: 1,
+      contentBase64: "A".repeat(MAX_ATTACHMENT_BASE64_LENGTH + 4),
+    })).toThrow();
   });
 });
