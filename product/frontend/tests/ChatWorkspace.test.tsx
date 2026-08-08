@@ -431,6 +431,99 @@ describe("chat workspace", () => {
     expect(send.mock.calls[2]![0].clientRequestId).not.toBe(send.mock.calls[1]![0].clientRequestId);
   });
 
+  it("prepares a concurrently selected duplicate attachment only once", async () => {
+    const base = clientFixture();
+    const attachment = { id: "attachment-concurrent", file: { id: "file-concurrent", name: "same.txt", mediaType: "text/plain", size: 4, kind: "attachment" as const }, state: "ready" as const, progress: 1 };
+    const first = deferred<typeof attachment[]>();
+    const second = deferred<typeof attachment[]>();
+    let selectCount = 0;
+    const invoke = vi.fn((request: { method: string; requestId: string }) => {
+      if (request.method === "select") {
+        selectCount += 1;
+        return (selectCount === 1 ? first.promise : second.promise).then((result) => ({ method: request.method, requestId: request.requestId, ok: true as const, result }));
+      }
+      return Promise.resolve({ method: request.method, requestId: request.requestId, ok: true as const, result: request.method === "prepare" ? [attachment] : null });
+    });
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) } });
+    render(<App client={client} />);
+    const add = await screen.findByRole("button", { name: "添加附件" });
+    fireEvent.click(add);
+    fireEvent.click(add);
+    first.resolve([attachment]);
+    second.resolve([attachment]);
+
+    expect(await screen.findByText("same.txt")).toBeVisible();
+    await waitFor(() => expect(invoke.mock.calls.filter(([request]) => request.method === "prepare")).toHaveLength(1));
+  });
+
+  it("preserves clientRequestId when a dropped attachment import fails", async () => {
+    const base = clientFixture();
+    const invoke = vi.fn(async (request: { method: string; requestId: string }) => {
+      if (request.method === "import") throw new Error("import failed");
+      return { method: request.method, requestId: request.requestId, ok: true, result: null };
+    });
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    let attempt = 0;
+    const send = vi.fn((input: Parameters<UClawClient["chat"]["send"]>[0]) => (async function* () {
+      attempt += 1;
+      if (attempt === 1) throw new Error("send failed");
+      yield { type: "started" as const, runId: "run-drop", sessionId: input.sessionId };
+      yield { type: "final" as const, runId: "run-drop", message: { id: "final-drop", sessionId: input.sessionId, runId: "run-drop", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    })());
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send } });
+    const { container } = render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "拖放失败后重试" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await screen.findByText("send failed");
+    const file = new File(["data"], "failed.txt", { type: "text/plain" });
+    fireEvent.drop(container.querySelector(".composer")!, { dataTransfer: { files: [file] } });
+    await screen.findByText("import failed");
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].clientRequestId).toBe(send.mock.calls[0]![0].clientRequestId);
+  });
+
+  it("rotates clientRequestId as soon as the first dropped attachment is imported", async () => {
+    const base = clientFixture();
+    const firstAttachment = { id: "attachment-first", file: { id: "file-first", name: "first.txt", mediaType: "text/plain", size: 5, kind: "attachment" as const }, state: "ready" as const, progress: 1 };
+    const secondImport = deferred<typeof firstAttachment>();
+    const invoke = vi.fn(async (request: { method: string; requestId: string; params?: { name?: string } }) => {
+      if (request.method === "import") {
+        const result = request.params?.name === "first.txt" ? firstAttachment : await secondImport.promise;
+        return { method: request.method, requestId: request.requestId, ok: true, result };
+      }
+      return { method: request.method, requestId: request.requestId, ok: true, result: request.method === "prepare" ? [firstAttachment] : null };
+    });
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    let attempt = 0;
+    const send = vi.fn((input: Parameters<UClawClient["chat"]["send"]>[0]) => (async function* () {
+      attempt += 1;
+      if (attempt === 1) throw new Error("send failed");
+      yield { type: "started" as const, runId: "run-partial-drop", sessionId: input.sessionId };
+      yield { type: "final" as const, runId: "run-partial-drop", message: { id: "final-partial-drop", sessionId: input.sessionId, runId: "run-partial-drop", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    })());
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send } });
+    const { container } = render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "首个附件入队后发送" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await screen.findByText("send failed");
+    fireEvent.drop(container.querySelector(".composer")!, { dataTransfer: { files: [
+      new File(["first"], "first.txt", { type: "text/plain" }),
+      new File(["second"], "second.txt", { type: "text/plain" }),
+    ] } });
+    expect(await screen.findByText("first.txt")).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].clientRequestId).not.toBe(send.mock.calls[0]![0].clientRequestId);
+    secondImport.resolve({ ...firstAttachment, id: "attachment-second", file: { ...firstAttachment.file, id: "file-second", name: "second.txt" } });
+  });
+
   it("rotates clientRequestId after an aborted terminal event", async () => {
     const base = clientFixture();
     let attempt = 0;

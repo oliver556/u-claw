@@ -42,14 +42,22 @@ describe("createClientDispatcher stream ownership", () => {
       inputSummary: {
         command: "rm -rf /private/data",
         cwd: "/private/data",
+        argv: ["rm", "-rf", "../../private"],
+        script: "cat ~/.ssh/id_rsa",
+        path: "../secret",
         embeddedPath: "cwd:/private/embedded",
         windowsPath: "C:\\Users\\private\\project",
         tokenCount: 42,
         status: "tests failed",
+        outcome: "wrote /Users/private/secret",
         longText: "x".repeat(10_000),
         nested: { deeper: { secret: "must-not-cross" } },
+        "Authorization Bearer sk-proj-secretvalue": "failed",
+        state: 123456,
+        configured: [123456],
+        count: true,
       },
-      outputSummary: { configured: true, token: "secret-value" },
+      outputSummary: { configured: true, token: "secret-value", apiKey: 123456 },
       error: { code: "OPERATION_FAILED", message: "process failed", retryable: true },
     } as unknown as ToolCall;
     const dispatcher = createClientDispatcher({
@@ -64,14 +72,15 @@ describe("createClientDispatcher stream ownership", () => {
 
     expect(response).toMatchObject({ ok: true, result: {
       inputSummary: {
-        command: "[REDACTED]", cwd: "[REDACTED]", embeddedPath: "[REDACTED]", windowsPath: "[REDACTED]",
-        tokenCount: 42, status: "tests failed", nested: "[REDACTED]",
+        field_1: "[REDACTED]", field_3: "[REDACTED]",
+        tokenCount: 42, status: "tests failed", outcome: "[REDACTED]", field_13: "[REDACTED]",
+        state: "[REDACTED]", configured: "[REDACTED]", count: "[REDACTED]",
       },
-      outputSummary: { configured: true, token: "[REDACTED]" },
+      outputSummary: { configured: true, field_2: "[REDACTED]", field_3: "[REDACTED]" },
       error: { code: "OPERATION_FAILED", message: "Tool operation failed.", retryable: true },
     } });
     const serialized = JSON.stringify(response);
-    expect(serialized).not.toMatch(/rm -rf|\/private\/(?:data|embedded)|C:\\\\Users|must-not-cross|secret-value/);
+    expect(serialized).not.toMatch(/rm -rf|\.\.\/private|~\/\.ssh|\.\.\/secret|\/Users\/private|\/private\/(?:data|embedded)|C:\\\\Users|must-not-cross|secret-value|123456|Authorization Bearer|sk-proj-secretvalue/);
     expect(serialized.length).toBeLessThanOrEqual(4_096);
     dispatcher.dispose();
   });

@@ -212,10 +212,22 @@ function rendererSafeMessageEvent(event: MessageEvent): MessageEvent {
 }
 
 const MAX_TOOL_SUMMARY_FIELDS = 16;
-const MAX_TOOL_SUMMARY_ARRAY_ITEMS = 8;
 const MAX_TOOL_SUMMARY_TEXT = 256;
 const MAX_TOOL_SUMMARY_TEXT_TOTAL = 2_048;
 const TOOL_SUMMARY_REDACTED = "[REDACTED]";
+const SAFE_TOOL_SUMMARY_TEXT_KEYS = new Set(["status", "state", "outcome"]);
+const SAFE_TOOL_SUMMARY_TEXT_VALUE = /^(?:pending|running|completed|failed|success|succeeded|cancelled|canceled|aborted|tests (?:passed|failed))$/i;
+const SAFE_TOOL_SUMMARY_KEYS = new Set([
+  ...SAFE_TOOL_SUMMARY_TEXT_KEYS,
+  "configured", "success", "count", "token_count", "duration_ms", "exit_code",
+]);
+const SAFE_TOOL_SUMMARY_BOOLEAN_KEYS = new Set(["configured", "success"]);
+const SAFE_TOOL_SUMMARY_NUMBER_RULES: Record<string, (value: number) => boolean> = {
+  count: (value) => Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000_000,
+  token_count: (value) => Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000_000,
+  duration_ms: (value) => Number.isFinite(value) && value >= 0 && value <= 604_800_000,
+  exit_code: (value) => Number.isSafeInteger(value) && value >= -65_535 && value <= 65_535,
+};
 
 function rendererSafeToolSummary(summary: unknown) {
   const projected: Record<string, string | number | boolean | null | Array<string | number | boolean | null>> = {};
@@ -227,12 +239,9 @@ function rendererSafeToolSummary(summary: unknown) {
   const safeText = (value: string, key: string): string | undefined => {
     if (remainingText <= 0) return undefined;
     const normalizedKey = normalizeKey(key);
-    const exposesCommand = /(?:^|_)(?:command|cmd|cwd)(?:_|$)/.test(normalizedKey);
-    const exposesAbsolutePath = /(?:^|[^/])\/(?!\/)[^\s]+/.test(value) ||
-      /(?:[A-Za-z]:[\\/]|\\\\)[^\s]+/.test(value);
-    const redacted = exposesCommand || exposesAbsolutePath
-      ? TOOL_SUMMARY_REDACTED
-      : redactRendererText(value, key);
+    const redacted = SAFE_TOOL_SUMMARY_TEXT_KEYS.has(normalizedKey) && SAFE_TOOL_SUMMARY_TEXT_VALUE.test(value.trim())
+      ? redactRendererText(value, key)
+      : TOOL_SUMMARY_REDACTED;
     const limit = Math.min(MAX_TOOL_SUMMARY_TEXT, remainingText);
     const bounded = redacted.length <= limit
       ? redacted
@@ -242,22 +251,20 @@ function rendererSafeToolSummary(summary: unknown) {
   };
 
   for (const [index, [rawKey, rawValue]] of Object.entries(summary).slice(0, MAX_TOOL_SUMMARY_FIELDS).entries()) {
-    const key = rawKey.length <= 64 && !/[\\/]/.test(rawKey) ? rawKey : `field_${index + 1}`;
-    if (typeof rawValue === "string") {
+    const safeKey = rawKey.length <= 64 && SAFE_TOOL_SUMMARY_KEYS.has(normalizeKey(rawKey));
+    const key = safeKey ? rawKey : `field_${index + 1}`;
+    if (!safeKey) {
+      projected[key] = TOOL_SUMMARY_REDACTED;
+      continue;
+    }
+    const normalizedKey = normalizeKey(rawKey);
+    if (SAFE_TOOL_SUMMARY_TEXT_KEYS.has(normalizedKey) && typeof rawValue === "string") {
       const value = safeText(rawValue, key);
       if (value !== undefined) projected[key] = value;
-    } else if (typeof rawValue === "number" || typeof rawValue === "boolean" || rawValue === null) {
+    } else if (SAFE_TOOL_SUMMARY_BOOLEAN_KEYS.has(normalizedKey) && typeof rawValue === "boolean") {
       projected[key] = rawValue;
-    } else if (Array.isArray(rawValue)) {
-      const values: Array<string | number | boolean | null> = [];
-      for (const item of rawValue.slice(0, MAX_TOOL_SUMMARY_ARRAY_ITEMS)) {
-        if (typeof item === "string") {
-          const value = safeText(item, key);
-          if (value !== undefined) values.push(value);
-        } else if (typeof item === "number" || typeof item === "boolean" || item === null) values.push(item);
-        else values.push(TOOL_SUMMARY_REDACTED);
-      }
-      projected[key] = values;
+    } else if (typeof rawValue === "number" && SAFE_TOOL_SUMMARY_NUMBER_RULES[normalizedKey]?.(rawValue) === true) {
+      projected[key] = rawValue;
     } else {
       projected[key] = TOOL_SUMMARY_REDACTED;
     }
