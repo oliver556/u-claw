@@ -134,8 +134,9 @@ test("PowerShell harness consumes strict auditable build sidecars", async () => 
 test("PowerShell harness stays compatible with Windows PowerShell 5.1", async () => {
   const source = await readFile(harnessUrl, "utf8");
   assert.match(source, /function ConvertTo-WindowsCommandLineArgument/);
-  assert.match(source, /\.Arguments\s*=\s*\[string\]::Join/);
-  assert.match(source, /\.EnvironmentVariables\[['"]PATH['"]\]/);
+  assert.match(source, /CreateProcessW/);
+  assert.match(source, /CREATE_UNICODE_ENVIRONMENT/);
+  assert.match(source, /BuildEnvironmentBlock/);
   assert.match(source, /\[Security\.Cryptography\.SHA256\]::Create\(\)/);
   assert.match(source, /\[BitConverter\]::ToString/);
   assert.match(source, /\$backslashes \* 2 \+ 1/);
@@ -155,22 +156,25 @@ test("future Windows harness workflow must gate PowerShell 5.1 and pwsh", async 
   }
   assert.match(workflowSource, /shell:\s*powershell\b/);
   assert.match(workflowSource, /shell:\s*pwsh\b/);
+  assert.match(workflowSource, /fake-child/i);
+  assert.match(workflowSource, /PROCESS_CAPTURE_TIMEOUT/);
+  assert.match(workflowSource, /Get-Process/);
 });
 
 test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH restoration", async () => {
   const source = await readFile(harnessUrl, "utf8");
-  assert.match(source, /UseShellExecute\s*=\s*\$false/i);
-  assert.match(source, /RedirectStandardOutput\s*=\s*\$true/i);
-  assert.match(source, /RedirectStandardError\s*=\s*\$true/i);
-  assert.match(source, /ReadToEndAsync\(\)/);
+  assert.match(source, /CreatePipe/);
+  assert.match(source, /SetHandleInformation/);
+  assert.match(source, /PROC_THREAD_ATTRIBUTE_HANDLE_LIST/);
+  assert.match(source, /SafeFileHandle/);
+  assert.match(source, /DeleteProcThreadAttributeList/);
+  assert.match(source, /Marshal\.FreeHGlobal/);
+  assert.match(source, /Task\.Factory\.StartNew[\s\S]{0,300}ReadToEnd\(\)/);
   assert.match(source, /WaitForExit\(\$TimeoutMs\)/);
-  assert.match(source, /taskkill\.exe/);
-  assert.match(source, /\/PID[\s\S]{0,100}\/T[\s\S]{0,100}\/F/);
-  assert.match(source, /LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED/);
-  assert.match(source, /WaitForExit\(\$KillTimeoutMs\)/);
+  assert.match(source, /TerminateProcess/);
+  assert.match(source, /WaitForSingleObject/);
   assert.match(source, /\[Threading\.Tasks\.Task\]::WaitAll\([^\r\n]*\$CaptureTimeoutMs\)/);
-  assert.doesNotMatch(source, /WaitForExit\(\s*\)/);
-  assert.doesNotMatch(source, /PROCESS_CAPTURE_TIMEOUT[\s\S]{0,240}Stop-TimedOutProcess|Stop-TimedOutProcess[\s\S]{0,240}PROCESS_CAPTURE_TIMEOUT/);
+  assert.doesNotMatch(source, /Diagnostics\.ProcessStartInfo|\.ArgumentList\b|taskkill\.exe/);
   assert.match(source, /\[Diagnostics\.Stopwatch\]::StartNew\(\)/);
   assert.match(source, /finally[\s\S]{0,240}Remove-Item\s+-LiteralPath/i);
   assert.match(source, /finally[\s\S]{0,180}\$env:PATH\s*=\s*\$originalPath/i);
@@ -181,13 +185,16 @@ test("PowerShell harness contains descendants in a kill-on-close Windows Job Obj
   const source = await readFile(harnessUrl, "utf8");
   const invokeSource = source.slice(
     source.indexOf("function Invoke-CapturedProcess"),
-    source.indexOf("function Invoke-Taskkill"),
+    source.indexOf("function Resolve-CommitSha"),
   );
   for (const api of [
     "CreateJobObjectW",
     "SetInformationJobObject",
     "AssignProcessToJobObject",
     "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+    "CREATE_SUSPENDED",
+    "EXTENDED_STARTUPINFO_PRESENT",
+    "ResumeThread",
     "CloseHandle",
   ]) {
     assert.match(source, new RegExp(api));
@@ -195,17 +202,18 @@ test("PowerShell harness contains descendants in a kill-on-close Windows Job Obj
   assert.match(source, /CreateJobObjectW[\s\S]{0,140}ExactSpelling\s*=\s*true|ExactSpelling\s*=\s*true[\s\S]{0,140}CreateJobObjectW/);
   assert.match(source, /LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED/);
   assert.match(source, /function Initialize-ProcessJob[\s\S]{0,500}Add-Type[\s\S]{0,300}catch[\s\S]{0,200}PROCESS_JOB_FAILED/);
-  assert.match(source, /\$process\.Start\(\)[\s\S]{0,500}\$job\.Assign\(\$process\.Handle\)[\s\S]{0,500}ReadToEndAsync\(\)/);
   assert.match(source, /\$job\s*=\s*\[LauncherProcessJob\]::new\(\)[\s\S]{0,200}catch[\s\S]{0,200}PROCESS_JOB_FAILED/);
-  assert.match(source, /\$job\.Assign\(\$process\.Handle\)[\s\S]{0,300}Stop-TimedOutProcess[\s\S]{0,200}PROCESS_JOB_FAILED/);
-  assert.match(source, /finally[\s\S]{0,500}\$job\.Dispose\(\)[\s\S]{0,300}\$process\.Dispose\(\)/);
+  assert.match(source, /CreateProcessW[\s\S]{0,1000}AssignProcessToJobObject[\s\S]{0,1000}Task\.Factory\.StartNew[\s\S]{0,500}ResumeThread/);
+  assert.match(source, /CreateProcessW[\s\S]{0,500}CloseParentWriteHandles[\s\S]{0,300}AssignProcessToJobObject/);
+  assert.match(source, /AssignProcessToJobObject[\s\S]{0,300}TerminateSuspendedProcess/);
+  assert.match(source, /ResumeThread[\s\S]{0,300}TerminateSuspendedProcess/);
+  assert.doesNotMatch(source, /public void Assign\(/);
+  assert.match(source, /finally[\s\S]{0,500}\$job\.Dispose\(\)[\s\S]{0,300}\$runner\.Dispose\(\)/);
   assert.match(source, /\$job\.Dispose\(\)[\s\S]{0,200}\$jobDisposeFailed\s*=\s*\$true[\s\S]{0,300}PROCESS_JOB_FAILED/);
-  assert.doesNotMatch(source, /PROCESS_CAPTURE_TIMEOUT[\s\S]{0,240}Stop-TimedOutProcess/);
   assert.ok(invokeSource.indexOf("Initialize-ProcessJob") < invokeSource.indexOf("[Diagnostics.Stopwatch]::StartNew()"));
   assert.ok(invokeSource.indexOf("[LauncherProcessJob]::new()") < invokeSource.indexOf("[Diagnostics.Stopwatch]::StartNew()"));
-  assert.match(invokeSource, /\$stopwatch\s*=\s*\[Diagnostics\.Stopwatch\]::StartNew\(\)\s*\r?\n\s*if \(-not \$process\.Start\(\)\)/);
-  assert.ok(invokeSource.indexOf("$process.Start()") < invokeSource.indexOf("$job.Assign($process.Handle)"));
-  assert.ok(invokeSource.indexOf("$job.Assign($process.Handle)") < invokeSource.indexOf("ReadToEndAsync()"));
+  assert.ok(invokeSource.indexOf("$job.PrepareProcess") < invokeSource.indexOf("[Diagnostics.Stopwatch]::StartNew()"));
+  assert.match(invokeSource, /\$stopwatch\s*=\s*\[Diagnostics\.Stopwatch\]::StartNew\(\)\s*\r?\n\s*\$runner\.Start\(\)/);
   assert.ok(invokeSource.indexOf("$stopwatch.Stop()") < invokeSource.indexOf("return [pscustomobject]"));
   assert.ok(invokeSource.indexOf("return [pscustomobject]") < invokeSource.indexOf("$job.Dispose()"));
 });

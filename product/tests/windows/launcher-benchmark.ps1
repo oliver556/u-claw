@@ -113,8 +113,14 @@ public static class LauncherBuildMetadataParser
 
 $processJobSource = @'
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.Win32.SafeHandles;
 
 public sealed class LauncherProcessJob : IDisposable
 {
@@ -147,10 +153,11 @@ public sealed class LauncherProcessJob : IDisposable
         }
     }
 
-    public void Assign(IntPtr processHandle)
+    public LauncherNativeProcess PrepareProcess(
+        string filePath, string commandLine, string pathOverride)
     {
         if (handle == IntPtr.Zero) throw new ObjectDisposedException("LauncherProcessJob");
-        if (!AssignProcessToJobObject(handle, processHandle)) throw LastWin32Exception();
+        return new LauncherNativeProcess(handle, filePath, commandLine, pathOverride);
     }
 
     public void Dispose()
@@ -169,6 +176,411 @@ public sealed class LauncherProcessJob : IDisposable
     private static Win32Exception LastWin32Exception()
     {
         return new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    public sealed class LauncherNativeProcess : IDisposable
+    {
+        private const UInt32 CREATE_SUSPENDED = 0x00000004;
+        private const UInt32 CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+        private const UInt32 EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
+        private const UInt32 CREATE_NO_WINDOW = 0x08000000;
+        private const UInt32 STARTF_USESTDHANDLES = 0x00000100;
+        private const UInt32 HANDLE_FLAG_INHERIT = 0x00000001;
+        private const Int32 PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002;
+        private const UInt32 GENERIC_READ = 0x80000000;
+        private const UInt32 FILE_SHARE_READ = 0x00000001;
+        private const UInt32 FILE_SHARE_WRITE = 0x00000002;
+        private const UInt32 OPEN_EXISTING = 3;
+        private const UInt32 FILE_ATTRIBUTE_NORMAL = 0x00000080;
+        private const UInt32 WAIT_OBJECT_0 = 0x00000000;
+        private const UInt32 WAIT_TIMEOUT = 0x00000102;
+        private const UInt32 WAIT_FAILED = 0xFFFFFFFF;
+        private const UInt32 STILL_ACTIVE = 259;
+        private const UInt32 PROCESS_CREATION_FLAGS = CREATE_SUSPENDED |
+            CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW;
+
+        private readonly IntPtr jobHandle;
+        private readonly string filePath;
+        private readonly StringBuilder commandLine;
+        private IntPtr environmentBlock;
+        private IntPtr attributeList;
+        private IntPtr handleList;
+        private bool attributeListInitialized;
+        private IntPtr stdinHandle;
+        private IntPtr stdoutReadHandle;
+        private IntPtr stdoutWriteHandle;
+        private IntPtr stderrReadHandle;
+        private IntPtr stderrWriteHandle;
+        private IntPtr processHandle;
+        private IntPtr threadHandle;
+        private STARTUPINFOEX startupInfo;
+        private PROCESS_INFORMATION processInformation;
+        private SafeFileHandle stdoutSafeHandle;
+        private SafeFileHandle stderrSafeHandle;
+        private StreamReader stdoutReader;
+        private StreamReader stderrReader;
+        private bool started;
+        private bool disposed;
+
+        public Task<string> StdoutTask { get; private set; }
+        public Task<string> StderrTask { get; private set; }
+
+        internal LauncherNativeProcess(
+            IntPtr jobHandle, string filePath, string commandLine, string pathOverride)
+        {
+            this.jobHandle = jobHandle;
+            this.filePath = filePath;
+            this.commandLine = new StringBuilder(commandLine);
+            try
+            {
+                environmentBlock = BuildEnvironmentBlock(pathOverride);
+                PreparePipesAndAttributes();
+            }
+            catch
+            {
+                try { if (stdoutReader != null) stdoutReader.Dispose(); } catch { }
+                try { if (stderrReader != null) stderrReader.Dispose(); } catch { }
+                try { if (stdoutSafeHandle != null) stdoutSafeHandle.Dispose(); } catch { }
+                try { if (stderrSafeHandle != null) stderrSafeHandle.Dispose(); } catch { }
+                CleanupHandles(false);
+                throw;
+            }
+        }
+
+        public void Start()
+        {
+            if (disposed || started) throw new InvalidOperationException();
+            if (!CreateProcessW(
+                filePath, commandLine, IntPtr.Zero, IntPtr.Zero, true, PROCESS_CREATION_FLAGS,
+                environmentBlock, null, ref startupInfo, out processInformation))
+            {
+                throw LastWin32Exception();
+            }
+            processHandle = processInformation.hProcess;
+            threadHandle = processInformation.hThread;
+            started = true;
+
+            try
+            {
+                CloseParentWriteHandles();
+                if (!AssignProcessToJobObject(jobHandle, processHandle))
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    TerminateSuspendedProcess();
+                    throw new Win32Exception(error);
+                }
+                StdoutTask = Task.Factory.StartNew(
+                    () => stdoutReader.ReadToEnd(),
+                    TaskCreationOptions.LongRunning);
+                StderrTask = Task.Factory.StartNew(
+                    () => stderrReader.ReadToEnd(),
+                    TaskCreationOptions.LongRunning);
+                if (ResumeThread(threadHandle) == UInt32.MaxValue)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    TerminateSuspendedProcess();
+                    throw new Win32Exception(error);
+                }
+            }
+            catch
+            {
+                if (IsProcessActive()) TerminateSuspendedProcess();
+                throw;
+            }
+        }
+
+        public bool WaitForExit(int timeoutMs)
+        {
+            UInt32 result = WaitForSingleObject(processHandle, (UInt32)timeoutMs);
+            if (result == WAIT_OBJECT_0) return true;
+            if (result == WAIT_TIMEOUT) return false;
+            if (result == WAIT_FAILED) throw LastWin32Exception();
+            throw new Win32Exception();
+        }
+
+        public int ExitCode
+        {
+            get
+            {
+                UInt32 exitCode;
+                if (!GetExitCodeProcess(processHandle, out exitCode)) throw LastWin32Exception();
+                if (exitCode == STILL_ACTIVE) throw new InvalidOperationException();
+                return unchecked((Int32)exitCode);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            Exception failure = null;
+            try { if (stdoutReader != null) stdoutReader.Dispose(); } catch (Exception error) { failure = error; }
+            try { if (stderrReader != null) stderrReader.Dispose(); } catch (Exception error) { if (failure == null) failure = error; }
+            try { if (stdoutSafeHandle != null) stdoutSafeHandle.Dispose(); } catch (Exception error) { if (failure == null) failure = error; }
+            try { if (stderrSafeHandle != null) stderrSafeHandle.Dispose(); } catch (Exception error) { if (failure == null) failure = error; }
+            try { CleanupHandles(true); } catch (Exception error) { if (failure == null) failure = error; }
+            if (failure != null) throw failure;
+            GC.SuppressFinalize(this);
+        }
+
+        ~LauncherNativeProcess()
+        {
+            CleanupHandles(false);
+        }
+
+        private void PreparePipesAndAttributes()
+        {
+            var security = new SECURITY_ATTRIBUTES();
+            security.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+            security.bInheritHandle = true;
+            if (!CreatePipe(out stdoutReadHandle, out stdoutWriteHandle, ref security, 0))
+                throw LastWin32Exception();
+            if (!SetHandleInformation(stdoutReadHandle, HANDLE_FLAG_INHERIT, 0))
+                throw LastWin32Exception();
+            if (!CreatePipe(out stderrReadHandle, out stderrWriteHandle, ref security, 0))
+                throw LastWin32Exception();
+            if (!SetHandleInformation(stderrReadHandle, HANDLE_FLAG_INHERIT, 0))
+                throw LastWin32Exception();
+            stdinHandle = CreateFileW(
+                "NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, ref security,
+                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+            if (stdinHandle == new IntPtr(-1)) throw LastWin32Exception();
+
+            UIntPtr size = UIntPtr.Zero;
+            InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);
+            if (size == UIntPtr.Zero) throw LastWin32Exception();
+            attributeList = Marshal.AllocHGlobal(checked((Int32)size.ToUInt64()));
+            if (!InitializeProcThreadAttributeList(attributeList, 1, 0, ref size))
+                throw LastWin32Exception();
+            attributeListInitialized = true;
+            handleList = Marshal.AllocHGlobal(IntPtr.Size * 3);
+            Marshal.WriteIntPtr(handleList, 0, stdinHandle);
+            Marshal.WriteIntPtr(handleList, IntPtr.Size, stdoutWriteHandle);
+            Marshal.WriteIntPtr(handleList, IntPtr.Size * 2, stderrWriteHandle);
+            if (!UpdateProcThreadAttribute(
+                attributeList, 0, new IntPtr(PROC_THREAD_ATTRIBUTE_HANDLE_LIST),
+                handleList, new IntPtr(IntPtr.Size * 3), IntPtr.Zero, IntPtr.Zero))
+            {
+                throw LastWin32Exception();
+            }
+
+            startupInfo = new STARTUPINFOEX();
+            startupInfo.StartupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFOEX));
+            startupInfo.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+            startupInfo.StartupInfo.hStdInput = stdinHandle;
+            startupInfo.StartupInfo.hStdOutput = stdoutWriteHandle;
+            startupInfo.StartupInfo.hStdError = stderrWriteHandle;
+            startupInfo.lpAttributeList = attributeList;
+
+            stdoutSafeHandle = new SafeFileHandle(stdoutReadHandle, true);
+            stdoutReadHandle = IntPtr.Zero;
+            stderrSafeHandle = new SafeFileHandle(stderrReadHandle, true);
+            stderrReadHandle = IntPtr.Zero;
+            stdoutReader = new StreamReader(new FileStream(stdoutSafeHandle, FileAccess.Read, 4096, false), new UTF8Encoding(false, true));
+            stderrReader = new StreamReader(new FileStream(stderrSafeHandle, FileAccess.Read, 4096, false), new UTF8Encoding(false, true));
+        }
+
+        private static IntPtr BuildEnvironmentBlock(string pathOverride)
+        {
+            IDictionary environment = Environment.GetEnvironmentVariables();
+            var entries = new List<string>();
+            bool replacedPath = false;
+            foreach (DictionaryEntry entry in environment)
+            {
+                string name = (string)entry.Key;
+                string value = (string)entry.Value;
+                if (pathOverride != null && String.Equals(name, "PATH", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = pathOverride;
+                    replacedPath = true;
+                }
+                entries.Add(name + "=" + value);
+            }
+            if (pathOverride != null && !replacedPath) entries.Add("PATH=" + pathOverride);
+            entries.Sort(StringComparer.OrdinalIgnoreCase);
+            var block = new StringBuilder();
+            foreach (string entry in entries) block.Append(entry).Append('\0');
+            block.Append('\0');
+            return Marshal.StringToHGlobalUni(block.ToString());
+        }
+
+        private void CloseParentWriteHandles()
+        {
+            CloseOwnedHandle(ref stdinHandle, true);
+            CloseOwnedHandle(ref stdoutWriteHandle, true);
+            CloseOwnedHandle(ref stderrWriteHandle, true);
+        }
+
+        private void TerminateSuspendedProcess()
+        {
+            if (processHandle == IntPtr.Zero) return;
+            if (!TerminateProcess(processHandle, 1) && IsProcessActive()) throw LastWin32Exception();
+            UInt32 result = WaitForSingleObject(processHandle, 5000);
+            if (result == WAIT_OBJECT_0) return;
+            if (result == WAIT_FAILED) throw LastWin32Exception();
+            throw new Win32Exception(1460);
+        }
+
+        private bool IsProcessActive()
+        {
+            if (processHandle == IntPtr.Zero) return false;
+            UInt32 exitCode;
+            if (!GetExitCodeProcess(processHandle, out exitCode)) throw LastWin32Exception();
+            return exitCode == STILL_ACTIVE;
+        }
+
+        private void CleanupHandles(bool throwOnFailure)
+        {
+            Exception failure = null;
+            TryClose(ref threadHandle, ref failure);
+            TryClose(ref processHandle, ref failure);
+            TryClose(ref stdinHandle, ref failure);
+            TryClose(ref stdoutReadHandle, ref failure);
+            TryClose(ref stdoutWriteHandle, ref failure);
+            TryClose(ref stderrReadHandle, ref failure);
+            TryClose(ref stderrWriteHandle, ref failure);
+            if (attributeList != IntPtr.Zero)
+            {
+                if (attributeListInitialized) DeleteProcThreadAttributeList(attributeList);
+                Marshal.FreeHGlobal(attributeList);
+                attributeList = IntPtr.Zero;
+                attributeListInitialized = false;
+            }
+            if (handleList != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(handleList);
+                handleList = IntPtr.Zero;
+            }
+            if (environmentBlock != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(environmentBlock);
+                environmentBlock = IntPtr.Zero;
+            }
+            if (throwOnFailure && failure != null) throw failure;
+        }
+
+        private static void TryClose(ref IntPtr value, ref Exception failure)
+        {
+            if (value == IntPtr.Zero || value == new IntPtr(-1))
+            {
+                value = IntPtr.Zero;
+                return;
+            }
+            if (CloseHandle(value))
+            {
+                value = IntPtr.Zero;
+            }
+            else if (failure == null)
+            {
+                failure = LastWin32Exception();
+            }
+        }
+
+        private static void CloseOwnedHandle(ref IntPtr value, bool throwOnFailure)
+        {
+            Exception failure = null;
+            TryClose(ref value, ref failure);
+            if (throwOnFailure && failure != null) throw failure;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateProcessW(
+            string applicationName, StringBuilder commandLine, IntPtr processAttributes,
+            IntPtr threadAttributes, [MarshalAs(UnmanagedType.Bool)] bool inheritHandles,
+            UInt32 creationFlags, IntPtr environment, string currentDirectory,
+            ref STARTUPINFOEX startupInfo, out PROCESS_INFORMATION processInformation);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreatePipe(
+            out IntPtr readPipe, out IntPtr writePipe,
+            ref SECURITY_ATTRIBUTES pipeAttributes, UInt32 size);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetHandleInformation(IntPtr handle, UInt32 mask, UInt32 flags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        private static extern IntPtr CreateFileW(
+            string fileName, UInt32 desiredAccess, UInt32 shareMode,
+            ref SECURITY_ATTRIBUTES securityAttributes, UInt32 creationDisposition,
+            UInt32 flagsAndAttributes, IntPtr templateFile);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool InitializeProcThreadAttributeList(
+            IntPtr attributeList, Int32 attributeCount, Int32 flags, ref UIntPtr size);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UpdateProcThreadAttribute(
+            IntPtr attributeList, UInt32 flags, IntPtr attribute, IntPtr value,
+            IntPtr size, IntPtr previousValue, IntPtr returnSize);
+
+        [DllImport("kernel32.dll", ExactSpelling = true)]
+        private static extern void DeleteProcThreadAttributeList(IntPtr attributeList);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern UInt32 ResumeThread(IntPtr thread);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool TerminateProcess(IntPtr process, UInt32 exitCode);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern UInt32 WaitForSingleObject(IntPtr handle, UInt32 milliseconds);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetExitCodeProcess(IntPtr process, out UInt32 exitCode);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SECURITY_ATTRIBUTES
+        {
+            public Int32 nLength;
+            public IntPtr lpSecurityDescriptor;
+            [MarshalAs(UnmanagedType.Bool)] public bool bInheritHandle;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct STARTUPINFO
+        {
+            public Int32 cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public Int32 dwX;
+            public Int32 dwY;
+            public Int32 dwXSize;
+            public Int32 dwYSize;
+            public Int32 dwXCountChars;
+            public Int32 dwYCountChars;
+            public Int32 dwFillAttribute;
+            public UInt32 dwFlags;
+            public UInt16 wShowWindow;
+            public UInt16 cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct STARTUPINFOEX
+        {
+            public STARTUPINFO StartupInfo;
+            public IntPtr lpAttributeList;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_INFORMATION
+        {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public UInt32 dwProcessId;
+            public UInt32 dwThreadId;
+        }
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
@@ -396,21 +808,11 @@ function Invoke-CapturedProcess {
         [AllowNull()][string]$PathOverride
     )
 
-    $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $FilePath
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    $startInfo.CreateNoWindow = $true
-    $quotedArguments = @($Arguments | ForEach-Object { ConvertTo-WindowsCommandLineArgument $_ })
-    $startInfo.Arguments = [string]::Join(' ', $quotedArguments)
-    if ($null -ne $PathOverride) {
-        $startInfo.EnvironmentVariables['PATH'] = $PathOverride
-    }
-
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
+    $commandLineParts = @((ConvertTo-WindowsCommandLineArgument $FilePath))
+    $commandLineParts += @($Arguments | ForEach-Object { ConvertTo-WindowsCommandLineArgument $_ })
+    $commandLine = [string]::Join(' ', $commandLineParts)
     $job = $null
+    $runner = $null
     $stopwatch = $null
     try {
         Initialize-ProcessJob
@@ -420,20 +822,17 @@ function Invoke-CapturedProcess {
         catch {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
         }
-        $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-        if (-not $process.Start()) {
-            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_FAILED'
-        }
         try {
-            $job.Assign($process.Handle)
+            $runner = $job.PrepareProcess($FilePath, $commandLine, $PathOverride)
         }
         catch {
-            try { Stop-TimedOutProcess $process 5000 } catch {}
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
         }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutMs)) {
+        $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+        $runner.Start()
+        $stdoutTask = $runner.StdoutTask
+        $stderrTask = $runner.StderrTask
+        if (-not $runner.WaitForExit($TimeoutMs)) {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_TIMEOUT'
         }
         $CaptureTimeoutMs = 5000
@@ -443,11 +842,17 @@ function Invoke-CapturedProcess {
         }
         $stopwatch.Stop()
         return [pscustomobject]@{
-            ExitCode = $process.ExitCode
+            ExitCode = $runner.ExitCode
             Stdout = $stdoutTask.GetAwaiter().GetResult()
             Stderr = $stderrTask.GetAwaiter().GetResult()
             ElapsedMs = $stopwatch.Elapsed.TotalMilliseconds
         }
+    }
+    catch [LauncherBenchmarkError] {
+        throw
+    }
+    catch {
+        Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
     }
     finally {
         if ($null -ne $stopwatch) {
@@ -457,70 +862,12 @@ function Invoke-CapturedProcess {
         if ($null -ne $job) {
             try { $job.Dispose() } catch { $jobDisposeFailed = $true }
         }
-        $process.Dispose()
+        if ($null -ne $runner) {
+            try { $runner.Dispose() } catch { $jobDisposeFailed = $true }
+        }
         if ($jobDisposeFailed) {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
         }
-    }
-}
-
-function Invoke-Taskkill {
-    param(
-        [Parameter(Mandatory)][int]$ProcessId,
-        [Parameter(Mandatory)][int]$TimeoutMs
-    )
-
-    $taskkillPath = Join-Path $env:SystemRoot 'System32\taskkill.exe'
-    $startInfo = New-Object Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $taskkillPath
-    $startInfo.Arguments = '/PID ' + $ProcessId + ' /T /F'
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    $startInfo.CreateNoWindow = $true
-    $killer = New-Object Diagnostics.Process
-    $killer.StartInfo = $startInfo
-    try {
-        if (-not $killer.Start()) {
-            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
-        }
-        $stdoutTask = $killer.StandardOutput.ReadToEndAsync()
-        $stderrTask = $killer.StandardError.ReadToEndAsync()
-        if (-not $killer.WaitForExit($TimeoutMs)) {
-            try { $killer.Kill() } catch { Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED' }
-            if (-not $killer.WaitForExit(1000)) {
-                Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
-            }
-            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
-        }
-        $tasks = [Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
-        if (-not [Threading.Tasks.Task]::WaitAll($tasks, 1000)) {
-            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
-        }
-        return $killer.ExitCode -eq 0
-    }
-    finally {
-        $killer.Dispose()
-    }
-}
-
-function Stop-TimedOutProcess {
-    param(
-        [Parameter(Mandatory)][Diagnostics.Process]$Process,
-        [Parameter(Mandatory)][int]$KillTimeoutMs
-    )
-
-    try {
-        $killed = Invoke-Taskkill $Process.Id $KillTimeoutMs
-        if (-not $killed -and -not $Process.HasExited) {
-            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
-        }
-        if (-not $Process.WaitForExit($KillTimeoutMs)) {
-            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
-        }
-    }
-    catch {
-        Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
     }
 }
 
