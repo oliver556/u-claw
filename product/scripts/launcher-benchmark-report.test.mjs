@@ -154,8 +154,9 @@ test("PowerShell harness consumes strict auditable build sidecars", async () => 
   assert.match(source, /Add-Type/);
   assert.match(source, /function Initialize-BuildMetadataParser/);
   assert.match(source, /try\s*\{[\s\S]{0,600}Initialize-BuildMetadataParser[\s\S]{0,600}LauncherBuildMetadataParser\]::Parse/);
-  assert.match(source, /JsonReaderWriterFactory\]\.Assembly\.Location/);
-  assert.match(source, /XElement\]\.Assembly\.Location/);
+  assert.match(source, /Reflection\.Assembly\]::Load\(['"]System\.Runtime\.Serialization['"]\)/);
+  assert.match(source, /Reflection\.Assembly\]::Load\(['"]System\.Xml\.Linq['"]\)/);
+  assert.doesNotMatch(source, /JsonReaderWriterFactory\]\.Assembly\.Location|XElement\]\.Assembly\.Location/);
   assert.doesNotMatch(source, /'System\.Runtime\.Serialization\.dll'|'System\.Xml\.Linq\.dll'/);
   assert.doesNotMatch(source, /ReadAllText\([^\r\n]*\)\s*\|\s*ConvertFrom-Json/);
   assert.doesNotMatch(source, /LastWriteTime|CreationTime|buildMs\s*=\s*0\b/);
