@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { type z } from "zod";
 
 import { AsyncEventQueue, OpenClawClient, UClawUnsupportedError, type OpenClawTransport } from "../src/openclaw-client.js";
-import { AttachmentManager } from "../src/attachments.js";
+import { AttachmentManager, AttachmentServiceError } from "../src/attachments.js";
 import { ManualClock } from "../src/mock/mock-client.js";
 import { ReconnectPolicy } from "../src/reconnect.js";
 import type { HelloOk } from "../src/transport/gateway-websocket.js";
@@ -23,6 +23,7 @@ class FakeTransport implements OpenClawTransport {
   readonly closeListeners = new Set<(error: Error) => void>();
   readonly connectFailures: Error[] = [];
   helloMethods = ["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list"];
+  policy = { maxPayload: 65_536, maxBufferedBytes: 131_072 };
   resetSequences: Array<number | undefined> = [];
   connectCalls = 0;
   private lastSequence: number | undefined;
@@ -36,7 +37,7 @@ class FakeTransport implements OpenClawTransport {
       protocol: 4 as const,
       server: { version: "2026.7.1-2" },
       features: { methods: this.helloMethods, events: ["chat"] },
-      policy: { maxPayload: 65_536, maxBufferedBytes: 131_072 },
+      policy: this.policy,
     };
   }
 
@@ -321,6 +322,52 @@ describe("OpenClawClient", () => {
 
     expect(transport.requests.at(-1)).toEqual({ method: "chat.send", params: fixture.requestFrame.params });
     expect(await attachments.get(attachment.id)).toMatchObject({ state: "attached", progress: 1 });
+  });
+
+  it("sends multiple attachments in one request when cumulative payload fits policy", async () => {
+    const transport = new FakeTransport();
+    transport.fixtures.set("chat.send", { runId: "run-multi", status: "started" });
+    const attachments = new AttachmentManager({ createId: (() => { let id = 0; return () => String(++id); })() });
+    const first = await attachments.import({ name: "one.txt", mediaType: "text/plain", size: 3, contentBase64: "b25l" });
+    const second = await attachments.import({ name: "two.txt", mediaType: "text/plain", size: 3, contentBase64: "dHdv" });
+    const client = new OpenClawClient({ transport, attachments });
+    await client.gateway.negotiate();
+    const iterator = client.chat.send({
+      sessionId: "session-1", clientRequestId: "multi-1",
+      blocks: [{ type: "attachment", attachmentId: first.id }, { type: "attachment", attachmentId: second.id }],
+    })[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+    expect(transport.requests.at(-1)).toMatchObject({ method: "chat.send", params: { attachments: [{ fileName: "one.txt" }, { fileName: "two.txt" }] } });
+  });
+
+  it("rejects attachment count and small Gateway policy before chat.send", async () => {
+    const transport = new FakeTransport();
+    const attachments = new AttachmentManager({ createId: (() => { let id = 0; return () => String(++id); })() });
+    const imported = [];
+    for (let index = 0; index < 9; index += 1) {
+      imported.push(await attachments.import({ name: `${index}.txt`, mediaType: "text/plain", size: 1, contentBase64: "eA==" }));
+    }
+    const client = new OpenClawClient({ transport, attachments });
+    await client.gateway.negotiate();
+    const tooMany = client.chat.send({
+      sessionId: "session-1", clientRequestId: "too-many",
+      blocks: imported.map((attachment) => ({ type: "attachment" as const, attachmentId: attachment.id })),
+    })[Symbol.asyncIterator]();
+    await expect(tooMany.next()).rejects.toBeInstanceOf(AttachmentServiceError);
+    expect(transport.requests).toEqual([]);
+
+    transport.policy = { maxPayload: 180, maxBufferedBytes: 256 };
+    await client.gateway.reconnect();
+    const one = imported[0];
+    const smallPolicy = client.chat.send({
+      sessionId: "session-1", clientRequestId: "small-policy",
+      blocks: [{ type: "text", text: "payload", format: "plain" }, { type: "attachment", attachmentId: one.id }],
+    })[Symbol.asyncIterator]();
+    const error = await smallPolicy.next().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AttachmentServiceError);
+    expect((error as AttachmentServiceError).uclawError.code).toBe("FILE_TOO_LARGE");
+    expect(transport.requests).toEqual([]);
   });
 
   it("reports upload progress and preserves a retryable failed attachment", async () => {

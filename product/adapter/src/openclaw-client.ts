@@ -1,5 +1,8 @@
 import {
   capabilitySetFromWire,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_ATTACHMENT_BASE64_TOTAL_LENGTH,
+  MAX_ATTACHMENT_TOTAL_BYTES,
   UClawErrorSchema,
   type CapabilitySet,
   type GatewayConnectionState,
@@ -32,7 +35,7 @@ import {
 import type { GatewayWebSocketState, HelloOk } from "./transport/gateway-websocket.js";
 import { ReconnectPolicy, type SequenceGap } from "./reconnect.js";
 import { AdapterServiceError, RpcClosedError, RpcProtocolError, RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
-import type { AttachmentManager } from "./attachments.js";
+import { AttachmentServiceError, type AttachmentManager } from "./attachments.js";
 
 interface OpenClawRouter {
   request<T>(method: string, params: JsonValue, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T>;
@@ -400,7 +403,16 @@ export class OpenClawClient implements UClawClient {
     this.requireMethod("chat.send");
     const attachmentIds = input.blocks.flatMap((block) => block.type === "attachment" ? [block.attachmentId] : []);
     if (attachmentIds.length > 0 && this.options.attachments === undefined) throw new UClawUnsupportedError("chat.send.attachments");
-    const attachments = attachmentIds.map((id) => this.options.attachments!.resolveForSend(id));
+    if (attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      throw new AttachmentServiceError("INVALID_ARGUMENT", `单条消息最多发送 ${MAX_ATTACHMENTS_PER_MESSAGE} 个附件。`);
+    }
+    const resolvedAttachments = attachmentIds.map((id) => this.options.attachments!.resolveForSend(id));
+    const rawAttachmentBytes = resolvedAttachments.reduce((total, attachment) => total + attachment.byteLength, 0);
+    const encodedAttachmentLength = resolvedAttachments.reduce((total, attachment) => total + attachment.content.length, 0);
+    if (rawAttachmentBytes > MAX_ATTACHMENT_TOTAL_BYTES || encodedAttachmentLength > MAX_ATTACHMENT_BASE64_TOTAL_LENGTH) {
+      throw new AttachmentServiceError("FILE_TOO_LARGE", "附件累计大小超过单条消息限制。");
+    }
+    const attachments = resolvedAttachments.map(({ byteLength: _byteLength, ...attachment }) => attachment);
     const text = input.blocks.filter((block) => block.type === "text").map((block) => block.text).join("\n");
     const queue = new AsyncEventQueue<MessageEvent>();
     let expectedRunId: string | undefined;
@@ -447,6 +459,17 @@ export class OpenClawClient implements UClawClient {
         idempotencyKey: input.clientRequestId,
         ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       };
+      const policyLimit = Math.min(
+        this.hello?.policy.maxPayload ?? 64 * 1024,
+        this.hello?.policy.maxBufferedBytes ?? 64 * 1024,
+        64 * 1024,
+      );
+      const frameBytes = new TextEncoder().encode(JSON.stringify({
+        type: "req", id: "x".repeat(64), method: "chat.send", params: requestParams,
+      })).byteLength;
+      if (frameBytes > policyLimit) {
+        throw new AttachmentServiceError("FILE_TOO_LARGE", `附件发送载荷超过 Gateway 限制（${frameBytes} > ${policyLimit} bytes）。`);
+      }
       const acceptedRequest = this.options.transport.router.request("chat.send", requestParams, SendResponseSchema).then((accepted) => {
         for (const id of attachmentIds) this.options.attachments?.markAttached(id);
         return accepted;
