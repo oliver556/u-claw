@@ -29,6 +29,7 @@ func main() {
 	if strings.Contains(strings.ToLower(filepath.Base(os.Args[0])), "dotnet") {
 		candidate = "dotnet"
 	}
+	maybeDelay(candidate)
 	newline := "\n"
 	if candidate == "dotnet" {
 		newline = "\r\n"
@@ -61,6 +62,39 @@ func main() {
 		fail("E_PACKAGE_INVALID", newline)
 	}
 	fmt.Fprintf(os.Stdout, "{\"status\":\"ready\",\"candidate\":\"%s\"}%s", candidate, newline)
+}
+
+func maybeDelay(candidate string) {
+	root := os.Getenv("LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT")
+	if root == "" {
+		return
+	}
+	counterPath := filepath.Join(root, candidate+".timing-count")
+	invocation := 0
+	if raw, err := os.ReadFile(counterPath); err == nil {
+		invocation, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+	}
+	invocation++
+	if err := os.WriteFile(counterPath, []byte(strconv.Itoa(invocation)), 0o600); err != nil {
+		return
+	}
+	time.Sleep(timingDelay(invocation))
+}
+
+func timingDelay(invocation int) time.Duration {
+	samples := [...]time.Duration{
+		0,
+		0,
+		0,
+		300 * time.Millisecond,
+		900 * time.Millisecond,
+		900 * time.Millisecond,
+		2 * time.Second,
+	}
+	if invocation < 10 || invocation > 16 {
+		return 0
+	}
+	return samples[invocation-10]
 }
 
 func validArchive(value string) bool {

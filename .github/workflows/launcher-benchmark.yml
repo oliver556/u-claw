@@ -9,7 +9,7 @@ on:
       - 'product/scripts/launcher-benchmark-report.mjs'
       - 'product/scripts/launcher-benchmark-report.test.mjs'
       - 'product/tests/windows/launcher-benchmark*'
-      - 'product/tests/windows/fixtures/fake-launcher.go'
+      - 'product/tests/windows/fixtures/fake-launcher*.go'
       - 'product/package.json'
       - 'product/package-lock.json'
 
@@ -93,7 +93,7 @@ jobs:
           dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishAot=true -o $publishRoot
           $stopwatch.Stop()
           if ($LASTEXITCODE -ne 0) { throw 'NativeAOT publish failed' }
-          $publishedExecutables = @(Get-ChildItem -LiteralPath $publishRoot -Filter '*.exe' -File)
+          $publishedExecutables = @(Get-ChildItem -LiteralPath $publishRoot -Filter '*.exe' -File -Recurse)
           if ($publishedExecutables.Count -ne 1) { throw 'NativeAOT publish must contain exactly one executable' }
           if (@(Get-ChildItem -LiteralPath $publishRoot -Filter '*.dll' -File -Recurse).Count -ne 0) {
             throw 'NativeAOT publish contains DLL runtime dependencies'

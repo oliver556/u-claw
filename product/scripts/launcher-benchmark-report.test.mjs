@@ -183,6 +183,10 @@ test("Windows launcher workflow builds measured sidecars and validates every tri
   assert.match(workflowSource, /dotnet[^\n]*--self-test/);
   assert.match(workflowSource, /dotnet publish/);
   assert.match(workflowSource, /PublishAot=true/);
+  assert.match(
+    workflowSource,
+    /publishedExecutables\s*=\s*@\(Get-ChildItem[^\n]*-Filter\s+['"]\*\.exe['"][^\n]*-File[^\n]*-Recurse/,
+  );
   assert.match(workflowSource, /Stopwatch/);
   assert.match(workflowSource, /go version/);
   assert.match(workflowSource, /dotnet --version/);
@@ -217,6 +221,9 @@ test("Windows behavior test covers Task 4 compatibility cases", async () => {
   const source = await readFile(behaviorTestUrl, "utf8");
   assert.match(source, /Iterations['"],\s*['"]7/);
   assert.match(source, /p50Ms[\s\S]*p95Ms/);
+  assert.match(source, /LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT/);
+  assert.match(source, /\$p50\s+-ge\s+220[\s\S]*\$p50\s+-le\s+500/);
+  assert.match(source, /\$p95\s+-ge\s+1850[\s\S]*\$p95\s+-le\s+2400/);
   assert.match(source, /duplicate/i);
   assert.match(source, /null/i);
   assert.match(source, /relative/i);

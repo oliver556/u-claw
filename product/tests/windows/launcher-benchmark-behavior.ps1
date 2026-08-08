@@ -67,6 +67,7 @@ $harness = 'product\tests\windows\launcher-benchmark.ps1'
 $goExe = Join-Path $relativeRoot 'fake-go.exe'
 $dotnetExe = Join-Path $relativeRoot 'fake-dotnet.exe'
 $originalPath = $env:PATH
+$originalTimingRoot = $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT
 $originalCounter = $env:LAUNCHER_BENCHMARK_FAKE_COUNTER
 $originalPidFile = $env:LAUNCHER_BENCHMARK_FAKE_CHILD_PID_FILE
 
@@ -74,6 +75,9 @@ try {
     [void][IO.Directory]::CreateDirectory($absoluteRoot)
     Push-Location $repositoryRoot
     try {
+        & go test .\product\tests\windows\fixtures\fake-launcher.go `
+            .\product\tests\windows\fixtures\fake-launcher_test.go
+        Assert-True ($LASTEXITCODE -eq 0) 'fake candidate tests failed'
         & go build -trimpath -o $goExe .\product\tests\windows\fixtures\fake-launcher.go
         Assert-True ($LASTEXITCODE -eq 0) 'fake candidate build failed'
         Copy-Item -LiteralPath $goExe -Destination $dotnetExe
@@ -90,15 +94,21 @@ try {
             ('"' + $dotnetDirectory + '\"') + [IO.Path]::PathSeparator + $originalPath
 
         $reportPath = Join-Path $relativeRoot 'relative-trial.json'
+        $timingRoot = Join-Path $absoluteRoot 'timing-state'
+        [void][IO.Directory]::CreateDirectory($timingRoot)
+        $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $timingRoot
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe $reportPath $absoluteRoot
+        $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $null
         Assert-True ($result.ExitCode -eq 0) ('relative benchmark failed: ' + $result.Stderr)
         $report = Get-Content -LiteralPath (Join-Path $repositoryRoot $reportPath) -Raw | ConvertFrom-Json
-        foreach ($candidate in @($report.candidates.go, $report.candidates.dotnet)) {
+        foreach ($candidateId in @('go', 'dotnet')) {
+            $invocations = [int]([IO.File]::ReadAllText((Join-Path $timingRoot ($candidateId + '.timing-count'))))
+            Assert-True ($invocations -eq 16) ($candidateId + ' timing sequence was not isolated')
+            $candidate = $report.candidates.$candidateId
             $p50 = [Convert]::ToDouble($candidate.p50Ms, [Globalization.CultureInfo]::InvariantCulture)
             $p95 = [Convert]::ToDouble($candidate.p95Ms, [Globalization.CultureInfo]::InvariantCulture)
-            Assert-True ($p50 -ge 0) 'p50Ms missing'
-            Assert-True ($p95 -ge 0) 'p95Ms missing'
-            Assert-True ($p50 -le $p95) 'nearest-rank percentile order invalid'
+            Assert-True ($p50 -ge 220 -and $p50 -le 500) 'p50Ms is not nearest-rank sample 4'
+            Assert-True ($p95 -ge 1850 -and $p95 -le 2400) 'p95Ms is not nearest-rank sample 7'
         }
 
         $validGoSidecar = [IO.File]::ReadAllText((Join-Path $repositoryRoot ($goExe + '.build.json')))
@@ -142,6 +152,7 @@ try {
 }
 finally {
     $env:PATH = $originalPath
+    $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $originalTimingRoot
     $env:LAUNCHER_BENCHMARK_FAKE_COUNTER = $originalCounter
     $env:LAUNCHER_BENCHMARK_FAKE_CHILD_PID_FILE = $originalPidFile
     if (Test-Path -LiteralPath $absoluteRoot) { Remove-Item -LiteralPath $absoluteRoot -Recurse }
