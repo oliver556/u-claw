@@ -177,33 +177,74 @@ internal static class ManifestValidatorTests
         File.WriteAllBytes(Path.Combine(outsideDirectory.Path, "runtime.pkg"), payload);
         string linkPath = Path.Combine(baseDirectory.Path, "packages");
 
-        using var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = "cmd.exe",
-            ArgumentList = { "/c", "mklink", "/J", linkPath, outsideDirectory.Path },
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        });
-        if (process is null)
-        {
-            return;
-        }
-
-        process.WaitForExit();
-        if (process.ExitCode != 0)
-        {
-            return;
-        }
-
         try
         {
+            if (!TryCreateJunction(linkPath, outsideDirectory.Path))
+            {
+                DeleteDirectoryLinkIfPresent(linkPath);
+                if (!TryCreateDirectorySymbolicLink(linkPath, outsideDirectory.Path))
+                {
+                    throw new InvalidOperationException(
+                        "unable to create Windows junction or directory symbolic link");
+                }
+            }
+
             Throws<PackageValidationException>(() => ManifestValidator.ValidatePackage(
                 baseDirectory.Path,
                 ValidManifest() with { Sha256 = Convert.ToHexString(SHA256.HashData(payload)) }));
         }
         finally
+        {
+            DeleteDirectoryLinkIfPresent(linkPath);
+        }
+    }
+
+    private static bool TryCreateJunction(string linkPath, string targetPath)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath },
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            if (process is null)
+            {
+                return false;
+            }
+
+            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+            Task<string> standardError = process.StandardError.ReadToEndAsync();
+            process.WaitForExit();
+            Task.WaitAll(standardOutput, standardError);
+            return process.ExitCode == 0 && Directory.Exists(linkPath);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return Directory.Exists(linkPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static void DeleteDirectoryLinkIfPresent(string linkPath)
+    {
+        if (Directory.Exists(linkPath))
         {
             Directory.Delete(linkPath);
         }
