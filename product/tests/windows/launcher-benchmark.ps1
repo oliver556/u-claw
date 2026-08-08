@@ -111,6 +111,132 @@ public static class LauncherBuildMetadataParser
 }
 '@
 
+$processJobSource = @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public sealed class LauncherProcessJob : IDisposable
+{
+    private const UInt32 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+    private const Int32 JobObjectExtendedLimitInformation = 9;
+    private IntPtr handle;
+
+    public LauncherProcessJob()
+    {
+        handle = CreateJobObjectW(IntPtr.Zero, null);
+        if (handle == IntPtr.Zero) throw LastWin32Exception();
+
+        var information = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+        information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        int size = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(information, buffer, false);
+            if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformation, buffer, (UInt32)size))
+            {
+                int error = Marshal.GetLastWin32Error();
+                if (CloseHandle(handle)) handle = IntPtr.Zero;
+                throw new Win32Exception(error);
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    public void Assign(IntPtr processHandle)
+    {
+        if (handle == IntPtr.Zero) throw new ObjectDisposedException("LauncherProcessJob");
+        if (!AssignProcessToJobObject(handle, processHandle)) throw LastWin32Exception();
+    }
+
+    public void Dispose()
+    {
+        IntPtr value = handle;
+        if (value != IntPtr.Zero && !CloseHandle(value)) throw LastWin32Exception();
+        handle = IntPtr.Zero;
+        GC.SuppressFinalize(this);
+    }
+
+    ~LauncherProcessJob()
+    {
+        if (handle != IntPtr.Zero) CloseHandle(handle);
+    }
+
+    private static Win32Exception LastWin32Exception()
+    {
+        return new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern IntPtr CreateJobObjectW(IntPtr jobAttributes, string name);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(
+        IntPtr job, Int32 informationClass, IntPtr information, UInt32 informationLength);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    {
+        public Int64 PerProcessUserTimeLimit;
+        public Int64 PerJobUserTimeLimit;
+        public UInt32 LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public UInt32 ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public UInt32 PriorityClass;
+        public UInt32 SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IO_COUNTERS
+    {
+        public UInt64 ReadOperationCount;
+        public UInt64 WriteOperationCount;
+        public UInt64 OtherOperationCount;
+        public UInt64 ReadTransferCount;
+        public UInt64 WriteTransferCount;
+        public UInt64 OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+}
+'@
+
+function Initialize-ProcessJob {
+    if ('LauncherProcessJob' -as [type]) {
+        return
+    }
+    try {
+        Add-Type -TypeDefinition $processJobSource
+    }
+    catch {
+        Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
+    }
+}
+
 function Initialize-BuildMetadataParser {
     if ('LauncherBuildMetadataParser' -as [type]) {
         return
@@ -285,20 +411,33 @@ function Invoke-CapturedProcess {
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $job = $null
     try {
+        Initialize-ProcessJob
+        try {
+            $job = [LauncherProcessJob]::new()
+        }
+        catch {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
+        }
         if (-not $process.Start()) {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_FAILED'
+        }
+        try {
+            $job.Assign($process.Handle)
+        }
+        catch {
+            try { Stop-TimedOutProcess $process 5000 } catch {}
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
         }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutMs)) {
-            Stop-TimedOutProcess $process 5000
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_TIMEOUT'
         }
         $CaptureTimeoutMs = 5000
         $captureTasks = [Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
         if (-not [Threading.Tasks.Task]::WaitAll($captureTasks, $CaptureTimeoutMs)) {
-            Stop-TimedOutProcess $process 5000
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_CAPTURE_TIMEOUT'
         }
         $stopwatch.Stop()
@@ -311,7 +450,14 @@ function Invoke-CapturedProcess {
     }
     finally {
         $stopwatch.Stop()
+        $jobDisposeFailed = $false
+        if ($null -ne $job) {
+            try { $job.Dispose() } catch { $jobDisposeFailed = $true }
+        }
         $process.Dispose()
+        if ($jobDisposeFailed) {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED'
+        }
     }
 }
 
@@ -361,11 +507,16 @@ function Stop-TimedOutProcess {
         [Parameter(Mandatory)][int]$KillTimeoutMs
     )
 
-    $killed = Invoke-Taskkill $Process.Id $KillTimeoutMs
-    if (-not $killed -and -not $Process.HasExited) {
-        Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
+    try {
+        $killed = Invoke-Taskkill $Process.Id $KillTimeoutMs
+        if (-not $killed -and -not $Process.HasExited) {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
+        }
+        if (-not $Process.WaitForExit($KillTimeoutMs)) {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
+        }
     }
-    if (-not $Process.WaitForExit($KillTimeoutMs)) {
+    catch {
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
     }
 }

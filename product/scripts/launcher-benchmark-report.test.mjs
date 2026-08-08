@@ -170,11 +170,33 @@ test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH 
   assert.match(source, /WaitForExit\(\$KillTimeoutMs\)/);
   assert.match(source, /\[Threading\.Tasks\.Task\]::WaitAll\([^\r\n]*\$CaptureTimeoutMs\)/);
   assert.doesNotMatch(source, /WaitForExit\(\s*\)/);
-  assert.match(source, /PROCESS_CAPTURE_TIMEOUT[\s\S]{0,240}Stop-TimedOutProcess|Stop-TimedOutProcess[\s\S]{0,240}PROCESS_CAPTURE_TIMEOUT/);
+  assert.doesNotMatch(source, /PROCESS_CAPTURE_TIMEOUT[\s\S]{0,240}Stop-TimedOutProcess|Stop-TimedOutProcess[\s\S]{0,240}PROCESS_CAPTURE_TIMEOUT/);
   assert.match(source, /\[Diagnostics\.Stopwatch\]::StartNew\(\)/);
   assert.match(source, /finally[\s\S]{0,240}Remove-Item\s+-LiteralPath/i);
   assert.match(source, /finally[\s\S]{0,180}\$env:PATH\s*=\s*\$originalPath/i);
   assert.doesNotMatch(source, /&\s*\$[^\r\n]*2>&1|Invoke-Expression|\.\.\//i);
+});
+
+test("PowerShell harness contains descendants in a kill-on-close Windows Job Object", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  for (const api of [
+    "CreateJobObjectW",
+    "SetInformationJobObject",
+    "AssignProcessToJobObject",
+    "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+    "CloseHandle",
+  ]) {
+    assert.match(source, new RegExp(api));
+  }
+  assert.match(source, /CreateJobObjectW[\s\S]{0,140}ExactSpelling\s*=\s*true|ExactSpelling\s*=\s*true[\s\S]{0,140}CreateJobObjectW/);
+  assert.match(source, /LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED/);
+  assert.match(source, /function Initialize-ProcessJob[\s\S]{0,500}Add-Type[\s\S]{0,300}catch[\s\S]{0,200}PROCESS_JOB_FAILED/);
+  assert.match(source, /\$process\.Start\(\)[\s\S]{0,500}\$job\.Assign\(\$process\.Handle\)[\s\S]{0,500}ReadToEndAsync\(\)/);
+  assert.match(source, /\$job\s*=\s*\[LauncherProcessJob\]::new\(\)[\s\S]{0,200}catch[\s\S]{0,200}PROCESS_JOB_FAILED/);
+  assert.match(source, /\$job\.Assign\(\$process\.Handle\)[\s\S]{0,300}Stop-TimedOutProcess[\s\S]{0,200}PROCESS_JOB_FAILED/);
+  assert.match(source, /finally[\s\S]{0,500}\$job\.Dispose\(\)[\s\S]{0,300}\$process\.Dispose\(\)/);
+  assert.match(source, /\$job\.Dispose\(\)[\s\S]{0,200}\$jobDisposeFailed\s*=\s*\$true[\s\S]{0,300}PROCESS_JOB_FAILED/);
+  assert.doesNotMatch(source, /PROCESS_CAPTURE_TIMEOUT[\s\S]{0,240}Stop-TimedOutProcess/);
 });
 
 test("PowerShell harness preserves each candidate's exact newline contract", async () => {
