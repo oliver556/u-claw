@@ -23,8 +23,7 @@ function runtimeOptions(root, runtime, overrides = {}) {
     inputDir: runtime,
     outputFile: path.join(root, "runtime.pkg"),
     productVersion: "0.1.0",
-    runtimeVersion: "2026.8.1",
-    runtimeId: "openclaw-2026.8.1-win-x64",
+    runtimeId: "openclaw-2026.7.1-2-win-x64",
     entrypoint: "electron/electron.exe",
     entryArgs: ["resources/app.asar"],
     ...overrides,
@@ -40,6 +39,14 @@ test("buildRuntime rejects missing input and entrypoint", async () => {
   await assert.rejects(
     buildRuntime(runtimeOptions(root, runtime, { entrypoint: "missing.exe" })),
     /entrypoint/i,
+  );
+});
+
+test("buildRuntime rejects a runtime id that disagrees with canonical pins", async () => {
+  const { root, runtime } = await fixtureRuntime();
+  await assert.rejects(
+    buildRuntime(runtimeOptions(root, runtime, { runtimeId: "openclaw-latest-win-x64" })),
+    /runtimeId must be openclaw-2026\.7\.1-2-win-x64/u,
   );
 });
 
@@ -73,6 +80,11 @@ test("buildRuntime creates a strict manifest from real package bounds", async ()
   const manifest = await buildRuntime(options);
   assert.equal(validateRuntimeManifest(manifest), manifest);
   assert.equal(manifest.runtimeArchive, "runtime.pkg");
+  assert.equal(manifest.nodeVersion, "24.15.0");
+  assert.equal(manifest.electronVersion, "40.10.6");
+  assert.equal(manifest.runtimeVersion, "2026.7.1-2");
+  assert.equal(manifest.targetPlatform, "win32");
+  assert.equal(manifest.targetArch, "x64");
   assert.equal(manifest.fileCount, 2);
   assert.equal(manifest.unpackedBytes, Buffer.byteLength("launcherapplication"));
   assert.equal(manifest.runtimeBytes, (await stat(options.outputFile)).size);

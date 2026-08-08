@@ -65,7 +65,7 @@ $manifestPath = Join-Path $buildRoot 'version.json'
 $unicodePrefix = ([string][char]0x4E2D) + ([string][char]0x6587)
 $releaseRoot = Join-Path $workRoot ($unicodePrefix + ' U disk')
 $localAppData = Join-Path $workRoot 'Local App Data'
-$runtimeId = 'fixture-2026.8.1-win-x64'
+$runtimeId = 'openclaw-2026.7.1-2-win-x64'
 $cachePath = Join-Path (Join-Path (Join-Path $localAppData 'U-Claw') 'runtime') $runtimeId
 $cacheMarker = Join-Path $cachePath '.uclaw-runtime.json'
 $launcher = Join-Path $releaseRoot 'U-Claw.exe'
@@ -93,7 +93,6 @@ try {
         --input $runtimeSource `
         --output $runtimePackage `
         --product-version '0.1.0' `
-        --runtime-version '2026.8.1' `
         --runtime-id $runtimeId `
         --entrypoint 'electron/electron.exe')
     Assert-True ($LASTEXITCODE -eq 0) 'BUILD_RUNTIME_FAILED'

@@ -10,8 +10,12 @@ function validManifest(overrides = {}) {
   return {
     schemaVersion: 1,
     productVersion: "0.1.0",
+    nodeVersion: "24.15.0",
+    electronVersion: "40.10.6",
     runtimeVersion: "2026.7.1-2",
     runtimeId: "openclaw-2026.7.1-2-win-x64",
+    targetPlatform: "win32",
+    targetArch: "x64",
     runtimeArchive: "runtime.pkg",
     runtimeSha256: "a".repeat(64),
     runtimeBytes: 1024,

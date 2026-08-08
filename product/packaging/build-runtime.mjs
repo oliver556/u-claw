@@ -8,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   open,
+  readFile,
   readdir,
   rm,
 } from "node:fs/promises";
@@ -22,7 +23,15 @@ import {
   validateRuntimeManifest,
 } from "../scripts/runtime-manifest.mjs";
 
+const runtimeVersions = JSON.parse(
+  await readFile(new URL("../runtime-versions.json", import.meta.url), "utf8"),
+);
+
 export async function buildRuntime(options) {
+  const expectedRuntimeId = runtimeVersions.runtimeId;
+  if (options.runtimeId !== expectedRuntimeId) {
+    throw new Error(`runtimeId must be ${expectedRuntimeId}`);
+  }
   const inputDir = path.resolve(options.inputDir);
   const outputFile = path.resolve(options.outputFile);
   await requireMissing(outputFile, "runtime output already exists");
@@ -40,8 +49,12 @@ export async function buildRuntime(options) {
   const provisionalManifest = {
     schemaVersion: 1,
     productVersion: options.productVersion,
-    runtimeVersion: options.runtimeVersion,
+    nodeVersion: runtimeVersions.node,
+    electronVersion: runtimeVersions.electron,
+    runtimeVersion: runtimeVersions.openclaw,
     runtimeId: options.runtimeId,
+    targetPlatform: runtimeVersions.targetPlatform,
+    targetArch: runtimeVersions.targetArch,
     runtimeArchive: "runtime.pkg",
     runtimeSha256: "0".repeat(64),
     runtimeBytes: 1,
@@ -160,7 +173,6 @@ async function runCLI() {
       input: { type: "string" },
       output: { type: "string" },
       "product-version": { type: "string" },
-      "runtime-version": { type: "string" },
       "runtime-id": { type: "string" },
       entrypoint: { type: "string" },
       "entry-arg": { type: "string", multiple: true, default: [] },
@@ -170,7 +182,6 @@ async function runCLI() {
     inputDir: values.input,
     outputFile: values.output,
     productVersion: values["product-version"],
-    runtimeVersion: values["runtime-version"],
     runtimeId: values["runtime-id"],
     entrypoint: values.entrypoint,
     entryArgs: values["entry-arg"],

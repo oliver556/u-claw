@@ -41,7 +41,7 @@ test("portable launcher workflow builds windowsgui and runs both PowerShell gate
 
 test("portable launcher artifact contains diagnostics only", async () => {
   const source = await readFile(workflowUrl, "utf8");
-  const upload = source.slice(source.indexOf("uses: actions/upload-artifact@v4"));
+  const upload = source.slice(source.search(/uses: actions\/upload-artifact@[0-9a-f]{40}/u));
   assert.match(upload, /name:\s*portable-launcher-diagnostics/u);
   assert.match(upload, /product\/\.portable-launcher\/diagnostics\/\*\.json/u);
   assert.doesNotMatch(upload, /runtime\.pkg|version\.json|U-Claw\.exe|\.uclaw[\\/]data/iu);
