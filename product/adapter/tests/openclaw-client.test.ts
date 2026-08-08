@@ -482,6 +482,9 @@ describe("OpenClawClient", () => {
     transport.fixtures.set("exec.approval.resolve", { ok: true });
     transport.fixtures.set("plugin.approval.resolve", { ok: true });
     transport.fixtures.set("sessions.patch", { ok: true, key: "session-1" });
+    transport.fixtures.set("sessions.list", {
+      sessions: [{ key: "session-1", modelProvider: "provider", model: "model-1" }],
+    });
     const execOther = structuredClone(approvals.exec.allowOnce.event.payload);
     execOther.id = "exec-other-session";
     execOther.request.sessionKey = "agent:dev:other";
@@ -526,6 +529,59 @@ describe("OpenClawClient", () => {
       { method: "exec.approval.resolve", params: { id: execId, decision: "allow-once" } },
       { method: "plugin.approval.resolve", params: { id: pluginId, decision: "deny" } },
       { method: "sessions.patch", params: { key: "session-1", model: "provider/model-1" } },
+      { method: "sessions.list", params: {} },
+    ]);
+  });
+
+  it("verifies a session model against the locked sessions.patch readback", async () => {
+    const patchFixture = contractFixture("sessions.patch.json");
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.patch");
+    transport.fixtures.set("sessions.patch", patchFixture.model.responseFrame.payload);
+    transport.fixtures.set("sessions.list", patchFixture.modelReadback.responseFrame.payload);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await client.models.selectForSession("agent:dev:main", "contract/contract-alt-model");
+
+    expect(transport.requests).toEqual([
+      { method: "sessions.patch", params: patchFixture.model.requestFrame.params },
+      { method: "sessions.list", params: patchFixture.modelReadback.requestFrame.params },
+    ]);
+  });
+
+  it("reports MODEL_UNAVAILABLE when sessions.patch accepts but readback has another model", async () => {
+    const patchFixture = contractFixture("sessions.patch.json");
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.patch");
+    transport.fixtures.set("sessions.patch", patchFixture.model.responseFrame.payload);
+    const mismatchedReadback = structuredClone(patchFixture.modelReadback.responseFrame.payload);
+    mismatchedReadback.sessions[0].model = "contract-other-model";
+    transport.fixtures.set("sessions.list", mismatchedReadback);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const error = await client.models.selectForSession("agent:dev:main", "contract/contract-alt-model").catch((reason: unknown) => reason) as { uclawError: unknown };
+
+    expect(UClawErrorSchema.parse(error.uclawError)).toMatchObject({ code: "MODEL_UNAVAILABLE", retryable: false });
+    expect(transport.requests).toEqual([
+      { method: "sessions.patch", params: patchFixture.model.requestFrame.params },
+      { method: "sessions.list", params: patchFixture.modelReadback.requestFrame.params },
+    ]);
+  });
+
+  it("reports MODEL_UNAVAILABLE when sessions.patch rejects a selected model", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.patch");
+    transport.requestGates.set("sessions.patch", Promise.reject(new RpcRemoteError("INVALID_REQUEST", "Selected model is unavailable")));
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const error = await client.models.selectForSession("agent:dev:main", "contract/missing-model").catch((reason: unknown) => reason) as { uclawError: unknown };
+
+    expect(UClawErrorSchema.parse(error.uclawError)).toMatchObject({ code: "MODEL_UNAVAILABLE", retryable: false });
+    expect(transport.requests).toEqual([
+      { method: "sessions.patch", params: { key: "agent:dev:main", model: "contract/missing-model" } },
     ]);
   });
 

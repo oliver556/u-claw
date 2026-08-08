@@ -134,6 +134,7 @@ export class MockUClawClient implements UClawClient {
         "sessions.patch",
         "chat.history", "chat.message.get", "chat.send", "chat.abort",
         "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
+        "sessions.patch",
       ],
       events: ["chat"],
       features: { attachments: false, approvalResolve: false },
@@ -251,7 +252,21 @@ export class MockUClawClient implements UClawClient {
     resolvePlugin: async () => this.unsupported("plugin.approval.resolve"),
   };
 
-  readonly models: UClawClient["models"] = { list: async () => this.unsupported("models.list"), selectForSession: async () => this.unsupported("sessions.patch.model") };
+  readonly models: UClawClient["models"] = {
+    list: async () => this.unsupported("models.list"),
+    selectForSession: async (sessionId, modelId) => {
+      const sessionIndex = this.sessionItems.findIndex((session) => session.id === sessionId);
+      const session = this.requireSession(sessionId);
+      const separator = modelId.indexOf("/");
+      const providerId = separator > 0 ? modelId.slice(0, separator) : undefined;
+      const label = separator > 0 ? modelId.slice(separator + 1) : modelId;
+      this.sessionItems[sessionIndex] = SessionSchema.parse({
+        ...session,
+        model: { id: modelId, label, ...(providerId === undefined ? {} : { providerId }) },
+        updatedAt: this.clock.now(),
+      });
+    },
+  };
   readonly skills: UClawClient["skills"] = { list: async () => this.unsupported("skills.status") };
   readonly channels: UClawClient["channels"] = { list: async () => this.unsupported("channels.status") };
   readonly files: UClawClient["files"] = { list: async () => this.unsupported("files.list"), readText: async () => this.unsupported("files.readText") };
