@@ -1,4 +1,6 @@
 import {
+  AttachmentIpcRequestSchema,
+  AttachmentIpcResponseSchema,
   ClientIpcRequestSchema,
   IpcEventSchema,
   IpcResponseSchema,
@@ -11,6 +13,7 @@ import {
 
 import {
   CLIENT_IPC_CHANNEL,
+  ATTACHMENT_IPC_CHANNEL,
   CLIENT_IPC_EVENT_CHANNEL,
   WINDOW_MAXIMIZED_EVENT_CHANNEL,
   WINDOW_IPC_CHANNEL,
@@ -58,6 +61,14 @@ export function installPreloadBridge({
     const response = await ipcRenderer.invoke(CLIENT_IPC_CHANNEL, request);
     return validateCorrelatedResponse(response, request);
   };
+  const invokeAttachments = async (payload: unknown) => {
+    const request = AttachmentIpcRequestSchema.parse(payload);
+    const response = AttachmentIpcResponseSchema.parse(await ipcRenderer.invoke(ATTACHMENT_IPC_CHANNEL, request));
+    if (response.method !== request.method || response.requestId !== request.requestId) {
+      throw new Error("IPC response does not match its request.");
+    }
+    return response;
+  };
   const subscribe = (listener: (event: IpcEvent) => void): (() => void) => {
     const receive = (_event: unknown, payload: unknown): void => {
       const parsed = IpcEventSchema.safeParse(payload);
@@ -85,5 +96,6 @@ export function installPreloadBridge({
   contextBridge.exposeInMainWorld("uclaw", Object.freeze({
     window: Object.freeze({ invoke: invokeWindow, onMaximizedChange }),
     client: Object.freeze({ invoke: invokeClient, subscribe }),
+    attachments: Object.freeze({ invoke: invokeAttachments }),
   }));
 }
