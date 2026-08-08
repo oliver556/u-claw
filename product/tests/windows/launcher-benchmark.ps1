@@ -28,6 +28,101 @@ class LauncherBenchmarkError : System.Exception {
     }
 }
 
+$metadataParserSource = @'
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Runtime.Serialization.Json;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
+
+public sealed class LauncherBuildMetadata
+{
+    public int SchemaVersion { get; set; }
+    public string Candidate { get; set; }
+    public string CommitSha { get; set; }
+    public double BuildMs { get; set; }
+    public string ToolchainVersion { get; set; }
+}
+
+public static class LauncherBuildMetadataParser
+{
+    public static LauncherBuildMetadata Parse(string path, string expectedCandidate)
+    {
+        XElement root;
+        using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        using (XmlDictionaryReader reader = JsonReaderWriterFactory.CreateJsonReader(
+            stream, Encoding.UTF8, XmlDictionaryReaderQuotas.Max, null))
+        {
+            root = XElement.Load(reader, LoadOptions.None);
+        }
+
+        if (JsonType(root) != "object") throw new FormatException();
+        var members = new Dictionary<string, XElement>(StringComparer.Ordinal);
+        foreach (XElement element in root.Elements())
+        {
+            string name = element.Name.LocalName;
+            if (members.ContainsKey(name)) throw new FormatException("duplicate member");
+            members.Add(name, element);
+        }
+
+        string[] expected = { "schemaVersion", "candidate", "commitSha", "buildMs", "toolchainVersion" };
+        if (members.Count != expected.Length) throw new FormatException();
+        foreach (string name in expected)
+        {
+            if (!members.ContainsKey(name)) throw new FormatException();
+        }
+
+        int schemaVersion;
+        double buildMs;
+        if (JsonType(members["schemaVersion"]) != "number" ||
+            !Int32.TryParse(members["schemaVersion"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out schemaVersion) ||
+            schemaVersion != 1 ||
+            JsonType(members["candidate"]) != "string" || members["candidate"].Value != expectedCandidate ||
+            JsonType(members["commitSha"]) != "string" ||
+            !Regex.IsMatch(members["commitSha"].Value, "^[0-9a-f]{40}$", RegexOptions.CultureInvariant) ||
+            JsonType(members["buildMs"]) != "number" ||
+            !Double.TryParse(members["buildMs"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out buildMs) ||
+            Double.IsNaN(buildMs) || Double.IsInfinity(buildMs) || buildMs < 0 ||
+            JsonType(members["toolchainVersion"]) != "string" ||
+            String.IsNullOrWhiteSpace(members["toolchainVersion"].Value))
+        {
+            throw new FormatException();
+        }
+
+        return new LauncherBuildMetadata
+        {
+            SchemaVersion = schemaVersion,
+            Candidate = members["candidate"].Value,
+            CommitSha = members["commitSha"].Value,
+            BuildMs = buildMs,
+            ToolchainVersion = members["toolchainVersion"].Value,
+        };
+    }
+
+    private static string JsonType(XElement element)
+    {
+        XAttribute attribute = element.Attribute("type");
+        return attribute == null ? "string" : attribute.Value;
+    }
+}
+'@
+
+function Initialize-BuildMetadataParser {
+    if ('LauncherBuildMetadataParser' -as [type]) {
+        return
+    }
+    $metadataParserReferences = @(
+        [System.Text.RegularExpressions.Regex].Assembly.Location,
+        [System.Runtime.Serialization.Json.JsonReaderWriterFactory].Assembly.Location,
+        [System.Xml.Linq.XElement].Assembly.Location
+    ) | Select-Object -Unique
+    Add-Type -TypeDefinition $metadataParserSource -ReferencedAssemblies $metadataParserReferences
+}
+
 function Throw-BenchmarkError {
     param([Parameter(Mandatory)][string]$Code)
     throw [LauncherBenchmarkError]::new($Code)
@@ -47,7 +142,7 @@ function Get-CanonicalAbsolutePath {
         if ([IO.Path]::IsPathRooted($InputPath)) {
             return [IO.Path]::GetFullPath($InputPath)
         }
-        return [IO.Path]::GetFullPath($InputPath, $workingDirectory)
+        return [IO.Path]::GetFullPath([IO.Path]::Combine($workingDirectory, $InputPath))
     }
     catch {
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_UNSAFE_PATH'
@@ -113,21 +208,6 @@ function Assert-SafeOutputPath {
     return $absolutePath
 }
 
-function Test-FiniteNumber {
-    param([Parameter(Mandatory)]$Value)
-
-    $numericTypeCodes = @(
-        [TypeCode]::Byte, [TypeCode]::SByte, [TypeCode]::Int16, [TypeCode]::UInt16,
-        [TypeCode]::Int32, [TypeCode]::UInt32, [TypeCode]::Int64, [TypeCode]::UInt64,
-        [TypeCode]::Single, [TypeCode]::Double, [TypeCode]::Decimal
-    )
-    if ([Convert]::GetTypeCode($Value) -notin $numericTypeCodes) {
-        return $false
-    }
-    $number = [double]$Value
-    return -not [double]::IsNaN($number) -and -not [double]::IsInfinity($number) -and $number -ge 0
-}
-
 function Read-BuildMetadata {
     param(
         [Parameter(Mandatory)][string]$ExecutablePath,
@@ -136,32 +216,50 @@ function Read-BuildMetadata {
 
     $sidecarPath = $ExecutablePath + '.build.json'
     try {
+        Initialize-BuildMetadataParser
         $sidecarItem = Get-Item -LiteralPath $sidecarPath
         if ($sidecarItem.PSProvider.Name -ne 'FileSystem' -or $sidecarItem.PSIsContainer) {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
         }
         Assert-NoReparsePath $sidecarItem
-        $metadata = [IO.File]::ReadAllText($sidecarItem.FullName) | ConvertFrom-Json
-    }
-    catch [LauncherBenchmarkError] {
-        throw
+        return [LauncherBuildMetadataParser]::Parse($sidecarItem.FullName, $Candidate)
     }
     catch {
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
     }
+}
 
-    $expectedNames = @('buildMs', 'candidate', 'commitSha', 'schemaVersion', 'toolchainVersion')
-    $actualNames = @($metadata.PSObject.Properties.Name | Sort-Object)
-    if ([string]::Join(',', $actualNames) -cne [string]::Join(',', $expectedNames) -or
-        $metadata.schemaVersion -isnot [int64] -and $metadata.schemaVersion -isnot [int32] -or
-        $metadata.schemaVersion -ne 1 -or
-        $metadata.candidate -isnot [string] -or $metadata.candidate -cne $Candidate -or
-        $metadata.commitSha -isnot [string] -or $metadata.commitSha -cnotmatch '^[0-9a-f]{40}$' -or
-        -not (Test-FiniteNumber $metadata.buildMs) -or
-        $metadata.toolchainVersion -isnot [string] -or [string]::IsNullOrWhiteSpace($metadata.toolchainVersion)) {
-        Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
+function ConvertTo-WindowsCommandLineArgument {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Argument)
+
+    if ($Argument.Length -gt 0 -and $Argument -notmatch '[\s"]') {
+        return $Argument
     }
-    return $metadata
+    $builder = New-Object Text.StringBuilder
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Argument.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashes++
+            continue
+        }
+        if ($character -eq '"') {
+            [void]$builder.Append(('\' * ($backslashes * 2 + 1)))
+            [void]$builder.Append('"')
+            $backslashes = 0
+            continue
+        }
+        if ($backslashes -gt 0) {
+            [void]$builder.Append(('\' * $backslashes))
+            $backslashes = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($backslashes -gt 0) {
+        [void]$builder.Append(('\' * ($backslashes * 2)))
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
 }
 
 function Invoke-CapturedProcess {
@@ -178,11 +276,10 @@ function Invoke-CapturedProcess {
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     $startInfo.CreateNoWindow = $true
-    foreach ($argument in $Arguments) {
-        [void]$startInfo.ArgumentList.Add($argument)
-    }
+    $quotedArguments = @($Arguments | ForEach-Object { ConvertTo-WindowsCommandLineArgument $_ })
+    $startInfo.Arguments = [string]::Join(' ', $quotedArguments)
     if ($null -ne $PathOverride) {
-        $startInfo.Environment['PATH'] = $PathOverride
+        $startInfo.EnvironmentVariables['PATH'] = $PathOverride
     }
 
     $process = [Diagnostics.Process]::new()
@@ -201,6 +298,7 @@ function Invoke-CapturedProcess {
         $CaptureTimeoutMs = 5000
         $captureTasks = [Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
         if (-not [Threading.Tasks.Task]::WaitAll($captureTasks, $CaptureTimeoutMs)) {
+            Stop-TimedOutProcess $process 5000
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_CAPTURE_TIMEOUT'
         }
         $stopwatch.Stop()
@@ -217,19 +315,55 @@ function Invoke-CapturedProcess {
     }
 }
 
+function Invoke-Taskkill {
+    param(
+        [Parameter(Mandatory)][int]$ProcessId,
+        [Parameter(Mandatory)][int]$TimeoutMs
+    )
+
+    $taskkillPath = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    $startInfo = New-Object Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $taskkillPath
+    $startInfo.Arguments = '/PID ' + $ProcessId + ' /T /F'
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    $killer = New-Object Diagnostics.Process
+    $killer.StartInfo = $startInfo
+    try {
+        if (-not $killer.Start()) {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
+        }
+        $stdoutTask = $killer.StandardOutput.ReadToEndAsync()
+        $stderrTask = $killer.StandardError.ReadToEndAsync()
+        if (-not $killer.WaitForExit($TimeoutMs)) {
+            try { $killer.Kill() } catch { Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED' }
+            if (-not $killer.WaitForExit(1000)) {
+                Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
+            }
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
+        }
+        $tasks = [Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
+        if (-not [Threading.Tasks.Task]::WaitAll($tasks, 1000)) {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
+        }
+        return $killer.ExitCode -eq 0
+    }
+    finally {
+        $killer.Dispose()
+    }
+}
+
 function Stop-TimedOutProcess {
     param(
         [Parameter(Mandatory)][Diagnostics.Process]$Process,
         [Parameter(Mandatory)][int]$KillTimeoutMs
     )
 
-    try {
-        $Process.Kill($true)
-    }
-    catch {
-        if (-not $Process.HasExited) {
-            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
-        }
+    $killed = Invoke-Taskkill $Process.Id $KillTimeoutMs
+    if (-not $killed -and -not $Process.HasExited) {
+        Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
     }
     if (-not $Process.WaitForExit($KillTimeoutMs)) {
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
@@ -264,8 +398,14 @@ function Resolve-CommitSha {
 function Get-Sha256Hex {
     param([Parameter(Mandatory)][byte[]]$Bytes)
 
-    $digest = [Security.Cryptography.SHA256]::HashData($Bytes)
-    return [Convert]::ToHexString($digest).ToLowerInvariant()
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $hasher.ComputeHash($Bytes)
+        return [BitConverter]::ToString($digest).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $hasher.Dispose()
+    }
 }
 
 function Write-Utf8Json {
@@ -342,15 +482,44 @@ function Test-ExpectedInvocation {
     }
 }
 
+function Get-NormalizedPathSegment {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Segment)
+
+    $trimmed = $Segment.Trim().Trim('"')
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        return $null
+    }
+    try {
+        $expanded = [Environment]::ExpandEnvironmentVariables($trimmed)
+        $normalized = [IO.Path]::GetFullPath($expanded)
+        $root = [IO.Path]::GetPathRoot($normalized)
+        if ($normalized -cne $root) {
+            $normalized = $normalized.TrimEnd('\', '/')
+        }
+        return $normalized
+    }
+    catch {
+        return $null
+    }
+}
+
 function Get-SdkFreePath {
-    $sdkDirectories = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $sdkDirectories = @()
     foreach ($commandName in @('go', 'dotnet')) {
         @(Get-Command $commandName -CommandType Application -All -ErrorAction SilentlyContinue) | ForEach-Object {
-            [void]$sdkDirectories.Add([IO.Path]::GetDirectoryName($_.Source))
+            $directory = Get-NormalizedPathSegment ([IO.Path]::GetDirectoryName($_.Source))
+            if ($null -ne $directory -and -not ($sdkDirectories -contains $directory)) {
+                $sdkDirectories += $directory
+            }
         }
     }
     $separator = [IO.Path]::PathSeparator
-    $segments = @($env:PATH.Split($separator) | Where-Object { -not $sdkDirectories.Contains($_) })
+    $segments = @($env:PATH.Split($separator) | ForEach-Object {
+        $normalized = Get-NormalizedPathSegment $_
+        if ($null -ne $normalized -and -not ($sdkDirectories -contains $normalized)) {
+            $normalized
+        }
+    })
     return [string]::Join($separator, $segments)
 }
 
@@ -360,6 +529,10 @@ function Invoke-WithoutSdkPath {
     $originalPath = $env:PATH
     try {
         $env:PATH = Get-SdkFreePath
+        $remainingSdkCommands = @(Get-Command @('go', 'dotnet') -CommandType Application -ErrorAction SilentlyContinue)
+        if ($remainingSdkCommands.Count -ne 0) {
+            return $false
+        }
         return & $Operation $env:PATH
     }
     finally {
@@ -417,17 +590,6 @@ function Invoke-MandatoryCases {
     }
     $cases['cli-invalid-arguments'] = Test-ExpectedInvocation $Candidate @('--private-secret-path') 1 '' ('E_ARGUMENTS' + $newline) $null
     return $cases
-}
-
-function Get-Median {
-    param([Parameter(Mandatory)][double[]]$Values)
-
-    $sorted = @($Values | Sort-Object)
-    $middle = [int]($sorted.Count / 2)
-    if ($sorted.Count % 2 -eq 0) {
-        return ($sorted[$middle - 1] + $sorted[$middle]) / 2
-    }
-    return $sorted[$middle]
 }
 
 function Get-Percentile {
@@ -547,7 +709,7 @@ function Invoke-LauncherBenchmark {
             $candidateReports[$candidate.Id] = [ordered]@{
                 exeBytes = [int64](Get-Item -LiteralPath $candidate.Executable).Length
                 buildMs = [double]$candidate.Metadata.buildMs
-                p50Ms = [Math]::Round((Get-Median $timings[$candidate.Id].ToArray()), 6)
+                p50Ms = [Math]::Round((Get-Percentile $timings[$candidate.Id].ToArray() 0.50), 6)
                 p95Ms = [Math]::Round((Get-Percentile $timings[$candidate.Id].ToArray() 0.95), 6)
                 mandatoryPassed = $mandatoryPassed
                 cases = $cases

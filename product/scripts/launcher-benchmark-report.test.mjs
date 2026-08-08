@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -53,6 +53,11 @@ function reports(overrides = {}) {
 
 function runCli(...args) {
   return spawnSync(process.execPath, [scriptPath, ...args], { encoding: "utf8" });
+}
+
+function nearestRank(values, percentile) {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.max(0, Math.ceil(percentile * sorted.length) - 1)];
 }
 
 test("accepts a complete trial report", () => {
@@ -109,14 +114,47 @@ test("PowerShell harness consumes strict auditable build sidecars", async () => 
   for (const field of ["schemaVersion", "candidate", "commitSha", "buildMs", "toolchainVersion"]) {
     assert.match(source, new RegExp(`['"]${field}['"]`));
   }
-  assert.match(source, /\[double\]::IsNaN/);
-  assert.match(source, /\[double\]::IsInfinity/);
-  assert.match(source, /\[Convert\]::GetTypeCode/);
-  assert.doesNotMatch(source, /-is\s+\$_/);
+  assert.match(source, /IsNaN/);
+  assert.match(source, /IsInfinity/);
   assert.match(source, /\^\[0-9a-f\]\{40\}\$/);
   assert.match(source, /GITHUB_SHA/);
   assert.match(source, /rev-parse[\s\S]{0,80}HEAD/);
+  assert.match(source, /JsonReaderWriterFactory\.CreateJsonReader/);
+  assert.match(source, /members\.ContainsKey/);
+  assert.match(source, /Add-Type/);
+  assert.match(source, /function Initialize-BuildMetadataParser/);
+  assert.match(source, /try\s*\{[\s\S]{0,600}Initialize-BuildMetadataParser[\s\S]{0,600}LauncherBuildMetadataParser\]::Parse/);
+  assert.match(source, /JsonReaderWriterFactory\]\.Assembly\.Location/);
+  assert.match(source, /XElement\]\.Assembly\.Location/);
+  assert.doesNotMatch(source, /'System\.Runtime\.Serialization\.dll'|'System\.Xml\.Linq\.dll'/);
+  assert.doesNotMatch(source, /ReadAllText\([^\r\n]*\)\s*\|\s*ConvertFrom-Json/);
   assert.doesNotMatch(source, /LastWriteTime|CreationTime|buildMs\s*=\s*0\b/);
+});
+
+test("PowerShell harness stays compatible with Windows PowerShell 5.1", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /function ConvertTo-WindowsCommandLineArgument/);
+  assert.match(source, /\.Arguments\s*=\s*\[string\]::Join/);
+  assert.match(source, /\.EnvironmentVariables\[['"]PATH['"]\]/);
+  assert.match(source, /\[Security\.Cryptography\.SHA256\]::Create\(\)/);
+  assert.match(source, /\[BitConverter\]::ToString/);
+  assert.match(source, /\$backslashes \* 2 \+ 1/);
+  assert.match(source, /\$backslashes \* 2/);
+  assert.doesNotMatch(source, /GetFullPath\(\$InputPath\s*,|\.ArgumentList\b|\.Environment\[['"]PATH['"]\]|\.Kill\(\$true\)|SHA256\]::HashData|\[Convert\]::ToHexString/);
+});
+
+test("future Windows harness workflow must gate PowerShell 5.1 and pwsh", async (t) => {
+  const directoryUrl = new URL("../../.github/workflows/", import.meta.url);
+  const workflowNames = (await readdir(directoryUrl)).filter((name) => name.endsWith(".yml"));
+  const workflowSource = (await Promise.all(
+    workflowNames.map((name) => readFile(new URL(name, directoryUrl), "utf8")),
+  )).join("\n");
+  if (!workflowSource.includes("launcher-benchmark.ps1")) {
+    t.skip("Task 5 has not wired the Windows behavior gate yet");
+    return;
+  }
+  assert.match(workflowSource, /shell:\s*powershell\b/);
+  assert.match(workflowSource, /shell:\s*pwsh\b/);
 });
 
 test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH restoration", async () => {
@@ -126,13 +164,13 @@ test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH 
   assert.match(source, /RedirectStandardError\s*=\s*\$true/i);
   assert.match(source, /ReadToEndAsync\(\)/);
   assert.match(source, /WaitForExit\(\$TimeoutMs\)/);
-  assert.match(source, /Kill\(\$true\)/);
+  assert.match(source, /taskkill\.exe/);
+  assert.match(source, /\/PID[\s\S]{0,100}\/T[\s\S]{0,100}\/F/);
   assert.match(source, /LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED/);
   assert.match(source, /WaitForExit\(\$KillTimeoutMs\)/);
   assert.match(source, /\[Threading\.Tasks\.Task\]::WaitAll\([^\r\n]*\$CaptureTimeoutMs\)/);
   assert.doesNotMatch(source, /WaitForExit\(\s*\)/);
-  assert.doesNotMatch(source, /\$Process\.Kill\(\s*\)/);
-  assert.doesNotMatch(source, /Kill\(\$true\)\s*\}\s*catch\s*\{\s*\}/);
+  assert.match(source, /PROCESS_CAPTURE_TIMEOUT[\s\S]{0,240}Stop-TimedOutProcess|Stop-TimedOutProcess[\s\S]{0,240}PROCESS_CAPTURE_TIMEOUT/);
   assert.match(source, /\[Diagnostics\.Stopwatch\]::StartNew\(\)/);
   assert.match(source, /finally[\s\S]{0,240}Remove-Item\s+-LiteralPath/i);
   assert.match(source, /finally[\s\S]{0,180}\$env:PATH\s*=\s*\$originalPath/i);
@@ -151,19 +189,21 @@ test("PowerShell harness makes percentile and iteration policy auditable", async
   const source = await readFile(harnessUrl, "utf8");
   assert.match(source, /function Get-Percentile/);
   assert.match(source, /\[Math\]::Ceiling\(\$Percentile\s*\*\s*\$sorted\.Count\)\s*-\s*1/);
-  assert.match(source, /function Get-Median/);
-  assert.match(source, /\(\$sorted\[\$middle\s*-\s*1\]\s*\+\s*\$sorted\[\$middle\]\)\s*\/\s*2/);
+  assert.match(source, /p50Ms\s*=\s*\[Math\]::Round\(\(Get-Percentile[^\r\n]+0\.50\)/);
   assert.match(source, /for\s*\(\$iteration\s*=\s*0;\s*\$iteration\s*-lt\s*\$Iterations/i);
   assert.match(source, /\$iteration\s*%\s*2/);
   assert.match(source, /hosted-runner-process-start/);
   assert.doesNotMatch(source, /cold[- ]start/i);
+  const seven = [7, 1, 6, 2, 5, 3, 4];
+  assert.equal(nearestRank(seven, 0.50), 4);
+  assert.equal(nearestRank(seven, 0.95), 7);
 });
 
 test("PowerShell harness validates paths and creates report without overwrite", async () => {
   const source = await readFile(harnessUrl, "utf8");
   assert.match(source, /\[IO\.Path\]::IsPathRooted/);
   assert.match(source, /\$workingDirectory\s*=\s*\(Get-Location\)\.ProviderPath/);
-  assert.match(source, /GetFullPath\(\$InputPath, \$workingDirectory\)/);
+  assert.match(source, /\[IO\.Path\]::Combine\(\$workingDirectory, \$InputPath\)/);
   assert.doesNotMatch(source, /IsNullOrWhiteSpace\(\$InputPath\)[^\r\n]*-not \[IO\.Path\]::IsPathRooted/);
   assert.match(source, /FileAttributes\]::ReparsePoint/);
   assert.match(source, /PSIsContainer/);
@@ -173,6 +213,16 @@ test("PowerShell harness validates paths and creates report without overwrite", 
   assert.match(source, /\[IO\.File\]::Move\(/);
   assert.match(source, /ConvertTo-Json/);
   assert.doesNotMatch(source, /\b-Force\b/);
+});
+
+test("PowerShell harness normalizes PATH entries and proves SDK commands are absent", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /function Get-NormalizedPathSegment/);
+  assert.match(source, /\.Trim\(\)\.Trim\('"'\)/);
+  assert.match(source, /GetFullPath\(\$expanded\)/);
+  assert.match(source, /Get-Command\s+@\(['"]go['"],\s*['"]dotnet['"]\)[^\r\n]*SilentlyContinue/);
+  assert.match(source, /if\s*\(\$remainingSdkCommands\.Count\s+-ne\s+0\)[\s\S]{0,160}return \$false/);
+  assert.match(source, /finally[\s\S]{0,180}\$env:PATH\s*=\s*\$originalPath/);
 });
 
 test("PowerShell harness rejects path, username, and temp disclosures before reporting", async () => {
