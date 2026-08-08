@@ -133,7 +133,7 @@ export class MockUClawClient implements UClawClient {
       openClawVersion: "2026.7.1-2", usb: { state: "available", dataWritable: true, displayName: "U-Claw Data" },
       capabilities,
     };
-    const session = SessionSchema.parse({ id: "session-1", title: "Welcome", createdAt: this.clock.now(), updatedAt: this.clock.now(), pinned: false, status: "idle", revision: "1" });
+    const session = SessionSchema.parse({ id: "session-1", title: "Welcome", createdAt: this.clock.now(), updatedAt: this.clock.now(), pinned: false, status: "idle" });
     this.sessionItems = [session];
     const historySize = Math.max(1, Math.floor(options.historySize ?? 1));
     this.messages.set(session.id, Array.from({ length: historySize }, (_, index) => MessageSchema.parse({
@@ -183,21 +183,22 @@ export class MockUClawClient implements UClawClient {
     list: async (request) => page(this.sessionItems, request),
     get: async (sessionId) => this.requireSession(sessionId),
     create: async (input) => {
-      const session = SessionSchema.parse({ id: `session-${++this.sessionCounter}`, title: input?.title ?? "New session", createdAt: this.clock.now(), updatedAt: this.clock.now(), pinned: false, status: "idle", revision: "1", ...(input?.modelId === undefined ? {} : { model: { id: input.modelId, label: input.modelId } }) });
+      const session = SessionSchema.parse({ id: `session-${++this.sessionCounter}`, title: input?.title ?? "New session", createdAt: this.clock.now(), updatedAt: this.clock.now(), pinned: false, status: "idle", ...(input?.modelId === undefined ? {} : { model: { id: input.modelId, label: input.modelId } }) });
       this.sessionItems.push(session);
       this.messages.set(session.id, []);
       return session;
     },
-    rename: async (sessionId, title) => {
+    rename: async (sessionId, title, revision) => {
+      if (revision !== undefined) throw new UClawUnsupportedError("sessions.patch.revision");
       const index = this.sessionItems.findIndex((session) => session.id === sessionId);
       if (index < 0) throw this.notFound("Session");
       const current = this.sessionItems[index];
-      const revision = String(Number.parseInt(current.revision ?? "0", 10) + 1);
-      const renamed = SessionSchema.parse({ ...current, title, updatedAt: this.clock.now(), revision });
+      const renamed = SessionSchema.parse({ ...current, title, updatedAt: this.clock.now() });
       this.sessionItems[index] = renamed;
       return renamed;
     },
-    remove: async (sessionId) => {
+    remove: async (sessionId, revision) => {
+      if (revision !== undefined) throw new UClawUnsupportedError("sessions.delete.revision");
       const index = this.sessionItems.findIndex((session) => session.id === sessionId);
       if (index < 0) throw this.notFound("Session");
       this.sessionItems.splice(index, 1);

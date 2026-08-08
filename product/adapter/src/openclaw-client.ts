@@ -290,7 +290,8 @@ export class OpenClawClient implements UClawClient {
       }, SessionsCreateResponseSchema);
       return this.readSession(created.key);
     },
-    rename: async (sessionId, title) => {
+    rename: async (sessionId, title, revision) => {
+      if (revision !== undefined) throw new UClawUnsupportedError("sessions.patch.revision");
       this.requireMethod("sessions.patch");
       this.requireMethod("sessions.describe");
       return this.serializeSessionMutation(sessionId, async () => {
@@ -564,11 +565,9 @@ export class OpenClawClient implements UClawClient {
     this.negotiation = this.connectWithStartupRetry().then((hello) => {
       this.ensureTransportListeners();
       this.hello = hello;
-      const methods = hello.features.methods.filter((method) => implementedMethods.has(method));
-      if (!hello.features.methods.includes("sessions.describe")) {
-        const createIndex = methods.indexOf("sessions.create");
-        if (createIndex >= 0) methods.splice(createIndex, 1);
-      }
+      const hasDescribe = hello.features.methods.includes("sessions.describe");
+      const methods = hello.features.methods.filter((method) => implementedMethods.has(method)
+        && (hasDescribe || (method !== "sessions.create" && method !== "sessions.patch")));
       this.capabilities = capabilitySetFromWire({
         protocolVersion: 4,
         methods,

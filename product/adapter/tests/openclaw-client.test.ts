@@ -145,7 +145,7 @@ describe("OpenClawClient", () => {
 
     await expect(client.sessions.get("agent:dev:existing")).resolves.toMatchObject({ title: "Existing" });
     await expect(client.sessions.create({ title: "Created", modelId: "contract/model" })).resolves.toMatchObject({ id: "agent:dev:created" });
-    await expect(client.sessions.rename?.("agent:dev:created", "Renamed", "ignored-revision")).resolves.toMatchObject({ title: "Renamed" });
+    await expect(client.sessions.rename?.("agent:dev:created", "Renamed")).resolves.toMatchObject({ title: "Renamed" });
     expect(transport.requests).toEqual([
       { method: "sessions.describe", params: { key: "agent:dev:existing", includeDerivedTitles: true, includeLastMessage: true } },
       { method: "sessions.create", params: { label: "Created", model: "contract/model" } },
@@ -153,6 +153,16 @@ describe("OpenClawClient", () => {
       { method: "sessions.patch", params: { key: "agent:dev:created", label: "Renamed" } },
       { method: "sessions.describe", params: { key: "agent:dev:created", includeDerivedTitles: true, includeLastMessage: true } },
     ]);
+  });
+
+  it("refuses fake revision protection when renaming", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.describe", "sessions.patch");
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.sessions.rename?.("agent:dev:created", "Renamed", "fake-cas")).rejects.toBeInstanceOf(UClawUnsupportedError);
+    expect(transport.requests).toEqual([]);
   });
 
   it("deletes with the locked sessions.delete shape and refuses fake revision protection", async () => {
@@ -194,11 +204,12 @@ describe("OpenClawClient", () => {
     expect(transport.connectCalls).toBe(1);
   });
 
-  it("keeps create capability closed when authoritative describe readback is unavailable", async () => {
+  it("keeps create and patch capabilities closed when authoritative describe readback is unavailable", async () => {
     const transport = new FakeTransport();
-    transport.helloMethods.push("sessions.create");
+    transport.helloMethods.push("sessions.create", "sessions.patch");
     const capabilities = await new OpenClawClient({ transport }).gateway.negotiate();
     expect(capabilities.methods.has("sessions.create")).toBe(false);
+    expect(capabilities.methods.has("sessions.patch")).toBe(false);
   });
 
   it("keeps unsupported attachment and unimplemented management capabilities closed", async () => {
@@ -261,7 +272,7 @@ describe("OpenClawClient", () => {
   it("resolves observed approval decisions, rejects allow-session, and selects a model", async () => {
     const approvals = contractFixture("approvals.json");
     const transport = new FakeTransport();
-    transport.helloMethods.push("exec.approval.resolve", "plugin.approval.resolve", "sessions.patch");
+    transport.helloMethods.push("exec.approval.resolve", "plugin.approval.resolve", "sessions.describe", "sessions.patch");
     transport.fixtures.set("exec.approval.resolve", { ok: true });
     transport.fixtures.set("plugin.approval.resolve", { ok: true });
     transport.fixtures.set("sessions.patch", { ok: true, key: "session-1" });

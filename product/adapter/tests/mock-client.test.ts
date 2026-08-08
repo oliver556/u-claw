@@ -2,6 +2,7 @@ import { UClawErrorSchema } from "@uclaw/shared";
 import { describe, expect, it } from "vitest";
 
 import { MockUClawClient, ManualClock } from "../src/mock/mock-client.js";
+import { UClawUnsupportedError } from "../src/openclaw-client.js";
 
 async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
   const values: T[] = [];
@@ -12,7 +13,9 @@ async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
 describe("MockUClawClient", () => {
   it("supports session create, rename, delete, and stable pagination", async () => {
     const client = new MockUClawClient({ historySize: 5 });
+    expect((await client.sessions.get("session-1")).revision).toBeUndefined();
     const created = await client.sessions.create({ title: "Created" });
+    expect(created.revision).toBeUndefined();
     await expect(client.sessions.rename?.(created.id, "Renamed")).resolves.toMatchObject({ title: "Renamed" });
     const first = await client.chat.list("session-1", { limit: 2 });
     const second = await client.chat.list("session-1", { cursor: first.nextCursor ?? undefined, limit: 2 });
@@ -20,6 +23,17 @@ describe("MockUClawClient", () => {
     expect(second.items.map((message) => message.id)).toEqual(["message-3", "message-4"]);
     await client.sessions.remove(created.id);
     await expect(client.sessions.get(created.id)).rejects.toMatchObject({ uclawError: { code: "NOT_FOUND" } });
+  });
+
+  it("refuses fake revision protection for session mutations", async () => {
+    const client = new MockUClawClient();
+    const created = await client.sessions.create({ title: "Created" });
+
+    await expect(client.sessions.rename?.(created.id, "Renamed", "fake-cas")).rejects.toBeInstanceOf(UClawUnsupportedError);
+    await expect(client.sessions.remove(created.id, "fake-cas")).rejects.toBeInstanceOf(UClawUnsupportedError);
+    const unchanged = await client.sessions.get(created.id);
+    expect(unchanged.title).toBe("Created");
+    expect(unchanged.revision).toBeUndefined();
   });
 
   it("lists sessions/history and deterministically streams send", async () => {
