@@ -35,6 +35,31 @@ const status = (attempt: number): GatewayStatus => ({
 });
 
 describe("createClientDispatcher stream ownership", () => {
+  it("preserves validated tool summaries while keeping sensitive values redacted", async () => {
+    const dispatcher = createClientDispatcher({
+      client: clientWith({ tools: {
+        list: vi.fn(),
+        getCall: vi.fn(async () => ({
+          id: "tool-summary", sessionId: "session-1", toolId: "exec", displayName: "Run tests",
+          state: "failed" as const, risk: "high" as const,
+          inputSummary: { command: "npm test", tokenCount: 42 },
+          outputSummary: { configured: true, token: "secret-value" },
+          error: { code: "OPERATION_FAILED" as const, message: "process failed", retryable: true },
+        })),
+      } }),
+      sendEvent: vi.fn(),
+    });
+
+    const response = await dispatcher(request("tools.get-call", "tool-1", { toolCallId: "tool-summary" }));
+
+    expect(response).toMatchObject({ ok: true, result: {
+      inputSummary: { command: "npm test", tokenCount: 42 },
+      outputSummary: { configured: true, token: "[REDACTED]" },
+      error: { code: "OPERATION_FAILED", message: "Tool operation failed.", retryable: true },
+    } });
+    dispatcher.dispose();
+  });
+
   it("routes session rename without a revision pseudo-CAS", async () => {
     const rename = vi.fn(async () => ({ id: "session-1", title: "重命名后", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" as const }));
     const dispatcher = createClientDispatcher({ client: clientWith({ sessions: { list: vi.fn(), get: vi.fn(), create: vi.fn(), rename, remove: vi.fn() } }), sendEvent: vi.fn() });

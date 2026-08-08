@@ -107,6 +107,48 @@ describe("chat workspace", () => {
     expect(within(main).queryByText("第一段历史")).not.toBeInTheDocument();
   });
 
+  it("paginates history with stable deduplication and resets paging on session switch", async () => {
+    const base = clientFixture();
+    const now = "2026-08-08T08:00:00.000Z";
+    const message = (id: string, sessionId: string, text: string) => ({ id, sessionId, role: "assistant" as const, status: "completed" as const, blocks: [{ id: `block-${id}`, type: "text" as const, text, format: "plain" as const }], createdAt: now });
+    const list = vi.fn(async (sessionId: string, page?: { cursor?: string }) => {
+      if (sessionId === "session-2") return { items: [message("other", sessionId, "第二会话消息")], nextCursor: null, hasMore: false };
+      if (page?.cursor === "history-2") return { items: [message("shared", sessionId, "共享消息"), message("third", sessionId, "第三条消息")], nextCursor: null, hasMore: false };
+      return { items: [message("first", sessionId, "第一条消息"), message("shared", sessionId, "共享消息")], nextCursor: "history-2", hasMore: true };
+    });
+    const client = clientFixture({ chat: { ...base.chat, list } });
+    render(<App client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "加载更多消息" }));
+    expect(await screen.findByText("第三条消息")).toBeVisible();
+    expect(screen.getAllByText("共享消息")).toHaveLength(1);
+    expect(list).toHaveBeenCalledWith("session-1", { cursor: "history-2" });
+
+    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    expect(await screen.findByText("第二会话消息")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "加载更多消息" })).not.toBeInTheDocument();
+    expect(screen.queryByText("第三条消息")).not.toBeInTheDocument();
+  });
+
+  it("shows a recoverable error when loading more history fails", async () => {
+    const base = clientFixture();
+    let pageAttempts = 0;
+    const list = vi.fn(async (sessionId: string, page?: { cursor?: string }) => {
+      if (page?.cursor === "history-next") {
+        pageAttempts += 1;
+        if (pageAttempts === 1) throw new Error("history page failed");
+        return { items: [{ id: "message-next", sessionId, role: "assistant" as const, status: "completed" as const, blocks: [{ id: "block-next", type: "text" as const, text: "重试加载成功", format: "plain" as const }], createdAt: "2026-08-08T08:00:00.000Z" }], nextCursor: null, hasMore: false };
+      }
+      return { items: [], nextCursor: "history-next", hasMore: true };
+    });
+    const client = clientFixture({ chat: { ...base.chat, list } });
+    render(<App client={client} />);
+    fireEvent.click(await screen.findByRole("button", { name: "加载更多消息" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("history page failed");
+    fireEvent.click(screen.getByRole("button", { name: "重试加载" }));
+    expect(await screen.findByText("重试加载成功")).toBeVisible();
+  });
+
   it("ignores stale session responses that resolve out of order", async () => {
     const client = clientFixture();
     render(<App client={client} />);
@@ -326,6 +368,97 @@ describe("chat workspace", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("发送失败");
     expect(composer).toHaveValue("保留这段草稿");
     expect([...document.querySelectorAll(".message")].some((message) => message.textContent?.includes("保留这段草稿"))).toBe(false);
+  });
+
+  it("reuses clientRequestId for an unchanged failed intent and rotates it after editing", async () => {
+    const base = clientFixture();
+    let attempt = 0;
+    const send = vi.fn((input: Parameters<UClawClient["chat"]["send"]>[0]) => (async function* () {
+      attempt += 1;
+      if (attempt === 1) throw new Error("send failed");
+      yield { type: "started" as const, runId: `run-${attempt}`, sessionId: input.sessionId };
+      yield { type: "final" as const, runId: `run-${attempt}`, message: { id: `final-${attempt}`, sessionId: input.sessionId, runId: `run-${attempt}`, role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    })());
+    const client = clientFixture({ chat: { ...base.chat, send } });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "同一发送意图" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await screen.findByText("send failed");
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].clientRequestId).toBe(send.mock.calls[0]![0].clientRequestId);
+
+    fireEvent.change(composer, { target: { value: "新的发送意图" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+    expect(send.mock.calls[2]![0].clientRequestId).not.toBe(send.mock.calls[1]![0].clientRequestId);
+  });
+
+  it("clears successful attachments so a later text-only send is not blocked", async () => {
+    const base = clientFixture();
+    const attachment = { id: "attachment-1", file: { id: "file-1", name: "report.txt", mediaType: "text/plain", size: 4, kind: "attachment" as const }, state: "ready" as const, progress: 1 };
+    const invoke = vi.fn(async (request: { method: string; requestId: string }) => ({ method: request.method, requestId: request.requestId, ok: true, result: request.method === "select" ? [attachment] : request.method === "prepare" ? [attachment] : null }));
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    const send = vi.fn((input: Parameters<UClawClient["chat"]["send"]>[0]) => (async function* () {
+      yield { type: "started" as const, runId: `run-${send.mock.calls.length}`, sessionId: input.sessionId };
+      yield { type: "final" as const, runId: `run-${send.mock.calls.length}`, message: { id: `final-${send.mock.calls.length}`, sessionId: input.sessionId, runId: `run-${send.mock.calls.length}`, role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    })());
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send } });
+    render(<App client={client} />);
+    fireEvent.click(await screen.findByRole("button", { name: "添加附件" }));
+    expect(await screen.findByText("report.txt")).toBeVisible();
+    const composer = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "带附件发送" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(screen.queryByLabelText("附件队列")).not.toBeInTheDocument());
+
+    fireEvent.change(composer, { target: { value: "纯文本发送" } });
+    expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].blocks).toEqual([{ type: "text", text: "纯文本发送", format: "plain" }]);
+  });
+
+  it("reads failed attachment state after send failure and retries the same attachment", async () => {
+    const base = clientFixture();
+    const ready = { id: "attachment-failed", file: { id: "file-failed", name: "failed.txt", mediaType: "text/plain", size: 4, kind: "attachment" as const }, state: "ready" as const, progress: 1 };
+    const failed = { ...ready, state: "failed" as const, error: { code: "OPERATION_FAILED" as const, message: "上传失败", retryable: true } };
+    const invoke = vi.fn(async (request: { method: string; requestId: string }) => ({ method: request.method, requestId: request.requestId, ok: true, result: request.method === "select" ? [ready] : request.method === "get" ? failed : request.method === "prepare" ? [ready] : null }));
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send: vi.fn(async function* () { throw new Error("send failed"); }) } });
+    render(<App client={client} />);
+    fireEvent.click(await screen.findByRole("button", { name: "添加附件" }));
+    const composer = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "失败附件" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    expect(await screen.findByText("上传失败")).toBeVisible();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "get", params: { attachmentId: "attachment-failed" } }));
+    fireEvent.click(screen.getByRole("button", { name: "重试 failed.txt" }));
+    await waitFor(() => expect(invoke.mock.calls.filter(([request]) => request.method === "prepare").length).toBeGreaterThan(1));
+  });
+
+  it("resets session paging metadata after a successful refresh", async () => {
+    const base = clientFixture();
+    let listCall = 0;
+    const list = vi.fn(async () => {
+      listCall += 1;
+      const items = [{ id: "session-1", title: "发布检查", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" as const }];
+      return listCall === 1 ? { items, nextCursor: "old-cursor", hasMore: true } : { items, nextCursor: null, hasMore: false };
+    });
+    const send = vi.fn(async function* () {
+      yield { type: "started" as const, runId: "run-refresh", sessionId: "session-1" };
+      yield { type: "final" as const, runId: "run-refresh", message: { id: "final-refresh", sessionId: "session-1", runId: "run-refresh", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    });
+    const client = clientFixture({ sessions: { ...base.sessions, list }, chat: { ...base.chat, send } });
+    render(<App client={client} />);
+    expect(await screen.findByRole("button", { name: "加载更多" })).toBeVisible();
+    const composer = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "刷新分页" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument());
   });
 
   it("shows disconnected state and reconnect action", async () => {

@@ -40,6 +40,19 @@ describe("ToolRun", () => {
     expect(screen.getByRole("status")).toHaveTextContent(label);
     cleanup();
   });
+
+  it("renders validated input, output, and error summaries", () => {
+    const tool: ToolCall = {
+      id: "tool-summary", sessionId: "session-1", toolId: "exec", displayName: "执行命令", state: "failed", risk: "high",
+      inputSummary: { command: "npm test", tokenCount: 42 },
+      outputSummary: { configured: true, token: "[REDACTED]" },
+      error: { code: "OPERATION_FAILED", message: "Tool operation failed.", retryable: true },
+    };
+    render(<ToolRun tool={tool} />);
+    expect(screen.getByText(/输入：/)).toHaveTextContent("npm test");
+    expect(screen.getByText(/输出：/)).toHaveTextContent("[REDACTED]");
+    expect(screen.getByText("Tool operation failed.")).toBeVisible();
+  });
 });
 
 describe("MessageList", () => {

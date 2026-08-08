@@ -7,6 +7,7 @@ import {
   GatewayStatusWireSchema,
   MessageSchema,
   ModelSummarySchema,
+  RendererSafeSummarySchema,
   SessionSchema,
   SessionSummarySchema,
   ToolCallSchema,
@@ -218,8 +219,8 @@ function rendererSafeTool(tool: ToolCall): ToolCall {
     displayName: "OpenClaw tool",
     state: tool.state,
     risk: tool.risk,
-    ...(tool.inputSummary === undefined ? {} : { inputSummary: { available: true } }),
-    ...(tool.outputSummary === undefined ? {} : { outputSummary: { available: true } }),
+    ...(tool.inputSummary === undefined ? {} : { inputSummary: RendererSafeSummarySchema.parse(tool.inputSummary) }),
+    ...(tool.outputSummary === undefined ? {} : { outputSummary: RendererSafeSummarySchema.parse(tool.outputSummary) }),
     ...(tool.startedAt === undefined ? {} : { startedAt: tool.startedAt }),
     ...(tool.finishedAt === undefined ? {} : { finishedAt: tool.finishedAt }),
     ...(tool.error === undefined ? {} : {
