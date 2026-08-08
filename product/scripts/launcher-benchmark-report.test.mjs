@@ -12,6 +12,11 @@ import { decideLauncher, validateTrialReport } from "./launcher-benchmark-report
 
 const scriptPath = fileURLToPath(new URL("./launcher-benchmark-report.mjs", import.meta.url));
 const schemaUrl = new URL("../tests/windows/launcher-benchmark.schema.json", import.meta.url);
+const harnessUrl = new URL("../tests/windows/launcher-benchmark.ps1", import.meta.url);
+const fixtureUrl = new URL(
+  "../tests/packaging/fixtures/launcher-trial.example.json",
+  import.meta.url,
+);
 const reportSchema = JSON.parse(await readFile(schemaUrl, "utf8"));
 const validateSchema = new Ajv2020({ allErrors: true }).compile(reportSchema);
 
@@ -53,6 +58,120 @@ function runCli(...args) {
 test("accepts a complete trial report", () => {
   const report = makeTrial(1);
   assert.equal(validateTrialReport(report), report);
+});
+
+test("example launcher trial fixture satisfies the frozen report contract", async () => {
+  const fixture = JSON.parse(await readFile(fixtureUrl, "utf8"));
+  assert.equal(validateSchema(fixture), true, JSON.stringify(validateSchema.errors));
+  assert.equal(validateTrialReport(fixture), fixture);
+  assert.equal(fixture.measurementKind, "hosted-runner-process-start");
+  assert.doesNotMatch(JSON.stringify(fixture), /[A-Z]:\\|\\\\|\/Users\/|\/home\//);
+});
+
+test("PowerShell harness has strict bounded parameters and no elevation or persistence", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /Set-StrictMode -Version Latest/);
+  assert.match(source, /\$ErrorActionPreference\s*=\s*['"]Stop['"]/);
+  for (const parameter of ["GoExe", "DotnetExe", "Iterations", "Trial", "OutputPath"]) {
+    assert.match(source, new RegExp(`\\[Parameter\\(Mandatory\\)\\][\\s\\S]{0,160}\\$${parameter}\\b`));
+  }
+  assert.match(source, /\[ValidateRange\(5, 100\)\][\s\S]{0,80}\$Iterations\b/);
+  assert.match(source, /\[ValidateRange\(1, 3\)\][\s\S]{0,80}\$Trial\b/);
+  assert.doesNotMatch(source, /Start-Process\s+[^\r\n]*-Verb\s+RunAs|\bRunAs\b/i);
+  assert.doesNotMatch(source, /SetEnvironmentVariable\([^\r\n]*(Machine|User)|\bsetx\b|HKLM:|HKCU:/i);
+});
+
+test("PowerShell harness locks symmetric mandatory cases and safe fixed errors", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  for (const caseName of [
+    "valid-manifest",
+    "invalid-sha256",
+    "path-traversal",
+    "absolute-path",
+    "absolute-path-unc",
+    "unicode-space-path",
+    "sdk-path-removed",
+    "cli-invalid-arguments",
+  ]) {
+    assert.match(source, new RegExp(`['"]${caseName}['"]`));
+  }
+  assert.match(source, /foreach\s*\(\$candidate\s+in\s+\$candidates\)/i);
+  assert.match(source, /E_MANIFEST_INVALID/);
+  assert.match(source, /E_PACKAGE_INVALID/);
+  assert.match(source, /E_ARGUMENTS/);
+  assert.match(source, /LAUNCHER_BENCHMARK_[A-Z_]+/);
+  assert.doesNotMatch(source, /Write-(Host|Verbose|Debug|Warning)/i);
+});
+
+test("PowerShell harness consumes strict auditable build sidecars", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /\$ExecutablePath\s*\+\s*['"]\.build\.json['"]/);
+  for (const field of ["schemaVersion", "candidate", "commitSha", "buildMs", "toolchainVersion"]) {
+    assert.match(source, new RegExp(`['"]${field}['"]`));
+  }
+  assert.match(source, /\[double\]::IsNaN/);
+  assert.match(source, /\[double\]::IsInfinity/);
+  assert.match(source, /\[Convert\]::GetTypeCode/);
+  assert.doesNotMatch(source, /-is\s+\$_/);
+  assert.match(source, /\^\[0-9a-f\]\{40\}\$/);
+  assert.match(source, /GITHUB_SHA/);
+  assert.match(source, /rev-parse[\s\S]{0,80}HEAD/);
+  assert.doesNotMatch(source, /LastWriteTime|CreationTime|buildMs\s*=\s*0\b/);
+});
+
+test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH restoration", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /UseShellExecute\s*=\s*\$false/i);
+  assert.match(source, /RedirectStandardOutput\s*=\s*\$true/i);
+  assert.match(source, /RedirectStandardError\s*=\s*\$true/i);
+  assert.match(source, /ReadToEndAsync\(\)/);
+  assert.match(source, /WaitForExit\(\$TimeoutMs\)/);
+  assert.match(source, /Kill\(\$true\)/);
+  assert.match(source, /\[Diagnostics\.Stopwatch\]::StartNew\(\)/);
+  assert.match(source, /finally[\s\S]{0,240}Remove-Item\s+-LiteralPath/i);
+  assert.match(source, /finally[\s\S]{0,180}\$env:PATH\s*=\s*\$originalPath/i);
+  assert.doesNotMatch(source, /&\s*\$[^\r\n]*2>&1|Invoke-Expression|\.\.\//i);
+});
+
+test("PowerShell harness preserves each candidate's exact newline contract", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /function Get-CandidateNewline/);
+  assert.match(source, /\$CandidateId\s+-ceq\s+['"]go['"][\s\S]{0,80}return\s+['"]`n['"]/);
+  assert.match(source, /Get-CandidateNewline \$Candidate\.Id/);
+  assert.doesNotMatch(source, /\$newline\s*=\s*\[Environment\]::NewLine/);
+});
+
+test("PowerShell harness makes percentile and iteration policy auditable", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /function Get-Percentile/);
+  assert.match(source, /\[Math\]::Ceiling\(\$Percentile\s*\*\s*\$sorted\.Count\)\s*-\s*1/);
+  assert.match(source, /function Get-Median/);
+  assert.match(source, /\(\$sorted\[\$middle\s*-\s*1\]\s*\+\s*\$sorted\[\$middle\]\)\s*\/\s*2/);
+  assert.match(source, /for\s*\(\$iteration\s*=\s*0;\s*\$iteration\s*-lt\s*\$Iterations/i);
+  assert.match(source, /\$iteration\s*%\s*2/);
+  assert.match(source, /hosted-runner-process-start/);
+  assert.doesNotMatch(source, /cold[- ]start/i);
+});
+
+test("PowerShell harness validates paths and creates report without overwrite", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /\[IO\.Path\]::IsPathRooted/);
+  assert.match(source, /FileAttributes\]::ReparsePoint/);
+  assert.match(source, /PSIsContainer/);
+  assert.match(source, /FileMode\]::CreateNew/);
+  assert.match(source, /\[IO\.File\]::Move\(/);
+  assert.match(source, /ConvertTo-Json/);
+  assert.doesNotMatch(source, /\b-Force\b/);
+});
+
+test("PowerShell harness rejects path, username, and temp disclosures before reporting", async () => {
+  const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /function Assert-SafeReportValue/);
+  assert.match(source, /\$env:USERNAME/);
+  assert.match(source, /\[IO\.Path\]::GetTempPath\(\)/);
+  assert.match(source, /Assert-SafeReportValue \$cpu/);
+  assert.match(source, /Assert-SafeReportValue \$candidate\.Metadata\.toolchainVersion/);
+  assert.match(source, /LAUNCHER_BENCHMARK_UNSAFE_REPORT/);
 });
 
 test("rejects invalid report fields", () => {
