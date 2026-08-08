@@ -6,7 +6,7 @@
       "method": "chat.message.get",
       "params": {
         "sessionKey": "agent:dev:main",
-        "messageId": "e4ea4c4f"
+        "messageId": "ed87970e"
       }
     },
     "responseFrame": {
@@ -18,13 +18,13 @@
         "message": {
           "role": "user",
           "content": "[REDACTED USER TEXT:short]",
-          "timestamp": 1786129709920,
+          "timestamp": 1786217513758,
           "idempotencyKey": "contract-tool-run-1:user",
           "__openclaw": {
             "senderIsOwner": true,
-            "id": "e4ea4c4f",
+            "id": "ed87970e",
             "idempotencyKey": "contract-tool-run-1:user",
-            "recordTimestampMs": 1786129711040,
+            "recordTimestampMs": 1786217514903,
             "seq": 1
           }
         }

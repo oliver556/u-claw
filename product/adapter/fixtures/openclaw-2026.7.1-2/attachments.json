@@ -28,9 +28,9 @@
           "runId": "contract-attachment-image",
           "status": "started",
           "serverTiming": {
-            "receivedToAckMs": 706.824,
-            "loadSessionMs": 0.153,
-            "prepareAttachmentsMs": 706.125
+            "receivedToAckMs": 750.876,
+            "loadSessionMs": 0.431,
+            "prepareAttachmentsMs": 749.862
           }
         }
       }
@@ -63,9 +63,9 @@
           "runId": "contract-attachment-text",
           "status": "started",
           "serverTiming": {
-            "receivedToAckMs": 19.453,
-            "loadSessionMs": 0.337,
-            "prepareAttachmentsMs": 18.761
+            "receivedToAckMs": 21.797,
+            "loadSessionMs": 0.292,
+            "prepareAttachmentsMs": 21.053
           }
         }
       }
@@ -98,9 +98,9 @@
           "runId": "contract-attachment-mime-mismatch",
           "status": "started",
           "serverTiming": {
-            "receivedToAckMs": 19.904,
-            "loadSessionMs": 0.14,
-            "prepareAttachmentsMs": 19.441
+            "receivedToAckMs": 24.941,
+            "loadSessionMs": 1.474,
+            "prepareAttachmentsMs": 22.32
           }
         }
       }

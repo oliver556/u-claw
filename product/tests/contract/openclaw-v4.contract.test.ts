@@ -11,6 +11,7 @@ import {
   OpenClawApprovalsFixtureSchema,
   OpenClawHistoryFixtureSchema,
   OpenClawMessageGetFixtureSchema,
+  OpenClawModelsListFixtureSchema,
   OpenClawSessionToolFixtureSchema,
   OpenClawSessionsPatchFixtureSchema,
   mapOpenClawAttachmentEvidence,
@@ -27,15 +28,15 @@ import {
 const fixturesDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../adapter/fixtures/openclaw-2026.7.1-2");
 const productDir = resolve(fixturesDir, "../../..");
 const fixtureNames = ["attachments.json", "approvals.json", "chat.history.json", "chat.message.get.json", "models.list.json", "session.tool.json", "sessions.patch.json", "provenance.json"];
-const captureArtifactTrustAnchor = "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260807T190831086Z";
+const captureArtifactTrustAnchor = "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260808T193154952Z";
 const rawCaptureTrustAnchor = {
-  "attachments.json": "0620a06a0eb5c9ebc398ed1a67a6d0159672e3e82219bd30ca0c016d8afaf80c",
-  "approvals.json": "37df37bfd40473e26ff911414c95b476e1fb3feb10df9b8d29c2ae8321791c9e",
-  "chat.history.json": "e7d8cc48c660727324d15c0b6f1d45ee30e1c0b4cad910173a5aadf4cbe3786a",
-  "chat.message.get.json": "565226b866b8b4861aab92d440bc3dbd439b6ec99e6dec4d0b30fc4d71278d09",
-  "models.list.json": "f12bf7ea608ec51e83fb0035f6c79f7cad21582742a3179cd38a2cad3af722e6",
-  "session.tool.json": "bb667e348778c6a7754de0ffe2929a544154fdfa8ec9bba8a16e85196c8c4692",
-  "sessions.patch.json": "228a7adcd4e493f73083c224cf5ca55b60604cdc6909d8c9033b136d894cad97",
+  "attachments.json": "b0b615e0d4a341e271d61cfa92f31e89e58eee45bc811bddf8435b588b924088",
+  "approvals.json": "1682555a2460ef3545ebb2e14e146dc0b687395f2f9e78a364d55d4e8e2e87c2",
+  "chat.history.json": "ef401e0bb57be5fbc55819f799e33a1b15c922e366c0f2d8052b5b564c89f32d",
+  "chat.message.get.json": "ea9d4066af2e49b3708b9f7a7738a41b80415748363be6a0f80c5fb4ada4dc21",
+  "models.list.json": "f4c95f4babdb5c77ba24c4fb6d3907da514e029c0095815c797cd8dcff3af297",
+  "session.tool.json": "35431f0d4ed3cf5220e18d1eaa8c3a228f473b920b815034f234c8e5aad1b0eb",
+  "sessions.patch.json": "e621c16f1d7ba9bbb37afced2cfc15f55e3370f25a3c1eb7e9953daef77542b7",
 } as const;
 
 function fixture(name: string): unknown {
@@ -52,6 +53,10 @@ function expectTrustedRawCapture(provenance: { captureArtifact?: unknown; rawCap
 }
 
 describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
+  it("exports a strict models.list fixture schema", () => {
+    expect(OpenClawModelsListFixtureSchema.parse(fixture("models.list.json"))).toBeTruthy();
+  });
+
   it("GATE-A01 validates raw chat.send attachment frames and maps outcomes", () => {
     const raw = OpenClawAttachmentFixtureSchema.parse(fixture("attachments.json"));
     const mapped = raw.cases.map(mapOpenClawAttachmentEvidence);
@@ -131,7 +136,7 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
   });
 
   it("GATE-A05 maps the real configured models.list response and locks invalid view rejection", () => {
-    const raw = fixture("models.list.json") as any;
+    const raw = OpenClawModelsListFixtureSchema.parse(fixture("models.list.json"));
     expect(raw.configured.requestFrame).toMatchObject({ method: "models.list", params: { view: "configured" } });
     expect(raw.configured.responseFrame.id).toBe(raw.configured.requestFrame.id);
     const response = RawOpenClawModelsListResponseSchema.parse(raw.configured.responseFrame.payload);
@@ -198,14 +203,19 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
   });
 
   it("rejects malformed models.list entries and mismatched captured ids", () => {
-    const models = structuredClone(fixture("models.list.json")) as any;
-    models.configured.responseFrame.payload.models[0].provider = "";
-    expect(RawOpenClawModelsListResponseSchema.safeParse(models.configured.responseFrame.payload).success).toBe(false);
-
-    const captured = fixture("models.list.json") as any;
-    expect(captured.configured.responseFrame.id).toBe(captured.configured.requestFrame.id);
-    captured.configured.responseFrame.id = "mismatched-response-id";
-    expect(captured.configured.responseFrame.id).not.toBe(captured.configured.requestFrame.id);
+    const mutations = [
+      (value: any) => { value.configured.requestFrame.method = "sessions.list"; },
+      (value: any) => { value.configured.requestFrame.params.view = "all"; },
+      (value: any) => { value.configured.responseFrame.id = "mismatched-response-id"; },
+      (value: any) => { value.invalidView.requestFrame.params.view = "configured"; },
+      (value: any) => { value.invalidView.responseFrame.id = "mismatched-response-id"; },
+      (value: any) => { value.configured.responseFrame.payload.models[0].provider = ""; },
+    ];
+    for (const mutate of mutations) {
+      const models = structuredClone(fixture("models.list.json"));
+      mutate(models);
+      expect(OpenClawModelsListFixtureSchema.safeParse(models).success).toBe(false);
+    }
   });
 
   it("rejects chat.history responses captured for another session", () => {

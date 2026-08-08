@@ -144,12 +144,13 @@ async function writeFixture(name, value) {
 }
 
 await mkdir(fixtureDir, { recursive: true });
-const rawNames = ["attachments.json", "approvals.json", "chat.history.json", "chat.message.get.json", "session.tool.json", "sessions.patch.json"];
+const rawNames = ["attachments.json", "approvals.json", "chat.history.json", "chat.message.get.json", "models.list.json", "session.tool.json", "sessions.patch.json"];
 const rawBodies = Object.fromEntries(await Promise.all(rawNames.map(async (name) => [name, await readFile(join(captureDir, name))])));
 const attachments = await readJson("attachments.json");
 const approvals = await readJson("approvals.json");
 const history = await readJson("chat.history.json");
 const messageGet = await readJson("chat.message.get.json");
+const modelsList = await readJson("models.list.json");
 const sessionTool = await readJson("session.tool.json");
 const sessionsPatch = await readJson("sessions.patch.json");
 
@@ -178,6 +179,16 @@ const fixtures = {
       },
     },
     unavailable: { requestFrame: messageGet.unavailable.requestFrame, responseFrame: messageGet.unavailable.responseFrame },
+  }),
+  "models.list.json": sanitize({
+    configured: {
+      requestFrame: modelsList.configured.requestFrame,
+      responseFrame: modelsList.configured.responseFrame,
+    },
+    invalidView: {
+      requestFrame: modelsList.invalidView.requestFrame,
+      responseFrame: modelsList.invalidView.responseFrame,
+    },
   }),
   "session.tool.json": { start: redactToolResult(sessionTool.start), result: redactToolResult(sessionTool.result) },
   "sessions.patch.json": {
@@ -233,8 +244,23 @@ const provenance = {
   nodeVersionSource: "OPENCLAW_NODE_BIN --version",
   capturedAt: new Date(fixtures["session.tool.json"].start.payload.ts).toISOString(),
   captureArtifact: {
-    id: "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260807T190831086Z",
+    id: "openclaw-2026.7.1-2-protocol-v4-node-24.15.0-20260808T193154952Z",
     kind: "raw-wire-json-v1",
+  },
+  modelCatalogProtocolEvidence: {
+    method: "models.list",
+    requiredScope: "operator.read",
+    pickerRequest: { view: "configured" },
+    allowedViews: ["default", "configured", "all"],
+    publishedResponseFields: ["id", "name", "provider", "alias", "available", "contextWindow", "reasoning"],
+    observedAdditionalResponseFields: ["api", "input"],
+    sources: [
+      "docs/gateway/protocol.md",
+      "dist/core-descriptors-DRUtdasO.js",
+      "dist/models-BxhDHfd4.js",
+      "dist/models-list-result-D6lGV0YW.js",
+      "dist/schema-BuOFpc7K.js",
+    ],
   },
   capture: {
     runtime: `OpenClaw Gateway ${packageJson.version} on Node.js ${nodeVersion}`,

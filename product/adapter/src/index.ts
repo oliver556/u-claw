@@ -17,6 +17,7 @@ export {
   OpenClawHistoryResponseSchema,
   OpenClawMessageGetFixtureSchema,
   OpenClawMessageGetResponseSchema,
+  OpenClawModelsListFixtureSchema,
   OpenClawPluginApprovalEventSchema,
   OpenClawSessionToolEventSchema,
   OpenClawSessionToolFixtureSchema,
