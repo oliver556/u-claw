@@ -21,6 +21,10 @@ import {
 } from "./gateway/health-check.js";
 import { selectGatewayPort } from "./gateway/port-selector.js";
 import { startGatewayAndCreateWindow, type ShowableWindow } from "./gateway/startup.js";
+import {
+  applyPortableEnvironmentToLaunchOptions,
+  type PortableDesktopPaths,
+} from "./portable-paths.js";
 import type { IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import {
@@ -315,7 +319,10 @@ export async function readSelectedAttachments(
   return results;
 }
 
-export async function startElectronMain(options: DesktopMainOptions): Promise<void> {
+export async function startElectronMain(
+  options: DesktopMainOptions,
+  portablePaths: PortableDesktopPaths,
+): Promise<void> {
   const { app, BrowserWindow, dialog, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const client = requireElectronClient(options.client);
@@ -333,7 +340,7 @@ export async function startElectronMain(options: DesktopMainOptions): Promise<vo
     ...options,
     buildGatewayLaunchOptions: (port) => {
       gatewayPort = port;
-      return options.buildGatewayLaunchOptions(port);
+      return applyPortableEnvironmentToLaunchOptions(options.buildGatewayLaunchOptions(port), portablePaths);
     },
   };
   await runDesktopMain<DesktopWindow>(runtimeOptions, {

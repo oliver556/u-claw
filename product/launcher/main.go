@@ -40,6 +40,7 @@ func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 		USBInterval:         500 * time.Millisecond,
 		ReadManifest:        ReadManifest,
 		ProbeDataDirectory:  ProbeDataDirectory,
+		EnsureHostCache:     EnsureHostCacheOwnership,
 		AcquireInstanceLock: AcquireInstanceLock,
 		PrepareRuntime:      prepareRuntimeForLaunch,
 		StartProcess: func(spec ProcessSpec) (ChildProcess, error) {

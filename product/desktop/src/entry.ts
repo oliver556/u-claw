@@ -3,6 +3,10 @@ import { dirname, isAbsolute, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { startElectronMain, type DesktopMainOptions } from "./main.js";
+import {
+  configurePortableDesktopPaths,
+  type PortableDesktopPaths,
+} from "./portable-paths.js";
 
 const WIRING_MODULE_ENV = "UCLAW_DESKTOP_WIRING_MODULE";
 
@@ -44,18 +48,26 @@ export async function loadProductionDesktopOptions(
 }
 
 export interface ElectronEntryDependencies {
+  preparePortableDesktop(): Promise<PortableDesktopPaths>;
   loadOptions(): Promise<DesktopMainOptions>;
-  startElectronMain(options: DesktopMainOptions): Promise<void>;
+  startElectronMain(options: DesktopMainOptions, paths: PortableDesktopPaths): Promise<void>;
+}
+
+export async function prepareProductionPortableDesktop(): Promise<PortableDesktopPaths> {
+  const { app } = await import("electron");
+  return configurePortableDesktopPaths(app, process.env);
 }
 
 export async function runElectronEntry(
   dependencies: ElectronEntryDependencies = {
+    preparePortableDesktop: prepareProductionPortableDesktop,
     loadOptions: loadProductionDesktopOptions,
     startElectronMain,
   },
 ): Promise<void> {
+  const paths = await dependencies.preparePortableDesktop();
   const options = await dependencies.loadOptions();
-  await dependencies.startElectronMain(options);
+  await dependencies.startElectronMain(options, paths);
 }
 
 async function reportStartupFailure(): Promise<void> {

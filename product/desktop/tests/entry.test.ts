@@ -9,6 +9,7 @@ import {
   runElectronEntry,
 } from "../src/entry.js";
 import type { DesktopMainOptions } from "../src/main.js";
+import type { PortableDesktopPaths } from "../src/portable-paths.js";
 
 describe("Electron production entry", () => {
   it("auto-starts only in the Electron browser process", () => {
@@ -31,16 +32,27 @@ describe("Electron production entry", () => {
       dispatchClient: vi.fn(),
     };
     const startElectronMain = vi.fn(async () => undefined);
-    const loadOptions = vi.fn(async () => options);
+    const calls: string[] = [];
+    const portablePaths = {} as PortableDesktopPaths;
+    const preparePortableDesktop = vi.fn(async () => {
+      calls.push("portable");
+      return portablePaths;
+    });
+    const loadOptions = vi.fn(async () => {
+      calls.push("wiring");
+      return options;
+    });
 
     await runElectronEntry({
+      preparePortableDesktop,
       loadOptions,
       startElectronMain,
     });
 
     expect(loadOptions).toHaveBeenCalledOnce();
     expect(startElectronMain).toHaveBeenCalledOnce();
-    expect(startElectronMain).toHaveBeenCalledWith(options);
+    expect(startElectronMain).toHaveBeenCalledWith(options, portablePaths);
+    expect(calls).toEqual(["portable", "wiring"]);
   });
 
   it("fails with a stable error when production wiring is not configured", async () => {

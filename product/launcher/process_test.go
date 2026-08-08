@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,18 @@ func TestStartManagedProcessRejectsUnsafeSpec(t *testing.T) {
 				t.Fatalf("returned %v", err)
 			}
 		})
+	}
+}
+
+func TestMergeEnvironmentWindowsOverridesKeysCaseInsensitively(t *testing.T) {
+	merged := mergeEnvironmentForPlatform(
+		[]string{"Path=C:\\Windows", "Uclaw_Data_Dir=C:\\Users\\host", "temp=C:\\host-temp"},
+		[]string{"UCLAW_DATA_DIR=E:\\.uclaw\\data", "TEMP=C:\\U-Claw\\cache\\temp"},
+		true,
+	)
+	want := []string{"Path=C:\\Windows", "TEMP=C:\\U-Claw\\cache\\temp", "UCLAW_DATA_DIR=E:\\.uclaw\\data"}
+	if !reflect.DeepEqual(merged, want) {
+		t.Fatalf("merged = %v", merged)
 	}
 }
 

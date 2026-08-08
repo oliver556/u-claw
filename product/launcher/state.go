@@ -55,6 +55,7 @@ type Dependencies struct {
 	USBInterval         time.Duration
 	ReadManifest        func(path string) (Manifest, error)
 	ProbeDataDirectory  func(packageRoot string, dataDir string) error
+	EnsureHostCache     func(cacheRoot string) error
 	AcquireInstanceLock func(dataDir string) (InstanceLock, error)
 	PrepareRuntime      func(context.Context, string, string, Manifest, func()) (CacheResult, error)
 	StartProcess        func(ProcessSpec) (ChildProcess, error)
@@ -75,6 +76,9 @@ func Run(ctx context.Context, deps Dependencies) error {
 		return reportFailure(reporter, err)
 	}
 	defer lock.Close()
+	if err := deps.EnsureHostCache(deps.Paths.HostCacheRoot); err != nil {
+		return reportFailure(reporter, err)
+	}
 
 	reporter.State(StateCheckingRuntime)
 	manifest, err := deps.ReadManifest(filepath.Join(deps.Paths.PackageRoot, "version.json"))
@@ -98,7 +102,7 @@ func Run(ctx context.Context, deps Dependencies) error {
 		Path: entrypoint,
 		Args: append([]string(nil), manifest.EntryArgs...),
 		Dir:  filepath.Dir(entrypoint),
-		Env:  []string{"UCLAW_DATA_DIR=" + deps.Paths.DataDir},
+		Env:  portableProcessEnvironment(deps.Paths),
 	})
 	if err != nil {
 		return reportFailure(reporter, errors.Join(ErrAppStartFailed, err))
@@ -131,6 +135,20 @@ func Run(ctx context.Context, deps Dependencies) error {
 		_ = process.Stop()
 		<-waitResult
 		return ctx.Err()
+	}
+}
+
+func portableProcessEnvironment(paths PortablePaths) []string {
+	stateDir := filepath.Join(paths.DataDir, ".openclaw")
+	return []string{
+		"NODE_COMPILE_CACHE=" + filepath.Join(paths.HostCacheRoot, "cache", "node-compile"),
+		"OPENCLAW_CONFIG_PATH=" + filepath.Join(stateDir, "openclaw.json"),
+		"OPENCLAW_HOME=" + paths.DataDir,
+		"OPENCLAW_STATE_DIR=" + stateDir,
+		"TEMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
+		"TMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
+		"UCLAW_CACHE_DIR=" + filepath.Join(paths.HostCacheRoot, "cache"),
+		"UCLAW_DATA_DIR=" + paths.DataDir,
 	}
 }
 
