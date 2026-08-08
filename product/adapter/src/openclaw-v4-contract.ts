@@ -351,6 +351,21 @@ function safeIdentifier(value: string | null | undefined, fallback: string): str
   return fallback;
 }
 
+function toolFailure(result: unknown): { message: string; category: string } {
+  const candidate = typeof result === "string"
+    ? result
+    : result !== null && typeof result === "object"
+      ? ["error", "message", "reason"].map((key) => (result as Record<string, unknown>)[key]).find((value) => typeof value === "string")
+      : undefined;
+  const text = typeof candidate === "string" ? candidate.toLowerCase().slice(0, 512) : "";
+  if (/timeout|timed out/.test(text)) return { message: "OpenClaw tool call timed out", category: "timeout" };
+  if (/forbidden|permission|denied/.test(text)) return { message: "OpenClaw tool call was denied", category: "permission" };
+  if (/auth|credential|token/.test(text)) return { message: "OpenClaw tool authorization failed", category: "authorization" };
+  if (/not found|missing/.test(text)) return { message: "OpenClaw tool resource was not found", category: "not-found" };
+  if (/network|connect|dns/.test(text)) return { message: "OpenClaw tool network operation failed", category: "network" };
+  return { message: "OpenClaw tool call failed for an unclassified reason", category: "unclassified" };
+}
+
 export function mapOpenClawExecApproval(input: unknown): ExecApprovalRequest {
   const wrapped = ApprovalEventFrameSchema("exec.approval.requested", OpenClawExecApprovalEventSchema).safeParse(input);
   const event = OpenClawExecApprovalEventSchema.parse(wrapped.success ? wrapped.data.payload : input);
@@ -392,6 +407,7 @@ export function mapOpenClawPluginApproval(input: unknown): PluginApprovalRequest
     choices: approvalChoices(event.request.allowedDecisions),
     expiresAt: toIso(event.expiresAtMs),
     status: "pending",
+    ...(event.request.toolCallId ? { toolCallId: event.request.toolCallId } : {}),
   });
 }
 
@@ -400,6 +416,7 @@ export function mapOpenClawSessionToolEvent(input: unknown): ToolCall {
   const event = OpenClawSessionToolPayloadSchema.parse(wrapped.success ? wrapped.data.payload : input);
   const failed = event.data.phase === "result" && event.data.isError === true;
   const toolId = safeIdentifier(event.data.name, "unknown-tool");
+  const failure = failed ? toolFailure(event.data.result) : undefined;
   return ToolCallSchema.parse({
     id: event.data.toolCallId,
     sessionId: event.sessionKey,
@@ -412,10 +429,10 @@ export function mapOpenClawSessionToolEvent(input: unknown): ToolCall {
       ? { inputSummary: safeSummary(event.data.args) }
       : {}),
     ...(event.data.phase === "result" && event.data.result !== undefined
-      ? { outputSummary: safeSummary(event.data.result) }
+      ? { outputSummary: { ...safeSummary(event.data.result), ...(failure ? { failureCategory: failure.category } : {}) } }
       : {}),
     ...(event.data.phase === "start" ? { startedAt: toIso(event.ts) } : { finishedAt: toIso(event.ts) }),
-    ...(failed ? { error: { code: "OPERATION_FAILED", message: "OpenClaw tool call failed", retryable: false } } : {}),
+    ...(failure ? { error: { code: "OPERATION_FAILED", message: failure.message, retryable: false } } : {}),
   });
 }
 
