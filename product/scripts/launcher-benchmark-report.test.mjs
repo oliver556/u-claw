@@ -140,6 +140,15 @@ test("uses the p95 median margin before executable size", () => {
   assert.equal(result.reason, "p95-margin");
 });
 
+test("selects the faster candidate at the exact decimal p95 threshold", () => {
+  const result = decideLauncher(reports({
+    go: { p95Ms: 0.8, exeBytes: 8_000_000 },
+    dotnet: { p95Ms: 1, exeBytes: 8_000_000 },
+  }));
+  assert.equal(result.selected, "go");
+  assert.equal(result.reason, "p95-margin");
+});
+
 test("uses the executable median size margin when p95 is within 20 percent", () => {
   const result = decideLauncher(reports({
     go: { p95Ms: 30, exeBytes: 6_000_000 },
@@ -147,6 +156,24 @@ test("uses the executable median size margin when p95 is within 20 percent", () 
   }));
   assert.equal(result.selected, "go");
   assert.equal(result.reason, "size-margin");
+});
+
+test("selects the smaller candidate at the exact integer size threshold", () => {
+  const result = decideLauncher(reports({
+    go: { p95Ms: 1, exeBytes: 3 },
+    dotnet: { p95Ms: 1, exeBytes: 4 },
+  }));
+  assert.equal(result.selected, "go");
+  assert.equal(result.reason, "size-margin");
+});
+
+test("does not claim a margin when both compared values are zero", () => {
+  const result = decideLauncher(reports({
+    go: { p95Ms: 0, exeBytes: 0 },
+    dotnet: { p95Ms: 0, exeBytes: 0 },
+  }));
+  assert.equal(result.selected, "go");
+  assert.equal(result.reason, "documented-tie-breaker");
 });
 
 test("uses Go as deterministic tie breaker", () => {

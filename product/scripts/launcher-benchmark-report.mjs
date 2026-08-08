@@ -110,10 +110,11 @@ function marginDecision(summary, eligible, field, threshold, reason) {
     return difference || left.localeCompare(right);
   });
   const worseValue = summary[worse][field];
-  const margin = worseValue === 0
-    ? 0
-    : (worseValue - summary[better][field]) / worseValue;
-  return margin >= threshold ? { selected: better, reason, summary } : null;
+  if (worseValue === 0) {
+    return null;
+  }
+  const meetsThreshold = summary[better][field] <= worseValue * (1 - threshold);
+  return meetsThreshold ? { selected: better, reason, summary } : null;
 }
 
 export function decideLauncher(reports) {
