@@ -1403,10 +1403,14 @@ function Invoke-LauncherBenchmark {
         $caseResults = @{}
         $timings = @{ go = [Collections.Generic.List[double]]::new(); dotnet = [Collections.Generic.List[double]]::new() }
         foreach ($candidate in $candidates) {
+            $candidateDiagnosticPrefix = 'CANDIDATE_' + $candidate.Id.ToUpperInvariant()
+            Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_START')
             $candidateRoot = Join-Path $temporaryRoot $candidate.Id
             [void][IO.Directory]::CreateDirectory($candidateRoot)
             $fixturesByCandidate[$candidate.Id] = New-CandidateFixtures $candidateRoot
+            Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_FIXTURES_CREATED')
             $caseResults[$candidate.Id] = Invoke-MandatoryCases $candidate $fixturesByCandidate[$candidate.Id]
+            Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_CASES_COMPLETED')
         }
         Write-BenchmarkDiagnostic 'CASES_COMPLETED'
 
