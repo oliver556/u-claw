@@ -713,7 +713,7 @@ function Assert-NoReparsePath {
         if (($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_UNSAFE_PATH'
         }
-        $current = $current.Parent
+        $current = if ($current -is [IO.FileInfo]) { $current.Directory } else { $current.Parent }
     }
 }
 
@@ -1262,9 +1262,6 @@ catch [LauncherBenchmarkError] {
     exit 1
 }
 catch {
-    if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
-        [Console]::Error.WriteLine(($_.Exception.GetType().FullName + ': ' + $_.Exception.Message))
-    }
     [Console]::Error.WriteLine('LAUNCHER_BENCHMARK_INTERNAL_ERROR: benchmark failed')
     exit 1
 }

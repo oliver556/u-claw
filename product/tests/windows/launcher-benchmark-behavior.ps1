@@ -109,9 +109,7 @@ try {
         $timingRoot = Join-Path $absoluteRoot 'timing-state'
         [void][IO.Directory]::CreateDirectory($timingRoot)
         $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $timingRoot
-        $env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS = '1'
         $result = Invoke-HarnessProcess $repositoryRoot $harness $goExe $dotnetExe $reportPath $absoluteRoot
-        $env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS = $null
         $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $null
         Assert-True ($result.ExitCode -eq 0) ('relative benchmark failed: ' + $result.Stderr)
         $report = Get-Content -LiteralPath (Join-Path $repositoryRoot $reportPath) -Raw | ConvertFrom-Json
@@ -172,7 +170,6 @@ catch {
 finally {
     $env:PATH = $originalPath
     $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $originalTimingRoot
-    $env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS = $null
     $env:LAUNCHER_BENCHMARK_FAKE_COUNTER = $originalCounter
     $env:LAUNCHER_BENCHMARK_FAKE_CHILD_PID_FILE = $originalPidFile
     if (Test-Path -LiteralPath $absoluteRoot) { Remove-Item -LiteralPath $absoluteRoot -Recurse }
