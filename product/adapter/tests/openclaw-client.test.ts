@@ -343,9 +343,11 @@ describe("OpenClawClient", () => {
     transport.requestGates.set("chat.send", new Promise((_resolve, reject) => { rejectSend = reject; }));
     const retry = client.chat.send({ sessionId: "session-1", clientRequestId: "retry-key", blocks: [{ type: "attachment", attachmentId: attachment.id }] })[Symbol.asyncIterator]();
     const failed = retry.next();
-    rejectSend(new RpcRemoteError("UNAVAILABLE", "upload failed", true));
+    rejectSend(new RpcRemoteError("UNAVAILABLE", "C:\\Users\\alice\\secret.txt /home/alice/private.txt token=sk-secret123 prompt=private-body", true));
     await expect(failed).rejects.toBeInstanceOf(RpcRemoteError);
-    expect(await attachments.get(attachment.id)).toMatchObject({ state: "failed", error: { retryable: true } });
+    const failedAttachment = await attachments.get(attachment.id);
+    expect(failedAttachment).toMatchObject({ state: "failed", error: { message: "附件发送失败。", retryable: true } });
+    expect(JSON.stringify(failedAttachment)).not.toMatch(/Users|\/home|sk-secret123|private-body/);
     const states = [];
     for await (const state of attachments.prepare(attachment.id)) states.push(state.state);
     expect(states).toEqual(["validating", "ready"]);
