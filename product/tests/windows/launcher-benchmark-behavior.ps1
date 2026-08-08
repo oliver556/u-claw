@@ -61,8 +61,10 @@ function Invoke-HarnessProcess {
             $script:behaviorPhase = 'HARNESS_PROCESS_TIMEOUT'
             throw 'LAUNCHER_BENCHMARK_BEHAVIOR_TIMEOUT'
         }
+        $process.Refresh()
+        $exitCode = $process.ExitCode
         return [pscustomobject]@{
-            ExitCode = $process.ExitCode
+            ExitCode = $exitCode
             Stdout = [IO.File]::ReadAllText($stdoutPath)
             Stderr = [IO.File]::ReadAllText($stderrPath)
         }
