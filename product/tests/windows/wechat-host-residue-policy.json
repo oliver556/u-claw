@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "requirementId": "DATA-005",
+  "component": "personal-wechat",
+  "pluginPackage": "@tencent-weixin/openclaw-weixin",
+  "portableGuaranteeScope": "portable-usb",
+  "hostInstalledMode": {
+    "personalWechat": "not-shipped",
+    "reason": "Installed mode stores U-Claw state on the host and cannot satisfy USB-primary DATA-005 ownership."
+  },
+  "usbBusinessData": [
+    "data/.openclaw/openclaw-weixin/accounts.json",
+    "data/.openclaw/openclaw-weixin/accounts/"
+  ],
+  "usbBusinessDataOwnership": "openclaw-weixin",
+  "usbBusinessDataCleanup": "never",
+  "usbPluginSource": "app/extensions/openclaw-weixin/",
+  "usbPluginRuntimeCopy": "data/.openclaw/extensions/openclaw-weixin/",
+  "hostCandidateKinds": [
+    "legacy-userprofile",
+    "appdata",
+    "localappdata",
+    "temp",
+    "fixed-drive"
+  ],
+  "markerFile": ".uclaw-residue-owner.json",
+  "cleanableMarker": {
+    "schemaVersion": 1,
+    "owner": "U-Claw",
+    "component": "personal-wechat",
+    "dataClass": "rebuildable-cache"
+  },
+  "rules": [
+    {
+      "id": "usb-business-data",
+      "decision": "never-clean",
+      "reason": "Primary account and token state belongs on the USB drive."
+    },
+    {
+      "id": "wechat-client-data",
+      "decision": "never-scan-or-clean",
+      "reason": "Tencent and WeChat client directories are not owned by U-Claw."
+    },
+    {
+      "id": "legacy-userprofile-plugin",
+      "decision": "refuse-clean",
+      "reason": "Old copies have no ownership marker and may be user-managed."
+    },
+    {
+      "id": "marked-rebuildable-residue",
+      "decision": "clean",
+      "reason": "Only exact U-Claw markers without business-data paths authorize cleanup."
+    },
+    {
+      "id": "unknown-host-content",
+      "decision": "refuse-clean",
+      "reason": "Unknown or unmarked content requires manual ownership evidence."
+    }
+  ],
+  "sourceAudit": {
+    "repositoryCapability": "present",
+    "releasePluginArtifactInCheckout": "absent",
+    "status": "needs-input",
+    "requiredInput": "A released Windows bundle containing the exact plugin artifact and evidence from a real Windows host and physical USB drive."
+  }
+}
