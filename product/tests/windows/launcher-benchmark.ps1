@@ -948,6 +948,14 @@ function Read-BuildMetadata {
     $sidecarPath = $ExecutablePath + '.build.json'
     try {
         Initialize-BuildMetadataParser
+    }
+    catch {
+        if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_METADATA_PARSER_INIT'
+        }
+        Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
+    }
+    try {
         $sidecarItem = Get-Item -LiteralPath $sidecarPath
         if ($sidecarItem.PSProvider.Name -ne 'FileSystem' -or $sidecarItem.PSIsContainer) {
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
@@ -956,6 +964,9 @@ function Read-BuildMetadata {
         return [LauncherBuildMetadataParser]::Parse($sidecarItem.FullName, $Candidate)
     }
     catch {
+        if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_METADATA_PARSER_PARSE'
+        }
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
     }
 }
