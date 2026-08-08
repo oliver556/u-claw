@@ -24,6 +24,7 @@ class FakeTransport implements OpenClawTransport {
   readonly connectFailures: Error[] = [];
   helloMethods = ["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list"];
   policy = { maxPayload: 65_536, maxBufferedBytes: 131_072 };
+  helloEvents = ["chat"];
   resetSequences: Array<number | undefined> = [];
   connectCalls = 0;
   private lastSequence: number | undefined;
@@ -34,9 +35,9 @@ class FakeTransport implements OpenClawTransport {
     if (failure !== undefined) throw failure;
     return {
       type: "hello-ok" as const,
-      protocol: 4 as const,
-      server: { version: "2026.7.1-2" },
-      features: { methods: this.helloMethods, events: ["chat"] },
+        protocol: 4 as const,
+        server: { version: "2026.7.1-2" },
+      features: { methods: this.helloMethods, events: this.helloEvents },
       policy: this.policy,
     };
   }
@@ -277,6 +278,20 @@ describe("OpenClawClient", () => {
     expect(capabilities.methods.has("sessions.patch")).toBe(false);
   });
 
+  it("reports partial approval and tool event capabilities independently", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("exec.approval.resolve");
+    transport.helloEvents.push("exec.approval.requested", "session.tool");
+    const capabilities = await new OpenClawClient({ transport }).gateway.negotiate();
+
+    expect(capabilities.features).toMatchObject({
+      execApproval: true,
+      pluginApproval: false,
+      approvalResolve: false,
+      toolTrace: true,
+    });
+  });
+
   it("keeps unsupported attachment and unimplemented management capabilities closed", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push(
@@ -455,6 +470,7 @@ describe("OpenClawClient", () => {
 
   it("resolves observed approval decisions, rejects allow-session, and selects a model", async () => {
     const approvals = contractFixture("approvals.json");
+    const tools = contractFixture("session.tool.json");
     const transport = new FakeTransport();
     transport.helloMethods.push("exec.approval.resolve", "plugin.approval.resolve", "sessions.describe", "sessions.patch");
     transport.fixtures.set("exec.approval.resolve", { ok: true });
@@ -468,7 +484,13 @@ describe("OpenClawClient", () => {
     pluginOther.request.sessionKey = "agent:dev:other";
     transport.fixtures.set("exec.approval.list", [...approvals.exec.allowOnce.listing.responseFrame.payload, execOther]);
     transport.fixtures.set("plugin.approval.list", [...approvals.plugin.allowOnce.listing.responseFrame.payload, pluginOther]);
-    const client = new OpenClawClient({ transport });
+    const approvalChanges: string[] = [];
+    const toolChanges: Array<{ state: string }> = [];
+    const client = new OpenClawClient({
+      transport,
+      onApprovalsChanged: (sessionId) => { approvalChanges.push(sessionId); },
+      onToolCallChanged: (toolCall) => { toolChanges.push(toolCall); },
+    });
     await client.gateway.negotiate();
 
     await expect(client.approvals.listPending("agent:dev:main")).resolves.toMatchObject([
@@ -479,15 +501,26 @@ describe("OpenClawClient", () => {
       { id: "exec-other-session", family: "exec" },
       { id: "plugin-other-session", family: "plugin" },
     ]);
-    await client.approvals.resolveExec({ ref: { family: "exec", id: "exec-1" }, decision: "allow-once" });
-    await client.approvals.resolvePlugin({ ref: { family: "plugin", id: "plugin-1" }, decision: "deny" });
+    const execId = approvals.exec.allowOnce.event.payload.id;
+    const pluginId = approvals.plugin.allowOnce.event.payload.id;
+    const toolStart = structuredClone(tools.start.payload);
+    toolStart.data.toolCallId = approvals.plugin.allowOnce.event.payload.request.toolCallId;
+    const watch = client.chat.watch("agent:dev:main")[Symbol.asyncIterator]();
+    const observedTool = watch.next();
+    transport.emit("session.tool", toolStart, 1);
+    await expect(observedTool).resolves.toMatchObject({ value: { type: "tool", tool: { state: "running" } } });
+    await client.approvals.resolveExec({ ref: { family: "exec", id: execId }, decision: "allow-once" });
+    await client.approvals.resolvePlugin({ ref: { family: "plugin", id: pluginId }, decision: "deny" });
+    expect(approvalChanges).toEqual(["agent:dev:main", "agent:dev:main"]);
+    expect(toolChanges).toMatchObject([{ state: "cancelled" }]);
+    await watch.return?.();
     await client.models.selectForSession("session-1", "provider/model-1");
     const unsupported = await client.approvals.resolveExec({ ref: { family: "exec", id: "exec-1" }, decision: "allow-session" }).catch((error: unknown) => error);
     expect(unsupported).toBeInstanceOf(UClawUnsupportedError);
     expect((unsupported as UClawUnsupportedError).uclawError.code).toBe("UNSUPPORTED");
     expect(transport.requests.slice(4)).toEqual([
-      { method: "exec.approval.resolve", params: { id: "exec-1", decision: "allow-once" } },
-      { method: "plugin.approval.resolve", params: { id: "plugin-1", decision: "deny" } },
+      { method: "exec.approval.resolve", params: { id: execId, decision: "allow-once" } },
+      { method: "plugin.approval.resolve", params: { id: pluginId, decision: "deny" } },
       { method: "sessions.patch", params: { key: "session-1", model: "provider/model-1" } },
     ]);
   });
@@ -616,13 +649,9 @@ describe("OpenClawClient", () => {
 
     const exactPlugin = structuredClone(approvals.plugin.allowOnce.event.payload);
     exactPlugin.request.toolCallId = "tool-call-approval-1";
-    const watchedWaiting = iterator.next();
-    const sentWaiting = send.next();
-    transport.emit("plugin.approval.requested", exactPlugin, 2);
-    await expect(watchedWaiting).resolves.toMatchObject({ value: { type: "tool", tool: { state: "waiting-authorization" } } });
-    await expect(sentWaiting).resolves.toMatchObject({ value: { type: "tool", tool: { state: "waiting-authorization" } } });
     const watchedApproval = iterator.next();
     const sentApproval = send.next();
+    transport.emit("plugin.approval.requested", exactPlugin, 2);
     await expect(watchedApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: exactPlugin.id, family: "plugin" } } });
     await expect(sentApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: exactPlugin.id, family: "plugin" } } });
 
@@ -677,8 +706,6 @@ describe("OpenClawClient", () => {
     };
     transport.emit("plugin.approval.requested", approvalEvent("plugin-concurrent-1", "tool-concurrent-1"), 3);
     transport.emit("plugin.approval.requested", approvalEvent("plugin-concurrent-2", "tool-concurrent-2"), 4);
-    await expect(first.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-concurrent-1", tool: { state: "waiting-authorization" } } });
-    await expect(second.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-concurrent-2", tool: { state: "waiting-authorization" } } });
     await expect(first.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-concurrent-1", approval: { id: "plugin-concurrent-1" } } });
     await expect(second.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-concurrent-2", approval: { id: "plugin-concurrent-2" } } });
 
@@ -746,7 +773,6 @@ describe("OpenClawClient", () => {
       },
     }, 3);
     await expect(send.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-race" } });
-    await expect(send.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-race", tool: { state: "waiting-authorization" } } });
     await expect(send.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-race" } });
     await expect(send.next()).resolves.toMatchObject({ value: { type: "final", runId: "run-race" } });
   });
@@ -781,16 +807,14 @@ describe("OpenClawClient", () => {
       event.request.toolCallId = "shared-tool-call";
       return event;
     };
-    const firstWaiting = first.next();
-    const secondWaiting = second.next();
+    const firstApproval = first.next();
+    const secondApproval = second.next();
     transport.emit("plugin.approval.requested", approvalEvent("agent:dev:first", "approval-first"), 3);
     transport.emit("plugin.approval.requested", approvalEvent("agent:dev:second", "approval-second"), 4);
     await Promise.resolve();
     expect(approvalChanges).toEqual([]);
-    await expect(firstWaiting).resolves.toMatchObject({ value: { type: "tool", runId: "run-first", tool: { state: "waiting-authorization" } } });
-    await expect(secondWaiting).resolves.toMatchObject({ value: { type: "tool", runId: "run-second", tool: { state: "waiting-authorization" } } });
-    await expect(first.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-first", approval: { id: "approval-first" } } });
-    await expect(second.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-second", approval: { id: "approval-second" } } });
+    await expect(firstApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-first", approval: { id: "approval-first" } } });
+    await expect(secondApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-second", approval: { id: "approval-second" } } });
     await first.return?.();
     await second.return?.();
   });

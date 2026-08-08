@@ -3,6 +3,12 @@ import { z } from "zod";
 import { ISODateTimeSchema, ResourceRefSchema } from "./common.js";
 import { RendererSafeSummarySchema, UClawErrorSummarySchema } from "./errors.js";
 
+const SafeOpaqueIdSchema = z.string().min(1).refine(
+  (value) => !/^(?:[A-Za-z]:[\\/]|[\\/]|file:)/i.test(value),
+  "Opaque ID must not be a filesystem path",
+);
+const SafeResourceRefSchema = ResourceRefSchema.extend({ id: SafeOpaqueIdSchema });
+
 export const ToolStateSchema = z.enum([
   "queued",
   "waiting-authorization",
@@ -18,11 +24,11 @@ export type ToolRisk = z.infer<typeof ToolRiskSchema>;
 
 export const ToolCallSchema = z
   .object({
-    id: z.string().min(1),
-    sessionId: z.string().min(1),
-    runId: z.string().min(1).optional(),
-    messageId: z.string().min(1).optional(),
-    toolId: z.string().min(1),
+    id: SafeOpaqueIdSchema,
+    sessionId: SafeOpaqueIdSchema,
+    runId: SafeOpaqueIdSchema.optional(),
+    messageId: SafeOpaqueIdSchema.optional(),
+    toolId: SafeOpaqueIdSchema,
     displayName: z.string().min(1),
     state: ToolStateSchema,
     risk: ToolRiskSchema,
@@ -48,9 +54,9 @@ export const ApprovalDecisionSchema = z.enum(["allow-once", "allow-session", "de
 export type ApprovalDecision = z.infer<typeof ApprovalDecisionSchema>;
 
 const ApprovalRequestBaseSchema = z.object({
-  id: z.string().min(1),
-  sessionId: z.string().min(1).optional(),
-  subject: ResourceRefSchema,
+  id: SafeOpaqueIdSchema,
+  sessionId: SafeOpaqueIdSchema.optional(),
+  subject: SafeResourceRefSchema,
   title: z.string().min(1),
   description: z.string().min(1),
   risk: ToolRiskSchema,
@@ -62,13 +68,14 @@ const ApprovalRequestBaseSchema = z.object({
 
 export const ExecApprovalRequestSchema = ApprovalRequestBaseSchema.extend({
   family: z.literal("exec"),
-  toolCallId: z.string().min(1).optional(),
+  toolCallId: SafeOpaqueIdSchema.optional(),
 }).strict();
 export type ExecApprovalRequest = z.infer<typeof ExecApprovalRequestSchema>;
 
 export const PluginApprovalRequestSchema = ApprovalRequestBaseSchema.extend({
   family: z.literal("plugin"),
-  subject: ResourceRefSchema.extend({ kind: z.literal("plugin") }),
+  subject: SafeResourceRefSchema.extend({ kind: z.literal("plugin") }),
+  toolCallId: SafeOpaqueIdSchema.optional(),
 }).strict();
 export type PluginApprovalRequest = z.infer<typeof PluginApprovalRequestSchema>;
 
@@ -79,12 +86,12 @@ export const ApprovalRequestSchema = z.discriminatedUnion("family", [
 export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
 
 export const ExecApprovalRefSchema = z
-  .object({ family: z.literal("exec"), id: z.string().min(1) })
+  .object({ family: z.literal("exec"), id: SafeOpaqueIdSchema })
   .strict();
 export type ExecApprovalRef = z.infer<typeof ExecApprovalRefSchema>;
 
 export const PluginApprovalRefSchema = z
-  .object({ family: z.literal("plugin"), id: z.string().min(1) })
+  .object({ family: z.literal("plugin"), id: SafeOpaqueIdSchema })
   .strict();
 export type PluginApprovalRef = z.infer<typeof PluginApprovalRefSchema>;
 

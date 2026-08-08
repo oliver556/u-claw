@@ -134,4 +134,19 @@ describe("tool contracts", () => {
     expect(ResolvePluginApprovalInputSchema.parse({ ref: pluginRef, decision: "deny" })).toBeTruthy();
     expect(() => ResolveExecApprovalInputSchema.parse({ ref: pluginRef, decision: "deny" })).toThrow();
   });
+
+  it.each(["/Users/private/tool", "C:\\Users\\private\\tool", "file:///tmp/tool"])("rejects path-shaped opaque ids: %s", (id) => {
+    expect(() => ToolCallSchema.parse({
+      id, sessionId: "session-1", toolId: "exec", displayName: "Execute", state: "running", risk: "high",
+    })).toThrow();
+  });
+
+  it("preserves a safe plugin tool call id", () => {
+    expect(ApprovalRequestSchema.parse({
+      id: "plugin:approval-1", family: "plugin", toolCallId: "tool-call-1",
+      subject: { kind: "plugin", id: "plugin-1" }, title: "Approval", description: "Plugin operation",
+      risk: "high", permissions: [{ kind: "other", scope: "plugin-1", description: "Plugin operation" }],
+      choices: ["deny"], status: "pending",
+    })).toMatchObject({ toolCallId: "tool-call-1" });
+  });
 });

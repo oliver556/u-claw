@@ -47,8 +47,8 @@ describe("OpenClaw tool and approval contract", () => {
       state: "failed",
       toolId: "unknown-tool",
       displayName: "Unknown tool",
-      error: { code: "OPERATION_FAILED", message: "OpenClaw tool call failed" },
-      outputSummary: { fieldCount: 3, retryable: false },
+      error: { code: "OPERATION_FAILED", message: "OpenClaw tool authorization failed" },
+      outputSummary: { fieldCount: 3, retryable: false, failureCategory: "authorization" },
     });
     expect(serialized).not.toContain("tool-secret");
     expect(serialized).not.toContain("/Users/private");
