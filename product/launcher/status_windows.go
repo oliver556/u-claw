@@ -98,7 +98,7 @@ type nativeStatusReporter struct {
 	closeOnce   sync.Once
 }
 
-func NewStatusReporter() Reporter {
+func newPlatformStatusReporter() Reporter {
 	reporter := &nativeStatusReporter{
 		text:  stateText(StateStarting),
 		state: StateStarting,

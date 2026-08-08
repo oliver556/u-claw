@@ -49,3 +49,14 @@ func TestLauncherMainRejectsInvalidPortablePaths(t *testing.T) {
 		t.Fatalf("failures=%v closed=%v", reporter.failures, reporter.closed)
 	}
 }
+
+func TestHeadlessStatusReporterSupportsAutomatedFailureChecks(t *testing.T) {
+	t.Setenv("UCLAW_LAUNCHER_HEADLESS", "1")
+	if !statusReporterHeadless() {
+		t.Fatal("headless status mode was not enabled")
+	}
+	reporter := NewStatusReporter()
+	reporter.State(StateCheckingRuntime)
+	reporter.Fail("E_PACKAGE_INVALID", "运行时文件校验失败。")
+	reporter.Close()
+}

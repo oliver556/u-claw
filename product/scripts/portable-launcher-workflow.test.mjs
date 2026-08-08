@@ -1,0 +1,69 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const workflowUrl = new URL("../../.github/workflows/portable-launcher.yml", import.meta.url);
+const e2eUrl = new URL("../tests/windows/launcher-e2e.ps1", import.meta.url);
+const appManifestUrl = new URL("../launcher/app.manifest", import.meta.url);
+
+test("portable launcher workflow pins tools and limits authority", async () => {
+  const source = await readFile(workflowUrl, "utf8");
+  assert.match(source, /workflow_dispatch:\s*\n\s*pull_request:/u);
+  assert.match(source, /permissions:\s*\n\s*contents:\s*read/u);
+  assert.match(source, /runs-on:\s*windows-2022/u);
+  assert.match(source, /timeout-minutes:\s*30/u);
+  assert.match(source, /go-version:\s*['"]1\.25\.0['"]/u);
+  assert.match(source, /node-version:\s*['"]24\.15\.0['"]/u);
+  assert.match(source, /npm ci --ignore-scripts --prefix product/u);
+  assert.match(source, /persist-credentials:\s*false/u);
+  assert.doesNotMatch(source, /pull_request_target|\bsecrets\b|\bRunAs\b|requireAdministrator/iu);
+});
+
+test("portable launcher workflow builds windowsgui and runs both PowerShell gates", async () => {
+  const [source, appManifest] = await Promise.all([
+    readFile(workflowUrl, "utf8"),
+    readFile(appManifestUrl, "utf8"),
+  ]);
+  assert.match(source, /CGO_ENABLED[^\n]*0/u);
+  assert.match(source, /GOOS[^\n]*windows/u);
+  assert.match(source, /GOARCH[^\n]*amd64/u);
+  assert.match(source, /go test -race \.\/\.\.\./u);
+  assert.match(source, /-H windowsgui/u);
+  assert.match(source, /github\.com\/akavel\/rsrc@v0\.10\.2[^\n]*-manifest app\.manifest/u);
+  assert.match(appManifest, /requestedExecutionLevel level="asInvoker" uiAccess="false"/u);
+  assert.doesNotMatch(appManifest, /requireAdministrator|highestAvailable/u);
+  assert.match(source, /portable-runtime\.go/u);
+  assert.match(source, /launcher-e2e\.ps1/u);
+  assert.equal((source.match(/-LauncherExe\b/gu) ?? []).length, 2);
+  assert.match(source, /shell:\s*powershell\b/u);
+  assert.match(source, /shell:\s*pwsh\b/u);
+});
+
+test("portable launcher artifact contains diagnostics only", async () => {
+  const source = await readFile(workflowUrl, "utf8");
+  const upload = source.slice(source.indexOf("uses: actions/upload-artifact@v4"));
+  assert.match(upload, /name:\s*portable-launcher-diagnostics/u);
+  assert.match(upload, /product\/\.portable-launcher\/diagnostics\/\*\.json/u);
+  assert.doesNotMatch(upload, /runtime\.pkg|version\.json|U-Claw\.exe|\.uclaw[\\/]data/iu);
+});
+
+test("PowerShell E2E covers the frozen portable lifecycle", async () => {
+  const source = await readFile(e2eUrl, "utf8");
+  assert.match(source, /Set-StrictMode -Version Latest/u);
+  assert.match(source, /\$ErrorActionPreference\s*=\s*['"]Stop['"]/u);
+  for (const check of [
+    "firstLaunch",
+    "secondLaunchReused",
+    "invalidHashRejected",
+    "truncatedPackageRejected",
+    "partialCacheRejected",
+    "unicodeSpacePath",
+    "duplicateLaunchRejected",
+    "dataStayedOnUSB",
+  ]) {
+    assert.match(source, new RegExp(`\\b${check}\\b`, "u"));
+  }
+  assert.match(source, /UCLAW_LAUNCHER_HEADLESS/u);
+  assert.match(source, /\.partial-/u);
+  assert.doesNotMatch(source, /Write-(Host|Verbose|Debug|Warning)|Start-Process[^\n]*-Verb\s+RunAs/iu);
+});
