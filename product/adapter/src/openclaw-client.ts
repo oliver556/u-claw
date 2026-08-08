@@ -63,7 +63,7 @@ export class UClawUnsupportedError extends AdapterServiceError {
 }
 
 export const OPENCLAW_IMPLEMENTED_METHODS = [
-  "sessions.list", "sessions.get", "sessions.create", "sessions.delete",
+  "sessions.list", "sessions.describe", "sessions.create", "sessions.delete",
   "chat.history", "chat.message.get", "chat.send", "chat.abort",
   "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
   "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch",
@@ -76,12 +76,26 @@ const implementedEvents = new Set([
 
 const SessionPageSchema = z.object({
   sessions: z.array(RawSessionSchema),
-  nextCursor: z.string().nullable().default(null),
+  ts: z.number().optional(),
+  path: z.string().optional(),
+  count: z.number().int().nonnegative().optional(),
+  totalCount: z.number().int().nonnegative().optional(),
+  limitApplied: z.number().int().positive().nullable().optional(),
+  offset: z.number().int().nonnegative().optional(),
+  nextOffset: z.number().int().nonnegative().nullable().optional(),
   hasMore: z.boolean().default(false),
+  defaults: z.unknown().optional(),
 }).strict();
 
 const SendResponseSchema = z.object({ runId: z.string().min(1), status: z.string().min(1) }).strict();
 const EmptyResponseSchema = z.union([z.object({}).strict(), z.null()]);
+const SessionDescribeResponseSchema = z.object({ session: RawSessionSchema.nullable() }).strict();
+const SessionsCreateResponseSchema = z.object({
+  ok: z.literal(true), key: z.string().min(1), sessionId: z.string().min(1).optional(), entry: z.record(z.string(), z.unknown()).optional(),
+}).passthrough();
+const SessionsDeleteResponseSchema = z.object({
+  ok: z.literal(true), key: z.string().min(1), deleted: z.boolean(), archived: z.array(z.string()),
+}).strict();
 const ResolveApprovalResponseSchema = z.object({ ok: z.literal(true) }).passthrough();
 const SessionsPatchResponseSchema = z.object({ ok: z.literal(true), key: z.string().min(1) }).passthrough();
 const ToolCatalogSchema = z.object({
@@ -99,6 +113,35 @@ const ToolCatalogSchema = z.object({
 const ToolCallResponseSchema = z.object({ toolCall: RawToolCallSchema }).strict();
 const ExecApprovalListSchema = z.array(OpenClawExecApprovalEventSchema);
 const PluginApprovalListSchema = z.array(OpenClawPluginApprovalEventSchema);
+
+function decodeOffsetCursor(cursor: string | undefined): number {
+  if (cursor === undefined) return 0;
+  if (!/^(?:0|[1-9]\d*)$/.test(cursor)) {
+    const message = "Invalid pagination cursor";
+    throw new AdapterServiceError(message, UClawErrorSchema.parse({
+      code: "INVALID_ARGUMENT", message, retryable: false,
+      recoveryActions: [], causeDetails: { field: "cursor" },
+    }));
+  }
+  const offset = Number(cursor);
+  if (!Number.isSafeInteger(offset)) {
+    const message = "Invalid pagination cursor";
+    throw new AdapterServiceError(message, UClawErrorSchema.parse({
+      code: "INVALID_ARGUMENT", message, retryable: false,
+      recoveryActions: [], causeDetails: { field: "cursor" },
+    }));
+  }
+  return offset;
+}
+
+function uniqueById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
 
 interface QueueWaiter<T> {
   resolve(result: IteratorResult<T>): void;
@@ -182,6 +225,7 @@ export class OpenClawClient implements UClawClient {
   private readonly statusSubscribers = new Set<AsyncEventQueue<GatewayStatus>>();
   private readonly toolCallRuns = new Map<string, Map<string, string>>();
   private readonly notifiedApprovalFrames = new WeakSet<object>();
+  private readonly sessionMutations = new Map<string, Promise<unknown>>();
   private resyncing = false;
 
   constructor(private readonly options: OpenClawClientOptions) {
@@ -219,29 +263,65 @@ export class OpenClawClient implements UClawClient {
   readonly sessions: UClawClient["sessions"] = {
     list: async (request) => {
       this.requireMethod("sessions.list");
-      const raw = await this.options.transport.router.request("sessions.list", request ?? {}, SessionPageSchema);
-      return { items: raw.sessions.map(mapSessionSummary), nextCursor: raw.nextCursor, hasMore: raw.hasMore };
+      const offset = decodeOffsetCursor(request?.cursor);
+      const raw = await this.options.transport.router.request("sessions.list", {
+        ...(request?.cursor === undefined ? {} : { offset }),
+        ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        ...(request?.query === undefined ? {} : { search: request.query }),
+        includeDerivedTitles: true,
+        includeLastMessage: true,
+      }, SessionPageSchema);
+      const items = uniqueById(raw.sessions.map(mapSessionSummary));
+      const nextCursor = raw.hasMore && raw.nextOffset !== undefined && raw.nextOffset !== null
+        ? String(raw.nextOffset)
+        : null;
+      if (raw.hasMore && nextCursor === null) throw new RpcProtocolError("sessions.list");
+      return { items, nextCursor, hasMore: raw.hasMore };
     },
     get: async (sessionId) => {
-      this.requireMethod("sessions.get");
-      return mapSession(await this.options.transport.router.request("sessions.get", { sessionKey: sessionId }, RawSessionSchema));
+      return this.readSession(sessionId);
     },
     create: async (input) => {
       this.requireMethod("sessions.create");
-      return mapSession(await this.options.transport.router.request("sessions.create", input ?? {}, RawSessionSchema));
+      this.requireMethod("sessions.describe");
+      const created = await this.options.transport.router.request("sessions.create", {
+        ...(input?.title === undefined ? {} : { label: input.title }),
+        ...(input?.modelId === undefined ? {} : { model: input.modelId }),
+      }, SessionsCreateResponseSchema);
+      return this.readSession(created.key);
+    },
+    rename: async (sessionId, title) => {
+      this.requireMethod("sessions.patch");
+      this.requireMethod("sessions.describe");
+      return this.serializeSessionMutation(sessionId, async () => {
+        await this.options.transport.router.request("sessions.patch", { key: sessionId, label: title }, SessionsPatchResponseSchema);
+        return this.readSession(sessionId);
+      });
     },
     remove: async (sessionId, revision) => {
+      if (revision !== undefined) throw new UClawUnsupportedError("sessions.delete.revision");
       this.requireMethod("sessions.delete");
-      await this.options.transport.router.request("sessions.delete", { sessionKey: sessionId, ...(revision === undefined ? {} : { revision }) }, EmptyResponseSchema);
+      const result = await this.serializeSessionMutation(sessionId, () => this.options.transport.router.request(
+        "sessions.delete", { key: sessionId, deleteTranscript: true }, SessionsDeleteResponseSchema,
+      ));
+      if (!result.deleted) throw this.notFound("sessions.delete");
     },
   };
 
   readonly chat: UClawClient["chat"] = {
     list: async (sessionId, request) => {
       this.requireMethod("chat.history");
-      const raw = await this.options.transport.router.request("chat.history", { sessionKey: sessionId, ...(request ?? {}) }, OpenClawHistoryResponseSchema);
+      const offset = decodeOffsetCursor(request?.cursor);
+      const paged = request !== undefined;
+      const raw = await this.options.transport.router.request("chat.history", {
+        sessionKey: sessionId,
+        ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        ...(paged ? { offset } : {}),
+      }, OpenClawHistoryResponseSchema);
       if (raw.sessionKey !== sessionId) throw new RpcProtocolError("chat.history");
-      return { items: mapOpenClawHistoryResponse(raw), nextCursor: null, hasMore: false };
+      const nextCursor = raw.hasMore === true && raw.nextOffset !== undefined ? String(raw.nextOffset) : null;
+      if (raw.hasMore === true && nextCursor === null) throw new RpcProtocolError("chat.history");
+      return { items: uniqueById(mapOpenClawHistoryResponse(raw)), nextCursor, hasMore: raw.hasMore ?? false };
     },
     get: async (sessionId, messageId) => {
       this.requireMethod("chat.message.get");
@@ -457,6 +537,26 @@ export class OpenClawClient implements UClawClient {
     if (this.capabilities?.methods.has(method) !== true) throw new UClawUnsupportedError(method);
   }
 
+  private async readSession(sessionId: string) {
+    this.requireMethod("sessions.describe");
+    const raw = await this.options.transport.router.request("sessions.describe", {
+      key: sessionId, includeDerivedTitles: true, includeLastMessage: true,
+    }, SessionDescribeResponseSchema);
+    if (raw.session === null) throw this.notFound("sessions.describe");
+    return mapSession(raw.session);
+  }
+
+  private async serializeSessionMutation<T>(sessionId: string, mutation: () => Promise<T>): Promise<T> {
+    const previous = this.sessionMutations.get(sessionId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(mutation);
+    this.sessionMutations.set(sessionId, current);
+    try {
+      return await current;
+    } finally {
+      if (this.sessionMutations.get(sessionId) === current) this.sessionMutations.delete(sessionId);
+    }
+  }
+
   private negotiate(): Promise<CapabilitySet> {
     if (this.capabilities !== undefined) return Promise.resolve(this.capabilities);
     if (this.negotiation !== undefined) return this.negotiation;
@@ -464,9 +564,14 @@ export class OpenClawClient implements UClawClient {
     this.negotiation = this.connectWithStartupRetry().then((hello) => {
       this.ensureTransportListeners();
       this.hello = hello;
+      const methods = hello.features.methods.filter((method) => implementedMethods.has(method));
+      if (!hello.features.methods.includes("sessions.describe")) {
+        const createIndex = methods.indexOf("sessions.create");
+        if (createIndex >= 0) methods.splice(createIndex, 1);
+      }
       this.capabilities = capabilitySetFromWire({
         protocolVersion: 4,
-        methods: hello.features.methods.filter((method) => implementedMethods.has(method)),
+        methods,
         events: hello.features.events.filter((event) => implementedEvents.has(event)),
         features: {
           attachments: false,

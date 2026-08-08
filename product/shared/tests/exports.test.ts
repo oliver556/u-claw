@@ -25,6 +25,7 @@ describe("public type exports", () => {
     expectTypeOf<UClawClient["approvals"]>().toEqualTypeOf<ApprovalService>();
     expectTypeOf<CapabilitySet["protocolVersion"]>().toEqualTypeOf<4>();
     expectTypeOf<ReturnType<ChatService["send"]>>().toEqualTypeOf<AsyncIterable<MessageEvent>>();
+    expectTypeOf<NonNullable<SessionService["rename"]>>().toBeFunction();
   });
 
   it("uses family-specific approval service inputs", () => {

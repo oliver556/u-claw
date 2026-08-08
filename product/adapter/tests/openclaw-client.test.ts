@@ -94,8 +94,8 @@ describe("OpenClawClient", () => {
   it("negotiates hello capabilities and maps session list", async () => {
     const transport = new FakeTransport();
     transport.fixtures.set("sessions.list", {
-      sessions: [{ sessionKey: "session-1", title: "Chat", createdAt: "2026-08-07T12:00:00.000Z", updatedAt: "2026-08-07T12:00:00.000Z", pinned: false, status: "idle" }],
-      nextCursor: null,
+      sessions: [{ key: "session-1", label: "Chat", updatedAt: 1786129711211, pinned: false }],
+      nextOffset: null,
       hasMore: false,
     });
     const client = new OpenClawClient({ transport });
@@ -107,11 +107,98 @@ describe("OpenClawClient", () => {
     await expect(client.sessions.list()).resolves.toMatchObject({ items: [{ id: "session-1" }] });
   });
 
+  it("maps real session pagination, filters, ordering, and duplicate rows", async () => {
+    const transport = new FakeTransport();
+    transport.fixtures.set("sessions.list", {
+      count: 3, totalCount: 4, offset: 2, nextOffset: 5, hasMore: true,
+      sessions: [
+        { key: "agent:dev:new", label: "New", updatedAt: 1786129711211, pinned: false },
+        { key: "agent:dev:new", label: "Duplicate", updatedAt: 1786129711211, pinned: false },
+        { key: "agent:dev:old", displayName: "Old", updatedAt: 1786129700000, pinned: false },
+      ],
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.sessions.list({ cursor: "2", limit: 3, query: "release" })).resolves.toMatchObject({
+      items: [{ id: "agent:dev:new", title: "New" }, { id: "agent:dev:old", title: "Old" }],
+      nextCursor: "5", hasMore: true,
+    });
+    expect(transport.requests.at(-1)).toEqual({
+      method: "sessions.list",
+      params: { offset: 2, limit: 3, search: "release", includeDerivedTitles: true, includeLastMessage: true },
+    });
+  });
+
+  it("uses describe for get and authoritative readback after create and rename", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.describe", "sessions.create", "sessions.patch");
+    transport.fixtures.set("sessions.create", { ok: true, key: "agent:dev:created", sessionId: "upstream-created", entry: {} });
+    transport.fixtures.set("sessions.patch", { ok: true, key: "agent:dev:created", entry: {} });
+    transport.fixtureQueues.set("sessions.describe", [
+      { session: { key: "agent:dev:existing", label: "Existing", updatedAt: 1786129700000, pinned: false } },
+      { session: { key: "agent:dev:created", label: "Created", updatedAt: 1786129710000, pinned: false } },
+      { session: { key: "agent:dev:created", label: "Renamed", updatedAt: 1786129720000, pinned: false } },
+    ]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.sessions.get("agent:dev:existing")).resolves.toMatchObject({ title: "Existing" });
+    await expect(client.sessions.create({ title: "Created", modelId: "contract/model" })).resolves.toMatchObject({ id: "agent:dev:created" });
+    await expect(client.sessions.rename?.("agent:dev:created", "Renamed", "ignored-revision")).resolves.toMatchObject({ title: "Renamed" });
+    expect(transport.requests).toEqual([
+      { method: "sessions.describe", params: { key: "agent:dev:existing", includeDerivedTitles: true, includeLastMessage: true } },
+      { method: "sessions.create", params: { label: "Created", model: "contract/model" } },
+      { method: "sessions.describe", params: { key: "agent:dev:created", includeDerivedTitles: true, includeLastMessage: true } },
+      { method: "sessions.patch", params: { key: "agent:dev:created", label: "Renamed" } },
+      { method: "sessions.describe", params: { key: "agent:dev:created", includeDerivedTitles: true, includeLastMessage: true } },
+    ]);
+  });
+
+  it("deletes with the locked sessions.delete shape and refuses fake revision protection", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.delete");
+    transport.fixtures.set("sessions.delete", { ok: true, key: "agent:dev:old", deleted: true, archived: [] });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await client.sessions.remove("agent:dev:old");
+    expect(transport.requests.at(-1)).toEqual({ method: "sessions.delete", params: { key: "agent:dev:old", deleteTranscript: true } });
+    await expect(client.sessions.remove("agent:dev:old", "fake-cas")).rejects.toBeInstanceOf(UClawUnsupportedError);
+  });
+
+  it("maps offset history pages in chronological order without duplicate ids", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("chat.history");
+    transport.fixtures.set("chat.history", {
+      sessionKey: "agent:dev:main", sessionId: "upstream-session", offset: 0, nextOffset: 3, hasMore: true, totalMessages: 5,
+      messages: [
+        { role: "assistant", content: "later", timestamp: 1786129712000, __openclaw: { id: "message-2", recordTimestampMs: 1786129712000, seq: 2 } },
+        { role: "user", content: "earlier", timestamp: 1786129711000, __openclaw: { id: "message-1", recordTimestampMs: 1786129711000, seq: 1 } },
+        { role: "user", content: "duplicate", timestamp: 1786129711000, __openclaw: { id: "message-1", recordTimestampMs: 1786129711000, seq: 1 } },
+      ],
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.chat.list("agent:dev:main", { limit: 3 })).resolves.toMatchObject({
+      items: [{ id: "message-1" }, { id: "message-2" }], nextCursor: "3", hasMore: true,
+    });
+    expect(transport.requests.at(-1)).toEqual({ method: "chat.history", params: { sessionKey: "agent:dev:main", limit: 3, offset: 0 } });
+  });
+
   it("shares an in-flight negotiation", async () => {
     const transport = new FakeTransport();
     const client = new OpenClawClient({ transport });
     await Promise.all([client.gateway.negotiate(), client.gateway.negotiate()]);
     expect(transport.connectCalls).toBe(1);
+  });
+
+  it("keeps create capability closed when authoritative describe readback is unavailable", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.create");
+    const capabilities = await new OpenClawClient({ transport }).gateway.negotiate();
+    expect(capabilities.methods.has("sessions.create")).toBe(false);
   });
 
   it("keeps unsupported attachment and unimplemented management capabilities closed", async () => {

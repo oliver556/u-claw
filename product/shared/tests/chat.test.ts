@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { MessageEventSchema, MessageSchema, SendMessageInputSchema } from "../src/index.js";
+import {
+  CreateSessionInputSchema,
+  MessageEventSchema,
+  MessageSchema,
+  SendMessageInputSchema,
+  SessionListRequestSchema,
+  SessionSummarySchema,
+} from "../src/index.js";
 
 const message = {
   id: "message-1",
@@ -12,6 +19,26 @@ const message = {
 };
 
 describe("chat contracts", () => {
+  it("accepts session rows when OpenClaw only exposes updatedAt", () => {
+    expect(SessionSummarySchema.parse({
+      id: "agent:main:fixture",
+      title: "Fixture",
+      updatedAt: "2026-08-07T00:00:00.000Z",
+      pinned: false,
+      status: "idle",
+    })).not.toHaveProperty("createdAt");
+  });
+
+  it("validates session list filters and create inputs", () => {
+    expect(SessionListRequestSchema.parse({ cursor: "20", limit: 20, query: "release" })).toEqual({
+      cursor: "20", limit: 20, query: "release",
+    });
+    expect(CreateSessionInputSchema.parse({ title: "Release", modelId: "provider/model" })).toEqual({
+      title: "Release", modelId: "provider/model",
+    });
+    expect(() => CreateSessionInputSchema.parse({ title: "" })).toThrow();
+  });
+
   it("parses messages and send inputs", () => {
     expect(MessageSchema.parse(message)).toEqual(message);
     expect(

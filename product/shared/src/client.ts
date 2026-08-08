@@ -1,5 +1,5 @@
 import type { Page, PageRequest } from "./common.js";
-import type { Message, MessageEvent, SendMessageInput, Session, SessionSummary } from "./chat.js";
+import type { CreateSessionInput, Message, MessageEvent, SendMessageInput, Session, SessionListRequest, SessionSummary } from "./chat.js";
 import type { CapabilitySet, GatewayStatus } from "./gateway.js";
 import type {
   ChannelSummary,
@@ -25,9 +25,10 @@ export interface GatewayService {
 }
 
 export interface SessionService {
-  list(page?: PageRequest): Promise<Page<SessionSummary>>;
+  list(page?: SessionListRequest): Promise<Page<SessionSummary>>;
   get(sessionId: string): Promise<Session>;
-  create(input?: { title?: string; modelId?: string }): Promise<Session>;
+  create(input?: CreateSessionInput): Promise<Session>;
+  rename?(sessionId: string, title: string, revision?: string): Promise<Session>;
   remove(sessionId: string, revision?: string): Promise<void>;
 }
 
