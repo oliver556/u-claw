@@ -14,31 +14,45 @@
 在 Windows x64 仓库根目录检查依赖。版本必须与上面一致：
 
 ```powershell
+$ErrorActionPreference = 'Stop'
 Get-Command git, node, go, dotnet, powershell.exe, pwsh | Select-Object Name, Source
 node --version
+if ($LASTEXITCODE -ne 0) { throw 'Node version check failed' }
 go version
+if ($LASTEXITCODE -ne 0) { throw 'Go version check failed' }
 dotnet --version
+if ($LASTEXITCODE -ne 0) { throw '.NET version check failed' }
 powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell version check failed' }
 pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 version check failed' }
 ```
 
 预期 Node 输出 `v24.15.0`，Go 输出包含 `go1.24.4 windows/amd64`，.NET 输出 `8.0.408`，Windows PowerShell 输出 `5.1.*`，`pwsh` 输出 `7.*`。缺少命令或版本不同，停止；不要把结果与 CI 固定环境混用。
 
 ## Windows 本地复现
 
-以下命令从仓库根目录运行。输出固定在 `product\.launcher-benchmark`。每个 EXE 的严格 sidecar 与 EXE 同目录，名称为 `<exe>.build.json`，且只含 `schemaVersion`、`candidate`、`commitSha`、`buildMs`、`toolchainVersion`。`buildMs` 来自真实 `Stopwatch`，不得填 `0` 或伪造。开始前确认目标报告不存在；harness 和 `decide` 会拒绝覆盖已有输出。
+以下命令从干净 checkout 的仓库根目录运行。输出固定在 `product\.launcher-benchmark`。每个 EXE 的严格 sidecar 与 EXE 同目录，名称为 `<exe>.build.json`，且只含 `schemaVersion`、`candidate`、`commitSha`、`buildMs`、`toolchainVersion`。`buildMs` 来自真实 `Stopwatch`，不得填 `0` 或伪造。开始时整个输出根目录必须不存在；脚本拒绝复用它，避免新 EXE 与旧 sidecar 错配。harness 和 `decide` 也会拒绝覆盖已有输出。
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$candidateRoot = Join-Path $PWD 'product\.launcher-benchmark\candidates'
-$publishRoot = Join-Path $PWD 'product\.launcher-benchmark\nativeaot-publish'
-$reportRoot = Join-Path $PWD 'product\.launcher-benchmark\reports'
+$benchmarkRoot = Join-Path $PWD 'product\.launcher-benchmark'
+if (Test-Path -LiteralPath $benchmarkRoot) { throw 'Benchmark output root already exists' }
+[void][IO.Directory]::CreateDirectory($benchmarkRoot)
+$candidateRoot = Join-Path $benchmarkRoot 'candidates'
+$publishRoot = Join-Path $benchmarkRoot 'nativeaot-publish'
+$reportRoot = Join-Path $benchmarkRoot 'reports'
 [void][IO.Directory]::CreateDirectory($candidateRoot)
 [void][IO.Directory]::CreateDirectory($reportRoot)
+
+npm ci --ignore-scripts --prefix product
+if ($LASTEXITCODE -ne 0) { throw 'Product dependency install failed' }
+
 $commitSha = (& git rev-parse HEAD).Trim().ToLowerInvariant()
 if ($LASTEXITCODE -ne 0 -or $commitSha -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid Git commit SHA' }
 
 $goExe = Join-Path $candidateRoot 'uclaw-launcher-go.exe'
+if (Test-Path -LiteralPath $goExe) { throw 'Go candidate output already exists' }
 $env:CGO_ENABLED = '0'
 $env:GOOS = 'windows'
 $env:GOARCH = 'amd64'
@@ -48,20 +62,23 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Go tests failed' }
   $stopwatch = [Diagnostics.Stopwatch]::StartNew()
   go build -trimpath -ldflags '-s -w' -o $goExe .
+  if ($LASTEXITCODE -ne 0) { $stopwatch.Stop(); throw 'Go build failed' }
   $stopwatch.Stop()
-  if ($LASTEXITCODE -ne 0) { throw 'Go build failed' }
 }
 finally {
   Pop-Location
 }
+$goToolchainVersion = (& go version).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Go version capture failed' }
 $metadata = [ordered]@{
   schemaVersion = 1
   candidate = 'go'
   commitSha = $commitSha
   buildMs = $stopwatch.Elapsed.TotalMilliseconds
-  toolchainVersion = (& go version).Trim()
+  toolchainVersion = $goToolchainVersion
 }
 $sidecar = $goExe + '.build.json'
+if (Test-Path -LiteralPath $sidecar) { throw 'Go build sidecar already exists' }
 $temporary = $sidecar + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
 [IO.File]::WriteAllText($temporary, (($metadata | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 [IO.File]::Move($temporary, $sidecar)
@@ -69,25 +86,30 @@ $temporary = $sidecar + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
 $project = Join-Path $PWD 'product\benchmarks\launcher\dotnet\UClaw.Launcher.Benchmark.csproj'
 dotnet run --project $project -c Release -- --self-test
 if ($LASTEXITCODE -ne 0) { throw 'NativeAOT source self-test failed' }
+if (Test-Path -LiteralPath $publishRoot) { throw 'NativeAOT publish output already exists' }
 $stopwatch = [Diagnostics.Stopwatch]::StartNew()
 dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishAot=true -o $publishRoot
+if ($LASTEXITCODE -ne 0) { $stopwatch.Stop(); throw 'NativeAOT publish failed' }
 $stopwatch.Stop()
-if ($LASTEXITCODE -ne 0) { throw 'NativeAOT publish failed' }
 $publishedExecutables = @(Get-ChildItem -LiteralPath $publishRoot -Filter '*.exe' -File -Recurse)
 if ($publishedExecutables.Count -ne 1) { throw 'NativeAOT publish must contain exactly one executable' }
 if (@(Get-ChildItem -LiteralPath $publishRoot -Filter '*.dll' -File -Recurse).Count -ne 0) { throw 'NativeAOT publish contains DLL runtime dependencies' }
 $dotnetExe = Join-Path $candidateRoot 'uclaw-launcher-dotnet.exe'
-Copy-Item -LiteralPath $publishedExecutables[0].FullName -Destination $dotnetExe
+if (Test-Path -LiteralPath $dotnetExe) { throw 'NativeAOT candidate output already exists' }
+Copy-Item -LiteralPath $publishedExecutables[0].FullName -Destination $dotnetExe -ErrorAction Stop
 & $dotnetExe --self-test
 if ($LASTEXITCODE -ne 0) { throw 'Published NativeAOT self-test failed' }
+$dotnetToolchainVersion = (& dotnet --version).Trim()
+if ($LASTEXITCODE -ne 0) { throw '.NET version capture failed' }
 $metadata = [ordered]@{
   schemaVersion = 1
   candidate = 'dotnet'
   commitSha = $commitSha
   buildMs = $stopwatch.Elapsed.TotalMilliseconds
-  toolchainVersion = (& dotnet --version).Trim()
+  toolchainVersion = $dotnetToolchainVersion
 }
 $sidecar = $dotnetExe + '.build.json'
+if (Test-Path -LiteralPath $sidecar) { throw 'NativeAOT build sidecar already exists' }
 $temporary = $sidecar + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
 [IO.File]::WriteAllText($temporary, (($metadata | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 [IO.File]::Move($temporary, $sidecar)
@@ -111,15 +133,24 @@ if ($LASTEXITCODE -ne 0) { throw 'Mandatory safety cases failed' }
 
 ```powershell
 pwsh -NoProfile -File product\tests\windows\launcher-benchmark.ps1 -GoExe product\.launcher-benchmark\candidates\uclaw-launcher-go.exe -DotnetExe product\.launcher-benchmark\candidates\uclaw-launcher-dotnet.exe -Iterations 20 -Trial 2 -OutputPath product\.launcher-benchmark\reports\trial-2.json
+if ($LASTEXITCODE -ne 0) { throw 'Trial 2 benchmark failed' }
 pwsh -NoProfile -File product\tests\windows\launcher-benchmark.ps1 -GoExe product\.launcher-benchmark\candidates\uclaw-launcher-go.exe -DotnetExe product\.launcher-benchmark\candidates\uclaw-launcher-dotnet.exe -Iterations 20 -Trial 3 -OutputPath product\.launcher-benchmark\reports\trial-3.json
+if ($LASTEXITCODE -ne 0) { throw 'Trial 3 benchmark failed' }
 
 node product\scripts\launcher-benchmark-report.mjs validate product\.launcher-benchmark\reports\trial-1.json
+if ($LASTEXITCODE -ne 0) { throw 'Trial 1 validation failed' }
 node product\scripts\launcher-benchmark-report.mjs validate product\.launcher-benchmark\reports\trial-2.json
+if ($LASTEXITCODE -ne 0) { throw 'Trial 2 validation failed' }
 node product\scripts\launcher-benchmark-report.mjs validate product\.launcher-benchmark\reports\trial-3.json
+if ($LASTEXITCODE -ne 0) { throw 'Trial 3 validation failed' }
 node product\scripts\launcher-benchmark-report.mjs require-mandatory product\.launcher-benchmark\reports\trial-1.json
+if ($LASTEXITCODE -ne 0) { throw 'Trial 1 mandatory gate failed' }
 node product\scripts\launcher-benchmark-report.mjs require-mandatory product\.launcher-benchmark\reports\trial-2.json
+if ($LASTEXITCODE -ne 0) { throw 'Trial 2 mandatory gate failed' }
 node product\scripts\launcher-benchmark-report.mjs require-mandatory product\.launcher-benchmark\reports\trial-3.json
+if ($LASTEXITCODE -ne 0) { throw 'Trial 3 mandatory gate failed' }
 node product\scripts\launcher-benchmark-report.mjs decide product\.launcher-benchmark\reports\trial-1.json product\.launcher-benchmark\reports\trial-2.json product\.launcher-benchmark\reports\trial-3.json --output product\.launcher-benchmark\reports\decision.json
+if ($LASTEXITCODE -ne 0) { throw 'Decision failed' }
 ```
 
 只有三份报告属于同一 `commitSha`，且三份都通过 mandatory gate 后，`decision.json` 才是 provisional decision。本地单机运行三次不等于三台独立 hosted runner，不得把它描述为 CI 证据。
@@ -130,7 +161,9 @@ node product\scripts\launcher-benchmark-report.mjs decide product\.launcher-benc
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\product\tests\windows\launcher-benchmark-behavior.ps1
+if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell behavior gate failed' }
 pwsh -NoProfile -File .\product\tests\windows\launcher-benchmark-behavior.ps1
+if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 behavior gate failed' }
 ```
 
 该脚本编译 fake 候选并验证带引号 PATH、最近秩 percentile、严格 sidecar、超时后的 child process cleanup 等兼容与安全行为。
@@ -141,6 +174,7 @@ pwsh -NoProfile -File .\product\tests\windows\launcher-benchmark-behavior.ps1
 
 ```powershell
 gh workflow run launcher-benchmark.yml --ref <branch>
+if ($LASTEXITCODE -ne 0) { throw 'Workflow dispatch failed' }
 ```
 
 本复现任务不 push，也不运行 workflow。三个独立 trial artifact 名为 `launcher-benchmark-trial-1`、`launcher-benchmark-trial-2`、`launcher-benchmark-trial-3`；聚合 artifact 名为 `launcher-benchmark-results`，包含三份 trial JSON 和 `decision.json`。
@@ -149,4 +183,10 @@ gh workflow run launcher-benchmark.yml --ref <branch>
 
 `product\.launcher-benchmark`、任何 `.tmp`、EXE、DLL、PDB、`bin`、`obj`、trial JSON 和 decision JSON 都是本地产物，不得提交。sidecar 必须与对应 EXE 同目录，也不得提交。运行前使用新的输出路径；不要覆盖或篡改已有报告。
 
-提交前删除这些本地产物并运行 `git status --short`。报告、日志和提交内容不得包含用户绝对路径、用户名或 secret。
+提交前删除这些本地产物，再运行以下门禁。报告、日志和提交内容不得包含用户绝对路径、用户名或 secret。
+
+```powershell
+$status = (& git status --short)
+if ($LASTEXITCODE -ne 0) { throw 'Git status check failed' }
+if ($status) { throw ('Working tree is not clean:' + [Environment]::NewLine + ($status -join [Environment]::NewLine)) }
+```
