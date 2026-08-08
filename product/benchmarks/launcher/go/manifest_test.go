@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -196,6 +197,80 @@ func TestValidatePackageUsesArchiveContent(t *testing.T) {
 	}
 }
 
+func TestValidatePackageRejectsEmptyFileAndDirectory(t *testing.T) {
+	baseDir := t.TempDir()
+	archivePath := filepath.Join(baseDir, "runtime.pkg")
+	if err := os.WriteFile(archivePath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	emptyDigest := sha256.Sum256(nil)
+	manifest := Manifest{
+		RuntimeID: "openclaw-win-x64",
+		Archive:   "runtime.pkg",
+		SHA256:    hex.EncodeToString(emptyDigest[:]),
+	}
+	if err := ValidatePackage(baseDir, manifest); err == nil {
+		t.Fatal("accepted empty archive")
+	}
+
+	if err := os.Remove(archivePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(archivePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePackage(baseDir, manifest); err == nil {
+		t.Fatal("accepted directory as archive")
+	}
+}
+
+func TestValidatePackageStreamsLargeArchive(t *testing.T) {
+	const archiveSize = 32 << 20
+	baseDir := t.TempDir()
+	archive, err := os.Create(filepath.Join(baseDir, "runtime.pkg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.CopyN(archive, zeroReader{}, archiveSize); err != nil {
+		archive.Close()
+		t.Fatal(err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	hasher := sha256.New()
+	if _, err := io.CopyN(hasher, zeroReader{}, archiveSize); err != nil {
+		t.Fatal(err)
+	}
+	manifest := Manifest{
+		RuntimeID: "openclaw-win-x64",
+		Archive:   "runtime.pkg",
+		SHA256:    hex.EncodeToString(hasher.Sum(nil)),
+	}
+	if err := ValidatePackage(baseDir, manifest); err != nil {
+		t.Fatalf("large archive rejected: %v", err)
+	}
+}
+
+func TestValidatePackageAvoidsSymlinkTOCTOUByContract(t *testing.T) {
+	source, err := os.ReadFile("manifest.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{"os.OpenRoot(", "root.Open(", "file.Stat(", "io.Copy("} {
+		if !strings.Contains(text, required) {
+			t.Errorf("manifest.go missing root-bound streaming operation %q", required)
+		}
+	}
+	for _, forbidden := range []string{"os.ReadFile(", "filepath.EvalSymlinks("} {
+		if strings.Contains(text, forbidden) {
+			t.Errorf("manifest.go contains TOCTOU-prone operation %q", forbidden)
+		}
+	}
+}
+
 func TestValidatePackageAllowsUnicodeBaseDirectory(t *testing.T) {
 	baseDir := filepath.Join(t.TempDir(), "中文 路径")
 	if err := os.Mkdir(baseDir, 0o700); err != nil {
@@ -374,4 +449,11 @@ func assertCLIError(t *testing.T, executable string, args []string, code, secret
 	if secret != "" && strings.Contains(string(exitError.Stderr), secret) {
 		t.Fatalf("%s stderr leaked %q", code, secret)
 	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(buffer []byte) (int, error) {
+	clear(buffer)
+	return len(buffer), nil
 }

@@ -5,8 +5,8 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -47,17 +47,29 @@ func ValidatePackage(baseDir string, manifest Manifest) error {
 		return err
 	}
 
-	archivePath, err := containedArchivePath(baseDir, manifest.Archive)
+	root, err := os.OpenRoot(baseDir)
 	if err != nil {
 		return errArchiveMissing
 	}
-	data, err := os.ReadFile(archivePath)
+	defer root.Close()
+
+	archivePath := strings.ReplaceAll(manifest.Archive, `\`, string(os.PathSeparator))
+	file, err := root.Open(archivePath)
 	if err != nil {
 		return errArchiveMissing
 	}
-	actual := sha256.Sum256(data)
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 {
+		return errArchiveMissing
+	}
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return errArchiveMissing
+	}
 	expected := strings.ToLower(manifest.SHA256)
-	if subtle.ConstantTimeCompare([]byte(expected), []byte(hex.EncodeToString(actual[:]))) != 1 {
+	if subtle.ConstantTimeCompare([]byte(expected), []byte(hex.EncodeToString(hasher.Sum(nil)))) != 1 {
 		return errArchiveHash
 	}
 	return nil
@@ -95,26 +107,4 @@ func isWindowsDeviceName(segment string) bool {
 		return false
 	}
 	return baseName[:3] == "COM" || baseName[:3] == "LPT"
-}
-
-func containedArchivePath(baseDir, archive string) (string, error) {
-	basePath, err := filepath.EvalSymlinks(baseDir)
-	if err != nil {
-		return "", err
-	}
-	basePath, err = filepath.Abs(basePath)
-	if err != nil {
-		return "", err
-	}
-
-	hostRelative := filepath.FromSlash(strings.ReplaceAll(archive, `\`, "/"))
-	archivePath, err := filepath.EvalSymlinks(filepath.Join(basePath, hostRelative))
-	if err != nil {
-		return "", err
-	}
-	relative, err := filepath.Rel(basePath, archivePath)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", errInvalidArchive
-	}
-	return archivePath, nil
 }

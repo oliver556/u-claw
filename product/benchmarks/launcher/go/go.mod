@@ -1,3 +1,3 @@
 module u-claw-launcher-go
 
-go 1.23
+go 1.24
