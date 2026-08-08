@@ -781,6 +781,9 @@ function Read-BuildMetadata {
         return [LauncherBuildMetadataParser]::Parse($sidecarItem.FullName, $Candidate)
     }
     catch {
+        if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
+            [Console]::Error.WriteLine(($_.Exception.GetType().FullName + ': ' + $_.Exception.Message))
+        }
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_INVALID_BUILD_METADATA'
     }
 }
