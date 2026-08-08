@@ -9,11 +9,18 @@ export const RawOpenClawModelSchema = z.object({
   available: z.boolean().optional(),
   contextWindow: z.number().int().positive().optional(),
   reasoning: z.boolean().optional(),
+  api: z.string().min(1).optional(),
   input: z.array(z.string()).optional(),
-}).passthrough();
+}).strict();
 
 export const RawOpenClawModelsListResponseSchema = z.object({
   models: z.array(RawOpenClawModelSchema),
+}).strict();
+
+const RuntimeOpenClawModelSchema = RawOpenClawModelSchema.passthrough();
+
+export const RuntimeOpenClawModelsListResponseSchema = z.object({
+  models: z.array(RuntimeOpenClawModelSchema),
 }).strict();
 
 export type RawOpenClawModel = z.infer<typeof RawOpenClawModelSchema>;

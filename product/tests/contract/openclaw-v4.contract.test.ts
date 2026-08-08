@@ -210,6 +210,10 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
       (value: any) => { value.invalidView.requestFrame.params.view = "configured"; },
       (value: any) => { value.invalidView.responseFrame.id = "mismatched-response-id"; },
       (value: any) => { value.configured.responseFrame.payload.models[0].provider = ""; },
+      (value: any) => { value.configured.responseFrame.payload.models[0].unknown = "forbidden"; },
+      (value: any) => { value.configured.responseFrame.payload.models[0].apiKey = "secret"; },
+      (value: any) => { value.configured.responseFrame.payload.models[0].baseUrl = "https://private.invalid"; },
+      (value: any) => { value.configured.responseFrame.payload.models[0].params = { secret: true }; },
     ];
     for (const mutate of mutations) {
       const models = structuredClone(fixture("models.list.json"));

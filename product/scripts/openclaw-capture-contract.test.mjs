@@ -24,5 +24,9 @@ test("sanitizer rebuilds models.list fixture hashes and provenance from raw capt
   const source = await readFile(sanitizerUrl, "utf8");
   assert.match(source, /rawNames = \[[^\]]*"models\.list\.json"/su);
   assert.match(source, /readJson\("models\.list\.json"\)/u);
-  assert.match(source, /"models\.list\.json": sanitize/u);
+  assert.match(source, /function projectModelsListResponse\(/u);
+  assert.doesNotMatch(source, /responseFrame:\s*modelsList\.(?:configured|invalidView)\.responseFrame/u);
+  for (const field of ["id", "name", "provider", "alias", "available", "contextWindow", "reasoning", "api", "input"]) {
+    assert.match(source, new RegExp(`\\b${field}\\b`, "u"));
+  }
 });
