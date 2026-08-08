@@ -99,6 +99,7 @@ export const ClientIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("sessions.list"), requestId: RequestIdSchema, params: PageRequestSchema }).strict(),
   z.object({ method: z.literal("sessions.get"), requestId: RequestIdSchema, params: SessionIdParamsSchema }).strict(),
   z.object({ method: z.literal("sessions.create"), requestId: RequestIdSchema, params: z.object({ title: z.string().optional(), modelId: z.string().min(1).optional() }).strict() }).strict(),
+  z.object({ method: z.literal("sessions.rename"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), title: z.string().trim().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("sessions.remove"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), revision: z.string().optional() }).strict() }).strict(),
   z.object({ method: z.literal("chat.list"), requestId: RequestIdSchema, params: SessionPageParamsSchema }).strict(),
   z.object({ method: z.literal("chat.get"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), messageId: z.string().min(1) }).strict() }).strict(),
@@ -131,6 +132,7 @@ export const ClientIpcSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("sessions.list"), requestId: RequestIdSchema, ok: z.literal(true), result: PageResponseSchema(SessionSummarySchema) }).strict(),
   z.object({ method: z.literal("sessions.get"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionSchema }).strict(),
   z.object({ method: z.literal("sessions.create"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionSchema }).strict(),
+  z.object({ method: z.literal("sessions.rename"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionSchema }).strict(),
   z.object({ method: z.literal("sessions.remove"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
   z.object({ method: z.literal("chat.list"), requestId: RequestIdSchema, ok: z.literal(true), result: PageResponseSchema(MessageSchema) }).strict(),
   z.object({ method: z.literal("chat.get"), requestId: RequestIdSchema, ok: z.literal(true), result: MessageSchema }).strict(),
@@ -159,7 +161,7 @@ export const ClientIpcFailureResponseSchema = z
   .object({
     method: z.enum([
       "gateway.negotiate", "gateway.get-status", "gateway.watch-status", "gateway.reconnect",
-      "sessions.list", "sessions.get", "sessions.create", "sessions.remove",
+      "sessions.list", "sessions.get", "sessions.create", "sessions.rename", "sessions.remove",
       "chat.list", "chat.get", "chat.watch", "chat.send", "chat.abort", "chat.cancel-stream",
       "tools.list", "tools.get-call", "approvals.list-pending", "approvals.resolve-exec", "approvals.resolve-plugin",
       "models.list", "models.select-for-session", "skills.list", "channels.list",

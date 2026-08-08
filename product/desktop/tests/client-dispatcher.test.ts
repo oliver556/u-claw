@@ -18,7 +18,7 @@ class ControlledIterator<T> implements AsyncIterable<T>, AsyncIterator<T> {
 function clientWith(overrides: Partial<UClawClient>): UClawClient {
   return {
     gateway: { negotiate: vi.fn(), getStatus: vi.fn(), watchStatus: vi.fn(), reconnect: vi.fn() },
-    sessions: { list: vi.fn(), get: vi.fn(), create: vi.fn(), remove: vi.fn() },
+    sessions: { list: vi.fn(), get: vi.fn(), create: vi.fn(), rename: vi.fn(), remove: vi.fn() },
     chat: { list: vi.fn(), get: vi.fn(), watch: vi.fn(), send: vi.fn(), abort: vi.fn() },
     tools: { list: vi.fn(), getCall: vi.fn() }, approvals: { listPending: vi.fn(), resolveExec: vi.fn(), resolvePlugin: vi.fn() },
     models: { list: vi.fn(), selectForSession: vi.fn() }, skills: { list: vi.fn() }, channels: { list: vi.fn() },
@@ -35,6 +35,14 @@ const status = (attempt: number): GatewayStatus => ({
 });
 
 describe("createClientDispatcher stream ownership", () => {
+  it("routes session rename without a revision pseudo-CAS", async () => {
+    const rename = vi.fn(async () => ({ id: "session-1", title: "重命名后", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" as const }));
+    const dispatcher = createClientDispatcher({ client: clientWith({ sessions: { list: vi.fn(), get: vi.fn(), create: vi.fn(), rename, remove: vi.fn() } }), sendEvent: vi.fn() });
+
+    await expect(dispatcher(request("sessions.rename", "rename-1", { sessionId: "session-1", title: "重命名后" }))).resolves.toMatchObject({ ok: true, result: { title: "重命名后" } });
+    expect(rename).toHaveBeenCalledWith("session-1", "重命名后");
+    dispatcher.dispose();
+  });
   it("drops late send frames from an older generation with the same clientRequestId", async () => {
     const oldStream = new ControlledIterator<MessageEvent>();
     const newStream = new ControlledIterator<MessageEvent>();

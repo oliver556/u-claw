@@ -319,6 +319,10 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
         }
         case "sessions.get": return success(request, rendererSafeSession(await client.sessions.get(request.params.sessionId)));
         case "sessions.create": return success(request, rendererSafeSession(await client.sessions.create(request.params)));
+        case "sessions.rename": {
+          if (client.sessions.rename === undefined) throw { code: "UNAVAILABLE", message: "Session rename is unavailable.", retryable: false, recoveryActions: [], causeDetails: {} };
+          return success(request, rendererSafeSession(await client.sessions.rename(request.params.sessionId, request.params.title)));
+        }
         case "sessions.remove": await client.sessions.remove(request.params.sessionId, request.params.revision); return success(request, null);
         case "chat.list": {
           const { sessionId, ...page } = request.params;
