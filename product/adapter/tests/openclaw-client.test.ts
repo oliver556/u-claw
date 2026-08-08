@@ -18,6 +18,7 @@ class FakeTransport implements OpenClawTransport {
   readonly fixtures = new Map<string, JsonValue>();
   readonly fixtureQueues = new Map<string, JsonValue[]>();
   readonly requestGates = new Map<string, Promise<JsonValue>>();
+  readonly requestGateQueues = new Map<string, Array<Promise<JsonValue>>>();
   readonly eventListeners = new Set<{ event: string; listener: (frame: EventFrame) => void }>();
   readonly sequenceGapListeners = new Set<(gap: { expected: number; received: number }) => void>();
   readonly closeListeners = new Set<(error: Error) => void>();
@@ -70,7 +71,8 @@ class FakeTransport implements OpenClawTransport {
       this.calls.push(method);
       this.requests.push({ method, params });
       const queued = this.fixtureQueues.get(method)?.shift();
-      return schema.parse(await (this.requestGates.get(method) ?? Promise.resolve(queued ?? this.fixtures.get(method))));
+      const gated = this.requestGateQueues.get(method)?.shift() ?? this.requestGates.get(method);
+      return schema.parse(await (gated ?? Promise.resolve(queued ?? this.fixtures.get(method))));
     },
     onEvent: (event: string, listener: (frame: EventFrame) => void) => {
       const registered = { event, listener };
@@ -582,6 +584,61 @@ describe("OpenClawClient", () => {
     expect(UClawErrorSchema.parse(error.uclawError)).toMatchObject({ code: "MODEL_UNAVAILABLE", retryable: false });
     expect(transport.requests).toEqual([
       { method: "sessions.patch", params: { key: "agent:dev:main", model: "contract/missing-model" } },
+    ]);
+  });
+
+  it("preserves non-model INVALID_REQUEST errors from sessions.patch", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.patch");
+    transport.requestGates.set("sessions.patch", Promise.reject(new RpcRemoteError(
+      "INVALID_REQUEST",
+      "invalid sessions.patch params: at root: unexpected property 'baseHash'",
+    )));
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const error = await client.models.selectForSession("agent:dev:main", "contract/contract-alt-model").catch((reason: unknown) => reason) as { uclawError: unknown };
+
+    expect(UClawErrorSchema.parse(error.uclawError)).toMatchObject({
+      code: "OPERATION_FAILED",
+      message: "invalid sessions.patch params: at root: unexpected property 'baseHash'",
+      causeDetails: { upstreamCode: "INVALID_REQUEST" },
+    });
+  });
+
+  it("serializes model patch and readback globally across sessions", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("sessions.patch");
+    let releaseFirstPatch: (value: JsonValue) => void = () => undefined;
+    transport.requestGateQueues.set("sessions.patch", [
+      new Promise((resolve) => { releaseFirstPatch = resolve; }),
+      Promise.resolve({ ok: true, key: "agent:dev:other" }),
+    ]);
+    transport.fixtureQueues.set("sessions.list", [
+      { sessions: [{ key: "agent:dev:main", modelProvider: "contract", model: "contract-main" }] },
+      { sessions: [{ key: "agent:dev:other", modelProvider: "contract", model: "contract-alt" }] },
+    ]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const first = client.models.selectForSession("agent:dev:main", "contract/contract-main");
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = client.models.selectForSession("agent:dev:other", "contract/contract-alt");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.requests).toEqual([
+      { method: "sessions.patch", params: { key: "agent:dev:main", model: "contract/contract-main" } },
+    ]);
+
+    releaseFirstPatch({ ok: true, key: "agent:dev:main" });
+    await Promise.all([first, second]);
+    expect(transport.requests).toEqual([
+      { method: "sessions.patch", params: { key: "agent:dev:main", model: "contract/contract-main" } },
+      { method: "sessions.list", params: {} },
+      { method: "sessions.patch", params: { key: "agent:dev:other", model: "contract/contract-alt" } },
+      { method: "sessions.list", params: {} },
     ]);
   });
 
