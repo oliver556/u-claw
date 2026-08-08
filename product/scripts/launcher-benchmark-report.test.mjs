@@ -137,6 +137,8 @@ test("PowerShell harness locks symmetric mandatory cases and safe fixed errors",
   assert.match(source, /E_PACKAGE_INVALID/);
   assert.match(source, /E_ARGUMENTS/);
   assert.match(source, /LAUNCHER_BENCHMARK_[A-Z_]+/);
+  assert.match(source, /@\(\$ready\.PSObject\.Properties\)\.Count\s+-eq\s+2/);
+  assert.doesNotMatch(source, /\$ready\.PSObject\.Properties\.Count/);
   assert.doesNotMatch(source, /Write-(Host|Verbose|Debug|Warning)/i);
 });
 

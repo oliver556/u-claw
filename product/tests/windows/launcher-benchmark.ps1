@@ -1275,7 +1275,7 @@ function Test-ReadyJson {
     try {
         $ready = $Output.TrimEnd("`r", "`n") | ConvertFrom-Json
         return $ready.status -ceq 'ready' -and $ready.candidate -ceq $CandidateId -and
-            $ready.PSObject.Properties.Count -eq 2
+            @($ready.PSObject.Properties).Count -eq 2
     }
     catch {
         return $false
