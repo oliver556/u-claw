@@ -163,6 +163,8 @@ test("PowerShell harness consumes strict auditable build sidecars", async () => 
   assert.match(source, /Write-BenchmarkDiagnostic 'GO_METADATA_READ'/);
   assert.match(source, /Write-BenchmarkDiagnostic \(\$candidateDiagnosticPrefix \+ '_(?:FIXTURES_CREATED)'\)/);
   assert.match(source, /Write-BenchmarkDiagnostic \(\$candidateDiagnosticPrefix \+ '_(?:CASES_COMPLETED)'\)/);
+  assert.match(source, /Write-BenchmarkDiagnostic \(\$caseDiagnosticPrefix \+ 'VALID_MANIFEST'\)/);
+  assert.match(source, /Write-BenchmarkDiagnostic \(\$caseDiagnosticPrefix \+ 'SDK_PATH_REMOVED'\)/);
   assert.match(source, /Write-BenchmarkDiagnostic 'REPORT_WRITTEN'/);
   assert.match(source, /Console\]::Error\.WriteLine\(['"]LAUNCHER_BENCHMARK_METADATA_PARSER_(?:INIT|PARSE)['"]\)/);
   assert.match(source, /try\s*\{[\s\S]{0,600}Initialize-BuildMetadataParser[\s\S]{0,600}LauncherBuildMetadataParser\]::Parse/);

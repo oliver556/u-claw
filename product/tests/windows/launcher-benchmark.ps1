@@ -1290,18 +1290,27 @@ function Invoke-MandatoryCases {
 
     $newline = Get-CandidateNewline $Candidate.Id
     $ready = '{"status":"ready","candidate":"' + $Candidate.Id + '"}' + $newline
+    $caseDiagnosticPrefix = 'CANDIDATE_' + $Candidate.Id.ToUpperInvariant() + '_CASE_'
     $cases = [ordered]@{}
     $cases['valid-manifest'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['valid-manifest']) 0 $ready '' $null
+    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'VALID_MANIFEST')
     $cases['invalid-sha256'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['invalid-sha256']) 1 '' ('E_PACKAGE_INVALID' + $newline) $null
+    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'INVALID_SHA256')
     $cases['path-traversal'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['path-traversal']) 1 '' ('E_MANIFEST_INVALID' + $newline) $null
+    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'PATH_TRAVERSAL')
     $cases['absolute-path'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['absolute-path']) 1 '' ('E_MANIFEST_INVALID' + $newline) $null
+    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'ABSOLUTE_PATH')
     $cases['absolute-path-unc'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['absolute-path-unc']) 1 '' ('E_MANIFEST_INVALID' + $newline) $null
+    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'ABSOLUTE_PATH_UNC')
     $cases['unicode-space-path'] = Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['unicode-space-path']) 0 $ready '' $null
+    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'UNICODE_SPACE_PATH')
     $cases['sdk-path-removed'] = Invoke-WithoutSdkPath {
         param($sdkFreePath)
         Test-ExpectedInvocation $Candidate @('--manifest', $Fixtures['sdk-path-removed']) 0 $ready '' $sdkFreePath
     }
+    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'SDK_PATH_REMOVED')
     $cases['cli-invalid-arguments'] = Test-ExpectedInvocation $Candidate @('--private-secret-path') 1 '' ('E_ARGUMENTS' + $newline) $null
+    Write-BenchmarkDiagnostic ($caseDiagnosticPrefix + 'CLI_INVALID_ARGUMENTS')
     return $cases
 }
 
