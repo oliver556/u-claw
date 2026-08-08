@@ -2,7 +2,16 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { UClawErrorSchema, type AttachmentImportInput, type AttachmentService, type ClientIpcRequest, type UClawClient } from "@uclaw/shared";
+import {
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_TOTAL_BYTES,
+  UClawErrorSchema,
+  type AttachmentImportInput,
+  type AttachmentService,
+  type ClientIpcRequest,
+  type UClawClient,
+} from "@uclaw/shared";
 
 import { GatewayProcessManager, type SpawnGateway } from "./gateway/gateway-process.js";
 import {
@@ -244,22 +253,66 @@ const ATTACHMENT_MEDIA_TYPES: Record<string, string> = {
   ".webp": "image/webp",
 };
 
+export interface ReadSelectedAttachmentsOptions {
+  maxFiles?: number;
+  maxFileBytes?: number;
+  maxTotalBytes?: number;
+  concurrency?: number;
+  stat?(path: string): Promise<{ isFile(): boolean; size: number }>;
+  readFile?(path: string): Promise<Buffer>;
+}
+
 export async function readSelectedAttachments(
   paths: readonly string[],
-  maxBytes = 10 * 1024 * 1024,
+  options: ReadSelectedAttachmentsOptions = {},
 ): Promise<AttachmentImportInput[]> {
-  return Promise.all(paths.map(async (path) => {
-    const info = await stat(path);
+  const maxFiles = options.maxFiles ?? MAX_ATTACHMENTS_PER_MESSAGE;
+  const maxFileBytes = options.maxFileBytes ?? MAX_ATTACHMENT_BYTES;
+  const maxTotalBytes = options.maxTotalBytes ?? MAX_ATTACHMENT_TOTAL_BYTES;
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 2, maxFiles));
+  const inspect = options.stat ?? stat;
+  const read = options.readFile ?? readFile;
+  if (paths.length > maxFiles) {
+    throw UClawErrorSchema.parse({ code: "INVALID_ARGUMENT", message: `一次最多选择 ${maxFiles} 个附件。`, retryable: false });
+  }
+  const inspected = await Promise.all(paths.map(async (path) => {
+    const info = await inspect(path);
     if (!info.isFile()) throw UClawErrorSchema.parse({ code: "INVALID_ARGUMENT", message: "选择项不是文件。", retryable: false });
-    if (info.size > maxBytes) throw UClawErrorSchema.parse({ code: "FILE_TOO_LARGE", message: `附件超过大小限制（${info.size} > ${maxBytes} bytes）。`, retryable: false });
-    const content = await readFile(path);
-    return {
-      name: basename(path),
-      mediaType: ATTACHMENT_MEDIA_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream",
-      size: content.byteLength,
-      contentBase64: content.toString("base64"),
-    };
+    if (info.size > maxFileBytes) throw UClawErrorSchema.parse({ code: "FILE_TOO_LARGE", message: `附件超过大小限制（${info.size} > ${maxFileBytes} bytes）。`, retryable: false });
+    return info;
   }));
+  const inspectedTotal = inspected.reduce((total, info) => total + info.size, 0);
+  if (inspectedTotal > maxTotalBytes) {
+    throw UClawErrorSchema.parse({ code: "FILE_TOO_LARGE", message: "附件累计大小超过选择限制。", retryable: false });
+  }
+
+  const results = new Array<AttachmentImportInput>(paths.length);
+  let nextIndex = 0;
+  let actualTotal = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= paths.length) return;
+      const path = paths[index];
+      const content = await read(path);
+      if (content.byteLength > maxFileBytes) {
+        throw UClawErrorSchema.parse({ code: "FILE_TOO_LARGE", message: `附件读取后超过大小限制（${content.byteLength} > ${maxFileBytes} bytes）。`, retryable: false });
+      }
+      actualTotal += content.byteLength;
+      if (actualTotal > maxTotalBytes) {
+        throw UClawErrorSchema.parse({ code: "FILE_TOO_LARGE", message: "附件读取后累计大小超过选择限制。", retryable: false });
+      }
+      results[index] = {
+        name: basename(path),
+        mediaType: ATTACHMENT_MEDIA_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream",
+        size: content.byteLength,
+        contentBase64: content.toString("base64"),
+      };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, () => worker()));
+  return results;
 }
 
 export async function startElectronMain(options: DesktopMainOptions): Promise<void> {

@@ -18,6 +18,10 @@ export interface OpenClawAttachment {
   content: string;
 }
 
+interface ResolvedOpenClawAttachment extends OpenClawAttachment {
+  byteLength: number;
+}
+
 interface StoredAttachment {
   attachment: Attachment;
   contentBase64: string;
@@ -132,7 +136,7 @@ export class AttachmentManager implements AttachmentService {
     this.items.delete(id);
   }
 
-  resolveForSend(id: string): OpenClawAttachment {
+  resolveForSend(id: string): ResolvedOpenClawAttachment {
     const stored = this.require(id);
     if (stored.attachment.state !== "ready" && stored.attachment.state !== "attached") {
       throw new AttachmentServiceError("INVALID_ARGUMENT", "附件尚未准备完成。");
@@ -142,6 +146,7 @@ export class AttachmentManager implements AttachmentService {
       fileName: stored.attachment.file.name,
       mimeType: stored.attachment.file.mediaType,
       content: stored.contentBase64,
+      byteLength: stored.attachment.file.size,
     };
   }
 

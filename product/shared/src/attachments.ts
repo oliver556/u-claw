@@ -5,6 +5,9 @@ import { UClawErrorSummarySchema } from "./errors.js";
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHMENT_BASE64_LENGTH = Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4;
+export const MAX_ATTACHMENTS_PER_MESSAGE = 8;
+export const MAX_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
+export const MAX_ATTACHMENT_BASE64_TOTAL_LENGTH = Math.ceil(MAX_ATTACHMENT_TOTAL_BYTES / 3) * 4;
 
 export const AttachmentStateSchema = z.enum([
   "selected", "validating", "ready", "uploading", "attached", "failed", "cancelled",
