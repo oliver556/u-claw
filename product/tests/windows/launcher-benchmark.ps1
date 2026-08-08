@@ -1407,36 +1407,36 @@ function Invoke-LauncherBenchmark {
     )
     $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('uclaw-launcher-' + [Guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($temporaryRoot)
-        try {
-            $fixturesByCandidate = @{}
-            $caseResults = @{}
-            $firstMandatoryFailure = $null
-            $timings = @{ go = [Collections.Generic.List[double]]::new(); dotnet = [Collections.Generic.List[double]]::new() }
-            foreach ($candidate in $candidates) {
+    try {
+        $fixturesByCandidate = @{}
+        $caseResults = @{}
+        $firstMandatoryFailure = $null
+        $timings = @{ go = [Collections.Generic.List[double]]::new(); dotnet = [Collections.Generic.List[double]]::new() }
+        foreach ($candidate in $candidates) {
             $candidateDiagnosticPrefix = 'CANDIDATE_' + $candidate.Id.ToUpperInvariant()
             Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_START')
             $candidateRoot = Join-Path $temporaryRoot $candidate.Id
             [void][IO.Directory]::CreateDirectory($candidateRoot)
             $fixturesByCandidate[$candidate.Id] = New-CandidateFixtures $candidateRoot
             Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_FIXTURES_CREATED')
-                $caseResults[$candidate.Id] = Invoke-MandatoryCases $candidate $fixturesByCandidate[$candidate.Id]
-                Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_CASES_COMPLETED')
-                if ($null -eq $firstMandatoryFailure) {
-                    foreach ($case in $caseResults[$candidate.Id].GetEnumerator()) {
-                        if (-not $case.Value) {
-                            $firstMandatoryFailure = 'MANDATORY_FAILURE_' + $candidate.Id.ToUpperInvariant() + '_' +
-                                $case.Key.ToString().ToUpperInvariant().Replace('-', '_')
-                            break
-                        }
+            $caseResults[$candidate.Id] = Invoke-MandatoryCases $candidate $fixturesByCandidate[$candidate.Id]
+            Write-BenchmarkDiagnostic ($candidateDiagnosticPrefix + '_CASES_COMPLETED')
+            if ($null -eq $firstMandatoryFailure) {
+                foreach ($case in $caseResults[$candidate.Id].GetEnumerator()) {
+                    if (-not $case.Value) {
+                        $firstMandatoryFailure = 'MANDATORY_FAILURE_' + $candidate.Id.ToUpperInvariant() + '_' +
+                            $case.Key.ToString().ToUpperInvariant().Replace('-', '_')
+                        break
                     }
                 }
             }
-            Write-BenchmarkDiagnostic 'CASES_COMPLETED'
-            if ($null -ne $firstMandatoryFailure) {
-                Write-BenchmarkDiagnostic $firstMandatoryFailure
-            }
+        }
+        Write-BenchmarkDiagnostic 'CASES_COMPLETED'
+        if ($null -ne $firstMandatoryFailure) {
+            Write-BenchmarkDiagnostic $firstMandatoryFailure
+        }
 
-            foreach ($candidate in $candidates) {
+        foreach ($candidate in $candidates) {
             [void](Invoke-TimedReady $candidate $fixturesByCandidate[$candidate.Id]['valid-manifest'])
         }
         for ($iteration = 0; $iteration -lt $Iterations; $iteration++) {
