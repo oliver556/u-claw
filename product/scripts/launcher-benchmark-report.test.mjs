@@ -203,7 +203,7 @@ test("PowerShell harness contains descendants in a kill-on-close Windows Job Obj
   assert.match(source, /LAUNCHER_BENCHMARK_PROCESS_JOB_FAILED/);
   assert.match(source, /function Initialize-ProcessJob[\s\S]{0,500}Add-Type[\s\S]{0,300}catch[\s\S]{0,200}PROCESS_JOB_FAILED/);
   assert.match(source, /\$job\s*=\s*\[LauncherProcessJob\]::new\(\)[\s\S]{0,200}catch[\s\S]{0,200}PROCESS_JOB_FAILED/);
-  assert.match(source, /CreateProcessW[\s\S]{0,1000}AssignProcessToJobObject[\s\S]{0,1000}Task\.Factory\.StartNew[\s\S]{0,500}ResumeThread/);
+  assert.match(source, /CreateProcessW[\s\S]{0,1000}AssignProcessToJobObject[\s\S]{0,500}ResumeThread[\s\S]{0,500}Task\.Factory\.StartNew/);
   assert.match(source, /CreateProcessW[\s\S]{0,500}CloseParentWriteHandles[\s\S]{0,300}AssignProcessToJobObject/);
   assert.match(source, /AssignProcessToJobObject[\s\S]{0,300}TerminateSuspendedProcess/);
   assert.match(source, /ResumeThread[\s\S]{0,300}TerminateSuspendedProcess/);

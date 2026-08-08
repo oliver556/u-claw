@@ -269,18 +269,18 @@ public sealed class LauncherProcessJob : IDisposable
                     TerminateSuspendedProcess();
                     throw new Win32Exception(error);
                 }
-                StdoutTask = Task.Factory.StartNew(
-                    () => stdoutReader.ReadToEnd(),
-                    TaskCreationOptions.LongRunning);
-                StderrTask = Task.Factory.StartNew(
-                    () => stderrReader.ReadToEnd(),
-                    TaskCreationOptions.LongRunning);
                 if (ResumeThread(threadHandle) == UInt32.MaxValue)
                 {
                     int error = Marshal.GetLastWin32Error();
                     TerminateSuspendedProcess();
                     throw new Win32Exception(error);
                 }
+                StdoutTask = Task.Factory.StartNew(
+                    () => stdoutReader.ReadToEnd(),
+                    TaskCreationOptions.LongRunning);
+                StderrTask = Task.Factory.StartNew(
+                    () => stderrReader.ReadToEnd(),
+                    TaskCreationOptions.LongRunning);
             }
             catch
             {
