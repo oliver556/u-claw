@@ -72,6 +72,7 @@ func ValidateManifest(manifest Manifest) error {
 		manifest.UnpackedBytes <= 0 ||
 		manifest.FileCount <= 0 ||
 		!isSafeWindowsRelativePath(manifest.Entrypoint) ||
+		manifest.EntryArgs == nil ||
 		len(manifest.EntryArgs) > 64 {
 		return ErrManifestInvalid
 	}
