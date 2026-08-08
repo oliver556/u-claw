@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "RUN-001",
+  "status": "blocked",
+  "startedAtUtc": "2000-01-01T00:00:00.000Z",
+  "completedAtUtc": "2000-01-01T00:00:00.000Z",
+  "assertions": [],
+  "artifacts": [],
+  "blockers": [
+    {
+      "code": "REAL_WINDOWS_EVIDENCE_REQUIRED",
+      "message": "Replace this template only with evidence collected on the required real Windows environment."
+    }
+  ]
+}
