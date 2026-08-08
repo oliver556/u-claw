@@ -1,7 +1,8 @@
-import { dirname, join } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ClientIpcRequest, UClawClient } from "@uclaw/shared";
+import { UClawErrorSchema, type AttachmentImportInput, type AttachmentService, type ClientIpcRequest, type UClawClient } from "@uclaw/shared";
 
 import { GatewayProcessManager, type SpawnGateway } from "./gateway/gateway-process.js";
 import {
@@ -135,6 +136,8 @@ export interface DesktopMainOptions {
   probeCapabilities(port: number, signal: AbortSignal): Promise<GatewayCapabilityProbeResult>;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
   client?: UClawClient;
+  attachments?: AttachmentService;
+  selectAttachments?(): Promise<AttachmentImportInput[]>;
   selectPort?(excludedPorts: readonly number[], signal: AbortSignal): Promise<number>;
   fetch?: GatewayHealthDependencies["fetch"];
   now?: () => number;
@@ -231,10 +234,39 @@ export function requireElectronClient(client: UClawClient | undefined): UClawCli
   return client;
 }
 
+const ATTACHMENT_MEDIA_TYPES: Record<string, string> = {
+  ".gif": "image/gif",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".txt": "text/plain",
+  ".webp": "image/webp",
+};
+
+export async function readSelectedAttachments(
+  paths: readonly string[],
+  maxBytes = 10 * 1024 * 1024,
+): Promise<AttachmentImportInput[]> {
+  return Promise.all(paths.map(async (path) => {
+    const info = await stat(path);
+    if (!info.isFile()) throw UClawErrorSchema.parse({ code: "INVALID_ARGUMENT", message: "选择项不是文件。", retryable: false });
+    if (info.size > maxBytes) throw UClawErrorSchema.parse({ code: "FILE_TOO_LARGE", message: `附件超过大小限制（${info.size} > ${maxBytes} bytes）。`, retryable: false });
+    const content = await readFile(path);
+    return {
+      name: basename(path),
+      mediaType: ATTACHMENT_MEDIA_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream",
+      size: content.byteLength,
+      contentBase64: content.toString("base64"),
+    };
+  }));
+}
+
 export async function startElectronMain(options: DesktopMainOptions): Promise<void> {
-  const { app, BrowserWindow, ipcMain, shell } = await import("electron");
+  const { app, BrowserWindow, dialog, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const client = requireElectronClient(options.client);
+  const attachments = options.attachments ?? client.attachments;
   let gatewayPort: number | undefined;
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -274,6 +306,14 @@ export async function startElectronMain(options: DesktopMainOptions): Promise<vo
       },
       dispatchClient,
       client,
+      attachments,
+      selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
+        const selected = await dialog.showOpenDialog({
+          properties: ["openFile", "multiSelections"],
+          filters: [{ name: "Supported attachments", extensions: ["png", "jpg", "jpeg", "gif", "webp", "txt", "pdf"] }],
+        });
+        return selected.canceled ? [] : readSelectedAttachments(selected.filePaths);
+      }),
     }),
   });
 }

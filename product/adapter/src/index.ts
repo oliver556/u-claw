@@ -1,4 +1,6 @@
 export { packageName } from "./package-name.js";
+export { AttachmentManager, AttachmentServiceError } from "./attachments.js";
+export type { AttachmentManagerOptions, OpenClawAttachment } from "./attachments.js";
 export { mapChatEvent, mapMessage } from "./mappers/chat.js";
 export { mapSession, mapSessionSummary } from "./mappers/session.js";
 export { mapExecApproval, mapPluginApproval, mapToolCall } from "./mappers/tool.js";

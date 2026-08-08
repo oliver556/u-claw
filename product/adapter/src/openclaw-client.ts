@@ -32,6 +32,7 @@ import {
 import type { GatewayWebSocketState, HelloOk } from "./transport/gateway-websocket.js";
 import { ReconnectPolicy, type SequenceGap } from "./reconnect.js";
 import { AdapterServiceError, RpcClosedError, RpcProtocolError, RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
+import type { AttachmentManager } from "./attachments.js";
 
 interface OpenClawRouter {
   request<T>(method: string, params: JsonValue, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T>;
@@ -87,7 +88,7 @@ const SessionPageSchema = z.object({
   defaults: z.unknown().optional(),
 }).strict();
 
-const SendResponseSchema = z.object({ runId: z.string().min(1), status: z.string().min(1) }).strict();
+const SendResponseSchema = z.object({ runId: z.string().min(1), status: z.string().min(1) }).passthrough();
 const EmptyResponseSchema = z.union([z.object({}).strict(), z.null()]);
 const SessionDescribeResponseSchema = z.object({ session: RawSessionSchema.nullable() }).strict();
 const SessionsCreateResponseSchema = z.object({
@@ -210,6 +211,7 @@ export class AsyncEventQueue<T> {
 
 export interface OpenClawClientOptions {
   transport: OpenClawTransport;
+  attachments?: AttachmentManager;
   now?: () => string;
   reconnectPolicy?: ReconnectPolicy;
   maxStartupRetries?: number;
@@ -218,6 +220,7 @@ export interface OpenClawClientOptions {
 }
 
 export class OpenClawClient implements UClawClient {
+  readonly attachments: AttachmentManager | undefined;
   private capabilities: CapabilitySet | undefined;
   private hello: HelloOk | undefined;
   private readonly now: () => string;
@@ -237,6 +240,7 @@ export class OpenClawClient implements UClawClient {
   private resyncing = false;
 
   constructor(private readonly options: OpenClawClientOptions) {
+    this.attachments = options.attachments;
     this.now = options.now ?? (() => new Date().toISOString());
     this.statusSince = this.now();
     this.reconnectPolicy = options.reconnectPolicy ?? new ReconnectPolicy();
@@ -394,7 +398,9 @@ export class OpenClawClient implements UClawClient {
 
   private async *sendChat(input: Parameters<UClawClient["chat"]["send"]>[0], signal?: AbortSignal): AsyncIterable<MessageEvent> {
     this.requireMethod("chat.send");
-    if (input.blocks.some((block) => block.type === "attachment")) throw new UClawUnsupportedError("chat.send.attachments");
+    const attachmentIds = input.blocks.flatMap((block) => block.type === "attachment" ? [block.attachmentId] : []);
+    if (attachmentIds.length > 0 && this.options.attachments === undefined) throw new UClawUnsupportedError("chat.send.attachments");
+    const attachments = attachmentIds.map((id) => this.options.attachments!.resolveForSend(id));
     const text = input.blocks.filter((block) => block.type === "text").map((block) => block.text).join("\n");
     const queue = new AsyncEventQueue<MessageEvent>();
     let expectedRunId: string | undefined;
@@ -433,12 +439,24 @@ export class OpenClawClient implements UClawClient {
     })];
     try {
       if (signal?.aborted === true) return;
-      const acceptedRequest = this.options.transport.router.request("chat.send", {
+      for (const id of attachmentIds) this.options.attachments?.markUploading(id, 0);
+      const requestParams: JsonValue = {
         sessionKey: input.sessionId,
         message: text,
+        ...(attachments.length === 0 ? {} : { attachments: attachments.map((attachment) => ({ ...attachment })) }),
         idempotencyKey: input.clientRequestId,
         ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
-      }, SendResponseSchema);
+      };
+      const acceptedRequest = this.options.transport.router.request("chat.send", requestParams, SendResponseSchema).then((accepted) => {
+        for (const id of attachmentIds) this.options.attachments?.markAttached(id);
+        return accepted;
+      }, (error: unknown) => {
+        const summary = error instanceof AdapterServiceError
+          ? { code: error.uclawError.code, message: error.uclawError.message, retryable: error.uclawError.retryable }
+          : { code: "UNAVAILABLE" as const, message: "附件发送失败。", retryable: true };
+        for (const id of attachmentIds) this.options.attachments?.markFailed(id, summary);
+        throw error;
+      });
       let removeAbortListener = (): void => undefined;
       const cancellation = new Promise<{ kind: "cancelled" }>((resolve) => {
         const onAbort = (): void => resolve({ kind: "cancelled" });
@@ -581,7 +599,7 @@ export class OpenClawClient implements UClawClient {
         methods,
         events: hello.features.events.filter((event) => implementedEvents.has(event)),
         features: {
-          attachments: false,
+          attachments: this.options.attachments !== undefined && hello.features.methods.includes("chat.send"),
           approvalResolve: hello.features.methods.includes("exec.approval.resolve") && hello.features.methods.includes("plugin.approval.resolve"),
         },
       });

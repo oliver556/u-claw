@@ -1,4 +1,5 @@
 import type { Page, PageRequest } from "./common.js";
+import type { AttachmentService } from "./attachments.js";
 import type { CreateSessionInput, Message, MessageEvent, SendMessageInput, Session, SessionListRequest, SessionSummary } from "./chat.js";
 import type { CapabilitySet, GatewayStatus } from "./gateway.js";
 import type {
@@ -78,6 +79,7 @@ export interface UClawClient {
   gateway: GatewayService;
   sessions: SessionService;
   chat: ChatService;
+  attachments?: AttachmentService;
   tools: ToolService;
   approvals: ApprovalService;
   models: ModelService;

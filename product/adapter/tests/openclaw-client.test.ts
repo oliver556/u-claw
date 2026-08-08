@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { type z } from "zod";
 
 import { AsyncEventQueue, OpenClawClient, UClawUnsupportedError, type OpenClawTransport } from "../src/openclaw-client.js";
+import { AttachmentManager } from "../src/attachments.js";
 import { ManualClock } from "../src/mock/mock-client.js";
 import { ReconnectPolicy } from "../src/reconnect.js";
 import type { HelloOk } from "../src/transport/gateway-websocket.js";
@@ -291,6 +292,63 @@ describe("OpenClawClient", () => {
     expect(capabilities.methods.has("plugin.approval.resolve")).toBe(false);
     expect([...capabilities.methods]).toEqual(["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list"]);
     expect(transport.calls).toEqual([]);
+  });
+
+  it("maps prepared attachments to the locked OpenClaw v4 fixture", async () => {
+    const fixture = contractFixture("attachments.json").cases.find((item: { kind: string }) => item.kind === "text");
+    const transport = new FakeTransport();
+    transport.fixtures.set("chat.send", fixture.responseFrame.payload);
+    const attachments = new AttachmentManager();
+    const attachment = await attachments.import({
+      name: fixture.requestFrame.params.attachments[0].fileName,
+      mediaType: fixture.requestFrame.params.attachments[0].mimeType,
+      size: 8,
+      contentBase64: fixture.requestFrame.params.attachments[0].content,
+    });
+    const client = new OpenClawClient({ transport, attachments });
+    await client.gateway.negotiate();
+
+    const iterator = client.chat.send({
+      sessionId: fixture.requestFrame.params.sessionKey,
+      clientRequestId: fixture.requestFrame.params.idempotencyKey,
+      blocks: [
+        { type: "text", text: fixture.requestFrame.params.message, format: "plain" },
+        { type: "attachment", attachmentId: attachment.id },
+      ],
+    })[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+
+    expect(transport.requests.at(-1)).toEqual({ method: "chat.send", params: fixture.requestFrame.params });
+    expect(await attachments.get(attachment.id)).toMatchObject({ state: "attached", progress: 1 });
+  });
+
+  it("reports upload progress and preserves a retryable failed attachment", async () => {
+    const transport = new FakeTransport();
+    let acceptSend: (value: JsonValue) => void = () => undefined;
+    transport.requestGates.set("chat.send", new Promise((resolve) => { acceptSend = resolve; }));
+    const attachments = new AttachmentManager();
+    const attachment = await attachments.import({ name: "fixture.txt", mediaType: "text/plain", size: 8, contentBase64: "Y29udHJhY3Q=" });
+    const client = new OpenClawClient({ transport, attachments });
+    await client.gateway.negotiate();
+    const iterator = client.chat.send({ sessionId: "session-1", clientRequestId: "retry-key", blocks: [{ type: "attachment", attachmentId: attachment.id }] })[Symbol.asyncIterator]();
+    const started = iterator.next();
+    await vi.waitFor(async () => expect(await attachments.get(attachment.id)).toMatchObject({ state: "uploading", progress: 0 }));
+    acceptSend({ runId: "run-upload", status: "started" });
+    await expect(started).resolves.toMatchObject({ value: { type: "started", runId: "run-upload" } });
+    expect(await attachments.get(attachment.id)).toMatchObject({ state: "attached", progress: 1 });
+    await iterator.return?.();
+
+    let rejectSend: (error: Error) => void = () => undefined;
+    transport.requestGates.set("chat.send", new Promise((_resolve, reject) => { rejectSend = reject; }));
+    const retry = client.chat.send({ sessionId: "session-1", clientRequestId: "retry-key", blocks: [{ type: "attachment", attachmentId: attachment.id }] })[Symbol.asyncIterator]();
+    const failed = retry.next();
+    rejectSend(new RpcRemoteError("UNAVAILABLE", "upload failed", true));
+    await expect(failed).rejects.toBeInstanceOf(RpcRemoteError);
+    expect(await attachments.get(attachment.id)).toMatchObject({ state: "failed", error: { retryable: true } });
+    const states = [];
+    for await (const state of attachments.prepare(attachment.id)) states.push(state.state);
+    expect(states).toEqual(["validating", "ready"]);
   });
 
   it("maps real history and chat.message.get envelopes", async () => {

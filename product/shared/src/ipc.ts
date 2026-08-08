@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { AttachmentImportInputSchema, AttachmentSchema } from "./attachments.js";
+
 import {
   MessageEventSchema,
   MessageSchema,
@@ -29,6 +31,34 @@ import {
 const EmptyParamsSchema = z.object({}).strict();
 const RequestIdSchema = z.string().min(1);
 const SubscriptionIdSchema = z.string().min(1);
+
+export const AttachmentIpcRequestSchema = z.discriminatedUnion("method", [
+  z.object({ method: z.literal("select"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
+  z.object({ method: z.literal("import"), requestId: RequestIdSchema, params: AttachmentImportInputSchema }).strict(),
+  z.object({ method: z.literal("get"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
+  z.object({ method: z.literal("prepare"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
+  z.object({ method: z.literal("cancel"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
+  z.object({ method: z.literal("remove"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
+]);
+export type AttachmentIpcRequest = z.infer<typeof AttachmentIpcRequestSchema>;
+
+export const AttachmentIpcResponseSchema = z.union([
+  z.discriminatedUnion("method", [
+    z.object({ method: z.literal("select"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(AttachmentSchema) }).strict(),
+    z.object({ method: z.literal("import"), requestId: RequestIdSchema, ok: z.literal(true), result: AttachmentSchema }).strict(),
+    z.object({ method: z.literal("get"), requestId: RequestIdSchema, ok: z.literal(true), result: AttachmentSchema }).strict(),
+    z.object({ method: z.literal("prepare"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(AttachmentSchema) }).strict(),
+    z.object({ method: z.literal("cancel"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+    z.object({ method: z.literal("remove"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+  ]),
+  z.object({
+    method: z.enum(["select", "import", "get", "prepare", "cancel", "remove"]),
+    requestId: RequestIdSchema,
+    ok: z.literal(false),
+    error: UClawErrorSchema,
+  }).strict(),
+]);
+export type AttachmentIpcResponse = z.infer<typeof AttachmentIpcResponseSchema>;
 
 export const WindowIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("minimize"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
@@ -151,13 +181,14 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
-export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema]);
+export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema]);
 export type IpcRequest = z.infer<typeof IpcRequestSchema>;
 export const IpcResponseSchema = z.union([
   WindowIpcSuccessResponseSchema,
   WindowIpcFailureResponseSchema,
   ClientIpcSuccessResponseSchema,
   ClientIpcFailureResponseSchema,
+  AttachmentIpcResponseSchema,
 ]);
 export type IpcResponse = z.infer<typeof IpcResponseSchema>;
 export const IpcEventSchema = ClientIpcEventSchema;

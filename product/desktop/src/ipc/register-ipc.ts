@@ -1,4 +1,6 @@
 import {
+  AttachmentIpcRequestSchema,
+  AttachmentIpcResponseSchema,
   ClientIpcRequestSchema,
   IpcResponseSchema,
   UClawErrorSchema,
@@ -8,10 +10,12 @@ import {
   type IpcResponse,
   type UClawError,
   type UClawClient,
+  type AttachmentImportInput,
+  type AttachmentService,
 } from "@uclaw/shared";
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
-import { CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { ATTACHMENT_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -36,6 +40,8 @@ export interface RegisterIpcDependencies {
   windowControls: WindowControls;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
   client?: UClawClient;
+  attachments?: AttachmentService;
+  selectAttachments?(): Promise<AttachmentImportInput[]>;
 }
 
 function safeError(
@@ -73,6 +79,8 @@ export function registerIpc({
   windowControls,
   dispatchClient,
   client,
+  attachments,
+  selectAttachments,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
@@ -149,6 +157,36 @@ export function registerIpc({
     }
   });
 
+  if (attachments !== undefined) ipcMain.handle(ATTACHMENT_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = AttachmentIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid attachment IPC request.");
+    const request = parsed.data;
+    try {
+      let result: unknown = null;
+      if (request.method === "select") {
+        if (selectAttachments === undefined) throw safeError("UNAVAILABLE", "Attachment selection is unavailable.");
+        const selected = await selectAttachments();
+        result = await Promise.all(selected.map((input) => attachments.import(input)));
+      }
+      if (request.method === "import") result = await attachments.import(request.params);
+      if (request.method === "get") result = await attachments.get(request.params.attachmentId);
+      if (request.method === "prepare") {
+        const states = [];
+        for await (const attachment of attachments.prepare(request.params.attachmentId)) states.push(attachment);
+        result = states;
+      }
+      if (request.method === "cancel") await attachments.cancel(request.params.attachmentId);
+      if (request.method === "remove") await attachments.remove(request.params.attachmentId);
+      return AttachmentIpcResponseSchema.parse({ method: request.method, requestId: request.requestId, ok: true, result });
+    } catch (error) {
+      return AttachmentIpcResponseSchema.parse({
+        method: request.method, requestId: request.requestId, ok: false,
+        error: toRendererSafeError(error),
+      });
+    }
+  });
+
   let disposed = false;
   return () => {
     if (disposed) return;
@@ -156,5 +194,6 @@ export function registerIpc({
     clientDispatcher?.dispose();
     ipcMain.removeHandler(WINDOW_IPC_CHANNEL);
     ipcMain.removeHandler(CLIENT_IPC_CHANNEL);
+    if (attachments !== undefined) ipcMain.removeHandler(ATTACHMENT_IPC_CHANNEL);
   };
 }

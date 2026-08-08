@@ -1,3 +1,4 @@
+export * from "./attachments.js";
 export * from "./chat.js";
 export * from "./client.js";
 export * from "./common.js";
