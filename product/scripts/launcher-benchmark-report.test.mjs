@@ -191,20 +191,20 @@ test("Windows launcher workflow has pinned tools, isolated trials, and safe trig
   assert.match(workflowSource, /runs-on:\s*windows-2022/);
   assert.match(workflowSource, /fail-fast:\s*false/);
   assert.match(workflowSource, /trial:\s*\[1,\s*2,\s*3\]/);
-  assert.match(workflowSource, /runs-on:\s*ubuntu-latest/);
+  assert.match(workflowSource, /runs-on:\s*ubuntu-24\.04/);
   assert.match(workflowSource, /benchmark:[\s\S]*timeout-minutes:\s*45/);
   assert.match(workflowSource, /aggregate:[\s\S]*timeout-minutes:\s*10/);
   assert.equal(
-    [...workflowSource.matchAll(/uses:\s*actions\/checkout@v4\s*\n\s*with:\s*\n\s*persist-credentials:\s*false/g)].length,
+    [...workflowSource.matchAll(/uses:\s*actions\/checkout@11d5960a326750d5838078e36cf38b85af677262[^\n]*\n\s*with:\s*\n\s*persist-credentials:\s*false/g)].length,
     2,
   );
   for (const action of [
-    "actions/checkout@v4",
-    "actions/setup-go@v5",
-    "actions/setup-dotnet@v4",
-    "actions/setup-node@v4",
-    "actions/upload-artifact@v4",
-    "actions/download-artifact@v4",
+    "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+    "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff",
+    "actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9",
+    "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
   ]) {
     assert.match(workflowSource, new RegExp(action.replace("/", "\\/")));
   }

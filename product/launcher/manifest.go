@@ -26,17 +26,21 @@ var (
 )
 
 type Manifest struct {
-	SchemaVersion  int      `json:"schemaVersion"`
-	ProductVersion string   `json:"productVersion"`
-	RuntimeVersion string   `json:"runtimeVersion"`
-	RuntimeID      string   `json:"runtimeId"`
-	RuntimeArchive string   `json:"runtimeArchive"`
-	RuntimeSHA256  string   `json:"runtimeSha256"`
-	RuntimeBytes   int64    `json:"runtimeBytes"`
-	UnpackedBytes  int64    `json:"unpackedBytes"`
-	FileCount      int64    `json:"fileCount"`
-	Entrypoint     string   `json:"entrypoint"`
-	EntryArgs      []string `json:"entryArgs"`
+	SchemaVersion   int      `json:"schemaVersion"`
+	ProductVersion  string   `json:"productVersion"`
+	NodeVersion     string   `json:"nodeVersion"`
+	ElectronVersion string   `json:"electronVersion"`
+	RuntimeVersion  string   `json:"runtimeVersion"`
+	RuntimeID       string   `json:"runtimeId"`
+	TargetPlatform  string   `json:"targetPlatform"`
+	TargetArch      string   `json:"targetArch"`
+	RuntimeArchive  string   `json:"runtimeArchive"`
+	RuntimeSHA256   string   `json:"runtimeSha256"`
+	RuntimeBytes    int64    `json:"runtimeBytes"`
+	UnpackedBytes   int64    `json:"unpackedBytes"`
+	FileCount       int64    `json:"fileCount"`
+	Entrypoint      string   `json:"entrypoint"`
+	EntryArgs       []string `json:"entryArgs"`
 }
 
 func ReadManifest(path string) (Manifest, error) {
@@ -64,8 +68,12 @@ func ReadManifest(path string) (Manifest, error) {
 func ValidateManifest(manifest Manifest) error {
 	if manifest.SchemaVersion != 1 ||
 		!isSafeVersion(manifest.ProductVersion) ||
+		!isSafeVersion(manifest.NodeVersion) ||
+		!isSafeVersion(manifest.ElectronVersion) ||
 		!isSafeVersion(manifest.RuntimeVersion) ||
 		!runtimeIDPattern.MatchString(manifest.RuntimeID) ||
+		manifest.TargetPlatform != "win32" ||
+		manifest.TargetArch != "x64" ||
 		!isSafeWindowsRelativePath(manifest.RuntimeArchive) ||
 		!sha256Pattern.MatchString(manifest.RuntimeSHA256) ||
 		manifest.RuntimeBytes <= 0 ||

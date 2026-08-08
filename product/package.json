@@ -2,6 +2,7 @@
   "name": "uclaw-product",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.12.1",
   "engines": {
     "node": "24.15.0"
   },
@@ -12,9 +13,11 @@
     "frontend"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present && npm run smoke:dist",
+    "preinstall": "node scripts/verify-reproducibility.mjs",
+    "verify:reproducible": "node scripts/verify-reproducibility.mjs",
+    "build": "npm run verify:reproducible && npm run build --workspaces --if-present && npm run smoke:dist",
     "smoke:dist": "node shared/dist/index.js && node adapter/dist/index.js && node desktop/dist/index.js && npm run smoke:file -w @uclaw/frontend",
-    "test": "node --test scripts/*.test.mjs tests/packaging/*.test.mjs && npm run test:contract && npm run test --workspaces --if-present",
+    "test": "npm run verify:reproducible && node --test scripts/*.test.mjs tests/packaging/*.test.mjs && npm run test:contract && npm run test --workspaces --if-present",
     "test:launcher-benchmark": "node --test scripts/launcher-benchmark-report.test.mjs",
     "test:portable-launcher": "node --test scripts/portable-launcher-workflow.test.mjs scripts/runtime-manifest.test.mjs",
     "test:contract": "vitest run tests/contract",
@@ -22,11 +25,11 @@
     "capture:openclaw-v4": "node scripts/capture-openclaw-v4.mjs",
     "sanitize:openclaw-v4": "node scripts/sanitize-openclaw-v4-capture.mjs",
     "test:e2e": "playwright test",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run verify:reproducible && npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
-    "ajv": "^8.20.0",
-    "tar": "^7.5.2",
-    "typescript": "^5.9.3"
+    "ajv": "8.20.0",
+    "tar": "7.5.2",
+    "typescript": "5.9.3"
   }
 }

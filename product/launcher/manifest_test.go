@@ -13,17 +13,21 @@ import (
 
 func validRuntimeManifest() Manifest {
 	return Manifest{
-		SchemaVersion:  1,
-		ProductVersion: "0.1.0",
-		RuntimeVersion: "2026.7.1-2",
-		RuntimeID:      "openclaw-2026.7.1-2-win-x64",
-		RuntimeArchive: "runtime.pkg",
-		RuntimeSHA256:  strings.Repeat("a", 64),
-		RuntimeBytes:   1024,
-		UnpackedBytes:  4096,
-		FileCount:      8,
-		Entrypoint:     `electron\electron.exe`,
-		EntryArgs:      []string{"resources/app.asar"},
+		SchemaVersion:   1,
+		ProductVersion:  "0.1.0",
+		NodeVersion:     "24.15.0",
+		ElectronVersion: "40.10.6",
+		RuntimeVersion:  "2026.7.1-2",
+		RuntimeID:       "openclaw-2026.7.1-2-win-x64",
+		TargetPlatform:  "win32",
+		TargetArch:      "x64",
+		RuntimeArchive:  "runtime.pkg",
+		RuntimeSHA256:   strings.Repeat("a", 64),
+		RuntimeBytes:    1024,
+		UnpackedBytes:   4096,
+		FileCount:       8,
+		Entrypoint:      `electron\electron.exe`,
+		EntryArgs:       []string{"resources/app.asar"},
 	}
 }
 
@@ -77,7 +81,11 @@ func TestValidateManifestRejectsMalformedBounds(t *testing.T) {
 	mutations := []func(*Manifest){
 		func(value *Manifest) { value.SchemaVersion = 2 },
 		func(value *Manifest) { value.ProductVersion = "" },
+		func(value *Manifest) { value.NodeVersion = "" },
+		func(value *Manifest) { value.ElectronVersion = "" },
 		func(value *Manifest) { value.RuntimeVersion = "bad\nversion" },
+		func(value *Manifest) { value.TargetPlatform = "linux" },
+		func(value *Manifest) { value.TargetArch = "arm64" },
 		func(value *Manifest) { value.RuntimeSHA256 = strings.Repeat("g", 64) },
 		func(value *Manifest) { value.RuntimeBytes = 0 },
 		func(value *Manifest) { value.UnpackedBytes = -1 },
@@ -98,8 +106,12 @@ func TestReadManifestIsStrict(t *testing.T) {
 	valid := `{
 		"schemaVersion":1,
 		"productVersion":"0.1.0",
+		"nodeVersion":"24.15.0",
+		"electronVersion":"40.10.6",
 		"runtimeVersion":"2026.7.1-2",
 		"runtimeId":"openclaw-win-x64",
+		"targetPlatform":"win32",
+		"targetArch":"x64",
 		"runtimeArchive":"runtime.pkg",
 		"runtimeSha256":"` + strings.Repeat("a", 64) + `",
 		"runtimeBytes":1,

@@ -15,8 +15,8 @@
     "@uclaw/shared": "0.1.0"
   },
   "devDependencies": {
-    "esbuild": "^0.28.0",
-    "electron": "^40.4.0",
-    "vitest": "^3.2.4"
+    "esbuild": "0.28.1",
+    "electron": "40.10.6",
+    "vitest": "3.2.7"
   }
 }
