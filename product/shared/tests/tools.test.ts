@@ -135,7 +135,14 @@ describe("tool contracts", () => {
     expect(() => ResolveExecApprovalInputSchema.parse({ ref: pluginRef, decision: "deny" })).toThrow();
   });
 
-  it.each(["/Users/private/tool", "C:\\Users\\private\\tool", "file:///tmp/tool"])("rejects path-shaped opaque ids: %s", (id) => {
+  it.each([
+    "/Users/private/tool",
+    "C:\\Users\\private\\tool",
+    "file:///tmp/tool",
+    "ghp_123456789012345678901234567890123456",
+    "xoxa-12345678901234567890",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnopqrstuvwxyz123456",
+  ])("rejects unsafe opaque ids: %s", (id) => {
     expect(() => ToolCallSchema.parse({
       id, sessionId: "session-1", toolId: "exec", displayName: "Execute", state: "running", risk: "high",
     })).toThrow();

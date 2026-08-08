@@ -84,4 +84,29 @@ describe("OpenClaw tool and approval contract", () => {
     expect(serialized).not.toContain("plugin-secret");
     expect(serialized).not.toContain("/Users/private");
   });
+
+  it("removes token-shaped summary keys and identifiers", () => {
+    const tools = fixture("session.tool.json");
+    const event = structuredClone(tools.result);
+    event.payload.data.name = "ghp_123456789012345678901234567890123456";
+    event.payload.data.result = {
+      ghp_123456789012345678901234567890123456: 1,
+      github_pat_1234567890123456789012345678901234567890: true,
+      count: 2,
+    };
+
+    const mapped = mapOpenClawSessionToolEvent(event);
+    const serialized = JSON.stringify(mapped);
+    expect(mapped).toMatchObject({ toolId: "unknown-tool", outputSummary: { count: 2 } });
+    expect(serialized).not.toContain("ghp_");
+    expect(serialized).not.toContain("github_pat_");
+  });
+
+  it("rejects all Slack token families as tool identifiers", () => {
+    const tools = fixture("session.tool.json");
+    const event = structuredClone(tools.result);
+    event.payload.data.name = "xoxa-12345678901234567890";
+
+    expect(mapOpenClawSessionToolEvent(event)).toMatchObject({ toolId: "unknown-tool" });
+  });
 });
