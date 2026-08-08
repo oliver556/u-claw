@@ -357,6 +357,8 @@ test("Windows behavior test covers Task 4 compatibility cases", async () => {
   assert.match(source, /invalid utf-8/i);
   assert.match(source, /escaped newline sha/i);
   assert.match(source, /\$behaviorPhase\s*=\s*['"]VALID_METADATA['"]/);
+  assert.match(source, /\$behaviorPhase\s*=\s*['"]VALID_REPORT_READ['"]/);
+  assert.match(source, /\$behaviorPhase\s*=\s*['"]VALID_REPORT_PARSED['"]/);
   assert.match(source, /VALID_REPORT_INVOCATION_COUNT/);
   assert.match(source, /VALID_REPORT_P50/);
   assert.match(source, /VALID_REPORT_P95/);

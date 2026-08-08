@@ -141,7 +141,9 @@ try {
         $env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS = $null
         $env:LAUNCHER_BENCHMARK_FAKE_TIMING_ROOT = $null
         Assert-True ($result.ExitCode -eq 0) ('relative benchmark failed: ' + $result.Stderr)
+        $behaviorPhase = 'VALID_REPORT_READ'
         $report = Get-Content -LiteralPath (Join-Path $repositoryRoot $reportPath) -Raw | ConvertFrom-Json
+        $behaviorPhase = 'VALID_REPORT_PARSED'
         foreach ($candidateId in @('go', 'dotnet')) {
             $behaviorPhase = 'VALID_REPORT_INVOCATION_COUNT_' + $candidateId.ToUpperInvariant()
             $invocations = [int]([IO.File]::ReadAllText((Join-Path $timingRoot ($candidateId + '.timing-count'))))
