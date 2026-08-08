@@ -118,6 +118,8 @@ test("PowerShell harness has strict bounded parameters and no elevation or persi
 
 test("PowerShell harness locks symmetric mandatory cases and safe fixed errors", async () => {
   const source = await readFile(harnessUrl, "utf8");
+  assert.match(source, /\[AllowEmptyString\(\)\]\[string\]\$ExpectedStdout/);
+  assert.match(source, /\[AllowEmptyString\(\)\]\[string\]\$ExpectedStderr/);
   for (const caseName of [
     "valid-manifest",
     "invalid-sha256",

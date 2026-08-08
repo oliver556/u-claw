@@ -1179,8 +1179,8 @@ function Test-ExpectedInvocation {
         [Parameter(Mandatory)]$Candidate,
         [Parameter(Mandatory)][string[]]$Arguments,
         [Parameter(Mandatory)][int]$ExpectedExitCode,
-        [Parameter(Mandatory)][string]$ExpectedStdout,
-        [Parameter(Mandatory)][string]$ExpectedStderr,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedStdout,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedStderr,
         [AllowNull()][string]$PathOverride
     )
 
