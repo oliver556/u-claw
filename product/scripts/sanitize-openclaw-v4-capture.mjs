@@ -137,6 +137,51 @@ function sessionListEvidence(entry, key) {
   });
 }
 
+function projectModelsListRequest(frame) {
+  return {
+    type: frame.type,
+    id: frame.id,
+    method: frame.method,
+    params: { view: frame.params?.view },
+  };
+}
+
+function projectModelsListResponse(frame) {
+  if (frame.ok === false) {
+    return {
+      type: frame.type,
+      id: frame.id,
+      ok: false,
+      error: { code: frame.error?.code, message: frame.error?.message },
+    };
+  }
+  return {
+    type: frame.type,
+    id: frame.id,
+    ok: true,
+    payload: {
+      models: (frame.payload?.models ?? []).map((model) => ({
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        ...(model.alias === undefined ? {} : { alias: model.alias }),
+        ...(model.available === undefined ? {} : { available: model.available }),
+        ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+        ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+        ...(model.api === undefined ? {} : { api: model.api }),
+        ...(model.input === undefined ? {} : { input: model.input }),
+      })),
+    },
+  };
+}
+
+function projectModelsListCase(entry) {
+  return sanitize({
+    requestFrame: projectModelsListRequest(entry.requestFrame),
+    responseFrame: projectModelsListResponse(entry.responseFrame),
+  });
+}
+
 async function writeFixture(name, value) {
   const body = `${JSON.stringify(value, null, 2)}\n`;
   await writeFile(join(fixtureDir, name), body);
@@ -180,16 +225,10 @@ const fixtures = {
     },
     unavailable: { requestFrame: messageGet.unavailable.requestFrame, responseFrame: messageGet.unavailable.responseFrame },
   }),
-  "models.list.json": sanitize({
-    configured: {
-      requestFrame: modelsList.configured.requestFrame,
-      responseFrame: modelsList.configured.responseFrame,
-    },
-    invalidView: {
-      requestFrame: modelsList.invalidView.requestFrame,
-      responseFrame: modelsList.invalidView.responseFrame,
-    },
-  }),
+  "models.list.json": {
+    configured: projectModelsListCase(modelsList.configured),
+    invalidView: projectModelsListCase(modelsList.invalidView),
+  },
   "session.tool.json": { start: redactToolResult(sessionTool.start), result: redactToolResult(sessionTool.result) },
   "sessions.patch.json": {
     rename: patchEvidence(sessionsPatch.rename),

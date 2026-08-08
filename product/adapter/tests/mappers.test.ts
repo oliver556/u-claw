@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mapChatEvent, mapMessage } from "../src/mappers/chat.js";
-import { mapOpenClawModel } from "../src/mappers/model.js";
+import { mapOpenClawModel, RuntimeOpenClawModelsListResponseSchema } from "../src/mappers/model.js";
 import { mapSession } from "../src/mappers/session.js";
 import { mapExecApproval, mapPluginApproval, mapToolCall } from "../src/mappers/tool.js";
 
@@ -58,6 +58,13 @@ describe("session and tool mappers", () => {
       capabilities: ["unknown"],
       unavailableReason: { code: "MODEL_UNAVAILABLE" },
     });
+  });
+
+  it("accepts unmodeled upstream model fields at the runtime boundary", () => {
+    const response = RuntimeOpenClawModelsListResponseSchema.parse({
+      models: [{ id: "future", name: "Future", provider: "contract", futureField: { enabled: true } }],
+    });
+    expect(response.models[0]).toMatchObject({ id: "future", futureField: { enabled: true } });
   });
 
   it("maps validated sessions", () => {

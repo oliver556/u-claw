@@ -18,7 +18,7 @@ import { z } from "zod";
 
 import { mapChatEvent, RawChatEventSchema } from "./mappers/chat.js";
 import { mapSession, mapSessionSummary, RawSessionSchema } from "./mappers/session.js";
-import { mapOpenClawModel, RawOpenClawModelsListResponseSchema } from "./mappers/model.js";
+import { mapOpenClawModel, RuntimeOpenClawModelsListResponseSchema } from "./mappers/model.js";
 import {
   OpenClawExecApprovalEventSchema,
   OpenClawHistoryResponseSchema,
@@ -453,7 +453,7 @@ export class OpenClawClient implements UClawClient {
       const raw = await this.options.transport.router.request(
         "models.list",
         { view: "configured" },
-        RawOpenClawModelsListResponseSchema,
+        RuntimeOpenClawModelsListResponseSchema,
       );
       return raw.models.map(mapOpenClawModel);
     },

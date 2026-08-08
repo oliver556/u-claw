@@ -12,7 +12,7 @@
   "captureStateHelperSha256": "67f99aa679fd8556c4db0bd75763e33914db0412dd528c65b44187ba998f127c",
   "captureCleanupHelperSha256": "0c9c5d03f0bc57196b174a5e9bfb064621e68c1470c773c2401afd8707ada455",
   "captureWaitHelperSha256": "2644e6dcaaf448da6afeef8822f3d52180277d3df61b7d764bc6e59cc2f6113d",
-  "sanitizerSha256": "ca8ed7dc0d7c6a896582864f45d4908f14b5ae5a145adf8c276f4d8f1bac53dd",
+  "sanitizerSha256": "95d5d3c0de5404b810f435439681f895ec739a8206701585d207b8739257d630",
   "nodeVersionSource": "OPENCLAW_NODE_BIN --version",
   "capturedAt": "2026-08-08T19:31:54.952Z",
   "captureArtifact": {
@@ -71,7 +71,7 @@
     "approvals.json": "6a2349029ca90f0083f23f3c9b2e77f04f272228be9668a76ceaba1254ecb84d",
     "chat.history.json": "4891c0acb9513636107816feff66399b7af86bc8df17ee5eaec73d4d17e5ad6d",
     "chat.message.get.json": "fcdd6a1c951c8dae4c728953e10170054d16360c95a02547aa9d9b71af95b93e",
-    "models.list.json": "170447284d7a5373df8d31a61f25069cc6ba0fd632c9b10bae1c2261637495d6",
+    "models.list.json": "c9f16026c26e3676e61fda6d12878d3e21cbacf4a30ff351cbd9bf07151af0d9",
     "session.tool.json": "27439209a3517b3589fb6b2309f1e335b66b6844656541f364ee2e55bbce16e2",
     "sessions.patch.json": "f06349600235d36352ee817fab3803de968645fc2f235906d71585a7792501e9"
   }

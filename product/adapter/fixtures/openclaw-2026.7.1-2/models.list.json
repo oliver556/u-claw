@@ -18,25 +18,25 @@
             "id": "contract-alt-model",
             "name": "Contract Alt Model",
             "provider": "contract",
-            "api": "openai-completions",
+            "available": true,
             "contextWindow": 131072,
             "reasoning": false,
+            "api": "openai-completions",
             "input": [
               "text"
-            ],
-            "available": true
+            ]
           },
           {
             "id": "contract-model",
             "name": "Contract Model",
             "provider": "contract",
-            "api": "openai-completions",
+            "available": true,
             "contextWindow": 131072,
             "reasoning": false,
+            "api": "openai-completions",
             "input": [
               "text"
-            ],
-            "available": true
+            ]
           }
         ]
       }
