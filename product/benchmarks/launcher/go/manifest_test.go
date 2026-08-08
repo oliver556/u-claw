@@ -31,6 +31,11 @@ func TestValidateManifest(t *testing.T) {
 	if err := ValidateManifest(manifest); err != nil {
 		t.Fatalf("uppercase SHA-256 should be accepted: %v", err)
 	}
+
+	manifest.Archive = `packages/runtime package_1-2.pkg`
+	if err := ValidateManifest(manifest); err != nil {
+		t.Fatalf("safe ASCII archive path should be accepted: %v", err)
+	}
 }
 
 func TestRejectsInvalidRuntimeIDs(t *testing.T) {
@@ -127,6 +132,26 @@ func TestRejectsWindowsDeviceNamesCaseInsensitively(t *testing.T) {
 	}
 }
 
+func TestRejectsUnicodeDOSDeviceAliases(t *testing.T) {
+	for _, archive := range []string{"COM¹", "com².txt", "packages/Com³.pkg", "LPT¹", "lpt².txt", "packages/LpT³.pkg"} {
+		manifest := validManifest()
+		manifest.Archive = archive
+		if err := ValidateManifest(manifest); err == nil {
+			t.Fatalf("accepted Unicode DOS device alias %q", archive)
+		}
+	}
+}
+
+func TestRejectsConsoleDeviceNames(t *testing.T) {
+	for _, archive := range []string{"CONIN$", "conin$.txt", "CONOUT$", "packages/conout$.pkg"} {
+		manifest := validManifest()
+		manifest.Archive = archive
+		if err := ValidateManifest(manifest); err == nil {
+			t.Fatalf("accepted console device name %q", archive)
+		}
+	}
+}
+
 func TestAllowsNonDeviceBasenames(t *testing.T) {
 	for _, archive := range []string{"console.pkg", "com0.pkg", "com10.pkg", "lpt0", "lpt10", "auxiliary"} {
 		manifest := validManifest()
@@ -171,6 +196,26 @@ func TestValidatePackageUsesArchiveContent(t *testing.T) {
 	}
 }
 
+func TestValidatePackageAllowsUnicodeBaseDirectory(t *testing.T) {
+	baseDir := filepath.Join(t.TempDir(), "中文 路径")
+	if err := os.Mkdir(baseDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("unicode base directory")
+	if err := os.WriteFile(filepath.Join(baseDir, "runtime.pkg"), payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	manifest := Manifest{
+		RuntimeID: "openclaw-win-x64",
+		Archive:   "runtime.pkg",
+		SHA256:    hex.EncodeToString(digest[:]),
+	}
+	if err := ValidatePackage(baseDir, manifest); err != nil {
+		t.Fatalf("Unicode base directory rejected: %v", err)
+	}
+}
+
 func TestValidatePackageRejectsSymlinkEscape(t *testing.T) {
 	baseDir := t.TempDir()
 	outsideDir := t.TempDir()
@@ -209,7 +254,10 @@ func TestCLIRealProcessSuccessAndPathRedaction(t *testing.T) {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
 
-	packageDir := t.TempDir()
+	packageDir := filepath.Join(t.TempDir(), "中文 路径")
+	if err := os.Mkdir(packageDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	payload := []byte("cli payload")
 	if err := os.WriteFile(filepath.Join(packageDir, "runtime.pkg"), payload, 0o600); err != nil {
 		t.Fatal(err)
@@ -287,7 +335,7 @@ func TestCLIRealProcessSuccessAndPathRedaction(t *testing.T) {
 	writeManifest(t, manifestPath, invalidManifest)
 	assertCLIError(t, executable, []string{"--manifest", manifestPath}, "E_PACKAGE_INVALID", secret)
 
-	for _, archive := range []string{"bad?.pkg", "CON.txt"} {
+	for _, archive := range []string{"bad?.pkg", "CON.txt", "COM¹.pkg", "CONOUT$.pkg"} {
 		invalidManifest = manifest
 		invalidManifest.Archive = archive
 		writeManifest(t, manifestPath, invalidManifest)

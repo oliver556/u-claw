@@ -18,8 +18,9 @@ type Manifest struct {
 }
 
 var (
-	runtimeIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-	sha256Pattern    = regexp.MustCompile(`^[A-Fa-f0-9]{64}$`)
+	runtimeIDPattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	archiveSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9._ -]+$`)
+	sha256Pattern         = regexp.MustCompile(`^[A-Fa-f0-9]{64}$`)
 
 	errInvalidRuntimeID = errors.New("invalid runtimeId")
 	errInvalidArchive   = errors.New("invalid archive path")
@@ -63,13 +64,8 @@ func ValidatePackage(baseDir string, manifest Manifest) error {
 }
 
 func isSafeRelativeWindowsPath(path string) bool {
-	if path == "" || strings.Contains(path, ":") || strings.ContainsAny(path, "<>\"|?*") {
+	if path == "" {
 		return false
-	}
-	for _, character := range path {
-		if character <= 0x1f || character == 0x7f {
-			return false
-		}
 	}
 	if path[0] == '/' || path[0] == '\\' {
 		return false
@@ -78,7 +74,7 @@ func isSafeRelativeWindowsPath(path string) bool {
 	normalized := strings.ReplaceAll(path, `\`, "/")
 	for _, segment := range strings.Split(normalized, "/") {
 		normalizedSegment := strings.TrimRight(segment, " .")
-		if normalizedSegment == "" || normalizedSegment != segment {
+		if normalizedSegment == "" || normalizedSegment != segment || !archiveSegmentPattern.MatchString(normalizedSegment) {
 			return false
 		}
 		if isWindowsDeviceName(normalizedSegment) {
