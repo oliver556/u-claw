@@ -102,6 +102,18 @@ func TestExtractRuntimeWritesOnlyDeclaredFiles(t *testing.T) {
 	}
 }
 
+func TestExtractRuntimeAcceptsTarDirectoryTrailingSlash(t *testing.T) {
+	entries := []archiveEntry{
+		{name: "electron/", typeflag: tar.TypeDir},
+		{name: "electron/electron.exe", body: []byte("executable")},
+	}
+	archive := buildRuntimeArchive(t, entries)
+	manifest := manifestForArchive(archive, entries)
+	if err := ExtractRuntime(context.Background(), bytes.NewReader(archive), t.TempDir(), manifest); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExtractRuntimeRejectsUnsafeEntries(t *testing.T) {
 	tests := map[string][]archiveEntry{
 		"parent":    {{name: "../escape", body: []byte("x")}},

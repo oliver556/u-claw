@@ -253,3 +253,10 @@ func TestStateTextUsesFixedChineseStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestDiagnosticMapsExtractionFailureToCacheFailure(t *testing.T) {
+	code, message := diagnosticFor(ErrExtractionFailed)
+	if code != "E_CACHE_FAILED" || message != "无法准备本机运行缓存，请检查磁盘空间。" {
+		t.Fatalf("diagnostic = %q, %q", code, message)
+	}
+}

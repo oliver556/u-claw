@@ -47,6 +47,9 @@ func ExtractRuntime(ctx context.Context, archive io.Reader, target string, manif
 			return ErrExtractionFailed
 		}
 		normalized := strings.ReplaceAll(header.Name, `\`, "/")
+		if header.Typeflag == tar.TypeDir {
+			normalized = strings.TrimSuffix(normalized, "/")
+		}
 		canonical := strings.ToLower(normalized)
 		if !isSafeWindowsRelativePath(normalized) || canonical == strings.ToLower(cacheMarkerName) {
 			return ErrExtractionFailed

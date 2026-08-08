@@ -157,7 +157,7 @@ func diagnosticFor(err error) (string, string) {
 		return "E_MANIFEST_INVALID", "运行时清单无效，请重新下载 U-Claw。"
 	case errors.Is(err, ErrPackageInvalid):
 		return "E_PACKAGE_INVALID", "运行时文件校验失败，请重新下载 U-Claw。"
-	case errors.Is(err, ErrCachePreparationFailed):
+	case errors.Is(err, ErrCachePreparationFailed), errors.Is(err, ErrExtractionFailed):
 		return "E_CACHE_FAILED", "无法准备本机运行缓存，请检查磁盘空间。"
 	case errors.Is(err, ErrAppStartFailed), errors.Is(err, ErrProcessInvalid):
 		return "E_APP_START_FAILED", "无法启动 U-Claw，请重新启动。"
