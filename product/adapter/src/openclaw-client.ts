@@ -99,6 +99,7 @@ const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);
 const implementedEvents = new Set([
   "chat", "session.tool", "exec.approval.requested", "plugin.approval.requested",
 ]);
+const MAX_TRACKED_TRACES = 256;
 
 const SessionPageSchema = z.object({
   sessions: z.array(RawSessionSchema),
@@ -273,6 +274,8 @@ export class OpenClawClient implements UClawClient {
   private readonly toolCallRuns = new Map<string, Map<string, { runId: string; tool: ToolCall }>>();
   private readonly approvalRequests = new Map<string, ApprovalRequest>();
   private readonly approvalDecisions = new Map<string, "allow-once" | "deny">();
+  private readonly approvalToolIndex = new Map<string, string>();
+  private readonly seenRealtimeApprovals = new Set<string>();
   private readonly notifiedApprovalFrames = new WeakSet<object>();
   private readonly sessionMutations = new Map<string, Promise<unknown>>();
   private readonly processedToolFrames = new WeakMap<object, { tool: ToolCall; accepted: boolean }>();
@@ -298,6 +301,9 @@ export class OpenClawClient implements UClawClient {
       this.toolCallRuns.clear();
       this.approvalRequests.clear();
       this.approvalDecisions.clear();
+      this.approvalToolIndex.clear();
+      this.seenRealtimeApprovals.clear();
+      this.terminalRuns.clear();
       this.setStatus("reconnecting", this.reconnectAttempt + 1);
       await this.reconnectPolicy.wait(this.reconnectAttempt);
       this.removeSequenceGapListener?.();
@@ -418,7 +424,7 @@ export class OpenClawClient implements UClawClient {
       const pending = [...exec.map(mapOpenClawExecApproval), ...plugin.map(mapOpenClawPluginApproval)];
       for (const request of pending) {
         const key = `${request.family}:${request.id}`;
-        if (this.approvalRequests.get(key)?.status !== "resolved") this.approvalRequests.set(key, request);
+        if (this.approvalRequests.get(key)?.status !== "resolved") this.storeApproval(key, request);
       }
       return sessionId === undefined ? pending : pending.filter((request) => request.sessionId === sessionId);
     },
@@ -758,6 +764,9 @@ export class OpenClawClient implements UClawClient {
       this.toolCallRuns.clear();
       this.approvalRequests.clear();
       this.approvalDecisions.clear();
+      this.approvalToolIndex.clear();
+      this.seenRealtimeApprovals.clear();
+      this.terminalRuns.clear();
       if (this.statusState !== "reconnecting") this.setStatus("closed");
     });
   }
@@ -828,10 +837,8 @@ export class OpenClawClient implements UClawClient {
 
   private recordToolRun(tool: ToolCall): boolean {
     if (tool.state === "running") {
-      const denied = [...this.approvalRequests.entries()].find(([key, request]) =>
-        request.sessionId === tool.sessionId && request.toolCallId === tool.id &&
-        request.status === "resolved" && this.approvalDecisions.get(key) === "deny");
-      if (denied !== undefined) tool = { ...tool, state: "cancelled" };
+      const approvalKey = this.approvalToolIndex.get(`${tool.sessionId}:${tool.id}`);
+      if (approvalKey && this.approvalDecisions.get(approvalKey) === "deny") tool = { ...tool, state: "cancelled" };
     }
     const sessionRuns = this.toolCallRuns.get(tool.sessionId);
     const existing = sessionRuns?.get(tool.id);
@@ -842,11 +849,13 @@ export class OpenClawClient implements UClawClient {
     if (tool.state === "running") {
       const runs = sessionRuns ?? new Map<string, { runId: string; tool: ToolCall }>();
       runs.set(tool.id, { runId: tool.runId ?? "unknown-run", tool });
+      this.pruneMap(runs);
       this.toolCallRuns.set(tool.sessionId, runs);
       return true;
     }
     const runs = sessionRuns ?? new Map<string, { runId: string; tool: ToolCall }>();
     runs.set(tool.id, { runId: tool.runId ?? existing?.runId ?? "unknown-run", tool });
+    this.pruneMap(runs);
     this.toolCallRuns.set(tool.sessionId, runs);
     return true;
   }
@@ -871,7 +880,10 @@ export class OpenClawClient implements UClawClient {
     const terminal = mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error";
     const key = `${event.sessionKey}:${mapped.runId}`;
     const accepted = !terminal || !this.terminalRuns.has(key);
-    if (terminal && accepted) this.terminalRuns.add(key);
+    if (terminal && accepted) {
+      this.terminalRuns.add(key);
+      this.pruneSet(this.terminalRuns);
+    }
     const processed = { event: mapped, accepted };
     this.processedChatFrames.set(frame, processed);
     return processed;
@@ -908,11 +920,13 @@ export class OpenClawClient implements UClawClient {
     const cached = this.processedApprovalFrames.get(frame);
     if (cached !== undefined) return cached;
     const key = `${request.family}:${request.id}`;
-    const existing = this.approvalRequests.get(key);
-    const processed = existing === undefined
-      ? { request, accepted: true }
-      : { request: existing, accepted: false };
-    if (processed.accepted) this.approvalRequests.set(key, request);
+    const accepted = !this.seenRealtimeApprovals.has(key);
+    const processed = { request: accepted ? request : (this.approvalRequests.get(key) ?? request), accepted };
+    if (accepted) {
+      this.seenRealtimeApprovals.add(key);
+      this.pruneSet(this.seenRealtimeApprovals);
+      this.storeApproval(key, request);
+    }
     this.processedApprovalFrames.set(frame, processed);
     return processed;
   }
@@ -923,6 +937,7 @@ export class OpenClawClient implements UClawClient {
     if (request === undefined || request.status === "resolved") return;
     this.approvalRequests.set(key, { ...request, status: "resolved" });
     this.approvalDecisions.set(key, decision);
+    this.pruneApprovalDecisions();
     if (request.sessionId && request.toolCallId) {
       const tracked = this.toolCallRuns.get(request.sessionId)?.get(request.toolCallId);
       if (tracked && !["succeeded", "failed", "cancelled"].includes(tracked.tool.state)) {
@@ -932,15 +947,72 @@ export class OpenClawClient implements UClawClient {
       }
     }
     if (request.sessionId) void Promise.resolve(this.options.onApprovalsChanged?.(request.sessionId)).catch(() => undefined);
+    this.approvalRequests.delete(key);
   }
 
   private clearToolRunsForRun(sessionId: string, runId: string): void {
     const sessionRuns = this.toolCallRuns.get(sessionId);
     if (sessionRuns === undefined) return;
     for (const [toolCallId, mapped] of sessionRuns) {
-      if (mapped.runId === runId) sessionRuns.delete(toolCallId);
+      if (mapped.runId === runId) {
+        sessionRuns.delete(toolCallId);
+        const toolKey = `${sessionId}:${toolCallId}`;
+        const approvalKey = this.approvalToolIndex.get(toolKey);
+        if (approvalKey) {
+          this.approvalToolIndex.delete(toolKey);
+          this.approvalRequests.delete(approvalKey);
+          this.approvalDecisions.delete(approvalKey);
+          this.seenRealtimeApprovals.delete(approvalKey);
+        }
+      }
     }
     if (sessionRuns.size === 0) this.toolCallRuns.delete(sessionId);
+  }
+
+  private storeApproval(key: string, request: ApprovalRequest): void {
+    const previous = this.approvalRequests.get(key);
+    if (previous?.sessionId && previous.toolCallId) {
+      const previousToolKey = `${previous.sessionId}:${previous.toolCallId}`;
+      const nextToolKey = request.sessionId && request.toolCallId ? `${request.sessionId}:${request.toolCallId}` : undefined;
+      if (previousToolKey !== nextToolKey && this.approvalToolIndex.get(previousToolKey) === key) {
+        this.approvalToolIndex.delete(previousToolKey);
+      }
+    }
+    this.approvalRequests.set(key, request);
+    if (request.sessionId && request.toolCallId) this.approvalToolIndex.set(`${request.sessionId}:${request.toolCallId}`, key);
+    while (this.approvalRequests.size > MAX_TRACKED_TRACES) {
+      const oldestKey = this.approvalRequests.keys().next().value as string;
+      const oldest = this.approvalRequests.get(oldestKey);
+      this.approvalRequests.delete(oldestKey);
+      if (oldest?.sessionId && oldest.toolCallId) {
+        const toolKey = `${oldest.sessionId}:${oldest.toolCallId}`;
+        if (this.approvalToolIndex.get(toolKey) === oldestKey) this.approvalToolIndex.delete(toolKey);
+      }
+    }
+    while (this.approvalToolIndex.size > MAX_TRACKED_TRACES) {
+      const [toolKey, approvalKey] = this.approvalToolIndex.entries().next().value as [string, string];
+      this.approvalToolIndex.delete(toolKey);
+      this.approvalRequests.delete(approvalKey);
+      this.approvalDecisions.delete(approvalKey);
+    }
+  }
+
+  private pruneApprovalDecisions(): void {
+    while (this.approvalDecisions.size > MAX_TRACKED_TRACES) {
+      const approvalKey = this.approvalDecisions.keys().next().value as string;
+      this.approvalDecisions.delete(approvalKey);
+      for (const [toolKey, indexedApprovalKey] of this.approvalToolIndex) {
+        if (indexedApprovalKey === approvalKey) this.approvalToolIndex.delete(toolKey);
+      }
+    }
+  }
+
+  private pruneMap<K, V>(map: Map<K, V>): void {
+    while (map.size > MAX_TRACKED_TRACES) map.delete(map.keys().next().value as K);
+  }
+
+  private pruneSet<T>(set: Set<T>): void {
+    while (set.size > MAX_TRACKED_TRACES) set.delete(set.values().next().value as T);
   }
 
   private notifyApprovalsChanged(frame: EventFrame, sessionId: string): void {

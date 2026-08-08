@@ -825,9 +825,12 @@ describe("OpenClawClient", () => {
     const approvals = contractFixture("approvals.json");
     const transport = new FakeTransport();
     const approvalChanges: string[] = [];
+    transport.fixtures.set("exec.approval.list", []);
+    transport.fixtures.set("plugin.approval.list", approvals.plugin.allowOnce.listing.responseFrame.payload);
     transport.fixtures.set("chat.send", { runId: "run-approval-1", status: "accepted" });
     const client = new OpenClawClient({ transport, onApprovalsChanged: (sessionId) => { approvalChanges.push(sessionId); } });
     await client.gateway.negotiate();
+    await client.approvals.listPending("agent:dev:main");
     const send = client.chat.send({
       sessionId: "agent:dev:main",
       clientRequestId: "request-approval-1",
@@ -1235,5 +1238,58 @@ describe("OpenClawClient", () => {
     await clock.advance(100);
     await negotiation;
     expect(transport.connectCalls).toBe(2);
+  });
+
+  it("bounds approval indexes and terminal run dedupe state", async () => {
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    const entries = Array.from({ length: 300 }, (_, index) => {
+      const entry = structuredClone(approvals.exec.allowOnce.event.payload);
+      entry.id = `approval-bounded-${index}`;
+      entry.request.toolCallId = `tool-bounded-${index}`;
+      return entry;
+    });
+    transport.fixtures.set("exec.approval.list", entries);
+    transport.fixtures.set("plugin.approval.list", []);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+    await client.approvals.listPending();
+    const internal = client as unknown as {
+      approvalRequests: Map<unknown, unknown>;
+      approvalToolIndex: Map<unknown, unknown>;
+      terminalRuns: Set<unknown>;
+    };
+    expect(internal.approvalRequests.size).toBeLessThanOrEqual(256);
+    expect(internal.approvalToolIndex.size).toBeLessThanOrEqual(256);
+
+    const watch = client.chat.watch("agent:dev:main")[Symbol.asyncIterator]();
+    for (let index = 0; index < 300; index += 1) {
+      transport.emit("chat", {
+        state: "aborted", runId: `run-bounded-${index}`, sessionKey: "agent:dev:main", errorMessage: "stopped",
+      }, index + 1);
+    }
+    expect(internal.terminalRuns.size).toBeLessThanOrEqual(256);
+    await watch.return?.();
+  });
+
+  it("replaces a stale tool-call index when an approval snapshot is remapped", async () => {
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    const entry = structuredClone(approvals.exec.allowOnce.event.payload);
+    entry.request.toolCallId = "tool-original";
+    transport.fixtures.set("exec.approval.list", [entry]);
+    transport.fixtures.set("plugin.approval.list", []);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+    await client.approvals.listPending();
+
+    const remapped = structuredClone(entry);
+    remapped.request.toolCallId = "tool-remapped";
+    transport.fixtures.set("exec.approval.list", [remapped]);
+    await client.approvals.listPending();
+
+    const internal = client as unknown as { approvalToolIndex: Map<string, string> };
+    expect(internal.approvalToolIndex.has(`${entry.request.sessionKey}:${entry.request.toolCallId}`)).toBe(false);
+    expect(internal.approvalToolIndex.get(`${remapped.request.sessionKey}:${remapped.request.toolCallId}`)).toBe(`exec:${entry.id}`);
   });
 });

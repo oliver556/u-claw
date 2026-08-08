@@ -333,6 +333,7 @@ function safeSummary(value: unknown): Record<string, string | number | boolean |
   };
   for (const [key, fieldValue] of entries) {
     if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) continue;
+    if (isTokenLike(key)) continue;
     if (typeof fieldValue === "number" || typeof fieldValue === "boolean" || fieldValue === null) {
       summary[key] = fieldValue;
     } else if (Array.isArray(fieldValue)) {
@@ -344,8 +345,14 @@ function safeSummary(value: unknown): Record<string, string | number | boolean |
   return summary;
 }
 
+function isTokenLike(value: string): boolean {
+  return /^(?:gh[pousr]_|github_pat_|xox[a-z]-|sk-(?:proj-)?|AIza|AKIA)[A-Za-z0-9_-]{8,}$/i.test(value) ||
+    /^eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/.test(value);
+}
+
 function safeIdentifier(value: string | null | undefined, fallback: string): string {
   if (value === undefined || value === null) return fallback;
+  if (isTokenLike(value)) return fallback;
   if (/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)) return value;
   if (/^@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) return value;
   return fallback;
