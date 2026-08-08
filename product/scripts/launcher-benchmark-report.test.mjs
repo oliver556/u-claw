@@ -177,6 +177,32 @@ test("does not treat a clearly sub-threshold p95 margin as 20 percent", () => {
   assert.equal(result.reason, "documented-tie-breaker");
 });
 
+test("does not let tolerance turn tiny sub-threshold values into a margin", () => {
+  for (const better of [1e-20, 9e-21]) {
+    const result = decideLauncher(reports({
+      go: { p95Ms: better, exeBytes: 8_000_000 },
+      dotnet: { p95Ms: 1e-20, exeBytes: 8_000_000 },
+    }));
+    assert.equal(result.selected, "go", `${better} vs 1e-20`);
+    assert.equal(result.reason, "documented-tie-breaker", `${better} vs 1e-20`);
+  }
+});
+
+test("recognizes exact p95 thresholds at normal and large scales", () => {
+  for (const { better, worse } of [
+    { better: 0.8, worse: 1 },
+    { better: 80, worse: 100 },
+    { better: 8e19, worse: 1e20 },
+  ]) {
+    const result = decideLauncher(reports({
+      go: { p95Ms: better, exeBytes: 8_000_000 },
+      dotnet: { p95Ms: worse, exeBytes: 8_000_000 },
+    }));
+    assert.equal(result.selected, "go", `${better} vs ${worse}`);
+    assert.equal(result.reason, "p95-margin", `${better} vs ${worse}`);
+  }
+});
+
 test("uses the executable median size margin when p95 is within 20 percent", () => {
   const result = decideLauncher(reports({
     go: { p95Ms: 30, exeBytes: 6_000_000 },
