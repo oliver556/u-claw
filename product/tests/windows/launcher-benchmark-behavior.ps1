@@ -143,12 +143,15 @@ try {
         Assert-True ($result.ExitCode -eq 0) ('relative benchmark failed: ' + $result.Stderr)
         $report = Get-Content -LiteralPath (Join-Path $repositoryRoot $reportPath) -Raw | ConvertFrom-Json
         foreach ($candidateId in @('go', 'dotnet')) {
+            $behaviorPhase = 'VALID_REPORT_INVOCATION_COUNT_' + $candidateId.ToUpperInvariant()
             $invocations = [int]([IO.File]::ReadAllText((Join-Path $timingRoot ($candidateId + '.timing-count'))))
             Assert-True ($invocations -eq 16) ($candidateId + ' timing sequence was not isolated')
             $candidate = $report.candidates.$candidateId
             $p50 = [Convert]::ToDouble($candidate.p50Ms, [Globalization.CultureInfo]::InvariantCulture)
             $p95 = [Convert]::ToDouble($candidate.p95Ms, [Globalization.CultureInfo]::InvariantCulture)
+            $behaviorPhase = 'VALID_REPORT_P50_' + $candidateId.ToUpperInvariant()
             Assert-True ($p50 -ge 220 -and $p50 -le 500) 'p50Ms is not nearest-rank sample 4'
+            $behaviorPhase = 'VALID_REPORT_P95_' + $candidateId.ToUpperInvariant()
             Assert-True ($p95 -ge 1850 -and $p95 -le 2400) 'p95Ms is not nearest-rank sample 7'
         }
 
