@@ -26,7 +26,7 @@ class ScriptedGatewaySocket implements WebSocketLike {
       this.respond(request.id, {
         type: "hello-ok", protocol: 4, server: { version: "2026.7.1-2" },
         features: {
-          methods: ["sessions.list", "sessions.get", "chat.history", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list"],
+          methods: ["sessions.list", "sessions.describe", "chat.history", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list"],
           events: ["chat"],
         },
         policy: { maxPayload: 1_000_000, maxBufferedBytes: 1_000_000 },
@@ -34,11 +34,11 @@ class ScriptedGatewaySocket implements WebSocketLike {
       return;
     }
     if (request.method === "sessions.list") {
-      this.respond(request.id, { sessions: [rawSession], nextCursor: null, hasMore: false });
+      this.respond(request.id, { sessions: [rawSession], nextOffset: null, hasMore: false });
       return;
     }
-    if (request.method === "sessions.get") {
-      this.respond(request.id, rawSession);
+    if (request.method === "sessions.describe") {
+      this.respond(request.id, { session: rawSession });
       return;
     }
     if (request.method === "chat.history") {
