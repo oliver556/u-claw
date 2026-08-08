@@ -36,11 +36,18 @@ function Throw-BenchmarkError {
 function Get-CanonicalAbsolutePath {
     param([Parameter(Mandatory)][string]$InputPath)
 
-    if ([string]::IsNullOrWhiteSpace($InputPath) -or -not [IO.Path]::IsPathRooted($InputPath)) {
+    if ([string]::IsNullOrWhiteSpace($InputPath)) {
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_UNSAFE_PATH'
     }
     try {
-        return [IO.Path]::GetFullPath($InputPath)
+        if ((Get-Location).Provider.Name -ne 'FileSystem') {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_UNSAFE_PATH'
+        }
+        $workingDirectory = (Get-Location).ProviderPath
+        if ([IO.Path]::IsPathRooted($InputPath)) {
+            return [IO.Path]::GetFullPath($InputPath)
+        }
+        return [IO.Path]::GetFullPath($InputPath, $workingDirectory)
     }
     catch {
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_UNSAFE_PATH'
@@ -80,6 +87,12 @@ function Assert-SafeOutputPath {
     param([Parameter(Mandatory)][string]$RequestedPath)
 
     $absolutePath = Get-CanonicalAbsolutePath $RequestedPath
+    $leaf = [IO.Path]::GetFileName($absolutePath)
+    if ([string]::IsNullOrWhiteSpace($leaf) -or
+        $leaf.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
+        $leaf -cne $leaf.TrimEnd(' ', '.')) {
+        Throw-BenchmarkError 'LAUNCHER_BENCHMARK_UNSAFE_PATH'
+    }
     if (Test-Path -LiteralPath $absolutePath) {
         Throw-BenchmarkError 'LAUNCHER_BENCHMARK_OUTPUT_EXISTS'
     }
@@ -182,9 +195,13 @@ function Invoke-CapturedProcess {
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutMs)) {
-            try { $process.Kill($true) } catch { }
-            [void]$process.WaitForExit()
+            Stop-TimedOutProcess $process 5000
             Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_TIMEOUT'
+        }
+        $CaptureTimeoutMs = 5000
+        $captureTasks = [Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
+        if (-not [Threading.Tasks.Task]::WaitAll($captureTasks, $CaptureTimeoutMs)) {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_CAPTURE_TIMEOUT'
         }
         $stopwatch.Stop()
         return [pscustomobject]@{
@@ -197,6 +214,25 @@ function Invoke-CapturedProcess {
     finally {
         $stopwatch.Stop()
         $process.Dispose()
+    }
+}
+
+function Stop-TimedOutProcess {
+    param(
+        [Parameter(Mandatory)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][int]$KillTimeoutMs
+    )
+
+    try {
+        $Process.Kill($true)
+    }
+    catch {
+        if (-not $Process.HasExited) {
+            Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
+        }
+    }
+    if (-not $Process.WaitForExit($KillTimeoutMs)) {
+        Throw-BenchmarkError 'LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED'
     }
 }
 

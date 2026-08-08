@@ -127,6 +127,12 @@ test("PowerShell harness uses exact process capture, timeout, cleanup, and PATH 
   assert.match(source, /ReadToEndAsync\(\)/);
   assert.match(source, /WaitForExit\(\$TimeoutMs\)/);
   assert.match(source, /Kill\(\$true\)/);
+  assert.match(source, /LAUNCHER_BENCHMARK_PROCESS_KILL_FAILED/);
+  assert.match(source, /WaitForExit\(\$KillTimeoutMs\)/);
+  assert.match(source, /\[Threading\.Tasks\.Task\]::WaitAll\([^\r\n]*\$CaptureTimeoutMs\)/);
+  assert.doesNotMatch(source, /WaitForExit\(\s*\)/);
+  assert.doesNotMatch(source, /\$Process\.Kill\(\s*\)/);
+  assert.doesNotMatch(source, /Kill\(\$true\)\s*\}\s*catch\s*\{\s*\}/);
   assert.match(source, /\[Diagnostics\.Stopwatch\]::StartNew\(\)/);
   assert.match(source, /finally[\s\S]{0,240}Remove-Item\s+-LiteralPath/i);
   assert.match(source, /finally[\s\S]{0,180}\$env:PATH\s*=\s*\$originalPath/i);
@@ -156,8 +162,13 @@ test("PowerShell harness makes percentile and iteration policy auditable", async
 test("PowerShell harness validates paths and creates report without overwrite", async () => {
   const source = await readFile(harnessUrl, "utf8");
   assert.match(source, /\[IO\.Path\]::IsPathRooted/);
+  assert.match(source, /\$workingDirectory\s*=\s*\(Get-Location\)\.ProviderPath/);
+  assert.match(source, /GetFullPath\(\$InputPath, \$workingDirectory\)/);
+  assert.doesNotMatch(source, /IsNullOrWhiteSpace\(\$InputPath\)[^\r\n]*-not \[IO\.Path\]::IsPathRooted/);
   assert.match(source, /FileAttributes\]::ReparsePoint/);
   assert.match(source, /PSIsContainer/);
+  assert.match(source, /GetFileName\(\$absolutePath\)/);
+  assert.match(source, /GetInvalidFileNameChars\(\)/);
   assert.match(source, /FileMode\]::CreateNew/);
   assert.match(source, /\[IO\.File\]::Move\(/);
   assert.match(source, /ConvertTo-Json/);
