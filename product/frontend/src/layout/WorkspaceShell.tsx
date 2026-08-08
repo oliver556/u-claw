@@ -158,6 +158,8 @@ export function WorkspaceShell({ client }: { client: UClawClient }) {
     try {
       const [page, refreshed] = await Promise.all([client.sessions.list(), client.sessions.get(sessionId)]);
       setSessions(page.items);
+      setNextSessionCursor(page.nextCursor);
+      setHasMoreSessions(page.hasMore);
       setActiveSession((current) => current?.id === sessionId ? refreshed : current);
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : "会话刷新失败");

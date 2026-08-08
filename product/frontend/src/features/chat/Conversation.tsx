@@ -36,6 +36,10 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const [messages, setMessages] = useState<Message[]>([]);
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">("loading");
   const [historyError, setHistoryError] = useState<string>();
+  const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyPageState, setHistoryPageState] = useState<"idle" | "loading" | "error">("idle");
+  const [historyPageError, setHistoryPageError] = useState<string>();
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [pendingTools, setPendingTools] = useState<ToolCall[]>([]);
   const [sending, setSending] = useState(false);
@@ -46,6 +50,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const activeRunId = useRef<string | undefined>(undefined);
   const sendController = useRef<AbortController | undefined>(undefined);
   const stopRequested = useRef(false);
+  const sendIntentId = useRef<string | undefined>(undefined);
   const mounted = useRef(true);
   const resolvingApprovals = useRef(new Set<string>());
 
@@ -83,6 +88,10 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
         ? [client.tools.getCall(approval.toolCallId).catch(() => undefined)]
         : []));
       setMessages(history.items);
+      setHistoryNextCursor(history.nextCursor ?? null);
+      setHistoryHasMore(history.hasMore);
+      setHistoryPageState("idle");
+      setHistoryPageError(undefined);
       setPendingApprovals(approvals);
       setPendingTools(tools.filter((tool): tool is ToolCall => tool !== undefined));
       setHistoryState("ready");
@@ -93,6 +102,25 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   }, [client, session.id]);
 
   useEffect(() => { void loadHistory(); }, [loadHistory]);
+
+  const loadMoreHistory = async () => {
+    if (!historyHasMore || historyNextCursor === null || historyPageState === "loading") return;
+    setHistoryPageState("loading");
+    setHistoryPageError(undefined);
+    try {
+      const page = await client.chat.list(session.id, { cursor: historyNextCursor });
+      setMessages((current) => {
+        const known = new Set(current.map((message) => message.id));
+        return [...current, ...page.items.filter((message) => !known.has(message.id))];
+      });
+      setHistoryNextCursor(page.nextCursor ?? null);
+      setHistoryHasMore(page.hasMore);
+      setHistoryPageState("idle");
+    } catch (error) {
+      setHistoryPageError(error instanceof Error ? error.message : "加载更多消息失败");
+      setHistoryPageState("error");
+    }
+  };
 
   useEffect(() => {
     if (capabilities?.methods.has("models.list") !== true) return;
@@ -111,13 +139,15 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const legacyApprovalResolve = capabilities?.features.approvalResolve === true && capabilities?.features.execApproval === undefined && capabilities?.features.pluginApproval === undefined;
   const approvalCapabilities = { exec: capabilities?.features.execApproval === true || legacyApprovalResolve, plugin: capabilities?.features.pluginApproval === true || legacyApprovalResolve };
 
-  const attachmentInvoke = async (method: "select" | "import" | "prepare" | "remove", params: object) => {
+  const attachmentInvoke = async (method: "select" | "import" | "get" | "prepare" | "remove", params: object) => {
     const invoke = window.uclaw?.attachments?.invoke;
     if (invoke === undefined) throw new Error("附件服务不可用");
     const response = await invoke({ method, requestId: requestId(), params } as never);
     if (!response.ok) throw new Error(response.error.message);
     return response.result;
   };
+
+  const invalidateSendIntent = () => { sendIntentId.current = undefined; };
 
   const prepareAttachment = async (id: string) => {
     setAttachments((current) => current.map((item) => item.id === id ? { ...item, state: "validating" } : item));
@@ -143,6 +173,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   };
 
   const selectAttachments = async () => {
+    invalidateSendIntent();
     try {
       const selected = await attachmentInvoke("select", {}) as Attachment[];
       setAttachments((current) => [...current, ...selected.filter((item) => !current.some((known) => known.id === item.id))]);
@@ -153,6 +184,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   };
 
   const dropFiles = async (files: File[]) => {
+    invalidateSendIntent();
     const inputs = await Promise.all(files.map(async (file) => {
       const contentBase64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -163,6 +195,15 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
       return { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, contentBase64 };
     }));
     await addAttachmentInputs(inputs);
+  };
+
+  const refreshAttachmentStates = async (sent: Attachment[]) => {
+    if (sent.length === 0) return;
+    const refreshed = await Promise.all(sent.map(async (attachment) => {
+      try { return await attachmentInvoke("get", { attachmentId: attachment.id }) as Attachment; }
+      catch { return { ...attachment, state: "failed" as const, error: { code: "OPERATION_FAILED" as const, message: "附件发送失败", retryable: true } }; }
+    }));
+    setAttachments((current) => current.map((attachment) => refreshed.find((item) => item.id === attachment.id) ?? attachment));
   };
 
   const send = async () => {
@@ -188,16 +229,26 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     };
     try {
       const blocks = [...(text === "" ? [] : [{ type: "text" as const, text, format: "plain" as const }]), ...readyAttachments.map((attachment) => ({ type: "attachment" as const, attachmentId: attachment.id }))];
-      const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId: requestId(), blocks }, controller.signal));
+      const clientRequestId = sendIntentId.current ??= requestId();
+      const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId, blocks }, controller.signal));
       if (!mounted.current) return;
-      if (terminal?.type === "error") restoreFailedDraft(terminal.error.message);
+      if (terminal?.type === "error") {
+        restoreFailedDraft(terminal.error.message);
+        await refreshAttachmentStates(readyAttachments);
+      }
       else if (terminal?.type === "final") {
         onDraftChange("");
-        setAttachments((current) => current.map((attachment) => readyAttachments.some((ready) => ready.id === attachment.id) ? { ...attachment, state: "attached", progress: 1 } : attachment));
+        const sentIds = new Set(readyAttachments.map((attachment) => attachment.id));
+        setAttachments((current) => current.filter((attachment) => !sentIds.has(attachment.id)));
+        await Promise.all(readyAttachments.map((attachment) => attachmentInvoke("remove", { attachmentId: attachment.id }).catch(() => undefined)));
+        sendIntentId.current = undefined;
         onSendSuccess(session.id);
       }
     } catch (error) {
-      if (mounted.current && !stopRequested.current) restoreFailedDraft(error instanceof Error ? error.message : "发送失败");
+      if (mounted.current && !stopRequested.current) {
+        restoreFailedDraft(error instanceof Error ? error.message : "发送失败");
+        await refreshAttachmentStates(readyAttachments);
+      }
     } finally {
       activeRunId.current = undefined;
       sendController.current = undefined;
@@ -261,9 +312,11 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     <div className="conversation" aria-busy={historyState === "loading"}>
       {historyState === "loading" ? <div className="conversation-state"><LoaderCircle className="spin" /><span>正在加载消息</span></div> : null}
       {historyState === "error" ? <div className="conversation-state" role="alert"><AlertCircle /><strong>消息加载失败</strong><span>{historyError}</span><button type="button" onClick={() => void loadHistory()}><RotateCw />重试</button></div> : null}
-      {historyState === "ready" ? <MessageList messages={messages} stream={stream} pendingApprovals={pendingApprovals} pendingTools={pendingTools} canResolveApprovals={false} approvalCapabilities={approvalCapabilities} onResolveApproval={handleApproval} /> : null}
+      {historyState === "ready" ? <><MessageList messages={messages} stream={stream} pendingApprovals={pendingApprovals} pendingTools={pendingTools} canResolveApprovals={false} approvalCapabilities={approvalCapabilities} onResolveApproval={handleApproval} />
+        {historyHasMore ? <button className="history-load-more" type="button" disabled={historyPageState === "loading"} onClick={() => void loadMoreHistory()}>{historyPageState === "loading" ? <LoaderCircle className="spin" /> : <RotateCw />}加载更多消息</button> : null}
+        {historyPageState === "error" ? <div className="history-page-error" role="alert"><span>{historyPageError}</span><button type="button" onClick={() => void loadMoreHistory()}><RotateCw />重试加载</button></div> : null}</> : null}
     </div>
     {sendError ? <div className="send-error" role="alert"><AlertCircle /><span><strong>发送失败</strong>{sendError}</span></div> : null}
-    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} onChange={onDraftChange} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => void prepareAttachment(id)} onRemoveAttachment={(id) => { void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); setAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
+    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { invalidateSendIntent(); void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); setAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
   </section>;
 }
