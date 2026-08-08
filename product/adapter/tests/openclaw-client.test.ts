@@ -368,6 +368,20 @@ describe("OpenClawClient", () => {
     expect(error).toBeInstanceOf(AttachmentServiceError);
     expect((error as AttachmentServiceError).uclawError.code).toBe("FILE_TOO_LARGE");
     expect(transport.requests).toEqual([]);
+    expect(await attachments.get(one.id)).toMatchObject({ state: "ready", progress: 0 });
+    const prepared = [];
+    for await (const state of attachments.prepare(one.id)) prepared.push(state.state);
+    expect(prepared).toEqual(["ready"]);
+
+    transport.policy = { maxPayload: 65_536, maxBufferedBytes: 131_072 };
+    transport.fixtures.set("chat.send", { runId: "run-after-limit", status: "started" });
+    await client.gateway.reconnect();
+    const retry = client.chat.send({
+      sessionId: "session-1", clientRequestId: "after-limit",
+      blocks: [{ type: "attachment", attachmentId: one.id }],
+    })[Symbol.asyncIterator]();
+    await expect(retry.next()).resolves.toMatchObject({ value: { type: "started", runId: "run-after-limit" } });
+    await retry.return?.();
   });
 
   it("reports upload progress and preserves a retryable failed attachment", async () => {

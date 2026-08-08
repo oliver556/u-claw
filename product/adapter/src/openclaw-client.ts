@@ -451,7 +451,6 @@ export class OpenClawClient implements UClawClient {
     })];
     try {
       if (signal?.aborted === true) return;
-      for (const id of attachmentIds) this.options.attachments?.markUploading(id, 0);
       const requestParams: JsonValue = {
         sessionKey: input.sessionId,
         message: text,
@@ -470,6 +469,7 @@ export class OpenClawClient implements UClawClient {
       if (frameBytes > policyLimit) {
         throw new AttachmentServiceError("FILE_TOO_LARGE", `附件发送载荷超过 Gateway 限制（${frameBytes} > ${policyLimit} bytes）。`);
       }
+      for (const id of attachmentIds) this.options.attachments?.markUploading(id, 0);
       const acceptedRequest = this.options.transport.router.request("chat.send", requestParams, SendResponseSchema).then((accepted) => {
         for (const id of attachmentIds) this.options.attachments?.markAttached(id);
         return accepted;
