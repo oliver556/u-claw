@@ -61,8 +61,29 @@
         "mandatoryPassed": { "type": "boolean" },
         "cases": {
           "type": "object",
-          "minProperties": 1,
-          "additionalProperties": { "type": "boolean" }
+          "additionalProperties": false,
+          "minProperties": 8,
+          "maxProperties": 8,
+          "required": [
+            "valid-manifest",
+            "invalid-sha256",
+            "path-traversal",
+            "absolute-path",
+            "absolute-path-unc",
+            "unicode-space-path",
+            "sdk-path-removed",
+            "cli-invalid-arguments"
+          ],
+          "properties": {
+            "valid-manifest": { "type": "boolean" },
+            "invalid-sha256": { "type": "boolean" },
+            "path-traversal": { "type": "boolean" },
+            "absolute-path": { "type": "boolean" },
+            "absolute-path-unc": { "type": "boolean" },
+            "unicode-space-path": { "type": "boolean" },
+            "sdk-path-removed": { "type": "boolean" },
+            "cli-invalid-arguments": { "type": "boolean" }
+          }
         },
         "toolchainVersion": { "type": "string", "minLength": 1 }
       }

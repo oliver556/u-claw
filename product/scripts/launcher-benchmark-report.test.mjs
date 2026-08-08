@@ -18,12 +18,37 @@ const behaviorTestUrl = new URL(
   import.meta.url,
 );
 const workflowUrl = new URL("../../.github/workflows/launcher-benchmark.yml", import.meta.url);
+const launcherReadmeUrl = new URL("../benchmarks/launcher/README.md", import.meta.url);
+const goManifestUrl = new URL("../benchmarks/launcher/go/app.manifest", import.meta.url);
+const dotnetManifestUrl = new URL("../benchmarks/launcher/dotnet/app.manifest", import.meta.url);
+const dotnetProjectUrl = new URL(
+  "../benchmarks/launcher/dotnet/UClaw.Launcher.Benchmark.csproj",
+  import.meta.url,
+);
 const fixtureUrl = new URL(
   "../tests/packaging/fixtures/launcher-trial.example.json",
   import.meta.url,
 );
 const reportSchema = JSON.parse(await readFile(schemaUrl, "utf8"));
 const validateSchema = new Ajv2020({ allErrors: true }).compile(reportSchema);
+
+const mandatoryCaseNames = [
+  "valid-manifest",
+  "invalid-sha256",
+  "path-traversal",
+  "absolute-path",
+  "absolute-path-unc",
+  "unicode-space-path",
+  "sdk-path-removed",
+  "cli-invalid-arguments",
+];
+
+function mandatoryCases(overrides = {}) {
+  return {
+    ...Object.fromEntries(mandatoryCaseNames.map((name) => [name, true])),
+    ...overrides,
+  };
+}
 
 function candidate(overrides = {}) {
   return {
@@ -32,7 +57,7 @@ function candidate(overrides = {}) {
     p50Ms: 20,
     p95Ms: 30,
     mandatoryPassed: true,
-    cases: { "valid-manifest": true },
+    cases: mandatoryCases(),
     toolchainVersion: "test",
     ...overrides,
   };
@@ -204,6 +229,58 @@ test("Windows launcher workflow builds measured sidecars and validates every tri
   assert.match(workflowSource, /-Iterations\s+20/);
   assert.match(workflowSource, /-Trial\s+['"]?\$\{\{ matrix\.trial \}\}/);
   assert.match(workflowSource, /launcher-benchmark-report\.mjs validate/);
+});
+
+test("launcher candidates declare explicit asInvoker application manifests", async () => {
+  const [goManifest, dotnetManifest, project] = await Promise.all([
+    readFile(goManifestUrl, "utf8"),
+    readFile(dotnetManifestUrl, "utf8"),
+    readFile(dotnetProjectUrl, "utf8"),
+  ]);
+  for (const manifest of [goManifest, dotnetManifest]) {
+    assert.equal((manifest.match(/requestedExecutionLevel/g) ?? []).length, 1);
+    assert.match(manifest, /requestedExecutionLevel\s+level="asInvoker"\s+uiAccess="false"/);
+    assert.doesNotMatch(manifest, /requireAdministrator|highestAvailable/);
+  }
+  assert.match(project, /<ApplicationManifest>app\.manifest<\/ApplicationManifest>/);
+});
+
+test("Windows workflow embeds and structurally gates both asInvoker manifests", async () => {
+  const workflowSource = await readFile(workflowUrl, "utf8");
+  const generateIndex = workflowSource.indexOf("go run github.com/akavel/rsrc@v0.10.2");
+  const stopwatchIndex = workflowSource.indexOf("$stopwatch = [Diagnostics.Stopwatch]::StartNew()", generateIndex);
+  assert.ok(generateIndex >= 0 && generateIndex < stopwatchIndex);
+  assert.match(workflowSource, /go run github\.com\/akavel\/rsrc@v0\.10\.2[^\n]*-manifest app\.manifest[^\n]*-arch amd64[^\n]*-o rsrc_windows_amd64\.syso/);
+  assert.match(workflowSource, /finally[\s\S]{0,240}Remove-Item[^\n]*rsrc_windows_amd64\.syso/);
+  assert.match(workflowSource, /ProgramFiles\(x86\)[\s\S]*Windows Kits[\\/]10[\\/]bin/);
+  assert.match(workflowSource, /Sort-Object[^\n]*\[version\]/);
+  assert.match(workflowSource, /mt\.exe/);
+  assert.match(workflowSource, /SelectNodes\([^\n]*requestedExecutionLevel/);
+  assert.match(workflowSource, /GetAttribute\(['"]level['"]\)[^\n]*asInvoker/);
+  assert.match(workflowSource, /GetAttribute\(['"]uiAccess['"]\)[^\n]*false/);
+  assert.match(workflowSource, /foreach\s*\(\$executable\s+in\s+@\(\$goExe,\s*\$dotnetExe\)\)/);
+  const gateIndex = workflowSource.indexOf("Verify asInvoker application manifests");
+  const behaviorIndex = workflowSource.indexOf("behavior compatibility gate");
+  const formalIndex = workflowSource.indexOf("Run formal benchmark trial");
+  assert.ok(gateIndex >= 0 && gateIndex < behaviorIndex && gateIndex < formalIndex);
+  assert.doesNotMatch(workflowSource, /RunAs|requireAdministrator|highestAvailable/i);
+});
+
+test("Windows workflow runs launcher Node tests before candidate builds", async () => {
+  const workflowSource = await readFile(workflowUrl, "utf8");
+  const installIndex = workflowSource.indexOf("npm ci --ignore-scripts --prefix product");
+  const testIndex = workflowSource.indexOf("npm run test:launcher-benchmark --prefix product");
+  const buildIndex = workflowSource.indexOf("name: Build and test Go candidate");
+  assert.ok(installIndex >= 0 && installIndex < testIndex && testIndex < buildIndex);
+});
+
+test("launcher reproduction documents resource generation and asInvoker gate", async () => {
+  const source = await readFile(launcherReadmeUrl, "utf8");
+  assert.match(source, /github\.com\/akavel\/rsrc@v0\.10\.2/);
+  assert.match(source, /rsrc_windows_amd64\.syso/);
+  assert.match(source, /mt\.exe/);
+  assert.match(source, /asInvoker/);
+  assert.match(source, /uiAccess="false"/);
 });
 
 test("Windows harness workflow gates PowerShell 5.1 and pwsh with behavior tests", async () => {
@@ -447,10 +524,22 @@ test("rejects empty cases and non-boolean case values", () => {
   );
 });
 
+test("requires exactly the eight frozen mandatory case keys", () => {
+  const missing = makeTrial(1);
+  delete missing.candidates.go.cases[mandatoryCaseNames[0]];
+  assert.throws(() => validateTrialReport(missing), /candidates\.go\.cases/);
+
+  const placeholder = makeTrial(1, { go: { cases: { placeholder: true } } });
+  assert.throws(() => validateTrialReport(placeholder), /candidates\.go\.cases/);
+
+  const extra = makeTrial(1, { go: { cases: { ...mandatoryCases(), "as-invoker": true } } });
+  assert.throws(() => validateTrialReport(extra), /candidates\.go\.cases/);
+});
+
 test("rejects mandatoryPassed values that contradict cases", () => {
   for (const go of [
-    { mandatoryPassed: true, cases: { manifest: false } },
-    { mandatoryPassed: false, cases: { manifest: true, checksum: true } },
+    { mandatoryPassed: true, cases: mandatoryCases({ "valid-manifest": false }) },
+    { mandatoryPassed: false, cases: mandatoryCases() },
   ]) {
     assert.throws(
       () => validateTrialReport(makeTrial(1, { go })),
@@ -481,7 +570,10 @@ test("requires all trials to report the same commit SHA", () => {
 });
 
 test("eliminates candidates that fail any mandatory trial", () => {
-  const failed = { mandatoryPassed: false, cases: { "valid-manifest": false } };
+  const failed = {
+    mandatoryPassed: false,
+    cases: mandatoryCases({ "valid-manifest": false }),
+  };
   const trialReports = reports({ go: failed });
   assert.deepEqual(decideLauncher(trialReports), {
     selected: "dotnet",
@@ -614,8 +706,12 @@ test("schema and runtime accept and reject the same report examples", () => {
     [false, makeTrial(1, { go: { exeBytes: 0 } })],
     [false, makeTrial(1, { go: { cases: {} } })],
     [false, makeTrial(1, { go: { cases: { manifest: "yes" } } })],
-    [false, makeTrial(1, { go: { mandatoryPassed: true, cases: { manifest: false } } })],
-    [false, makeTrial(1, { go: { mandatoryPassed: false, cases: { manifest: true } } })],
+    [false, makeTrial(1, {
+      go: { mandatoryPassed: true, cases: mandatoryCases({ "valid-manifest": false }) },
+    })],
+    [false, makeTrial(1, {
+      go: { mandatoryPassed: false, cases: mandatoryCases() },
+    })],
   ];
 
   for (const [expected, report] of examples) {
@@ -659,7 +755,10 @@ test("CLI validates reports and writes a decision", async (t) => {
 test("CLI mandatory gate rejects one failed candidate before decision", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "uclaw-launcher-gate-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const failed = { mandatoryPassed: false, cases: { "valid-manifest": false } };
+  const failed = {
+    mandatoryPassed: false,
+    cases: mandatoryCases({ "valid-manifest": false }),
+  };
   const trialReports = [makeTrial(1, { go: failed }), makeTrial(2), makeTrial(3)];
   const files = await Promise.all(trialReports.map(async (report, index) => {
     const file = path.join(directory, `trial-${index + 1}.json`);

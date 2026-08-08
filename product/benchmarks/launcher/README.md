@@ -8,6 +8,7 @@
 - Node.js 24.15.0
 - Go 1.24.4
 - .NET SDK 8.0.408
+- Windows SDK：使用 Windows Kits 10 最新版本目录中的 x64 `mt.exe`
 - Windows PowerShell 5.1：仅用于行为兼容门禁
 - PowerShell 7：用于行为兼容门禁、候选构建和正式基准
 
@@ -33,6 +34,13 @@ $windowsPowerShellVersion = (& powershell.exe -NoProfile -Command '$v = $PSVersi
 if ($LASTEXITCODE -ne 0 -or $windowsPowerShellVersion -cne '5.1') { throw 'Windows PowerShell must be 5.1' }
 $pwshMajor = (& pwsh -NoProfile -Command '$PSVersionTable.PSVersion.Major.ToString()').Trim()
 if ($LASTEXITCODE -ne 0 -or $pwshMajor -cne '7') { throw 'PowerShell must be major version 7' }
+$windowsKitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+$mt = Get-ChildItem -LiteralPath $windowsKitsBin -Directory |
+  Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'x64\mt.exe')) } |
+  Sort-Object { [version]$_.Name } -Descending |
+  Select-Object -First 1 |
+  ForEach-Object { Join-Path $_.FullName 'x64\mt.exe' }
+if (-not $mt) { throw 'Windows SDK x64 mt.exe not found' }
 ```
 
 上述检查同时验证当前 shell 为 PowerShell 7、子 shell `powershell.exe` 为 5.1、子 shell `pwsh` major 为 7。缺少命令或版本不同会立即停止；不要把结果与 CI 固定环境混用。
@@ -67,6 +75,8 @@ $reportRoot = Join-Path $benchmarkRoot 'reports'
 
 npm ci --ignore-scripts --prefix product
 if ($LASTEXITCODE -ne 0) { throw 'Product dependency install failed' }
+npm run test:launcher-benchmark --prefix product
+if ($LASTEXITCODE -ne 0) { throw 'Launcher benchmark report tests failed' }
 
 $commitSha = (& git rev-parse HEAD).Trim().ToLowerInvariant()
 if ($LASTEXITCODE -ne 0 -or $commitSha -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid Git commit SHA' }
@@ -87,10 +97,18 @@ try {
   try {
     go test ./...
     if ($LASTEXITCODE -ne 0) { throw 'Go tests failed' }
-    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-    go build -trimpath -ldflags '-s -w' -o $goExe .
-    if ($LASTEXITCODE -ne 0) { $stopwatch.Stop(); throw 'Go build failed' }
-    $stopwatch.Stop()
+    if (Test-Path -LiteralPath rsrc_windows_amd64.syso) { throw 'Go resource output already exists' }
+    try {
+      go run github.com/akavel/rsrc@v0.10.2 -manifest app.manifest -arch amd64 -o rsrc_windows_amd64.syso
+      if ($LASTEXITCODE -ne 0) { throw 'Go manifest resource generation failed' }
+      $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+      go build -trimpath -ldflags '-s -w' -o $goExe .
+      if ($LASTEXITCODE -ne 0) { $stopwatch.Stop(); throw 'Go build failed' }
+      $stopwatch.Stop()
+    }
+    finally {
+      Remove-Item -LiteralPath rsrc_windows_amd64.syso -Force -ErrorAction SilentlyContinue
+    }
   }
   finally {
     Pop-Location
@@ -146,6 +164,32 @@ if (Test-Path -LiteralPath $sidecar) { throw 'NativeAOT build sidecar already ex
 $temporary = $sidecar + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
 [IO.File]::WriteAllText($temporary, (($metadata | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 [IO.File]::Move($temporary, $sidecar)
+
+$windowsKitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+$mt = Get-ChildItem -LiteralPath $windowsKitsBin -Directory |
+  Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'x64\mt.exe')) } |
+  Sort-Object { [version]$_.Name } -Descending |
+  Select-Object -First 1 |
+  ForEach-Object { Join-Path $_.FullName 'x64\mt.exe' }
+if (-not $mt) { throw 'Windows SDK x64 mt.exe not found' }
+foreach ($executable in @($goExe, $dotnetExe)) {
+  $extractedManifest = Join-Path $env:TEMP (([IO.Path]::GetFileName($executable)) + '.' + [Guid]::NewGuid().ToString('N') + '.manifest')
+  try {
+    & $mt "-inputresource:$executable;#1" "-out:$extractedManifest"
+    if ($LASTEXITCODE -ne 0) { throw "Manifest extraction failed: $executable" }
+    [xml]$manifest = Get-Content -LiteralPath $extractedManifest -Raw
+    $levels = @($manifest.SelectNodes("//*[local-name()='requestedExecutionLevel']"))
+    if ($levels.Count -ne 1) { throw "Expected exactly one requestedExecutionLevel: $executable" }
+    if ($levels[0].GetAttribute('level') -cne 'asInvoker') { throw "Manifest level must be asInvoker: $executable" }
+    if ($levels[0].GetAttribute('uiAccess') -cne 'false') { throw "Manifest uiAccess must be false: $executable" }
+  }
+  finally {
+    Remove-Item -LiteralPath $extractedManifest -Force -ErrorAction SilentlyContinue
+  }
+}
+
+# 两个 EXE 都必须且只能包含一个：
+# <requestedExecutionLevel level="asInvoker" uiAccess="false" />
 
 pwsh -NoProfile -File product\tests\windows\launcher-benchmark.ps1 `
   -GoExe product\.launcher-benchmark\candidates\uclaw-launcher-go.exe `
@@ -203,9 +247,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Workflow dispatch failed' }
 
 ## 输出与清理
 
-`product\.launcher-benchmark`、任何 `.tmp`、EXE、DLL、PDB、`bin`、`obj`、trial JSON 和 decision JSON 都是本地产物，不得提交。sidecar 必须与对应 EXE 同目录，也不得提交。运行前使用新的输出路径；不要覆盖或篡改已有报告。
+`product\.launcher-benchmark`、Go 固定资源文件 `rsrc_windows_amd64.syso`、任何 `.tmp`、EXE、DLL、PDB、`bin`、`obj`、trial JSON 和 decision JSON 都是本地产物，不得提交。sidecar 必须与对应 EXE 同目录，也不得提交。运行前使用新的输出路径；不要覆盖或篡改已有报告。
 
-提交前只删除仓库内固定的 benchmark 输出根目录和 .NET `bin`/`obj`。脚本先证明 `$work` 等于预期目录，并逐一校验其他清理路径在仓库内固定位置；拒绝 reparse point，删除后用 `Test-Path` 确认不存在，再检查 Git。报告、日志和提交内容不得包含用户绝对路径、用户名或 secret。
+提交前只删除仓库内固定的 benchmark 输出根目录、Go `rsrc_windows_amd64.syso` 和 .NET `bin`/`obj`。脚本先证明 `$work` 等于预期目录，并逐一校验其他清理路径在仓库内固定位置；拒绝 reparse point，删除后用 `Test-Path` 确认不存在，再检查 Git。报告、日志和提交内容不得包含用户绝对路径、用户名或 secret。
 
 ```powershell
 $ErrorActionPreference = 'Stop'
@@ -228,17 +272,19 @@ if (-not $work.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCa
 }
 
 $buildOutputs = @(
+  [IO.Path]::GetFullPath([IO.Path]::Combine($repositoryRoot, 'product', 'benchmarks', 'launcher', 'go', 'rsrc_windows_amd64.syso')),
   [IO.Path]::GetFullPath([IO.Path]::Combine($repositoryRoot, 'product', 'benchmarks', 'launcher', 'dotnet', 'bin')),
   [IO.Path]::GetFullPath([IO.Path]::Combine($repositoryRoot, 'product', 'benchmarks', 'launcher', 'dotnet', 'obj'))
 )
 $expectedBuildOutputs = @(
+  [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'product\benchmarks\launcher\go\rsrc_windows_amd64.syso')),
   [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'product\benchmarks\launcher\dotnet\bin')),
   [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'product\benchmarks\launcher\dotnet\obj'))
 )
 for ($index = 0; $index -lt $buildOutputs.Count; $index++) {
   if (-not $buildOutputs[$index].Equals($expectedBuildOutputs[$index], [StringComparison]::OrdinalIgnoreCase) -or
       -not $buildOutputs[$index].StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Unexpected .NET cleanup path'
+    throw 'Unexpected build cleanup path'
   }
 }
 
