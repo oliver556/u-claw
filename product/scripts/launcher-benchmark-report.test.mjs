@@ -243,6 +243,8 @@ test("launcher candidates declare explicit asInvoker application manifests", asy
     assert.doesNotMatch(manifest, /requireAdministrator|highestAvailable/);
   }
   assert.match(project, /<ApplicationManifest>app\.manifest<\/ApplicationManifest>/);
+  assert.match(project, /<PublishAot>true<\/PublishAot>/);
+  assert.doesNotMatch(project, /<PublishSingleFile>true<\/PublishSingleFile>/);
 });
 
 test("Windows workflow embeds and structurally gates both asInvoker manifests", async () => {
