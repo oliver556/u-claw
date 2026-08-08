@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "trial": 1,
+  "measurementKind": "hosted-runner-process-start",
+  "commitSha": "0123456789abcdef0123456789abcdef01234567",
+  "runner": {
+    "os": "Windows",
+    "arch": "X64",
+    "cpu": "Example CI processor"
+  },
+  "candidates": {
+    "go": {
+      "exeBytes": 8000000,
+      "buildMs": 1250.5,
+      "p50Ms": 18.25,
+      "p95Ms": 27.75,
+      "mandatoryPassed": true,
+      "cases": {
+        "valid-manifest": true,
+        "invalid-sha256": true,
+        "path-traversal": true,
+        "absolute-path": true,
+        "absolute-path-unc": true,
+        "unicode-space-path": true,
+        "sdk-path-removed": true,
+        "cli-invalid-arguments": true
+      },
+      "toolchainVersion": "go1.24.0"
+    },
+    "dotnet": {
+      "exeBytes": 10000000,
+      "buildMs": 2250.5,
+      "p50Ms": 19.5,
+      "p95Ms": 29.25,
+      "mandatoryPassed": true,
+      "cases": {
+        "valid-manifest": true,
+        "invalid-sha256": true,
+        "path-traversal": true,
+        "absolute-path": true,
+        "absolute-path-unc": true,
+        "unicode-space-path": true,
+        "sdk-path-removed": true,
+        "cli-invalid-arguments": true
+      },
+      "toolchainVersion": "8.0.100"
+    }
+  }
+}

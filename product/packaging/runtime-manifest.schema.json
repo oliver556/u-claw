@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "productVersion",
+    "runtimeVersion",
+    "runtimeId",
+    "runtimeArchive",
+    "runtimeSha256",
+    "runtimeBytes",
+    "unpackedBytes",
+    "fileCount",
+    "entrypoint",
+    "entryArgs"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "productVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "runtimeVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "runtimeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "runtimeArchive": { "type": "string", "minLength": 1, "maxLength": 32767 },
+    "runtimeSha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "runtimeBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "unpackedBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "fileCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "entrypoint": { "type": "string", "minLength": 1, "maxLength": 32767 },
+    "entryArgs": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "type": "string", "maxLength": 4096 }
+    }
+  }
+}
