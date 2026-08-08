@@ -92,6 +92,8 @@ describe("OpenClaw tool and approval contract", () => {
     event.payload.data.result = {
       ghp_123456789012345678901234567890123456: 1,
       github_pat_1234567890123456789012345678901234567890: true,
+      ["sk_" + "live_123456789012345678901234"]: "stripe-secret",
+      ["rk_" + "live_123456789012345678901234"]: "stripe-restricted-secret",
       count: 2,
     };
 
@@ -100,6 +102,21 @@ describe("OpenClaw tool and approval contract", () => {
     expect(mapped).toMatchObject({ toolId: "unknown-tool", outputSummary: { count: 2 } });
     expect(serialized).not.toContain("ghp_");
     expect(serialized).not.toContain("github_pat_");
+    expect(serialized).not.toContain("sk_live_");
+    expect(serialized).not.toContain("rk_live_");
+  });
+
+  it.each([
+    "sk_" + "live_123456789012345678901234",
+    "rk_" + "live_123456789012345678901234",
+    "sk-1234567890123456",
+    "sk-proj-1234567890123456",
+  ])("rejects token-shaped tool identifier: %s", (toolId) => {
+    const tools = fixture("session.tool.json");
+    const event = structuredClone(tools.result);
+    event.payload.data.name = toolId;
+
+    expect(mapOpenClawSessionToolEvent(event)).toMatchObject({ toolId: "unknown-tool" });
   });
 
   it("rejects all Slack token families as tool identifiers", () => {

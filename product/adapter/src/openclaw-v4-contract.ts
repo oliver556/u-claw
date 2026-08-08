@@ -347,6 +347,7 @@ function safeSummary(value: unknown): Record<string, string | number | boolean |
 
 function isTokenLike(value: string): boolean {
   return /^(?:gh[pousr]_|github_pat_|xox[a-z]-|sk-(?:proj-)?|AIza|AKIA)[A-Za-z0-9_-]{8,}$/i.test(value) ||
+    /^(?:sk|rk)_live_[A-Za-z0-9_-]{16,}$/.test(value) ||
     /^eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/.test(value);
 }
 

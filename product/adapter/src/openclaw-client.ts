@@ -101,6 +101,10 @@ const implementedEvents = new Set([
 ]);
 const MAX_TRACKED_TRACES = 256;
 
+function approvalToolKey(sessionId: string, toolCallId: string): string {
+  return `${sessionId.length}:${sessionId}${toolCallId.length}:${toolCallId}`;
+}
+
 const SessionPageSchema = z.object({
   sessions: z.array(RawSessionSchema),
   ts: z.number().optional(),
@@ -837,7 +841,7 @@ export class OpenClawClient implements UClawClient {
 
   private recordToolRun(tool: ToolCall): boolean {
     if (tool.state === "running") {
-      const approvalKey = this.approvalToolIndex.get(`${tool.sessionId}:${tool.id}`);
+      const approvalKey = this.approvalToolIndex.get(approvalToolKey(tool.sessionId, tool.id));
       if (approvalKey && this.approvalDecisions.get(approvalKey) === "deny") tool = { ...tool, state: "cancelled" };
     }
     const sessionRuns = this.toolCallRuns.get(tool.sessionId);
@@ -956,7 +960,7 @@ export class OpenClawClient implements UClawClient {
     for (const [toolCallId, mapped] of sessionRuns) {
       if (mapped.runId === runId) {
         sessionRuns.delete(toolCallId);
-        const toolKey = `${sessionId}:${toolCallId}`;
+        const toolKey = approvalToolKey(sessionId, toolCallId);
         const approvalKey = this.approvalToolIndex.get(toolKey);
         if (approvalKey) {
           this.approvalToolIndex.delete(toolKey);
@@ -972,20 +976,20 @@ export class OpenClawClient implements UClawClient {
   private storeApproval(key: string, request: ApprovalRequest): void {
     const previous = this.approvalRequests.get(key);
     if (previous?.sessionId && previous.toolCallId) {
-      const previousToolKey = `${previous.sessionId}:${previous.toolCallId}`;
-      const nextToolKey = request.sessionId && request.toolCallId ? `${request.sessionId}:${request.toolCallId}` : undefined;
+      const previousToolKey = approvalToolKey(previous.sessionId, previous.toolCallId);
+      const nextToolKey = request.sessionId && request.toolCallId ? approvalToolKey(request.sessionId, request.toolCallId) : undefined;
       if (previousToolKey !== nextToolKey && this.approvalToolIndex.get(previousToolKey) === key) {
         this.approvalToolIndex.delete(previousToolKey);
       }
     }
     this.approvalRequests.set(key, request);
-    if (request.sessionId && request.toolCallId) this.approvalToolIndex.set(`${request.sessionId}:${request.toolCallId}`, key);
+    if (request.sessionId && request.toolCallId) this.approvalToolIndex.set(approvalToolKey(request.sessionId, request.toolCallId), key);
     while (this.approvalRequests.size > MAX_TRACKED_TRACES) {
       const oldestKey = this.approvalRequests.keys().next().value as string;
       const oldest = this.approvalRequests.get(oldestKey);
       this.approvalRequests.delete(oldestKey);
       if (oldest?.sessionId && oldest.toolCallId) {
-        const toolKey = `${oldest.sessionId}:${oldest.toolCallId}`;
+        const toolKey = approvalToolKey(oldest.sessionId, oldest.toolCallId);
         if (this.approvalToolIndex.get(toolKey) === oldestKey) this.approvalToolIndex.delete(toolKey);
       }
     }

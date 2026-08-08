@@ -1094,6 +1094,48 @@ describe("OpenClawClient", () => {
     await watch.return?.();
   });
 
+  it("keeps colon-bearing session and tool ids isolated during denial and terminal cleanup", async () => {
+    const tools = contractFixture("session.tool.json");
+    const approvals = contractFixture("approvals.json");
+    const transport = new FakeTransport();
+    transport.helloMethods.push("plugin.approval.resolve");
+    transport.fixtures.set("plugin.approval.resolve", { ok: true });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const first = client.chat.watch("a:b")[Symbol.asyncIterator]();
+    const firstTool = first.next();
+    const approval = structuredClone(approvals.plugin.deny.event.payload);
+    approval.id = "approval-colon-collision";
+    approval.request.sessionKey = "a:b";
+    approval.request.toolCallId = "c";
+    transport.emit("plugin.approval.requested", approval, 1);
+    await client.approvals.resolvePlugin({ ref: { family: "plugin", id: approval.id }, decision: "deny" });
+
+    const second = client.chat.watch("a")[Symbol.asyncIterator]();
+    const secondTool = second.next();
+    const start = (sessionKey: string, toolCallId: string, runId: string) => {
+      const event = structuredClone(tools.start.payload);
+      event.sessionKey = sessionKey;
+      event.data.toolCallId = toolCallId;
+      event.runId = runId;
+      return event;
+    };
+    transport.emit("session.tool", start("a", "b:c", "run-second"), 2);
+    await expect(secondTool).resolves.toMatchObject({ value: { type: "tool", tool: { state: "running" } } });
+
+    const terminal = second.next();
+    transport.emit("chat", {
+      state: "aborted", runId: "run-second", sessionKey: "a", errorMessage: "stopped",
+    }, 3);
+    await expect(terminal).resolves.toMatchObject({ value: { type: "aborted", runId: "run-second" } });
+
+    transport.emit("session.tool", start("a:b", "c", "run-first"), 4);
+    await expect(firstTool).resolves.toMatchObject({ value: { type: "tool", tool: { state: "cancelled" } } });
+    await first.return?.();
+    await second.return?.();
+  });
+
   it("clears tool approval associations across disconnect and reconnect", async () => {
     const tools = contractFixture("session.tool.json");
     const approvals = contractFixture("approvals.json");
@@ -1289,7 +1331,8 @@ describe("OpenClawClient", () => {
     await client.approvals.listPending();
 
     const internal = client as unknown as { approvalToolIndex: Map<string, string> };
-    expect(internal.approvalToolIndex.has(`${entry.request.sessionKey}:${entry.request.toolCallId}`)).toBe(false);
-    expect(internal.approvalToolIndex.get(`${remapped.request.sessionKey}:${remapped.request.toolCallId}`)).toBe(`exec:${entry.id}`);
+    const toolKey = (sessionId: string, toolCallId: string) => `${sessionId.length}:${sessionId}${toolCallId.length}:${toolCallId}`;
+    expect(internal.approvalToolIndex.has(toolKey(entry.request.sessionKey, entry.request.toolCallId))).toBe(false);
+    expect(internal.approvalToolIndex.get(toolKey(remapped.request.sessionKey, remapped.request.toolCallId))).toBe(`exec:${entry.id}`);
   });
 });
