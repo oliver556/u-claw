@@ -616,9 +616,13 @@ describe("OpenClawClient", () => {
 
     const exactPlugin = structuredClone(approvals.plugin.allowOnce.event.payload);
     exactPlugin.request.toolCallId = "tool-call-approval-1";
+    const watchedWaiting = iterator.next();
+    const sentWaiting = send.next();
+    transport.emit("plugin.approval.requested", exactPlugin, 2);
+    await expect(watchedWaiting).resolves.toMatchObject({ value: { type: "tool", tool: { state: "waiting-authorization" } } });
+    await expect(sentWaiting).resolves.toMatchObject({ value: { type: "tool", tool: { state: "waiting-authorization" } } });
     const watchedApproval = iterator.next();
     const sentApproval = send.next();
-    transport.emit("plugin.approval.requested", exactPlugin, 2);
     await expect(watchedApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: exactPlugin.id, family: "plugin" } } });
     await expect(sentApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-approval-1", approval: { id: exactPlugin.id, family: "plugin" } } });
 
@@ -673,6 +677,8 @@ describe("OpenClawClient", () => {
     };
     transport.emit("plugin.approval.requested", approvalEvent("plugin-concurrent-1", "tool-concurrent-1"), 3);
     transport.emit("plugin.approval.requested", approvalEvent("plugin-concurrent-2", "tool-concurrent-2"), 4);
+    await expect(first.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-concurrent-1", tool: { state: "waiting-authorization" } } });
+    await expect(second.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-concurrent-2", tool: { state: "waiting-authorization" } } });
     await expect(first.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-concurrent-1", approval: { id: "plugin-concurrent-1" } } });
     await expect(second.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-concurrent-2", approval: { id: "plugin-concurrent-2" } } });
 
@@ -740,6 +746,7 @@ describe("OpenClawClient", () => {
       },
     }, 3);
     await expect(send.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-race" } });
+    await expect(send.next()).resolves.toMatchObject({ value: { type: "tool", runId: "run-race", tool: { state: "waiting-authorization" } } });
     await expect(send.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-race" } });
     await expect(send.next()).resolves.toMatchObject({ value: { type: "final", runId: "run-race" } });
   });
@@ -774,14 +781,16 @@ describe("OpenClawClient", () => {
       event.request.toolCallId = "shared-tool-call";
       return event;
     };
-    const firstApproval = first.next();
-    const secondApproval = second.next();
+    const firstWaiting = first.next();
+    const secondWaiting = second.next();
     transport.emit("plugin.approval.requested", approvalEvent("agent:dev:first", "approval-first"), 3);
     transport.emit("plugin.approval.requested", approvalEvent("agent:dev:second", "approval-second"), 4);
     await Promise.resolve();
     expect(approvalChanges).toEqual([]);
-    await expect(firstApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-first", approval: { id: "approval-first" } } });
-    await expect(secondApproval).resolves.toMatchObject({ value: { type: "approval", runId: "run-second", approval: { id: "approval-second" } } });
+    await expect(firstWaiting).resolves.toMatchObject({ value: { type: "tool", runId: "run-first", tool: { state: "waiting-authorization" } } });
+    await expect(secondWaiting).resolves.toMatchObject({ value: { type: "tool", runId: "run-second", tool: { state: "waiting-authorization" } } });
+    await expect(first.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-first", approval: { id: "approval-first" } } });
+    await expect(second.next()).resolves.toMatchObject({ value: { type: "approval", runId: "run-second", approval: { id: "approval-second" } } });
     await first.return?.();
     await second.return?.();
   });

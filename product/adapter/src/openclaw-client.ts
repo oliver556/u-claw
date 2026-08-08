@@ -9,6 +9,7 @@ import {
   type GatewayStatus,
   type MessageEvent,
   type Page,
+  type ToolCall,
   MessageEventSchema,
   type UClawClient,
 } from "@uclaw/shared";
@@ -237,7 +238,7 @@ export class OpenClawClient implements UClawClient {
   private statusSince: string;
   private statusAttempt = 0;
   private readonly statusSubscribers = new Set<AsyncEventQueue<GatewayStatus>>();
-  private readonly toolCallRuns = new Map<string, Map<string, string>>();
+  private readonly toolCallRuns = new Map<string, Map<string, { runId: string; tool: ToolCall }>>();
   private readonly notifiedApprovalFrames = new WeakSet<object>();
   private readonly sessionMutations = new Map<string, Promise<unknown>>();
   private resyncing = false;
@@ -439,15 +440,21 @@ export class OpenClawClient implements UClawClient {
     }), this.options.transport.router.onEvent("exec.approval.requested", (frame) => {
       const raw = OpenClawExecApprovalEventSchema.safeParse(frame.payload);
       if (!raw.success || raw.data.request.sessionKey !== input.sessionId) return;
-      const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
-      if (runId === undefined) this.notifyApprovalsChanged(frame, input.sessionId);
-      else enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
+      const waiting = this.waitingToolEvent(raw.data.request.sessionKey, raw.data.request.toolCallId);
+      if (waiting === undefined) this.notifyApprovalsChanged(frame, input.sessionId);
+      else {
+        enqueue(waiting);
+        enqueue(MessageEventSchema.parse({ type: "approval", runId: waiting.runId, approval: mapOpenClawExecApproval(raw.data) }));
+      }
     }), this.options.transport.router.onEvent("plugin.approval.requested", (frame) => {
       const raw = OpenClawPluginApprovalEventSchema.safeParse(frame.payload);
       if (!raw.success || raw.data.request.sessionKey !== input.sessionId) return;
-      const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
-      if (runId === undefined) this.notifyApprovalsChanged(frame, input.sessionId);
-      else enqueue(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
+      const waiting = this.waitingToolEvent(raw.data.request.sessionKey, raw.data.request.toolCallId);
+      if (waiting === undefined) this.notifyApprovalsChanged(frame, input.sessionId);
+      else {
+        enqueue(waiting);
+        enqueue(MessageEventSchema.parse({ type: "approval", runId: waiting.runId, approval: mapOpenClawPluginApproval(raw.data) }));
+      }
     })];
     try {
       if (signal?.aborted === true) return;
@@ -533,15 +540,21 @@ export class OpenClawClient implements UClawClient {
     }), this.options.transport.router.onEvent("exec.approval.requested", (frame) => {
       const raw = OpenClawExecApprovalEventSchema.safeParse(frame.payload);
       if (!raw.success || raw.data.request.sessionKey !== sessionId) return;
-      const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
-      if (runId === undefined) this.notifyApprovalsChanged(frame, sessionId);
-      else queue.push(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawExecApproval(raw.data) }));
+      const waiting = this.waitingToolEvent(raw.data.request.sessionKey, raw.data.request.toolCallId);
+      if (waiting === undefined) this.notifyApprovalsChanged(frame, sessionId);
+      else {
+        queue.push(waiting);
+        queue.push(MessageEventSchema.parse({ type: "approval", runId: waiting.runId, approval: mapOpenClawExecApproval(raw.data) }));
+      }
     }), this.options.transport.router.onEvent("plugin.approval.requested", (frame) => {
       const raw = OpenClawPluginApprovalEventSchema.safeParse(frame.payload);
       if (!raw.success || raw.data.request.sessionKey !== sessionId) return;
-      const runId = this.approvalRunId(raw.data.request.sessionKey, raw.data.request.toolCallId);
-      if (runId === undefined) this.notifyApprovalsChanged(frame, sessionId);
-      else queue.push(MessageEventSchema.parse({ type: "approval", runId, approval: mapOpenClawPluginApproval(raw.data) }));
+      const waiting = this.waitingToolEvent(raw.data.request.sessionKey, raw.data.request.toolCallId);
+      if (waiting === undefined) this.notifyApprovalsChanged(frame, sessionId);
+      else {
+        queue.push(waiting);
+        queue.push(MessageEventSchema.parse({ type: "approval", runId: waiting.runId, approval: mapOpenClawPluginApproval(raw.data) }));
+      }
     })];
     try {
       while (signal?.aborted !== true) {
@@ -691,8 +704,8 @@ export class OpenClawClient implements UClawClient {
   private recordToolRun(event: z.infer<typeof OpenClawSessionToolPayloadSchema>): void {
     const sessionRuns = this.toolCallRuns.get(event.sessionKey);
     if (event.data.phase === "start") {
-      const runs = sessionRuns ?? new Map<string, string>();
-      runs.set(event.data.toolCallId, event.runId);
+      const runs = sessionRuns ?? new Map<string, { runId: string; tool: ToolCall }>();
+      runs.set(event.data.toolCallId, { runId: event.runId, tool: mapOpenClawSessionToolEvent(event) });
       this.toolCallRuns.set(event.sessionKey, runs);
       return;
     }
@@ -700,16 +713,19 @@ export class OpenClawClient implements UClawClient {
     if (sessionRuns?.size === 0) this.toolCallRuns.delete(event.sessionKey);
   }
 
-  private approvalRunId(sessionId: string | null | undefined, toolCallId: string | null | undefined): string | undefined {
+  private waitingToolEvent(sessionId: string | null | undefined, toolCallId: string | null | undefined): MessageEvent | undefined {
     if (!sessionId || !toolCallId) return undefined;
-    return this.toolCallRuns.get(sessionId)?.get(toolCallId);
+    const correlated = this.toolCallRuns.get(sessionId)?.get(toolCallId);
+    if (correlated === undefined) return undefined;
+    correlated.tool = { ...correlated.tool, state: "waiting-authorization" };
+    return MessageEventSchema.parse({ type: "tool", runId: correlated.runId, tool: correlated.tool });
   }
 
   private clearToolRunsForRun(sessionId: string, runId: string): void {
     const sessionRuns = this.toolCallRuns.get(sessionId);
     if (sessionRuns === undefined) return;
-    for (const [toolCallId, mappedRunId] of sessionRuns) {
-      if (mappedRunId === runId) sessionRuns.delete(toolCallId);
+    for (const [toolCallId, mapped] of sessionRuns) {
+      if (mapped.runId === runId) sessionRuns.delete(toolCallId);
     }
     if (sessionRuns.size === 0) this.toolCallRuns.delete(sessionId);
   }
