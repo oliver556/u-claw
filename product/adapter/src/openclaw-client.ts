@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import { mapChatEvent, RawChatEventSchema } from "./mappers/chat.js";
 import { mapSession, mapSessionSummary, RawSessionSchema } from "./mappers/session.js";
+import { mapOpenClawModel, RawOpenClawModelsListResponseSchema } from "./mappers/model.js";
 import {
   OpenClawExecApprovalEventSchema,
   OpenClawHistoryResponseSchema,
@@ -92,7 +93,7 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "sessions.list", "sessions.describe", "sessions.create", "sessions.delete",
   "chat.history", "chat.message.get", "chat.send", "chat.abort",
   "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
-  "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch",
+  "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch", "models.list",
 ] as const;
 
 const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);
@@ -447,7 +448,15 @@ export class OpenClawClient implements UClawClient {
   };
 
   readonly models: UClawClient["models"] = {
-    list: async () => this.unsupported("models.list"),
+    list: async () => {
+      this.requireMethod("models.list");
+      const raw = await this.options.transport.router.request(
+        "models.list",
+        { view: "configured" },
+        RawOpenClawModelsListResponseSchema,
+      );
+      return raw.models.map(mapOpenClawModel);
+    },
     selectForSession: async (sessionId, modelId) => {
       this.requireMethod("sessions.patch");
       this.requireMethod("sessions.list");

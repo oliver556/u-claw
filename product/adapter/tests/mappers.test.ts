@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mapChatEvent, mapMessage } from "../src/mappers/chat.js";
+import { mapOpenClawModel } from "../src/mappers/model.js";
 import { mapSession } from "../src/mappers/session.js";
 import { mapExecApproval, mapPluginApproval, mapToolCall } from "../src/mappers/tool.js";
 
@@ -42,6 +43,23 @@ describe("chat mapper", () => {
 });
 
 describe("session and tool mappers", () => {
+  it("maps only explicit OpenClaw model input capabilities", () => {
+    expect(mapOpenClawModel({
+      id: "vision-model", name: "Vision Model", provider: "contract", available: true,
+      input: ["text", "image", "audio"],
+    })).toMatchObject({
+      id: "contract/vision-model", capabilities: ["text", "vision"], locality: "unknown",
+    });
+  });
+
+  it("fails closed when model availability and inputs are absent", () => {
+    expect(mapOpenClawModel({ id: "unknown", name: "Unknown", provider: "contract" })).toMatchObject({
+      available: false,
+      capabilities: ["unknown"],
+      unavailableReason: { code: "MODEL_UNAVAILABLE" },
+    });
+  });
+
   it("maps validated sessions", () => {
     expect(mapSession({ sessionKey: "session-1", title: "Chat", createdAt: now, updatedAt: now, pinned: false, status: "idle" })).toMatchObject({ id: "session-1", title: "Chat" });
   });

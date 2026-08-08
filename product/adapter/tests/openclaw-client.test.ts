@@ -112,6 +112,48 @@ describe("OpenClawClient", () => {
     await expect(client.sessions.list()).resolves.toMatchObject({ items: [{ id: "session-1" }] });
   });
 
+  it("negotiates and maps the locked configured model catalog without leaking upstream fields", async () => {
+    const models = contractFixture("models.list.json");
+    const transport = new FakeTransport();
+    transport.helloMethods.push("models.list");
+    const payload = structuredClone(models.configured.responseFrame.payload);
+    payload.models[0].available = false;
+    payload.models[0].apiKey = "sk-contract-secret";
+    payload.models[0].baseUrl = "https://secret.example/v1";
+    transport.fixtures.set("models.list", payload);
+    const client = new OpenClawClient({ transport });
+
+    const capabilities = await client.gateway.negotiate();
+    expect(capabilities.methods.has("models.list")).toBe(true);
+    await expect(client.models.list()).resolves.toEqual([
+      {
+        id: "contract/contract-alt-model",
+        label: "Contract Alt Model",
+        providerId: "contract",
+        available: false,
+        locality: "unknown",
+        capabilities: ["text"],
+        unavailableReason: {
+          code: "MODEL_UNAVAILABLE",
+          message: "Model is unavailable in the current OpenClaw runtime.",
+          retryable: false,
+        },
+      },
+      {
+        id: "contract/contract-model",
+        label: "Contract Model",
+        providerId: "contract",
+        available: true,
+        locality: "unknown",
+        capabilities: ["text"],
+      },
+    ]);
+    expect(transport.requests).toEqual([
+      { method: "models.list", params: models.configured.requestFrame.params },
+    ]);
+    expect(JSON.stringify(await client.models.list())).not.toMatch(/sk-contract-secret|secret\.example|openai-completions/);
+  });
+
   it("maps real session pagination, filters, ordering, and duplicate rows", async () => {
     const transport = new FakeTransport();
     transport.fixtures.set("sessions.list", {
@@ -306,7 +348,7 @@ describe("OpenClawClient", () => {
     expect(transport.calls).toEqual(["exec.approval.list"]);
   });
 
-  it("keeps unsupported attachment and unimplemented management capabilities closed", async () => {
+  it("keeps unsupported attachment and remaining management capabilities closed", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push(
       "models.list",
@@ -320,7 +362,7 @@ describe("OpenClawClient", () => {
     await expect(stream[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(UClawUnsupportedError);
     expect(capabilities.methods.has("exec.approval.resolve")).toBe(false);
     expect(capabilities.methods.has("plugin.approval.resolve")).toBe(false);
-    expect([...capabilities.methods]).toEqual(["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list"]);
+    expect([...capabilities.methods]).toEqual(["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list", "models.list"]);
     expect(transport.calls).toEqual([]);
   });
 
