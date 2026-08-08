@@ -63,8 +63,13 @@ func ValidatePackage(baseDir string, manifest Manifest) error {
 }
 
 func isSafeRelativeWindowsPath(path string) bool {
-	if path == "" || strings.ContainsRune(path, '\x00') || strings.Contains(path, ":") {
+	if path == "" || strings.Contains(path, ":") || strings.ContainsAny(path, "<>\"|?*") {
 		return false
+	}
+	for _, character := range path {
+		if character <= 0x1f || character == 0x7f {
+			return false
+		}
 	}
 	if path[0] == '/' || path[0] == '\\' {
 		return false
@@ -72,11 +77,28 @@ func isSafeRelativeWindowsPath(path string) bool {
 
 	normalized := strings.ReplaceAll(path, `\`, "/")
 	for _, segment := range strings.Split(normalized, "/") {
-		if segment == "" || segment == "." || segment == ".." || strings.HasSuffix(segment, ".") || strings.HasSuffix(segment, " ") {
+		normalizedSegment := strings.TrimRight(segment, " .")
+		if normalizedSegment == "" || normalizedSegment != segment {
+			return false
+		}
+		if isWindowsDeviceName(normalizedSegment) {
 			return false
 		}
 	}
 	return true
+}
+
+func isWindowsDeviceName(segment string) bool {
+	baseName := strings.SplitN(segment, ".", 2)[0]
+	baseName = strings.ToUpper(strings.TrimRight(baseName, " "))
+	switch baseName {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	if len(baseName) != 4 || baseName[3] < '1' || baseName[3] > '9' {
+		return false
+	}
+	return baseName[:3] == "COM" || baseName[:3] == "LPT"
 }
 
 func containedArchivePath(baseDir, archive string) (string, error) {

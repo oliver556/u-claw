@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +62,8 @@ func TestRejectsUnsafeWindowsArchivePaths(t *testing.T) {
 		`packages/\runtime.pkg`,
 		`runtime.pkg:payload`,
 		"runtime.pkg\x00payload",
+		`runtime.pkg.`,
+		`runtime.pkg `,
 	}
 
 	for _, archive := range paths {
@@ -71,6 +74,66 @@ func TestRejectsUnsafeWindowsArchivePaths(t *testing.T) {
 				t.Fatalf("accepted archive %q", archive)
 			}
 		})
+	}
+}
+
+func TestRejectsWindowsInvalidFilenameCharacters(t *testing.T) {
+	for _, character := range []string{"<", ">", `"`, "|", "?", "*"} {
+		manifest := validManifest()
+		manifest.Archive = "packages/runtime" + character + ".pkg"
+		if err := ValidateManifest(manifest); err == nil {
+			t.Fatalf("accepted Windows filename character %q", character)
+		}
+	}
+}
+
+func TestRejectsASCIIControlCharacters(t *testing.T) {
+	controls := make([]byte, 0, 33)
+	for value := byte(0); value <= 31; value++ {
+		controls = append(controls, value)
+	}
+	controls = append(controls, 127)
+
+	for _, control := range controls {
+		manifest := validManifest()
+		manifest.Archive = "packages/runtime" + string(rune(control)) + ".pkg"
+		if err := ValidateManifest(manifest); err == nil {
+			t.Fatalf("accepted ASCII control character 0x%02x", control)
+		}
+	}
+}
+
+func TestRejectsWindowsDeviceNamesCaseInsensitively(t *testing.T) {
+	archives := []string{
+		"CON",
+		"con.txt",
+		"packages/NuL.pkg",
+		"aux",
+		"PrN.log",
+		"COM1",
+		"com9.bin",
+		"LPT1",
+		"lPt9.archive.tar",
+		"packages/CON .txt",
+		"packages/NUL.txt. ",
+	}
+
+	for _, archive := range archives {
+		manifest := validManifest()
+		manifest.Archive = archive
+		if err := ValidateManifest(manifest); err == nil {
+			t.Fatalf("accepted Windows device name %q", archive)
+		}
+	}
+}
+
+func TestAllowsNonDeviceBasenames(t *testing.T) {
+	for _, archive := range []string{"console.pkg", "com0.pkg", "com10.pkg", "lpt0", "lpt10", "auxiliary"} {
+		manifest := validManifest()
+		manifest.Archive = archive
+		if err := ValidateManifest(manifest); err != nil {
+			t.Fatalf("rejected non-device basename %q: %v", archive, err)
+		}
 	}
 }
 
@@ -105,6 +168,34 @@ func TestValidatePackageUsesArchiveContent(t *testing.T) {
 	manifest.SHA256 = strings.Repeat("0", 64)
 	if err := ValidatePackage(dir, manifest); err == nil {
 		t.Fatal("expected archive hash mismatch")
+	}
+}
+
+func TestValidatePackageRejectsSymlinkEscape(t *testing.T) {
+	baseDir := t.TempDir()
+	outsideDir := t.TempDir()
+	payload := []byte("outside payload")
+	outsideArchive := filepath.Join(outsideDir, "runtime.pkg")
+	if err := os.WriteFile(outsideArchive, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	linkPath := filepath.Join(baseDir, "runtime.pkg")
+	if err := os.Symlink(outsideArchive, linkPath); err != nil {
+		if runtime.GOOS == "windows" || errors.Is(err, os.ErrPermission) {
+			t.Skipf("symlink creation unavailable on this OS or without permission: %v", err)
+		}
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	digest := sha256.Sum256(payload)
+	manifest := Manifest{
+		RuntimeID: "openclaw-win-x64",
+		Archive:   "runtime.pkg",
+		SHA256:    hex.EncodeToString(digest[:]),
+	}
+	if err := ValidatePackage(baseDir, manifest); err == nil {
+		t.Fatal("accepted archive symlink escaping base directory")
 	}
 }
 
@@ -195,6 +286,13 @@ func TestCLIRealProcessSuccessAndPathRedaction(t *testing.T) {
 	invalidManifest.SHA256 = strings.Repeat("0", 64)
 	writeManifest(t, manifestPath, invalidManifest)
 	assertCLIError(t, executable, []string{"--manifest", manifestPath}, "E_PACKAGE_INVALID", secret)
+
+	for _, archive := range []string{"bad?.pkg", "CON.txt"} {
+		invalidManifest = manifest
+		invalidManifest.Archive = archive
+		writeManifest(t, manifestPath, invalidManifest)
+		assertCLIError(t, executable, []string{"--manifest", manifestPath}, "E_MANIFEST_INVALID", archive)
+	}
 }
 
 func writeManifest(t *testing.T, path string, manifest Manifest) {
