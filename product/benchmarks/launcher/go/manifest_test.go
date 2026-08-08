@@ -197,7 +197,7 @@ func TestValidatePackageUsesArchiveContent(t *testing.T) {
 	}
 }
 
-func TestValidatePackageRejectsEmptyFileAndDirectory(t *testing.T) {
+func TestValidatePackageAllowsEmptyRegularFile(t *testing.T) {
 	baseDir := t.TempDir()
 	archivePath := filepath.Join(baseDir, "runtime.pkg")
 	if err := os.WriteFile(archivePath, nil, 0o600); err != nil {
@@ -209,15 +209,22 @@ func TestValidatePackageRejectsEmptyFileAndDirectory(t *testing.T) {
 		Archive:   "runtime.pkg",
 		SHA256:    hex.EncodeToString(emptyDigest[:]),
 	}
-	if err := ValidatePackage(baseDir, manifest); err == nil {
-		t.Fatal("accepted empty archive")
+	if err := ValidatePackage(baseDir, manifest); err != nil {
+		t.Fatalf("empty regular archive rejected: %v", err)
 	}
+}
 
-	if err := os.Remove(archivePath); err != nil {
-		t.Fatal(err)
-	}
+func TestValidatePackageRejectsDirectory(t *testing.T) {
+	baseDir := t.TempDir()
+	archivePath := filepath.Join(baseDir, "runtime.pkg")
 	if err := os.Mkdir(archivePath, 0o700); err != nil {
 		t.Fatal(err)
+	}
+	emptyDigest := sha256.Sum256(nil)
+	manifest := Manifest{
+		RuntimeID: "openclaw-win-x64",
+		Archive:   "runtime.pkg",
+		SHA256:    hex.EncodeToString(emptyDigest[:]),
 	}
 	if err := ValidatePackage(baseDir, manifest); err == nil {
 		t.Fatal("accepted directory as archive")
