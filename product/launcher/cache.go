@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,12 +12,93 @@ import (
 )
 
 const cacheMarkerName = ".uclaw-runtime.json"
+const hostCacheMarkerName = ".uclaw-cache.json"
 
 var ErrCachePreparationFailed = errors.New("runtime cache preparation failed")
 
 type CacheResult struct {
 	Path   string
 	Reused bool
+}
+
+type hostCacheMarker struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	Product       string `json:"product"`
+	Purpose       string `json:"purpose"`
+}
+
+var expectedHostCacheMarker = hostCacheMarker{
+	SchemaVersion: 1,
+	Product:       "U-Claw",
+	Purpose:       "rebuildable-cache",
+}
+
+func EnsureHostCacheOwnership(cacheRoot string) error {
+	if !filepath.IsAbs(cacheRoot) || filepath.Clean(cacheRoot) == filepath.VolumeName(cacheRoot)+string(os.PathSeparator) {
+		return ErrCachePreparationFailed
+	}
+	info, err := os.Lstat(cacheRoot)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
+			return ErrCachePreparationFailed
+		}
+		info, err = os.Lstat(cacheRoot)
+	}
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return ErrCachePreparationFailed
+	}
+	root, err := os.OpenRoot(cacheRoot)
+	if err != nil {
+		return ErrCachePreparationFailed
+	}
+	defer root.Close()
+
+	markerInfo, markerErr := root.Lstat(hostCacheMarkerName)
+	if markerErr == nil {
+		if !markerInfo.Mode().IsRegular() || markerInfo.Mode()&os.ModeSymlink != 0 {
+			return ErrCachePreparationFailed
+		}
+		file, openErr := root.Open(hostCacheMarkerName)
+		if openErr != nil {
+			return ErrCachePreparationFailed
+		}
+		defer file.Close()
+		decoder := json.NewDecoder(file)
+		decoder.DisallowUnknownFields()
+		var marker hostCacheMarker
+		if decoder.Decode(&marker) != nil || marker != expectedHostCacheMarker {
+			return ErrCachePreparationFailed
+		}
+		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			return ErrCachePreparationFailed
+		}
+		return ensureOwnedCacheDirectories(root)
+	}
+	if !errors.Is(markerErr, os.ErrNotExist) {
+		return ErrCachePreparationFailed
+	}
+	file, err := root.OpenFile(hostCacheMarkerName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return ErrCachePreparationFailed
+	}
+	encoder := json.NewEncoder(file)
+	encodeErr := encoder.Encode(expectedHostCacheMarker)
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	if encodeErr != nil || syncErr != nil || closeErr != nil {
+		_ = root.Remove(hostCacheMarkerName)
+		return ErrCachePreparationFailed
+	}
+	return ensureOwnedCacheDirectories(root)
+}
+
+func ensureOwnedCacheDirectories(root *os.Root) error {
+	for _, directory := range []string{filepath.Join("cache", "temp"), filepath.Join("cache", "node-compile")} {
+		if err := root.MkdirAll(directory, 0o700); err != nil {
+			return ErrCachePreparationFailed
+		}
+	}
+	return nil
 }
 
 func EnsureRuntimeCache(

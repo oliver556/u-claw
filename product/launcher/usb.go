@@ -17,10 +17,11 @@ var (
 )
 
 type PortablePaths struct {
-	USBRoot     string
-	PackageRoot string
-	DataDir     string
-	CacheRoot   string
+	USBRoot       string
+	PackageRoot   string
+	DataDir       string
+	HostCacheRoot string
+	CacheRoot     string
 }
 
 func ResolvePortablePaths(executablePath string, localAppData string) (PortablePaths, error) {
@@ -29,11 +30,13 @@ func ResolvePortablePaths(executablePath string, localAppData string) (PortableP
 	}
 	usbRoot := filepath.Clean(filepath.Dir(executablePath))
 	packageRoot := filepath.Join(usbRoot, ".uclaw")
+	hostCacheRoot := filepath.Join(filepath.Clean(localAppData), "U-Claw")
 	return PortablePaths{
-		USBRoot:     usbRoot,
-		PackageRoot: packageRoot,
-		DataDir:     filepath.Join(packageRoot, "data"),
-		CacheRoot:   filepath.Join(filepath.Clean(localAppData), "U-Claw", "runtime"),
+		USBRoot:       usbRoot,
+		PackageRoot:   packageRoot,
+		DataDir:       filepath.Join(packageRoot, "data"),
+		HostCacheRoot: hostCacheRoot,
+		CacheRoot:     filepath.Join(hostCacheRoot, "runtime"),
 	}, nil
 }
 

@@ -69,10 +69,11 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 	t.Helper()
 	root := t.TempDir()
 	paths := PortablePaths{
-		USBRoot:     root,
-		PackageRoot: filepath.Join(root, ".uclaw"),
-		DataDir:     filepath.Join(root, ".uclaw", "data"),
-		CacheRoot:   filepath.Join(t.TempDir(), "runtime"),
+		USBRoot:       root,
+		PackageRoot:   filepath.Join(root, ".uclaw"),
+		DataDir:       filepath.Join(root, ".uclaw", "data"),
+		HostCacheRoot: filepath.Join(t.TempDir(), "U-Claw"),
+		CacheRoot:     filepath.Join(t.TempDir(), "runtime"),
 	}
 	manifest := validRuntimeManifest()
 	manifest.Entrypoint = `electron\electron.exe`
@@ -91,6 +92,12 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 		ProbeDataDirectory: func(packageRoot string, dataDir string) error {
 			if packageRoot != paths.PackageRoot || dataDir != paths.DataDir {
 				t.Fatalf("probe paths = %q, %q", packageRoot, dataDir)
+			}
+			return nil
+		},
+		EnsureHostCache: func(cacheRoot string) error {
+			if cacheRoot != paths.HostCacheRoot {
+				t.Fatalf("host cache root = %q", cacheRoot)
 			}
 			return nil
 		},
@@ -142,7 +149,17 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 	if startedSpec.Path != wantEntrypoint || startedSpec.Dir != filepath.Dir(wantEntrypoint) {
 		t.Fatalf("process path/dir = %q, %q", startedSpec.Path, startedSpec.Dir)
 	}
-	if !reflect.DeepEqual(startedSpec.Env, []string{"UCLAW_DATA_DIR=" + deps.Paths.DataDir}) {
+	wantEnv := []string{
+		"NODE_COMPILE_CACHE=" + filepath.Join(deps.Paths.HostCacheRoot, "cache", "node-compile"),
+		"OPENCLAW_CONFIG_PATH=" + filepath.Join(deps.Paths.DataDir, ".openclaw", "openclaw.json"),
+		"OPENCLAW_HOME=" + deps.Paths.DataDir,
+		"OPENCLAW_STATE_DIR=" + filepath.Join(deps.Paths.DataDir, ".openclaw"),
+		"TEMP=" + filepath.Join(deps.Paths.HostCacheRoot, "cache", "temp"),
+		"TMP=" + filepath.Join(deps.Paths.HostCacheRoot, "cache", "temp"),
+		"UCLAW_CACHE_DIR=" + filepath.Join(deps.Paths.HostCacheRoot, "cache"),
+		"UCLAW_DATA_DIR=" + deps.Paths.DataDir,
+	}
+	if !reflect.DeepEqual(startedSpec.Env, wantEnv) {
 		t.Fatalf("process env = %v", startedSpec.Env)
 	}
 }
@@ -179,6 +196,32 @@ func TestRunMapsFailureWithoutLeakingSensitiveDetails(t *testing.T) {
 	}
 	if !reporter.closed {
 		t.Fatal("reporter was not closed")
+	}
+}
+
+func TestRunStopsBeforeRuntimeWhenHostCacheOwnershipFails(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.EnsureHostCache = func(string) error { return ErrCachePreparationFailed }
+	prepared := false
+	started := false
+	deps.PrepareRuntime = func(context.Context, string, string, Manifest, func()) (CacheResult, error) {
+		prepared = true
+		return CacheResult{}, nil
+	}
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		started = true
+		return &fakeChildProcess{}, nil
+	}
+
+	if err := Run(context.Background(), deps); !errors.Is(err, ErrCachePreparationFailed) {
+		t.Fatalf("returned %v", err)
+	}
+	if prepared || started {
+		t.Fatalf("prepared=%v started=%v", prepared, started)
+	}
+	if !reflect.DeepEqual(reporter.failures, [][2]string{{"E_CACHE_FAILED", "无法准备本机运行缓存，请检查磁盘空间。"}}) {
+		t.Fatalf("failures = %#v", reporter.failures)
 	}
 }
 

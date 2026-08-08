@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -96,21 +97,30 @@ func validateProcessSpec(spec ProcessSpec) error {
 }
 
 func mergeEnvironment(base []string, overrides []string) []string {
+	return mergeEnvironmentForPlatform(base, overrides, runtime.GOOS == "windows")
+}
+
+func mergeEnvironmentForPlatform(base []string, overrides []string, caseInsensitive bool) []string {
 	values := make(map[string]string, len(base)+len(overrides))
 	for _, entry := range append(append([]string{}, base...), overrides...) {
 		separator := strings.IndexByte(entry, '=')
 		if separator > 0 {
-			values[entry[:separator]] = entry[separator+1:]
+			key := entry[:separator]
+			normalized := key
+			if caseInsensitive {
+				normalized = strings.ToUpper(key)
+			}
+			values[normalized] = key + "=" + entry[separator+1:]
 		}
 	}
 	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
+	for normalized := range values {
+		keys = append(keys, normalized)
 	}
 	sort.Strings(keys)
 	result := make([]string, 0, len(keys))
-	for _, key := range keys {
-		result = append(result, key+"="+values[key])
+	for _, normalized := range keys {
+		result = append(result, values[normalized])
 	}
 	return result
 }

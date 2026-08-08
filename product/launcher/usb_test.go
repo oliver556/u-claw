@@ -39,6 +39,26 @@ func TestResolvePortablePathsRejectsRelativeInputs(t *testing.T) {
 	}
 }
 
+func TestResolvePortablePathsChangesWithExecutableRoot(t *testing.T) {
+	localAppData := filepath.Join(t.TempDir(), "Local App Data")
+	firstRoot := filepath.Join(t.TempDir(), "drive-e")
+	secondRoot := filepath.Join(t.TempDir(), "drive-r")
+	first, err := ResolvePortablePaths(filepath.Join(firstRoot, "U-Claw.exe"), localAppData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ResolvePortablePaths(filepath.Join(secondRoot, "U-Claw.exe"), localAppData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.DataDir == second.DataDir || first.DataDir != filepath.Join(firstRoot, ".uclaw", "data") || second.DataDir != filepath.Join(secondRoot, ".uclaw", "data") {
+		t.Fatalf("drive-relative data paths = %q, %q", first.DataDir, second.DataDir)
+	}
+	if first.HostCacheRoot != second.HostCacheRoot || first.HostCacheRoot != filepath.Join(localAppData, "U-Claw") {
+		t.Fatalf("host cache roots = %q, %q", first.HostCacheRoot, second.HostCacheRoot)
+	}
+}
+
 func TestProbeDataDirectoryCreatesOnlyDataDirectory(t *testing.T) {
 	packageRoot := filepath.Join(t.TempDir(), ".uclaw")
 	if err := os.Mkdir(packageRoot, 0o700); err != nil {

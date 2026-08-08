@@ -10,6 +10,87 @@ import (
 	"testing"
 )
 
+func TestEnsureHostCacheOwnershipCreatesAuditableMarker(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "U-Claw")
+	if err := EnsureHostCacheOwnership(root); err != nil {
+		t.Fatal(err)
+	}
+	marker, err := os.ReadFile(filepath.Join(root, hostCacheMarkerName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"schemaVersion":1,"product":"U-Claw","purpose":"rebuildable-cache"}` + "\n"
+	if string(marker) != want {
+		t.Fatalf("marker = %q", marker)
+	}
+	if err := EnsureHostCacheOwnership(root); err != nil {
+		t.Fatalf("valid marker was not reusable: %v", err)
+	}
+	for _, path := range []string{filepath.Join(root, "cache"), filepath.Join(root, "cache", "temp")} {
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			t.Fatalf("owned cache directory %q: info=%v err=%v", path, info, err)
+		}
+	}
+}
+
+func TestEnsureHostCacheOwnershipRejectsUnsafeRootsAndForeignMarkers(t *testing.T) {
+	for name, root := range map[string]string{
+		"relative":        "U-Claw",
+		"filesystem-root": filepath.VolumeName(t.TempDir()) + string(os.PathSeparator),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := EnsureHostCacheOwnership(root); !errors.Is(err, ErrCachePreparationFailed) {
+				t.Fatalf("returned %v", err)
+			}
+		})
+	}
+	root := filepath.Join(t.TempDir(), "U-Claw")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, hostCacheMarkerName), []byte(`{"product":"another-app"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureHostCacheOwnership(root); !errors.Is(err, ErrCachePreparationFailed) {
+		t.Fatalf("foreign marker returned %v", err)
+	}
+}
+
+func TestEnsureHostCacheOwnershipRejectsTrailingJson(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "U-Claw")
+	if err := EnsureHostCacheOwnership(root); err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(root, hostCacheMarkerName)
+	marker, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(markerPath, append(marker, []byte("{}\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureHostCacheOwnership(root); !errors.Is(err, ErrCachePreparationFailed) {
+		t.Fatalf("trailing JSON returned %v", err)
+	}
+}
+
+func TestEnsureHostCacheOwnershipRejectsSymlinkedRoot(t *testing.T) {
+	outside := t.TempDir()
+	root := filepath.Join(t.TempDir(), "U-Claw")
+	if err := os.Symlink(outside, root); err != nil {
+		if runtime.GOOS == "windows" || errors.Is(err, os.ErrPermission) {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	if err := EnsureHostCacheOwnership(root); !errors.Is(err, ErrCachePreparationFailed) {
+		t.Fatalf("symlinked root returned %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, hostCacheMarkerName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outside marker changed: %v", err)
+	}
+}
+
 func writePackageFixture(t *testing.T) (string, Manifest) {
 	t.Helper()
 	entries := []archiveEntry{

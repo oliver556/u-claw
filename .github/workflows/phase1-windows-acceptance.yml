@@ -8,10 +8,12 @@ on:
       - 'product/tests/windows/first-launch.ps1'
       - 'product/tests/windows/second-launch.ps1'
       - 'product/tests/windows/portable-data-audit.ps1'
+      - 'product/tests/windows/portable-continuity*'
       - 'product/tests/windows/process-cleanup.ps1'
       - 'product/tests/windows/phase1-acceptance*'
       - 'product/tests/windows/phase1-requirements.json'
       - 'product/tests/windows/README-P1-T23.md'
+      - 'product/tests/windows/README-P1-T05.md'
       - 'product/tests/windows/fixtures/p1-t23-case.template.json'
 
 permissions:
@@ -33,7 +35,7 @@ jobs:
 
       - name: Test static acceptance contracts
         shell: pwsh
-        run: node --test product/tests/windows/phase1-acceptance.contract.test.mjs
+        run: node --test product/tests/windows/phase1-acceptance.contract.test.mjs product/tests/windows/portable-continuity.contract.test.mjs
 
       - name: Parse scripts with Windows PowerShell 5.1 and PowerShell 7
         shell: pwsh
@@ -41,7 +43,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $scripts = Get-ChildItem product\tests\windows\*.ps1 | Where-Object { $_.Name -in @(
             'first-launch.ps1', 'second-launch.ps1', 'portable-data-audit.ps1',
-            'process-cleanup.ps1', 'phase1-acceptance.ps1'
+            'portable-continuity.ps1', 'process-cleanup.ps1', 'phase1-acceptance.ps1'
           ) }
           foreach ($script in $scripts) {
             powershell.exe -NoProfile -Command "`$null = [scriptblock]::Create([IO.File]::ReadAllText('$($script.FullName)'))"
