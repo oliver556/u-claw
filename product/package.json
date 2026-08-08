@@ -15,6 +15,7 @@
     "build": "npm run build --workspaces --if-present && npm run smoke:dist",
     "smoke:dist": "node shared/dist/index.js && node adapter/dist/index.js && node desktop/dist/index.js && npm run smoke:file -w @uclaw/frontend",
     "test": "node --test scripts/*.test.mjs && npm run test:contract && npm run test --workspaces --if-present",
+    "test:launcher-benchmark": "node --test scripts/launcher-benchmark-report.test.mjs",
     "test:contract": "vitest run tests/contract",
     "test:integration": "vitest run tests/integration",
     "capture:openclaw-v4": "node scripts/capture-openclaw-v4.mjs",
