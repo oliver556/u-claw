@@ -33,8 +33,28 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["exeBytes", "buildMs", "p50Ms", "p95Ms", "mandatoryPassed", "cases", "toolchainVersion"],
+      "allOf": [
+        {
+          "if": { "properties": { "mandatoryPassed": { "const": true } } },
+          "then": {
+            "properties": {
+              "cases": { "type": "object", "additionalProperties": { "const": true } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "mandatoryPassed": { "const": false } } },
+          "then": {
+            "not": {
+              "properties": {
+                "cases": { "type": "object", "additionalProperties": { "const": true } }
+              }
+            }
+          }
+        }
+      ],
       "properties": {
-        "exeBytes": { "type": "integer", "minimum": 0 },
+        "exeBytes": { "type": "integer", "minimum": 1 },
         "buildMs": { "type": "number", "minimum": 0 },
         "p50Ms": { "type": "number", "minimum": 0 },
         "p95Ms": { "type": "number", "minimum": 0 },

@@ -1,101 +1,31 @@
+import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-const reportFields = [
-  "schemaVersion",
-  "trial",
-  "measurementKind",
-  "commitSha",
-  "runner",
-  "candidates",
-];
-const runnerFields = ["os", "arch", "cpu"];
+import Ajv2020 from "ajv/dist/2020.js";
+
 const candidateIds = ["go", "dotnet"];
-const candidateFields = [
-  "exeBytes",
-  "buildMs",
-  "p50Ms",
-  "p95Ms",
-  "mandatoryPassed",
-  "cases",
-  "toolchainVersion",
-];
+const schemaUrl = new URL("../tests/windows/launcher-benchmark.schema.json", import.meta.url);
+const reportSchema = JSON.parse(readFileSync(schemaUrl, "utf8"));
+const validateReportSchema = new Ajv2020({ allErrors: true }).compile(reportSchema);
 
-function requireObject(value, field) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${field} must be an object`);
-  }
-}
-
-function rejectUnknownFields(value, allowed, field) {
-  const unknown = Object.keys(value).find((key) => !allowed.includes(key));
-  if (unknown !== undefined) {
-    throw new Error(`${field}.${unknown} is an unexpected field`);
-  }
-}
-
-function requireNonEmptyString(value, field) {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${field} must be a non-empty string`);
-  }
-}
-
-function validateCandidate(candidate, field) {
-  requireObject(candidate, field);
-  rejectUnknownFields(candidate, candidateFields, field);
-
-  for (const measurement of ["exeBytes", "buildMs", "p50Ms", "p95Ms"]) {
-    const value = candidate[measurement];
-    if (!Number.isFinite(value) || value < 0) {
-      throw new Error(`${field}.${measurement} must be a finite non-negative number`);
-    }
-  }
-  if (!Number.isInteger(candidate.exeBytes)) {
-    throw new Error(`${field}.exeBytes must be an integer`);
-  }
-  if (typeof candidate.mandatoryPassed !== "boolean") {
-    throw new Error(`${field}.mandatoryPassed must be a boolean`);
-  }
-
-  requireObject(candidate.cases, `${field}.cases`);
-  if (Object.keys(candidate.cases).length === 0) {
-    throw new Error(`${field}.cases must not be empty`);
-  }
-  for (const [name, passed] of Object.entries(candidate.cases)) {
-    if (typeof passed !== "boolean") {
-      throw new Error(`${field}.cases.${name} must be a boolean`);
-    }
-  }
-  requireNonEmptyString(candidate.toolchainVersion, `${field}.toolchainVersion`);
+function errorField(error) {
+  const path = error.instancePath.replaceAll("/", ".").replace(/^\./, "");
+  const suffix = error.keyword === "required"
+    ? error.params.missingProperty
+    : error.keyword === "additionalProperties"
+      ? error.params.additionalProperty
+      : "";
+  return [path, suffix].filter(Boolean).join(".") || "report";
 }
 
 export function validateTrialReport(report) {
-  requireObject(report, "report");
-  rejectUnknownFields(report, reportFields, "report");
-
-  if (report.schemaVersion !== 1) {
-    throw new Error("schemaVersion must be 1");
-  }
-  if (!Number.isInteger(report.trial) || report.trial < 1 || report.trial > 3) {
-    throw new Error("trial must be an integer from 1 through 3");
-  }
-  if (report.measurementKind !== "hosted-runner-process-start") {
-    throw new Error("measurementKind must be hosted-runner-process-start");
-  }
-  if (typeof report.commitSha !== "string" || !/^[0-9a-f]{40}$/.test(report.commitSha)) {
-    throw new Error("commitSha must be a 40-character lowercase hexadecimal SHA");
-  }
-
-  requireObject(report.runner, "runner");
-  rejectUnknownFields(report.runner, runnerFields, "runner");
-  for (const field of runnerFields) {
-    requireNonEmptyString(report.runner[field], `runner.${field}`);
-  }
-
-  requireObject(report.candidates, "candidates");
-  rejectUnknownFields(report.candidates, candidateIds, "candidates");
-  for (const id of candidateIds) {
-    validateCandidate(report.candidates[id], `candidates.${id}`);
+  if (!validateReportSchema(report)) {
+    const fields = [...new Set(validateReportSchema.errors.map(errorField))].join(", ");
+    const hasUnexpected = validateReportSchema.errors.some(
+      (error) => error.keyword === "additionalProperties",
+    );
+    throw new Error(`${fields}: ${hasUnexpected ? "unexpected field" : "invalid report field"}`);
   }
   return report;
 }
@@ -130,6 +60,9 @@ export function decideLauncher(reports) {
   if (trials.some((trial, index) => trial !== index + 1)) {
     throw new Error("reports must contain trials 1, 2, and 3 exactly once");
   }
+  if (reports.some((report) => report.commitSha !== reports[0].commitSha)) {
+    throw new Error("all trial reports must have the same commitSha");
+  }
 
   const summary = Object.fromEntries(candidateIds.map((id) => [id, {
     mandatoryPassed: reports.every((report) => report.candidates[id].mandatoryPassed),
@@ -149,30 +82,59 @@ export function decideLauncher(reports) {
     ?? { selected: "go", reason: "documented-tie-breaker", summary };
 }
 
+class CliError extends Error {
+  constructor(code, safeMessage) {
+    super(safeMessage);
+    this.code = code;
+  }
+}
+
+async function readTrialReport(file) {
+  try {
+    const report = JSON.parse(await readFile(file, "utf8"));
+    return validateTrialReport(report);
+  } catch {
+    throw new CliError("LAUNCHER_BENCHMARK_INVALID_REPORT", "report validation failed");
+  }
+}
+
 async function main(argv) {
   const [command, ...args] = argv;
   if (command === "validate" && args.length === 1) {
-    validateTrialReport(JSON.parse(await readFile(args[0], "utf8")));
+    await readTrialReport(args[0]);
     return;
   }
   if (command === "decide") {
     const outputIndex = args.indexOf("--output");
     if (args.length !== 5 || outputIndex !== 3 || args[4].length === 0) {
-      throw new Error("decide requires three reports and --output <file>");
+      throw new CliError("LAUNCHER_BENCHMARK_USAGE", "invalid command arguments");
     }
-    const reports = await Promise.all(args.slice(0, 3).map(async (file) => (
-      JSON.parse(await readFile(file, "utf8"))
-    )));
-    const decision = decideLauncher(reports);
-    await writeFile(args[4], `${JSON.stringify(decision, null, 2)}\n`, { flag: "wx" });
+    const reports = await Promise.all(args.slice(0, 3).map(readTrialReport));
+    let decision;
+    try {
+      decision = decideLauncher(reports);
+    } catch {
+      throw new CliError("LAUNCHER_BENCHMARK_INVALID_REPORT", "report validation failed");
+    }
+    try {
+      await writeFile(args[4], `${JSON.stringify(decision, null, 2)}\n`, { flag: "wx" });
+    } catch (error) {
+      if (error?.code === "EEXIST") {
+        throw new CliError("LAUNCHER_BENCHMARK_OUTPUT_EXISTS", "output file already exists");
+      }
+      throw new CliError("LAUNCHER_BENCHMARK_IO_ERROR", "file operation failed");
+    }
     return;
   }
-  throw new Error("usage: validate <report> | decide <r1> <r2> <r3> --output <file>");
+  throw new CliError("LAUNCHER_BENCHMARK_USAGE", "invalid command arguments");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main(process.argv.slice(2)).catch((error) => {
-    console.error(error.message);
+    const safeError = error instanceof CliError
+      ? error
+      : new CliError("LAUNCHER_BENCHMARK_INTERNAL_ERROR", "operation failed");
+    console.error(`${safeError.code}: ${safeError.message}`);
     process.exitCode = 1;
   });
 }
