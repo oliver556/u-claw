@@ -1262,6 +1262,9 @@ catch [LauncherBenchmarkError] {
     exit 1
 }
 catch {
+    if ($env:LAUNCHER_BENCHMARK_BEHAVIOR_DIAGNOSTICS -ceq '1') {
+        [Console]::Error.WriteLine(($_.Exception.GetType().FullName + ': ' + $_.Exception.Message))
+    }
     [Console]::Error.WriteLine('LAUNCHER_BENCHMARK_INTERNAL_ERROR: benchmark failed')
     exit 1
 }
