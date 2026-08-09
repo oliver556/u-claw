@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { AttachmentImportInputSchema, AttachmentSchema } from "./attachments.js";
+import { ActivityDomainIdSchema, ArtifactSnapshotSchema, TaskActivitySnapshotSchema } from "./activity.js";
 
 import {
   MessageEventSchema,
@@ -105,6 +106,8 @@ export const ClientIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("sessions.create"), requestId: RequestIdSchema, params: z.object({ title: z.string().optional(), modelId: z.string().min(1).optional() }).strict() }).strict(),
   z.object({ method: z.literal("sessions.rename"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), title: z.string().trim().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("sessions.remove"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), revision: z.string().optional() }).strict() }).strict(),
+  z.object({ method: z.literal("activity.list"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
+  z.object({ method: z.literal("artifacts.list"), requestId: RequestIdSchema, params: z.object({ sessionId: ActivityDomainIdSchema.optional() }).strict() }).strict(),
   z.object({ method: z.literal("session-organizer.get"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
   z.object({ method: z.literal("session-organizer.set-pinned"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), pinned: z.boolean() }).strict() }).strict(),
   z.object({ method: z.literal("session-organizer.create-group"), requestId: RequestIdSchema, params: z.object({ name: z.string().trim().min(1).max(80) }).strict() }).strict(),
@@ -143,6 +146,8 @@ export const ClientIpcSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("sessions.create"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionSchema }).strict(),
   z.object({ method: z.literal("sessions.rename"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionSchema }).strict(),
   z.object({ method: z.literal("sessions.remove"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+  z.object({ method: z.literal("activity.list"), requestId: RequestIdSchema, ok: z.literal(true), result: TaskActivitySnapshotSchema }).strict(),
+  z.object({ method: z.literal("artifacts.list"), requestId: RequestIdSchema, ok: z.literal(true), result: ArtifactSnapshotSchema }).strict(),
   z.object({ method: z.literal("session-organizer.get"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionOrganizerDocumentSchema }).strict(),
   z.object({ method: z.literal("session-organizer.set-pinned"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionOrganizerDocumentSchema }).strict(),
   z.object({ method: z.literal("session-organizer.create-group"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionOrganizerDocumentSchema }).strict(),
@@ -176,6 +181,7 @@ export const ClientIpcFailureResponseSchema = z
     method: z.enum([
       "gateway.negotiate", "gateway.get-status", "gateway.watch-status", "gateway.reconnect",
       "sessions.list", "sessions.get", "sessions.create", "sessions.rename", "sessions.remove",
+      "activity.list", "artifacts.list",
       "session-organizer.get", "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group", "session-organizer.assign-group",
       "chat.list", "chat.get", "chat.watch", "chat.send", "chat.abort", "chat.cancel-stream",
       "tools.list", "tools.get-call", "approvals.list-pending", "approvals.resolve-exec", "approvals.resolve-plugin",

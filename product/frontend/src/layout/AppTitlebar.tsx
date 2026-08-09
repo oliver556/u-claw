@@ -1,6 +1,6 @@
 import type { AttachmentIpcRequest, AttachmentIpcResponse, ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, ProviderIpcRequest, ProviderIpcResponse, RecoveryAction, WindowIpcRequest } from "@uclaw/shared";
 import { Modal, Tooltip } from "antd";
-import { Copy, Cpu, HardDrive, Maximize2, Minus, Radio, RotateCw, Search, X } from "lucide-react";
+import { Activity, Copy, Cpu, HardDrive, Maximize2, Minus, Radio, RotateCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -55,7 +55,7 @@ function recoveryLabel(action: RecoveryAction): string {
   }[action];
 }
 
-export function AppTitlebar({ status, onReconnect }: { status?: GatewayStatus; onReconnect(): Promise<void> }) {
+export function AppTitlebar({ status, onReconnect, onOpenActivity }: { status?: GatewayStatus; onReconnect(): Promise<void>; onOpenActivity(): void }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [windowError, setWindowError] = useState<string | null>(null);
@@ -137,6 +137,7 @@ export function AppTitlebar({ status, onReconnect }: { status?: GatewayStatus; o
             <Search aria-hidden="true" /><span>搜索会话、文件或能力</span><kbd>Ctrl K</kbd>
           </button>
         </Tooltip>
+        <Tooltip title="打开任务活动中心"><button className="activity-center-trigger" type="button" aria-label="打开任务活动中心" onClick={onOpenActivity}><Activity /></button></Tooltip>
         <div className="runtime-status" aria-label="运行状态">
           <span className="status-item"><i className={`status-dot ${usb.tone}`} /><HardDrive aria-hidden="true" />{usb.label}</span>
           <span className="status-item"><i className={`status-dot ${gateway.tone}`} /><Radio aria-hidden="true" />{gateway.label}</span>

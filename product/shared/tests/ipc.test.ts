@@ -9,6 +9,11 @@ import {
 } from "../src/index.js";
 
 describe("IPC contracts", () => {
+  it("allows only domain ids for task activity and artifact snapshots", () => {
+    expect(ClientIpcRequestSchema.parse({ method: "activity.list", requestId: "req-activity", params: {} })).toBeDefined();
+    expect(ClientIpcRequestSchema.parse({ method: "artifacts.list", requestId: "req-artifacts", params: { sessionId: "session-1" } })).toBeDefined();
+    expect(() => ClientIpcRequestSchema.parse({ method: "artifacts.list", requestId: "req-escape", params: { sessionId: "../secret" } })).toThrow();
+  });
   it("keeps window control separate from client methods", () => {
     expect(WindowIpcRequestSchema.parse({ method: "minimize", requestId: "request-1", params: {} })).toBeTruthy();
     expect(() => ClientIpcRequestSchema.parse({ method: "minimize", requestId: "request-1", params: {} })).toThrow();

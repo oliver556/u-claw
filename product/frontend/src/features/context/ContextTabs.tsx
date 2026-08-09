@@ -1,9 +1,9 @@
-import type { CapabilitySet, FileRef, Message, Session, ToolCall, UClawClient } from "@uclaw/shared";
+import type { ArtifactEntry, ArtifactSnapshot, CapabilitySet, FileRef, Message, Session, ToolCall, UClawClient } from "@uclaw/shared";
 import { Activity, Brain, FileText, Hammer, Link2, PackageCheck, Paperclip } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const tabs = ["上下文", "记忆", "活动"] as const;
-const tabIds = { 上下文: "context", 记忆: "memory", 活动: "activity" } as const;
+const tabs = ["上下文", "记忆", "成果", "活动"] as const;
+const tabIds = { 上下文: "context", 记忆: "memory", 成果: "artifacts", 活动: "activity" } as const;
 
 type ContextKind = "attachment" | "reference" | "memory" | "tool" | "artifact";
 
@@ -119,14 +119,17 @@ function EmptyContext() {
 export function ContextTabs({ client, session, capabilities, activity }: ContextTabsProps) {
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("上下文");
   const [snapshot, setSnapshot] = useState<ContextSnapshot>();
+  const [artifactSnapshot, setArtifactSnapshot] = useState<ArtifactSnapshot>();
+  const [artifactState, setArtifactState] = useState<"loading" | "ready" | "error">("loading");
   const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [selectedStep, setSelectedStep] = useState<ContextStep>();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const activeId = tabIds[activeTab];
   const chatSupported = capabilities?.methods.has("chat.list") === true;
-  const selectedEntries = useMemo(() => snapshot === undefined || selectedStep === undefined ? [] : [
+  const allEntries = useMemo(() => snapshot === undefined ? [] : [
     ...snapshot.attachments, ...snapshot.references, ...snapshot.memories, ...snapshot.tools, ...snapshot.artifacts,
-  ].filter((entry) => entry.step.id === selectedStep.id), [selectedStep, snapshot]);
+  ], [snapshot]);
+  const selectedEntries = useMemo(() => selectedStep === undefined ? [] : allEntries.filter((entry) => entry.step.id === selectedStep.id), [allEntries, selectedStep]);
 
   useEffect(() => {
     if (session === undefined || !chatSupported) {
@@ -145,6 +148,20 @@ export function ContextTabs({ client, session, capabilities, activity }: Context
     }).catch(() => { if (current) setState("error"); });
     return () => { current = false; };
   }, [chatSupported, client, session?.id]);
+
+  useEffect(() => {
+    let current = true;
+    setArtifactSnapshot(undefined);
+    if (session === undefined || client.artifacts === undefined) {
+      setArtifactState("ready");
+      return () => { current = false; };
+    }
+    setArtifactState("loading");
+    void client.artifacts.list(session.id).then((next) => {
+      if (current) { setArtifactSnapshot(next); setArtifactState("ready"); }
+    }).catch(() => { if (current) setArtifactState("error"); });
+    return () => { current = false; };
+  }, [client, session?.id]);
 
   const activate = (index: number) => { setActiveTab(tabs[index]); tabRefs.current[index]?.focus(); };
   const selectStep = (step: ContextStep) => setSelectedStep(step);
@@ -165,9 +182,34 @@ export function ContextTabs({ client, session, capabilities, activity }: Context
         <p className="panel-label">任务产物</p><EntryRows entries={snapshot.artifacts} selectedStepId={selectedStep?.id} onSelect={selectStep} />
       </>}</> : null}
       {activeTab === "记忆" ? snapshot === undefined ? <div className="empty-panel"><Brain /><strong>{state === "loading" ? "正在加载记忆上下文" : "记忆不可用"}</strong></div> : snapshot.memories.length === 0 ? <div className="empty-panel"><Brain /><strong>当前会话没有引用记忆</strong></div> : <><p className="panel-label">记忆</p><EntryRows entries={snapshot.memories} selectedStepId={selectedStep?.id} onSelect={selectStep} /></> : null}
+      {activeTab === "成果" ? <ArtifactFiles state={artifactState} artifacts={artifactSnapshot?.artifacts ?? []} onLocate={(artifact) => {
+        setSelectedStep(allEntries.find((entry) => entry.step.id === artifact.messageId)?.step ?? { id: artifact.messageId, label: artifact.name });
+        setActiveTab("上下文");
+      }} /> : null}
       {activeTab === "活动" ? <div className="empty-panel"><Activity /><strong>{session?.title ?? "未选择会话"}</strong>{activity.length === 0 ? <p>此会话暂无活动。</p> : activity.map((item, index) => <p key={`${index}-${item}`}>{item}</p>)}</div> : null}
       {selectedStep === undefined || selectedEntries.length === 0 ? null : <div className="context-callout"><Activity /><span><strong>{selectedStep.label}</strong><small>当前选中步骤关联 {selectedEntries.length} 项上下文。</small></span></div>}
     </div>
     <footer><FileText /><span>上下文使用量</span><strong>{snapshot === undefined ? "加载中" : `${snapshot.attachments.length + snapshot.references.length + snapshot.memories.length + snapshot.tools.length + snapshot.artifacts.length} 项`}</strong></footer>
   </>;
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const artifactStatusLabel: Record<ArtifactEntry["status"], string> = {
+  pending: "生成中", ready: "已就绪", failed: "失败", cancelled: "已取消",
+};
+
+function ArtifactFiles({ state, artifacts, onLocate }: { state: "loading" | "ready" | "error"; artifacts: ArtifactEntry[]; onLocate(artifact: ArtifactEntry): void }) {
+  if (state === "loading") return <div className="empty-panel"><PackageCheck /><strong>正在加载成果文件</strong></div>;
+  if (state === "error") return <div className="empty-panel" role="alert"><PackageCheck /><strong>成果文件加载失败</strong><p>请检查连接后重试。</p></div>;
+  if (artifacts.length === 0) return <div className="empty-panel"><PackageCheck /><strong>当前会话暂无成果文件</strong></div>;
+  return <div className="artifact-list">{artifacts.map((artifact) => <article key={`${artifact.messageId}:${artifact.id}`} className="artifact-row">
+    <span className="file-type"><PackageCheck /></span>
+    <div><strong>{artifact.name}</strong><span>{artifact.mediaType}</span><small>{formatBytes(artifact.size)} · {new Date(artifact.createdAt).toLocaleString("zh-CN", { hour12: false })}</small><small>OpenClaw · {artifactStatusLabel[artifact.status]}</small></div>
+    <button type="button" aria-label={`定位 ${artifact.name}`} onClick={() => onLocate(artifact)}>定位</button>
+  </article>)}</div>;
 }

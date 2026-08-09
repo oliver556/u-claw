@@ -85,6 +85,7 @@ test("mobile titlebar and icon controls preserve touch target sizes", async ({ p
   await expect(page.locator(".titlebar")).toHaveCSS("height", "48px");
   for (const control of [
     page.getByRole("button", { name: "打开全局搜索" }),
+    page.getByRole("button", { name: "打开任务活动中心" }),
     page.getByRole("button", { name: "关闭" }),
     page.getByRole("button", { name: "展开会话栏" }),
     page.getByRole("button", { name: "展开上下文舱" }),
@@ -97,6 +98,20 @@ test("mobile titlebar and icon controls preserve touch target sizes", async ({ p
   await page.getByRole("button", { name: "展开会话栏" }).click();
   const sessionSearch = await page.locator(".session-search").boundingBox();
   expect(sessionSearch?.height).toBeGreaterThanOrEqual(44);
+});
+
+test("task activity center fits the 390px viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "打开任务活动中心" }).click();
+
+  const center = page.getByRole("complementary", { name: "全局任务活动中心" });
+  await expect(center).toBeVisible();
+  const box = await center.boundingBox();
+  expect(box?.x).toBe(0);
+  expect(box?.width).toBe(390);
+  expect(box?.height).toBe(738);
+  await expectNoHorizontalOverflow(page);
 });
 
 test("icon-only window controls expose tooltips", async ({ page }) => {

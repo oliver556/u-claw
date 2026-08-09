@@ -1,5 +1,6 @@
 import type { Page, PageRequest } from "./common.js";
 import type { AttachmentService } from "./attachments.js";
+import type { ActivityCenterService, ArtifactService } from "./activity.js";
 import type { CreateSessionInput, Message, MessageEvent, SendMessageInput, Session, SessionListRequest, SessionSummary } from "./chat.js";
 import type { CapabilitySet, GatewayStatus } from "./gateway.js";
 import type {
@@ -87,4 +88,6 @@ export interface UClawClient {
   channels: ChannelService;
   files: FileService;
   diagnostics: DiagnosticsService;
+  activityCenter?: ActivityCenterService;
+  artifacts?: ArtifactService;
 }
