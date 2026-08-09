@@ -9,6 +9,7 @@ export * from "./errors.js";
 export * from "./gateway.js";
 export * from "./ipc.js";
 export * from "./management.js";
+export * from "./mcp.js";
 export * from "./package-name.js";
 export * from "./session-organizer.js";
 export * from "./providers.js";

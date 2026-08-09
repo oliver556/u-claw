@@ -37,6 +37,8 @@ import { createPluginService } from "./plugins/plugin-service.js";
 import type { PluginRuntimeAdapter } from "./plugins/runtime-adapter.js";
 import { createChannelStore } from "./channels/channel-store.js";
 import type { ChannelRuntime } from "./channels/channel-dispatcher.js";
+import { createMcpStore } from "./mcp/mcp-store.js";
+import { createOpenClawMcpRuntime } from "./mcp/mcp-runtime.js";
 import {
   createAdvancedConsoleController,
   createMainWindow,
@@ -362,6 +364,8 @@ export async function startElectronMain(
   });
   const channelRuntime = requireChannelRuntime(client);
   const channels = createChannelStore({ dataDir: portablePaths.dataDir, capability: channelRuntime.capability });
+  const mcpRuntime = createOpenClawMcpRuntime(client);
+  const mcp = createMcpStore({ dataDir: portablePaths.dataDir, runtimeAvailable: mcpRuntime.capability });
   let gatewayPort: number | undefined;
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -408,6 +412,8 @@ export async function startElectronMain(
       plugins,
       channels,
       channelRuntime,
+      mcp,
+      mcpRuntime,
       selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
         const selected = await dialog.showOpenDialog({
           properties: ["openFile", "multiSelections"],

@@ -11,6 +11,8 @@ import {
   PluginIpcResponseSchema,
   ChannelIpcRequestSchema,
   ChannelIpcResponseSchema,
+  McpIpcRequestSchema,
+  McpIpcResponseSchema,
   UClawErrorSchema,
   WindowIpcRequestSchema,
   redactRendererText,
@@ -33,7 +35,9 @@ import type { PluginService } from "../plugins/plugin-service.js";
 import { createProviderNetworkService, type ProviderNetworkService } from "../providers/provider-network.js";
 import { createChannelDispatcher, type ChannelRuntime } from "../channels/channel-dispatcher.js";
 import type { ChannelStore } from "../channels/channel-store.js";
-import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { createMcpDispatcher, type McpRuntime } from "../mcp/mcp-dispatcher.js";
+import type { McpStore } from "../mcp/mcp-store.js";
+import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -67,6 +71,8 @@ export interface RegisterIpcDependencies {
   plugins?: PluginService;
   channels?: ChannelStore;
   channelRuntime?: ChannelRuntime;
+  mcp?: McpStore;
+  mcpRuntime?: McpRuntime;
 }
 
 function safeError(
@@ -113,6 +119,8 @@ export function registerIpc({
   plugins,
   channels,
   channelRuntime,
+  mcp,
+  mcpRuntime,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
@@ -128,6 +136,7 @@ export function registerIpc({
   const channelDispatcher = channels === undefined || channelRuntime === undefined
     ? undefined
     : createChannelDispatcher(channels, channelRuntime);
+  const mcpDispatcher = mcp === undefined || mcpRuntime === undefined ? undefined : createMcpDispatcher(mcp, mcpRuntime);
   const authorize = (event: unknown): void => {
     const candidate = event as { sender?: unknown; senderFrame?: unknown };
     if (
@@ -292,12 +301,23 @@ export function registerIpc({
     }
   });
 
+  if (mcpDispatcher !== undefined) ipcMain.handle(MCP_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = McpIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid MCP IPC request.");
+    try { return McpIpcResponseSchema.parse(await mcpDispatcher(parsed.data)); }
+    catch (error) {
+      return McpIpcResponseSchema.parse({ method: parsed.data.method, requestId: parsed.data.requestId, ok: false, error: toRendererSafeError(error) });
+    }
+  });
+
   let disposed = false;
   return () => {
     if (disposed) return;
     disposed = true;
     clientDispatcher?.dispose();
     channelDispatcher?.dispose();
+    mcpDispatcher?.dispose();
     ipcMain.removeHandler(WINDOW_IPC_CHANNEL);
     ipcMain.removeHandler(CLIENT_IPC_CHANNEL);
     if (attachments !== undefined) ipcMain.removeHandler(ATTACHMENT_IPC_CHANNEL);
@@ -305,5 +325,6 @@ export function registerIpc({
     if (skills !== undefined) ipcMain.removeHandler(SKILL_IPC_CHANNEL);
     if (plugins !== undefined) ipcMain.removeHandler(PLUGIN_IPC_CHANNEL);
     if (channelDispatcher !== undefined) ipcMain.removeHandler(CHANNEL_IPC_CHANNEL);
+    if (mcpDispatcher !== undefined) ipcMain.removeHandler(MCP_IPC_CHANNEL);
   };
 }
