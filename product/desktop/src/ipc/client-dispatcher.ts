@@ -64,6 +64,7 @@ const rendererErrorMessages: Record<UClawError["code"], string> = {
   UNAUTHORIZED: "Authentication is required.",
   FORBIDDEN: "This operation is not allowed.",
   AUTHORIZATION_REQUIRED: "Authorization is required.",
+  CONFIRMATION_REQUIRED: "Explicit confirmation is required.",
   GATEWAY_STARTING: "Gateway is starting.",
   GATEWAY_DISCONNECTED: "Gateway is disconnected.",
   GATEWAY_FAILED: "Gateway operation failed.",

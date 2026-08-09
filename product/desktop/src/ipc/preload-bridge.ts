@@ -6,12 +6,15 @@ import {
   IpcResponseSchema,
   ProviderIpcRequestSchema,
   ProviderIpcResponseSchema,
+  SkillIpcRequestSchema,
+  SkillIpcResponseSchema,
   WindowIpcRequestSchema,
   type ClientIpcRequest,
   type IpcResponse,
   type IpcEvent,
   type WindowIpcRequest,
   type ProviderIpcRequest,
+  type SkillIpcRequest,
 } from "@uclaw/shared";
 
 import {
@@ -21,6 +24,7 @@ import {
   WINDOW_MAXIMIZED_EVENT_CHANNEL,
   WINDOW_IPC_CHANNEL,
   PROVIDER_IPC_CHANNEL,
+  SKILL_IPC_CHANNEL,
 } from "./channels.js";
 
 export interface ContextBridgeLike {
@@ -85,6 +89,14 @@ export function installPreloadBridge({
     }
     return response;
   };
+  const invokeSkills = async (payload: unknown) => {
+    const request = SkillIpcRequestSchema.parse(payload);
+    const response = SkillIpcResponseSchema.parse(await ipcRenderer.invoke(SKILL_IPC_CHANNEL, request));
+    if (response.method !== request.method || response.requestId !== request.requestId) {
+      throw new Error("IPC response does not match its request.");
+    }
+    return response;
+  };
   const subscribe = (listener: (event: IpcEvent) => void): (() => void) => {
     const receive = (_event: unknown, payload: unknown): void => {
       const parsed = IpcEventSchema.safeParse(payload);
@@ -114,5 +126,6 @@ export function installPreloadBridge({
     client: Object.freeze({ invoke: invokeClient, subscribe }),
     attachments: Object.freeze({ invoke: invokeAttachments }),
     providers: Object.freeze({ invoke: invokeProviders as (request: ProviderIpcRequest) => Promise<unknown> }),
+    skills: Object.freeze({ invoke: invokeSkills as (request: SkillIpcRequest) => Promise<unknown> }),
   }));
 }
