@@ -15,6 +15,7 @@ import {
   type UClawError,
   type WorkspaceEntry,
 } from "@uclaw/shared";
+import { createMaintenanceService } from "./maintenance-service.js";
 
 const MAX_TEXT_BYTES = 2_000_000;
 const CONTROL_FILES = new Set([
@@ -23,6 +24,8 @@ const CONTROL_FILES = new Set([
 
 interface DataServiceOptions {
   dataDir: string;
+  cacheDir?: string;
+  acquireConsistencyLease?(): Promise<{ release(): Promise<void> }>;
 }
 
 interface FileInfo {
@@ -111,6 +114,11 @@ function toMemoryEntry(id: string, info: FileInfo, version: string): MemoryEntry
 export function createDataService(options: DataServiceOptions) {
   if (!isAbsolute(options.dataDir)) throw new Error("Data root must be absolute.");
   const workspaceRoot = resolve(options.dataDir, DATA_ROOT_CONTRACT.roots.workspace);
+  const maintenance = options.cacheDir === undefined ? undefined : createMaintenanceService({
+    dataDir: options.dataDir,
+    cacheDir: options.cacheDir,
+    acquireConsistencyLease: options.acquireConsistencyLease,
+  });
   let availableOverride: boolean | undefined;
   let mutationQueue = Promise.resolve();
 
@@ -225,6 +233,49 @@ export function createDataService(options: DataServiceOptions) {
           result = { state: writable ? "available" : "read-only", writable };
           break;
         }
+        case "backup.preview":
+          if (!maintenance) throw safeError("UNAVAILABLE", "备份服务未配置。");
+          result = await maintenance.previewBackup(request.params.collectionIds, request.params.trigger, request.params.retainLatest);
+          break;
+        case "backup.list":
+          if (!maintenance) throw safeError("UNAVAILABLE", "备份服务未配置。");
+          result = { items: await maintenance.listBackups() };
+          break;
+        case "backup.create":
+          if (!maintenance) throw safeError("UNAVAILABLE", "备份服务未配置。");
+          await maintenance.assertNoRecoveryState();
+          result = maintenance.createBackup(request.params);
+          break;
+        case "backup.restore-preview":
+          if (!maintenance) throw safeError("UNAVAILABLE", "恢复服务未配置。");
+          result = await maintenance.previewRestore(request.params.backupId, request.params.collectionIds);
+          break;
+        case "backup.restore":
+          if (!maintenance) throw safeError("UNAVAILABLE", "恢复服务未配置。");
+          await maintenance.assertNoRecoveryState();
+          result = maintenance.restoreBackup(request.params);
+          break;
+        case "storage.stats":
+          if (!maintenance) throw safeError("UNAVAILABLE", "空间服务未配置。");
+          result = await maintenance.storageStats();
+          break;
+        case "cleanup.preview":
+          if (!maintenance) throw safeError("UNAVAILABLE", "清理服务未配置。");
+          result = await maintenance.previewCleanup(request.params.candidateIds);
+          break;
+        case "cleanup.execute":
+          if (!maintenance) throw safeError("UNAVAILABLE", "清理服务未配置。");
+          await maintenance.assertNoRecoveryState();
+          result = maintenance.executeCleanup(request.params.candidateIds, request.params.previewToken);
+          break;
+        case "maintenance.operation-get":
+          if (!maintenance) throw safeError("UNAVAILABLE", "维护服务未配置。");
+          result = maintenance.getOperation(request.params.operationId);
+          break;
+        case "maintenance.operation-cancel":
+          if (!maintenance) throw safeError("UNAVAILABLE", "维护服务未配置。");
+          result = maintenance.cancelOperation(request.params.operationId);
+          break;
         case "workspace.list": {
           const { parentId } = request.params;
           if (parentId) assertWorkspaceDomain(parentId);

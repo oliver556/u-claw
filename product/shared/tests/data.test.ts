@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DATA_ROOT_CONTRACT,
   DataIpcRequestSchema,
+  DataIpcResponseSchema,
   DataRootContractSchema,
   RelativeDomainIdSchema,
 } from "../src/data.js";
@@ -66,5 +67,43 @@ describe("data management contract", () => {
     expect(contract.backupPolicies["uclaw-configuration"].excludes).toEqual([".openclaw/agents/**"]);
     expect(contract.cleanupPolicies["protected-durable"].includes).toContain("desktop/**");
     expect(contract.cleanupPolicies["rebuildable-cache"]).toEqual({ root: "cache", includes: ["**"] });
+  });
+
+  it("accepts only domain IDs for backup, restore and cleanup writes", () => {
+    expect(DataIpcRequestSchema.parse({
+      method: "backup.create", requestId: "b1",
+      params: { collectionIds: ["openclaw-memory", "openclaw-sessions"], previewToken: "preview-b1", trigger: "manual", retainLatest: 3, confirmed: true },
+    }).params).not.toHaveProperty("path");
+    expect(DataIpcRequestSchema.parse({
+      method: "backup.restore", requestId: "r1",
+      params: { backupId: "backup-20260809-1", collectionIds: ["openclaw-memory"], previewToken: "preview-r1", confirmed: true },
+    }).params).not.toHaveProperty("path");
+    expect(DataIpcRequestSchema.parse({
+      method: "cleanup.execute", requestId: "c1",
+      params: { candidateIds: ["cache:electron"], previewToken: "preview-c1", confirmed: true },
+    }).params).not.toHaveProperty("path");
+
+    for (const invalid of [
+      { method: "backup.create", requestId: "x", params: { collectionIds: ["/tmp"], trigger: "manual", retainLatest: 3, confirmed: true } },
+      { method: "backup.restore", requestId: "x", params: { backupId: "C:\\secret", collectionIds: ["openclaw-memory"], confirmed: true } },
+      { method: "cleanup.execute", requestId: "x", params: { candidateIds: ["../workspace"], confirmed: true } },
+      { method: "cleanup.execute", requestId: "x", params: { candidateIds: ["cache:electron"], previewToken: "preview-x" } },
+    ]) expect(DataIpcRequestSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("keeps maintenance responses path-free and bounded", () => {
+    const response = DataIpcResponseSchema.parse({
+      method: "backup.preview", requestId: "p1", ok: true,
+      result: {
+        previewToken: "preview-p1",
+        target: "当前 U 盘受控备份区",
+        consistency: "runtime-coordination-required",
+        trigger: "manual", retainLatest: 3,
+        collections: [{ id: "openclaw-memory", label: "记忆", fileCount: 2, bytes: 128, risk: "sensitive" }],
+        totalFileCount: 2, totalBytes: 128,
+        warnings: ["创建时将暂停写入并获取一致性快照。"],
+      },
+    });
+    expect(JSON.stringify(response)).not.toMatch(/(?:[A-Za-z]:\\\\|\/Users\/|\/tmp\/)/);
   });
 });

@@ -10,7 +10,7 @@ import {
   type SessionSummary,
   type UClawClient,
 } from "@uclaw/shared";
-import { FolderArchive, PanelLeft, PanelRight, SquareTerminal } from "lucide-react";
+import { Activity, DatabaseBackup, FolderArchive, PanelLeft, PanelRight, SquareTerminal } from "lucide-react";
 import { Tooltip } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { unstable_usePrompt, useLocation, useNavigate } from "react-router-dom";
@@ -23,6 +23,7 @@ import { ChannelSettings } from "../features/channels/ChannelSettings";
 import { TaskActivityCenter } from "../features/activity/TaskActivityCenter";
 import { DataManager } from "../features/data/DataManager";
 import { SystemDiagnostics } from "../features/system/SystemDiagnostics";
+import { MaintenanceCenter } from "../features/data/MaintenanceCenter";
 import { AppTitlebar } from "./AppTitlebar";
 import { ContextPanel } from "./ContextPanel";
 import { PrimaryRail } from "./PrimaryRail";
@@ -34,6 +35,17 @@ function SecondaryView({ title, description, system }: { title: string; descript
     void invoke({ method: "open-advanced-console", requestId: `console-${Date.now()}`, params: {} });
   };
   return <section className="secondary-view"><header><h1>{title}</h1><p>{description}</p></header><div className="secondary-content"><div className="status-line"><i className="status-dot success" /><span>U 盘工作区可用</span><strong>已就绪</strong></div><div className="empty-panel"><FolderArchive /><strong>{title}入口已连接</strong><p>当前阶段保留稳定入口和运行状态。</p>{system ? <button className="secondary-command" type="button" onClick={openAdvancedConsole}><SquareTerminal />打开高级控制台</button> : null}</div></div></section>;
+}
+
+function SystemCenter() {
+  const [view, setView] = useState<"diagnostics" | "maintenance">("diagnostics");
+  return <div className="system-center">
+    <div className="system-center-tabs" role="tablist" aria-label="系统工具">
+      <button type="button" role="tab" aria-selected={view === "diagnostics"} onClick={() => setView("diagnostics")}><Activity />诊断</button>
+      <button type="button" role="tab" aria-selected={view === "maintenance"} onClick={() => setView("maintenance")}><DatabaseBackup />备份与存储</button>
+    </div>
+    {view === "diagnostics" ? <SystemDiagnostics /> : <MaintenanceCenter />}
+  </div>;
 }
 
 type WorkspaceClient = UClawClient & { sessionOrganizer?: SessionOrganizerService };
@@ -261,7 +273,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
         {isWork ? activeSession === undefined
           ? <section className="work-canvas workspace-placeholder"><header className="canvas-head"><div className="canvas-title">{!sessionsOpen ? <Tooltip title="展开会话栏"><button className="icon-button" type="button" aria-label="展开会话栏" onClick={() => setSessionsOpen(true)}><PanelLeft /></button></Tooltip> : null}<strong>工作区</strong></div>{!contextOpen ? <Tooltip title="展开上下文舱"><button className="icon-button" type="button" aria-label="展开上下文舱" onClick={() => setContextOpen(true)}><PanelRight /></button></Tooltip> : null}</header><div className="conversation-state"><FolderArchive /><strong>{sessionState === "loading" ? "正在准备工作区" : "还没有会话"}</strong></div></section>
           : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} onSessionUpdated={(sessionId) => void refreshSessions(sessionId)} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
-          : route.path === "/files" ? <DataManager key="workspace" domain="workspace" onDirtyChange={setDataDirty} /> : route.path === "/memory" ? <DataManager key="memory" domain="memory" onDirtyChange={setDataDirty} /> : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/connections" ? <ChannelSettings /> : route.path === "/system" ? <SystemDiagnostics /> : <SecondaryView title={route.label} description={route.description} system={false} />}
+          : route.path === "/files" ? <DataManager key="workspace" domain="workspace" onDirtyChange={setDataDirty} /> : route.path === "/memory" ? <DataManager key="memory" domain="memory" onDirtyChange={setDataDirty} /> : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/connections" ? <ChannelSettings /> : route.path === "/system" ? <SystemCenter /> : <SecondaryView title={route.label} description={route.description} system={false} />}
       </main>
       {isWork && contextOpen ? <ContextPanel client={client} session={activeSession} capabilities={capabilities} activity={activeSession === undefined ? [] : activity[activeSession.id] ?? []} onClose={() => setContextOpen(false)} /> : null}
     </div>

@@ -369,7 +369,7 @@ export async function startElectronMain(
   const channels = createChannelStore({ dataDir: portablePaths.dataDir, capability: channelRuntime.capability });
   const mcpRuntime = createOpenClawMcpRuntime(client);
   const mcp = createMcpStore({ dataDir: portablePaths.dataDir, runtimeAvailable: mcpRuntime.capability });
-  const data = createDataService({ dataDir: portablePaths.dataDir });
+  const data = createDataService({ dataDir: portablePaths.dataDir, cacheDir: portablePaths.cacheDir });
   const diagnosticsRuntime: DiagnosticsRuntimeInfo = {
     productVersion: "0.1.0",
     openClawVersion: LOCKED_OPENCLAW_VERSION,

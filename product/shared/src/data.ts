@@ -25,6 +25,18 @@ export const DataEntryNameSchema = z.string().trim().min(1).max(255).superRefine
 
 const RequestIdSchema = z.string().min(1).max(128);
 const VersionSchema = z.string().min(1).max(256);
+export const BackupCollectionIdSchema = z.enum(["workspace-user-files", "openclaw-memory", "openclaw-sessions", "uclaw-configuration"]);
+export type BackupCollectionId = z.infer<typeof BackupCollectionIdSchema>;
+export const BackupIdSchema = z.string().regex(/^backup-[a-z0-9-]{1,80}$/);
+export const MaintenanceOperationIdSchema = z.string().regex(/^operation-[a-z0-9-]{1,80}$/);
+export const MaintenancePreviewTokenSchema = z.string().regex(/^preview-[a-z0-9-]{1,80}$/);
+export const CleanupCandidateIdSchema = z.enum([
+  "cache:electron", "cache:node-compile", "cache:temp", "diagnostics:expired-logs",
+  "diagnostics:expired-crash-dumps", "backups:expired",
+]);
+export type CleanupCandidateId = z.infer<typeof CleanupCandidateIdSchema>;
+const UniqueBackupCollectionsSchema = z.array(BackupCollectionIdSchema).min(1).max(4).refine((items) => new Set(items).size === items.length, "Duplicate backup collection ID.");
+const UniqueCleanupCandidatesSchema = z.array(CleanupCandidateIdSchema).min(1).max(6).refine((items) => new Set(items).size === items.length, "Duplicate cleanup candidate ID.");
 const PageParamsSchema = z.object({
   query: z.string().trim().max(200).optional(),
   cursor: z.string().max(64).optional(),
@@ -44,6 +56,16 @@ export const DataIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("memory.read"), requestId: RequestIdSchema, params: z.object({ memoryId: RelativeDomainIdSchema }).strict() }).strict(),
   z.object({ method: z.literal("memory.write"), requestId: RequestIdSchema, params: z.object({ memoryId: RelativeDomainIdSchema, content: z.string().max(2_000_000), version: VersionSchema }).strict() }).strict(),
   z.object({ method: z.literal("memory.delete"), requestId: RequestIdSchema, params: z.object({ memoryId: RelativeDomainIdSchema, version: VersionSchema, confirmed: z.literal(true) }).strict() }).strict(),
+  z.object({ method: z.literal("backup.preview"), requestId: RequestIdSchema, params: z.object({ collectionIds: UniqueBackupCollectionsSchema.optional(), trigger: z.enum(["manual", "automatic"]).optional(), retainLatest: z.number().int().min(1).max(20).optional() }).strict() }).strict(),
+  z.object({ method: z.literal("backup.list"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("backup.create"), requestId: RequestIdSchema, params: z.object({ collectionIds: UniqueBackupCollectionsSchema, previewToken: MaintenancePreviewTokenSchema, trigger: z.enum(["manual", "automatic"]), retainLatest: z.number().int().min(1).max(20), confirmed: z.literal(true) }).strict() }).strict(),
+  z.object({ method: z.literal("backup.restore-preview"), requestId: RequestIdSchema, params: z.object({ backupId: BackupIdSchema, collectionIds: UniqueBackupCollectionsSchema.optional() }).strict() }).strict(),
+  z.object({ method: z.literal("backup.restore"), requestId: RequestIdSchema, params: z.object({ backupId: BackupIdSchema, collectionIds: UniqueBackupCollectionsSchema, previewToken: MaintenancePreviewTokenSchema, confirmed: z.literal(true) }).strict() }).strict(),
+  z.object({ method: z.literal("storage.stats"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("cleanup.preview"), requestId: RequestIdSchema, params: z.object({ candidateIds: UniqueCleanupCandidatesSchema.optional() }).strict() }).strict(),
+  z.object({ method: z.literal("cleanup.execute"), requestId: RequestIdSchema, params: z.object({ candidateIds: UniqueCleanupCandidatesSchema, previewToken: MaintenancePreviewTokenSchema, confirmed: z.literal(true) }).strict() }).strict(),
+  z.object({ method: z.literal("maintenance.operation-get"), requestId: RequestIdSchema, params: z.object({ operationId: MaintenanceOperationIdSchema }).strict() }).strict(),
+  z.object({ method: z.literal("maintenance.operation-cancel"), requestId: RequestIdSchema, params: z.object({ operationId: MaintenanceOperationIdSchema }).strict() }).strict(),
 ]);
 export type DataIpcRequest = z.infer<typeof DataIpcRequestSchema>;
 
@@ -108,6 +130,55 @@ export const DATA_ROOT_CONTRACT: DataRootContract = DataRootContractSchema.parse
 
 const PageSchema = <T extends z.ZodType>(item: T) => z.object({ items: z.array(item), nextCursor: z.string().nullable(), hasMore: z.boolean() }).strict();
 const DataStatusSchema = z.object({ state: z.enum(["available", "read-only", "offline"]), writable: z.boolean() }).strict();
+const CollectionSummarySchema = z.object({ id: BackupCollectionIdSchema, label: z.string().min(1).max(40), fileCount: z.number().int().nonnegative(), bytes: z.number().int().nonnegative(), risk: z.enum(["normal", "sensitive", "large"]) }).strict();
+export const BackupPreviewSchema = z.object({
+  previewToken: MaintenancePreviewTokenSchema,
+  target: z.literal("当前 U 盘受控备份区"),
+  consistency: z.enum(["runtime-coordination-required", "coordinated"]),
+  trigger: z.enum(["manual", "automatic"]), retainLatest: z.number().int().min(1).max(20),
+  collections: z.array(CollectionSummarySchema).max(4),
+  totalFileCount: z.number().int().nonnegative(), totalBytes: z.number().int().nonnegative(),
+  warnings: z.array(z.string().min(1).max(160)).max(8),
+}).strict();
+export type BackupPreview = z.infer<typeof BackupPreviewSchema>;
+export const RestorePreviewSchema = z.object({
+  previewToken: MaintenancePreviewTokenSchema, backupId: BackupIdSchema,
+  source: z.literal("当前 U 盘受控备份区"), target: z.literal("当前 U 盘数据根"),
+  collections: z.array(CollectionSummarySchema).min(1).max(4),
+  totalFileCount: z.number().int().nonnegative(), totalBytes: z.number().int().nonnegative(),
+  overwriteFileCount: z.number().int().nonnegative(), newFileCount: z.number().int().nonnegative(),
+  warnings: z.array(z.string().min(1).max(160)).max(8),
+}).strict();
+export type RestorePreview = z.infer<typeof RestorePreviewSchema>;
+export const BackupSummarySchema = z.object({
+  id: BackupIdSchema, createdAt: z.string().datetime(), trigger: z.enum(["manual", "automatic"]),
+  state: z.enum(["ready", "damaged", "incomplete"]), collections: z.array(BackupCollectionIdSchema).min(1).max(4),
+  fileCount: z.number().int().nonnegative(), bytes: z.number().int().nonnegative(),
+}).strict();
+export type BackupSummary = z.infer<typeof BackupSummarySchema>;
+const StorageCategoryIdSchema = z.enum(["configuration", "sessions", "memory", "capabilities", "logs", "cache", "temporary-downloads", "user-files", "backups"]);
+export const StorageStatsSchema = z.object({
+  state: z.enum(["available", "read-only", "offline", "damaged"]),
+  categories: z.array(z.object({ id: StorageCategoryIdSchema, label: z.string().min(1).max(40), bytes: z.number().int().nonnegative(), fileCount: z.number().int().nonnegative(), protected: z.boolean() }).strict()).length(9),
+  totalBytes: z.number().int().nonnegative(),
+}).strict();
+export type StorageStats = z.infer<typeof StorageStatsSchema>;
+export const CleanupPreviewSchema = z.object({
+  previewToken: MaintenancePreviewTokenSchema,
+  candidates: z.array(z.object({ id: CleanupCandidateIdSchema, label: z.string().min(1).max(60), bytes: z.number().int().nonnegative(), fileCount: z.number().int().nonnegative(), reason: z.string().min(1).max(120) }).strict()).max(6),
+  totalBytes: z.number().int().nonnegative(), totalFileCount: z.number().int().nonnegative(),
+  protectedCategories: z.array(StorageCategoryIdSchema).min(1),
+}).strict();
+export type CleanupPreview = z.infer<typeof CleanupPreviewSchema>;
+export const MaintenanceOperationSchema = z.object({
+  id: MaintenanceOperationIdSchema, kind: z.enum(["backup", "restore", "cleanup"]),
+  state: z.enum(["queued", "running", "completed", "cancelled", "failed", "needs-recovery"]),
+  phase: z.enum(["queued", "coordinating", "scanning", "staging", "verifying", "committing", "rolling-back", "cleaning", "completed", "cancelled", "failed", "needs-recovery"]),
+  processedFiles: z.number().int().nonnegative(), totalFiles: z.number().int().nonnegative(),
+  processedBytes: z.number().int().nonnegative(), totalBytes: z.number().int().nonnegative(),
+  partialFailures: z.number().int().nonnegative(), failures: z.array(z.object({ candidateId: CleanupCandidateIdSchema, code: z.string().min(1).max(40), message: z.string().min(1).max(120) }).strict()).max(20), message: z.string().min(1).max(160),
+}).strict();
+export type MaintenanceOperation = z.infer<typeof MaintenanceOperationSchema>;
 
 export const DataIpcResponseSchema = z.union([
   z.object({ method: z.literal("data.contract"), requestId: RequestIdSchema, ok: z.literal(true), result: DataRootContractSchema }).strict(),
@@ -119,6 +190,12 @@ export const DataIpcResponseSchema = z.union([
   z.object({ method: z.literal("memory.list"), requestId: RequestIdSchema, ok: z.literal(true), result: PageSchema(MemoryEntrySchema) }).strict(),
   z.object({ method: z.literal("memory.read"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ memory: MemoryEntrySchema, content: z.string() }).strict() }).strict(),
   z.object({ method: z.literal("memory.write"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ memory: MemoryEntrySchema }).strict() }).strict(),
+  z.object({ method: z.literal("backup.preview"), requestId: RequestIdSchema, ok: z.literal(true), result: BackupPreviewSchema }).strict(),
+  z.object({ method: z.literal("backup.list"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ items: z.array(BackupSummarySchema).max(200) }).strict() }).strict(),
+  z.object({ method: z.literal("backup.restore-preview"), requestId: RequestIdSchema, ok: z.literal(true), result: RestorePreviewSchema }).strict(),
+  z.object({ method: z.literal("storage.stats"), requestId: RequestIdSchema, ok: z.literal(true), result: StorageStatsSchema }).strict(),
+  z.object({ method: z.literal("cleanup.preview"), requestId: RequestIdSchema, ok: z.literal(true), result: CleanupPreviewSchema }).strict(),
+  z.object({ method: z.enum(["backup.create", "backup.restore", "cleanup.execute", "maintenance.operation-get", "maintenance.operation-cancel"]), requestId: RequestIdSchema, ok: z.literal(true), result: MaintenanceOperationSchema }).strict(),
   z.object({ method: z.string().min(1), requestId: RequestIdSchema, ok: z.literal(false), error: UClawErrorSchema }).strict(),
 ]);
 export type DataIpcResponse = z.infer<typeof DataIpcResponseSchema>;

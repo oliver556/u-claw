@@ -279,6 +279,18 @@ describe("U-Claw application shell", () => {
     expect(JSON.stringify(invoke.mock.calls)).not.toContain("url");
   });
 
+  it("keeps diagnostics and data maintenance available from the system route", async () => {
+    renderApp();
+    fireEvent.click(screen.getByRole("link", { name: "系统" }));
+
+    expect(screen.getByRole("tab", { name: "诊断" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { name: "系统" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("tab", { name: "备份与存储" }));
+    expect(screen.getByRole("tab", { name: "备份与存储" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { name: "数据维护" })).toBeVisible();
+  });
+
   it("keeps live USB, Gateway, and model status visible with Chinese recovery actions", async () => {
     const status = {
       connectionState: "degraded",
