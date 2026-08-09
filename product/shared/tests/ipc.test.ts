@@ -35,6 +35,9 @@ describe("IPC contracts", () => {
     const requests = [
       ["gateway.negotiate", {}], ["gateway.get-status", {}], ["gateway.watch-status", { subscriptionId: "sub-1" }], ["gateway.reconnect", {}],
       ["sessions.list", {}], ["sessions.get", { sessionId: "s" }], ["sessions.create", {}], ["sessions.rename", { sessionId: "s", title: "新的会话名" }], ["sessions.remove", { sessionId: "s" }],
+      ["session-organizer.get", {}], ["session-organizer.set-pinned", { sessionId: "s", pinned: true }],
+      ["session-organizer.create-group", { name: "项目" }], ["session-organizer.rename-group", { groupId: "g", name: "归档" }],
+      ["session-organizer.assign-group", { sessionId: "s", groupId: "g" }], ["session-organizer.assign-group", { sessionId: "s", groupId: null }],
       ["chat.list", { sessionId: "s" }], ["chat.get", { sessionId: "s", messageId: "m" }], ["chat.watch", { sessionId: "s", subscriptionId: "sub-2" }],
       ["chat.send", { sessionId: "s", clientRequestId: "c", blocks: [{ type: "text", text: "hi", format: "plain" }] }], ["chat.abort", { runId: "r" }], ["chat.cancel-stream", { clientRequestId: "c" }],
       ["tools.list", {}], ["tools.get-call", { toolCallId: "t" }], ["approvals.list-pending", {}],
@@ -47,6 +50,14 @@ describe("IPC contracts", () => {
     for (const [method, params] of requests) {
       expect(ClientIpcRequestSchema.parse({ method, requestId: `request-${method}`, params })).toBeTruthy();
     }
+  });
+
+  it("does not accept renderer-controlled organizer paths", () => {
+    expect(() => ClientIpcRequestSchema.parse({
+      method: "session-organizer.get",
+      requestId: "request-path",
+      params: { path: "C:\\escape\\session-organizer.json" },
+    })).toThrow();
   });
 
   it("models subscription start and cancellation lifecycle", () => {

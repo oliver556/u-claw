@@ -192,6 +192,28 @@ describe("createClientDispatcher stream ownership", () => {
     expect(rename).toHaveBeenCalledWith("session-1", "重命名后");
     dispatcher.dispose();
   });
+
+  it("routes organizer domain objects locally and cleans metadata after OpenClaw deletion", async () => {
+    const organizer = {
+      load: vi.fn(async () => ({ schemaVersion: 1 as const, groups: [], sessions: [] })),
+      setPinned: vi.fn(async () => ({ schemaVersion: 1 as const, groups: [], sessions: [{ sessionId: "session-1", pinned: true }] })),
+      createGroup: vi.fn(), renameGroup: vi.fn(), assignGroup: vi.fn(),
+      removeSession: vi.fn(async () => ({ schemaVersion: 1 as const, groups: [], sessions: [] })),
+    };
+    const remove = vi.fn(async () => undefined);
+    const dispatcher = createClientDispatcher({
+      client: clientWith({ sessions: { list: vi.fn(), get: vi.fn(), create: vi.fn(), rename: vi.fn(), remove } }),
+      organizer,
+      sendEvent: vi.fn(),
+    });
+
+    await expect(dispatcher(request("session-organizer.get", "organizer-get", {}))).resolves.toMatchObject({ ok: true, result: { schemaVersion: 1 } });
+    await expect(dispatcher(request("session-organizer.set-pinned", "organizer-pin", { sessionId: "session-1", pinned: true }))).resolves.toMatchObject({ ok: true, result: { sessions: [{ sessionId: "session-1", pinned: true }] } });
+    await expect(dispatcher(request("sessions.remove", "remove-1", { sessionId: "session-1" }))).resolves.toMatchObject({ ok: true });
+    expect(remove).toHaveBeenCalledWith("session-1", undefined);
+    expect(organizer.removeSession).toHaveBeenCalledWith("session-1");
+    dispatcher.dispose();
+  });
   it("drops late send frames from an older generation with the same clientRequestId", async () => {
     const oldStream = new ControlledIterator<MessageEvent>();
     const newStream = new ControlledIterator<MessageEvent>();
