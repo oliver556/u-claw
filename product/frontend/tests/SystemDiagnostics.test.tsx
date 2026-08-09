@@ -100,7 +100,7 @@ describe("SystemDiagnostics", () => {
       if (request.method === "doctor.run" || request.method === "doctor.repair") return { method: request.method, requestId: request.requestId, ok: true, result: { state: request.method === "doctor.repair" ? "healthy" : "issues", adapter: "openclaw", checks: [{ id: "gateway", label: "Gateway", level: request.method === "doctor.repair" ? "info" : "error", summary: request.method === "doctor.repair" ? "检查通过。" : "Gateway 未就绪。", suggestion: "重启受控 Gateway。", ...(request.method === "doctor.run" ? { repair: { actionId: "gateway-restart", label: "重启 Gateway", previewToken: "doctor-preview-1" } } : {}) }] } };
       if (request.method === "network.run") return { method: request.method, requestId: request.requestId, ok: true, result: { mode: "intranet-only", checks: [
         "portable-data", "runtime", "gateway", "local-port", "dns", "provider", "channels", "capabilities",
-      ].map((id) => ({ id, label: id === "provider" ? "Provider 连通" : id, level: id === "provider" ? "warning" : "info", summary: id === "provider" ? "外网不可用，内网功能仍可使用。" : "检查通过。", durationMs: 10 })), proxy: { configured: true, noProxyConfigured: true } } };
+      ].map((id) => ({ id, label: id === "provider" ? "Provider 连通" : id, status: id === "provider" ? "unreachable" : id === "channels" ? "unavailable" : id === "capabilities" ? "skipped" : "passed", level: id === "provider" ? "warning" : "info", summary: id === "provider" ? "外网不可用，内网功能仍可使用。" : id === "channels" ? "当前 adapter 未提供只读检查接口。" : id === "capabilities" ? "缺少权威只读契约，已跳过。" : "检查通过。", durationMs: 10 })), proxy: { configured: true, noProxyConfigured: true } } };
       throw new Error("unexpected");
     });
     window.uclaw = { diagnostics: { invoke } } as never;
@@ -116,6 +116,8 @@ describe("SystemDiagnostics", () => {
     fireEvent.click(screen.getByRole("tab", { name: "网络诊断" }));
     expect(await screen.findByText("内网可用，外网不可用")).toBeVisible();
     expect(screen.getByText("外网不可用，内网功能仍可使用。")).toBeVisible();
+    expect(screen.getByText("当前 adapter 未提供只读检查接口。")).toBeVisible();
+    expect(screen.getByText("缺少权威只读契约，已跳过。")).toBeVisible();
     expect(document.body.textContent).not.toMatch(/https?:\/\/|proxy\.example|18789/);
   });
 

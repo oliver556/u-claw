@@ -366,7 +366,7 @@ describe("OpenClawClient", () => {
     expect(transport.calls).toEqual([]);
   });
 
-  it("maps structured OpenClaw doctor checks and allowlisted repair actions", async () => {
+  it("maps structured OpenClaw doctor checks but does not expose an unaudited repair RPC", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push("diagnostics.doctor", "diagnostics.repair");
     transport.fixtures.set("diagnostics.doctor", { status: "issues", checks: [{
@@ -375,20 +375,18 @@ describe("OpenClawClient", () => {
       repair: { actionId: "gateway-restart", label: "Restart Gateway" },
       command: "unsafe renderer-visible command",
     }] });
-    transport.fixtures.set("diagnostics.repair", { ok: true, actionId: "gateway-restart" });
     const client = new OpenClawClient({ transport });
     await client.gateway.negotiate();
 
     await expect(client.diagnostics.doctor!()).resolves.toEqual({ status: "issues", checks: [{
       id: "gateway", title: "Gateway", severity: "error", status: "fail",
       summary: "Gateway is unavailable.", suggestion: "Restart the managed Gateway.",
-      repair: { actionId: "gateway-restart", label: "Restart Gateway" },
     }] });
-    await expect(client.diagnostics.repair!("gateway-restart")).resolves.toBeUndefined();
+    expect(client.diagnostics.repair).toBeUndefined();
     expect(transport.requests).toEqual([
       { method: "diagnostics.doctor", params: {} },
-      { method: "diagnostics.repair", params: { actionId: "gateway-restart" } },
     ]);
+    expect((await client.gateway.negotiate()).methods.has("diagnostics.repair")).toBe(false);
   });
 
   it("fails doctor closed before transport when OpenClaw has no structured adapter", async () => {

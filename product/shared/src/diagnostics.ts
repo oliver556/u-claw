@@ -112,6 +112,7 @@ export const NetworkDiagnosticsResultSchema = z.object({
   checks: z.array(z.object({
     id: z.enum(["portable-data", "runtime", "gateway", "local-port", "dns", "provider", "channels", "capabilities"]),
     label: z.string().min(1).max(80),
+    status: z.enum(["passed", "unreachable", "unavailable", "skipped"]),
     level: z.enum(["info", "warning", "error"]),
     summary: z.string().min(1).max(240),
     durationMs: z.number().int().nonnegative().max(60_000),

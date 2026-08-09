@@ -185,6 +185,7 @@ describe("diagnostics service", () => {
     const repair = vi.fn(async () => undefined);
     const service = createDiagnosticsService({
       ...paths, runtime: { productVersion: "0.1.0" },
+      fixtureDoctorRepairActionIds: ["gateway-restart"],
       diagnostics: { ...diagnostics(), doctor: async () => ({ status: "issues" as const, checks: [{ id: "gateway", title: "Gateway", severity: "error" as const, status: "fail" as const, summary: "Gateway unavailable.", suggestion: "Restart managed Gateway.", repair: { actionId: "gateway-restart", label: "Restart Gateway" } }] }), repair },
     });
     const result = await service.dispatch({ method: "doctor.run", requestId: "doctor-1", params: {} });
@@ -196,12 +197,29 @@ describe("diagnostics service", () => {
     await expect(service.dispatch({ method: "doctor.repair", requestId: "repair-stale", params: { actionId: "gateway-restart", previewToken, confirmed: true } })).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
   });
 
+  it("keeps Doctor repair unavailable without an authoritative production action allowlist", async () => {
+    const paths = await fixture();
+    const repair = vi.fn(async () => undefined);
+    const service = createDiagnosticsService({
+      ...paths, runtime: { productVersion: "0.1.0" },
+      diagnostics: { ...diagnostics(), doctor: async () => ({ status: "issues" as const, checks: [{ id: "gateway", title: "Gateway", severity: "error" as const, status: "fail" as const, summary: "failed", repair: { actionId: "gateway-restart", label: "repair" } }] }), repair },
+    });
+    const result = await service.dispatch({ method: "doctor.run", requestId: "doctor-production", params: {} });
+    expect(result).toMatchObject({ ok: true, result: { checks: [{ id: "gateway" }] } });
+    if (!result.ok || result.method !== "doctor.run") return;
+    expect(result.result.checks[0]).not.toHaveProperty("repair");
+    await expect(service.dispatch({ method: "doctor.repair", requestId: "repair-production", params: { actionId: "gateway-restart", previewToken: "doctor-preview-untrusted", confirmed: true } }))
+      .resolves.toMatchObject({ ok: false, error: { code: "UNAVAILABLE" } });
+    expect(repair).not.toHaveBeenCalled();
+  });
+
   it("redacts Doctor text and invalidates repair previews after a fresh run", async () => {
     const paths = await fixture();
     let run = 0;
     const repair = vi.fn(async () => undefined);
     const service = createDiagnosticsService({
       ...paths, runtime: { productVersion: "0.1.0" },
+      fixtureDoctorRepairActionIds: ["gateway-restart"],
       diagnostics: {
         ...diagnostics(), repair,
         doctor: async () => ++run === 1 ? ({ status: "issues" as const, checks: [{
@@ -275,6 +293,7 @@ describe("diagnostics service", () => {
     let call = 0;
     const service = createDiagnosticsService({
       ...paths, runtime: { productVersion: "0.1.0" },
+      fixtureDoctorRepairActionIds: ["gateway-restart", "runtime-restart"],
       diagnostics: {
         ...diagnostics(), repair: async () => undefined,
         doctor: async () => new Promise((resolve) => { if (++call === 1) firstResolve = resolve; else secondResolve = resolve; }),
@@ -288,6 +307,23 @@ describe("diagnostics service", () => {
     await expect(second).resolves.toMatchObject({ ok: true });
     firstResolve({ status: "issues", checks: [{ id: "runtime", title: "Runtime", severity: "error", status: "fail", summary: "failed", repair: { actionId: "runtime-restart", label: "repair" } }] });
     await expect(first).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+  });
+
+  it("marks unsupported channel and capability probes unavailable instead of failed", async () => {
+    const paths = await fixture();
+    const list = vi.fn(async () => { throw { uclawError: { code: "UNSUPPORTED" } }; });
+    const service = createDiagnosticsService({
+      ...paths,
+      diagnostics: { ...diagnostics(), list },
+      runtime: { productVersion: "0.1.0", openClawVersion: "2026.7.1-2", gatewayStatus: "ready" },
+    });
+    const result = await service.dispatch({ method: "network.run", requestId: "network-unsupported", params: { timeoutMs: 250 } });
+    expect(result).toMatchObject({ ok: true, result: { checks: [
+      {}, {}, {}, {}, {}, {},
+      { id: "channels", status: "unavailable", level: "info" },
+      { id: "capabilities", status: "skipped", level: "info" },
+    ] } });
+    expect(list).not.toHaveBeenCalled();
   });
 
   it("times out and cancels Doctor adapter calls that never settle", async () => {
@@ -315,6 +351,7 @@ describe("diagnostics service", () => {
     let repairCalls = 0;
     const service = createDiagnosticsService({
       ...paths, runtime: { productVersion: "0.1.0" },
+      fixtureDoctorRepairActionIds: ["gateway-restart", "runtime-restart"],
       diagnostics: {
         ...diagnostics(),
         doctor: async () => ({ status: "issues", checks: [
