@@ -60,6 +60,7 @@ type Dependencies struct {
 	EnsureHostCache     func(cacheRoot string) error
 	AcquireInstanceLock func(dataDir string) (InstanceLock, error)
 	PrepareRuntime      func(context.Context, string, string, Manifest, func()) (CacheResult, error)
+	AcquireRuntime      func(string, Manifest) (RuntimeLease, error)
 	CheckSequence       func(string, Manifest) error
 	AcceptSequence      func(string, Manifest) error
 	FinalizeUpdate      func(string, Manifest) error
@@ -103,13 +104,20 @@ func Run(ctx context.Context, deps Dependencies) error {
 	if err != nil {
 		return reportFailure(reporter, err)
 	}
+	lease, err := deps.AcquireRuntime(cache.Path, manifest)
+	if err != nil {
+		return reportFailure(reporter, err)
+	}
+	defer lease.Close()
 	reporter.State(StateStartingApp)
-	entrypoint := filepath.Join(cache.Path, filepath.FromSlash(strings.ReplaceAll(manifest.Entrypoint, `\`, "/")))
+	runtimeRoot := lease.RootPath()
+	entrypoint := filepath.Join(runtimeRoot, filepath.FromSlash(strings.ReplaceAll(manifest.Entrypoint, `\`, "/")))
 	process, err := deps.StartProcess(ProcessSpec{
-		Path: entrypoint,
-		Args: append([]string(nil), manifest.EntryArgs...),
-		Dir:  filepath.Dir(entrypoint),
-		Env:  append(portableProcessEnvironment(deps.Paths), "UCLAW_RUNTIME_DIR="+cache.Path),
+		Path:  entrypoint,
+		Args:  append([]string(nil), manifest.EntryArgs...),
+		Dir:   filepath.Dir(entrypoint),
+		Env:   append(portableProcessEnvironment(deps.Paths), "UCLAW_RUNTIME_DIR="+runtimeRoot),
+		Lease: lease,
 	})
 	if err != nil {
 		return reportFailure(reporter, errors.Join(ErrAppStartFailed, err))
