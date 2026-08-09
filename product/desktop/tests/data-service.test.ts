@@ -159,4 +159,41 @@ describe("data service", () => {
     expect(JSON.stringify(response)).not.toContain(dataDir);
     expect(JSON.stringify(response)).not.toContain("daily body");
   });
+
+  it("dispatches path-free maintenance previews and fails closed without runtime coordination", async () => {
+    const { dataDir } = await fixture();
+    const cacheRoot = await mkdtemp(join(tmpdir(), "uclaw-maintenance-cache-"));
+    const cacheDir = join(cacheRoot, "runtime");
+    await mkdir(join(cacheDir, "electron"), { recursive: true });
+    await writeFile(join(cacheRoot, ".uclaw-cache.json"), `${JSON.stringify({ schemaVersion: 1, product: "U-Claw", purpose: "rebuildable-cache" })}\n`);
+    const service = createDataService({ dataDir, cacheDir });
+    const preview = await service.dispatch({ method: "backup.preview", requestId: "preview", params: {} });
+    expect(preview.ok).toBe(true);
+    expect(JSON.stringify(preview)).not.toContain(dataDir);
+    if (!preview.ok || preview.method !== "backup.preview") throw new Error("preview failed");
+    const create = await service.dispatch({
+      method: "backup.create", requestId: "create",
+      params: { collectionIds: ["openclaw-memory"], previewToken: preview.result.previewToken, trigger: "manual", retainLatest: 3, confirmed: true },
+    });
+    expect(create).toMatchObject({ ok: false, error: { code: "UNAVAILABLE" } });
+    expect(JSON.stringify(create)).not.toContain(dataDir);
+  });
+
+  it("blocks maintenance writes while an interrupted artifact needs recovery", async () => {
+    const { dataDir } = await fixture();
+    const cacheRoot = await mkdtemp(join(tmpdir(), "uclaw-maintenance-cache-"));
+    const cacheDir = join(cacheRoot, "runtime");
+    await mkdir(join(cacheDir, "electron"), { recursive: true });
+    await writeFile(join(cacheDir, "electron", "entry.bin"), "cache");
+    await writeFile(join(cacheRoot, ".uclaw-cache.json"), `${JSON.stringify({ schemaVersion: 1, product: "U-Claw", purpose: "rebuildable-cache" })}\n`);
+    const service = createDataService({ dataDir, cacheDir });
+    const preview = await service.dispatch({ method: "cleanup.preview", requestId: "preview", params: { candidateIds: ["cache:electron"] } });
+    if (!preview.ok || preview.method !== "cleanup.preview") throw new Error("preview failed");
+    await mkdir(join(dataDir, "backups", ".backup-interrupted.staging"), { recursive: true });
+
+    await expect(service.dispatch({
+      method: "cleanup.execute", requestId: "execute",
+      params: { candidateIds: ["cache:electron"], previewToken: preview.result.previewToken, confirmed: true },
+    })).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+  });
 });
