@@ -38,12 +38,11 @@ func StartManagedProcess(spec ProcessSpec) (*ManagedProcess, error) {
 	command := exec.Command(spec.Path, spec.Args...)
 	command.Dir = spec.Dir
 	command.Env = mergeEnvironment(os.Environ(), spec.Env)
-	container, err := prepareProcessContainer(command)
-	if err != nil {
+	if err := spec.Lease.VerifyEntrypoint(spec.Path); err != nil {
 		return nil, err
 	}
-	if err := spec.Lease.VerifyEntrypoint(spec.Path); err != nil {
-		_ = container.close()
+	container, err := prepareProcessContainer(command)
+	if err != nil {
 		return nil, err
 	}
 	if err := command.Start(); err != nil {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -80,7 +81,8 @@ type fakeRuntimeLease struct {
 	root       string
 	verifyErr  error
 	verified   []string
-	closeCalls int
+	closeErr   error
+	closeCalls atomic.Int32
 }
 
 func (lease *fakeRuntimeLease) RootPath() string {
@@ -93,8 +95,12 @@ func (lease *fakeRuntimeLease) VerifyEntrypoint(path string) error {
 }
 
 func (lease *fakeRuntimeLease) Close() error {
-	lease.closeCalls++
-	return nil
+	lease.closeCalls.Add(1)
+	return lease.closeErr
+}
+
+func (lease *fakeRuntimeLease) CloseCalls() int {
+	return int(lease.closeCalls.Load())
 }
 
 type fakeChildProcess struct {
@@ -123,6 +129,18 @@ func (*stopFailingChildProcess) Wait() error {
 }
 
 func (*stopFailingChildProcess) Stop() error {
+	return errors.New("terminate failed")
+}
+
+type releasableStopFailingChildProcess struct {
+	result chan error
+}
+
+func (process *releasableStopFailingChildProcess) Wait() error {
+	return <-process.result
+}
+
+func (*releasableStopFailingChildProcess) Stop() error {
 	return errors.New("terminate failed")
 }
 
@@ -249,8 +267,8 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 	if startedSpec.Lease == nil || startedSpec.Lease.RootPath() != filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID) {
 		t.Fatalf("process lease = %#v", startedSpec.Lease)
 	}
-	if startedSpec.Lease.(*fakeRuntimeLease).closeCalls != 1 {
-		t.Fatalf("lease close calls = %d", startedSpec.Lease.(*fakeRuntimeLease).closeCalls)
+	if startedSpec.Lease.(*fakeRuntimeLease).CloseCalls() != 1 {
+		t.Fatalf("lease close calls = %d", startedSpec.Lease.(*fakeRuntimeLease).CloseCalls())
 	}
 	wantEnv := []string{
 		"NODE_COMPILE_CACHE=" + filepath.Join(deps.Paths.HostCacheRoot, "cache", "node-compile"),
@@ -271,7 +289,7 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 	}
 }
 
-func TestRunPreparesAcquiresAndStartsRuntimeInOrder(t *testing.T) {
+func TestRunAcquiresRuntimeLeaseBeforeStart(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
 	manifest := validRuntimeManifest()
@@ -307,12 +325,12 @@ func TestRunPreparesAcquiresAndStartsRuntimeInOrder(t *testing.T) {
 	if !reflect.DeepEqual(events, []string{"prepare", "acquire", "start"}) {
 		t.Fatalf("events = %v", events)
 	}
-	if lease.closeCalls != 1 {
-		t.Fatalf("lease close calls = %d", lease.closeCalls)
+	if lease.CloseCalls() != 1 {
+		t.Fatalf("lease close calls = %d", lease.CloseCalls())
 	}
 }
 
-func TestRunDoesNotStartWhenRuntimeLeaseAcquisitionFails(t *testing.T) {
+func TestRunRejectsRuntimeLeaseFailure(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
 	acquireErr := errors.Join(ErrPackageInvalid, errors.New("runtime changed"))
@@ -377,8 +395,8 @@ func TestRunClosesRuntimeLeaseOnRepresentativeExitPaths(t *testing.T) {
 			test.run(ctx, cancel, &deps)
 
 			_ = Run(ctx, deps)
-			if lease.closeCalls != 1 {
-				t.Fatalf("lease close calls = %d", lease.closeCalls)
+			if lease.CloseCalls() != 1 {
+				t.Fatalf("lease close calls = %d", lease.CloseCalls())
 			}
 		})
 	}
@@ -508,6 +526,64 @@ func TestRunMapsProcessStartErrors(t *testing.T) {
 	}
 }
 
+func TestRunJoinsRuntimeLeaseCloseErrorWhenStartFails(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	startErr := errors.New("start failed")
+	closeErr := errors.New("lease close failed")
+	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime"), closeErr: closeErr}
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return nil, startErr }
+
+	err := Run(context.Background(), deps)
+	if !errors.Is(err, ErrAppStartFailed) || !errors.Is(err, startErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("returned %v", err)
+	}
+	if lease.CloseCalls() != 1 {
+		t.Fatalf("lease close calls = %d", lease.CloseCalls())
+	}
+}
+
+func TestRunPropagatesRuntimeLeaseCloseErrorAfterWait(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	closeErr := errors.New("lease close failed")
+	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime"), closeErr: closeErr}
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
+
+	err := Run(context.Background(), deps)
+	if !errors.Is(err, ErrAppExited) || !errors.Is(err, closeErr) {
+		t.Fatalf("returned %v", err)
+	}
+	if lease.CloseCalls() != 1 {
+		t.Fatalf("lease close calls = %d", lease.CloseCalls())
+	}
+}
+
+func TestRunPropagatesRuntimeLeaseCloseErrorAfterStopAndWait(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	closeErr := errors.New("lease close failed")
+	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime"), closeErr: closeErr}
+	process := &blockingChildProcess{result: make(chan error, 1)}
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	deps.MonitorUSB = func(ctx context.Context, _ string, _ time.Duration) error {
+		cancel()
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	err := Run(ctx, deps)
+	if !errors.Is(err, ErrAppExited) || !errors.Is(err, closeErr) {
+		t.Fatalf("returned %v", err)
+	}
+	if lease.CloseCalls() != 1 {
+		t.Fatalf("lease close calls = %d", lease.CloseCalls())
+	}
+}
+
 func TestRunPreservesUpdateWhenProcessExitsBeforeReadiness(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
@@ -543,6 +619,38 @@ func TestRunDoesNotBlockWhenProcessStopFails(t *testing.T) {
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("launcher blocked after process stop failed")
+	}
+}
+
+func TestRunKeepsRuntimeLeaseUntilWaitCompletesAfterStopFailure(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime")}
+	process := &releasableStopFailingChildProcess{result: make(chan error, 1)}
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
+	deps.AcceptSequence = func(string, Manifest) error { return ErrManifestInvalid }
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
+
+	result := make(chan error, 1)
+	go func() { result <- Run(context.Background(), deps) }()
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrManifestInvalid) {
+			t.Fatalf("returned %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("launcher blocked after process stop failed")
+	}
+	if lease.CloseCalls() != 0 {
+		t.Fatalf("lease closed before wait completed: %d", lease.CloseCalls())
+	}
+	process.result <- nil
+	deadline := time.Now().Add(time.Second)
+	for lease.CloseCalls() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if lease.CloseCalls() != 1 {
+		t.Fatalf("lease close calls = %d", lease.CloseCalls())
 	}
 }
 
