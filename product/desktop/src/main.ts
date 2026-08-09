@@ -31,6 +31,10 @@ import { createSessionOrganizerStore } from "./session-organizer/store.js";
 import { createProviderStore } from "./providers/provider-store.js";
 import { createFixtureSkillHubClient } from "./skills/fixture-client.js";
 import { createSkillService } from "./skills/skill-service.js";
+import { createFixturePluginRegistryClient } from "./plugins/fixture-client.js";
+import { createOpenClawCliPluginRuntime } from "./plugins/openclaw-cli-runtime.js";
+import { createPluginService } from "./plugins/plugin-service.js";
+import type { PluginRuntimeAdapter } from "./plugins/runtime-adapter.js";
 import { createChannelStore } from "./channels/channel-store.js";
 import type { ChannelRuntime } from "./channels/channel-dispatcher.js";
 import {
@@ -155,6 +159,7 @@ export interface DesktopMainOptions {
   probeCapabilities(port: number, signal: AbortSignal): Promise<GatewayCapabilityProbeResult>;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
   client?: UClawClient;
+  pluginRuntime?: PluginRuntimeAdapter;
   attachments?: AttachmentService;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
   selectPort?(excludedPorts: readonly number[], signal: AbortSignal): Promise<number>;
@@ -345,6 +350,16 @@ export async function startElectronMain(
   const attachments = options.attachments ?? client.attachments;
   const providers = createProviderStore({ dataDir: portablePaths.dataDir });
   const skills = await createSkillService({ dataDir: portablePaths.dataDir, client: createFixtureSkillHubClient() });
+  const pluginRuntime = options.pluginRuntime ?? await createOpenClawCliPluginRuntime({
+    runtimeRoot: process.env.UCLAW_RUNTIME_DIR ?? "",
+    executable: process.execPath,
+    dataDir: portablePaths.dataDir,
+  });
+  const plugins = await createPluginService({
+    dataDir: portablePaths.dataDir,
+    client: createFixturePluginRegistryClient(),
+    runtime: pluginRuntime,
+  });
   const channelRuntime = requireChannelRuntime(client);
   const channels = createChannelStore({ dataDir: portablePaths.dataDir, capability: channelRuntime.capability });
   let gatewayPort: number | undefined;
@@ -390,6 +405,7 @@ export async function startElectronMain(
       attachments,
       providers,
       skills,
+      plugins,
       channels,
       channelRuntime,
       selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {

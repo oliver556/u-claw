@@ -27,7 +27,7 @@ describe("installPreloadBridge", () => {
       ipcRenderer: { invoke, on, removeListener },
     });
 
-    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "channels"]);
+    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels"]);
     expect(api).not.toHaveProperty("ipcRenderer");
     expect(api).not.toHaveProperty("invoke");
     expect(Object.keys(api?.client as object)).toEqual(["invoke", "subscribe"]);

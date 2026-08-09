@@ -102,7 +102,7 @@ func Run(ctx context.Context, deps Dependencies) error {
 		Path: entrypoint,
 		Args: append([]string(nil), manifest.EntryArgs...),
 		Dir:  filepath.Dir(entrypoint),
-		Env:  portableProcessEnvironment(deps.Paths),
+		Env:  append(portableProcessEnvironment(deps.Paths), "UCLAW_RUNTIME_DIR="+cache.Path),
 	})
 	if err != nil {
 		return reportFailure(reporter, errors.Join(ErrAppStartFailed, err))
