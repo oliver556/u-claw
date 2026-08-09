@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export { SkillIpcRequestSchema, SkillIpcResponseSchema } from "./capabilities.js";
+
 import { AttachmentImportInputSchema, AttachmentSchema } from "./attachments.js";
 import { ActivityDomainIdSchema, ArtifactSnapshotSchema, TaskActivitySnapshotSchema } from "./activity.js";
 

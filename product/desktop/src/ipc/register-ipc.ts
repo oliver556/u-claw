@@ -5,6 +5,8 @@ import {
   IpcResponseSchema,
   ProviderIpcRequestSchema,
   ProviderIpcResponseSchema,
+  SkillIpcRequestSchema,
+  SkillIpcResponseSchema,
   UClawErrorSchema,
   WindowIpcRequestSchema,
   redactRendererText,
@@ -20,8 +22,10 @@ import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } f
 import type { SessionOrganizerStore } from "../session-organizer/store.js";
 import { createProviderDispatcher } from "../providers/provider-dispatcher.js";
 import type { ProviderStore } from "../providers/provider-store.js";
+import { createSkillDispatcher } from "../skills/skill-dispatcher.js";
+import type { SkillService } from "../skills/skill-service.js";
 import { createProviderNetworkService, type ProviderNetworkService } from "../providers/provider-network.js";
-import { ATTACHMENT_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, PROVIDER_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { ATTACHMENT_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -51,6 +55,7 @@ export interface RegisterIpcDependencies {
   selectAttachments?(): Promise<AttachmentImportInput[]>;
   providers?: ProviderStore;
   providerNetwork?: ProviderNetworkService;
+  skills?: SkillService;
 }
 
 function safeError(
@@ -93,6 +98,7 @@ export function registerIpc({
   selectAttachments,
   providers,
   providerNetwork,
+  skills,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
@@ -103,6 +109,7 @@ export function registerIpc({
   const providerDispatcher = providers === undefined
     ? undefined
     : createProviderDispatcher(providers, providerNetwork ?? createProviderNetworkService());
+  const skillDispatcher = skills === undefined ? undefined : createSkillDispatcher(skills);
   const authorize = (event: unknown): void => {
     const candidate = event as { sender?: unknown; senderFrame?: unknown };
     if (
@@ -219,6 +226,22 @@ export function registerIpc({
     }
   });
 
+  if (skillDispatcher !== undefined) ipcMain.handle(SKILL_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = SkillIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid Skill IPC request.");
+    try {
+      return await skillDispatcher(parsed.data);
+    } catch (error) {
+      return SkillIpcResponseSchema.parse({
+        method: parsed.data.method,
+        requestId: parsed.data.requestId,
+        ok: false,
+        error: toRendererSafeError(error),
+      });
+    }
+  });
+
   let disposed = false;
   return () => {
     if (disposed) return;
@@ -228,5 +251,6 @@ export function registerIpc({
     ipcMain.removeHandler(CLIENT_IPC_CHANNEL);
     if (attachments !== undefined) ipcMain.removeHandler(ATTACHMENT_IPC_CHANNEL);
     if (providers !== undefined) ipcMain.removeHandler(PROVIDER_IPC_CHANNEL);
+    if (skills !== undefined) ipcMain.removeHandler(SKILL_IPC_CHANNEL);
   };
 }

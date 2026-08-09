@@ -29,6 +29,8 @@ import type { IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import { createSessionOrganizerStore } from "./session-organizer/store.js";
 import { createProviderStore } from "./providers/provider-store.js";
+import { createFixtureSkillHubClient } from "./skills/fixture-client.js";
+import { createSkillService } from "./skills/skill-service.js";
 import {
   createAdvancedConsoleController,
   createMainWindow,
@@ -331,6 +333,7 @@ export async function startElectronMain(
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
   const attachments = options.attachments ?? client.attachments;
   const providers = createProviderStore({ dataDir: portablePaths.dataDir });
+  const skills = await createSkillService({ dataDir: portablePaths.dataDir, client: createFixtureSkillHubClient() });
   let gatewayPort: number | undefined;
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -373,6 +376,7 @@ export async function startElectronMain(
       organizer,
       attachments,
       providers,
+      skills,
       selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
         const selected = await dialog.showOpenDialog({
           properties: ["openFile", "multiSelections"],

@@ -1,6 +1,7 @@
 export * from "./attachments.js";
 export * from "./activity.js";
 export * from "./chat.js";
+export * from "./capabilities.js";
 export * from "./client.js";
 export * from "./common.js";
 export * from "./errors.js";

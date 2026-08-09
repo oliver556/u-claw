@@ -12,4 +12,8 @@ export * from "./providers/provider-dispatcher.js";
 export * from "./providers/provider-network.js";
 export * from "./security/navigation-policy.js";
 export * from "./session-organizer/store.js";
+export * from "./skills/bundle-validator.js";
+export * from "./skills/fixture-client.js";
+export * from "./skills/skill-service.js";
+export * from "./skills/skill-dispatcher.js";
 export * from "./window.js";
