@@ -9,6 +9,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--release-fs-helper" {
+		if err := runReleaseFSHelper(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			_, _ = os.Stderr.WriteString("release filesystem helper failed\n")
+			os.Exit(2)
+		}
+		return
+	}
 	reporter := NewStatusReporter()
 	executablePath, err := os.Executable()
 	if err != nil {
