@@ -10,6 +10,20 @@ function deferred<T>() {
 }
 
 describe("createRendererClient", () => {
+  it("uses whitelist IPC methods for activity and artifacts without paths", async () => {
+    const invoke = vi.fn(async (request: ClientIpcRequest): Promise<IpcResponse> => request.method === "activity.list"
+      ? { method: request.method, requestId: request.requestId, ok: true, result: { contractVersion: 1, generatedAt: "2026-08-09T08:00:00.000Z", source: "openclaw", tasks: [] } }
+      : { method: "artifacts.list", requestId: request.requestId, ok: true, result: { contractVersion: 1, generatedAt: "2026-08-09T08:00:00.000Z", source: "openclaw", artifacts: [] } });
+    const client = createRendererClient({ invoke, subscribe: () => () => undefined });
+
+    await client.activityCenter.list();
+    await client.artifacts.list("session-1");
+
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "activity.list", params: {} }));
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "artifacts.list", params: { sessionId: "session-1" } }));
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain("path");
+    client.dispose();
+  });
   it("maps organizer domain operations to whitelisted IPC methods without paths", async () => {
     const document = { schemaVersion: 1 as const, groups: [], sessions: [] };
     const invoke = vi.fn(async (request: ClientIpcRequest): Promise<IpcResponse> => ({

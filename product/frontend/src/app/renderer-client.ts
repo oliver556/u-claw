@@ -8,6 +8,8 @@ import {
   type SessionOrganizerService,
   type UClawClient,
   type UClawError,
+  type ActivityCenterService,
+  type ArtifactService,
 } from "@uclaw/shared";
 
 export interface RendererClientBridge {
@@ -17,6 +19,8 @@ export interface RendererClientBridge {
 
 export interface RendererClient extends UClawClient {
   sessionOrganizer: SessionOrganizerService;
+  activityCenter: ActivityCenterService;
+  artifacts: ArtifactService;
   dispose(): void;
 }
 
@@ -175,6 +179,8 @@ export function createRendererClient(bridge: RendererClientBridge): RendererClie
       list: (page = {}) => invoke("sessions.list", page), get: (sessionId) => invoke("sessions.get", { sessionId }),
       create: (input = {}) => invoke("sessions.create", input), rename: (sessionId, title) => invoke("sessions.rename", { sessionId, title }), remove: (sessionId, revision) => invoke("sessions.remove", { sessionId, ...(revision ? { revision } : {}) }),
     },
+    activityCenter: { list: () => invoke("activity.list", {}) },
+    artifacts: { list: (sessionId) => invoke("artifacts.list", { ...(sessionId ? { sessionId } : {}) }) },
     sessionOrganizer: {
       get: () => invoke("session-organizer.get", {}),
       setPinned: (sessionId, pinned) => invoke("session-organizer.set-pinned", { sessionId, pinned }),

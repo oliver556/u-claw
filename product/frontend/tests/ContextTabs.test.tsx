@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import type { CapabilitySet, Message, Session, ToolCall, UClawClient } from "@uclaw/shared";
+import type { ArtifactSnapshot, CapabilitySet, Message, Session, ToolCall, UClawClient } from "@uclaw/shared";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -75,6 +75,29 @@ function clientFixture(): UClawClient {
 
 describe("ContextTabs", () => {
   afterEach(cleanup);
+
+  it("shows controlled artifact metadata in a dedicated result files tab", async () => {
+    const client = clientFixture();
+    const artifacts: ArtifactSnapshot = {
+      contractVersion: 1, generatedAt: now, source: "openclaw",
+      artifacts: [{
+        id: "artifact-one", sessionId: "session-one", messageId: "message-one", runId: "run-one",
+        name: "release-report.md", mediaType: "text/markdown", size: 2048, createdAt: now, status: "ready",
+      }],
+    };
+    const listArtifacts = vi.fn(async () => artifacts);
+    client.artifacts = { list: listArtifacts };
+    render(<ContextTabs client={client} session={session("session-one", "发布检查")} capabilities={contextCapabilities} activity={[]} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "成果" }));
+    expect(await screen.findByText("release-report.md")).toBeVisible();
+    expect(screen.getByText("text/markdown")).toBeVisible();
+    expect(screen.getByText(/2 KB/)).toBeVisible();
+    expect(screen.getByText(/OpenClaw · 已就绪/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "定位 release-report.md" }));
+    expect(screen.getByText("整理发布清单")).toBeVisible();
+    expect(JSON.stringify(listArtifacts.mock.calls)).not.toContain("path");
+  });
 
   it("builds attachments, references, memories, tool results, and artifacts from current session only", async () => {
     const client = clientFixture();

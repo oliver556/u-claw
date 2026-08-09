@@ -41,6 +41,8 @@ const defaultClient: UClawClient = {
   channels: mockClient.channels,
   files: mockClient.files,
   diagnostics: mockClient.diagnostics,
+  activityCenter: { list: async () => ({ contractVersion: 1, generatedAt: new Date().toISOString(), source: "openclaw", tasks: [] }) },
+  artifacts: { list: async () => ({ contractVersion: 1, generatedAt: new Date().toISOString(), source: "openclaw", artifacts: [] }) },
 };
 
 export function App({ client }: { client?: UClawClient }) {

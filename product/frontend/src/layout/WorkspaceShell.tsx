@@ -13,12 +13,13 @@ import {
 import { FolderArchive, PanelLeft, PanelRight, SquareTerminal } from "lucide-react";
 import { Tooltip } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { routeForPath } from "../app/routes";
 import { Conversation } from "../features/chat/Conversation";
 import { SessionSidebar } from "../features/sessions/SessionSidebar";
 import { ProviderSettings } from "../features/providers/ProviderSettings";
+import { TaskActivityCenter } from "../features/activity/TaskActivityCenter";
 import { AppTitlebar } from "./AppTitlebar";
 import { ContextPanel } from "./ContextPanel";
 import { PrimaryRail } from "./PrimaryRail";
@@ -36,6 +37,7 @@ type WorkspaceClient = UClawClient & { sessionOrganizer?: SessionOrganizerServic
 
 export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const route = routeForPath(pathname);
   const isWork = route.path === "/";
   const [sessionsOpen, setSessionsOpen] = useState(() => window.innerWidth > 680);
@@ -54,6 +56,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState<Record<string, string[]>>({});
+  const [activityCenterOpen, setActivityCenterOpen] = useState(false);
   const selectionRequest = useRef(0);
 
   const selectSession = useCallback(async (sessionId: string) => {
@@ -222,7 +225,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
 
   return <div className="app-shell">
     <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById("main")?.focus(); }}>跳到主要内容</a>
-    <AppTitlebar status={gatewayStatus} onReconnect={() => client.gateway.reconnect()} />
+    <AppTitlebar status={gatewayStatus} onReconnect={() => client.gateway.reconnect()} onOpenActivity={() => setActivityCenterOpen(true)} />
     <div className={isWork ? `workspace-grid${sessionsOpen ? "" : " sessions-collapsed"}${contextOpen ? "" : " context-collapsed"}` : "workspace-grid secondary-layout"}>
       <PrimaryRail />
       {isWork && sessionsOpen ? <SessionSidebar
@@ -256,5 +259,10 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
       </main>
       {isWork && contextOpen ? <ContextPanel client={client} session={activeSession} capabilities={capabilities} activity={activeSession === undefined ? [] : activity[activeSession.id] ?? []} onClose={() => setContextOpen(false)} /> : null}
     </div>
+    <TaskActivityCenter open={activityCenterOpen} service={client.activityCenter} onClose={() => setActivityCenterOpen(false)} onOpenSession={(sessionId) => {
+      navigate("/");
+      void selectSession(sessionId);
+      setActivityCenterOpen(false);
+    }} />
   </div>;
 }
