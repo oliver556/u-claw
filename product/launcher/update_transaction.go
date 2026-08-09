@@ -54,7 +54,7 @@ func FinalizeUpdateTransaction(packageRoot string, manifest Manifest) error {
 	trailingErr := decoder.Decode(&struct{}{})
 	closeErr := file.Close()
 	if decodeErr != nil || !errors.Is(trailingErr, io.EOF) || closeErr != nil ||
-		record.SchemaVersion != 1 || record.State != "complete" || manifest.Signature == nil ||
+		record.SchemaVersion != 1 || (record.State != "switching" && record.State != "complete") || manifest.Signature == nil ||
 		record.Target.Sequence != manifest.Signature.Sequence ||
 		!strings.EqualFold(record.Target.RuntimeSHA256, manifest.RuntimeSHA256) ||
 		record.Target.SignatureValue != manifest.Signature.Value {

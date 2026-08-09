@@ -39,6 +39,19 @@ test("portable launcher workflow builds windowsgui and runs both PowerShell gate
   assert.match(source, /shell:\s*pwsh\b/u);
 });
 
+test("production launcher build requires and injects an Ed25519 trust root", async () => {
+  const source = await readFile(workflowUrl, "utf8");
+  assert.match(source, /UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
+  assert.match(source, /UCLAW_RUNTIME_REVOKED_KEY_IDS:\s*\$\{\{\s*vars\.UCLAW_RUNTIME_REVOKED_KEY_IDS\s*\}\}/u);
+  assert.match(source, /UCLAW_RELEASE_BASE_URL:\s*\$\{\{\s*vars\.UCLAW_RELEASE_BASE_URL\s*\}\}/u);
+  assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS\)[\s\S]*throw/u);
+  assert.match(source, /FromBase64String[\s\S]*Length\s*-ne\s*32/u);
+  assert.match(source, /main\.trustedRuntimeKeys=\$trustedKeysJson/u);
+  assert.match(source, /main\.revokedRuntimeKeyIDs=\$revokedKeyIDsJson/u);
+  assert.match(source, /main\.releaseFeedBaseURL=\$releaseBaseURL/u);
+  assert.doesNotMatch(source, /BEGIN (?:OPENSSH |RSA |EC )?PRIVATE KEY/u);
+});
+
 test("portable launcher artifact contains diagnostics only", async () => {
   const source = await readFile(workflowUrl, "utf8");
   const upload = source.slice(source.search(/uses: actions\/upload-artifact@[0-9a-f]{40}/u));

@@ -25,4 +25,5 @@ export const IPC_CHANNELS = Object.freeze([
   MCP_IPC_CHANNEL,
   DATA_IPC_CHANNEL,
   DIAGNOSTICS_IPC_CHANNEL,
+  RELEASE_IPC_CHANNEL,
 ] as const);

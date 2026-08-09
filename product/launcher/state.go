@@ -198,6 +198,9 @@ func portableProcessEnvironment(paths PortablePaths) []string {
 		"TMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
 		"UCLAW_CACHE_DIR=" + filepath.Join(paths.HostCacheRoot, "cache"),
 		"UCLAW_DATA_DIR=" + paths.DataDir,
+		"UCLAW_RELEASE_BASE_URL=" + releaseFeedBaseURL,
+		"UCLAW_RELEASE_REVOKED_KEY_IDS=" + revokedRuntimeKeyIDs,
+		"UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS=" + trustedRuntimeKeys,
 	}
 }
 

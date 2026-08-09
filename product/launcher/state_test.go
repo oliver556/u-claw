@@ -187,6 +187,9 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 		"TMP=" + filepath.Join(deps.Paths.HostCacheRoot, "cache", "temp"),
 		"UCLAW_CACHE_DIR=" + filepath.Join(deps.Paths.HostCacheRoot, "cache"),
 		"UCLAW_DATA_DIR=" + deps.Paths.DataDir,
+		"UCLAW_RELEASE_BASE_URL=",
+		"UCLAW_RELEASE_REVOKED_KEY_IDS=[]",
+		"UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS={}",
 		"UCLAW_RUNTIME_DIR=" + filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID),
 	}
 	if !reflect.DeepEqual(startedSpec.Env, wantEnv) {
@@ -370,6 +373,36 @@ func TestStateTextUsesFixedChineseStatus(t *testing.T) {
 			t.Fatalf("state %s text = %q", state, got)
 		}
 	}
+}
+
+func TestPortableProcessEnvironmentInjectsImmutableReleaseConfiguration(t *testing.T) {
+	previousKeys, previousRevoked, previousFeed := trustedRuntimeKeys, revokedRuntimeKeyIDs, releaseFeedBaseURL
+	trustedRuntimeKeys = `{"release-2026":"fixture-public-key"}`
+	revokedRuntimeKeyIDs = `["release-old"]`
+	releaseFeedBaseURL = "https://updates.example.test/releases/"
+	t.Cleanup(func() {
+		trustedRuntimeKeys, revokedRuntimeKeyIDs, releaseFeedBaseURL = previousKeys, previousRevoked, previousFeed
+	})
+
+	environment := portableProcessEnvironment(PortablePaths{DataDir: `E:\.uclaw\data`, HostCacheRoot: `C:\U-Claw`})
+	for _, expected := range []string{
+		`UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS={"release-2026":"fixture-public-key"}`,
+		`UCLAW_RELEASE_REVOKED_KEY_IDS=["release-old"]`,
+		`UCLAW_RELEASE_BASE_URL=https://updates.example.test/releases/`,
+	} {
+		if !containsString(environment, expected) {
+			t.Fatalf("release environment missing %q: %v", expected, environment)
+		}
+	}
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDiagnosticMapsExtractionFailureToCacheFailure(t *testing.T) {

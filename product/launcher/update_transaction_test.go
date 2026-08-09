@@ -44,6 +44,75 @@ func TestFinalizeUpdateTransactionRemovesAcceptedRollback(t *testing.T) {
 	}
 }
 
+func TestFinalizeUpdateTransactionAcceptsInterruptedSwitchAfterRuntimeIsStable(t *testing.T) {
+	packageRoot := t.TempDir()
+	manifest := validRuntimeManifest()
+	manifest.Signature = &ManifestSignature{Sequence: 43, Value: "fixture-target-signature"}
+	record := updateTransaction{
+		SchemaVersion: 1,
+		State:         "switching",
+		Target: updateIdentity{
+			Sequence:       manifest.Signature.Sequence,
+			RuntimeSHA256:  manifest.RuntimeSHA256,
+			SignatureValue: manifest.Signature.Value,
+		},
+		Previous: &updateIdentity{Sequence: 42, RuntimeSHA256: "b" + manifest.RuntimeSHA256[1:], SignatureValue: "fixture-previous-signature"},
+	}
+	contents, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string][]byte{
+		updateTransactionName:   contents,
+		"runtime.pkg.rollback":  []byte("old runtime"),
+		"version.json.rollback": []byte("old manifest"),
+	} {
+		if err := os.WriteFile(filepath.Join(packageRoot, name), value, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := FinalizeUpdateTransaction(packageRoot, manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{updateTransactionName, "runtime.pkg.rollback", "version.json.rollback"} {
+		if _, err := os.Lstat(filepath.Join(packageRoot, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists or could not be checked: %v", name, err)
+		}
+	}
+}
+
+func TestFinalizeUpdateTransactionRejectsInterruptedSwitchForPreviousRuntime(t *testing.T) {
+	packageRoot := t.TempDir()
+	manifest := validRuntimeManifest()
+	manifest.Signature = &ManifestSignature{Sequence: 42, Value: "fixture-previous-signature"}
+	record := updateTransaction{
+		SchemaVersion: 1,
+		State:         "switching",
+		Target: updateIdentity{
+			Sequence:       43,
+			RuntimeSHA256:  "b" + manifest.RuntimeSHA256[1:],
+			SignatureValue: "fixture-target-signature",
+		},
+		Previous: &updateIdentity{Sequence: manifest.Signature.Sequence, RuntimeSHA256: manifest.RuntimeSHA256, SignatureValue: manifest.Signature.Value},
+	}
+	contents, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transactionPath := filepath.Join(packageRoot, updateTransactionName)
+	if err := os.WriteFile(transactionPath, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := FinalizeUpdateTransaction(packageRoot, manifest); err == nil {
+		t.Fatal("previous runtime finalized an interrupted target switch")
+	}
+	if _, err := os.Lstat(transactionPath); err != nil {
+		t.Fatalf("recovery transaction was removed: %v", err)
+	}
+}
+
 func TestFinalizeUpdateTransactionFailsClosedForWrongIdentity(t *testing.T) {
 	packageRoot := t.TempDir()
 	manifest := validRuntimeManifest()

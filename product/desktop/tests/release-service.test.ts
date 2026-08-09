@@ -68,6 +68,37 @@ describe("release service", () => {
   it("reports a valid same-version manifest as current", async () => {
     const setup = await fixture({ currentVersion: "0.2.0" });
     expect(await setup.service.check("stable")).toMatchObject({ state: "current", currentVersion: "0.2.0" });
+    await expect(readFile(join(setup.cacheRoot, ".uclaw-release-sequence.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await setup.service.retry()).toMatchObject({ state: "current" });
+  });
+
+  it("allows only the exact current runtime identity at an accepted sequence", async () => {
+    const setup = await fixture({ currentVersion: "0.2.0" });
+    const accepted = manifest().runtimeManifest;
+    await writeFile(join(setup.cacheRoot, ".uclaw-release-sequence.json"), JSON.stringify({ schemaVersion: 1, ...transactionIdentity(accepted) }));
+    expect(await setup.service.check("stable")).toMatchObject({ state: "current" });
+
+    const replacement = manifest();
+    replacement.runtimeManifest.runtimeTreeSha256 = "c".repeat(64);
+    replacement.runtimeManifest.signature.value = sign(null, canonicalRuntimePayload(replacement.runtimeManifest), keys.privateKey).toString("base64");
+    const { signature: _signature, ...replacementUnsigned } = replacement;
+    replacement.signature.value = sign(null, canonicalReleasePayload(replacementUnsigned), keys.privateKey).toString("base64");
+    const replaced = await fixture({ currentVersion: "0.2.0", fetchManifest: vi.fn(async () => replacement) });
+    await writeFile(join(replaced.cacheRoot, ".uclaw-release-sequence.json"), JSON.stringify({ schemaVersion: 1, ...transactionIdentity(accepted) }));
+    expect(await replaced.service.check("stable")).toMatchObject({ state: "unavailable", retryable: false });
+  });
+
+  it.each(["oversized", "symlink"])("fails closed for an %s sequence record before fetching", async (kind) => {
+    const setup = await fixture();
+    const sequencePath = join(setup.cacheRoot, ".uclaw-release-sequence.json");
+    if (kind === "oversized") await writeFile(sequencePath, "x".repeat(4097));
+    else {
+      const outside = join(setup.root, "outside-sequence.json");
+      await writeFile(outside, JSON.stringify({ schemaVersion: 1, ...transactionIdentity(manifest().runtimeManifest) }));
+      await symlink(outside, sequencePath);
+    }
+    expect(await setup.service.check("stable")).toMatchObject({ state: "unavailable" });
+    expect(setup.fetchManifest).not.toHaveBeenCalled();
   });
 
   it("validates the requested beta channel instead of the startup default", async () => {

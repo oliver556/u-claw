@@ -20,6 +20,7 @@ import (
 // Populated at release build time with public keys only. Private keys never enter the binary.
 var trustedRuntimeKeys = "{}"
 var revokedRuntimeKeyIDs = "[]"
+var releaseFeedBaseURL = ""
 
 const maxManifestBytes = 1 << 20
 const maxSafeJSONInteger = int64(9007199254740991)

@@ -49,6 +49,7 @@ export interface ReleaseServiceOptions {
   currentVersion: string; channel: "stable" | "beta"; platform: "win32"; arch: "x64"; runtimeId: string;
   cacheRoot: string; packageRoot: string; trustedKeys: Record<string, string>; revokedKeyIds: Set<string>;
   highestSequence?: number; timeoutMs?: number; now?: () => Date;
+  configurationError?: string;
   fetchManifest(channel: "stable" | "beta", signal: AbortSignal): Promise<SignedReleaseManifest>;
   download(manifest: SignedReleaseManifest, controlledTarget: string, signal: AbortSignal): Promise<void>;
 }
@@ -77,7 +78,7 @@ async function writeJsonDurable(path: string, value: unknown, exclusive = false)
   } catch (error) { await rm(temporary, { force: true }); throw error; }
 }
 
-function validManifest(value: SignedReleaseManifest, options: ReleaseServiceOptions, now: Date, highestSequence: number, channel: "stable" | "beta"): boolean {
+function validManifest(value: SignedReleaseManifest, options: ReleaseServiceOptions, now: Date, highestSequence: number, acceptedIdentity: UpdateIdentity | undefined, channel: "stable" | "beta"): boolean {
   const { signature, ...unsigned } = value;
   const key = options.trustedKeys[signature?.keyId];
   if (!key || signature.algorithm !== "ed25519" || options.revokedKeyIds.has(signature.keyId)) return false;
@@ -85,7 +86,8 @@ function validManifest(value: SignedReleaseManifest, options: ReleaseServiceOpti
   const version = parseVersion(value.version); const current = parseVersion(options.currentVersion);
   if (!version || !current || compareVersion(version, current) < 0) return false;
   if (value.channel !== channel || value.compatibility.platform !== options.platform || value.compatibility.arch !== options.arch || value.compatibility.runtimeId !== options.runtimeId) return false;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value.id) || !Number.isSafeInteger(value.sequence) || value.sequence <= highestSequence) return false;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value.id) || !Number.isSafeInteger(value.sequence) || value.sequence < highestSequence) return false;
+  if (value.sequence === highestSequence && (!acceptedIdentity || !sameUpdateIdentity(value.runtimeManifest, acceptedIdentity))) return false;
   if (!Number.isFinite(Date.parse(value.publishedAt)) || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= now.getTime()) return false;
   return value.package.bytes > 0 && /^[a-f0-9]{64}$/u.test(value.package.sha256) && validRuntimeManifest(value.runtimeManifest, value, options, now);
 }
@@ -179,6 +181,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
   let checked: { manifest: SignedReleaseManifest; previewToken: string } | undefined;
   let uninstallPreview: UninstallPreview | undefined;
   let highestSequence = options.highestSequence ?? 0;
+  let acceptedIdentity: UpdateIdentity | undefined;
   const operations = new Map<string, ReleaseOperation>();
   const operationSignals = new Map<string, AbortController>();
   const checkedAt = () => now().toISOString();
@@ -195,27 +198,32 @@ export function createReleaseService(options: ReleaseServiceOptions) {
     } catch { return undefined; }
   };
   const loadSequence = async () => {
+    let handle;
+    try { handle = await open(sequencePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
     let text: string;
-    try { text = await readFile(sequencePath, "utf8"); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
-    const value = JSON.parse(text) as { schemaVersion?: number; sequence?: number };
-    if (Object.keys(value).sort().join("\0") !== "schemaVersion\0sequence" || value.schemaVersion !== 1 || !Number.isSafeInteger(value.sequence) || value.sequence! < 1) throw new Error("Release sequence record is invalid.");
-    if (value.sequence! > highestSequence) highestSequence = value.sequence!;
-  };
-  const persistSequence = async (sequence: number) => {
-    await writeJsonDurable(sequencePath, { schemaVersion: 1, sequence }); highestSequence = sequence;
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.nlink !== 1 || info.size < 1 || info.size > 4096) throw new Error("Release sequence record is invalid.");
+      text = await handle.readFile("utf8");
+    } finally { await handle.close(); }
+    const value = JSON.parse(text) as { schemaVersion?: number; sequence?: number; runtimeSha256?: string; signatureValue?: string };
+    const { schemaVersion, ...identity } = value;
+    if (Object.keys(value).sort().join("\0") !== "runtimeSha256\0schemaVersion\0sequence\0signatureValue" || schemaVersion !== 1 || !validUpdateIdentity(identity)) throw new Error("Release sequence record is invalid.");
+    if (identity.sequence >= highestSequence) { highestSequence = identity.sequence; acceptedIdentity = identity; }
   };
   const base = (state: ReleaseCheckResult["state"], extra: Partial<ReleaseCheckResult> = {}): ReleaseCheckResult => ({ state, checkedAt: checkedAt(), currentVersion: options.currentVersion, channel: lastChannel, ...extra });
 
   const check = async (channel: "stable" | "beta"): Promise<ReleaseCheckResult> => {
     lastChannel = channel; checked = undefined; activeCheck?.abort(new Error("cancelled"));
+    if (options.configurationError) return base("unavailable", { retryable: false, message: options.configurationError });
     if (Object.keys(options.trustedKeys).length === 0) return base("unavailable", { retryable: false, message: "发布签名信任根未配置。" });
     const controller = new AbortController(); activeCheck = controller;
     const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs); timer.unref?.();
     try {
       await loadSequence();
       const manifest = await options.fetchManifest(channel, controller.signal);
-      if (!validManifest(manifest, options, now(), highestSequence, channel)) return base("unavailable", { retryable: false, message: "更新签名或兼容性验证失败。" });
-      if (compareVersion(parseVersion(manifest.version)!, parseVersion(options.currentVersion)!) === 0) { await persistSequence(manifest.sequence); return base("current"); }
+      if (!validManifest(manifest, options, now(), highestSequence, acceptedIdentity, channel)) return base("unavailable", { retryable: false, message: "更新签名或兼容性验证失败。" });
+      if (compareVersion(parseVersion(manifest.version)!, parseVersion(options.currentVersion)!) === 0) { highestSequence = manifest.sequence; acceptedIdentity = updateIdentity(manifest.runtimeManifest); return base("current"); }
       const previewToken = token(); checked = { manifest, previewToken };
       const update: ReleaseUpdate = { id: manifest.id, version: manifest.version, channel: manifest.channel, publishedAt: manifest.publishedAt, notes: manifest.notes, compatibility: manifest.compatibility, bytes: manifest.package.bytes, mandatory: manifest.mandatory, previewToken };
       return base("available", { update });
@@ -245,7 +253,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
         await mkdir(staging, { recursive: false, mode: 0o700 }); await options.download(manifest, stagedPackage, controller.signal); controller.signal.throwIfAborted();
         await writeJsonDurable(stagedManifest, manifest.runtimeManifest, true);
         setOperation({ ...operations.get(id)!, phase: "verifying", processedItems: 1, message: "正在验证签名与校验和。" });
-        if (!validManifest(manifest, options, now(), highestSequence, manifest.channel) || await hashRegularFile(stagedPackage, manifest.package.bytes) !== manifest.package.sha256) throw new Error("Update verification failed.");
+        if (!validManifest(manifest, options, now(), highestSequence, acceptedIdentity, manifest.channel) || await hashRegularFile(stagedPackage, manifest.package.bytes) !== manifest.package.sha256) throw new Error("Update verification failed.");
         controller.signal.throwIfAborted();
         if (await lstat(transaction).then(() => true, () => false) || await lstat(runtimeRollback).then(() => true, () => false) || await lstat(versionRollback).then(() => true, () => false)) throw new Error("Update recovery is required before another install.");
         const runtimeExists = await lstat(runtime).then(() => true, () => false); const versionExists = await lstat(version).then(() => true, () => false);

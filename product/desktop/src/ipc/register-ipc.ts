@@ -2,6 +2,7 @@ import {
   AttachmentIpcRequestSchema,
   AttachmentIpcResponseSchema,
   ClientIpcRequestSchema,
+  ClientIpcResponseSchema,
   IpcResponseSchema,
   ProviderIpcRequestSchema,
   ProviderIpcResponseSchema,
@@ -23,7 +24,7 @@ import {
   WindowIpcRequestSchema,
   redactRendererText,
   type ClientIpcRequest,
-  type IpcResponse,
+  type ClientIpcResponse,
   type UClawError,
   type UClawClient,
   type AttachmentImportInput,
@@ -102,17 +103,10 @@ function safeError(
   });
 }
 
-function ensureCorrelatedResponse(response: unknown, request: ClientIpcRequest): IpcResponse {
-  const parsed = IpcResponseSchema.parse(response);
+function ensureCorrelatedResponse(response: unknown, request: ClientIpcRequest): ClientIpcResponse {
+  const parsed = ClientIpcResponseSchema.parse(response);
   if (parsed.method !== request.method || parsed.requestId !== request.requestId) {
     throw new Error("Client response correlation failed.");
-  }
-  if (WindowIpcRequestSchema.safeParse({
-    method: parsed.method,
-    requestId: parsed.requestId,
-    params: {},
-  }).success) {
-    throw new Error("Client dispatcher returned a window response.");
   }
   return toRendererSafeResponse(parsed);
 }
