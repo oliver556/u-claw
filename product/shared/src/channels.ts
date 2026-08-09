@@ -4,7 +4,7 @@ import { ISODateTimeSchema } from "./common.js";
 import { RendererSafeTextSchema, UClawErrorSchema } from "./errors.js";
 
 export const CHANNEL_CONFIG_VERSION = 1 as const;
-export const ChannelKindSchema = z.enum(["telegram", "qq-bot", "feishu", "wecom"]);
+export const ChannelKindSchema = z.enum(["telegram", "qq-bot", "feishu", "wecom", "wechat-personal"]);
 export type ChannelKind = z.infer<typeof ChannelKindSchema>;
 export const ChannelStatusSchema = z.enum([
   "not-configured", "pending-verification", "connecting", "connected", "disconnected",
@@ -70,7 +70,7 @@ export const ManagedChannelSummarySchema = z.object({
   id: IdSchema,
   kind: ChannelKindSchema,
   name: z.string().min(1),
-  mode: z.enum(["bot", "app", "websocket", "webhook"]),
+  mode: z.enum(["bot", "app", "websocket", "webhook", "qr"]),
   configured: z.boolean(),
   enabled: z.boolean(),
   status: ChannelStatusSchema,
@@ -92,6 +92,41 @@ export const ChannelOperationResultSchema = z.object({
 }).strict();
 export type ChannelOperationResult = z.infer<typeof ChannelOperationResultSchema>;
 
+export const WechatLoginStateSchema = z.enum([
+  "idle", "preparing", "awaiting-scan", "awaiting-confirmation", "connected",
+  "expired", "cancelled", "logged-out", "error",
+]);
+export type WechatLoginState = z.infer<typeof WechatLoginStateSchema>;
+
+const QrImageSchema = z.object({
+  kind: z.literal("data-url"),
+  value: z.string().max(16_384).regex(/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/u),
+}).strict();
+
+export const WechatConnectionSnapshotSchema = z.object({
+  channelId: z.literal("wechat-personal"),
+  status: ChannelStatusSchema,
+  loginState: WechatLoginStateSchema,
+  capability: z.enum(["available", "unavailable"]),
+  capabilityReason: RendererSafeTextSchema.optional(),
+  plugin: z.object({
+    id: z.literal("openclaw-weixin"),
+    requiredVersion: z.literal("2.4.6"),
+    status: z.enum(["installed", "missing", "unknown"]),
+  }).strict(),
+  flowId: IdSchema.optional(),
+  qrGeneration: z.number().int().positive().optional(),
+  qrImage: QrImageSchema.optional(),
+  qrExpiresAt: ISODateTimeSchema.optional(),
+  account: z.object({
+    displayName: RendererSafeTextSchema.optional(),
+    accountIdHint: HintSchema,
+  }).strict().optional(),
+  lastCheckedAt: ISODateTimeSchema.optional(),
+  error: ChannelErrorSummarySchema.optional(),
+}).strict();
+export type WechatConnectionSnapshot = z.infer<typeof WechatConnectionSnapshotSchema>;
+
 const RequestIdSchema = z.string().min(1);
 const ChannelIdParamsSchema = z.object({ channelId: IdSchema }).strict();
 export const ChannelIpcRequestSchema = z.discriminatedUnion("method", [
@@ -103,15 +138,35 @@ export const ChannelIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("channels.test"), requestId: RequestIdSchema, params: ChannelIdParamsSchema }).strict(),
   z.object({ method: z.literal("channels.reconnect"), requestId: RequestIdSchema, params: ChannelIdParamsSchema }).strict(),
   z.object({ method: z.literal("channels.cancel"), requestId: RequestIdSchema, params: z.object({ operationRequestId: RequestIdSchema }).strict() }).strict(),
+  z.object({ method: z.literal("channels.wechat-status"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("channels.wechat-login-start"), requestId: RequestIdSchema, params: z.object({ force: z.boolean().optional() }).strict() }).strict(),
+  z.object({ method: z.literal("channels.wechat-login-poll"), requestId: RequestIdSchema, params: z.object({ flowId: IdSchema, qrGeneration: z.number().int().positive() }).strict() }).strict(),
+  z.object({ method: z.literal("channels.wechat-login-refresh"), requestId: RequestIdSchema, params: z.object({ flowId: IdSchema, qrGeneration: z.number().int().positive() }).strict() }).strict(),
+  z.object({ method: z.literal("channels.wechat-login-cancel"), requestId: RequestIdSchema, params: z.object({ flowId: IdSchema }).strict() }).strict(),
+  z.object({ method: z.literal("channels.wechat-reconnect"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("channels.wechat-logout"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
 ]);
 export type ChannelIpcRequest = z.infer<typeof ChannelIpcRequestSchema>;
 
 const SnapshotMethodSchema = z.enum(["channels.list-managed", "channels.create", "channels.update", "channels.remove", "channels.set-enabled"]);
 const OperationMethodSchema = z.enum(["channels.test", "channels.reconnect"]);
+const WechatMethodSchema = z.enum([
+  "channels.wechat-status", "channels.wechat-login-start", "channels.wechat-login-poll",
+  "channels.wechat-login-refresh", "channels.wechat-login-cancel", "channels.wechat-reconnect",
+  "channels.wechat-logout",
+]);
+const ChannelMethodSchema = z.enum([
+  "channels.list-managed", "channels.create", "channels.update", "channels.remove",
+  "channels.set-enabled", "channels.test", "channels.reconnect", "channels.cancel",
+  "channels.wechat-status", "channels.wechat-login-start", "channels.wechat-login-poll",
+  "channels.wechat-login-refresh", "channels.wechat-login-cancel", "channels.wechat-reconnect",
+  "channels.wechat-logout",
+]);
 export const ChannelIpcResponseSchema = z.union([
   z.object({ method: SnapshotMethodSchema, requestId: RequestIdSchema, ok: z.literal(true), result: ChannelSnapshotSchema }).strict(),
   z.object({ method: OperationMethodSchema, requestId: RequestIdSchema, ok: z.literal(true), result: ChannelOperationResultSchema }).strict(),
   z.object({ method: z.literal("channels.cancel"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
-  z.object({ method: z.enum(["channels.list-managed", "channels.create", "channels.update", "channels.remove", "channels.set-enabled", "channels.test", "channels.reconnect", "channels.cancel"]), requestId: RequestIdSchema, ok: z.literal(false), error: UClawErrorSchema }).strict(),
+  z.object({ method: WechatMethodSchema, requestId: RequestIdSchema, ok: z.literal(true), result: WechatConnectionSnapshotSchema }).strict(),
+  z.object({ method: ChannelMethodSchema, requestId: RequestIdSchema, ok: z.literal(false), error: UClawErrorSchema }).strict(),
 ]);
 export type ChannelIpcResponse = z.infer<typeof ChannelIpcResponseSchema>;

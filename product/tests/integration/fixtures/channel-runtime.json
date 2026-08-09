@@ -5,6 +5,14 @@
     "name": "Telegram Main",
     "botToken": "fixture-telegram-token-0001"
   },
+  "wechat": {
+    "flowId": "wechat-flow",
+    "accountIdHint": "...7a2f",
+    "displayName": "微信账号",
+    "portableCredential": "fixture-wechat-credential-9009",
+    "firstQrExpiresAt": "2026-08-09T02:04:00.000Z",
+    "refreshedQrExpiresAt": "2026-08-09T02:06:00.000Z"
+  },
   "unavailable": [
     {
       "id": "qq-bot-main",

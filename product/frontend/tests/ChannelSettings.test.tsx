@@ -2,8 +2,8 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import type { ChannelIpcRequest, ChannelIpcResponse, ChannelSnapshot } from "@uclaw/shared";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ChannelIpcRequest, ChannelIpcResponse, ChannelSnapshot, WechatConnectionSnapshot } from "@uclaw/shared";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelSettings } from "../src/features/channels/ChannelSettings";
@@ -39,14 +39,27 @@ const snapshot: ChannelSnapshot = {
   ],
 };
 
+const unavailableWechat: WechatConnectionSnapshot = {
+  channelId: "wechat-personal",
+  status: "needs-action",
+  loginState: "error",
+  capability: "unavailable",
+  capabilityReason: "需要安装并启用个人微信插件。",
+  plugin: { id: "openclaw-weixin", requiredVersion: "2.4.6", status: "missing" },
+  error: { category: "capability", code: "WECHAT_PLUGIN_MISSING", message: "个人微信插件未安装。", retryable: false },
+};
+
 function success(request: ChannelIpcRequest, result: ChannelSnapshot = snapshot): ChannelIpcResponse {
+  if (request.method.startsWith("channels.wechat-")) {
+    return { method: request.method, requestId: request.requestId, ok: true, result: unavailableWechat } as ChannelIpcResponse;
+  }
   return { method: request.method, requestId: request.requestId, ok: true, result } as ChannelIpcResponse;
 }
 
 describe("ChannelSettings", () => {
   const getComputedStyle = window.getComputedStyle.bind(window);
 
-  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+  afterEach(() => { vi.useRealTimers(); cleanup(); vi.restoreAllMocks(); });
 
   beforeEach(() => {
     Object.defineProperty(window, "matchMedia", {
@@ -71,7 +84,49 @@ describe("ChannelSettings", () => {
     fireEvent.click(await screen.findByText("飞书", { selector: ".ant-select-item-option-content" }));
     expect(screen.queryByText("Telegram 主机器人")).not.toBeInTheDocument();
     expect(screen.getByText("飞书运维")).toBeVisible();
-    expect(screen.getByText("需要操作")).toBeVisible();
+    expect(within(screen.getByText("飞书运维").closest("article") as HTMLElement).getByText("需要操作")).toBeVisible();
+  });
+
+  it("shows personal WeChat as a distinct connection and explains missing plugin", async () => {
+    window.uclaw = { channels: { invoke: vi.fn(async (request: ChannelIpcRequest) => success(request)) } } as never;
+    render(<ChannelSettings />);
+
+    expect(await screen.findByText("个人微信")).toBeVisible();
+    expect(screen.getByText("@tencent-weixin/openclaw-weixin@2.4.6")).toBeVisible();
+    expect(screen.getByText("需要安装并启用个人微信插件。")).toBeVisible();
+    expect(screen.getByRole("button", { name: "开始个人微信扫码登录" })).toBeDisabled();
+  });
+
+  it("renders safe QR, polls confirmation, then shows masked connected account", async () => {
+    vi.useFakeTimers();
+    const qrImage = { kind: "data-url" as const, value: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2ZQAAAABJRU5ErkJggg==" };
+    const available = { ...unavailableWechat, capability: "available" as const, capabilityReason: undefined, plugin: { ...unavailableWechat.plugin, status: "installed" as const }, error: undefined, status: "not-configured" as const, loginState: "idle" as const };
+    let poll = 0;
+    const invoke = vi.fn(async (request: ChannelIpcRequest) => {
+      if (request.method === "channels.wechat-status") return { method: request.method, requestId: request.requestId, ok: true, result: available } as ChannelIpcResponse;
+      if (request.method === "channels.wechat-login-start") return { method: request.method, requestId: request.requestId, ok: true, result: { ...available, status: "pending-verification", loginState: "awaiting-scan", flowId: "flow-1", qrGeneration: 1, qrImage, qrExpiresAt: "2026-08-09T09:05:00.000Z" } } as ChannelIpcResponse;
+      if (request.method === "channels.wechat-login-poll") {
+        poll += 1;
+        return { method: request.method, requestId: request.requestId, ok: true, result: poll === 1
+          ? { ...available, status: "pending-verification", loginState: "awaiting-confirmation", flowId: "flow-1", qrGeneration: 1, qrImage, qrExpiresAt: "2026-08-09T09:05:00.000Z" }
+          : { ...available, status: "connected", loginState: "connected", account: { displayName: "微信账号", accountIdHint: "...7a2f" } } } as ChannelIpcResponse;
+      }
+      return success(request);
+    });
+    window.uclaw = { channels: { invoke } } as never;
+    render(<ChannelSettings />);
+    await act(async () => { await Promise.resolve(); });
+
+    fireEvent.click(screen.getByRole("button", { name: "开始个人微信扫码登录" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("img", { name: "个人微信登录二维码" })).toHaveAttribute("src", qrImage.value);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
+
+    expect(screen.getAllByText("扫码后请在手机微信确认").length).toBeGreaterThan(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
+    expect(screen.getByText("...7a2f")).toBeVisible();
+    expect(screen.queryByRole("img", { name: "个人微信登录二维码" })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("bot_token");
   });
 
   it("runs Telegram test, stop and reconnect while disabling unavailable runtime actions", async () => {
@@ -176,7 +231,7 @@ describe("ChannelSettings", () => {
     let attempt = 0;
     const empty: ChannelSnapshot = { schemaVersion: 1, channels: [] };
     const invoke = vi.fn(async (request: ChannelIpcRequest) => {
-      if (attempt++ === 0) throw new Error("network failed with token secret-token");
+      if (request.method === "channels.list-managed" && attempt++ === 0) throw new Error("network failed with token secret-token");
       return success(request, empty);
     });
     window.uclaw = { channels: { invoke } } as never;

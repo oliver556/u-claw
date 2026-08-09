@@ -1,0 +1,21 @@
+{
+  "host": {
+    "version": "2026.7.1-2",
+    "packageJsonSha256": "695b6ee36df7fc69606dc390cf97bb2ca809114337b18c573707637cd2a4e3db",
+    "channelStatusMethod": "channels.status",
+    "webLoginProviderSelection": "gatewayMethods"
+  },
+  "plugin": {
+    "package": "@tencent-weixin/openclaw-weixin",
+    "version": "2.4.6",
+    "channelId": "openclaw-weixin",
+    "tarballSha256": "ef1c3600ca2fc0ee9076c1327af1e0d5d2e8e19fbb61e9f56c961fcde0bd07f6",
+    "packageJsonSha256": "c6a85212021231fdc463080e70e8c5e3a995d2b8351f7450e6d4ffca01356a03",
+    "manifestSha256": "9ff8c0cc0cedd22fa700036ffb6a8290868d9ea84c3c41a5a04753206bcefe12",
+    "channelSourceSha256": "6eb9f5f0b1e854901a7c312ff0acd26e108ada358895a59e67129a8804894122",
+    "gatewayMethods": [],
+    "gatewayAdapterMethods": ["loginWithQrStart", "loginWithQrWait"],
+    "stateDirectoryPrecedence": ["OPENCLAW_STATE_DIR", "CLAWDBOT_STATE_DIR", "user-home/.openclaw"]
+  },
+  "productionCapability": "unavailable"
+}
