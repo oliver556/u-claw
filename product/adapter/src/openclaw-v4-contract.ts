@@ -57,6 +57,67 @@ function RpcCaseSchema<Method extends string, Params extends z.ZodTypeAny, Respo
 }
 
 const EmptyParamsSchema = z.object({}).strict();
+const ChannelRpcRequestSchema = <Method extends string, Params extends z.ZodTypeAny>(method: Method, params: Params) => z.object({
+  method: z.literal(method),
+  params,
+}).strict();
+
+const TelegramOperationParamsSchema = z.object({ channel: z.literal("telegram"), accountId: z.string().min(1) }).strict();
+const TelegramOperationResponseBaseSchema = z.object({ channel: z.literal("telegram"), accountId: z.string().min(1) });
+
+export const OpenClawChannelsFixtureSchema = z.object({
+  status: z.object({
+    request: ChannelRpcRequestSchema("channels.status", z.object({
+      channel: z.literal("telegram"),
+      probe: z.literal(true),
+      timeoutMs: z.number().int().nonnegative(),
+    }).strict()),
+    response: z.object({
+      ts: z.number().int().nonnegative(),
+      channelOrder: z.array(z.literal("telegram")),
+      channelLabels: z.object({ telegram: z.string().min(1) }).strict(),
+      channels: z.object({ telegram: z.unknown() }).strict(),
+      channelAccounts: z.object({ telegram: z.array(z.object({
+        accountId: z.string().min(1),
+        enabled: z.boolean().optional(),
+        configured: z.boolean().optional(),
+        running: z.boolean().optional(),
+        connected: z.boolean().optional(),
+      }).strict()) }).strict(),
+      channelDefaultAccountId: z.object({ telegram: z.string().min(1) }).strict(),
+    }).strict(),
+  }).strict(),
+  configure: z.object({
+    getRequest: ChannelRpcRequestSchema("config.get", EmptyParamsSchema),
+    getResponse: z.object({ hash: z.string().min(1), valid: z.literal(true) }).strict(),
+    patchRequest: ChannelRpcRequestSchema("config.patch", z.object({ raw: z.string().min(1), baseHash: z.string().min(1) }).strict()),
+    patchResponse: z.object({ ok: z.literal(true) }).strict(),
+  }).strict(),
+  start: z.object({
+    request: ChannelRpcRequestSchema("channels.start", TelegramOperationParamsSchema),
+    response: TelegramOperationResponseBaseSchema.extend({ started: z.literal(true) }).strict(),
+  }).strict(),
+  stop: z.object({
+    request: ChannelRpcRequestSchema("channels.stop", TelegramOperationParamsSchema),
+    response: TelegramOperationResponseBaseSchema.extend({ stopped: z.literal(true) }).strict(),
+  }).strict(),
+  unavailable: z.tuple([z.literal("qq-bot"), z.literal("feishu"), z.literal("wecom")]),
+}).strict().superRefine((fixture, context) => {
+  if (fixture.configure.patchRequest.params.baseHash !== fixture.configure.getResponse.hash) {
+    context.addIssue({ code: "custom", path: ["configure", "patchRequest", "params", "baseHash"], message: "config.patch baseHash must match config.get" });
+  }
+  try {
+    const patch = JSON.parse(fixture.configure.patchRequest.params.raw) as unknown;
+    const parsed = z.object({ channels: z.object({ telegram: z.object({
+      accounts: z.record(z.string().min(1), z.object({
+        enabled: z.boolean(), botToken: z.literal("[FIXTURE SECRET]"),
+      }).strict()),
+    }).strict() }).strict() }).strict().safeParse(patch);
+    if (!parsed.success) throw new Error("invalid Telegram patch");
+  } catch {
+    context.addIssue({ code: "custom", path: ["configure", "patchRequest", "params", "raw"], message: "raw must contain only sanitized Telegram config" });
+  }
+});
 
 const StrictModelsListRequestSchema = <T extends z.ZodTypeAny>(params: T) => z.object({
   type: z.literal("req"),

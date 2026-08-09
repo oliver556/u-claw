@@ -2,11 +2,19 @@ import { EventEmitter } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { bootstrapDesktopApp, requireElectronClient, runDesktopMain, validateRendererUrl } from "../src/main.js";
+import { bootstrapDesktopApp, requireChannelRuntime, requireElectronClient, runDesktopMain, validateRendererUrl } from "../src/main.js";
 
 describe("Electron client wiring", () => {
   it("rejects production startup without a real UClawClient", () => {
     expect(() => requireElectronClient(undefined)).toThrow("UClawClient");
+  });
+
+  it("requires real channel lifecycle methods from production client", () => {
+    expect(() => requireChannelRuntime({ channels: { list: vi.fn() } } as any)).toThrow("channel runtime");
+    const runtime = {
+      capability: vi.fn(), configure: vi.fn(), remove: vi.fn(), test: vi.fn(), start: vi.fn(), stop: vi.fn(),
+    };
+    expect(requireChannelRuntime({ channels: runtime } as any)).toBe(runtime);
   });
 });
 

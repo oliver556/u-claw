@@ -348,7 +348,7 @@ describe("OpenClawClient", () => {
     expect(transport.calls).toEqual(["exec.approval.list"]);
   });
 
-  it("keeps unsupported attachment and remaining management capabilities closed", async () => {
+  it("exposes implemented channel status while keeping remaining management capabilities closed", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push(
       "models.list",
@@ -362,7 +362,7 @@ describe("OpenClawClient", () => {
     await expect(stream[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(UClawUnsupportedError);
     expect(capabilities.methods.has("exec.approval.resolve")).toBe(false);
     expect(capabilities.methods.has("plugin.approval.resolve")).toBe(false);
-    expect([...capabilities.methods]).toEqual(["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list", "models.list"]);
+    expect([...capabilities.methods]).toEqual(["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list", "models.list", "channels.status"]);
     expect(transport.calls).toEqual([]);
   });
 

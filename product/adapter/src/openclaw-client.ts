@@ -11,6 +11,11 @@ import {
   type Page,
   type ToolCall,
   type ApprovalRequest,
+  type ChannelConfigEntry,
+  type ChannelErrorSummary,
+  type ChannelKind,
+  type ChannelSummary,
+  type ChannelStatus,
   MessageEventSchema,
   type UClawClient,
 } from "@uclaw/shared";
@@ -94,6 +99,7 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "chat.history", "chat.message.get", "chat.send", "chat.abort",
   "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
   "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch", "models.list",
+  "config.get", "config.patch", "channels.status", "channels.start", "channels.stop",
 ] as const;
 
 const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);
@@ -154,6 +160,74 @@ const ToolCatalogSchema = z.object({
 const ToolCallResponseSchema = z.object({ toolCall: RawToolCallSchema }).strict();
 const ExecApprovalListSchema = z.array(OpenClawExecApprovalEventSchema);
 const PluginApprovalListSchema = z.array(OpenClawPluginApprovalEventSchema);
+const ConfigGetResponseSchema = z.object({ hash: z.string().min(1).optional(), valid: z.boolean() }).passthrough();
+const ConfigPatchResponseSchema = z.object({ ok: z.literal(true) }).passthrough();
+const ChannelAccountSnapshotSchema = z.object({
+  accountId: z.string().min(1),
+  enabled: z.boolean().optional(),
+  configured: z.boolean().optional(),
+  running: z.boolean().optional(),
+  connected: z.boolean().optional(),
+  lastError: z.string().optional(),
+  healthState: z.string().optional(),
+}).passthrough();
+const ChannelsStatusResponseSchema = z.object({
+  ts: z.number().int().nonnegative(),
+  channelOrder: z.array(z.string().min(1)),
+  channelLabels: z.record(z.string(), z.string()),
+  channels: z.record(z.string(), z.unknown()),
+  channelAccounts: z.record(z.string(), z.array(ChannelAccountSnapshotSchema)),
+  channelDefaultAccountId: z.record(z.string(), z.string()),
+}).passthrough();
+const ChannelStartResponseSchema = z.object({ channel: z.literal("telegram"), accountId: z.string().min(1), started: z.boolean() }).passthrough();
+const ChannelStopResponseSchema = z.object({ channel: z.literal("telegram"), accountId: z.string().min(1), stopped: z.boolean() }).passthrough();
+const TELEGRAM_RUNTIME_METHODS = ["config.get", "config.patch", "channels.status", "channels.start", "channels.stop"] as const;
+
+export interface OpenClawChannelRuntime {
+  capability(kind: ChannelKind): boolean;
+  configure(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
+  remove(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
+  test(channel: ChannelConfigEntry, signal: AbortSignal): Promise<{ status: ChannelStatus; error?: ChannelErrorSummary }>;
+  start(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
+  stop(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
+}
+
+const authenticationError: ChannelErrorSummary = {
+  category: "authentication",
+  code: "AUTHENTICATION_FAILED",
+  message: "渠道鉴权失败。",
+  retryable: false,
+};
+const rateLimitError: ChannelErrorSummary = {
+  category: "rate-limit",
+  code: "RATE_LIMITED",
+  message: "渠道请求被限流。",
+  retryable: true,
+};
+const networkError: ChannelErrorSummary = {
+  category: "network",
+  code: "NETWORK_ERROR",
+  message: "渠道网络连接失败。",
+  retryable: true,
+};
+const operationError: ChannelErrorSummary = {
+  category: "operation",
+  code: "OPERATION_FAILED",
+  message: "渠道操作失败。",
+  retryable: true,
+};
+
+function channelErrorSummary(message: string): ChannelErrorSummary {
+  if (/401|403|unauthor|forbidden|token|secret|credential/iu.test(message)) return authenticationError;
+  if (/429|rate.?limit/iu.test(message)) return rateLimitError;
+  if (/network|fetch|socket|connect|dns|econn|timeout|timed out/iu.test(message)) return networkError;
+  return operationError;
+}
+
+function telegramChannel(channel: ChannelConfigEntry): Extract<ChannelConfigEntry, { kind: "telegram" }> {
+  if (channel.kind !== "telegram") throw new UClawUnsupportedError(`channels.${channel.kind}`);
+  return channel;
+}
 
 function decodeOffsetCursor(cursor: string | undefined): number {
   if (cursor === undefined) return 0;
@@ -474,7 +548,65 @@ export class OpenClawClient implements UClawClient {
     },
   };
   readonly skills: UClawClient["skills"] = { list: async () => this.unsupported("skills.status") };
-  readonly channels: UClawClient["channels"] = { list: async () => this.unsupported("channels.status") };
+  readonly channels: UClawClient["channels"] & OpenClawChannelRuntime = {
+    list: () => this.runChannelOperation(async () => {
+      const { result, account } = await this.readTelegramStatus(false);
+      if (account === undefined) return [];
+      const state: ChannelSummary["state"] = account.lastError !== undefined ? "error"
+        : account.connected === true ? "connected"
+          : account.running === true ? "connecting" : "disconnected";
+      return [{
+        id: "telegram",
+        kind: "telegram",
+        name: result.channelLabels.telegram ?? "Telegram",
+        configured: account.configured === true,
+        enabled: account.enabled !== false,
+        state,
+        accountLabel: account.accountId,
+        credential: { configured: account.configured === true },
+      }];
+    }),
+    capability: (kind) => kind === "telegram" && TELEGRAM_RUNTIME_METHODS.every((method) => this.capabilities?.methods.has(method) === true),
+    configure: (channel, signal) => this.runChannelOperation(async () => {
+      const configured = telegramChannel(channel);
+      await this.patchTelegramAccount(configured.id, { enabled: configured.enabled, botToken: configured.credentials.botToken }, signal);
+    }),
+    remove: (channel, signal) => this.runChannelOperation(async () => {
+      telegramChannel(channel);
+      await this.patchTelegramAccount(channel.id, null, signal);
+    }),
+    test: (channel, signal) => this.runChannelOperation(async () => {
+      telegramChannel(channel);
+      const { account } = await this.readTelegramStatus(true, signal, channel.id);
+      if (account === undefined || account.configured !== true) return { status: "pending-verification" };
+      if (account.connected === true) return { status: "connected" };
+      if (account.lastError !== undefined) {
+        const error = channelErrorSummary(account.lastError);
+        const status: ChannelStatus = error.category === "authentication" ? "auth-failed"
+          : error.category === "rate-limit" ? "rate-limited"
+            : error.category === "network" ? "network-error" : "needs-action";
+        return { status, error };
+      }
+      if (account.running === true) return { status: "connecting" };
+      return { status: "disconnected" };
+    }),
+    start: (channel, signal) => this.runChannelOperation(async () => {
+      telegramChannel(channel);
+      this.requireMethod("channels.start");
+      const result = await this.options.transport.router.request(
+        "channels.start", { channel: "telegram", accountId: channel.id }, ChannelStartResponseSchema, signal,
+      );
+      if (!result.started || result.accountId !== channel.id) throw new RpcProtocolError("channels.start");
+    }),
+    stop: (channel, signal) => this.runChannelOperation(async () => {
+      telegramChannel(channel);
+      this.requireMethod("channels.stop");
+      const result = await this.options.transport.router.request(
+        "channels.stop", { channel: "telegram", accountId: channel.id }, ChannelStopResponseSchema, signal,
+      );
+      if (!result.stopped || result.accountId !== channel.id) throw new RpcProtocolError("channels.stop");
+    }),
+  };
   readonly files: UClawClient["files"] = { list: async () => this.unsupported("files.list"), readText: async () => this.unsupported("files.readText") };
   readonly diagnostics: UClawClient["diagnostics"] = { list: async () => this.unsupported("diagnostics.list"), listLogs: async () => this.unsupported("logs.tail") };
 
@@ -695,6 +827,46 @@ export class OpenClawClient implements UClawClient {
 
   private requireMethod(method: string): void {
     if (this.capabilities?.methods.has(method) !== true) throw new UClawUnsupportedError(method);
+  }
+
+  private async patchTelegramAccount(accountId: string, config: { enabled: boolean; botToken: string } | null, signal: AbortSignal): Promise<void> {
+    this.requireMethod("config.get");
+    this.requireMethod("config.patch");
+    const snapshot = await this.options.transport.router.request("config.get", {}, ConfigGetResponseSchema, signal);
+    if (snapshot.hash === undefined || !snapshot.valid) throw new RpcProtocolError("config.get");
+    await this.options.transport.router.request("config.patch", {
+      raw: JSON.stringify({ channels: { telegram: { accounts: { [accountId]: config } } } }),
+      baseHash: snapshot.hash,
+    }, ConfigPatchResponseSchema, signal);
+  }
+
+  private async readTelegramStatus(probe: boolean, signal?: AbortSignal, accountId?: string) {
+    this.requireMethod("channels.status");
+    const result = await this.options.transport.router.request(
+      "channels.status",
+      { channel: "telegram", probe, ...(probe ? { timeoutMs: 10_000 } : {}) },
+      ChannelsStatusResponseSchema,
+      signal,
+    );
+    const accounts = result.channelAccounts.telegram ?? [];
+    const selectedAccountId = accountId ?? result.channelDefaultAccountId.telegram;
+    const account = accounts.find((candidate) => candidate.accountId === selectedAccountId) ?? (accountId === undefined ? accounts[0] : undefined);
+    return { result, account };
+  }
+
+  private async runChannelOperation<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof UClawUnsupportedError || error instanceof RpcProtocolError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      const summary = channelErrorSummary(message);
+      if (summary.category === "authentication") throw new Error("Channel authentication failed");
+      if (summary.category === "rate-limit") throw new Error("Channel request rate limited");
+      if (/timeout|timed out/iu.test(message)) throw new Error("Channel operation timed out");
+      if (summary.category === "network") throw new Error("Channel network connection failed");
+      throw new Error("Channel operation failed");
+    }
   }
 
   private async readSession(sessionId: string) {

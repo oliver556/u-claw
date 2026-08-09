@@ -1,0 +1,46 @@
+{
+  "checkedAt": "2026-08-09T02:03:04.000Z",
+  "telegram": {
+    "id": "telegram-main",
+    "name": "Telegram Main",
+    "botToken": "fixture-telegram-token-0001"
+  },
+  "unavailable": [
+    {
+      "id": "qq-bot-main",
+      "kind": "qq-bot",
+      "name": "QQ Bot Main",
+      "mode": "app",
+      "enabled": true,
+      "credentials": {
+        "appId": "fixture-qq-app",
+        "clientSecret": "fixture-qq-secret-0002"
+      }
+    },
+    {
+      "id": "feishu-main",
+      "kind": "feishu",
+      "name": "Feishu Main",
+      "mode": "webhook",
+      "enabled": true,
+      "credentials": {
+        "appId": "fixture-feishu-app",
+        "appSecret": "fixture-feishu-secret-0003",
+        "verificationToken": "fixture-verification-token-0004",
+        "encryptKey": "fixture-encrypt-key-0005"
+      }
+    },
+    {
+      "id": "wecom-main",
+      "kind": "wecom",
+      "name": "WeCom Main",
+      "mode": "webhook",
+      "enabled": true,
+      "credentials": {
+        "token": "fixture-wecom-token-0006",
+        "encodingAESKey": "fixture-wecom-aes-key-0007",
+        "receiveId": "fixture-wecom-receiver"
+      }
+    }
+  ]
+}

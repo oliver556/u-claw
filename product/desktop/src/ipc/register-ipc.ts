@@ -7,6 +7,8 @@ import {
   ProviderIpcResponseSchema,
   SkillIpcRequestSchema,
   SkillIpcResponseSchema,
+  ChannelIpcRequestSchema,
+  ChannelIpcResponseSchema,
   UClawErrorSchema,
   WindowIpcRequestSchema,
   redactRendererText,
@@ -25,7 +27,9 @@ import type { ProviderStore } from "../providers/provider-store.js";
 import { createSkillDispatcher } from "../skills/skill-dispatcher.js";
 import type { SkillService } from "../skills/skill-service.js";
 import { createProviderNetworkService, type ProviderNetworkService } from "../providers/provider-network.js";
-import { ATTACHMENT_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { createChannelDispatcher, type ChannelRuntime } from "../channels/channel-dispatcher.js";
+import type { ChannelStore } from "../channels/channel-store.js";
+import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -56,6 +60,8 @@ export interface RegisterIpcDependencies {
   providers?: ProviderStore;
   providerNetwork?: ProviderNetworkService;
   skills?: SkillService;
+  channels?: ChannelStore;
+  channelRuntime?: ChannelRuntime;
 }
 
 function safeError(
@@ -99,6 +105,8 @@ export function registerIpc({
   providers,
   providerNetwork,
   skills,
+  channels,
+  channelRuntime,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
@@ -110,6 +118,9 @@ export function registerIpc({
     ? undefined
     : createProviderDispatcher(providers, providerNetwork ?? createProviderNetworkService());
   const skillDispatcher = skills === undefined ? undefined : createSkillDispatcher(skills);
+  const channelDispatcher = channels === undefined || channelRuntime === undefined
+    ? undefined
+    : createChannelDispatcher(channels, channelRuntime);
   const authorize = (event: unknown): void => {
     const candidate = event as { sender?: unknown; senderFrame?: unknown };
     if (
@@ -242,15 +253,33 @@ export function registerIpc({
     }
   });
 
+  if (channelDispatcher !== undefined) ipcMain.handle(CHANNEL_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = ChannelIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid channel IPC request.");
+    try {
+      return ChannelIpcResponseSchema.parse(await channelDispatcher(parsed.data));
+    } catch (error) {
+      return ChannelIpcResponseSchema.parse({
+        method: parsed.data.method,
+        requestId: parsed.data.requestId,
+        ok: false,
+        error: toRendererSafeError(error),
+      });
+    }
+  });
+
   let disposed = false;
   return () => {
     if (disposed) return;
     disposed = true;
     clientDispatcher?.dispose();
+    channelDispatcher?.dispose();
     ipcMain.removeHandler(WINDOW_IPC_CHANNEL);
     ipcMain.removeHandler(CLIENT_IPC_CHANNEL);
     if (attachments !== undefined) ipcMain.removeHandler(ATTACHMENT_IPC_CHANNEL);
     if (providers !== undefined) ipcMain.removeHandler(PROVIDER_IPC_CHANNEL);
     if (skills !== undefined) ipcMain.removeHandler(SKILL_IPC_CHANNEL);
+    if (channelDispatcher !== undefined) ipcMain.removeHandler(CHANNEL_IPC_CHANNEL);
   };
 }
