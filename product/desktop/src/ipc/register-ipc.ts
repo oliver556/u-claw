@@ -13,6 +13,8 @@ import {
   ChannelIpcResponseSchema,
   McpIpcRequestSchema,
   McpIpcResponseSchema,
+  DataIpcRequestSchema,
+  DataIpcResponseSchema,
   UClawErrorSchema,
   WindowIpcRequestSchema,
   redactRendererText,
@@ -22,6 +24,7 @@ import {
   type UClawClient,
   type AttachmentImportInput,
   type AttachmentService,
+  type DataIpcRequest,
 } from "@uclaw/shared";
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
@@ -37,7 +40,7 @@ import { createChannelDispatcher, type ChannelRuntime } from "../channels/channe
 import type { ChannelStore } from "../channels/channel-store.js";
 import { createMcpDispatcher, type McpRuntime } from "../mcp/mcp-dispatcher.js";
 import type { McpStore } from "../mcp/mcp-store.js";
-import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -73,6 +76,7 @@ export interface RegisterIpcDependencies {
   channelRuntime?: ChannelRuntime;
   mcp?: McpStore;
   mcpRuntime?: McpRuntime;
+  dispatchData?(request: DataIpcRequest): Promise<unknown>;
 }
 
 function safeError(
@@ -121,6 +125,7 @@ export function registerIpc({
   channelRuntime,
   mcp,
   mcpRuntime,
+  dispatchData,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
@@ -311,6 +316,28 @@ export function registerIpc({
     }
   });
 
+  if (dispatchData !== undefined) ipcMain.handle(DATA_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = DataIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid data IPC request.");
+    try {
+      const response = DataIpcResponseSchema.parse(await dispatchData(parsed.data));
+      if (response.method !== parsed.data.method || response.requestId !== parsed.data.requestId) {
+        throw new Error("Data response correlation failed.");
+      }
+      return response;
+    } catch (error) {
+      const knownResponse = DataIpcResponseSchema.safeParse({
+        method: parsed.data.method,
+        requestId: parsed.data.requestId,
+        ok: false,
+        error: toRendererSafeError(error),
+      });
+      if (knownResponse.success) return knownResponse.data;
+      throw safeError("UNKNOWN", "Invalid data IPC response.");
+    }
+  });
+
   let disposed = false;
   return () => {
     if (disposed) return;
@@ -326,5 +353,6 @@ export function registerIpc({
     if (plugins !== undefined) ipcMain.removeHandler(PLUGIN_IPC_CHANNEL);
     if (channelDispatcher !== undefined) ipcMain.removeHandler(CHANNEL_IPC_CHANNEL);
     if (mcpDispatcher !== undefined) ipcMain.removeHandler(MCP_IPC_CHANNEL);
+    if (dispatchData !== undefined) ipcMain.removeHandler(DATA_IPC_CHANNEL);
   };
 }

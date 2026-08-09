@@ -134,6 +134,23 @@ test("secondary destinations use the full workspace beside navigation", async ({
   await expect(page.locator(".workspace-grid")).toHaveClass(/secondary-layout/);
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`file and memory managers fit ${viewport.width}px and expose native states`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    for (const [label, searchName, emptyText] of [
+      ["文件", "搜索工作区文件", "当前文件夹为空"],
+      ["记忆", "搜索 AI 记忆", "还没有 AI 记忆"],
+    ] as const) {
+      await page.getByRole("link", { name: label }).click();
+      await expect(page.getByRole("heading", { name: label })).toBeVisible();
+      await expect(page.getByRole("searchbox", { name: searchName })).toBeVisible();
+      await expect(page.getByText(emptyText)).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+    }
+  });
+}
+
 test("global search traps focus and restores the trigger", async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 640 });
   await page.goto("/");

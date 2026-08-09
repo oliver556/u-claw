@@ -8,6 +8,7 @@ export const SKILL_IPC_CHANNEL = "uclaw:skills";
 export const PLUGIN_IPC_CHANNEL = "uclaw:plugins";
 export const CHANNEL_IPC_CHANNEL = "uclaw:managed-channels";
 export const MCP_IPC_CHANNEL = "uclaw:mcp-servers";
+export const DATA_IPC_CHANNEL = "uclaw:data";
 
 export const IPC_CHANNELS = Object.freeze([
   WINDOW_IPC_CHANNEL,
@@ -20,4 +21,5 @@ export const IPC_CHANNELS = Object.freeze([
   PLUGIN_IPC_CHANNEL,
   CHANNEL_IPC_CHANNEL,
   MCP_IPC_CHANNEL,
+  DATA_IPC_CHANNEL,
 ] as const);

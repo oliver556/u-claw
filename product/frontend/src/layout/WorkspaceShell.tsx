@@ -13,7 +13,7 @@ import {
 import { FolderArchive, PanelLeft, PanelRight, SquareTerminal } from "lucide-react";
 import { Tooltip } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { unstable_usePrompt, useLocation, useNavigate } from "react-router-dom";
 
 import { routeForPath } from "../app/routes";
 import { Conversation } from "../features/chat/Conversation";
@@ -21,6 +21,7 @@ import { SessionSidebar } from "../features/sessions/SessionSidebar";
 import { CapabilitiesView } from "../features/capabilities/CapabilitiesView";
 import { ChannelSettings } from "../features/channels/ChannelSettings";
 import { TaskActivityCenter } from "../features/activity/TaskActivityCenter";
+import { DataManager } from "../features/data/DataManager";
 import { AppTitlebar } from "./AppTitlebar";
 import { ContextPanel } from "./ContextPanel";
 import { PrimaryRail } from "./PrimaryRail";
@@ -58,7 +59,10 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState<Record<string, string[]>>({});
   const [activityCenterOpen, setActivityCenterOpen] = useState(false);
+  const [dataDirty, setDataDirty] = useState(false);
   const selectionRequest = useRef(0);
+
+  unstable_usePrompt({ when: dataDirty, message: "当前记忆尚未保存，放弃修改吗？" });
 
   const selectSession = useCallback(async (sessionId: string) => {
     const request = ++selectionRequest.current;
@@ -256,7 +260,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
         {isWork ? activeSession === undefined
           ? <section className="work-canvas workspace-placeholder"><header className="canvas-head"><div className="canvas-title">{!sessionsOpen ? <Tooltip title="展开会话栏"><button className="icon-button" type="button" aria-label="展开会话栏" onClick={() => setSessionsOpen(true)}><PanelLeft /></button></Tooltip> : null}<strong>工作区</strong></div>{!contextOpen ? <Tooltip title="展开上下文舱"><button className="icon-button" type="button" aria-label="展开上下文舱" onClick={() => setContextOpen(true)}><PanelRight /></button></Tooltip> : null}</header><div className="conversation-state"><FolderArchive /><strong>{sessionState === "loading" ? "正在准备工作区" : "还没有会话"}</strong></div></section>
           : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} onSessionUpdated={(sessionId) => void refreshSessions(sessionId)} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
-          : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/connections" ? <ChannelSettings /> : <SecondaryView title={route.label} description={route.description} system={route.path === "/system"} />}
+          : route.path === "/files" ? <DataManager key="workspace" domain="workspace" onDirtyChange={setDataDirty} /> : route.path === "/memory" ? <DataManager key="memory" domain="memory" onDirtyChange={setDataDirty} /> : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/connections" ? <ChannelSettings /> : <SecondaryView title={route.label} description={route.description} system={route.path === "/system"} />}
       </main>
       {isWork && contextOpen ? <ContextPanel client={client} session={activeSession} capabilities={capabilities} activity={activeSession === undefined ? [] : activity[activeSession.id] ?? []} onClose={() => setContextOpen(false)} /> : null}
     </div>
