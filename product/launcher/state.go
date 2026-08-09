@@ -53,11 +53,16 @@ type Dependencies struct {
 	Paths               PortablePaths
 	Reporter            Reporter
 	USBInterval         time.Duration
+	StartupGrace        time.Duration
+	ProcessStopTimeout  time.Duration
 	ReadManifest        func(path string) (Manifest, error)
 	ProbeDataDirectory  func(packageRoot string, dataDir string) error
 	EnsureHostCache     func(cacheRoot string) error
 	AcquireInstanceLock func(dataDir string) (InstanceLock, error)
 	PrepareRuntime      func(context.Context, string, string, Manifest, func()) (CacheResult, error)
+	CheckSequence       func(string, Manifest) error
+	AcceptSequence      func(string, Manifest) error
+	FinalizeUpdate      func(string, Manifest) error
 	StartProcess        func(ProcessSpec) (ChildProcess, error)
 	MonitorUSB          func(context.Context, string, time.Duration) error
 }
@@ -85,6 +90,9 @@ func Run(ctx context.Context, deps Dependencies) error {
 	if err != nil {
 		return reportFailure(reporter, err)
 	}
+	if err := deps.CheckSequence(deps.Paths.HostCacheRoot, manifest); err != nil {
+		return reportFailure(reporter, err)
+	}
 	cache, err := deps.PrepareRuntime(
 		ctx,
 		deps.Paths.CacheRoot,
@@ -95,7 +103,6 @@ func Run(ctx context.Context, deps Dependencies) error {
 	if err != nil {
 		return reportFailure(reporter, err)
 	}
-
 	reporter.State(StateStartingApp)
 	entrypoint := filepath.Join(cache.Path, filepath.FromSlash(strings.ReplaceAll(manifest.Entrypoint, `\`, "/")))
 	process, err := deps.StartProcess(ProcessSpec{
@@ -107,13 +114,38 @@ func Run(ctx context.Context, deps Dependencies) error {
 	if err != nil {
 		return reportFailure(reporter, errors.Join(ErrAppStartFailed, err))
 	}
+	waitResult := make(chan error, 1)
+	go func() { waitResult <- process.Wait() }()
+	if deps.StartupGrace > 0 {
+		grace := time.NewTimer(deps.StartupGrace)
+		select {
+		case err := <-waitResult:
+			grace.Stop()
+			return reportFailure(reporter, errors.Join(ErrAppExited, err))
+		case <-grace.C:
+			select {
+			case err := <-waitResult:
+				return reportFailure(reporter, errors.Join(ErrAppExited, err))
+			default:
+			}
+		case <-ctx.Done():
+			if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
+				return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
+			}
+			return ctx.Err()
+		}
+	}
+	if err := deps.AcceptSequence(deps.Paths.HostCacheRoot, manifest); err != nil {
+		return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
+	}
+	if err := deps.FinalizeUpdate(deps.Paths.PackageRoot, manifest); err != nil {
+		return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
+	}
 	reporter.State(StateReady)
 
 	monitorCtx, cancelMonitor := context.WithCancel(ctx)
 	defer cancelMonitor()
-	waitResult := make(chan error, 1)
 	usbResult := make(chan error, 1)
-	go func() { waitResult <- process.Wait() }()
 	go func() { usbResult <- deps.MonitorUSB(monitorCtx, deps.Paths.USBRoot, deps.USBInterval) }()
 
 	select {
@@ -124,17 +156,34 @@ func Run(ctx context.Context, deps Dependencies) error {
 		return nil
 	case err := <-usbResult:
 		if ctx.Err() != nil {
-			_ = process.Stop()
-			<-waitResult
+			if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
+				return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
+			}
 			return ctx.Err()
 		}
-		_ = process.Stop()
-		<-waitResult
-		return reportFailure(reporter, err)
+		return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
 	case <-ctx.Done():
-		_ = process.Stop()
-		<-waitResult
+		if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
+			return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
+		}
 		return ctx.Err()
+	}
+}
+
+func stopAndWait(process ChildProcess, waitResult <-chan error, timeout time.Duration) error {
+	if err := process.Stop(); err != nil {
+		return err
+	}
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-waitResult:
+		return nil
+	case <-timer.C:
+		return ErrProcessStopFailed
 	}
 }
 
@@ -153,8 +202,9 @@ func portableProcessEnvironment(paths PortablePaths) []string {
 }
 
 var (
-	ErrAppStartFailed = errors.New("application start failed")
-	ErrAppExited      = errors.New("application exited unexpectedly")
+	ErrAppStartFailed    = errors.New("application start failed")
+	ErrAppExited         = errors.New("application exited unexpectedly")
+	ErrProcessStopFailed = errors.New("application stop failed")
 )
 
 func reportFailure(reporter Reporter, err error) error {

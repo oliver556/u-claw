@@ -55,6 +55,16 @@ type blockingChildProcess struct {
 	stopped bool
 }
 
+type stopFailingChildProcess struct{}
+
+func (*stopFailingChildProcess) Wait() error {
+	select {}
+}
+
+func (*stopFailingChildProcess) Stop() error {
+	return errors.New("terminate failed")
+}
+
 func (process *blockingChildProcess) Wait() error {
 	return <-process.result
 }
@@ -80,9 +90,10 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 	lock := &fakeInstanceLock{}
 	var startedSpec ProcessSpec
 	return Dependencies{
-		Paths:       paths,
-		Reporter:    reporter,
-		USBInterval: time.Hour,
+		Paths:              paths,
+		Reporter:           reporter,
+		USBInterval:        time.Hour,
+		ProcessStopTimeout: time.Second,
 		ReadManifest: func(path string) (Manifest, error) {
 			if path != filepath.Join(paths.PackageRoot, "version.json") {
 				t.Fatalf("manifest path = %q", path)
@@ -113,6 +124,24 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 			}
 			extracting()
 			return CacheResult{Path: filepath.Join(paths.CacheRoot, manifest.RuntimeID)}, nil
+		},
+		CheckSequence: func(cacheRoot string, got Manifest) error {
+			if cacheRoot != paths.HostCacheRoot || !reflect.DeepEqual(got, manifest) {
+				t.Fatalf("sequence preflight inputs differ")
+			}
+			return nil
+		},
+		AcceptSequence: func(cacheRoot string, got Manifest) error {
+			if cacheRoot != paths.HostCacheRoot || !reflect.DeepEqual(got, manifest) {
+				t.Fatalf("sequence inputs differ")
+			}
+			return nil
+		},
+		FinalizeUpdate: func(packageRoot string, got Manifest) error {
+			if packageRoot != paths.PackageRoot || !reflect.DeepEqual(got, manifest) {
+				t.Fatalf("update finalization inputs differ")
+			}
+			return nil
 		},
 		StartProcess: func(spec ProcessSpec) (ChildProcess, error) {
 			startedSpec = spec
@@ -270,6 +299,10 @@ func TestRunCancellationStopsProcessWithoutFailureDialog(t *testing.T) {
 func TestRunMapsProcessStartErrors(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
+	accepted := false
+	finalized := false
+	deps.AcceptSequence = func(string, Manifest) error { accepted = true; return nil }
+	deps.FinalizeUpdate = func(string, Manifest) error { finalized = true; return nil }
 	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
 		return nil, errors.New("CreateProcess failed at C:\\private")
 	}
@@ -279,6 +312,47 @@ func TestRunMapsProcessStartErrors(t *testing.T) {
 	want := [][2]string{{"E_APP_START_FAILED", "无法启动 U-Claw，请重新启动。"}}
 	if !reflect.DeepEqual(reporter.failures, want) {
 		t.Fatalf("failures = %#v", reporter.failures)
+	}
+	if accepted || finalized {
+		t.Fatalf("failed process committed update: accepted=%v finalized=%v", accepted, finalized)
+	}
+}
+
+func TestRunPreservesUpdateWhenProcessExitsBeforeReadiness(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.StartupGrace = time.Second
+	accepted := false
+	finalized := false
+	deps.AcceptSequence = func(string, Manifest) error { accepted = true; return nil }
+	deps.FinalizeUpdate = func(string, Manifest) error { finalized = true; return nil }
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		return &fakeChildProcess{waitErr: errors.New("runtime initialization failed")}, nil
+	}
+
+	if err := Run(context.Background(), deps); !errors.Is(err, ErrAppExited) {
+		t.Fatalf("returned %v", err)
+	}
+	if accepted || finalized {
+		t.Fatalf("early process exit committed update: accepted=%v finalized=%v", accepted, finalized)
+	}
+}
+
+func TestRunDoesNotBlockWhenProcessStopFails(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.AcceptSequence = func(string, Manifest) error { return ErrManifestInvalid }
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return &stopFailingChildProcess{}, nil }
+	result := make(chan error, 1)
+	go func() { result <- Run(context.Background(), deps) }()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrManifestInvalid) {
+			t.Fatalf("returned %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("launcher blocked after process stop failed")
 	}
 }
 

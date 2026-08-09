@@ -17,6 +17,8 @@ import {
   DataIpcResponseSchema,
   DiagnosticsIpcRequestSchema,
   DiagnosticsIpcResponseSchema,
+  ReleaseIpcRequestSchema,
+  ReleaseIpcResponseSchema,
   UClawErrorSchema,
   WindowIpcRequestSchema,
   redactRendererText,
@@ -28,6 +30,7 @@ import {
   type AttachmentService,
   type DataIpcRequest,
   type DiagnosticsIpcRequest,
+  type ReleaseIpcRequest,
 } from "@uclaw/shared";
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
@@ -43,7 +46,7 @@ import { createChannelDispatcher, type ChannelRuntime } from "../channels/channe
 import type { ChannelStore } from "../channels/channel-store.js";
 import { createMcpDispatcher, type McpRuntime } from "../mcp/mcp-dispatcher.js";
 import type { McpStore } from "../mcp/mcp-store.js";
-import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, RELEASE_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -81,6 +84,7 @@ export interface RegisterIpcDependencies {
   mcpRuntime?: McpRuntime;
   dispatchData?(request: DataIpcRequest): Promise<unknown>;
   dispatchDiagnostics?(request: DiagnosticsIpcRequest): Promise<unknown>;
+  dispatchRelease?(request: ReleaseIpcRequest): Promise<unknown>;
   diagnosticsTimeoutMs?: number;
 }
 
@@ -132,6 +136,7 @@ export function registerIpc({
   mcpRuntime,
   dispatchData,
   dispatchDiagnostics,
+  dispatchRelease,
   diagnosticsTimeoutMs = 15_000,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
@@ -391,6 +396,19 @@ export function registerIpc({
     }
   });
 
+  if (dispatchRelease !== undefined) ipcMain.handle(RELEASE_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = ReleaseIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid release IPC request.");
+    try {
+      const response = ReleaseIpcResponseSchema.parse(await dispatchRelease(parsed.data));
+      if (response.method !== parsed.data.method || response.requestId !== parsed.data.requestId) throw new Error("Release response correlation failed.");
+      return response;
+    } catch {
+      throw safeError("UNKNOWN", "Invalid release IPC response.");
+    }
+  });
+
   let disposed = false;
   return () => {
     if (disposed) return;
@@ -408,5 +426,6 @@ export function registerIpc({
     if (mcpDispatcher !== undefined) ipcMain.removeHandler(MCP_IPC_CHANNEL);
     if (dispatchData !== undefined) ipcMain.removeHandler(DATA_IPC_CHANNEL);
     if (dispatchDiagnostics !== undefined) ipcMain.removeHandler(DIAGNOSTICS_IPC_CHANNEL);
+    if (dispatchRelease !== undefined) ipcMain.removeHandler(RELEASE_IPC_CHANNEL);
   };
 }

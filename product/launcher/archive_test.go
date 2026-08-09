@@ -66,13 +66,16 @@ func manifestForArchive(archive []byte, entries []archiveEntry) Manifest {
 	manifest.RuntimeBytes = int64(len(archive))
 	manifest.UnpackedBytes = 0
 	manifest.FileCount = 0
+	files := make([]runtimeTreeFile, 0)
 	for _, entry := range entries {
 		typeflag := entry.typeflag
 		if typeflag == 0 || typeflag == tar.TypeReg || typeflag == tar.TypeRegA {
 			manifest.FileCount++
 			manifest.UnpackedBytes += int64(len(entry.body))
+			files = append(files, runtimeTreeFile{path: entry.name, size: int64(len(entry.body)), digest: sha256.Sum256(entry.body)})
 		}
 	}
+	manifest.RuntimeTreeSHA256 = runtimeTreeDigest(files)
 	return manifest
 }
 

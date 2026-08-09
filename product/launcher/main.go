@@ -38,11 +38,16 @@ func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 		Paths:               paths,
 		Reporter:            reporter,
 		USBInterval:         500 * time.Millisecond,
+		StartupGrace:        2 * time.Second,
+		ProcessStopTimeout:  2 * time.Second,
 		ReadManifest:        ReadManifest,
 		ProbeDataDirectory:  ProbeDataDirectory,
 		EnsureHostCache:     EnsureHostCacheOwnership,
 		AcquireInstanceLock: AcquireInstanceLock,
 		PrepareRuntime:      prepareRuntimeForLaunch,
+		CheckSequence:       CheckRuntimeSequence,
+		AcceptSequence:      AcceptRuntimeSequence,
+		FinalizeUpdate:      FinalizeUpdateTransaction,
 		StartProcess: func(spec ProcessSpec) (ChildProcess, error) {
 			return StartManagedProcess(spec)
 		},

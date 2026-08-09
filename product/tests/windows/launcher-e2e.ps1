@@ -61,7 +61,11 @@ $workRoot = Join-Path $env:RUNNER_TEMP ('uclaw-portable-' + [Guid]::NewGuid().To
 $buildRoot = Join-Path $workRoot 'build'
 $runtimeSource = Join-Path $buildRoot 'runtime source'
 $runtimePackage = Join-Path $buildRoot 'runtime.pkg'
+$unsignedManifestPath = Join-Path $buildRoot 'version.unsigned.json'
 $manifestPath = Join-Path $buildRoot 'version.json'
+$fixturePublicKey = Join-Path $buildRoot 'fixture-public.pem'
+$fixtureTrustedKeys = Join-Path $buildRoot 'fixture-trusted-keys.json'
+$fixtureLauncher = Join-Path $buildRoot 'U-Claw-fixture.exe'
 $unicodePrefix = ([string][char]0x4E2D) + ([string][char]0x6587)
 $releaseRoot = Join-Path $workRoot ($unicodePrefix + ' U disk')
 $localAppData = Join-Path $workRoot 'Local App Data'
@@ -96,14 +100,33 @@ try {
         --runtime-id $runtimeId `
         --entrypoint 'electron/electron.exe')
     Assert-True ($LASTEXITCODE -eq 0) 'BUILD_RUNTIME_FAILED'
-    Write-Utf8NoBom $manifestPath (($manifestLines -join [Environment]::NewLine) + [Environment]::NewLine)
+    Write-Utf8NoBom $unsignedManifestPath (($manifestLines -join [Environment]::NewLine) + [Environment]::NewLine)
+
+    $phase = 'SIGN_RUNTIME_FIXTURE'
+    $signFixture = Join-Path $repositoryRoot 'product\tests\windows\sign-runtime-fixture.mjs'
+    & node $signFixture `
+        --input $unsignedManifestPath `
+        --output $manifestPath `
+        --public-key $fixturePublicKey `
+        --trusted-keys $fixtureTrustedKeys
+    Assert-True ($LASTEXITCODE -eq 0) 'SIGN_RUNTIME_FIXTURE_FAILED'
+    $trustedKeysJson = [IO.File]::ReadAllText($fixtureTrustedKeys).Trim()
+    Push-Location (Join-Path $repositoryRoot 'product\launcher')
+    try {
+        & go build -trimpath -ldflags "-s -w -H windowsgui -X main.trustedRuntimeKeys=$trustedKeysJson" -o $fixtureLauncher .
+        Assert-True ($LASTEXITCODE -eq 0) 'BUILD_SIGNED_FIXTURE_LAUNCHER_FAILED'
+    }
+    finally {
+        Pop-Location
+    }
 
     $phase = 'BUILD_RELEASE'
     $buildRelease = Join-Path $repositoryRoot 'product\packaging\build-release.mjs'
     & node $buildRelease `
-        --launcher $launcherPath `
+        --launcher $fixtureLauncher `
         --runtime-package $runtimePackage `
         --manifest $manifestPath `
+        --public-key $fixturePublicKey `
         --output $releaseRoot
     Assert-True ($LASTEXITCODE -eq 0) 'BUILD_RELEASE_FAILED'
 
