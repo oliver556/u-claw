@@ -337,6 +337,25 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .secondary-command { min-height: 36px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; color: var(--uclaw-primary-text); }
 .secondary-command:hover { background: var(--uclaw-bg-hover); }
 
+.mcp-page-header { min-height: 76px; flex-direction: row !important; align-items: center; justify-content: space-between !important; gap: 16px; }
+.mcp-page-header > div { min-width: 0; }
+.mcp-content { max-width: 1120px; gap: 12px; padding-top: 18px; }
+.mcp-toolbar { min-height: 36px; display: flex; align-items: center; justify-content: space-between; color: var(--uclaw-text-secondary); font-size: 12px; }
+.mcp-toolbar button { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; }
+.mcp-list { display: grid; gap: 8px; }
+.mcp-row { min-width: 0; display: grid; grid-template-columns: 38px minmax(180px, 1fr) minmax(130px, .7fr) minmax(170px, .8fr) auto 36px auto; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); }
+.mcp-row.disabled { opacity: .66; }
+.mcp-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 6px; color: var(--uclaw-primary); background: var(--uclaw-primary-soft); }
+.mcp-icon svg, .mcp-actions svg, .mcp-toolbar svg { width: 15px; height: 15px; }
+.mcp-identity, .mcp-health, .mcp-capabilities { min-width: 0; display: grid; gap: 3px; }
+.mcp-identity > div { min-width: 0; display: flex; align-items: center; gap: 6px; }.mcp-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.mcp-identity span, .mcp-identity small, .mcp-health small, .mcp-capabilities small { overflow: hidden; color: var(--uclaw-text-tertiary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-capabilities { grid-template-columns: repeat(3, auto); justify-content: start; gap: 3px 8px; color: var(--uclaw-text-secondary); font-size: 11px; }.mcp-capabilities small { grid-column: 1 / -1; }
+.mcp-auth { min-width: 70px; color: var(--uclaw-text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.mcp-actions { display: flex; justify-content: end; gap: 5px; }.mcp-actions button:not(.ant-btn) { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; }.mcp-actions button:hover:not(:disabled) { background: var(--uclaw-bg-hover); }
+.mcp-state { min-height: 180px; display: grid; place-content: center; justify-items: center; gap: 8px; color: var(--uclaw-text-secondary); text-align: center; }.mcp-state svg { width: 22px; }
+.mcp-form { display: grid; gap: 12px; }.mcp-form label { display: grid; gap: 5px; color: var(--uclaw-text-secondary); font-size: 12px; }.mcp-form select { min-height: 34px; padding: 0 9px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; background: var(--uclaw-bg-input); }
+.mcp-risk-confirm { display: flex; align-items: center; gap: 7px; margin-top: 14px; }
+
 .provider-page-header { min-height: 76px; flex-direction: row !important; align-items: center; justify-content: space-between !important; gap: 16px; }
 .provider-page-header > div { min-width: 0; }
 .provider-page-header .ant-btn { flex: none; }
@@ -522,6 +541,17 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
   .channel-actions button { width: 44px; height: 44px; }
   .channel-capability { grid-column: 1 / -1; }
   .channel-row > .ant-switch { align-self: center; }
+  .mcp-page-header { min-height: 96px; align-items: flex-start; padding: 14px 16px; }
+  .mcp-page-header .ant-btn { min-height: 44px; }
+  .mcp-content { padding: 14px 12px 76px; }
+  .mcp-row { grid-template-columns: 36px minmax(0, 1fr) 44px; align-items: start; padding: 10px; }
+  .mcp-identity { align-self: center; }
+  .mcp-health, .mcp-capabilities, .mcp-auth { grid-column: 2 / -1; }
+  .mcp-capabilities { grid-template-columns: repeat(3, minmax(0, auto)); }
+  .mcp-actions { grid-column: 1 / -1; justify-content: start; flex-wrap: wrap; }
+  .mcp-actions button:not(.ant-btn) { width: 44px; height: 44px; }
+  .mcp-actions .ant-btn { min-height: 44px; }
+  .mcp-row > .ant-switch { align-self: center; }
   .connection-alert button { min-height: 44px; }
   .secondary-view > header { padding: 0 16px; }
   .secondary-content { padding: 22px 16px; }
