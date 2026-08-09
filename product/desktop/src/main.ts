@@ -28,6 +28,7 @@ import {
 import type { IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import { createSessionOrganizerStore } from "./session-organizer/store.js";
+import { createProviderStore } from "./providers/provider-store.js";
 import {
   createAdvancedConsoleController,
   createMainWindow,
@@ -329,6 +330,7 @@ export async function startElectronMain(
   const client = requireElectronClient(options.client);
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
   const attachments = options.attachments ?? client.attachments;
+  const providers = createProviderStore({ dataDir: portablePaths.dataDir });
   let gatewayPort: number | undefined;
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -370,6 +372,7 @@ export async function startElectronMain(
       client,
       organizer,
       attachments,
+      providers,
       selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
         const selected = await dialog.showOpenDialog({
           properties: ["openFile", "multiSelections"],

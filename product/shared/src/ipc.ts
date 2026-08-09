@@ -11,6 +11,9 @@ import {
 } from "./chat.js";
 import { PageRequestSchema } from "./common.js";
 import { UClawErrorSchema } from "./errors.js";
+import { ProviderIpcRequestSchema, ProviderIpcResponseSchema } from "./providers.js";
+export { ProviderIpcRequestSchema, ProviderIpcResponseSchema } from "./providers.js";
+export type { ProviderIpcRequest, ProviderIpcResponse } from "./providers.js";
 import { CapabilitySetWireSchema, GatewayStatusWireSchema } from "./gateway.js";
 import { SessionOrganizerDocumentSchema } from "./session-organizer.js";
 import {
@@ -195,7 +198,7 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
-export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema]);
+export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema]);
 export type IpcRequest = z.infer<typeof IpcRequestSchema>;
 export const IpcResponseSchema = z.union([
   WindowIpcSuccessResponseSchema,
@@ -203,6 +206,7 @@ export const IpcResponseSchema = z.union([
   ClientIpcSuccessResponseSchema,
   ClientIpcFailureResponseSchema,
   AttachmentIpcResponseSchema,
+  ProviderIpcResponseSchema,
 ]);
 export type IpcResponse = z.infer<typeof IpcResponseSchema>;
 export const IpcEventSchema = ClientIpcEventSchema;

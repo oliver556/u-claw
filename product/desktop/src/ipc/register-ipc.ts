@@ -3,6 +3,8 @@ import {
   AttachmentIpcResponseSchema,
   ClientIpcRequestSchema,
   IpcResponseSchema,
+  ProviderIpcRequestSchema,
+  ProviderIpcResponseSchema,
   UClawErrorSchema,
   WindowIpcRequestSchema,
   redactRendererText,
@@ -15,8 +17,10 @@ import {
 } from "@uclaw/shared";
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
-import { ATTACHMENT_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 import type { SessionOrganizerStore } from "../session-organizer/store.js";
+import { createProviderDispatcher } from "../providers/provider-dispatcher.js";
+import type { ProviderStore } from "../providers/provider-store.js";
+import { ATTACHMENT_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, PROVIDER_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -44,6 +48,7 @@ export interface RegisterIpcDependencies {
   organizer?: SessionOrganizerStore;
   attachments?: AttachmentService;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
+  providers?: ProviderStore;
 }
 
 function safeError(
@@ -84,6 +89,7 @@ export function registerIpc({
   organizer,
   attachments,
   selectAttachments,
+  providers,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
@@ -191,6 +197,22 @@ export function registerIpc({
     }
   });
 
+  if (providers !== undefined) ipcMain.handle(PROVIDER_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = ProviderIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid provider IPC request.");
+    try {
+      return ProviderIpcResponseSchema.parse(await createProviderDispatcher(providers)(parsed.data));
+    } catch (error) {
+      return ProviderIpcResponseSchema.parse({
+        method: parsed.data.method,
+        requestId: parsed.data.requestId,
+        ok: false,
+        error: toRendererSafeError(error),
+      });
+    }
+  });
+
   let disposed = false;
   return () => {
     if (disposed) return;
@@ -199,5 +221,6 @@ export function registerIpc({
     ipcMain.removeHandler(WINDOW_IPC_CHANNEL);
     ipcMain.removeHandler(CLIENT_IPC_CHANNEL);
     if (attachments !== undefined) ipcMain.removeHandler(ATTACHMENT_IPC_CHANNEL);
+    if (providers !== undefined) ipcMain.removeHandler(PROVIDER_IPC_CHANNEL);
   };
 }

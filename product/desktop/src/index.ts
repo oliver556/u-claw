@@ -7,6 +7,8 @@ export * from "./ipc/channels.js";
 export * from "./ipc/preload-bridge.js";
 export * from "./ipc/register-ipc.js";
 export * from "./main.js";
+export * from "./providers/provider-store.js";
+export * from "./providers/provider-dispatcher.js";
 export * from "./security/navigation-policy.js";
 export * from "./session-organizer/store.js";
 export * from "./window.js";
