@@ -1,0 +1,128 @@
+import { z } from "zod";
+
+import { UClawErrorSchema } from "./errors.js";
+
+const WINDOWS_DEVICE_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+
+export const RelativeDomainIdSchema = z.string().max(1024).superRefine((value, context) => {
+  const segments = value.split("/");
+  if (
+    value.length === 0 || value === "." || value.startsWith("/") || value.startsWith("\\") ||
+    value.includes("\\") || value.includes(":") || value.includes("\0") ||
+    segments.some((segment) => segment.length === 0 || segment === "." || segment === ".." ||
+      segment.endsWith(".") || segment.endsWith(" ") || WINDOWS_DEVICE_NAME.test(segment))
+  ) context.addIssue({ code: "custom", message: "Invalid relative domain ID." });
+});
+export type RelativeDomainId = z.infer<typeof RelativeDomainIdSchema>;
+
+export const DataEntryNameSchema = z.string().trim().min(1).max(255).superRefine((value, context) => {
+  if (
+    value === "." || value === ".." || value.includes("/") || value.includes("\\") ||
+    value.includes(":") || value.includes("\0") || value.endsWith(".") || value.endsWith(" ") ||
+    WINDOWS_DEVICE_NAME.test(value)
+  ) context.addIssue({ code: "custom", message: "Invalid entry name." });
+});
+
+const RequestIdSchema = z.string().min(1).max(128);
+const VersionSchema = z.string().min(1).max(256);
+const PageParamsSchema = z.object({
+  query: z.string().trim().max(200).optional(),
+  cursor: z.string().max(64).optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+}).strict();
+
+export const DataIpcRequestSchema = z.discriminatedUnion("method", [
+  z.object({ method: z.literal("data.contract"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("data.status"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("workspace.list"), requestId: RequestIdSchema, params: PageParamsSchema.extend({ parentId: RelativeDomainIdSchema.optional() }).strict() }).strict(),
+  z.object({ method: z.literal("workspace.read"), requestId: RequestIdSchema, params: z.object({ entryId: RelativeDomainIdSchema }).strict() }).strict(),
+  z.object({ method: z.enum(["workspace.open", "workspace.reveal"]), requestId: RequestIdSchema, params: z.object({ entryId: RelativeDomainIdSchema }).strict() }).strict(),
+  z.object({ method: z.literal("workspace.rename"), requestId: RequestIdSchema, params: z.object({ entryId: RelativeDomainIdSchema, name: DataEntryNameSchema, version: VersionSchema }).strict() }).strict(),
+  z.object({ method: z.literal("workspace.move"), requestId: RequestIdSchema, params: z.object({ entryId: RelativeDomainIdSchema, destinationId: RelativeDomainIdSchema.optional(), version: VersionSchema }).strict() }).strict(),
+  z.object({ method: z.literal("workspace.delete"), requestId: RequestIdSchema, params: z.object({ entryId: RelativeDomainIdSchema, version: VersionSchema, confirmed: z.literal(true) }).strict() }).strict(),
+  z.object({ method: z.literal("memory.list"), requestId: RequestIdSchema, params: PageParamsSchema }).strict(),
+  z.object({ method: z.literal("memory.read"), requestId: RequestIdSchema, params: z.object({ memoryId: RelativeDomainIdSchema }).strict() }).strict(),
+  z.object({ method: z.literal("memory.write"), requestId: RequestIdSchema, params: z.object({ memoryId: RelativeDomainIdSchema, content: z.string().max(2_000_000), version: VersionSchema }).strict() }).strict(),
+  z.object({ method: z.literal("memory.delete"), requestId: RequestIdSchema, params: z.object({ memoryId: RelativeDomainIdSchema, version: VersionSchema, confirmed: z.literal(true) }).strict() }).strict(),
+]);
+export type DataIpcRequest = z.infer<typeof DataIpcRequestSchema>;
+
+export const WorkspaceEntrySchema = z.object({
+  id: RelativeDomainIdSchema,
+  name: z.string().min(1),
+  kind: z.enum(["file", "directory"]),
+  size: z.number().int().nonnegative(),
+  modifiedAt: z.string().datetime(),
+  version: VersionSchema,
+  readable: z.boolean(),
+}).strict();
+export type WorkspaceEntry = z.infer<typeof WorkspaceEntrySchema>;
+
+export const MemoryEntrySchema = z.object({
+  id: RelativeDomainIdSchema,
+  title: z.string().min(1),
+  size: z.number().int().nonnegative(),
+  modifiedAt: z.string().datetime(),
+  version: VersionSchema,
+}).strict();
+export type MemoryEntry = z.infer<typeof MemoryEntrySchema>;
+
+export const DataRootContractSchema = z.object({
+  contractVersion: z.literal(1),
+  roots: z.object({ workspace: z.literal("workspace"), memory: z.literal("workspace"), sessions: z.literal(".openclaw/agents") }).strict(),
+  backupSets: z.array(z.enum(["workspace-user-files", "openclaw-memory", "openclaw-sessions", "uclaw-configuration"])).length(4),
+  cleanupClasses: z.array(z.enum(["protected-durable", "user-managed", "rebuildable-cache", "diagnostic-retention"])).length(4),
+  backupPolicies: z.object({
+    "workspace-user-files": z.object({ root: z.literal("data"), includes: z.array(z.string()).min(1), excludes: z.array(z.string()) }).strict(),
+    "openclaw-memory": z.object({ root: z.literal("data"), includes: z.array(z.string()).min(1), excludes: z.array(z.string()) }).strict(),
+    "openclaw-sessions": z.object({ root: z.literal("data"), includes: z.array(z.string()).min(1), excludes: z.array(z.string()) }).strict(),
+    "uclaw-configuration": z.object({ root: z.literal("data"), includes: z.array(z.string()).min(1), excludes: z.array(z.string()) }).strict(),
+  }).strict(),
+  cleanupPolicies: z.object({
+    "protected-durable": z.object({ root: z.literal("data"), includes: z.array(z.string()).min(1) }).strict(),
+    "user-managed": z.object({ root: z.literal("data"), includes: z.array(z.string()).min(1), excludes: z.array(z.string()) }).strict(),
+    "rebuildable-cache": z.object({ root: z.literal("cache"), includes: z.array(z.string()).min(1) }).strict(),
+    "diagnostic-retention": z.object({ root: z.literal("data"), includes: z.array(z.string()).min(1) }).strict(),
+  }).strict(),
+}).strict();
+export type DataRootContract = z.infer<typeof DataRootContractSchema>;
+
+export const DATA_ROOT_CONTRACT: DataRootContract = DataRootContractSchema.parse({
+  contractVersion: 1,
+  roots: { workspace: "workspace", memory: "workspace", sessions: ".openclaw/agents" },
+  backupSets: ["workspace-user-files", "openclaw-memory", "openclaw-sessions", "uclaw-configuration"],
+  cleanupClasses: ["protected-durable", "user-managed", "rebuildable-cache", "diagnostic-retention"],
+  backupPolicies: {
+    "workspace-user-files": { root: "data", includes: ["workspace/**"], excludes: ["workspace/MEMORY.md", "workspace/memory/**", "workspace/AGENTS.md", "workspace/SOUL.md", "workspace/TOOLS.md", "workspace/IDENTITY.md", "workspace/USER.md", "workspace/HEARTBEAT.md", "workspace/BOOTSTRAP.md", "workspace/DREAMS.md", "workspace/.openclaw/**"] },
+    "openclaw-memory": { root: "data", includes: ["workspace/MEMORY.md", "workspace/memory/**/*.md"], excludes: [] },
+    "openclaw-sessions": { root: "data", includes: [".openclaw/agents/**"], excludes: [] },
+    "uclaw-configuration": { root: "data", includes: [".openclaw/**", "desktop/**", "workspace/AGENTS.md", "workspace/SOUL.md", "workspace/TOOLS.md", "workspace/IDENTITY.md", "workspace/USER.md", "workspace/HEARTBEAT.md", "workspace/BOOTSTRAP.md", "workspace/DREAMS.md", "capabilities/**", "channels/**", "mcp/**", "providers/**", "uclaw/**"], excludes: [".openclaw/agents/**"] },
+  },
+  cleanupPolicies: {
+    "protected-durable": { root: "data", includes: ["workspace/MEMORY.md", "workspace/memory/**", "workspace/AGENTS.md", "workspace/SOUL.md", "workspace/TOOLS.md", "workspace/IDENTITY.md", "workspace/USER.md", "workspace/HEARTBEAT.md", "workspace/BOOTSTRAP.md", "workspace/DREAMS.md", ".openclaw/**", "desktop/**", "capabilities/**", "channels/**", "mcp/**", "providers/**", "uclaw/**"] },
+    "user-managed": { root: "data", includes: ["workspace/**"], excludes: ["workspace/MEMORY.md", "workspace/memory/**", "workspace/AGENTS.md", "workspace/SOUL.md", "workspace/TOOLS.md", "workspace/IDENTITY.md", "workspace/USER.md", "workspace/HEARTBEAT.md", "workspace/BOOTSTRAP.md", "workspace/DREAMS.md", "workspace/.openclaw/**"] },
+    "rebuildable-cache": { root: "cache", includes: ["**"] },
+    "diagnostic-retention": { root: "data", includes: ["diagnostics/**"] },
+  },
+});
+
+const PageSchema = <T extends z.ZodType>(item: T) => z.object({ items: z.array(item), nextCursor: z.string().nullable(), hasMore: z.boolean() }).strict();
+const DataStatusSchema = z.object({ state: z.enum(["available", "read-only", "offline"]), writable: z.boolean() }).strict();
+
+export const DataIpcResponseSchema = z.union([
+  z.object({ method: z.literal("data.contract"), requestId: RequestIdSchema, ok: z.literal(true), result: DataRootContractSchema }).strict(),
+  z.object({ method: z.literal("data.status"), requestId: RequestIdSchema, ok: z.literal(true), result: DataStatusSchema }).strict(),
+  z.object({ method: z.literal("workspace.list"), requestId: RequestIdSchema, ok: z.literal(true), result: PageSchema(WorkspaceEntrySchema) }).strict(),
+  z.object({ method: z.literal("workspace.read"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ entry: WorkspaceEntrySchema, content: z.string(), encoding: z.literal("utf-8") }).strict() }).strict(),
+  z.object({ method: z.enum(["workspace.open", "workspace.reveal", "workspace.delete", "memory.delete"]), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+  z.object({ method: z.enum(["workspace.rename", "workspace.move"]), requestId: RequestIdSchema, ok: z.literal(true), result: WorkspaceEntrySchema }).strict(),
+  z.object({ method: z.literal("memory.list"), requestId: RequestIdSchema, ok: z.literal(true), result: PageSchema(MemoryEntrySchema) }).strict(),
+  z.object({ method: z.literal("memory.read"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ memory: MemoryEntrySchema, content: z.string() }).strict() }).strict(),
+  z.object({ method: z.literal("memory.write"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ memory: MemoryEntrySchema }).strict() }).strict(),
+  z.object({ method: z.string().min(1), requestId: RequestIdSchema, ok: z.literal(false), error: UClawErrorSchema }).strict(),
+]);
+export type DataIpcResponse = z.infer<typeof DataIpcResponseSchema>;
+
+export interface DataBridge {
+  invoke(request: DataIpcRequest): Promise<DataIpcResponse>;
+}

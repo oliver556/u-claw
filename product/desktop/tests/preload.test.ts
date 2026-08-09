@@ -27,7 +27,7 @@ describe("installPreloadBridge", () => {
       ipcRenderer: { invoke, on, removeListener },
     });
 
-    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp"]);
+    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "data"]);
     expect(api).not.toHaveProperty("ipcRenderer");
     expect(api).not.toHaveProperty("invoke");
     expect(Object.keys(api?.client as object)).toEqual(["invoke", "subscribe"]);
@@ -37,6 +37,7 @@ describe("installPreloadBridge", () => {
     expect(Object.keys(api?.plugins as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.channels as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.mcp as object)).toEqual(["invoke"]);
+    expect(Object.keys(api?.data as object)).toEqual(["invoke"]);
 
     await (api?.window as { invoke: (request: unknown) => Promise<unknown> }).invoke({
       method: "minimize",

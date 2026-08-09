@@ -28,6 +28,7 @@ export interface PortableDesktopPaths {
   crashDumps: string;
   openClawState: string;
   openClawConfig: string;
+  workspace: string;
 }
 
 export interface PortableElectronApp {
@@ -67,6 +68,7 @@ export function resolvePortableDesktopPaths(dataDir: string, cacheDir: string): 
     crashDumps: join(normalizedData, "diagnostics", "crash-dumps"),
     openClawState,
     openClawConfig: join(openClawState, "openclaw.json"),
+    workspace: join(normalizedData, "workspace"),
   };
 }
 
@@ -77,6 +79,7 @@ function portableEnvironment(paths: PortableDesktopPaths): NodeJS.ProcessEnv {
     OPENCLAW_HOME: paths.dataDir,
     OPENCLAW_STATE_DIR: paths.openClawState,
     OPENCLAW_CONFIG_PATH: paths.openClawConfig,
+    OPENCLAW_WORKSPACE_DIR: paths.workspace,
     NODE_COMPILE_CACHE: join(paths.cacheDir, "node-compile"),
     TEMP: paths.temp,
     TMP: paths.temp,
@@ -160,6 +163,7 @@ export function configurePortableDesktopPaths(
     paths.logs,
     paths.crashDumps,
     paths.openClawState,
+    paths.workspace,
   ]) mkdirSync(path, { recursive: true });
 
   for (const [name, path] of [

@@ -336,6 +336,44 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .status-line strong { color: var(--uclaw-success); font-weight: 600; }
 .secondary-command { min-height: 36px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; color: var(--uclaw-primary-text); }
 .secondary-command:hover { background: var(--uclaw-bg-hover); }
+.data-manager { display: flex; flex-direction: column; overflow: hidden; }
+.data-toolbar { min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 10px 20px; border-bottom: 1px solid var(--uclaw-border-secondary); }
+.data-search { width: min(420px, 100%); min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 11px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; background: var(--uclaw-bg-primary); }
+.data-search svg { width: 16px; color: var(--uclaw-text-tertiary); }
+.data-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--uclaw-text-primary); }
+.data-breadcrumbs { min-height: 34px; display: flex; align-items: center; gap: 4px; padding: 4px 20px; overflow-x: auto; border-bottom: 1px solid var(--uclaw-border-secondary); }
+.data-breadcrumbs button { white-space: nowrap; color: var(--uclaw-primary-text); }
+.data-breadcrumbs button + button::before { content: "/"; margin-right: 4px; color: var(--uclaw-text-tertiary); }
+.data-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 20px; background: var(--uclaw-error-bg); color: var(--uclaw-error-text); }
+.data-error button { min-height: 32px; white-space: nowrap; text-decoration: underline; }
+.data-status { padding: 9px 20px; border-bottom: 1px solid var(--uclaw-border-secondary); color: var(--uclaw-text-secondary); background: var(--uclaw-bg-secondary); }
+.data-layout { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(260px, 38%) minmax(0, 1fr); }
+.data-list { min-width: 0; overflow-y: auto; border-right: 1px solid var(--uclaw-border-secondary); }
+.data-row { width: 100%; min-height: 60px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--uclaw-border-secondary); text-align: left; }
+.data-row:hover, .data-row.selected { background: var(--uclaw-bg-hover); }
+.data-row.selected { box-shadow: inset 3px 0 var(--uclaw-primary); }
+.data-row > svg { width: 19px; color: var(--uclaw-primary); }
+.data-row span, .data-detail-head > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.data-row strong, .data-row small, .data-detail-head strong, .data-detail-head small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.data-row small, .data-row time, .data-detail-head small { color: var(--uclaw-text-tertiary); font-size: 11px; }
+.data-more { width: 100%; min-height: 42px; color: var(--uclaw-primary-text); }
+.data-detail { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.data-detail-head { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--uclaw-border-secondary); }
+.data-actions { display: flex; flex: 0 0 auto; gap: 3px; }
+.data-actions .icon-button { width: 36px; height: 36px; min-width: 36px; }
+.icon-button.danger { color: var(--uclaw-error-text); }
+.data-editor { width: 100%; min-height: 0; flex: 1; resize: none; padding: 16px; border: 0; outline: 0; background: var(--uclaw-bg-primary); color: var(--uclaw-text-primary); font: 13px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.data-state { min-height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--uclaw-text-tertiary); }
+.data-state svg { width: 28px; }
+.data-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.data-modal-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / 42%); }
+.data-modal { width: min(480px, 100%); padding: 20px; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); box-shadow: 0 16px 44px var(--uclaw-shadow); }
+.data-modal h2 { margin: 0 0 12px; font-size: 17px; }
+.data-modal p { margin: 0; color: var(--uclaw-text-secondary); line-height: 1.6; }
+.data-confirm-actions button { min-height: 36px; padding: 0 14px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; }
+.danger-command { border-color: var(--uclaw-error-text) !important; background: var(--uclaw-error-text); color: white; }
+.spin { animation: data-spin 1s linear infinite; }
+@keyframes data-spin { to { transform: rotate(360deg); } }
 
 .mcp-page-header { min-height: 76px; flex-direction: row !important; align-items: center; justify-content: space-between !important; gap: 16px; }
 .mcp-page-header > div { min-width: 0; }
@@ -576,6 +614,14 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
   .connection-alert button { min-height: 44px; }
   .secondary-view > header { padding: 0 16px; }
   .secondary-content { padding: 22px 16px; }
+  .data-toolbar { padding: 8px 12px; }
+  .data-breadcrumbs, .data-error, .data-status { padding-left: 12px; padding-right: 12px; }
+  .data-layout { grid-template-columns: 1fr; grid-template-rows: minmax(170px, 42%) minmax(0, 1fr); }
+  .data-list { border-right: 0; border-bottom: 1px solid var(--uclaw-border-secondary); }
+  .data-row { min-height: 54px; grid-template-columns: 20px minmax(0, 1fr); }
+  .data-row time { display: none; }
+  .data-detail-head { align-items: flex-start; }
+  .data-actions { max-width: 190px; flex-wrap: wrap; justify-content: flex-end; }
   .capability-tabs { padding: 0 12px; }
   .skill-content { padding: 14px 12px 76px; }
   .skill-toolbar { flex-wrap: wrap; }.skill-toolbar label { flex-basis: calc(100% - 44px); }.skill-mode { order: 3; }

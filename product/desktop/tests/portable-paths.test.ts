@@ -37,6 +37,7 @@ describe("portable desktop paths", () => {
       OPENCLAW_HOME: dataDir,
       OPENCLAW_STATE_DIR: join(dataDir, ".openclaw"),
       OPENCLAW_CONFIG_PATH: join(dataDir, ".openclaw", "openclaw.json"),
+      OPENCLAW_WORKSPACE_DIR: join(dataDir, "workspace"),
       NODE_COMPILE_CACHE: join(cacheDir, "node-compile"),
       TEMP: join(cacheDir, "temp"),
       TMP: join(cacheDir, "temp"),
@@ -73,6 +74,7 @@ describe("portable desktop paths", () => {
         OPENCLAW_HOME: dataDir,
         OPENCLAW_STATE_DIR: join(dataDir, ".openclaw"),
         OPENCLAW_CONFIG_PATH: join(dataDir, ".openclaw", "openclaw.json"),
+        OPENCLAW_WORKSPACE_DIR: join(dataDir, "workspace"),
       },
     });
   });

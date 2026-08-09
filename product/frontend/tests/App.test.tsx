@@ -4,14 +4,22 @@ import "@testing-library/jest-dom/vitest";
 
 import { ManualClock, MockUClawClient } from "@uclaw/adapter";
 import type { ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, UClawClient, WindowIpcRequest } from "@uclaw/shared";
+import { transferableAbortController } from "node:util";
 import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/app/App";
 
 const renderApp = () => render(<App />);
 const getComputedStyle = window.getComputedStyle.bind(window);
+const JsdomAbortController = globalThis.AbortController;
+
+class RequestCompatibleAbortController {
+  readonly #controller = transferableAbortController();
+  get signal() { return this.#controller.signal; }
+  abort(reason?: unknown) { this.#controller.abort(reason); }
+}
 
 const statusFixture = (overrides: Partial<GatewayStatus> = {}): GatewayStatus => ({
   connectionState: "ready",
@@ -40,6 +48,9 @@ function clientWithStatus(status: GatewayStatus, reconnect: UClawClient["gateway
 }
 
 describe("U-Claw application shell", () => {
+  beforeAll(() => { globalThis.AbortController = RequestCompatibleAbortController as typeof AbortController; });
+  afterAll(() => { globalThis.AbortController = JsdomAbortController; });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -114,6 +125,33 @@ describe("U-Claw application shell", () => {
     expect(document.querySelector(".workspace-grid")).toHaveClass("secondary-layout");
     expect(screen.queryByLabelText("会话栏")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();
+  });
+
+  it("blocks router navigation while memory edits are dirty", async () => {
+    const memory = { id: "MEMORY.md", title: "长期记忆", modifiedAt: "2026-08-09T00:00:00.000Z", version: "m1", size: 10 };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "data.status") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "available", writable: true } };
+      if (request.method === "memory.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [memory], nextCursor: null, hasMore: false } };
+      if (request.method === "memory.read") return { method: request.method, requestId: request.requestId, ok: true, result: { memory, content: "old" } };
+      if (request.method === "workspace.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [], nextCursor: null, hasMore: false } };
+      throw new Error(`unexpected ${request.method}`);
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    window.uclaw = { data: { invoke } } as any;
+    renderApp();
+
+    fireEvent.click(screen.getByRole("link", { name: "记忆" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看 长期记忆" }));
+    fireEvent.change(await screen.findByLabelText("记忆正文"), { target: { value: "dirty" } });
+    fireEvent.click(screen.getByRole("link", { name: "文件" }));
+
+    expect(confirm).toHaveBeenCalledWith("当前记忆尚未保存，放弃修改吗？");
+    expect(screen.getByRole("link", { name: "记忆" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByLabelText("记忆正文")).toHaveValue("dirty");
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("link", { name: "文件" }));
+    expect(await screen.findByRole("heading", { name: "文件" })).toBeVisible();
   });
 
   it("manages provider selection, order, status and API keys through the dedicated bridge", async () => {

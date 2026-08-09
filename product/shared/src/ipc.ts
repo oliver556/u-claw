@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export { DataIpcRequestSchema, DataIpcResponseSchema } from "./data.js";
+export type { DataIpcRequest, DataIpcResponse } from "./data.js";
+
 import { SkillIpcRequestSchema, SkillIpcResponseSchema } from "./capabilities.js";
 export { SkillIpcRequestSchema, SkillIpcResponseSchema } from "./capabilities.js";
 import { PluginIpcRequestSchema, PluginIpcResponseSchema } from "./plugins.js";

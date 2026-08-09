@@ -11,14 +11,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@openclaw/fs-safe": "0.4.1",
     "@uclaw/adapter": "0.1.0",
     "@uclaw/shared": "0.1.0",
     "semver": "7.8.5",
     "undici": "7.29.0"
   },
   "devDependencies": {
-    "esbuild": "0.28.1",
     "electron": "40.10.6",
+    "esbuild": "0.28.1",
     "vitest": "3.2.7"
   }
 }

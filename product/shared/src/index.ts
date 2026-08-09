@@ -5,6 +5,7 @@ export * from "./capabilities.js";
 export * from "./channels.js";
 export * from "./client.js";
 export * from "./common.js";
+export * from "./data.js";
 export * from "./errors.js";
 export * from "./gateway.js";
 export * from "./ipc.js";
