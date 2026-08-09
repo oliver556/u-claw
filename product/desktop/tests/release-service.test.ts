@@ -154,6 +154,18 @@ describe("release service", () => {
     expect(await readFile(join(setup.packageRoot, "runtime.pkg"), "utf8")).toBe("runtime");
   });
 
+  it("uses the secure native install path without exposing a staging target", async () => {
+    const secureInstall = vi.fn(async () => undefined);
+    const download = vi.fn(async () => { throw new Error("Node staging path must not run"); });
+    const setup = await fixture({ secureInstall, download });
+    const checked = await setup.service.check("stable");
+    const operation = setup.service.install(checked.update!.id, checked.update!.previewToken, true);
+
+    expect(await setup.service.wait(operation.id)).toMatchObject({ state: "completed", recovery: "none" });
+    expect(secureInstall).toHaveBeenCalledWith(expect.objectContaining({ id: "release-42" }), expect.any(AbortSignal));
+    expect(download).not.toHaveBeenCalled();
+  });
+
   it("recovers idempotently when only runtime reached rollback", async () => {
     const setup = await fixture();
     const oldManifest = manifest().runtimeManifest;
@@ -230,5 +242,17 @@ describe("release service", () => {
     const op = setup.service.executeUninstall(["host-cache"], preview.previewToken, true);
     expect(await setup.service.wait(op.id)).toMatchObject({ state: "completed", partialFailures: 1 });
     expect(await readFile(unknown, "utf8")).toBe("foreign");
+  });
+
+  it("delegates each cache child to the native cleanup boundary", async () => {
+    const secureCleanup = vi.fn(async (child: string) => {
+      if (child === "cache") throw new Error("replacement rejected");
+    });
+    const setup = await fixture({ secureCleanup });
+    const preview = await setup.service.previewUninstall();
+    const operation = setup.service.executeUninstall(["host-cache"], preview.previewToken, true);
+
+    expect(await setup.service.wait(operation.id)).toMatchObject({ state: "completed", processedItems: 3, partialFailures: 1 });
+    expect(secureCleanup.mock.calls.map(([child]) => child)).toEqual(["runtime", "cache", "updates"]);
   });
 });

@@ -52,6 +52,8 @@ export interface ReleaseServiceOptions {
   configurationError?: string;
   fetchManifest(channel: "stable" | "beta", signal: AbortSignal): Promise<SignedReleaseManifest>;
   download(manifest: SignedReleaseManifest, controlledTarget: string, signal: AbortSignal): Promise<void>;
+  secureInstall?(manifest: SignedReleaseManifest, signal: AbortSignal): Promise<void>;
+  secureCleanup?(child: "runtime" | "cache" | "updates"): Promise<void>;
 }
 
 const token = () => randomUUID().replaceAll("-", "");
@@ -249,6 +251,12 @@ export function createReleaseService(options: ReleaseServiceOptions) {
       const transaction = join(options.packageRoot, ".update-transaction.json");
       try {
         setOperation({ ...initial, state: "running", phase: "downloading", message: "正在下载到受控暂存区。" });
+        if (options.secureInstall) {
+          if (!validManifest(manifest, options, now(), highestSequence, acceptedIdentity, manifest.channel)) throw new Error("Update verification failed.");
+          await options.secureInstall(manifest, controller.signal); controller.signal.throwIfAborted();
+          setOperation({ ...operations.get(id)!, state: "completed", phase: "completed", processedItems: 3, message: "安全更新已安装，重启后完成验收。" });
+          return;
+        }
         const packageInfo = await lstat(options.packageRoot); if (!packageInfo.isDirectory() || packageInfo.isSymbolicLink()) throw new Error("Unsafe package root.");
         await mkdir(staging, { recursive: false, mode: 0o700 }); await options.download(manifest, stagedPackage, controller.signal); controller.signal.throwIfAborted();
         await writeJsonDurable(stagedManifest, manifest.runtimeManifest, true);
@@ -273,7 +281,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
         setOperation({ ...operations.get(id)!, state: "completed", phase: "completed", processedItems: 3, message: "安全更新已安装，重启后完成验收。" });
       } catch (error) {
         const cancelled = controller.signal.aborted;
-        await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+        if (!options.secureInstall) await rm(staging, { recursive: true, force: true }).catch(() => undefined);
         const recovery = await recover();
         setOperation({ ...operations.get(id)!, state: cancelled ? "cancelled" : "failed", phase: cancelled ? "cancelled" : "failed", message: cancelled ? "更新已取消。" : recovery.state === "recovery-required" ? "更新失败，需要恢复。" : "更新失败，已保留或回滚当前 runtime。", recovery: recovery.state === "rolled-back" ? "rolled-back" : recovery.state === "recovery-required" ? "recovery-required" : "none" });
       } finally { operationSignals.delete(id); }
@@ -304,12 +312,15 @@ export function createReleaseService(options: ReleaseServiceOptions) {
       }
       for (const child of ["runtime", "cache", "updates"] as const) {
         try {
-          const path = join(options.cacheRoot, child); const quarantine = join(options.cacheRoot, `.uclaw-cleanup-${id}-${child}`);
-          const info = await lstat(path).catch(() => undefined); if (!info) { processed += 1; continue; }
-          if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("Unknown cache target rejected.");
-          await rename(path, quarantine); const moved = await lstat(quarantine);
-          if (moved.isSymbolicLink() || !moved.isDirectory()) { await rename(quarantine, path).catch(() => undefined); throw new Error("Changed cache target rejected."); }
-          await rm(quarantine, { recursive: true, force: true });
+          if (options.secureCleanup) await options.secureCleanup(child);
+          else {
+            const path = join(options.cacheRoot, child); const quarantine = join(options.cacheRoot, `.uclaw-cleanup-${id}-${child}`);
+            const info = await lstat(path).catch(() => undefined); if (!info) { processed += 1; continue; }
+            if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("Unknown cache target rejected.");
+            await rename(path, quarantine); const moved = await lstat(quarantine);
+            if (moved.isSymbolicLink() || !moved.isDirectory()) { await rename(quarantine, path).catch(() => undefined); throw new Error("Changed cache target rejected."); }
+            await rm(quarantine, { recursive: true, force: true });
+          }
         } catch { failures += 1; }
         processed += 1; setOperation({ ...operations.get(id)!, processedItems: processed, partialFailures: failures });
       }
