@@ -20,6 +20,7 @@ import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } f
 import type { SessionOrganizerStore } from "../session-organizer/store.js";
 import { createProviderDispatcher } from "../providers/provider-dispatcher.js";
 import type { ProviderStore } from "../providers/provider-store.js";
+import { createProviderNetworkService, type ProviderNetworkService } from "../providers/provider-network.js";
 import { ATTACHMENT_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, PROVIDER_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
@@ -49,6 +50,7 @@ export interface RegisterIpcDependencies {
   attachments?: AttachmentService;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
   providers?: ProviderStore;
+  providerNetwork?: ProviderNetworkService;
 }
 
 function safeError(
@@ -90,6 +92,7 @@ export function registerIpc({
   attachments,
   selectAttachments,
   providers,
+  providerNetwork,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
@@ -97,6 +100,9 @@ export function registerIpc({
     sendEvent: (event) => authorizedWebContents.send?.(CLIENT_IPC_EVENT_CHANNEL, event),
   });
   const dispatch = clientDispatcher ?? dispatchClient;
+  const providerDispatcher = providers === undefined
+    ? undefined
+    : createProviderDispatcher(providers, providerNetwork ?? createProviderNetworkService());
   const authorize = (event: unknown): void => {
     const candidate = event as { sender?: unknown; senderFrame?: unknown };
     if (
@@ -197,12 +203,12 @@ export function registerIpc({
     }
   });
 
-  if (providers !== undefined) ipcMain.handle(PROVIDER_IPC_CHANNEL, async (event, payload) => {
+  if (providerDispatcher !== undefined) ipcMain.handle(PROVIDER_IPC_CHANNEL, async (event, payload) => {
     authorize(event);
     const parsed = ProviderIpcRequestSchema.safeParse(payload);
     if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid provider IPC request.");
     try {
-      return ProviderIpcResponseSchema.parse(await createProviderDispatcher(providers)(parsed.data));
+      return ProviderIpcResponseSchema.parse(await providerDispatcher(parsed.data));
     } catch (error) {
       return ProviderIpcResponseSchema.parse({
         method: parsed.data.method,

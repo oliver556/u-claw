@@ -1,14 +1,21 @@
 import {
   BUILT_IN_PROVIDER_TEMPLATES,
+  DEFAULT_PROVIDER_NETWORK_SETTINGS,
   ProviderDraftSchema,
+  type LocalModelDiscovery,
   type ProviderConfigSummary,
   type ProviderDraft,
   type ProviderIpcRequest,
+  type ProviderNetworkSettings,
   type ProviderSnapshot,
+  type ProviderVerification,
 } from "@uclaw/shared";
 import { Alert, Button, Input, Modal, Popconfirm, Switch, Tag, Tooltip } from "antd";
-import { ArrowDown, ArrowUp, Check, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+
+import { LocalModelDiscoveryPanel } from "./LocalModelDiscoveryPanel";
+import { ProviderNetworkPanel } from "./ProviderNetworkPanel";
 
 type ProviderForm = {
   id: string;
@@ -38,12 +45,24 @@ function formFor(provider: ProviderConfigSummary): ProviderForm {
   };
 }
 
+function localProviderId(model: LocalModelDiscovery["models"][number], usedIds: Set<string>): string {
+  const stem = `local-${model.source}-${model.id}`.toLowerCase().replace(/[^a-z0-9._-]+/gu, "-").replace(/[-._]+$/u, "").slice(0, 60) || "local-model";
+  let candidate = stem;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${stem.slice(0, 60 - String(suffix).length)}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
 export function ProviderSettings() {
   const [snapshot, setSnapshot] = useState<ProviderSnapshot>();
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string>();
   const [error, setError] = useState<string>();
-  const [notice, setNotice] = useState<string>();
+  const [verificationResults, setVerificationResults] = useState<Record<string, ProviderVerification>>({});
+  const [activeVerification, setActiveVerification] = useState<{ providerId: string; requestId: string }>();
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string>();
   const [form, setForm] = useState<ProviderForm>(emptyForm);
@@ -78,7 +97,6 @@ export function ProviderSettings() {
     if (!invoke || busyId) return false;
     setBusyId(providerId);
     setError(undefined);
-    setNotice(undefined);
     try {
       const response = await invoke(request);
       if (!response.ok) throw new Error();
@@ -157,15 +175,61 @@ export function ProviderSettings() {
   };
   const verify = async (provider: ProviderConfigSummary) => {
     if (!invoke || busyId) return;
+    const verificationRequest = request("providers.verify", { providerId: provider.id });
     setBusyId(provider.id);
+    setActiveVerification({ providerId: provider.id, requestId: verificationRequest.requestId });
     setError(undefined);
     try {
-      await invoke(request("providers.verify", { providerId: provider.id }));
+      const response = await invoke(verificationRequest);
+      if (!response.ok || response.method !== "providers.verify") throw new Error();
+      setVerificationResults((current) => ({ ...current, [provider.id]: response.result }));
     } catch {
-      // Verification contract is deliberately deferred to MODEL-005.
+      setVerificationResults((current) => ({
+        ...current,
+        [provider.id]: { state: "failed", category: "network", code: "NETWORK_UNREACHABLE", message: "网络连接失败。", retryable: true },
+      }));
     } finally {
       setBusyId(undefined);
-      setNotice("真实连通验证将在 MODEL-005 提供");
+      setActiveVerification(undefined);
+    }
+  };
+  const cancelVerification = async () => {
+    if (!invoke || !activeVerification) return;
+    await invoke(request("providers.cancel", { operationRequestId: activeVerification.requestId })).catch(() => undefined);
+  };
+  const useLocalModel = async (model: LocalModelDiscovery["models"][number]) => {
+    if (!invoke || !snapshot || busyId) return;
+    setError(undefined);
+    try {
+      let providerId = snapshot.providers.find((provider) => provider.baseUrl === model.baseUrl && provider.model === model.id)?.id;
+      if (!providerId) {
+        providerId = localProviderId(model, new Set(snapshot.providers.map(({ id }) => id)));
+        const created = await invoke(request("providers.create", { provider: {
+          id: providerId,
+          name: model.source === "ollama" ? `Ollama · ${model.label}` : `LM Studio · ${model.label}`,
+          enabled: true,
+          baseUrl: model.baseUrl,
+          model: model.id,
+        } }));
+        if (!created.ok || created.method !== "providers.create") throw new Error();
+        setSnapshot(created.result);
+      }
+      const selected = await invoke(request("providers.select", { providerId }));
+      if (!selected.ok || selected.method !== "providers.select") throw new Error();
+      setSnapshot(selected.result);
+    } catch {
+      setError("本地模型选择失败，请重试");
+    }
+  };
+  const saveNetwork = async (network: ProviderNetworkSettings): Promise<boolean> => {
+    if (!invoke) return false;
+    try {
+      const response = await invoke(request("providers.set-network", { network }));
+      if (!response.ok || response.method !== "providers.set-network") return false;
+      setSnapshot(response.result);
+      return true;
+    } catch {
+      return false;
     }
   };
 
@@ -173,23 +237,28 @@ export function ProviderSettings() {
     <header className="provider-page-header"><div><h1>模型 Provider</h1><p>Provider 配置</p></div><Button type="primary" icon={<Plus />} onClick={openCreate}>新增 Provider</Button></header>
     <div className="secondary-content provider-content">
       {error ? <Alert type="error" showIcon message={error} action={error.startsWith("Provider 配置加载") ? <Button size="small" aria-label="重试" onClick={() => void load()}>重试</Button> : undefined} /> : null}
-      {notice ? <Alert type="info" showIcon closable message={notice} onClose={() => setNotice(undefined)} /> : null}
       {loading ? <div className="provider-state"><RefreshCw className="spin" /><span>正在加载 Provider</span></div> : null}
       {!loading && snapshot?.providers.length === 0 ? <div className="provider-state"><strong>暂无 Provider</strong></div> : null}
+      {!loading && snapshot ? <div className="provider-tools-grid">
+        <LocalModelDiscoveryPanel invoke={invoke} onUse={useLocalModel} />
+        <ProviderNetworkPanel network={snapshot.network ?? DEFAULT_PROVIDER_NETWORK_SETTINGS} onSave={saveNetwork} />
+      </div> : null}
       <div className="provider-list" aria-label="Provider 列表">
         {snapshot?.providers.map((provider, index) => {
           const selected = snapshot.selectedProviderId === provider.id;
           const rowBusy = busyId === provider.id;
           const locked = busyId !== undefined;
+          const verification = verificationResults[provider.id];
+          const isVerifying = activeVerification?.providerId === provider.id;
           return <article className={`provider-row${selected ? " selected" : ""}${provider.enabled ? "" : " disabled"}`} key={provider.id}>
             <Tooltip title={selected ? "当前 Provider" : "设为当前 Provider"}><button className="provider-select" type="button" aria-label={`选择 ${provider.name}`} disabled={selected || !provider.enabled || locked} onClick={() => void mutate(request("providers.select", { providerId: provider.id }), provider.id)}><Check aria-hidden="true" /></button></Tooltip>
-            <div className="provider-identity"><div><strong>{provider.name}</strong>{selected ? <Tag color="blue">当前</Tag> : null}{provider.templateId ? <Tag>内置</Tag> : <Tag color="cyan">自定义</Tag>}</div><span>{provider.model}</span><small>{provider.baseUrl ?? "OpenClaw 原生 Provider"}</small></div>
+            <div className="provider-identity"><div><strong>{provider.name}</strong>{selected ? <Tag color="blue">当前</Tag> : null}{provider.templateId ? <Tag>内置</Tag> : <Tag color="cyan">自定义</Tag>}</div><span>{provider.model}</span><small>{provider.baseUrl ?? "OpenClaw 原生 Provider"}</small>{verification && verification.state !== "unverified" ? <em className={`provider-verification ${verification.state}`}>{verification.message}</em> : null}</div>
             <div className="provider-key-state"><KeyRound aria-hidden="true" /><span>{provider.apiKeyConfigured ? provider.apiKeyHint : "未配置"}</span></div>
             <Switch size="small" aria-label={`启用 ${provider.name}`} checked={provider.enabled} disabled={locked} loading={rowBusy} onChange={(enabled) => void mutate(request("providers.set-enabled", { providerId: provider.id, enabled }), provider.id)} />
             <div className="provider-actions">
               <Tooltip title="上移"><button type="button" aria-label={`上移 ${provider.name}`} disabled={index === 0 || locked} onClick={() => void mutate(request("providers.move", { providerId: provider.id, direction: "up" }), provider.id)}><ArrowUp /></button></Tooltip>
               <Tooltip title="下移"><button type="button" aria-label={`下移 ${provider.name}`} disabled={index === (snapshot?.providers.length ?? 0) - 1 || locked} onClick={() => void mutate(request("providers.move", { providerId: provider.id, direction: "down" }), provider.id)}><ArrowDown /></button></Tooltip>
-              <Tooltip title="验证"><button type="button" aria-label={`验证 ${provider.name}`} disabled={locked} onClick={() => void verify(provider)}><ShieldCheck /></button></Tooltip>
+              <Tooltip title={isVerifying ? "取消验证" : "验证"}><button type="button" aria-label={isVerifying ? `取消验证 ${provider.name}` : `验证 ${provider.name}`} disabled={locked && !isVerifying} onClick={() => void (isVerifying ? cancelVerification() : verify(provider))}>{isVerifying ? <X /> : <ShieldCheck />}</button></Tooltip>
               <Tooltip title="API Key"><button type="button" aria-label={`管理 ${provider.name} API Key`} disabled={locked} onClick={() => { setNewApiKey(""); setKeyError(undefined); setKeyProvider(provider); }}><KeyRound /></button></Tooltip>
               <Tooltip title="编辑"><button type="button" aria-label={`编辑 ${provider.name}`} disabled={locked} onClick={() => openEdit(provider)}><Pencil /></button></Tooltip>
               <Popconfirm title="删除 Provider？" okText="删除" cancelText="取消" onConfirm={() => void mutate(request("providers.remove", { providerId: provider.id }), provider.id)}><Tooltip title="删除"><button type="button" aria-label={`删除 ${provider.name}`} disabled={locked}><Trash2 /></button></Tooltip></Popconfirm>

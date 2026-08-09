@@ -8,12 +8,14 @@ import {
   ProviderConfigDocumentSchema,
   ProviderDraftSchema,
   ProviderIpcRequestSchema,
+  ProviderNetworkSettingsSchema,
   ProviderSnapshotSchema,
   UClawErrorSchema,
   type ProviderConfigDocument,
   type ProviderConfigEntry,
   type ProviderDraft,
   type ProviderSnapshot,
+  type ProviderNetworkSettings,
   type UClawError,
 } from "@uclaw/shared";
 
@@ -27,7 +29,9 @@ export interface ProviderStore {
   select(providerId: string): Promise<ProviderSnapshot>;
   setApiKey(providerId: string, apiKey: string): Promise<ProviderSnapshot>;
   clearApiKey(providerId: string): Promise<ProviderSnapshot>;
+  setNetwork(network: ProviderNetworkSettings): Promise<ProviderSnapshot>;
   getSelectedForRuntime(): Promise<ProviderConfigEntry | null>;
+  getForRuntime(providerId: string): Promise<ProviderConfigEntry>;
 }
 
 export interface CreateProviderStoreOptions {
@@ -84,6 +88,7 @@ function toSnapshot(document: ProviderConfigDocument): ProviderSnapshot {
       ...(apiKey === undefined ? {} : { apiKeyHint: `...${apiKey.slice(-4)}` }),
       verification: { state: "unverified" },
     })),
+    network: document.network,
   });
 }
 
@@ -201,10 +206,16 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
     clearApiKey: (providerId) => mutate((document) => {
       delete requireProvider(document, providerId).apiKey;
     }),
+    setNetwork: (network) => mutate((document) => {
+      const parsed = ProviderNetworkSettingsSchema.safeParse(network);
+      if (!parsed.success) throw providerError("INVALID_ARGUMENT", "Invalid provider network settings.");
+      document.network = parsed.data;
+    }),
     getSelectedForRuntime: () => serialize(async () => {
       const document = await load();
       const selected = document.providers.find(({ id }) => id === document.selectedProviderId);
       return selected === undefined ? null : structuredClone(selected);
     }),
+    getForRuntime: (providerId) => serialize(async () => structuredClone(requireProvider(await load(), providerId))),
   };
 }

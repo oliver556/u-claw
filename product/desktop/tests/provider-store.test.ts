@@ -16,6 +16,8 @@ type Store = {
   setApiKey(providerId: string, apiKey: string): Promise<any>;
   clearApiKey(providerId: string): Promise<any>;
   getSelectedForRuntime(): Promise<any>;
+  getForRuntime(providerId: string): Promise<any>;
+  setNetwork(network: any): Promise<any>;
 };
 
 describe("provider store", () => {
@@ -103,6 +105,24 @@ describe("provider store", () => {
     const cleared = await store.clearApiKey("openai");
     expect(cleared.providers.find((provider: any) => provider.id === "openai")).toMatchObject({ apiKeyConfigured: false });
     expect(await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8")).not.toContain("sk-live-12345678");
+  });
+
+  it("persists validated proxy settings and exposes defaults without credentials", async () => {
+    const { store, dataDir } = await setup();
+    expect((await store.list()).network).toEqual({
+      httpProxy: null, httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1"],
+    });
+    await store.setApiKey("openai", "sk-main-only-secret");
+    const snapshot = await store.setNetwork({
+      httpProxy: "http://proxy.example.com:8080", httpsProxy: null,
+      noProxy: ["localhost", "127.0.0.1", "::1", ".example.com"],
+    });
+    expect(snapshot.network.httpProxy).toBe("http://proxy.example.com:8080");
+    expect(JSON.stringify(snapshot)).not.toContain("sk-main-only-secret");
+    expect(await store.getForRuntime("openai")).toMatchObject({ apiKey: "sk-main-only-secret" });
+    const disk = await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8");
+    expect(disk).toContain("proxy.example.com:8080");
+    await expect(store.setNetwork({ httpProxy: "socks5://127.0.0.1:1080", httpsProxy: null, noProxy: [] })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
   });
 
   it("serializes concurrent mutations so neither provider is lost", async () => {
