@@ -82,6 +82,27 @@ describe("provider IPC", () => {
     expect(ipcMain.removeHandler).toHaveBeenCalledWith(channel);
   });
 
+  it("coordinates provider mutations but not read-only requests", async () => {
+    const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const webContents = { mainFrame: {} };
+    const coordinateWrite = vi.fn(async <T>(operation: () => Promise<T>) => operation());
+    (desktop as any).registerIpc({
+      ipcMain: { handle: (channel: string, handler: any) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents: webContents,
+      windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
+      dispatchClient: vi.fn(),
+      providers: fakeStore(),
+      coordinateWrite,
+    });
+    const event = { sender: webContents, senderFrame: webContents.mainFrame };
+    const channel = (desktop as any).PROVIDER_IPC_CHANNEL;
+
+    await handlers.get(channel)!(event, { method: "providers.list", requestId: "read", params: {} });
+    await handlers.get(channel)!(event, { method: "providers.set-network", requestId: "write", params: { network: snapshot.network } });
+
+    expect(coordinateWrite).toHaveBeenCalledOnce();
+  });
+
   it("preload exposes only validated provider invoke on the fixed channel", async () => {
     let api: Record<string, any> | undefined;
     const invoke = vi.fn(async (_channel: string, request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: snapshot }));

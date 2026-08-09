@@ -67,7 +67,7 @@ export function validateGatewayLaunchOptions(value: unknown): GatewayLaunchOptio
   };
 }
 
-async function waitForGatewayReadiness(
+export async function waitForGatewayReadiness(
   options: Pick<GatewayStartupDependencies<ShowableWindow>,
     "checkHealth" | "now" | "sleep" | "timeoutMs" | "pollIntervalMs" | "signal">,
   port: number,

@@ -49,12 +49,13 @@ export interface DataMutationContext {
 
 export interface DataMutationCoordinator {
   runVersioned<T>(context: DataMutationContext, operation: () => Promise<T>): Promise<T>;
+  runTrackedWrite?<T>(operation: () => Promise<T>): Promise<T>;
 }
 
 export interface DataServiceOptions {
   dataDir: string;
   cacheDir?: string;
-  acquireConsistencyLease?(): Promise<{ release(): Promise<void> }>;
+  acquireConsistencyLease?(signal?: AbortSignal): Promise<{ release(): Promise<void> }>;
   workspaceShell?: WorkspaceShell;
   mutationCoordinator?: DataMutationCoordinator;
 }
@@ -170,12 +171,6 @@ function toMemoryEntry(id: string, info: FileInfo, version: string): MemoryEntry
 export function createDataService(options: DataServiceOptions) {
   if (!isAbsolute(options.dataDir)) throw new Error("Data root must be absolute.");
   const workspaceRoot = resolve(options.dataDir, DATA_ROOT_CONTRACT.roots.workspace);
-  const maintenance = options.cacheDir === undefined ? undefined : createMaintenanceService({
-    dataDir: options.dataDir,
-    cacheDir: options.cacheDir,
-    acquireConsistencyLease: options.acquireConsistencyLease,
-  });
-  let availableOverride: boolean | undefined;
   const mutationCoordinator: DataMutationCoordinator = options.mutationCoordinator ?? {
     runVersioned: async (context, operation) => {
       try {
@@ -202,6 +197,15 @@ export function createDataService(options: DataServiceOptions) {
       }
     },
   };
+  const maintenance = options.cacheDir === undefined ? undefined : createMaintenanceService({
+    dataDir: options.dataDir,
+    cacheDir: options.cacheDir,
+    acquireConsistencyLease: options.acquireConsistencyLease,
+    ...(mutationCoordinator.runTrackedWrite === undefined ? {} : {
+      runMutation: (operation) => mutationCoordinator.runTrackedWrite!(operation),
+    }),
+  });
+  let availableOverride: boolean | undefined;
 
   const getRoot = async (): Promise<Root> => {
     if (availableOverride === false) throw safeError("USB_MISSING", "U 盘工作区离线。", true);

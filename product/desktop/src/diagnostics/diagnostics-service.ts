@@ -10,11 +10,13 @@ import {
   DiagnosticsIpcRequestSchema,
   DiagnosticsIpcResponseSchema,
   DiagnosticLogEntrySchema,
+  DOCTOR_REPAIR_ACTION_IDS,
   UClawErrorSchema,
   normalizeKey,
   type DiagnosticLogEntry,
   type DiagnosticsIpcRequest,
   type DiagnosticsIpcResponse,
+  type DoctorRepairActionId,
   type RendererRedactedValue,
   type UClawClient,
   type UClawError,
@@ -59,7 +61,16 @@ export interface DiagnosticsServiceOptions {
   environment?: NodeJS.ProcessEnv;
   now?: () => number;
   networkProbe?(target: NetworkProbeTarget, signal: AbortSignal): Promise<NetworkProbeOutcome>;
-  fixtureDoctorRepairActionIds?: readonly string[];
+  doctorRepairActions?: Partial<Record<DoctorRepairActionId, (signal: AbortSignal) => Promise<void>>>;
+  auditDoctorRepair?(event: DoctorRepairAuditEvent): void;
+}
+
+export interface DoctorRepairAuditEvent {
+  event: "previewed" | "confirmed" | "started" | "succeeded" | "failed" | "cancelled" | "timed-out";
+  actionId: DoctorRepairActionId;
+  requestId: string;
+  previewToken: string;
+  timestamp: string;
 }
 
 export type NetworkProbeTarget = "portable-data" | "runtime" | "gateway" | "local-port" | "dns" | "provider" | "channels" | "capabilities";
@@ -67,7 +78,7 @@ export type NetworkProbeOutcome = "reachable" | "unreachable" | "unavailable" | 
 
 interface CleanupCandidate { name: string; size: number; modifiedAt: string; version: string }
 interface CleanupPreview { expiresAt: number; retentionDays: number; files: CleanupCandidate[] }
-interface DoctorPreview { actionId: string; expiresAt: number }
+interface DoctorPreview { actionId: DoctorRepairActionId; expiresAt: number }
 
 function safeError(code: UClawError["code"], message: string, retryable = false): UClawError {
   return UClawErrorSchema.parse({ code, message, retryable, recoveryActions: retryable ? ["retry"] : [], causeDetails: {} });
@@ -194,7 +205,10 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
   const controllers = new Map<string, AbortController>();
   let doctorGeneration = 0;
   let repairActive = false;
-  const fixtureDoctorRepairActionIds = new Set(options.fixtureDoctorRepairActionIds ?? []);
+  const doctorRepairActionIds = new Set<DoctorRepairActionId>(DOCTOR_REPAIR_ACTION_IDS);
+  const auditDoctorRepair = (event: Omit<DoctorRepairAuditEvent, "timestamp">): void => {
+    try { options.auditDoctorRepair?.({ ...event, timestamp: new Date(now()).toISOString() }); } catch { /* audit sinks cannot alter repair control flow */ }
+  };
 
   const defaultNetworkProbe = async (target: NetworkProbeTarget, signal: AbortSignal): Promise<NetworkProbeOutcome> => {
     try {
@@ -276,7 +290,7 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
     };
   };
 
-  const runDoctor = async (signal: AbortSignal, timeoutMs: number) => {
+  const runDoctor = async (signal: AbortSignal, timeoutMs: number, requestId: string) => {
     if (!options.diagnostics.doctor) throw safeError("UNAVAILABLE", "当前 OpenClaw runtime 未提供结构化诊断 adapter。");
     const generation = ++doctorGeneration;
     doctorPreviews.clear();
@@ -286,10 +300,13 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
       state: upstream.status === "ok" ? "healthy" as const : "issues" as const,
       adapter: "openclaw" as const,
       checks: upstream.checks.map((check) => {
-        const repair = check.repair && options.diagnostics.repair && fixtureDoctorRepairActionIds.has(check.repair.actionId) ? (() => {
+        const actionId = check.repair?.actionId;
+        const repair = actionId && doctorRepairActionIds.has(actionId as DoctorRepairActionId) && options.doctorRepairActions?.[actionId as DoctorRepairActionId] ? (() => {
           const previewToken = `doctor-preview-${randomUUID().toLowerCase()}`;
-          doctorPreviews.set(previewToken, { actionId: check.repair!.actionId, expiresAt: now() + PREVIEW_TTL_MS });
-          return { actionId: check.repair.actionId, label: "执行受控修复", previewToken };
+          const controlledActionId = actionId as DoctorRepairActionId;
+          doctorPreviews.set(previewToken, { actionId: controlledActionId, expiresAt: now() + PREVIEW_TTL_MS });
+          auditDoctorRepair({ event: "previewed", actionId: controlledActionId, requestId, previewToken });
+          return { actionId: controlledActionId, label: "执行受控修复", previewToken };
         })() : undefined;
         const summary = check.status === "pass" ? "检查通过。" : check.status === "warn" ? "检查需要注意。" : "检查未通过。";
         return { id: check.id, label: DOCTOR_LABELS[check.id] ?? "OpenClaw 检查项", level: check.severity, summary, ...(check.suggestion ? { suggestion: repair ? "可使用 OpenClaw 提供的受控修复。" : "请在 OpenClaw 中查看脱敏诊断。" } : {}), ...(repair ? { repair } : {}) };
@@ -497,23 +514,32 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
           break;
         }
         case "config.export": result = await createExport(request.params.fileName, `${(await redactedConfig()).content}\n`); break;
-        case "doctor.run": result = await runDoctor(controller.signal, request.params.timeoutMs ?? 10_000); break;
+        case "doctor.run": result = await runDoctor(controller.signal, request.params.timeoutMs ?? 10_000, request.requestId); break;
         case "doctor.repair": {
-          if (!fixtureDoctorRepairActionIds.has(request.params.actionId)) throw safeError("UNAVAILABLE", "当前生产 adapter 无权威 Doctor 修复动作契约。");
+          const executor = options.doctorRepairActions?.[request.params.actionId];
+          if (!executor) throw safeError("UNAVAILABLE", "当前生产 runtime 未注册该 Doctor 修复动作。");
           const preview = doctorPreviews.get(request.params.previewToken);
           doctorPreviews.delete(request.params.previewToken);
           if (!preview || preview.expiresAt < now() || preview.actionId !== request.params.actionId) throw safeError("CONFLICT", "修复预览已过期，请重新运行 Doctor。", true);
-          if (!options.diagnostics.repair) throw safeError("UNAVAILABLE", "当前 OpenClaw runtime 未提供受控修复 adapter。");
           if (repairActive) throw safeError("CONFLICT", "已有 Doctor 修复正在执行。", true);
           doctorPreviews.clear();
+          auditDoctorRepair({ event: "confirmed", actionId: request.params.actionId, requestId: request.requestId, previewToken: request.params.previewToken });
           repairActive = true;
           const timeoutMs = request.params.timeoutMs ?? 10_000;
           try {
-            await withTimeout((adapterSignal) => options.diagnostics.repair!(request.params.actionId, adapterSignal), controller.signal, timeoutMs);
-            result = await runDoctor(controller.signal, timeoutMs);
-          } finally {
-            repairActive = false;
-          }
+            auditDoctorRepair({ event: "started", actionId: request.params.actionId, requestId: request.requestId, previewToken: request.params.previewToken });
+            await withTimeout((signal) => {
+              const execution = Promise.resolve().then(() => executor(signal));
+              void execution.finally(() => { repairActive = false; }).catch(() => undefined);
+              return execution;
+            }, controller.signal, timeoutMs);
+            auditDoctorRepair({ event: "succeeded", actionId: request.params.actionId, requestId: request.requestId, previewToken: request.params.previewToken });
+            result = await runDoctor(controller.signal, timeoutMs, request.requestId);
+          } catch (caught) {
+            const event = controller.signal.aborted ? "cancelled" : caught instanceof DOMException && caught.name === "TimeoutError" ? "timed-out" : "failed";
+            auditDoctorRepair({ event, actionId: request.params.actionId, requestId: request.requestId, previewToken: request.params.previewToken });
+            throw caught;
+          } finally { /* executor settlement releases the global repair slot */ }
           break;
         }
         case "network.run": result = await runNetworkDiagnostics(controller.signal, request.params.timeoutMs); break;

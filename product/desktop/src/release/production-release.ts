@@ -101,6 +101,7 @@ export function createProductionReleaseService(
   paths: PortableDesktopPaths,
   source: ProductionReleaseConfigSource = process.env,
   fetchImpl: typeof fetch = fetch,
+  runMutation?: <T>(operation: () => Promise<T>) => Promise<T>,
 ) {
   const parsed = parseProductionReleaseConfig(source);
   const configuration = parsed.ok ? parsed.value : undefined;
@@ -121,6 +122,7 @@ export function createProductionReleaseService(
     trustedKeys: configuration?.trustedKeys ?? {},
     revokedKeyIds: configuration?.revokedKeyIds ?? new Set(),
     configurationError: parsed.ok ? undefined : parsed.message,
+    runMutation,
     async fetchManifest(channel, signal) {
       if (!configuration) throw new Error("Release feed is not configured.");
       const response = await fetchImpl(new URL(`${channel}.json`, configuration.baseUrl), { signal, redirect: "error", credentials: "omit" });

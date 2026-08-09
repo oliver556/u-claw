@@ -325,4 +325,42 @@ describe("data service", () => {
       params: { candidateIds: ["cache:electron"], previewToken: preview.result.previewToken, confirmed: true },
     })).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
   });
+
+  it("tracks cleanup background work through the runtime mutation coordinator", async () => {
+    const { dataDir } = await fixture();
+    const cacheRoot = await mkdtemp(join(tmpdir(), "uclaw-maintenance-cache-"));
+    const cacheDir = join(cacheRoot, "runtime");
+    await mkdir(join(cacheDir, "electron"), { recursive: true });
+    await writeFile(join(cacheDir, "electron", "entry.bin"), "cache");
+    await writeFile(join(cacheRoot, ".uclaw-cache.json"), `${JSON.stringify({ schemaVersion: 1, product: "U-Claw", purpose: "rebuildable-cache" })}\n`);
+    let releaseMutation!: () => void;
+    let trackedWrites = 0;
+    const runTrackedWrite = async <T>(operation: () => Promise<T>): Promise<T> => {
+      trackedWrites += 1;
+      await new Promise<void>((resolve) => { releaseMutation = resolve; });
+      return operation();
+    };
+    const service = createDataService({
+      dataDir,
+      cacheDir,
+      mutationCoordinator: {
+        runVersioned: async (_context, operation) => operation(),
+        runTrackedWrite,
+      },
+    });
+    const preview = await service.dispatch({ method: "cleanup.preview", requestId: "preview", params: { candidateIds: ["cache:electron"] } });
+    if (!preview.ok || preview.method !== "cleanup.preview") throw new Error("preview failed");
+    const execute = await service.dispatch({
+      method: "cleanup.execute", requestId: "execute",
+      params: { candidateIds: ["cache:electron"], previewToken: preview.result.previewToken, confirmed: true },
+    });
+    if (!execute.ok || execute.method !== "cleanup.execute") throw new Error("execute failed");
+
+    await vi.waitFor(() => expect(trackedWrites).toBe(1));
+    expect(await service.dispatch({ method: "maintenance.operation-get", requestId: "before-release", params: { operationId: execute.result.id } }))
+      .toMatchObject({ ok: true, result: { state: "queued" } });
+    releaseMutation();
+    await vi.waitFor(async () => expect(await service.dispatch({ method: "maintenance.operation-get", requestId: "after-release", params: { operationId: execute.result.id } }))
+      .toMatchObject({ ok: true, result: { state: "completed" } }));
+  });
 });

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { bootstrapDesktopApp, createProductionDataService, requireChannelRuntime, requireElectronClient, runDesktopMain, validateRendererUrl } from "../src/main.js";
+import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
   it("rejects production startup without a real UClawClient", () => {
@@ -20,27 +21,61 @@ describe("Electron client wiring", () => {
     expect(requireChannelRuntime({ channels: runtime } as any)).toBe(runtime);
   });
 
-  it("keeps production factory reset unavailable without an OpenClaw consistency coordinator", async () => {
+  it("coordinates production backup, restore, and factory reset with the managed Gateway lifecycle", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-data-"));
     const cacheRoot = await mkdtemp(join(tmpdir(), "uclaw-main-cache-"));
     const cacheDir = join(cacheRoot, "runtime");
     await mkdir(join(dataDir, "uclaw"), { recursive: true });
+    await mkdir(join(dataDir, "workspace", "memory"), { recursive: true });
     await mkdir(join(cacheDir, "electron"), { recursive: true });
     await writeFile(join(dataDir, "uclaw", "settings.json"), "owned");
+    await writeFile(join(dataDir, "workspace", "memory", "note.md"), "before");
     await writeFile(join(cacheDir, "electron", "entry.bin"), "cache");
     await writeFile(join(cacheRoot, ".uclaw-cache.json"), `${JSON.stringify({ schemaVersion: 1, product: "U-Claw", purpose: "rebuildable-cache" })}\n`);
     try {
-      const service = createProductionDataService({ dataDir, cacheDir });
+      const stop = vi.fn(async () => undefined);
+      const start = vi.fn(async () => undefined);
+      const coordinator = new ProductionRuntimeConsistencyCoordinator({ stop, start });
+      const service = createProductionDataService({ dataDir, cacheDir }, undefined, coordinator);
+      const waitForTerminal = async (operationId: string) => {
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const response = await service.dispatch({ method: "maintenance.operation-get", requestId: `operation-${attempt}`, params: { operationId } });
+          if (response.ok && response.method === "maintenance.operation-get" && ["completed", "failed", "cancelled", "needs-recovery"].includes(response.result.state)) return response.result;
+          await new Promise((resolve) => setTimeout(resolve, 2));
+        }
+        throw new Error("maintenance operation did not finish");
+      };
+
+      const backupPreview = await service.dispatch({ method: "backup.preview", requestId: "backup-preview", params: { collectionIds: ["openclaw-memory"], trigger: "manual", retainLatest: 3 } });
+      if (!backupPreview.ok || backupPreview.method !== "backup.preview") throw new Error("backup preview failed");
+      expect(backupPreview.result.consistency).toBe("coordinated");
+      const backup = await service.dispatch({ method: "backup.create", requestId: "backup-create", params: { collectionIds: ["openclaw-memory"], previewToken: backupPreview.result.previewToken, trigger: "manual", retainLatest: 3, confirmed: true } });
+      if (!backup.ok || backup.method !== "backup.create") throw new Error("backup create failed");
+      expect(await waitForTerminal(backup.result.id)).toMatchObject({ state: "completed" });
+      const backups = await service.dispatch({ method: "backup.list", requestId: "backup-list", params: {} });
+      if (!backups.ok || backups.method !== "backup.list") throw new Error("backup list failed");
+      await writeFile(join(dataDir, "workspace", "memory", "note.md"), "after");
+      const restorePreview = await service.dispatch({ method: "backup.restore-preview", requestId: "restore-preview", params: { backupId: backups.result.items[0]!.id, collectionIds: ["openclaw-memory"] } });
+      if (!restorePreview.ok || restorePreview.method !== "backup.restore-preview") throw new Error("restore preview failed");
+      const restore = await service.dispatch({ method: "backup.restore", requestId: "restore", params: { backupId: backups.result.items[0]!.id, collectionIds: ["openclaw-memory"], previewToken: restorePreview.result.previewToken, confirmed: true } });
+      if (!restore.ok || restore.method !== "backup.restore") throw new Error("restore failed");
+      expect(await waitForTerminal(restore.result.id)).toMatchObject({ state: "completed" });
+      expect(await readFile(join(dataDir, "workspace", "memory", "note.md"), "utf8")).toBe("before");
+
       const preview = await service.dispatch({ method: "factory-reset.preview", requestId: "reset-preview", params: {} });
       if (!preview.ok || preview.method !== "factory-reset.preview") throw new Error("preview failed");
-      expect(preview.result).toMatchObject({ consistency: "runtime-coordination-required" });
+      expect(preview.result).toMatchObject({ consistency: "coordinated" });
 
-      await expect(service.dispatch({
+      const reset = await service.dispatch({
         method: "factory-reset.execute", requestId: "reset-execute",
         params: { previewToken: preview.result.previewToken, confirmation: "RESET U-CLAW", confirmed: true },
-      })).resolves.toMatchObject({ ok: false, error: { code: "UNAVAILABLE" } });
-      expect(await readFile(join(dataDir, "uclaw", "settings.json"), "utf8")).toBe("owned");
-      expect(await readFile(join(cacheDir, "electron", "entry.bin"), "utf8")).toBe("cache");
+      });
+      if (!reset.ok || reset.method !== "factory-reset.execute") throw new Error("factory reset failed");
+      expect(await waitForTerminal(reset.result.id)).toMatchObject({ state: "completed" });
+      await expect(readFile(join(dataDir, "uclaw", "settings.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(join(cacheDir, "electron", "entry.bin"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      expect(stop).toHaveBeenCalledTimes(3);
+      expect(start).toHaveBeenCalledTimes(3);
     } finally {
       await Promise.all([dataDir, cacheRoot].map((path) => rm(path, { recursive: true, force: true })));
     }
@@ -338,6 +373,45 @@ describe("runDesktopMain", () => {
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     child.exitCode = 0;
     child.emit("exit", 0, null);
+  });
+
+  it("restarts the owned Gateway through the production consistency coordinator", async () => {
+    class FakeChild extends EventEmitter {
+      exitCode: number | null = null;
+      killed = false;
+      constructor(readonly pid: number) { super(); }
+      kill = vi.fn(() => {
+        queueMicrotask(() => {
+          this.exitCode = 0;
+          this.emit("exit", 0, null);
+        });
+        return true;
+      });
+    }
+    const children = [new FakeChild(8201), new FakeChild(8202)];
+    const spawn = vi.fn(() => children[spawn.mock.calls.length - 1]!);
+    const coordinator = new ProductionRuntimeConsistencyCoordinator();
+    await runDesktopMain({
+      spawn,
+      consistencyCoordinator: coordinator,
+      buildGatewayLaunchOptions: (port) => ({ executable: "node", args: [String(port)] }),
+      requiredMethods: [],
+      probeCapabilities: async () => ({ helloOk: true, methods: [] }),
+      dispatchClient: vi.fn(),
+      selectPort: async () => 18794,
+      fetch: async () => ({ ok: true }),
+      now: () => 0,
+      sleep: async () => undefined,
+    }, {
+      app: { requestSingleInstanceLock: () => true, quit: vi.fn(), whenReady: async () => undefined, on: vi.fn() },
+      createWindow: async () => ({ show: vi.fn(), isDestroyed: () => false, isMinimized: () => false, restore: vi.fn(), focus: vi.fn() }),
+      registerIpc: vi.fn(),
+    });
+
+    await coordinator.restartManagedGateway();
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(children[0]!.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(coordinator.getState()).toEqual({ phase: "idle" });
   });
 
   it("times out a hanging health request and rolls back the gateway", async () => {

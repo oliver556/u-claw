@@ -2,7 +2,7 @@ import { chmod, link, mkdir, mkdtemp, readFile, rename, symlink, truncate, utime
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createMaintenanceService } from "../src/data/maintenance-service.js";
 
@@ -25,11 +25,11 @@ async function fixture(coordinated = true, hooks: Partial<Parameters<typeof crea
   await writeFile(join(cacheDir, "electron", "entry.bin"), "cache-data");
   await writeFile(join(cacheDir, "temp", "download.tmp"), "temporary");
   const service = createMaintenanceService({
-    ...hooks,
     dataDir,
     cacheDir,
     acquireConsistencyLease: coordinated ? async () => ({ release: async () => undefined }) : undefined,
     createId: (() => { let index = 0; return (prefix) => `${prefix}-20260809-${++index}`; })(),
+    ...hooks,
   });
   return { root, dataDir, cacheDir, service };
 }
@@ -331,6 +331,27 @@ describe("maintenance service", () => {
     expect((await restarted.listBackups()).find((item) => item.id === backupId)).toMatchObject({ state: "incomplete" });
   });
 
+  it("keeps the restore journal when operation failure and rollback failure combine", async () => {
+    let failRestore = false;
+    const { dataDir, service } = await fixture(true, {
+      async beforeRestoreWrite() {
+        if (failRestore) throw new Error("restore write failed");
+      },
+      async beforeRestoreRollback() { throw new Error("rollback failed"); },
+    });
+    const backupPreview = await service.previewBackup(["openclaw-memory"]);
+    const backup = service.createBackup({ collectionIds: ["openclaw-memory"], previewToken: backupPreview.previewToken, trigger: "manual", retainLatest: 3 });
+    expect((await waitForTerminal(service, backup.id)).state).toBe("completed");
+    const backupId = (await service.listBackups())[0]!.id;
+    await writeFile(join(dataDir, "workspace", "MEMORY.md"), "changed");
+    const restorePreview = await service.previewRestore(backupId, ["openclaw-memory"]);
+    failRestore = true;
+    const restore = service.restoreBackup({ backupId, collectionIds: ["openclaw-memory"], previewToken: restorePreview.previewToken });
+
+    expect(await waitForTerminal(service, restore.id)).toMatchObject({ state: "needs-recovery", phase: "needs-recovery" });
+    expect(await service.storageStats()).toMatchObject({ state: "damaged" });
+  });
+
   it("reports orphaned backup staging as a manual recovery state after restart", async () => {
     const { dataDir, cacheDir } = await fixture();
     await mkdir(join(dataDir, "backups", ".backup-interrupted.staging"), { recursive: true });
@@ -346,6 +367,24 @@ describe("maintenance service", () => {
     expect(preview.consistency).toBe("runtime-coordination-required");
     expect(() => service.executeFactoryReset({ previewToken: preview.previewToken }))
       .toThrow(expect.objectContaining({ code: "UNAVAILABLE" }));
+  });
+
+  it("releases the consistency lease when the portable data root disappears after acquisition", async () => {
+    let dataDir = "";
+    const release = vi.fn(async () => undefined);
+    const acquired = vi.fn(async () => {
+      await rename(dataDir, `${dataDir}-missing`);
+      return { release };
+    });
+    const fixtureState = await fixture(true, { acquireConsistencyLease: acquired });
+    dataDir = fixtureState.dataDir;
+    const preview = await fixtureState.service.previewFactoryReset();
+
+    const reset = fixtureState.service.executeFactoryReset({ previewToken: preview.previewToken });
+
+    expect(await waitForTerminal(fixtureState.service, reset.id)).toMatchObject({ state: "failed" });
+    expect(acquired).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
   });
 
   it("factory reset deletes only owned state while preserving user files and backups", async () => {
@@ -393,6 +432,49 @@ describe("maintenance service", () => {
     const resumed = restarted.executeFactoryReset({ previewToken: resumePreview.previewToken });
     expect((await waitForTerminal(restarted, resumed.id)).state).toBe("completed");
     expect(await restarted.storageStats()).toMatchObject({ state: "available" });
+  });
+
+  it("keeps factory reset recovery state when managed Gateway restart fails", async () => {
+    const { dataDir, cacheDir } = await fixture();
+    const service = createMaintenanceService({
+      dataDir,
+      cacheDir,
+      acquireConsistencyLease: async () => ({ release: async () => { throw new Error("restart failed"); } }),
+    });
+    const preview = await service.previewFactoryReset();
+    const reset = service.executeFactoryReset({ previewToken: preview.previewToken });
+
+    expect(await waitForTerminal(service, reset.id)).toMatchObject({ state: "needs-recovery", phase: "needs-recovery" });
+    expect(await service.storageStats()).toMatchObject({ state: "damaged" });
+  });
+
+  it("keeps factory reset recovery state when journal cleanup fails", async () => {
+    const { service } = await fixture(true, {
+      async beforeFactoryResetJournalCleanup() { throw new Error("journal cleanup failed"); },
+    });
+    const preview = await service.previewFactoryReset();
+    const reset = service.executeFactoryReset({ previewToken: preview.previewToken });
+
+    expect(await waitForTerminal(service, reset.id)).toMatchObject({ state: "needs-recovery", phase: "needs-recovery" });
+    expect(await service.storageStats()).toMatchObject({ state: "damaged" });
+  });
+
+  it("releases the consistency lease when the portable data root disappears", async () => {
+    const { root, dataDir, cacheDir } = await fixture();
+    let released = false;
+    const service = createMaintenanceService({
+      dataDir,
+      cacheDir,
+      acquireConsistencyLease: async () => {
+        await rename(dataDir, join(root, "removed-during-backup"));
+        return { release: async () => { released = true; } };
+      },
+    });
+    const preview = await service.previewBackup(["openclaw-memory"]);
+    const backup = service.createBackup({ collectionIds: ["openclaw-memory"], previewToken: preview.previewToken, trigger: "manual", retainLatest: 3 });
+
+    expect(await waitForTerminal(service, backup.id)).toMatchObject({ state: "failed" });
+    expect(released).toBe(true);
   });
 
   it("fails factory reset closed when a scanned file changes identity", async () => {

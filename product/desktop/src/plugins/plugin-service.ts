@@ -263,10 +263,12 @@ export async function createPluginService({
   dataDir,
   client,
   runtime,
+  runMutation = (operation) => operation(),
 }: {
   dataDir: string;
   client: PluginRegistryClient;
   runtime: PluginRuntimeAdapter;
+  runMutation?: <T>(operation: () => Promise<T>) => Promise<T>;
 }): Promise<PluginService> {
   const capabilityDir = join(dataDir, "capabilities");
   const transactionDir = join(capabilityDir, ".plugin-transactions");
@@ -392,7 +394,7 @@ export async function createPluginService({
   const start = (slug: string, action: PluginOperation["action"], task: (id: string) => Promise<void>): PluginOperation => {
     const operation: PluginOperation = { id: randomUUID(), slug, action, state: "queued", progress: 0, phase: "queued" };
     operations.set(operation.id, operation);
-    const running = enqueue(async () => {
+    const running = enqueue(() => runMutation(async () => {
       updateOperation(operation.id, { state: "running", progress: 5, phase: "downloading" });
       try {
         await task(operation.id);
@@ -400,6 +402,8 @@ export async function createPluginService({
       } catch {
         updateOperation(operation.id, { state: "failed", phase: "failed", error: "Plugin operation failed. Retry or restart U-Claw for recovery." });
       }
+    })).catch(() => {
+      updateOperation(operation.id, { state: "failed", phase: "failed", error: "Plugin operation failed. Retry or restart U-Claw for recovery." });
     });
     tasks.set(operation.id, running);
     void running.finally(() => tasks.delete(operation.id));

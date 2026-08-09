@@ -99,7 +99,15 @@ async function recoverTransactions(transactionDir: string, statePath: string): P
   }
 }
 
-export async function createSkillService({ dataDir, client }: { dataDir: string; client: SkillHubClient }): Promise<SkillService> {
+export async function createSkillService({
+  dataDir,
+  client,
+  runMutation = (operation) => operation(),
+}: {
+  dataDir: string;
+  client: SkillHubClient;
+  runMutation?: <T>(operation: () => Promise<T>) => Promise<T>;
+}): Promise<SkillService> {
   const root = join(dataDir, "capabilities");
   const skillsDir = join(root, "skills");
   const transactionDir = join(root, ".skill-transactions");
@@ -165,7 +173,7 @@ export async function createSkillService({ dataDir, client }: { dataDir: string;
   const start = (slug: string, action: SkillOperation["action"], task: (id: string) => Promise<void>): SkillOperation => {
     const operation: SkillOperation = { id: randomUUID(), slug, action, state: "queued", progress: 0, phase: "queued" };
     operations.set(operation.id, operation);
-    const running = Promise.resolve().then(async () => {
+    const running = Promise.resolve().then(() => runMutation(async () => {
       updateOperation(operation.id, { state: "running", progress: 5, phase: "downloading" });
       try {
         await task(operation.id);
@@ -173,6 +181,8 @@ export async function createSkillService({ dataDir, client }: { dataDir: string;
       } catch (error) {
         updateOperation(operation.id, { state: "failed", phase: "failed", error: "Skill operation failed. Retry or restart U-Claw for recovery." });
       }
+    })).catch(() => {
+      updateOperation(operation.id, { state: "failed", phase: "failed", error: "Skill operation failed. Retry or restart U-Claw for recovery." });
     });
     tasks.set(operation.id, running);
     void running.finally(() => tasks.delete(operation.id));

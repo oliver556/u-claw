@@ -86,6 +86,7 @@ export interface RegisterIpcDependencies {
   dispatchData?(request: DataIpcRequest): Promise<unknown>;
   dispatchDiagnostics?(request: DiagnosticsIpcRequest): Promise<unknown>;
   dispatchRelease?(request: ReleaseIpcRequest): Promise<unknown>;
+  coordinateWrite?<T>(operation: () => Promise<T>): Promise<T>;
   diagnosticsTimeoutMs?: number;
 }
 
@@ -131,11 +132,34 @@ export function registerIpc({
   dispatchData,
   dispatchDiagnostics,
   dispatchRelease,
+  coordinateWrite = (operation) => operation(),
   diagnosticsTimeoutMs = 15_000,
 }: RegisterIpcDependencies): () => void {
+  const providerWriteMethods = new Set([
+    "providers.create", "providers.update", "providers.remove", "providers.set-enabled",
+    "providers.move", "providers.select", "providers.set-api-key", "providers.clear-api-key",
+    "providers.set-network",
+  ]);
+  const clientWriteMethods = new Set([
+    "gateway.reconnect", "sessions.create", "sessions.rename", "sessions.remove",
+    "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group",
+    "session-organizer.assign-group", "chat.send", "models.select-for-session",
+  ]);
+  const attachmentWriteMethods = new Set(["select", "import", "prepare", "remove"]);
+  const channelWriteMethods = new Set([
+    "channels.create", "channels.update", "channels.remove", "channels.set-enabled", "channels.test",
+    "channels.reconnect", "channels.wechat-login-start", "channels.wechat-login-refresh",
+    "channels.wechat-login-cancel", "channels.wechat-reconnect", "channels.wechat-logout",
+  ]);
+  const mcpWriteMethods = new Set([
+    "mcp.create", "mcp.update", "mcp.remove", "mcp.set-enabled", "mcp.test", "mcp.reconnect", "mcp.confirm-risk",
+  ]);
+  const diagnosticsWriteMethods = new Set(["logs.export", "logs.cleanup", "config.export"]);
+  const releaseWriteMethods = new Set(["release.install", "uninstall.execute"]);
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
     organizer,
+    runMutation: coordinateWrite,
     sendEvent: (event) => authorizedWebContents.send?.(CLIENT_IPC_EVENT_CHANNEL, event),
   });
   const dispatch = clientDispatcher ?? dispatchClient;
@@ -198,7 +222,8 @@ export function registerIpc({
 
     let response: unknown;
     try {
-      response = await dispatch(parsed.data);
+      const operation = () => dispatch(parsed.data);
+      response = await (clientDispatcher === undefined && clientWriteMethods.has(parsed.data.method) ? coordinateWrite(operation) : operation());
     } catch (error) {
       const known = UClawErrorSchema.safeParse(error);
       return IpcResponseSchema.parse({
@@ -224,21 +249,25 @@ export function registerIpc({
     if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid attachment IPC request.");
     const request = parsed.data;
     try {
-      let result: unknown = null;
-      if (request.method === "select") {
-        if (selectAttachments === undefined) throw safeError("UNAVAILABLE", "Attachment selection is unavailable.");
-        const selected = await selectAttachments();
-        result = await Promise.all(selected.map((input) => attachments.import(input)));
-      }
-      if (request.method === "import") result = await attachments.import(request.params);
-      if (request.method === "get") result = await attachments.get(request.params.attachmentId);
-      if (request.method === "prepare") {
-        const states = [];
-        for await (const attachment of attachments.prepare(request.params.attachmentId)) states.push(attachment);
-        result = states;
-      }
-      if (request.method === "cancel") await attachments.cancel(request.params.attachmentId);
-      if (request.method === "remove") await attachments.remove(request.params.attachmentId);
+      const invoke = async () => {
+        let result: unknown = null;
+        if (request.method === "select") {
+          if (selectAttachments === undefined) throw safeError("UNAVAILABLE", "Attachment selection is unavailable.");
+          const selected = await selectAttachments();
+          result = await Promise.all(selected.map((input) => attachments.import(input)));
+        }
+        if (request.method === "import") result = await attachments.import(request.params);
+        if (request.method === "get") result = await attachments.get(request.params.attachmentId);
+        if (request.method === "prepare") {
+          const states = [];
+          for await (const attachment of attachments.prepare(request.params.attachmentId)) states.push(attachment);
+          result = states;
+        }
+        if (request.method === "cancel") await attachments.cancel(request.params.attachmentId);
+        if (request.method === "remove") await attachments.remove(request.params.attachmentId);
+        return result;
+      };
+      const result = await (attachmentWriteMethods.has(request.method) ? coordinateWrite(invoke) : invoke());
       return AttachmentIpcResponseSchema.parse({ method: request.method, requestId: request.requestId, ok: true, result });
     } catch (error) {
       return AttachmentIpcResponseSchema.parse({
@@ -253,7 +282,8 @@ export function registerIpc({
     const parsed = ProviderIpcRequestSchema.safeParse(payload);
     if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid provider IPC request.");
     try {
-      return ProviderIpcResponseSchema.parse(await providerDispatcher(parsed.data));
+      const operation = () => providerDispatcher(parsed.data);
+      return ProviderIpcResponseSchema.parse(await (providerWriteMethods.has(parsed.data.method) ? coordinateWrite(operation) : operation()));
     } catch (error) {
       return ProviderIpcResponseSchema.parse({
         method: parsed.data.method,
@@ -301,7 +331,8 @@ export function registerIpc({
     const parsed = ChannelIpcRequestSchema.safeParse(payload);
     if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid channel IPC request.");
     try {
-      return ChannelIpcResponseSchema.parse(await channelDispatcher(parsed.data));
+      const operation = () => channelDispatcher(parsed.data);
+      return ChannelIpcResponseSchema.parse(await (channelWriteMethods.has(parsed.data.method) ? coordinateWrite(operation) : operation()));
     } catch (error) {
       return ChannelIpcResponseSchema.parse({
         method: parsed.data.method,
@@ -316,7 +347,10 @@ export function registerIpc({
     authorize(event);
     const parsed = McpIpcRequestSchema.safeParse(payload);
     if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid MCP IPC request.");
-    try { return McpIpcResponseSchema.parse(await mcpDispatcher(parsed.data)); }
+    try {
+      const operation = () => mcpDispatcher(parsed.data);
+      return McpIpcResponseSchema.parse(await (mcpWriteMethods.has(parsed.data.method) ? coordinateWrite(operation) : operation()));
+    }
     catch (error) {
       return McpIpcResponseSchema.parse({ method: parsed.data.method, requestId: parsed.data.requestId, ok: false, error: toRendererSafeError(error) });
     }
@@ -353,7 +387,7 @@ export function registerIpc({
     const timedOut = Symbol("diagnostics-timeout");
     try {
       const response = await Promise.race([
-        dispatchDiagnostics(request),
+        diagnosticsWriteMethods.has(request.method) ? coordinateWrite(() => dispatchDiagnostics(request)) : dispatchDiagnostics(request),
         new Promise<typeof timedOut>((resolveTimeout) => {
           timer = setTimeout(() => resolveTimeout(timedOut), diagnosticsTimeoutMs);
           timer.unref?.();
@@ -395,7 +429,8 @@ export function registerIpc({
     const parsed = ReleaseIpcRequestSchema.safeParse(payload);
     if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid release IPC request.");
     try {
-      const response = ReleaseIpcResponseSchema.parse(await dispatchRelease(parsed.data));
+      const operation = () => dispatchRelease(parsed.data);
+      const response = ReleaseIpcResponseSchema.parse(await (releaseWriteMethods.has(parsed.data.method) ? coordinateWrite(operation) : operation()));
       if (response.method !== parsed.data.method || response.requestId !== parsed.data.requestId) throw new Error("Release response correlation failed.");
       return response;
     } catch {

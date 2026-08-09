@@ -14,14 +14,14 @@ import {
   LOCKED_OPENCLAW_VERSION,
 } from "@uclaw/shared";
 
-import { GatewayProcessManager, type SpawnGateway } from "./gateway/gateway-process.js";
+import { GatewayProcessManager, type GatewayLaunchOptions, type SpawnGateway } from "./gateway/gateway-process.js";
 import {
   checkGatewayHealth,
   type GatewayCapabilityProbeResult,
   type GatewayHealthDependencies,
 } from "./gateway/health-check.js";
 import { selectGatewayPort } from "./gateway/port-selector.js";
-import { startGatewayAndCreateWindow, type ShowableWindow } from "./gateway/startup.js";
+import { startGatewayAndCreateWindow, validateGatewayLaunchOptions, waitForGatewayReadiness, type ShowableWindow } from "./gateway/startup.js";
 import {
   applyPortableEnvironmentToLaunchOptions,
   type PortableDesktopPaths,
@@ -40,6 +40,7 @@ import { createChannelStore } from "./channels/channel-store.js";
 import type { ChannelRuntime } from "./channels/channel-dispatcher.js";
 import { createMcpStore } from "./mcp/mcp-store.js";
 import { createDataService } from "./data/data-service.js";
+import { ProductionRuntimeConsistencyCoordinator } from "./data/production-consistency-coordinator.js";
 import { createDiagnosticsService, type DiagnosticsRuntimeInfo } from "./diagnostics/diagnostics-service.js";
 import { createOpenClawMcpRuntime } from "./mcp/mcp-runtime.js";
 import { createReleaseDispatcher } from "./release/release-dispatcher.js";
@@ -61,10 +62,13 @@ interface ElectronWorkspaceShell {
 export function createProductionDataService(
   paths: Pick<PortableDesktopPaths, "dataDir" | "cacheDir">,
   electronShell?: ElectronWorkspaceShell,
+  consistencyCoordinator?: ProductionRuntimeConsistencyCoordinator,
 ) {
   return createDataService({
     dataDir: paths.dataDir,
     cacheDir: paths.cacheDir,
+    acquireConsistencyLease: consistencyCoordinator?.acquireConsistencyLease.bind(consistencyCoordinator),
+    mutationCoordinator: consistencyCoordinator,
     workspaceShell: electronShell ? {
       invoke: async (action, target) => {
         await target.verify();
@@ -205,6 +209,7 @@ export interface DesktopMainOptions {
   readinessPollIntervalMs?: number;
   gatewayStopTimeoutMs?: number;
   gatewayKillTimeoutMs?: number;
+  consistencyCoordinator?: ProductionRuntimeConsistencyCoordinator;
 }
 
 export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
@@ -245,6 +250,51 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
   const now = options.now ?? Date.now;
   const startupController = new AbortController();
   const stopGateway = (): Promise<void> => gatewayProcess.stop();
+  let managedPort: number | undefined;
+  let managedLaunchOptions: GatewayLaunchOptions | undefined;
+  const buildManagedLaunchOptions = (port: number): GatewayLaunchOptions => {
+    const launchOptions = validateGatewayLaunchOptions(options.buildGatewayLaunchOptions(port));
+    managedPort = port;
+    managedLaunchOptions = launchOptions;
+    return launchOptions;
+  };
+  options.consistencyCoordinator?.bindLifecycle({
+    stop: async (signal) => {
+      signal?.throwIfAborted();
+      await gatewayProcess.stop();
+    },
+    start: async (signal) => {
+      if (managedPort === undefined || managedLaunchOptions === undefined) throw new Error("Managed Gateway launch state is unavailable.");
+      const restartController = new AbortController();
+      const restartSignal = signal ? AbortSignal.any([signal, restartController.signal]) : restartController.signal;
+      const identity = gatewayProcess.start(managedLaunchOptions);
+      try {
+        await waitForGatewayReadiness({
+          checkHealth: (port, deadlineMs, currentIdentity, healthSignal) => checkGatewayHealth({
+            isProcessAlive: () => gatewayProcess.getOwnedPid() === currentIdentity.pid && gatewayProcess.getOwnedInstanceId() === currentIdentity.instanceId,
+            baseUrl: `http://127.0.0.1:${port}`,
+            fetch: fetchHealth,
+            now,
+            deadlineMs,
+            signal: healthSignal,
+            requiredMethods: options.requiredMethods,
+            probeCapabilities: (probeSignal) => options.probeCapabilities(port, probeSignal),
+          }),
+          now,
+          sleep: options.sleep ?? defaultSleep,
+          timeoutMs: options.readinessTimeoutMs ?? 30_000,
+          pollIntervalMs: options.readinessPollIntervalMs ?? 250,
+          signal: restartSignal,
+        }, managedPort, identity);
+      } catch (error) {
+        restartController.abort();
+        try { await gatewayProcess.stop(); } catch (stopError) {
+          throw new AggregateError([error, stopError], "Managed Gateway restart and cleanup failed.", { cause: error });
+        }
+        throw error;
+      }
+    },
+  });
 
   return bootstrapDesktopApp({
     app: runtime.app,
@@ -258,7 +308,7 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
           start: (launchOptions) => gatewayProcess.start(launchOptions),
           stop: stopGateway,
         },
-        buildLaunchOptions: options.buildGatewayLaunchOptions,
+        buildLaunchOptions: buildManagedLaunchOptions,
         checkHealth: (port, deadlineMs, identity, signal) => checkGatewayHealth({
           isProcessAlive: () =>
             gatewayProcess.getOwnedPid() === identity.pid &&
@@ -381,10 +431,15 @@ export async function startElectronMain(
   const { app, BrowserWindow, dialog, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const client = requireElectronClient(options.client);
+  const consistencyCoordinator = new ProductionRuntimeConsistencyCoordinator();
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
   const attachments = options.attachments ?? client.attachments;
   const providers = createProviderStore({ dataDir: portablePaths.dataDir });
-  const skills = await createSkillService({ dataDir: portablePaths.dataDir, client: createFixtureSkillHubClient() });
+  const skills = await createSkillService({
+    dataDir: portablePaths.dataDir,
+    client: createFixtureSkillHubClient(),
+    runMutation: (operation) => consistencyCoordinator.runTrackedWrite(operation),
+  });
   const pluginRuntime = options.pluginRuntime ?? await createOpenClawCliPluginRuntime({
     runtimeRoot: process.env.UCLAW_RUNTIME_DIR ?? "",
     executable: process.execPath,
@@ -394,12 +449,13 @@ export async function startElectronMain(
     dataDir: portablePaths.dataDir,
     client: createFixturePluginRegistryClient(),
     runtime: pluginRuntime,
+    runMutation: (operation) => consistencyCoordinator.runTrackedWrite(operation),
   });
   const channelRuntime = requireChannelRuntime(client);
   const channels = createChannelStore({ dataDir: portablePaths.dataDir, capability: channelRuntime.capability });
   const mcpRuntime = createOpenClawMcpRuntime(client);
   const mcp = createMcpStore({ dataDir: portablePaths.dataDir, runtimeAvailable: mcpRuntime.capability });
-  const data = createProductionDataService(portablePaths, shell);
+  const data = createProductionDataService(portablePaths, shell, consistencyCoordinator);
   const diagnosticsRuntime: DiagnosticsRuntimeInfo = {
     productVersion: "0.1.0",
     openClawVersion: LOCKED_OPENCLAW_VERSION,
@@ -411,8 +467,15 @@ export async function startElectronMain(
     configPath: portablePaths.openClawConfig,
     diagnostics: client.diagnostics,
     runtime: diagnosticsRuntime,
+    doctorRepairActions: { "gateway-restart": (signal) => consistencyCoordinator.restartManagedGateway(signal) },
+    auditDoctorRepair: (event) => console.info("U-Claw Doctor repair audit", JSON.stringify(event)),
   });
-  const release = options.releaseService ?? createProductionReleaseService(portablePaths);
+  const release = options.releaseService ?? createProductionReleaseService(
+    portablePaths,
+    process.env,
+    fetch,
+    (operation) => consistencyCoordinator.runTrackedWrite(operation),
+  );
   let gatewayPort: number | undefined;
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -424,6 +487,7 @@ export async function startElectronMain(
   });
   const runtimeOptions: DesktopMainOptions = {
     ...options,
+    consistencyCoordinator,
     buildGatewayLaunchOptions: (port) => {
       gatewayPort = port;
       diagnosticsRuntime.gatewayPort = port;
@@ -467,6 +531,7 @@ export async function startElectronMain(
       dispatchData: data.dispatch,
       dispatchDiagnostics: diagnostics.dispatch,
       dispatchRelease: createReleaseDispatcher(release),
+      coordinateWrite: (operation) => consistencyCoordinator.runTrackedWrite(operation),
       selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
         const selected = await dialog.showOpenDialog({
           properties: ["openFile", "multiSelections"],

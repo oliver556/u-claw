@@ -34,4 +34,27 @@ describe("attachment selection IPC", () => {
     });
     await expect(handlers.get(ATTACHMENT_IPC_CHANNEL)!({ sender: webContents, senderFrame: webContents.mainFrame }, { method: "import", requestId: "drop-1", params: { path: "C:\\secret.txt" } })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
   });
+
+  it("allows attachment cancellation without entering the mutation gate", async () => {
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => Promise<unknown>>();
+    const webContents = { mainFrame: {} };
+    let coordinatedWrites = 0;
+    const coordinateWrite = async <T>(operation: () => Promise<T>): Promise<T> => {
+      coordinatedWrites += 1;
+      return operation();
+    };
+    const attachments = new AttachmentManager();
+    const attachment = await attachments.import({ name: "fixture.txt", mediaType: "text/plain", size: 8, contentBase64: "Y29udHJhY3Q=" });
+    registerIpc({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents: webContents,
+      windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
+      dispatchClient: vi.fn(), attachments, coordinateWrite,
+    });
+
+    await expect(handlers.get(ATTACHMENT_IPC_CHANNEL)!({ sender: webContents, senderFrame: webContents.mainFrame }, {
+      method: "cancel", requestId: "cancel-1", params: { attachmentId: attachment.id },
+    })).resolves.toMatchObject({ ok: true, result: null });
+    expect(coordinatedWrites).toBe(0);
+  });
 });

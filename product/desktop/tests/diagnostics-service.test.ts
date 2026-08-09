@@ -183,17 +183,20 @@ describe("diagnostics service", () => {
   it("projects structured OpenClaw doctor checks and binds repairs to a server preview", async () => {
     const paths = await fixture();
     const repair = vi.fn(async () => undefined);
+    const audit = vi.fn();
     const service = createDiagnosticsService({
       ...paths, runtime: { productVersion: "0.1.0" },
-      fixtureDoctorRepairActionIds: ["gateway-restart"],
-      diagnostics: { ...diagnostics(), doctor: async () => ({ status: "issues" as const, checks: [{ id: "gateway", title: "Gateway", severity: "error" as const, status: "fail" as const, summary: "Gateway unavailable.", suggestion: "Restart managed Gateway.", repair: { actionId: "gateway-restart", label: "Restart Gateway" } }] }), repair },
+      doctorRepairActions: { "gateway-restart": repair },
+      auditDoctorRepair: audit,
+      diagnostics: { ...diagnostics(), doctor: async () => ({ status: "issues" as const, checks: [{ id: "gateway", title: "Gateway", severity: "error" as const, status: "fail" as const, summary: "Gateway unavailable.", suggestion: "Restart managed Gateway.", repair: { actionId: "gateway-restart", label: "Restart Gateway" } }] }) },
     });
     const result = await service.dispatch({ method: "doctor.run", requestId: "doctor-1", params: {} });
     expect(result).toMatchObject({ ok: true, result: { state: "issues", adapter: "openclaw", checks: [{ id: "gateway", level: "error", repair: { actionId: "gateway-restart" } }] } });
     if (!result.ok || result.method !== "doctor.run") return;
     const previewToken = result.result.checks[0]!.repair!.previewToken;
     await expect(service.dispatch({ method: "doctor.repair", requestId: "repair-1", params: { actionId: "gateway-restart", previewToken, confirmed: true } })).resolves.toMatchObject({ ok: true });
-    expect(repair).toHaveBeenCalledWith("gateway-restart", expect.any(AbortSignal));
+    expect(repair).toHaveBeenCalledWith(expect.any(AbortSignal));
+    expect(audit.mock.calls.map(([event]) => event.event)).toEqual(["previewed", "confirmed", "started", "succeeded", "previewed"]);
     await expect(service.dispatch({ method: "doctor.repair", requestId: "repair-stale", params: { actionId: "gateway-restart", previewToken, confirmed: true } })).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
   });
 
@@ -202,7 +205,7 @@ describe("diagnostics service", () => {
     const repair = vi.fn(async () => undefined);
     const service = createDiagnosticsService({
       ...paths, runtime: { productVersion: "0.1.0" },
-      diagnostics: { ...diagnostics(), doctor: async () => ({ status: "issues" as const, checks: [{ id: "gateway", title: "Gateway", severity: "error" as const, status: "fail" as const, summary: "failed", repair: { actionId: "gateway-restart", label: "repair" } }] }), repair },
+      diagnostics: { ...diagnostics(), doctor: async () => ({ status: "issues" as const, checks: [{ id: "gateway", title: "Gateway", severity: "error" as const, status: "fail" as const, summary: "failed", repair: { actionId: "gateway-restart", label: "repair" } }] }) },
     });
     const result = await service.dispatch({ method: "doctor.run", requestId: "doctor-production", params: {} });
     expect(result).toMatchObject({ ok: true, result: { checks: [{ id: "gateway" }] } });
@@ -219,9 +222,9 @@ describe("diagnostics service", () => {
     const repair = vi.fn(async () => undefined);
     const service = createDiagnosticsService({
       ...paths, runtime: { productVersion: "0.1.0" },
-      fixtureDoctorRepairActionIds: ["gateway-restart"],
+      doctorRepairActions: { "gateway-restart": repair },
       diagnostics: {
-        ...diagnostics(), repair,
+        ...diagnostics(),
         doctor: async () => ++run === 1 ? ({ status: "issues" as const, checks: [{
           id: "gateway", title: "C:\\Users\\alice\\secret", severity: "error" as const, status: "fail" as const,
           summary: "Authorization: Bearer token-secret", suggestion: "rm -rf /",
@@ -293,9 +296,9 @@ describe("diagnostics service", () => {
     let call = 0;
     const service = createDiagnosticsService({
       ...paths, runtime: { productVersion: "0.1.0" },
-      fixtureDoctorRepairActionIds: ["gateway-restart", "runtime-restart"],
+      doctorRepairActions: { "gateway-restart": async () => undefined },
       diagnostics: {
-        ...diagnostics(), repair: async () => undefined,
+        ...diagnostics(),
         doctor: async () => new Promise((resolve) => { if (++call === 1) firstResolve = resolve; else secondResolve = resolve; }),
       },
     });
@@ -305,7 +308,7 @@ describe("diagnostics service", () => {
     await vi.waitFor(() => expect(call).toBe(2));
     secondResolve({ status: "issues", checks: [{ id: "gateway", title: "Gateway", severity: "error", status: "fail", summary: "failed", repair: { actionId: "gateway-restart", label: "repair" } }] });
     await expect(second).resolves.toMatchObject({ ok: true });
-    firstResolve({ status: "issues", checks: [{ id: "runtime", title: "Runtime", severity: "error", status: "fail", summary: "failed", repair: { actionId: "runtime-restart", label: "repair" } }] });
+    firstResolve({ status: "issues", checks: [{ id: "runtime", title: "Runtime", severity: "error", status: "fail", summary: "failed", repair: { actionId: "gateway-restart", label: "repair" } }] });
     await expect(first).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
   });
 
@@ -351,14 +354,13 @@ describe("diagnostics service", () => {
     let repairCalls = 0;
     const service = createDiagnosticsService({
       ...paths, runtime: { productVersion: "0.1.0" },
-      fixtureDoctorRepairActionIds: ["gateway-restart", "runtime-restart"],
+      doctorRepairActions: { "gateway-restart": async () => { repairCalls += 1; return new Promise(() => undefined); } },
       diagnostics: {
         ...diagnostics(),
         doctor: async () => ({ status: "issues", checks: [
           { id: "gateway", title: "Gateway", severity: "error", status: "fail", summary: "failed", repair: { actionId: "gateway-restart", label: "repair" } },
-          { id: "runtime", title: "Runtime", severity: "error", status: "fail", summary: "failed", repair: { actionId: "runtime-restart", label: "repair" } },
+          { id: "runtime", title: "Runtime", severity: "error", status: "fail", summary: "failed", repair: { actionId: "gateway-restart", label: "repair" } },
         ] }),
-        repair: async () => { repairCalls += 1; return new Promise(() => undefined); },
       },
     });
     const doctor = await service.dispatch({ method: "doctor.run", requestId: "doctor-two-repairs", params: { timeoutMs: 1000 } });
@@ -371,5 +373,61 @@ describe("diagnostics service", () => {
     expect(repairCalls).toBe(1);
     await service.dispatch({ method: "operations.cancel", requestId: "repair-cancel", params: { operationRequestId: "repair-first" } });
     await expect(first).resolves.toMatchObject({ ok: false, error: { code: "CANCELLED" } });
+  });
+
+  it("times out a controlled Doctor repair and records the bounded outcome", async () => {
+    const paths = await fixture();
+    const audit = vi.fn();
+    const service = createDiagnosticsService({
+      ...paths,
+      runtime: { productVersion: "0.1.0" },
+      auditDoctorRepair: audit,
+      doctorRepairActions: { "gateway-restart": async () => new Promise(() => undefined) },
+      diagnostics: { ...diagnostics(), doctor: async () => ({ status: "issues", checks: [{ id: "gateway", title: "Gateway", severity: "error", status: "fail", summary: "failed", repair: { actionId: "gateway-restart", label: "repair" } }] }) },
+    });
+    const doctor = await service.dispatch({ method: "doctor.run", requestId: "doctor-timeout-preview", params: {} });
+    if (!doctor.ok || doctor.method !== "doctor.run") throw new Error("doctor preview failed");
+    const repair = doctor.result.checks[0]!.repair!;
+
+    await expect(service.dispatch({ method: "doctor.repair", requestId: "repair-timeout", params: { actionId: "gateway-restart", previewToken: repair.previewToken, confirmed: true, timeoutMs: 250 } }))
+      .resolves.toMatchObject({ ok: false, error: { code: "TIMEOUT" } });
+    expect(audit.mock.calls.map(([event]) => event.event)).toContain("timed-out");
+  });
+
+  it("keeps Doctor repair busy after timeout until the executor actually settles", async () => {
+    const paths = await fixture();
+    let finishFirst!: () => void;
+    let calls = 0;
+    const service = createDiagnosticsService({
+      ...paths,
+      runtime: { productVersion: "0.1.0" },
+      doctorRepairActions: {
+        "gateway-restart": async () => {
+          calls += 1;
+          if (calls === 1) await new Promise<void>((resolve) => { finishFirst = resolve; });
+        },
+      },
+      diagnostics: { ...diagnostics(), doctor: async () => ({ status: "issues", checks: [{ id: "gateway", title: "Gateway", severity: "error", status: "fail", summary: "failed", repair: { actionId: "gateway-restart", label: "repair" } }] }) },
+    });
+    const preview = async (requestId: string) => {
+      const doctor = await service.dispatch({ method: "doctor.run", requestId, params: {} });
+      if (!doctor.ok || doctor.method !== "doctor.run") throw new Error("doctor preview failed");
+      return doctor.result.checks[0]!.repair!;
+    };
+    const first = await preview("doctor-timeout-busy-1");
+    await expect(service.dispatch({ method: "doctor.repair", requestId: "repair-timeout-busy-1", params: { actionId: first.actionId, previewToken: first.previewToken, confirmed: true, timeoutMs: 250 } }))
+      .resolves.toMatchObject({ ok: false, error: { code: "TIMEOUT" } });
+
+    const second = await preview("doctor-timeout-busy-2");
+    await expect(service.dispatch({ method: "doctor.repair", requestId: "repair-timeout-busy-2", params: { actionId: second.actionId, previewToken: second.previewToken, confirmed: true } }))
+      .resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+    expect(calls).toBe(1);
+
+    finishFirst();
+    await vi.waitFor(() => expect(calls).toBe(1));
+    const third = await preview("doctor-timeout-busy-3");
+    await expect(service.dispatch({ method: "doctor.repair", requestId: "repair-timeout-busy-3", params: { actionId: third.actionId, previewToken: third.previewToken, confirmed: true } }))
+      .resolves.toMatchObject({ ok: true });
+    expect(calls).toBe(2);
   });
 });
