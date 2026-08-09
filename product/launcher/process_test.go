@@ -60,12 +60,21 @@ func TestStartManagedProcessVerifiesEntrypointBeforeStarting(t *testing.T) {
 	verifyErr := errors.New("entrypoint identity changed")
 	lease := processTestLease(filepath.Dir(os.Args[0]))
 	lease.verifyErr = verifyErr
-	process, err := StartManagedProcess(ProcessSpec{Path: os.Args[0], Lease: lease})
+	sentinel := filepath.Join(t.TempDir(), "started")
+	process, err := StartManagedProcess(ProcessSpec{
+		Path:  os.Args[0],
+		Args:  []string{"-test.run=TestLauncherProcessHelper", "--", sentinel, "started"},
+		Env:   []string{"UCLAW_HELPER_MODE=write"},
+		Lease: lease,
+	})
 	if process != nil || !errors.Is(err, verifyErr) {
 		t.Fatalf("process=%#v err=%v", process, err)
 	}
 	if !reflect.DeepEqual(lease.verified, []string{os.Args[0]}) {
 		t.Fatalf("verified = %v", lease.verified)
+	}
+	if _, err := os.Stat(sentinel); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("process started and wrote sentinel: %v", err)
 	}
 }
 
