@@ -68,6 +68,11 @@ type Dependencies struct {
 	MonitorUSB          func(context.Context, string, time.Duration) error
 }
 
+type processWaitResult struct {
+	processErr error
+	leaseErr   error
+}
+
 func Run(ctx context.Context, deps Dependencies) error {
 	reporter := deps.Reporter
 	defer reporter.Close()
@@ -108,7 +113,6 @@ func Run(ctx context.Context, deps Dependencies) error {
 	if err != nil {
 		return reportFailure(reporter, err)
 	}
-	defer lease.Close()
 	reporter.State(StateStartingApp)
 	runtimeRoot := lease.RootPath()
 	entrypoint := filepath.Join(runtimeRoot, filepath.FromSlash(strings.ReplaceAll(manifest.Entrypoint, `\`, "/")))
@@ -120,20 +124,22 @@ func Run(ctx context.Context, deps Dependencies) error {
 		Lease: lease,
 	})
 	if err != nil {
-		return reportFailure(reporter, errors.Join(ErrAppStartFailed, err))
+		return reportFailure(reporter, errors.Join(ErrAppStartFailed, err, lease.Close()))
 	}
-	waitResult := make(chan error, 1)
-	go func() { waitResult <- process.Wait() }()
+	waitResult := make(chan processWaitResult, 1)
+	go func() {
+		waitResult <- processWaitResult{processErr: process.Wait(), leaseErr: lease.Close()}
+	}()
 	if deps.StartupGrace > 0 {
 		grace := time.NewTimer(deps.StartupGrace)
 		select {
-		case err := <-waitResult:
+		case result := <-waitResult:
 			grace.Stop()
-			return reportFailure(reporter, errors.Join(ErrAppExited, err))
+			return reportFailure(reporter, errors.Join(ErrAppExited, result.processErr, result.leaseErr))
 		case <-grace.C:
 			select {
-			case err := <-waitResult:
-				return reportFailure(reporter, errors.Join(ErrAppExited, err))
+			case result := <-waitResult:
+				return reportFailure(reporter, errors.Join(ErrAppExited, result.processErr, result.leaseErr))
 			default:
 			}
 		case <-ctx.Done():
@@ -157,8 +163,8 @@ func Run(ctx context.Context, deps Dependencies) error {
 	go func() { usbResult <- deps.MonitorUSB(monitorCtx, deps.Paths.USBRoot, deps.USBInterval) }()
 
 	select {
-	case err := <-waitResult:
-		if err != nil {
+	case result := <-waitResult:
+		if err := errors.Join(result.processErr, result.leaseErr); err != nil {
 			return reportFailure(reporter, errors.Join(ErrAppExited, err))
 		}
 		return nil
@@ -178,7 +184,9 @@ func Run(ctx context.Context, deps Dependencies) error {
 	}
 }
 
-func stopAndWait(process ChildProcess, waitResult <-chan error, timeout time.Duration) error {
+func stopAndWait(process ChildProcess, waitResult <-chan processWaitResult, timeout time.Duration) error {
+	// The waiter owns the runtime lease until the process exits. Stop failure or
+	// timeout returns without it, so future Wait or Close errors cannot be reported.
 	if err := process.Stop(); err != nil {
 		return err
 	}
@@ -188,8 +196,10 @@ func stopAndWait(process ChildProcess, waitResult <-chan error, timeout time.Dur
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
-	case <-waitResult:
-		return nil
+	case result := <-waitResult:
+		// Process termination commonly makes Wait return an error. Only lease
+		// cleanup failure changes the result of an intentional stop.
+		return result.leaseErr
 	case <-timer.C:
 		return ErrProcessStopFailed
 	}
