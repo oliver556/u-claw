@@ -45,6 +45,7 @@ func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 		EnsureHostCache:     EnsureHostCacheOwnership,
 		AcquireInstanceLock: AcquireInstanceLock,
 		PrepareRuntime:      prepareRuntimeForLaunch,
+		AcquireRuntime:      AcquireRuntimeLease,
 		CheckSequence:       CheckRuntimeSequence,
 		AcceptSequence:      AcceptRuntimeSequence,
 		FinalizeUpdate:      FinalizeUpdateTransaction,

@@ -10,12 +10,17 @@ import (
 	"time"
 )
 
+func processTestLease(root string) *fakeRuntimeLease {
+	return &fakeRuntimeLease{root: root}
+}
+
 func TestManagedProcessPassesExplicitArgumentsAndEnvironment(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "child output.txt")
 	process, err := StartManagedProcess(ProcessSpec{
-		Path: os.Args[0],
-		Args: []string{"-test.run=TestLauncherProcessHelper", "--", output, "argument with spaces"},
-		Env:  []string{"UCLAW_HELPER_MODE=write", "UCLAW_DATA_DIR=U盘数据"},
+		Path:  os.Args[0],
+		Args:  []string{"-test.run=TestLauncherProcessHelper", "--", output, "argument with spaces"},
+		Env:   []string{"UCLAW_HELPER_MODE=write", "UCLAW_DATA_DIR=U盘数据"},
+		Lease: processTestLease(filepath.Dir(os.Args[0])),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -34,9 +39,10 @@ func TestManagedProcessPassesExplicitArgumentsAndEnvironment(t *testing.T) {
 
 func TestManagedProcessStopTerminatesProcessGroup(t *testing.T) {
 	process, err := StartManagedProcess(ProcessSpec{
-		Path: os.Args[0],
-		Args: []string{"-test.run=TestLauncherProcessHelper", "--"},
-		Env:  []string{"UCLAW_HELPER_MODE=sleep"},
+		Path:  os.Args[0],
+		Args:  []string{"-test.run=TestLauncherProcessHelper", "--"},
+		Env:   []string{"UCLAW_HELPER_MODE=sleep"},
+		Lease: processTestLease(filepath.Dir(os.Args[0])),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -50,11 +56,25 @@ func TestManagedProcessStopTerminatesProcessGroup(t *testing.T) {
 	}
 }
 
+func TestStartManagedProcessVerifiesEntrypointBeforeStarting(t *testing.T) {
+	verifyErr := errors.New("entrypoint identity changed")
+	lease := processTestLease(filepath.Dir(os.Args[0]))
+	lease.verifyErr = verifyErr
+	process, err := StartManagedProcess(ProcessSpec{Path: os.Args[0], Lease: lease})
+	if process != nil || !errors.Is(err, verifyErr) {
+		t.Fatalf("process=%#v err=%v", process, err)
+	}
+	if !reflect.DeepEqual(lease.verified, []string{os.Args[0]}) {
+		t.Fatalf("verified = %v", lease.verified)
+	}
+}
+
 func TestStartManagedProcessRejectsUnsafeSpec(t *testing.T) {
 	for name, spec := range map[string]ProcessSpec{
-		"relative": {Path: "electron.exe"},
-		"nul-arg":  {Path: os.Args[0], Args: []string{"bad\x00arg"}},
-		"nul-env":  {Path: os.Args[0], Env: []string{"TOKEN=bad\x00value"}},
+		"relative":      {Path: "electron.exe", Lease: processTestLease(filepath.Dir(os.Args[0]))},
+		"nul-arg":       {Path: os.Args[0], Args: []string{"bad\x00arg"}, Lease: processTestLease(filepath.Dir(os.Args[0]))},
+		"nul-env":       {Path: os.Args[0], Env: []string{"TOKEN=bad\x00value"}, Lease: processTestLease(filepath.Dir(os.Args[0]))},
+		"missing-lease": {Path: os.Args[0]},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := StartManagedProcess(spec); !errors.Is(err, ErrProcessInvalid) {

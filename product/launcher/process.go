@@ -14,10 +14,11 @@ import (
 var ErrProcessInvalid = errors.New("process specification invalid")
 
 type ProcessSpec struct {
-	Path string
-	Args []string
-	Dir  string
-	Env  []string
+	Path  string
+	Args  []string
+	Dir   string
+	Env   []string
+	Lease RuntimeLease
 }
 
 type ManagedProcess struct {
@@ -39,6 +40,10 @@ func StartManagedProcess(spec ProcessSpec) (*ManagedProcess, error) {
 	command.Env = mergeEnvironment(os.Environ(), spec.Env)
 	container, err := prepareProcessContainer(command)
 	if err != nil {
+		return nil, err
+	}
+	if err := spec.Lease.VerifyEntrypoint(spec.Path); err != nil {
+		_ = container.close()
 		return nil, err
 	}
 	if err := command.Start(); err != nil {
@@ -79,7 +84,7 @@ func (process *ManagedProcess) closeContainer() {
 }
 
 func validateProcessSpec(spec ProcessSpec) error {
-	if !filepath.IsAbs(spec.Path) || (spec.Dir != "" && !filepath.IsAbs(spec.Dir)) {
+	if spec.Lease == nil || !filepath.IsAbs(spec.Path) || (spec.Dir != "" && !filepath.IsAbs(spec.Dir)) {
 		return ErrProcessInvalid
 	}
 	for _, argument := range spec.Args {

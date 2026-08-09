@@ -3,11 +3,51 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 )
+
+func TestAcquireRuntimeLeaseVerifiesRuntimeTree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "runtime.bin"), []byte("trusted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := runtimeTreeDigestAt(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := validRuntimeManifest()
+	manifest.RuntimeTreeSHA256 = digest
+
+	lease, err := AcquireRuntimeLease(root, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.RootPath() != root {
+		t.Fatalf("lease root = %q", lease.RootPath())
+	}
+	if err := lease.VerifyEntrypoint(filepath.Join(root, "runtime.bin")); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAcquireRuntimeLeaseMapsDigestErrorsToInvalidPackage(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Symlink("missing-target", filepath.Join(root, "changed-link")); err != nil {
+		t.Fatal(err)
+	}
+	manifest := validRuntimeManifest()
+	_, err := AcquireRuntimeLease(root, manifest)
+	if !errors.Is(err, ErrPackageInvalid) || errors.Is(err, ErrCachePreparationFailed) {
+		t.Fatalf("returned %v", err)
+	}
+}
 
 type recordingReporter struct {
 	states   []State
@@ -33,6 +73,27 @@ type fakeInstanceLock struct {
 
 func (lock *fakeInstanceLock) Close() error {
 	lock.closed = true
+	return nil
+}
+
+type fakeRuntimeLease struct {
+	root       string
+	verifyErr  error
+	verified   []string
+	closeCalls int
+}
+
+func (lease *fakeRuntimeLease) RootPath() string {
+	return lease.root
+}
+
+func (lease *fakeRuntimeLease) VerifyEntrypoint(path string) error {
+	lease.verified = append(lease.verified, path)
+	return lease.verifyErr
+}
+
+func (lease *fakeRuntimeLease) Close() error {
+	lease.closeCalls++
 	return nil
 }
 
@@ -88,6 +149,7 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 	manifest := validRuntimeManifest()
 	manifest.Entrypoint = `electron\electron.exe`
 	lock := &fakeInstanceLock{}
+	lease := &fakeRuntimeLease{root: filepath.Join(paths.CacheRoot, manifest.RuntimeID)}
 	var startedSpec ProcessSpec
 	return Dependencies{
 		Paths:              paths,
@@ -124,6 +186,12 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 			}
 			extracting()
 			return CacheResult{Path: filepath.Join(paths.CacheRoot, manifest.RuntimeID)}, nil
+		},
+		AcquireRuntime: func(root string, got Manifest) (RuntimeLease, error) {
+			if root != filepath.Join(paths.CacheRoot, manifest.RuntimeID) || !reflect.DeepEqual(got, manifest) {
+				t.Fatalf("runtime lease inputs differ")
+			}
+			return lease, nil
 		},
 		CheckSequence: func(cacheRoot string, got Manifest) error {
 			if cacheRoot != paths.HostCacheRoot || !reflect.DeepEqual(got, manifest) {
@@ -178,6 +246,12 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 	if startedSpec.Path != wantEntrypoint || startedSpec.Dir != filepath.Dir(wantEntrypoint) {
 		t.Fatalf("process path/dir = %q, %q", startedSpec.Path, startedSpec.Dir)
 	}
+	if startedSpec.Lease == nil || startedSpec.Lease.RootPath() != filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID) {
+		t.Fatalf("process lease = %#v", startedSpec.Lease)
+	}
+	if startedSpec.Lease.(*fakeRuntimeLease).closeCalls != 1 {
+		t.Fatalf("lease close calls = %d", startedSpec.Lease.(*fakeRuntimeLease).closeCalls)
+	}
 	wantEnv := []string{
 		"NODE_COMPILE_CACHE=" + filepath.Join(deps.Paths.HostCacheRoot, "cache", "node-compile"),
 		"OPENCLAW_CONFIG_PATH=" + filepath.Join(deps.Paths.DataDir, ".openclaw", "openclaw.json"),
@@ -194,6 +268,119 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 	}
 	if !reflect.DeepEqual(startedSpec.Env, wantEnv) {
 		t.Fatalf("process env = %v", startedSpec.Env)
+	}
+}
+
+func TestRunPreparesAcquiresAndStartsRuntimeInOrder(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	manifest := validRuntimeManifest()
+	manifest.Entrypoint = `electron\electron.exe`
+	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "leased-runtime")}
+	var events []string
+	deps.PrepareRuntime = func(context.Context, string, string, Manifest, func()) (CacheResult, error) {
+		events = append(events, "prepare")
+		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, manifest.RuntimeID)}, nil
+	}
+	deps.AcquireRuntime = func(root string, got Manifest) (RuntimeLease, error) {
+		events = append(events, "acquire")
+		if root != filepath.Join(deps.Paths.CacheRoot, manifest.RuntimeID) || !reflect.DeepEqual(got, manifest) {
+			t.Fatalf("acquire inputs differ")
+		}
+		return lease, nil
+	}
+	deps.StartProcess = func(spec ProcessSpec) (ChildProcess, error) {
+		events = append(events, "start")
+		if spec.Lease != lease {
+			t.Fatalf("process lease = %#v", spec.Lease)
+		}
+		want := filepath.Join(lease.RootPath(), "electron", "electron.exe")
+		if spec.Path != want || spec.Dir != filepath.Dir(want) {
+			t.Fatalf("process path/dir = %q, %q", spec.Path, spec.Dir)
+		}
+		return &fakeChildProcess{}, nil
+	}
+
+	if err := Run(context.Background(), deps); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(events, []string{"prepare", "acquire", "start"}) {
+		t.Fatalf("events = %v", events)
+	}
+	if lease.closeCalls != 1 {
+		t.Fatalf("lease close calls = %d", lease.closeCalls)
+	}
+}
+
+func TestRunDoesNotStartWhenRuntimeLeaseAcquisitionFails(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	acquireErr := errors.Join(ErrPackageInvalid, errors.New("runtime changed"))
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) {
+		return nil, acquireErr
+	}
+	started := false
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		started = true
+		return &fakeChildProcess{}, nil
+	}
+
+	if err := Run(context.Background(), deps); !errors.Is(err, ErrPackageInvalid) {
+		t.Fatalf("returned %v", err)
+	}
+	if started {
+		t.Fatal("process started")
+	}
+	want := [][2]string{{"E_PACKAGE_INVALID", "运行时文件校验失败，请重新下载 U-Claw。"}}
+	if !reflect.DeepEqual(reporter.failures, want) {
+		t.Fatalf("failures = %#v", reporter.failures)
+	}
+}
+
+func TestRunClosesRuntimeLeaseOnRepresentativeExitPaths(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  func(context.Context, context.CancelFunc, *Dependencies)
+	}{
+		{
+			name: "start failure",
+			run: func(_ context.Context, _ context.CancelFunc, deps *Dependencies) {
+				deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+					return nil, errors.New("start failed")
+				}
+			},
+		},
+		{
+			name: "normal exit",
+			run:  func(_ context.Context, _ context.CancelFunc, _ *Dependencies) {},
+		},
+		{
+			name: "cancellation",
+			run: func(_ context.Context, cancel context.CancelFunc, deps *Dependencies) {
+				process := &blockingChildProcess{result: make(chan error, 1)}
+				deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
+				deps.MonitorUSB = func(ctx context.Context, _ string, _ time.Duration) error {
+					cancel()
+					<-ctx.Done()
+					return ctx.Err()
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reporter := &recordingReporter{}
+			deps, _, _ := successfulDependencies(t, reporter)
+			lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime")}
+			deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			test.run(ctx, cancel, &deps)
+
+			_ = Run(ctx, deps)
+			if lease.closeCalls != 1 {
+				t.Fatalf("lease close calls = %d", lease.closeCalls)
+			}
+		})
 	}
 }
 
