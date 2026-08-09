@@ -185,24 +185,26 @@ func Run(ctx context.Context, deps Dependencies) error {
 }
 
 func stopAndWait(process ChildProcess, waitResult <-chan processWaitResult, timeout time.Duration) error {
-	// The waiter owns the runtime lease until the process exits. Stop failure or
-	// timeout returns without it, so future Wait or Close errors cannot be reported.
-	if err := process.Stop(); err != nil {
-		return err
-	}
+	stopErr := process.Stop()
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case result := <-waitResult:
-		// Process termination commonly makes Wait return an error. Only lease
-		// cleanup failure changes the result of an intentional stop.
-		return result.leaseErr
-	case <-timer.C:
-		return ErrProcessStopFailed
+	if stopErr == nil {
+		timer := time.NewTimer(timeout)
+		select {
+		case result := <-waitResult:
+			timer.Stop()
+			// Process termination commonly makes Wait return an error. Only lease
+			// cleanup failure changes the result of an intentional stop.
+			return result.leaseErr
+		case <-timer.C:
+			stopErr = ErrProcessStopFailed
+		}
 	}
+	// The launcher process owns the lease handles. It must remain alive after a
+	// stop failure or timeout until the child actually exits and releases them.
+	result := <-waitResult
+	return errors.Join(stopErr, result.leaseErr)
 }
 
 func portableProcessEnvironment(paths PortablePaths) []string {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,6 +143,18 @@ func (process *releasableStopFailingChildProcess) Wait() error {
 
 func (*releasableStopFailingChildProcess) Stop() error {
 	return errors.New("terminate failed")
+}
+
+type releasableTimeoutChildProcess struct {
+	result chan error
+}
+
+func (process *releasableTimeoutChildProcess) Wait() error {
+	return <-process.result
+}
+
+func (*releasableTimeoutChildProcess) Stop() error {
+	return nil
 }
 
 func (process *blockingChildProcess) Wait() error {
@@ -604,25 +617,7 @@ func TestRunPreservesUpdateWhenProcessExitsBeforeReadiness(t *testing.T) {
 	}
 }
 
-func TestRunDoesNotBlockWhenProcessStopFails(t *testing.T) {
-	reporter := &recordingReporter{}
-	deps, _, _ := successfulDependencies(t, reporter)
-	deps.AcceptSequence = func(string, Manifest) error { return ErrManifestInvalid }
-	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return &stopFailingChildProcess{}, nil }
-	result := make(chan error, 1)
-	go func() { result <- Run(context.Background(), deps) }()
-
-	select {
-	case err := <-result:
-		if !errors.Is(err, ErrManifestInvalid) {
-			t.Fatalf("returned %v", err)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("launcher blocked after process stop failed")
-	}
-}
-
-func TestRunKeepsRuntimeLeaseUntilWaitCompletesAfterStopFailure(t *testing.T) {
+func TestRunWaitsForProcessAfterStopFailure(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
 	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime")}
@@ -635,19 +630,54 @@ func TestRunKeepsRuntimeLeaseUntilWaitCompletesAfterStopFailure(t *testing.T) {
 	go func() { result <- Run(context.Background(), deps) }()
 	select {
 	case err := <-result:
-		if !errors.Is(err, ErrManifestInvalid) {
-			t.Fatalf("returned %v", err)
-		}
+		t.Fatalf("launcher exited before child: %v", err)
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("launcher blocked after process stop failed")
 	}
 	if lease.CloseCalls() != 0 {
 		t.Fatalf("lease closed before wait completed: %d", lease.CloseCalls())
 	}
 	process.result <- nil
-	deadline := time.Now().Add(time.Second)
-	for lease.CloseCalls() == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrManifestInvalid) || err.Error() == "" || !strings.Contains(err.Error(), "terminate failed") {
+			t.Fatalf("returned %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("launcher did not exit after child")
+	}
+	if lease.CloseCalls() != 1 {
+		t.Fatalf("lease close calls = %d", lease.CloseCalls())
+	}
+}
+
+func TestRunWaitsForProcessAfterStopTimeout(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.ProcessStopTimeout = 10 * time.Millisecond
+	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime")}
+	process := &releasableTimeoutChildProcess{result: make(chan error, 1)}
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
+	deps.AcceptSequence = func(string, Manifest) error { return ErrManifestInvalid }
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
+
+	result := make(chan error, 1)
+	go func() { result <- Run(context.Background(), deps) }()
+	select {
+	case err := <-result:
+		t.Fatalf("launcher exited before child: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if lease.CloseCalls() != 0 {
+		t.Fatalf("lease closed before wait completed: %d", lease.CloseCalls())
+	}
+	process.result <- nil
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrManifestInvalid) || !errors.Is(err, ErrProcessStopFailed) {
+			t.Fatalf("returned %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("launcher did not exit after child")
 	}
 	if lease.CloseCalls() != 1 {
 		t.Fatalf("lease close calls = %d", lease.CloseCalls())
