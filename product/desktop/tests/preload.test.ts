@@ -3,12 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CLIENT_IPC_CHANNEL,
   CLIENT_IPC_EVENT_CHANNEL,
+  IPC_CHANNELS,
+  RELEASE_IPC_CHANNEL,
   WINDOW_MAXIMIZED_EVENT_CHANNEL,
   WINDOW_IPC_CHANNEL,
 } from "../src/ipc/channels.js";
 import { installPreloadBridge } from "../src/ipc/preload-bridge.js";
 
 describe("installPreloadBridge", () => {
+  it("registers release in the fixed IPC channel inventory", () => {
+    expect(IPC_CHANNELS).toContain(RELEASE_IPC_CHANNEL);
+  });
+
   it("exposes only fixed window and client contract methods", async () => {
     const invoke = vi.fn(async (_channel: string, request: unknown) => {
       const { method, requestId } = request as { method: string; requestId: string };

@@ -1,6 +1,6 @@
 import {
   IpcEventSchema,
-  IpcResponseSchema,
+  ClientIpcResponseSchema,
   ApprovalRequestSchema,
   ChannelSummarySchema,
   DiagnosticSummarySchema,
@@ -22,10 +22,10 @@ import {
   redactRendererText,
   type ClientIpcEvent,
   type ClientIpcRequest,
+  type ClientIpcResponse,
   type ApprovalRequest,
   type ChannelSummary,
   type DiagnosticSummary,
-  type IpcResponse,
   type Message,
   type MessageEvent,
   type ModelSummary,
@@ -48,7 +48,7 @@ export interface ClientDispatcherDependencies {
 }
 
 export interface ClientDispatcher {
-  (request: ClientIpcRequest): Promise<IpcResponse>;
+  (request: ClientIpcRequest): Promise<ClientIpcResponse>;
   dispose(): void;
 }
 
@@ -361,9 +361,9 @@ function rendererSafeTool(tool: ToolCall): ToolCall {
   });
 }
 
-export function toRendererSafeResponse(response: IpcResponse): IpcResponse {
+export function toRendererSafeResponse(response: ClientIpcResponse): ClientIpcResponse {
   if (!response.ok) {
-    return IpcResponseSchema.parse({
+    return ClientIpcResponseSchema.parse({
       method: response.method,
       requestId: response.requestId,
       ok: false,
@@ -386,7 +386,7 @@ export function toRendererSafeResponse(response: IpcResponse): IpcResponse {
     case "diagnostics.list": result = response.result.map(rendererSafeDiagnostic); break;
     case "diagnostics.list-logs": result = rendererSafeLogPage(response.result); break;
   }
-  return IpcResponseSchema.parse({ ...response, result });
+  return ClientIpcResponseSchema.parse({ ...response, result });
 }
 
 export function createClientDispatcher({ client, organizer, sendEvent }: ClientDispatcherDependencies) {
@@ -423,11 +423,11 @@ export function createClientDispatcher({ client, organizer, sendEvent }: ClientD
     }
   };
 
-  const success = (request: ClientIpcRequest, result: unknown): IpcResponse => toRendererSafeResponse(IpcResponseSchema.parse({
+  const success = (request: ClientIpcRequest, result: unknown): ClientIpcResponse => toRendererSafeResponse(ClientIpcResponseSchema.parse({
     method: request.method, requestId: request.requestId, ok: true, result,
   }));
 
-  const dispatch = async (request: ClientIpcRequest): Promise<IpcResponse> => {
+  const dispatch = async (request: ClientIpcRequest): Promise<ClientIpcResponse> => {
     try {
       switch (request.method) {
         case "gateway.negotiate": return success(request, capabilitySetToWire(await client.gateway.negotiate()));
@@ -579,7 +579,7 @@ export function createClientDispatcher({ client, organizer, sendEvent }: ClientD
         }
       }
     } catch (error) {
-      return IpcResponseSchema.parse({
+      return ClientIpcResponseSchema.parse({
         method: request.method, requestId: request.requestId, ok: false, error: toRendererSafeError(error),
       });
     }

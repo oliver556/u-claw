@@ -1,10 +1,11 @@
 import { z } from "zod";
 
 import { DataIpcRequestSchema, DataIpcResponseSchema } from "./data.js";
-import { ReleaseIpcRequestSchema } from "./release.js";
+import { ReleaseIpcRequestSchema, ReleaseIpcResponseSchema } from "./release.js";
 export { ReleaseIpcRequestSchema, ReleaseIpcResponseSchema } from "./release.js";
 export { DataIpcRequestSchema, DataIpcResponseSchema } from "./data.js";
 export type { DataIpcRequest, DataIpcResponse } from "./data.js";
+import { DiagnosticsIpcRequestSchema, DiagnosticsIpcResponseSchema } from "./diagnostics.js";
 export { DiagnosticsIpcRequestSchema, DiagnosticsIpcResponseSchema } from "./diagnostics.js";
 export type { DiagnosticsIpcRequest, DiagnosticsIpcResponse } from "./diagnostics.js";
 
@@ -216,6 +217,9 @@ export const ClientIpcFailureResponseSchema = z
   .strict();
 export type ClientIpcFailureResponse = z.infer<typeof ClientIpcFailureResponseSchema>;
 
+export const ClientIpcResponseSchema = z.union([ClientIpcSuccessResponseSchema, ClientIpcFailureResponseSchema]);
+export type ClientIpcResponse = z.infer<typeof ClientIpcResponseSchema>;
+
 export const ClientIpcEventSchema = z.discriminatedUnion("event", [
   z.object({ event: z.literal("gateway.status"), subscriptionId: SubscriptionIdSchema, payload: GatewayStatusWireSchema }).strict(),
   z.object({ event: z.literal("chat.watch-event"), subscriptionId: SubscriptionIdSchema, payload: MessageEventSchema }).strict(),
@@ -224,7 +228,7 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
-export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, DataIpcRequestSchema, ReleaseIpcRequestSchema]);
+export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, DataIpcRequestSchema, DiagnosticsIpcRequestSchema, ReleaseIpcRequestSchema]);
 export type IpcRequest = z.infer<typeof IpcRequestSchema>;
 export const IpcResponseSchema = z.union([
   WindowIpcSuccessResponseSchema,
@@ -238,6 +242,8 @@ export const IpcResponseSchema = z.union([
   ChannelIpcResponseSchema,
   McpIpcResponseSchema,
   DataIpcResponseSchema,
+  DiagnosticsIpcResponseSchema,
+  ReleaseIpcResponseSchema,
 ]);
 export type IpcResponse = z.infer<typeof IpcResponseSchema>;
 export const IpcEventSchema = ClientIpcEventSchema;

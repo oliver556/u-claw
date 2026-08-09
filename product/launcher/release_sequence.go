@@ -5,13 +5,31 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 )
 
 const releaseSequenceName = ".uclaw-release-sequence.json"
 
 type releaseSequenceRecord struct {
-	SchemaVersion int    `json:"schemaVersion"`
-	Sequence      uint64 `json:"sequence"`
+	SchemaVersion  int    `json:"schemaVersion"`
+	Sequence       uint64 `json:"sequence"`
+	RuntimeSHA256  string `json:"runtimeSha256"`
+	SignatureValue string `json:"signatureValue"`
+}
+
+func runtimeSequenceIdentity(manifest Manifest) releaseSequenceRecord {
+	return releaseSequenceRecord{
+		SchemaVersion:  1,
+		Sequence:       manifest.Signature.Sequence,
+		RuntimeSHA256:  manifest.RuntimeSHA256,
+		SignatureValue: manifest.Signature.Value,
+	}
+}
+
+func sameRuntimeSequenceIdentity(record releaseSequenceRecord, manifest Manifest) bool {
+	return manifest.Signature != nil && record.Sequence == manifest.Signature.Sequence &&
+		strings.EqualFold(record.RuntimeSHA256, manifest.RuntimeSHA256) &&
+		record.SignatureValue == manifest.Signature.Value
 }
 
 func AcceptRuntimeSequence(cacheRoot string, manifest Manifest) error {
@@ -23,11 +41,14 @@ func AcceptRuntimeSequence(cacheRoot string, manifest Manifest) error {
 		return err
 	}
 	defer root.Close()
-	if manifest.Signature.Sequence < current {
+	if manifest.Signature.Sequence < current.Sequence {
 		return ErrManifestInvalid
 	}
-	if manifest.Signature.Sequence == current {
-		return nil
+	if manifest.Signature.Sequence == current.Sequence {
+		if sameRuntimeSequenceIdentity(current, manifest) {
+			return nil
+		}
+		return ErrManifestInvalid
 	}
 	temporary := releaseSequenceName + ".new"
 	_ = root.Remove(temporary)
@@ -35,7 +56,7 @@ func AcceptRuntimeSequence(cacheRoot string, manifest Manifest) error {
 	if err != nil {
 		return ErrManifestInvalid
 	}
-	encodeErr := json.NewEncoder(out).Encode(releaseSequenceRecord{SchemaVersion: 1, Sequence: manifest.Signature.Sequence})
+	encodeErr := json.NewEncoder(out).Encode(runtimeSequenceIdentity(manifest))
 	syncErr := out.Sync()
 	closeErr := out.Close()
 	if encodeErr != nil || syncErr != nil || closeErr != nil {
@@ -66,25 +87,26 @@ func CheckRuntimeSequence(cacheRoot string, manifest Manifest) error {
 	if root != nil {
 		root.Close()
 	}
-	if err != nil || manifest.Signature.Sequence < current {
+	if err != nil || manifest.Signature.Sequence < current.Sequence ||
+		(manifest.Signature.Sequence == current.Sequence && !sameRuntimeSequenceIdentity(current, manifest)) {
 		return ErrManifestInvalid
 	}
 	return nil
 }
 
-func readRuntimeSequence(cacheRoot string) (uint64, *os.Root, error) {
+func readRuntimeSequence(cacheRoot string) (releaseSequenceRecord, *os.Root, error) {
 	root, err := os.OpenRoot(cacheRoot)
 	if err != nil {
-		return 0, nil, ErrManifestInvalid
+		return releaseSequenceRecord{}, nil, ErrManifestInvalid
 	}
-	current := uint64(0)
+	current := releaseSequenceRecord{}
 	file, openErr := root.Open(releaseSequenceName)
 	if openErr == nil {
 		info, statErr := file.Stat()
 		if statErr != nil || !info.Mode().IsRegular() {
 			file.Close()
 			root.Close()
-			return 0, nil, ErrManifestInvalid
+			return releaseSequenceRecord{}, nil, ErrManifestInvalid
 		}
 		decoder := json.NewDecoder(io.LimitReader(file, 4097))
 		decoder.DisallowUnknownFields()
@@ -92,14 +114,15 @@ func readRuntimeSequence(cacheRoot string) (uint64, *os.Root, error) {
 		decodeErr := decoder.Decode(&record)
 		trailingErr := decoder.Decode(&struct{}{})
 		closeErr := file.Close()
-		if decodeErr != nil || !errors.Is(trailingErr, io.EOF) || closeErr != nil || record.SchemaVersion != 1 || record.Sequence == 0 {
+		if decodeErr != nil || !errors.Is(trailingErr, io.EOF) || closeErr != nil || record.SchemaVersion != 1 || record.Sequence == 0 ||
+			!sha256Pattern.MatchString(record.RuntimeSHA256) || record.SignatureValue == "" || len(record.SignatureValue) > 256 {
 			root.Close()
-			return 0, nil, ErrManifestInvalid
+			return releaseSequenceRecord{}, nil, ErrManifestInvalid
 		}
-		current = record.Sequence
+		current = record
 	} else if !errors.Is(openErr, os.ErrNotExist) {
 		root.Close()
-		return 0, nil, ErrManifestInvalid
+		return releaseSequenceRecord{}, nil, ErrManifestInvalid
 	}
 	return current, root, nil
 }

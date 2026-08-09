@@ -4,6 +4,7 @@ import {
   ClientIpcEventSchema,
   ClientIpcRequestSchema,
   ClientIpcSuccessResponseSchema,
+  IpcRequestSchema,
   IpcResponseSchema,
   WindowIpcRequestSchema,
 } from "../src/index.js";
@@ -34,6 +35,36 @@ describe("IPC contracts", () => {
         causeDetails: { operation: "window.close" },
       },
     })).toBeTruthy();
+  });
+
+  it("parses release responses through the unified response contract", () => {
+    expect(IpcResponseSchema.parse({
+      method: "release.check",
+      requestId: "release-check-1",
+      ok: true,
+      result: {
+        state: "unavailable",
+        checkedAt: "2026-08-10T00:00:00.000Z",
+        currentVersion: "0.1.0",
+        channel: "stable",
+        retryable: false,
+        message: "发布更新配置缺失。",
+      },
+    })).toBeTruthy();
+  });
+
+  it("parses diagnostics requests and responses through the unified contract", () => {
+    expect(IpcRequestSchema.parse({ method: "system.get", requestId: "doctor-1", params: {} })).toBeTruthy();
+    expect(IpcResponseSchema.parse({ method: "system.get", requestId: "doctor-1", ok: true, result: {
+      product: { name: "U-Claw", version: "0.1.0" },
+      runtime: { node: "24.15.0", electron: "40.10.6", openclaw: "2026.7.1" },
+      platform: "win32",
+      architecture: "x64",
+      gateway: { status: "offline", port: null },
+      proxy: null,
+      portableData: { state: "available", writable: true },
+      storage: { totalBytes: 1, freeBytes: 1, usedBytes: 0 },
+    } })).toBeTruthy();
   });
 
   it("expresses every public client method as an explicit request", () => {
