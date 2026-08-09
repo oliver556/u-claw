@@ -1,4 +1,4 @@
-import type { AttachmentIpcRequest, AttachmentIpcResponse, ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, RecoveryAction, WindowIpcRequest } from "@uclaw/shared";
+import type { AttachmentIpcRequest, AttachmentIpcResponse, ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, ProviderIpcRequest, ProviderIpcResponse, RecoveryAction, WindowIpcRequest } from "@uclaw/shared";
 import { Modal, Tooltip } from "antd";
 import { Copy, Cpu, HardDrive, Maximize2, Minus, Radio, RotateCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -19,6 +19,9 @@ declare global {
       };
       attachments?: {
         invoke(request: AttachmentIpcRequest): Promise<AttachmentIpcResponse>;
+      };
+      providers?: {
+        invoke(request: ProviderIpcRequest): Promise<ProviderIpcResponse>;
       };
     };
   }
