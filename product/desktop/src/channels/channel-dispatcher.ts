@@ -12,6 +12,7 @@ import {
 } from "@uclaw/shared";
 
 import type { ChannelStore } from "./channel-store.js";
+import { createWechatLoginCoordinator, type WechatPersonalRuntime } from "./wechat-login-coordinator.js";
 
 export interface ChannelRuntime {
   capability(kind: ChannelKind): boolean;
@@ -20,6 +21,7 @@ export interface ChannelRuntime {
   test?(channel: ChannelConfigEntry, signal: AbortSignal): Promise<{ status: ChannelStatus; error?: ChannelErrorSummary }>;
   start?(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
   stop?(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
+  wechat?: WechatPersonalRuntime;
 }
 
 export type ChannelDispatcher = ((request: ChannelIpcRequest) => Promise<ChannelIpcResponse>) & { dispose(): void };
@@ -47,6 +49,17 @@ export function createChannelDispatcher(store: ChannelStore, runtime: ChannelRun
   const now = options.now ?? (() => new Date());
   const active = new Map<string, AbortController>();
   const queues = new Map<string, Promise<void>>();
+  const unavailableWechatRuntime: WechatPersonalRuntime = {
+    capability: async () => ({ available: false, pluginStatus: "unknown", reason: "OpenClaw 2026.7.1-2 未提供可安全定向个人微信的扫码与退出 RPC。" }),
+    status: async () => { throw new Error("WeChat runtime unavailable"); },
+    start: async () => { throw new Error("WeChat runtime unavailable"); },
+    poll: async () => { throw new Error("WeChat runtime unavailable"); },
+    refresh: async () => { throw new Error("WeChat runtime unavailable"); },
+    cancel: async () => { throw new Error("WeChat runtime unavailable"); },
+    reconnect: async () => { throw new Error("WeChat runtime unavailable"); },
+    logout: async () => { throw new Error("WeChat runtime unavailable"); },
+  };
+  const wechat = createWechatLoginCoordinator(runtime.wechat ?? unavailableWechatRuntime, { now, timeoutMs });
   const serialize = <T>(
     requestId: string,
     channelId: string,
@@ -190,11 +203,19 @@ export function createChannelDispatcher(store: ChannelStore, runtime: ChannelRun
         break;
       }
       case "channels.cancel": active.get(request.params.operationRequestId)?.abort(new Error("Channel operation cancelled")); result = null; break;
+      case "channels.wechat-status": result = await wechat.status(); break;
+      case "channels.wechat-login-start": result = await wechat.start(request.params.force ?? false); break;
+      case "channels.wechat-login-poll": result = await wechat.poll(request.params.flowId, request.params.qrGeneration); break;
+      case "channels.wechat-login-refresh": result = await wechat.refresh(request.params.flowId, request.params.qrGeneration); break;
+      case "channels.wechat-login-cancel": result = await wechat.cancel(request.params.flowId); break;
+      case "channels.wechat-reconnect": result = await wechat.reconnect(); break;
+      case "channels.wechat-logout": result = await wechat.logout(); break;
     }
     return ChannelIpcResponseSchema.parse({ method: request.method, requestId: request.requestId, ok: true, result });
   };
   return Object.assign(dispatch, {
     dispose: (): void => {
+      wechat.dispose();
       for (const controller of active.values()) controller.abort(new Error("Channel dispatcher disposed"));
       active.clear();
     },

@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import type { ChannelConfigEntry, ChannelDraft, ChannelIpcRequest } from "@uclaw/shared";
+import type { ChannelConfigEntry, ChannelDraft, ChannelIpcRequest, WechatConnectionSnapshot } from "@uclaw/shared";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createChannelDispatcher, type ChannelRuntime } from "../../desktop/src/channels/channel-dispatcher.js";
@@ -13,6 +13,10 @@ interface Fixture {
   checkedAt: string;
   telegram: { id: string; name: string; botToken: string };
   unavailable: ChannelDraft[];
+  wechat: {
+    flowId: string; accountIdHint: string; displayName: string; portableCredential: string;
+    firstQrExpiresAt: string; refreshedQrExpiresAt: string;
+  };
 }
 
 const fixturePath = resolve(import.meta.dirname, "fixtures/channel-runtime.json");
@@ -112,5 +116,94 @@ describe("channel runtime fixture boundary", () => {
     }
 
     expect(runtimeCalls).toEqual([]);
+  });
+
+  it("runs the personal WeChat fixture lifecycle and keeps state inside OPENCLAW_STATE_DIR", async () => {
+    const fixture = await loadFixture();
+    const root = await mkdtemp(join(tmpdir(), "uclaw-wechat-integration-"));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const dataDir = join(root, "portable", "data");
+    const openClawStateDir = join(dataDir, "openclaw");
+    const fakeHome = join(root, "user-home");
+    const fakeTemp = join(root, "host-temp");
+    await Promise.all([mkdir(openClawStateDir, { recursive: true }), mkdir(fakeHome), mkdir(fakeTemp)]);
+    const credentialPath = join(openClawStateDir, "openclaw-weixin", "accounts.json");
+    let now = new Date(fixture.checkedAt);
+    let pollCount = 0;
+    let statusCount = 0;
+    let startCount = 0;
+    const runtime: ChannelRuntime = {
+      capability: () => false,
+      wechat: {
+        capability: async () => ({ available: true, pluginStatus: "installed" }),
+        status: async () => {
+          statusCount += 1;
+          if (statusCount === 1) return { status: "disconnected", loginState: "idle" };
+          throw new Error(`401 logged out ${fixture.wechat.portableCredential}`);
+        },
+        start: async () => {
+          startCount += 1;
+          return {
+            flowId: `${fixture.wechat.flowId}-${startCount}`,
+            qrImage: { kind: "data-url", value: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2ZQAAAABJRU5ErkJggg==" },
+            qrExpiresAt: fixture.wechat.firstQrExpiresAt,
+          };
+        },
+        poll: async () => {
+          pollCount += 1;
+          if (pollCount === 1) return { status: "pending-verification", loginState: "awaiting-confirmation" };
+          await mkdir(join(openClawStateDir, "openclaw-weixin"), { recursive: true });
+          await writeFile(credentialPath, JSON.stringify({ credential: fixture.wechat.portableCredential }), { mode: 0o600 });
+          return { status: "connected", loginState: "connected", account: { displayName: fixture.wechat.displayName, accountIdHint: fixture.wechat.accountIdHint } };
+        },
+        refresh: async () => ({
+          qrImage: { kind: "data-url", value: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" },
+          qrExpiresAt: fixture.wechat.refreshedQrExpiresAt,
+        }),
+        cancel: async () => undefined,
+        reconnect: async () => ({ status: "connected", loginState: "connected", account: { displayName: fixture.wechat.displayName, accountIdHint: fixture.wechat.accountIdHint } }),
+        logout: async () => { await unlink(credentialPath); },
+      },
+    };
+    const dispatch = createChannelDispatcher(createChannelStore({ dataDir }), runtime, { now: () => now, timeoutMs: 500 });
+
+    const initial = await dispatch(request("channels.wechat-status", "wechat-status", {}));
+    const started = await dispatch(request("channels.wechat-login-start", "wechat-start", { force: false }));
+    const publicFlowId = started.ok ? (started.result as WechatConnectionSnapshot).flowId! : "";
+    now = new Date(fixture.wechat.firstQrExpiresAt);
+    const expired = await dispatch(request("channels.wechat-login-poll", "wechat-expired", { flowId: publicFlowId, qrGeneration: 1 }));
+    const refreshed = await dispatch(request("channels.wechat-login-refresh", "wechat-refresh", { flowId: publicFlowId, qrGeneration: 1 }));
+    const stale = await dispatch(request("channels.wechat-login-poll", "wechat-stale", { flowId: publicFlowId, qrGeneration: 1 }));
+    const scanned = await dispatch(request("channels.wechat-login-poll", "wechat-scanned", { flowId: publicFlowId, qrGeneration: 2 }));
+    const connected = await dispatch(request("channels.wechat-login-poll", "wechat-connected", { flowId: publicFlowId, qrGeneration: 2 }));
+    const portableState = await readFile(credentialPath, "utf8");
+    const invalid = await dispatch(request("channels.wechat-status", "wechat-invalid", {}));
+    const reconnected = await dispatch(request("channels.wechat-reconnect", "wechat-reconnect", {}));
+    const loggedOut = await dispatch(request("channels.wechat-logout", "wechat-logout", {}));
+    const restarted = await dispatch(request("channels.wechat-login-start", "wechat-restart", { force: true }));
+    const restartedFlowId = restarted.ok ? (restarted.result as WechatConnectionSnapshot).flowId! : "";
+    const cancelled = await dispatch(request("channels.wechat-login-cancel", "wechat-cancel", { flowId: restartedFlowId }));
+
+    expect(initial.ok && initial.result).toMatchObject({ status: "disconnected", loginState: "idle", capability: "available" });
+    expect(started.ok && started.result).toMatchObject({ loginState: "awaiting-scan", qrGeneration: 1 });
+    expect(expired.ok && expired.result).toMatchObject({ loginState: "expired", error: { code: "WECHAT_QR_EXPIRED" } });
+    expect(refreshed.ok && refreshed.result).toMatchObject({ loginState: "awaiting-scan", qrGeneration: 2 });
+    expect(stale.ok && stale.result).toMatchObject({ loginState: "awaiting-scan", qrGeneration: 2 });
+    expect(scanned.ok && scanned.result).toMatchObject({ loginState: "awaiting-confirmation" });
+    expect(connected.ok && connected.result).toMatchObject({ status: "connected", account: { accountIdHint: fixture.wechat.accountIdHint } });
+    expect(invalid.ok && invalid.result).toMatchObject({ status: "auth-failed", error: { code: "WECHAT_LOGGED_OUT" } });
+    expect(reconnected.ok && reconnected.result).toMatchObject({ status: "connected", loginState: "connected" });
+    expect(loggedOut.ok && loggedOut.result).toMatchObject({ status: "not-configured", loginState: "logged-out" });
+    expect(restarted.ok && restarted.result).toMatchObject({ flowId: restartedFlowId, loginState: "awaiting-scan" });
+    expect(cancelled.ok && cancelled.result).toMatchObject({ status: "disconnected", loginState: "cancelled" });
+    expect(pollCount).toBe(2);
+    expect(portableState).toContain(fixture.wechat.portableCredential);
+    await expect(readFile(credentialPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(fakeHome)).toEqual([]);
+    expect(await readdir(fakeTemp)).toEqual([]);
+    const rendered = JSON.stringify([initial, started, expired, refreshed, stale, scanned, connected, invalid, reconnected, loggedOut, restarted, cancelled]);
+    expect(rendered).not.toContain(fixture.wechat.portableCredential);
+    expect(rendered).not.toContain(openClawStateDir);
+    expect(rendered).not.toContain(fixture.wechat.flowId);
   });
 });

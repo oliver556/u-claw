@@ -3,6 +3,38 @@ import { describe, expect, it, vi } from "vitest";
 import * as desktop from "../src/index.js";
 
 describe("channel dispatcher", () => {
+  it("routes personal WeChat lifecycle through the managed channel contract", async () => {
+    const qrImage = { kind: "data-url" as const, value: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2ZQAAAABJRU5ErkJggg==" };
+    const wechat = {
+      capability: vi.fn(async () => ({ available: true, pluginStatus: "installed" as const })),
+      status: vi.fn(async () => ({ status: "not-configured" as const, loginState: "idle" as const })),
+      start: vi.fn(async () => ({ flowId: "flow-1", qrImage, qrExpiresAt: "2026-08-09T09:05:00.000Z" })),
+      poll: vi.fn(async () => ({ status: "pending-verification" as const, loginState: "awaiting-confirmation" as const })),
+      refresh: vi.fn(), cancel: vi.fn(), reconnect: vi.fn(), logout: vi.fn(),
+    };
+    const dispatch = (desktop as any).createChannelDispatcher({}, { capability: () => false, wechat }, { now: () => new Date("2026-08-09T09:00:00.000Z") });
+
+    const started = await dispatch({ method: "channels.wechat-login-start", requestId: "start-1", params: { force: false } });
+    const publicFlowId = started.result.flowId;
+    const polled = await dispatch({ method: "channels.wechat-login-poll", requestId: "poll-1", params: { flowId: publicFlowId, qrGeneration: 1 } });
+
+    expect(started).toMatchObject({ ok: true, result: { loginState: "awaiting-scan", qrGeneration: 1 } });
+    expect(polled).toMatchObject({ ok: true, result: { loginState: "awaiting-confirmation" } });
+    expect(wechat.start).toHaveBeenCalledWith(false, expect.any(AbortSignal));
+    expect(wechat.poll).toHaveBeenCalledWith("flow-1", expect.any(AbortSignal));
+  });
+
+  it("reports personal WeChat unavailable when production runtime has no safe adapter", async () => {
+    const dispatch = (desktop as any).createChannelDispatcher({}, { capability: () => false });
+
+    const response = await dispatch({ method: "channels.wechat-status", requestId: "status-1", params: {} });
+
+    expect(response).toMatchObject({
+      ok: true,
+      result: { capability: "unavailable", plugin: { id: "openclaw-weixin", requiredVersion: "2.4.6", status: "unknown" }, error: { code: "WECHAT_CAPABILITY_UNAVAILABLE" } },
+    });
+  });
+
   it("serializes lifecycle operations for one channel", async () => {
     const order: string[] = [];
     let releaseFirst!: () => void;

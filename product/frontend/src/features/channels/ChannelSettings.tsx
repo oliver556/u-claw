@@ -11,6 +11,8 @@ import { Alert, Button, Input, Modal, Popconfirm, Select, Switch, Tag, Tooltip }
 import { Cable, CircleOff, Pencil, Plus, RefreshCw, RotateCw, TestTube2, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { WechatPersonalConnection } from "./WechatPersonalConnection";
+
 type ChannelForm = {
   id: string;
   kind: ChannelDraft["kind"];
@@ -21,11 +23,12 @@ type ChannelForm = {
 };
 
 const emptyForm: ChannelForm = { id: "", kind: "telegram", name: "", mode: "bot", enabled: true, credentials: {} };
-const kindLabels: Record<ChannelDraft["kind"], string> = {
+const kindLabels: Record<ManagedChannelSummary["kind"], string> = {
   telegram: "Telegram",
   "qq-bot": "QQ Bot",
   feishu: "飞书",
   wecom: "企业微信",
+  "wechat-personal": "个人微信",
 };
 const statusLabels: Record<ChannelStatus, string> = {
   "not-configured": "未配置",
@@ -167,8 +170,9 @@ export function ChannelSettings() {
     setFormOpen(true);
   };
   const openEdit = (channel: ManagedChannelSummary) => {
+    if (channel.kind === "wechat-personal" || channel.mode === "qr") return;
     setEditing(channel);
-    setForm({ id: channel.id, kind: channel.kind, name: channel.name, mode: channel.mode, enabled: channel.enabled, credentials: {} });
+    setForm({ id: channel.id, kind: channel.kind, name: channel.name, mode: channel.mode as ChannelDraft["mode"], enabled: channel.enabled, credentials: {} });
     setFormError(undefined);
     setFormOpen(true);
   };
@@ -193,6 +197,7 @@ export function ChannelSettings() {
     <div className="secondary-content channel-content">
       {loadError ? <Alert type="error" showIcon message="渠道配置暂时不可用" description="当前离线或本地服务未就绪。" action={<Button size="small" aria-label="重试加载渠道" onClick={() => void load()}>重试</Button>} /> : null}
       {operationError ? <Alert type="error" showIcon closable message={operationError} onClose={() => setOperationError(undefined)} /> : null}
+      <WechatPersonalConnection />
       <div className="channel-toolbar" aria-label="渠道筛选器">
         <label>渠道<Select aria-label="渠道筛选" value={kindFilter} onChange={setKindFilter} options={[{ value: "all", label: "全部渠道" }, ...Object.entries(kindLabels).map(([value, label]) => ({ value, label }))]} /></label>
         <label>状态<Select aria-label="状态筛选" value={statusFilter} onChange={setStatusFilter} options={[{ value: "all", label: "全部状态" }, ...Object.entries(statusLabels).map(([value, label]) => ({ value, label }))]} /></label>

@@ -164,6 +164,33 @@ describe("OpenClawClient channel runtime", () => {
     expect(client.channels.capability("telegram")).toBe(false);
   });
 
+  it("detects the locked personal WeChat plugin but keeps unsafe QR RPC unavailable", async () => {
+    const transport = new ChannelTransport();
+    transport.responses.set("channels.status", [{
+      ts: 1, channelOrder: ["openclaw-weixin"], channelLabels: { "openclaw-weixin": "Weixin" },
+      channels: { "openclaw-weixin": { configured: false } }, channelAccounts: { "openclaw-weixin": [] }, channelDefaultAccountId: {},
+    }]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+    const signal = new AbortController().signal;
+
+    await expect(client.channels.wechat.capability(signal)).resolves.toEqual({
+      available: false,
+      pluginStatus: "installed",
+      reason: "OpenClaw 2026.7.1-2 无法安全定向个人微信扫码，且插件 2.4.6 未提供退出 RPC。",
+    });
+    expect(transport.requests.at(-1)).toEqual({ method: "channels.status", params: { channel: "openclaw-weixin", probe: false }, signal });
+  });
+
+  it("reports personal WeChat plugin missing from channel status", async () => {
+    const transport = new ChannelTransport();
+    transport.responses.set("channels.status", [{ ts: 1, channelOrder: [], channelLabels: {}, channels: {}, channelAccounts: {}, channelDefaultAccountId: {} }]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.channels.wechat.capability(new AbortController().signal)).resolves.toMatchObject({ available: false, pluginStatus: "missing" });
+  });
+
   it("prefers a live connected account over a stale lastError", async () => {
     const transport = new ChannelTransport();
     transport.responses.set("channels.status", [{
