@@ -73,8 +73,19 @@ func TestStartManagedProcessVerifiesEntrypointBeforeStarting(t *testing.T) {
 	if !reflect.DeepEqual(lease.verified, []string{os.Args[0]}) {
 		t.Fatalf("verified = %v", lease.verified)
 	}
-	if _, err := os.Stat(sentinel); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("process started and wrote sentinel: %v", err)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		_, err := os.Stat(sentinel)
+		if err == nil {
+			t.Fatal("process started and wrote sentinel")
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stat sentinel: %v", err)
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
