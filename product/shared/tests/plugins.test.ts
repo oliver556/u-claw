@@ -5,6 +5,7 @@ import {
   PluginDetailSchema,
   PluginIpcRequestSchema,
 } from "../src/plugins.js";
+import { IpcRequestSchema, IpcResponseSchema } from "../src/ipc.js";
 
 const plugin = {
   packageKind: "plugin",
@@ -55,5 +56,25 @@ describe("Plugin contracts", () => {
       requestId: "bad",
       params: { slug: plugin.slug, confirmation: null, path: "/tmp/plugin", command: "openclaw plugins install" },
     }).success).toBe(false);
+  });
+
+  it("participates in the unified IPC request and response contracts", () => {
+    expect(IpcRequestSchema.safeParse({
+      method: "plugins.installed",
+      requestId: "plugins-list",
+      params: {},
+    }).success).toBe(true);
+    expect(IpcResponseSchema.safeParse({
+      method: "plugins.installed",
+      requestId: "plugins-list",
+      ok: false,
+      error: {
+        code: "UNAVAILABLE",
+        message: "Plugin service unavailable.",
+        retryable: false,
+        recoveryActions: [],
+        causeDetails: {},
+      },
+    }).success).toBe(true);
   });
 });
