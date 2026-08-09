@@ -59,7 +59,7 @@ describe("diagnostics IPC contracts", () => {
       state: "issues", adapter: "openclaw", checks: [{ id: "gateway", label: "Gateway", level: "error", summary: "Gateway 未就绪。", suggestion: "重启受控 Gateway。", repair: { actionId: "gateway-restart", label: "重启 Gateway", previewToken: "doctor-preview-1" } }],
     } });
     const network = DiagnosticsIpcResponseSchema.parse({ method: "network.run", requestId: "network-1", ok: true, result: {
-      mode: "intranet-only", checks: [{ id: "provider", label: "Provider", level: "warning", summary: "外网不可用。", durationMs: 1200 }], proxy: { configured: true, noProxyConfigured: true },
+      mode: "intranet-only", checks: [{ id: "provider", label: "Provider", status: "unreachable", level: "warning", summary: "外网不可用。", durationMs: 1200 }], proxy: { configured: true, noProxyConfigured: true },
     } });
     expect(JSON.stringify([doctor, network])).not.toMatch(/(?:command|https?:\/\/|[A-Za-z]:\\\\|\/Users\/)/);
   });

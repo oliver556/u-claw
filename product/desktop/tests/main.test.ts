@@ -1,8 +1,11 @@
 import { EventEmitter } from "node:events";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { bootstrapDesktopApp, requireChannelRuntime, requireElectronClient, runDesktopMain, validateRendererUrl } from "../src/main.js";
+import { bootstrapDesktopApp, createProductionDataService, requireChannelRuntime, requireElectronClient, runDesktopMain, validateRendererUrl } from "../src/main.js";
 
 describe("Electron client wiring", () => {
   it("rejects production startup without a real UClawClient", () => {
@@ -15,6 +18,32 @@ describe("Electron client wiring", () => {
       capability: vi.fn(), configure: vi.fn(), remove: vi.fn(), test: vi.fn(), start: vi.fn(), stop: vi.fn(),
     };
     expect(requireChannelRuntime({ channels: runtime } as any)).toBe(runtime);
+  });
+
+  it("keeps production factory reset unavailable without an OpenClaw consistency coordinator", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-data-"));
+    const cacheRoot = await mkdtemp(join(tmpdir(), "uclaw-main-cache-"));
+    const cacheDir = join(cacheRoot, "runtime");
+    await mkdir(join(dataDir, "uclaw"), { recursive: true });
+    await mkdir(join(cacheDir, "electron"), { recursive: true });
+    await writeFile(join(dataDir, "uclaw", "settings.json"), "owned");
+    await writeFile(join(cacheDir, "electron", "entry.bin"), "cache");
+    await writeFile(join(cacheRoot, ".uclaw-cache.json"), `${JSON.stringify({ schemaVersion: 1, product: "U-Claw", purpose: "rebuildable-cache" })}\n`);
+    try {
+      const service = createProductionDataService({ dataDir, cacheDir });
+      const preview = await service.dispatch({ method: "factory-reset.preview", requestId: "reset-preview", params: {} });
+      if (!preview.ok || preview.method !== "factory-reset.preview") throw new Error("preview failed");
+      expect(preview.result).toMatchObject({ consistency: "runtime-coordination-required" });
+
+      await expect(service.dispatch({
+        method: "factory-reset.execute", requestId: "reset-execute",
+        params: { previewToken: preview.result.previewToken, confirmation: "RESET U-CLAW", confirmed: true },
+      })).resolves.toMatchObject({ ok: false, error: { code: "UNAVAILABLE" } });
+      expect(await readFile(join(dataDir, "uclaw", "settings.json"), "utf8")).toBe("owned");
+      expect(await readFile(join(cacheDir, "electron", "entry.bin"), "utf8")).toBe("cache");
+    } finally {
+      await Promise.all([dataDir, cacheRoot].map((path) => rm(path, { recursive: true, force: true })));
+    }
   });
 });
 

@@ -50,6 +50,10 @@ import {
   type DesktopWindow,
 } from "./window.js";
 
+export function createProductionDataService(paths: Pick<PortableDesktopPaths, "dataDir" | "cacheDir">) {
+  return createDataService({ dataDir: paths.dataDir, cacheDir: paths.cacheDir });
+}
+
 export interface DesktopAppLike {
   requestSingleInstanceLock(): boolean;
   quit(): void;
@@ -369,7 +373,7 @@ export async function startElectronMain(
   const channels = createChannelStore({ dataDir: portablePaths.dataDir, capability: channelRuntime.capability });
   const mcpRuntime = createOpenClawMcpRuntime(client);
   const mcp = createMcpStore({ dataDir: portablePaths.dataDir, runtimeAvailable: mcpRuntime.capability });
-  const data = createDataService({ dataDir: portablePaths.dataDir, cacheDir: portablePaths.cacheDir });
+  const data = createProductionDataService(portablePaths);
   const diagnosticsRuntime: DiagnosticsRuntimeInfo = {
     productVersion: "0.1.0",
     openClawVersion: LOCKED_OPENCLAW_VERSION,

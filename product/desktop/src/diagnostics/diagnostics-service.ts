@@ -58,10 +58,12 @@ export interface DiagnosticsServiceOptions {
   runtime: DiagnosticsRuntimeInfo;
   environment?: NodeJS.ProcessEnv;
   now?: () => number;
-  networkProbe?(target: NetworkProbeTarget, signal: AbortSignal): Promise<"reachable" | "unreachable">;
+  networkProbe?(target: NetworkProbeTarget, signal: AbortSignal): Promise<NetworkProbeOutcome>;
+  fixtureDoctorRepairActionIds?: readonly string[];
 }
 
 export type NetworkProbeTarget = "portable-data" | "runtime" | "gateway" | "local-port" | "dns" | "provider" | "channels" | "capabilities";
+export type NetworkProbeOutcome = "reachable" | "unreachable" | "unavailable" | "skipped";
 
 interface CleanupCandidate { name: string; size: number; modifiedAt: string; version: string }
 interface CleanupPreview { expiresAt: number; retentionDays: number; files: CleanupCandidate[] }
@@ -192,8 +194,9 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
   const controllers = new Map<string, AbortController>();
   let doctorGeneration = 0;
   let repairActive = false;
+  const fixtureDoctorRepairActionIds = new Set(options.fixtureDoctorRepairActionIds ?? []);
 
-  const defaultNetworkProbe = async (target: NetworkProbeTarget, signal: AbortSignal): Promise<"reachable" | "unreachable"> => {
+  const defaultNetworkProbe = async (target: NetworkProbeTarget, signal: AbortSignal): Promise<NetworkProbeOutcome> => {
     try {
       signal.throwIfAborted();
       if (target === "portable-data") { await access(dataDir, constants.R_OK); return "reachable"; }
@@ -212,8 +215,7 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
       }
       if (target === "dns") { await lookup("openclaw.ai"); return "reachable"; }
       if (target === "provider") { await fetch("https://api.openai.com", { method: "HEAD", redirect: "manual", signal }); return "reachable"; }
-      await options.diagnostics.list();
-      return "reachable";
+      return target === "channels" ? "unavailable" : "skipped";
     } catch (caught) {
       if (signal.aborted) throw caught;
       return "unreachable";
@@ -237,7 +239,7 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
       { id: "dns", label: "DNS" }, { id: "provider", label: "Provider 连通" },
       { id: "channels", label: "渠道依赖" }, { id: "capabilities", label: "能力依赖" },
     ];
-    const outcomes = new Map<NetworkProbeTarget, { outcome: "reachable" | "unreachable"; durationMs: number }>();
+    const outcomes = new Map<NetworkProbeTarget, { outcome: NetworkProbeOutcome; durationMs: number }>();
     let cursor = 0;
     const worker = async () => {
       while (cursor < targets.length) {
@@ -259,7 +261,13 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
       checks: targets.map((target) => {
         const item = outcomes.get(target.id)!;
         const reachable = item.outcome === "reachable";
-        return { id: target.id, label: target.label, level: reachable ? "info" as const : target.id === "provider" && mode === "intranet-only" ? "warning" as const : "error" as const, summary: reachable ? "检查通过。" : target.id === "provider" && mode === "intranet-only" ? "外网不可用，内网功能仍可使用。" : "检查未通过。", durationMs: item.durationMs };
+        const unavailable = item.outcome === "unavailable" || item.outcome === "skipped";
+        return {
+          id: target.id, label: target.label, status: reachable ? "passed" as const : item.outcome,
+          level: reachable || unavailable ? "info" as const : target.id === "provider" && mode === "intranet-only" ? "warning" as const : "error" as const,
+          summary: reachable ? "检查通过。" : item.outcome === "unavailable" ? "当前 adapter 未提供只读检查接口。" : item.outcome === "skipped" ? "缺少权威只读契约，已跳过。" : target.id === "provider" && mode === "intranet-only" ? "外网不可用，内网功能仍可使用。" : "检查未通过。",
+          durationMs: item.durationMs,
+        };
       }),
       proxy: {
         configured: Boolean(environment.HTTPS_PROXY ?? environment.https_proxy ?? environment.HTTP_PROXY ?? environment.http_proxy),
@@ -278,7 +286,7 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
       state: upstream.status === "ok" ? "healthy" as const : "issues" as const,
       adapter: "openclaw" as const,
       checks: upstream.checks.map((check) => {
-        const repair = check.repair ? (() => {
+        const repair = check.repair && options.diagnostics.repair && fixtureDoctorRepairActionIds.has(check.repair.actionId) ? (() => {
           const previewToken = `doctor-preview-${randomUUID().toLowerCase()}`;
           doctorPreviews.set(previewToken, { actionId: check.repair!.actionId, expiresAt: now() + PREVIEW_TTL_MS });
           return { actionId: check.repair.actionId, label: "执行受控修复", previewToken };
@@ -491,6 +499,7 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
         case "config.export": result = await createExport(request.params.fileName, `${(await redactedConfig()).content}\n`); break;
         case "doctor.run": result = await runDoctor(controller.signal, request.params.timeoutMs ?? 10_000); break;
         case "doctor.repair": {
+          if (!fixtureDoctorRepairActionIds.has(request.params.actionId)) throw safeError("UNAVAILABLE", "当前生产 adapter 无权威 Doctor 修复动作契约。");
           const preview = doctorPreviews.get(request.params.previewToken);
           doctorPreviews.delete(request.params.previewToken);
           if (!preview || preview.expiresAt < now() || preview.actionId !== request.params.actionId) throw safeError("CONFLICT", "修复预览已过期，请重新运行 Doctor。", true);
