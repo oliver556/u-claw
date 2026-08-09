@@ -216,7 +216,7 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
-export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema]);
+export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema]);
 export type IpcRequest = z.infer<typeof IpcRequestSchema>;
 export const IpcResponseSchema = z.union([
   WindowIpcSuccessResponseSchema,
@@ -226,6 +226,7 @@ export const IpcResponseSchema = z.union([
   AttachmentIpcResponseSchema,
   ProviderIpcResponseSchema,
   SkillIpcResponseSchema,
+  PluginIpcResponseSchema,
   ChannelIpcResponseSchema,
   McpIpcResponseSchema,
 ]);

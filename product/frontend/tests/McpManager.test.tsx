@@ -107,6 +107,31 @@ describe("McpManager", () => {
     })));
   });
 
+  it("explicitly clears stored stdio arguments and environment variables", async () => {
+    const localSnapshot: McpSnapshot = { ...snapshot, servers: [{
+      id: "local", name: "Local MCP", enabled: true, transport: "stdio", executableId: "node",
+      risk: "none", status: "unavailable", capabilitySummary: { tools: 0, resources: 0, prompts: 0 },
+      toolNames: [], resourceSchemes: [],
+    }] };
+    const invoke = vi.fn(async (request: McpIpcRequest) => success(request, localSnapshot));
+    window.uclaw = { mcp: { invoke } } as never;
+    render(<McpManager />);
+    await screen.findByText("Local MCP");
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑 Local MCP" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "清空已有参数" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "清空已有环境变量" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存 MCP server" }));
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "mcp.update",
+      params: { serverId: "local", server: {
+        id: "local", name: "Local MCP", enabled: true, transport: "stdio", executableId: "node",
+        args: [], env: {},
+      } },
+    })));
+  });
+
   it("confirms stdio risk fingerprint and deletion explicitly", async () => {
     const risky: McpSnapshot = { ...snapshot, runtime: { state: "available" }, servers: [{
       id: "package", name: "Package MCP", enabled: false, transport: "stdio", executableId: "npx",

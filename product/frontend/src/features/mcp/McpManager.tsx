@@ -22,11 +22,14 @@ type FormState = {
   executableId: "node" | "npx" | "python" | "uvx";
   args: string;
   env: string;
+  clearArgs: boolean;
+  clearEnv: boolean;
 };
 
 const emptyForm: FormState = {
   id: "", name: "", transport: "streamable-http", enabled: true, url: "",
   authenticationType: "none", headerName: "", secret: "", executableId: "node", args: "", env: "",
+  clearArgs: false, clearEnv: false,
 };
 
 const statusLabels: Record<ManagedMcpServerSummary["status"], string> = {
@@ -73,8 +76,8 @@ function updatePatchFromForm(form: FormState): unknown {
     return {
       id: form.id.trim(), name: form.name.trim(), enabled: form.enabled, transport: "stdio",
       executableId: form.executableId,
-      ...(form.args ? { args: form.args.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean) } : {}),
-      ...(form.env ? { env } : {}),
+      ...(form.clearArgs ? { args: [] } : form.args ? { args: form.args.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean) } : {}),
+      ...(form.clearEnv ? { env: {} } : form.env ? { env } : {}),
     };
   }
   const authentication = form.authenticationType === "none"
@@ -201,14 +204,16 @@ export function McpManager() {
     <Modal title={editing ? "编辑 MCP server" : "新增 MCP server"} open={formOpen} onCancel={() => setFormOpen(false)} footer={<><Button onClick={() => setFormOpen(false)}>取消</Button><Button type="primary" onClick={() => void save()}>保存 MCP server</Button></>}>
       <div className="mcp-form">
         {formError ? <Alert type="error" showIcon message={formError} /> : null}
-        {editing ? <Alert type="info" showIcon message="安全字段不回显" description="URL、参数、环境变量和 secret 留空时保留原值。" /> : null}
+        {editing ? <Alert type="info" showIcon message="安全字段不回显" description="URL、参数、环境变量和 secret 留空时保留原值；stdio 字段可显式清空。" /> : null}
         <label>Transport<select aria-label="Transport" value={form.transport} disabled={Boolean(editing)} onChange={(event) => setForm((current) => ({ ...current, transport: event.target.value as McpTransport }))}><option value="streamable-http">Streamable HTTP</option><option value="http">HTTP</option><option value="stdio">stdio</option></select></label>
         <label>Server ID<Input aria-label="Server ID" value={form.id} disabled={Boolean(editing)} onChange={(event) => setForm((current) => ({ ...current, id: event.target.value }))} /></label>
         <label>显示名称<Input aria-label="显示名称" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
         {form.transport === "stdio" ? <>
           <label>Executable<select aria-label="Executable" value={form.executableId} onChange={(event) => setForm((current) => ({ ...current, executableId: event.target.value as FormState["executableId"] }))}><option value="node">Node.js</option><option value="npx">npx</option><option value="python">Python</option><option value="uvx">uvx</option></select></label>
-          <label>参数<Input.TextArea aria-label="参数" rows={3} value={form.args} placeholder="每行一个参数" onChange={(event) => setForm((current) => ({ ...current, args: event.target.value }))} /></label>
-          <label>环境变量<Input.TextArea aria-label="环境变量" rows={3} value={form.env} placeholder="仅 MCP_*，每行 KEY=VALUE" onChange={(event) => setForm((current) => ({ ...current, env: event.target.value }))} /></label>
+          <label>参数<Input.TextArea aria-label="参数" rows={3} value={form.args} disabled={form.clearArgs} placeholder="每行一个参数" onChange={(event) => setForm((current) => ({ ...current, args: event.target.value }))} /></label>
+          {editing ? <label><input type="checkbox" checked={form.clearArgs} onChange={(event) => setForm((current) => ({ ...current, clearArgs: event.target.checked }))} />清空已有参数</label> : null}
+          <label>环境变量<Input.TextArea aria-label="环境变量" rows={3} value={form.env} disabled={form.clearEnv} placeholder="仅 MCP_*，每行 KEY=VALUE" onChange={(event) => setForm((current) => ({ ...current, env: event.target.value }))} /></label>
+          {editing ? <label><input type="checkbox" checked={form.clearEnv} onChange={(event) => setForm((current) => ({ ...current, clearEnv: event.target.checked }))} />清空已有环境变量</label> : null}
         </> : <>
           <label>URL<Input aria-label="URL" value={form.url} onChange={(event) => setForm((current) => ({ ...current, url: event.target.value }))} /></label>
           <label>认证方式<select aria-label="认证方式" value={form.authenticationType} onChange={(event) => setForm((current) => ({ ...current, authenticationType: event.target.value as FormState["authenticationType"] }))}><option value="none">无</option><option value="bearer">Bearer</option><option value="header">自定义 Header</option></select></label>
