@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyPortableEnvironmentToLaunchOptions,
   configurePortableDesktopPaths,
+  LOG_OWNERSHIP_MANIFEST,
   resolvePortableDesktopPaths,
 } from "../src/portable-paths.js";
 
@@ -44,6 +45,7 @@ describe("portable desktop paths", () => {
     });
     const marker = JSON.parse(await readFile(join(cacheDir, "..", ".uclaw-cache.json"), "utf8"));
     expect(marker).toEqual({ schemaVersion: 1, product: "U-Claw", purpose: "rebuildable-cache" });
+    expect(JSON.parse(await readFile(join(paths.logs, ".uclaw-log-ownership.json"), "utf8"))).toEqual(LOG_OWNERSHIP_MANIFEST);
     expect((await lstat(paths.userData)).isDirectory()).toBe(true);
   });
 
@@ -94,5 +96,22 @@ describe("portable desktop paths", () => {
       commandLine: { appendSwitch: vi.fn() },
     }, environment)).toThrow(/cache root/i);
     await expect(lstat(join(outside, ".uclaw-cache.json"))).rejects.toThrow();
+  });
+
+  it("rejects a diagnostics parent symlink before creating any outside log directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "uclaw-log-link-"));
+    const dataDir = join(root, "usb", ".uclaw", "data");
+    const logsParent = join(dataDir, "diagnostics");
+    const outside = join(root, "outside");
+    await mkdir(dataDir, { recursive: true });
+    await mkdir(outside);
+    await symlink(outside, logsParent, "dir");
+    expect(() => configurePortableDesktopPaths({ setPath: vi.fn(), commandLine: { appendSwitch: vi.fn() } }, {
+      UCLAW_DATA_DIR: dataDir,
+      UCLAW_CACHE_DIR: join(root, "host", "U-Claw", "cache"),
+    })).toThrow("Invalid portable child path.");
+    await expect(readFile(join(outside, ".uclaw-log-ownership.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(join(outside, "desktop-logs"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(join(outside, "crash-dumps"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

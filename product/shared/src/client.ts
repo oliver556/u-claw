@@ -73,7 +73,7 @@ export interface FileService {
 
 export interface DiagnosticsService {
   list(): Promise<DiagnosticSummary[]>;
-  listLogs(page?: PageRequest): Promise<Page<LogSummary>>;
+  listLogs(page?: PageRequest, signal?: AbortSignal): Promise<Page<LogSummary>>;
 }
 
 export interface UClawClient {

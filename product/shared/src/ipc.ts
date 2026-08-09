@@ -3,6 +3,8 @@ import { z } from "zod";
 import { DataIpcRequestSchema, DataIpcResponseSchema } from "./data.js";
 export { DataIpcRequestSchema, DataIpcResponseSchema } from "./data.js";
 export type { DataIpcRequest, DataIpcResponse } from "./data.js";
+export { DiagnosticsIpcRequestSchema, DiagnosticsIpcResponseSchema } from "./diagnostics.js";
+export type { DiagnosticsIpcRequest, DiagnosticsIpcResponse } from "./diagnostics.js";
 
 import { SkillIpcRequestSchema, SkillIpcResponseSchema } from "./capabilities.js";
 export { SkillIpcRequestSchema, SkillIpcResponseSchema } from "./capabilities.js";

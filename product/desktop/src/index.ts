@@ -8,6 +8,7 @@ export * from "./ipc/preload-bridge.js";
 export * from "./ipc/register-ipc.js";
 export * from "./main.js";
 export * from "./data/data-service.js";
+export * from "./diagnostics/diagnostics-service.js";
 export * from "./mcp/mcp-store.js";
 export * from "./mcp/mcp-runtime.js";
 export * from "./mcp/mcp-dispatcher.js";

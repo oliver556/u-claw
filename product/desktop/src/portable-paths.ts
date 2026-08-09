@@ -1,10 +1,12 @@
 import {
   closeSync,
+  constants,
   fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -15,6 +17,20 @@ const CACHE_MARKER_VALUE = {
   schemaVersion: 1,
   product: "U-Claw",
   purpose: "rebuildable-cache",
+} as const;
+
+export const LOG_OWNERSHIP_MANIFEST = {
+  version: 1,
+  product: "U-Claw",
+  purpose: "runtime-logs",
+  files: [
+    "uclaw-launcher.log", "uclaw-launcher.jsonl",
+    "uclaw-desktop.log", "uclaw-desktop.jsonl",
+    "uclaw-adapter.log", "uclaw-adapter.jsonl",
+    "uclaw-gateway.log", "uclaw-gateway.jsonl",
+    "uclaw-openclaw.log", "uclaw-openclaw.jsonl",
+    "uclaw-channel.log", "uclaw-channel.jsonl",
+  ],
 } as const;
 
 export interface PortableDesktopPaths {
@@ -41,6 +57,22 @@ export interface PortableElectronApp {
 function isWithin(parent: string, child: string): boolean {
   const candidate = relative(parent, child);
   return candidate === "" || (!candidate.startsWith("..") && !isAbsolute(candidate));
+}
+
+function assertSafeExistingDirectoryChain(rootDir: string, targetDir: string): void {
+  if (!isWithin(rootDir, targetDir)) throw new Error("Invalid portable child path.");
+  const rootInfo = lstatSync(rootDir);
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error("Invalid portable data root.");
+  let current = rootDir;
+  for (const part of relative(rootDir, targetDir).split(/[\\/]+/).filter(Boolean)) {
+    current = join(current, part);
+    let info: ReturnType<typeof lstatSync>;
+    try { info = lstatSync(current); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Invalid portable child path.");
+  }
 }
 
 export function resolvePortableDesktopPaths(dataDir: string, cacheDir: string): PortableDesktopPaths {
@@ -145,6 +177,31 @@ function ensureCacheOwnership(cacheDir: string): void {
   }
 }
 
+function ensureLogOwnership(logsDir: string, dataDir: string): void {
+  const logsInfo = lstatSync(logsDir);
+  if (!logsInfo.isDirectory() || logsInfo.isSymbolicLink() || !isWithin(realpathSync(dataDir), realpathSync(logsDir))) throw new Error("Invalid log ownership root.");
+  const markerPath = join(logsDir, ".uclaw-log-ownership.json");
+  const expected = `${JSON.stringify(LOG_OWNERSHIP_MANIFEST)}\n`;
+  let markerInfo: ReturnType<typeof lstatSync> | null = null;
+  try { markerInfo = lstatSync(markerPath); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (markerInfo !== null) {
+    if (!markerInfo.isFile() || markerInfo.isSymbolicLink() || markerInfo.nlink !== 1 || readFileSync(markerPath, "utf8") !== expected) throw new Error("Invalid log ownership marker.");
+    return;
+  }
+  const descriptor = openSync(markerPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+  let complete = false;
+  try {
+    writeFileSync(descriptor, expected, "utf8");
+    fsyncSync(descriptor);
+    complete = true;
+  } finally {
+    closeSync(descriptor);
+    if (!complete) try { unlinkSync(markerPath); } catch { /* best-effort partial marker cleanup */ }
+  }
+}
+
 export function configurePortableDesktopPaths(
   app: PortableElectronApp,
   environment: NodeJS.ProcessEnv = process.env,
@@ -154,6 +211,7 @@ export function configurePortableDesktopPaths(
     environment.UCLAW_CACHE_DIR ?? "",
   );
   ensureCacheOwnership(paths.cacheDir);
+  mkdirSync(paths.dataDir, { recursive: true });
   for (const path of [
     paths.userData,
     paths.sessionData,
@@ -164,7 +222,11 @@ export function configurePortableDesktopPaths(
     paths.crashDumps,
     paths.openClawState,
     paths.workspace,
-  ]) mkdirSync(path, { recursive: true });
+  ]) {
+    if (isWithin(paths.dataDir, path)) assertSafeExistingDirectoryChain(paths.dataDir, path);
+    mkdirSync(path, { recursive: true });
+  }
+  ensureLogOwnership(paths.logs, paths.dataDir);
 
   for (const [name, path] of [
     ["userData", paths.userData],

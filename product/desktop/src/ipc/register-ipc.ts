@@ -15,6 +15,8 @@ import {
   McpIpcResponseSchema,
   DataIpcRequestSchema,
   DataIpcResponseSchema,
+  DiagnosticsIpcRequestSchema,
+  DiagnosticsIpcResponseSchema,
   UClawErrorSchema,
   WindowIpcRequestSchema,
   redactRendererText,
@@ -25,6 +27,7 @@ import {
   type AttachmentImportInput,
   type AttachmentService,
   type DataIpcRequest,
+  type DiagnosticsIpcRequest,
 } from "@uclaw/shared";
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
@@ -40,7 +43,7 @@ import { createChannelDispatcher, type ChannelRuntime } from "../channels/channe
 import type { ChannelStore } from "../channels/channel-store.js";
 import { createMcpDispatcher, type McpRuntime } from "../mcp/mcp-dispatcher.js";
 import type { McpStore } from "../mcp/mcp-store.js";
-import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -77,6 +80,8 @@ export interface RegisterIpcDependencies {
   mcp?: McpStore;
   mcpRuntime?: McpRuntime;
   dispatchData?(request: DataIpcRequest): Promise<unknown>;
+  dispatchDiagnostics?(request: DiagnosticsIpcRequest): Promise<unknown>;
+  diagnosticsTimeoutMs?: number;
 }
 
 function safeError(
@@ -126,6 +131,8 @@ export function registerIpc({
   mcp,
   mcpRuntime,
   dispatchData,
+  dispatchDiagnostics,
+  diagnosticsTimeoutMs = 15_000,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
@@ -338,6 +345,52 @@ export function registerIpc({
     }
   });
 
+  if (dispatchDiagnostics !== undefined) ipcMain.handle(DIAGNOSTICS_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = DiagnosticsIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid diagnostics IPC request.");
+    const request = parsed.data;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = Symbol("diagnostics-timeout");
+    try {
+      const response = await Promise.race([
+        dispatchDiagnostics(request),
+        new Promise<typeof timedOut>((resolveTimeout) => {
+          timer = setTimeout(() => resolveTimeout(timedOut), diagnosticsTimeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+      if (response === timedOut) {
+        void dispatchDiagnostics({
+          method: "operations.cancel",
+          requestId: `cancel-${request.requestId}`.slice(0, 128),
+          params: { operationRequestId: request.requestId },
+        }).catch(() => undefined);
+        return DiagnosticsIpcResponseSchema.parse({
+          method: request.method,
+          requestId: request.requestId,
+          ok: false,
+          error: safeError("TIMEOUT", "诊断操作超时。", true),
+        });
+      }
+      const correlated = DiagnosticsIpcResponseSchema.parse(response);
+      if (correlated.method !== request.method || correlated.requestId !== request.requestId) throw new Error("Diagnostics response correlation failed.");
+      if (Buffer.byteLength(JSON.stringify(correlated)) > 1_048_576) {
+        return DiagnosticsIpcResponseSchema.parse({
+          method: request.method,
+          requestId: request.requestId,
+          ok: false,
+          error: safeError("FILE_TOO_LARGE", "诊断响应超过大小上限。"),
+        });
+      }
+      return correlated;
+    } catch {
+      throw safeError("UNKNOWN", "Invalid diagnostics IPC response.");
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  });
+
   let disposed = false;
   return () => {
     if (disposed) return;
@@ -354,5 +407,6 @@ export function registerIpc({
     if (channelDispatcher !== undefined) ipcMain.removeHandler(CHANNEL_IPC_CHANNEL);
     if (mcpDispatcher !== undefined) ipcMain.removeHandler(MCP_IPC_CHANNEL);
     if (dispatchData !== undefined) ipcMain.removeHandler(DATA_IPC_CHANNEL);
+    if (dispatchDiagnostics !== undefined) ipcMain.removeHandler(DIAGNOSTICS_IPC_CHANNEL);
   };
 }

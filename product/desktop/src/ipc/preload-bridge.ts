@@ -16,6 +16,8 @@ import {
   McpIpcResponseSchema,
   DataIpcRequestSchema,
   DataIpcResponseSchema,
+  DiagnosticsIpcRequestSchema,
+  DiagnosticsIpcResponseSchema,
   WindowIpcRequestSchema,
   type ClientIpcRequest,
   type IpcResponse,
@@ -27,6 +29,7 @@ import {
   type ChannelIpcRequest,
   type McpIpcRequest,
   type DataIpcRequest,
+  type DiagnosticsIpcRequest,
 } from "@uclaw/shared";
 
 import {
@@ -41,6 +44,7 @@ import {
   CHANNEL_IPC_CHANNEL,
   MCP_IPC_CHANNEL,
   DATA_IPC_CHANNEL,
+  DIAGNOSTICS_IPC_CHANNEL,
 } from "./channels.js";
 
 export interface ContextBridgeLike {
@@ -151,6 +155,14 @@ export function installPreloadBridge({
     }
     return response;
   };
+  const invokeDiagnostics = async (payload: unknown) => {
+    const request = DiagnosticsIpcRequestSchema.parse(payload);
+    const response = DiagnosticsIpcResponseSchema.parse(await ipcRenderer.invoke(DIAGNOSTICS_IPC_CHANNEL, request));
+    if (response.method !== request.method || response.requestId !== request.requestId) {
+      throw new Error("IPC response does not match its request.");
+    }
+    return response;
+  };
   const subscribe = (listener: (event: IpcEvent) => void): (() => void) => {
     const receive = (_event: unknown, payload: unknown): void => {
       const parsed = IpcEventSchema.safeParse(payload);
@@ -185,5 +197,6 @@ export function installPreloadBridge({
     channels: Object.freeze({ invoke: invokeChannels as (request: ChannelIpcRequest) => Promise<unknown> }),
     mcp: Object.freeze({ invoke: invokeMcp as (request: McpIpcRequest) => Promise<unknown> }),
     data: Object.freeze({ invoke: invokeData as (request: DataIpcRequest) => Promise<unknown> }),
+    diagnostics: Object.freeze({ invoke: invokeDiagnostics as (request: DiagnosticsIpcRequest) => Promise<unknown> }),
   }));
 }

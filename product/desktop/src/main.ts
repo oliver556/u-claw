@@ -11,6 +11,7 @@ import {
   type AttachmentService,
   type ClientIpcRequest,
   type UClawClient,
+  LOCKED_OPENCLAW_VERSION,
 } from "@uclaw/shared";
 
 import { GatewayProcessManager, type SpawnGateway } from "./gateway/gateway-process.js";
@@ -39,6 +40,7 @@ import { createChannelStore } from "./channels/channel-store.js";
 import type { ChannelRuntime } from "./channels/channel-dispatcher.js";
 import { createMcpStore } from "./mcp/mcp-store.js";
 import { createDataService } from "./data/data-service.js";
+import { createDiagnosticsService, type DiagnosticsRuntimeInfo } from "./diagnostics/diagnostics-service.js";
 import { createOpenClawMcpRuntime } from "./mcp/mcp-runtime.js";
 import {
   createAdvancedConsoleController,
@@ -368,6 +370,18 @@ export async function startElectronMain(
   const mcpRuntime = createOpenClawMcpRuntime(client);
   const mcp = createMcpStore({ dataDir: portablePaths.dataDir, runtimeAvailable: mcpRuntime.capability });
   const data = createDataService({ dataDir: portablePaths.dataDir });
+  const diagnosticsRuntime: DiagnosticsRuntimeInfo = {
+    productVersion: "0.1.0",
+    openClawVersion: LOCKED_OPENCLAW_VERSION,
+    gatewayStatus: "starting",
+  };
+  const diagnostics = createDiagnosticsService({
+    dataDir: portablePaths.dataDir,
+    logsDir: portablePaths.logs,
+    configPath: portablePaths.openClawConfig,
+    diagnostics: client.diagnostics,
+    runtime: diagnosticsRuntime,
+  });
   let gatewayPort: number | undefined;
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -381,6 +395,7 @@ export async function startElectronMain(
     ...options,
     buildGatewayLaunchOptions: (port) => {
       gatewayPort = port;
+      diagnosticsRuntime.gatewayPort = port;
       return applyPortableEnvironmentToLaunchOptions(options.buildGatewayLaunchOptions(port), portablePaths);
     },
   };
@@ -398,7 +413,9 @@ export async function startElectronMain(
         beforeLoad: registerIpc,
       });
     },
-    registerIpc: (window, dispatchClient) => registerDesktopIpc({
+    registerIpc: (window, dispatchClient) => {
+      diagnosticsRuntime.gatewayStatus = "ready";
+      return registerDesktopIpc({
       ipcMain: ipcMain as unknown as IpcMainLike,
       authorizedWebContents: window.webContents,
       windowControls: {
@@ -417,6 +434,7 @@ export async function startElectronMain(
       mcp,
       mcpRuntime,
       dispatchData: data.dispatch,
+      dispatchDiagnostics: diagnostics.dispatch,
       selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
         const selected = await dialog.showOpenDialog({
           properties: ["openFile", "multiSelections"],
@@ -424,6 +442,7 @@ export async function startElectronMain(
         });
         return selected.canceled ? [] : readSelectedAttachments(selected.filePaths);
       }),
-    }),
+      });
+    },
   });
 }
