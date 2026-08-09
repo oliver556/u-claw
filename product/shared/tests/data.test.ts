@@ -6,6 +6,7 @@ import {
   DataRootContractSchema,
   RelativeDomainIdSchema,
 } from "../src/data.js";
+import { IpcRequestSchema, IpcResponseSchema } from "../src/ipc.js";
 
 describe("data management contract", () => {
   it("accepts normalized relative domain IDs", () => {
@@ -28,6 +29,26 @@ describe("data management contract", () => {
     expect(DataIpcRequestSchema.safeParse({
       method: "memory.delete", requestId: "delete-2",
       params: { memoryId: "memory/2026-08-09.md", version: "v1", confirmed: true },
+    }).success).toBe(true);
+  });
+
+  it("participates in the unified IPC request and response contracts", () => {
+    expect(IpcRequestSchema.safeParse({
+      method: "workspace.list",
+      requestId: "workspace-list",
+      params: { limit: 20 },
+    }).success).toBe(true);
+    expect(IpcResponseSchema.safeParse({
+      method: "workspace.open",
+      requestId: "workspace-open",
+      ok: false,
+      error: {
+        code: "UNAVAILABLE",
+        message: "Controlled system opener is unavailable.",
+        retryable: false,
+        recoveryActions: [],
+        causeDetails: {},
+      },
     }).success).toBe(true);
   });
 
