@@ -1,33 +1,58 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
+
+func signedRuntimeManifest(t *testing.T, manifest Manifest, keyID string, private ed25519.PrivateKey, signedAt, expiresAt time.Time, sequence uint64) Manifest {
+	t.Helper()
+	manifest.Signature = &ManifestSignature{Algorithm: "ed25519", KeyID: keyID, SignedAt: signedAt.UTC().Format(time.RFC3339), ExpiresAt: expiresAt.UTC().Format(time.RFC3339), Sequence: sequence}
+	payload, err := manifestSigningPayload(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Signature.Value = base64.StdEncoding.EncodeToString(ed25519.Sign(private, payload))
+	return manifest
+}
+
+func trustRuntimeTestKey(t *testing.T, keyID string, public ed25519.PublicKey) {
+	t.Helper()
+	previousKeys, previousRevoked := trustedRuntimeKeys, revokedRuntimeKeyIDs
+	encoded, _ := json.Marshal(map[string]string{keyID: base64.StdEncoding.EncodeToString(public)})
+	trustedRuntimeKeys, revokedRuntimeKeyIDs = string(encoded), "[]"
+	t.Cleanup(func() { trustedRuntimeKeys, revokedRuntimeKeyIDs = previousKeys, previousRevoked })
+}
 
 func validRuntimeManifest() Manifest {
 	return Manifest{
-		SchemaVersion:   1,
-		ProductVersion:  "0.1.0",
-		NodeVersion:     "24.15.0",
-		ElectronVersion: "40.10.6",
-		RuntimeVersion:  "2026.7.1-2",
-		RuntimeID:       "openclaw-2026.7.1-2-win-x64",
-		TargetPlatform:  "win32",
-		TargetArch:      "x64",
-		RuntimeArchive:  "runtime.pkg",
-		RuntimeSHA256:   strings.Repeat("a", 64),
-		RuntimeBytes:    1024,
-		UnpackedBytes:   4096,
-		FileCount:       8,
-		Entrypoint:      `electron\electron.exe`,
-		EntryArgs:       []string{"resources/app.asar"},
+		SchemaVersion:     1,
+		ProductVersion:    "0.1.0",
+		NodeVersion:       "24.15.0",
+		ElectronVersion:   "40.10.6",
+		RuntimeVersion:    "2026.7.1-2",
+		RuntimeID:         "openclaw-2026.7.1-2-win-x64",
+		TargetPlatform:    "win32",
+		TargetArch:        "x64",
+		RuntimeArchive:    "runtime.pkg",
+		RuntimeSHA256:     strings.Repeat("a", 64),
+		RuntimeTreeSHA256: strings.Repeat("b", 64),
+		RuntimeBytes:      1024,
+		UnpackedBytes:     4096,
+		FileCount:         8,
+		Entrypoint:        `electron\electron.exe`,
+		EntryArgs:         []string{"resources/app.asar"},
 	}
 }
 
@@ -103,23 +128,24 @@ func TestValidateManifestRejectsMalformedBounds(t *testing.T) {
 
 func TestReadManifestIsStrict(t *testing.T) {
 	directory := t.TempDir()
-	valid := `{
-		"schemaVersion":1,
-		"productVersion":"0.1.0",
-		"nodeVersion":"24.15.0",
-		"electronVersion":"40.10.6",
-		"runtimeVersion":"2026.7.1-2",
-		"runtimeId":"openclaw-win-x64",
-		"targetPlatform":"win32",
-		"targetArch":"x64",
-		"runtimeArchive":"runtime.pkg",
-		"runtimeSha256":"` + strings.Repeat("a", 64) + `",
-		"runtimeBytes":1,
-		"unpackedBytes":1,
-		"fileCount":1,
-		"entrypoint":"electron.exe",
-		"entryArgs":[]
-	}`
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustRuntimeTestKey(t, "fixture", public)
+	manifest := validRuntimeManifest()
+	manifest.RuntimeID = "openclaw-win-x64"
+	manifest.RuntimeBytes = 1
+	manifest.UnpackedBytes = 1
+	manifest.FileCount = 1
+	manifest.Entrypoint = "electron.exe"
+	manifest.EntryArgs = []string{}
+	manifest = signedRuntimeManifest(t, manifest, "fixture", private, time.Now().Add(-time.Minute), time.Now().Add(time.Hour), 7)
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := string(encoded)
 	path := filepath.Join(directory, "version.json")
 	if err := os.WriteFile(path, []byte(valid), 0o600); err != nil {
 		t.Fatal(err)
@@ -139,6 +165,105 @@ func TestReadManifestIsStrict(t *testing.T) {
 				t.Fatalf("returned %v", err)
 			}
 		})
+	}
+}
+
+func TestReadManifestSignatureFailsClosed(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongPublic, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	tests := []struct {
+		name    string
+		build   func(*testing.T) Manifest
+		keys    map[string]string
+		revoked string
+	}{
+		{"valid", func(t *testing.T) Manifest {
+			return signedRuntimeManifest(t, validRuntimeManifest(), "fixture", private, now.Add(-time.Minute), now.Add(time.Hour), 8)
+		}, map[string]string{"fixture": base64.StdEncoding.EncodeToString(public)}, "[]"},
+		{"tampered", func(t *testing.T) Manifest {
+			value := signedRuntimeManifest(t, validRuntimeManifest(), "fixture", private, now.Add(-time.Minute), now.Add(time.Hour), 8)
+			value.RuntimeID = "tampered-win-x64"
+			return value
+		}, map[string]string{"fixture": base64.StdEncoding.EncodeToString(public)}, "[]"},
+		{"wrong-key", func(t *testing.T) Manifest {
+			return signedRuntimeManifest(t, validRuntimeManifest(), "fixture", private, now.Add(-time.Minute), now.Add(time.Hour), 8)
+		}, map[string]string{"fixture": base64.StdEncoding.EncodeToString(wrongPublic)}, "[]"},
+		{"expired", func(t *testing.T) Manifest {
+			return signedRuntimeManifest(t, validRuntimeManifest(), "fixture", private, now.Add(-time.Hour), now.Add(-time.Minute), 8)
+		}, map[string]string{"fixture": base64.StdEncoding.EncodeToString(public)}, "[]"},
+		{"revoked", func(t *testing.T) Manifest {
+			return signedRuntimeManifest(t, validRuntimeManifest(), "fixture", private, now.Add(-time.Minute), now.Add(time.Hour), 8)
+		}, map[string]string{"fixture": base64.StdEncoding.EncodeToString(public)}, `["fixture"]`},
+		{"tampered-key-id", func(t *testing.T) Manifest {
+			value := signedRuntimeManifest(t, validRuntimeManifest(), "fixture", private, now.Add(-time.Minute), now.Add(time.Hour), 8)
+			value.Signature.KeyID = "other"
+			return value
+		}, map[string]string{
+			"fixture": base64.StdEncoding.EncodeToString(public),
+			"other":   base64.StdEncoding.EncodeToString(public),
+		}, "[]"},
+		{"tampered-expiry", func(t *testing.T) Manifest {
+			value := signedRuntimeManifest(t, validRuntimeManifest(), "fixture", private, now.Add(-time.Minute), now.Add(time.Hour), 8)
+			value.Signature.ExpiresAt = now.Add(2 * time.Hour).UTC().Format(time.RFC3339)
+			return value
+		}, map[string]string{"fixture": base64.StdEncoding.EncodeToString(public)}, "[]"},
+		{"tampered-sequence", func(t *testing.T) Manifest {
+			value := signedRuntimeManifest(t, validRuntimeManifest(), "fixture", private, now.Add(-time.Minute), now.Add(time.Hour), 8)
+			value.Signature.Sequence = 9
+			return value
+		}, map[string]string{"fixture": base64.StdEncoding.EncodeToString(public)}, "[]"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			encodedKeys, _ := json.Marshal(test.keys)
+			previousKeys, previousRevoked := trustedRuntimeKeys, revokedRuntimeKeyIDs
+			trustedRuntimeKeys, revokedRuntimeKeyIDs = string(encodedKeys), test.revoked
+			defer func() { trustedRuntimeKeys, revokedRuntimeKeyIDs = previousKeys, previousRevoked }()
+			directory := t.TempDir()
+			encoded, _ := json.Marshal(test.build(t))
+			path := filepath.Join(directory, "version.json")
+			if os.WriteFile(path, encoded, 0o600) != nil {
+				t.Fatal("write")
+			}
+			_, readErr := ReadManifest(path)
+			if test.name == "valid" && readErr != nil {
+				t.Fatalf("valid signature rejected: %v", readErr)
+			}
+			if test.name != "valid" && !errors.Is(readErr, ErrManifestInvalid) {
+				t.Fatalf("expected fail closed, got %v", readErr)
+			}
+		})
+	}
+}
+
+func TestManifestSigningPayloadMatchesJavaScriptGolden(t *testing.T) {
+	manifest := validRuntimeManifest()
+	manifest.ProductVersion = "0.1.0<>&\u2028"
+	manifest.RuntimeID = "openclaw-test"
+	manifest.RuntimeBytes = 7
+	manifest.UnpackedBytes = 9
+	manifest.FileCount = 1
+	manifest.Entrypoint = "electron/electron.exe"
+	manifest.EntryArgs = []string{"<arg>", "line\u2029end"}
+	manifest.Signature = &ManifestSignature{
+		Algorithm: "ed25519", KeyID: "fixture",
+		SignedAt: "2026-08-09T00:00:00.000Z", ExpiresAt: "2027-08-09T00:00:00.000Z",
+		Sequence: 42,
+	}
+	payload, err := manifestSigningPayload(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	if hex.EncodeToString(digest[:]) != "bb7ad70619f7524d325cf326d432a5a6be0bb84aa87ea24aa6ac7623b6cd4754" {
+		t.Fatalf("payload digest mismatch: %s", hex.EncodeToString(digest[:]))
 	}
 }
 
@@ -204,5 +329,24 @@ func TestValidatePackageRejectsSymlinkEscape(t *testing.T) {
 	manifest.RuntimeSHA256 = hex.EncodeToString(digest[:])
 	if err := ValidatePackage(directory, manifest); !errors.Is(err, ErrPackageInvalid) {
 		t.Fatalf("symlink package returned %v", err)
+	}
+}
+
+func TestValidatePackageRejectsHardlink(t *testing.T) {
+	directory := t.TempDir()
+	payload := []byte("runtime")
+	outside := filepath.Join(t.TempDir(), "outside.pkg")
+	if err := os.WriteFile(outside, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(outside, filepath.Join(directory, "runtime.pkg")); err != nil {
+		t.Skipf("hardlink unavailable: %v", err)
+	}
+	digest := sha256.Sum256(payload)
+	manifest := validRuntimeManifest()
+	manifest.RuntimeBytes = int64(len(payload))
+	manifest.RuntimeSHA256 = hex.EncodeToString(digest[:])
+	if err := ValidatePackage(directory, manifest); !errors.Is(err, ErrPackageInvalid) {
+		t.Fatalf("hardlink returned %v", err)
 	}
 }

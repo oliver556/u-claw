@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { DataIpcRequestSchema, DataIpcResponseSchema } from "./data.js";
+import { ReleaseIpcRequestSchema } from "./release.js";
+export { ReleaseIpcRequestSchema, ReleaseIpcResponseSchema } from "./release.js";
 export { DataIpcRequestSchema, DataIpcResponseSchema } from "./data.js";
 export type { DataIpcRequest, DataIpcResponse } from "./data.js";
 export { DiagnosticsIpcRequestSchema, DiagnosticsIpcResponseSchema } from "./diagnostics.js";
@@ -222,7 +224,7 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
-export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, DataIpcRequestSchema]);
+export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, DataIpcRequestSchema, ReleaseIpcRequestSchema]);
 export type IpcRequest = z.infer<typeof IpcRequestSchema>;
 export const IpcResponseSchema = z.union([
   WindowIpcSuccessResponseSchema,

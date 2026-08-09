@@ -16,12 +16,18 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
-import { validateRuntimeManifest } from "../scripts/runtime-manifest.mjs";
+import { list as listTar } from "tar";
+
+import { hashRuntimeTree } from "./build-runtime.mjs";
+import {
+  isSafeWindowsRelativePath,
+  verifySignedRuntimeManifest,
+} from "../scripts/runtime-manifest.mjs";
 
 const execFileAsync = promisify(execFile);
 
 export async function buildRelease(options) {
-  const manifest = validateRuntimeManifest(options.manifest);
+  const manifest = verifySignedRuntimeManifest(options.manifest, options.trustedPublicKeys);
   if (manifest.runtimeArchive !== "runtime.pkg") {
     throw new Error("release package name must be runtime.pkg");
   }
@@ -33,6 +39,7 @@ export async function buildRelease(options) {
   if (packageInfo.size !== manifest.runtimeBytes || !await digestMatches(runtimePackagePath, manifest.runtimeSha256)) {
     throw new Error("runtime package does not match manifest");
   }
+  await validateRuntimeArchive(runtimePackagePath, manifest);
   await requireMissing(outputDir, "release output already exists");
 
   const outputParent = path.dirname(outputDir);
@@ -66,6 +73,71 @@ export async function buildRelease(options) {
   }
 }
 
+async function validateRuntimeArchive(archivePath, manifest) {
+  const records = [];
+  const pending = [];
+  const seen = new Set();
+  let fileCount = 0;
+  let unpackedBytes = 0;
+
+  try {
+    await listTar({
+      file: archivePath,
+      gzip: true,
+      strict: true,
+      onReadEntry(entry) {
+        if (entry.type !== "Directory" && entry.type !== "File") {
+          throw new Error(`unsupported entry type: ${entry.type}`);
+        }
+        const normalized = entry.path.replaceAll("\\", "/").replace(/^\.\//u, "");
+        const relative = entry.type === "Directory" ? normalized.replace(/\/$/u, "") : normalized;
+        if (!isSafeWindowsRelativePath(relative)) {
+          throw new Error(`unsafe path: ${entry.path}`);
+        }
+        const canonical = relative.toLowerCase();
+        if (canonical === ".uclaw-runtime-cache.json") {
+          throw new Error(`reserved path: ${entry.path}`);
+        }
+        if (seen.has(canonical)) throw new Error(`duplicate path: ${entry.path}`);
+        seen.add(canonical);
+
+        if (entry.type === "Directory") return;
+        if (!Number.isSafeInteger(entry.size) || entry.size < 0) {
+          throw new Error(`invalid entry size: ${entry.path}`);
+        }
+        fileCount += 1;
+        unpackedBytes += entry.size;
+        if (!Number.isSafeInteger(unpackedBytes) || unpackedBytes > manifest.unpackedBytes) {
+          throw new Error("unpacked size exceeds signed manifest");
+        }
+
+        const hash = createHash("sha256");
+        pending.push(new Promise((resolve, reject) => {
+          entry.on("data", (chunk) => hash.update(chunk));
+          entry.once("error", reject);
+          entry.once("end", () => {
+            records.push({ path: relative, size: entry.size, sha256: hash.digest("hex") });
+            resolve();
+          });
+        }));
+      },
+    });
+    await Promise.all(pending);
+  } catch (error) {
+    throw new Error(`runtime archive validation failed: ${error.message}`);
+  }
+
+  if (fileCount !== manifest.fileCount || unpackedBytes !== manifest.unpackedBytes) {
+    throw new Error("runtime archive metadata does not match manifest");
+  }
+  if (!records.some((record) => record.path.toLowerCase() === manifest.entrypoint.toLowerCase())) {
+    throw new Error("runtime archive entrypoint is missing");
+  }
+  if (hashRuntimeTree(records) !== manifest.runtimeTreeSha256.toLowerCase()) {
+    throw new Error("runtime archive tree does not match manifest");
+  }
+}
+
 async function requireRegularFile(target, label) {
   const info = await lstat(target).catch(() => null);
   if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`${label} must be a regular file`);
@@ -94,15 +166,19 @@ async function runCLI() {
       launcher: { type: "string" },
       "runtime-package": { type: "string" },
       manifest: { type: "string" },
+      "public-key": { type: "string" },
       output: { type: "string" },
     },
   });
   const manifest = JSON.parse(await readFile(values.manifest, "utf8"));
+  if (!values["public-key"]) throw new Error("trusted runtime public key is required");
+  const publicKey = await readFile(values["public-key"], "utf8");
   await buildRelease({
     launcherPath: values.launcher,
     runtimePackagePath: values["runtime-package"],
     manifest,
     outputDir: values.output,
+    trustedPublicKeys: { [manifest.signature?.keyId]: publicKey },
   });
 }
 

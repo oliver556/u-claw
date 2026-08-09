@@ -10,6 +10,7 @@ export const CHANNEL_IPC_CHANNEL = "uclaw:managed-channels";
 export const MCP_IPC_CHANNEL = "uclaw:mcp-servers";
 export const DATA_IPC_CHANNEL = "uclaw:data";
 export const DIAGNOSTICS_IPC_CHANNEL = "uclaw:diagnostics";
+export const RELEASE_IPC_CHANNEL = "uclaw:release";
 
 export const IPC_CHANNELS = Object.freeze([
   WINDOW_IPC_CHANNEL,

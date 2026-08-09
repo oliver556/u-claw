@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -110,8 +114,25 @@ func EnsureRuntimeCache(
 	if err := ctx.Err(); err != nil {
 		return CacheResult{}, err
 	}
-	if err := ValidatePackage(packageRoot, manifest); err != nil {
+	if err := ValidateManifest(manifest); err != nil {
 		return CacheResult{}, err
+	}
+	packageDirectory, err := os.OpenRoot(packageRoot)
+	if err != nil {
+		return CacheResult{}, ErrCachePreparationFailed
+	}
+	defer packageDirectory.Close()
+	archivePath := strings.ReplaceAll(manifest.RuntimeArchive, `\`, string(os.PathSeparator))
+	archive, err := packageDirectory.Open(archivePath)
+	if err != nil {
+		return CacheResult{}, ErrCachePreparationFailed
+	}
+	defer archive.Close()
+	if err := validatePackageFile(archive, manifest); err != nil {
+		return CacheResult{}, err
+	}
+	if _, err := archive.Seek(0, io.SeekStart); err != nil {
+		return CacheResult{}, ErrCachePreparationFailed
 	}
 	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
 		return CacheResult{}, ErrCachePreparationFailed
@@ -151,26 +172,19 @@ func EnsureRuntimeCache(
 		}
 	}()
 
-	packageDirectory, err := os.OpenRoot(packageRoot)
-	if err != nil {
-		return CacheResult{}, ErrCachePreparationFailed
-	}
-	archivePath := strings.ReplaceAll(manifest.RuntimeArchive, `\`, string(os.PathSeparator))
-	archive, err := packageDirectory.Open(archivePath)
-	if err != nil {
-		packageDirectory.Close()
-		return CacheResult{}, ErrCachePreparationFailed
-	}
-	extractErr := ExtractRuntime(ctx, archive, temporaryPath, manifest)
-	closeArchiveErr := archive.Close()
-	closePackageErr := packageDirectory.Close()
+	archiveHash := sha256.New()
+	verifiedArchive := &countingReader{reader: io.TeeReader(archive, archiveHash)}
+	extractErr := ExtractRuntime(ctx, verifiedArchive, temporaryPath, manifest)
 	if extractErr != nil {
 		return CacheResult{}, extractErr
 	}
-	if closeArchiveErr != nil || closePackageErr != nil {
-		return CacheResult{}, ErrCachePreparationFailed
+	if _, err := io.Copy(io.Discard, verifiedArchive); err != nil || verifiedArchive.bytes != manifest.RuntimeBytes || hex.EncodeToString(archiveHash.Sum(nil)) != strings.ToLower(manifest.RuntimeSHA256) {
+		return CacheResult{}, ErrPackageInvalid
 	}
 	if !runtimeEntrypointUsable(temporaryPath, manifest.Entrypoint) {
+		return CacheResult{}, ErrCachePreparationFailed
+	}
+	if digest, err := runtimeTreeDigestAt(temporaryPath); err != nil || digest != strings.ToLower(manifest.RuntimeTreeSHA256) {
 		return CacheResult{}, ErrCachePreparationFailed
 	}
 	if err := writeCacheMarker(temporaryPath, manifest); err != nil {
@@ -183,12 +197,119 @@ func EnsureRuntimeCache(
 	return CacheResult{Path: cachePath, Reused: false}, nil
 }
 
+type countingReader struct {
+	reader io.Reader
+	bytes  int64
+}
+
+func (reader *countingReader) Read(buffer []byte) (int, error) {
+	read, err := reader.reader.Read(buffer)
+	reader.bytes += int64(read)
+	return read, err
+}
+
 func runtimeCacheUsable(cachePath string, manifest Manifest) bool {
-	marker, err := ReadManifest(filepath.Join(cachePath, cacheMarkerName))
+	marker, err := readManifestFile(filepath.Join(cachePath, cacheMarkerName))
 	if err != nil || !reflect.DeepEqual(marker, manifest) {
 		return false
 	}
-	return runtimeEntrypointUsable(cachePath, manifest.Entrypoint)
+	if !runtimeEntrypointUsable(cachePath, manifest.Entrypoint) {
+		return false
+	}
+	digest, err := runtimeTreeDigestAt(cachePath)
+	return err == nil && digest == strings.ToLower(manifest.RuntimeTreeSHA256)
+}
+
+type runtimeTreeFile struct {
+	path   string
+	size   int64
+	digest [sha256.Size]byte
+}
+
+func runtimeTreeDigestAt(cachePath string) (string, error) {
+	root, err := os.OpenRoot(cachePath)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	files := make([]runtimeTreeFile, 0)
+	var visit func(string) error
+	visit = func(directory string) error {
+		file, err := root.Open(directory)
+		if err != nil {
+			return err
+		}
+		entries, readErr := file.ReadDir(-1)
+		closeErr := file.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		for _, entry := range entries {
+			relative := entry.Name()
+			if directory != "." {
+				relative = filepath.Join(directory, entry.Name())
+			}
+			if directory == "." && entry.Name() == cacheMarkerName {
+				continue
+			}
+			info, err := root.Lstat(relative)
+			if err != nil || info.Mode()&os.ModeSymlink != 0 {
+				return ErrCachePreparationFailed
+			}
+			if info.IsDir() {
+				if err := visit(relative); err != nil {
+					return err
+				}
+				continue
+			}
+			if !info.Mode().IsRegular() {
+				return ErrCachePreparationFailed
+			}
+			content, err := root.Open(relative)
+			if err != nil {
+				return err
+			}
+			links, linkErr := fileLinkCount(content, info)
+			if linkErr != nil || links != 1 {
+				content.Close()
+				return ErrCachePreparationFailed
+			}
+			hash := sha256.New()
+			_, copyErr := io.Copy(hash, content)
+			after, statErr := content.Stat()
+			closeErr := content.Close()
+			if copyErr != nil || statErr != nil || closeErr != nil || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
+				return ErrCachePreparationFailed
+			}
+			var digest [sha256.Size]byte
+			copy(digest[:], hash.Sum(nil))
+			files = append(files, runtimeTreeFile{path: filepath.ToSlash(relative), size: info.Size(), digest: digest})
+		}
+		return nil
+	}
+	if err := visit("."); err != nil {
+		return "", err
+	}
+	return runtimeTreeDigest(files), nil
+}
+
+func runtimeTreeDigest(files []runtimeTreeFile) string {
+	sort.Slice(files, func(left, right int) bool { return files[left].path < files[right].path })
+	hash := sha256.New()
+	var pathLength [4]byte
+	var size [8]byte
+	for _, file := range files {
+		binary.BigEndian.PutUint32(pathLength[:], uint32(len([]byte(file.path))))
+		binary.BigEndian.PutUint64(size[:], uint64(file.size))
+		hash.Write(pathLength[:])
+		hash.Write([]byte(file.path))
+		hash.Write(size[:])
+		hash.Write(file.digest[:])
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func runtimeEntrypointUsable(cachePath string, entrypoint string) bool {

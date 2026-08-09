@@ -42,6 +42,9 @@ import { createMcpStore } from "./mcp/mcp-store.js";
 import { createDataService } from "./data/data-service.js";
 import { createDiagnosticsService, type DiagnosticsRuntimeInfo } from "./diagnostics/diagnostics-service.js";
 import { createOpenClawMcpRuntime } from "./mcp/mcp-runtime.js";
+import { createReleaseDispatcher } from "./release/release-dispatcher.js";
+import type { ReleaseService } from "./release/release-service.js";
+import { createProductionReleaseService } from "./release/production-release.js";
 import {
   createAdvancedConsoleController,
   createMainWindow,
@@ -171,6 +174,7 @@ export interface DesktopMainOptions {
   pluginRuntime?: PluginRuntimeAdapter;
   attachments?: AttachmentService;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
+  releaseService?: ReleaseService;
   selectPort?(excludedPorts: readonly number[], signal: AbortSignal): Promise<number>;
   fetch?: GatewayHealthDependencies["fetch"];
   now?: () => number;
@@ -386,6 +390,7 @@ export async function startElectronMain(
     diagnostics: client.diagnostics,
     runtime: diagnosticsRuntime,
   });
+  const release = options.releaseService ?? createProductionReleaseService(portablePaths);
   let gatewayPort: number | undefined;
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -439,6 +444,7 @@ export async function startElectronMain(
       mcpRuntime,
       dispatchData: data.dispatch,
       dispatchDiagnostics: diagnostics.dispatch,
+      dispatchRelease: createReleaseDispatcher(release),
       selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
         const selected = await dialog.showOpenDialog({
           properties: ["openFile", "multiSelections"],

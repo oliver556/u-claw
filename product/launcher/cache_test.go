@@ -161,6 +161,33 @@ func TestEnsureRuntimeCacheRebuildsMissingEntrypoint(t *testing.T) {
 	}
 }
 
+func TestEnsureRuntimeCacheRebuildsTamperedCachedContent(t *testing.T) {
+	packageRoot, manifest := writePackageFixture(t)
+	cacheRoot := t.TempDir()
+	first, err := EnsureRuntimeCache(context.Background(), cacheRoot, packageRoot, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(first.Path, filepath.FromSlash("resources/app.asar"))
+	if err := os.WriteFile(app, []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := EnsureRuntimeCache(context.Background(), cacheRoot, packageRoot, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Reused {
+		t.Fatal("tampered cache was reused")
+	}
+	content, err := os.ReadFile(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "application" {
+		t.Fatalf("cache content was not restored: %q", content)
+	}
+}
+
 func TestEnsureRuntimeCacheRemovesPartialDirectoryAfterCancellation(t *testing.T) {
 	packageRoot, manifest := writePackageFixture(t)
 	cacheRoot := t.TempDir()

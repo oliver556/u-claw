@@ -16,4 +16,5 @@ export * from "./package-name.js";
 export * from "./session-organizer.js";
 export * from "./providers.js";
 export * from "./plugins.js";
+export * from "./release.js";
 export * from "./tools.js";

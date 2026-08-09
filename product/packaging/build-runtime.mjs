@@ -57,6 +57,7 @@ export async function buildRuntime(options) {
     targetArch: runtimeVersions.targetArch,
     runtimeArchive: "runtime.pkg",
     runtimeSha256: "0".repeat(64),
+    runtimeTreeSha256: inventory.treeSha256,
     runtimeBytes: 1,
     unpackedBytes: inventory.unpackedBytes,
     fileCount: inventory.fileCount,
@@ -105,6 +106,7 @@ export async function buildRuntime(options) {
 async function inventoryRuntime(inputDir) {
   const entries = [];
   const files = new Set();
+  const fileRecords = [];
   const seen = new Set();
   let fileCount = 0;
   let unpackedBytes = 0;
@@ -133,6 +135,7 @@ async function inventoryRuntime(inputDir) {
       } else if (info.isFile()) {
         entries.push(relative);
         files.add(canonical);
+        fileRecords.push({ path: relative, size: info.size, sha256: await hashFile(absolute) });
         fileCount += 1;
         unpackedBytes += info.size;
         if (!Number.isSafeInteger(unpackedBytes)) throw new Error("runtime is too large");
@@ -144,7 +147,19 @@ async function inventoryRuntime(inputDir) {
 
   await visit("");
   entries.sort((left, right) => left.localeCompare(right, "en"));
-  return { entries, files, fileCount, unpackedBytes };
+  return { entries, files, fileCount, unpackedBytes, treeSha256: hashRuntimeTree(fileRecords) };
+}
+
+export function hashRuntimeTree(records) {
+  const hash = createHash("sha256");
+  const sorted = [...records].sort((left, right) => Buffer.compare(Buffer.from(left.path), Buffer.from(right.path)));
+  for (const record of sorted) {
+    const pathBytes = Buffer.from(record.path);
+    const pathLength = Buffer.alloc(4); pathLength.writeUInt32BE(pathBytes.length);
+    const size = Buffer.alloc(8); size.writeBigUInt64BE(BigInt(record.size));
+    hash.update(pathLength); hash.update(pathBytes); hash.update(size); hash.update(Buffer.from(record.sha256, "hex"));
+  }
+  return hash.digest("hex");
 }
 
 function normalizeRuntimePath(value) {
