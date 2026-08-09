@@ -106,4 +106,21 @@ describe("data management contract", () => {
     });
     expect(JSON.stringify(response)).not.toMatch(/(?:[A-Za-z]:\\\\|\/Users\/|\/tmp\/)/);
   });
+
+  it("requires server previews and fixed categories for factory reset", () => {
+    expect(DataIpcRequestSchema.parse({ method: "factory-reset.preview", requestId: "reset-preview", params: {} }).params).toEqual({});
+    expect(DataIpcRequestSchema.parse({ method: "factory-reset.execute", requestId: "reset-execute", params: { previewToken: "preview-reset-1", confirmation: "RESET U-CLAW", confirmed: true } }).params).not.toHaveProperty("path");
+    expect(DataIpcRequestSchema.safeParse({ method: "factory-reset.execute", requestId: "bad", params: { previewToken: "preview-reset-1", confirmation: "RESET U-CLAW", confirmed: true, path: "/tmp" } }).success).toBe(false);
+    expect(DataIpcRequestSchema.safeParse({ method: "factory-reset.execute", requestId: "bad", params: { previewToken: "preview-reset-1", confirmation: "yes", confirmed: true } }).success).toBe(false);
+  });
+
+  it("keeps factory reset preview explicit and path-free", () => {
+    const response = DataIpcResponseSchema.parse({ method: "factory-reset.preview", requestId: "reset-preview", ok: true, result: {
+      previewToken: "preview-reset-1", consistency: "runtime-coordination-required", recovery: "none",
+      delete: [{ id: "uclaw-owned-state", label: "U-Claw 配置与运行状态", fileCount: 3, bytes: 90 }],
+      preserve: [{ id: "user-files", label: "用户工作文件" }, { id: "backups", label: "备份" }],
+      warnings: ["执行前需 OpenClaw 停写协调。"],
+    } });
+    expect(JSON.stringify(response)).not.toMatch(/(?:[A-Za-z]:\\\\|\/Users\/|\/tmp\/)/);
+  });
 });

@@ -268,6 +268,14 @@ export function createDataService(options: DataServiceOptions) {
           await maintenance.assertNoRecoveryState();
           result = maintenance.executeCleanup(request.params.candidateIds, request.params.previewToken);
           break;
+        case "factory-reset.preview":
+          if (!maintenance) throw safeError("UNAVAILABLE", "恢复出厂服务未配置。");
+          result = await maintenance.previewFactoryReset();
+          break;
+        case "factory-reset.execute":
+          if (!maintenance) throw safeError("UNAVAILABLE", "恢复出厂服务未配置。");
+          result = maintenance.executeFactoryReset({ previewToken: request.params.previewToken });
+          break;
         case "maintenance.operation-get":
           if (!maintenance) throw safeError("UNAVAILABLE", "维护服务未配置。");
           result = maintenance.getOperation(request.params.operationId);

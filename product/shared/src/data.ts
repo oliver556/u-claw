@@ -35,6 +35,9 @@ export const CleanupCandidateIdSchema = z.enum([
   "diagnostics:expired-crash-dumps", "backups:expired",
 ]);
 export type CleanupCandidateId = z.infer<typeof CleanupCandidateIdSchema>;
+export const FactoryResetDeleteIdSchema = z.enum(["openclaw-state", "uclaw-owned-state", "capabilities", "diagnostics", "rebuildable-cache"]);
+export type FactoryResetDeleteId = z.infer<typeof FactoryResetDeleteIdSchema>;
+const FactoryResetFailureIdSchema = z.union([CleanupCandidateIdSchema, z.enum(["factory-reset:owned-data", "factory-reset:cache"])]);
 const UniqueBackupCollectionsSchema = z.array(BackupCollectionIdSchema).min(1).max(4).refine((items) => new Set(items).size === items.length, "Duplicate backup collection ID.");
 const UniqueCleanupCandidatesSchema = z.array(CleanupCandidateIdSchema).min(1).max(6).refine((items) => new Set(items).size === items.length, "Duplicate cleanup candidate ID.");
 const PageParamsSchema = z.object({
@@ -64,6 +67,8 @@ export const DataIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("storage.stats"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
   z.object({ method: z.literal("cleanup.preview"), requestId: RequestIdSchema, params: z.object({ candidateIds: UniqueCleanupCandidatesSchema.optional() }).strict() }).strict(),
   z.object({ method: z.literal("cleanup.execute"), requestId: RequestIdSchema, params: z.object({ candidateIds: UniqueCleanupCandidatesSchema, previewToken: MaintenancePreviewTokenSchema, confirmed: z.literal(true) }).strict() }).strict(),
+  z.object({ method: z.literal("factory-reset.preview"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("factory-reset.execute"), requestId: RequestIdSchema, params: z.object({ previewToken: MaintenancePreviewTokenSchema, confirmation: z.literal("RESET U-CLAW"), confirmed: z.literal(true) }).strict() }).strict(),
   z.object({ method: z.literal("maintenance.operation-get"), requestId: RequestIdSchema, params: z.object({ operationId: MaintenanceOperationIdSchema }).strict() }).strict(),
   z.object({ method: z.literal("maintenance.operation-cancel"), requestId: RequestIdSchema, params: z.object({ operationId: MaintenanceOperationIdSchema }).strict() }).strict(),
 ]);
@@ -170,13 +175,25 @@ export const CleanupPreviewSchema = z.object({
   protectedCategories: z.array(StorageCategoryIdSchema).min(1),
 }).strict();
 export type CleanupPreview = z.infer<typeof CleanupPreviewSchema>;
+export const FactoryResetPreviewSchema = z.object({
+  previewToken: MaintenancePreviewTokenSchema,
+  consistency: z.enum(["runtime-coordination-required", "coordinated"]),
+  recovery: z.enum(["none", "resume-required"]),
+  delete: z.array(z.object({ id: FactoryResetDeleteIdSchema, label: z.string().min(1).max(80), fileCount: z.number().int().nonnegative(), bytes: z.number().int().nonnegative() }).strict()).max(5),
+  preserve: z.tuple([
+    z.object({ id: z.literal("user-files"), label: z.literal("用户工作文件") }).strict(),
+    z.object({ id: z.literal("backups"), label: z.literal("备份") }).strict(),
+  ]),
+  warnings: z.array(z.string().min(1).max(160)).min(1).max(8),
+}).strict();
+export type FactoryResetPreview = z.infer<typeof FactoryResetPreviewSchema>;
 export const MaintenanceOperationSchema = z.object({
-  id: MaintenanceOperationIdSchema, kind: z.enum(["backup", "restore", "cleanup"]),
+  id: MaintenanceOperationIdSchema, kind: z.enum(["backup", "restore", "cleanup", "factory-reset"]),
   state: z.enum(["queued", "running", "completed", "cancelled", "failed", "needs-recovery"]),
-  phase: z.enum(["queued", "coordinating", "scanning", "staging", "verifying", "committing", "rolling-back", "cleaning", "completed", "cancelled", "failed", "needs-recovery"]),
+  phase: z.enum(["queued", "coordinating", "scanning", "staging", "verifying", "committing", "rolling-back", "cleaning", "restarting", "completed", "cancelled", "failed", "needs-recovery"]),
   processedFiles: z.number().int().nonnegative(), totalFiles: z.number().int().nonnegative(),
   processedBytes: z.number().int().nonnegative(), totalBytes: z.number().int().nonnegative(),
-  partialFailures: z.number().int().nonnegative(), failures: z.array(z.object({ candidateId: CleanupCandidateIdSchema, code: z.string().min(1).max(40), message: z.string().min(1).max(120) }).strict()).max(20), message: z.string().min(1).max(160),
+  partialFailures: z.number().int().nonnegative(), failures: z.array(z.object({ candidateId: FactoryResetFailureIdSchema, code: z.string().min(1).max(40), message: z.string().min(1).max(120) }).strict()).max(20), message: z.string().min(1).max(160),
 }).strict();
 export type MaintenanceOperation = z.infer<typeof MaintenanceOperationSchema>;
 
@@ -195,7 +212,8 @@ export const DataIpcResponseSchema = z.union([
   z.object({ method: z.literal("backup.restore-preview"), requestId: RequestIdSchema, ok: z.literal(true), result: RestorePreviewSchema }).strict(),
   z.object({ method: z.literal("storage.stats"), requestId: RequestIdSchema, ok: z.literal(true), result: StorageStatsSchema }).strict(),
   z.object({ method: z.literal("cleanup.preview"), requestId: RequestIdSchema, ok: z.literal(true), result: CleanupPreviewSchema }).strict(),
-  z.object({ method: z.enum(["backup.create", "backup.restore", "cleanup.execute", "maintenance.operation-get", "maintenance.operation-cancel"]), requestId: RequestIdSchema, ok: z.literal(true), result: MaintenanceOperationSchema }).strict(),
+  z.object({ method: z.literal("factory-reset.preview"), requestId: RequestIdSchema, ok: z.literal(true), result: FactoryResetPreviewSchema }).strict(),
+  z.object({ method: z.enum(["backup.create", "backup.restore", "cleanup.execute", "factory-reset.execute", "maintenance.operation-get", "maintenance.operation-cancel"]), requestId: RequestIdSchema, ok: z.literal(true), result: MaintenanceOperationSchema }).strict(),
   z.object({ method: z.string().min(1), requestId: RequestIdSchema, ok: z.literal(false), error: UClawErrorSchema }).strict(),
 ]);
 export type DataIpcResponse = z.infer<typeof DataIpcResponseSchema>;

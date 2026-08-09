@@ -45,4 +45,22 @@ describe("diagnostics IPC contracts", () => {
     };
     expect(DiagnosticsIpcResponseSchema.safeParse(response).success).toBe(false);
   });
+
+  it("accepts only structured doctor, repair, and bounded network requests", () => {
+    expect(DiagnosticsIpcRequestSchema.parse({ method: "doctor.run", requestId: "doctor-1", params: {} }).method).toBe("doctor.run");
+    expect(DiagnosticsIpcRequestSchema.parse({ method: "doctor.repair", requestId: "repair-1", params: { actionId: "gateway-restart", previewToken: "doctor-preview-1", confirmed: true } }).method).toBe("doctor.repair");
+    expect(DiagnosticsIpcRequestSchema.parse({ method: "network.run", requestId: "network-1", params: { timeoutMs: 2500 } }).method).toBe("network.run");
+    expect(DiagnosticsIpcRequestSchema.safeParse({ method: "doctor.repair", requestId: "bad", params: { command: "rm -rf /", confirmed: true } }).success).toBe(false);
+    expect(DiagnosticsIpcRequestSchema.safeParse({ method: "network.run", requestId: "bad", params: { target: "https://secret.example", timeoutMs: 999999 } }).success).toBe(false);
+  });
+
+  it("accepts path-free structured doctor and network results", () => {
+    const doctor = DiagnosticsIpcResponseSchema.parse({ method: "doctor.run", requestId: "doctor-1", ok: true, result: {
+      state: "issues", adapter: "openclaw", checks: [{ id: "gateway", label: "Gateway", level: "error", summary: "Gateway 未就绪。", suggestion: "重启受控 Gateway。", repair: { actionId: "gateway-restart", label: "重启 Gateway", previewToken: "doctor-preview-1" } }],
+    } });
+    const network = DiagnosticsIpcResponseSchema.parse({ method: "network.run", requestId: "network-1", ok: true, result: {
+      mode: "intranet-only", checks: [{ id: "provider", label: "Provider", level: "warning", summary: "外网不可用。", durationMs: 1200 }], proxy: { configured: true, noProxyConfigured: true },
+    } });
+    expect(JSON.stringify([doctor, network])).not.toMatch(/(?:command|https?:\/\/|[A-Za-z]:\\\\|\/Users\/)/);
+  });
 });

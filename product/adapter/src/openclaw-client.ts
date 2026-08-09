@@ -100,6 +100,7 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
   "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch", "models.list",
   "config.get", "config.patch", "channels.status", "channels.start", "channels.stop",
+  "diagnostics.doctor", "diagnostics.repair",
 ] as const;
 
 const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);
@@ -179,6 +180,20 @@ const ChannelsStatusResponseSchema = z.object({
   channelAccounts: z.record(z.string(), z.array(ChannelAccountSnapshotSchema)),
   channelDefaultAccountId: z.record(z.string(), z.string()),
 }).passthrough();
+const DoctorActionIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,63}$/);
+const DoctorResponseSchema = z.object({
+  status: z.enum(["ok", "issues"]),
+  checks: z.array(z.object({
+    id: DoctorActionIdSchema,
+    title: z.string().min(1).max(80),
+    severity: z.enum(["info", "warning", "error"]),
+    status: z.enum(["pass", "warn", "fail"]),
+    summary: z.string().min(1).max(240),
+    suggestion: z.string().min(1).max(240).optional(),
+    repair: z.object({ actionId: DoctorActionIdSchema, label: z.string().min(1).max(80) }).optional(),
+  })).max(100),
+});
+const DoctorRepairResponseSchema = z.object({ ok: z.literal(true), actionId: DoctorActionIdSchema }).passthrough();
 const ChannelStartResponseSchema = z.object({ channel: z.literal("telegram"), accountId: z.string().min(1), started: z.boolean() }).passthrough();
 const ChannelStopResponseSchema = z.object({ channel: z.literal("telegram"), accountId: z.string().min(1), stopped: z.boolean() }).passthrough();
 const TELEGRAM_RUNTIME_METHODS = ["config.get", "config.patch", "channels.status", "channels.start", "channels.stop"] as const;
@@ -646,7 +661,19 @@ export class OpenClawClient implements UClawClient {
     },
   };
   readonly files: UClawClient["files"] = { list: async () => this.unsupported("files.list"), readText: async () => this.unsupported("files.readText") };
-  readonly diagnostics: UClawClient["diagnostics"] = { list: async () => this.unsupported("diagnostics.list"), listLogs: async () => this.unsupported("logs.tail") };
+  readonly diagnostics: UClawClient["diagnostics"] = {
+    list: async () => this.unsupported("diagnostics.list"),
+    listLogs: async () => this.unsupported("logs.tail"),
+    doctor: async (signal) => {
+      this.requireMethod("diagnostics.doctor");
+      return this.options.transport.router.request("diagnostics.doctor", {}, DoctorResponseSchema, signal);
+    },
+    repair: async (actionId, signal) => {
+      this.requireMethod("diagnostics.repair");
+      const result = await this.options.transport.router.request("diagnostics.repair", { actionId }, DoctorRepairResponseSchema, signal);
+      if (result.actionId !== actionId) throw new RpcProtocolError("diagnostics.repair");
+    },
+  };
 
   private async *sendChat(input: Parameters<UClawClient["chat"]["send"]>[0], signal?: AbortSignal): AsyncIterable<MessageEvent> {
     this.requireMethod("chat.send");
