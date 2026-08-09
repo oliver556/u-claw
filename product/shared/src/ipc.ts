@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { SkillIpcRequestSchema, SkillIpcResponseSchema } from "./capabilities.js";
 export { SkillIpcRequestSchema, SkillIpcResponseSchema } from "./capabilities.js";
 
 import { AttachmentImportInputSchema, AttachmentSchema } from "./attachments.js";
@@ -15,6 +16,9 @@ import {
 import { PageRequestSchema } from "./common.js";
 import { UClawErrorSchema } from "./errors.js";
 import { ProviderIpcRequestSchema, ProviderIpcResponseSchema } from "./providers.js";
+import { ChannelIpcRequestSchema, ChannelIpcResponseSchema } from "./channels.js";
+export { ChannelIpcRequestSchema, ChannelIpcResponseSchema } from "./channels.js";
+export type { ChannelIpcRequest, ChannelIpcResponse } from "./channels.js";
 export { ProviderIpcRequestSchema, ProviderIpcResponseSchema } from "./providers.js";
 export type { ProviderIpcRequest, ProviderIpcResponse } from "./providers.js";
 import { CapabilitySetWireSchema, GatewayStatusWireSchema } from "./gateway.js";
@@ -206,7 +210,7 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
-export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema]);
+export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, ChannelIpcRequestSchema]);
 export type IpcRequest = z.infer<typeof IpcRequestSchema>;
 export const IpcResponseSchema = z.union([
   WindowIpcSuccessResponseSchema,
@@ -215,6 +219,8 @@ export const IpcResponseSchema = z.union([
   ClientIpcFailureResponseSchema,
   AttachmentIpcResponseSchema,
   ProviderIpcResponseSchema,
+  SkillIpcResponseSchema,
+  ChannelIpcResponseSchema,
 ]);
 export type IpcResponse = z.infer<typeof IpcResponseSchema>;
 export const IpcEventSchema = ClientIpcEventSchema;

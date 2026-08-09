@@ -1,4 +1,4 @@
-import type { AttachmentIpcRequest, AttachmentIpcResponse, ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, ProviderIpcRequest, ProviderIpcResponse, RecoveryAction, SkillIpcRequest, SkillIpcResponse, WindowIpcRequest } from "@uclaw/shared";
+import type { AttachmentIpcRequest, AttachmentIpcResponse, ChannelIpcRequest, ChannelIpcResponse, ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, ProviderIpcRequest, ProviderIpcResponse, RecoveryAction, SkillIpcRequest, SkillIpcResponse, WindowIpcRequest } from "@uclaw/shared";
 import { Modal, Tooltip } from "antd";
 import { Activity, Copy, Cpu, HardDrive, Maximize2, Minus, Radio, RotateCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -25,6 +25,9 @@ declare global {
       };
       skills?: {
         invoke(request: SkillIpcRequest): Promise<SkillIpcResponse>;
+      };
+      channels?: {
+        invoke(request: ChannelIpcRequest): Promise<ChannelIpcResponse>;
       };
     };
   }

@@ -8,6 +8,8 @@ import {
   ProviderIpcResponseSchema,
   SkillIpcRequestSchema,
   SkillIpcResponseSchema,
+  ChannelIpcRequestSchema,
+  ChannelIpcResponseSchema,
   WindowIpcRequestSchema,
   type ClientIpcRequest,
   type IpcResponse,
@@ -15,6 +17,7 @@ import {
   type WindowIpcRequest,
   type ProviderIpcRequest,
   type SkillIpcRequest,
+  type ChannelIpcRequest,
 } from "@uclaw/shared";
 
 import {
@@ -25,6 +28,7 @@ import {
   WINDOW_IPC_CHANNEL,
   PROVIDER_IPC_CHANNEL,
   SKILL_IPC_CHANNEL,
+  CHANNEL_IPC_CHANNEL,
 } from "./channels.js";
 
 export interface ContextBridgeLike {
@@ -97,6 +101,18 @@ export function installPreloadBridge({
     }
     return response;
   };
+  const invokeChannels = async (payload: unknown) => {
+    const parsedRequest = ChannelIpcRequestSchema.safeParse(payload);
+    if (!parsedRequest.success) throw new Error("Invalid channel IPC request.");
+    const request = parsedRequest.data;
+    const parsedResponse = ChannelIpcResponseSchema.safeParse(await ipcRenderer.invoke(CHANNEL_IPC_CHANNEL, request));
+    if (!parsedResponse.success) throw new Error("Invalid channel IPC response.");
+    const response = parsedResponse.data;
+    if (response.method !== request.method || response.requestId !== request.requestId) {
+      throw new Error("IPC response does not match its request.");
+    }
+    return response;
+  };
   const subscribe = (listener: (event: IpcEvent) => void): (() => void) => {
     const receive = (_event: unknown, payload: unknown): void => {
       const parsed = IpcEventSchema.safeParse(payload);
@@ -127,5 +143,6 @@ export function installPreloadBridge({
     attachments: Object.freeze({ invoke: invokeAttachments }),
     providers: Object.freeze({ invoke: invokeProviders as (request: ProviderIpcRequest) => Promise<unknown> }),
     skills: Object.freeze({ invoke: invokeSkills as (request: SkillIpcRequest) => Promise<unknown> }),
+    channels: Object.freeze({ invoke: invokeChannels as (request: ChannelIpcRequest) => Promise<unknown> }),
   }));
 }

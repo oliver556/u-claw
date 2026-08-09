@@ -31,6 +31,8 @@ import { createSessionOrganizerStore } from "./session-organizer/store.js";
 import { createProviderStore } from "./providers/provider-store.js";
 import { createFixtureSkillHubClient } from "./skills/fixture-client.js";
 import { createSkillService } from "./skills/skill-service.js";
+import { createChannelStore } from "./channels/channel-store.js";
+import type { ChannelRuntime } from "./channels/channel-dispatcher.js";
 import {
   createAdvancedConsoleController,
   createMainWindow,
@@ -251,6 +253,15 @@ export function requireElectronClient(client: UClawClient | undefined): UClawCli
   return client;
 }
 
+export function requireChannelRuntime(client: UClawClient): ChannelRuntime {
+  const runtime = client.channels as unknown as Partial<ChannelRuntime>;
+  const methods: ReadonlyArray<keyof ChannelRuntime> = ["capability", "configure", "remove", "test", "start", "stop"];
+  if (methods.some((method) => typeof runtime[method] !== "function")) {
+    throw new Error("Desktop production wiring must provide a real channel runtime.");
+  }
+  return runtime as ChannelRuntime;
+}
+
 const ATTACHMENT_MEDIA_TYPES: Record<string, string> = {
   ".gif": "image/gif",
   ".jpeg": "image/jpeg",
@@ -334,6 +345,8 @@ export async function startElectronMain(
   const attachments = options.attachments ?? client.attachments;
   const providers = createProviderStore({ dataDir: portablePaths.dataDir });
   const skills = await createSkillService({ dataDir: portablePaths.dataDir, client: createFixtureSkillHubClient() });
+  const channelRuntime = requireChannelRuntime(client);
+  const channels = createChannelStore({ dataDir: portablePaths.dataDir, capability: channelRuntime.capability });
   let gatewayPort: number | undefined;
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -377,6 +390,8 @@ export async function startElectronMain(
       attachments,
       providers,
       skills,
+      channels,
+      channelRuntime,
       selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
         const selected = await dialog.showOpenDialog({
           properties: ["openFile", "multiSelections"],

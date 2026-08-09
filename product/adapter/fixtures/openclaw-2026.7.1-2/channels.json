@@ -1,0 +1,39 @@
+{
+  "status": {
+    "request": {
+      "method": "channels.status",
+      "params": { "channel": "telegram", "probe": true, "timeoutMs": 10000 }
+    },
+    "response": {
+      "ts": 1786129711211,
+      "channelOrder": ["telegram"],
+      "channelLabels": { "telegram": "Telegram" },
+      "channels": { "telegram": { "configured": true } },
+      "channelAccounts": {
+        "telegram": [{ "accountId": "telegram-main", "enabled": true, "configured": true, "running": true, "connected": true }]
+      },
+      "channelDefaultAccountId": { "telegram": "telegram-main" }
+    }
+  },
+  "configure": {
+    "getRequest": { "method": "config.get", "params": {} },
+    "getResponse": { "hash": "fixture-config-hash", "valid": true },
+    "patchRequest": {
+      "method": "config.patch",
+      "params": {
+        "raw": "{\"channels\":{\"telegram\":{\"accounts\":{\"telegram-main\":{\"enabled\":true,\"botToken\":\"[FIXTURE SECRET]\"}}}}}",
+        "baseHash": "fixture-config-hash"
+      }
+    },
+    "patchResponse": { "ok": true }
+  },
+  "start": {
+    "request": { "method": "channels.start", "params": { "channel": "telegram", "accountId": "telegram-main" } },
+    "response": { "channel": "telegram", "accountId": "telegram-main", "started": true }
+  },
+  "stop": {
+    "request": { "method": "channels.stop", "params": { "channel": "telegram", "accountId": "telegram-main" } },
+    "response": { "channel": "telegram", "accountId": "telegram-main", "stopped": true }
+  },
+  "unavailable": ["qq-bot", "feishu", "wecom"]
+}
