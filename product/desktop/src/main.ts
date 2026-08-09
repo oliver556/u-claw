@@ -53,8 +53,30 @@ import {
   type DesktopWindow,
 } from "./window.js";
 
-export function createProductionDataService(paths: Pick<PortableDesktopPaths, "dataDir" | "cacheDir">) {
-  return createDataService({ dataDir: paths.dataDir, cacheDir: paths.cacheDir });
+interface ElectronWorkspaceShell {
+  openPath(path: string): Promise<string>;
+  showItemInFolder(path: string): void;
+}
+
+export function createProductionDataService(
+  paths: Pick<PortableDesktopPaths, "dataDir" | "cacheDir">,
+  electronShell?: ElectronWorkspaceShell,
+) {
+  return createDataService({
+    dataDir: paths.dataDir,
+    cacheDir: paths.cacheDir,
+    workspaceShell: electronShell ? {
+      invoke: async (action, target) => {
+        await target.verify();
+        if (action === "reveal") {
+          electronShell.showItemInFolder(target.path);
+          return;
+        }
+        const error = await electronShell.openPath(target.path);
+        if (error !== "") throw new Error("Electron shell rejected the controlled workspace target.");
+      },
+    } : undefined,
+  });
 }
 
 export interface DesktopAppLike {
@@ -377,7 +399,7 @@ export async function startElectronMain(
   const channels = createChannelStore({ dataDir: portablePaths.dataDir, capability: channelRuntime.capability });
   const mcpRuntime = createOpenClawMcpRuntime(client);
   const mcp = createMcpStore({ dataDir: portablePaths.dataDir, runtimeAvailable: mcpRuntime.capability });
-  const data = createProductionDataService(portablePaths);
+  const data = createProductionDataService(portablePaths, shell);
   const diagnosticsRuntime: DiagnosticsRuntimeInfo = {
     productVersion: "0.1.0",
     openClawVersion: LOCKED_OPENCLAW_VERSION,

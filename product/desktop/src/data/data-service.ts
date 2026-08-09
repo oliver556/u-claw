@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { access, lstat, realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { FsSafeError, root, type Root } from "@openclaw/fs-safe";
+import { withFileLock } from "@openclaw/fs-safe/file-lock";
 import {
   DATA_ROOT_CONTRACT,
   DataIpcRequestSchema,
@@ -22,10 +23,40 @@ const CONTROL_FILES = new Set([
   "agents.md", "soul.md", "tools.md", "identity.md", "user.md", "heartbeat.md", "bootstrap.md", "dreams.md",
 ]);
 
-interface DataServiceOptions {
+export type WorkspaceShellAction = "open" | "reveal";
+
+export interface WorkspaceShellTarget {
+  readonly path: string;
+  verify(): Promise<void>;
+}
+
+export interface WorkspaceShell {
+  invoke(action: WorkspaceShellAction, target: WorkspaceShellTarget): Promise<void>;
+}
+
+export type VersionedDataMutationMethod =
+  | "workspace.rename"
+  | "workspace.move"
+  | "workspace.delete"
+  | "memory.write"
+  | "memory.delete";
+
+export interface DataMutationContext {
+  method: VersionedDataMutationMethod;
+  id: string;
+  expectedVersion: string;
+}
+
+export interface DataMutationCoordinator {
+  runVersioned<T>(context: DataMutationContext, operation: () => Promise<T>): Promise<T>;
+}
+
+export interface DataServiceOptions {
   dataDir: string;
   cacheDir?: string;
   acquireConsistencyLease?(): Promise<{ release(): Promise<void> }>;
+  workspaceShell?: WorkspaceShell;
+  mutationCoordinator?: DataMutationCoordinator;
 }
 
 interface FileInfo {
@@ -49,6 +80,31 @@ function isDirectory(info: FileInfo): boolean {
 
 function isSymbolicLink(info: FileInfo): boolean {
   return typeof info.isSymbolicLink === "function" ? info.isSymbolicLink() : info.isSymbolicLink;
+}
+
+function sameFileIdentity(left: FileInfo, right: FileInfo): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameFileSnapshot(left: FileInfo, right: FileInfo): boolean {
+  return sameFileIdentity(left, right) &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.nlink === right.nlink &&
+    isFile(left) === isFile(right) &&
+    isDirectory(left) === isDirectory(right) &&
+    isSymbolicLink(left) === isSymbolicLink(right);
+}
+
+function sameCanonicalPath(left: string, right: string): boolean {
+  return process.platform === "win32"
+    ? left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US")
+    : left === right;
+}
+
+function isPathWithin(rootPath: string, candidatePath: string): boolean {
+  const child = relative(rootPath, candidatePath);
+  return child === "" || (!child.startsWith("..") && !isAbsolute(child));
 }
 
 function safeError(code: UClawError["code"], message: string, retryable = false): UClawError {
@@ -120,14 +176,31 @@ export function createDataService(options: DataServiceOptions) {
     acquireConsistencyLease: options.acquireConsistencyLease,
   });
   let availableOverride: boolean | undefined;
-  let mutationQueue = Promise.resolve();
-
-  const serialized = async <T>(operation: () => Promise<T>): Promise<T> => {
-    const previous = mutationQueue;
-    let release!: () => void;
-    mutationQueue = new Promise<void>((resolveQueue) => { release = resolveQueue; });
-    await previous;
-    try { return await operation(); } finally { release(); }
+  const mutationCoordinator: DataMutationCoordinator = options.mutationCoordinator ?? {
+    runVersioned: async (context, operation) => {
+      try {
+        return await withFileLock(workspaceRoot, {
+          managerKey: "uclaw-data-mutation",
+          lockPath: join(options.dataDir, ".uclaw-data-mutation.lock"),
+          staleMs: 30_000,
+          timeoutMs: 5_000,
+          retry: { retries: 20, minTimeout: 10, maxTimeout: 100, factor: 1.4, randomize: true },
+          staleRecovery: "fail-closed",
+          payload: () => ({
+            pid: process.pid,
+            boundary: "filesystem-optimistic-cas",
+            method: context.method,
+            id: context.id,
+          }),
+        }, operation);
+      } catch (caught) {
+        const code = (caught as NodeJS.ErrnoException).code;
+        if (code === "file_lock_timeout" || code === "file_lock_stale") {
+          throw safeError("CONFLICT", "数据正在被其他进程修改，请稍后重试。", true);
+        }
+        throw caught;
+      }
+    },
   };
 
   const getRoot = async (): Promise<Root> => {
@@ -165,6 +238,64 @@ export function createDataService(options: DataServiceOptions) {
   const readFile = async (safeRoot: Root, id: string) => {
     const read = await safeRoot.read(id, { hardlinks: "reject", maxBytes: MAX_TEXT_BYTES, symlinks: "reject" });
     return { ...read, version: contentVersion(read.buffer, read.stat) };
+  };
+
+  const verifyWorkspaceShellTarget = async (
+    safeRoot: Root,
+    targetPath: string,
+    expectedRealPath: string,
+    expected: FileInfo,
+    pinnedHandle?: { stat(): Promise<FileInfo> },
+  ): Promise<void> => {
+    const before = await lstat(targetPath);
+    if (before.isSymbolicLink() || (!before.isFile() && !before.isDirectory()) || (before.isFile() && before.nlink > 1)) {
+      throw safeError("FORBIDDEN", "拒绝不安全的数据路径。");
+    }
+    const targetReal = await realpath(targetPath);
+    const after = await lstat(targetPath);
+    if (
+      !sameCanonicalPath(targetReal, expectedRealPath) ||
+      !isPathWithin(safeRoot.rootReal, targetReal) ||
+      !sameFileSnapshot(before, after) ||
+      !sameFileSnapshot(after, expected) ||
+      isSymbolicLink(after) ||
+      (isFile(after) && after.nlink > 1)
+    ) {
+      throw safeError("FORBIDDEN", "受控目标在系统操作前发生变化。");
+    }
+    if (pinnedHandle && !sameFileSnapshot(await pinnedHandle.stat(), expected)) {
+      throw safeError("FORBIDDEN", "受控目标在系统操作前发生变化。");
+    }
+  };
+
+  const invokeWorkspaceShell = async (safeRoot: Root, id: string, action: WorkspaceShellAction): Promise<void> => {
+    if (!options.workspaceShell) throw safeError("UNAVAILABLE", "受控系统打开组件尚未安装。");
+    const targetPath = resolve(workspaceRoot, id);
+    const info = await safeRoot.stat(id);
+    if (!isFile(info) && !isDirectory(info)) throw safeError("FORBIDDEN", "拒绝不安全的数据路径。");
+
+    if (isFile(info)) {
+      const opened = await safeRoot.open(id, { hardlinks: "reject", symlinks: "reject" });
+      try {
+        const target: WorkspaceShellTarget = {
+          path: targetPath,
+          verify: () => verifyWorkspaceShellTarget(safeRoot, targetPath, opened.realPath, opened.stat, opened.handle),
+        };
+        await target.verify();
+        await options.workspaceShell.invoke(action, target);
+      } finally {
+        await opened.handle.close().catch(() => undefined);
+      }
+      return;
+    }
+
+    const targetReal = await realpath(targetPath);
+    const target: WorkspaceShellTarget = {
+      path: targetPath,
+      verify: () => verifyWorkspaceShellTarget(safeRoot, targetPath, targetReal, info),
+    };
+    await target.verify();
+    await options.workspaceShell.invoke(action, target);
   };
 
   const assertVersion = async (safeRoot: Root, id: string, expected: string): Promise<FileInfo> => {
@@ -312,14 +443,22 @@ export function createDataService(options: DataServiceOptions) {
         case "workspace.reveal": {
           assertWorkspaceDomain(request.params.entryId);
           const safeRoot = await getRoot();
-          const opened = await safeRoot.open(request.params.entryId, { hardlinks: "reject", symlinks: "reject" });
-          await opened.handle.close();
-          throw safeError("UNAVAILABLE", "受控系统打开组件尚未安装。");
+          await invokeWorkspaceShell(
+            safeRoot,
+            request.params.entryId,
+            request.method === "workspace.open" ? "open" : "reveal",
+          );
+          result = null;
+          break;
         }
         case "workspace.rename":
         case "workspace.move":
         case "workspace.delete":
-          result = await serialized(async () => {
+          result = await mutationCoordinator.runVersioned({
+            method: request.method,
+            id: request.params.entryId,
+            expectedVersion: request.params.version,
+          }, async () => {
             assertWorkspaceDomain(request.params.entryId);
             const safeRoot = await getRoot();
             const sourceInfo = await assertVersion(safeRoot, request.params.entryId, request.params.version);
@@ -368,7 +507,11 @@ export function createDataService(options: DataServiceOptions) {
           break;
         }
         case "memory.write":
-          result = await serialized(async () => {
+          result = await mutationCoordinator.runVersioned({
+            method: request.method,
+            id: request.params.memoryId,
+            expectedVersion: request.params.version,
+          }, async () => {
             assertMemoryDomain(request.params.memoryId);
             const safeRoot = await getRoot();
             await assertVersion(safeRoot, request.params.memoryId, request.params.version);
@@ -381,7 +524,11 @@ export function createDataService(options: DataServiceOptions) {
           });
           break;
         case "memory.delete":
-          result = await serialized(async () => {
+          result = await mutationCoordinator.runVersioned({
+            method: request.method,
+            id: request.params.memoryId,
+            expectedVersion: request.params.version,
+          }, async () => {
             assertMemoryDomain(request.params.memoryId);
             const safeRoot = await getRoot();
             await assertVersion(safeRoot, request.params.memoryId, request.params.version);

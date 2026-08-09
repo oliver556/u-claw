@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { configureFsSafePython } from "@openclaw/fs-safe";
 import { __setFsSafeTestHooksForTest } from "@openclaw/fs-safe/test-hooks";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDataService } from "../src/data/data-service.js";
 
@@ -88,17 +88,99 @@ describe("data service", () => {
     expect(JSON.stringify(response)).not.toContain("outside secret");
   });
 
-  it.each(["workspace.open", "workspace.reveal"] as const)(
-    "fails closed for %s until a handle-bound native helper is available",
-    async (method) => {
-      const { dataDir } = await fixture();
-      const service = createDataService({ dataDir });
-      const response = await service.dispatch({
+  it("opens and reveals only after the trusted shell adapter verifies the pinned target", async () => {
+    const { dataDir, workspace } = await fixture();
+    const invoked: Array<{ action: string; path: string }> = [];
+    const service = createDataService({
+      dataDir,
+      workspaceShell: {
+        invoke: async (action, target) => {
+          await target.verify();
+          invoked.push({ action, path: target.path });
+        },
+      },
+    });
+
+    for (const method of ["workspace.open", "workspace.reveal"] as const) {
+      await expect(service.dispatch({
         method, requestId: method, params: { entryId: "notes/plan.md" },
-      });
-      expect(response).toMatchObject({ ok: false, error: { code: "UNAVAILABLE" } });
-    },
-  );
+      })).resolves.toMatchObject({ ok: true, result: null });
+    }
+    expect(invoked).toEqual([
+      { action: "open", path: join(workspace, "notes", "plan.md") },
+      { action: "reveal", path: join(workspace, "notes", "plan.md") },
+    ]);
+  });
+
+  it("rejects a workspace target replaced after pinning but before the shell action", async () => {
+    const { dataDir, workspace } = await fixture();
+    const outside = await mkdtemp(join(tmpdir(), "uclaw-shell-race-"));
+    await writeFile(join(outside, "secret.md"), "secret", "utf8");
+    const shellAction = vi.fn();
+    const service = createDataService({
+      dataDir,
+      workspaceShell: {
+        invoke: async (_action, target) => {
+          await rename(target.path, `${target.path}.original`);
+          await symlink(join(outside, "secret.md"), target.path, "file");
+          await target.verify();
+          shellAction();
+        },
+      },
+    });
+
+    await expect(service.dispatch({
+      method: "workspace.open", requestId: "replace", params: { entryId: "notes/plan.md" },
+    })).resolves.toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    expect(shellAction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a workspace target modified in place after pinning but before the shell action", async () => {
+    const { dataDir } = await fixture();
+    const shellAction = vi.fn();
+    const service = createDataService({
+      dataDir,
+      workspaceShell: {
+        invoke: async (_action, target) => {
+          await writeFile(target.path, "changed after pin", "utf8");
+          await target.verify();
+          shellAction();
+        },
+      },
+    });
+
+    await expect(service.dispatch({
+      method: "workspace.open", requestId: "rewrite", params: { entryId: "notes/plan.md" },
+    })).resolves.toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    expect(shellAction).not.toHaveBeenCalled();
+  });
+
+  it.each(["linked/secret.md", "linked-inside/plan.md", "notes/hard.md"])("rejects unsafe shell target %s", async (entryId) => {
+    const { dataDir, workspace } = await fixture();
+    const outside = await mkdtemp(join(tmpdir(), "uclaw-shell-outside-"));
+    await writeFile(join(outside, "secret.md"), "secret", "utf8");
+    await symlink(outside, join(workspace, "linked"), "dir");
+    await symlink(join(workspace, "notes"), join(workspace, "linked-inside"), "dir");
+    await link(join(outside, "secret.md"), join(workspace, "notes", "hard.md"));
+    const invoke = vi.fn();
+    const service = createDataService({ dataDir, workspaceShell: { invoke } });
+
+    await expect(service.dispatch({
+      method: "workspace.reveal", requestId: entryId, params: { entryId },
+    })).resolves.toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("rejects shell path traversal before reaching the adapter", async () => {
+    const { dataDir } = await fixture();
+    const invoke = vi.fn();
+    const service = createDataService({ dataDir, workspaceShell: { invoke } });
+
+    await expect(service.dispatch({
+      method: "workspace.open", requestId: "escape", params: { entryId: "../secret.md" },
+    } as any)).rejects.toThrow();
+    expect(invoke).not.toHaveBeenCalled();
+  });
 
   it("detects stale writes and preserves the current file", async () => {
     const { workspace, service } = await fixture();
@@ -110,6 +192,53 @@ describe("data service", () => {
     });
     expect(response).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
     await expect(readFile(join(workspace, "notes", "plan.md"), "utf8")).resolves.toBe("external update");
+  });
+
+  it("lets an injected coordinator own the versioned mutation boundary", async () => {
+    const { dataDir, service: reader } = await fixture();
+    const read = await reader.dispatch({
+      method: "memory.read", requestId: "read", params: { memoryId: "MEMORY.md" },
+    }) as any;
+    const contexts: unknown[] = [];
+    const service = createDataService({
+      dataDir,
+      mutationCoordinator: {
+        runVersioned: async (context, operation) => {
+          contexts.push(context);
+          return operation();
+        },
+      },
+    });
+
+    await expect(service.dispatch({
+      method: "memory.write", requestId: "write",
+      params: { memoryId: "MEMORY.md", content: "coordinated", version: read.result.memory.version },
+    })).resolves.toMatchObject({ ok: true });
+    expect(contexts).toEqual([{
+      method: "memory.write", id: "MEMORY.md", expectedVersion: read.result.memory.version,
+    }]);
+  });
+
+  it("rejects an external change made before the coordinator enters the optimistic CAS operation", async () => {
+    const { dataDir, workspace, service: reader } = await fixture();
+    const read = await reader.dispatch({
+      method: "memory.read", requestId: "read", params: { memoryId: "MEMORY.md" },
+    }) as any;
+    const service = createDataService({
+      dataDir,
+      mutationCoordinator: {
+        runVersioned: async (_context, operation) => {
+          await writeFile(join(workspace, "MEMORY.md"), "external update", "utf8");
+          return operation();
+        },
+      },
+    });
+
+    await expect(service.dispatch({
+      method: "memory.write", requestId: "write",
+      params: { memoryId: "MEMORY.md", content: "our update", version: read.result.memory.version },
+    })).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+    await expect(readFile(join(workspace, "MEMORY.md"), "utf8")).resolves.toBe("external update");
   });
 
   it("edits and deletes only OpenClaw-readable Markdown memory with version checks", async () => {
