@@ -8,14 +8,16 @@ export type CapabilityPackageKind = z.infer<typeof CapabilityPackageKindSchema>;
 export const CapabilityRiskSchema = z.enum(["low", "medium", "high", "critical"]);
 export type CapabilityRisk = z.infer<typeof CapabilityRiskSchema>;
 
-export const SkillPermissionSchema = z.object({
+export const CapabilityPermissionSchema = z.object({
   kind: z.enum(["filesystem", "network", "command", "environment"]),
   access: z.enum(["read", "write", "connect", "execute", "read-secret"]),
   target: z.string().min(1).max(240),
   risk: CapabilityRiskSchema,
   reason: z.string().min(1).max(500),
 }).strict();
-export type SkillPermission = z.infer<typeof SkillPermissionSchema>;
+export type CapabilityPermission = z.infer<typeof CapabilityPermissionSchema>;
+export const SkillPermissionSchema = CapabilityPermissionSchema;
+export type SkillPermission = CapabilityPermission;
 
 export const SkillSourceSchema = z.object({
   provider: z.literal("skillhub"),

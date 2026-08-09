@@ -158,6 +158,7 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 		"TMP=" + filepath.Join(deps.Paths.HostCacheRoot, "cache", "temp"),
 		"UCLAW_CACHE_DIR=" + filepath.Join(deps.Paths.HostCacheRoot, "cache"),
 		"UCLAW_DATA_DIR=" + deps.Paths.DataDir,
+		"UCLAW_RUNTIME_DIR=" + filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID),
 	}
 	if !reflect.DeepEqual(startedSpec.Env, wantEnv) {
 		t.Fatalf("process env = %v", startedSpec.Env)

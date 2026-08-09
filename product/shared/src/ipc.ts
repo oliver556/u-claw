@@ -2,6 +2,9 @@ import { z } from "zod";
 
 import { SkillIpcRequestSchema, SkillIpcResponseSchema } from "./capabilities.js";
 export { SkillIpcRequestSchema, SkillIpcResponseSchema } from "./capabilities.js";
+import { PluginIpcRequestSchema, PluginIpcResponseSchema } from "./plugins.js";
+export { PluginIpcRequestSchema, PluginIpcResponseSchema } from "./plugins.js";
+export type { PluginIpcRequest, PluginIpcResponse } from "./plugins.js";
 
 import { AttachmentImportInputSchema, AttachmentSchema } from "./attachments.js";
 import { ActivityDomainIdSchema, ArtifactSnapshotSchema, TaskActivitySnapshotSchema } from "./activity.js";
