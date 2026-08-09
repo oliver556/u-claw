@@ -74,6 +74,19 @@ export interface FileService {
 export interface DiagnosticsService {
   list(): Promise<DiagnosticSummary[]>;
   listLogs(page?: PageRequest, signal?: AbortSignal): Promise<Page<LogSummary>>;
+  doctor?(signal?: AbortSignal): Promise<{
+    status: "ok" | "issues";
+    checks: Array<{
+      id: string;
+      title: string;
+      severity: "info" | "warning" | "error";
+      status: "pass" | "warn" | "fail";
+      summary: string;
+      suggestion?: string;
+      repair?: { actionId: string; label: string };
+    }>;
+  }>;
+  repair?(actionId: string, signal?: AbortSignal): Promise<void>;
 }
 
 export interface UClawClient {

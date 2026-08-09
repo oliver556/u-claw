@@ -6,16 +6,17 @@ import type {
   CleanupPreview,
   DataBridge,
   DataIpcRequest,
+  FactoryResetPreview,
   MaintenanceOperation,
   RestorePreview,
   StorageStats,
 } from "@uclaw/shared";
-import { AlertTriangle, Archive, CheckCircle2, DatabaseBackup, HardDrive, LoaderCircle, RefreshCw, RotateCcw, SquareTerminal, Trash2, X } from "lucide-react";
+import { AlertTriangle, Archive, CheckCircle2, DatabaseBackup, HardDrive, LoaderCircle, RefreshCw, RotateCcw, ShieldAlert, SquareTerminal, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-type Tab = "backup" | "restore" | "storage";
+type Tab = "backup" | "restore" | "storage" | "factory-reset";
 type Availability = "checking" | "available" | "read-only" | "offline" | "damaged";
-type Confirmation = { kind: "backup" | "restore" | "cleanup"; title: string; body: string };
+type Confirmation = { kind: "backup" | "restore" | "cleanup" | "factory-reset"; title: string; body: string };
 
 let requestSequence = 0;
 const requestId = (method: string) => `maintenance-${method}-${Date.now()}-${++requestSequence}`;
@@ -43,6 +44,8 @@ export function MaintenanceCenter({ bridge }: { bridge?: DataBridge }) {
   const [selectedCleanup, setSelectedCleanup] = useState<CleanupCandidateId[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [operation, setOperation] = useState<MaintenanceOperation>();
+  const [factoryResetPreview, setFactoryResetPreview] = useState<FactoryResetPreview>();
+  const [factoryResetConfirmation, setFactoryResetConfirmation] = useState("");
 
   const invoke = useCallback(async (request: DataIpcRequest) => {
     const response = await resolvedBridge.invoke(request);
@@ -74,6 +77,14 @@ export function MaintenanceCenter({ bridge }: { bridge?: DataBridge }) {
   }, [invoke]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const loadFactoryReset = useCallback(async () => {
+    setError(undefined);
+    try { setFactoryResetPreview(await invoke({ method: "factory-reset.preview", requestId: requestId("factory-reset-preview"), params: {} }) as FactoryResetPreview); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "恢复出厂预览失败。"); }
+  }, [invoke]);
+
+  useEffect(() => { if (tab === "factory-reset" && factoryResetPreview === undefined) void loadFactoryReset(); }, [factoryResetPreview, loadFactoryReset, tab]);
 
   useEffect(() => {
     if (!operation || !["queued", "running"].includes(operation.state)) return;
@@ -113,6 +124,7 @@ export function MaintenanceCenter({ bridge }: { bridge?: DataBridge }) {
       if (current.kind === "backup" && backupPreview) result = await invoke({ method: "backup.create", requestId: requestId("backup-create"), params: { collectionIds: selectedCollections, previewToken: backupPreview.previewToken, trigger: backupPreview.trigger, retainLatest: backupPreview.retainLatest, confirmed: true } });
       else if (current.kind === "restore" && restorePreview) result = await invoke({ method: "backup.restore", requestId: requestId("backup-restore"), params: { backupId: restorePreview.backupId, collectionIds: restorePreview.collections.map((item) => item.id), previewToken: restorePreview.previewToken, confirmed: true } });
       else if (current.kind === "cleanup" && cleanupPreview) result = await invoke({ method: "cleanup.execute", requestId: requestId("cleanup-execute"), params: { candidateIds: selectedCleanup, previewToken: cleanupPreview.previewToken, confirmed: true } });
+      else if (current.kind === "factory-reset" && factoryResetPreview) result = await invoke({ method: "factory-reset.execute", requestId: requestId("factory-reset-execute"), params: { previewToken: factoryResetPreview.previewToken, confirmation: "RESET U-CLAW", confirmed: true } });
       if (result) setOperation(result as MaintenanceOperation);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "维护操作失败。"); }
   };
@@ -123,7 +135,7 @@ export function MaintenanceCenter({ bridge }: { bridge?: DataBridge }) {
     catch (caught) { setError(caught instanceof Error ? caught.message : "取消失败。"); }
   };
 
-  const tabs = useMemo(() => [{ id: "backup" as const, label: "备份", icon: DatabaseBackup }, { id: "restore" as const, label: "恢复", icon: RotateCcw }, { id: "storage" as const, label: "空间", icon: HardDrive }], []);
+  const tabs = useMemo(() => [{ id: "backup" as const, label: "备份", icon: DatabaseBackup }, { id: "restore" as const, label: "恢复", icon: RotateCcw }, { id: "storage" as const, label: "空间", icon: HardDrive }, { id: "factory-reset" as const, label: "恢复出厂", icon: ShieldAlert }], []);
   const openAdvancedConsole = () => {
     const open = window.uclaw?.window?.invoke;
     if (open) void open({ method: "open-advanced-console", requestId: requestId("console"), params: {} });
@@ -153,9 +165,10 @@ export function MaintenanceCenter({ bridge }: { bridge?: DataBridge }) {
         {tab === "storage" && storage && cleanupPreview ? <><section className="maintenance-band"><header><div><h2>空间分类</h2><p>已统计 {formatBytes(storage.totalBytes)}</p></div></header><div className="storage-categories">{storage.categories.map((category) => <div key={category.id}><span>{category.label}{category.protected ? <small>受保护</small> : null}</span><strong>{formatBytes(category.bytes)}</strong></div>)}</div></section>
           <section className="maintenance-band"><header><div><h2>清理预览</h2><p>仅可重建缓存、明确过期诊断和旧备份</p></div></header><div className="maintenance-list">{cleanupPreview.candidates.length ? cleanupPreview.candidates.map((candidate) => <label className="maintenance-row" key={candidate.id}><input type="checkbox" checked={selectedCleanup.includes(candidate.id)} onChange={(event) => setSelectedCleanup(event.target.checked ? [...selectedCleanup, candidate.id] : selectedCleanup.filter((id) => id !== candidate.id))} /><span><strong>{candidate.label}</strong><small>{candidate.reason} · {candidate.fileCount} 个文件</small></span><em>{formatBytes(candidate.bytes)}</em></label>) : <div className="data-state"><CheckCircle2 /><strong>没有可清理数据</strong></div>}</div></section>
           <footer className="maintenance-actions"><span>配置、会话、记忆、能力包、渠道凭据与用户文件永不进入候选。</span><button type="button" disabled={!writable || selectedCleanup.length === 0 || busy} onClick={() => setConfirmation({ kind: "cleanup", title: "确认清理", body: `将清理 ${selectedCleanup.length} 类受控对象。` })}><Trash2 />清理所选</button></footer></> : null}
+        {tab === "factory-reset" ? factoryResetPreview ? <section className="factory-reset-panel"><div className="maintenance-notice warning"><ShieldAlert /><span>{factoryResetPreview.warnings[0]}</span></div><section className="maintenance-band"><header><div><h2>将删除</h2><p>仅限 U-Claw 自有受控数据</p></div></header><div className="maintenance-list">{factoryResetPreview.delete.map((item) => <div className="maintenance-row" key={item.id}><Trash2 /><span><strong>{item.label}</strong><small>{item.fileCount} 个文件</small></span><em>{formatBytes(item.bytes)}</em></div>)}</div></section><section className="maintenance-band"><header><div><h2>默认保留</h2><p>不会进入删除集合</p></div></header><div className="maintenance-list">{factoryResetPreview.preserve.map((item) => <div className="maintenance-row" key={item.id}><CheckCircle2 /><span><strong>{item.label}</strong><small>受保护</small></span><em>保留</em></div>)}</div></section><footer className="maintenance-actions"><span>执行前重新校验预览 token；路径变化或链接对象将拒绝。</span><button type="button" aria-label="预览并恢复出厂" disabled={(!writable && factoryResetPreview.recovery !== "resume-required") || factoryResetPreview.consistency !== "coordinated" || busy} onClick={() => { setFactoryResetConfirmation(""); setConfirmation({ kind: "factory-reset", title: "确认恢复出厂", body: "此操作删除配置、会话、记忆和可重建缓存；用户工作文件与备份保留。" }); }}><ShieldAlert />{factoryResetPreview.recovery === "resume-required" ? "继续恢复出厂" : "预览并恢复出厂"}</button></footer></section> : <div className="data-state"><LoaderCircle className="spin" /><strong>正在生成恢复出厂预览</strong></div> : null}
       </div>
     )}
     {operation ? <aside className={`maintenance-operation ${operation.state}`} aria-live="polite"><div>{busy ? <LoaderCircle className="spin" /> : operation.state === "completed" ? <CheckCircle2 /> : <AlertTriangle />}<span><strong>{operation.message}</strong><small>{operation.processedFiles}/{operation.totalFiles} 个文件 · {formatBytes(operation.processedBytes)}/{formatBytes(operation.totalBytes)}{operation.partialFailures ? ` · ${operation.partialFailures} 项失败` : ""}</small></span></div>{busy ? <button type="button" onClick={() => void cancel()}><X />取消</button> : <button type="button" aria-label="关闭结果" onClick={() => setOperation(undefined)}><X /></button>}</aside> : null}
-    {confirmation ? <div className="data-modal-backdrop"><div className="data-modal" role="dialog" aria-modal="true" aria-label={confirmation.title}><h2>{confirmation.title}</h2><p>{confirmation.body}</p><div className="data-confirm-actions"><button type="button" onClick={() => setConfirmation(undefined)}>取消</button><button type="button" onClick={() => void executeConfirmed()}>{confirmation.kind === "backup" ? "确认创建" : confirmation.kind === "restore" ? "确认恢复" : "确认清理"}</button></div></div></div> : null}
+    {confirmation ? <div className="data-modal-backdrop"><div className="data-modal" role="dialog" aria-modal="true" aria-label={confirmation.title}><h2>{confirmation.title}</h2><p>{confirmation.body}</p>{confirmation.kind === "factory-reset" ? <label className="factory-reset-confirm">输入 RESET U-CLAW 确认<input aria-label="输入 RESET U-CLAW 确认" value={factoryResetConfirmation} onChange={(event) => setFactoryResetConfirmation(event.target.value)} autoComplete="off" /></label> : null}<div className="data-confirm-actions"><button type="button" onClick={() => setConfirmation(undefined)}>取消</button><button type="button" disabled={confirmation.kind === "factory-reset" && factoryResetConfirmation !== "RESET U-CLAW"} onClick={() => void executeConfirmed()}>{confirmation.kind === "backup" ? "确认创建" : confirmation.kind === "restore" ? "确认恢复" : confirmation.kind === "factory-reset" ? "确认恢复出厂" : "确认清理"}</button></div></div></div> : null}
   </section>;
 }

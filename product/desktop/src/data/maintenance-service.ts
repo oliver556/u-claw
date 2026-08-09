@@ -6,6 +6,7 @@ import { FsSafeError, root as createSafeRoot, type Root } from "@openclaw/fs-saf
 import {
   CleanupPreviewSchema,
   DATA_ROOT_CONTRACT,
+  FactoryResetPreviewSchema,
   MaintenanceOperationSchema,
   RelativeDomainIdSchema,
   RestorePreviewSchema,
@@ -16,6 +17,7 @@ import {
   type BackupSummary,
   type CleanupCandidateId,
   type CleanupPreview,
+  type FactoryResetPreview,
   type MaintenanceOperation,
   type RestorePreview,
   type StorageStats,
@@ -44,7 +46,7 @@ const CLEANUP_LABELS: Record<CleanupCandidateId, string> = {
 };
 
 interface InventoryFile { id: string; safeId: string; safeRoot: Root; size: number; dev: number; ino: number; mtimeMs: number; collection?: BackupCollectionId }
-interface PreviewRecord { kind: "backup" | "cleanup" | "restore"; ids: string[]; fingerprint: string; expiresAt: number; backupId?: string; policy?: string }
+interface PreviewRecord { kind: "backup" | "cleanup" | "restore" | "factory-reset"; ids: string[]; fingerprint: string; expiresAt: number; backupId?: string; policy?: string }
 interface ConsistencyLease { release(): Promise<void> }
 interface MaintenanceOptions {
   dataDir: string;
@@ -52,6 +54,7 @@ interface MaintenanceOptions {
   acquireConsistencyLease?(): Promise<ConsistencyLease>;
   beforeBackupCommit?(root: Root, stagingId: string): Promise<void>;
   beforeCleanupMove?(root: Root, safeId: string): Promise<void>;
+  beforeFactoryResetDelete?(root: Root, safeId: string): Promise<void>;
   beforeRetentionMove?(root: Root, backupId: string): Promise<void>;
   createId?(prefix: "backup" | "operation" | "preview"): string;
   now?(): Date;
@@ -236,6 +239,9 @@ export function createMaintenanceService(options: MaintenanceOptions) {
   };
 
   const startOperation = (kind: MaintenanceOperation["kind"], totalFiles: number, totalBytes: number, task: (operation: MaintenanceOperation, signal: AbortSignal) => Promise<void>): MaintenanceOperation => {
+    if ([...operations.values()].some((operation) => operation.state === "queued" || operation.state === "running")) {
+      throw safeError("CONFLICT", "已有维护操作正在执行，请等待完成。", true);
+    }
     const id = createId("operation");
     const operation = MaintenanceOperationSchema.parse({ id, kind, state: "queued", phase: "queued", processedFiles: 0, totalFiles, processedBytes: 0, totalBytes, partialFailures: 0, failures: [], message: "操作已排队。" });
     const controller = new AbortController();
@@ -477,17 +483,30 @@ export function createMaintenanceService(options: MaintenanceOptions) {
     }
     return { backupIds, damaged };
   };
-  const cacheRecoveryState = async (cache: Awaited<ReturnType<typeof ownedCacheRoot>>): Promise<boolean> => {
+  const cacheRecoveryState = async (cache: Awaited<ReturnType<typeof ownedCacheRoot>>): Promise<{ factoryReset: boolean; other: boolean }> => {
     const maintenanceId = `${cache.baseId}/.maintenance`;
-    if (!await cache.root.exists(maintenanceId)) return false;
+    if (!await cache.root.exists(maintenanceId)) return { factoryReset: false, other: false };
     const entries = await cache.root.list(maintenanceId, { withFileTypes: true });
-    return entries.some((entry) => !activeArtifacts.has(entry.name) && /^\.operation-[a-z0-9-]{1,80}\.cleanup-quarantine$/.test(entry.name));
+    return {
+      factoryReset: entries.some((entry) => entry.name === ".factory-reset-journal.json"),
+      other: entries.some((entry) => !activeArtifacts.has(entry.name) && /^\.operation-[a-z0-9-]{1,80}\.cleanup-quarantine$/.test(entry.name)),
+    };
   };
-  const assertNoRecoveryState = async (): Promise<void> => {
+  const validateFactoryResetJournal = async (cache: Awaited<ReturnType<typeof ownedCacheRoot>>): Promise<void> => {
+    const journalId = `${cache.baseId}/.maintenance/.factory-reset-journal.json`;
+    const journal = JSON.parse(await cache.root.readText(journalId, { hardlinks: "reject", maxBytes: 1024 * 1024, symlinks: "reject" })) as Record<string, unknown>;
+    const dataInfo = await lstat(dataDir);
+    if (journal.schemaVersion !== 1 || journal.phase !== "cleaning" || typeof journal.operationId !== "string" || !/^operation-[a-z0-9-]{1,80}$/.test(journal.operationId) ||
+      journal.dataRootDev !== dataInfo.dev || journal.dataRootIno !== dataInfo.ino) {
+      throw safeError("CONFLICT", "恢复出厂 journal 与当前 U 盘不匹配，拒绝继续。", true);
+    }
+  };
+  const assertNoRecoveryState = async (allowFactoryReset = false): Promise<void> => {
     const dataRoot = await pinnedRoot(dataDir, "U 盘数据");
     const dataRecovery = await maintenanceRecoveryState(dataRoot);
     const cache = await ownedCacheRoot();
-    if (dataRecovery.damaged || await cacheRecoveryState(cache)) throw safeError("CONFLICT", "检测到未完成维护状态，请先人工恢复。", true);
+    const cacheRecovery = await cacheRecoveryState(cache);
+    if (dataRecovery.damaged || cacheRecovery.other || (cacheRecovery.factoryReset && !allowFactoryReset)) throw safeError("CONFLICT", "检测到未完成维护状态，请先人工恢复。", true);
   };
   const listBackups = async (): Promise<BackupSummary[]> => {
     const dataRoot = await pinnedRoot(dataDir, "U 盘数据");
@@ -724,6 +743,98 @@ export function createMaintenanceService(options: MaintenanceOptions) {
     });
   };
 
+  const FACTORY_RESET_IDS = ["openclaw-state", "uclaw-owned-state", "capabilities", "diagnostics", "rebuildable-cache"] as const;
+  const factoryResetInventory = async (): Promise<InventoryFile[]> => {
+    const data = (await scan(dataDir, "U 盘数据", undefined, true, MAX_FILE_BYTES)).filter((file) => {
+      const collection = classifyDataId(file.id);
+      return collection !== undefined && collection !== "workspace-user-files" || file.id.startsWith("diagnostics/");
+    }).map((file) => ({ ...file, id: `data:${file.id}` }));
+    const cache = await ownedCacheRoot();
+    const cacheFiles = (await scanPinned(cache.root, cache.baseId, undefined, false, MAX_FILE_BYTES))
+      .filter((file) => !file.id.startsWith(".maintenance/"))
+      .map((file) => ({ ...file, id: `cache:${file.id}` }));
+    await assertOwnedCacheIdentity(cache);
+    return [...data, ...cacheFiles];
+  };
+
+  const previewFactoryReset = async (): Promise<FactoryResetPreview> => {
+    const files = await factoryResetInventory();
+    const recoveryCache = await ownedCacheRoot();
+    const recoveryPending = (await cacheRecoveryState(recoveryCache)).factoryReset;
+    if (recoveryPending) await validateFactoryResetJournal(recoveryCache);
+    const category = (file: InventoryFile) => file.id.startsWith("cache:") ? "rebuildable-cache"
+      : file.id.startsWith("data:capabilities/") ? "capabilities"
+      : file.id.startsWith("data:diagnostics/") ? "diagnostics"
+      : file.id.startsWith("data:.openclaw/") || file.id.startsWith("data:workspace/") ? "openclaw-state"
+      : "uclaw-owned-state";
+    const labels = { "openclaw-state": "OpenClaw 配置、会话与记忆", "uclaw-owned-state": "U-Claw 配置与运行状态", capabilities: "Skills、Plugins、MCP 与渠道能力", diagnostics: "诊断数据", "rebuildable-cache": "可重建缓存" } as const;
+    const previewToken = rememberPreview({ kind: "factory-reset", ids: [...FACTORY_RESET_IDS].sort(), fingerprint: fingerprint(files) });
+    return FactoryResetPreviewSchema.parse({
+      previewToken,
+      consistency: options.acquireConsistencyLease ? "coordinated" : "runtime-coordination-required",
+      recovery: recoveryPending ? "resume-required" : "none",
+      delete: FACTORY_RESET_IDS.map((id) => { const selected = files.filter((file) => category(file) === id); return { id, label: labels[id], fileCount: selected.length, bytes: selected.reduce((sum, file) => sum + file.size, 0) }; }),
+      preserve: [{ id: "user-files", label: "用户工作文件" }, { id: "backups", label: "备份" }],
+      warnings: [recoveryPending ? "检测到未完成恢复出厂；确认后将从剩余受控数据继续。" : options.acquireConsistencyLease ? "执行时将暂停 OpenClaw 写入；失败对象保留并显示恢复状态。" : "当前 runtime 无恢复出厂协调能力，执行将安全拒绝。"],
+    });
+  };
+
+  const executeFactoryReset = (input: { previewToken: string }): MaintenanceOperation => {
+    if (!options.acquireConsistencyLease) throw safeError("UNAVAILABLE", "OpenClaw runtime 无恢复出厂协调能力，拒绝执行。");
+    const preview = requirePreview(input.previewToken, "factory-reset", [...FACTORY_RESET_IDS]);
+    return startOperation("factory-reset", 0, 0, async (operation, signal) => {
+      await assertNoRecoveryState(true);
+      operation.state = "running"; operation.phase = "coordinating"; operation.message = "正在协调 OpenClaw 停止写入。";
+      const lease = await options.acquireConsistencyLease!();
+      const dataRoot = await pinnedRoot(dataDir, "U 盘数据");
+      const cache = await ownedCacheRoot();
+      const journalDir = `${cache.baseId}/.maintenance`;
+      const journalId = `${journalDir}/.factory-reset-journal.json`;
+      try {
+        const files = await factoryResetInventory();
+        if (fingerprint(files) !== preview.fingerprint) throw safeError("CONFLICT", "数据在预览后发生变化，请重新预览。", true);
+        operation.totalFiles = files.length; operation.totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+        await cache.root.mkdir(journalDir);
+        if (await cache.root.exists(journalId)) {
+          await validateFactoryResetJournal(cache);
+        } else {
+          const dataInfo = await lstat(dataDir);
+          await cache.root.create(journalId, `${JSON.stringify({ schemaVersion: 1, operationId: operation.id, phase: "cleaning", dataRootDev: dataInfo.dev, dataRootIno: dataInfo.ino })}\n`, { mode: 0o600 });
+        }
+        operation.phase = "cleaning"; operation.message = "正在删除 U-Claw 自有受控数据。";
+        for (const file of files) {
+          if (signal.aborted) { operation.state = "cancelled"; operation.phase = "cancelled"; operation.message = "恢复出厂已取消；未处理对象保持不变。"; break; }
+          try {
+            await options.beforeFactoryResetDelete?.(file.safeRoot, file.safeId);
+            await safeRead(file);
+            await file.safeRoot.remove(file.safeId);
+            operation.processedFiles += 1; operation.processedBytes += file.size;
+          } catch (caught) {
+            if (caught instanceof FsSafeError || UClawErrorSchema.safeParse(caught).success) throw caught;
+            operation.partialFailures += 1;
+            if (operation.failures.length < 20) operation.failures.push({ candidateId: file.id.startsWith("cache:") ? "factory-reset:cache" : "factory-reset:owned-data", code: "DELETE_FAILED", message: "受控对象删除失败。" });
+          }
+        }
+        for (const id of [".openclaw", "desktop", "capabilities", "channels", "mcp", "providers", "uclaw", "diagnostics", "workspace/memory"]) {
+          if (await dataRoot.exists(id).catch(() => false)) await pruneEmptyTree(dataRoot, id).catch(() => undefined);
+        }
+        for (const id of ["electron", "node-compile", "temp"]) {
+          const safeId = `${cache.baseId}/${id}`;
+          if (await cache.root.exists(safeId).catch(() => false)) await pruneEmptyTree(cache.root, safeId).catch(() => undefined);
+        }
+        if (operation.state !== "cancelled") {
+          operation.phase = "restarting"; operation.message = "受控数据已处理，等待应用重启。";
+          operation.state = operation.partialFailures ? "needs-recovery" : "completed";
+          operation.phase = operation.partialFailures ? "needs-recovery" : "completed";
+          operation.message = operation.partialFailures ? "恢复出厂部分失败，需重启后恢复处理。" : "恢复出厂已完成，请重启应用。";
+        }
+        if (operation.state === "completed") await cache.root.remove(journalId).catch(() => undefined);
+      } finally {
+        await lease.release();
+      }
+    });
+  };
+
   const storageStats = async (): Promise<StorageStats> => {
     const ownedCache = await ownedCacheRoot();
     const dataRoot = await pinnedRoot(dataDir, "U 盘数据");
@@ -746,7 +857,8 @@ export function createMaintenanceService(options: MaintenanceOptions) {
     const categories = Object.entries(categoryFiles).map(([id, files]) => ({ id, label: labels[id], bytes: files.reduce((sum, file) => sum + file.size, 0), fileCount: files.length, protected: ["configuration", "sessions", "memory", "capabilities", "user-files"].includes(id) }));
     await statfs(dataRoot.rootReal);
     const interrupted = await maintenanceRecoveryState(dataRoot);
-    return StorageStatsSchema.parse({ state: interrupted.damaged ? "damaged" : "available", categories, totalBytes: categories.reduce((sum, item) => sum + item.bytes, 0) });
+    const cacheRecovery = await cacheRecoveryState(ownedCache);
+    return StorageStatsSchema.parse({ state: interrupted.damaged || cacheRecovery.factoryReset || cacheRecovery.other ? "damaged" : "available", categories, totalBytes: categories.reduce((sum, item) => sum + item.bytes, 0) });
   };
 
   const getOperation = (id: string): MaintenanceOperation => {
@@ -758,5 +870,5 @@ export function createMaintenanceService(options: MaintenanceOptions) {
     controllers.get(id)?.abort(); return cloneOperation(operation);
   };
 
-  return { previewBackup, createBackup, listBackups, previewRestore, restoreBackup, previewCleanup, executeCleanup, storageStats, getOperation, cancelOperation, assertNoRecoveryState };
+  return { previewBackup, createBackup, listBackups, previewRestore, restoreBackup, previewCleanup, executeCleanup, previewFactoryReset, executeFactoryReset, storageStats, getOperation, cancelOperation, assertNoRecoveryState };
 }

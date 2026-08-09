@@ -92,4 +92,55 @@ describe("SystemDiagnostics", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("当前离线");
     expect(document.body.textContent).not.toMatch(/private|alice/);
   });
+
+  it("renders structured Doctor checks, controlled repair, and intranet diagnostics", async () => {
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "logs.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [], nextCursor: null, hasMore: false } };
+      if (request.method === "system.get") return { method: request.method, requestId: request.requestId, ok: true, result: system };
+      if (request.method === "doctor.run" || request.method === "doctor.repair") return { method: request.method, requestId: request.requestId, ok: true, result: { state: request.method === "doctor.repair" ? "healthy" : "issues", adapter: "openclaw", checks: [{ id: "gateway", label: "Gateway", level: request.method === "doctor.repair" ? "info" : "error", summary: request.method === "doctor.repair" ? "检查通过。" : "Gateway 未就绪。", suggestion: "重启受控 Gateway。", ...(request.method === "doctor.run" ? { repair: { actionId: "gateway-restart", label: "重启 Gateway", previewToken: "doctor-preview-1" } } : {}) }] } };
+      if (request.method === "network.run") return { method: request.method, requestId: request.requestId, ok: true, result: { mode: "intranet-only", checks: [
+        "portable-data", "runtime", "gateway", "local-port", "dns", "provider", "channels", "capabilities",
+      ].map((id) => ({ id, label: id === "provider" ? "Provider 连通" : id, level: id === "provider" ? "warning" : "info", summary: id === "provider" ? "外网不可用，内网功能仍可使用。" : "检查通过。", durationMs: 10 })), proxy: { configured: true, noProxyConfigured: true } } };
+      throw new Error("unexpected");
+    });
+    window.uclaw = { diagnostics: { invoke } } as never;
+    render(<SystemDiagnostics />);
+    await screen.findByText("暂无日志");
+
+    fireEvent.click(screen.getByRole("tab", { name: "OpenClaw Doctor" }));
+    expect(await screen.findByText("Gateway 未就绪。")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "重启 Gateway" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "确认受控修复" })).getByRole("button", { name: "确认修复" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "doctor.repair", params: { actionId: "gateway-restart", previewToken: "doctor-preview-1", confirmed: true, timeoutMs: 10_000 } })));
+
+    fireEvent.click(screen.getByRole("tab", { name: "网络诊断" }));
+    expect(await screen.findByText("内网可用，外网不可用")).toBeVisible();
+    expect(screen.getByText("外网不可用，内网功能仍可使用。")).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/https?:\/\/|proxy\.example|18789/);
+  });
+
+  it("offers user cancellation for an in-flight Doctor request", async () => {
+    let finishDoctor!: (response: any) => void;
+    let doctorRequestId = "";
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "logs.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [], nextCursor: null, hasMore: false } };
+      if (request.method === "system.get") return { method: request.method, requestId: request.requestId, ok: true, result: system };
+      if (request.method === "doctor.run") {
+        doctorRequestId = request.requestId;
+        return new Promise((resolve) => { finishDoctor = resolve; });
+      }
+      if (request.method === "operations.cancel") {
+        finishDoctor({ method: "doctor.run", requestId: doctorRequestId, ok: false, error: { code: "CANCELLED", message: "诊断操作已取消。", retryable: false, recoveryActions: [], causeDetails: {} } });
+        return { method: request.method, requestId: request.requestId, ok: true, result: null };
+      }
+      throw new Error("unexpected");
+    });
+    window.uclaw = { diagnostics: { invoke } } as never;
+    render(<SystemDiagnostics />);
+    await screen.findByText("暂无日志");
+    fireEvent.click(screen.getByRole("tab", { name: "OpenClaw Doctor" }));
+    fireEvent.click(await screen.findByRole("button", { name: "取消 Doctor 操作" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "operations.cancel", params: { operationRequestId: doctorRequestId } })));
+    expect(await screen.findByRole("alert")).toHaveTextContent("诊断数据加载失败");
+  });
 });

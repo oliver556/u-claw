@@ -1,4 +1,4 @@
-import { chmod, link, mkdir, mkdtemp, readFile, symlink, truncate, utimes, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readFile, rename, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -338,5 +338,107 @@ describe("maintenance service", () => {
     const restarted = createMaintenanceService({ dataDir, cacheDir, acquireConsistencyLease: async () => ({ release: async () => undefined }) });
     expect(await restarted.storageStats()).toMatchObject({ state: "damaged" });
     await expect(restarted.assertNoRecoveryState()).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("fails factory reset closed without OpenClaw coordination", async () => {
+    const { service } = await fixture(false);
+    const preview = await service.previewFactoryReset();
+    expect(preview.consistency).toBe("runtime-coordination-required");
+    expect(() => service.executeFactoryReset({ previewToken: preview.previewToken }))
+      .toThrow(expect.objectContaining({ code: "UNAVAILABLE" }));
+  });
+
+  it("factory reset deletes only owned state while preserving user files and backups", async () => {
+    const { dataDir, cacheDir, service } = await fixture();
+    const backupPreview = await service.previewBackup(["openclaw-memory"]);
+    const backup = service.createBackup({ collectionIds: ["openclaw-memory"], previewToken: backupPreview.previewToken, trigger: "manual", retainLatest: 3 });
+    expect((await waitForTerminal(service, backup.id)).state).toBe("completed");
+    const backupId = (await service.listBackups())[0]!.id;
+
+    const preview = await service.previewFactoryReset();
+    expect(preview.preserve.map((item) => item.id)).toEqual(["user-files", "backups"]);
+    expect(JSON.stringify(preview)).not.toMatch(/(?:\/tmp\/|\/Users\/|[A-Za-z]:\\\\)/);
+    const reset = service.executeFactoryReset({ previewToken: preview.previewToken });
+    expect((await waitForTerminal(service, reset.id)).state).toBe("completed");
+
+    expect(await readFile(join(dataDir, "workspace", "notes.txt"), "utf8")).toBe("user-file");
+    expect(await readFile(join(dataDir, "backups", backupId, "manifest.json"), "utf8")).toContain(backupId);
+    await expect(readFile(join(dataDir, "workspace", "MEMORY.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(dataDir, "channels", "channels.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(cacheDir, "electron", "entry.bin"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a stale factory reset preview before deleting anything", async () => {
+    const { dataDir, service } = await fixture();
+    const preview = await service.previewFactoryReset();
+    await writeFile(join(dataDir, "channels", "changed-after-preview.json"), "new-state");
+    const reset = service.executeFactoryReset({ previewToken: preview.previewToken });
+    expect((await waitForTerminal(service, reset.id)).state).toBe("failed");
+    expect(await readFile(join(dataDir, "workspace", "MEMORY.md"), "utf8")).toBe("memory-body");
+  });
+
+  it("keeps factory reset recovery state after cancellation", async () => {
+    const { dataDir, cacheDir, service } = await fixture();
+    const preview = await service.previewFactoryReset();
+    const reset = service.executeFactoryReset({ previewToken: preview.previewToken });
+    service.cancelOperation(reset.id);
+
+    expect((await waitForTerminal(service, reset.id)).state).toBe("cancelled");
+    const restarted = createMaintenanceService({ dataDir, cacheDir, acquireConsistencyLease: async () => ({ release: async () => undefined }) });
+    expect(await restarted.storageStats()).toMatchObject({ state: "damaged" });
+    await expect(restarted.assertNoRecoveryState()).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const resumePreview = await restarted.previewFactoryReset();
+    expect(resumePreview.warnings.join(" ")).toContain("未完成");
+    const resumed = restarted.executeFactoryReset({ previewToken: resumePreview.previewToken });
+    expect((await waitForTerminal(restarted, resumed.id)).state).toBe("completed");
+    expect(await restarted.storageStats()).toMatchObject({ state: "available" });
+  });
+
+  it("fails factory reset closed when a scanned file changes identity", async () => {
+    let swapped = false;
+    const { dataDir, service } = await fixture(true, {
+      async beforeFactoryResetDelete(root, safeId) {
+        if (swapped || !safeId.endsWith("sessions/s1.jsonl")) return;
+        swapped = true;
+        await root.write(safeId, "replacement", { overwrite: true });
+      },
+    });
+    const preview = await service.previewFactoryReset();
+    const reset = service.executeFactoryReset({ previewToken: preview.previewToken });
+
+    expect(await waitForTerminal(service, reset.id)).toMatchObject({ state: "failed", partialFailures: 0 });
+    expect(await readFile(join(dataDir, "workspace", "MEMORY.md"), "utf8")).toBe("memory-body");
+    expect(await readFile(join(dataDir, "capabilities", "skills", "index.json"), "utf8")).toBe("skill-state");
+  });
+
+  it("rejects concurrent maintenance operations", async () => {
+    const { service } = await fixture();
+    const firstPreview = await service.previewFactoryReset();
+    const secondPreview = await service.previewFactoryReset();
+    const first = service.executeFactoryReset({ previewToken: firstPreview.previewToken });
+
+    expect(() => service.executeFactoryReset({ previewToken: secondPreview.previewToken }))
+      .toThrow(expect.objectContaining({ code: "CONFLICT" }));
+    service.cancelOperation(first.id);
+    expect((await waitForTerminal(service, first.id)).state).toBe("cancelled");
+  });
+
+  it("rejects factory reset recovery after the portable data root is replaced", async () => {
+    const { root, dataDir, cacheDir, service } = await fixture();
+    const preview = await service.previewFactoryReset();
+    const reset = service.executeFactoryReset({ previewToken: preview.previewToken });
+    service.cancelOperation(reset.id);
+    expect((await waitForTerminal(service, reset.id)).state).toBe("cancelled");
+
+    await rename(dataDir, join(root, "removed-data-root"));
+    await mkdir(join(dataDir, "workspace"), { recursive: true });
+    await mkdir(join(dataDir, "channels"), { recursive: true });
+    await writeFile(join(dataDir, "workspace", "notes.txt"), "different-portable-root");
+    await writeFile(join(dataDir, "channels", "channels.json"), "different-channel-state");
+    const restarted = createMaintenanceService({ dataDir, cacheDir, acquireConsistencyLease: async () => ({ release: async () => undefined }) });
+
+    await expect(restarted.previewFactoryReset()).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await readFile(join(dataDir, "channels", "channels.json"), "utf8")).toBe("different-channel-state");
   });
 });
