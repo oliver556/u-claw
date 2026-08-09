@@ -1,9 +1,10 @@
 import { createPublicKey } from "node:crypto";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { open, rm } from "node:fs/promises";
 
 import type { PortableDesktopPaths } from "../portable-paths.js";
 import { createReleaseService } from "./release-service.js";
+import { createLauncherReleaseFSHelper } from "./release-fs-helper.js";
 
 type ProductionReleaseConfigSource = Readonly<Record<string, string | undefined>>;
 
@@ -103,6 +104,12 @@ export function createProductionReleaseService(
 ) {
   const parsed = parseProductionReleaseConfig(source);
   const configuration = parsed.ok ? parsed.value : undefined;
+  const packageRoot = dirname(paths.dataDir);
+  const releaseFS = createLauncherReleaseFSHelper({
+    launcherPath: join(dirname(packageRoot), "U-Claw.exe"),
+    packageRoot,
+    cacheRoot: dirname(paths.cacheDir),
+  });
   return createReleaseService({
     currentVersion: "0.1.0",
     channel: "stable",
@@ -110,7 +117,7 @@ export function createProductionReleaseService(
     arch: "x64",
     runtimeId: "openclaw-2026.7.1-2-win-x64",
     cacheRoot: dirname(paths.cacheDir),
-    packageRoot: dirname(paths.dataDir),
+    packageRoot,
     trustedKeys: configuration?.trustedKeys ?? {},
     revokedKeyIds: configuration?.revokedKeyIds ?? new Set(),
     configurationError: parsed.ok ? undefined : parsed.message,
@@ -130,5 +137,12 @@ export function createProductionReleaseService(
       if (!response.ok || !response.body) throw new Error("Runtime download failed.");
       await writeBoundedResponseBody(response.body, target, manifest.package.bytes, signal);
     },
+    async secureInstall(manifest, signal) {
+      if (!configuration) throw new Error("Release feed is not configured.");
+      const response = await fetchImpl(new URL(`packages/${encodeURIComponent(manifest.id)}/runtime.pkg`, configuration.baseUrl), { signal, redirect: "error", credentials: "omit" });
+      if (!response.ok || !response.body) throw new Error("Runtime download failed.");
+      await releaseFS.secureInstall(manifest.runtimeManifest, response.body, signal);
+    },
+    secureCleanup: (child) => releaseFS.secureCleanup(child),
   });
 }
