@@ -177,12 +177,12 @@ describe("U-Claw application shell", () => {
     })));
   });
 
-  it("recovers from provider loading errors and exposes deferred per-provider verification", async () => {
-    const snapshot = { schemaVersion: 1 as const, selectedProviderId: "openai", providers: [{ id: "openai", templateId: "openai" as const, name: "OpenAI", enabled: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKeyConfigured: false, verification: { state: "unverified" as const } }] };
+  it("recovers from provider loading errors and exposes real redacted verification", async () => {
+    const snapshot = { schemaVersion: 1 as const, selectedProviderId: "openai", providers: [{ id: "openai", templateId: "openai" as const, name: "OpenAI", enabled: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKeyConfigured: false, verification: { state: "unverified" as const } }], network: { httpProxy: null, httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1"] } };
     let attempts = 0;
     const invoke = vi.fn(async (request: any) => {
       if (request.method === "providers.list" && attempts++ === 0) throw new Error("provider disk failure with sk-secret");
-      if (request.method === "providers.verify") return { method: request.method, requestId: request.requestId, ok: false, error: { code: "UNAVAILABLE", message: "Requested operation is unavailable.", retryable: false, recoveryActions: [], causeDetails: {} } };
+      if (request.method === "providers.verify") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "failed", category: "authentication", code: "PROVIDER_AUTH_FAILED", message: "认证失败，请检查 API Key。", retryable: false } };
       return { method: request.method, requestId: request.requestId, ok: true, result: snapshot };
     });
     window.uclaw = { providers: { invoke } } as any;
@@ -192,7 +192,40 @@ describe("U-Claw application shell", () => {
     expect(document.body.textContent).not.toContain("sk-secret");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     fireEvent.click(await screen.findByRole("button", { name: "验证 OpenAI" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("MODEL-005");
+    expect(await screen.findByText("认证失败，请检查 API Key。")).toBeVisible();
+    expect(document.body.textContent).not.toContain("sk-secret");
+  });
+
+  it("discovers and selects local models and saves strict proxy settings", async () => {
+    let snapshot: any = {
+      schemaVersion: 1, selectedProviderId: "openai",
+      providers: [{ id: "openai", templateId: "openai", name: "OpenAI", enabled: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKeyConfigured: false, verification: { state: "unverified" } }],
+      network: { httpProxy: null, httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1"] },
+    };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "providers.discover-local") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "ready", models: [{ id: "llama3.2:latest", label: "llama3.2:latest", source: "ollama", baseUrl: "http://127.0.0.1:11434/v1" }] } };
+      if (request.method === "providers.create") snapshot = { ...snapshot, providers: [...snapshot.providers, { ...request.params.provider, apiKeyConfigured: false, verification: { state: "unverified" } }] };
+      if (request.method === "providers.select") snapshot = { ...snapshot, selectedProviderId: request.params.providerId };
+      if (request.method === "providers.set-network") snapshot = { ...snapshot, network: request.params.network };
+      return { method: request.method, requestId: request.requestId, ok: true, result: snapshot };
+    });
+    window.uclaw = { providers: { invoke } } as any;
+    renderApp();
+    fireEvent.click(screen.getByRole("link", { name: "能力" }));
+    await screen.findByRole("heading", { name: "模型 Provider" });
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新本地模型" }));
+    fireEvent.click(await screen.findByRole("button", { name: "使用 llama3.2:latest" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.create", params: { provider: expect.objectContaining({ baseUrl: "http://127.0.0.1:11434/v1", model: "llama3.2:latest" }) } })));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.select" })));
+
+    fireEvent.change(screen.getByLabelText("HTTP 代理"), { target: { value: "http://proxy.example.com:8080" } });
+    fireEvent.change(screen.getByLabelText("NO_PROXY"), { target: { value: "localhost, 127.0.0.1, ::1, .example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存代理设置" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "providers.set-network",
+      params: { network: { httpProxy: "http://proxy.example.com:8080", httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1", ".example.com"] } },
+    })));
   });
 
   it("opens advanced console through fixed window IPC without a URL", async () => {

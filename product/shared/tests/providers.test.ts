@@ -82,4 +82,55 @@ describe("provider contracts", () => {
     expect(() => requestSchema.parse({ method: "providers.read-api-key", requestId: "key-3", params: { providerId: "openai" } })).toThrow();
     expect(() => requestSchema.parse({ method: "providers.set-api-key", requestId: "key-4", params: { providerId: "openai", apiKey: "sk-once", path: "C:\\secret" } })).toThrow();
   });
+
+  it("publishes strict discovery, connectivity, cancellation, and proxy contracts", () => {
+    const requestSchema = contract.ProviderIpcRequestSchema as Schema;
+    const responseSchema = contract.ProviderIpcResponseSchema as Schema;
+    expect(requestSchema.parse({ method: "providers.discover-local", requestId: "discover-1", params: {} })).toBeTruthy();
+    expect(requestSchema.parse({ method: "providers.cancel", requestId: "cancel-1", params: { operationRequestId: "verify-1" } })).toBeTruthy();
+    expect(requestSchema.parse({
+      method: "providers.set-network", requestId: "network-1", params: {
+        network: { httpProxy: "http://proxy.example.com:8080", httpsProxy: "https://proxy.example.com:8443", noProxy: ["localhost", "127.0.0.1", "::1", ".example.com"] },
+      },
+    })).toBeTruthy();
+    expect(() => requestSchema.parse({
+      method: "providers.set-network", requestId: "network-2", params: {
+        network: { httpProxy: "file:///tmp/proxy", httpsProxy: null, noProxy: ["*"] },
+      },
+    })).toThrow();
+    expect(() => requestSchema.parse({
+      method: "providers.set-network", requestId: "network-3", params: {
+        network: { httpProxy: "socks5://127.0.0.1:1080", httpsProxy: null, noProxy: [] },
+      },
+    })).toThrow();
+    expect(() => requestSchema.parse({
+      method: "providers.set-network", requestId: "network-4", params: {
+        network: { httpProxy: "http://169.254.169.254", httpsProxy: null, noProxy: [] },
+      },
+    })).toThrow();
+    expect(responseSchema.parse({
+      method: "providers.discover-local", requestId: "discover-1", ok: true,
+      result: { state: "ready", models: [{ id: "llama3.2", label: "llama3.2", source: "ollama", baseUrl: "http://127.0.0.1:11434/v1" }] },
+    })).toBeTruthy();
+    expect(responseSchema.parse({
+      method: "providers.verify", requestId: "verify-1", ok: true,
+      result: { state: "failed", category: "authentication", code: "PROVIDER_AUTH_FAILED", message: "认证失败，请检查 API Key。", retryable: false },
+    })).toBeTruthy();
+    expect(() => responseSchema.parse({
+      method: "providers.verify", requestId: "verify-leak", ok: true,
+      result: { state: "failed", category: "authentication", code: "PROVIDER_AUTH_FAILED", message: "Bearer sk-secret-value", retryable: false, body: "secret" },
+    })).toThrow();
+  });
+
+  it("includes renderer-safe proxy state without proxy credentials", () => {
+    const schema = contract.ProviderSnapshotSchema as Schema;
+    expect(schema.parse({
+      schemaVersion: 1, selectedProviderId: null, providers: [],
+      network: { httpProxy: null, httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1"] },
+    })).toBeTruthy();
+    expect(() => schema.parse({
+      schemaVersion: 1, selectedProviderId: null, providers: [],
+      network: { httpProxy: "http://user:secret@proxy.example.com", httpsProxy: null, noProxy: [] },
+    })).toThrow();
+  });
 });

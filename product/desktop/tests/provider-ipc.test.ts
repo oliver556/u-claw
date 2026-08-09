@@ -10,6 +10,7 @@ const snapshot = {
     baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKeyConfigured: true,
     apiKeyHint: "...cret", verification: { state: "unverified" as const },
   }],
+  network: { httpProxy: null, httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1"] },
 };
 
 function fakeStore() {
@@ -17,7 +18,8 @@ function fakeStore() {
     list: vi.fn(async () => snapshot), create: vi.fn(async () => snapshot), update: vi.fn(async () => snapshot),
     remove: vi.fn(async () => snapshot), setEnabled: vi.fn(async () => snapshot), move: vi.fn(async () => snapshot),
     select: vi.fn(async () => snapshot), setApiKey: vi.fn(async () => snapshot), clearApiKey: vi.fn(async () => snapshot),
-    getSelectedForRuntime: vi.fn(),
+    setNetwork: vi.fn(async () => snapshot), getSelectedForRuntime: vi.fn(),
+    getForRuntime: vi.fn(async () => ({ id: "openai", templateId: "openai", name: "OpenAI", enabled: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKey: "sk-main-private" })),
   };
 }
 
@@ -35,10 +37,24 @@ describe("provider IPC", () => {
     expect(JSON.stringify(response)).not.toContain("sk-request-only");
   });
 
-  it("keeps verification as an explicit deferred capability", async () => {
-    const dispatch = (desktop as any).createProviderDispatcher(fakeStore());
-    await expect(dispatch({ method: "providers.verify", requestId: "verify-1", params: { providerId: "openai" } }))
-      .rejects.toMatchObject({ code: "UNAVAILABLE", causeDetails: {} });
+  it("routes discovery, real verification, proxy updates, and cancellation without leaking keys", async () => {
+    const store = fakeStore();
+    const network = {
+      discover: vi.fn(async () => ({ state: "empty", models: [] })),
+      verify: vi.fn(async () => ({ state: "succeeded", category: "ok", code: "OK", message: "连接成功。", retryable: false })),
+      cancel: vi.fn(() => true),
+    };
+    const dispatch = (desktop as any).createProviderDispatcher(store, network);
+    const discovered = await dispatch({ method: "providers.discover-local", requestId: "discover-1", params: {} });
+    const verified = await dispatch({ method: "providers.verify", requestId: "verify-1", params: { providerId: "openai" } });
+    const updated = await dispatch({ method: "providers.set-network", requestId: "network-1", params: { network: snapshot.network } });
+    const cancelled = await dispatch({ method: "providers.cancel", requestId: "cancel-1", params: { operationRequestId: "verify-1" } });
+    expect(discovered).toMatchObject({ ok: true, result: { state: "empty" } });
+    expect(verified).toMatchObject({ ok: true, result: { state: "succeeded" } });
+    expect(updated).toMatchObject({ ok: true, result: snapshot });
+    expect(cancelled).toEqual({ method: "providers.cancel", requestId: "cancel-1", ok: true, result: null });
+    expect(network.verify).toHaveBeenCalledWith("verify-1", expect.objectContaining({ apiKey: "sk-main-private" }), snapshot.network);
+    expect(JSON.stringify([discovered, verified, updated, cancelled])).not.toContain("sk-main-private");
   });
 
   it("registers one authorized fixed provider channel and removes it on dispose", async () => {
