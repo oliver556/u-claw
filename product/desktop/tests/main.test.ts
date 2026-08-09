@@ -45,6 +45,28 @@ describe("Electron client wiring", () => {
       await Promise.all([dataDir, cacheRoot].map((path) => rm(path, { recursive: true, force: true })));
     }
   });
+
+  it("wires production workspace open and reveal to the controlled Electron shell", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-shell-data-"));
+    const cacheDir = await mkdtemp(join(tmpdir(), "uclaw-main-shell-cache-"));
+    await mkdir(join(dataDir, "workspace"), { recursive: true });
+    await writeFile(join(dataDir, "workspace", "result.txt"), "result", "utf8");
+    const openPath = vi.fn(async () => "");
+    const showItemInFolder = vi.fn();
+    try {
+      const service = createProductionDataService({ dataDir, cacheDir }, { openPath, showItemInFolder });
+      await expect(service.dispatch({
+        method: "workspace.open", requestId: "open", params: { entryId: "result.txt" },
+      })).resolves.toMatchObject({ ok: true, result: null });
+      await expect(service.dispatch({
+        method: "workspace.reveal", requestId: "reveal", params: { entryId: "result.txt" },
+      })).resolves.toMatchObject({ ok: true, result: null });
+      expect(openPath).toHaveBeenCalledWith(join(dataDir, "workspace", "result.txt"));
+      expect(showItemInFolder).toHaveBeenCalledWith(join(dataDir, "workspace", "result.txt"));
+    } finally {
+      await Promise.all([dataDir, cacheDir].map((path) => rm(path, { recursive: true, force: true })));
+    }
+  });
 });
 
 describe("bootstrapDesktopApp", () => {

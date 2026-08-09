@@ -18,13 +18,16 @@ Electron shell 是 path-based API，不提供 Windows handle-bound shell invocat
 
 ```ts
 interface DataMutationCoordinator {
-  runVersioned<T>(operation: () => Promise<T>): Promise<T>;
+  runVersioned<T>(
+    context: { method: VersionedDataMutationMethod; id: string; expectedVersion: string },
+    operation: () => Promise<T>,
+  ): Promise<T>;
 }
 ```
 
-所有 `workspace.rename/move/delete` 与 `memory.write/delete` 经该接口执行。默认实现只做本进程串行化；后续 P2-T11/P2-T13 可注入 production coordinator，在不改变 renderer/shared IPC 契约下接管跨域写入协调。
+所有 `workspace.rename/move/delete` 与 `memory.write/delete` 经该接口执行。默认实现使用 U 盘数据根上的 `O_CREAT | O_EXCL` advisory sidecar lock，在协作进程之间串行化版本检查与 mutation；后续 P2-T11/P2-T13 可注入 production coordinator，在不改变 renderer/shared IPC 契约下接管跨域写入协调。
 
-对象版本仍为 filesystem optimistic CAS：操作前比较 content/stat version；mutation 临界点再次验证对象身份；提交后验证结果。旧 version、校验后外部修改和对象替换返回 `CONFLICT`。该协议检测冲突，但不是与不协作 OpenClaw writer 严格跨进程线性化 CAS。
+对象版本仍为 filesystem optimistic CAS：进入锁定操作后比较 content/stat version，提交后验证结果。旧 version、锁等待期间外部修改和可观测对象替换返回 `CONFLICT`。sidecar lock 是 advisory；不遵守该锁的 OpenClaw writer 可在任意时刻写入。因此该协议检测已观测冲突，但不是严格跨进程线性化 CAS。
 
 ## 测试
 
