@@ -16,6 +16,7 @@ import {
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
 import { ATTACHMENT_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import type { SessionOrganizerStore } from "../session-organizer/store.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -40,6 +41,7 @@ export interface RegisterIpcDependencies {
   windowControls: WindowControls;
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
   client?: UClawClient;
+  organizer?: SessionOrganizerStore;
   attachments?: AttachmentService;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
 }
@@ -79,11 +81,13 @@ export function registerIpc({
   windowControls,
   dispatchClient,
   client,
+  organizer,
   attachments,
   selectAttachments,
 }: RegisterIpcDependencies): () => void {
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
+    organizer,
     sendEvent: (event) => authorizedWebContents.send?.(CLIENT_IPC_EVENT_CHANNEL, event),
   });
   const dispatch = clientDispatcher ?? dispatchClient;

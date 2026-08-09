@@ -38,8 +38,11 @@ import {
   type UClawErrorSummary,
 } from "@uclaw/shared";
 
+import type { SessionOrganizerStore } from "../session-organizer/store.js";
+
 export interface ClientDispatcherDependencies {
   client: UClawClient;
+  organizer?: SessionOrganizerStore;
   sendEvent(event: ClientIpcEvent): void;
 }
 
@@ -384,7 +387,7 @@ export function toRendererSafeResponse(response: IpcResponse): IpcResponse {
   return IpcResponseSchema.parse({ ...response, result });
 }
 
-export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDependencies) {
+export function createClientDispatcher({ client, organizer, sendEvent }: ClientDispatcherDependencies) {
   type SubscriptionState = { controller: AbortController };
   type SendState = { controller: AbortController; iterator: AsyncIterator<MessageEvent> };
   const subscriptions = new Map<string, SubscriptionState>();
@@ -452,7 +455,33 @@ export function createClientDispatcher({ client, sendEvent }: ClientDispatcherDe
           if (client.sessions.rename === undefined) throw { code: "UNAVAILABLE", message: "Session rename is unavailable.", retryable: false, recoveryActions: [], causeDetails: {} };
           return success(request, rendererSafeSession(await client.sessions.rename(request.params.sessionId, request.params.title)));
         }
-        case "sessions.remove": await client.sessions.remove(request.params.sessionId, request.params.revision); return success(request, null);
+        case "sessions.remove": {
+          await client.sessions.remove(request.params.sessionId, request.params.revision);
+          await organizer?.removeSession(request.params.sessionId).catch(() => undefined);
+          return success(request, null);
+        }
+        case "session-organizer.get": {
+          if (!organizer) throw { code: "UNAVAILABLE", retryable: false, recoveryActions: [], causeDetails: {} };
+          return success(request, await organizer.load());
+        }
+        case "session-organizer.set-pinned": {
+          if (!organizer) throw { code: "UNAVAILABLE", retryable: false, recoveryActions: [], causeDetails: {} };
+          return success(request, await organizer.setPinned(request.params.sessionId, request.params.pinned));
+        }
+        case "session-organizer.create-group": {
+          if (!organizer) throw { code: "UNAVAILABLE", retryable: false, recoveryActions: [], causeDetails: {} };
+          await organizer.createGroup(request.params.name);
+          return success(request, await organizer.load());
+        }
+        case "session-organizer.rename-group": {
+          if (!organizer) throw { code: "UNAVAILABLE", retryable: false, recoveryActions: [], causeDetails: {} };
+          await organizer.renameGroup(request.params.groupId, request.params.name);
+          return success(request, await organizer.load());
+        }
+        case "session-organizer.assign-group": {
+          if (!organizer) throw { code: "UNAVAILABLE", retryable: false, recoveryActions: [], causeDetails: {} };
+          return success(request, await organizer.assignGroup(request.params.sessionId, request.params.groupId));
+        }
         case "chat.list": {
           const { sessionId, ...page } = request.params;
           const result = await client.chat.list(sessionId, page);

@@ -12,6 +12,7 @@ import {
 import { PageRequestSchema } from "./common.js";
 import { UClawErrorSchema } from "./errors.js";
 import { CapabilitySetWireSchema, GatewayStatusWireSchema } from "./gateway.js";
+import { SessionOrganizerDocumentSchema } from "./session-organizer.js";
 import {
   ChannelSummarySchema,
   DiagnosticSummarySchema,
@@ -101,6 +102,11 @@ export const ClientIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("sessions.create"), requestId: RequestIdSchema, params: z.object({ title: z.string().optional(), modelId: z.string().min(1).optional() }).strict() }).strict(),
   z.object({ method: z.literal("sessions.rename"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), title: z.string().trim().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("sessions.remove"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), revision: z.string().optional() }).strict() }).strict(),
+  z.object({ method: z.literal("session-organizer.get"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
+  z.object({ method: z.literal("session-organizer.set-pinned"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), pinned: z.boolean() }).strict() }).strict(),
+  z.object({ method: z.literal("session-organizer.create-group"), requestId: RequestIdSchema, params: z.object({ name: z.string().trim().min(1).max(80) }).strict() }).strict(),
+  z.object({ method: z.literal("session-organizer.rename-group"), requestId: RequestIdSchema, params: z.object({ groupId: z.string().min(1), name: z.string().trim().min(1).max(80) }).strict() }).strict(),
+  z.object({ method: z.literal("session-organizer.assign-group"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), groupId: z.string().min(1).nullable() }).strict() }).strict(),
   z.object({ method: z.literal("chat.list"), requestId: RequestIdSchema, params: SessionPageParamsSchema }).strict(),
   z.object({ method: z.literal("chat.get"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), messageId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("chat.watch"), requestId: RequestIdSchema, params: z.object({ sessionId: z.string().min(1), subscriptionId: SubscriptionIdSchema }).strict() }).strict(),
@@ -134,6 +140,11 @@ export const ClientIpcSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("sessions.create"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionSchema }).strict(),
   z.object({ method: z.literal("sessions.rename"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionSchema }).strict(),
   z.object({ method: z.literal("sessions.remove"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+  z.object({ method: z.literal("session-organizer.get"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionOrganizerDocumentSchema }).strict(),
+  z.object({ method: z.literal("session-organizer.set-pinned"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionOrganizerDocumentSchema }).strict(),
+  z.object({ method: z.literal("session-organizer.create-group"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionOrganizerDocumentSchema }).strict(),
+  z.object({ method: z.literal("session-organizer.rename-group"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionOrganizerDocumentSchema }).strict(),
+  z.object({ method: z.literal("session-organizer.assign-group"), requestId: RequestIdSchema, ok: z.literal(true), result: SessionOrganizerDocumentSchema }).strict(),
   z.object({ method: z.literal("chat.list"), requestId: RequestIdSchema, ok: z.literal(true), result: PageResponseSchema(MessageSchema) }).strict(),
   z.object({ method: z.literal("chat.get"), requestId: RequestIdSchema, ok: z.literal(true), result: MessageSchema }).strict(),
   z.object({ method: z.literal("chat.watch"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
@@ -162,6 +173,7 @@ export const ClientIpcFailureResponseSchema = z
     method: z.enum([
       "gateway.negotiate", "gateway.get-status", "gateway.watch-status", "gateway.reconnect",
       "sessions.list", "sessions.get", "sessions.create", "sessions.rename", "sessions.remove",
+      "session-organizer.get", "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group", "session-organizer.assign-group",
       "chat.list", "chat.get", "chat.watch", "chat.send", "chat.abort", "chat.cancel-stream",
       "tools.list", "tools.get-call", "approvals.list-pending", "approvals.resolve-exec", "approvals.resolve-plugin",
       "models.list", "models.select-for-session", "skills.list", "channels.list",

@@ -10,6 +10,33 @@ function deferred<T>() {
 }
 
 describe("createRendererClient", () => {
+  it("maps organizer domain operations to whitelisted IPC methods without paths", async () => {
+    const document = { schemaVersion: 1 as const, groups: [], sessions: [] };
+    const invoke = vi.fn(async (request: ClientIpcRequest): Promise<IpcResponse> => ({
+      method: request.method,
+      requestId: request.requestId,
+      ok: true,
+      result: document,
+    } as IpcResponse));
+    const client = createRendererClient({ invoke, subscribe: () => vi.fn() });
+
+    await client.sessionOrganizer.get();
+    await client.sessionOrganizer.setPinned("session-1", true);
+    await client.sessionOrganizer.createGroup("发布");
+    await client.sessionOrganizer.renameGroup("group-1", "正式发布");
+    await client.sessionOrganizer.assignGroup("session-1", null);
+
+    expect(invoke.mock.calls.map(([request]) => request)).toEqual([
+      expect.objectContaining({ method: "session-organizer.get", params: {} }),
+      expect.objectContaining({ method: "session-organizer.set-pinned", params: { sessionId: "session-1", pinned: true } }),
+      expect.objectContaining({ method: "session-organizer.create-group", params: { name: "发布" } }),
+      expect.objectContaining({ method: "session-organizer.rename-group", params: { groupId: "group-1", name: "正式发布" } }),
+      expect.objectContaining({ method: "session-organizer.assign-group", params: { sessionId: "session-1", groupId: null } }),
+    ]);
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain("path");
+    client.dispose();
+  });
+
   it("drops buffered send events when cancellation wins before acceptance", async () => {
     let listener: ((event: ClientIpcEvent) => void) | undefined;
     const accepted = deferred<IpcResponse>();

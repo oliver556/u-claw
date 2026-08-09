@@ -5,6 +5,7 @@ import {
   type ClientIpcRequest,
   type IpcResponse,
   type MessageEvent,
+  type SessionOrganizerService,
   type UClawClient,
   type UClawError,
 } from "@uclaw/shared";
@@ -15,6 +16,7 @@ export interface RendererClientBridge {
 }
 
 export interface RendererClient extends UClawClient {
+  sessionOrganizer: SessionOrganizerService;
   dispose(): void;
 }
 
@@ -172,6 +174,13 @@ export function createRendererClient(bridge: RendererClientBridge): RendererClie
     sessions: {
       list: (page = {}) => invoke("sessions.list", page), get: (sessionId) => invoke("sessions.get", { sessionId }),
       create: (input = {}) => invoke("sessions.create", input), rename: (sessionId, title) => invoke("sessions.rename", { sessionId, title }), remove: (sessionId, revision) => invoke("sessions.remove", { sessionId, ...(revision ? { revision } : {}) }),
+    },
+    sessionOrganizer: {
+      get: () => invoke("session-organizer.get", {}),
+      setPinned: (sessionId, pinned) => invoke("session-organizer.set-pinned", { sessionId, pinned }),
+      createGroup: (name) => invoke("session-organizer.create-group", { name }),
+      renameGroup: (groupId, name) => invoke("session-organizer.rename-group", { groupId, name }),
+      assignGroup: (sessionId, groupId) => invoke("session-organizer.assign-group", { sessionId, groupId }),
     },
     chat: {
       list: (sessionId, page = {}) => invoke("chat.list", { sessionId, ...page }),
