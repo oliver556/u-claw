@@ -45,6 +45,7 @@ export interface ClientDispatcherDependencies {
   client: UClawClient;
   organizer?: SessionOrganizerStore;
   sendEvent(event: ClientIpcEvent): void;
+  runMutation?<T>(operation: () => Promise<T>): Promise<T>;
 }
 
 export interface ClientDispatcher {
@@ -389,7 +390,7 @@ export function toRendererSafeResponse(response: ClientIpcResponse): ClientIpcRe
   return ClientIpcResponseSchema.parse({ ...response, result });
 }
 
-export function createClientDispatcher({ client, organizer, sendEvent }: ClientDispatcherDependencies) {
+export function createClientDispatcher({ client, organizer, sendEvent, runMutation = (operation) => operation() }: ClientDispatcherDependencies) {
   type SubscriptionState = { controller: AbortController };
   type SendState = { controller: AbortController; iterator: AsyncIterator<MessageEvent> };
   const subscriptions = new Map<string, SubscriptionState>();
@@ -427,7 +428,7 @@ export function createClientDispatcher({ client, organizer, sendEvent }: ClientD
     method: request.method, requestId: request.requestId, ok: true, result,
   }));
 
-  const dispatch = async (request: ClientIpcRequest): Promise<ClientIpcResponse> => {
+  const dispatchUnlocked = async (request: ClientIpcRequest): Promise<ClientIpcResponse> => {
     try {
       switch (request.method) {
         case "gateway.negotiate": return success(request, capabilitySetToWire(await client.gateway.negotiate()));
@@ -504,28 +505,28 @@ export function createClientDispatcher({ client, organizer, sendEvent }: ClientD
           return success(request, null);
         }
         case "chat.send": {
-          const controller = new AbortController();
-          const iterator = client.chat.send(request.params, controller.signal)[Symbol.asyncIterator]();
-          const previous = sends.get(request.params.clientRequestId);
-          previous?.controller.abort();
-          if (previous) void returnIterator(previous.iterator);
-          const state = { controller, iterator };
-          sends.set(request.params.clientRequestId, state);
-          const first = await iterator.next();
-          if (disposed || sends.get(request.params.clientRequestId) !== state) {
-            controller.abort();
-            await returnIterator(iterator);
-            throw new Error("Chat stream was replaced.");
-          }
-          if (first.done || first.value.type !== "started") {
-            if (sends.get(request.params.clientRequestId) === state) sends.delete(request.params.clientRequestId);
-            controller.abort();
-            await returnIterator(iterator);
-            throw new Error("Chat stream did not start.");
-          }
-          emit({ event: "chat.send-event", clientRequestId: request.params.clientRequestId, payload: rendererSafeMessageEvent(first.value) });
-          void (async () => {
+          let resolveStarted!: (response: ClientIpcResponse) => void;
+          let rejectStarted!: (error: unknown) => void;
+          let startedSettled = false;
+          const started = new Promise<ClientIpcResponse>((resolve, reject) => { resolveStarted = resolve; rejectStarted = reject; });
+          void runMutation(async () => {
+            if (disposed) throw new Error("Client dispatcher is disposed.");
+            const controller = new AbortController();
+            const iterator = client.chat.send(request.params, controller.signal)[Symbol.asyncIterator]();
+            const previous = sends.get(request.params.clientRequestId);
+            previous?.controller.abort();
+            if (previous) void returnIterator(previous.iterator);
+            const state = { controller, iterator };
+            sends.set(request.params.clientRequestId, state);
+            let runId: string | undefined;
             try {
+              const first = await iterator.next();
+              if (disposed || sends.get(request.params.clientRequestId) !== state) throw new Error("Chat stream was replaced.");
+              if (first.done || first.value.type !== "started") throw new Error("Chat stream did not start.");
+              runId = first.value.runId;
+              emit({ event: "chat.send-event", clientRequestId: request.params.clientRequestId, payload: rendererSafeMessageEvent(first.value) });
+              startedSettled = true;
+              resolveStarted(success(request, { clientRequestId: request.params.clientRequestId, runId }));
               while (true) {
                 const next = await iterator.next();
                 if (next.done) return;
@@ -534,16 +535,22 @@ export function createClientDispatcher({ client, organizer, sendEvent }: ClientD
                 }
               }
             } catch (error) {
-              if (!disposed && sends.get(request.params.clientRequestId) === state) emit({
+              if (!startedSettled) {
+                startedSettled = true;
+                rejectStarted(error);
+              } else if (!disposed && runId && sends.get(request.params.clientRequestId) === state) emit({
                 event: "chat.send-event", clientRequestId: request.params.clientRequestId,
-                payload: { type: "error", runId: first.value.runId, error: toRendererSafeError(error) },
+                payload: { type: "error", runId, error: toRendererSafeError(error) },
               });
             } finally {
               if (sends.get(request.params.clientRequestId) === state) sends.delete(request.params.clientRequestId);
+              controller.abort();
               await returnIterator(iterator);
             }
-          })();
-          return success(request, { clientRequestId: request.params.clientRequestId, runId: first.value.runId });
+          }).catch((error) => {
+            if (!startedSettled) { startedSettled = true; rejectStarted(error); }
+          });
+          return await started;
         }
         case "chat.abort": await client.chat.abort(request.params.runId); return success(request, null);
         case "chat.cancel-stream": {
@@ -584,6 +591,14 @@ export function createClientDispatcher({ client, organizer, sendEvent }: ClientD
       });
     }
   };
+  const writeMethods = new Set<ClientIpcRequest["method"]>([
+    "gateway.reconnect", "sessions.create", "sessions.rename", "sessions.remove",
+    "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group",
+    "session-organizer.assign-group", "models.select-for-session",
+  ]);
+  const dispatch = (request: ClientIpcRequest): Promise<ClientIpcResponse> => writeMethods.has(request.method)
+    ? runMutation(() => dispatchUnlocked(request))
+    : dispatchUnlocked(request);
   dispatch.dispose = () => {
     if (disposed) return;
     disposed = true;

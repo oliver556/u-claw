@@ -20,6 +20,31 @@ afterEach(async () => {
 });
 
 describe("portable Skill service", () => {
+  it("keeps background mutations tracked until the operation settles", async () => {
+    let mutationCalls = 0;
+    const runMutation = async <T>(operation: () => Promise<T>) => { mutationCalls += 1; return operation(); };
+    const service = await createSkillService({ dataDir: await makeRoot(), client: createFixtureSkillHubClient(), runMutation });
+    const detail = await service.detail("workspace-reader");
+    const operation = await service.startInstall({
+      slug: detail.slug,
+      confirmation: { permissionFingerprint: detail.permissionFingerprint, acceptedRisk: detail.risk },
+    });
+    await service.waitForOperation(operation.id);
+    expect(mutationCalls).toBe(1);
+  });
+
+  it("fails a queued mutation when the consistency coordinator rejects it", async () => {
+    const runMutation = async <T>(_operation: () => Promise<T>): Promise<T> => { throw new Error("runtime unavailable"); };
+    const service = await createSkillService({ dataDir: await makeRoot(), client: createFixtureSkillHubClient(), runMutation });
+    const detail = await service.detail("workspace-reader");
+    const operation = await service.startInstall({
+      slug: detail.slug,
+      confirmation: { permissionFingerprint: detail.permissionFingerprint, acceptedRisk: detail.risk },
+    });
+
+    await expect(service.waitForOperation(operation.id)).resolves.toMatchObject({ state: "failed" });
+  });
+
   it("searches only free fixture Skills with cursor pagination", async () => {
     const service = await createSkillService({ dataDir: await makeRoot(), client: createFixtureSkillHubClient() });
     const first = await service.search({ query: "", cursor: null, pageSize: 1 });

@@ -49,6 +49,7 @@ describe("diagnostics IPC contracts", () => {
   it("accepts only structured doctor, repair, and bounded network requests", () => {
     expect(DiagnosticsIpcRequestSchema.parse({ method: "doctor.run", requestId: "doctor-1", params: {} }).method).toBe("doctor.run");
     expect(DiagnosticsIpcRequestSchema.parse({ method: "doctor.repair", requestId: "repair-1", params: { actionId: "gateway-restart", previewToken: "doctor-preview-1", confirmed: true } }).method).toBe("doctor.repair");
+    expect(DiagnosticsIpcRequestSchema.safeParse({ method: "doctor.repair", requestId: "bad-action", params: { actionId: "runtime-restart", previewToken: "doctor-preview-1", confirmed: true } }).success).toBe(false);
     expect(DiagnosticsIpcRequestSchema.parse({ method: "network.run", requestId: "network-1", params: { timeoutMs: 2500 } }).method).toBe("network.run");
     expect(DiagnosticsIpcRequestSchema.safeParse({ method: "doctor.repair", requestId: "bad", params: { command: "rm -rf /", confirmed: true } }).success).toBe(false);
     expect(DiagnosticsIpcRequestSchema.safeParse({ method: "network.run", requestId: "bad", params: { target: "https://secret.example", timeoutMs: 999999 } }).success).toBe(false);

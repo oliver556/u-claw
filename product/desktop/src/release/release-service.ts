@@ -50,6 +50,7 @@ export interface ReleaseServiceOptions {
   cacheRoot: string; packageRoot: string; trustedKeys: Record<string, string>; revokedKeyIds: Set<string>;
   highestSequence?: number; timeoutMs?: number; now?: () => Date;
   configurationError?: string;
+  runMutation?<T>(operation: () => Promise<T>): Promise<T>;
   fetchManifest(channel: "stable" | "beta", signal: AbortSignal): Promise<SignedReleaseManifest>;
   download(manifest: SignedReleaseManifest, controlledTarget: string, signal: AbortSignal): Promise<void>;
   secureInstall?(manifest: SignedReleaseManifest, signal: AbortSignal): Promise<void>;
@@ -176,6 +177,7 @@ async function readOwnedCacheMarker(cacheRoot: string): Promise<boolean> {
 }
 
 export function createReleaseService(options: ReleaseServiceOptions) {
+  const runMutation = options.runMutation ?? ((operation) => operation());
   const now = options.now ?? (() => new Date());
   const timeoutMs = options.timeoutMs ?? 15_000;
   let lastChannel = options.channel;
@@ -244,7 +246,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
     const id = operationId(); const controller = new AbortController(); operationSignals.set(id, controller);
     const initial = setOperation({ id, kind: "install", state: "queued", phase: "queued", processedItems: 0, totalItems: 3, partialFailures: 0, message: "更新已排队。", recovery: "none" });
     const manifest = checked.manifest; checked = undefined;
-    void (async () => {
+    void runMutation(async () => {
       const staging = join(options.packageRoot, `.update-staging-${id}`); const stagedPackage = join(staging, "runtime.pkg"); const stagedManifest = join(staging, "version.json");
       const runtime = join(options.packageRoot, "runtime.pkg"); const version = join(options.packageRoot, "version.json");
       const runtimeRollback = join(options.packageRoot, "runtime.pkg.rollback"); const versionRollback = join(options.packageRoot, "version.json.rollback");
@@ -285,7 +287,10 @@ export function createReleaseService(options: ReleaseServiceOptions) {
         const recovery = await recover();
         setOperation({ ...operations.get(id)!, state: cancelled ? "cancelled" : "failed", phase: cancelled ? "cancelled" : "failed", message: cancelled ? "更新已取消。" : recovery.state === "recovery-required" ? "更新失败，需要恢复。" : "更新失败，已保留或回滚当前 runtime。", recovery: recovery.state === "rolled-back" ? "rolled-back" : recovery.state === "recovery-required" ? "recovery-required" : "none" });
       } finally { operationSignals.delete(id); }
-    })();
+    }).catch(() => {
+      operationSignals.delete(id);
+      setOperation({ ...operations.get(id)!, state: "failed", phase: "failed", message: "更新失败，runtime 当前不可写。" });
+    });
     return initial;
   };
 
@@ -303,7 +308,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
     if (!confirmed || !uninstallPreview || uninstallPreview.previewToken !== previewToken || scopeIds.length !== 1 || scopeIds[0] !== "host-cache") throw new Error("Uninstall confirmation is stale.");
     uninstallPreview = undefined; const id = operationId();
     const initial = setOperation({ id, kind: "uninstall", state: "queued", phase: "queued", processedItems: 0, totalItems: 3, partialFailures: 0, message: "缓存清理已排队。", recovery: "none" });
-    void (async () => {
+    void runMutation(async () => {
       let processed = 0; let failures = 0;
       setOperation({ ...initial, state: "running", phase: "cleaning", message: "正在清理本机 U-Claw 自有缓存。" });
       if (!await readOwnedCacheMarker(options.cacheRoot)) {
@@ -325,7 +330,9 @@ export function createReleaseService(options: ReleaseServiceOptions) {
         processed += 1; setOperation({ ...operations.get(id)!, processedItems: processed, partialFailures: failures });
       }
       setOperation({ ...operations.get(id)!, state: "completed", phase: "completed", processedItems: processed, partialFailures: failures, message: failures ? "缓存清理完成，部分项目失败。" : "本机 U-Claw 缓存已清理。" });
-    })();
+    }).catch(() => {
+      setOperation({ ...operations.get(id)!, state: "failed", phase: "failed", message: "缓存清理失败，runtime 当前不可写。" });
+    });
     return initial;
   };
 

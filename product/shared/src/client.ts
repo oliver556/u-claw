@@ -18,6 +18,7 @@ import type {
   ResolvePluginApprovalInput,
   ToolCall,
 } from "./tools.js";
+import type { DoctorRepairActionId } from "./diagnostics.js";
 
 export interface GatewayService {
   negotiate(): Promise<CapabilitySet>;
@@ -83,10 +84,9 @@ export interface DiagnosticsService {
       status: "pass" | "warn" | "fail";
       summary: string;
       suggestion?: string;
-      repair?: { actionId: string; label: string };
+      repair?: { actionId: DoctorRepairActionId; label: string };
     }>;
   }>;
-  repair?(actionId: string, signal?: AbortSignal): Promise<void>;
 }
 
 export interface UClawClient {

@@ -6,7 +6,10 @@ import { UClawErrorSchema } from "./errors.js";
 const RequestIdSchema = z.string().min(1).max(128);
 const CursorSchema = z.string().min(1).max(128);
 const QuerySchema = z.string().trim().max(200).optional();
-const DoctorActionIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,63}$/);
+const DoctorCheckIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,63}$/);
+export const DOCTOR_REPAIR_ACTION_IDS = ["gateway-restart"] as const;
+export const DoctorRepairActionIdSchema = z.enum(DOCTOR_REPAIR_ACTION_IDS);
+export type DoctorRepairActionId = z.infer<typeof DoctorRepairActionIdSchema>;
 const DoctorPreviewTokenSchema = z.string().regex(/^doctor-preview-[a-z0-9-]{1,80}$/);
 const OperationTimeoutSchema = z.number().int().min(250).max(30_000);
 export const DiagnosticLogLevelSchema = z.enum(["debug", "info", "warning", "error"]);
@@ -49,7 +52,7 @@ export const DiagnosticsIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("config.get"), requestId: RequestIdSchema, params: z.object({ query: QuerySchema }).strict() }).strict(),
   z.object({ method: z.literal("config.export"), requestId: RequestIdSchema, params: z.object({ fileName: BasenameSchema }).strict() }).strict(),
   z.object({ method: z.literal("doctor.run"), requestId: RequestIdSchema, params: z.object({ timeoutMs: OperationTimeoutSchema.optional() }).strict() }).strict(),
-  z.object({ method: z.literal("doctor.repair"), requestId: RequestIdSchema, params: z.object({ actionId: DoctorActionIdSchema, previewToken: DoctorPreviewTokenSchema, confirmed: z.literal(true), timeoutMs: OperationTimeoutSchema.optional() }).strict() }).strict(),
+  z.object({ method: z.literal("doctor.repair"), requestId: RequestIdSchema, params: z.object({ actionId: DoctorRepairActionIdSchema, previewToken: DoctorPreviewTokenSchema, confirmed: z.literal(true), timeoutMs: OperationTimeoutSchema.optional() }).strict() }).strict(),
   z.object({ method: z.literal("network.run"), requestId: RequestIdSchema, params: z.object({ timeoutMs: z.number().int().min(250).max(10_000).default(3000) }).strict() }).strict(),
   z.object({ method: z.literal("operations.cancel"), requestId: RequestIdSchema, params: z.object({ operationRequestId: RequestIdSchema }).strict() }).strict(),
 ]);
@@ -97,12 +100,12 @@ export const DoctorResultSchema = z.object({
   state: z.enum(["healthy", "issues"]),
   adapter: z.literal("openclaw"),
   checks: z.array(z.object({
-    id: DoctorActionIdSchema,
+    id: DoctorCheckIdSchema,
     label: z.string().min(1).max(80),
     level: z.enum(["info", "warning", "error"]),
     summary: z.string().min(1).max(240),
     suggestion: z.string().min(1).max(240).optional(),
-    repair: z.object({ actionId: DoctorActionIdSchema, label: z.string().min(1).max(80), previewToken: DoctorPreviewTokenSchema }).strict().optional(),
+    repair: z.object({ actionId: DoctorRepairActionIdSchema, label: z.string().min(1).max(80), previewToken: DoctorPreviewTokenSchema }).strict().optional(),
   }).strict()).max(100),
 }).strict();
 export type DoctorResult = z.infer<typeof DoctorResultSchema>;

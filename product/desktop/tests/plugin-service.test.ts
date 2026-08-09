@@ -20,6 +20,25 @@ const createService = (dataDir: string, client = createFixturePluginRegistryClie
   createPluginService({ dataDir, client, runtime: createFixturePluginRuntime(dataDir) });
 
 describe("Plugin service", () => {
+  it("keeps background mutations tracked until the operation settles", async () => {
+    const dataDir = await makeRoot();
+    let mutationCalls = 0;
+    const runMutation = async <T>(operation: () => Promise<T>) => { mutationCalls += 1; return operation(); };
+    const service = await createPluginService({
+      dataDir,
+      client: createFixturePluginRegistryClient(),
+      runtime: createFixturePluginRuntime(dataDir),
+      runMutation,
+    });
+    const detail = await service.detail("openclaw-calendar");
+    const operation = await service.startInstall({
+      slug: detail.slug,
+      confirmation: { permissionFingerprint: detail.permissionFingerprint, acceptedRisk: detail.risk },
+    });
+    await service.waitForOperation(operation.id);
+    expect(mutationCalls).toBe(1);
+  });
+
   it("uses a plugin fixture registry, never SkillHub", async () => {
     const service = await createService(await makeRoot());
     const page = await service.search({ query: "", cursor: null, pageSize: 20 });

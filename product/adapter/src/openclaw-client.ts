@@ -3,6 +3,7 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_ATTACHMENT_BASE64_TOTAL_LENGTH,
   MAX_ATTACHMENT_TOTAL_BYTES,
+  DoctorRepairActionIdSchema,
   UClawErrorSchema,
   type CapabilitySet,
   type GatewayConnectionState,
@@ -181,7 +182,7 @@ const ChannelsStatusResponseSchema = z.object({
   channelDefaultAccountId: z.record(z.string(), z.string()),
 }).passthrough();
 const DoctorActionIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,63}$/);
-const DoctorResponseSchema = z.object({
+const RawDoctorResponseSchema = z.object({
   status: z.enum(["ok", "issues"]),
   checks: z.array(z.object({
     id: DoctorActionIdSchema,
@@ -190,6 +191,7 @@ const DoctorResponseSchema = z.object({
     status: z.enum(["pass", "warn", "fail"]),
     summary: z.string().min(1).max(240),
     suggestion: z.string().min(1).max(240).optional(),
+    repair: z.object({ actionId: DoctorActionIdSchema, label: z.string().min(1).max(80) }).strict().optional(),
   })).max(100),
 });
 const ChannelStartResponseSchema = z.object({ channel: z.literal("telegram"), accountId: z.string().min(1), started: z.boolean() }).passthrough();
@@ -664,7 +666,14 @@ export class OpenClawClient implements UClawClient {
     listLogs: async () => this.unsupported("logs.tail"),
     doctor: async (signal) => {
       this.requireMethod("diagnostics.doctor");
-      return this.options.transport.router.request("diagnostics.doctor", {}, DoctorResponseSchema, signal);
+      const raw = await this.options.transport.router.request("diagnostics.doctor", {}, RawDoctorResponseSchema, signal);
+      return {
+        status: raw.status,
+        checks: raw.checks.map(({ repair, ...check }) => {
+          const actionId = DoctorRepairActionIdSchema.safeParse(repair?.actionId);
+          return actionId.success && repair ? { ...check, repair: { actionId: actionId.data, label: repair.label } } : check;
+        }),
+      };
     },
   };
 

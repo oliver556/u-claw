@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ClientIpcEvent, ClientIpcRequest, GatewayStatus, MessageEvent, ToolCall, UClawClient } from "@uclaw/shared";
 
 import { createClientDispatcher, toRendererSafeError } from "../src/ipc/client-dispatcher.js";
+import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 class ControlledIterator<T> implements AsyncIterable<T>, AsyncIterator<T> {
   private readonly waiting: Array<{ resolve(value: IteratorResult<T>): void; reject(error: unknown): void }> = [];
@@ -278,5 +279,69 @@ describe("createClientDispatcher stream ownership", () => {
     stream.fail(new Error("late failure"));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(events).toEqual([]);
+  });
+
+  it("tracks a chat mutation until its background stream actually settles", async () => {
+    const stream = new ControlledIterator<MessageEvent>();
+    let activeWrites = 0;
+    const runMutation = async <T>(operation: () => Promise<T>): Promise<T> => {
+      activeWrites += 1;
+      try { return await operation(); }
+      finally { activeWrites -= 1; }
+    };
+    const dispatcher = createClientDispatcher({
+      client: clientWith({ chat: { list: vi.fn(), get: vi.fn(), watch: vi.fn(), abort: vi.fn(), send: vi.fn(() => stream) } }),
+      sendEvent: vi.fn(),
+      runMutation,
+    });
+
+    const started = dispatcher(request("chat.send", "tracked-send", { sessionId: "session-1", clientRequestId: "tracked-client", blocks: [{ type: "text", text: "hello", format: "plain" }] }));
+    stream.push({ type: "started", runId: "run-tracked", sessionId: "session-1" });
+    await started;
+    expect(activeWrites).toBe(1);
+
+    stream.fail(new Error("stream ended"));
+    await vi.waitFor(() => expect(activeWrites).toBe(0));
+    dispatcher.dispose();
+  });
+
+  it.each([
+    ["chat.abort", { runId: "run-1" }, "abort"],
+    ["approvals.resolve-exec", { approvalId: "approval-1", decision: "allow-once" }, "resolveExec"],
+    ["approvals.resolve-plugin", { approvalId: "approval-1", decision: "allow-once" }, "resolvePlugin"],
+  ] as const)("allows %s to release an active writer while consistency draining", async (method, params, expectedCall) => {
+    const calls = {
+      abort: vi.fn(async () => undefined),
+      resolveExec: vi.fn(async () => undefined),
+      resolvePlugin: vi.fn(async () => undefined),
+    };
+    const coordinator = new ProductionRuntimeConsistencyCoordinator({
+      stop: vi.fn(async () => undefined),
+      start: vi.fn(async () => undefined),
+    });
+    let finishWrite!: () => void;
+    const activeWrite = coordinator.runTrackedWrite(() => new Promise<void>((resolve) => { finishWrite = resolve; }));
+    const dispatcher = createClientDispatcher({
+      client: clientWith({
+        chat: { list: vi.fn(), get: vi.fn(), watch: vi.fn(), send: vi.fn(), abort: calls.abort },
+        approvals: { listPending: vi.fn(), resolveExec: calls.resolveExec, resolvePlugin: calls.resolvePlugin },
+      }),
+      sendEvent: vi.fn(),
+      runMutation: (operation) => coordinator.runTrackedWrite(operation),
+    });
+
+    const leasePending = coordinator.acquireConsistencyLease();
+    await vi.waitFor(() => expect(coordinator.getState().phase).toBe("draining"));
+    const controlPending = dispatcher(request(method, `control-${method}`, params));
+    await Promise.resolve();
+    const calledDuringDrain = calls[expectedCall].mock.calls.length === 1;
+
+    finishWrite();
+    await activeWrite;
+    const lease = await leasePending;
+    await lease.release();
+    await controlPending;
+    dispatcher.dispose();
+    expect(calledDuringDrain).toBe(true);
   });
 });

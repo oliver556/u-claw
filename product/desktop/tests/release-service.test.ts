@@ -53,6 +53,29 @@ async function fixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe("release service", () => {
+  it("tracks background install work until the operation settles", async () => {
+    const runMutation = vi.fn(async <T>(operation: () => Promise<T>) => operation());
+    const setup = await fixture({ runMutation });
+    const checked = await setup.service.check("stable");
+    if (checked.state !== "available" || !checked.update) throw new Error("release preview unavailable");
+    const operation = setup.service.install(checked.update.id, checked.update.previewToken, true);
+
+    await setup.service.wait(operation.id);
+
+    expect(runMutation).toHaveBeenCalledOnce();
+  });
+
+  it("fails a queued install when the consistency coordinator rejects it", async () => {
+    const runMutation = async <T>(_operation: () => Promise<T>): Promise<T> => { throw new Error("runtime unavailable"); };
+    const setup = await fixture({ runMutation });
+    const checked = await setup.service.check("stable");
+    if (checked.state !== "available" || !checked.update) throw new Error("release preview unavailable");
+    const operation = setup.service.install(checked.update.id, checked.update.previewToken, true);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(setup.service.operation(operation.id)).toMatchObject({ state: "failed" });
+  });
+
   it("returns structured available, offline, unavailable, timeout and retry states", async () => {
     const healthy = await fixture();
     expect(await healthy.service.check("stable")).toMatchObject({ state: "available", update: { version: "0.2.0", compatibility: { platform: "win32", arch: "x64" } } });

@@ -51,13 +51,17 @@ interface ConsistencyLease { release(): Promise<void> }
 interface MaintenanceOptions {
   dataDir: string;
   cacheDir: string;
-  acquireConsistencyLease?(): Promise<ConsistencyLease>;
+  acquireConsistencyLease?(signal?: AbortSignal): Promise<ConsistencyLease>;
   beforeBackupCommit?(root: Root, stagingId: string): Promise<void>;
   beforeCleanupMove?(root: Root, safeId: string): Promise<void>;
   beforeFactoryResetDelete?(root: Root, safeId: string): Promise<void>;
+  beforeFactoryResetJournalCleanup?(root: Root, journalId: string): Promise<void>;
+  beforeRestoreWrite?(root: Root, safeId: string): Promise<void>;
+  beforeRestoreRollback?(root: Root): Promise<void>;
   beforeRetentionMove?(root: Root, backupId: string): Promise<void>;
   createId?(prefix: "backup" | "operation" | "preview"): string;
   now?(): Date;
+  runMutation?<T>(operation: () => Promise<T>): Promise<T>;
 }
 interface BackupManifest {
   schemaVersion: 1; id: string; createdAt: string; trigger: "manual" | "automatic"; retainLatest: number;
@@ -263,7 +267,7 @@ export function createMaintenanceService(options: MaintenanceOptions) {
     return startOperation("backup", 0, 0, async (operation, signal) => {
       await assertNoRecoveryState();
       operation.state = "running"; operation.phase = "coordinating"; operation.message = "正在协调 runtime 一致性快照。";
-      const lease = await options.acquireConsistencyLease!();
+      const lease = await options.acquireConsistencyLease!(signal);
       const backupId = createId("backup");
       const stagingId = `backups/.${backupId}.staging`;
       const targetId = `backups/${backupId}`;
@@ -555,7 +559,7 @@ export function createMaintenanceService(options: MaintenanceOptions) {
     return startOperation("restore", 0, 0, async (operation, signal) => {
       await assertNoRecoveryState();
       operation.state = "running"; operation.phase = "coordinating"; operation.message = "正在协调 runtime 并校验恢复目标。";
-      const lease = await options.acquireConsistencyLease!();
+      const lease = await options.acquireConsistencyLease!(signal);
       const rollbackId = `backups/.${operation.id}.rollback`;
       const journalId = `backups/.${operation.id}.restore-journal.json`;
       activeArtifacts.add(basename(rollbackId)); activeArtifacts.add(basename(journalId));
@@ -583,6 +587,7 @@ export function createMaintenanceService(options: MaintenanceOptions) {
           if (signal.aborted) throw safeError("CANCELLED", "恢复已取消。");
           const buffer = await safeRead(file.file);
           if (createHash("sha256").update(buffer).digest("hex") !== file.entry.sha256) throw safeError("CONFLICT", "备份文件在恢复前发生变化。", true);
+          await options.beforeRestoreWrite?.(dataRoot, file.entry.id);
           await dataRoot.write(file.entry.id, buffer, { mkdir: true, mode: 0o600, overwrite: true });
           operation.processedFiles += 1; operation.processedBytes += buffer.length;
         }
@@ -593,6 +598,7 @@ export function createMaintenanceService(options: MaintenanceOptions) {
         operation.phase = "rolling-back"; operation.message = "恢复失败，正在自动回滚。";
         try {
           if (!dataRoot) throw new Error("missing restore root");
+          await options.beforeRestoreRollback?.(dataRoot);
           const affected = new Set(verified?.files.map((file) => file.entry.id) ?? []);
           for (const id of affected) if (await dataRoot.exists(id)) await dataRoot.remove(id);
           const restoreIds = new Set(verified?.files.map((file) => file.entry.id) ?? []);
@@ -675,7 +681,7 @@ export function createMaintenanceService(options: MaintenanceOptions) {
   const executeCleanup = (requested: CleanupCandidateId[], previewToken: string): MaintenanceOperation => {
     const ids = [...new Set(requested)].sort() as CleanupCandidateId[];
     const preview = requirePreview(previewToken, "cleanup", ids);
-    return startOperation("cleanup", 0, 0, async (operation, signal) => {
+    return startOperation("cleanup", 0, 0, (operation, signal) => (options.runMutation ?? ((run) => run()))(async () => {
       await assertNoRecoveryState();
       operation.state = "running"; operation.phase = "scanning"; operation.message = "正在重新校验清理对象。";
       const files = await scanCleanup(ids);
@@ -740,7 +746,7 @@ export function createMaintenanceService(options: MaintenanceOptions) {
       } finally {
         activeArtifacts.delete(quarantineName);
       }
-    });
+    }));
   };
 
   const FACTORY_RESET_IDS = ["openclaw-state", "uclaw-owned-state", "capabilities", "diagnostics", "rebuildable-cache"] as const;
@@ -785,12 +791,17 @@ export function createMaintenanceService(options: MaintenanceOptions) {
     return startOperation("factory-reset", 0, 0, async (operation, signal) => {
       await assertNoRecoveryState(true);
       operation.state = "running"; operation.phase = "coordinating"; operation.message = "正在协调 OpenClaw 停止写入。";
-      const lease = await options.acquireConsistencyLease!();
-      const dataRoot = await pinnedRoot(dataDir, "U 盘数据");
-      const cache = await ownedCacheRoot();
-      const journalDir = `${cache.baseId}/.maintenance`;
-      const journalId = `${journalDir}/.factory-reset-journal.json`;
+      const lease = await options.acquireConsistencyLease!(signal);
+      let cache: Awaited<ReturnType<typeof ownedCacheRoot>> | undefined;
+      let journalId: string | undefined;
+      let clearJournal = false;
+      let finalState: "completed" | "cancelled" | "needs-recovery" | undefined;
+      let finalMessage = "";
       try {
+        const dataRoot = await pinnedRoot(dataDir, "U 盘数据");
+        cache = await ownedCacheRoot();
+        const journalDir = `${cache.baseId}/.maintenance`;
+        journalId = `${journalDir}/.factory-reset-journal.json`;
         const files = await factoryResetInventory();
         if (fingerprint(files) !== preview.fingerprint) throw safeError("CONFLICT", "数据在预览后发生变化，请重新预览。", true);
         operation.totalFiles = files.length; operation.totalBytes = files.reduce((sum, file) => sum + file.size, 0);
@@ -803,7 +814,7 @@ export function createMaintenanceService(options: MaintenanceOptions) {
         }
         operation.phase = "cleaning"; operation.message = "正在删除 U-Claw 自有受控数据。";
         for (const file of files) {
-          if (signal.aborted) { operation.state = "cancelled"; operation.phase = "cancelled"; operation.message = "恢复出厂已取消；未处理对象保持不变。"; break; }
+          if (signal.aborted) { finalState = "cancelled"; finalMessage = "恢复出厂已取消；未处理对象保持不变。"; break; }
           try {
             await options.beforeFactoryResetDelete?.(file.safeRoot, file.safeId);
             await safeRead(file);
@@ -822,15 +833,35 @@ export function createMaintenanceService(options: MaintenanceOptions) {
           const safeId = `${cache.baseId}/${id}`;
           if (await cache.root.exists(safeId).catch(() => false)) await pruneEmptyTree(cache.root, safeId).catch(() => undefined);
         }
-        if (operation.state !== "cancelled") {
-          operation.phase = "restarting"; operation.message = "受控数据已处理，等待应用重启。";
-          operation.state = operation.partialFailures ? "needs-recovery" : "completed";
-          operation.phase = operation.partialFailures ? "needs-recovery" : "completed";
-          operation.message = operation.partialFailures ? "恢复出厂部分失败，需重启后恢复处理。" : "恢复出厂已完成，请重启应用。";
+        operation.phase = "restarting"; operation.message = "受控数据已处理，正在恢复 Managed Gateway。";
+        if (!finalState) {
+          finalState = operation.partialFailures ? "needs-recovery" : "completed";
+          finalMessage = operation.partialFailures ? "恢复出厂部分失败，需重启后恢复处理。" : "恢复出厂已完成，请重启应用。";
         }
-        if (operation.state === "completed") await cache.root.remove(journalId).catch(() => undefined);
+        clearJournal = finalState === "completed";
       } finally {
-        await lease.release();
+        try {
+          await lease.release();
+        } catch {
+          operation.state = "needs-recovery"; operation.phase = "needs-recovery";
+          operation.message = "受控数据已处理，但 Managed Gateway 重启失败；恢复日志已保留。";
+          return;
+        }
+      }
+      if (clearJournal && cache && journalId) {
+        try {
+          await options.beforeFactoryResetJournalCleanup?.(cache.root, journalId);
+          await cache.root.remove(journalId);
+        } catch {
+          operation.state = "needs-recovery"; operation.phase = "needs-recovery";
+          operation.message = "受控数据已处理，但恢复日志清理失败；需人工恢复。";
+          return;
+        }
+      }
+      if (finalState) {
+        operation.state = finalState;
+        operation.phase = finalState;
+        operation.message = finalMessage;
       }
     });
   };
