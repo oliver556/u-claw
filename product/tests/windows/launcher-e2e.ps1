@@ -65,6 +65,8 @@ $unsignedManifestPath = Join-Path $buildRoot 'version.unsigned.json'
 $manifestPath = Join-Path $buildRoot 'version.json'
 $fixturePublicKey = Join-Path $buildRoot 'fixture-public.pem'
 $fixtureTrustedKeys = Join-Path $buildRoot 'fixture-trusted-keys.json'
+$fixtureLicenseDir = Join-Path $buildRoot 'fixture-license'
+$fixtureLicenseTrustedKeys = Join-Path $buildRoot 'fixture-license-trusted-keys.json'
 $fixtureLauncher = Join-Path $buildRoot 'U-Claw-fixture.exe'
 $unicodePrefix = ([string][char]0x4E2D) + ([string][char]0x6587)
 $releaseRoot = Join-Path $workRoot ($unicodePrefix + ' U disk')
@@ -77,6 +79,9 @@ $packageRoot = Join-Path $releaseRoot '.uclaw'
 $dataDirectory = Join-Path $packageRoot 'data'
 $runtimePackageInRelease = Join-Path $packageRoot 'runtime.pkg'
 $versionInRelease = Join-Path $packageRoot 'version.json'
+$licenseDirectory = Join-Path $packageRoot 'license'
+$startupCredentialInRelease = Join-Path $licenseDirectory '.startup-credential.json'
+$licenseInRelease = Join-Path $licenseDirectory 'license.json'
 $originalLocalAppData = $env:LOCALAPPDATA
 $originalHeadless = $env:UCLAW_LAUNCHER_HEADLESS
 $originalHold = $env:UCLAW_FIXTURE_HOLD_MS
@@ -111,9 +116,15 @@ try {
         --trusted-keys $fixtureTrustedKeys
     Assert-True ($LASTEXITCODE -eq 0) 'SIGN_RUNTIME_FIXTURE_FAILED'
     $trustedKeysJson = [IO.File]::ReadAllText($fixtureTrustedKeys).Trim()
+    $signLicenseFixture = Join-Path $repositoryRoot 'product\tests\windows\sign-license-fixture.mjs'
+    & node $signLicenseFixture `
+        --license-dir $fixtureLicenseDir `
+        --trusted-keys $fixtureLicenseTrustedKeys
+    Assert-True ($LASTEXITCODE -eq 0) 'SIGN_LICENSE_FIXTURE_FAILED'
+    $licenseTrustedKeysJson = [IO.File]::ReadAllText($fixtureLicenseTrustedKeys).Trim()
     Push-Location (Join-Path $repositoryRoot 'product\launcher')
     try {
-        & go build -trimpath -ldflags "-s -w -H windowsgui -X main.trustedRuntimeKeys=$trustedKeysJson" -o $fixtureLauncher .
+        & go build -trimpath -tags licensefixture -ldflags "-s -w -H windowsgui -X main.trustedRuntimeKeys=$trustedKeysJson -X main.trustedStartupLicenseKeys=$licenseTrustedKeysJson" -o $fixtureLauncher .
         Assert-True ($LASTEXITCODE -eq 0) 'BUILD_SIGNED_FIXTURE_LAUNCHER_FAILED'
     }
     finally {
@@ -129,10 +140,34 @@ try {
         --public-key $fixturePublicKey `
         --output $releaseRoot
     Assert-True ($LASTEXITCODE -eq 0) 'BUILD_RELEASE_FAILED'
+    [void][IO.Directory]::CreateDirectory($licenseDirectory)
+    Copy-Item -LiteralPath (Join-Path $fixtureLicenseDir '.startup-credential.json') -Destination $startupCredentialInRelease
+    Copy-Item -LiteralPath (Join-Path $fixtureLicenseDir 'license.json') -Destination $licenseInRelease
 
     $env:LOCALAPPDATA = $localAppData
     $env:UCLAW_LAUNCHER_HEADLESS = '1'
     $env:UCLAW_FIXTURE_HOLD_MS = '100'
+
+    $phase = 'MISSING_STARTUP_CREDENTIAL'
+    $credentialOriginal = [IO.File]::ReadAllBytes($startupCredentialInRelease)
+    Remove-Item -LiteralPath $startupCredentialInRelease -Force
+    $missingStartupCredentialRejected = (Invoke-Launcher $launcher $releaseRoot) -ne 0 -and -not (Test-Path -LiteralPath $cacheMarker)
+    Assert-True $missingStartupCredentialRejected 'MISSING_STARTUP_CREDENTIAL_ACCEPTED'
+    [IO.File]::WriteAllBytes($startupCredentialInRelease, $credentialOriginal)
+
+    $phase = 'MISSING_LICENSE'
+    $licenseOriginal = [IO.File]::ReadAllText($licenseInRelease)
+    Remove-Item -LiteralPath $licenseInRelease -Force
+    $missingLicenseRejected = (Invoke-Launcher $launcher $releaseRoot) -ne 0 -and -not (Test-Path -LiteralPath $cacheMarker)
+    Assert-True $missingLicenseRejected 'MISSING_LICENSE_ACCEPTED'
+    Write-Utf8NoBom $licenseInRelease $licenseOriginal
+
+    $phase = 'TAMPERED_LICENSE'
+    $tamperedLicense = $licenseOriginal.Replace('dev_windows_fixture_001', 'dev_windows_fixture_002')
+    Write-Utf8NoBom $licenseInRelease $tamperedLicense
+    $tamperedLicenseRejected = (Invoke-Launcher $launcher $releaseRoot) -ne 0 -and -not (Test-Path -LiteralPath $cacheMarker)
+    Assert-True $tamperedLicenseRejected 'TAMPERED_LICENSE_ACCEPTED'
+    Write-Utf8NoBom $licenseInRelease $licenseOriginal
 
     $phase = 'FIRST_LAUNCH'
     $firstLaunch = (Invoke-Launcher $launcher $releaseRoot) -eq 0
@@ -210,6 +245,9 @@ try {
         unicodeSpacePath = $unicodeSpacePath
         duplicateLaunchRejected = $duplicateLaunchRejected
         dataStayedOnUSB = $dataStayedOnUSB
+        missingStartupCredentialRejected = $missingStartupCredentialRejected
+        missingLicenseRejected = $missingLicenseRejected
+        tamperedLicenseRejected = $tamperedLicenseRejected
     }
     Write-Diagnostics $results
 }

@@ -47,8 +47,13 @@ test("production launcher build requires and injects an Ed25519 trust root", asy
   assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS\)[\s\S]*throw/u);
   assert.match(source, /FromBase64String[\s\S]*Length\s*-ne\s*32/u);
   assert.match(source, /main\.trustedRuntimeKeys=\$trustedKeysJson/u);
+  assert.match(source, /UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
+  assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS\)[\s\S]*throw/u);
+  assert.match(source, /main\.trustedStartupLicenseKeys=\$licenseKeysJson/u);
+  assert.match(source, /\$env:GOFLAGS\s*=\s*''/u);
   assert.match(source, /main\.revokedRuntimeKeyIDs=\$revokedKeyIDsJson/u);
   assert.match(source, /main\.releaseFeedBaseURL=\$releaseBaseURL/u);
+  assert.doesNotMatch(source, /go build[^\n]*-tags\s+licensefixture/iu);
   assert.doesNotMatch(source, /BEGIN (?:OPENSSH |RSA |EC )?PRIVATE KEY/u);
 });
 
@@ -73,10 +78,16 @@ test("PowerShell E2E covers the frozen portable lifecycle", async () => {
     "unicodeSpacePath",
     "duplicateLaunchRejected",
     "dataStayedOnUSB",
+    "missingStartupCredentialRejected",
+    "missingLicenseRejected",
+    "tamperedLicenseRejected",
   ]) {
     assert.match(source, new RegExp(`\\b${check}\\b`, "u"));
   }
   assert.match(source, /UCLAW_LAUNCHER_HEADLESS/u);
+  assert.match(source, /sign-license-fixture\.mjs/u);
+  assert.match(source, /-tags\s+licensefixture/u);
+  assert.match(source, /main\.trustedStartupLicenseKeys=\$licenseTrustedKeysJson/u);
   assert.match(source, /\.partial-/u);
   assert.doesNotMatch(source, /Write-(Host|Verbose|Debug|Warning)|Start-Process[^\n]*-Verb\s+RunAs/iu);
 });

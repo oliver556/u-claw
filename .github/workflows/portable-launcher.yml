@@ -11,6 +11,7 @@ on:
       - 'product/scripts/runtime-manifest*'
       - 'product/tests/packaging/runtime-package.test.mjs'
       - 'product/tests/windows/launcher-e2e.ps1'
+      - 'product/tests/windows/sign-license-fixture.mjs'
       - 'product/tests/windows/fixtures/portable-runtime*.go'
       - 'product/package.json'
       - 'product/package-lock.json'
@@ -67,12 +68,16 @@ jobs:
         shell: pwsh
         env:
           UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS }}
+          UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS }}
           UCLAW_RUNTIME_REVOKED_KEY_IDS: ${{ vars.UCLAW_RUNTIME_REVOKED_KEY_IDS }}
           UCLAW_RELEASE_BASE_URL: ${{ vars.UCLAW_RELEASE_BASE_URL }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ([string]::IsNullOrWhiteSpace($env:UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS)) {
             throw 'UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS is required for production Launcher builds'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS)) {
+            throw 'UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS is required for production Launcher builds'
           }
           if ([string]::IsNullOrWhiteSpace($env:UCLAW_RELEASE_BASE_URL)) {
             throw 'UCLAW_RELEASE_BASE_URL is required for production Launcher builds'
@@ -85,12 +90,20 @@ jobs:
               $keyBytes = [Convert]::FromBase64String($trustedKeys[$keyID])
               if ($keyBytes.Length -ne 32) { throw 'Trusted runtime key must be a raw Ed25519 public key' }
             }
+            $licenseKeys = ConvertFrom-Json $env:UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS -AsHashtable
+            if ($licenseKeys.Count -lt 1 -or $licenseKeys.Count -gt 16) { throw 'Trusted license key count is invalid' }
+            foreach ($keyID in $licenseKeys.Keys) {
+              if ($keyID -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { throw 'Trusted license key ID is invalid' }
+              $keyBytes = [Convert]::FromBase64String($licenseKeys[$keyID])
+              if ($keyBytes.Length -ne 32) { throw 'Trusted license key must be a raw Ed25519 public key' }
+            }
             $revokedKeyIDs = @(ConvertFrom-Json ($env:UCLAW_RUNTIME_REVOKED_KEY_IDS ?? '[]'))
             if ($revokedKeyIDs.Count -gt 64) { throw 'Revoked runtime key count is invalid' }
             foreach ($keyID in $revokedKeyIDs) {
               if ($keyID -isnot [string] -or $keyID -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { throw 'Revoked runtime key ID is invalid' }
             }
             $trustedKeysJson = ConvertTo-Json $trustedKeys -Compress
+            $licenseKeysJson = ConvertTo-Json $licenseKeys -Compress
             $revokedKeyIDsJson = ConvertTo-Json @($revokedKeyIDs) -Compress
             $releaseURI = [Uri]$env:UCLAW_RELEASE_BASE_URL
             if (!$releaseURI.IsAbsoluteUri -or $releaseURI.Scheme -cne 'https' -or $releaseURI.UserInfo -or $releaseURI.Query -or $releaseURI.Fragment) {
@@ -103,6 +116,7 @@ jobs:
           }
           $outputRoot = Join-Path $PWD 'product\.portable-launcher\bin'
           [void][IO.Directory]::CreateDirectory($outputRoot)
+          $env:GOFLAGS = ''
           $env:CGO_ENABLED = '0'
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
@@ -112,7 +126,7 @@ jobs:
             try {
               go run github.com/akavel/rsrc@v0.10.2 -manifest app.manifest -arch amd64 -o rsrc_windows_amd64.syso
               if ($LASTEXITCODE -ne 0) { throw 'Launcher manifest generation failed' }
-              $ldflags = "-s -w -H windowsgui -X 'main.trustedRuntimeKeys=$trustedKeysJson' -X 'main.revokedRuntimeKeyIDs=$revokedKeyIDsJson' -X 'main.releaseFeedBaseURL=$releaseBaseURL'"
+              $ldflags = "-s -w -H windowsgui -X 'main.trustedRuntimeKeys=$trustedKeysJson' -X 'main.trustedStartupLicenseKeys=$licenseKeysJson' -X 'main.revokedRuntimeKeyIDs=$revokedKeyIDsJson' -X 'main.releaseFeedBaseURL=$releaseBaseURL'"
               go build -trimpath -ldflags $ldflags -o (Join-Path $outputRoot 'U-Claw.exe') .
               if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed' }
             }

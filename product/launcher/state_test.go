@@ -199,6 +199,12 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 			}
 			return nil
 		},
+		VerifyLicense: func(packageRoot string, usbRoot string) error {
+			if packageRoot != paths.PackageRoot || usbRoot != paths.USBRoot {
+				t.Fatalf("license paths = %q, %q", packageRoot, usbRoot)
+			}
+			return nil
+		},
 		EnsureHostCache: func(cacheRoot string) error {
 			if cacheRoot != paths.HostCacheRoot {
 				t.Fatalf("host cache root = %q", cacheRoot)
@@ -262,6 +268,7 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 	wantStates := []State{
 		StateStarting,
 		StateValidatingUSB,
+		StateValidatingLicense,
 		StateCheckingRuntime,
 		StateExtractingRuntime,
 		StateStartingApp,
@@ -424,7 +431,7 @@ func TestRunSkipsExtractingStateForReusableRuntime(t *testing.T) {
 	if err := Run(context.Background(), deps); err != nil {
 		t.Fatal(err)
 	}
-	wantStates := []State{StateStarting, StateValidatingUSB, StateCheckingRuntime, StateStartingApp, StateReady}
+	wantStates := []State{StateStarting, StateValidatingUSB, StateValidatingLicense, StateCheckingRuntime, StateStartingApp, StateReady}
 	if !reflect.DeepEqual(reporter.states, wantStates) {
 		t.Fatalf("states = %v", reporter.states)
 	}
@@ -447,6 +454,53 @@ func TestRunMapsFailureWithoutLeakingSensitiveDetails(t *testing.T) {
 	}
 	if !reporter.closed {
 		t.Fatal("reporter was not closed")
+	}
+}
+
+func TestRunRejectsLicenseBeforeLockOrRuntimeWork(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	locked := false
+	readRuntime := false
+	prepared := false
+	started := false
+	deps.VerifyLicense = func(packageRoot string, usbRoot string) error {
+		if packageRoot != deps.Paths.PackageRoot || usbRoot != deps.Paths.USBRoot {
+			t.Fatalf("license paths = %q, %q", packageRoot, usbRoot)
+		}
+		return errors.Join(ErrStartupSecretInvalid, errors.New("secret=must-not-leak device=dev_private"))
+	}
+	deps.AcquireInstanceLock = func(string) (InstanceLock, error) {
+		locked = true
+		return &fakeInstanceLock{}, nil
+	}
+	deps.ReadManifest = func(string) (Manifest, error) {
+		readRuntime = true
+		return validRuntimeManifest(), nil
+	}
+	deps.PrepareRuntime = func(context.Context, string, string, Manifest, func()) (CacheResult, error) {
+		prepared = true
+		return CacheResult{}, nil
+	}
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		started = true
+		return &fakeChildProcess{}, nil
+	}
+
+	err := Run(context.Background(), deps)
+	if !errors.Is(err, ErrStartupSecretInvalid) {
+		t.Fatalf("returned %v", err)
+	}
+	if locked || readRuntime || prepared || started {
+		t.Fatalf("post-license work ran: lock=%v read=%v prepare=%v start=%v", locked, readRuntime, prepared, started)
+	}
+	wantStates := []State{StateStarting, StateValidatingUSB, StateValidatingLicense}
+	if !reflect.DeepEqual(reporter.states, wantStates) {
+		t.Fatalf("states = %v", reporter.states)
+	}
+	wantFailures := [][2]string{{"E_LICENSE_SECRET_INVALID", "启动授权凭据无效，请联系服务人员。"}}
+	if !reflect.DeepEqual(reporter.failures, wantFailures) {
+		t.Fatalf("failures = %#v", reporter.failures)
 	}
 }
 
@@ -688,6 +742,7 @@ func TestStateTextUsesFixedChineseStatus(t *testing.T) {
 	want := map[State]string{
 		StateStarting:          "正在启动 U-Claw...",
 		StateValidatingUSB:     "正在检查 U 盘数据目录...",
+		StateValidatingLicense: "正在验证启动授权...",
 		StateCheckingRuntime:   "正在检查运行环境...",
 		StateExtractingRuntime: "首次启动，正在准备运行环境...",
 		StateStartingApp:       "正在打开 U-Claw...",
@@ -734,5 +789,33 @@ func TestDiagnosticMapsExtractionFailureToCacheFailure(t *testing.T) {
 	code, message := diagnosticFor(ErrExtractionFailed)
 	if code != "E_CACHE_FAILED" || message != "无法准备本机运行缓存，请检查磁盘空间。" {
 		t.Fatalf("diagnostic = %q, %q", code, message)
+	}
+}
+
+func TestDiagnosticMapsLicenseFailuresWithoutSensitiveDetails(t *testing.T) {
+	tests := []struct {
+		err  error
+		code string
+	}{
+		{ErrStartupCredentialMissing, "E_LICENSE_CREDENTIAL_MISSING"},
+		{ErrStartupSecretMissing, "E_LICENSE_SECRET_MISSING"},
+		{ErrStartupSecretInvalid, "E_LICENSE_SECRET_INVALID"},
+		{ErrLicenseFileMissing, "E_LICENSE_FILE_MISSING"},
+		{ErrLicenseFileUnsafe, "E_LICENSE_FILE_UNSAFE"},
+		{ErrLicenseFormatInvalid, "E_LICENSE_FORMAT_INVALID"},
+		{ErrLicenseTrustUnavailable, "E_LICENSE_TRUST_UNAVAILABLE"},
+		{ErrLicenseSignatureInvalid, "E_LICENSE_SIGNATURE_INVALID"},
+		{ErrLicenseDeviceMismatch, "E_LICENSE_DEVICE_MISMATCH"},
+		{ErrLicenseIDMismatch, "E_LICENSE_ID_MISMATCH"},
+		{ErrLicenseUSBIdentityUnavailable, "E_LICENSE_USB_ID_UNAVAILABLE"},
+		{ErrLicenseFingerprintMismatch, "E_LICENSE_USB_MISMATCH"},
+		{ErrLicenseNotYetValid, "E_LICENSE_NOT_YET_VALID"},
+		{ErrLicenseExpired, "E_LICENSE_EXPIRED"},
+	}
+	for _, test := range tests {
+		code, message := diagnosticFor(errors.Join(test.err, errors.New(`C:\Users\private secret=value dev_private`)))
+		if code != test.code || message == "" || strings.Contains(message, "private") || strings.Contains(message, "secret") {
+			t.Fatalf("%v diagnostic = %q, %q", test.err, code, message)
+		}
 	}
 }
