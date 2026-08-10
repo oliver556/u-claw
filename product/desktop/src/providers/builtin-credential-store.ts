@@ -148,15 +148,19 @@ export function createBuiltinCredentialStore({
     }
   }
   const path = `.uclaw/${FILE_NAME}`;
-  const safeRoot = createSafeRoot(dataDir, {
-    symlinks: "reject", hardlinks: "reject", maxBytes: 1024 * 1024, mkdir: true, mode: 0o600,
-  }).catch(() => {
-    throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential root is unsafe.");
-  });
+  let safeRoot: ReturnType<typeof createSafeRoot> | undefined;
+  const getSafeRoot = (): ReturnType<typeof createSafeRoot> => {
+    safeRoot ??= createSafeRoot(dataDir, {
+      symlinks: "reject", hardlinks: "reject", maxBytes: 1024 * 1024, mkdir: true, mode: 0o600,
+    }).catch(() => {
+      throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential root is unsafe.");
+    });
+    return safeRoot;
+  };
   const load = async (requiredMappingStatus?: "active"): Promise<BuiltinModelCredential> => {
     let body: string;
     try {
-      body = await (await safeRoot).readText(path);
+      body = await (await getSafeRoot()).readText(path);
     } catch (error) {
       if (error instanceof FsSafeError && error.code === "not-found") {
         throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_MISSING", "Builtin model credential is not configured.");
@@ -179,7 +183,7 @@ export function createBuiltinCredentialStore({
     async provision(input) {
       const { persisted } = validatePersisted({ schemaVersion: 1, ...input }, allowLoopbackHttp);
       try {
-        await (await safeRoot).write(path, `${JSON.stringify(persisted)}\n`, { mode: 0o600, overwrite: true });
+        await (await getSafeRoot()).write(path, `${JSON.stringify(persisted)}\n`, { mode: 0o600, overwrite: true });
       } catch {
         throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential could not be written safely.");
       }
@@ -188,7 +192,7 @@ export function createBuiltinCredentialStore({
     loadForConnectivityCheck: () => load(),
     async clear() {
       try {
-        await (await safeRoot).remove(path);
+        await (await getSafeRoot()).remove(path);
       } catch (error) {
         if (!(error instanceof FsSafeError) || error.code !== "not-found") throw error;
       }

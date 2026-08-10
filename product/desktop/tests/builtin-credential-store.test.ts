@@ -53,6 +53,26 @@ function provisionInput(endpoint = "http://127.0.0.1:18090/v1") {
 }
 
 describe("builtin credential store", () => {
+  it("does not initialize the credential root until the first I/O operation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "uclaw-builtin-invalid-root-"));
+    roots.push(root);
+    const dataDir = join(root, "plain-file");
+    await writeFile(dataDir, "not a directory");
+
+    createBuiltinCredentialStore({ dataDir });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+
+  it("reports an unsafe credential root on the first load", async () => {
+    const root = await mkdtemp(join(tmpdir(), "uclaw-builtin-invalid-root-"));
+    roots.push(root);
+    const dataDir = join(root, "plain-file");
+    await writeFile(dataDir, "not a directory");
+
+    const store = createBuiltinCredentialStore({ dataDir });
+    await expect(store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
+  });
+
   it("requires pinned filesystem access and rejects Windows before P3-T08", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-builtin-windows-"));
     roots.push(dataDir);
