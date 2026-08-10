@@ -1,0 +1,40 @@
+{
+  "contractVersion": 1,
+  "device": {
+    "deviceId": "dev_fixture_001",
+    "licenseId": "lic_fixture_001",
+    "startupSecretHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "startupSecretSalt": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "usbFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "newApiUserId": "usr_fixture_001",
+    "newApiUsername": "uclaw_fixture_001",
+    "newApiTokenId": "tok_fixture_001",
+    "status": "provisioning",
+    "failure": null,
+    "createdAt": "2026-08-10T00:00:00.000Z",
+    "updatedAt": "2026-08-10T00:00:00.000Z"
+  },
+  "policy": {
+    "quota": { "unit": "tokens", "limit": 100000, "period": "monthly" },
+    "rateLimit": { "requestsPerMinute": 60, "concurrentRequests": 2 },
+    "allowedModels": ["model-fixture"],
+    "disabled": false
+  },
+  "usage": {
+    "userId": "usr_fixture_001",
+    "consumed": 1250,
+    "remaining": 98750,
+    "resetAt": "2026-09-01T00:00:00.000Z",
+    "updatedAt": "2026-08-10T00:00:00.000Z"
+  },
+  "auditEvent": {
+    "id": "aud_fixture_001",
+    "action": "token.revoked",
+    "subjectType": "token",
+    "subjectId": "tok_fixture_001",
+    "deviceId": "dev_fixture_001",
+    "outcome": "succeeded",
+    "errorCategory": null,
+    "createdAt": "2026-08-10T00:00:00.000Z"
+  }
+}

@@ -13,6 +13,7 @@ export * from "./mcp/mcp-store.js";
 export * from "./mcp/mcp-runtime.js";
 export * from "./mcp/mcp-dispatcher.js";
 export * from "./mcp/stdio-policy.js";
+export * from "./new-api-management/index.js";
 export * from "./providers/provider-store.js";
 export * from "./channels/channel-store.js";
 export * from "./channels/channel-dispatcher.js";
