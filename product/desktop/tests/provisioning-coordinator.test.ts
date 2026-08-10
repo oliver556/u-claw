@@ -68,15 +68,31 @@ function setup() {
     policy, createdAt: now, updatedAt: now,
   };
   let token: NewApiIssuedToken | undefined;
+  const issuedLicenses = new Map<string, IssuedLicense>();
 
   const licenseClient: LicenseLifecycleClient = {
-    issueLicense: vi.fn(async () => { events.push("license.issue"); return license(); }),
-    getLicenseStatus: vi.fn(),
+    issueLicense: vi.fn(async () => {
+      events.push("license.issue");
+      const value = license();
+      issuedLicenses.set(value.status.licenseId, value);
+      return value;
+    }),
+    getLicenseStatus: vi.fn(async (licenseId) => {
+      events.push("license.status");
+      return { status: (issuedLicenses.get(licenseId) ?? license(licenseId)).status, receipt: { value: "r".repeat(40) } };
+    }),
     revokeLicense: vi.fn(async (licenseId) => {
       events.push("license.revoke");
       return { status: { ...license().status, licenseId, status: "revoked" as const, revision: 2 }, receipt: { value: "r".repeat(40) } };
     }),
-    reissueLicense: vi.fn(async () => { events.push("license.reissue"); return license("lic_fixture_002", input.usbFingerprint); }),
+    reissueLicense: vi.fn(async (_licenseId, value) => {
+      events.push("license.reissue");
+      const replacement = license("lic_fixture_002", value.usbFingerprint);
+      replacement.status = { ...replacement.status, notBefore: value.notBefore, expiresAt: value.expiresAt };
+      replacement.license = { ...replacement.license, notBefore: value.notBefore, expiresAt: value.expiresAt };
+      issuedLicenses.set(replacement.status.licenseId, replacement);
+      return replacement;
+    }),
   };
   const newApiClient: NewApiManagementClient = {
     createUser: vi.fn(async () => { events.push("user.create"); return { ...user, policy }; }),
@@ -87,17 +103,28 @@ function setup() {
         token: {
           id: `tok_fixture_00${value.generation}`, userId: value.userId, name: value.name,
           channelId: value.channelId, policyDigest: value.policyDigest, generation: value.generation,
-          status: "active", createdAt: now, updatedAt: now,
+          status: "provisioning", createdAt: now, updatedAt: now,
         },
         secret: `fixture-device-token-secret-material-${value.generation}`,
       };
       return token;
+    }),
+    activateToken: vi.fn(async (tokenId) => {
+      events.push("token.activate");
+      if (!token) throw new Error("token missing");
+      token = { ...token, token: { ...token.token, id: tokenId, status: "active", updatedAt: now } };
+      return token.token;
     }),
     createDeviceMapping: vi.fn(async (value) => {
       events.push("mapping.create");
       const { idempotencyKey: _key, ...fields } = value;
       mapping = { ...fields, failure: null, createdAt: now, updatedAt: now };
       return mapping!;
+    }),
+    getDeviceMapping: vi.fn(async () => {
+      events.push("mapping.get");
+      if (!mapping) throw new Error("mapping missing");
+      return mapping;
     }),
     updateDeviceStatus: vi.fn(async (_deviceId, value) => {
       events.push(`mapping.${value.status}`);
@@ -114,6 +141,9 @@ function setup() {
     listAuditEvents: vi.fn(),
   };
   const artifactWriter: ProvisioningArtifactWriter = {
+    acquireLock: vi.fn(async () => async () => undefined),
+    recoverPendingArtifacts: vi.fn(async () => undefined),
+    commitArtifacts: vi.fn(async () => undefined),
     writeJournal: vi.fn(async (value) => { journal = structuredClone(value); events.push(`journal.${value.stage}`); }),
     readJournal: vi.fn(async () => journal === null ? null : structuredClone(journal)),
     writeArtifacts: vi.fn(async () => { events.push("artifacts.write"); }),
@@ -146,10 +176,12 @@ describe("provisioning coordinator", () => {
     });
     expect(context.events).toEqual(expect.arrayContaining([
       "license.issue", "user.create", "policy.bind", "token.create", "mapping.create",
-      "artifacts.write", "artifacts.verify", "mapping.active", "credential.finalize", "artifacts.verify-active",
+      "artifacts.write", "artifacts.verify", "mapping.active", "token.activate", "credential.finalize",
+      "artifacts.verify-active", "license.status", "mapping.get",
     ]));
     expect(context.events.indexOf("artifacts.verify")).toBeLessThan(context.events.indexOf("mapping.active"));
     expect(context.events.indexOf("mapping.active")).toBeLessThan(context.events.indexOf("credential.finalize"));
+    expect(context.events.indexOf("mapping.active")).toBeLessThan(context.events.indexOf("token.activate"));
   });
 
   it("rejects a mismatched remote binding before the next side effect", async () => {
@@ -158,6 +190,16 @@ describe("provisioning coordinator", () => {
     await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH", retryable: false });
     expect(context.newApiClient.createUser).not.toHaveBeenCalled();
     expect(context.licenseClient.revokeLicense).toHaveBeenCalledOnce();
+  });
+
+  it("replays initial license issue when failure happened before a license id was known", async () => {
+    const context = setup();
+    vi.mocked(context.licenseClient.issueLicense).mockRejectedValueOnce(new Error("network unavailable"));
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "LICENSE_FAILED" });
+    expect(context.getJournal()).toMatchObject({ generation: 1, stage: "failed" });
+    await expect(context.coordinator.provision(input)).resolves.toMatchObject({ status: "active" });
+    expect(context.licenseClient.issueLicense).toHaveBeenCalledTimes(2);
+    expect(context.licenseClient.reissueLicense).not.toHaveBeenCalled();
   });
 
   it("serializes same-device requests and replays identical active result", async () => {
@@ -197,6 +239,26 @@ describe("provisioning coordinator", () => {
     expect(context.getJournal()).toMatchObject({ stage: "failed", compensation: { token: "succeeded", license: "succeeded" } });
   });
 
+  it("does not let delayed old-generation compensation mutate a replacement mapping", async () => {
+    const context = setup();
+    const getMapping = vi.mocked(context.newApiClient.getDeviceMapping).getMockImplementation()!;
+    let reads = 0;
+    vi.mocked(context.newApiClient.getDeviceMapping).mockImplementation(async (deviceId) => {
+      const current = await getMapping(deviceId);
+      reads += 1;
+      return reads === 1 ? current : {
+        ...current, generation: 2, licenseId: "lic_fixture_002", newApiTokenId: "tok_fixture_002",
+      };
+    });
+    vi.mocked(context.artifactWriter.finalizeCredential).mockRejectedValueOnce(new Error("write failed"));
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "ARTIFACT_WRITE_FAILED" });
+    const delayedUpdates = vi.mocked(context.newApiClient.updateDeviceStatus).mock.calls
+      .map((call) => call[1])
+      .filter((value) => value.status === "failed");
+    expect(delayedUpdates).toHaveLength(0);
+    expect(context.newApiClient.revokeToken).toHaveBeenCalledWith("tok_fixture_001", expect.anything());
+  });
+
   it("keeps compensation pending when artifact cleanup fails", async () => {
     const context = setup();
     vi.mocked(context.artifactWriter.finalizeCredential).mockRejectedValueOnce(new Error("write failure"));
@@ -215,6 +277,45 @@ describe("provisioning coordinator", () => {
     expect(context.getJournal()).toMatchObject({
       stage: "failed", compensation: { mapping: "not-needed", token: "succeeded", license: "succeeded" },
     });
+  });
+
+  it("recovers an ambiguous mapping commit from the authoritative mapping", async () => {
+    const context = setup();
+    const createMapping = vi.mocked(context.newApiClient.createDeviceMapping).getMockImplementation()!;
+    vi.mocked(context.newApiClient.createDeviceMapping).mockImplementationOnce(async (value) => {
+      await createMapping(value);
+      throw Object.assign(new Error("response lost"), { category: "transport" });
+    });
+    await expect(context.coordinator.provision(input)).resolves.toMatchObject({ status: "active" });
+    expect(context.newApiClient.getDeviceMapping).toHaveBeenCalledWith(input.deviceId);
+  });
+
+  it("journals a created token id before rejecting a mismatched token response", async () => {
+    const context = setup();
+    vi.mocked(context.newApiClient.createToken).mockResolvedValueOnce({
+      token: {
+        id: "tok_mismatch_001", userId: "usr_other_001", name: "wrong", channelId: input.channelId,
+        policyDigest: "d".repeat(64), generation: 1, status: "provisioning", createdAt: now, updatedAt: now,
+      },
+      secret: "fixture-device-token-secret-material-mismatch",
+    });
+    vi.mocked(context.newApiClient.revokeToken).mockResolvedValueOnce({
+      id: "tok_mismatch_001", userId: "usr_other_001", name: "wrong", channelId: input.channelId,
+      policyDigest: "d".repeat(64), generation: 1, status: "revoked", createdAt: now, updatedAt: now,
+    });
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
+    expect(context.getJournal()).toMatchObject({ binding: { newApiTokenId: "tok_mismatch_001" } });
+    expect(context.newApiClient.revokeToken).toHaveBeenCalledWith("tok_mismatch_001", expect.anything());
+  });
+
+  it("fails closed when final authoritative license state does not match", async () => {
+    const context = setup();
+    vi.mocked(context.licenseClient.getLicenseStatus).mockResolvedValueOnce({
+      status: { ...license().status, expiresAt: "2028-08-10T00:00:00.000Z" },
+      receipt: { value: "r".repeat(40) },
+    });
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
+    expect(context.getJournal()).not.toMatchObject({ stage: "active" });
   });
 
   it("keeps compensation pending and retries it from journal", async () => {
@@ -245,6 +346,30 @@ describe("provisioning coordinator", () => {
     expect(context.getJournal()).toMatchObject({ stage: "disabled" });
     await context.coordinator.applyLifecycle({ action: "revoke", idempotencyKey: "lifecycle-revoke-001", binding });
     expect(context.getJournal()).toMatchObject({ stage: "revoked" });
+  });
+
+  it("resumes the same reissue action after the new binding partially fails", async () => {
+    const context = setup();
+    const active = await context.coordinator.provision(input);
+    const binding = {
+      deviceId: active.deviceId, usbFingerprint: active.usbFingerprint, licenseId: active.licenseId,
+      newApiUserId: active.newApiUserId, newApiUsername: active.newApiUsername,
+      newApiTokenId: active.newApiTokenId, channelId: active.channelId,
+    };
+    const action = {
+      action: "reissue" as const, idempotencyKey: "lifecycle-reissue-recover",
+      binding, usbFingerprint: "e".repeat(64), notBefore: input.notBefore,
+      expiresAt: "2028-08-10T00:00:00.000Z",
+    };
+    vi.mocked(context.artifactWriter.writeArtifacts).mockRejectedValueOnce(new Error("disk unavailable"));
+    await expect(context.coordinator.applyLifecycle(action)).rejects.toMatchObject({ retryable: true });
+    expect(context.getJournal()).toMatchObject({
+      stage: "reissuing",
+      lifecycle: { requestHash: expect.any(String), sourceBinding: binding, targetGeneration: 2 },
+    });
+    await expect(context.coordinator.applyLifecycle(action)).resolves.toMatchObject({
+      status: "active", usbFingerprint: action.usbFingerprint,
+    });
   });
 
   it("wraps lifecycle failures in fixed public errors", async () => {

@@ -47,6 +47,10 @@ describe("localhost New API management backend", () => {
     const issued = await client.createToken({
       idempotencyKey: "idem-token-001", userId: user.id, name: "device", channelId, policyDigest, generation: 1,
     });
+    expect(issued.token.status).toBe("provisioning");
+    await expect(client.activateToken(issued.token.id, {
+      idempotencyKey: "idem-activate-too-early", deviceId: "dev_001",
+    })).rejects.toMatchObject({ category: "conflict", code: "TOKEN_MAPPING_INACTIVE" });
     const mapping = await client.createDeviceMapping({
       idempotencyKey: "idem-device-001",
       deviceId: "dev_001",
@@ -59,6 +63,22 @@ describe("localhost New API management backend", () => {
       newApiTokenId: issued.token.id,
       channelId, policyDigest, generation: 1, previousTokenId: null,
       status: "provisioning",
+    });
+    await client.updateDeviceStatus(mapping.deviceId, {
+      idempotencyKey: "idem-device-active", status: "active", expectedStatus: "provisioning",
+      expectedGeneration: 1, expectedLicenseId: mapping.licenseId, expectedTokenId: issued.token.id,
+    });
+    await expect(client.updateDeviceStatus(mapping.deviceId, {
+      idempotencyKey: "idem-device-stale", status: "failed", expectedStatus: "provisioning",
+      expectedGeneration: 1, expectedLicenseId: mapping.licenseId, expectedTokenId: issued.token.id,
+      failure: { code: "STALE", compensation: { tokenId: issued.token.id, status: "pending", attemptedAt: null } },
+    })).rejects.toMatchObject({ category: "conflict", code: "DEVICE_CAS_CONFLICT" });
+    const activated = await client.activateToken(issued.token.id, {
+      idempotencyKey: "idem-token-activate", deviceId: mapping.deviceId,
+    });
+    expect(activated.status).toBe("active");
+    await expect(client.getDeviceMapping(mapping.deviceId)).resolves.toMatchObject({
+      status: "active", newApiTokenId: issued.token.id, channelId, policyDigest, generation: 1,
     });
     server.recordUsage(user.id, 750);
 
@@ -117,6 +137,8 @@ describe("localhost New API management backend", () => {
     const failed = await client.updateDeviceStatus("dev_fail", {
       idempotencyKey: "idem-fail-status",
       status: "failed",
+      expectedStatus: "provisioning", expectedGeneration: 1,
+      expectedLicenseId: "lic_fail", expectedTokenId: issued.token.id,
       failure: { code: "WRITE_FAILED", compensation: { tokenId: issued.token.id, status: "pending", attemptedAt: null } },
     });
     expect(failed).toMatchObject({ status: "failed", failure: { compensation: { status: "pending" } } });
@@ -173,9 +195,21 @@ describe("localhost New API management backend", () => {
     const error = await client.getUsage("usr_fixture_001").catch((caught: unknown) => caught);
     expect(error).toMatchObject({ category: "upstream", code: "UPSTREAM_ERROR" });
     expect(String((error as Error).message)).not.toMatch(/fixture-management-credential|ghp_/u);
+    expect((error as Error).cause).toBeUndefined();
 
     const unavailable = createUnavailableNewApiManagementClient(`Unavailable ${githubCredential}`);
     const unavailableError = await unavailable.getUsage("usr_fixture_001").catch((caught: unknown) => caught);
     expect(String((unavailableError as Error).message)).not.toContain(githubCredential);
+  });
+
+  it("does not retain raw transport errors as causes", async () => {
+    const client = createNewApiManagementClient({
+      endpoint: "https://management.example.test/uclaw-management/v1/",
+      managementCredential: "fixture-management-credential",
+      fetch: async () => { throw new Error("raw transport detail"); },
+    });
+    const error = await client.getUsage("usr_fixture_001").catch((caught: unknown) => caught) as Error;
+    expect(error.name).toBe("NewApiManagementError");
+    expect(error.cause).toBeUndefined();
   });
 });

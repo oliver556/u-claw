@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   NewApiDeviceMappingSchema,
@@ -19,12 +19,17 @@ import {
 import type { BuiltinCredentialStore } from "../providers/builtin-credential-store.js";
 
 const MAX_JSON_BYTES = 1024 * 1024;
+const MAX_BACKUP_BYTES = 5 * MAX_JSON_BYTES;
+const LOCK_STALE_MS = 5 * 60_000;
+const LOCK_WAIT_MS = 10_000;
+const localLockQueues = new Map<string, Promise<void>>();
 
 export type ProvisioningArtifactErrorCode =
   | "ARTIFACT_PATH_UNSAFE"
   | "ARTIFACT_WRITE_FAILED"
   | "ARTIFACT_INVALID"
-  | "JOURNAL_INVALID";
+  | "JOURNAL_INVALID"
+  | "ARTIFACT_LOCKED";
 
 export class ProvisioningArtifactError extends Error {
   constructor(readonly code: ProvisioningArtifactErrorCode, message: string) {
@@ -34,6 +39,8 @@ export class ProvisioningArtifactError extends Error {
 }
 
 export interface ProvisioningArtifactInput {
+  transactionId: string;
+  generation: number;
   startupCredential: {
     schemaVersion: 1;
     deviceId: string;
@@ -48,12 +55,78 @@ export interface ProvisioningArtifactInput {
 }
 
 export interface ProvisioningArtifactWriter {
+  acquireLock(identity: { deviceId: string; requestHash: string }): Promise<() => Promise<void>>;
+  recoverPendingArtifacts(): Promise<void>;
+  commitArtifacts(transactionId: string, generation: number): Promise<void>;
   writeJournal(journal: ProvisioningJournal): Promise<void>;
   readJournal(): Promise<ProvisioningJournal | null>;
   writeArtifacts(input: ProvisioningArtifactInput): Promise<void>;
-  finalizeCredential(input: Omit<ProvisioningArtifactInput, "startupCredential" | "license">): Promise<void>;
+  finalizeCredential(input: Omit<ProvisioningArtifactInput, "transactionId" | "generation" | "startupCredential" | "license">): Promise<void>;
   verifyArtifacts(binding: ProvisioningBinding, requireActive?: boolean): Promise<void>;
   cleanupArtifacts(): Promise<void>;
+}
+
+interface BackupEntry {
+  present: boolean;
+  body: string | null;
+  sha256: string | null;
+}
+
+interface ArtifactBackup {
+  schemaVersion: 1;
+  transactionId: string;
+  generation: number;
+  files: [BackupEntry, BackupEntry, BackupEntry];
+}
+
+function backupEntry(body: Buffer | null): BackupEntry {
+  return body === null
+    ? { present: false, body: null, sha256: null }
+    : { present: true, body: body.toString("base64"), sha256: createHash("sha256").update(body).digest("hex") };
+}
+
+function parseBackup(value: unknown): ArtifactBackup {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("backup");
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).sort().join(",") !== "files,generation,schemaVersion,transactionId"
+      || record.schemaVersion !== 1 || typeof record.transactionId !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u.test(record.transactionId)
+      || typeof record.generation !== "number" || !Number.isSafeInteger(record.generation) || record.generation < 1
+      || !Array.isArray(record.files) || record.files.length !== 3) throw new Error("backup");
+  const files = record.files.map((entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) throw new Error("backup");
+    const item = entry as Record<string, unknown>;
+    if (Object.keys(item).sort().join(",") !== "body,present,sha256") throw new Error("backup");
+    if (item.present === false && item.body === null && item.sha256 === null) return item as unknown as BackupEntry;
+    if (item.present !== true || typeof item.body !== "string" || typeof item.sha256 !== "string"
+        || !/^[a-f0-9]{64}$/u.test(item.sha256)) throw new Error("backup");
+    const body = Buffer.from(item.body, "base64");
+    if (body.toString("base64") !== item.body || createHash("sha256").update(body).digest("hex") !== item.sha256) throw new Error("backup");
+    return item as unknown as BackupEntry;
+  }) as ArtifactBackup["files"];
+  return { schemaVersion: 1, transactionId: record.transactionId, generation: record.generation, files };
+}
+
+async function acquireLocalLock(key: string): Promise<() => void> {
+  const previous = localLockQueues.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolveLock) => { release = resolveLock; });
+  const queued = previous.catch(() => undefined).then(() => current);
+  localLockQueues.set(key, queued);
+  await previous.catch(() => undefined);
+  return () => {
+    release();
+    if (localLockQueues.get(key) === queued) localLockQueues.delete(key);
+  };
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 export interface CreateProvisioningArtifactWriterOptions {
@@ -97,8 +170,8 @@ async function syncDirectory(path: string): Promise<void> {
   }
 }
 
-async function atomicWrite(path: string, body: string): Promise<void> {
-  if (Buffer.byteLength(body) > MAX_JSON_BYTES) {
+async function atomicWrite(path: string, body: string, maxBytes = MAX_JSON_BYTES): Promise<void> {
+  if (Buffer.byteLength(body) > maxBytes) {
     throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact is too large.");
   }
   await assertReplaceable(path);
@@ -138,10 +211,10 @@ async function restore(path: string, body: Buffer | null): Promise<void> {
   await syncDirectory(dirname(path));
 }
 
-async function boundedJson(path: string): Promise<unknown> {
+async function boundedJson(path: string, maxBytes = MAX_JSON_BYTES): Promise<unknown> {
   await assertReplaceable(path);
   const body = await readFile(path);
-  if (body.byteLength > MAX_JSON_BYTES) throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact is too large.");
+  if (body.byteLength > maxBytes) throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact is too large.");
   try {
     return JSON.parse(body.toString("utf8")) as unknown;
   } catch {
@@ -159,13 +232,119 @@ export function createProvisioningArtifactWriter({
   const licensePath = join(licenseDir, "license.json");
   const credentialPath = join(uclawDir, "builtin-model-credential.v1.json");
   const journalPath = join(uclawDir, "provisioning-transaction.v1.json");
+  const lockPath = join(uclawDir, "provisioning.lock");
+  const backupPath = join(uclawDir, "provisioning-artifact-backup.v1.json");
+  const lockKey = resolve(uclawDir);
 
   const prepare = async (): Promise<void> => {
     await assertDirectory(uclawDir);
     await assertDirectory(licenseDir);
   };
+  const artifactPaths = [startupPath, licensePath, credentialPath] as const;
+
+  const restoreBackup = async (backup: ArtifactBackup): Promise<void> => {
+    await prepare();
+    await Promise.all(artifactPaths.map(async (path, index) => {
+      const entry = backup.files[index];
+      await restore(path, entry.present ? Buffer.from(entry.body!, "base64") : null);
+    }));
+    await unlink(backupPath);
+    await syncDirectory(uclawDir);
+  };
 
   return {
+    async acquireLock(identity) {
+      const releaseLocal = await acquireLocalLock(lockKey);
+      const nonce = randomUUID();
+      const startedAt = Date.now();
+      try {
+        await assertDirectory(uclawDir);
+        while (true) {
+          let handle: Awaited<ReturnType<typeof open>> | undefined;
+          try {
+            handle = await open(lockPath, "wx", 0o600);
+            const record = {
+              nonce,
+              pid: process.pid,
+              deviceId: identity.deviceId,
+              requestHash: identity.requestHash,
+              acquiredAt: new Date().toISOString(),
+            };
+            await handle.writeFile(`${JSON.stringify(record)}\n`, "utf8");
+            await handle.sync();
+            await handle.close();
+            handle = undefined;
+            await syncDirectory(uclawDir);
+            break;
+          } catch (error) {
+            await handle?.close().catch(() => undefined);
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+            try {
+              const record = await boundedJson(lockPath) as Record<string, unknown>;
+              const acquiredAt = typeof record.acquiredAt === "string" ? Date.parse(record.acquiredAt) : Number.NaN;
+              const pid = typeof record.pid === "number" && Number.isSafeInteger(record.pid) ? record.pid : -1;
+              if (Number.isFinite(acquiredAt) && Date.now() - acquiredAt > LOCK_STALE_MS && !processIsAlive(pid)) {
+                await unlink(lockPath);
+                await syncDirectory(uclawDir);
+                continue;
+              }
+            } catch (readError) {
+              if ((readError as NodeJS.ErrnoException).code === "ENOENT") continue;
+            }
+            if (Date.now() - startedAt >= LOCK_WAIT_MS) {
+              throw new ProvisioningArtifactError("ARTIFACT_LOCKED", "Provisioning target is locked.");
+            }
+            await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+          }
+        }
+      } catch (error) {
+        releaseLocal();
+        if (error instanceof ProvisioningArtifactError) throw error;
+        throw new ProvisioningArtifactError("ARTIFACT_LOCKED", "Provisioning target lock could not be acquired.");
+      }
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        try {
+          const record = await boundedJson(lockPath) as Record<string, unknown>;
+          if (record.nonce === nonce) {
+            await unlink(lockPath);
+            await syncDirectory(uclawDir);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        } finally {
+          releaseLocal();
+        }
+      };
+    },
+
+    async recoverPendingArtifacts() {
+      try {
+        await restoreBackup(parseBackup(await boundedJson(backupPath, MAX_BACKUP_BYTES)));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        if (error instanceof ProvisioningArtifactError) throw error;
+        throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact backup is invalid.");
+      }
+    },
+
+    async commitArtifacts(transactionId, generation) {
+      try {
+        const backup = parseBackup(await boundedJson(backupPath, MAX_BACKUP_BYTES));
+        if (backup.transactionId !== transactionId || backup.generation !== generation) {
+          throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact backup does not match transaction.");
+        }
+        await unlink(backupPath);
+        await syncDirectory(uclawDir);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        if (error instanceof ProvisioningArtifactError) throw error;
+        throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact backup is invalid.");
+      }
+    },
+
     async writeJournal(value) {
       let journal: ProvisioningJournal;
       try {
@@ -219,14 +398,22 @@ export function createProvisioningArtifactWriter({
         throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact binding is invalid.");
       }
       await prepare();
-      const paths = [startupPath, licensePath, credentialPath] as const;
-      const previous = await Promise.all(paths.map((path) => snapshot(path)));
+      const previous = await Promise.all(artifactPaths.map((path) => snapshot(path)));
+      const backup: ArtifactBackup = {
+        schemaVersion: 1,
+        transactionId: input.transactionId,
+        generation: input.generation,
+        files: previous.map(backupEntry) as ArtifactBackup["files"],
+      };
       try {
+        await atomicWrite(backupPath, `${JSON.stringify(backup)}\n`, MAX_BACKUP_BYTES);
         await atomicWrite(startupPath, `${JSON.stringify(startup)}\n`);
         await atomicWrite(licensePath, `${JSON.stringify(license)}\n`);
         await credentialStore.provision({ endpoint: input.endpoint, model: input.model, mapping, issuedToken });
       } catch {
-        await Promise.all(paths.map((path, index) => restore(path, previous[index] ?? null)));
+        await Promise.all(artifactPaths.map((path, index) => restore(path, previous[index] ?? null)));
+        await unlink(backupPath).catch(() => undefined);
+        await syncDirectory(uclawDir);
         throw new ProvisioningArtifactError("ARTIFACT_WRITE_FAILED", "Provisioning artifacts could not be written.");
       }
     },
@@ -264,6 +451,12 @@ export function createProvisioningArtifactWriter({
     },
 
     async cleanupArtifacts() {
+      try {
+        await restoreBackup(parseBackup(await boundedJson(backupPath, MAX_BACKUP_BYTES)));
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
       await Promise.all([startupPath, licensePath, credentialPath].map((path) => unlink(path).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;
       })));

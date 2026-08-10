@@ -71,6 +71,7 @@ describe("provisioning identity contract", () => {
         license: "pending" as const,
         artifacts: "pending" as const,
       },
+      lifecycle: null,
       createdAt: "2026-08-10T00:00:00.000Z",
       updatedAt: "2026-08-10T00:01:00.000Z",
     };

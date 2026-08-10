@@ -113,6 +113,7 @@ describe("builtin credential store", () => {
     await expect(store.provision({
       ...input,
       mapping: { ...input.mapping, status: "provisioning" },
+      issuedToken: { ...input.issuedToken, token: { ...input.issuedToken.token, status: "provisioning" } },
     })).resolves.toBeUndefined();
     await expect(store.loadForConnectivityCheck()).resolves.toMatchObject({ tokenId: input.issuedToken.token.id });
     await expect(store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });

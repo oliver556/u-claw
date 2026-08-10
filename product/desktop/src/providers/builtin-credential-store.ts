@@ -96,7 +96,8 @@ function validatePersisted(
   if (!mapping.success || !issuedToken.success
       || (mapping.data.status !== "provisioning" && mapping.data.status !== "active")
       || (requiredMappingStatus !== undefined && mapping.data.status !== requiredMappingStatus)
-      || issuedToken.data.token.status !== "active"
+      || (mapping.data.status === "provisioning" && issuedToken.data.token.status !== "provisioning")
+      || (mapping.data.status === "active" && issuedToken.data.token.status !== "active")
       || mapping.data.newApiUserId !== issuedToken.data.token.userId
       || mapping.data.newApiTokenId !== issuedToken.data.token.id
       || mapping.data.channelId !== issuedToken.data.token.channelId
