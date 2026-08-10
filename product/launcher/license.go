@@ -85,80 +85,100 @@ type licenseVerificationOptions struct {
 	TrustedPublicKeys map[string]ed25519.PublicKey
 }
 
+type verifiedLicenseMaterial struct {
+	DeviceID       string
+	LicenseID      string
+	StartupSecret  string
+	USBFingerprint string
+	ExpiresAt      time.Time
+}
+
 func VerifyStartupLicense(options licenseVerificationOptions) error {
+	_, err := VerifyStartupLicenseMaterial(options)
+	return err
+}
+
+func VerifyStartupLicenseMaterial(options licenseVerificationOptions) (verifiedLicenseMaterial, error) {
+	fail := func(err error) (verifiedLicenseMaterial, error) { return verifiedLicenseMaterial{}, err }
 	if !filepath.IsAbs(options.PackageRoot) || options.Now == nil || options.ReadFingerprint == nil {
-		return ErrLicenseFormatInvalid
+		return fail(ErrLicenseFormatInvalid)
 	}
 	var credential startupCredential
 	if err := readStrictLicenseJSON(options.PackageRoot, startupCredentialFilename, ErrStartupCredentialMissing, &credential); err != nil {
-		return err
+		return fail(err)
 	}
 	if credential.SchemaVersion != 1 {
-		return ErrLicenseFormatInvalid
+		return fail(ErrLicenseFormatInvalid)
 	}
 	if credential.StartupSecret == "" {
-		return ErrStartupSecretMissing
+		return fail(ErrStartupSecretMissing)
 	}
 	if !validLicenseIdentifier(credential.DeviceID) || !validLicenseIdentifier(credential.LicenseID) ||
 		utf8.RuneCountInString(credential.StartupSecret) < 32 || utf8.RuneCountInString(credential.StartupSecret) > 512 ||
 		strings.IndexFunc(credential.StartupSecret, func(value rune) bool { return value < 0x20 || value == 0x7f }) >= 0 {
-		return ErrLicenseFormatInvalid
+		return fail(ErrLicenseFormatInvalid)
 	}
 
 	var license startupLicense
 	if err := readStrictLicenseJSON(options.PackageRoot, licenseFilename, ErrLicenseFileMissing, &license); err != nil {
-		return err
+		return fail(err)
 	}
 	if err := validateStartupLicense(license); err != nil {
-		return err
+		return fail(err)
 	}
 	if len(options.TrustedPublicKeys) == 0 {
-		return ErrLicenseTrustUnavailable
+		return fail(ErrLicenseTrustUnavailable)
 	}
 	publicKey, ok := options.TrustedPublicKeys[license.Signature.KeyID]
 	if !ok || len(publicKey) != ed25519.PublicKeySize {
-		return ErrLicenseSignatureInvalid
+		return fail(ErrLicenseSignatureInvalid)
 	}
 	signature, err := base64.StdEncoding.DecodeString(license.Signature.Value)
 	if err != nil || len(signature) != ed25519.SignatureSize {
-		return ErrLicenseSignatureInvalid
+		return fail(ErrLicenseSignatureInvalid)
 	}
 	payload, err := licenseSigningPayload(license)
 	if err != nil || !ed25519.Verify(publicKey, payload, signature) {
-		return ErrLicenseSignatureInvalid
+		return fail(ErrLicenseSignatureInvalid)
 	}
 	if license.DeviceID != credential.DeviceID {
-		return ErrLicenseDeviceMismatch
+		return fail(ErrLicenseDeviceMismatch)
 	}
 	if license.LicenseID != credential.LicenseID {
-		return ErrLicenseIDMismatch
+		return fail(ErrLicenseIDMismatch)
 	}
 	salt, err := hex.DecodeString(license.StartupSecretProof.StartupSecretSalt)
 	if err != nil {
-		return ErrLicenseFormatInvalid
+		return fail(ErrLicenseFormatInvalid)
 	}
 	actualSecretHash := startupSecretDigest(credential.StartupSecret, salt)
 	if subtle.ConstantTimeCompare([]byte(actualSecretHash), []byte(license.StartupSecretProof.StartupSecretHash)) != 1 {
-		return ErrStartupSecretInvalid
+		return fail(ErrStartupSecretInvalid)
 	}
 	now := options.Now().UTC()
 	notBefore, _ := time.Parse(time.RFC3339, license.NotBefore)
 	expiresAt, _ := time.Parse(time.RFC3339, license.ExpiresAt)
 	if now.Before(notBefore) {
-		return ErrLicenseNotYetValid
+		return fail(ErrLicenseNotYetValid)
 	}
 	if !now.Before(expiresAt) {
-		return ErrLicenseExpired
+		return fail(ErrLicenseExpired)
 	}
 	fingerprint, err := options.ReadFingerprint(options.USBRoot)
 	if err != nil {
-		return ErrLicenseUSBIdentityUnavailable
+		return fail(ErrLicenseUSBIdentityUnavailable)
 	}
 	if fingerprint.Scheme != license.USBFingerprint.Scheme ||
 		subtle.ConstantTimeCompare([]byte(fingerprint.SHA256), []byte(license.USBFingerprint.SHA256)) != 1 {
-		return ErrLicenseFingerprintMismatch
+		return fail(ErrLicenseFingerprintMismatch)
 	}
-	return nil
+	return verifiedLicenseMaterial{
+		DeviceID:       credential.DeviceID,
+		LicenseID:      credential.LicenseID,
+		StartupSecret:  credential.StartupSecret,
+		USBFingerprint: fingerprint.SHA256,
+		ExpiresAt:      expiresAt,
+	}, nil
 }
 
 func readStrictLicenseJSON(packageRoot string, filename string, missing error, output any) error {

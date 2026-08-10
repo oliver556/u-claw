@@ -6,6 +6,7 @@ export * from "./gateway/startup.js";
 export * from "./ipc/channels.js";
 export * from "./ipc/preload-bridge.js";
 export * from "./ipc/register-ipc.js";
+export * from "./license-lifecycle/index.js";
 export * from "./main.js";
 export * from "./data/data-service.js";
 export * from "./diagnostics/diagnostics-service.js";

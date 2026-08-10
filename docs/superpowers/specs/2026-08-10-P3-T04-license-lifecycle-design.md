@@ -13,7 +13,7 @@
 1. Node localhost server 是 issuer/server test boundary。测试启动时从调用方注入临时 Ed25519 私钥；私钥不进入客户端、Launcher、fixture、环境变量、日志或仓库。
 2. 服务端记录许可证状态与单调 revision，签发 Ed25519 `license.json` 和 opaque signed status receipt。客户端只持公钥；contract 不暴露独立 signature 字段。
 3. Launcher 先完成 `P3-T03` 本地验签，再在线查询；只有在线 `active` 或满足冻结规则的离线缓存才能继续。
-4. 状态回执由服务端签名；落盘缓存使用 startup secret 独立 domain 派生的 AEAD key 加密回执，并认证时钟元数据。任一认证失败、时钟回拨或超窗都 fail-closed。
+4. 状态回执由服务端签名；U 盘缓存使用 startup secret 独立 domain 派生的 AEAD key 加密回执，并认证时钟元数据。主机侧另存独立 HMAC authorization anchor，锁定最高 revision、状态和最后观察时间，防止旧 U 盘缓存整体回滚。任一认证失败、时钟回拨、anchor/cache 不一致或超窗都 fail-closed。
 
 不采用“只信本地 license 签名”：签名只证明授权曾被签发，不能证明当前仍为 `active`。不采用无限期或客户端配置 grace：会让撤销无法有界传播。
 
@@ -73,9 +73,9 @@ ProbeDataDirectory
 effectiveGraceUntil = min(receipt.graceUntil, receipt.checkedAt + 24h, license.expiresAt)
 ```
 
-必须同时满足：最近一次成功在线回执状态为 `active`；服务端 Ed25519 回执签名有效；本地 `license.json` 签名和绑定仍有效；缓存 startup secret AEAD 认证有效；`now >= checkedAt`；`now >= lastObservedAt`；`now < effectiveGraceUntil`。首次启动无缓存、缓存状态不是 active、回执重放超窗、缓存字段篡改或时钟回拨全部拒绝。
+必须同时满足：最近一次成功在线回执状态为 `active`；服务端 Ed25519 回执签名有效；本地 `license.json` 签名和绑定仍有效；缓存 startup secret AEAD 认证有效；主机 authorization anchor 的 HMAC 有效；anchor/cache 的 revision、状态和 `lastObservedAt` 精确一致；`now >= checkedAt`；`now >= lastObservedAt`；`now < effectiveGraceUntil`。首次启动无缓存或无 anchor、缓存状态不是 active、回执重放超窗、缓存/anchor 篡改或时钟回拨全部拒绝。
 
-每次检查在进入 runtime 前原子更新 AEAD 保护的 `lastObservedAt`。收到 `revoked` 或 `reissued` 后先原子持久化终态缓存，再拒绝；离线逻辑从不接受终态缓存。撤销在客户端持续离线且尚未查询到撤销时，最坏传播上限为最后一次 active 在线确认后的 24 小时。
+每次检查在进入 runtime 前先原子更新主机 anchor，再原子更新 U 盘 AEAD cache；任一步失败都拒绝，后续不一致继续 fail-closed。收到 `revoked` 或 `reissued` 后先持久化终态 anchor/cache，再拒绝；离线逻辑从不接受终态。撤销在客户端持续离线且尚未查询到撤销时，最坏传播上限为最后一次 active 在线确认后的 24 小时。
 
 ## 文件与信任边界
 
@@ -85,7 +85,13 @@ effectiveGraceUntil = min(receipt.graceUntil, receipt.checkedAt + 24h, license.e
 .uclaw/license/.lifecycle-cache.json
 ```
 
-缓存外层只包含 v1 schema、随机 nonce、加密 payload 和认证 tag。加密 payload 内含 opaque signed receipt、`lastObservedAt` 和必要绑定值；key 从 startup secret 经独立 domain 派生，不复用 secret proof。磁盘上不出现 startup secret、设备 Token、完整 USB 指纹、明文签名或 Authorization。文件沿用 `P3-T03` 的有界、handle-bound、拒绝 symlink/hardlink/未知字段读取；更新使用同目录临时文件、flush、rename，不在错误中暴露路径或底层内容。
+主机 authorization anchor：
+
+```text
+HostCacheRoot/license-anchors/<sha256(licenseId,deviceId)>.json
+```
+
+U 盘缓存外层只包含 v1 schema、随机 nonce、加密 payload 和认证 tag。加密 payload 内含 opaque signed receipt、`lastObservedAt` 和必要绑定值；key 从 startup secret 经独立 domain 派生，不复用 secret proof。主机 anchor 只包含最高 revision、状态、`lastObservedAt` 和独立 domain HMAC，不含 receipt、签名、secret 或指纹。两者都使用有界、handle-bound、拒绝 symlink/hardlink/未知字段读取，并以同目录临时文件、flush、rename 原子更新。authorization anchor 属于 gate state，不是可复用 runtime cache；错误不暴露路径或底层内容。
 
 生产 lifecycle endpoint 必须为 HTTPS。未配置 endpoint、无状态回执公钥或无本地授权全部 fail-closed。localhost HTTP 仅由显式测试依赖注入允许；生产配置不能放宽。
 

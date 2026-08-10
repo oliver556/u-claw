@@ -82,6 +82,7 @@ $versionInRelease = Join-Path $packageRoot 'version.json'
 $licenseDirectory = Join-Path $packageRoot 'license'
 $startupCredentialInRelease = Join-Path $licenseDirectory '.startup-credential.json'
 $licenseInRelease = Join-Path $licenseDirectory 'license.json'
+$licenseStatusInRelease = Join-Path $licenseDirectory '.status-response.json'
 $originalLocalAppData = $env:LOCALAPPDATA
 $originalHeadless = $env:UCLAW_LAUNCHER_HEADLESS
 $originalHold = $env:UCLAW_FIXTURE_HOLD_MS
@@ -122,9 +123,10 @@ try {
         --trusted-keys $fixtureLicenseTrustedKeys
     Assert-True ($LASTEXITCODE -eq 0) 'SIGN_LICENSE_FIXTURE_FAILED'
     $licenseTrustedKeysJson = [IO.File]::ReadAllText($fixtureLicenseTrustedKeys).Trim()
+    $licenseStatusTrustedKeysJson = $licenseTrustedKeysJson
     Push-Location (Join-Path $repositoryRoot 'product\launcher')
     try {
-        & go build -trimpath -tags licensefixture -ldflags "-s -w -H windowsgui -X main.trustedRuntimeKeys=$trustedKeysJson -X main.trustedStartupLicenseKeys=$licenseTrustedKeysJson" -o $fixtureLauncher .
+        & go build -trimpath -tags licensefixture -ldflags "-s -w -H windowsgui -X main.trustedRuntimeKeys=$trustedKeysJson -X main.trustedStartupLicenseKeys=$licenseTrustedKeysJson -X main.trustedLicenseStatusKeys=$licenseStatusTrustedKeysJson" -o $fixtureLauncher .
         Assert-True ($LASTEXITCODE -eq 0) 'BUILD_SIGNED_FIXTURE_LAUNCHER_FAILED'
     }
     finally {
@@ -143,6 +145,7 @@ try {
     [void][IO.Directory]::CreateDirectory($licenseDirectory)
     Copy-Item -LiteralPath (Join-Path $fixtureLicenseDir '.startup-credential.json') -Destination $startupCredentialInRelease
     Copy-Item -LiteralPath (Join-Path $fixtureLicenseDir 'license.json') -Destination $licenseInRelease
+    Copy-Item -LiteralPath (Join-Path $fixtureLicenseDir '.status-response.json') -Destination $licenseStatusInRelease
 
     $env:LOCALAPPDATA = $localAppData
     $env:UCLAW_LAUNCHER_HEADLESS = '1'

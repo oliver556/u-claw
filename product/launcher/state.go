@@ -274,6 +274,34 @@ func diagnosticFor(err error) (string, string) {
 		return "E_LICENSE_NOT_YET_VALID", "授权尚未生效，请联系服务人员。"
 	case errors.Is(err, ErrLicenseExpired):
 		return "E_LICENSE_EXPIRED", "授权已过期，请联系服务人员。"
+	case errors.Is(err, ErrLicenseStatusUnavailable), errors.Is(err, ErrLicenseLifecycleConfigAbsent):
+		return "E_LICENSE_STATUS_UNAVAILABLE", "无法确认许可证在线状态，且没有可用的离线授权。"
+	case errors.Is(err, ErrLicenseStatusAuthentication):
+		return "E_LICENSE_STATUS_AUTH_FAILED", "许可证在线认证失败，请联系服务人员。"
+	case errors.Is(err, ErrLicenseStatusResponseInvalid):
+		return "E_LICENSE_STATUS_INVALID", "许可证在线状态响应无效，请联系服务人员。"
+	case errors.Is(err, ErrLicenseStatusReceiptInvalid):
+		return "E_LICENSE_STATUS_SIGNATURE_INVALID", "许可证状态回执无效，请联系服务人员。"
+	case errors.Is(err, ErrLicenseStatusDeviceMismatch):
+		return "E_LICENSE_STATUS_DEVICE_MISMATCH", "许可证状态设备不匹配，请联系服务人员。"
+	case errors.Is(err, ErrLicenseStatusLicenseMismatch):
+		return "E_LICENSE_STATUS_LICENSE_MISMATCH", "许可证状态标识不匹配，请联系服务人员。"
+	case errors.Is(err, ErrLicenseOfflineCacheMissing):
+		return "E_LICENSE_OFFLINE_FIRST_START", "首次启动需要联网确认许可证状态。"
+	case errors.Is(err, ErrLicenseOfflineCacheInvalid):
+		return "E_LICENSE_CACHE_INVALID", "许可证离线缓存无效，请联网重试。"
+	case errors.Is(err, ErrLicenseClockRollback):
+		return "E_LICENSE_CLOCK_ROLLBACK", "检测到系统时间回拨，请校准时间后联网重试。"
+	case errors.Is(err, ErrLicenseOfflineGraceExpired):
+		return "E_LICENSE_OFFLINE_GRACE_EXPIRED", "许可证离线有效期已结束，请联网确认。"
+	case errors.Is(err, ErrLicenseProvisioning):
+		return "E_LICENSE_PROVISIONING", "许可证仍在签发中，请稍后重试。"
+	case errors.Is(err, ErrLicenseRevoked):
+		return "E_LICENSE_REVOKED", "许可证已撤销，请联系服务人员。"
+	case errors.Is(err, ErrLicenseReissued):
+		return "E_LICENSE_REISSUED", "许可证已重制，请使用新的授权介质。"
+	case errors.Is(err, ErrLicenseDisabled):
+		return "E_LICENSE_DISABLED", "许可证已停用，请联系服务人员。"
 	case errors.Is(err, ErrInstanceRunning):
 		return "E_INSTANCE_RUNNING", "U-Claw 已在使用这个 U 盘数据目录。"
 	case errors.Is(err, ErrUSBDisconnected):

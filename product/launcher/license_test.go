@@ -117,6 +117,31 @@ func TestVerifyStartupLicenseAcceptsValidSignedAuthorization(t *testing.T) {
 	}
 }
 
+func TestVerifyStartupLicenseMaterialReturnsOnlyVerifiedLifecycleInputs(t *testing.T) {
+	fixture := newLicenseFixture(t)
+	fixture.sign(t)
+	fixture.write(t)
+	material, err := VerifyStartupLicenseMaterial(licenseVerificationOptions{
+		PackageRoot: fixture.root,
+		Now:         func() time.Time { return fixture.now },
+		ReadFingerprint: func(string) (usbFingerprint, error) {
+			return usbFingerprint{Scheme: "uclaw-usb-v1", SHA256: strings.Repeat("a", 64)}, nil
+		},
+		USBRoot:           `C:\产品盘`,
+		TrustedPublicKeys: map[string]ed25519.PublicKey{"test-license-key": fixture.publicKey},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if material.DeviceID != fixture.credential.DeviceID || material.LicenseID != fixture.credential.LicenseID ||
+		material.StartupSecret != fixture.credential.StartupSecret || !material.ExpiresAt.Equal(fixture.now.Add(time.Hour)) {
+		t.Fatalf("unexpected verified material: %#v", material)
+	}
+	if material.USBFingerprint != fixture.license.USBFingerprint.SHA256 {
+		t.Fatalf("lifecycle binding material missing: %#v", material)
+	}
+}
+
 func TestVerifyStartupLicenseRejectsUnsupportedCredentialSchema(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
 		fixture := newLicenseFixture(t)

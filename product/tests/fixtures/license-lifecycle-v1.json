@@ -1,0 +1,27 @@
+{
+  "contractVersion": 1,
+  "status": {
+    "licenseId": "lic_fixture_001",
+    "deviceId": "dev_fixture_001",
+    "status": "active",
+    "revision": 1,
+    "notBefore": "2026-08-10T00:00:00.000Z",
+    "expiresAt": "2027-08-10T00:00:00.000Z",
+    "replacementLicenseId": null,
+    "updatedAt": "2026-08-10T00:00:00.000Z"
+  },
+  "receipt": {
+    "value": "uclaw_receipt_fixture_opaque_001"
+  },
+  "auditEvent": {
+    "id": "aud_fixture_001",
+    "action": "license.issued",
+    "licenseId": "lic_fixture_001",
+    "deviceId": "dev_fixture_001",
+    "status": "active",
+    "revision": 1,
+    "outcome": "succeeded",
+    "errorCategory": null,
+    "createdAt": "2026-08-10T00:00:00.000Z"
+  }
+}
