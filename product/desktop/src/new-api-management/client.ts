@@ -95,6 +95,10 @@ export function createUnavailableNewApiManagementClient(reason: string): NewApiM
     throw new NewApiManagementError("unavailable", "ENDPOINT_NOT_CONFIGURED", message, false);
   };
   return {
+    getServiceStatus: unavailable,
+    updateServiceStatus: unavailable,
+    getDeviceControls: unavailable,
+    updateDeviceControls: unavailable,
     createUser: unavailable,
     getUser: unavailable,
     createToken: unavailable,
@@ -163,7 +167,19 @@ export function createNewApiManagementClient(options: NewApiManagementClientOpti
   };
 
   const id = (value: string): string => encodeURIComponent(ResourceIdSchema.parse(value));
+  const operationsUnavailable = async (): Promise<never> => {
+    throw new NewApiManagementError(
+      "unavailable",
+      "OPERATIONS_NOT_IMPLEMENTED",
+      "Builtin service operations are not implemented.",
+      false,
+    );
+  };
   return {
+    getServiceStatus: operationsUnavailable,
+    updateServiceStatus: operationsUnavailable,
+    getDeviceControls: operationsUnavailable,
+    updateDeviceControls: operationsUnavailable,
     async createUser(input) {
       const parsed = NewApiCreateUserInputSchema.parse(input);
       const { idempotencyKey, ...body } = parsed;

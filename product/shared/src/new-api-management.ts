@@ -1,6 +1,13 @@
 import { z } from "zod";
 
 import { RendererSafeTextSchema } from "./errors.js";
+import type {
+  BuiltinDeviceControls,
+  BuiltinDeviceControlsUpdate,
+  BuiltinDeviceLocator,
+  BuiltinServiceStatus,
+  BuiltinServiceStatusUpdate,
+} from "./builtin-service-operations.js";
 
 export const NEW_API_MANAGEMENT_CONTRACT_VERSION = 1 as const;
 
@@ -225,6 +232,10 @@ export const NewApiAuditPageSchema = z.object({
 export type NewApiAuditPage = z.infer<typeof NewApiAuditPageSchema>;
 
 export interface NewApiManagementClient {
+  getServiceStatus(): Promise<BuiltinServiceStatus>;
+  updateServiceStatus(input: BuiltinServiceStatusUpdate): Promise<BuiltinServiceStatus>;
+  getDeviceControls(locator: BuiltinDeviceLocator): Promise<BuiltinDeviceControls>;
+  updateDeviceControls(locator: BuiltinDeviceLocator, input: BuiltinDeviceControlsUpdate): Promise<BuiltinDeviceControls>;
   createUser(input: NewApiCreateUserInput): Promise<NewApiUser>;
   getUser(userId: string): Promise<NewApiUser>;
   createToken(input: NewApiCreateTokenInput): Promise<NewApiIssuedToken>;
