@@ -31,6 +31,38 @@ describe("New API management v1 contract", () => {
     expect(JSON.stringify(device)).not.toMatch(/startupSecret":|tokenSecret|authorization|upstreamKey/iu);
   });
 
+  it("requires token and mapping channel-policy binding with attempt generation", () => {
+    const policyDigest = "d".repeat(64);
+    const tokenInput = {
+      idempotencyKey: "idem-token-binding-001",
+      userId: "usr_fixture_001",
+      name: "device",
+      channelId: "channel_builtin_001",
+      policyDigest,
+      generation: 1,
+    };
+    expect(shared.NewApiCreateTokenInputSchema.parse(tokenInput)).toEqual(tokenInput);
+    expect(() => shared.NewApiCreateTokenInputSchema.parse({
+      idempotencyKey: tokenInput.idempotencyKey, userId: tokenInput.userId, name: tokenInput.name,
+    })).toThrow();
+
+    const mappingInput = {
+      idempotencyKey: "idem-mapping-binding-001",
+      ...fixture.device,
+      channelId: tokenInput.channelId,
+      policyDigest,
+      generation: 1,
+      previousTokenId: null,
+    };
+    delete (mappingInput as Record<string, unknown>).failure;
+    delete (mappingInput as Record<string, unknown>).createdAt;
+    delete (mappingInput as Record<string, unknown>).updatedAt;
+    expect(shared.NewApiCreateDeviceMappingInputSchema.parse(mappingInput)).toEqual(mappingInput);
+    expect(() => shared.NewApiCreateDeviceMappingInputSchema.parse({
+      ...mappingInput, channelId: "channel_other_001",
+    })).not.toThrow();
+  });
+
   it("expresses failed provisioning and pending token compensation", () => {
     expect(shared.NewApiDeviceMappingSchema.parse({
       ...fixture.device,

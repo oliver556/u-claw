@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -31,13 +31,21 @@ function provisionInput(endpoint = "http://127.0.0.1:18090/v1") {
     newApiUserId: userId,
     newApiUsername: `user_${suffix}`,
     newApiTokenId: tokenId,
+    channelId: "channel_builtin_001",
+    policyDigest: "d".repeat(64),
+    generation: 1,
+    previousTokenId: null,
     status: "active",
     failure: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
   const issuedToken: NewApiIssuedToken = {
-    token: { id: tokenId, userId, name: "device", status: "active", createdAt: timestamp, updatedAt: timestamp },
+    token: {
+      id: tokenId, userId, name: "device", channelId: mapping.channelId,
+      policyDigest: mapping.policyDigest, generation: mapping.generation,
+      status: "active", createdAt: timestamp, updatedAt: timestamp,
+    },
     secret: randomBytes(32).toString("base64url"),
   };
   return { endpoint, model: "builtin-model", mapping, issuedToken };
@@ -82,6 +90,21 @@ describe("builtin credential store", () => {
       ...input,
       issuedToken: { ...input.issuedToken, token: { ...input.issuedToken.token, status: "revoked" } },
     })).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
+    await expect(store.provision({
+      ...input,
+      issuedToken: { ...input.issuedToken, token: { ...input.issuedToken.token, channelId: "channel_other_001" } },
+    })).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
+  });
+
+  it("rejects a hardlinked credential target", async () => {
+    const { dataDir, store } = await setup();
+    const uclawDir = join(dataDir, ".uclaw");
+    await mkdir(uclawDir, { recursive: true });
+    const source = join(dataDir, "linked-secret.json");
+    await writeFile(source, "preserve-me", { mode: 0o600 });
+    await link(source, join(uclawDir, "builtin-model-credential.v1.json"));
+    await expect(store.provision(provisionInput())).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
+    expect(await readFile(source, "utf8")).toBe("preserve-me");
   });
 
   it("allows provisioning credentials for the pre-activation connectivity gate", async () => {

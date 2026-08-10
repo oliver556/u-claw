@@ -17,6 +17,7 @@ export interface LicenseLifecycleClientOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
   maxResponseBytes?: number;
+  allowLoopbackHttp?: boolean;
 }
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -36,13 +37,13 @@ export class LicenseLifecycleError extends Error {
   }
 }
 
-function lifecycleEndpoint(value: string | URL): URL {
+function lifecycleEndpoint(value: string | URL, allowLoopbackHttp: boolean): URL {
   const url = new URL(value);
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
   const loopback = LOOPBACK_HOSTS.has(hostname);
-  if ((url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+  if ((url.protocol !== "https:" && !(allowLoopbackHttp && url.protocol === "http:" && loopback)) ||
       url.username || url.password || url.search || url.hash) {
-    throw new Error("License lifecycle endpoint must use HTTPS; plain HTTP is allowed only for exact loopback hosts without credentials, query, or fragment.");
+    throw new Error("License lifecycle endpoint must use HTTPS; plain HTTP requires explicit test-only loopback permission.");
   }
   if (!url.pathname.endsWith("/")) url.pathname += "/";
   return url;
@@ -73,7 +74,7 @@ async function readBoundedJson(response: Response, maxBytes: number): Promise<un
   } catch (error) {
     await reader.cancel().catch(() => undefined);
     if (error instanceof LicenseLifecycleError) throw error;
-    throw new LicenseLifecycleError("invalid-response", "INVALID_JSON", "License service returned invalid JSON.", false, response.status, { cause: error });
+    throw new LicenseLifecycleError("invalid-response", "INVALID_JSON", "License service returned invalid JSON.", false, response.status);
   } finally {
     reader.releaseLock();
   }
@@ -93,7 +94,7 @@ export function createUnavailableLicenseLifecycleClient(reason: string): License
 }
 
 export function createLicenseLifecycleClient(options: LicenseLifecycleClientOptions): LicenseLifecycleClient {
-  const endpoint = lifecycleEndpoint(options.endpoint);
+  const endpoint = lifecycleEndpoint(options.endpoint, options.allowLoopbackHttp ?? false);
   const credential = z.string().min(12).max(512).parse(options.managementCredential);
   const fetchImpl = options.fetch ?? fetch;
   const timeoutMs = z.number().int().min(1).max(60_000).parse(options.timeoutMs ?? 10_000);
@@ -137,8 +138,8 @@ export function createLicenseLifecycleClient(options: LicenseLifecycleClientOpti
       }
       try {
         return schema.parse(payload);
-      } catch (error) {
-        throw new LicenseLifecycleError("invalid-response", "INVALID_RESPONSE_BODY", "License service returned an invalid response body.", false, response.status, { cause: error });
+      } catch {
+        throw new LicenseLifecycleError("invalid-response", "INVALID_RESPONSE_BODY", "License service returned an invalid response body.", false, response.status);
       }
     } catch (error) {
       if (error instanceof LicenseLifecycleError) throw error;

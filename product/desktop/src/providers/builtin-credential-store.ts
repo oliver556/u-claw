@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -15,7 +15,8 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 export type BuiltinCredentialErrorCode =
   | "BUILTIN_CREDENTIAL_MISSING"
   | "BUILTIN_CREDENTIAL_INVALID"
-  | "BUILTIN_ENDPOINT_INSECURE";
+  | "BUILTIN_ENDPOINT_INSECURE"
+  | "BUILTIN_CREDENTIAL_UNSAFE";
 
 export class BuiltinCredentialError extends Error {
   constructor(readonly code: BuiltinCredentialErrorCode, message: string) {
@@ -97,7 +98,10 @@ function validatePersisted(
       || (requiredMappingStatus !== undefined && mapping.data.status !== requiredMappingStatus)
       || issuedToken.data.token.status !== "active"
       || mapping.data.newApiUserId !== issuedToken.data.token.userId
-      || mapping.data.newApiTokenId !== issuedToken.data.token.id) {
+      || mapping.data.newApiTokenId !== issuedToken.data.token.id
+      || mapping.data.channelId !== issuedToken.data.token.channelId
+      || mapping.data.policyDigest !== issuedToken.data.token.policyDigest
+      || mapping.data.generation !== issuedToken.data.token.generation) {
     throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin model credential is invalid.");
   }
   const endpoint = validateEndpoint(record.endpoint, allowLoopbackHttp);
@@ -122,8 +126,21 @@ function validatePersisted(
 }
 
 async function writeMode600(path: string, body: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = join(dirname(path), `.${FILE_NAME}.${process.pid}.${randomUUID()}.tmp`);
+  const parent = dirname(path);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  const parentStat = await lstat(parent);
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+    throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential directory is unsafe.");
+  }
+  try {
+    const targetStat = await lstat(path);
+    if (!targetStat.isFile() || targetStat.isSymbolicLink() || targetStat.nlink !== 1) {
+      throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential target is unsafe.");
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const temporary = join(parent, `.${FILE_NAME}.${process.pid}.${randomUUID()}.tmp`);
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(temporary, "wx", 0o600);
@@ -132,6 +149,12 @@ async function writeMode600(path: string, body: string): Promise<void> {
     await handle.close();
     handle = undefined;
     await rename(temporary, path);
+    const directory = await open(parent, "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
   } catch (error) {
     await handle?.close().catch(() => undefined);
     await unlink(temporary).catch(() => undefined);

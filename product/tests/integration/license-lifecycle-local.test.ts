@@ -28,6 +28,7 @@ async function setup(now = "2026-08-10T00:00:00.000Z") {
     client: createLicenseLifecycleClient({
       endpoint: server.url,
       managementCredential: "fixture-license-management-credential",
+      allowLoopbackHttp: true,
     }),
   };
 }
@@ -147,6 +148,9 @@ describe("localhost license lifecycle backend", () => {
     for (const endpoint of ["http://example.test/v1/", "http://127.0.0.2/v1/", "http://192.168.1.10/v1/"]) {
       expect(() => createLicenseLifecycleClient({ endpoint, managementCredential: "fixture-license-management-credential" })).toThrow(/HTTPS|loopback/iu);
     }
+    expect(() => createLicenseLifecycleClient({
+      endpoint: "http://127.0.0.1/v1/", managementCredential: "fixture-license-management-credential",
+    })).toThrow(/HTTPS|loopback/iu);
   });
 
   it("never exposes remote lifecycle error messages", async () => {
@@ -162,6 +166,7 @@ describe("localhost license lifecycle backend", () => {
     const client = createLicenseLifecycleClient({
       endpoint: "http://127.0.0.1/uclaw-license/v1/",
       managementCredential: credential,
+      allowLoopbackHttp: true,
       fetch: async () => new Response(JSON.stringify({
         error: {
           category: "status",

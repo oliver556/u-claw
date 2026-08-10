@@ -23,10 +23,15 @@ function typedCredential(endpoint = "http://127.0.0.1:18091/v1") {
     deviceId: `dev_${suffix}`, licenseId: `lic_${suffix}`,
     startupSecretHash: "a".repeat(64), startupSecretSalt: "b".repeat(32), usbFingerprint: "c".repeat(64),
     newApiUserId: userId, newApiUsername: `user_${suffix}`, newApiTokenId: tokenId,
+    channelId: "channel_builtin_001", policyDigest: "d".repeat(64), generation: 1, previousTokenId: null,
     status: "active", failure: null, createdAt: timestamp, updatedAt: timestamp,
   };
   const issuedToken: NewApiIssuedToken = {
-    token: { id: tokenId, userId, name: "device", status: "active", createdAt: timestamp, updatedAt: timestamp },
+    token: {
+      id: tokenId, userId, name: "device", channelId: mapping.channelId,
+      policyDigest: mapping.policyDigest, generation: mapping.generation,
+      status: "active", createdAt: timestamp, updatedAt: timestamp,
+    },
     secret: randomBytes(32).toString("base64url"),
   };
   return { endpoint, model: "builtin-model", mapping, issuedToken };

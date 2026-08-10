@@ -37,6 +37,10 @@ export const NewApiDeviceMappingSchema = z.object({
   newApiUserId: IdentifierSchema,
   newApiUsername: UsernameSchema,
   newApiTokenId: IdentifierSchema,
+  channelId: IdentifierSchema,
+  policyDigest: Sha256Schema,
+  generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  previousTokenId: IdentifierSchema.nullable(),
   status: NewApiProvisioningStatusSchema,
   failure: NewApiProvisioningFailureSchema.nullable(),
   createdAt: TimestampSchema,
@@ -90,6 +94,9 @@ export const NewApiTokenSchema = z.object({
   id: IdentifierSchema,
   userId: IdentifierSchema,
   name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$/u),
+  channelId: IdentifierSchema,
+  policyDigest: Sha256Schema,
+  generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   status: z.enum(["active", "revoked"]),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
@@ -153,6 +160,9 @@ export const NewApiCreateTokenInputSchema = z.object({
   idempotencyKey: IdempotencyKeySchema,
   userId: IdentifierSchema,
   name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$/u),
+  channelId: IdentifierSchema,
+  policyDigest: Sha256Schema,
+  generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
 }).strict();
 export type NewApiCreateTokenInput = z.infer<typeof NewApiCreateTokenInputSchema>;
 
@@ -166,6 +176,10 @@ export const NewApiCreateDeviceMappingInputSchema = z.object({
   newApiUserId: IdentifierSchema,
   newApiUsername: UsernameSchema,
   newApiTokenId: IdentifierSchema,
+  channelId: IdentifierSchema,
+  policyDigest: Sha256Schema,
+  generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  previousTokenId: IdentifierSchema.nullable(),
   status: z.literal("provisioning"),
 }).strict();
 export type NewApiCreateDeviceMappingInput = z.infer<typeof NewApiCreateDeviceMappingInputSchema>;
