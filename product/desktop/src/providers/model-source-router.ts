@@ -1,4 +1,15 @@
-import type { BuiltinModelRequest, ProviderConfigEntry, UClawErrorCode } from "@uclaw/shared";
+import { createHash } from "node:crypto";
+
+import {
+  BuiltinModelRequestSchema,
+  MessageEventSchema,
+  type BuiltinModelRequest,
+  type BuiltinModelResponse,
+  type MessageEvent,
+  type ProviderConfigEntry,
+  type SendMessageInput,
+  type UClawErrorCode,
+} from "@uclaw/shared";
 
 import {
   createBuiltinCredentialStore,
@@ -53,11 +64,73 @@ export interface CreateModelSourceRouterOptions<Request, Result> {
   executors: ModelSourceExecutors<Request, Result>;
 }
 
-export interface CreateMainProcessModelRoutingOptions<Request, Result> {
+export interface CreateMainProcessModelRoutingOptions {
   dataDir: string;
   providers: ProviderStore;
-  executors: ExternalModelSourceExecutors<Request, Result>;
+  executors: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
   allowLoopbackHttp?: boolean;
+}
+
+const BUILTIN_MAX_OUTPUT_TOKENS = 4_096;
+const BUILTIN_VALIDATION_MESSAGE = "Builtin service request was rejected.";
+
+function builtinChatDigest(input: SendMessageInput): string {
+  return createHash("sha256")
+    .update("uclaw-builtin-chat-v1\0")
+    .update(input.sessionId)
+    .update("\0")
+    .update(input.clientRequestId)
+    .digest("hex");
+}
+
+function invalidBuiltinChatInput(): BuiltinServiceClientError {
+  return new BuiltinServiceClientError("validation", "INVALID_REQUEST", BUILTIN_VALIDATION_MESSAGE, false);
+}
+
+function toBuiltinModelRequest(input: SendMessageInput, credential: BuiltinModelCredential): BuiltinModelRequest {
+  const textBlocks = input.blocks.filter((block) => block.type === "text");
+  if (textBlocks.length !== input.blocks.length || textBlocks.every((block) => block.text.length === 0)) {
+    throw invalidBuiltinChatInput();
+  }
+  const prompt = textBlocks.map((block) => block.text).join("\n\n");
+  const parsed = BuiltinModelRequestSchema.safeParse({
+    schemaVersion: 1,
+    requestId: `req_${builtinChatDigest(input).slice(0, 32)}`,
+    model: credential.model,
+    prompt,
+    maxOutputTokens: BUILTIN_MAX_OUTPUT_TOKENS,
+  });
+  if (!parsed.success) throw invalidBuiltinChatInput();
+  return parsed.data;
+}
+
+function toBuiltinMessageStream(
+  input: SendMessageInput,
+  response: BuiltinModelResponse,
+): AsyncIterable<MessageEvent> {
+  const digest = builtinChatDigest(input);
+  const runId = `run_${digest.slice(0, 32)}`;
+  const createdAt = new Date().toISOString();
+  const events: MessageEvent[] = [
+    { type: "started", runId, sessionId: input.sessionId },
+    { type: "delta", runId, mode: "append", text: response.output },
+    {
+      type: "final",
+      runId,
+      message: {
+        id: `msg_${digest.slice(0, 32)}`,
+        sessionId: input.sessionId,
+        runId,
+        role: "assistant",
+        status: "completed",
+        blocks: [{ id: `block_${digest.slice(0, 32)}`, type: "text", text: response.output, format: "markdown" }],
+        createdAt,
+      },
+    },
+  ];
+  return (async function* (): AsyncIterable<MessageEvent> {
+    for (const event of events) yield MessageEventSchema.parse(event);
+  })();
 }
 
 function externalSource(provider: ProviderConfigEntry): "domestic" | "custom" {
@@ -99,16 +172,23 @@ export function createModelSourceRouter<Request, Result>({
   };
 }
 
-export function createMainProcessModelRouting<Request, Result>({
+export function createMainProcessModelRouting({
   dataDir,
   providers,
   executors,
   allowLoopbackHttp = false,
-}: CreateMainProcessModelRoutingOptions<Request, Result>) {
+}: CreateMainProcessModelRoutingOptions) {
   const credentials = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp });
   const builtinDataClient = createBuiltinServiceClient({ allowLoopbackHttp });
-  const builtin = async (request: Request, credential: BuiltinModelCredential, signal?: AbortSignal): Promise<Result> =>
-    await builtinDataClient.execute(request as unknown as BuiltinModelRequest, credential, signal) as unknown as Result;
+  const builtin = async (
+    input: SendMessageInput,
+    credential: BuiltinModelCredential,
+    signal?: AbortSignal,
+  ): Promise<AsyncIterable<MessageEvent>> => {
+    const request = toBuiltinModelRequest(input, credential);
+    const response = await builtinDataClient.execute(request, credential, signal);
+    return toBuiltinMessageStream(input, response);
+  };
   const router = createModelSourceRouter({ providers, credentials, executors: { ...executors, builtin } });
   return { credentials, routeChatSend: router.execute };
 }
