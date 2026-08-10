@@ -479,13 +479,88 @@ describe("localhost builtin service data plane", () => {
 
   it("authenticates before reporting unconfigured data dependencies", async () => {
     const { client, server } = await setup(false);
-    const { issued } = await activateMapping(client);
+    const { issued, mapping } = await activateMapping(client);
     const invalid = await dataRequest(server, "invalid-device-credential", "health");
     expect(invalid.status).toBe(401);
     await expect(invalid.json()).resolves.toMatchObject({ error: { code: "AUTHENTICATION_FAILED" } });
     const authenticated = await dataRequest(server, issued.secret, "health");
     expect(authenticated.status).toBe(503);
     await expect(authenticated.json()).resolves.toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
+    await client.updateDeviceStatus(mapping.deviceId, {
+      idempotencyKey: "ops-unconfigured-health-stale",
+      status: "disabled",
+      expectedStatus: "active",
+      expectedGeneration: mapping.generation,
+      expectedLicenseId: mapping.licenseId,
+      expectedTokenId: mapping.newApiTokenId,
+    });
+    const stale = await dataRequest(server, issued.secret, "health");
+    expect(stale.status).toBe(401);
+    await expect(stale.json()).resolves.toEqual({
+      error: { category: "authentication", code: "AUTHENTICATION_FAILED", message: "Data authentication failed.", retryable: false },
+    });
+    await client.updateDeviceStatus(mapping.deviceId, {
+      idempotencyKey: "ops-unconfigured-health-reactivate",
+      status: "active",
+      expectedStatus: "disabled",
+      expectedGeneration: mapping.generation,
+      expectedLicenseId: mapping.licenseId,
+      expectedTokenId: mapping.newApiTokenId,
+    });
+    await client.revokeToken(issued.token.id, { idempotencyKey: "ops-unconfigured-health-revoke" });
+    const revoked = await dataRequest(server, issued.secret, "health");
+    expect(revoked.status).toBe(401);
+    const revokedBody = await revoked.json();
+    expect(revokedBody).toEqual({
+      error: { category: "authentication", code: "AUTHENTICATION_FAILED", message: "Data authentication failed.", retryable: false },
+    });
+    expect(JSON.stringify(revokedBody)).not.toMatch(/state|revision/iu);
+  });
+
+  it("rejects invalid, stale, and revoked model credentials before unconfigured dependencies", async () => {
+    const { client, server } = await setup(false);
+    const { issued, mapping } = await activateMapping(client);
+    expect((await dataRequest(server, "invalid-device-credential")).status).toBe(401);
+    const authenticated = await dataRequest(server, issued.secret);
+    expect(authenticated.status).toBe(503);
+    await expect(authenticated.json()).resolves.toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
+    await client.updateDeviceStatus(mapping.deviceId, {
+      idempotencyKey: "ops-unconfigured-model-stale",
+      status: "disabled",
+      expectedStatus: "active",
+      expectedGeneration: mapping.generation,
+      expectedLicenseId: mapping.licenseId,
+      expectedTokenId: mapping.newApiTokenId,
+    });
+    const stale = await dataRequest(server, issued.secret, "models/respond", {
+      schemaVersion: 1,
+      requestId: "req_unconfigured_stale_001",
+      model: "model-a",
+      prompt: "must-not-parse",
+      maxOutputTokens: 1,
+      unknown: true,
+    });
+    expect(stale.status).toBe(401);
+    await client.updateDeviceStatus(mapping.deviceId, {
+      idempotencyKey: "ops-unconfigured-model-reactivate",
+      status: "active",
+      expectedStatus: "disabled",
+      expectedGeneration: mapping.generation,
+      expectedLicenseId: mapping.licenseId,
+      expectedTokenId: mapping.newApiTokenId,
+    });
+    await client.revokeToken(issued.token.id, { idempotencyKey: "ops-unconfigured-model-revoke" });
+    const revoked = await fetch(new URL("models/respond", server.dataUrl), {
+      method: "POST",
+      headers: { authorization: `Bearer ${issued.secret}`, "content-type": "application/json" },
+      body: "{must-not-parse",
+    });
+    expect(revoked.status).toBe(401);
+    const revokedBody = await revoked.json();
+    expect(revokedBody).toEqual({
+      error: { category: "authentication", code: "AUTHENTICATION_FAILED", message: "Data authentication failed.", retryable: false },
+    });
+    expect(JSON.stringify(revokedBody)).not.toMatch(/state|revision/iu);
   });
 
   it("closes state and policy changes immediately without silent service fallback", async () => {

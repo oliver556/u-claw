@@ -260,9 +260,12 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     return matched;
   };
 
-  const captureAdmission = (request: IncomingMessage, checkServiceState: boolean): AdmissionSnapshot => {
-    const stored = authenticateData(request);
-    if (!options.builtin) throw failure(503, "unavailable", "SERVICE_UNAVAILABLE", "Builtin service is unavailable.", true);
+  const resolveLocalDataIdentity = (stored: StoredToken): {
+    token: NewApiToken;
+    mapping: NewApiDeviceMapping;
+    user: NewApiUser;
+    control: BuiltinDeviceControls;
+  } => {
     const token = stored.summary;
     const deviceId = deviceIdsByToken.get(token.id);
     const mapping = deviceId ? devices.get(deviceId) : undefined;
@@ -285,9 +288,16 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
         || policyDigest(user.policy) !== mapping.policyDigest) {
       throw failure(401, "authentication", "AUTHENTICATION_FAILED", "Data authentication failed.");
     }
+    return { token, mapping, user, control };
+  };
+
+  const captureAdmission = (request: IncomingMessage, checkServiceState: boolean): AdmissionSnapshot => {
+    const stored = authenticateData(request);
+    const { token, mapping, user, control } = resolveLocalDataIdentity(stored);
     if (user.status !== "active" || user.policy.disabled) {
       throw failure(403, "disabled", "DEVICE_DISABLED", "Builtin access is disabled.");
     }
+    if (!options.builtin) throw failure(503, "unavailable", "SERVICE_UNAVAILABLE", "Builtin service is unavailable.", true);
     if (checkServiceState && serviceStatus.state === "disabled") {
       throw failure(503, "unavailable", "SERVICE_DISABLED", "Builtin service is disabled.");
     }
@@ -802,7 +812,10 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
         return;
       }
       if (method === "POST" && route === "models/respond") {
-        authenticateData(request);
+        const localIdentity = resolveLocalDataIdentity(authenticateData(request));
+        if (localIdentity.user.status !== "active" || localIdentity.user.policy.disabled) {
+          throw failure(403, "disabled", "DEVICE_DISABLED", "Builtin access is disabled.");
+        }
         const modelRequest = BuiltinModelRequestSchema.parse(await readJson(request));
         admitted = await authorizeData(request, true);
         if (request.aborted || response.destroyed) {
