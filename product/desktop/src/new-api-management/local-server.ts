@@ -5,6 +5,10 @@ import type { AddressInfo } from "node:net";
 import {
   BuiltinDeviceControlsSchema,
   BuiltinDeviceControlsUpdateSchema,
+  BuiltinModelRequestSchema,
+  BuiltinModelResponseSchema,
+  BuiltinModelUsageSchema,
+  BuiltinServiceHealthSchema,
   BuiltinServiceStatusSchema,
   BuiltinServiceStatusUpdateSchema,
   NewApiAuditPageSchema,
@@ -17,6 +21,7 @@ import {
   NewApiManagementErrorBodySchema,
   NewApiPolicySchema,
   NewApiUpdateDeviceStatusInputSchema,
+  LicenseStatusSummarySchema,
   type BuiltinDeviceControls,
   type BuiltinModelRequest,
   type BuiltinModelUsage,
@@ -39,13 +44,15 @@ export interface StartLocalNewApiManagementServerOptions {
   managementCredential: string;
   now?: () => Date;
   builtin?: {
-    readLicenseStatus(licenseId: string): Promise<LicenseStatusSummary>;
+    readLicenseStatus(licenseId: string, signal?: AbortSignal): Promise<LicenseStatusSummary>;
     execute(request: BuiltinModelRequest, signal?: AbortSignal): Promise<{ output: string; usage: BuiltinModelUsage }>;
+    licenseTimeoutMs?: number;
   };
 }
 
 export interface LocalNewApiManagementServer {
   readonly url: string;
+  readonly dataUrl: string;
   recordUsage(userId: string, amount: number): void;
   close(): Promise<void>;
 }
@@ -53,9 +60,21 @@ export interface LocalNewApiManagementServer {
 type StoredToken = { summary: NewApiToken; secretHash: string };
 type IdempotencyEntry = { fingerprint: string; status: number; sealedResponse: string };
 type InFlightEntry = { fingerprint: string; promise: Promise<{ status: number; value: unknown }> };
-type ApiFailure = Error & { category: NewApiErrorCategory; code: string; retryable: boolean; status: number };
+class ApiFailure extends Error {
+  constructor(
+    readonly status: number,
+    readonly category: NewApiErrorCategory,
+    readonly code: string,
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "ApiFailure";
+  }
+}
 
 const BASE_PATH = "/uclaw-management/v1/";
+const DATA_BASE_PATH = "/v1/";
 const DEFAULT_POLICY: NewApiPolicy = {
   quota: { unit: "tokens", limit: 100_000, period: "monthly" },
   rateLimit: { requestsPerMinute: 60, concurrentRequests: 2 },
@@ -64,7 +83,14 @@ const DEFAULT_POLICY: NewApiPolicy = {
 };
 
 function failure(status: number, category: NewApiErrorCategory, code: string, message: string, retryable = false): ApiFailure {
-  return Object.assign(new Error(message), { status, category, code, retryable });
+  return new ApiFailure(status, category, code, message, retryable);
+}
+
+export class LocalBuiltinUpstreamError extends Error {
+  constructor(readonly status: number) {
+    super("Builtin upstream request failed.");
+    this.name = "LocalBuiltinUpstreamError";
+  }
 }
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
@@ -109,6 +135,9 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
   const deviceIdsByLicense = new Map<string, string>();
   const deviceIdsByToken = new Map<string, string>();
   const usage = new Map<string, number>();
+  const reservedQuota = new Map<string, number>();
+  const activeRequests = new Map<string, number>();
+  const admittedAt = new Map<string, number[]>();
   const controls = new Map<string, BuiltinDeviceControls>();
   const audit: NewApiAuditEvent[] = [];
   const idempotency = new Map<string, IdempotencyEntry>();
@@ -148,8 +177,9 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     deviceId: string | null,
     outcome: NewApiAuditEvent["outcome"] = "succeeded",
     errorCategory: NewApiErrorCategory | null = null,
+    serviceRevision: number | null = null,
   ): void => {
-    audit.push({ id: nextId("aud"), action, subjectType, subjectId, deviceId, outcome, errorCategory, createdAt: timestamp() });
+    audit.push({ id: nextId("aud"), action, subjectType, subjectId, deviceId, outcome, errorCategory, serviceRevision, createdAt: timestamp() });
     if (audit.length > 1_000) audit.shift();
   };
 
@@ -203,6 +233,184 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     return { deviceId, current };
   };
 
+  type AdmissionSnapshot = {
+    serviceRevision: number;
+    serviceState: BuiltinServiceState;
+    controlsRevision: number;
+    deviceId: string;
+    userId: string;
+    tokenId: string;
+    licenseId: string;
+    generation: number;
+    channelId: string;
+    policyDigest: string;
+    policy: NewApiPolicy;
+  };
+
+  const authenticateData = (request: IncomingMessage): StoredToken => {
+    const authorization = request.headers.authorization ?? "";
+    const hasBearerScheme = authorization.startsWith("Bearer ") && authorization.length > 7;
+    const candidate = hasBearerScheme ? authorization.slice(7) : "";
+    const candidateHash = createHash("sha256").update(candidate).digest();
+    let matched: StoredToken | undefined;
+    for (const stored of tokens.values()) {
+      if (timingSafeEqual(candidateHash, Buffer.from(stored.secretHash, "hex"))) matched = stored;
+    }
+    if (!hasBearerScheme || !matched) throw failure(401, "authentication", "AUTHENTICATION_FAILED", "Data authentication failed.");
+    return matched;
+  };
+
+  const captureAdmission = (request: IncomingMessage, checkServiceState: boolean): AdmissionSnapshot => {
+    const stored = authenticateData(request);
+    if (!options.builtin) throw failure(503, "unavailable", "SERVICE_UNAVAILABLE", "Builtin service is unavailable.", true);
+    const token = stored.summary;
+    const deviceId = deviceIdsByToken.get(token.id);
+    const mapping = deviceId ? devices.get(deviceId) : undefined;
+    const user = users.get(token.userId);
+    const control = deviceId ? controls.get(deviceId) : undefined;
+    if (token.status !== "active" || !mapping || !user || !control
+        || mapping.status !== "active"
+        || mapping.newApiTokenId !== token.id
+        || mapping.newApiUserId !== token.userId
+        || mapping.deviceId !== user.deviceId
+        || mapping.generation !== token.generation
+        || mapping.channelId !== token.channelId
+        || mapping.policyDigest !== token.policyDigest
+        || control.deviceId !== mapping.deviceId
+        || control.userId !== user.id
+        || control.generation !== mapping.generation
+        || control.licenseId !== mapping.licenseId
+        || control.tokenId !== token.id
+        || control.policyDigest !== mapping.policyDigest
+        || policyDigest(user.policy) !== mapping.policyDigest) {
+      throw failure(401, "authentication", "AUTHENTICATION_FAILED", "Data authentication failed.");
+    }
+    if (user.status !== "active" || user.policy.disabled) {
+      throw failure(403, "disabled", "DEVICE_DISABLED", "Builtin access is disabled.");
+    }
+    if (checkServiceState && serviceStatus.state === "disabled") {
+      throw failure(503, "unavailable", "SERVICE_DISABLED", "Builtin service is disabled.");
+    }
+    if (checkServiceState && serviceStatus.state === "maintenance") {
+      throw failure(503, "unavailable", "SERVICE_MAINTENANCE", "Builtin service is in maintenance.");
+    }
+    return {
+      serviceRevision: serviceStatus.revision,
+      serviceState: serviceStatus.state,
+      controlsRevision: control.revision,
+      deviceId: mapping.deviceId,
+      userId: user.id,
+      tokenId: token.id,
+      licenseId: mapping.licenseId,
+      generation: mapping.generation,
+      channelId: mapping.channelId,
+      policyDigest: mapping.policyDigest,
+      policy: structuredClone(user.policy),
+    };
+  };
+
+  const sameAdmission = (left: AdmissionSnapshot, right: AdmissionSnapshot): boolean =>
+    left.serviceRevision === right.serviceRevision
+    && left.serviceState === right.serviceState
+    && left.controlsRevision === right.controlsRevision
+    && left.deviceId === right.deviceId
+    && left.userId === right.userId
+    && left.tokenId === right.tokenId
+    && left.licenseId === right.licenseId
+    && left.generation === right.generation
+    && left.channelId === right.channelId
+    && left.policyDigest === right.policyDigest
+    && JSON.stringify(left.policy) === JSON.stringify(right.policy);
+
+  const readAuthoritativeLicense = async (snapshot: AdmissionSnapshot): Promise<void> => {
+    const controller = new AbortController();
+    const timeoutMs = z.number().int().min(1).max(10_000).parse(options.builtin?.licenseTimeoutMs ?? 1_000);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(failure(503, "unavailable", "LICENSE_STATUS_UNAVAILABLE", "License status is unavailable.", true));
+        }, timeoutMs);
+      });
+      const raw = await Promise.race([
+        options.builtin!.readLicenseStatus(snapshot.licenseId, controller.signal),
+        timeoutPromise,
+      ]);
+      let license: LicenseStatusSummary;
+      try {
+        license = LicenseStatusSummarySchema.parse(raw);
+      } catch {
+        throw failure(503, "invalid-response", "LICENSE_STATUS_INVALID", "License status is invalid.");
+      }
+      const currentTime = now().getTime();
+      if (license.licenseId !== snapshot.licenseId
+          || license.deviceId !== snapshot.deviceId
+          || license.status !== "active"
+          || license.replacementLicenseId !== null
+          || currentTime < Date.parse(license.notBefore)
+          || currentTime >= Date.parse(license.expiresAt)) {
+        throw failure(401, "authentication", "AUTHENTICATION_FAILED", "Data authentication failed.");
+      }
+    } catch (error) {
+      if (error instanceof ApiFailure) throw error;
+      throw failure(503, "unavailable", "LICENSE_STATUS_UNAVAILABLE", "License status is unavailable.", true);
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+  };
+
+  const authorizeData = async (request: IncomingMessage, checkServiceState: boolean): Promise<AdmissionSnapshot> => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const captured = captureAdmission(request, checkServiceState);
+      await readAuthoritativeLicense(captured);
+      const current = captureAdmission(request, checkServiceState);
+      if (sameAdmission(captured, current)) return current;
+    }
+    throw failure(409, "conflict", "ADMISSION_CONFLICT", "Builtin admission state changed.", true);
+  };
+
+  const reserveRequest = (snapshot: AdmissionSnapshot, request: BuiltinModelRequest): number => {
+    if (!snapshot.policy.allowedModels.includes(request.model)) {
+      throw failure(403, "model-permission", "MODEL_NOT_ALLOWED", "Builtin model is not allowed.");
+    }
+    const effectiveConcurrent = snapshot.serviceState === "degraded"
+      ? 1
+      : snapshot.policy.rateLimit.concurrentRequests;
+    if ((activeRequests.get(snapshot.userId) ?? 0) >= effectiveConcurrent) {
+      throw failure(429, "rate-limit", "CONCURRENCY_LIMIT_EXCEEDED", "Builtin concurrency limit exceeded.", true);
+    }
+    const minuteStart = now().getTime() - 60_000;
+    const recent = (admittedAt.get(snapshot.userId) ?? []).filter((value) => value > minuteStart);
+    const effectiveRpm = snapshot.serviceState === "degraded"
+      ? Math.max(1, Math.floor(snapshot.policy.rateLimit.requestsPerMinute / 2))
+      : snapshot.policy.rateLimit.requestsPerMinute;
+    if (recent.length >= effectiveRpm) {
+      throw failure(429, "rate-limit", "REQUEST_RATE_LIMIT_EXCEEDED", "Builtin request rate exceeded.", true);
+    }
+    const reservation = snapshot.policy.quota.unit === "requests"
+      ? 1
+      : Buffer.byteLength(request.prompt, "utf8") + request.maxOutputTokens;
+    const consumed = usage.get(snapshot.userId) ?? 0;
+    const reserved = reservedQuota.get(snapshot.userId) ?? 0;
+    if (consumed + reserved + reservation > snapshot.policy.quota.limit) {
+      throw failure(429, "quota", "QUOTA_EXCEEDED", "Builtin quota exceeded.");
+    }
+    admittedAt.set(snapshot.userId, [...recent, now().getTime()]);
+    activeRequests.set(snapshot.userId, (activeRequests.get(snapshot.userId) ?? 0) + 1);
+    reservedQuota.set(snapshot.userId, reserved + reservation);
+    return reservation;
+  };
+
+  const releaseReservation = (snapshot: AdmissionSnapshot, reservation: number, consumed: number): void => {
+    reservedQuota.set(snapshot.userId, Math.max(0, (reservedQuota.get(snapshot.userId) ?? 0) - reservation));
+    if (consumed > 0) usage.set(snapshot.userId, (usage.get(snapshot.userId) ?? 0) + consumed);
+  };
+
+  const releaseConcurrency = (snapshot: AdmissionSnapshot): void => {
+    activeRequests.set(snapshot.userId, Math.max(0, (activeRequests.get(snapshot.userId) ?? 0) - 1));
+  };
+
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
       authenticate(request);
@@ -238,7 +446,7 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
             reasonCode: input.reasonCode,
             updatedAt: timestamp(),
           });
-          addAudit("service-state.updated", "service", "builtin-service", null);
+          addAudit("service-state.updated", "service", "builtin-service", null, "succeeded", null, serviceStatus.revision);
           return { status: 200, value: serviceStatus };
         });
         sendJson(response, result.status, result.value);
@@ -563,12 +771,128 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     } catch (error) {
       let apiError: ApiFailure;
       if (error instanceof z.ZodError) apiError = failure(400, "validation", "VALIDATION_FAILED", "Management request validation failed.");
-      else if (error && typeof error === "object" && "category" in error) apiError = error as ApiFailure;
+      else if (error instanceof ApiFailure) apiError = error;
       else apiError = failure(500, "unavailable", "INTERNAL_ERROR", "Management service failed.", true);
       addAudit("request.rejected", "request", nextId("req"), null, "failed", apiError.category);
       sendJson(response, apiError.status, NewApiManagementErrorBodySchema.parse({
         error: { category: apiError.category, code: apiError.code, message: apiError.message, retryable: apiError.retryable },
       }));
+    }
+  };
+
+  const dataHandler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    let admitted: AdmissionSnapshot | undefined;
+    try {
+      const url = new URL(request.url ?? "/", `http://${hostname}`);
+      if (!url.pathname.startsWith(DATA_BASE_PATH) || url.search.length > 0) {
+        throw failure(404, "not-found", "ENDPOINT_NOT_FOUND", "Data endpoint was not found.");
+      }
+      const route = url.pathname.slice(DATA_BASE_PATH.length).replace(/\/$/u, "");
+      const method = request.method ?? "GET";
+      if (method === "GET" && route === "health") {
+        admitted = await authorizeData(request, false);
+        const health = BuiltinServiceHealthSchema.parse({
+          schemaVersion: 1,
+          acceptingBuiltin: admitted.serviceState === "enabled" || admitted.serviceState === "degraded",
+          state: admitted.serviceState,
+          revision: admitted.serviceRevision,
+        });
+        addAudit("builtin.health-queried", "request", nextId("req"), admitted.deviceId, "succeeded", null, admitted.serviceRevision);
+        sendJson(response, 200, health);
+        return;
+      }
+      if (method === "POST" && route === "models/respond") {
+        authenticateData(request);
+        const modelRequest = BuiltinModelRequestSchema.parse(await readJson(request));
+        admitted = await authorizeData(request, true);
+        if (request.aborted || response.destroyed) {
+          throw failure(499, "cancelled", "OPERATION_CANCELLED", "Builtin request was cancelled.");
+        }
+        const reservation = reserveRequest(admitted, modelRequest);
+        const abortController = new AbortController();
+        const onAborted = (): void => abortController.abort();
+        const onClosed = (): void => {
+          if (!response.writableEnded) abortController.abort();
+        };
+        request.once("aborted", onAborted);
+        response.once("close", onClosed);
+        let reservationReleased = false;
+        let removeAbortWaiter = (): void => undefined;
+        try {
+          let raw: unknown;
+          try {
+            const aborted = new Promise<never>((_resolve, reject) => {
+              const onAbort = (): void => reject(failure(499, "cancelled", "OPERATION_CANCELLED", "Builtin request was cancelled."));
+              abortController.signal.addEventListener("abort", onAbort, { once: true });
+              removeAbortWaiter = () => abortController.signal.removeEventListener("abort", onAbort);
+            });
+            raw = await Promise.race([options.builtin!.execute(modelRequest, abortController.signal), aborted]);
+          } catch (error) {
+            if (abortController.signal.aborted) {
+              throw failure(499, "cancelled", "OPERATION_CANCELLED", "Builtin request was cancelled.");
+            }
+            if (error instanceof LocalBuiltinUpstreamError && error.status >= 400 && error.status < 500) {
+              throw failure(502, "upstream", "UPSTREAM_4XX", "Builtin upstream rejected the request.");
+            }
+            throw failure(502, "upstream", "UPSTREAM_5XX", "Builtin upstream failed.", true);
+          }
+          let upstream: { output: string; usage: BuiltinModelUsage };
+          try {
+            upstream = z.object({ output: z.string().max(1_048_576), usage: BuiltinModelUsageSchema }).strict().parse(raw);
+            if (upstream.usage.outputTokens > modelRequest.maxOutputTokens
+                || (admitted.policy.quota.unit === "tokens"
+                  && upstream.usage.inputTokens + upstream.usage.outputTokens > reservation)) {
+              throw new Error("usage exceeds reservation");
+            }
+          } catch {
+            releaseReservation(admitted, reservation, reservation);
+            reservationReleased = true;
+            throw failure(502, "invalid-response", "UPSTREAM_INVALID_RESPONSE", "Builtin upstream response is invalid.");
+          }
+          const consumed = admitted.policy.quota.unit === "requests"
+            ? 1
+            : upstream.usage.inputTokens + upstream.usage.outputTokens;
+          releaseReservation(admitted, reservation, consumed);
+          reservationReleased = true;
+          const result = BuiltinModelResponseSchema.parse({
+            schemaVersion: 1,
+            requestId: modelRequest.requestId,
+            output: upstream.output,
+            usage: upstream.usage,
+            serviceState: admitted.serviceState,
+            serviceRevision: admitted.serviceRevision,
+          });
+          addAudit("builtin.request-succeeded", "request", nextId("req"), admitted.deviceId, "succeeded", null, admitted.serviceRevision);
+          sendJson(response, 200, result);
+        } finally {
+          removeAbortWaiter();
+          request.off("aborted", onAborted);
+          response.off("close", onClosed);
+          if (!reservationReleased) releaseReservation(admitted, reservation, 0);
+          releaseConcurrency(admitted);
+        }
+        return;
+      }
+      throw failure(404, "not-found", "ENDPOINT_NOT_FOUND", "Data endpoint was not found.");
+    } catch (error) {
+      let apiError: ApiFailure;
+      if (error instanceof z.ZodError) apiError = failure(400, "validation", "VALIDATION_FAILED", "Data request validation failed.");
+      else if (error instanceof ApiFailure) apiError = error;
+      else apiError = failure(500, "unavailable", "INTERNAL_ERROR", "Data service failed.", true);
+      addAudit(
+        "builtin.request-rejected",
+        "request",
+        nextId("req"),
+        admitted?.deviceId ?? null,
+        "failed",
+        apiError.category,
+        apiError.category === "authentication" ? null : (admitted?.serviceRevision ?? null),
+      );
+      if (!response.destroyed) {
+        sendJson(response, apiError.status, NewApiManagementErrorBodySchema.parse({
+          error: { category: apiError.category, code: apiError.code, message: apiError.message, retryable: apiError.retryable },
+        }));
+      }
     }
   };
 
@@ -582,13 +906,28 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
   });
   const address = server.address() as AddressInfo;
   const host = address.family === "IPv6" ? `[${address.address}]` : address.address;
+  const dataServer = createServer((request, response) => void dataHandler(request, response));
+  await new Promise<void>((resolve, reject) => {
+    dataServer.once("error", reject);
+    dataServer.listen(0, hostname, () => {
+      dataServer.off("error", reject);
+      resolve();
+    });
+  });
+  const dataAddress = dataServer.address() as AddressInfo;
+  const dataHost = dataAddress.family === "IPv6" ? `[${dataAddress.address}]` : dataAddress.address;
   return {
     url: `http://${host}:${address.port}${BASE_PATH}`,
+    dataUrl: `http://${dataHost}:${dataAddress.port}${DATA_BASE_PATH}`,
     recordUsage(userId, amount) {
       if (!users.has(userId)) throw new Error("Unknown fixture user.");
       const parsed = z.number().int().min(0).parse(amount);
       usage.set(userId, (usage.get(userId) ?? 0) + parsed);
     },
-    close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+    close: async () => {
+      await Promise.all([server, dataServer].map((current) => new Promise<void>((resolve, reject) => {
+        current.close((error) => error ? reject(error) : resolve());
+      })));
+    },
   };
 }
