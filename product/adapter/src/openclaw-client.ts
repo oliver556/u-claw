@@ -17,6 +17,7 @@ import {
   type ChannelKind,
   type ChannelSummary,
   type ChannelStatus,
+  type McpServerConfigEntry,
   MessageEventSchema,
   type UClawClient,
 } from "@uclaw/shared";
@@ -573,6 +574,12 @@ export class OpenClawClient implements UClawClient {
     },
   };
   readonly skills: UClawClient["skills"] = { list: async () => this.unsupported("skills.status") };
+  readonly mcp: NonNullable<UClawClient["mcp"]> = {
+    configure: (server, signal) => this.patchMcpServer(server, server.enabled, signal),
+    remove: (server, signal) => this.patchMcpServer(server, undefined, signal, true),
+    start: (server, signal) => this.patchMcpServer(server, true, signal),
+    stop: (server, signal) => this.patchMcpServer(server, false, signal),
+  };
   readonly channels: UClawClient["channels"] & OpenClawChannelRuntime = {
     list: () => this.runChannelOperation(async () => {
       const { result, account } = await this.readTelegramStatus(false);
@@ -903,6 +910,50 @@ export class OpenClawClient implements UClawClient {
     if (snapshot.hash === undefined || !snapshot.valid) throw new RpcProtocolError("config.get");
     await this.options.transport.router.request("config.patch", {
       raw: JSON.stringify({ channels: { telegram: { accounts: { [accountId]: config } } } }),
+      baseHash: snapshot.hash,
+    }, ConfigPatchResponseSchema, signal);
+  }
+
+  private async patchMcpServer(
+    server: McpServerConfigEntry,
+    enabled: boolean | undefined,
+    signal: AbortSignal,
+    remove = false,
+  ): Promise<void> {
+    if (!remove && server.transport !== "stdio" && server.authentication.type !== "none" && server.authentication.secret === undefined) {
+      const message = "MCP authentication secret is required";
+      throw new AdapterServiceError(message, UClawErrorSchema.parse({
+        code: "INVALID_ARGUMENT",
+        message,
+        retryable: false,
+        recoveryActions: [],
+        causeDetails: { field: "authentication.secret" },
+      }));
+    }
+    this.requireMethod("config.get");
+    this.requireMethod("config.patch");
+    const snapshot = await this.options.transport.router.request("config.get", {}, ConfigGetResponseSchema, signal);
+    if (snapshot.hash === undefined || !snapshot.valid) throw new RpcProtocolError("config.get");
+    const config = remove ? null : server.transport === "stdio"
+      ? {
+          enabled: enabled ?? server.enabled,
+          transport: server.transport,
+          command: server.executableId,
+          args: server.args,
+          env: server.env,
+        }
+      : {
+          enabled: enabled ?? server.enabled,
+          transport: server.transport,
+          url: server.url,
+          ...(server.authentication.type === "none" ? {} : {
+            headers: server.authentication.type === "bearer"
+              ? { Authorization: `Bearer ${server.authentication.secret}` }
+              : { [server.authentication.headerName]: server.authentication.secret },
+          }),
+        };
+    await this.options.transport.router.request("config.patch", {
+      raw: JSON.stringify({ mcp: { servers: { [server.id]: config } } }),
       baseHash: snapshot.hash,
     }, ConfigPatchResponseSchema, signal);
   }

@@ -16,6 +16,7 @@ export function PluginManager() {
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [sourceMode, setSourceMode] = useState<"fixture" | "live">();
   const [repositoryVerified, setRepositoryVerified] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [detail, setDetail] = useState<PluginDetail>();
@@ -45,6 +46,7 @@ export function PluginManager() {
         setItems((current) => append ? [...current, ...response.result.items.filter((item) => !current.some(({ slug }) => slug === item.slug))] : response.result.items);
         setCursor(response.result.nextCursor);
         setHasMore(response.result.hasMore);
+        setSourceMode(response.result.mode);
         setRepositoryVerified(response.result.repositoryVerified);
       } else {
         setItems(response.result as PluginCatalogItem[]);
@@ -121,7 +123,7 @@ export function PluginManager() {
     <div className="plugin-toolbar">
       {view === "catalog" ? <label><Search aria-hidden="true" /><span className="sr-only">搜索插件</span><input aria-label="搜索插件" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索插件" /></label> : <strong className="plugin-installed-heading">U 盘已安装插件</strong>}
       <button type="button" aria-label="刷新插件目录" onClick={() => void load()}><RefreshCw aria-hidden="true" /></button>
-      {view === "catalog" ? <span className="plugin-mode fixture">{repositoryVerified ? "真实插件仓库" : "Fixture 数据，真实插件仓库未验收"}</span> : null}
+      {view === "catalog" ? <span className={`plugin-mode ${sourceMode ?? "unknown"}`}>{sourceMode === "fixture" ? "Fixture 数据，真实插件仓库未验收" : sourceMode === "live" ? repositoryVerified ? "真实插件仓库" : "插件仓库未验证" : state === "error" ? "插件仓库不可用" : "正在确认插件源"}</span> : null}
     </div>
     {state === "loading" ? <div className="plugin-state"><RefreshCw className="spin" /><strong>正在加载插件目录</strong></div> : null}
     {state === "error" ? <div className="plugin-error" role="alert"><AlertTriangle /><div><strong>插件目录离线</strong><span>可重试目录；已安装插件仍从 U 盘读取。</span></div><button type="button" aria-label="重试插件目录" onClick={() => void load()}>重试</button></div> : null}

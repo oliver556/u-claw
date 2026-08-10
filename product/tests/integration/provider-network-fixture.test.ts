@@ -13,7 +13,7 @@ afterEach(async () => Promise.all(cleanup.splice(0).map((dispose) => dispose()))
 
 describe("provider network fixture mainline", () => {
   it("carries a stored main-process key through a minimal request and returns only a fixed result", async () => {
-    const key = "sk-integration-main-only-12345678";
+    const key = "sk-fixture-main-only-12345678";
     const server = createServer((request, response) => {
       expect(request.url).toBe("/v1/chat/completions");
       expect(request.headers.authorization).toBe(`Bearer ${key}`);

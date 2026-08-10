@@ -1,5 +1,7 @@
 import readline from "node:readline";
 
+if (process.env.ELECTRON_RUN_AS_NODE !== "1") process.exit(2);
+
 const lines = readline.createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   const request = JSON.parse(line);

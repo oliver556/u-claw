@@ -96,15 +96,15 @@ describe("provider store", () => {
 
   it("updates and clears a key without returning plaintext to renderer snapshots", async () => {
     const { store, dataDir } = await setup();
-    const updated = await store.setApiKey("openai", "sk-live-12345678");
+    const updated = await store.setApiKey("openai", "fixture-sk-live-12345678");
     expect(updated.providers.find((provider: any) => provider.id === "openai")).toMatchObject({ apiKeyConfigured: true, apiKeyHint: "...5678" });
-    expect(JSON.stringify(updated)).not.toContain("sk-live-12345678");
-    expect(await store.getSelectedForRuntime()).not.toMatchObject({ apiKey: "sk-live-12345678" });
+    expect(JSON.stringify(updated)).not.toContain("fixture-sk-live-12345678");
+    expect(await store.getSelectedForRuntime()).not.toMatchObject({ apiKey: "fixture-sk-live-12345678" });
     const disk = await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8");
-    expect(disk).toContain("sk-live-12345678");
+    expect(disk).toContain("fixture-sk-live-12345678");
     const cleared = await store.clearApiKey("openai");
     expect(cleared.providers.find((provider: any) => provider.id === "openai")).toMatchObject({ apiKeyConfigured: false });
-    expect(await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8")).not.toContain("sk-live-12345678");
+    expect(await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8")).not.toContain("fixture-sk-live-12345678");
   });
 
   it("persists validated proxy settings and exposes defaults without credentials", async () => {

@@ -28,7 +28,7 @@ test("mock chat covers sessions, tool, approval, stop, and streaming completion"
 
   await composer.fill("完成 Mock 主链");
   await page.getByRole("button", { name: "发送消息" }).click();
-  await expect(page.getByText("Fixture ")).toBeVisible();
+  await expect(page.locator(".assistant-message").last().locator(".message-content").getByText("Fixture", { exact: true })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Inspect workspace" })).toContainText("等待授权");
   const dynamicApproval = page.getByLabel(/命令执行授权/).filter({ hasText: "Inspect workspace" });
   await expect(dynamicApproval).toBeVisible();

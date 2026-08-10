@@ -22,6 +22,7 @@
     "test:portable-launcher": "node --test scripts/portable-launcher-workflow.test.mjs scripts/runtime-manifest.test.mjs",
     "test:contract": "vitest run tests/contract",
     "test:integration": "vitest run tests/integration",
+    "test:secrets": "node scripts/secret-scan.mjs",
     "capture:openclaw-v4": "node scripts/capture-openclaw-v4.mjs",
     "sanitize:openclaw-v4": "node scripts/sanitize-openclaw-v4-capture.mjs",
     "test:e2e": "playwright test",
