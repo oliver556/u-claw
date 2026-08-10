@@ -15,6 +15,35 @@ test("accepts a production-safe SVG concept", () => {
   assert.deepEqual(validateSvg(svg, "valid.svg"), []);
 });
 
+test("requires svg to be the document root", () => {
+  const svg = `
+    <root>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        <g id="icon">
+          <path fill="#111111" d="M100 100 L412 100 L256 412 Z" />
+        </g>
+      </svg>
+    </root>
+  `;
+
+  assert.deepEqual(validateSvg(svg, "wrapped.svg"), [
+    "wrapped.svg: root svg is required",
+  ]);
+});
+
+test("accepts path data split across lines", () => {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+      <g id="icon">
+        <path fill="#111111" d="M100 100 L412 100 L256 412
+          Z" />
+      </g>
+    </svg>
+  `;
+
+  assert.deepEqual(validateSvg(svg, "multiline.svg"), []);
+});
+
 test("reports structural and silhouette violations in contract order", () => {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" stroke="none">

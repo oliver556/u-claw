@@ -16,7 +16,7 @@ const FORBIDDEN_ATTRIBUTES = ["opacity", "style", "class", "transform"];
 
 function getAttribute(attributes, name) {
   const match = attributes.match(
-    new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, "i"),
+    new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, "i"),
   );
   return match?.[2];
 }
@@ -30,7 +30,11 @@ function hasAttribute(markup, names) {
 
 export function validateSvg(svg, source = "SVG") {
   const errors = [];
-  const root = svg.match(/<svg\b([^>]*)>/i);
+  const document = svg.replace(
+    /^(?:\s|<\?xml[\s\S]*?\?>|<!--[\s\S]*?-->)*/i,
+    "",
+  );
+  const root = document.match(/^<svg\b([^>]*)>/i);
   const rootAttributes = root?.[1] ?? "";
   const paths = [...svg.matchAll(/<path\b([^>]*)>/gi)].map(
     (match) => match[1],
