@@ -115,6 +115,34 @@ describe("registerIpc", () => {
     expect(fallback).not.toHaveBeenCalled();
   });
 
+  it("keeps model routing in main while renderer sends only the chat contract", async () => {
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => Promise<unknown>>();
+    const authorizedWebContents = { mainFrame: {}, send: vi.fn() };
+    const client = new MockUClawClient();
+    await client.gateway.negotiate();
+    const routeChatSend = vi.fn(async () => (async function* () {
+      yield { type: "started" as const, runId: "run-routed", sessionId: "session-1" };
+    })());
+    registerIpc({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents,
+      windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
+      dispatchClient: vi.fn(),
+      client,
+      routeChatSend,
+    });
+
+    const response = await handlers.get(CLIENT_IPC_CHANNEL)!({ sender: authorizedWebContents, senderFrame: authorizedWebContents.mainFrame }, {
+      method: "chat.send", requestId: "routed-chat", params: {
+        sessionId: "session-1", clientRequestId: "renderer-request",
+        blocks: [{ type: "text", text: "hello", format: "plain" }],
+      },
+    });
+    expect(response).toMatchObject({ ok: true, result: { runId: "run-routed" } });
+    expect(routeChatSend).toHaveBeenCalledOnce();
+    expect(JSON.stringify(routeChatSend.mock.calls[0])).not.toMatch(/endpoint|username|tokenSecret|authorization/iu);
+  });
+
   it("rejects requests from another sender and from subframes", async () => {
     const { handlers, dispatchClient, event, authorizedWebContents } = setup();
     const payload = { method: "tools.list", requestId: "client-auth", params: {} };

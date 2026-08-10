@@ -10,6 +10,8 @@ import {
   type AttachmentImportInput,
   type AttachmentService,
   type ClientIpcRequest,
+  type MessageEvent,
+  type SendMessageInput,
   type UClawClient,
   LOCKED_OPENCLAW_VERSION,
 } from "@uclaw/shared";
@@ -30,6 +32,7 @@ import type { IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import { createSessionOrganizerStore } from "./session-organizer/store.js";
 import { createProviderStore } from "./providers/provider-store.js";
+import { createMainProcessModelRouting, type ModelSourceExecutors } from "./providers/model-source-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
 import { createSkillService } from "./skills/skill-service.js";
 import { createLivePluginRegistryClient, createUnavailablePluginRegistryClient } from "./plugins/registry-client.js";
@@ -210,6 +213,7 @@ export interface DesktopMainOptions {
   gatewayStopTimeoutMs?: number;
   gatewayKillTimeoutMs?: number;
   consistencyCoordinator?: ProductionRuntimeConsistencyCoordinator;
+  modelSourceExecutors?: ModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
 }
 
 export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
@@ -343,6 +347,13 @@ export function requireElectronClient(client: UClawClient | undefined): UClawCli
   return client;
 }
 
+export function requireModelSourceExecutors(
+  executors: DesktopMainOptions["modelSourceExecutors"],
+): ModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>> {
+  if (!executors) throw new Error("Desktop production wiring must provide model source executors.");
+  return executors;
+}
+
 export function requireChannelRuntime(client: UClawClient): ChannelRuntime {
   const runtime = client.channels as unknown as Partial<ChannelRuntime>;
   const methods: ReadonlyArray<keyof ChannelRuntime> = ["capability", "configure", "remove", "test", "start", "stop"];
@@ -428,6 +439,7 @@ export async function startElectronMain(
   options: DesktopMainOptions,
   portablePaths: PortableDesktopPaths,
 ): Promise<void> {
+  const modelSourceExecutors = requireModelSourceExecutors(options.modelSourceExecutors);
   const { app, BrowserWindow, dialog, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const client = requireElectronClient(options.client);
@@ -435,6 +447,11 @@ export async function startElectronMain(
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
   const attachments = options.attachments ?? client.attachments;
   const providers = createProviderStore({ dataDir: portablePaths.dataDir });
+  const modelRouting = createMainProcessModelRouting({
+    dataDir: portablePaths.dataDir,
+    providers,
+    executors: modelSourceExecutors,
+  });
   const skills = await createSkillService({
     dataDir: portablePaths.dataDir,
     client: createSkillHubClient(),
@@ -528,6 +545,7 @@ export async function startElectronMain(
       organizer,
       attachments,
       providers,
+      routeChatSend: modelRouting.routeChatSend,
       skills,
       plugins,
       channels,

@@ -28,6 +28,7 @@ import {
   type DiagnosticSummary,
   type Message,
   type MessageEvent,
+  type SendMessageInput,
   type ModelSummary,
   type LogSummary,
   type Session,
@@ -46,6 +47,7 @@ export interface ClientDispatcherDependencies {
   organizer?: SessionOrganizerStore;
   sendEvent(event: ClientIpcEvent): void;
   runMutation?<T>(operation: () => Promise<T>): Promise<T>;
+  routeChatSend?(input: SendMessageInput, signal: AbortSignal): AsyncIterable<MessageEvent> | Promise<AsyncIterable<MessageEvent>>;
 }
 
 export interface ClientDispatcher {
@@ -390,9 +392,15 @@ export function toRendererSafeResponse(response: ClientIpcResponse): ClientIpcRe
   return ClientIpcResponseSchema.parse({ ...response, result });
 }
 
-export function createClientDispatcher({ client, organizer, sendEvent, runMutation = (operation) => operation() }: ClientDispatcherDependencies) {
+export function createClientDispatcher({
+  client,
+  organizer,
+  sendEvent,
+  runMutation = (operation) => operation(),
+  routeChatSend = (input, signal) => client.chat.send(input, signal),
+}: ClientDispatcherDependencies) {
   type SubscriptionState = { controller: AbortController };
-  type SendState = { controller: AbortController; iterator: AsyncIterator<MessageEvent> };
+  type SendState = { controller: AbortController; iterator?: AsyncIterator<MessageEvent> };
   const subscriptions = new Map<string, SubscriptionState>();
   const sends = new Map<string, SendState>();
   let disposed = false;
@@ -512,14 +520,21 @@ export function createClientDispatcher({ client, organizer, sendEvent, runMutati
           void runMutation(async () => {
             if (disposed) throw new Error("Client dispatcher is disposed.");
             const controller = new AbortController();
-            const iterator = client.chat.send(request.params, controller.signal)[Symbol.asyncIterator]();
             const previous = sends.get(request.params.clientRequestId);
             previous?.controller.abort();
-            if (previous) void returnIterator(previous.iterator);
-            const state = { controller, iterator };
+            if (previous?.iterator) void returnIterator(previous.iterator);
+            const state: SendState = { controller };
             sends.set(request.params.clientRequestId, state);
+            let iterator: AsyncIterator<MessageEvent> | undefined;
             let runId: string | undefined;
             try {
+              const routed = routeChatSend(request.params, controller.signal);
+              const source = routed instanceof Promise ? await routed : routed;
+              if (disposed || sends.get(request.params.clientRequestId) !== state || controller.signal.aborted) {
+                throw new Error("Chat stream was replaced.");
+              }
+              iterator = source[Symbol.asyncIterator]();
+              state.iterator = iterator;
               const first = await iterator.next();
               if (disposed || sends.get(request.params.clientRequestId) !== state) throw new Error("Chat stream was replaced.");
               if (first.done || first.value.type !== "started") throw new Error("Chat stream did not start.");
@@ -545,7 +560,7 @@ export function createClientDispatcher({ client, organizer, sendEvent, runMutati
             } finally {
               if (sends.get(request.params.clientRequestId) === state) sends.delete(request.params.clientRequestId);
               controller.abort();
-              await returnIterator(iterator);
+              if (iterator) await returnIterator(iterator);
             }
           }).catch((error) => {
             if (!startedSettled) { startedSettled = true; rejectStarted(error); }
@@ -558,7 +573,7 @@ export function createClientDispatcher({ client, organizer, sendEvent, runMutati
           if (active) {
             sends.delete(request.params.clientRequestId);
             active.controller.abort();
-            await returnIterator(active.iterator);
+            if (active.iterator) await returnIterator(active.iterator);
           }
           return success(request, null);
         }
@@ -609,7 +624,7 @@ export function createClientDispatcher({ client, organizer, sendEvent, runMutati
     sends.clear();
     for (const { controller, iterator } of activeSends) {
       controller.abort();
-      void returnIterator(iterator);
+      if (iterator) void returnIterator(iterator);
     }
   };
   return dispatch;

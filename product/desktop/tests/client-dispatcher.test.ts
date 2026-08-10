@@ -36,6 +36,22 @@ const status = (attempt: number): GatewayStatus => ({
 });
 
 describe("createClientDispatcher stream ownership", () => {
+  it("uses the main-process model route for chat sends", async () => {
+    const stream = new ControlledIterator<MessageEvent>();
+    const client = clientWith({ chat: { list: vi.fn(), get: vi.fn(), watch: vi.fn(), send: vi.fn(), abort: vi.fn() } });
+    const routeChatSend = vi.fn(async () => stream as AsyncIterable<MessageEvent>);
+    const dispatcher = createClientDispatcher({ client, routeChatSend, sendEvent: vi.fn() });
+    const response = dispatcher(request("chat.send", "routed-send", {
+      sessionId: "session-1", clientRequestId: "routed-client",
+      blocks: [{ type: "text", text: "hello", format: "plain" }],
+    }));
+    await vi.waitFor(() => expect(routeChatSend).toHaveBeenCalledOnce());
+    stream.push({ type: "started", runId: "run-routed", sessionId: "session-1" });
+    await expect(response).resolves.toMatchObject({ ok: true, result: { runId: "run-routed" } });
+    expect(client.chat.send).not.toHaveBeenCalled();
+    dispatcher.dispose();
+  });
+
   it("preserves safe error controls while dropping cause, stack, and unsafe correlation data", () => {
     const safe = toRendererSafeError({
       code: "NETWORK_UNREACHABLE",
@@ -239,6 +255,46 @@ describe("createClientDispatcher stream ownership", () => {
     await Promise.resolve();
 
     expect(events).toEqual([{ event: "chat.send-event", clientRequestId: "same", payload: { type: "started", runId: "run-new", sessionId: "session-1" } }]);
+    dispatcher.dispose();
+  });
+
+  it("does not let a slower route replace a newer send with the same clientRequestId", async () => {
+    const oldStream = new ControlledIterator<MessageEvent>();
+    const newStream = new ControlledIterator<MessageEvent>();
+    let resolveOld!: (stream: AsyncIterable<MessageEvent>) => void;
+    const oldRoute = new Promise<AsyncIterable<MessageEvent>>((resolve) => { resolveOld = resolve; });
+    let calls = 0;
+    const routeChatSend = vi.fn(() => calls++ === 0 ? oldRoute : Promise.resolve(newStream));
+    const dispatcher = createClientDispatcher({ client: clientWith({}), routeChatSend, sendEvent: vi.fn() });
+
+    const first = dispatcher(request("chat.send", "request-old", { sessionId: "session-1", clientRequestId: "same", blocks: [{ type: "text", text: "old", format: "plain" }] }));
+    await vi.waitFor(() => expect(routeChatSend).toHaveBeenCalledTimes(1));
+    const second = dispatcher(request("chat.send", "request-new", { sessionId: "session-1", clientRequestId: "same", blocks: [{ type: "text", text: "new", format: "plain" }] }));
+    await vi.waitFor(() => expect(routeChatSend).toHaveBeenCalledTimes(2));
+    newStream.push({ type: "started", runId: "run-new", sessionId: "session-1" });
+    await expect(second).resolves.toMatchObject({ ok: true, result: { runId: "run-new" } });
+
+    resolveOld(oldStream);
+    await expect(first).resolves.toMatchObject({ ok: false });
+    expect(newStream.return).not.toHaveBeenCalled();
+    dispatcher.dispose();
+  });
+
+  it("aborts a model route while it is still resolving", async () => {
+    let routeSignal!: AbortSignal;
+    const routeChatSend = vi.fn((_input, signal: AbortSignal) => {
+      routeSignal = signal;
+      return new Promise<AsyncIterable<MessageEvent>>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    const dispatcher = createClientDispatcher({ client: clientWith({}), routeChatSend, sendEvent: vi.fn() });
+    const pending = dispatcher(request("chat.send", "request-pending", { sessionId: "session-1", clientRequestId: "pending", blocks: [{ type: "text", text: "pending", format: "plain" }] }));
+    await vi.waitFor(() => expect(routeChatSend).toHaveBeenCalledOnce());
+
+    await expect(dispatcher(request("chat.cancel-stream", "cancel-pending", { clientRequestId: "pending" }))).resolves.toMatchObject({ ok: true });
+    expect(routeSignal.aborted).toBe(true);
+    await expect(pending).resolves.toMatchObject({ ok: false });
     dispatcher.dispose();
   });
 

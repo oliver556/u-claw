@@ -36,14 +36,17 @@ describe("provider store", () => {
     id, name: `Custom ${id}`, enabled: true, baseUrl: "https://models.example.com/v1", model: "model-1",
   });
 
-  it("starts with every supported built-in provider without exposing keys", async () => {
+  it("starts on hidden builtin while preserving every external provider template", async () => {
     const { store } = await setup();
     const snapshot = await store.list();
     expect(snapshot.schemaVersion).toBe(1);
-    expect(snapshot.providers).toHaveLength(11);
+    expect(snapshot.selectedProviderId).toBeNull();
+    expect(snapshot.providers).toHaveLength(10);
     expect(snapshot.providers.map((provider: any) => provider.templateId)).toEqual([
-      "uclaw-cloud", "minimax", "kimi", "deepseek", "zai", "qwen", "doubao", "openai", "anthropic", "groq", "siliconflow",
+      "minimax", "kimi", "deepseek", "zai", "qwen", "doubao", "openai", "anthropic", "groq", "siliconflow",
     ]);
+    expect(snapshot.providers.every((provider: any) => provider.enabled === false)).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toMatch(/uclaw-cloud|api\.u-claw\.org|虾盘云/u);
     expect(JSON.stringify(snapshot)).not.toMatch(/apiKey":/u);
   });
 
@@ -85,12 +88,14 @@ describe("provider store", () => {
     expect(await store.getSelectedForRuntime()).toMatchObject({ id: "custom-new", apiKey: "preserved-secret" });
   });
 
-  it("moves selection to the next enabled provider when current one is disabled or removed", async () => {
+  it("uses last explicit enable and returns to builtin when current source is disabled or removed", async () => {
     const { store } = await setup();
-    await store.select("deepseek");
-    expect((await store.setEnabled("deepseek", false)).selectedProviderId).toBe("zai");
-    await store.select("qwen");
-    expect((await store.remove("qwen")).selectedProviderId).toBe("doubao");
+    expect((await store.setEnabled("deepseek", true)).selectedProviderId).toBe("deepseek");
+    expect((await store.setEnabled("qwen", true)).selectedProviderId).toBe("qwen");
+    expect((await store.setEnabled("deepseek", true)).selectedProviderId).toBe("deepseek");
+    expect((await store.setEnabled("deepseek", false)).selectedProviderId).toBeNull();
+    expect((await store.setEnabled("qwen", true)).selectedProviderId).toBe("qwen");
+    expect((await store.remove("qwen")).selectedProviderId).toBeNull();
     await expect(store.select("deepseek")).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
   });
 
@@ -155,7 +160,8 @@ describe("provider store", () => {
     await writeFile(join(dataDir, "providers", "provider-config.v1.json"), "{ secret-key-fragment", "utf8");
     const create = (desktop as any).createProviderStore;
     const snapshot = await (create({ dataDir }) as Store).list();
-    expect(snapshot.providers).toHaveLength(11);
+    expect(snapshot.providers).toHaveLength(10);
+    expect(snapshot.selectedProviderId).toBeNull();
     expect(JSON.stringify(snapshot)).not.toContain("secret-key-fragment");
   });
 });

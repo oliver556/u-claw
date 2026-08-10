@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { bootstrapDesktopApp, createProductionDataService, requireChannelRuntime, requireElectronClient, runDesktopMain, validateRendererUrl } from "../src/main.js";
+import { bootstrapDesktopApp, createProductionDataService, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runDesktopMain, validateRendererUrl } from "../src/main.js";
 import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
@@ -24,6 +24,15 @@ describe("Electron client wiring", () => {
 
   it("rejects production startup without a real UClawClient", () => {
     expect(() => requireElectronClient(undefined)).toThrow("UClawClient");
+  });
+
+  it("fails closed when production model-source executors are missing", () => {
+    expect(() => requireModelSourceExecutors(undefined)).toThrow("model source executors");
+  });
+
+  it("does not expose the loopback HTTP test policy through production options", async () => {
+    const source = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+    expect(source).not.toContain("allowBuiltinLoopbackHttp");
   });
 
   it("requires real channel lifecycle methods from production client", () => {

@@ -15,6 +15,8 @@ export * from "./mcp/mcp-dispatcher.js";
 export * from "./mcp/stdio-policy.js";
 export * from "./new-api-management/index.js";
 export * from "./providers/provider-store.js";
+export * from "./providers/builtin-credential-store.js";
+export * from "./providers/model-source-router.js";
 export * from "./channels/channel-store.js";
 export * from "./channels/channel-dispatcher.js";
 export * from "./channels/wechat-login-coordinator.js";
