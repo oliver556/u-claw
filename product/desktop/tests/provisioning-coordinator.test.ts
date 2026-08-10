@@ -515,6 +515,28 @@ describe("provisioning coordinator", () => {
     expect(context.newApiClient.getDeviceMapping).toHaveBeenCalledWith(input.deviceId);
   });
 
+  it("reuses the user creation key after a lost response", async () => {
+    const context = setup();
+    const createUser = vi.mocked(context.newApiClient.createUser).getMockImplementation()!;
+    let createdWithKey: string | undefined;
+    vi.mocked(context.newApiClient.createUser).mockImplementation(async (value) => {
+      if (createdWithKey === undefined) {
+        createdWithKey = value.idempotencyKey;
+        await createUser(value);
+        throw Object.assign(new Error("transport response lost"), { category: "transport" });
+      }
+      if (value.idempotencyKey !== createdWithKey) throw new Error("device user already exists");
+      return createUser(value);
+    });
+
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "NEW_API_FAILED" });
+    await expect(context.coordinator.provision(input)).resolves.toMatchObject({ status: "active" });
+
+    const keys = vi.mocked(context.newApiClient.createUser).mock.calls.map(([value]) => value.idempotencyKey);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+  });
+
   it("treats an ambiguous mapping POST followed by not-found as not created", async () => {
     const context = setup();
     vi.mocked(context.newApiClient.createDeviceMapping).mockRejectedValueOnce(

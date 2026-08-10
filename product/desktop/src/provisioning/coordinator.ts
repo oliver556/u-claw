@@ -348,7 +348,7 @@ export function createProvisioningCoordinator({
         };
       } else {
         user = await newApiClient.createUser({
-          idempotencyKey: deriveProvisioningStepKey(input.idempotencyKey, "user", generation),
+          idempotencyKey: deriveProvisioningStepKey(input.idempotencyKey, "user", 1),
           deviceId: input.deviceId,
           username: input.username,
         });
