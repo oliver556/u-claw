@@ -504,6 +504,34 @@ func TestRunRejectsLicenseBeforeLockOrRuntimeWork(t *testing.T) {
 	}
 }
 
+func TestLifecycleFailuresHaveDistinctFixedDiagnostics(t *testing.T) {
+	tests := []struct {
+		err  error
+		code string
+	}{
+		{ErrLicenseStatusUnavailable, "E_LICENSE_STATUS_UNAVAILABLE"},
+		{ErrLicenseStatusAuthentication, "E_LICENSE_STATUS_AUTH_FAILED"},
+		{ErrLicenseStatusResponseInvalid, "E_LICENSE_STATUS_INVALID"},
+		{ErrLicenseStatusReceiptInvalid, "E_LICENSE_STATUS_SIGNATURE_INVALID"},
+		{ErrLicenseStatusDeviceMismatch, "E_LICENSE_STATUS_DEVICE_MISMATCH"},
+		{ErrLicenseStatusLicenseMismatch, "E_LICENSE_STATUS_LICENSE_MISMATCH"},
+		{ErrLicenseOfflineCacheMissing, "E_LICENSE_OFFLINE_FIRST_START"},
+		{ErrLicenseOfflineCacheInvalid, "E_LICENSE_CACHE_INVALID"},
+		{ErrLicenseClockRollback, "E_LICENSE_CLOCK_ROLLBACK"},
+		{ErrLicenseOfflineGraceExpired, "E_LICENSE_OFFLINE_GRACE_EXPIRED"},
+		{ErrLicenseProvisioning, "E_LICENSE_PROVISIONING"},
+		{ErrLicenseRevoked, "E_LICENSE_REVOKED"},
+		{ErrLicenseReissued, "E_LICENSE_REISSUED"},
+		{ErrLicenseDisabled, "E_LICENSE_DISABLED"},
+	}
+	for _, test := range tests {
+		code, message := diagnosticFor(errors.Join(test.err, errors.New("Authorization: Bearer private-secret C:\\private")))
+		if code != test.code || message == "" || strings.Contains(message, "private") || strings.Contains(message, "Authorization") {
+			t.Fatalf("%v => %q %q", test.err, code, message)
+		}
+	}
+}
+
 func TestRunStopsBeforeRuntimeWhenHostCacheOwnershipFails(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)

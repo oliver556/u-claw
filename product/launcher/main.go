@@ -2,11 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"time"
+)
+
+var (
+	licenseStatusEndpoint    = ""
+	trustedLicenseStatusKeys = "{}"
 )
 
 func runReleaseFSHelperEntry(
@@ -23,7 +30,7 @@ func runReleaseFSHelperEntry(
 	if err := ProbeDataDirectory(paths.PackageRoot, paths.DataDir); err != nil {
 		return err
 	}
-	if err := verifyProductionStartupLicense(paths.PackageRoot, paths.USBRoot); err != nil {
+	if err := verifyProductionStartupLicense(paths.PackageRoot, paths.USBRoot, paths.HostCacheRoot); err != nil {
 		return err
 	}
 	return runReleaseFSHelper(args, input, output)
@@ -68,14 +75,16 @@ func launcherMain(ctx context.Context, executablePath string, localAppData strin
 
 func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 	return Dependencies{
-		Paths:               paths,
-		Reporter:            reporter,
-		USBInterval:         500 * time.Millisecond,
-		StartupGrace:        2 * time.Second,
-		ProcessStopTimeout:  2 * time.Second,
-		ReadManifest:        ReadManifest,
-		ProbeDataDirectory:  ProbeDataDirectory,
-		VerifyLicense:       verifyProductionStartupLicense,
+		Paths:              paths,
+		Reporter:           reporter,
+		USBInterval:        500 * time.Millisecond,
+		StartupGrace:       2 * time.Second,
+		ProcessStopTimeout: 2 * time.Second,
+		ReadManifest:       ReadManifest,
+		ProbeDataDirectory: ProbeDataDirectory,
+		VerifyLicense: func(packageRoot string, usbRoot string) error {
+			return verifyProductionStartupLicense(packageRoot, usbRoot, paths.HostCacheRoot)
+		},
 		EnsureHostCache:     EnsureHostCacheOwnership,
 		AcquireInstanceLock: AcquireInstanceLock,
 		PrepareRuntime:      prepareRuntimeForLaunch,
@@ -90,18 +99,50 @@ func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 	}
 }
 
-func verifyProductionStartupLicense(packageRoot string, usbRoot string) error {
+func verifyProductionStartupLicense(packageRoot string, usbRoot string, anchorRoot string) error {
 	keys, err := parseTrustedStartupLicenseKeys(trustedStartupLicenseKeys)
 	if err != nil {
 		return err
 	}
-	return VerifyStartupLicense(licenseVerificationOptions{
+	material, err := VerifyStartupLicenseMaterial(licenseVerificationOptions{
 		PackageRoot:       packageRoot,
 		USBRoot:           usbRoot,
 		Now:               time.Now,
 		ReadFingerprint:   ReadUSBFingerprint,
 		TrustedPublicKeys: keys,
 	})
+	if err != nil {
+		return err
+	}
+	query, statusKeys, err := productionLicenseLifecycleConfig(packageRoot)
+	if err != nil {
+		return err
+	}
+	return VerifyLicenseLifecycle(licenseLifecycleVerificationOptions{
+		PackageRoot:       packageRoot,
+		AnchorRoot:        anchorRoot,
+		Material:          material,
+		Now:               time.Now,
+		QueryStatus:       query,
+		TrustedPublicKeys: statusKeys,
+		Random:            rand.Reader,
+	})
+}
+
+func productionLicenseLifecycleConfig(packageRoot string) (
+	func(verifiedLicenseMaterial) (licenseStatusResponse, error),
+	map[string]ed25519.PublicKey,
+	error,
+) {
+	keys, err := parseTrustedStartupLicenseKeys(trustedLicenseStatusKeys)
+	if err != nil {
+		return nil, nil, ErrLicenseLifecycleConfigAbsent
+	}
+	query, err := productionLicenseStatusQuery(packageRoot)
+	if err != nil {
+		return nil, nil, ErrLicenseLifecycleConfigAbsent
+	}
+	return query, keys, nil
 }
 
 func prepareRuntimeForLaunch(

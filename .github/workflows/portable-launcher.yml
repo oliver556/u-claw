@@ -69,6 +69,8 @@ jobs:
         env:
           UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS }}
           UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS }}
+          UCLAW_LICENSE_STATUS_ENDPOINT: ${{ vars.UCLAW_LICENSE_STATUS_ENDPOINT }}
+          UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS }}
           UCLAW_RUNTIME_REVOKED_KEY_IDS: ${{ vars.UCLAW_RUNTIME_REVOKED_KEY_IDS }}
           UCLAW_RELEASE_BASE_URL: ${{ vars.UCLAW_RELEASE_BASE_URL }}
         run: |
@@ -78,6 +80,12 @@ jobs:
           }
           if ([string]::IsNullOrWhiteSpace($env:UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS)) {
             throw 'UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS is required for production Launcher builds'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:UCLAW_LICENSE_STATUS_ENDPOINT)) {
+            throw 'UCLAW_LICENSE_STATUS_ENDPOINT is required for production Launcher builds'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS)) {
+            throw 'UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS is required for production Launcher builds'
           }
           if ([string]::IsNullOrWhiteSpace($env:UCLAW_RELEASE_BASE_URL)) {
             throw 'UCLAW_RELEASE_BASE_URL is required for production Launcher builds'
@@ -97,6 +105,13 @@ jobs:
               $keyBytes = [Convert]::FromBase64String($licenseKeys[$keyID])
               if ($keyBytes.Length -ne 32) { throw 'Trusted license key must be a raw Ed25519 public key' }
             }
+            $licenseStatusKeys = ConvertFrom-Json $env:UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS -AsHashtable
+            if ($licenseStatusKeys.Count -lt 1 -or $licenseStatusKeys.Count -gt 16) { throw 'Trusted license status key count is invalid' }
+            foreach ($keyID in $licenseStatusKeys.Keys) {
+              if ($keyID -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { throw 'Trusted license status key ID is invalid' }
+              $keyBytes = [Convert]::FromBase64String($licenseStatusKeys[$keyID])
+              if ($keyBytes.Length -ne 32) { throw 'Trusted license status key must be a raw Ed25519 public key' }
+            }
             $revokedKeyIDs = @(ConvertFrom-Json ($env:UCLAW_RUNTIME_REVOKED_KEY_IDS ?? '[]'))
             if ($revokedKeyIDs.Count -gt 64) { throw 'Revoked runtime key count is invalid' }
             foreach ($keyID in $revokedKeyIDs) {
@@ -104,12 +119,18 @@ jobs:
             }
             $trustedKeysJson = ConvertTo-Json $trustedKeys -Compress
             $licenseKeysJson = ConvertTo-Json $licenseKeys -Compress
+            $licenseStatusKeysJson = ConvertTo-Json $licenseStatusKeys -Compress
             $revokedKeyIDsJson = ConvertTo-Json @($revokedKeyIDs) -Compress
             $releaseURI = [Uri]$env:UCLAW_RELEASE_BASE_URL
             if (!$releaseURI.IsAbsoluteUri -or $releaseURI.Scheme -cne 'https' -or $releaseURI.UserInfo -or $releaseURI.Query -or $releaseURI.Fragment) {
               throw 'Release feed must be an HTTPS URL without credentials, query, or fragment'
             }
             $releaseBaseURL = $releaseURI.AbsoluteUri
+            $licenseStatusURI = [Uri]$env:UCLAW_LICENSE_STATUS_ENDPOINT
+            if (!$licenseStatusURI.IsAbsoluteUri -or $licenseStatusURI.Scheme -cne 'https' -or $licenseStatusURI.UserInfo -or $licenseStatusURI.Query -or $licenseStatusURI.Fragment) {
+              throw 'License status endpoint must be an HTTPS URL without credentials, query, or fragment'
+            }
+            $licenseStatusEndpoint = $licenseStatusURI.AbsoluteUri
           }
           catch {
             throw "Invalid production Launcher trust-root configuration: $($_.Exception.Message)"
@@ -126,7 +147,7 @@ jobs:
             try {
               go run github.com/akavel/rsrc@v0.10.2 -manifest app.manifest -arch amd64 -o rsrc_windows_amd64.syso
               if ($LASTEXITCODE -ne 0) { throw 'Launcher manifest generation failed' }
-              $ldflags = "-s -w -H windowsgui -X 'main.trustedRuntimeKeys=$trustedKeysJson' -X 'main.trustedStartupLicenseKeys=$licenseKeysJson' -X 'main.revokedRuntimeKeyIDs=$revokedKeyIDsJson' -X 'main.releaseFeedBaseURL=$releaseBaseURL'"
+              $ldflags = "-s -w -H windowsgui -X 'main.trustedRuntimeKeys=$trustedKeysJson' -X 'main.trustedStartupLicenseKeys=$licenseKeysJson' -X 'main.trustedLicenseStatusKeys=$licenseStatusKeysJson' -X 'main.licenseStatusEndpoint=$licenseStatusEndpoint' -X 'main.revokedRuntimeKeyIDs=$revokedKeyIDsJson' -X 'main.releaseFeedBaseURL=$releaseBaseURL'"
               go build -trimpath -ldflags $ldflags -o (Join-Path $outputRoot 'U-Claw.exe') .
               if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed' }
             }

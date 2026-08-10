@@ -61,6 +61,23 @@ async function main() {
     license.notBefore, license.expiresAt, license.signature.algorithm, license.signature.keyId,
   ];
   license.signature.value = sign(null, Buffer.from(JSON.stringify(payload), "utf8"), privateKey).toString("base64");
+  const checkedAt = new Date(now).toISOString();
+  const status = {
+    licenseId: credential.licenseId,
+    deviceId: credential.deviceId,
+    status: "active",
+    revision: 1,
+    notBefore: license.notBefore,
+    expiresAt: license.expiresAt,
+    replacementLicenseId: null,
+    updatedAt: checkedAt,
+  };
+  const statusPayload = [
+    "uclaw-license-status-v1", 1, status.licenseId, status.deviceId, status.status, status.revision,
+    status.notBefore, status.expiresAt, status.replacementLicenseId, status.updatedAt, checkedAt, license.expiresAt, keyId,
+  ];
+  const encodedStatus = Buffer.from(JSON.stringify(statusPayload), "utf8").toString("base64url");
+  const statusReceipt = `${encodedStatus}.${sign(null, Buffer.from(JSON.stringify(statusPayload), "utf8"), privateKey).toString("base64url")}`;
   const publicJwk = publicKey.export({ format: "jwk" });
   if (typeof publicJwk.x !== "string") throw new Error("fixture public key export failed");
 
@@ -68,6 +85,7 @@ async function main() {
   await Promise.all([
     writeFile(path.join(licenseDir, ".startup-credential.json"), `${JSON.stringify(credential)}\n`, { mode: 0o600 }),
     writeFile(path.join(licenseDir, "license.json"), `${JSON.stringify(license)}\n`, { mode: 0o600 }),
+    writeFile(path.join(licenseDir, ".status-response.json"), `${JSON.stringify({ status, receipt: { value: statusReceipt } })}\n`, { mode: 0o600 }),
     writeFile(trustedKeysPath, `${JSON.stringify({ [keyId]: Buffer.from(publicJwk.x, "base64url").toString("base64") })}\n`, { mode: 0o600 }),
   ]);
 }

@@ -50,6 +50,11 @@ test("production launcher build requires and injects an Ed25519 trust root", asy
   assert.match(source, /UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
   assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS\)[\s\S]*throw/u);
   assert.match(source, /main\.trustedStartupLicenseKeys=\$licenseKeysJson/u);
+  assert.match(source, /UCLAW_LICENSE_STATUS_ENDPOINT:\s*\$\{\{\s*vars\.UCLAW_LICENSE_STATUS_ENDPOINT\s*\}\}/u);
+  assert.match(source, /UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
+  assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_LICENSE_STATUS_ENDPOINT\)[\s\S]*throw/u);
+  assert.match(source, /main\.licenseStatusEndpoint=\$licenseStatusEndpoint/u);
+  assert.match(source, /main\.trustedLicenseStatusKeys=\$licenseStatusKeysJson/u);
   assert.match(source, /\$env:GOFLAGS\s*=\s*''/u);
   assert.match(source, /main\.revokedRuntimeKeyIDs=\$revokedKeyIDsJson/u);
   assert.match(source, /main\.releaseFeedBaseURL=\$releaseBaseURL/u);
@@ -88,6 +93,8 @@ test("PowerShell E2E covers the frozen portable lifecycle", async () => {
   assert.match(source, /sign-license-fixture\.mjs/u);
   assert.match(source, /-tags\s+licensefixture/u);
   assert.match(source, /main\.trustedStartupLicenseKeys=\$licenseTrustedKeysJson/u);
+  assert.match(source, /main\.trustedLicenseStatusKeys=\$licenseStatusTrustedKeysJson/u);
+  assert.match(source, /\.status-response\.json/u);
   assert.match(source, /\.partial-/u);
   assert.doesNotMatch(source, /Write-(Host|Verbose|Debug|Warning)|Start-Process[^\n]*-Verb\s+RunAs/iu);
 });

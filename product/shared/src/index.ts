@@ -10,6 +10,7 @@ export * from "./diagnostics.js";
 export * from "./errors.js";
 export * from "./gateway.js";
 export * from "./ipc.js";
+export * from "./license-lifecycle.js";
 export * from "./management.js";
 export * from "./new-api-management.js";
 export * from "./mcp.js";

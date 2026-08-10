@@ -75,6 +75,26 @@ func TestLauncherDependenciesWireProductionLicenseGate(t *testing.T) {
 	}
 }
 
+func TestProductionLicenseLifecycleConfigurationFailsClosed(t *testing.T) {
+	originalEndpoint, originalKeys := licenseStatusEndpoint, trustedLicenseStatusKeys
+	t.Cleanup(func() {
+		licenseStatusEndpoint, trustedLicenseStatusKeys = originalEndpoint, originalKeys
+	})
+	licenseStatusEndpoint, trustedLicenseStatusKeys = "", "{}"
+	if _, _, err := productionLicenseLifecycleConfig(""); !errors.Is(err, ErrLicenseLifecycleConfigAbsent) {
+		t.Fatalf("missing configuration returned %v", err)
+	}
+	trustFixture := newLicenseFixture(t)
+	licenseStatusEndpoint = "http://license.example.test/status/"
+	trustedLicenseStatusKeys = fmt.Sprintf(
+		`{"test-status-key":%q}`,
+		base64.StdEncoding.EncodeToString(trustFixture.publicKey),
+	)
+	if _, _, err := productionLicenseLifecycleConfig(""); !errors.Is(err, ErrLicenseLifecycleConfigAbsent) {
+		t.Fatalf("plain HTTP configuration returned %v", err)
+	}
+}
+
 func TestReleaseFSHelperEntryRejectsMissingLicenseBeforeBody(t *testing.T) {
 	trustFixture := newLicenseFixture(t)
 	originalTrust := trustedStartupLicenseKeys
