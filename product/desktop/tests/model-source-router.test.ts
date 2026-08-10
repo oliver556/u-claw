@@ -67,11 +67,9 @@ describe("model source router", () => {
     await routing.credentials.provision(typedCredential("https://127.0.0.1:1/v1"));
 
     await expect(routing.routeChatSend({
-      schemaVersion: 1,
-      requestId: "main_builtin_request",
-      model: "builtin-model",
-      prompt: "main",
-      maxOutputTokens: 10,
+      sessionId: "main_builtin_session",
+      clientRequestId: "main_builtin_request",
+      blocks: [{ type: "text", text: "main", format: "plain" }],
     })).rejects.toMatchObject({ category: "transport", code: "NETWORK_ERROR" });
     expect(bypass).not.toHaveBeenCalled();
   });
@@ -86,12 +84,43 @@ describe("model source router", () => {
       executors: { domestic: vi.fn(), custom: vi.fn() },
     });
 
-    await expect(routing.routeChatSend({ prompt: "missing" })).rejects.toMatchObject({
+    await expect(routing.routeChatSend({
+      sessionId: "missing_builtin_session",
+      clientRequestId: "missing_builtin_request",
+      blocks: [{ type: "text", text: "missing", format: "plain" }],
+    })).rejects.toMatchObject({
       source: "builtin", category: "configuration", code: "UNAVAILABLE",
     });
     await expect(routing.credentials.provision(typedCredential())).rejects.toMatchObject({
       code: "BUILTIN_ENDPOINT_INSECURE",
     });
+  });
+
+  it.each([
+    { blocks: [{ type: "attachment", attachmentId: "attachment_001" }] },
+    { blocks: [{ type: "text", text: "", format: "plain" }] },
+    { blocks: [{ type: "text", text: "x".repeat(65_537), format: "plain" }] },
+  ] as const)("fails closed for builtin chat input that has no bounded text mapping", async ({ blocks }) => {
+    const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-model-invalid-input-"));
+    roots.push(dataDir);
+    const providers = createProviderStore({ dataDir });
+    const routing = createMainProcessModelRouting({
+      dataDir,
+      providers,
+      executors: { domestic: vi.fn(), custom: vi.fn() },
+    });
+    const credential = typedCredential("https://127.0.0.1:1/v1");
+    await routing.credentials.provision(credential);
+
+    const error = await routing.routeChatSend({
+      sessionId: "invalid_builtin_session",
+      clientRequestId: "invalid_builtin_request",
+      blocks: [...blocks],
+    }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ category: "validation", code: "INVALID_REQUEST", retryable: false, causeDetails: {} });
+    const serialized = JSON.stringify(error);
+    expect(serialized).not.toContain(credential.endpoint);
+    expect(serialized).not.toContain(credential.issuedToken.secret);
   });
 
   it("uses builtin when no external source is explicitly enabled", async () => {

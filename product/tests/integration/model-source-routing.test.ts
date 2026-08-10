@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { BuiltinModelRequest, MessageEvent, SendMessageInput } from "@uclaw/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -19,6 +20,29 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+async function collectEvents(stream: AsyncIterable<MessageEvent> | Promise<AsyncIterable<MessageEvent>>): Promise<MessageEvent[]> {
+  const events: MessageEvent[] = [];
+  for await (const event of await stream) events.push(event);
+  return events;
+}
+
+function externalEvents(sessionId: string, source: "domestic" | "custom"): AsyncIterable<MessageEvent> {
+  const runId = `run_${source}_fixture`;
+  return (async function* (): AsyncIterable<MessageEvent> {
+    yield { type: "started", runId, sessionId };
+    yield { type: "delta", runId, mode: "append", text: source };
+    yield {
+      type: "final",
+      runId,
+      message: {
+        id: `msg_${source}_fixture`, sessionId, runId, role: "assistant", status: "completed",
+        blocks: [{ id: `block_${source}_fixture`, type: "text", text: source, format: "plain" }],
+        createdAt: "2026-08-11T00:00:00.000Z",
+      },
+    };
+  })();
+}
 
 describe("typed New API model source routing integration", () => {
   it("keeps builtin quota and credentials isolated when an external source is active", async () => {
@@ -57,7 +81,7 @@ describe("typed New API model source routing integration", () => {
 
     const providers = createProviderStore({ dataDir });
     const domestic = vi.fn(async () => { throw new ModelSourceFailure("domestic", "quota"); });
-    const custom = vi.fn(async () => ({ source: "custom" as const }));
+    const custom = vi.fn(async (input: SendMessageInput) => externalEvents(input.sessionId, "custom"));
     const routing = createMainProcessModelRouting({
       dataDir, providers, allowLoopbackHttp: true, executors: { domestic, custom },
     });
@@ -68,7 +92,11 @@ describe("typed New API model source routing integration", () => {
 
     const loadActive = vi.spyOn(routing.credentials, "loadActive");
     await providers.setEnabled("deepseek", true);
-    const externalError = await routing.routeChatSend({ prompt: "external" }).catch((error: unknown) => error);
+    const externalError = await routing.routeChatSend({
+      sessionId: "route_external_session",
+      clientRequestId: "route_external_request",
+      blocks: [{ type: "text", text: "external", format: "plain" }],
+    }).catch((error: unknown) => error);
     expect(externalError).toMatchObject({ source: "domestic", category: "quota", code: "MODEL_UNAVAILABLE" });
     expect(loadActive).not.toHaveBeenCalled();
     expect(domestic).toHaveBeenCalledOnce();
@@ -86,6 +114,7 @@ describe("typed New API model source routing integration", () => {
     let licenseState: "active" | "revoked" | "disabled" | "expired" | "reissued" = "active";
     let licenseRevision = 1;
     let upstreamCalls = 0;
+    const upstreamRequests: BuiltinModelRequest[] = [];
     const server = await startLocalNewApiManagementServer({
       managementCredential: "fixture-lifecycle-management-credential",
       now: () => new Date("2026-08-11T00:00:00.000Z"),
@@ -100,8 +129,9 @@ describe("typed New API model source routing integration", () => {
           replacementLicenseId: licenseState === "reissued" ? "route_replacement_license" : null,
           updatedAt: "2026-08-11T00:00:00.000Z",
         }),
-        execute: async () => {
+        execute: async (request) => {
           upstreamCalls += 1;
+          upstreamRequests.push(request);
           return { output: "builtin-answer", usage: { inputTokens: 1, outputTokens: 1 } };
         },
       },
@@ -169,8 +199,8 @@ describe("typed New API model source routing integration", () => {
     });
 
     const providers = createProviderStore({ dataDir });
-    const domestic = vi.fn(async () => ({ source: "domestic" as const }));
-    const custom = vi.fn(async () => ({ source: "custom" as const }));
+    const domestic = vi.fn(async (input: SendMessageInput) => externalEvents(input.sessionId, "domestic"));
+    const custom = vi.fn(async (input: SendMessageInput) => externalEvents(input.sessionId, "custom"));
     const routing = createMainProcessModelRouting({
       dataDir,
       providers,
@@ -184,22 +214,54 @@ describe("typed New API model source routing integration", () => {
       issuedToken: { ...issued, token: activeToken },
     });
     let requestSequence = 0;
-    const routeBuiltin = () => routing.routeChatSend({
-      schemaVersion: 1 as const,
-      requestId: `route_lifecycle_request_${++requestSequence}`,
-      model: "builtin-model",
-      prompt: "hello",
-      maxOutputTokens: 10,
-    });
+    const routeBuiltin = (signal?: AbortSignal) => routing.routeChatSend({
+      sessionId: "route_lifecycle_session",
+      clientRequestId: `route_lifecycle_request_${++requestSequence}`,
+      blocks: [
+        { type: "text", text: "hello", format: "plain" },
+        { type: "text", text: "world", format: "markdown" },
+      ],
+    } satisfies SendMessageInput, signal);
 
-    await expect(routeBuiltin()).resolves.toMatchObject({ serviceState: "enabled", output: "builtin-answer" });
+    const initialEvents = await collectEvents(routeBuiltin());
+    expect(initialEvents).toMatchObject([
+      { type: "started", sessionId: "route_lifecycle_session" },
+      { type: "delta", mode: "append", text: "builtin-answer" },
+      { type: "final", message: { status: "completed", role: "assistant" } },
+    ]);
+    expect(initialEvents[0]).toMatchObject({ runId: expect.stringMatching(/^run_[a-f0-9]{32}$/u) });
+    expect(initialEvents[2]).toMatchObject({
+      runId: expect.stringMatching(/^run_[a-f0-9]{32}$/u),
+      message: {
+        id: expect.stringMatching(/^msg_[a-f0-9]{32}$/u),
+        blocks: [expect.objectContaining({ id: expect.stringMatching(/^block_[a-f0-9]{32}$/u) })],
+      },
+    });
+    const serializedEvents = JSON.stringify(initialEvents);
+    expect(serializedEvents).not.toContain(server.dataUrl);
+    expect(serializedEvents).not.toContain(issued.secret);
+    expect(serializedEvents).not.toContain("builtin-model");
+    expect(upstreamRequests[0]).toMatchObject({
+      schemaVersion: 1,
+      model: "builtin-model",
+      prompt: "hello\n\nworld",
+      maxOutputTokens: 4_096,
+    });
+    expect(upstreamRequests[0]?.requestId).toMatch(/^req_[a-f0-9]{32}$/u);
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(routeBuiltin(aborted.signal)).rejects.toMatchObject({
+      category: "cancelled", code: "OPERATION_CANCELLED", retryable: false,
+    });
     await management.updateServiceStatus({
       idempotencyKey: "route-lifecycle-service-degraded",
       expectedRevision: 2,
       state: "degraded",
       reasonCode: "DEGRADED_HEALTH",
     });
-    await expect(routeBuiltin()).resolves.toMatchObject({ serviceState: "degraded", serviceRevision: 3 });
+    await expect(collectEvents(routeBuiltin())).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "delta", text: "builtin-answer" }),
+    ]));
 
     await management.updateServiceStatus({
       idempotencyKey: "route-lifecycle-service-maintenance",
@@ -212,7 +274,9 @@ describe("typed New API model source routing integration", () => {
     const loadActive = vi.spyOn(routing.credentials, "loadActive");
     await providers.setApiKey("deepseek", randomBytes(24).toString("hex"));
     await providers.setEnabled("deepseek", true);
-    await expect(routeBuiltin()).resolves.toEqual({ source: "domestic" });
+    await expect(collectEvents(routeBuiltin())).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "delta", text: "domestic" }),
+    ]));
     expect(upstreamCalls).toBe(callsBeforeExternal);
     expect(loadActive).not.toHaveBeenCalled();
     await providers.create({
@@ -223,7 +287,9 @@ describe("typed New API model source routing integration", () => {
       model: "custom-model",
     });
     await providers.setApiKey("route-lifecycle-custom", randomBytes(24).toString("hex"));
-    await expect(routeBuiltin()).resolves.toEqual({ source: "custom" });
+    await expect(collectEvents(routeBuiltin())).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "delta", text: "custom" }),
+    ]));
     expect(upstreamCalls).toBe(callsBeforeExternal);
     expect(loadActive).not.toHaveBeenCalled();
     loadActive.mockRestore();
@@ -262,7 +328,7 @@ describe("typed New API model source routing integration", () => {
       expectedTokenId: disabledControls.tokenId,
       policy,
     });
-    await expect(routeBuiltin()).resolves.toMatchObject({ serviceState: "enabled" });
+    await expect(collectEvents(routeBuiltin())).resolves.toHaveLength(3);
 
     for (const state of ["revoked", "disabled", "expired", "reissued"] as const) {
       licenseState = state;
@@ -271,7 +337,7 @@ describe("typed New API model source routing integration", () => {
     }
     licenseState = "active";
     licenseRevision += 1;
-    await expect(routeBuiltin()).resolves.toMatchObject({ serviceState: "enabled" });
+    await expect(collectEvents(routeBuiltin())).resolves.toHaveLength(3);
 
     await management.updateDeviceStatus(mapping.deviceId, {
       idempotencyKey: "route-lifecycle-mapping-disable",
@@ -290,7 +356,7 @@ describe("typed New API model source routing integration", () => {
       expectedLicenseId: mapping.licenseId,
       expectedTokenId: mapping.newApiTokenId,
     });
-    await expect(routeBuiltin()).resolves.toMatchObject({ serviceState: "enabled" });
+    await expect(collectEvents(routeBuiltin())).resolves.toHaveLength(3);
 
     await management.revokeToken(issued.token.id, { idempotencyKey: "route-lifecycle-token-revoke" });
     await expect(routeBuiltin()).rejects.toMatchObject({ category: "authentication", code: "AUTHENTICATION_FAILED" });
