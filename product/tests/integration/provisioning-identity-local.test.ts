@@ -128,6 +128,34 @@ describe("localhost provisioning identity transaction", () => {
     expect(audit.items.filter((event) => event.action === "device.created")).toHaveLength(1);
   });
 
+  it("serializes different devices across coordinators that share one data directory", async () => {
+    const context = await setup();
+    const secondWriter = createProvisioningArtifactWriter({
+      dataDir: context.dataDir,
+      credentialStore: createBuiltinCredentialStore({ dataDir: context.dataDir, allowLoopbackHttp: true }),
+    });
+    const second = createProvisioningCoordinator({
+      licenseClient: context.licenseClient,
+      newApiClient: context.newApiClient,
+      artifactWriter: secondWriter,
+      now: () => new Date("2026-08-10T00:00:00.000Z"),
+    });
+    const [firstResult, secondResult] = await Promise.allSettled([
+      context.coordinator.provision(context.input),
+      second.provision({
+        ...context.input,
+        idempotencyKey: "provision-local-device-002",
+        deviceId: "dev_local_fixture_002",
+        username: "uclaw_local_fixture_002",
+        usbFingerprint: "b".repeat(64),
+      }),
+    ]);
+    expect(firstResult.status).toBe("fulfilled");
+    expect(secondResult).toMatchObject({ status: "rejected", reason: { code: "IDEMPOTENCY_CONFLICT" } });
+    const audit = await context.newApiClient.listAuditEvents({ cursor: null, pageSize: 100 });
+    expect(audit.items.filter((event) => event.action === "user.created")).toHaveLength(1);
+  });
+
   it("fails closed for auth, network, and invalid response without leaking remote data", async () => {
     const authenticated = await setup();
     const wrongAuth = createNewApiManagementClient({
@@ -254,6 +282,40 @@ describe("localhost provisioning identity transaction", () => {
       idempotencyKey: "verify-old-token-revoked",
     })).resolves.toMatchObject({ status: "revoked" });
     await expect(context.credentialStore.loadActive()).resolves.toMatchObject({ tokenId: reissued.newApiTokenId });
+  });
+
+  it("resumes a reissue after the replacement artifact write fails", async () => {
+    const context = await setup();
+    const active = await context.coordinator.provision(context.input);
+    let failWrite = true;
+    const writer: ProvisioningArtifactWriter = {
+      ...context.artifactWriter,
+      async writeArtifacts(value) {
+        if (failWrite) {
+          failWrite = false;
+          throw new Error("injected replacement write failure");
+        }
+        return context.artifactWriter.writeArtifacts(value);
+      },
+    };
+    const coordinator = createProvisioningCoordinator({
+      licenseClient: context.licenseClient,
+      newApiClient: context.newApiClient,
+      artifactWriter: writer,
+      now: () => new Date("2026-08-10T00:00:00.000Z"),
+    });
+    const action = {
+      action: "reissue" as const,
+      idempotencyKey: "lifecycle-reissue-recover-local",
+      binding: bindingOf(active),
+      usbFingerprint: "e".repeat(64),
+      notBefore: context.input.notBefore,
+      expiresAt: "2028-08-10T00:00:00.000Z",
+    };
+    await expect(coordinator.applyLifecycle(action)).rejects.toMatchObject({ retryable: true });
+    await expect(coordinator.applyLifecycle(action)).resolves.toMatchObject({
+      status: "active", usbFingerprint: action.usbFingerprint,
+    });
   });
 
   it("keeps secrets out of result, errors, journal, audit, and ordinary config", async () => {

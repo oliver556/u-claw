@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import {
   NewApiAuditPageSchema,
   NewApiAuditQuerySchema,
+  NewApiActivateTokenInputSchema,
   NewApiCreateDeviceMappingInputSchema,
   NewApiCreateTokenInputSchema,
   NewApiCreateUserInputSchema,
@@ -206,7 +207,7 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
           const token: NewApiToken = {
             id: nextId("tok"), userId, name: input.name,
             channelId: input.channelId, policyDigest: input.policyDigest, generation: input.generation,
-            status: "active", createdAt, updatedAt: createdAt,
+            status: "provisioning", createdAt, updatedAt: createdAt,
           };
           const secret = `uclaw_dev_${randomBytes(24).toString("base64url")}`;
           tokens.set(token.id, { summary: token, secretHash: createHash("sha256").update(secret).digest("hex") });
@@ -235,7 +236,7 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
           const user = users.get(input.newApiUserId);
           const token = tokens.get(input.newApiTokenId);
           if (!user || user.username !== input.newApiUsername || user.deviceId !== input.deviceId) throw failure(409, "conflict", "USER_MAPPING_CONFLICT", "User mapping does not match device.");
-          if (!token || token.summary.userId !== user.id || token.summary.status !== "active"
+          if (!token || token.summary.userId !== user.id || token.summary.status !== "provisioning"
               || token.summary.channelId !== input.channelId
               || token.summary.policyDigest !== input.policyDigest
               || token.summary.generation !== input.generation) {
@@ -254,6 +255,15 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
         return;
       }
 
+      const deviceMatch = /^devices\/([^/]+)$/u.exec(route);
+      if (method === "GET" && deviceMatch) {
+        const deviceId = decodeURIComponent(deviceMatch[1]);
+        const mapping = devices.get(deviceId);
+        if (!mapping) throw failure(404, "not-found", "DEVICE_NOT_FOUND", "Device mapping was not found.");
+        sendJson(response, 200, mapping);
+        return;
+      }
+
       const deviceStatusMatch = /^devices\/([^/]+)\/status$/u.exec(route);
       if (method === "PATCH" && deviceStatusMatch) {
         const deviceId = decodeURIComponent(deviceStatusMatch[1]);
@@ -262,6 +272,12 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
         const result = await runIdempotent(request, `device.status:${deviceId}`, body, async () => {
           const current = devices.get(deviceId);
           if (!current) throw failure(404, "not-found", "DEVICE_NOT_FOUND", "Device mapping was not found.");
+          if (current.status !== input.expectedStatus
+              || current.generation !== input.expectedGeneration
+              || current.licenseId !== input.expectedLicenseId
+              || current.newApiTokenId !== input.expectedTokenId) {
+            throw failure(409, "conflict", "DEVICE_CAS_CONFLICT", "Device mapping changed before status update.");
+          }
           const updated = NewApiDeviceMappingSchema.parse({
             ...current,
             status: input.status,
@@ -270,6 +286,38 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
           });
           devices.set(deviceId, updated);
           addAudit("device.status-updated", "device", deviceId, deviceId);
+          return { status: 200, value: updated };
+        });
+        sendJson(response, result.status, result.value);
+        return;
+      }
+
+      const activateMatch = /^tokens\/([^/]+)\/activate$/u.exec(route);
+      if (method === "POST" && activateMatch) {
+        const tokenId = decodeURIComponent(activateMatch[1]);
+        const body = await readJson(request);
+        const input = NewApiActivateTokenInputSchema.parse({
+          ...z.record(z.string(), z.unknown()).parse(body),
+          idempotencyKey: request.headers["idempotency-key"],
+        });
+        const result = await runIdempotent(request, `token.activate:${tokenId}`, body, async () => {
+          const stored = tokens.get(tokenId);
+          const mapping = devices.get(input.deviceId);
+          if (!stored) throw failure(404, "not-found", "TOKEN_NOT_FOUND", "Device token was not found.");
+          if (!mapping || mapping.status !== "active") {
+            throw failure(409, "conflict", "TOKEN_MAPPING_INACTIVE", "Token mapping is not active.");
+          }
+          if (stored.summary.status === "revoked"
+              || mapping.newApiTokenId !== stored.summary.id
+              || mapping.newApiUserId !== stored.summary.userId
+              || mapping.channelId !== stored.summary.channelId
+              || mapping.policyDigest !== stored.summary.policyDigest
+              || mapping.generation !== stored.summary.generation) {
+            throw failure(409, "conflict", "TOKEN_MAPPING_CONFLICT", "Token mapping does not match token binding.");
+          }
+          const updated: NewApiToken = { ...stored.summary, status: "active", updatedAt: timestamp() };
+          tokens.set(tokenId, { ...stored, summary: updated });
+          addAudit("token.activated", "token", tokenId, mapping.deviceId);
           return { status: 200, value: updated };
         });
         sendJson(response, result.status, result.value);

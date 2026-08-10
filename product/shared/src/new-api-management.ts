@@ -97,7 +97,7 @@ export const NewApiTokenSchema = z.object({
   channelId: IdentifierSchema,
   policyDigest: Sha256Schema,
   generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-  status: z.enum(["active", "revoked"]),
+  status: z.enum(["provisioning", "active", "revoked"]),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
 }).strict();
@@ -121,7 +121,7 @@ export type NewApiUsage = z.infer<typeof NewApiUsageSchema>;
 export const NewApiAuditEventSchema = z.object({
   id: IdentifierSchema,
   action: z.enum([
-    "user.created", "token.created", "token.revoked", "device.created", "device.status-updated",
+    "user.created", "token.created", "token.activated", "token.revoked", "device.created", "device.status-updated",
     "policy.updated", "usage.queried", "request.rejected",
   ]),
   subjectType: z.enum(["user", "token", "device", "request"]),
@@ -166,6 +166,12 @@ export const NewApiCreateTokenInputSchema = z.object({
 }).strict();
 export type NewApiCreateTokenInput = z.infer<typeof NewApiCreateTokenInputSchema>;
 
+export const NewApiActivateTokenInputSchema = z.object({
+  idempotencyKey: IdempotencyKeySchema,
+  deviceId: IdentifierSchema,
+}).strict();
+export type NewApiActivateTokenInput = z.infer<typeof NewApiActivateTokenInputSchema>;
+
 export const NewApiCreateDeviceMappingInputSchema = z.object({
   idempotencyKey: IdempotencyKeySchema,
   deviceId: IdentifierSchema,
@@ -184,9 +190,16 @@ export const NewApiCreateDeviceMappingInputSchema = z.object({
 }).strict();
 export type NewApiCreateDeviceMappingInput = z.infer<typeof NewApiCreateDeviceMappingInputSchema>;
 
+const NewApiDeviceStatusCasSchema = z.object({
+  idempotencyKey: IdempotencyKeySchema,
+  expectedStatus: NewApiProvisioningStatusSchema,
+  expectedGeneration: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  expectedLicenseId: IdentifierSchema,
+  expectedTokenId: IdentifierSchema,
+});
 export const NewApiUpdateDeviceStatusInputSchema = z.discriminatedUnion("status", [
-  z.object({ idempotencyKey: IdempotencyKeySchema, status: z.enum(["active", "disabled", "revoked"]), failure: z.undefined().optional() }).strict(),
-  z.object({ idempotencyKey: IdempotencyKeySchema, status: z.literal("failed"), failure: NewApiProvisioningFailureSchema }).strict(),
+  NewApiDeviceStatusCasSchema.extend({ status: z.enum(["active", "disabled", "revoked"]), failure: z.undefined().optional() }).strict(),
+  NewApiDeviceStatusCasSchema.extend({ status: z.literal("failed"), failure: NewApiProvisioningFailureSchema }).strict(),
 ]);
 export type NewApiUpdateDeviceStatusInput = z.infer<typeof NewApiUpdateDeviceStatusInputSchema>;
 
@@ -214,7 +227,9 @@ export type NewApiAuditPage = z.infer<typeof NewApiAuditPageSchema>;
 export interface NewApiManagementClient {
   createUser(input: NewApiCreateUserInput): Promise<NewApiUser>;
   createToken(input: NewApiCreateTokenInput): Promise<NewApiIssuedToken>;
+  activateToken(tokenId: string, input: NewApiActivateTokenInput): Promise<NewApiToken>;
   createDeviceMapping(input: NewApiCreateDeviceMappingInput): Promise<NewApiDeviceMapping>;
+  getDeviceMapping(deviceId: string): Promise<NewApiDeviceMapping>;
   updateDeviceStatus(deviceId: string, input: NewApiUpdateDeviceStatusInput): Promise<NewApiDeviceMapping>;
   updatePolicy(userId: string, policy: NewApiPolicy): Promise<NewApiPolicy>;
   getUsage(userId: string): Promise<NewApiUsage>;

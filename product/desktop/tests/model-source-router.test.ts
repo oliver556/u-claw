@@ -81,6 +81,10 @@ describe("model source router", () => {
     await context.credentials.provision({
       ...context.credential,
       mapping: { ...context.credential.mapping, status: "provisioning" },
+      issuedToken: {
+        ...context.credential.issuedToken,
+        token: { ...context.credential.issuedToken.token, status: "provisioning" },
+      },
     });
 
     await expect(context.router.execute({ prompt: "not-active" })).rejects.toMatchObject({

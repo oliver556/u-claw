@@ -48,7 +48,11 @@ describe("typed New API model source routing integration", () => {
       channelId: "channel_builtin_001", policyDigest, generation: 1, previousTokenId: null,
     });
     const mapping = await management.updateDeviceStatus(provisioning.deviceId, {
-      idempotencyKey: "route-active-001", status: "active",
+      idempotencyKey: "route-active-001", status: "active", expectedStatus: "provisioning",
+      expectedGeneration: 1, expectedLicenseId: provisioning.licenseId, expectedTokenId: issuedToken.token.id,
+    });
+    const activeToken = await management.activateToken(issuedToken.token.id, {
+      idempotencyKey: "route-token-active-001", deviceId: provisioning.deviceId,
     });
 
     const providers = createProviderStore({ dataDir });
@@ -59,7 +63,9 @@ describe("typed New API model source routing integration", () => {
       dataDir, providers, allowLoopbackHttp: true, executors: { builtin, domestic, custom },
     });
     const endpoint = new URL("/v1", server.url).href;
-    await routing.credentials.provision({ endpoint, model: "builtin-model", mapping, issuedToken });
+    await routing.credentials.provision({
+      endpoint, model: "builtin-model", mapping, issuedToken: { ...issuedToken, token: activeToken },
+    });
 
     await expect(routing.routeChatSend({ prompt: "first" })).resolves.toEqual({ source: "builtin" });
     await providers.setEnabled("deepseek", true);

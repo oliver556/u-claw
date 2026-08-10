@@ -1,6 +1,7 @@
 import {
   NewApiAuditPageSchema,
   NewApiAuditQuerySchema,
+  NewApiActivateTokenInputSchema,
   NewApiCreateDeviceMappingInputSchema,
   NewApiCreateTokenInputSchema,
   NewApiCreateUserInputSchema,
@@ -96,7 +97,9 @@ export function createUnavailableNewApiManagementClient(reason: string): NewApiM
   return {
     createUser: unavailable,
     createToken: unavailable,
+    activateToken: unavailable,
     createDeviceMapping: unavailable,
+    getDeviceMapping: unavailable,
     updateDeviceStatus: unavailable,
     updatePolicy: unavailable,
     getUsage: unavailable,
@@ -150,8 +153,8 @@ export function createNewApiManagementClient(options: NewApiManagementClientOpti
       }
     } catch (error) {
       if (error instanceof NewApiManagementError) throw error;
-      if (controller.signal.aborted) throw new NewApiManagementError("transport", "TIMEOUT", "Management service request timed out.", true, undefined, { cause: error });
-      throw new NewApiManagementError("transport", "NETWORK_ERROR", "Management service request failed.", true, undefined, { cause: error });
+      if (controller.signal.aborted) throw new NewApiManagementError("transport", "TIMEOUT", "Management service request timed out.", true);
+      throw new NewApiManagementError("transport", "NETWORK_ERROR", "Management service request failed.", true);
     } finally {
       clearTimeout(timer);
     }
@@ -169,10 +172,18 @@ export function createNewApiManagementClient(options: NewApiManagementClientOpti
       const { idempotencyKey, userId, ...body } = parsed;
       return request("POST", `users/${id(userId)}/tokens`, NewApiIssuedTokenSchema, body, idempotencyKey);
     },
+    async activateToken(tokenId, input) {
+      const parsed = NewApiActivateTokenInputSchema.parse(input);
+      const { idempotencyKey, ...body } = parsed;
+      return request("POST", `tokens/${id(tokenId)}/activate`, NewApiTokenSchema, body, idempotencyKey);
+    },
     async createDeviceMapping(input) {
       const parsed = NewApiCreateDeviceMappingInputSchema.parse(input);
       const { idempotencyKey, ...body } = parsed;
       return request("POST", "devices", NewApiDeviceMappingSchema, body, idempotencyKey);
+    },
+    async getDeviceMapping(deviceId) {
+      return request("GET", `devices/${id(deviceId)}`, NewApiDeviceMappingSchema);
     },
     async updateDeviceStatus(deviceId, input) {
       const parsed = NewApiUpdateDeviceStatusInputSchema.parse(input);

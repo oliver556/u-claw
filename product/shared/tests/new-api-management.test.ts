@@ -63,6 +63,40 @@ describe("New API management v1 contract", () => {
     })).not.toThrow();
   });
 
+  it("keeps newly issued tokens provisioning until explicit activation", () => {
+    const token = {
+      id: "tok_fixture_001",
+      userId: "usr_fixture_001",
+      name: "device",
+      channelId: "channel_builtin_001",
+      policyDigest: "d".repeat(64),
+      generation: 1,
+      status: "provisioning" as const,
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:00.000Z",
+    };
+    expect(shared.NewApiTokenSchema.parse(token)).toEqual(token);
+    expect(shared.NewApiActivateTokenInputSchema.parse({
+      idempotencyKey: "activate-token-001", deviceId: "dev_fixture_001",
+    })).toBeTruthy();
+  });
+
+  it("requires mapping status updates to compare the bound generation and resources", () => {
+    const input = {
+      idempotencyKey: "mapping-status-cas-001",
+      status: "active" as const,
+      expectedStatus: "provisioning" as const,
+      expectedGeneration: 1,
+      expectedLicenseId: "lic_fixture_001",
+      expectedTokenId: "tok_fixture_001",
+    };
+    expect(shared.NewApiUpdateDeviceStatusInputSchema.parse(input)).toEqual(input);
+    expect(() => shared.NewApiUpdateDeviceStatusInputSchema.parse({
+      idempotencyKey: input.idempotencyKey,
+      status: input.status,
+    })).toThrow();
+  });
+
   it("expresses failed provisioning and pending token compensation", () => {
     expect(shared.NewApiDeviceMappingSchema.parse({
       ...fixture.device,

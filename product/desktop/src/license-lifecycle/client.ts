@@ -143,8 +143,8 @@ export function createLicenseLifecycleClient(options: LicenseLifecycleClientOpti
       }
     } catch (error) {
       if (error instanceof LicenseLifecycleError) throw error;
-      if (controller.signal.aborted) throw new LicenseLifecycleError("transport", "TIMEOUT", "License service request timed out.", true, undefined, { cause: error });
-      throw new LicenseLifecycleError("transport", "NETWORK_ERROR", "License service request failed.", true, undefined, { cause: error });
+      if (controller.signal.aborted) throw new LicenseLifecycleError("transport", "TIMEOUT", "License service request timed out.", true);
+      throw new LicenseLifecycleError("transport", "NETWORK_ERROR", "License service request failed.", true);
     } finally {
       clearTimeout(timer);
     }

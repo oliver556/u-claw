@@ -185,5 +185,17 @@ describe("localhost license lifecycle backend", () => {
       expect(exposed).not.toMatch(/receipt|signature|authorization/iu);
       expect(exposed).not.toContain(credential);
     }
+    expect(error.cause).toBeUndefined();
+  });
+
+  it("does not retain raw transport errors as causes", async () => {
+    const client = createLicenseLifecycleClient({
+      endpoint: "https://license.example.test/uclaw-license/v1/",
+      managementCredential: "fixture-license-management-credential",
+      fetch: async () => { throw new Error("raw transport detail"); },
+    });
+    const error = await client.getLicenseStatus("lic_fixture_001").catch((caught: unknown) => caught) as Error;
+    expect(error.name).toBe("LicenseLifecycleError");
+    expect(error.cause).toBeUndefined();
   });
 });

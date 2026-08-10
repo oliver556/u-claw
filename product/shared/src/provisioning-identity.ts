@@ -58,6 +58,7 @@ export const ProvisioningJournalStageSchema = z.enum([
   "license-issued",
   "user-created",
   "token-created",
+  "mapping-pending",
   "mapping-created",
   "artifacts-written",
   "active",
@@ -73,6 +74,18 @@ export const ProvisioningJournalStageSchema = z.enum([
 export type ProvisioningJournalStage = z.infer<typeof ProvisioningJournalStageSchema>;
 
 const CompensationStepSchema = z.enum(["not-needed", "pending", "succeeded"]);
+const ReissueLifecycleSchema = z.object({
+  action: z.literal("reissue"),
+  requestHash: Sha256Schema,
+  sourceBinding: ProvisioningBindingSchema,
+  target: z.object({
+    usbFingerprint: Sha256Schema,
+    notBefore: TimestampSchema,
+    expiresAt: TimestampSchema,
+  }).strict(),
+  targetGeneration: z.number().int().min(2).max(Number.MAX_SAFE_INTEGER),
+  phase: z.enum(["started", "source-revoked", "artifacts-cleaned", "replacement-issued", "active"]),
+}).strict();
 export const ProvisioningJournalSchema = z.object({
   schemaVersion: z.literal(1),
   generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
@@ -90,6 +103,7 @@ export const ProvisioningJournalSchema = z.object({
     license: CompensationStepSchema,
     artifacts: CompensationStepSchema,
   }).strict(),
+  lifecycle: ReissueLifecycleSchema.nullable().default(null),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
 }).strict();
