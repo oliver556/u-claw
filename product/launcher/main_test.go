@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -59,4 +65,73 @@ func TestHeadlessStatusReporterSupportsAutomatedFailureChecks(t *testing.T) {
 	reporter.State(StateCheckingRuntime)
 	reporter.Fail("E_PACKAGE_INVALID", "运行时文件校验失败。")
 	reporter.Close()
+}
+
+func TestLauncherDependenciesWireProductionLicenseGate(t *testing.T) {
+	paths := PortablePaths{PackageRoot: filepath.Join(t.TempDir(), ".uclaw"), USBRoot: t.TempDir()}
+	dependencies := launcherDependencies(paths, &recordingReporter{})
+	if dependencies.VerifyLicense == nil {
+		t.Fatal("production license gate is not configured")
+	}
+}
+
+func TestReleaseFSHelperEntryRejectsMissingLicenseBeforeBody(t *testing.T) {
+	trustFixture := newLicenseFixture(t)
+	originalTrust := trustedStartupLicenseKeys
+	trustedStartupLicenseKeys = fmt.Sprintf(
+		`{"test-license-key":%q}`,
+		base64.StdEncoding.EncodeToString(trustFixture.publicKey),
+	)
+	t.Cleanup(func() { trustedStartupLicenseKeys = originalTrust })
+
+	tests := []struct {
+		name      string
+		configure func(*testing.T, string)
+		want      error
+	}{
+		{"credential", func(t *testing.T, packageRoot string) {
+			if err := os.MkdirAll(filepath.Join(packageRoot, "license"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, ErrStartupCredentialMissing},
+		{"license", func(t *testing.T, packageRoot string) {
+			fixture := newLicenseFixture(t)
+			fixture.root = packageRoot
+			fixture.sign(t)
+			fixture.write(t)
+			if err := os.Remove(filepath.Join(packageRoot, "license", licenseFilename)); err != nil {
+				t.Fatal(err)
+			}
+		}, ErrLicenseFileMissing},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			usbRoot := t.TempDir()
+			packageRoot := filepath.Join(usbRoot, ".uclaw")
+			test.configure(t, packageRoot)
+			cacheRoot := t.TempDir()
+			child := filepath.Join(cacheRoot, "runtime")
+			if err := os.Mkdir(child, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			bodyCalls := 0
+			releaseFSAfterOpenRoot = func() { bodyCalls++ }
+			t.Cleanup(func() { releaseFSAfterOpenRoot = nil })
+
+			err := runReleaseFSHelperEntry(
+				[]string{"cleanup-cache", "--root", cacheRoot, "--child", "runtime"},
+				filepath.Join(usbRoot, "U-Claw.exe"), filepath.Join(t.TempDir(), "local"),
+				bytes.NewReader(nil), io.Discard,
+			)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("returned %v", err)
+			}
+			if bodyCalls != 0 {
+				t.Fatalf("helper body calls = %d", bodyCalls)
+			}
+			if info, err := os.Stat(child); err != nil || !info.IsDir() {
+				t.Fatalf("cache child changed: %v", err)
+			}
+		})
+	}
 }

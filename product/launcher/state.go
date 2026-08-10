@@ -13,6 +13,7 @@ type State string
 const (
 	StateStarting          State = "STARTING"
 	StateValidatingUSB     State = "VALIDATING_USB"
+	StateValidatingLicense State = "VALIDATING_LICENSE"
 	StateCheckingRuntime   State = "CHECKING_RUNTIME"
 	StateExtractingRuntime State = "EXTRACTING_RUNTIME"
 	StateStartingApp       State = "STARTING_APP"
@@ -25,6 +26,8 @@ func stateText(state State) string {
 		return "正在启动 U-Claw..."
 	case StateValidatingUSB:
 		return "正在检查 U 盘数据目录..."
+	case StateValidatingLicense:
+		return "正在验证启动授权..."
 	case StateCheckingRuntime:
 		return "正在检查运行环境..."
 	case StateExtractingRuntime:
@@ -57,6 +60,7 @@ type Dependencies struct {
 	ProcessStopTimeout  time.Duration
 	ReadManifest        func(path string) (Manifest, error)
 	ProbeDataDirectory  func(packageRoot string, dataDir string) error
+	VerifyLicense       func(packageRoot string, usbRoot string) error
 	EnsureHostCache     func(cacheRoot string) error
 	AcquireInstanceLock func(dataDir string) (InstanceLock, error)
 	PrepareRuntime      func(context.Context, string, string, Manifest, func()) (CacheResult, error)
@@ -80,6 +84,10 @@ func Run(ctx context.Context, deps Dependencies) error {
 
 	reporter.State(StateValidatingUSB)
 	if err := deps.ProbeDataDirectory(deps.Paths.PackageRoot, deps.Paths.DataDir); err != nil {
+		return reportFailure(reporter, err)
+	}
+	reporter.State(StateValidatingLicense)
+	if err := deps.VerifyLicense(deps.Paths.PackageRoot, deps.Paths.USBRoot); err != nil {
 		return reportFailure(reporter, err)
 	}
 	lock, err := deps.AcquireInstanceLock(deps.Paths.DataDir)
@@ -238,6 +246,34 @@ func reportFailure(reporter Reporter, err error) error {
 
 func diagnosticFor(err error) (string, string) {
 	switch {
+	case errors.Is(err, ErrStartupCredentialMissing):
+		return "E_LICENSE_CREDENTIAL_MISSING", "未找到启动授权凭据，请联系服务人员。"
+	case errors.Is(err, ErrStartupSecretMissing):
+		return "E_LICENSE_SECRET_MISSING", "启动授权凭据不完整，请联系服务人员。"
+	case errors.Is(err, ErrStartupSecretInvalid):
+		return "E_LICENSE_SECRET_INVALID", "启动授权凭据无效，请联系服务人员。"
+	case errors.Is(err, ErrLicenseFileMissing):
+		return "E_LICENSE_FILE_MISSING", "未找到授权文件，请联系服务人员。"
+	case errors.Is(err, ErrLicenseFileUnsafe):
+		return "E_LICENSE_FILE_UNSAFE", "授权文件存储异常，请联系服务人员。"
+	case errors.Is(err, ErrLicenseFormatInvalid):
+		return "E_LICENSE_FORMAT_INVALID", "授权文件格式无效，请联系服务人员。"
+	case errors.Is(err, ErrLicenseTrustUnavailable):
+		return "E_LICENSE_TRUST_UNAVAILABLE", "启动授权信任配置不可用，请联系服务人员。"
+	case errors.Is(err, ErrLicenseSignatureInvalid):
+		return "E_LICENSE_SIGNATURE_INVALID", "授权文件签名无效，请联系服务人员。"
+	case errors.Is(err, ErrLicenseDeviceMismatch):
+		return "E_LICENSE_DEVICE_MISMATCH", "授权设备不匹配，请联系服务人员。"
+	case errors.Is(err, ErrLicenseIDMismatch):
+		return "E_LICENSE_ID_MISMATCH", "许可证标识不匹配，请联系服务人员。"
+	case errors.Is(err, ErrLicenseUSBIdentityUnavailable):
+		return "E_LICENSE_USB_ID_UNAVAILABLE", "无法读取 U 盘硬件身份，请更换接口后重试。"
+	case errors.Is(err, ErrLicenseFingerprintMismatch):
+		return "E_LICENSE_USB_MISMATCH", "当前 U 盘与授权不匹配。"
+	case errors.Is(err, ErrLicenseNotYetValid):
+		return "E_LICENSE_NOT_YET_VALID", "授权尚未生效，请联系服务人员。"
+	case errors.Is(err, ErrLicenseExpired):
+		return "E_LICENSE_EXPIRED", "授权已过期，请联系服务人员。"
 	case errors.Is(err, ErrInstanceRunning):
 		return "E_INSTANCE_RUNNING", "U-Claw 已在使用这个 U 盘数据目录。"
 	case errors.Is(err, ErrUSBDisconnected):

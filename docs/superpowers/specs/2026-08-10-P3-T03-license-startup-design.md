@@ -30,7 +30,7 @@
 {"schemaVersion":1,"deviceId":"dev_...","licenseId":"lic_...","startupSecret":"<random secret>"}
 ```
 
-授权 strict JSON 包含 `deviceId`、`licenseId`、`usbFingerprint`、`startupSecretProof`、`notBefore`、`expiresAt` 和 Ed25519 signature。签名 payload 使用固定字段顺序与 domain separator；未知字段、尾随 JSON、非法时间、超界字段全部拒绝。
+授权 strict JSON 包含 `deviceId`、`licenseId`、`usbFingerprint`、`startupSecretProof`、`notBefore`、`expiresAt` 和 Ed25519 signature。`startupSecretProof` 保留 P3-T01 冻结字段名 `startupSecretSalt`、`startupSecretHash`。签名 payload 使用固定字段顺序与 domain separator；未知字段、尾随 JSON、非法时间、超界字段全部拒绝。
 
 `startupSecretProof` 使用独立 salt：
 

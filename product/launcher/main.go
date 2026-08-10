@@ -2,15 +2,41 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"time"
 )
 
+func runReleaseFSHelperEntry(
+	args []string,
+	executablePath string,
+	localAppData string,
+	input io.Reader,
+	output io.Writer,
+) error {
+	paths, err := ResolvePortablePaths(executablePath, localAppData)
+	if err != nil {
+		return err
+	}
+	if err := ProbeDataDirectory(paths.PackageRoot, paths.DataDir); err != nil {
+		return err
+	}
+	if err := verifyProductionStartupLicense(paths.PackageRoot, paths.USBRoot); err != nil {
+		return err
+	}
+	return runReleaseFSHelper(args, input, output)
+}
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--release-fs-helper" {
-		if err := runReleaseFSHelper(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+		executablePath, err := os.Executable()
+		if err != nil {
+			_, _ = os.Stderr.WriteString("release filesystem helper failed\n")
+			os.Exit(2)
+		}
+		if err := runReleaseFSHelperEntry(os.Args[2:], executablePath, os.Getenv("LOCALAPPDATA"), os.Stdin, os.Stdout); err != nil {
 			_, _ = os.Stderr.WriteString("release filesystem helper failed\n")
 			os.Exit(2)
 		}
@@ -49,6 +75,7 @@ func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 		ProcessStopTimeout:  2 * time.Second,
 		ReadManifest:        ReadManifest,
 		ProbeDataDirectory:  ProbeDataDirectory,
+		VerifyLicense:       verifyProductionStartupLicense,
 		EnsureHostCache:     EnsureHostCacheOwnership,
 		AcquireInstanceLock: AcquireInstanceLock,
 		PrepareRuntime:      prepareRuntimeForLaunch,
@@ -61,6 +88,20 @@ func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 		},
 		MonitorUSB: MonitorUSB,
 	}
+}
+
+func verifyProductionStartupLicense(packageRoot string, usbRoot string) error {
+	keys, err := parseTrustedStartupLicenseKeys(trustedStartupLicenseKeys)
+	if err != nil {
+		return err
+	}
+	return VerifyStartupLicense(licenseVerificationOptions{
+		PackageRoot:       packageRoot,
+		USBRoot:           usbRoot,
+		Now:               time.Now,
+		ReadFingerprint:   ReadUSBFingerprint,
+		TrustedPublicKeys: keys,
+	})
 }
 
 func prepareRuntimeForLaunch(
