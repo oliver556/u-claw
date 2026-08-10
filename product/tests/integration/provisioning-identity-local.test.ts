@@ -259,6 +259,7 @@ describe("localhost provisioning identity transaction", () => {
   it("revokes old token and replaces binding during reissue", async () => {
     const context = await setup();
     const active = await context.coordinator.provision(context.input);
+    const originalControls = await context.newApiClient.getDeviceControls({ deviceId: active.deviceId });
     const reissued = await context.coordinator.applyLifecycle({
       action: "reissue",
       idempotencyKey: "lifecycle-reissue-local-001",
@@ -270,6 +271,11 @@ describe("localhost provisioning identity transaction", () => {
     expect(reissued.licenseId).not.toBe(active.licenseId);
     expect(reissued.newApiTokenId).not.toBe(active.newApiTokenId);
     expect(reissued.usbFingerprint).toBe("e".repeat(64));
+    await expect(context.newApiClient.getDeviceControls({ deviceId: reissued.deviceId })).resolves.toMatchObject({
+      revision: originalControls.revision + 2,
+      generation: 2,
+      tokenId: reissued.newApiTokenId,
+    });
     await expect(context.coordinator.applyLifecycle({
       action: "reissue",
       idempotencyKey: "lifecycle-reissue-local-001",

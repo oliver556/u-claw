@@ -129,9 +129,9 @@ export const NewApiAuditEventSchema = z.object({
   id: IdentifierSchema,
   action: z.enum([
     "user.created", "token.created", "token.activated", "token.revoked", "device.created", "device.status-updated",
-    "policy.updated", "usage.queried", "request.rejected",
+    "policy.updated", "service-state.updated", "device-controls.updated", "usage.queried", "request.rejected",
   ]),
-  subjectType: z.enum(["user", "token", "device", "request"]),
+  subjectType: z.enum(["service", "user", "token", "device", "request"]),
   subjectId: IdentifierSchema,
   deviceId: IdentifierSchema.nullable(),
   outcome: z.enum(["succeeded", "failed"]),

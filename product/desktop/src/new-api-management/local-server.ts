@@ -3,6 +3,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 
 import {
+  BuiltinDeviceControlsSchema,
+  BuiltinDeviceControlsUpdateSchema,
+  BuiltinServiceStatusSchema,
+  BuiltinServiceStatusUpdateSchema,
   NewApiAuditPageSchema,
   NewApiAuditQuerySchema,
   NewApiActivateTokenInputSchema,
@@ -13,6 +17,12 @@ import {
   NewApiManagementErrorBodySchema,
   NewApiPolicySchema,
   NewApiUpdateDeviceStatusInputSchema,
+  type BuiltinDeviceControls,
+  type BuiltinModelRequest,
+  type BuiltinModelUsage,
+  type BuiltinServiceState,
+  type BuiltinServiceStatus,
+  type LicenseStatusSummary,
   type NewApiAuditEvent,
   type NewApiDeviceMapping,
   type NewApiErrorCategory,
@@ -28,6 +38,10 @@ export interface StartLocalNewApiManagementServerOptions {
   hostname?: "127.0.0.1" | "::1" | "localhost";
   managementCredential: string;
   now?: () => Date;
+  builtin?: {
+    readLicenseStatus(licenseId: string): Promise<LicenseStatusSummary>;
+    execute(request: BuiltinModelRequest, signal?: AbortSignal): Promise<{ output: string; usage: BuiltinModelUsage }>;
+  };
 }
 
 export interface LocalNewApiManagementServer {
@@ -95,12 +109,20 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
   const deviceIdsByLicense = new Map<string, string>();
   const deviceIdsByToken = new Map<string, string>();
   const usage = new Map<string, number>();
+  const controls = new Map<string, BuiltinDeviceControls>();
   const audit: NewApiAuditEvent[] = [];
   const idempotency = new Map<string, IdempotencyEntry>();
   const inFlight = new Map<string, InFlightEntry>();
   let sequence = 0;
 
   const timestamp = (): string => now().toISOString();
+  let serviceStatus: BuiltinServiceStatus = BuiltinServiceStatusSchema.parse({
+    schemaVersion: 1,
+    state: "disabled",
+    revision: 1,
+    reasonCode: "OPERATOR_DISABLED",
+    updatedAt: timestamp(),
+  });
   const nextId = (prefix: string): string => `${prefix}_${String(++sequence).padStart(6, "0")}`;
   const seal = (value: unknown): string => {
     const iv = randomBytes(12);
@@ -161,6 +183,26 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     return promise;
   };
 
+  const allowedServiceTransitions: Readonly<Record<BuiltinServiceState, readonly BuiltinServiceState[]>> = {
+    enabled: ["degraded", "maintenance", "disabled"],
+    degraded: ["enabled", "maintenance", "disabled"],
+    maintenance: ["enabled", "disabled"],
+    disabled: ["enabled", "maintenance"],
+  };
+
+  const controlsForRoute = (route: string): { deviceId: string; current: BuiltinDeviceControls } | null => {
+    const deviceMatch = /^operations\/devices\/([^/]+)\/controls$/u.exec(route);
+    const userMatch = /^operations\/users\/([^/]+)\/controls$/u.exec(route);
+    if (!deviceMatch && !userMatch) return null;
+    const deviceId = deviceMatch
+      ? decodeURIComponent(deviceMatch[1])
+      : users.get(decodeURIComponent(userMatch![1]))?.deviceId;
+    if (!deviceId) throw failure(404, "not-found", "DEVICE_CONTROLS_NOT_FOUND", "Device controls were not found.");
+    const current = controls.get(deviceId);
+    if (!current) throw failure(404, "not-found", "DEVICE_CONTROLS_NOT_FOUND", "Device controls were not found.");
+    return { deviceId, current };
+  };
+
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
       authenticate(request);
@@ -168,6 +210,98 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
       if (!url.pathname.startsWith(BASE_PATH)) throw failure(404, "not-found", "ENDPOINT_NOT_FOUND", "Management endpoint was not found.");
       const route = url.pathname.slice(BASE_PATH.length).replace(/\/$/u, "");
       const method = request.method ?? "GET";
+
+      if (method === "GET" && route === "operations/service") {
+        sendJson(response, 200, serviceStatus);
+        return;
+      }
+      if (method === "PATCH" && route === "operations/service") {
+        const body = await readJson(request);
+        const input = BuiltinServiceStatusUpdateSchema.parse({
+          ...z.record(z.string(), z.unknown()).parse(body),
+          idempotencyKey: request.headers["idempotency-key"],
+        });
+        const result = await runIdempotent(request, "operations.service", body, async () => {
+          if (serviceStatus.revision !== input.expectedRevision) {
+            throw failure(409, "conflict", "SERVICE_STATE_CAS_CONFLICT", "Builtin service state changed before update.");
+          }
+          if (!allowedServiceTransitions[serviceStatus.state].includes(input.state)) {
+            throw failure(409, "conflict", "SERVICE_STATE_TRANSITION_INVALID", "Builtin service state transition is invalid.");
+          }
+          if ((input.state === "enabled" || input.state === "degraded") && options.builtin === undefined) {
+            throw failure(503, "unavailable", "SERVICE_UNAVAILABLE", "Builtin service dependencies are not configured.");
+          }
+          serviceStatus = BuiltinServiceStatusSchema.parse({
+            schemaVersion: 1,
+            state: input.state,
+            revision: serviceStatus.revision + 1,
+            reasonCode: input.reasonCode,
+            updatedAt: timestamp(),
+          });
+          addAudit("service-state.updated", "service", "builtin-service", null);
+          return { status: 200, value: serviceStatus };
+        });
+        sendJson(response, result.status, result.value);
+        return;
+      }
+
+      const locatedControls = controlsForRoute(route);
+      if (method === "GET" && locatedControls) {
+        sendJson(response, 200, locatedControls.current);
+        return;
+      }
+      if (method === "PATCH" && locatedControls) {
+        const body = await readJson(request);
+        const input = BuiltinDeviceControlsUpdateSchema.parse({
+          ...z.record(z.string(), z.unknown()).parse(body),
+          idempotencyKey: request.headers["idempotency-key"],
+        });
+        const result = await runIdempotent(request, `operations.controls:${locatedControls.deviceId}`, body, async () => {
+          const current = controls.get(locatedControls.deviceId);
+          const mapping = devices.get(locatedControls.deviceId);
+          if (!current || !mapping) {
+            throw failure(404, "not-found", "DEVICE_CONTROLS_NOT_FOUND", "Device controls were not found.");
+          }
+          const stored = tokens.get(mapping.newApiTokenId);
+          const user = users.get(mapping.newApiUserId);
+          if (current.revision !== input.expectedRevision
+              || current.generation !== input.expectedGeneration
+              || current.licenseId !== input.expectedLicenseId
+              || current.tokenId !== input.expectedTokenId
+              || mapping.generation !== input.expectedGeneration
+              || mapping.licenseId !== input.expectedLicenseId
+              || mapping.newApiTokenId !== input.expectedTokenId
+              || !stored
+              || !user) {
+            throw failure(409, "conflict", "DEVICE_CONTROLS_CAS_CONFLICT", "Device controls changed before update.");
+          }
+          const updatedAt = timestamp();
+          const updatedDigest = policyDigest(input.policy);
+          const updatedUser: NewApiUser = {
+            ...user,
+            policy: input.policy,
+            status: input.policy.disabled ? "disabled" : "active",
+            updatedAt,
+          };
+          const updatedMapping = NewApiDeviceMappingSchema.parse({ ...mapping, policyDigest: updatedDigest, updatedAt });
+          const updatedToken: NewApiToken = { ...stored.summary, policyDigest: updatedDigest, updatedAt };
+          const updatedControls = BuiltinDeviceControlsSchema.parse({
+            ...current,
+            revision: current.revision + 1,
+            policy: input.policy,
+            policyDigest: updatedDigest,
+            updatedAt,
+          });
+          users.set(user.id, updatedUser);
+          devices.set(mapping.deviceId, updatedMapping);
+          tokens.set(stored.summary.id, { ...stored, summary: updatedToken });
+          controls.set(mapping.deviceId, updatedControls);
+          addAudit("device-controls.updated", "device", mapping.deviceId, mapping.deviceId);
+          return { status: 200, value: updatedControls };
+        });
+        sendJson(response, result.status, result.value);
+        return;
+      }
 
       if (method === "POST" && route === "users") {
         const body = await readJson(request);
@@ -245,6 +379,9 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
           const user = users.get(input.newApiUserId);
           const token = tokens.get(input.newApiTokenId);
           if (!user || user.username !== input.newApiUsername || user.deviceId !== input.deviceId) throw failure(409, "conflict", "USER_MAPPING_CONFLICT", "User mapping does not match device.");
+          if (policyDigest(user.policy) !== input.policyDigest) {
+            throw failure(409, "conflict", "POLICY_BINDING_CONFLICT", "User policy changed before device mapping.");
+          }
           if (!token || token.summary.userId !== user.id || token.summary.status !== "provisioning"
               || token.summary.channelId !== input.channelId
               || token.summary.policyDigest !== input.policyDigest
@@ -257,6 +394,18 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
           devices.set(mapping.deviceId, mapping);
           deviceIdsByLicense.set(mapping.licenseId, mapping.deviceId);
           deviceIdsByToken.set(mapping.newApiTokenId, mapping.deviceId);
+          controls.set(mapping.deviceId, BuiltinDeviceControlsSchema.parse({
+            schemaVersion: 1,
+            deviceId: mapping.deviceId,
+            userId: mapping.newApiUserId,
+            revision: (controls.get(mapping.deviceId)?.revision ?? 0) + 1,
+            policy: user.policy,
+            policyDigest: mapping.policyDigest,
+            generation: mapping.generation,
+            licenseId: mapping.licenseId,
+            tokenId: mapping.newApiTokenId,
+            updatedAt: createdAt,
+          }));
           addAudit("device.created", "device", mapping.deviceId, mapping.deviceId);
           return { status: 201, value: mapping };
         });
@@ -346,6 +495,9 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
         const policy = NewApiPolicySchema.parse(await readJson(request));
         const user = users.get(userId);
         if (!user) throw failure(404, "not-found", "USER_NOT_FOUND", "User was not found.");
+        if (devices.has(user.deviceId)) {
+          throw failure(409, "conflict", "OPERATIONS_CAS_REQUIRED", "Mapped device policy requires operations CAS.");
+        }
         const updatedUser: NewApiUser = { ...user, policy, status: policy.disabled ? "disabled" : "active", updatedAt: timestamp() };
         users.set(userId, updatedUser);
         addAudit("policy.updated", "user", userId, user.deviceId);

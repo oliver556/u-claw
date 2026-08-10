@@ -56,7 +56,7 @@ export interface ProvisioningCoordinator {
   applyLifecycle(action: ProvisioningLifecycleAction): Promise<ProvisioningIdentityResult>;
 }
 
-type Step = "license" | "user" | "policy" | "token" | "mapping" | "active" | "activate-token" | "failed" | "compensation-complete" | "revoke-token" | "revoke-license" | "lifecycle";
+type Step = "license" | "user" | "policy" | "controls" | "token" | "mapping" | "active" | "activate-token" | "failed" | "compensation-complete" | "revoke-token" | "revoke-license" | "lifecycle";
 
 export function deriveProvisioningStepKey(idempotencyKey: string, step: Step, generation: number): string {
   return `p_${createHash("sha256")
@@ -227,6 +227,46 @@ export function createProvisioningCoordinator({
     return save(next, { stage: pending ? "compensation-pending" : "failed" });
   };
 
+  const updateBoundControlsPolicy = async (input: {
+    deviceId: string;
+    userId: string;
+    expectedGeneration: number;
+    expectedLicenseId: string;
+    expectedTokenId: string;
+    idempotencyKey: string;
+    policy: NewApiPolicy;
+  }): Promise<NewApiPolicy> => {
+    const controls = await newApiClient.getDeviceControls({ deviceId: input.deviceId });
+    if (controls.deviceId !== input.deviceId
+        || controls.userId !== input.userId
+        || controls.generation !== input.expectedGeneration
+        || controls.licenseId !== input.expectedLicenseId
+        || controls.tokenId !== input.expectedTokenId
+        || controls.policyDigest !== policyDigest(controls.policy)) {
+      throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "policy-bound", false);
+    }
+    if (controls.revision > 1 && controls.policyDigest === policyDigest(input.policy)) return controls.policy;
+    const updated = await newApiClient.updateDeviceControls({ deviceId: input.deviceId }, {
+      idempotencyKey: input.idempotencyKey,
+      expectedRevision: controls.revision,
+      expectedGeneration: input.expectedGeneration,
+      expectedLicenseId: input.expectedLicenseId,
+      expectedTokenId: input.expectedTokenId,
+      policy: input.policy,
+    });
+    if (updated.deviceId !== input.deviceId
+        || updated.userId !== input.userId
+        || updated.generation !== input.expectedGeneration
+        || updated.licenseId !== input.expectedLicenseId
+        || updated.tokenId !== input.expectedTokenId
+        || updated.revision !== controls.revision + 1
+        || updated.policyDigest !== policyDigest(input.policy)
+        || policyDigest(updated.policy) !== policyDigest(input.policy)) {
+      throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "policy-bound", false);
+    }
+    return updated.policy;
+  };
+
   const execute = async (
     input: ProvisioningIdentityInput,
     seed?: ProvisioningJournal,
@@ -322,7 +362,35 @@ export function createProvisioningCoordinator({
       });
 
       const policy = provisioningPolicy(input.model);
-      const updatedPolicy = await newApiClient.updatePolicy(user.id, policy);
+      let updatedPolicy: NewApiPolicy;
+      if (previousTokenId === null) {
+        updatedPolicy = await newApiClient.updatePolicy(user.id, policy);
+      } else {
+        const currentControls = await newApiClient.getDeviceControls({ deviceId: input.deviceId });
+        const targetAlreadyMapped = currentControls.deviceId === input.deviceId
+          && currentControls.generation === generation
+          && currentControls.licenseId === journal.binding.licenseId
+          && currentControls.tokenId === journal.binding.newApiTokenId
+          && currentControls.userId === user.id
+          && currentControls.policyDigest === policyDigest(policy)
+          && policyDigest(currentControls.policy) === policyDigest(policy);
+        if (targetAlreadyMapped) {
+          updatedPolicy = currentControls.policy;
+        } else {
+          if (journal.licenseSourceId === null) {
+            throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "policy-bound", false);
+          }
+          updatedPolicy = await updateBoundControlsPolicy({
+            deviceId: input.deviceId,
+            userId: user.id,
+            expectedGeneration: generation - 1,
+            expectedLicenseId: journal.licenseSourceId,
+            expectedTokenId: previousTokenId,
+            idempotencyKey: deriveProvisioningStepKey(input.idempotencyKey, "controls", generation),
+            policy,
+          });
+        }
+      }
       if (policyDigest(updatedPolicy) !== policyDigest(policy)) {
         throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "policy-bound", false);
       }
@@ -598,7 +666,15 @@ export function createProvisioningCoordinator({
     }
     if (action.action === "disable") {
       journal = await save(journal, { stage: "disabling" });
-      await newApiClient.updatePolicy(action.binding.newApiUserId, provisioningPolicy(journal.model, true));
+      await updateBoundControlsPolicy({
+        deviceId: action.binding.deviceId,
+        userId: action.binding.newApiUserId,
+        expectedGeneration: journal.generation,
+        expectedLicenseId: action.binding.licenseId,
+        expectedTokenId: action.binding.newApiTokenId,
+        idempotencyKey: deriveProvisioningStepKey(action.idempotencyKey, "controls", journal.generation),
+        policy: provisioningPolicy(journal.model, true),
+      });
       await newApiClient.updateDeviceStatus(action.binding.deviceId, {
         idempotencyKey: deriveProvisioningStepKey(action.idempotencyKey, "lifecycle", journal.generation), status: "disabled",
         expectedStatus: "active", expectedGeneration: journal.generation,
@@ -662,7 +738,9 @@ export function createProvisioningCoordinator({
       requestHash: reissueHash,
       mappedTokenId: lifecycle.sourceBinding.newApiTokenId,
       previousTokenId: lifecycle.sourceBinding.newApiTokenId,
-      binding: { ...lifecycle.sourceBinding, usbFingerprint: lifecycle.target.usbFingerprint },
+      binding: resumingReissue
+        ? journal.binding
+        : { ...lifecycle.sourceBinding, usbFingerprint: lifecycle.target.usbFingerprint },
       stage: "started",
       failureCode: null,
       lifecycle: { ...lifecycle, phase: "replacement-issued" },
