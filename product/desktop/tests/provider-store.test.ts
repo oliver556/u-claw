@@ -153,15 +153,17 @@ describe("provider store", () => {
     expect((await store.list()).providers.some((provider: any) => provider.id === "will-fail")).toBe(false);
   });
 
-  it("falls back to the built-in catalog when persisted JSON is corrupted", async () => {
+  it("fails closed without leaking persisted content when JSON is corrupted", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-provider-corrupt-"));
     roots.push(dataDir);
     await mkdir(join(dataDir, "providers"), { recursive: true });
     await writeFile(join(dataDir, "providers", "provider-config.v1.json"), "{ secret-key-fragment", "utf8");
     const create = (desktop as any).createProviderStore;
-    const snapshot = await (create({ dataDir }) as Store).list();
-    expect(snapshot.providers).toHaveLength(10);
-    expect(snapshot.selectedProviderId).toBeNull();
-    expect(JSON.stringify(snapshot)).not.toContain("secret-key-fragment");
+    const error = await (create({ dataDir }) as Store).list().catch((reason: unknown) => reason);
+    expect(error).toMatchObject({
+      code: "OPERATION_FAILED",
+      message: "Provider configuration could not be loaded.",
+    });
+    expect(JSON.stringify(error)).not.toContain("secret-key-fragment");
   });
 });

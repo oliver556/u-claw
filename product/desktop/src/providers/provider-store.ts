@@ -122,10 +122,20 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
 
   const load = async (): Promise<ProviderConfigDocument> => {
     if (loaded !== undefined) return loaded;
+    let body: string;
     try {
-      loaded = ProviderConfigDocumentSchema.parse(migrateLegacyBuiltin(JSON.parse(await readFile(configPath, "utf8"))));
+      body = await readFile(configPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        loaded = defaultDocument();
+        return loaded;
+      }
+      throw providerError("OPERATION_FAILED", "Provider configuration could not be loaded.");
+    }
+    try {
+      loaded = ProviderConfigDocumentSchema.parse(migrateLegacyBuiltin(JSON.parse(body)));
     } catch {
-      loaded = defaultDocument();
+      throw providerError("OPERATION_FAILED", "Provider configuration could not be loaded.");
     }
     return loaded;
   };

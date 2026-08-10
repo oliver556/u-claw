@@ -247,6 +247,33 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     policy: NewApiPolicy;
   };
 
+  type QuotaBucket = {
+    key: string;
+    resetAt: string | null;
+  };
+
+  type QuotaReservation = {
+    key: string;
+    amount: number;
+  };
+
+  const quotaBucketFor = (userId: string, policy: NewApiPolicy, at: Date = now()): QuotaBucket => {
+    const { unit, period } = policy.quota;
+    let bucket: string;
+    let resetAt: string | null;
+    if (period === "daily") {
+      bucket = `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}-${String(at.getUTCDate()).padStart(2, "0")}`;
+      resetAt = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate() + 1)).toISOString();
+    } else if (period === "monthly") {
+      bucket = `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
+      resetAt = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1)).toISOString();
+    } else {
+      bucket = "lifetime";
+      resetAt = null;
+    }
+    return { key: JSON.stringify([userId, unit, period, bucket]), resetAt };
+  };
+
   const authenticateData = (request: IncomingMessage): StoredToken => {
     const authorization = request.headers.authorization ?? "";
     const hasBearerScheme = authorization.startsWith("Bearer ") && authorization.length > 7;
@@ -380,7 +407,7 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     throw failure(409, "conflict", "ADMISSION_CONFLICT", "Builtin admission state changed.", true);
   };
 
-  const reserveRequest = (snapshot: AdmissionSnapshot, request: BuiltinModelRequest): number => {
+  const reserveRequest = (snapshot: AdmissionSnapshot, request: BuiltinModelRequest): QuotaReservation => {
     if (!snapshot.policy.allowedModels.includes(request.model)) {
       throw failure(403, "model-permission", "MODEL_NOT_ALLOWED", "Builtin model is not allowed.");
     }
@@ -398,23 +425,24 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     if (recent.length >= effectiveRpm) {
       throw failure(429, "rate-limit", "REQUEST_RATE_LIMIT_EXCEEDED", "Builtin request rate exceeded.", true);
     }
-    const reservation = snapshot.policy.quota.unit === "requests"
+    const amount = snapshot.policy.quota.unit === "requests"
       ? 1
       : Buffer.byteLength(request.prompt, "utf8") + request.maxOutputTokens;
-    const consumed = usage.get(snapshot.userId) ?? 0;
-    const reserved = reservedQuota.get(snapshot.userId) ?? 0;
-    if (consumed + reserved + reservation > snapshot.policy.quota.limit) {
+    const { key } = quotaBucketFor(snapshot.userId, snapshot.policy);
+    const consumed = usage.get(key) ?? 0;
+    const reserved = reservedQuota.get(key) ?? 0;
+    if (consumed + reserved + amount > snapshot.policy.quota.limit) {
       throw failure(429, "quota", "QUOTA_EXCEEDED", "Builtin quota exceeded.");
     }
     admittedAt.set(snapshot.userId, [...recent, now().getTime()]);
     activeRequests.set(snapshot.userId, (activeRequests.get(snapshot.userId) ?? 0) + 1);
-    reservedQuota.set(snapshot.userId, reserved + reservation);
-    return reservation;
+    reservedQuota.set(key, reserved + amount);
+    return { key, amount };
   };
 
-  const releaseReservation = (snapshot: AdmissionSnapshot, reservation: number, consumed: number): void => {
-    reservedQuota.set(snapshot.userId, Math.max(0, (reservedQuota.get(snapshot.userId) ?? 0) - reservation));
-    if (consumed > 0) usage.set(snapshot.userId, (usage.get(snapshot.userId) ?? 0) + consumed);
+  const releaseReservation = (reservation: QuotaReservation, consumed: number): void => {
+    reservedQuota.set(reservation.key, Math.max(0, (reservedQuota.get(reservation.key) ?? 0) - reservation.amount));
+    if (consumed > 0) usage.set(reservation.key, (usage.get(reservation.key) ?? 0) + consumed);
   };
 
   const releaseConcurrency = (snapshot: AdmissionSnapshot): void => {
@@ -535,7 +563,6 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
           users.set(user.id, user);
           userIdsByUsername.set(user.username, user.id);
           userIdsByDevice.set(user.deviceId, user.id);
-          usage.set(user.id, 0);
           addAudit("user.created", "user", user.id, user.deviceId);
           return { status: 201, value: user };
         });
@@ -728,12 +755,13 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
         const userId = decodeURIComponent(usageMatch[1]);
         const user = users.get(userId);
         if (!user) throw failure(404, "not-found", "USER_NOT_FOUND", "User was not found.");
-        const consumed = usage.get(userId) ?? 0;
+        const bucket = quotaBucketFor(userId, user.policy);
+        const consumed = usage.get(bucket.key) ?? 0;
         const result: NewApiUsage = {
           userId,
           consumed,
           remaining: Math.max(0, user.policy.quota.limit - consumed),
-          resetAt: user.policy.quota.period === "lifetime" ? null : timestamp(),
+          resetAt: bucket.resetAt,
           updatedAt: timestamp(),
         };
         addAudit("usage.queried", "user", userId, user.deviceId);
@@ -854,18 +882,18 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
             upstream = z.object({ output: z.string().max(1_048_576), usage: BuiltinModelUsageSchema }).strict().parse(raw);
             if (upstream.usage.outputTokens > modelRequest.maxOutputTokens
                 || (admitted.policy.quota.unit === "tokens"
-                  && upstream.usage.inputTokens + upstream.usage.outputTokens > reservation)) {
+                  && upstream.usage.inputTokens + upstream.usage.outputTokens > reservation.amount)) {
               throw new Error("usage exceeds reservation");
             }
           } catch {
-            releaseReservation(admitted, reservation, reservation);
+            releaseReservation(reservation, reservation.amount);
             reservationReleased = true;
             throw failure(502, "invalid-response", "UPSTREAM_INVALID_RESPONSE", "Builtin upstream response is invalid.");
           }
           const consumed = admitted.policy.quota.unit === "requests"
             ? 1
             : upstream.usage.inputTokens + upstream.usage.outputTokens;
-          releaseReservation(admitted, reservation, consumed);
+          releaseReservation(reservation, consumed);
           reservationReleased = true;
           const result = BuiltinModelResponseSchema.parse({
             schemaVersion: 1,
@@ -881,7 +909,7 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
           removeAbortWaiter();
           request.off("aborted", onAborted);
           response.off("close", onClosed);
-          if (!reservationReleased) releaseReservation(admitted, reservation, 0);
+          if (!reservationReleased) releaseReservation(reservation, 0);
           releaseConcurrency(admitted);
         }
         return;
@@ -935,7 +963,9 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     recordUsage(userId, amount) {
       if (!users.has(userId)) throw new Error("Unknown fixture user.");
       const parsed = z.number().int().min(0).parse(amount);
-      usage.set(userId, (usage.get(userId) ?? 0) + parsed);
+      const user = users.get(userId)!;
+      const { key } = quotaBucketFor(userId, user.policy);
+      usage.set(key, (usage.get(key) ?? 0) + parsed);
     },
     close: async () => {
       await Promise.all([server, dataServer].map((current) => new Promise<void>((resolve, reject) => {

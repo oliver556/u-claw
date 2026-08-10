@@ -35,12 +35,15 @@ afterEach(async () => Promise.all(servers.splice(0).map((server) => server.close
 
 type BuiltinDependencies = NonNullable<Parameters<typeof startLocalNewApiManagementServer>[0]["builtin"]>;
 
-async function setup(configured: boolean | BuiltinDependencies = true) {
+async function setup(
+  configured: boolean | BuiltinDependencies = true,
+  now: () => Date = () => new Date("2026-08-11T00:00:00.000Z"),
+) {
   const managementCredential = randomBytes(32).toString("base64url");
   const server = await startLocalNewApiManagementServer({
     hostname: "127.0.0.1",
     managementCredential,
-    now: () => new Date("2026-08-11T00:00:00.000Z"),
+    now,
     ...(configured ? {
       builtin: {
         readLicenseStatus: async (licenseId: string) => ({
@@ -894,6 +897,87 @@ describe("localhost builtin service data plane", () => {
     await enableBuiltin(client);
     expect((await dataRequest(server, issued.secret)).status).toBe(200);
     await expect(client.getUsage(user.id)).resolves.toMatchObject({ consumed: 1, remaining: 1 });
+  });
+
+  it("rolls daily quota at UTC midnight without charging old reservations to the new period", async () => {
+    let currentTime = new Date("2026-08-11T23:59:00.000Z");
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const { client, server } = await setup({
+      readLicenseStatus: async (licenseId) => ({
+        licenseId, deviceId: "dev_ops_001", status: "active", revision: 1,
+        notBefore: "2026-08-10T00:00:00.000Z", expiresAt: "2027-08-10T00:00:00.000Z",
+        replacementLicenseId: null, updatedAt: currentTime.toISOString(),
+      }),
+      execute: async () => { await barrier; return { output: "answer", usage: { inputTokens: 1, outputTokens: 1 } }; },
+    }, () => currentTime);
+    const { issued, mapping, user } = await activateMapping(client);
+    const controls = await client.getDeviceControls({ deviceId: mapping.deviceId });
+    await client.updateDeviceControls({ deviceId: mapping.deviceId }, {
+      idempotencyKey: "ops-daily-period-policy",
+      expectedRevision: controls.revision,
+      expectedGeneration: controls.generation,
+      expectedLicenseId: controls.licenseId,
+      expectedTokenId: controls.tokenId,
+      policy: { ...controls.policy, quota: { unit: "requests", limit: 1, period: "daily" } },
+    });
+    await enableBuiltin(client);
+
+    const first = dataRequest(server, issued.secret);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect((await dataRequest(server, issued.secret)).status).toBe(429);
+      await expect(client.getUsage(user.id)).resolves.toMatchObject({
+        consumed: 0,
+        remaining: 1,
+        resetAt: "2026-08-12T00:00:00.000Z",
+      });
+
+      currentTime = new Date("2026-08-12T00:00:00.000Z");
+      release();
+      expect((await first).status).toBe(200);
+      await expect(client.getUsage(user.id)).resolves.toMatchObject({
+        consumed: 0,
+        remaining: 1,
+        resetAt: "2026-08-13T00:00:00.000Z",
+      });
+      expect((await dataRequest(server, issued.secret)).status).toBe(200);
+    } finally {
+      release();
+      await first.catch(() => undefined);
+    }
+  });
+
+  it("rolls monthly quota at the next UTC month boundary", async () => {
+    let currentTime = new Date("2026-08-31T23:59:00.000Z");
+    const { client, server } = await setup(true, () => currentTime);
+    const { issued, mapping, user } = await activateMapping(client);
+    const controls = await client.getDeviceControls({ deviceId: mapping.deviceId });
+    await client.updateDeviceControls({ deviceId: mapping.deviceId }, {
+      idempotencyKey: "ops-monthly-period-policy",
+      expectedRevision: controls.revision,
+      expectedGeneration: controls.generation,
+      expectedLicenseId: controls.licenseId,
+      expectedTokenId: controls.tokenId,
+      policy: { ...controls.policy, quota: { unit: "requests", limit: 1, period: "monthly" } },
+    });
+    await enableBuiltin(client);
+
+    expect((await dataRequest(server, issued.secret)).status).toBe(200);
+    expect((await dataRequest(server, issued.secret)).status).toBe(429);
+    await expect(client.getUsage(user.id)).resolves.toMatchObject({
+      consumed: 1,
+      remaining: 0,
+      resetAt: "2026-09-01T00:00:00.000Z",
+    });
+
+    currentTime = new Date("2026-09-01T00:00:00.000Z");
+    await expect(client.getUsage(user.id)).resolves.toMatchObject({
+      consumed: 0,
+      remaining: 1,
+      resetAt: "2026-10-01T00:00:00.000Z",
+    });
+    expect((await dataRequest(server, issued.secret)).status).toBe(200);
   });
 
   it("releases reservations when caller aborts even if executor ignores the signal", async () => {
