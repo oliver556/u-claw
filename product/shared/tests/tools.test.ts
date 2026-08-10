@@ -139,12 +139,12 @@ describe("tool contracts", () => {
     "/Users/private/tool",
     "C:\\Users\\private\\tool",
     "file:///tmp/tool",
-    "ghp_123456789012345678901234567890123456",
+    "ghp_fixtureA123456789012345678901234567890",
     "sk_" + "live_123456789012345678901234",
     "rk_" + "live_123456789012345678901234",
     "sk-1234567890123456",
-    "sk-proj-1234567890123456",
-    "xoxa-12345678901234567890",
+    "sk-proj-fixtureA123456789012",
+    "xoxa-fixtureA1234567890123",
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnopqrstuvwxyz123456",
   ])("rejects unsafe opaque ids: %s", (id) => {
     expect(() => ToolCallSchema.parse({

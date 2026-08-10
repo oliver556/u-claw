@@ -20,6 +20,20 @@ const plugin = {
 };
 
 describe("PluginManager", () => {
+  it("does not label an unverified live repository as fixture data", async () => {
+    window.uclaw = { plugins: { invoke: vi.fn(async (request: any) => ({
+      method: request.method,
+      requestId: request.requestId,
+      ok: true,
+      result: { items: [{ ...plugin, mode: "live", source: { ...plugin.source, provider: "external" } }], nextCursor: null, hasMore: false, mode: "live", repositoryVerified: false },
+    })) } } as any;
+
+    render(<PluginManager />);
+
+    expect(await screen.findByText("插件仓库未验证")).toBeVisible();
+    expect(screen.queryByText("Fixture 数据，真实插件仓库未验收")).not.toBeInTheDocument();
+  });
+
   it("renders offline retry, search pagination, and unverified repository boundary", async () => {
     let attempts = 0;
     const invoke = vi.fn(async (request: any) => {

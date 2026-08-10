@@ -9,6 +9,19 @@ import { bootstrapDesktopApp, createProductionDataService, requireChannelRuntime
 import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
+  it("uses production capability clients instead of fixture catalogs", async () => {
+    const source = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+    expect(source).toContain("createSkillHubClient()");
+    expect(source).toContain("UCLAW_PLUGIN_REGISTRY_URL");
+    expect(source).toContain("createUnavailablePluginRegistryClient");
+    expect(source).toContain("createMcpProtocolProbe({");
+    expect(source).toContain("runtimeRoot: process.env.UCLAW_RUNTIME_DIR ?? \"\"");
+    expect(source).toContain("executables: { node: process.execPath }");
+    expect(source).toContain("createOpenClawMcpRuntime(client.mcp, mcpProbe)");
+    expect(source).not.toContain("createFixtureSkillHubClient");
+    expect(source).not.toContain("createFixturePluginRegistryClient");
+  });
+
   it("rejects production startup without a real UClawClient", () => {
     expect(() => requireElectronClient(undefined)).toThrow("UClawClient");
   });

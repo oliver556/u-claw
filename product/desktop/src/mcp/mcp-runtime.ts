@@ -5,7 +5,7 @@ import { join, relative, resolve } from "node:path";
 import readline from "node:readline";
 import { Agent, ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
 
-import { UClawErrorCodeSchema, UClawErrorSchema, type McpServerConfigEntry, type UClawError } from "@uclaw/shared";
+import { UClawErrorCodeSchema, UClawErrorSchema, type McpConfigurationService, type McpServerConfigEntry, type UClawError } from "@uclaw/shared";
 
 import { assessMcpStdioPolicy } from "./stdio-policy.js";
 
@@ -363,7 +363,11 @@ async function testStdio(server: Extract<McpServerConfigEntry, { transport: "std
     if (child.startsWith("..") || child === "") throw new ProbeError(safeError("FORBIDDEN", "stdio script is outside controlled runtime root.", false));
     args[0] = script;
   }
-  const process = spawn(executable, args, { cwd: root, env: { ...server.env }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const environment = {
+    ...server.env,
+    ...(server.executableId === "node" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+  };
+  const process = spawn(executable, args, { cwd: root, env: environment, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   return runStdioHandshake(process, options.timeoutMs, parentSignal);
 }
 
@@ -431,9 +435,7 @@ export function createMcpProtocolProbe(options: CreateMcpProtocolProbeOptions = 
   };
 }
 
-const requiredOpenClawMethods = ["list", "configure", "remove", "test", "start", "stop"] as const;
-
-export function createOpenClawMcpRuntime(client: unknown): {
+export function createOpenClawMcpRuntime(configuration: McpConfigurationService | undefined, probe: McpProtocolProbe): {
   capability(): boolean;
   reason(): "locked-runtime-no-mcp-rpc";
   test(server: McpServerConfigEntry, signal: AbortSignal): Promise<McpProbeResult>;
@@ -442,11 +444,10 @@ export function createOpenClawMcpRuntime(client: unknown): {
   start(server: McpServerConfigEntry, signal: AbortSignal): Promise<void>;
   stop(server: McpServerConfigEntry, signal: AbortSignal): Promise<void>;
 } {
-  const runtime = (client as { mcp?: Record<string, unknown> } | undefined)?.mcp;
-  const available = runtime !== undefined && requiredOpenClawMethods.every((method) => typeof runtime[method] === "function");
-  const invoke = async (method: typeof requiredOpenClawMethods[number], server: McpServerConfigEntry, signal: AbortSignal): Promise<unknown> => {
-    if (!available || !runtime) throw new ProbeError(safeError("UNAVAILABLE", "Runtime MCP RPC unavailable.", false));
-    return (runtime[method] as (server: McpServerConfigEntry, signal: AbortSignal) => Promise<unknown>).call(runtime, server, signal);
+  const available = configuration !== undefined;
+  const invoke = async (method: keyof McpConfigurationService, server: McpServerConfigEntry, signal: AbortSignal): Promise<void> => {
+    if (!configuration) throw new ProbeError(safeError("UNAVAILABLE", "Runtime MCP configuration unavailable.", false));
+    await configuration[method](server, signal);
   };
   const parseConnected = (value: unknown): McpProbeSuccess | undefined => {
     if (!value || typeof value !== "object") return undefined;
@@ -469,7 +470,8 @@ export function createOpenClawMcpRuntime(client: unknown): {
     reason: () => "locked-runtime-no-mcp-rpc",
     test: async (server, signal) => {
       try {
-        const result = await invoke("test", server, signal) as { status?: unknown; error?: unknown };
+        if (!available) throw new ProbeError(safeError("UNAVAILABLE", "Runtime MCP configuration unavailable.", false));
+        const result = await probe.test(server, signal) as { status?: unknown; error?: unknown };
         if (result.status === "connected") {
           const connected = parseConnected(result);
           if (connected) return connected;
@@ -486,7 +488,7 @@ export function createOpenClawMcpRuntime(client: unknown): {
         return { status: "error", error: error instanceof ProbeError ? error.error : safeError("OPERATION_FAILED", "OpenClaw MCP operation failed.", true) };
       }
     },
-    configure: async (server, signal) => { await invoke("configure", server, signal); },
+    configure: (server, signal) => invoke("configure", server, signal),
     remove: async (server, signal) => { await invoke("remove", server, signal); },
     start: async (server, signal) => { await invoke("start", server, signal); },
     stop: async (server, signal) => { await invoke("stop", server, signal); },

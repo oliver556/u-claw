@@ -19,6 +19,7 @@ import type {
   ToolCall,
 } from "./tools.js";
 import type { DoctorRepairActionId } from "./diagnostics.js";
+import type { McpServerConfigEntry } from "./mcp.js";
 
 export interface GatewayService {
   negotiate(): Promise<CapabilitySet>;
@@ -67,6 +68,13 @@ export interface ChannelService {
   list(): Promise<ChannelSummary[]>;
 }
 
+export interface McpConfigurationService {
+  configure(server: McpServerConfigEntry, signal: AbortSignal): Promise<void>;
+  remove(server: McpServerConfigEntry, signal: AbortSignal): Promise<void>;
+  start(server: McpServerConfigEntry, signal: AbortSignal): Promise<void>;
+  stop(server: McpServerConfigEntry, signal: AbortSignal): Promise<void>;
+}
+
 export interface FileService {
   list(parentId?: string, page?: PageRequest): Promise<Page<FileSummary>>;
   readText(fileId: string): Promise<{ file: FileSummary; content: string; encoding: "utf-8" }>;
@@ -99,6 +107,7 @@ export interface UClawClient {
   models: ModelService;
   skills: SkillService;
   channels: ChannelService;
+  mcp?: McpConfigurationService;
   files: FileService;
   diagnostics: DiagnosticsService;
   activityCenter?: ActivityCenterService;

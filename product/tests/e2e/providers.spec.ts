@@ -70,7 +70,7 @@ test("provider settings manages selection, keys, custom URL validation, and narr
   await page.setViewportSize({ width: 390, height: 780 });
   await expect(page.getByRole("heading", { name: "模型 Provider" })).toBeVisible();
   await expect(page.locator(".provider-row").first()).toBeInViewport();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const toolBoxes = await page.locator(".provider-tool").evaluateAll((elements) => elements.map((element) => {
     const rect = element.getBoundingClientRect();
     return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };

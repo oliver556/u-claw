@@ -30,9 +30,9 @@ import type { IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import { createSessionOrganizerStore } from "./session-organizer/store.js";
 import { createProviderStore } from "./providers/provider-store.js";
-import { createFixtureSkillHubClient } from "./skills/fixture-client.js";
+import { createSkillHubClient } from "./skills/skillhub-client.js";
 import { createSkillService } from "./skills/skill-service.js";
-import { createFixturePluginRegistryClient } from "./plugins/fixture-client.js";
+import { createLivePluginRegistryClient, createUnavailablePluginRegistryClient } from "./plugins/registry-client.js";
 import { createOpenClawCliPluginRuntime } from "./plugins/openclaw-cli-runtime.js";
 import { createPluginService } from "./plugins/plugin-service.js";
 import type { PluginRuntimeAdapter } from "./plugins/runtime-adapter.js";
@@ -42,7 +42,7 @@ import { createMcpStore } from "./mcp/mcp-store.js";
 import { createDataService } from "./data/data-service.js";
 import { ProductionRuntimeConsistencyCoordinator } from "./data/production-consistency-coordinator.js";
 import { createDiagnosticsService, type DiagnosticsRuntimeInfo } from "./diagnostics/diagnostics-service.js";
-import { createOpenClawMcpRuntime } from "./mcp/mcp-runtime.js";
+import { createMcpProtocolProbe, createOpenClawMcpRuntime } from "./mcp/mcp-runtime.js";
 import { createReleaseDispatcher } from "./release/release-dispatcher.js";
 import type { ReleaseService } from "./release/release-service.js";
 import { createProductionReleaseService } from "./release/production-release.js";
@@ -437,7 +437,7 @@ export async function startElectronMain(
   const providers = createProviderStore({ dataDir: portablePaths.dataDir });
   const skills = await createSkillService({
     dataDir: portablePaths.dataDir,
-    client: createFixtureSkillHubClient(),
+    client: createSkillHubClient(),
     runMutation: (operation) => consistencyCoordinator.runTrackedWrite(operation),
   });
   const pluginRuntime = options.pluginRuntime ?? await createOpenClawCliPluginRuntime({
@@ -447,13 +447,19 @@ export async function startElectronMain(
   });
   const plugins = await createPluginService({
     dataDir: portablePaths.dataDir,
-    client: createFixturePluginRegistryClient(),
+    client: process.env.UCLAW_PLUGIN_REGISTRY_URL
+      ? createLivePluginRegistryClient({ baseUrl: process.env.UCLAW_PLUGIN_REGISTRY_URL })
+      : createUnavailablePluginRegistryClient("Plugin registry is not configured."),
     runtime: pluginRuntime,
     runMutation: (operation) => consistencyCoordinator.runTrackedWrite(operation),
   });
   const channelRuntime = requireChannelRuntime(client);
   const channels = createChannelStore({ dataDir: portablePaths.dataDir, capability: channelRuntime.capability });
-  const mcpRuntime = createOpenClawMcpRuntime(client);
+  const mcpProbe = createMcpProtocolProbe({
+    runtimeRoot: process.env.UCLAW_RUNTIME_DIR ?? "",
+    executables: { node: process.execPath },
+  });
+  const mcpRuntime = createOpenClawMcpRuntime(client.mcp, mcpProbe);
   const mcp = createMcpStore({ dataDir: portablePaths.dataDir, runtimeAvailable: mcpRuntime.capability });
   const data = createProductionDataService(portablePaths, shell, consistencyCoordinator);
   const diagnosticsRuntime: DiagnosticsRuntimeInfo = {

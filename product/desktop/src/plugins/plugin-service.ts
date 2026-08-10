@@ -440,6 +440,9 @@ export async function createPluginService({
     if (action === "update" && (!actual || !previousRecord || actual.origin === "bundled")) {
       throw domainError("NOT_FOUND", "Installed Plugin not found.");
     }
+    if (client.mode === "live" && !client.repositoryVerified) {
+      throw domainError("UNAVAILABLE", "Plugin registry trust is not verified; remote package download is disabled.");
+    }
     const bundle = await client.download(detail.slug);
     updateOperation(operationId, { progress: 25, phase: "validating" });
     const validated = validatePluginBundle(bundle, detail);

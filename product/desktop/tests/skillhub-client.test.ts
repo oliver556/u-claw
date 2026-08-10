@@ -1,0 +1,326 @@
+import { createHash } from "node:crypto";
+
+import JSZip from "jszip";
+import { describe, expect, it, vi } from "vitest";
+
+import { parseSkillMarkdownFrontmatter, validateSkillBundle } from "../src/skills/bundle-validator.js";
+import { createSkillHubClient } from "../src/skills/skillhub-client.js";
+
+const namespace = { canonicalName: "@owner/workspace-reader", displayName: "owner", handle: "owner", publicSlug: "workspace-reader" };
+const searchItem = {
+  slug: "workspace-reader", name: "Workspace Reader", description: "Reads workspace files", description_zh: null,
+  version: "1.0.0", labels: { requires_api_key: "false" }, namespace,
+};
+const detailBody = {
+  slug: "workspace-reader", namespace, latestVersion: { version: "1.0.0", changelog: null, createdAt: 1 },
+  skill: { slug: "workspace-reader", displayName: "Workspace Reader", summary: "Reads workspace files", summary_zh: null, labels: { requires_api_key: "false" } },
+};
+const skillMd = `---
+slug: workspace-reader
+name: Workspace Reader
+description: "Reads workspace files"
+version: 1.0.0
+---
+
+# Workspace Reader
+`;
+const canonicalSkillMd = `---
+name: Workspace Reader
+description: "Reads workspace files"
+version: 1.0.0
+license: MIT
+---
+
+# Workspace Reader
+`;
+
+const json = (value: unknown, init: ResponseInit = {}) => new Response(JSON.stringify(value), {
+  status: 200,
+  headers: { "content-type": "application/json", ...init.headers },
+  ...init,
+});
+
+const redirect = (path: string, host = "skillhub-1388575217.cos.accelerate.myqcloud.com") => new Response(null, {
+  status: 302,
+  headers: { location: `https://${host}/${path}` },
+});
+
+async function zipOf(files: Record<string, string>): Promise<Uint8Array> {
+  const zip = new JSZip();
+  for (const [path, content] of Object.entries(files)) zip.file(path, content);
+  zip.file("_meta.json", "{}");
+  return zip.generateAsync({ type: "uint8array" });
+}
+
+const responseBody = (bytes: Uint8Array): ArrayBuffer => Uint8Array.from(bytes).buffer;
+
+function filesBody(files: Record<string, string>) {
+  return {
+    count: Object.keys(files).length,
+    files: Object.entries(files).map(([path, content]) => ({
+      path, size: Buffer.byteLength(content), sha256: createHash("sha256").update(content).digest("hex"),
+    })),
+    namespace,
+    version: "1.0.0",
+  };
+}
+
+function bundleOf(files: Record<string, string>) {
+  const entries = Object.entries(files).map(([path, content]) => ({
+    path,
+    type: "file" as const,
+    size: Buffer.byteLength(content),
+    contentBase64: Buffer.from(content).toString("base64"),
+  }));
+  return {
+    sourceUrl: "https://api.skillhub.cn/api/v1/download?slug=workspace-reader&version=1.0.0&namespace=owner",
+    compressedBytes: 100,
+    checksumSha256: createHash("sha256").update(JSON.stringify(entries)).digest("hex"),
+    entries,
+  };
+}
+
+describe("live SkillHub client", () => {
+  it("accepts canonical frontmatter without API-owned slug or version fields", () => {
+    expect(parseSkillMarkdownFrontmatter(`---
+name: Workspace Reader
+description: Reads workspace files
+---
+`)).toEqual({ slug: undefined, name: "Workspace Reader", description: "Reads workspace files", version: undefined });
+  });
+
+  it("maps the official free catalog contract with an exact credential-free request", async () => {
+    const fetch = vi.fn(async () => json({ code: 0, data: { skills: [searchItem], total: 21 }, message: "success" }));
+    const client = createSkillHubClient({ fetch });
+
+    await expect(client.search({ query: "workspace & files", cursor: "2", pageSize: 20 })).resolves.toMatchObject({
+      items: [{ slug: "workspace-reader", pricingType: "free", risk: "high", mode: "live" }],
+      nextCursor: null, hasMore: false, mode: "live",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.skillhub.cn/api/skills?page=2&pageSize=20&keyword=workspace+%26+files&labels=pricing_type%3A%21paid",
+      { method: "GET", headers: { accept: "application/json" }, redirect: "error", signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("rejects untrusted bases, API failures, malformed bodies, explicit paid labels, and oversized JSON", async () => {
+    expect(() => createSkillHubClient({ baseUrl: "http://api.skillhub.cn" })).toThrow("trusted SkillHub HTTPS origin");
+    expect(() => createSkillHubClient({ baseUrl: "https://example.com" })).toThrow("trusted SkillHub HTTPS origin");
+    const responses = [
+      json({ code: 9, data: { skills: [], total: 0 }, message: "failed" }),
+      json({ code: 0, data: { skills: [{ ...searchItem, unknownRequiredShape: null }], total: "one" }, message: "success" }),
+      json({ code: 0, data: { skills: [{ ...searchItem, labels: { pricing: "paid" } }], total: 1 }, message: "success" }),
+      new Response("x", { headers: { "content-type": "application/json", "content-length": String(1024 * 1024 + 1) } }),
+    ];
+    const client = createSkillHubClient({ fetch: vi.fn(async () => responses.shift()!) });
+    const input = { query: "", cursor: null, pageSize: 20 };
+
+    await expect(client.search(input)).rejects.toThrow("SkillHub API request failed");
+    await expect(client.search(input)).rejects.toThrow();
+    await expect(client.search(input)).rejects.toThrow("Paid Skills");
+    await expect(client.search(input)).rejects.toThrow("response exceeds limit");
+  });
+
+  it("reads real SKILL.md frontmatter through a validated COS redirect", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json(detailBody))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(canonicalSkillMd, { headers: { "content-type": "text/markdown", "content-length": String(Buffer.byteLength(canonicalSkillMd)) } }));
+    const client = createSkillHubClient({ fetch });
+
+    await expect(client.detail("workspace-reader")).resolves.toMatchObject({
+      slug: "workspace-reader", name: "Workspace Reader", description: "Reads workspace files", version: "1.0.0",
+      pricingType: "free", risk: "high", manifest: { kind: "skill", id: "workspace-reader", version: "1.0.0", entry: "SKILL.md" },
+    });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.skillhub.cn/api/v1/skills/workspace-reader?namespace=",
+      "https://api.skillhub.cn/api/v1/skills/workspace-reader/file?path=SKILL.md&version=1.0.0&namespace=owner",
+      "https://skillhub-1388575217.cos.accelerate.myqcloud.com/signed/skill.md",
+    ]);
+  });
+
+  it("rejects optional SKILL.md identity fields when they conflict with the API", async () => {
+    for (const markdown of [
+      skillMd.replace("slug: workspace-reader", "slug: other-skill"),
+      skillMd.replace("version: 1.0.0", "version: 2.0.0"),
+    ]) {
+      const client = createSkillHubClient({ fetch: vi.fn()
+        .mockResolvedValueOnce(json(detailBody))
+        .mockResolvedValueOnce(redirect("signed/skill.md"))
+        .mockResolvedValueOnce(new Response(markdown, { headers: { "content-type": "text/markdown" } })) });
+      await expect(client.detail("workspace-reader")).rejects.toThrow("SKILL.md identity mismatch");
+    }
+  });
+
+  it("rejects redirects to any host outside the fixed HTTPS COS boundary", async () => {
+    const client = createSkillHubClient({ fetch: vi.fn()
+      .mockResolvedValueOnce(json(detailBody))
+      .mockResolvedValueOnce(redirect("signed/skill.md", "evil.example.com")) });
+    await expect(client.detail("workspace-reader")).rejects.toThrow("untrusted redirect");
+  });
+
+  it("rejects redirected payloads with the wrong media type", async () => {
+    const client = createSkillHubClient({ fetch: vi.fn()
+      .mockResolvedValueOnce(json(detailBody))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(json({ markdown: skillMd })) });
+    await expect(client.detail("workspace-reader")).rejects.toThrow("content type");
+  });
+
+  it("rejects detail billing metadata even when the catalog filter is bypassed", async () => {
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      ...detailBody,
+      skill: { ...detailBody.skill, labels: { requires_api_key: "false" }, billingType: "per_call" },
+    })) });
+    await expect(client.detail("workspace-reader")).rejects.toThrow("Paid Skills");
+  });
+
+  it("downloads the real ZIP through a trusted redirect and verifies its listed files", async () => {
+    const files = { "SKILL.md": canonicalSkillMd, "manifest.yaml": "name: Workspace Reader\n" };
+    const archive = await zipOf(files);
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json(detailBody))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(canonicalSkillMd, { headers: { "content-type": "text/markdown" } }))
+      .mockResolvedValueOnce(json(filesBody(files)))
+      .mockResolvedValueOnce(redirect("signed/skill.zip"))
+      .mockResolvedValueOnce(new Response(responseBody(archive), { headers: { "content-type": "application/zip", "content-length": String(archive.byteLength) } }));
+    const client = createSkillHubClient({ fetch });
+    const expected = await client.detail("workspace-reader");
+    const bundle = await client.download("workspace-reader");
+
+    expect(validateSkillBundle(bundle, expected).manifest).toMatchObject({ id: "workspace-reader", version: "1.0.0", entry: "SKILL.md" });
+    expect(bundle.entries.map((entry) => entry.path)).toEqual(["SKILL.md", "manifest.yaml"]);
+  });
+
+  it("accepts safe explicit directory entries while projecting only listed files", async () => {
+    const files = { "SKILL.md": canonicalSkillMd, "docs/readme.md": "# Notes\n" };
+    const zip = new JSZip();
+    zip.file("SKILL.md", canonicalSkillMd);
+    zip.folder("docs")!.file("readme.md", "# Notes\n");
+    const archive = await zip.generateAsync({ type: "uint8array" });
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json(filesBody(files)))
+      .mockResolvedValueOnce(redirect("signed/directories.zip"))
+      .mockResolvedValueOnce(new Response(responseBody(archive), { headers: { "content-type": "application/zip" } }));
+    const client = createSkillHubClient({ fetch });
+    await client.search({ query: "workspace", cursor: null, pageSize: 20 });
+
+    await expect(client.download("workspace-reader")).resolves.toMatchObject({
+      entries: [
+        { path: "SKILL.md", type: "file" },
+        { path: "docs/readme.md", type: "file" },
+      ],
+    });
+  });
+
+  it("rejects download listing identity drift from confirmed catalog metadata", async () => {
+    const files = { "SKILL.md": canonicalSkillMd };
+    const archive = await zipOf(files);
+    for (const drift of [
+      { version: "2.0.0" },
+      { namespace: { ...namespace, handle: "other-owner" } },
+    ]) {
+      const fetch = vi.fn()
+        .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }))
+        .mockResolvedValueOnce(json({ ...filesBody(files), ...drift }))
+        .mockResolvedValueOnce(redirect("signed/drift.zip"))
+        .mockResolvedValueOnce(new Response(responseBody(archive), { headers: { "content-type": "application/zip" } }));
+      const client = createSkillHubClient({ fetch });
+      await client.search({ query: "workspace", cursor: null, pageSize: 20 });
+
+      await expect(client.download("workspace-reader")).rejects.toThrow("identity mismatch");
+    }
+  });
+
+  it.each([
+    ["case collision", { "SKILL.md": canonicalSkillMd, "skill.md": "shadow" }, "duplicate paths"],
+    ["Windows device", { "SKILL.md": canonicalSkillMd, "CON.txt": "device" }, "unsafe path"],
+    ["Windows extended device", { "SKILL.md": canonicalSkillMd, "CONIN$.txt": "device" }, "unsafe path"],
+    ["Windows superscript device", { "SKILL.md": canonicalSkillMd, "COM\u00b9.txt": "device" }, "unsafe path"],
+    ["Windows spaced device", { "SKILL.md": canonicalSkillMd, "CON .txt": "device" }, "unsafe path"],
+    ["Windows ADS", { "SKILL.md": canonicalSkillMd, "notes.txt:secret": "ads" }, "unsafe path"],
+    ["Windows invalid character", { "SKILL.md": canonicalSkillMd, "bad?.txt": "invalid" }, "unsafe path"],
+    ["Windows control character", { "SKILL.md": canonicalSkillMd, "bad\u001f.txt": "invalid" }, "unsafe path"],
+    ["Windows trailing dot", { "SKILL.md": canonicalSkillMd, "notes.": "shadow" }, "unsafe path"],
+    ["file ancestor", { "SKILL.md": canonicalSkillMd, docs: "file", "docs/readme.md": "child" }, "file/directory conflicts"],
+  ])("rejects %s in the SkillHub file listing", async (_case, files, message) => {
+    const client = createSkillHubClient({ fetch: vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json(filesBody(files))) });
+    await client.search({ query: "workspace", cursor: null, pageSize: 20 });
+
+    await expect(client.download("workspace-reader")).rejects.toThrow(message);
+  });
+
+  it("rejects case-equivalent file/directory conflicts inside the ZIP", async () => {
+    const files = { "SKILL.md": canonicalSkillMd };
+    const zip = new JSZip();
+    zip.file("SKILL.md", canonicalSkillMd);
+    zip.folder("skill.md");
+    const archive = await zip.generateAsync({ type: "uint8array" });
+    const client = createSkillHubClient({ fetch: vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json(filesBody(files)))
+      .mockResolvedValueOnce(redirect("signed/collision.zip"))
+      .mockResolvedValueOnce(new Response(responseBody(archive), { headers: { "content-type": "application/zip" } })) });
+    await client.search({ query: "workspace", cursor: null, pageSize: 20 });
+
+    await expect(client.download("workspace-reader")).rejects.toThrow("file/directory conflicts");
+  });
+
+  it.each([
+    ["case collision", { "SKILL.md": canonicalSkillMd, "skill.md": "shadow" }, "duplicate paths"],
+    ["Windows device", { "SKILL.md": canonicalSkillMd, "AUX/readme.md": "device" }, "escapes target"],
+    ["Windows extended device", { "SKILL.md": canonicalSkillMd, "CONOUT$.txt": "device" }, "escapes target"],
+    ["Windows superscript device", { "SKILL.md": canonicalSkillMd, "LPT\u00b2.txt": "device" }, "escapes target"],
+    ["Windows spaced device", { "SKILL.md": canonicalSkillMd, "CONOUT$ .txt": "device" }, "escapes target"],
+    ["Windows ADS", { "SKILL.md": canonicalSkillMd, "notes.txt:secret": "ads" }, "escapes target"],
+    ["Windows invalid character", { "SKILL.md": canonicalSkillMd, "bad*.txt": "invalid" }, "escapes target"],
+    ["Windows control character", { "SKILL.md": canonicalSkillMd, "bad\u007f.txt": "invalid" }, "escapes target"],
+    ["Windows trailing space", { "SKILL.md": canonicalSkillMd, "notes ": "shadow" }, "escapes target"],
+    ["file ancestor", { "SKILL.md": canonicalSkillMd, docs: "file", "docs/readme.md": "child" }, "file/directory conflicts"],
+  ])("rejects %s in the final Skill bundle", (_case, files, message) => {
+    expect(() => validateSkillBundle(bundleOf(files), {
+      slug: "workspace-reader",
+      version: "1.0.0",
+      permissionFingerprint: "unused-for-markdown-bundles",
+    })).toThrow(message);
+  });
+
+  it("rejects malformed file manifests, dangerous ZIP paths, hash mismatches, and oversized archives", async () => {
+    const validFiles = { "SKILL.md": skillMd };
+    const badPathArchive = await zipOf({ "../outside.txt": "x", "SKILL.md": skillMd });
+    const hashMismatchArchive = await zipOf(validFiles);
+    const responses = [
+      json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }),
+      json({ ...filesBody(validFiles), count: 2 }),
+      json(filesBody(validFiles)), redirect("signed/path.zip"), new Response(responseBody(badPathArchive), { headers: { "content-type": "application/zip" } }),
+      json({ ...filesBody(validFiles), files: [{ ...filesBody(validFiles).files[0], sha256: "0".repeat(64) }] }), redirect("signed/hash.zip"), new Response(responseBody(hashMismatchArchive), { headers: { "content-type": "application/zip" } }),
+      json(filesBody(validFiles)), redirect("signed/large.zip"), new Response("x", { headers: { "content-type": "application/zip", "content-length": String(20 * 1024 * 1024 + 1) } }),
+    ];
+    const client = createSkillHubClient({ fetch: vi.fn(async () => responses.shift()!) });
+    await client.search({ query: "workspace", cursor: null, pageSize: 20 });
+
+    await expect(client.download("workspace-reader")).rejects.toThrow();
+    await expect(client.download("workspace-reader")).rejects.toThrow("unsafe path");
+    await expect(client.download("workspace-reader")).rejects.toThrow("hash mismatch");
+    await expect(client.download("workspace-reader")).rejects.toThrow("response exceeds limit");
+  });
+
+  it("rejects ZIP symlinks before projecting archive entries as files", async () => {
+    const zip = new JSZip();
+    zip.file("SKILL.md", skillMd);
+    zip.file("link", "outside", { unixPermissions: 0o120777 });
+    const archive = await zip.generateAsync({ type: "uint8array", platform: "UNIX" });
+    const files = { "SKILL.md": skillMd, link: "outside" };
+    const client = createSkillHubClient({ fetch: vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json(filesBody(files)))
+      .mockResolvedValueOnce(redirect("signed/link.zip"))
+      .mockResolvedValueOnce(new Response(responseBody(archive), { headers: { "content-type": "application/zip" } })) });
+    await client.search({ query: "workspace", cursor: null, pageSize: 20 });
+    await expect(client.download("workspace-reader")).rejects.toThrow("unsafe ZIP entry");
+  });
+});

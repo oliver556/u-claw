@@ -71,9 +71,9 @@ describe("diagnostics service", () => {
     expect(serialized).toContain("gateway.port");
     expect(serialized).not.toMatch(/top-secret|sk-secret|Bearer nested|private conversation|must hide|alice|config\.ts/);
     expect(serialized).toContain("[REDACTED]");
-    await writeFile(paths.configPath, JSON.stringify({ status: "/Applications/U-Claw/alice/secret", state: "opaque-secret", model: "sk-secret", "sk-proj-key-name-secret": true }));
+    await writeFile(paths.configPath, JSON.stringify({ status: "/Applications/U-Claw/alice/secret", state: "opaque-secret", model: "sk-secret", "sk-proj-fixture-key-name-secret": true }));
     const attack = await service.dispatch({ method: "config.get", requestId: "config-attack", params: {} });
-    expect(JSON.stringify(attack)).not.toMatch(/Applications|alice|opaque-secret|sk-secret|sk-proj-key-name-secret/);
+    expect(JSON.stringify(attack)).not.toMatch(/Applications|alice|opaque-secret|sk-secret|sk-proj-fixture-key-name-secret/);
   });
 
   it("scans bounded upstream pages for filtered matches and rejects cyclic cursors", async () => {

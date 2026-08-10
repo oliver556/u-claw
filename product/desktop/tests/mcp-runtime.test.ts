@@ -224,20 +224,49 @@ describe("MCP protocol probe", () => {
   });
 
   it("does not claim OpenClaw MCP availability without real RPC methods", () => {
-    const runtime = (desktop as any).createOpenClawMcpRuntime({ mcp: { list: vi.fn() } });
+    const runtime = (desktop as any).createOpenClawMcpRuntime(undefined, { test: vi.fn() });
     expect(runtime.capability()).toBe(false);
     expect(runtime.reason()).toBe("locked-runtime-no-mcp-rpc");
   });
 
+  it("combines typed Gateway configuration with the Electron protocol probe", async () => {
+    const configuration = {
+      configure: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+    };
+    const probe = { test: vi.fn(async () => ({
+      status: "connected" as const,
+      capabilitySummary: { tools: 1, resources: 0, prompts: 0 },
+      toolNames: ["calendar.read"],
+      resourceSchemes: [],
+    })) };
+    const runtime = (desktop as any).createOpenClawMcpRuntime(configuration, probe);
+    const server = remote("https://mcp.example.com/rpc");
+    const signal = new AbortController().signal;
+
+    expect(runtime.capability()).toBe(true);
+    await expect(runtime.test(server, signal)).resolves.toMatchObject({ status: "connected", toolNames: ["calendar.read"] });
+    await runtime.configure(server, signal);
+    await runtime.stop(server, signal);
+    await runtime.start(server, signal);
+    await runtime.remove(server, signal);
+    expect(probe.test).toHaveBeenCalledWith(server, signal);
+    expect(configuration.configure).toHaveBeenCalledWith(server, signal);
+    expect(configuration.stop).toHaveBeenCalledWith(server, signal);
+    expect(configuration.start).toHaveBeenCalledWith(server, signal);
+    expect(configuration.remove).toHaveBeenCalledWith(server, signal);
+  });
+
   it("sanitizes OpenClaw MCP errors before they can reach storage or renderer", async () => {
-    const methods = Object.fromEntries(["list", "configure", "remove", "start", "stop"].map((name) => [name, vi.fn(async () => undefined)]));
-    const runtime = (desktop as any).createOpenClawMcpRuntime({ mcp: {
-      ...methods,
+    const configuration = Object.fromEntries(["configure", "remove", "start", "stop"].map((name) => [name, vi.fn(async () => undefined)]));
+    const runtime = (desktop as any).createOpenClawMcpRuntime(configuration, {
       test: vi.fn(async () => ({
         status: "error",
         error: { code: "OPERATION_FAILED", message: "Bearer top-secret /Users/name/private tool arguments", retryable: true, recoveryActions: ["retry"], causeDetails: { body: "secret" } },
       })),
-    } });
+    });
     const result = await runtime.test(remote("https://mcp.example.com/rpc"), new AbortController().signal);
     expect(result).toMatchObject({ status: "error", error: { code: "OPERATION_FAILED", retryable: true } });
     expect(JSON.stringify(result)).not.toMatch(/top-secret|Users\/name|tool arguments|body/u);

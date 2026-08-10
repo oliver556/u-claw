@@ -29,7 +29,7 @@ describe("management contracts", () => {
     expect(ConfigurationFieldSchema.parse({ key: "optional-name", label: "Optional name", kind: "text", required: false, value: null })).toBeTruthy();
     expect(ConfigurationFieldSchema.parse({ key: "credential", label: "Key", kind: "secret", required: true, secret: { configured: true, hint: "...1234" } })).toBeTruthy();
     expect(() => ConfigurationFieldSchema.parse({ key: "credential", label: "Key", kind: "secret", required: true, secret: { configured: true }, value: "plaintext" })).toThrow();
-    const secret = ConfigurationFieldSchema.parse({ key: "credential", label: "Key", kind: "secret", required: true, secret: { configured: true, hint: "ghp_123456789012345678901234567890123456" } });
+    const secret = ConfigurationFieldSchema.parse({ key: "credential", label: "Key", kind: "secret", required: true, secret: { configured: true, hint: "ghp_fixtureA123456789012345678901234567890" } });
     expect(secret).toMatchObject({ secret: { hint: "[REDACTED]" } });
   });
 });

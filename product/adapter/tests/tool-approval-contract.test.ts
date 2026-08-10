@@ -88,9 +88,9 @@ describe("OpenClaw tool and approval contract", () => {
   it("removes token-shaped summary keys and identifiers", () => {
     const tools = fixture("session.tool.json");
     const event = structuredClone(tools.result);
-    event.payload.data.name = "ghp_123456789012345678901234567890123456";
+    event.payload.data.name = "ghp_fixtureA123456789012345678901234567890";
     event.payload.data.result = {
-      ghp_123456789012345678901234567890123456: 1,
+      ghp_fixtureA123456789012345678901234567890: 1,
       github_pat_1234567890123456789012345678901234567890: true,
       ["sk_" + "live_123456789012345678901234"]: "stripe-secret",
       ["rk_" + "live_123456789012345678901234"]: "stripe-restricted-secret",
@@ -110,7 +110,7 @@ describe("OpenClaw tool and approval contract", () => {
     "sk_" + "live_123456789012345678901234",
     "rk_" + "live_123456789012345678901234",
     "sk-1234567890123456",
-    "sk-proj-1234567890123456",
+    "sk-proj-fixtureA123456789012",
   ])("rejects token-shaped tool identifier: %s", (toolId) => {
     const tools = fixture("session.tool.json");
     const event = structuredClone(tools.result);
@@ -122,7 +122,7 @@ describe("OpenClaw tool and approval contract", () => {
   it("rejects all Slack token families as tool identifiers", () => {
     const tools = fixture("session.tool.json");
     const event = structuredClone(tools.result);
-    event.payload.data.name = "xoxa-12345678901234567890";
+    event.payload.data.name = "xoxa-fixtureA1234567890123";
 
     expect(mapOpenClawSessionToolEvent(event)).toMatchObject({ toolId: "unknown-tool" });
   });

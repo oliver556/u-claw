@@ -35,7 +35,7 @@ describe("error contracts", () => {
   it.each([
     "Authorization: Basic Zm9vOmJhcg==",
     "Authorization: Bearer raw-secret-value",
-    "ghp_123456789012345678901234567890123456",
+    "ghp_fixtureA123456789012345678901234567890",
     "AKIAIOSFODNN7EXAMPLE",
     "api_key=top-secret-value",
     "token=top-secret-value",
@@ -97,7 +97,7 @@ describe("error contracts", () => {
     "API Key: actual-secret",
     "aws_secret_access_key=actual-secret-value",
     "github_pat_1234567890123456789012345678901234567890",
-    "xoxb-1234567890-1234567890-secret",
+    "xoxb-fixtureA1234567890123",
     "AIzaSyD12345678901234567890123456789012",
     "sk_" + "live_123456789012345678901234",
     "rk_" + "live_123456789012345678901234",
@@ -140,9 +140,9 @@ describe("error contracts", () => {
 
   it("redacts nonempty sensitive values while preserving metrics and safe statuses", () => {
     const parsed = RendererSafeSummarySchema.parse({
-      apiKey: "context-secret-1",
-      access_token: "context-secret-2",
-      authToken: "context-secret-3",
+      apiKey: "fixture-context-secret-1",
+      access_token: "fixture-context-secret-2",
+      authToken: "fixture-context-secret-3",
       sessionCookie: true,
       privateKey: ["line-1", "line-2"],
       token: 123456,
