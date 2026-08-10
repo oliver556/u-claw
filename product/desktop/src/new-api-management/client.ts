@@ -1,4 +1,9 @@
 import {
+  BuiltinDeviceControlsSchema,
+  BuiltinDeviceControlsUpdateSchema,
+  BuiltinDeviceLocatorSchema,
+  BuiltinServiceStatusSchema,
+  BuiltinServiceStatusUpdateSchema,
   NewApiAuditPageSchema,
   NewApiAuditQuerySchema,
   NewApiActivateTokenInputSchema,
@@ -167,19 +172,31 @@ export function createNewApiManagementClient(options: NewApiManagementClientOpti
   };
 
   const id = (value: string): string => encodeURIComponent(ResourceIdSchema.parse(value));
-  const operationsUnavailable = async (): Promise<never> => {
-    throw new NewApiManagementError(
-      "unavailable",
-      "OPERATIONS_NOT_IMPLEMENTED",
-      "Builtin service operations are not implemented.",
-      false,
-    );
-  };
   return {
-    getServiceStatus: operationsUnavailable,
-    updateServiceStatus: operationsUnavailable,
-    getDeviceControls: operationsUnavailable,
-    updateDeviceControls: operationsUnavailable,
+    async getServiceStatus() {
+      return request("GET", "operations/service", BuiltinServiceStatusSchema);
+    },
+    async updateServiceStatus(input) {
+      const parsed = BuiltinServiceStatusUpdateSchema.parse(input);
+      const { idempotencyKey, ...body } = parsed;
+      return request("PATCH", "operations/service", BuiltinServiceStatusSchema, body, idempotencyKey);
+    },
+    async getDeviceControls(locator) {
+      const parsed = BuiltinDeviceLocatorSchema.parse(locator);
+      const path = "deviceId" in parsed
+        ? `operations/devices/${id(parsed.deviceId)}/controls`
+        : `operations/users/${id(parsed.userId)}/controls`;
+      return request("GET", path, BuiltinDeviceControlsSchema);
+    },
+    async updateDeviceControls(locator, input) {
+      const parsedLocator = BuiltinDeviceLocatorSchema.parse(locator);
+      const parsed = BuiltinDeviceControlsUpdateSchema.parse(input);
+      const { idempotencyKey, ...body } = parsed;
+      const path = "deviceId" in parsedLocator
+        ? `operations/devices/${id(parsedLocator.deviceId)}/controls`
+        : `operations/users/${id(parsedLocator.userId)}/controls`;
+      return request("PATCH", path, BuiltinDeviceControlsSchema, body, idempotencyKey);
+    },
     async createUser(input) {
       const parsed = NewApiCreateUserInputSchema.parse(input);
       const { idempotencyKey, ...body } = parsed;

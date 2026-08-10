@@ -86,7 +86,18 @@ describe("localhost New API management backend", () => {
     expect(mapping).toMatchObject({ status: "provisioning", newApiTokenId: issued.token.id });
     expect(policy).toMatchObject({ allowedModels: ["model-a", "model-b"], disabled: false });
     await expect(client.getUsage(user.id)).resolves.toMatchObject({ consumed: 750, remaining: 9_250 });
-    await expect(client.updatePolicy(user.id, { ...policy, disabled: true })).resolves.toMatchObject({ disabled: true });
+    await expect(client.updatePolicy(user.id, { ...policy, disabled: true })).rejects.toMatchObject({
+      category: "conflict", code: "OPERATIONS_CAS_REQUIRED", retryable: false,
+    });
+    const controls = await client.getDeviceControls({ deviceId: mapping.deviceId });
+    await expect(client.updateDeviceControls({ userId: user.id }, {
+      idempotencyKey: "idem-controls-disable-001",
+      expectedRevision: controls.revision,
+      expectedGeneration: mapping.generation,
+      expectedLicenseId: mapping.licenseId,
+      expectedTokenId: issued.token.id,
+      policy: { ...policy, disabled: true },
+    })).resolves.toMatchObject({ policy: { disabled: true }, revision: 2 });
     await expect(client.revokeToken(issued.token.id, { idempotencyKey: "idem-revoke-001" })).resolves.toMatchObject({ status: "revoked" });
 
     const audit = await client.listAuditEvents({ deviceId: "dev_001", cursor: null, pageSize: 100 });

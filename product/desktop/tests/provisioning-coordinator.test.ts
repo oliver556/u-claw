@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type {
+  BuiltinDeviceControls,
   IssuedLicense,
   LicenseLifecycleClient,
   NewApiDeviceMapping,
@@ -33,6 +34,11 @@ const input: ProvisioningIdentityInput = {
   notBefore: now,
   expiresAt: "2027-08-10T00:00:00.000Z",
 };
+
+const policyDigest = (value: NewApiPolicy): string => createHash("sha256")
+  .update("uclaw-new-api-policy-v1\0")
+  .update(JSON.stringify(value))
+  .digest("hex");
 
 function license(licenseId = "lic_fixture_001", fingerprint = input.usbFingerprint): IssuedLicense {
   const startupSecret = "fixture-startup-secret-material-001";
@@ -78,6 +84,7 @@ function setup() {
     policy, createdAt: now, updatedAt: now,
   };
   let token: NewApiIssuedToken | undefined;
+  let controls: BuiltinDeviceControls | undefined;
   const issuedLicenses = new Map<string, IssuedLicense>();
 
   const licenseClient: LicenseLifecycleClient = {
@@ -107,8 +114,26 @@ function setup() {
   const newApiClient: NewApiManagementClient = {
     getServiceStatus: vi.fn(async () => { throw new Error("operations unavailable"); }),
     updateServiceStatus: vi.fn(async () => { throw new Error("operations unavailable"); }),
-    getDeviceControls: vi.fn(async () => { throw new Error("operations unavailable"); }),
-    updateDeviceControls: vi.fn(async () => { throw new Error("operations unavailable"); }),
+    getDeviceControls: vi.fn(async () => {
+      events.push("controls.get");
+      if (!controls) throw new Error("controls unavailable");
+      return controls;
+    }),
+    updateDeviceControls: vi.fn(async (_locator, value) => {
+      events.push(value.policy.disabled ? "controls.disable" : "controls.bind");
+      if (!controls || !mapping || !token
+          || controls.revision !== value.expectedRevision
+          || controls.generation !== value.expectedGeneration
+          || controls.licenseId !== value.expectedLicenseId
+          || controls.tokenId !== value.expectedTokenId) throw new Error("controls CAS conflict");
+      const updatedAt = now;
+      const nextDigest = policyDigest(value.policy);
+      policy = value.policy;
+      mapping = { ...mapping, policyDigest: nextDigest, updatedAt };
+      token = { ...token, token: { ...token.token, policyDigest: nextDigest, updatedAt } };
+      controls = { ...controls, revision: controls.revision + 1, policy, policyDigest: nextDigest, updatedAt };
+      return controls;
+    }),
     createUser: vi.fn(async () => { events.push("user.create"); return { ...user, policy }; }),
     getUser: vi.fn(async () => ({ ...user, policy })),
     updatePolicy: vi.fn(async (_userId, value) => { events.push(value.disabled ? "policy.disable" : "policy.bind"); policy = value; return value; }),
@@ -134,8 +159,21 @@ function setup() {
     createDeviceMapping: vi.fn(async (value) => {
       events.push("mapping.create");
       const { idempotencyKey: _key, ...fields } = value;
-      mapping = { ...fields, failure: null, createdAt: now, updatedAt: now };
-      return mapping!;
+      const created: NewApiDeviceMapping = { ...fields, failure: null, createdAt: now, updatedAt: now };
+      mapping = created;
+      controls = {
+        schemaVersion: 1,
+        deviceId: created.deviceId,
+        userId: created.newApiUserId,
+        revision: 1,
+        policy,
+        policyDigest: created.policyDigest,
+        generation: created.generation,
+        licenseId: created.licenseId,
+        tokenId: created.newApiTokenId,
+        updatedAt: now,
+      };
+      return created;
     }),
     getDeviceMapping: vi.fn(async () => {
       events.push("mapping.get");
@@ -168,7 +206,37 @@ function setup() {
     cleanupArtifacts: vi.fn(async () => { events.push("artifacts.cleanup"); }),
   };
   const coordinator = createProvisioningCoordinator({ licenseClient, newApiClient, artifactWriter, now: () => new Date(now) });
-  return { coordinator, licenseClient, newApiClient, artifactWriter, events, getJournal: () => journal };
+  const seedMapping = (value: NewApiDeviceMapping, valuePolicy: NewApiPolicy): void => {
+    mapping = value;
+    policy = valuePolicy;
+    token = {
+      token: {
+        id: value.newApiTokenId,
+        userId: value.newApiUserId,
+        name: "device",
+        channelId: value.channelId,
+        policyDigest: value.policyDigest,
+        generation: value.generation,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      secret: "fixture-device-token-secret-material-seeded",
+    };
+    controls = {
+      schemaVersion: 1,
+      deviceId: value.deviceId,
+      userId: value.newApiUserId,
+      revision: 1,
+      policy: valuePolicy,
+      policyDigest: value.policyDigest,
+      generation: value.generation,
+      licenseId: value.licenseId,
+      tokenId: value.newApiTokenId,
+      updatedAt: now,
+    };
+  };
+  return { coordinator, licenseClient, newApiClient, artifactWriter, events, getJournal: () => journal, seedMapping };
 }
 
 describe("provisioning coordinator", () => {
@@ -281,6 +349,22 @@ describe("provisioning coordinator", () => {
     "restarts generation-two %s from the immutable source license",
     async (stage) => {
       const context = setup();
+      const boundPolicy: NewApiPolicy = {
+        quota: { unit: "tokens", limit: 100_000, period: "monthly" },
+        rateLimit: { requestsPerMinute: 60, concurrentRequests: 2 },
+        allowedModels: [input.model], disabled: false,
+      };
+      const remoteGeneration = stage === "mapping-created" ? 2 : 1;
+      context.seedMapping({
+        deviceId: input.deviceId,
+        licenseId: `lic_fixture_00${remoteGeneration}`,
+        startupSecretHash: "1".repeat(64), startupSecretSalt: "2".repeat(32), usbFingerprint: input.usbFingerprint,
+        newApiUserId: "usr_fixture_001", newApiUsername: input.username,
+        newApiTokenId: `tok_fixture_00${remoteGeneration}`,
+        channelId: input.channelId, policyDigest: policyDigest(boundPolicy), generation: remoteGeneration,
+        previousTokenId: remoteGeneration === 1 ? null : "tok_fixture_001",
+        status: remoteGeneration === 1 ? "revoked" : "provisioning", failure: null, createdAt: now, updatedAt: now,
+      }, boundPolicy);
       const requestHash = createHash("sha256")
         .update("uclaw-provisioning-request-v1").update("\0").update(JSON.stringify(input)).digest("hex");
       await context.artifactWriter.writeJournal({
@@ -302,7 +386,8 @@ describe("provisioning coordinator", () => {
         licenseClient: context.licenseClient, newApiClient: context.newApiClient,
         artifactWriter: context.artifactWriter, now: () => new Date(now),
       });
-      await expect(restarted.provision(input)).resolves.toMatchObject({ status: "active", licenseId: "lic_fixture_002" });
+      const restartedResult = await restarted.provision(input);
+      expect(restartedResult).toMatchObject({ status: "active", licenseId: "lic_fixture_002" });
       expect(context.licenseClient.reissueLicense).toHaveBeenCalledWith("lic_fixture_001", expect.anything());
       expect(context.licenseClient.reissueLicense).not.toHaveBeenCalledWith("lic_fixture_002", expect.anything());
     },
@@ -325,6 +410,40 @@ describe("provisioning coordinator", () => {
     expect(context.licenseClient.issueLicense).toHaveBeenCalledOnce();
     await expect(context.coordinator.provision({ ...input, username: "uclaw_other" }))
       .rejects.toBeInstanceOf(ProvisioningCoordinatorError);
+  });
+
+  it("fails closed when resumed target controls point at a different token", async () => {
+    const context = setup();
+    const boundPolicy: NewApiPolicy = {
+      quota: { unit: "tokens", limit: 100_000, period: "monthly" },
+      rateLimit: { requestsPerMinute: 60, concurrentRequests: 2 },
+      allowedModels: [input.model], disabled: false,
+    };
+    context.seedMapping({
+      deviceId: input.deviceId,
+      licenseId: "lic_fixture_002",
+      startupSecretHash: "1".repeat(64), startupSecretSalt: "2".repeat(32), usbFingerprint: input.usbFingerprint,
+      newApiUserId: "usr_fixture_001", newApiUsername: input.username, newApiTokenId: "tok_wrong_001",
+      channelId: input.channelId, policyDigest: policyDigest(boundPolicy), generation: 2,
+      previousTokenId: "tok_fixture_001", status: "provisioning", failure: null, createdAt: now, updatedAt: now,
+    }, boundPolicy);
+    const requestHash = createHash("sha256")
+      .update("uclaw-provisioning-request-v1").update("\0").update(JSON.stringify(input)).digest("hex");
+    await context.artifactWriter.writeJournal({
+      schemaVersion: 1, generation: 2, licenseOperation: "reissue", licenseSourceId: "lic_fixture_001",
+      transactionId: `txn_${requestHash.slice(0, 24)}`, requestHash, mappedTokenId: "tok_fixture_002",
+      previousTokenId: "tok_fixture_001",
+      binding: {
+        deviceId: input.deviceId, usbFingerprint: input.usbFingerprint, channelId: input.channelId,
+        licenseId: "lic_fixture_002", newApiUserId: "usr_fixture_001", newApiUsername: input.username,
+        newApiTokenId: "tok_fixture_002",
+      },
+      endpoint: input.endpoint, model: input.model, stage: "mapping-created", failureCode: null,
+      compensation: { mapping: "pending", token: "pending", license: "pending", artifacts: "not-needed" },
+      lifecycle: null, createdAt: now, updatedAt: now,
+    });
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
+    expect(context.newApiClient.createToken).not.toHaveBeenCalled();
   });
 
   it("marks mapping failed and revokes token/license when active credential finalization fails", async () => {
@@ -514,7 +633,18 @@ describe("provisioning coordinator", () => {
     };
     context.events.length = 0;
     await context.coordinator.applyLifecycle({ action: "disable", idempotencyKey: "lifecycle-disable-001", binding });
-    expect(context.events.indexOf("policy.disable")).toBeLessThan(context.events.indexOf("artifacts.cleanup"));
+    expect(context.events.indexOf("controls.disable")).toBeLessThan(context.events.indexOf("artifacts.cleanup"));
+    expect(context.newApiClient.getDeviceControls).toHaveBeenCalledWith({ deviceId: binding.deviceId });
+    expect(context.newApiClient.updateDeviceControls).toHaveBeenCalledWith(
+      { deviceId: binding.deviceId },
+      expect.objectContaining({
+        expectedRevision: 1,
+        expectedGeneration: 1,
+        expectedLicenseId: binding.licenseId,
+        expectedTokenId: binding.newApiTokenId,
+        policy: expect.objectContaining({ disabled: true }),
+      }),
+    );
     expect(context.getJournal()).toMatchObject({ stage: "disabled" });
     await context.coordinator.applyLifecycle({ action: "revoke", idempotencyKey: "lifecycle-revoke-001", binding });
     expect(context.getJournal()).toMatchObject({ stage: "revoked" });
@@ -542,6 +672,16 @@ describe("provisioning coordinator", () => {
     await expect(context.coordinator.applyLifecycle(action)).resolves.toMatchObject({
       status: "active", usbFingerprint: action.usbFingerprint,
     });
+    expect(context.newApiClient.updateDeviceControls).toHaveBeenCalledWith(
+      { deviceId: binding.deviceId },
+      expect.objectContaining({
+        expectedGeneration: 1,
+        expectedLicenseId: binding.licenseId,
+        expectedTokenId: binding.newApiTokenId,
+        policy: expect.objectContaining({ allowedModels: [input.model], disabled: false }),
+      }),
+    );
+    expect(context.newApiClient.updatePolicy).toHaveBeenCalledTimes(1);
   });
 
   it("wraps lifecycle failures in fixed public errors", async () => {
@@ -552,7 +692,7 @@ describe("provisioning coordinator", () => {
       newApiUserId: active.newApiUserId, newApiUsername: active.newApiUsername,
       newApiTokenId: active.newApiTokenId, channelId: active.channelId,
     };
-    vi.mocked(context.newApiClient.updatePolicy).mockRejectedValueOnce(new Error("fixture lifecycle secret"));
+    vi.mocked(context.newApiClient.updateDeviceControls).mockRejectedValueOnce(new Error("fixture lifecycle secret"));
     const error = await context.coordinator.applyLifecycle({
       action: "disable", idempotencyKey: "lifecycle-disable-fail", binding,
     }).catch((caught: unknown) => caught);
