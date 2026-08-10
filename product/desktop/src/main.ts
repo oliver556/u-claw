@@ -32,7 +32,7 @@ import type { IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import { createSessionOrganizerStore } from "./session-organizer/store.js";
 import { createProviderStore } from "./providers/provider-store.js";
-import { createMainProcessModelRouting, type ModelSourceExecutors } from "./providers/model-source-router.js";
+import { createMainProcessModelRouting, type ExternalModelSourceExecutors } from "./providers/model-source-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
 import { createSkillService } from "./skills/skill-service.js";
 import { createLivePluginRegistryClient, createUnavailablePluginRegistryClient } from "./plugins/registry-client.js";
@@ -213,7 +213,7 @@ export interface DesktopMainOptions {
   gatewayStopTimeoutMs?: number;
   gatewayKillTimeoutMs?: number;
   consistencyCoordinator?: ProductionRuntimeConsistencyCoordinator;
-  modelSourceExecutors?: ModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
+  modelSourceExecutors?: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
 }
 
 export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
@@ -349,7 +349,7 @@ export function requireElectronClient(client: UClawClient | undefined): UClawCli
 
 export function requireModelSourceExecutors(
   executors: DesktopMainOptions["modelSourceExecutors"],
-): ModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>> {
+): ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>> {
   if (!executors) throw new Error("Desktop production wiring must provide model source executors.");
   return executors;
 }

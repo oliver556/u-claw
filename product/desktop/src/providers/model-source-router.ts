@@ -1,11 +1,11 @@
-import type { ProviderConfigEntry, UClawErrorCode } from "@uclaw/shared";
+import type { BuiltinModelRequest, ProviderConfigEntry, UClawErrorCode } from "@uclaw/shared";
 
 import {
   createBuiltinCredentialStore,
   type BuiltinCredentialStore,
   type BuiltinModelCredential,
 } from "./builtin-credential-store.js";
-import { BuiltinServiceClientError } from "./builtin-service-client.js";
+import { BuiltinServiceClientError, createBuiltinServiceClient } from "./builtin-service-client.js";
 import type { ProviderStore } from "./provider-store.js";
 
 export type ModelSource = "builtin" | "domestic" | "custom";
@@ -42,6 +42,11 @@ export interface ModelSourceExecutors<Request, Result> {
   custom(request: Request, provider: ProviderConfigEntry, signal?: AbortSignal): Promise<Result>;
 }
 
+export type ExternalModelSourceExecutors<Request, Result> = Pick<
+  ModelSourceExecutors<Request, Result>,
+  "domestic" | "custom"
+>;
+
 export interface CreateModelSourceRouterOptions<Request, Result> {
   providers: ProviderStore;
   credentials: BuiltinCredentialStore;
@@ -51,7 +56,7 @@ export interface CreateModelSourceRouterOptions<Request, Result> {
 export interface CreateMainProcessModelRoutingOptions<Request, Result> {
   dataDir: string;
   providers: ProviderStore;
-  executors: ModelSourceExecutors<Request, Result>;
+  executors: ExternalModelSourceExecutors<Request, Result>;
   allowLoopbackHttp?: boolean;
 }
 
@@ -101,6 +106,9 @@ export function createMainProcessModelRouting<Request, Result>({
   allowLoopbackHttp = false,
 }: CreateMainProcessModelRoutingOptions<Request, Result>) {
   const credentials = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp });
-  const router = createModelSourceRouter({ providers, credentials, executors });
+  const builtinDataClient = createBuiltinServiceClient({ allowLoopbackHttp });
+  const builtin = async (request: Request, credential: BuiltinModelCredential, signal?: AbortSignal): Promise<Result> =>
+    await builtinDataClient.execute(request as unknown as BuiltinModelRequest, credential, signal) as unknown as Result;
+  const router = createModelSourceRouter({ providers, credentials, executors: { ...executors, builtin } });
   return { credentials, routeChatSend: router.execute };
 }
