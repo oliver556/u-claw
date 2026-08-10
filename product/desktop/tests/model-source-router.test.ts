@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { redactAdapterRecord } from "../../adapter/src/redaction.js";
 import { createBuiltinCredentialStore } from "../src/providers/builtin-credential-store.js";
+import { BuiltinServiceClientError } from "../src/providers/builtin-service-client.js";
 import { ModelSourceFailure, createMainProcessModelRouting, createModelSourceRouter } from "../src/providers/model-source-router.js";
 import { createProviderStore } from "../src/providers/provider-store.js";
 
@@ -140,13 +141,43 @@ describe("model source router", () => {
     },
   );
 
+  it("preserves typed builtin failure classification without retry or external fallback", async () => {
+    const context = await setup();
+    const failure = new BuiltinServiceClientError(
+      "unavailable",
+      "SERVICE_MAINTENANCE",
+      "Builtin service is unavailable.",
+      false,
+    );
+    context.builtin.mockRejectedValueOnce(failure);
+
+    await expect(context.router.execute({ prompt: "maintenance" })).rejects.toBe(failure);
+    expect(context.builtin).toHaveBeenCalledOnce();
+    expect(context.domestic).not.toHaveBeenCalled();
+    expect(context.custom).not.toHaveBeenCalled();
+  });
+
   it("keeps external requests and quota isolated from builtin", async () => {
     const context = await setup();
+    const loadActive = vi.spyOn(context.credentials, "loadActive");
     await context.providers.setEnabled("minimax", true);
     await context.router.execute({ prompt: "external-only" });
     expect(context.domestic).toHaveBeenCalledOnce();
     expect(context.builtin).not.toHaveBeenCalled();
-    expect(context.credentials.loadActive).not.toBeUndefined();
+    expect(loadActive).not.toHaveBeenCalled();
+
+    await context.providers.create({
+      id: "custom-isolated",
+      name: "Custom isolated",
+      enabled: true,
+      baseUrl: "https://custom.example.test/v1",
+      model: "custom-model",
+    });
+    await context.providers.setApiKey("custom-isolated", randomBytes(24).toString("hex"));
+    await context.router.execute({ prompt: "custom-only" });
+    expect(context.custom).toHaveBeenCalledOnce();
+    expect(context.builtin).not.toHaveBeenCalled();
+    expect(loadActive).not.toHaveBeenCalled();
   });
 
   it("fails closed without builtin credential and never projects secrets into errors or redaction output", async () => {
