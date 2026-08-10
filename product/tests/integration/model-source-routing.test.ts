@@ -10,7 +10,6 @@ import {
   startLocalNewApiManagementServer,
   type LocalNewApiManagementServer,
 } from "../../desktop/src/new-api-management/index.js";
-import { createBuiltinServiceClient } from "../../desktop/src/providers/builtin-service-client.js";
 import { createMainProcessModelRouting, ModelSourceFailure } from "../../desktop/src/providers/model-source-router.js";
 import { createProviderStore } from "../../desktop/src/providers/provider-store.js";
 
@@ -57,22 +56,21 @@ describe("typed New API model source routing integration", () => {
     });
 
     const providers = createProviderStore({ dataDir });
-    const builtin = vi.fn(async () => ({ source: "builtin" as const }));
     const domestic = vi.fn(async () => { throw new ModelSourceFailure("domestic", "quota"); });
     const custom = vi.fn(async () => ({ source: "custom" as const }));
     const routing = createMainProcessModelRouting({
-      dataDir, providers, allowLoopbackHttp: true, executors: { builtin, domestic, custom },
+      dataDir, providers, allowLoopbackHttp: true, executors: { domestic, custom },
     });
     const endpoint = new URL("/v1", server.url).href;
     await routing.credentials.provision({
       endpoint, model: "builtin-model", mapping, issuedToken: { ...issuedToken, token: activeToken },
     });
 
-    await expect(routing.routeChatSend({ prompt: "first" })).resolves.toEqual({ source: "builtin" });
+    const loadActive = vi.spyOn(routing.credentials, "loadActive");
     await providers.setEnabled("deepseek", true);
     const externalError = await routing.routeChatSend({ prompt: "external" }).catch((error: unknown) => error);
     expect(externalError).toMatchObject({ source: "domestic", category: "quota", code: "MODEL_UNAVAILABLE" });
-    expect(builtin).toHaveBeenCalledOnce();
+    expect(loadActive).not.toHaveBeenCalled();
     expect(domestic).toHaveBeenCalledOnce();
     expect(custom).not.toHaveBeenCalled();
 
@@ -171,15 +169,13 @@ describe("typed New API model source routing integration", () => {
     });
 
     const providers = createProviderStore({ dataDir });
-    const dataClient = createBuiltinServiceClient({ allowLoopbackHttp: true });
-    const builtin = vi.fn(dataClient.execute.bind(dataClient));
     const domestic = vi.fn(async () => ({ source: "domestic" as const }));
     const custom = vi.fn(async () => ({ source: "custom" as const }));
     const routing = createMainProcessModelRouting({
       dataDir,
       providers,
       allowLoopbackHttp: true,
-      executors: { builtin, domestic, custom },
+      executors: { domestic, custom },
     });
     await routing.credentials.provision({
       endpoint: server.dataUrl,
@@ -204,7 +200,6 @@ describe("typed New API model source routing integration", () => {
       reasonCode: "DEGRADED_HEALTH",
     });
     await expect(routeBuiltin()).resolves.toMatchObject({ serviceState: "degraded", serviceRevision: 3 });
-    expect(builtin).toHaveBeenCalledTimes(2);
 
     await management.updateServiceStatus({
       idempotencyKey: "route-lifecycle-service-maintenance",
@@ -214,13 +209,11 @@ describe("typed New API model source routing integration", () => {
     });
     await expect(routeBuiltin()).rejects.toMatchObject({ category: "unavailable", code: "SERVICE_MAINTENANCE", retryable: false });
     const callsBeforeExternal = upstreamCalls;
-    const builtinCallsBeforeExternal = builtin.mock.calls.length;
     const loadActive = vi.spyOn(routing.credentials, "loadActive");
     await providers.setApiKey("deepseek", randomBytes(24).toString("hex"));
     await providers.setEnabled("deepseek", true);
     await expect(routeBuiltin()).resolves.toEqual({ source: "domestic" });
     expect(upstreamCalls).toBe(callsBeforeExternal);
-    expect(builtin).toHaveBeenCalledTimes(builtinCallsBeforeExternal);
     expect(loadActive).not.toHaveBeenCalled();
     await providers.create({
       id: "route-lifecycle-custom",
@@ -232,7 +225,6 @@ describe("typed New API model source routing integration", () => {
     await providers.setApiKey("route-lifecycle-custom", randomBytes(24).toString("hex"));
     await expect(routeBuiltin()).resolves.toEqual({ source: "custom" });
     expect(upstreamCalls).toBe(callsBeforeExternal);
-    expect(builtin).toHaveBeenCalledTimes(builtinCallsBeforeExternal);
     expect(loadActive).not.toHaveBeenCalled();
     loadActive.mockRestore();
     await providers.remove("route-lifecycle-custom");

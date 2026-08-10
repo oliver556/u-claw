@@ -53,20 +53,45 @@ async function setup() {
 }
 
 describe("model source router", () => {
-  it("assembles credential storage and routing inside the main-process boundary", async () => {
+  it("keeps the typed builtin client inside the main-process boundary", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-model-route-"));
     roots.push(dataDir);
     const providers = createProviderStore({ dataDir });
-    const builtin = vi.fn(async () => "builtin-result");
+    const bypass = vi.fn(async () => "bypassed-result");
+    const executors = { builtin: bypass, domestic: vi.fn(), custom: vi.fn() };
     const routing = createMainProcessModelRouting({
       dataDir,
       providers,
-      allowLoopbackHttp: true,
-      executors: { builtin, domestic: vi.fn(), custom: vi.fn() },
+      executors,
     });
-    await routing.credentials.provision(typedCredential());
-    await expect(routing.routeChatSend({ prompt: "main" })).resolves.toBe("builtin-result");
-    expect(builtin).toHaveBeenCalledOnce();
+    await routing.credentials.provision(typedCredential("https://127.0.0.1:1/v1"));
+
+    await expect(routing.routeChatSend({
+      schemaVersion: 1,
+      requestId: "main_builtin_request",
+      model: "builtin-model",
+      prompt: "main",
+      maxOutputTokens: 10,
+    })).rejects.toMatchObject({ category: "transport", code: "NETWORK_ERROR" });
+    expect(bypass).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when production builtin endpoint is missing or not HTTPS", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-model-unavailable-"));
+    roots.push(dataDir);
+    const providers = createProviderStore({ dataDir });
+    const routing = createMainProcessModelRouting({
+      dataDir,
+      providers,
+      executors: { domestic: vi.fn(), custom: vi.fn() },
+    });
+
+    await expect(routing.routeChatSend({ prompt: "missing" })).rejects.toMatchObject({
+      source: "builtin", category: "configuration", code: "UNAVAILABLE",
+    });
+    await expect(routing.credentials.provision(typedCredential())).rejects.toMatchObject({
+      code: "BUILTIN_ENDPOINT_INSECURE",
+    });
   });
 
   it("uses builtin when no external source is explicitly enabled", async () => {
