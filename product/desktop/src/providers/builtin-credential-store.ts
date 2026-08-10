@@ -1,7 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { lstat, mkdir, open, rename, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { FsSafeError, root as createSafeRoot } from "@openclaw/fs-safe";
 
 import {
   NewApiDeviceMappingSchema,
@@ -127,69 +124,29 @@ function validatePersisted(
   };
 }
 
-async function writeMode600(path: string, body: string): Promise<void> {
-  const parent = dirname(path);
-  await mkdir(parent, { recursive: true, mode: 0o700 });
-  const parentStat = await lstat(parent);
-  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
-    throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential directory is unsafe.");
-  }
-  try {
-    const targetStat = await lstat(path);
-    if (!targetStat.isFile() || targetStat.isSymbolicLink() || targetStat.nlink !== 1) {
-      throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential target is unsafe.");
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  const temporary = join(parent, `.${FILE_NAME}.${process.pid}.${randomUUID()}.tmp`);
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(temporary, "wx", 0o600);
-    await handle.writeFile(body, "utf8");
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await rename(temporary, path);
-    const directory = await open(parent, "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } catch (error) {
-    await handle?.close().catch(() => undefined);
-    await unlink(temporary).catch(() => undefined);
-    throw error;
-  }
-}
-
 export function createBuiltinCredentialStore({
   dataDir,
   allowLoopbackHttp = false,
 }: CreateBuiltinCredentialStoreOptions): BuiltinCredentialStore {
-  const path = join(dataDir, ".uclaw", FILE_NAME);
+  const path = `.uclaw/${FILE_NAME}`;
+  const safeRoot = createSafeRoot(dataDir, {
+    symlinks: "reject", hardlinks: "reject", maxBytes: 1024 * 1024, mkdir: true, mode: 0o600,
+  }).catch(() => {
+    throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential root is unsafe.");
+  });
   const load = async (requiredMappingStatus?: "active"): Promise<BuiltinModelCredential> => {
     let body: string;
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-      const stat = await handle.stat();
-      if (!stat.isFile() || stat.nlink !== 1) {
-        throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential target is unsafe.");
-      }
-      body = await handle.readFile("utf8");
+      body = await (await safeRoot).readText(path);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      if (error instanceof FsSafeError && error.code === "not-found") {
         throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_MISSING", "Builtin model credential is not configured.");
       }
-      if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+      if (error instanceof FsSafeError && ["symlink", "hardlink", "path-mismatch"].includes(error.code)) {
         throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential target is unsafe.");
       }
       if (error instanceof BuiltinCredentialError) throw error;
       throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin model credential could not be read.");
-    } finally {
-      await handle?.close();
     }
     try {
       return validatePersisted(JSON.parse(body) as unknown, allowLoopbackHttp, requiredMappingStatus).credential;
@@ -201,25 +158,19 @@ export function createBuiltinCredentialStore({
   return {
     async provision(input) {
       const { persisted } = validatePersisted({ schemaVersion: 1, ...input }, allowLoopbackHttp);
-      await writeMode600(path, `${JSON.stringify(persisted)}\n`);
+      try {
+        await (await safeRoot).write(path, `${JSON.stringify(persisted)}\n`, { mode: 0o600, overwrite: true });
+      } catch {
+        throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential could not be written safely.");
+      }
     },
     loadActive: () => load("active"),
     loadForConnectivityCheck: () => load(),
     async clear() {
-      let removed = false;
       try {
-        await unlink(path);
-        removed = true;
+        await (await safeRoot).remove(path);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-      if (removed) {
-        const directory = await open(dirname(path), "r");
-        try {
-          await directory.sync();
-        } finally {
-          await directory.close();
-        }
+        if (!(error instanceof FsSafeError) || error.code !== "not-found") throw error;
       }
     },
   };

@@ -241,6 +241,7 @@ export function createProvisioningCoordinator({
       schemaVersion: 1,
       generation,
       licenseOperation: "issue",
+      licenseSourceId: null,
       transactionId,
       requestHash,
       mappedTokenId: null,
@@ -271,7 +272,7 @@ export function createProvisioningCoordinator({
             notBefore: input.notBefore,
             expiresAt: input.expiresAt,
           })
-          : await licenseClient.reissueLicense(journal.binding.licenseId!, {
+          : await licenseClient.reissueLicense(journal.licenseSourceId!, {
             idempotencyKey: deriveProvisioningStepKey(input.idempotencyKey, "license", generation),
             usbFingerprint: input.usbFingerprint,
             notBefore: input.notBefore,
@@ -414,10 +415,20 @@ export function createProvisioningCoordinator({
       if (!mappingMatches(mapping)
           || mapping.policyDigest !== boundPolicyDigest || mapping.generation !== generation
           || mapping.previousTokenId !== previousTokenId || mapping.status !== "provisioning") {
-        journal = await save(journal, {
-          mappedTokenId: mapping.newApiTokenId,
-          compensation: { ...journal.compensation, mapping: "succeeded" },
-        });
+        const ownedMapping = mapping.deviceId === input.deviceId
+          && mapping.licenseId === issued.status.licenseId
+          && mapping.newApiUserId === user.id
+          && mapping.newApiTokenId === issuedToken.token.id
+          && mapping.generation === generation;
+        if (ownedMapping) {
+          journal = await save(journal, {
+            mappedTokenId: mapping.newApiTokenId,
+            compensation: {
+              ...journal.compensation,
+              mapping: mapping.status === "failed" ? "succeeded" : "pending",
+            },
+          });
+        }
         throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "mapping-created", false);
       }
       journal = await save(journal, {
@@ -534,6 +545,7 @@ export function createProvisioningCoordinator({
           ...compensated,
           generation: compensated.generation + 1,
           licenseOperation: compensated.binding.licenseId === undefined ? "issue" : "reissue",
+          licenseSourceId: compensated.binding.licenseId ?? null,
           requestHash,
           previousTokenId: compensated.mappedTokenId,
           stage: "started",
@@ -552,6 +564,7 @@ export function createProvisioningCoordinator({
           ...existing,
           generation: retryGeneration,
           licenseOperation: existing.binding.licenseId === undefined ? "issue" : "reissue",
+          licenseSourceId: existing.binding.licenseId ?? null,
           requestHash,
           previousTokenId: existing.mappedTokenId,
           stage: "started",
@@ -645,6 +658,7 @@ export function createProvisioningCoordinator({
       ...journal,
       generation: targetGeneration,
       licenseOperation: "reissue",
+      licenseSourceId: lifecycle.sourceBinding.licenseId,
       requestHash: reissueHash,
       mappedTokenId: lifecycle.sourceBinding.newApiTokenId,
       previousTokenId: lifecycle.sourceBinding.newApiTokenId,

@@ -79,6 +79,7 @@ const journal = {
   schemaVersion: 1 as const,
   generation: 1,
   licenseOperation: "issue" as const,
+  licenseSourceId: null,
   transactionId: "txn_fixture_001",
   requestHash: "d".repeat(64),
   mappedTokenId: binding.newApiTokenId,
