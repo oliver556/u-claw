@@ -127,6 +127,28 @@ describe("U-Claw application shell", () => {
     expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();
   });
 
+  it("changes and persists appearance from the system center", async () => {
+    localStorage.clear();
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false,
+      media: "(prefers-color-scheme: dark)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    renderApp();
+    fireEvent.click(screen.getByRole("link", { name: "系统" }));
+    fireEvent.click(screen.getByRole("tab", { name: "外观" }));
+
+    const chooser = screen.getByRole("radiogroup", { name: "主题模式" });
+    fireEvent.click(within(chooser).getByRole("radio", { name: /深色/ }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(JSON.parse(localStorage.getItem("uclaw.settings.v1") ?? "{}")).toMatchObject({ appearance: { theme: "dark" } });
+
+    fireEvent.click(within(chooser).getByRole("radio", { name: /跟随系统/ }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    expect(JSON.parse(localStorage.getItem("uclaw.settings.v1") ?? "{}")).toMatchObject({ appearance: { theme: "system" } });
+  });
+
   it("blocks router navigation while memory edits are dirty", async () => {
     const memory = { id: "MEMORY.md", title: "长期记忆", modifiedAt: "2026-08-09T00:00:00.000Z", version: "m1", size: 10 };
     const invoke = vi.fn(async (request: any) => {

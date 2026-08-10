@@ -4,8 +4,6 @@ import { Activity, Copy, Cpu, HardDrive, Maximize2, Minus, Radio, RotateCw, Sear
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { semanticCssVariables } from "../theme/tokens";
-
 declare global {
   interface Window {
     uclaw?: {
@@ -182,7 +180,6 @@ export function AppTitlebar({ status, onReconnect, onOpenActivity }: { status?: 
         maskClosable
         onCancel={closeSearch}
         open={searchOpen}
-        style={semanticCssVariables}
         title={<span className="sr-only">全局搜索</span>}
         width={620}
         afterOpenChange={(open) => open && searchRef.current?.focus()}

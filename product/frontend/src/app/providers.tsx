@@ -1,10 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ConfigProvider } from "antd";
 import type { PropsWithChildren, ReactNode } from "react";
 import { createContext, useContext, useState } from "react";
 import { createHashRouter, RouterProvider } from "react-router-dom";
 
-import { appTheme, semanticCssVariables } from "../theme/tokens";
+import { AppThemeProvider } from "../theme/ThemeProvider";
 
 const RoutedContent = createContext<ReactNode>(null);
 
@@ -17,12 +16,12 @@ export function AppProviders({ children }: PropsWithChildren) {
   const [router] = useState(() => createHashRouter([{ path: "*", element: <AppRoute /> }]));
 
   return (
-    <ConfigProvider theme={appTheme}>
+    <AppThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <RoutedContent.Provider value={<div className="theme-root" style={semanticCssVariables}>{children}</div>}>
+        <RoutedContent.Provider value={<div className="theme-root">{children}</div>}>
           <RouterProvider router={router} />
         </RoutedContent.Provider>
       </QueryClientProvider>
-    </ConfigProvider>
+    </AppThemeProvider>
   );
 }

@@ -10,7 +10,7 @@ import {
   type SessionSummary,
   type UClawClient,
 } from "@uclaw/shared";
-import { Activity, DatabaseBackup, FolderArchive, PackageCheck, PanelLeft, PanelRight, SquareTerminal } from "lucide-react";
+import { Activity, DatabaseBackup, FolderArchive, PackageCheck, Palette, PanelLeft, PanelRight, SquareTerminal } from "lucide-react";
 import { Tooltip } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { unstable_usePrompt, useLocation, useNavigate } from "react-router-dom";
@@ -25,6 +25,7 @@ import { DataManager } from "../features/data/DataManager";
 import { SystemDiagnostics } from "../features/system/SystemDiagnostics";
 import { MaintenanceCenter } from "../features/data/MaintenanceCenter";
 import { ReleaseCenter } from "../features/system/ReleaseCenter";
+import { AppearanceSettings } from "../features/system/AppearanceSettings";
 import { AppTitlebar } from "./AppTitlebar";
 import { ContextPanel } from "./ContextPanel";
 import { PrimaryRail } from "./PrimaryRail";
@@ -39,14 +40,15 @@ function SecondaryView({ title, description, system }: { title: string; descript
 }
 
 function SystemCenter() {
-  const [view, setView] = useState<"diagnostics" | "maintenance" | "release">("diagnostics");
+  const [view, setView] = useState<"diagnostics" | "maintenance" | "release" | "appearance">("diagnostics");
   return <div className="system-center">
     <div className="system-center-tabs" role="tablist" aria-label="系统工具">
       <button type="button" role="tab" aria-selected={view === "diagnostics"} onClick={() => setView("diagnostics")}><Activity />诊断</button>
       <button type="button" role="tab" aria-selected={view === "maintenance"} onClick={() => setView("maintenance")}><DatabaseBackup />备份与存储</button>
       <button type="button" role="tab" aria-selected={view === "release"} onClick={() => setView("release")}><PackageCheck />发布更新</button>
+      <button type="button" role="tab" aria-selected={view === "appearance"} onClick={() => setView("appearance")}><Palette />外观</button>
     </div>
-    {view === "diagnostics" ? <SystemDiagnostics /> : view === "maintenance" ? <MaintenanceCenter /> : <ReleaseCenter onOpenDiagnostics={() => setView("diagnostics")} />}
+    {view === "diagnostics" ? <SystemDiagnostics /> : view === "maintenance" ? <MaintenanceCenter /> : view === "release" ? <ReleaseCenter onOpenDiagnostics={() => setView("diagnostics")} /> : <AppearanceSettings />}
   </div>;
 }
 
