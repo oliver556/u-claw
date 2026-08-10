@@ -5,6 +5,7 @@ import {
   type BuiltinCredentialStore,
   type BuiltinModelCredential,
 } from "./builtin-credential-store.js";
+import { BuiltinServiceClientError } from "./builtin-service-client.js";
 import type { ProviderStore } from "./provider-store.js";
 
 export type ModelSource = "builtin" | "domestic" | "custom";
@@ -85,6 +86,7 @@ export function createModelSourceRouter<Request, Result>({
       try {
         return await executors.builtin(request, credential, signal);
       } catch (error) {
+        if (error instanceof BuiltinServiceClientError) throw error;
         if (error instanceof ModelSourceFailure && error.source === "builtin") throw error;
         throw new ModelSourceFailure("builtin", "upstream");
       }
