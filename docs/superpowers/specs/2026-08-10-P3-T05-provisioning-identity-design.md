@@ -26,7 +26,7 @@
 
 ## 身份与凭据
 
-`deviceId` 和 `usbFingerprint` 由冻结的 Windows native fingerprint gate 提供。协调器不自行降级生成设备身份；缺任一值直接拒绝。一次成功绑定严格满足：
+`deviceId` 和 `usbFingerprint` 由冻结的 Windows native fingerprint gate 提供。协调器不自行降级生成设备身份；缺任一值直接拒绝。P3-T05 扩展 New API typed contract，mapping 增加 `channelId`、`model`、`policyDigest`、`generation`；device token 增加同一 binding scope 与 `provisioning | active | revoked` 状态。服务端下游鉴权必须同时检查 token active、mapping active、user enabled、channel/model/policy digest 一致。一次成功绑定严格满足：
 
 ```text
 deviceId == license.deviceId == startupCredential.deviceId == NewApi user.deviceId == mapping.deviceId
@@ -34,9 +34,11 @@ licenseId == license.licenseId == startupCredential.licenseId == mapping.license
 usbFingerprint == license.usbFingerprint.sha256 == mapping.usbFingerprint
 user.id == token.userId == mapping.newApiUserId
 token.id == mapping.newApiTokenId
-channelId == credential channel binding
+channelId/model/policyDigest/generation == token scope == mapping == credential binding
 startup secret proof == mapping startupSecretSalt/startupSecretHash
 ```
+
+每次远端响应均由协调器重新校验请求 identity、预期状态、资源关系、token name、license 有效期和 generation。final commit 前重新读取本地产物并查询权威 mapping/license 状态。schema-valid 但 binding 不一致的响应按非法响应处理。
 
 Launcher 文件：
 
@@ -66,30 +68,33 @@ started
 重试 failed/pending -> replay/create missing step 或继续 compensation
 ```
 
-每步幂等 key 从调用方 `idempotencyKey` 加固定 step suffix 派生，满足现有 8~128 字符 contract。相同 key 与相同身份返回同一绑定；相同 key 不同身份拒绝。进程内按 `deviceId` 串行；服务端唯一约束处理跨进程竞争。
+每步幂等 key 为 `p3t05:<step>:<sha256(baseKey)>`，避免合法 128 字符 base key 溢出，并做 domain separation。相同 key 与相同身份返回同一绑定；相同 key 不同身份拒绝。进程内按 `deviceId` 串行；服务端同一 key+fingerprint 共享 in-flight Promise，跨进程由数据库/localhost mock 的唯一约束处理。
 
-写盘使用同目录唯一临时文件、`wx`、mode 0600、完整写入、`sync`、关闭、`rename`。journal 在每个远端副作用之后先持久化。三份制盘文件逐一提交；任一失败删除本事务已经提交的文件，保留 journal，随后补偿。只有三份文件均完成且逐项重读校验后，mapping 才可变为 `active`。因此不会静默留下“服务端 active、账号或文件不可用”的成功结果。
+写盘使用 handle-bound/同目录唯一临时文件、`wx`、mode 0600、完整写入、`sync`、关闭、`rename`、父目录 `sync`。父目录/目标/备份拒绝 symlink，文件拒绝 hardlink。journal 在每个远端副作用之前记录 intent、之后记录完成。覆盖已有制盘文件前先创建并校验同 generation backup；失败按 journal 完成 commit 或恢复旧 generation，不删除旧有效身份。
 
-补偿顺序：mapping=`failed`（包含 token ID 与补偿状态）→ revoke token → revoke license → 更新 mapping compensation。既有 contract 只能用 `failed` 表达补偿记录；license 撤销结果写入本地 journal。网络失败不伪装完成，返回固定可重试错误，journal 保持 `compensation-pending`。
+credential 使用二阶段 finalization：先写只允许 connectivity check 的 `provisioning` snapshot；远端 mapping/token 变 active 后，重写为 active snapshot并重读验证。若 finalization 失败，journal 明确记录远端 active/local pending，立即禁用或撤销远端 binding并恢复旧 generation；不能返回成功。恢复逻辑可继续 finalization或继续补偿，不把 active 远端状态当作已完成。
+
+补偿 journal 的资源 ID 按 phase 可空：mapping 创建前也能记录失败；user-only orphan 可在下一次相同 identity 重试时复用。存在 token 时，补偿顺序：阻止 token 使用 → mapping=`failed`（包含 token ID 与补偿状态）→ revoke token → revoke license → 更新 mapping compensation。补偿后的同一事务不得把已 revoked token replay 当作成功；协调器查询当前 binding，并创建递增 attempt generation 的新 token/rebind。网络失败不伪装完成，返回固定可重试错误，journal 保持 `compensation-pending`。
 
 ## 生命周期语义
 
 - `active`：license、mapping、token、user、文件全部一致才返回成功。
 - `revoked`：mapping=`revoked`，token 撤销，license 撤销；本地 credential 删除。重复调用幂等。
 - `disabled`：mapping=`disabled`，user policy disabled；token 可保留但不能使用；本地 active load 因 mapping 非 active 失败。
-- `reissued`：P3-T04 生成新 license；旧 mapping=`revoked`、旧 token 撤销、旧 credential 删除；新 license 走新的完整开户事务。旧绑定永不复活。
+- `reissued`：P3-T04 生成新 license；New API `rebind` 原子检查旧 license/token/generation，复用同一 device user，创建递增 generation token/mapping，旧 token 永久撤销、旧 binding 保留历史终态；本地 credential 走 generation commit。旧绑定永不复活。
 - `expired`：P3-T04 gate 拒绝。P3-T05 不新增 New API `expired` 状态；运维同步由后续控制面触发 disabled/revoked，记录为 P3-T06 边界。
 - `provisioning`：任何 runtime 普通请求不得使用；只允许制盘 connectivity check。
 
 ## 错误与审计
 
-协调器公开错误只含稳定 code、阶段、retryable，不透传远端 body、路径、请求、headers 或 cause message。内部 cause 可保留对象供测试，但不得序列化到报告。审计使用 P3-T01/P3-T04 的 typed events 加非敏感 journal；普通返回只给 binding IDs 与状态。
+协调器公开错误只含稳定 code、阶段、retryable，不透传远端 body、路径、请求、headers、cause 或 cause message。远端/Zod 错误先转换成固定 typed error，通用 logger 不得接收原始 Error。审计使用 P3-T01/P3-T04 的 typed events 加非敏感 journal；普通返回只给 binding IDs 与状态。
 
-生产 endpoint 配置缺失时注入 unavailable client 并 fail-closed。P3-T01/P3-T04 client 的 HTTP loopback 能力仅测试构造函数可用；生产装配不提供放宽开关。模型 endpoint 同样复用 `BuiltinCredentialStore` 的 `allowLoopbackHttp=false` 默认值。
+生产 endpoint 配置缺失时注入 unavailable client 并 fail-closed。P3-T01/P3-T04 client 默认只接受 HTTPS；HTTP loopback 需要显式 `allowLoopbackHttp: true`，且生产装配不提供该值。模型 endpoint 同样复用 `BuiltinCredentialStore` 的 `allowLoopbackHttp=false` 默认值。
+
+POSIX sandbox 验证 mode 0600。Windows 生产威胁模型要求制盘目录使用仅当前制造账户和 SYSTEM 可访问的 DACL；P3-T05 只保留 contract/交叉编译证据，真实 DACL、Win 账户和物理盘验证留 P3-T08，不把 POSIX mode 冒充 Windows ACL。
 
 ## 测试与真实环境声明
 
 Node integration 使用真实 localhost HTTP server 与临时沙箱目录，覆盖成功、重复、并发、认证失败、网络失败、非法响应、写盘失败、补偿失败后恢复、binding 篡改拒绝和全对象敏感字符串扫描。单元测试对每个新行为保留 RED→GREEN 证据。
 
 fresh 门禁：Node build/typecheck/unit/contract/integration/secret scan；Go test/race/vet；Windows amd64 production/fixture 交叉编译。交叉编译只证明可编译，不宣称真实 Windows、DeviceIoControl、物理 U 盘、真实 New API 或真实撤销传播通过。
-
