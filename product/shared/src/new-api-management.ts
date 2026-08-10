@@ -226,12 +226,14 @@ export type NewApiAuditPage = z.infer<typeof NewApiAuditPageSchema>;
 
 export interface NewApiManagementClient {
   createUser(input: NewApiCreateUserInput): Promise<NewApiUser>;
+  getUser(userId: string): Promise<NewApiUser>;
   createToken(input: NewApiCreateTokenInput): Promise<NewApiIssuedToken>;
   activateToken(tokenId: string, input: NewApiActivateTokenInput): Promise<NewApiToken>;
   createDeviceMapping(input: NewApiCreateDeviceMappingInput): Promise<NewApiDeviceMapping>;
   getDeviceMapping(deviceId: string): Promise<NewApiDeviceMapping>;
   updateDeviceStatus(deviceId: string, input: NewApiUpdateDeviceStatusInput): Promise<NewApiDeviceMapping>;
   updatePolicy(userId: string, policy: NewApiPolicy): Promise<NewApiPolicy>;
+  getPolicy(userId: string): Promise<NewApiPolicy>;
   getUsage(userId: string): Promise<NewApiUsage>;
   revokeToken(tokenId: string, input: NewApiRevokeTokenInput): Promise<NewApiToken>;
   listAuditEvents(query: NewApiAuditQuery): Promise<NewApiAuditPage>;

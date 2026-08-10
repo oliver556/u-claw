@@ -96,12 +96,14 @@ export function createUnavailableNewApiManagementClient(reason: string): NewApiM
   };
   return {
     createUser: unavailable,
+    getUser: unavailable,
     createToken: unavailable,
     activateToken: unavailable,
     createDeviceMapping: unavailable,
     getDeviceMapping: unavailable,
     updateDeviceStatus: unavailable,
     updatePolicy: unavailable,
+    getPolicy: unavailable,
     getUsage: unavailable,
     revokeToken: unavailable,
     listAuditEvents: unavailable,
@@ -167,6 +169,9 @@ export function createNewApiManagementClient(options: NewApiManagementClientOpti
       const { idempotencyKey, ...body } = parsed;
       return request("POST", "users", NewApiUserSchema, body, idempotencyKey);
     },
+    async getUser(userId) {
+      return request("GET", `users/${id(userId)}`, NewApiUserSchema);
+    },
     async createToken(input) {
       const parsed = NewApiCreateTokenInputSchema.parse(input);
       const { idempotencyKey, userId, ...body } = parsed;
@@ -192,6 +197,9 @@ export function createNewApiManagementClient(options: NewApiManagementClientOpti
     },
     async updatePolicy(userId, policy) {
       return request("PUT", `users/${id(userId)}/policy`, NewApiPolicySchema, NewApiPolicySchema.parse(policy));
+    },
+    async getPolicy(userId) {
+      return request("GET", `users/${id(userId)}/policy`, NewApiPolicySchema);
     },
     async getUsage(userId) {
       return request("GET", `users/${id(userId)}/usage`, NewApiUsageSchema);

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   IssuedLicense,
   LicenseLifecycleClient,
@@ -33,6 +35,14 @@ const input: ProvisioningIdentityInput = {
 };
 
 function license(licenseId = "lic_fixture_001", fingerprint = input.usbFingerprint): IssuedLicense {
+  const startupSecret = "fixture-startup-secret-material-001";
+  const startupSecretSalt = "b".repeat(32);
+  const startupSecretHash = createHash("sha256")
+    .update(Buffer.from("uclaw-startup-secret-v1\0", "utf8"))
+    .update(Buffer.from(startupSecretSalt, "hex"))
+    .update(Buffer.from([0]))
+    .update(Buffer.from(startupSecret, "utf8"))
+    .digest("hex");
   return {
     status: {
       licenseId, deviceId: input.deviceId, status: "active", revision: 1,
@@ -40,13 +50,13 @@ function license(licenseId = "lic_fixture_001", fingerprint = input.usbFingerpri
     },
     startupCredential: {
       schemaVersion: 1, deviceId: input.deviceId, licenseId,
-      startupSecret: "fixture-startup-secret-material-001",
+      startupSecret,
     },
     license: {
       schemaVersion: 1, deviceId: input.deviceId, licenseId,
       usbFingerprint: { scheme: "uclaw-usb-v1", sha256: fingerprint },
       startupSecretProof: {
-        algorithm: "sha256-salt-v1", startupSecretSalt: "b".repeat(32), startupSecretHash: "c".repeat(64),
+        algorithm: "sha256-salt-v1", startupSecretSalt, startupSecretHash,
       },
       notBefore: input.notBefore, expiresAt: input.expiresAt,
       signature: { algorithm: "ed25519", keyId: "fixture-key-001", value: "s".repeat(88) },
@@ -96,7 +106,9 @@ function setup() {
   };
   const newApiClient: NewApiManagementClient = {
     createUser: vi.fn(async () => { events.push("user.create"); return { ...user, policy }; }),
+    getUser: vi.fn(async () => ({ ...user, policy })),
     updatePolicy: vi.fn(async (_userId, value) => { events.push(value.disabled ? "policy.disable" : "policy.bind"); policy = value; return value; }),
+    getPolicy: vi.fn(async () => policy),
     createToken: vi.fn(async (value) => {
       events.push("token.create");
       token = {
@@ -192,6 +204,29 @@ describe("provisioning coordinator", () => {
     expect(context.licenseClient.revokeLicense).toHaveBeenCalledOnce();
   });
 
+  it("rejects a schema-valid startup secret proof before any New API side effect", async () => {
+    const context = setup();
+    const mismatched = license();
+    mismatched.license = {
+      ...mismatched.license,
+      startupSecretProof: { ...mismatched.license.startupSecretProof, startupSecretHash: "f".repeat(64) },
+    };
+    vi.mocked(context.licenseClient.issueLicense).mockResolvedValueOnce(mismatched);
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
+    expect(context.newApiClient.createUser).not.toHaveBeenCalled();
+  });
+
+  it("rejects a schema-valid policy mutation response before creating a token", async () => {
+    const context = setup();
+    vi.mocked(context.newApiClient.updatePolicy).mockResolvedValueOnce({
+      quota: { unit: "tokens", limit: 100_000, period: "monthly" },
+      rateLimit: { requestsPerMinute: 60, concurrentRequests: 2 },
+      allowedModels: ["other-model"], disabled: false,
+    });
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
+    expect(context.newApiClient.createToken).not.toHaveBeenCalled();
+  });
+
   it("replays initial license issue when failure happened before a license id was known", async () => {
     const context = setup();
     vi.mocked(context.licenseClient.issueLicense).mockRejectedValueOnce(new Error("network unavailable"));
@@ -201,6 +236,42 @@ describe("provisioning coordinator", () => {
     expect(context.licenseClient.issueLicense).toHaveBeenCalledTimes(2);
     expect(context.licenseClient.reissueLicense).not.toHaveBeenCalled();
   });
+
+  it.each(["license-issued", "token-created", "mapping-created", "artifacts-written"] as const)(
+    "replays issue rather than reissuing when a normal provision restarts after %s",
+    async (stage) => {
+    const context = setup();
+    const requestHash = createHash("sha256")
+      .update("uclaw-provisioning-request-v1").update("\0").update(JSON.stringify(input)).digest("hex");
+    await context.artifactWriter.writeJournal({
+      schemaVersion: 1, generation: 1, licenseOperation: "issue",
+      transactionId: `txn_${requestHash.slice(0, 24)}`, requestHash,
+      mappedTokenId: stage === "mapping-created" || stage === "artifacts-written" ? "tok_fixture_001" : null,
+      previousTokenId: null,
+      binding: {
+        deviceId: input.deviceId, usbFingerprint: input.usbFingerprint, channelId: input.channelId,
+        licenseId: "lic_fixture_001", newApiUserId: "usr_fixture_001", newApiUsername: input.username,
+        newApiTokenId: "tok_fixture_001",
+      },
+      endpoint: input.endpoint, model: input.model, stage, failureCode: null,
+      compensation: {
+        mapping: stage === "mapping-created" || stage === "artifacts-written" ? "pending" : "not-needed",
+        token: "pending", license: "pending", artifacts: stage === "artifacts-written" ? "pending" : "not-needed",
+      },
+      lifecycle: null, createdAt: now, updatedAt: now,
+    });
+    vi.clearAllMocks();
+    const restarted = createProvisioningCoordinator({
+      licenseClient: context.licenseClient,
+      newApiClient: context.newApiClient,
+      artifactWriter: context.artifactWriter,
+      now: () => new Date(now),
+    });
+    await expect(restarted.provision(input)).resolves.toMatchObject({ status: "active" });
+    expect(context.licenseClient.issueLicense).toHaveBeenCalledOnce();
+    expect(context.licenseClient.reissueLicense).not.toHaveBeenCalled();
+    },
+  );
 
   it("serializes same-device requests and replays identical active result", async () => {
     const context = setup();
@@ -290,6 +361,36 @@ describe("provisioning coordinator", () => {
     expect(context.newApiClient.getDeviceMapping).toHaveBeenCalledWith(input.deviceId);
   });
 
+  it("treats an ambiguous mapping POST followed by not-found as not created", async () => {
+    const context = setup();
+    vi.mocked(context.newApiClient.createDeviceMapping).mockRejectedValueOnce(
+      Object.assign(new Error("request lost"), { category: "transport" }),
+    );
+    vi.mocked(context.newApiClient.getDeviceMapping).mockRejectedValueOnce(
+      Object.assign(new Error("missing"), { category: "not-found" }),
+    );
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "NEW_API_FAILED" });
+    expect(context.getJournal()).toMatchObject({ compensation: { mapping: "not-needed" } });
+    expect(context.newApiClient.updateDeviceStatus).not.toHaveBeenCalled();
+  });
+
+  it("records an authoritative existing token when a mapping response mismatches", async () => {
+    const context = setup();
+    const existing = {
+      deviceId: input.deviceId, licenseId: "lic_existing_001",
+      startupSecretHash: "1".repeat(64), startupSecretSalt: "2".repeat(32), usbFingerprint: input.usbFingerprint,
+      newApiUserId: "usr_existing_001", newApiUsername: input.username, newApiTokenId: "tok_existing_001",
+      channelId: input.channelId, policyDigest: "3".repeat(64), generation: 1, previousTokenId: null,
+      status: "failed" as const,
+      failure: { code: "OLD_FAILED", compensation: { tokenId: "tok_existing_001", status: "succeeded" as const, attemptedAt: now } },
+      createdAt: now, updatedAt: now,
+    };
+    vi.mocked(context.newApiClient.createDeviceMapping).mockResolvedValueOnce(existing);
+    vi.mocked(context.newApiClient.getDeviceMapping).mockResolvedValue(existing);
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
+    expect(context.getJournal()).toMatchObject({ mappedTokenId: "tok_existing_001" });
+  });
+
   it("journals a created token id before rejecting a mismatched token response", async () => {
     const context = setup();
     vi.mocked(context.newApiClient.createToken).mockResolvedValueOnce({
@@ -313,6 +414,21 @@ describe("provisioning coordinator", () => {
     vi.mocked(context.licenseClient.getLicenseStatus).mockResolvedValueOnce({
       status: { ...license().status, expiresAt: "2028-08-10T00:00:00.000Z" },
       receipt: { value: "r".repeat(40) },
+    });
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
+    expect(context.getJournal()).not.toMatchObject({ stage: "active" });
+  });
+
+  it("fails closed when the authoritative user is disabled before final commit", async () => {
+    const context = setup();
+    vi.mocked(context.newApiClient.getUser).mockResolvedValueOnce({
+      id: "usr_fixture_001", deviceId: input.deviceId, username: input.username, status: "disabled",
+      policy: {
+        quota: { unit: "tokens", limit: 100_000, period: "monthly" },
+        rateLimit: { requestsPerMinute: 60, concurrentRequests: 2 },
+        allowedModels: [input.model], disabled: true,
+      },
+      createdAt: now, updatedAt: now,
     });
     await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
     expect(context.getJournal()).not.toMatchObject({ stage: "active" });

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import {
@@ -194,14 +195,21 @@ async function atomicWrite(path: string, body: string, maxBytes = MAX_JSON_BYTES
 }
 
 async function snapshot(path: string): Promise<Buffer | null> {
-  await assertReplaceable(path);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const body = await readFile(path);
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.nlink !== 1) {
+      throw new ProvisioningArtifactError("ARTIFACT_PATH_UNSAFE", "Provisioning artifact target is unsafe.");
+    }
+    const body = await handle.readFile();
     if (body.byteLength > MAX_JSON_BYTES) throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact is too large.");
     return body;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
+  } finally {
+    await handle?.close();
   }
 }
 
@@ -212,13 +220,32 @@ async function restore(path: string, body: Buffer | null): Promise<void> {
 }
 
 async function boundedJson(path: string, maxBytes = MAX_JSON_BYTES): Promise<unknown> {
-  await assertReplaceable(path);
-  const body = await readFile(path);
-  if (body.byteLength > maxBytes) throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact is too large.");
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.nlink !== 1) {
+      throw new ProvisioningArtifactError("ARTIFACT_PATH_UNSAFE", "Provisioning artifact target is unsafe.");
+    }
+    const body = await handle.readFile();
+    if (body.byteLength > maxBytes) throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact is too large.");
     return JSON.parse(body.toString("utf8")) as unknown;
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+      throw new ProvisioningArtifactError("ARTIFACT_PATH_UNSAFE", "Provisioning artifact target is unsafe.");
+    }
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof ProvisioningArtifactError) throw error;
     throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact is invalid.");
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function syncDirectoryIfExists(path: string): Promise<void> {
+  try {
+    await syncDirectory(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
 }
 
@@ -412,7 +439,9 @@ export function createProvisioningArtifactWriter({
         await credentialStore.provision({ endpoint: input.endpoint, model: input.model, mapping, issuedToken });
       } catch {
         await Promise.all(artifactPaths.map((path, index) => restore(path, previous[index] ?? null)));
-        await unlink(backupPath).catch(() => undefined);
+        await unlink(backupPath).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        });
         await syncDirectory(uclawDir);
         throw new ProvisioningArtifactError("ARTIFACT_WRITE_FAILED", "Provisioning artifacts could not be written.");
       }
@@ -460,7 +489,8 @@ export function createProvisioningArtifactWriter({
       await Promise.all([startupPath, licensePath, credentialPath].map((path) => unlink(path).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;
       })));
-      await Promise.all([licenseDir, uclawDir].map((path) => syncDirectory(path).catch(() => undefined)));
+      await syncDirectoryIfExists(licenseDir);
+      await syncDirectoryIfExists(uclawDir);
     },
   };
 }

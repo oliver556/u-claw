@@ -86,6 +86,15 @@ function policyDigest(policy: NewApiPolicy): string {
   return digest(policy, "uclaw-new-api-policy-v1");
 }
 
+function startupSecretHash(secret: string, saltHex: string): string {
+  return createHash("sha256")
+    .update(Buffer.from("uclaw-startup-secret-v1\0", "utf8"))
+    .update(Buffer.from(saltHex, "hex"))
+    .update(Buffer.from([0]))
+    .update(Buffer.from(secret, "utf8"))
+    .digest("hex");
+}
+
 function resultFrom(journal: ProvisioningJournal, status: "active" | "disabled" | "revoked"): ProvisioningIdentityResult {
   return ProvisioningIdentityResultSchema.parse({
     transactionId: journal.transactionId,
@@ -227,13 +236,15 @@ export function createProvisioningCoordinator({
     const timestamp = now().toISOString();
     const generation = seed?.generation ?? 1;
     const transactionId = seed?.transactionId ?? `txn_${requestHash.slice(0, 24)}`;
-    const previousTokenId = seed?.mappedTokenId ?? null;
+    const previousTokenId = seed?.previousTokenId ?? null;
     let journal = seed ?? ProvisioningJournalSchema.parse({
       schemaVersion: 1,
       generation,
+      licenseOperation: "issue",
       transactionId,
       requestHash,
       mappedTokenId: null,
+      previousTokenId: null,
       binding: { deviceId: input.deviceId, usbFingerprint: input.usbFingerprint, channelId: input.channelId },
       endpoint: input.endpoint,
       model: input.model,
@@ -252,7 +263,7 @@ export function createProvisioningCoordinator({
 
     try {
       if (!issued) {
-        issued = journal.binding.licenseId === undefined
+        issued = journal.licenseOperation === "issue"
           ? await licenseClient.issueLicense({
             idempotencyKey: deriveProvisioningStepKey(input.idempotencyKey, "license", generation),
             deviceId: input.deviceId,
@@ -273,8 +284,13 @@ export function createProvisioningCoordinator({
         compensation: { ...journal.compensation, license: "pending" },
       });
       if (issued.status.deviceId !== input.deviceId || issued.status.licenseId !== issued.license.licenseId
+          || issued.status.status !== "active" || issued.status.notBefore !== input.notBefore
+          || issued.status.expiresAt !== input.expiresAt || issued.status.replacementLicenseId !== null
           || issued.startupCredential.deviceId !== input.deviceId || issued.startupCredential.licenseId !== issued.status.licenseId
-          || issued.license.deviceId !== input.deviceId || issued.license.usbFingerprint.sha256 !== input.usbFingerprint) {
+          || issued.license.deviceId !== input.deviceId || issued.license.usbFingerprint.sha256 !== input.usbFingerprint
+          || issued.license.notBefore !== input.notBefore || issued.license.expiresAt !== input.expiresAt
+          || startupSecretHash(issued.startupCredential.startupSecret, issued.license.startupSecretProof.startupSecretSalt)
+            !== issued.license.startupSecretProof.startupSecretHash) {
         throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "license-issued", false);
       }
 
@@ -305,7 +321,10 @@ export function createProvisioningCoordinator({
       });
 
       const policy = provisioningPolicy(input.model);
-      await newApiClient.updatePolicy(user.id, policy);
+      const updatedPolicy = await newApiClient.updatePolicy(user.id, policy);
+      if (policyDigest(updatedPolicy) !== policyDigest(policy)) {
+        throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "policy-bound", false);
+      }
       const boundPolicyDigest = policyDigest(policy);
       issuedToken = await newApiClient.createToken({
         idempotencyKey: deriveProvisioningStepKey(input.idempotencyKey, "token", generation),
@@ -366,7 +385,21 @@ export function createProvisioningCoordinator({
           ? (error as { category?: unknown }).category
           : undefined;
         if (category === "transport" || category === "invalid-response") {
-          mapping = await newApiClient.getDeviceMapping(input.deviceId);
+          try {
+            mapping = await newApiClient.getDeviceMapping(input.deviceId);
+          } catch (queryError) {
+            const queryCategory = queryError && typeof queryError === "object" && "category" in queryError
+              ? (queryError as { category?: unknown }).category
+              : undefined;
+            if (queryCategory === "not-found") {
+              journal = await save(journal, {
+                stage: "token-created",
+                compensation: { ...journal.compensation, mapping: "not-needed" },
+              });
+              throw error;
+            }
+            throw queryError;
+          }
         } else {
           journal = await save(journal, {
             stage: "token-created",
@@ -381,6 +414,10 @@ export function createProvisioningCoordinator({
       if (!mappingMatches(mapping)
           || mapping.policyDigest !== boundPolicyDigest || mapping.generation !== generation
           || mapping.previousTokenId !== previousTokenId || mapping.status !== "provisioning") {
+        journal = await save(journal, {
+          mappedTokenId: mapping.newApiTokenId,
+          compensation: { ...journal.compensation, mapping: "succeeded" },
+        });
         throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "mapping-created", false);
       }
       journal = await save(journal, {
@@ -426,16 +463,22 @@ export function createProvisioningCoordinator({
           || activeToken.status !== "active") {
         throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "token-active", false);
       }
-      const [authoritativeLicense, authoritativeMapping] = await Promise.all([
+      const [authoritativeLicense, authoritativeMapping, authoritativeUser, authoritativePolicy] = await Promise.all([
         licenseClient.getLicenseStatus(issued.status.licenseId),
         newApiClient.getDeviceMapping(input.deviceId),
+        newApiClient.getUser(user.id),
+        newApiClient.getPolicy(user.id),
       ]);
       if (authoritativeLicense.status.licenseId !== issued.status.licenseId
           || authoritativeLicense.status.deviceId !== input.deviceId
           || authoritativeLicense.status.status !== "active"
           || authoritativeLicense.status.notBefore !== input.notBefore
           || authoritativeLicense.status.expiresAt !== input.expiresAt
-          || !mappingMatches(authoritativeMapping) || authoritativeMapping.status !== "active") {
+          || !mappingMatches(authoritativeMapping) || authoritativeMapping.status !== "active"
+          || authoritativeUser.id !== user.id || authoritativeUser.deviceId !== input.deviceId
+          || authoritativeUser.username !== input.username || authoritativeUser.status !== "active"
+          || policyDigest(authoritativeUser.policy) !== boundPolicyDigest
+          || policyDigest(authoritativePolicy) !== boundPolicyDigest) {
         throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "authoritative-verification", false);
       }
       failureCode = "ARTIFACT_WRITE_FAILED";
@@ -490,7 +533,9 @@ export function createProvisioningCoordinator({
         const retry = ProvisioningJournalSchema.parse({
           ...compensated,
           generation: compensated.generation + 1,
+          licenseOperation: compensated.binding.licenseId === undefined ? "issue" : "reissue",
           requestHash,
+          previousTokenId: compensated.mappedTokenId,
           stage: "started",
           failureCode: null,
           compensation: { mapping: "not-needed", token: "not-needed", license: "not-needed", artifacts: "not-needed" },
@@ -506,7 +551,9 @@ export function createProvisioningCoordinator({
         const retry = ProvisioningJournalSchema.parse({
           ...existing,
           generation: retryGeneration,
+          licenseOperation: existing.binding.licenseId === undefined ? "issue" : "reissue",
           requestHash,
+          previousTokenId: existing.mappedTokenId,
           stage: "started",
           failureCode: null,
           compensation: { mapping: "not-needed", token: "not-needed", license: "not-needed", artifacts: "not-needed" },
@@ -597,8 +644,10 @@ export function createProvisioningCoordinator({
     const retry = ProvisioningJournalSchema.parse({
       ...journal,
       generation: targetGeneration,
+      licenseOperation: "reissue",
       requestHash: reissueHash,
       mappedTokenId: lifecycle.sourceBinding.newApiTokenId,
+      previousTokenId: lifecycle.sourceBinding.newApiTokenId,
       binding: { ...lifecycle.sourceBinding, usbFingerprint: lifecycle.target.usbFingerprint },
       stage: "started",
       failureCode: null,
