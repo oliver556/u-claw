@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import { FsSafeError, root as createSafeRoot } from "@openclaw/fs-safe";
+import { configureFsSafePython, getFsSafePythonConfig } from "@openclaw/fs-safe/config";
 
 import {
   NewApiDeviceMappingSchema,
@@ -133,12 +134,32 @@ function processIsAlive(pid: number): boolean {
 export interface CreateProvisioningArtifactWriterOptions {
   dataDir: string;
   credentialStore: BuiltinCredentialStore;
+  allowUnpinnedFilesystemForTest?: true;
+  platformForTest?: NodeJS.Platform;
 }
 
 export function createProvisioningArtifactWriter({
   dataDir,
   credentialStore,
+  allowUnpinnedFilesystemForTest,
+  platformForTest,
 }: CreateProvisioningArtifactWriterOptions): ProvisioningArtifactWriter {
+  const platform = platformForTest ?? process.platform;
+  if (platform === "win32" && allowUnpinnedFilesystemForTest !== true) {
+    throw new ProvisioningArtifactError(
+      "ARTIFACT_PATH_UNSAFE",
+      "Pinned Windows filesystem access requires the P3-T08 native helper.",
+    );
+  }
+  if (!credentialStore.pinnedFilesystem && allowUnpinnedFilesystemForTest !== true) {
+    throw new ProvisioningArtifactError("ARTIFACT_PATH_UNSAFE", "Provisioning requires a pinned credential store.");
+  }
+  if (platform !== "win32") {
+    configureFsSafePython({ mode: "require" });
+    if (getFsSafePythonConfig().mode !== "require") {
+      throw new ProvisioningArtifactError("ARTIFACT_PATH_UNSAFE", "Pinned filesystem helper is unavailable.");
+    }
+  }
   const uclawDir = ".uclaw";
   const licenseDir = ".uclaw/license";
   const startupPath = ".uclaw/license/.startup-credential.json";
