@@ -1,4 +1,5 @@
 import { FsSafeError, root as createSafeRoot } from "@openclaw/fs-safe";
+import { configureFsSafePython, getFsSafePythonConfig } from "@openclaw/fs-safe/config";
 
 import {
   NewApiDeviceMappingSchema,
@@ -40,6 +41,7 @@ export interface BuiltinModelCredential {
 }
 
 export interface BuiltinCredentialStore {
+  readonly pinnedFilesystem: boolean;
   provision(input: BuiltinCredentialProvisioningInput): Promise<void>;
   loadActive(): Promise<BuiltinModelCredential>;
   loadForConnectivityCheck(): Promise<BuiltinModelCredential>;
@@ -49,6 +51,8 @@ export interface BuiltinCredentialStore {
 export interface CreateBuiltinCredentialStoreOptions {
   dataDir: string;
   allowLoopbackHttp?: boolean;
+  allowUnpinnedFilesystemForTest?: true;
+  platformForTest?: NodeJS.Platform;
 }
 
 interface PersistedCredential {
@@ -127,7 +131,22 @@ function validatePersisted(
 export function createBuiltinCredentialStore({
   dataDir,
   allowLoopbackHttp = false,
+  allowUnpinnedFilesystemForTest,
+  platformForTest,
 }: CreateBuiltinCredentialStoreOptions): BuiltinCredentialStore {
+  const platform = platformForTest ?? process.platform;
+  if (platform === "win32" && allowUnpinnedFilesystemForTest !== true) {
+    throw new BuiltinCredentialError(
+      "BUILTIN_CREDENTIAL_UNSAFE",
+      "Pinned Windows filesystem access requires the P3-T08 native helper.",
+    );
+  }
+  if (platform !== "win32") {
+    configureFsSafePython({ mode: "require" });
+    if (getFsSafePythonConfig().mode !== "require") {
+      throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Pinned filesystem helper is unavailable.");
+    }
+  }
   const path = `.uclaw/${FILE_NAME}`;
   const safeRoot = createSafeRoot(dataDir, {
     symlinks: "reject", hardlinks: "reject", maxBytes: 1024 * 1024, mkdir: true, mode: 0o600,
@@ -156,6 +175,7 @@ export function createBuiltinCredentialStore({
     }
   };
   return {
+    pinnedFilesystem: platform !== "win32",
     async provision(input) {
       const { persisted } = validatePersisted({ schemaVersion: 1, ...input }, allowLoopbackHttp);
       try {

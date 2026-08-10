@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import type { NewApiDeviceMapping, NewApiIssuedToken } from "@uclaw/shared";
 import { afterEach, describe, expect, it } from "vitest";
+import { getFsSafePythonConfig } from "@openclaw/fs-safe/config";
 
 import { createBuiltinCredentialStore } from "../src/providers/builtin-credential-store.js";
 
@@ -52,6 +53,20 @@ function provisionInput(endpoint = "http://127.0.0.1:18090/v1") {
 }
 
 describe("builtin credential store", () => {
+  it("requires pinned filesystem access and rejects Windows before P3-T08", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "uclaw-builtin-windows-"));
+    roots.push(dataDir);
+    expect(() => createBuiltinCredentialStore({ dataDir, platformForTest: "win32" }))
+      .toThrow(/P3-T08 native helper/u);
+    const testOnly = createBuiltinCredentialStore({
+      dataDir, platformForTest: "win32", allowUnpinnedFilesystemForTest: true,
+    });
+    expect(testOnly.pinnedFilesystem).toBe(false);
+    const native = createBuiltinCredentialStore({ dataDir });
+    expect(native.pinnedFilesystem).toBe(true);
+    expect(getFsSafePythonConfig().mode).toBe("require");
+  });
+
   it("fails closed when credential is missing", async () => {
     const { store } = await setup();
     await expect(store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_MISSING" });

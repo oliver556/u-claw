@@ -99,6 +99,13 @@ const journal = {
 };
 
 describe("provisioning artifact writer", () => {
+  it("rejects Windows provisioning before the P3-T08 native helper", async () => {
+    const dataDir = await root();
+    const credentialStore = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp: true });
+    expect(() => createProvisioningArtifactWriter({ dataDir, credentialStore, platformForTest: "win32" }))
+      .toThrow(/P3-T08 native helper/u);
+  });
+
   it("serializes separate writers that target the same data directory", async () => {
     const dataDir = await root();
     const first = createProvisioningArtifactWriter({
@@ -212,6 +219,7 @@ describe("provisioning artifact writer", () => {
   it("removes artifacts committed before a later write failure", async () => {
     const dataDir = await root();
     const failingStore: BuiltinCredentialStore = {
+      pinnedFilesystem: true,
       provision: async () => { throw new Error("injected write failure"); },
       loadActive: async () => { throw new Error("unused"); },
       loadForConnectivityCheck: async () => { throw new Error("unused"); },
