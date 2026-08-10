@@ -37,6 +37,7 @@ export interface LocalNewApiManagementServer {
 
 type StoredToken = { summary: NewApiToken; secretHash: string };
 type IdempotencyEntry = { fingerprint: string; status: number; sealedResponse: string };
+type InFlightEntry = { fingerprint: string; promise: Promise<{ status: number; value: unknown }> };
 type ApiFailure = Error & { category: NewApiErrorCategory; code: string; retryable: boolean; status: number };
 
 const BASE_PATH = "/uclaw-management/v1/";
@@ -95,6 +96,7 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
   const usage = new Map<string, number>();
   const audit: NewApiAuditEvent[] = [];
   const idempotency = new Map<string, IdempotencyEntry>();
+  const inFlight = new Map<string, InFlightEntry>();
   let sequence = 0;
 
   const timestamp = (): string => now().toISOString();
@@ -111,6 +113,10 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
     decipher.setAuthTag(bytes.subarray(12, 28));
     return JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]).toString("utf8")) as unknown;
   };
+  const policyDigest = (policy: NewApiPolicy): string => createHash("sha256")
+    .update("uclaw-new-api-policy-v1\0")
+    .update(JSON.stringify(policy))
+    .digest("hex");
 
   const addAudit = (
     action: NewApiAuditEvent["action"],
@@ -141,9 +147,17 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
       if (existing.fingerprint !== fingerprint) throw failure(409, "conflict", "IDEMPOTENCY_CONFLICT", "Idempotency key was reused with different input.");
       return { status: existing.status, value: open(existing.sealedResponse) };
     }
-    const result = await operation();
-    idempotency.set(storageKey, { fingerprint, status: result.status, sealedResponse: seal(result.value) });
-    return result;
+    const running = inFlight.get(storageKey);
+    if (running) {
+      if (running.fingerprint !== fingerprint) throw failure(409, "conflict", "IDEMPOTENCY_CONFLICT", "Idempotency key was reused with different input.");
+      return running.promise;
+    }
+    const promise = operation().then((result) => {
+      idempotency.set(storageKey, { fingerprint, status: result.status, sealedResponse: seal(result.value) });
+      return result;
+    }).finally(() => inFlight.delete(storageKey));
+    inFlight.set(storageKey, { fingerprint, promise });
+    return promise;
   };
 
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -185,8 +199,15 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
           const user = users.get(userId);
           if (!user) throw failure(404, "not-found", "USER_NOT_FOUND", "User was not found.");
           if (user.status === "disabled") throw failure(409, "disabled", "USER_DISABLED", "User is disabled.");
+          if (user.policy.allowedModels.length === 0 || input.policyDigest !== policyDigest(user.policy)) {
+            throw failure(409, "conflict", "POLICY_BINDING_CONFLICT", "Token policy binding does not match user policy.");
+          }
           const createdAt = timestamp();
-          const token: NewApiToken = { id: nextId("tok"), userId, name: input.name, status: "active", createdAt, updatedAt: createdAt };
+          const token: NewApiToken = {
+            id: nextId("tok"), userId, name: input.name,
+            channelId: input.channelId, policyDigest: input.policyDigest, generation: input.generation,
+            status: "active", createdAt, updatedAt: createdAt,
+          };
           const secret = `uclaw_dev_${randomBytes(24).toString("base64url")}`;
           tokens.set(token.id, { summary: token, secretHash: createHash("sha256").update(secret).digest("hex") });
           addAudit("token.created", "token", token.id, user.deviceId);
@@ -200,13 +221,26 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
         const body = await readJson(request);
         const input = NewApiCreateDeviceMappingInputSchema.parse({ ...z.record(z.string(), z.unknown()).parse(body), idempotencyKey: request.headers["idempotency-key"] });
         const result = await runIdempotent(request, "device.create", body, async () => {
-          if (devices.has(input.deviceId)) throw failure(409, "conflict", "DEVICE_CONFLICT", "Device mapping already exists.");
+          const previous = devices.get(input.deviceId);
+          if (previous && (input.previousTokenId !== previous.newApiTokenId
+              || input.generation <= previous.generation
+              || !["failed", "disabled", "revoked"].includes(previous.status))) {
+            throw failure(409, "conflict", "DEVICE_CONFLICT", "Device mapping replacement is invalid.");
+          }
+          if (!previous && input.previousTokenId !== null) {
+            throw failure(409, "conflict", "DEVICE_GENERATION_CONFLICT", "Initial device mapping generation is invalid.");
+          }
           if (deviceIdsByLicense.has(input.licenseId)) throw failure(409, "conflict", "LICENSE_CONFLICT", "License mapping already exists.");
           if (deviceIdsByToken.has(input.newApiTokenId)) throw failure(409, "conflict", "TOKEN_ID_CONFLICT", "Token mapping already exists.");
           const user = users.get(input.newApiUserId);
           const token = tokens.get(input.newApiTokenId);
           if (!user || user.username !== input.newApiUsername || user.deviceId !== input.deviceId) throw failure(409, "conflict", "USER_MAPPING_CONFLICT", "User mapping does not match device.");
-          if (!token || token.summary.userId !== user.id || token.summary.status !== "active") throw failure(409, "conflict", "TOKEN_MAPPING_CONFLICT", "Token mapping does not match user.");
+          if (!token || token.summary.userId !== user.id || token.summary.status !== "active"
+              || token.summary.channelId !== input.channelId
+              || token.summary.policyDigest !== input.policyDigest
+              || token.summary.generation !== input.generation) {
+            throw failure(409, "conflict", "TOKEN_MAPPING_CONFLICT", "Token mapping does not match user, channel, policy, or generation.");
+          }
           const createdAt = timestamp();
           const { idempotencyKey: _key, ...fields } = input;
           const mapping = NewApiDeviceMappingSchema.parse({ ...fields, failure: null, createdAt, updatedAt: createdAt });

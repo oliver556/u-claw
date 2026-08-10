@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,13 +26,26 @@ describe("typed New API model source routing integration", () => {
     roots.push(dataDir);
     const server = await startLocalNewApiManagementServer({ managementCredential: "fixture-management-credential" });
     servers.push(server);
-    const management = createNewApiManagementClient({ endpoint: server.url, managementCredential: "fixture-management-credential" });
+    const management = createNewApiManagementClient({
+      endpoint: server.url, managementCredential: "fixture-management-credential", allowLoopbackHttp: true,
+    });
     const user = await management.createUser({ idempotencyKey: "route-user-001", deviceId: "route_device", username: "route_user" });
-    const issuedToken = await management.createToken({ idempotencyKey: "route-token-001", userId: user.id, name: "device" });
+    const policy = {
+      quota: { unit: "tokens" as const, limit: 100_000, period: "monthly" as const },
+      rateLimit: { requestsPerMinute: 60, concurrentRequests: 2 },
+      allowedModels: ["builtin-model"], disabled: false,
+    };
+    await management.updatePolicy(user.id, policy);
+    const policyDigest = createHash("sha256").update("uclaw-new-api-policy-v1\0").update(JSON.stringify(policy)).digest("hex");
+    const issuedToken = await management.createToken({
+      idempotencyKey: "route-token-001", userId: user.id, name: "device",
+      channelId: "channel_builtin_001", policyDigest, generation: 1,
+    });
     const provisioning = await management.createDeviceMapping({
       idempotencyKey: "route-device-001", deviceId: "route_device", licenseId: "route_license",
       startupSecretHash: "a".repeat(64), startupSecretSalt: "b".repeat(32), usbFingerprint: "c".repeat(64),
       newApiUserId: user.id, newApiUsername: user.username, newApiTokenId: issuedToken.token.id, status: "provisioning",
+      channelId: "channel_builtin_001", policyDigest, generation: 1, previousTokenId: null,
     });
     const mapping = await management.updateDeviceStatus(provisioning.deviceId, {
       idempotencyKey: "route-active-001", status: "active",

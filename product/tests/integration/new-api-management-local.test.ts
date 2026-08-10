@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -8,6 +10,15 @@ import {
 } from "../../desktop/src/new-api-management/index.js";
 
 const servers: LocalNewApiManagementServer[] = [];
+const channelId = "channel_builtin_001";
+const policy = {
+  quota: { unit: "tokens" as const, limit: 10_000, period: "monthly" as const },
+  rateLimit: { requestsPerMinute: 30, concurrentRequests: 2 },
+  allowedModels: ["model-a", "model-b"],
+  disabled: false,
+};
+const digestPolicy = (value: unknown) => createHash("sha256")
+  .update("uclaw-new-api-policy-v1\0").update(JSON.stringify(value)).digest("hex");
 afterEach(async () => Promise.all(servers.splice(0).map((server) => server.close())));
 
 async function setup() {
@@ -22,6 +33,7 @@ async function setup() {
     client: createNewApiManagementClient({
       endpoint: server.url,
       managementCredential: "fixture-management-credential",
+      allowLoopbackHttp: true,
     }),
   };
 }
@@ -30,7 +42,11 @@ describe("localhost New API management backend", () => {
   it("uses real HTTP for user, token, mapping, policy, usage, disable, and revoke lifecycle", async () => {
     const { client, server } = await setup();
     const user = await client.createUser({ idempotencyKey: "idem-user-001", deviceId: "dev_001", username: "uclaw_001" });
-    const issued = await client.createToken({ idempotencyKey: "idem-token-001", userId: user.id, name: "device" });
+    await client.updatePolicy(user.id, policy);
+    const policyDigest = digestPolicy(policy);
+    const issued = await client.createToken({
+      idempotencyKey: "idem-token-001", userId: user.id, name: "device", channelId, policyDigest, generation: 1,
+    });
     const mapping = await client.createDeviceMapping({
       idempotencyKey: "idem-device-001",
       deviceId: "dev_001",
@@ -41,13 +57,8 @@ describe("localhost New API management backend", () => {
       newApiUserId: user.id,
       newApiUsername: user.username,
       newApiTokenId: issued.token.id,
+      channelId, policyDigest, generation: 1, previousTokenId: null,
       status: "provisioning",
-    });
-    const policy = await client.updatePolicy(user.id, {
-      quota: { unit: "tokens", limit: 10_000, period: "monthly" },
-      rateLimit: { requestsPerMinute: 30, concurrentRequests: 2 },
-      allowedModels: ["model-a", "model-b"],
-      disabled: false,
     });
     server.recordUsage(user.id, 750);
 
@@ -68,6 +79,8 @@ describe("localhost New API management backend", () => {
     const { client } = await setup();
     const input = { idempotencyKey: "idem-user-retry", deviceId: "dev_retry", username: "uclaw_retry" };
     const first = await client.createUser(input);
+    await client.updatePolicy(first.id, policy);
+    const policyDigest = digestPolicy(policy);
     await expect(client.createUser(input)).resolves.toEqual(first);
     await expect(client.createUser({ ...input, username: "uclaw_changed" })).rejects.toMatchObject({
       category: "conflict", code: "IDEMPOTENCY_CONFLICT", retryable: false,
@@ -76,18 +89,30 @@ describe("localhost New API management backend", () => {
       category: "conflict", code: "USERNAME_CONFLICT", retryable: false,
     });
 
-    const issued = await client.createToken({ idempotencyKey: "idem-token-retry", userId: first.id, name: "device" });
-    await expect(client.createToken({ idempotencyKey: "idem-token-retry", userId: first.id, name: "device" })).resolves.toEqual(issued);
+    const tokenInput = {
+      idempotencyKey: "idem-token-retry", userId: first.id, name: "device", channelId, policyDigest, generation: 1,
+    };
+    const [issued, concurrentReplay] = await Promise.all([
+      client.createToken(tokenInput),
+      client.createToken(tokenInput),
+    ]);
+    expect(concurrentReplay).toEqual(issued);
+    await expect(client.createToken(tokenInput)).resolves.toEqual(issued);
   });
 
   it("records failed provisioning and compensation without exposing credentials", async () => {
     const { client } = await setup();
     const user = await client.createUser({ idempotencyKey: "idem-fail-user", deviceId: "dev_fail", username: "uclaw_fail" });
-    const issued = await client.createToken({ idempotencyKey: "idem-fail-token", userId: user.id, name: "device" });
+    await client.updatePolicy(user.id, policy);
+    const policyDigest = digestPolicy(policy);
+    const issued = await client.createToken({
+      idempotencyKey: "idem-fail-token", userId: user.id, name: "device", channelId, policyDigest, generation: 1,
+    });
     await client.createDeviceMapping({
       idempotencyKey: "idem-fail-device", deviceId: "dev_fail", licenseId: "lic_fail",
       startupSecretHash: "d".repeat(64), startupSecretSalt: "e".repeat(32), usbFingerprint: "f".repeat(64),
       newApiUserId: user.id, newApiUsername: user.username, newApiTokenId: issued.token.id, status: "provisioning",
+      channelId, policyDigest, generation: 1, previousTokenId: null,
     });
     const failed = await client.updateDeviceStatus("dev_fail", {
       idempotencyKey: "idem-fail-status",
@@ -104,6 +129,9 @@ describe("localhost New API management backend", () => {
     for (const endpoint of ["http://example.test/v1/", "http://192.168.1.10/v1/", "http://127.0.0.2/v1/"]) {
       expect(() => createNewApiManagementClient({ endpoint, managementCredential: "fixture-management-credential" })).toThrow(/HTTPS|loopback/iu);
     }
+    expect(() => createNewApiManagementClient({
+      endpoint: "http://127.0.0.1/v1/", managementCredential: "fixture-management-credential",
+    })).toThrow(/HTTPS|loopback/iu);
   });
 
   it("refuses non-loopback binding and audits rejected authentication without request data", async () => {
@@ -116,6 +144,7 @@ describe("localhost New API management backend", () => {
     const unauthorized = createNewApiManagementClient({
       endpoint: server.url,
       managementCredential: "fixture-wrong-credential",
+      allowLoopbackHttp: true,
     });
     await expect(unauthorized.getUsage("usr_missing")).rejects.toMatchObject({
       category: "authentication", code: "AUTHENTICATION_FAILED", retryable: false,

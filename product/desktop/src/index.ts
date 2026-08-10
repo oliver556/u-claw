@@ -23,6 +23,7 @@ export * from "./channels/channel-dispatcher.js";
 export * from "./channels/wechat-login-coordinator.js";
 export * from "./providers/provider-dispatcher.js";
 export * from "./providers/provider-network.js";
+export * from "./provisioning/index.js";
 export * from "./security/navigation-policy.js";
 export * from "./session-organizer/store.js";
 export * from "./skills/bundle-validator.js";
