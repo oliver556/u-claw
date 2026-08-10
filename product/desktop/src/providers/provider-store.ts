@@ -48,16 +48,29 @@ function providerError(code: UClawError["code"], message: string): UClawError {
 function defaultDocument(): ProviderConfigDocument {
   return ProviderConfigDocumentSchema.parse({
     schemaVersion: PROVIDER_CONFIG_VERSION,
-    selectedProviderId: BUILT_IN_PROVIDER_TEMPLATES[0].id,
+    selectedProviderId: null,
     providers: BUILT_IN_PROVIDER_TEMPLATES.map(({ id, name, baseUrl, model }) => ({
       id,
       templateId: id,
       name,
-      enabled: true,
+      enabled: false,
       baseUrl,
       model,
     })),
   });
+}
+
+function migrateLegacyBuiltin(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  const document = structuredClone(value) as Record<string, unknown>;
+  if (!Array.isArray(document.providers)) return document;
+  document.providers = document.providers.filter((provider) => {
+    if (provider === null || typeof provider !== "object" || Array.isArray(provider)) return true;
+    const entry = provider as Record<string, unknown>;
+    return entry.id !== "uclaw-cloud" && entry.templateId !== "uclaw-cloud";
+  });
+  if (document.selectedProviderId === "uclaw-cloud") document.selectedProviderId = null;
+  return document;
 }
 
 async function defaultAtomicWrite(path: string, body: string): Promise<void> {
@@ -110,7 +123,7 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
   const load = async (): Promise<ProviderConfigDocument> => {
     if (loaded !== undefined) return loaded;
     try {
-      loaded = ProviderConfigDocumentSchema.parse(JSON.parse(await readFile(configPath, "utf8")));
+      loaded = ProviderConfigDocumentSchema.parse(migrateLegacyBuiltin(JSON.parse(await readFile(configPath, "utf8"))));
     } catch {
       loaded = defaultDocument();
     }
@@ -140,50 +153,38 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
     return provider;
   };
 
-  const chooseReplacement = (document: ProviderConfigDocument, oldIndex: number): void => {
-    const enabled = document.providers.filter(({ enabled }) => enabled);
-    if (enabled.length === 0) {
-      document.selectedProviderId = null;
-      return;
-    }
-    const next = document.providers.slice(oldIndex + 1).find(({ enabled }) => enabled)
-      ?? document.providers.slice(0, oldIndex).find(({ enabled }) => enabled)
-      ?? enabled[0];
-    document.selectedProviderId = next.id;
-  };
-
   return {
     list: () => serialize(async () => toSnapshot(await load())),
     create: (draft) => mutate((document) => {
       const provider = ProviderDraftSchema.parse(draft);
       if (document.providers.some(({ id }) => id === provider.id)) throw providerError("CONFLICT", "Provider ID already exists.");
       document.providers.push(provider);
-      if (document.selectedProviderId === null && provider.enabled) document.selectedProviderId = provider.id;
+      if (provider.enabled) document.selectedProviderId = provider.id;
     }),
     update: (providerId, draft) => mutate((document) => {
       const index = document.providers.findIndex(({ id }) => id === providerId);
       if (index < 0) throw providerError("NOT_FOUND", "Provider was not found.");
       const provider = ProviderDraftSchema.parse(draft);
       if (provider.id !== providerId && document.providers.some(({ id }) => id === provider.id)) throw providerError("CONFLICT", "Provider ID already exists.");
-      const apiKey = document.providers[index].apiKey;
+      const previous = document.providers[index];
+      const apiKey = previous.apiKey;
       document.providers[index] = { ...provider, ...(apiKey === undefined ? {} : { apiKey }) };
       if (document.selectedProviderId === providerId) {
         document.selectedProviderId = provider.enabled ? provider.id : null;
-        if (!provider.enabled) chooseReplacement(document, index);
       }
+      if (!previous.enabled && provider.enabled) document.selectedProviderId = provider.id;
     }),
     remove: (providerId) => mutate((document) => {
       const index = document.providers.findIndex(({ id }) => id === providerId);
       if (index < 0) throw providerError("NOT_FOUND", "Provider was not found.");
       document.providers.splice(index, 1);
-      if (document.selectedProviderId === providerId) chooseReplacement(document, index - 1);
+      if (document.selectedProviderId === providerId) document.selectedProviderId = null;
     }),
     setEnabled: (providerId, enabled) => mutate((document) => {
-      const index = document.providers.findIndex(({ id }) => id === providerId);
       const provider = requireProvider(document, providerId);
       provider.enabled = enabled;
-      if (!enabled && document.selectedProviderId === providerId) chooseReplacement(document, index);
-      if (enabled && document.selectedProviderId === null) document.selectedProviderId = providerId;
+      if (!enabled && document.selectedProviderId === providerId) document.selectedProviderId = null;
+      if (enabled) document.selectedProviderId = providerId;
     }),
     move: (providerId, direction) => mutate((document) => {
       const index = document.providers.findIndex(({ id }) => id === providerId);

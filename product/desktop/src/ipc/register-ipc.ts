@@ -32,6 +32,8 @@ import {
   type DataIpcRequest,
   type DiagnosticsIpcRequest,
   type ReleaseIpcRequest,
+  type MessageEvent,
+  type SendMessageInput,
 } from "@uclaw/shared";
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
@@ -88,6 +90,7 @@ export interface RegisterIpcDependencies {
   dispatchRelease?(request: ReleaseIpcRequest): Promise<unknown>;
   coordinateWrite?<T>(operation: () => Promise<T>): Promise<T>;
   diagnosticsTimeoutMs?: number;
+  routeChatSend?(input: SendMessageInput, signal: AbortSignal): AsyncIterable<MessageEvent> | Promise<AsyncIterable<MessageEvent>>;
 }
 
 function safeError(
@@ -134,6 +137,7 @@ export function registerIpc({
   dispatchRelease,
   coordinateWrite = (operation) => operation(),
   diagnosticsTimeoutMs = 15_000,
+  routeChatSend,
 }: RegisterIpcDependencies): () => void {
   const providerWriteMethods = new Set([
     "providers.create", "providers.update", "providers.remove", "providers.set-enabled",
@@ -160,6 +164,7 @@ export function registerIpc({
     client,
     organizer,
     runMutation: coordinateWrite,
+    routeChatSend,
     sendEvent: (event) => authorizedWebContents.send?.(CLIENT_IPC_EVENT_CHANNEL, event),
   });
   const dispatch = clientDispatcher ?? dispatchClient;

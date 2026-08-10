@@ -5,7 +5,6 @@ import { UClawErrorSchema } from "./errors.js";
 export const PROVIDER_CONFIG_VERSION = 1 as const;
 
 export const BUILT_IN_PROVIDER_TEMPLATES = Object.freeze([
-  { id: "uclaw-cloud", name: "虾盘云", baseUrl: "https://api.u-claw.org/v1", model: "deepseek-v4-flash", protocol: "openai-compatible" },
   { id: "minimax", name: "MiniMax", baseUrl: "https://api.minimax.chat/v1", model: "MiniMax-M2", protocol: "openai-compatible" },
   { id: "kimi", name: "Kimi", baseUrl: "https://api.moonshot.cn/v1", model: "kimi-k2-turbo-preview", protocol: "openai-compatible" },
   { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", protocol: "openai-compatible" },

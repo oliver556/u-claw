@@ -7,10 +7,9 @@ type Schema = { parse(value: unknown): unknown };
 describe("provider contracts", () => {
   const contract = shared as unknown as Record<string, unknown>;
 
-  it("publishes the versioned built-in provider catalog", () => {
+  it("publishes only renderer-visible external provider templates", () => {
     expect(contract.PROVIDER_CONFIG_VERSION).toBe(1);
     expect(contract.BUILT_IN_PROVIDER_TEMPLATES).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "uclaw-cloud", name: "虾盘云" }),
       expect.objectContaining({ id: "minimax", name: "MiniMax" }),
       expect.objectContaining({ id: "kimi", name: "Kimi" }),
       expect.objectContaining({ id: "deepseek", name: "DeepSeek" }),
@@ -22,7 +21,8 @@ describe("provider contracts", () => {
       expect.objectContaining({ id: "groq", name: "Groq" }),
       expect.objectContaining({ id: "siliconflow", name: "硅基流动" }),
     ]));
-    expect(contract.BUILT_IN_PROVIDER_TEMPLATES).toHaveLength(11);
+    expect(contract.BUILT_IN_PROVIDER_TEMPLATES).toHaveLength(10);
+    expect(JSON.stringify(contract.BUILT_IN_PROVIDER_TEMPLATES)).not.toMatch(/uclaw-cloud|api\.u-claw\.org|虾盘云/u);
   });
 
   it("accepts multiple providers while rejecting duplicate IDs and invalid selection", () => {
