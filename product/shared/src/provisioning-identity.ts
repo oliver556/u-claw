@@ -89,9 +89,11 @@ const ReissueLifecycleSchema = z.object({
 export const ProvisioningJournalSchema = z.object({
   schemaVersion: z.literal(1),
   generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  licenseOperation: z.enum(["issue", "reissue"]),
   transactionId: IdentifierSchema,
   requestHash: Sha256Schema,
   mappedTokenId: IdentifierSchema.nullable(),
+  previousTokenId: IdentifierSchema.nullable(),
   binding: ProvisioningBindingSchema.partial().required({ deviceId: true, usbFingerprint: true, channelId: true }),
   endpoint: EndpointSchema,
   model: ModelSchema,

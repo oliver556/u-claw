@@ -57,9 +57,11 @@ describe("provisioning identity contract", () => {
     const journal = {
       schemaVersion: 1 as const,
       generation: 1,
+      licenseOperation: "issue",
       transactionId: "txn_fixture_001",
       requestHash: "b".repeat(64),
       mappedTokenId: binding.newApiTokenId,
+      previousTokenId: null,
       binding,
       endpoint: input.endpoint,
       model: input.model,

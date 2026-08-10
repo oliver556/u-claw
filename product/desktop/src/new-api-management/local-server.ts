@@ -191,6 +191,15 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
         return;
       }
 
+      const userMatch = /^users\/([^/]+)$/u.exec(route);
+      if (method === "GET" && userMatch) {
+        const userId = decodeURIComponent(userMatch[1]);
+        const user = users.get(userId);
+        if (!user) throw failure(404, "not-found", "USER_NOT_FOUND", "User was not found.");
+        sendJson(response, 200, user);
+        return;
+      }
+
       const createTokenMatch = /^users\/([^/]+)\/tokens$/u.exec(route);
       if (method === "POST" && createTokenMatch) {
         const userId = decodeURIComponent(createTokenMatch[1]);
@@ -325,6 +334,13 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
       }
 
       const policyMatch = /^users\/([^/]+)\/policy$/u.exec(route);
+      if (method === "GET" && policyMatch) {
+        const userId = decodeURIComponent(policyMatch[1]);
+        const user = users.get(userId);
+        if (!user) throw failure(404, "not-found", "USER_NOT_FOUND", "User was not found.");
+        sendJson(response, 200, user.policy);
+        return;
+      }
       if (method === "PUT" && policyMatch) {
         const userId = decodeURIComponent(policyMatch[1]);
         const policy = NewApiPolicySchema.parse(await readJson(request));

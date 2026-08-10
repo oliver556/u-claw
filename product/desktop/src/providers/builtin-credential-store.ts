@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -170,13 +171,25 @@ export function createBuiltinCredentialStore({
   const path = join(dataDir, ".uclaw", FILE_NAME);
   const load = async (requiredMappingStatus?: "active"): Promise<BuiltinModelCredential> => {
     let body: string;
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      body = await readFile(path, "utf8");
+      handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.nlink !== 1) {
+        throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential target is unsafe.");
+      }
+      body = await handle.readFile("utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_MISSING", "Builtin model credential is not configured.");
       }
+      if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+        throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential target is unsafe.");
+      }
+      if (error instanceof BuiltinCredentialError) throw error;
       throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin model credential could not be read.");
+    } finally {
+      await handle?.close();
     }
     try {
       return validatePersisted(JSON.parse(body) as unknown, allowLoopbackHttp, requiredMappingStatus).credential;
@@ -193,9 +206,21 @@ export function createBuiltinCredentialStore({
     loadActive: () => load("active"),
     loadForConnectivityCheck: () => load(),
     async clear() {
-      await unlink(path).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "ENOENT") throw error;
-      });
+      let removed = false;
+      try {
+        await unlink(path);
+        removed = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      if (removed) {
+        const directory = await open(dirname(path), "r");
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
+      }
     },
   };
 }
