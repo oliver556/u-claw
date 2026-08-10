@@ -244,7 +244,7 @@ describe("provisioning coordinator", () => {
     const requestHash = createHash("sha256")
       .update("uclaw-provisioning-request-v1").update("\0").update(JSON.stringify(input)).digest("hex");
     await context.artifactWriter.writeJournal({
-      schemaVersion: 1, generation: 1, licenseOperation: "issue",
+      schemaVersion: 1, generation: 1, licenseOperation: "issue", licenseSourceId: null,
       transactionId: `txn_${requestHash.slice(0, 24)}`, requestHash,
       mappedTokenId: stage === "mapping-created" || stage === "artifacts-written" ? "tok_fixture_001" : null,
       previousTokenId: null,
@@ -270,6 +270,37 @@ describe("provisioning coordinator", () => {
     await expect(restarted.provision(input)).resolves.toMatchObject({ status: "active" });
     expect(context.licenseClient.issueLicense).toHaveBeenCalledOnce();
     expect(context.licenseClient.reissueLicense).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["token-created", "mapping-created"] as const)(
+    "restarts generation-two %s from the immutable source license",
+    async (stage) => {
+      const context = setup();
+      const requestHash = createHash("sha256")
+        .update("uclaw-provisioning-request-v1").update("\0").update(JSON.stringify(input)).digest("hex");
+      await context.artifactWriter.writeJournal({
+        schemaVersion: 1, generation: 2, licenseOperation: "reissue", licenseSourceId: "lic_fixture_001",
+        transactionId: `txn_${requestHash.slice(0, 24)}`, requestHash,
+        mappedTokenId: stage === "mapping-created" ? "tok_fixture_002" : "tok_fixture_001",
+        previousTokenId: "tok_fixture_001",
+        binding: {
+          deviceId: input.deviceId, usbFingerprint: input.usbFingerprint, channelId: input.channelId,
+          licenseId: "lic_fixture_002", newApiUserId: "usr_fixture_001", newApiUsername: input.username,
+          newApiTokenId: "tok_fixture_002",
+        },
+        endpoint: input.endpoint, model: input.model, stage, failureCode: null,
+        compensation: { mapping: "pending", token: "pending", license: "pending", artifacts: "not-needed" },
+        lifecycle: null, createdAt: now, updatedAt: now,
+      });
+      vi.clearAllMocks();
+      const restarted = createProvisioningCoordinator({
+        licenseClient: context.licenseClient, newApiClient: context.newApiClient,
+        artifactWriter: context.artifactWriter, now: () => new Date(now),
+      });
+      await expect(restarted.provision(input)).resolves.toMatchObject({ status: "active", licenseId: "lic_fixture_002" });
+      expect(context.licenseClient.reissueLicense).toHaveBeenCalledWith("lic_fixture_001", expect.anything());
+      expect(context.licenseClient.reissueLicense).not.toHaveBeenCalledWith("lic_fixture_002", expect.anything());
     },
   );
 
@@ -374,7 +405,7 @@ describe("provisioning coordinator", () => {
     expect(context.newApiClient.updateDeviceStatus).not.toHaveBeenCalled();
   });
 
-  it("records an authoritative existing token when a mapping response mismatches", async () => {
+  it("does not mutate a non-owned authoritative mapping when a response mismatches", async () => {
     const context = setup();
     const existing = {
       deviceId: input.deviceId, licenseId: "lic_existing_001",
@@ -388,7 +419,28 @@ describe("provisioning coordinator", () => {
     vi.mocked(context.newApiClient.createDeviceMapping).mockResolvedValueOnce(existing);
     vi.mocked(context.newApiClient.getDeviceMapping).mockResolvedValue(existing);
     await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
-    expect(context.getJournal()).toMatchObject({ mappedTokenId: "tok_existing_001" });
+    expect(context.getJournal()).toMatchObject({ mappedTokenId: null });
+    expect(context.newApiClient.updateDeviceStatus).not.toHaveBeenCalled();
+  });
+
+  it("marks an owned provisioning mapping failed when its authoritative binding mismatches", async () => {
+    const context = setup();
+    const createMapping = vi.mocked(context.newApiClient.createDeviceMapping).getMockImplementation()!;
+    vi.mocked(context.newApiClient.createDeviceMapping).mockImplementationOnce(async (value) => createMapping({
+      ...value, startupSecretHash: "f".repeat(64),
+    }));
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
+    expect(context.getJournal()).toMatchObject({
+      mappedTokenId: "tok_fixture_001", stage: "failed", compensation: { mapping: "succeeded" },
+    });
+    expect(vi.mocked(context.newApiClient.updateDeviceStatus).mock.calls.map((call) => call[1]))
+      .toContainEqual(expect.objectContaining({
+        status: "failed", expectedGeneration: 1,
+        expectedLicenseId: "lic_fixture_001", expectedTokenId: "tok_fixture_001",
+      }));
+    await expect(context.coordinator.provision(input)).resolves.toMatchObject({
+      status: "active", licenseId: "lic_fixture_002", newApiTokenId: "tok_fixture_002",
+    });
   });
 
   it("journals a created token id before rejecting a mismatched token response", async () => {

@@ -90,6 +90,7 @@ export const ProvisioningJournalSchema = z.object({
   schemaVersion: z.literal(1),
   generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   licenseOperation: z.enum(["issue", "reissue"]),
+  licenseSourceId: IdentifierSchema.nullable(),
   transactionId: IdentifierSchema,
   requestHash: Sha256Schema,
   mappedTokenId: IdentifierSchema.nullable(),
@@ -108,7 +109,11 @@ export const ProvisioningJournalSchema = z.object({
   lifecycle: ReissueLifecycleSchema.nullable().default(null),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
-}).strict();
+}).strict().superRefine((value, context) => {
+  if ((value.licenseOperation === "reissue") !== (value.licenseSourceId !== null)) {
+    context.addIssue({ code: "custom", path: ["licenseSourceId"], message: "Reissue requires an immutable source license." });
+  }
+});
 export type ProvisioningJournal = z.infer<typeof ProvisioningJournalSchema>;
 
 const LifecycleBaseSchema = z.object({

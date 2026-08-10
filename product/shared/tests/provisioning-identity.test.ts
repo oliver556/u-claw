@@ -58,6 +58,7 @@ describe("provisioning identity contract", () => {
       schemaVersion: 1 as const,
       generation: 1,
       licenseOperation: "issue",
+      licenseSourceId: null,
       transactionId: "txn_fixture_001",
       requestHash: "b".repeat(64),
       mappedTokenId: binding.newApiTokenId,
