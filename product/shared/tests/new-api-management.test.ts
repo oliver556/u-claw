@@ -130,6 +130,16 @@ describe("New API management v1 contract", () => {
     }
   });
 
+  it("requires bounded service revision and fixed builtin audit actions", () => {
+    const { serviceRevision: _revision, ...withoutRevision } = fixture.auditEvent;
+    expect(() => shared.NewApiAuditEventSchema.parse(withoutRevision)).toThrow();
+    for (const action of ["builtin.request-succeeded", "builtin.request-rejected", "builtin.health-queried"] as const) {
+      expect(shared.NewApiAuditEventSchema.parse({ ...fixture.auditEvent, action, serviceRevision: 2 })).toBeTruthy();
+    }
+    expect(shared.NewApiAuditEventSchema.parse({ ...fixture.auditEvent, serviceRevision: null })).toBeTruthy();
+    expect(() => shared.NewApiAuditEventSchema.parse({ ...fixture.auditEvent, serviceRevision: 0 })).toThrow();
+  });
+
   it("classifies management and downstream access failures without raw payloads", () => {
     const categories = [
       "validation", "conflict", "authentication", "not-found", "disabled", "quota", "rate-limit",

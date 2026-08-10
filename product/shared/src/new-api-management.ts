@@ -130,19 +130,21 @@ export const NewApiAuditEventSchema = z.object({
   action: z.enum([
     "user.created", "token.created", "token.activated", "token.revoked", "device.created", "device.status-updated",
     "policy.updated", "service-state.updated", "device-controls.updated", "usage.queried", "request.rejected",
+    "builtin.request-succeeded", "builtin.request-rejected", "builtin.health-queried",
   ]),
   subjectType: z.enum(["service", "user", "token", "device", "request"]),
   subjectId: IdentifierSchema,
   deviceId: IdentifierSchema.nullable(),
   outcome: z.enum(["succeeded", "failed"]),
-  errorCategory: z.enum(["validation", "conflict", "authentication", "not-found", "disabled", "quota", "rate-limit", "model-permission", "upstream", "unavailable", "transport", "invalid-response"]).nullable(),
+  errorCategory: z.enum(["validation", "conflict", "authentication", "not-found", "disabled", "quota", "rate-limit", "model-permission", "upstream", "unavailable", "transport", "invalid-response", "cancelled"]).nullable(),
+  serviceRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).nullable(),
   createdAt: TimestampSchema,
 }).strict();
 export type NewApiAuditEvent = z.infer<typeof NewApiAuditEventSchema>;
 
 export const NewApiErrorCategorySchema = z.enum([
   "validation", "conflict", "authentication", "not-found", "disabled", "quota", "rate-limit",
-  "model-permission", "upstream", "unavailable", "transport", "invalid-response",
+  "model-permission", "upstream", "unavailable", "transport", "invalid-response", "cancelled",
 ]);
 export type NewApiErrorCategory = z.infer<typeof NewApiErrorCategorySchema>;
 

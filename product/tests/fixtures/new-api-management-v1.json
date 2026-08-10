@@ -39,6 +39,7 @@
     "deviceId": "dev_fixture_001",
     "outcome": "succeeded",
     "errorCategory": null,
+    "serviceRevision": null,
     "createdAt": "2026-08-10T00:00:00.000Z"
   }
 }
