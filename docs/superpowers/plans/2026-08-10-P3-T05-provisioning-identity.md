@@ -90,4 +90,3 @@
 - [ ] Run fresh `go test ./...`, `go test -race ./...`, and `go vet ./...` in `product/launcher`.
 - [ ] Cross-compile Windows amd64 production and license fixture without executing them; record as compile evidence only.
 - [ ] Write report with requirement map, changed files, exact results, conflict risk, P3-T06 startingState, real-environment gaps, and no-PR state.
-
