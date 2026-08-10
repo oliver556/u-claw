@@ -1,5 +1,6 @@
 export * from "./attachments.js";
 export * from "./activity.js";
+export * from "./builtin-service-operations.js";
 export * from "./chat.js";
 export * from "./capabilities.js";
 export * from "./channels.js";

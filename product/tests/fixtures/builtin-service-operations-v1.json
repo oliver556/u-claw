@@ -1,0 +1,66 @@
+{
+  "contractVersion": 1,
+  "statuses": [
+    { "schemaVersion": 1, "state": "enabled", "revision": 2, "reasonCode": "OPERATOR_ENABLED", "updatedAt": "2026-08-11T00:00:00.000Z" },
+    { "schemaVersion": 1, "state": "disabled", "revision": 3, "reasonCode": "OPERATOR_DISABLED", "updatedAt": "2026-08-11T00:01:00.000Z" },
+    { "schemaVersion": 1, "state": "degraded", "revision": 4, "reasonCode": "DEGRADED_HEALTH", "updatedAt": "2026-08-11T00:02:00.000Z" },
+    { "schemaVersion": 1, "state": "maintenance", "revision": 5, "reasonCode": "SCHEDULED_MAINTENANCE", "updatedAt": "2026-08-11T00:03:00.000Z" }
+  ],
+  "serviceUpdate": {
+    "idempotencyKey": "service-state-update-001",
+    "expectedRevision": 1,
+    "state": "maintenance",
+    "reasonCode": "SCHEDULED_MAINTENANCE"
+  },
+  "deviceControls": {
+    "schemaVersion": 1,
+    "deviceId": "dev_fixture_001",
+    "userId": "usr_fixture_001",
+    "revision": 1,
+    "policy": {
+      "quota": { "unit": "tokens", "limit": 100000, "period": "monthly" },
+      "rateLimit": { "requestsPerMinute": 60, "concurrentRequests": 2 },
+      "allowedModels": ["model-fixture"],
+      "disabled": false
+    },
+    "policyDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "generation": 1,
+    "licenseId": "lic_fixture_001",
+    "tokenId": "tok_fixture_001",
+    "updatedAt": "2026-08-11T00:00:00.000Z"
+  },
+  "deviceUpdate": {
+    "idempotencyKey": "device-controls-update-001",
+    "expectedRevision": 1,
+    "expectedGeneration": 1,
+    "expectedLicenseId": "lic_fixture_001",
+    "expectedTokenId": "tok_fixture_001",
+    "policy": {
+      "quota": { "unit": "requests", "limit": 500, "period": "daily" },
+      "rateLimit": { "requestsPerMinute": 30, "concurrentRequests": 1 },
+      "allowedModels": ["model-fixture"],
+      "disabled": false
+    }
+  },
+  "modelRequest": {
+    "schemaVersion": 1,
+    "requestId": "req_fixture_001",
+    "model": "model-fixture",
+    "prompt": "Fixture prompt.",
+    "maxOutputTokens": 256
+  },
+  "modelResponse": {
+    "schemaVersion": 1,
+    "requestId": "req_fixture_001",
+    "output": "Fixture response.",
+    "usage": { "inputTokens": 3, "outputTokens": 4 },
+    "serviceState": "enabled",
+    "serviceRevision": 2
+  },
+  "health": {
+    "schemaVersion": 1,
+    "acceptingBuiltin": true,
+    "state": "enabled",
+    "revision": 2
+  }
+}

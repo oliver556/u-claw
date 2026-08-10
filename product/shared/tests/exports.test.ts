@@ -10,6 +10,15 @@ import type {
   UClawClient,
   ExecApprovalRef,
   PluginApprovalRef,
+  BuiltinDeviceControls,
+  BuiltinDeviceControlsUpdate,
+  BuiltinDeviceLocator,
+  BuiltinModelRequest,
+  BuiltinModelResponse,
+  BuiltinServiceHealth,
+  BuiltinServiceStatus,
+  BuiltinServiceStatusUpdate,
+  NewApiManagementClient,
 } from "../src/index.js";
 import {
   ExecApprovalRequestSchema,
@@ -26,6 +35,21 @@ describe("public type exports", () => {
     expectTypeOf<CapabilitySet["protocolVersion"]>().toEqualTypeOf<4>();
     expectTypeOf<ReturnType<ChatService["send"]>>().toEqualTypeOf<AsyncIterable<MessageEvent>>();
     expectTypeOf<NonNullable<SessionService["rename"]>>().toBeFunction();
+  });
+
+  it("exports builtin service operations contracts and management methods", () => {
+    expectTypeOf<BuiltinServiceStatus["schemaVersion"]>().toEqualTypeOf<1>();
+    expectTypeOf<BuiltinServiceStatusUpdate["expectedRevision"]>().toEqualTypeOf<number>();
+    expectTypeOf<BuiltinDeviceLocator>().toMatchTypeOf<{ deviceId: string } | { userId: string }>();
+    expectTypeOf<BuiltinDeviceControls["policyDigest"]>().toEqualTypeOf<string>();
+    expectTypeOf<BuiltinDeviceControlsUpdate["expectedGeneration"]>().toEqualTypeOf<number>();
+    expectTypeOf<BuiltinModelRequest["maxOutputTokens"]>().toEqualTypeOf<number>();
+    expectTypeOf<BuiltinModelResponse["serviceRevision"]>().toEqualTypeOf<number>();
+    expectTypeOf<BuiltinServiceHealth["acceptingBuiltin"]>().toEqualTypeOf<boolean>();
+    expectTypeOf<NewApiManagementClient["getServiceStatus"]>().toBeFunction();
+    expectTypeOf<NewApiManagementClient["updateServiceStatus"]>().toBeFunction();
+    expectTypeOf<NewApiManagementClient["getDeviceControls"]>().toBeFunction();
+    expectTypeOf<NewApiManagementClient["updateDeviceControls"]>().toBeFunction();
   });
 
   it("uses family-specific approval service inputs", () => {

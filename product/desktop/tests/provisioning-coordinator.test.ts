@@ -105,6 +105,10 @@ function setup() {
     }),
   };
   const newApiClient: NewApiManagementClient = {
+    getServiceStatus: vi.fn(async () => { throw new Error("operations unavailable"); }),
+    updateServiceStatus: vi.fn(async () => { throw new Error("operations unavailable"); }),
+    getDeviceControls: vi.fn(async () => { throw new Error("operations unavailable"); }),
+    updateDeviceControls: vi.fn(async () => { throw new Error("operations unavailable"); }),
     createUser: vi.fn(async () => { events.push("user.create"); return { ...user, policy }; }),
     getUser: vi.fn(async () => ({ ...user, policy })),
     updatePolicy: vi.fn(async (_userId, value) => { events.push(value.disabled ? "policy.disable" : "policy.bind"); policy = value; return value; }),
