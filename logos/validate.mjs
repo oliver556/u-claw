@@ -14,83 +14,126 @@ const FORBIDDEN_ELEMENTS = [
 ];
 const FORBIDDEN_ATTRIBUTES = ["opacity", "style", "class", "transform"];
 
-function getAttribute(attributes, name) {
-  const match = attributes.match(
-    new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, "i"),
-  );
-  return match?.[2];
-}
+const forbiddenElementTest = FORBIDDEN_ELEMENTS.map(
+  (name) => `name()='${name}'`,
+).join(" or ");
+const forbiddenAttributeTest = FORBIDDEN_ATTRIBUTES.map(
+  (name) => `name()='${name}'`,
+).join(" or ");
+const allowedElementTest = ["svg", "g", "path"]
+  .map((name) => `name()='${name}'`)
+  .join(" or ");
 
-function hasAttribute(markup, names) {
-  const attribute = new RegExp(`\\s(?:${names.join("|")})\\s*=`, "i");
-  return [...markup.matchAll(/<[^!?/][^>]*>/g)].some(([tag]) =>
-    attribute.test(tag),
-  );
+const SUMMARY_XPATH = `concat(
+  name(/*), '|',
+  /*/@viewBox = '0 0 512 512', '|',
+  count(/*/@width | /*/@height), '|',
+  count(//*[name()='g' and @id='icon']), '|',
+  count(//*[name()='path']), '|',
+  count(//@*[name()='stroke']), '|',
+  count(//*[name()='path' and not(@fill='#111111')]), '|',
+  count(//*[${forbiddenElementTest}]), '|',
+  count(//@*[${forbiddenAttributeTest}]), '|',
+  count(//*[not(${allowedElementTest} or ${forbiddenElementTest})]), '|',
+  count(//*) = 3 and
+    count(/*/*) = 1 and
+    name(/*/*[1]) = 'g' and
+    /*/*[1]/@id = 'icon' and
+    count(/*/*[1]/*) = 1 and
+    name(/*/*[1]/*[1]) = 'path'
+)`;
+
+function runXPath(svg, expression) {
+  const result = spawnSync("/usr/bin/xmllint", ["--xpath", expression, "-"], {
+    encoding: "utf8",
+    input: svg,
+  });
+
+  return result.status === 0 ? result.stdout.trimEnd() : null;
 }
 
 export function validateSvg(svg, source = "SVG") {
   const errors = [];
-  const document = svg.replace(
-    /^(?:\s|<\?xml[\s\S]*?\?>|<!--[\s\S]*?-->)*/i,
-    "",
-  );
-  const root = document.match(/^<svg\b([^>]*)>/i);
-  const rootAttributes = root?.[1] ?? "";
-  const paths = [...svg.matchAll(/<path\b([^>]*)>/gi)].map(
-    (match) => match[1],
+  const summary = runXPath(svg, SUMMARY_XPATH);
+  if (summary === null) {
+    return [`${source}: root svg is required`];
+  }
+
+  const [
+    rootName,
+    viewBoxIsValid,
+    rootSizeCount,
+    iconCount,
+    pathCountValue,
+    strokeCount,
+    invalidFillCount,
+    forbiddenElementCount,
+    forbiddenAttributeCount,
+    unsupportedElementCount,
+    structureIsValid,
+  ] = summary.split("|");
+  const pathCount = Number(pathCountValue);
+  const pathData = Array.from(
+    { length: pathCount },
+    (_, index) =>
+      runXPath(svg, `string((//*[name()='path'])[${index + 1}]/@d)`) ?? "",
   );
 
-  if (!root) {
+  if (rootName !== "svg") {
     errors.push(`${source}: root svg is required`);
-  } else if (getAttribute(rootAttributes, "viewBox") !== "0 0 512 512") {
+  } else if (viewBoxIsValid !== "true") {
     errors.push(`${source}: root viewBox must be 0 0 512 512`);
   }
 
-  if (
-    getAttribute(rootAttributes, "width") !== undefined ||
-    getAttribute(rootAttributes, "height") !== undefined
-  ) {
+  if (rootName === "svg" && rootSizeCount !== "0") {
     errors.push(`${source}: root svg must not define width or height`);
   }
 
-  const hasIcon = [...svg.matchAll(/<g\b([^>]*)>/gi)].some(
-    (match) => getAttribute(match[1], "id") === "icon",
-  );
-  if (!hasIcon) {
+  if (iconCount !== "1") {
     errors.push(`${source}: concept must contain g#icon`);
   }
 
-  if (paths.length !== 1) {
+  if (pathCount !== 1) {
     errors.push(`${source}: concept must contain exactly one path`);
   }
 
-  if (hasAttribute(svg, ["stroke"])) {
+  if (
+    rootName === "svg" &&
+    iconCount === "1" &&
+    pathCount === 1 &&
+    forbiddenElementCount === "0" &&
+    unsupportedElementCount === "0" &&
+    structureIsValid !== "true"
+  ) {
+    errors.push(`${source}: concept structure must be svg > g#icon > path`);
+  }
+
+  if (strokeCount !== "0") {
     errors.push(`${source}: strokes are forbidden`);
   }
 
-  if (paths.some((attributes) => getAttribute(attributes, "fill") !== "#111111")) {
+  if (invalidFillCount !== "0") {
     errors.push(`${source}: concept fill must be #111111`);
   }
 
-  const pathData = paths.map((attributes) => getAttribute(attributes, "d") ?? "");
   if (pathData.some((data) => !/[Zz]\s*$/.test(data))) {
     errors.push(`${source}: silhouette path must end with Z`);
   }
 
-  const forbiddenTag = new RegExp(
-    `<\\s*(?:${FORBIDDEN_ELEMENTS.join("|")})\\b`,
-    "i",
-  );
-  if (forbiddenTag.test(svg)) {
+  if (forbiddenElementCount !== "0") {
     errors.push(
       `${source}: gradients, filters, masks, patterns, clips, images, and text are forbidden`,
     );
   }
 
-  if (hasAttribute(svg, FORBIDDEN_ATTRIBUTES)) {
+  if (forbiddenAttributeCount !== "0") {
     errors.push(
       `${source}: opacity, style, class, and transform attributes are forbidden`,
     );
+  }
+
+  if (rootName === "svg" && unsupportedElementCount !== "0") {
+    errors.push(`${source}: only svg, g, and path elements are allowed`);
   }
 
   if (pathData.some((data) => (data.match(/[Mm]/g) ?? []).length !== 1)) {
