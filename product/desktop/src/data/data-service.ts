@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -19,6 +19,8 @@ import {
 import { createMaintenanceService } from "./maintenance-service.js";
 
 const MAX_TEXT_BYTES = 2_000_000;
+const DEFAULT_SEARCH_LIMITS = { maxDepth: 32, maxEntries: 10_000, maxBytes: 64_000_000 };
+const DATA_STAGING_DIR = ".uclaw-data-staging";
 const CONTROL_FILES = new Set([
   "agents.md", "soul.md", "tools.md", "identity.md", "user.md", "heartbeat.md", "bootstrap.md", "dreams.md",
 ]);
@@ -58,6 +60,7 @@ export interface DataServiceOptions {
   acquireConsistencyLease?(signal?: AbortSignal): Promise<{ release(): Promise<void> }>;
   workspaceShell?: WorkspaceShell;
   mutationCoordinator?: DataMutationCoordinator;
+  searchLimits?: { maxDepth: number; maxEntries: number; maxBytes: number };
 }
 
 interface FileInfo {
@@ -138,8 +141,9 @@ function isMemoryId(id: string): boolean {
 }
 
 function isProtectedWorkspaceId(id: string): boolean {
-  const first = id.split("/")[0]?.toLocaleLowerCase("en-US") ?? "";
-  return first === "memory" || first === "memory.md" || CONTROL_FILES.has(first) || first.startsWith(".");
+  const segments = id.split("/");
+  const first = segments[0]?.toLocaleLowerCase("en-US") ?? "";
+  return first === "memory" || first === "memory.md" || CONTROL_FILES.has(first) || segments.some((segment) => segment.startsWith("."));
 }
 
 function memoryTitle(id: string): string {
@@ -171,6 +175,10 @@ function toMemoryEntry(id: string, info: FileInfo, version: string): MemoryEntry
 export function createDataService(options: DataServiceOptions) {
   if (!isAbsolute(options.dataDir)) throw new Error("Data root must be absolute.");
   const workspaceRoot = resolve(options.dataDir, DATA_ROOT_CONTRACT.roots.workspace);
+  const searchLimits = options.searchLimits ?? DEFAULT_SEARCH_LIMITS;
+  if (searchLimits.maxDepth < 0 || searchLimits.maxEntries < 1 || searchLimits.maxBytes < 1) {
+    throw new Error("Search limits must be positive.");
+  }
   const mutationCoordinator: DataMutationCoordinator = options.mutationCoordinator ?? {
     runVersioned: async (context, operation) => {
       try {
@@ -206,6 +214,8 @@ export function createDataService(options: DataServiceOptions) {
     }),
   });
   let availableOverride: boolean | undefined;
+  const activeStagingTransactions = new Set<string>();
+  let stagingRecovery: Promise<void> | undefined;
 
   const getRoot = async (): Promise<Root> => {
     if (availableOverride === false) throw safeError("USB_MISSING", "U 盘工作区离线。", true);
@@ -222,6 +232,8 @@ export function createDataService(options: DataServiceOptions) {
       if (relative(dataRootReal, safeRoot.rootReal).toLocaleLowerCase("en-US") !== DATA_ROOT_CONTRACT.roots.workspace) {
         throw safeError("FORBIDDEN", "工作区根不安全。");
       }
+      stagingRecovery ??= recoverStagedTargets(safeRoot).finally(() => { stagingRecovery = undefined; });
+      await stagingRecovery;
       return safeRoot;
     } catch (caught) {
       if ((caught as NodeJS.ErrnoException).code === "ENOENT" || (caught instanceof FsSafeError && caught.code === "not-found")) {
@@ -236,13 +248,70 @@ export function createDataService(options: DataServiceOptions) {
   };
 
   const assertMemoryDomain = (id: string): void => {
-    if (!isMemoryId(id) || id.startsWith("memory/.")) throw safeError("FORBIDDEN", "该项目不属于 OpenClaw 记忆域。");
+    const hiddenMemorySegment = id.startsWith("memory/") && id.split("/").slice(1).some((segment) => segment.startsWith("."));
+    if (!isMemoryId(id) || hiddenMemorySegment) throw safeError("FORBIDDEN", "该项目不属于 OpenClaw 记忆域。");
   };
 
   const readFile = async (safeRoot: Root, id: string) => {
     const read = await safeRoot.read(id, { hardlinks: "reject", maxBytes: MAX_TEXT_BYTES, symlinks: "reject" });
     return { ...read, version: contentVersion(read.buffer, read.stat) };
   };
+
+  const removeStagingTransaction = async (safeRoot: Root, transactionId: string, payloadId?: string): Promise<void> => {
+    if (payloadId) await safeRoot.remove(payloadId);
+    await safeRoot.remove(`${transactionId}/journal.json`).catch((caught) => {
+      if (!(caught instanceof FsSafeError && caught.code === "not-found")) throw caught;
+    });
+    await safeRoot.remove(transactionId);
+  };
+
+  async function recoverStagedTargets(safeRoot: Root): Promise<void> {
+    let entries;
+    try { entries = await safeRoot.list(DATA_STAGING_DIR, { withFileTypes: true }); }
+    catch (caught) {
+      if (caught instanceof FsSafeError && caught.code === "not-found") return;
+      throw caught;
+    }
+    for (const entry of entries) {
+      const transactionId = `${DATA_STAGING_DIR}/${entry.name}`;
+      if (activeStagingTransactions.has(transactionId)) continue;
+      if (!entry.isDirectory || entry.isSymbolicLink) throw safeError("CONFLICT", "检测到无效的数据恢复事务。", true);
+      const transactionEntries = await safeRoot.list(transactionId, { withFileTypes: true });
+      if (!transactionEntries.some((candidate) => candidate.name === "journal.json")) {
+        if (transactionEntries.length === 0) {
+          await safeRoot.remove(transactionId);
+          continue;
+        }
+        throw safeError("CONFLICT", "数据恢复事务损坏，请先运行诊断。", true);
+      }
+      let id: string;
+      try {
+        const journal = JSON.parse((await safeRoot.read(`${transactionId}/journal.json`, { maxBytes: 8_192 })).buffer.toString("utf8")) as unknown;
+        if (!journal || typeof journal !== "object" || (journal as any).schemaVersion !== 1 || typeof (journal as any).id !== "string") throw new Error("invalid journal");
+        id = (journal as any).id;
+        const hiddenMemorySegment = id.startsWith("memory/") && id.split("/").slice(1).some((segment) => segment.startsWith("."));
+        if ((isProtectedWorkspaceId(id) && !isMemoryId(id)) || hiddenMemorySegment) throw new Error("invalid authority id");
+      } catch {
+        throw safeError("CONFLICT", "数据恢复事务损坏，请先运行诊断。", true);
+      }
+      const payloadId = `${transactionId}/payload`;
+      let payloadExists = true;
+      try { await safeRoot.stat(payloadId); }
+      catch (caught) {
+        if (caught instanceof FsSafeError && caught.code === "not-found") payloadExists = false;
+        else throw caught;
+      }
+      let authorityExists = true;
+      try { await safeRoot.stat(id); }
+      catch (caught) {
+        if (caught instanceof FsSafeError && caught.code === "not-found") authorityExists = false;
+        else throw caught;
+      }
+      if (payloadExists && !authorityExists) await safeRoot.move(payloadId, id, { overwrite: false });
+      else if (payloadExists) await safeRoot.remove(payloadId);
+      await removeStagingTransaction(safeRoot, transactionId);
+    }
+  }
 
   const verifyWorkspaceShellTarget = async (
     safeRoot: Root,
@@ -287,6 +356,7 @@ export function createDataService(options: DataServiceOptions) {
         };
         await target.verify();
         await options.workspaceShell.invoke(action, target);
+        await target.verify();
       } finally {
         await opened.handle.close().catch(() => undefined);
       }
@@ -300,6 +370,21 @@ export function createDataService(options: DataServiceOptions) {
     };
     await target.verify();
     await options.workspaceShell.invoke(action, target);
+    await target.verify();
+  };
+
+  const createSearchBudget = () => {
+    let entries = 0;
+    let bytes = 0;
+    return {
+      visit(depth: number, info?: FileInfo, countBytes = false): void {
+        entries += 1;
+        if (countBytes && info && isFile(info)) bytes += Number(info.size);
+        if (depth > searchLimits.maxDepth || entries > searchLimits.maxEntries || bytes > searchLimits.maxBytes) {
+          throw safeError("FILE_TOO_LARGE", "搜索范围超过安全限制，请缩小搜索目录。");
+        }
+      },
+    };
   };
 
   const assertVersion = async (safeRoot: Root, id: string, expected: string): Promise<FileInfo> => {
@@ -313,11 +398,50 @@ export function createDataService(options: DataServiceOptions) {
     return current;
   };
 
+  const stageVersionedTarget = async (safeRoot: Root, id: string, expected: string) => {
+    await safeRoot.mkdir(DATA_STAGING_DIR);
+    const transactionId = `${DATA_STAGING_DIR}/${randomUUID()}`;
+    const stagingId = `${transactionId}/payload`;
+    activeStagingTransactions.add(transactionId);
+    try {
+      await safeRoot.mkdir(transactionId);
+      await safeRoot.create(`${transactionId}/journal.json`, `${JSON.stringify({ schemaVersion: 1, id })}\n`, { mode: 0o600 });
+      await safeRoot.move(id, stagingId, { overwrite: false });
+      const info = await assertVersion(safeRoot, stagingId, expected);
+      return { stagingId, transactionId, info, release: () => activeStagingTransactions.delete(transactionId) };
+    } catch (caught) {
+      await safeRoot.move(stagingId, id, { overwrite: false }).catch(() => undefined);
+      await removeStagingTransaction(safeRoot, transactionId).catch(() => undefined);
+      activeStagingTransactions.delete(transactionId);
+      throw caught;
+    }
+  };
+
+  const restoreStagedTarget = async (safeRoot: Root, transactionId: string, stagingId: string, id: string): Promise<void> => {
+    let authorityExists = true;
+    try {
+      await safeRoot.stat(id);
+    } catch (caught) {
+      if (caught instanceof FsSafeError && caught.code === "not-found") {
+        authorityExists = false;
+      } else throw caught;
+    }
+    if (authorityExists) await safeRoot.remove(stagingId);
+    else await safeRoot.move(stagingId, id, { overwrite: false });
+    await removeStagingTransaction(safeRoot, transactionId);
+  };
+
   const listMemoryIds = async (safeRoot: Root): Promise<string[]> => {
     const ids: string[] = [];
-    try { await readFile(safeRoot, "MEMORY.md"); ids.push("MEMORY.md"); }
+    const budget = createSearchBudget();
+    try {
+      const memory = await readFile(safeRoot, "MEMORY.md");
+      budget.visit(0, memory.stat, true);
+      ids.push("MEMORY.md");
+    }
     catch (caught) { if (!(caught instanceof FsSafeError && caught.code === "not-found")) throw caught; }
-    const walk = async (relativeDir: string): Promise<void> => {
+    const walk = async (relativeDir: string, depth: number): Promise<void> => {
+      budget.visit(depth);
       let entries;
       try { entries = await safeRoot.list(relativeDir, { withFileTypes: true }); }
       catch (caught) {
@@ -325,14 +449,45 @@ export function createDataService(options: DataServiceOptions) {
         throw caught;
       }
       for (const entry of entries) {
-        if (entry.name.startsWith(".") || entry.isSymbolicLink || (entry.isFile && entry.nlink > 1)) continue;
         const id = `${relativeDir}/${entry.name}`;
-        if (entry.isDirectory) await walk(id);
+        const unsafe = entry.name.startsWith(".") || entry.isSymbolicLink || (entry.isFile && entry.nlink > 1);
+        budget.visit(depth + 1, entry, !unsafe && entry.isFile && id.toLocaleLowerCase("en-US").endsWith(".md"));
+        if (unsafe) continue;
+        if (entry.isDirectory) await walk(id, depth + 1);
         else if (entry.isFile && id.toLocaleLowerCase("en-US").endsWith(".md")) ids.push(id);
       }
     };
-    await walk("memory");
+    await walk("memory", 0);
     return ids.sort((left, right) => left.localeCompare(right));
+  };
+
+  const listWorkspaceEntries = async (safeRoot: Root, parentId: string | undefined, query: string): Promise<WorkspaceEntry[]> => {
+    const candidates: WorkspaceEntry[] = [];
+    const budget = createSearchBudget();
+    const walk = async (relativeDir: string | undefined, depth: number): Promise<void> => {
+      budget.visit(depth);
+      for (const entry of await safeRoot.list(relativeDir ?? ".", { withFileTypes: true })) {
+        budget.visit(depth + 1, entry);
+        const id = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+        if (isProtectedWorkspaceId(id) || entry.isSymbolicLink || (entry.isFile && entry.nlink > 1)) continue;
+        if (entry.isFile || entry.isDirectory) {
+          if (!query || id.toLocaleLowerCase("en-US").includes(query)) candidates.push(toWorkspaceEntry(id, entry));
+          if (query && entry.isDirectory) await walk(id, depth + 1);
+        }
+      }
+    };
+    await walk(parentId, 0);
+    return candidates;
+  };
+
+  const assertRemoved = async (safeRoot: Root, id: string): Promise<void> => {
+    try {
+      await safeRoot.stat(id);
+    } catch (caught) {
+      if (caught instanceof FsSafeError && caught.code === "not-found") return;
+      throw caught;
+    }
+    throw safeError("CONFLICT", "项目删除后仍可见，请重新加载。", true);
   };
 
   const failure = (request: DataIpcRequest, caught: unknown): DataIpcResponse => {
@@ -423,13 +578,8 @@ export function createDataService(options: DataServiceOptions) {
           const { parentId } = request.params;
           if (parentId) assertWorkspaceDomain(parentId);
           const safeRoot = await getRoot();
-          const query = request.params.query?.toLocaleLowerCase() ?? "";
-          const candidates: WorkspaceEntry[] = [];
-          for (const entry of await safeRoot.list(parentId ?? ".", { withFileTypes: true })) {
-            const id = parentId ? `${parentId}/${entry.name}` : entry.name;
-            if (isProtectedWorkspaceId(id) || entry.isSymbolicLink || (entry.isFile && entry.nlink > 1) || (query && !entry.name.toLocaleLowerCase().includes(query))) continue;
-            if (entry.isFile || entry.isDirectory) candidates.push(toWorkspaceEntry(id, entry));
-          }
+          const query = request.params.query?.toLocaleLowerCase("en-US") ?? "";
+          const candidates = await listWorkspaceEntries(safeRoot, parentId, query);
           candidates.sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1);
           const offset = parseCursor(request.params.cursor);
           const limit = request.params.limit ?? 50;
@@ -465,11 +615,18 @@ export function createDataService(options: DataServiceOptions) {
           }, async () => {
             assertWorkspaceDomain(request.params.entryId);
             const safeRoot = await getRoot();
-            const sourceInfo = await assertVersion(safeRoot, request.params.entryId, request.params.version);
             if (request.method === "workspace.delete") {
-              await safeRoot.remove(request.params.entryId);
-              return null;
+              const staged = await stageVersionedTarget(safeRoot, request.params.entryId, request.params.version);
+              try {
+                await removeStagingTransaction(safeRoot, staged.transactionId, staged.stagingId);
+                await assertRemoved(safeRoot, request.params.entryId);
+                return null;
+              } catch (caught) {
+                await restoreStagedTarget(safeRoot, staged.transactionId, staged.stagingId, request.params.entryId).catch(() => undefined);
+                throw caught;
+              } finally { staged.release(); }
             }
+            const sourceInfo = await assertVersion(safeRoot, request.params.entryId, request.params.version);
             const parentId = request.method === "workspace.move"
               ? request.params.destinationId
               : dirname(request.params.entryId) === "." ? undefined : dirname(request.params.entryId);
@@ -483,19 +640,26 @@ export function createDataService(options: DataServiceOptions) {
             assertWorkspaceDomain(targetId);
             await safeRoot.move(request.params.entryId, targetId, { overwrite: false });
             const target = await safeRoot.stat(targetId);
-            const version = isFile(sourceInfo) && request.params.version.startsWith("sha256:")
-              ? (await readFile(safeRoot, targetId)).version
+            const movedRead = isFile(sourceInfo) && request.params.version.startsWith("sha256:")
+              ? await readFile(safeRoot, targetId)
+              : undefined;
+            if (!sameFileIdentity(sourceInfo, target) || (movedRead !== undefined && movedRead.version !== request.params.version)) {
+              await safeRoot.move(targetId, request.params.entryId, { overwrite: false }).catch(() => undefined);
+              throw safeError("CONFLICT", "源项目在移动期间发生变化，请重新加载。", true);
+            }
+            const version = movedRead !== undefined
+              ? movedRead.version
               : metadataVersion(target);
             return toWorkspaceEntry(targetId, target, version);
           });
           break;
         case "memory.list": {
           const safeRoot = await getRoot();
-          const query = request.params.query?.toLocaleLowerCase() ?? "";
+          const query = request.params.query?.toLocaleLowerCase("en-US") ?? "";
           const items: MemoryEntry[] = [];
           for (const id of await listMemoryIds(safeRoot)) {
-            if (query && !id.toLocaleLowerCase().includes(query)) continue;
             const read = await readFile(safeRoot, id);
+            if (query && !`${id}\n${memoryTitle(id)}\n${read.buffer.toString("utf8")}`.toLocaleLowerCase("en-US").includes(query)) continue;
             items.push(toMemoryEntry(id, read.stat, read.version));
           }
           const offset = parseCursor(request.params.cursor);
@@ -518,13 +682,27 @@ export function createDataService(options: DataServiceOptions) {
           }, async () => {
             assertMemoryDomain(request.params.memoryId);
             const safeRoot = await getRoot();
-            await assertVersion(safeRoot, request.params.memoryId, request.params.version);
-            await safeRoot.write(request.params.memoryId, request.params.content, { mode: 0o600, overwrite: true });
-            const written = await readFile(safeRoot, request.params.memoryId);
-            if (!written.buffer.equals(Buffer.from(request.params.content, "utf8"))) {
-              throw safeError("CONFLICT", "内容已被其他进程修改，请重新加载。", true);
-            }
-            return { memory: toMemoryEntry(request.params.memoryId, written.stat, written.version) };
+            const staged = await stageVersionedTarget(safeRoot, request.params.memoryId, request.params.version);
+            try {
+              await safeRoot.create(request.params.memoryId, request.params.content, { mode: 0o600 });
+              let written;
+              try {
+                written = await readFile(safeRoot, request.params.memoryId);
+              } catch {
+                throw safeError("CONFLICT", "内容已被其他进程修改，请重新加载。", true);
+              }
+              if (!written.buffer.equals(Buffer.from(request.params.content, "utf8"))) {
+                throw safeError("CONFLICT", "内容已被其他进程修改，请重新加载。", true);
+              }
+              await removeStagingTransaction(safeRoot, staged.transactionId, staged.stagingId);
+              return { memory: toMemoryEntry(request.params.memoryId, written.stat, written.version) };
+            } catch (caught) {
+              await restoreStagedTarget(safeRoot, staged.transactionId, staged.stagingId, request.params.memoryId);
+              if (caught instanceof FsSafeError) {
+                throw safeError("CONFLICT", "内容已被其他进程修改，请重新加载。", true);
+              }
+              throw caught;
+            } finally { staged.release(); }
           });
           break;
         case "memory.delete":
@@ -535,9 +713,15 @@ export function createDataService(options: DataServiceOptions) {
           }, async () => {
             assertMemoryDomain(request.params.memoryId);
             const safeRoot = await getRoot();
-            await assertVersion(safeRoot, request.params.memoryId, request.params.version);
-            await safeRoot.remove(request.params.memoryId);
-            return null;
+            const staged = await stageVersionedTarget(safeRoot, request.params.memoryId, request.params.version);
+            try {
+              await removeStagingTransaction(safeRoot, staged.transactionId, staged.stagingId);
+              await assertRemoved(safeRoot, request.params.memoryId);
+              return null;
+            } catch (caught) {
+              await restoreStagedTarget(safeRoot, staged.transactionId, staged.stagingId, request.params.memoryId).catch(() => undefined);
+              throw caught;
+            } finally { staged.release(); }
           });
           break;
       }

@@ -8,6 +8,66 @@ import { DataManager } from "../src/features/data/DataManager";
 
 describe("DataManager", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("fails explicitly when the native data bridge is unavailable", async () => {
+    const original = window.uclaw;
+    Object.defineProperty(window, "uclaw", { configurable: true, value: undefined });
+    try {
+      render(<DataManager domain="workspace" />);
+      expect(await screen.findByRole("alert")).toHaveTextContent("原生数据服务未连接");
+      expect(screen.queryByText("当前文件夹为空")).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "uclaw", { configurable: true, value: original });
+    }
+  });
+
+  it("ignores a stale refresh that finishes after a newer refresh", async () => {
+    let resolveFirstStatus!: (value: any) => void;
+    const firstStatus = new Promise((resolve) => { resolveFirstStatus = resolve; });
+    let statusCalls = 0;
+    let listCalls = 0;
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "data.status") {
+        statusCalls += 1;
+        if (statusCalls === 1) return firstStatus;
+        return { method: request.method, requestId: request.requestId, ok: true, result: { state: "available", writable: true } };
+      }
+      if (request.method === "workspace.list") {
+        listCalls += 1;
+        const name = listCalls === 1 ? "new.md" : "stale.md";
+        return { method: request.method, requestId: request.requestId, ok: true, result: { items: [{ id: name, name, kind: "file", size: 1, modifiedAt: "2026-08-09T00:00:00.000Z", version: name, readable: true }], nextCursor: null, hasMore: false } };
+      }
+      throw new Error("unexpected");
+    });
+    render(<DataManager domain="workspace" bridge={{ invoke } as any} />);
+    fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
+    expect(await screen.findByRole("button", { name: "查看 new.md" })).toBeVisible();
+    resolveFirstStatus({ method: "data.status", requestId: "stale", ok: true, result: { state: "read-only", writable: false } });
+    await vi.waitFor(() => expect(statusCalls).toBe(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("stale.md")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前工作区只读")).not.toBeInTheDocument();
+  });
+
+  it("ignores a stale detail read that finishes after a newer selection", async () => {
+    let resolveFirstRead!: (value: any) => void;
+    const firstRead = new Promise((resolve) => { resolveFirstRead = resolve; });
+    const entries = ["a.md", "b.md"].map((name) => ({ id: name, name, kind: "file", size: 1, modifiedAt: "2026-08-09T00:00:00.000Z", version: name, readable: true }));
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "data.status") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "available", writable: true } };
+      if (request.method === "workspace.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: entries, nextCursor: null, hasMore: false } };
+      if (request.method === "workspace.read" && request.params.entryId === "a.md") return firstRead;
+      if (request.method === "workspace.read") return { method: request.method, requestId: request.requestId, ok: true, result: { entry: entries[1], content: "b", encoding: "utf-8" } };
+      throw new Error("unexpected");
+    });
+    render(<DataManager domain="workspace" bridge={{ invoke } as any} />);
+    fireEvent.click(await screen.findByRole("button", { name: "查看 a.md" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看 b.md" }));
+    expect(await screen.findByLabelText("文件内容")).toHaveValue("b");
+    resolveFirstRead({ method: "workspace.read", requestId: "stale", ok: true, result: { entry: entries[0], content: "a", encoding: "utf-8" } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByLabelText("文件内容")).toHaveValue("b");
+  });
   it("loads files, searches, opens detail and confirms deletion", async () => {
     const invoke = vi.fn(async (request: any) => {
       if (request.method === "data.status") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "available", writable: true } };
@@ -20,7 +80,15 @@ describe("DataManager", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索工作区文件" }), { target: { value: "plan" } });
     fireEvent.click(screen.getByRole("button", { name: "查看 plan.md" }));
     expect(await screen.findByDisplayValue("plan v1")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "删除 plan.md" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开 plan.md" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "workspace.open", params: { entryId: "notes/plan.md" } })));
+    const reveal = screen.getByRole("button", { name: "定位 plan.md" });
+    await vi.waitFor(() => expect(reveal).toBeEnabled());
+    fireEvent.click(reveal);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "workspace.reveal", params: { entryId: "notes/plan.md" } })));
+    const remove = screen.getByRole("button", { name: "删除 plan.md" });
+    await vi.waitFor(() => expect(remove).toBeEnabled());
+    fireEvent.click(remove);
     expect(screen.getByRole("dialog", { name: "确认删除" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "workspace.delete", params: expect.objectContaining({ confirmed: true }) })));
@@ -116,6 +184,46 @@ describe("DataManager", () => {
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
   });
 
+  it("guards renderer unload only while a memory edit is dirty", async () => {
+    const listeners = new Set<EventListenerOrEventListenerObject>();
+    const add = vi.spyOn(window, "addEventListener").mockImplementation(((type: string, listener: EventListenerOrEventListenerObject) => {
+      if (type === "beforeunload") listeners.add(listener);
+    }) as typeof window.addEventListener);
+    const remove = vi.spyOn(window, "removeEventListener").mockImplementation(((type: string, listener: EventListenerOrEventListenerObject) => {
+      if (type === "beforeunload") listeners.delete(listener);
+    }) as typeof window.removeEventListener);
+    let content = "old";
+    let version = "m1";
+    const memory = () => ({ id: "MEMORY.md", title: "长期记忆", modifiedAt: "2026-08-09T00:00:00.000Z", version, size: content.length });
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "data.status") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "available", writable: true } };
+      if (request.method === "memory.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [memory()], nextCursor: null, hasMore: false } };
+      if (request.method === "memory.read") return { method: request.method, requestId: request.requestId, ok: true, result: { memory: memory(), content } };
+      if (request.method === "memory.write") {
+        content = request.params.content;
+        version = "m2";
+        return { method: request.method, requestId: request.requestId, ok: true, result: { memory: memory() } };
+      }
+      throw new Error("unexpected");
+    });
+    render(<DataManager domain="memory" bridge={{ invoke } as any} />);
+    fireEvent.click(await screen.findByRole("button", { name: "查看 长期记忆" }));
+    await screen.findByLabelText("记忆正文");
+    expect(listeners).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("记忆正文"), { target: { value: "dirty" } });
+    expect(add).toHaveBeenCalledWith("beforeunload", expect.any(Function));
+    expect(listeners).toHaveLength(1);
+    const event = new Event("beforeunload", { cancelable: true });
+    for (const listener of listeners) {
+      if (typeof listener === "function") listener(event);
+      else listener.handleEvent(event);
+    }
+    expect(event.defaultPrevented).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "保存记忆" }));
+    await vi.waitFor(() => expect(listeners).toHaveLength(0));
+    expect(remove).toHaveBeenCalledWith("beforeunload", expect.any(Function));
+  });
+
   it("reports a successful memory write separately from a failed list refresh", async () => {
     let listCalls = 0;
     const memory = { id: "MEMORY.md", title: "长期记忆", modifiedAt: "2026-08-09T00:00:00.000Z", version: "m1", size: 10 };
@@ -136,5 +244,76 @@ describe("DataManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存记忆" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("记忆已保存，但列表刷新失败");
     expect(screen.getByRole("button", { name: "保存记忆" })).toBeDisabled();
+  });
+
+  it("destroys the edited memory state and renders the authoritative readback after saving", async () => {
+    let content = "old";
+    let version = "m1";
+    const memory = () => ({ id: "MEMORY.md", title: "长期记忆", modifiedAt: "2026-08-09T00:00:00.000Z", version, size: content.length });
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "data.status") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "available", writable: true } };
+      if (request.method === "memory.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [memory()], nextCursor: null, hasMore: false } };
+      if (request.method === "memory.read") return { method: request.method, requestId: request.requestId, ok: true, result: { memory: memory(), content } };
+      if (request.method === "memory.write") {
+        content = `${request.params.content}\n<!-- authoritative -->`;
+        version = "m2";
+        return { method: request.method, requestId: request.requestId, ok: true, result: { memory: memory() } };
+      }
+      throw new Error("unexpected");
+    });
+    render(<DataManager domain="memory" bridge={{ invoke } as any} />);
+    fireEvent.click(await screen.findByRole("button", { name: "查看 长期记忆" }));
+    fireEvent.change(await screen.findByLabelText("记忆正文"), { target: { value: "new" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存记忆" }));
+    expect(await screen.findByLabelText("记忆正文")).toHaveValue("new\n<!-- authoritative -->");
+    expect(invoke.mock.calls.map(([request]) => request.method).slice(-3)).toEqual(["memory.write", "memory.list", "memory.read"]);
+  });
+
+  it("re-reads a renamed workspace file instead of trusting the mutation response", async () => {
+    let entry = { id: "notes/plan.md", name: "plan.md", kind: "file", size: 7, modifiedAt: "2026-08-09T00:00:00.000Z", version: "v1", readable: true };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "data.status") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "available", writable: true } };
+      if (request.method === "workspace.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [entry], nextCursor: null, hasMore: false } };
+      if (request.method === "workspace.read") return { method: request.method, requestId: request.requestId, ok: true, result: { entry, content: `disk:${entry.id}`, encoding: "utf-8" } };
+      if (request.method === "workspace.rename") {
+        entry = { ...entry, id: "notes/renamed.md", name: "renamed.md", version: "v2" };
+        return { method: request.method, requestId: request.requestId, ok: true, result: entry };
+      }
+      throw new Error("unexpected");
+    });
+    render(<DataManager domain="workspace" bridge={{ invoke } as any} />);
+    fireEvent.click(await screen.findByRole("button", { name: "查看 plan.md" }));
+    expect(await screen.findByLabelText("文件内容")).toHaveValue("disk:notes/plan.md");
+    fireEvent.click(screen.getByRole("button", { name: "重命名 plan.md" }));
+    const dialog = screen.getByRole("dialog", { name: "重命名文件" });
+    fireEvent.change(within(dialog).getByLabelText("新名称"), { target: { value: "renamed.md" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认重命名" }));
+    expect(await screen.findByLabelText("文件内容")).toHaveValue("disk:notes/renamed.md");
+    expect(invoke.mock.calls.map(([request]) => request.method).slice(-3)).toEqual(["workspace.rename", "workspace.list", "workspace.read"]);
+  });
+
+  it("moves a workspace file through a controlled dialog", async () => {
+    let entry = { id: "notes/plan.md", name: "plan.md", kind: "file", size: 7, modifiedAt: "2026-08-09T00:00:00.000Z", version: "v1", readable: true };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "data.status") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "available", writable: true } };
+      if (request.method === "workspace.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [entry], nextCursor: null, hasMore: false } };
+      if (request.method === "workspace.read") return { method: request.method, requestId: request.requestId, ok: true, result: { entry, content: "plan", encoding: "utf-8" } };
+      if (request.method === "workspace.move") {
+        entry = { ...entry, id: "archive/plan.md", version: "v2" };
+        return { method: request.method, requestId: request.requestId, ok: true, result: entry };
+      }
+      throw new Error("unexpected");
+    });
+    render(<DataManager domain="workspace" bridge={{ invoke } as any} />);
+    fireEvent.click(await screen.findByRole("button", { name: "查看 plan.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "移动 plan.md" }));
+    const dialog = screen.getByRole("dialog", { name: "移动文件" });
+    fireEvent.change(within(dialog).getByLabelText("目标文件夹"), { target: { value: "archive" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认移动" }));
+    expect(await within(screen.getByRole("region", { name: "详情" })).findByText("archive/plan.md")).toBeVisible();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "workspace.move",
+      params: expect.objectContaining({ destinationId: "archive" }),
+    }));
   });
 });
