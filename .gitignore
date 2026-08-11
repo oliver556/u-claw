@@ -52,3 +52,4 @@ usb-release/toolkit/*.zip
 # ── Environment variables ──
 .env
 .env.*
+!.env.example
