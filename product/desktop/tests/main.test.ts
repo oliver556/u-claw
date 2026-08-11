@@ -48,7 +48,9 @@ describe("Electron client wiring", () => {
     expect(() => requireChannelRuntime({ channels: { list: vi.fn() } } as any)).toThrow("channel runtime");
     const runtime = {
       capability: vi.fn(), configure: vi.fn(), remove: vi.fn(), test: vi.fn(), start: vi.fn(), stop: vi.fn(),
+      status: vi.fn(), logout: vi.fn(), send: vi.fn(), action: vi.fn(), poll: vi.fn(),
     };
+    expect(() => requireChannelRuntime({ channels: { ...runtime, poll: undefined } } as any)).toThrow("channel runtime");
     expect(requireChannelRuntime({ channels: runtime } as any)).toBe(runtime);
   });
 

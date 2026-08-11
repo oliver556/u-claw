@@ -61,4 +61,39 @@ describe("channel IPC", () => {
     expect(String(error)).toContain("Invalid channel IPC response");
     expect(String(error)).not.toContain("full-secret-token");
   });
+
+  it("serializes channel logout, send, action, and poll as writes", async () => {
+    const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const webContents = { mainFrame: {} };
+    const coordinateWrite = vi.fn(async <T>(operation: () => Promise<T>) => operation());
+    const stored = { id: "discord-main", kind: "discord", name: "Discord", mode: "bot", enabled: true, credentials: { botToken: "secret" } } as const;
+    const channels = {
+      getForRuntime: vi.fn(async () => stored),
+      record: vi.fn(async () => snapshot),
+    };
+    const channelRuntime = {
+      capability: () => true,
+      logout: vi.fn(async () => undefined),
+      send: vi.fn(async () => undefined),
+      action: vi.fn(async () => undefined),
+      poll: vi.fn(async () => undefined),
+    };
+    const dispose = (desktop as any).registerIpc({
+      ipcMain: { handle: (channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents: webContents,
+      windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
+      dispatchClient: vi.fn(), channels, channelRuntime, coordinateWrite,
+    });
+    const requests = [
+      { method: "channels.logout", requestId: "logout-1", params: { channelId: "discord-main" } },
+      { method: "channels.send", requestId: "send-1", params: { channelId: "discord-main", target: "channel:1", message: "hello" } },
+      { method: "channels.action", requestId: "action-1", params: { channelId: "discord-main", target: "channel:1", action: "react", messageId: "message-1", emoji: ":thumbsup:" } },
+      { method: "channels.poll", requestId: "poll-1", params: { channelId: "discord-main", target: "channel:1", question: "Ship?", options: ["Yes", "No"], multiple: false } },
+    ];
+    for (const request of requests) {
+      await handlers.get("uclaw:managed-channels")!({ sender: webContents, senderFrame: webContents.mainFrame }, request);
+    }
+    expect(coordinateWrite).toHaveBeenCalledTimes(4);
+    dispose();
+  });
 });

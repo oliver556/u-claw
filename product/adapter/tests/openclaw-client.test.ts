@@ -1485,6 +1485,36 @@ describe("OpenClawClient", () => {
     ]);
   });
 
+  it("mounts the managed channel runtime with logout and message operations", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push(
+      "config.get", "config.patch", "channels.status", "channels.start", "channels.stop",
+      "channels.logout", "tools.invoke",
+    );
+    transport.fixtures.set("channels.logout", { channel: "discord", accountId: "discord-main", loggedOut: true });
+    transport.fixtureQueues.set("channels.status", [
+      {
+        ts: 1_786_129_711_211,
+        channelOrder: ["discord"],
+        channelLabels: { discord: "Discord" },
+        channels: { discord: {} },
+        channelAccounts: { discord: [{ accountId: "discord-main", enabled: true, configured: false, running: false, connected: false }] },
+        channelDefaultAccountId: { discord: "discord-main" },
+      },
+    ]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+    const runtime = client.channels as any;
+    const discord = {
+      id: "discord-main", kind: "discord", name: "Discord", mode: "bot", enabled: true,
+      credentials: { botToken: "discord-secret" },
+    };
+
+    expect(runtime.capability("discord")).toBe(true);
+    await expect(runtime.logout(discord, new AbortController().signal)).resolves.toBeUndefined();
+    expect(transport.requests.map(({ method }) => method)).toEqual(["channels.logout", "channels.status"]);
+  });
+
   it("rejects authenticated MCP configuration without a secret before Gateway access", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push("config.get", "config.patch");

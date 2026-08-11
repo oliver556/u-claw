@@ -40,6 +40,15 @@ async function installChannelBridge(page: Page) {
     Object.defineProperty(window, "uclaw", {
       configurable: true,
       value: {
+        client: {
+          subscribe() { return () => undefined; },
+          async invoke(request: any) {
+            if (request.method === "gateway.negotiate") return success(request, { protocolVersion: 4, methods: [], events: [], features: {} });
+            if (request.method === "sessions.list") return success(request, { items: [], nextCursor: null, hasMore: false });
+            if (request.method === "gateway.watch-status" || request.method === "subscriptions.cancel") return success(request, null);
+            throw new Error(`Unexpected client IPC method: ${request.method}`);
+          },
+        },
         channels: {
           async invoke(request: any) {
             if (request.method.startsWith("channels.wechat-")) return success(request, fixtures.wechat);
@@ -228,9 +237,19 @@ test("offline channel load retries into an empty state without exposing bridge e
   const privateError = "network failed with fixture-private-token-3003";
   await page.addInitScript((fixtures) => {
     let attempts = 0;
+    const success = (request: any, result: unknown) => ({ method: request.method, requestId: request.requestId, ok: true, result });
     Object.defineProperty(window, "uclaw", {
       configurable: true,
       value: {
+        client: {
+          subscribe() { return () => undefined; },
+          async invoke(request: any) {
+            if (request.method === "gateway.negotiate") return success(request, { protocolVersion: 4, methods: [], events: [], features: {} });
+            if (request.method === "sessions.list") return success(request, { items: [], nextCursor: null, hasMore: false });
+            if (request.method === "gateway.watch-status" || request.method === "subscriptions.cancel") return success(request, null);
+            throw new Error(`Unexpected client IPC method: ${request.method}`);
+          },
+        },
         channels: {
           async invoke(request: any) {
             if (request.method === "channels.list-managed") {
