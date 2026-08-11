@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>U Claw Logo Concepts</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #111;
+        background: #f4f4f3;
+      }
+
+      * {
+        box-sizing: border-box;
+        letter-spacing: 0;
+      }
+
+      html {
+        overflow-x: hidden;
+      }
+
+      body {
+        min-width: 0;
+        margin: 0;
+        background: #f4f4f3;
+      }
+
+      img {
+        display: block;
+        flex: 0 0 auto;
+        max-width: 100%;
+      }
+
+      .page {
+        width: min(100% - 40px, 1440px);
+        margin: 0 auto;
+        padding: 56px 0 72px;
+      }
+
+      .page-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 520px);
+        gap: 32px;
+        align-items: end;
+        padding-bottom: 28px;
+        border-bottom: 1px solid #bdbdb9;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(30px, 4vw, 52px);
+        font-weight: 650;
+        line-height: 1.05;
+      }
+
+      .subtitle,
+      .caveat {
+        color: #555550;
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .concepts {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 32px;
+      }
+
+      .concept {
+        min-width: 0;
+        padding: 34px 0 38px;
+        border-bottom: 1px solid #cfcfca;
+      }
+
+      .concept h2 {
+        margin-bottom: 18px;
+        font-size: 19px;
+        font-weight: 650;
+        line-height: 1.25;
+      }
+
+      .states {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .state,
+      .icon-strip,
+      .laser-swatch {
+        min-width: 0;
+        border: 1px solid #c9c9c5;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      .state {
+        display: grid;
+        grid-template-rows: 28px 112px;
+        background: #fff;
+      }
+
+      .state-label,
+      .strip-label {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        padding: 0 10px;
+        border-bottom: 1px solid #d4d4d0;
+        background: rgba(255, 255, 255, 0.94);
+        color: #111;
+        font-size: 11px;
+        font-weight: 650;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      .state-body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        padding: 18px;
+      }
+
+      .state-body > img {
+        width: 68px;
+        height: 68px;
+      }
+
+      .dark {
+        border-color: #2d2d2d;
+        background: #111;
+      }
+
+      .dark .state-label {
+        border-color: #333;
+        background: #111;
+        color: #fff;
+      }
+
+      .reversed {
+        filter: invert(1);
+      }
+
+      .silver-metal {
+        background: linear-gradient(100deg, #9c9c9a 0%, #f7f7f4 34%, #b9b9b6 68%, #ededeb 100%);
+      }
+
+      .black-metal {
+        border-color: #30302f;
+        background: linear-gradient(100deg, #080808 0%, #393938 43%, #101010 100%);
+      }
+
+      .lockup {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 11px;
+        min-width: 0;
+      }
+
+      .lockup img {
+        width: 48px;
+        height: 48px;
+      }
+
+      .wordmark {
+        min-width: 0;
+        color: #111;
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      .black-metal .wordmark {
+        color: #fff;
+      }
+
+      .icon-strip {
+        grid-column: 1 / -1;
+        background: #fff;
+      }
+
+      .strip-icons {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        align-items: end;
+        min-height: 112px;
+        padding: 14px 10px 12px;
+      }
+
+      .strip-size {
+        display: grid;
+        grid-template-rows: 68px 18px;
+        place-items: end center;
+        gap: 5px;
+        min-width: 0;
+        color: #5d5d58;
+        font-size: 10px;
+        line-height: 1;
+      }
+
+      .icon-64 {
+        width: 64px;
+        height: 64px;
+      }
+
+      .icon-32 {
+        width: 32px;
+        height: 32px;
+      }
+
+      .icon-16 {
+        width: 16px;
+        height: 16px;
+      }
+
+      .laser {
+        padding-top: 48px;
+      }
+
+      .laser-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 520px);
+        gap: 32px;
+        align-items: end;
+        padding-bottom: 20px;
+        border-bottom: 1px solid #bdbdb9;
+      }
+
+      .laser h2 {
+        font-size: 25px;
+        font-weight: 650;
+        line-height: 1.2;
+      }
+
+      .laser-concept {
+        display: grid;
+        grid-template-columns: minmax(140px, 0.55fr) repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        align-items: stretch;
+        padding: 16px 0;
+        border-bottom: 1px solid #cfcfca;
+      }
+
+      .laser-concept h3 {
+        align-self: center;
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .laser-swatch {
+        display: grid;
+        grid-template-rows: minmax(96px, 1fr) 28px;
+        min-height: 142px;
+        background: linear-gradient(100deg, #9c9c9a 0%, #f7f7f4 34%, #b9b9b6 68%, #ededeb 100%);
+      }
+
+      .laser-image {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 96px;
+        padding: 10px;
+      }
+
+      .laser-swatch figcaption {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-top: 1px solid rgba(17, 17, 17, 0.2);
+        background: rgba(255, 255, 255, 0.9);
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .size-18 {
+        width: 18mm;
+        height: 18mm;
+      }
+
+      .size-15 {
+        width: 15mm;
+        height: 15mm;
+      }
+
+      .size-12 {
+        width: 12mm;
+        height: 12mm;
+      }
+
+      @media (max-width: 900px) {
+        .page-header,
+        .laser-header {
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+
+        .concepts {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 700px) {
+        .laser-concept {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .laser-concept h3 {
+          grid-column: 1 / -1;
+        }
+      }
+
+      @media (max-width: 520px) {
+        .page {
+          width: min(100% - 24px, 1440px);
+          padding: 32px 0 48px;
+        }
+
+        h1 {
+          font-size: 32px;
+        }
+
+        .states,
+        .laser-concept {
+          grid-template-columns: 1fr;
+        }
+
+        .icon-strip,
+        .laser-concept h3 {
+          grid-column: auto;
+        }
+
+        .state {
+          grid-template-rows: 28px 126px;
+        }
+
+        .laser-swatch {
+          grid-template-columns: minmax(0, 1fr) 64px;
+          grid-template-rows: 112px;
+          min-height: 112px;
+        }
+
+        .laser-swatch figcaption {
+          border-top: 0;
+          border-left: 1px solid rgba(17, 17, 17, 0.2);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-header">
+        <h1>U Claw Logo Concepts</h1>
+        <p class="subtitle">Compare silhouette only. The wordmark is a proportion simulation, not final typography.</p>
+      </header>
+
+      <div class="concepts">
+        <section class="concept" aria-labelledby="concept-01">
+          <h2 id="concept-01">01 Compact</h2>
+          <div class="states">
+            <div class="state">
+              <div class="state-label">White</div>
+              <div class="state-body"><img src="concepts/concept-1-compact.svg" alt="Compact logo icon in black on white"></div>
+            </div>
+            <div class="state dark">
+              <div class="state-label">Black</div>
+              <div class="state-body"><img class="reversed" src="concepts/concept-1-compact.svg" alt="Compact logo icon reversed in white on black"></div>
+            </div>
+            <div class="state silver-metal">
+              <div class="state-label">Silver metal</div>
+              <div class="state-body lockup"><img src="concepts/concept-1-compact.svg" alt="Compact logo icon in silver metal lockup"><span class="wordmark">U Claw</span></div>
+            </div>
+            <div class="state black-metal">
+              <div class="state-label">Black metal</div>
+              <div class="state-body lockup"><img class="reversed" src="concepts/concept-1-compact.svg" alt="Compact logo icon reversed in black metal lockup"><span class="wordmark">U Claw</span></div>
+            </div>
+            <div class="icon-strip">
+              <div class="strip-label">Fixed icon sizes</div>
+              <div class="strip-icons">
+                <div class="strip-size"><img class="icon-64" src="concepts/concept-1-compact.svg" alt="Compact logo icon at 64 pixels"><span>64 px</span></div>
+                <div class="strip-size"><img class="icon-32" src="concepts/concept-1-compact.svg" alt="Compact logo icon at 32 pixels"><span>32 px</span></div>
+                <div class="strip-size"><img class="icon-16" src="concepts/concept-1-compact.svg" alt="Compact logo icon at 16 pixels"><span>16 px</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="concept" aria-labelledby="concept-02">
+          <h2 id="concept-02">02 Wide Claw</h2>
+          <div class="states">
+            <div class="state">
+              <div class="state-label">White</div>
+              <div class="state-body"><img src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo icon in black on white"></div>
+            </div>
+            <div class="state dark">
+              <div class="state-label">Black</div>
+              <div class="state-body"><img class="reversed" src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo icon reversed in white on black"></div>
+            </div>
+            <div class="state silver-metal">
+              <div class="state-label">Silver metal</div>
+              <div class="state-body lockup"><img src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo icon in silver metal lockup"><span class="wordmark">U Claw</span></div>
+            </div>
+            <div class="state black-metal">
+              <div class="state-label">Black metal</div>
+              <div class="state-body lockup"><img class="reversed" src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo icon reversed in black metal lockup"><span class="wordmark">U Claw</span></div>
+            </div>
+            <div class="icon-strip">
+              <div class="strip-label">Fixed icon sizes</div>
+              <div class="strip-icons">
+                <div class="strip-size"><img class="icon-64" src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo icon at 64 pixels"><span>64 px</span></div>
+                <div class="strip-size"><img class="icon-32" src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo icon at 32 pixels"><span>32 px</span></div>
+                <div class="strip-size"><img class="icon-16" src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo icon at 16 pixels"><span>16 px</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="concept" aria-labelledby="concept-03">
+          <h2 id="concept-03">03 Long Body</h2>
+          <div class="states">
+            <div class="state">
+              <div class="state-label">White</div>
+              <div class="state-body"><img src="concepts/concept-3-long-body.svg" alt="Long Body logo icon in black on white"></div>
+            </div>
+            <div class="state dark">
+              <div class="state-label">Black</div>
+              <div class="state-body"><img class="reversed" src="concepts/concept-3-long-body.svg" alt="Long Body logo icon reversed in white on black"></div>
+            </div>
+            <div class="state silver-metal">
+              <div class="state-label">Silver metal</div>
+              <div class="state-body lockup"><img src="concepts/concept-3-long-body.svg" alt="Long Body logo icon in silver metal lockup"><span class="wordmark">U Claw</span></div>
+            </div>
+            <div class="state black-metal">
+              <div class="state-label">Black metal</div>
+              <div class="state-body lockup"><img class="reversed" src="concepts/concept-3-long-body.svg" alt="Long Body logo icon reversed in black metal lockup"><span class="wordmark">U Claw</span></div>
+            </div>
+            <div class="icon-strip">
+              <div class="strip-label">Fixed icon sizes</div>
+              <div class="strip-icons">
+                <div class="strip-size"><img class="icon-64" src="concepts/concept-3-long-body.svg" alt="Long Body logo icon at 64 pixels"><span>64 px</span></div>
+                <div class="strip-size"><img class="icon-32" src="concepts/concept-3-long-body.svg" alt="Long Body logo icon at 32 pixels"><span>32 px</span></div>
+                <div class="strip-size"><img class="icon-16" src="concepts/concept-3-long-body.svg" alt="Long Body logo icon at 16 pixels"><span>16 px</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="concept" aria-labelledby="concept-04">
+          <h2 id="concept-04">04 Shield</h2>
+          <div class="states">
+            <div class="state">
+              <div class="state-label">White</div>
+              <div class="state-body"><img src="concepts/concept-4-shield.svg" alt="Shield logo icon in black on white"></div>
+            </div>
+            <div class="state dark">
+              <div class="state-label">Black</div>
+              <div class="state-body"><img class="reversed" src="concepts/concept-4-shield.svg" alt="Shield logo icon reversed in white on black"></div>
+            </div>
+            <div class="state silver-metal">
+              <div class="state-label">Silver metal</div>
+              <div class="state-body lockup"><img src="concepts/concept-4-shield.svg" alt="Shield logo icon in silver metal lockup"><span class="wordmark">U Claw</span></div>
+            </div>
+            <div class="state black-metal">
+              <div class="state-label">Black metal</div>
+              <div class="state-body lockup"><img class="reversed" src="concepts/concept-4-shield.svg" alt="Shield logo icon reversed in black metal lockup"><span class="wordmark">U Claw</span></div>
+            </div>
+            <div class="icon-strip">
+              <div class="strip-label">Fixed icon sizes</div>
+              <div class="strip-icons">
+                <div class="strip-size"><img class="icon-64" src="concepts/concept-4-shield.svg" alt="Shield logo icon at 64 pixels"><span>64 px</span></div>
+                <div class="strip-size"><img class="icon-32" src="concepts/concept-4-shield.svg" alt="Shield logo icon at 32 pixels"><span>32 px</span></div>
+                <div class="strip-size"><img class="icon-16" src="concepts/concept-4-shield.svg" alt="Shield logo icon at 16 pixels"><span>16 px</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="laser" aria-labelledby="laser-heading">
+        <header class="laser-header">
+          <h2 id="laser-heading">Laser size simulation</h2>
+          <p class="caveat">CSS physical units are for comparison only; supplier material proof is authoritative.</p>
+        </header>
+
+        <div class="laser-concept">
+          <h3>01 Compact</h3>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-18" src="concepts/concept-1-compact.svg" alt="Compact logo simulated at 18 millimeters on silver metal"></div><figcaption>18 mm</figcaption></figure>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-15" src="concepts/concept-1-compact.svg" alt="Compact logo simulated at 15 millimeters on silver metal"></div><figcaption>15 mm</figcaption></figure>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-12" src="concepts/concept-1-compact.svg" alt="Compact logo simulated at 12 millimeters on silver metal"></div><figcaption>12 mm</figcaption></figure>
+        </div>
+        <div class="laser-concept">
+          <h3>02 Wide Claw</h3>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-18" src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo simulated at 18 millimeters on silver metal"></div><figcaption>18 mm</figcaption></figure>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-15" src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo simulated at 15 millimeters on silver metal"></div><figcaption>15 mm</figcaption></figure>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-12" src="concepts/concept-2-wide-claw.svg" alt="Wide Claw logo simulated at 12 millimeters on silver metal"></div><figcaption>12 mm</figcaption></figure>
+        </div>
+        <div class="laser-concept">
+          <h3>03 Long Body</h3>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-18" src="concepts/concept-3-long-body.svg" alt="Long Body logo simulated at 18 millimeters on silver metal"></div><figcaption>18 mm</figcaption></figure>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-15" src="concepts/concept-3-long-body.svg" alt="Long Body logo simulated at 15 millimeters on silver metal"></div><figcaption>15 mm</figcaption></figure>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-12" src="concepts/concept-3-long-body.svg" alt="Long Body logo simulated at 12 millimeters on silver metal"></div><figcaption>12 mm</figcaption></figure>
+        </div>
+        <div class="laser-concept">
+          <h3>04 Shield</h3>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-18" src="concepts/concept-4-shield.svg" alt="Shield logo simulated at 18 millimeters on silver metal"></div><figcaption>18 mm</figcaption></figure>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-15" src="concepts/concept-4-shield.svg" alt="Shield logo simulated at 15 millimeters on silver metal"></div><figcaption>15 mm</figcaption></figure>
+          <figure class="laser-swatch"><div class="laser-image"><img class="size-12" src="concepts/concept-4-shield.svg" alt="Shield logo simulated at 12 millimeters on silver metal"></div><figcaption>12 mm</figcaption></figure>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
