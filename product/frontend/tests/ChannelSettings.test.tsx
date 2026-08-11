@@ -36,6 +36,21 @@ const snapshot: ChannelSnapshot = {
       credentialHints: { appId: "...1001", appSecret: "...5678" },
       error: { category: "capability", code: "CAPABILITY_UNAVAILABLE", message: "渠道插件不可用。", retryable: false },
     },
+    {
+      id: "discord-main",
+      kind: "discord",
+      name: "Discord 主机器人",
+      mode: "bot",
+      configured: true,
+      enabled: true,
+      status: "connected",
+      capability: "available",
+      credentialHints: { botToken: "...dcba" },
+      runtimeAuthoritative: true,
+      pendingAction: "none",
+      lastInboundAt: "2026-08-11T12:00:00.000Z",
+      lastOutboundAt: "2026-08-11T12:01:00.000Z",
+    },
   ],
 };
 
@@ -75,7 +90,7 @@ describe("ChannelSettings", () => {
     render(<ChannelSettings />);
 
     expect(await screen.findByText("Telegram 主机器人")).toBeVisible();
-    expect(screen.getByText("已连接")).toBeVisible();
+    expect(screen.getAllByText("已连接").length).toBeGreaterThan(0);
     expect(screen.getByText(/2026\/08\/09 16:30/u)).toBeVisible();
     expect(screen.getByText("...7890")).toBeVisible();
     expect(document.body.textContent).not.toContain("123456:complete-secret");
@@ -151,6 +166,55 @@ describe("ChannelSettings", () => {
     expect(screen.getByText("当前便携运行时未打包该 OpenClaw 渠道插件。")).toBeVisible();
   });
 
+  it("configures Discord and routes logout, send, reaction and poll commands", async () => {
+    const invoke = vi.fn(async (request: ChannelIpcRequest) => {
+      if (["channels.logout", "channels.send", "channels.action", "channels.poll"].includes(request.method)) {
+        if (!("channelId" in request.params)) throw new Error("Expected channel command params");
+        return { method: request.method, requestId: request.requestId, ok: true, result: {
+          channelId: request.params.channelId,
+          operation: request.method.slice("channels.".length),
+          completedAt: "2026-08-11T12:02:00.000Z",
+        } } as ChannelIpcResponse;
+      }
+      return success(request);
+    });
+    window.uclaw = { channels: { invoke } } as never;
+    render(<ChannelSettings />);
+    await screen.findByText("Discord 主机器人");
+
+    expect(screen.getByText(/最近收取/u)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "发送 Discord 主机器人" }));
+    fireEvent.change(screen.getByLabelText("目标"), { target: { value: "channel:123" } });
+    fireEvent.change(screen.getByLabelText("消息"), { target: { value: "hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "执行渠道操作" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "channels.send", params: { channelId: "discord-main", target: "channel:123", message: "hello" } })));
+
+    fireEvent.click(screen.getByRole("button", { name: "发送 Discord 主机器人" }));
+    fireEvent.click(screen.getByText("回应"));
+    fireEvent.change(screen.getByLabelText("目标"), { target: { value: "channel:123" } });
+    fireEvent.change(screen.getByLabelText("消息 ID"), { target: { value: "message-1" } });
+    fireEvent.change(screen.getByLabelText("Emoji"), { target: { value: ":thumbsup:" } });
+    fireEvent.click(screen.getByRole("button", { name: "执行渠道操作" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "channels.action" })));
+
+    fireEvent.click(screen.getByRole("button", { name: "发送 Discord 主机器人" }));
+    fireEvent.click(screen.getByText("投票"));
+    fireEvent.change(screen.getByLabelText("目标"), { target: { value: "channel:123" } });
+    fireEvent.change(screen.getByLabelText("问题"), { target: { value: "Ship?" } });
+    fireEvent.change(screen.getByLabelText("选项"), { target: { value: "Yes\nNo" } });
+    fireEvent.click(screen.getByRole("button", { name: "执行渠道操作" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "channels.poll", params: expect.objectContaining({ options: ["Yes", "No"] }) })));
+
+    fireEvent.click(screen.getByRole("button", { name: "登出 Discord 主机器人" }));
+    const confirmation = await screen.findByText("登出渠道账号？");
+    fireEvent.click(within(confirmation.closest(".ant-popover-inner") as HTMLElement).getByRole("button", { name: /登\s*出/u }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "channels.logout", params: { channelId: "discord-main" } })));
+
+    fireEvent.click(screen.getByRole("button", { name: "新增连接" }));
+    fireEvent.change(screen.getByLabelText("渠道"), { target: { value: "discord" } });
+    expect(screen.getByLabelText("Bot Token")).toBeInTheDocument();
+  });
+
   it("cancels an in-flight connection test by operation request ID", async () => {
     let resolveTest!: (value: ChannelIpcResponse) => void;
     const pending = new Promise<ChannelIpcResponse>((resolve) => { resolveTest = resolve; });
@@ -190,6 +254,27 @@ describe("ChannelSettings", () => {
     const dialog = await screen.findByRole("dialog", { name: "编辑渠道连接" });
     expect(within(dialog).getByLabelText("Bot Token")).toHaveValue("");
     expect(within(dialog).getByText("已保存：...7890")).toBeInTheDocument();
+  });
+
+  it("submits QQ Bot allowFrom as a bounded line list", async () => {
+    const invoke = vi.fn(async (request: ChannelIpcRequest) => success(request));
+    window.uclaw = { channels: { invoke } } as never;
+    render(<ChannelSettings />);
+    await screen.findByText("Telegram 主机器人");
+
+    fireEvent.click(screen.getByRole("button", { name: "新增连接" }));
+    fireEvent.change(screen.getByLabelText("渠道"), { target: { value: "qq-bot" } });
+    fireEvent.change(screen.getByLabelText("渠道 ID"), { target: { value: "qq-alerts" } });
+    fireEvent.change(screen.getByLabelText("连接名称"), { target: { value: "QQ 告警" } });
+    fireEvent.change(screen.getByLabelText("允许来源"), { target: { value: "user:1\ngroup:2" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "1024" } });
+    fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "qq-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存渠道" }));
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "channels.create",
+      params: { channel: { id: "qq-alerts", kind: "qq-bot", name: "QQ 告警", mode: "app", enabled: true, allowFrom: ["user:1", "group:2"], credentials: { appId: "1024", clientSecret: "qq-secret" } } },
+    })));
   });
 
   it("distinguishes Feishu and WeCom webhook credential contracts", async () => {
