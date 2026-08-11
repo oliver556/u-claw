@@ -73,11 +73,31 @@ export function useMessageStream(onEvent?: (event: MessageEvent) => void) {
 
   const consume = useCallback(async (source: AsyncIterable<MessageEvent>) => {
     const iterator = source[Symbol.asyncIterator]();
+    let runId: string | undefined;
     try {
       while (true) {
         const item = await iterator.next();
-        if (item.done) return undefined;
+        if (item.done) {
+          const failure = new Error("消息流在完成前中断");
+          if (runId !== undefined) {
+            const event: MessageEvent = {
+              type: "error",
+              runId,
+              error: {
+                code: "GATEWAY_DISCONNECTED",
+                message: failure.message,
+                retryable: true,
+                recoveryActions: ["reconnect"],
+                causeDetails: { operation: "chat.stream" },
+              },
+            };
+            dispatch(event);
+            onEvent?.(event);
+          }
+          throw failure;
+        }
         const event = item.value;
+        runId = event.runId;
         dispatch(event);
         onEvent?.(event);
         if (event.type === "final" || event.type === "aborted" || event.type === "error") return event;

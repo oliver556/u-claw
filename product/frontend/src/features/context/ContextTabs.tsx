@@ -147,7 +147,7 @@ export function ContextTabs({ client, session, capabilities, activity }: Context
       if (current && next.sessionId === session.id) setState("ready");
     }).catch(() => { if (current) setState("error"); });
     return () => { current = false; };
-  }, [chatSupported, client, session?.id]);
+  }, [activity.length, chatSupported, client, session?.id]);
 
   useEffect(() => {
     let current = true;
@@ -161,7 +161,7 @@ export function ContextTabs({ client, session, capabilities, activity }: Context
       if (current) { setArtifactSnapshot(next); setArtifactState("ready"); }
     }).catch(() => { if (current) setArtifactState("error"); });
     return () => { current = false; };
-  }, [client, session?.id]);
+  }, [activity.length, client, session?.id]);
 
   const activate = (index: number) => { setActiveTab(tabs[index]); tabRefs.current[index]?.focus(); };
   const selectStep = (step: ContextStep) => setSelectedStep(step);

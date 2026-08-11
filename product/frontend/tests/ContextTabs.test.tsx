@@ -160,4 +160,27 @@ describe("ContextTabs", () => {
     expect(screen.getByText("步骤乙")).toBeVisible();
     expect(document.querySelector(".context-callout")).toHaveTextContent("当前选中步骤关联 5 项上下文。");
   });
+
+  it("reads authoritative context again when session activity advances", async () => {
+    const client = clientFixture();
+    const first = message("session-live", "message-first", [
+      { id: "text-first", type: "text", text: "开始处理", format: "plain" },
+    ]);
+    const completed = message("session-live", "message-completed", [
+      { id: "text-completed", type: "text", text: "处理完成", format: "plain" },
+      { id: "memory-completed", type: "citation", source: { kind: "memory", id: "memory-live", label: "最新记忆" }, label: "最新记忆", excerpt: "来自 OpenClaw 的新引用" },
+    ]);
+    vi.mocked(client.chat.list)
+      .mockResolvedValueOnce({ items: [first], nextCursor: null, hasMore: false })
+      .mockResolvedValueOnce({ items: [first, completed], nextCursor: null, hasMore: false });
+    const view = render(<ContextTabs client={client} session={session("session-live", "实时上下文")} capabilities={contextCapabilities} activity={[]} />);
+    await waitFor(() => expect(client.chat.list).toHaveBeenCalledTimes(1));
+
+    view.rerender(<ContextTabs client={client} session={session("session-live", "实时上下文")} capabilities={contextCapabilities} activity={["响应已完成"]} />);
+    fireEvent.click(screen.getByRole("tab", { name: "记忆" }));
+
+    expect(await screen.findByText("最新记忆")).toBeVisible();
+    expect(screen.getByText("来自 OpenClaw 的新引用")).toBeVisible();
+    expect(client.chat.list).toHaveBeenCalledTimes(2);
+  });
 });

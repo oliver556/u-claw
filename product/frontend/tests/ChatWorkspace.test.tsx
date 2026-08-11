@@ -4,11 +4,17 @@ import "@testing-library/jest-dom/vitest";
 
 import type { MessageEvent, UClawClient } from "@uclaw/shared";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
-import { StrictMode } from "react";
+import { StrictMode, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/app/App";
 import { initialStreamState, messageEventReducer, useMessageStream } from "../src/features/chat/useMessageStream";
+
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>();
+  const { cloneElement } = await import("react");
+  return { ...actual, Popconfirm: ({ children, onConfirm }: { children: ReactElement<{ onClick?(): void }>; onConfirm?(): void }) => cloneElement(children, { onClick: onConfirm }) };
+});
 
 function deferredStream() {
   let emit: ((event: MessageEvent) => void) | undefined;
@@ -52,7 +58,7 @@ function clientFixture(overrides: Partial<UClawClient> = {}): UClawClient {
         { id: "session-1", title: "发布检查", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const, lastMessagePreview: "第一段历史" },
         { id: "session-2", title: "知识库调研", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const, lastMessagePreview: "第二段历史" },
       ], nextCursor: null, hasMore: false })),
-      get: vi.fn(async (id: string) => ({ id, title: id === "session-1" ? "发布检查" : "知识库调研", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const })),
+      get: vi.fn(async (id: string) => ({ id, title: id === "session-1" ? "发布检查" : id === "session-3" ? "新会话" : "知识库调研", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const })),
       create: vi.fn(async () => ({ id: "session-3", title: "新会话", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const })),
       remove: vi.fn(async () => undefined),
     },
@@ -176,6 +182,79 @@ describe("chat workspace", () => {
     expect(await screen.findByText("开始一段新会话")).toBeVisible();
   });
 
+  it("reads authoritative session state after create and renderer reconstruction", async () => {
+    const base = clientFixture();
+    const now = "2026-08-08T08:00:00.000Z";
+    let authoritative = [
+      { id: "session-1", title: "发布检查", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const },
+    ];
+    const list = vi.fn(async () => ({ items: authoritative, nextCursor: null, hasMore: false }));
+    const get = vi.fn(async (id: string) => authoritative.find((session) => session.id === id)!);
+    const create = vi.fn(async () => {
+      authoritative = [...authoritative, { id: "session-3", title: "网关权威会话", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const }];
+      return { ...authoritative[1], title: "临时创建响应" };
+    });
+    const client = clientFixture({ sessions: { ...base.sessions, list, get, create } });
+    const first = render(<App client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "新建会话" }));
+    expect(await screen.findByRole("heading", { name: "网关权威会话" })).toBeVisible();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledWith("session-3");
+
+    first.unmount();
+    render(<App client={client} />);
+    expect(await screen.findByRole("button", { name: /网关权威会话/ })).toBeVisible();
+  });
+
+  it("reads authoritative session list after rename and delete", async () => {
+    const base = clientFixture();
+    const now = "2026-08-08T08:00:00.000Z";
+    let authoritative = [
+      { id: "session-1", title: "发布检查", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const },
+      { id: "session-2", title: "知识库调研", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const },
+    ];
+    const list = vi.fn(async () => ({ items: authoritative, nextCursor: null, hasMore: false }));
+    const get = vi.fn(async (id: string) => authoritative.find((session) => session.id === id)!);
+    const rename = vi.fn(async (id: string, title: string) => {
+      authoritative = authoritative.map((session) => session.id === id ? { ...session, title: `${title}（权威）` } : session);
+      return { ...authoritative.find((session) => session.id === id)!, title: "临时重命名响应" };
+    });
+    const remove = vi.fn(async (id: string) => { authoritative = authoritative.filter((session) => session.id !== id); });
+    const organizerGet = vi.fn(async () => ({ schemaVersion: 1 as const, groups: [], sessions: [] }));
+    const client = Object.assign(clientFixture({ sessions: { ...base.sessions, list, get, rename, remove } }), {
+      sessionOrganizer: { get: organizerGet, setPinned: vi.fn(), createGroup: vi.fn(), renameGroup: vi.fn(), assignGroup: vi.fn() },
+    });
+    vi.spyOn(window, "prompt").mockReturnValue("正式发布");
+    render(<App client={client} />);
+
+    const firstRow = (await screen.findByRole("button", { name: /发布检查/ })).closest(".session-row")!;
+    fireEvent.click(within(firstRow as HTMLElement).getByRole("button", { name: "重命名会话" }));
+    expect(await screen.findByRole("heading", { name: "正式发布（权威）" })).toBeVisible();
+
+    const renamedRow = screen.getByRole("button", { name: /正式发布（权威）/ }).closest(".session-row")!;
+    fireEvent.click(within(renamedRow as HTMLElement).getByRole("button", { name: "删除会话" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /正式发布（权威）/ })).not.toBeInTheDocument());
+    expect(list).toHaveBeenCalledTimes(3);
+    expect(organizerGet).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows authoritative readback failures without discarding the loaded session list", async () => {
+    const base = clientFixture();
+    let listCalls = 0;
+    const list = vi.fn(async () => {
+      listCalls += 1;
+      if (listCalls > 1) throw new Error("gateway readback failed");
+      return base.sessions.list();
+    });
+    const client = clientFixture({ sessions: { ...base.sessions, list } });
+    render(<App client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "新建会话" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("gateway readback failed");
+    expect(screen.getByRole("button", { name: /发布检查/ })).toBeVisible();
+  });
+
   it("filters sessions by title or preview", async () => {
     render(<App client={clientFixture()} />);
     const sidebar = await screen.findByRole("complementary", { name: "会话栏" });
@@ -229,6 +308,48 @@ describe("chat workspace", () => {
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "停止生成" })).not.toBeInTheDocument());
     expect(screen.getAllByText("检查完成")).toHaveLength(1);
+  });
+
+  it("resolves a pending exec approval once when Gateway advertises approval support", async () => {
+    const base = clientFixture();
+    const resolveExec = vi.fn(async () => undefined);
+    const approval = {
+      id: "approval-live",
+      family: "exec" as const,
+      sessionId: "session-1",
+      subject: { kind: "operation" as const, id: "operation-live" },
+      title: "运行发布检查",
+      description: "OpenClaw 请求执行一次受控操作",
+      risk: "high" as const,
+      permissions: [{ kind: "process" as const, scope: "gateway", description: "执行检查" }],
+      choices: ["allow-once" as const, "deny" as const],
+      status: "pending" as const,
+    };
+    const client = clientFixture({
+      gateway: {
+        ...base.gateway,
+        negotiate: vi.fn(async () => ({
+          protocolVersion: 4 as const,
+          methods: new Set(["exec.approval.resolve"]),
+          events: new Set(["exec.approval.requested"]),
+          features: { attachments: false, approvalResolve: true, execApproval: true, pluginApproval: false },
+        })),
+      },
+      approvals: {
+        ...base.approvals,
+        listPending: vi.fn(async () => [approval]),
+        resolveExec,
+      },
+    });
+    render(<App client={client} />);
+
+    const allowOnce = await screen.findByRole("button", { name: "允许一次" });
+    expect(allowOnce).toBeEnabled();
+    fireEvent.click(allowOnce);
+
+    await waitFor(() => expect(resolveExec).toHaveBeenCalledOnce());
+    expect(resolveExec).toHaveBeenCalledWith({ ref: { family: "exec", id: "approval-live" }, decision: "allow-once" });
+    await waitFor(() => expect(screen.queryByLabelText(/运行发布检查/)).not.toBeInTheDocument());
   });
 
   it("completes sends after the StrictMode effect replay", async () => {
@@ -657,6 +778,25 @@ describe("messageEventReducer", () => {
 });
 
 describe("useMessageStream", () => {
+  it("rejects when the gateway stream closes before a terminal event", async () => {
+    const source: AsyncIterable<MessageEvent> = {
+      [Symbol.asyncIterator]: () => ({
+        next: vi.fn()
+          .mockResolvedValueOnce({ done: false as const, value: { type: "started" as const, runId: "run-closed", sessionId: "session-1" } })
+          .mockResolvedValueOnce({ done: true as const, value: undefined }),
+      }),
+    };
+    const { result } = renderHook(() => useMessageStream());
+
+    await act(async () => {
+      await expect(result.current.consume(source)).rejects.toThrow("消息流在完成前中断");
+    });
+    expect(result.current.state.runs["run-closed"]).toMatchObject({
+      terminal: "error",
+      errorMessage: "消息流在完成前中断",
+    });
+  });
+
   it("returns the first terminal event and closes the iterator", async () => {
     const final: MessageEvent = { type: "final", runId: "run-1", message: { id: "message-1", sessionId: "session-1", runId: "run-1", role: "assistant", status: "completed", blocks: [], createdAt: "2026-08-08T08:00:00.000Z" } };
     const lateError: MessageEvent = { type: "error", runId: "run-1", error: { code: "UNKNOWN", message: "late", retryable: false, recoveryActions: [], causeDetails: {} } };
