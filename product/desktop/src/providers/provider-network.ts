@@ -108,7 +108,7 @@ function bypassesProxy(url: URL, network: ProviderNetworkSettings): boolean {
   });
 }
 
-async function readLimitedJson(response: Response): Promise<unknown> {
+async function readLimitedJson(response: Response, maxBytes = 262_144): Promise<unknown> {
   const reader = response.body?.getReader();
   if (!reader) return null;
   const chunks: Uint8Array[] = [];
@@ -117,13 +117,92 @@ async function readLimitedJson(response: Response): Promise<unknown> {
     const next = await reader.read();
     if (next.done) break;
     length += next.value.byteLength;
-    if (length > 262_144) {
+    if (length > maxBytes) {
       await reader.cancel();
-      throw new Error("Discovery response is too large");
+      throw new Error("Provider response is too large");
     }
     chunks.push(next.value);
   }
   return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
+}
+
+export interface ProviderHttpClientOptions {
+  timeoutMs?: number;
+  maxResponseBytes?: number;
+  proxyFetch?: FetchLike;
+  lookup?: typeof dnsLookup;
+}
+
+export interface ProviderJsonRequest {
+  url: string;
+  init: RequestInit;
+  network?: ProviderNetworkSettings;
+}
+
+export interface ProviderHttpClient {
+  requestJson(request: ProviderJsonRequest): Promise<unknown>;
+}
+
+export function createProviderHttpClient(options: ProviderHttpClientOptions = {}): ProviderHttpClient {
+  const lookup = options.lookup ?? dnsLookup;
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const maxResponseBytes = options.maxResponseBytes ?? 1_048_576;
+
+  return {
+    async requestJson({ url, init, network = DEFAULT_PROVIDER_NETWORK_SETTINGS }): Promise<unknown> {
+      const endpoint = new URL(url);
+      await resolveSafeAddress(endpoint, lookup);
+      const proxyUrl = endpoint.protocol === "https:" ? network.httpsProxy : network.httpProxy;
+      const useProxy = proxyUrl !== null && !bypassesProxy(endpoint, network);
+      if (useProxy) await assertSafeProxy(new URL(proxyUrl), lookup);
+
+      const timeout = AbortSignal.timeout(timeoutMs);
+      const signals = [timeout, ...(init.signal ? [init.signal] : [])];
+      const requestInit = { ...init, signal: AbortSignal.any(signals) };
+      let operation: FetchOperation | undefined;
+      try {
+        if (useProxy) {
+          if (options.proxyFetch) {
+            operation = {
+              response: await options.proxyFetch(endpoint.toString(), requestInit, proxyUrl!),
+              close: async () => undefined,
+            };
+          } else {
+            const dispatcher = new ProxyAgent(proxyUrl!);
+            try {
+              operation = {
+                response: await undiciFetch(endpoint, { ...requestInit, dispatcher } as any) as unknown as Response,
+                close: () => dispatcher.close(),
+              };
+            } catch (error) {
+              await dispatcher.close();
+              throw error;
+            }
+          }
+        } else {
+          const address = await resolveSafeAddress(endpoint, lookup);
+          const dispatcher = new Agent({ connect: { lookup: (_hostname, lookupOptions, callback) => {
+            if (lookupOptions.all) callback(null, [{ address, family: isIP(address) }]);
+            else callback(null, address, isIP(address));
+          } } });
+          try {
+            operation = {
+              response: await undiciFetch(endpoint, { ...requestInit, dispatcher } as any) as unknown as Response,
+              close: () => dispatcher.close(),
+            };
+          } catch (error) {
+            await dispatcher.close();
+            throw error;
+          }
+        }
+        if (!operation.response.ok) throw new Error("Provider request failed.");
+        return await readLimitedJson(operation.response, maxResponseBytes);
+      } finally {
+        await operation?.response.body?.cancel().catch(() => undefined);
+        await operation?.close().catch(() => undefined);
+      }
+    },
+  };
 }
 
 export function createProviderNetworkService(options: CreateProviderNetworkServiceOptions = {}): ProviderNetworkService {

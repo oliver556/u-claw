@@ -11,7 +11,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { App } from "../src/app/App";
 
-const renderApp = () => render(<App />);
+const previewClock = new ManualClock("2026-08-08T08:00:00.000Z");
+const previewClient = new MockUClawClient({ clock: previewClock });
+const renderApp = () => render(<App client={window.uclaw?.client ? undefined : previewClient} />);
 const getComputedStyle = window.getComputedStyle.bind(window);
 const JsdomAbortController = globalThis.AbortController;
 
@@ -81,6 +83,13 @@ describe("U-Claw application shell", () => {
     expect(screen.getByText("U 盘检测中")).toBeVisible();
     expect(screen.getByText("Gateway 启动中")).toBeVisible();
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "sessions.list", params: {} }));
+  });
+
+  it("labels browser startup without preload as development preview and does not create a mock client", () => {
+    render(<App />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("开发预览");
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
   });
 
   it("keeps one preload event listener through StrictMode replay and removes it on unmount", async () => {

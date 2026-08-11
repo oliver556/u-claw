@@ -5,10 +5,19 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { bootstrapDesktopApp, createProductionDataService, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runDesktopMain, validateRendererUrl } from "../src/main.js";
+import { bootstrapDesktopApp, createProductionDataService, disposeDesktopIpc, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runDesktopMain, validateRendererUrl } from "../src/main.js";
 import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
+  it("always removes core IPC when a domain IPC disposer fails", () => {
+    const domain = vi.fn(() => { throw new Error("domain cleanup failed"); });
+    const core = vi.fn();
+
+    expect(() => disposeDesktopIpc(domain, core)).toThrow(AggregateError);
+    expect(domain).toHaveBeenCalledOnce();
+    expect(core).toHaveBeenCalledOnce();
+  });
+
   it("uses production capability clients instead of fixture catalogs", async () => {
     const source = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
     expect(source).toContain("createSkillHubClient()");
@@ -212,8 +221,32 @@ describe("bootstrapDesktopApp", () => {
     expect(quit).not.toHaveBeenCalled();
 
     finishStop?.();
-    await Promise.resolve();
-    expect(quit).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
+  });
+
+  it("uninstalls IPC before disposing gateway-backed services on quit", async () => {
+    const listeners = new Map<string, (event?: { preventDefault(): void }) => void>();
+    const calls: string[] = [];
+    const quit = vi.fn();
+    await bootstrapDesktopApp({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit,
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn((event: string, listener: (event?: { preventDefault(): void }) => void) => listeners.set(event, listener)),
+      },
+      createWindow: vi.fn(async (registerIpc) => {
+        const window = { isDestroyed: () => false, isMinimized: () => false, restore: vi.fn(), focus: vi.fn() };
+        registerIpc(window);
+        return window;
+      }),
+      registerIpc: vi.fn(() => () => { calls.push("ipc"); }),
+      stopGateway: vi.fn(async () => { calls.push("services"); }),
+    });
+
+    listeners.get("before-quit")?.({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
+    expect(calls).toEqual(["ipc", "services"]);
   });
 
   it("prevents every quit attempt until cleanup completes", async () => {
@@ -249,7 +282,7 @@ describe("bootstrapDesktopApp", () => {
     expect(stopGateway).toHaveBeenCalledOnce();
 
     finishStop?.();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
     listeners.get("before-quit")?.({ preventDefault: vi.fn() });
     expect(quit).toHaveBeenCalledOnce();
   });

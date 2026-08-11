@@ -7,6 +7,7 @@ import {
   type BuiltinModelResponse,
   type MessageEvent,
   type ProviderConfigEntry,
+  type ProviderNetworkSettings,
   type SendMessageInput,
   type UClawErrorCode,
 } from "@uclaw/shared";
@@ -49,8 +50,8 @@ export class ModelSourceFailure extends Error {
 
 export interface ModelSourceExecutors<Request, Result> {
   builtin(request: Request, credential: BuiltinModelCredential, signal?: AbortSignal): Promise<Result>;
-  domestic(request: Request, provider: ProviderConfigEntry, signal?: AbortSignal): Promise<Result>;
-  custom(request: Request, provider: ProviderConfigEntry, signal?: AbortSignal): Promise<Result>;
+  domestic(request: Request, provider: ProviderConfigEntry, signal?: AbortSignal, network?: ProviderNetworkSettings): Promise<Result>;
+  custom(request: Request, provider: ProviderConfigEntry, signal?: AbortSignal, network?: ProviderNetworkSettings): Promise<Result>;
 }
 
 export type ExternalModelSourceExecutors<Request, Result> = Pick<
@@ -148,7 +149,8 @@ export function createModelSourceRouter<Request, Result>({
       if (provider !== null) {
         const source = externalSource(provider);
         try {
-          return await executors[source](request, provider, signal);
+          const network = await providers.getNetworkForRuntime();
+          return await executors[source](request, provider, signal, network);
         } catch (error) {
           if (error instanceof ModelSourceFailure && error.source === source) throw error;
           throw new ModelSourceFailure(source, "upstream");

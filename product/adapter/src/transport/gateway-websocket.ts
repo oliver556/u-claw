@@ -33,17 +33,27 @@ export type GatewayConnectParams = z.input<typeof ConnectParamsSchema>;
 export const HelloOkSchema = z.object({
   type: z.literal("hello-ok"),
   protocol: z.literal(4),
-  server: z.object({ version: z.string().min(1) }).strict(),
+  server: z.object({
+    version: z.string().min(1),
+    connId: z.string().min(1).optional(),
+  }).strict(),
   features: z.object({
     methods: z.array(z.string()),
     events: z.array(z.string()),
+    capabilities: z.array(z.string().min(1)).optional(),
   }).strict(),
-  auth: z.object({ deviceToken: z.string().min(1) }).strict().optional(),
+  snapshot: z.unknown().optional(),
+  auth: z.object({
+    deviceToken: z.string().min(1).optional(),
+    role: z.string().min(1).optional(),
+    scopes: z.array(z.string().min(1)).optional(),
+  }).passthrough().optional(),
   policy: z.object({
     maxPayload: z.number().int().positive(),
     maxBufferedBytes: z.number().int().positive(),
+    tickIntervalMs: z.number().int().positive().optional(),
   }).strict(),
-}).strict().transform(({ auth: _auth, ...hello }) => hello);
+}).passthrough().transform(({ auth: _auth, snapshot: _snapshot, ...hello }) => hello);
 export type HelloOk = z.infer<typeof HelloOkSchema>;
 
 export type GatewayWebSocketState = "idle" | "connecting" | "authenticating" | "ready" | "failed" | "closed";
@@ -95,9 +105,11 @@ export class GatewayWebSocket {
       return Promise.reject(gatewayError("GATEWAY_DISCONNECTED", "Gateway WebSocket failed", true, ["reconnect"]));
     }
     this.socket = socket;
+    let protocolViolation = (): void => undefined;
     const router = new RpcRouter(socket, {
       requestTimeoutMs: this.options.requestTimeoutMs,
       onDiagnostic: this.options.onDiagnostic,
+      onProtocolViolation: () => protocolViolation(),
     });
     this.activeRouter = router;
 
@@ -120,6 +132,25 @@ export class GatewayWebSocket {
           // Preserve the original normalized handshake failure.
         }
         reject(reason);
+      };
+      protocolViolation = () => {
+        if (settled) {
+          if (this.state !== "ready") return;
+          this.state = "failed";
+          router.close();
+          try {
+            socket.close(1002, "protocol violation");
+          } catch {
+            // The protocol failure state is authoritative even if close throws.
+          }
+          return;
+        }
+        fail(gatewayError(
+          "PROTOCOL_MAPPING_FAILED",
+          "Gateway handshake frame failed validation",
+          false,
+          ["open-diagnostics"],
+        ));
       };
       const onError = (): void => fail(gatewayError("GATEWAY_DISCONNECTED", "Gateway WebSocket failed", true, ["reconnect"]));
       const onClose = (): void => {
@@ -149,7 +180,12 @@ export class GatewayWebSocket {
             return;
           }
           const params: JsonValue = {
-            client: { id: supplied.client.id, mode: supplied.client.mode },
+            client: {
+              id: "gateway-client",
+              version: "0.1.0",
+              platform: "uclaw-desktop",
+              mode: "backend",
+            },
             role: supplied.role,
             scopes: supplied.scopes,
             caps: supplied.caps,
@@ -157,7 +193,6 @@ export class GatewayWebSocket {
             ...(supplied.device === undefined ? {} : { device: supplied.device }),
             minProtocol: 4,
             maxProtocol: 4,
-            challenge: { nonce: challenge.data.nonce, ts: challenge.data.ts },
           };
           void router.request("connect", params, HelloOkSchema).then((hello) => {
             if (settled) return;

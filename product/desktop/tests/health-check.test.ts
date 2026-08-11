@@ -98,6 +98,18 @@ describe("checkGatewayHealth", () => {
     })).resolves.toMatchObject({ businessAvailable: false });
   });
 
+  it("preserves terminal capability negotiation failures for startup diagnostics", async () => {
+    const failure = { code: "AUTH_FAILED", message: "Gateway authentication failed." };
+    await expect(checkGatewayHealth({
+      isProcessAlive: () => true,
+      baseUrl: "http://127.0.0.1:18789",
+      fetch: vi.fn().mockResolvedValue({ ok: true }),
+      now: () => 4_700,
+      deadlineMs: 4_800,
+      probeCapabilities: async () => { throw failure; },
+    })).rejects.toBe(failure);
+  });
+
   it("hard-times out a hanging fetch and aborts its signal", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

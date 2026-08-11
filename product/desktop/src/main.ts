@@ -28,7 +28,7 @@ import {
   applyPortableEnvironmentToLaunchOptions,
   type PortableDesktopPaths,
 } from "./portable-paths.js";
-import type { IpcMainLike } from "./ipc/register-ipc.js";
+import type { AuthorizedWebContents, IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import { createSessionOrganizerStore } from "./session-organizer/store.js";
 import { createProviderStore } from "./providers/provider-store.js";
@@ -143,6 +143,25 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
   }
 
   let window: TWindow | null = null;
+  let disposeIpc: (() => void) | undefined;
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanupRuntime = (): Promise<void> => cleanupPromise ??= (async () => {
+    const failures: unknown[] = [];
+    try {
+      disposeIpc?.();
+    } catch (error) {
+      failures.push(error);
+    } finally {
+      disposeIpc = undefined;
+    }
+    try {
+      await stopGateway();
+    } catch (error) {
+      failures.push(error);
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "Desktop shutdown cleanup failed.");
+  })();
   app.on("second-instance", () => {
     if (!window || window.isDestroyed()) return;
     if (window.isMinimized()) window.restore();
@@ -157,7 +176,7 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
     if (shutdownStarted) return;
     shutdownStarted = true;
     try {
-      void Promise.resolve(stopGateway()).then(
+      void cleanupRuntime().then(
         () => {
           cleanupDone = true;
           app.quit();
@@ -176,11 +195,22 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
 
   try {
     await app.whenReady();
-    window = await createWindow(registerIpc);
+    window = await createWindow((createdWindow) => {
+      const registered = registerIpc(createdWindow);
+      if (!registered) return;
+      let active = true;
+      const dispose = (): void => {
+        if (!active) return;
+        active = false;
+        registered();
+      };
+      disposeIpc = dispose;
+      return dispose;
+    });
     return window;
   } catch (error) {
     try {
-      await stopGateway();
+      await cleanupRuntime();
     } catch (cleanupError) {
       throw new AggregateError(
         [error, cleanupError],
@@ -214,6 +244,31 @@ export interface DesktopMainOptions {
   gatewayKillTimeoutMs?: number;
   consistencyCoordinator?: ProductionRuntimeConsistencyCoordinator;
   modelSourceExecutors?: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
+  domainRegistrations?: DesktopDomainRegistry;
+  dispose?(): Promise<void> | void;
+}
+
+export interface RegisteredDesktopDomain {
+  installIpc?(context: DesktopDomainIpcContext): (() => void) | void;
+  dispose?(): Promise<void> | void;
+}
+
+export interface DesktopDomainServiceAccessor {
+  get<T>(name: string): T | undefined;
+}
+
+export interface DesktopDomainIpcContext {
+  ipcMain: IpcMainLike;
+  authorizedWebContents: AuthorizedWebContents;
+  client: UClawClient;
+  services: DesktopDomainServiceAccessor;
+}
+
+export interface DesktopDomainRegistry {
+  register(name: string, registration: RegisteredDesktopDomain): () => void;
+  resolve<T extends RegisteredDesktopDomain>(name: string): T | undefined;
+  installIpc(context: DesktopDomainIpcContext): () => void;
+  dispose(): Promise<void>;
 }
 
 export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
@@ -223,6 +278,22 @@ export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWind
     signal: AbortSignal,
   ): Promise<TWindow>;
   registerIpc(window: TWindow, dispatchClient: DesktopMainOptions["dispatchClient"]): () => void;
+}
+
+export function disposeDesktopIpc(
+  domainDispose: (() => void) | undefined,
+  coreDispose: () => void,
+): void {
+  const failures: unknown[] = [];
+  for (const dispose of [domainDispose, coreDispose]) {
+    if (!dispose) continue;
+    try {
+      dispose();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) throw new AggregateError(failures, "Desktop IPC cleanup failed.");
 }
 
 const defaultSleep = (milliseconds: number, signal: AbortSignal): Promise<void> =>
@@ -253,7 +324,15 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
   const fetchHealth = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const now = options.now ?? Date.now;
   const startupController = new AbortController();
-  const stopGateway = (): Promise<void> => gatewayProcess.stop();
+  let stopPromise: Promise<void> | undefined;
+  const stopGateway = (): Promise<void> => stopPromise ??= (async () => {
+    const results = await Promise.allSettled([
+      gatewayProcess.stop(),
+      Promise.resolve(options.dispose?.()),
+    ]);
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Desktop runtime cleanup failed.");
+  })();
   let managedPort: number | undefined;
   let managedLaunchOptions: GatewayLaunchOptions | undefined;
   const buildManagedLaunchOptions = (port: number): GatewayLaunchOptions => {
@@ -517,6 +596,24 @@ export async function startElectronMain(
       return applyPortableEnvironmentToLaunchOptions(options.buildGatewayLaunchOptions(port), portablePaths);
     },
   };
+  const domainServices = new Map<string, unknown>([
+    ["organizer", organizer],
+    ["attachments", attachments],
+    ["providers", providers],
+    ["skills", skills],
+    ["plugins", plugins],
+    ["channels", channels],
+    ["channelRuntime", channelRuntime],
+    ["mcp", mcp],
+    ["mcpRuntime", mcpRuntime],
+    ["data", data],
+    ["diagnostics", diagnostics],
+    ["release", release],
+    ["consistencyCoordinator", consistencyCoordinator],
+  ]);
+  const services: DesktopDomainServiceAccessor = {
+    get: <T>(name: string) => domainServices.get(name) as T | undefined,
+  };
   await runDesktopMain<DesktopWindow>(runtimeOptions, {
     app,
     createWindow: (registerIpc, signal) => {
@@ -533,7 +630,7 @@ export async function startElectronMain(
     },
     registerIpc: (window, dispatchClient) => {
       diagnosticsRuntime.gatewayStatus = "ready";
-      return registerDesktopIpc({
+      const coreDispose = registerDesktopIpc({
       ipcMain: ipcMain as unknown as IpcMainLike,
       authorizedWebContents: window.webContents,
       windowControls: {
@@ -564,6 +661,21 @@ export async function startElectronMain(
         return selected.canceled ? [] : readSelectedAttachments(selected.filePaths);
       }),
       });
+      let domainDispose: (() => void) | undefined;
+      try {
+        domainDispose = options.domainRegistrations?.installIpc({
+          ipcMain: ipcMain as unknown as IpcMainLike,
+          authorizedWebContents: window.webContents,
+          client,
+          services,
+        });
+      } catch (error) {
+        coreDispose();
+        throw error;
+      }
+      return () => {
+        disposeDesktopIpc(domainDispose, coreDispose);
+      };
     },
   });
 }

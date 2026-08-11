@@ -3,6 +3,7 @@ import { dirname, isAbsolute, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { startElectronMain, type DesktopMainOptions } from "./main.js";
+import { createDesktopMainOptions } from "./wiring/create-desktop-main-options.js";
 import {
   configurePortableDesktopPaths,
   type PortableDesktopPaths,
@@ -11,7 +12,7 @@ import {
 const WIRING_MODULE_ENV = "UCLAW_DESKTOP_WIRING_MODULE";
 
 interface ProductionWiringModule {
-  createDesktopMainOptions?: () => DesktopMainOptions | Promise<DesktopMainOptions>;
+  createDesktopMainOptions?: (env: NodeJS.ProcessEnv) => DesktopMainOptions | Promise<DesktopMainOptions>;
 }
 
 export async function loadProductionDesktopOptions(
@@ -19,7 +20,7 @@ export async function loadProductionDesktopOptions(
 ): Promise<DesktopMainOptions> {
   const modulePath = environment[WIRING_MODULE_ENV];
   if (!modulePath) {
-    throw new Error("Desktop production wiring is not configured.");
+    return createDesktopMainOptions(environment);
   }
   if (!isAbsolute(modulePath)) {
     throw new Error("Desktop production wiring must use an absolute path within controlled runtime roots.");
@@ -44,7 +45,7 @@ export async function loadProductionDesktopOptions(
   if (typeof wiring.createDesktopMainOptions !== "function") {
     throw new Error("Desktop wiring module must export createDesktopMainOptions().");
   }
-  return wiring.createDesktopMainOptions();
+  return wiring.createDesktopMainOptions(environment);
 }
 
 export interface ElectronEntryDependencies {
@@ -70,12 +71,75 @@ export async function runElectronEntry(
   await dependencies.startElectronMain(options, paths);
 }
 
-async function reportStartupFailure(): Promise<void> {
+export type StartupDiagnosticCode =
+  | "UNCONFIGURED"
+  | "AUTH_FAILED"
+  | "PROTOCOL_ERROR"
+  | "UNSUPPORTED"
+  | "OFFLINE";
+
+const STARTUP_DIAGNOSTIC_CODES = new Set<StartupDiagnosticCode>([
+  "UNCONFIGURED",
+  "AUTH_FAILED",
+  "PROTOCOL_ERROR",
+  "UNSUPPORTED",
+  "OFFLINE",
+]);
+
+export function startupDiagnosticCode(error: unknown): StartupDiagnosticCode {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && STARTUP_DIAGNOSTIC_CODES.has(code as StartupDiagnosticCode)) {
+      return code as StartupDiagnosticCode;
+    }
+  }
+  return "OFFLINE";
+}
+
+export interface StartupFailureDependencies {
+  stderr(line: string): void;
+  showErrorBox(title: string, message: string): void | Promise<void>;
+  quit(): Promise<void>;
+}
+
+const STARTUP_DIAGNOSTIC_MESSAGES: Record<StartupDiagnosticCode, string> = {
+  UNCONFIGURED: "桌面运行环境未配置，请检查安装与数据目录。",
+  AUTH_FAILED: "OpenClaw 鉴权失败，请检查桌面运行配置。",
+  PROTOCOL_ERROR: "OpenClaw 通信协议异常，请检查运行时版本。",
+  UNSUPPORTED: "当前 OpenClaw 版本缺少 U-Claw 所需能力。",
+  OFFLINE: "无法连接 OpenClaw 服务，请检查运行环境后重试。",
+};
+
+export async function reportStartupFailure(
+  error: unknown,
+  dependencies: StartupFailureDependencies = {
+    stderr: (line) => console.error(line),
+    showErrorBox: async (title, message) => {
+      const { dialog } = await import("electron");
+      dialog.showErrorBox(title, message);
+    },
+    quit: async () => {
+      const { app } = await import("electron");
+      app.quit();
+    },
+  },
+): Promise<void> {
   process.exitCode = 1;
-  console.error("U-Claw desktop startup failed.");
+  const code = startupDiagnosticCode(error);
+  dependencies.stderr(JSON.stringify({
+    event: "desktop-startup-failed",
+    code,
+  }));
   try {
-    const { app } = await import("electron");
-    app.quit();
+    await dependencies.showErrorBox(
+      "U-Claw 启动失败",
+      `${STARTUP_DIAGNOSTIC_MESSAGES[code]}（错误代码：${code}）`,
+    );
+  } catch {
+    // Electron may not have initialized far enough to show a dialog.
+  }
+  try {
+    await dependencies.quit();
   } catch {
     // Electron may not have initialized far enough to expose app.
   }
@@ -89,5 +153,5 @@ export function isElectronMainProcess(runtime: {
 }
 
 if (isElectronMainProcess(process as NodeJS.Process & { type?: string })) {
-  void runElectronEntry().catch(() => reportStartupFailure());
+  void runElectronEntry().catch((error: unknown) => reportStartupFailure(error));
 }

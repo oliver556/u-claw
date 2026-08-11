@@ -899,6 +899,31 @@ describe("OpenClawClient", () => {
     await second.return?.();
   });
 
+  it("reports safe idle process and USB defaults without a production status projection", async () => {
+    const client = new OpenClawClient({ transport: new FakeTransport() });
+
+    await expect(client.gateway.getStatus()).resolves.toMatchObject({
+      connectionState: "idle",
+      processAlive: false,
+      usb: { state: "missing", dataWritable: false },
+    });
+  });
+
+  it("uses the injected production process and USB status projection", async () => {
+    const client = new OpenClawClient({
+      transport: new FakeTransport(),
+      statusProjection: () => ({
+        processAlive: true,
+        usb: { state: "read-only", dataWritable: false, displayName: "U-Claw Data" },
+      }),
+    });
+
+    await expect(client.gateway.getStatus()).resolves.toMatchObject({
+      processAlive: true,
+      usb: { state: "read-only", dataWritable: false, displayName: "U-Claw Data" },
+    });
+  });
+
   it("routes tool and separate approval families into message watch", async () => {
     const tools = contractFixture("session.tool.json");
     const approvals = contractFixture("approvals.json");
