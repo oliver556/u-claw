@@ -35,6 +35,53 @@ describe("data service", () => {
     expect(JSON.stringify(root)).not.toMatch(/MEMORY\.md|"memory"/);
   });
 
+  it("searches nested workspace paths from the authoritative root", async () => {
+    const { workspace, service } = await fixture();
+    await mkdir(join(workspace, "nested", ".private"), { recursive: true });
+    await writeFile(join(workspace, "nested", ".private", "leak.md"), "hidden", "utf8");
+    const response = await service.dispatch({
+      method: "workspace.list", requestId: "nested-search", params: { query: "plan", limit: 20 },
+    }) as any;
+
+    expect(response.result.items.map((item: any) => item.id)).toEqual(["notes/plan.md"]);
+    const protectedSearch = await service.dispatch({
+      method: "workspace.list", requestId: "protected-search", params: { query: "2026-08-09", limit: 20 },
+    }) as any;
+    expect(protectedSearch.result.items).toEqual([]);
+    const hiddenSearch = await service.dispatch({
+      method: "workspace.list", requestId: "hidden-search", params: { query: ".private", limit: 20 },
+    }) as any;
+    expect(hiddenSearch.result.items).toEqual([]);
+  });
+
+  it.each([
+    { searchLimits: { maxDepth: 1, maxEntries: 100, maxBytes: 10_000 }, setup: async (workspace: string) => mkdir(join(workspace, "one", "two"), { recursive: true }), query: "missing" },
+    { searchLimits: { maxDepth: 10, maxEntries: 1, maxBytes: 10_000 }, setup: async (workspace: string) => writeFile(join(workspace, "second.txt"), "2", "utf8"), query: "missing" },
+  ])("fails closed when search exceeds a filesystem budget", async ({ searchLimits, setup, query }) => {
+    const { dataDir, workspace } = await fixture();
+    await setup(workspace);
+    const service = createDataService({ dataDir, searchLimits });
+    await expect(service.dispatch({
+      method: "workspace.list", requestId: "budget", params: { query, limit: 20 },
+    })).resolves.toMatchObject({ ok: false, error: { code: "FILE_TOO_LARGE" } });
+  });
+
+  it("applies byte budgets to searched memory bodies but not workspace path listings", async () => {
+    const { dataDir, workspace } = await fixture();
+    await writeFile(join(workspace, "memory", "attachment.bin"), "x".repeat(100), "utf8");
+    const bounded = createDataService({ dataDir, searchLimits: { maxDepth: 10, maxEntries: 100, maxBytes: 20 } });
+    await expect(bounded.dispatch({
+      method: "memory.list", requestId: "memory-non-markdown-byte-budget", params: { query: "daily", limit: 20 },
+    })).resolves.toMatchObject({ ok: true });
+    const service = createDataService({ dataDir, searchLimits: { maxDepth: 10, maxEntries: 100, maxBytes: 5 } });
+    await expect(service.dispatch({
+      method: "workspace.list", requestId: "workspace-byte-budget", params: { query: "plan", limit: 20 },
+    })).resolves.toMatchObject({ ok: true });
+    await expect(service.dispatch({
+      method: "memory.list", requestId: "memory-byte-budget", params: { query: "daily", limit: 20 },
+    })).resolves.toMatchObject({ ok: false, error: { code: "FILE_TOO_LARGE" } });
+  });
+
   it("rejects symlink and hardlink traversal", async () => {
     const { workspace, service } = await fixture();
     const outside = await mkdtemp(join(tmpdir(), "uclaw-outside-"));
@@ -65,6 +112,16 @@ describe("data service", () => {
       })).resolves.toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
     },
   );
+
+  it("rejects hidden segments anywhere in the OpenClaw memory domain", async () => {
+    const { workspace, service } = await fixture();
+    await mkdir(join(workspace, "memory", "archive", ".private"), { recursive: true });
+    await writeFile(join(workspace, "memory", "archive", ".private", "secret.md"), "secret", "utf8");
+
+    await expect(service.dispatch({
+      method: "memory.read", requestId: "hidden-memory", params: { memoryId: "memory/archive/.private/secret.md" },
+    })).resolves.toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+  });
 
   it("rejects a parent directory swapped to an outside symlink during read", async () => {
     const { workspace, service } = await fixture();
@@ -155,6 +212,22 @@ describe("data service", () => {
     expect(shellAction).not.toHaveBeenCalled();
   });
 
+  it("does not report shell success when the target is replaced during the OS action", async () => {
+    const { dataDir } = await fixture();
+    const service = createDataService({
+      dataDir,
+      workspaceShell: {
+        invoke: async (_action, target) => {
+          await rename(target.path, `${target.path}.original`);
+          await writeFile(target.path, "replacement", "utf8");
+        },
+      },
+    });
+    await expect(service.dispatch({
+      method: "workspace.open", requestId: "replace-during-action", params: { entryId: "notes/plan.md" },
+    })).resolves.toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+  });
+
   it.each(["linked/secret.md", "linked-inside/plan.md", "notes/hard.md"])("rejects unsafe shell target %s", async (entryId) => {
     const { dataDir, workspace } = await fixture();
     const outside = await mkdtemp(join(tmpdir(), "uclaw-shell-outside-"));
@@ -192,6 +265,51 @@ describe("data service", () => {
     });
     expect(response).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
     await expect(readFile(join(workspace, "notes", "plan.md"), "utf8")).resolves.toBe("external update");
+  });
+
+  it("does not delete a workspace object swapped after version validation", async () => {
+    const { workspace, service } = await fixture();
+    const read = await service.dispatch({ method: "workspace.read", requestId: "read-delete-race", params: { entryId: "notes/plan.md" } }) as any;
+    configureFsSafePython({ mode: "off" });
+    let swapped = false;
+    __setFsSafeTestHooksForTest({
+      beforeRootFallbackMutation: async (operation, targetPath) => {
+        if (swapped || operation !== "move" || !targetPath.includes(".uclaw-data-staging")) return;
+        swapped = true;
+        await rename(join(workspace, "notes", "plan.md"), join(workspace, "notes", "original.md"));
+        await writeFile(join(workspace, "notes", "plan.md"), "external replacement", "utf8");
+      },
+    });
+    await expect(service.dispatch({
+      method: "workspace.delete", requestId: "delete-race",
+      params: { entryId: "notes/plan.md", version: read.result.entry.version, confirmed: true },
+    })).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+    expect(swapped).toBe(true);
+    await expect(readFile(join(workspace, "notes", "plan.md"), "utf8")).resolves.toBe("external replacement");
+  });
+
+  it("fails closed and rolls back when a workspace source inode changes during move", async () => {
+    const { workspace, service } = await fixture();
+    const read = await service.dispatch({
+      method: "workspace.read", requestId: "move-race-read", params: { entryId: "notes/plan.md" },
+    }) as any;
+    configureFsSafePython({ mode: "off" });
+    let swapped = false;
+    __setFsSafeTestHooksForTest({
+      beforeRootFallbackMutation: async (operation, targetPath) => {
+        if (swapped || operation !== "move" || !targetPath.endsWith(join("notes", "renamed.md"))) return;
+        swapped = true;
+        await rename(join(workspace, "notes", "plan.md"), join(workspace, "notes", "plan-original.md"));
+        await writeFile(join(workspace, "notes", "plan.md"), "replacement", "utf8");
+      },
+    });
+
+    await expect(service.dispatch({
+      method: "workspace.rename", requestId: "move-race",
+      params: { entryId: "notes/plan.md", name: "renamed.md", version: read.result.entry.version },
+    })).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+    expect(swapped).toBe(true);
+    await expect(readFile(join(workspace, "notes", "plan.md"), "utf8")).resolves.toBe("replacement");
   });
 
   it("lets an injected coordinator own the versioned mutation boundary", async () => {
@@ -253,6 +371,87 @@ describe("data service", () => {
     expect(crossDomain).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
   });
 
+  it("searches Markdown memory content and persists edits and deletes across service recreation", async () => {
+    const { dataDir, workspace, service } = await fixture();
+    const searched = await service.dispatch({
+      method: "memory.list", requestId: "content-search", params: { query: "daily body", limit: 20 },
+    }) as any;
+    expect(searched.result.items.map((item: any) => item.id)).toEqual(["memory/2026-08-09.md"]);
+
+    const original = await service.dispatch({
+      method: "memory.read", requestId: "read-before-restart", params: { memoryId: "memory/2026-08-09.md" },
+    }) as any;
+    await service.dispatch({
+      method: "memory.write", requestId: "write-before-restart",
+      params: { memoryId: original.result.memory.id, content: "persisted body", version: original.result.memory.version },
+    });
+
+    const restarted = createDataService({ dataDir });
+    const persisted = await restarted.dispatch({
+      method: "memory.read", requestId: "read-after-restart", params: { memoryId: "memory/2026-08-09.md" },
+    }) as any;
+    expect(persisted.result.content).toBe("persisted body");
+    await restarted.dispatch({
+      method: "memory.delete", requestId: "delete-before-restart",
+      params: { memoryId: persisted.result.memory.id, version: persisted.result.memory.version, confirmed: true },
+    });
+
+    const restartedAgain = createDataService({ dataDir });
+    await expect(restartedAgain.dispatch({
+      method: "memory.read", requestId: "read-after-delete-restart", params: { memoryId: "memory/2026-08-09.md" },
+    })).resolves.toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+    await expect(readFile(join(workspace, "MEMORY.md"), "utf8")).resolves.toBe("long term");
+  });
+
+  it("recovers an authority file staged by an interrupted mutation after service recreation", async () => {
+    const { dataDir, workspace } = await fixture();
+    const transactionDir = join(workspace, ".uclaw-data-staging", "interrupted");
+    await mkdir(transactionDir, { recursive: true });
+    await writeFile(join(transactionDir, "journal.json"), `${JSON.stringify({ schemaVersion: 1, id: "MEMORY.md" })}\n`, "utf8");
+    await rename(join(workspace, "MEMORY.md"), join(transactionDir, "payload"));
+
+    const restarted = createDataService({ dataDir });
+    await expect(restarted.dispatch({
+      method: "memory.read", requestId: "recover-staged-memory", params: { memoryId: "MEMORY.md" },
+    })).resolves.toMatchObject({ ok: true, result: { content: "long term" } });
+  });
+
+  it("garbage-collects an empty transaction left before journal creation or after cleanup", async () => {
+    const { dataDir, workspace } = await fixture();
+    await mkdir(join(workspace, ".uclaw-data-staging", "empty-transaction"), { recursive: true });
+    const restarted = createDataService({ dataDir });
+    await expect(restarted.dispatch({
+      method: "memory.read", requestId: "recover-empty-transaction", params: { memoryId: "MEMORY.md" },
+    })).resolves.toMatchObject({ ok: true, result: { content: "long term" } });
+  });
+
+  it("persists workspace rename, move and delete across service recreation", async () => {
+    const { dataDir, service } = await fixture();
+    const original = await service.dispatch({
+      method: "workspace.read", requestId: "workspace-original", params: { entryId: "notes/plan.md" },
+    }) as any;
+    const renamed = await service.dispatch({
+      method: "workspace.rename", requestId: "workspace-rename",
+      params: { entryId: original.result.entry.id, name: "renamed.md", version: original.result.entry.version },
+    }) as any;
+    const moved = await createDataService({ dataDir }).dispatch({
+      method: "workspace.move", requestId: "workspace-move",
+      params: { entryId: renamed.result.id, version: renamed.result.version },
+    }) as any;
+    const restarted = createDataService({ dataDir });
+    const readBack = await restarted.dispatch({
+      method: "workspace.read", requestId: "workspace-read-back", params: { entryId: moved.result.id },
+    }) as any;
+    expect(readBack.result.content).toBe("plan v1");
+    await restarted.dispatch({
+      method: "workspace.delete", requestId: "workspace-delete",
+      params: { entryId: readBack.result.entry.id, version: readBack.result.entry.version, confirmed: true },
+    });
+    await expect(createDataService({ dataDir }).dispatch({
+      method: "workspace.read", requestId: "workspace-read-deleted", params: { entryId: moved.result.id },
+    })).resolves.toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+  });
+
   it("does not report success when memory changes again immediately after atomic replacement", async () => {
     const { workspace, service } = await fixture();
     const read = await service.dispatch({
@@ -260,8 +459,11 @@ describe("data service", () => {
     }) as any;
     configureFsSafePython({ mode: "off" });
     __setFsSafeTestHooksForTest({
-      afterPinnedWriteFallbackRename: async (targetPath) => {
-        if (targetPath.endsWith("MEMORY.md")) await writeFile(targetPath, "external update", "utf8");
+      afterOpen: async (targetPath) => {
+        if (targetPath.endsWith(join("workspace", "MEMORY.md"))) {
+          await rename(targetPath, `${targetPath}.our-write`);
+          await writeFile(targetPath, "external update", "utf8");
+        }
       },
     });
     const response = await service.dispatch({
@@ -270,6 +472,27 @@ describe("data service", () => {
     });
     expect(response).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
     await expect(readFile(join(workspace, "MEMORY.md"), "utf8")).resolves.toBe("external update");
+  });
+
+  it("does not overwrite memory swapped after version validation", async () => {
+    const { workspace, service } = await fixture();
+    const read = await service.dispatch({ method: "memory.read", requestId: "read-write-race", params: { memoryId: "MEMORY.md" } }) as any;
+    configureFsSafePython({ mode: "off" });
+    let swapped = false;
+    __setFsSafeTestHooksForTest({
+      beforeRootFallbackMutation: async (operation, targetPath) => {
+        if (swapped || operation !== "move" || !targetPath.includes(".uclaw-data-staging")) return;
+        swapped = true;
+        await rename(join(workspace, "MEMORY.md"), join(workspace, "original-memory.md"));
+        await writeFile(join(workspace, "MEMORY.md"), "external memory", "utf8");
+      },
+    });
+    await expect(service.dispatch({
+      method: "memory.write", requestId: "write-race",
+      params: { memoryId: "MEMORY.md", content: "our memory", version: read.result.memory.version },
+    })).resolves.toMatchObject({ ok: false, error: { code: "CONFLICT" } });
+    expect(swapped).toBe(true);
+    await expect(readFile(join(workspace, "MEMORY.md"), "utf8")).resolves.toBe("external memory");
   });
 
   it("binds memory versions to a SHA-256 content identity", async () => {

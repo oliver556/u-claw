@@ -19,23 +19,18 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Domain = "workspace" | "memory";
 type Entry = WorkspaceEntry | MemoryEntry;
 type Availability = "checking" | "available" | "read-only" | "offline";
+type WorkspaceDialog = { kind: "rename" | "move"; value: string };
 
 let requestSequence = 0;
 const requestId = (method: string): string => `data-${method}-${Date.now()}-${++requestSequence}`;
 
 const fallbackBridge: DataBridge = {
   async invoke(request): Promise<DataIpcResponse> {
-    if (request.method === "data.status") {
-      return { method: request.method, requestId: request.requestId, ok: true, result: { state: "read-only", writable: false } };
-    }
-    if (request.method === "workspace.list" || request.method === "memory.list") {
-      return { method: request.method, requestId: request.requestId, ok: true, result: { items: [], nextCursor: null, hasMore: false } };
-    }
     return {
       method: request.method,
       requestId: request.requestId,
@@ -61,9 +56,12 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
   const [savedContent, setSavedContent] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [workspaceDialog, setWorkspaceDialog] = useState<WorkspaceDialog>();
   const [busy, setBusy] = useState(false);
+  const [lastMutation, setLastMutation] = useState("");
   const [availability, setAvailability] = useState<Availability>("checking");
   const loadGeneration = useRef(0);
+  const detailGeneration = useRef(0);
 
   const invoke = useCallback(async (request: DataIpcRequest): Promise<DataIpcResponse> => {
     const response = await resolvedBridge.invoke(request);
@@ -71,12 +69,14 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
     return response;
   }, [resolvedBridge]);
 
-  const loadStatus = useCallback(async (): Promise<boolean> => {
+  const loadStatus = useCallback(async (generation: number): Promise<boolean> => {
     try {
       const response = await invoke({ method: "data.status", requestId: requestId("data.status"), params: {} }) as Extract<DataIpcResponse, { ok: true; method: "data.status" }>;
+      if (generation !== loadGeneration.current) return false;
       setAvailability(response.result.state);
       return response.result.state !== "offline";
     } catch (caught) {
+      if (generation !== loadGeneration.current) return false;
       setAvailability("offline");
       setItems([]);
       setSelected(undefined);
@@ -88,8 +88,8 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
     }
   }, [invoke]);
 
-  const load = useCallback(async (append = false): Promise<boolean> => {
-    const generation = ++loadGeneration.current;
+  const load = useCallback(async (append = false, requestedGeneration?: number): Promise<boolean> => {
+    const generation = requestedGeneration ?? ++loadGeneration.current;
     setState("loading");
     setError(undefined);
     try {
@@ -121,11 +121,13 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
   }, [domain, invoke, nextCursor, parentId, query]);
 
   const refresh = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     setAvailability("checking");
-    if (await loadStatus()) await load();
+    if (await loadStatus(generation)) await load(false, generation);
   }, [load, loadStatus]);
 
   useEffect(() => {
+    detailGeneration.current += 1;
     setItems([]);
     setQuery("");
     setParentId(undefined);
@@ -135,6 +137,7 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
     setContent("");
     setSavedContent("");
     setDeleteOpen(false);
+    setWorkspaceDialog(undefined);
   }, [domain]);
 
   useEffect(() => { void refresh(); }, [domain, parentId, query]);
@@ -144,46 +147,78 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
-  useEffect(() => {
+
+  useLayoutEffect(() => {
     if (!dirty) return;
-    const preventUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
-    window.addEventListener("beforeunload", preventUnload);
-    return () => window.removeEventListener("beforeunload", preventUnload);
+    const guard = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", guard);
+    return () => window.removeEventListener("beforeunload", guard);
   }, [dirty]);
+
+  const clearSelection = () => {
+    detailGeneration.current += 1;
+    setSelected(undefined);
+    setContent("");
+    setSavedContent("");
+  };
+
+  const readEntry = async (entryId: string, preserveError = false): Promise<boolean> => {
+    const generation = ++detailGeneration.current;
+    setSelected(undefined);
+    setContent("");
+    setSavedContent("");
+    setDetailLoading(true);
+    if (!preserveError) setError(undefined);
+    try {
+      const method = domain === "workspace" ? "workspace.read" : "memory.read";
+      const params = domain === "workspace" ? { entryId } : { memoryId: entryId };
+      const response = await invoke({ method, requestId: requestId(method), params } as DataIpcRequest) as any;
+      if (generation !== detailGeneration.current) return false;
+      const nextEntry = domain === "workspace" ? response.result.entry : response.result.memory;
+      setSelected(nextEntry);
+      setContent(response.result.content);
+      setSavedContent(response.result.content);
+      return true;
+    } catch (caught) {
+      if (generation !== detailGeneration.current) return false;
+      setError(caught instanceof Error ? caught.message : "内容读取失败。");
+      return false;
+    } finally {
+      if (generation === detailGeneration.current) setDetailLoading(false);
+    }
+  };
 
   const openEntry = async (entry: Entry) => {
     if (dirty && selected?.id !== entry.id && !window.confirm("当前记忆尚未保存，放弃修改吗？")) return;
     if (domain === "workspace" && "kind" in entry && entry.kind === "directory") {
+      detailGeneration.current += 1;
       setParentId(entry.id);
       setSelected(undefined);
       setContent("");
       return;
     }
-    setDetailLoading(true);
-    setError(undefined);
-    try {
-      const method = domain === "workspace" ? "workspace.read" : "memory.read";
-      const params = domain === "workspace" ? { entryId: entry.id } : { memoryId: entry.id };
-      const response = await invoke({ method, requestId: requestId(method), params } as DataIpcRequest) as any;
-      const nextEntry = domain === "workspace" ? response.result.entry : response.result.memory;
-      setSelected(nextEntry);
-      setContent(response.result.content);
-      setSavedContent(response.result.content);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "内容读取失败。");
-    } finally { setDetailLoading(false); }
+    await readEntry(entry.id);
   };
 
-  const mutate = async (request: DataIpcRequest, refreshAfter = true) => {
+  const mutate = async (request: DataIpcRequest, refreshAfter = true, onMutated?: (response: any) => void) => {
     setBusy(true);
+    setLastMutation(`${request.method}:pending`);
     setError(undefined);
     try {
       const response = await invoke(request) as any;
+      onMutated?.(response);
+      let refreshed = true;
       if (refreshAfter && !(await load())) {
+        refreshed = false;
         setError(request.method === "memory.write" ? "记忆已保存，但列表刷新失败。" : "操作已完成，但列表刷新失败。");
       }
-      return response;
+      setLastMutation(`${request.method}:succeeded`);
+      return { response, refreshed };
     } catch (caught) {
+      setLastMutation(`${request.method}:failed`);
       setError(caught instanceof Error ? caught.message : "操作失败。");
       return undefined;
     } finally { setBusy(false); }
@@ -191,15 +226,13 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
 
   const saveMemory = async () => {
     if (domain !== "memory" || !selected || content === savedContent) return;
+    const memoryId = selected.id;
     const response = await mutate({
       method: "memory.write",
       requestId: requestId("memory.write"),
       params: { memoryId: selected.id, content, version: selected.version },
-    });
-    if (response?.result.memory) {
-      setSelected(response.result.memory);
-      setSavedContent(content);
-    }
+    }, true, clearSelection);
+    if (response?.response.result.memory) await readEntry(memoryId, !response.refreshed);
   };
 
   const confirmDelete = async () => {
@@ -208,25 +241,28 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
     const params = domain === "workspace"
       ? { entryId: selected.id, version: selected.version, confirmed: true as const }
       : { memoryId: selected.id, version: selected.version, confirmed: true as const };
-    const response = await mutate({ method, requestId: requestId(method), params } as DataIpcRequest);
-    if (response) { setSelected(undefined); setContent(""); setSavedContent(""); setDeleteOpen(false); }
+    const response = await mutate({ method, requestId: requestId(method), params } as DataIpcRequest, true, clearSelection);
+    if (response) setDeleteOpen(false);
   };
 
-  const renameEntry = async () => {
+  const renameEntry = async (name: string) => {
     if (domain !== "workspace" || !selected) return;
     const current = entryLabel(selected);
-    const name = window.prompt("新名称", current)?.trim();
-    if (!name || name === current) return;
-    const response = await mutate({ method: "workspace.rename", requestId: requestId("workspace.rename"), params: { entryId: selected.id, name, version: selected.version } });
-    if (response?.result) setSelected(response.result);
+    if (!name || name === current) { setWorkspaceDialog(undefined); return; }
+    const response = await mutate({ method: "workspace.rename", requestId: requestId("workspace.rename"), params: { entryId: selected.id, name, version: selected.version } }, true, clearSelection);
+    if (response?.response.result) {
+      setWorkspaceDialog(undefined);
+      await readEntry(response.response.result.id, !response.refreshed);
+    }
   };
 
-  const moveEntry = async () => {
+  const moveEntry = async (destinationId: string) => {
     if (domain !== "workspace" || !selected) return;
-    const destinationId = window.prompt("目标文件夹（留空表示根目录）", "")?.trim();
-    if (destinationId === undefined) return;
-    const response = await mutate({ method: "workspace.move", requestId: requestId("workspace.move"), params: { entryId: selected.id, ...(destinationId ? { destinationId } : {}), version: selected.version } });
-    if (response?.result) setSelected(response.result);
+    const response = await mutate({ method: "workspace.move", requestId: requestId("workspace.move"), params: { entryId: selected.id, ...(destinationId ? { destinationId } : {}), version: selected.version } }, true, clearSelection);
+    if (response?.response.result) {
+      setWorkspaceDialog(undefined);
+      await readEntry(response.response.result.id, !response.refreshed);
+    }
   };
 
   const title = domain === "workspace" ? "文件" : "记忆";
@@ -235,7 +271,7 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
   const breadcrumbs = useMemo(() => parentId?.split("/") ?? [], [parentId]);
   const writable = availability === "available";
 
-  return <section className="secondary-view data-manager">
+  return <section className="secondary-view data-manager" data-last-mutation={lastMutation}>
     <header><h1>{title}</h1><p>{description}</p></header>
     <div className="data-toolbar">
       <label className="data-search"><Search aria-hidden="true" /><input type="search" aria-label={domain === "workspace" ? "搜索工作区文件" : "搜索 AI 记忆"} placeholder="搜索" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
@@ -269,8 +305,8 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
             {domain === "workspace" ? <>
               <Tooltip title="打开"><button className="icon-button" type="button" aria-label={`打开 ${entryLabel(selected)}`} disabled={busy || availability === "offline"} onClick={() => void mutate({ method: "workspace.open", requestId: requestId("workspace.open"), params: { entryId: selected.id } }, false)}><ExternalLink /></button></Tooltip>
               <Tooltip title="定位"><button className="icon-button" type="button" aria-label={`定位 ${entryLabel(selected)}`} disabled={busy || availability === "offline"} onClick={() => void mutate({ method: "workspace.reveal", requestId: requestId("workspace.reveal"), params: { entryId: selected.id } }, false)}><FolderSearch /></button></Tooltip>
-              <Tooltip title="重命名"><button className="icon-button" type="button" aria-label={`重命名 ${entryLabel(selected)}`} disabled={busy || !writable} onClick={() => void renameEntry()}><Pencil /></button></Tooltip>
-              <Tooltip title="移动"><button className="icon-button" type="button" aria-label={`移动 ${entryLabel(selected)}`} disabled={busy || !writable} onClick={() => void moveEntry()}><FolderInput /></button></Tooltip>
+              <Tooltip title="重命名"><button className="icon-button" type="button" aria-label={`重命名 ${entryLabel(selected)}`} disabled={busy || !writable} onClick={() => setWorkspaceDialog({ kind: "rename", value: entryLabel(selected) })}><Pencil /></button></Tooltip>
+              <Tooltip title="移动"><button className="icon-button" type="button" aria-label={`移动 ${entryLabel(selected)}`} disabled={busy || !writable} onClick={() => setWorkspaceDialog({ kind: "move", value: "" })}><FolderInput /></button></Tooltip>
             </> : <Tooltip title="保存"><button className="icon-button" type="button" aria-label="保存记忆" disabled={busy || !writable || content === savedContent} onClick={() => void saveMemory()}><Save /></button></Tooltip>}
             <Tooltip title="删除"><button className="icon-button danger" type="button" aria-label={`删除 ${entryLabel(selected)}`} disabled={busy || !writable} onClick={() => setDeleteOpen(true)}><Trash2 /></button></Tooltip>
           </div></div>
@@ -278,6 +314,20 @@ export function DataManager({ domain, bridge, onDirtyChange }: { domain: Domain;
         </>}
       </section>
     </div>
+    {workspaceDialog && selected ? <div className="data-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setWorkspaceDialog(undefined); }}>
+      <div className="data-modal" role="dialog" aria-modal="true" aria-label={workspaceDialog.kind === "rename" ? "重命名文件" : "移动文件"}>
+        <h2>{workspaceDialog.kind === "rename" ? "重命名文件" : "移动文件"}</h2>
+        <form className="data-modal-form" onSubmit={(event) => {
+          event.preventDefault();
+          const value = workspaceDialog.value.trim();
+          if (workspaceDialog.kind === "rename") void renameEntry(value);
+          else void moveEntry(value);
+        }}>
+          <label>{workspaceDialog.kind === "rename" ? "新名称" : "目标文件夹"}<input autoFocus maxLength={workspaceDialog.kind === "rename" ? 255 : 1024} placeholder={workspaceDialog.kind === "move" ? "留空表示工作区根目录" : undefined} value={workspaceDialog.value} onChange={(event) => setWorkspaceDialog({ ...workspaceDialog, value: event.target.value })} /></label>
+          <div className="data-confirm-actions"><button type="button" disabled={busy} onClick={() => setWorkspaceDialog(undefined)}>取消</button><button type="submit" disabled={busy || (workspaceDialog.kind === "rename" && workspaceDialog.value.trim().length === 0)}>{workspaceDialog.kind === "rename" ? "确认重命名" : "确认移动"}</button></div>
+        </form>
+      </div>
+    </div> : null}
     {deleteOpen ? <div className="data-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteOpen(false); }}>
       <div className="data-modal" role="dialog" aria-modal="true" aria-label="确认删除">
         <h2>确认删除</h2>

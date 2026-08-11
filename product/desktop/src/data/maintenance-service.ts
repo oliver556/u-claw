@@ -89,6 +89,7 @@ function classifyDataId(id: string): BackupCollectionId | undefined {
   if (lower.startsWith(".openclaw/agents/")) return "openclaw-sessions";
   if (lower.startsWith("workspace/")) {
     const first = lower.slice("workspace/".length).split("/")[0] ?? "";
+    if (first === ".uclaw-data-staging") return undefined;
     if (["agents.md", "soul.md", "tools.md", "identity.md", "user.md", "heartbeat.md", "bootstrap.md", "dreams.md", ".openclaw"].includes(first)) return "uclaw-configuration";
     return "workspace-user-files";
   }

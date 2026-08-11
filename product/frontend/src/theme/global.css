@@ -393,6 +393,8 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .data-modal { width: min(480px, 100%); padding: 20px; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); box-shadow: 0 16px 44px var(--uclaw-shadow); }
 .data-modal h2 { margin: 0 0 12px; font-size: 17px; }
 .data-modal p { margin: 0; color: var(--uclaw-text-secondary); line-height: 1.6; }
+.data-modal-form label { display: grid; gap: 6px; color: var(--uclaw-text-secondary); font-size: 12px; }
+.data-modal-form input { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; color: var(--uclaw-text-primary); background: var(--uclaw-bg-input); }
 .data-confirm-actions button { min-height: 36px; padding: 0 14px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; }
 
 .maintenance-center { min-width: 0; overflow: hidden; }

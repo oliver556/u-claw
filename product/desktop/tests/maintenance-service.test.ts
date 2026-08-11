@@ -55,6 +55,16 @@ describe("maintenance service", () => {
     expect(JSON.stringify(preview)).not.toMatch(/(?:\/tmp\/|\/Users\/|[A-Za-z]:\\\\)/);
   });
 
+  it("never classifies interrupted data transactions as backup content", async () => {
+    const { dataDir, service } = await fixture();
+    const transaction = join(dataDir, "workspace", ".uclaw-data-staging", "interrupted");
+    await mkdir(transaction, { recursive: true });
+    await writeFile(join(transaction, "journal.json"), "sensitive journal");
+    await writeFile(join(transaction, "payload"), "staged memory body");
+    const preview = await service.previewBackup();
+    expect(preview.totalFileCount).toBe(5);
+  });
+
   it("fails closed when runtime cannot provide a global consistency lease", async () => {
     const { service } = await fixture(false);
     expect(() => service.createBackup({ collectionIds: ["openclaw-memory"], trigger: "manual", retainLatest: 3 }))
