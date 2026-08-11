@@ -49,7 +49,7 @@ export function WechatPersonalConnection() {
   }, [busy, run, snapshot]);
 
   const available = snapshot?.capability === "available";
-  const connected = snapshot?.loginState === "connected";
+  const hasAccount = snapshot?.account !== undefined;
   const activeQr = Boolean(snapshot?.flowId && snapshot.qrGeneration);
   const qrDataUrl = snapshot?.qrImage?.kind === "data-url" ? snapshot.qrImage.value : undefined;
   const refresh = () => snapshot?.flowId && snapshot.qrGeneration && void run("channels.wechat-login-refresh", { flowId: snapshot.flowId, qrGeneration: snapshot.qrGeneration });
@@ -71,7 +71,7 @@ export function WechatPersonalConnection() {
         <div className="wechat-qr-copy"><strong>{loginLabels[snapshot.loginState]}</strong><span>{snapshot.qrExpiresAt ? `有效期至 ${new Date(snapshot.qrExpiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : "请使用手机微信完成操作"}</span><div className="wechat-actions"><Button icon={<RefreshCw />} disabled={busy} onClick={refresh}>刷新二维码</Button><Button icon={<X />} disabled={busy} onClick={cancel}>取消</Button></div></div>
       </div> : <div className="wechat-account">
         <div><strong>{snapshot.account?.displayName ?? "个人微信账号"}</strong><span>{snapshot.account?.accountIdHint ?? "账号信息仅保存在当前 U 盘"}</span></div>
-        <div className="wechat-actions">{connected ? <Button icon={<RotateCw />} disabled={busy} onClick={() => void run("channels.wechat-reconnect")}>重新连接</Button> : null}{connected ? <Popconfirm title="退出个人微信？" description="当前 U 盘中的个人微信账号状态与凭据将被清理。" okText="退出" cancelText="取消" onConfirm={() => void run("channels.wechat-logout")}><Button danger icon={<LogOut />} disabled={busy}>退出登录</Button></Popconfirm> : <Button type="primary" icon={<QrCode />} aria-label="开始个人微信扫码登录" disabled={busy || !available} onClick={() => void run("channels.wechat-login-start", { force: false })}>扫码登录</Button>}</div>
+        <div className="wechat-actions">{hasAccount ? <Button icon={<RotateCw />} disabled={busy} onClick={() => void run("channels.wechat-reconnect")}>重新连接</Button> : null}{hasAccount ? <Popconfirm title="退出个人微信？" description="当前 U 盘中的个人微信账号状态与凭据将被清理。" okText="退出" cancelText="取消" onConfirm={() => void run("channels.wechat-logout")}><Button danger icon={<LogOut />} disabled={busy}>退出登录</Button></Popconfirm> : <Button type="primary" icon={<QrCode />} aria-label="开始个人微信扫码登录" disabled={busy || !available} onClick={() => void run("channels.wechat-login-start", { force: false })}>扫码登录</Button>}</div>
       </div>}
       {snapshot.error ? <Alert type={snapshot.error.category === "network" || snapshot.error.category === "timeout" ? "error" : "warning"} showIcon message={snapshot.error.message} action={snapshot.loginState === "expired" && activeQr ? <Button size="small" onClick={refresh}>刷新</Button> : undefined} /> : null}
     </div> : null}

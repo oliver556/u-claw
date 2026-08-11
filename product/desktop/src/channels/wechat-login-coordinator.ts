@@ -230,6 +230,10 @@ export function createWechatLoginCoordinator(
             runtimeFlowId = undefined;
             return commit({ ...result, capability: "available", pluginStatus: current.plugin.status, lastCheckedAt: checkedAt() });
           }
+          if (result.account) {
+            runtimeFlowId = undefined;
+            return commit({ ...result, capability: "available", pluginStatus: current.plugin.status, lastCheckedAt: checkedAt() });
+          }
           return commit({ ...current, ...result, capability: "available", pluginStatus: current.plugin.status, lastCheckedAt: checkedAt(), error: undefined });
         });
       } catch (error) {

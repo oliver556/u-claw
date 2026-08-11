@@ -19,6 +19,8 @@ import {
 import { MessageEventSchema, type MessageEvent, type ProviderConfigEntry, type ProviderNetworkSettings, type SendMessageInput } from "@uclaw/shared";
 
 import { createClientDispatcher } from "../ipc/client-dispatcher.js";
+import { createWechatPersonalRuntime } from "../channels/wechat-personal-runtime.js";
+import { createOpenClawQrRenderer } from "../channels/wechat-qr-renderer.js";
 import { createOpenClawProviderConfigBackend } from "../providers/openclaw-provider-config.js";
 import { createOpenClawProviderExecutor } from "../providers/openclaw-provider-executor.js";
 import { createProviderStore, type ProviderStore } from "../providers/provider-store.js";
@@ -358,9 +360,18 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     baseEnvironment: env,
   });
   let gatewayProcessAlive = false;
+  const openClawStateDir = dirname(environment.openClawConfig);
+  const wechatPluginDir = join(openClawStateDir, "extensions", "openclaw-weixin");
+  const wechatRuntime = createWechatPersonalRuntime({
+    dataDir: openClawStateDir,
+    pluginDir: wechatPluginDir,
+    requestGateway: (method, params, signal) => transport.router.request(method, params as never, z.unknown(), signal),
+    renderQr: createOpenClawQrRenderer(environment.runtimeRoot, wechatPluginDir),
+  });
   const client = new OpenClawClient({
     transport,
     attachments,
+    wechatRuntime,
     statusProjection: () => {
       if (!existsSync(environment.dataRoot)) {
         return { processAlive: gatewayProcessAlive, usb: { state: "missing", dataWritable: false } };

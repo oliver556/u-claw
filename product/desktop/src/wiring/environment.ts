@@ -8,6 +8,7 @@ import { findOpenClawEntrypoint } from "../plugins/openclaw-cli-runtime.js";
 export interface DesktopWiringEnvironment {
   runtimeRoot: string;
   dataRoot: string;
+  openClawConfig: string;
   openClawEntry: string;
   nodeExecutable: string;
   electronRunAsNode: boolean;
@@ -122,6 +123,7 @@ export async function readDesktopWiringEnvironment(env: NodeJS.ProcessEnv): Prom
   return {
     runtimeRoot,
     dataRoot,
+    openClawConfig: configPath,
     openClawEntry,
     nodeExecutable,
     electronRunAsNode,
