@@ -2,7 +2,7 @@ import {
   SessionAdvancedIpcRequestSchema,
   SessionAdvancedIpcResponseSchema,
   type SessionAdvancedService,
-} from "@uclaw/shared/dist/session-advanced.js";
+} from "@uclaw/shared";
 
 export function createSessionAdvancedDispatcher(service: SessionAdvancedService) {
   return async (payload: unknown) => {

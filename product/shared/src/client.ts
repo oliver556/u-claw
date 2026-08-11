@@ -20,6 +20,7 @@ import type {
 } from "./tools.js";
 import type { DoctorRepairActionId } from "./diagnostics.js";
 import type { McpServerConfigEntry } from "./mcp.js";
+import type { SessionAdvancedService } from "./session-advanced.js";
 
 export interface GatewayService {
   negotiate(): Promise<CapabilitySet>;
@@ -100,6 +101,7 @@ export interface DiagnosticsService {
 export interface UClawClient {
   gateway: GatewayService;
   sessions: SessionService;
+  sessionAdvanced?: SessionAdvancedService;
   chat: ChatService;
   attachments?: AttachmentService;
   tools: ToolService;

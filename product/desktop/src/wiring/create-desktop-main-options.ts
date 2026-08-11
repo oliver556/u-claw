@@ -359,12 +359,12 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     requiredMethods: REQUIRED_GATEWAY_METHODS,
     probeCapabilities: async (_port, signal) => {
       try {
-        const hello = await withAbort(transport.connect(), signal, () => transport.close());
-        const methods = new Set(hello.features.methods);
+        const capabilities = await withAbort(client.gateway.negotiate(), signal, () => transport.close());
+        const methods = capabilities.methods;
         if (!REQUIRED_GATEWAY_METHODS.every((method) => methods.has(method))) {
           throw new DesktopWiringError("UNSUPPORTED", "Gateway is missing required methods.");
         }
-        return { helloOk: true, methods: hello.features.methods };
+        return { helloOk: true, methods: [...methods] };
       } catch (error) {
         normalizeGatewayFailure(error);
       }

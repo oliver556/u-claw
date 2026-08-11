@@ -17,6 +17,7 @@ export * from "./new-api-management.js";
 export * from "./mcp.js";
 export * from "./package-name.js";
 export * from "./session-organizer.js";
+export * from "./session-advanced.js";
 export * from "./providers.js";
 export * from "./plugins.js";
 export * from "./provisioning-identity.js";

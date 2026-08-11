@@ -35,6 +35,17 @@ class ScriptedWebSocket {
   send(data: string): void {
     const frame = JSON.parse(data) as Record<string, unknown>;
     this.sent.push(frame);
+    if (frame.method === "sessions.list") {
+      queueMicrotask(() => this.emit("message", {
+        data: JSON.stringify({
+          type: "res",
+          id: frame.id,
+          ok: true,
+          payload: { sessions: [], hasMore: false, nextOffset: null },
+        }),
+      }));
+      return;
+    }
     if (frame.method !== "connect") return;
     if (ScriptedWebSocket.outcome === "authentication") {
       queueMicrotask(() => this.emit("message", {
@@ -202,6 +213,7 @@ describe("production desktop wiring", () => {
     expect(launch.args.join(" ")).not.toContain("test-gateway-token");
     expect(launch.env.OPENCLAW_GATEWAY_TOKEN).toBe("test-gateway-token");
     expect(options.client?.attachments).toBe(options.attachments);
+    expect(options.client?.sessionAdvanced).toBeDefined();
     expect(options.providerConfig).toBeDefined();
     expect(options.pluginRuntime).toBeDefined();
 
@@ -222,10 +234,10 @@ describe("production desktop wiring", () => {
     });
 
     await expect(options.dispatchClient({
-      method: "gateway.negotiate",
-      requestId: "wiring-negotiate",
+      method: "sessions.list",
+      requestId: "wiring-sessions",
       params: {},
-    })).resolves.toMatchObject({ ok: true, result: { protocolVersion: 4 } });
+    })).resolves.toMatchObject({ ok: true, result: { items: [], hasMore: false } });
     await options.dispose?.();
     expect(socket.close).toHaveBeenCalled();
   });

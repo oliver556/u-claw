@@ -235,13 +235,13 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
     }
   };
 
-  const refreshSessions = async (sessionId: string) => {
+  const refreshSessions = async (sessionId: string, selectReadback = false) => {
     try {
       const [page, refreshed] = await Promise.all([client.sessions.list(), client.sessions.get(sessionId)]);
       setSessions(page.items);
       setNextSessionCursor(page.nextCursor);
       setHasMoreSessions(page.hasMore);
-      setActiveSession((current) => current?.id === sessionId ? refreshed : current);
+      setActiveSession((current) => selectReadback || current?.id === sessionId ? refreshed : current);
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : "会话刷新失败");
     }
@@ -300,7 +300,11 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
           : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} sessionsOpen={sessionsOpen} contextOpen={contextOpen} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} onSessionUpdated={(sessionId) => void refreshSessions(sessionId)} openSessions={() => setSessionsOpen(true)} openContext={() => setContextOpen(true)} />
           : route.path === "/files" ? <DataManager key="workspace" domain="workspace" onDirtyChange={setDataDirty} /> : route.path === "/memory" ? <DataManager key="memory" domain="memory" onDirtyChange={setDataDirty} /> : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/connections" ? <ChannelSettings /> : route.path === "/system" ? <SystemCenter /> : <SecondaryView title={route.label} description={route.description} system={false} />}
       </main>
-      {isWork && contextOpen ? <ContextPanel client={client} session={activeSession} capabilities={capabilities} activity={activeSession === undefined ? [] : activity[activeSession.id] ?? []} onClose={() => setContextOpen(false)} /> : null}
+      {isWork && contextOpen ? <ContextPanel client={client} session={activeSession} capabilities={capabilities} activity={activeSession === undefined ? [] : activity[activeSession.id] ?? []} onClose={() => setContextOpen(false)} onSessionReadback={(readback) => {
+        selectionRequest.current += 1;
+        setActiveSession(readback);
+        void refreshSessions(readback.id, true);
+      }} /> : null}
     </div>
     <TaskActivityCenter open={activityCenterOpen} service={client.activityCenter} onClose={() => setActivityCenterOpen(false)} onOpenSession={(sessionId) => {
       navigate("/");

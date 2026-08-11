@@ -46,6 +46,7 @@ import type { GatewayWebSocketState, HelloOk } from "./transport/gateway-websock
 import { ReconnectPolicy, type SequenceGap } from "./reconnect.js";
 import { AdapterServiceError, RpcClosedError, RpcProtocolError, RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
 import { AttachmentServiceError, type AttachmentManager } from "./attachments.js";
+import { createOpenClawSessionAdvancedService } from "./session-advanced.js";
 
 interface OpenClawRouter {
   request<T>(method: string, params: JsonValue, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T>;
@@ -103,6 +104,9 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch", "models.list",
   "config.get", "config.patch", "channels.status", "channels.start", "channels.stop",
   "diagnostics.doctor",
+  "sessions.files.list", "sessions.files.get", "sessions.compaction.list", "sessions.reset",
+  "sessions.compact", "sessions.compaction.branch", "sessions.compaction.restore",
+  "sessions.compaction.get", "sessions.steer",
 ] as const;
 
 const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);
@@ -363,6 +367,7 @@ export interface OpenClawClientOptions {
 
 export class OpenClawClient implements UClawClient {
   readonly attachments: AttachmentManager | undefined;
+  readonly sessionAdvanced: NonNullable<UClawClient["sessionAdvanced"]>;
   private capabilities: CapabilitySet | undefined;
   private hello: HelloOk | undefined;
   private readonly now: () => string;
@@ -397,6 +402,12 @@ export class OpenClawClient implements UClawClient {
     this.statusSince = this.now();
     this.reconnectPolicy = options.reconnectPolicy ?? new ReconnectPolicy();
     this.onResyncRequired = options.onResyncRequired;
+    this.sessionAdvanced = createOpenClawSessionAdvancedService({
+      router: {
+        request: (method, params, schema, signal) => options.transport.router.request(method, params, schema, signal),
+      },
+      requireMethod: (method) => this.requireMethod(method),
+    });
   }
 
   readonly gateway: UClawClient["gateway"] = {

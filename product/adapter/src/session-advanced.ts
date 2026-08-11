@@ -10,7 +10,7 @@ import {
   SessionSteerResultSchema,
   type SessionAdvancedService,
   type SessionCheckpoint,
-} from "@uclaw/shared/dist/session-advanced.js";
+} from "@uclaw/shared";
 import { z } from "zod";
 
 import { mapSession, RawSessionSchema } from "./mappers/session.js";

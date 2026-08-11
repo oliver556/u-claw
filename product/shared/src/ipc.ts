@@ -38,6 +38,9 @@ export { ProviderIpcRequestSchema, ProviderIpcResponseSchema } from "./providers
 export type { ProviderIpcRequest, ProviderIpcResponse } from "./providers.js";
 import { CapabilitySetWireSchema, GatewayStatusWireSchema } from "./gateway.js";
 import { SessionOrganizerDocumentSchema } from "./session-organizer.js";
+import { SessionAdvancedIpcRequestSchema, SessionAdvancedIpcResponseSchema } from "./session-advanced.js";
+export { SessionAdvancedIpcRequestSchema, SessionAdvancedIpcResponseSchema } from "./session-advanced.js";
+export type { SessionAdvancedIpcRequest, SessionAdvancedIpcResponse } from "./session-advanced.js";
 import {
   ChannelSummarySchema,
   DiagnosticSummarySchema,
@@ -228,7 +231,7 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
-export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, DataIpcRequestSchema, DiagnosticsIpcRequestSchema, ReleaseIpcRequestSchema]);
+export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, SessionAdvancedIpcRequestSchema, DataIpcRequestSchema, DiagnosticsIpcRequestSchema, ReleaseIpcRequestSchema]);
 export type IpcRequest = z.infer<typeof IpcRequestSchema>;
 export const IpcResponseSchema = z.union([
   WindowIpcSuccessResponseSchema,
@@ -241,6 +244,7 @@ export const IpcResponseSchema = z.union([
   PluginIpcResponseSchema,
   ChannelIpcResponseSchema,
   McpIpcResponseSchema,
+  SessionAdvancedIpcResponseSchema,
   DataIpcResponseSchema,
   DiagnosticsIpcResponseSchema,
   ReleaseIpcResponseSchema,
