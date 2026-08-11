@@ -14,6 +14,36 @@ export function createSkillDispatcher(service: SkillService) {
       case "skills.uninstall": result = await service.startUninstall(request.params.slug); break;
       case "skills.set-enabled": result = await service.setEnabled(request.params); break;
       case "skills.operation": result = await service.operation(request.params.operationId); break;
+      case "skills.runtime-status": result = await service.runtimeStatus(); break;
+      case "skills.curator-status": result = await service.curatorStatus(); break;
+      case "skills.curator-action": result = await service.curatorAction(request.params.skill, request.params.action); break;
+      case "skills.proposals-list": result = await service.proposalsList(); break;
+      case "skills.proposal-inspect": result = await service.proposalInspect(request.params.proposalId); break;
+      case "skills.proposal-action": result = await service.proposalAction(
+        request.params.proposalId, request.params.action, request.params.reason ?? undefined,
+      ); break;
+      case "skills.proposal-create": result = await service.proposalCreate({
+        name: request.params.name, description: request.params.description, content: request.params.content,
+        ...(request.params.goal ? { goal: request.params.goal } : {}),
+        ...(request.params.evidence ? { evidence: request.params.evidence } : {}),
+      }); break;
+      case "skills.proposal-update": result = await service.proposalUpdate({
+        skillName: request.params.skillName, content: request.params.content,
+        ...(request.params.description ? { description: request.params.description } : {}),
+        ...(request.params.goal ? { goal: request.params.goal } : {}),
+        ...(request.params.evidence ? { evidence: request.params.evidence } : {}),
+      }); break;
+      case "skills.proposal-revise": result = await service.proposalRevise({
+        proposalId: request.params.proposalId, content: request.params.content,
+        ...(request.params.description ? { description: request.params.description } : {}),
+        ...(request.params.goal ? { goal: request.params.goal } : {}),
+        ...(request.params.evidence ? { evidence: request.params.evidence } : {}),
+      }); break;
+      case "skills.proposal-request-revision": result = await service.proposalRequestRevision({
+        proposalId: request.params.proposalId, instructions: request.params.instructions, sessionKey: request.params.sessionKey,
+        ...(request.params.targetAgentId ? { targetAgentId: request.params.targetAgentId } : {}),
+        ...(request.params.sessionId ? { sessionId: request.params.sessionId } : {}),
+      }); break;
     }
     return SkillIpcResponseSchema.parse({ method: request.method, requestId: request.requestId, ok: true, result });
   };

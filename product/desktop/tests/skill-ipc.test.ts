@@ -9,12 +9,16 @@ import { registerIpc } from "../src/ipc/register-ipc.js";
 import { createFixtureSkillHubClient } from "../src/skills/fixture-client.js";
 import { createSkillDispatcher } from "../src/skills/skill-dispatcher.js";
 import { createSkillService } from "../src/skills/skill-service.js";
+import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fixture.js";
 
 function skillService() {
   return {
     search: vi.fn(async () => ({ items: [], nextCursor: null, hasMore: false, mode: "fixture" as const })),
     detail: vi.fn(), installed: vi.fn(async () => []), startInstall: vi.fn(), startUpdate: vi.fn(),
     startUninstall: vi.fn(), setEnabled: vi.fn(), operation: vi.fn(), waitForOperation: vi.fn(),
+    runtimeStatus: vi.fn(), curatorStatus: vi.fn(), curatorAction: vi.fn(), proposalsList: vi.fn(),
+    proposalInspect: vi.fn(), proposalAction: vi.fn(), proposalCreate: vi.fn(), proposalUpdate: vi.fn(),
+    proposalRevise: vi.fn(), proposalRequestRevision: vi.fn(),
   };
 }
 
@@ -49,6 +53,41 @@ describe("Skill IPC", () => {
     });
     expect(skills.search).toHaveBeenCalledWith({ query: "git", cursor: null, pageSize: 20 });
     expect(response).toMatchObject({ method: "skills.search", requestId: "skills-1", ok: true });
+  });
+
+  it("routes runtime, curator, and proposal methods through strict IPC", async () => {
+    const skills = skillService();
+    const now = "2026-08-11T00:00:00.000Z";
+    skills.runtimeStatus.mockResolvedValue({ workspaceDir: "OpenClaw workspace", managedSkillsDir: "OpenClaw managed skills", skills: [] });
+    skills.curatorStatus.mockResolvedValue({ lastAttemptAtMs: null, lastSuccessAtMs: null, lastError: null, counts: { active: 0, stale: 0, archived: 0 }, skills: [], overlaps: [] });
+    skills.curatorAction.mockResolvedValue({ skillFile: "SKILL.md", skillKey: "one", skillName: "one", state: "active", pinned: true, createdAtMs: 1, stateChangedAtMs: 1, lastUsedAtMs: null, useCount: 0, archivedReason: null });
+    skills.proposalsList.mockResolvedValue({ schema: "openclaw.skill-workshop.proposals-manifest.v1", updatedAt: now, proposals: [] });
+    const inspected = formalProposalInspect;
+    skills.proposalInspect.mockResolvedValue(inspected);
+    skills.proposalAction.mockResolvedValue(formalProposalRecord);
+    skills.proposalCreate.mockResolvedValue(inspected);
+    skills.proposalUpdate.mockResolvedValue(inspected);
+    skills.proposalRevise.mockResolvedValue(inspected);
+    skills.proposalRequestRevision.mockResolvedValue({ runId: "run-1", status: "started" });
+    const dispatch = createSkillDispatcher(skills);
+    const requests = [
+      { method: "skills.runtime-status", requestId: "r1", params: {} },
+      { method: "skills.curator-status", requestId: "r2", params: {} },
+      { method: "skills.curator-action", requestId: "r3", params: { skill: "one", action: "pin" } },
+      { method: "skills.proposals-list", requestId: "r4", params: {} },
+      { method: "skills.proposal-inspect", requestId: "r5", params: { proposalId: "p1" } },
+      { method: "skills.proposal-action", requestId: "r6", params: { proposalId: "p1", action: "apply", reason: null } },
+      { method: "skills.proposal-create", requestId: "r7", params: { name: "one", description: "One", content: "# One", goal: null, evidence: null } },
+      { method: "skills.proposal-update", requestId: "r8", params: { skillName: "one", description: null, content: "# One v2", goal: null, evidence: null } },
+      { method: "skills.proposal-revise", requestId: "r9", params: { proposalId: "p1", content: "# Revised", description: null, goal: null, evidence: null } },
+      { method: "skills.proposal-request-revision", requestId: "r10", params: { proposalId: "p1", instructions: "Add tests", sessionKey: "session-key", targetAgentId: null, sessionId: null } },
+    ] as const;
+    for (const request of requests) await expect(dispatch(request)).resolves.toMatchObject({ method: request.method, ok: true });
+    expect(skills.runtimeStatus).toHaveBeenCalledOnce();
+    expect(skills.curatorAction).toHaveBeenCalledWith("one", "pin");
+    expect(skills.proposalAction).toHaveBeenCalledWith("p1", "apply", undefined);
+    expect(skills.proposalCreate).toHaveBeenCalledWith({ name: "one", description: "One", content: "# One", goal: undefined, evidence: undefined });
+    expect(skills.proposalRequestRevision).toHaveBeenCalledWith({ proposalId: "p1", instructions: "Add tests", sessionKey: "session-key", targetAgentId: undefined, sessionId: undefined });
   });
 
   it("rejects renderer paths and commands before dispatch", async () => {

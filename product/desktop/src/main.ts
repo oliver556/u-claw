@@ -37,6 +37,7 @@ import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provide
 import { createMainProcessModelRouting, type ExternalModelSourceExecutors } from "./providers/model-source-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
 import { createSkillService } from "./skills/skill-service.js";
+import type { OpenClawSkillRuntime } from "./skills/openclaw-skill-runtime.js";
 import { createLivePluginRegistryClient, createUnavailablePluginRegistryClient } from "./plugins/registry-client.js";
 import { createOpenClawCliPluginRuntime } from "./plugins/openclaw-cli-runtime.js";
 import { createPluginService } from "./plugins/plugin-service.js";
@@ -274,6 +275,20 @@ export interface DesktopDomainRegistry {
   resolve<T extends RegisteredDesktopDomain>(name: string): T | undefined;
   installIpc(context: DesktopDomainIpcContext): () => void;
   dispose(): Promise<void>;
+}
+
+export type SkillRuntimeRegistration = RegisteredDesktopDomain & {
+  runtime: OpenClawSkillRuntime;
+  bundledRoots: readonly string[];
+};
+
+export function resolveSkillRuntimeRegistration(
+  registry: DesktopDomainRegistry | undefined,
+): SkillRuntimeRegistration | undefined {
+  if (registry === undefined) return undefined;
+  const registration = registry.resolve<SkillRuntimeRegistration>("skills.runtime");
+  if (registration === undefined) throw new Error("Skill runtime is not registered.");
+  return registration;
 }
 
 export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
@@ -536,9 +551,14 @@ export async function startElectronMain(
     providers,
     executors: modelSourceExecutors,
   });
+  const skillRuntimeRegistration = resolveSkillRuntimeRegistration(options.domainRegistrations);
   const skills = await createSkillService({
     dataDir: portablePaths.dataDir,
     client: createSkillHubClient(),
+    runtime: skillRuntimeRegistration?.runtime,
+    bundledRoots: skillRuntimeRegistration?.bundledRoots ?? [],
+    managedRoot: join(portablePaths.openClawState, "skills"),
+    workspaceRoot: join(portablePaths.workspace, "skills"),
     runMutation: (operation) => consistencyCoordinator.runTrackedWrite(operation),
   });
   const pluginRuntime = options.pluginRuntime ?? await createOpenClawCliPluginRuntime({

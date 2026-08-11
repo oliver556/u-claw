@@ -9,11 +9,11 @@ import { createSkillHubClient } from "../src/skills/skillhub-client.js";
 const namespace = { canonicalName: "@owner/workspace-reader", displayName: "owner", handle: "owner", publicSlug: "workspace-reader" };
 const searchItem = {
   slug: "workspace-reader", name: "Workspace Reader", description: "Reads workspace files", description_zh: null,
-  version: "1.0.0", labels: { requires_api_key: "false" }, namespace,
+  version: "1.0.0", labels: { requires_api_key: "false", pricing_type: "free", category: "productivity" }, namespace,
 };
 const detailBody = {
   slug: "workspace-reader", namespace, latestVersion: { version: "1.0.0", changelog: null, createdAt: 1 },
-  skill: { slug: "workspace-reader", displayName: "Workspace Reader", summary: "Reads workspace files", summary_zh: null, labels: { requires_api_key: "false" } },
+  skill: { slug: "workspace-reader", displayName: "Workspace Reader", summary: "Reads workspace files", summary_zh: null, labels: { requires_api_key: "false", pricing_type: "free", category: "productivity" } },
 };
 const skillMd = `---
 slug: workspace-reader
@@ -89,18 +89,162 @@ description: Reads workspace files
 `)).toEqual({ slug: undefined, name: "Workspace Reader", description: "Reads workspace files", version: undefined });
   });
 
+  it("does not treat nested metadata fields as top-level Skill identity", () => {
+    expect(parseSkillMarkdownFrontmatter(`---
+name: free-tool-strategy
+description: Plans free tools
+metadata:
+  version: 1.1.0
+---
+`)).toEqual({ slug: undefined, name: "free-tool-strategy", description: "Plans free tools", version: undefined });
+  });
+
   it("maps the official free catalog contract with an exact credential-free request", async () => {
     const fetch = vi.fn(async () => json({ code: 0, data: { skills: [searchItem], total: 21 }, message: "success" }));
     const client = createSkillHubClient({ fetch });
 
-    await expect(client.search({ query: "workspace & files", cursor: "2", pageSize: 20 })).resolves.toMatchObject({
-      items: [{ slug: "workspace-reader", pricingType: "free", risk: "high", mode: "live" }],
+    await expect(client.search({ query: "workspace & files", category: "productivity", cursor: "2", pageSize: 20 })).resolves.toMatchObject({
+      items: [{ slug: "workspace-reader", pricingType: "free", risk: "high", mode: "live", categories: ["productivity"] }],
       nextCursor: null, hasMore: false, mode: "live",
     });
     expect(fetch).toHaveBeenCalledWith(
-      "https://api.skillhub.cn/api/skills?page=2&pageSize=20&keyword=workspace+%26+files&labels=pricing_type%3A%21paid",
+      "https://api.skillhub.cn/api/skills?page=2&pageSize=20&keyword=workspace+%26+files&category=productivity&labels=pricing_type%3A%21paid",
       { method: "GET", headers: { accept: "application/json" }, redirect: "error", signal: expect.any(AbortSignal) },
     );
+  });
+
+  it.each([
+    ["paid", { pricing_type: "paid" }],
+    ["trial", { pricing_type: "trial" }],
+  ])("fails closed for %s catalog pricing", async (_label, labels) => {
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      code: 0, data: { skills: [{ ...searchItem, labels }], total: 1 }, message: "success",
+    })) });
+    await expect(client.search({ query: "", cursor: null, pageSize: 20 })).rejects.toThrow("free");
+  });
+
+  it("accepts the official not-paid catalog response and its direct category field", async () => {
+    const liveItem = { ...searchItem, labels: { requires_api_key: "false" }, category: "content-creation" };
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      code: 0, data: { skills: [liveItem], total: 1 }, message: "success",
+    })) });
+    await expect(client.search({ query: "", cursor: null, pageSize: 20 })).resolves.toMatchObject({
+      items: [{ slug: "workspace-reader", pricingType: "free", categories: ["content-creation"] }],
+    });
+  });
+
+  it("accepts pricing-free detail only after the official not-paid catalog confirmed the slug", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [{ ...searchItem, labels: null }], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json({ ...detailBody, skill: { ...detailBody.skill, labels: null, category: "productivity" } }))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(canonicalSkillMd, { headers: { "content-type": "text/markdown" } }));
+    const client = createSkillHubClient({ fetch });
+    await client.search({ query: "", cursor: null, pageSize: 20 });
+    await expect(client.detail("workspace-reader")).resolves.toMatchObject({ pricingType: "free", categories: ["productivity"] });
+  });
+
+  it.each([
+    ["namespace", { namespace: { ...namespace, handle: "other-owner" } }],
+    ["version", { latestVersion: { ...detailBody.latestVersion, version: "2.0.0" } }],
+  ])("rejects pricing-free detail when the filtered %s identity drifts", async (_field, drift) => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [{ ...searchItem, labels: null }], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json({ ...detailBody, ...drift, skill: { ...detailBody.skill, labels: null } }));
+    const client = createSkillHubClient({ fetch });
+    await client.search({ query: "", cursor: null, pageSize: 20 });
+    await expect(client.detail("workspace-reader")).rejects.toThrow(/identity|free/i);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects duplicate filtered slugs with conflicting catalog identity", async () => {
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      code: 0,
+      data: {
+        skills: [searchItem, { ...searchItem, namespace: { ...namespace, handle: "other-owner" } }],
+        total: 2,
+      },
+      message: "success",
+    })) });
+    await expect(client.search({ query: "", cursor: null, pageSize: 20 })).rejects.toThrow(/identity|duplicate/i);
+  });
+
+  it("fails closed when detail does not explicitly declare free pricing", async () => {
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      ...detailBody, skill: { ...detailBody.skill, labels: { requires_api_key: "false" } },
+    })) });
+    await expect(client.detail("workspace-reader")).rejects.toThrow("free");
+  });
+
+  it("fails closed when pricing metadata conflicts", async () => {
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      ...detailBody, skill: { ...detailBody.skill, billingType: "paid" },
+    })) });
+    await expect(client.detail("workspace-reader")).rejects.toThrow("free");
+  });
+
+  it.each([
+    ["paid flag", { paid: "true", pricing_type: "free" }, {}],
+    ["ambiguous paid flag", { paid: "yes", pricing_type: "free" }, {}],
+    ["positive price", { pricing_type: "free", price: "9.99" }, {}],
+    ["trial flag", { pricing_type: "free", trial: "true" }, {}],
+    ["object amount", { pricing_type: "free" }, { pricing: { type: "free", amount: 1 } }],
+    ["string object amount", { pricing_type: "free" }, { pricing: { type: "free", amount: "9.99" } }],
+  ])("fails closed for %s even with a free label", async (_case, labels, extra) => {
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      ...detailBody, skill: { ...detailBody.skill, labels, ...extra },
+    })) });
+    await expect(client.detail("workspace-reader")).rejects.toThrow("free");
+  });
+
+  it("accepts only explicit free values across optional pricing fields", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({
+        ...detailBody,
+        skill: {
+          ...detailBody.skill,
+          labels: { pricing_type: "free", paid: "false", price: "0", trial: "false" },
+          paid: false,
+          price: 0,
+          trial: false,
+          billingType: "free",
+          pricing: { type: "free", amount: 0 },
+        },
+      }))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(canonicalSkillMd, { headers: { "content-type": "text/markdown", "content-length": String(Buffer.byteLength(canonicalSkillMd)) } }));
+    const client = createSkillHubClient({ fetch });
+    await expect(client.detail("workspace-reader")).resolves.toMatchObject({ pricingType: "free" });
+  });
+
+  it("rejects paid metadata nested inside pricing plan objects", async () => {
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      ...detailBody,
+      skill: {
+        ...detailBody.skill,
+        pricing: { type: "free", plan: { amount: "9.99" } },
+      },
+    })) });
+    await expect(client.detail("workspace-reader")).rejects.toThrow("free");
+  });
+
+  it("rejects excessively deep pricing metadata", async () => {
+    let plan: Record<string, unknown> = { type: "free" };
+    for (let depth = 0; depth < 20; depth += 1) plan = { type: "free", plan };
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      ...detailBody,
+      skill: { ...detailBody.skill, pricing: plan },
+    })) });
+    await expect(client.detail("workspace-reader")).rejects.toThrow("free");
+  });
+
+  it("rejects pricing metadata that exceeds the inspection node limit", async () => {
+    const fields = Object.fromEntries(Array.from({ length: 129 }, (_, index) => [`field-${index}`, "free"]));
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      ...detailBody,
+      skill: { ...detailBody.skill, pricing: { type: "free", plan: fields } },
+    })) });
+    await expect(client.detail("workspace-reader")).rejects.toThrow("free");
   });
 
   it("rejects untrusted bases, API failures, malformed bodies, explicit paid labels, and oversized JSON", async () => {
@@ -117,7 +261,7 @@ description: Reads workspace files
 
     await expect(client.search(input)).rejects.toThrow("SkillHub API request failed");
     await expect(client.search(input)).rejects.toThrow();
-    await expect(client.search(input)).rejects.toThrow("Paid Skills");
+    await expect(client.search(input)).rejects.toThrow("explicitly free");
     await expect(client.search(input)).rejects.toThrow("response exceeds limit");
   });
 
@@ -172,7 +316,7 @@ description: Reads workspace files
       ...detailBody,
       skill: { ...detailBody.skill, labels: { requires_api_key: "false" }, billingType: "per_call" },
     })) });
-    await expect(client.detail("workspace-reader")).rejects.toThrow("Paid Skills");
+    await expect(client.detail("workspace-reader")).rejects.toThrow("explicitly free");
   });
 
   it("downloads the real ZIP through a trusted redirect and verifies its listed files", async () => {
@@ -322,5 +466,20 @@ description: Reads workspace files
       .mockResolvedValueOnce(new Response(responseBody(archive), { headers: { "content-type": "application/zip" } })) });
     await client.search({ query: "workspace", cursor: null, pageSize: 20 });
     await expect(client.download("workspace-reader")).rejects.toThrow("unsafe ZIP entry");
+  });
+
+  it("rejects a ZIP with too many empty directory entries", async () => {
+    const files = { "SKILL.md": canonicalSkillMd };
+    const zip = new JSZip();
+    zip.file("SKILL.md", canonicalSkillMd);
+    for (let index = 0; index < 1_001; index += 1) zip.folder(`empty-${index}`);
+    const archive = await zip.generateAsync({ type: "uint8array" });
+    const client = createSkillHubClient({ fetch: vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json(filesBody(files)))
+      .mockResolvedValueOnce(redirect("signed/directories-bomb.zip"))
+      .mockResolvedValueOnce(new Response(responseBody(archive), { headers: { "content-type": "application/zip" } })) });
+    await client.search({ query: "workspace", cursor: null, pageSize: 20 });
+    await expect(client.download("workspace-reader")).rejects.toThrow("entry count");
   });
 });

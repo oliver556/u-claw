@@ -54,10 +54,13 @@ export function parseSkillMarkdownFrontmatter(markdown: string): SkillMarkdownFr
   const values = new Map<string, string>();
   for (const line of lines.slice(1, end)) {
     if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+    if (/^\s/u.test(line)) continue;
     const separator = line.indexOf(":");
     if (separator < 1) throw new Error("SKILL.md frontmatter is invalid.");
     const key = line.slice(0, separator).trim();
-    if (!/^[A-Za-z][A-Za-z0-9_-]*$/u.test(key) || values.has(key)) throw new Error("SKILL.md frontmatter is invalid.");
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/u.test(key)) throw new Error("SKILL.md frontmatter is invalid.");
+    if (!["slug", "name", "displayName", "description", "summary", "version"].includes(key)) continue;
+    if (values.has(key)) throw new Error("SKILL.md frontmatter is invalid.");
     values.set(key, scalar(line.slice(separator + 1)));
   }
   const slug = values.get("slug");
