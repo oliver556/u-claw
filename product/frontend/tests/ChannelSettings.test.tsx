@@ -144,6 +144,36 @@ describe("ChannelSettings", () => {
     expect(document.body.textContent).not.toContain("bot_token");
   });
 
+  it("offers authoritative reconnect and logout after personal WeChat login becomes invalid", async () => {
+    const invalid: WechatConnectionSnapshot = {
+      ...unavailableWechat,
+      capability: "available",
+      capabilityReason: undefined,
+      plugin: { ...unavailableWechat.plugin, status: "installed" },
+      status: "auth-failed",
+      loginState: "error",
+      account: { accountIdHint: "...7a2f" },
+      error: { category: "authentication", code: "WECHAT_LOGGED_OUT", message: "个人微信登录已失效。", retryable: true },
+    };
+    const invoke = vi.fn(async (request: ChannelIpcRequest) => request.method.startsWith("channels.wechat-") ? ({
+      method: request.method,
+      requestId: request.requestId,
+      ok: true,
+      result: invalid,
+    }) as ChannelIpcResponse : success(request));
+    window.uclaw = { channels: { invoke } } as never;
+    render(<ChannelSettings />);
+
+    expect(await screen.findByText("...7a2f")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "重新连接" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "channels.wechat-reconnect" })));
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "退出登录" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+    const confirmation = await screen.findByText("退出个人微信？");
+    fireEvent.click(within(confirmation.closest(".ant-popover-inner") as HTMLElement).getByRole("button", { name: /退\s*出/u }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "channels.wechat-logout" })));
+  });
+
   it("runs Telegram test, stop and reconnect while disabling unavailable runtime actions", async () => {
     const invoke = vi.fn(async (request: ChannelIpcRequest) => request.method === "channels.test" || request.method === "channels.reconnect"
       ? { method: request.method, requestId: request.requestId, ok: true, result: { channelId: request.params.channelId, status: "connected", checkedAt: "2026-08-09T09:00:00.000Z" } } as ChannelIpcResponse

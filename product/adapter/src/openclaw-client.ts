@@ -14,6 +14,9 @@ import {
   type ApprovalRequest,
   type ChannelErrorSummary,
   type ChannelSummary,
+  type ChannelStatus,
+  type WechatConnectionSnapshot,
+  type WechatLoginState,
   type McpServerConfigEntry,
   MessageEventSchema,
   type UClawClient,
@@ -197,17 +200,32 @@ const RawDoctorResponseSchema = z.object({
     repair: z.object({ actionId: DoctorActionIdSchema, label: z.string().min(1).max(80) }).strict().optional(),
   })).max(100),
 });
+type OpenClawWechatState = {
+  status: ChannelStatus;
+  loginState: WechatLoginState;
+  account?: { displayName?: string; accountIdHint: string };
+};
+
+export interface OpenClawWechatRuntime {
+  capability(signal: AbortSignal): Promise<{ available: boolean; pluginStatus: "installed" | "missing" | "unknown"; reason?: string }>;
+  status(signal: AbortSignal): Promise<OpenClawWechatState>;
+  start(force: boolean, signal: AbortSignal): Promise<{
+    flowId: string;
+    qrImage: NonNullable<WechatConnectionSnapshot["qrImage"]>;
+    qrExpiresAt: string;
+  }>;
+  poll(flowId: string, signal: AbortSignal): Promise<OpenClawWechatState>;
+  refresh(flowId: string, signal: AbortSignal): Promise<{
+    qrImage: NonNullable<WechatConnectionSnapshot["qrImage"]>;
+    qrExpiresAt: string;
+  }>;
+  cancel(flowId: string, signal: AbortSignal): Promise<void>;
+  reconnect(signal: AbortSignal): Promise<OpenClawWechatState>;
+  logout(signal: AbortSignal): Promise<void>;
+}
+
 export interface OpenClawChannelRuntime extends OpenClawManagedChannelRuntime {
-  wechat: {
-    capability(signal: AbortSignal): Promise<{ available: false; pluginStatus: "installed" | "missing"; reason: string }>;
-    status(signal: AbortSignal): Promise<never>;
-    start(force: boolean, signal: AbortSignal): Promise<never>;
-    poll(flowId: string, signal: AbortSignal): Promise<never>;
-    refresh(flowId: string, signal: AbortSignal): Promise<never>;
-    cancel(flowId: string, signal: AbortSignal): Promise<never>;
-    reconnect(signal: AbortSignal): Promise<never>;
-    logout(signal: AbortSignal): Promise<never>;
-  };
+  wechat: OpenClawWechatRuntime;
 }
 
 const authenticationError: ChannelErrorSummary = {
@@ -346,6 +364,7 @@ export interface OpenClawClientOptions {
   onResyncRequired?: (gap: SequenceGap) => void | Promise<void>;
   onApprovalsChanged?: (sessionId: string) => void | Promise<void>;
   onToolCallChanged?: (toolCall: ToolCall) => void | Promise<void>;
+  wechatRuntime?: OpenClawWechatRuntime;
 }
 
 export class OpenClawClient implements UClawClient {
@@ -618,6 +637,7 @@ export class OpenClawClient implements UClawClient {
     poll: (channel, input, signal) => this.managedChannelRuntime.poll(channel, input, signal),
     wechat: {
       capability: async (signal) => {
+        if (this.options.wechatRuntime) return this.options.wechatRuntime.capability(signal);
         this.requireMethod("channels.status");
         const result = await this.options.transport.router.request(
           "channels.status",
@@ -636,13 +656,34 @@ export class OpenClawClient implements UClawClient {
             : "需要安装并启用 @tencent-weixin/openclaw-weixin@2.4.6。",
         };
       },
-      status: async () => { throw new UClawUnsupportedError("wechat-personal.status"); },
-      start: async () => { throw new UClawUnsupportedError("wechat-personal.login-start"); },
-      poll: async () => { throw new UClawUnsupportedError("wechat-personal.login-poll"); },
-      refresh: async () => { throw new UClawUnsupportedError("wechat-personal.login-refresh"); },
-      cancel: async () => { throw new UClawUnsupportedError("wechat-personal.login-cancel"); },
-      reconnect: async () => { throw new UClawUnsupportedError("wechat-personal.reconnect"); },
-      logout: async () => { throw new UClawUnsupportedError("wechat-personal.logout"); },
+      status: async (signal) => {
+        if (this.options.wechatRuntime) return this.options.wechatRuntime.status(signal);
+        throw new UClawUnsupportedError("wechat-personal.status");
+      },
+      start: async (force, signal) => {
+        if (this.options.wechatRuntime) return this.options.wechatRuntime.start(force, signal);
+        throw new UClawUnsupportedError("wechat-personal.login-start");
+      },
+      poll: async (flowId, signal) => {
+        if (this.options.wechatRuntime) return this.options.wechatRuntime.poll(flowId, signal);
+        throw new UClawUnsupportedError("wechat-personal.login-poll");
+      },
+      refresh: async (flowId, signal) => {
+        if (this.options.wechatRuntime) return this.options.wechatRuntime.refresh(flowId, signal);
+        throw new UClawUnsupportedError("wechat-personal.login-refresh");
+      },
+      cancel: async (flowId, signal) => {
+        if (this.options.wechatRuntime) return this.options.wechatRuntime.cancel(flowId, signal);
+        throw new UClawUnsupportedError("wechat-personal.login-cancel");
+      },
+      reconnect: async (signal) => {
+        if (this.options.wechatRuntime) return this.options.wechatRuntime.reconnect(signal);
+        throw new UClawUnsupportedError("wechat-personal.reconnect");
+      },
+      logout: async (signal) => {
+        if (this.options.wechatRuntime) return this.options.wechatRuntime.logout(signal);
+        throw new UClawUnsupportedError("wechat-personal.logout");
+      },
     },
   };
   readonly files: UClawClient["files"] = { list: async () => this.unsupported("files.list"), readText: async () => this.unsupported("files.readText") };

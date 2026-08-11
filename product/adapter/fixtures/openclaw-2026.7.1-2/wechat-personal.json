@@ -17,5 +17,13 @@
     "gatewayAdapterMethods": ["loginWithQrStart", "loginWithQrWait"],
     "stateDirectoryPrecedence": ["OPENCLAW_STATE_DIR", "CLAWDBOT_STATE_DIR", "user-home/.openclaw"]
   },
-  "productionCapability": "unavailable"
+  "productionCapability": "desktop-controlled-http-plugin-flow",
+  "desktopRuntime": {
+    "loginTransport": "ilink-https",
+    "stateAuthority": [
+      "channels.status",
+      "OPENCLAW_STATE_DIR/openclaw-weixin/accounts.json"
+    ],
+    "transientSecrets": ["qrcode", "flowId"]
+  }
 }

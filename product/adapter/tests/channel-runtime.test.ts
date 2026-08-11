@@ -1,5 +1,5 @@
 import type { ChannelConfigEntry } from "@uclaw/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 
 import { OpenClawClient, type OpenClawTransport } from "../src/openclaw-client.js";
@@ -218,6 +218,21 @@ describe("OpenClawClient channel runtime", () => {
     await client.gateway.negotiate();
 
     await expect(client.channels.wechat.capability(new AbortController().signal)).resolves.toMatchObject({ available: false, pluginStatus: "missing" });
+  });
+
+  it("uses an explicitly injected controlled personal WeChat runtime", async () => {
+    const transport = new ChannelTransport();
+    const wechatRuntime = {
+      capability: vi.fn(async () => ({ available: true, pluginStatus: "installed" as const })),
+      status: vi.fn(async () => ({ status: "connected" as const, loginState: "connected" as const, account: { accountIdHint: "...7a2f" } })),
+      start: vi.fn(), poll: vi.fn(), refresh: vi.fn(), cancel: vi.fn(), reconnect: vi.fn(), logout: vi.fn(),
+    };
+    const client = new OpenClawClient({ transport, wechatRuntime });
+    const signal = new AbortController().signal;
+
+    await expect(client.channels.wechat.capability(signal)).resolves.toEqual({ available: true, pluginStatus: "installed" });
+    await expect(client.channels.wechat.status(signal)).resolves.toMatchObject({ status: "connected", loginState: "connected" });
+    expect(transport.requests).toEqual([]);
   });
 
   it("prefers a live connected account over a stale lastError", async () => {

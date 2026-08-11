@@ -31,6 +31,11 @@ describe("OpenClaw 2026.7.1-2 channel contract", () => {
         gatewayAdapterMethods: string[]; stateDirectoryPrecedence: string[];
       };
       productionCapability: string;
+      desktopRuntime: {
+        loginTransport: string;
+        stateAuthority: string[];
+        transientSecrets: string[];
+      };
     };
 
     expect(fixture.host).toMatchObject({
@@ -47,7 +52,12 @@ describe("OpenClaw 2026.7.1-2 channel contract", () => {
       stateDirectoryPrecedence: ["OPENCLAW_STATE_DIR", "CLAWDBOT_STATE_DIR", "user-home/.openclaw"],
     });
     expect(fixture.plugin.gatewayAdapterMethods).not.toContain("logoutAccount");
-    expect(fixture.productionCapability).toBe("unavailable");
+    expect(fixture.productionCapability).toBe("desktop-controlled-http-plugin-flow");
+    expect(fixture.desktopRuntime).toEqual({
+      loginTransport: "ilink-https",
+      stateAuthority: ["channels.status", "OPENCLAW_STATE_DIR/openclaw-weixin/accounts.json"],
+      transientSecrets: ["qrcode", "flowId"],
+    });
     expect(rawText).not.toMatch(/token|cookie|sessionKey|[A-Z]:\\\\|\/Users\//u);
   });
 });

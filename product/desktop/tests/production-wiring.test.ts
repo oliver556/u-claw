@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -217,7 +217,9 @@ describe("production desktop wiring", () => {
     runtimeRoot = await realpath(runtimeRoot);
     openClawEntry = await realpath(openClawEntry);
     dataRoot = await mkdtemp(join(tmpdir(), "uclaw-production-data-"));
-    const configPath = join(dataRoot, "openclaw.json");
+    const stateRoot = join(dataRoot, ".openclaw");
+    await mkdir(stateRoot, { recursive: true });
+    const configPath = join(stateRoot, "openclaw.json");
     await writeFile(configPath, JSON.stringify({ gateway: { auth: { mode: "token", token: "test-gateway-token" } } }));
     productionEnv = {
       UCLAW_RUNTIME_DIR: runtimeRoot,
@@ -326,6 +328,7 @@ describe("production desktop wiring", () => {
     expect(options.client?.sessionAdvanced).toBeDefined();
     expect(options.providerConfig).toBeDefined();
     expect(options.pluginRuntime).toBeDefined();
+    expect((options.client!.channels as unknown as { wechat?: unknown }).wechat).toBeDefined();
 
     await expect(options.probeCapabilities(18791, new AbortController().signal)).resolves.toEqual({
       helloOk: true,
@@ -359,6 +362,22 @@ describe("production desktop wiring", () => {
       connectionState: "idle",
       processAlive: false,
       usb: { state: "available", dataWritable: true },
+    });
+    await options.dispose?.();
+  });
+
+  it("injects the executable personal WeChat runtime instead of the adapter Unsupported surface", async () => {
+    const pluginDir = join(dirname(productionEnv.OPENCLAW_CONFIG_PATH!), "extensions", "openclaw-weixin");
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(join(pluginDir, "openclaw.plugin.json"), JSON.stringify({ id: "openclaw-weixin" }));
+    await writeFile(join(pluginDir, "package.json"), JSON.stringify({ name: "@tencent-weixin/openclaw-weixin", version: "2.4.6" }));
+    const options = await createDesktopMainOptions(productionEnv);
+
+    await expect((options.client!.channels as unknown as {
+      wechat: { capability(signal: AbortSignal): Promise<unknown> };
+    }).wechat.capability(new AbortController().signal)).resolves.toEqual({
+      available: true,
+      pluginStatus: "installed",
     });
     await options.dispose?.();
   });

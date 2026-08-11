@@ -26,6 +26,8 @@ export * from "./providers/openclaw-provider-executor.js";
 export * from "./channels/channel-store.js";
 export * from "./channels/channel-dispatcher.js";
 export * from "./channels/wechat-login-coordinator.js";
+export * from "./channels/wechat-personal-runtime.js";
+export * from "./channels/wechat-qr-renderer.js";
 export * from "./providers/provider-dispatcher.js";
 export * from "./providers/provider-network.js";
 export * from "./provisioning/index.js";

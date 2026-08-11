@@ -55,6 +55,20 @@ describe("personal WeChat login coordinator", () => {
     expect(connected).not.toHaveProperty("flowId");
   });
 
+  it("clears QR state but keeps account actions when confirmed startup fails", async () => {
+    const candidate = runtime({
+      poll: vi.fn(async () => ({ status: "disconnected", loginState: "error", account: { accountIdHint: "...7a2f" } })),
+    });
+    const coordinator = createCoordinator(candidate, { now: () => new Date("2026-08-09T09:00:00.000Z") });
+    await coordinator.start(false);
+
+    const failed = await coordinator.poll("flow-1", 1);
+
+    expect(failed).toMatchObject({ status: "disconnected", loginState: "error", account: { accountIdHint: "...7a2f" } });
+    expect(failed).not.toHaveProperty("flowId");
+    expect(failed).not.toHaveProperty("qrImage");
+  });
+
   it("maps an upstream login handle to a renderer-safe local flow id", async () => {
     const candidate = runtime({ start: vi.fn(async () => ({ flowId: "runtime-session-handle-secret", qrImage: qr(), qrExpiresAt: "2026-08-09T09:05:00.000Z" })) });
     const coordinator = createCoordinator(candidate, {
