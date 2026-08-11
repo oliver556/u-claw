@@ -183,10 +183,32 @@ export type ProviderVerification = z.infer<typeof ProviderVerificationSchema>;
 const EmptyParamsSchema = z.object({}).strict();
 const RequestIdSchema = z.string().min(1);
 const ProviderIdParamsSchema = z.object({ providerId: ProviderIdSchema }).strict();
+const ConfigObjectSchema = z.record(z.string(), z.json()).refine((value) => !Array.isArray(value));
+const RendererSafeConfigSchema = ConfigObjectSchema.superRefine((value, context) => {
+  const inspect = (candidate: unknown, path: PropertyKey[]): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach((entry, index) => inspect(entry, [...path, index]));
+      return;
+    }
+    if (candidate === null || typeof candidate !== "object") return;
+    for (const [key, entry] of Object.entries(candidate)) {
+      const sensitive = /(?:^|_)(?:authorization|cookie|credential|key|password|private_key|secret|token)(?:_|$)/u.test(key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase());
+      if (sensitive && entry !== "[REDACTED]") context.addIssue({ code: "custom", path: [...path, key], message: "Secret config values must be redacted" });
+      else inspect(entry, [...path, key]);
+    }
+  };
+  inspect(value, []);
+});
+export const ProviderRendererConfigSnapshotSchema = z.object({ config: RendererSafeConfigSchema }).strict();
+export const ProviderConfigSchemaSnapshotSchema = z.object({
+  schema: ConfigObjectSchema,
+  uiHints: ConfigObjectSchema.optional(),
+}).strict();
 const ProviderMethodSchema = z.enum([
   "providers.list", "providers.create", "providers.update", "providers.remove", "providers.set-enabled",
   "providers.move", "providers.select", "providers.set-api-key", "providers.clear-api-key", "providers.verify",
   "providers.discover-local", "providers.set-network", "providers.cancel",
+  "providers.config-schema", "providers.config-get", "providers.config-patch", "providers.config-apply",
 ]);
 
 export const ProviderIpcRequestSchema = z.discriminatedUnion("method", [
@@ -203,6 +225,10 @@ export const ProviderIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("providers.discover-local"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
   z.object({ method: z.literal("providers.set-network"), requestId: RequestIdSchema, params: z.object({ network: ProviderNetworkSettingsSchema }).strict() }).strict(),
   z.object({ method: z.literal("providers.cancel"), requestId: RequestIdSchema, params: z.object({ operationRequestId: RequestIdSchema }).strict() }).strict(),
+  z.object({ method: z.literal("providers.config-schema"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
+  z.object({ method: z.literal("providers.config-get"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
+  z.object({ method: z.literal("providers.config-patch"), requestId: RequestIdSchema, params: z.object({ patch: ConfigObjectSchema }).strict() }).strict(),
+  z.object({ method: z.literal("providers.config-apply"), requestId: RequestIdSchema, params: z.object({ config: ConfigObjectSchema }).strict() }).strict(),
 ]);
 export type ProviderIpcRequest = z.infer<typeof ProviderIpcRequestSchema>;
 
@@ -216,6 +242,8 @@ const ProviderIpcSuccessResponseSchema = z.union([
   z.object({ method: z.literal("providers.verify"), requestId: RequestIdSchema, ok: z.literal(true), result: ProviderVerificationSchema }).strict(),
   z.object({ method: z.literal("providers.discover-local"), requestId: RequestIdSchema, ok: z.literal(true), result: LocalModelDiscoverySchema }).strict(),
   z.object({ method: z.literal("providers.cancel"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+  z.object({ method: z.literal("providers.config-schema"), requestId: RequestIdSchema, ok: z.literal(true), result: ProviderConfigSchemaSnapshotSchema }).strict(),
+  z.object({ method: z.enum(["providers.config-get", "providers.config-patch", "providers.config-apply"]), requestId: RequestIdSchema, ok: z.literal(true), result: ProviderRendererConfigSnapshotSchema }).strict(),
 ]);
 const ProviderIpcFailureResponseSchema = z.object({
   method: ProviderMethodSchema,

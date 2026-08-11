@@ -5,7 +5,10 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDesktopMainOptions } from "../src/wiring/create-desktop-main-options.js";
+import {
+  createDesktopMainOptions,
+  createRegisteredProviderExecutor,
+} from "../src/wiring/create-desktop-main-options.js";
 
 class ScriptedWebSocket {
   static instances: ScriptedWebSocket[] = [];
@@ -199,6 +202,8 @@ describe("production desktop wiring", () => {
     expect(launch.args.join(" ")).not.toContain("test-gateway-token");
     expect(launch.env.OPENCLAW_GATEWAY_TOKEN).toBe("test-gateway-token");
     expect(options.client?.attachments).toBe(options.attachments);
+    expect(options.providerConfig).toBeDefined();
+    expect(options.pluginRuntime).toBeDefined();
 
     await expect(options.probeCapabilities(18791, new AbortController().signal)).resolves.toEqual({
       helloOk: true,
@@ -212,6 +217,7 @@ describe("production desktop wiring", () => {
         minProtocol: 4,
         maxProtocol: 4,
         auth: { token: "test-gateway-token" },
+        scopes: ["operator.read", "operator.write", "operator.approvals", "operator.admin"],
       },
     });
 
@@ -282,6 +288,63 @@ describe("production desktop wiring", () => {
     }
   });
 
+  it("allows a loopback OpenAI-compatible local model without an API key", async () => {
+    let authorization: string | undefined;
+    const server = createServer((request, response) => {
+      authorization = request.headers.authorization;
+      request.on("data", () => undefined);
+      request.on("end", () => {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ choices: [{ message: { content: "local response" } }] }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local provider fixture did not bind");
+    const options = await createDesktopMainOptions(productionEnv);
+    try {
+      const stream = await options.modelSourceExecutors!.custom({
+        sessionId: "session-local",
+        clientRequestId: "request-local",
+        blocks: [{ type: "text", text: "hello", format: "plain" }],
+      }, {
+        id: "ollama-local",
+        name: "Ollama",
+        enabled: true,
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        model: "llama3.2",
+      });
+      const events = [];
+      for await (const event of stream) events.push(event);
+      expect(events).toMatchObject([{ type: "started" }, { type: "delta", text: "local response" }, { type: "final" }]);
+      expect(authorization).toBeUndefined();
+    } finally {
+      await options.dispose?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("routes the ZAI native template through OpenClaw instead of the HTTP executor", async () => {
+    const openAiCompatible = vi.fn();
+    const native = vi.fn(async () => "native-result");
+    const registry = {
+      resolve: vi.fn(() => ({ execute: openAiCompatible })),
+    } as never;
+    const execute = createRegisteredProviderExecutor(registry, "domestic", native as never);
+
+    await expect(execute({} as never, {
+      id: "zai",
+      templateId: "zai",
+      name: "Z.AI",
+      enabled: true,
+      baseUrl: null,
+      model: "glm-5",
+      apiKey: "zai-key",
+    })).resolves.toBe("native-result");
+    expect(native).toHaveBeenCalledOnce();
+    expect(openAiCompatible).not.toHaveBeenCalled();
+  });
+
   it("routes the default provider executor through the safe network boundary", async () => {
     const fetch = vi.fn(async () => ({
       ok: true,
@@ -303,6 +366,28 @@ describe("production desktop wiring", () => {
       apiKey: "provider-key",
     })).rejects.toThrow("UNSAFE_TARGET");
     expect(fetch).not.toHaveBeenCalled();
+    await options.dispose?.();
+  });
+
+  it("shares saved provider proxy settings with the managed Gateway launch", async () => {
+    const options = await createDesktopMainOptions(productionEnv);
+    expect(options.providers).toBeDefined();
+
+    await options.providers!.setNetwork({
+      httpProxy: "http://proxy.example.com:8080",
+      httpsProxy: "https://proxy.example.com:8443",
+      noProxy: ["localhost", "127.0.0.1", "::1", ".example.com"],
+    });
+
+    const launch = options.buildGatewayLaunchOptions(18796) as { env: NodeJS.ProcessEnv };
+    expect(launch.env).toMatchObject({
+      HTTP_PROXY: "http://proxy.example.com:8080",
+      http_proxy: "http://proxy.example.com:8080",
+      HTTPS_PROXY: "https://proxy.example.com:8443",
+      https_proxy: "https://proxy.example.com:8443",
+      NO_PROXY: "localhost,127.0.0.1,::1,.example.com",
+      no_proxy: "localhost,127.0.0.1,::1,.example.com",
+    });
     await options.dispose?.();
   });
 

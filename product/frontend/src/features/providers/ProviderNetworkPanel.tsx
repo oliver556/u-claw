@@ -17,7 +17,7 @@ export function ProviderNetworkPanel({
   const [httpsProxy, setHttpsProxy] = useState("");
   const [noProxy, setNoProxy] = useState("");
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<"error" | "saved">();
+  const [status, setStatus] = useState<"invalid" | "save-error" | "saved">();
 
   useEffect(() => {
     setHttpProxy(network.httpProxy ?? "");
@@ -32,13 +32,13 @@ export function ProviderNetworkPanel({
       noProxy: noProxy.split(",").map((value) => value.trim()).filter(Boolean),
     });
     if (!parsed.success) {
-      setStatus("error");
+      setStatus("invalid");
       return;
     }
     setBusy(true);
     setStatus(undefined);
     try {
-      setStatus(await onSave(parsed.data) ? "saved" : "error");
+      setStatus(await onSave(parsed.data) ? "saved" : "save-error");
     } finally {
       setBusy(false);
     }
@@ -55,7 +55,8 @@ export function ProviderNetworkPanel({
       <span>本地服务默认直连；SOCKS 当前不可用</span>
       <Button type="primary" icon={<Save />} loading={busy} aria-label="保存代理设置" onClick={() => void save()}>保存</Button>
     </div>
-    {status === "error" ? <Alert type="error" showIcon message="代理设置无效或保存失败" /> : null}
+    {status === "invalid" ? <Alert type="error" showIcon message="代理地址无效；仅支持不含凭据的 HTTP/HTTPS 地址" /> : null}
+    {status === "save-error" ? <Alert type="error" showIcon message="代理设置保存失败，请检查 Gateway 状态后重试" /> : null}
     {status === "saved" ? <Alert type="success" showIcon message="代理设置已保存" /> : null}
   </section>;
 }

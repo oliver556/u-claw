@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -106,10 +106,15 @@ describe("provider store", () => {
     expect(JSON.stringify(updated)).not.toContain("fixture-sk-live-12345678");
     expect(await store.getSelectedForRuntime()).not.toMatchObject({ apiKey: "fixture-sk-live-12345678" });
     const disk = await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8");
-    expect(disk).toContain("fixture-sk-live-12345678");
+    expect(disk).not.toContain("fixture-sk-live-12345678");
+    expect(disk).not.toContain("apiKey");
+    const credentialsPath = join(dataDir, ".uclaw", "provider-credentials.v1.json");
+    expect(await readFile(credentialsPath, "utf8")).toContain("fixture-sk-live-12345678");
+    expect((await stat(credentialsPath)).mode & 0o777).toBe(0o600);
     const cleared = await store.clearApiKey("openai");
     expect(cleared.providers.find((provider: any) => provider.id === "openai")).toMatchObject({ apiKeyConfigured: false });
     expect(await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8")).not.toContain("fixture-sk-live-12345678");
+    expect(await readFile(credentialsPath, "utf8")).not.toContain("fixture-sk-live-12345678");
   });
 
   it("persists validated proxy settings and exposes defaults without credentials", async () => {
@@ -136,6 +141,55 @@ describe("provider store", () => {
     expect((await store.list()).providers.map((provider: any) => provider.id)).toEqual(expect.arrayContaining(["parallel-a", "parallel-b"]));
   });
 
+  it("commits only after OpenClaw config write and readback succeed", async () => {
+    const openClawConfig = { synchronize: vi.fn(async (_previous: any, _next: any) => undefined) };
+    const { store } = await setup({ openClawConfig });
+    await store.create(custom("authoritative"));
+    expect(openClawConfig.synchronize).toHaveBeenCalledOnce();
+    expect(openClawConfig.synchronize.mock.calls[0]?.[1]).toMatchObject({
+      selectedProviderId: "authoritative",
+      providers: expect.arrayContaining([expect.objectContaining({ id: "authoritative", enabled: true })]),
+    });
+
+    openClawConfig.synchronize.mockRejectedValueOnce({ code: "CONFLICT", message: "readback mismatch" });
+    await expect(store.create(custom("rejected"))).rejects.toMatchObject({ code: "CONFLICT" });
+    expect((await store.list()).providers.some((provider: any) => provider.id === "rejected")).toBe(false);
+  });
+
+  it("keeps proxy settings local instead of writing unrelated OpenClaw Provider config", async () => {
+    const openClawConfig = { synchronize: vi.fn(async (_previous: any, _next: any) => undefined) };
+    const { store } = await setup({ openClawConfig });
+    await store.setNetwork({ httpProxy: "http://proxy.example.com:8080", httpsProxy: null, noProxy: ["localhost"] });
+    expect(openClawConfig.synchronize).not.toHaveBeenCalled();
+  });
+
+  it("does not let concurrent same-ID recreation inherit a removed Provider key", async () => {
+    const values = new Map<string, string>();
+    let releaseRemoval!: () => void;
+    let removalStarted!: () => void;
+    const started = new Promise<void>((resolve) => { removalStarted = resolve; });
+    const blocked = new Promise<void>((resolve) => { releaseRemoval = resolve; });
+    const credentials = {
+      get: async (id: string) => values.get(id),
+      has: async (id: string) => values.has(id),
+      set: async (id: string, value: string) => { values.set(id, value); },
+      remove: async (id: string) => { removalStarted(); await blocked; values.delete(id); },
+    };
+    const { store } = await setup({ credentials });
+    await store.create(custom("same-id"));
+    await store.setApiKey("same-id", "old-owner-secret");
+    const removing = store.remove("same-id");
+    await started;
+    const recreatedPromise = store.create(custom("same-id"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseRemoval();
+    await removing;
+    const recreated = await recreatedPromise;
+
+    expect(recreated.providers.find((provider: any) => provider.id === "same-id"))
+      .toMatchObject({ apiKeyConfigured: false });
+  });
+
   it("keeps the old document when an atomic write fails", async () => {
     const writeAtomically = vi.fn(async (path: string, body: string) => {
       if (body.includes("will-fail")) throw new Error("disk contained secret-key-value");
@@ -151,6 +205,128 @@ describe("provider store", () => {
     const after = await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8");
     expect(after).toBe(before);
     expect((await store.list()).providers.some((provider: any) => provider.id === "will-fail")).toBe(false);
+  });
+
+  it("compensates OpenClaw when local metadata commit fails after synchronization", async () => {
+    const writeAtomically = vi.fn(async (_path: string, body: string) => {
+      if (body.includes("remote-rollback")) throw new Error("disk failure");
+    });
+    const openClawConfig = { synchronize: vi.fn(async (_previous: any, _next: any) => undefined) };
+    const { store } = await setup({ writeAtomically, openClawConfig });
+    await expect(store.create(custom("remote-rollback"))).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+    expect(openClawConfig.synchronize).toHaveBeenCalledTimes(2);
+    expect(openClawConfig.synchronize.mock.calls[1]?.[0]).toMatchObject({ providers: expect.arrayContaining([expect.objectContaining({ id: "remote-rollback" })]) });
+    expect(openClawConfig.synchronize.mock.calls[1]?.[1].providers.some((provider: any) => provider.id === "remote-rollback")).toBe(false);
+  });
+
+  it("does not compensate a durable metadata commit when only snapshot generation fails", async () => {
+    let synchronized = false;
+    const credentials = {
+      get: vi.fn(async () => {
+        if (synchronized) throw new Error("credential read unavailable");
+        return undefined;
+      }),
+      has: vi.fn(async () => false),
+      set: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+    };
+    const openClawConfig = {
+      synchronize: vi.fn(async () => { synchronized = true; }),
+    };
+    const { dataDir, store } = await setup({ credentials, openClawConfig });
+    await expect(store.create(custom("durable-snapshot-failure"))).rejects.toThrow("credential read unavailable");
+    expect(openClawConfig.synchronize).toHaveBeenCalledOnce();
+    expect(await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8")).toContain("durable-snapshot-failure");
+  });
+
+  it("does not restore an old key after durable commit when only snapshot generation fails", async () => {
+    const values = new Map<string, string>();
+    let failReads = false;
+    const credentials = {
+      get: vi.fn(async (id: string) => {
+        if (failReads) throw new Error("credential read unavailable");
+        return values.get(id);
+      }),
+      has: vi.fn(async (id: string) => values.has(id)),
+      set: vi.fn(async (id: string, value: string) => { values.set(id, value); }),
+      remove: vi.fn(async (id: string) => { values.delete(id); }),
+    };
+    const openClawConfig = {
+      synchronize: vi.fn(async () => { failReads = true; }),
+    };
+    const { store } = await setup({ credentials, openClawConfig });
+    await expect(store.setApiKey("openai", "durable-new-key")).rejects.toThrow("credential read unavailable");
+
+    failReads = false;
+    expect(values.get("openai")).toBe("durable-new-key");
+    expect(credentials.remove).not.toHaveBeenCalledWith("openai");
+  });
+
+  it("restores the old key when OpenClaw synchronization fails before metadata commit", async () => {
+    const values = new Map<string, string>();
+    const credentials = {
+      get: vi.fn(async (id: string) => values.get(id)),
+      has: vi.fn(async (id: string) => values.has(id)),
+      set: vi.fn(async (id: string, value: string) => { values.set(id, value); }),
+      remove: vi.fn(async (id: string) => { values.delete(id); }),
+    };
+    const openClawConfig = { synchronize: vi.fn(async () => { throw new Error("remote write failed"); }) };
+    const { store } = await setup({ credentials, openClawConfig });
+
+    await expect(store.setApiKey("openai", "uncommitted-new-key")).rejects.toThrow("remote write failed");
+    expect(values.has("openai")).toBe(false);
+  });
+
+  it("keeps the old Provider and key when rename credential removal fails before synchronization", async () => {
+    const values = new Map<string, string>();
+    const credentials = {
+      get: vi.fn(async (id: string) => values.get(id)),
+      has: vi.fn(async (id: string) => values.has(id)),
+      set: vi.fn(async (id: string, value: string) => { values.set(id, value); }),
+      remove: vi.fn(async (id: string) => {
+        if (id === "rename-old") throw new Error("credential remove failed");
+        values.delete(id);
+      }),
+    };
+    const openClawConfig = { synchronize: vi.fn(async () => undefined) };
+    const { store } = await setup({ credentials, openClawConfig });
+    await store.create(custom("rename-old"));
+    await store.setApiKey("rename-old", "rename-secret");
+    openClawConfig.synchronize.mockClear();
+
+    await expect(store.update("rename-old", { ...custom("rename-new"), id: "rename-new" }))
+      .rejects.toThrow("credential remove failed");
+
+    const snapshot = await store.list();
+    expect(snapshot.providers.some((provider: any) => provider.id === "rename-old")).toBe(true);
+    expect(snapshot.providers.some((provider: any) => provider.id === "rename-new")).toBe(false);
+    expect(values.get("rename-old")).toBe("rename-secret");
+    expect(values.has("rename-new")).toBe(false);
+    expect(openClawConfig.synchronize).not.toHaveBeenCalled();
+  });
+
+  it("keeps Provider metadata and key when credential removal fails before delete synchronization", async () => {
+    const values = new Map<string, string>();
+    const credentials = {
+      get: vi.fn(async (id: string) => values.get(id)),
+      has: vi.fn(async (id: string) => values.has(id)),
+      set: vi.fn(async (id: string, value: string) => { values.set(id, value); }),
+      remove: vi.fn(async (id: string) => {
+        if (id === "remove-failure") throw new Error("credential remove failed");
+        values.delete(id);
+      }),
+    };
+    const openClawConfig = { synchronize: vi.fn(async () => undefined) };
+    const { store } = await setup({ credentials, openClawConfig });
+    await store.create(custom("remove-failure"));
+    await store.setApiKey("remove-failure", "remove-secret");
+    openClawConfig.synchronize.mockClear();
+
+    await expect(store.remove("remove-failure")).rejects.toThrow("credential remove failed");
+
+    expect((await store.list()).providers.some((provider: any) => provider.id === "remove-failure")).toBe(true);
+    expect(values.get("remove-failure")).toBe("remove-secret");
+    expect(openClawConfig.synchronize).not.toHaveBeenCalled();
   });
 
   it("fails closed without leaking persisted content when JSON is corrupted", async () => {

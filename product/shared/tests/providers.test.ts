@@ -83,6 +83,17 @@ describe("provider contracts", () => {
     expect(() => requestSchema.parse({ method: "providers.set-api-key", requestId: "key-4", params: { providerId: "openai", apiKey: "sk-once", path: "C:\\secret" } })).toThrow();
   });
 
+  it("defines schema-driven OpenClaw config IPC without a secret read path", () => {
+    const requestSchema = contract.ProviderIpcRequestSchema as Schema;
+    const responseSchema = contract.ProviderIpcResponseSchema as Schema;
+    expect(requestSchema.parse({ method: "providers.config-schema", requestId: "schema-1", params: {} })).toBeTruthy();
+    expect(requestSchema.parse({ method: "providers.config-get", requestId: "get-1", params: {} })).toBeTruthy();
+    expect(requestSchema.parse({ method: "providers.config-patch", requestId: "patch-1", params: { patch: { gateway: { port: 18790 } } } })).toBeTruthy();
+    expect(requestSchema.parse({ method: "providers.config-apply", requestId: "apply-1", params: { config: { gateway: { port: 18790 } } } })).toBeTruthy();
+    expect(responseSchema.parse({ method: "providers.config-get", requestId: "get-1", ok: true, result: { config: { models: { providers: { openai: { apiKey: "[REDACTED]" } } } } } })).toBeTruthy();
+    expect(() => responseSchema.parse({ method: "providers.config-get", requestId: "get-2", ok: true, result: { config: { apiKey: "sk-leak" } } })).toThrow();
+  });
+
   it("publishes strict discovery, connectivity, cancellation, and proxy contracts", () => {
     const requestSchema = contract.ProviderIpcRequestSchema as Schema;
     const responseSchema = contract.ProviderIpcResponseSchema as Schema;

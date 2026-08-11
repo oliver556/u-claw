@@ -7,8 +7,13 @@ import {
 
 import type { ProviderStore } from "./provider-store.js";
 import { createProviderNetworkService } from "./provider-network.js";
+import type { OpenClawProviderConfigBackend } from "./openclaw-provider-config.js";
 
-export function createProviderDispatcher(store: ProviderStore, network = createProviderNetworkService()) {
+export function createProviderDispatcher(
+  store: ProviderStore,
+  network = createProviderNetworkService(),
+  config?: OpenClawProviderConfigBackend,
+) {
   return async (request: ProviderIpcRequest): Promise<ProviderIpcResponse> => {
     let result;
     switch (request.method) {
@@ -32,6 +37,27 @@ export function createProviderDispatcher(store: ProviderStore, network = createP
         network.cancel(request.params.operationRequestId);
         result = null;
         break;
+      case "providers.config-schema": {
+        if (config === undefined) throw new Error("OpenClaw config backend is unavailable.");
+        const snapshot = await config.getRendererConfig();
+        result = { schema: snapshot.schema, ...(snapshot.uiHints === undefined ? {} : { uiHints: snapshot.uiHints }) };
+        break;
+      }
+      case "providers.config-get": {
+        if (config === undefined) throw new Error("OpenClaw config backend is unavailable.");
+        result = { config: (await config.getRendererConfig()).config };
+        break;
+      }
+      case "providers.config-patch": {
+        if (config === undefined) throw new Error("OpenClaw config backend is unavailable.");
+        result = { config: (await config.patchRendererConfig(request.params.patch)).config };
+        break;
+      }
+      case "providers.config-apply": {
+        if (config === undefined) throw new Error("OpenClaw config backend is unavailable.");
+        result = { config: (await config.applyRendererConfig(request.params.config)).config };
+        break;
+      }
     }
     return ProviderIpcResponseSchema.parse({ method: request.method, requestId: request.requestId, ok: true, result });
   };
