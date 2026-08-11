@@ -11,6 +11,16 @@ export { createOpenClawSessionAdvancedService } from "./session-advanced.js";
 export type { OpenClawSessionAdvancedOptions, SessionAdvancedRouter } from "./session-advanced.js";
 export { createOpenClawUsageService } from "./openclaw-usage.js";
 export type { OpenClawUsageRequest, OpenClawUsageService } from "./openclaw-usage.js";
+export { createOpenClawChannelRuntime } from "./openclaw-channel-runtime.js";
+export type {
+  ChannelActionInput,
+  ChannelMessageInput,
+  ChannelPendingAction,
+  ChannelPollInput,
+  ChannelRuntimeReadback,
+  OpenClawChannelRouter,
+  OpenClawManagedChannelRuntime,
+} from "./openclaw-channel-runtime.js";
 export type { OpenClawChannelRuntime, OpenClawClientOptions, OpenClawTransport } from "./openclaw-client.js";
 export {
   OpenClawApprovalsFixtureSchema,

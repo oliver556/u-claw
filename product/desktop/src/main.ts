@@ -455,7 +455,9 @@ export function requireModelSourceExecutors(
 
 export function requireChannelRuntime(client: UClawClient): ChannelRuntime {
   const runtime = client.channels as unknown as Partial<ChannelRuntime>;
-  const methods: ReadonlyArray<keyof ChannelRuntime> = ["capability", "configure", "remove", "test", "start", "stop"];
+  const methods: ReadonlyArray<keyof ChannelRuntime> = [
+    "capability", "configure", "remove", "status", "test", "start", "stop", "logout", "send", "action", "poll",
+  ];
   if (methods.some((method) => typeof runtime[method] !== "function")) {
     throw new Error("Desktop production wiring must provide a real channel runtime.");
   }

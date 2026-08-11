@@ -17,7 +17,7 @@ class ChannelTransport implements OpenClawTransport {
       type: "hello-ok",
       protocol: 4,
       server: { version: "2026.7.1-2" },
-      features: { methods: ["config.get", "config.patch", "channels.status", "channels.start", "channels.stop"], events: [] },
+      features: { methods: ["config.get", "config.patch", "channels.status", "channels.start", "channels.stop", "channels.logout", "tools.invoke"], events: [] },
       policy: { maxPayload: 65_536, maxBufferedBytes: 131_072 },
     };
   }
@@ -78,6 +78,12 @@ describe("OpenClawClient channel runtime", () => {
     const transport = new ChannelTransport();
     transport.responses.set("config.get", [{ hash: "fixture-config-hash", valid: true }]);
     transport.responses.set("config.patch", [{ ok: true }]);
+    transport.responses.set("channels.status", [{
+      ts: 1_786_129_711_211,
+      channelOrder: ["telegram"], channelLabels: { telegram: "Telegram" }, channels: { telegram: {} },
+      channelAccounts: { telegram: [{ accountId: "telegram-main", enabled: true, configured: true, running: true, connected: true }] },
+      channelDefaultAccountId: { telegram: "telegram-main" },
+    }]);
     const client = new OpenClawClient({ transport });
     await client.gateway.negotiate();
     const controller = new AbortController();
@@ -94,6 +100,7 @@ describe("OpenClawClient channel runtime", () => {
         },
         signal: controller.signal,
       },
+      { method: "channels.status", params: { channel: "telegram", probe: false }, signal: controller.signal },
     ]);
   });
 
@@ -132,23 +139,45 @@ describe("OpenClawClient channel runtime", () => {
     transport.responses.set("channels.stop", [{ channel: "telegram", accountId: "telegram-main", stopped: true }]);
     transport.responses.set("config.get", [{ hash: "remove-hash", valid: true }]);
     transport.responses.set("config.patch", [{ ok: true }]);
+    transport.responses.set("channels.status", [
+      {
+        ts: 1_786_129_711_211,
+        channelOrder: ["telegram"], channelLabels: { telegram: "Telegram" }, channels: { telegram: {} },
+        channelAccounts: { telegram: [{ accountId: "telegram-main", enabled: true, configured: true, running: true, connected: true }] },
+        channelDefaultAccountId: { telegram: "telegram-main" },
+      },
+      {
+        ts: 1_786_129_711_212,
+        channelOrder: ["telegram"], channelLabels: { telegram: "Telegram" }, channels: { telegram: {} },
+        channelAccounts: { telegram: [{ accountId: "telegram-main", enabled: true, configured: true, running: false, connected: false }] },
+        channelDefaultAccountId: { telegram: "telegram-main" },
+      },
+      {
+        ts: 1_786_129_711_213,
+        channelOrder: ["telegram"], channelLabels: { telegram: "Telegram" }, channels: { telegram: {} },
+        channelAccounts: { telegram: [] }, channelDefaultAccountId: { telegram: "telegram-main" },
+      },
+    ]);
     const client = new OpenClawClient({ transport });
     await client.gateway.negotiate();
     const signal = new AbortController().signal;
 
     expect(client.channels.capability("telegram")).toBe(true);
-    expect(client.channels.capability("qq-bot")).toBe(false);
-    expect(client.channels.capability("feishu")).toBe(false);
-    expect(client.channels.capability("wecom")).toBe(false);
+    expect(client.channels.capability("qq-bot")).toBe(true);
+    expect(client.channels.capability("feishu")).toBe(true);
+    expect(client.channels.capability("wecom")).toBe(true);
     await client.channels.start(telegram(), signal);
     await client.channels.stop(telegram(), signal);
     await client.channels.remove(telegram(), signal);
 
-    expect(transport.requests.slice(-4)).toEqual([
+    expect(transport.requests.slice(-7)).toEqual([
       { method: "channels.start", params: { channel: "telegram", accountId: "telegram-main" }, signal },
+      { method: "channels.status", params: { channel: "telegram", probe: false }, signal },
       { method: "channels.stop", params: { channel: "telegram", accountId: "telegram-main" }, signal },
+      { method: "channels.status", params: { channel: "telegram", probe: false }, signal },
       { method: "config.get", params: {}, signal },
       { method: "config.patch", params: { raw: JSON.stringify({ channels: { telegram: { accounts: { "telegram-main": null } } } }), baseHash: "remove-hash" }, signal },
+      { method: "channels.status", params: { channel: "telegram", probe: false }, signal },
     ]);
   });
 

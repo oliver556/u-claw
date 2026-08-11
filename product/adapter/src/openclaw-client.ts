@@ -12,11 +12,8 @@ import {
   type Page,
   type ToolCall,
   type ApprovalRequest,
-  type ChannelConfigEntry,
   type ChannelErrorSummary,
-  type ChannelKind,
   type ChannelSummary,
-  type ChannelStatus,
   type McpServerConfigEntry,
   MessageEventSchema,
   type UClawClient,
@@ -47,6 +44,7 @@ import { ReconnectPolicy, type SequenceGap } from "./reconnect.js";
 import { AdapterServiceError, RpcClosedError, RpcProtocolError, RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
 import { AttachmentServiceError, type AttachmentManager } from "./attachments.js";
 import { createOpenClawSessionAdvancedService } from "./session-advanced.js";
+import { createOpenClawChannelRuntime, type OpenClawManagedChannelRuntime } from "./openclaw-channel-runtime.js";
 
 interface OpenClawRouter {
   request<T>(method: string, params: JsonValue, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T>;
@@ -102,7 +100,7 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "chat.history", "chat.message.get", "chat.send", "chat.abort",
   "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
   "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch", "models.list",
-  "config.get", "config.patch", "channels.status", "channels.start", "channels.stop",
+  "config.get", "config.patch", "channels.status", "channels.start", "channels.stop", "channels.logout", "tools.invoke",
   "diagnostics.doctor",
   "sessions.files.list", "sessions.files.get", "sessions.compaction.list", "sessions.reset",
   "sessions.compact", "sessions.compaction.branch", "sessions.compaction.restore",
@@ -199,17 +197,7 @@ const RawDoctorResponseSchema = z.object({
     repair: z.object({ actionId: DoctorActionIdSchema, label: z.string().min(1).max(80) }).strict().optional(),
   })).max(100),
 });
-const ChannelStartResponseSchema = z.object({ channel: z.literal("telegram"), accountId: z.string().min(1), started: z.boolean() }).passthrough();
-const ChannelStopResponseSchema = z.object({ channel: z.literal("telegram"), accountId: z.string().min(1), stopped: z.boolean() }).passthrough();
-const TELEGRAM_RUNTIME_METHODS = ["config.get", "config.patch", "channels.status", "channels.start", "channels.stop"] as const;
-
-export interface OpenClawChannelRuntime {
-  capability(kind: ChannelKind): boolean;
-  configure(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
-  remove(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
-  test(channel: ChannelConfigEntry, signal: AbortSignal): Promise<{ status: ChannelStatus; error?: ChannelErrorSummary }>;
-  start(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
-  stop(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
+export interface OpenClawChannelRuntime extends OpenClawManagedChannelRuntime {
   wechat: {
     capability(signal: AbortSignal): Promise<{ available: false; pluginStatus: "installed" | "missing"; reason: string }>;
     status(signal: AbortSignal): Promise<never>;
@@ -252,11 +240,6 @@ function channelErrorSummary(message: string): ChannelErrorSummary {
   if (/429|rate.?limit/iu.test(message)) return rateLimitError;
   if (/network|fetch|socket|connect|dns|econn|timeout|timed out/iu.test(message)) return networkError;
   return operationError;
-}
-
-function telegramChannel(channel: ChannelConfigEntry): Extract<ChannelConfigEntry, { kind: "telegram" }> {
-  if (channel.kind !== "telegram") throw new UClawUnsupportedError(`channels.${channel.kind}`);
-  return channel;
 }
 
 function decodeOffsetCursor(cursor: string | undefined): number {
@@ -368,6 +351,7 @@ export interface OpenClawClientOptions {
 export class OpenClawClient implements UClawClient {
   readonly attachments: AttachmentManager | undefined;
   readonly sessionAdvanced: NonNullable<UClawClient["sessionAdvanced"]>;
+  private readonly managedChannelRuntime: OpenClawManagedChannelRuntime;
   private capabilities: CapabilitySet | undefined;
   private hello: HelloOk | undefined;
   private readonly now: () => string;
@@ -407,6 +391,17 @@ export class OpenClawClient implements UClawClient {
         request: (method, params, schema, signal) => options.transport.router.request(method, params, schema, signal),
       },
       requireMethod: (method) => this.requireMethod(method),
+    });
+    this.managedChannelRuntime = createOpenClawChannelRuntime({
+      router: {
+        request: (method, params, schema, signal) => options.transport.router.request(method, params, schema, signal),
+      },
+      methods: { has: (method) => this.capabilities?.methods.has(method) === true },
+      reconnect: async (signal) => {
+        if (signal.aborted) throw signal.reason;
+        await this.gateway.reconnect();
+        if (signal.aborted) throw signal.reason;
+      },
     });
   }
 
@@ -610,46 +605,17 @@ export class OpenClawClient implements UClawClient {
         credential: { configured: account.configured === true },
       }];
     }),
-    capability: (kind) => kind === "telegram" && TELEGRAM_RUNTIME_METHODS.every((method) => this.capabilities?.methods.has(method) === true),
-    configure: (channel, signal) => this.runChannelOperation(async () => {
-      const configured = telegramChannel(channel);
-      await this.patchTelegramAccount(configured.id, { enabled: configured.enabled, botToken: configured.credentials.botToken }, signal);
-    }),
-    remove: (channel, signal) => this.runChannelOperation(async () => {
-      telegramChannel(channel);
-      await this.patchTelegramAccount(channel.id, null, signal);
-    }),
-    test: (channel, signal) => this.runChannelOperation(async () => {
-      telegramChannel(channel);
-      const { account } = await this.readTelegramStatus(true, signal, channel.id);
-      if (account === undefined || account.configured !== true) return { status: "pending-verification" };
-      if (account.connected === true) return { status: "connected" };
-      if (account.lastError !== undefined) {
-        const error = channelErrorSummary(account.lastError);
-        const status: ChannelStatus = error.category === "authentication" ? "auth-failed"
-          : error.category === "rate-limit" ? "rate-limited"
-            : error.category === "network" ? "network-error" : "needs-action";
-        return { status, error };
-      }
-      if (account.running === true) return { status: "connecting" };
-      return { status: "disconnected" };
-    }),
-    start: (channel, signal) => this.runChannelOperation(async () => {
-      telegramChannel(channel);
-      this.requireMethod("channels.start");
-      const result = await this.options.transport.router.request(
-        "channels.start", { channel: "telegram", accountId: channel.id }, ChannelStartResponseSchema, signal,
-      );
-      if (!result.started || result.accountId !== channel.id) throw new RpcProtocolError("channels.start");
-    }),
-    stop: (channel, signal) => this.runChannelOperation(async () => {
-      telegramChannel(channel);
-      this.requireMethod("channels.stop");
-      const result = await this.options.transport.router.request(
-        "channels.stop", { channel: "telegram", accountId: channel.id }, ChannelStopResponseSchema, signal,
-      );
-      if (!result.stopped || result.accountId !== channel.id) throw new RpcProtocolError("channels.stop");
-    }),
+    capability: (kind) => this.managedChannelRuntime.capability(kind),
+    configure: (channel, signal) => this.managedChannelRuntime.configure(channel, signal),
+    remove: (channel, signal) => this.managedChannelRuntime.remove(channel, signal),
+    status: (channel, probe, signal) => this.managedChannelRuntime.status(channel, probe, signal),
+    test: (channel, signal) => this.managedChannelRuntime.test(channel, signal),
+    start: (channel, signal) => this.managedChannelRuntime.start(channel, signal),
+    stop: (channel, signal) => this.managedChannelRuntime.stop(channel, signal),
+    logout: (channel, signal) => this.managedChannelRuntime.logout(channel, signal),
+    send: (channel, input, signal) => this.managedChannelRuntime.send(channel, input, signal),
+    action: (channel, input, signal) => this.managedChannelRuntime.action(channel, input, signal),
+    poll: (channel, input, signal) => this.managedChannelRuntime.poll(channel, input, signal),
     wechat: {
       capability: async (signal) => {
         this.requireMethod("channels.status");
@@ -917,17 +883,6 @@ export class OpenClawClient implements UClawClient {
 
   private requireMethod(method: string): void {
     if (this.capabilities?.methods.has(method) !== true) throw new UClawUnsupportedError(method);
-  }
-
-  private async patchTelegramAccount(accountId: string, config: { enabled: boolean; botToken: string } | null, signal: AbortSignal): Promise<void> {
-    this.requireMethod("config.get");
-    this.requireMethod("config.patch");
-    const snapshot = await this.options.transport.router.request("config.get", {}, ConfigGetResponseSchema, signal);
-    if (snapshot.hash === undefined || !snapshot.valid) throw new RpcProtocolError("config.get");
-    await this.options.transport.router.request("config.patch", {
-      raw: JSON.stringify({ channels: { telegram: { accounts: { [accountId]: config } } } }),
-      baseHash: snapshot.hash,
-    }, ConfigPatchResponseSchema, signal);
   }
 
   private async patchMcpServer(

@@ -163,6 +163,7 @@ export function registerIpc({
     "channels.create", "channels.update", "channels.remove", "channels.set-enabled", "channels.test",
     "channels.reconnect", "channels.wechat-login-start", "channels.wechat-login-refresh",
     "channels.wechat-login-cancel", "channels.wechat-reconnect", "channels.wechat-logout",
+    "channels.logout", "channels.send", "channels.action", "channels.poll",
   ]);
   const mcpWriteMethods = new Set([
     "mcp.create", "mcp.update", "mcp.remove", "mcp.set-enabled", "mcp.test", "mcp.reconnect", "mcp.confirm-risk",

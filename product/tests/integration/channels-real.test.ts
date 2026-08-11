@@ -31,7 +31,9 @@ async function reservePort(): Promise<number> {
 
 async function waitForPort(port: number, child: ChildProcess, diagnostic: () => string): Promise<void> {
   for (let attempt = 0; attempt < 600; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`OpenClaw Gateway exited before readiness (${child.exitCode}): ${diagnostic()}`);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`OpenClaw Gateway exited before readiness (${child.exitCode ?? child.signalCode}): ${diagnostic()}`);
+    }
     try {
       await new Promise<void>((resolveConnect, reject) => {
         const socket = connect({ host: "127.0.0.1", port });
@@ -86,10 +88,11 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw channel runtime", () => {
         env: { ...process.env, OPENCLAW_STATE_DIR: stateDir, OPENCLAW_CONFIG_PATH: configPath, OPENCLAW_GATEWAY_TOKEN: gatewayToken },
         stdio: ["ignore", "pipe", "pipe"],
       });
-      let stderr = "";
-      child.stderr?.on("data", (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-8_000); });
+      let diagnostic = "";
+      child.stdout?.on("data", (chunk) => { diagnostic = `${diagnostic}${String(chunk)}`.slice(-8_000); });
+      child.stderr?.on("data", (chunk) => { diagnostic = `${diagnostic}${String(chunk)}`.slice(-8_000); });
       processes.push(child);
-      await waitForPort(port, child, () => stderr.trim());
+      await waitForPort(port, child, () => diagnostic.trim());
       const createTransport = () => new GatewayWebSocket({
         url: `ws://127.0.0.1:${port}`,
         webSocketFactory: (url) => new (globalThis.WebSocket as unknown as new (target: string) => WebSocketLike)(url),

@@ -159,13 +159,13 @@ function accountConfig(channel: ChannelConfigEntry): Record<string, JsonValue> {
   }
 }
 
-function requireMethod(methods: ReadonlySet<string>, method: string): void {
+function requireMethod(methods: Pick<ReadonlySet<string>, "has">, method: string): void {
   if (!methods.has(method)) throw new Error(`OpenClaw capability unavailable: ${method}`);
 }
 
 export function createOpenClawChannelRuntime(options: {
   router: OpenClawChannelRouter;
-  methods: ReadonlySet<string>;
+  methods: Pick<ReadonlySet<string>, "has">;
   reconnect?: (signal: AbortSignal) => Promise<void>;
 }): OpenClawManagedChannelRuntime {
   const { router, methods, reconnect } = options;
