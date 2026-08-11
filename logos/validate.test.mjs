@@ -27,6 +27,46 @@ test("accepts a production-safe SVG concept", () => {
   assert.deepEqual(validateSvg(VALID_SVG, "valid.svg"), []);
 });
 
+for (const [name, namespace] of [
+  ["missing", ""],
+  ["wrong", "https://example.com/not-svg"],
+]) {
+  test(`rejects a ${name} SVG namespace`, () => {
+    const declaration = namespace === "" ? "" : ` xmlns="${namespace}"`;
+    const svg = VALID_SVG.replace(' xmlns="http://www.w3.org/2000/svg"', declaration);
+
+    assert.deepEqual(validateSvg(svg, `${name}-namespace.svg`), [
+      `${name}-namespace.svg: root svg namespace must be http://www.w3.org/2000/svg`,
+    ]);
+  });
+}
+
+for (const attribute of [
+  'onload="alert(1)"',
+  'onclick="alert(1)"',
+  'href="https://example.com/logo.svg"',
+  'xml:base="https://example.com/"',
+]) {
+  test(`rejects active SVG attribute ${attribute.split("=")[0]}`, () => {
+    const svg = VALID_SVG.replace("<svg ", `<svg ${attribute} `);
+
+    assert.deepEqual(validateSvg(svg, "active-attribute.svg"), [
+      "active-attribute.svg: event, href, and xml:base attributes are forbidden",
+    ]);
+  });
+}
+
+test("rejects xlink:href attributes", () => {
+  const svg = VALID_SVG.replace(
+    "<svg ",
+    '<svg xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://example.com/logo.svg" ',
+  );
+
+  assert.deepEqual(validateSvg(svg, "xlink.svg"), [
+    "xlink.svg: event, href, and xml:base attributes are forbidden",
+  ]);
+});
+
 test("requires svg to be the document root", () => {
   const svg = `
     <root>

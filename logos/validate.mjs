@@ -23,9 +23,12 @@ const forbiddenAttributeTest = FORBIDDEN_ATTRIBUTES.map(
 const allowedElementTest = ["svg", "g", "path"]
   .map((name) => `name()='${name}'`)
   .join(" or ");
+const normalizedAttributeName = "translate(name(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')";
+const activeAttributeTest = `starts-with(${normalizedAttributeName}, 'on') or ${normalizedAttributeName}='href' or ${normalizedAttributeName}='xlink:href' or ${normalizedAttributeName}='xml:base'`;
 
 const SUMMARY_XPATH = `concat(
   name(/*), '|',
+  namespace-uri(/*), '|',
   /*/@viewBox = '0 0 512 512', '|',
   count(/*/@width | /*/@height), '|',
   count(//*[name()='g' and @id='icon']), '|',
@@ -34,6 +37,7 @@ const SUMMARY_XPATH = `concat(
   count(//*[name()='path' and not(@fill='#111111')]), '|',
   count(//*[${forbiddenElementTest}]), '|',
   count(//@*[${forbiddenAttributeTest}]), '|',
+  count(//@*[${activeAttributeTest}]), '|',
   count(//*[not(${allowedElementTest} or ${forbiddenElementTest})]), '|',
   count(//*) = 3 and
     count(/*/*) = 1 and
@@ -61,6 +65,7 @@ export function validateSvg(svg, source = "SVG") {
 
   const [
     rootName,
+    rootNamespace,
     viewBoxIsValid,
     rootSizeCount,
     iconCount,
@@ -69,6 +74,7 @@ export function validateSvg(svg, source = "SVG") {
     invalidFillCount,
     forbiddenElementCount,
     forbiddenAttributeCount,
+    activeAttributeCount,
     unsupportedElementCount,
     structureIsValid,
   ] = summary.split("|");
@@ -81,8 +87,13 @@ export function validateSvg(svg, source = "SVG") {
 
   if (rootName !== "svg") {
     errors.push(`${source}: root svg is required`);
-  } else if (viewBoxIsValid !== "true") {
-    errors.push(`${source}: root viewBox must be 0 0 512 512`);
+  } else {
+    if (rootNamespace !== "http://www.w3.org/2000/svg") {
+      errors.push(`${source}: root svg namespace must be http://www.w3.org/2000/svg`);
+    }
+    if (viewBoxIsValid !== "true") {
+      errors.push(`${source}: root viewBox must be 0 0 512 512`);
+    }
   }
 
   if (rootName === "svg" && rootSizeCount !== "0") {
@@ -130,6 +141,10 @@ export function validateSvg(svg, source = "SVG") {
     errors.push(
       `${source}: opacity, style, class, and transform attributes are forbidden`,
     );
+  }
+
+  if (activeAttributeCount !== "0") {
+    errors.push(`${source}: event, href, and xml:base attributes are forbidden`);
   }
 
   if (rootName === "svg" && unsupportedElementCount !== "0") {
