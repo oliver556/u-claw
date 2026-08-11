@@ -9,6 +9,8 @@ export { ManualClock, MockUClawClient } from "./mock/mock-client.js";
 export { OpenClawClient, UClawUnsupportedError } from "./openclaw-client.js";
 export { createOpenClawSessionAdvancedService } from "./session-advanced.js";
 export type { OpenClawSessionAdvancedOptions, SessionAdvancedRouter } from "./session-advanced.js";
+export { createOpenClawUsageService } from "./openclaw-usage.js";
+export type { OpenClawUsageRequest, OpenClawUsageService } from "./openclaw-usage.js";
 export type { OpenClawChannelRuntime, OpenClawClientOptions, OpenClawTransport } from "./openclaw-client.js";
 export {
   OpenClawApprovalsFixtureSchema,

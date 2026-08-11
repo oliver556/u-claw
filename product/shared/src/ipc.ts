@@ -41,6 +41,9 @@ import { SessionOrganizerDocumentSchema } from "./session-organizer.js";
 import { SessionAdvancedIpcRequestSchema, SessionAdvancedIpcResponseSchema } from "./session-advanced.js";
 export { SessionAdvancedIpcRequestSchema, SessionAdvancedIpcResponseSchema } from "./session-advanced.js";
 export type { SessionAdvancedIpcRequest, SessionAdvancedIpcResponse } from "./session-advanced.js";
+import { UsageIpcRequestSchema, UsageIpcResponseSchema } from "./usage.js";
+export { UsageIpcRequestSchema, UsageIpcResponseSchema } from "./usage.js";
+export type { UsageIpcRequest, UsageIpcResponse } from "./usage.js";
 import {
   ChannelSummarySchema,
   DiagnosticSummarySchema,
@@ -231,7 +234,7 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
-export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, SessionAdvancedIpcRequestSchema, DataIpcRequestSchema, DiagnosticsIpcRequestSchema, ReleaseIpcRequestSchema]);
+export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, SessionAdvancedIpcRequestSchema, UsageIpcRequestSchema, DataIpcRequestSchema, DiagnosticsIpcRequestSchema, ReleaseIpcRequestSchema]);
 export type IpcRequest = z.infer<typeof IpcRequestSchema>;
 export const IpcResponseSchema = z.union([
   WindowIpcSuccessResponseSchema,
@@ -245,6 +248,7 @@ export const IpcResponseSchema = z.union([
   ChannelIpcResponseSchema,
   McpIpcResponseSchema,
   SessionAdvancedIpcResponseSchema,
+  UsageIpcResponseSchema,
   DataIpcResponseSchema,
   DiagnosticsIpcResponseSchema,
   ReleaseIpcResponseSchema,

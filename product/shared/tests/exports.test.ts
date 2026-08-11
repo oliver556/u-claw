@@ -19,6 +19,8 @@ import type {
   BuiltinServiceStatus,
   BuiltinServiceStatusUpdate,
   NewApiManagementClient,
+  UsageIpcRequest,
+  UsageSnapshot,
 } from "../src/index.js";
 import {
   ExecApprovalRequestSchema,
@@ -50,6 +52,13 @@ describe("public type exports", () => {
     expectTypeOf<NewApiManagementClient["updateServiceStatus"]>().toBeFunction();
     expectTypeOf<NewApiManagementClient["getDeviceControls"]>().toBeFunction();
     expectTypeOf<NewApiManagementClient["updateDeviceControls"]>().toBeFunction();
+  });
+
+  it("exports usage contracts from the package entrypoint", () => {
+    expectTypeOf<UsageIpcRequest["method"]>().toEqualTypeOf<
+      "usage.snapshot" | "usage.session-timeseries" | "usage.session-logs"
+    >();
+    expectTypeOf<UsageSnapshot["newApi"]>().toMatchTypeOf<{ source: "new-api" } | null>();
   });
 
   it("uses family-specific approval service inputs", () => {

@@ -23,3 +23,4 @@ export * from "./plugins.js";
 export * from "./provisioning-identity.js";
 export * from "./release.js";
 export * from "./tools.js";
+export * from "./usage.js";

@@ -1,5 +1,4 @@
 import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -14,8 +13,9 @@ import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fi
 
 class ScriptedWebSocket {
   static instances: ScriptedWebSocket[] = [];
-  static outcome: "success" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
+  static outcome: "success" | "usage" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
   static skillDisabled = false;
+  static selectedModel: { sessionId: string; providerId: string; model: string } | undefined;
   readonly sent: Array<Record<string, unknown>> = [];
   readonly close = vi.fn();
   private readonly listeners = new Map<string, Set<(event: { data?: string }) => void>>();
@@ -38,6 +38,35 @@ class ScriptedWebSocket {
   send(data: string): void {
     const frame = JSON.parse(data) as Record<string, unknown>;
     this.sent.push(frame);
+    if (frame.method === "usage.status") {
+      queueMicrotask(() => this.respond(frame, { updatedAt: 100, providers: [] }));
+      return;
+    }
+    if (frame.method === "usage.cost") {
+      queueMicrotask(() => this.respond(frame, { updatedAt: 101, days: 1, daily: [], totals: {
+        input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, totalCost: 0,
+        inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheWriteCost: 0, missingCostEntries: 0,
+      } }));
+      return;
+    }
+    if (frame.method === "sessions.usage") {
+      queueMicrotask(() => this.respond(frame, { updatedAt: 102, startDate: "2026-08-12", endDate: "2026-08-12", sessions: [], totals: {
+        input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, totalCost: 0,
+        inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheWriteCost: 0, missingCostEntries: 0,
+      } }));
+      return;
+    }
+    if (frame.method === "sessions.patch") {
+      const params = frame.params as { key: string; model: string };
+      const separator = params.model.indexOf("/");
+      ScriptedWebSocket.selectedModel = {
+        sessionId: params.key,
+        providerId: params.model.slice(0, separator),
+        model: params.model.slice(separator + 1),
+      };
+      queueMicrotask(() => this.respond(frame, { ok: true, key: params.key }));
+      return;
+    }
     if (frame.method === "skills.status") {
       queueMicrotask(() => this.respond(frame, {
         workspaceDir: "/portable/workspace",
@@ -99,6 +128,15 @@ class ScriptedWebSocket {
       return;
     }
     if (frame.method === "sessions.list") {
+      if (ScriptedWebSocket.selectedModel !== undefined) {
+        const selected = ScriptedWebSocket.selectedModel;
+        queueMicrotask(() => this.respond(frame, {
+          sessions: [{ key: selected.sessionId, modelProvider: selected.providerId, model: selected.model }],
+          hasMore: false,
+          nextCursor: null,
+        }));
+        return;
+      }
       queueMicrotask(() => this.emit("message", {
         data: JSON.stringify({
           type: "res",
@@ -133,7 +171,9 @@ class ScriptedWebSocket {
           features: {
             methods: ScriptedWebSocket.outcome === "missing-methods"
               ? ["sessions.list", "chat.history", "chat.send"]
-              : ["sessions.list", "sessions.describe", "chat.history", "chat.send"],
+              : ScriptedWebSocket.outcome === "usage"
+                ? ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send", "usage.status", "usage.cost", "sessions.usage", "sessions.usage.timeseries", "sessions.usage.logs"]
+                : ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send"],
             events: ["chat"],
           },
           policy: { maxPayload: 1_000_000, maxBufferedBytes: 2_000_000 },
@@ -192,6 +232,7 @@ describe("production desktop wiring", () => {
     ScriptedWebSocket.instances = [];
     ScriptedWebSocket.outcome = "success";
     ScriptedWebSocket.skillDisabled = false;
+    ScriptedWebSocket.selectedModel = undefined;
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: OriginalWebSocket });
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -288,7 +329,7 @@ describe("production desktop wiring", () => {
 
     await expect(options.probeCapabilities(18791, new AbortController().signal)).resolves.toEqual({
       helloOk: true,
-      methods: ["sessions.list", "sessions.describe", "chat.history", "chat.send"],
+      methods: ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send"],
     });
     const socket = ScriptedWebSocket.instances[0]!;
     expect(socket.url).toBe("ws://127.0.0.1:18791");
@@ -384,6 +425,57 @@ describe("production desktop wiring", () => {
     await options.dispose?.();
   });
 
+  it("registers production Usage IPC and routes external providers through OpenClaw", async () => {
+    ScriptedWebSocket.outcome = "usage";
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
+    const fetchSpy = vi.fn(async () => { throw new Error("HTTP executor must not run"); });
+    vi.stubGlobal("fetch", fetchSpy);
+    const options = await createDesktopMainOptions(productionEnv);
+    options.buildGatewayLaunchOptions(18801);
+    await options.probeCapabilities(18801, new AbortController().signal);
+
+    const usage = options.domainRegistrations!.resolve("usage") as {
+      installIpc(context: {
+        ipcMain: { handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void; removeHandler(channel: string): void };
+        authorizedWebContents: { mainFrame: unknown };
+      }): () => void;
+    } | undefined;
+    expect(usage).toBeDefined();
+    const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const frame = {};
+    const webContents = { mainFrame: frame };
+    const disposeUsage = usage!.installIpc({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: (channel) => { handlers.delete(channel); } },
+      authorizedWebContents: webContents,
+    });
+    await expect(handlers.get("uclaw:usage")!({ sender: webContents, senderFrame: frame }, {
+      method: "usage.snapshot",
+      requestId: "usage-production-1",
+      params: { startDate: "2026-08-12", endDate: "2026-08-12" },
+    })).resolves.toMatchObject({ ok: true, result: { newApi: null } });
+
+    await expect(options.modelSourceExecutors!.custom({
+      sessionId: "agent:main:external",
+      clientRequestId: "external-1",
+      blocks: [{ type: "text", text: "hello", format: "plain" }],
+    }, {
+      id: "external-provider",
+      name: "External",
+      enabled: true,
+      baseUrl: "https://provider.example/v1",
+      model: "model-1",
+      apiKey: "provider-key",
+    })).resolves.toBeDefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "sessions.patch", params: { key: "agent:main:external", model: "external-provider/model-1" } }),
+      expect.objectContaining({ method: "sessions.list" }),
+    ]));
+
+    disposeUsage();
+    await options.dispose?.();
+  });
+
   it("resolves the repository portable Skill root when the explicit override is absent", async () => {
     delete productionEnv.UCLAW_PORTABLE_SKILLS_DIR;
     const options = await createDesktopMainOptions(productionEnv);
@@ -417,27 +509,16 @@ describe("production desktop wiring", () => {
     });
   });
 
-  it("spawns only the configured runtime and supplies a real default provider executor", async () => {
-    let requestBody = "";
-    let authorization: string | undefined;
-    const server = createServer((request, response) => {
-      authorization = request.headers.authorization;
-      request.on("data", (chunk: Buffer) => { requestBody += chunk; });
-      request.on("end", () => {
-        response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify({ choices: [{ message: { content: "provider response" } }] }));
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("provider fixture did not bind");
+  it("spawns only the configured runtime and supplies a real OpenClaw provider executor", async () => {
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
     const options = await createDesktopMainOptions(productionEnv);
     try {
       const launch = options.buildGatewayLaunchOptions(18792) as { executable: string; args: string[]; env: NodeJS.ProcessEnv };
+      await options.probeCapabilities(18792, new AbortController().signal);
 
       expect(typeof options.spawn).toBe("function");
       expect(launch.executable).toBe(process.execPath);
-      const stream = await options.modelSourceExecutors!.custom({
+      await expect(options.modelSourceExecutors!.custom({
         sessionId: "session-1",
         clientRequestId: "request-1",
         blocks: [{ type: "text", text: "hello", format: "plain" }],
@@ -445,41 +526,25 @@ describe("production desktop wiring", () => {
         id: "custom",
         name: "Custom",
         enabled: true,
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: "https://provider.example/v1",
         model: "model-1",
         apiKey: "provider-key",
-      });
-      const events = [];
-      for await (const event of stream) events.push(event);
-      expect(events).toMatchObject([
-        { type: "started", sessionId: "session-1" },
-        { type: "delta", text: "provider response" },
-        { type: "final", message: { blocks: [{ type: "text", text: "provider response" }] } },
-      ]);
-      expect(authorization).toBe("Bearer provider-key");
-      expect(JSON.parse(requestBody)).toMatchObject({ model: "model-1", max_tokens: 4_096, stream: false });
+      })).resolves.toBeDefined();
+      expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([
+        expect.objectContaining({ method: "sessions.patch", params: { key: "session-1", model: "custom/model-1" } }),
+      ]));
     } finally {
       await options.dispose?.();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
-  it("allows a loopback OpenAI-compatible local model without an API key", async () => {
-    let authorization: string | undefined;
-    const server = createServer((request, response) => {
-      authorization = request.headers.authorization;
-      request.on("data", () => undefined);
-      request.on("end", () => {
-        response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify({ choices: [{ message: { content: "local response" } }] }));
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("local provider fixture did not bind");
+  it("allows a loopback OpenAI-compatible local model without an API key through OpenClaw", async () => {
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
     const options = await createDesktopMainOptions(productionEnv);
     try {
-      const stream = await options.modelSourceExecutors!.custom({
+      options.buildGatewayLaunchOptions(18793);
+      await options.probeCapabilities(18793, new AbortController().signal);
+      await expect(options.modelSourceExecutors!.custom({
         sessionId: "session-local",
         clientRequestId: "request-local",
         blocks: [{ type: "text", text: "hello", format: "plain" }],
@@ -487,16 +552,14 @@ describe("production desktop wiring", () => {
         id: "ollama-local",
         name: "Ollama",
         enabled: true,
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: "http://127.0.0.1:11434/v1",
         model: "llama3.2",
-      });
-      const events = [];
-      for await (const event of stream) events.push(event);
-      expect(events).toMatchObject([{ type: "started" }, { type: "delta", text: "local response" }, { type: "final" }]);
-      expect(authorization).toBeUndefined();
+      })).resolves.toBeDefined();
+      expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([
+        expect.objectContaining({ method: "sessions.patch", params: { key: "session-local", model: "ollama-local/llama3.2" } }),
+      ]));
     } finally {
       await options.dispose?.();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
@@ -521,13 +584,16 @@ describe("production desktop wiring", () => {
     expect(openAiCompatible).not.toHaveBeenCalled();
   });
 
-  it("routes the default provider executor through the safe network boundary", async () => {
+  it("does not bypass OpenClaw for an external provider target", async () => {
     const fetch = vi.fn(async () => ({
       ok: true,
       json: async () => ({ choices: [{ message: { content: "unsafe response" } }] }),
     }));
     vi.stubGlobal("fetch", fetch);
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
     const options = await createDesktopMainOptions(productionEnv);
+    options.buildGatewayLaunchOptions(18794);
+    await options.probeCapabilities(18794, new AbortController().signal);
 
     await expect(options.modelSourceExecutors!.custom({
       sessionId: "session-unsafe",
@@ -540,7 +606,7 @@ describe("production desktop wiring", () => {
       baseUrl: "http://169.254.169.254/v1",
       model: "model-1",
       apiKey: "provider-key",
-    })).rejects.toThrow("UNSAFE_TARGET");
+    })).resolves.toBeDefined();
     expect(fetch).not.toHaveBeenCalled();
     await options.dispose?.();
   });
@@ -599,7 +665,7 @@ describe("production desktop wiring", () => {
     });
 
     const uninstall = options.domainRegistrations!.installIpc({
-      ipcMain: {} as never,
+      ipcMain: { handle: vi.fn(), removeHandler: vi.fn() } as never,
       authorizedWebContents: { mainFrame: {} },
       client: options.client!,
       services: { get: () => undefined },
@@ -621,7 +687,7 @@ describe("production desktop wiring", () => {
     options.domainRegistrations!.register("work.first", { installIpc: () => first });
     options.domainRegistrations!.register("work.second", { installIpc: () => second });
     const uninstall = options.domainRegistrations!.installIpc({
-      ipcMain: {} as never,
+      ipcMain: { handle: vi.fn(), removeHandler: vi.fn() } as never,
       authorizedWebContents: { mainFrame: {} },
       client: options.client!,
       services: { get: () => undefined },
@@ -642,7 +708,7 @@ describe("production desktop wiring", () => {
     const error = (() => {
       try {
         options.domainRegistrations!.installIpc({
-          ipcMain: {} as never,
+          ipcMain: { handle: vi.fn(), removeHandler: vi.fn() } as never,
           authorizedWebContents: { mainFrame: {} },
           client: options.client!,
           services: { get: () => undefined },

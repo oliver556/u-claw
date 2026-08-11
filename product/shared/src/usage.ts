@@ -151,6 +151,6 @@ export const UsageIpcResponseSchema = z.union([
   z.object({ method: z.literal("usage.snapshot"), requestId: IdentifierSchema, ok: z.literal(true), result: UsageSnapshotSchema }).strict(),
   z.object({ method: z.literal("usage.session-timeseries"), requestId: IdentifierSchema, ok: z.literal(true), result: OpenClawSessionTimeseriesSchema }).strict(),
   z.object({ method: z.literal("usage.session-logs"), requestId: IdentifierSchema, ok: z.literal(true), result: OpenClawSessionUsageLogsSchema.shape.logs }).strict(),
-  z.object({ method: z.enum(["usage.snapshot", "usage.session-timeseries", "usage.session-logs"]), requestId: IdentifierSchema, ok: z.literal(false), error: z.object({ code: z.string().min(1), message: z.string().min(1), retryable: z.boolean() }).passthrough() }).strict(),
+  z.object({ method: z.enum(["usage.snapshot", "usage.session-timeseries", "usage.session-logs"]), requestId: IdentifierSchema, ok: z.literal(false), error: UClawErrorSchema }).strict(),
 ]);
 export type UsageIpcResponse = z.infer<typeof UsageIpcResponseSchema>;
