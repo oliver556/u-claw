@@ -56,6 +56,22 @@ for (const attribute of [
   });
 }
 
+for (const attribute of [
+  'filter="url(https://example.invalid/filter.svg#effect)"',
+  'mask="url(https://example.invalid/mask.svg#mask)"',
+  'clip-path="url(https://example.invalid/clip.svg#clip)"',
+  'cursor="url(https://example.invalid/cursor.cur), auto"',
+  'marker-start="url(https://example.invalid/marker.svg#marker)"',
+]) {
+  test(`rejects unsupported SVG attribute ${attribute.split("=")[0]}`, () => {
+    const svg = VALID_SVG.replace("<path ", `<path ${attribute} `);
+
+    assert.deepEqual(validateSvg(svg, "unsupported-attribute.svg"), [
+      "unsupported-attribute.svg: only viewBox, id, fill, and d attributes are allowed",
+    ]);
+  });
+}
+
 test("rejects xlink:href attributes", () => {
   const svg = VALID_SVG.replace(
     "<svg ",

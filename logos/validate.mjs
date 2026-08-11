@@ -25,6 +25,12 @@ const allowedElementTest = ["svg", "g", "path"]
   .join(" or ");
 const normalizedAttributeName = "translate(name(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')";
 const activeAttributeTest = `starts-with(${normalizedAttributeName}, 'on') or ${normalizedAttributeName}='href' or ${normalizedAttributeName}='xlink:href' or ${normalizedAttributeName}='xml:base'`;
+const specializedForbiddenAttributeTest = `${forbiddenAttributeTest} or ${activeAttributeTest}`;
+const unsupportedAttributeCount = `
+  count(/*/@*[not(name()='viewBox') and not(${specializedForbiddenAttributeTest})]) +
+  count(//*[name()='g']/@*[not(name()='id') and not(${specializedForbiddenAttributeTest})]) +
+  count(//*[name()='path']/@*[not(name()='fill' or name()='d') and not(${specializedForbiddenAttributeTest})])
+`;
 
 const SUMMARY_XPATH = `concat(
   name(/*), '|',
@@ -38,6 +44,7 @@ const SUMMARY_XPATH = `concat(
   count(//*[${forbiddenElementTest}]), '|',
   count(//@*[${forbiddenAttributeTest}]), '|',
   count(//@*[${activeAttributeTest}]), '|',
+  ${unsupportedAttributeCount}, '|',
   count(//processing-instruction()), '|',
   count(//*[not(${allowedElementTest} or ${forbiddenElementTest})]), '|',
   count(//*) = 3 and
@@ -77,6 +84,7 @@ export function validateSvg(svg, source = "SVG") {
     forbiddenElementCount,
     forbiddenAttributeCount,
     activeAttributeCount,
+    unsupportedAttributeCountValue,
     processingInstructionCount,
     unsupportedElementCount,
     structureIsValid,
@@ -148,6 +156,18 @@ export function validateSvg(svg, source = "SVG") {
 
   if (activeAttributeCount !== "0") {
     errors.push(`${source}: event, href, and xml:base attributes are forbidden`);
+  }
+
+  if (
+    unsupportedAttributeCountValue !== "0" &&
+    rootName === "svg" &&
+    viewBoxIsValid === "true" &&
+    rootSizeCount === "0" &&
+    strokeCount === "0" &&
+    forbiddenAttributeCount === "0" &&
+    activeAttributeCount === "0"
+  ) {
+    errors.push(`${source}: only viewBox, id, fill, and d attributes are allowed`);
   }
 
   if (processingInstructionCount !== "0" || hasDoctype) {
