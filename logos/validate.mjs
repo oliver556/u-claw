@@ -38,6 +38,7 @@ const SUMMARY_XPATH = `concat(
   count(//*[${forbiddenElementTest}]), '|',
   count(//@*[${forbiddenAttributeTest}]), '|',
   count(//@*[${activeAttributeTest}]), '|',
+  count(//processing-instruction()), '|',
   count(//*[not(${allowedElementTest} or ${forbiddenElementTest})]), '|',
   count(//*) = 3 and
     count(/*/*) = 1 and
@@ -48,7 +49,7 @@ const SUMMARY_XPATH = `concat(
 )`;
 
 function runXPath(svg, expression) {
-  const result = spawnSync("/usr/bin/xmllint", ["--xpath", expression, "-"], {
+  const result = spawnSync("/usr/bin/xmllint", ["--nonet", "--xpath", expression, "-"], {
     encoding: "utf8",
     input: svg,
   });
@@ -58,6 +59,7 @@ function runXPath(svg, expression) {
 
 export function validateSvg(svg, source = "SVG") {
   const errors = [];
+  const hasDoctype = /<!DOCTYPE\b/u.test(svg);
   const summary = runXPath(svg, SUMMARY_XPATH);
   if (summary === null) {
     return [`${source}: root svg is required`];
@@ -75,6 +77,7 @@ export function validateSvg(svg, source = "SVG") {
     forbiddenElementCount,
     forbiddenAttributeCount,
     activeAttributeCount,
+    processingInstructionCount,
     unsupportedElementCount,
     structureIsValid,
   ] = summary.split("|");
@@ -147,6 +150,10 @@ export function validateSvg(svg, source = "SVG") {
     errors.push(`${source}: event, href, and xml:base attributes are forbidden`);
   }
 
+  if (processingInstructionCount !== "0" || hasDoctype) {
+    errors.push(`${source}: processing instructions and DOCTYPE are forbidden`);
+  }
+
   if (rootName === "svg" && unsupportedElementCount !== "0") {
     errors.push(`${source}: only svg, g, and path elements are allowed`);
   }
@@ -159,7 +166,7 @@ export function validateSvg(svg, source = "SVG") {
 }
 
 export function validateFile(file) {
-  const result = spawnSync("/usr/bin/xmllint", ["--noout", file], {
+  const result = spawnSync("/usr/bin/xmllint", ["--nonet", "--noout", file], {
     encoding: "utf8",
   });
 
