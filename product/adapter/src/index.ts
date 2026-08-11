@@ -7,6 +7,8 @@ export { mapOpenClawModel, RawOpenClawModelSchema, RawOpenClawModelsListResponse
 export { mapExecApproval, mapPluginApproval, mapToolCall } from "./mappers/tool.js";
 export { ManualClock, MockUClawClient } from "./mock/mock-client.js";
 export { OpenClawClient, UClawUnsupportedError } from "./openclaw-client.js";
+export { createOpenClawSessionAdvancedService } from "./session-advanced.js";
+export type { OpenClawSessionAdvancedOptions, SessionAdvancedRouter } from "./session-advanced.js";
 export type { OpenClawChannelRuntime, OpenClawClientOptions, OpenClawTransport } from "./openclaw-client.js";
 export {
   OpenClawApprovalsFixtureSchema,

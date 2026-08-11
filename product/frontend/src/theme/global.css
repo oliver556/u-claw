@@ -215,7 +215,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .context-panel { grid-column: 4; }
 .context-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 16px; }
 .context-panel h2 { margin: 0; font-size: 15px; }
-.context-tabs { display: grid; grid-template-columns: repeat(4, 1fr); padding: 0 10px; border-bottom: 1px solid var(--uclaw-border-secondary); }
+.context-tabs { display: grid; grid-template-columns: repeat(5, 1fr); padding: 0 10px; border-bottom: 1px solid var(--uclaw-border-secondary); }
 .context-tabs button { position: relative; font-size: 12px; }
 .context-tabs button[aria-selected="true"] { color: var(--uclaw-primary-text); font-weight: 600; }
 .context-tabs button[aria-selected="true"]::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: -1px; height: 2px; background: var(--uclaw-primary); }

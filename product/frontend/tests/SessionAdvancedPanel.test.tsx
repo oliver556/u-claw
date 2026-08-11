@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import type { SessionAdvancedIpcRequest, SessionAdvancedIpcResponse, SessionCheckpoint } from "@uclaw/shared/dist/session-advanced.js";
+import type { SessionAdvancedIpcRequest, SessionAdvancedIpcResponse, SessionCheckpoint } from "@uclaw/shared";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

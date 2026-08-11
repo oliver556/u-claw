@@ -74,7 +74,20 @@ function clientFixture(): UClawClient {
 }
 
 describe("ContextTabs", () => {
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); delete window.uclaw; });
+
+  it("mounts the fixed Session Advanced preload bridge for the selected session", async () => {
+    const invoke = vi.fn(async (request: { method: string; requestId: string }) => request.method === "sessions.files.list"
+      ? { method: request.method, requestId: request.requestId, ok: true, result: { sessionId: "session-one", files: [] } }
+      : { method: request.method, requestId: request.requestId, ok: true, result: { sessionId: "session-one", checkpoints: [] } });
+    window.uclaw = { sessionAdvanced: { invoke } } as typeof window.uclaw;
+    render(<ContextTabs client={clientFixture()} session={session("session-one", "发布检查")} capabilities={contextCapabilities} activity={[]} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "高级" }));
+    expect(await screen.findByText("当前会话没有关联文件")).toBeVisible();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "sessions.files.list", params: { sessionId: "session-one" } }));
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "sessions.checkpoints.list", params: { sessionId: "session-one" } }));
+  });
 
   it("shows controlled artifact metadata in a dedicated result files tab", async () => {
     const client = clientFixture();

@@ -20,6 +20,8 @@ import {
   DiagnosticsIpcResponseSchema,
   ReleaseIpcRequestSchema,
   ReleaseIpcResponseSchema,
+  SessionAdvancedIpcRequestSchema,
+  SessionAdvancedIpcResponseSchema,
   UClawErrorSchema,
   WindowIpcRequestSchema,
   redactRendererText,
@@ -34,6 +36,7 @@ import {
   type ReleaseIpcRequest,
   type MessageEvent,
   type SendMessageInput,
+  type SessionAdvancedService,
 } from "@uclaw/shared";
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
@@ -50,7 +53,8 @@ import { createChannelDispatcher, type ChannelRuntime } from "../channels/channe
 import type { ChannelStore } from "../channels/channel-store.js";
 import { createMcpDispatcher, type McpRuntime } from "../mcp/mcp-dispatcher.js";
 import type { McpStore } from "../mcp/mcp-store.js";
-import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, RELEASE_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { createSessionAdvancedDispatcher } from "../sessions/session-advanced-dispatcher.js";
+import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, RELEASE_IPC_CHANNEL, SESSION_ADVANCED_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -87,6 +91,7 @@ export interface RegisterIpcDependencies {
   channelRuntime?: ChannelRuntime;
   mcp?: McpStore;
   mcpRuntime?: McpRuntime;
+  sessionAdvanced?: SessionAdvancedService;
   dispatchData?(request: DataIpcRequest): Promise<unknown>;
   dispatchDiagnostics?(request: DiagnosticsIpcRequest): Promise<unknown>;
   dispatchRelease?(request: ReleaseIpcRequest): Promise<unknown>;
@@ -135,6 +140,7 @@ export function registerIpc({
   channelRuntime,
   mcp,
   mcpRuntime,
+  sessionAdvanced,
   dispatchData,
   dispatchDiagnostics,
   dispatchRelease,
@@ -163,6 +169,9 @@ export function registerIpc({
   ]);
   const diagnosticsWriteMethods = new Set(["logs.export", "logs.cleanup", "config.export"]);
   const releaseWriteMethods = new Set(["release.install", "uninstall.execute"]);
+  const sessionAdvancedWriteMethods = new Set([
+    "sessions.reset", "sessions.compact", "sessions.branch", "sessions.restore", "sessions.steer",
+  ]);
   const clientDispatcher = client === undefined ? undefined : createClientDispatcher({
     client,
     organizer,
@@ -180,6 +189,7 @@ export function registerIpc({
     ? undefined
     : createChannelDispatcher(channels, channelRuntime);
   const mcpDispatcher = mcp === undefined || mcpRuntime === undefined ? undefined : createMcpDispatcher(mcp, mcpRuntime);
+  const sessionAdvancedDispatcher = sessionAdvanced === undefined ? undefined : createSessionAdvancedDispatcher(sessionAdvanced);
   const authorize = (event: unknown): void => {
     const candidate = event as { sender?: unknown; senderFrame?: unknown };
     if (
@@ -364,6 +374,25 @@ export function registerIpc({
     }
   });
 
+  if (sessionAdvancedDispatcher !== undefined) ipcMain.handle(SESSION_ADVANCED_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = SessionAdvancedIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid Session Advanced IPC request.");
+    try {
+      const operation = () => sessionAdvancedDispatcher(parsed.data);
+      return SessionAdvancedIpcResponseSchema.parse(await (
+        sessionAdvancedWriteMethods.has(parsed.data.method) ? coordinateWrite(operation) : operation()
+      ));
+    } catch (error) {
+      return SessionAdvancedIpcResponseSchema.parse({
+        method: parsed.data.method,
+        requestId: parsed.data.requestId,
+        ok: false,
+        error: toRendererSafeError(error),
+      });
+    }
+  });
+
   if (dispatchData !== undefined) ipcMain.handle(DATA_IPC_CHANNEL, async (event, payload) => {
     authorize(event);
     const parsed = DataIpcRequestSchema.safeParse(payload);
@@ -461,6 +490,7 @@ export function registerIpc({
     if (plugins !== undefined) ipcMain.removeHandler(PLUGIN_IPC_CHANNEL);
     if (channelDispatcher !== undefined) ipcMain.removeHandler(CHANNEL_IPC_CHANNEL);
     if (mcpDispatcher !== undefined) ipcMain.removeHandler(MCP_IPC_CHANNEL);
+    if (sessionAdvancedDispatcher !== undefined) ipcMain.removeHandler(SESSION_ADVANCED_IPC_CHANNEL);
     if (dispatchData !== undefined) ipcMain.removeHandler(DATA_IPC_CHANNEL);
     if (dispatchDiagnostics !== undefined) ipcMain.removeHandler(DIAGNOSTICS_IPC_CHANNEL);
     if (dispatchRelease !== undefined) ipcMain.removeHandler(RELEASE_IPC_CHANNEL);

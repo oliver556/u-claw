@@ -3,8 +3,8 @@ import type {
   SessionAdvancedIpcResponse,
   SessionCheckpoint,
   SessionFileEntry,
-} from "@uclaw/shared/dist/session-advanced.js";
-import type { Session } from "@uclaw/shared";
+  Session,
+} from "@uclaw/shared";
 import { GitBranch, History, LoaderCircle, RefreshCw, RotateCcw, Send, Shrink, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 

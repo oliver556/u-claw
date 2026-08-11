@@ -656,6 +656,7 @@ export async function startElectronMain(
       channelRuntime,
       mcp,
       mcpRuntime,
+      sessionAdvanced: client.sessionAdvanced,
       dispatchData: data.dispatch,
       dispatchDiagnostics: diagnostics.dispatch,
       dispatchRelease: createReleaseDispatcher(release),

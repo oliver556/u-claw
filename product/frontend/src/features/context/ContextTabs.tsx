@@ -1,9 +1,10 @@
 import type { ArtifactEntry, ArtifactSnapshot, CapabilitySet, FileRef, Message, Session, ToolCall, UClawClient } from "@uclaw/shared";
 import { Activity, Brain, FileText, Hammer, Link2, PackageCheck, Paperclip } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SessionAdvancedPanel } from "../sessions/SessionAdvancedPanel";
 
-const tabs = ["上下文", "记忆", "成果", "活动"] as const;
-const tabIds = { 上下文: "context", 记忆: "memory", 成果: "artifacts", 活动: "activity" } as const;
+const tabs = ["上下文", "记忆", "成果", "活动", "高级"] as const;
+const tabIds = { 上下文: "context", 记忆: "memory", 成果: "artifacts", 活动: "activity", 高级: "advanced" } as const;
 
 type ContextKind = "attachment" | "reference" | "memory" | "tool" | "artifact";
 
@@ -35,6 +36,7 @@ interface ContextTabsProps {
   session?: Session;
   capabilities?: CapabilitySet;
   activity: string[];
+  onSessionReadback?(session: Session): void;
 }
 
 function stepFor(message: Message, index: number): ContextStep {
@@ -116,7 +118,7 @@ function EmptyContext() {
   return <div className="empty-panel"><FileText /><strong>当前会话没有上下文</strong><p>附件、引用文件、工具结果和任务产物会随对话步骤显示。</p></div>;
 }
 
-export function ContextTabs({ client, session, capabilities, activity }: ContextTabsProps) {
+export function ContextTabs({ client, session, capabilities, activity, onSessionReadback }: ContextTabsProps) {
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("上下文");
   const [snapshot, setSnapshot] = useState<ContextSnapshot>();
   const [artifactSnapshot, setArtifactSnapshot] = useState<ArtifactSnapshot>();
@@ -187,6 +189,7 @@ export function ContextTabs({ client, session, capabilities, activity }: Context
         setActiveTab("上下文");
       }} /> : null}
       {activeTab === "活动" ? <div className="empty-panel"><Activity /><strong>{session?.title ?? "未选择会话"}</strong>{activity.length === 0 ? <p>此会话暂无活动。</p> : activity.map((item, index) => <p key={`${index}-${item}`}>{item}</p>)}</div> : null}
+      {activeTab === "高级" ? <SessionAdvancedPanel bridge={window.uclaw?.sessionAdvanced} sessionId={session?.id} onSessionReadback={onSessionReadback} /> : null}
       {selectedStep === undefined || selectedEntries.length === 0 ? null : <div className="context-callout"><Activity /><span><strong>{selectedStep.label}</strong><small>当前选中步骤关联 {selectedEntries.length} 项上下文。</small></span></div>}
     </div>
     <footer><FileText /><span>上下文使用量</span><strong>{snapshot === undefined ? "加载中" : `${snapshot.attachments.length + snapshot.references.length + snapshot.memories.length + snapshot.tools.length + snapshot.artifacts.length} 项`}</strong></footer>

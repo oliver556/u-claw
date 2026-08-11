@@ -5,6 +5,7 @@ import {
   CLIENT_IPC_EVENT_CHANNEL,
   IPC_CHANNELS,
   RELEASE_IPC_CHANNEL,
+  SESSION_ADVANCED_IPC_CHANNEL,
   WINDOW_MAXIMIZED_EVENT_CHANNEL,
   WINDOW_IPC_CHANNEL,
 } from "../src/ipc/channels.js";
@@ -18,6 +19,9 @@ describe("installPreloadBridge", () => {
   it("exposes only fixed window and client contract methods", async () => {
     const invoke = vi.fn(async (_channel: string, request: unknown) => {
       const { method, requestId } = request as { method: string; requestId: string };
+      if (method === "sessions.files.list") {
+        return { method, requestId, ok: true, result: { sessionId: "agent:main:main", files: [] } };
+      }
       return { method, requestId, ok: true, result: null };
     });
     let api: Record<string, unknown> | undefined;
@@ -33,7 +37,7 @@ describe("installPreloadBridge", () => {
       ipcRenderer: { invoke, on, removeListener },
     });
 
-    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "data", "diagnostics", "release"]);
+    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "sessionAdvanced", "data", "diagnostics", "release"]);
     expect(api).not.toHaveProperty("ipcRenderer");
     expect(api).not.toHaveProperty("invoke");
     expect(Object.keys(api?.client as object)).toEqual(["invoke", "subscribe"]);
@@ -43,6 +47,7 @@ describe("installPreloadBridge", () => {
     expect(Object.keys(api?.plugins as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.channels as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.mcp as object)).toEqual(["invoke"]);
+    expect(Object.keys(api?.sessionAdvanced as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.data as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.diagnostics as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.release as object)).toEqual(["invoke"]);
@@ -53,6 +58,13 @@ describe("installPreloadBridge", () => {
       params: {},
     });
     expect(invoke).toHaveBeenLastCalledWith(WINDOW_IPC_CHANNEL, expect.any(Object));
+
+    await (api?.sessionAdvanced as { invoke: (request: unknown) => Promise<unknown> }).invoke({
+      method: "sessions.files.list",
+      requestId: "advanced-1",
+      params: { sessionId: "agent:main:main" },
+    });
+    expect(invoke).toHaveBeenLastCalledWith(SESSION_ADVANCED_IPC_CHANNEL, expect.any(Object));
 
     await expect(
       (api?.client as { invoke: (request: unknown) => Promise<unknown> }).invoke({
