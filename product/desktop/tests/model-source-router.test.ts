@@ -221,6 +221,24 @@ describe("model source router", () => {
     },
   );
 
+  it("preserves typed OpenClaw executor errors without fallback", async () => {
+    const context = await setup();
+    await context.providers.setEnabled("qwen", true);
+    const error = Object.assign(new Error("Selected model unavailable"), {
+      uclawError: {
+        code: "MODEL_UNAVAILABLE",
+        message: "Selected model unavailable",
+        retryable: false,
+        recoveryActions: ["open-settings"],
+        causeDetails: { operation: "sessions.patch" },
+      },
+    });
+    context.domestic.mockRejectedValueOnce(error);
+
+    await expect(context.router.execute({ prompt: "typed-error" })).rejects.toBe(error);
+    expect(context.builtin).not.toHaveBeenCalled();
+  });
+
   it("preserves typed builtin failure classification without retry or external fallback", async () => {
     const context = await setup();
     const failure = new BuiltinServiceClientError(
