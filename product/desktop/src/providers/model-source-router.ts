@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
   BuiltinModelRequestSchema,
   MessageEventSchema,
+  UClawErrorSchema,
   type BuiltinModelRequest,
   type BuiltinModelResponse,
   type MessageEvent,
@@ -138,6 +139,10 @@ function externalSource(provider: ProviderConfigEntry): "domestic" | "custom" {
   return provider.templateId === undefined ? "custom" : "domestic";
 }
 
+function hasTypedUClawError(error: unknown): boolean {
+  return UClawErrorSchema.safeParse((error as { uclawError?: unknown } | null)?.uclawError).success;
+}
+
 export function createModelSourceRouter<Request, Result>({
   providers,
   credentials,
@@ -153,6 +158,7 @@ export function createModelSourceRouter<Request, Result>({
           return await executors[source](request, provider, signal, network);
         } catch (error) {
           if (error instanceof ModelSourceFailure && error.source === source) throw error;
+          if (hasTypedUClawError(error)) throw error;
           throw new ModelSourceFailure(source, "upstream");
         }
       }
