@@ -4,6 +4,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import {
   DEFAULT_PROVIDER_NETWORK_SETTINGS,
   LocalModelDiscoverySchema,
+  ProviderNetworkSettingsSchema,
   ProviderVerificationSchema,
   type LocalModelDiscovery,
   type ProviderConfigEntry,
@@ -36,6 +37,32 @@ const DEFAULT_DISCOVERY_TARGETS: readonly DiscoveryTarget[] = Object.freeze([
   { source: "lm-studio", baseUrl: "http://127.0.0.1:1234" },
 ]);
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const PROVIDER_PROXY_ENV_KEYS = [
+  "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy",
+] as const;
+
+export function applyProviderNetworkEnvironment(
+  environment: NodeJS.ProcessEnv,
+  network: ProviderNetworkSettings,
+): NodeJS.ProcessEnv {
+  const parsed = ProviderNetworkSettingsSchema.parse(network);
+  const result = { ...environment };
+  for (const key of PROVIDER_PROXY_ENV_KEYS) delete result[key];
+  if (parsed.httpProxy !== null) {
+    result.HTTP_PROXY = parsed.httpProxy;
+    result.http_proxy = parsed.httpProxy;
+  }
+  if (parsed.httpsProxy !== null) {
+    result.HTTPS_PROXY = parsed.httpsProxy;
+    result.https_proxy = parsed.httpsProxy;
+  }
+  if (parsed.noProxy.length > 0) {
+    const noProxy = parsed.noProxy.join(",");
+    result.NO_PROXY = noProxy;
+    result.no_proxy = noProxy;
+  }
+  return result;
+}
 
 const failed = (category: Exclude<ProviderVerification, { state: "unverified" | "succeeded" }>["category"]): ProviderVerification => {
   const results = {

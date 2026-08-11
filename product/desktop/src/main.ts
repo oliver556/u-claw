@@ -31,7 +31,9 @@ import {
 import type { AuthorizedWebContents, IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import { createSessionOrganizerStore } from "./session-organizer/store.js";
-import { createProviderStore } from "./providers/provider-store.js";
+import { createProviderStore, type ProviderStore } from "./providers/provider-store.js";
+import type { ProviderNetworkService } from "./providers/provider-network.js";
+import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provider-config.js";
 import { createMainProcessModelRouting, type ExternalModelSourceExecutors } from "./providers/model-source-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
 import { createSkillService } from "./skills/skill-service.js";
@@ -243,6 +245,9 @@ export interface DesktopMainOptions {
   gatewayStopTimeoutMs?: number;
   gatewayKillTimeoutMs?: number;
   consistencyCoordinator?: ProductionRuntimeConsistencyCoordinator;
+  providers?: ProviderStore;
+  providerNetwork?: ProviderNetworkService;
+  providerConfig?: OpenClawProviderConfigBackend;
   modelSourceExecutors?: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
   domainRegistrations?: DesktopDomainRegistry;
   dispose?(): Promise<void> | void;
@@ -525,7 +530,7 @@ export async function startElectronMain(
   const consistencyCoordinator = new ProductionRuntimeConsistencyCoordinator();
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
   const attachments = options.attachments ?? client.attachments;
-  const providers = createProviderStore({ dataDir: portablePaths.dataDir });
+  const providers = options.providers ?? createProviderStore({ dataDir: portablePaths.dataDir });
   const modelRouting = createMainProcessModelRouting({
     dataDir: portablePaths.dataDir,
     providers,
@@ -642,6 +647,8 @@ export async function startElectronMain(
       organizer,
       attachments,
       providers,
+      providerNetwork: options.providerNetwork,
+      providerConfig: options.providerConfig,
       routeChatSend: modelRouting.routeChatSend,
       skills,
       plugins,

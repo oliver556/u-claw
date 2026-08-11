@@ -1,6 +1,7 @@
 import { spawn as spawnChild } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync } from "node:fs";
+import { z } from "zod";
 
 import {
   AttachmentManager,
@@ -14,12 +15,19 @@ import {
 import { MessageEventSchema, type MessageEvent, type ProviderConfigEntry, type ProviderNetworkSettings, type SendMessageInput } from "@uclaw/shared";
 
 import { createClientDispatcher } from "../ipc/client-dispatcher.js";
-import { createProviderHttpClient } from "../providers/provider-network.js";
+import { createOpenClawProviderConfigBackend } from "../providers/openclaw-provider-config.js";
+import { createProviderStore, type ProviderStore } from "../providers/provider-store.js";
+import {
+  applyProviderNetworkEnvironment,
+  createProviderHttpClient,
+  createProviderNetworkService,
+} from "../providers/provider-network.js";
 import type {
   DesktopDomainRegistry,
   DesktopMainOptions,
   RegisteredDesktopDomain,
 } from "../main.js";
+import { createOpenClawCliPluginRuntime } from "../plugins/openclaw-cli-runtime.js";
 import {
   DesktopWiringError,
   readDesktopWiringEnvironment,
@@ -135,7 +143,7 @@ class PortAwareGatewayTransport implements OpenClawTransport {
       connectParams: () => ({
         client: { id: "u-claw-desktop", mode: "desktop" },
         role: "operator",
-        scopes: ["operator.read", "operator.write", "operator.approvals"],
+        scopes: ["operator.read", "operator.write", "operator.approvals", "operator.admin"],
         caps: ["protocol-v4"],
         auth: { token: this.token },
       }),
@@ -187,8 +195,15 @@ type ProviderExecutor = (
 
 const providerHttpClient = createProviderHttpClient();
 
-function registeredProviderExecutor(registry: DesktopDomainRegistry, source: "domestic" | "custom"): ProviderExecutor {
+export function createRegisteredProviderExecutor(
+  registry: DesktopDomainRegistry,
+  source: "domestic" | "custom",
+  nativeExecutor?: ProviderExecutor,
+): ProviderExecutor {
   return async (input, provider, signal, network) => {
+    if (provider.id === "zai" && provider.baseUrl === null && nativeExecutor !== undefined) {
+      return nativeExecutor(input, provider, signal, network);
+    }
     const registration = registry.resolve<RegisteredDesktopDomain & { execute?: ProviderExecutor }>(`provider.executor.${source}`) ??
       registry.resolve<RegisteredDesktopDomain & { execute?: ProviderExecutor }>("provider.executor.openai-compatible");
     if (typeof registration?.execute !== "function") {
@@ -204,9 +219,12 @@ async function executeOpenAICompatibleProvider(
   signal?: AbortSignal,
   network?: ProviderNetworkSettings,
 ): Promise<AsyncIterable<MessageEvent>> {
-  if (provider.baseUrl === null || provider.apiKey === undefined) {
+  if (provider.baseUrl === null) {
     throw new DesktopWiringError("UNCONFIGURED", "Model provider is not configured.");
   }
+  const endpoint = new URL(provider.baseUrl);
+  const loopback = endpoint.hostname === "localhost" || endpoint.hostname === "127.0.0.1" || endpoint.hostname === "[::1]";
+  if (provider.apiKey === undefined && !loopback) throw new DesktopWiringError("UNCONFIGURED", "Model provider is not configured.");
   if (input.blocks.some((block) => block.type !== "text")) {
     throw new DesktopWiringError("UNSUPPORTED", "External provider attachments are not supported.");
   }
@@ -217,7 +235,7 @@ async function executeOpenAICompatibleProvider(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${provider.apiKey}`,
+        ...(provider.apiKey === undefined ? {} : { authorization: `Bearer ${provider.apiKey}` }),
       },
       body: JSON.stringify({
         model: provider.model,
@@ -272,6 +290,27 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   const domains = new ProductionDomainRegistry();
   const attachments = new AttachmentManager();
   const transport = new PortAwareGatewayTransport(environment.gatewayToken);
+  const openClawConfig = createOpenClawProviderConfigBackend({
+    request: (method, params) => transport.router.request(method, params as never, z.unknown()),
+  });
+  const storedProviders = createProviderStore({ dataDir: environment.dataRoot, openClawConfig });
+  let providerNetworkSettings = await storedProviders.getNetworkForRuntime();
+  const providers: ProviderStore = {
+    ...storedProviders,
+    setNetwork: async (network) => {
+      const snapshot = await storedProviders.setNetwork(network);
+      providerNetworkSettings = await storedProviders.getNetworkForRuntime();
+      return snapshot;
+    },
+  };
+  const providerNetwork = createProviderNetworkService();
+  const pluginRuntime = await createOpenClawCliPluginRuntime({
+    runtimeRoot: environment.runtimeRoot,
+    executable: environment.nodeExecutable,
+    entrypoint: environment.openClawEntry,
+    dataDir: environment.dataRoot,
+    baseEnvironment: env,
+  });
   let gatewayProcessAlive = false;
   const client = new OpenClawClient({
     transport,
@@ -310,11 +349,11 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
         executable: environment.nodeExecutable,
         args: [environment.openClawEntry, "gateway", "run", "--port", String(port), "--auth", "token", "--ws-log", "compact"],
         cwd: environment.runtimeRoot,
-        env: {
+        env: applyProviderNetworkEnvironment({
           ...env,
           ...(environment.electronRunAsNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
           OPENCLAW_GATEWAY_TOKEN: environment.gatewayToken,
-        },
+        }, providerNetworkSettings),
       };
     },
     requiredMethods: REQUIRED_GATEWAY_METHODS,
@@ -333,10 +372,14 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     dispatchClient: dispatcher,
     client,
     attachments,
+    providers,
+    providerNetwork,
+    providerConfig: openClawConfig,
+    pluginRuntime,
     domainRegistrations: domains,
     modelSourceExecutors: {
-      domestic: registeredProviderExecutor(domains, "domestic"),
-      custom: registeredProviderExecutor(domains, "custom"),
+      domestic: createRegisteredProviderExecutor(domains, "domestic", async (input, _provider, signal) => client.chat.send(input, signal)),
+      custom: createRegisteredProviderExecutor(domains, "custom"),
     },
     dispose: async () => {
       if (disposed) return;

@@ -125,11 +125,12 @@ async function runCommand(options: {
 export async function createOpenClawCliPluginRuntime(input: {
   runtimeRoot: string;
   executable: string;
+  entrypoint?: string;
   dataDir: string;
   baseEnvironment?: NodeJS.ProcessEnv;
 }): Promise<PluginRuntimeAdapter> {
   if (!isAbsolute(input.runtimeRoot) || !isAbsolute(input.executable)) throw new Error("OpenClaw runtime paths must be absolute.");
-  const entrypoint = await findOpenClawEntrypoint(input.runtimeRoot);
+  const entrypoint = await findOpenClawEntrypoint(input.runtimeRoot, input.entrypoint);
   const packageJson = JSON.parse(await readFile(join(dirname(entrypoint), "package.json"), "utf8")) as { name?: unknown; version?: unknown };
   if (packageJson.name !== "openclaw" || packageJson.version !== LOCKED_OPENCLAW_VERSION) {
     throw new Error("OpenClaw Plugin runtime version does not match lock.");

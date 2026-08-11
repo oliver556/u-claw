@@ -45,6 +45,7 @@ import type { SkillService } from "../skills/skill-service.js";
 import { createPluginDispatcher } from "../plugins/plugin-dispatcher.js";
 import type { PluginService } from "../plugins/plugin-service.js";
 import { createProviderNetworkService, type ProviderNetworkService } from "../providers/provider-network.js";
+import type { OpenClawProviderConfigBackend } from "../providers/openclaw-provider-config.js";
 import { createChannelDispatcher, type ChannelRuntime } from "../channels/channel-dispatcher.js";
 import type { ChannelStore } from "../channels/channel-store.js";
 import { createMcpDispatcher, type McpRuntime } from "../mcp/mcp-dispatcher.js";
@@ -79,6 +80,7 @@ export interface RegisterIpcDependencies {
   selectAttachments?(): Promise<AttachmentImportInput[]>;
   providers?: ProviderStore;
   providerNetwork?: ProviderNetworkService;
+  providerConfig?: OpenClawProviderConfigBackend;
   skills?: SkillService;
   plugins?: PluginService;
   channels?: ChannelStore;
@@ -126,6 +128,7 @@ export function registerIpc({
   selectAttachments,
   providers,
   providerNetwork,
+  providerConfig,
   skills,
   plugins,
   channels,
@@ -142,7 +145,7 @@ export function registerIpc({
   const providerWriteMethods = new Set([
     "providers.create", "providers.update", "providers.remove", "providers.set-enabled",
     "providers.move", "providers.select", "providers.set-api-key", "providers.clear-api-key",
-    "providers.set-network",
+    "providers.set-network", "providers.config-patch", "providers.config-apply",
   ]);
   const clientWriteMethods = new Set([
     "gateway.reconnect", "sessions.create", "sessions.rename", "sessions.remove",
@@ -170,7 +173,7 @@ export function registerIpc({
   const dispatch = clientDispatcher ?? dispatchClient;
   const providerDispatcher = providers === undefined
     ? undefined
-    : createProviderDispatcher(providers, providerNetwork ?? createProviderNetworkService());
+    : createProviderDispatcher(providers, providerNetwork ?? createProviderNetworkService(), providerConfig);
   const skillDispatcher = skills === undefined ? undefined : createSkillDispatcher(skills);
   const pluginDispatcher = plugins === undefined ? undefined : createPluginDispatcher(plugins);
   const channelDispatcher = channels === undefined || channelRuntime === undefined

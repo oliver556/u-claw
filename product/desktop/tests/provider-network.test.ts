@@ -19,6 +19,42 @@ afterEach(async () => {
 });
 
 describe("provider network service", () => {
+  it("projects saved Provider network settings into a complete runtime environment", () => {
+    const environment = (desktop as any).applyProviderNetworkEnvironment({
+      HTTP_PROXY: "http://stale-http.example.com:8080",
+      HTTPS_PROXY: "http://stale-https.example.com:8080",
+      NO_PROXY: "stale.example.com",
+      CUSTOM_RUNTIME_VALUE: "preserved",
+    }, {
+      httpProxy: "http://proxy.example.com:8080",
+      httpsProxy: "https://secure-proxy.example.com:8443",
+      noProxy: ["localhost", "127.0.0.1", "::1", ".internal.example.com"],
+    });
+
+    expect(environment).toMatchObject({
+      CUSTOM_RUNTIME_VALUE: "preserved",
+      HTTP_PROXY: "http://proxy.example.com:8080",
+      http_proxy: "http://proxy.example.com:8080",
+      HTTPS_PROXY: "https://secure-proxy.example.com:8443",
+      https_proxy: "https://secure-proxy.example.com:8443",
+      NO_PROXY: "localhost,127.0.0.1,::1,.internal.example.com",
+      no_proxy: "localhost,127.0.0.1,::1,.internal.example.com",
+    });
+  });
+
+  it("removes inherited proxy variables when saved Provider settings disable them", () => {
+    const environment = (desktop as any).applyProviderNetworkEnvironment({
+      HTTP_PROXY: "http://stale.example.com:8080",
+      http_proxy: "http://stale.example.com:8080",
+      HTTPS_PROXY: "http://stale.example.com:8080",
+      https_proxy: "http://stale.example.com:8080",
+      NO_PROXY: "stale.example.com",
+      no_proxy: "stale.example.com",
+    }, { httpProxy: null, httpsProxy: null, noProxy: [] });
+
+    expect(environment).toEqual({});
+  });
+
   it("executes bounded JSON requests through the safe provider network path", async () => {
     const baseUrl = await fixture((_request, response) => {
       response.setHeader("content-type", "application/json");

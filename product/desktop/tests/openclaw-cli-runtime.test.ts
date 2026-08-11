@@ -45,6 +45,27 @@ else if (args[1] === "install") {
 }
 
 describe("OpenClaw CLI Plugin runtime adapter", () => {
+  it("uses the production-validated explicit entrypoint without scanning the runtime inventory", async () => {
+    const fixture = await fixtureRuntime();
+    const nestedRoot = join(fixture.runtimeRoot, "core", "node_modules", "openclaw");
+    await mkdir(nestedRoot, { recursive: true });
+    const entrypoint = join(nestedRoot, "openclaw.mjs");
+    await writeFile(join(nestedRoot, "package.json"), JSON.stringify({ name: "openclaw", version: "2026.7.1-2" }));
+    await writeFile(entrypoint, "console.log(JSON.stringify({ plugins: [] }));");
+    await rm(join(fixture.runtimeRoot, "openclaw.mjs"));
+    await rm(join(fixture.runtimeRoot, "package.json"));
+
+    const runtime = await createOpenClawCliPluginRuntime({
+      runtimeRoot: fixture.runtimeRoot,
+      executable: process.execPath,
+      entrypoint,
+      dataDir: fixture.dataDir,
+      baseEnvironment: {},
+    });
+
+    await expect(runtime.installed()).resolves.toEqual([]);
+  });
+
   it("rejects an entrypoint from a different OpenClaw version", async () => {
     const fixture = await fixtureRuntime();
     await writeFile(join(fixture.runtimeRoot, "package.json"), JSON.stringify({ name: "openclaw", version: "2026.7.1-1" }));

@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
+    const listeners = new Set<(event: unknown) => void>();
     let snapshot = {
       schemaVersion: 1,
       selectedProviderId: "openai" as string | null,
@@ -15,6 +16,15 @@ test.beforeEach(async ({ page }) => {
     Object.defineProperty(window, "uclaw", {
       configurable: true,
       value: {
+        client: {
+          subscribe(listener: (event: unknown) => void) { listeners.add(listener); return () => listeners.delete(listener); },
+          async invoke(request: { method: string; requestId: string }) {
+            if (request.method === "gateway.negotiate") return success(request, { protocolVersion: 4, methods: [], events: [], features: {} });
+            if (request.method === "sessions.list") return success(request, { items: [], nextCursor: null, hasMore: false });
+            if (request.method === "gateway.watch-status" || request.method === "subscriptions.cancel") return success(request, null);
+            throw new Error(`Unexpected client IPC method: ${request.method}`);
+          },
+        },
         providers: {
           async invoke(request: { method: string; requestId: string; params: Record<string, any> }) {
             if (request.method === "providers.select") snapshot = { ...snapshot, selectedProviderId: request.params.providerId };

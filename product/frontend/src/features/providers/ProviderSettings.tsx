@@ -11,7 +11,8 @@ import {
   type ProviderVerification,
 } from "@uclaw/shared";
 import { Alert, Button, Input, Modal, Popconfirm, Switch, Tag, Tooltip } from "antd";
-import { ArrowDown, ArrowUp, Check, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
+import Ajv, { type ErrorObject } from "ajv";
+import { ArrowDown, ArrowUp, Braces, Check, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { LocalModelDiscoveryPanel } from "./LocalModelDiscoveryPanel";
@@ -56,6 +57,15 @@ function localProviderId(model: LocalModelDiscovery["models"][number], usedIds: 
   return candidate;
 }
 
+function configErrorMessage(error: ErrorObject, uiHints?: Record<string, unknown>): string {
+  const path = error.instancePath || "/";
+  const hint = uiHints?.[path];
+  const label = hint !== null && typeof hint === "object" && typeof (hint as { label?: unknown }).label === "string"
+    ? (hint as { label: string }).label
+    : path;
+  return `OpenClaw 配置校验失败：${label} ${error.message ?? "不符合 schema"}`;
+}
+
 export function ProviderSettings() {
   const [snapshot, setSnapshot] = useState<ProviderSnapshot>();
   const [loading, setLoading] = useState(true);
@@ -70,8 +80,21 @@ export function ProviderSettings() {
   const [keyProvider, setKeyProvider] = useState<ProviderConfigSummary>();
   const [newApiKey, setNewApiKey] = useState("");
   const [keyError, setKeyError] = useState<string>();
+  const [configOpen, setConfigOpen] = useState(false);
+  const [configBody, setConfigBody] = useState("");
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configError, setConfigError] = useState<string>();
+  const [configSchema, setConfigSchema] = useState<Record<string, unknown>>();
+  const [configUiHints, setConfigUiHints] = useState<Record<string, unknown>>();
 
   const invoke = window.uclaw?.providers?.invoke;
+  const readSnapshot = useCallback(async (): Promise<ProviderSnapshot> => {
+    if (!invoke) throw new Error("Provider bridge unavailable");
+    const response = await invoke({ method: "providers.list", requestId: nextRequestId(), params: {} });
+    if (!response.ok || response.method !== "providers.list") throw new Error("Provider readback failed");
+    return response.result;
+  }, [invoke]);
   const load = useCallback(async () => {
     setLoading(true);
     setError(undefined);
@@ -81,15 +104,13 @@ export function ProviderSettings() {
       return;
     }
     try {
-      const response = await invoke({ method: "providers.list", requestId: nextRequestId(), params: {} });
-      if (!response.ok) throw new Error();
-      setSnapshot(response.result as ProviderSnapshot);
+      setSnapshot(await readSnapshot());
     } catch {
       setError("Provider 配置加载失败，请重试");
     } finally {
       setLoading(false);
     }
-  }, [invoke]);
+  }, [invoke, readSnapshot]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -100,7 +121,7 @@ export function ProviderSettings() {
     try {
       const response = await invoke(request);
       if (!response.ok) throw new Error();
-      if (request.method !== "providers.verify") setSnapshot(response.result as ProviderSnapshot);
+      if (request.method !== "providers.verify") setSnapshot(await readSnapshot());
       return true;
     } catch {
       setError("Provider 配置保存失败，请重试");
@@ -166,8 +187,9 @@ export function ProviderSettings() {
   };
   const saveKey = async () => {
     if (!keyProvider || !newApiKey) return;
-    if (await mutate(request("providers.set-api-key", { providerId: keyProvider.id, apiKey: newApiKey }), keyProvider.id)) {
-      setNewApiKey("");
+    const apiKey = newApiKey;
+    setNewApiKey("");
+    if (await mutate(request("providers.set-api-key", { providerId: keyProvider.id, apiKey }), keyProvider.id)) {
       setKeyProvider(undefined);
     } else {
       setKeyError("API Key 保存失败，请重试");
@@ -212,11 +234,13 @@ export function ProviderSettings() {
           model: model.id,
         } }));
         if (!created.ok || created.method !== "providers.create") throw new Error();
-        setSnapshot(created.result);
+        const createdSnapshot = await readSnapshot();
+        if (!createdSnapshot.providers.some((provider) => provider.id === providerId)) throw new Error();
+        setSnapshot(createdSnapshot);
       }
       const selected = await invoke(request("providers.select", { providerId }));
       if (!selected.ok || selected.method !== "providers.select") throw new Error();
-      setSnapshot(selected.result);
+      setSnapshot(await readSnapshot());
     } catch {
       setError("本地模型选择失败，请重试");
     }
@@ -226,15 +250,79 @@ export function ProviderSettings() {
     try {
       const response = await invoke(request("providers.set-network", { network }));
       if (!response.ok || response.method !== "providers.set-network") return false;
-      setSnapshot(response.result);
+      setSnapshot(await readSnapshot());
       return true;
     } catch {
       return false;
     }
   };
+  const loadOpenClawConfig = async () => {
+    if (!invoke) return;
+    setConfigLoading(true);
+    setConfigError(undefined);
+    setConfigSchema(undefined);
+    setConfigUiHints(undefined);
+    try {
+      const [schema, config] = await Promise.all([
+        invoke(request("providers.config-schema", {})),
+        invoke(request("providers.config-get", {})),
+      ]);
+      if (!schema.ok || schema.method !== "providers.config-schema" || !config.ok || config.method !== "providers.config-get") throw new Error();
+      setConfigSchema(schema.result.schema);
+      setConfigUiHints(schema.result.uiHints);
+      setConfigBody(JSON.stringify(config.result.config, null, 2));
+    } catch {
+      setConfigError("OpenClaw 配置加载失败，请重试");
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+  const openOpenClawConfig = () => {
+    setConfigOpen(true);
+    void loadOpenClawConfig();
+  };
+  const applyOpenClawConfig = async () => {
+    if (!invoke || configSaving) return;
+    let config: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(configBody);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      config = parsed as Record<string, unknown>;
+    } catch {
+      setConfigError("OpenClaw 配置 JSON 无效");
+      return;
+    }
+    if (!configSchema) {
+      setConfigError("OpenClaw 配置 schema 尚未加载，请刷新后重试");
+      return;
+    }
+    try {
+      const validate = new Ajv({ allErrors: true, strict: false }).compile(configSchema);
+      if (!validate(config)) {
+        setConfigError(configErrorMessage(validate.errors?.[0] ?? { keyword: "schema", instancePath: "", schemaPath: "", params: {} }, configUiHints));
+        return;
+      }
+    } catch {
+      setConfigError("OpenClaw 配置 schema 无效，无法安全应用");
+      return;
+    }
+    setConfigSaving(true);
+    setConfigError(undefined);
+    try {
+      const applied = await invoke(request("providers.config-apply", { config }));
+      if (!applied.ok || applied.method !== "providers.config-apply") throw new Error();
+      const readback = await invoke(request("providers.config-get", {}));
+      if (!readback.ok || readback.method !== "providers.config-get") throw new Error();
+      setConfigBody(JSON.stringify(readback.result.config, null, 2));
+    } catch {
+      setConfigError("OpenClaw 配置应用失败，请重试");
+    } finally {
+      setConfigSaving(false);
+    }
+  };
 
   return <section className="secondary-view provider-settings">
-    <header className="provider-page-header"><div><h1>模型 Provider</h1><p>Provider 配置</p></div><Button type="primary" icon={<Plus />} onClick={openCreate}>新增 Provider</Button></header>
+    <header className="provider-page-header"><div><h1>模型 Provider</h1><p>Provider 配置</p></div><div className="provider-header-actions"><Button icon={<Braces />} aria-label="管理 OpenClaw 配置" onClick={openOpenClawConfig}>OpenClaw 配置</Button><Button type="primary" icon={<Plus />} onClick={openCreate}>新增 Provider</Button></div></header>
     <div className="secondary-content provider-content">
       {error ? <Alert type="error" showIcon message={error} action={error.startsWith("Provider 配置加载") ? <Button size="small" aria-label="重试" onClick={() => void load()}>重试</Button> : undefined} /> : null}
       {loading ? <div className="provider-state"><RefreshCw className="spin" /><span>正在加载 Provider</span></div> : null}
@@ -282,6 +370,11 @@ export function ProviderSettings() {
     <Modal title={keyProvider ? `${keyProvider.name} API Key` : "API Key"} open={keyProvider !== undefined} onCancel={() => { setNewApiKey(""); setKeyError(undefined); setKeyProvider(undefined); }} footer={<><Button onClick={() => { setNewApiKey(""); setKeyError(undefined); setKeyProvider(undefined); }}>取消</Button>{keyProvider?.apiKeyConfigured ? <Popconfirm title="清除已存 Key？" okText="清除" cancelText="取消" onConfirm={() => { if (keyProvider) void mutate(request("providers.clear-api-key", { providerId: keyProvider.id }), keyProvider.id).then((saved) => { if (saved) setKeyProvider(undefined); else setKeyError("API Key 清除失败，请重试"); }); }}><Button danger>清除 Key</Button></Popconfirm> : null}<Button type="primary" disabled={!newApiKey} onClick={() => void saveKey()}>保存 Key</Button></>}>
       {keyError ? <Alert type="error" showIcon message={keyError} className="provider-key-error" /> : null}
       <Input.Password aria-label="新 API Key" autoComplete="new-password" value={newApiKey} onChange={(event) => setNewApiKey(event.target.value)} />
+    </Modal>
+
+    <Modal title="OpenClaw 配置" width={760} open={configOpen} onCancel={() => { setConfigOpen(false); setConfigBody(""); setConfigError(undefined); setConfigSchema(undefined); setConfigUiHints(undefined); }} footer={<><Button icon={<RefreshCw />} loading={configLoading} onClick={() => void loadOpenClawConfig()}>刷新</Button><Button type="primary" loading={configSaving} aria-label="应用 OpenClaw 配置" onClick={() => void applyOpenClawConfig()}>应用</Button></>}>
+      {configError ? <Alert type="error" showIcon message={configError} className="provider-key-error" /> : null}
+      <Input.TextArea aria-label="OpenClaw 配置 JSON" value={configBody} disabled={configLoading} autoSize={{ minRows: 16, maxRows: 28 }} spellCheck={false} onChange={(event) => setConfigBody(event.target.value)} />
     </Modal>
   </section>;
 }

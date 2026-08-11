@@ -19,6 +19,9 @@ import {
   type UClawError,
 } from "@uclaw/shared";
 
+import { createProviderCredentialStore, type ProviderCredentialStore } from "./provider-credential-store.js";
+import type { OpenClawProviderConfigBackend } from "./openclaw-provider-config.js";
+
 export interface ProviderStore {
   list(): Promise<ProviderSnapshot>;
   create(provider: ProviderDraft): Promise<ProviderSnapshot>;
@@ -38,6 +41,8 @@ export interface ProviderStore {
 export interface CreateProviderStoreOptions {
   dataDir: string;
   writeAtomically?: (path: string, body: string) => Promise<void>;
+  credentials?: ProviderCredentialStore;
+  openClawConfig?: OpenClawProviderConfigBackend;
 }
 
 const configFileName = "provider-config.v1.json";
@@ -92,15 +97,18 @@ async function defaultAtomicWrite(path: string, body: string): Promise<void> {
   }
 }
 
-function toSnapshot(document: ProviderConfigDocument): ProviderSnapshot {
+async function toSnapshot(document: ProviderConfigDocument, credentials: ProviderCredentialStore): Promise<ProviderSnapshot> {
   return ProviderSnapshotSchema.parse({
     schemaVersion: document.schemaVersion,
     selectedProviderId: document.selectedProviderId,
-    providers: document.providers.map(({ apiKey, ...provider }) => ({
-      ...provider,
-      apiKeyConfigured: apiKey !== undefined,
-      ...(apiKey === undefined ? {} : { apiKeyHint: `...${apiKey.slice(-4)}` }),
-      verification: { state: "unverified" },
+    providers: await Promise.all(document.providers.map(async ({ apiKey: legacyKey, ...provider }) => {
+      const apiKey = legacyKey ?? await credentials.get(provider.id);
+      return {
+        ...provider,
+        apiKeyConfigured: apiKey !== undefined,
+        ...(apiKey === undefined ? {} : { apiKeyHint: `...${apiKey.slice(-4)}` }),
+        verification: { state: "unverified" },
+      };
     })),
     network: document.network,
   });
@@ -110,7 +118,12 @@ function cloneDocument(document: ProviderConfigDocument): ProviderConfigDocument
   return structuredClone(document);
 }
 
-export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWrite }: CreateProviderStoreOptions): ProviderStore {
+export function createProviderStore({
+  dataDir,
+  writeAtomically = defaultAtomicWrite,
+  credentials = createProviderCredentialStore({ dataDir }),
+  openClawConfig,
+}: CreateProviderStoreOptions): ProviderStore {
   const configPath = join(dataDir, "providers", configFileName);
   let loaded: ProviderConfigDocument | undefined;
   let queue = Promise.resolve();
@@ -135,13 +148,22 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
     }
     try {
       loaded = ProviderConfigDocumentSchema.parse(migrateLegacyBuiltin(JSON.parse(body)));
+      const legacyKeys = loaded.providers.flatMap((provider) => provider.apiKey === undefined ? [] : [[provider.id, provider.apiKey] as const]);
+      if (legacyKeys.length > 0) {
+        for (const [providerId, apiKey] of legacyKeys) await credentials.set(providerId, apiKey);
+        loaded = ProviderConfigDocumentSchema.parse({
+          ...loaded,
+          providers: loaded.providers.map(({ apiKey: _apiKey, ...provider }) => provider),
+        });
+        await writeAtomically(configPath, `${JSON.stringify(loaded, null, 2)}\n`);
+      }
     } catch {
       throw providerError("OPERATION_FAILED", "Provider configuration could not be loaded.");
     }
     return loaded;
   };
 
-  const commit = async (next: ProviderConfigDocument): Promise<ProviderSnapshot> => {
+  const persist = async (next: ProviderConfigDocument): Promise<ProviderConfigDocument> => {
     const parsed = ProviderConfigDocumentSchema.parse(next);
     try {
       await writeAtomically(configPath, `${JSON.stringify(parsed, null, 2)}\n`);
@@ -149,10 +171,46 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
       throw providerError("OPERATION_FAILED", "Provider configuration could not be saved.");
     }
     loaded = parsed;
-    return toSnapshot(parsed);
+    return parsed;
+  };
+  const commit = async (next: ProviderConfigDocument): Promise<ProviderSnapshot> => toSnapshot(await persist(next), credentials);
+
+  const withCredentials = async (document: ProviderConfigDocument): Promise<ProviderConfigDocument> => ProviderConfigDocumentSchema.parse({
+    ...document,
+    providers: await Promise.all(document.providers.map(async (provider) => {
+      const apiKey = await credentials.get(provider.id);
+      return { ...provider, ...(apiKey === undefined ? {} : { apiKey }) };
+    })),
+  });
+
+  const synchronizeAndCommit = async (
+    previous: ProviderConfigDocument,
+    next: ProviderConfigDocument,
+    metadata: ProviderConfigDocument,
+  ): Promise<ProviderConfigDocument> => {
+    if (openClawConfig === undefined) return persist(metadata);
+    await openClawConfig.synchronize(previous, next);
+    let persisted: ProviderConfigDocument;
+    try {
+      persisted = await persist(metadata);
+    } catch (commitError) {
+      try {
+        await openClawConfig.synchronize(next, previous);
+      } catch (rollbackError) {
+        throw new AggregateError([commitError, rollbackError], "Provider metadata commit and OpenClaw compensation both failed.");
+      }
+      throw commitError;
+    }
+    return persisted;
   };
 
   const mutate = (change: (document: ProviderConfigDocument) => void): Promise<ProviderSnapshot> => serialize(async () => {
+    const next = cloneDocument(await load());
+    const previous = cloneDocument(await load());
+    change(next);
+    return toSnapshot(await synchronizeAndCommit(await withCredentials(previous), await withCredentials(next), next), credentials);
+  });
+  const mutateLocal = (change: (document: ProviderConfigDocument) => void): Promise<ProviderSnapshot> => serialize(async () => {
     const next = cloneDocument(await load());
     change(next);
     return commit(next);
@@ -164,32 +222,99 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
     return provider;
   };
 
+  const restoreCredentialsOrThrow = async (
+    operationError: unknown,
+    restorations: readonly (() => Promise<void>)[],
+  ): Promise<never> => {
+    const failures: unknown[] = [operationError];
+    for (const restore of restorations) {
+      try {
+        await restore();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 1) throw new AggregateError(failures, "Provider credential operation and restoration both failed.");
+    throw operationError;
+  };
+
   return {
-    list: () => serialize(async () => toSnapshot(await load())),
+    list: () => serialize(async () => toSnapshot(await load(), credentials)),
     create: (draft) => mutate((document) => {
       const provider = ProviderDraftSchema.parse(draft);
       if (document.providers.some(({ id }) => id === provider.id)) throw providerError("CONFLICT", "Provider ID already exists.");
       document.providers.push(provider);
       if (provider.enabled) document.selectedProviderId = provider.id;
     }),
-    update: (providerId, draft) => mutate((document) => {
+    update: (providerId, draft) => serialize(async () => {
+      const document = cloneDocument(await load());
       const index = document.providers.findIndex(({ id }) => id === providerId);
       if (index < 0) throw providerError("NOT_FOUND", "Provider was not found.");
       const provider = ProviderDraftSchema.parse(draft);
       if (provider.id !== providerId && document.providers.some(({ id }) => id === provider.id)) throw providerError("CONFLICT", "Provider ID already exists.");
       const previous = document.providers[index];
-      const apiKey = previous.apiKey;
-      document.providers[index] = { ...provider, ...(apiKey === undefined ? {} : { apiKey }) };
+      const previousDocument = cloneDocument(document);
+      const apiKey = await credentials.get(providerId);
+      document.providers[index] = provider;
       if (document.selectedProviderId === providerId) {
         document.selectedProviderId = provider.enabled ? provider.id : null;
       }
       if (!previous.enabled && provider.enabled) document.selectedProviderId = provider.id;
+      const renamedWithCredential = provider.id !== providerId && apiKey !== undefined;
+      const previousRuntime = ProviderConfigDocumentSchema.parse({
+        ...previousDocument,
+        providers: previousDocument.providers.map((entry) => entry.id === providerId && apiKey !== undefined ? { ...entry, apiKey } : entry),
+      });
+      if (renamedWithCredential) {
+        try {
+          await credentials.set(provider.id, apiKey);
+          await credentials.remove(providerId);
+        } catch (error) {
+          return restoreCredentialsOrThrow(error, [
+            () => credentials.set(providerId, apiKey),
+            () => credentials.remove(provider.id),
+          ]);
+        }
+      }
+      let persisted: ProviderConfigDocument;
+      try {
+        persisted = await synchronizeAndCommit(previousRuntime, await withCredentials(document), document);
+      } catch (error) {
+        if (!renamedWithCredential) throw error;
+        return restoreCredentialsOrThrow(error, [
+          () => credentials.set(providerId, apiKey),
+          () => credentials.remove(provider.id),
+        ]);
+      }
+      return toSnapshot(persisted, credentials);
     }),
-    remove: (providerId) => mutate((document) => {
+    remove: (providerId) => serialize(async () => {
+      const previous = cloneDocument(await load());
+      const document = cloneDocument(previous);
       const index = document.providers.findIndex(({ id }) => id === providerId);
       if (index < 0) throw providerError("NOT_FOUND", "Provider was not found.");
+      const previousKey = await credentials.get(providerId);
+      const previousRuntime = ProviderConfigDocumentSchema.parse({
+        ...previous,
+        providers: previous.providers.map((provider) => provider.id === providerId && previousKey !== undefined ? { ...provider, apiKey: previousKey } : provider),
+      });
       document.providers.splice(index, 1);
       if (document.selectedProviderId === providerId) document.selectedProviderId = null;
+      if (previousKey !== undefined) {
+        try {
+          await credentials.remove(providerId);
+        } catch (error) {
+          return restoreCredentialsOrThrow(error, [() => credentials.set(providerId, previousKey)]);
+        }
+      }
+      let persisted: ProviderConfigDocument;
+      try {
+        persisted = await synchronizeAndCommit(previousRuntime, await withCredentials(document), document);
+      } catch (error) {
+        if (previousKey === undefined) throw error;
+        return restoreCredentialsOrThrow(error, [() => credentials.set(providerId, previousKey)]);
+      }
+      return toSnapshot(persisted, credentials);
     }),
     setEnabled: (providerId, enabled) => mutate((document) => {
       const provider = requireProvider(document, providerId);
@@ -209,16 +334,40 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
       if (!provider.enabled) throw providerError("INVALID_ARGUMENT", "Disabled provider cannot be selected.");
       document.selectedProviderId = providerId;
     }),
-    setApiKey: (providerId, apiKey) => mutate((document) => {
+    setApiKey: (providerId, apiKey) => serialize(async () => {
       if (!ProviderIpcRequestSchema.safeParse({ method: "providers.set-api-key", requestId: "store-validation", params: { providerId, apiKey } }).success) {
         throw providerError("INVALID_ARGUMENT", "Invalid provider API key.");
       }
-      requireProvider(document, providerId).apiKey = apiKey;
+      const document = await load();
+      requireProvider(document, providerId);
+      const previousKey = await credentials.get(providerId);
+      await credentials.set(providerId, apiKey);
+      let persisted: ProviderConfigDocument;
+      try {
+        const previous = ProviderConfigDocumentSchema.parse({ ...document, providers: document.providers.map((provider) => provider.id === providerId && previousKey !== undefined ? { ...provider, apiKey: previousKey } : provider) });
+        persisted = await synchronizeAndCommit(previous, await withCredentials(document), document);
+      } catch (error) {
+        if (previousKey === undefined) await credentials.remove(providerId); else await credentials.set(providerId, previousKey);
+        throw error;
+      }
+      return toSnapshot(persisted, credentials);
     }),
-    clearApiKey: (providerId) => mutate((document) => {
-      delete requireProvider(document, providerId).apiKey;
+    clearApiKey: (providerId) => serialize(async () => {
+      const document = await load();
+      requireProvider(document, providerId);
+      const previousKey = await credentials.get(providerId);
+      await credentials.remove(providerId);
+      let persisted: ProviderConfigDocument;
+      try {
+        const previous = ProviderConfigDocumentSchema.parse({ ...document, providers: document.providers.map((provider) => provider.id === providerId && previousKey !== undefined ? { ...provider, apiKey: previousKey } : provider) });
+        persisted = await synchronizeAndCommit(previous, await withCredentials(document), document);
+      } catch (error) {
+        if (previousKey !== undefined) await credentials.set(providerId, previousKey);
+        throw error;
+      }
+      return toSnapshot(persisted, credentials);
     }),
-    setNetwork: (network) => mutate((document) => {
+    setNetwork: (network) => mutateLocal((document) => {
       const parsed = ProviderNetworkSettingsSchema.safeParse(network);
       if (!parsed.success) throw providerError("INVALID_ARGUMENT", "Invalid provider network settings.");
       document.network = parsed.data;
@@ -227,8 +376,14 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
     getSelectedForRuntime: () => serialize(async () => {
       const document = await load();
       const selected = document.providers.find(({ id }) => id === document.selectedProviderId);
-      return selected === undefined ? null : structuredClone(selected);
+      if (selected === undefined) return null;
+      const apiKey = await credentials.get(selected.id);
+      return structuredClone({ ...selected, ...(apiKey === undefined ? {} : { apiKey }) });
     }),
-    getForRuntime: (providerId) => serialize(async () => structuredClone(requireProvider(await load(), providerId))),
+    getForRuntime: (providerId) => serialize(async () => {
+      const provider = requireProvider(await load(), providerId);
+      const apiKey = await credentials.get(providerId);
+      return structuredClone({ ...provider, ...(apiKey === undefined ? {} : { apiKey }) });
+    }),
   };
 }

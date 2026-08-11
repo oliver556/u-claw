@@ -57,6 +57,24 @@ describe("provider IPC", () => {
     expect(JSON.stringify([discovered, verified, updated, cancelled])).not.toContain("sk-main-private");
   });
 
+  it("routes schema-driven OpenClaw config through the main-process backend", async () => {
+    const store = fakeStore();
+    const network = { discover: vi.fn(), verify: vi.fn(), cancel: vi.fn() };
+    const config = {
+      getRendererConfig: vi.fn(async () => ({ config: { gateway: { port: 18789 } }, schema: { type: "object" } })),
+      patchRendererConfig: vi.fn(async () => ({ config: { gateway: { port: 18790 } }, schema: { type: "object" } })),
+      applyRendererConfig: vi.fn(async () => ({ config: { gateway: { port: 18791 } }, schema: { type: "object" } })),
+    };
+    const dispatch = (desktop as any).createProviderDispatcher(store, network, config);
+
+    expect(await dispatch({ method: "providers.config-schema", requestId: "schema", params: {} })).toMatchObject({ ok: true, result: { schema: { type: "object" } } });
+    expect(await dispatch({ method: "providers.config-get", requestId: "get", params: {} })).toMatchObject({ ok: true, result: { config: { gateway: { port: 18789 } } } });
+    await dispatch({ method: "providers.config-patch", requestId: "patch", params: { patch: { gateway: { port: 18790 } } } });
+    await dispatch({ method: "providers.config-apply", requestId: "apply", params: { config: { gateway: { port: 18791 } } } });
+    expect(config.patchRendererConfig).toHaveBeenCalledWith({ gateway: { port: 18790 } });
+    expect(config.applyRendererConfig).toHaveBeenCalledWith({ gateway: { port: 18791 } });
+  });
+
   it("registers one authorized fixed provider channel and removes it on dispose", async () => {
     const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
     const webContents = { mainFrame: {} };
