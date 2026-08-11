@@ -19,6 +19,57 @@ afterEach(async () => {
 });
 
 describe("provider network service", () => {
+  it("executes bounded JSON requests through the safe provider network path", async () => {
+    const baseUrl = await fixture((_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ choices: [{ message: { content: "safe response" } }] }));
+    });
+    const client = (desktop as any).createProviderHttpClient({ timeoutMs: 1_000, maxResponseBytes: 1_024 });
+
+    await expect(client.requestJson({
+      url: `${baseUrl}/v1/chat/completions`,
+      init: { method: "POST", body: "{}" },
+    })).resolves.toMatchObject({ choices: [{ message: { content: "safe response" } }] });
+    await expect(client.requestJson({
+      url: "http://169.254.169.254/latest/meta-data",
+      init: { method: "GET" },
+    })).rejects.toThrow("UNSAFE_TARGET");
+  });
+
+  it("cancels provider response bodies on HTTP failure and size overflow", async () => {
+    const cancelled = vi.fn();
+    const proxyFetch = vi.fn(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("upstream failure"));
+        controller.close();
+      },
+      cancel: cancelled,
+    }), { status: 502 }));
+    const lookup = vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]);
+    const client = (desktop as any).createProviderHttpClient({ lookup, proxyFetch, maxResponseBytes: 1_024 });
+
+    await expect(client.requestJson({
+      url: "https://models.example.com/v1/chat/completions",
+      network: { httpProxy: null, httpsProxy: "https://proxy.example.com", noProxy: [] },
+      init: { method: "POST", body: "{}" },
+    })).rejects.toThrow("Provider request failed");
+    expect(cancelled).toHaveBeenCalledOnce();
+
+    const overflowCancelled = vi.fn();
+    proxyFetch.mockResolvedValueOnce(new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(2_048));
+      },
+      cancel: overflowCancelled,
+    }), { status: 200 }));
+    await expect(client.requestJson({
+      url: "https://models.example.com/v1/chat/completions",
+      network: { httpProxy: null, httpsProxy: "https://proxy.example.com", noProxy: [] },
+      init: { method: "POST", body: "{}" },
+    })).rejects.toThrow("too large");
+    expect(overflowCancelled).toHaveBeenCalledOnce();
+  });
+
   it("discovers models only from explicitly configured loopback targets", async () => {
     const baseUrl = await fixture((request, response) => {
       expect(request.url).toBe("/api/tags");

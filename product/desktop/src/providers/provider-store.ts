@@ -30,6 +30,7 @@ export interface ProviderStore {
   setApiKey(providerId: string, apiKey: string): Promise<ProviderSnapshot>;
   clearApiKey(providerId: string): Promise<ProviderSnapshot>;
   setNetwork(network: ProviderNetworkSettings): Promise<ProviderSnapshot>;
+  getNetworkForRuntime(): Promise<ProviderNetworkSettings>;
   getSelectedForRuntime(): Promise<ProviderConfigEntry | null>;
   getForRuntime(providerId: string): Promise<ProviderConfigEntry>;
 }
@@ -222,6 +223,7 @@ export function createProviderStore({ dataDir, writeAtomically = defaultAtomicWr
       if (!parsed.success) throw providerError("INVALID_ARGUMENT", "Invalid provider network settings.");
       document.network = parsed.data;
     }),
+    getNetworkForRuntime: () => serialize(async () => structuredClone((await load()).network)),
     getSelectedForRuntime: () => serialize(async () => {
       const document = await load();
       const selected = document.providers.find(({ id }) => id === document.selectedProviderId);

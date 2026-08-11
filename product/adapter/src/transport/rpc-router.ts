@@ -10,7 +10,10 @@ const EventFrameSchema = z.object({
   event: z.string().min(1),
   payload: z.json(),
   seq: z.number().int().nonnegative().optional(),
-  stateVersion: z.number().int().nonnegative().optional(),
+  stateVersion: z.object({
+    presence: z.number().int().nonnegative(),
+    health: z.number().int().nonnegative(),
+  }).strict().optional(),
 }).strict();
 
 const SuccessResponseSchema = z.object({
@@ -131,6 +134,7 @@ export interface RpcSocketLike {
 export interface RpcRouterOptions {
   requestTimeoutMs?: number;
   onDiagnostic?: (message: string) => void;
+  onProtocolViolation?: () => void;
   idFactory?: () => string;
 }
 
@@ -144,12 +148,14 @@ export class RpcRouter {
   private readonly sequenceDetector: SequenceGapDetector;
   private readonly requestTimeoutMs: number;
   private readonly onDiagnostic: (message: string) => void;
+  private readonly onProtocolViolation: () => void;
   private readonly idFactory: () => string;
   private closed = false;
 
   constructor(private readonly socket: RpcSocketLike, options: RpcRouterOptions = {}) {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
     this.onDiagnostic = options.onDiagnostic ?? (() => undefined);
+    this.onProtocolViolation = options.onProtocolViolation ?? (() => undefined);
     this.idFactory = options.idFactory ?? (() => `rpc-${++this.nextId}`);
     this.sequenceDetector = new SequenceGapDetector((gap) => {
       for (const listener of this.sequenceGapListeners) listener(gap);
@@ -222,19 +228,19 @@ export class RpcRouter {
 
   private readonly handleMessage = (event: { data?: string }): void => {
     if (typeof event.data !== "string") {
-      this.onDiagnostic("Ignored non-text Gateway frame");
+      this.handleProtocolViolation("Ignored non-text Gateway frame");
       return;
     }
     let decoded: JsonValue;
     try {
       decoded = z.json().parse(JSON.parse(event.data));
     } catch {
-      this.onDiagnostic("Ignored malformed Gateway frame");
+      this.handleProtocolViolation("Ignored malformed Gateway frame");
       return;
     }
     const parsed = IncomingFrameSchema.safeParse(decoded);
     if (!parsed.success) {
-      this.onDiagnostic("Ignored unknown Gateway frame");
+      this.handleProtocolViolation("Ignored unknown Gateway frame");
       return;
     }
     const frame = parsed.data;
@@ -267,6 +273,16 @@ export class RpcRouter {
     }
     pending.resolve(payload.data);
   };
+
+  private handleProtocolViolation(diagnostic: string): void {
+    this.onDiagnostic(diagnostic);
+    for (const [id, pending] of this.pending) {
+      this.pending.delete(id);
+      pending.cleanup();
+      pending.reject(new RpcProtocolError(pending.method));
+    }
+    this.onProtocolViolation();
+  }
 
   private readonly handleClose = (): void => {
     if (this.closed) return;

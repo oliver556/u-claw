@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 
 import { LOCKED_OPENCLAW_VERSION } from "@uclaw/shared";
 import { z } from "zod";
@@ -27,8 +27,37 @@ function isWithin(root: string, child: string): boolean {
   return value === "" || (!value.startsWith("..") && !isAbsolute(value));
 }
 
-async function findOpenClawEntrypoint(runtimeRoot: string): Promise<string> {
+export async function findOpenClawEntrypoint(runtimeRoot: string, explicitEntry?: string): Promise<string> {
   const resolvedRoot = await realpath(runtimeRoot);
+  const validateEntry = async (path: string): Promise<string | null> => {
+    const info = await lstat(path);
+    if (!info.isFile() || info.isSymbolicLink()) return null;
+    const resolved = await realpath(path);
+    if (!isWithin(resolvedRoot, resolved)) throw new Error("OpenClaw entrypoint escapes runtime root.");
+    if (basename(resolved) !== "openclaw.mjs") return null;
+    try {
+      const packageJson = JSON.parse(await readFile(join(dirname(resolved), "package.json"), "utf8")) as { name?: unknown; version?: unknown };
+      return packageJson.name === "openclaw" && packageJson.version === LOCKED_OPENCLAW_VERSION ? resolved : null;
+    } catch {
+      return null;
+    }
+  };
+  if (explicitEntry !== undefined) {
+    const entrypoint = await validateEntry(explicitEntry);
+    if (!entrypoint) throw new Error("Locked OpenClaw runtime entrypoint not found.");
+    return entrypoint;
+  }
+  for (const candidate of [
+    join(resolvedRoot, "node_modules", "openclaw", "openclaw.mjs"),
+    join(resolvedRoot, "openclaw", "openclaw.mjs"),
+  ]) {
+    try {
+      const entrypoint = await validateEntry(candidate);
+      if (entrypoint) return entrypoint;
+    } catch {
+      // Missing or invalid fixed candidates fall through to bounded legacy discovery.
+    }
+  }
   let visited = 0;
   const visit = async (directory: string): Promise<string | null> => {
     const children = await readdir(directory, { withFileTypes: true });
@@ -40,12 +69,8 @@ async function findOpenClawEntrypoint(runtimeRoot: string): Promise<string> {
       const info = await lstat(path);
       if (info.isSymbolicLink()) continue;
       if (child.isFile() && child.name === "openclaw.mjs") {
-        const resolved = await realpath(path);
-        if (!isWithin(resolvedRoot, resolved)) throw new Error("OpenClaw entrypoint escapes runtime root.");
-        try {
-          const packageJson = JSON.parse(await readFile(join(directory, "package.json"), "utf8")) as { name?: unknown; version?: unknown };
-          if (packageJson.name === "openclaw" && packageJson.version === LOCKED_OPENCLAW_VERSION) return resolved;
-        } catch { /* Continue scanning for the locked runtime package root. */ }
+        const entrypoint = await validateEntry(path);
+        if (entrypoint) return entrypoint;
       }
       if (child.isDirectory()) {
         const found = await visit(path);

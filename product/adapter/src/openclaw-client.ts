@@ -352,6 +352,7 @@ export class AsyncEventQueue<T> {
 export interface OpenClawClientOptions {
   transport: OpenClawTransport;
   attachments?: AttachmentManager;
+  statusProjection?: () => Pick<GatewayStatus, "processAlive" | "usb">;
   now?: () => string;
   reconnectPolicy?: ReconnectPolicy;
   maxStartupRetries?: number;
@@ -890,12 +891,16 @@ export class OpenClawClient implements UClawClient {
 
   private gatewayStatus(): GatewayStatus {
     const ready = this.statusState === "ready";
+    const projection = this.options.statusProjection?.() ?? {
+      processAlive: !["idle", "failed", "closed"].includes(this.statusState),
+      usb: { state: "missing" as const, dataWritable: false },
+    };
     return {
       connectionState: this.statusState, protocolVersion: 4,
       phase: ready ? "available" : this.statusState === "failed" ? "failed" : this.statusState === "closed" ? "stopped" : this.statusState === "idle" ? "idle" : "starting",
-      processAlive: this.statusState !== "closed", serviceReady: ready, businessAvailable: ready,
+      processAlive: projection.processAlive, serviceReady: ready, businessAvailable: ready,
       since: this.statusSince, attempt: this.statusAttempt, ...(this.hello === undefined ? {} : { openClawVersion: this.hello.server.version }),
-      usb: { state: "available", dataWritable: true }, ...(this.capabilities === undefined ? {} : { capabilities: this.capabilities }),
+      usb: projection.usb, ...(this.capabilities === undefined ? {} : { capabilities: this.capabilities }),
     };
   }
 

@@ -68,7 +68,10 @@ async function probeBusinessAvailability(
       ? result.methods
       : new Set(result.methods);
     return requiredMethods.every((method) => methods.has(method));
-  } catch {
+  } catch (error) {
+    const candidate = error as { code?: unknown; uclawError?: { code?: unknown } } | null;
+    const code = candidate?.code ?? candidate?.uclawError?.code;
+    if (["AUTH_FAILED", "PROTOCOL_ERROR", "UNSUPPORTED"].includes(String(code))) throw error;
     return false;
   }
 }

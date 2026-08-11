@@ -169,6 +169,32 @@ describe("model source router", () => {
     expect(context.custom).toHaveBeenCalledOnce();
   });
 
+  it("passes the saved provider network settings to the real executor", async () => {
+    const context = await setup();
+    const network = {
+      httpProxy: null,
+      httpsProxy: "https://proxy.example.test:8443",
+      noProxy: ["localhost"],
+    };
+    await context.providers.setNetwork(network);
+    await context.providers.create({
+      id: "custom-network",
+      name: "Custom network",
+      enabled: true,
+      baseUrl: "https://custom.example.test/v1",
+      model: "custom-model",
+    });
+
+    await context.router.execute({ prompt: "network" });
+
+    expect(context.custom).toHaveBeenCalledWith(
+      { prompt: "network" },
+      expect.objectContaining({ id: "custom-network" }),
+      undefined,
+      network,
+    );
+  });
+
   it("returns to builtin when the active external source is disabled or removed", async () => {
     const context = await setup();
     await context.providers.setEnabled("kimi", true);

@@ -4,10 +4,11 @@ import { z } from "zod";
 import { GatewayWebSocket, type WebSocketLike } from "../src/transport/gateway-websocket.js";
 import { UClawErrorSchema } from "@uclaw/shared";
 
-import { RpcCancelledError, RpcClosedError, RpcRemoteError, RpcRouter, RpcTimeoutError, type JsonValue } from "../src/transport/rpc-router.js";
+import { RpcCancelledError, RpcClosedError, RpcProtocolError, RpcRemoteError, RpcRouter, RpcTimeoutError, type JsonValue } from "../src/transport/rpc-router.js";
 
 class FakeSocket implements WebSocketLike {
   readonly sent: string[] = [];
+  readonly close = vi.fn((_code?: number, _reason?: string) => { this.emit("close"); });
   sendError: Error | undefined;
   private readonly listeners = new Map<string, Set<(event: { data?: string }) => void>>();
 
@@ -25,7 +26,6 @@ class FakeSocket implements WebSocketLike {
     if (this.sendError !== undefined) throw this.sendError;
     this.sent.push(data);
   }
-  close(): void { this.emit("close"); }
   emit(type: "open" | "close" | "error"): void;
   emit(type: "message", data: string): void;
   emit(type: "open" | "message" | "close" | "error", data?: string): void {
@@ -116,6 +116,29 @@ describe("RpcRouter", () => {
     expect(diagnostics).toEqual(["Ignored unknown Gateway frame"]);
     expect(JSON.stringify(diagnostics)).not.toMatch(/gateway-secret|gateway-cookie|private conversation body|987654321|alice|chat\.txt/);
     router.close();
+  });
+
+  it("accepts locked Gateway state-version objects without failing pending RPC", async () => {
+    const socket = new FakeSocket();
+    const router = new RpcRouter(socket, { requestTimeoutMs: 1_000 });
+    const request = router.request("sessions.list", {}, z.object({ sessions: z.array(z.unknown()) }));
+    const frame = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+
+    socket.emit("message", JSON.stringify({
+      type: "event",
+      event: "health",
+      payload: { ok: true },
+      seq: 1,
+      stateVersion: { presence: 0, health: 1 },
+    }));
+    socket.emit("message", JSON.stringify({
+      type: "res",
+      id: frame.id,
+      ok: true,
+      payload: { sessions: [] },
+    }));
+
+    await expect(request).resolves.toEqual({ sessions: [] });
   });
 
   it("suppresses a duplicate before one subscriber receives it", () => {
@@ -228,8 +251,8 @@ describe("RpcRouter", () => {
     const frame = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
     socket.emit("message", JSON.stringify({ type: "res", id: frame.id, ok: false, error: { code: "NOPE", message: "denied", extra: true } }));
     expect(diagnostics).toEqual(["Ignored unknown Gateway frame"]);
+    await expect(request).rejects.toBeInstanceOf(RpcProtocolError);
     router.close();
-    await expect(request).rejects.toBeInstanceOf(RpcClosedError);
   });
 
   it("normalizes response schema failures", async () => {
@@ -275,14 +298,25 @@ describe("GatewayWebSocket", () => {
     socket.emit("message", JSON.stringify({ type: "event", event: "connect.challenge", payload: { nonce: "n-1", ts: 1 }, seq: 1 }));
     const request = JSON.parse(socket.sent[0] ?? "{}") as { id: string; method: string; params: Record<string, JsonValue> };
     expect(request.method).toBe("connect");
-    expect(request.params).toMatchObject({ minProtocol: 4, maxProtocol: 4 });
+    expect(request.params).toMatchObject({
+      minProtocol: 4,
+      maxProtocol: 4,
+      client: {
+        id: "gateway-client",
+        version: "0.1.0",
+        platform: "uclaw-desktop",
+        mode: "backend",
+      },
+    });
+    expect(request.params).not.toHaveProperty("challenge");
     socket.emit("message", JSON.stringify({
       type: "res", id: request.id, ok: true, payload: {
         type: "hello-ok", protocol: 4,
-        server: { version: "2026.7.1-2" },
-        features: { methods: ["chat.send"], events: ["chat"] },
-        auth: { deviceToken: "device-secret" },
-        policy: { maxPayload: 65536, maxBufferedBytes: 131072 },
+        server: { version: "2026.7.1-2", connId: "connection-1" },
+        features: { methods: ["chat.send"], events: ["chat"], capabilities: ["tool-events"] },
+        snapshot: { presence: [], health: {}, stateVersion: 1, uptimeMs: 100 },
+        auth: { deviceToken: "device-secret", role: "operator", scopes: ["operator.read"] },
+        policy: { maxPayload: 65536, maxBufferedBytes: 131072, tickIntervalMs: 30_000 },
       },
     }));
 
@@ -292,6 +326,37 @@ describe("GatewayWebSocket", () => {
     expect(gateway.state).toBe("ready");
     socket.emit("close");
     expect(gateway.state).toBe("closed");
+  });
+
+  it("fails ready state and pending RPC immediately on a malformed frame", async () => {
+    const socket = new FakeSocket();
+    const gateway = new GatewayWebSocket({
+      url: "ws://gateway.test",
+      webSocketFactory: () => socket,
+      connectParams: () => ({ client: { id: "u-claw-desktop", mode: "desktop" }, role: "operator", scopes: ["operator.read"] }),
+      requestTimeoutMs: 10_000,
+    });
+    const connection = gateway.connect();
+    socket.emit("open");
+    socket.emit("message", JSON.stringify({ type: "event", event: "connect.challenge", payload: { nonce: "n-1", ts: 1 } }));
+    const connectRequest = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    socket.emit("message", JSON.stringify({
+      type: "res", id: connectRequest.id, ok: true, payload: {
+        type: "hello-ok", protocol: 4,
+        server: { version: "2026.7.1-2" },
+        features: { methods: ["sessions.list"], events: [] },
+        policy: { maxPayload: 65536, maxBufferedBytes: 131072 },
+      },
+    }));
+    await connection;
+    const pending = gateway.router.request("sessions.list", {}, z.object({ sessions: z.array(z.unknown()) }));
+
+    socket.emit("message", "{");
+
+    const error = await pending.catch((reason: unknown) => reason) as { uclawError: unknown };
+    expect(UClawErrorSchema.parse(error.uclawError).code).toBe("PROTOCOL_MAPPING_FAILED");
+    expect(gateway.state).toBe("failed");
+    expect(socket.close).toHaveBeenCalledWith(1002, "protocol violation");
   });
 
   it("rejects extra fields in known challenge payloads", async () => {
@@ -305,6 +370,26 @@ describe("GatewayWebSocket", () => {
     socket.emit("open");
     socket.emit("message", JSON.stringify({ type: "event", event: "connect.challenge", payload: { nonce: "n-1", ts: 1, extra: true }, seq: 1 }));
     await expect(connection).rejects.toThrow("challenge failed validation");
+  });
+
+  it.each([
+    ["malformed JSON", "{"],
+    ["unknown frame", JSON.stringify({ type: "mystery", payload: {} })],
+  ])("rejects %s immediately during the handshake", async (_label, frame) => {
+    const socket = new FakeSocket();
+    const gateway = new GatewayWebSocket({
+      url: "ws://gateway.test",
+      webSocketFactory: () => socket,
+      connectParams: () => ({ client: { id: "u-claw-desktop", mode: "desktop" }, role: "operator", scopes: ["operator.read"] }),
+      challengeTimeoutMs: 10_000,
+    });
+    const connection = gateway.connect();
+    socket.emit("open");
+    socket.emit("message", frame);
+
+    const error = await connection.catch((reason: unknown) => reason) as { uclawError: unknown };
+    expect(UClawErrorSchema.parse(error.uclawError).code).toBe("PROTOCOL_MAPPING_FAILED");
+    expect(gateway.state).toBe("failed");
   });
 
   it("rejects when connect params fail instead of leaving handshake pending", async () => {
