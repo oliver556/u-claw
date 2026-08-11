@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,10 +9,13 @@ import {
   createDesktopMainOptions,
   createRegisteredProviderExecutor,
 } from "../src/wiring/create-desktop-main-options.js";
+import * as desktopMain from "../src/main.js";
+import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fixture.js";
 
 class ScriptedWebSocket {
   static instances: ScriptedWebSocket[] = [];
   static outcome: "success" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
+  static skillDisabled = false;
   readonly sent: Array<Record<string, unknown>> = [];
   readonly close = vi.fn();
   private readonly listeners = new Map<string, Set<(event: { data?: string }) => void>>();
@@ -35,6 +38,66 @@ class ScriptedWebSocket {
   send(data: string): void {
     const frame = JSON.parse(data) as Record<string, unknown>;
     this.sent.push(frame);
+    if (frame.method === "skills.status") {
+      queueMicrotask(() => this.respond(frame, {
+        workspaceDir: "/portable/workspace",
+        managedSkillsDir: "/portable/.openclaw/skills",
+        skills: [{
+          name: "china-weather", description: "weather", source: "workspace", bundled: false,
+          disabled: ScriptedWebSocket.skillDisabled, eligible: !ScriptedWebSocket.skillDisabled,
+          blockedByAllowlist: false, blockedByAgentFilter: false, modelVisible: !ScriptedWebSocket.skillDisabled,
+          userInvocable: true, commandVisible: !ScriptedWebSocket.skillDisabled,
+          missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+        }],
+      }));
+      return;
+    }
+    if (frame.method === "skills.update") {
+      ScriptedWebSocket.skillDisabled = (frame.params as { enabled?: boolean }).enabled === false;
+      queueMicrotask(() => this.respond(frame, { ok: true }));
+      return;
+    }
+    if (frame.method === "skills.curator.status") {
+      queueMicrotask(() => this.respond(frame, {
+        lastAttemptAtMs: null, lastSuccessAtMs: null, lastError: null,
+        counts: { active: 0, stale: 0, archived: 0 }, skills: [], overlaps: [],
+      }));
+      return;
+    }
+    if (["skills.curator.pin", "skills.curator.unpin", "skills.curator.restore"].includes(String(frame.method))) {
+      queueMicrotask(() => this.respond(frame, {
+        skillFile: "china-weather/SKILL.md", skillKey: "china-weather", skillName: "china-weather",
+        state: "active", pinned: frame.method === "skills.curator.pin",
+        createdAtMs: 1, stateChangedAtMs: 2, lastUsedAtMs: null, useCount: 0, archivedReason: null,
+      }));
+      return;
+    }
+    if (frame.method === "skills.proposals.list") {
+      queueMicrotask(() => this.respond(frame, {
+        schema: "openclaw.skill-workshop.proposals-manifest.v1",
+        updatedAt: "2026-08-12T00:00:00.000Z",
+        proposals: [],
+      }));
+      return;
+    }
+    if (frame.method === "skills.proposals.inspect") {
+      queueMicrotask(() => this.respond(frame, formalProposalInspect));
+      return;
+    }
+    if (["skills.proposals.apply", "skills.proposals.reject", "skills.proposals.quarantine"].includes(String(frame.method))) {
+      queueMicrotask(() => this.respond(frame, frame.method === "skills.proposals.apply"
+        ? { record: formalProposalRecord, targetSkillFile: formalProposalRecord.target.skillFile }
+        : formalProposalRecord));
+      return;
+    }
+    if (["skills.proposals.create", "skills.proposals.update", "skills.proposals.revise"].includes(String(frame.method))) {
+      queueMicrotask(() => this.respond(frame, formalProposalInspect));
+      return;
+    }
+    if (frame.method === "skills.proposals.requestRevision") {
+      queueMicrotask(() => this.respond(frame, { runId: "run-1", status: "started" }));
+      return;
+    }
     if (frame.method === "sessions.list") {
       queueMicrotask(() => this.emit("message", {
         data: JSON.stringify({
@@ -89,6 +152,10 @@ class ScriptedWebSocket {
     this.listeners.get(type)?.delete(listener);
   }
 
+  private respond(frame: Record<string, unknown>, payload: unknown): void {
+    this.emit("message", { data: JSON.stringify({ type: "res", id: frame.id, ok: true, payload }) });
+  }
+
   private emit(type: string, event: { data?: string }): void {
     for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
@@ -117,12 +184,14 @@ describe("production desktop wiring", () => {
       UCLAW_OPENCLAW_ENTRY: openClawEntry,
       UCLAW_DATA_DIR: dataRoot,
       OPENCLAW_CONFIG_PATH: configPath,
+      UCLAW_PORTABLE_SKILLS_DIR: await realpath(resolve(import.meta.dirname, "../../../portable/skills-cn")),
     };
   });
 
   afterEach(async () => {
     ScriptedWebSocket.instances = [];
     ScriptedWebSocket.outcome = "success";
+    ScriptedWebSocket.skillDisabled = false;
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: OriginalWebSocket });
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -251,6 +320,101 @@ describe("production desktop wiring", () => {
       usb: { state: "available", dataWritable: true },
     });
     await options.dispose?.();
+  });
+
+  it("registers the OpenClaw Skill runtime on the production transport with portable roots", async () => {
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
+    const options = await createDesktopMainOptions(productionEnv);
+    options.buildGatewayLaunchOptions(18798);
+    await options.probeCapabilities(18798, new AbortController().signal);
+
+    const registration = options.domainRegistrations!.resolve("skills.runtime") as unknown as {
+      runtime: {
+        status(): Promise<{ skills: Array<{ id: string; disabled: boolean }> }>;
+        setEnabled(skillKey: string, enabled: boolean): Promise<{ id: string; disabled: boolean }>;
+        curatorStatus(): Promise<{ counts: { active: number } }>;
+        curatorAction(skill: string, action: "pin" | "unpin" | "restore"): Promise<{ skillKey: string }>;
+        listProposals(): Promise<{ proposals: unknown[] }>;
+        inspectProposal(proposalId: string): Promise<{ record: { id: string } }>;
+        proposalAction(proposalId: string, action: "apply" | "reject" | "quarantine", reason?: string): Promise<unknown>;
+        createProposal(input: unknown): Promise<{ record: { id: string } }>;
+        updateProposal(input: unknown): Promise<{ record: { id: string } }>;
+        reviseProposal(input: unknown): Promise<{ record: { id: string } }>;
+        requestProposalRevision(input: unknown): Promise<{ runId: string; status: string }>;
+      };
+      bundledRoots: string[];
+    };
+    expect(registration.bundledRoots).toEqual([productionEnv.UCLAW_PORTABLE_SKILLS_DIR]);
+    await expect(readdir(registration.bundledRoots[0]!, { withFileTypes: true })).resolves.toSatisfy(
+      (entries: Array<{ isDirectory(): boolean }>) => entries.filter((entry) => entry.isDirectory()).length === 17,
+    );
+    await expect(registration.runtime.status()).resolves.toMatchObject({
+      skills: [{ id: "china-weather", disabled: false }],
+    });
+    await expect(registration.runtime.setEnabled("china-weather", false)).resolves.toMatchObject({
+      id: "china-weather", disabled: true,
+    });
+    await expect(registration.runtime.curatorStatus()).resolves.toMatchObject({ counts: { active: 0 } });
+    for (const action of ["pin", "unpin", "restore"] as const) {
+      await expect(registration.runtime.curatorAction("china-weather", action)).resolves.toMatchObject({ skillKey: "china-weather" });
+    }
+    await expect(registration.runtime.listProposals()).resolves.toMatchObject({ proposals: [] });
+    await expect(registration.runtime.inspectProposal("proposal-1")).resolves.toMatchObject({ record: { id: "proposal-1" } });
+    for (const action of ["apply", "reject", "quarantine"] as const) {
+      await expect(registration.runtime.proposalAction("proposal-1", action, "reviewed")).resolves.toMatchObject(action === "apply" ? { targetSkillFile: formalProposalRecord.target.skillFile } : { id: "proposal-1" });
+    }
+    await expect(registration.runtime.createProposal({ name: "weather", description: "Weather", content: "# Weather" })).resolves.toMatchObject({ record: { id: "proposal-1" } });
+    await expect(registration.runtime.updateProposal({ skillName: "weather", content: "# Weather v2" })).resolves.toMatchObject({ record: { id: "proposal-1" } });
+    await expect(registration.runtime.reviseProposal({ proposalId: "proposal-1", content: "# Revised" })).resolves.toMatchObject({ record: { id: "proposal-1" } });
+    await expect(registration.runtime.requestProposalRevision({ proposalId: "proposal-1", instructions: "Add tests", sessionKey: "session-key" })).resolves.toMatchObject({ runId: "run-1", status: "started" });
+
+    const skillFrames = ScriptedWebSocket.instances[0]!.sent.filter((frame) => String(frame.method).startsWith("skills."));
+    expect(skillFrames.slice(0, 3)).toMatchObject([
+      { method: "skills.status", params: {} },
+      { method: "skills.update", params: { skillKey: "china-weather", enabled: false } },
+      { method: "skills.status", params: {} },
+    ]);
+    const methods = skillFrames.map((frame) => frame.method);
+    expect(methods).toEqual(expect.arrayContaining([
+      "skills.status", "skills.update", "skills.curator.status", "skills.proposals.list",
+      "skills.curator.pin", "skills.curator.unpin", "skills.curator.restore",
+      "skills.proposals.inspect", "skills.proposals.apply", "skills.proposals.reject", "skills.proposals.quarantine",
+      "skills.proposals.create", "skills.proposals.update", "skills.proposals.revise", "skills.proposals.requestRevision",
+    ]));
+    await options.dispose?.();
+  });
+
+  it("resolves the repository portable Skill root when the explicit override is absent", async () => {
+    delete productionEnv.UCLAW_PORTABLE_SKILLS_DIR;
+    const options = await createDesktopMainOptions(productionEnv);
+    const registration = options.domainRegistrations!.resolve("skills.runtime") as unknown as { bundledRoots: string[] };
+
+    expect(registration.bundledRoots).toHaveLength(1);
+    await expect(readdir(registration.bundledRoots[0]!, { withFileTypes: true })).resolves.toSatisfy(
+      (entries: Array<{ isDirectory(): boolean }>) => entries.filter((entry) => entry.isDirectory()).length === 17,
+    );
+    await options.dispose?.();
+  });
+
+  it("fails closed for a bad explicit portable Skill override instead of using a fallback", async () => {
+    productionEnv.UCLAW_PORTABLE_SKILLS_DIR = join(dataRoot, "missing-skills-cn");
+
+    await expect(createDesktopMainOptions(productionEnv)).rejects.toMatchObject({
+      code: "UNAVAILABLE",
+      message: "Portable Skill source is unavailable.",
+    });
+  });
+
+  it("requires a registered Skill runtime only when a production domain registry exists", () => {
+    const resolveSkillRuntimeRegistration = (desktopMain as unknown as {
+      resolveSkillRuntimeRegistration?: (registry: unknown) => unknown;
+    }).resolveSkillRuntimeRegistration;
+    expect(resolveSkillRuntimeRegistration).toBeTypeOf("function");
+    expect(resolveSkillRuntimeRegistration!(undefined)).toBeUndefined();
+    expect(() => resolveSkillRuntimeRegistration!({ resolve: () => undefined })).toThrow("Skill runtime is not registered");
+    expect(resolveSkillRuntimeRegistration!({ resolve: () => ({ runtime: {}, bundledRoots: [] }) })).toMatchObject({
+      runtime: {}, bundledRoots: [],
+    });
   });
 
   it("spawns only the configured runtime and supplies a real default provider executor", async () => {

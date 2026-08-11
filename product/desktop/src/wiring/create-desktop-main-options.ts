@@ -1,6 +1,9 @@
 import { spawn as spawnChild } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync } from "node:fs";
+import { lstat, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 import {
@@ -28,6 +31,7 @@ import type {
   RegisteredDesktopDomain,
 } from "../main.js";
 import { createOpenClawCliPluginRuntime } from "../plugins/openclaw-cli-runtime.js";
+import { createOpenClawSkillRuntime } from "../skills/openclaw-skill-runtime.js";
 import {
   DesktopWiringError,
   readDesktopWiringEnvironment,
@@ -285,8 +289,45 @@ async function executeOpenAICompatibleProvider(
   })();
 }
 
+async function resolveExistingSkillRoot(candidate: string): Promise<string | undefined> {
+  if (!isAbsolute(candidate) || candidate.includes("\0")) return undefined;
+  try {
+    const normalized = resolve(candidate);
+    const info = await lstat(normalized);
+    if (!info.isDirectory() || info.isSymbolicLink()) return undefined;
+    return await realpath(normalized);
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveBundledSkillsRoot(env: NodeJS.ProcessEnv): Promise<string> {
+  const override = env.UCLAW_PORTABLE_SKILLS_DIR;
+  if (override !== undefined) {
+    if (!isAbsolute(override) || override.includes("\0")) {
+      throw new DesktopWiringError("UNCONFIGURED", "Portable Skill source is not configured.");
+    }
+    const resolved = await resolveExistingSkillRoot(override);
+    if (resolved === undefined) throw new DesktopWiringError("UNAVAILABLE", "Portable Skill source is unavailable.");
+    return resolved;
+  }
+
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    ...(resourcesPath === undefined ? [] : [join(resourcesPath, "portable", "skills-cn")]),
+    resolve(moduleDir, "../../../../portable/skills-cn"),
+  ];
+  for (const candidate of candidates) {
+    const resolved = await resolveExistingSkillRoot(candidate);
+    if (resolved !== undefined) return resolved;
+  }
+  throw new DesktopWiringError("UNAVAILABLE", "Portable Skill source is unavailable.");
+}
+
 export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<DesktopMainOptions> {
   const environment = await readDesktopWiringEnvironment(env);
+  const bundledSkillsRoot = await resolveBundledSkillsRoot(env);
   const domains = new ProductionDomainRegistry();
   const attachments = new AttachmentManager();
   const transport = new PortAwareGatewayTransport(environment.gatewayToken);
@@ -327,10 +368,23 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
       }
     },
   });
-  await composeDesktopDomainModules(domains, { client }, [{
-    name: "provider.executor.openai-compatible",
-    register: () => ({ execute: executeOpenAICompatibleProvider, dispose: () => undefined }),
-  }]);
+  const skillRuntime = createOpenClawSkillRuntime({
+    request: (method, params, schema) => transport.router.request(method, params as never, schema),
+  });
+  await composeDesktopDomainModules(domains, { client }, [
+    {
+      name: "provider.executor.openai-compatible",
+      register: () => ({ execute: executeOpenAICompatibleProvider, dispose: () => undefined }),
+    },
+    {
+      name: "skills.runtime",
+      register: () => ({
+        runtime: skillRuntime,
+        bundledRoots: [bundledSkillsRoot],
+        dispose: () => undefined,
+      }),
+    },
+  ]);
   const dispatcher = createClientDispatcher({ client, sendEvent: () => undefined });
   let disposed = false;
 

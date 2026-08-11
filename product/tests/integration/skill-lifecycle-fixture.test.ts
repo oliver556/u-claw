@@ -14,15 +14,18 @@ describe("Skill fixture lifecycle integration", () => {
   it("searches, installs, disables, and uninstalls in the portable data root", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-skill-integration-"));
     roots.push(dataDir);
-    const service = await createSkillService({ dataDir, client: createFixtureSkillHubClient() });
+    const workspaceRoot = join(dataDir, "workspace", "skills");
+    const service = await createSkillService({ dataDir, workspaceRoot, client: createFixtureSkillHubClient() });
     const page = await service.search({ query: "工作区", cursor: null, pageSize: 20 });
     const detail = await service.detail(page.items[0].slug);
     const confirmation = { permissionFingerprint: detail.permissionFingerprint, acceptedRisk: detail.risk };
     await service.waitForOperation((await service.startInstall({ slug: detail.slug, confirmation })).id);
-    expect(await readFile(join(dataDir, "capabilities", "skills", detail.slug, "SKILL.json"), "utf8")).toContain(detail.slug);
+    expect(await readFile(join(workspaceRoot, detail.slug, "SKILL.md"), "utf8")).toContain(detail.slug);
     await service.setEnabled({ slug: detail.slug, enabled: false, confirmation });
     expect((await service.installed())[0].enabled).toBe(false);
     await service.waitForOperation((await service.startUninstall(detail.slug)).id);
     expect(await service.installed()).toEqual([]);
+    const restarted = await createSkillService({ dataDir, workspaceRoot, client: createFixtureSkillHubClient() });
+    expect(await restarted.installed()).toEqual([]);
   });
 });

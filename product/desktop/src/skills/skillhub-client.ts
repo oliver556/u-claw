@@ -20,6 +20,7 @@ const FILE_LIMIT = 5 * 1024 * 1024;
 const TOTAL_FILE_LIMIT = 50 * 1024 * 1024;
 const FILE_COUNT_LIMIT = 1_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
+const OFFICIAL_NOT_PAID_FILTER = "pricing_type:!paid";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -38,6 +39,7 @@ const SearchItemSchema = z.object({
   description_zh: z.string().max(1_000).nullable().optional(),
   version: z.string().min(1).max(80),
   labels: LabelsSchema,
+  category: z.string().max(80).nullable().optional(),
   namespace: NamespaceSchema,
 }).loose();
 const SearchResponseSchema = z.object({
@@ -56,6 +58,7 @@ const DetailResponseSchema = z.object({
     summary: z.string().max(1_000),
     summary_zh: z.string().max(1_000).nullable().optional(),
     labels: LabelsSchema,
+    category: z.string().max(80).nullable().optional(),
   }).loose(),
 }).loose();
 
@@ -88,25 +91,67 @@ function assertTrustedApiOrigin(value: string): URL {
   return url;
 }
 
-function explicitPaid(labels: Record<string, string> | null | undefined): boolean {
-  if (!labels) return false;
-  return Object.entries(labels).some(([key, value]) => {
+function pricingDisposition(value: Record<string, unknown> & { labels?: Record<string, string> | null }): "free" | "unknown" | "non-free" {
+  const MAX_PRICING_DEPTH = 8;
+  const MAX_PRICING_NODES = 128;
+  let declarations = 0;
+  let nodes = 0;
+  const explicitFalse = (entry: unknown) => entry === false || (typeof entry === "string" && entry.trim().toLowerCase() === "false");
+  const explicitZero = (entry: unknown) => (typeof entry === "number" && Number.isFinite(entry) && entry === 0) ||
+    (typeof entry === "string" && entry.trim() !== "" && Number(entry) === 0);
+  const explicitFreeText = (entry: unknown) => typeof entry === "string" && entry.trim().toLowerCase() === "free";
+  const pending: Array<{ key: string; entry: unknown; paidContext: boolean; depth: number }> = [];
+  for (const [key, entry] of Object.entries(value.labels ?? {})) pending.push({ key, entry, paidContext: false, depth: 0 });
+  for (const [key, entry] of Object.entries(value)) {
+    if (key !== "labels") pending.push({ key, entry, paidContext: false, depth: 0 });
+  }
+  while (pending.length > 0) {
+    const { key, entry, paidContext, depth } = pending.pop()!;
     const normalizedKey = key.toLowerCase().replace(/[-_]/gu, "");
-    const normalizedValue = value.toLowerCase();
-    return (normalizedKey === "paid" && normalizedValue === "true") ||
-      (["pricing", "pricingtype", "price"].includes(normalizedKey) && normalizedValue !== "free" && normalizedValue !== "0");
-  });
+    const paidContainer = normalizedKey.includes("pricing") || normalizedKey.includes("billing") ||
+      normalizedKey.includes("payment") || normalizedKey.includes("plan");
+    const relevant = paidContext || paidContainer || normalizedKey.includes("paid") ||
+      normalizedKey.includes("trial") || normalizedKey.includes("price");
+    if (!relevant) continue;
+    nodes += 1;
+    if (nodes > MAX_PRICING_NODES || depth > MAX_PRICING_DEPTH) return "non-free";
+    if (normalizedKey.includes("paid") || normalizedKey.includes("trial")) {
+      if (!explicitFalse(entry)) return "non-free";
+      declarations += 1;
+      continue;
+    }
+    if (normalizedKey.includes("price") || (paidContext && (normalizedKey === "amount" || normalizedKey === "cents"))) {
+      if (!explicitZero(entry)) return "non-free";
+      declarations += 1;
+      continue;
+    }
+    if (paidContainer || (paidContext && normalizedKey === "type")) {
+      if (entry && typeof entry === "object") {
+        const children = Array.isArray(entry) ? entry.map((child, index) => [String(index), child] as const) : Object.entries(entry);
+        for (const [childKey, child] of children) pending.push({ key: childKey, entry: child, paidContext: true, depth: depth + 1 });
+      } else if (explicitFreeText(entry) || explicitFalse(entry) || explicitZero(entry)) declarations += 1;
+      else return "non-free";
+      continue;
+    }
+    if (paidContext && entry && typeof entry === "object") {
+      const children = Array.isArray(entry) ? entry.map((child, index) => [String(index), child] as const) : Object.entries(entry);
+      for (const [childKey, child] of children) pending.push({ key: childKey, entry: child, paidContext: true, depth: depth + 1 });
+    }
+  }
+  return declarations > 0 ? "free" : "unknown";
 }
 
-function paidMetadata(value: Record<string, unknown> & { labels?: Record<string, string> | null }): boolean {
-  if (explicitPaid(value.labels)) return true;
-  if (typeof value.billingType === "string" && value.billingType.toLowerCase() !== "free") return true;
-  if (typeof value.pricing === "string" && value.pricing.toLowerCase() !== "free") return true;
-  if (value.pricing && typeof value.pricing === "object") {
-    const pricing = value.pricing as Record<string, unknown>;
-    return [pricing.type, pricing.billingType].some((entry) => typeof entry === "string" && entry.toLowerCase() !== "free");
+function categories(labels: Record<string, string> | null | undefined, direct?: string | null): string[] {
+  const result = new Set<string>();
+  if (direct !== undefined && direct !== null && /^[a-z0-9][a-z0-9._-]{0,79}$/u.test(direct)) result.add(direct);
+  for (const [key, value] of Object.entries(labels ?? {})) {
+    const normalizedKey = key.toLowerCase().replace(/[-_]/gu, "");
+    if (normalizedKey !== "category" && normalizedKey !== "categories") continue;
+    for (const category of value.split(",").map((entry) => entry.trim().toLowerCase())) {
+      if (/^[a-z0-9][a-z0-9._-]{0,79}$/u.test(category)) result.add(category);
+    }
   }
-  return false;
+  return [...result];
 }
 
 async function readBounded(response: Response, limit: number): Promise<Uint8Array> {
@@ -189,7 +234,13 @@ export function createSkillHubClient({
   timeoutMs?: number;
 } = {}): SkillHubClient {
   const origin = assertTrustedApiOrigin(baseUrl).origin;
-  const metadata = new Map<string, { namespace: string; version: string }>();
+  type FreeProof = {
+    slug: string;
+    namespace: string;
+    version: string;
+    evidence: "explicit-free-metadata" | "official-not-paid-filter";
+  };
+  const confirmedFree = new Map<string, FreeProof>();
   const request = (url: string, redirect: RequestRedirect = "error", accept = "application/json") => fetch(url, {
     method: "GET",
     headers: { accept },
@@ -225,23 +276,40 @@ export function createSkillHubClient({
     permissionFingerprint: conservativeFingerprint,
     risk: "high",
     mode: "live",
+    categories: categories(item.labels, item.category),
     manifest: { kind: "skill", id: item.slug, version: item.version, entry: "SKILL.md" },
   });
 
   return {
     mode: "live",
-    async search({ query, cursor, pageSize }): Promise<SkillHubSearchResult> {
+    async search({ query, category, cursor, pageSize }): Promise<SkillHubSearchResult> {
       const page = cursor === null ? 1 : Number(cursor);
       if (!Number.isSafeInteger(page) || page < 1) throw new Error("SkillHub cursor is invalid.");
       const url = new URL("/api/skills", origin);
       url.searchParams.set("page", String(page));
       url.searchParams.set("pageSize", String(pageSize));
       url.searchParams.set("keyword", query);
-      url.searchParams.set("labels", "pricing_type:!paid");
+      if (category !== undefined && category !== null && !/^[a-z0-9][a-z0-9._-]{0,79}$/u.test(category)) throw new Error("SkillHub category is invalid.");
+      if (category) url.searchParams.set("category", category);
+      url.searchParams.set("labels", OFFICIAL_NOT_PAID_FILTER);
       const response = await requestJson(url.toString(), SearchResponseSchema);
       if (response.code !== 0) throw new Error("SkillHub API request failed.");
-      if (response.data.skills.some((item) => paidMetadata(item))) throw new Error("Paid Skills are not available.");
-      for (const item of response.data.skills) metadata.set(item.slug, { namespace: item.namespace.handle, version: item.version });
+      if (response.data.skills.some((item) => pricingDisposition(item) === "non-free")) throw new Error("Only explicitly free Skills are available.");
+      const pageProofs = new Map<string, FreeProof>();
+      for (const item of response.data.skills) {
+        const proof: FreeProof = {
+          slug: item.slug,
+          namespace: item.namespace.handle,
+          version: item.version,
+          evidence: pricingDisposition(item) === "free" ? "explicit-free-metadata" : "official-not-paid-filter",
+        };
+        const duplicate = pageProofs.get(item.slug);
+        if (duplicate && (duplicate.namespace !== proof.namespace || duplicate.version !== proof.version)) {
+          throw new Error("SkillHub catalog identity is ambiguous.");
+        }
+        pageProofs.set(item.slug, proof);
+      }
+      for (const [slug, proof] of pageProofs) confirmedFree.set(slug, proof);
       const consumed = page * pageSize;
       return {
         items: response.data.skills.map(project),
@@ -251,17 +319,20 @@ export function createSkillHubClient({
       };
     },
     async detail(slug) {
-      const known = metadata.get(slug);
+      const known = confirmedFree.get(slug);
       const detailUrl = new URL(`/api/v1/skills/${encodeURIComponent(slug)}`, origin);
       detailUrl.searchParams.set("namespace", known?.namespace ?? "");
       const response = await requestJson(detailUrl.toString(), DetailResponseSchema);
-      if (response.slug !== slug || response.skill.slug !== slug || paidMetadata(response.skill)) {
-        if (paidMetadata(response.skill)) throw new Error("Paid Skills are not available.");
+      const pricing = pricingDisposition(response.skill);
+      const namespace = response.namespace.handle;
+      const version = response.latestVersion.version;
+      const identityMatchesProof = known !== undefined && known.slug === slug && known.namespace === namespace && known.version === version;
+      if (known && !identityMatchesProof) throw new Error("SkillHub detail identity drifted from its free catalog proof.");
+      if (response.slug !== slug || response.skill.slug !== slug || pricing === "non-free" || (pricing === "unknown" && !identityMatchesProof)) {
+        if (pricing === "non-free" || (pricing === "unknown" && !identityMatchesProof)) throw new Error("Only explicitly free Skills are available.");
         throw new Error("SkillHub detail identity mismatch.");
       }
-      const version = response.latestVersion.version;
-      const namespace = response.namespace.handle;
-      metadata.set(slug, { namespace, version });
+      confirmedFree.set(slug, known ?? { slug, namespace, version, evidence: "explicit-free-metadata" });
       const markdownUrl = new URL(`/api/v1/skills/${encodeURIComponent(slug)}/file`, origin);
       markdownUrl.searchParams.set("path", "SKILL.md");
       markdownUrl.searchParams.set("version", version);
@@ -289,11 +360,12 @@ export function createSkillHubClient({
         permissionFingerprint: conservativeFingerprint,
         risk: "high",
         mode: "live",
+        categories: categories(response.skill.labels, response.skill.category),
         manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },
       });
     },
     async download(slug) {
-      const known = metadata.get(slug);
+      const known = confirmedFree.get(slug);
       if (!known) throw new Error("SkillHub download identity is not confirmed.");
       const filesUrl = new URL(`/api/v1/skills/${encodeURIComponent(slug)}/files`, origin);
       filesUrl.searchParams.set("version", known.version);
@@ -324,6 +396,7 @@ export function createSkillHubClient({
         ["application/zip", "application/x-zip-compressed", "application/octet-stream"],
       );
       const zip = await JSZip.loadAsync(archive);
+      if (Object.keys(zip.files).length > FILE_COUNT_LIMIT) throw new Error("SkillHub ZIP entry count exceeds limit.");
       const archivePaths = new Map<string, "file" | "directory">();
       for (const entry of Object.values(zip.files)) {
         if (entry.unsafeOriginalName && entry.unsafeOriginalName !== entry.name) throw new Error("SkillHub ZIP contains an unsafe path.");

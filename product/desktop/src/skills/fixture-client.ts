@@ -25,7 +25,7 @@ export interface SkillHubSearchResult {
 
 export interface SkillHubClient {
   readonly mode: "fixture" | "live";
-  search(input: { query: string; cursor: string | null; pageSize: number }): Promise<SkillHubSearchResult>;
+  search(input: { query: string; category?: string | null; cursor: string | null; pageSize: number }): Promise<SkillHubSearchResult>;
   detail(slug: string): Promise<SkillDetail>;
   download(slug: string): Promise<SkillBundle>;
   readonly failAfterBackup?: boolean;
@@ -75,7 +75,8 @@ function detail(slug: string, pricingType: "free" | "paid" = "free", version = "
     permissionFingerprint: permissionFingerprint(skillPermissions),
     risk: highestPermissionRisk(skillPermissions),
     mode: "fixture",
-    manifest: { kind: "skill", id: slug, version, entry: "index.js" },
+    categories: slug === "workspace-reader" ? ["productivity"] : ["developer-tools"],
+    manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },
   };
 }
 
@@ -94,15 +95,16 @@ function makeBundle(slug: string, version: string, invalid?: FixtureOptions["inv
     entry: "index.js",
     permissions: manifestPermissions,
   });
-  const entrySource = "export default {};";
-  let entries: SkillBundleEntry[] = [
-    { path: "SKILL.json", type: "file", size: Buffer.byteLength(manifest), contentBase64: Buffer.from(manifest).toString("base64") },
-    { path: "index.js", type: "file", size: Buffer.byteLength(entrySource), contentBase64: Buffer.from(entrySource).toString("base64") },
-  ];
+  const skillMarkdown = `---\nslug: ${slug}\nname: ${slug}\ndescription: Fixture Skill ${slug}\nversion: ${version}\n---\n`;
+  const legacyManifestCase = invalid === "bad-manifest" || invalid === "permission-mismatch";
+  let entries: SkillBundleEntry[] = legacyManifestCase
+    ? [{ path: "SKILL.json", type: "file", size: Buffer.byteLength(manifest), contentBase64: Buffer.from(manifest).toString("base64") },
+      { path: "index.js", type: "file", size: 18, contentBase64: Buffer.from("export default {};").toString("base64") }]
+    : [{ path: "SKILL.md", type: "file", size: Buffer.byteLength(skillMarkdown), contentBase64: Buffer.from(skillMarkdown).toString("base64") }];
   if (invalid === "path-escape") entries.push({ path: "../outside.txt", type: "file", size: 1, contentBase64: "eA==" });
   if (invalid === "symlink") entries.push({ path: "link", type: "symlink", size: 0 });
   if (invalid === "hardlink") entries.push({ path: "hard-link", type: "hardlink", size: 0 } as unknown as SkillBundleEntry);
-  if (invalid === "duplicate-path") entries.push({ path: "SKILL.json", type: "file", size: Buffer.byteLength(manifest), contentBase64: Buffer.from(manifest).toString("base64") });
+  if (invalid === "duplicate-path") entries.push({ path: "SKILL.md", type: "file", size: Buffer.byteLength(skillMarkdown), contentBase64: Buffer.from(skillMarkdown).toString("base64") });
   if (invalid === "archive-bomb") entries = Array.from({ length: 1_001 }, (_, index) => ({ path: `f-${index}`, type: "file" as const, size: 1, contentBase64: "eA==" }));
   return {
     sourceUrl: `https://api.skillhub.cn/api/v1/download?slug=${slug}`,
@@ -121,9 +123,11 @@ export function createFixtureSkillHubClient(options: FixtureOptions = {}): Skill
   return {
     mode: "fixture",
     failAfterBackup: options.failAfterBackup,
-    async search({ query, cursor, pageSize }) {
-      const offset = cursor === null ? 0 : Number.parseInt(cursor, 10);
+    async search({ query, category, cursor, pageSize }) {
+      const offset = cursor === null ? 0 : Number(cursor);
+      if (!Number.isSafeInteger(offset) || offset < 0 || (cursor !== null && String(offset) !== cursor)) throw new Error("Fixture SkillHub cursor is invalid.");
       const matches = catalog.filter((item) => item.pricingType === "free" &&
+        (!category || item.categories.includes(category)) &&
         `${item.name} ${item.description} ${item.slug}`.toLowerCase().includes(query.trim().toLowerCase()));
       const items = matches.slice(offset, offset + pageSize);
       const nextOffset = offset + items.length;
