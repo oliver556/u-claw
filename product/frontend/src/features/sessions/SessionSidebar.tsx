@@ -96,6 +96,7 @@ export function SessionSidebar({
     </div>
     {organizerState === "loading" ? <div className="organizer-status"><LoaderCircle className="spin" />正在加载整理信息</div> : null}
     {organizerState === "error" ? <div className="organizer-status error" role="alert"><AlertCircle /><span>{organizerError ?? "整理信息读取失败"}</span><button type="button" aria-label="重试整理信息" onClick={onRetryOrganizer}><RotateCw /></button></div> : null}
+    {state === "ready" && error ? <div className="organizer-status error" role="alert"><AlertCircle /><span>{error}</span><button type="button" aria-label="刷新会话" onClick={onRetry}><RotateCw /></button></div> : null}
     <div className="session-list" aria-busy={state === "loading"}>
       {state === "loading" ? <div className="session-state"><LoaderCircle className="spin" /><span>正在加载会话</span></div> : null}
       {state === "error" ? <div className="session-state" role="alert"><AlertCircle /><span>{error ?? "会话加载失败"}</span><button type="button" onClick={onRetry}><RotateCw />重试</button></div> : null}

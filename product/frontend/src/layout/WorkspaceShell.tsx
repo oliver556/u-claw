@@ -156,15 +156,18 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
   const createSession = async () => {
     if (creatingSession) return;
     setCreatingSession(true);
+    setSessionError(undefined);
     try {
       const created = await client.sessions.create({ title: "新会话" });
+      const [page, authoritative] = await Promise.all([client.sessions.list(), client.sessions.get(created.id)]);
       selectionRequest.current += 1;
-      setSessions((current) => [...current, created]);
-      setActiveSession(created);
+      setSessions(page.items);
+      setNextSessionCursor(page.nextCursor);
+      setHasMoreSessions(page.hasMore);
+      setActiveSession(authoritative);
       if (window.innerWidth <= 680) setSessionsOpen(false);
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : "新建会话失败");
-      setSessionState("error");
     } finally {
       setCreatingSession(false);
     }
@@ -192,21 +195,38 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
       setSessionError("当前连接不支持重命名会话");
       return;
     }
+    setSessionError(undefined);
     try {
-      const renamed = await client.sessions.rename(summary.id, title);
-      setSessions((current) => current.map((item) => item.id === renamed.id ? renamed : item));
-      setActiveSession((current) => current?.id === renamed.id ? renamed : current);
+      await client.sessions.rename(summary.id, title);
+      const [page, authoritative] = await Promise.all([client.sessions.list(), client.sessions.get(summary.id)]);
+      setSessions(page.items);
+      setNextSessionCursor(page.nextCursor);
+      setHasMoreSessions(page.hasMore);
+      setActiveSession((current) => current?.id === summary.id ? authoritative : current);
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : "重命名会话失败");
     }
   };
 
   const removeSession = async (summary: SessionSummary) => {
+    setSessionError(undefined);
     try {
       await client.sessions.remove(summary.id);
-      setSessions((current) => current.filter((item) => item.id !== summary.id));
+      const page = await client.sessions.list();
+      setSessions(page.items);
+      setNextSessionCursor(page.nextCursor);
+      setHasMoreSessions(page.hasMore);
+      if (client.sessionOrganizer !== undefined) {
+        try {
+          setOrganizer(await client.sessionOrganizer.get());
+          setOrganizerState("ready");
+        } catch (error) {
+          setOrganizerError(error instanceof Error ? error.message : "整理信息读取失败");
+          setOrganizerState("error");
+        }
+      }
       if (activeSession?.id === summary.id) {
-        const next = sessions.find((item) => item.id !== summary.id);
+        const next = page.items[0];
         if (next) await selectSession(next.id);
         else setActiveSession(undefined);
       }
@@ -235,7 +255,8 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
     if (client.sessionOrganizer === undefined) return;
     setOrganizerError(undefined);
     try {
-      setOrganizer(await operation(client.sessionOrganizer));
+      await operation(client.sessionOrganizer);
+      setOrganizer(await client.sessionOrganizer.get());
       setOrganizerState("ready");
     } catch (error) {
       setOrganizerError(error instanceof Error ? error.message : "整理信息保存失败");

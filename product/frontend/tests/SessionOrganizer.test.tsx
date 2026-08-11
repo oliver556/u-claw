@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
+import type { SessionOrganizerDocument, SessionOrganizerService, UClawClient } from "@uclaw/shared";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { App } from "../src/app/App";
 import { SessionSidebar } from "../src/features/sessions/SessionSidebar";
 
 const sessions = [
@@ -27,6 +29,12 @@ describe("SessionSidebar organizer", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("整理信息读取失败");
     fireEvent.click(screen.getByRole("button", { name: "重试整理信息" }));
     expect(value.onRetryOrganizer).toHaveBeenCalledOnce();
+  });
+
+  it("shows loaded sessions together with a recoverable action error", () => {
+    render(<SessionSidebar {...props()} error="会话写后读回失败" />);
+    expect(screen.getByRole("alert")).toHaveTextContent("会话写后读回失败");
+    expect(screen.getByRole("button", { name: /^发布检查，/ })).toBeVisible();
   });
 
   it("searches, pins, assigns and clears groups", () => {
@@ -67,5 +75,37 @@ describe("SessionSidebar organizer", () => {
     rerender(<SessionSidebar {...value} sessions={[]} groups={[]} />);
     expect(screen.getByText("还没有会话")).toBeVisible();
     expect(screen.getByText("还没有分组")).toBeVisible();
+  });
+});
+
+describe("WorkspaceShell organizer readback", () => {
+  it("reloads USB organizer metadata after writes and renderer reconstruction", async () => {
+    const now = "2026-08-08T08:00:00.000Z";
+    let document: SessionOrganizerDocument = { schemaVersion: 1, groups: [], sessions: [] };
+    const organizer: SessionOrganizerService = {
+      get: vi.fn(async () => structuredClone(document)),
+      setPinned: vi.fn(async (sessionId, pinned) => {
+        document = { ...document, sessions: [{ sessionId, pinned }] };
+        return { schemaVersion: 1 as const, groups: [], sessions: [] };
+      }),
+      createGroup: vi.fn(), renameGroup: vi.fn(), assignGroup: vi.fn(),
+    };
+    const client = {
+      gateway: { negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set<string>(), events: new Set<string>(), features: { attachments: false, approvalResolve: false } })), getStatus: vi.fn(), watchStatus: vi.fn(async function* () {}), reconnect: vi.fn() },
+      sessions: { list: vi.fn(async () => ({ items: [{ id: "session-1", title: "发布检查", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const }], nextCursor: null, hasMore: false })), get: vi.fn(async () => ({ id: "session-1", title: "发布检查", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const })), create: vi.fn(), remove: vi.fn() },
+      chat: { list: vi.fn(async () => ({ items: [], nextCursor: null, hasMore: false })), get: vi.fn(), watch: vi.fn(async function* () {}), send: vi.fn(async function* () {}), abort: vi.fn() },
+      tools: { list: vi.fn(async () => []), getCall: vi.fn() }, approvals: { listPending: vi.fn(async () => []), resolveExec: vi.fn(), resolvePlugin: vi.fn() },
+      models: { list: vi.fn(), selectForSession: vi.fn() }, skills: { list: vi.fn() }, channels: { list: vi.fn() }, files: { list: vi.fn(), readText: vi.fn() }, diagnostics: { list: vi.fn(), listLogs: vi.fn() },
+      sessionOrganizer: organizer,
+    } as UClawClient & { sessionOrganizer: SessionOrganizerService };
+    const first = render(<App client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "固定会话" }));
+    await screen.findByRole("button", { name: "取消固定会话" });
+    expect(organizer.get).toHaveBeenCalledTimes(2);
+
+    first.unmount();
+    render(<App client={client} />);
+    expect(await screen.findByRole("button", { name: "取消固定会话" })).toBeVisible();
   });
 });
