@@ -208,4 +208,41 @@ describe("provider network service", () => {
     })).resolves.toMatchObject({ state: "failed", category: "unsafe-target", code: "INVALID_ARGUMENT" });
     expect(proxyFetch).not.toHaveBeenCalled();
   });
+
+  it("rejects redirects on direct Provider requests", async () => {
+    const target = await fixture((_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end("{}");
+    });
+    const redirect = await fixture((_request, response) => {
+      response.writeHead(302, { location: `${target}/redirected` });
+      response.end();
+    });
+    const service = (desktop as any).createProviderNetworkService();
+
+    await expect(service.verify("verify-direct-redirect", {
+      id: "direct-redirect", enabled: true, name: "Direct redirect", baseUrl: `${redirect}/v1`, model: "model",
+    })).resolves.toMatchObject({ state: "failed", category: "network", code: "NETWORK_UNREACHABLE" });
+  });
+
+  it("rejects redirects on proxied Provider requests", async () => {
+    const target = await fixture((_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end("{}");
+    });
+    const redirect = await fixture((_request, response) => {
+      response.writeHead(302, { location: `${target}/redirected` });
+      response.end();
+    });
+    const proxyFetch = vi.fn((_url: string, init: RequestInit) => fetch(`${redirect}/via-proxy`, init));
+    const lookup = vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]);
+    const service = (desktop as any).createProviderNetworkService({ lookup, proxyFetch });
+
+    await expect(service.verify("verify-proxy-redirect", {
+      id: "proxy-redirect", enabled: true, name: "Proxy redirect", baseUrl: "https://models.example.com/v1", model: "model",
+    }, {
+      httpProxy: null, httpsProxy: "http://127.0.0.1:8080", noProxy: [],
+    })).resolves.toMatchObject({ state: "failed", category: "proxy", code: "NETWORK_UNREACHABLE" });
+    expect(proxyFetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ redirect: "error" }), expect.any(String));
+  });
 });

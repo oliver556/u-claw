@@ -158,20 +158,20 @@ export function createProviderHttpClient(options: ProviderHttpClientOptions = {}
 
       const timeout = AbortSignal.timeout(timeoutMs);
       const signals = [timeout, ...(init.signal ? [init.signal] : [])];
-      const requestInit = { ...init, signal: AbortSignal.any(signals) };
+      const requestInit: RequestInit = { ...init, redirect: "error", signal: AbortSignal.any(signals) };
       let operation: FetchOperation | undefined;
       try {
         if (useProxy) {
           if (options.proxyFetch) {
             operation = {
-              response: await options.proxyFetch(endpoint.toString(), requestInit, proxyUrl!),
+              response: await options.proxyFetch(endpoint.toString(), { ...requestInit, redirect: "error" }, proxyUrl!),
               close: async () => undefined,
             };
           } else {
             const dispatcher = new ProxyAgent(proxyUrl!);
             try {
               operation = {
-                response: await undiciFetch(endpoint, { ...requestInit, dispatcher } as any) as unknown as Response,
+                response: await undiciFetch(endpoint, { ...requestInit, redirect: "error", dispatcher } as any) as unknown as Response,
                 close: () => dispatcher.close(),
               };
             } catch (error) {
@@ -187,7 +187,7 @@ export function createProviderHttpClient(options: ProviderHttpClientOptions = {}
           } } });
           try {
             operation = {
-              response: await undiciFetch(endpoint, { ...requestInit, dispatcher } as any) as unknown as Response,
+              response: await undiciFetch(endpoint, { ...requestInit, redirect: "error", dispatcher } as any) as unknown as Response,
               close: () => dispatcher.close(),
             };
           } catch (error) {
@@ -212,14 +212,14 @@ export function createProviderNetworkService(options: CreateProviderNetworkServi
   const fetchThroughProxy = options.proxyFetch === undefined ? async (url: string, init: RequestInit, proxyUrl: string): Promise<FetchOperation> => {
     const dispatcher = new ProxyAgent(proxyUrl!);
     try {
-      const response = await undiciFetch(url, { ...init, dispatcher } as any) as unknown as Response;
+      const response = await undiciFetch(url, { ...init, redirect: "error", dispatcher } as any) as unknown as Response;
       return { response, close: () => dispatcher.close() };
     } catch (error) {
       await dispatcher.close();
       throw error;
     }
   } : async (url: string, init: RequestInit, proxyUrl: string): Promise<FetchOperation> => ({
-    response: await options.proxyFetch!(url, init, proxyUrl),
+    response: await options.proxyFetch!(url, { ...init, redirect: "error" }, proxyUrl),
     close: async () => undefined,
   });
 
@@ -230,7 +230,7 @@ export function createProviderNetworkService(options: CreateProviderNetworkServi
       else callback(null, address, isIP(address));
     } } });
     try {
-      const response = await undiciFetch(url, { ...init, dispatcher } as any) as unknown as Response;
+      const response = await undiciFetch(url, { ...init, redirect: "error", dispatcher } as any) as unknown as Response;
       return { response, close: () => dispatcher.close() };
     } catch (error) {
       await dispatcher.close();
