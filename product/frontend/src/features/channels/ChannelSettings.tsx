@@ -7,8 +7,8 @@ import {
   type ChannelStatus,
   type ManagedChannelSummary,
 } from "@uclaw/shared";
-import { Alert, Button, Input, Modal, Popconfirm, Select, Switch, Tag, Tooltip } from "antd";
-import { Cable, CircleOff, Pencil, Plus, RefreshCw, RotateCw, TestTube2, Trash2, X } from "lucide-react";
+import { Alert, Button, Input, Modal, Popconfirm, Segmented, Select, Switch, Tag, Tooltip } from "antd";
+import { Cable, CircleOff, LogOut, Pencil, Plus, RefreshCw, RotateCw, Send, TestTube2, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WechatPersonalConnection } from "./WechatPersonalConnection";
@@ -19,15 +19,17 @@ type ChannelForm = {
   name: string;
   mode: ChannelDraft["mode"];
   enabled: boolean;
+  allowFrom: string;
   credentials: Record<string, string>;
 };
 
-const emptyForm: ChannelForm = { id: "", kind: "telegram", name: "", mode: "bot", enabled: true, credentials: {} };
+const emptyForm: ChannelForm = { id: "", kind: "telegram", name: "", mode: "bot", enabled: true, allowFrom: "*", credentials: {} };
 const kindLabels: Record<ManagedChannelSummary["kind"], string> = {
   telegram: "Telegram",
   "qq-bot": "QQ Bot",
   feishu: "飞书",
   wecom: "企业微信",
+  discord: "Discord",
   "wechat-personal": "个人微信",
 };
 const statusLabels: Record<ChannelStatus, string> = {
@@ -52,6 +54,14 @@ const statusTones: Record<ChannelStatus, string> = {
   "network-error": "error",
   "needs-action": "warning",
 };
+const pendingActionLabels: Record<NonNullable<ManagedChannelSummary["pendingAction"]>, string> = {
+  none: "",
+  configure: "需要完成渠道配置。",
+  "update-credentials": "需要更新渠道凭据。",
+  "install-plugin": "需要安装并启用渠道插件。",
+  reconnect: "需要重新连接渠道。",
+  "external-account": "需要在外部平台完成账号操作。",
+};
 
 let requestSequence = 0;
 function nextRequestId(): string {
@@ -60,13 +70,13 @@ function nextRequestId(): string {
 }
 
 function defaultMode(kind: ChannelDraft["kind"]): ChannelDraft["mode"] {
-  if (kind === "telegram") return "bot";
+  if (kind === "telegram" || kind === "discord") return "bot";
   if (kind === "qq-bot") return "app";
   return "websocket";
 }
 
 function credentialFields(kind: ChannelDraft["kind"], mode: ChannelDraft["mode"]): Array<{ key: string; label: string; secret: boolean; optional?: boolean }> {
-  if (kind === "telegram") return [{ key: "botToken", label: "Bot Token", secret: true }];
+  if (kind === "telegram" || kind === "discord") return [{ key: "botToken", label: "Bot Token", secret: true }];
   if (kind === "qq-bot") return [{ key: "appId", label: "App ID", secret: false }, { key: "clientSecret", label: "Client Secret", secret: true }];
   if (kind === "feishu") return [
     { key: "appId", label: "App ID", secret: false },
@@ -83,7 +93,10 @@ function draftFromForm(form: ChannelForm): unknown {
   const credentials = Object.fromEntries(fields
     .filter(({ key, optional }) => !optional || Boolean(form.credentials[key]?.trim()))
     .map(({ key }) => [key, form.credentials[key]?.trim() ?? ""]));
-  return { id: form.id, kind: form.kind, name: form.name, mode: form.mode, enabled: form.enabled, credentials };
+  return {
+    id: form.id, kind: form.kind, name: form.name, mode: form.mode, enabled: form.enabled, credentials,
+    ...(form.kind === "qq-bot" ? { allowFrom: form.allowFrom.split("\n").map((value) => value.trim()).filter(Boolean) } : {}),
+  };
 }
 
 function formatCheckedAt(value: string | undefined): string {
@@ -103,6 +116,11 @@ export function ChannelSettings() {
   const [editing, setEditing] = useState<ManagedChannelSummary>();
   const [form, setForm] = useState<ChannelForm>(emptyForm);
   const [formError, setFormError] = useState<string>();
+  const [commandChannel, setCommandChannel] = useState<ManagedChannelSummary>();
+  const [commandMode, setCommandMode] = useState<"send" | "action" | "poll">("send");
+  const [command, setCommand] = useState({ target: "", message: "", messageId: "", emoji: "", question: "", options: "", multiple: false });
+  const [commandError, setCommandError] = useState<string>();
+  const [commandBusy, setCommandBusy] = useState(false);
 
   const invoke = window.uclaw?.channels?.invoke;
   const request = (method: ChannelIpcRequest["method"], params: Record<string, unknown>) => ({ method, requestId: nextRequestId(), params }) as ChannelIpcRequest;
@@ -163,6 +181,44 @@ export function ChannelSettings() {
     await invoke(request("channels.cancel", { operationRequestId })).catch(() => undefined);
   };
 
+  const runCommand = async () => {
+    if (!invoke || !commandChannel || commandBusy) return;
+    const target = command.target.trim();
+    let channelRequest: ChannelIpcRequest | undefined;
+    if (commandMode === "send" && target && command.message.trim()) channelRequest = request("channels.send", { channelId: commandChannel.id, target, message: command.message.trim() });
+    if (commandMode === "action" && target && command.messageId.trim() && command.emoji.trim()) channelRequest = request("channels.action", { channelId: commandChannel.id, target, action: "react", messageId: command.messageId.trim(), emoji: command.emoji.trim() });
+    const options = command.options.split("\n").map((value) => value.trim()).filter(Boolean);
+    if (commandMode === "poll" && target && command.question.trim() && options.length >= 2) channelRequest = request("channels.poll", { channelId: commandChannel.id, target, question: command.question.trim(), options, multiple: command.multiple });
+    if (!channelRequest) { setCommandError("请填写完整且有效的渠道操作参数。"); return; }
+    setCommandBusy(true);
+    setCommandError(undefined);
+    try {
+      const response = await invoke(channelRequest);
+      if (!response.ok || response.method !== channelRequest.method) throw new Error();
+      setCommandBusy(false);
+      setCommandChannel(undefined);
+      void load();
+    } catch {
+      setCommandError("渠道操作失败，请检查账号权限、目标和运行状态。");
+    } finally {
+      setCommandBusy(false);
+    }
+  };
+
+  const logout = async (channel: ManagedChannelSummary) => {
+    if (!invoke || busy[channel.id]) return;
+    setBusy((current) => ({ ...current, [channel.id]: "logout" }));
+    try {
+      const response = await invoke(request("channels.logout", { channelId: channel.id }));
+      if (!response.ok || response.method !== "channels.logout") throw new Error();
+      await load();
+    } catch {
+      setOperationError("渠道登出失败，请检查运行状态后重试。");
+    } finally {
+      setBusy((current) => { const next = { ...current }; delete next[channel.id]; return next; });
+    }
+  };
+
   const openCreate = () => {
     setEditing(undefined);
     setForm(emptyForm);
@@ -172,7 +228,7 @@ export function ChannelSettings() {
   const openEdit = (channel: ManagedChannelSummary) => {
     if (channel.kind === "wechat-personal" || channel.mode === "qr") return;
     setEditing(channel);
-    setForm({ id: channel.id, kind: channel.kind, name: channel.name, mode: channel.mode as ChannelDraft["mode"], enabled: channel.enabled, credentials: {} });
+    setForm({ id: channel.id, kind: channel.kind, name: channel.name, mode: channel.mode as ChannelDraft["mode"], enabled: channel.enabled, allowFrom: channel.allowFrom?.join("\n") ?? "*", credentials: {} });
     setFormError(undefined);
     setFormOpen(true);
   };
@@ -216,8 +272,9 @@ export function ChannelSettings() {
               <div><strong>{channel.name}</strong><Tag>{kindLabels[channel.kind]}</Tag><Tag>{channel.mode}</Tag></div>
               <span>{channel.id}</span>
               <small>最后检查：{formatCheckedAt(channel.lastCheckedAt)}</small>
+              {channel.lastInboundAt || channel.lastOutboundAt ? <small>最近收取：{formatCheckedAt(channel.lastInboundAt)} · 最近发送：{formatCheckedAt(channel.lastOutboundAt)}</small> : null}
             </div>
-            <div className="channel-health"><Tag color={statusTones[channel.status]}>{statusLabels[channel.status]}</Tag><small>{channel.error?.message ?? (channel.enabled ? "运行已启用" : "运行已停用")}</small></div>
+            <div className="channel-health"><Tag color={statusTones[channel.status]}>{statusLabels[channel.status]}</Tag><small>{channel.error?.message ?? (channel.pendingAction && channel.pendingAction !== "none" ? pendingActionLabels[channel.pendingAction] : channel.enabled ? "运行已启用" : "运行已停用")}</small></div>
             <div className="channel-secrets" aria-label={`${channel.name} 凭据提示`}>
               {Object.entries(channel.credentialHints).map(([key, value]) => <span key={key}><small>{key}</small><code>{value}</code></span>)}
             </div>
@@ -226,6 +283,8 @@ export function ChannelSettings() {
               {operation?.startsWith("channel-ui-") ? <Tooltip title="取消"><button type="button" aria-label={`取消 ${channel.name}`} onClick={() => void cancel(channel.id)}><X /></button></Tooltip> : null}
               <Tooltip title="测试连接"><button type="button" aria-label={`测试 ${channel.name}`} disabled={Boolean(operation) || unavailable} onClick={() => { const testRequest = request("channels.test", { channelId: channel.id }); void mutate(channel.id, testRequest.requestId, testRequest); }}><TestTube2 /></button></Tooltip>
               <Tooltip title="重新连接"><button type="button" aria-label={`重连 ${channel.name}`} disabled={Boolean(operation) || unavailable || !channel.enabled} onClick={() => { const reconnectRequest = request("channels.reconnect", { channelId: channel.id }); void mutate(channel.id, reconnectRequest.requestId, reconnectRequest); }}><RotateCw /></button></Tooltip>
+              <Tooltip title="消息操作"><button type="button" aria-label={`发送 ${channel.name}`} disabled={Boolean(operation) || unavailable || channel.status !== "connected"} onClick={() => { setCommandChannel(channel); setCommandMode("send"); setCommand({ target: "", message: "", messageId: "", emoji: "", question: "", options: "", multiple: false }); setCommandError(undefined); }}><Send /></button></Tooltip>
+              <Popconfirm title="登出渠道账号？" description="运行时会断开该账号；凭据状态将从 OpenClaw 重新读取。" okText="登出" cancelText="取消" onConfirm={() => void logout(channel)}><Tooltip title="登出"><button type="button" aria-label={`登出 ${channel.name}`} disabled={Boolean(operation) || unavailable}><LogOut /></button></Tooltip></Popconfirm>
               <Tooltip title="编辑凭据"><button type="button" aria-label={`编辑 ${channel.name}`} disabled={Boolean(operation)} onClick={() => openEdit(channel)}><Pencil /></button></Tooltip>
               <Popconfirm title="删除渠道连接？" description="配置和已存凭据将从 U 盘删除。" okText="删除" cancelText="取消" onConfirm={() => void mutate(channel.id, "remove", request("channels.remove", { channelId: channel.id }))}><Tooltip title="删除"><button type="button" aria-label={`删除 ${channel.name}`} disabled={Boolean(operation)}><Trash2 /></button></Tooltip></Popconfirm>
             </div>
@@ -238,14 +297,26 @@ export function ChannelSettings() {
     <Modal title={editing ? "编辑渠道连接" : "新增渠道连接"} open={formOpen} onCancel={() => setFormOpen(false)} footer={<><Button onClick={() => setFormOpen(false)}>取消</Button><Button type="primary" onClick={() => void save()}>保存渠道</Button></>}>
       <div className="channel-form">
         {formError ? <Alert type="error" showIcon message={formError} /> : null}
-        <label>渠道<select aria-label="渠道" value={form.kind} disabled={Boolean(editing)} onChange={(event) => { const kind = event.target.value as ChannelDraft["kind"]; setForm((current) => ({ ...current, kind, mode: defaultMode(kind), credentials: {} })); }}><option value="telegram">Telegram</option><option value="qq-bot">QQ Bot（非个人 QQ）</option><option value="feishu">飞书</option><option value="wecom">企业微信</option></select></label>
+        <label>渠道<select aria-label="渠道" value={form.kind} disabled={Boolean(editing)} onChange={(event) => { const kind = event.target.value as ChannelDraft["kind"]; setForm((current) => ({ ...current, kind, mode: defaultMode(kind), credentials: {} })); }}><option value="telegram">Telegram</option><option value="qq-bot">QQ Bot（非个人 QQ）</option><option value="feishu">飞书</option><option value="wecom">企业微信</option><option value="discord">Discord</option></select></label>
         {(form.kind === "feishu" || form.kind === "wecom") ? <label>连接模式<select aria-label="连接模式" value={form.mode} onChange={(event) => setForm((current) => ({ ...current, mode: event.target.value as ChannelDraft["mode"], credentials: {} }))}><option value="websocket">App / WebSocket</option><option value="webhook">Webhook</option></select></label> : null}
         <label>渠道 ID<Input aria-label="渠道 ID" value={form.id} disabled={Boolean(editing)} onChange={(event) => setForm((current) => ({ ...current, id: event.target.value }))} /></label>
         <label>连接名称<Input aria-label="连接名称" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
+        {form.kind === "qq-bot" ? <label>允许来源<Input.TextArea aria-label="允许来源" rows={4} value={form.allowFrom} onChange={(event) => setForm((current) => ({ ...current, allowFrom: event.target.value }))} /></label> : null}
         {editing ? <Alert type="info" showIcon message="已存凭据不会回显" description="输入全部新凭据后将替换 U 盘中的旧凭据。" /> : null}
         {credentialFields(form.kind, form.mode).map((field) => <label key={field.key}>{field.label}{field.secret
           ? <Input.Password aria-label={field.label} autoComplete="new-password" value={form.credentials[field.key] ?? ""} onChange={(event) => setForm((current) => ({ ...current, credentials: { ...current.credentials, [field.key]: event.target.value } }))} />
           : <Input aria-label={field.label} value={form.credentials[field.key] ?? ""} onChange={(event) => setForm((current) => ({ ...current, credentials: { ...current.credentials, [field.key]: event.target.value } }))} />}{editing && channelHint(editing, field.key) ? <small>已保存：{channelHint(editing, field.key)}</small> : null}</label>)}
+      </div>
+    </Modal>
+
+    <Modal title={commandChannel ? `${commandChannel.name} 消息操作` : "渠道消息操作"} open={Boolean(commandChannel)} onCancel={() => setCommandChannel(undefined)} footer={<><Button onClick={() => setCommandChannel(undefined)}>取消</Button><Button type="primary" loading={commandBusy} onClick={() => void runCommand()}>执行渠道操作</Button></>}>
+      <div className="channel-form">
+        {commandError ? <Alert type="error" showIcon message={commandError} /> : null}
+        <Segmented value={commandMode} options={[{ label: "发送", value: "send" }, { label: "回应", value: "action" }, { label: "投票", value: "poll" }]} onChange={(value) => { setCommandMode(value as typeof commandMode); setCommandError(undefined); }} />
+        <label>目标<Input aria-label="目标" value={command.target} onChange={(event) => setCommand((current) => ({ ...current, target: event.target.value }))} /></label>
+        {commandMode === "send" ? <label>消息<Input.TextArea aria-label="消息" rows={4} value={command.message} onChange={(event) => setCommand((current) => ({ ...current, message: event.target.value }))} /></label> : null}
+        {commandMode === "action" ? <><label>消息 ID<Input aria-label="消息 ID" value={command.messageId} onChange={(event) => setCommand((current) => ({ ...current, messageId: event.target.value }))} /></label><label>Emoji<Input aria-label="Emoji" value={command.emoji} onChange={(event) => setCommand((current) => ({ ...current, emoji: event.target.value }))} /></label></> : null}
+        {commandMode === "poll" ? <><label>问题<Input aria-label="问题" value={command.question} onChange={(event) => setCommand((current) => ({ ...current, question: event.target.value }))} /></label><label>选项<Input.TextArea aria-label="选项" rows={5} value={command.options} onChange={(event) => setCommand((current) => ({ ...current, options: event.target.value }))} /></label><label>允许多选<Switch aria-label="允许多选" checked={command.multiple} onChange={(multiple) => setCommand((current) => ({ ...current, multiple }))} /></label></> : null}
       </div>
     </Modal>
   </section>;

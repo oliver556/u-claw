@@ -1,5 +1,6 @@
 import {
   ChannelIpcResponseSchema,
+  ChannelSnapshotSchema,
   UClawErrorSchema,
   redactRendererText,
   type ChannelConfigEntry,
@@ -8,6 +9,7 @@ import {
   type ChannelIpcResponse,
   type ChannelKind,
   type ChannelOperationResult,
+  type ChannelSnapshot,
   type ChannelStatus,
 } from "@uclaw/shared";
 
@@ -21,6 +23,21 @@ export interface ChannelRuntime {
   test?(channel: ChannelConfigEntry, signal: AbortSignal): Promise<{ status: ChannelStatus; error?: ChannelErrorSummary }>;
   start?(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
   stop?(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
+  status?(channel: ChannelConfigEntry, probe: boolean, signal: AbortSignal): Promise<{
+    configured: boolean;
+    enabled: boolean;
+    status: ChannelStatus;
+    runtimeAuthoritative: true;
+    pendingAction: "none" | "configure" | "update-credentials" | "install-plugin" | "reconnect" | "external-account";
+    lastCheckedAt: string;
+    lastInboundAt?: string;
+    lastOutboundAt?: string;
+    error?: ChannelErrorSummary;
+  }>;
+  logout?(channel: ChannelConfigEntry, signal: AbortSignal): Promise<void>;
+  send?(channel: ChannelConfigEntry, input: { target: string; message: string }, signal: AbortSignal): Promise<void>;
+  action?(channel: ChannelConfigEntry, input: { target: string; action: "react"; messageId: string; emoji: string }, signal: AbortSignal): Promise<void>;
+  poll?(channel: ChannelConfigEntry, input: { target: string; question: string; options: string[]; multiple: boolean }, signal: AbortSignal): Promise<void>;
   wechat?: WechatPersonalRuntime;
 }
 
@@ -123,10 +140,53 @@ export function createChannelDispatcher(store: ChannelStore, runtime: ChannelRun
       return { channelId, status, checkedAt, error: summary };
     }
   };
+  const authoritativeList = async (): Promise<ChannelSnapshot> => {
+    const snapshot = await store.list();
+    if (runtime.status === undefined) return snapshot;
+    const channels = await Promise.all(snapshot.channels.map(async (summary) => {
+      if (!runtime.capability(summary.kind)) return summary;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(new Error("Channel status timed out")), timeoutMs);
+      try {
+        const channel = await store.getForRuntime(summary.id);
+        const readback = await runtime.status!(channel, false, controller.signal);
+        return {
+          ...summary,
+          ...readback,
+          capability: "available" as const,
+          capabilityReason: undefined,
+        };
+      } catch (error) {
+        const safe = operationError(controller.signal.aborted ? controller.signal.reason : error);
+        return {
+          ...summary,
+          status: statusForError(safe),
+          runtimeAuthoritative: true as const,
+          pendingAction: "reconnect" as const,
+          error: safe,
+        };
+      } finally {
+        clearTimeout(timeout);
+      }
+    }));
+    return ChannelSnapshotSchema.parse({ ...snapshot, channels });
+  };
+  const runCommand = async (
+    requestId: string,
+    channelId: string,
+    operation: "logout" | "send" | "action" | "poll",
+    execute: (channel: ChannelConfigEntry, signal: AbortSignal) => Promise<void>,
+  ) => serialize(requestId, channelId, async (signal) => {
+    const channel = await store.getForRuntime(channelId);
+    if (!runtime.capability(channel.kind)) throw UClawErrorSchema.parse({ code: "UNSUPPORTED", message: "Channel runtime is unavailable.", retryable: false });
+    await execute(channel, signal);
+    if (operation === "logout") await store.record(channelId, "disconnected", now().toISOString()).catch(() => undefined);
+    return { channelId, operation, completedAt: now().toISOString() };
+  });
   const dispatch = async (request: ChannelIpcRequest): Promise<ChannelIpcResponse> => {
     let result: unknown;
     switch (request.method) {
-      case "channels.list-managed": result = await store.list(); break;
+      case "channels.list-managed": result = await authoritativeList(); break;
       case "channels.create": result = await serialize(request.requestId, request.params.channel.id, async (signal) => {
         const existing = await store.list();
         if (existing.channels.some(({ id }) => id === request.params.channel.id)) throw UClawErrorSchema.parse({ code: "CONFLICT", message: "Channel ID already exists.", retryable: false });
@@ -202,6 +262,22 @@ export function createChannelDispatcher(store: ChannelStore, runtime: ChannelRun
         });
         break;
       }
+      case "channels.logout": result = await runCommand(request.requestId, request.params.channelId, "logout", async (channel, signal) => {
+        if (!runtime.logout) throw new Error("Channel logout is unavailable");
+        await runtime.logout(channel, signal);
+      }); break;
+      case "channels.send": result = await runCommand(request.requestId, request.params.channelId, "send", async (channel, signal) => {
+        if (!runtime.send) throw new Error("Channel send is unavailable");
+        await runtime.send(channel, { target: request.params.target, message: request.params.message }, signal);
+      }); break;
+      case "channels.action": result = await runCommand(request.requestId, request.params.channelId, "action", async (channel, signal) => {
+        if (!runtime.action) throw new Error("Channel action is unavailable");
+        await runtime.action(channel, { target: request.params.target, action: request.params.action, messageId: request.params.messageId, emoji: request.params.emoji }, signal);
+      }); break;
+      case "channels.poll": result = await runCommand(request.requestId, request.params.channelId, "poll", async (channel, signal) => {
+        if (!runtime.poll) throw new Error("Channel poll is unavailable");
+        await runtime.poll(channel, { target: request.params.target, question: request.params.question, options: request.params.options, multiple: request.params.multiple }, signal);
+      }); break;
       case "channels.cancel": active.get(request.params.operationRequestId)?.abort(new Error("Channel operation cancelled")); result = null; break;
       case "channels.wechat-status": result = await wechat.status(); break;
       case "channels.wechat-login-start": result = await wechat.start(request.params.force ?? false); break;

@@ -20,8 +20,17 @@ describe("channel contracts", () => {
   });
 
   it("keeps QQ Bot distinct from personal QQ", () => {
-    expect(ChannelDraftSchema.parse({ id: "qq-main", kind: "qq-bot", name: "QQ Bot", enabled: true, mode: "app", credentials: { appId: "1024", clientSecret: "secret" } }).kind).toBe("qq-bot");
+    expect(ChannelDraftSchema.parse({ id: "qq-main", kind: "qq-bot", name: "QQ Bot", enabled: true, mode: "app", allowFrom: ["user:1"], credentials: { appId: "1024", clientSecret: "secret" } })).toMatchObject({ kind: "qq-bot", allowFrom: ["user:1"] });
     expect(ChannelDraftSchema.safeParse({ id: "qq-main", kind: "qq-personal", name: "QQ", enabled: true, mode: "app", credentials: {} }).success).toBe(false);
+    expect(ChannelDraftSchema.safeParse({ id: "qq-main", kind: "qq-bot", name: "QQ Bot", enabled: true, mode: "app", allowFrom: [""], credentials: { appId: "1024", clientSecret: "secret" } }).success).toBe(false);
+  });
+
+  it("supports Discord bot credentials as a first-class managed channel", () => {
+    expect(ChannelKindSchema.safeParse("discord").success).toBe(true);
+    expect(ChannelDraftSchema.parse({
+      id: "discord-main", kind: "discord", name: "Discord", enabled: true,
+      mode: "bot", credentials: { botToken: "discord-token" },
+    }).kind).toBe("discord");
   });
 
   it("never accepts full credentials in renderer snapshots", () => {
@@ -30,6 +39,37 @@ describe("channel contracts", () => {
 
   it("defines cancel by operation request id", () => {
     expect(ChannelIpcRequestSchema.parse({ method: "channels.cancel", requestId: "cancel-1", params: { operationRequestId: "test-1" } })).toMatchObject({ params: { operationRequestId: "test-1" } });
+  });
+
+  it("defines logout, send, action and poll without accepting arbitrary tool arguments", () => {
+    const requests = [
+      { method: "channels.logout", requestId: "logout-1", params: { channelId: "discord-main" } },
+      { method: "channels.send", requestId: "send-1", params: { channelId: "discord-main", target: "channel:123", message: "hello" } },
+      { method: "channels.action", requestId: "action-1", params: { channelId: "discord-main", target: "channel:123", action: "react", messageId: "message-1", emoji: ":thumbsup:" } },
+      { method: "channels.poll", requestId: "poll-1", params: { channelId: "discord-main", target: "channel:123", question: "Ship?", options: ["Yes", "No"], multiple: false } },
+    ];
+    for (const request of requests) expect(ChannelIpcRequestSchema.safeParse(request).success).toBe(true);
+    expect(ChannelIpcRequestSchema.safeParse({
+      method: "channels.action", requestId: "bad-action", params: { channelId: "discord-main", target: "channel:123", action: "exec", command: "rm" },
+    }).success).toBe(false);
+  });
+
+  it("accepts runtime-authoritative health and activity without raw runtime details", () => {
+    const parsed = ChannelSnapshotSchema.parse({
+      schemaVersion: 1,
+      channels: [{
+        id: "discord-main", kind: "discord", name: "Discord", mode: "bot",
+        configured: true, enabled: true, status: "connected", capability: "available",
+        credentialHints: { botToken: "...7890" }, runtimeAuthoritative: true,
+        pendingAction: "none", lastInboundAt: "2026-08-11T12:00:00.000Z",
+        lastOutboundAt: "2026-08-11T12:01:00.000Z",
+      }],
+    });
+    expect(parsed.channels[0]).toMatchObject({ runtimeAuthoritative: true, pendingAction: "none" });
+    expect(ChannelSnapshotSchema.safeParse({
+      ...parsed,
+      channels: [{ ...parsed.channels[0], runtime: { token: "secret" } }],
+    }).success).toBe(false);
   });
 
   it("keeps personal WeChat distinct and exposes QR lifecycle through channel IPC", () => {

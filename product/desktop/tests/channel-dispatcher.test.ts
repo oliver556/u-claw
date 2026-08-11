@@ -3,6 +3,71 @@ import { describe, expect, it, vi } from "vitest";
 import * as desktop from "../src/index.js";
 
 describe("channel dispatcher", () => {
+  it("projects managed health from runtime instead of persisted UI state", async () => {
+    const local = {
+      schemaVersion: 1 as const,
+      channels: [{
+        id: "discord-main", kind: "discord" as const, name: "Discord", mode: "bot" as const,
+        configured: true, enabled: true, status: "pending-verification" as const,
+        capability: "available" as const, credentialHints: { botToken: "...cret" },
+      }],
+    };
+    const stored = { id: "discord-main", kind: "discord" as const, name: "Discord", mode: "bot" as const, enabled: true, credentials: { botToken: "discord-secret" } };
+    const store = { list: vi.fn(async () => local), getForRuntime: vi.fn(async () => stored) };
+    const runtime = {
+      capability: () => true,
+      status: vi.fn(async () => ({
+        configured: true, enabled: true, status: "connected" as const,
+        runtimeAuthoritative: true as const, pendingAction: "none" as const,
+        lastInboundAt: "2026-08-11T12:00:00.000Z", lastOutboundAt: "2026-08-11T12:01:00.000Z",
+      })),
+    };
+    const dispatch = (desktop as any).createChannelDispatcher(store, runtime);
+
+    const response = await dispatch({ method: "channels.list-managed", requestId: "list-runtime", params: {} });
+
+    expect(runtime.status).toHaveBeenCalledWith(stored, false, expect.any(AbortSignal));
+    expect(response.result.channels[0]).toMatchObject({
+      status: "connected", runtimeAuthoritative: true, pendingAction: "none",
+      lastInboundAt: "2026-08-11T12:00:00.000Z", credentialHints: { botToken: "...cret" },
+    });
+    expect(JSON.stringify(response)).not.toContain("discord-secret");
+  });
+
+  it("routes logout, send, action and poll through the formal runtime surface", async () => {
+    const stored = { id: "discord-main", kind: "discord" as const, name: "Discord", mode: "bot" as const, enabled: true, credentials: { botToken: "discord-secret" } };
+    const store = { getForRuntime: vi.fn(async () => stored), record: vi.fn(async () => ({ schemaVersion: 1, channels: [] })) };
+    const runtime = {
+      capability: () => true,
+      logout: vi.fn(async () => undefined),
+      send: vi.fn(async () => undefined),
+      action: vi.fn(async () => undefined),
+      poll: vi.fn(async () => undefined),
+    };
+    const dispatch = (desktop as any).createChannelDispatcher(store, runtime, { now: () => new Date("2026-08-11T12:00:00.000Z") });
+    const requests = [
+      { method: "channels.logout", requestId: "logout-1", params: { channelId: "discord-main" } },
+      { method: "channels.send", requestId: "send-1", params: { channelId: "discord-main", target: "channel:123", message: "hello" } },
+      { method: "channels.action", requestId: "action-1", params: { channelId: "discord-main", target: "channel:123", action: "react", messageId: "message-1", emoji: ":thumbsup:" } },
+      { method: "channels.poll", requestId: "poll-1", params: { channelId: "discord-main", target: "channel:123", question: "Ship?", options: ["Yes", "No"], multiple: false } },
+    ];
+
+    const results = [];
+    for (const request of requests) results.push(await dispatch(request));
+
+    expect(runtime.logout).toHaveBeenCalledWith(stored, expect.any(AbortSignal));
+    expect(runtime.send).toHaveBeenCalledWith(stored, { target: "channel:123", message: "hello" }, expect.any(AbortSignal));
+    expect(runtime.action).toHaveBeenCalledWith(stored, { target: "channel:123", action: "react", messageId: "message-1", emoji: ":thumbsup:" }, expect.any(AbortSignal));
+    expect(runtime.poll).toHaveBeenCalledWith(stored, { target: "channel:123", question: "Ship?", options: ["Yes", "No"], multiple: false }, expect.any(AbortSignal));
+    expect(results.map((response: any) => response.result)).toEqual([
+      { channelId: "discord-main", operation: "logout", completedAt: "2026-08-11T12:00:00.000Z" },
+      { channelId: "discord-main", operation: "send", completedAt: "2026-08-11T12:00:00.000Z" },
+      { channelId: "discord-main", operation: "action", completedAt: "2026-08-11T12:00:00.000Z" },
+      { channelId: "discord-main", operation: "poll", completedAt: "2026-08-11T12:00:00.000Z" },
+    ]);
+    expect(JSON.stringify(results)).not.toContain("hello");
+    expect(JSON.stringify(results)).not.toContain("discord-secret");
+  });
   it("routes personal WeChat lifecycle through the managed channel contract", async () => {
     const qrImage = { kind: "data-url" as const, value: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2ZQAAAABJRU5ErkJggg==" };
     const wechat = {
