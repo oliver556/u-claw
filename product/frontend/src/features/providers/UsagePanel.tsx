@@ -1,60 +1,19 @@
 import { Alert, Button, Statistic } from "antd";
 import { Activity, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import type { UsageIpcRequest, UsageSnapshot } from "@uclaw/shared";
 
-type UsageRequest =
-  | { method: "usage.snapshot"; requestId: string; params: { startDate: string; endDate: string } }
-  | { method: "usage.session-timeseries" | "usage.session-logs"; requestId: string; params: { sessionKey: string } };
 type SessionPoint = { timestamp: number; totalTokens: number; cost: number; cumulativeTokens: number; cumulativeCost: number };
 type SessionLog = { timestamp: number; role: string; content: string; tokens?: number; cost?: number };
 type UsageResponse = {
-  method?: UsageRequest["method"];
+  method?: UsageIpcRequest["method"];
   ok: boolean;
   result?: unknown;
   error?: { code: string; message: string; retryable: boolean };
 };
-type UsageSnapshot = {
-    fetchedAt: string;
-    openClaw: {
-      providerStatus: {
-        updatedAt: number;
-        providers: Array<{
-          provider: string;
-          displayName: string;
-          windows: Array<{ label: string; usedPercent: number; resetAt?: number }>;
-          billing?: Array<{
-            type: "balance" | "spend" | "budget";
-            label?: string;
-            amount?: number;
-            used?: number;
-            limit?: number;
-            unit: string;
-            resetAt?: number;
-          }>;
-          summary?: string;
-          plan?: string;
-          error?: string;
-        }>;
-      };
-      cost: { totals: { totalTokens: number; totalCost: number } };
-      sessions: { sessions: Array<{ key: string; sessionId: string; modelProvider?: string; model?: string }> };
-    };
-    newApi: null | {
-      source: "new-api";
-      updatedAt: string;
-      error: { code: string; message: string; retryable: boolean };
-    } | {
-      source: "new-api";
-      quota: number;
-      used: number;
-      remaining: number;
-      resetAt: string | null;
-      updatedAt: string;
-    };
-};
 
 interface UsagePanelProps {
-  invoke?: (request: UsageRequest) => Promise<UsageResponse>;
+  invoke?: (request: UsageIpcRequest) => Promise<UsageResponse>;
   today?: () => string;
 }
 
@@ -65,8 +24,7 @@ const currentDate = () => {
 };
 
 function defaultInvoke(): UsagePanelProps["invoke"] {
-  const bridge = window.uclaw as typeof window.uclaw & { usage?: { invoke(request: UsageRequest): Promise<UsageResponse> } };
-  return bridge?.usage?.invoke;
+  return window.uclaw?.usage?.invoke;
 }
 
 function formatTimestamp(value: string | number): string {
@@ -166,7 +124,7 @@ export function UsagePanel({ invoke = defaultInvoke(), today = currentDate }: Us
         </span>)}
         {provider.billing?.map((billing, index) => <span key={`${billing.type}-${index}`}>
           {billing.label ?? billing.type}{billing.type === "budget" ? `${billing.used ?? 0} / ${billing.limit ?? 0}` : billing.amount ?? 0} {billing.unit}
-          {billing.resetAt === undefined ? "" : formatTimestamp(billing.resetAt)}
+          {!("resetAt" in billing) || billing.resetAt === undefined ? "" : formatTimestamp(billing.resetAt)}
         </span>)}
         {provider.error === undefined ? null : <Alert type="error" showIcon role="alert" aria-label={`${provider.displayName} Provider 错误`} message={provider.error} />}
       </div>)}

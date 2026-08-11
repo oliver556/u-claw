@@ -2,9 +2,10 @@ import { UClawErrorSchema } from "@uclaw/shared";
 import { z } from "zod";
 
 import { toRendererSafeError } from "../ipc/client-dispatcher.js";
+import { USAGE_IPC_CHANNEL } from "../ipc/channels.js";
 import type { RegisteredDesktopDomain } from "../main.js";
 
-export const USAGE_IPC_CHANNEL = "uclaw:usage";
+export { USAGE_IPC_CHANNEL } from "../ipc/channels.js";
 
 const identifier = z.string().trim().min(1).max(512);
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);

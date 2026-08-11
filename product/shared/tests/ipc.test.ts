@@ -53,6 +53,20 @@ describe("IPC contracts", () => {
     })).toBeTruthy();
   });
 
+  it("parses usage requests and responses through the unified contract", () => {
+    expect(IpcRequestSchema.parse({
+      method: "usage.snapshot",
+      requestId: "usage-ipc-1",
+      params: { startDate: "2026-08-12", endDate: "2026-08-12" },
+    })).toMatchObject({ method: "usage.snapshot" });
+    expect(IpcResponseSchema.parse({
+      method: "usage.session-logs",
+      requestId: "usage-ipc-2",
+      ok: true,
+      result: [],
+    })).toMatchObject({ method: "usage.session-logs", ok: true });
+  });
+
   it("parses diagnostics requests and responses through the unified contract", () => {
     expect(IpcRequestSchema.parse({ method: "system.get", requestId: "doctor-1", params: {} })).toBeTruthy();
     expect(IpcResponseSchema.parse({ method: "system.get", requestId: "doctor-1", ok: true, result: {

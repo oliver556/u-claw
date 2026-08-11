@@ -11,6 +11,7 @@ import {
   AdapterServiceError,
   GatewayWebSocket,
   OpenClawClient,
+  createOpenClawUsageService,
   type HelloOk,
   type OpenClawTransport,
   type WebSocketLike,
@@ -19,6 +20,7 @@ import { MessageEventSchema, type MessageEvent, type ProviderConfigEntry, type P
 
 import { createClientDispatcher } from "../ipc/client-dispatcher.js";
 import { createOpenClawProviderConfigBackend } from "../providers/openclaw-provider-config.js";
+import { createOpenClawProviderExecutor } from "../providers/openclaw-provider-executor.js";
 import { createProviderStore, type ProviderStore } from "../providers/provider-store.js";
 import {
   applyProviderNetworkEnvironment,
@@ -32,6 +34,8 @@ import type {
 } from "../main.js";
 import { createOpenClawCliPluginRuntime } from "../plugins/openclaw-cli-runtime.js";
 import { createOpenClawSkillRuntime } from "../skills/openclaw-skill-runtime.js";
+import { createUsageDispatcher } from "../usage/usage-dispatcher.js";
+import { createUsageDomainRegistration } from "../usage/usage-domain.js";
 import {
   DesktopWiringError,
   readDesktopWiringEnvironment,
@@ -371,6 +375,11 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   const skillRuntime = createOpenClawSkillRuntime({
     request: (method, params, schema) => transport.router.request(method, params as never, schema),
   });
+  const usageDispatcher = createUsageDispatcher({
+    openClaw: createOpenClawUsageService({
+      request: (method, params) => transport.router.request(method, params as never, z.unknown()),
+    }),
+  });
   await composeDesktopDomainModules(domains, { client }, [
     {
       name: "provider.executor.openai-compatible",
@@ -383,6 +392,10 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
         bundledRoots: [bundledSkillsRoot],
         dispose: () => undefined,
       }),
+    },
+    {
+      name: "usage",
+      register: () => createUsageDomainRegistration(usageDispatcher),
     },
   ]);
   const dispatcher = createClientDispatcher({ client, sendEvent: () => undefined });
@@ -432,8 +445,8 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     pluginRuntime,
     domainRegistrations: domains,
     modelSourceExecutors: {
-      domestic: createRegisteredProviderExecutor(domains, "domestic", async (input, _provider, signal) => client.chat.send(input, signal)),
-      custom: createRegisteredProviderExecutor(domains, "custom"),
+      domestic: createOpenClawProviderExecutor(client),
+      custom: createOpenClawProviderExecutor(client),
     },
     dispose: async () => {
       if (disposed) return;
