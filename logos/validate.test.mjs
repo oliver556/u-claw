@@ -67,6 +67,25 @@ test("rejects xlink:href attributes", () => {
   ]);
 });
 
+test("rejects xml-stylesheet processing instructions", () => {
+  const svg = `<?xml-stylesheet type="text/css" href="https://example.invalid/logo.css"?>${VALID_SVG}`;
+
+  assert.deepEqual(validateSvg(svg, "stylesheet.svg"), [
+    "stylesheet.svg: processing instructions and DOCTYPE are forbidden",
+  ]);
+});
+
+for (const [name, declaration] of [
+  ["external", '<!DOCTYPE svg SYSTEM "https://example.invalid/logo.dtd">'],
+  ["internal", '<!DOCTYPE svg [<!ENTITY mark "U Claw">]>'],
+]) {
+  test(`rejects ${name} DOCTYPE declarations`, () => {
+    assert.deepEqual(validateSvg(`${declaration}${VALID_SVG}`, `${name}-doctype.svg`), [
+      `${name}-doctype.svg: processing instructions and DOCTYPE are forbidden`,
+    ]);
+  });
+}
+
 test("requires svg to be the document root", () => {
   const svg = `
     <root>
