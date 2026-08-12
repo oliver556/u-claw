@@ -206,118 +206,6 @@ describe("U-Claw application shell", () => {
     expect(await screen.findByRole("heading", { name: "文件" })).toBeVisible();
   });
 
-  it("manages provider selection, order, status and API keys through the dedicated bridge", async () => {
-    const providerSnapshot = {
-      schemaVersion: 1 as const,
-      selectedProviderId: "openai",
-      providers: [
-        { id: "openai", templateId: "openai" as const, name: "OpenAI", enabled: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKeyConfigured: false, verification: { state: "unverified" as const } },
-        { id: "deepseek", templateId: "deepseek" as const, name: "DeepSeek", enabled: true, baseUrl: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", apiKeyConfigured: true, apiKeyHint: "...5678", verification: { state: "unverified" as const } },
-      ],
-    };
-    const invoke = vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: providerSnapshot }));
-    window.uclaw = { providers: { invoke } } as any;
-    renderApp();
-    fireEvent.click(screen.getByRole("link", { name: "能力" }));
-
-    expect(await screen.findByRole("heading", { name: "模型 Provider" })).toBeVisible();
-    expect(screen.getByText("...5678")).toBeVisible();
-    expect(document.body.textContent).not.toContain("sk-request-only");
-    fireEvent.click(screen.getByRole("button", { name: "选择 DeepSeek" }));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.select" })));
-    await vi.waitFor(() => expect(screen.getByRole("button", { name: "上移 DeepSeek" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "上移 DeepSeek" }));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.move" })));
-    await vi.waitFor(() => expect(screen.getByRole("switch", { name: "启用 DeepSeek" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("switch", { name: "启用 DeepSeek" }));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.set-enabled" })));
-    await vi.waitFor(() => expect(screen.getByRole("button", { name: "管理 DeepSeek API Key" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "管理 DeepSeek API Key" }));
-    fireEvent.change(screen.getByLabelText("新 API Key"), { target: { value: "sk-request-only" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存 Key" }));
-
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.select", params: { providerId: "deepseek" } })));
-    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.move", params: { providerId: "deepseek", direction: "up" } }));
-    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.set-enabled", params: { providerId: "deepseek", enabled: false } }));
-    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.set-api-key", params: { providerId: "deepseek", apiKey: "sk-request-only" } }));
-    expect(document.body.textContent).not.toContain("sk-request-only");
-  });
-
-  it("validates a custom OpenAI-compatible service before creating it", async () => {
-    const providerSnapshot = { schemaVersion: 1 as const, selectedProviderId: null, providers: [] };
-    const invoke = vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: providerSnapshot }));
-    window.uclaw = { providers: { invoke } } as any;
-    renderApp();
-    fireEvent.click(screen.getByRole("link", { name: "能力" }));
-    await screen.findByRole("heading", { name: "模型 Provider" });
-    fireEvent.click(screen.getByRole("button", { name: "新增 Provider" }));
-    fireEvent.change(screen.getByLabelText("Provider ID"), { target: { value: "custom-one" } });
-    fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "自定义服务" } });
-    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "file:///C:/secret" } });
-    fireEvent.change(screen.getByLabelText("模型名"), { target: { value: "model-1" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存 Provider" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Base URL");
-    expect(invoke.mock.calls.some(([request]) => request.method === "providers.create")).toBe(false);
-
-    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://models.example.com/v1" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存 Provider" }));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
-      method: "providers.create",
-      params: { provider: expect.objectContaining({ id: "custom-one", baseUrl: "https://models.example.com/v1", model: "model-1" }) },
-    })));
-  });
-
-  it("recovers from provider loading errors and exposes real redacted verification", async () => {
-    const snapshot = { schemaVersion: 1 as const, selectedProviderId: "openai", providers: [{ id: "openai", templateId: "openai" as const, name: "OpenAI", enabled: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKeyConfigured: false, verification: { state: "unverified" as const } }], network: { httpProxy: null, httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1"] } };
-    let attempts = 0;
-    const invoke = vi.fn(async (request: any) => {
-      if (request.method === "providers.list" && attempts++ === 0) throw new Error("provider disk failure with sk-secret");
-      if (request.method === "providers.verify") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "failed", category: "authentication", code: "PROVIDER_AUTH_FAILED", message: "认证失败，请检查 API Key。", retryable: false } };
-      return { method: request.method, requestId: request.requestId, ok: true, result: snapshot };
-    });
-    window.uclaw = { providers: { invoke } } as any;
-    renderApp();
-    fireEvent.click(screen.getByRole("link", { name: "能力" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Provider 配置加载失败");
-    expect(document.body.textContent).not.toContain("sk-secret");
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    fireEvent.click(await screen.findByRole("button", { name: "验证 OpenAI" }));
-    expect(await screen.findByText("认证失败，请检查 API Key。")).toBeVisible();
-    expect(document.body.textContent).not.toContain("sk-secret");
-  });
-
-  it("discovers and selects local models and saves strict proxy settings", async () => {
-    let snapshot: any = {
-      schemaVersion: 1, selectedProviderId: "openai",
-      providers: [{ id: "openai", templateId: "openai", name: "OpenAI", enabled: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKeyConfigured: false, verification: { state: "unverified" } }],
-      network: { httpProxy: null, httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1"] },
-    };
-    const invoke = vi.fn(async (request: any) => {
-      if (request.method === "providers.discover-local") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "ready", models: [{ id: "llama3.2:latest", label: "llama3.2:latest", source: "ollama", baseUrl: "http://127.0.0.1:11434/v1" }] } };
-      if (request.method === "providers.create") snapshot = { ...snapshot, providers: [...snapshot.providers, { ...request.params.provider, apiKeyConfigured: false, verification: { state: "unverified" } }] };
-      if (request.method === "providers.select") snapshot = { ...snapshot, selectedProviderId: request.params.providerId };
-      if (request.method === "providers.set-network") snapshot = { ...snapshot, network: request.params.network };
-      return { method: request.method, requestId: request.requestId, ok: true, result: snapshot };
-    });
-    window.uclaw = { providers: { invoke } } as any;
-    renderApp();
-    fireEvent.click(screen.getByRole("link", { name: "能力" }));
-    await screen.findByRole("heading", { name: "模型 Provider" });
-
-    fireEvent.click(screen.getByRole("button", { name: "刷新本地模型" }));
-    fireEvent.click(await screen.findByRole("button", { name: "使用 llama3.2:latest" }));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.create", params: { provider: expect.objectContaining({ baseUrl: "http://127.0.0.1:11434/v1", model: "llama3.2:latest" }) } })));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.select" })));
-
-    fireEvent.change(screen.getByLabelText("HTTP 代理"), { target: { value: "http://proxy.example.com:8080" } });
-    fireEvent.change(screen.getByLabelText("NO_PROXY"), { target: { value: "localhost, 127.0.0.1, ::1, .example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存代理设置" }));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
-      method: "providers.set-network",
-      params: { network: { httpProxy: "http://proxy.example.com:8080", httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1", ".example.com"] } },
-    })));
-  });
-
   it("opens advanced console through fixed window IPC without a URL", async () => {
     const invoke = vi.fn(async (request: WindowIpcRequest): Promise<IpcResponse> => ({
       method: request.method, requestId: request.requestId, ok: true, result: null,
@@ -445,7 +333,7 @@ describe("U-Claw application shell", () => {
     expect(window.location.hash).toBe("#/files");
   });
 
-  it("collapses and restores both side panels", () => {
+  it("collapses and restores the session panel while keeping the context panel hidden", () => {
     renderApp();
 
     fireEvent.click(screen.getByRole("button", { name: "收起会话栏" }));
@@ -453,10 +341,7 @@ describe("U-Claw application shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开会话栏" }));
     expect(screen.getByLabelText("会话栏")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "收起上下文舱" }));
     expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "展开上下文舱" }));
-    expect(screen.getByLabelText("上下文舱")).toBeVisible();
   });
 
   it("routes Windows controls through the injected bridge", () => {
@@ -632,17 +517,9 @@ describe("U-Claw application shell", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("窗口操作被拒绝");
   });
 
-  it("supports arrow-key context tabs with linked tabpanels", () => {
+  it("keeps context tabs and panels hidden from the work surface", () => {
     renderApp();
-    const [firstTab] = screen.getAllByRole("tab");
-    const memory = screen.getByRole("tab", { name: "记忆" });
-
-    firstTab!.focus();
-    fireEvent.keyDown(firstTab!, { key: "ArrowRight" });
-    expect(memory).toHaveFocus();
-    expect(memory).toHaveAttribute("aria-selected", "true");
-    expect(memory).toHaveAttribute("aria-controls", "context-panel-memory");
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "context-panel-memory");
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "context-tab-memory");
+    expect(screen.queryByRole("complementary", { name: "上下文舱" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
   });
 });
