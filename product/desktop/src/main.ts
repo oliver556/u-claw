@@ -104,6 +104,127 @@ export interface AppWindowLike {
   focus(): void;
 }
 
+export const ACTIVATION_ONLY_CAPABILITIES = [
+  "activation.preflight",
+  "activation.submit",
+  "activation.commit",
+  "activation.cancel",
+  "window.close",
+] as const;
+
+export type ActivationOnlyCapability = typeof ACTIVATION_ONLY_CAPABILITIES[number];
+
+export function assertActivationOnlyCapabilities(capabilities: readonly string[]): void {
+  if (
+    capabilities.length !== ACTIVATION_ONLY_CAPABILITIES.length ||
+    ACTIVATION_ONLY_CAPABILITIES.some((capability) => !capabilities.includes(capability))
+  ) {
+    throw new Error("Activation-only IPC capabilities must match the restricted allowlist.");
+  }
+}
+
+export interface ActivationIpcRegistration {
+  capabilities: readonly string[];
+  dispose(): void;
+}
+
+export interface RegisterActivationOnlyIpcDependencies {
+  ipcMain: IpcMainLike;
+  authorizedWebContents: AuthorizedWebContents;
+  closeWindow(): void;
+}
+
+export function registerActivationOnlyIpc({
+  ipcMain,
+  authorizedWebContents,
+  closeWindow,
+}: RegisterActivationOnlyIpcDependencies): ActivationIpcRegistration {
+  const registered: ActivationOnlyCapability[] = [];
+  try {
+    for (const capability of ACTIVATION_ONLY_CAPABILITIES) {
+      ipcMain.handle(capability, async (event) => {
+        const candidate = event as { sender?: unknown; senderFrame?: unknown };
+        if (
+          candidate.sender !== authorizedWebContents ||
+          candidate.senderFrame !== authorizedWebContents.mainFrame
+        ) {
+          throw new Error("Unauthorized activation IPC sender.");
+        }
+        if (capability === "window.close") {
+          closeWindow();
+          return null;
+        }
+        throw new Error("Activation service is unavailable.");
+      });
+      registered.push(capability);
+    }
+  } catch (error) {
+    const cleanupFailures: unknown[] = [];
+    for (const capability of registered.reverse()) {
+      try {
+        ipcMain.removeHandler(capability);
+      } catch (cleanupError) {
+        cleanupFailures.push(cleanupError);
+      }
+    }
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupFailures],
+        "Activation IPC registration and rollback failed.",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+
+  let active = true;
+  return {
+    capabilities: ACTIVATION_ONLY_CAPABILITIES,
+    dispose: () => {
+      if (!active) return;
+      active = false;
+      for (const capability of registered) ipcMain.removeHandler(capability);
+    },
+  };
+}
+
+export interface ActivationWindowLike extends AppWindowLike {
+  close(): void;
+}
+
+export interface ActivationMainRuntime<TWindow extends ActivationWindowLike> {
+  app: DesktopAppLike;
+  createWindow(registerIpc: (window: TWindow) => void): Promise<TWindow>;
+  registerIpc(window: TWindow): ActivationIpcRegistration;
+}
+
+export async function runActivationMain<TWindow extends ActivationWindowLike>(
+  runtime: ActivationMainRuntime<TWindow>,
+): Promise<TWindow | null> {
+  return bootstrapDesktopApp({
+    app: runtime.app,
+    createWindow: async (registerIpc) => runtime.createWindow((window) => {
+      try {
+        registerIpc(window);
+      } catch (error) {
+        window.close();
+        throw error;
+      }
+    }),
+    registerIpc: (window) => {
+      const registration = runtime.registerIpc(window);
+      try {
+        assertActivationOnlyCapabilities(registration.capabilities);
+      } catch (error) {
+        registration.dispose();
+        throw error;
+      }
+      return registration.dispose;
+    },
+    stopGateway: () => undefined,
+  });
+}
+
 const LOOPBACK_RENDERER_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 export function validateRendererUrl(value: string | undefined): string | undefined {
@@ -714,4 +835,31 @@ export async function startElectronMain(
       };
     },
   });
+}
+
+export async function startActivationMain(
+  portablePaths: PortableDesktopPaths,
+): Promise<void> {
+  const { app, BrowserWindow, ipcMain, shell } = await import("electron");
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const devTools = !app.isPackaged;
+  await runActivationMain<DesktopWindow>({
+    app,
+    createWindow: (registerIpc) => createMainWindow({
+      BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
+      preloadPath: resolvePreloadPath(moduleDir),
+      rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
+      rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
+      openExternal: (url) => shell.openExternal(url),
+      devTools,
+      showWhenReady: true,
+      beforeLoad: registerIpc,
+    }),
+    registerIpc: (window) => registerActivationOnlyIpc({
+      ipcMain: ipcMain as unknown as IpcMainLike,
+      authorizedWebContents: window.webContents,
+      closeWindow: () => window.close(),
+    }),
+  });
+  void portablePaths;
 }

@@ -5,10 +5,157 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { bootstrapDesktopApp, createProductionDataService, disposeDesktopIpc, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runDesktopMain, validateRendererUrl } from "../src/main.js";
+import { ACTIVATION_ONLY_CAPABILITIES, assertActivationOnlyCapabilities, bootstrapDesktopApp, createProductionDataService, disposeDesktopIpc, registerActivationOnlyIpc, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runActivationMain, runDesktopMain, validateRendererUrl } from "../src/main.js";
 import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
+  it("allows exactly the activation-only IPC capability set", () => {
+    expect(() => assertActivationOnlyCapabilities(ACTIVATION_ONLY_CAPABILITIES)).not.toThrow();
+    expect(() => assertActivationOnlyCapabilities([...ACTIVATION_ONLY_CAPABILITIES, "client.invoke"])).toThrow("capabilities");
+    expect(() => assertActivationOnlyCapabilities(ACTIVATION_ONLY_CAPABILITIES.slice(1))).toThrow("capabilities");
+  });
+
+  it("starts activation-only without a Gateway lifecycle", async () => {
+    const window = {
+      close: vi.fn(),
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      restore: vi.fn(),
+      focus: vi.fn(),
+    };
+    const registerIpc = vi.fn(() => ({ capabilities: ACTIVATION_ONLY_CAPABILITIES, dispose: vi.fn() }));
+    const createWindow = vi.fn(async (beforeLoad: (createdWindow: typeof window) => void) => {
+      beforeLoad(window);
+      return window;
+    });
+
+    await expect(runActivationMain({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow,
+      registerIpc,
+    })).resolves.toBe(window);
+
+    expect(createWindow).toHaveBeenCalledOnce();
+    expect(registerIpc).toHaveBeenCalledWith(window);
+  });
+
+  it("closes the activation window when IPC registration fails before load", async () => {
+    const close = vi.fn();
+    const window = {
+      close,
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      restore: vi.fn(),
+      focus: vi.fn(),
+    };
+
+    await expect(runActivationMain({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow: async (beforeLoad) => {
+        beforeLoad(window);
+        return window;
+      },
+      registerIpc: () => { throw new Error("IPC registration failed"); },
+    })).rejects.toThrow("IPC registration failed");
+
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects activation IPC unless sender and main frame both match", async () => {
+    const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const authorized = { mainFrame: {} };
+    const registration = registerActivationOnlyIpc({
+      ipcMain: {
+        handle: (channel, handler) => handlers.set(channel, handler),
+        removeHandler: (channel) => handlers.delete(channel),
+      },
+      authorizedWebContents: authorized,
+      closeWindow: vi.fn(),
+    });
+    const close = handlers.get("window.close")!;
+
+    await expect(close({ sender: {}, senderFrame: authorized.mainFrame }, undefined)).rejects.toThrow("Unauthorized");
+    await expect(close({ sender: authorized, senderFrame: {} }, undefined)).rejects.toThrow("Unauthorized");
+    await expect(close({ sender: authorized, senderFrame: authorized.mainFrame }, undefined)).resolves.toBeNull();
+    registration.dispose();
+  });
+
+  it("rolls back activation handlers when registration fails partway", () => {
+    const registered = new Set<string>();
+    const removeHandler = vi.fn((channel: string) => registered.delete(channel));
+
+    expect(() => registerActivationOnlyIpc({
+      ipcMain: {
+        handle: (channel) => {
+          if (channel === "activation.commit") throw new Error("duplicate handler");
+          registered.add(channel);
+        },
+        removeHandler,
+      },
+      authorizedWebContents: { mainFrame: {} },
+      closeWindow: vi.fn(),
+    })).toThrow("duplicate handler");
+
+    expect(registered).toEqual(new Set());
+    expect(removeHandler).toHaveBeenCalledWith("activation.submit");
+    expect(removeHandler).toHaveBeenCalledWith("activation.preflight");
+  });
+
+  it("continues partial rollback and preserves registration plus cleanup failures", () => {
+    const registered = new Set<string>();
+    const registrationError = new Error("duplicate handler");
+    const cleanupError = new Error("remove submit failed");
+
+    const caught = (() => {
+      try {
+        registerActivationOnlyIpc({
+          ipcMain: {
+            handle: (channel) => {
+              if (channel === "activation.commit") throw registrationError;
+              registered.add(channel);
+            },
+            removeHandler: (channel) => {
+              registered.delete(channel);
+              if (channel === "activation.submit") throw cleanupError;
+            },
+          },
+          authorizedWebContents: { mainFrame: {} },
+          closeWindow: vi.fn(),
+        });
+      } catch (error) {
+        return error;
+      }
+    })();
+
+    expect(caught).toBeInstanceOf(AggregateError);
+    expect((caught as AggregateError).errors).toEqual([registrationError, cleanupError]);
+    expect(registered).toEqual(new Set());
+  });
+
+  it("disposes activation handlers only once", () => {
+    const removeHandler = vi.fn();
+    const registration = registerActivationOnlyIpc({
+      ipcMain: { handle: vi.fn(), removeHandler },
+      authorizedWebContents: { mainFrame: {} },
+      closeWindow: vi.fn(),
+    });
+
+    registration.dispose();
+    registration.dispose();
+
+    expect(removeHandler).toHaveBeenCalledTimes(ACTIVATION_ONLY_CAPABILITIES.length);
+  });
+
   it("always removes core IPC when a domain IPC disposer fails", () => {
     const domain = vi.fn(() => { throw new Error("domain cleanup failed"); });
     const core = vi.fn();
