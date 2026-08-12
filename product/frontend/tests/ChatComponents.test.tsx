@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import type { ApprovalRequest, ContentBlock, ToolCall, ToolState } from "@uclaw/shared";
+import type { ApprovalRequest, ContentBlock, Message, ToolCall, ToolState } from "@uclaw/shared";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -56,6 +56,21 @@ describe("ToolRun", () => {
 });
 
 describe("MessageList", () => {
+  it("renders user and assistant messages as anonymous role-aligned bubbles", () => {
+    const messages: Message[] = [
+      { id: "user-1", sessionId: "session-1", role: "user", status: "completed", blocks: [{ id: "u", type: "text", text: "你好", format: "plain" }], createdAt: "2026-08-13T00:00:00.000Z" },
+      { id: "assistant-1", sessionId: "session-1", role: "assistant", status: "completed", blocks: [{ id: "a", type: "text", text: "你好，小李总", format: "markdown" }], createdAt: "2026-08-13T00:00:01.000Z" },
+    ];
+
+    const { container } = render(<MessageList messages={messages} stream={{ order: [], runs: {} }} pendingTools={[]} pendingApprovals={[]} canResolveApprovals={false} onResolveApproval={vi.fn()} />);
+
+    expect(container.querySelector(".user-message .message-content")).toHaveTextContent("你好");
+    expect(container.querySelector(".assistant-message .message-content")).toHaveTextContent("你好，小李总");
+    expect(container.querySelectorAll(".message > header")).toHaveLength(0);
+    expect(screen.queryByText("U-Claw")).not.toBeInTheDocument();
+    expect(screen.queryByText("你")).not.toBeInTheDocument();
+  });
+
   it("keeps final run tools and approvals visible without duplicating pending items", () => {
     const tool: ToolCall = { id: "tool-final", sessionId: "session-1", runId: "run-1", toolId: "exec", displayName: "Inspect workspace", state: "waiting-authorization", risk: "high" };
     const approval: ApprovalRequest = { id: "approval-final", family: "exec", sessionId: "session-1", toolCallId: tool.id, subject: { kind: "toolCall", id: tool.id }, title: "Inspect workspace", description: "Read files", risk: "high", permissions: [{ kind: "file-read", scope: "fixture", description: "Read fixture" }], choices: ["allow-once", "deny"], status: "pending" };
