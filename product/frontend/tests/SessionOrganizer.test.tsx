@@ -57,13 +57,21 @@ describe("SessionSidebar organizer", () => {
     expect(value.onAssignGroup).toHaveBeenCalledWith(sessions[0], null);
   });
 
-  it("creates and renames groups from explicit commands", () => {
+  it("creates and renames groups from an in-app dialog", () => {
     const value = props();
-    vi.spyOn(window, "prompt").mockReturnValueOnce("客户 A").mockReturnValueOnce("正式发布");
     render(<SessionSidebar {...value} />);
     fireEvent.click(screen.getByRole("button", { name: "新建分组" }));
+    expect(screen.getByRole("dialog", { name: "新建分组" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "分组名称" }), { target: { value: "客户 A" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建分组" }));
     expect(value.onCreateGroup).toHaveBeenCalledWith("客户 A");
+
     fireEvent.click(screen.getByRole("button", { name: "重命名分组 发布" }));
+    expect(screen.getByRole("dialog", { name: "重命名分组" })).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "分组名称" });
+    expect(input).toHaveValue("发布");
+    fireEvent.change(input, { target: { value: "正式发布" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存分组名称" }));
     expect(value.onRenameGroup).toHaveBeenCalledWith({ id: "group-1", name: "发布" }, "正式发布");
   });
 
