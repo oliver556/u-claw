@@ -73,6 +73,12 @@ func TestLauncherDependenciesWireProductionLicenseGate(t *testing.T) {
 	if dependencies.VerifyLicense == nil {
 		t.Fatal("production license gate is not configured")
 	}
+	if dependencies.DetectActivationState == nil {
+		t.Fatal("activation classification is not configured")
+	}
+	if dependencies.ActivationProcessSpec == nil {
+		t.Fatal("activation process factory is not configured")
+	}
 }
 
 func TestProductionLicenseLifecycleConfigurationFailsClosed(t *testing.T) {

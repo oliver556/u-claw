@@ -10,6 +10,135 @@ import (
 	"time"
 )
 
+func TestActivationProcessSpecUsesRestrictedStartupMode(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "runtime")
+	paths := PortablePaths{
+		DataDir:       filepath.Join(t.TempDir(), "data"),
+		HostCacheRoot: filepath.Join(t.TempDir(), "host-cache"),
+	}
+	manifest := validRuntimeManifest()
+	manifest.Entrypoint = `electron\electron.exe`
+	manifest.EntryArgs = []string{"resources/app.asar"}
+	lease := processTestLease(root)
+
+	spec := ActivationProcessSpec(paths, manifest, lease)
+
+	wantEntrypoint := filepath.Join(root, "electron", "electron.exe")
+	if spec.Path != wantEntrypoint || spec.Dir != filepath.Dir(wantEntrypoint) || spec.Lease != lease {
+		t.Fatalf("process spec = %#v", spec)
+	}
+	wantArgs := []string{"resources/app.asar", "--uclaw-startup-mode=activation-only"}
+	if !reflect.DeepEqual(spec.Args, wantArgs) {
+		t.Fatalf("args = %v", spec.Args)
+	}
+	for _, entry := range spec.Env {
+		if strings.HasPrefix(entry, "OPENCLAW_") {
+			t.Fatalf("activation environment contains %q", entry)
+		}
+	}
+	wantEnv := []string{
+		"TEMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
+		"TMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
+		"UCLAW_CACHE_DIR=" + filepath.Join(paths.HostCacheRoot, "cache"),
+		"UCLAW_DATA_DIR=" + paths.DataDir,
+		"UCLAW_RUNTIME_DIR=" + root,
+	}
+	if !reflect.DeepEqual(spec.Env, wantEnv) {
+		t.Fatalf("environment = %v", spec.Env)
+	}
+	if !reflect.DeepEqual(spec.EnvRemovePrefixes, []string{"OPENCLAW_"}) {
+		t.Fatalf("environment removal prefixes = %v", spec.EnvRemovePrefixes)
+	}
+}
+
+func TestManagedActivationProcessRemovesInheritedOpenClawEnvironment(t *testing.T) {
+	t.Setenv("OPENCLAW_CONFIG_PATH", "host-config")
+	t.Setenv("OPENCLAW_HOME", "host-home")
+	t.Setenv("OPENCLAW_STATE_DIR", "host-state")
+	t.Setenv("OPENCLAW_FUTURE_SETTING", "host-future")
+	output := filepath.Join(t.TempDir(), "environment")
+	spec := ProcessSpec{
+		Path:              os.Args[0],
+		Args:              []string{"-test.run=TestLauncherProcessHelper", "--", output},
+		Env:               []string{"UCLAW_HELPER_MODE=write-openclaw"},
+		EnvRemovePrefixes: []string{"OPENCLAW_"},
+		Lease:             processTestLease(filepath.Dir(os.Args[0])),
+	}
+	process, err := StartManagedProcess(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "|||" {
+		t.Fatalf("inherited OpenClaw environment = %q", content)
+	}
+}
+
+func TestNormalProcessSpecPreservesManifestArgumentsAndOpenClawEnvironment(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "runtime")
+	paths := PortablePaths{
+		DataDir:       filepath.Join(t.TempDir(), "data"),
+		HostCacheRoot: filepath.Join(t.TempDir(), "host-cache"),
+	}
+	manifest := validRuntimeManifest()
+	manifest.EntryArgs = []string{"resources/app.asar", "--inspect=0"}
+	lease := processTestLease(root)
+
+	spec := NormalProcessSpec(paths, manifest, lease)
+
+	wantArgs := append(append([]string(nil), manifest.EntryArgs...), "--uclaw-startup-mode=normal")
+	if !reflect.DeepEqual(spec.Args, wantArgs) {
+		t.Fatalf("args = %v", spec.Args)
+	}
+	hasOpenClawEnvironment := false
+	for _, entry := range spec.Env {
+		if strings.HasPrefix(entry, "OPENCLAW_STATE_DIR=") {
+			hasOpenClawEnvironment = true
+		}
+	}
+	if !hasOpenClawEnvironment {
+		t.Fatalf("normal environment = %v", spec.Env)
+	}
+}
+
+func TestActivationCompletedRecognizesOnlyExitCode20(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		mode string
+		want bool
+	}{
+		{name: "activation complete", mode: "exit20", want: true},
+		{name: "other exit", mode: "exit21", want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			process, err := StartManagedProcess(ProcessSpec{
+				Path:  os.Args[0],
+				Args:  []string{"-test.run=TestLauncherProcessHelper"},
+				Env:   []string{"UCLAW_HELPER_MODE=" + test.mode},
+				Lease: processTestLease(filepath.Dir(os.Args[0])),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := ActivationCompleted(process.Wait()); got != test.want {
+				t.Fatalf("ActivationCompleted = %v, want %v", got, test.want)
+			}
+		})
+	}
+	if ActivationCompleted(nil) {
+		t.Fatal("successful exit was treated as activation completion")
+	}
+	if ActivationCompleted(errors.New("exit status 20")) {
+		t.Fatal("error text was treated as activation completion")
+	}
+}
+
 func processTestLease(root string) *fakeRuntimeLease {
 	return &fakeRuntimeLease{root: root}
 }
@@ -142,6 +271,24 @@ func TestLauncherProcessHelper(t *testing.T) {
 		for {
 			time.Sleep(time.Second)
 		}
+	case "exit20":
+		os.Exit(20)
+	case "exit21":
+		os.Exit(21)
+	case "write-openclaw":
+		if separator < 0 || len(os.Args) < separator+2 {
+			os.Exit(2)
+		}
+		content := strings.Join([]string{
+			os.Getenv("OPENCLAW_CONFIG_PATH"),
+			os.Getenv("OPENCLAW_HOME"),
+			os.Getenv("OPENCLAW_STATE_DIR"),
+			os.Getenv("OPENCLAW_FUTURE_SETTING"),
+		}, "|")
+		if err := os.WriteFile(os.Args[separator+1], []byte(content), 0o600); err != nil {
+			os.Exit(3)
+		}
+		os.Exit(0)
 	default:
 		os.Exit(4)
 	}
