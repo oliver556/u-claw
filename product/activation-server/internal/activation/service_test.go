@@ -53,6 +53,8 @@ func (repository *fakeRepository) CompleteBinding(_ context.Context, input Compl
 	return repository.complete, repository.completeErr
 }
 
+func (repository *fakeRepository) CommitActivation(context.Context, CommitInput) error { return nil }
+
 type fakeSigner struct{ calls int }
 
 func (signer *fakeSigner) Sign(payload license.SigningPayload) (string, error) {

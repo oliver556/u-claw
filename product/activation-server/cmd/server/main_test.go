@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"u-claw-activation-server/internal/config"
+	"u-claw-activation-server/internal/security"
+	"u-claw-activation-server/internal/transport"
 )
 
 func TestNewHTTPServerUsesSafeLimitsAndInjectedDatabaseCheck(t *testing.T) {
@@ -21,10 +23,11 @@ func TestNewHTTPServerUsesSafeLimitsAndInjectedDatabaseCheck(t *testing.T) {
 	server := newHTTPServer(config.Config{
 		ListenAddress:     "127.0.0.1:0",
 		LicenseSigningKey: privateKey,
+		StatusSigningKey:  privateKey,
 	}, func(context.Context) error {
 		databaseCalled = true
 		return nil
-	})
+	}, transport.ReadinessCheck(func(context.Context) error { return nil }))
 
 	if server.ReadHeaderTimeout != readHeaderTimeout || server.ReadTimeout != readTimeout ||
 		server.WriteTimeout != writeTimeout || server.IdleTimeout != idleTimeout {
@@ -41,6 +44,29 @@ func TestNewHTTPServerUsesSafeLimitsAndInjectedDatabaseCheck(t *testing.T) {
 	if !databaseCalled {
 		t.Fatal("injected database readiness check was not called")
 	}
+}
+
+func TestProductionKMSUsesConfiguredKEKAndRejectsUnsafeProviders(t *testing.T) {
+	for _, cfg := range []config.Config{
+		{},
+		{KMSProvider: "test", KMSKeyVersion: "kms-v1", KMSKEK: make([]byte, 32)},
+		{KMSProvider: "local-kek-v1", KMSKeyVersion: "kms-v1", KMSKEK: make([]byte, 31)},
+	} {
+		if _, err := productionKMS(cfg); err == nil {
+			t.Fatalf("unsafe config accepted: %#v", cfg)
+		}
+	}
+	kms, err := productionKMS(config.Config{KMSProvider: "local-kek-v1", KMSKeyVersion: "kms-v1", KMSKEK: []byte("01234567890123456789012345678901")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, ok := kms.(interface {
+		Probe(context.Context, string) error
+	})
+	if !ok || probe.Probe(context.Background(), "kms-v1") != nil {
+		t.Fatal("production KMS probe failed")
+	}
+	var _ security.KMS = kms
 }
 
 func TestSignerReadinessSignsAndVerifies(t *testing.T) {

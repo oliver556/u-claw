@@ -1,0 +1,7 @@
+{
+  "seed": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+  "publicKey": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+  "checkedAt": "2026-08-13T01:02:03Z",
+  "startupSecret": "fixture-startup-secret-material-0001",
+  "response": {"status":{"licenseId":"lic_fixture_001","deviceId":"dev_fixture_001","status":"active","revision":2,"notBefore":"2026-08-13T00:02:03Z","expiresAt":"2026-08-15T01:02:03Z","replacementLicenseId":null,"updatedAt":"2026-08-13T01:01:03Z"},"receipt":{"value":"WyJ1Y2xhdy1saWNlbnNlLXN0YXR1cy12MSIsMSwibGljX2ZpeHR1cmVfMDAxIiwiZGV2X2ZpeHR1cmVfMDAxIiwiYWN0aXZlIiwyLCIyMDI2LTA4LTEzVDAwOjAyOjAzWiIsIjIwMjYtMDgtMTVUMDE6MDI6MDNaIixudWxsLCIyMDI2LTA4LTEzVDAxOjAxOjAzWiIsIjIwMjYtMDgtMTNUMDE6MDI6MDNaIiwiMjAyNi0wOC0xNFQwMTowMjowM1oiLCJzdGF0dXMta2V5LTAwMSJd.TO5vPJkzwxwQrIDx7fO_b5FF3HsNAv6ZwS_Ogzr9OjjpFRRe6sqFGAK1tfIWqIoVcBLToJ1iMH-ZBE1-xKWuCQ"}}
+}

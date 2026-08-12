@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,10 +15,19 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	directory := t.TempDir()
 	pepperFile := writeTestFile(t, directory, "pepper", []byte(strings.Repeat("p", 32)))
 	keyFile := writeSigningKey(t, directory)
+	kekFile := writeTestFile(t, directory, "kek", []byte(strings.Repeat("k", 32)))
+	tokenKeyFile := writeTestFile(t, directory, "token-key", []byte(strings.Repeat("t", 32)))
 	values := map[string]string{
 		"DATABASE_URL":             " postgres://database.example/uclaw ",
 		"ACTIVATION_PEPPER_FILE":   pepperFile,
 		"LICENSE_SIGNING_KEY_FILE": keyFile,
+		"STATUS_SIGNING_KEY_FILE":  keyFile,
+		"LICENSE_KEY_ID":           "license-key-001",
+		"STATUS_KEY_ID":            "status-key-001",
+		"KMS_PROVIDER":             "external-kms",
+		"KMS_KEY_VERSION":          "kms-v1",
+		"KMS_KEK_FILE":             kekFile,
+		"TOKEN_SIGNING_KEY_FILE":   tokenKeyFile,
 		"LISTEN_ADDRESS":           " 127.0.0.1:8080 ",
 	}
 
@@ -40,6 +50,12 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	if len(got.LicenseSigningKey) != ed25519.PrivateKeySize {
 		t.Fatalf("signing key length = %d, want %d", len(got.LicenseSigningKey), ed25519.PrivateKeySize)
 	}
+	if got.KMSKEKFile != kekFile || string(got.KMSKEK) != strings.Repeat("k", 32) {
+		t.Fatal("KEK file was not loaded")
+	}
+	if got.TokenSigningKeyFile != tokenKeyFile || string(got.TokenSigningKey) != strings.Repeat("t", 32) {
+		t.Fatal("token signing key was not loaded")
+	}
 }
 
 func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T) {
@@ -48,6 +64,13 @@ func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T
 		"DATABASE_URL":             "postgres://secret-user:secret-password@database/uclaw",
 		"ACTIVATION_PEPPER_FILE":   writeTestFile(t, directory, "required-pepper", []byte(strings.Repeat("p", 32))),
 		"LICENSE_SIGNING_KEY_FILE": writeSigningKey(t, directory),
+		"STATUS_SIGNING_KEY_FILE":  writeSigningKey(t, directory),
+		"LICENSE_KEY_ID":           "license-key-001",
+		"STATUS_KEY_ID":            "status-key-001",
+		"KMS_PROVIDER":             "external-kms",
+		"KMS_KEY_VERSION":          "kms-v1",
+		"KMS_KEK_FILE":             writeTestFile(t, directory, "required-kek", []byte(strings.Repeat("k", 32))),
+		"TOKEN_SIGNING_KEY_FILE":   writeTestFile(t, directory, "required-token-key", []byte(strings.Repeat("t", 32))),
 	}
 
 	for _, missingName := range requiredVariables {
@@ -92,6 +115,13 @@ func TestLoadFromRejectsInvalidSecretFilesWithoutLeakingValues(t *testing.T) {
 				"DATABASE_URL":             "postgres://secret-user:secret-password@database/uclaw",
 				"ACTIVATION_PEPPER_FILE":   test.pepperFile,
 				"LICENSE_SIGNING_KEY_FILE": test.keyFile,
+				"STATUS_SIGNING_KEY_FILE":  validKey,
+				"LICENSE_KEY_ID":           "license-key-001",
+				"STATUS_KEY_ID":            "status-key-001",
+				"KMS_PROVIDER":             "external-kms",
+				"KMS_KEY_VERSION":          "kms-v1",
+				"KMS_KEK_FILE":             writeTestFile(t, directory, "valid-kek", []byte(strings.Repeat("k", 32))),
+				"TOKEN_SIGNING_KEY_FILE":   writeTestFile(t, directory, "valid-token-key", []byte(strings.Repeat("t", 32))),
 			}
 			_, err := LoadFrom(func(name string) string { return values[name] })
 			if err == nil {
@@ -104,6 +134,46 @@ func TestLoadFromRejectsInvalidSecretFilesWithoutLeakingValues(t *testing.T) {
 				if strings.Contains(err.Error(), secret) {
 					t.Fatalf("error leaks configuration value: %q", err)
 				}
+			}
+		})
+	}
+}
+
+func TestLoadFromAcceptsOnlyExplicitKEKFormats(t *testing.T) {
+	directory := t.TempDir()
+	keyFile := writeSigningKey(t, directory)
+	baseValues := map[string]string{
+		"DATABASE_URL":             "postgres://database/uclaw",
+		"ACTIVATION_PEPPER_FILE":   writeTestFile(t, directory, "pepper", []byte(strings.Repeat("p", 32))),
+		"LICENSE_SIGNING_KEY_FILE": keyFile,
+		"STATUS_SIGNING_KEY_FILE":  keyFile,
+		"LICENSE_KEY_ID":           "license-key-001",
+		"STATUS_KEY_ID":            "status-key-001",
+		"KMS_PROVIDER":             "local-kek-v1",
+		"KMS_KEY_VERSION":          "kms-v1",
+		"TOKEN_SIGNING_KEY_FILE":   writeTestFile(t, directory, "token-key", []byte(strings.Repeat("t", 32))),
+	}
+	for name, contents := range map[string][]byte{
+		"raw":    []byte(strings.Repeat("r", 32)),
+		"base64": []byte("base64:" + base64.RawStdEncoding.EncodeToString([]byte(strings.Repeat("b", 32)))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			values := maps.Clone(baseValues)
+			values["KMS_KEK_FILE"] = writeTestFile(t, directory, "kek-"+name, contents)
+			if _, err := LoadFrom(func(key string) string { return values[key] }); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for name, contents := range map[string][]byte{
+		"implicit base64": []byte(base64.RawStdEncoding.EncodeToString([]byte(strings.Repeat("x", 32)))),
+		"short raw":       []byte(strings.Repeat("x", 31)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			values := maps.Clone(baseValues)
+			values["KMS_KEK_FILE"] = writeTestFile(t, directory, "bad-kek-"+name, contents)
+			if _, err := LoadFrom(func(key string) string { return values[key] }); err == nil || !strings.Contains(err.Error(), "KMS_KEK_FILE") {
+				t.Fatalf("error=%v", err)
 			}
 		})
 	}

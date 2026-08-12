@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"u-claw-activation-server/internal/activation"
 )
 
 func TestInitialMigrationContainsAuthoritativeTablesAndConstraints(t *testing.T) {
@@ -82,7 +84,7 @@ func TestInitialMigrationContainsAuthoritativeTablesAndConstraints(t *testing.T)
 			t.Errorf("migration ledger missing constraint %q", fragment)
 		}
 	}
-	if migrationVersion != 1 || len(initialMigrationChecksum) != 32 {
+	if latestMigrationVersion != 2 || len(initialMigrationChecksum) != 32 {
 		t.Fatal("migration version/checksum metadata is invalid")
 	}
 }
@@ -94,6 +96,32 @@ func TestInitialMigrationReleaseFileMatchesCompiledMigration(t *testing.T) {
 	}
 	if strings.TrimSpace(string(contents)) != strings.TrimSpace(InitialMigrationSQL()) {
 		t.Fatal("migrations/001_initial.sql drifted from compiled migration")
+	}
+}
+
+func TestLifecycleMigrationContainsTaskFiveAndSixSchema(t *testing.T) {
+	sql := LifecycleMigrationSQL()
+	for _, fragment := range []string{
+		"ADD COLUMN IF NOT EXISTS artifact_generation BIGINT",
+		"ADD COLUMN IF NOT EXISTS commit_idempotency_key TEXT",
+		"activation_attempts_committed_fields_check",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("lifecycle migration missing %q", fragment)
+		}
+	}
+	if latestMigrationVersion != 2 || len(lifecycleMigrationChecksum) != 32 {
+		t.Fatal("lifecycle migration version/checksum metadata is invalid")
+	}
+}
+
+func TestLifecycleMigrationReleaseFileMatchesCompiledMigration(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "..", "migrations", "002_lifecycle.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(contents)) != strings.TrimSpace(LifecycleMigrationSQL()) {
+		t.Fatal("migrations/002_lifecycle.sql drifted from compiled migration")
 	}
 }
 
@@ -148,11 +176,11 @@ func TestMigratePostgreSQLIsIdempotentAndEnforcesUniqueBindings(t *testing.T) {
 		t.Fatalf("table count = %d, want 9", tableCount)
 	}
 	var migrationCount int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version = 1 AND octet_length(checksum) = 32`).Scan(&migrationCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2) AND octet_length(checksum) = 32`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 1 {
-		t.Fatalf("migration record count = %d, want 1", migrationCount)
+	if migrationCount != 2 {
+		t.Fatalf("migration record count = %d, want 2", migrationCount)
 	}
 
 	_, err = pool.Exec(ctx, `INSERT INTO activation_inventory
@@ -191,4 +219,23 @@ func TestMigratePostgreSQLIsIdempotentAndEnforcesUniqueBindings(t *testing.T) {
 func postgresCode(err error, code string) bool {
 	var postgresError *pgconn.PgError
 	return errors.As(err, &postgresError) && postgresError.Code == code
+}
+
+func TestValidateCommitReplayUsesIndependentCommitKeyAndGeneration(t *testing.T) {
+	key := "commit-fixture-001"
+	generation := int64(7)
+	if err := validateCommitReplay("server_bound", nil, nil, activation.CommitInput{IdempotencyKey: key, ArtifactGeneration: generation}); err != nil {
+		t.Fatalf("first commit rejected: %v", err)
+	}
+	if err := validateCommitReplay("committed", &key, &generation, activation.CommitInput{IdempotencyKey: key, ArtifactGeneration: generation}); err != nil {
+		t.Fatalf("identical replay rejected: %v", err)
+	}
+	for _, input := range []activation.CommitInput{
+		{IdempotencyKey: "commit-fixture-002", ArtifactGeneration: generation},
+		{IdempotencyKey: key, ArtifactGeneration: generation + 1},
+	} {
+		if err := validateCommitReplay("committed", &key, &generation, input); !errors.Is(err, activation.ErrIdempotencyConflict) {
+			t.Fatalf("conflicting replay error=%v", err)
+		}
+	}
 }

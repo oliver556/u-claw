@@ -176,6 +176,14 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 	return service.complete(ctx, begin.Record)
 }
 
+func (service *Service) Commit(ctx context.Context, input CommitInput) error {
+	if !identifierPattern.MatchString(input.ActivationID) || !idempotencyPattern.MatchString(input.IdempotencyKey) ||
+		input.ArtifactGeneration < 1 || input.ArtifactGeneration > 9007199254740991 || !identifierPattern.MatchString(input.RequestID) {
+		return ErrActivationInvalid
+	}
+	return service.repository.CommitActivation(ctx, input)
+}
+
 func (service *Service) complete(ctx context.Context, record BoundRecord) (ActivateResult, error) {
 	binding := envelopeBinding(record, record.PendingMaterialKeyVersion)
 	pendingBytes, err := service.envelope.Decrypt(ctx, binding, record.PendingMaterialEnvelope)

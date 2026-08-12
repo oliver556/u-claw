@@ -36,6 +36,13 @@ type ActivateResult struct {
 	Material     []byte
 }
 
+type CommitInput struct {
+	ActivationID       string
+	IdempotencyKey     string
+	ArtifactGeneration int64
+	RequestID          string
+}
+
 type BindingDisposition uint8
 
 const (
@@ -101,6 +108,7 @@ type Repository interface {
 	ValidateBinding(context.Context, ValidateBindingInput) error
 	BeginBinding(context.Context, BeginBindingInput) (BeginBindingResult, error)
 	CompleteBinding(context.Context, CompleteBindingInput) (BoundRecord, error)
+	CommitActivation(context.Context, CommitInput) error
 }
 
 type LicenseSigner interface {

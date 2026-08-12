@@ -23,6 +23,13 @@ var requiredVariables = []string{
 	"DATABASE_URL",
 	"ACTIVATION_PEPPER_FILE",
 	"LICENSE_SIGNING_KEY_FILE",
+	"STATUS_SIGNING_KEY_FILE",
+	"LICENSE_KEY_ID",
+	"STATUS_KEY_ID",
+	"KMS_PROVIDER",
+	"KMS_KEY_VERSION",
+	"KMS_KEK_FILE",
+	"TOKEN_SIGNING_KEY_FILE",
 }
 
 type Config struct {
@@ -32,6 +39,15 @@ type Config struct {
 	LicenseSigningKeyFile string
 	ActivationPepper      []byte
 	LicenseSigningKey     ed25519.PrivateKey
+	StatusSigningKey      ed25519.PrivateKey
+	LicenseKeyID          string
+	StatusKeyID           string
+	KMSProvider           string
+	KMSKeyVersion         string
+	KMSKEKFile            string
+	KMSKEK                []byte
+	TokenSigningKeyFile   string
+	TokenSigningKey       []byte
 }
 
 func Load() (Config, error) {
@@ -64,6 +80,18 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("configuration LICENSE_SIGNING_KEY_FILE is invalid")
 	}
+	statusSigningKey, err := loadSigningKey(values["STATUS_SIGNING_KEY_FILE"])
+	if err != nil {
+		return Config{}, errors.New("configuration STATUS_SIGNING_KEY_FILE is invalid")
+	}
+	kek, err := loadKEK(values["KMS_KEK_FILE"])
+	if err != nil {
+		return Config{}, errors.New("configuration KMS_KEK_FILE is invalid")
+	}
+	tokenSigningKey, err := readRegularFile(values["TOKEN_SIGNING_KEY_FILE"], 32, maximumPepperBytes)
+	if err != nil {
+		return Config{}, errors.New("configuration TOKEN_SIGNING_KEY_FILE is invalid")
+	}
 
 	return Config{
 		ListenAddress:         listenAddress,
@@ -72,7 +100,35 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		LicenseSigningKeyFile: values["LICENSE_SIGNING_KEY_FILE"],
 		ActivationPepper:      pepper,
 		LicenseSigningKey:     signingKey,
+		StatusSigningKey:      statusSigningKey,
+		LicenseKeyID:          values["LICENSE_KEY_ID"],
+		StatusKeyID:           values["STATUS_KEY_ID"],
+		KMSProvider:           values["KMS_PROVIDER"],
+		KMSKeyVersion:         values["KMS_KEY_VERSION"],
+		KMSKEKFile:            values["KMS_KEK_FILE"],
+		KMSKEK:                kek,
+		TokenSigningKeyFile:   values["TOKEN_SIGNING_KEY_FILE"],
+		TokenSigningKey:       tokenSigningKey,
 	}, nil
+}
+
+func loadKEK(path string) ([]byte, error) {
+	encoded, err := readRegularFile(path, 32, maximumKeyFileBytes)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) == 32 {
+		return append([]byte(nil), encoded...), nil
+	}
+	const prefix = "base64:"
+	if !strings.HasPrefix(string(encoded), prefix) {
+		return nil, errors.New("KEK format invalid")
+	}
+	decoded, err := base64.RawStdEncoding.Strict().DecodeString(strings.TrimPrefix(string(encoded), prefix))
+	if err != nil || len(decoded) != 32 {
+		return nil, errors.New("KEK format invalid")
+	}
+	return decoded, nil
 }
 
 func loadPepper(path string) ([]byte, error) {
