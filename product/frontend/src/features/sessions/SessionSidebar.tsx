@@ -1,6 +1,6 @@
 import type { SessionGroup, SessionSummary } from "@uclaw/shared";
 import { AlertCircle, FolderPlus, LoaderCircle, MoreHorizontal, PanelLeft, Pencil, Pin, PinOff, Plus, RotateCw, Search, Trash2 } from "lucide-react";
-import { Popconfirm, Tooltip } from "antd";
+import { Input, Modal, Popconfirm, Tooltip } from "antd";
 import { useMemo, useState } from "react";
 
 interface SessionSidebarProps {
@@ -27,11 +27,6 @@ interface SessionSidebarProps {
   onRetryOrganizer?(): void;
 }
 
-function requestedName(label: string, initial = ""): string | undefined {
-  const value = window.prompt(label, initial)?.trim();
-  return value === undefined || value === "" || value === initial ? undefined : value;
-}
-
 export function SessionSidebar({
   sessions,
   groups = [],
@@ -56,11 +51,24 @@ export function SessionSidebar({
   onRetryOrganizer = () => undefined,
 }: SessionSidebarProps) {
   const [query, setQuery] = useState("");
+  const [groupDialog, setGroupDialog] = useState<{ mode: "create" } | { mode: "rename"; group: SessionGroup }>();
+  const [groupName, setGroupName] = useState("");
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   const visibleSessions = useMemo(() => sessions
     .filter((session) => normalizedQuery === "" || `${session.title} ${session.lastMessagePreview ?? ""}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery))
     .sort((left, right) => Number(right.pinned) - Number(left.pinned) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || left.id.localeCompare(right.id)), [normalizedQuery, sessions]);
   const groupOptions = [{ value: "", label: "未分组" }, ...groups.map((group) => ({ value: group.id, label: group.name }))];
+  const closeGroupDialog = () => {
+    setGroupDialog(undefined);
+    setGroupName("");
+  };
+  const submitGroupDialog = () => {
+    const name = groupName.trim();
+    if (!groupDialog || name === "") return;
+    if (groupDialog.mode === "create") onCreateGroup(name);
+    else if (name !== groupDialog.group.name) onRenameGroup(groupDialog.group, name);
+    closeGroupDialog();
+  };
 
   const sessionRow = (session: SessionSummary) => <div key={session.id} className={`session-row${activeSessionId === session.id ? " active" : ""}`}>
     <button type="button" aria-label={`${session.title}，${session.lastMessagePreview ?? "暂无消息"}`} onClick={() => onSelect(session.id)}>
@@ -91,8 +99,8 @@ export function SessionSidebar({
     <label className="session-search"><Search aria-hidden="true" /><span className="sr-only">搜索会话</span><input type="search" placeholder="搜索会话" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
     <div className="session-group-bar">
       <span>分组</span>
-      {groups.length === 0 ? <small>还没有分组</small> : <div>{groups.map((group) => <span key={group.id}>{group.name}<Tooltip title="重命名分组"><button type="button" aria-label={`重命名分组 ${group.name}`} onClick={() => { const name = requestedName("分组名称", group.name); if (name) onRenameGroup(group, name); }}><Pencil /></button></Tooltip></span>)}</div>}
-      <Tooltip title="新建分组"><button type="button" aria-label="新建分组" onClick={() => { const name = requestedName("分组名称"); if (name) onCreateGroup(name); }}><FolderPlus /></button></Tooltip>
+      {groups.length === 0 ? <small>还没有分组</small> : <div>{groups.map((group) => <span key={group.id}>{group.name}<Tooltip title="重命名分组"><button type="button" aria-label={`重命名分组 ${group.name}`} onClick={() => { setGroupName(group.name); setGroupDialog({ mode: "rename", group }); }}><Pencil /></button></Tooltip></span>)}</div>}
+      <Tooltip title="新建分组"><button type="button" aria-label="新建分组" onClick={() => { setGroupName(""); setGroupDialog({ mode: "create" }); }}><FolderPlus /></button></Tooltip>
     </div>
     {organizerState === "loading" ? <div className="organizer-status"><LoaderCircle className="spin" />正在加载整理信息</div> : null}
     {organizerState === "error" ? <div className="organizer-status error" role="alert"><AlertCircle /><span>{organizerError ?? "整理信息读取失败"}</span><button type="button" aria-label="重试整理信息" onClick={onRetryOrganizer}><RotateCw /></button></div> : null}
@@ -107,5 +115,17 @@ export function SessionSidebar({
     </div>
     <div className="storage-summary"><span><i className="status-dot success" />数据写入正常</span><strong>空间充足</strong></div>
     <Tooltip title="收起会话栏"><button className="panel-edge-close" type="button" aria-label="收起会话栏" onClick={onClose}><PanelLeft aria-hidden="true" /></button></Tooltip>
+    <Modal
+      title={groupDialog?.mode === "rename" ? "重命名分组" : "新建分组"}
+      open={groupDialog !== undefined}
+      onCancel={closeGroupDialog}
+      onOk={submitGroupDialog}
+      okButtonProps={{ disabled: groupName.trim() === "" }}
+      okText={groupDialog?.mode === "rename" ? "保存分组名称" : "创建分组"}
+      cancelText="取消"
+      afterOpenChange={(open) => open && document.querySelector<HTMLInputElement>('input[aria-label="分组名称"]')?.focus()}
+    >
+      <Input aria-label="分组名称" value={groupName} maxLength={80} onChange={(event) => setGroupName(event.target.value)} onPressEnter={submitGroupDialog} />
+    </Modal>
   </aside>;
 }
