@@ -117,11 +117,15 @@ describe("activation API contract", () => {
   it("freezes client policy and license status fields", () => {
     expect(ClientPolicySchema.parse({
       minimumClientVersion: "1.0.0",
-      latestClientVersion: "1.1.0",
       upgradeRequired: false,
-      statusRefreshSeconds: 900,
-      maximumOfflineGraceSeconds: 86_400,
+      feedUrl: "https://updates.u-claw.org/releases/",
     })).toBeTruthy();
+    expect(() => ClientPolicySchema.parse({
+      minimumClientVersion: "1.0.0",
+      upgradeRequired: false,
+      feedUrl: "https://updates.u-claw.org/releases/",
+      releaseKey: "forbidden",
+    })).toThrow();
     expect(LicenseStatusSummarySchema.parse({
       licenseId: "lic_fixture_001",
       deviceId: "dev_fixture_001",
