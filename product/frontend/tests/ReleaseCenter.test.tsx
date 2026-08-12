@@ -11,6 +11,8 @@ function bridge(state: "available" | "offline" | "unavailable" = "available", re
   const invoke = vi.fn(async (request: any) => {
     const ok = (result: any) => ({ method: request.method, requestId: request.requestId, ok: true, result });
     if (request.method === "release.recovery") return ok({ state: recovery, message: recovery === "recovery-required" ? "自动回滚失败，需要恢复。" : recovery === "rolled-back" ? "检测到中断更新，已回滚。" : "无待恢复更新。" });
+    if (request.method === "release.rollback-preview") return ok({ available: true, previewToken: "rollback-preview-42", version: "0.0.9" });
+    if (request.method === "release.rollback") return ok({ state: "rolled-back", version: "0.0.9", message: "已切换到上一已验证版本。" });
     if (["release.check", "release.retry"].includes(request.method)) return ok({ state, checkedAt: "2026-08-09T00:00:00.000Z", currentVersion: "0.1.0", channel: "stable", retryable: state !== "unavailable", ...(message ? { message } : {}), ...(state === "available" ? { update: { id: "release-42", version: "0.2.0", channel: "stable", publishedAt: "2026-08-09T00:00:00.000Z", notes: ["安全更新", "修复恢复流程"], compatibility: { platform: "win32", arch: "x64", runtimeId: "openclaw-2026.7.1-2-win-x64" }, bytes: 128, mandatory: false, previewToken: "preview-42" } } : {}) });
     if (request.method === "uninstall.preview") return ok({ previewToken: "uninstall-token", scopes: [
       { id: "application", label: "U-Claw 应用", selected: false, protected: false, available: false, detail: "由 Windows 卸载器移除" },
@@ -64,6 +66,17 @@ describe("ReleaseCenter", () => {
   it("surfaces interrupted update recovery state", async () => {
     render(<ReleaseCenter bridge={bridge("unavailable", "recovery-required") as any} onOpenDiagnostics={vi.fn()} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("自动回滚失败，需要恢复");
+  });
+
+  it("previews and confirms explicit rollback", async () => {
+    const release = bridge();
+    render(<ReleaseCenter bridge={release as any} onOpenDiagnostics={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "回滚上一版本" }));
+    expect(await screen.findByText("将切换到已验证版本 0.0.9")).toBeVisible();
+    fireEvent.click(within(screen.getByRole("dialog", { name: "确认版本回滚" })).getByRole("button", { name: "确认回滚" }));
+    await waitFor(() => expect(release.invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "release.rollback", params: { previewToken: "rollback-preview-42", confirmed: true } })));
+    await waitFor(() => expect(release.invoke.mock.calls.filter(([request]) => request.method === "release.recovery")).toHaveLength(2));
+    expect(release.invoke.mock.calls.filter(([request]) => request.method === "release.check")).toHaveLength(2);
   });
 
   it("does not offer cancellation after an install enters switching", async () => {

@@ -265,6 +265,14 @@ describe("production desktop wiring", () => {
     await options.dispose?.();
   });
 
+  it("wires the locked OpenClaw Doctor CLI into production diagnostics", async () => {
+    const options = await createDesktopMainOptions(productionEnv);
+
+    expect(options.client?.diagnostics.doctor).toBeTypeOf("function");
+    await expect(options.client!.diagnostics.doctor!()).rejects.not.toThrow("Capability is not supported");
+    await options.dispose?.();
+  });
+
   it("skips an OpenClaw filename decoy and resolves the locked package", async () => {
     const decoy = join(runtimeRoot, "aaa-decoy");
     await mkdir(decoy);

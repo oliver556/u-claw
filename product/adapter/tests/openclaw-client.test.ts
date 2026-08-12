@@ -362,7 +362,7 @@ describe("OpenClawClient", () => {
     await expect(stream[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(UClawUnsupportedError);
     expect(capabilities.methods.has("exec.approval.resolve")).toBe(false);
     expect(capabilities.methods.has("plugin.approval.resolve")).toBe(false);
-    expect([...capabilities.methods]).toEqual(["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list", "models.list", "channels.status"]);
+    expect([...capabilities.methods]).toEqual(["sessions.list", "chat.send", "chat.abort", "exec.approval.list", "plugin.approval.list", "models.list", "channels.status", "logs.tail"]);
     expect(transport.calls).toEqual([]);
   });
 
@@ -1579,5 +1579,51 @@ describe("OpenClawClient", () => {
       });
     }
     expect(transport.calls).toEqual([]);
+  });
+
+  it("maps authoritative logs, health, system, stability, and audit RPCs", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("logs.tail", "health", "status", "system.info", "diagnostics.stability", "audit.list");
+    transport.helloMethods.push("config.get");
+    transport.fixtures.set("logs.tail", {
+      cursor: 42, reset: false, truncated: false, size: 512,
+      lines: [JSON.stringify({ 0: '{"subsystem":"gateway"}', 1: "Bearer private-log", _meta: { date: "2026-08-12T00:00:00.000Z", logLevelName: "INFO", name: '{"subsystem":"gateway"}' } })],
+    });
+    transport.fixtures.set("health", { ok: true, agents: [], channels: {}, sessions: {} });
+    transport.fixtures.set("status", { runtimeVersion: "2026.7.1-2", tasks: {}, taskAudit: {} });
+    transport.fixtures.set("system.info", { platform: "darwin", arch: "arm64", uptimeMs: 1000, nodeVersion: "24.15.0" });
+    transport.fixtures.set("diagnostics.stability", { count: 3, dropped: 1, summary: { byType: { "diagnostic.phase.completed": 3 } }, events: [] });
+    transport.fixtures.set("audit.list", {
+      events: [{ eventId: "audit-1", sequence: 1, sourceSequence: 1, occurredAt: Date.now(), kind: "tool_action", action: "tool.execute", status: "succeeded", actor: { type: "operator", id: "private-actor" }, agentId: "main", runId: "private-run", redaction: "metadata_only" }],
+    });
+    transport.fixtures.set("config.get", { hash: "config-hash", valid: true, config: { gateway: { port: 18789, token: "secret" } } });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.diagnostics.listLogs({ limit: 10 })).resolves.toMatchObject({
+      items: [{ timestamp: "2026-08-12T00:00:00.000Z", level: "info", source: "gateway", message: "Gateway info event." }],
+      nextCursor: "42", hasMore: false,
+    });
+    await client.diagnostics.listLogs({ cursor: "42", limit: 10 });
+    await expect(client.diagnostics.system!()).resolves.toMatchObject({ health: { state: "ready" }, status: { state: "ready" }, info: { platform: "darwin", architecture: "arm64" } });
+    await expect(client.diagnostics.stability!()).resolves.toMatchObject({ state: "degraded", score: null, incidents: [
+      { id: "dropped-events", level: "warning" }, { id: "diagnostic.phase.completed", level: "info", summary: "最近记录 3 次。" },
+    ] });
+    await expect(client.diagnostics.audit!()).resolves.toMatchObject({ state: "passed", findings: [{ id: "audit-1", severity: "info", summary: "tool.execute：succeeded" }] });
+    await expect(client.diagnostics.config!()).resolves.toMatchObject({ gateway: { port: 18789, token: "secret" } });
+    expect(transport.requests.map((request) => request.method)).toEqual([
+      "logs.tail", "logs.tail", "health", "status", "system.info", "diagnostics.stability", "audit.list", "config.get",
+    ]);
+    expect(transport.requests[1]?.params).toMatchObject({ cursor: 42 });
+  });
+
+  it("keeps logs.tail forward cursor without treating truncation as pagination", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("logs.tail");
+    transport.fixtures.set("logs.tail", { cursor: 91, reset: false, truncated: true, size: 2048, lines: [] });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.diagnostics.listLogs()).resolves.toMatchObject({ nextCursor: "91", hasMore: false });
   });
 });

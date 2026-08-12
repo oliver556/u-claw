@@ -43,7 +43,7 @@ describe("diagnostics security integration", () => {
       service.dispatch({ method: "config.get", requestId: "config", params: {} }),
       service.dispatch({ method: "config.export", requestId: "export", params: { fileName: "redacted.json" } }),
     ]);
-    expect(logs).toMatchObject({ ok: true, result: { items: [{ message: "Desktop info event." }] } });
+    expect(logs).toMatchObject({ ok: true, result: { items: expect.arrayContaining([expect.objectContaining({ message: "Desktop info event." })]) } });
     expect(exported.ok).toBe(true);
     const exportText = exported.ok && exported.method === "config.export"
       ? await readFile(join(dataDir, exported.result.relativePath), "utf8")

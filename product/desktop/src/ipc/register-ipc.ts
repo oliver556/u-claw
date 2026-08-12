@@ -176,7 +176,7 @@ export function registerIpc({
     "plugins.install", "plugins.update", "plugins.uninstall", "plugins.set-enabled", "plugins.session-action",
   ]);
   const diagnosticsWriteMethods = new Set(["logs.export", "logs.cleanup", "config.export"]);
-  const releaseWriteMethods = new Set(["release.install", "uninstall.execute"]);
+  const releaseWriteMethods = new Set(["release.install", "release.rollback", "uninstall.execute"]);
   const sessionAdvancedWriteMethods = new Set([
     "sessions.reset", "sessions.compact", "sessions.branch", "sessions.restore", "sessions.steer",
   ]);

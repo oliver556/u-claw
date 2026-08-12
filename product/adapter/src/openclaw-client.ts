@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
+
 import {
   capabilitySetFromWire,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_ATTACHMENT_BASE64_TOTAL_LENGTH,
   MAX_ATTACHMENT_TOTAL_BYTES,
   DoctorRepairActionIdSchema,
+  DiagnosticLogEntrySchema,
   UClawErrorSchema,
   type CapabilitySet,
   type GatewayConnectionState,
@@ -105,6 +108,7 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch", "models.list",
   "config.get", "config.patch", "channels.status", "channels.start", "channels.stop", "channels.logout", "tools.invoke",
   "diagnostics.doctor",
+  "logs.tail", "health", "status", "system.info", "diagnostics.stability", "audit.list",
   "sessions.files.list", "sessions.files.get", "sessions.compaction.list", "sessions.reset",
   "sessions.compact", "sessions.compaction.branch", "sessions.compaction.restore",
   "sessions.compaction.get", "sessions.steer",
@@ -208,6 +212,42 @@ const RawDoctorResponseSchema = z.object({
     repair: z.object({ actionId: DoctorActionIdSchema, label: z.string().min(1).max(80) }).strict().optional(),
   })).max(100),
 });
+const RawLogsTailResponseSchema = z.object({
+  lines: z.array(z.string().max(100_000)).max(500),
+  cursor: z.number().int().nonnegative(), reset: z.boolean(), truncated: z.boolean(), size: z.number().int().nonnegative(),
+}).passthrough();
+const RawHealthResponseSchema = z.object({ ok: z.boolean() }).passthrough();
+const RawStatusResponseSchema = z.object({ runtimeVersion: z.string().min(1).max(80) }).passthrough();
+const RawSystemInfoResponseSchema = z.object({ platform: z.string().min(1).max(32), arch: z.string().min(1).max(32), uptimeMs: z.number().int().nonnegative() }).passthrough();
+const RawStabilityResponseSchema = z.object({
+  count: z.number().int().nonnegative(), dropped: z.number().int().nonnegative(),
+  summary: z.object({ byType: z.record(z.string().min(1).max(80), z.number().int().nonnegative()) }).passthrough(),
+  events: z.array(z.object({ type: z.string().min(1).max(80) }).passthrough()).max(500),
+}).passthrough();
+const RawAuditResponseSchema = z.object({
+  events: z.array(z.object({
+    eventId: z.string().min(1).max(80), action: z.string().min(1).max(120),
+    status: z.enum(["started", "succeeded", "failed", "cancelled", "timed_out", "blocked", "unknown"]),
+    errorCode: z.string().min(1).max(80).optional(), redaction: z.literal("metadata_only"),
+  }).passthrough()).max(100),
+  nextCursor: z.string().min(1).max(128).optional(),
+}).passthrough();
+
+function projectGatewayLog(line: string, cursor: number, index: number) {
+  try {
+    const value = JSON.parse(line) as Record<string, unknown>;
+    const meta = value._meta;
+    if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+    const record = meta as Record<string, unknown>;
+    if (typeof record.date !== "string" || !Number.isFinite(Date.parse(record.date))) return undefined;
+    const rawLevel = typeof record.logLevelName === "string" ? record.logLevelName.toLocaleLowerCase() : "info";
+    const level = rawLevel === "warn" ? "warning" : ["debug", "info", "warning", "error"].includes(rawLevel) ? rawLevel as "debug" | "info" | "warning" | "error" : "info";
+    return DiagnosticLogEntrySchema.parse({
+      id: createHash("sha256").update(`${cursor}:${index}:${line}`).digest("hex").slice(0, 20),
+      timestamp: new Date(record.date).toISOString(), level, source: "gateway", message: `Gateway ${level} event.`,
+    });
+  } catch { return undefined; }
+}
 type OpenClawWechatState = {
   status: ChannelStatus;
   loginState: WechatLoginState;
@@ -697,7 +737,48 @@ export class OpenClawClient implements UClawClient {
   readonly files: UClawClient["files"] = { list: async () => this.unsupported("files.list"), readText: async () => this.unsupported("files.readText") };
   readonly diagnostics: UClawClient["diagnostics"] = {
     list: async () => this.unsupported("diagnostics.list"),
-    listLogs: async () => this.unsupported("logs.tail"),
+    listLogs: async (page, signal) => {
+      this.requireMethod("logs.tail");
+      const cursorText = page?.cursor;
+      const cursor = cursorText === undefined ? undefined : Number(cursorText);
+      if (cursor !== undefined && (!Number.isSafeInteger(cursor) || cursor < 0 || String(cursor) !== cursorText)) throw new RpcProtocolError("OpenClaw logs.tail cursor is invalid.");
+      const raw = await this.options.transport.router.request("logs.tail", { ...(cursor === undefined ? {} : { cursor }), limit: page?.limit ?? 100 }, RawLogsTailResponseSchema, signal);
+      return { items: raw.lines.map((line, index) => projectGatewayLog(line, raw.cursor, index)).filter((entry) => entry !== undefined), nextCursor: String(raw.cursor), hasMore: false };
+    },
+    system: async (signal) => {
+      for (const method of ["health", "status", "system.info"]) this.requireMethod(method);
+      const [health, status, info] = await Promise.all([
+        this.options.transport.router.request("health", {}, RawHealthResponseSchema, signal),
+        this.options.transport.router.request("status", {}, RawStatusResponseSchema, signal),
+        this.options.transport.router.request("system.info", {}, RawSystemInfoResponseSchema, signal),
+      ]);
+      return { health: { state: health.ok ? "ready" as const : "degraded" as const }, status: { state: health.ok ? "ready" as const : "degraded" as const, uptimeMs: info.uptimeMs }, info: { platform: ["win32", "darwin", "linux"].includes(info.platform) ? info.platform as "win32" | "darwin" | "linux" : "other" as const, architecture: info.arch, version: status.runtimeVersion } };
+    },
+    stability: async (signal) => {
+      this.requireMethod("diagnostics.stability");
+      const raw = await this.options.transport.router.request("diagnostics.stability", {}, RawStabilityResponseSchema, signal);
+      const incidents = [
+        ...(raw.dropped > 0 ? [{ id: "dropped-events", level: "warning" as const, summary: `稳定性记录器丢弃 ${raw.dropped} 条事件。` }] : []),
+        ...Object.entries(raw.summary.byType).slice(0, 99).map(([id, count]) => ({ id, level: "info" as const, summary: `最近记录 ${count} 次。` })),
+      ].slice(0, 100);
+      return { state: raw.dropped > 0 ? "degraded" as const : "stable" as const, score: null, incidents };
+    },
+    audit: async (signal) => {
+      this.requireMethod("audit.list");
+      const raw = await this.options.transport.router.request("audit.list", { limit: 100 }, RawAuditResponseSchema, signal);
+      const findings = raw.events.map((event) => ({
+        id: event.eventId,
+        severity: (["failed", "timed_out", "blocked"].includes(event.status) ? "error" : event.status === "cancelled" || event.status === "unknown" ? "warning" : "info") as "info" | "warning" | "error",
+        summary: `${event.action}：${event.errorCode ?? event.status}`,
+      }));
+      return { state: findings.some((finding) => finding.severity === "error") ? "failed" as const : findings.some((finding) => finding.severity === "warning") ? "warning" as const : "passed" as const, findings };
+    },
+    config: async (signal) => {
+      this.requireMethod("config.get");
+      const raw = await this.options.transport.router.request("config.get", {}, ConfigGetResponseSchema, signal);
+      if (!raw.valid || raw.config === undefined) throw new RpcProtocolError("OpenClaw config.get returned no valid config.");
+      return raw.config;
+    },
     doctor: async (signal) => {
       this.requireMethod("diagnostics.doctor");
       const raw = await this.options.transport.router.request("diagnostics.doctor", {}, RawDoctorResponseSchema, signal);

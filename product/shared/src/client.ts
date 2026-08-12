@@ -18,7 +18,7 @@ import type {
   ResolvePluginApprovalInput,
   ToolCall,
 } from "./tools.js";
-import type { DoctorRepairActionId } from "./diagnostics.js";
+import type { DoctorRepairActionId, OpenClawAuditResult, OpenClawRuntimeSummary, OpenClawStabilityResult } from "./diagnostics.js";
 import type { McpServerConfigEntry } from "./mcp.js";
 import type { SessionAdvancedService } from "./session-advanced.js";
 
@@ -96,6 +96,10 @@ export interface DiagnosticsService {
       repair?: { actionId: DoctorRepairActionId; label: string };
     }>;
   }>;
+  system?(signal?: AbortSignal): Promise<OpenClawRuntimeSummary>;
+  stability?(signal?: AbortSignal): Promise<OpenClawStabilityResult>;
+  audit?(signal?: AbortSignal): Promise<OpenClawAuditResult>;
+  config?(signal?: AbortSignal): Promise<unknown>;
 }
 
 export interface UClawClient {

@@ -43,6 +43,14 @@ export const UninstallPreviewSchema = z.object({
   }).strict()).length(3),
 }).strict();
 export type UninstallPreview = z.infer<typeof UninstallPreviewSchema>;
+export const ReleaseRollbackPreviewSchema = z.object({
+  available: z.boolean(), previewToken: TokenSchema, version: z.string().min(1).max(128).optional(),
+}).strict();
+export type ReleaseRollbackPreview = z.infer<typeof ReleaseRollbackPreviewSchema>;
+export const ReleaseRollbackResultSchema = z.object({
+  state: z.literal("rolled-back"), version: z.string().min(1).max(128), message: z.string().min(1).max(500),
+}).strict();
+export type ReleaseRollbackResult = z.infer<typeof ReleaseRollbackResultSchema>;
 
 export const ReleaseIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("release.check"), requestId: RequestIdSchema, params: z.object({ channel: ReleaseChannelSchema }).strict() }).strict(),
@@ -52,18 +60,21 @@ export const ReleaseIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("release.operation"), requestId: RequestIdSchema, params: z.object({ operationId: UpdateIdSchema }).strict() }).strict(),
   z.object({ method: z.literal("release.cancel"), requestId: RequestIdSchema, params: z.object({ operationId: UpdateIdSchema }).strict() }).strict(),
   z.object({ method: z.literal("release.recovery"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("release.rollback-preview"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("release.rollback"), requestId: RequestIdSchema, params: z.object({ previewToken: TokenSchema, confirmed: z.literal(true) }).strict() }).strict(),
   z.object({ method: z.literal("uninstall.preview"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
   z.object({ method: z.literal("uninstall.execute"), requestId: RequestIdSchema, params: z.object({ scopeIds: z.array(z.enum(["host-cache"])).min(1).max(1), previewToken: TokenSchema, confirmed: z.literal(true) }).strict() }).strict(),
 ]);
 export type ReleaseIpcRequest = z.infer<typeof ReleaseIpcRequestSchema>;
 
 const success = (method: z.ZodLiteral<string>, result: z.ZodType) => z.object({ method, requestId: RequestIdSchema, ok: z.literal(true), result }).strict();
-const methods = ["release.check", "release.retry", "release.cancel-check", "release.install", "release.operation", "release.cancel", "release.recovery", "uninstall.preview", "uninstall.execute"] as const;
+const methods = ["release.check", "release.retry", "release.cancel-check", "release.install", "release.operation", "release.cancel", "release.recovery", "release.rollback-preview", "release.rollback", "uninstall.preview", "uninstall.execute"] as const;
 export const ReleaseIpcResponseSchema = z.union([
   success(z.literal("release.check"), ReleaseCheckResultSchema), success(z.literal("release.retry"), ReleaseCheckResultSchema),
   success(z.literal("release.cancel-check"), ReleaseCheckResultSchema), success(z.literal("release.install"), ReleaseOperationSchema),
   success(z.literal("release.operation"), ReleaseOperationSchema), success(z.literal("release.cancel"), ReleaseOperationSchema),
   success(z.literal("release.recovery"), z.object({ state: z.enum(["clean", "rolled-back", "recovery-required"]), message: z.string().max(500) }).strict()),
+  success(z.literal("release.rollback-preview"), ReleaseRollbackPreviewSchema), success(z.literal("release.rollback"), ReleaseRollbackResultSchema),
   success(z.literal("uninstall.preview"), UninstallPreviewSchema), success(z.literal("uninstall.execute"), ReleaseOperationSchema),
   z.object({ method: z.enum(methods), requestId: RequestIdSchema, ok: z.literal(false), error: UClawErrorSchema }).strict(),
 ]);

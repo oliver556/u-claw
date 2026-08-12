@@ -43,6 +43,8 @@ import { createUsageDispatcher } from "../usage/usage-dispatcher.js";
 import { createUsageDomainRegistration } from "../usage/usage-domain.js";
 import { createAutomationDispatcher } from "../automation/automation-dispatcher.js";
 import { createAutomationDomainRegistration } from "../automation/automation-domain.js";
+import { createDesktopLogSink } from "../diagnostics/desktop-log-sink.js";
+import { createOpenClawDoctorRuntime } from "../diagnostics/openclaw-doctor-runtime.js";
 import {
   DesktopWiringError,
   readDesktopWiringEnvironment,
@@ -388,6 +390,14 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
       }
     },
   });
+  client.diagnostics.doctor = createOpenClawDoctorRuntime({
+    executable: environment.nodeExecutable,
+    entrypoint: environment.openClawEntry,
+    stateDir: openClawStateDir,
+    baseEnvironment: env,
+  });
+  const desktopLog = createDesktopLogSink({ dataDir: environment.dataRoot, logsDir: join(environment.dataRoot, "diagnostics", "desktop-logs") });
+  void desktopLog.append("desktop-started").catch(() => undefined);
   const skillRuntime = createOpenClawSkillRuntime({
     request: (method, params, schema) => transport.router.request(method, params as never, schema),
   });
@@ -434,8 +444,9 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     spawn: (executable, args, options) => {
       const child = spawnChild(executable, [...args], options) as unknown as ReturnType<DesktopMainOptions["spawn"]>;
       gatewayProcessAlive = child.pid !== undefined && child.exitCode === null;
-      child.on("error", () => { gatewayProcessAlive = false; });
-      child.once("exit", () => { gatewayProcessAlive = false; });
+      void desktopLog.append(gatewayProcessAlive ? "gateway-started" : "gateway-failed").catch(() => undefined);
+      child.on("error", () => { gatewayProcessAlive = false; void desktopLog.append("gateway-failed").catch(() => undefined); });
+      child.once("exit", () => { gatewayProcessAlive = false; void desktopLog.append("gateway-stopped").catch(() => undefined); });
       child.once("close", () => { gatewayProcessAlive = false; });
       return child;
     },

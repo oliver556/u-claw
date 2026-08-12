@@ -8,6 +8,8 @@ describe("release IPC contract", () => {
     expect(ReleaseIpcRequestSchema.parse({ method: "release.install", requestId: "install-1", params: { updateId: "release-42", previewToken: "preview-42", confirmed: true } })).not.toHaveProperty("path");
     expect(ReleaseIpcRequestSchema.safeParse({ method: "process.exec", requestId: "bad", params: { command: "doctor --fix" } }).success).toBe(false);
     expect(ReleaseIpcRequestSchema.safeParse({ method: "release.check", requestId: "bad", params: { channel: "stable", url: "https://evil.invalid" } }).success).toBe(false);
+    expect(ReleaseIpcRequestSchema.parse({ method: "release.rollback-preview", requestId: "rollback-preview", params: {} })).toBeTruthy();
+    expect(ReleaseIpcRequestSchema.parse({ method: "release.rollback", requestId: "rollback", params: { previewToken: "rollback-preview-42", confirmed: true } })).toBeTruthy();
   });
 
   it("keeps update metadata structured and renderer responses path-free", () => {

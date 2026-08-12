@@ -357,7 +357,25 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
     const items = page.items.map((entry, index) => projectLog(entry, indexOffset + index, pageRequest.cursor));
     const nextCursor = safeCursor(page.nextCursor);
     if (pageRequest.cursor !== undefined && page.hasMore && nextCursor === pageRequest.cursor) throw safeError("CONTRACT_INCOMPATIBLE", "日志分页游标重复。");
-    return { items, nextCursor, hasMore: nextCursor !== null && page.hasMore };
+    return { items, nextCursor, hasMore: page.hasMore };
+  };
+
+  const loadOwnedLogEntries = async (): Promise<DiagnosticLogEntry[]> => {
+    const logs = await openRoot(logsDir, MAX_EXPORT_BYTES);
+    const entries: DiagnosticLogEntry[] = [];
+    for (const name of await ownedLogNames(logs)) {
+      const info = await logs.stat(name);
+      if (info.size === 0) continue;
+      const content = await logs.readText(name, { hardlinks: "reject", maxBytes: MAX_EXPORT_BYTES, symlinks: "reject" });
+      const lineCount = content.split(/\r?\n/u).filter((line) => line.length > 0).length;
+      const source = name.includes("launcher") ? "launcher" : name.includes("adapter") ? "adapter" : name.includes("gateway") ? "gateway" : name.includes("openclaw") ? "openclaw" : name.includes("channel") ? "channel" : "desktop";
+      for (let index = 0; index < lineCount; index += 1) entries.push(DiagnosticLogEntrySchema.parse({
+        id: createHash("sha256").update(`${name}:${info.dev}:${info.ino}:${index}:${info.mtimeMs}`).digest("hex").slice(0, 20),
+        timestamp: new Date(info.mtimeMs).toISOString(), level: "info", source,
+        message: `${LOG_SOURCE_LABELS[source]} owned log event.`,
+      }));
+    }
+    return entries;
   };
 
   const loadFilteredLogPage = async (params: Extract<DiagnosticsIpcRequest, { method: "logs.list" }>["params"], signal: AbortSignal) => {
@@ -367,7 +385,8 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
       if (cursor !== undefined && seen.has(cursor)) throw safeError("CONTRACT_INCOMPATIBLE", "日志分页游标重复。");
       if (cursor !== undefined) seen.add(cursor);
       const page = await loadRawLogPage({ ...(cursor ? { cursor } : {}), limit: params.limit }, signal, pageNumber * params.limit);
-      const items = page.items.filter((entry) => matchesLog(entry, params));
+      const owned = cursor === undefined ? await loadOwnedLogEntries() : [];
+      const items = [...page.items, ...owned].filter((entry) => matchesLog(entry, params)).sort((left, right) => right.timestamp.localeCompare(left.timestamp)).slice(0, params.limit);
       if (items.length > 0 || !page.hasMore || page.nextCursor === null) return { ...page, items };
       cursor = page.nextCursor;
     }
@@ -375,11 +394,14 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
   };
 
   const redactedConfig = async () => {
-    const parent = resolve(configPath, "..");
-    const configRoot = await openRoot(parent);
-    const raw = await configRoot.readText(relative(parent, configPath), { hardlinks: "reject", maxBytes: MAX_CONFIG_BYTES, symlinks: "reject" });
     let parsed: unknown;
-    try { parsed = JSON.parse(raw); } catch { throw safeError("CONTRACT_INCOMPATIBLE", "OpenClaw 配置不是有效 JSON。"); }
+    if (options.diagnostics.config) parsed = await options.diagnostics.config();
+    else {
+      const parent = resolve(configPath, "..");
+      const configRoot = await openRoot(parent);
+      const raw = await configRoot.readText(relative(parent, configPath), { hardlinks: "reject", maxBytes: MAX_CONFIG_BYTES, symlinks: "reject" });
+      try { parsed = JSON.parse(raw); } catch { throw safeError("CONTRACT_INCOMPATIBLE", "OpenClaw 配置不是有效 JSON。"); }
+    }
     const redacted = redactConfigTree(parsed);
     const content = JSON.stringify(redacted, null, 2);
     if (Buffer.byteLength(content) > MAX_CONFIG_BYTES) throw safeError("FILE_TOO_LARGE", "脱敏配置超过显示上限。");
@@ -416,6 +438,14 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
           let bytes = 0;
           let pageCount = 0;
           const seen = new Set<string>();
+          const append = (entry: DiagnosticLogEntry): void => {
+            const line = `${JSON.stringify(entry)}\n`;
+            bytes += Buffer.byteLength(line);
+            count += 1;
+            if (count > MAX_EXPORT_ENTRIES || bytes > MAX_EXPORT_BYTES) throw safeError("FILE_TOO_LARGE", "诊断导出超过大小上限。");
+            lines.push(line);
+          };
+          for (const entry of (await loadOwnedLogEntries()).filter((item) => matchesLog(item, request.params))) append(entry);
           do {
             controller.signal.throwIfAborted();
             if (pageCount >= MAX_EXPORT_PAGES) throw safeError("FILE_TOO_LARGE", "诊断导出超过分页上限。");
@@ -423,13 +453,7 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
             if (cursor !== undefined) seen.add(cursor);
             const page = await loadRawLogPage({ ...(cursor ? { cursor } : {}), limit: 500 }, controller.signal, pageCount * 500);
             pageCount += 1;
-            for (const entry of page.items.filter((item) => matchesLog(item, request.params))) {
-              const line = `${JSON.stringify(entry)}\n`;
-              bytes += Buffer.byteLength(line);
-              count += 1;
-              if (count > MAX_EXPORT_ENTRIES || bytes > MAX_EXPORT_BYTES) throw safeError("FILE_TOO_LARGE", "诊断导出超过大小上限。");
-              lines.push(line);
-            }
+            for (const entry of page.items.filter((item) => matchesLog(item, request.params))) append(entry);
             cursor = page.hasMore && page.nextCursor !== null ? page.nextCursor : undefined;
           } while (cursor !== undefined);
           result = await createExport(request.params.fileName, lines.join(""));
@@ -505,6 +529,21 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
             proxy: safeProxy(environment), portableData: { state: writable ? "available" : "read-only", writable },
             storage: { totalBytes, freeBytes, usedBytes: Math.max(0, totalBytes - freeBytes) },
           };
+          break;
+        }
+        case "runtime.get": {
+          if (!options.diagnostics.system) throw safeError("UNAVAILABLE", "当前 OpenClaw runtime 未提供系统状态接口。");
+          result = await abortable(options.diagnostics.system(controller.signal), controller.signal);
+          break;
+        }
+        case "stability.get": {
+          if (!options.diagnostics.stability) throw safeError("UNAVAILABLE", "当前 OpenClaw runtime 未提供稳定性诊断。");
+          result = await abortable(options.diagnostics.stability(controller.signal), controller.signal);
+          break;
+        }
+        case "audit.get": {
+          if (!options.diagnostics.audit) throw safeError("UNAVAILABLE", "当前 OpenClaw runtime 未提供安全审计。");
+          result = await abortable(options.diagnostics.audit(controller.signal), controller.signal);
           break;
         }
         case "config.get": {

@@ -1,4 +1,4 @@
-import type { ReleaseBridge, ReleaseCheckResult, ReleaseIpcRequest, ReleaseOperation, UninstallPreview } from "@uclaw/shared";
+import type { ReleaseBridge, ReleaseCheckResult, ReleaseIpcRequest, ReleaseOperation, ReleaseRollbackPreview, UninstallPreview } from "@uclaw/shared";
 import { AlertTriangle, CheckCircle2, Download, LoaderCircle, RefreshCw, ShieldCheck, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -14,7 +14,8 @@ export function ReleaseCenter({ bridge, onOpenDiagnostics }: { bridge?: ReleaseB
   const [result, setResult] = useState<ReleaseCheckResult>();
   const [preview, setPreview] = useState<UninstallPreview>();
   const [operation, setOperation] = useState<ReleaseOperation>();
-  const [confirm, setConfirm] = useState<"install" | "uninstall">();
+  const [confirm, setConfirm] = useState<"install" | "rollback" | "uninstall">();
+  const [rollbackPreview, setRollbackPreview] = useState<ReleaseRollbackPreview>();
   const [error, setError] = useState<string>();
   const [recovery, setRecovery] = useState<{ state: "clean" | "rolled-back" | "recovery-required"; message: string }>();
   const invoke = useCallback(async (request: ReleaseIpcRequest) => {
@@ -41,6 +42,13 @@ export function ReleaseCenter({ bridge, onOpenDiagnostics }: { bridge?: ReleaseB
     const action = confirm; setConfirm(undefined); if (!action) return;
     try {
       if (action === "install" && result?.update) setOperation(await invoke({ method: "release.install", requestId: requestId("install"), params: { updateId: result.update.id, previewToken: result.update.previewToken, confirmed: true } }) as ReleaseOperation);
+      if (action === "rollback" && rollbackPreview?.available) {
+        await invoke({ method: "release.rollback", requestId: requestId("rollback"), params: { previewToken: rollbackPreview.previewToken, confirmed: true } });
+        setError(undefined); setRollbackPreview(undefined);
+        const readback = await invoke({ method: "release.recovery", requestId: requestId("rollback-recovery"), params: {} }) as typeof recovery;
+        setRecovery(readback);
+        await check();
+      }
       if (action === "uninstall" && preview) setOperation(await invoke({ method: "uninstall.execute", requestId: requestId("uninstall"), params: { scopeIds: ["host-cache"], previewToken: preview.previewToken, confirmed: true } }) as ReleaseOperation);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "操作失败。"); }
   };
@@ -48,6 +56,13 @@ export function ReleaseCenter({ bridge, onOpenDiagnostics }: { bridge?: ReleaseB
   const openCli = () => void window.uclaw?.window?.invoke?.({ method: "open-advanced-console", requestId: requestId("console"), params: {} });
   const cancelCheck = async () => { try { setResult(await invoke({ method: "release.cancel-check", requestId: requestId("cancel-check"), params: {} }) as ReleaseCheckResult); } finally { setChecking(false); } };
   const cancelOperation = async () => { if (operation) setOperation(await invoke({ method: "release.cancel", requestId: requestId("cancel"), params: { operationId: operation.id } }) as ReleaseOperation); };
+  const previewRollback = async () => {
+    try {
+      const value = await invoke({ method: "release.rollback-preview", requestId: requestId("rollback-preview"), params: {} }) as ReleaseRollbackPreview;
+      setRollbackPreview(value);
+      if (value.available) setConfirm("rollback"); else setError("没有可回滚的已验证版本。");
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "回滚预览失败。"); }
+  };
   return <section className="release-center secondary-view">
     <header><div><h1>发布与恢复</h1><p>签名更新、Doctor 入口与受控卸载</p></div><div className="release-head-actions">{checking ? <button className="secondary-command" type="button" onClick={() => void cancelCheck()}><X />取消检查</button> : null}<button className="secondary-command" type="button" onClick={onOpenDiagnostics}><Stethoscope />打开 Doctor</button><button className="secondary-command" type="button" onClick={openCli}><SquareTerminal />打开 CLI 控制台</button></div></header>
     <div className="release-tabs" role="tablist" aria-label="发布工具"><button type="button" role="tab" aria-selected={tab === "updates"} onClick={() => setTab("updates")}><Download />更新</button><button type="button" role="tab" aria-selected={tab === "uninstall"} onClick={() => void openUninstall()}><Trash2 />卸载与清理</button></div>
@@ -55,9 +70,9 @@ export function ReleaseCenter({ bridge, onOpenDiagnostics }: { bridge?: ReleaseB
     {recovery && recovery.state !== "clean" ? <div className={`release-recovery ${recovery.state}`} role="alert"><AlertTriangle />{recovery.message}</div> : null}
     <div className="release-content">
       {tab === "updates" ? <>{checking ? <div className="data-state"><LoaderCircle className="spin" /><strong>正在检查更新</strong></div> : result?.update ? <section className="release-update"><header><div><span>版本</span><strong>{result.update.version}</strong></div><em>{result.update.channel}</em></header><dl><div><dt>发布时间</dt><dd>{new Date(result.update.publishedAt).toLocaleString()}</dd></div><div><dt>兼容性</dt><dd>{result.update.compatibility.platform} · {result.update.compatibility.arch}</dd></div><div><dt>Runtime</dt><dd>{result.update.compatibility.runtimeId}</dd></div></dl><ul>{result.update.notes.map((note) => <li key={note}>{note}</li>)}</ul><div className="release-trust"><ShieldCheck />签名清单、版本绑定与校验和将在安装前验证</div><button type="button" onClick={() => setConfirm("install")}><Download />安装更新</button></section> : <div className="data-state"><AlertTriangle /><strong>{stateText}</strong>{result?.message ? <small>{result.message}</small> : null}{result?.retryable ? <button type="button" onClick={() => void check(true)}><RefreshCw />重试</button> : null}</div>}
-      <label className="release-channel">更新渠道<select value={channel} onChange={(event) => setChannel(event.target.value as "stable" | "beta")}><option value="stable">Stable</option><option value="beta">Beta</option></select></label></> : <section className="uninstall-preview"><h2>卸载范围</h2>{preview ? preview.scopes.map((scope) => <div key={scope.id} className={scope.protected ? "protected" : ""}><span><strong>{scope.label}</strong><small>{scope.detail}</small></span>{scope.protected ? <ShieldCheck /> : scope.available ? <CheckCircle2 /> : <X />}</div>) : <div className="data-state"><LoaderCircle className="spin" /></div>}<button type="button" disabled={!preview} onClick={() => setConfirm("uninstall")}><Trash2 />清理本机缓存</button></section>}
+      <label className="release-channel">更新渠道<select value={channel} onChange={(event) => setChannel(event.target.value as "stable" | "beta")}><option value="stable">Stable</option><option value="beta">Beta</option></select></label><button type="button" onClick={() => void previewRollback()}><RefreshCw />回滚上一版本</button></> : <section className="uninstall-preview"><h2>卸载范围</h2>{preview ? preview.scopes.map((scope) => <div key={scope.id} className={scope.protected ? "protected" : ""}><span><strong>{scope.label}</strong><small>{scope.detail}</small></span>{scope.protected ? <ShieldCheck /> : scope.available ? <CheckCircle2 /> : <X />}</div>) : <div className="data-state"><LoaderCircle className="spin" /></div>}<button type="button" disabled={!preview} onClick={() => setConfirm("uninstall")}><Trash2 />清理本机缓存</button></section>}
     </div>
     {operation ? <aside className={`maintenance-operation ${operation.state}`}><div>{operation.state === "completed" ? <CheckCircle2 /> : operation.state === "failed" ? <AlertTriangle /> : <LoaderCircle className="spin" />}<span><strong>{operation.message}</strong><small>{operation.processedItems}/{operation.totalItems} 项{operation.partialFailures ? ` · ${operation.partialFailures} 项失败` : ""}{operation.recovery !== "none" ? ` · ${operation.recovery}` : ""}</small></span></div>{operation.kind === "install" && ["queued", "downloading", "verifying"].includes(operation.phase) ? <button type="button" onClick={() => void cancelOperation()}><X />取消</button> : null}</aside> : null}
-    {confirm ? <div className="data-modal-backdrop"><div className="data-modal" role="dialog" aria-modal="true" aria-label={confirm === "install" ? "确认安装更新" : "确认清理本机缓存"}><h2>{confirm === "install" ? "确认安装更新" : "确认清理本机缓存"}</h2><p>{confirm === "install" ? "下载仅进入受控暂存区；验签和校验通过后原子切换，失败自动回滚。" : "只清理 marker 证明归属的本机 U-Claw 缓存；U 盘用户数据保持不变。"}</p><div className="data-confirm-actions"><button type="button" onClick={() => setConfirm(undefined)}>取消</button><button type="button" onClick={() => void execute()}>{confirm === "install" ? "确认安装" : "确认清理"}</button></div></div></div> : null}
+    {confirm ? <div className="data-modal-backdrop"><div className="data-modal" role="dialog" aria-modal="true" aria-label={confirm === "install" ? "确认安装更新" : confirm === "rollback" ? "确认版本回滚" : "确认清理本机缓存"}><h2>{confirm === "install" ? "确认安装更新" : confirm === "rollback" ? "确认版本回滚" : "确认清理本机缓存"}</h2><p>{confirm === "install" ? "下载仅进入受控暂存区；验签和校验通过后原子切换，失败自动回滚。" : confirm === "rollback" ? `将切换到已验证版本 ${rollbackPreview?.version ?? "未知"}` : "只清理 marker 证明归属的本机 U-Claw 缓存；U 盘用户数据保持不变。"}</p><div className="data-confirm-actions"><button type="button" onClick={() => setConfirm(undefined)}>取消</button><button type="button" onClick={() => void execute()}>{confirm === "install" ? "确认安装" : confirm === "rollback" ? "确认回滚" : "确认清理"}</button></div></div></div> : null}
   </section>;
 }

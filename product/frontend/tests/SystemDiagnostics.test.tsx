@@ -34,8 +34,28 @@ describe("SystemDiagnostics", () => {
     fireEvent.click(screen.getByRole("button", { name: "暂停日志刷新" }));
     expect(screen.getByText("已暂停")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "恢复日志刷新" }));
-    fireEvent.click(await screen.findByRole("button", { name: "加载更多日志" }));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "logs.list", params: expect.objectContaining({ cursor: "offset:1" }) })));
+    expect(screen.queryByRole("button", { name: "加载更多日志" })).not.toBeInTheDocument();
+  });
+
+  it("continues the authoritative tail cursor and deduplicates appended events", async () => {
+    let poll!: TimerHandler;
+    vi.spyOn(window, "setInterval").mockImplementation((handler) => { poll = handler; return 1 as unknown as ReturnType<typeof setInterval>; });
+    const nextLog = { ...log, id: "desktop:2", message: "desktop next event." };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "logs.list") return request.params.cursor
+        ? { method: request.method, requestId: request.requestId, ok: true, result: { items: [log, nextLog], nextCursor: "42", hasMore: false } }
+        : { method: request.method, requestId: request.requestId, ok: true, result: { items: [log], nextCursor: "41", hasMore: false } };
+      if (request.method === "system.get") return { method: request.method, requestId: request.requestId, ok: true, result: system };
+      throw new Error("unexpected");
+    });
+    window.uclaw = { diagnostics: { invoke } } as never;
+    render(<SystemDiagnostics />);
+    await vi.waitFor(() => expect(screen.getAllByText("desktop info event.")).toHaveLength(1));
+
+    await (poll as () => void)();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "logs.list", params: expect.objectContaining({ cursor: "41" }) })));
+    await vi.waitFor(() => expect(screen.getByText("desktop next event.")).toBeVisible());
+    expect(screen.getAllByText("desktop info event.")).toHaveLength(1);
   });
 
   it("exports logs and requires preview plus second confirmation before cleanup", async () => {
@@ -83,6 +103,24 @@ describe("SystemDiagnostics", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "config.get", params: { query: "gateway" } })));
     fireEvent.click(screen.getByRole("button", { name: "导出脱敏配置" }));
     expect(await screen.findByRole("status")).toHaveTextContent("配置导出完成");
+  });
+
+  it("shows authoritative OpenClaw runtime, stability, and audit results", async () => {
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "logs.list") return { method: request.method, requestId: request.requestId, ok: true, result: { items: [], nextCursor: null, hasMore: false } };
+      if (request.method === "system.get") return { method: request.method, requestId: request.requestId, ok: true, result: system };
+      if (request.method === "runtime.get") return { method: request.method, requestId: request.requestId, ok: true, result: { health: { state: "ready" }, status: { state: "ready", uptimeMs: 1000 }, info: { platform: "darwin", architecture: "arm64", version: "2026.7.1-2" } } };
+      if (request.method === "stability.get") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "stable", score: 98, incidents: [] } };
+      if (request.method === "audit.get") return { method: request.method, requestId: request.requestId, ok: true, result: { state: "passed", findings: [{ id: "config", severity: "info", summary: "检查通过。" }] } };
+      throw new Error("unexpected");
+    });
+    window.uclaw = { diagnostics: { invoke } } as never;
+    render(<SystemDiagnostics />);
+    await screen.findByText("暂无日志");
+    fireEvent.click(screen.getByRole("tab", { name: "运行审计" }));
+    expect(await screen.findByText("OpenClaw 2026.7.1-2")).toBeVisible();
+    expect(screen.getByText("稳定性 98")).toBeVisible();
+    expect(screen.getByText("检查通过。")).toBeVisible();
   });
 
   it("shows offline and safe error states", async () => {

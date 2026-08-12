@@ -37,6 +37,23 @@ afterEach(async () => {
 });
 
 describe("diagnostics service", () => {
+  it("dispatches authoritative runtime, stability, and audit projections", async () => {
+    const paths = await fixture();
+    const service = createDiagnosticsService({
+      ...paths, runtime: { productVersion: "0.1.0" },
+      diagnostics: {
+        ...diagnostics(),
+        system: async () => ({ health: { state: "ready" }, status: { state: "ready", uptimeMs: 1000 }, info: { platform: "darwin", architecture: "arm64", version: "2026.7.1-2" } }),
+        stability: async () => ({ state: "stable", score: 98, incidents: [] }),
+        audit: async () => ({ state: "passed", findings: [{ id: "config", severity: "info", summary: "检查通过。" }] }),
+      },
+    });
+    await expect(service.dispatch({ method: "runtime.get", requestId: "runtime", params: {} })).resolves.toMatchObject({ ok: true, result: { health: { state: "ready" } } });
+    await expect(service.dispatch({ method: "stability.get", requestId: "stability", params: {} })).resolves.toMatchObject({ ok: true, result: { state: "stable", score: 98 } });
+    await expect(service.dispatch({ method: "audit.get", requestId: "audit", params: {} })).resolves.toMatchObject({ ok: true, result: { state: "passed" } });
+    expect(JSON.stringify(await service.dispatch({ method: "audit.get", requestId: "audit-safe", params: {} }))).not.toMatch(/token|Authorization|\/Users\//);
+  });
+
   it("lists only the existing diagnostics adapter page and projects messages before renderer", async () => {
     const paths = await fixture();
     const upstream = diagnostics([{ items: [logEntry("private-id")], nextCursor: "cursor-2", hasMore: true }]);
@@ -53,6 +70,21 @@ describe("diagnostics service", () => {
     expect(response.result.nextCursor).toBe("cursor-2");
     const serialized = JSON.stringify(response);
     expect(serialized).not.toMatch(/upstream-secret|private conversation|private-id/);
+  });
+
+  it("merges owned Desktop and Launcher log files with OpenClaw logs and reads appended bytes", async () => {
+    const paths = await fixture();
+    await writeFile(join(paths.logsDir, "uclaw-desktop.log"), "desktop secret one\n");
+    await writeFile(join(paths.logsDir, "uclaw-launcher.log"), "launcher secret one\n");
+    const service = createDiagnosticsService({ ...paths, diagnostics: diagnostics(), runtime: { productVersion: "0.1.0" } });
+    const first = await service.dispatch({ method: "logs.list", requestId: "owned-first", params: { limit: 100 } });
+    expect(first).toMatchObject({ ok: true, result: { items: expect.arrayContaining([
+      expect.objectContaining({ source: "desktop" }), expect.objectContaining({ source: "launcher" }), expect.objectContaining({ source: "desktop" }),
+    ]) } });
+    await writeFile(join(paths.logsDir, "uclaw-launcher.log"), "launcher secret one\nlauncher secret two\n");
+    const second = await service.dispatch({ method: "logs.list", requestId: "owned-second", params: { limit: 100, sources: ["launcher"] } });
+    expect(second).toMatchObject({ ok: true, result: { items: [expect.objectContaining({ source: "launcher" }), expect.objectContaining({ source: "launcher" })] } });
+    expect(JSON.stringify([first, second])).not.toMatch(/secret one|secret two/);
   });
 
   it("deep-redacts nested config and hides unknown fields before renderer and export", async () => {
@@ -74,6 +106,18 @@ describe("diagnostics service", () => {
     await writeFile(paths.configPath, JSON.stringify({ status: "/Applications/U-Claw/alice/secret", state: "opaque-secret", model: "sk-secret", "sk-proj-fixture-key-name-secret": true }));
     const attack = await service.dispatch({ method: "config.get", requestId: "config-attack", params: {} });
     expect(JSON.stringify(attack)).not.toMatch(/Applications|alice|opaque-secret|sk-secret|sk-proj-fixture-key-name-secret/);
+  });
+
+  it("uses OpenClaw config.get as the production raw config authority", async () => {
+    const paths = await fixture();
+    await writeFile(paths.configPath, JSON.stringify({ gateway: { port: 1 } }));
+    const service = createDiagnosticsService({
+      ...paths, runtime: { productVersion: "0.1.0" },
+      diagnostics: { ...diagnostics(), config: async () => ({ gateway: { port: 18789, token: "upstream-secret" } }) },
+    });
+    const response = await service.dispatch({ method: "config.get", requestId: "rpc-config", params: {} });
+    expect(response).toMatchObject({ ok: true, result: { entries: expect.arrayContaining([expect.objectContaining({ path: "gateway.port", value: "18789" })]) } });
+    expect(JSON.stringify(response)).not.toMatch(/upstream-secret/);
   });
 
   it("scans bounded upstream pages for filtered matches and rejects cyclic cursors", async () => {
@@ -124,6 +168,8 @@ describe("diagnostics service", () => {
 
   it("exports without overwrite and leaves source logs unchanged", async () => {
     const paths = await fixture();
+    await writeFile(join(paths.logsDir, "uclaw-desktop.log"), "desktop export secret\n");
+    await writeFile(join(paths.logsDir, "uclaw-launcher.log"), "launcher export secret\n");
     const upstream = diagnostics([
       { items: [logEntry("one")], nextCursor: "page-2", hasMore: true },
       { items: [logEntry("two")], nextCursor: null, hasMore: false },
@@ -135,9 +181,14 @@ describe("diagnostics service", () => {
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(false);
     if (!first.ok || first.method !== "logs.export") return;
-    const exported = await readFile(join(paths.dataDir, first.result.relativePath), "utf8");
-    expect(exported).not.toMatch(/secret|conversation|"id":"one"|"id":"two"/);
-    expect(exported.trim().split("\n")).toHaveLength(2);
+    const exportedText = await readFile(join(paths.dataDir, first.result.relativePath), "utf8");
+    expect(exportedText).toContain('"source":"desktop"');
+    expect(exportedText).toContain('"source":"launcher"');
+    expect(exportedText).not.toMatch(/desktop export secret|launcher export secret|upstream-secret/);
+    expect(await readFile(join(paths.logsDir, "uclaw-desktop.log"), "utf8")).toBe("desktop export secret\n");
+    expect(await readFile(join(paths.logsDir, "uclaw-launcher.log"), "utf8")).toBe("launcher export secret\n");
+    expect(exportedText).not.toMatch(/secret|conversation|"id":"one"|"id":"two"/);
+    expect(exportedText.trim().split("\n")).toHaveLength(4);
   });
 
   it("previews then clears only aged owned regular files and rejects link attacks", async () => {
