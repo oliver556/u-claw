@@ -861,6 +861,120 @@ describe("OpenClawClient", () => {
     await expect(waiting).resolves.toEqual({ value: undefined, done: true });
   });
 
+  it("recovers a missing chat final event from agent.wait and authoritative history", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("agent.wait", "chat.history");
+    transport.fixtures.set("chat.send", { runId: "run-wait", status: "accepted" });
+    transport.fixtures.set("agent.wait", { runId: "run-wait", status: "ok", endedAt: 2 });
+    transport.fixtureQueues.set("chat.history", [
+      {
+        sessionKey: "session-1",
+        sessionId: "session-1",
+        messages: [
+          {
+            role: "user",
+            content: "hello",
+            timestamp: 1,
+            idempotencyKey: "request-wait:user",
+            __openclaw: { id: "message-user", idempotencyKey: "request-wait:user", recordTimestampMs: 1, seq: 1 },
+          },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "history answer" }],
+            timestamp: 2,
+            __openclaw: { id: "message-assistant", recordTimestampMs: 2, seq: 2 },
+          },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "other run answer" }],
+            timestamp: 3,
+            __openclaw: { id: "message-other", recordTimestampMs: 3, seq: 3 },
+          },
+        ],
+      },
+    ]);
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const events = [];
+    for await (const event of client.chat.send({
+      sessionId: "session-1",
+      clientRequestId: "request-wait",
+      blocks: [{ type: "text", text: "hello", format: "plain" }],
+    })) events.push(event);
+
+    expect(events).toMatchObject([
+      { type: "started", runId: "run-wait" },
+      { type: "final", runId: "run-wait", message: { role: "assistant", blocks: [expect.objectContaining({ text: "history answer" })] } },
+    ]);
+    expect(transport.requests).toEqual(expect.arrayContaining([
+      { method: "agent.wait", params: { runId: "run-wait", timeoutMs: 10_000 } },
+      { method: "chat.history", params: { sessionKey: "session-1" } },
+    ]));
+  });
+
+  it("terminates chat send with an error when missing-final recovery fails", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("agent.wait", "chat.history");
+    transport.fixtures.set("chat.send", { runId: "run-failed", status: "accepted" });
+    transport.requestGates.set("agent.wait", Promise.reject(new RpcRemoteError("UNAVAILABLE", "wait failed", true)));
+    transport.fixtures.set("chat.history", { sessionKey: "session-1", sessionId: "session-1", messages: [] });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const events = [];
+    for await (const event of client.chat.send({
+      sessionId: "session-1",
+      clientRequestId: "request-failed",
+      blocks: [{ type: "text", text: "hello", format: "plain" }],
+    })) events.push(event);
+
+    expect(events).toMatchObject([
+      { type: "started", runId: "run-failed" },
+      { type: "error", runId: "run-failed", error: { code: "UNAVAILABLE", retryable: true } },
+    ]);
+  });
+
+  it("does not recover another concurrent turn after the next user message", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("agent.wait", "chat.history");
+    transport.fixtures.set("chat.send", { runId: "run-target", status: "accepted" });
+    transport.fixtures.set("agent.wait", { runId: "run-target", status: "ok" });
+    transport.fixtures.set("chat.history", {
+      sessionKey: "session-1",
+      sessionId: "session-1",
+      messages: [
+        {
+          role: "user", content: "target", timestamp: 1, idempotencyKey: "request-target:user",
+          __openclaw: { id: "user-target", idempotencyKey: "request-target:user", recordTimestampMs: 1, seq: 1 },
+        },
+        {
+          role: "user", content: "other", timestamp: 2, idempotencyKey: "request-other:user",
+          __openclaw: { id: "user-other", idempotencyKey: "request-other:user", recordTimestampMs: 2, seq: 2 },
+        },
+        {
+          role: "assistant", content: [{ type: "text", text: "other answer" }], timestamp: 3,
+          __openclaw: { id: "assistant-other", recordTimestampMs: 3, seq: 3 },
+        },
+      ],
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const events = [];
+    for await (const event of client.chat.send({
+      sessionId: "session-1",
+      clientRequestId: "request-target",
+      blocks: [{ type: "text", text: "target", format: "plain" }],
+    })) events.push(event);
+
+    expect(events).toMatchObject([
+      { type: "started", runId: "run-target" },
+      { type: "error", runId: "run-target", error: { code: "PROTOCOL_MAPPING_FAILED" } },
+    ]);
+    expect(JSON.stringify(events)).not.toContain("other answer");
+  });
+
   it("aborts a late accepted run after local pre-start cancellation", async () => {
     const transport = new FakeTransport();
     transport.fixtures.set("chat.abort", {});
