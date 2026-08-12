@@ -3,8 +3,8 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 
-import { startElectronMain, type DesktopMainOptions } from "./main.js";
-import { createDesktopMainOptions } from "./wiring/create-desktop-main-options.js";
+import { startActivationMain, startElectronMain, type DesktopMainOptions } from "./main.js";
+import { parseStartupMode } from "./startup/mode.js";
 import {
   configurePortableDesktopPaths,
   type PortableDesktopPaths,
@@ -43,6 +43,7 @@ export async function loadProductionDesktopOptions(
   const effectiveEnvironment = environment ?? await loadDevelopmentEnvironment(process.env);
   const modulePath = effectiveEnvironment[WIRING_MODULE_ENV];
   if (!modulePath) {
+    const { createDesktopMainOptions } = await import("./wiring/create-desktop-main-options.js");
     return createDesktopMainOptions(effectiveEnvironment);
   }
   if (!isAbsolute(modulePath)) {
@@ -72,8 +73,10 @@ export async function loadProductionDesktopOptions(
 }
 
 export interface ElectronEntryDependencies {
+  argv: readonly string[];
   preparePortableDesktop(): Promise<PortableDesktopPaths>;
   loadOptions(): Promise<DesktopMainOptions>;
+  startActivationMain(paths: PortableDesktopPaths): Promise<void>;
   startElectronMain(options: DesktopMainOptions, paths: PortableDesktopPaths): Promise<void>;
 }
 
@@ -84,12 +87,19 @@ export async function prepareProductionPortableDesktop(): Promise<PortableDeskto
 
 export async function runElectronEntry(
   dependencies: ElectronEntryDependencies = {
+    argv: process.argv,
     preparePortableDesktop: prepareProductionPortableDesktop,
     loadOptions: loadProductionDesktopOptions,
+    startActivationMain,
     startElectronMain,
   },
 ): Promise<void> {
+  const mode = parseStartupMode(dependencies.argv);
   const paths = await dependencies.preparePortableDesktop();
+  if (mode === "activation-only") {
+    await dependencies.startActivationMain(paths);
+    return;
+  }
   const options = await dependencies.loadOptions();
   await dependencies.startElectronMain(options, paths);
 }
