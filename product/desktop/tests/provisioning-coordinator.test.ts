@@ -515,7 +515,7 @@ describe("provisioning coordinator", () => {
     expect(context.newApiClient.getDeviceMapping).toHaveBeenCalledWith(input.deviceId);
   });
 
-  it("reuses the user creation key after a lost response", async () => {
+  it("recovers a lost user creation response in the same transaction", async () => {
     const context = setup();
     const createUser = vi.mocked(context.newApiClient.createUser).getMockImplementation()!;
     let createdWithKey: string | undefined;
@@ -529,12 +529,12 @@ describe("provisioning coordinator", () => {
       return createUser(value);
     });
 
-    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "NEW_API_FAILED" });
     await expect(context.coordinator.provision(input)).resolves.toMatchObject({ status: "active" });
 
     const keys = vi.mocked(context.newApiClient.createUser).mock.calls.map(([value]) => value.idempotencyKey);
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
+    expect(context.licenseClient.revokeLicense).not.toHaveBeenCalled();
   });
 
   it("treats an ambiguous mapping POST followed by not-found as not created", async () => {

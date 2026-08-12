@@ -44,6 +44,24 @@ describe("usage dispatcher", () => {
     expect(getUsage).toHaveBeenCalledWith("usr_1");
   });
 
+  it("resolves the current USB-bound New API user for every snapshot", async () => {
+    const newApiUsage = vi.fn(async () => ({
+      userId: "usr_current", consumed: 4, remaining: 6, resetAt: null,
+      updatedAt: "2026-08-12T07:59:00.000Z",
+    }));
+    const dispatch = createUsageDispatcher({
+      openClaw: {
+        snapshot: async () => ({}), sessionTimeseries: vi.fn(), sessionLogs: vi.fn(),
+      },
+      newApiUsage,
+    });
+
+    await dispatch({ method: "usage.snapshot", requestId: "usage-current-1", params: { startDate: "2026-08-12", endDate: "2026-08-12" } });
+    await dispatch({ method: "usage.snapshot", requestId: "usage-current-2", params: { startDate: "2026-08-12", endDate: "2026-08-12" } });
+
+    expect(newApiUsage).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps OpenClaw usage available when New API is not configured", async () => {
     const dispatch = createUsageDispatcher({
       openClaw: {

@@ -347,11 +347,20 @@ export function createProvisioningCoordinator({
           updatedAt: timestamp,
         };
       } else {
-        user = await newApiClient.createUser({
+        const createUserInput = {
           idempotencyKey: deriveProvisioningStepKey(input.idempotencyKey, "user", 1),
           deviceId: input.deviceId,
           username: input.username,
-        });
+        };
+        try {
+          user = await newApiClient.createUser(createUserInput);
+        } catch (error) {
+          const category = error && typeof error === "object" && "category" in error
+            ? (error as { category?: unknown }).category
+            : undefined;
+          if (category !== "transport" && category !== "invalid-response") throw error;
+          user = await newApiClient.createUser(createUserInput);
+        }
       }
       if (user.deviceId !== input.deviceId || user.username !== input.username) {
         throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "user-created", false);

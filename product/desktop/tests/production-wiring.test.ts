@@ -408,6 +408,21 @@ describe("production desktop wiring", () => {
     await options.dispose?.();
   });
 
+  it("registers product services from the supplied env instead of global process state", async () => {
+    const options = await createDesktopMainOptions({
+      ...productionEnv,
+      UCLAW_LICENSE_SERVICE_URL: "https://license.example.test/v1/",
+      UCLAW_LICENSE_MANAGEMENT_CREDENTIAL: "license-management-secret",
+      UCLAW_NEW_API_MANAGEMENT_URL: "https://management.example.test/v1/",
+      UCLAW_NEW_API_MANAGEMENT_CREDENTIAL: "new-api-management-secret",
+    });
+
+    expect(options.domainRegistrations!.resolve("product-services")).toMatchObject({
+      services: { authority: expect.any(Object), provisioning: expect.any(Object) },
+    });
+    await options.dispose?.();
+  });
+
   it("injects the executable personal WeChat runtime instead of the adapter Unsupported surface", async () => {
     const pluginDir = join(dirname(productionEnv.OPENCLAW_CONFIG_PATH!), "extensions", "openclaw-weixin");
     await mkdir(pluginDir, { recursive: true });

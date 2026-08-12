@@ -51,6 +51,7 @@ import { createTaskArtifactFileService } from "../task-artifacts/task-artifact-f
 import { createProductionSystemNodeDomain } from "../system-node/production-system-node.js";
 import { createProductionSystemVoiceDomain, createProductionTalkRunBridge, playSecureTemporaryAudio } from "../system-voice/production-system-voice.js";
 import type { AuthorizedWebContents } from "../ipc/register-ipc.js";
+import { createProductionProductServices } from "../product-services/production-product-services.js";
 import { createDesktopLogSink } from "../diagnostics/desktop-log-sink.js";
 import { createOpenClawDoctorRuntime } from "../diagnostics/openclaw-doctor-runtime.js";
 import {
@@ -542,12 +543,23 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     onDisconnect: (listener) => transport.onDisconnect(listener),
     clearPendingTalkRuns: talkRunBridge.clearPending,
   });
+  const productServices = createProductionProductServices({ dataDir: environment.dataRoot, environment: env });
+  const newApiUsageConfigured = [
+    env.UCLAW_LICENSE_SERVICE_URL,
+    env.UCLAW_LICENSE_MANAGEMENT_CREDENTIAL,
+    env.UCLAW_NEW_API_MANAGEMENT_URL,
+    env.UCLAW_NEW_API_MANAGEMENT_CREDENTIAL,
+  ].every((value) => value !== undefined);
   const usageDispatcher = createUsageDispatcher({
     openClaw: createOpenClawUsageService({
       request: (method, params) => transport.router.request(method, params as never, z.unknown()),
     }),
+    ...(newApiUsageConfigured ? { newApiUsage: () => productServices.authority.readUsage() } : {}),
   });
-  await composeDesktopDomainModules(domains, { client }, [
+  await composeDesktopDomainModules(domains, {
+    client,
+    productServices: { dataDir: environment.dataRoot, environment: env, services: productServices },
+  }, [
     {
       name: "provider.executor.openai-compatible",
       register: () => ({ execute: executeOpenAICompatibleProvider, dispose: () => undefined }),
