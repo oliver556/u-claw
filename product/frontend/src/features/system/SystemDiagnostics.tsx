@@ -139,7 +139,7 @@ export function SystemDiagnostics() {
 
   const loadDoctor = useCallback(async () => {
     setDoctorState("loading"); setNotice(undefined);
-    const doctorRequest = request("doctor.run", { timeoutMs: 10_000 });
+    const doctorRequest = request("doctor.run", { timeoutMs: 20_000 });
     setDoctorOperationRequestId(doctorRequest.requestId);
     try {
       const response = await invoke(doctorRequest);
@@ -161,7 +161,7 @@ export function SystemDiagnostics() {
   const confirmRepair = async () => {
     if (!repair) return;
     setOperation("正在执行 OpenClaw 受控修复"); setNotice(undefined);
-    const repairRequest = request("doctor.repair", { actionId: repair.actionId, previewToken: repair.previewToken, confirmed: true, timeoutMs: 10_000 });
+    const repairRequest = request("doctor.repair", { actionId: repair.actionId, previewToken: repair.previewToken, confirmed: true, timeoutMs: 20_000 });
     setDoctorOperationRequestId(repairRequest.requestId);
     try {
       const response = await invoke(repairRequest);

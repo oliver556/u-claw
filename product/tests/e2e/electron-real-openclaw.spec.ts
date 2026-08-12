@@ -143,6 +143,14 @@ test("production Electron persists real OpenClaw sessions and Provider configura
     });
     expect(await readFile(credentialPath, "utf8")).not.toContain(providerSecret);
 
+    await restartedWindow.getByRole("link", { name: "系统" }).click();
+    await restartedWindow.getByRole("tab", { name: "运行审计" }).click();
+    await expect(restartedWindow.getByText("OpenClaw 2026.7.1-2")).toBeVisible();
+    const doctor = await restartedWindow.evaluate(() => window.uclaw?.diagnostics?.invoke({ method: "doctor.run", requestId: "doctor-production-smoke", params: { timeoutMs: 30_000 } }));
+    expect(doctor, JSON.stringify(doctor)).toMatchObject({ ok: true, method: "doctor.run", result: { adapter: "openclaw" } });
+    await restartedWindow.getByRole("tab", { name: "OpenClaw Doctor" }).click();
+    await expect(restartedWindow.getByText(/OpenClaw (检查通过|发现需处理项)/)).toBeVisible({ timeout: 25_000 });
+
     await restartedWindow.getByRole("link", { name: "自动化" }).click();
     await expect(restartedWindow.getByRole("button", { name: "查看 Agent smoke-agent" })).toBeVisible();
     await restartedWindow.getByRole("tab", { name: "定时任务" }).click();

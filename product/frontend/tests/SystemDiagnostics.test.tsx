@@ -149,7 +149,7 @@ describe("SystemDiagnostics", () => {
     expect(await screen.findByText("Gateway 未就绪。")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "重启 Gateway" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "确认受控修复" })).getByRole("button", { name: "确认修复" }));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "doctor.repair", params: { actionId: "gateway-restart", previewToken: "doctor-preview-1", confirmed: true, timeoutMs: 10_000 } })));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "doctor.repair", params: { actionId: "gateway-restart", previewToken: "doctor-preview-1", confirmed: true, timeoutMs: 20_000 } })));
 
     fireEvent.click(screen.getByRole("tab", { name: "网络诊断" }));
     expect(await screen.findByText("内网可用，外网不可用")).toBeVisible();
