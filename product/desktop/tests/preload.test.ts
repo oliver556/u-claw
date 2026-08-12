@@ -6,6 +6,7 @@ import {
   CLIENT_IPC_EVENT_CHANNEL,
   IPC_CHANNELS,
   RELEASE_IPC_CHANNEL,
+  PRODUCT_SERVICES_IPC_CHANNEL,
   SESSION_ADVANCED_IPC_CHANNEL,
   SYSTEM_NODE_IPC_CHANNEL,
   SYSTEM_NODE_IPC_EVENT_CHANNEL,
@@ -25,6 +26,7 @@ describe("installPreloadBridge", () => {
     expect(IPC_CHANNELS).toContain(TASK_ARTIFACT_IPC_CHANNEL);
     expect(IPC_CHANNELS).toContain(SYSTEM_NODE_IPC_CHANNEL);
     expect(IPC_CHANNELS).toContain(SYSTEM_VOICE_IPC_CHANNEL);
+    expect(IPC_CHANNELS).toContain(PRODUCT_SERVICES_IPC_CHANNEL);
   });
 
   it("exposes only fixed window and client contract methods", async () => {
@@ -35,6 +37,15 @@ describe("installPreloadBridge", () => {
       }
       if (method === "usage.session-logs") {
         return { method, requestId, ok: true, result: [] };
+      }
+      if (method === "product.authority.read") {
+        return { method, requestId, ok: true, result: {
+          license: { status: "active", revision: 1, expiresAt: "2027-08-01T00:00:00.000Z" },
+          product: { status: "active", generation: 1, userStatus: "active" },
+          service: { state: "enabled", revision: 1, reasonCode: "OPERATOR_ENABLED" },
+          policy: { quota: { unit: "tokens", limit: 100, period: "monthly" }, rateLimit: { requestsPerMinute: 60, concurrentRequests: 2 }, allowedModels: ["builtin/model"], disabled: false },
+          usage: { consumed: 25, remaining: 75, resetAt: null, updatedAt: "2026-08-12T00:00:00.000Z" },
+        } };
       }
       return { method, requestId, ok: true, result: null };
     });
@@ -51,7 +62,7 @@ describe("installPreloadBridge", () => {
       ipcRenderer: { invoke, on, removeListener },
     });
 
-    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "sessionAdvanced", "usage", "automation", "taskArtifacts", "systemNode", "systemVoice", "data", "diagnostics", "release"]);
+    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "sessionAdvanced", "usage", "automation", "taskArtifacts", "systemNode", "systemVoice", "productServices", "data", "diagnostics", "release"]);
     expect(api).not.toHaveProperty("ipcRenderer");
     expect(api).not.toHaveProperty("invoke");
     expect(Object.keys(api?.client as object)).toEqual(["invoke", "subscribe"]);
@@ -67,6 +78,7 @@ describe("installPreloadBridge", () => {
     expect(Object.keys(api?.taskArtifacts as object)).toEqual(["invoke", "subscribe"]);
     expect(Object.keys(api?.systemNode as object)).toEqual(["invoke", "subscribe"]);
     expect(Object.keys(api?.systemVoice as object)).toEqual(["invoke"]);
+    expect(Object.keys(api?.productServices as object)).toEqual(["readAuthority"]);
     expect(Object.keys(api?.data as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.diagnostics as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.release as object)).toEqual(["invoke"]);
@@ -113,6 +125,10 @@ describe("installPreloadBridge", () => {
 
     await (api?.systemVoice as { invoke: (request: unknown) => Promise<unknown> }).invoke({ method: "talk.runtime.status", requestId: "system-voice-1", params: {} });
     expect(invoke).toHaveBeenLastCalledWith(SYSTEM_VOICE_IPC_CHANNEL, expect.any(Object));
+
+    await (api?.productServices as { readAuthority: (request: unknown) => Promise<unknown> }).readAuthority({ method: "product.authority.read", requestId: "product-1", params: {} });
+    expect(invoke).toHaveBeenLastCalledWith(PRODUCT_SERVICES_IPC_CHANNEL, expect.any(Object));
+    await expect((api?.productServices as { readAuthority: (request: unknown) => Promise<unknown> }).readAuthority({ method: "product.provision", requestId: "product-write", params: {} })).rejects.toThrow();
 
     await expect((api?.usage as { invoke: (request: unknown) => Promise<unknown> }).invoke({
       method: "usage.session-logs",

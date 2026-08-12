@@ -24,6 +24,7 @@ export * from "./session-organizer.js";
 export * from "./session-advanced.js";
 export * from "./providers.js";
 export * from "./plugins.js";
+export * from "./product-services.js";
 export * from "./provisioning-identity.js";
 export * from "./release.js";
 export * from "./tools.js";

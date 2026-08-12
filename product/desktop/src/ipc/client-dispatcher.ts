@@ -84,6 +84,7 @@ const rendererErrorMessages: Record<UClawError["code"], string> = {
   FILE_TYPE_UNSUPPORTED: "The requested file type is unsupported.",
   MODEL_UNAVAILABLE: "The selected model is unavailable.",
   PROVIDER_AUTH_FAILED: "Model provider authentication failed.",
+  PRODUCT_SERVICES_NOT_CONFIGURED: "Product services are not configured.",
   NETWORK_UNREACHABLE: "Network is unreachable.",
   OPERATION_FAILED: "Client operation failed.",
   ALREADY_COMPLETED: "This operation is already complete.",
