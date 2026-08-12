@@ -157,6 +157,10 @@ const SessionPageSchema = z.object({
 }).strict();
 
 const SendResponseSchema = z.object({ runId: z.string().min(1), status: z.string().min(1) }).passthrough();
+const AgentWaitResponseSchema = z.object({
+  runId: z.string().min(1),
+  status: z.enum(["ok", "error", "timeout", "pending"]),
+}).passthrough();
 const CommandsListResponseSchema = z.object({
   commands: z.array(z.object({
     name: z.string().min(1),
@@ -853,6 +857,8 @@ export class OpenClawClient implements UClawClient {
       text = `/${matches[0]!.name}${text === "" ? "" : ` ${text}`}`;
     }
     const queue = new AsyncEventQueue<MessageEvent>();
+    const canRecoverMissingFinal = this.capabilities?.methods.has("agent.wait") === true
+      && this.capabilities.methods.has("chat.history");
     let expectedRunId: string | undefined;
     const buffered: MessageEvent[] = [];
     const enqueue = (mapped: MessageEvent): void => {
@@ -956,6 +962,63 @@ export class OpenClawClient implements UClawClient {
       const accepted = outcome.accepted;
       expectedRunId = accepted.runId;
       for (const mapped of buffered.splice(0)) enqueue(mapped);
+      if (canRecoverMissingFinal) {
+        void (async () => {
+          let completed = false;
+          for (let attempt = 0; attempt < 12; attempt += 1) {
+            const wait = await this.options.transport.router.request(
+              "agent.wait",
+              { runId: accepted.runId, timeoutMs: 10_000 },
+              AgentWaitResponseSchema,
+              signal,
+            );
+            if (wait.runId !== accepted.runId || wait.status === "error") throw new RpcProtocolError("agent.wait");
+            if (wait.status === "ok") {
+              completed = true;
+              break;
+            }
+          }
+          if (!completed) throw new RpcProtocolError("agent.wait");
+          const history = await this.options.transport.router.request(
+            "chat.history", { sessionKey: input.sessionId }, OpenClawHistoryResponseSchema, signal,
+          );
+          if (history.sessionKey !== input.sessionId) throw new RpcProtocolError("chat.history");
+          const userKey = `${input.clientRequestId}:user`;
+          let userIndex = -1;
+          for (let index = history.messages.length - 1; index >= 0; index -= 1) {
+            const candidate = history.messages[index]!;
+            if (candidate.role === "user" &&
+              (candidate.idempotencyKey === userKey || candidate.__openclaw.idempotencyKey === userKey)) {
+              userIndex = index;
+              break;
+            }
+          }
+          const turnMessages = userIndex < 0 ? [] : history.messages.slice(userIndex + 1);
+          const nextUserIndex = turnMessages.findIndex((candidate) => candidate.role === "user");
+          const rawMessage = turnMessages.slice(0, nextUserIndex < 0 ? undefined : nextUserIndex).find((candidate) =>
+            candidate.role === "assistant");
+          if (rawMessage === undefined) throw new RpcProtocolError("chat.history");
+          const [message] = mapOpenClawHistoryResponse({ ...history, messages: [rawMessage] });
+          if (message === undefined) throw new RpcProtocolError("chat.history");
+          enqueue(MessageEventSchema.parse({
+            type: "final",
+            runId: accepted.runId,
+            message: { ...message, runId: accepted.runId },
+          }));
+        })().catch((error: unknown) => {
+          if (signal?.aborted === true) return;
+          const mapped = error instanceof AdapterServiceError
+            ? error.uclawError
+            : UClawErrorSchema.parse({
+              code: "UNAVAILABLE",
+              message: "OpenClaw did not return a final response.",
+              retryable: true,
+              recoveryActions: ["retry"],
+              causeDetails: { operation: "agent.wait" },
+            });
+          enqueue(MessageEventSchema.parse({ type: "error", runId: accepted.runId, error: mapped }));
+        });
+      }
       yield { type: "started", runId: accepted.runId, sessionId: input.sessionId };
       while (true) {
         const item = await queue.next(signal);

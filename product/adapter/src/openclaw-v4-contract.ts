@@ -171,6 +171,7 @@ export const OpenClawHistoryMessageSchema = z.object({
   role: z.enum(["user", "assistant", "system", "tool", "toolResult"]),
   content: z.union([z.string(), z.array(OpenClawContentBlockSchema)]),
   timestamp: z.number().int().nonnegative(),
+  idempotencyKey: z.string().min(1).optional(),
   provider: z.string().optional(),
   model: z.string().optional(),
   MediaPath: z.string().optional(),
