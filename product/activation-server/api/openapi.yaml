@@ -130,11 +130,56 @@
           "503": { "$ref": "#/components/responses/503" }
         }
       }
+    },
+    "/internal/v1/inventory": {
+      "post": {
+        "operationId": "adminGenerateInventory", "security": [{ "AdminBearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminGenerateRequest" } } } },
+        "responses": { "201": { "description": "Generated inventory credentials", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/AdminInventorySecret" } } } } }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } }
+      }
+    },
+    "/internal/v1/inventory/import": {
+      "post": {
+        "operationId": "adminImportInventory", "security": [{ "AdminBearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminImportRequest" } } } },
+        "responses": { "201": { "description": "Imported inventory", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/AdminInventorySummary" } } } } }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } }
+      }
+    },
+    "/internal/v1/inventory/{id}": {
+      "get": {
+        "operationId": "adminShowInventory", "security": [{ "AdminBearerAuth": [] }], "parameters": [{ "$ref": "#/components/parameters/AdminId" }],
+        "responses": { "200": { "description": "Inventory summary", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminInventorySummary" } } } }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } }
+      }
+    },
+    "/internal/v1/licenses/{id}/disable": { "post": { "$ref": "#/components/pathItems/AdminLicenseDisable" } },
+    "/internal/v1/licenses/{id}/enable": { "post": { "$ref": "#/components/pathItems/AdminLicenseEnable" } },
+    "/internal/v1/licenses/{id}/revoke": { "post": { "$ref": "#/components/pathItems/AdminLicenseRevoke" } },
+    "/internal/v1/licenses/{id}/reissue": { "post": { "$ref": "#/components/pathItems/AdminLicenseReissue" } },
+    "/internal/v1/new-api-bindings/{deviceId}/balance-status": {
+      "patch": {
+        "operationId": "adminUpdateBalanceStatus", "security": [{ "AdminBearerAuth": [] }], "parameters": [{ "name": "deviceId", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Identifier" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminBalanceStatusRequest" } } } },
+        "responses": { "200": { "description": "Binding marked configured", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminInventorySummary" } } } }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } }
+      }
+    },
+    "/internal/v1/audit": {
+      "get": {
+        "operationId": "adminQueryAudit", "security": [{ "AdminBearerAuth": [] }],
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 } }, { "name": "before", "in": "query", "schema": { "$ref": "#/components/schemas/Identifier" } }],
+        "responses": { "200": { "description": "Audit events", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/AdminAuditEvent" } } } } }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } }
+      }
     }
   },
   "components": {
     "securitySchemes": {
-      "BearerAuth": { "type": "http", "scheme": "bearer" }
+      "BearerAuth": { "type": "http", "scheme": "bearer" },
+      "AdminBearerAuth": { "type": "http", "scheme": "bearer", "description": "Independent admin secret" }
+    },
+    "pathItems": {
+      "AdminLicenseDisable": { "operationId": "adminDisableLicense", "security": [{ "AdminBearerAuth": [] }], "parameters": [{ "$ref": "#/components/parameters/AdminId" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminMutation" } } } }, "responses": { "200": { "$ref": "#/components/responses/AdminMutationResponse" }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } } },
+      "AdminLicenseEnable": { "operationId": "adminEnableLicense", "security": [{ "AdminBearerAuth": [] }], "parameters": [{ "$ref": "#/components/parameters/AdminId" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminMutation" } } } }, "responses": { "200": { "$ref": "#/components/responses/AdminMutationResponse" }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } } },
+      "AdminLicenseRevoke": { "operationId": "adminRevokeLicense", "security": [{ "AdminBearerAuth": [] }], "parameters": [{ "$ref": "#/components/parameters/AdminId" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminMutation" } } } }, "responses": { "200": { "$ref": "#/components/responses/AdminMutationResponse" }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } } },
+      "AdminLicenseReissue": { "operationId": "adminReissueLicense", "security": [{ "AdminBearerAuth": [] }], "parameters": [{ "$ref": "#/components/parameters/AdminId" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminMutation" } } } }, "responses": { "200": { "description": "License reissued with replacement credential", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminReissueResponse" } } } }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } } }
     },
     "parameters": {
       "ActivationId": {
@@ -148,7 +193,8 @@
         "in": "path",
         "required": true,
         "schema": { "$ref": "#/components/schemas/Identifier" }
-      }
+      },
+      "AdminId": { "name": "id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Identifier" } }
     },
     "responses": {
       "ActivationError": {
@@ -170,13 +216,27 @@
       "503": {
         "description": "Service unavailable",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ActivationError" } } }
-      }
+      },
+      "AdminError": { "description": "Redacted admin error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminError" } } } },
+      "AdminMutationResponse": { "description": "License mutation result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminMutationResult" } } } }
     },
     "schemas": {
       "Identifier": {
         "type": "string",
         "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
       },
+      "ActivationCode": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" },
+      "AdminOperation": { "type": "object", "additionalProperties": false, "required": ["operatorId", "requestId", "idempotencyKey", "reason"], "properties": { "operatorId": { "$ref": "#/components/schemas/Identifier" }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "idempotencyKey": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }, "reason": { "type": "string", "minLength": 3, "maxLength": 512 } } },
+      "AdminMutation": { "type": "object", "additionalProperties": false, "required": ["operatorId", "requestId", "idempotencyKey", "reason", "confirmTarget"], "properties": { "operatorId": { "$ref": "#/components/schemas/Identifier" }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "idempotencyKey": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }, "reason": { "type": "string", "minLength": 3, "maxLength": 512 }, "confirmTarget": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } },
+      "AdminGenerateRequest": { "type": "object", "additionalProperties": false, "required": ["operatorId", "requestId", "idempotencyKey", "reason", "count"], "properties": { "operatorId": { "$ref": "#/components/schemas/Identifier" }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "idempotencyKey": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }, "reason": { "type": "string", "minLength": 3, "maxLength": 512 }, "count": { "type": "integer", "minimum": 1, "maximum": 10000 } } },
+      "AdminBalanceStatusRequest": { "type": "object", "additionalProperties": false, "required": ["operatorId", "requestId", "idempotencyKey", "reason", "balanceStatus"], "properties": { "operatorId": { "$ref": "#/components/schemas/Identifier" }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "idempotencyKey": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }, "reason": { "type": "string", "minLength": 3, "maxLength": 512 }, "balanceStatus": { "const": "configured" } } },
+      "AdminImportRequest": { "type": "object", "additionalProperties": false, "required": ["operatorId", "requestId", "idempotencyKey", "reason", "records"], "properties": { "operatorId": { "$ref": "#/components/schemas/Identifier" }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "idempotencyKey": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }, "reason": { "type": "string", "minLength": 3, "maxLength": 512 }, "records": { "type": "array", "minItems": 1, "maxItems": 10000, "items": { "type": "object", "additionalProperties": false, "required": ["username", "activationCode", "newApiUserId", "newApiUsername", "policyDigest"], "properties": { "username": { "$ref": "#/components/schemas/Identifier" }, "activationCode": { "$ref": "#/components/schemas/ActivationCode" }, "newApiUserId": { "$ref": "#/components/schemas/Identifier" }, "newApiUsername": { "$ref": "#/components/schemas/Identifier" }, "policyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } } } } },
+      "AdminInventorySecret": { "type": "object", "additionalProperties": false, "required": ["inventoryId", "username", "activationCode"], "properties": { "inventoryId": { "$ref": "#/components/schemas/Identifier" }, "username": { "type": "string" }, "activationCode": { "$ref": "#/components/schemas/ActivationCode" } } },
+      "AdminInventorySummary": { "type": "object", "additionalProperties": false, "required": ["inventoryId", "username", "status", "newApiSetupStatus", "deviceId", "licenseId"], "properties": { "inventoryId": { "$ref": "#/components/schemas/Identifier" }, "username": { "$ref": "#/components/schemas/Identifier" }, "status": { "enum": ["prepared", "binding", "active", "revoked"] }, "newApiSetupStatus": { "enum": ["pending", "configured", "suspended"] }, "deviceId": { "anyOf": [{ "$ref": "#/components/schemas/Identifier" }, { "type": "null" }] }, "licenseId": { "anyOf": [{ "$ref": "#/components/schemas/Identifier" }, { "type": "null" }] } } },
+      "AdminMutationResult": { "type": "object", "additionalProperties": false, "required": ["licenseId", "status", "revision", "replacementInventoryId"], "properties": { "licenseId": { "$ref": "#/components/schemas/Identifier" }, "status": { "enum": ["active", "disabled", "revoked", "reissued"] }, "revision": { "type": "integer", "minimum": 1 }, "replacementInventoryId": { "anyOf": [{ "$ref": "#/components/schemas/Identifier" }, { "type": "null" }] } } },
+      "AdminReissueResponse": { "type": "object", "additionalProperties": false, "required": ["licenseId", "status", "revision", "replacementInventoryId", "username", "activationCode"], "properties": { "licenseId": { "$ref": "#/components/schemas/Identifier" }, "status": { "const": "reissued" }, "revision": { "type": "integer", "minimum": 1 }, "replacementInventoryId": { "$ref": "#/components/schemas/Identifier" }, "username": { "type": "string" }, "activationCode": { "$ref": "#/components/schemas/ActivationCode" } } },
+      "AdminAuditEvent": { "type": "object", "additionalProperties": false, "required": ["eventId", "actorId", "action", "outcome", "inventoryId", "deviceId", "licenseId", "requestId", "reason", "idempotencyKey", "createdAt"], "properties": { "eventId": { "$ref": "#/components/schemas/Identifier" }, "actorId": { "type": "string" }, "action": { "type": "string" }, "outcome": { "enum": ["succeeded", "failed"] }, "inventoryId": { "anyOf": [{ "$ref": "#/components/schemas/Identifier" }, { "type": "null" }] }, "deviceId": { "anyOf": [{ "$ref": "#/components/schemas/Identifier" }, { "type": "null" }] }, "licenseId": { "anyOf": [{ "$ref": "#/components/schemas/Identifier" }, { "type": "null" }] }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "reason": { "type": ["string", "null"] }, "idempotencyKey": { "anyOf": [{ "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }, { "type": "null" }] }, "createdAt": { "type": "string", "format": "date-time" } } },
+      "AdminError": { "type": "object", "additionalProperties": false, "required": ["code"], "properties": { "code": { "enum": ["ADMIN_AUTHENTICATION_FAILED", "ADMIN_INVALID", "ADMIN_SERVICE_UNAVAILABLE"] } } },
       "UsbFingerprint": {
         "type": "object",
         "additionalProperties": false,
@@ -192,7 +252,7 @@
         "required": ["username", "activationCode", "usbFingerprint", "clientVersion", "idempotencyKey"],
         "properties": {
           "username": { "type": "string", "minLength": 3, "maxLength": 128 },
-          "activationCode": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" },
+          "activationCode": { "$ref": "#/components/schemas/ActivationCode" },
           "usbFingerprint": { "$ref": "#/components/schemas/UsbFingerprint" },
           "clientVersion": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$" },
           "idempotencyKey": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }

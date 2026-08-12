@@ -4,11 +4,15 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+
+	"u-claw-activation-server/internal/admin"
 )
 
 const defaultListenAddress = ":8080"
@@ -30,6 +34,7 @@ var requiredVariables = []string{
 	"KMS_KEY_VERSION",
 	"KMS_KEK_FILE",
 	"TOKEN_SIGNING_KEY_FILE",
+	"ADMIN_OPERATORS_FILE",
 }
 
 type Config struct {
@@ -48,6 +53,8 @@ type Config struct {
 	KMSKEK                []byte
 	TokenSigningKeyFile   string
 	TokenSigningKey       []byte
+	AdminOperatorsFile    string
+	AdminOperators        admin.OperatorRegistry
 }
 
 func Load() (Config, error) {
@@ -92,6 +99,10 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("configuration TOKEN_SIGNING_KEY_FILE is invalid")
 	}
+	adminOperators, err := loadAdminOperators(values["ADMIN_OPERATORS_FILE"])
+	if err != nil {
+		return Config{}, errors.New("configuration ADMIN_OPERATORS_FILE is invalid")
+	}
 
 	return Config{
 		ListenAddress:         listenAddress,
@@ -109,7 +120,37 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		KMSKEK:                kek,
 		TokenSigningKeyFile:   values["TOKEN_SIGNING_KEY_FILE"],
 		TokenSigningKey:       tokenSigningKey,
+		AdminOperatorsFile:    values["ADMIN_OPERATORS_FILE"],
+		AdminOperators:        adminOperators,
 	}, nil
+}
+
+func loadAdminOperators(path string) (admin.OperatorRegistry, error) {
+	contents, err := readRegularFile(path, 2, maximumPepperBytes)
+	if err != nil {
+		return nil, err
+	}
+	var encoded map[string]string
+	decoder := json.NewDecoder(strings.NewReader(string(contents)))
+	if err = decoder.Decode(&encoded); err != nil || decoder.Decode(&struct{}{}) != io.EOF || len(encoded) == 0 {
+		return nil, errors.New("operator registry invalid")
+	}
+	result := make(admin.OperatorRegistry, len(encoded))
+	seenDigests := make(map[[32]byte]struct{}, len(encoded))
+	for operatorID, value := range encoded {
+		decoded, decodeErr := hex.DecodeString(value)
+		if decodeErr != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != value || len(operatorID) < 3 || len(operatorID) > 128 {
+			return nil, errors.New("operator registry invalid")
+		}
+		var digest [32]byte
+		copy(digest[:], decoded)
+		if _, exists := seenDigests[digest]; exists {
+			return nil, errors.New("operator registry invalid")
+		}
+		seenDigests[digest] = struct{}{}
+		result[operatorID] = digest
+	}
+	return result, nil
 }
 
 func loadKEK(path string) ([]byte, error) {

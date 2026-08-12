@@ -14,7 +14,7 @@ import (
 const (
 	migrationAdvisoryLockID int64 = 0x55434c41574d4947
 	migrationLockSQL              = "SELECT pg_advisory_xact_lock($1)"
-	latestMigrationVersion  int64 = 2
+	latestMigrationVersion  int64 = 3
 )
 
 const migrationLedgerSQL = `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -29,6 +29,9 @@ var initialMigration string
 //go:embed migrations/002_lifecycle.sql
 var lifecycleMigration string
 
+//go:embed migrations/003_admin.sql
+var adminMigration string
+
 var initialMigrationChecksum = func() []byte {
 	digest := sha256.Sum256([]byte(initialMigration))
 	return digest[:]
@@ -39,6 +42,11 @@ var lifecycleMigrationChecksum = func() []byte {
 	return digest[:]
 }()
 
+var adminMigrationChecksum = func() []byte {
+	digest := sha256.Sum256([]byte(adminMigration))
+	return digest[:]
+}()
+
 func InitialMigrationSQL() string {
 	return initialMigration
 }
@@ -46,6 +54,8 @@ func InitialMigrationSQL() string {
 func LifecycleMigrationSQL() string {
 	return lifecycleMigration
 }
+
+func AdminMigrationSQL() string { return adminMigration }
 
 type migration struct {
 	version  int64
@@ -72,6 +82,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	for _, candidate := range []migration{
 		{version: 1, contents: initialMigration, checksum: initialMigrationChecksum},
 		{version: 2, contents: lifecycleMigration, checksum: lifecycleMigrationChecksum},
+		{version: 3, contents: adminMigration, checksum: adminMigrationChecksum},
 	} {
 		var checksum []byte
 		err = tx.QueryRow(ctx, "SELECT checksum FROM schema_migrations WHERE version = $1", candidate.version).Scan(&checksum)
