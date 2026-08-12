@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
+import { toProductModels } from "./product-model-catalog";
 import { useMessageStream } from "./useMessageStream";
 
 interface ConversationProps {
@@ -52,6 +53,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   const sendIntentId = useRef<string | undefined>(undefined);
   const mounted = useRef(true);
   const resolvingApprovals = useRef(new Set<string>());
+  const defaultModelSelections = useRef(new Set<string>());
 
   useEffect(() => {
     mounted.current = true;
@@ -125,13 +127,22 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     if (capabilities?.methods.has("models.list") !== true) return;
     let active = true;
     setModelState("loading");
-    void client.models.list().then((items) => {
+    void client.models.list().then(async (items) => {
       if (!active) return;
-      setModels(items.map((model) => ({ id: model.id, label: model.label, available: model.available })));
+      const productModels = toProductModels(items);
+      setModels(productModels);
+      const target = productModels.find((model) => model.available);
+      const currentModelAllowed = productModels.some((model) => model.id === session.model?.id);
+      const selectionKey = target === undefined ? undefined : `${session.id}\0${target.id}`;
+      if (target !== undefined && !currentModelAllowed && selectionKey !== undefined && !defaultModelSelections.current.has(selectionKey)) {
+        defaultModelSelections.current.add(selectionKey);
+        await client.models.selectForSession(session.id, target.id);
+        if (active) onSessionUpdated(session.id);
+      }
       setModelState("idle");
     }).catch(() => { if (active) setModelState("error"); });
     return () => { active = false; };
-  }, [capabilities, client]);
+  }, [capabilities, client, onSessionUpdated, session.id, session.model?.id]);
 
   useEffect(() => {
     const invoke = window.uclaw?.skills?.invoke;

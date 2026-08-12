@@ -81,6 +81,31 @@ function clientFixture(overrides: Partial<UClawClient> = {}): UClawClient {
 }
 
 describe("chat workspace", () => {
+  it("selects GPT-5.6 Sol as the only first-release model", async () => {
+    const base = clientFixture();
+    const selectForSession = vi.fn(async () => undefined);
+    const client = clientFixture({
+      gateway: {
+        ...base.gateway,
+        negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send", "chat.abort", "sessions.create", "models.list"]), events: new Set(["chat"]), features: { attachments: false, approvalResolve: false } })),
+      },
+      models: {
+        list: vi.fn(async () => [
+          { id: "uclaw-development-gpt/gpt-5.6-sol", label: "Raw Sol", providerId: "uclaw-development-gpt", available: true, locality: "cloud" as const, capabilities: ["text" as const] },
+          { id: "uclaw-development-gpt/gpt-5.6-luna", label: "Luna", providerId: "uclaw-development-gpt", available: true, locality: "cloud" as const, capabilities: ["text" as const] },
+          { id: "anthropic/claude-opus", label: "Claude", providerId: "anthropic", available: true, locality: "cloud" as const, capabilities: ["text" as const] },
+        ]),
+        selectForSession,
+      },
+    });
+
+    render(<App client={client} />);
+
+    await waitFor(() => expect(selectForSession).toHaveBeenCalledWith("session-1", "uclaw-development-gpt/gpt-5.6-sol"));
+    expect(screen.queryByText("Luna")).not.toBeInTheDocument();
+    expect(screen.queryByText("Claude")).not.toBeInTheDocument();
+  });
+
   it("shows current model while clearly degrading unavailable model discovery", async () => {
     const client = clientFixture();
     vi.mocked(client.sessions.get).mockResolvedValue({
