@@ -102,10 +102,8 @@ export type ActivationError = z.infer<typeof ActivationErrorSchema>;
 
 export const ClientPolicySchema = z.object({
   minimumClientVersion: SemverSchema,
-  latestClientVersion: SemverSchema,
   upgradeRequired: z.boolean(),
-  statusRefreshSeconds: z.number().int().min(1).max(86_400),
-  maximumOfflineGraceSeconds: z.number().int().min(0).max(86_400),
+  feedUrl: z.literal("https://updates.u-claw.org/releases/"),
 }).strict();
 export type ClientPolicy = z.infer<typeof ClientPolicySchema>;
 
