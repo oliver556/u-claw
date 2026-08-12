@@ -13,7 +13,7 @@ import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fi
 
 class ScriptedWebSocket {
   static instances: ScriptedWebSocket[] = [];
-  static outcome: "success" | "usage" | "automation" | "task-artifacts" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
+  static outcome: "success" | "usage" | "automation" | "task-artifacts" | "system-node" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
   static skillDisabled = false;
   static selectedModel: { sessionId: string; providerId: string; model: string } | undefined;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -48,6 +48,10 @@ class ScriptedWebSocket {
     }
     if (frame.method === "artifacts.list") {
       queueMicrotask(() => this.respond(frame, { artifacts: [] }));
+      return;
+    }
+    if (frame.method === "environments.list") {
+      queueMicrotask(() => this.respond(frame, { environments: [{ id: "gateway", type: "local", label: "Gateway", status: "available" }] }));
       return;
     }
     if (frame.method === "usage.status") {
@@ -189,6 +193,8 @@ class ScriptedWebSocket {
                   ? ["sessions.list", "sessions.describe", "chat.history", "chat.send", "agents.list", "agent.identity.get", "agents.create", "agents.update", "agents.delete", "agents.files.list", "agents.files.get", "agents.files.set", "agents.workspace.list", "agents.workspace.get", "cron.list", "cron.status", "cron.get", "cron.add", "cron.update", "cron.remove", "cron.run", "cron.runs"]
                   : ScriptedWebSocket.outcome === "task-artifacts"
                     ? ["sessions.list", "sessions.describe", "chat.history", "chat.send", "tasks.list", "tasks.get", "tasks.cancel", "tasks.retry", "artifacts.list", "artifacts.get", "artifacts.download"]
+                  : ScriptedWebSocket.outcome === "system-node"
+                    ? ["sessions.list", "sessions.describe", "chat.history", "chat.send", "environments.list", "terminal.list"]
                   : ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send"],
             events: ["chat"],
           },
@@ -267,11 +273,14 @@ describe("production desktop wiring", () => {
 
   it("accepts the existing portable short token without weakening character validation", async () => {
     const configPath = productionEnv.OPENCLAW_CONFIG_PATH!;
+    productionEnv.UNRELATED_HOST_SECRET = "must-not-reach-gateway";
     await writeFile(configPath, JSON.stringify({ gateway: { auth: { mode: "token", token: "uclaw" } } }));
 
     const options = await createDesktopMainOptions(productionEnv);
     const launch = options.buildGatewayLaunchOptions(18790) as { env: NodeJS.ProcessEnv };
-    expect(launch.env.OPENCLAW_GATEWAY_TOKEN).toBe("uclaw");
+    expect(launch.env).not.toHaveProperty("OPENCLAW_GATEWAY_TOKEN");
+    expect(launch.env.OPENCLAW_CONFIG_PATH).toBe(configPath);
+    expect(launch.env).not.toHaveProperty("UNRELATED_HOST_SECRET");
     await options.dispose?.();
   });
 
@@ -347,7 +356,7 @@ describe("production desktop wiring", () => {
       openClawEntry, "gateway", "run", "--port", "18791", "--auth", "token",
     ]));
     expect(launch.args.join(" ")).not.toContain("test-gateway-token");
-    expect(launch.env.OPENCLAW_GATEWAY_TOKEN).toBe("test-gateway-token");
+    expect(launch.env).not.toHaveProperty("OPENCLAW_GATEWAY_TOKEN");
     expect(options.client?.attachments).toBe(options.attachments);
     expect(options.client?.sessionAdvanced).toBeDefined();
     expect(options.providerConfig).toBeDefined();
@@ -556,6 +565,28 @@ describe("production desktop wiring", () => {
     const taskResponse = await handlers.get("uclaw:task-artifacts")!({ sender: webContents, senderFrame: frame }, { method: "tasks.list", requestId: "tasks-production-1", params: {} });
     expect(taskResponse).toMatchObject({ ok: true, result: [{ id: "task-1", title: "Report" }] });
     expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([expect.objectContaining({ method: "tasks.list", params: {} })]));
+    dispose();
+    await options.dispose?.();
+  });
+
+  it("registers production System/Node IPC while keeping Terminal fail-closed", async () => {
+    ScriptedWebSocket.outcome = "system-node";
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
+    const options = await createDesktopMainOptions(productionEnv);
+    options.buildGatewayLaunchOptions(18803);
+    await options.probeCapabilities(18803, new AbortController().signal);
+    const registration = options.domainRegistrations!.resolve("system-node") as {
+      installIpc(context: { ipcMain: { handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void; removeHandler(channel: string): void }; authorizedWebContents: { mainFrame: unknown; send(...args: unknown[]): void } }): () => void;
+    } | undefined;
+    expect(registration).toBeDefined();
+    const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const frame = {};
+    const webContents = { mainFrame: frame, send: vi.fn() };
+    const dispose = registration!.installIpc({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: (channel) => handlers.delete(channel) }, authorizedWebContents: webContents });
+    await expect(handlers.get("uclaw:system-node")!({ sender: webContents, senderFrame: frame }, { method: "environments.list", requestId: "system-node-production-1", params: {} })).resolves.toMatchObject({ ok: true, result: { environments: [{ id: "gateway" }] } });
+    await expect(handlers.get("uclaw:system-node")!({ sender: webContents, senderFrame: frame }, { method: "terminal.list", requestId: "terminal-production-1", params: {} })).resolves.toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([expect.objectContaining({ method: "environments.list", params: {} })]));
+    expect(ScriptedWebSocket.instances[0]!.sent).not.toEqual(expect.arrayContaining([expect.objectContaining({ method: "terminal.list" })]));
     dispose();
     await options.dispose?.();
   });

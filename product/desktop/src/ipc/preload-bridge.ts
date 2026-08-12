@@ -51,6 +51,13 @@ import {
   TaskArtifactIpcResponseSchema,
   type TaskArtifactIpcRequest,
 } from "@uclaw/shared/dist/task-artifacts.js";
+import {
+  SystemNodeIpcEventSchema,
+  SystemNodeIpcRequestSchema,
+  SystemNodeIpcResponseSchema,
+  type SystemNodeIpcEvent,
+  type SystemNodeIpcRequest,
+} from "@uclaw/shared/dist/system-node.js";
 
 import {
   CLIENT_IPC_CHANNEL,
@@ -71,6 +78,8 @@ import {
   AUTOMATION_IPC_CHANNEL,
   TASK_ARTIFACT_EVENT_CHANNEL,
   TASK_ARTIFACT_IPC_CHANNEL,
+  SYSTEM_NODE_IPC_CHANNEL,
+  SYSTEM_NODE_IPC_EVENT_CHANNEL,
 } from "./channels.js";
 
 export interface ContextBridgeLike {
@@ -255,6 +264,21 @@ export function installPreloadBridge({
     ipcRenderer.on(TASK_ARTIFACT_EVENT_CHANNEL, receive);
     return () => ipcRenderer.removeListener(TASK_ARTIFACT_EVENT_CHANNEL, receive);
   };
+  const invokeSystemNode = async (payload: unknown) => {
+    const request = SystemNodeIpcRequestSchema.parse(payload);
+    const response = SystemNodeIpcResponseSchema.parse(await ipcRenderer.invoke(SYSTEM_NODE_IPC_CHANNEL, request));
+    if (response.method !== request.method || response.requestId !== request.requestId) throw new Error("IPC response does not match its request.");
+    return response;
+  };
+  const subscribeSystemNode = (listener: (event: SystemNodeIpcEvent) => void): (() => void) => {
+    const receive = (_event: unknown, payload: unknown): void => {
+      const parsed = SystemNodeIpcEventSchema.safeParse(payload);
+      if (!parsed.success) { reportInvalidEvent(new Error("Invalid System/Node IPC event.")); return; }
+      listener(parsed.data);
+    };
+    ipcRenderer.on(SYSTEM_NODE_IPC_EVENT_CHANNEL, receive);
+    return () => ipcRenderer.removeListener(SYSTEM_NODE_IPC_EVENT_CHANNEL, receive);
+  };
 
   contextBridge.exposeInMainWorld("uclaw", Object.freeze({
     window: Object.freeze({ invoke: invokeWindow, onMaximizedChange }),
@@ -269,6 +293,7 @@ export function installPreloadBridge({
     usage: Object.freeze({ invoke: invokeUsage as (request: UsageIpcRequest) => Promise<unknown> }),
     automation: Object.freeze({ invoke: invokeAutomation as (request: AutomationIpcRequest) => Promise<unknown> }),
     taskArtifacts: Object.freeze({ invoke: invokeTaskArtifacts as (request: TaskArtifactIpcRequest) => Promise<unknown>, subscribe: subscribeTaskArtifacts }),
+    systemNode: Object.freeze({ invoke: invokeSystemNode as (request: SystemNodeIpcRequest) => Promise<unknown>, subscribe: subscribeSystemNode }),
     data: Object.freeze({ invoke: invokeData as (request: DataIpcRequest) => Promise<unknown> }),
     diagnostics: Object.freeze({ invoke: invokeDiagnostics as (request: DiagnosticsIpcRequest) => Promise<unknown> }),
     release: Object.freeze({ invoke: invokeRelease as (request: ReleaseIpcRequest) => Promise<unknown> }),

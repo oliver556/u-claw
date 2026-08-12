@@ -151,6 +151,21 @@ test("production Electron persists real OpenClaw sessions and Provider configura
     await restartedWindow.getByRole("tab", { name: "OpenClaw Doctor" }).click();
     await expect(restartedWindow.getByText(/OpenClaw (检查通过|发现需处理项)/)).toBeVisible({ timeout: 25_000 });
 
+    await restartedWindow.getByRole("tab", { name: "设备与运行" }).click();
+    await expect(restartedWindow.getByLabel("设备与运行")).toBeVisible();
+    const systemNode = await restartedWindow.evaluate(async () => ({
+      environments: await window.uclaw?.systemNode?.invoke({ method: "environments.list", requestId: "system-node-environments", params: {} }),
+      terminal: await window.uclaw?.systemNode?.invoke({ method: "terminal.list", requestId: "system-node-terminal", params: {} }),
+    }));
+    expect(systemNode).toMatchObject({
+      environments: { ok: true, result: { environments: [expect.objectContaining({ id: "gateway", status: "available" })] } },
+      terminal: { ok: false, error: { code: "FORBIDDEN" } },
+    });
+    await restartedWindow.reload();
+    await restartedWindow.getByRole("link", { name: "系统" }).click();
+    await restartedWindow.getByRole("tab", { name: "设备与运行" }).click();
+    await expect(restartedWindow.getByLabel("设备与运行")).toBeVisible();
+
     await restartedWindow.getByRole("button", { name: "打开任务活动中心" }).click();
     await expect(restartedWindow.getByRole("region", { name: "Task 活动中心" })).toBeVisible();
     await expect(restartedWindow.getByRole("alert")).toContainText("not supported", { timeout: 10_000 });
