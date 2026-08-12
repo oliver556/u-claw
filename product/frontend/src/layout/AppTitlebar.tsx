@@ -1,4 +1,4 @@
-import type { AttachmentIpcRequest, AttachmentIpcResponse, AutomationIpcRequest, AutomationIpcResponse, ChannelIpcRequest, ChannelIpcResponse, ClientIpcEvent, ClientIpcRequest, DataBridge, DiagnosticsIpcRequest, DiagnosticsIpcResponse, GatewayStatus, IpcResponse, McpIpcRequest, McpIpcResponse, PluginIpcRequest, PluginIpcResponse, ProviderIpcRequest, ProviderIpcResponse, RecoveryAction, ReleaseBridge, SessionAdvancedIpcRequest, SessionAdvancedIpcResponse, SkillIpcRequest, SkillIpcResponse, SystemNodeIpcEvent, SystemNodeIpcRequest, SystemNodeIpcResponse, SystemVoiceIpcRequest, SystemVoiceIpcResponse, TaskArtifactIpcEventSchema, TaskArtifactIpcRequest, TaskArtifactIpcResponse, UsageIpcRequest, UsageIpcResponse, WindowIpcRequest } from "@uclaw/shared";
+import type { AttachmentIpcRequest, AttachmentIpcResponse, AutomationIpcRequest, AutomationIpcResponse, ChannelIpcRequest, ChannelIpcResponse, ClientIpcEvent, ClientIpcRequest, DataBridge, DiagnosticsIpcRequest, DiagnosticsIpcResponse, GatewayStatus, IpcResponse, McpIpcRequest, McpIpcResponse, PluginIpcRequest, PluginIpcResponse, ProductAuthorityIpcRequest, ProductAuthorityIpcResponse, ProviderIpcRequest, ProviderIpcResponse, RecoveryAction, ReleaseBridge, SessionAdvancedIpcRequest, SessionAdvancedIpcResponse, SkillIpcRequest, SkillIpcResponse, SystemNodeIpcEvent, SystemNodeIpcRequest, SystemNodeIpcResponse, SystemVoiceIpcRequest, SystemVoiceIpcResponse, TaskArtifactIpcEventSchema, TaskArtifactIpcRequest, TaskArtifactIpcResponse, UsageIpcRequest, UsageIpcResponse, WindowIpcRequest } from "@uclaw/shared";
 import { Modal, Tooltip } from "antd";
 import { Activity, Copy, Cpu, HardDrive, Maximize2, Minus, Radio, RotateCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -52,6 +52,9 @@ declare global {
       };
       systemVoice?: {
         invoke(request: SystemVoiceIpcRequest): Promise<SystemVoiceIpcResponse>;
+      };
+      productServices?: {
+        readAuthority(request: ProductAuthorityIpcRequest): Promise<ProductAuthorityIpcResponse>;
       };
       data?: DataBridge;
       diagnostics?: {

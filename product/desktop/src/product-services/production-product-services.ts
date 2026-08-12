@@ -1,6 +1,6 @@
 import {
-  ProvisioningIdentityInputSchema,
-  ProvisioningLifecycleActionSchema,
+  PRODUCT_SERVICES_IPC_CHANNEL,
+  ProductAuthorityIpcRequestSchema,
   type LicenseLifecycleClient,
   type NewApiManagementClient,
 } from "@uclaw/shared";
@@ -26,13 +26,7 @@ import {
 import type { DesktopDomainModule } from "../wiring/domain-modules.js";
 import { toRendererSafeError } from "../ipc/client-dispatcher.js";
 
-export const PRODUCT_SERVICES_IPC_CHANNEL = "uclaw:product-services";
-
-const ProductServicesRequestSchema = z.discriminatedUnion("method", [
-  z.object({ method: z.literal("product.provision"), requestId: z.string().min(1).max(512), params: ProvisioningIdentityInputSchema }).strict(),
-  z.object({ method: z.literal("product.lifecycle"), requestId: z.string().min(1).max(512), params: ProvisioningLifecycleActionSchema }).strict(),
-  z.object({ method: z.literal("product.authority.read"), requestId: z.string().min(1).max(512), params: z.object({}).strict() }).strict(),
-]);
+export { PRODUCT_SERVICES_IPC_CHANNEL } from "@uclaw/shared";
 
 const ProductionProductServiceConfigSchema = z.object({
   licenseEndpoint: z.string().url(),
@@ -129,6 +123,33 @@ export interface CreateProductionProductDomainModuleOptions extends CreateProduc
   services?: ProductionProductServices;
 }
 
+function rendererAuthoritySummary(authority: Awaited<ReturnType<ProductAuthorityReader["read"]>>) {
+  return {
+    license: {
+      status: authority.license.status.status,
+      revision: authority.license.status.revision,
+      expiresAt: authority.license.status.expiresAt,
+    },
+    product: {
+      status: authority.mapping.status,
+      generation: authority.mapping.generation,
+      userStatus: authority.user.status,
+    },
+    service: {
+      state: authority.service.state,
+      revision: authority.service.revision,
+      reasonCode: authority.service.reasonCode,
+    },
+    policy: authority.controls.policy,
+    usage: {
+      consumed: authority.usage.consumed,
+      remaining: authority.usage.remaining,
+      resetAt: authority.usage.resetAt,
+      updatedAt: authority.usage.updatedAt,
+    },
+  };
+}
+
 export function readProductionProductServiceConfig(
   environment: NodeJS.ProcessEnv,
 ): ProductionProductServiceConfig {
@@ -222,13 +243,9 @@ export function createProductionProductDomainModule(
             if (candidate.sender !== authorizedWebContents || candidate.senderFrame !== authorizedWebContents.mainFrame) {
               throw new Error("Product service IPC sender is not authorized.");
             }
-            const request = ProductServicesRequestSchema.parse(payload);
+            const request = ProductAuthorityIpcRequestSchema.parse(payload);
             try {
-              const result = request.method === "product.provision"
-                ? await services.provisioning.provision(request.params)
-                : request.method === "product.lifecycle"
-                  ? await services.provisioning.applyLifecycle(request.params)
-                  : await services.authority.read();
+              const result = rendererAuthoritySummary(await services.authority.read());
               return { method: request.method, requestId: request.requestId, ok: true, result };
             } catch (error) {
               return { method: request.method, requestId: request.requestId, ok: false, error: toRendererSafeError(error) };

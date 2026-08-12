@@ -343,6 +343,8 @@ describe("U-Claw application shell", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "语音与通知" }));
     expect(screen.getByLabelText("语音与通知")).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "产品授权" }));
+    expect(screen.getByLabelText("产品授权")).toBeVisible();
 
     fireEvent.click(screen.getByRole("tab", { name: "备份与存储" }));
     expect(screen.getByRole("tab", { name: "备份与存储" })).toHaveAttribute("aria-selected", "true");

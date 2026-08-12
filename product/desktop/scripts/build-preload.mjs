@@ -15,5 +15,6 @@ await build({
     "@uclaw/shared/dist/task-artifacts.js": fileURLToPath(new URL("../../shared/dist/task-artifacts.js", import.meta.url)),
     "@uclaw/shared/dist/system-node.js": fileURLToPath(new URL("../../shared/dist/system-node.js", import.meta.url)),
     "@uclaw/shared/dist/system-voice.js": fileURLToPath(new URL("../../shared/dist/system-voice.js", import.meta.url)),
+    "@uclaw/shared/dist/product-services.js": fileURLToPath(new URL("../../shared/dist/product-services.js", import.meta.url)),
   },
 });

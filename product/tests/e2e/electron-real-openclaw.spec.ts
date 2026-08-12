@@ -175,9 +175,15 @@ test("production Electron persists real OpenClaw sessions and Provider configura
     await expect(restartedWindow.getByRole("region", { name: "语音与通知" })).toBeVisible();
     await expect(restartedWindow.getByRole("button", { name: "创建客户端 Talk 会话" })).toBeVisible();
 
+    await restartedWindow.getByRole("tab", { name: "产品授权" }).click();
+    await expect(restartedWindow.getByRole("region", { name: "产品授权" })).toBeVisible();
+    await expect(restartedWindow.getByRole("alert")).toContainText("PRODUCT_SERVICES_NOT_CONFIGURED");
+    await expect(restartedWindow.getByRole("button", { name: /制盘|开户|撤销|重制/ })).toHaveCount(0);
+
     await restartedWindow.getByRole("button", { name: "打开任务活动中心" }).click();
-    await expect(restartedWindow.getByRole("region", { name: "Task 活动中心" })).toBeVisible();
-    await expect(restartedWindow.getByRole("alert")).toContainText("not supported", { timeout: 10_000 });
+    const taskCenter = restartedWindow.getByRole("region", { name: "Task 活动中心" });
+    await expect(taskCenter).toBeVisible();
+    await expect(taskCenter.getByRole("alert")).toContainText("not supported", { timeout: 10_000 });
 
     await restartedWindow.getByRole("link", { name: "自动化" }).click();
     await expect(restartedWindow.getByRole("button", { name: "查看 Agent smoke-agent" })).toBeVisible();
