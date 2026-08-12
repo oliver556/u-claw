@@ -40,6 +40,11 @@ import {
   type SessionAdvancedIpcRequest,
   type UsageIpcRequest,
 } from "@uclaw/shared";
+import {
+  AutomationIpcRequestSchema,
+  AutomationIpcResponseSchema,
+  type AutomationIpcRequest,
+} from "@uclaw/shared/dist/automation.js";
 
 import {
   CLIENT_IPC_CHANNEL,
@@ -57,6 +62,7 @@ import {
   RELEASE_IPC_CHANNEL,
   SESSION_ADVANCED_IPC_CHANNEL,
   USAGE_IPC_CHANNEL,
+  AUTOMATION_IPC_CHANNEL,
 } from "./channels.js";
 
 export interface ContextBridgeLike {
@@ -183,6 +189,12 @@ export function installPreloadBridge({
     }
     return response;
   };
+  const invokeAutomation = async (payload: unknown) => {
+    const request = AutomationIpcRequestSchema.parse(payload);
+    const response = AutomationIpcResponseSchema.parse(await ipcRenderer.invoke(AUTOMATION_IPC_CHANNEL, request));
+    if (response.method !== request.method || response.requestId !== request.requestId) throw new Error("IPC response does not match its request.");
+    return response;
+  };
   const invokeDiagnostics = async (payload: unknown) => {
     const request = DiagnosticsIpcRequestSchema.parse(payload);
     const response = DiagnosticsIpcResponseSchema.parse(await ipcRenderer.invoke(DIAGNOSTICS_IPC_CHANNEL, request));
@@ -232,6 +244,7 @@ export function installPreloadBridge({
     mcp: Object.freeze({ invoke: invokeMcp as (request: McpIpcRequest) => Promise<unknown> }),
     sessionAdvanced: Object.freeze({ invoke: invokeSessionAdvanced as (request: SessionAdvancedIpcRequest) => Promise<unknown> }),
     usage: Object.freeze({ invoke: invokeUsage as (request: UsageIpcRequest) => Promise<unknown> }),
+    automation: Object.freeze({ invoke: invokeAutomation as (request: AutomationIpcRequest) => Promise<unknown> }),
     data: Object.freeze({ invoke: invokeData as (request: DataIpcRequest) => Promise<unknown> }),
     diagnostics: Object.freeze({ invoke: invokeDiagnostics as (request: DiagnosticsIpcRequest) => Promise<unknown> }),
     release: Object.freeze({ invoke: invokeRelease as (request: ReleaseIpcRequest) => Promise<unknown> }),

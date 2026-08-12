@@ -10,10 +10,10 @@ const AgentPath = z.object({ agentId: Id, path: SafePath }).strict();
 export const AgentSummarySchema = z.object({ id: Id, name: z.string().min(1).optional(), workspace: z.string().optional(), model: z.string().optional() }).passthrough();
 export const AgentIdentitySchema = z.object({ agentId: Id, name: z.string().optional(), emoji: z.string().optional(), avatar: z.string().optional() }).passthrough();
 export const AgentFileSchema = z.object({ name: z.string().min(1), path: z.string().min(1), missing: z.boolean().optional(), size: z.number().int().nonnegative().optional(), updatedAtMs: z.number().int().nonnegative().optional(), content: z.string().optional() }).passthrough();
-export const WorkspaceEntrySchema = z.object({ name: z.string().min(1), path: z.string().min(1), kind: z.enum(["file", "directory"]), size: z.number().int().nonnegative().optional(), updatedAtMs: z.number().int().nonnegative().optional(), content: z.string().optional(), mimeType: z.string().optional(), dataBase64: z.string().optional() }).passthrough();
+export const AgentWorkspaceEntrySchema = z.object({ name: z.string().min(1), path: z.string().min(1), kind: z.enum(["file", "directory"]), size: z.number().int().nonnegative().optional(), updatedAtMs: z.number().int().nonnegative().optional(), content: z.string().optional(), mimeType: z.string().optional(), dataBase64: z.string().optional() }).passthrough();
 export type AgentSummary = z.infer<typeof AgentSummarySchema>;
 export type AgentFile = z.infer<typeof AgentFileSchema>;
-export type WorkspaceEntry = z.infer<typeof WorkspaceEntrySchema>;
+export type AgentWorkspaceEntry = z.infer<typeof AgentWorkspaceEntrySchema>;
 
 export const CronScheduleSchema = z.union([
   z.object({ kind: z.literal("cron"), expression: z.string().min(1), tz: z.string().optional() }).passthrough(),

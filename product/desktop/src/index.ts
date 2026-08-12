@@ -40,4 +40,6 @@ export * from "./skills/skill-service.js";
 export * from "./skills/skill-dispatcher.js";
 export * from "./usage/usage-dispatcher.js";
 export * from "./usage/usage-domain.js";
+export * from "./automation/automation-dispatcher.js";
+export * from "./automation/automation-domain.js";
 export * from "./window.js";

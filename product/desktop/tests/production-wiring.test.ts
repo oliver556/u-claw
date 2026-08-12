@@ -13,7 +13,7 @@ import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fi
 
 class ScriptedWebSocket {
   static instances: ScriptedWebSocket[] = [];
-  static outcome: "success" | "usage" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
+  static outcome: "success" | "usage" | "automation" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
   static skillDisabled = false;
   static selectedModel: { sessionId: string; providerId: string; model: string } | undefined;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -38,6 +38,10 @@ class ScriptedWebSocket {
   send(data: string): void {
     const frame = JSON.parse(data) as Record<string, unknown>;
     this.sent.push(frame);
+    if (frame.method === "agents.list") {
+      queueMicrotask(() => this.respond(frame, { agents: [{ id: "main", name: "Main" }] }));
+      return;
+    }
     if (frame.method === "usage.status") {
       queueMicrotask(() => this.respond(frame, { updatedAt: 100, providers: [] }));
       return;
@@ -173,6 +177,8 @@ class ScriptedWebSocket {
               ? ["sessions.list", "chat.history", "chat.send"]
               : ScriptedWebSocket.outcome === "usage"
                 ? ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send", "usage.status", "usage.cost", "sessions.usage", "sessions.usage.timeseries", "sessions.usage.logs"]
+                : ScriptedWebSocket.outcome === "automation"
+                  ? ["sessions.list", "sessions.describe", "chat.history", "chat.send", "agents.list", "agent.identity.get", "agents.create", "agents.update", "agents.delete", "agents.files.list", "agents.files.get", "agents.files.set", "agents.workspace.list", "agents.workspace.get", "cron.list", "cron.status", "cron.get", "cron.add", "cron.update", "cron.remove", "cron.run", "cron.runs"]
                 : ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send"],
             events: ["chat"],
           },
@@ -492,6 +498,26 @@ describe("production desktop wiring", () => {
     ]));
 
     disposeUsage();
+    await options.dispose?.();
+  });
+
+  it("registers production Agent/Cron IPC and dispatches through OpenClaw", async () => {
+    ScriptedWebSocket.outcome = "automation";
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
+    const options = await createDesktopMainOptions(productionEnv);
+    options.buildGatewayLaunchOptions(18801);
+    await options.probeCapabilities(18801, new AbortController().signal);
+    const automation = options.domainRegistrations!.resolve("automation") as {
+      installIpc(context: { ipcMain: { handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void; removeHandler(channel: string): void }; authorizedWebContents: { mainFrame: unknown } }): () => void;
+    } | undefined;
+    expect(automation).toBeDefined();
+    const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const frame = {};
+    const webContents = { mainFrame: frame };
+    const disposeAutomation = automation!.installIpc({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: (channel) => { handlers.delete(channel); } }, authorizedWebContents: webContents });
+    await expect(handlers.get("uclaw:automation")!({ sender: webContents, senderFrame: frame }, { method: "agents.list", requestId: "automation-production-1", params: {} })).resolves.toMatchObject({ ok: true, result: { agents: [{ id: "main", name: "Main" }] } });
+    expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([expect.objectContaining({ method: "agents.list", params: {} })]));
+    disposeAutomation();
     await options.dispose?.();
   });
 

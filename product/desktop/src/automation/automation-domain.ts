@@ -1,5 +1,4 @@
-import { AUTOMATION_IPC_CHANNEL, AutomationIpcRequestSchema } from "@uclaw/shared/dist/automation.js";
-import { UClawErrorSchema } from "@uclaw/shared";
+import { AUTOMATION_IPC_CHANNEL, AutomationIpcRequestSchema, UClawErrorSchema } from "@uclaw/shared";
 import type { RegisteredDesktopDomain } from "../main.js";
 import { toRendererSafeError } from "../ipc/client-dispatcher.js";
 

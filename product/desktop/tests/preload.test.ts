@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  AUTOMATION_IPC_CHANNEL,
   CLIENT_IPC_CHANNEL,
   CLIENT_IPC_EVENT_CHANNEL,
   IPC_CHANNELS,
@@ -15,6 +16,7 @@ import { installPreloadBridge } from "../src/ipc/preload-bridge.js";
 describe("installPreloadBridge", () => {
   it("registers release in the fixed IPC channel inventory", () => {
     expect(IPC_CHANNELS).toContain(RELEASE_IPC_CHANNEL);
+    expect(IPC_CHANNELS).toContain(AUTOMATION_IPC_CHANNEL);
   });
 
   it("exposes only fixed window and client contract methods", async () => {
@@ -41,7 +43,7 @@ describe("installPreloadBridge", () => {
       ipcRenderer: { invoke, on, removeListener },
     });
 
-    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "sessionAdvanced", "usage", "data", "diagnostics", "release"]);
+    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "sessionAdvanced", "usage", "automation", "data", "diagnostics", "release"]);
     expect(api).not.toHaveProperty("ipcRenderer");
     expect(api).not.toHaveProperty("invoke");
     expect(Object.keys(api?.client as object)).toEqual(["invoke", "subscribe"]);
@@ -53,6 +55,7 @@ describe("installPreloadBridge", () => {
     expect(Object.keys(api?.mcp as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.sessionAdvanced as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.usage as object)).toEqual(["invoke"]);
+    expect(Object.keys(api?.automation as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.data as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.diagnostics as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.release as object)).toEqual(["invoke"]);
@@ -77,6 +80,9 @@ describe("installPreloadBridge", () => {
       params: { sessionKey: "agent:main:session-1" },
     });
     expect(invoke).toHaveBeenLastCalledWith(USAGE_IPC_CHANNEL, expect.any(Object));
+
+    await (api?.automation as { invoke: (request: unknown) => Promise<unknown> }).invoke({ method: "agents.list", requestId: "automation-1", params: {} });
+    expect(invoke).toHaveBeenLastCalledWith(AUTOMATION_IPC_CHANNEL, expect.any(Object));
 
     await expect((api?.usage as { invoke: (request: unknown) => Promise<unknown> }).invoke({
       method: "usage.session-logs",
