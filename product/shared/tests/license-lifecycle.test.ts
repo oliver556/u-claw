@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createPublicKey, verify } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +11,15 @@ const fixture = JSON.parse(readFileSync(resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../tests/fixtures/license-lifecycle-v1.json",
 ), "utf8")) as Record<string, unknown>;
+const signingGolden = JSON.parse(readFileSync(resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "fixtures/license-signing-golden.json",
+), "utf8")) as {
+  payload: Record<string, string | number>;
+  canonical: string;
+  publicKey: string;
+  signature: string;
+};
 
 describe("license lifecycle v1 contract", () => {
   it("exports six explicit lifecycle states and strict safe status shapes", () => {
@@ -53,6 +63,7 @@ describe("license lifecycle v1 contract", () => {
       },
       license: {
         schemaVersion: 1,
+        usernameId: "usr_fixture_001",
         deviceId: "dev_fixture_001",
         licenseId: "lic_fixture_001",
         usbFingerprint: { scheme: "uclaw-usb-v1", sha256: "a".repeat(64) },
@@ -61,8 +72,9 @@ describe("license lifecycle v1 contract", () => {
           startupSecretSalt: "b".repeat(32),
           startupSecretHash: "c".repeat(64),
         },
-        notBefore: "2026-08-10T00:00:00.000Z",
-        expiresAt: "2027-08-10T00:00:00.000Z",
+        notBefore: "2026-08-10T00:00:00Z",
+        expiresAt: "2027-08-10T00:00:00Z",
+        revision: 1,
         signature: { algorithm: "ed25519", keyId: "fixture-key", value: "d".repeat(88) },
       },
     });
@@ -77,5 +89,26 @@ describe("license lifecycle v1 contract", () => {
     expect(shared.LicenseLifecycleErrorBodySchema.parse({
       error: { category: "status", code: "LICENSE_REVOKED", message: "许可证已撤销。", retryable: false },
     })).toBeTruthy();
+  });
+
+  it("rebuilds and verifies the cross-language signing golden", () => {
+    const payload = signingGolden.payload;
+    const canonical = JSON.stringify([
+      "uclaw-startup-license-v1", payload.schemaVersion, payload.keyId, payload.usernameId,
+      payload.deviceId, payload.licenseId, payload.usbFingerprintVersion, payload.usbFingerprintSha256,
+      payload.startupSecretSalt, payload.startupSecretHash, payload.notBefore, payload.expiresAt, payload.revision,
+    ]);
+    expect(canonical).toBe(signingGolden.canonical);
+    const rawPublicKey = Buffer.from(signingGolden.publicKey, "base64");
+    const spkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
+    const publicKey = createPublicKey({ key: Buffer.concat([spkiPrefix, rawPublicKey]), format: "der", type: "spki" });
+    expect(verify(null, Buffer.from(canonical), publicKey, Buffer.from(signingGolden.signature, "base64"))).toBe(true);
+    expect(() => shared.StartupLicenseArtifactSchema.parse({
+      schemaVersion: 1, usernameId: payload.usernameId, deviceId: payload.deviceId, licenseId: payload.licenseId,
+      usbFingerprint: { scheme: payload.usbFingerprintVersion, sha256: payload.usbFingerprintSha256 },
+      startupSecretProof: { algorithm: "sha256-salt-v1", startupSecretSalt: payload.startupSecretSalt, startupSecretHash: payload.startupSecretHash },
+      notBefore: "2026-08-10T00:00:00.000Z", expiresAt: payload.expiresAt, revision: payload.revision,
+      signature: { algorithm: "ed25519", keyId: payload.keyId, value: signingGolden.signature },
+    })).toThrow();
   });
 });

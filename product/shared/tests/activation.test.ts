@@ -38,6 +38,7 @@ describe("activation API contract", () => {
       licenseId: "lic_fixture_001",
       license: {
         schemaVersion: 1,
+        usernameId: "usr_fixture_001",
         deviceId: "dev_fixture_001",
         licenseId: "lic_fixture_001",
         usbFingerprint: { scheme: "uclaw-usb-v1", sha256: "a".repeat(64) },
@@ -46,8 +47,9 @@ describe("activation API contract", () => {
           startupSecretSalt: "b".repeat(32),
           startupSecretHash: "c".repeat(64),
         },
-        notBefore: "2026-08-13T00:00:00.000Z",
-        expiresAt: "2027-08-13T00:00:00.000Z",
+        notBefore: "2026-08-13T00:00:00Z",
+        expiresAt: "2027-08-13T00:00:00Z",
+        revision: 1,
         signature: { algorithm: "ed25519", keyId: "fixture-key", value: "d".repeat(88) },
       },
       startupCredential: {
