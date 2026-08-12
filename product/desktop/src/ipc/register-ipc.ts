@@ -65,6 +65,7 @@ export interface IpcMainLike {
 export interface AuthorizedWebContents {
   mainFrame: unknown;
   send?(channel: string, payload: unknown): void;
+  executeJavaScript?(code: string, userGesture?: boolean): Promise<unknown>;
 }
 
 export interface WindowControls {

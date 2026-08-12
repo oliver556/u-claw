@@ -2,6 +2,7 @@ export * from "./attachments.js";
 export * from "./automation.js";
 export * from "./task-artifacts.js";
 export * from "./system-node.js";
+export * from "./system-voice.js";
 export * from "./activity.js";
 export * from "./builtin-service-operations.js";
 export * from "./chat.js";

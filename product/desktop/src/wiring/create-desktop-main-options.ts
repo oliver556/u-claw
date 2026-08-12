@@ -49,6 +49,8 @@ import { createTaskArtifactDispatcher } from "../task-artifacts/task-artifact-di
 import { createTaskArtifactDomainRegistration } from "../task-artifacts/task-artifact-domain.js";
 import { createTaskArtifactFileService } from "../task-artifacts/task-artifact-files.js";
 import { createProductionSystemNodeDomain } from "../system-node/production-system-node.js";
+import { createProductionSystemVoiceDomain, createProductionTalkRunBridge, playSecureTemporaryAudio } from "../system-voice/production-system-voice.js";
+import type { AuthorizedWebContents } from "../ipc/register-ipc.js";
 import { createDesktopLogSink } from "../diagnostics/desktop-log-sink.js";
 import { createOpenClawDoctorRuntime } from "../diagnostics/openclaw-doctor-runtime.js";
 import {
@@ -145,6 +147,7 @@ class PortAwareGatewayTransport implements OpenClawTransport {
   private active: GatewayWebSocket | undefined;
   private hello: HelloOk | undefined;
   private readonly eventListeners = new Map<string, Set<(frame: EventFrame) => void>>();
+  private readonly disconnectListeners = new Set<() => void>();
   private eventDisposers: Array<() => void> = [];
 
   constructor(private readonly token: string) {}
@@ -203,9 +206,19 @@ class PortAwareGatewayTransport implements OpenClawTransport {
     };
   }
 
+  onDisconnect(listener: () => void): () => void {
+    this.disconnectListeners.add(listener);
+    this.attachEventListeners();
+    return () => {
+      this.disconnectListeners.delete(listener);
+      this.attachEventListeners();
+    };
+  }
+
   private attachEventListeners(): void {
     for (const dispose of this.eventDisposers.splice(0)) dispose();
     if (!this.active) return;
+    for (const listener of this.disconnectListeners) this.eventDisposers.push(this.active.router.onClose(listener));
     for (const [event, listeners] of this.eventListeners) {
       for (const listener of listeners) this.eventDisposers.push(this.active.router.onEvent(event, listener));
     }
@@ -473,6 +486,62 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     onEvent: (event, listener) => transport.onEvent(event, listener),
     requireMethod: (method) => { if (!gatewayMethods.has(method)) throw new UClawUnsupportedError(method); },
   });
+  let systemVoiceWebContents: AuthorizedWebContents | undefined;
+  const requireSystemVoiceWebContents = () => {
+    if (typeof systemVoiceWebContents?.executeJavaScript !== "function") {
+      throw new DesktopWiringError("UNCONFIGURED", "Authorized Electron voice authority is unavailable.");
+    }
+    return systemVoiceWebContents;
+  };
+  const executeSystemVoice = (source: string, userGesture = false) => requireSystemVoiceWebContents().executeJavaScript!(source, userGesture);
+  const talkRunBridge = createProductionTalkRunBridge({
+    request: (method, params, schema) => transport.router.request(method, params as never, schema),
+    onEvent: (event, listener) => transport.onEvent(event, listener as never),
+  });
+  const systemVoiceDomain = createProductionSystemVoiceDomain({
+    request: (method, params, schema, signal) => transport.router.request(method, params as never, schema, signal),
+    requireMethod: (method) => { if (!gatewayMethods.has(method)) throw new UClawUnsupportedError(method); },
+    permissions: { get: async () => {
+      if (typeof systemVoiceWebContents?.executeJavaScript !== "function") return { microphone: "unknown", notifications: "restricted" };
+      const { systemPreferences, Notification } = await import("electron");
+      const microphone = process.platform === "darwin" || process.platform === "win32"
+        ? systemPreferences.getMediaAccessStatus("microphone")
+        : "unknown";
+      const notificationPermission = await executeSystemVoice("globalThis.Notification?.permission ?? 'unsupported'");
+      const notifications = Notification.isSupported() && ["granted", "denied", "default"].includes(String(notificationPermission))
+        ? notificationPermission === "default" ? "not-determined" : notificationPermission as "granted" | "denied"
+        : "restricted";
+      return { microphone, notifications };
+    } },
+    pushSubscription: {
+      get: async () => {
+        const value = await executeSystemVoice("navigator.serviceWorker?.ready.then(r => r.pushManager.getSubscription()).then(s => s?.toJSON() ?? null) ?? null");
+        return z.object({ endpoint: z.string().url(), keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }).strict() }).strict().nullable().parse(value);
+      },
+      subscribe: async (vapidPublicKey) => {
+        const encodedKey = JSON.stringify(vapidPublicKey);
+        const value = await executeSystemVoice(`navigator.serviceWorker.ready.then(r => r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: ${encodedKey} })).then(s => s.toJSON())`, true);
+        return z.object({ endpoint: z.string().url(), keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }).strict() }).strict().parse(value);
+      },
+      unsubscribe: async () => { await executeSystemVoice("navigator.serviceWorker?.ready.then(r => r.pushManager.getSubscription()).then(s => s?.unsubscribe()) ?? false", true); },
+    },
+    audioOutput: { play: async ({ audioBase64 }) => {
+      if (process.platform !== "darwin") throw new DesktopWiringError("UNAVAILABLE", "Secure TTS audio output is unavailable on this platform.");
+      await playSecureTemporaryAudio(audioBase64, { cacheRoot: environment.cacheRoot, play: (path) => new Promise<void>((resolve, reject) => {
+        const child = spawnChild("/usr/bin/afplay", [path], { stdio: "ignore" });
+        child.once("error", () => reject(new DesktopWiringError("UNAVAILABLE", "Secure TTS audio output failed.")));
+        child.once("close", (code) => code === 0 ? resolve() : reject(new DesktopWiringError("OPERATION_FAILED", "Secure TTS audio output failed.")));
+      })
+      });
+    } },
+    waitForTalkRun: talkRunBridge.waitForTalkRun,
+    abortTalkRun: talkRunBridge.abortTalkRun,
+  }, {
+    bindAuthorizedWebContents: (webContents) => { systemVoiceWebContents = webContents; },
+    onTalkEvent: (listener) => transport.onEvent("talk.event", (frame) => listener(frame.payload)),
+    onDisconnect: (listener) => transport.onDisconnect(listener),
+    clearPendingTalkRuns: talkRunBridge.clearPending,
+  });
   const usageDispatcher = createUsageDispatcher({
     openClaw: createOpenClawUsageService({
       request: (method, params) => transport.router.request(method, params as never, z.unknown()),
@@ -506,6 +575,10 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     {
       name: "system-node",
       register: () => systemNodeDomain,
+    },
+    {
+      name: "system-voice",
+      register: () => systemVoiceDomain,
     },
   ]);
   const dispatcher = createClientDispatcher({ client, sendEvent: () => undefined });

@@ -34,12 +34,12 @@ export const SystemVoiceIpcRequestSchema = z.discriminatedUnion("method", [
 ]);
 export type SystemVoiceIpcRequest = z.infer<typeof SystemVoiceIpcRequestSchema>;
 export type SystemVoiceMethod = SystemVoiceIpcRequest["method"];
-const SensitiveResultKey = /(?:endpoint|auth|p256dh|audioBase64|token|secret|password|credential|api[_-]?key|private[_-]?key|authorization|cookie)/i;
+const SensitiveResultKey = /^(?:endpoint|auth|p256dh|audioBase64|token|secret|password|credential|api[_-]?key|private[_-]?key|authorization|cookie)$/i;
 function rendererSafe(value: unknown): boolean { if (Array.isArray(value)) return value.every(rendererSafe); if (!value || typeof value !== "object") return true; return Object.entries(value).every(([key, entry]) => !SensitiveResultKey.test(key) && rendererSafe(entry)); }
 const RendererSafeResult = z.unknown().refine(rendererSafe, "Sensitive voice or Push result cannot cross renderer IPC");
 export const TalkClientBootstrapSchema = z.object({ provider: Id, transport: z.literal("webrtc"), clientSecret: Id, offerUrl: z.literal("https://api.openai.com/v1/realtime/calls"), offerHeaders: z.record(z.string(), z.string()).optional(), sessionKey: Id, model: Id.optional(), voice: Id.optional(), expiresAt: z.number().optional() }).strict();
 export type TalkClientBootstrap = z.infer<typeof TalkClientBootstrapSchema>;
-export const SystemVoiceIpcResponseSchema = z.union([z.object({ method: z.literal("talk.client.create"), requestId: Id, ok: z.literal(true), result: z.object({ clientBootstrap: TalkClientBootstrapSchema, permissions: SystemVoicePermissionsSchema }).strict() }).strict(), z.object({ method: z.string(), requestId: Id, ok: z.literal(true), result: RendererSafeResult }).strict(), z.object({ method: z.string(), requestId: Id, ok: z.literal(false), error: UClawErrorSchema }).strict()]);
+export const SystemVoiceIpcResponseSchema = z.union([z.object({ method: z.literal("talk.client.create"), requestId: Id, ok: z.literal(true), result: z.object({ clientBootstrap: TalkClientBootstrapSchema, permissions: SystemVoicePermissionsSchema }).strict() }).strict(), z.object({ method: z.string().refine((method) => method !== "talk.client.create"), requestId: Id, ok: z.literal(true), result: RendererSafeResult }).strict(), z.object({ method: z.string(), requestId: Id, ok: z.literal(false), error: UClawErrorSchema }).strict()]);
 export type SystemVoiceIpcResponse = z.infer<typeof SystemVoiceIpcResponseSchema>;
 export const SYSTEM_VOICE_IPC_CHANNEL = "uclaw:system-voice";
 type Params<M extends SystemVoiceMethod> = Extract<SystemVoiceIpcRequest, { method: M }>["params"];

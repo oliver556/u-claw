@@ -4,12 +4,23 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { type z } from "zod";
 
-import { AsyncEventQueue, OpenClawClient, UClawUnsupportedError, type OpenClawTransport } from "../src/openclaw-client.js";
+import { AsyncEventQueue, OPENCLAW_IMPLEMENTED_METHODS, OpenClawClient, UClawUnsupportedError, type OpenClawTransport } from "../src/openclaw-client.js";
 import { AttachmentManager, AttachmentServiceError } from "../src/attachments.js";
 import { ManualClock } from "../src/mock/mock-client.js";
 import { ReconnectPolicy } from "../src/reconnect.js";
 import type { HelloOk } from "../src/transport/gateway-websocket.js";
 import { RpcProtocolError, RpcRemoteError, type EventFrame, type JsonValue } from "../src/transport/rpc-router.js";
+
+describe("P4 system voice capability filter", () => {
+  it("advertises Talk, TTS, Voice Wake, and agent.wait without advertising Push", () => {
+    expect(OPENCLAW_IMPLEMENTED_METHODS).toEqual(expect.arrayContaining([
+      "talk.session.create", "talk.session.close", "talk.client.create", "talk.client.toolCall", "talk.client.steer",
+      "tts.status", "tts.providers", "tts.setProvider", "tts.personas", "tts.setPersona", "tts.speak",
+      "voicewake.get", "voicewake.set", "voicewake.routing.get", "voicewake.routing.set", "agent.wait",
+    ]));
+    expect(OPENCLAW_IMPLEMENTED_METHODS).not.toEqual(expect.arrayContaining(["push.web.subscribe"]));
+  });
+});
 
 class FakeTransport implements OpenClawTransport {
   state = "idle" as const;

@@ -124,6 +124,9 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "environments.list", "environments.status",
   "worktrees.list", "worktrees.create", "worktrees.remove", "worktrees.restore", "worktrees.gc",
   "terminal.list", "terminal.open", "terminal.input", "terminal.resize", "terminal.close", "terminal.attach", "terminal.text",
+  "talk.session.create", "talk.session.close", "talk.client.create", "talk.client.toolCall", "talk.client.steer",
+  "tts.status", "tts.providers", "tts.setProvider", "tts.personas", "tts.setPersona", "tts.speak",
+  "voicewake.get", "voicewake.set", "voicewake.routing.get", "voicewake.routing.set", "agent.wait",
 ] as const;
 
 const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);
@@ -131,6 +134,7 @@ const implementedEvents = new Set([
   "chat", "session.tool", "exec.approval.requested", "plugin.approval.requested",
   "device.pair.requested", "device.pair.resolved", "node.pair.requested", "node.pair.resolved",
   "terminal.data", "terminal.exit",
+  "talk.event",
 ]);
 const MAX_TRACKED_TRACES = 256;
 

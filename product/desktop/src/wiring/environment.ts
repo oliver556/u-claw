@@ -8,6 +8,7 @@ import { findOpenClawEntrypoint } from "../plugins/openclaw-cli-runtime.js";
 export interface DesktopWiringEnvironment {
   runtimeRoot: string;
   dataRoot: string;
+  cacheRoot: string;
   openClawConfig: string;
   openClawEntry: string;
   nodeExecutable: string;
@@ -93,6 +94,7 @@ export async function readDesktopWiringEnvironment(env: NodeJS.ProcessEnv): Prom
   }
   let configPath: string;
   let dataRoot: string;
+  let cacheRoot: string;
   let config: unknown;
   try {
     configPath = await realpath(resolve(rawConfigPath));
@@ -104,6 +106,15 @@ export async function readDesktopWiringEnvironment(env: NodeJS.ProcessEnv): Prom
   } catch (error) {
     if (error instanceof DesktopWiringError) throw error;
     throw new DesktopWiringError("UNCONFIGURED", "OpenClaw configuration is unavailable.");
+  }
+  const rawCacheRoot = env.UCLAW_CACHE_DIR;
+  if (!rawCacheRoot || !isAbsolute(rawCacheRoot) || rawCacheRoot.includes("\0")) {
+    throw new DesktopWiringError("UNCONFIGURED", "Desktop cache root is not configured.");
+  }
+  try {
+    cacheRoot = await realpath(resolve(rawCacheRoot));
+  } catch {
+    throw new DesktopWiringError("UNAVAILABLE", "Desktop cache root is unavailable.");
   }
   const gateway = typeof config === "object" && config !== null && !Array.isArray(config)
     ? (config as Record<string, unknown>).gateway
@@ -123,6 +134,7 @@ export async function readDesktopWiringEnvironment(env: NodeJS.ProcessEnv): Prom
   return {
     runtimeRoot,
     dataRoot,
+    cacheRoot,
     openClawConfig: configPath,
     openClawEntry,
     nodeExecutable,

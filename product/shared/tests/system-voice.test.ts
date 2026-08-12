@@ -21,5 +21,6 @@ describe("system voice contract", () => {
     expect(() => SystemVoiceIpcRequestSchema.parse({ method: "talk.session.create", requestId: "1", params: { microphoneGranted: true } })).toThrow();
     expect(() => SystemVoiceIpcRequestSchema.parse({ method: "push.web.subscribe", requestId: "2", params: { endpoint: "https://push.example/secret" } })).toThrow();
     expect(() => SystemVoiceIpcResponseSchema.parse({ method: "push.web.subscribe", requestId: "2", ok: true, result: { endpoint: "https://push.example/secret", auth: "secret" } })).toThrow();
+    expect(() => SystemVoiceIpcResponseSchema.parse({ method: "talk.client.create", requestId: "3", ok: true, result: { clientSecret: "bypass" } })).toThrow();
   });
 });
