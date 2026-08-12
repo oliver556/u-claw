@@ -27,6 +27,10 @@ import { createWechatPersonalRuntime } from "../channels/wechat-personal-runtime
 import { createOpenClawQrRenderer } from "../channels/wechat-qr-renderer.js";
 import { createOpenClawProviderConfigBackend } from "../providers/openclaw-provider-config.js";
 import { createOpenClawProviderExecutor } from "../providers/openclaw-provider-executor.js";
+import {
+  bootstrapDevelopmentProvider,
+  readDevelopmentProvider,
+} from "../providers/development-provider-bootstrap.js";
 import { createProviderStore, type ProviderStore } from "../providers/provider-store.js";
 import {
   applyProviderNetworkEnvironment,
@@ -400,6 +404,7 @@ async function resolveBundledSkillsRoot(env: NodeJS.ProcessEnv): Promise<string>
 
 export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<DesktopMainOptions> {
   const environment = await readDesktopWiringEnvironment(env);
+  const developmentProvider = readDevelopmentProvider(env);
   const bundledSkillsRoot = await resolveBundledSkillsRoot(env);
   const domains = new ProductionDomainRegistry();
   const attachments = new AttachmentManager();
@@ -598,6 +603,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   ]);
   const dispatcher = createClientDispatcher({ client, sendEvent: () => undefined });
   let disposed = false;
+  let developmentProviderReady = false;
 
   return {
     spawn: (executable, args, options) => {
@@ -630,6 +636,10 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
         taskArtifactContractAvailable = transport.serverVersion !== "2026.7.1-2";
         if (!REQUIRED_GATEWAY_METHODS.every((method) => methods.has(method))) {
           throw new DesktopWiringError("UNSUPPORTED", "Gateway is missing required methods.");
+        }
+        if (!developmentProviderReady) {
+          await bootstrapDevelopmentProvider(providers, developmentProvider);
+          developmentProviderReady = true;
         }
         return { helloOk: true, methods: [...methods] };
       } catch (error) {
