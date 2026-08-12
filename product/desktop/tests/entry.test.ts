@@ -83,8 +83,10 @@ describe("Electron production entry", () => {
     });
 
     await runElectronEntry({
+      argv: ["electron", "app", "--uclaw-startup-mode=normal"],
       preparePortableDesktop,
       loadOptions,
+      startActivationMain: vi.fn(),
       startElectronMain,
     });
 
@@ -92,6 +94,47 @@ describe("Electron production entry", () => {
     expect(startElectronMain).toHaveBeenCalledOnce();
     expect(startElectronMain).toHaveBeenCalledWith(options, portablePaths);
     expect(calls).toEqual(["portable", "wiring"]);
+  });
+
+  it("starts activation-only without loading normal desktop options", async () => {
+    const portablePaths = { dataDir: "/portable/data" } as PortableDesktopPaths;
+    const loadOptions = vi.fn();
+    const startElectronMain = vi.fn();
+    const startActivationMain = vi.fn(async () => undefined);
+
+    await runElectronEntry({
+      argv: ["electron", "app", "--uclaw-startup-mode=activation-only"],
+      preparePortableDesktop: vi.fn(async () => portablePaths),
+      loadOptions,
+      startElectronMain,
+      startActivationMain,
+    });
+
+    expect(startActivationMain).toHaveBeenCalledWith(portablePaths);
+    expect(loadOptions).not.toHaveBeenCalled();
+    expect(startElectronMain).not.toHaveBeenCalled();
+  });
+
+  it("does not statically load normal production wiring from the entry module", async () => {
+    const source = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(new URL("../src/entry.ts", import.meta.url), "utf8"));
+
+    expect(source).not.toMatch(/^import .*create-desktop-main-options/m);
+    expect(source).toContain("await import(\"./wiring/create-desktop-main-options.js\")");
+  });
+
+  it("fails closed before preparing runtime when Launcher mode is missing", async () => {
+    const preparePortableDesktop = vi.fn();
+
+    await expect(runElectronEntry({
+      argv: ["electron", "app"],
+      preparePortableDesktop,
+      loadOptions: vi.fn(),
+      startElectronMain: vi.fn(),
+      startActivationMain: vi.fn(),
+    })).rejects.toThrow("missing");
+
+    expect(preparePortableDesktop).not.toHaveBeenCalled();
   });
 
   it("uses the repository production factory when no test wiring module is configured", async () => {
