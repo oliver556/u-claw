@@ -115,3 +115,24 @@ func TestHealthReadyFailsClosedWithMissingCheck(t *testing.T) {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusServiceUnavailable)
 	}
 }
+
+func TestReadinessRequiresEveryConfiguredDependency(t *testing.T) {
+	calls := 0
+	checks := []ReadinessCheck{
+		func(context.Context) error { calls++; return nil },
+		func(context.Context) error { calls++; return nil },
+		func(context.Context) error { calls++; return nil },
+		func(context.Context) error { calls++; return nil },
+	}
+	response := httptest.NewRecorder()
+	NewHealthHandler(checks...).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+	if response.Code != http.StatusOK || calls != 4 {
+		t.Fatalf("status=%d calls=%d", response.Code, calls)
+	}
+	checks[2] = func(context.Context) error { return errors.New("status signer unavailable") }
+	response = httptest.NewRecorder()
+	NewHealthHandler(checks...).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d", response.Code)
+	}
+}

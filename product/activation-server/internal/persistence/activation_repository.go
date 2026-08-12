@@ -197,6 +197,59 @@ func (repository *ActivationRepository) CompleteBinding(ctx context.Context, inp
 	return record, nil
 }
 
+func (repository *ActivationRepository) CommitActivation(ctx context.Context, input activation.CommitInput) error {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin activation commit: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var stage string
+	var commitKey *string
+	var generation *int64
+	err = tx.QueryRow(ctx, `SELECT stage,commit_idempotency_key,artifact_generation FROM activation_attempts WHERE activation_id=$1 FOR UPDATE`, input.ActivationID).
+		Scan(&stage, &commitKey, &generation)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return activation.ErrActivationInvalid
+	}
+	if err != nil {
+		return fmt.Errorf("load activation commit: %w", err)
+	}
+	if err := validateCommitReplay(stage, commitKey, generation, input); err != nil {
+		return err
+	}
+	if stage == "committed" {
+		if commitKey != nil && generation != nil {
+			return tx.Commit(ctx)
+		}
+	}
+	if stage != "server_bound" {
+		return activation.ErrActivationInProgress
+	}
+	result, err := tx.Exec(ctx, `UPDATE activation_attempts SET stage='committed',artifact_generation=$1,
+		commit_idempotency_key=$2,committed_at=clock_timestamp(),updated_at=clock_timestamp()
+		WHERE activation_id=$3 AND stage='server_bound'`, input.ArtifactGeneration, input.IdempotencyKey, input.ActivationID)
+	if err != nil {
+		return fmt.Errorf("commit activation attempt: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return activation.ErrActivationInProgress
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit activation transaction: %w", err)
+	}
+	return nil
+}
+
+func validateCommitReplay(stage string, commitKey *string, generation *int64, input activation.CommitInput) error {
+	if stage != "committed" {
+		return nil
+	}
+	if commitKey == nil || generation == nil || *commitKey != input.IdempotencyKey || *generation != input.ArtifactGeneration {
+		return activation.ErrIdempotencyConflict
+	}
+	return nil
+}
+
 func resumeExisting(ctx context.Context, tx pgx.Tx, input activation.BeginBindingInput, existing activation.BoundRecord) (activation.BeginBindingResult, error) {
 	if !bytes.Equal(existing.RequestFingerprint[:], input.Record.RequestFingerprint[:]) {
 		return activation.BeginBindingResult{}, activation.ErrIdempotencyConflict
