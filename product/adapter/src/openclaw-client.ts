@@ -118,11 +118,19 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "cron.list", "cron.status", "cron.get", "cron.add", "cron.update", "cron.remove", "cron.run", "cron.runs",
   "tasks.list", "tasks.get", "tasks.cancel", "tasks.retry",
   "artifacts.list", "artifacts.get", "artifacts.download",
+  "device.pair.list", "device.pair.approve", "device.pair.reject", "device.pair.remove",
+  "device.token.rotate", "device.token.revoke",
+  "node.list", "node.describe", "node.rename", "node.pair.list", "node.pair.approve", "node.pair.reject", "node.pair.remove", "node.invoke",
+  "environments.list", "environments.status",
+  "worktrees.list", "worktrees.create", "worktrees.remove", "worktrees.restore", "worktrees.gc",
+  "terminal.list", "terminal.open", "terminal.input", "terminal.resize", "terminal.close", "terminal.attach", "terminal.text",
 ] as const;
 
 const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);
 const implementedEvents = new Set([
   "chat", "session.tool", "exec.approval.requested", "plugin.approval.requested",
+  "device.pair.requested", "device.pair.resolved", "node.pair.requested", "node.pair.resolved",
+  "terminal.data", "terminal.exit",
 ]);
 const MAX_TRACKED_TRACES = 256;
 

@@ -52,7 +52,7 @@ export function SystemNodeManager({ bridge }: { bridge?: SystemNodeBridge }) {
     if (event.event === "terminal.exit") { terminalSeq.current.delete(event.payload.sessionId); if (event.payload.sessionId === terminalId) setTerminalText(""); void refresh("terminal"); }
   }), [bridge, refresh, terminalId]);
   useEffect(() => () => { terminalSeq.current.clear(); setTerminalText(""); setTerminalInput(""); }, []);
-  if (!bridge) return <div className="empty-panel"><Cpu /><strong>设备与运行 RPC 未配置</strong></div>;
+  if (!bridge) return <section className="system-node-manager" aria-label="设备与运行"><div className="empty-panel"><Cpu /><strong>设备与运行 RPC 未配置</strong></div></section>;
   const switchView = (next: View) => { setView(next); setError(undefined); };
   const readbackDevices = (value: unknown) => { const next = authority(value); setDevices({ pending: rows(next, "pending"), paired: rows(next, "paired") }); };
   const mutateDevice = (method: "device.pair.approve" | "device.pair.reject", requestId: string) => run(async () => readbackDevices(await call(method, { requestId })));

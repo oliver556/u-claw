@@ -13,6 +13,8 @@ export const USAGE_IPC_CHANNEL = "uclaw:usage";
 export const AUTOMATION_IPC_CHANNEL = "uclaw:automation";
 export const TASK_ARTIFACT_IPC_CHANNEL = "uclaw:task-artifacts";
 export const TASK_ARTIFACT_EVENT_CHANNEL = "uclaw:task-artifact-event";
+export const SYSTEM_NODE_IPC_CHANNEL = "uclaw:system-node";
+export const SYSTEM_NODE_IPC_EVENT_CHANNEL = "uclaw:system-node-event";
 export const DATA_IPC_CHANNEL = "uclaw:data";
 export const DIAGNOSTICS_IPC_CHANNEL = "uclaw:diagnostics";
 export const RELEASE_IPC_CHANNEL = "uclaw:release";
@@ -33,6 +35,8 @@ export const IPC_CHANNELS = Object.freeze([
   AUTOMATION_IPC_CHANNEL,
   TASK_ARTIFACT_IPC_CHANNEL,
   TASK_ARTIFACT_EVENT_CHANNEL,
+  SYSTEM_NODE_IPC_CHANNEL,
+  SYSTEM_NODE_IPC_EVENT_CHANNEL,
   DATA_IPC_CHANNEL,
   DIAGNOSTICS_IPC_CHANNEL,
   RELEASE_IPC_CHANNEL,

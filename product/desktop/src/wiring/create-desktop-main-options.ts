@@ -48,6 +48,7 @@ import { createAutomationDomainRegistration } from "../automation/automation-dom
 import { createTaskArtifactDispatcher } from "../task-artifacts/task-artifact-dispatcher.js";
 import { createTaskArtifactDomainRegistration } from "../task-artifacts/task-artifact-domain.js";
 import { createTaskArtifactFileService } from "../task-artifacts/task-artifact-files.js";
+import { createProductionSystemNodeDomain } from "../system-node/production-system-node.js";
 import { createDesktopLogSink } from "../diagnostics/desktop-log-sink.js";
 import { createOpenClawDoctorRuntime } from "../diagnostics/openclaw-doctor-runtime.js";
 import {
@@ -62,6 +63,15 @@ const REQUIRED_GATEWAY_METHODS = [
   "chat.history",
   "chat.send",
 ] as const;
+
+const GATEWAY_ENV_KEYS = [
+  "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL",
+  "OPENCLAW_CONFIG_PATH", "OPENCLAW_STATE_DIR",
+] as const;
+
+function createGatewayEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(GATEWAY_ENV_KEYS.flatMap((key) => env[key] === undefined ? [] : [[key, env[key]]]));
+}
 
 class ProductionDomainRegistry implements DesktopDomainRegistry {
   private readonly registrations = new Map<string, RegisteredDesktopDomain>();
@@ -458,6 +468,11 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     },
   });
   const taskArtifactDispatcher = createTaskArtifactDispatcher(taskArtifactAuthority, taskArtifactFiles);
+  const systemNodeDomain = createProductionSystemNodeDomain({
+    request: (method, params, schema, signal) => transport.router.request(method, params as never, schema, signal),
+    onEvent: (event, listener) => transport.onEvent(event, listener),
+    requireMethod: (method) => { if (!gatewayMethods.has(method)) throw new UClawUnsupportedError(method); },
+  });
   const usageDispatcher = createUsageDispatcher({
     openClaw: createOpenClawUsageService({
       request: (method, params) => transport.router.request(method, params as never, z.unknown()),
@@ -488,6 +503,10 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
       name: "task-artifacts",
       register: () => createTaskArtifactDomainRegistration(taskArtifactAuthority, taskArtifactDispatcher),
     },
+    {
+      name: "system-node",
+      register: () => systemNodeDomain,
+    },
   ]);
   const dispatcher = createClientDispatcher({ client, sendEvent: () => undefined });
   let disposed = false;
@@ -509,9 +528,8 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
         args: [environment.openClawEntry, "gateway", "run", "--port", String(port), "--auth", "token", "--ws-log", "compact"],
         cwd: environment.runtimeRoot,
         env: applyProviderNetworkEnvironment({
-          ...env,
+          ...createGatewayEnvironment(env),
           ...(environment.electronRunAsNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
-          OPENCLAW_GATEWAY_TOKEN: environment.gatewayToken,
         }, providerNetworkSettings),
       };
     },
