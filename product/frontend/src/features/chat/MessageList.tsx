@@ -18,8 +18,7 @@ interface MessageListProps {
 
 function MessageFrame({ message }: { message: Message }) {
   const assistant = message.role === "assistant";
-  return <article className={`message ${assistant ? "assistant-message" : "user-message"}`}>
-    <header>{assistant ? <span className="brand-mark compact"><i /><i /><i /></span> : <span className="avatar">李</span>}<strong>{assistant ? "U-Claw" : "你"}</strong>{message.model ? <small>{message.model.label}</small> : null}</header>
+  return <article className={`message ${assistant ? "assistant-message" : "user-message"}`} aria-label={assistant ? "助手消息" : "用户消息"}>
     <MessageContent blocks={message.blocks} />
   </article>;
 }
@@ -37,8 +36,7 @@ export function MessageList({ messages, stream, pendingApprovals, pendingTools, 
         {run.tools.map((tool) => <ToolRun key={tool.id} tool={tool} />)}
         {run.approvals.map((approval) => <ApprovalCard key={approval.id} approval={approval} canResolve={approvalCapabilities?.[approval.family] ?? canResolveApprovals} onResolve={onResolveApproval} />)}
       </Fragment>;
-      return <article className="message assistant-message" key={runId}>
-        <header><span className="brand-mark compact"><i /><i /><i /></span><strong>U-Claw</strong><small>{run.terminal === "aborted" ? "已停止" : run.terminal === "error" ? "失败" : "生成中"}</small></header>
+      return <article className="message assistant-message" aria-label={`助手消息，${run.terminal === "aborted" ? "已停止" : run.terminal === "error" ? "失败" : "生成中"}`} key={runId}>
         {run.text ? <MessageContent blocks={[{ id: `${runId}-stream`, type: "text", text: run.text, format: "markdown" }]} /> : null}
         {run.tools.map((tool) => <ToolRun key={tool.id} tool={tool} />)}
         {run.approvals.map((approval) => <ApprovalCard key={approval.id} approval={approval} canResolve={approvalCapabilities?.[approval.family] ?? canResolveApprovals} onResolve={onResolveApproval} />)}
