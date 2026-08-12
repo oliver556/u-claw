@@ -768,13 +768,15 @@ func TestRunWaitsForProcessAfterStopTimeout(t *testing.T) {
 
 func TestStateTextUsesFixedChineseStatus(t *testing.T) {
 	want := map[State]string{
-		StateStarting:          "正在启动 U-Claw...",
-		StateValidatingUSB:     "正在检查 U 盘数据目录...",
-		StateValidatingLicense: "正在验证启动授权...",
-		StateCheckingRuntime:   "正在检查运行环境...",
-		StateExtractingRuntime: "首次启动，正在准备运行环境...",
-		StateStartingApp:       "正在打开 U-Claw...",
-		StateReady:             "U-Claw 已就绪。",
+		StateStarting:           "正在启动 U-Claw...",
+		StateActivationRequired: "需要先激活 U-Claw。",
+		StateStartingActivation: "正在打开激活窗口...",
+		StateValidatingUSB:      "正在检查 U 盘数据目录...",
+		StateValidatingLicense:  "正在验证启动授权...",
+		StateCheckingRuntime:    "正在检查运行环境...",
+		StateExtractingRuntime:  "首次启动，正在准备运行环境...",
+		StateStartingApp:        "正在打开 U-Claw...",
+		StateReady:              "U-Claw 已就绪。",
 	}
 	for state, text := range want {
 		if got := stateText(state); got != text {
