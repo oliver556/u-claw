@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { UClawErrorSchema } from "./errors.js";
+import { RendererSafeTextSchema, UClawErrorSchema } from "./errors.js";
 
 export const MCP_CONFIG_VERSION = 1 as const;
 
@@ -167,6 +167,84 @@ export const McpSnapshotSchema = z.object({
 }).strict();
 export type McpSnapshot = z.infer<typeof McpSnapshotSchema>;
 
+const CapabilityIdSchema = z.string().trim().min(1).max(160);
+const CapabilityTextSchema = z.string().trim().min(1).max(500);
+const CapabilityRiskSchema = z.enum(["low", "medium", "high"]);
+const CapabilitySourceSchema = z.enum(["core", "plugin", "channel", "mcp"]);
+const ToolCatalogEntrySchema = z.object({
+  id: CapabilityIdSchema,
+  label: RendererSafeTextSchema.pipe(CapabilityTextSchema),
+  description: RendererSafeTextSchema.pipe(z.string().max(1_000)),
+  source: z.enum(["core", "plugin"]),
+  pluginId: CapabilityIdSchema.optional(),
+  optional: z.boolean().optional(),
+  risk: CapabilityRiskSchema.optional(),
+  tags: z.array(RendererSafeTextSchema.pipe(CapabilityIdSchema)).max(32).optional(),
+  defaultProfiles: z.array(z.enum(["minimal", "coding", "messaging", "full"])).max(4),
+}).strict();
+const EffectiveToolEntrySchema = z.object({
+  id: CapabilityIdSchema,
+  label: RendererSafeTextSchema.pipe(CapabilityTextSchema),
+  description: RendererSafeTextSchema.pipe(z.string().max(1_000)),
+  source: CapabilitySourceSchema,
+  pluginId: CapabilityIdSchema.optional(),
+  channelId: CapabilityIdSchema.optional(),
+  risk: CapabilityRiskSchema.optional(),
+  tags: z.array(RendererSafeTextSchema.pipe(CapabilityIdSchema)).max(32).optional(),
+}).strict();
+export const CapabilityToolsSnapshotSchema = z.object({
+  agentId: CapabilityIdSchema,
+  sessionKey: z.string().trim().min(1).max(500),
+  catalog: z.object({
+    groups: z.array(z.object({
+      id: CapabilityIdSchema,
+      label: RendererSafeTextSchema.pipe(CapabilityTextSchema),
+      source: z.enum(["core", "plugin"]),
+      pluginId: CapabilityIdSchema.optional(),
+      tools: z.array(ToolCatalogEntrySchema).max(500),
+    }).strict()).max(100),
+  }).strict(),
+  commands: z.array(z.object({
+    name: CapabilityIdSchema,
+    nativeName: CapabilityIdSchema.optional(),
+    textAliases: z.array(CapabilityIdSchema).max(32).optional(),
+    description: RendererSafeTextSchema.pipe(z.string().max(1_000)),
+    category: z.enum(["session", "options", "status", "management", "media", "tools", "docks"]).optional(),
+    source: z.enum(["native", "skill", "plugin"]),
+    scope: z.enum(["text", "native", "both"]),
+    acceptsArgs: z.boolean(),
+  }).strict()).max(500),
+  effective: z.object({
+    profile: z.string().trim().min(1).max(120),
+    groups: z.array(z.object({
+      id: CapabilitySourceSchema,
+      label: RendererSafeTextSchema.pipe(CapabilityTextSchema),
+      source: CapabilitySourceSchema,
+      tools: z.array(EffectiveToolEntrySchema).max(500),
+    }).strict()).max(100),
+    notices: z.array(z.object({
+      id: CapabilityIdSchema,
+      severity: z.enum(["info", "warning"]),
+      message: RendererSafeTextSchema.pipe(z.string().min(1).max(1_000)),
+    }).strict()).max(100),
+  }).strict(),
+}).strict();
+export type CapabilityToolsSnapshot = z.infer<typeof CapabilityToolsSnapshotSchema>;
+
+export const ExecApprovalPolicySchema = z.object({
+  security: z.enum(["deny", "allowlist", "full"]),
+  ask: z.enum(["off", "on-miss", "always"]),
+  askFallback: z.enum(["deny", "allowlist", "full"]),
+  autoAllowSkills: z.boolean(),
+}).strict();
+export type ExecApprovalPolicy = z.infer<typeof ExecApprovalPolicySchema>;
+export const ExecApprovalPolicySnapshotSchema = z.object({
+  exists: z.boolean(),
+  hash: z.string().min(1).max(256),
+  policy: ExecApprovalPolicySchema,
+}).strict();
+export type ExecApprovalPolicySnapshot = z.infer<typeof ExecApprovalPolicySnapshotSchema>;
+
 export const McpIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("mcp.list"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
   z.object({ method: z.literal("mcp.create"), requestId: RequestIdSchema, params: z.object({ server: McpServerDraftSchema }).strict() }).strict(),
@@ -177,6 +255,15 @@ export const McpIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("mcp.reconnect"), requestId: RequestIdSchema, params: ServerIdParamsSchema }).strict(),
   z.object({ method: z.literal("mcp.confirm-risk"), requestId: RequestIdSchema, params: ServerIdParamsSchema.extend({ fingerprint: z.string().min(1).max(160), confirmed: z.literal(true) }).strict() }).strict(),
   z.object({ method: z.literal("mcp.cancel"), requestId: RequestIdSchema, params: z.object({ operationRequestId: RequestIdSchema }).strict() }).strict(),
+  z.object({ method: z.literal("capabilities.tools"), requestId: RequestIdSchema, params: z.object({
+    agentId: CapabilityIdSchema,
+    sessionKey: z.string().trim().min(1).max(500),
+  }).strict() }).strict(),
+  z.object({ method: z.literal("capabilities.approvals-get"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("capabilities.approvals-set"), requestId: RequestIdSchema, params: z.object({
+    baseHash: z.string().min(1).max(256),
+    policy: ExecApprovalPolicySchema,
+  }).strict() }).strict(),
 ]);
 export type McpIpcRequest = z.infer<typeof McpIpcRequestSchema>;
 
@@ -190,10 +277,13 @@ const McpSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("mcp.test"), requestId: RequestIdSchema, ok: z.literal(true), result: ManagedMcpServerSummarySchema }).strict(),
   z.object({ method: z.literal("mcp.reconnect"), requestId: RequestIdSchema, ok: z.literal(true), result: ManagedMcpServerSummarySchema }).strict(),
   z.object({ method: z.literal("mcp.cancel"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+  z.object({ method: z.literal("capabilities.tools"), requestId: RequestIdSchema, ok: z.literal(true), result: CapabilityToolsSnapshotSchema }).strict(),
+  z.object({ method: z.literal("capabilities.approvals-get"), requestId: RequestIdSchema, ok: z.literal(true), result: ExecApprovalPolicySnapshotSchema }).strict(),
+  z.object({ method: z.literal("capabilities.approvals-set"), requestId: RequestIdSchema, ok: z.literal(true), result: ExecApprovalPolicySnapshotSchema }).strict(),
 ]);
 
 const McpFailureResponseSchema = z.object({
-  method: z.enum(["mcp.list", "mcp.create", "mcp.update", "mcp.remove", "mcp.set-enabled", "mcp.test", "mcp.reconnect", "mcp.confirm-risk", "mcp.cancel"]),
+  method: z.enum(["mcp.list", "mcp.create", "mcp.update", "mcp.remove", "mcp.set-enabled", "mcp.test", "mcp.reconnect", "mcp.confirm-risk", "mcp.cancel", "capabilities.tools", "capabilities.approvals-get", "capabilities.approvals-set"]),
   requestId: RequestIdSchema,
   ok: z.literal(false),
   error: UClawErrorSchema,

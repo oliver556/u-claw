@@ -98,4 +98,30 @@ describe("PluginManager", () => {
     expect(await screen.findByText("命令工具包")).toBeVisible();
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "plugins.installed" }));
   });
+
+  it("lists authoritative Plugin UI descriptors and invokes session actions", async () => {
+    const invoke = vi.fn(async (request: any) => ({
+      method: request.method, requestId: request.requestId, ok: true,
+      result: request.method === "plugins.ui-descriptors"
+        ? [{ id: "calendar.open", pluginId: "calendar", pluginName: "Calendar", surface: "session", label: "打开日历", description: "显示当前会话日历", schema: { type: "object" } }]
+        : request.method === "plugins.session-action"
+          ? { ok: true, result: { success: true } }
+          : { items: [], nextCursor: null, hasMore: false, mode: "fixture", repositoryVerified: false },
+    }));
+    window.uclaw = { plugins: { invoke } } as any;
+    render(<PluginManager />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "会话操作" }));
+    expect(await screen.findByText("打开日历")).toBeVisible();
+    expect(screen.getByText("Calendar · session")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("打开日历 session key"), { target: { value: "agent:main:session-1" } });
+    fireEvent.change(screen.getByLabelText("打开日历 JSON payload"), { target: { value: '{"date":"2026-08-12"}' } });
+    fireEvent.click(screen.getByRole("button", { name: "执行 打开日历" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "plugins.session-action", params: {
+        pluginId: "calendar", actionId: "calendar.open", sessionKey: "agent:main:session-1", payload: { date: "2026-08-12" },
+      },
+    })));
+    expect(await screen.findByText("操作已完成")).toBeVisible();
+  });
 });

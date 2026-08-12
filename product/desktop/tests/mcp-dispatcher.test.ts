@@ -19,6 +19,42 @@ const riskyStdioServer = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("MCP dispatcher", () => {
+  it("keeps configured servers, live probe, effective tools, and approval policy as separate results", async () => {
+    const store = { list: vi.fn(async () => unavailableSnapshot) };
+    const runtime = { capability: () => false, test: vi.fn() };
+    const capabilities = {
+      tools: vi.fn(async () => ({
+        agentId: "main", sessionKey: "agent:main:main", catalog: { groups: [] }, commands: [],
+        effective: { profile: "coding", groups: [], notices: [] },
+      })),
+      approvalsGet: vi.fn(async () => ({ exists: true, hash: "hash-1", policy: { security: "allowlist", ask: "on-miss", askFallback: "deny", autoAllowSkills: false } })),
+      approvalsSet: vi.fn(),
+    };
+    const dispatch = (desktop as any).createMcpDispatcher(store, runtime, capabilities);
+
+    await expect(dispatch({ method: "mcp.list", requestId: "list", params: {} }))
+      .resolves.toMatchObject({ result: { runtime: { state: "unavailable" } } });
+    await expect(dispatch({ method: "capabilities.tools", requestId: "tools", params: { agentId: "main", sessionKey: "agent:main:main" } }))
+      .resolves.toMatchObject({ result: { effective: { profile: "coding" } } });
+    await expect(dispatch({ method: "capabilities.approvals-get", requestId: "policy", params: {} }))
+      .resolves.toMatchObject({ result: { hash: "hash-1", policy: { security: "allowlist" } } });
+  });
+
+  it("writes approval policy through the Gateway runtime with the caller base hash", async () => {
+    const store = {};
+    const runtime = { capability: () => false, test: vi.fn() };
+    const policy = { security: "deny" as const, ask: "always" as const, askFallback: "deny" as const, autoAllowSkills: false };
+    const capabilities = {
+      tools: vi.fn(), approvalsGet: vi.fn(),
+      approvalsSet: vi.fn(async () => ({ exists: true, hash: "hash-2", policy })),
+    };
+    const dispatch = (desktop as any).createMcpDispatcher(store, runtime, capabilities);
+
+    await expect(dispatch({ method: "capabilities.approvals-set", requestId: "set", params: { baseHash: "hash-1", policy } }))
+      .resolves.toMatchObject({ result: { hash: "hash-2", policy } });
+    expect(capabilities.approvalsSet).toHaveBeenCalledWith({ baseHash: "hash-1", policy });
+  });
+
   it("configures an available runtime and compensates when portable persistence fails", async () => {
     const server = { id: "docs", name: "Docs", enabled: true, transport: "streamable-http", url: "https://mcp.example.com", authentication: { type: "none" } };
     const store = {

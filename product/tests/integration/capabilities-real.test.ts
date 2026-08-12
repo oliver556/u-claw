@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer, connect } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +13,7 @@ import { createFixtureSkillHubClient } from "../../desktop/src/skills/fixture-cl
 import { createSkillService, type SkillService } from "../../desktop/src/skills/skill-service.js";
 import { createSkillHubClient } from "../../desktop/src/skills/skillhub-client.js";
 import { createDesktopMainOptions } from "../../desktop/src/wiring/create-desktop-main-options.js";
+import { createMcpProtocolProbe } from "../../desktop/src/mcp/mcp-runtime.js";
 
 const runRealOpenClaw = process.env.UCLAW_RUN_REAL_OPENCLAW === "1";
 const runRealSkillHub = process.env.UCLAW_RUN_REAL_SKILLHUB === "1";
@@ -316,4 +317,154 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw Skill lifecycle", () => {
     await running.options.dispose?.();
     await stopGateway(running.child);
   }, 60_000);
+});
+
+describe.skipIf(!runRealOpenClaw)("real OpenClaw Plugin, MCP, tools, and approvals", () => {
+  it("reads every mutation back from OpenClaw, the authoritative config, or a real MCP process", async () => {
+    await access(openClawEntry);
+    await access(nodeExecutable);
+    const root = await mkdtemp(join(tmpdir(), "uclaw-capability-runtime-real-"));
+    roots.push(root);
+    const dataDir = join(root, "data");
+    const cacheDir = join(root, "cache");
+    const workspaceDir = join(dataDir, "workspace");
+    const stateDir = join(dataDir, "openclaw-state");
+    const configPath = join(dataDir, "config", "openclaw.json");
+    const pluginSource = join(root, "plugin-source");
+    await Promise.all([
+      mkdir(cacheDir, { recursive: true }), mkdir(workspaceDir, { recursive: true }),
+      mkdir(stateDir, { recursive: true }), mkdir(dirname(configPath), { recursive: true }),
+      mkdir(join(pluginSource, "dist"), { recursive: true }),
+    ]);
+    const token = "uclaw-real-capability-token";
+    await writeFile(configPath, `${JSON.stringify({
+      gateway: { mode: "local", bind: "loopback", auth: { mode: "token", token } },
+      agents: { defaults: { workspace: workspaceDir, skipBootstrap: true } },
+    }, null, 2)}\n`);
+    await writeFile(join(pluginSource, "openclaw.plugin.json"), JSON.stringify({
+      id: "uclaw-capability-smoke", configSchema: { type: "object", additionalProperties: false, properties: {} },
+    }));
+    const writePluginPackage = (version: string) => writeFile(join(pluginSource, "package.json"), JSON.stringify({
+      name: "@uclaw/capability-smoke", version,
+      openclaw: { extensions: ["./dist/index.js"] },
+    }));
+    await writePluginPackage("1.0.0");
+    await writeFile(join(pluginSource, "dist", "index.js"), `export default {
+  id: "uclaw-capability-smoke",
+  name: "U-Claw Capability Smoke",
+  description: "Local controlled Plugin lifecycle smoke.",
+  register() {},
+};
+`);
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      VITEST: undefined,
+      VITEST_POOL_ID: undefined,
+      VITEST_WORKER_ID: undefined,
+      UCLAW_RUNTIME_DIR: runtimeRoot,
+      UCLAW_OPENCLAW_ENTRY: openClawEntry,
+      UCLAW_NODE_BIN: nodeExecutable,
+      UCLAW_DATA_DIR: dataDir,
+      UCLAW_PORTABLE_SKILLS_DIR: portableSkills,
+      OPENCLAW_STATE_DIR: stateDir,
+      OPENCLAW_CONFIG_PATH: configPath,
+    };
+    const port = await reservePort();
+    const start = async () => {
+      const options = await createDesktopMainOptions(env);
+      const launch = options.buildGatewayLaunchOptions(port) as { executable: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv };
+      const child = options.spawn(launch.executable, launch.args, { cwd: launch.cwd, env: launch.env, stdio: ["ignore", "pipe", "pipe"] }) as unknown as ChildProcess;
+      let stderr = "";
+      child.stderr?.on("data", (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-8_000); });
+      processes.push(child);
+      await waitForPort(port, child, () => stderr.trim());
+      await options.probeCapabilities(port, new AbortController().signal);
+      return { options, child };
+    };
+
+    const initialOptions = await createDesktopMainOptions(env);
+    const runtime = initialOptions.pluginRuntime!;
+    expect(await runtime.installed()).toEqual(expect.any(Array));
+    await runtime.installFromPath({ sourceDir: pluginSource, slug: "uclaw-capability-smoke" });
+    expect(await runtime.installed()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ slug: "uclaw-capability-smoke", version: "1.0.0", enabled: true }),
+    ]));
+    await writePluginPackage("1.1.0");
+    await runtime.installFromPath({ sourceDir: pluginSource, slug: "uclaw-capability-smoke" });
+    expect(await runtime.installed()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ slug: "uclaw-capability-smoke", version: "1.1.0", enabled: true }),
+    ]));
+    await runtime.setEnabled("uclaw-capability-smoke", false);
+    expect(await runtime.installed()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ slug: "uclaw-capability-smoke", enabled: false }),
+    ]));
+
+    await initialOptions.dispose?.();
+    let running = await start();
+    const capabilityRuntime = running.options.capabilityRuntime!;
+    try {
+      expect(await capabilityRuntime.pluginDescriptors()).toEqual(expect.any(Array));
+    } catch (error) {
+      expect(error).toMatchObject({ code: "UNSUPPORTED", retryable: false });
+      await expect(capabilityRuntime.pluginSessionAction({ pluginId: "uclaw-capability-smoke", actionId: "inspect" }))
+        .rejects.toMatchObject({ code: "UNSUPPORTED", retryable: false });
+    }
+    try {
+      const tools = await capabilityRuntime.tools({ agentId: "main", sessionKey: "agent:main:main" });
+      expect(tools).toMatchObject({ agentId: "main", sessionKey: "agent:main:main", catalog: { groups: expect.any(Array) }, effective: { groups: expect.any(Array) } });
+    } catch (error) {
+      expect(error).toMatchObject({ code: "UNSUPPORTED", retryable: false });
+    }
+    let approvalHash: string | undefined;
+    try {
+      const approval = await capabilityRuntime.approvalsGet();
+      const written = await capabilityRuntime.approvalsSet({ baseHash: approval.hash, policy: {
+        security: "deny", ask: "always", askFallback: "deny", autoAllowSkills: false,
+      } });
+      expect(written).toMatchObject({ policy: { security: "deny", ask: "always" } });
+      approvalHash = written.hash;
+    } catch (error) {
+      expect(error).toMatchObject({ code: "UNSUPPORTED", retryable: false });
+    }
+
+    const mcpServer = {
+      id: "uclaw-local-smoke", name: "U-Claw local smoke", enabled: true, transport: "stdio" as const,
+      executableId: "node" as const, args: ["mcp-stdio-server.mjs"], env: {},
+    };
+    await running.options.client!.mcp!.configure(mcpServer, new AbortController().signal);
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({
+      mcp: { servers: { "uclaw-local-smoke": { enabled: true, transport: "stdio", command: "node" } } },
+    });
+    const controlledMcpRoot = join(root, "mcp-runtime");
+    await mkdir(controlledMcpRoot);
+    await copyFile(resolve(import.meta.dirname, "../../desktop/tests/fixtures/mcp-stdio-server.mjs"), join(controlledMcpRoot, "mcp-stdio-server.mjs"));
+    const probe = createMcpProtocolProbe({ runtimeRoot: controlledMcpRoot, executables: { node: nodeExecutable } });
+    await expect(probe.test(mcpServer, new AbortController().signal)).resolves.toMatchObject({
+      status: "connected", capabilitySummary: { tools: 1, resources: 1 }, toolNames: ["fixture_search"], resourceSchemes: ["fixture"],
+    });
+
+    await running.options.dispose?.();
+    await stopGateway(running.child);
+    running = await start();
+    expect(await running.options.pluginRuntime!.installed()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ slug: "uclaw-capability-smoke", version: "1.1.0", enabled: false }),
+    ]));
+    if (approvalHash !== undefined) {
+      await expect(running.options.capabilityRuntime!.approvalsGet()).resolves.toMatchObject({
+        hash: approvalHash,
+        policy: { security: "deny", ask: "always", askFallback: "deny", autoAllowSkills: false },
+      });
+    }
+    await expect(running.options.client!.mcp!.remove(mcpServer, new AbortController().signal)).rejects.toThrow(
+      /config\.patch would remove entries from array path/u,
+    );
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({
+      mcp: { servers: { "uclaw-local-smoke": { args: ["mcp-stdio-server.mjs"] } } },
+    });
+    await running.options.dispose?.();
+    await stopGateway(running.child);
+    await runtime.uninstall("uclaw-capability-smoke");
+    expect((await runtime.installed()).some((plugin) => plugin.slug === "uclaw-capability-smoke" && plugin.origin !== "bundled")).toBe(false);
+  }, 90_000);
 });

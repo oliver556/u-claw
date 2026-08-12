@@ -59,6 +59,26 @@ describe("Plugin IPC", () => {
     expect(plugins.startInstall).not.toHaveBeenCalled();
   });
 
+  it("routes UI descriptors and session actions through the authoritative Gateway runtime", async () => {
+    const plugins = pluginService();
+    const capabilities = {
+      pluginDescriptors: vi.fn(async () => [{ id: "calendar.open", pluginId: "calendar", surface: "session" as const, label: "Open calendar" }]),
+      pluginSessionAction: vi.fn(async () => ({ ok: true as const, result: { success: true } })),
+    };
+    const dispatch = createPluginDispatcher(plugins, capabilities as any);
+
+    await expect(dispatch({ method: "plugins.ui-descriptors", requestId: "descriptors", params: {} }))
+      .resolves.toMatchObject({ ok: true, result: [{ id: "calendar.open", pluginId: "calendar" }] });
+    await expect(dispatch({
+      method: "plugins.session-action", requestId: "action", params: {
+        pluginId: "calendar", actionId: "open", sessionKey: "agent:main:main", payload: { day: "today" },
+      },
+    })).resolves.toMatchObject({ ok: true, result: { ok: true, result: { success: true } } });
+    expect(capabilities.pluginSessionAction).toHaveBeenCalledWith({
+      pluginId: "calendar", actionId: "open", sessionKey: "agent:main:main", payload: { day: "today" },
+    });
+  });
+
   it("preload exposes only a parsed Plugin invoke bridge", async () => {
     let api: Record<string, any> = {};
     const invoke = vi.fn(async (_channel: string, request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: { items: [], nextCursor: null, hasMore: false, mode: "fixture", repositoryVerified: false } }));

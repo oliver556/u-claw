@@ -13,6 +13,7 @@ import {
 import type { McpStore } from "./mcp-store.js";
 import type { McpProbeResult } from "./mcp-runtime.js";
 import { assessMcpStdioPolicy } from "./stdio-policy.js";
+import type { OpenClawCapabilityRuntime } from "../capabilities/openclaw-capability-runtime.js";
 
 export interface McpRuntime {
   capability(): boolean;
@@ -76,7 +77,11 @@ function requireStdioRuntimeConfirmation(
   } as McpServerConfigEntry;
 }
 
-export function createMcpDispatcher(store: McpStore, runtime: McpRuntime): McpDispatcher {
+export function createMcpDispatcher(
+  store: McpStore,
+  runtime: McpRuntime,
+  capabilities?: Pick<OpenClawCapabilityRuntime, "tools" | "approvalsGet" | "approvalsSet">,
+): McpDispatcher {
   const operations = new Map<string, AbortController>();
   const serverQueues = new Map<string, Promise<void>>();
   let disposed = false;
@@ -143,6 +148,9 @@ export function createMcpDispatcher(store: McpStore, runtime: McpRuntime): McpDi
 
   const dispatchUnlocked = async (request: McpIpcRequest): Promise<McpIpcResponse> => {
     let result: unknown;
+    if (request.method === "capabilities.tools") result = await capabilities?.tools(request.params);
+    if (request.method === "capabilities.approvals-get") result = await capabilities?.approvalsGet();
+    if (request.method === "capabilities.approvals-set") result = await capabilities?.approvalsSet(request.params);
     if (request.method === "mcp.list") result = await store.list();
     if (request.method === "mcp.create") {
       let server = request.params.server as McpServerConfigEntry;
@@ -279,9 +287,12 @@ export function createMcpDispatcher(store: McpStore, runtime: McpRuntime): McpDi
         if (operations.get(request.requestId) === controller) operations.delete(request.requestId);
       }
     }
-    const serverId = request.method === "mcp.create"
+    const serverId = request.method === "capabilities.approvals-set"
+      ? "__exec-approvals__"
+      : request.method === "mcp.create"
       ? request.params.server.id
-      : request.method === "mcp.list" || request.method === "mcp.cancel"
+      : request.method === "mcp.list" || request.method === "mcp.cancel" ||
+        request.method === "capabilities.tools" || request.method === "capabilities.approvals-get"
         ? undefined
         : request.params.serverId;
     return serverId === undefined ? dispatchUnlocked(request) : serializeServer(serverId, () => dispatchUnlocked(request));

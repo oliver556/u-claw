@@ -42,6 +42,7 @@ import { createLivePluginRegistryClient, createUnavailablePluginRegistryClient }
 import { createOpenClawCliPluginRuntime } from "./plugins/openclaw-cli-runtime.js";
 import { createPluginService } from "./plugins/plugin-service.js";
 import type { PluginRuntimeAdapter } from "./plugins/runtime-adapter.js";
+import type { OpenClawCapabilityRuntime } from "./capabilities/openclaw-capability-runtime.js";
 import { createChannelStore } from "./channels/channel-store.js";
 import type { ChannelRuntime } from "./channels/channel-dispatcher.js";
 import { createMcpStore } from "./mcp/mcp-store.js";
@@ -234,6 +235,7 @@ export interface DesktopMainOptions {
   dispatchClient(request: ClientIpcRequest): Promise<unknown>;
   client?: UClawClient;
   pluginRuntime?: PluginRuntimeAdapter;
+  capabilityRuntime?: OpenClawCapabilityRuntime;
   attachments?: AttachmentService;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
   releaseService?: ReleaseService;
@@ -678,6 +680,7 @@ export async function startElectronMain(
       channelRuntime,
       mcp,
       mcpRuntime,
+      capabilityRuntime: options.capabilityRuntime,
       sessionAdvanced: client.sessionAdvanced,
       dispatchData: data.dispatch,
       dispatchDiagnostics: diagnostics.dispatch,
