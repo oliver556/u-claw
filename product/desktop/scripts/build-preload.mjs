@@ -11,5 +11,6 @@ await build({
   external: ["electron"],
   alias: {
     "@uclaw/shared": fileURLToPath(new URL("../../shared/dist/ipc.js", import.meta.url)),
+    "@uclaw/shared/dist/automation.js": fileURLToPath(new URL("../../shared/dist/automation.js", import.meta.url)),
   },
 });

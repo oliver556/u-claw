@@ -11,6 +11,8 @@ import {
   AdapterServiceError,
   GatewayWebSocket,
   OpenClawClient,
+  UClawUnsupportedError,
+  createOpenClawAutomationService,
   createOpenClawUsageService,
   type HelloOk,
   type OpenClawTransport,
@@ -39,6 +41,8 @@ import { createOpenClawCapabilityRuntime } from "../capabilities/openclaw-capabi
 import { createOpenClawSkillRuntime } from "../skills/openclaw-skill-runtime.js";
 import { createUsageDispatcher } from "../usage/usage-dispatcher.js";
 import { createUsageDomainRegistration } from "../usage/usage-domain.js";
+import { createAutomationDispatcher } from "../automation/automation-dispatcher.js";
+import { createAutomationDomainRegistration } from "../automation/automation-domain.js";
 import {
   DesktopWiringError,
   readDesktopWiringEnvironment,
@@ -391,6 +395,11 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     methods: async () => (await client.gateway.negotiate()).methods,
     request: (method, params) => transport.router.request(method, params as never, z.unknown()),
   });
+  let gatewayMethods: ReadonlySet<string> = new Set();
+  const automationDispatcher = createAutomationDispatcher(createOpenClawAutomationService({
+    request: (method, params, schema) => transport.router.request(method, params, schema),
+    requireMethod: (method) => { if (!gatewayMethods.has(method)) throw new UClawUnsupportedError(method); },
+  }));
   const usageDispatcher = createUsageDispatcher({
     openClaw: createOpenClawUsageService({
       request: (method, params) => transport.router.request(method, params as never, z.unknown()),
@@ -412,6 +421,10 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     {
       name: "usage",
       register: () => createUsageDomainRegistration(usageDispatcher),
+    },
+    {
+      name: "automation",
+      register: () => createAutomationDomainRegistration(automationDispatcher),
     },
   ]);
   const dispatcher = createClientDispatcher({ client, sendEvent: () => undefined });
@@ -444,6 +457,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
       try {
         const capabilities = await withAbort(client.gateway.negotiate(), signal, () => transport.close());
         const methods = capabilities.methods;
+        gatewayMethods = methods;
         if (!REQUIRED_GATEWAY_METHODS.every((method) => methods.has(method))) {
           throw new DesktopWiringError("UNSUPPORTED", "Gateway is missing required methods.");
         }

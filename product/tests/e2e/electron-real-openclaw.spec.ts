@@ -81,6 +81,21 @@ test("production Electron persists real OpenClaw sessions and Provider configura
     const configBefore = await configEditor.inputValue();
     await firstWindow.getByRole("button", { name: "应用 OpenClaw 配置" }).click();
     await expect(configEditor).toHaveValue(configBefore);
+    await firstWindow.keyboard.press("Escape");
+    await expect(firstWindow.getByRole("dialog", { name: "OpenClaw 配置" })).toBeHidden();
+
+    await firstWindow.getByRole("link", { name: "自动化" }).click();
+    await expect(firstWindow.getByRole("region", { name: "Agent 与定时任务" })).toBeVisible();
+    await firstWindow.getByLabel("Agent 名称").fill("smoke-agent");
+    await firstWindow.getByLabel("Agent workspace").fill(join(root, "smoke-agent"));
+    await firstWindow.getByRole("button", { name: "创建 Agent" }).click();
+    await expect(firstWindow.getByRole("button", { name: "查看 Agent smoke-agent" })).toBeVisible();
+    await firstWindow.getByRole("tab", { name: "定时任务" }).click();
+    await firstWindow.getByLabel("定时任务名称").fill("Smoke schedule");
+    await firstWindow.getByLabel("Cron 表达式").fill("0 9 * * *");
+    await firstWindow.getByLabel("定时任务消息").fill("authoritative smoke");
+    await firstWindow.getByRole("button", { name: "新增定时任务" }).click();
+    await expect(firstWindow.getByRole("button", { name: /查看定时任务/ })).toBeVisible();
 
     const credentialPath = join(dataDir, ".uclaw", "provider-credentials.v1.json");
     expect((await stat(credentialPath)).mode & 0o777).toBe(0o600);
@@ -127,6 +142,21 @@ test("production Electron persists real OpenClaw sessions and Provider configura
       readback: { ok: true, result: { providers: expect.not.arrayContaining([expect.objectContaining({ id: "smoke-provider" })]) } },
     });
     expect(await readFile(credentialPath, "utf8")).not.toContain(providerSecret);
+
+    await restartedWindow.getByRole("link", { name: "自动化" }).click();
+    await expect(restartedWindow.getByRole("button", { name: "查看 Agent smoke-agent" })).toBeVisible();
+    await restartedWindow.getByRole("tab", { name: "定时任务" }).click();
+    const cronButton = restartedWindow.getByRole("button", { name: /查看定时任务/ });
+    await expect(cronButton).toBeVisible();
+    const cronLabel = await cronButton.getAttribute("aria-label");
+    const cronId = cronLabel?.replace("查看定时任务 ", "");
+    expect(cronId).toBeTruthy();
+    restartedWindow.once("dialog", (dialog) => dialog.accept());
+    await restartedWindow.getByRole("button", { name: `删除定时任务 ${cronId}` }).click();
+    await restartedWindow.getByRole("tab", { name: "Agent" }).click();
+    restartedWindow.once("dialog", (dialog) => dialog.accept());
+    await restartedWindow.getByRole("button", { name: "删除 Agent smoke-agent" }).click();
+    await expect(restartedWindow.getByRole("button", { name: "查看 Agent smoke-agent" })).toHaveCount(0);
   } finally {
     await app?.close().catch(() => undefined);
     await rm(root, { recursive: true, force: true });

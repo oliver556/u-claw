@@ -1,4 +1,4 @@
-import { AutomationIpcRequestSchema, type AutomationService } from "@uclaw/shared/dist/automation.js";
+import { AutomationIpcRequestSchema, type AutomationService } from "@uclaw/shared";
 
 export function createAutomationDispatcher(service: AutomationService) {
   return async (payload: unknown) => {

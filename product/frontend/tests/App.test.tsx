@@ -50,6 +50,17 @@ function clientWithStatus(status: GatewayStatus, reconnect: UClawClient["gateway
 }
 
 describe("U-Claw application shell", () => {
+  it("mounts the Agent/Cron manager on the automation route", async () => {
+    window.history.pushState({}, "", "/#/automation");
+    Object.defineProperty(window, "uclaw", { configurable: true, value: {
+      automation: { invoke: vi.fn(async (request: { method: string; requestId: string }) => ({
+        method: request.method, requestId: request.requestId, ok: true,
+        result: request.method === "agents.list" ? { agents: [] } : null,
+      })) },
+    } });
+    render(<App client={previewClient} />);
+    expect(await screen.findByRole("region", { name: "Agent 与定时任务" })).toBeInTheDocument();
+  });
   beforeAll(() => { globalThis.AbortController = RequestCompatibleAbortController as typeof AbortController; });
   afterAll(() => { globalThis.AbortController = JsdomAbortController; });
 

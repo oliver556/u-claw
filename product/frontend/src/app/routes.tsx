@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Brain, BriefcaseBusiness, Folder, PlugZap, Settings, Sparkles } from "lucide-react";
+import { Brain, BriefcaseBusiness, CalendarClock, Folder, PlugZap, Settings, Sparkles } from "lucide-react";
 
 export type PrimaryRoute = {
   path: string;
@@ -15,6 +15,7 @@ export const primaryRoutes: PrimaryRoute[] = [
   { path: "/capabilities", label: "能力", description: "模型、技能、插件和 MCP", icon: Sparkles },
   { path: "/connections", label: "连接", description: "渠道和第三方服务", icon: PlugZap },
   { path: "/system", label: "系统", description: "运行状态、日志和诊断", icon: Settings },
+  { path: "/automation", label: "自动化", description: "管理 Agent 与定时任务", icon: CalendarClock },
 ];
 
 export function routeForPath(pathname: string) {
