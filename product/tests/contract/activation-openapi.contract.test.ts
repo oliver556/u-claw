@@ -52,7 +52,7 @@ describe("activation OpenAPI contract", () => {
       "licenseId", "deviceId", "status", "revision", "notBefore", "expiresAt", "replacementLicenseId", "updatedAt",
     ]);
     expect(required("StartupLicense")).toEqual([
-      "schemaVersion", "deviceId", "licenseId", "usbFingerprint", "startupSecretProof", "notBefore", "expiresAt", "signature",
+      "schemaVersion", "usernameId", "deviceId", "licenseId", "usbFingerprint", "startupSecretProof", "notBefore", "expiresAt", "revision", "signature",
     ]);
     expect(required("StartupCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "startupSecret"]);
     expect(required("BuiltinCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "accessToken", "expiresAt"]);
@@ -97,6 +97,11 @@ describe("activation OpenAPI contract", () => {
     expect(document.components.schemas.LicenseStatusSummary.properties?.revision).toMatchObject({
       maximum: Number.MAX_SAFE_INTEGER,
     });
+    for (const field of ["notBefore", "expiresAt"]) {
+      expect(document.components.schemas.StartupLicense.properties?.[field]).toMatchObject({
+        pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      });
+    }
     expect(document.components.schemas.ClientPolicy.properties?.minimumClientVersion).toMatchObject({
       pattern: "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
     });
