@@ -152,7 +152,7 @@ test("production Electron persists real OpenClaw sessions and Provider configura
     await expect(restartedWindow.getByText(/OpenClaw (检查通过|发现需处理项)/)).toBeVisible({ timeout: 25_000 });
 
     await restartedWindow.getByRole("tab", { name: "设备与运行" }).click();
-    await expect(restartedWindow.getByLabel("设备与运行")).toBeVisible();
+    await expect(restartedWindow.getByRole("region", { name: "设备与运行" })).toBeVisible();
     const systemNode = await restartedWindow.evaluate(async () => ({
       environments: await window.uclaw?.systemNode?.invoke({ method: "environments.list", requestId: "system-node-environments", params: {} }),
       terminal: await window.uclaw?.systemNode?.invoke({ method: "terminal.list", requestId: "system-node-terminal", params: {} }),
@@ -161,10 +161,19 @@ test("production Electron persists real OpenClaw sessions and Provider configura
       environments: { ok: true, result: { environments: [expect.objectContaining({ id: "gateway", status: "available" })] } },
       terminal: { ok: false, error: { code: "FORBIDDEN" } },
     });
+    await restartedWindow.getByRole("tab", { name: "语音与通知" }).click();
+    await expect(restartedWindow.getByRole("region", { name: "语音与通知" })).toBeVisible();
+    const systemVoice = await restartedWindow.evaluate(async () => ({
+      status: await window.uclaw?.systemVoice?.invoke({ method: "talk.runtime.status", requestId: "system-voice-status", params: {} }),
+      create: await window.uclaw?.systemVoice?.invoke({ method: "talk.session.create", requestId: "system-voice-create", params: { mode: "realtime" } }),
+    }));
+    expect(systemVoice.status).toMatchObject({ ok: true, result: { authority: { scope: "owned-runtime" } } });
+    expect(systemVoice.create).toMatchObject({ ok: false, error: { code: expect.stringMatching(/^(AUTHORIZATION_REQUIRED|FORBIDDEN)$/) } });
     await restartedWindow.reload();
     await restartedWindow.getByRole("link", { name: "系统" }).click();
-    await restartedWindow.getByRole("tab", { name: "设备与运行" }).click();
-    await expect(restartedWindow.getByLabel("设备与运行")).toBeVisible();
+    await restartedWindow.getByRole("tab", { name: "语音与通知" }).click();
+    await expect(restartedWindow.getByRole("region", { name: "语音与通知" })).toBeVisible();
+    await expect(restartedWindow.getByRole("button", { name: "创建客户端 Talk 会话" })).toBeVisible();
 
     await restartedWindow.getByRole("button", { name: "打开任务活动中心" }).click();
     await expect(restartedWindow.getByRole("region", { name: "Task 活动中心" })).toBeVisible();

@@ -48,4 +48,8 @@ export * from "./task-artifacts/task-artifact-files.js";
 export * from "./system-node/production-system-node.js";
 export * from "./system-node/system-node-dispatcher.js";
 export * from "./system-node/system-node-domain.js";
+export * from "./system-voice/electron-permissions.js";
+export * from "./system-voice/production-system-voice.js";
+export * from "./system-voice/system-voice-dispatcher.js";
+export * from "./system-voice/system-voice-domain.js";
 export * from "./window.js";

@@ -58,6 +58,11 @@ import {
   type SystemNodeIpcEvent,
   type SystemNodeIpcRequest,
 } from "@uclaw/shared/dist/system-node.js";
+import {
+  SystemVoiceIpcRequestSchema,
+  SystemVoiceIpcResponseSchema,
+  type SystemVoiceIpcRequest,
+} from "@uclaw/shared/dist/system-voice.js";
 
 import {
   CLIENT_IPC_CHANNEL,
@@ -80,6 +85,7 @@ import {
   TASK_ARTIFACT_IPC_CHANNEL,
   SYSTEM_NODE_IPC_CHANNEL,
   SYSTEM_NODE_IPC_EVENT_CHANNEL,
+  SYSTEM_VOICE_IPC_CHANNEL,
 } from "./channels.js";
 
 export interface ContextBridgeLike {
@@ -279,6 +285,12 @@ export function installPreloadBridge({
     ipcRenderer.on(SYSTEM_NODE_IPC_EVENT_CHANNEL, receive);
     return () => ipcRenderer.removeListener(SYSTEM_NODE_IPC_EVENT_CHANNEL, receive);
   };
+  const invokeSystemVoice = async (payload: unknown) => {
+    const request = SystemVoiceIpcRequestSchema.parse(payload);
+    const response = SystemVoiceIpcResponseSchema.parse(await ipcRenderer.invoke(SYSTEM_VOICE_IPC_CHANNEL, request));
+    if (response.method !== request.method || response.requestId !== request.requestId) throw new Error("IPC response does not match its request.");
+    return response;
+  };
 
   contextBridge.exposeInMainWorld("uclaw", Object.freeze({
     window: Object.freeze({ invoke: invokeWindow, onMaximizedChange }),
@@ -294,6 +306,7 @@ export function installPreloadBridge({
     automation: Object.freeze({ invoke: invokeAutomation as (request: AutomationIpcRequest) => Promise<unknown> }),
     taskArtifacts: Object.freeze({ invoke: invokeTaskArtifacts as (request: TaskArtifactIpcRequest) => Promise<unknown>, subscribe: subscribeTaskArtifacts }),
     systemNode: Object.freeze({ invoke: invokeSystemNode as (request: SystemNodeIpcRequest) => Promise<unknown>, subscribe: subscribeSystemNode }),
+    systemVoice: Object.freeze({ invoke: invokeSystemVoice as (request: SystemVoiceIpcRequest) => Promise<unknown> }),
     data: Object.freeze({ invoke: invokeData as (request: DataIpcRequest) => Promise<unknown> }),
     diagnostics: Object.freeze({ invoke: invokeDiagnostics as (request: DiagnosticsIpcRequest) => Promise<unknown> }),
     release: Object.freeze({ invoke: invokeRelease as (request: ReleaseIpcRequest) => Promise<unknown> }),

@@ -13,7 +13,7 @@ import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fi
 
 class ScriptedWebSocket {
   static instances: ScriptedWebSocket[] = [];
-  static outcome: "success" | "usage" | "automation" | "task-artifacts" | "system-node" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
+  static outcome: "success" | "usage" | "automation" | "task-artifacts" | "system-node" | "system-voice" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
   static skillDisabled = false;
   static selectedModel: { sessionId: string; providerId: string; model: string } | undefined;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -52,6 +52,10 @@ class ScriptedWebSocket {
     }
     if (frame.method === "environments.list") {
       queueMicrotask(() => this.respond(frame, { environments: [{ id: "gateway", type: "local", label: "Gateway", status: "available" }] }));
+      return;
+    }
+    if (frame.method === "voicewake.get") {
+      queueMicrotask(() => this.respond(frame, { triggers: ["uclaw"] }));
       return;
     }
     if (frame.method === "usage.status") {
@@ -195,6 +199,8 @@ class ScriptedWebSocket {
                     ? ["sessions.list", "sessions.describe", "chat.history", "chat.send", "tasks.list", "tasks.get", "tasks.cancel", "tasks.retry", "artifacts.list", "artifacts.get", "artifacts.download"]
                   : ScriptedWebSocket.outcome === "system-node"
                     ? ["sessions.list", "sessions.describe", "chat.history", "chat.send", "environments.list", "terminal.list"]
+                  : ScriptedWebSocket.outcome === "system-voice"
+                    ? ["sessions.list", "sessions.describe", "chat.history", "chat.send", "talk.session.create", "talk.session.close", "talk.client.create", "talk.client.toolCall", "talk.client.steer", "tts.status", "tts.providers", "tts.setProvider", "tts.personas", "tts.setPersona", "tts.speak", "voicewake.get", "voicewake.set", "voicewake.routing.get", "voicewake.routing.set", "agent.wait"]
                   : ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send"],
             events: ["chat"],
           },
@@ -228,6 +234,7 @@ describe("production desktop wiring", () => {
   let runtimeRoot: string;
   let openClawEntry: string;
   let dataRoot: string;
+  let cacheRoot: string;
   let productionEnv: NodeJS.ProcessEnv;
 
   beforeEach(async () => {
@@ -239,6 +246,7 @@ describe("production desktop wiring", () => {
     runtimeRoot = await realpath(runtimeRoot);
     openClawEntry = await realpath(openClawEntry);
     dataRoot = await mkdtemp(join(tmpdir(), "uclaw-production-data-"));
+    cacheRoot = await mkdtemp(join(tmpdir(), "uclaw-production-cache-"));
     const stateRoot = join(dataRoot, ".openclaw");
     await mkdir(stateRoot, { recursive: true });
     const configPath = join(stateRoot, "openclaw.json");
@@ -247,6 +255,7 @@ describe("production desktop wiring", () => {
       UCLAW_RUNTIME_DIR: runtimeRoot,
       UCLAW_OPENCLAW_ENTRY: openClawEntry,
       UCLAW_DATA_DIR: dataRoot,
+      UCLAW_CACHE_DIR: cacheRoot,
       OPENCLAW_CONFIG_PATH: configPath,
       UCLAW_PORTABLE_SKILLS_DIR: await realpath(resolve(import.meta.dirname, "../../../portable/skills-cn")),
     };
@@ -260,7 +269,7 @@ describe("production desktop wiring", () => {
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: OriginalWebSocket });
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    await Promise.all([runtimeRoot, dataRoot].map((path) => rm(path, { recursive: true, force: true })));
+    await Promise.all([runtimeRoot, dataRoot, cacheRoot].map((path) => rm(path, { recursive: true, force: true })));
   });
 
   it("returns a diagnostic UClaw error when runtime configuration is missing", async () => {
@@ -587,6 +596,26 @@ describe("production desktop wiring", () => {
     await expect(handlers.get("uclaw:system-node")!({ sender: webContents, senderFrame: frame }, { method: "terminal.list", requestId: "terminal-production-1", params: {} })).resolves.toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
     expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([expect.objectContaining({ method: "environments.list", params: {} })]));
     expect(ScriptedWebSocket.instances[0]!.sent).not.toEqual(expect.arrayContaining([expect.objectContaining({ method: "terminal.list" })]));
+    dispose();
+    await options.dispose?.();
+  });
+
+  it("registers production System Voice IPC and fails closed without renderer permission authority", async () => {
+    ScriptedWebSocket.outcome = "system-voice";
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
+    const options = await createDesktopMainOptions(productionEnv);
+    options.buildGatewayLaunchOptions(18804);
+    await options.probeCapabilities(18804, new AbortController().signal);
+    const registration = options.domainRegistrations!.resolve("system-voice") as {
+      installIpc(context: { ipcMain: { handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void; removeHandler(channel: string): void }; authorizedWebContents: { mainFrame: unknown } }): () => void;
+    } | undefined;
+    expect(registration).toBeDefined();
+    const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const frame = {};
+    const webContents = { mainFrame: frame };
+    const dispose = registration!.installIpc({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: (channel) => handlers.delete(channel) }, authorizedWebContents: webContents });
+    await expect(handlers.get("uclaw:system-voice")!({ sender: webContents, senderFrame: frame }, { method: "voicewake.get", requestId: "system-voice-read", params: {} })).resolves.toEqual({ method: "voicewake.get", requestId: "system-voice-read", ok: true, result: { authority: { triggers: ["uclaw"] }, permissions: { microphone: "unknown", notifications: "restricted" } } });
+    await expect(handlers.get("uclaw:system-voice")!({ sender: webContents, senderFrame: frame }, { method: "talk.session.create", requestId: "system-voice-denied", params: { mode: "realtime" } })).resolves.toMatchObject({ ok: false, error: { code: "AUTHORIZATION_REQUIRED" } });
     dispose();
     await options.dispose?.();
   });
