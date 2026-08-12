@@ -458,7 +458,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .mcp-risk-confirm { display: flex; align-items: center; gap: 7px; margin-top: 14px; }
 .mcp-panel-tabs { display: flex; gap: 4px; padding: 3px; width: fit-content; border: 1px solid var(--uclaw-border-primary); border-radius: 7px; background: var(--uclaw-bg-input); }
 .mcp-panel-tabs button { min-height: 32px; padding: 0 12px; border-radius: 5px; color: var(--uclaw-text-secondary); }
-.mcp-panel-tabs button[aria-pressed="true"] { color: var(--uclaw-text-primary); background: var(--uclaw-bg-elevated); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
+.mcp-panel-tabs button[aria-pressed="true"] { color: var(--uclaw-text-primary); background: var(--uclaw-bg-elevated); box-shadow: 0 1px 2px var(--uclaw-shadow); }
 .capability-tools-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .capability-tools-panel > .ant-alert, .capability-tools-panel > section:last-child { grid-column: 1 / -1; }
 .capability-tools-panel section, .approval-policy-panel { display: grid; align-content: start; gap: 10px; padding: 14px; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); }

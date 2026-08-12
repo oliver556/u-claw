@@ -168,7 +168,11 @@ const ToolCatalogSchema = z.object({
 const ToolCallResponseSchema = z.object({ toolCall: RawToolCallSchema }).strict();
 const ExecApprovalListSchema = z.array(OpenClawExecApprovalEventSchema);
 const PluginApprovalListSchema = z.array(OpenClawPluginApprovalEventSchema);
-const ConfigGetResponseSchema = z.object({ hash: z.string().min(1).optional(), valid: z.boolean() }).passthrough();
+const ConfigGetResponseSchema = z.object({
+  hash: z.string().min(1).optional(),
+  valid: z.boolean(),
+  config: z.record(z.string(), z.unknown()).optional(),
+}).passthrough();
 const ConfigPatchResponseSchema = z.object({ ok: z.literal(true) }).passthrough();
 const ChannelAccountSnapshotSchema = z.object({
   accountId: z.string().min(1),
@@ -964,10 +968,57 @@ export class OpenClawClient implements UClawClient {
               : { [server.authentication.headerName]: server.authentication.secret },
           }),
         };
+    const previous = this.readMcpServerConfig(snapshot.config, server.id);
+    const replacePaths = this.collectRemovedArrayPaths(previous, config, `mcp.servers.${server.id}`);
+    if (replacePaths.length > 0 && server.id.includes(".")) throw new RpcProtocolError("config.patch");
     await this.options.transport.router.request("config.patch", {
       raw: JSON.stringify({ mcp: { servers: { [server.id]: config } } }),
       baseHash: snapshot.hash,
+      ...(replacePaths.length === 0 ? {} : { replacePaths }),
     }, ConfigPatchResponseSchema, signal);
+    const readback = await this.options.transport.router.request("config.get", {}, ConfigGetResponseSchema, signal);
+    if (!readback.valid || !this.matchesMcpServerReadback(this.readMcpServerConfig(readback.config, server.id), config)) {
+      throw new RpcProtocolError("config.get");
+    }
+  }
+
+  private readMcpServerConfig(config: Record<string, unknown> | undefined, serverId: string): unknown {
+    if (!config || typeof config.mcp !== "object" || config.mcp === null || Array.isArray(config.mcp)) return undefined;
+    const servers = (config.mcp as Record<string, unknown>).servers;
+    if (typeof servers !== "object" || servers === null || Array.isArray(servers)) return undefined;
+    return (servers as Record<string, unknown>)[serverId];
+  }
+
+  private collectRemovedArrayPaths(previous: unknown, next: unknown, path: string): string[] {
+    if (Array.isArray(previous)) {
+      if (!Array.isArray(next) || previous.some((entry) => !next.some((candidate) => JSON.stringify(candidate) === JSON.stringify(entry)))) return [path];
+      return [];
+    }
+    if (typeof previous !== "object" || previous === null || Array.isArray(previous)) return [];
+    const nextRecord = typeof next === "object" && next !== null && !Array.isArray(next) ? next as Record<string, unknown> : {};
+    return Object.entries(previous as Record<string, unknown>).flatMap(([key, value]) =>
+      this.collectRemovedArrayPaths(value, nextRecord[key], `${path}.${key}`));
+  }
+
+  private matchesMcpServerReadback(actual: unknown, expected: unknown): boolean {
+    if (expected === null) return actual === undefined;
+    if (typeof actual !== "object" || actual === null || Array.isArray(actual) || typeof expected !== "object" || expected === null || Array.isArray(expected)) return false;
+    const actualRecord = actual as Record<string, unknown>;
+    const expectedRecord = expected as Record<string, unknown>;
+    for (const key of ["enabled", "transport", "command", "args", "url"] as const) {
+      if (key in expectedRecord && JSON.stringify(actualRecord[key]) !== JSON.stringify(expectedRecord[key])) return false;
+    }
+    for (const key of ["env", "headers"] as const) {
+      if (!(key in expectedRecord)) continue;
+      const actualSecretMap = actualRecord[key];
+      const expectedSecretMap = expectedRecord[key];
+      if (
+        typeof actualSecretMap !== "object" || actualSecretMap === null || Array.isArray(actualSecretMap) ||
+        typeof expectedSecretMap !== "object" || expectedSecretMap === null || Array.isArray(expectedSecretMap) ||
+        JSON.stringify(Object.keys(actualSecretMap).sort()) !== JSON.stringify(Object.keys(expectedSecretMap).sort())
+      ) return false;
+    }
+    return true;
   }
 
   private async readTelegramStatus(probe: boolean, signal?: AbortSignal, accountId?: string) {
