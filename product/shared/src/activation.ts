@@ -108,3 +108,29 @@ export const ClientPolicySchema = z.object({
   maximumOfflineGraceSeconds: z.number().int().min(0).max(86_400),
 }).strict();
 export type ClientPolicy = z.infer<typeof ClientPolicySchema>;
+
+export const AdminOperationSchema = z.object({
+  operatorId: IdentifierSchema,
+  requestId: IdentifierSchema,
+  idempotencyKey: IdempotencyKeySchema,
+  reason: z.string().trim().min(3).max(512),
+}).strict();
+export type AdminOperation = z.infer<typeof AdminOperationSchema>;
+
+export const AdminInventoryLocatorSchema = z.object({ inventoryId: IdentifierSchema.optional(), username: IdentifierSchema.optional(), deviceId: IdentifierSchema.optional() })
+  .strict().refine((value) => [value.inventoryId, value.username, value.deviceId].filter(Boolean).length === 1);
+export const AdminInventorySummarySchema = z.object({
+  inventoryId: IdentifierSchema, username: IdentifierSchema,
+  status: z.enum(["prepared", "binding", "active", "revoked"]),
+  newApiSetupStatus: z.enum(["pending", "configured", "suspended"]),
+  deviceId: IdentifierSchema.nullable(), licenseId: IdentifierSchema.nullable(),
+}).strict();
+export const AdminInventorySecretSchema = z.object({ inventoryId: IdentifierSchema, username: z.string(), activationCode: ActivationCodeSchema }).strict();
+export const AdminInventoryGenerateSchema = AdminOperationSchema.extend({ count: z.number().int().min(1).max(10_000) }).strict();
+export const AdminInventoryImportRecordSchema = z.object({ username: IdentifierSchema, activationCode: ActivationCodeSchema, newApiUserId: IdentifierSchema, newApiUsername: IdentifierSchema, policyDigest: Sha256Schema }).strict();
+export const AdminInventoryImportSchema = AdminOperationSchema.extend({ records: z.array(AdminInventoryImportRecordSchema).min(1).max(10_000) }).strict();
+export const AdminLicenseMutationSchema = AdminOperationSchema.extend({ confirmTarget: Sha256Schema }).strict();
+export const AdminMutationResultSchema = z.object({ licenseId: IdentifierSchema, status: z.enum(["active", "disabled", "revoked", "reissued"]), revision: z.number().int().min(1), replacementInventoryId: IdentifierSchema.nullable() }).strict();
+export const AdminReissueResponseSchema = z.object({ licenseId: IdentifierSchema, status: z.literal("reissued"), revision: z.number().int().min(1), replacementInventoryId: IdentifierSchema, username: z.string(), activationCode: ActivationCodeSchema }).strict();
+export const AdminAuditEventSchema = z.object({ eventId: IdentifierSchema, actorId: z.string(), action: z.string(), outcome: z.enum(["succeeded", "failed"]), inventoryId: IdentifierSchema.nullable(), deviceId: IdentifierSchema.nullable(), licenseId: IdentifierSchema.nullable(), requestId: IdentifierSchema, reason: z.string().nullable(), idempotencyKey: IdempotencyKeySchema.nullable(), createdAt: z.iso.datetime() }).strict();
+export const AdminMarkConfiguredSchema = AdminOperationSchema.extend({ balanceStatus: z.literal("configured") }).strict();

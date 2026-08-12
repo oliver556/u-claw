@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"u-claw-activation-server/internal/activation"
+	adminservice "u-claw-activation-server/internal/admin"
 	"u-claw-activation-server/internal/config"
 	"u-claw-activation-server/internal/license"
 	"u-claw-activation-server/internal/lifecycle"
@@ -63,7 +65,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server := newHTTPServer(cfg, func(ctx context.Context) error { return pool.Ping(ctx) }, public, kmsReadiness(kms, cfg.KMSKeyVersion))
+	repository, err := persistence.NewActivationRepository(pool)
+	if err != nil {
+		return err
+	}
+	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper})
+	if err != nil {
+		return err
+	}
+	adminHandler := transport.NewAdminHandler(transport.AdminHandlerOptions{Service: adminApplication, Operators: cfg.AdminOperators})
+	application := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/internal/v1/") {
+			adminHandler.ServeHTTP(writer, request)
+			return
+		}
+		public.ServeHTTP(writer, request)
+	})
+	server := newHTTPServer(cfg, func(ctx context.Context) error { return pool.Ping(ctx) }, application, kmsReadiness(kms, cfg.KMSKeyVersion))
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

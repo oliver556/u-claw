@@ -5,6 +5,9 @@ import {
   ActivationErrorSchema,
   ActivationRequestSchema,
   ActivationResponseSchema,
+  AdminInventoryGenerateSchema,
+  AdminInventoryLocatorSchema,
+  AdminMutationResultSchema,
   ClientPolicySchema,
   LicenseStatusSummarySchema,
   normalizeActivationCodeInput,
@@ -22,6 +25,13 @@ const request = {
 };
 
 describe("activation API contract", () => {
+	it("keeps admin mutations explicit and redacted", () => {
+		const operation = { operatorId: "operator_fixture", requestId: "request_fixture_001", idempotencyKey: "admin-fixture-001", reason: "support request" };
+		expect(AdminInventoryGenerateSchema.parse({ count: 1, ...operation }).count).toBe(1);
+		expect(() => AdminInventoryGenerateSchema.parse({ count: 1, ...operation, reason: "" })).toThrow();
+		expect(() => AdminInventoryLocatorSchema.parse({ inventoryId: "inv_fixture_001", deviceId: "dev_fixture_001" })).toThrow();
+		expect(() => AdminMutationResultSchema.parse({ licenseId: "lic_fixture_001", status: "reissued", revision: 2, replacementInventoryId: "inv_replacement_001", activationCode: "secret" })).toThrow();
+	});
   it("separates UI normalization from the strict wire activation code", () => {
     expect(normalizeActivationCodeInput("01234-56789-abcde-fghjk-mnpqrs")).toBe("0123456789ABCDEFGHJKMNPQRS");
     expect(ActivationRequestSchema.parse(request).activationCode).toBe("0123456789ABCDEFGHJKMNPQRS");

@@ -77,6 +77,9 @@ describe("activation OpenAPI contract", () => {
 
   it("uses the same normalized Crockford code pattern as shared", () => {
     expect(document.components.schemas.ActivationRequest.properties?.activationCode).toMatchObject({
+      $ref: "#/components/schemas/ActivationCode",
+    });
+    expect(document.components.schemas.ActivationCode).toMatchObject({
       pattern: "^[0-9A-HJKMNP-TV-Z]{26}$",
     });
   });

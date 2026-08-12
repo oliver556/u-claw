@@ -156,7 +156,7 @@ func (service *Service) Recover(ctx context.Context, input RecoverInput) ([]byte
 		return nil, err
 	}
 	license, err := service.repository.GetLicense(ctx, record.LicenseID)
-	if err != nil || license.DeviceID != record.DeviceID || !authenticate(license, input.StartupSecret) {
+	if err != nil || license.DeviceID != record.DeviceID || license.Status != "active" || !authenticate(license, input.StartupSecret) {
 		return nil, ErrAuthentication
 	}
 	material, err := service.envelope.Decrypt(ctx, security.EnvelopeBinding{ActivationID: record.ActivationID, DeviceID: record.DeviceID, LicenseID: record.LicenseID, KeyVersion: record.ArtifactKeyVersion}, record.ArtifactEnvelope)

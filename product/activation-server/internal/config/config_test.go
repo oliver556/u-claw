@@ -17,6 +17,7 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	keyFile := writeSigningKey(t, directory)
 	kekFile := writeTestFile(t, directory, "kek", []byte(strings.Repeat("k", 32)))
 	tokenKeyFile := writeTestFile(t, directory, "token-key", []byte(strings.Repeat("t", 32)))
+	operatorsFile := writeTestFile(t, directory, "admin-operators.json", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`))
 	values := map[string]string{
 		"DATABASE_URL":             " postgres://database.example/uclaw ",
 		"ACTIVATION_PEPPER_FILE":   pepperFile,
@@ -28,6 +29,7 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 		"KMS_KEY_VERSION":          "kms-v1",
 		"KMS_KEK_FILE":             kekFile,
 		"TOKEN_SIGNING_KEY_FILE":   tokenKeyFile,
+		"ADMIN_OPERATORS_FILE":     operatorsFile,
 		"LISTEN_ADDRESS":           " 127.0.0.1:8080 ",
 	}
 
@@ -56,6 +58,9 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	if got.TokenSigningKeyFile != tokenKeyFile || string(got.TokenSigningKey) != strings.Repeat("t", 32) {
 		t.Fatal("token signing key was not loaded")
 	}
+	if got.AdminOperatorsFile != operatorsFile || len(got.AdminOperators) != 1 {
+		t.Fatal("admin operators were not loaded")
+	}
 }
 
 func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T) {
@@ -71,6 +76,7 @@ func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T
 		"KMS_KEY_VERSION":          "kms-v1",
 		"KMS_KEK_FILE":             writeTestFile(t, directory, "required-kek", []byte(strings.Repeat("k", 32))),
 		"TOKEN_SIGNING_KEY_FILE":   writeTestFile(t, directory, "required-token-key", []byte(strings.Repeat("t", 32))),
+		"ADMIN_OPERATORS_FILE":     writeTestFile(t, directory, "required-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
 	}
 
 	for _, missingName := range requiredVariables {
@@ -122,6 +128,7 @@ func TestLoadFromRejectsInvalidSecretFilesWithoutLeakingValues(t *testing.T) {
 				"KMS_KEY_VERSION":          "kms-v1",
 				"KMS_KEK_FILE":             writeTestFile(t, directory, "valid-kek", []byte(strings.Repeat("k", 32))),
 				"TOKEN_SIGNING_KEY_FILE":   writeTestFile(t, directory, "valid-token-key", []byte(strings.Repeat("t", 32))),
+				"ADMIN_OPERATORS_FILE":     writeTestFile(t, directory, "valid-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
 			}
 			_, err := LoadFrom(func(name string) string { return values[name] })
 			if err == nil {
@@ -152,6 +159,7 @@ func TestLoadFromAcceptsOnlyExplicitKEKFormats(t *testing.T) {
 		"KMS_PROVIDER":             "local-kek-v1",
 		"KMS_KEY_VERSION":          "kms-v1",
 		"TOKEN_SIGNING_KEY_FILE":   writeTestFile(t, directory, "token-key", []byte(strings.Repeat("t", 32))),
+		"ADMIN_OPERATORS_FILE":     writeTestFile(t, directory, "admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
 	}
 	for name, contents := range map[string][]byte{
 		"raw":    []byte(strings.Repeat("r", 32)),
@@ -176,6 +184,15 @@ func TestLoadFromAcceptsOnlyExplicitKEKFormats(t *testing.T) {
 				t.Fatalf("error=%v", err)
 			}
 		})
+	}
+}
+
+func TestLoadAdminOperatorsRejectsDuplicateCredentialDigest(t *testing.T) {
+	directory := t.TempDir()
+	digest := strings.Repeat("a", 64)
+	path := writeTestFile(t, directory, "duplicate-operators.json", []byte(`{"operator_one":"`+digest+`","operator_two":"`+digest+`"}`))
+	if _, err := loadAdminOperators(path); err == nil {
+		t.Fatal("duplicate credential digest accepted")
 	}
 }
 

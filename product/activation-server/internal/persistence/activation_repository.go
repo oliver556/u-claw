@@ -88,13 +88,17 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 		return activation.BeginBindingResult{}, err
 	}
 	if found {
+		if err = ensureActivationRecoverable(ctx, tx, existing); err != nil {
+			return activation.BeginBindingResult{}, err
+		}
 		return resumeExisting(ctx, tx, input, existing)
 	}
 
 	var inventoryID, username, status, setupStatus string
-	err = tx.QueryRow(ctx, `SELECT id, username_normalized, status, new_api_setup_status
+	var entitlementRevision int64
+	err = tx.QueryRow(ctx, `SELECT id, username_normalized, status, new_api_setup_status, entitlement_revision
 		FROM activation_inventory WHERE activation_code_digest = $1 FOR UPDATE`, input.ActivationCodeDigest[:]).
-		Scan(&inventoryID, &username, &status, &setupStatus)
+		Scan(&inventoryID, &username, &status, &setupStatus, &entitlementRevision)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && username != input.UsernameNormalized) {
 		return activation.BeginBindingResult{}, activation.ErrActivationInvalid
 	}
@@ -110,6 +114,9 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 			return activation.BeginBindingResult{}, loadErr
 		}
 		if ok {
+			if loadErr = ensureActivationRecoverable(ctx, tx, recovered); loadErr != nil {
+				return activation.BeginBindingResult{}, loadErr
+			}
 			if recovered.ArtifactEnvelope != nil {
 				if err := tx.Commit(ctx); err != nil {
 					return activation.BeginBindingResult{}, fmt.Errorf("commit recovery lookup: %w", err)
@@ -122,7 +129,7 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 	}
 
 	record := input.Record
-	record.InventoryID, record.UsernameID = inventoryID, inventoryID
+	record.InventoryID, record.UsernameID, record.Revision = inventoryID, inventoryID, entitlementRevision
 	if err := insertBinding(ctx, tx, input, record); err != nil {
 		return activation.BeginBindingResult{}, mapBindingError(err)
 	}
@@ -130,6 +137,23 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 		return activation.BeginBindingResult{}, fmt.Errorf("commit activation binding: %w", err)
 	}
 	return activation.BeginBindingResult{Disposition: activation.BindingAcquired, Record: record}, nil
+}
+
+func ensureActivationRecoverable(ctx context.Context, tx pgx.Tx, record activation.BoundRecord) error {
+	var allowed bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM activation_inventory inventory
+		JOIN devices device ON device.inventory_id=inventory.id
+		JOIN licenses license ON license.device_id=device.device_id
+		JOIN new_api_bindings binding ON binding.inventory_id=inventory.id AND binding.device_id=device.device_id
+		WHERE inventory.id=$1 AND device.device_id=$2 AND license.license_id=$3
+		AND inventory.status='active' AND device.status='active' AND license.status='active' AND binding.status='active')`, record.InventoryID, record.DeviceID, record.LicenseID).Scan(&allowed)
+	if err != nil {
+		return fmt.Errorf("verify activation recovery status: %w", err)
+	}
+	if !allowed {
+		return activation.ErrActivationCodeAlreadyBound
+	}
+	return nil
 }
 
 func (repository *ActivationRepository) CompleteBinding(ctx context.Context, input activation.CompleteBindingInput) (activation.BoundRecord, error) {
@@ -190,6 +214,11 @@ func (repository *ActivationRepository) CompleteBinding(ctx context.Context, inp
 		VALUES ($1,'client',$2,'activation.bound','succeeded',$3,$4,$5,$6,$7)`, record.BoundAuditEventID,
 		record.DeviceID, record.InventoryID, record.DeviceID, record.LicenseID, record.RequestID, completedAt); err != nil {
 		return activation.BoundRecord{}, fmt.Errorf("record bound activation audit: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE licenses old_license SET replacement_license_id=$1,replacement_inventory_id=NULL,updated_at=$2
+		FROM activation_inventory replacement WHERE replacement.id=$3 AND replacement.replaces_license_id=old_license.license_id
+		AND old_license.status='reissued' AND old_license.replacement_inventory_id=$3`, record.LicenseID, completedAt, record.InventoryID); err != nil {
+		return activation.BoundRecord{}, fmt.Errorf("complete replacement license link: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return activation.BoundRecord{}, fmt.Errorf("commit activation completion: %w", err)
@@ -355,7 +384,10 @@ func loadAttemptByInventoryAndDevice(ctx context.Context, tx pgx.Tx, inventoryID
 		return activation.BoundRecord{}, false, activation.ErrActivationInvalid
 	}
 	return scanAttempt(tx.QueryRow(ctx, attemptSelect+` WHERE attempt.inventory_id=$1 AND device.fingerprint_version=$2
-		AND device.fingerprint_sha256=$3 ORDER BY attempt.created_at DESC LIMIT 1`, inventoryID,
+		AND device.fingerprint_sha256=$3 AND inventory.status='active' AND device.status='active'
+		AND license.status='active' AND EXISTS (SELECT 1 FROM new_api_bindings binding
+		WHERE binding.inventory_id=inventory.id AND binding.device_id=device.device_id AND binding.status='active')
+		ORDER BY attempt.created_at DESC LIMIT 1`, inventoryID,
 		record.FingerprintVersion, fingerprint))
 }
 
