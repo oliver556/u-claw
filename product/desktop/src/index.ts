@@ -42,4 +42,7 @@ export * from "./usage/usage-dispatcher.js";
 export * from "./usage/usage-domain.js";
 export * from "./automation/automation-dispatcher.js";
 export * from "./automation/automation-domain.js";
+export * from "./task-artifacts/task-artifact-dispatcher.js";
+export * from "./task-artifacts/task-artifact-domain.js";
+export * from "./task-artifacts/task-artifact-files.js";
 export * from "./window.js";

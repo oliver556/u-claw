@@ -136,6 +136,16 @@ describe("U-Claw application shell", () => {
     expect(within(navigation).getByRole("link", { name: "工作" })).toHaveAttribute("aria-current", "page");
   });
 
+  it("opens the authoritative Task and Artifact center from the titlebar", async () => {
+    const invokeTaskArtifacts = vi.fn(async (request: { method: string; requestId: string }) => ({ method: request.method, requestId: request.requestId, ok: true, result: [] }));
+    window.uclaw = { taskArtifacts: { invoke: invokeTaskArtifacts as never, subscribe: () => () => undefined } } as never;
+    renderApp();
+    fireEvent.click(screen.getByRole("button", { name: "打开任务活动中心" }));
+    expect(await screen.findByRole("region", { name: "Task 活动中心" })).toBeVisible();
+    expect(invokeTaskArtifacts).toHaveBeenCalledWith(expect.objectContaining({ method: "tasks.list" }));
+    expect(invokeTaskArtifacts).toHaveBeenCalledWith(expect.objectContaining({ method: "artifacts.list" }));
+  });
+
   it("navigates to another primary destination", () => {
     renderApp();
     fireEvent.click(screen.getByRole("link", { name: "文件" }));

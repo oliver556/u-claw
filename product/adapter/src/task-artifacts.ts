@@ -11,6 +11,7 @@ import {
   type TaskRecord,
 } from "@uclaw/shared/dist/task-artifacts.js";
 import { RpcProtocolError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
+import { UClawUnsupportedError } from "./openclaw-client.js";
 
 const AnySchema = z.unknown();
 const ObjectSchema = z.record(z.string(), z.unknown());
@@ -70,7 +71,12 @@ function artifact(value: unknown, method: string): ArtifactRecord {
 export function createOpenClawTaskArtifactService(options: OpenClawTaskArtifactOptions): TaskArtifactAuthority {
   const request = async (method: string, params: Record<string, unknown>) => {
     options.requireMethod(method);
-    return options.request ? options.request(method, params as JsonValue, AnySchema) : options.router!.request(method, params as JsonValue, AnySchema);
+    try {
+      return await (options.request ? options.request(method, params as JsonValue, AnySchema) : options.router!.request(method, params as JsonValue, AnySchema));
+    } catch (error) {
+      if (error instanceof RpcProtocolError) throw new UClawUnsupportedError(method);
+      throw error;
+    }
   };
   const readTask = async (id: string) => task(object(await request("tasks.get", { taskId: id }), "tasks.get").task, "tasks.get");
   return {

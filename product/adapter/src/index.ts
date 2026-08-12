@@ -1,6 +1,8 @@
 export { packageName } from "./package-name.js";
 export { AttachmentManager, AttachmentServiceError } from "./attachments.js";
 export { createOpenClawAutomationService } from "./automation.js";
+export { createOpenClawTaskArtifactService } from "./task-artifacts.js";
+export type { OpenClawTaskArtifactOptions, TaskArtifactRouter } from "./task-artifacts.js";
 export type { AutomationRouter, AutomationService, OpenClawAutomationOptions } from "./automation.js";
 export type { AttachmentManagerOptions, OpenClawAttachment } from "./attachments.js";
 export { mapChatEvent, mapMessage } from "./mappers/chat.js";

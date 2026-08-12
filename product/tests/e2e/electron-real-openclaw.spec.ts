@@ -151,6 +151,10 @@ test("production Electron persists real OpenClaw sessions and Provider configura
     await restartedWindow.getByRole("tab", { name: "OpenClaw Doctor" }).click();
     await expect(restartedWindow.getByText(/OpenClaw (检查通过|发现需处理项)/)).toBeVisible({ timeout: 25_000 });
 
+    await restartedWindow.getByRole("button", { name: "打开任务活动中心" }).click();
+    await expect(restartedWindow.getByRole("region", { name: "Task 活动中心" })).toBeVisible();
+    await expect(restartedWindow.getByRole("alert")).toContainText("not supported", { timeout: 10_000 });
+
     await restartedWindow.getByRole("link", { name: "自动化" }).click();
     await expect(restartedWindow.getByRole("button", { name: "查看 Agent smoke-agent" })).toBeVisible();
     await restartedWindow.getByRole("tab", { name: "定时任务" }).click();

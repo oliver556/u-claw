@@ -1,4 +1,4 @@
-import type { AttachmentIpcRequest, AttachmentIpcResponse, AutomationIpcRequest, AutomationIpcResponse, ChannelIpcRequest, ChannelIpcResponse, ClientIpcEvent, ClientIpcRequest, DataBridge, DiagnosticsIpcRequest, DiagnosticsIpcResponse, GatewayStatus, IpcResponse, McpIpcRequest, McpIpcResponse, PluginIpcRequest, PluginIpcResponse, ProviderIpcRequest, ProviderIpcResponse, RecoveryAction, ReleaseBridge, SessionAdvancedIpcRequest, SessionAdvancedIpcResponse, SkillIpcRequest, SkillIpcResponse, UsageIpcRequest, UsageIpcResponse, WindowIpcRequest } from "@uclaw/shared";
+import type { AttachmentIpcRequest, AttachmentIpcResponse, AutomationIpcRequest, AutomationIpcResponse, ChannelIpcRequest, ChannelIpcResponse, ClientIpcEvent, ClientIpcRequest, DataBridge, DiagnosticsIpcRequest, DiagnosticsIpcResponse, GatewayStatus, IpcResponse, McpIpcRequest, McpIpcResponse, PluginIpcRequest, PluginIpcResponse, ProviderIpcRequest, ProviderIpcResponse, RecoveryAction, ReleaseBridge, SessionAdvancedIpcRequest, SessionAdvancedIpcResponse, SkillIpcRequest, SkillIpcResponse, TaskArtifactIpcEventSchema, TaskArtifactIpcRequest, TaskArtifactIpcResponse, UsageIpcRequest, UsageIpcResponse, WindowIpcRequest } from "@uclaw/shared";
 import { Modal, Tooltip } from "antd";
 import { Activity, Copy, Cpu, HardDrive, Maximize2, Minus, Radio, RotateCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -41,6 +41,10 @@ declare global {
       };
       automation?: {
         invoke(request: AutomationIpcRequest): Promise<AutomationIpcResponse>;
+      };
+      taskArtifacts?: {
+        invoke(request: TaskArtifactIpcRequest): Promise<TaskArtifactIpcResponse>;
+        subscribe(listener: (event: typeof TaskArtifactIpcEventSchema._output) => void): () => void;
       };
       data?: DataBridge;
       diagnostics?: {

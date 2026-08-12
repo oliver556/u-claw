@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createOpenClawTaskArtifactService } from "../src/task-artifacts.js";
+import { UClawUnsupportedError } from "../src/openclaw-client.js";
+import { RpcProtocolError } from "../src/transport/rpc-router.js";
 
 describe("OpenClaw Task and Artifact service", () => {
   it("uses authoritative RPCs and reads back after cancel and retry", async () => {
@@ -39,5 +41,13 @@ describe("OpenClaw Task and Artifact service", () => {
     expect(onEvent).toHaveBeenCalledWith("task", expect.any(Function));
     expect(received).toHaveLength(1);
     unsubscribe();
+  });
+
+  it("reports an advertised but incompatible Task contract as unsupported", async () => {
+    const service = createOpenClawTaskArtifactService({
+      request: vi.fn(async () => { throw new RpcProtocolError("tasks.list"); }) as never,
+      requireMethod: () => undefined,
+    });
+    await expect(service.listTasks()).rejects.toBeInstanceOf(UClawUnsupportedError);
   });
 });
