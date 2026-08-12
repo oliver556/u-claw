@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer, connect } from "node:net";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -331,11 +331,19 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw Plugin, MCP, tools, and approva
     const stateDir = join(dataDir, "openclaw-state");
     const configPath = join(dataDir, "config", "openclaw.json");
     const pluginSource = join(root, "plugin-source");
+    const controlledMcpRoot = await mkdtemp(join(runtimeRoot, ".uclaw-mcp-smoke-"));
+    roots.push(controlledMcpRoot);
+    const controlledMcpEntry = join(controlledMcpRoot, "mcp-stdio-server.mjs");
+    const controlledMcpArgument = relative(runtimeRoot, controlledMcpEntry);
     await Promise.all([
       mkdir(cacheDir, { recursive: true }), mkdir(workspaceDir, { recursive: true }),
       mkdir(stateDir, { recursive: true }), mkdir(dirname(configPath), { recursive: true }),
       mkdir(join(pluginSource, "dist"), { recursive: true }),
     ]);
+    await copyFile(
+      resolve(import.meta.dirname, "../../desktop/tests/fixtures/mcp-stdio-server.mjs"),
+      controlledMcpEntry,
+    );
     const token = "uclaw-real-capability-token";
     await writeFile(configPath, `${JSON.stringify({
       gateway: { mode: "local", bind: "loopback", auth: { mode: "token", token } },
@@ -410,9 +418,11 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw Plugin, MCP, tools, and approva
       await expect(capabilityRuntime.pluginSessionAction({ pluginId: "uclaw-capability-smoke", actionId: "inspect" }))
         .rejects.toMatchObject({ code: "UNSUPPORTED", retryable: false });
     }
+    let toolsAvailable = false;
     try {
       const tools = await capabilityRuntime.tools({ agentId: "main", sessionKey: "agent:main:main" });
       expect(tools).toMatchObject({ agentId: "main", sessionKey: "agent:main:main", catalog: { groups: expect.any(Array) }, effective: { groups: expect.any(Array) } });
+      toolsAvailable = true;
     } catch (error) {
       expect(error).toMatchObject({ code: "UNSUPPORTED", retryable: false });
     }
@@ -430,16 +440,13 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw Plugin, MCP, tools, and approva
 
     const mcpServer = {
       id: "uclaw-local-smoke", name: "U-Claw local smoke", enabled: true, transport: "stdio" as const,
-      executableId: "node" as const, args: ["mcp-stdio-server.mjs"], env: {},
+      executableId: "node" as const, args: [controlledMcpArgument], env: {},
     };
     await running.options.client!.mcp!.configure(mcpServer, new AbortController().signal);
     expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({
       mcp: { servers: { "uclaw-local-smoke": { enabled: true, transport: "stdio", command: "node" } } },
     });
-    const controlledMcpRoot = join(root, "mcp-runtime");
-    await mkdir(controlledMcpRoot);
-    await copyFile(resolve(import.meta.dirname, "../../desktop/tests/fixtures/mcp-stdio-server.mjs"), join(controlledMcpRoot, "mcp-stdio-server.mjs"));
-    const probe = createMcpProtocolProbe({ runtimeRoot: controlledMcpRoot, executables: { node: nodeExecutable } });
+    const probe = createMcpProtocolProbe({ runtimeRoot, executables: { node: nodeExecutable } });
     await expect(probe.test(mcpServer, new AbortController().signal)).resolves.toMatchObject({
       status: "connected", capabilitySummary: { tools: 1, resources: 1 }, toolNames: ["fixture_search"], resourceSchemes: ["fixture"],
     });
@@ -456,12 +463,32 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw Plugin, MCP, tools, and approva
         policy: { security: "deny", ask: "always", askFallback: "deny", autoAllowSkills: false },
       });
     }
-    await expect(running.options.client!.mcp!.remove(mcpServer, new AbortController().signal)).rejects.toThrow(
-      /config\.patch would remove entries from array path/u,
-    );
+    if (toolsAvailable) {
+      await expect(running.options.capabilityRuntime!.tools({ agentId: "main", sessionKey: "agent:main:main" }))
+        .resolves.toSatisfy((tools) => JSON.stringify(tools).includes("fixture_search"));
+    }
+    const updatedMcpServer = { ...mcpServer, args: [controlledMcpArgument, "--updated"] };
+    await running.options.client!.mcp!.configure(updatedMcpServer, new AbortController().signal);
+    await running.options.dispose?.();
+    await stopGateway(running.child);
+    running = await start();
     expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({
-      mcp: { servers: { "uclaw-local-smoke": { args: ["mcp-stdio-server.mjs"] } } },
+      mcp: { servers: { "uclaw-local-smoke": { args: [controlledMcpArgument, "--updated"] } } },
     });
+    if (toolsAvailable) {
+      await expect(running.options.capabilityRuntime!.tools({ agentId: "main", sessionKey: "agent:main:main" }))
+        .resolves.toSatisfy((tools) => JSON.stringify(tools).includes("fixture_search"));
+    }
+    await running.options.client!.mcp!.remove(updatedMcpServer, new AbortController().signal);
+    await running.options.dispose?.();
+    await stopGateway(running.child);
+    running = await start();
+    const afterRemoval = JSON.parse(await readFile(configPath, "utf8")) as { mcp?: { servers?: Record<string, unknown> } };
+    expect(afterRemoval.mcp?.servers?.[mcpServer.id]).toBeUndefined();
+    if (toolsAvailable) {
+      await expect(running.options.capabilityRuntime!.tools({ agentId: "main", sessionKey: "agent:main:main" }))
+        .resolves.toSatisfy((tools) => !JSON.stringify(tools).includes("fixture_search"));
+    }
     await running.options.dispose?.();
     await stopGateway(running.child);
     await runtime.uninstall("uclaw-capability-smoke");

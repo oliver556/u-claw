@@ -1443,46 +1443,93 @@ describe("OpenClawClient", () => {
   it("patches only the target mcp.servers entry with CAS and strict transport secrets", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push("config.get", "config.patch");
-    transport.fixtures.set("config.get", { hash: "config-hash", valid: true });
+    transport.fixtureQueues.set("config.get", [
+      { hash: "config-hash", valid: true, config: {} },
+      { hash: "config-hash-1", valid: true, config: { mcp: { servers: {
+        header: { enabled: true, transport: "http", url: "https://header.example.com/mcp", headers: { "X-MCP-Key": "[REDACTED]" } },
+      } } } },
+    ]);
     transport.fixtures.set("config.patch", { ok: true });
     const client = new OpenClawClient({ transport });
     await client.gateway.negotiate();
     const mcp = (client as any).mcp;
     const signal = new AbortController().signal;
-    const stdio = {
-      id: "local", name: "Local", enabled: true, transport: "stdio",
-      executableId: "node", args: ["server.mjs"], env: { MCP_TOKEN: "stdio-secret" },
-    };
-    const bearer = {
-      id: "remote", name: "Remote", enabled: true, transport: "streamable-http",
-      url: "https://mcp.example.com/rpc", authentication: { type: "bearer", secret: "bearer-secret" },
-    };
     const header = {
       id: "header", name: "Header", enabled: true, transport: "http",
       url: "https://header.example.com/mcp", authentication: { type: "header", headerName: "X-MCP-Key", secret: "header-secret" },
     };
 
-    await mcp.configure(stdio, signal);
-    await mcp.configure(bearer, signal);
     await mcp.configure(header, signal);
-    await mcp.stop(bearer, signal);
-    await mcp.start(bearer, signal);
-    await mcp.remove(header, signal);
 
     const patches = transport.requests.filter(({ method }) => method === "config.patch").map(({ params }) => params as any);
-    expect(patches.map(({ baseHash }) => baseHash)).toEqual(Array(6).fill("config-hash"));
+    expect(patches.map(({ baseHash }) => baseHash)).toEqual(["config-hash"]);
     expect(patches.map(({ raw }) => JSON.parse(raw))).toEqual([
-      { mcp: { servers: { local: { enabled: true, transport: "stdio", command: "node", args: ["server.mjs"], env: { MCP_TOKEN: "stdio-secret" } } } } },
-      { mcp: { servers: { remote: { enabled: true, transport: "streamable-http", url: "https://mcp.example.com/rpc", headers: { Authorization: "Bearer bearer-secret" } } } } },
       { mcp: { servers: { header: { enabled: true, transport: "http", url: "https://header.example.com/mcp", headers: { "X-MCP-Key": "header-secret" } } } } },
-      { mcp: { servers: { remote: { enabled: false, transport: "streamable-http", url: "https://mcp.example.com/rpc", headers: { Authorization: "Bearer bearer-secret" } } } } },
-      { mcp: { servers: { remote: { enabled: true, transport: "streamable-http", url: "https://mcp.example.com/rpc", headers: { Authorization: "Bearer bearer-secret" } } } } },
-      { mcp: { servers: { header: null } } },
     ]);
-    expect(transport.calls).toEqual([
-      "config.get", "config.patch", "config.get", "config.patch", "config.get", "config.patch",
-      "config.get", "config.patch", "config.get", "config.patch", "config.get", "config.patch",
+    expect(transport.calls).toEqual(["config.get", "config.patch", "config.get"]);
+  });
+
+  it("uses exact replace paths and verifies authoritative readback for MCP update", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("config.get", "config.patch");
+    transport.fixtureQueues.set("config.get", [
+      { hash: "before", valid: true, config: { mcp: { servers: { local: { enabled: true, transport: "stdio", command: "node", args: ["old.mjs"], env: {} } } } } },
+      { hash: "after", valid: true, config: { mcp: { servers: { local: { enabled: true, transport: "stdio", command: "node", args: ["new.mjs"], env: {} } } } } },
     ]);
+    transport.fixtures.set("config.patch", { ok: true });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await client.mcp.configure({
+      id: "local", name: "Local", enabled: true, transport: "stdio",
+      executableId: "node", args: ["new.mjs"], env: {},
+    }, new AbortController().signal);
+
+    expect(transport.requests.find(({ method }) => method === "config.patch")?.params).toMatchObject({
+      baseHash: "before", replacePaths: ["mcp.servers.local.args"],
+    });
+    expect(transport.calls).toEqual(["config.get", "config.patch", "config.get"]);
+  });
+
+  it("uses exact replace paths and verifies authoritative readback for MCP removal", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("config.get", "config.patch");
+    transport.fixtureQueues.set("config.get", [
+      { hash: "before", valid: true, config: { mcp: { servers: { local: { enabled: true, transport: "stdio", command: "node", args: ["server.mjs"], env: {} } } } } },
+      { hash: "after", valid: true, config: { mcp: { servers: {} } } },
+    ]);
+    transport.fixtures.set("config.patch", { ok: true });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await client.mcp.remove({
+      id: "local", name: "Local", enabled: true, transport: "stdio",
+      executableId: "node", args: ["server.mjs"], env: {},
+    }, new AbortController().signal);
+
+    expect(transport.requests.find(({ method }) => method === "config.patch")?.params).toMatchObject({
+      baseHash: "before", replacePaths: ["mcp.servers.local.args"],
+    });
+    expect(transport.calls).toEqual(["config.get", "config.patch", "config.get"]);
+  });
+
+  it("fails closed when MCP authoritative readback drops secret-bearing structure", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("config.get", "config.patch");
+    transport.fixtureQueues.set("config.get", [
+      { hash: "before", valid: true, config: {} },
+      { hash: "after", valid: true, config: { mcp: { servers: { local: {
+        enabled: true, transport: "stdio", command: "node", args: ["server.mjs"], env: {},
+      } } } } },
+    ]);
+    transport.fixtures.set("config.patch", { ok: true });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.mcp.configure({
+      id: "local", name: "Local", enabled: true, transport: "stdio",
+      executableId: "node", args: ["server.mjs"], env: { MCP_TOKEN: "secret" },
+    }, new AbortController().signal)).rejects.toBeInstanceOf(RpcProtocolError);
   });
 
   it("mounts the managed channel runtime with logout and message operations", async () => {
