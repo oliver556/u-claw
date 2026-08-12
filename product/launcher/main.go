@@ -75,23 +75,25 @@ func launcherMain(ctx context.Context, executablePath string, localAppData strin
 
 func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 	return Dependencies{
-		Paths:              paths,
-		Reporter:           reporter,
-		USBInterval:        500 * time.Millisecond,
-		StartupGrace:       2 * time.Second,
-		ProcessStopTimeout: 2 * time.Second,
-		ReadManifest:       ReadManifest,
-		ProbeDataDirectory: ProbeDataDirectory,
+		Paths:                 paths,
+		Reporter:              reporter,
+		USBInterval:           500 * time.Millisecond,
+		StartupGrace:          2 * time.Second,
+		ProcessStopTimeout:    2 * time.Second,
+		ReadManifest:          ReadManifest,
+		ProbeDataDirectory:    ProbeDataDirectory,
+		DetectActivationState: DetectActivationState,
 		VerifyLicense: func(packageRoot string, usbRoot string) error {
 			return verifyProductionStartupLicense(packageRoot, usbRoot, paths.HostCacheRoot)
 		},
-		EnsureHostCache:     EnsureHostCacheOwnership,
-		AcquireInstanceLock: AcquireInstanceLock,
-		PrepareRuntime:      prepareRuntimeForLaunch,
-		AcquireRuntime:      AcquireRuntimeLease,
-		CheckSequence:       CheckRuntimeSequence,
-		AcceptSequence:      AcceptRuntimeSequence,
-		FinalizeUpdate:      FinalizeUpdateTransaction,
+		EnsureHostCache:       EnsureHostCacheOwnership,
+		AcquireInstanceLock:   AcquireInstanceLock,
+		PrepareRuntime:        prepareRuntimeForLaunch,
+		AcquireRuntime:        AcquireRuntimeLease,
+		CheckSequence:         CheckRuntimeSequence,
+		AcceptSequence:        AcceptRuntimeSequence,
+		FinalizeUpdate:        FinalizeUpdateTransaction,
+		ActivationProcessSpec: ActivationProcessSpec,
 		StartProcess: func(spec ProcessSpec) (ChildProcess, error) {
 			return StartManagedProcess(spec)
 		},
