@@ -23,14 +23,14 @@ type ProposalForm = "create" | "update" | null;
 
 const messageOf = (error: unknown, fallback: string) => error instanceof Error && error.message ? error.message : fallback;
 
-export function SkillManager() {
+export function SkillManager({ publicView = false }: { publicView?: boolean } = {}) {
   const invoke = window.uclaw?.skills?.invoke;
   const mounted = useRef(true);
   const loadSequence = useRef(0);
   const proposalInspectSequence = useRef(0);
   const selectedProposalId = useRef<string | null>(null);
   const mutationPendingRef = useRef(false);
-  const [view, setView] = useState<View>("catalog");
+  const [view, setView] = useState<View>(publicView ? "installed" : "catalog");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [items, setItems] = useState<SkillCatalogItem[]>([]);
@@ -341,10 +341,10 @@ export function SkillManager() {
   const actionLabel = action === "install" ? "安装" : action === "update" ? "更新" : "启用";
 
   return <section className="skill-manager" aria-label="技能管理">
-    <div className="skill-view-tabs" role="tablist" aria-label="技能视图">
+    {!publicView ? <div className="skill-view-tabs" role="tablist" aria-label="技能视图">
       {([['catalog', '免费目录'], ['installed', '已安装'], ['runtime', '运行状态'], ['curator', 'Curator'], ['proposals', 'Proposals']] as const).map(([id, label]) =>
         <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => switchView(id)}>{label}</button>)}
-    </div>
+    </div> : null}
 
     {(view === "catalog" || view === "installed") ? <>
       <div className="skill-toolbar">
