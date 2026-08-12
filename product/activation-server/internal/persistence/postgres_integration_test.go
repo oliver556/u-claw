@@ -34,6 +34,7 @@ func TestInitialMigrationContainsAuthoritativeTablesAndConstraints(t *testing.T)
 		"inventory_id UUID PRIMARY KEY REFERENCES activation_inventory(id)",
 		"balance_setup_status TEXT NOT NULL CHECK (balance_setup_status IN ('pending', 'configured', 'suspended'))",
 		"status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'revoked'))",
+		"status TEXT NOT NULL CHECK (status IN ('prepared', 'active', 'disabled', 'revoked', 'expired', 'reissued'))",
 		"artifact_envelope BYTEA",
 		"artifact_key_version TEXT",
 		"CHECK (status IN ('prepared', 'binding', 'active', 'revoked'))",
