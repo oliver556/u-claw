@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE TABLE IF NOT EXISTS licenses (
     license_id UUID PRIMARY KEY,
     device_id UUID NOT NULL REFERENCES devices(device_id),
-    status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'revoked', 'expired', 'reissued')),
+    status TEXT NOT NULL CHECK (status IN ('prepared', 'active', 'disabled', 'revoked', 'expired', 'reissued')),
     revision BIGINT NOT NULL CHECK (revision > 0),
     key_id TEXT NOT NULL,
     startup_secret_salt BYTEA NOT NULL CHECK (octet_length(startup_secret_salt) BETWEEN 16 AND 64),
@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS activation_attempts (
     artifact_key_version TEXT,
     pending_material_envelope BYTEA,
     pending_material_key_version TEXT,
+    request_id TEXT NOT NULL CHECK (char_length(request_id) BETWEEN 3 AND 128),
+    active_status_event_id UUID NOT NULL,
+    bound_audit_event_id UUID NOT NULL,
     last_error_code TEXT,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
