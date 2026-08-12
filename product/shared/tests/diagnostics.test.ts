@@ -65,6 +65,15 @@ describe("diagnostics IPC contracts", () => {
     expect(JSON.stringify([doctor, network])).not.toMatch(/(?:command|https?:\/\/|[A-Za-z]:\\\\|\/Users\/)/);
   });
 
+  it("accepts the namespaced check IDs emitted by the locked OpenClaw Doctor", () => {
+    expect(DiagnosticsIpcResponseSchema.safeParse({ method: "doctor.run", requestId: "doctor-real", ok: true, result: {
+      state: "issues", adapter: "openclaw", checks: [{ id: "core/doctor/gateway-health", label: "Gateway 健康", level: "warning", summary: "检查需要注意。" }],
+    } }).success).toBe(true);
+    expect(DiagnosticsIpcResponseSchema.safeParse({ method: "doctor.run", requestId: "doctor-unsafe", ok: true, result: {
+      state: "issues", adapter: "openclaw", checks: [{ id: "core/../secret", label: "非法路径", level: "error", summary: "非法检查。" }],
+    } }).success).toBe(false);
+  });
+
   it("accepts authoritative runtime, stability, and audit requests without arbitrary payloads", () => {
     for (const method of ["runtime.get", "stability.get", "audit.get"] as const) {
       expect(DiagnosticsIpcRequestSchema.parse({ method, requestId: method, params: {} }).method).toBe(method);

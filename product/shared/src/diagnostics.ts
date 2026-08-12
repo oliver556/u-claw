@@ -6,7 +6,7 @@ import { UClawErrorSchema } from "./errors.js";
 const RequestIdSchema = z.string().min(1).max(128);
 const CursorSchema = z.string().min(1).max(128);
 const QuerySchema = z.string().trim().max(200).optional();
-const DoctorCheckIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,63}$/);
+const DoctorCheckIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,63}(?:\/[a-z0-9][a-z0-9._:-]{0,63}){0,7}$/);
 export const DOCTOR_REPAIR_ACTION_IDS = ["gateway-restart"] as const;
 export const DoctorRepairActionIdSchema = z.enum(DOCTOR_REPAIR_ACTION_IDS);
 export type DoctorRepairActionId = z.infer<typeof DoctorRepairActionIdSchema>;
