@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -59,24 +58,26 @@ type ChildProcess interface {
 }
 
 type Dependencies struct {
-	Paths               PortablePaths
-	Reporter            Reporter
-	USBInterval         time.Duration
-	StartupGrace        time.Duration
-	ProcessStopTimeout  time.Duration
-	ReadManifest        func(path string) (Manifest, error)
-	ProbeDataDirectory  func(packageRoot string, dataDir string) error
-	VerifyLicense       func(packageRoot string, usbRoot string) error
-	EnsureHostCache     func(cacheRoot string) error
-	AcquireInstanceLock func(dataDir string) (InstanceLock, error)
-	PrepareRuntime      func(context.Context, string, string, Manifest, func()) (CacheResult, error)
-	AcquireRuntime      func(string, Manifest) (RuntimeLease, error)
-	CheckSequence       func(string, Manifest) error
-	AcceptSequence      func(string, Manifest) error
-	FinalizeUpdate      func(string, Manifest) error
-	StartProcess        func(ProcessSpec) (ChildProcess, error)
-	MonitorUSB          func(context.Context, string, time.Duration) error
-	AppendLog           func(dataDir string, event string) error
+	Paths                 PortablePaths
+	Reporter              Reporter
+	USBInterval           time.Duration
+	StartupGrace          time.Duration
+	ProcessStopTimeout    time.Duration
+	ReadManifest          func(path string) (Manifest, error)
+	ProbeDataDirectory    func(packageRoot string, dataDir string) error
+	DetectActivationState func(packageRoot string) (ActivationState, error)
+	VerifyLicense         func(packageRoot string, usbRoot string) error
+	EnsureHostCache       func(cacheRoot string) error
+	AcquireInstanceLock   func(dataDir string) (InstanceLock, error)
+	PrepareRuntime        func(context.Context, string, string, Manifest, func()) (CacheResult, error)
+	AcquireRuntime        func(string, Manifest) (RuntimeLease, error)
+	CheckSequence         func(string, Manifest) error
+	AcceptSequence        func(string, Manifest) error
+	FinalizeUpdate        func(string, Manifest) error
+	ActivationProcessSpec func(PortablePaths, Manifest, RuntimeLease) ProcessSpec
+	StartProcess          func(ProcessSpec) (ChildProcess, error)
+	MonitorUSB            func(context.Context, string, time.Duration) error
+	AppendLog             func(dataDir string, event string) error
 }
 
 type processWaitResult struct {
@@ -93,120 +94,173 @@ func Run(ctx context.Context, deps Dependencies) error {
 		}
 	}
 	appendLog("launcher-started")
-	reporter.State(StateStarting)
+	for activationRuns := 0; ; {
+		reporter.State(StateStarting)
 
-	reporter.State(StateValidatingUSB)
-	if err := deps.ProbeDataDirectory(deps.Paths.PackageRoot, deps.Paths.DataDir); err != nil {
-		return reportFailure(reporter, err)
-	}
-	reporter.State(StateValidatingLicense)
-	if err := deps.VerifyLicense(deps.Paths.PackageRoot, deps.Paths.USBRoot); err != nil {
-		return reportFailure(reporter, err)
-	}
-	lock, err := deps.AcquireInstanceLock(deps.Paths.DataDir)
-	if err != nil {
-		return reportFailure(reporter, err)
-	}
-	defer lock.Close()
-	if err := deps.EnsureHostCache(deps.Paths.HostCacheRoot); err != nil {
-		return reportFailure(reporter, err)
-	}
+		reporter.State(StateValidatingUSB)
+		if err := deps.ProbeDataDirectory(deps.Paths.PackageRoot, deps.Paths.DataDir); err != nil {
+			return reportFailure(reporter, err)
+		}
+		activationState, err := deps.DetectActivationState(deps.Paths.PackageRoot)
+		if err != nil {
+			return reportFailure(reporter, err)
+		}
+		activationOnly := activationState == ActivationRequired
+		if activationState == LicenseLocalInvalid {
+			reporter.State(StateValidatingLicense)
+			if err := deps.VerifyLicense(deps.Paths.PackageRoot, deps.Paths.USBRoot); err != nil {
+				return reportFailure(reporter, err)
+			}
+			return reportFailure(reporter, ErrLicenseLocalInvalid)
+		}
+		if activationOnly {
+			if activationRuns >= 1 {
+				return reportFailure(reporter, ErrActivationRestartLimit)
+			}
+			reporter.State(StateActivationRequired)
+		} else {
+			reporter.State(StateValidatingLicense)
+			if err := deps.VerifyLicense(deps.Paths.PackageRoot, deps.Paths.USBRoot); err != nil {
+				return reportFailure(reporter, err)
+			}
+			lock, err := deps.AcquireInstanceLock(deps.Paths.DataDir)
+			if err != nil {
+				return reportFailure(reporter, err)
+			}
+			defer lock.Close()
+		}
+		if err := deps.EnsureHostCache(deps.Paths.HostCacheRoot); err != nil {
+			return reportFailure(reporter, err)
+		}
 
-	reporter.State(StateCheckingRuntime)
-	manifest, err := deps.ReadManifest(filepath.Join(deps.Paths.PackageRoot, "version.json"))
-	if err != nil {
-		return reportFailure(reporter, err)
-	}
-	if err := deps.CheckSequence(deps.Paths.HostCacheRoot, manifest); err != nil {
-		return reportFailure(reporter, err)
-	}
-	cache, err := deps.PrepareRuntime(
-		ctx,
-		deps.Paths.CacheRoot,
-		deps.Paths.PackageRoot,
-		manifest,
-		func() { reporter.State(StateExtractingRuntime) },
-	)
-	if err != nil {
-		return reportFailure(reporter, err)
-	}
-	lease, err := deps.AcquireRuntime(cache.Path, manifest)
-	if err != nil {
-		return reportFailure(reporter, err)
-	}
-	reporter.State(StateStartingApp)
-	runtimeRoot := lease.RootPath()
-	entrypoint := filepath.Join(runtimeRoot, filepath.FromSlash(strings.ReplaceAll(manifest.Entrypoint, `\`, "/")))
-	process, err := deps.StartProcess(ProcessSpec{
-		Path:  entrypoint,
-		Args:  append([]string(nil), manifest.EntryArgs...),
-		Dir:   filepath.Dir(entrypoint),
-		Env:   append(portableProcessEnvironment(deps.Paths), "UCLAW_RUNTIME_DIR="+runtimeRoot),
-		Lease: lease,
-	})
-	if err != nil {
-		appendLog("launcher-failed")
-		return reportFailure(reporter, errors.Join(ErrAppStartFailed, err, lease.Close()))
-	}
-	appendLog("runtime-started")
-	waitResult := make(chan processWaitResult, 1)
-	go func() {
-		waitResult <- processWaitResult{processErr: process.Wait(), leaseErr: lease.Close()}
-	}()
-	if deps.StartupGrace > 0 {
-		grace := time.NewTimer(deps.StartupGrace)
-		select {
-		case result := <-waitResult:
-			grace.Stop()
-			return reportFailure(reporter, errors.Join(ErrAppExited, result.processErr, result.leaseErr))
-		case <-grace.C:
+		reporter.State(StateCheckingRuntime)
+		manifest, err := deps.ReadManifest(filepath.Join(deps.Paths.PackageRoot, "version.json"))
+		if err != nil {
+			return reportFailure(reporter, err)
+		}
+		if err := deps.CheckSequence(deps.Paths.HostCacheRoot, manifest); err != nil {
+			return reportFailure(reporter, err)
+		}
+		cache, err := deps.PrepareRuntime(
+			ctx,
+			deps.Paths.CacheRoot,
+			deps.Paths.PackageRoot,
+			manifest,
+			func() { reporter.State(StateExtractingRuntime) },
+		)
+		if err != nil {
+			return reportFailure(reporter, err)
+		}
+		lease, err := deps.AcquireRuntime(cache.Path, manifest)
+		if err != nil {
+			return reportFailure(reporter, err)
+		}
+		if activationOnly {
+			reporter.State(StateStartingActivation)
+			process, err := deps.StartProcess(deps.ActivationProcessSpec(deps.Paths, manifest, lease))
+			if err != nil {
+				return reportFailure(reporter, errors.Join(ErrAppStartFailed, err, lease.Close()))
+			}
+			waitResult := make(chan processWaitResult, 1)
+			go func() {
+				waitResult <- processWaitResult{processErr: process.Wait(), leaseErr: lease.Close()}
+			}()
+			monitorCtx, cancelMonitor := context.WithCancel(ctx)
+			usbResult := make(chan error, 1)
+			go func() { usbResult <- deps.MonitorUSB(monitorCtx, deps.Paths.USBRoot, deps.USBInterval) }()
 			select {
 			case result := <-waitResult:
+				cancelMonitor()
+				if ActivationCompleted(result.processErr) && result.leaseErr == nil {
+					activationRuns++
+					continue
+				}
+				return reportFailure(reporter, errors.Join(ErrActivationExited, result.processErr, result.leaseErr))
+			case err := <-usbResult:
+				cancelMonitor()
+				cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout)
+				if ctx.Err() != nil {
+					if cleanupErr != nil {
+						return reportFailure(reporter, errors.Join(ErrActivationExited, cleanupErr))
+					}
+					return ctx.Err()
+				}
+				return reportFailure(reporter, errors.Join(err, cleanupErr))
+			case <-ctx.Done():
+				cancelMonitor()
+				if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
+					return reportFailure(reporter, errors.Join(ErrActivationExited, cleanupErr))
+				}
+				return ctx.Err()
+			}
+		}
+
+		reporter.State(StateStartingApp)
+		process, err := deps.StartProcess(NormalProcessSpec(deps.Paths, manifest, lease))
+		if err != nil {
+			appendLog("launcher-failed")
+			return reportFailure(reporter, errors.Join(ErrAppStartFailed, err, lease.Close()))
+		}
+		appendLog("runtime-started")
+		waitResult := make(chan processWaitResult, 1)
+		go func() {
+			waitResult <- processWaitResult{processErr: process.Wait(), leaseErr: lease.Close()}
+		}()
+		if deps.StartupGrace > 0 {
+			grace := time.NewTimer(deps.StartupGrace)
+			select {
+			case result := <-waitResult:
+				grace.Stop()
 				return reportFailure(reporter, errors.Join(ErrAppExited, result.processErr, result.leaseErr))
-			default:
+			case <-grace.C:
+				select {
+				case result := <-waitResult:
+					return reportFailure(reporter, errors.Join(ErrAppExited, result.processErr, result.leaseErr))
+				default:
+				}
+			case <-ctx.Done():
+				if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
+					return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
+				}
+				return ctx.Err()
 			}
+		}
+		if err := deps.AcceptSequence(deps.Paths.HostCacheRoot, manifest); err != nil {
+			return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
+		}
+		if err := deps.FinalizeUpdate(deps.Paths.PackageRoot, manifest); err != nil {
+			return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
+		}
+		reporter.State(StateReady)
+
+		monitorCtx, cancelMonitor := context.WithCancel(ctx)
+		defer cancelMonitor()
+		usbResult := make(chan error, 1)
+		go func() { usbResult <- deps.MonitorUSB(monitorCtx, deps.Paths.USBRoot, deps.USBInterval) }()
+
+		select {
+		case result := <-waitResult:
+			appendLog("runtime-stopped")
+			if err := errors.Join(result.processErr, result.leaseErr); err != nil {
+				return reportFailure(reporter, errors.Join(ErrAppExited, err))
+			}
+			return nil
+		case err := <-usbResult:
+			appendLog("runtime-stopped")
+			if ctx.Err() != nil {
+				if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
+					return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
+				}
+				return ctx.Err()
+			}
+			return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
 		case <-ctx.Done():
+			appendLog("runtime-stopped")
 			if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
 				return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
 			}
 			return ctx.Err()
 		}
-	}
-	if err := deps.AcceptSequence(deps.Paths.HostCacheRoot, manifest); err != nil {
-		return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
-	}
-	if err := deps.FinalizeUpdate(deps.Paths.PackageRoot, manifest); err != nil {
-		return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
-	}
-	reporter.State(StateReady)
-
-	monitorCtx, cancelMonitor := context.WithCancel(ctx)
-	defer cancelMonitor()
-	usbResult := make(chan error, 1)
-	go func() { usbResult <- deps.MonitorUSB(monitorCtx, deps.Paths.USBRoot, deps.USBInterval) }()
-
-	select {
-	case result := <-waitResult:
-		appendLog("runtime-stopped")
-		if err := errors.Join(result.processErr, result.leaseErr); err != nil {
-			return reportFailure(reporter, errors.Join(ErrAppExited, err))
-		}
-		return nil
-	case err := <-usbResult:
-		appendLog("runtime-stopped")
-		if ctx.Err() != nil {
-			if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
-				return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
-			}
-			return ctx.Err()
-		}
-		return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
-	case <-ctx.Done():
-		appendLog("runtime-stopped")
-		if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
-			return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
-		}
-		return ctx.Err()
 	}
 }
 
@@ -251,9 +305,12 @@ func portableProcessEnvironment(paths PortablePaths) []string {
 }
 
 var (
-	ErrAppStartFailed    = errors.New("application start failed")
-	ErrAppExited         = errors.New("application exited unexpectedly")
-	ErrProcessStopFailed = errors.New("application stop failed")
+	ErrAppStartFailed         = errors.New("application start failed")
+	ErrAppExited              = errors.New("application exited unexpectedly")
+	ErrProcessStopFailed      = errors.New("application stop failed")
+	ErrLicenseLocalInvalid    = errors.New("local license material invalid")
+	ErrActivationExited       = errors.New("activation window exited unexpectedly")
+	ErrActivationRestartLimit = errors.New("activation restart limit reached")
 )
 
 func reportFailure(reporter Reporter, err error) error {
@@ -336,6 +393,12 @@ func diagnosticFor(err error) (string, string) {
 		return "E_APP_START_FAILED", "无法启动 U-Claw，请重新启动。"
 	case errors.Is(err, ErrAppExited):
 		return "E_APP_EXITED", "U-Claw 意外退出，请重新启动。"
+	case errors.Is(err, ErrActivationExited):
+		return "E_ACTIVATION_EXITED", "激活窗口意外退出，请重新启动 U-Claw。"
+	case errors.Is(err, ErrActivationRestartLimit):
+		return "E_ACTIVATION_RESTART_LIMIT", "激活完成后授权仍未生效，请重新启动 U-Claw。"
+	case errors.Is(err, ErrLicenseLocalInvalid):
+		return "E_LICENSE_LOCAL_INVALID", "本地授权材料不完整，请联系服务人员。"
 	default:
 		return "E_INTERNAL", "U-Claw 启动失败，请重新启动。"
 	}
