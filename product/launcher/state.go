@@ -11,19 +11,25 @@ import (
 type State string
 
 const (
-	StateStarting          State = "STARTING"
-	StateValidatingUSB     State = "VALIDATING_USB"
-	StateValidatingLicense State = "VALIDATING_LICENSE"
-	StateCheckingRuntime   State = "CHECKING_RUNTIME"
-	StateExtractingRuntime State = "EXTRACTING_RUNTIME"
-	StateStartingApp       State = "STARTING_APP"
-	StateReady             State = "READY"
+	StateStarting           State = "STARTING"
+	StateActivationRequired State = "ACTIVATION_REQUIRED"
+	StateStartingActivation State = "STARTING_ACTIVATION"
+	StateValidatingUSB      State = "VALIDATING_USB"
+	StateValidatingLicense  State = "VALIDATING_LICENSE"
+	StateCheckingRuntime    State = "CHECKING_RUNTIME"
+	StateExtractingRuntime  State = "EXTRACTING_RUNTIME"
+	StateStartingApp        State = "STARTING_APP"
+	StateReady              State = "READY"
 )
 
 func stateText(state State) string {
 	switch state {
 	case StateStarting:
 		return "正在启动 U-Claw..."
+	case StateActivationRequired:
+		return "需要先激活 U-Claw。"
+	case StateStartingActivation:
+		return "正在打开激活窗口..."
 	case StateValidatingUSB:
 		return "正在检查 U 盘数据目录..."
 	case StateValidatingLicense:
