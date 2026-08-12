@@ -51,12 +51,14 @@ export function SessionSidebar({
   onRetryOrganizer = () => undefined,
 }: SessionSidebarProps) {
   const [query, setQuery] = useState("");
+  const [activeGroupId, setActiveGroupId] = useState<string>();
   const [groupDialog, setGroupDialog] = useState<{ mode: "create" } | { mode: "rename"; group: SessionGroup }>();
   const [groupName, setGroupName] = useState("");
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
-  const visibleSessions = useMemo(() => sessions
+  const scopedSessions = useMemo(() => activeGroupId === undefined ? sessions : sessions.filter((session) => session.groupId === activeGroupId), [activeGroupId, sessions]);
+  const visibleSessions = useMemo(() => scopedSessions
     .filter((session) => normalizedQuery === "" || `${session.title} ${session.lastMessagePreview ?? ""}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery))
-    .sort((left, right) => Number(right.pinned) - Number(left.pinned) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || left.id.localeCompare(right.id)), [normalizedQuery, sessions]);
+    .sort((left, right) => Number(right.pinned) - Number(left.pinned) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || left.id.localeCompare(right.id)), [normalizedQuery, scopedSessions]);
   const groupOptions = [{ value: "", label: "未分组" }, ...groups.map((group) => ({ value: group.id, label: group.name }))];
   const closeGroupDialog = () => {
     setGroupDialog(undefined);
@@ -88,6 +90,8 @@ export function SessionSidebar({
 
   const sections = normalizedQuery !== ""
     ? [{ id: "search", label: "搜索结果", items: visibleSessions }]
+    : activeGroupId !== undefined
+      ? groups.filter((group) => group.id === activeGroupId).map((group) => ({ id: group.id, label: group.name, items: visibleSessions }))
     : [
         { id: "pinned", label: "已固定", items: visibleSessions.filter((session) => session.pinned) },
         ...groups.map((group) => ({ id: group.id, label: group.name, items: visibleSessions.filter((session) => !session.pinned && session.groupId === group.id) })),
@@ -99,7 +103,7 @@ export function SessionSidebar({
     <label className="session-search"><Search aria-hidden="true" /><span className="sr-only">搜索会话</span><input type="search" placeholder="搜索会话" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
     <div className="session-group-bar">
       <span>分组</span>
-      {groups.length === 0 ? <small>还没有分组</small> : <div>{groups.map((group) => <span key={group.id}>{group.name}<Tooltip title="重命名分组"><button type="button" aria-label={`重命名分组 ${group.name}`} onClick={() => { setGroupName(group.name); setGroupDialog({ mode: "rename", group }); }}><Pencil /></button></Tooltip></span>)}</div>}
+      {groups.length === 0 ? <small>还没有分组</small> : <div>{groups.map((group) => <span key={group.id} className={activeGroupId === group.id ? "active" : undefined}><button type="button" aria-label={`筛选分组 ${group.name}`} aria-pressed={activeGroupId === group.id} onClick={() => setActiveGroupId((current) => current === group.id ? undefined : group.id)}>{group.name}</button><Tooltip title="重命名分组"><button type="button" aria-label={`重命名分组 ${group.name}`} onClick={() => { setGroupName(group.name); setGroupDialog({ mode: "rename", group }); }}><Pencil /></button></Tooltip></span>)}</div>}
       <Tooltip title="新建分组"><button type="button" aria-label="新建分组" onClick={() => { setGroupName(""); setGroupDialog({ mode: "create" }); }}><FolderPlus /></button></Tooltip>
     </div>
     {organizerState === "loading" ? <div className="organizer-status"><LoaderCircle className="spin" />正在加载整理信息</div> : null}

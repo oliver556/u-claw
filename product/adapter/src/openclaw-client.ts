@@ -106,6 +106,7 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "chat.history", "chat.message.get", "chat.send", "chat.abort",
   "tools.catalog", "session.tool.get", "exec.approval.list", "plugin.approval.list",
   "exec.approval.resolve", "plugin.approval.resolve", "sessions.patch", "models.list",
+  "commands.list",
   "config.get", "config.patch", "channels.status", "channels.start", "channels.stop", "channels.logout", "tools.invoke",
   "diagnostics.doctor",
   "logs.tail", "health", "status", "system.info", "diagnostics.stability", "audit.list",
@@ -156,6 +157,16 @@ const SessionPageSchema = z.object({
 }).strict();
 
 const SendResponseSchema = z.object({ runId: z.string().min(1), status: z.string().min(1) }).passthrough();
+const CommandsListResponseSchema = z.object({
+  commands: z.array(z.object({
+    name: z.string().min(1),
+    textAliases: z.array(z.string().min(1)).optional(),
+    description: z.string().optional(),
+    source: z.enum(["native", "skill", "plugin"]),
+    scope: z.enum(["text", "native", "both"]),
+    acceptsArgs: z.boolean(),
+  }).passthrough()),
+}).passthrough();
 const EmptyResponseSchema = z.union([z.object({}).strict(), z.null()]);
 const SessionDescribeResponseSchema = z.object({ session: RawSessionSchema.nullable() }).strict();
 const SessionsCreateResponseSchema = z.object({
@@ -820,7 +831,27 @@ export class OpenClawClient implements UClawClient {
       throw new AttachmentServiceError("FILE_TOO_LARGE", "附件累计大小超过单条消息限制。");
     }
     const attachments = resolvedAttachments.map(({ byteLength: _byteLength, ...attachment }) => attachment);
-    const text = input.blocks.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+    let text = input.blocks.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+    if (input.skillId !== undefined) {
+      this.requireMethod("commands.list");
+      const agentId = /^agent:([^:]+):/u.exec(input.sessionId)?.[1] ?? "main";
+      const expectedCommand = input.skillId.toLocaleLowerCase("en-US")
+        .replace(/[^a-z0-9_]+/gu, "_")
+        .replace(/_+/gu, "_")
+        .replace(/^_+|_+$/gu, "")
+        .slice(0, 32) || "skill";
+      const catalog = await this.options.transport.router.request("commands.list", { agentId, scope: "text", includeArgs: false }, CommandsListResponseSchema, signal);
+      const matches = catalog.commands.filter((command) => command.source === "skill" && command.scope !== "native" &&
+        (command.name === expectedCommand || command.textAliases?.some((alias) => alias.replace(/^\//u, "") === expectedCommand) === true));
+      if (matches.length !== 1) {
+        const message = "Selected Skill is unavailable or has no unique command.";
+        throw new AdapterServiceError(message, UClawErrorSchema.parse({
+          code: "UNAVAILABLE", message, retryable: false,
+          recoveryActions: [], causeDetails: { operation: "commands.list" },
+        }));
+      }
+      text = `/${matches[0]!.name}${text === "" ? "" : ` ${text}`}`;
+    }
     const queue = new AsyncEventQueue<MessageEvent>();
     let expectedRunId: string | undefined;
     const buffered: MessageEvent[] = [];

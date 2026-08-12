@@ -34,6 +34,17 @@ test("creates a session group through the production Electron UI and reads it ba
     await page.getByRole("button", { name: "创建分组" }).click();
     const groupLabel = page.locator(".session-group-bar > div > span", { hasText: name });
     await expect(groupLabel).toBeVisible();
+    await page.getByRole("button", { name: `筛选分组 ${name}` }).click();
+    await expect(page.getByRole("button", { name: `筛选分组 ${name}` })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: `筛选分组 ${name}` }).click();
+    if (await page.getByRole("textbox", { name: "给 U-Claw 发送消息" }).count() === 0) {
+      await page.getByRole("button", { name: "新建会话", exact: true }).first().click();
+      await expect(page.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toBeVisible();
+    }
+    await expect(page.locator(".canvas-head")).toHaveCount(0);
+    await expect(page.getByRole("complementary", { name: "上下文舱" })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "会话模型" })).toBeAttached();
+    await expect(page.getByRole("combobox", { name: "下一条消息 Skill" })).toBeAttached();
     await page.reload();
     await expect(groupLabel).toBeVisible();
   } finally {
