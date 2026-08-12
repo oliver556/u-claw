@@ -116,6 +116,8 @@ export const OPENCLAW_IMPLEMENTED_METHODS = [
   "agents.files.list", "agents.files.get", "agents.files.set",
   "agents.workspace.list", "agents.workspace.get",
   "cron.list", "cron.status", "cron.get", "cron.add", "cron.update", "cron.remove", "cron.run", "cron.runs",
+  "tasks.list", "tasks.get", "tasks.cancel", "tasks.retry",
+  "artifacts.list", "artifacts.get", "artifacts.download",
 ] as const;
 
 const implementedMethods = new Set<string>(OPENCLAW_IMPLEMENTED_METHODS);

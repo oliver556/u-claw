@@ -21,7 +21,7 @@ import { SessionSidebar } from "../features/sessions/SessionSidebar";
 import { CapabilitiesView } from "../features/capabilities/CapabilitiesView";
 import { AutomationManager } from "../features/automation/AutomationManager";
 import { ChannelSettings } from "../features/channels/ChannelSettings";
-import { TaskActivityCenter } from "../features/activity/TaskActivityCenter";
+import { TaskArtifactCenter } from "../features/activity/TaskArtifactCenter";
 import { DataManager } from "../features/data/DataManager";
 import { SystemDiagnostics } from "../features/system/SystemDiagnostics";
 import { MaintenanceCenter } from "../features/data/MaintenanceCenter";
@@ -307,10 +307,12 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
         void refreshSessions(readback.id, true);
       }} /> : null}
     </div>
-    <TaskActivityCenter open={activityCenterOpen} service={client.activityCenter} onClose={() => setActivityCenterOpen(false)} onOpenSession={(sessionId) => {
-      navigate("/");
-      void selectSession(sessionId);
-      setActivityCenterOpen(false);
-    }} />
+    {activityCenterOpen ? <aside className="task-activity-center" aria-label="全局任务活动中心">
+      <TaskArtifactCenter onOpenSession={(sessionId) => {
+        navigate("/");
+        void selectSession(sessionId);
+        setActivityCenterOpen(false);
+      }} />
+    </aside> : null}
   </div>;
 }

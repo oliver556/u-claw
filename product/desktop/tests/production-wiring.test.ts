@@ -13,7 +13,7 @@ import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fi
 
 class ScriptedWebSocket {
   static instances: ScriptedWebSocket[] = [];
-  static outcome: "success" | "usage" | "automation" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
+  static outcome: "success" | "usage" | "automation" | "task-artifacts" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
   static skillDisabled = false;
   static selectedModel: { sessionId: string; providerId: string; model: string } | undefined;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -40,6 +40,14 @@ class ScriptedWebSocket {
     this.sent.push(frame);
     if (frame.method === "agents.list") {
       queueMicrotask(() => this.respond(frame, { agents: [{ id: "main", name: "Main" }] }));
+      return;
+    }
+    if (frame.method === "tasks.list") {
+      queueMicrotask(() => this.respond(frame, { tasks: [{ id: "task-1", title: "Report", status: "running", createdAt: "2026-08-12T08:00:00.000Z", updatedAt: "2026-08-12T08:01:00.000Z" }] }));
+      return;
+    }
+    if (frame.method === "artifacts.list") {
+      queueMicrotask(() => this.respond(frame, { artifacts: [] }));
       return;
     }
     if (frame.method === "usage.status") {
@@ -171,7 +179,7 @@ class ScriptedWebSocket {
         payload: {
           type: "hello-ok",
           protocol: ScriptedWebSocket.outcome === "protocol" ? 3 : 4,
-          server: { version: "2026.7.1-2" },
+          server: { version: ScriptedWebSocket.outcome === "task-artifacts" ? "2026.8.0-contract-fixture" : "2026.7.1-2" },
           features: {
             methods: ScriptedWebSocket.outcome === "missing-methods"
               ? ["sessions.list", "chat.history", "chat.send"]
@@ -179,7 +187,9 @@ class ScriptedWebSocket {
                 ? ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send", "usage.status", "usage.cost", "sessions.usage", "sessions.usage.timeseries", "sessions.usage.logs"]
                 : ScriptedWebSocket.outcome === "automation"
                   ? ["sessions.list", "sessions.describe", "chat.history", "chat.send", "agents.list", "agent.identity.get", "agents.create", "agents.update", "agents.delete", "agents.files.list", "agents.files.get", "agents.files.set", "agents.workspace.list", "agents.workspace.get", "cron.list", "cron.status", "cron.get", "cron.add", "cron.update", "cron.remove", "cron.run", "cron.runs"]
-                : ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send"],
+                  : ScriptedWebSocket.outcome === "task-artifacts"
+                    ? ["sessions.list", "sessions.describe", "chat.history", "chat.send", "tasks.list", "tasks.get", "tasks.cancel", "tasks.retry", "artifacts.list", "artifacts.get", "artifacts.download"]
+                  : ["sessions.list", "sessions.describe", "sessions.patch", "chat.history", "chat.send"],
             events: ["chat"],
           },
           policy: { maxPayload: 1_000_000, maxBufferedBytes: 2_000_000 },
@@ -529,6 +539,27 @@ describe("production desktop wiring", () => {
     await options.dispose?.();
   });
 
+  it("registers production Task/Artifact IPC and dispatches through OpenClaw", async () => {
+    ScriptedWebSocket.outcome = "task-artifacts";
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
+    const options = await createDesktopMainOptions(productionEnv);
+    options.buildGatewayLaunchOptions(18802);
+    await options.probeCapabilities(18802, new AbortController().signal);
+    const registration = options.domainRegistrations!.resolve("task-artifacts") as {
+      installIpc(context: { ipcMain: { handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void; removeHandler(channel: string): void }; authorizedWebContents: { mainFrame: unknown; send(...args: unknown[]): void } }): () => void;
+    } | undefined;
+    expect(registration).toBeDefined();
+    const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const frame = {};
+    const webContents = { mainFrame: frame, send: vi.fn() };
+    const dispose = registration!.installIpc({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: (channel) => handlers.delete(channel) }, authorizedWebContents: webContents });
+    const taskResponse = await handlers.get("uclaw:task-artifacts")!({ sender: webContents, senderFrame: frame }, { method: "tasks.list", requestId: "tasks-production-1", params: {} });
+    expect(taskResponse).toMatchObject({ ok: true, result: [{ id: "task-1", title: "Report" }] });
+    expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([expect.objectContaining({ method: "tasks.list", params: {} })]));
+    dispose();
+    await options.dispose?.();
+  });
+
   it("resolves the repository portable Skill root when the explicit override is absent", async () => {
     delete productionEnv.UCLAW_PORTABLE_SKILLS_DIR;
     const options = await createDesktopMainOptions(productionEnv);
@@ -719,7 +750,7 @@ describe("production desktop wiring", () => {
 
     const uninstall = options.domainRegistrations!.installIpc({
       ipcMain: { handle: vi.fn(), removeHandler: vi.fn() } as never,
-      authorizedWebContents: { mainFrame: {} },
+      authorizedWebContents: { mainFrame: {}, send: vi.fn() },
       client: options.client!,
       services: { get: () => undefined },
     });
@@ -741,7 +772,7 @@ describe("production desktop wiring", () => {
     options.domainRegistrations!.register("work.second", { installIpc: () => second });
     const uninstall = options.domainRegistrations!.installIpc({
       ipcMain: { handle: vi.fn(), removeHandler: vi.fn() } as never,
-      authorizedWebContents: { mainFrame: {} },
+      authorizedWebContents: { mainFrame: {}, send: vi.fn() },
       client: options.client!,
       services: { get: () => undefined },
     });
@@ -762,7 +793,7 @@ describe("production desktop wiring", () => {
       try {
         options.domainRegistrations!.installIpc({
           ipcMain: { handle: vi.fn(), removeHandler: vi.fn() } as never,
-          authorizedWebContents: { mainFrame: {} },
+          authorizedWebContents: { mainFrame: {}, send: vi.fn() },
           client: options.client!,
           services: { get: () => undefined },
         });

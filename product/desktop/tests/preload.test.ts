@@ -7,6 +7,8 @@ import {
   IPC_CHANNELS,
   RELEASE_IPC_CHANNEL,
   SESSION_ADVANCED_IPC_CHANNEL,
+  TASK_ARTIFACT_EVENT_CHANNEL,
+  TASK_ARTIFACT_IPC_CHANNEL,
   USAGE_IPC_CHANNEL,
   WINDOW_MAXIMIZED_EVENT_CHANNEL,
   WINDOW_IPC_CHANNEL,
@@ -17,6 +19,7 @@ describe("installPreloadBridge", () => {
   it("registers release in the fixed IPC channel inventory", () => {
     expect(IPC_CHANNELS).toContain(RELEASE_IPC_CHANNEL);
     expect(IPC_CHANNELS).toContain(AUTOMATION_IPC_CHANNEL);
+    expect(IPC_CHANNELS).toContain(TASK_ARTIFACT_IPC_CHANNEL);
   });
 
   it("exposes only fixed window and client contract methods", async () => {
@@ -43,7 +46,7 @@ describe("installPreloadBridge", () => {
       ipcRenderer: { invoke, on, removeListener },
     });
 
-    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "sessionAdvanced", "usage", "automation", "data", "diagnostics", "release"]);
+    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "sessionAdvanced", "usage", "automation", "taskArtifacts", "data", "diagnostics", "release"]);
     expect(api).not.toHaveProperty("ipcRenderer");
     expect(api).not.toHaveProperty("invoke");
     expect(Object.keys(api?.client as object)).toEqual(["invoke", "subscribe"]);
@@ -56,6 +59,7 @@ describe("installPreloadBridge", () => {
     expect(Object.keys(api?.sessionAdvanced as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.usage as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.automation as object)).toEqual(["invoke"]);
+    expect(Object.keys(api?.taskArtifacts as object)).toEqual(["invoke", "subscribe"]);
     expect(Object.keys(api?.data as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.diagnostics as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.release as object)).toEqual(["invoke"]);
@@ -83,6 +87,14 @@ describe("installPreloadBridge", () => {
 
     await (api?.automation as { invoke: (request: unknown) => Promise<unknown> }).invoke({ method: "agents.list", requestId: "automation-1", params: {} });
     expect(invoke).toHaveBeenLastCalledWith(AUTOMATION_IPC_CHANNEL, expect.any(Object));
+
+    await (api?.taskArtifacts as { invoke: (request: unknown) => Promise<unknown> }).invoke({ method: "tasks.list", requestId: "tasks-1", params: {} });
+    expect(invoke).toHaveBeenLastCalledWith(TASK_ARTIFACT_IPC_CHANNEL, expect.any(Object));
+    const taskListener = vi.fn();
+    const unsubscribeTasks = (api?.taskArtifacts as { subscribe: (listener: (event: unknown) => void) => () => void }).subscribe(taskListener);
+    expect(on).toHaveBeenCalledWith(TASK_ARTIFACT_EVENT_CHANNEL, expect.any(Function));
+    unsubscribeTasks();
+    expect(removeListener).toHaveBeenCalledWith(TASK_ARTIFACT_EVENT_CHANNEL, expect.any(Function));
 
     await expect((api?.usage as { invoke: (request: unknown) => Promise<unknown> }).invoke({
       method: "usage.session-logs",

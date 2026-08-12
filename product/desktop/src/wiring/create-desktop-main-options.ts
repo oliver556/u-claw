@@ -13,7 +13,9 @@ import {
   OpenClawClient,
   UClawUnsupportedError,
   createOpenClawAutomationService,
+  createOpenClawTaskArtifactService,
   createOpenClawUsageService,
+  type EventFrame,
   type HelloOk,
   type OpenClawTransport,
   type WebSocketLike,
@@ -43,6 +45,9 @@ import { createUsageDispatcher } from "../usage/usage-dispatcher.js";
 import { createUsageDomainRegistration } from "../usage/usage-domain.js";
 import { createAutomationDispatcher } from "../automation/automation-dispatcher.js";
 import { createAutomationDomainRegistration } from "../automation/automation-domain.js";
+import { createTaskArtifactDispatcher } from "../task-artifacts/task-artifact-dispatcher.js";
+import { createTaskArtifactDomainRegistration } from "../task-artifacts/task-artifact-domain.js";
+import { createTaskArtifactFileService } from "../task-artifacts/task-artifact-files.js";
 import { createDesktopLogSink } from "../diagnostics/desktop-log-sink.js";
 import { createOpenClawDoctorRuntime } from "../diagnostics/openclaw-doctor-runtime.js";
 import {
@@ -129,6 +134,8 @@ class PortAwareGatewayTransport implements OpenClawTransport {
   private port: number | undefined;
   private active: GatewayWebSocket | undefined;
   private hello: HelloOk | undefined;
+  private readonly eventListeners = new Map<string, Set<(frame: EventFrame) => void>>();
+  private eventDisposers: Array<() => void> = [];
 
   constructor(private readonly token: string) {}
 
@@ -139,6 +146,10 @@ class PortAwareGatewayTransport implements OpenClawTransport {
   get router(): OpenClawTransport["router"] {
     if (!this.active) throw new DesktopWiringError("GATEWAY_DISCONNECTED", "Gateway is not connected.", true);
     return this.active.router;
+  }
+
+  get serverVersion(): string | undefined {
+    return this.hello?.server.version;
   }
 
   setPort(port: number): void {
@@ -166,13 +177,35 @@ class PortAwareGatewayTransport implements OpenClawTransport {
       }),
     });
     this.hello = await this.active.connect();
+    this.attachEventListeners();
     return this.hello;
+  }
+
+  onEvent(event: string, listener: (frame: EventFrame) => void): () => void {
+    const listeners = this.eventListeners.get(event) ?? new Set();
+    listeners.add(listener);
+    this.eventListeners.set(event, listeners);
+    this.attachEventListeners();
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.eventListeners.delete(event);
+      this.attachEventListeners();
+    };
+  }
+
+  private attachEventListeners(): void {
+    for (const dispose of this.eventDisposers.splice(0)) dispose();
+    if (!this.active) return;
+    for (const [event, listeners] of this.eventListeners) {
+      for (const listener of listeners) this.eventDisposers.push(this.active.router.onEvent(event, listener));
+    }
   }
 
   close(): void {
     const active = this.active;
     this.active = undefined;
     this.hello = undefined;
+    for (const dispose of this.eventDisposers.splice(0)) dispose();
     active?.close();
   }
 }
@@ -406,10 +439,25 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     request: (method, params) => transport.router.request(method, params as never, z.unknown()),
   });
   let gatewayMethods: ReadonlySet<string> = new Set();
+  let taskArtifactContractAvailable = false;
   const automationDispatcher = createAutomationDispatcher(createOpenClawAutomationService({
     request: (method, params, schema) => transport.router.request(method, params, schema),
     requireMethod: (method) => { if (!gatewayMethods.has(method)) throw new UClawUnsupportedError(method); },
   }));
+  const taskArtifactAuthority = createOpenClawTaskArtifactService({
+    request: (method, params, schema) => transport.router.request(method, params, schema),
+    onEvent: (event, listener) => transport.onEvent(event, listener),
+    requireMethod: (method) => { if (!taskArtifactContractAvailable || !gatewayMethods.has(method)) throw new UClawUnsupportedError(method); },
+  });
+  const taskArtifactFiles = createTaskArtifactFileService({
+    dataRoot: environment.dataRoot,
+    shell: { openPath: async (path) => (await import("electron")).shell.openPath(path) },
+    selectExportTarget: async (suggestedName) => {
+      const selected = await (await import("electron")).dialog.showSaveDialog({ defaultPath: suggestedName });
+      return selected.canceled ? undefined : selected.filePath;
+    },
+  });
+  const taskArtifactDispatcher = createTaskArtifactDispatcher(taskArtifactAuthority, taskArtifactFiles);
   const usageDispatcher = createUsageDispatcher({
     openClaw: createOpenClawUsageService({
       request: (method, params) => transport.router.request(method, params as never, z.unknown()),
@@ -435,6 +483,10 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     {
       name: "automation",
       register: () => createAutomationDomainRegistration(automationDispatcher),
+    },
+    {
+      name: "task-artifacts",
+      register: () => createTaskArtifactDomainRegistration(taskArtifactAuthority, taskArtifactDispatcher),
     },
   ]);
   const dispatcher = createClientDispatcher({ client, sendEvent: () => undefined });
@@ -469,6 +521,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
         const capabilities = await withAbort(client.gateway.negotiate(), signal, () => transport.close());
         const methods = capabilities.methods;
         gatewayMethods = methods;
+        taskArtifactContractAvailable = transport.serverVersion !== "2026.7.1-2";
         if (!REQUIRED_GATEWAY_METHODS.every((method) => methods.has(method))) {
           throw new DesktopWiringError("UNSUPPORTED", "Gateway is missing required methods.");
         }

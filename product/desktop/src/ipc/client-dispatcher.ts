@@ -40,7 +40,6 @@ import {
 } from "@uclaw/shared";
 
 import type { SessionOrganizerStore } from "../session-organizer/store.js";
-import { buildTaskCenterSnapshot } from "../activity/task-snapshot.js";
 
 export interface ClientDispatcherDependencies {
   client: UClawClient;
@@ -475,8 +474,8 @@ export function createClientDispatcher({
           await organizer?.removeSession(request.params.sessionId).catch(() => undefined);
           return success(request, null);
         }
-        case "activity.list": return success(request, (await buildTaskCenterSnapshot(client)).activity);
-        case "artifacts.list": return success(request, (await buildTaskCenterSnapshot(client, undefined, request.params.sessionId)).artifacts);
+        case "activity.list":
+        case "artifacts.list": throw { code: "UNSUPPORTED", message: "Task and Artifact authority requires the dedicated production bridge.", retryable: false, recoveryActions: [], causeDetails: {} };
         case "session-organizer.get": {
           if (!organizer) throw { code: "UNAVAILABLE", retryable: false, recoveryActions: [], causeDetails: {} };
           return success(request, await organizer.load());
