@@ -53,6 +53,7 @@ import { createChannelDispatcher, type ChannelRuntime } from "../channels/channe
 import type { ChannelStore } from "../channels/channel-store.js";
 import { createMcpDispatcher, type McpRuntime } from "../mcp/mcp-dispatcher.js";
 import type { McpStore } from "../mcp/mcp-store.js";
+import type { OpenClawCapabilityRuntime } from "../capabilities/openclaw-capability-runtime.js";
 import { createSessionAdvancedDispatcher } from "../sessions/session-advanced-dispatcher.js";
 import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, RELEASE_IPC_CHANNEL, SESSION_ADVANCED_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
@@ -91,6 +92,7 @@ export interface RegisterIpcDependencies {
   channelRuntime?: ChannelRuntime;
   mcp?: McpStore;
   mcpRuntime?: McpRuntime;
+  capabilityRuntime?: OpenClawCapabilityRuntime;
   sessionAdvanced?: SessionAdvancedService;
   dispatchData?(request: DataIpcRequest): Promise<unknown>;
   dispatchDiagnostics?(request: DiagnosticsIpcRequest): Promise<unknown>;
@@ -140,6 +142,7 @@ export function registerIpc({
   channelRuntime,
   mcp,
   mcpRuntime,
+  capabilityRuntime,
   sessionAdvanced,
   dispatchData,
   dispatchDiagnostics,
@@ -167,6 +170,10 @@ export function registerIpc({
   ]);
   const mcpWriteMethods = new Set([
     "mcp.create", "mcp.update", "mcp.remove", "mcp.set-enabled", "mcp.test", "mcp.reconnect", "mcp.confirm-risk",
+    "capabilities.approvals-set",
+  ]);
+  const pluginWriteMethods = new Set([
+    "plugins.install", "plugins.update", "plugins.uninstall", "plugins.set-enabled", "plugins.session-action",
   ]);
   const diagnosticsWriteMethods = new Set(["logs.export", "logs.cleanup", "config.export"]);
   const releaseWriteMethods = new Set(["release.install", "uninstall.execute"]);
@@ -185,11 +192,11 @@ export function registerIpc({
     ? undefined
     : createProviderDispatcher(providers, providerNetwork ?? createProviderNetworkService(), providerConfig);
   const skillDispatcher = skills === undefined ? undefined : createSkillDispatcher(skills);
-  const pluginDispatcher = plugins === undefined ? undefined : createPluginDispatcher(plugins);
+  const pluginDispatcher = plugins === undefined ? undefined : createPluginDispatcher(plugins, capabilityRuntime);
   const channelDispatcher = channels === undefined || channelRuntime === undefined
     ? undefined
     : createChannelDispatcher(channels, channelRuntime);
-  const mcpDispatcher = mcp === undefined || mcpRuntime === undefined ? undefined : createMcpDispatcher(mcp, mcpRuntime);
+  const mcpDispatcher = mcp === undefined || mcpRuntime === undefined ? undefined : createMcpDispatcher(mcp, mcpRuntime, capabilityRuntime);
   const sessionAdvancedDispatcher = sessionAdvanced === undefined ? undefined : createSessionAdvancedDispatcher(sessionAdvanced);
   const authorize = (event: unknown): void => {
     const candidate = event as { sender?: unknown; senderFrame?: unknown };
@@ -334,7 +341,8 @@ export function registerIpc({
     const parsed = PluginIpcRequestSchema.safeParse(payload);
     if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid Plugin IPC request.");
     try {
-      return await pluginDispatcher(parsed.data);
+      const operation = () => pluginDispatcher(parsed.data);
+      return await (pluginWriteMethods.has(parsed.data.method) ? coordinateWrite(operation) : operation());
     } catch (error) {
       return PluginIpcResponseSchema.parse({
         method: parsed.data.method,

@@ -44,6 +44,23 @@ else if (args[1] === "install") {
   return { root, runtimeRoot, dataDir };
 }
 
+async function flakyListRuntime() {
+  const fixture = await fixtureRuntime();
+  const entrypoint = join(fixture.runtimeRoot, "openclaw.mjs");
+  await writeFile(entrypoint, `
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+const marker = join(process.env.OPENCLAW_STATE_DIR, "list-attempt.txt");
+await mkdir(process.env.OPENCLAW_STATE_DIR, { recursive: true });
+let attempt = 0;
+try { attempt = Number(await readFile(marker, "utf8")); } catch {}
+await writeFile(marker, String(attempt + 1));
+if (attempt === 0) process.exit(0);
+console.log(JSON.stringify({ plugins: [] }));
+`);
+  return fixture;
+}
+
 describe("OpenClaw CLI Plugin runtime adapter", () => {
   it("uses the production-validated explicit entrypoint without scanning the runtime inventory", async () => {
     const fixture = await fixtureRuntime();
@@ -94,6 +111,35 @@ describe("OpenClaw CLI Plugin runtime adapter", () => {
     expect((await runtime.installed())[0].enabled).toBe(false);
     await runtime.uninstall("calendar");
     expect(await runtime.installed()).toEqual([]);
+  });
+
+  it("uses the production Gateway state and config paths inside the portable data root", async () => {
+    const fixture = await fixtureRuntime();
+    const stateDir = join(fixture.dataDir, "openclaw-state");
+    const configPath = join(fixture.dataDir, "config", "openclaw.json");
+    const runtime = await createOpenClawCliPluginRuntime({
+      runtimeRoot: fixture.runtimeRoot,
+      executable: process.execPath,
+      dataDir: fixture.dataDir,
+      baseEnvironment: { OPENCLAW_STATE_DIR: stateDir, OPENCLAW_CONFIG_PATH: configPath },
+    });
+
+    const sourceDir = join(fixture.root, "portable-path-plugin");
+    await mkdir(sourceDir);
+    await writeFile(join(sourceDir, "openclaw.plugin.json"), JSON.stringify({ id: "portable-path", configSchema: { type: "object" } }));
+    await writeFile(join(sourceDir, "package.json"), JSON.stringify({ name: "portable-path", version: "1.0.0", openclaw: { extensions: ["./index.js"] } }));
+    await runtime.installFromPath({ sourceDir, slug: "portable-path" });
+    await expect(readFile(join(stateDir, "fixture-runtime.json"), "utf8")).resolves.toContain('"plugins"');
+    await expect(readFile(join(fixture.dataDir, ".openclaw", "fixture-runtime.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("retries an empty authoritative Plugin list response before parsing", async () => {
+    const fixture = await flakyListRuntime();
+    const runtime = await createOpenClawCliPluginRuntime({
+      runtimeRoot: fixture.runtimeRoot, executable: process.execPath, dataDir: fixture.dataDir,
+    });
+    await expect(runtime.installed()).resolves.toEqual([]);
+    await expect(readFile(join(fixture.dataDir, ".openclaw", "list-attempt.txt"), "utf8")).resolves.toBe("2");
   });
 
   it("does not expose runtime stderr through lifecycle errors", async () => {

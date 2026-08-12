@@ -1,4 +1,4 @@
-import type { CapabilityRisk, PluginCatalogItem, PluginDetail, PluginIpcRequest, PluginOperation } from "@uclaw/shared";
+import type { CapabilityRisk, PluginCatalogItem, PluginDetail, PluginIpcRequest, PluginOperation, PluginUiDescriptor } from "@uclaw/shared";
 import { AlertTriangle, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -12,7 +12,11 @@ const permissionKindLabel = { filesystem: "文件", network: "网络", command: 
 export function PluginManager() {
   const invoke = window.uclaw?.plugins?.invoke;
   const [items, setItems] = useState<PluginCatalogItem[]>([]);
-  const [view, setView] = useState<"catalog" | "installed">("catalog");
+  const [view, setView] = useState<"catalog" | "installed" | "actions">("catalog");
+  const [descriptors, setDescriptors] = useState<PluginUiDescriptor[]>([]);
+  const [actionState, setActionState] = useState<Record<string, "running" | "succeeded" | "failed">>({});
+  const [actionSessionKeys, setActionSessionKeys] = useState<Record<string, string>>({});
+  const [actionPayloads, setActionPayloads] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -39,8 +43,13 @@ export function PluginManager() {
       if (!invoke) throw new Error();
       const response = view === "catalog"
         ? await invoke(request("plugins.search", { query, cursor: nextCursor, pageSize: 20 }))
-        : await invoke(request("plugins.installed", {}));
-      if (!response.ok || (view === "catalog" ? response.method !== "plugins.search" : response.method !== "plugins.installed")) throw new Error();
+        : view === "installed"
+          ? await invoke(request("plugins.installed", {}))
+          : await invoke(request("plugins.ui-descriptors", {}));
+      if (!response.ok ||
+        (view === "catalog" && response.method !== "plugins.search") ||
+        (view === "installed" && response.method !== "plugins.installed") ||
+        (view === "actions" && response.method !== "plugins.ui-descriptors")) throw new Error();
       if (!mounted.current || sequence !== loadSequence.current) return;
       if (response.method === "plugins.search") {
         setItems((current) => append ? [...current, ...response.result.items.filter((item) => !current.some(({ slug }) => slug === item.slug))] : response.result.items);
@@ -48,8 +57,12 @@ export function PluginManager() {
         setHasMore(response.result.hasMore);
         setSourceMode(response.result.mode);
         setRepositoryVerified(response.result.repositoryVerified);
-      } else {
+      } else if (response.method === "plugins.installed") {
         setItems(response.result as PluginCatalogItem[]);
+        setCursor(null);
+        setHasMore(false);
+      } else if (response.method === "plugins.ui-descriptors") {
+        setDescriptors(response.result);
         setCursor(null);
         setHasMore(false);
       }
@@ -115,20 +128,39 @@ export function PluginManager() {
     void poll(operation);
   };
 
+  const runSessionAction = async (descriptor: PluginUiDescriptor) => {
+    if (!invoke || actionState[descriptor.id] === "running") return;
+    setActionState((current) => ({ ...current, [descriptor.id]: "running" }));
+    try {
+      const sessionKey = actionSessionKeys[descriptor.id]?.trim();
+      const payloadText = actionPayloads[descriptor.id]?.trim();
+      const payload = payloadText ? JSON.parse(payloadText) : undefined;
+      const response = await invoke(request("plugins.session-action", {
+        pluginId: descriptor.pluginId, actionId: descriptor.id,
+        ...(sessionKey ? { sessionKey } : {}), ...(payload === undefined ? {} : { payload }),
+      }));
+      const succeeded = response.ok && response.method === "plugins.session-action" && response.result.ok;
+      setActionState((current) => ({ ...current, [descriptor.id]: succeeded ? "succeeded" : "failed" }));
+    } catch {
+      setActionState((current) => ({ ...current, [descriptor.id]: "failed" }));
+    }
+  };
+
   return <section className="plugin-manager" aria-label="插件管理">
     <div className="plugin-view-tabs" role="tablist" aria-label="插件视图">
       <button type="button" role="tab" aria-selected={view === "catalog"} onClick={() => setView("catalog")}>插件目录</button>
       <button type="button" role="tab" aria-selected={view === "installed"} onClick={() => setView("installed")}>已安装</button>
+      <button type="button" role="tab" aria-selected={view === "actions"} onClick={() => setView("actions")}>会话操作</button>
     </div>
     <div className="plugin-toolbar">
-      {view === "catalog" ? <label><Search aria-hidden="true" /><span className="sr-only">搜索插件</span><input aria-label="搜索插件" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索插件" /></label> : <strong className="plugin-installed-heading">U 盘已安装插件</strong>}
+      {view === "catalog" ? <label><Search aria-hidden="true" /><span className="sr-only">搜索插件</span><input aria-label="搜索插件" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索插件" /></label> : <strong className="plugin-installed-heading">{view === "installed" ? "U 盘已安装插件" : "OpenClaw Plugin UI descriptors"}</strong>}
       <button type="button" aria-label="刷新插件目录" onClick={() => void load()}><RefreshCw aria-hidden="true" /></button>
       {view === "catalog" ? <span className={`plugin-mode ${sourceMode ?? "unknown"}`}>{sourceMode === "fixture" ? "Fixture 数据，真实插件仓库未验收" : sourceMode === "live" ? repositoryVerified ? "真实插件仓库" : "插件仓库未验证" : state === "error" ? "插件仓库不可用" : "正在确认插件源"}</span> : null}
     </div>
     {state === "loading" ? <div className="plugin-state"><RefreshCw className="spin" /><strong>正在加载插件目录</strong></div> : null}
     {state === "error" ? <div className="plugin-error" role="alert"><AlertTriangle /><div><strong>插件目录离线</strong><span>可重试目录；已安装插件仍从 U 盘读取。</span></div><button type="button" aria-label="重试插件目录" onClick={() => void load()}>重试</button></div> : null}
-    {state === "ready" && items.length === 0 ? <div className="plugin-state"><strong>{view === "catalog" ? "没有匹配的插件" : "尚未安装插件"}</strong><span>{view === "catalog" ? "调整搜索条件后重试。" : "从插件目录安装后会显示在这里。"}</span></div> : null}
-    {state === "ready" && items.length > 0 ? <div className="plugin-list" aria-label="插件列表">{items.map((item) => <PluginCard
+    {state === "ready" && view !== "actions" && items.length === 0 ? <div className="plugin-state"><strong>{view === "catalog" ? "没有匹配的插件" : "尚未安装插件"}</strong><span>{view === "catalog" ? "调整搜索条件后重试。" : "从插件目录安装后会显示在这里。"}</span></div> : null}
+    {state === "ready" && view !== "actions" && items.length > 0 ? <div className="plugin-list" aria-label="插件列表">{items.map((item) => <PluginCard
       key={item.slug}
       item={item}
       operation={operations[item.slug]}
@@ -136,6 +168,15 @@ export function PluginManager() {
       onDisable={() => void simpleAction(item, "plugins.set-enabled")}
       onUninstall={() => void simpleAction(item, "plugins.uninstall")}
     />)}</div> : null}
+    {state === "ready" && view === "actions" && descriptors.length === 0 ? <div className="plugin-state"><strong>没有 Plugin 会话操作</strong><span>当前 OpenClaw runtime 未注册 UI descriptor。</span></div> : null}
+    {state === "ready" && view === "actions" && descriptors.length > 0 ? <div className="plugin-action-list" aria-label="Plugin 会话操作">{descriptors.map((descriptor) => <article key={descriptor.id}>
+      <div><strong>{descriptor.label}</strong><span>{descriptor.pluginName ?? descriptor.pluginId} · {descriptor.surface}</span><small>{descriptor.description}</small></div>
+      <label>Session key<input aria-label={`${descriptor.label} session key`} value={actionSessionKeys[descriptor.id] ?? ""} onChange={(event) => setActionSessionKeys((current) => ({ ...current, [descriptor.id]: event.target.value }))} /></label>
+      {descriptor.schema !== undefined ? <label>JSON payload<textarea aria-label={`${descriptor.label} JSON payload`} value={actionPayloads[descriptor.id] ?? ""} onChange={(event) => setActionPayloads((current) => ({ ...current, [descriptor.id]: event.target.value }))} /></label> : null}
+      <button type="button" aria-label={`执行 ${descriptor.label}`} disabled={actionState[descriptor.id] === "running"} onClick={() => void runSessionAction(descriptor)}>{actionState[descriptor.id] === "running" ? "执行中" : "执行"}</button>
+      {actionState[descriptor.id] === "succeeded" ? <span role="status">操作已完成</span> : null}
+      {actionState[descriptor.id] === "failed" ? <span role="alert">操作失败</span> : null}
+    </article>)}</div> : null}
     {state === "ready" && hasMore ? <button className="plugin-load-more" type="button" aria-label="加载更多插件" onClick={() => void load(cursor, true)}>加载更多</button> : null}
     {detail ? <div className="plugin-dialog-backdrop"><div className="plugin-dialog" role="dialog" aria-modal="true" aria-label={`确认${action === "install" ? "安装" : action === "update" ? "更新" : "启用"}${detail.name}`}>
       <header><AlertTriangle /><div><strong>{riskLabel[detail.risk]}插件确认</strong><span>{detail.name}</span></div></header>

@@ -1,6 +1,8 @@
 import {
   McpServerDraftSchema,
   McpServerUpdatePatchSchema,
+  type CapabilityToolsSnapshot,
+  type ExecApprovalPolicySnapshot,
   type ManagedMcpServerSummary,
   type McpIpcRequest,
   type McpSnapshot,
@@ -92,7 +94,12 @@ function updatePatchFromForm(form: FormState): unknown {
 }
 
 export function McpManager() {
+  const [panel, setPanel] = useState<"servers" | "tools" | "approvals">("servers");
   const [snapshot, setSnapshot] = useState<McpSnapshot>();
+  const [tools, setTools] = useState<CapabilityToolsSnapshot>();
+  const [approval, setApproval] = useState<ExecApprovalPolicySnapshot>();
+  const [capabilityError, setCapabilityError] = useState(false);
+  const [approvalSaved, setApprovalSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [operationError, setOperationError] = useState(false);
@@ -119,6 +126,39 @@ export function McpManager() {
 
   useEffect(() => { void load(); }, [load]);
 
+  const loadTools = async () => {
+    if (!invoke) return;
+    setCapabilityError(false);
+    try {
+      const response = await invoke(request("capabilities.tools", { agentId: "main", sessionKey: "agent:main:main" }));
+      if (!response.ok || response.method !== "capabilities.tools") throw new Error();
+      setTools(response.result);
+    } catch { setCapabilityError(true); }
+  };
+
+  const loadApproval = async () => {
+    if (!invoke) return;
+    setCapabilityError(false);
+    setApprovalSaved(false);
+    try {
+      const response = await invoke(request("capabilities.approvals-get", {}));
+      if (!response.ok || response.method !== "capabilities.approvals-get") throw new Error();
+      setApproval(response.result);
+    } catch { setCapabilityError(true); }
+  };
+
+  const saveApproval = async () => {
+    if (!invoke || !approval) return;
+    setCapabilityError(false);
+    setApprovalSaved(false);
+    try {
+      const response = await invoke(request("capabilities.approvals-set", { baseHash: approval.hash, policy: approval.policy }));
+      if (!response.ok || response.method !== "capabilities.approvals-set") throw new Error();
+      setApproval(response.result);
+      setApprovalSaved(true);
+    } catch { setCapabilityError(true); }
+  };
+
   const mutate = async (serverId: string, operation: string, operationRequest: McpIpcRequest) => {
     if (!invoke || busy[serverId]) return false;
     setBusy((current) => ({ ...current, [serverId]: operation }));
@@ -128,7 +168,9 @@ export function McpManager() {
       if (!response.ok) throw new Error();
       if (response.method === "mcp.test" || response.method === "mcp.reconnect") {
         setSnapshot((current) => current ? { ...current, servers: current.servers.map((server) => server.id === response.result.id ? response.result : server) } : current);
-      } else if (response.method !== "mcp.cancel") setSnapshot(response.result);
+      } else if (["mcp.create", "mcp.update", "mcp.remove", "mcp.set-enabled", "mcp.confirm-risk"].includes(response.method)) {
+        setSnapshot(response.result as McpSnapshot);
+      }
       return true;
     } catch { setOperationError(true); return false; }
     finally { setBusy((current) => { const next = { ...current }; delete next[serverId]; return next; }); }
@@ -168,8 +210,15 @@ export function McpManager() {
 
   const runtimeUnavailable = snapshot?.runtime.state === "unavailable";
   return <section className="secondary-view mcp-settings">
-    <header className="mcp-page-header"><div><h1>MCP servers</h1><p>独立 server 配置、连接状态与能力摘要</p></div><Button type="primary" icon={<Plus />} aria-label="新增 MCP server" onClick={openCreate}>新增 server</Button></header>
+    <header className="mcp-page-header"><div><h1>MCP、工具与审批</h1><p>配置、实时状态与有效权限分层管理</p></div>{panel === "servers" ? <Button type="primary" icon={<Plus />} aria-label="新增 MCP server" onClick={openCreate}>新增 server</Button> : null}</header>
     <div className="secondary-content mcp-content">
+      <div className="mcp-panel-tabs" role="group" aria-label="能力管理视图">
+        <button type="button" aria-pressed={panel === "servers"} onClick={() => setPanel("servers")}>MCP servers</button>
+        <button type="button" aria-pressed={panel === "tools"} onClick={() => { setPanel("tools"); void loadTools(); }}>工具与命令</button>
+        <button type="button" aria-pressed={panel === "approvals"} onClick={() => { setPanel("approvals"); void loadApproval(); }}>审批策略</button>
+      </div>
+      {capabilityError ? <Alert type="error" showIcon message="OpenClaw 能力状态读取或写入失败" /> : null}
+      {panel === "servers" ? <>
       {runtimeUnavailable ? <Alert type="warning" showIcon message="OpenClaw runtime 未提供 MCP RPC" description="配置可保存在 U 盘，但不会标记为已连接。" /> : null}
       {snapshot?.storage.state === "degraded" ? <Alert type="error" showIcon message="MCP 配置已降级" description={snapshot.storage.message} /> : null}
       {loadError ? <Alert type="error" showIcon message="MCP 配置暂时不可用" description="本地主进程未就绪。" action={<Button size="small" aria-label="重试加载 MCP" onClick={() => void load()}>重试</Button>} /> : null}
@@ -199,6 +248,28 @@ export function McpManager() {
           </article>;
         })}
       </div>
+      </> : null}
+      {panel === "tools" ? <div className="capability-tools-panel">
+        <Alert type="info" showIcon message="配置状态与实时 probe 独立展示" description="Catalog 表示可用能力；Effective 表示当前 agent/session 实际权限。" />
+        {tools ? <>
+          <section><header><h2>Tool catalog</h2><Tag>{tools.agentId}</Tag></header>{tools.catalog.groups.map((group) => <article key={group.id}><strong>{group.label}</strong><span>{group.source}</span><ul>{group.tools.map((tool) => <li key={tool.id}><code>{tool.id}</code><span>{tool.label}</span></li>)}</ul></article>)}</section>
+          <section><header><h2>Effective tools</h2><Tag>{tools.effective.profile}</Tag></header>{tools.effective.groups.map((group) => <article key={group.id}><strong>{group.label}</strong><span>{group.source}</span><ul>{group.tools.map((tool) => <li key={tool.id}><code>{tool.id}</code><span>{tool.label}</span>{tool.risk ? <Tag color={tool.risk === "high" ? "error" : "warning"}>{tool.risk}</Tag> : null}</li>)}</ul></article>)}</section>
+          <section><header><h2>Commands</h2></header><ul>{tools.commands.map((command) => <li key={command.name}><code>/{command.name}</code><span>{command.description}</span><Tag>{command.scope}</Tag></li>)}</ul></section>
+        </> : <div className="mcp-state"><RefreshCw className="spin" /><span>正在读取 OpenClaw 工具投影</span></div>}
+      </div> : null}
+      {panel === "approvals" ? <div className="approval-policy-panel">
+        {approval ? <>
+          <Alert type={approval.policy.security === "full" || approval.policy.ask === "off" ? "warning" : "info"} showIcon message="Exec 全局默认策略" description={`security=${approval.policy.security} · ask=${approval.policy.ask} · fallback=${approval.policy.askFallback}。Agent 级覆盖与 allowlist 仍由 OpenClaw 合并决定实际权限。`} />
+          <div className="approval-policy-form">
+            <label>Security<select aria-label="Exec security" value={approval.policy.security} onChange={(event) => setApproval({ ...approval, policy: { ...approval.policy, security: event.target.value as typeof approval.policy.security } })}><option value="deny">deny</option><option value="allowlist">allowlist</option><option value="full">full</option></select></label>
+            <label>Ask<select aria-label="Exec ask" value={approval.policy.ask} onChange={(event) => setApproval({ ...approval, policy: { ...approval.policy, ask: event.target.value as typeof approval.policy.ask } })}><option value="off">off</option><option value="on-miss">on-miss</option><option value="always">always</option></select></label>
+            <label>Fallback<select aria-label="Exec fallback" value={approval.policy.askFallback} onChange={(event) => setApproval({ ...approval, policy: { ...approval.policy, askFallback: event.target.value as typeof approval.policy.askFallback } })}><option value="deny">deny</option><option value="allowlist">allowlist</option><option value="full">full</option></select></label>
+            <label className="approval-checkbox"><input type="checkbox" checked={approval.policy.autoAllowSkills} onChange={(event) => setApproval({ ...approval, policy: { ...approval.policy, autoAllowSkills: event.target.checked } })} />自动允许 Skill 声明工具</label>
+          </div>
+          <Button type="primary" aria-label="保存审批策略" onClick={() => void saveApproval()}>保存审批策略</Button>
+          {approvalSaved ? <span role="status">策略已从 OpenClaw 读回</span> : null}
+        </> : <div className="mcp-state"><RefreshCw className="spin" /><span>正在读取 OpenClaw 审批策略</span></div>}
+      </div> : null}
     </div>
 
     <Modal title={editing ? "编辑 MCP server" : "新增 MCP server"} open={formOpen} onCancel={() => setFormOpen(false)} footer={<><Button onClick={() => setFormOpen(false)}>取消</Button><Button type="primary" onClick={() => void save()}>保存 MCP server</Button></>}>

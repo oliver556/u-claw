@@ -140,12 +140,23 @@ export async function createOpenClawCliPluginRuntime(input: {
     ...(input.baseEnvironment ?? process.env),
     ELECTRON_RUN_AS_NODE: "1",
     OPENCLAW_HOME: input.dataDir,
-    OPENCLAW_STATE_DIR: openClawState,
-    OPENCLAW_CONFIG_PATH: join(openClawState, "openclaw.json"),
+    OPENCLAW_STATE_DIR: input.baseEnvironment?.OPENCLAW_STATE_DIR ?? openClawState,
+    OPENCLAW_CONFIG_PATH: input.baseEnvironment?.OPENCLAW_CONFIG_PATH ?? join(openClawState, "openclaw.json"),
   };
   const run = (args: string[]) => runCommand({ executable: input.executable, entrypoint, args, environment });
   const installed = async (): Promise<RuntimePluginRecord[]> => {
-    const result = PluginListSchema.parse(JSON.parse(await run(["plugins", "list", "--json"])) as unknown);
+    let parsed: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const output = await run(["plugins", "list", "--json"]);
+      try {
+        parsed = JSON.parse(output) as unknown;
+        break;
+      } catch {
+        if (attempt === 2) throw new Error("OpenClaw Plugin list returned invalid JSON.");
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 50 * (attempt + 1)));
+      }
+    }
+    const result = PluginListSchema.parse(parsed);
     return result.plugins.map((plugin) => ({
       slug: plugin.id,
       name: plugin.name ?? plugin.id,

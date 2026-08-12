@@ -90,6 +90,45 @@ describe("MCP contracts", () => {
     ]) expect(request.parse(value)).toBeTruthy();
   });
 
+  it("defines distinct tool catalog, effective projection, command, and approval policy operations", () => {
+    const request = api.McpIpcRequestSchema as Schema;
+    const response = api.McpIpcResponseSchema as Schema;
+    for (const value of [
+      { method: "capabilities.tools", requestId: "tools-1", params: { agentId: "main", sessionKey: "agent:main:main" } },
+      { method: "capabilities.approvals-get", requestId: "policy-1", params: {} },
+      { method: "capabilities.approvals-set", requestId: "policy-2", params: {
+        baseHash: "hash-1", policy: { security: "allowlist", ask: "on-miss", askFallback: "deny", autoAllowSkills: false },
+      } },
+    ]) expect(request.parse(value)).toBeTruthy();
+    expect(response.parse({
+      method: "capabilities.tools", requestId: "tools-1", ok: true, result: {
+        agentId: "main", sessionKey: "agent:main:main",
+        catalog: { groups: [{ id: "core", label: "Core", source: "core", tools: [{ id: "read", label: "Read", description: "Read files", source: "core", defaultProfiles: ["coding"] }] }] },
+        commands: [{ name: "status", description: "Show status", source: "native", scope: "both", acceptsArgs: false }],
+        effective: { profile: "coding", groups: [{ id: "mcp", label: "MCP", source: "mcp", tools: [{ id: "docs.search", label: "Search", description: "Search docs", source: "mcp" }] }], notices: [] },
+      },
+    })).toBeTruthy();
+  });
+
+  it("redacts sensitive text from the tool projection before it reaches renderer", () => {
+    const response = api.McpIpcResponseSchema as { parse(value: unknown): any };
+    const parsed = response.parse({
+      method: "capabilities.tools", requestId: "tools-redaction", ok: true, result: {
+        agentId: "main", sessionKey: "agent:main:main",
+        catalog: { groups: [{ id: "core", label: "Authorization: Bearer catalog-secret", source: "core", tools: [{
+          id: "read", label: "Read", description: "token=tool-secret", source: "core",
+          tags: ["api_key=tag-secret"], defaultProfiles: ["coding"],
+        }] }] },
+        commands: [{ name: "status", description: "password=command-secret", source: "native", scope: "both", acceptsArgs: false }],
+        effective: { profile: "coding", groups: [{ id: "mcp", label: "MCP", source: "mcp", tools: [] }], notices: [{
+          id: "notice", severity: "warning", message: "Authorization: Bearer notice-secret",
+        }] },
+      },
+    });
+    expect(JSON.stringify(parsed)).not.toContain("secret");
+    expect(JSON.stringify(parsed)).toContain("[REDACTED]");
+  });
+
   it("allows renderer-safe update patches to preserve main-process-only fields", () => {
     const request = api.McpIpcRequestSchema as Schema;
     expect(request.parse({ method: "mcp.update", requestId: "update-http", params: {

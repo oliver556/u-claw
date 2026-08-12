@@ -169,4 +169,46 @@ describe("McpManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "重试加载 MCP" }));
     expect(await screen.findByText("还没有 MCP server")).toBeVisible();
   });
+
+  it("shows catalog, effective tools, commands, and server probe as separate layers", async () => {
+    const invoke = vi.fn(async (request: McpIpcRequest) => success(request,
+      request.method === "capabilities.tools" ? {
+        agentId: "main", sessionKey: "agent:main:main",
+        catalog: { groups: [{ id: "core", label: "Core catalog", source: "core", tools: [{ id: "read", label: "Read", description: "Read data", source: "core", defaultProfiles: ["coding"] }] }] },
+        commands: [{ name: "status", description: "Show status", source: "native", scope: "both", acceptsArgs: false }],
+        effective: { profile: "coding", groups: [{ id: "mcp", label: "Effective MCP", source: "mcp", tools: [{ id: "docs.search", label: "Docs search", description: "Search docs", source: "mcp", risk: "medium" }] }], notices: [] },
+      } : snapshot));
+    window.uclaw = { mcp: { invoke } } as never;
+    render(<McpManager />);
+    await screen.findByText("Docs MCP");
+
+    fireEvent.click(screen.getByRole("button", { name: "工具与命令" }));
+    expect(await screen.findByText("Core catalog")).toBeVisible();
+    expect(screen.getByText("Effective MCP")).toBeVisible();
+    expect(screen.getByText("/status")).toBeVisible();
+    expect(screen.getByText("配置状态与实时 probe 独立展示")).toBeVisible();
+  });
+
+  it("reads and writes the authoritative Exec approval policy with base hash", async () => {
+    const initialPolicy = { security: "allowlist" as const, ask: "on-miss" as const, askFallback: "deny" as const, autoAllowSkills: false };
+    const invoke = vi.fn(async (request: McpIpcRequest) => success(request,
+      request.method === "capabilities.approvals-get"
+        ? { exists: true, hash: "hash-1", policy: initialPolicy }
+        : request.method === "capabilities.approvals-set"
+          ? { exists: true, hash: "hash-2", policy: request.params.policy }
+          : snapshot));
+    window.uclaw = { mcp: { invoke } } as never;
+    render(<McpManager />);
+    await screen.findByText("Docs MCP");
+
+    fireEvent.click(screen.getByRole("button", { name: "审批策略" }));
+    expect(await screen.findByDisplayValue("allowlist")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Exec security"), { target: { value: "deny" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存审批策略" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "capabilities.approvals-set",
+      params: { baseHash: "hash-1", policy: { ...initialPolicy, security: "deny" } },
+    })));
+    expect(await screen.findByText("策略已从 OpenClaw 读回")).toBeVisible();
+  });
 });

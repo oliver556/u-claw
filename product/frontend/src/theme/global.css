@@ -456,6 +456,32 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .mcp-state { min-height: 180px; display: grid; place-content: center; justify-items: center; gap: 8px; color: var(--uclaw-text-secondary); text-align: center; }.mcp-state svg { width: 22px; }
 .mcp-form { display: grid; gap: 12px; }.mcp-form label { display: grid; gap: 5px; color: var(--uclaw-text-secondary); font-size: 12px; }.mcp-form select { min-height: 34px; padding: 0 9px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; background: var(--uclaw-bg-input); }
 .mcp-risk-confirm { display: flex; align-items: center; gap: 7px; margin-top: 14px; }
+.mcp-panel-tabs { display: flex; gap: 4px; padding: 3px; width: fit-content; border: 1px solid var(--uclaw-border-primary); border-radius: 7px; background: var(--uclaw-bg-input); }
+.mcp-panel-tabs button { min-height: 32px; padding: 0 12px; border-radius: 5px; color: var(--uclaw-text-secondary); }
+.mcp-panel-tabs button[aria-pressed="true"] { color: var(--uclaw-text-primary); background: var(--uclaw-bg-elevated); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
+.capability-tools-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.capability-tools-panel > .ant-alert, .capability-tools-panel > section:last-child { grid-column: 1 / -1; }
+.capability-tools-panel section, .approval-policy-panel { display: grid; align-content: start; gap: 10px; padding: 14px; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); }
+.capability-tools-panel section > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.capability-tools-panel h2 { margin: 0; font-size: 14px; }
+.capability-tools-panel article { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; padding-top: 8px; border-top: 1px solid var(--uclaw-border-primary); }
+.capability-tools-panel article > ul { grid-column: 1 / -1; }
+.capability-tools-panel ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.capability-tools-panel li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.capability-tools-panel code { color: var(--uclaw-primary); }
+.approval-policy-panel { max-width: 720px; }
+.approval-policy-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.approval-policy-form label { display: grid; gap: 5px; color: var(--uclaw-text-secondary); font-size: 12px; }
+.approval-policy-form select { min-height: 36px; padding: 0 8px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; background: var(--uclaw-bg-input); }
+.approval-policy-form .approval-checkbox { grid-column: 1 / -1; display: flex; align-items: center; }
+.plugin-action-list { display: grid; gap: 8px; }
+.plugin-action-list article { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 0.6fr) minmax(180px, 0.6fr) auto auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; background: var(--uclaw-bg-elevated); }
+.plugin-action-list article > div { display: grid; gap: 3px; min-width: 0; }
+.plugin-action-list article span, .plugin-action-list article small { color: var(--uclaw-text-secondary); font-size: 12px; }
+.plugin-action-list article > label { display: grid; gap: 4px; min-width: 0; color: var(--uclaw-text-secondary); font-size: 12px; }
+.plugin-action-list article input, .plugin-action-list article textarea { min-width: 0; width: 100%; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; background: var(--uclaw-bg-input); color: var(--uclaw-text-primary); padding: 6px 8px; }
+.plugin-action-list article textarea { min-height: 36px; resize: vertical; }
+.plugin-action-list article > button { min-height: 34px; padding: 0 12px; border: 1px solid var(--uclaw-border-primary); border-radius: 6px; }
 
 .provider-page-header { min-height: 76px; flex-direction: row !important; align-items: center; justify-content: space-between !important; gap: 16px; }
 .provider-page-header > div { min-width: 0; }
@@ -676,6 +702,13 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
   .mcp-actions button:not(.ant-btn) { width: 44px; height: 44px; }
   .mcp-actions .ant-btn { min-height: 44px; }
   .mcp-row > .ant-switch { align-self: center; }
+  .mcp-panel-tabs { width: 100%; overflow-x: auto; }
+  .mcp-panel-tabs button { flex: 1 0 auto; min-height: 40px; }
+  .capability-tools-panel { grid-template-columns: minmax(0, 1fr); }
+  .capability-tools-panel > .ant-alert, .capability-tools-panel > section:last-child { grid-column: auto; }
+  .approval-policy-form { grid-template-columns: minmax(0, 1fr); }
+  .plugin-action-list article { grid-template-columns: minmax(0, 1fr) auto; }
+  .plugin-action-list article > div, .plugin-action-list article > label, .plugin-action-list article > span { grid-column: 1 / -1; }
   .connection-alert button { min-height: 44px; }
   .secondary-view > header { padding: 0 16px; }
   .secondary-content { padding: 22px 16px; }

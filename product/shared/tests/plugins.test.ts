@@ -4,6 +4,7 @@ import {
   PluginCatalogItemSchema,
   PluginDetailSchema,
   PluginIpcRequestSchema,
+  PluginIpcResponseSchema,
 } from "../src/plugins.js";
 import { IpcRequestSchema, IpcResponseSchema } from "../src/ipc.js";
 
@@ -56,6 +57,28 @@ describe("Plugin contracts", () => {
       requestId: "bad",
       params: { slug: plugin.slug, confirmation: null, path: "/tmp/plugin", command: "openclaw plugins install" },
     }).success).toBe(false);
+  });
+
+  it("defines renderer-safe UI descriptor and session action contracts", () => {
+    expect(PluginIpcRequestSchema.parse({
+      method: "plugins.ui-descriptors", requestId: "descriptor-list", params: {},
+    })).toBeTruthy();
+    expect(PluginIpcRequestSchema.parse({
+      method: "plugins.session-action", requestId: "session-action", params: {
+        pluginId: "calendar", actionId: "summarize", sessionKey: "agent:main:main", payload: { range: "today" },
+      },
+    })).toBeTruthy();
+    expect(PluginIpcResponseSchema.parse({
+      method: "plugins.ui-descriptors", requestId: "descriptor-list", ok: true, result: [{
+        id: "summary", pluginId: "calendar", pluginName: "Calendar", surface: "session",
+        label: "Summarize calendar", description: "Summarize events", requiredScopes: ["operator.write"],
+      }],
+    })).toBeTruthy();
+    const action = PluginIpcResponseSchema.parse({
+      method: "plugins.session-action", requestId: "session-action", ok: true,
+      result: { ok: true, result: { token: "sk-secret-value" } },
+    });
+    expect(JSON.stringify(action)).not.toContain("sk-secret-value");
   });
 
   it("participates in the unified IPC request and response contracts", () => {

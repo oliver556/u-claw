@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { CapabilityPermissionSchema, CapabilityRiskSchema } from "./capabilities.js";
-import { UClawErrorSchema } from "./errors.js";
+import { RendererSafeTextSchema, redactRendererValue, UClawErrorSchema } from "./errors.js";
 
 export const LOCKED_OPENCLAW_VERSION = "2026.7.1-2";
 
@@ -81,6 +81,39 @@ export const PluginOperationSchema = z.object({
 }).strict();
 export type PluginOperation = z.infer<typeof PluginOperationSchema>;
 
+export const PluginUiDescriptorSchema = z.object({
+  id: z.string().trim().min(1).max(120),
+  pluginId: z.string().trim().min(1).max(120),
+  pluginName: RendererSafeTextSchema.pipe(z.string().max(120)).optional(),
+  surface: z.enum(["session", "tool", "run", "settings"]),
+  label: RendererSafeTextSchema.pipe(z.string().min(1).max(120)),
+  description: RendererSafeTextSchema.pipe(z.string().max(500)).optional(),
+  placement: z.string().trim().max(120).optional(),
+  schema: z.unknown().optional(),
+  requiredScopes: z.array(z.string().trim().min(1).max(120)).max(16).optional(),
+}).strict();
+export type PluginUiDescriptor = z.infer<typeof PluginUiDescriptorSchema>;
+
+const PluginActionPayloadSchema = z.json().refine(
+  (value) => JSON.stringify(value).length <= 65_536,
+  "Plugin action payload exceeds limit.",
+);
+export const PluginSessionActionResultSchema = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    result: z.unknown().transform((value) => redactRendererValue(value)).optional(),
+    continueAgent: z.boolean().optional(),
+    reply: z.unknown().transform((value) => redactRendererValue(value)).optional(),
+  }).strict(),
+  z.object({
+    ok: z.literal(false),
+    error: RendererSafeTextSchema.pipe(z.string().min(1).max(500)),
+    code: z.string().trim().min(1).max(80).optional(),
+    details: z.unknown().transform((value) => redactRendererValue(value)).optional(),
+  }).strict(),
+]);
+export type PluginSessionActionResult = z.infer<typeof PluginSessionActionResultSchema>;
+
 const RequestIdSchema = z.string().min(1);
 const SlugSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/);
 const MutationParamsSchema = z.object({
@@ -97,6 +130,13 @@ export const PluginIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("plugins.uninstall"), requestId: RequestIdSchema, params: z.object({ slug: SlugSchema }).strict() }).strict(),
   z.object({ method: z.literal("plugins.set-enabled"), requestId: RequestIdSchema, params: MutationParamsSchema.extend({ enabled: z.boolean() }).strict() }).strict(),
   z.object({ method: z.literal("plugins.operation"), requestId: RequestIdSchema, params: z.object({ operationId: z.string().min(1) }).strict() }).strict(),
+  z.object({ method: z.literal("plugins.ui-descriptors"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("plugins.session-action"), requestId: RequestIdSchema, params: z.object({
+    pluginId: SlugSchema,
+    actionId: z.string().trim().min(1).max(120),
+    sessionKey: z.string().trim().min(1).max(500).optional(),
+    payload: PluginActionPayloadSchema.optional(),
+  }).strict() }).strict(),
 ]);
 export type PluginIpcRequest = z.infer<typeof PluginIpcRequestSchema>;
 
@@ -106,9 +146,11 @@ const PluginSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("plugins.detail"), requestId: RequestIdSchema, ok: z.literal(true), result: PluginDetailSchema }).strict(),
   ...(["plugins.install", "plugins.update", "plugins.uninstall", "plugins.set-enabled", "plugins.operation"] as const).map((method) =>
     z.object({ method: z.literal(method), requestId: RequestIdSchema, ok: z.literal(true), result: PluginOperationSchema }).strict()),
+  z.object({ method: z.literal("plugins.ui-descriptors"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(PluginUiDescriptorSchema).max(200) }).strict(),
+  z.object({ method: z.literal("plugins.session-action"), requestId: RequestIdSchema, ok: z.literal(true), result: PluginSessionActionResultSchema }).strict(),
 ]);
 
-const PluginMethodSchema = z.enum(["plugins.search", "plugins.installed", "plugins.detail", "plugins.install", "plugins.update", "plugins.uninstall", "plugins.set-enabled", "plugins.operation"]);
+const PluginMethodSchema = z.enum(["plugins.search", "plugins.installed", "plugins.detail", "plugins.install", "plugins.update", "plugins.uninstall", "plugins.set-enabled", "plugins.operation", "plugins.ui-descriptors", "plugins.session-action"]);
 export const PluginIpcResponseSchema = z.union([
   PluginSuccessResponseSchema,
   z.object({ method: PluginMethodSchema, requestId: RequestIdSchema, ok: z.literal(false), error: UClawErrorSchema }).strict(),
