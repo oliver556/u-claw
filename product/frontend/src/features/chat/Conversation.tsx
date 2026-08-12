@@ -1,7 +1,6 @@
-import type { ApprovalDecision, ApprovalRequest, Attachment, CapabilitySet, GatewayStatus, Message, MessageEvent, Session, ToolCall, UClawClient } from "@uclaw/shared";
-import { AlertCircle, FolderArchive, LoaderCircle, PanelLeft, PanelRight, RotateCw, WifiOff } from "lucide-react";
-import { Select, Tooltip } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ApprovalDecision, ApprovalRequest, Attachment, CapabilitySet, GatewayStatus, Message, MessageEvent, Session, SkillRuntimeInventory, ToolCall, UClawClient } from "@uclaw/shared";
+import { AlertCircle, LoaderCircle, RotateCw, WifiOff } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
@@ -12,15 +11,11 @@ interface ConversationProps {
   session: Session;
   capabilities?: CapabilitySet;
   gatewayStatus?: GatewayStatus;
-  sessionsOpen: boolean;
-  contextOpen: boolean;
   draft: string;
   onDraftChange(value: string): void;
   onActivity(message: string): void;
   onSendSuccess(sessionId: string): void;
   onSessionUpdated(sessionId: string): void;
-  openSessions(): void;
-  openContext(): void;
 }
 
 function requestId() {
@@ -32,7 +27,7 @@ export async function resolveApproval(client: Pick<UClawClient, "approvals">, ap
   return client.approvals.resolvePlugin({ ref: { family: "plugin", id: approval.id }, decision });
 }
 
-export function Conversation({ client, session, capabilities, gatewayStatus, sessionsOpen, contextOpen, draft, onDraftChange, onActivity, onSendSuccess, onSessionUpdated, openSessions, openContext }: ConversationProps) {
+export function Conversation({ client, session, capabilities, gatewayStatus, draft, onDraftChange, onActivity, onSendSuccess, onSessionUpdated }: ConversationProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">("loading");
   const [historyError, setHistoryError] = useState<string>();
@@ -48,6 +43,9 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   const attachmentsRef = useRef<Attachment[]>([]);
   const [models, setModels] = useState<Array<{ id: string; label: string; available: boolean }>>([]);
   const [modelState, setModelState] = useState<"idle" | "loading" | "error" | "selecting">("idle");
+  const [skills, setSkills] = useState<Array<{ id: string; name: string }>>([]);
+  const [skillState, setSkillState] = useState<"loading" | "ready" | "error">("loading");
+  const [selectedSkillId, setSelectedSkillId] = useState<string>();
   const activeRunId = useRef<string | undefined>(undefined);
   const sendController = useRef<AbortController | undefined>(undefined);
   const stopRequested = useRef(false);
@@ -134,6 +132,21 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     }).catch(() => { if (active) setModelState("error"); });
     return () => { active = false; };
   }, [capabilities, client]);
+
+  useEffect(() => {
+    const invoke = window.uclaw?.skills?.invoke;
+    if (invoke === undefined) { setSkillState("error"); return; }
+    let active = true;
+    setSkillState("loading");
+    void invoke({ method: "skills.runtime-status", requestId: requestId(), params: {} }).then((response: any) => {
+      if (!active) return;
+      if (!response.ok) throw new Error(response.error.message);
+      const inventory = response.result as SkillRuntimeInventory;
+      setSkills(inventory.skills.filter((skill) => !skill.disabled && skill.availability === "available" && skill.eligible && skill.userInvocable && skill.commandVisible).map((skill) => ({ id: skill.id, name: skill.name })));
+      setSkillState("ready");
+    }).catch(() => { if (active) setSkillState("error"); });
+    return () => { active = false; };
+  }, [session.id]);
 
   const unavailable = gatewayStatus !== undefined && !gatewayStatus.businessAvailable;
   const attachmentsSupported = capabilities?.features.attachments === true;
@@ -248,7 +261,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     try {
       const blocks = [...(text === "" ? [] : [{ type: "text" as const, text, format: "plain" as const }]), ...readyAttachments.map((attachment) => ({ type: "attachment" as const, attachmentId: attachment.id }))];
       const clientRequestId = sendIntentId.current ??= requestId();
-      const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId, blocks }, controller.signal));
+      const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId, blocks, ...(selectedSkillId === undefined ? {} : { skillId: selectedSkillId }) }, controller.signal));
       if (!mounted.current) return;
       if (terminal?.type === "error") {
         restoreFailedDraft(terminal.error.message);
@@ -257,6 +270,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
       else if (terminal?.type === "aborted") sendIntentId.current = undefined;
       else if (terminal?.type === "final") {
         onDraftChange("");
+        setSelectedSkillId(undefined);
         const sentIds = new Set(readyAttachments.map((attachment) => attachment.id));
         updateAttachments((current) => current.filter((attachment) => !sentIds.has(attachment.id)));
         await Promise.all(readyAttachments.map((attachment) => attachmentInvoke("remove", { attachmentId: attachment.id }).catch(() => undefined)));
@@ -299,14 +313,6 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
     }
   };
 
-  const titleMeta = useMemo(() => {
-    const label = session.model?.label ?? "默认模型";
-    if (capabilities !== undefined && !capabilities.methods.has("models.list")) {
-      return `${label} · 当前连接不支持模型列表`;
-    }
-    return label;
-  }, [capabilities, session.model?.label]);
-
   const selectModel = async (modelId: string) => {
     setModelState("selecting");
     try {
@@ -320,13 +326,6 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
   };
 
   return <section className="work-canvas">
-    <header className="canvas-head">
-      <div className="canvas-title">
-        {!sessionsOpen ? <Tooltip title="展开会话栏"><button className="icon-button" type="button" aria-label="展开会话栏" onClick={openSessions}><PanelLeft /></button></Tooltip> : null}
-        <div><h2>{session.title}</h2><p>{titleMeta} <span>{sending ? "生成中" : "自动保存"}</span></p>{capabilities?.methods.has("models.list") === true ? <Select aria-label="会话模型" size="small" loading={modelState === "loading" || modelState === "selecting"} status={modelState === "error" ? "error" : undefined} value={session.model?.id} placeholder={modelState === "error" ? "模型目录不可用" : "选择模型"} options={models.map((model) => ({ value: model.id, label: model.available ? model.label : `${model.label}（不可用）`, disabled: !model.available }))} onChange={(value) => void selectModel(value)} /> : null}</div>
-      </div>
-      <div className="canvas-actions"><button type="button" disabled title="当前版本不支持归档"><FolderArchive />归档</button>{!contextOpen ? <Tooltip title="展开上下文舱"><button className="icon-button" type="button" aria-label="展开上下文舱" onClick={openContext}><PanelRight /></button></Tooltip> : null}</div>
-    </header>
     {unavailable ? <div className="connection-alert" role="alert"><WifiOff /><span><strong>服务连接已断开</strong><small>消息暂时无法发送，草稿仍保留在本机。</small></span><button type="button" onClick={() => void client.gateway.reconnect()}><RotateCw />重新连接</button></div> : null}
     <div className="conversation" aria-busy={historyState === "loading"}>
       {historyState === "loading" ? <div className="conversation-state"><LoaderCircle className="spin" /><span>正在加载消息</span></div> : null}
@@ -336,6 +335,6 @@ export function Conversation({ client, session, capabilities, gatewayStatus, ses
         {historyPageState === "error" ? <div className="history-page-error" role="alert"><span>{historyPageError}</span><button type="button" onClick={() => void loadMoreHistory()}><RotateCw />重试加载</button></div> : null}</> : null}
     </div>
     {sendError ? <div className="send-error" role="alert"><AlertCircle /><span><strong>发送失败</strong>{sendError}</span></div> : null}
-    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); updateAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
+    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} models={models.map((model) => ({ value: model.id, label: model.available ? model.label : `${model.label}（不可用）`, disabled: !model.available }))} modelValue={session.model?.id} modelLoading={modelState === "loading" || modelState === "selecting"} modelError={modelState === "error"} skills={skills.map((skill) => ({ value: skill.id, label: skill.name }))} skillValue={selectedSkillId} skillLoading={skillState === "loading"} onModelChange={(value) => void selectModel(value)} onSkillChange={(value) => { invalidateSendIntent(); setSelectedSkillId(value); }} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); updateAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
   </section>;
 }

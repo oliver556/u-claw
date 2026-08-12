@@ -75,6 +75,7 @@ export const SendMessageInputSchema = z
       ]),
     ).min(1),
     modelId: z.string().min(1).optional(),
+    skillId: z.string().trim().min(1).max(160).optional(),
   })
   .strict();
 export type SendMessageInput = z.infer<typeof SendMessageInputSchema>;

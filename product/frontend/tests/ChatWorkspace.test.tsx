@@ -89,7 +89,8 @@ describe("chat workspace", () => {
     });
     render(<App client={client} />);
 
-    expect(await within(screen.getByRole("main")).findByText(/GPT-5/)).toHaveTextContent("当前连接不支持模型列表");
+    expect(await screen.findByRole("combobox", { name: "会话模型" })).toBeInTheDocument();
+    expect(screen.queryByText("当前连接不支持模型列表")).not.toBeInTheDocument();
   });
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
@@ -158,7 +159,7 @@ describe("chat workspace", () => {
   it("ignores stale session responses that resolve out of order", async () => {
     const client = clientFixture();
     render(<App client={client} />);
-    expect(await screen.findByRole("heading", { name: "发布检查" })).toBeVisible();
+    expect(await screen.findByText("第一段历史")).toBeVisible();
     const sessionOne = deferred<Awaited<ReturnType<UClawClient["sessions"]["get"]>>>();
     const sessionTwo = deferred<Awaited<ReturnType<UClawClient["sessions"]["get"]>>>();
     vi.mocked(client.sessions.get).mockImplementation((id) => id === "session-1" ? sessionOne.promise : sessionTwo.promise);
@@ -170,7 +171,7 @@ describe("chat workspace", () => {
     sessionTwo.resolve({ id: "session-2", title: "知识库调研", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" });
     await act(async () => undefined);
 
-    expect(screen.getByRole("heading", { name: "发布检查" })).toBeVisible();
+    expect(within(screen.getByRole("main")).getByText("第一段历史")).toBeVisible();
   });
 
   it("creates and selects an empty session", async () => {
@@ -178,8 +179,8 @@ describe("chat workspace", () => {
     render(<App client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "新建会话" }));
-    expect(await screen.findByRole("heading", { name: "新会话" })).toBeVisible();
     expect(await screen.findByText("开始一段新会话")).toBeVisible();
+    expect(client.sessions.get).toHaveBeenCalledWith("session-3");
   });
 
   it("reads authoritative session state after create and renderer reconstruction", async () => {
@@ -198,7 +199,7 @@ describe("chat workspace", () => {
     const first = render(<App client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "新建会话" }));
-    expect(await screen.findByRole("heading", { name: "网关权威会话" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: /网关权威会话/ }).closest(".session-row")).toHaveClass("active"));
     expect(list).toHaveBeenCalledTimes(2);
     expect(get).toHaveBeenCalledWith("session-3");
 
@@ -230,7 +231,7 @@ describe("chat workspace", () => {
 
     const firstRow = (await screen.findByRole("button", { name: /发布检查/ })).closest(".session-row")!;
     fireEvent.click(within(firstRow as HTMLElement).getByRole("button", { name: "重命名会话" }));
-    expect(await screen.findByRole("heading", { name: "正式发布（权威）" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: /正式发布（权威）/ }).closest(".session-row")).toHaveClass("active"));
 
     const renamedRow = screen.getByRole("button", { name: /正式发布（权威）/ }).closest(".session-row")!;
     fireEvent.click(within(renamedRow as HTMLElement).getByRole("button", { name: "删除会话" }));
@@ -277,14 +278,19 @@ describe("chat workspace", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue("知识库草稿"));
   });
 
-  it("updates activity context when the active session changes", async () => {
+  it("hides the conversation header and context panel", async () => {
     render(<App client={clientFixture()} />);
-    const panel = screen.getByRole("complementary", { name: "上下文舱" });
-    fireEvent.click(screen.getByRole("tab", { name: "活动" }));
-    expect(await within(panel).findByText(/发布检查/)).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
-    expect(await within(panel).findByText(/知识库调研/)).toBeVisible();
-    expect(within(panel).queryByText(/发布检查/)).not.toBeInTheDocument();
+    expect(await screen.findByText("第一段历史")).toBeVisible();
+    expect(document.querySelector(".canvas-head")).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "上下文舱" })).not.toBeInTheDocument();
+  });
+
+  it("reopens the session sidebar without restoring the conversation header", async () => {
+    render(<App client={clientFixture()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "收起会话栏" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开会话栏" }));
+    expect(await screen.findByRole("complementary", { name: "会话栏" })).toBeVisible();
+    expect(document.querySelector(".canvas-head")).not.toBeInTheDocument();
   });
 
   it("sends text, renders append and replace deltas, then finalizes once", async () => {
@@ -308,6 +314,51 @@ describe("chat workspace", () => {
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "停止生成" })).not.toBeInTheDocument());
     expect(screen.getAllByText("检查完成")).toHaveLength(1);
+  });
+
+  it("sends one available Skill with the next message and clears it after success", async () => {
+    const send = vi.fn(async function* () {
+      yield { type: "started" as const, runId: "run-skill", sessionId: "session-1" };
+      yield { type: "final" as const, runId: "run-skill", message: { id: "skill-final", sessionId: "session-1", runId: "run-skill", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    });
+    window.uclaw = { skills: { invoke: vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: {
+      workspaceDir: "/workspace", managedSkillsDir: "/workspace/skills", skills: [
+        { id: "document-writer", name: "文档整理", source: "workspace", bundled: false, disabled: false, eligible: true, modelVisible: true, userInvocable: true, commandVisible: true, availability: "available", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] },
+        { id: "disabled-skill", name: "不可用技能", source: "workspace", bundled: false, disabled: true, eligible: true, modelVisible: true, userInvocable: true, commandVisible: true, availability: "disabled", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] },
+      ],
+    } })) } } as never;
+    const base = clientFixture();
+    const client = clientFixture({ chat: { ...base.chat, send } });
+    render(<App client={client} />);
+
+    const skillSelect = await screen.findByRole("combobox", { name: "下一条消息 Skill" });
+    fireEvent.mouseDown(skillSelect);
+    fireEvent.click(await screen.findByText("文档整理"));
+    expect(screen.queryByText("不可用技能")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" }), { target: { value: "整理需求" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({ skillId: "document-writer" }), expect.any(AbortSignal)));
+    await waitFor(() => expect(document.querySelector('.composer-tools .ant-select-selection-item[title="文档整理"]')).not.toBeInTheDocument());
+  });
+
+  it("keeps the selected Skill after a failed send", async () => {
+    window.uclaw = { skills: { invoke: vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: {
+      workspaceDir: "/workspace", managedSkillsDir: "/workspace/skills", skills: [
+        { id: "document-writer", name: "文档整理", source: "workspace", bundled: false, disabled: false, eligible: true, modelVisible: true, userInvocable: true, commandVisible: true, availability: "available", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] },
+      ],
+    } })) } } as never;
+    const base = clientFixture();
+    const send = vi.fn(async function* () { throw new Error("skill send failed"); });
+    render(<App client={clientFixture({ chat: { ...base.chat, send } })} />);
+
+    fireEvent.mouseDown(await screen.findByRole("combobox", { name: "下一条消息 Skill" }));
+    fireEvent.click(await screen.findByText("文档整理"));
+    fireEvent.change(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" }), { target: { value: "整理需求" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    expect(await screen.findByText("skill send failed")).toBeVisible();
+    expect(document.querySelector('.composer-tools .ant-select-selection-item[title="文档整理"]')).toBeInTheDocument();
   });
 
   it("resolves a pending exec approval once when Gateway advertises approval support", async () => {
@@ -445,13 +496,13 @@ describe("chat workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
     pending.emit({ type: "started", runId: "run-old", sessionId: "session-1" });
     fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
-    expect(await screen.findByRole("heading", { name: "知识库调研" })).toBeVisible();
+    expect(await within(screen.getByRole("main")).findByText("第二段历史")).toBeVisible();
     expect(signal?.aborted).toBe(true);
     pending.emit({ type: "final", runId: "run-old", message: { id: "old-final", sessionId: "session-1", runId: "run-old", role: "assistant", status: "completed", blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } });
     pending.finish();
     await act(async () => undefined);
 
-    expect(screen.getByRole("heading", { name: "知识库调研" })).toBeVisible();
+    expect(within(screen.getByRole("main")).getByText("第二段历史")).toBeVisible();
   });
 
   it("removes a stream approval after resolving it once", async () => {

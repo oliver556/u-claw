@@ -293,6 +293,9 @@ async function executeOpenAICompatibleProvider(
   signal?: AbortSignal,
   network?: ProviderNetworkSettings,
 ): Promise<AsyncIterable<MessageEvent>> {
+  if (input.skillId !== undefined) {
+    throw new DesktopWiringError("UNSUPPORTED", "External model providers do not support Skills.");
+  }
   if (provider.baseUrl === null) {
     throw new DesktopWiringError("UNCONFIGURED", "Model provider is not configured.");
   }

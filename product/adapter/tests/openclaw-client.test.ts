@@ -443,6 +443,42 @@ describe("OpenClawClient", () => {
     expect(await attachments.get(attachment.id)).toMatchObject({ state: "attached", progress: 1 });
   });
 
+  it("resolves a selected Skill through the authoritative command catalog before chat.send", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("commands.list");
+    transport.fixtures.set("commands.list", { commands: [{ name: "document_writer", textAliases: ["/document_writer"], description: "Document writer", source: "skill", scope: "text", acceptsArgs: true }] });
+    transport.fixtures.set("chat.send", { runId: "run-skill", status: "started" });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const iterator = client.chat.send({
+      sessionId: "agent:main:main", clientRequestId: "skill-1", skillId: "Document Writer",
+      blocks: [{ type: "text", text: "整理需求", format: "plain" }],
+    })[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+
+    expect(transport.requests).toEqual(expect.arrayContaining([
+      { method: "commands.list", params: { agentId: "main", scope: "text", includeArgs: false } },
+      { method: "chat.send", params: expect.objectContaining({ message: "/document_writer 整理需求" }) },
+    ]));
+  });
+
+  it("fails closed when a selected Skill has no unique authoritative command", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("commands.list");
+    transport.fixtures.set("commands.list", { commands: [{ name: "other", description: "Other", source: "skill", scope: "text", acceptsArgs: true }] });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const iterator = client.chat.send({
+      sessionId: "agent:main:main", clientRequestId: "skill-missing", skillId: "Document Writer",
+      blocks: [{ type: "text", text: "整理需求", format: "plain" }],
+    })[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toMatchObject({ uclawError: { code: "UNAVAILABLE" } });
+    expect(transport.requests.some((request) => request.method === "chat.send")).toBe(false);
+  });
+
   it("sends multiple attachments in one request when cumulative payload fits policy", async () => {
     const transport = new FakeTransport();
     transport.fixtures.set("chat.send", { runId: "run-multi", status: "started" });

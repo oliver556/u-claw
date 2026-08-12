@@ -57,6 +57,21 @@ describe("SessionSidebar organizer", () => {
     expect(value.onAssignGroup).toHaveBeenCalledWith(sessions[0], null);
   });
 
+  it("filters sessions by group and toggles back to all sessions", () => {
+    const value = props();
+    render(<SessionSidebar {...value} />);
+    fireEvent.click(screen.getByRole("button", { name: "筛选分组 发布" }));
+    expect(screen.getByRole("button", { name: "筛选分组 发布" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^发布检查，/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^知识库调研，/ })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索会话" }), { target: { value: "知识库" } });
+    expect(screen.getByText("没有匹配的会话")).toBeVisible();
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索会话" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "筛选分组 发布" }));
+    expect(screen.getByRole("button", { name: /^知识库调研，/ })).toBeVisible();
+  });
+
   it("creates and renames groups from an in-app dialog", () => {
     const value = props();
     render(<SessionSidebar {...value} />);

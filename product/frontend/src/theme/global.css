@@ -91,6 +91,8 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .session-group-bar { min-height: 38px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 8px 14px; color: var(--uclaw-text-tertiary); font-size: 12px; }
 .session-group-bar > div { min-width: 0; flex: 1; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .session-group-bar > div > span { min-width: 0; display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 7px; border-radius: 4px; color: var(--uclaw-text-secondary); background: var(--uclaw-bg-hover); white-space: nowrap; }
+.session-group-bar > div > span.active { color: var(--uclaw-primary-text); background: var(--uclaw-bg-selected); }
+.session-group-bar > div > span > button:first-child { width: auto; max-width: 112px; padding: 0 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-group-bar small { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-group-bar button, .organizer-status button { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 4px; }
 .session-group-bar button:hover, .organizer-status button:hover { color: var(--uclaw-primary-text); background: var(--uclaw-bg-selected); }
@@ -121,7 +123,8 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .panel-edge-close { position: absolute; top: 11px; right: 52px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 6px; }
 .panel-edge-close:hover { background: var(--uclaw-bg-hover); }
 
-.main-canvas { min-width: 0; min-height: 0; overflow: hidden; background: var(--uclaw-bg-canvas); }
+.main-canvas { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--uclaw-bg-canvas); }
+.sessions-reopen { position: absolute; z-index: 12; top: 10px; left: 82px; border: 1px solid var(--uclaw-border-primary); background: var(--uclaw-bg-elevated); box-shadow: 0 3px 12px var(--uclaw-shadow); }
 .main-canvas { grid-column: 3; }
 .work-canvas { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .canvas-head { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--uclaw-border-secondary); }
@@ -207,6 +210,9 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .attachment-queue button { width: 26px; min-height: 26px; display: grid; place-items: center; padding: 0; }
 .attachment-queue svg { width: 15px; height: 15px; }
 .composer footer { min-height: 40px; display: flex; justify-content: space-between; align-items: center; padding: 4px 7px; }
+.composer-tools { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.composer-tools .ant-select { width: 150px; }
+.composer-tools .ant-select:last-child { width: 170px; }
 .composer button { min-height: 32px; padding: 0 8px; border-radius: 6px; }
 .composer button:hover:not(:disabled) { background: var(--uclaw-bg-hover); }
 .composer button:disabled { color: var(--uclaw-text-disabled); cursor: not-allowed; }
@@ -636,6 +642,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
   .more-menu a { min-height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 6px; }
   .more-menu a:hover { background: var(--uclaw-bg-hover); }
   .main-canvas { height: 100%; }
+  .sessions-reopen { top: 8px; left: 10px; }
   .session-panel { position: fixed; z-index: 40; top: 48px; left: 0; bottom: 58px; width: min(320px, calc(100vw - 36px)); box-shadow: 10px 0 28px var(--uclaw-shadow); }
   .context-panel { top: 48px; bottom: 58px; width: min(320px, calc(100vw - 36px)); grid-template-rows: 58px 44px minmax(0, 1fr) 42px; }
   .icon-button, .panel-edge-close { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
@@ -646,6 +653,10 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
   .artifact-row { grid-template-columns: 34px minmax(0, 1fr); }
   .artifact-row button { grid-column: 2; width: fit-content; min-height: 44px; }
   .composer button { min-width: 44px; min-height: 44px; }
+  .composer footer { flex-wrap: wrap; gap: 4px; }
+  .composer-tools { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); }
+  .composer-tools .ant-select, .composer-tools .ant-select:last-child { width: 100%; }
+  .composer .send-button { margin-left: auto; }
   .work-canvas { grid-template-rows: 64px minmax(0, 1fr) auto; }
   .canvas-head { padding: 0 12px; }
   .canvas-actions > button:first-child { display: none; }
