@@ -1,6 +1,7 @@
-import { realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseEnv } from "node:util";
 
 import { startElectronMain, type DesktopMainOptions } from "./main.js";
 import { createDesktopMainOptions } from "./wiring/create-desktop-main-options.js";
@@ -10,17 +11,39 @@ import {
 } from "./portable-paths.js";
 
 const WIRING_MODULE_ENV = "UCLAW_DESKTOP_WIRING_MODULE";
+const DEVELOPMENT_ENV_KEYS = [
+  "UCLAW_TEST_PROVIDER_BASE_URL",
+  "UCLAW_TEST_PROVIDER_API_KEY",
+  "UCLAW_TEST_PROVIDER_MODEL",
+] as const;
+
+export async function loadDevelopmentEnvironment(
+  environment: NodeJS.ProcessEnv,
+  repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../.."),
+): Promise<NodeJS.ProcessEnv> {
+  let parsed: NodeJS.ProcessEnv;
+  try {
+    parsed = parseEnv(await readFile(join(repositoryRoot, ".env"), "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ...environment };
+    throw new Error("Development environment could not be loaded.");
+  }
+  const selected = Object.fromEntries(DEVELOPMENT_ENV_KEYS.flatMap((key) =>
+    environment[key] !== undefined ? [[key, environment[key]]] : parsed[key] === undefined ? [] : [[key, parsed[key]]]));
+  return { ...environment, ...selected };
+}
 
 interface ProductionWiringModule {
   createDesktopMainOptions?: (env: NodeJS.ProcessEnv) => DesktopMainOptions | Promise<DesktopMainOptions>;
 }
 
 export async function loadProductionDesktopOptions(
-  environment: NodeJS.ProcessEnv = process.env,
+  environment?: NodeJS.ProcessEnv,
 ): Promise<DesktopMainOptions> {
-  const modulePath = environment[WIRING_MODULE_ENV];
+  const effectiveEnvironment = environment ?? await loadDevelopmentEnvironment(process.env);
+  const modulePath = effectiveEnvironment[WIRING_MODULE_ENV];
   if (!modulePath) {
-    return createDesktopMainOptions(environment);
+    return createDesktopMainOptions(effectiveEnvironment);
   }
   if (!isAbsolute(modulePath)) {
     throw new Error("Desktop production wiring must use an absolute path within controlled runtime roots.");
@@ -45,7 +68,7 @@ export async function loadProductionDesktopOptions(
   if (typeof wiring.createDesktopMainOptions !== "function") {
     throw new Error("Desktop wiring module must export createDesktopMainOptions().");
   }
-  return wiring.createDesktopMainOptions(environment);
+  return wiring.createDesktopMainOptions(effectiveEnvironment);
 }
 
 export interface ElectronEntryDependencies {

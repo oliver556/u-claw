@@ -1,10 +1,14 @@
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
 import {
   isElectronMainProcess,
+  loadDevelopmentEnvironment,
   loadProductionDesktopOptions,
   reportStartupFailure,
   runElectronEntry,
@@ -15,6 +19,38 @@ import type { DesktopMainOptions } from "../src/main.js";
 import type { PortableDesktopPaths } from "../src/portable-paths.js";
 
 describe("Electron production entry", () => {
+  it("loads only development Provider keys from root .env without overriding the process", async () => {
+    const root = await mkdtemp(join(tmpdir(), "uclaw-entry-env-"));
+    await writeFile(join(root, ".env"), [
+      "UCLAW_TEST_PROVIDER_BASE_URL=https://provider.example/v1",
+      "UCLAW_TEST_PROVIDER_API_KEY=file-secret",
+      "UCLAW_TEST_PROVIDER_MODEL=gpt-5.6-sol",
+      "UNRELATED_SECRET=must-not-load",
+      "",
+    ].join("\n"));
+    try {
+      await expect(loadDevelopmentEnvironment({
+        UCLAW_TEST_PROVIDER_API_KEY: "process-secret",
+      }, root)).resolves.toMatchObject({
+        UCLAW_TEST_PROVIDER_BASE_URL: "https://provider.example/v1",
+        UCLAW_TEST_PROVIDER_API_KEY: "process-secret",
+        UCLAW_TEST_PROVIDER_MODEL: "gpt-5.6-sol",
+      });
+      expect((await loadDevelopmentEnvironment({}, root)).UNRELATED_SECRET).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores a missing development .env", async () => {
+    const root = await mkdtemp(join(tmpdir(), "uclaw-entry-env-missing-"));
+    try {
+      await expect(loadDevelopmentEnvironment({ EXISTING: "value" }, root)).resolves.toEqual({ EXISTING: "value" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("auto-starts only in the Electron browser process", () => {
     expect(isElectronMainProcess({ versions: { electron: "40.4.0" }, type: "browser" })).toBe(true);
     expect(isElectronMainProcess({ versions: { electron: "40.4.0" }, type: "renderer" })).toBe(false);

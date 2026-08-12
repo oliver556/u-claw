@@ -16,6 +16,8 @@ class ScriptedWebSocket {
   static outcome: "success" | "usage" | "automation" | "task-artifacts" | "system-node" | "system-voice" | "offline" | "authentication" | "protocol" | "missing-methods" = "success";
   static skillDisabled = false;
   static selectedModel: { sessionId: string; providerId: string; model: string } | undefined;
+  static config: Record<string, unknown> = {};
+  static configRevision = 1;
   readonly sent: Array<Record<string, unknown>> = [];
   readonly close = vi.fn();
   private readonly listeners = new Map<string, Set<(event: { data?: string }) => void>>();
@@ -38,6 +40,25 @@ class ScriptedWebSocket {
   send(data: string): void {
     const frame = JSON.parse(data) as Record<string, unknown>;
     this.sent.push(frame);
+    if (frame.method === "config.schema") {
+      queueMicrotask(() => this.respond(frame, { schema: { type: "object" } }));
+      return;
+    }
+    if (frame.method === "config.get") {
+      queueMicrotask(() => this.respond(frame, {
+        valid: true,
+        hash: `config-${ScriptedWebSocket.configRevision}`,
+        sourceConfig: structuredClone(ScriptedWebSocket.config),
+      }));
+      return;
+    }
+    if (frame.method === "config.apply") {
+      const params = frame.params as { raw: string };
+      ScriptedWebSocket.config = JSON.parse(params.raw) as Record<string, unknown>;
+      ScriptedWebSocket.configRevision += 1;
+      queueMicrotask(() => this.respond(frame, { ok: true }));
+      return;
+    }
     if (frame.method === "agents.list") {
       queueMicrotask(() => this.respond(frame, { agents: [{ id: "main", name: "Main" }] }));
       return;
@@ -266,6 +287,8 @@ describe("production desktop wiring", () => {
     ScriptedWebSocket.outcome = "success";
     ScriptedWebSocket.skillDisabled = false;
     ScriptedWebSocket.selectedModel = undefined;
+    ScriptedWebSocket.config = {};
+    ScriptedWebSocket.configRevision = 1;
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: OriginalWebSocket });
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -395,6 +418,41 @@ describe("production desktop wiring", () => {
     })).resolves.toMatchObject({ ok: true, result: { items: [], hasMore: false } });
     await options.dispose?.();
     expect(socket.close).toHaveBeenCalled();
+  });
+
+  it("bootstraps the fixed development provider only after Gateway negotiation", async () => {
+    const apiKey = "development-provider-secret";
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
+    const options = await createDesktopMainOptions({
+      ...productionEnv,
+      UCLAW_TEST_PROVIDER_BASE_URL: "https://provider.example/v1",
+      UCLAW_TEST_PROVIDER_API_KEY: apiKey,
+      UCLAW_TEST_PROVIDER_MODEL: "gpt-5.6-sol",
+    });
+
+    expect(await options.providers!.list()).not.toMatchObject({
+      selectedProviderId: "uclaw-development-gpt",
+    });
+
+    options.buildGatewayLaunchOptions(18796);
+    await options.probeCapabilities(18796, new AbortController().signal);
+    const snapshot = await options.providers!.list();
+    expect(snapshot.selectedProviderId).toBe("uclaw-development-gpt");
+    expect(snapshot.providers).toContainEqual(expect.objectContaining({
+      id: "uclaw-development-gpt",
+      model: "gpt-5.6-sol",
+      apiKeyConfigured: true,
+    }));
+    expect(JSON.stringify(snapshot)).not.toContain(apiKey);
+    expect(JSON.stringify(ScriptedWebSocket.config)).toContain("uclaw-development-gpt/gpt-5.6-sol");
+
+    const providerMetadata = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(join(dataRoot, "providers", "provider-config.v1.json"), "utf8"));
+    expect(providerMetadata).not.toContain(apiKey);
+    const applyCount = ScriptedWebSocket.instances[0]!.sent.filter(({ method }) => method === "config.apply").length;
+    await options.probeCapabilities(18796, new AbortController().signal);
+    expect(ScriptedWebSocket.instances[0]!.sent.filter(({ method }) => method === "config.apply")).toHaveLength(applyCount);
+    await options.dispose?.();
   });
 
   it("injects the production process lifecycle and data-root projection into client status", async () => {
