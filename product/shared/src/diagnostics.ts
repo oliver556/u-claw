@@ -24,6 +24,26 @@ export const DiagnosticLogEntrySchema = z.object({
 }).strict();
 export type DiagnosticLogEntry = z.infer<typeof DiagnosticLogEntrySchema>;
 
+export const OpenClawRuntimeSummarySchema = z.object({
+  health: z.object({ state: z.enum(["ready", "degraded", "offline", "unknown"]) }).strict(),
+  status: z.object({ state: z.enum(["ready", "degraded", "offline", "unknown"]), uptimeMs: z.number().int().nonnegative().nullable() }).strict(),
+  info: z.object({ platform: z.enum(["win32", "darwin", "linux", "other"]), architecture: z.string().min(1).max(32), version: z.string().min(1).max(80) }).strict(),
+}).strict();
+export type OpenClawRuntimeSummary = z.infer<typeof OpenClawRuntimeSummarySchema>;
+
+export const OpenClawStabilityResultSchema = z.object({
+  state: z.enum(["stable", "degraded", "unstable", "unknown"]),
+  score: z.number().int().min(0).max(100).nullable(),
+  incidents: z.array(z.object({ id: z.string().min(1).max(80), level: z.enum(["info", "warning", "error"]), summary: z.string().min(1).max(240) }).strict()).max(100),
+}).strict();
+export type OpenClawStabilityResult = z.infer<typeof OpenClawStabilityResultSchema>;
+
+export const OpenClawAuditResultSchema = z.object({
+  state: z.enum(["passed", "warning", "failed", "unknown"]),
+  findings: z.array(z.object({ id: z.string().min(1).max(80), severity: z.enum(["info", "warning", "error"]), summary: z.string().min(1).max(240) }).strict()).max(100),
+}).strict();
+export type OpenClawAuditResult = z.infer<typeof OpenClawAuditResultSchema>;
+
 const LogFilterSchema = z.object({
   cursor: CursorSchema.optional(),
   limit: z.number().int().min(1).max(500).default(100),
@@ -49,6 +69,9 @@ export const DiagnosticsIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("logs.cleanup-preview"), requestId: RequestIdSchema, params: z.object({ retentionDays: z.number().int().min(1).max(3650) }).strict() }).strict(),
   z.object({ method: z.literal("logs.cleanup"), requestId: RequestIdSchema, params: z.object({ previewId: z.string().uuid(), confirm: z.literal(true) }).strict() }).strict(),
   z.object({ method: z.literal("system.get"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("runtime.get"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("stability.get"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("audit.get"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
   z.object({ method: z.literal("config.get"), requestId: RequestIdSchema, params: z.object({ query: QuerySchema }).strict() }).strict(),
   z.object({ method: z.literal("config.export"), requestId: RequestIdSchema, params: z.object({ fileName: BasenameSchema }).strict() }).strict(),
   z.object({ method: z.literal("doctor.run"), requestId: RequestIdSchema, params: z.object({ timeoutMs: OperationTimeoutSchema.optional() }).strict() }).strict(),
@@ -130,6 +153,9 @@ const SuccessSchemas = [
   z.object({ method: z.literal("logs.cleanup-preview"), requestId: RequestIdSchema, ok: z.literal(true), result: CleanupPreviewSchema }).strict(),
   z.object({ method: z.literal("logs.cleanup"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ removedFiles: z.number().int().nonnegative(), removedBytes: z.number().int().nonnegative(), pendingPhysicalFiles: z.number().int().nonnegative().optional() }).strict() }).strict(),
   z.object({ method: z.literal("system.get"), requestId: RequestIdSchema, ok: z.literal(true), result: SystemSummarySchema }).strict(),
+  z.object({ method: z.literal("runtime.get"), requestId: RequestIdSchema, ok: z.literal(true), result: OpenClawRuntimeSummarySchema }).strict(),
+  z.object({ method: z.literal("stability.get"), requestId: RequestIdSchema, ok: z.literal(true), result: OpenClawStabilityResultSchema }).strict(),
+  z.object({ method: z.literal("audit.get"), requestId: RequestIdSchema, ok: z.literal(true), result: OpenClawAuditResultSchema }).strict(),
   z.object({ method: z.literal("config.get"), requestId: RequestIdSchema, ok: z.literal(true), result: ConfigResultSchema }).strict(),
   z.object({ method: z.literal("config.export"), requestId: RequestIdSchema, ok: z.literal(true), result: ExportResultSchema }).strict(),
   z.object({ method: z.literal("doctor.run"), requestId: RequestIdSchema, ok: z.literal(true), result: DoctorResultSchema }).strict(),
@@ -138,7 +164,7 @@ const SuccessSchemas = [
   z.object({ method: z.literal("operations.cancel"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
 ] as const;
 
-const DiagnosticsMethodSchema = z.enum(["logs.list", "logs.export", "logs.cleanup-preview", "logs.cleanup", "system.get", "config.get", "config.export", "doctor.run", "doctor.repair", "network.run", "operations.cancel"]);
+const DiagnosticsMethodSchema = z.enum(["logs.list", "logs.export", "logs.cleanup-preview", "logs.cleanup", "system.get", "runtime.get", "stability.get", "audit.get", "config.get", "config.export", "doctor.run", "doctor.repair", "network.run", "operations.cancel"]);
 export const DiagnosticsIpcResponseSchema = z.union([
   ...SuccessSchemas,
   z.object({ method: DiagnosticsMethodSchema, requestId: RequestIdSchema, ok: z.literal(false), error: UClawErrorSchema }).strict(),

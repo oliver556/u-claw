@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { link, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rename, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -53,6 +53,69 @@ async function fixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe("release service", () => {
+  it("previews and explicitly rolls back to the verified previous runtime", async () => {
+    const setup = await fixture();
+    const previous = manifest({ version: "0.1.0", sequence: 41 }).runtimeManifest;
+    previous.productVersion = "0.1.0";
+    previous.signature.sequence = 41;
+    previous.signature.value = sign(null, canonicalRuntimePayload(previous), keys.privateKey).toString("base64");
+    await writeFile(join(setup.packageRoot, "runtime.pkg"), "runtime");
+    await writeFile(join(setup.packageRoot, "version.json"), JSON.stringify(manifest().runtimeManifest));
+    await writeFile(join(setup.packageRoot, "runtime.pkg.rollback"), "runtime");
+    await writeFile(join(setup.packageRoot, "version.json.rollback"), JSON.stringify(previous));
+
+    const preview = await setup.service.previewRollback();
+    expect(preview).toMatchObject({ available: true, version: "0.1.0" });
+    await expect(setup.service.rollback(preview.previewToken, true)).resolves.toMatchObject({ state: "rolled-back", version: "0.1.0" });
+    expect(JSON.parse(await readFile(join(setup.packageRoot, "version.json"), "utf8"))).toMatchObject({ productVersion: "0.1.0" });
+  });
+
+  it("preserves both verified pairs when rollback switching fails", async () => {
+    const setup = await fixture({ beforeRollbackSwitch: async (stage: string) => { if (stage === "active-runtime-moved") throw new Error("switch rejected"); } });
+    const active = manifest().runtimeManifest;
+    const previous = manifest({ version: "0.1.0", sequence: 41 }).runtimeManifest;
+    previous.productVersion = "0.1.0";
+    previous.signature.sequence = 41;
+    previous.signature.value = sign(null, canonicalRuntimePayload(previous), keys.privateKey).toString("base64");
+    await writeFile(join(setup.packageRoot, "runtime.pkg"), "runtime");
+    await writeFile(join(setup.packageRoot, "version.json"), JSON.stringify(active));
+    await writeFile(join(setup.packageRoot, "runtime.pkg.rollback"), "runtime");
+    await writeFile(join(setup.packageRoot, "version.json.rollback"), JSON.stringify(previous));
+
+    const preview = await setup.service.previewRollback();
+    await expect(setup.service.rollback(preview.previewToken, true)).rejects.toThrow("switch rejected");
+    expect(JSON.parse(await readFile(join(setup.packageRoot, "version.json"), "utf8"))).toMatchObject({ productVersion: "0.2.0" });
+    expect(JSON.parse(await readFile(join(setup.packageRoot, "version.json.rollback"), "utf8"))).toMatchObject({ productVersion: "0.1.0" });
+  });
+
+  it.each([
+    ["prepared", []],
+    ["active-runtime-moved", [["runtime.pkg", "runtime.pkg.current"]]],
+    ["active-version-moved", [["runtime.pkg", "runtime.pkg.current"], ["version.json", "version.json.current"]]],
+    ["rollback-runtime-moved", [["runtime.pkg", "runtime.pkg.current"], ["version.json", "version.json.current"], ["runtime.pkg.rollback", "runtime.pkg"]]],
+    ["rollback-version-moved", [["runtime.pkg", "runtime.pkg.current"], ["version.json", "version.json.current"], ["runtime.pkg.rollback", "runtime.pkg"], ["version.json.rollback", "version.json"]]],
+  ] as const)("recovers a rollback interrupted after %s", async (stage, moves) => {
+    const setup = await fixture();
+    const active = manifest().runtimeManifest;
+    const previous = manifest({ version: "0.1.0", sequence: 41 }).runtimeManifest;
+    previous.productVersion = "0.1.0";
+    previous.signature.sequence = 41;
+    previous.signature.value = sign(null, canonicalRuntimePayload(previous), keys.privateKey).toString("base64");
+    await writeFile(join(setup.packageRoot, "runtime.pkg"), "runtime");
+    await writeFile(join(setup.packageRoot, "version.json"), JSON.stringify(active));
+    await writeFile(join(setup.packageRoot, "runtime.pkg.rollback"), "runtime");
+    await writeFile(join(setup.packageRoot, "version.json.rollback"), JSON.stringify(previous));
+    await writeFile(join(setup.packageRoot, ".rollback-transaction.json"), JSON.stringify({
+      schemaVersion: 1, stage, active: transactionIdentity(active), target: transactionIdentity(previous),
+    }));
+    for (const [from, to] of moves) await rename(join(setup.packageRoot, from), join(setup.packageRoot, to));
+
+    await expect(setup.service.recover()).resolves.toMatchObject({ state: "rolled-back" });
+    expect(JSON.parse(await readFile(join(setup.packageRoot, "version.json"), "utf8"))).toMatchObject({ productVersion: "0.2.0" });
+    expect(JSON.parse(await readFile(join(setup.packageRoot, "version.json.rollback"), "utf8"))).toMatchObject({ productVersion: "0.1.0" });
+    await expect(readFile(join(setup.packageRoot, ".rollback-transaction.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("tracks background install work until the operation settles", async () => {
     const runMutation = vi.fn(async <T>(operation: () => Promise<T>) => operation());
     const setup = await fixture({ runMutation });

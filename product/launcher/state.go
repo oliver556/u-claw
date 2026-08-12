@@ -70,6 +70,7 @@ type Dependencies struct {
 	FinalizeUpdate      func(string, Manifest) error
 	StartProcess        func(ProcessSpec) (ChildProcess, error)
 	MonitorUSB          func(context.Context, string, time.Duration) error
+	AppendLog           func(dataDir string, event string) error
 }
 
 type processWaitResult struct {
@@ -80,6 +81,12 @@ type processWaitResult struct {
 func Run(ctx context.Context, deps Dependencies) error {
 	reporter := deps.Reporter
 	defer reporter.Close()
+	appendLog := func(event string) {
+		if deps.AppendLog != nil {
+			_ = deps.AppendLog(deps.Paths.DataDir, event)
+		}
+	}
+	appendLog("launcher-started")
 	reporter.State(StateStarting)
 
 	reporter.State(StateValidatingUSB)
@@ -132,8 +139,10 @@ func Run(ctx context.Context, deps Dependencies) error {
 		Lease: lease,
 	})
 	if err != nil {
+		appendLog("launcher-failed")
 		return reportFailure(reporter, errors.Join(ErrAppStartFailed, err, lease.Close()))
 	}
+	appendLog("runtime-started")
 	waitResult := make(chan processWaitResult, 1)
 	go func() {
 		waitResult <- processWaitResult{processErr: process.Wait(), leaseErr: lease.Close()}
@@ -172,11 +181,13 @@ func Run(ctx context.Context, deps Dependencies) error {
 
 	select {
 	case result := <-waitResult:
+		appendLog("runtime-stopped")
 		if err := errors.Join(result.processErr, result.leaseErr); err != nil {
 			return reportFailure(reporter, errors.Join(ErrAppExited, err))
 		}
 		return nil
 	case err := <-usbResult:
+		appendLog("runtime-stopped")
 		if ctx.Err() != nil {
 			if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
 				return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
@@ -185,6 +196,7 @@ func Run(ctx context.Context, deps Dependencies) error {
 		}
 		return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
 	case <-ctx.Done():
+		appendLog("runtime-stopped")
 		if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
 			return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
 		}

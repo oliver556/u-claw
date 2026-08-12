@@ -13,6 +13,8 @@ export function createReleaseDispatcher(service: ReleaseService) {
       case "release.operation": result = service.operation(request.params.operationId); break;
       case "release.cancel": result = service.cancel(request.params.operationId); break;
       case "release.recovery": result = await service.recover(); break;
+      case "release.rollback-preview": result = await service.previewRollback(); break;
+      case "release.rollback": result = await service.rollback(request.params.previewToken, request.params.confirmed); break;
       case "uninstall.preview": result = await service.previewUninstall(); break;
       case "uninstall.execute": result = service.executeUninstall(request.params.scopeIds, request.params.previewToken, request.params.confirmed); break;
     }

@@ -4,13 +4,16 @@ import type {
   DiagnosticsIpcResponse,
   DoctorResult,
   NetworkDiagnosticsResult,
+  OpenClawAuditResult,
+  OpenClawRuntimeSummary,
+  OpenClawStabilityResult,
   SystemSummary,
 } from "@uclaw/shared";
 import { Modal, Tooltip } from "antd";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Copy, Download, FileJson, Network, Pause, Play, RefreshCw, Search, SquareTerminal, Stethoscope, Trash2, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Tab = "logs" | "system" | "doctor" | "network" | "config";
+type Tab = "logs" | "system" | "runtime" | "doctor" | "network" | "config";
 type LoadState = "loading" | "ready" | "empty" | "error" | "offline";
 type CleanupPreview = Extract<DiagnosticsIpcResponse, { method: "logs.cleanup-preview"; ok: true }>["result"];
 
@@ -39,10 +42,13 @@ function safeMessage(response: DiagnosticsIpcResponse): string {
 export function SystemDiagnostics() {
   const [tab, setTab] = useState<Tab>("logs");
   const [logs, setLogs] = useState<DiagnosticLogEntry[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [logState, setLogState] = useState<LoadState>("loading");
   const [system, setSystem] = useState<SystemSummary>();
   const [systemState, setSystemState] = useState<LoadState>("loading");
+  const [runtime, setRuntime] = useState<OpenClawRuntimeSummary>();
+  const [stability, setStability] = useState<OpenClawStabilityResult>();
+  const [audit, setAudit] = useState<OpenClawAuditResult>();
+  const [runtimeState, setRuntimeState] = useState<LoadState>("loading");
   const [config, setConfig] = useState<{ content: string; entries: Array<{ path: string; value: string }>; truncated: boolean }>();
   const [configState, setConfigState] = useState<LoadState>("loading");
   const [doctor, setDoctor] = useState<DoctorResult>();
@@ -63,6 +69,8 @@ export function SystemDiagnostics() {
   const [cleanupPreview, setCleanupPreview] = useState<CleanupPreview>();
   const [retentionDays, setRetentionDays] = useState(7);
   const mounted = useRef(true);
+  const logCursor = useRef<string | undefined>(undefined);
+  const logEntries = useRef<DiagnosticLogEntry[]>([]);
 
   const invoke = useCallback(async (diagnosticRequest: DiagnosticsIpcRequest): Promise<DiagnosticsIpcResponse> => {
     const bridge = window.uclaw?.diagnostics?.invoke;
@@ -86,11 +94,17 @@ export function SystemDiagnostics() {
       const response = await invoke(request("logs.list", { ...filterParams(), ...(cursor ? { cursor } : {}) }));
       if (!response.ok || response.method !== "logs.list") throw new Error(safeMessage(response));
       if (!mounted.current) return;
-      setLogs((current) => cursor ? [...current, ...response.result.items].slice(-500) : response.result.items);
-      setNextCursor(response.result.nextCursor);
-      setLogState((cursor ? logs.length + response.result.items.length : response.result.items.length) === 0 ? "empty" : "ready");
+      if (!cursor) logEntries.current = response.result.items;
+      else {
+        const merged = new Map(logEntries.current.map((entry) => [entry.id, entry]));
+        for (const entry of response.result.items) merged.set(entry.id, entry);
+        logEntries.current = [...merged.values()].slice(-500);
+      }
+      setLogs(logEntries.current);
+      logCursor.current = response.result.nextCursor ?? cursor ?? undefined;
+      setLogState(logEntries.current.length === 0 ? "empty" : "ready");
     } catch { if (mounted.current) setLogState("error"); }
-  }, [filterParams, invoke, logs.length]);
+  }, [filterParams, invoke]);
 
   const loadSystem = useCallback(async () => {
     if (!navigator.onLine) { setSystemState("offline"); return; }
@@ -111,6 +125,17 @@ export function SystemDiagnostics() {
       if (mounted.current) { setConfig(response.result); setConfigState(response.result.entries.length ? "ready" : "empty"); }
     } catch { if (mounted.current) setConfigState("error"); }
   }, [configQuery, invoke]);
+
+  const loadRuntime = useCallback(async () => {
+    setRuntimeState("loading");
+    try {
+      const [runtimeResponse, stabilityResponse, auditResponse] = await Promise.all([
+        invoke(request("runtime.get", {})), invoke(request("stability.get", {})), invoke(request("audit.get", {})),
+      ]);
+      if (!runtimeResponse.ok || runtimeResponse.method !== "runtime.get" || !stabilityResponse.ok || stabilityResponse.method !== "stability.get" || !auditResponse.ok || auditResponse.method !== "audit.get") throw new Error("invalid runtime response");
+      if (mounted.current) { setRuntime(runtimeResponse.result); setStability(stabilityResponse.result); setAudit(auditResponse.result); setRuntimeState("ready"); }
+    } catch { if (mounted.current) setRuntimeState("error"); }
+  }, [invoke]);
 
   const loadDoctor = useCallback(async () => {
     setDoctorState("loading"); setNotice(undefined);
@@ -161,13 +186,14 @@ export function SystemDiagnostics() {
 
   useEffect(() => {
     if (paused) return;
-    const timer = window.setInterval(() => void loadLogs(undefined, true), 3_000);
+    const timer = window.setInterval(() => void loadLogs(logCursor.current, true), 3_000);
     return () => window.clearInterval(timer);
   }, [loadLogs, paused]);
 
   useEffect(() => { if (tab === "config" && config === undefined) void loadConfig(); }, [config, loadConfig, tab]);
   useEffect(() => { if (tab === "doctor" && doctor === undefined) void loadDoctor(); }, [doctor, loadDoctor, tab]);
   useEffect(() => { if (tab === "network" && network === undefined) void loadNetwork(); }, [loadNetwork, network, tab]);
+  useEffect(() => { if (tab === "runtime" && runtime === undefined) void loadRuntime(); }, [loadRuntime, runtime, tab]);
 
   const exportLogs = async () => {
     setOperation("正在导出脱敏日志"); setNotice(undefined);
@@ -221,7 +247,7 @@ export function SystemDiagnostics() {
   };
   const stateView = (state: LoadState, empty: string) => state === "loading" ? <div className="diagnostics-state"><RefreshCw className="spin" />正在加载</div>
     : state === "offline" ? <div className="diagnostics-state warning" role="alert"><AlertTriangle />当前离线，诊断数据不可用</div>
-    : state === "error" ? <div className="diagnostics-state error" role="alert"><AlertTriangle />诊断数据加载失败<button type="button" onClick={() => tab === "logs" ? void loadLogs() : tab === "system" ? void loadSystem() : tab === "doctor" ? void loadDoctor() : tab === "network" ? void loadNetwork() : void loadConfig()}>重试</button></div>
+    : state === "error" ? <div className="diagnostics-state error" role="alert"><AlertTriangle />诊断数据加载失败<button type="button" onClick={() => tab === "logs" ? void loadLogs() : tab === "system" ? void loadSystem() : tab === "runtime" ? void loadRuntime() : tab === "doctor" ? void loadDoctor() : tab === "network" ? void loadNetwork() : void loadConfig()}>重试</button></div>
     : state === "empty" ? <div className="diagnostics-state">{empty}</div> : null;
 
   const systemRows = system ? [
@@ -234,7 +260,7 @@ export function SystemDiagnostics() {
   return <section className="system-diagnostics secondary-view">
     <header><h1>系统</h1><p>运行状态、日志和诊断</p><button className="secondary-command" type="button" onClick={() => void openAdvancedConsole()}><SquareTerminal />打开高级控制台</button></header>
     <div className="diagnostics-tabs" role="tablist" aria-label="系统诊断视图">
-      {[["logs", "日志"], ["system", "系统信息"], ["doctor", "OpenClaw Doctor"], ["network", "网络诊断"], ["config", "原始配置"]].map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id as Tab)}>{label}</button>)}
+      {[["logs", "日志"], ["system", "系统信息"], ["runtime", "运行审计"], ["doctor", "OpenClaw Doctor"], ["network", "网络诊断"], ["config", "原始配置"]].map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id as Tab)}>{label}</button>)}
     </div>
     {notice || operation || doctorOperationRequestId ? <div className="diagnostics-notice" role="status"><span>{operation ?? notice ?? "Doctor 操作进行中"}</span>{doctorOperationRequestId ? <button type="button" aria-label="取消 Doctor 操作" onClick={() => void cancelDoctor()}><X />取消</button> : null}</div> : null}
     {tab === "logs" ? <div className="diagnostics-content">
@@ -249,9 +275,10 @@ export function SystemDiagnostics() {
       </div>
       <div className="diagnostics-actions"><button type="button" onClick={() => void exportLogs()} disabled={Boolean(operation)}><Download />导出脱敏日志</button><label>保留天数<input type="number" min="1" max="3650" value={retentionDays} onChange={(event) => setRetentionDays(Number(event.target.value))} /></label><button type="button" onClick={() => void previewCleanup()} disabled={Boolean(operation)}><Trash2 />预览日志清理</button>{paused ? <span className="paused-state">已暂停</span> : null}</div>
       {stateView(logState, "暂无日志")}
-      {logState === "ready" ? <div className="log-list" role="log" aria-label="运行日志">{logs.map((entry) => <article className={`log-row level-${entry.level}`} key={entry.id}><time>{new Date(entry.timestamp).toLocaleString()}</time><span>{entry.level}</span><strong>{entry.source}</strong><p>{entry.message}</p></article>)}{nextCursor ? <button className="diagnostics-more" type="button" aria-label="加载更多日志" onClick={() => void loadLogs(nextCursor)}>加载更多</button> : null}</div> : null}
+      {logState === "ready" ? <div className="log-list" role="log" aria-label="运行日志">{logs.map((entry) => <article className={`log-row level-${entry.level}`} key={entry.id}><time>{new Date(entry.timestamp).toLocaleString()}</time><span>{entry.level}</span><strong>{entry.source}</strong><p>{entry.message}</p></article>)}</div> : null}
     </div> : null}
     {tab === "system" ? <div className="diagnostics-content">{stateView(systemState, "暂无系统信息")}{systemState === "ready" ? <div className="system-summary">{systemRows.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong><Tooltip title={`复制${label}`}><button type="button" aria-label={`复制${label}`} onClick={() => copy(value)}><Copy /></button></Tooltip></div>)}</div> : null}</div> : null}
+    {tab === "runtime" ? <div className="diagnostics-content">{stateView(runtimeState, "暂无运行审计")}{runtimeState === "ready" && runtime && stability && audit ? <><div className={`diagnostics-overview ${audit.state}`}><CheckCircle2 /><strong>OpenClaw {runtime.info.version}</strong><span>{runtime.health.state} / {runtime.status.state} / {runtime.info.platform} {runtime.info.architecture}</span><button type="button" onClick={() => void loadRuntime()}><RefreshCw />重新读取</button></div><div className="diagnostics-check-list"><article className="diagnostics-check"><CheckCircle2 /><div><strong>稳定性 {stability.score ?? "未知"}</strong><p>{stability.state}</p></div></article>{stability.incidents.map((item) => <article className={`diagnostics-check level-${item.level}`} key={item.id}><AlertTriangle /><div><strong>{item.id}</strong><p>{item.summary}</p></div></article>)}{audit.findings.map((item) => <article className={`diagnostics-check level-${item.severity}`} key={item.id}><CheckCircle2 /><div><strong>{item.id}</strong><p>{item.summary}</p></div></article>)}</div></> : null}</div> : null}
     {tab === "doctor" ? <div className="diagnostics-content">{stateView(doctorState, "Doctor 未返回检查项")}{doctorState === "ready" && doctor ? <><div className={`diagnostics-overview ${doctor.state}`}><Stethoscope /><strong>{doctor.state === "healthy" ? "OpenClaw 检查通过" : "OpenClaw 发现需处理项"}</strong><button type="button" onClick={() => void loadDoctor()}><RefreshCw />重新检查</button></div><div className="diagnostics-check-list">{doctor.checks.map((check) => <article className={`diagnostics-check level-${check.level}`} key={check.id}>{check.level === "info" ? <CheckCircle2 /> : <AlertTriangle />}<div><strong>{check.label}</strong><p>{check.summary}</p>{check.suggestion ? <small>{check.suggestion}</small> : null}</div>{check.repair ? <button type="button" onClick={() => setRepair(check.repair)}><Wrench />{check.repair.label}</button> : null}</article>)}</div></> : null}</div> : null}
     {tab === "network" ? <div className="diagnostics-content">{stateView(networkState, "暂无网络检查项")}{networkState === "ready" && network ? <><div className={`diagnostics-overview ${network.mode}`}><Network /><strong>{network.mode === "online" ? "外网可用" : network.mode === "intranet-only" ? "内网可用，外网不可用" : "完全离线"}</strong><span>代理 {network.proxy.configured ? "已配置" : "未配置"} · NO_PROXY {network.proxy.noProxyConfigured ? "已配置" : "未配置"}</span><button type="button" onClick={() => void loadNetwork()}><RefreshCw />重新探测</button></div><div className="diagnostics-check-list">{network.checks.map((check) => <article className={`diagnostics-check level-${check.level}`} key={check.id}>{check.status === "passed" ? <CheckCircle2 /> : check.status === "unavailable" || check.status === "skipped" ? <CircleSlash2 /> : <AlertTriangle />}<div><strong>{check.label}</strong><p>{check.summary}</p><small>{check.durationMs} ms</small></div></article>)}</div></> : null}</div> : null}
     {tab === "config" ? <div className="diagnostics-content"><div className="config-toolbar"><label className="diagnostics-search"><Search /><input type="search" aria-label="搜索配置" value={configQuery} onChange={(event) => setConfigQuery(event.target.value)} placeholder="按字段路径搜索" /></label><button type="button" aria-label="搜索配置" onClick={() => void loadConfig()}><Search />搜索</button><button type="button" aria-label="导出脱敏配置" onClick={() => void exportConfig()} disabled={Boolean(operation)}><Download />导出脱敏配置</button></div>{stateView(configState, "没有匹配配置")}{config ? <div className="config-layout"><div className="config-entries">{config.entries.map((entry) => <button type="button" key={entry.path} onClick={() => copy(`${entry.path}=${entry.value}`)}><span>{entry.path}</span><strong>{entry.value}</strong></button>)}</div><pre aria-label="脱敏配置正文"><FileJson />{config.content}</pre></div> : null}</div> : null}

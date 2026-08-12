@@ -96,6 +96,7 @@ func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 			return StartManagedProcess(spec)
 		},
 		MonitorUSB: MonitorUSB,
+		AppendLog:  appendLauncherLog,
 	}
 }
 

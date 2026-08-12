@@ -64,4 +64,11 @@ describe("diagnostics IPC contracts", () => {
     } });
     expect(JSON.stringify([doctor, network])).not.toMatch(/(?:command|https?:\/\/|[A-Za-z]:\\\\|\/Users\/)/);
   });
+
+  it("accepts authoritative runtime, stability, and audit requests without arbitrary payloads", () => {
+    for (const method of ["runtime.get", "stability.get", "audit.get"] as const) {
+      expect(DiagnosticsIpcRequestSchema.parse({ method, requestId: method, params: {} }).method).toBe(method);
+    }
+    expect(DiagnosticsIpcRequestSchema.safeParse({ method: "audit.get", requestId: "bad", params: { command: "cat config" } }).success).toBe(false);
+  });
 });

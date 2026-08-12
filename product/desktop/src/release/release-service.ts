@@ -33,6 +33,14 @@ interface UpdateTransaction {
   previous: UpdateIdentity | null;
 }
 
+type RollbackStage = "prepared" | "active-runtime-moved" | "active-version-moved" | "rollback-runtime-moved" | "rollback-version-moved";
+interface RollbackTransaction {
+  schemaVersion: 1;
+  stage: RollbackStage;
+  active: UpdateIdentity;
+  target: UpdateIdentity;
+}
+
 type UnsignedReleaseManifest = Omit<SignedReleaseManifest, "signature">;
 export const canonicalReleasePayload = (manifest: UnsignedReleaseManifest): Buffer => Buffer.from(JSON.stringify(manifest));
 export const canonicalRuntimePayload = (runtime: RuntimeManifest): Buffer => Buffer.from(JSON.stringify([
@@ -55,6 +63,7 @@ export interface ReleaseServiceOptions {
   download(manifest: SignedReleaseManifest, controlledTarget: string, signal: AbortSignal): Promise<void>;
   secureInstall?(manifest: SignedReleaseManifest, signal: AbortSignal): Promise<void>;
   secureCleanup?(child: "runtime" | "cache" | "updates"): Promise<void>;
+  beforeRollbackSwitch?(stage: "before" | "active-runtime-moved" | "active-version-moved" | "rollback-runtime-moved" | "rollback-version-moved"): Promise<void>;
 }
 
 const token = () => randomUUID().replaceAll("-", "");
@@ -184,6 +193,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
   let activeCheck: AbortController | undefined;
   let checked: { manifest: SignedReleaseManifest; previewToken: string } | undefined;
   let uninstallPreview: UninstallPreview | undefined;
+  let rollbackPreview: { token: string; identity: UpdateIdentity } | undefined;
   let highestSequence = options.highestSequence ?? 0;
   let acceptedIdentity: UpdateIdentity | undefined;
   const operations = new Map<string, ReleaseOperation>();
@@ -304,6 +314,54 @@ export function createReleaseService(options: ReleaseServiceOptions) {
     return uninstallPreview;
   };
 
+  const previewRollback = async () => {
+    const rollback = await installedPair(join(options.packageRoot, "runtime.pkg.rollback"), join(options.packageRoot, "version.json.rollback"));
+    const previewToken = token();
+    rollbackPreview = rollback ? { token: previewToken, identity: updateIdentity(rollback) } : undefined;
+    return rollback ? { available: true, previewToken, version: rollback.productVersion } : { available: false, previewToken };
+  };
+
+  const rollback = async (previewToken: string, confirmed: boolean) => {
+    const preview = rollbackPreview;
+    rollbackPreview = undefined;
+    if (!confirmed || !preview || preview.token !== previewToken) throw new Error("Rollback confirmation is stale.");
+    return runMutation(async () => {
+      const runtime = join(options.packageRoot, "runtime.pkg"); const version = join(options.packageRoot, "version.json");
+      const runtimeRollback = join(options.packageRoot, "runtime.pkg.rollback"); const versionRollback = join(options.packageRoot, "version.json.rollback");
+      const previous = await installedPair(runtimeRollback, versionRollback);
+      if (!previous || !sameUpdateIdentity(previous, preview.identity)) throw new Error("Rollback target changed after preview.");
+      const active = await installedPair(runtime, version);
+      if (!active) throw new Error("Active runtime is not eligible for rollback.");
+      await options.beforeRollbackSwitch?.("before");
+      const runtimeCurrent = join(options.packageRoot, "runtime.pkg.current"); const versionCurrent = join(options.packageRoot, "version.json.current");
+      const rollbackTransaction = join(options.packageRoot, ".rollback-transaction.json");
+      const rollbackRecord: RollbackTransaction = { schemaVersion: 1, stage: "prepared", active: updateIdentity(active), target: preview.identity };
+      let activeRuntimeMoved = false; let activeVersionMoved = false; let rollbackRuntimeMoved = false; let rollbackVersionMoved = false;
+      try {
+        await writeJsonDurable(rollbackTransaction, rollbackRecord, true);
+        await rename(runtime, runtimeCurrent); activeRuntimeMoved = true; await syncDirectory(options.packageRoot); await writeJsonDurable(rollbackTransaction, { ...rollbackRecord, stage: "active-runtime-moved" }); await options.beforeRollbackSwitch?.("active-runtime-moved");
+        await rename(version, versionCurrent); activeVersionMoved = true; await syncDirectory(options.packageRoot); await writeJsonDurable(rollbackTransaction, { ...rollbackRecord, stage: "active-version-moved" }); await options.beforeRollbackSwitch?.("active-version-moved");
+        await rename(runtimeRollback, runtime); rollbackRuntimeMoved = true; await syncDirectory(options.packageRoot); await writeJsonDurable(rollbackTransaction, { ...rollbackRecord, stage: "rollback-runtime-moved" }); await options.beforeRollbackSwitch?.("rollback-runtime-moved");
+        await rename(versionRollback, version); rollbackVersionMoved = true; await syncDirectory(options.packageRoot); await writeJsonDurable(rollbackTransaction, { ...rollbackRecord, stage: "rollback-version-moved" }); await options.beforeRollbackSwitch?.("rollback-version-moved");
+        const readback = await installedPair(runtime, version);
+        if (!readback || !sameUpdateIdentity(readback, preview.identity)) throw new Error("Rollback readback failed.");
+        await rename(runtimeCurrent, runtimeRollback); await rename(versionCurrent, versionRollback); await syncDirectory(options.packageRoot);
+        await rm(rollbackTransaction, { force: true }); await syncDirectory(options.packageRoot);
+        return { state: "rolled-back" as const, version: readback.productVersion, message: "已切换到上一已验证版本。" };
+      } catch (error) {
+        if (rollbackVersionMoved) await rename(version, versionRollback).catch(() => undefined);
+        if (rollbackRuntimeMoved) await rename(runtime, runtimeRollback).catch(() => undefined);
+        if (activeVersionMoved) await rename(versionCurrent, version).catch(() => undefined);
+        if (activeRuntimeMoved) await rename(runtimeCurrent, runtime).catch(() => undefined);
+        await syncDirectory(options.packageRoot).catch(() => undefined);
+        const [activeReadback, rollbackReadback] = await Promise.all([installedPair(runtime, version), installedPair(runtimeRollback, versionRollback)]);
+        if (!activeReadback || !sameUpdateIdentity(activeReadback, updateIdentity(active)) || !rollbackReadback || !sameUpdateIdentity(rollbackReadback, preview.identity)) throw new Error("Rollback recovery failed.");
+        await rm(rollbackTransaction, { force: true }); await syncDirectory(options.packageRoot);
+        throw error;
+      }
+    });
+  };
+
   const executeUninstall = (scopeIds: readonly "host-cache"[], previewToken: string, confirmed: boolean): ReleaseOperation => {
     if (!confirmed || !uninstallPreview || uninstallPreview.previewToken !== previewToken || scopeIds.length !== 1 || scopeIds[0] !== "host-cache") throw new Error("Uninstall confirmation is stale.");
     uninstallPreview = undefined; const id = operationId();
@@ -338,6 +396,49 @@ export function createReleaseService(options: ReleaseServiceOptions) {
 
   const recover = async () => {
     const transaction = join(options.packageRoot, ".update-transaction.json");
+    const rollbackTransaction = join(options.packageRoot, ".rollback-transaction.json");
+    if (await exists(rollbackTransaction)) {
+      let record: RollbackTransaction;
+      try {
+        const raw = JSON.parse(await readFile(rollbackTransaction, "utf8")) as Record<string, unknown>;
+        const stages: RollbackStage[] = ["prepared", "active-runtime-moved", "active-version-moved", "rollback-runtime-moved", "rollback-version-moved"];
+        if (Object.keys(raw).sort().join("\0") !== "active\0schemaVersion\0stage\0target" || raw.schemaVersion !== 1 || !stages.includes(raw.stage as RollbackStage) || !validUpdateIdentity(raw.active) || !validUpdateIdentity(raw.target)) throw new Error("invalid rollback transaction");
+        record = raw as unknown as RollbackTransaction;
+      } catch { return { state: "recovery-required" as const, message: "回滚事务记录损坏，需要恢复。" }; }
+      const runtime = join(options.packageRoot, "runtime.pkg"); const version = join(options.packageRoot, "version.json");
+      const runtimeRollback = join(options.packageRoot, "runtime.pkg.rollback"); const versionRollback = join(options.packageRoot, "version.json.rollback");
+      const runtimeCurrent = join(options.packageRoot, "runtime.pkg.current"); const versionCurrent = join(options.packageRoot, "version.json.current");
+      const activeRuntimeRecovery = join(options.packageRoot, "runtime.pkg.active-recovery"); const activeVersionRecovery = join(options.packageRoot, "version.json.active-recovery");
+      const targetRuntimeRecovery = join(options.packageRoot, "runtime.pkg.target-recovery"); const targetVersionRecovery = join(options.packageRoot, "version.json.target-recovery");
+      const runtimeCandidates = [runtime, runtimeRollback, runtimeCurrent, activeRuntimeRecovery, targetRuntimeRecovery];
+      const versionCandidates = [version, versionRollback, versionCurrent, activeVersionRecovery, targetVersionRecovery];
+      const findPair = async (identity: UpdateIdentity) => {
+        for (const runtimePath of runtimeCandidates) for (const versionPath of versionCandidates) {
+          const candidate = await installedPair(runtimePath, versionPath);
+          if (candidate && sameUpdateIdentity(candidate, identity)) return { runtimePath, versionPath };
+        }
+        return undefined;
+      };
+      try {
+        const activeSource = await findPair(record.active); const targetSource = await findPair(record.target);
+        if (!activeSource || !targetSource) throw new Error("Rollback source missing.");
+        for (const path of [activeRuntimeRecovery, activeVersionRecovery, targetRuntimeRecovery, targetVersionRecovery]) await rm(path, { force: true });
+        await copyFile(activeSource.runtimePath, activeRuntimeRecovery, constants.COPYFILE_EXCL); await syncFile(activeRuntimeRecovery);
+        await copyFile(activeSource.versionPath, activeVersionRecovery, constants.COPYFILE_EXCL); await syncFile(activeVersionRecovery);
+        await copyFile(targetSource.runtimePath, targetRuntimeRecovery, constants.COPYFILE_EXCL); await syncFile(targetRuntimeRecovery);
+        await copyFile(targetSource.versionPath, targetVersionRecovery, constants.COPYFILE_EXCL); await syncFile(targetVersionRecovery); await syncDirectory(options.packageRoot);
+        const [activeCopy, targetCopy] = await Promise.all([installedPair(activeRuntimeRecovery, activeVersionRecovery), installedPair(targetRuntimeRecovery, targetVersionRecovery)]);
+        if (!activeCopy || !sameUpdateIdentity(activeCopy, record.active) || !targetCopy || !sameUpdateIdentity(targetCopy, record.target)) throw new Error("Rollback recovery copy invalid.");
+        await rm(runtime, { force: true }); await rename(activeRuntimeRecovery, runtime); await syncDirectory(options.packageRoot);
+        await rm(version, { force: true }); await rename(activeVersionRecovery, version); await syncDirectory(options.packageRoot);
+        await rm(runtimeRollback, { force: true }); await rename(targetRuntimeRecovery, runtimeRollback); await syncDirectory(options.packageRoot);
+        await rm(versionRollback, { force: true }); await rename(targetVersionRecovery, versionRollback); await syncDirectory(options.packageRoot);
+        const [activeReadback, targetReadback] = await Promise.all([installedPair(runtime, version), installedPair(runtimeRollback, versionRollback)]);
+        if (!activeReadback || !sameUpdateIdentity(activeReadback, record.active) || !targetReadback || !sameUpdateIdentity(targetReadback, record.target)) throw new Error("Rollback recovery readback invalid.");
+        await rm(runtimeCurrent, { force: true }); await rm(versionCurrent, { force: true }); await rm(rollbackTransaction, { force: true }); await syncDirectory(options.packageRoot);
+        return { state: "rolled-back" as const, message: "检测到中断回滚，已恢复原版本对。" };
+      } catch { return { state: "recovery-required" as const, message: "中断回滚自动恢复失败，需要恢复。" }; }
+    }
     if (!await exists(transaction)) return { state: "clean" as const, message: "无待恢复更新。" };
     let record: UpdateTransaction;
     try {
@@ -383,7 +484,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
 
   return {
     check, retry: () => check(lastChannel), cancelCheck: () => { activeCheck?.abort(new Error("cancelled")); return base("cancelled", { retryable: true, message: "更新检查已取消。" }); },
-    install, previewUninstall, executeUninstall, recover,
+    install, previewRollback, rollback, previewUninstall, executeUninstall, recover,
     operation: (id: string) => operations.get(id), cancel: (id: string) => { operationSignals.get(id)?.abort(new Error("cancelled")); return operations.get(id); },
     wait: async (id: string) => { while (["queued", "running"].includes(operations.get(id)?.state ?? "")) await new Promise((resolve) => setTimeout(resolve, 2)); return operations.get(id); },
   };
