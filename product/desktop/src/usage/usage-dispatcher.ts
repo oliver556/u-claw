@@ -16,16 +16,17 @@ interface OpenClawUsageService {
 interface CreateUsageDispatcherOptions {
   openClaw: OpenClawUsageService;
   newApi?: { userId: string; client: Pick<NewApiManagementClient, "getUsage"> };
+  newApiUsage?: () => Promise<Awaited<ReturnType<NewApiManagementClient["getUsage"]>>>;
   now?: () => Date;
 }
 
-export function createUsageDispatcher({ openClaw: openClawService, newApi, now = () => new Date() }: CreateUsageDispatcherOptions) {
+export function createUsageDispatcher({ openClaw: openClawService, newApi, newApiUsage, now = () => new Date() }: CreateUsageDispatcherOptions) {
   return async (request: UsageRequest) => {
     let result: unknown;
     if (request.method === "usage.snapshot") {
       const [openClaw, newApiResult] = await Promise.all([
         openClawService.snapshot(request.params),
-        newApi === undefined ? Promise.resolve(null) : newApi.client.getUsage(newApi.userId).then(
+        newApiUsage === undefined && newApi === undefined ? Promise.resolve(null) : (newApiUsage?.() ?? newApi!.client.getUsage(newApi!.userId)).then(
           (quota) => ({ quota }),
           (error: unknown) => ({ error: toRendererSafeError(error) }),
         ),
