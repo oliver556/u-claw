@@ -40,6 +40,7 @@ export interface BrowserWindowOptionsLike {
     contextIsolation: boolean;
     sandbox: boolean;
     nodeIntegration: boolean;
+    devTools: boolean;
   };
 }
 
@@ -53,6 +54,7 @@ export interface CreateMainWindowOptions {
   rendererUrl?: string;
   rendererFile?: string;
   openExternal(url: string): Promise<unknown>;
+  devTools?: boolean;
   showWhenReady?: boolean;
   beforeLoad?(window: DesktopWindow): (() => void) | void;
 }
@@ -61,18 +63,21 @@ export interface CreateAdvancedConsoleWindowOptions {
   BrowserWindow: BrowserWindowConstructor;
   gatewayPort: number;
   openExternal(url: string): Promise<unknown>;
+  devTools?: boolean;
 }
 
 export interface CreateAdvancedConsoleControllerOptions {
   BrowserWindow: BrowserWindowConstructor;
   getGatewayPort(): number;
   openExternal(url: string): Promise<unknown>;
+  devTools?: boolean;
 }
 
 export function createAdvancedConsoleController({
   BrowserWindow,
   getGatewayPort,
   openExternal,
+  devTools = true,
 }: CreateAdvancedConsoleControllerOptions): () => Promise<void> {
   let current: DesktopWindow | undefined;
   let pending: Promise<DesktopWindow> | undefined;
@@ -87,7 +92,7 @@ export function createAdvancedConsoleController({
       if (!created.isDestroyed()) created.focus();
       return;
     }
-    const creating = createAdvancedConsoleWindow({ BrowserWindow, gatewayPort: getGatewayPort(), openExternal });
+    const creating = createAdvancedConsoleWindow({ BrowserWindow, gatewayPort: getGatewayPort(), openExternal, devTools });
     pending = creating;
     let created: DesktopWindow;
     try {
@@ -106,6 +111,7 @@ export async function createAdvancedConsoleWindow({
   BrowserWindow,
   gatewayPort,
   openExternal,
+  devTools = true,
 }: CreateAdvancedConsoleWindowOptions): Promise<DesktopWindow> {
   if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65_535) {
     throw new Error("Advanced console Gateway port is invalid.");
@@ -116,7 +122,7 @@ export async function createAdvancedConsoleWindow({
     show: false,
     minWidth: 800,
     minHeight: 600,
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, devTools },
   });
   installNavigationPolicy({
     webContents: window.webContents,
@@ -139,6 +145,7 @@ export async function createMainWindow({
   rendererUrl,
   rendererFile,
   openExternal,
+  devTools = true,
   showWhenReady = true,
   beforeLoad,
 }: CreateMainWindowOptions): Promise<DesktopWindow> {
@@ -155,6 +162,7 @@ export async function createMainWindow({
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      devTools,
     },
   });
 

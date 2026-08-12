@@ -15,10 +15,18 @@ describe("createMainWindow", () => {
       close = vi.fn(); isDestroyed = vi.fn(() => false); isMinimized = vi.fn(() => false); restore = vi.fn(); focus = vi.fn();
     }
 
-    await createAdvancedConsoleWindow({ BrowserWindow: ConsoleWindow, gatewayPort: 18789, openExternal: vi.fn(async () => undefined) });
+    await createAdvancedConsoleWindow({
+      BrowserWindow: ConsoleWindow,
+      gatewayPort: 18789,
+      openExternal: vi.fn(async () => undefined),
+      devTools: false,
+    });
 
     expect(loadURL).toHaveBeenCalledWith("http://127.0.0.1:18789/");
-    expect(options).toMatchObject({ frame: true, webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false } });
+    expect(options).toMatchObject({
+      frame: true,
+      webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, devTools: false },
+    });
     await expect(createAdvancedConsoleWindow({ BrowserWindow: ConsoleWindow, gatewayPort: 0, openExternal: vi.fn() })).rejects.toThrow();
   });
   it("holds and reuses the advanced console window until it closes", async () => {
@@ -140,6 +148,7 @@ describe("createMainWindow", () => {
       preloadPath: "/runtime/preload.js",
       rendererUrl: "http://127.0.0.1:5173",
       openExternal: vi.fn(async () => undefined),
+      devTools: false,
       beforeLoad: (window) => {
         order.push("register-ipc");
         expect(window.webContents).toBeDefined();
@@ -160,6 +169,7 @@ describe("createMainWindow", () => {
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,
+        devTools: false,
       },
     });
     expect(loadURL).toHaveBeenCalledWith("http://127.0.0.1:5173");

@@ -607,6 +607,7 @@ export async function startElectronMain(
     fetch,
     (operation) => consistencyCoordinator.runTrackedWrite(operation),
   );
+  const devTools = !app.isPackaged;
   let gatewayPort: number | undefined;
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
@@ -615,6 +616,7 @@ export async function startElectronMain(
       return gatewayPort;
     },
     openExternal: (url) => shell.openExternal(url),
+    devTools,
   });
   const runtimeOptions: DesktopMainOptions = {
     ...options,
@@ -653,6 +655,7 @@ export async function startElectronMain(
         rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
         rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
         openExternal: (url) => shell.openExternal(url),
+        devTools,
         showWhenReady: false,
         beforeLoad: registerIpc,
       });
