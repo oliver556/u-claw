@@ -1,8 +1,13 @@
 import { execFile, execFileSync } from "node:child_process";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const defaultMaxFileBytes = 5 * 1024 * 1024;
+const defaultMaxTotalBytes = 100 * 1024 * 1024;
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 const privateKeyBegin = /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/u;
 const privateKeyEnd = /-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/u;
@@ -64,7 +69,8 @@ export function scanText(filePath, source) {
   return findings;
 }
 
-export async function scanTrackedRepository(startDirectory = process.cwd()) {
+export async function scanTrackedRepository(startDirectory = process.cwd(), options = {}) {
+  const limits = createLimits(options);
   const { stdout: rootOutput } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], {
     cwd: startDirectory,
     encoding: "utf8",
@@ -72,29 +78,77 @@ export async function scanTrackedRepository(startDirectory = process.cwd()) {
   const root = rootOutput.trim();
   const { stdout } = await execFileAsync("git", ["ls-files", "--stage", "-z"], {
     cwd: root,
-    encoding: "utf8",
+    encoding: null,
     maxBuffer: 16 * 1024 * 1024,
   });
-  const entries = stdout.split("\0").filter(Boolean).flatMap((record) => {
-    const separator = record.indexOf("\t");
+  const entries = splitNul(stdout).flatMap((record) => {
+    const separator = record.indexOf(9);
     if (separator < 0) return [];
-    const [mode, objectId, stage] = record.slice(0, separator).split(" ");
-    if (stage !== "0" || mode === "160000") return [];
-    return [{ path: record.slice(separator + 1), objectId }];
+    const [mode, objectId, stage] = record.subarray(0, separator).toString("ascii").split(" ");
+    const file = decodeGitPath(record.subarray(separator + 1));
+    if (stage !== "0") throw new Error(`unmerged index entry: ${file}`);
+    if (mode === "160000") return [];
+    if (!mode.startsWith("100")) return [];
+    return [{ path: file, objectId }];
   });
-  const blobs = readIndexBlobs(root, entries);
+  const blobs = readIndexBlobs(root, entries, limits);
+  const indexContents = new Map(entries.map((entry, index) => [entry.path, blobs[index]]));
   const findings = [];
+  const findingKeys = new Set();
 
   for (const [{ path: file }, contents] of entries.map((entry, index) => [entry, blobs[index]])) {
     const source = decodeText(contents);
     if (source === null) continue;
-    findings.push(...scanText(file, source));
+    addFindings(findings, findingKeys, scanText(file, source));
+  }
+
+  const worktreePaths = await listWorktreePaths(root);
+  for (const file of worktreePaths) {
+    const absolutePath = path.join(root, file);
+    let handle;
+    try {
+      handle = await open(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (error) {
+      if (error?.code === "ENOENT" || error?.code === "ELOOP") continue;
+      throw error;
+    }
+    let readResult;
+    try {
+      const metadata = await handle.stat();
+      if (!metadata.isFile()) continue;
+      limits.checkFile(file, metadata.size);
+      readResult = await readBounded(handle, file, limits, indexContents.get(file));
+    } finally {
+      await handle.close();
+    }
+    const { contents, matchesIndex } = readResult;
+    if (matchesIndex) continue;
+    limits.add(file, contents.length);
+    const source = decodeText(contents);
+    if (source === null) continue;
+    addFindings(findings, findingKeys, scanText(file, source));
   }
   return findings;
 }
 
-function readIndexBlobs(root, entries) {
+function readIndexBlobs(root, entries, limits) {
   if (entries.length === 0) return [];
+  const sizeOutput = execFileSync("git", ["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], {
+    cwd: root,
+    encoding: "utf8",
+    input: `${entries.map(({ objectId }) => objectId).join("\n")}\n`,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  const sizeLines = sizeOutput.trimEnd().split("\n");
+  if (sizeLines.length !== entries.length) throw new Error("invalid git cat-file size response");
+  sizeLines.forEach((header, index) => {
+    const [objectId, type, sizeText] = header.split(" ");
+    const size = Number(sizeText);
+    if (objectId !== entries[index].objectId || type !== "blob" || !Number.isSafeInteger(size) || size < 0) {
+      throw new Error("invalid git cat-file size header");
+    }
+    limits.add(entries[index].path, size);
+  });
   const output = execFileSync("git", ["cat-file", "--batch"], {
     cwd: root,
     encoding: null,
@@ -122,6 +176,88 @@ function readIndexBlobs(root, entries) {
   }
   if (offset !== output.length) throw new Error("unexpected git cat-file output");
   return blobs;
+}
+
+async function listWorktreePaths(root) {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    { cwd: root, encoding: null, maxBuffer: 16 * 1024 * 1024 },
+  );
+  return [...new Set(splitNul(stdout).map(decodeGitPath))].sort();
+}
+
+function splitNul(output) {
+  const records = [];
+  let start = 0;
+  for (let index = 0; index < output.length; index += 1) {
+    if (output[index] !== 0) continue;
+    if (index > start) records.push(output.subarray(start, index));
+    start = index + 1;
+  }
+  if (start !== output.length) throw new Error("invalid NUL-delimited git output");
+  return records;
+}
+
+function decodeGitPath(contents) {
+  try {
+    return utf8Decoder.decode(contents);
+  } catch {
+    throw new Error("git path is not valid UTF-8");
+  }
+}
+
+async function readBounded(handle, file, limits, indexContent) {
+  const chunks = [];
+  let length = 0;
+  let matchesIndex = indexContent !== undefined;
+  for (;;) {
+    const chunk = Buffer.allocUnsafe(limits.nextReadSize(length));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+    if (bytesRead === 0) break;
+    const contents = chunk.subarray(0, bytesRead);
+    if (matchesIndex && !contents.equals(indexContent.subarray(length, length + bytesRead))) {
+      matchesIndex = false;
+    }
+    length += bytesRead;
+    if (!matchesIndex) limits.checkCandidate(file, length);
+    chunks.push(contents);
+  }
+  if (matchesIndex && length !== indexContent.length) matchesIndex = false;
+  if (!matchesIndex) limits.checkCandidate(file, length);
+  return { contents: Buffer.concat(chunks, length), matchesIndex };
+}
+
+function addFindings(target, keys, additions) {
+  for (const finding of additions) {
+    const key = `${finding.path}\0${finding.line}\0${finding.rule}`;
+    if (keys.has(key)) continue;
+    keys.add(key);
+    target.push(finding);
+  }
+}
+
+function createLimits({ maxFileBytes = defaultMaxFileBytes, maxTotalBytes = defaultMaxTotalBytes }) {
+  if (!Number.isSafeInteger(maxFileBytes) || maxFileBytes < 0) throw new TypeError("maxFileBytes must be a non-negative safe integer");
+  if (!Number.isSafeInteger(maxTotalBytes) || maxTotalBytes < 0) throw new TypeError("maxTotalBytes must be a non-negative safe integer");
+  let total = 0;
+  return {
+    nextReadSize(length) {
+      return Math.min(64 * 1024, maxFileBytes - length + 1);
+    },
+    checkFile(file, size) {
+      if (size > maxFileBytes) throw new Error(`${file} exceeds secret scan file size limit`);
+    },
+    checkCandidate(file, size) {
+      this.checkFile(file, size);
+      if (!Number.isSafeInteger(total + size) || total + size > maxTotalBytes) throw new Error("secret scan total size limit exceeded");
+    },
+    add(file, size) {
+      this.checkFile(file, size);
+      total += size;
+      if (!Number.isSafeInteger(total) || total > maxTotalBytes) throw new Error("secret scan total size limit exceeded");
+    },
+  };
 }
 
 function decodeText(contents) {
