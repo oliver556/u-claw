@@ -1,5 +1,6 @@
 import {
   BuiltinModelRequestSchema,
+  BuiltinModelResponseSchema,
   BuiltinServiceHealthSchema,
   NewApiManagementErrorBodySchema,
   type BuiltinModelRequest,
@@ -63,10 +64,10 @@ const OpenAIChatCompletionSchema = z.object({
     }),
   })).min(1),
   usage: z.object({
-    prompt_tokens: z.number().int().min(0),
-    completion_tokens: z.number().int().min(0),
-    total_tokens: z.number().int().min(0),
-  }),
+    prompt_tokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    completion_tokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    total_tokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  }).optional(),
 });
 const OpenAIModelsSchema = z.object({
   object: z.literal("list"),
@@ -207,7 +208,7 @@ type CircuitState = "closed" | "open" | "half-open";
 function breakerCounted(error: BuiltinServiceClientError): boolean {
   return error.category === "transport"
     || error.category === "invalid-response"
-    || (error.category === "upstream" && error.code === "UPSTREAM_5XX")
+    || (error.category === "upstream" && error.retryable)
     || (error.category === "unavailable" && error.retryable && error.code !== "CIRCUIT_OPEN");
 }
 
@@ -328,21 +329,23 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
       }, signal);
       const choice = result.choices[0];
       if (!choice) throw clientError("invalid-response", "INVALID_RESPONSE_BODY", false);
-      if (requestEpoch === circuitEpoch) {
-        state = "closed";
-        consecutiveFailures = 0;
-      }
-      return {
+      const response = BuiltinModelResponseSchema.safeParse({
         schemaVersion: 1,
         requestId: request.requestId,
         output: choice.message.content,
         usage: {
-          inputTokens: result.usage.prompt_tokens,
-          outputTokens: result.usage.completion_tokens,
+          inputTokens: result.usage?.prompt_tokens ?? 0,
+          outputTokens: result.usage?.completion_tokens ?? 0,
         },
         serviceState: "enabled",
         serviceRevision: 1,
-      };
+      });
+      if (!response.success) throw clientError("invalid-response", "INVALID_RESPONSE_BODY", false);
+      if (requestEpoch === circuitEpoch) {
+        state = "closed";
+        consecutiveFailures = 0;
+      }
+      return response.data;
     } catch (error) {
       if (!(error instanceof BuiltinServiceClientError)) throw error;
       if (requestEpoch !== circuitEpoch) throw error;

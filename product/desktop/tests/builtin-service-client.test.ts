@@ -185,6 +185,29 @@ describe("builtin service client endpoint and transport policy", () => {
     await expect(emptyChoices.execute(request, credential())).rejects.toMatchObject({
       category: "invalid-response", code: "INVALID_RESPONSE_BODY",
     });
+
+    for (const invalid of [
+      { ...responseBody, choices: [{ ...responseBody.choices[0], message: { role: "assistant", content: "x".repeat(1_048_577) } }] },
+      { ...responseBody, usage: { prompt_tokens: Number.MAX_SAFE_INTEGER + 1, completion_tokens: 1, total_tokens: Number.MAX_SAFE_INTEGER + 1 } },
+    ]) {
+      const invalidResult = createBuiltinServiceClient({
+        fetch: async () => jsonResponse(invalid),
+        maxResponseBytes: 2 * 1024 * 1024,
+      });
+      await expect(invalidResult.execute(request, credential())).rejects.toMatchObject({
+        category: "invalid-response", code: "INVALID_RESPONSE_BODY", causeDetails: {},
+      });
+    }
+
+    const withoutUsage = createBuiltinServiceClient({
+      fetch: async () => {
+        const { usage: _usage, ...body } = responseBody;
+        return jsonResponse(body);
+      },
+    });
+    await expect(withoutUsage.execute(request, credential())).resolves.toMatchObject({
+      usage: { inputTokens: 0, outputTokens: 0 },
+    });
   });
 });
 
@@ -321,6 +344,19 @@ describe("builtin service client error classification", () => {
 });
 
 describe("builtin service circuit breaker", () => {
+  it("counts retryable flat proxy upstream failures and opens locally", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: "UPSTREAM_UNAVAILABLE",
+      message: "Bad Gateway",
+      requestId: "request-fixture-001",
+    }, 502));
+    const client = createBuiltinServiceClient({ fetch: fetchImpl });
+    await expect(client.execute(request, credential())).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+    await expect(client.execute(request, credential())).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+    await expect(client.execute(request, credential())).rejects.toMatchObject({ code: "CIRCUIT_OPEN" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("opens after two counted failures and fast-rejects without moving cooldown", async () => {
     let now = 1_000;
     const fetchImpl = vi.fn(async () => { throw new Error("offline"); });

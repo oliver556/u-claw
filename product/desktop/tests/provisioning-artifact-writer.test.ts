@@ -1,4 +1,5 @@
 import { chmod, lstat, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,7 +7,6 @@ import type { NewApiDeviceMapping, NewApiIssuedToken } from "@uclaw/shared";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createBuiltinCredentialStore } from "../src/providers/builtin-credential-store.js";
-import type { BuiltinCredentialStore } from "../src/providers/builtin-credential-store.js";
 import {
   ProvisioningArtifactError,
   createProvisioningArtifactWriter,
@@ -53,7 +53,7 @@ const issuedToken: NewApiIssuedToken = {
     policyDigest: mapping.policyDigest, generation: mapping.generation,
     status: "provisioning", createdAt: now, updatedAt: now,
   },
-  secret: `uclaw_dt_${"A".repeat(43)}`,
+  secret: "fixture-device-token-secret-material",
 };
 const startupCredential = {
   schemaVersion: 1 as const,
@@ -128,7 +128,7 @@ describe("provisioning artifact writer", () => {
     await releaseSecond();
   });
 
-  it("atomically writes and verifies all mode-0600 artifacts", async () => {
+  it("atomically writes legacy artifacts without creating a formal builtin credential", async () => {
     const dataDir = await root();
     const credentialStore = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp: true });
     const writer = createProvisioningArtifactWriter({ dataDir, credentialStore });
@@ -139,11 +139,12 @@ describe("provisioning artifact writer", () => {
     for (const path of [
       join(dataDir, ".uclaw", "license", ".startup-credential.json"),
       join(dataDir, ".uclaw", "license", "license.json"),
-      join(dataDir, ".uclaw", "builtin-model-credential.v1.json"),
       join(dataDir, ".uclaw", "provisioning-transaction.v1.json"),
     ]) {
       expect((await lstat(path)).mode & 0o777).toBe(0o600);
     }
+    await expect(readFile(join(dataDir, ".uclaw", "builtin-model-credential.v1.json"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
     expect((await readdir(join(dataDir, ".uclaw"))).some((name) => name.endsWith(".tmp"))).toBe(false);
     expect(await writer.readJournal()).toEqual(journal);
   });
@@ -170,7 +171,7 @@ describe("provisioning artifact writer", () => {
     };
     const nextToken: NewApiIssuedToken = {
       token: { ...issuedToken.token, id: nextBinding.newApiTokenId, generation: 2 },
-      secret: `uclaw_dt_${"B".repeat(43)}`,
+      secret: "fixture-device-token-secret-material-next",
     };
     await first.writeArtifacts({
       transactionId: "txn_fixture_002", generation: 2,
@@ -196,6 +197,41 @@ describe("provisioning artifact writer", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("ignores the credential entry in a legacy three-file backup", async () => {
+    const dataDir = await root();
+    const store = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp: true });
+    const writer = createProvisioningArtifactWriter({ dataDir, credentialStore: store });
+    await writer.writeArtifacts({
+      transactionId: journal.transactionId, generation: 1,
+      startupCredential, license, endpoint: journal.endpoint, model: journal.model, mapping, issuedToken,
+    });
+    const backupPath = join(dataDir, ".uclaw", "provisioning-artifact-backup.v1.json");
+    const backup = JSON.parse(await readFile(backupPath, "utf8"));
+    const obsoleteBody = Buffer.from("obsolete-credential").toString("base64");
+    backup.files.push({
+      present: true,
+      body: obsoleteBody,
+      sha256: createHash("sha256").update(Buffer.from(obsoleteBody, "base64")).digest("hex"),
+    });
+    await writeFile(backupPath, `${JSON.stringify(backup)}\n`);
+    const formal = {
+      schemaVersion: 1 as const,
+      deviceId: "dev_activation_001",
+      licenseId: "lic_activation_001",
+      endpoint: "http://127.0.0.1:18090/model-api/",
+      model: "gpt-5.6-sol",
+      deviceToken: `uclaw_dt_${"A".repeat(43)}`,
+    };
+    await store.provision(formal);
+
+    await createProvisioningArtifactWriter({ dataDir, credentialStore: store }).recoverPendingArtifacts();
+
+    await expect(store.loadActive()).resolves.toMatchObject({
+      deviceId: formal.deviceId,
+      deviceToken: formal.deviceToken,
+    });
+  });
+
   it("rejects corrupted read-back and non-directory or symlink license paths", async () => {
     const dataDir = await root();
     const writer = createProvisioningArtifactWriter({
@@ -218,20 +254,28 @@ describe("provisioning artifact writer", () => {
       .rejects.toBeInstanceOf(ProvisioningArtifactError);
   });
 
-  it("removes artifacts committed before a later write failure", async () => {
+  it("does not overwrite a formal activation credential", async () => {
     const dataDir = await root();
-    const failingStore: BuiltinCredentialStore = {
-      pinnedFilesystem: true,
-      provision: async () => { throw new Error("injected write failure"); },
-      loadActive: async () => { throw new Error("unused"); },
-      loadForConnectivityCheck: async () => { throw new Error("unused"); },
-      clear: async () => undefined,
+    const store = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp: true });
+    const formal = {
+      schemaVersion: 1 as const,
+      deviceId: "dev_activation_001",
+      licenseId: "lic_activation_001",
+      endpoint: "http://127.0.0.1:18090/model-api/",
+      model: "gpt-5.6-sol",
+      deviceToken: `uclaw_dt_${"A".repeat(43)}`,
     };
-    const writer = createProvisioningArtifactWriter({ dataDir, credentialStore: failingStore });
-    await expect(writer.writeArtifacts({ transactionId: journal.transactionId, generation: 1, startupCredential, license, endpoint: journal.endpoint, model: journal.model, mapping, issuedToken }))
-      .rejects.toMatchObject({ code: "ARTIFACT_WRITE_FAILED" });
-    await expect(readFile(join(dataDir, ".uclaw", "license", "license.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(dataDir, ".uclaw", "license", ".startup-credential.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await store.provision(formal);
+    const writer = createProvisioningArtifactWriter({ dataDir, credentialStore: store });
+    await writer.writeArtifacts({ transactionId: journal.transactionId, generation: 1, startupCredential, license, endpoint: journal.endpoint, model: journal.model, mapping, issuedToken });
+    await writer.finalizeCredential({ endpoint: journal.endpoint, model: journal.model, mapping, issuedToken });
+    await writer.cleanupArtifacts();
+    await expect(store.loadActive()).resolves.toMatchObject({
+      deviceId: formal.deviceId,
+      licenseId: formal.licenseId,
+      endpoint: new URL(formal.endpoint),
+      deviceToken: formal.deviceToken,
+    });
   });
 
   it("rejects secret-bearing journal objects before disk write", async () => {
