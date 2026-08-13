@@ -94,6 +94,7 @@ func launcherDependencies(paths PortablePaths, reporter Reporter) Dependencies {
 		AcceptSequence:        AcceptRuntimeSequence,
 		FinalizeUpdate:        FinalizeUpdateTransaction,
 		ActivationProcessSpec: ActivationProcessSpec,
+		ReadUSBFingerprint:    ReadUSBFingerprint,
 		StartProcess: func(spec ProcessSpec) (ChildProcess, error) {
 			return StartManagedProcess(spec)
 		},
