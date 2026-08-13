@@ -437,7 +437,7 @@ func newTestService(t *testing.T, repository Repository, signer LicenseSigner, e
 
 func fixtureInput() ActivateInput {
 	return ActivateInput{
-		ActivationCode:     "0123456789ABCDEFGHJKMNPQRS",
+		ActivationCode:     "TESTTESTTESTTESTTESTTEST12",
 		FingerprintVersion: "uclaw-usb-v1", FingerprintSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ClientVersion: "1.0.0", IdempotencyKey: "activation-fixture-001", RequestID: "req_fixture_001",
 	}

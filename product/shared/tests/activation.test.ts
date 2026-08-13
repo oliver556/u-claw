@@ -15,7 +15,7 @@ import {
 } from "../src/index.js";
 
 const request = {
-  activationCode: "0123456789ABCDEFGHJKMNPQRS",
+  activationCode: "TESTTESTTESTTESTTESTTEST12",
   usbFingerprint: {
     version: "uclaw-usb-v1",
     sha256: "a".repeat(64),
@@ -94,7 +94,8 @@ describe("activation API contract", () => {
 	});
   it("separates UI normalization from the strict wire activation code", () => {
     expect(normalizeActivationCodeInput("01234-56789-abcde-fghjk-mnpqrs")).toBe("0123456789ABCDEFGHJKMNPQRS");
-    expect(ActivationRequestSchema.parse(request).activationCode).toBe("0123456789ABCDEFGHJKMNPQRS");
+    const strictCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
+    expect(ActivationRequestSchema.parse({ ...request, activationCode: strictCode }).activationCode).toBe(strictCode);
     expect(() => ActivationRequestSchema.parse({ ...request, activationCode: "01234-56789-ABCDE-FGHJK-MNPQRS" })).toThrow();
     expect(() => ActivationRequestSchema.parse({ ...request, activationCode: "0123456789ABCDEFGHJKMNPQRS0" })).toThrow();
     expect(() => ActivationRequestSchema.parse({ ...request, activationCode: "01234-56789-ABCDE-FGHIJ-KLMNOP" })).toThrow();

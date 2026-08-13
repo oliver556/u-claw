@@ -7,7 +7,7 @@ import { ActivationClientError } from "../src/activation/errors.js";
 import { readActivationServiceConfiguration } from "../src/wiring/environment.js";
 
 const request = {
-  activationCode: "0123456789ABCDEFGHJKMNPQRS",
+  activationCode: "TESTTESTTESTTESTTESTTEST12",
   usbFingerprint: { version: "uclaw-usb-v1" as const, sha256: "a".repeat(64) },
   clientVersion: "1.0.0",
   idempotencyKey: "activation:test:001",

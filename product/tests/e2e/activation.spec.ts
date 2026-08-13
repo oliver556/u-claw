@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 
 type FixtureMode = "success" | "invalid" | "offline" | "bound-other" | "write-failure" | "recovery";
 
-const activationCode = "ABCDEFGHJKMNPQRSTVWXYZ2345";
+const activationCode = "TESTTESTTESTTESTTESTTEST12";
 const browserProblems = new WeakMap<Page, string[]>();
 
 test.beforeEach(async ({ page }) => {

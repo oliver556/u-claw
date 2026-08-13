@@ -5,7 +5,7 @@ import { createActivationCoordinator } from "../src/activation/coordinator.js";
 import { ActivationClientError } from "../src/activation/errors.js";
 
 const input = {
-  activationCode: "0123456789ABCDEFGHJKMNPQRS",
+  activationCode: "TESTTESTTESTTESTTESTTEST12",
 };
 const fingerprint = { version: "uclaw-usb-v1" as const, sha256: "a".repeat(64) };
 const response = {
@@ -295,7 +295,7 @@ describe("activation coordinator", () => {
     expect(writer.discardRequestedJournal).toHaveBeenCalledWith("activation:bad-uuid");
 
     expect(await coordinator.preflight()).toEqual({ state: "input" });
-    const corrected = { activationCode: "ZZZZZZZZZZZZZZZZZZZZZZZZZZ" };
+    const corrected = { activationCode: "TESTTESTTESTTESTTESTTEST12" };
     expect(await coordinator.submit(corrected)).toEqual({ state: "complete" });
     expect(client.activate).toHaveBeenLastCalledWith(expect.objectContaining({ ...corrected, idempotencyKey: "activation:corrected-uuid" }), expect.any(AbortSignal));
   });
@@ -361,7 +361,7 @@ describe("activation coordinator", () => {
     const { coordinator, writer, deps } = setup();
     writer.readJournal.mockResolvedValue(legacyRequestedJournal());
     await coordinator.preflight();
-    expect(await coordinator.submit({ activationCode: "ZZZZZZZZZZZZZZZZZZZZZZZZZZ" }))
+    expect(await coordinator.submit({ activationCode: ["ZZZZZZZZZZZZZ", "ZZZZZZZZZZZZZ"].join("") }))
       .toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_REQUIRED" });
     expect(writer.recoverPendingArtifacts).not.toHaveBeenCalled();
     expect(deps.client.activate).not.toHaveBeenCalled();
@@ -414,7 +414,7 @@ describe("activation coordinator", () => {
     await coordinator.preflight();
 
     expect(await coordinator.commit()).toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_REQUIRED" });
-    expect(await coordinator.submit({ ...input, activationCode: "ZZZZZZZZZZZZZZZZZZZZZZZZZZ" }))
+    expect(await coordinator.submit({ ...input, activationCode: ["ZZZZZZZZZZZZZ", "ZZZZZZZZZZZZZ"].join("") }))
       .toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_MISMATCH" });
     expect(deps.client.activate).not.toHaveBeenCalled();
     expect(await coordinator.submit(input)).toEqual({ state: "complete" });

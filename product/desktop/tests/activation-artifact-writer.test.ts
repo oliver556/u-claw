@@ -54,7 +54,7 @@ const material = (suffix = "001"): ActivationResponse => ({
 });
 
 const request = {
-  activationCode: "0123456789ABCDEFGHJKMNPQRS",
+  activationCode: "TESTTESTTESTTESTTESTTEST12",
   usbFingerprint: { version: "uclaw-usb-v1" as const, sha256: "d".repeat(64) },
   clientVersion: "1.0.0",
   idempotencyKey: "activation:test:requested:001",
