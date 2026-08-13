@@ -202,6 +202,8 @@ describe("activation client", () => {
 
     const error = await client.activate(request).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ code: "ACTIVATION_INVALID", retryable: false, status: 400, stage: "failed_before_bind", activationId: null });
+    expect(String(error)).toContain("Activation code is incorrect.");
+    expect(`${String(error)}${JSON.stringify(error)}`).not.toMatch(/username|用户名/iu);
     expect(JSON.stringify(error)).not.toContain(request.activationCode);
   });
 

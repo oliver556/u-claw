@@ -117,6 +117,7 @@ export interface ActivationArtifactWriter {
   writeJournal(journal: ActivationArtifactJournal): Promise<void>;
   writeServerBoundJournal(journal: ActivationServerBoundJournal): Promise<void>;
   readJournal(): Promise<ActivationReadableJournal | null>;
+  readServerBoundResponse(activationId: string, deviceId: string, licenseId: string): Promise<ActivationResponse>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
   recoverPendingArtifacts(): Promise<void>;
@@ -286,6 +287,27 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         if (isNotFound(error)) return null;
         if (error instanceof FsSafeError) throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Activation journal path is unsafe.");
         throw new ActivationArtifactError("JOURNAL_INVALID", "Activation journal is invalid.");
+      }
+    },
+
+    async readServerBoundResponse(activationId, deviceId, licenseId) {
+      try {
+        const startup = StartupCredentialArtifactSchema.parse(JSON.parse(await (await packageSafeRoot).readText(artifactPaths[0].path)));
+        const license = StartupLicenseArtifactSchema.parse(JSON.parse(await (await packageSafeRoot).readText(artifactPaths[1].path)));
+        const loadedBuiltin = await credentialStore.loadActive();
+        const builtinCredential = BuiltinCredentialArtifactSchema.parse({
+          schemaVersion: 1, deviceId: loadedBuiltin.deviceId, licenseId: loadedBuiltin.licenseId,
+          endpoint: loadedBuiltin.endpoint.href, model: loadedBuiltin.model, deviceToken: loadedBuiltin.deviceToken,
+        });
+        const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3].path));
+        if (manifest.activationId !== activationId || manifest.deviceId !== deviceId || manifest.licenseId !== licenseId) throw new Error("manifest");
+        const response = ActivationResponseSchema.parse({ activationId, deviceId, licenseId, license, startupCredential: startup, builtinCredential, status: "active" });
+        if (response.deviceId !== startup.deviceId || response.licenseId !== startup.licenseId
+            || response.deviceId !== license.deviceId || response.licenseId !== license.licenseId
+            || response.deviceId !== builtinCredential.deviceId || response.licenseId !== builtinCredential.licenseId) throw new Error("identity");
+        return response;
+      } catch {
+        throw new ActivationArtifactError("ARTIFACT_INVALID", "Activation artifacts are invalid.");
       }
     },
 

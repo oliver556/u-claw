@@ -98,7 +98,7 @@ function projectedRemoteError(payload: unknown, status: number): ActivationClien
     return new ActivationClientError("INVALID_RESPONSE", "Activation service returned an invalid response.", false, status);
   }
   if (AUTHENTICATION_FAILURE_CODES.has(parsed.data.code)) {
-    return new ActivationClientError("ACTIVATION_INVALID", "Username or activation code is incorrect.", false, status, parsed.data.supportCode, parsed.data.stage, parsed.data.activationId);
+    return new ActivationClientError("ACTIVATION_INVALID", "Activation code is incorrect.", false, status, parsed.data.supportCode, parsed.data.stage, parsed.data.activationId);
   }
   return new ActivationClientError(
     parsed.data.code,

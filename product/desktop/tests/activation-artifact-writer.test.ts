@@ -234,6 +234,19 @@ describe("activation artifact writer", () => {
     expect(JSON.parse(await readFile(absolutePath(dataDir, paths.backup), "utf8"))).toMatchObject({ generation: 7 });
   });
 
+  it("reconstructs a strict server-bound response from persisted artifacts", async () => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    const response = material();
+    await writer.writeServerBoundJournal(journal(response));
+    await writer.writeArtifacts({ generation: 1, response });
+
+    await expect(writer.readServerBoundResponse(response.activationId, response.deviceId, response.licenseId))
+      .resolves.toEqual(response);
+    await expect(writer.readServerBoundResponse("activation-other", response.deviceId, response.licenseId))
+      .rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
+  });
+
   it("restores the previous generation after a partial write", async () => {
     const dataDir = await tempRoot();
     const first = createActivationArtifactWriter(writerOptions(dataDir));

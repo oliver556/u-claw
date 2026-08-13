@@ -73,6 +73,20 @@ function requestedJournal() {
   };
 }
 
+function legacyRequestedJournal(stage: "requested" | "server_bound" | "committed" = "requested") {
+  const hash = createHash("sha256").update(JSON.stringify([
+    "uclaw-activation-request-v1", "UCLAW-TEST", input.activationCode,
+    fingerprint.version, fingerprint.sha256, "1.2.3",
+  ])).digest("hex");
+  return {
+    schemaVersion: 1 as const, idempotencyKey: "activation:legacy-uuid", generation: 1, stage,
+    activationId: stage === "requested" ? null : response.activationId,
+    deviceId: stage === "requested" ? null : response.deviceId,
+    licenseId: stage === "requested" ? null : response.licenseId,
+    username: "UCLAW-TEST", requestHash: hash, usbFingerprint: fingerprint, clientVersion: "1.2.3",
+  };
+}
+
 function serverBoundJournal() {
   const binding = requestedJournal();
   return {
@@ -95,6 +109,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     writeJournal: vi.fn(async (): Promise<void> => undefined),
     writeServerBoundJournal: vi.fn(async () => undefined),
     recoverPendingArtifacts: vi.fn(async () => undefined),
+    readServerBoundResponse: vi.fn(async () => response),
     writeArtifacts: vi.fn(async (): Promise<void> => undefined),
     verifyArtifacts: vi.fn(async () => undefined),
     commitArtifacts: vi.fn(async () => undefined),
@@ -302,12 +317,54 @@ describe("activation coordinator", () => {
     );
   });
 
-  it("never replays a legacy v1 requested journal as a v2 request", async () => {
-    const legacy = { ...requestedJournal(), schemaVersion: 1 as const, username: "UCLAW-TEST" };
+  it("replaces a matching legacy v1 requested journal with a fresh v2 transaction", async () => {
+    const legacy = legacyRequestedJournal();
     const { coordinator, writer, deps } = setup();
     writer.readJournal.mockResolvedValue(legacy);
     expect(await coordinator.preflight()).toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_REQUIRED" });
-    expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_REQUIRED" });
+    expect(await coordinator.submit(input)).toEqual({ state: "complete" });
+    expect(writer.recoverPendingArtifacts).toHaveBeenCalledTimes(2);
+    expect(writer.writeJournal).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: 2, idempotencyKey: "activation:fixed-uuid" }));
+    expect(deps.client.activate).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: "activation:fixed-uuid" }), expect.any(AbortSignal));
+    expect(deps.client.activate).not.toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: legacy.idempotencyKey }), expect.anything());
+  });
+
+  it("keeps legacy v1 recovery gated when the activation code does not match", async () => {
+    const { coordinator, writer, deps } = setup();
+    writer.readJournal.mockResolvedValue(legacyRequestedJournal());
+    await coordinator.preflight();
+    expect(await coordinator.submit({ activationCode: "ZZZZZZZZZZZZZZZZZZZZZZZZZZ" }))
+      .toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_REQUIRED" });
+    expect(writer.recoverPendingArtifacts).not.toHaveBeenCalled();
+    expect(deps.client.activate).not.toHaveBeenCalled();
+  });
+
+  it("recovers a legacy v1 server-bound journal without activating again", async () => {
+    const pending = legacyRequestedJournal("server_bound");
+    const { coordinator, writer, deps } = setup();
+    writer.readJournal.mockResolvedValue(pending);
+    await coordinator.preflight();
+    expect(await coordinator.submit(input)).toEqual({ state: "complete" });
+    expect(deps.client.activate).not.toHaveBeenCalled();
+    expect(writer.readServerBoundResponse).toHaveBeenCalledWith(response.activationId, response.deviceId, response.licenseId);
+    expect(writer.writeServerBoundJournal).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: 2, stage: "server_bound" }));
+  });
+
+  it("does not reactivate a legacy v1 server-bound journal when local artifacts are incomplete", async () => {
+    const { coordinator, writer, deps } = setup();
+    writer.readJournal.mockResolvedValue(legacyRequestedJournal("server_bound"));
+    writer.readServerBoundResponse.mockRejectedValue(new Error("incomplete"));
+    await coordinator.preflight();
+    expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "RECOVERY_REQUIRED" });
+    expect(deps.client.activate).not.toHaveBeenCalled();
+    expect(writer.writeServerBoundJournal).not.toHaveBeenCalled();
+  });
+
+  it("cleans a legacy v1 committed journal without activation input", async () => {
+    const { coordinator, writer, deps } = setup();
+    writer.readJournal.mockResolvedValue(legacyRequestedJournal("committed"));
+    expect(await coordinator.preflight()).toEqual({ state: "complete" });
+    expect(writer.recoverPendingArtifacts).toHaveBeenCalledOnce();
     expect(deps.client.activate).not.toHaveBeenCalled();
   });
 
