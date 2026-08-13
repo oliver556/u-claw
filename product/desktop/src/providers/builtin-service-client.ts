@@ -1,8 +1,9 @@
 import {
   BuiltinModelRequestSchema,
-  BuiltinModelResponseSchema,
   BuiltinServiceHealthSchema,
   NewApiManagementErrorBodySchema,
+  OpenAIChatCompletionResponseSchema,
+  OpenAIModelsResponseSchema,
   type BuiltinModelRequest,
   type BuiltinModelResponse,
   type BuiltinServiceHealth,
@@ -189,10 +190,10 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
   const circuitOpen = (): BuiltinServiceClientError => clientError("unavailable", "CIRCUIT_OPEN", true);
 
   const send = async <T>(
-    route: "models/respond" | "health",
+    route: "v1/chat/completions" | "v1/models",
     schema: z.ZodType<T>,
     credential: BuiltinModelCredential,
-    body: BuiltinModelRequest | undefined,
+    body: unknown | undefined,
     callerSignal?: AbortSignal,
   ): Promise<T> => {
     if (callerSignal?.aborted) throw clientError("cancelled", "OPERATION_CANCELLED", false);
@@ -214,7 +215,7 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
         method: body === undefined ? "GET" : "POST",
         headers: {
           accept: "application/json",
-          authorization: `Bearer ${credential.tokenSecret}`,
+          authorization: `Bearer ${credential.deviceToken}`,
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -269,15 +270,29 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
     }
     const requestEpoch = circuitEpoch;
     try {
-      const result = await send("models/respond", BuiltinModelResponseSchema, credential, request, signal);
-      if (result.requestId !== request.requestId) {
-        throw clientError("invalid-response", "RESPONSE_REQUEST_MISMATCH", false);
-      }
+      const result = await send("v1/chat/completions", OpenAIChatCompletionResponseSchema, credential, {
+        model: credential.model,
+        messages: [{ role: "user", content: request.prompt }],
+        max_tokens: request.maxOutputTokens,
+        stream: false,
+      }, signal);
+      const choice = result.choices[0];
+      if (!choice) throw clientError("invalid-response", "INVALID_RESPONSE_BODY", false);
       if (requestEpoch === circuitEpoch) {
         state = "closed";
         consecutiveFailures = 0;
       }
-      return result;
+      return {
+        schemaVersion: 1,
+        requestId: request.requestId,
+        output: choice.message.content,
+        usage: {
+          inputTokens: result.usage.prompt_tokens,
+          outputTokens: result.usage.completion_tokens,
+        },
+        serviceState: "enabled",
+        serviceRevision: 1,
+      };
     } catch (error) {
       if (!(error instanceof BuiltinServiceClientError)) throw error;
       if (requestEpoch !== circuitEpoch) throw error;
@@ -296,8 +311,16 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
     }
   };
 
-  const health = async (credential: BuiltinModelCredential, signal?: AbortSignal): Promise<BuiltinServiceHealth> =>
-    send("health", BuiltinServiceHealthSchema, credential, undefined, signal);
+  const health = async (credential: BuiltinModelCredential, signal?: AbortSignal): Promise<BuiltinServiceHealth> => {
+    const models = await send("v1/models", OpenAIModelsResponseSchema, credential, undefined, signal);
+    const acceptingBuiltin = models.data.some((model) => model.id === credential.model);
+    return BuiltinServiceHealthSchema.parse({
+      schemaVersion: 1,
+      acceptingBuiltin,
+      state: acceptingBuiltin ? "enabled" : "disabled",
+      revision: 1,
+    });
+  };
 
   return { execute, health };
 }

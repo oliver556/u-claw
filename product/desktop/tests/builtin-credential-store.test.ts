@@ -1,9 +1,8 @@
-import { randomBytes, randomUUID } from "node:crypto";
-import { link, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, link, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { NewApiDeviceMapping, NewApiIssuedToken } from "@uclaw/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { getFsSafePythonConfig } from "@openclaw/fs-safe/config";
 
@@ -20,52 +19,21 @@ async function setup(allowLoopbackHttp = true) {
 
 function provisionInput(endpoint = "http://127.0.0.1:18090/v1") {
   const suffix = randomUUID().replaceAll("-", "");
-  const timestamp = new Date().toISOString();
-  const userId = `usr_${suffix}`;
-  const tokenId = `tok_${suffix}`;
-  const mapping: NewApiDeviceMapping = {
+  return {
+    schemaVersion: 1 as const,
     deviceId: `dev_${suffix}`,
     licenseId: `lic_${suffix}`,
-    startupSecretHash: "a".repeat(64),
-    startupSecretSalt: "b".repeat(32),
-    usbFingerprint: "c".repeat(64),
-    newApiUserId: userId,
-    newApiUsername: `user_${suffix}`,
-    newApiTokenId: tokenId,
-    channelId: "channel_builtin_001",
-    policyDigest: "d".repeat(64),
-    generation: 1,
-    previousTokenId: null,
-    status: "active",
-    failure: null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    endpoint,
+    model: "gpt-5.6-sol",
+    deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   };
-  const issuedToken: NewApiIssuedToken = {
-    token: {
-      id: tokenId, userId, name: "device", channelId: mapping.channelId,
-      policyDigest: mapping.policyDigest, generation: mapping.generation,
-      status: "active", createdAt: timestamp, updatedAt: timestamp,
-    },
-    secret: randomBytes(32).toString("base64url"),
-  };
-  return { endpoint, model: "builtin-model", mapping, issuedToken };
 }
 
 describe("builtin credential store", () => {
-  it("keeps activation credentials separate from normal active credentials", async () => {
+  it("exposes only the normal credential API", async () => {
     const { store } = await setup(true);
-    await store.provision(provisionInput());
-    const before = await store.loadActive();
-    await store.provisionActivation!({
-      schemaVersion: 1,
-      deviceId: "device-activation-001",
-      licenseId: "license-activation-001",
-      accessToken: "a".repeat(16),
-      expiresAt: "2026-08-14T00:00:00.000Z",
-    });
-    await expect(store.loadActive()).resolves.toEqual(before);
-    await expect(store.loadActivation!()).resolves.toMatchObject({ deviceId: "device-activation-001" });
+    expect(store).not.toHaveProperty("provisionActivation");
+    expect(store).not.toHaveProperty("loadActivation");
   });
   it("does not initialize the credential root until the first I/O operation", async () => {
     const root = await mkdtemp(join(tmpdir(), "uclaw-builtin-invalid-root-"));
@@ -106,42 +74,33 @@ describe("builtin credential store", () => {
     await expect(store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_MISSING" });
   });
 
-  it("persists a P3-T01 typed device token in a main-only mode-0600 store", async () => {
+  it("persists the strict activated credential in the mode-0600 normal store", async () => {
     const { dataDir, store } = await setup();
     const input = provisionInput();
     await store.provision(input);
 
     await expect(store.loadActive()).resolves.toMatchObject({
       endpoint: new URL(input.endpoint),
-      deviceId: input.mapping.deviceId,
-      userId: input.mapping.newApiUserId,
-      tokenId: input.issuedToken.token.id,
-      tokenSecret: input.issuedToken.secret,
+      deviceId: input.deviceId,
+      licenseId: input.licenseId,
+      deviceToken: input.deviceToken,
       model: input.model,
     });
     const path = join(dataDir, ".uclaw", "builtin-model-credential.v1.json");
     expect((await stat(path)).mode & 0o777).toBe(0o600);
-    expect(await readFile(path, "utf8")).toContain(input.issuedToken.secret);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...input, endpoint: `${input.endpoint}/` });
   });
 
-  it("rejects mismatched, inactive, or failed P3-T01 token mappings", async () => {
+  it("rejects extra fields and malformed device tokens", async () => {
     const { store } = await setup();
     const input = provisionInput();
     await expect(store.provision({
       ...input,
-      issuedToken: { ...input.issuedToken, token: { ...input.issuedToken.token, userId: `other_${randomUUID().replaceAll("-", "")}` } },
-    })).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
+      mapping: {},
+    } as never)).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
     await expect(store.provision({
       ...input,
-      mapping: { ...input.mapping, status: "disabled" },
-    })).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
-    await expect(store.provision({
-      ...input,
-      issuedToken: { ...input.issuedToken, token: { ...input.issuedToken.token, status: "revoked" } },
-    })).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
-    await expect(store.provision({
-      ...input,
-      issuedToken: { ...input.issuedToken, token: { ...input.issuedToken.token, channelId: "channel_other_001" } },
+      deviceToken: `uclaw_dt_${"A".repeat(42)}`,
     })).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
   });
 
@@ -156,16 +115,27 @@ describe("builtin credential store", () => {
     expect(await readFile(source, "utf8")).toBe("preserve-me");
   });
 
-  it("allows provisioning credentials for the pre-activation connectivity gate", async () => {
+  it("rejects symlinked and broadly readable credential targets", async () => {
+    const linked = await setup();
+    const linkedDir = join(linked.dataDir, ".uclaw");
+    await mkdir(linkedDir, { recursive: true });
+    const source = join(linked.dataDir, "linked-secret.json");
+    await writeFile(source, `${JSON.stringify(provisionInput())}\n`, { mode: 0o600 });
+    await symlink(source, join(linkedDir, "builtin-model-credential.v1.json"));
+    await expect(linked.store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
+
+    const broad = await setup();
+    await broad.store.provision(provisionInput());
+    await chmod(join(broad.dataDir, ".uclaw", "builtin-model-credential.v1.json"), 0o644);
+    await expect(broad.store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
+  });
+
+  it("uses the same strict credential for connectivity checks", async () => {
     const { store } = await setup();
     const input = provisionInput();
-    await expect(store.provision({
-      ...input,
-      mapping: { ...input.mapping, status: "provisioning" },
-      issuedToken: { ...input.issuedToken, token: { ...input.issuedToken.token, status: "provisioning" } },
-    })).resolves.toBeUndefined();
-    await expect(store.loadForConnectivityCheck()).resolves.toMatchObject({ tokenId: input.issuedToken.token.id });
-    await expect(store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
+    await expect(store.provision(input)).resolves.toBeUndefined();
+    await expect(store.loadForConnectivityCheck()).resolves.toMatchObject({ deviceToken: input.deviceToken });
+    await expect(store.loadActive()).resolves.toMatchObject({ deviceToken: input.deviceToken });
   });
 
   it("allows loopback HTTP only under explicit development-test policy", async () => {

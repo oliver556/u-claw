@@ -9,27 +9,26 @@ import { describe, expect, it, vi } from "vitest";
 const credential = (endpoint = "https://builtin.example.test/v1/"): BuiltinModelCredential => ({
   endpoint: new URL(endpoint),
   deviceId: "dev_builtin_001",
-  userId: "usr_builtin_001",
-  tokenId: "tok_builtin_001",
-  tokenSecret: "device-secret-that-must-not-leak",
-  model: "model-a",
+  licenseId: "lic_builtin_001",
+  deviceToken: `uclaw_dt_${"A".repeat(43)}`,
+  model: "gpt-5.6-sol",
 });
 
 const request = {
   schemaVersion: 1 as const,
   requestId: "req_builtin_001",
-  model: "model-a",
+  model: "gpt-5.6-sol",
   prompt: "hello",
   maxOutputTokens: 10,
 };
 
 const responseBody = {
-  schemaVersion: 1,
-  requestId: request.requestId,
-  output: "world",
-  usage: { inputTokens: 1, outputTokens: 1 },
-  serviceState: "enabled",
-  serviceRevision: 2,
+  id: "chatcmpl_fixture_001",
+  object: "chat.completion",
+  created: 1_786_656_000,
+  model: "gpt-5.6-sol",
+  choices: [{ index: 0, message: { role: "assistant", content: "world" }, finish_reason: "stop" }],
+  usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 };
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -83,14 +82,35 @@ describe("builtin service client endpoint and transport policy", () => {
     });
   });
 
+  it("reports health unavailable when the default model is absent", async () => {
+    const client = createBuiltinServiceClient({
+      fetch: async () => jsonResponse({
+        object: "list",
+        data: [{ id: "other-model", object: "model", created: 1_786_656_000, owned_by: "uclaw" }],
+      }),
+    });
+    await expect(client.health(credential())).resolves.toMatchObject({
+      acceptingBuiltin: false,
+      state: "disabled",
+    });
+  });
+
   it("sends only the device credential as Authorization and disables redirects", async () => {
-    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe("https://builtin.example.test/v1/v1/chat/completions");
       expect(init).toMatchObject({ method: "POST", redirect: "error", credentials: "omit" });
       expect(init?.headers).toEqual({
         accept: "application/json",
-        authorization: `Bearer ${credential().tokenSecret}`,
+        authorization: `Bearer ${credential().deviceToken}`,
         "content-type": "application/json",
       });
+      expect(JSON.parse(String(init?.body))).toEqual({
+        model: credential().model,
+        messages: [{ role: "user", content: request.prompt }],
+        max_tokens: request.maxOutputTokens,
+        stream: false,
+      });
+      expect(JSON.stringify(init)).not.toContain("New API Key");
       return jsonResponse(responseBody);
     });
     await createBuiltinServiceClient({ fetch: fetchImpl }).execute(request, credential());
@@ -116,7 +136,7 @@ describe("builtin service client endpoint and transport policy", () => {
       category: "invalid-response", code: "RESPONSE_TOO_LARGE", causeDetails: {},
     });
 
-    const secret = credential().tokenSecret;
+    const secret = credential().deviceToken;
     const malformed = createBuiltinServiceClient({ fetch: async () => new Response(`not-json-${secret}`, {
       headers: { "content-type": "application/json" },
     }) });
@@ -147,11 +167,9 @@ describe("builtin service client endpoint and transport policy", () => {
       category: "invalid-response", code: "INVALID_RESPONSE_BODY",
     });
 
-    const mismatched = createBuiltinServiceClient({
-      fetch: async () => jsonResponse({ ...responseBody, requestId: "req_builtin_other" }),
-    });
-    await expect(mismatched.execute(request, credential())).rejects.toMatchObject({
-      category: "invalid-response", code: "RESPONSE_REQUEST_MISMATCH",
+    const emptyChoices = createBuiltinServiceClient({ fetch: async () => jsonResponse({ ...responseBody, choices: [] }) });
+    await expect(emptyChoices.execute(request, credential())).rejects.toMatchObject({
+      category: "invalid-response", code: "INVALID_RESPONSE_BODY",
     });
   });
 });
@@ -176,16 +194,16 @@ describe("builtin service client error classification", () => {
 
   it("classifies caller abort separately and does not expose the raw network cause", async () => {
     const controller = new AbortController();
-    controller.abort(new Error(`caller-${credential().tokenSecret}`));
+    controller.abort(new Error(`caller-${credential().deviceToken}`));
     const client = createBuiltinServiceClient({ fetch: async () => { throw new Error("must not fetch"); } });
     const cancelled = await client.execute(request, credential(), controller.signal).catch((caught: unknown) => caught);
     expect(cancelled).toMatchObject({ category: "cancelled", code: "OPERATION_CANCELLED", retryable: false, causeDetails: {} });
-    expect(JSON.stringify(cancelled)).not.toContain(credential().tokenSecret);
+    expect(JSON.stringify(cancelled)).not.toContain(credential().deviceToken);
 
-    const network = createBuiltinServiceClient({ fetch: async () => { throw new Error(`network-${credential().tokenSecret}`); } });
+    const network = createBuiltinServiceClient({ fetch: async () => { throw new Error(`network-${credential().deviceToken}`); } });
     const failed = await network.execute(request, credential()).catch((caught: unknown) => caught);
     expect(failed).toMatchObject({ category: "transport", code: "NETWORK_ERROR", retryable: true, causeDetails: {} });
-    expect(JSON.stringify(failed)).not.toContain(credential().tokenSecret);
+    expect(JSON.stringify(failed)).not.toContain(credential().deviceToken);
   });
 
   it("classifies the client timeout as counted transport failure", async () => {
@@ -393,8 +411,9 @@ describe("builtin service circuit breaker", () => {
     let now = 1_000;
     let modelCalls = 0;
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      if (String(url).endsWith("/health")) {
-        return jsonResponse({ schemaVersion: 1, acceptingBuiltin: true, state: "enabled", revision: 2 });
+      if (String(url).endsWith("/v1/models")) {
+        expect(init?.headers).toMatchObject({ authorization: `Bearer ${credential().deviceToken}` });
+        return jsonResponse({ object: "list", data: [{ id: credential().model, object: "model", created: 1_786_656_000, owned_by: "uclaw" }] });
       }
       modelCalls += 1;
       return new Promise<Response>((_resolve, reject) => {
