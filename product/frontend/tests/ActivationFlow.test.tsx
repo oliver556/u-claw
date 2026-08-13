@@ -50,6 +50,32 @@ describe("ActivationFlow", () => {
     expect(screen.getByText("这套 U-Claw 已可使用")).toBeVisible();
   });
 
+  it.each([
+    ["illegal character", `${code.slice(0, 25)}!`],
+    ["27 characters", `${code}Z`],
+  ])("keeps %s invalid instead of coercing it into a valid code", async (_name, value) => {
+    const api = bridge();
+    render(<ActivationFlow api={api} />);
+    const input = await screen.findByLabelText("激活码");
+    fireEvent.change(input, { target: { value } });
+    fireEvent.submit(input.closest("form")!);
+    expect(api.submit).not.toHaveBeenCalled();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", "activation-code-help");
+    expect(input).toHaveAttribute("aria-errormessage", "activation-code-error");
+    expect(screen.getByRole("alert")).toHaveTextContent("请输入 26 位有效激活码");
+  });
+
+  it("accepts a legal hyphenated activation code", async () => {
+    const api = bridge();
+    render(<ActivationFlow api={api} />);
+    const input = await screen.findByLabelText("激活码");
+    fireEvent.change(input, { target: { value: "7k4p9-q2mx8-rt6w3-na5kc-4d7h2q" } });
+    expect(input).toHaveAccessibleDescription("激活码不区分大小写");
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(api.submit).toHaveBeenCalledWith({ activationCode: code }));
+  });
+
   it("polls redacted progress while submit is pending and stops after unmount", async () => {
     vi.useFakeTimers();
     let finishSubmit!: (status: ActivationStatus) => void;

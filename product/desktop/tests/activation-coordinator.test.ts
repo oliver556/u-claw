@@ -108,6 +108,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     readJournal: vi.fn<() => Promise<any>>(async () => null),
     writeJournal: vi.fn(async (): Promise<void> => undefined),
     writeServerBoundJournal: vi.fn(async () => undefined),
+    discardRequestedJournal: vi.fn(async () => undefined),
     recoverPendingArtifacts: vi.fn(async () => undefined),
     readServerBoundResponse: vi.fn(async () => response),
     writeArtifacts: vi.fn(async (): Promise<void> => undefined),
@@ -282,6 +283,33 @@ describe("activation coordinator", () => {
     expect(await coordinator.submit(input)).toEqual({ state: "error", code: "ACTIVATION_INVALID" });
     expect(writer.writeJournal).toHaveBeenCalledWith(requestedJournal());
     expect(writer.writeServerBoundJournal).not.toHaveBeenCalled();
+  });
+
+  it("discards a failed-before-bind request so a corrected code gets a fresh transaction", async () => {
+    const first = new ActivationClientError("ACTIVATION_INVALID", "redacted", false, 401, undefined, "failed_before_bind", null);
+    const client = { activate: vi.fn().mockRejectedValueOnce(first).mockResolvedValueOnce(response) };
+    const randomUUID = vi.fn().mockReturnValueOnce("bad-uuid").mockReturnValueOnce("corrected-uuid");
+    const { coordinator, writer } = setup({ client, randomUUID });
+    await coordinator.preflight();
+    expect(await coordinator.submit(input)).toEqual({ state: "error", code: "ACTIVATION_INVALID" });
+    expect(writer.discardRequestedJournal).toHaveBeenCalledWith("activation:bad-uuid");
+
+    expect(await coordinator.preflight()).toEqual({ state: "input" });
+    const corrected = { activationCode: "ZZZZZZZZZZZZZZZZZZZZZZZZZZ" };
+    expect(await coordinator.submit(corrected)).toEqual({ state: "complete" });
+    expect(client.activate).toHaveBeenLastCalledWith(expect.objectContaining({ ...corrected, idempotencyKey: "activation:corrected-uuid" }), expect.any(AbortSignal));
+  });
+
+  it("retains requested recovery state for an unknown or server-bound result", async () => {
+    for (const error of [
+      new ActivationClientError("NETWORK_ERROR", "redacted", true),
+      new ActivationClientError("SERVICE_UNAVAILABLE", "redacted", true, 503, undefined, "server_bound", "activation-001"),
+    ]) {
+      const { coordinator, writer } = setup({ client: { activate: vi.fn(async () => { throw error; }) } });
+      await coordinator.preflight();
+      expect((await coordinator.submit(input)).state).toBe("recovery-required");
+      expect(writer.discardRequestedJournal).not.toHaveBeenCalled();
+    }
   });
 
   it("requires recovery for a server-bound service error", async () => {

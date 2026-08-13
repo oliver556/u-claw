@@ -137,6 +137,19 @@ describe("activation artifact writer", () => {
     } as never)).rejects.toMatchObject({ code: "JOURNAL_INVALID" });
   });
 
+  it("discards only the matching requested journal", async () => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    await writer.writeJournal(requestedJournal);
+    await expect(writer.discardRequestedJournal("activation:other-key")).rejects.toMatchObject({ code: "JOURNAL_INVALID" });
+    await writer.discardRequestedJournal(requestedJournal.idempotencyKey);
+    await expect(writer.readJournal()).resolves.toBeNull();
+
+    await writer.writeServerBoundJournal(journal());
+    await expect(writer.discardRequestedJournal(request.idempotencyKey)).rejects.toMatchObject({ code: "JOURNAL_INVALID" });
+    await expect(writer.readJournal()).resolves.toMatchObject({ stage: "server_bound" });
+  });
+
   it("rejects secret-bearing response material in a requested journal", async () => {
     const dataDir = await tempRoot();
     const writer = createActivationArtifactWriter(writerOptions(dataDir));

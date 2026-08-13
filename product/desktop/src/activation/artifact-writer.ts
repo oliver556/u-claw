@@ -117,6 +117,7 @@ export interface ActivationArtifactWriter {
   writeJournal(journal: ActivationArtifactJournal): Promise<void>;
   writeServerBoundJournal(journal: ActivationServerBoundJournal): Promise<void>;
   readJournal(): Promise<ActivationReadableJournal | null>;
+  discardRequestedJournal(idempotencyKey: string): Promise<void>;
   readServerBoundResponse(activationId: string, deviceId: string, licenseId: string, generation: number): Promise<ActivationResponse>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
@@ -285,6 +286,17 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
           : JournalSchema.parse(value);
       } catch (error) {
         if (isNotFound(error)) return null;
+        if (error instanceof FsSafeError) throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Activation journal path is unsafe.");
+        throw new ActivationArtifactError("JOURNAL_INVALID", "Activation journal is invalid.");
+      }
+    },
+
+    async discardRequestedJournal(idempotencyKey) {
+      try {
+        const journal = RequestedJournalSchema.parse(await readJson(journalPath));
+        if (journal.idempotencyKey !== idempotencyKey) throw new Error("transaction");
+        await remove(journalPath);
+      } catch (error) {
         if (error instanceof FsSafeError) throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Activation journal path is unsafe.");
         throw new ActivationArtifactError("JOURNAL_INVALID", "Activation journal is invalid.");
       }

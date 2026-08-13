@@ -31,6 +31,7 @@ interface CoordinatorWriter {
   writeJournal(journal: ActivationJournal): Promise<void>;
   writeServerBoundJournal(journal: BoundJournal): Promise<void>;
   recoverPendingArtifacts(): Promise<void>;
+  discardRequestedJournal(idempotencyKey: string): Promise<void>;
   readServerBoundResponse(activationId: string, deviceId: string, licenseId: string, generation: number): Promise<ActivationResponse>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
@@ -106,6 +107,11 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
       try { response = await deps.client.activate(request, active.controller.signal); }
       catch (error) {
         if (error instanceof ActivationClientError && error.stage === "failed_before_bind") {
+          try {
+            await deps.writer.discardRequestedJournal(journal.idempotencyKey);
+            pendingJournal = null;
+            pendingRequest = null;
+          } catch { return recovery("RECOVERY_REQUIRED"); }
           return set("error", error.code);
         }
         return recovery("ACTIVATION_RESULT_UNKNOWN");
