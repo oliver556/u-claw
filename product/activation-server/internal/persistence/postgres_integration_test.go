@@ -255,7 +255,7 @@ func TestProductionComposeMountsSecretsOwnerReadOnly(t *testing.T) {
 	}
 	compose := string(contents)
 	for _, source := range []string{"activation_pepper", "license_signing_key", "status_signing_key", "kms_kek", "token_signing_key", "admin_operators", "admin_secret_fingerprint_key"} {
-		fragment := "source: " + source + ", target: /run/secrets/" + source + ", uid: \"65532\", gid: \"65532\", mode: 0400"
+		fragment := "source: " + source + ", target: /run/secrets/" + source + ", uid: \"0\", gid: \"0\", mode: 0400"
 		if !strings.Contains(compose, fragment) {
 			t.Errorf("activation secret mount not owner-read-only: %s", source)
 		}

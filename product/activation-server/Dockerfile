@@ -7,11 +7,13 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/activation-server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/activation-server ./cmd/server \
+    && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/secret-init ./cmd/secret-init
 
 FROM --platform=$TARGETPLATFORM scratch
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/activation-server /activation-server
-USER 65532:65532
-ENTRYPOINT ["/activation-server"]
+COPY --from=build /out/secret-init /secret-init
+ENTRYPOINT ["/secret-init"]
+CMD ["/activation-server"]
