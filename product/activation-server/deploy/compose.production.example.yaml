@@ -106,6 +106,9 @@ services:
         mode: 0444
     secrets:
       - { source: rate_limit_hmac_key, target: /run/secrets/rate_limit_hmac_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_server_certificate, target: /run/secrets/edge_upstream_server_certificate, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_server_private_key, target: /run/secrets/edge_upstream_server_private_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_client_ca, target: /run/secrets/edge_upstream_client_ca, uid: "0", gid: "0", mode: 0400 }
     networks:
       - edge_private
       - service_private
@@ -136,6 +139,9 @@ services:
     secrets:
       - { source: tls_certificate, target: /run/secrets/tls_certificate, uid: "0", gid: "0", mode: 0400 }
       - { source: tls_private_key, target: /run/secrets/tls_private_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_client_certificate, target: /run/secrets/edge_upstream_client_certificate, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_client_private_key, target: /run/secrets/edge_upstream_client_private_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_server_ca, target: /run/secrets/edge_upstream_server_ca, uid: "0", gid: "0", mode: 0400 }
     volumes:
       - caddy_data:/data
       - caddy_config:/config
@@ -213,6 +219,18 @@ secrets:
     file: ${MANAGEMENT_CLIENT_CA_FILE:?set MANAGEMENT_CLIENT_CA_FILE}
   rate_limit_hmac_key:
     file: ${RATE_LIMIT_HMAC_KEY_FILE:?set RATE_LIMIT_HMAC_KEY_FILE}
+  edge_upstream_server_certificate:
+    file: ${EDGE_UPSTREAM_SERVER_CERTIFICATE_FILE:?set EDGE_UPSTREAM_SERVER_CERTIFICATE_FILE}
+  edge_upstream_server_private_key:
+    file: ${EDGE_UPSTREAM_SERVER_PRIVATE_KEY_FILE:?set EDGE_UPSTREAM_SERVER_PRIVATE_KEY_FILE}
+  edge_upstream_client_certificate:
+    file: ${EDGE_UPSTREAM_CLIENT_CERTIFICATE_FILE:?set EDGE_UPSTREAM_CLIENT_CERTIFICATE_FILE}
+  edge_upstream_client_private_key:
+    file: ${EDGE_UPSTREAM_CLIENT_PRIVATE_KEY_FILE:?set EDGE_UPSTREAM_CLIENT_PRIVATE_KEY_FILE}
+  edge_upstream_client_ca:
+    file: ${EDGE_UPSTREAM_CLIENT_CA_FILE:?set EDGE_UPSTREAM_CLIENT_CA_FILE}
+  edge_upstream_server_ca:
+    file: ${EDGE_UPSTREAM_SERVER_CA_FILE:?set EDGE_UPSTREAM_SERVER_CA_FILE}
   migration_database_url:
     file: ${MIGRATION_DATABASE_URL_FILE:?set MIGRATION_DATABASE_URL_FILE}
   migration_role:
@@ -253,8 +271,14 @@ configs:
           keepalive 64;
         }
         server {
-          listen 8081;
+          listen 8443 ssl;
           server_tokens off;
+          ssl_certificate /run/secrets/edge_upstream_server_certificate;
+          ssl_certificate_key /run/secrets/edge_upstream_server_private_key;
+          ssl_client_certificate /run/secrets/edge_upstream_client_ca;
+          ssl_verify_client on;
+          ssl_protocols TLSv1.2 TLSv1.3;
+          if ($$ssl_client_verify != SUCCESS) { return 403; }
           client_max_body_size 1m;
           client_body_timeout 5s;
           keepalive_timeout 30s;
@@ -278,7 +302,11 @@ configs:
               key_file:close()
               -- edge_private is dedicated to Caddy and this gateway. Caddy
               -- replaces X-Forwarded-For, so clients cannot forge this value.
-              local subjects = {{"ip", ngx.var.http_x_forwarded_for or ngx.var.binary_remote_addr, 120}}
+              local forwarded = ngx.var.http_x_forwarded_for
+              if not forwarded or forwarded == "" or string.find(forwarded, ",", 1, true) then
+                return ngx.exit(400)
+              end
+              local subjects = {{"ip", forwarded, 120}}
               if ngx.req.get_method() == "POST" then
                 ngx.req.read_body()
                 local body_data = ngx.req.get_body_data()
@@ -346,24 +374,42 @@ configs:
           respond 404
         }
         handle /model-api/* {
-          reverse_proxy public-gateway:8081 {
+          reverse_proxy https://public-gateway:8443 {
             header_up -X-Forwarded-For
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto https
+            transport http {
+              tls
+              tls_server_name public-gateway
+              tls_client_auth /run/secrets/edge_upstream_client_certificate /run/secrets/edge_upstream_client_private_key
+              tls_trusted_ca_certs /run/secrets/edge_upstream_server_ca
+            }
           }
         }
         handle /v1/* {
-          reverse_proxy public-gateway:8081 {
+          reverse_proxy https://public-gateway:8443 {
             header_up -X-Forwarded-For
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto https
+            transport http {
+              tls
+              tls_server_name public-gateway
+              tls_client_auth /run/secrets/edge_upstream_client_certificate /run/secrets/edge_upstream_client_private_key
+              tls_trusted_ca_certs /run/secrets/edge_upstream_server_ca
+            }
           }
         }
         handle /health/ready {
-          reverse_proxy public-gateway:8081 {
+          reverse_proxy https://public-gateway:8443 {
             header_up -X-Forwarded-For
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto https
+            transport http {
+              tls
+              tls_server_name public-gateway
+              tls_client_auth /run/secrets/edge_upstream_client_certificate /run/secrets/edge_upstream_client_private_key
+              tls_trusted_ca_certs /run/secrets/edge_upstream_server_ca
+            }
           }
         }
         handle {

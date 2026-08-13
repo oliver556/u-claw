@@ -347,6 +347,42 @@ func TestProductionExamplesUsePublicModelEndpointAndIsolatedGateways(t *testing.
 	}
 }
 
+func TestProductionEdgeAuthenticatesTrustedProxyHopWithDedicatedMTLS(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "..", "deploy", "compose.production.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(contents)
+	for _, required := range []string{
+		"EDGE_UPSTREAM_SERVER_CERTIFICATE_FILE",
+		"EDGE_UPSTREAM_SERVER_PRIVATE_KEY_FILE",
+		"EDGE_UPSTREAM_CLIENT_CERTIFICATE_FILE",
+		"EDGE_UPSTREAM_CLIENT_PRIVATE_KEY_FILE",
+		"EDGE_UPSTREAM_CLIENT_CA_FILE",
+		"EDGE_UPSTREAM_SERVER_CA_FILE",
+		"ssl_verify_client on",
+		`if ($$ssl_client_verify != SUCCESS) { return 403; }`,
+		"ssl_client_certificate /run/secrets/edge_upstream_client_ca",
+		"tls_server_name public-gateway",
+		"tls_client_auth /run/secrets/edge_upstream_client_certificate /run/secrets/edge_upstream_client_private_key",
+		"tls_trusted_ca_certs /run/secrets/edge_upstream_server_ca",
+		"https://public-gateway:8443",
+	} {
+		if !strings.Contains(compose, required) {
+			t.Errorf("production edge mTLS config missing %q", required)
+		}
+	}
+	if strings.Contains(compose, "tls_insecure_skip_verify") {
+		t.Fatal("production edge disables upstream TLS verification")
+	}
+	for _, source := range []string{"edge_upstream_server_certificate", "edge_upstream_server_private_key", "edge_upstream_client_certificate", "edge_upstream_client_private_key", "edge_upstream_client_ca", "edge_upstream_server_ca"} {
+		fragment := "source: " + source + ", target: /run/secrets/" + source + ", uid: \"0\", gid: \"0\", mode: 0400"
+		if !strings.Contains(compose, fragment) {
+			t.Errorf("edge mTLS secret not owner-read-only: %s", source)
+		}
+	}
+}
+
 func writeSigningKey(t *testing.T, directory string) string {
 	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
