@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"u-claw-activation-server/internal/deviceaccess"
@@ -191,7 +193,6 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 		service.observer.RecordBindingLeaseStale()
 	}
 	if begin.Disposition == BindingBound {
-		begin.Record.PublicModelEndpoint = service.publicModelEndpoint
 		return service.recoverBound(ctx, begin.Record, true)
 	}
 	begin.Record.PublicModelEndpoint = service.publicModelEndpoint
@@ -412,8 +413,18 @@ func validActivationMaterial(material activationMaterial, record BoundRecord) bo
 		material.License.Signature.Algorithm == "ed25519" && material.License.Signature.KeyID == record.KeyID && material.License.Signature.Value != "" &&
 		material.StartupCredential.SchemaVersion == 1 && material.StartupCredential.DeviceID == record.DeviceID && material.StartupCredential.LicenseID == record.LicenseID &&
 		material.BuiltinCredential.SchemaVersion == 1 && material.BuiltinCredential.DeviceID == record.DeviceID && material.BuiltinCredential.LicenseID == record.LicenseID &&
-		material.BuiltinCredential.Endpoint == record.PublicModelEndpoint && material.BuiltinCredential.Model == record.DefaultModel &&
-		len(material.BuiltinCredential.DeviceToken) == 52
+		validBuiltinCredential(material.BuiltinCredential)
+}
+
+func validBuiltinCredential(credential builtinCredentialArtifact) bool {
+	endpoint, err := url.Parse(credential.Endpoint)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil ||
+		endpoint.Path != "/model-api/" || endpoint.RawPath != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" ||
+		credential.Model == "" || strings.TrimSpace(credential.Model) != credential.Model {
+		return false
+	}
+	const tokenPrefix = "uclaw_dt_"
+	return strings.HasPrefix(credential.DeviceToken, tokenPrefix) && len(credential.DeviceToken) == len(tokenPrefix)+43
 }
 
 func decodeStrictJSON(encoded []byte, output any) error {
