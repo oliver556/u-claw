@@ -7,7 +7,7 @@ export const LICENSE_LIFECYCLE_CONTRACT_VERSION = 1 as const;
 const IdentifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u);
 const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
 const TimestampSchema = z.iso.datetime({ offset: true });
-const CanonicalSigningTimestampSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u);
+const CanonicalSigningTimestampSchema = z.iso.datetime({ offset: false, precision: 0 });
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SafeMessageSchema = RendererSafeTextSchema.pipe(z.string().min(1).max(300));
 

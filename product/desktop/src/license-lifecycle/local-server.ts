@@ -193,6 +193,14 @@ export async function startLocalLicenseLifecycleServer(options: StartLocalLicens
     .update(Buffer.from(secret, "utf8"))
     .digest("hex");
 
+  const canonicalSigningTimestamp = (value: string): string => {
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime()) || parsed.getUTCMilliseconds() !== 0) {
+      throw failure(400, "validation", "INVALID_LICENSE_TIME", "License timestamps must use whole seconds.");
+    }
+    return parsed.toISOString().replace(".000Z", "Z");
+  };
+
   const issue = (input: z.infer<typeof LicenseIssueInputSchema>): IssuedLicense => {
     if (licenseIdByDevice.has(input.deviceId)) {
       throw failure(409, "conflict", "LICENSE_CONFLICT", "Device already has a tracked license.");
@@ -201,6 +209,8 @@ export async function startLocalLicenseLifecycleServer(options: StartLocalLicens
   };
 
   const createIssued = (deviceId: string, usbFingerprint: string, notBefore: string, expiresAt: string): IssuedLicense => {
+    const canonicalNotBefore = canonicalSigningTimestamp(notBefore);
+    const canonicalExpiresAt = canonicalSigningTimestamp(expiresAt);
     const licenseId = nextId("lic");
     const startupSecret = randomBytes(32).toString("base64url");
     const salt = randomBytes(16);
@@ -212,13 +222,14 @@ export async function startLocalLicenseLifecycleServer(options: StartLocalLicens
       revision: 1,
       usbFingerprint,
       startupSecretDigest: secretDigest(startupSecret),
-      notBefore,
-      expiresAt,
+      notBefore: canonicalNotBefore,
+      expiresAt: canonicalExpiresAt,
       replacementLicenseId: null,
       updatedAt,
     };
     const license: StartupLicenseArtifact = {
       schemaVersion: 1,
+      usernameId: `usr_${createHash("sha256").update(deviceId).digest("hex").slice(0, 24)}`,
       deviceId,
       licenseId,
       usbFingerprint: { scheme: "uclaw-usb-v1", sha256: usbFingerprint },
@@ -227,15 +238,17 @@ export async function startLocalLicenseLifecycleServer(options: StartLocalLicens
         startupSecretSalt: salt.toString("hex"),
         startupSecretHash: startupSecretHash(startupSecret, salt),
       },
-      notBefore,
-      expiresAt,
+      notBefore: canonicalNotBefore,
+      expiresAt: canonicalExpiresAt,
+      revision: record.revision,
       signature: { algorithm: "ed25519", keyId: signingKeyId, value: "" },
     };
     const signingPayload = [
-      "uclaw-startup-license-v1", license.schemaVersion, license.deviceId, license.licenseId,
+      "uclaw-startup-license-v1", license.schemaVersion, license.signature.keyId, license.usernameId,
+      license.deviceId, license.licenseId,
       license.usbFingerprint.scheme, license.usbFingerprint.sha256,
-      license.startupSecretProof.algorithm, license.startupSecretProof.startupSecretSalt, license.startupSecretProof.startupSecretHash,
-      license.notBefore, license.expiresAt, license.signature.algorithm, license.signature.keyId,
+      license.startupSecretProof.startupSecretSalt, license.startupSecretProof.startupSecretHash,
+      license.notBefore, license.expiresAt, license.revision,
     ];
     license.signature.value = sign(null, Buffer.from(JSON.stringify(signingPayload), "utf8"), options.signingPrivateKey).toString("base64");
     records.set(licenseId, record);

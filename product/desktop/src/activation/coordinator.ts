@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import type { ActivationRequest, ActivationResponse } from "@uclaw/shared";
 
+import { ActivationClientError } from "./errors.js";
+
 export type ActivationCoordinatorState = "checking" | "input" | "submitting" | "server-bound" | "writing" | "verifying" | "committing" | "complete" | "recovery-required" | "error";
 export interface ActivationStatus { state: ActivationCoordinatorState; code?: string; }
 export interface ActivationSubmitInput { username: string; activationCode: string; }
@@ -90,7 +92,12 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
       set("submitting");
       let response: ActivationResponse;
       try { response = await deps.client.activate(request, active.controller.signal); }
-      catch { return recovery("ACTIVATION_RESULT_UNKNOWN"); }
+      catch (error) {
+        if (error instanceof ActivationClientError && error.stage === "failed_before_bind") {
+          return set("error", error.code);
+        }
+        return recovery("ACTIVATION_RESULT_UNKNOWN");
+      }
       if (!isCurrent(active.token)) return current;
       if (journal.stage !== "requested" && (response.activationId !== journal.activationId || response.deviceId !== journal.deviceId || response.licenseId !== journal.licenseId)) return recovery("RECOVERY_REQUIRED");
       const bound: BoundJournal = {

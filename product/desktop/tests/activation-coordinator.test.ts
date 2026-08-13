@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 
 import { createActivationCoordinator } from "../src/activation/coordinator.js";
+import { ActivationClientError } from "../src/activation/errors.js";
 
 const input = {
   username: "UCLAW-TEST",
@@ -14,6 +15,7 @@ const response = {
   licenseId: "license-001",
   license: {
     schemaVersion: 1,
+    usernameId: "username-001",
     deviceId: "device-001",
     licenseId: "license-001",
     usbFingerprint: { scheme: "uclaw-usb-v1", sha256: "a".repeat(64) },
@@ -22,8 +24,9 @@ const response = {
       startupSecretSalt: "b".repeat(32),
       startupSecretHash: "c".repeat(64),
     },
-    notBefore: "2026-08-13T00:00:00.000Z",
-    expiresAt: "2027-08-13T00:00:00.000Z",
+    notBefore: "2026-08-13T00:00:00Z",
+    expiresAt: "2027-08-13T00:00:00Z",
+    revision: 1,
     signature: { algorithm: "ed25519", keyId: "activation-key", value: "s".repeat(80) },
   },
   startupCredential: {
@@ -257,6 +260,35 @@ describe("activation coordinator", () => {
     expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "ACTIVATION_RESULT_UNKNOWN" });
     expect(writer.writeJournal).toHaveBeenCalledWith(requestedJournal());
     expect(writer.writeServerBoundJournal).not.toHaveBeenCalled();
+  });
+
+  it("preserves deterministic activation client errors without entering recovery", async () => {
+    const { coordinator, writer } = setup({
+      client: { activate: vi.fn(async () => { throw new ActivationClientError("ACTIVATION_INVALID", "redacted", false, 401, undefined, "failed_before_bind", null); }) },
+    });
+    await coordinator.preflight();
+
+    expect(await coordinator.submit(input)).toEqual({ state: "error", code: "ACTIVATION_INVALID" });
+    expect(writer.writeJournal).toHaveBeenCalledWith(requestedJournal());
+    expect(writer.writeServerBoundJournal).not.toHaveBeenCalled();
+  });
+
+  it("requires recovery for a server-bound service error", async () => {
+    const { coordinator } = setup({
+      client: { activate: vi.fn(async () => { throw new ActivationClientError("SERVICE_UNAVAILABLE", "redacted", true, 503, undefined, "server_bound", "activation-001"); }) },
+    });
+    await coordinator.preflight();
+
+    expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "ACTIVATION_RESULT_UNKNOWN" });
+  });
+
+  it.each(["TIMEOUT", "NETWORK_ERROR", "INVALID_RESPONSE"])("treats %s as an unknown activation result", async (code) => {
+    const { coordinator } = setup({
+      client: { activate: vi.fn(async () => { throw new ActivationClientError(code, "redacted", true); }) },
+    });
+    await coordinator.preflight();
+
+    expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "ACTIVATION_RESULT_UNKNOWN" });
   });
 
   it("requires input for a restarted requested journal, then replays with the same idempotency key", async () => {

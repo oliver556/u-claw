@@ -930,10 +930,11 @@ export function verifyActivationResponse(
     const key = trustedPublicKeys[license.signature.keyId];
     if (!key) return false;
     const payload = [
-      "uclaw-startup-license-v1", license.schemaVersion, license.deviceId, license.licenseId,
+      "uclaw-startup-license-v1", license.schemaVersion, license.signature.keyId, license.usernameId,
+      license.deviceId, license.licenseId,
       license.usbFingerprint.scheme, license.usbFingerprint.sha256,
-      license.startupSecretProof.algorithm, license.startupSecretProof.startupSecretSalt, license.startupSecretProof.startupSecretHash,
-      license.notBefore, license.expiresAt, license.signature.algorithm, license.signature.keyId,
+      license.startupSecretProof.startupSecretSalt, license.startupSecretProof.startupSecretHash,
+      license.notBefore, license.expiresAt, license.revision,
     ];
     return verify(null, Buffer.from(JSON.stringify(payload), "utf8"), key, Buffer.from(license.signature.value, "base64"));
   } catch {

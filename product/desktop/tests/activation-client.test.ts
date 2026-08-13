@@ -20,6 +20,7 @@ const response = {
   licenseId: "license-001",
   license: {
     schemaVersion: 1,
+    usernameId: "username-001",
     deviceId: "device-001",
     licenseId: "license-001",
     usbFingerprint: { scheme: "uclaw-usb-v1", sha256: "a".repeat(64) },
@@ -28,8 +29,9 @@ const response = {
       startupSecretSalt: "b".repeat(32),
       startupSecretHash: "c".repeat(64),
     },
-    notBefore: "2026-08-13T00:00:00.000Z",
-    expiresAt: "2027-08-13T00:00:00.000Z",
+    notBefore: "2026-08-13T00:00:00Z",
+    expiresAt: "2027-08-13T00:00:00Z",
+    revision: 1,
     signature: { algorithm: "ed25519", keyId: "activation-key", value: "s".repeat(80) },
   },
   startupCredential: {
@@ -199,8 +201,17 @@ describe("activation client", () => {
     const client = createActivationClient({ endpoint: "https://activation.example.test/", fetch });
 
     const error = await client.activate(request).catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ code: "ACTIVATION_INVALID", retryable: false, status: 400 });
+    expect(error).toMatchObject({ code: "ACTIVATION_INVALID", retryable: false, status: 400, stage: "failed_before_bind", activationId: null });
     expect(JSON.stringify(error)).not.toContain(request.activationCode);
+  });
+
+  it("preserves server-bound error metadata", async () => {
+    const fetch = vi.fn(async () => jsonResponse({
+      requestId: "request-001", activationId: "activation-001", code: "ACTIVATION_SERVICE_UNAVAILABLE",
+      stage: "server_bound", retryable: true, supportCode: "ACT-SVC-001",
+    }, 503));
+    const client = createActivationClient({ endpoint: "https://activation.example.test/", fetch });
+    await expect(client.activate(request)).rejects.toMatchObject({ stage: "server_bound", activationId: "activation-001" });
   });
 
   it("never includes an invalid remote body in projected errors", async () => {

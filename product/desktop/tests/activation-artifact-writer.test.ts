@@ -30,14 +30,16 @@ const material = (suffix = "001"): ActivationResponse => ({
   licenseId: `license-${suffix}`,
   license: {
     schemaVersion: 1,
+    usernameId: `username-${suffix}`,
     deviceId: `device-${suffix}`,
     licenseId: `license-${suffix}`,
     usbFingerprint: { scheme: "uclaw-usb-v1", sha256: "a".repeat(64) },
     startupSecretProof: {
       algorithm: "sha256-salt-v1", startupSecretSalt: "b".repeat(32), startupSecretHash: "c".repeat(64),
     },
-    notBefore: "2026-08-13T00:00:00.000Z",
-    expiresAt: "2027-08-13T00:00:00.000Z",
+    notBefore: "2026-08-13T00:00:00Z",
+    expiresAt: "2027-08-13T00:00:00Z",
+    revision: 1,
     signature: { algorithm: "ed25519", keyId: "activation-key", value: "s".repeat(80) },
   },
   startupCredential: {

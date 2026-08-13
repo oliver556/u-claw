@@ -127,6 +127,49 @@ func TestPublicHandlerProjectsStableRedactedErrors(t *testing.T) {
 	}
 }
 
+func TestActivateErrorReportsBindingStageAndActivationID(t *testing.T) {
+	for name, result := range map[string]activation.ActivateResult{
+		"before bind":  {},
+		"server bound": {ActivationID: "act_fixture_001"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service := &fakePublicService{activateResult: result, activateErr: activation.ErrActivationServiceUnavailable}
+			handler := NewPublicHandler(PublicHandlerOptions{Activation: service, RequestIDs: strings.NewReader(strings.Repeat("c", 64))})
+			body := `{"username":"UCLAW-00000001","activationCode":"0123456789ABCDEFGHJKMNPQRS","usbFingerprint":{"version":"uclaw-usb-v1","sha256":"` + strings.Repeat("a", 64) + `"},"clientVersion":"1.0.0","idempotencyKey":"activation-001"}`
+			request := httptest.NewRequest(http.MethodPost, "/v1/activations", strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			var payload publicError
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			wantStage := "failed_before_bind"
+			if result.ActivationID != "" {
+				wantStage = "server_bound"
+			}
+			if payload.Stage == nil || *payload.Stage != wantStage || (result.ActivationID != "" && (payload.ActivationID == nil || *payload.ActivationID != result.ActivationID)) {
+				t.Fatalf("payload=%+v", payload)
+			}
+		})
+	}
+}
+
+func TestActivateValidationErrorReportsFailedBeforeBind(t *testing.T) {
+	handler := NewPublicHandler(PublicHandlerOptions{RequestIDs: strings.NewReader(strings.Repeat("d", 64))})
+	request := httptest.NewRequest(http.MethodPost, "/v1/activations", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var payload publicError
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Stage == nil || *payload.Stage != "failed_before_bind" || payload.ActivationID != nil {
+		t.Fatalf("payload=%+v", payload)
+	}
+}
+
 func TestPublicHandlerServesClientPolicy(t *testing.T) {
 	handler := NewPublicHandler(PublicHandlerOptions{Activation: &fakePublicService{}, Lifecycle: &fakePublicService{}, RequestIDs: strings.NewReader(strings.Repeat("c", 64))})
 	response := httptest.NewRecorder()

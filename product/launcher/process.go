@@ -13,6 +13,10 @@ import (
 
 var ErrProcessInvalid = errors.New("process specification invalid")
 
+// Populated at release build time with public activation configuration only.
+// Private keys, activation codes, and tokens must never enter the launcher binary.
+var activationServiceEndpoint = ""
+
 type ProcessSpec struct {
 	Path              string
 	Args              []string
@@ -43,10 +47,12 @@ func ActivationProcessSpec(paths PortablePaths, manifest Manifest, lease Runtime
 		"UCLAW_USB_FINGERPRINT_SCHEME=" + fingerprint.Scheme,
 		"UCLAW_USB_FINGERPRINT_SHA256=" + fingerprint.SHA256,
 		"UCLAW_CLIENT_VERSION=" + manifest.ProductVersion,
+		"UCLAW_ACTIVATION_ENDPOINT=" + activationServiceEndpoint,
+		"UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS=" + trustedStartupLicenseKeys,
 	}
 	arguments := append(append([]string(nil), manifest.EntryArgs...), activationStartupArgument)
 	spec := processSpec(paths, manifest, lease, arguments, environment)
-	spec.EnvRemovePrefixes = []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT"}
+	spec.EnvRemovePrefixes = []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_"}
 	return spec
 }
 
@@ -157,6 +163,10 @@ func mergeEnvironment(base []string, overrides []string) []string {
 
 func mergeEnvironmentFiltered(base []string, overrides []string, removePrefixes []string) []string {
 	caseInsensitive := runtime.GOOS == "windows"
+	return mergeEnvironmentForPlatform(filterEnvironment(base, removePrefixes, caseInsensitive), overrides, caseInsensitive)
+}
+
+func filterEnvironment(base []string, removePrefixes []string, caseInsensitive bool) []string {
 	filtered := make([]string, 0, len(base))
 	for _, entry := range base {
 		separator := strings.IndexByte(entry, '=')
@@ -164,7 +174,7 @@ func mergeEnvironmentFiltered(base []string, overrides []string, removePrefixes 
 			filtered = append(filtered, entry)
 		}
 	}
-	return mergeEnvironmentForPlatform(filtered, overrides, caseInsensitive)
+	return filtered
 }
 
 func hasEnvironmentPrefix(key string, prefixes []string, caseInsensitive bool) bool {

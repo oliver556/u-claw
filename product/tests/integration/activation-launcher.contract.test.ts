@@ -73,6 +73,7 @@ describe("activation launcher-to-desktop contract", () => {
       const signingKeys = generateKeyPairSync("ed25519");
       const license = {
         schemaVersion: 1 as const,
+        usernameId: "username-001",
         deviceId: "device-001",
         licenseId: "license-001",
         usbFingerprint: {
@@ -84,8 +85,9 @@ describe("activation launcher-to-desktop contract", () => {
           startupSecretSalt: salt,
           startupSecretHash: secretHash,
         },
-        notBefore: "2026-08-13T00:00:00.000Z",
-        expiresAt: "2027-08-13T00:00:00.000Z",
+        notBefore: "2026-08-13T00:00:00Z",
+        expiresAt: "2027-08-13T00:00:00Z",
+        revision: 1,
         signature: {
           algorithm: "ed25519" as const,
           keyId: "activation-key",
@@ -98,17 +100,17 @@ describe("activation launcher-to-desktop contract", () => {
           JSON.stringify([
             "uclaw-startup-license-v1",
             1,
+            license.signature.keyId,
+            license.usernameId,
             license.deviceId,
             license.licenseId,
             license.usbFingerprint.scheme,
             fingerprint,
-            license.startupSecretProof.algorithm,
             salt,
             secretHash,
             license.notBefore,
             license.expiresAt,
-            license.signature.algorithm,
-            license.signature.keyId,
+            license.revision,
           ]),
         ),
         signingKeys.privateKey,

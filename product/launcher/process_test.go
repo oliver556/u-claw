@@ -11,6 +11,12 @@ import (
 )
 
 func TestActivationProcessSpecUsesRestrictedStartupMode(t *testing.T) {
+	originalEndpoint, originalKeys := activationServiceEndpoint, trustedStartupLicenseKeys
+	activationServiceEndpoint = "https://activation.u-claw.org/"
+	trustedStartupLicenseKeys = `{"activation-2026":"fixture-public-key"}`
+	t.Cleanup(func() {
+		activationServiceEndpoint, trustedStartupLicenseKeys = originalEndpoint, originalKeys
+	})
 	root := filepath.Join(t.TempDir(), "runtime")
 	paths := PortablePaths{
 		DataDir:       filepath.Join(t.TempDir(), "data"),
@@ -46,13 +52,41 @@ func TestActivationProcessSpecUsesRestrictedStartupMode(t *testing.T) {
 		"UCLAW_USB_FINGERPRINT_SCHEME=uclaw-usb-v1",
 		"UCLAW_USB_FINGERPRINT_SHA256=" + strings.Repeat("a", 64),
 		"UCLAW_CLIENT_VERSION=" + manifest.ProductVersion,
+		"UCLAW_ACTIVATION_ENDPOINT=https://activation.u-claw.org/",
+		`UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS={"activation-2026":"fixture-public-key"}`,
 		"UCLAW_RUNTIME_DIR=" + root,
 	}
 	if !reflect.DeepEqual(spec.Env, wantEnv) {
 		t.Fatalf("environment = %v", spec.Env)
 	}
-	if !reflect.DeepEqual(spec.EnvRemovePrefixes, []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT"}) {
+	if !reflect.DeepEqual(spec.EnvRemovePrefixes, []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_"}) {
 		t.Fatalf("environment removal prefixes = %v", spec.EnvRemovePrefixes)
+	}
+}
+
+func TestActivationProcessEnvironmentReplacesInheritedActivationConfiguration(t *testing.T) {
+	base := []string{
+		"UCLAW_ACTIVATION_ENDPOINT=https://attacker.example/",
+		`UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS={"attacker":"key"}`,
+		"UCLAW_ACTIVATION_FUTURE_SETTING=forged",
+		"PATH=fixture-path",
+	}
+	overrides := []string{
+		"UCLAW_ACTIVATION_ENDPOINT=https://activation.u-claw.org/",
+		`UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS={"activation-2026":"fixture-public-key"}`,
+	}
+	got := mergeEnvironmentForPlatform(
+		filterEnvironment(base, []string{"UCLAW_ACTIVATION_"}, true),
+		overrides,
+		true,
+	)
+	want := []string{
+		"PATH=fixture-path",
+		"UCLAW_ACTIVATION_ENDPOINT=https://activation.u-claw.org/",
+		`UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS={"activation-2026":"fixture-public-key"}`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("activation environment = %v", got)
 	}
 }
 
