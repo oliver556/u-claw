@@ -16,7 +16,7 @@ test("creates a session group through the production Electron UI and reads it ba
     await mkdir(cacheDir, { recursive: true });
     await cp(join(runtime, "data/.openclaw/openclaw.json"), join(dataDir, ".openclaw/openclaw.json"));
     app = await electron.launch({
-      args: [resolve("desktop/dist/entry.js")],
+      args: [resolve("desktop/dist/entry.js"), "--uclaw-startup-mode=normal"],
       env: {
         ...process.env,
         UCLAW_RUNTIME_DIR: runtime,

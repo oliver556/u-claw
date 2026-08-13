@@ -46,6 +46,25 @@ test("buildRuntime rejects missing input and entrypoint", async () => {
   );
 });
 
+test("buildRuntime rejects a second activation Electron executable", async () => {
+  const { root, runtime } = await fixtureRuntime();
+  await writeFile(path.join(runtime, "electron", "activation.exe"), "second-electron");
+  await assert.rejects(
+    buildRuntime(runtimeOptions(root, runtime)),
+    /exactly one Electron|activation\.exe/i,
+  );
+});
+
+test("buildRuntime rejects a nested second Electron executable", async () => {
+  const { root, runtime } = await fixtureRuntime();
+  await mkdir(path.join(runtime, "tools", "electron"), { recursive: true });
+  await writeFile(path.join(runtime, "tools", "electron", "activation.exe"), "second-electron");
+  await assert.rejects(
+    buildRuntime(runtimeOptions(root, runtime)),
+    /exactly one Electron|activation\.exe/i,
+  );
+});
+
 test("buildRuntime rejects a runtime id that disagrees with canonical pins", async () => {
   const { root, runtime } = await fixtureRuntime();
   await assert.rejects(

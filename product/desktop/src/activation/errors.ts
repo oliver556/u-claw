@@ -19,4 +19,3 @@ export class ActivationClientError extends Error {
     this.name = "ActivationClientError";
   }
 }
-
