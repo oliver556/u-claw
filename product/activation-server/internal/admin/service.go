@@ -158,11 +158,17 @@ type ServiceOptions struct {
 	Repository Repository
 	Pepper     []byte
 	Random     io.Reader
+	Observer   Observer
+}
+
+type Observer interface {
+	RecordLifecycle(action, outcome string)
 }
 type Service struct {
 	repository Repository
 	pepper     []byte
 	random     io.Reader
+	observer   Observer
 }
 
 func NewService(options ServiceOptions) (*Service, error) {
@@ -172,7 +178,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 	if options.Random == nil {
 		options.Random = rand.Reader
 	}
-	return &Service{repository: options.Repository, pepper: append([]byte(nil), options.Pepper...), random: options.Random}, nil
+	return &Service{repository: options.Repository, pepper: append([]byte(nil), options.Pepper...), random: options.Random, observer: options.Observer}, nil
 }
 
 func (service *Service) Generate(ctx context.Context, input GenerateInput) ([]InventorySummary, error) {
@@ -268,11 +274,26 @@ func (service *Service) MutateLicense(ctx context.Context, mutation Mutation) (M
 	if mutation.Action == ActionReissue {
 		plan, err := service.PrepareReissue(ctx, mutation)
 		if err != nil {
+			service.recordLifecycle(mutation.Action, err)
 			return MutationResult{}, err
 		}
-		return service.ExecuteReissue(ctx, plan)
+		result, err := service.ExecuteReissue(ctx, plan)
+		service.recordLifecycle(mutation.Action, err)
+		return result, err
 	}
-	return service.repository.Mutate(ctx, mutation)
+	result, err := service.repository.Mutate(ctx, mutation)
+	service.recordLifecycle(mutation.Action, err)
+	return result, err
+}
+
+func (service *Service) recordLifecycle(action Action, err error) {
+	if service.observer != nil && (action == ActionReissue || action == ActionRevoke) {
+		outcome := "success"
+		if err != nil {
+			outcome = "error"
+		}
+		service.observer.RecordLifecycle(string(action), outcome)
+	}
 }
 
 func (service *Service) PrepareReissue(ctx context.Context, mutation Mutation) (ReissuePlan, error) {

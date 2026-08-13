@@ -382,7 +382,7 @@ func resumeExisting(ctx context.Context, tx pgx.Tx, input activation.BeginBindin
 	if err := tx.Commit(ctx); err != nil {
 		return activation.BeginBindingResult{}, fmt.Errorf("commit activation lease: %w", err)
 	}
-	return activation.BeginBindingResult{Disposition: activation.BindingAcquired, Record: existing}, nil
+	return activation.BeginBindingResult{Disposition: activation.BindingAcquired, Record: existing, LeaseRecovered: true}, nil
 }
 
 func insertBinding(ctx context.Context, tx pgx.Tx, input activation.BeginBindingInput, record activation.BoundRecord) error {

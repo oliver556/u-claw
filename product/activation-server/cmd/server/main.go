@@ -20,6 +20,7 @@ import (
 	"u-claw-activation-server/internal/config"
 	"u-claw-activation-server/internal/license"
 	"u-claw-activation-server/internal/lifecycle"
+	"u-claw-activation-server/internal/observability"
 	"u-claw-activation-server/internal/persistence"
 	"u-claw-activation-server/internal/security"
 	"u-claw-activation-server/internal/transport"
@@ -61,7 +62,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	public, err := buildPublicHandler(cfg, pool, kms)
+	metrics := observability.NewMetrics()
+	public, err := buildPublicHandler(cfg, pool, kms, metrics)
 	if err != nil {
 		return err
 	}
@@ -69,18 +71,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper})
+	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, Observer: metrics})
 	if err != nil {
 		return err
 	}
 	adminHandler := transport.NewAdminHandler(transport.AdminHandlerOptions{Service: adminApplication, Operators: cfg.AdminOperators})
-	application := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if strings.HasPrefix(request.URL.Path, "/internal/v1/") {
-			adminHandler.ServeHTTP(writer, request)
-			return
-		}
-		public.ServeHTTP(writer, request)
-	})
+	application := newApplication(public, adminHandler, metrics)
 	server := newHTTPServer(cfg, func(ctx context.Context) error { return pool.Ping(ctx) }, application, kmsReadiness(kms, cfg.KMSKeyVersion))
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -107,7 +103,22 @@ func run() error {
 	}
 }
 
-func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, kms security.KMS) (http.Handler, error) {
+func newApplication(public, admin http.Handler, metrics *observability.Metrics) http.Handler {
+	instrumentedPublic := metrics.InstrumentPublicHandler(public)
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/metrics" {
+			metrics.Handler().ServeHTTP(writer, request)
+			return
+		}
+		if strings.HasPrefix(request.URL.Path, "/internal/v1/") {
+			admin.ServeHTTP(writer, request)
+			return
+		}
+		instrumentedPublic.ServeHTTP(writer, request)
+	})
+}
+
+func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, kms security.KMS, observers ...activation.Observer) (http.Handler, error) {
 	repository, err := persistence.NewActivationRepository(pool)
 	if err != nil {
 		return nil, err
@@ -117,9 +128,13 @@ func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, kms security.KMS)
 		return nil, err
 	}
 	envelope := security.NewEnvelopeService(kms, nil)
+	var observer activation.Observer
+	if len(observers) > 0 {
+		observer = observers[0]
+	}
 	activationService, err := activation.NewService(activation.ServiceOptions{
 		Repository: repository, Signer: licenseSigner, Envelope: envelope, Pepper: cfg.ActivationPepper,
-		KeyID: cfg.LicenseKeyID, KeyVersion: cfg.KMSKeyVersion, LeaseTTL: time.Minute, LicenseTTL: 365 * 24 * time.Hour,
+		KeyID: cfg.LicenseKeyID, KeyVersion: cfg.KMSKeyVersion, LeaseTTL: time.Minute, LicenseTTL: 365 * 24 * time.Hour, Observer: observer,
 	})
 	if err != nil {
 		return nil, err

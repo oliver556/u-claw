@@ -1,0 +1,256 @@
+name: uclaw-activation-production
+
+x-activation-app: &activation-app
+  image: ${ACTIVATION_IMAGE:?set ACTIVATION_IMAGE to an immutable image digest}
+  restart: unless-stopped
+  environment:
+    LISTEN_ADDRESS: :8080
+    DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+    ACTIVATION_PEPPER_FILE: /run/secrets/activation_pepper
+    LICENSE_SIGNING_KEY_FILE: /run/secrets/license_signing_key
+    STATUS_SIGNING_KEY_FILE: /run/secrets/status_signing_key
+    LICENSE_KEY_ID: ${LICENSE_KEY_ID:?set LICENSE_KEY_ID}
+    STATUS_KEY_ID: ${STATUS_KEY_ID:?set STATUS_KEY_ID}
+    KMS_PROVIDER: local-kek-v1
+    KMS_KEY_VERSION: ${KMS_KEY_VERSION:?set KMS_KEY_VERSION}
+    KMS_KEK_FILE: /run/secrets/kms_kek
+    TOKEN_SIGNING_KEY_FILE: /run/secrets/token_signing_key
+    ADMIN_OPERATORS_FILE: /run/secrets/admin_operators
+  secrets:
+    - activation_pepper
+    - license_signing_key
+    - status_signing_key
+    - kms_kek
+    - token_signing_key
+    - admin_operators
+  networks:
+    - service_private
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 15s
+
+services:
+  activation-1:
+    <<: *activation-app
+
+  activation-2:
+    <<: *activation-app
+
+  public-gateway:
+    image: openresty/openresty:1.27.1.2-alpine
+    restart: unless-stopped
+    ports:
+      - "443:8443"
+    environment:
+      RATE_LIMIT_HMAC_FILE: /run/secrets/rate_limit_hmac_key
+    configs:
+      - source: public_gateway
+        target: /usr/local/openresty/nginx/conf/nginx.conf
+        mode: 0444
+    secrets:
+      - tls_certificate
+      - tls_private_key
+      - rate_limit_hmac_key
+    networks:
+      - public_edge
+      - service_private
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /usr/local/openresty/nginx/logs:size=16m,mode=0755
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - activation-1
+      - activation-2
+
+  # Loopback binding plus mTLS keeps management routes off the public network.
+  # Production should place this listener behind a private VPN/bastion as well.
+  management-gateway:
+    image: nginx:1.27.5-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8444:8444"
+    configs:
+      - source: management_gateway
+        target: /etc/nginx/nginx.conf
+        mode: 0444
+    secrets:
+      - tls_certificate
+      - tls_private_key
+      - management_client_ca
+    networks:
+      - service_private
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=16m,mode=0755
+      - /var/run:size=1m,mode=0755
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - activation-1
+      - activation-2
+
+networks:
+  public_edge: {}
+  service_private:
+    internal: true
+
+secrets:
+  activation_pepper:
+    file: ${ACTIVATION_PEPPER_FILE:?set ACTIVATION_PEPPER_FILE}
+  license_signing_key:
+    file: ${LICENSE_SIGNING_KEY_FILE:?set LICENSE_SIGNING_KEY_FILE}
+  status_signing_key:
+    file: ${STATUS_SIGNING_KEY_FILE:?set STATUS_SIGNING_KEY_FILE}
+  kms_kek:
+    file: ${KMS_KEK_FILE:?set KMS_KEK_FILE}
+  token_signing_key:
+    file: ${TOKEN_SIGNING_KEY_FILE:?set TOKEN_SIGNING_KEY_FILE}
+  admin_operators:
+    file: ${ADMIN_OPERATORS_FILE:?set ADMIN_OPERATORS_FILE}
+  tls_certificate:
+    file: ${TLS_CERTIFICATE_FILE:?set TLS_CERTIFICATE_FILE}
+  tls_private_key:
+    file: ${TLS_PRIVATE_KEY_FILE:?set TLS_PRIVATE_KEY_FILE}
+  management_client_ca:
+    file: ${MANAGEMENT_CLIENT_CA_FILE:?set MANAGEMENT_CLIENT_CA_FILE}
+  rate_limit_hmac_key:
+    file: ${RATE_LIMIT_HMAC_KEY_FILE:?set RATE_LIMIT_HMAC_KEY_FILE}
+
+configs:
+  public_gateway:
+    content: |
+      worker_processes auto;
+      error_log stderr warn;
+      pid /tmp/nginx.pid;
+      env RATE_LIMIT_HMAC_FILE;
+      events { worker_connections 4096; }
+      http {
+        lua_shared_dict rate_limit 32m;
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        upstream activation_public {
+          zone activation_public 64k;
+          least_conn;
+          server activation-1:8080 resolve;
+          server activation-2:8080 resolve;
+          keepalive 64;
+        }
+        server {
+          listen 8443 ssl;
+          server_tokens off;
+          ssl_certificate /run/secrets/tls_certificate;
+          ssl_certificate_key /run/secrets/tls_private_key;
+          ssl_protocols TLSv1.2 TLSv1.3;
+          client_max_body_size 1m;
+          client_body_timeout 5s;
+          keepalive_timeout 30s;
+          location ^~ /internal/ { return 404; }
+          location = /metrics { return 404; }
+          location / {
+            access_by_lua_block {
+              local cjson = require "cjson.safe"
+              local key_file = assert(io.open(os.getenv("RATE_LIMIT_HMAC_FILE"), "rb"))
+              local secret = key_file:read("*a")
+              key_file:close()
+              local subjects = {{"ip", ngx.var.binary_remote_addr, 120}}
+              if ngx.req.get_method() == "POST" then
+                ngx.req.read_body()
+                local body_data = ngx.req.get_body_data()
+                if not body_data then
+                  local body_path = ngx.req.get_body_file()
+                  if body_path then
+                    local body_file = assert(io.open(body_path, "rb"))
+                    body_data = body_file:read("*a")
+                    body_file:close()
+                  end
+                end
+                local body = cjson.decode(body_data or "") or {}
+                if type(body.username) == "string" then
+                  subjects[#subjects + 1] = {"username", string.lower(body.username), 20}
+                end
+                if type(body.deviceId) == "string" then
+                  subjects[#subjects + 1] = {"device", body.deviceId, 30}
+                elseif type(body.usbFingerprint) == "table" and type(body.usbFingerprint.sha256) == "string" then
+                  subjects[#subjects + 1] = {"device", body.usbFingerprint.sha256, 30}
+                end
+              end
+              local window = math.floor(ngx.now() / 60)
+              for _, item in ipairs(subjects) do
+                local digest = ngx.encode_base64(ngx.hmac_sha1(secret, item[2]), true)
+                local count = ngx.shared.rate_limit:incr(item[1] .. ":" .. digest .. ":" .. window, 1, 0, 61)
+                if count > item[3] then return ngx.exit(429) end
+              end
+            }
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $$remote_addr;
+            proxy_connect_timeout 2s;
+            proxy_send_timeout 10s;
+            proxy_read_timeout 10s;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_next_upstream_tries 2;
+            proxy_pass http://activation_public;
+          }
+        }
+      }
+  management_gateway:
+    content: |
+      worker_processes auto;
+      error_log stderr warn;
+      pid /tmp/nginx.pid;
+      events { worker_connections 1024; }
+      http {
+        upstream activation_management {
+          least_conn;
+          server activation-1:8080;
+          server activation-2:8080;
+          keepalive 16;
+        }
+        server {
+          listen 8444 ssl;
+          server_tokens off;
+          ssl_certificate /run/secrets/tls_certificate;
+          ssl_certificate_key /run/secrets/tls_private_key;
+          ssl_client_certificate /run/secrets/management_client_ca;
+          ssl_verify_client on;
+          ssl_protocols TLSv1.2 TLSv1.3;
+          client_max_body_size 1m;
+          client_body_timeout 5s;
+          keepalive_timeout 30s;
+          location ^~ /internal/v1/ {
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_connect_timeout 2s;
+            proxy_send_timeout 10s;
+            proxy_read_timeout 10s;
+            proxy_pass http://activation_management;
+          }
+          location = /metrics/activation-1 {
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 5s;
+            proxy_pass http://activation-1:8080/metrics;
+          }
+          location = /metrics/activation-2 {
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 5s;
+            proxy_pass http://activation-2:8080/metrics;
+          }
+          location / { return 404; }
+        }
+      }

@@ -6,13 +6,25 @@ import (
 	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"u-claw-activation-server/internal/config"
+	"u-claw-activation-server/internal/observability"
 	"u-claw-activation-server/internal/security"
 	"u-claw-activation-server/internal/transport"
 )
+
+func TestApplicationExposesMetricsOnlyOnExplicitRoute(t *testing.T) {
+	metrics := observability.NewMetrics()
+	application := newApplication(http.NotFoundHandler(), http.NotFoundHandler(), metrics)
+	response := httptest.NewRecorder()
+	application.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "uclaw_activation_requests_total") {
+		t.Fatalf("metrics response=%d %s", response.Code, response.Body.String())
+	}
+}
 
 func TestNewHTTPServerUsesSafeLimitsAndInjectedDatabaseCheck(t *testing.T) {
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
