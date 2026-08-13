@@ -32,6 +32,7 @@ fi
 checksum_001=$(checksum_file "$migration_dir/001_initial.sql")
 checksum_002=$(checksum_file "$migration_dir/002_lifecycle.sql")
 checksum_003=$(checksum_file "$migration_dir/003_admin.sql")
+checksum_004=$(checksum_file "$migration_dir/004_device_access_proxy.sql")
 
 psql "$ACTIVATION_DATABASE_URL" -X --set=ON_ERROR_STOP=1 \
     --set=migration_role="$ACTIVATION_MIGRATION_ROLE" \
@@ -143,6 +144,21 @@ SELECT NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 3) AS apply_0
     INSERT INTO schema_migrations(version, checksum, applied_at)
     VALUES (3, decode('$checksum_003', 'hex'), now());
 \endif
+
+SELECT EXISTS (
+    SELECT 1 FROM schema_migrations
+    WHERE version = 4 AND checksum <> decode('$checksum_004', 'hex')
+) AS checksum_mismatch_004 \gset
+\if :checksum_mismatch_004
+    \echo 'migration 4 checksum mismatch'
+    \quit 1
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 4) AS apply_004 \gset
+\if :apply_004
+    \i $migration_dir/004_device_access_proxy.sql
+    INSERT INTO schema_migrations(version, checksum, applied_at)
+    VALUES (4, decode('$checksum_004', 'hex'), now());
+\endif
 COMMIT;
 RESET ROLE;
 
@@ -151,6 +167,7 @@ SELECT format(
     'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I',
     :'app_role'
 ) \gexec
+SELECT format('REVOKE INSERT, UPDATE, DELETE ON TABLE public.schema_migrations FROM %I', :'app_role') \gexec
 SELECT format('GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO %I', :'app_role') \gexec
 SELECT format(
     'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I',

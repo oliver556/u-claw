@@ -42,6 +42,11 @@ func TestMigrationScriptUsesDedicatedLeastPrivilegeRoles(t *testing.T) {
 		"application role unexpectedly has DDL privilege",
 		"sha256sum",
 		"shasum",
+		"checksum_004",
+		"004_device_access_proxy.sql",
+		"WHERE version = 4",
+		"VALUES (4, decode('$checksum_004', 'hex'), now())",
+		"REVOKE INSERT, UPDATE, DELETE ON TABLE public.schema_migrations",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("migrate.sh missing least-privilege control %q", required)
@@ -208,6 +213,9 @@ func assertApplicationRoleHasNoDDL(t *testing.T, ctx context.Context, appURL str
 	if err := app.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&tableCount); err != nil {
 		t.Fatalf("application role cannot read migrated tables: %v", err)
 	}
+	if _, err := app.Exec(ctx, `INSERT INTO schema_migrations(version,checksum,applied_at) VALUES (999,decode(repeat('99',32),'hex'),now())`); !postgresCode(err, "42501") {
+		t.Fatalf("application role schema_migrations write error = %v, want SQLSTATE 42501", err)
+	}
 	tx, err := app.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -258,6 +266,15 @@ func insertRestoreFixtures(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 			('20000000-0000-0000-0000-000000000032','10000000-0000-0000-0000-000000000003','active',2,'fixture-key',decode(repeat('22',16),'hex'),$1,now(),now()+interval '30 days',now(),now())`, []any{startupHash[:]}},
 		{`INSERT INTO licenses (license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,replacement_license_id,created_at,updated_at)
 			VALUES ('20000000-0000-0000-0000-000000000031','10000000-0000-0000-0000-000000000003','reissued',1,'fixture-key',decode(repeat('21',16),'hex'),$1,now(),now()+interval '30 days','20000000-0000-0000-0000-000000000032','2026-01-01T00:00:00Z',now())`, []any{startupHash[:]}},
+		{`INSERT INTO new_api_bindings
+			(inventory_id,device_id,new_api_user_id,new_api_username,balance_setup_status,status,policy_digest,api_key_envelope,api_key_version,base_url,default_model,allowed_models,requests_per_minute,concurrent_requests,created_at,updated_at)
+			VALUES ('00000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','fixture-api-user','fixture-api','configured','active',decode(repeat('23',32),'hex'),decode('55434c41572d4150492d454e56454c4f50452d5631','hex'),'fixture-kek-v1','https://api.invalid/v1','fixture-model',ARRAY['fixture-model'],120,4,now(),now())`, nil},
+		{`INSERT INTO device_access_tokens
+			(device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at)
+			VALUES ('60000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000032',decode(repeat('24',32),'hex'),'active',now(),now(),now())`, nil},
+		{`INSERT INTO model_proxy_admissions
+			(request_id,device_token_id,started_at,lease_expires_at,completed_at)
+			VALUES ('70000000-0000-0000-0000-000000000003','60000000-0000-0000-0000-000000000003','2026-01-01T00:00:00Z','2026-01-01T00:01:00Z','2026-01-01T00:00:30Z')`, nil},
 		{`INSERT INTO activation_attempts
 			(activation_id,idempotency_key,inventory_id,device_id,license_id,request_fingerprint,stage,artifact_envelope,artifact_key_version,request_id,active_status_event_id,bound_audit_event_id,artifact_generation,commit_idempotency_key,created_at,updated_at,committed_at)
 			VALUES ('30000000-0000-0000-0000-000000000003','fixture-activation','00000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000032',decode(repeat('33',32),'hex'),'committed',decode('55434c41572d454e56454c4f50452d5631','hex'),'fixture-kek-v1','fixture-request','40000000-0000-0000-0000-000000000003','50000000-0000-0000-0000-000000000003',7,'fixture-commit',now(),now(),now())`, nil},
@@ -279,6 +296,9 @@ func assertRestoredState(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 	var prepared, binding, active, reissued, audits int
 	var entitlementRevision, oldRevision, newRevision, artifactGeneration int64
 	var envelope []byte
+	var apiEnvelope, tokenDigest []byte
+	var defaultModel string
+	var admissionCount int
 	err := pool.QueryRow(ctx, `SELECT
 		count(*) FILTER (WHERE status='prepared'), count(*) FILTER (WHERE status='binding'), count(*) FILTER (WHERE status='active'),
 		max(entitlement_revision) FROM activation_inventory`).Scan(&prepared, &binding, &active, &entitlementRevision)
@@ -297,6 +317,15 @@ func assertRestoredState(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE request_id LIKE 'fixture-%'`).Scan(&audits); err != nil {
 		t.Fatal(err)
 	}
+	if err := pool.QueryRow(ctx, `SELECT api_key_envelope,default_model FROM new_api_bindings WHERE inventory_id='00000000-0000-0000-0000-000000000003'`).Scan(&apiEnvelope, &defaultModel); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT token_digest FROM device_access_tokens WHERE device_token_id='60000000-0000-0000-0000-000000000003'`).Scan(&tokenDigest); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM model_proxy_admissions WHERE device_token_id='60000000-0000-0000-0000-000000000003' AND completed_at IS NOT NULL`).Scan(&admissionCount); err != nil {
+		t.Fatal(err)
+	}
 	if prepared != 1 || binding != 1 || active != 1 || reissued != 1 {
 		t.Fatalf("restored states prepared=%d binding=%d active=%d reissued=%d", prepared, binding, active, reissued)
 	}
@@ -305,6 +334,9 @@ func assertRestoredState(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 	}
 	if string(envelope) != "UCLAW-ENVELOPE-V1" || audits != 4 {
 		t.Fatalf("restored artifact=%q audits=%d", envelope, audits)
+	}
+	if string(apiEnvelope) != "UCLAW-API-ENVELOPE-V1" || defaultModel != "fixture-model" || len(tokenDigest) != 32 || admissionCount != 1 {
+		t.Fatalf("restored proxy state api_envelope=%q model=%q token_digest_len=%d admissions=%d", apiEnvelope, defaultModel, len(tokenDigest), admissionCount)
 	}
 }
 

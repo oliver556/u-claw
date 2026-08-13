@@ -89,7 +89,7 @@ func TestInitialMigrationContainsAuthoritativeTablesAndConstraints(t *testing.T)
 			t.Errorf("migration ledger missing constraint %q", fragment)
 		}
 	}
-	if latestMigrationVersion != 3 || len(initialMigrationChecksum) != 32 {
+	if latestMigrationVersion != 4 || len(initialMigrationChecksum) != 32 {
 		t.Fatal("migration version/checksum metadata is invalid")
 	}
 }
@@ -136,7 +136,7 @@ func TestLifecycleMigrationContainsTaskFiveAndSixSchema(t *testing.T) {
 			t.Errorf("lifecycle migration missing %q", fragment)
 		}
 	}
-	if latestMigrationVersion != 3 || len(lifecycleMigrationChecksum) != 32 {
+	if latestMigrationVersion != 4 || len(lifecycleMigrationChecksum) != 32 {
 		t.Fatal("lifecycle migration version/checksum metadata is invalid")
 	}
 }
@@ -172,6 +172,57 @@ func TestAdminMigrationContainsIdempotencyReasonAndReplacementEntitlement(t *tes
 	}
 	if string(contents) != sql {
 		t.Fatal("migrations/003_admin.sql drifted from compiled migration")
+	}
+}
+
+func TestDeviceAccessProxyMigrationContainsLongLivedTokenAndProxySchema(t *testing.T) {
+	sql := DeviceAccessProxyMigrationSQL()
+	for _, fragment := range []string{
+		"CREATE TABLE device_access_tokens",
+		"device_token_id UUID PRIMARY KEY",
+		"inventory_id UUID NOT NULL REFERENCES activation_inventory(id)",
+		"device_id UUID NOT NULL REFERENCES devices(device_id)",
+		"token_digest BYTEA UNIQUE NOT NULL CHECK (octet_length(token_digest) = 32)",
+		"status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'revoked'))",
+		"CHECK ((status = 'revoked') = (revoked_at IS NOT NULL))",
+		"FOREIGN KEY (license_id, device_id) REFERENCES licenses(license_id, device_id)",
+		"WHERE status = 'active'",
+		"ADD COLUMN api_key_envelope BYTEA",
+		"ADD COLUMN api_key_version TEXT",
+		"ADD COLUMN base_url TEXT",
+		"ADD COLUMN default_model TEXT",
+		"ADD COLUMN allowed_models TEXT[] NOT NULL DEFAULT '{}'",
+		"CHECK ((api_key_envelope IS NULL) = (api_key_version IS NULL))",
+		"CHECK (requests_per_minute BETWEEN 1 AND 6000)",
+		"CHECK (concurrent_requests BETWEEN 1 AND 100)",
+		"balance_setup_status <> 'configured'",
+		"api_key_envelope IS NULL\n                AND api_key_version IS NULL\n                AND base_url IS NULL\n                AND default_model IS NULL\n                AND cardinality(allowed_models) = 0",
+		") NOT VALID",
+		"CREATE TABLE model_proxy_admissions",
+		"request_id UUID PRIMARY KEY",
+		"device_token_id UUID NOT NULL REFERENCES device_access_tokens(device_token_id)",
+		"CHECK (lease_expires_at > started_at)",
+		"ON model_proxy_admissions(device_token_id, started_at DESC)",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("device access/proxy migration missing %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{"token_plaintext", "token_secret", "api_key TEXT"} {
+		if strings.Contains(strings.ToLower(sql), strings.ToLower(forbidden)) {
+			t.Errorf("device access/proxy migration stores plaintext secret %q", forbidden)
+		}
+	}
+	if latestMigrationVersion != 4 || len(deviceAccessProxyMigrationChecksum) != 32 {
+		t.Fatal("device access/proxy migration version/checksum metadata is invalid")
+	}
+
+	contents, err := os.ReadFile(filepath.Join("..", "..", "migrations", "004_device_access_proxy.sql"))
+	if err != nil {
+		t.Fatalf("read release migration 004: %v", err)
+	}
+	if string(contents) != sql {
+		t.Fatal("migrations/004_device_access_proxy.sql drifted from compiled migration")
 	}
 }
 
@@ -241,19 +292,32 @@ func TestMigratePostgreSQLIsIdempotentAndEnforcesUniqueBindings(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ANY($1)`, []string{
 		"activation_inventory", "devices", "licenses", "activation_attempts",
 		"new_api_bindings", "token_grants", "audit_events", "license_status_events", "schema_migrations", "admin_operations",
+		"device_access_tokens", "model_proxy_admissions",
 	}).Scan(&tableCount); err != nil {
 		t.Fatal(err)
 	}
-	if tableCount != 10 {
-		t.Fatalf("table count = %d, want 10", tableCount)
+	if tableCount != 12 {
+		t.Fatalf("table count = %d, want 12", tableCount)
 	}
 	var migrationCount int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3) AND octet_length(checksum) = 32`).Scan(&migrationCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4) AND octet_length(checksum) = 32`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 3 {
-		t.Fatalf("migration record count = %d, want 3", migrationCount)
+	if migrationCount != 4 {
+		t.Fatalf("migration record count = %d, want 4", migrationCount)
 	}
+	for _, query := range []string{
+		`SELECT device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,revoked_at,created_at,updated_at FROM device_access_tokens LIMIT 0`,
+		`SELECT api_key_envelope,api_key_version,base_url,default_model,allowed_models,requests_per_minute,concurrent_requests FROM new_api_bindings LIMIT 0`,
+		`SELECT request_id,device_token_id,started_at,lease_expires_at,completed_at FROM model_proxy_admissions LIMIT 0`,
+	} {
+		rows, err := pool.Query(ctx, query)
+		if err != nil {
+			t.Fatalf("query migration 4 schema: %v", err)
+		}
+		rows.Close()
+	}
+	assertDeviceAccessProxySchema(t, ctx, pool)
 
 	_, err = pool.Exec(ctx, `INSERT INTO activation_inventory
 		(id, username_normalized, username_display, activation_code_digest, status, new_api_setup_status, created_at)
@@ -285,6 +349,47 @@ func TestMigratePostgreSQLIsIdempotentAndEnforcesUniqueBindings(t *testing.T) {
 		(device_id, inventory_id, fingerprint_version, fingerprint_sha256, status, created_at, updated_at)
 		VALUES ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000004', 'uclaw-usb-v1', decode(repeat('aa', 32), 'hex'), 'active', now(), now())`); !postgresCode(err, "23505") {
 		t.Fatalf("duplicate USB fingerprint error = %v, want SQLSTATE 23505", err)
+	}
+}
+
+func assertDeviceAccessProxySchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	const inventoryID = "00000000-0000-0000-0000-000000000041"
+	const deviceID = "10000000-0000-0000-0000-000000000041"
+	const licenseID = "20000000-0000-0000-0000-000000000041"
+	statements := []string{
+		`INSERT INTO activation_inventory (id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at) VALUES ('` + inventoryID + `','proxy-41','Proxy 41',decode(repeat('41',32),'hex'),'active','configured',now())`,
+		`INSERT INTO activation_inventory (id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at) VALUES ('00000000-0000-0000-0000-000000000042','proxy-42','Proxy 42',decode(repeat('42',32),'hex'),'prepared','pending',now())`,
+		`INSERT INTO devices (device_id,inventory_id,fingerprint_version,fingerprint_sha256,status,created_at,updated_at) VALUES ('` + deviceID + `','` + inventoryID + `','uclaw-usb-v1',decode(repeat('41',32),'hex'),'active',now(),now())`,
+		`INSERT INTO licenses (license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,created_at,updated_at) VALUES ('` + licenseID + `','` + deviceID + `','active',1,'proxy-key',decode(repeat('41',16),'hex'),decode(repeat('42',32),'hex'),now(),now()+interval '30 days',now(),now())`,
+		`INSERT INTO device_access_tokens (device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) VALUES ('60000000-0000-0000-0000-000000000041','` + inventoryID + `','` + deviceID + `','` + licenseID + `',decode(repeat('43',32),'hex'),'active',now(),now(),now())`,
+		`INSERT INTO model_proxy_admissions (request_id,device_token_id,started_at,lease_expires_at) VALUES ('70000000-0000-0000-0000-000000000041','60000000-0000-0000-0000-000000000041',now(),now()+interval '1 minute')`,
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(ctx, statement); err != nil {
+			t.Fatalf("insert device access/proxy fixture: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO new_api_bindings (inventory_id,new_api_user_id,new_api_username,balance_setup_status,status,policy_digest,created_at,updated_at) VALUES ('00000000-0000-0000-0000-000000000042','proxy-user-42','proxy-42','configured','active',decode(repeat('45',32),'hex'),now(),now())`); err != nil {
+		t.Fatalf("legacy configured binding without proxy mapping must remain valid: %v", err)
+	}
+	invalid := []struct {
+		name string
+		sql  string
+	}{
+		{"short token digest", `INSERT INTO device_access_tokens (device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) VALUES ('60000000-0000-0000-0000-000000000042','` + inventoryID + `','` + deviceID + `','` + licenseID + `',decode('01','hex'),'disabled',now(),now(),now())`},
+		{"second active token", `INSERT INTO device_access_tokens (device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) VALUES ('60000000-0000-0000-0000-000000000043','` + inventoryID + `','` + deviceID + `','` + licenseID + `',decode(repeat('44',32),'hex'),'active',now(),now(),now())`},
+		{"revoked token without timestamp", `INSERT INTO device_access_tokens (device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) VALUES ('60000000-0000-0000-0000-000000000044','` + inventoryID + `','` + deviceID + `','` + licenseID + `',decode(repeat('46',32),'hex'),'revoked',now(),now(),now())`},
+		{"api key envelope without version", `UPDATE new_api_bindings SET api_key_envelope=decode('45','hex') WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
+		{"request rate limit", `UPDATE new_api_bindings SET requests_per_minute=0 WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
+		{"concurrent request limit", `UPDATE new_api_bindings SET concurrent_requests=101 WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
+		{"incomplete configured proxy", `UPDATE new_api_bindings SET api_key_envelope=decode('45','hex'),api_key_version='fixture-kek-v1' WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
+		{"expired admission lease", `INSERT INTO model_proxy_admissions (request_id,device_token_id,started_at,lease_expires_at) VALUES ('70000000-0000-0000-0000-000000000042','60000000-0000-0000-0000-000000000041',now(),now())`},
+	}
+	for _, fixture := range invalid {
+		if _, err := pool.Exec(ctx, fixture.sql); !postgresCode(err, "23514") && !(fixture.name == "second active token" && postgresCode(err, "23505")) {
+			t.Fatalf("%s error = %v, want constraint violation", fixture.name, err)
+		}
 	}
 }
 
