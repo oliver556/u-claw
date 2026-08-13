@@ -10,6 +10,8 @@ const TimestampSchema = z.iso.datetime({ offset: true });
 const RevisionSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const ModelSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u);
+const OpenAIUnixTimestampSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const OpenAITokenCountSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const PromptSchema = z.string().min(1).max(65_536).refine(
   (value) => new TextEncoder().encode(value).byteLength <= 65_536,
   "Prompt must not exceed 65536 UTF-8 bytes.",
@@ -117,6 +119,54 @@ export const BuiltinModelResponseSchema = z.object({
   serviceRevision: RevisionSchema,
 }).strict();
 export type BuiltinModelResponse = z.infer<typeof BuiltinModelResponseSchema>;
+
+export const OpenAIModelSchema = z.object({
+  id: ModelSchema,
+  object: z.literal("model"),
+  created: OpenAIUnixTimestampSchema,
+  owned_by: IdentifierSchema,
+}).strict();
+export type OpenAIModel = z.infer<typeof OpenAIModelSchema>;
+
+export const OpenAIModelsResponseSchema = z.object({
+  object: z.literal("list"),
+  data: z.array(OpenAIModelSchema),
+}).strict();
+export type OpenAIModelsResponse = z.infer<typeof OpenAIModelsResponseSchema>;
+
+export const OpenAIChatMessageSchema = z.object({
+  role: z.enum(["system", "user", "assistant"]),
+  content: z.string(),
+}).strict();
+export type OpenAIChatMessage = z.infer<typeof OpenAIChatMessageSchema>;
+
+export const OpenAIChatCompletionRequestSchema = z.object({
+  model: ModelSchema,
+  messages: z.array(OpenAIChatMessageSchema).min(1),
+  stream: z.literal(false),
+}).strict();
+export type OpenAIChatCompletionRequest = z.infer<typeof OpenAIChatCompletionRequestSchema>;
+
+export const OpenAIChatCompletionResponseSchema = z.object({
+  id: IdentifierSchema,
+  object: z.literal("chat.completion"),
+  created: OpenAIUnixTimestampSchema,
+  model: ModelSchema,
+  choices: z.array(z.object({
+    index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    message: z.object({
+      role: z.literal("assistant"),
+      content: z.string(),
+    }).strict(),
+    finish_reason: z.enum(["stop", "length", "content_filter"]),
+  }).strict()),
+  usage: z.object({
+    prompt_tokens: OpenAITokenCountSchema,
+    completion_tokens: OpenAITokenCountSchema,
+    total_tokens: OpenAITokenCountSchema,
+  }).strict(),
+}).strict();
+export type OpenAIChatCompletionResponse = z.infer<typeof OpenAIChatCompletionResponseSchema>;
 
 export const BuiltinServiceHealthSchema = z.object({
   schemaVersion: z.literal(1),

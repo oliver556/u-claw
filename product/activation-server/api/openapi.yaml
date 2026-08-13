@@ -111,26 +111,6 @@
         }
       }
     },
-    "/v1/device-tokens": {
-      "post": {
-        "operationId": "createDeviceToken",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceTokenRequest" } } }
-        },
-        "responses": {
-          "200": {
-            "description": "Short-lived device token issued",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceTokenResponse" } } }
-          },
-          "401": { "$ref": "#/components/responses/401" },
-          "403": { "$ref": "#/components/responses/403" },
-          "429": { "$ref": "#/components/responses/429" },
-          "503": { "$ref": "#/components/responses/503" }
-        }
-      }
-    },
     "/internal/v1/inventory": {
       "post": {
         "operationId": "adminGenerateInventory", "security": [{ "AdminBearerAuth": [] }],
@@ -250,9 +230,8 @@
       "ActivationRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["username", "activationCode", "usbFingerprint", "clientVersion", "idempotencyKey"],
+        "required": ["activationCode", "usbFingerprint", "clientVersion", "idempotencyKey"],
         "properties": {
-          "username": { "type": "string", "minLength": 3, "maxLength": 128 },
           "activationCode": { "$ref": "#/components/schemas/ActivationCode" },
           "usbFingerprint": { "$ref": "#/components/schemas/UsbFingerprint" },
           "clientVersion": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$" },
@@ -381,13 +360,14 @@
       "BuiltinCredential": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "deviceId", "licenseId", "accessToken", "expiresAt"],
+        "required": ["schemaVersion", "deviceId", "licenseId", "endpoint", "model", "deviceToken"],
         "properties": {
           "schemaVersion": { "const": 1 },
           "deviceId": { "$ref": "#/components/schemas/Identifier" },
           "licenseId": { "$ref": "#/components/schemas/Identifier" },
-          "accessToken": { "type": "string", "minLength": 16, "maxLength": 8192 },
-          "expiresAt": { "type": "string", "format": "date-time" }
+          "endpoint": { "type": "string", "format": "uri" },
+          "model": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
+          "deviceToken": { "type": "string", "pattern": "^uclaw_dt_[A-Za-z0-9_-]{43}$" }
         }
       },
       "LicenseStatusReceipt": {
@@ -395,26 +375,6 @@
         "additionalProperties": false,
         "required": ["value"],
         "properties": { "value": { "type": "string", "minLength": 32, "maxLength": 8192, "pattern": "^[A-Za-z0-9._~-]+$" } }
-      },
-      "DeviceTokenRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["deviceId", "licenseId", "idempotencyKey"],
-        "properties": {
-          "deviceId": { "$ref": "#/components/schemas/Identifier" },
-          "licenseId": { "$ref": "#/components/schemas/Identifier" },
-          "idempotencyKey": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }
-        }
-      },
-      "DeviceTokenResponse": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["accessToken", "tokenType", "expiresAt"],
-        "properties": {
-          "accessToken": { "type": "string", "minLength": 16, "maxLength": 8192 },
-          "tokenType": { "const": "Bearer" },
-          "expiresAt": { "type": "string", "format": "date-time" }
-        }
       },
       "HealthResponse": {
         "type": "object",

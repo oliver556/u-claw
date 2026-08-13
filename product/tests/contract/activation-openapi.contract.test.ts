@@ -30,13 +30,13 @@ describe("activation OpenAPI contract", () => {
       "/v1/activations/{activationId}",
       "/v1/activations/{activationId}/commit",
       "/v1/licenses/{licenseId}/status",
-      "/v1/device-tokens",
     ]));
+    expect(document.paths["/v1/device-tokens"]).toBeUndefined();
   });
 
   it("locks component names and required field sets", () => {
     expect(required("ActivationRequest")).toEqual([
-      "username", "activationCode", "usbFingerprint", "clientVersion", "idempotencyKey",
+      "activationCode", "usbFingerprint", "clientVersion", "idempotencyKey",
     ]);
     expect(required("ActivationResponse")).toEqual([
       "activationId", "deviceId", "licenseId", "license", "startupCredential", "builtinCredential", "status",
@@ -55,15 +55,15 @@ describe("activation OpenAPI contract", () => {
       "schemaVersion", "usernameId", "deviceId", "licenseId", "usbFingerprint", "startupSecretProof", "notBefore", "expiresAt", "revision", "signature",
     ]);
     expect(required("StartupCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "startupSecret"]);
-    expect(required("BuiltinCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "accessToken", "expiresAt"]);
+    expect(required("BuiltinCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "endpoint", "model", "deviceToken"]);
     expect(required("LicenseStatusReceipt")).toEqual(["value"]);
-    expect(required("DeviceTokenRequest")).toEqual(["deviceId", "licenseId", "idempotencyKey"]);
-    expect(required("DeviceTokenResponse")).toEqual(["accessToken", "tokenType", "expiresAt"]);
+    expect(document.components.schemas.DeviceTokenRequest).toBeUndefined();
+    expect(document.components.schemas.DeviceTokenResponse).toBeUndefined();
     expect(required("HealthResponse")).toEqual(["status"]);
     for (const name of [
       "ActivationRequest", "ActivationResponse", "ActivationCommit", "ActivationError", "ClientPolicy",
       "StartupLicense", "StartupCredential", "BuiltinCredential", "LicenseStatusSummary", "LicenseStatusReceipt",
-      "LicenseStatusResponse", "DeviceTokenRequest", "DeviceTokenResponse", "HealthResponse",
+      "LicenseStatusResponse", "HealthResponse",
     ]) expect(document.components.schemas[name].additionalProperties).toBe(false);
     expect(document.components.schemas.ActivationResponse.properties).toMatchObject({
       license: { $ref: "#/components/schemas/StartupLicense" },
@@ -84,12 +84,11 @@ describe("activation OpenAPI contract", () => {
     });
   });
 
-  it("requires bearer auth for recovery, status, and token issuance", () => {
+  it("requires bearer auth for recovery and status", () => {
     expect(document.components.securitySchemes.BearerAuth).toMatchObject({ type: "http", scheme: "bearer" });
     for (const [path, method] of [
       ["/v1/activations/{activationId}", "get"],
       ["/v1/licenses/{licenseId}/status", "get"],
-      ["/v1/device-tokens", "post"],
     ] as const) expect(document.paths[path][method].security).toEqual([{ BearerAuth: [] }]);
   });
 
@@ -115,10 +114,15 @@ describe("activation OpenAPI contract", () => {
     });
     expect(document.paths["/health/live"].get.responses["200"].content["application/json"].schema)
       .toEqual({ $ref: "#/components/schemas/HealthResponse" });
-    expect(document.paths["/v1/device-tokens"].post.requestBody.content["application/json"].schema)
-      .toEqual({ $ref: "#/components/schemas/DeviceTokenRequest" });
-    expect(document.paths["/v1/device-tokens"].post.responses["200"].content["application/json"].schema)
-      .toEqual({ $ref: "#/components/schemas/DeviceTokenResponse" });
+    expect(document.components.schemas.ActivationRequest.properties).not.toHaveProperty("username");
+    expect(document.components.schemas.BuiltinCredential.properties).toEqual({
+      schemaVersion: { const: 1 },
+      deviceId: { $ref: "#/components/schemas/Identifier" },
+      licenseId: { $ref: "#/components/schemas/Identifier" },
+      endpoint: { type: "string", format: "uri" },
+      model: expect.any(Object),
+      deviceToken: { type: "string", pattern: "^uclaw_dt_[A-Za-z0-9_-]{43}$" },
+    });
     for (const status of ["401", "403", "429", "503"]) {
       expect(document.components.responses[status]).toMatchObject({
         content: { "application/json": { schema: { $ref: "#/components/schemas/ActivationError" } } },
