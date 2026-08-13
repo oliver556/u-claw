@@ -26,6 +26,8 @@ import {
   UsageIpcResponseSchema,
   WindowIpcRequestSchema,
   type ClientIpcRequest,
+  type AttachmentIpcRequest,
+  type AttachmentIpcResponse,
   type IpcResponse,
   type IpcEvent,
   type WindowIpcRequest,
@@ -142,7 +144,7 @@ export function installPreloadBridge({
     const response = await ipcRenderer.invoke(CLIENT_IPC_CHANNEL, request);
     return validateCorrelatedResponse(response, request);
   };
-  const invokeAttachments = async (payload: unknown) => {
+  const invokeAttachments = async (payload: AttachmentIpcRequest): Promise<AttachmentIpcResponse> => {
     const request = AttachmentIpcRequestSchema.parse(payload);
     const response = AttachmentIpcResponseSchema.parse(await ipcRenderer.invoke(ATTACHMENT_IPC_CHANNEL, request));
     if (response.method !== request.method || response.requestId !== request.requestId) {

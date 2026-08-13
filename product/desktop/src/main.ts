@@ -1,4 +1,4 @@
-import { readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -67,6 +67,8 @@ import {
 import { installGatewayMediaRequestAuth } from "./gateway/media-request-auth.js";
 import { createImageOperationService } from "./images/image-operation-service.js";
 import { createImageOperationDispatcher } from "./images/image-operation-dispatcher.js";
+import { createAttachmentCache } from "./attachments/attachment-cache.js";
+import { startAttachmentCleanup } from "./attachments/attachment-cleanup.js";
 
 interface ElectronWorkspaceShell {
   openPath(path: string): Promise<string>;
@@ -244,6 +246,7 @@ export interface DesktopMainOptions {
   pluginRuntime?: PluginRuntimeAdapter;
   capabilityRuntime?: OpenClawCapabilityRuntime;
   attachments?: AttachmentService;
+  referencedAttachmentIds?: () => ReadonlySet<string> | Promise<ReadonlySet<string>>;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
   releaseService?: ReleaseService;
   selectPort?(excludedPorts: readonly number[], signal: AbortSignal): Promise<number>;
@@ -508,6 +511,7 @@ export interface ReadSelectedAttachmentsOptions {
   maxTotalBytes?: number;
   concurrency?: number;
   stat?(path: string): Promise<{ isFile(): boolean; size: number }>;
+  lstat?(path: string): Promise<{ isFile(): boolean; isSymbolicLink(): boolean; size: number }>;
   readFile?(path: string): Promise<Buffer>;
 }
 
@@ -519,13 +523,16 @@ export async function readSelectedAttachments(
   const maxFileBytes = options.maxFileBytes ?? MAX_ATTACHMENT_BYTES;
   const maxTotalBytes = options.maxTotalBytes ?? MAX_ATTACHMENT_TOTAL_BYTES;
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 2, maxFiles));
-  const inspect = options.stat ?? stat;
+  const inspect = options.lstat ?? options.stat ?? lstat;
   const read = options.readFile ?? readFile;
   if (paths.length > maxFiles) {
     throw UClawErrorSchema.parse({ code: "INVALID_ARGUMENT", message: `一次最多选择 ${maxFiles} 个附件。`, retryable: false });
   }
   const inspected = await Promise.all(paths.map(async (path) => {
     const info = await inspect(path);
+    if ("isSymbolicLink" in info && typeof info.isSymbolicLink === "function" && info.isSymbolicLink()) {
+      throw UClawErrorSchema.parse({ code: "FILE_OUTSIDE_ALLOWED_ROOT", message: "不允许选择符号链接附件。", retryable: false });
+    }
     if (!info.isFile()) throw UClawErrorSchema.parse({ code: "INVALID_ARGUMENT", message: "选择项不是文件。", retryable: false });
     if (info.size > maxFileBytes) throw UClawErrorSchema.parse({ code: "FILE_TOO_LARGE", message: `附件超过大小限制（${info.size} > ${maxFileBytes} bytes）。`, retryable: false });
     return info;
@@ -575,7 +582,12 @@ export async function startElectronMain(
   if (options.injectChatMessage === undefined) throw new Error("OpenClaw chat injection is required for local application actions.");
   const consistencyCoordinator = new ProductionRuntimeConsistencyCoordinator();
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
-  const attachments = options.attachments ?? client.attachments;
+  const attachments = options.attachments ?? createAttachmentCache({ dataDir: portablePaths.dataDir });
+  const attachmentCleanup = startAttachmentCleanup({
+    dataDir: portablePaths.dataDir,
+    referencedAttachmentIds: options.referencedAttachmentIds,
+  });
+  await attachmentCleanup.started;
   const providers = options.providers ?? createProviderStore({ dataDir: portablePaths.dataDir });
   const modelRouting = createMainProcessModelRouting({
     dataDir: portablePaths.dataDir,
@@ -671,6 +683,10 @@ export async function startElectronMain(
   });
   const runtimeOptions: DesktopMainOptions = {
     ...options,
+    dispose: async () => {
+      attachmentCleanup.dispose();
+      await options.dispose?.();
+    },
     consistencyCoordinator,
     buildGatewayLaunchOptions: (port) => {
       gatewayPort = port;
@@ -769,13 +785,19 @@ export async function startElectronMain(
       dispatchRelease: createReleaseDispatcher(release),
       dispatchImage: images,
       coordinateWrite: (operation) => consistencyCoordinator.runTrackedWrite(operation),
-      selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
+      selectAttachments: options.selectAttachments,
+      importSelectedAttachments: options.selectAttachments === undefined ? async () => {
         const selected = await dialog.showOpenDialog({
           properties: ["openFile", "multiSelections"],
-          filters: [{ name: "Supported attachments", extensions: ["png", "jpg", "jpeg", "gif", "webp", "txt", "pdf"] }],
+          filters: [{ name: "Supported attachments", extensions: ["png", "jpg", "jpeg", "gif", "webp", "mp4", "mov", "webm", "txt", "pdf"] }],
         });
-        return selected.canceled ? [] : readSelectedAttachments(selected.filePaths);
-      }),
+        return selected.canceled ? [] : Promise.all(selected.filePaths.map((path) => {
+          if (!("importFile" in attachments) || typeof attachments.importFile !== "function") {
+            return readSelectedAttachments([path]).then(([input]) => attachments.import(input));
+          }
+          return attachments.importFile(path) as Promise<import("@uclaw/shared").Attachment>;
+        }));
+      } : undefined,
       });
       let domainDispose: (() => void) | undefined;
       try {

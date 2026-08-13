@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MockUClawClient } from "@uclaw/adapter";
 
-import { CLIENT_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "../src/ipc/channels.js";
+import { ATTACHMENT_IPC_CHANNEL, CLIENT_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "../src/ipc/channels.js";
 import { registerIpc } from "../src/ipc/register-ipc.js";
 
 describe("registerIpc", () => {
@@ -36,6 +36,31 @@ describe("registerIpc", () => {
   it("registers only the fixed shared-contract channels", () => {
     const { handlers } = setup();
     expect([...handlers.keys()]).toEqual([WINDOW_IPC_CHANNEL, CLIENT_IPC_CHANNEL]);
+  });
+
+  it("routes streaming attachment imports through the frozen IPC contract", async () => {
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => Promise<unknown>>();
+    const authorizedWebContents = { mainFrame: {} };
+    const attachments = {
+      import: vi.fn(), get: vi.fn(), prepare: vi.fn(), cancel: vi.fn(), remove: vi.fn(),
+      beginImport: vi.fn(async () => ({ importId: "import-1" })),
+      importChunk: vi.fn(async () => ({ nextOffset: 4 })),
+      finishImport: vi.fn(async () => ({ id: "attachment-1", file: { id: "attachment-1", name: "a.png", mediaType: "image/png", size: 4, kind: "attachment" as const }, category: "image" as const, state: "ready" as const })),
+    };
+    registerIpc({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: vi.fn() },
+      authorizedWebContents,
+      windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
+      dispatchClient: vi.fn(), attachments,
+    });
+    const event = { sender: authorizedWebContents, senderFrame: authorizedWebContents.mainFrame };
+    await handlers.get(ATTACHMENT_IPC_CHANNEL)!(event, { method: "import.begin", requestId: "b", params: { name: "a.png", mediaType: "image/png", size: 4 } });
+    await handlers.get(ATTACHMENT_IPC_CHANNEL)!(event, { method: "import.chunk", requestId: "c", params: { importId: "import-1", offset: 0, contentBase64: "YWJjZA==" } });
+    const result = await handlers.get(ATTACHMENT_IPC_CHANNEL)!(event, { method: "import.finish", requestId: "f", params: { importId: "import-1" } });
+    expect(attachments.beginImport).toHaveBeenCalledOnce();
+    expect(attachments.importChunk).toHaveBeenCalledOnce();
+    expect(attachments.finishImport).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ method: "import.finish", ok: true, result: { id: "attachment-1" } });
   });
 
   it("rejects an arbitrary command payload with a safe UClawError", async () => {
