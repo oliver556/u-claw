@@ -584,6 +584,34 @@ describe("OpenClawClient", () => {
     await rm(dataRoot, { recursive: true, force: true });
   });
 
+  it("rejects a controlled video that cannot fit the negotiated Gateway frame before reading it", async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), "uclaw-adapter-video-policy-"));
+    const id = "video-policy";
+    const source = {
+      get: vi.fn(async () => ({
+        id,
+        file: { id, name: "clip.mp4", mediaType: "video/mp4", size: 20 * 1024 * 1024, kind: "attachment" as const, relativePath: `uclaw/attachments/objects/${id}/content` },
+        category: "video" as const,
+        state: "ready" as const,
+      })),
+      prepare: vi.fn(), cancel: vi.fn(), remove: vi.fn(), import: vi.fn(),
+    };
+    const beforeRead = vi.fn();
+    const transport = new FakeTransport();
+    transport.policy = { maxPayload: 25 * 1024 * 1024, maxBufferedBytes: 50 * 1024 * 1024 };
+    const client = new OpenClawClient({ transport, attachments: createControlledAttachmentResolver({ dataRoot, source, beforeRead }) });
+    await client.gateway.negotiate();
+
+    const send = client.chat.send({ sessionId: "agent:main:main", clientRequestId: "video-policy-key", blocks: [
+      { type: "text", text: "分析视频", format: "plain" },
+      { type: "attachment", attachmentId: id },
+    ] })[Symbol.asyncIterator]();
+    await expect(send.next()).rejects.toMatchObject({ uclawError: { code: "FILE_TOO_LARGE" } });
+    expect(beforeRead).not.toHaveBeenCalled();
+    expect(transport.requests.some((request) => request.method === "chat.send")).toBe(false);
+    await rm(dataRoot, { recursive: true, force: true });
+  });
+
   it("resolves a selected Skill through the authoritative command catalog before chat.send", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push("commands.list");

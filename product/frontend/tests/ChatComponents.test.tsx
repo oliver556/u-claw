@@ -12,6 +12,7 @@ import { AttachmentPreview } from "../src/features/chat/AttachmentPreview";
 import { resolveApproval } from "../src/features/chat/Conversation";
 import { MessageContent } from "../src/features/chat/MessageContent";
 import { MessageList } from "../src/features/chat/MessageList";
+import { QueuedMessageBar } from "../src/features/chat/QueuedMessageBar";
 import { ToolRun } from "../src/features/tools/ToolRun";
 
 afterEach(() => {
@@ -125,6 +126,31 @@ describe("AttachmentPreview", () => {
     expect(screen.getByLabelText("附件 notes.txt")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "移除 photo.png" }));
     expect(onRemove).toHaveBeenCalledWith("image");
+  });
+});
+
+describe("QueuedMessageBar", () => {
+  it("edits the complete queued message and keeps the editor open when save fails", async () => {
+    const item = {
+      id: "queue-1", sessionId: "session-1", text: "稍后处理", attachmentIds: ["attachment-old"], status: "queued" as const,
+      idempotencyKey: "queue-key-0001", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z",
+    };
+    const onSave = vi.fn(async () => { throw new Error("保存失败"); });
+    const onAddAttachments = vi.fn(async () => ["attachment-new"]);
+    render(<QueuedMessageBar items={[item]} onSend={vi.fn()} onRemove={vi.fn()} onSave={onSave} onAddAttachments={onAddAttachments} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "更多：稍后处理" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑消息" }));
+    expect(screen.getByLabelText("队列附件 attachment-old")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "移除队列附件 attachment-old" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加队列附件" }));
+    expect(await screen.findByLabelText("队列附件 attachment-new")).toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "编辑队列消息" }), { target: { value: "修改后" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存队列消息" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("保存失败");
+    expect(screen.getByRole("textbox", { name: "编辑队列消息" })).toHaveValue("修改后");
+    expect(onSave).toHaveBeenCalledWith(item, "修改后", ["attachment-new"]);
   });
 });
 

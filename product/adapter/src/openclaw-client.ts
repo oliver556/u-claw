@@ -832,7 +832,12 @@ export class OpenClawClient implements UClawClient {
     if (attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
       throw new AttachmentServiceError("INVALID_ARGUMENT", `单条消息最多发送 ${MAX_ATTACHMENTS_PER_MESSAGE} 个附件。`);
     }
-    const resolvedAttachments = await Promise.all(attachmentIds.map((id) => this.options.attachments!.resolveForSend(id)));
+    const policyLimit = Math.min(
+      this.hello?.policy.maxPayload ?? 64 * 1024,
+      this.hello?.policy.maxBufferedBytes ?? 64 * 1024,
+    );
+    const encodedBudgetPerAttachment = Math.floor(Math.max(0, policyLimit - 1024) / Math.max(1, attachmentIds.length));
+    const resolvedAttachments = await Promise.all(attachmentIds.map((id) => this.options.attachments!.resolveForSend(id, encodedBudgetPerAttachment)));
     const rawAttachmentBytes = resolvedAttachments.reduce((total, attachment) => total + attachment.byteLength, 0);
     const encodedAttachmentLength = resolvedAttachments.reduce((total, attachment) => total + attachment.content.length, 0);
     const hasVideo = resolvedAttachments.some((attachment) => attachment.mimeType.startsWith("video/"));
@@ -926,11 +931,6 @@ export class OpenClawClient implements UClawClient {
         idempotencyKey: input.clientRequestId,
         ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       };
-      const policyLimit = Math.min(
-        this.hello?.policy.maxPayload ?? 64 * 1024,
-        this.hello?.policy.maxBufferedBytes ?? 64 * 1024,
-        Number.POSITIVE_INFINITY,
-      );
       const frameBytes = new TextEncoder().encode(JSON.stringify({
         type: "req", id: "x".repeat(64), method: "chat.send", params: requestParams,
       })).byteLength;

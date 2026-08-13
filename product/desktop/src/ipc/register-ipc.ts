@@ -180,7 +180,7 @@ export function registerIpc({
     "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group",
     "session-organizer.assign-group", "chat.send", "models.select-for-session",
   ]);
-  const attachmentWriteMethods = new Set(["select", "import", "import.begin", "import.chunk", "import.finish", "prepare", "cancel", "remove"]);
+  const attachmentWriteMethods = new Set(["select", "import", "import.begin", "import.chunk", "import.finish", "prepare", "cancel", "remove", "retain", "release"]);
   const channelWriteMethods = new Set([
     "channels.create", "channels.update", "channels.remove", "channels.set-enabled", "channels.test",
     "channels.reconnect", "channels.wechat-login-start", "channels.wechat-login-refresh",
@@ -325,6 +325,14 @@ export function registerIpc({
         }
         if (request.method === "cancel") await attachments.cancel(request.params.attachmentId);
         if (request.method === "remove") await attachments.remove(request.params.attachmentId);
+        if (request.method === "retain") {
+          if (!attachments.retain) throw safeError("UNAVAILABLE", "Attachment references are unavailable.");
+          await attachments.retain(request.params.attachmentId);
+        }
+        if (request.method === "release") {
+          if (!attachments.release) throw safeError("UNAVAILABLE", "Attachment references are unavailable.");
+          await attachments.release(request.params.attachmentId);
+        }
         return result;
       };
       const result = await (attachmentWriteMethods.has(request.method) ? coordinateWrite(invoke) : invoke());

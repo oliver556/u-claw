@@ -590,6 +590,7 @@ export async function startElectronMain(
     dataDir: portablePaths.dataDir,
     referencedAttachmentIds: async () => {
       const referenced = new Set(await chatQueue.referencedAttachmentIds());
+      for (const attachmentId of await attachments.referencedAttachmentIds?.() ?? []) referenced.add(attachmentId);
       for (const attachmentId of await options.referencedAttachmentIds?.() ?? []) referenced.add(attachmentId);
       return referenced;
     },
