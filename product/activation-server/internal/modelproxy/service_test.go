@@ -123,6 +123,19 @@ func TestAuthorizeRecordsBoundedRejectionMetrics(t *testing.T) {
 	}
 }
 
+func TestAdmissionDeniedAuditFailureRecordsFinalizeMetric(t *testing.T) {
+	observer := &fakeObserver{}
+	repo := &fakeRepository{auth: activeAuthorization(), admitErr: ErrAdmissionLimited, auditErr: errors.New("audit")}
+	service, _ := NewService(ServiceOptions{Repository: repo, Digest: func(string) [32]byte { return [32]byte{} }, Envelope: &fakeEnvelope{value: runtimeSecret(t)}, Observer: observer})
+	_, err := service.Authorize(context.Background(), "token", "allowed", "req-123")
+	if !errors.Is(err, ErrAdmissionLimited) {
+		t.Fatalf("err=%v", err)
+	}
+	if strings.Join(observer.finalize, ",") != "audit" {
+		t.Fatalf("finalize=%v", observer.finalize)
+	}
+}
+
 func TestAuthorizeModelAdmissionAndSecretBinding(t *testing.T) {
 	repo := &fakeRepository{auth: activeAuthorization()}
 	secret := runtimeSecret(t)
