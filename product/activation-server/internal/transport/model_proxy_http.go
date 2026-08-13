@@ -61,9 +61,10 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
+	Model     string        `json:"model"`
+	Messages  []chatMessage `json:"messages"`
+	MaxTokens *int          `json:"max_tokens,omitempty"`
+	Stream    bool          `json:"stream"`
 }
 type tokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
@@ -279,7 +280,7 @@ func hasGETBody(w http.ResponseWriter, r *http.Request) (bool, error) {
 	return n > 0, nil
 }
 func validChat(c chatRequest) bool {
-	if !modelNamePattern.MatchString(c.Model) || c.Stream || len(c.Messages) == 0 {
+	if !modelNamePattern.MatchString(c.Model) || c.Stream || len(c.Messages) == 0 || (c.MaxTokens != nil && (*c.MaxTokens < 1 || *c.MaxTokens > 32768)) {
 		return false
 	}
 	for _, m := range c.Messages {

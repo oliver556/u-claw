@@ -2,8 +2,6 @@ import {
   BuiltinModelRequestSchema,
   BuiltinServiceHealthSchema,
   NewApiManagementErrorBodySchema,
-  OpenAIChatCompletionResponseSchema,
-  OpenAIModelsResponseSchema,
   type BuiltinModelRequest,
   type BuiltinModelResponse,
   type BuiltinServiceHealth,
@@ -34,6 +32,51 @@ const FIXED_SERVER_ERRORS = new Map<string, boolean>([
   ["503:unavailable:SERVICE_MAINTENANCE", false],
   ["503:unavailable:SERVICE_UNAVAILABLE", true],
 ]);
+const PROXY_ERRORS = new Map<string, readonly [NewApiErrorCategory, boolean]>([
+  ["400:INVALID_REQUEST", ["validation", false]],
+  ["401:AUTHENTICATION_FAILED", ["authentication", false]],
+  ["403:MODEL_NOT_ALLOWED", ["model-permission", false]],
+  ["404:NOT_FOUND", ["not-found", false]],
+  ["413:REQUEST_TOO_LARGE", ["validation", false]],
+  ["429:RATE_LIMITED", ["rate-limit", true]],
+  ["429:UPSTREAM_RATE_LIMITED", ["rate-limit", true]],
+  ["502:UPSTREAM_AUTHENTICATION_FAILED", ["upstream", false]],
+  ["502:UPSTREAM_UNAVAILABLE", ["upstream", true]],
+  ["503:REQUEST_ID_UNAVAILABLE", ["unavailable", true]],
+  ["503:SERVICE_UNAVAILABLE", ["unavailable", true]],
+]);
+const ProxyErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  requestId: z.string(),
+}).strict();
+const OpenAIChatCompletionSchema = z.object({
+  id: z.string().min(1),
+  object: z.literal("chat.completion"),
+  created: z.number().int().min(0),
+  model: z.string().min(1),
+  choices: z.array(z.object({
+    index: z.number().int().min(0),
+    message: z.object({
+      role: z.literal("assistant"),
+      content: z.string(),
+    }),
+  })).min(1),
+  usage: z.object({
+    prompt_tokens: z.number().int().min(0),
+    completion_tokens: z.number().int().min(0),
+    total_tokens: z.number().int().min(0),
+  }),
+});
+const OpenAIModelsSchema = z.object({
+  object: z.literal("list"),
+  data: z.array(z.object({
+    id: z.string().min(1),
+    object: z.literal("model"),
+    created: z.number().int().min(0),
+    owned_by: z.string().min(1),
+  })),
+});
 
 export interface BuiltinServiceClient {
   execute(
@@ -225,6 +268,13 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
       });
       const payload = await readBoundedJson(response, maxResponseBytes);
       if (!response.ok) {
+        const proxy = ProxyErrorSchema.safeParse(payload);
+        const mappedProxy = proxy.success
+          ? PROXY_ERRORS.get(`${response.status}:${proxy.data.code}`)
+          : undefined;
+        if (proxy.success && mappedProxy) {
+          throw clientError(mappedProxy[0], proxy.data.code, mappedProxy[1]);
+        }
         const parsed = NewApiManagementErrorBodySchema.safeParse(payload);
         const fixedRetryable = parsed.success
           ? FIXED_SERVER_ERRORS.get(`${response.status}:${parsed.data.error.category}:${parsed.data.error.code}`)
@@ -270,7 +320,7 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
     }
     const requestEpoch = circuitEpoch;
     try {
-      const result = await send("v1/chat/completions", OpenAIChatCompletionResponseSchema, credential, {
+      const result = await send("v1/chat/completions", OpenAIChatCompletionSchema, credential, {
         model: credential.model,
         messages: [{ role: "user", content: request.prompt }],
         max_tokens: request.maxOutputTokens,
@@ -312,7 +362,7 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
   };
 
   const health = async (credential: BuiltinModelCredential, signal?: AbortSignal): Promise<BuiltinServiceHealth> => {
-    const models = await send("v1/models", OpenAIModelsResponseSchema, credential, undefined, signal);
+    const models = await send("v1/models", OpenAIModelsSchema, credential, undefined, signal);
     const acceptingBuiltin = models.data.some((model) => model.id === credential.model);
     return BuiltinServiceHealthSchema.parse({
       schemaVersion: 1,
