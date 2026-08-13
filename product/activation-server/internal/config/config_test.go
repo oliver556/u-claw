@@ -311,6 +311,42 @@ func TestLoadFromRequiresIndependentAdminFingerprintSecret(t *testing.T) {
 	}
 }
 
+func TestProductionExamplesUsePublicModelEndpointAndIsolatedGateways(t *testing.T) {
+	environment, err := os.ReadFile(filepath.Join("..", "..", "deploy", "config.example.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(environment), "PUBLIC_MODEL_ENDPOINT=https://license.yiyong.me/model-api/") {
+		t.Fatal("production example does not advertise the public model endpoint")
+	}
+
+	contents, err := os.ReadFile(filepath.Join("..", "..", "deploy", "compose.production.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(contents)
+	for _, required := range []string{
+		"caddy-edge:",
+		"license.yiyong.me",
+		"121.41.89.103",
+		"handle /model-api/*",
+		"handle /v1/*",
+		"handle /health/ready",
+		"handle /internal/*",
+		"handle /metrics",
+		"127.0.0.1:8444:8444",
+		`{"username", body.username, 30}`,
+		`{"usb", body.usbFingerprint.sha256, 30}`,
+	} {
+		if !strings.Contains(compose, required) {
+			t.Errorf("production compose missing %q", required)
+		}
+	}
+	if strings.Contains(compose, `- "443:8443"`) {
+		t.Fatal("OpenResty public gateway must not publish TLS directly")
+	}
+}
+
 func writeSigningKey(t *testing.T, directory string) string {
 	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)

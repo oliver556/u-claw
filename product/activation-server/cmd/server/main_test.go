@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,10 +13,60 @@ import (
 	"time"
 
 	"u-claw-activation-server/internal/config"
+	"u-claw-activation-server/internal/modelproxy"
 	"u-claw-activation-server/internal/observability"
 	"u-claw-activation-server/internal/security"
 	"u-claw-activation-server/internal/transport"
 )
+
+func TestPublicMuxRoutesOnlyModelAPIPrefixToModelProxy(t *testing.T) {
+	activationHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Handler", "activation")
+	})
+	modelHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Handler", "model")
+	})
+	handler := newPublicMux(activationHandler, modelHandler)
+
+	for _, test := range []struct {
+		path string
+		want string
+	}{
+		{path: "/v1/activations", want: "activation"},
+		{path: "/model-api/v1/models", want: "model"},
+		{path: "/model-api/v1/chat/completions", want: "model"},
+		{path: "/model-api", want: "activation"},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path, nil))
+		if got := response.Header().Get("X-Handler"); got != test.want {
+			t.Errorf("path %s routed to %q, want %q", test.path, got, test.want)
+		}
+	}
+}
+
+func TestModelTokenDigestUsesDeviceTokenHMACContract(t *testing.T) {
+	pepper := []byte("01234567890123456789012345678901")
+	digest, err := modelTokenDigest(pepper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha256.New, pepper)
+	_, _ = mac.Write([]byte("uclaw_dt_fixture"))
+	want := mac.Sum(nil)
+	got := digest("uclaw_dt_fixture")
+	if !hmac.Equal(got[:], want) {
+		t.Fatal("model token digest does not match device-token HMAC contract")
+	}
+}
+
+func TestRuntimeEnvelopeAdaptersShareOneEnvelopeService(t *testing.T) {
+	artifact, secretEncryptor := newRuntimeEnvelopes(nil)
+	var _ modelproxy.SecretEnvelope = artifact
+	if secretEncryptor.envelope != artifact {
+		t.Fatal("runtime envelope adapters do not share the activation envelope service")
+	}
+}
 
 func TestApplicationExposesMetricsOnlyOnExplicitRoute(t *testing.T) {
 	metrics := observability.NewMetrics()
@@ -47,6 +99,9 @@ func TestNewHTTPServerUsesSafeLimitsAndInjectedDatabaseCheck(t *testing.T) {
 	}
 	if server.MaxHeaderBytes != maximumHeaderSize || server.MaxHeaderBytes > 1<<20 {
 		t.Fatalf("MaxHeaderBytes = %d, want bounded default", server.MaxHeaderBytes)
+	}
+	if server.WriteTimeout <= 60*time.Second {
+		t.Fatalf("WriteTimeout = %s, must exceed model proxy 60s timeout", server.WriteTimeout)
 	}
 	response := httptest.NewRecorder()
 	server.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/ready", nil))

@@ -53,7 +53,7 @@ type fakeEnvelope struct {
 }
 type blockingEnvelope struct{}
 
-func (blockingEnvelope) Decrypt(ctx context.Context, _ security.SecretBinding, _ []byte) ([]byte, error) {
+func (blockingEnvelope) DecryptSecret(ctx context.Context, _ security.SecretBinding, _ []byte) ([]byte, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
@@ -82,7 +82,7 @@ func (o *fakeObserver) RecordModelProxyFinalizeFailure(operation string) {
 	o.finalize = append(o.finalize, operation)
 }
 
-func (e *fakeEnvelope) Decrypt(_ context.Context, b security.SecretBinding, _ []byte) ([]byte, error) {
+func (e *fakeEnvelope) DecryptSecret(_ context.Context, b security.SecretBinding, _ []byte) ([]byte, error) {
 	e.binding = b
 	return append([]byte(nil), e.value...), e.err
 }
