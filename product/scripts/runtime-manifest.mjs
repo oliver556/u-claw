@@ -52,6 +52,9 @@ export function validateRuntimeManifest(value) {
   if (value.entryArgs.some((argument) => argument.includes("\0"))) {
     throw new Error("entryArgs: NUL is forbidden");
   }
+  if (value.entryArgs.some((argument) => argument.startsWith("--uclaw-startup-mode"))) {
+    throw new Error("entryArgs: startup mode is launcher-owned");
+  }
   return value;
 }
 

@@ -127,6 +127,24 @@ test("rejects unsafe entry arguments", () => {
   );
 });
 
+test("keeps activation mode outside the signed runtime manifest", () => {
+  for (const argument of [
+    "--uclaw-startup-mode",
+    "--uclaw-startup-mode=activation-only",
+    "--uclaw-startup-mode=normal",
+    "--uclaw-startup-mode-shadow",
+  ]) {
+    assert.throws(
+      () => validateRuntimeManifest(validManifest({ entryArgs: ["resources/app.asar", argument] })),
+      /entryArgs.*startup mode/i,
+    );
+  }
+  assert.throws(
+    () => validateRuntimeManifest({ ...validManifest(), activationEntrypoint: "electron/activation.exe" }),
+    /unexpected field/,
+  );
+});
+
 test("signature binds key, lifetime and anti-replay sequence", () => {
   const keys = generateKeyPairSync("ed25519");
   const signed = signRuntimeManifest(validManifest(), {
