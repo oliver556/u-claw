@@ -49,6 +49,33 @@ func TestMigrationScriptUsesDedicatedLeastPrivilegeRoles(t *testing.T) {
 	}
 }
 
+func TestProductionGatewayRateLimitReturnsActivationErrorJSON(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "deploy", "compose.production.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(contents)
+	for _, required := range []string{
+		`ngx.status = 429`,
+		`ngx.header["Content-Type"] = "application/json"`,
+		`ngx.header["Retry-After"] = "60"`,
+		`requestId = "gateway-rate-limit"`,
+		`activationId = cjson.null`,
+		`code = "RATE_LIMIT_EXCEEDED"`,
+		`stage = cjson.null`,
+		`retryable = true`,
+		`supportCode = "RATE-LIMIT"`,
+		`return ngx.exit(429)`,
+	} {
+		if !strings.Contains(compose, required) {
+			t.Errorf("production rate limiter missing activation error contract %q", required)
+		}
+	}
+	if strings.Contains(compose, `if count > item[3] then return ngx.exit(429) end`) {
+		t.Error("production rate limiter returns an empty 429 response")
+	}
+}
+
 func TestBackupRestorePreservesActivationStateAndExcludesPlaintextSecrets(t *testing.T) {
 	databaseURL := os.Getenv("ACTIVATION_TEST_DATABASE_URL")
 	if databaseURL == "" {

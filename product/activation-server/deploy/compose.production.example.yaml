@@ -249,7 +249,20 @@ configs:
               for _, item in ipairs(subjects) do
                 local digest = ngx.encode_base64(ngx.hmac_sha1(secret, item[2]), true)
                 local count = ngx.shared.rate_limit:incr(item[1] .. ":" .. digest .. ":" .. window, 1, 0, 61)
-                if count > item[3] then return ngx.exit(429) end
+                if count > item[3] then
+                  ngx.status = 429
+                  ngx.header["Content-Type"] = "application/json"
+                  ngx.header["Retry-After"] = "60"
+                  ngx.say(cjson.encode({
+                    requestId = "gateway-rate-limit",
+                    activationId = cjson.null,
+                    code = "RATE_LIMIT_EXCEEDED",
+                    stage = cjson.null,
+                    retryable = true,
+                    supportCode = "RATE-LIMIT"
+                  }))
+                  return ngx.exit(429)
+                end
               end
             }
             proxy_http_version 1.1;
