@@ -28,6 +28,8 @@ export * from "./channels/channel-dispatcher.js";
 export * from "./channels/wechat-login-coordinator.js";
 export * from "./channels/wechat-personal-runtime.js";
 export * from "./channels/wechat-qr-renderer.js";
+export * from "./chat-queue/store.js";
+export * from "./chat-queue/dispatcher.js";
 export * from "./providers/provider-dispatcher.js";
 export * from "./providers/provider-network.js";
 export * from "./provisioning/index.js";

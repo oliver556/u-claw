@@ -3,6 +3,7 @@ export const CLIENT_IPC_CHANNEL = "uclaw:client";
 export const CLIENT_IPC_EVENT_CHANNEL = "uclaw:client-event";
 export const WINDOW_MAXIMIZED_EVENT_CHANNEL = "uclaw:window-maximized";
 export const ATTACHMENT_IPC_CHANNEL = "uclaw:attachments";
+export const CHAT_QUEUE_IPC_CHANNEL = "uclaw:chat-queue";
 export const PROVIDER_IPC_CHANNEL = "uclaw:providers";
 export const SKILL_IPC_CHANNEL = "uclaw:skills";
 export const PLUGIN_IPC_CHANNEL = "uclaw:plugins";
@@ -28,6 +29,7 @@ export const IPC_CHANNELS = Object.freeze([
   CLIENT_IPC_EVENT_CHANNEL,
   WINDOW_MAXIMIZED_EVENT_CHANNEL,
   ATTACHMENT_IPC_CHANNEL,
+  CHAT_QUEUE_IPC_CHANNEL,
   PROVIDER_IPC_CHANNEL,
   SKILL_IPC_CHANNEL,
   PLUGIN_IPC_CHANNEL,
