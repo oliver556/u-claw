@@ -162,9 +162,23 @@ describe("builtin service client endpoint and transport policy", () => {
       category: "invalid-response", code: "INVALID_JSON",
     });
 
-    const unknown = createBuiltinServiceClient({ fetch: async () => jsonResponse({ ...responseBody, extra: true }) });
-    await expect(unknown.execute(request, credential())).rejects.toMatchObject({
-      category: "invalid-response", code: "INVALID_RESPONSE_BODY",
+    const extended = createBuiltinServiceClient({ fetch: async () => jsonResponse({
+      ...responseBody,
+      system_fingerprint: "fp_fixture",
+      custom_top: { secret: "ignored-extension" },
+      choices: [{
+        ...responseBody.choices[0],
+        logprobs: { tokens: [] },
+        message: { ...responseBody.choices[0].message, custom: "ignored" },
+      }],
+    }) });
+    await expect(extended.execute(request, credential())).resolves.toEqual({
+      schemaVersion: 1,
+      requestId: request.requestId,
+      output: "world",
+      usage: { inputTokens: 1, outputTokens: 1 },
+      serviceState: "enabled",
+      serviceRevision: 1,
     });
 
     const emptyChoices = createBuiltinServiceClient({ fetch: async () => jsonResponse({ ...responseBody, choices: [] }) });
@@ -260,6 +274,49 @@ describe("builtin service client error classification", () => {
         category: "invalid-response", code: "INVALID_ERROR_BODY",
       });
     }
+  });
+
+  it.each([
+    [400, "INVALID_REQUEST", "validation", false],
+    [401, "AUTHENTICATION_FAILED", "authentication", false],
+    [403, "MODEL_NOT_ALLOWED", "model-permission", false],
+    [404, "NOT_FOUND", "not-found", false],
+    [413, "REQUEST_TOO_LARGE", "validation", false],
+    [429, "RATE_LIMITED", "rate-limit", true],
+    [429, "UPSTREAM_RATE_LIMITED", "rate-limit", true],
+    [502, "UPSTREAM_AUTHENTICATION_FAILED", "upstream", false],
+    [502, "UPSTREAM_UNAVAILABLE", "upstream", true],
+    [503, "REQUEST_ID_UNAVAILABLE", "unavailable", true],
+    [503, "SERVICE_UNAVAILABLE", "unavailable", true],
+  ] as const)("maps flat proxy error %s/%s", async (status, code, category, retryable) => {
+    const secret = "proxy-secret-that-must-not-leak";
+    const client = createBuiltinServiceClient({
+      fetch: async () => jsonResponse({ code, message: secret, requestId: "request-fixture-001" }, status),
+    });
+    const error = await client.execute(request, credential()).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ category, code, retryable, causeDetails: {} });
+    expect(JSON.stringify(error)).not.toContain(secret);
+    expect(JSON.stringify(error)).not.toContain("request-fixture-001");
+  });
+
+  it("accepts model-list extensions without projecting them into health", async () => {
+    const client = createBuiltinServiceClient({ fetch: async () => jsonResponse({
+      object: "list",
+      custom_top: { secret: "ignored-extension" },
+      data: [{
+        id: credential().model,
+        object: "model",
+        created: 1_786_656_000,
+        owned_by: "uclaw",
+        custom: "ignored",
+      }],
+    }) });
+    await expect(client.health(credential())).resolves.toEqual({
+      schemaVersion: 1,
+      acceptingBuiltin: true,
+      state: "enabled",
+      revision: 1,
+    });
   });
 });
 

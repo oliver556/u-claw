@@ -149,6 +149,39 @@ func TestModelProxyHandlerRelaysStrictChatAndSanitizesHeaders(t *testing.T) {
 	}
 }
 
+func TestModelProxyHandlerAcceptsAndForwardsMaxTokens(t *testing.T) {
+	service := &fakeProxyService{grant: validGrant(t)}
+	var upstreamBody string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		upstreamBody = string(body)
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"chatcmpl_fixture","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))}, nil
+	})}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}})
+	req := httptest.NewRequest(http.MethodPost, "/model-api/v1/chat/completions", strings.NewReader(`{"model":"allowed","messages":[{"role":"user","content":"hello"}],"max_tokens":32768,"stream":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(upstreamBody, `"max_tokens":32768`) {
+		t.Fatalf("status=%d upstream=%s body=%s", res.Code, upstreamBody, res.Body.String())
+	}
+
+	for _, maxTokens := range []string{"0", "32769", "1.5"} {
+		req = httptest.NewRequest(http.MethodPost, "/model-api/v1/chat/completions", strings.NewReader(`{"model":"allowed","messages":[{"role":"user","content":"hello"}],"max_tokens":`+maxTokens+`,"stream":false}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer token")
+		res = httptest.NewRecorder()
+		h.ServeHTTP(res, req)
+		if res.Code != http.StatusBadRequest {
+			t.Fatalf("max_tokens=%s status=%d body=%s", maxTokens, res.Code, res.Body.String())
+		}
+	}
+}
+
 func TestModelProxyHandlerRecordsUpstreamOutcome(t *testing.T) {
 	observer := &fakeProxyObserver{}
 	service := &fakeProxyService{grant: validGrant(t)}
