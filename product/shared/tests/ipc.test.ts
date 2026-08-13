@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AttachmentIpcRequestSchema,
   ClientIpcEventSchema,
   ClientIpcRequestSchema,
   ClientIpcSuccessResponseSchema,
@@ -10,6 +11,42 @@ import {
 } from "../src/index.js";
 
 describe("IPC contracts", () => {
+  it("models begin, chunk, and finish attachment import without renderer paths", () => {
+    expect(AttachmentIpcRequestSchema.parse({
+      method: "import.begin",
+      requestId: "attachment-begin",
+      params: { name: "clip.mp4", mediaType: "video/mp4", size: 500 * 1024 * 1024 },
+    })).toBeTruthy();
+    expect(AttachmentIpcRequestSchema.parse({
+      method: "import.chunk",
+      requestId: "attachment-chunk",
+      params: { importId: "import-1", offset: 0, contentBase64: "Y2h1bms=" },
+    })).toBeTruthy();
+    expect(AttachmentIpcRequestSchema.parse({
+      method: "import.finish",
+      requestId: "attachment-finish",
+      params: { importId: "import-1" },
+    })).toBeTruthy();
+    expect(() => AttachmentIpcRequestSchema.parse({
+      method: "import.begin",
+      requestId: "attachment-path",
+      params: { name: "clip.mp4", mediaType: "video/mp4", size: 1, path: "/tmp/clip.mp4" },
+    })).toThrow();
+  });
+
+  it("exposes strict chat queue CRUD and send requests through unified IPC", () => {
+    const requests = [
+      ["chat-queue.list", { sessionId: "session-1" }],
+      ["chat-queue.add", { sessionId: "session-1", text: "next", attachmentIds: ["attachment-1"], modelId: "model-1", skillId: "skill-1", idempotencyKey: "queue:session-1:item-1" }],
+      ["chat-queue.update", { sessionId: "session-1", itemId: "queue-1", text: "updated", attachmentIds: [] }],
+      ["chat-queue.remove", { sessionId: "session-1", itemId: "queue-1" }],
+      ["chat-queue.send", { sessionId: "session-1", itemId: "queue-1" }],
+    ] as const;
+    for (const [method, params] of requests) {
+      expect(IpcRequestSchema.parse({ method, requestId: `request-${method}`, params })).toBeTruthy();
+    }
+  });
+
   it("allows only domain ids for task activity and artifact snapshots", () => {
     expect(ClientIpcRequestSchema.parse({ method: "activity.list", requestId: "req-activity", params: {} })).toBeDefined();
     expect(ClientIpcRequestSchema.parse({ method: "artifacts.list", requestId: "req-artifacts", params: { sessionId: "session-1" } })).toBeDefined();
