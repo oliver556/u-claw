@@ -263,6 +263,7 @@ func TestActivateReturnsSameBoundEnvelopeWithoutSigningAgain(t *testing.T) {
 	}}
 	signer := &fakeSigner{}
 	service := newTestService(t, repository, signer, envelope)
+	service.publicModelEndpoint = "https://new-public.example/model-api/"
 
 	result, err := service.Activate(context.Background(), fixtureInput())
 	if err != nil {
@@ -274,11 +275,59 @@ func TestActivateReturnsSameBoundEnvelopeWithoutSigningAgain(t *testing.T) {
 	if !bytes.Equal(result.Envelope, repository.beginResult.Record.ArtifactEnvelope) || !bytes.Equal(result.Material, boundMaterial) {
 		t.Fatal("bound recovery did not return identical persisted material")
 	}
+	var recovered activationMaterial
+	if err := json.Unmarshal(result.Material, &recovered); err != nil {
+		t.Fatal(err)
+	}
+	if recovered.BuiltinCredential.Endpoint != "https://public.example/model-api/" {
+		t.Fatalf("recovered endpoint=%q", recovered.BuiltinCredential.Endpoint)
+	}
 	if len(repository.recoveryOutcomes) != 1 || repository.recoveryOutcomes[0] != "succeeded" {
 		t.Fatalf("recovery outcomes=%v", repository.recoveryOutcomes)
 	}
 	if len(repository.recoveryRequestIDs) != 1 || repository.recoveryRequestIDs[0] != fixtureInput().RequestID {
 		t.Fatalf("recovery request IDs=%v", repository.recoveryRequestIDs)
+	}
+}
+
+func TestActivateFreshBindingUsesCurrentPublicEndpoint(t *testing.T) {
+	repository := &fakeRepository{}
+	service := newTestService(t, repository, &fakeSigner{}, &fakeEnvelope{})
+	service.publicModelEndpoint = "https://new-public.example/model-api/"
+	result, err := service.Activate(context.Background(), fixtureInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var material activationMaterial
+	if err := json.Unmarshal(result.Material, &material); err != nil {
+		t.Fatal(err)
+	}
+	if material.BuiltinCredential.Endpoint != service.publicModelEndpoint {
+		t.Fatalf("fresh endpoint=%q", material.BuiltinCredential.Endpoint)
+	}
+}
+
+func TestValidBuiltinCredentialRejectsUnsafeRecoveredEndpoint(t *testing.T) {
+	valid := builtinCredentialArtifact{
+		Endpoint:    "https://public.example/model-api/",
+		Model:       "model-a",
+		DeviceToken: "uclaw_dt_" + strings.Repeat("A", 43),
+	}
+	if !validBuiltinCredential(valid) {
+		t.Fatal("valid credential rejected")
+	}
+	for _, endpoint := range []string{
+		"http://public.example/model-api/",
+		"https://user:password@public.example/model-api/",
+		"https://public.example/model-api/?target=other",
+		"https://public.example/model-api/#fragment",
+		"https://public.example/other/",
+	} {
+		credential := valid
+		credential.Endpoint = endpoint
+		if validBuiltinCredential(credential) {
+			t.Fatalf("unsafe endpoint accepted: %q", endpoint)
+		}
 	}
 }
 
