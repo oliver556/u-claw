@@ -45,8 +45,12 @@ describe("activation OpenAPI contract", () => {
 
     expect(validate(credential), JSON.stringify(validate.errors)).toBe(true);
     for (const endpoint of [
+      "https://host.test/v1",
       "HTTPS://host.test/v1",
       "Https://host.test/v1",
+      "https://192.0.2.1/v1",
+      "https://[2001:db8::1]/v1",
+      "https://[2001:db8::1]:8443/model-api/v1",
       "https://127.0.0.1:8443/model-api/",
       "https://host.test/model-api/%3F/%23",
     ]) {
@@ -62,6 +66,16 @@ describe("activation OpenAPI contract", () => {
       "https://license.example.test/model-api/#models",
       "https://host.test/v1?",
       "https://host.test/v1#",
+      "https:///a",
+      " https://host.test/a",
+      "https:\t//host.test/a",
+      "https://host.test/a ",
+      "https://host.test/a\n",
+      String.raw`https:\host.test/a`,
+      String.raw`https:\\host.test/a`,
+      "https://",
+      "https://user@@host.test/a",
+      "https://user%40name@host.test/a",
     ]) {
       expect(validate({ ...credential, endpoint }), `AJV accepted insecure endpoint: ${endpoint}`).toBe(false);
     }
@@ -166,7 +180,11 @@ describe("activation OpenAPI contract", () => {
       schemaVersion: { const: 1 },
       deviceId: { $ref: "#/components/schemas/Identifier" },
       licenseId: { $ref: "#/components/schemas/Identifier" },
-      endpoint: { type: "string", format: "uri", pattern: "^[Hh][Tt][Tt][Pp][Ss]://[^/?#@]+(?:/[^?#]*)?$" },
+      endpoint: {
+        type: "string",
+        format: "uri",
+        pattern: "^[Hh][Tt][Tt][Pp][Ss]://(?:\\[[0-9A-Fa-f:.]+\\]|[^/?#@\\[\\]\\\\\\u0000-\\u0020\\u007F:]+)(?::[0-9]+)?(?:/[^?#@\\\\\\u0000-\\u0020\\u007F]*)?$",
+      },
       model: expect.any(Object),
       deviceToken: { type: "string", pattern: "^uclaw_dt_[A-Za-z0-9_-]{43}$" },
     });
