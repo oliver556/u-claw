@@ -259,7 +259,7 @@ describe("U-Claw application shell", () => {
     expect(screen.getByRole("heading", { name: "数据维护" })).toBeVisible();
   });
 
-  it("keeps live USB, Gateway, and model status visible with Chinese recovery actions", async () => {
+  it("keeps live USB and Gateway status visible without exposing the active model", async () => {
     const status = {
       connectionState: "degraded",
       protocolVersion: 4,
@@ -297,7 +297,7 @@ describe("U-Claw application shell", () => {
 
     expect(await screen.findByText("U 盘只读")).toBeVisible();
     expect(screen.getByText("Gateway 异常")).toBeVisible();
-    expect(screen.getByText("GPT-5")).toBeVisible();
+    expect(screen.queryByText("GPT-5")).not.toBeInTheDocument();
     expect(screen.getByText("U 盘数据目录只读").closest("[role=alert]")).toHaveTextContent("错误码：USB_READ_ONLY");
     fireEvent.click(screen.getByRole("link", { name: "查看诊断" }));
     expect(screen.getByRole("heading", { name: "系统" })).toBeVisible();
@@ -482,38 +482,14 @@ describe("U-Claw application shell", () => {
     expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();
   });
 
-  it("opens and closes global search with keyboard", () => {
+  it("does not mount deferred global search controls or keyboard interaction", () => {
     renderApp();
-    const trigger = screen.getByRole("button", { name: "打开全局搜索" });
-    trigger.focus();
-    fireEvent.click(trigger);
-    const dialog = screen.getByRole("dialog", { name: "全局搜索" });
-    expect(dialog).toBeInTheDocument();
-    screen.getByRole("searchbox", { name: "全局搜索" }).focus();
-    fireEvent.keyDown(dialog, { key: "Escape", keyCode: 27 });
+
+    expect(screen.queryByRole("button", { name: "打开全局搜索" })).not.toBeInTheDocument();
+    expect(screen.queryByText("搜索会话、文件或能力")).not.toBeInTheDocument();
+    expect(screen.queryByText("模型加载中")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(screen.queryByRole("dialog", { name: "全局搜索" })).not.toBeInTheDocument();
-    expect(trigger).toHaveFocus();
-  });
-
-  it("opens global search from Ctrl+K", () => {
-    renderApp();
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(screen.getByRole("dialog", { name: "全局搜索" })).toBeInTheDocument();
-    screen.getByRole("searchbox", { name: "全局搜索" }).focus();
-  });
-
-  it("keeps the original focus target when Ctrl+K repeats inside search", () => {
-    renderApp();
-    const trigger = screen.getByRole("button", { name: "打开全局搜索" });
-    trigger.focus();
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    const dialog = screen.getByRole("dialog", { name: "全局搜索" });
-    screen.getByRole("searchbox", { name: "全局搜索" }).focus();
-
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    fireEvent.keyDown(dialog, { key: "Escape", keyCode: 27 });
-
-    expect(trigger).toHaveFocus();
   });
 
   it("reports unavailable and failed window controls accessibly", async () => {
