@@ -20,6 +20,7 @@ func httpOperators(secret string) adminservice.OperatorRegistry {
 
 type fakeHTTPAdmin struct {
 	mutation   adminservice.Mutation
+	token      adminservice.DeviceTokenMutation
 	auditQuery adminservice.AuditQuery
 }
 
@@ -42,6 +43,13 @@ func (*fakeHTTPAdmin) MarkConfigured(context.Context, adminservice.InventoryLoca
 func (service *fakeHTTPAdmin) Audit(_ context.Context, query adminservice.AuditQuery) (adminservice.AuditPage, error) {
 	service.auditQuery = query
 	return adminservice.AuditPage{Items: []adminservice.AuditEvent{{Action: "license.revoke", Outcome: "succeeded"}}}, nil
+}
+func (*fakeHTTPAdmin) ShowMapping(_ context.Context, inventoryID string) (adminservice.MappingSummary, error) {
+	return adminservice.MappingSummary{InventoryID: inventoryID, BaseURLHost: "api.example.test", DefaultModel: "model-a", AllowedModels: []string{"model-a"}, RequestsPerMinute: 60, ConcurrentRequests: 2, KeyVersion: "kms-v1", Status: "configured"}, nil
+}
+func (service *fakeHTTPAdmin) MutateDeviceToken(_ context.Context, mutation adminservice.DeviceTokenMutation) (adminservice.DeviceTokenResult, error) {
+	service.token = mutation
+	return adminservice.DeviceTokenResult{LicenseID: mutation.LicenseID, Status: string(mutation.Action)}, nil
 }
 
 func TestAdminHTTPRequiresIndependentBearerAndStrictJSON(t *testing.T) {
@@ -122,5 +130,34 @@ func TestAdminHTTPBalanceStatusUsesDesignedPatchRoute(t *testing.T) {
 	handler.ServeHTTP(oldResponse, old)
 	if oldResponse.Code != http.StatusNotFound {
 		t.Fatalf("old route status=%d", oldResponse.Code)
+	}
+}
+
+func TestAdminHTTPShowsRedactedMappingAndControlsDeviceToken(t *testing.T) {
+	service := &fakeHTTPAdmin{}
+	handler := NewAdminHandler(AdminHandlerOptions{Service: service, Operators: httpOperators(strings.Repeat("a", 32))})
+	show := httptest.NewRequest(http.MethodGet, "/internal/v1/new-api-bindings/00000000-0000-4000-8000-000000000001", nil)
+	show.Header.Set("Authorization", "Bearer "+strings.Repeat("a", 32))
+	showResponse := httptest.NewRecorder()
+	handler.ServeHTTP(showResponse, show)
+	if showResponse.Code != http.StatusOK || strings.Contains(showResponse.Body.String(), "apiKey") || strings.Contains(showResponse.Body.String(), "envelope") || !strings.Contains(showResponse.Body.String(), "api.example.test") {
+		t.Fatalf("status=%d body=%s", showResponse.Code, showResponse.Body.String())
+	}
+	licenseID := "00000000-0000-4000-8000-000000000003"
+	body := `{"operatorId":"operator_fixture","requestId":"request_fixture_001","idempotencyKey":"admin-fixture-001","reason":"support","confirmTarget":"` + adminservice.TargetDigest(licenseID) + `"}`
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/device-tokens/"+licenseID+"/disable", bytes.NewBufferString(body))
+	request.Header = show.Header.Clone()
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || service.token.Action != adminservice.DeviceTokenDisable {
+		t.Fatalf("status=%d mutation=%+v body=%s", response.Code, service.token, response.Body.String())
+	}
+	reissue := httptest.NewRequest(http.MethodPost, "/internal/v1/device-tokens/"+licenseID+"/reissue", bytes.NewBufferString(body))
+	reissue.Header = request.Header.Clone()
+	reissueResponse := httptest.NewRecorder()
+	handler.ServeHTTP(reissueResponse, reissue)
+	if reissueResponse.Code != http.StatusNotFound {
+		t.Fatalf("reissue route status=%d", reissueResponse.Code)
 	}
 }

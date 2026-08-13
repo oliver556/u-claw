@@ -152,23 +152,31 @@ type Repository interface {
 	MarkConfigured(context.Context, InventoryLocator, Operation) (InventorySummary, error)
 	PrepareReissueTarget(context.Context, Mutation) (ReissueTarget, error)
 	Audit(context.Context, AuditQuery) ([]AuditEvent, error)
+	SetMapping(context.Context, MappingInput) (MappingSummary, error)
+	ShowMapping(context.Context, string) (MappingSummary, error)
+	MutateDeviceToken(context.Context, DeviceTokenMutation) (DeviceTokenResult, error)
+	PrepareDeviceTokenTarget(context.Context, string) (DeviceTokenResult, error)
 }
 
 type ServiceOptions struct {
-	Repository Repository
-	Pepper     []byte
-	Random     io.Reader
-	Observer   Observer
+	Repository     Repository
+	Pepper         []byte
+	Random         io.Reader
+	Observer       Observer
+	SecretEnvelope SecretEncrypter
+	KeyVersion     string
 }
 
 type Observer interface {
 	RecordLifecycle(action, outcome string)
 }
 type Service struct {
-	repository Repository
-	pepper     []byte
-	random     io.Reader
-	observer   Observer
+	repository     Repository
+	pepper         []byte
+	random         io.Reader
+	observer       Observer
+	secretEnvelope SecretEncrypter
+	keyVersion     string
 }
 
 func NewService(options ServiceOptions) (*Service, error) {
@@ -178,7 +186,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 	if options.Random == nil {
 		options.Random = rand.Reader
 	}
-	return &Service{repository: options.Repository, pepper: append([]byte(nil), options.Pepper...), random: options.Random, observer: options.Observer}, nil
+	return &Service{repository: options.Repository, pepper: append([]byte(nil), options.Pepper...), random: options.Random, observer: options.Observer, secretEnvelope: options.SecretEnvelope, keyVersion: options.KeyVersion}, nil
 }
 
 func (service *Service) Generate(ctx context.Context, input GenerateInput) ([]InventorySummary, error) {

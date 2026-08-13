@@ -17,6 +17,8 @@ type AdminService interface {
 	MutateLicense(context.Context, adminservice.Mutation) (adminservice.MutationResult, error)
 	MarkConfigured(context.Context, adminservice.InventoryLocator, adminservice.Operation) (adminservice.InventorySummary, error)
 	Audit(context.Context, adminservice.AuditQuery) (adminservice.AuditPage, error)
+	ShowMapping(context.Context, string) (adminservice.MappingSummary, error)
+	MutateDeviceToken(context.Context, adminservice.DeviceTokenMutation) (adminservice.DeviceTokenResult, error)
 }
 
 type AdminHandlerOptions struct {
@@ -116,8 +118,42 @@ func NewAdminHandler(options AdminHandlerOptions) http.Handler {
 		handler.mux.HandleFunc("POST /internal/v1/licenses/{id}/"+string(action), handler.mutate(action))
 	}
 	handler.mux.HandleFunc("PATCH /internal/v1/new-api-bindings/{deviceId}/balance-status", handler.markConfigured)
+	handler.mux.HandleFunc("GET /internal/v1/new-api-bindings/{inventoryId}", handler.showMapping)
+	for _, action := range []adminservice.DeviceTokenAction{adminservice.DeviceTokenDisable, adminservice.DeviceTokenEnable, adminservice.DeviceTokenRevoke} {
+		handler.mux.HandleFunc("POST /internal/v1/device-tokens/{licenseId}/"+string(action), handler.mutateDeviceToken(action))
+	}
 	handler.mux.HandleFunc("GET /internal/v1/audit", handler.audit)
 	return handler
+}
+
+func (handler *adminHandler) showMapping(writer http.ResponseWriter, request *http.Request) {
+	result, err := handler.service.ShowMapping(request.Context(), request.PathValue("inventoryId"))
+	if err != nil {
+		handler.writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+func (handler *adminHandler) mutateDeviceToken(action adminservice.DeviceTokenAction) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		var input adminOperationRequest
+		if decodeRequest(writer, request, &input) != nil {
+			handler.writeError(writer, adminservice.ErrInvalidInput)
+			return
+		}
+		operatorID, ok := authenticatedOperator(request, input.OperatorID)
+		if !ok {
+			handler.writeError(writer, adminservice.ErrInvalidInput)
+			return
+		}
+		licenseID := request.PathValue("licenseId")
+		result, err := handler.service.MutateDeviceToken(request.Context(), adminservice.DeviceTokenMutation{Action: action, LicenseID: licenseID, ConfirmTarget: input.ConfirmTarget, Operation: input.operation(operatorID)})
+		if err != nil {
+			handler.writeError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, result)
+	}
 }
 
 func (handler *adminHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {

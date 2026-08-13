@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,19 @@ type fakeRepository struct {
 	target   ReissueTarget
 	audit    []AuditEvent
 	query    AuditQuery
+	mapping  MappingInput
+	token    DeviceTokenMutation
+}
+
+type fakeSecretEnvelope struct {
+	binding   SecretBinding
+	plaintext []byte
+}
+
+func (envelope *fakeSecretEnvelope) Encrypt(_ context.Context, binding SecretBinding, plaintext []byte) ([]byte, error) {
+	envelope.binding = binding
+	envelope.plaintext = append([]byte(nil), plaintext...)
+	return []byte("opaque-envelope"), nil
 }
 
 func (repository *fakeRepository) PrepareReissueTarget(context.Context, Mutation) (ReissueTarget, error) {
@@ -171,5 +185,76 @@ func TestImportNormalizesCodesButDoesNotExposeThem(t *testing.T) {
 	}
 	if strings.Contains(result[0].Username, "0123456789") {
 		t.Fatal("import output leaked activation code")
+	}
+}
+
+func (repository *fakeRepository) SetMapping(_ context.Context, input MappingInput) (MappingSummary, error) {
+	repository.mapping = input
+	u, _ := url.Parse(input.BaseURL)
+	return MappingSummary{InventoryID: input.InventoryID, NewAPIUserID: input.NewAPIUserID, NewAPIUsername: input.NewAPIUsername, BaseURLHost: u.Host, DefaultModel: input.DefaultModel, AllowedModels: input.AllowedModels, RequestsPerMinute: input.RequestsPerMinute, ConcurrentRequests: input.ConcurrentRequests, KeyVersion: input.KeyVersion, Status: "configured"}, nil
+}
+func (repository *fakeRepository) ShowMapping(_ context.Context, inventoryID string) (MappingSummary, error) {
+	return MappingSummary{InventoryID: inventoryID, BaseURLHost: "api.example.test", Status: "configured"}, nil
+}
+func (repository *fakeRepository) MutateDeviceToken(_ context.Context, mutation DeviceTokenMutation) (DeviceTokenResult, error) {
+	repository.token = mutation
+	return DeviceTokenResult{DeviceTokenID: mutation.ReplacementTokenID, InventoryID: "00000000-0000-4000-8000-000000000001", DeviceID: "00000000-0000-4000-8000-000000000002", LicenseID: mutation.LicenseID, Status: string(mutation.Action)}, nil
+}
+func (*fakeRepository) PrepareDeviceTokenTarget(_ context.Context, licenseID string) (DeviceTokenResult, error) {
+	return DeviceTokenResult{InventoryID: "00000000-0000-4000-8000-000000000001", DeviceID: "00000000-0000-4000-8000-000000000002", LicenseID: licenseID, Status: "active"}, nil
+}
+
+func TestSetMappingEncryptsAPIKeyWithInventoryBindingAndReturnsRedactedSummary(t *testing.T) {
+	repository := &fakeRepository{}
+	envelope := &fakeSecretEnvelope{}
+	service, err := NewService(ServiceOptions{Repository: repository, Pepper: bytes.Repeat([]byte{1}, 32), SecretEnvelope: envelope, KeyVersion: "kms-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := []byte("runtime-" + strings.Repeat("s", 32))
+	input := MappingInput{InventoryID: "00000000-0000-4000-8000-000000000001", NewAPIUserID: "usr_fixture_001", NewAPIUsername: "user_fixture_001", BaseURL: "https://api.example.test/v1", DefaultModel: "model-a", AllowedModels: []string{"model-a", "model-b"}, RequestsPerMinute: 60, ConcurrentRequests: 2, APIKey: secret, Operation: operation()}
+	result, err := service.SetMapping(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envelope.binding != (SecretBinding{Purpose: "new-api-key", SubjectID: input.InventoryID, KeyVersion: "kms-v1"}) || !bytes.Equal(envelope.plaintext, secret) {
+		t.Fatalf("binding=%+v", envelope.binding)
+	}
+	if string(repository.mapping.APIKeyEnvelope) != "opaque-envelope" || len(repository.mapping.APIKey) != 0 || repository.mapping.KeyVersion != "kms-v1" {
+		t.Fatalf("stored=%+v", repository.mapping)
+	}
+	encoded := result.InventoryID + result.BaseURLHost + result.Status
+	if strings.Contains(encoded, string(secret)) || result.BaseURLHost != "api.example.test" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestSetMappingRejectsUnsafeEndpointModelsAndLimits(t *testing.T) {
+	service, _ := NewService(ServiceOptions{Repository: &fakeRepository{}, Pepper: bytes.Repeat([]byte{1}, 32), SecretEnvelope: &fakeSecretEnvelope{}, KeyVersion: "kms-v1"})
+	valid := MappingInput{InventoryID: "00000000-0000-4000-8000-000000000001", NewAPIUserID: "usr_fixture_001", NewAPIUsername: "user_fixture_001", BaseURL: "https://api.example.test/v1", DefaultModel: "model-a", AllowedModels: []string{"model-a"}, RequestsPerMinute: 60, ConcurrentRequests: 2, APIKey: []byte("key"), Operation: operation()}
+	mutations := []func(*MappingInput){func(v *MappingInput) { v.BaseURL = "http://api.example.test" }, func(v *MappingInput) { v.BaseURL = "https://user@api.example.test" }, func(v *MappingInput) { v.BaseURL = "https://api.example.test/@unsafe" }, func(v *MappingInput) { v.DefaultModel = "other" }, func(v *MappingInput) { v.AllowedModels = []string{"model-a", "model-a"} }, func(v *MappingInput) { v.RequestsPerMinute = 6001 }, func(v *MappingInput) { v.ConcurrentRequests = 0 }}
+	for _, mutate := range mutations {
+		candidate := valid
+		candidate.AllowedModels = append([]string(nil), valid.AllowedModels...)
+		mutate(&candidate)
+		if _, err := service.SetMapping(context.Background(), candidate); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("accepted=%+v err=%v", candidate, err)
+		}
+	}
+}
+
+func TestDeviceTokenReissueGeneratesOpaqueCredentialAndDigest(t *testing.T) {
+	repository := &fakeRepository{}
+	service, _ := NewService(ServiceOptions{Repository: repository, Pepper: bytes.Repeat([]byte{9}, 32), Random: bytes.NewReader(bytes.Repeat([]byte{5}, 128))})
+	mutation := DeviceTokenMutation{Action: DeviceTokenReissue, LicenseID: "00000000-0000-4000-8000-000000000003", ConfirmTarget: TargetDigest("00000000-0000-4000-8000-000000000003"), Operation: operation()}
+	result, err := service.MutateDeviceToken(context.Background(), mutation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(result.DeviceToken, "uclaw_dt_") || len(result.DeviceToken) != len("uclaw_dt_")+43 || len(repository.token.ReplacementDigest) != 32 || repository.token.ReplacementTokenID == "" {
+		t.Fatalf("result=%+v mutation=%+v", result, repository.token)
+	}
+	if repository.token.DeviceToken != "" {
+		t.Fatal("repository received plaintext token")
 	}
 }
