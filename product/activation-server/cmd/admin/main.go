@@ -51,7 +51,7 @@ func realMain(ctx context.Context, args []string, getenv func(string) string, st
 		return 1
 	}
 	defer pool.Close()
-	if err = persistence.Migrate(ctx, pool); err != nil {
+	if err = persistence.VerifyMigrations(ctx, pool); err != nil {
 		fmt.Fprintln(stderr, "admin migration failed")
 		return 1
 	}
