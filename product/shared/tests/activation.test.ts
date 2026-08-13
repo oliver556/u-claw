@@ -35,16 +35,31 @@ describe("activation API contract", () => {
 			schemaVersion: 1,
 			deviceId: "dev_fixture_001",
 			licenseId: "lic_fixture_001",
-			endpoint: "https://api.u-claw.org/v1",
+			endpoint: "https://license.example.test/model-api/",
 			model: "uclaw-default",
 			deviceToken: `uclaw_dt_${"A".repeat(43)}`,
 		};
 
 		expect(BuiltinCredentialArtifactSchema.parse(credential)).toEqual(credential);
+		expect(BuiltinCredentialArtifactSchema.parse({ ...credential, endpoint: "https://127.0.0.1:8443/model-api/" })).toBeTruthy();
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, accessToken: "legacy-token-material" })).toThrow();
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, expiresAt: "2027-08-13T00:00:00Z" })).toThrow();
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, deviceToken: `uclaw_dt_${"A".repeat(42)}` })).toThrow();
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, deviceToken: `uclaw_dt_${"A".repeat(42)}!` })).toThrow();
+		for (const endpoint of [
+			"http://license.example.test/model-api/",
+			"ftp://license.example.test/model-api/",
+			"file:///model-api/",
+			"javascript:alert(1)",
+			"https://user:password@license.example.test/model-api/",
+			"https://license.example.test/model-api/?region=test",
+			"https://license.example.test/model-api/#models",
+		]) {
+			expect(
+				() => BuiltinCredentialArtifactSchema.parse({ ...credential, endpoint }),
+				`accepted insecure endpoint: ${endpoint}`,
+			).toThrow();
+		}
 	});
 
 	it("keeps admin mutations explicit and redacted", () => {

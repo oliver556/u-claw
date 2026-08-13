@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import AjvModule from "ajv";
 import { describe, expect, it } from "vitest";
+
+const Ajv: any = (AjvModule as any).default ?? AjvModule;
 
 const document = JSON.parse(readFileSync(resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -20,6 +23,41 @@ const document = JSON.parse(readFileSync(resolve(
 const required = (schemaName: string) => document.components.schemas[schemaName]?.required ?? [];
 
 describe("activation OpenAPI contract", () => {
+  it("validates secure builtin credential endpoints with AJV", () => {
+    const ajv = new Ajv({ strict: false, validateFormats: true });
+    ajv.addFormat("uri", (value: string) => {
+      try {
+        return Boolean(new URL(value));
+      } catch {
+        return false;
+      }
+    });
+    ajv.addSchema(document, "openapi");
+    const validate = ajv.compile({ $ref: "openapi#/components/schemas/BuiltinCredential" });
+    const credential = {
+      schemaVersion: 1,
+      deviceId: "dev_fixture_001",
+      licenseId: "lic_fixture_001",
+      endpoint: "https://license.example.test/model-api/",
+      model: "uclaw-default",
+      deviceToken: `uclaw_dt_${"A".repeat(43)}`,
+    };
+
+    expect(validate(credential), JSON.stringify(validate.errors)).toBe(true);
+    expect(validate({ ...credential, endpoint: "https://127.0.0.1:8443/model-api/" }), JSON.stringify(validate.errors)).toBe(true);
+    for (const endpoint of [
+      "http://license.example.test/model-api/",
+      "ftp://license.example.test/model-api/",
+      "file:///model-api/",
+      "javascript:alert(1)",
+      "https://user:password@license.example.test/model-api/",
+      "https://license.example.test/model-api/?region=test",
+      "https://license.example.test/model-api/#models",
+    ]) {
+      expect(validate({ ...credential, endpoint }), `AJV accepted insecure endpoint: ${endpoint}`).toBe(false);
+    }
+  });
+
   it("declares all public activation and lifecycle routes", () => {
     expect(document.openapi).toBe("3.1.0");
     expect(Object.keys(document.paths)).toEqual(expect.arrayContaining([
@@ -119,7 +157,7 @@ describe("activation OpenAPI contract", () => {
       schemaVersion: { const: 1 },
       deviceId: { $ref: "#/components/schemas/Identifier" },
       licenseId: { $ref: "#/components/schemas/Identifier" },
-      endpoint: { type: "string", format: "uri" },
+      endpoint: { type: "string", format: "uri", pattern: "^https://[^/?#@]+(?:/[^?#]*)?$" },
       model: expect.any(Object),
       deviceToken: { type: "string", pattern: "^uclaw_dt_[A-Za-z0-9_-]{43}$" },
     });

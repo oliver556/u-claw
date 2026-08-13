@@ -365,7 +365,7 @@
           "schemaVersion": { "const": 1 },
           "deviceId": { "$ref": "#/components/schemas/Identifier" },
           "licenseId": { "$ref": "#/components/schemas/Identifier" },
-          "endpoint": { "type": "string", "format": "uri" },
+          "endpoint": { "type": "string", "format": "uri", "pattern": "^https://[^/?#@]+(?:/[^?#]*)?$" },
           "model": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
           "deviceToken": { "type": "string", "pattern": "^uclaw_dt_[A-Za-z0-9_-]{43}$" }
         }

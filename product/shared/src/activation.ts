@@ -12,6 +12,23 @@ const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SemverSchema = z.string().regex(/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u);
 
+const isSecureModelEndpoint = (value: string): boolean => {
+  try {
+    const endpoint = new URL(value);
+    return endpoint.protocol === "https:"
+      && endpoint.username === ""
+      && endpoint.password === ""
+      && endpoint.search === ""
+      && endpoint.hash === "";
+  } catch {
+    return false;
+  }
+};
+
+const SecureModelEndpointSchema = z.string().refine(isSecureModelEndpoint, {
+  message: "Model endpoint must be an absolute HTTPS URL without userinfo, query, or fragment.",
+});
+
 export const normalizeActivationCodeInput = (value: string): string => value.replaceAll("-", "").toUpperCase();
 
 export const ActivationCodeSchema = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/u);
@@ -32,7 +49,7 @@ export const BuiltinCredentialArtifactSchema = z.object({
   schemaVersion: z.literal(1),
   deviceId: IdentifierSchema,
   licenseId: IdentifierSchema,
-  endpoint: z.url(),
+  endpoint: SecureModelEndpointSchema,
   model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u),
   deviceToken: z.string().regex(/^uclaw_dt_[A-Za-z0-9_-]{43}$/u),
 }).strict();
