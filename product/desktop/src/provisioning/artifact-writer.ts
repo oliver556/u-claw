@@ -169,7 +169,8 @@ export function createProvisioningArtifactWriter({
   const lockPath = ".uclaw/provisioning.lock";
   const backupPath = ".uclaw/provisioning-artifact-backup.v1.json";
   const lockKey = resolve(dataDir, uclawDir);
-  const safeRoot = createSafeRoot(dataDir, {
+  let safeRoot: ReturnType<typeof createSafeRoot> | undefined;
+  const getSafeRoot = () => safeRoot ??= createSafeRoot(dataDir, {
     symlinks: "reject", hardlinks: "reject", maxBytes: MAX_JSON_BYTES, mkdir: true, mode: 0o600,
   }).catch(() => {
     throw new ProvisioningArtifactError("ARTIFACT_PATH_UNSAFE", "Provisioning artifact root is unsafe.");
@@ -177,7 +178,7 @@ export function createProvisioningArtifactWriter({
 
   const prepare = async (): Promise<void> => {
     try {
-      const fs = await safeRoot;
+      const fs = await getSafeRoot();
       await fs.mkdir(uclawDir);
       await fs.mkdir(licenseDir);
     } catch {
@@ -189,18 +190,18 @@ export function createProvisioningArtifactWriter({
   const isNotFound = (error: unknown): boolean => error instanceof FsSafeError && error.code === "not-found";
   const write = async (path: string, body: string | Buffer, maxBytes = MAX_JSON_BYTES): Promise<void> => {
     if (Buffer.byteLength(body) > maxBytes) throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact is too large.");
-    await (await safeRoot).write(path, body, { mode: 0o600, overwrite: true });
+    await (await getSafeRoot()).write(path, body, { mode: 0o600, overwrite: true });
   };
   const remove = async (path: string): Promise<void> => {
     try {
-      await (await safeRoot).remove(path);
+      await (await getSafeRoot()).remove(path);
     } catch (error) {
       if (!isNotFound(error)) throw error;
     }
   };
   const snapshot = async (path: string): Promise<Buffer | null> => {
     try {
-      return await (await safeRoot).readBytes(path);
+      return await (await getSafeRoot()).readBytes(path);
     } catch (error) {
       if (isNotFound(error)) return null;
       throw error;
@@ -208,7 +209,7 @@ export function createProvisioningArtifactWriter({
   };
   const boundedJson = async (path: string, maxBytes = MAX_JSON_BYTES): Promise<unknown> => {
     try {
-      return JSON.parse(await (await safeRoot).readText(path, { maxBytes })) as unknown;
+      return JSON.parse(await (await getSafeRoot()).readText(path, { maxBytes })) as unknown;
     } catch (error) {
       if (isNotFound(error)) throw error;
       if (error instanceof FsSafeError) throw new ProvisioningArtifactError("ARTIFACT_PATH_UNSAFE", "Provisioning artifact path is unsafe.");
@@ -245,7 +246,7 @@ export function createProvisioningArtifactWriter({
               requestHash: identity.requestHash,
               acquiredAt: new Date().toISOString(),
             };
-            await (await safeRoot).create(lockPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+            await (await getSafeRoot()).create(lockPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
             break;
           } catch (error) {
             if (!(error instanceof FsSafeError) || error.code !== "already-exists") throw error;
