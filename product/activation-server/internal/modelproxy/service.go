@@ -120,7 +120,9 @@ func (s *Service) Authorize(ctx context.Context, bearer, model, requestID string
 			if s.observer != nil {
 				s.observer.RecordModelProxyAdmissionLimited()
 			}
-			_ = s.repository.Audit(ctx, auditOf(auth, requestID, "admission.limited"))
+			if auditErr := s.repository.Audit(ctx, auditOf(auth, requestID, "admission.limited")); auditErr != nil && s.observer != nil {
+				s.observer.RecordModelProxyFinalizeFailure("audit")
+			}
 			return Grant{}, ErrAdmissionLimited
 		}
 		if s.observer != nil {

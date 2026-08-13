@@ -39,7 +39,7 @@ func TestSecureDialRejectsPrivateIPv4IPv6AndMixedAnswers(t *testing.T) {
 	}
 }
 func TestPublicIPRejectsIPv6SpecialPrefixes(t *testing.T) {
-	for _, raw := range []string{"::", "::1", "::ffff:127.0.0.1", "64:ff9b::1", "64:ff9b:1::1", "100::1", "2001::1", "2001:db8::1", "2002::1", "fc00::1", "fe80::1", "ff00::1"} {
+	for _, raw := range []string{"::", "::1", "::ffff:127.0.0.1", "64:ff9b::1", "64:ff9b:1::1", "100::1", "2001::1", "2001:db8::1", "2002::1", "fc00::1", "fec0::1", "fe80::1", "ff00::1"} {
 		if publicIP(net.ParseIP(raw)) {
 			t.Fatalf("accepted %s", raw)
 		}

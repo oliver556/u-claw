@@ -147,7 +147,6 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream, _ := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), body)
 	upstream.Header.Set("Authorization", "Bearer "+string(grant.APIKey))
-	defer upstream.Header.Del("Authorization")
 	upstream.Header.Set("Accept", "application/json")
 	upstream.Header.Set("X-Request-ID", requestID)
 	if route == "chat" {
@@ -155,6 +154,7 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	started := time.Now()
 	response, err := h.client.Do(upstream)
+	upstream.Header.Del("Authorization")
 	if err != nil {
 		h.observe("unavailable", started)
 		writeProxyError(w, 502, "UPSTREAM_UNAVAILABLE", requestID)
