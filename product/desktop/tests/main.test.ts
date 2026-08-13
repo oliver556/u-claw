@@ -10,6 +10,12 @@ import { ACTIVATION_ONLY_CAPABILITIES, assertActivationOnlyCapabilities, bootstr
 import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
+  it("passes explicit startup modes to normal and activation windows", async () => {
+    const source = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+    expect(source).toMatch(/createMainWindow\(\{[\s\S]*?startupMode: "normal"/);
+    expect(source).toMatch(/startActivationMain\([\s\S]*?createMainWindow\(\{[\s\S]*?startupMode: "activation-only"/);
+  });
+
   it("fully verifies activation response binding, secret proof, validity, fingerprint, and signature", () => {
     const keys = generateKeyPairSync("ed25519");
     const fingerprint = "a".repeat(64); const secret = "x".repeat(32); const salt = Buffer.from("b".repeat(32), "hex");
