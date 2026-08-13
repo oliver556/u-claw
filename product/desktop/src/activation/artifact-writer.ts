@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { join, resolve } from "node:path";
 
 import { FsSafeError, root as createSafeRoot } from "@openclaw/fs-safe";
 import { configureFsSafePython, getFsSafePythonConfig } from "@openclaw/fs-safe/config";
@@ -16,17 +17,40 @@ import { createBuiltinCredentialStore } from "../providers/builtin-credential-st
 const MAX_JSON_BYTES = 1024 * 1024;
 const MAX_BACKUP_BYTES = 4 * MAX_JSON_BYTES;
 
-const JournalSchema = z.object({
+const JournalBaseSchema = z.object({
   schemaVersion: z.literal(1),
-  activationId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
   idempotencyKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u),
   generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-  deviceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
-  licenseId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
-  stage: z.enum(["server_bound", "committed"]),
+});
+const IdentifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u);
+const RequestBindingSchema = z.object({
+  username: z.string().trim().min(3).max(128),
+  requestHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  usbFingerprint: z.object({
+    version: z.literal("uclaw-usb-v1"),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  }).strict(),
+  clientVersion: z.string().regex(/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u),
+});
+const RequestedJournalSchema = JournalBaseSchema.extend({
+  stage: z.literal("requested"),
+  activationId: z.null(),
+  deviceId: z.null(),
+  licenseId: z.null(),
+  ...RequestBindingSchema.shape,
 }).strict();
+const BoundJournalSchema = JournalBaseSchema.extend({
+  stage: z.enum(["server_bound", "committed"]),
+  activationId: IdentifierSchema,
+  deviceId: IdentifierSchema,
+  licenseId: IdentifierSchema,
+  ...RequestBindingSchema.shape,
+}).strict();
+const JournalSchema = z.union([RequestedJournalSchema, BoundJournalSchema]);
 
 export type ActivationArtifactJournal = z.infer<typeof JournalSchema>;
+export type ActivationRequestedJournal = z.infer<typeof RequestedJournalSchema>;
+export type ActivationServerBoundJournal = z.infer<typeof BoundJournalSchema>;
 
 interface BackupEntry {
   present: boolean;
@@ -77,7 +101,9 @@ export class ActivationArtifactError extends Error {
 }
 
 export interface ActivationArtifactWriter {
-  writeServerBoundJournal(journal: ActivationArtifactJournal): Promise<void>;
+  preflight(): Promise<void>;
+  writeJournal(journal: ActivationArtifactJournal): Promise<void>;
+  writeServerBoundJournal(journal: ActivationServerBoundJournal): Promise<void>;
   readJournal(): Promise<ActivationArtifactJournal | null>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
@@ -86,6 +112,7 @@ export interface ActivationArtifactWriter {
 }
 
 export interface CreateActivationArtifactWriterOptions {
+  packageRoot: string;
   dataDir: string;
   allowUnpinnedFilesystemForTest?: true;
   platformForTest?: NodeJS.Platform;
@@ -96,10 +123,10 @@ export interface CreateActivationArtifactWriterOptions {
 }
 
 const artifactPaths = [
-  ".uclaw/license/.startup-credential.json",
-  ".uclaw/license/license.json",
-  ".uclaw/activation-builtin-credential.v1.json",
-  ".uclaw/activation-artifact-generation.v1.json",
+  { root: "package", path: "license/.startup-credential.json" },
+  { root: "package", path: "license/license.json" },
+  { root: "data", path: ".uclaw/activation-builtin-credential.v1.json" },
+  { root: "data", path: ".uclaw/activation-artifact-generation.v1.json" },
 ] as const;
 const journalPath = ".uclaw/activation-transaction.v1.json";
 const backupPath = ".uclaw/activation-artifact-backup.v1.json";
@@ -121,6 +148,9 @@ function parseBackup(value: unknown): ArtifactBackup {
 }
 
 export function createActivationArtifactWriter(options: CreateActivationArtifactWriterOptions): ActivationArtifactWriter {
+  if (resolve(options.dataDir) !== join(resolve(options.packageRoot), "data")) {
+    throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Activation data root must be the package data directory.");
+  }
   const platform = options.platformForTest ?? process.platform;
   if (platform === "win32" && options.allowUnpinnedFilesystemForTest !== true) {
     throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Pinned Windows filesystem helper is unavailable.");
@@ -131,7 +161,12 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
       throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Pinned filesystem helper is unavailable.");
     }
   }
-  const safeRoot = createSafeRoot(options.dataDir, {
+  const packageSafeRoot = createSafeRoot(options.packageRoot, {
+    symlinks: "reject", hardlinks: "reject", maxBytes: MAX_JSON_BYTES, mkdir: true, mode: 0o600,
+  }).catch(() => {
+    throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Activation package root is unsafe.");
+  });
+  const dataSafeRoot = createSafeRoot(options.dataDir, {
     symlinks: "reject", hardlinks: "reject", maxBytes: MAX_JSON_BYTES, mkdir: true, mode: 0o600,
   }).catch(() => {
     throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Activation artifact root is unsafe.");
@@ -149,60 +184,89 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
   const isNotFound = (error: unknown): boolean => error instanceof FsSafeError && error.code === "not-found";
   const prepare = async (): Promise<void> => {
     try {
-      const fs = await safeRoot;
-      await fs.mkdir(".uclaw");
-      await fs.mkdir(".uclaw/license");
+      const [packageFs, dataFs] = await Promise.all([packageSafeRoot, dataSafeRoot]);
+      await packageFs.mkdir("license");
+      await dataFs.mkdir(".uclaw");
     } catch {
       throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Activation artifact directory is unsafe.");
     }
   };
-  const write = async (path: string, body: string | Buffer, maxBytes = MAX_JSON_BYTES): Promise<void> => {
+  const rootFor = (kind: "package" | "data") => kind === "package" ? packageSafeRoot : dataSafeRoot;
+  const writeAt = async (kind: "package" | "data", path: string, body: string | Buffer, maxBytes = MAX_JSON_BYTES): Promise<void> => {
     if (Buffer.byteLength(body) > maxBytes) throw new ActivationArtifactError("ARTIFACT_INVALID", "Activation artifact is too large.");
-    await (await safeRoot).write(path, body, { mode: 0o600, overwrite: true });
+    await (await rootFor(kind)).write(path, body, { mode: 0o600, overwrite: true });
   };
-  const remove = async (path: string): Promise<void> => {
+  const write = (path: string, body: string | Buffer, maxBytes = MAX_JSON_BYTES) =>
+    writeAt("data", path, body, maxBytes);
+  const removeAt = async (kind: "package" | "data", path: string): Promise<void> => {
     const removeDirect = async (): Promise<void> => {
       try {
-        await (await safeRoot).remove(path);
+        await (await rootFor(kind)).remove(path);
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
     };
-    if (options.removeForTest) {
+    if (kind === "data" && options.removeForTest) {
       await options.removeForTest(path, removeDirect);
       return;
     }
     await removeDirect();
   };
-  const snapshot = async (path: string): Promise<Buffer | null> => {
+  const remove = (path: string) => removeAt("data", path);
+  const snapshot = async (kind: "package" | "data", path: string): Promise<Buffer | null> => {
     try {
-      return await (await safeRoot).readBytes(path);
+      return await (await rootFor(kind)).readBytes(path);
     } catch (error) {
       if (isNotFound(error)) return null;
       throw error;
     }
   };
   const readJson = async (path: string, maxBytes = MAX_JSON_BYTES): Promise<unknown> =>
-    JSON.parse(await (await safeRoot).readText(path, { maxBytes })) as unknown;
-  const restore = async (path: string, entry: BackupEntry): Promise<void> => {
-    if (!entry.present) await remove(path);
-    else await write(path, Buffer.from(entry.body!, "base64"));
+    JSON.parse(await (await dataSafeRoot).readText(path, { maxBytes })) as unknown;
+  const restore = async (target: (typeof artifactPaths)[number], entry: BackupEntry): Promise<void> => {
+    if (!entry.present) await removeAt(target.root, target.path);
+    else await writeAt(target.root, target.path, Buffer.from(entry.body!, "base64"));
+  };
+
+  const writeJournal = async (value: ActivationArtifactJournal): Promise<void> => {
+    let journal: ActivationArtifactJournal;
+    try {
+      journal = JournalSchema.parse(value);
+    } catch {
+      throw new ActivationArtifactError("JOURNAL_INVALID", "Activation journal is invalid.");
+    }
+    await prepare();
+    try {
+      await write(journalPath, `${JSON.stringify(journal)}\n`);
+    } catch {
+      throw new ActivationArtifactError("ARTIFACT_WRITE_FAILED", "Activation journal could not be written.");
+    }
   };
 
   return {
-    async writeServerBoundJournal(value) {
-      let journal: ActivationArtifactJournal;
+    async preflight() {
+      await prepare();
+      const probe = `.activation-write-probe-${randomBytes(16).toString("hex")}`;
       try {
-        journal = JournalSchema.parse(value);
+        await writeAt("package", `license/${probe}`, "probe\n");
+        await writeAt("data", `.uclaw/${probe}`, "probe\n");
+        await removeAt("package", `license/${probe}`);
+        await removeAt("data", `.uclaw/${probe}`);
+      } catch {
+        try { await removeAt("package", `license/${probe}`); } catch { /* best-effort probe cleanup */ }
+        try { await removeAt("data", `.uclaw/${probe}`); } catch { /* best-effort probe cleanup */ }
+        throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Activation artifact roots are not safely writable.");
+      }
+    },
+    writeJournal,
+    async writeServerBoundJournal(value) {
+      let journal: ActivationServerBoundJournal;
+      try {
+        journal = BoundJournalSchema.parse(value);
       } catch {
         throw new ActivationArtifactError("JOURNAL_INVALID", "Activation journal is invalid.");
       }
-      await prepare();
-      try {
-        await write(journalPath, `${JSON.stringify(journal)}\n`);
-      } catch {
-        throw new ActivationArtifactError("ARTIFACT_WRITE_FAILED", "Activation journal could not be written.");
-      }
+      await writeJournal(journal);
     },
 
     async readJournal() {
@@ -230,7 +294,7 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
       await prepare();
       let previous: Array<Buffer | null>;
       try {
-        previous = await Promise.all(artifactPaths.map(snapshot));
+        previous = await Promise.all(artifactPaths.map((target) => snapshot(target.root, target.path)));
         const backup = {
           schemaVersion: 1 as const,
           activationId: response.activationId,
@@ -256,7 +320,7 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         for (let index = 0; index < artifactPaths.length; index += 1) {
           await options.beforeArtifactWrite?.(index);
           if (index === 2) await provisionActivation(response.builtinCredential);
-          else await write(artifactPaths[index], `${JSON.stringify(bodies[index])}\n`);
+          else await writeAt(artifactPaths[index].root, artifactPaths[index].path, `${JSON.stringify(bodies[index])}\n`);
           await options.afterArtifactWrite?.(index);
         }
       } catch (error) {
@@ -280,13 +344,13 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         } catch (error) {
           if (!isNotFound(error)) throw error;
         }
-        const startupBody = await (await safeRoot).readText(artifactPaths[0]);
-        const licenseBody = await (await safeRoot).readText(artifactPaths[1]);
-        const builtinBody = await (await safeRoot).readText(artifactPaths[2]);
+        const startupBody = await (await packageSafeRoot).readText(artifactPaths[0].path);
+        const licenseBody = await (await packageSafeRoot).readText(artifactPaths[1].path);
+        const builtinBody = await (await dataSafeRoot).readText(artifactPaths[2].path);
         const startup = StartupCredentialArtifactSchema.parse(JSON.parse(startupBody));
         const license = StartupLicenseArtifactSchema.parse(JSON.parse(licenseBody));
         const builtin = BuiltinCredentialArtifactSchema.parse(await loadActivation());
-        const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3]));
+        const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3].path));
         if (manifest.schemaVersion !== 1 || manifest.activationId !== response.activationId
             || manifest.deviceId !== response.deviceId || manifest.licenseId !== response.licenseId
             || manifest.generation !== generation
@@ -324,7 +388,7 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
       }
       await prepare();
       try {
-        await Promise.all(artifactPaths.map((path, index) => restore(path, backup.files[index])));
+        await Promise.all(artifactPaths.map((target, index) => restore(target, backup.files[index])));
         await remove(backupPath);
       } catch {
         throw new ActivationArtifactError("ARTIFACT_WRITE_FAILED", "Activation artifact recovery failed.");
@@ -348,12 +412,12 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         const backup = parseBackup(await readJson(backupPath, MAX_BACKUP_BYTES));
         if (backup.activationId !== activationId || backup.generation !== generation) throw new Error("transaction");
         const responseIds = { activationId, deviceId: journal.deviceId, licenseId: journal.licenseId };
-        const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3]));
+        const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3].path));
         if (manifest.activationId !== responseIds.activationId || manifest.deviceId !== responseIds.deviceId
             || manifest.licenseId !== responseIds.licenseId || manifest.generation !== generation) throw new Error("manifest");
-        const startupBody = await (await safeRoot).readText(artifactPaths[0]);
-        const licenseBody = await (await safeRoot).readText(artifactPaths[1]);
-        const builtinBody = await (await safeRoot).readText(artifactPaths[2]);
+        const startupBody = await (await packageSafeRoot).readText(artifactPaths[0].path);
+        const licenseBody = await (await packageSafeRoot).readText(artifactPaths[1].path);
+        const builtinBody = await (await dataSafeRoot).readText(artifactPaths[2].path);
         StartupCredentialArtifactSchema.parse(JSON.parse(startupBody));
         const startup = StartupCredentialArtifactSchema.parse(JSON.parse(startupBody));
         const license = StartupLicenseArtifactSchema.parse(JSON.parse(licenseBody));

@@ -21,7 +21,8 @@ func TestActivationProcessSpecUsesRestrictedStartupMode(t *testing.T) {
 	manifest.EntryArgs = []string{"resources/app.asar"}
 	lease := processTestLease(root)
 
-	spec := ActivationProcessSpec(paths, manifest, lease)
+	fingerprint := usbFingerprint{Scheme: "uclaw-usb-v1", SHA256: strings.Repeat("a", 64)}
+	spec := ActivationProcessSpec(paths, manifest, lease, fingerprint)
 
 	wantEntrypoint := filepath.Join(root, "electron", "electron.exe")
 	if spec.Path != wantEntrypoint || spec.Dir != filepath.Dir(wantEntrypoint) || spec.Lease != lease {
@@ -41,12 +42,16 @@ func TestActivationProcessSpecUsesRestrictedStartupMode(t *testing.T) {
 		"TMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
 		"UCLAW_CACHE_DIR=" + filepath.Join(paths.HostCacheRoot, "cache"),
 		"UCLAW_DATA_DIR=" + paths.DataDir,
+		"UCLAW_PACKAGE_ROOT=" + paths.PackageRoot,
+		"UCLAW_USB_FINGERPRINT_SCHEME=uclaw-usb-v1",
+		"UCLAW_USB_FINGERPRINT_SHA256=" + strings.Repeat("a", 64),
+		"UCLAW_CLIENT_VERSION=" + manifest.ProductVersion,
 		"UCLAW_RUNTIME_DIR=" + root,
 	}
 	if !reflect.DeepEqual(spec.Env, wantEnv) {
 		t.Fatalf("environment = %v", spec.Env)
 	}
-	if !reflect.DeepEqual(spec.EnvRemovePrefixes, []string{"OPENCLAW_"}) {
+	if !reflect.DeepEqual(spec.EnvRemovePrefixes, []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT"}) {
 		t.Fatalf("environment removal prefixes = %v", spec.EnvRemovePrefixes)
 	}
 }
