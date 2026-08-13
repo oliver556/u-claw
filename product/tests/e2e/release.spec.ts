@@ -3,7 +3,16 @@ import { expect, test } from "@playwright/test";
 async function installReleaseBridge(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     const ok = (request: any, result: any) => ({ method: request.method, requestId: request.requestId, ok: true, result });
-    (window as any).uclaw = { release: { invoke: async (request: any) => {
+    (window as any).uclaw = { client: {
+      subscribe: () => () => undefined,
+      invoke: async (request: any) => {
+        if (request.method === "gateway.negotiate") return ok(request, { protocolVersion: 4, methods: [], events: [], features: {} });
+        if (request.method === "sessions.list") return ok(request, { items: [], nextCursor: null, hasMore: false });
+        if (request.method === "session-organizer.get") return ok(request, { schemaVersion: 1, groups: [], sessions: [] });
+        if (["gateway.watch-status", "subscriptions.cancel"].includes(request.method)) return ok(request, null);
+        throw new Error(`unexpected client method ${request.method}`);
+      },
+    }, release: { invoke: async (request: any) => {
       if (request.method === "release.recovery") return ok(request, { state: "clean", message: "无待恢复更新。" });
       if (request.method === "release.check") return ok(request, { state: "available", checkedAt: "2026-08-09T00:00:00.000Z", currentVersion: "0.1.0", channel: "stable", update: { id: "release-42", version: "0.2.0", channel: "stable", publishedAt: "2026-08-09T00:00:00.000Z", notes: ["安全更新", "恢复流程改进"], compatibility: { platform: "win32", arch: "x64", runtimeId: "openclaw-2026.7.1-2-win-x64" }, bytes: 128, mandatory: false, previewToken: "preview-42" } });
       if (request.method === "uninstall.preview") return ok(request, { previewToken: "uninstall-token", scopes: [
@@ -19,10 +28,14 @@ async function installReleaseBridge(page: import("@playwright/test").Page) {
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test(`release center fits ${viewport.width}px and exposes secure update and uninstall boundaries`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport); await installReleaseBridge(page); await page.goto("/#/system");
-    await page.getByRole("tab", { name: "发布更新" }).click();
+    await expect(page.getByRole("tab", { name: "发布更新" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "外观" })).toBeVisible();
+    for (const label of ["诊断", "设备与运行", "语音与通知", "产品授权", "备份与存储"]) {
+      await expect(page.getByRole("tab", { name: label })).toHaveCount(0);
+    }
     await expect(page.getByText("0.2.0")).toBeVisible(); await expect(page.getByText("win32 · x64")).toBeVisible();
-    await expect(page.getByRole("button", { name: "打开 Doctor" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "打开 CLI 控制台" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "打开 Doctor" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "打开 CLI 控制台" })).toHaveCount(0);
     await page.getByRole("tab", { name: "卸载与清理" }).click(); await expect(page.getByText("默认永久保留")).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
     await page.screenshot({ path: testInfo.outputPath(`release-${viewport.width}.png`), fullPage: true });

@@ -226,40 +226,30 @@ describe("U-Claw application shell", () => {
 
     confirm.mockReturnValue(true);
     fireEvent.click(screen.getByRole("link", { name: "系统" }));
-    expect(await screen.findByRole("heading", { name: "系统" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "发布与恢复" })).toBeVisible();
   });
 
-  it("opens advanced console through fixed window IPC without a URL", async () => {
+  it("does not expose the advanced console from the system route", async () => {
     const invoke = vi.fn(async (request: WindowIpcRequest): Promise<IpcResponse> => ({
       method: request.method, requestId: request.requestId, ok: true, result: null,
     }));
     window.uclaw = { window: { invoke } };
     renderApp();
     fireEvent.click(screen.getByRole("link", { name: "系统" }));
-    fireEvent.click(screen.getByRole("button", { name: "打开高级控制台" }));
 
-    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "open-advanced-console", params: {} }));
-    expect(JSON.stringify(invoke.mock.calls)).not.toContain("url");
+    expect(screen.queryByRole("button", { name: "打开高级控制台" })).not.toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith(expect.objectContaining({ method: "open-advanced-console" }));
   });
 
-  it("keeps diagnostics and data maintenance available from the system route", async () => {
+  it("limits the system route to first-release tools and opens release by default", async () => {
     renderApp();
     fireEvent.click(screen.getByRole("link", { name: "系统" }));
 
-    expect(screen.getByRole("tab", { name: "诊断" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "系统" })).toBeVisible();
-
-    fireEvent.click(screen.getByRole("tab", { name: "设备与运行" }));
-    expect(screen.getByLabelText("设备与运行")).toBeVisible();
-
-    fireEvent.click(screen.getByRole("tab", { name: "语音与通知" }));
-    expect(screen.getByLabelText("语音与通知")).toBeVisible();
-    fireEvent.click(screen.getByRole("tab", { name: "产品授权" }));
-    expect(screen.getByLabelText("产品授权")).toBeVisible();
-
-    fireEvent.click(screen.getByRole("tab", { name: "备份与存储" }));
-    expect(screen.getByRole("tab", { name: "备份与存储" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "数据维护" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "发布更新" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "外观" })).toBeVisible();
+    for (const label of ["诊断", "设备与运行", "语音与通知", "产品授权", "备份与存储"]) {
+      expect(screen.queryByRole("tab", { name: label })).not.toBeInTheDocument();
+    }
   });
 
   it("keeps live USB and Gateway status visible without exposing the active model", async () => {
@@ -303,7 +293,7 @@ describe("U-Claw application shell", () => {
     expect(screen.queryByText("GPT-5")).not.toBeInTheDocument();
     expect(screen.getByText("U 盘数据目录只读").closest("[role=alert]")).toHaveTextContent("错误码：USB_READ_ONLY");
     fireEvent.click(screen.getByRole("link", { name: "查看诊断" }));
-    expect(screen.getByRole("heading", { name: "系统" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "发布与恢复" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "安全退出" }));
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "close", params: {} }));
     expect(reconnect).not.toHaveBeenCalled();
@@ -438,7 +428,7 @@ describe("U-Claw application shell", () => {
     const system = within(menu).getByRole("menuitem", { name: "系统" });
     expect(system).toHaveFocus();
     fireEvent.click(system);
-    expect(screen.getByRole("heading", { name: "系统" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "发布与恢复" })).toBeVisible();
   });
 
   it("closes the narrow More menu with Escape and outside interaction", () => {
