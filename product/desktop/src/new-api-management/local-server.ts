@@ -597,7 +597,7 @@ export async function startLocalNewApiManagementServer(options: StartLocalNewApi
             channelId: input.channelId, policyDigest: input.policyDigest, generation: input.generation,
             status: "provisioning", createdAt, updatedAt: createdAt,
           };
-          const secret = `uclaw_dt_${randomBytes(32).toString("base64url")}`;
+          const secret = `uclaw_dev_${randomBytes(24).toString("base64url")}`;
           tokens.set(token.id, { summary: token, secretHash: createHash("sha256").update(secret).digest("hex") });
           addAudit("token.created", "token", token.id, user.deviceId);
           return { status: 201, value: { token, secret } satisfies NewApiIssuedToken };
