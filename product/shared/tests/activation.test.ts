@@ -42,8 +42,12 @@ describe("activation API contract", () => {
 
 		expect(BuiltinCredentialArtifactSchema.parse(credential)).toEqual(credential);
 		for (const endpoint of [
+			"https://host.test/v1",
 			"HTTPS://host.test/v1",
 			"Https://host.test/v1",
+			"https://192.0.2.1/v1",
+			"https://[2001:db8::1]/v1",
+			"https://[2001:db8::1]:8443/model-api/v1",
 			"https://127.0.0.1:8443/model-api/",
 			"https://host.test/model-api/%3F/%23",
 		]) {
@@ -63,6 +67,16 @@ describe("activation API contract", () => {
 			"https://license.example.test/model-api/#models",
 			"https://host.test/v1?",
 			"https://host.test/v1#",
+			"https:///a",
+			" https://host.test/a",
+			"https:\t//host.test/a",
+			"https://host.test/a ",
+			"https://host.test/a\n",
+			String.raw`https:\host.test/a`,
+			String.raw`https:\\host.test/a`,
+			"https://",
+			"https://user@@host.test/a",
+			"https://user%40name@host.test/a",
 		]) {
 			expect(
 				() => BuiltinCredentialArtifactSchema.parse({ ...credential, endpoint }),
