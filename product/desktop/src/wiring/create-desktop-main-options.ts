@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 import {
-  AttachmentManager,
   AdapterServiceError,
   GatewayWebSocket,
   OpenClawClient,
@@ -15,6 +14,7 @@ import {
   createOpenClawAutomationService,
   createOpenClawTaskArtifactService,
   createOpenClawUsageService,
+  createControlledAttachmentResolver,
   type EventFrame,
   type HelloOk,
   type OpenClawTransport,
@@ -23,6 +23,7 @@ import {
 import { MessageEventSchema, type MessageEvent, type ProviderConfigEntry, type ProviderNetworkSettings, type SendMessageInput } from "@uclaw/shared";
 
 import { createClientDispatcher } from "../ipc/client-dispatcher.js";
+import { createAttachmentCache } from "../attachments/attachment-cache.js";
 import { createWechatPersonalRuntime } from "../channels/wechat-personal-runtime.js";
 import { createOpenClawQrRenderer } from "../channels/wechat-qr-renderer.js";
 import { createOpenClawProviderConfigBackend } from "../providers/openclaw-provider-config.js";
@@ -415,7 +416,8 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   const developmentProvider = readDevelopmentProvider(env);
   const bundledSkillsRoot = await resolveBundledSkillsRoot(env);
   const domains = new ProductionDomainRegistry();
-  const attachments = new AttachmentManager();
+  const attachmentCache = createAttachmentCache({ dataDir: environment.dataRoot });
+  const attachments = createControlledAttachmentResolver({ dataRoot: environment.dataRoot, source: attachmentCache });
   const transport = new PortAwareGatewayTransport(environment.gatewayToken);
   const openClawConfig = createOpenClawProviderConfigBackend({
     request: (method, params) => transport.router.request(method, params as never, z.unknown()),
