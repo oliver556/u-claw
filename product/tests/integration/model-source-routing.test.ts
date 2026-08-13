@@ -11,7 +11,8 @@ import {
   startLocalNewApiManagementServer,
   type LocalNewApiManagementServer,
 } from "../../desktop/src/new-api-management/index.js";
-import { createMainProcessModelRouting, ModelSourceFailure } from "../../desktop/src/providers/model-source-router.js";
+import { BuiltinServiceClientError } from "../../desktop/src/providers/builtin-service-client.js";
+import { createMainProcessModelRouting, createModelSourceRouter, ModelSourceFailure } from "../../desktop/src/providers/model-source-router.js";
 import { createProviderStore } from "../../desktop/src/providers/provider-store.js";
 
 const servers: LocalNewApiManagementServer[] = [];
@@ -87,7 +88,12 @@ describe("typed New API model source routing integration", () => {
     });
     const endpoint = new URL("/v1", server.url).href;
     await routing.credentials.provision({
-      endpoint, model: "builtin-model", mapping, issuedToken: { ...issuedToken, token: activeToken },
+      schemaVersion: 1,
+      endpoint,
+      model: "builtin-model",
+      deviceId: mapping.deviceId,
+      licenseId: mapping.licenseId,
+      deviceToken: `uclaw_dt_${"F".repeat(43)}`,
     });
 
     const loadActive = vi.spyOn(routing.credentials, "loadActive");
@@ -201,18 +207,67 @@ describe("typed New API model source routing integration", () => {
     const providers = createProviderStore({ dataDir });
     const domestic = vi.fn(async (input: SendMessageInput) => externalEvents(input.sessionId, "domestic"));
     const custom = vi.fn(async (input: SendMessageInput) => externalEvents(input.sessionId, "custom"));
-    const routing = createMainProcessModelRouting({
-      dataDir,
-      providers,
-      allowLoopbackHttp: true,
-      executors: { domestic, custom },
-    });
-    await routing.credentials.provision({
-      endpoint: server.dataUrl,
+    // Legacy New API fixture uses its issued token directly. Formal persisted
+    // device credentials are covered by activation-model-proxy.test.ts.
+    const credential = {
+      endpoint: new URL(server.dataUrl),
       model: "builtin-model",
-      mapping,
-      issuedToken: { ...issued, token: activeToken },
+      deviceId: mapping.deviceId,
+      licenseId: mapping.licenseId,
+      deviceToken: issued.secret,
+    };
+    const credentials = {
+      pinnedFilesystem: false,
+      provision: async () => undefined,
+      loadActive: async () => credential,
+      loadForConnectivityCheck: async () => credential,
+      clear: async () => undefined,
+    };
+    const router = createModelSourceRouter({
+      providers,
+      credentials,
+      executors: {
+        domestic,
+        custom,
+        builtin: async (input: SendMessageInput, activeCredential, signal) => {
+          if (signal?.aborted) throw new BuiltinServiceClientError("cancelled", "OPERATION_CANCELLED", "Builtin request was cancelled.", false);
+          const prompt = input.blocks.map((block) => block.type === "text" ? block.text : "").join("\n\n");
+          const modelRequest = {
+            schemaVersion: 1,
+            requestId: `req_${createHash("sha256").update(input.clientRequestId).digest("hex").slice(0, 32)}`,
+            model: activeCredential.model,
+            prompt,
+            maxOutputTokens: 4_096,
+          } as const;
+          const legacyResponse = await fetch(new URL("models/respond", activeCredential.endpoint), {
+            method: "POST",
+            headers: { authorization: `Bearer ${activeCredential.deviceToken}`, "content-type": "application/json" },
+            body: JSON.stringify(modelRequest),
+            signal,
+          });
+          const response = await legacyResponse.json() as {
+            output?: string;
+            error?: { category?: ConstructorParameters<typeof BuiltinServiceClientError>[0]; code?: string; retryable?: boolean };
+          };
+          if (!legacyResponse.ok) {
+            const failure = response.error ?? {};
+            throw new BuiltinServiceClientError(
+              failure.category ?? "invalid-response",
+              failure.code ?? "INVALID_ERROR_BODY",
+              "Legacy builtin fixture rejected request.",
+              failure.retryable ?? false,
+            );
+          }
+          return (async function* (): AsyncIterable<MessageEvent> {
+            const runId = `run_${createHash("sha256").update(input.clientRequestId).digest("hex").slice(0, 32)}`;
+            yield { type: "started", runId, sessionId: input.sessionId };
+            yield { type: "delta", runId, mode: "append", text: response.output ?? "" };
+            yield { type: "final", runId, message: { id: `msg_${runId.slice(4)}`, sessionId: input.sessionId, runId, role: "assistant", status: "completed", blocks: [{ id: `block_${runId.slice(4)}`, type: "text", text: response.output ?? "", format: "markdown" }], createdAt: "2026-08-11T00:00:00.000Z" } };
+          })();
+        },
+      },
     });
+    const routing = { credentials, routeChatSend: router.execute };
     let requestSequence = 0;
     const routeBuiltin = (signal?: AbortSignal) => routing.routeChatSend({
       sessionId: "route_lifecycle_session",

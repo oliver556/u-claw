@@ -54,6 +54,30 @@ test("detects standalone high-confidence provider tokens", () => {
   ]);
 });
 
+test("detects activation, device, bearer, and legacy New API secrets", () => {
+  const deviceToken = ["uclaw", "dt", "A1b2".repeat(11).slice(0, 43)].join("_");
+  const activationCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
+  const startupSecret = ["A1b2C3d4", "E5f6G7h8", "I9j0K1l2", "M3n4O5p6"].join("");
+  const newApiKey = ["new-api-live", "A1b2C3d4E5f6G7h8"].join("-");
+  const source = [
+    `copied=${deviceToken}`,
+    `Authorization: Bearer ${deviceToken}`,
+    `activationCode = "${activationCode}"`,
+    `startupSecret = "${startupSecret}"`,
+    `newApiKey = "${newApiKey}"`,
+    `issuedToken = "${newApiKey}"`,
+  ].join("\n");
+
+  assert.deepEqual(scanText("notes/runtime.txt", source), [
+    { path: "notes/runtime.txt", line: 1, rule: "DEVICE_TOKEN" },
+    { path: "notes/runtime.txt", line: 2, rule: "DEVICE_TOKEN" },
+    { path: "notes/runtime.txt", line: 3, rule: "ACTIVATION_CODE" },
+    { path: "notes/runtime.txt", line: 4, rule: "CREDENTIAL_ASSIGNMENT" },
+    { path: "notes/runtime.txt", line: 5, rule: "CREDENTIAL_ASSIGNMENT" },
+    { path: "notes/runtime.txt", line: 6, rule: "CREDENTIAL_ASSIGNMENT" },
+  ]);
+});
+
 test("detects modern GitHub fine-grained access tokens", () => {
   const body = "11AA22bb33CC44dd55EE66ff77GG88hh99II00jj".repeat(3).slice(0, 82);
   const token = ["github", "pat", body].join("_");
