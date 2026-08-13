@@ -404,9 +404,17 @@ func TestProductionGatewayStartupAndReadinessAreExecutable(t *testing.T) {
 		}
 	}
 	publicService := composeSection(t, compose, "  public-gateway:\n", "\n  # Caddy obtains")
-	for _, required := range []string{"condition: service_healthy", `test: ["CMD-SHELL", "openresty -t && kill -0 1"]`} {
+	for _, required := range []string{"condition: service_healthy", `test: ["CMD", "/bin/busybox", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8082/health/ready"]`} {
 		if !strings.Contains(publicService, required) {
 			t.Errorf("public gateway readiness missing %q", required)
+		}
+	}
+	if strings.Contains(publicService, "kill -0 1") {
+		t.Fatal("public gateway healthcheck only probes process liveness")
+	}
+	for _, required := range []string{"listen 127.0.0.1:8082;", "location = /health/ready", "proxy_pass http://activation_public/health/ready;", "proxy_connect_timeout 2s;", "proxy_read_timeout 3s;"} {
+		if !strings.Contains(publicConfig, required) {
+			t.Errorf("public gateway loopback readiness listener missing %q", required)
 		}
 	}
 	caddyService := composeSection(t, compose, "  caddy-edge:\n", "\n  # Loopback binding")
