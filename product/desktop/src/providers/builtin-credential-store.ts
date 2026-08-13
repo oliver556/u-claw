@@ -2,13 +2,16 @@ import { FsSafeError, root as createSafeRoot } from "@openclaw/fs-safe";
 import { configureFsSafePython, getFsSafePythonConfig } from "@openclaw/fs-safe/config";
 
 import {
+  BuiltinCredentialArtifactSchema,
   NewApiDeviceMappingSchema,
   NewApiIssuedTokenSchema,
+  type BuiltinCredentialArtifact,
   type NewApiDeviceMapping,
   type NewApiIssuedToken,
 } from "@uclaw/shared";
 
 const FILE_NAME = "builtin-model-credential.v1.json";
+const ACTIVATION_FILE_NAME = "activation-builtin-credential.v1.json";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 export type BuiltinCredentialErrorCode =
@@ -45,6 +48,8 @@ export interface BuiltinCredentialStore {
   provision(input: BuiltinCredentialProvisioningInput): Promise<void>;
   loadActive(): Promise<BuiltinModelCredential>;
   loadForConnectivityCheck(): Promise<BuiltinModelCredential>;
+  provisionActivation?(input: BuiltinCredentialArtifact): Promise<void>;
+  loadActivation?(): Promise<BuiltinCredentialArtifact>;
   clear(): Promise<void>;
 }
 
@@ -148,6 +153,7 @@ export function createBuiltinCredentialStore({
     }
   }
   const path = `.uclaw/${FILE_NAME}`;
+  const activationPath = `.uclaw/${ACTIVATION_FILE_NAME}`;
   let safeRoot: ReturnType<typeof createSafeRoot> | undefined;
   const getSafeRoot = (): ReturnType<typeof createSafeRoot> => {
     safeRoot ??= createSafeRoot(dataDir, {
@@ -190,6 +196,24 @@ export function createBuiltinCredentialStore({
     },
     loadActive: () => load("active"),
     loadForConnectivityCheck: () => load(),
+    async provisionActivation(input) {
+      const credential = BuiltinCredentialArtifactSchema.parse(input);
+      try {
+        await (await getSafeRoot()).write(activationPath, `${JSON.stringify(credential)}\n`, { mode: 0o600, overwrite: true });
+      } catch {
+        throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin activation credential could not be written safely.");
+      }
+    },
+    async loadActivation() {
+      try {
+        return BuiltinCredentialArtifactSchema.parse(JSON.parse(await (await getSafeRoot()).readText(activationPath)) as unknown);
+      } catch (error) {
+        if (error instanceof FsSafeError && ["symlink", "hardlink", "path-mismatch"].includes(error.code)) {
+          throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential target is unsafe.");
+        }
+        throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin activation credential is invalid.");
+      }
+    },
     async clear() {
       try {
         await (await getSafeRoot()).remove(path);
