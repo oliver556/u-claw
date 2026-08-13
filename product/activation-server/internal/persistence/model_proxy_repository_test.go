@@ -48,6 +48,11 @@ func TestModelProxyRepositoryPostgreSQLAuthorizationAdmissionAndAudit(t *testing
 		t.Fatal(err)
 	}
 	defer pool.Close()
+	pool2, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool2.Close()
 	if err = Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +71,7 @@ func TestModelProxyRepositoryPostgreSQLAuthorizationAdmissionAndAudit(t *testing
 		}
 	}
 	r1, _ := NewModelProxyRepository(pool)
-	r2, _ := NewModelProxyRepository(pool)
+	r2, _ := NewModelProxyRepository(pool2)
 	auth, err := r1.AuthorizeByDigest(ctx, digest)
 	if err != nil || auth.TokenID != ids[3] || auth.BaseURL == "" {
 		t.Fatalf("auth=%+v err=%v", auth, err)
@@ -104,6 +109,25 @@ func TestModelProxyRepositoryPostgreSQLAuthorizationAdmissionAndAudit(t *testing
 	}
 	if err = r2.Admit(ctx, ids[3], "60000000-0000-4000-8000-000000000003", 60, 1); err != nil {
 		t.Fatal(err)
+	}
+	if err = r2.Complete(ctx, "60000000-0000-4000-8000-000000000003"); err != nil {
+		t.Fatal(err)
+	}
+	if err = r1.Admit(ctx, ids[3], "60000000-0000-4000-8000-000000000004", 2, 10); !errors.Is(err, modelproxy.ErrAdmissionLimited) {
+		t.Fatalf("completed requests did not count toward RPM: %v", err)
+	}
+	if _, err = pool.Exec(ctx, `DELETE FROM model_proxy_admissions WHERE device_token_id=$1`, ids[3]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO model_proxy_admissions(request_id,device_token_id,started_at,lease_expires_at) VALUES('60000000-0000-4000-8000-000000000005',$1,clock_timestamp()-interval '2 minutes',clock_timestamp()-interval '1 minute')`, ids[3]); err != nil {
+		t.Fatal(err)
+	}
+	if err = r2.Admit(ctx, ids[3], "60000000-0000-4000-8000-000000000006", 1, 1); err != nil {
+		t.Fatalf("expired lease blocked admission: %v", err)
+	}
+	var expired int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM model_proxy_admissions WHERE request_id='60000000-0000-4000-8000-000000000005'`).Scan(&expired); err != nil || expired != 0 {
+		t.Fatalf("expired=%d err=%v", expired, err)
 	}
 	if err = r1.Audit(ctx, modelproxy.Audit{RequestID: "req-pg-test", TokenID: ids[3], InventoryID: ids[0], DeviceID: ids[1], LicenseID: ids[2], Route: "chat", Outcome: "succeeded", Status: 200}); err != nil {
 		t.Fatal(err)

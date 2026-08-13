@@ -156,3 +156,23 @@ func TestAuthorizeMapsLookupAndDecryptFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthorizeUsesSharedAPIKeyBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		key  []byte
+		ok   bool
+	}{{"min", bytes.Repeat([]byte{'k'}, 16), true}, {"max", bytes.Repeat([]byte{'k'}, 16<<10), true}, {"surrounding whitespace", append(append([]byte("  "), bytes.Repeat([]byte{'k'}, 16)...), ' ', ' '), true}, {"short", bytes.Repeat([]byte{'k'}, 15), false}, {"long", bytes.Repeat([]byte{'k'}, (16<<10)+1), false}, {"space", bytes.Repeat([]byte{' '}, 16), false}} {
+		t.Run(test.name, func(t *testing.T) {
+			service, _ := NewService(ServiceOptions{Repository: &fakeRepository{auth: activeAuthorization()}, Digest: func(string) [32]byte { return [32]byte{} }, Envelope: &fakeEnvelope{value: test.key}})
+			grant, err := service.Authorize(context.Background(), "token", "allowed", "req-123")
+			if test.ok && err != nil {
+				t.Fatal(err)
+			}
+			if !test.ok && !errors.Is(err, ErrServiceUnavailable) {
+				t.Fatalf("err=%v", err)
+			}
+			grant.Clear()
+		})
+	}
+}

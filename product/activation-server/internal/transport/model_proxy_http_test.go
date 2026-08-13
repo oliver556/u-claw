@@ -108,6 +108,60 @@ func TestModelProxyHandlerFiltersModelsToAuthorization(t *testing.T) {
 	}
 }
 
+func TestModelProxyHandlerAllowsAndPreservesUpstreamExtensions(t *testing.T) {
+	cases := []struct{ route, body string }{
+		{"/model-api/v1/chat/completions", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","system_fingerprint":"fp_x","choices":[{"index":0,"message":{"role":"assistant","content":"ok","custom":"yes"},"finish_reason":"stop","logprobs":{"tokens":[]}}],"custom_top":{"x":1}}`},
+		{"/model-api/v1/models", `{"object":"list","custom_top":true,"data":[{"id":"allowed","object":"model","created":1,"owned_by":"owner","custom":"kept"}]}`},
+	}
+	for _, test := range cases {
+		service := &fakeProxyService{grant: validGrant(t)}
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(test.body))}, nil
+		})}
+		h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}})
+		method := http.MethodGet
+		var body io.Reader
+		if strings.Contains(test.route, "chat") {
+			method = http.MethodPost
+			body = strings.NewReader(`{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`)
+		}
+		request := httptest.NewRequest(method, test.route, body)
+		request.Header.Set("Authorization", "Bearer token")
+		if body != nil {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, request)
+		if response.Code != 200 || !strings.Contains(response.Body.String(), "custom") {
+			t.Fatalf("route=%s status=%d body=%s", test.route, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestModelProxyHandlerAuthenticatesBeforeReadingBody(t *testing.T) {
+	for _, body := range []string{"{", strings.Repeat("x", (1<<20)+1)} {
+		service := &fakeProxyService{grant: validGrant(t)}
+		h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: &http.Client{}})
+		request := httptest.NewRequest(http.MethodPost, "/model-api/v1/chat/completions", strings.NewReader(body))
+		request.Header["Authorization"] = []string{"Bearer one", "Bearer two"}
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, request)
+		if response.Code != 401 || service.bearer != "" {
+			t.Fatalf("status=%d bearer=%q body=%s", response.Code, service.bearer, response.Body.String())
+		}
+	}
+}
+
+func TestUpstreamMinimalValidationRejectsMissingAndWrongTypes(t *testing.T) {
+	tests := []struct{ route, body string }{{"models", `{"object":"list"}`}, {"models", `{"object":"list","data":[{"id":3,"object":"model","created":1,"owned_by":"owner"}]}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[]}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":[]}}]}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":"1","completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{}}`}}
+	for _, test := range tests {
+		if validUpstreamJSON(test.route, []byte(test.body)) {
+			t.Fatalf("accepted route=%s body=%s", test.route, test.body)
+		}
+	}
+}
+
 type fakeProxyObserver struct{ outcomes []string }
 
 func (*fakeProxyObserver) RecordModelProxyAuthRejected()     {}
