@@ -126,7 +126,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "openresty -t && kill -0 1"]
+      test: ["CMD", "/bin/busybox", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8082/health/ready"]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -287,6 +287,16 @@ configs:
           server activation-1:8080;
           server activation-2:8080;
           keepalive 64;
+        }
+        server {
+          listen 127.0.0.1:8082;
+          server_tokens off;
+          location = /health/ready {
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 3s;
+            proxy_pass http://activation_public/health/ready;
+          }
+          location / { return 404; }
         }
         server {
           listen 8443 ssl;
