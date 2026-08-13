@@ -5,9 +5,9 @@ import (
 	"crypto/rand"
 	"errors"
 	"io"
-	"strings"
 	"time"
 
+	"u-claw-activation-server/internal/apikey"
 	"u-claw-activation-server/internal/security"
 )
 
@@ -117,7 +117,7 @@ func (s *Service) Authorize(ctx context.Context, bearer, model, requestID string
 		return Grant{}, ErrServiceUnavailable
 	}
 	plaintext, err := s.envelope.Decrypt(ctx, security.SecretBinding{Purpose: "new-api-key", SubjectID: auth.InventoryID, KeyVersion: auth.KeyVersion}, auth.Envelope)
-	if err != nil || len(plaintext) == 0 || len(plaintext) > 8192 || strings.TrimSpace(string(plaintext)) != string(plaintext) {
+	if err != nil || !apikey.Valid(plaintext) {
 		clear(plaintext)
 		_ = s.repository.Complete(ctx, requestID)
 		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "secret.unavailable", 503))

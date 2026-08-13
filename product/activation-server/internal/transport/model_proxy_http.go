@@ -62,45 +62,36 @@ type chatRequest struct {
 	Messages []chatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
 }
-type modelResponse struct {
-	Object string `json:"object"`
-	Data   []struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int64  `json:"created"`
-		OwnedBy string `json:"owned_by"`
-	} `json:"data"`
-}
-type chatResponse struct {
-	ID, Object string
-	Created    int64  `json:"created"`
-	Model      string `json:"model"`
-	Choices    []struct {
-		Index        int         `json:"index"`
-		Message      chatMessage `json:"message"`
-		FinishReason string      `json:"finish_reason"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+type tokenUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestID := h.requestID()
 	w.Header().Set("X-Request-ID", requestID)
 	route := ""
-	var chat chatRequest
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/model-api/v1/models":
 		route = "models"
-		if r.Body != nil && r.ContentLength != 0 {
-			writeProxyError(w, 400, "INVALID_REQUEST", requestID)
-			return
-		}
 	case r.Method == http.MethodPost && r.URL.Path == "/model-api/v1/chat/completions":
 		route = "chat"
+	default:
+		writeProxyError(w, 404, "NOT_FOUND", requestID)
+		return
+	}
+	bearer, ok := strictBearer(r.Header.Values("Authorization"))
+	if !ok {
+		writeProxyError(w, 401, "AUTHENTICATION_FAILED", requestID)
+		return
+	}
+	var chat chatRequest
+	if route == "models" && r.Body != nil && r.ContentLength != 0 {
+		writeProxyError(w, 400, "INVALID_REQUEST", requestID)
+		return
+	}
+	if route == "chat" {
 		if err := decodeModelRequest(w, r, &chat); err != nil {
 			status := 400
 			if errors.Is(err, errBodyTooLarge) {
@@ -113,14 +104,6 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeProxyError(w, 400, "INVALID_REQUEST", requestID)
 			return
 		}
-	default:
-		writeProxyError(w, 404, "NOT_FOUND", requestID)
-		return
-	}
-	bearer, ok := strictBearer(r.Header.Values("Authorization"))
-	if !ok {
-		writeProxyError(w, 401, "AUTHENTICATION_FAILED", requestID)
-		return
 	}
 	if h.service == nil || h.client == nil {
 		writeProxyError(w, 503, "SERVICE_UNAVAILABLE", requestID)
@@ -195,9 +178,13 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var usage *modelproxy.Usage
 	if route == "chat" {
-		var c chatResponse
-		_ = json.Unmarshal(content, &c)
-		usage = &modelproxy.Usage{PromptTokens: c.Usage.PromptTokens, CompletionTokens: c.Usage.CompletionTokens, TotalTokens: c.Usage.TotalTokens}
+		var response struct {
+			Usage *tokenUsage `json:"usage"`
+		}
+		_ = json.Unmarshal(content, &response)
+		if response.Usage != nil {
+			usage = &modelproxy.Usage{PromptTokens: response.Usage.PromptTokens, CompletionTokens: response.Usage.CompletionTokens, TotalTokens: response.Usage.TotalTokens}
+		}
 	}
 	h.service.Complete(r.Context(), grant, route, "succeeded", response.StatusCode, usage)
 	h.observe("success", started)
@@ -299,48 +286,73 @@ func readBounded(r io.Reader, limit int64) ([]byte, error) {
 	return b, nil
 }
 func validUpstreamJSON(route string, b []byte) bool {
-	decoder := json.NewDecoder(bytes.NewReader(b))
-	decoder.DisallowUnknownFields()
+	var top map[string]json.RawMessage
+	if json.Unmarshal(b, &top) != nil {
+		return false
+	}
 	if route == "models" {
-		var v modelResponse
-		if decoder.Decode(&v) != nil || decoder.Decode(&struct{}{}) != io.EOF || v.Object != "list" {
+		var object string
+		var data []map[string]json.RawMessage
+		if json.Unmarshal(top["object"], &object) != nil || object != "list" || json.Unmarshal(top["data"], &data) != nil {
 			return false
 		}
-		for _, m := range v.Data {
-			if m.ID == "" || m.Object != "model" || m.OwnedBy == "" || m.Created < 0 {
+		for _, m := range data {
+			var id, obj, owner string
+			var created int64
+			if json.Unmarshal(m["id"], &id) != nil || id == "" || json.Unmarshal(m["object"], &obj) != nil || obj != "model" || json.Unmarshal(m["owned_by"], &owner) != nil || owner == "" || json.Unmarshal(m["created"], &created) != nil || created < 0 {
 				return false
 			}
 		}
 		return true
 	}
-	var v chatResponse
-	if decoder.Decode(&v) != nil || decoder.Decode(&struct{}{}) != io.EOF || v.ID == "" || v.Object != "chat.completion" || v.Model == "" || v.Created < 0 {
+	var id, obj, model string
+	var created int64
+	var choices []map[string]json.RawMessage
+	if json.Unmarshal(top["id"], &id) != nil || id == "" || json.Unmarshal(top["object"], &obj) != nil || obj != "chat.completion" || json.Unmarshal(top["model"], &model) != nil || model == "" || json.Unmarshal(top["created"], &created) != nil || created < 0 || json.Unmarshal(top["choices"], &choices) != nil || len(choices) == 0 {
 		return false
 	}
-	for _, c := range v.Choices {
-		if c.Index < 0 || c.Message.Role != "assistant" || (c.FinishReason != "stop" && c.FinishReason != "length" && c.FinishReason != "content_filter") {
+	for _, choice := range choices {
+		var index int
+		var message map[string]json.RawMessage
+		if json.Unmarshal(choice["index"], &index) != nil || index < 0 || json.Unmarshal(choice["message"], &message) != nil {
+			return false
+		}
+		var role, content string
+		if json.Unmarshal(message["role"], &role) != nil || role != "assistant" || json.Unmarshal(message["content"], &content) != nil {
 			return false
 		}
 	}
-	return v.Usage.PromptTokens >= 0 && v.Usage.CompletionTokens >= 0 && v.Usage.TotalTokens >= 0
+	if raw, ok := top["usage"]; ok {
+		var fields map[string]json.RawMessage
+		var usage tokenUsage
+		if json.Unmarshal(raw, &fields) != nil || json.Unmarshal(fields["prompt_tokens"], &usage.PromptTokens) != nil || json.Unmarshal(fields["completion_tokens"], &usage.CompletionTokens) != nil || json.Unmarshal(fields["total_tokens"], &usage.TotalTokens) != nil || usage.PromptTokens < 0 || usage.CompletionTokens < 0 || usage.TotalTokens < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func filterModels(content []byte, allowed []string) []byte {
-	var response modelResponse
-	if json.Unmarshal(content, &response) != nil {
+	var response map[string]json.RawMessage
+	var models []json.RawMessage
+	if json.Unmarshal(content, &response) != nil || json.Unmarshal(response["data"], &models) != nil {
 		return content
 	}
 	set := make(map[string]struct{}, len(allowed))
 	for _, model := range allowed {
 		set[model] = struct{}{}
 	}
-	filtered := response.Data[:0]
-	for _, model := range response.Data {
-		if _, ok := set[model.ID]; ok {
-			filtered = append(filtered, model)
+	filtered := models[:0]
+	for _, model := range models {
+		var item map[string]json.RawMessage
+		var id string
+		if json.Unmarshal(model, &item) == nil && json.Unmarshal(item["id"], &id) == nil {
+			if _, ok := set[id]; ok {
+				filtered = append(filtered, model)
+			}
 		}
 	}
-	response.Data = filtered
+	response["data"], _ = json.Marshal(filtered)
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return content

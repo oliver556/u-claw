@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"u-claw-activation-server/internal/apikey"
 	"u-claw-activation-server/internal/security"
 )
 
@@ -162,7 +163,7 @@ func validDeviceTokenAction(a DeviceTokenAction) bool {
 	return a == DeviceTokenDisable || a == DeviceTokenEnable || a == DeviceTokenRevoke || a == DeviceTokenReissue
 }
 func (s *Service) validMapping(v MappingInput) bool {
-	if len(s.secretFingerprintKey) < 32 || len(s.allowedNewAPIHosts) == 0 || !uuidPattern.MatchString(v.InventoryID) || !identifierPattern.MatchString(v.NewAPIUserID) || !identifierPattern.MatchString(v.NewAPIUsername) || len(v.APIKey) < 16 || len(v.APIKey) > 16<<10 || strings.TrimSpace(string(v.APIKey)) == "" || v.RequestsPerMinute < 1 || v.RequestsPerMinute > 6000 || v.ConcurrentRequests < 1 || v.ConcurrentRequests > 100 || validateOperation(v.Operation, true) != nil {
+	if len(s.secretFingerprintKey) < 32 || len(s.allowedNewAPIHosts) == 0 || !uuidPattern.MatchString(v.InventoryID) || !identifierPattern.MatchString(v.NewAPIUserID) || !identifierPattern.MatchString(v.NewAPIUsername) || !apikey.Valid(v.APIKey) || v.RequestsPerMinute < 1 || v.RequestsPerMinute > 6000 || v.ConcurrentRequests < 1 || v.ConcurrentRequests > 100 || validateOperation(v.Operation, true) != nil {
 		return false
 	}
 	u, err := url.Parse(v.BaseURL)
