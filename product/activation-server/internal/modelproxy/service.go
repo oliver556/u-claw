@@ -31,15 +31,13 @@ type Authorization struct {
 
 type Audit struct {
 	RequestID, TokenID, InventoryID, DeviceID, LicenseID, Route, Outcome string
-	Status                                                               int
-	Usage                                                                *Usage
 }
 
 type Usage struct{ PromptTokens, CompletionTokens, TotalTokens int }
 
 type Repository interface {
 	AuthorizeByDigest(context.Context, [32]byte) (Authorization, error)
-	Admit(context.Context, string, string, int, int) error
+	Admit(context.Context, string, string, int, int, time.Duration) error
 	Complete(context.Context, string) error
 	Audit(context.Context, Audit) error
 }
@@ -57,6 +55,7 @@ type Observer interface {
 	RecordModelProxyAuthRejected()
 	RecordModelProxyAdmissionLimited()
 	RecordModelProxyUpstream(string, time.Duration)
+	RecordModelProxyFinalizeFailure(string)
 }
 type Service struct {
 	repository Repository
@@ -99,39 +98,59 @@ func (s *Service) Authorize(ctx context.Context, bearer, model, requestID string
 		if s.observer != nil {
 			s.observer.RecordModelProxyAuthRejected()
 		}
-		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "authentication.rejected", 401))
+		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "authentication.rejected"))
 		return Grant{}, ErrAuthenticationFailed
 	}
 	if model != "" && !contains(auth.AllowedModels, model) {
-		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "model.rejected", 403))
+		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "model.rejected"))
 		return Grant{}, ErrModelNotAllowed
 	}
-	if err = s.repository.Admit(ctx, auth.TokenID, requestID, auth.RequestsPerMinute, auth.ConcurrentRequests); err != nil {
+	lease := 75 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		lease = time.Until(deadline) + 10*time.Second
+		if lease > 2*time.Minute {
+			lease = 2 * time.Minute
+		}
+		if lease < 10*time.Second {
+			lease = 10 * time.Second
+		}
+	}
+	if err = s.repository.Admit(ctx, auth.TokenID, requestID, auth.RequestsPerMinute, auth.ConcurrentRequests, lease); err != nil {
 		if errors.Is(err, ErrAdmissionLimited) {
 			if s.observer != nil {
 				s.observer.RecordModelProxyAdmissionLimited()
 			}
-			_ = s.repository.Audit(ctx, auditOf(auth, requestID, "admission.limited", 429))
+			_ = s.repository.Audit(ctx, auditOf(auth, requestID, "admission.limited"))
 			return Grant{}, ErrAdmissionLimited
+		}
+		if s.observer != nil {
+			s.observer.RecordModelProxyFinalizeFailure("admission")
 		}
 		return Grant{}, ErrServiceUnavailable
 	}
 	plaintext, err := s.envelope.Decrypt(ctx, security.SecretBinding{Purpose: "new-api-key", SubjectID: auth.InventoryID, KeyVersion: auth.KeyVersion}, auth.Envelope)
 	if err != nil || !apikey.Valid(plaintext) {
 		clear(plaintext)
-		_ = s.repository.Complete(ctx, requestID)
-		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "secret.unavailable", 503))
+		s.finalize(ctx, Grant{Authorization: auth, RequestID: requestID}, "", "secret.unavailable")
 		return Grant{}, ErrServiceUnavailable
 	}
-	_ = s.repository.Audit(ctx, auditOf(auth, requestID, "admitted", 0))
+	_ = s.repository.Audit(ctx, auditOf(auth, requestID, "admitted"))
 	return Grant{Authorization: auth, RequestID: requestID, APIKey: plaintext}, nil
 }
 func (s *Service) Complete(ctx context.Context, grant Grant, route, outcome string, status int, usage *Usage) {
-	_ = s.repository.Complete(ctx, grant.RequestID)
-	a := auditOf(grant.Authorization, grant.RequestID, outcome, status)
+	s.finalize(ctx, grant, route, outcome)
+}
+func (s *Service) finalize(ctx context.Context, grant Grant, route, outcome string) {
+	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.repository.Complete(finalizeCtx, grant.RequestID); err != nil && s.observer != nil {
+		s.observer.RecordModelProxyFinalizeFailure("complete")
+	}
+	a := auditOf(grant.Authorization, grant.RequestID, outcome)
 	a.Route = route
-	a.Usage = usage
-	_ = s.repository.Audit(ctx, a)
+	if err := s.repository.Audit(finalizeCtx, a); err != nil && s.observer != nil {
+		s.observer.RecordModelProxyFinalizeFailure("audit")
+	}
 }
 func active(a Authorization) bool {
 	return a.TokenStatus == "active" && a.InventoryStatus == "active" && a.DeviceStatus == "active" && a.LicenseStatus == "active" && a.BindingStatus == "active" && a.SetupStatus == "configured" && a.BalanceStatus == "configured" && len(a.Envelope) > 0 && a.KeyVersion != "" && a.BaseURL != "" && a.DefaultModel != "" && a.RequestsPerMinute > 0 && a.ConcurrentRequests > 0
@@ -144,6 +163,6 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
-func auditOf(a Authorization, requestID, outcome string, status int) Audit {
-	return Audit{RequestID: requestID, TokenID: a.TokenID, InventoryID: a.InventoryID, DeviceID: a.DeviceID, LicenseID: a.LicenseID, Outcome: outcome, Status: status}
+func auditOf(a Authorization, requestID, outcome string) Audit {
+	return Audit{RequestID: requestID, TokenID: a.TokenID, InventoryID: a.InventoryID, DeviceID: a.DeviceID, LicenseID: a.LicenseID, Outcome: outcome}
 }

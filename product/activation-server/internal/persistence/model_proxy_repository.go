@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,8 +35,8 @@ func (r *ModelProxyRepository) AuthorizeByDigest(ctx context.Context, digest [32
 	}
 	return a, nil
 }
-func (r *ModelProxyRepository) Admit(ctx context.Context, tokenID, requestID string, rpm, concurrent int) error {
-	if rpm <= 0 || concurrent <= 0 {
+func (r *ModelProxyRepository) Admit(ctx context.Context, tokenID, requestID string, rpm, concurrent int, lease time.Duration) error {
+	if rpm <= 0 || concurrent <= 0 || lease < time.Second || lease > 2*time.Minute {
 		return modelproxy.ErrAdmissionLimited
 	}
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -46,7 +47,7 @@ func (r *ModelProxyRepository) Admit(ctx context.Context, tokenID, requestID str
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,$2))`, tokenID, modelProxyLockDomain); err != nil {
 		return fmt.Errorf("lock model proxy admission: %w", err)
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM model_proxy_admissions WHERE device_token_id=$1 AND completed_at IS NULL AND lease_expires_at<=clock_timestamp()`, tokenID); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM model_proxy_admissions WHERE ctid IN (SELECT ctid FROM model_proxy_admissions WHERE device_token_id=$1 AND ((completed_at IS NULL AND lease_expires_at<=clock_timestamp()) OR started_at<clock_timestamp()-interval '10 minutes') LIMIT 1000)`, tokenID); err != nil {
 		return fmt.Errorf("clean model proxy leases: %w", err)
 	}
 	var recent, active int
@@ -57,7 +58,7 @@ func (r *ModelProxyRepository) Admit(ctx context.Context, tokenID, requestID str
 	if recent >= rpm || active >= concurrent {
 		return modelproxy.ErrAdmissionLimited
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO model_proxy_admissions(request_id,device_token_id,started_at,lease_expires_at) VALUES($1,$2,clock_timestamp(),clock_timestamp()+interval '65 seconds')`, requestID, tokenID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO model_proxy_admissions(request_id,device_token_id,started_at,lease_expires_at) VALUES($1,$2,clock_timestamp(),clock_timestamp()+make_interval(secs => $3))`, requestID, tokenID, lease.Seconds()); err != nil {
 		return fmt.Errorf("insert model proxy admission: %w", err)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -81,9 +82,9 @@ func (r *ModelProxyRepository) Audit(ctx context.Context, a modelproxy.Audit) er
 	if a.Outcome == "succeeded" || a.Outcome == "admitted" {
 		outcome = "succeeded"
 	}
-	action := "model-proxy." + a.Route
-	if a.Route == "" {
-		action = "model-proxy.request"
+	action := "model-proxy.request"
+	if a.Route == "models" || a.Route == "chat" {
+		action = "model-proxy." + a.Route
 	}
 	_, err = r.pool.Exec(ctx, `INSERT INTO audit_events(event_id,actor_type,actor_id,action,outcome,inventory_id,device_id,license_id,request_id,created_at) VALUES($1,'client',$2,$3,$4,$5,$6,$7,$8,clock_timestamp())`, eventID, a.TokenID, action, outcome, a.InventoryID, a.DeviceID, a.LicenseID, a.RequestID)
 	if err != nil {

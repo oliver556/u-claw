@@ -14,28 +14,36 @@ import (
 )
 
 type fakeRepository struct {
-	auth      Authorization
-	err       error
-	admitErr  error
-	digest    [32]byte
-	completed string
-	audits    []Audit
+	auth           Authorization
+	err            error
+	admitErr       error
+	digest         [32]byte
+	completed      string
+	audits         []Audit
+	lease          time.Duration
+	completeCtxErr error
+	auditCtxErr    error
+	completeErr    error
+	auditErr       error
 }
 
 func (r *fakeRepository) AuthorizeByDigest(_ context.Context, d [32]byte) (Authorization, error) {
 	r.digest = d
 	return r.auth, r.err
 }
-func (r *fakeRepository) Admit(_ context.Context, tokenID, requestID string, rpm, concurrent int) error {
+func (r *fakeRepository) Admit(_ context.Context, tokenID, requestID string, rpm, concurrent int, lease time.Duration) error {
+	r.lease = lease
 	return r.admitErr
 }
-func (r *fakeRepository) Complete(_ context.Context, requestID string) error {
+func (r *fakeRepository) Complete(ctx context.Context, requestID string) error {
 	r.completed = requestID
-	return nil
+	r.completeCtxErr = ctx.Err()
+	return r.completeErr
 }
-func (r *fakeRepository) Audit(_ context.Context, a Audit) error {
+func (r *fakeRepository) Audit(ctx context.Context, a Audit) error {
 	r.audits = append(r.audits, a)
-	return nil
+	r.auditCtxErr = ctx.Err()
+	return r.auditErr
 }
 
 type fakeEnvelope struct {
@@ -43,10 +51,17 @@ type fakeEnvelope struct {
 	err     error
 	binding security.SecretBinding
 }
+type blockingEnvelope struct{}
+
+func (blockingEnvelope) Decrypt(ctx context.Context, _ security.SecretBinding, _ []byte) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
 
 type fakeObserver struct {
 	auth, limited int
 	outcomes      []string
+	finalize      []string
 }
 
 func runtimeSecret(t *testing.T) []byte {
@@ -62,6 +77,9 @@ func (o *fakeObserver) RecordModelProxyAuthRejected()     { o.auth++ }
 func (o *fakeObserver) RecordModelProxyAdmissionLimited() { o.limited++ }
 func (o *fakeObserver) RecordModelProxyUpstream(outcome string, _ time.Duration) {
 	o.outcomes = append(o.outcomes, outcome)
+}
+func (o *fakeObserver) RecordModelProxyFinalizeFailure(operation string) {
+	o.finalize = append(o.finalize, operation)
 }
 
 func (e *fakeEnvelope) Decrypt(_ context.Context, b security.SecretBinding, _ []byte) ([]byte, error) {
@@ -174,5 +192,50 @@ func TestAuthorizeUsesSharedAPIKeyBoundaries(t *testing.T) {
 			}
 			grant.Clear()
 		})
+	}
+}
+
+func TestAuthorizeDerivesLeaseFromOverallDeadline(t *testing.T) {
+	repo := &fakeRepository{auth: activeAuthorization()}
+	service, _ := NewService(ServiceOptions{Repository: repo, Digest: func(string) [32]byte { return [32]byte{} }, Envelope: &fakeEnvelope{value: runtimeSecret(t)}})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	grant, err := service.Authorize(ctx, "token", "allowed", "req-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant.Clear()
+	if repo.lease < 39*time.Second || repo.lease > 41*time.Second {
+		t.Fatalf("lease=%s", repo.lease)
+	}
+}
+
+func TestCompleteDetachesFromClientCancellationAndRecordsFailures(t *testing.T) {
+	repo := &fakeRepository{auth: activeAuthorization(), completeErr: errors.New("complete"), auditErr: errors.New("audit")}
+	observer := &fakeObserver{}
+	service, _ := NewService(ServiceOptions{Repository: repo, Digest: func(string) [32]byte { return [32]byte{} }, Envelope: &fakeEnvelope{value: runtimeSecret(t)}, Observer: observer})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	service.Complete(ctx, Grant{Authorization: repo.auth, RequestID: "req-123"}, "chat", "unavailable", 502, nil)
+	if repo.completeCtxErr != nil || repo.auditCtxErr != nil {
+		t.Fatalf("complete=%v audit=%v", repo.completeCtxErr, repo.auditCtxErr)
+	}
+	if strings.Join(observer.finalize, ",") != "complete,audit" {
+		t.Fatalf("finalize=%v", observer.finalize)
+	}
+}
+
+func TestAuthorizeSlowDecryptHonorsOverallDeadline(t *testing.T) {
+	repo := &fakeRepository{auth: activeAuthorization()}
+	service, _ := NewService(ServiceOptions{Repository: repo, Digest: func(string) [32]byte { return [32]byte{} }, Envelope: blockingEnvelope{}})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := service.Authorize(ctx, "token", "allowed", "req-123")
+	if !errors.Is(err, ErrServiceUnavailable) || time.Since(started) > time.Second {
+		t.Fatalf("err=%v duration=%s", err, time.Since(started))
+	}
+	if repo.completed != "req-123" {
+		t.Fatal("admission not finalized")
 	}
 }

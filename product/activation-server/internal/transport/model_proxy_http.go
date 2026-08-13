@@ -13,6 +13,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"u-claw-activation-server/internal/modelproxy"
@@ -35,12 +36,14 @@ type ModelProxyHandlerOptions struct {
 	Observer     modelproxy.Observer
 }
 type modelProxyHandler struct {
-	service      ModelProxyService
-	client       *http.Client
-	allowedHosts []string
-	requestIDs   io.Reader
-	timeout      time.Duration
-	observer     modelproxy.Observer
+	service       ModelProxyService
+	client        *http.Client
+	allowedHosts  []string
+	requestIDs    io.Reader
+	timeout       time.Duration
+	observer      modelproxy.Observer
+	requestIDMu   sync.Mutex
+	lastRequestID string
 }
 
 func NewModelProxyHandler(o ModelProxyHandlerOptions) http.Handler {
@@ -69,7 +72,11 @@ type tokenUsage struct {
 }
 
 func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	requestID := h.requestID()
+	requestID, err := h.requestID()
+	if err != nil {
+		writeProxyError(w, 503, "REQUEST_ID_UNAVAILABLE", "")
+		return
+	}
 	w.Header().Set("X-Request-ID", requestID)
 	route := ""
 	switch {
@@ -86,10 +93,16 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeProxyError(w, 401, "AUTHENTICATION_FAILED", requestID)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), h.timeout)
+	defer cancel()
+	r = r.WithContext(ctx)
 	var chat chatRequest
-	if route == "models" && r.Body != nil && r.ContentLength != 0 {
-		writeProxyError(w, 400, "INVALID_REQUEST", requestID)
-		return
+	if route == "models" {
+		nonempty, readErr := hasGETBody(w, r)
+		if readErr != nil || nonempty {
+			writeProxyError(w, 400, "INVALID_REQUEST", requestID)
+			return
+		}
 	}
 	if route == "chat" {
 		if err := decodeModelRequest(w, r, &chat); err != nil {
@@ -110,18 +123,18 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model := chat.Model
-	grant, err := h.service.Authorize(r.Context(), bearer, model, requestID)
+	grant, err := h.service.Authorize(ctx, bearer, model, requestID)
 	if err != nil {
 		status, code := serviceError(err)
 		writeProxyError(w, status, code, requestID)
 		return
 	}
 	defer grant.Clear()
-	ctx, cancel := context.WithTimeout(r.Context(), h.timeout)
-	defer cancel()
+	outcome, status, usage := "unavailable", 502, (*modelproxy.Usage)(nil)
+	defer func() { h.service.Complete(ctx, grant, route, outcome, status, usage) }()
 	target, err := modelproxy.ValidateBaseURL(grant.Authorization.BaseURL, h.allowedHosts)
 	if err != nil {
-		h.service.Complete(r.Context(), grant, route, "unavailable", 503, nil)
+		outcome, status = "unavailable", 503
 		writeProxyError(w, 503, "SERVICE_UNAVAILABLE", requestID)
 		return
 	}
@@ -134,6 +147,7 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream, _ := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), body)
 	upstream.Header.Set("Authorization", "Bearer "+string(grant.APIKey))
+	defer upstream.Header.Del("Authorization")
 	upstream.Header.Set("Accept", "application/json")
 	upstream.Header.Set("X-Request-ID", requestID)
 	if route == "chat" {
@@ -143,22 +157,21 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	response, err := h.client.Do(upstream)
 	if err != nil {
 		h.observe("unavailable", started)
-		h.service.Complete(r.Context(), grant, route, "unavailable", 502, nil)
 		writeProxyError(w, 502, "UPSTREAM_UNAVAILABLE", requestID)
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		status, code, outcome := upstreamError(response.StatusCode)
-		h.observe(outcome, started)
-		h.service.Complete(r.Context(), grant, route, outcome, status, nil)
-		writeProxyError(w, status, code, requestID)
+		mappedStatus, code, mappedOutcome := upstreamError(response.StatusCode)
+		h.observe(mappedOutcome, started)
+		outcome, status = mappedOutcome, mappedStatus
+		writeProxyError(w, mappedStatus, code, requestID)
 		return
 	}
 	mediaType, _, mediaErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if mediaErr != nil || mediaType != "application/json" {
 		h.observe("invalid_response", started)
-		h.service.Complete(r.Context(), grant, route, "invalid_response", 502, nil)
+		outcome, status = "invalid_response", 502
 		writeProxyError(w, 502, "UPSTREAM_UNAVAILABLE", requestID)
 		return
 	}
@@ -167,16 +180,15 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		limit = 4 << 20
 	}
 	content, err := readBounded(response.Body, limit)
-	if err != nil || !validUpstreamJSON(route, content) {
+	if err != nil || rejectUpstreamDuplicateKeys(content) != nil || !validUpstreamJSON(route, content) {
 		h.observe("invalid_response", started)
-		h.service.Complete(r.Context(), grant, route, "invalid_response", 502, nil)
+		outcome, status = "invalid_response", 502
 		writeProxyError(w, 502, "UPSTREAM_UNAVAILABLE", requestID)
 		return
 	}
 	if route == "models" {
 		content = filterModels(content, grant.Authorization.AllowedModels)
 	}
-	var usage *modelproxy.Usage
 	if route == "chat" {
 		var response struct {
 			Usage *tokenUsage `json:"usage"`
@@ -186,7 +198,7 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			usage = &modelproxy.Usage{PromptTokens: response.Usage.PromptTokens, CompletionTokens: response.Usage.CompletionTokens, TotalTokens: response.Usage.TotalTokens}
 		}
 	}
-	h.service.Complete(r.Context(), grant, route, "succeeded", response.StatusCode, usage)
+	outcome, status = "succeeded", response.StatusCode
 	h.observe("success", started)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
@@ -197,16 +209,25 @@ func (h *modelProxyHandler) observe(outcome string, started time.Time) {
 		h.observer.RecordModelProxyUpstream(outcome, time.Since(started))
 	}
 }
-func (h *modelProxyHandler) requestID() string {
+func (h *modelProxyHandler) requestID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := io.ReadFull(h.requestIDs, b); err != nil {
-		return "00000000-0000-4000-8000-000000000000"
+		return "", err
 	}
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
 	encoded := hex.EncodeToString(b)
-	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:]
+	requestID := encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:]
+	h.requestIDMu.Lock()
+	defer h.requestIDMu.Unlock()
+	if requestID == h.lastRequestID {
+		return "", errors.New("request ID entropy repeated")
+	}
+	h.lastRequestID = requestID
+	return requestID, nil
 }
+
+func rejectUpstreamDuplicateKeys(content []byte) error { return rejectDuplicateKeys(content) }
 func strictBearer(values []string) (string, bool) {
 	if len(values) != 1 {
 		return "", false
@@ -244,6 +265,18 @@ func decodeModelRequest(w http.ResponseWriter, r *http.Request, out any) error {
 		return errInvalidRequest
 	}
 	return nil
+}
+func hasGETBody(w http.ResponseWriter, r *http.Request) (bool, error) {
+	if r.Body == nil {
+		return false, nil
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	buffer := make([]byte, 1)
+	n, err := r.Body.Read(buffer)
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+	return n > 0, nil
 }
 func validChat(c chatRequest) bool {
 	if !modelNamePattern.MatchString(c.Model) || c.Stream || len(c.Messages) == 0 {
