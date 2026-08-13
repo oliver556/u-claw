@@ -19,7 +19,7 @@ export function registerActivationIpc(options: { ipcMain: IpcMainLike; authorize
       try { return await options.coordinator.submit(parsed.data); }
       catch { return safeFailure("ACTIVATION_FAILED"); }
     },
-    "activation.commit": () => options.coordinator.commit(),
+    "activation.commit": () => options.coordinator.status(),
     "activation.cancel": () => options.coordinator.cancel(),
     "window.close": () => {
       const result = options.coordinator.close();
