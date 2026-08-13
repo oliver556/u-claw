@@ -117,7 +117,7 @@ export interface ActivationArtifactWriter {
   writeJournal(journal: ActivationArtifactJournal): Promise<void>;
   writeServerBoundJournal(journal: ActivationServerBoundJournal): Promise<void>;
   readJournal(): Promise<ActivationReadableJournal | null>;
-  readServerBoundResponse(activationId: string, deviceId: string, licenseId: string): Promise<ActivationResponse>;
+  readServerBoundResponse(activationId: string, deviceId: string, licenseId: string, generation: number): Promise<ActivationResponse>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
   recoverPendingArtifacts(): Promise<void>;
@@ -290,17 +290,26 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
       }
     },
 
-    async readServerBoundResponse(activationId, deviceId, licenseId) {
+    async readServerBoundResponse(activationId, deviceId, licenseId, generation) {
       try {
-        const startup = StartupCredentialArtifactSchema.parse(JSON.parse(await (await packageSafeRoot).readText(artifactPaths[0].path)));
-        const license = StartupLicenseArtifactSchema.parse(JSON.parse(await (await packageSafeRoot).readText(artifactPaths[1].path)));
+        const startupBody = await (await packageSafeRoot).readText(artifactPaths[0].path);
+        const licenseBody = await (await packageSafeRoot).readText(artifactPaths[1].path);
+        const builtinBody = await (await dataSafeRoot).readText(artifactPaths[2].path);
+        const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3].path));
+        if (manifest.activationId !== activationId || manifest.deviceId !== deviceId || manifest.licenseId !== licenseId
+            || manifest.generation !== generation
+            || manifest.sha256.startupCredential !== createHash("sha256").update(startupBody).digest("hex")
+            || manifest.sha256.license !== createHash("sha256").update(licenseBody).digest("hex")
+            || manifest.sha256.builtinCredential !== createHash("sha256").update(builtinBody).digest("hex")) throw new Error("manifest");
+        const startup = StartupCredentialArtifactSchema.parse(JSON.parse(startupBody));
+        const license = StartupLicenseArtifactSchema.parse(JSON.parse(licenseBody));
+        const persistedBuiltin = BuiltinCredentialArtifactSchema.parse(JSON.parse(builtinBody));
         const loadedBuiltin = await credentialStore.loadActive();
         const builtinCredential = BuiltinCredentialArtifactSchema.parse({
           schemaVersion: 1, deviceId: loadedBuiltin.deviceId, licenseId: loadedBuiltin.licenseId,
           endpoint: loadedBuiltin.endpoint.href, model: loadedBuiltin.model, deviceToken: loadedBuiltin.deviceToken,
         });
-        const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3].path));
-        if (manifest.activationId !== activationId || manifest.deviceId !== deviceId || manifest.licenseId !== licenseId) throw new Error("manifest");
+        if (JSON.stringify(builtinCredential) !== JSON.stringify(persistedBuiltin)) throw new Error("credential");
         const response = ActivationResponseSchema.parse({ activationId, deviceId, licenseId, license, startupCredential: startup, builtinCredential, status: "active" });
         if (response.deviceId !== startup.deviceId || response.licenseId !== startup.licenseId
             || response.deviceId !== license.deviceId || response.licenseId !== license.licenseId
