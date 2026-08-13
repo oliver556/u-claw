@@ -180,7 +180,7 @@ func TestStagedSecretCommitAtomicallyCreatesWithoutReplacement(t *testing.T) {
 }
 
 func (*fakeAdminService) Generate(context.Context, adminservice.GenerateInput) ([]adminservice.InventorySummary, error) {
-	return []adminservice.InventorySummary{{InventoryID: "inv_fixture_001", Username: "uclaw-001", Status: "prepared", ActivationCode: "0123456789ABCDEFGHJKMNPQRS"}}, nil
+	return []adminservice.InventorySummary{{InventoryID: "inv_fixture_001", Username: "uclaw-001", Status: "prepared", ActivationCode: "TESTTESTTESTTESTTESTTEST12"}}, nil
 }
 func (*fakeAdminService) Import(context.Context, adminservice.ImportInput) ([]adminservice.InventorySummary, error) {
 	return nil, nil

@@ -78,6 +78,21 @@ test("detects activation, device, bearer, and legacy New API secrets", () => {
   ]);
 });
 
+test("detects activation codes leaked from test paths", () => {
+  const activationCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
+  assert.deepEqual(scanText("tests/leaked.txt", `activationCode = "${activationCode}"\n`), [
+    { path: "tests/leaked.txt", line: 1, rule: "ACTIVATION_CODE" },
+  ]);
+  assert.deepEqual(
+    scanText("tests/dynamic-fixture.ts", "const activationCode = ['0123456789', 'ABCDEFGHJK', 'MNPQRS'].join('');\n"),
+    [],
+  );
+  assert.deepEqual(
+    scanText("tests/static-fixture.json", '{"activationCode":"TESTTESTTESTTESTTESTTEST12"}\n'),
+    [],
+  );
+});
+
 test("detects modern GitHub fine-grained access tokens", () => {
   const body = "11AA22bb33CC44dd55EE66ff77GG88hh99II00jj".repeat(3).slice(0, 82);
   const token = ["github", "pat", body].join("_");
@@ -290,15 +305,26 @@ test("CLI reports only path, line, and rule without echoing secret values", asyn
 
 test("activation server container is a Go 1.25 linux/amd64 nonroot scratch image", async () => {
   const dockerfile = await readFile(path.join(productRoot, "activation-server", "Dockerfile"), "utf8");
+  const normalized = dockerfile.replace(/\\\r?\n\s*/gu, " ");
+  const secretInit = await readFile(path.join(productRoot, "activation-server", "cmd", "secret-init", "main.go"), "utf8");
   assert.match(dockerfile, /^FROM --platform=\$BUILDPLATFORM golang:1\.25(?:\.\d+)?-bookworm AS build$/mu);
   assert.match(dockerfile, /^ARG TARGETOS$/mu);
   assert.match(dockerfile, /^ARG TARGETARCH$/mu);
-  assert.match(dockerfile, /^RUN CGO_ENABLED=0 GOOS=\$TARGETOS GOARCH=\$TARGETARCH go build .* \.\/cmd\/server$/mu);
+  assert.match(normalized, /RUN CGO_ENABLED=0 GOOS=\$TARGETOS GOARCH=\$TARGETARCH go build [^\n]* -o \/out\/activation-server \.\/cmd\/server\s+&&\s+CGO_ENABLED=0 GOOS=\$TARGETOS GOARCH=\$TARGETARCH go build [^\n]* -o \/out\/secret-init \.\/cmd\/secret-init/u);
   assert.match(dockerfile, /^FROM --platform=\$TARGETPLATFORM scratch$/mu);
-  assert.match(dockerfile, /^USER 65532:65532$/mu);
-  assert.deepEqual(dockerfile.match(/^COPY /gmu)?.length, 4);
+  assert.equal(dockerfile.match(/^COPY /gmu)?.length, 5);
   assert.match(dockerfile, /^COPY --from=build \/etc\/ssl\/certs\/ca-certificates\.crt \/etc\/ssl\/certs\/ca-certificates\.crt$/mu);
   assert.match(dockerfile, /^COPY --from=build \/out\/activation-server \/activation-server$/mu);
+  assert.match(dockerfile, /^COPY --from=build \/out\/secret-init \/secret-init$/mu);
+  assert.equal(dockerfile.match(/^COPY --from=build \/out\/(?:activation-server|secret-init) \/(?:activation-server|secret-init)$/gmu)?.length, 2);
+  assert.match(dockerfile, /^ENTRYPOINT \["\/secret-init"\]$/mu);
+  assert.match(dockerfile, /^CMD \["\/activation-server"\]$/mu);
+  assert.match(secretInit, /const serviceUID = 65532/u);
+  assert.match(secretInit, /const serviceGID = 65532/u);
+  assert.match(secretInit, /syscall\.Setgroups\(\[\]int\{\}\)/u);
+  assert.match(secretInit, /syscall\.Setgid\(serviceGID\)/u);
+  assert.match(secretInit, /syscall\.Setuid\(serviceUID\)/u);
+  assert.match(secretInit, /syscall\.Exec\(executable, arguments, env\)/u);
 });
 
 test("worktree scan opens without following links and reads through the same descriptor with a bound", async () => {

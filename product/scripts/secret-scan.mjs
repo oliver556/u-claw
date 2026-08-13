@@ -16,6 +16,7 @@ const quotedCredentialAssignment = new RegExp(`(?:^|[\\s{,])["']?${credentialFie
 const environmentCredentialAssignment = new RegExp(`^(?:export\\s+)?${credentialField}\\s*=\\s*([^\\s#]+)\\s*$`, "iu");
 const deviceTokenPattern = /\buclaw_dt_[A-Za-z0-9_-]{43}\b/gu;
 const activationCodeAssignment = /(?:^|[\s{,])["']?activation[_-]?code["']?\s*(?:=|:)\s*(["'])([0-9A-HJKMNP-TV-Z]{26})\1/iu;
+const activationCodePlaceholder = "TESTTESTTESTTESTTESTTEST12";
 const tokenPatterns = [
   /\bAKIA[0-9A-Z]{16}\b/gu,
   /\bgh[pousr]_[A-Za-z0-9]{36,255}\b/gu,
@@ -60,8 +61,8 @@ export function scanText(filePath, source) {
       continue;
     }
 
-    const activationCode = isTestFixturePath(filePath) ? undefined : activationCodeAssignment.exec(line)?.[2];
-    if (activationCode && !isPlaceholder(activationCode)) {
+    const activationCode = activationCodeAssignment.exec(line)?.[2];
+    if (activationCode && activationCode !== activationCodePlaceholder) {
       findings.push({ path: filePath, line: index + 1, rule: "ACTIVATION_CODE" });
       continue;
     }
@@ -83,11 +84,6 @@ export function scanText(filePath, source) {
     findings.push({ path: filePath, line: privateKeyStart + 1, rule: "PRIVATE_KEY_BLOCK" });
   }
   return findings;
-}
-
-function isTestFixturePath(filePath) {
-  return /(?:^|\/)(?:tests?|fixtures?)(?:\/|\.|$)/iu.test(filePath)
-    || /(?:^|\/)[^/]+_test\.[^/]+$/iu.test(filePath);
 }
 
 export async function scanTrackedRepository(startDirectory = process.cwd(), options = {}) {

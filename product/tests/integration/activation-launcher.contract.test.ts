@@ -222,7 +222,7 @@ describe("activation launcher-to-desktop contract", () => {
         state: "input",
       });
       const input = {
-        activationCode: "ABCDEFGHJKMNPQRSTVWXYZ2345",
+        activationCode: "TESTTESTTESTTESTTESTTEST12",
       };
       await expect(coordinator.submit(input)).resolves.toEqual({
         state: "recovery-required",
@@ -273,7 +273,7 @@ describe("activation launcher-to-desktop contract", () => {
       await expect(
         restart.submit({
           ...input,
-          activationCode: "ZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+          activationCode: ["ZZZZZZZZZZZZZ", "ZZZZZZZZZZZZZ"].join(""),
         }),
       ).resolves.toEqual({
         state: "recovery-required",
