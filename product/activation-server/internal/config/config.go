@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,6 +18,7 @@ import (
 	"syscall"
 
 	"u-claw-activation-server/internal/admin"
+	"u-claw-activation-server/internal/modelendpoint"
 )
 
 const defaultListenAddress = ":8080"
@@ -146,9 +146,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 }
 
 func validPublicModelEndpoint(raw string) bool {
-	parsed, err := url.Parse(raw)
-	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil &&
-		parsed.Path == "/model-api/" && parsed.RawQuery == "" && parsed.Fragment == ""
+	return modelendpoint.Valid(raw)
 }
 
 func sameSecretFile(first, second string) bool {
