@@ -36,6 +36,8 @@ func trustedEnv(t *testing.T, overrides map[string]string) func(string) string {
 
 type fakeAdminService struct {
 	mutation adminservice.Mutation
+	mapping  adminservice.MappingInput
+	token    adminservice.DeviceTokenMutation
 	execute  func() error
 }
 
@@ -196,6 +198,103 @@ func (service *fakeAdminService) MutateLicense(_ context.Context, mutation admin
 }
 func (*fakeAdminService) MarkConfigured(context.Context, adminservice.InventoryLocator, adminservice.Operation) (adminservice.InventorySummary, error) {
 	return adminservice.InventorySummary{}, nil
+}
+func (service *fakeAdminService) SetMapping(_ context.Context, input adminservice.MappingInput) (adminservice.MappingSummary, error) {
+	input.APIKey = append([]byte(nil), input.APIKey...)
+	service.mapping = input
+	return adminservice.MappingSummary{InventoryID: input.InventoryID, BaseURLHost: "api.example.test", Status: "configured", KeyVersion: "kms-v1"}, nil
+}
+func (*fakeAdminService) ShowMapping(_ context.Context, inventoryID string) (adminservice.MappingSummary, error) {
+	return adminservice.MappingSummary{InventoryID: inventoryID, BaseURLHost: "api.example.test", Status: "configured", KeyVersion: "kms-v1"}, nil
+}
+func (service *fakeAdminService) MutateDeviceToken(_ context.Context, mutation adminservice.DeviceTokenMutation) (adminservice.DeviceTokenResult, error) {
+	service.token = mutation
+	return adminservice.DeviceTokenResult{DeviceTokenID: "00000000-0000-4000-8000-000000000004", InventoryID: "00000000-0000-4000-8000-000000000001", DeviceID: "00000000-0000-4000-8000-000000000002", LicenseID: mutation.LicenseID, Status: "active", DeviceToken: "uclaw_dt_" + strings.Repeat("A", 43)}, nil
+}
+func (service *fakeAdminService) PrepareDeviceTokenReissue(_ context.Context, mutation adminservice.DeviceTokenMutation) (adminservice.DeviceTokenReissuePlan, error) {
+	result, _ := service.MutateDeviceToken(context.Background(), mutation)
+	return adminservice.DeviceTokenReissuePlan{Mutation: mutation, Secret: result}, nil
+}
+func (service *fakeAdminService) ExecuteDeviceTokenReissue(ctx context.Context, plan adminservice.DeviceTokenReissuePlan) (adminservice.DeviceTokenResult, error) {
+	if service.execute != nil {
+		if err := service.execute(); err != nil {
+			return adminservice.DeviceTokenResult{}, err
+		}
+	}
+	return service.MutateDeviceToken(ctx, plan.Mutation)
+}
+
+func TestMappingSetReadsOnlySecureRegularKeyFileAndNeverLeaksSecret(t *testing.T) {
+	directory := t.TempDir()
+	secret := "runtime-" + strings.Repeat("k", 32)
+	secure := filepath.Join(directory, "new-api.key")
+	if err := os.WriteFile(secure, []byte(secret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := &fakeAdminService{}
+	args := []string{"mapping", "set", "--inventory-id", "00000000-0000-4000-8000-000000000001", "--new-api-user-id", "usr_fixture_001", "--new-api-username", "user_fixture_001", "--base-url", "https://api.example.test/v1", "--default-model", "model-a", "--allowed-models", "model-a,model-b", "--requests-per-minute", "60", "--concurrent-requests", "2", "--key-file", secure, "--reason", "provision"}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), args, trustedEnv(t, nil), service, &stdout, &stderr)
+	if code != 0 || string(service.mapping.APIKey) != secret {
+		t.Fatalf("code=%d out=%s err=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stdout.String()+stderr.String(), secret) || strings.Contains(stdout.String()+stderr.String(), "Authorization") || strings.Contains(stdout.String()+stderr.String(), "opaque-envelope") {
+		t.Fatal("secret leaked")
+	}
+
+	unsafe := filepath.Join(directory, "unsafe.key")
+	if err := os.WriteFile(unsafe, []byte(secret), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(directory, "link.key")
+	if err := os.Symlink(secure, symlink); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(directory, "empty.key")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	long := filepath.Join(directory, "long.key")
+	if err := os.WriteFile(long, bytes.Repeat([]byte{'x'}, maxAPIKeyFileBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{unsafe, symlink, empty, long} {
+		candidate := append([]string(nil), args...)
+		candidate[17] = path
+		stdout.Reset()
+		stderr.Reset()
+		if code = run(context.Background(), candidate, trustedEnv(t, nil), service, &stdout, &stderr); code == 0 {
+			t.Fatalf("unsafe key file accepted: %s", path)
+		}
+		if strings.Contains(stdout.String()+stderr.String(), secret) {
+			t.Fatal("rejected secret leaked")
+		}
+	}
+}
+
+func TestDeviceTokenReissueWritesOnlyOutputFile(t *testing.T) {
+	service := &fakeAdminService{}
+	licenseID := "00000000-0000-4000-8000-000000000003"
+	target := filepath.Join(t.TempDir(), "device-token.json")
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"device-token", "reissue", "--license-id", licenseID, "--confirm-target", adminservice.TargetDigest(licenseID), "--reason", "replace credential", "--output-file", target}, trustedEnv(t, nil), service, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, stderr.String())
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), `"schemaVersion":1`) || !strings.Contains(string(contents), `"deviceToken":"uclaw_dt_`) {
+		t.Fatalf("contents=%s", contents)
+	}
+	if strings.Contains(stdout.String()+stderr.String(), "uclaw_dt_") {
+		t.Fatal("token leaked to console")
+	}
+	info, _ := os.Stat(target)
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode=%o", info.Mode().Perm())
+	}
 }
 
 func TestRunRequiresTrustedOperatorAndReason(t *testing.T) {

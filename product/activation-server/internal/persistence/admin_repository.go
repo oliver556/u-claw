@@ -230,6 +230,145 @@ func (repository *ActivationRepository) MarkConfigured(ctx context.Context, loca
 	return replay, nil
 }
 
+func (repository *ActivationRepository) SetMapping(ctx context.Context, input admin.MappingInput) (admin.MappingSummary, error) {
+	action := "new-api.mapping.set"
+	fingerprint := adminFingerprint(action, input.Operation, struct {
+		InventoryID, NewAPIUserID, NewAPIUsername, BaseURL, DefaultModel, KeyVersion string
+		AllowedModels                                                                []string
+		RequestsPerMinute, ConcurrentRequests                                        int
+		APIKeyFingerprint                                                            []byte
+	}{input.InventoryID, input.NewAPIUserID, input.NewAPIUsername, input.BaseURL, input.DefaultModel, input.KeyVersion, input.AllowedModels, input.RequestsPerMinute, input.ConcurrentRequests, input.APIKeyFingerprint})
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return admin.MappingSummary{}, fmt.Errorf("begin mapping set: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var replay admin.MappingSummary
+	if found, claimErr := claimAdminOperation(ctx, tx, action, input.Operation, fingerprint, &replay); claimErr != nil || found {
+		return replay, claimErr
+	}
+	var exists string
+	if err = tx.QueryRow(ctx, `SELECT id FROM activation_inventory WHERE id=$1 FOR UPDATE`, input.InventoryID).Scan(&exists); errors.Is(err, pgx.ErrNoRows) {
+		return replay, admin.ErrInvalidInput
+	}
+	if err != nil {
+		return replay, err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE new_api_bindings SET new_api_user_id=$2,new_api_username=$3,api_key_envelope=$4,api_key_version=$5,base_url=$6,default_model=$7,allowed_models=$8,requests_per_minute=$9,concurrent_requests=$10,balance_setup_status='configured',updated_at=clock_timestamp() WHERE inventory_id=$1`, input.InventoryID, input.NewAPIUserID, input.NewAPIUsername, input.APIKeyEnvelope, input.KeyVersion, input.BaseURL, input.DefaultModel, input.AllowedModels, input.RequestsPerMinute, input.ConcurrentRequests)
+	if err != nil {
+		return replay, mapAdminWriteError(err)
+	}
+	if tag.RowsAffected() != 1 {
+		return replay, admin.ErrInvalidInput
+	}
+	if _, err = tx.Exec(ctx, `UPDATE activation_inventory SET new_api_setup_status='configured' WHERE id=$1`, input.InventoryID); err != nil {
+		return replay, err
+	}
+	replay = admin.MappingSummary{InventoryID: input.InventoryID, NewAPIUserID: input.NewAPIUserID, NewAPIUsername: input.NewAPIUsername, BaseURLHost: hostOnly(input.BaseURL), DefaultModel: input.DefaultModel, AllowedModels: input.AllowedModels, RequestsPerMinute: input.RequestsPerMinute, ConcurrentRequests: input.ConcurrentRequests, KeyVersion: input.KeyVersion, Status: "configured"}
+	if err = recordAdminSuccess(ctx, tx, action, input.Operation, &input.InventoryID, nil, nil, fingerprint, replay); err != nil {
+		return replay, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return replay, err
+	}
+	return replay, nil
+}
+
+func (repository *ActivationRepository) ShowMapping(ctx context.Context, inventoryID string) (admin.MappingSummary, error) {
+	var result admin.MappingSummary
+	var baseURL string
+	var updated time.Time
+	err := repository.pool.QueryRow(ctx, `SELECT inventory_id,new_api_user_id,new_api_username,base_url,default_model,allowed_models,requests_per_minute,concurrent_requests,api_key_version,status,updated_at FROM new_api_bindings WHERE inventory_id=$1 AND api_key_envelope IS NOT NULL`, inventoryID).Scan(&result.InventoryID, &result.NewAPIUserID, &result.NewAPIUsername, &baseURL, &result.DefaultModel, &result.AllowedModels, &result.RequestsPerMinute, &result.ConcurrentRequests, &result.KeyVersion, &result.Status, &updated)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return result, admin.ErrInvalidInput
+	}
+	if err != nil {
+		return result, fmt.Errorf("show mapping: %w", err)
+	}
+	result.BaseURLHost = hostOnly(baseURL)
+	result.UpdatedAt = updated.UTC().Format(time.RFC3339Nano)
+	return result, nil
+}
+
+func (repository *ActivationRepository) MutateDeviceToken(ctx context.Context, mutation admin.DeviceTokenMutation) (admin.DeviceTokenResult, error) {
+	action := "device-token." + string(mutation.Action)
+	fingerprint := adminFingerprint(action, mutation.Operation, mutation.LicenseID)
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return admin.DeviceTokenResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var replay admin.DeviceTokenResult
+	if found, claimErr := claimAdminOperation(ctx, tx, action, mutation.Operation, fingerprint, &replay); claimErr != nil || found {
+		return replay, claimErr
+	}
+	var tokenID, inventoryID, deviceID, status string
+	err = tx.QueryRow(ctx, `SELECT token.device_token_id,token.inventory_id,token.device_id,token.status FROM device_access_tokens token JOIN licenses license ON license.license_id=token.license_id AND license.device_id=token.device_id JOIN devices device ON device.device_id=token.device_id AND device.inventory_id=token.inventory_id JOIN new_api_bindings binding ON binding.inventory_id=token.inventory_id AND binding.device_id=token.device_id WHERE token.license_id=$1 AND license.status='active' AND device.status='active' AND binding.status='active' ORDER BY token.issued_at DESC LIMIT 1 FOR UPDATE OF token`, mutation.LicenseID).Scan(&tokenID, &inventoryID, &deviceID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return replay, admin.ErrInvalidInput
+	}
+	if err != nil {
+		return replay, err
+	}
+	target := string(mutation.Action)
+	if mutation.Action == admin.DeviceTokenDisable && status != "active" || mutation.Action == admin.DeviceTokenEnable && status != "disabled" || mutation.Action == admin.DeviceTokenRevoke && status == "revoked" || mutation.Action == admin.DeviceTokenReissue && status != "active" {
+		return replay, admin.ErrInvalidInput
+	}
+	if mutation.Action == admin.DeviceTokenReissue {
+		if len(mutation.ReplacementDigest) != 32 || mutation.ReplacementTokenID == "" {
+			return replay, admin.ErrInvalidInput
+		}
+		if _, err = tx.Exec(ctx, `UPDATE device_access_tokens SET status='revoked',revoked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE device_token_id=$1`, tokenID); err != nil {
+			return replay, err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO device_access_tokens(device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,revoked_at,created_at,updated_at) VALUES($1,$2,$3,$4,$5,'active',clock_timestamp(),NULL,clock_timestamp(),clock_timestamp())`, mutation.ReplacementTokenID, inventoryID, deviceID, mutation.LicenseID, mutation.ReplacementDigest); err != nil {
+			return replay, mapAdminWriteError(err)
+		}
+		tokenID = mutation.ReplacementTokenID
+		target = "active"
+	} else {
+		revokedAt := "NULL"
+		if mutation.Action == admin.DeviceTokenRevoke {
+			revokedAt = "clock_timestamp()"
+		}
+		if _, err = tx.Exec(ctx, `UPDATE device_access_tokens SET status=$2,revoked_at=`+revokedAt+`,updated_at=clock_timestamp() WHERE device_token_id=$1`, tokenID, target); err != nil {
+			return replay, err
+		}
+	}
+	replay = admin.DeviceTokenResult{DeviceTokenID: tokenID, InventoryID: inventoryID, DeviceID: deviceID, LicenseID: mutation.LicenseID, Status: target}
+	if err = recordAdminSuccess(ctx, tx, action, mutation.Operation, &inventoryID, &deviceID, &mutation.LicenseID, fingerprint, replay); err != nil {
+		return replay, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return replay, err
+	}
+	return replay, nil
+}
+
+func (repository *ActivationRepository) PrepareDeviceTokenTarget(ctx context.Context, licenseID string) (admin.DeviceTokenResult, error) {
+	var result admin.DeviceTokenResult
+	err := repository.pool.QueryRow(ctx, `SELECT token.inventory_id,token.device_id,token.license_id,token.status FROM device_access_tokens token JOIN licenses license ON license.license_id=token.license_id AND license.device_id=token.device_id JOIN devices device ON device.device_id=token.device_id AND device.inventory_id=token.inventory_id JOIN new_api_bindings binding ON binding.inventory_id=token.inventory_id AND binding.device_id=token.device_id WHERE token.license_id=$1 AND token.status='active' AND license.status='active' AND device.status='active' AND binding.status='active' ORDER BY token.issued_at DESC LIMIT 1`, licenseID).Scan(&result.InventoryID, &result.DeviceID, &result.LicenseID, &result.Status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return result, admin.ErrInvalidInput
+	}
+	if err != nil {
+		return result, fmt.Errorf("prepare device token target: %w", err)
+	}
+	return result, nil
+}
+
+func hostOnly(raw string) string {
+	start := strings.Index(raw, "://")
+	if start < 0 {
+		return ""
+	}
+	host := raw[start+3:]
+	if slash := strings.IndexByte(host, '/'); slash >= 0 {
+		host = host[:slash]
+	}
+	return host
+}
+
 func (repository *ActivationRepository) Mutate(ctx context.Context, mutation admin.Mutation) (admin.MutationResult, error) {
 	action := "license." + string(mutation.Action)
 	fingerprint := adminFingerprint(action, mutation.Operation, mutation.LicenseID)

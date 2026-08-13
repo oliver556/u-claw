@@ -12,13 +12,18 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 
 	adminservice "u-claw-activation-server/internal/admin"
 	"u-claw-activation-server/internal/config"
 	"u-claw-activation-server/internal/persistence"
+	"u-claw-activation-server/internal/security"
 )
+
+const maxAPIKeyFileBytes = 16 << 10
 
 type operatorCredential struct {
 	OperatorID string `json:"operatorId"`
@@ -35,6 +40,11 @@ type adminService interface {
 	PrepareReissue(context.Context, adminservice.Mutation) (adminservice.ReissuePlan, error)
 	ExecuteReissue(context.Context, adminservice.ReissuePlan) (adminservice.MutationResult, error)
 	MarkConfigured(context.Context, adminservice.InventoryLocator, adminservice.Operation) (adminservice.InventorySummary, error)
+	SetMapping(context.Context, adminservice.MappingInput) (adminservice.MappingSummary, error)
+	ShowMapping(context.Context, string) (adminservice.MappingSummary, error)
+	MutateDeviceToken(context.Context, adminservice.DeviceTokenMutation) (adminservice.DeviceTokenResult, error)
+	PrepareDeviceTokenReissue(context.Context, adminservice.DeviceTokenMutation) (adminservice.DeviceTokenReissuePlan, error)
+	ExecuteDeviceTokenReissue(context.Context, adminservice.DeviceTokenReissuePlan) (adminservice.DeviceTokenResult, error)
 }
 
 func main() { os.Exit(realMain(context.Background(), os.Args[1:], os.Getenv, os.Stdout, os.Stderr)) }
@@ -60,7 +70,12 @@ func realMain(ctx context.Context, args []string, getenv func(string) string, st
 		fmt.Fprintln(stderr, "admin repository unavailable")
 		return 1
 	}
-	service, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper})
+	kms, err := security.NewKEK(cfg.KMSKEK, nil)
+	if err != nil {
+		fmt.Fprintln(stderr, "admin service unavailable")
+		return 1
+	}
+	service, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, SecretEnvelope: security.NewSecretEnvelopeService(kms, nil), KeyVersion: cfg.KMSKeyVersion})
 	if err != nil {
 		fmt.Fprintln(stderr, "admin service unavailable")
 		return 1
@@ -91,6 +106,85 @@ func run(ctx context.Context, args []string, getenv func(string) string, service
 		return 0
 	}
 	switch args[0] + " " + args[1] {
+	case "mapping set":
+		flags := flag.NewFlagSet("mapping set", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		id := flags.String("inventory-id", "", "")
+		userID := flags.String("new-api-user-id", "", "")
+		username := flags.String("new-api-username", "", "")
+		baseURL := flags.String("base-url", "", "")
+		model := flags.String("default-model", "", "")
+		models := flags.String("allowed-models", "", "")
+		rpm := flags.Int("requests-per-minute", 0, "")
+		concurrent := flags.Int("concurrent-requests", 0, "")
+		keyFile := flags.String("key-file", "", "")
+		reason := flags.String("reason", "", "")
+		if flags.Parse(args[2:]) != nil || flags.NArg() != 0 {
+			return 2
+		}
+		op.Reason = *reason
+		key, readErr := readSecureAPIKey(*keyFile)
+		if readErr != nil {
+			return writeCLIError(stderr, readErr)
+		}
+		defer clear(key)
+		result, callErr := service.SetMapping(ctx, adminservice.MappingInput{InventoryID: *id, NewAPIUserID: *userID, NewAPIUsername: *username, BaseURL: *baseURL, DefaultModel: *model, AllowedModels: splitModels(*models), RequestsPerMinute: *rpm, ConcurrentRequests: *concurrent, APIKey: key, Operation: op})
+		if callErr != nil {
+			return writeCLIError(stderr, callErr)
+		}
+		return write(result)
+	case "mapping show":
+		flags := flag.NewFlagSet("mapping show", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		id := flags.String("inventory-id", "", "")
+		if flags.Parse(args[2:]) != nil || flags.NArg() != 0 {
+			return 2
+		}
+		result, showErr := service.ShowMapping(ctx, *id)
+		if showErr != nil {
+			return writeCLIError(stderr, showErr)
+		}
+		return write(result)
+	case "device-token disable", "device-token enable", "device-token revoke", "device-token reissue":
+		flags := flag.NewFlagSet(args[0]+" "+args[1], flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		licenseID := flags.String("license-id", "", "")
+		confirm := flags.String("confirm-target", "", "")
+		reason := flags.String("reason", "", "")
+		output := flags.String("output-file", "", "")
+		if flags.Parse(args[2:]) != nil || flags.NArg() != 0 {
+			return 2
+		}
+		op.Reason = *reason
+		action := adminservice.DeviceTokenAction(args[1])
+		if strings.TrimSpace(*reason) == "" || *confirm != adminservice.TargetDigest(*licenseID) {
+			return writeCLIError(stderr, adminservice.ErrInvalidInput)
+		}
+		if action == adminservice.DeviceTokenReissue {
+			plan, callErr := service.PrepareDeviceTokenReissue(ctx, adminservice.DeviceTokenMutation{Action: action, LicenseID: *licenseID, ConfirmTarget: *confirm, Operation: op})
+			if callErr != nil {
+				return writeCLIError(stderr, callErr)
+			}
+			staged, stageErr := stageDeviceToken(*output, plan.Secret)
+			if stageErr != nil {
+				return writeCLIError(stderr, stageErr)
+			}
+			result, callErr := service.ExecuteDeviceTokenReissue(ctx, plan)
+			if callErr != nil {
+				staged.abort()
+				return writeCLIError(stderr, callErr)
+			}
+			if stageErr = staged.commit(); stageErr != nil {
+				return writeCLIError(stderr, stageErr)
+			}
+			result.DeviceToken = ""
+			return write(result)
+		}
+		result, callErr := service.MutateDeviceToken(ctx, adminservice.DeviceTokenMutation{Action: action, LicenseID: *licenseID, ConfirmTarget: *confirm, Operation: op})
+		if callErr != nil {
+			return writeCLIError(stderr, callErr)
+		}
+		return write(result)
 	case "inventory generate":
 		flags := flag.NewFlagSet("inventory generate", flag.ContinueOnError)
 		flags.SetOutput(stderr)
@@ -221,6 +315,52 @@ func run(ctx context.Context, args []string, getenv func(string) string, service
 		}
 		return write(result)
 	}
+}
+
+func splitModels(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, ",")
+}
+func readSecureAPIKey(path string) ([]byte, error) {
+	if runtime.GOOS == "windows" || !filepath.IsAbs(path) {
+		return nil, adminservice.ErrInvalidInput
+	}
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() || before.Mode()&os.ModeSymlink != 0 || before.Mode().Perm() != 0o600 || before.Size() < 1 || before.Size() > maxAPIKeyFileBytes {
+		return nil, adminservice.ErrInvalidInput
+	}
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, adminservice.ErrInvalidInput
+	}
+	file := os.NewFile(uintptr(fd), path)
+	defer file.Close()
+	after, err := file.Stat()
+	if err != nil || !os.SameFile(before, after) || !after.Mode().IsRegular() || after.Mode().Perm() != 0o600 {
+		return nil, adminservice.ErrInvalidInput
+	}
+	contents, err := io.ReadAll(io.LimitReader(file, maxAPIKeyFileBytes+1))
+	if err != nil || len(contents) == 0 || len(contents) > maxAPIKeyFileBytes {
+		return nil, adminservice.ErrInvalidInput
+	}
+	contents = bytes.TrimSuffix(contents, []byte{'\n'})
+	if len(contents) == 0 {
+		return nil, adminservice.ErrInvalidInput
+	}
+	return contents, nil
+}
+func stageDeviceToken(path string, value adminservice.DeviceTokenResult) (stagedSecret, error) {
+	if value.DeviceToken == "" {
+		return stagedSecret{}, adminservice.ErrInvalidInput
+	}
+	return stageSecretJSON(path, struct {
+		SchemaVersion int    `json:"schemaVersion"`
+		DeviceID      string `json:"deviceId"`
+		LicenseID     string `json:"licenseId"`
+		DeviceToken   string `json:"deviceToken"`
+	}{1, value.DeviceID, value.LicenseID, value.DeviceToken})
 }
 
 func loadOperatorCredential(path, claimedID, operatorsPath string) (string, error) {
