@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -20,6 +22,7 @@ import (
 	"u-claw-activation-server/internal/config"
 	"u-claw-activation-server/internal/license"
 	"u-claw-activation-server/internal/lifecycle"
+	"u-claw-activation-server/internal/modelproxy"
 	"u-claw-activation-server/internal/observability"
 	"u-claw-activation-server/internal/persistence"
 	"u-claw-activation-server/internal/security"
@@ -31,7 +34,7 @@ const shutdownTimeout = 10 * time.Second
 const (
 	readHeaderTimeout = 5 * time.Second
 	readTimeout       = 10 * time.Second
-	writeTimeout      = 10 * time.Second
+	writeTimeout      = 75 * time.Second
 	idleTimeout       = 60 * time.Second
 	maximumHeaderSize = 1 << 20
 )
@@ -63,7 +66,8 @@ func run() error {
 		return err
 	}
 	metrics := observability.NewMetrics()
-	public, err := buildPublicHandler(cfg, pool, kms, metrics)
+	artifactEnvelope, secretEncryptor := newRuntimeEnvelopes(kms)
+	public, err := buildPublicHandler(cfg, pool, artifactEnvelope, metrics)
 	if err != nil {
 		return err
 	}
@@ -71,7 +75,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, Observer: metrics, SecretFingerprintKey: cfg.AdminSecretFingerprintKey, AllowedNewAPIHosts: cfg.AllowedNewAPIHosts})
+	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, Observer: metrics, SecretEnvelope: secretEncryptor, KeyVersion: cfg.KMSKeyVersion, SecretFingerprintKey: cfg.AdminSecretFingerprintKey, AllowedNewAPIHosts: cfg.AllowedNewAPIHosts})
 	if err != nil {
 		return err
 	}
@@ -118,7 +122,18 @@ func newApplication(public, admin http.Handler, metrics *observability.Metrics) 
 	})
 }
 
-func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, kms security.KMS, observers ...activation.Observer) (http.Handler, error) {
+type secretEncryptor struct{ envelope *security.EnvelopeService }
+
+func (adapter secretEncryptor) Encrypt(ctx context.Context, binding security.SecretBinding, plaintext []byte) ([]byte, error) {
+	return adapter.envelope.EncryptSecret(ctx, binding, plaintext)
+}
+
+func newRuntimeEnvelopes(kms security.KMS) (*security.EnvelopeService, secretEncryptor) {
+	envelope := security.NewEnvelopeService(kms, nil)
+	return envelope, secretEncryptor{envelope: envelope}
+}
+
+func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, envelope *security.EnvelopeService, metrics *observability.Metrics) (http.Handler, error) {
 	repository, err := persistence.NewActivationRepository(pool)
 	if err != nil {
 		return nil, err
@@ -127,14 +142,9 @@ func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, kms security.KMS,
 	if err != nil {
 		return nil, err
 	}
-	envelope := security.NewEnvelopeService(kms, nil)
-	var observer activation.Observer
-	if len(observers) > 0 {
-		observer = observers[0]
-	}
 	activationService, err := activation.NewService(activation.ServiceOptions{
 		Repository: repository, Signer: licenseSigner, Envelope: envelope, Pepper: cfg.ActivationPepper,
-		KeyID: cfg.LicenseKeyID, KeyVersion: cfg.KMSKeyVersion, LeaseTTL: time.Minute, LicenseTTL: 365 * 24 * time.Hour, Observer: observer,
+		KeyID: cfg.LicenseKeyID, KeyVersion: cfg.KMSKeyVersion, LeaseTTL: time.Minute, LicenseTTL: 365 * 24 * time.Hour, Observer: metrics,
 		PublicModelEndpoint: cfg.PublicModelEndpoint,
 	})
 	if err != nil {
@@ -146,7 +156,47 @@ func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, kms security.KMS,
 	if err != nil {
 		return nil, err
 	}
-	return transport.NewPublicHandler(transport.PublicHandlerOptions{Activation: activationService, Lifecycle: lifecycleService}), nil
+	modelRepository, err := persistence.NewModelProxyRepository(pool)
+	if err != nil {
+		return nil, err
+	}
+	digest, err := modelTokenDigest(cfg.ActivationPepper)
+	if err != nil {
+		return nil, err
+	}
+	modelService, err := modelproxy.NewService(modelproxy.ServiceOptions{Repository: modelRepository, Digest: digest, Envelope: envelope, Observer: metrics})
+	if err != nil {
+		return nil, err
+	}
+	activationHandler := transport.NewPublicHandler(transport.PublicHandlerOptions{Activation: activationService, Lifecycle: lifecycleService})
+	modelHandler := transport.NewModelProxyHandler(transport.ModelProxyHandlerOptions{
+		Service: modelService, Client: modelproxy.NewUpstreamClient(modelproxy.NewSecureTransport(nil, nil)), AllowedHosts: cfg.AllowedNewAPIHosts, Observer: metrics,
+	})
+	return newPublicMux(activationHandler, modelHandler), nil
+}
+
+func newPublicMux(activationHandler, modelHandler http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/model-api/") {
+			modelHandler.ServeHTTP(writer, request)
+			return
+		}
+		activationHandler.ServeHTTP(writer, request)
+	})
+}
+
+func modelTokenDigest(pepper []byte) (func(string) [sha256.Size]byte, error) {
+	if len(pepper) < sha256.Size {
+		return nil, errors.New("model token digest configuration invalid")
+	}
+	key := append([]byte(nil), pepper...)
+	return func(token string) [sha256.Size]byte {
+		mac := hmac.New(sha256.New, key)
+		_, _ = mac.Write([]byte(token))
+		var digest [sha256.Size]byte
+		copy(digest[:], mac.Sum(nil))
+		return digest
+	}, nil
 }
 
 func productionKMS(cfg config.Config) (security.KMS, error) {

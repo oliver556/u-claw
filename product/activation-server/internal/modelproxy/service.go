@@ -42,7 +42,7 @@ type Repository interface {
 	Audit(context.Context, Audit) error
 }
 type SecretEnvelope interface {
-	Decrypt(context.Context, security.SecretBinding, []byte) ([]byte, error)
+	DecryptSecret(context.Context, security.SecretBinding, []byte) ([]byte, error)
 }
 type ServiceOptions struct {
 	Repository Repository
@@ -130,7 +130,7 @@ func (s *Service) Authorize(ctx context.Context, bearer, model, requestID string
 		}
 		return Grant{}, ErrServiceUnavailable
 	}
-	plaintext, err := s.envelope.Decrypt(ctx, security.SecretBinding{Purpose: "new-api-key", SubjectID: auth.InventoryID, KeyVersion: auth.KeyVersion}, auth.Envelope)
+	plaintext, err := s.envelope.DecryptSecret(ctx, security.SecretBinding{Purpose: "new-api-key", SubjectID: auth.InventoryID, KeyVersion: auth.KeyVersion}, auth.Envelope)
 	if err != nil || !apikey.Valid(plaintext) {
 		clear(plaintext)
 		s.finalize(ctx, Grant{Authorization: auth, RequestID: requestID}, "", "secret.unavailable")

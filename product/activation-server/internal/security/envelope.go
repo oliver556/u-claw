@@ -54,6 +54,14 @@ func NewEnvelopeService(kms KMS, randomSource io.Reader) *EnvelopeService {
 	return &EnvelopeService{kms: kms, random: randomSource}
 }
 
+func (service *EnvelopeService) EncryptSecret(ctx context.Context, binding SecretBinding, plaintext []byte) ([]byte, error) {
+	return (&SecretEnvelopeService{kms: service.kms, random: service.random}).Encrypt(ctx, binding, plaintext)
+}
+
+func (service *EnvelopeService) DecryptSecret(ctx context.Context, binding SecretBinding, encoded []byte) ([]byte, error) {
+	return (&SecretEnvelopeService{kms: service.kms, random: service.random}).Decrypt(ctx, binding, encoded)
+}
+
 func (service *EnvelopeService) Encrypt(ctx context.Context, binding EnvelopeBinding, plaintext []byte) ([]byte, error) {
 	if service == nil || service.kms == nil || !validBinding(binding) || len(plaintext) == 0 || len(plaintext) > maxEnvelopePlaintextBytes {
 		return nil, errors.New("envelope input invalid")
