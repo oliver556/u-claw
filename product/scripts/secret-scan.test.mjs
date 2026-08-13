@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { execFile, execFileSync } from "node:child_process";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,6 +10,7 @@ import { scanText, scanTrackedRepository } from "./secret-scan.mjs";
 
 const execFileAsync = promisify(execFile);
 const scannerPath = new URL("./secret-scan.mjs", import.meta.url).pathname;
+const productRoot = path.resolve(new URL("..", import.meta.url).pathname);
 
 test("detects private-key blocks and high-confidence credential assignments", () => {
   const beginPrivateKey = `-----BEGIN ${"PRIVATE KEY"}-----`;
@@ -93,7 +94,7 @@ test("ignores schema declarations, property reads, and similarly named fields", 
   assert.deepEqual(scanText("src/config.ts", source), []);
 });
 
-test("scans tracked text files while skipping untracked and binary files", async (t) => {
+test("scans index, tracked worktree, and untracked nonignored files while skipping binary files", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "uclaw-secret-scan-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, "nested"));
@@ -108,6 +109,7 @@ test("scans tracked text files while skipping untracked and binary files", async
 
   assert.deepEqual(await scanTrackedRepository(path.join(root, "nested")), [
     { path: "tracked.env", line: 1, rule: "CREDENTIAL_ASSIGNMENT" },
+    { path: "untracked.env", line: 1, rule: "CREDENTIAL_ASSIGNMENT" },
   ]);
 });
 
@@ -127,6 +129,121 @@ test("scans staged index blobs instead of divergent worktree contents", async (t
   ]);
 });
 
+test("also scans unstaged tracked worktree contents", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-secret-worktree-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("git", ["init", "-q"], { cwd: root });
+
+  const target = path.join(root, "tracked.env");
+  await writeFile(target, "api_key=REDACTED\n");
+  await execFileAsync("git", ["add", "tracked.env"], { cwd: root });
+  const secret = ["live", "Q7mR2tY8pL5nD3xK9wJ4"].join("_");
+  await writeFile(target, `api_key=${secret}\n`);
+
+  assert.deepEqual(await scanTrackedRepository(root), [
+    { path: "tracked.env", line: 1, rule: "CREDENTIAL_ASSIGNMENT" },
+  ]);
+});
+
+test("skips ignored files, symlinks, and duplicate index/worktree findings", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-secret-filter-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("git", ["init", "-q"], { cwd: root });
+
+  const secret = ["live", "R8mQ2tY7pL4nD9xK5wH3"].join("_");
+  await writeFile(path.join(root, ".gitignore"), "ignored.env\n");
+  await writeFile(path.join(root, "tracked.env"), `api_key=${secret}\n`);
+  await writeFile(path.join(root, "ignored.env"), `api_key=${secret}\n`);
+  await symlink("ignored.env", path.join(root, "linked.env"));
+  await execFileAsync("git", ["add", ".gitignore", "tracked.env", "linked.env"], { cwd: root });
+
+  assert.deepEqual(await scanTrackedRepository(root), [
+    { path: "tracked.env", line: 1, rule: "CREDENTIAL_ASSIGNMENT" },
+  ]);
+});
+
+test("fails closed when one file exceeds the size limit", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-secret-file-limit-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("git", ["init", "-q"], { cwd: root });
+  await writeFile(path.join(root, "large.txt"), "123456789");
+
+  await assert.rejects(
+    scanTrackedRepository(root, { maxFileBytes: 8, maxTotalBytes: 100 }),
+    /large\.txt exceeds secret scan file size limit/u,
+  );
+});
+
+test("fails closed when aggregate input exceeds the total size limit", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-secret-total-limit-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("git", ["init", "-q"], { cwd: root });
+  await writeFile(path.join(root, "first.txt"), "123456");
+  await writeFile(path.join(root, "second.txt"), "abcdef");
+
+  await assert.rejects(
+    scanTrackedRepository(root, { maxFileBytes: 8, maxTotalBytes: 10 }),
+    /secret scan total size limit exceeded/u,
+  );
+});
+
+test("counts identical index and worktree content only once toward total size", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-secret-dedupe-limit-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("git", ["init", "-q"], { cwd: root });
+  await writeFile(path.join(root, "tracked.txt"), "123456");
+  await execFileAsync("git", ["add", "tracked.txt"], { cwd: root });
+
+  assert.deepEqual(
+    await scanTrackedRepository(root, { maxFileBytes: 8, maxTotalBytes: 6 }),
+    [],
+  );
+});
+
+test("fails closed on unmerged index stages without leaking blob contents", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-secret-unmerged-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("git", ["init", "-q"], { cwd: root });
+  const secret = ["live", "S9mQ2tY7pL4nD8xK5wH3"].join("_");
+  const objectIds = [];
+  for (const [index, contents] of ["base\n", `api_key=${secret}\n`, "theirs\n"].entries()) {
+    const blobPath = path.join(root, `blob-${index}.txt`);
+    await writeFile(blobPath, contents);
+    const { stdout } = await execFileAsync("git", ["hash-object", "-w", blobPath], { cwd: root });
+    objectIds.push(stdout.trim());
+    await rm(blobPath);
+  }
+  const indexInfo = objectIds.map((objectId, index) => `100644 ${objectId} ${index + 1}\tconflicted.env`).join("\n");
+  execFileSync("git", ["update-index", "--index-info"], { cwd: root, input: `${indexInfo}\n` });
+
+  await assert.rejects(scanTrackedRepository(root), /unmerged index entry: conflicted\.env/u);
+  await assert.rejects(
+    execFileAsync(process.execPath, [scannerPath], { cwd: root }),
+    (error) => {
+      assert.equal(error.code, 2);
+      assert.equal(error.stdout, "");
+      assert.equal(error.stderr, "Secret scan failed\n");
+      assert.equal(`${error.stdout}${error.stderr}`.includes(secret), false);
+      return true;
+    },
+  );
+});
+
+test("fails closed when git reports a non-UTF-8 path", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-secret-path-encoding-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("git", ["init", "-q"], { cwd: root });
+  const blobPath = path.join(root, "blob.txt");
+  await writeFile(blobPath, "safe\n");
+  const { stdout } = await execFileAsync("git", ["hash-object", "-w", blobPath], { cwd: root });
+  await rm(blobPath);
+  const prefix = Buffer.from(`100644 ${stdout.trim()} 0\t`, "ascii");
+  const indexInfo = Buffer.concat([prefix, Buffer.from([0xff]), Buffer.from(".env\n", "ascii")]);
+  execFileSync("git", ["update-index", "--index-info"], { cwd: root, input: indexInfo });
+
+  await assert.rejects(scanTrackedRepository(root), /git path is not valid UTF-8/u);
+});
+
 test("CLI reports only path, line, and rule without echoing secret values", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "uclaw-secret-cli-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -144,5 +261,37 @@ test("CLI reports only path, line, and rule without echoing secret values", asyn
       assert.equal(error.stderr, "");
       return true;
     },
+  );
+});
+
+test("activation server container is a Go 1.25 linux/amd64 nonroot scratch image", async () => {
+  const dockerfile = await readFile(path.join(productRoot, "activation-server", "Dockerfile"), "utf8");
+  assert.match(dockerfile, /^FROM --platform=\$BUILDPLATFORM golang:1\.25(?:\.\d+)?-bookworm AS build$/mu);
+  assert.match(dockerfile, /^ARG TARGETOS$/mu);
+  assert.match(dockerfile, /^ARG TARGETARCH$/mu);
+  assert.match(dockerfile, /^RUN CGO_ENABLED=0 GOOS=\$TARGETOS GOARCH=\$TARGETARCH go build .* \.\/cmd\/server$/mu);
+  assert.match(dockerfile, /^FROM --platform=\$TARGETPLATFORM scratch$/mu);
+  assert.match(dockerfile, /^USER 65532:65532$/mu);
+  assert.deepEqual(dockerfile.match(/^COPY /gmu)?.length, 4);
+  assert.match(dockerfile, /^COPY --from=build \/etc\/ssl\/certs\/ca-certificates\.crt \/etc\/ssl\/certs\/ca-certificates\.crt$/mu);
+  assert.match(dockerfile, /^COPY --from=build \/out\/activation-server \/activation-server$/mu);
+});
+
+test("worktree scan opens without following links and reads through the same descriptor with a bound", async () => {
+  const scanner = await readFile(scannerPath, "utf8");
+  assert.match(scanner, /open\(absolutePath, constants\.O_RDONLY \| constants\.O_NOFOLLOW\)/u);
+  assert.match(scanner, /handle\.stat\(\)/u);
+  assert.match(scanner, /handle\.read\(/u);
+  assert.match(scanner, /limits\.nextReadSize\(length\)/u);
+  assert.match(scanner, /maxFileBytes - length \+ 1/u);
+  assert.match(scanner, /finally\s*\{\s*await handle\.close\(\)/u);
+  assert.doesNotMatch(scanner, /lstat\(absolutePath\)|readFile\(absolutePath\)/u);
+});
+
+test("activation server test gate runs tests, race detector, vet, and linux build serially", async () => {
+  const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
+  assert.equal(
+    packageJson.scripts["test:activation-server"],
+    "cd activation-server && go test -p=1 -count=1 ./... && go test -p=1 -race -count=1 ./... && go vet ./... && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /dev/null ./cmd/server",
   );
 });
