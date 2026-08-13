@@ -158,3 +158,28 @@ func TestUnavailableDatabaseReadinessFailsClosed(t *testing.T) {
 		t.Fatal("unwired database readiness reported ready")
 	}
 }
+
+func TestRunHealthcheckRequiresReadyResponse(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status int
+		wantOK bool
+	}{
+		{name: "ready", status: http.StatusOK, wantOK: true},
+		{name: "not ready", status: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/health/ready" {
+					t.Errorf("path = %s", r.URL.Path)
+				}
+				w.WriteHeader(test.status)
+			}))
+			defer server.Close()
+			err := runHealthcheck(server.URL+"/health/ready", server.Client())
+			if (err == nil) != test.wantOK {
+				t.Fatalf("runHealthcheck error = %v, wantOK = %t", err, test.wantOK)
+			}
+		})
+	}
+}

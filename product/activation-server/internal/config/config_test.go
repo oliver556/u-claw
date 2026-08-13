@@ -383,6 +383,51 @@ func TestProductionEdgeAuthenticatesTrustedProxyHopWithDedicatedMTLS(t *testing.
 	}
 }
 
+func TestProductionGatewayStartupAndReadinessAreExecutable(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "..", "deploy", "compose.production.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(contents)
+	publicConfig := composeSection(t, compose, "  public_gateway:\n", "  caddy_edge:\n")
+	if strings.Contains(publicConfig, " resolve;") {
+		t.Fatal("OpenResty upstream uses unsupported runtime resolve parameter")
+	}
+	if !strings.Contains(publicConfig, "client_body_temp_path /tmp/client_body_temp 1 2;") {
+		t.Fatal("OpenResty request bodies do not use writable tmpfs")
+	}
+
+	activationAnchor := composeSection(t, compose, "x-activation-app:", "\nservices:")
+	for _, required := range []string{`test: ["CMD", "/activation-server", "--healthcheck"]`, "interval: 10s", "timeout: 3s"} {
+		if !strings.Contains(activationAnchor, required) {
+			t.Errorf("activation healthcheck missing %q", required)
+		}
+	}
+	publicService := composeSection(t, compose, "  public-gateway:\n", "\n  # Caddy obtains")
+	for _, required := range []string{"condition: service_healthy", `test: ["CMD-SHELL", "openresty -t && kill -0 1"]`} {
+		if !strings.Contains(publicService, required) {
+			t.Errorf("public gateway readiness missing %q", required)
+		}
+	}
+	caddyService := composeSection(t, compose, "  caddy-edge:\n", "\n  # Loopback binding")
+	if !strings.Contains(caddyService, "condition: service_healthy") {
+		t.Fatal("Caddy does not wait for healthy public gateway")
+	}
+}
+
+func composeSection(t *testing.T, source, start, end string) string {
+	t.Helper()
+	startAt := strings.Index(source, start)
+	if startAt < 0 {
+		t.Fatalf("compose section start missing %q", start)
+	}
+	endAt := strings.Index(source[startAt+len(start):], end)
+	if endAt < 0 {
+		t.Fatalf("compose section end missing %q", end)
+	}
+	return source[startAt : startAt+len(start)+endAt]
+}
+
 func writeSigningKey(t *testing.T, directory string) string {
 	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
