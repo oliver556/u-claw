@@ -156,28 +156,33 @@ type Repository interface {
 	ShowMapping(context.Context, string) (MappingSummary, error)
 	MutateDeviceToken(context.Context, DeviceTokenMutation) (DeviceTokenResult, error)
 	ReissueDeviceToken(context.Context, DeviceTokenMutation, func() error) (DeviceTokenResult, error)
+	ResolveDeviceTokenReissue(context.Context, DeviceTokenMutation) (DeviceTokenReissueOutcome, error)
 	PrepareDeviceTokenTarget(context.Context, string) (DeviceTokenResult, error)
 }
 
 type ServiceOptions struct {
-	Repository     Repository
-	Pepper         []byte
-	Random         io.Reader
-	Observer       Observer
-	SecretEnvelope SecretEncrypter
-	KeyVersion     string
+	Repository           Repository
+	Pepper               []byte
+	Random               io.Reader
+	Observer             Observer
+	SecretEnvelope       SecretEncrypter
+	KeyVersion           string
+	SecretFingerprintKey []byte
+	AllowedNewAPIHosts   []string
 }
 
 type Observer interface {
 	RecordLifecycle(action, outcome string)
 }
 type Service struct {
-	repository     Repository
-	pepper         []byte
-	random         io.Reader
-	observer       Observer
-	secretEnvelope SecretEncrypter
-	keyVersion     string
+	repository           Repository
+	pepper               []byte
+	random               io.Reader
+	observer             Observer
+	secretEnvelope       SecretEncrypter
+	keyVersion           string
+	secretFingerprintKey []byte
+	allowedNewAPIHosts   map[string]struct{}
 }
 
 func NewService(options ServiceOptions) (*Service, error) {
@@ -187,7 +192,14 @@ func NewService(options ServiceOptions) (*Service, error) {
 	if options.Random == nil {
 		options.Random = rand.Reader
 	}
-	return &Service{repository: options.Repository, pepper: append([]byte(nil), options.Pepper...), random: options.Random, observer: options.Observer, secretEnvelope: options.SecretEnvelope, keyVersion: options.KeyVersion}, nil
+	hosts := make(map[string]struct{}, len(options.AllowedNewAPIHosts))
+	for _, host := range options.AllowedNewAPIHosts {
+		host = strings.ToLower(strings.TrimSpace(host))
+		if host != "" {
+			hosts[host] = struct{}{}
+		}
+	}
+	return &Service{repository: options.Repository, pepper: append([]byte(nil), options.Pepper...), random: options.Random, observer: options.Observer, secretEnvelope: options.SecretEnvelope, keyVersion: options.KeyVersion, secretFingerprintKey: append([]byte(nil), options.SecretFingerprintKey...), allowedNewAPIHosts: hosts}, nil
 }
 
 func (service *Service) Generate(ctx context.Context, input GenerateInput) ([]InventorySummary, error) {

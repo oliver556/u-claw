@@ -16,6 +16,8 @@ x-activation-app: &activation-app
     KMS_KEK_FILE: /run/secrets/kms_kek
     TOKEN_SIGNING_KEY_FILE: /run/secrets/token_signing_key
     ADMIN_OPERATORS_FILE: /run/secrets/admin_operators
+    ADMIN_SECRET_FINGERPRINT_KEY_FILE: /run/secrets/admin_secret_fingerprint_key
+    NEW_API_ALLOWED_HOSTS: ${NEW_API_ALLOWED_HOSTS:?set NEW_API_ALLOWED_HOSTS}
   secrets:
     - activation_pepper
     - license_signing_key
@@ -23,6 +25,7 @@ x-activation-app: &activation-app
     - kms_kek
     - token_signing_key
     - admin_operators
+    - admin_secret_fingerprint_key
   networks:
     - service_private
   read_only: true
@@ -164,6 +167,8 @@ secrets:
     file: ${TOKEN_SIGNING_KEY_FILE:?set TOKEN_SIGNING_KEY_FILE}
   admin_operators:
     file: ${ADMIN_OPERATORS_FILE:?set ADMIN_OPERATORS_FILE}
+  admin_secret_fingerprint_key:
+    file: ${ADMIN_SECRET_FINGERPRINT_KEY_FILE:?set ADMIN_SECRET_FINGERPRINT_KEY_FILE}
   tls_certificate:
     file: ${TLS_CERTIFICATE_FILE:?set TLS_CERTIFICATE_FILE}
   tls_private_key:

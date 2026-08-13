@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -232,6 +233,34 @@ func (repository *ActivationRepository) MarkConfigured(ctx context.Context, loca
 	return replay, nil
 }
 
+func (repository *ActivationRepository) ResolveDeviceTokenReissue(ctx context.Context, mutation admin.DeviceTokenMutation) (admin.DeviceTokenReissueOutcome, error) {
+	fingerprint := adminFingerprint("device-token.reissue", mutation.Operation, mutation.LicenseID)
+	var status string
+	var encoded, stored []byte
+	err := repository.pool.QueryRow(ctx, `SELECT request_fingerprint,status,result FROM admin_operations WHERE idempotency_key=$1`, mutation.Operation.IdempotencyKey).Scan(&stored, &status, &encoded)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return admin.DeviceTokenReissueOutcome{}, nil
+	}
+	if err != nil {
+		return admin.DeviceTokenReissueOutcome{}, err
+	}
+	if !equalBytes(stored, fingerprint) {
+		return admin.DeviceTokenReissueOutcome{}, admin.ErrInvalidInput
+	}
+	if status != "completed" {
+		return admin.DeviceTokenReissueOutcome{}, nil
+	}
+	var result admin.DeviceTokenResult
+	if json.Unmarshal(encoded, &result) != nil {
+		return admin.DeviceTokenReissueOutcome{}, errors.New("resolve admin operation")
+	}
+	var digest []byte
+	if err = repository.pool.QueryRow(ctx, `SELECT token_digest FROM device_access_tokens WHERE device_token_id=$1 AND license_id=$2`, result.DeviceTokenID, mutation.LicenseID).Scan(&digest); err != nil {
+		return admin.DeviceTokenReissueOutcome{}, err
+	}
+	return admin.DeviceTokenReissueOutcome{Result: result, TokenDigest: digest, Completed: true}, nil
+}
+
 func (repository *ActivationRepository) SetMapping(ctx context.Context, input admin.MappingInput) (admin.MappingSummary, error) {
 	action := "new-api.mapping.set"
 	fingerprint := adminFingerprint(action, input.Operation, struct {
@@ -340,7 +369,27 @@ func (repository *ActivationRepository) mutateDeviceToken(ctx context.Context, m
 		return replay, repository.adminFailure(ctx, action, mutation.Operation, &mutation.LicenseID, businessErr)
 	}
 	var tokenID, inventoryID, deviceID, status string
-	err = tx.QueryRow(ctx, `SELECT token.device_token_id,token.inventory_id,token.device_id,token.status FROM device_access_tokens token JOIN licenses license ON license.license_id=token.license_id AND license.device_id=token.device_id WHERE token.license_id=$1 AND license.status='active' ORDER BY token.issued_at DESC LIMIT 1 FOR UPDATE OF token`, mutation.LicenseID).Scan(&tokenID, &inventoryID, &deviceID, &status)
+	if mutation.Action == admin.DeviceTokenReissue {
+		err = tx.QueryRow(ctx, `SELECT inventory_id,device_id FROM device_access_tokens WHERE license_id=$1 AND status='active' ORDER BY issued_at DESC LIMIT 1`, mutation.LicenseID).Scan(&inventoryID, &deviceID)
+		if err == nil {
+			err = tx.QueryRow(ctx, `SELECT id FROM activation_inventory WHERE id=$1 FOR UPDATE`, inventoryID).Scan(&inventoryID)
+		}
+		if err == nil {
+			err = tx.QueryRow(ctx, `SELECT device_id FROM devices WHERE device_id=$1 AND inventory_id=$2 FOR UPDATE`, deviceID, inventoryID).Scan(&deviceID)
+		}
+		if err == nil {
+			err = tx.QueryRow(ctx, `SELECT license_id FROM licenses WHERE license_id=$1 AND device_id=$2 AND status='active' FOR UPDATE`, mutation.LicenseID, deviceID).Scan(&mutation.LicenseID)
+		}
+		if err == nil {
+			var bindingID string
+			err = tx.QueryRow(ctx, `SELECT inventory_id FROM new_api_bindings WHERE inventory_id=$1 AND device_id=$2 FOR UPDATE`, inventoryID, deviceID).Scan(&bindingID)
+		}
+		if err == nil {
+			err = tx.QueryRow(ctx, `SELECT device_token_id,status FROM device_access_tokens WHERE license_id=$1 AND device_id=$2 AND inventory_id=$3 AND status='active' ORDER BY issued_at DESC LIMIT 1 FOR UPDATE`, mutation.LicenseID, deviceID, inventoryID).Scan(&tokenID, &status)
+		}
+	} else {
+		err = tx.QueryRow(ctx, `SELECT token.device_token_id,token.inventory_id,token.device_id,token.status FROM device_access_tokens token JOIN licenses license ON license.license_id=token.license_id AND license.device_id=token.device_id WHERE token.license_id=$1 AND license.status='active' ORDER BY token.issued_at DESC LIMIT 1 FOR UPDATE OF token`, mutation.LicenseID).Scan(&tokenID, &inventoryID, &deviceID, &status)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fail(admin.ErrInvalidInput)
 	}
@@ -409,6 +458,16 @@ func (repository *ActivationRepository) mutateDeviceToken(ctx context.Context, m
 		}
 	}
 	if err = tx.Commit(ctx); err != nil {
+		outcome, resolveErr := repository.ResolveDeviceTokenReissue(ctx, mutation)
+		if resolveErr != nil {
+			return replay, admin.ErrRecoveryConfirmationRequired
+		}
+		if outcome.Completed && outcome.Result.DeviceTokenID == mutation.ReplacementTokenID && hmac.Equal(outcome.TokenDigest, mutation.ReplacementDigest) {
+			return outcome.Result, nil
+		}
+		if outcome.Completed {
+			return replay, admin.ErrInvalidInput
+		}
 		return replay, err
 	}
 	return replay, nil

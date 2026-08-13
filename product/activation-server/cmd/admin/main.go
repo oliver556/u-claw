@@ -45,6 +45,7 @@ type adminService interface {
 	MutateDeviceToken(context.Context, adminservice.DeviceTokenMutation) (adminservice.DeviceTokenResult, error)
 	PrepareDeviceTokenReissue(context.Context, adminservice.DeviceTokenMutation) (adminservice.DeviceTokenReissuePlan, error)
 	ExecuteDeviceTokenReissue(context.Context, adminservice.DeviceTokenReissuePlan, func() error) (adminservice.DeviceTokenResult, error)
+	RecoverDeviceTokenReissue(context.Context, adminservice.DeviceTokenMutation, adminservice.DeviceTokenResult) (adminservice.DeviceTokenResult, error)
 }
 
 func main() { os.Exit(realMain(context.Background(), os.Args[1:], os.Getenv, os.Stdout, os.Stderr)) }
@@ -75,7 +76,7 @@ func realMain(ctx context.Context, args []string, getenv func(string) string, st
 		fmt.Fprintln(stderr, "admin service unavailable")
 		return 1
 	}
-	service, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, SecretEnvelope: security.NewSecretEnvelopeService(kms, nil), KeyVersion: cfg.KMSKeyVersion})
+	service, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, SecretEnvelope: security.NewSecretEnvelopeService(kms, nil), KeyVersion: cfg.KMSKeyVersion, SecretFingerprintKey: cfg.AdminSecretFingerprintKey, AllowedNewAPIHosts: cfg.AllowedNewAPIHosts})
 	if err != nil {
 		fmt.Fprintln(stderr, "admin service unavailable")
 		return 1
@@ -161,6 +162,17 @@ func run(ctx context.Context, args []string, getenv func(string) string, service
 			return writeCLIError(stderr, adminservice.ErrInvalidInput)
 		}
 		if action == adminservice.DeviceTokenReissue {
+			if _, existingErr := os.Lstat(*output); existingErr == nil {
+				existing, readErr := readExistingDeviceToken(*output)
+				if readErr != nil {
+					return writeCLIError(stderr, readErr)
+				}
+				result, recoverErr := service.RecoverDeviceTokenReissue(ctx, adminservice.DeviceTokenMutation{Action: action, LicenseID: *licenseID, ConfirmTarget: *confirm, Operation: op}, existing)
+				if recoverErr != nil {
+					return writeCLIError(stderr, recoverErr)
+				}
+				return write(result)
+			}
 			plan, callErr := service.PrepareDeviceTokenReissue(ctx, adminservice.DeviceTokenMutation{Action: action, LicenseID: *licenseID, ConfirmTarget: *confirm, Operation: op})
 			if callErr != nil {
 				return writeCLIError(stderr, callErr)
@@ -172,7 +184,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, service
 			result, callErr := service.ExecuteDeviceTokenReissue(ctx, plan, staged.commit)
 			if callErr != nil {
 				staged.abort()
-				staged.removePublished()
+				if !errors.Is(callErr, adminservice.ErrRecoveryConfirmationRequired) {
+					staged.removePublished()
+				}
 				return writeCLIError(stderr, callErr)
 			}
 			result.DeviceToken = ""
@@ -336,7 +350,8 @@ func readSecureAPIKey(path string) ([]byte, error) {
 	file := os.NewFile(uintptr(fd), path)
 	defer file.Close()
 	after, err := file.Stat()
-	if err != nil || !os.SameFile(before, after) || !after.Mode().IsRegular() || after.Mode().Perm() != 0o600 {
+	stat, ok := after.Sys().(*syscall.Stat_t)
+	if err != nil || !ok || stat.Nlink != 1 || !os.SameFile(before, after) || !after.Mode().IsRegular() || after.Mode().Perm() != 0o600 {
 		return nil, adminservice.ErrInvalidInput
 	}
 	contents, err := io.ReadAll(io.LimitReader(file, maxAPIKeyFileBytes+1))
@@ -355,10 +370,55 @@ func stageDeviceToken(path string, value adminservice.DeviceTokenResult) (staged
 	}
 	return stageSecretJSON(path, struct {
 		SchemaVersion int    `json:"schemaVersion"`
+		DeviceTokenID string `json:"deviceTokenId"`
 		DeviceID      string `json:"deviceId"`
 		LicenseID     string `json:"licenseId"`
 		DeviceToken   string `json:"deviceToken"`
-	}{1, value.DeviceID, value.LicenseID, value.DeviceToken})
+	}{1, value.DeviceTokenID, value.DeviceID, value.LicenseID, value.DeviceToken})
+}
+func readExistingDeviceToken(path string) (adminservice.DeviceTokenResult, error) {
+	contents, err := readSecureRegularFile(path, 32, 4096)
+	if err != nil {
+		return adminservice.DeviceTokenResult{}, adminservice.ErrInvalidInput
+	}
+	var document struct {
+		SchemaVersion int    `json:"schemaVersion"`
+		DeviceTokenID string `json:"deviceTokenId"`
+		DeviceID      string `json:"deviceId"`
+		LicenseID     string `json:"licenseId"`
+		DeviceToken   string `json:"deviceToken"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&document) != nil || decoder.Decode(&struct{}{}) != io.EOF || document.SchemaVersion != 1 {
+		return adminservice.DeviceTokenResult{}, adminservice.ErrInvalidInput
+	}
+	return adminservice.DeviceTokenResult{DeviceTokenID: document.DeviceTokenID, DeviceID: document.DeviceID, LicenseID: document.LicenseID, DeviceToken: document.DeviceToken}, nil
+}
+func readSecureRegularFile(path string, min, max int64) ([]byte, error) {
+	if runtime.GOOS == "windows" || !filepath.IsAbs(path) {
+		return nil, adminservice.ErrInvalidInput
+	}
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() || before.Mode().Perm() != 0o600 || before.Size() < min || before.Size() > max {
+		return nil, adminservice.ErrInvalidInput
+	}
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, adminservice.ErrInvalidInput
+	}
+	file := os.NewFile(uintptr(fd), path)
+	defer file.Close()
+	after, err := file.Stat()
+	stat, ok := after.Sys().(*syscall.Stat_t)
+	if err != nil || !ok || stat.Nlink != 1 || !os.SameFile(before, after) {
+		return nil, adminservice.ErrInvalidInput
+	}
+	contents, err := io.ReadAll(io.LimitReader(file, max+1))
+	if err != nil || int64(len(contents)) > max {
+		return nil, adminservice.ErrInvalidInput
+	}
+	return contents, nil
 }
 
 func loadOperatorCredential(path, claimedID, operatorsPath string) (string, error) {

@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -36,26 +38,31 @@ var requiredVariables = []string{
 	"KMS_KEK_FILE",
 	"TOKEN_SIGNING_KEY_FILE",
 	"ADMIN_OPERATORS_FILE",
+	"ADMIN_SECRET_FINGERPRINT_KEY_FILE",
+	"NEW_API_ALLOWED_HOSTS",
 }
 
 type Config struct {
-	ListenAddress         string
-	DatabaseURL           string
-	ActivationPepperFile  string
-	LicenseSigningKeyFile string
-	ActivationPepper      []byte
-	LicenseSigningKey     ed25519.PrivateKey
-	StatusSigningKey      ed25519.PrivateKey
-	LicenseKeyID          string
-	StatusKeyID           string
-	KMSProvider           string
-	KMSKeyVersion         string
-	KMSKEKFile            string
-	KMSKEK                []byte
-	TokenSigningKeyFile   string
-	TokenSigningKey       []byte
-	AdminOperatorsFile    string
-	AdminOperators        admin.OperatorRegistry
+	ListenAddress                 string
+	DatabaseURL                   string
+	ActivationPepperFile          string
+	LicenseSigningKeyFile         string
+	ActivationPepper              []byte
+	LicenseSigningKey             ed25519.PrivateKey
+	StatusSigningKey              ed25519.PrivateKey
+	LicenseKeyID                  string
+	StatusKeyID                   string
+	KMSProvider                   string
+	KMSKeyVersion                 string
+	KMSKEKFile                    string
+	KMSKEK                        []byte
+	TokenSigningKeyFile           string
+	TokenSigningKey               []byte
+	AdminOperatorsFile            string
+	AdminOperators                admin.OperatorRegistry
+	AdminSecretFingerprintKeyFile string
+	AdminSecretFingerprintKey     []byte
+	AllowedNewAPIHosts            []string
 }
 
 func Load() (Config, error) {
@@ -104,25 +111,34 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("configuration ADMIN_OPERATORS_FILE is invalid")
 	}
+	fingerprintKey, err := readRegularFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], 32, maximumPepperBytes)
+	if err != nil {
+		return Config{}, errors.New("configuration ADMIN_SECRET_FINGERPRINT_KEY_FILE is invalid")
+	}
+	allowedHosts, err := parseAllowedNewAPIHosts(values["NEW_API_ALLOWED_HOSTS"])
+	if err != nil {
+		return Config{}, errors.New("configuration NEW_API_ALLOWED_HOSTS is invalid")
+	}
 
 	return Config{
-		ListenAddress:         listenAddress,
-		DatabaseURL:           values["DATABASE_URL"],
-		ActivationPepperFile:  values["ACTIVATION_PEPPER_FILE"],
-		LicenseSigningKeyFile: values["LICENSE_SIGNING_KEY_FILE"],
-		ActivationPepper:      pepper,
-		LicenseSigningKey:     signingKey,
-		StatusSigningKey:      statusSigningKey,
-		LicenseKeyID:          values["LICENSE_KEY_ID"],
-		StatusKeyID:           values["STATUS_KEY_ID"],
-		KMSProvider:           values["KMS_PROVIDER"],
-		KMSKeyVersion:         values["KMS_KEY_VERSION"],
-		KMSKEKFile:            values["KMS_KEK_FILE"],
-		KMSKEK:                kek,
-		TokenSigningKeyFile:   values["TOKEN_SIGNING_KEY_FILE"],
-		TokenSigningKey:       tokenSigningKey,
-		AdminOperatorsFile:    values["ADMIN_OPERATORS_FILE"],
-		AdminOperators:        adminOperators,
+		ListenAddress:                 listenAddress,
+		DatabaseURL:                   values["DATABASE_URL"],
+		ActivationPepperFile:          values["ACTIVATION_PEPPER_FILE"],
+		LicenseSigningKeyFile:         values["LICENSE_SIGNING_KEY_FILE"],
+		ActivationPepper:              pepper,
+		LicenseSigningKey:             signingKey,
+		StatusSigningKey:              statusSigningKey,
+		LicenseKeyID:                  values["LICENSE_KEY_ID"],
+		StatusKeyID:                   values["STATUS_KEY_ID"],
+		KMSProvider:                   values["KMS_PROVIDER"],
+		KMSKeyVersion:                 values["KMS_KEY_VERSION"],
+		KMSKEKFile:                    values["KMS_KEK_FILE"],
+		KMSKEK:                        kek,
+		TokenSigningKeyFile:           values["TOKEN_SIGNING_KEY_FILE"],
+		TokenSigningKey:               tokenSigningKey,
+		AdminOperatorsFile:            values["ADMIN_OPERATORS_FILE"],
+		AdminOperators:                adminOperators,
+		AdminSecretFingerprintKeyFile: values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], AdminSecretFingerprintKey: fingerprintKey, AllowedNewAPIHosts: allowedHosts,
 	}, nil
 }
 
@@ -208,7 +224,8 @@ func readRegularFile(path string, minimumBytes int64, maximumBytes int64) ([]byt
 	defer file.Close()
 
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() < minimumBytes || info.Size() > maximumBytes {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if err != nil || !ok || stat.Nlink != 1 || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() < minimumBytes || info.Size() > maximumBytes {
 		return nil, errors.New("secret file is invalid")
 	}
 	contents, err := io.ReadAll(io.LimitReader(file, maximumBytes+1))
@@ -216,4 +233,23 @@ func readRegularFile(path string, minimumBytes int64, maximumBytes int64) ([]byt
 		return nil, errors.New("secret file is invalid")
 	}
 	return contents, nil
+}
+
+var dnsHostnamePattern = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+func parseAllowedNewAPIHosts(raw string) ([]string, error) {
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, host := range parts {
+		if host == "" || host != strings.TrimSpace(host) || host != strings.ToLower(host) || host == "localhost" || net.ParseIP(strings.Trim(host, "[]")) != nil || !dnsHostnamePattern.MatchString(host) || seen[host] {
+			return nil, errors.New("host allowlist invalid")
+		}
+		seen[host] = true
+		result = append(result, host)
+	}
+	if len(result) == 0 {
+		return nil, errors.New("host allowlist invalid")
+	}
+	return result, nil
 }
