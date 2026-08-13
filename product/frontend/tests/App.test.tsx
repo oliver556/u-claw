@@ -130,8 +130,11 @@ describe("U-Claw application shell", () => {
     renderApp();
 
     const navigation = screen.getByRole("navigation", { name: "主导航" });
-    for (const label of ["工作", "文件", "记忆", "能力", "连接", "用量", "余额", "系统"]) {
+    for (const label of ["工作", "能力", "连接", "用量", "余额", "系统"]) {
       expect(within(navigation).getByRole("link", { name: label })).toBeVisible();
+    }
+    for (const label of ["文件", "记忆", "自动化"]) {
+      expect(within(navigation).queryByRole("link", { name: label })).not.toBeInTheDocument();
     }
     expect(within(navigation).getByRole("link", { name: "工作" })).toHaveAttribute("aria-current", "page");
   });
@@ -167,11 +170,11 @@ describe("U-Claw application shell", () => {
   });
 
   it("navigates to another primary destination", () => {
+    window.history.pushState({}, "", "/#/files");
     renderApp();
-    fireEvent.click(screen.getByRole("link", { name: "文件" }));
 
     expect(screen.getByRole("heading", { name: "文件" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "文件" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("link", { name: "文件" })).not.toBeInTheDocument();
     expect(document.querySelector(".workspace-grid")).toHaveClass("secondary-layout");
     expect(screen.queryByLabelText("会话栏")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();
@@ -210,20 +213,20 @@ describe("U-Claw application shell", () => {
     });
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     window.uclaw = { data: { invoke } } as any;
+    window.history.pushState({}, "", "/#/memory");
     renderApp();
 
-    fireEvent.click(screen.getByRole("link", { name: "记忆" }));
     fireEvent.click(await screen.findByRole("button", { name: "查看 长期记忆" }));
     fireEvent.change(await screen.findByLabelText("记忆正文"), { target: { value: "dirty" } });
-    fireEvent.click(screen.getByRole("link", { name: "文件" }));
+    fireEvent.click(screen.getByRole("link", { name: "系统" }));
 
     expect(confirm).toHaveBeenCalledWith("当前记忆尚未保存，放弃修改吗？");
-    expect(screen.getByRole("link", { name: "记忆" })).toHaveAttribute("aria-current", "page");
+    expect(window.location.hash).toBe("#/memory");
     expect(screen.getByLabelText("记忆正文")).toHaveValue("dirty");
 
     confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByRole("link", { name: "文件" }));
-    expect(await screen.findByRole("heading", { name: "文件" })).toBeVisible();
+    fireEvent.click(screen.getByRole("link", { name: "系统" }));
+    expect(await screen.findByRole("heading", { name: "系统" })).toBeVisible();
   });
 
   it("opens advanced console through fixed window IPC without a URL", async () => {
@@ -343,8 +346,8 @@ describe("U-Claw application shell", () => {
   });
 
   it("focuses main content from the skip link without changing hash routes", () => {
+    window.history.pushState({}, "", "/#/files");
     renderApp();
-    fireEvent.click(screen.getByRole("link", { name: "文件" }));
     expect(window.location.hash).toBe("#/files");
 
     fireEvent.click(screen.getByRole("link", { name: "跳到主要内容" }));
@@ -426,11 +429,12 @@ describe("U-Claw application shell", () => {
     const menu = screen.getByRole("menu", { name: "更多导航" });
     expect(menu).toBeVisible();
 
-    const automation = within(menu).getByRole("menuitem", { name: "自动化" });
-    expect(within(menu).getByRole("menuitem", { name: "连接" })).toHaveFocus();
+    for (const label of ["工作", "能力", "连接", "用量"]) {
+      expect(screen.getByRole("link", { name: label })).toBeVisible();
+    }
+    expect(within(menu).queryByRole("menuitem", { name: "自动化" })).not.toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "余额" })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
-    expect(automation).toHaveFocus();
-    fireEvent.keyDown(document.activeElement!, { key: "End" });
     const system = within(menu).getByRole("menuitem", { name: "系统" });
     expect(system).toHaveFocus();
     fireEvent.click(system);
@@ -457,15 +461,15 @@ describe("U-Claw application shell", () => {
     renderApp();
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
 
-    const connection = screen.getByRole("menuitem", { name: "连接" });
-    const automation = screen.getByRole("menuitem", { name: "自动化" });
-    expect(connection).toHaveAttribute("tabindex", "0");
-    expect(automation).toHaveAttribute("tabindex", "-1");
-    fireEvent.keyDown(connection, { key: "ArrowDown" });
-    expect(connection).toHaveAttribute("tabindex", "-1");
-    expect(automation).toHaveAttribute("tabindex", "0");
+    const balance = screen.getByRole("menuitem", { name: "余额" });
+    const system = screen.getByRole("menuitem", { name: "系统" });
+    expect(balance).toHaveAttribute("tabindex", "0");
+    expect(system).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(balance, { key: "ArrowDown" });
+    expect(balance).toHaveAttribute("tabindex", "-1");
+    expect(system).toHaveAttribute("tabindex", "0");
 
-    fireEvent.blur(automation, { relatedTarget: screen.getByRole("main") });
+    fireEvent.blur(system, { relatedTarget: screen.getByRole("main") });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
@@ -477,7 +481,9 @@ describe("U-Claw application shell", () => {
     fireEvent(window, new Event("resize"));
 
     expect(screen.getByRole("button", { name: "更多" })).toBeVisible();
-    expect(screen.queryByRole("link", { name: "连接" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "连接" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "用量" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "余额" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("会话栏")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();
   });
