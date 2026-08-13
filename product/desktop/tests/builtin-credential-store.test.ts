@@ -53,6 +53,20 @@ function provisionInput(endpoint = "http://127.0.0.1:18090/v1") {
 }
 
 describe("builtin credential store", () => {
+  it("keeps activation credentials separate from normal active credentials", async () => {
+    const { store } = await setup(true);
+    await store.provision(provisionInput());
+    const before = await store.loadActive();
+    await store.provisionActivation!({
+      schemaVersion: 1,
+      deviceId: "device-activation-001",
+      licenseId: "license-activation-001",
+      accessToken: "a".repeat(16),
+      expiresAt: "2026-08-14T00:00:00.000Z",
+    });
+    await expect(store.loadActive()).resolves.toEqual(before);
+    await expect(store.loadActivation!()).resolves.toMatchObject({ deviceId: "device-activation-001" });
+  });
   it("does not initialize the credential root until the first I/O operation", async () => {
     const root = await mkdtemp(join(tmpdir(), "uclaw-builtin-invalid-root-"));
     roots.push(root);
