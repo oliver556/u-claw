@@ -1,0 +1,167 @@
+package transport
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"u-claw-activation-server/internal/modelproxy"
+)
+
+type fakeProxyService struct {
+	grant         modelproxy.Grant
+	err           error
+	bearer, model string
+	completed     bool
+}
+
+func (s *fakeProxyService) Authorize(_ context.Context, bearer, model, requestID string) (modelproxy.Grant, error) {
+	s.bearer = bearer
+	s.model = model
+	s.grant.RequestID = requestID
+	return s.grant, s.err
+}
+func (s *fakeProxyService) Complete(_ context.Context, _ modelproxy.Grant, _, _ string, _ int, _ *modelproxy.Usage) {
+	s.completed = true
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func runtimeSecret(t *testing.T) []byte {
+	t.Helper()
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		t.Fatal(err)
+	}
+	return []byte(hex.EncodeToString(value))
+}
+
+func validGrant(t *testing.T) modelproxy.Grant {
+	return modelproxy.Grant{Authorization: modelproxy.Authorization{TokenID: "10000000-0000-4000-8000-000000000001", InventoryID: "20000000-0000-4000-8000-000000000001", BaseURL: "https://api.example.test/v1", AllowedModels: []string{"allowed"}, DefaultModel: "allowed"}, APIKey: runtimeSecret(t)}
+}
+func TestModelProxyHandlerRelaysStrictChatAndSanitizesHeaders(t *testing.T) {
+	service := &fakeProxyService{grant: validGrant(t)}
+	wantAuthorization := "Bearer " + string(service.grant.APIKey)
+	var upstream *http.Request
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		upstream = r
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}, "Set-Cookie": []string{"bad=1"}}, Body: io.NopCloser(strings.NewReader(`{"id":"chatcmpl_fixture","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))}, nil
+	})}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}, RequestIDs: bytes.NewReader(make([]byte, 16))})
+	req := httptest.NewRequest(http.MethodPost, "/model-api/v1/chat/completions", strings.NewReader(`{"model":"allowed","messages":[{"role":"user","content":"hello"}],"stream":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer token-value")
+	req.Header.Set("Cookie", "secret-cookie")
+	req.Header.Set("X-Forwarded-For", "10.0.0.1")
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != 200 {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+	if upstream.Header.Get("Authorization") != wantAuthorization || upstream.Header.Get("Cookie") != "" || upstream.Header.Get("X-Forwarded-For") != "" {
+		t.Fatalf("headers=%v", upstream.Header)
+	}
+	if res.Header().Get("Set-Cookie") != "" {
+		t.Fatal("response cookie relayed")
+	}
+	if !service.completed {
+		t.Fatal("admission not completed")
+	}
+}
+
+func TestModelProxyHandlerRecordsUpstreamOutcome(t *testing.T) {
+	observer := &fakeProxyObserver{}
+	service := &fakeProxyService{grant: validGrant(t)}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 500, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("secret"))}, nil
+	})}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}, Observer: observer})
+	req := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if len(observer.outcomes) != 1 || observer.outcomes[0] != "unavailable" {
+		t.Fatalf("outcomes=%v", observer.outcomes)
+	}
+}
+
+func TestModelProxyHandlerFiltersModelsToAuthorization(t *testing.T) {
+	service := &fakeProxyService{grant: validGrant(t)}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"object":"list","data":[{"id":"allowed","object":"model","created":1,"owned_by":"owner"},{"id":"blocked","object":"model","created":1,"owned_by":"owner"}]}`))}, nil
+	})}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}})
+	req := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != 200 || strings.Contains(res.Body.String(), "blocked") || !strings.Contains(res.Body.String(), "allowed") {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+type fakeProxyObserver struct{ outcomes []string }
+
+func (*fakeProxyObserver) RecordModelProxyAuthRejected()     {}
+func (*fakeProxyObserver) RecordModelProxyAdmissionLimited() {}
+func (o *fakeProxyObserver) RecordModelProxyUpstream(outcome string, _ time.Duration) {
+	o.outcomes = append(o.outcomes, outcome)
+}
+func TestModelProxyHandlerRejectsMalformedAuthAndStrictPayloads(t *testing.T) {
+	for _, tc := range []struct {
+		name, auth, body string
+		status           int
+	}{{"two headers", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"extra whitespace", "Bearer  one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"stream", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":true}`, 400}, {"unknown", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false,"temperature":0}`, 400}, {"role", "Bearer one", `{"model":"allowed","messages":[{"role":"tool","content":"x"}],"stream":false}`, 400}} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fakeProxyService{grant: validGrant(t)}
+			h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: &http.Client{}, AllowedHosts: []string{"api.example.test"}, RequestIDs: rand.Reader})
+			req := httptest.NewRequest(http.MethodPost, "/model-api/v1/chat/completions", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", tc.auth)
+			if tc.name == "two headers" {
+				req.Header.Add("Authorization", "Bearer two")
+			}
+			res := httptest.NewRecorder()
+			h.ServeHTTP(res, req)
+			if res.Code != tc.status {
+				t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+			}
+			if strings.Contains(res.Body.String(), string(service.grant.APIKey)) {
+				t.Fatal("secret leaked")
+			}
+		})
+	}
+}
+func TestModelProxyHandlerMapsUpstreamFailuresAndRoutesExactly(t *testing.T) {
+	for _, tc := range []struct {
+		upstream, want int
+		code           string
+	}{{401, 502, "UPSTREAM_AUTHENTICATION_FAILED"}, {403, 502, "UPSTREAM_AUTHENTICATION_FAILED"}, {429, 429, "UPSTREAM_RATE_LIMITED"}, {500, 502, "UPSTREAM_UNAVAILABLE"}} {
+		service := &fakeProxyService{grant: validGrant(t)}
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: tc.upstream, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"secret":"upstream-body"}`))}, nil
+		})}
+		h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}, RequestIDs: rand.Reader})
+		req := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer token")
+		res := httptest.NewRecorder()
+		h.ServeHTTP(res, req)
+		if res.Code != tc.want || !strings.Contains(res.Body.String(), tc.code) || strings.Contains(res.Body.String(), "upstream-body") {
+			t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+		}
+	}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{})
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/model-api/v1/models/", nil))
+	if res.Code != 404 {
+		t.Fatalf("route status=%d", res.Code)
+	}
+}
