@@ -168,6 +168,102 @@ describe("chat workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存队列消息" }));
     await waitFor(() => expect(queueInvoke).toHaveBeenCalledWith(expect.objectContaining({ method: "chat-queue.update", params: expect.objectContaining({ itemId: "queue-1", text: "修改后处理" }) })));
   });
+
+  it("imports pasted image and streamed video through one attachment pipeline while preserving text paste", async () => {
+    const base = clientFixture();
+    const readyImage = { id: "image-1", file: { id: "file-image", name: "photo.png", mediaType: "image/png", size: 3, kind: "attachment" as const }, category: "image" as const, state: "ready" as const, progress: 1 };
+    const readyVideo = { id: "video-1", file: { id: "file-video", name: "clip.mp4", mediaType: "video/mp4", size: 5, kind: "attachment" as const }, category: "video" as const, state: "ready" as const, progress: 1 };
+    const invoke = vi.fn(async (request: any) => {
+      const results: Record<string, unknown> = {
+        import: readyImage,
+        "import.begin": { importId: "stream-1" },
+        "import.chunk": { nextOffset: request.params.offset + 5 },
+        "import.finish": readyVideo,
+        prepare: [request.params.attachmentId === "video-1" ? readyVideo : readyImage],
+      };
+      return { method: request.method, requestId: request.requestId, ok: true, result: results[request.method] ?? null };
+    });
+    const createObjectURL = vi.fn((file: Blob) => `blob:${(file as File).name}`);
+    const revokeObjectURL = vi.fn();
+    const queueInvoke = vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: request.method === "chat-queue.list" ? { schemaVersion: 1, sessionId: "session-1", items: [] } : null }));
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    window.uclaw = { attachments: { invoke: invoke as never }, chatQueue: { invoke: queueInvoke as never } };
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) } });
+    const view = render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+
+    const textPaste = fireEvent.paste(composer, { clipboardData: { files: [], getData: () => "普通文本" } });
+    expect(textPaste).toBe(true);
+    expect(invoke).not.toHaveBeenCalled();
+
+    fireEvent.paste(composer, { clipboardData: { files: [new File(["png"], "photo.png", { type: "image/png" })] } });
+    expect(await screen.findByRole("img", { name: "photo.png" })).toBeVisible();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "import" }));
+    expect(screen.getByRole("img", { name: "photo.png" }).compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.paste(composer, { clipboardData: { files: [new File(["video"], "clip.mp4", { type: "video/mp4" })] } });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "import.finish" })));
+    expect(invoke.mock.calls.some(([request]) => request.method === "import" && request.params.name === "clip.mp4")).toBe(false);
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "import.chunk", params: expect.objectContaining({ importId: "stream-1", offset: 0 }) }));
+
+    fireEvent.click(screen.getByRole("button", { name: "移除 photo.png" }));
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:photo.png");
+    fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(queueInvoke).toHaveBeenCalledWith(expect.objectContaining({ method: "chat-queue.add", params: expect.objectContaining({ attachmentIds: ["video-1"] }) })));
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:clip.mp4");
+    view.unmount();
+    expect(createObjectURL).toHaveBeenCalledTimes(2);
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels a failed streamed video import without leaving a preview behind", async () => {
+    const base = clientFixture();
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "import.begin") return { method: request.method, requestId: request.requestId, ok: true, result: { importId: "failed-stream" } };
+      if (request.method === "import.chunk") return { method: request.method, requestId: request.requestId, ok: false, error: { code: "OPERATION_FAILED", message: "chunk failed", retryable: true, recoveryActions: [], causeDetails: {} } };
+      return { method: request.method, requestId: request.requestId, ok: true, result: null };
+    });
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:failed") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) } });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+
+    fireEvent.paste(composer, { clipboardData: { files: [new File(["video"], "broken.mp4", { type: "video/mp4" })] } });
+
+    expect(await screen.findByText("chunk failed")).toBeVisible();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "cancel", params: { attachmentId: "failed-stream" } }));
+    expect(screen.queryByLabelText("视频预览 broken.mp4")).not.toBeInTheDocument();
+  });
+
+  it("releases and cancels an in-progress video when it is removed", async () => {
+    const base = clientFixture();
+    let rejectChunk: ((reason: Error) => void) | undefined;
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "import.begin") return { method: request.method, requestId: request.requestId, ok: true, result: { importId: "active-stream" } };
+      if (request.method === "import.chunk") return new Promise((_resolve, reject) => { rejectChunk = reject; });
+      return { method: request.method, requestId: request.requestId, ok: true, result: null };
+    });
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:active") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) } });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+
+    fireEvent.paste(composer, { clipboardData: { files: [new File(["video"], "active.mp4", { type: "video/mp4" })] } });
+    const remove = await screen.findByRole("button", { name: "移除 active.mp4" });
+    await waitFor(() => expect(rejectChunk).toBeDefined());
+    fireEvent.click(remove);
+    rejectChunk?.(new Error("cancelled"));
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "cancel", params: { attachmentId: "active-stream" } })));
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("cancelled")).not.toBeInTheDocument();
+  });
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });

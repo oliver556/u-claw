@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApprovalCard } from "../src/features/approvals/ApprovalCard";
 import { Composer } from "../src/features/chat/Composer";
+import { AttachmentPreview } from "../src/features/chat/AttachmentPreview";
 import { resolveApproval } from "../src/features/chat/Conversation";
 import { MessageContent } from "../src/features/chat/MessageContent";
 import { MessageList } from "../src/features/chat/MessageList";
@@ -106,6 +107,24 @@ describe("Composer", () => {
 
     expect(onSend).toHaveBeenCalledOnce();
     expect(onQueue).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("AttachmentPreview", () => {
+  it("renders image, video, and file previews with removal controls", () => {
+    const onRemove = vi.fn();
+    const attachments = [
+      { id: "image", file: { id: "image-file", name: "photo.png", mediaType: "image/png", size: 10, kind: "attachment" as const }, category: "image" as const, state: "ready" as const, progress: 1, previewUrl: "blob:image" },
+      { id: "video", file: { id: "video-file", name: "clip.mp4", mediaType: "video/mp4", size: 20, kind: "attachment" as const }, category: "video" as const, state: "uploading" as const, progress: 0.5, previewUrl: "blob:video", duration: 65 },
+      { id: "file", file: { id: "text-file", name: "notes.txt", mediaType: "text/plain", size: 30, kind: "attachment" as const }, category: "file" as const, state: "ready" as const, progress: 1 },
+    ];
+    render(<AttachmentPreview attachments={attachments} onRemove={onRemove} />);
+
+    expect(screen.getByRole("img", { name: "photo.png" })).toHaveAttribute("src", "blob:image");
+    expect(screen.getByLabelText("视频预览 clip.mp4")).toHaveTextContent("1:05");
+    expect(screen.getByLabelText("附件 notes.txt")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "移除 photo.png" }));
+    expect(onRemove).toHaveBeenCalledWith("image");
   });
 });
 
