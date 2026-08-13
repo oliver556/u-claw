@@ -10,47 +10,51 @@ import (
 	"errors"
 	"io"
 	"regexp"
-	"strings"
 	"time"
 
+	"u-claw-activation-server/internal/deviceaccess"
 	"u-claw-activation-server/internal/inventory"
 	"u-claw-activation-server/internal/license"
 	"u-claw-activation-server/internal/security"
 )
 
-const requestFingerprintDomain = "uclaw-activation-request-v1"
+const requestFingerprintDomain = "uclaw-activation-request-v2"
 
 type ServiceOptions struct {
-	Repository Repository
-	Signer     LicenseSigner
-	Envelope   Envelope
-	Pepper     []byte
-	KeyID      string
-	KeyVersion string
-	LeaseTTL   time.Duration
-	LicenseTTL time.Duration
-	Now        func() time.Time
-	Random     io.Reader
-	Observer   Observer
+	Repository          Repository
+	Signer              LicenseSigner
+	Envelope            Envelope
+	Pepper              []byte
+	KeyID               string
+	KeyVersion          string
+	LeaseTTL            time.Duration
+	LicenseTTL          time.Duration
+	Now                 func() time.Time
+	Random              io.Reader
+	Observer            Observer
+	PublicModelEndpoint string
 }
 
 type Service struct {
-	repository Repository
-	signer     LicenseSigner
-	envelope   Envelope
-	pepper     []byte
-	keyID      string
-	keyVersion string
-	leaseTTL   time.Duration
-	licenseTTL time.Duration
-	now        func() time.Time
-	random     io.Reader
-	observer   Observer
+	repository          Repository
+	signer              LicenseSigner
+	envelope            Envelope
+	pepper              []byte
+	keyID               string
+	keyVersion          string
+	leaseTTL            time.Duration
+	licenseTTL          time.Duration
+	now                 func() time.Time
+	random              io.Reader
+	observer            Observer
+	deviceAccess        *deviceaccess.Service
+	publicModelEndpoint string
 }
 
 type pendingMaterial struct {
 	StartupSecret string `json:"startupSecret"`
-	BuiltinToken  string `json:"builtinToken"`
+	DeviceTokenID string `json:"deviceTokenId"`
+	DeviceToken   string `json:"deviceToken"`
 }
 
 type activationMaterial struct {
@@ -98,8 +102,9 @@ type builtinCredentialArtifact struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	DeviceID      string `json:"deviceId"`
 	LicenseID     string `json:"licenseId"`
-	AccessToken   string `json:"accessToken"`
-	ExpiresAt     string `json:"expiresAt"`
+	Endpoint      string `json:"endpoint"`
+	Model         string `json:"model"`
+	DeviceToken   string `json:"deviceToken"`
 }
 
 var (
@@ -111,7 +116,7 @@ var (
 
 func NewService(options ServiceOptions) (*Service, error) {
 	if options.Repository == nil || options.Signer == nil || options.Envelope == nil || len(options.Pepper) < sha256.Size ||
-		options.KeyID == "" || options.KeyVersion == "" || options.LeaseTTL <= 0 || options.LicenseTTL <= 0 {
+		options.KeyID == "" || options.KeyVersion == "" || options.LeaseTTL <= 0 || options.LicenseTTL <= 0 || options.PublicModelEndpoint == "" {
 		return nil, errors.New("activation service configuration invalid")
 	}
 	if options.Now == nil {
@@ -120,11 +125,16 @@ func NewService(options ServiceOptions) (*Service, error) {
 	if options.Random == nil {
 		options.Random = rand.Reader
 	}
+	deviceAccess, err := deviceaccess.NewService(options.Pepper, options.Random)
+	if err != nil {
+		return nil, errors.New("activation service configuration invalid")
+	}
 	return &Service{
 		repository: options.Repository, signer: options.Signer, envelope: options.Envelope,
 		pepper: append([]byte(nil), options.Pepper...), keyID: options.KeyID, keyVersion: options.KeyVersion,
 		leaseTTL: options.LeaseTTL, licenseTTL: options.LicenseTTL, now: options.Now, random: options.Random,
-		observer: options.Observer,
+		observer:     options.Observer,
+		deviceAccess: deviceAccess, publicModelEndpoint: options.PublicModelEndpoint,
 	}, nil
 }
 
@@ -132,18 +142,17 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 	if err := validateActivateInput(input); err != nil {
 		return ActivateResult{}, ErrActivationInvalid
 	}
-	normalizedUsername := strings.ToUpper(input.Username)
 	digest, err := inventory.ActivationCodeDigest(service.pepper, input.ActivationCode)
-	if err != nil || normalizedUsername == "" {
+	if err != nil {
 		return ActivateResult{}, ErrActivationInvalid
 	}
-	fingerprint, err := canonicalRequestFingerprint(normalizedUsername, digest, input)
+	fingerprint, err := canonicalRequestFingerprint(digest, input)
 	if err != nil {
 		return ActivateResult{}, ErrActivationInvalid
 	}
 	if err := service.repository.ValidateBinding(ctx, ValidateBindingInput{
-		UsernameNormalized: normalizedUsername, ActivationCodeDigest: array32(digest),
-		IdempotencyKey: input.IdempotencyKey, RequestFingerprint: fingerprint,
+		ActivationCodeDigest: array32(digest),
+		IdempotencyKey:       input.IdempotencyKey, RequestFingerprint: fingerprint,
 		FingerprintVersion: input.FingerprintVersion, FingerprintSHA256: input.FingerprintSHA256,
 	}); err != nil {
 		service.recordDBFailure("validate_binding", err)
@@ -167,7 +176,6 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 	record.PendingMaterialKeyVersion = service.keyVersion
 
 	begin, err := service.repository.BeginBinding(ctx, BeginBindingInput{
-		UsernameNormalized:   normalizedUsername,
 		ActivationCodeDigest: array32(digest),
 		IdempotencyKey:       input.IdempotencyKey,
 		Record:               record,
@@ -183,8 +191,10 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 		service.observer.RecordBindingLeaseStale()
 	}
 	if begin.Disposition == BindingBound {
+		begin.Record.PublicModelEndpoint = service.publicModelEndpoint
 		return service.recoverBound(ctx, begin.Record, true)
 	}
+	begin.Record.PublicModelEndpoint = service.publicModelEndpoint
 	return service.complete(ctx, begin.Record)
 }
 
@@ -215,7 +225,7 @@ func (service *Service) complete(ctx context.Context, record BoundRecord) (Activ
 		return boundFailure(record, errors.Join(ErrActivationServiceUnavailable, err))
 	}
 	var pending pendingMaterial
-	if err := decodeStrictJSON(pendingBytes, &pending); err != nil || len(pending.StartupSecret) < 32 || len(pending.BuiltinToken) < 16 {
+	if err := decodeStrictJSON(pendingBytes, &pending); err != nil || len(pending.StartupSecret) < 32 || len(pending.DeviceToken) != 52 || pending.DeviceTokenID == "" {
 		return boundFailure(record, ErrActivationServiceUnavailable)
 	}
 	payload := signingPayload(record)
@@ -236,6 +246,8 @@ func (service *Service) complete(ctx context.Context, record BoundRecord) (Activ
 	}
 	record.ArtifactEnvelope = finalEnvelope
 	record.ArtifactKeyVersion = service.keyVersion
+	record.DeviceTokenID = pending.DeviceTokenID
+	record.DeviceTokenDigest = service.deviceAccess.Digest(pending.DeviceToken)
 	persisted, err := service.repository.CompleteBinding(ctx, CompleteBindingInput{LeaseToken: record.LeaseToken, Record: record})
 	if err != nil {
 		service.recordDBFailure("complete_binding", err)
@@ -342,25 +354,23 @@ func (service *Service) newPendingMaterial() (pendingMaterial, error) {
 	if err != nil {
 		return pendingMaterial{}, err
 	}
-	token, err := randomToken(service.random, 32)
+	credential, err := service.deviceAccess.Issue()
 	if err != nil {
 		return pendingMaterial{}, err
 	}
-	return pendingMaterial{StartupSecret: secret, BuiltinToken: token}, nil
+	return pendingMaterial{StartupSecret: secret, DeviceTokenID: credential.ID, DeviceToken: credential.Token}, nil
 }
 
-func canonicalRequestFingerprint(username string, digest []byte, input ActivateInput) ([32]byte, error) {
+func canonicalRequestFingerprint(digest []byte, input ActivateInput) ([32]byte, error) {
 	if len(digest) != sha256.Size {
 		return [32]byte{}, errors.New("invalid activation request")
 	}
-	encoded, _ := json.Marshal([]any{requestFingerprintDomain, username, hex.EncodeToString(digest), input.FingerprintVersion, input.FingerprintSHA256, input.ClientVersion})
+	encoded, _ := json.Marshal([]any{requestFingerprintDomain, hex.EncodeToString(digest), input.FingerprintVersion, input.FingerprintSHA256, input.ClientVersion})
 	return sha256.Sum256(encoded), nil
 }
 
 func validateActivateInput(input ActivateInput) error {
-	username := strings.TrimSpace(input.Username)
-	if username != input.Username || len(username) < 3 || len(username) > 128 ||
-		input.FingerprintVersion != "uclaw-usb-v1" || !sha256Pattern.MatchString(input.FingerprintSHA256) ||
+	if input.FingerprintVersion != "uclaw-usb-v1" || !sha256Pattern.MatchString(input.FingerprintSHA256) ||
 		!semverPattern.MatchString(input.ClientVersion) || !idempotencyPattern.MatchString(input.IdempotencyKey) ||
 		!identifierPattern.MatchString(input.RequestID) {
 		return errors.New("invalid activation input")
@@ -382,7 +392,7 @@ func newActivationMaterial(record BoundRecord, pending pendingMaterial, signatur
 			NotBefore: notBefore, ExpiresAt: expiresAt, Revision: record.Revision,
 		},
 		StartupCredential: startupCredentialArtifact{SchemaVersion: 1, DeviceID: record.DeviceID, LicenseID: record.LicenseID, StartupSecret: pending.StartupSecret},
-		BuiltinCredential: builtinCredentialArtifact{SchemaVersion: 1, DeviceID: record.DeviceID, LicenseID: record.LicenseID, AccessToken: pending.BuiltinToken, ExpiresAt: expiresAt},
+		BuiltinCredential: builtinCredentialArtifact{SchemaVersion: 1, DeviceID: record.DeviceID, LicenseID: record.LicenseID, Endpoint: record.PublicModelEndpoint, Model: record.DefaultModel, DeviceToken: pending.DeviceToken},
 	}
 	material.License.USBFingerprint.Scheme = record.FingerprintVersion
 	material.License.USBFingerprint.SHA256 = record.FingerprintSHA256
@@ -401,7 +411,9 @@ func validActivationMaterial(material activationMaterial, record BoundRecord) bo
 		material.License.SchemaVersion == 1 && material.License.DeviceID == record.DeviceID && material.License.LicenseID == record.LicenseID &&
 		material.License.Signature.Algorithm == "ed25519" && material.License.Signature.KeyID == record.KeyID && material.License.Signature.Value != "" &&
 		material.StartupCredential.SchemaVersion == 1 && material.StartupCredential.DeviceID == record.DeviceID && material.StartupCredential.LicenseID == record.LicenseID &&
-		material.BuiltinCredential.SchemaVersion == 1 && material.BuiltinCredential.DeviceID == record.DeviceID && material.BuiltinCredential.LicenseID == record.LicenseID
+		material.BuiltinCredential.SchemaVersion == 1 && material.BuiltinCredential.DeviceID == record.DeviceID && material.BuiltinCredential.LicenseID == record.LicenseID &&
+		material.BuiltinCredential.Endpoint == record.PublicModelEndpoint && material.BuiltinCredential.Model == record.DefaultModel &&
+		len(material.BuiltinCredential.DeviceToken) == 52
 }
 
 func decodeStrictJSON(encoded []byte, output any) error {

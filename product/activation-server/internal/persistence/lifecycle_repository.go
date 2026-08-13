@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"u-claw-activation-server/internal/lifecycle"
 )
@@ -177,111 +176,4 @@ func (repository *ActivationRepository) RecordRecovery(ctx context.Context, acti
 		return fmt.Errorf("commit recovery audit: %w", err)
 	}
 	return nil
-}
-
-func (repository *ActivationRepository) CreateTokenGrant(ctx context.Context, grant lifecycle.TokenGrant) (lifecycle.TokenGrant, error) {
-	tx, err := repository.pool.Begin(ctx)
-	if err != nil {
-		return lifecycle.TokenGrant{}, fmt.Errorf("begin token grant: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, grant.IdempotencyKey); err != nil {
-		return lifecycle.TokenGrant{}, fmt.Errorf("lock token idempotency key: %w", err)
-	}
-	existing, found, err := loadTokenGrant(ctx, tx, grant.IdempotencyKey, false)
-	if err != nil {
-		return lifecycle.TokenGrant{}, err
-	}
-	if found {
-		return compareTokenGrant(existing, grant)
-	}
-	var inventoryID string
-	err = tx.QueryRow(ctx, `SELECT device.inventory_id FROM licenses license JOIN devices device ON device.device_id=license.device_id
-		WHERE license.license_id=$1 AND license.device_id=$2`, grant.LicenseID, grant.DeviceID).Scan(&inventoryID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
-	}
-	if err != nil {
-		return lifecycle.TokenGrant{}, fmt.Errorf("load token scope: %w", err)
-	}
-	var inventoryStatus, licenseStatus, deviceStatus, bindingStatus, setupStatus string
-	var notBefore, expiresAt time.Time
-	err = tx.QueryRow(ctx, `SELECT status FROM activation_inventory WHERE id=$1 FOR UPDATE`, inventoryID).Scan(&inventoryStatus)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
-	}
-	if err != nil {
-		return lifecycle.TokenGrant{}, fmt.Errorf("lock token inventory: %w", err)
-	}
-	err = tx.QueryRow(ctx, `SELECT status FROM devices WHERE device_id=$1 AND inventory_id=$2 FOR UPDATE`, grant.DeviceID, inventoryID).Scan(&deviceStatus)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
-	}
-	if err != nil {
-		return lifecycle.TokenGrant{}, fmt.Errorf("lock token device: %w", err)
-	}
-	err = tx.QueryRow(ctx, `SELECT status,not_before,expires_at FROM licenses WHERE license_id=$1 AND device_id=$2 FOR UPDATE`, grant.LicenseID, grant.DeviceID).Scan(&licenseStatus, &notBefore, &expiresAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
-	}
-	if err != nil {
-		return lifecycle.TokenGrant{}, fmt.Errorf("lock token license: %w", err)
-	}
-	var policyDigest []byte
-	err = tx.QueryRow(ctx, `SELECT status,balance_setup_status,policy_digest FROM new_api_bindings WHERE inventory_id=$1 AND device_id=$2 FOR UPDATE`, inventoryID, grant.DeviceID).Scan(&bindingStatus, &setupStatus, &policyDigest)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
-	}
-	if err != nil {
-		return lifecycle.TokenGrant{}, fmt.Errorf("lock token binding: %w", err)
-	}
-	if inventoryStatus != "active" || licenseStatus != "active" || deviceStatus != "active" || bindingStatus != "active" || setupStatus != "configured" || grant.IssuedAt.Before(notBefore) || !grant.IssuedAt.Before(expiresAt) || grant.ExpiresAt.After(expiresAt) {
-		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO token_grants
-		(jti,device_id,license_id,policy_digest,status,issued_at,expires_at,created_at,idempotency_key)
-		VALUES($1,$2,$3,$4,'active',$5,$6,$5,$7)`, grant.JTI, grant.DeviceID, grant.LicenseID, policyDigest, grant.IssuedAt, grant.ExpiresAt, grant.IdempotencyKey)
-	if err != nil {
-		var postgresError *pgconn.PgError
-		if errors.As(err, &postgresError) && postgresError.Code == "23505" {
-			return lifecycle.TokenGrant{}, lifecycle.ErrIdempotencyConflict
-		}
-		return lifecycle.TokenGrant{}, fmt.Errorf("create token grant: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return lifecycle.TokenGrant{}, fmt.Errorf("commit token grant: %w", err)
-	}
-	return grant, nil
-}
-
-func (repository *ActivationRepository) loadTokenGrant(ctx context.Context, key string) (lifecycle.TokenGrant, bool, error) {
-	return loadTokenGrant(ctx, repository.pool, key, false)
-}
-
-type tokenGrantQuerier interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}
-
-func loadTokenGrant(ctx context.Context, query tokenGrantQuerier, key string, lock bool) (lifecycle.TokenGrant, bool, error) {
-	var grant lifecycle.TokenGrant
-	statement := `SELECT jti,device_id,license_id,idempotency_key,issued_at,expires_at FROM token_grants WHERE idempotency_key=$1`
-	if lock {
-		statement += ` FOR UPDATE`
-	}
-	err := query.QueryRow(ctx, statement, key).
-		Scan(&grant.JTI, &grant.DeviceID, &grant.LicenseID, &grant.IdempotencyKey, &grant.IssuedAt, &grant.ExpiresAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return lifecycle.TokenGrant{}, false, nil
-	}
-	if err != nil {
-		return lifecycle.TokenGrant{}, false, fmt.Errorf("load token grant: %w", err)
-	}
-	return grant, true, nil
-}
-
-func compareTokenGrant(existing, requested lifecycle.TokenGrant) (lifecycle.TokenGrant, error) {
-	if existing.JTI != requested.JTI || existing.DeviceID != requested.DeviceID || existing.LicenseID != requested.LicenseID {
-		return lifecycle.TokenGrant{}, lifecycle.ErrIdempotencyConflict
-	}
-	return existing, nil
 }

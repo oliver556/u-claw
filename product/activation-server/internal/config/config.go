@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -38,7 +39,7 @@ var requiredVariables = []string{
 	"KMS_PROVIDER",
 	"KMS_KEY_VERSION",
 	"KMS_KEK_FILE",
-	"TOKEN_SIGNING_KEY_FILE",
+	"PUBLIC_MODEL_ENDPOINT",
 	"ADMIN_OPERATORS_FILE",
 	"ADMIN_SECRET_FINGERPRINT_KEY_FILE",
 	"NEW_API_ALLOWED_HOSTS",
@@ -58,8 +59,7 @@ type Config struct {
 	KMSKeyVersion                 string
 	KMSKEKFile                    string
 	KMSKEK                        []byte
-	TokenSigningKeyFile           string
-	TokenSigningKey               []byte
+	PublicModelEndpoint           string
 	AdminOperatorsFile            string
 	AdminOperators                admin.OperatorRegistry
 	AdminSecretFingerprintKeyFile string
@@ -105,10 +105,6 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("configuration KMS_KEK_FILE is invalid")
 	}
-	tokenSigningKey, err := readRegularFile(values["TOKEN_SIGNING_KEY_FILE"], 32, maximumPepperBytes)
-	if err != nil {
-		return Config{}, errors.New("configuration TOKEN_SIGNING_KEY_FILE is invalid")
-	}
 	adminOperators, err := loadAdminOperators(values["ADMIN_OPERATORS_FILE"])
 	if err != nil {
 		return Config{}, errors.New("configuration ADMIN_OPERATORS_FILE is invalid")
@@ -117,12 +113,15 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("configuration ADMIN_SECRET_FINGERPRINT_KEY_FILE is invalid")
 	}
-	if sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["ACTIVATION_PEPPER_FILE"]) || sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["KMS_KEK_FILE"]) || sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["TOKEN_SIGNING_KEY_FILE"]) || constantTimeEqual(fingerprintKey, pepper) || constantTimeEqual(fingerprintKey, kek) || constantTimeEqual(fingerprintKey, tokenSigningKey) {
+	if sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["ACTIVATION_PEPPER_FILE"]) || sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["KMS_KEK_FILE"]) || constantTimeEqual(fingerprintKey, pepper) || constantTimeEqual(fingerprintKey, kek) {
 		return Config{}, errors.New("configuration ADMIN_SECRET_FINGERPRINT_KEY_FILE is invalid")
 	}
 	allowedHosts, err := parseAllowedNewAPIHosts(values["NEW_API_ALLOWED_HOSTS"])
 	if err != nil {
 		return Config{}, errors.New("configuration NEW_API_ALLOWED_HOSTS is invalid")
+	}
+	if !validPublicModelEndpoint(values["PUBLIC_MODEL_ENDPOINT"]) {
+		return Config{}, errors.New("configuration PUBLIC_MODEL_ENDPOINT is invalid")
 	}
 
 	return Config{
@@ -139,12 +138,17 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		KMSKeyVersion:                 values["KMS_KEY_VERSION"],
 		KMSKEKFile:                    values["KMS_KEK_FILE"],
 		KMSKEK:                        kek,
-		TokenSigningKeyFile:           values["TOKEN_SIGNING_KEY_FILE"],
-		TokenSigningKey:               tokenSigningKey,
+		PublicModelEndpoint:           values["PUBLIC_MODEL_ENDPOINT"],
 		AdminOperatorsFile:            values["ADMIN_OPERATORS_FILE"],
 		AdminOperators:                adminOperators,
 		AdminSecretFingerprintKeyFile: values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], AdminSecretFingerprintKey: fingerprintKey, AllowedNewAPIHosts: allowedHosts,
 	}, nil
+}
+
+func validPublicModelEndpoint(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil &&
+		parsed.Path == "/model-api/" && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 func sameSecretFile(first, second string) bool {

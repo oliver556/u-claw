@@ -39,6 +39,7 @@ func (repository *fakeRepository) BeginBinding(_ context.Context, input BeginBin
 	repository.beginCalls++
 	repository.beginInput = input
 	if repository.beginResult.Record.ActivationID == "" && repository.beginErr == nil {
+		input.Record.DefaultModel = "model-a"
 		repository.beginResult = BeginBindingResult{Disposition: BindingAcquired, Record: input.Record}
 	}
 	return repository.beginResult, repository.beginErr
@@ -128,8 +129,14 @@ func TestActivateFirstBindingUsesTwoPhasesAndReturnsPersistedEnvelope(t *testing
 	if material.Status != "active" || material.License.SchemaVersion != 1 ||
 		material.License.Signature.Algorithm != "ed25519" || material.License.Signature.KeyID != "test-license-key" ||
 		material.StartupCredential.SchemaVersion != 1 || material.BuiltinCredential.SchemaVersion != 1 ||
-		material.BuiltinCredential.ExpiresAt == "" {
+		material.BuiltinCredential.Endpoint != "https://public.example/model-api/" ||
+		material.BuiltinCredential.Model != "model-a" ||
+		!strings.HasPrefix(material.BuiltinCredential.DeviceToken, "uclaw_dt_") {
 		t.Fatalf("material does not match frozen activation response: %+v", material)
+	}
+	encoded := string(result.Material)
+	if strings.Contains(encoded, `"accessToken"`) {
+		t.Fatalf("legacy builtin token fields leaked: %s", encoded)
 	}
 	salt, err := hex.DecodeString(material.License.StartupSecretProof.StartupSecretSalt)
 	if err != nil {
@@ -191,8 +198,6 @@ func TestActivateClassifiesBeginBindingErrorsByCommitAmbiguity(t *testing.T) {
 
 func TestActivateRejectsInvalidOpenAPIInputBeforeDependencies(t *testing.T) {
 	tests := map[string]func(*ActivateInput){
-		"short username":        func(input *ActivateInput) { input.Username = "ab" },
-		"long username":         func(input *ActivateInput) { input.Username = strings.Repeat("a", 129) },
 		"noncanonical code":     func(input *ActivateInput) { input.ActivationCode = "01234-56789-ABCDE-FGHJK-MNPQRS" },
 		"uppercase fingerprint": func(input *ActivateInput) { input.FingerprintSHA256 = strings.Repeat("A", 64) },
 		"bad semver":            func(input *ActivateInput) { input.ClientVersion = "v1" },
@@ -246,7 +251,8 @@ func TestActivateReturnsSameBoundEnvelopeWithoutSigningAgain(t *testing.T) {
 	}
 	record.StartupSecretHash = startupSecretHash(strings.Repeat("s", 32), record.StartupSecretSalt)
 	record.RecoveryRequestID = fixtureInput().RequestID
-	boundMaterial, err := json.Marshal(newActivationMaterial(record, pendingMaterial{StartupSecret: strings.Repeat("s", 32), BuiltinToken: strings.Repeat("t", 32)}, "fixture-signature"))
+	record.PublicModelEndpoint, record.DefaultModel = "https://public.example/model-api/", "model-a"
+	boundMaterial, err := json.Marshal(newActivationMaterial(record, pendingMaterial{StartupSecret: strings.Repeat("s", 32), DeviceTokenID: "00000000-0000-4000-8000-000000000004", DeviceToken: "uclaw_dt_" + strings.Repeat("A", 43)}, "fixture-signature"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,6 +329,7 @@ func TestActivateCompletesRecoveredExpiredLeaseFromPendingEnvelope(t *testing.T)
 		t.Fatal(err)
 	}
 	pending := firstRepository.beginInput.Record
+	pending.DefaultModel = "model-a"
 	pending.ArtifactEnvelope = nil
 	pending.ArtifactKeyVersion = ""
 	pending.LeaseToken = "00000000-0000-4000-8000-000000000099"
@@ -348,10 +355,11 @@ func newTestService(t *testing.T, repository Repository, signer LicenseSigner, e
 		Envelope:   envelope,
 		Pepper:     []byte("0123456789abcdef0123456789abcdef"),
 		KeyID:      "test-license-key", KeyVersion: "kms-v1",
-		LeaseTTL:   time.Minute,
-		LicenseTTL: 365 * 24 * time.Hour,
-		Now:        func() time.Time { return time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC) },
-		Random:     &incrementingReader{next: 1},
+		LeaseTTL:            time.Minute,
+		LicenseTTL:          365 * 24 * time.Hour,
+		Now:                 func() time.Time { return time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC) },
+		Random:              &incrementingReader{next: 1},
+		PublicModelEndpoint: "https://public.example/model-api/",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -361,7 +369,7 @@ func newTestService(t *testing.T, repository Repository, signer LicenseSigner, e
 
 func fixtureInput() ActivateInput {
 	return ActivateInput{
-		Username: "UCLAW-00000001", ActivationCode: "0123456789ABCDEFGHJKMNPQRS",
+		ActivationCode:     "0123456789ABCDEFGHJKMNPQRS",
 		FingerprintVersion: "uclaw-usb-v1", FingerprintSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ClientVersion: "1.0.0", IdempotencyKey: "activation-fixture-001", RequestID: "req_fixture_001",
 	}

@@ -39,20 +39,26 @@ func (repository *ActivationRepository) ValidateBinding(ctx context.Context, inp
 		}
 		return nil
 	}
-	var username, status, setupStatus string
+	var status, setupStatus string
+	var mappingReady bool
 	var boundVersion *string
 	var boundFingerprint []byte
-	err = repository.pool.QueryRow(ctx, `SELECT inventory.username_normalized,inventory.status,inventory.new_api_setup_status,
+	err = repository.pool.QueryRow(ctx, `SELECT inventory.status,inventory.new_api_setup_status,
+		COALESCE(binding.status='active' AND binding.balance_setup_status='configured'
+			AND length(binding.api_key_envelope)>0 AND binding.api_key_version<>'' AND binding.base_url<>''
+			AND binding.default_model<>'' AND cardinality(binding.allowed_models)>0
+			AND binding.default_model=ANY(binding.allowed_models),false),
 		device.fingerprint_version,device.fingerprint_sha256 FROM activation_inventory inventory
+		LEFT JOIN new_api_bindings binding ON binding.inventory_id=inventory.id
 		LEFT JOIN devices device ON device.inventory_id=inventory.id WHERE inventory.activation_code_digest=$1`,
-		input.ActivationCodeDigest[:]).Scan(&username, &status, &setupStatus, &boundVersion, &boundFingerprint)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && username != input.UsernameNormalized) {
+		input.ActivationCodeDigest[:]).Scan(&status, &setupStatus, &mappingReady, &boundVersion, &boundFingerprint)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return activation.ErrActivationInvalid
 	}
 	if err != nil {
 		return fmt.Errorf("validate activation inventory: %w", err)
 	}
-	if setupStatus != "configured" {
+	if setupStatus != "configured" || !mappingReady {
 		return activation.ErrNewAPINotConfigured
 	}
 	if status == "prepared" {
@@ -101,12 +107,12 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 		return resumeExisting(ctx, tx, input, existing)
 	}
 
-	var inventoryID, username, status, setupStatus string
+	var inventoryID, status, setupStatus, defaultModel string
 	var entitlementRevision int64
-	err = tx.QueryRow(ctx, `SELECT id, username_normalized, status, new_api_setup_status, entitlement_revision
+	err = tx.QueryRow(ctx, `SELECT id,status,new_api_setup_status,entitlement_revision
 		FROM activation_inventory WHERE activation_code_digest = $1 FOR UPDATE`, input.ActivationCodeDigest[:]).
-		Scan(&inventoryID, &username, &status, &setupStatus, &entitlementRevision)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && username != input.UsernameNormalized) {
+		Scan(&inventoryID, &status, &setupStatus, &entitlementRevision)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return activation.BeginBindingResult{}, activation.ErrActivationInvalid
 	}
 	if err != nil {
@@ -114,6 +120,17 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 	}
 	if setupStatus != "configured" {
 		return activation.BeginBindingResult{}, activation.ErrNewAPINotConfigured
+	}
+	var mappingReady bool
+	err = tx.QueryRow(ctx, `SELECT status='active' AND balance_setup_status='configured'
+		AND length(api_key_envelope)>0 AND api_key_version<>'' AND base_url<>''
+		AND default_model<>'' AND cardinality(allowed_models)>0 AND default_model=ANY(allowed_models),default_model
+		FROM new_api_bindings WHERE inventory_id=$1 FOR UPDATE`, inventoryID).Scan(&mappingReady, &defaultModel)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !mappingReady) {
+		return activation.BeginBindingResult{}, activation.ErrNewAPINotConfigured
+	}
+	if err != nil {
+		return activation.BeginBindingResult{}, fmt.Errorf("lock activation mapping: %w", err)
 	}
 	if status != "prepared" {
 		recovered, ok, loadErr := loadAttemptByInventoryAndDevice(ctx, tx, inventoryID, input.Record)
@@ -148,6 +165,7 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 
 	record := input.Record
 	record.InventoryID, record.UsernameID, record.Revision = inventoryID, inventoryID, entitlementRevision
+	record.DefaultModel = defaultModel
 	if err := insertBinding(ctx, tx, input, record); err != nil {
 		return activation.BeginBindingResult{}, mapBindingError(err)
 	}
@@ -248,6 +266,17 @@ func (repository *ActivationRepository) CompleteBinding(ctx context.Context, inp
 	record := existing
 	record.ArtifactEnvelope = input.Record.ArtifactEnvelope
 	record.ArtifactKeyVersion = input.Record.ArtifactKeyVersion
+	record.DeviceTokenID = input.Record.DeviceTokenID
+	record.DeviceTokenDigest = append([]byte(nil), input.Record.DeviceTokenDigest...)
+	if record.DeviceTokenID == "" || len(record.DeviceTokenDigest) != 32 {
+		return activation.BoundRecord{}, activation.ErrActivationInProgress
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO device_access_tokens
+		(device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at)
+		VALUES($1,$2,$3,$4,$5,'active',clock_timestamp(),clock_timestamp(),clock_timestamp())`,
+		record.DeviceTokenID, record.InventoryID, record.DeviceID, record.LicenseID, record.DeviceTokenDigest); err != nil {
+		return activation.BoundRecord{}, fmt.Errorf("create activation device token: %w", err)
+	}
 
 	var completedAt time.Time
 	err = tx.QueryRow(ctx, `UPDATE activation_inventory SET status='active', activated_at=clock_timestamp(),
@@ -442,9 +471,10 @@ const attemptSelect = `SELECT attempt.activation_id,attempt.inventory_id,invento
 	device.fingerprint_version,encode(device.fingerprint_sha256,'hex'),license.key_id,license.not_before,
 	license.expires_at,license.revision,license.startup_secret_salt,license.startup_secret_hash,
 	attempt.pending_material_envelope,attempt.pending_material_key_version,attempt.artifact_envelope,attempt.artifact_key_version,attempt.stage,
-	attempt.request_id,attempt.active_status_event_id,attempt.bound_audit_event_id
+	attempt.request_id,attempt.active_status_event_id,attempt.bound_audit_event_id,binding.default_model
 	FROM activation_attempts attempt JOIN activation_inventory inventory ON inventory.id=attempt.inventory_id
-	JOIN devices device ON device.device_id=attempt.device_id JOIN licenses license ON license.license_id=attempt.license_id`
+	JOIN devices device ON device.device_id=attempt.device_id JOIN licenses license ON license.license_id=attempt.license_id
+	JOIN new_api_bindings binding ON binding.inventory_id=attempt.inventory_id AND binding.device_id=attempt.device_id`
 
 func loadAttempt(ctx context.Context, tx pgx.Tx, where string, argument any, lock bool) (activation.BoundRecord, bool, error) {
 	query := attemptSelect + " WHERE " + where
@@ -479,7 +509,7 @@ func scanAttempt(row rowScanner) (activation.BoundRecord, bool, error) {
 		&leaseToken, &leaseExpiry, &requestFingerprint, &record.FingerprintVersion, &record.FingerprintSHA256,
 		&record.KeyID, &record.NotBefore, &record.ExpiresAt, &record.Revision, &record.StartupSecretSalt, &startupHash,
 		&record.PendingMaterialEnvelope, &pendingVersion, &record.ArtifactEnvelope, &artifactVersion, &record.Stage,
-		&record.RequestID, &record.StatusEventID, &record.BoundAuditEventID)
+		&record.RequestID, &record.StatusEventID, &record.BoundAuditEventID, &record.DefaultModel)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return activation.BoundRecord{}, false, nil
 	}

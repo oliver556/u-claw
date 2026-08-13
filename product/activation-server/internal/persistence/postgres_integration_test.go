@@ -20,7 +20,6 @@ import (
 
 	"u-claw-activation-server/internal/activation"
 	adminservice "u-claw-activation-server/internal/admin"
-	"u-claw-activation-server/internal/lifecycle"
 )
 
 func TestInitialMigrationContainsAuthoritativeTablesAndConstraints(t *testing.T) {
@@ -254,7 +253,7 @@ func TestProductionComposeMountsSecretsOwnerReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	compose := string(contents)
-	for _, source := range []string{"activation_pepper", "license_signing_key", "status_signing_key", "kms_kek", "token_signing_key", "admin_operators", "admin_secret_fingerprint_key"} {
+	for _, source := range []string{"activation_pepper", "license_signing_key", "status_signing_key", "kms_kek", "admin_operators", "admin_secret_fingerprint_key"} {
 		fragment := "source: " + source + ", target: /run/secrets/" + source + ", uid: \"0\", gid: \"0\", mode: 0400"
 		if !strings.Contains(compose, fragment) {
 			t.Errorf("activation secret mount not owner-read-only: %s", source)
@@ -858,8 +857,6 @@ func TestPostgreSQLTransactionLockOrder(t *testing.T) {
 		"loadAttempt(ctx, tx, \"attempt.activation_id = $1\", input.Record.ActivationID, false)", "ensureActivationRecoverable(ctx, tx, existing)", "loadAttempt(ctx, tx, \"attempt.activation_id = $1\", input.Record.ActivationID, true)")
 	assertOrderedFragments(t, string(activationSource), "func insertBinding", "const attemptSelect",
 		"INSERT INTO devices", "INSERT INTO licenses", "UPDATE new_api_bindings", "INSERT INTO activation_attempts")
-	assertOrderedFragments(t, string(lifecycleSource), "func (repository *ActivationRepository) CreateTokenGrant", "func (repository *ActivationRepository) loadTokenGrant",
-		"FROM activation_inventory WHERE id=$1 FOR UPDATE", "FROM devices WHERE device_id=$1", "FROM licenses WHERE license_id=$1", "FROM new_api_bindings WHERE inventory_id=$1")
 	if !strings.Contains(string(lifecycleSource), "'activation.recovery_authorized','succeeded'") {
 		t.Fatal("AuthorizeRecovery must record authorization, not delivery")
 	}
@@ -950,7 +947,7 @@ func TestBeginBindingPostgreSQLRecoversExpiredRequestedLeaseAndGuardsBoundArtifa
 		StatusEventID: "60000000-0000-4000-8000-000000000201", BoundAuditEventID: "70000000-0000-4000-8000-000000000201",
 		LeaseExpiresAt: now.Add(time.Minute),
 	}
-	input := activation.BeginBindingInput{UsernameNormalized: "UCLAW-RECOVERY", ActivationCodeDigest: digest, IdempotencyKey: "recovery-idempotency-001", Record: record}
+	input := activation.BeginBindingInput{ActivationCodeDigest: digest, IdempotencyKey: "recovery-idempotency-001", Record: record}
 	first, err := repository.BeginBinding(ctx, input)
 	if err != nil || first.Disposition != activation.BindingAcquired {
 		t.Fatalf("first begin=%#v err=%v", first, err)
@@ -995,18 +992,10 @@ func TestBeginBindingPostgreSQLRecoversExpiredRequestedLeaseAndGuardsBoundArtifa
 	concurrentCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	start := make(chan struct{})
-	errorsByOperation := make(chan error, 3)
+	errorsByOperation := make(chan error, 2)
 	go func() {
 		<-start
 		_, operationErr := repository.BeginBinding(concurrentCtx, input)
-		errorsByOperation <- operationErr
-	}()
-	go func() {
-		<-start
-		_, operationErr := repository.CreateTokenGrant(concurrentCtx, lifecycle.TokenGrant{
-			JTI: "concurrent-token-jti", DeviceID: record.DeviceID, LicenseID: record.LicenseID,
-			IdempotencyKey: "concurrent-token-grant-001", IssuedAt: now.Add(time.Minute), ExpiresAt: now.Add(2 * time.Minute),
-		})
 		errorsByOperation <- operationErr
 	}()
 	go func() {
@@ -1018,7 +1007,7 @@ func TestBeginBindingPostgreSQLRecoversExpiredRequestedLeaseAndGuardsBoundArtifa
 		errorsByOperation <- operationErr
 	}()
 	close(start)
-	for range 3 {
+	for range 2 {
 		select {
 		case operationErr := <-errorsByOperation:
 			var postgresError *pgconn.PgError

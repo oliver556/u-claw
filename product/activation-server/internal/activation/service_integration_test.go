@@ -6,9 +6,11 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -83,6 +85,27 @@ func TestPostgresActivationSameKeyRecoveryAndConflict(t *testing.T) {
 	}
 	if !bytes.Equal(first.Envelope, second.Envelope) || !bytes.Equal(first.Material, second.Material) {
 		t.Fatal("same idempotent request did not return identical persisted artifact")
+	}
+	var material struct {
+		BuiltinCredential struct {
+			DeviceToken string `json:"deviceToken"`
+		} `json:"builtinCredential"`
+	}
+	if err := json.Unmarshal(first.Material, &material); err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha256.New, testPepper)
+	_, _ = mac.Write([]byte(material.BuiltinCredential.DeviceToken))
+	var digest []byte
+	if err := pool.QueryRow(context.Background(), `SELECT token_digest FROM device_access_tokens`).Scan(&digest); err != nil {
+		t.Fatal(err)
+	}
+	if !hmac.Equal(digest, mac.Sum(nil)) {
+		t.Fatal("persisted device token digest mismatch")
+	}
+	var rawMatches int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM device_access_tokens WHERE device_token_id::text=$1 OR encode(token_digest,'hex')=$1`, material.BuiltinCredential.DeviceToken).Scan(&rawMatches); err != nil || rawMatches != 0 {
+		t.Fatalf("raw device token persisted: count=%d err=%v", rawMatches, err)
 	}
 	conflict := input
 	conflict.ClientVersion = "1.0.1"
@@ -170,6 +193,28 @@ func TestPostgresActivationThirtyTwoDevicesOnlyOneBinds(t *testing.T) {
 	}
 }
 
+func TestPostgresActivationMappingPendingWritesNothing(t *testing.T) {
+	pool := activationTestPool(t)
+	seedActivationInventory(t, pool)
+	if _, err := pool.Exec(context.Background(), `UPDATE new_api_bindings SET balance_setup_status='pending',api_key_envelope=NULL,api_key_version=NULL,base_url=NULL,default_model=NULL,allowed_models='{}'`); err != nil {
+		t.Fatal(err)
+	}
+	service := integrationService(t, pool, 1)
+	if _, err := service.Activate(context.Background(), integrationInput(1, "activation-pending-001")); !errors.Is(err, activation.ErrNewAPINotConfigured) {
+		t.Fatalf("error=%v", err)
+	}
+	for _, table := range []string{"devices", "licenses", "activation_attempts", "device_access_tokens", "license_status_events", "audit_events"} {
+		var count int
+		if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM "+pgx.Identifier{table}.Sanitize()).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s count=%d err=%v", table, count, err)
+		}
+	}
+	var status string
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM activation_inventory`).Scan(&status); err != nil || status != "prepared" {
+		t.Fatalf("inventory status=%q err=%v", status, err)
+	}
+}
+
 func activationTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	databaseURL := os.Getenv("ACTIVATION_TEST_DATABASE_URL")
@@ -220,9 +265,10 @@ func seedActivationInventory(t *testing.T, pool *pgxpool.Pool) {
 		(id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at)
 		VALUES ('00000000-0000-4000-8000-000000000010',$1,$1,$2,'prepared','configured',now());
 		INSERT INTO new_api_bindings
-		(inventory_id,new_api_user_id,new_api_username,balance_setup_status,status,policy_digest,created_at,updated_at)
-		VALUES ('00000000-0000-4000-8000-000000000010','new-api-user-001','new-api-name-001','configured','active',$3,now(),now())`,
-		testUsername, digest, bytes.Repeat([]byte{0x55}, 32))
+		(inventory_id,new_api_user_id,new_api_username,balance_setup_status,status,policy_digest,base_url,default_model,allowed_models,api_key_envelope,api_key_version,created_at,updated_at)
+		VALUES ('00000000-0000-4000-8000-000000000010','new-api-user-001','new-api-name-001','configured','active',$3,
+		'https://upstream.example/v1','model-a',ARRAY['model-a'],$4,'kms-v1',now(),now())`,
+		testUsername, digest, bytes.Repeat([]byte{0x55}, 32), []byte("sealed-api-key"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,8 +290,9 @@ func integrationService(t *testing.T, pool *pgxpool.Pool, randomByte byte) *acti
 	service, err := activation.NewService(activation.ServiceOptions{
 		Repository: repository, Signer: signer, Envelope: envelope, Pepper: testPepper,
 		KeyID: "test-license-key", KeyVersion: "kms-v1", LeaseTTL: time.Minute, LicenseTTL: 365 * 24 * time.Hour,
-		Now:    func() time.Time { return time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC) },
-		Random: bytes.NewReader(bytes.Repeat([]byte{randomByte}, 4096)),
+		Now:                 func() time.Time { return time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC) },
+		Random:              bytes.NewReader(bytes.Repeat([]byte{randomByte}, 4096)),
+		PublicModelEndpoint: "https://activation.example/model-api/",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +302,7 @@ func integrationService(t *testing.T, pool *pgxpool.Pool, randomByte byte) *acti
 
 func integrationInput(device int, idempotencyKey string) activation.ActivateInput {
 	return activation.ActivateInput{
-		Username: testUsername, ActivationCode: testCode, FingerprintVersion: "uclaw-usb-v1",
+		ActivationCode: testCode, FingerprintVersion: "uclaw-usb-v1",
 		FingerprintSHA256: fmt.Sprintf("%064x", device), ClientVersion: "1.0.0",
 		IdempotencyKey: idempotencyKey, RequestID: fmt.Sprintf("req_integration_%03d", device),
 	}

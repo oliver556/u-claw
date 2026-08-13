@@ -22,24 +22,18 @@ type fakePublicService struct {
 	activationContext context.Context
 	statusContext     context.Context
 	recovered         []byte
-	token             lifecycle.DeviceTokenResponse
 }
 
 func (service *fakePublicService) Recover(context.Context, lifecycle.RecoverInput) ([]byte, error) {
 	return service.recovered, nil
 }
-func (service *fakePublicService) DeviceToken(context.Context, lifecycle.DeviceTokenInput) (lifecycle.DeviceTokenResponse, error) {
-	return service.token, nil
-}
-
 func (service *fakePublicService) Activate(context.Context, activation.ActivateInput) (activation.ActivateResult, error) {
 	return service.activateResult, service.activateErr
 }
 
-func TestPublicHandlerServesRecoveryAndDeviceToken(t *testing.T) {
+func TestPublicHandlerServesRecoveryAndRejectsRemovedDeviceTokenRoute(t *testing.T) {
 	service := &fakePublicService{
 		recovered: []byte(`{"activationId":"act_fixture_001"}`),
-		token:     lifecycle.DeviceTokenResponse{AccessToken: strings.Repeat("t", 32), TokenType: "Bearer", ExpiresAt: "2026-08-13T02:00:00Z"},
 	}
 	handler := NewPublicHandler(PublicHandlerOptions{Activation: service, Lifecycle: service, RequestIDs: strings.NewReader(strings.Repeat("f", 128))})
 	recovery := httptest.NewRequest(http.MethodGet, "/v1/activations/act_fixture_001", nil)
@@ -54,7 +48,7 @@ func TestPublicHandlerServesRecoveryAndDeviceToken(t *testing.T) {
 	tokenRequest.Header.Set("Content-Type", "application/json")
 	tokenResponse := httptest.NewRecorder()
 	handler.ServeHTTP(tokenResponse, tokenRequest)
-	if tokenResponse.Code != http.StatusOK || !strings.Contains(tokenResponse.Body.String(), strings.Repeat("t", 32)) {
+	if tokenResponse.Code != http.StatusNotFound {
 		t.Fatalf("token=%d %s", tokenResponse.Code, tokenResponse.Body.String())
 	}
 }
@@ -82,12 +76,12 @@ func (service *fakePublicService) Status(ctx context.Context, _, _ string) (life
 func TestPublicHandlerUsesStrictBoundedJSONAndNoRedirect(t *testing.T) {
 	service := &fakePublicService{activateResult: activation.ActivateResult{Material: []byte(`{"activationId":"act_fixture_001"}`)}}
 	handler := NewPublicHandler(PublicHandlerOptions{Activation: service, Lifecycle: service, RequestIDs: strings.NewReader(strings.Repeat("a", 64))})
-	valid := `{"username":"UCLAW-00000001","activationCode":"0123456789ABCDEFGHJKMNPQRS","usbFingerprint":{"version":"uclaw-usb-v1","sha256":"` + strings.Repeat("a", 64) + `"},"clientVersion":"1.0.0","idempotencyKey":"activation-001"}`
+	valid := `{"activationCode":"0123456789ABCDEFGHJKMNPQRS","usbFingerprint":{"version":"uclaw-usb-v1","sha256":"` + strings.Repeat("a", 64) + `"},"clientVersion":"1.0.0","idempotencyKey":"activation-001"}`
 	for name, body := range map[string]string{
-		"unknown":   valid[:len(valid)-1] + `,"extra":true}`,
-		"duplicate": strings.Replace(valid, `"username":`, `"username":"UCLAW-OTHER","username":`, 1),
-		"trailing":  valid + `{}`,
-		"oversized": `{"padding":"` + strings.Repeat("x", (1<<20)+1) + `"}`,
+		"unknown":          valid[:len(valid)-1] + `,"extra":true}`,
+		"unknown username": strings.Replace(valid, `{"activationCode"`, `{"username":"UCLAW-OTHER","activationCode"`, 1),
+		"trailing":         valid + `{}`,
+		"oversized":        `{"padding":"` + strings.Repeat("x", (1<<20)+1) + `"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "/v1/activations", strings.NewReader(body))
@@ -110,7 +104,7 @@ func TestPublicHandlerProjectsStableRedactedErrors(t *testing.T) {
 	secret := "Authorization: Bearer private-secret"
 	service := &fakePublicService{activateErr: errors.Join(activation.ErrActivationServiceUnavailable, errors.New(secret))}
 	handler := NewPublicHandler(PublicHandlerOptions{Activation: service, Lifecycle: service, RequestIDs: strings.NewReader(strings.Repeat("b", 64))})
-	body := `{"username":"UCLAW-00000001","activationCode":"0123456789ABCDEFGHJKMNPQRS","usbFingerprint":{"version":"uclaw-usb-v1","sha256":"` + strings.Repeat("a", 64) + `"},"clientVersion":"1.0.0","idempotencyKey":"activation-001"}`
+	body := `{"activationCode":"0123456789ABCDEFGHJKMNPQRS","usbFingerprint":{"version":"uclaw-usb-v1","sha256":"` + strings.Repeat("a", 64) + `"},"clientVersion":"1.0.0","idempotencyKey":"activation-001"}`
 	request := httptest.NewRequest(http.MethodPost, "/v1/activations", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -135,7 +129,7 @@ func TestActivateErrorReportsBindingStageAndActivationID(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			service := &fakePublicService{activateResult: result, activateErr: activation.ErrActivationServiceUnavailable}
 			handler := NewPublicHandler(PublicHandlerOptions{Activation: service, RequestIDs: strings.NewReader(strings.Repeat("c", 64))})
-			body := `{"username":"UCLAW-00000001","activationCode":"0123456789ABCDEFGHJKMNPQRS","usbFingerprint":{"version":"uclaw-usb-v1","sha256":"` + strings.Repeat("a", 64) + `"},"clientVersion":"1.0.0","idempotencyKey":"activation-001"}`
+			body := `{"activationCode":"0123456789ABCDEFGHJKMNPQRS","usbFingerprint":{"version":"uclaw-usb-v1","sha256":"` + strings.Repeat("a", 64) + `"},"clientVersion":"1.0.0","idempotencyKey":"activation-001"}`
 			request := httptest.NewRequest(http.MethodPost, "/v1/activations", strings.NewReader(body))
 			request.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()
