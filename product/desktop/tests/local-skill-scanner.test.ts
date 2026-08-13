@@ -28,6 +28,45 @@ describe("local Skill scanner", () => {
     expect(result.conflicts.get("china-weather")).toContain("workspace-installed");
   });
 
+  it("scans Tencent SkillHub namespace installs one level below the workspace root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "uclaw-skill-namespace-"));
+    roots.push(root);
+    const workspaceRoot = join(root, "workspace", "skills");
+    const skillRoot = join(workspaceRoot, "@user_ab5ae6ee", "unclecheng-reduce-ai-perception-v2");
+    await mkdir(skillRoot, { recursive: true });
+    await writeFile(join(skillRoot, "SKILL.md"), "---\nname: humanizer\ndescription: Remove AI writing patterns\nversion: 4.1.0\n---\n");
+
+    const result = await scanLocalSkills({ bundledRoots: [], managedRoot: join(root, "managed"), workspaceRoot });
+
+    expect(result.items).toEqual([expect.objectContaining({
+      id: "unclecheng-reduce-ai-perception-v2",
+      name: "humanizer",
+      directoryKey: "unclecheng-reduce-ai-perception-v2",
+      markdown: expect.stringContaining("Remove AI writing patterns"),
+      origin: "workspace-installed",
+    })]);
+  });
+
+  it("keeps slug, runtime name, directory identity, and complete markdown", async () => {
+    const root = await mkdtemp(join(tmpdir(), "uclaw-skill-identities-"));
+    roots.push(root);
+    const workspaceRoot = join(root, "workspace", "skills");
+    const skillRoot = join(workspaceRoot, "@user_bddf3fe6", "contextweave-interactive-architecture");
+    await mkdir(skillRoot, { recursive: true });
+    const markdown = "---\nname: interactive-architecture-diagram\nslug: contextweave-interactive-architecture\ndisplayName: 架构图一键生成\ndescription: Build architecture diagrams\nversion: 1.2.0\n---\n\n# Architecture\n\n- Parse requirements\n";
+    await writeFile(join(skillRoot, "SKILL.md"), markdown);
+
+    const result = await scanLocalSkills({ bundledRoots: [], managedRoot: join(root, "managed"), workspaceRoot });
+
+    expect(result.items).toEqual([expect.objectContaining({
+      id: "contextweave-interactive-architecture",
+      name: "架构图一键生成",
+      runtimeName: "interactive-architecture-diagram",
+      directoryKey: "contextweave-interactive-architecture",
+      markdown,
+    })]);
+  });
+
   it("rejects symlinked Skill entries", async () => {
     const root = await mkdtemp(join(tmpdir(), "uclaw-skill-symlink-"));
     const outside = await mkdtemp(join(tmpdir(), "uclaw-skill-outside-"));

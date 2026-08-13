@@ -1,10 +1,14 @@
-import type { GatewayLaunchOptions, GatewayProcessIdentity } from "./gateway-process.js";
+import type { GatewayLaunchOptions, GatewayProcessIdentity, GatewayStopReason } from "./gateway-process.js";
 import type { GatewayHealthStatus } from "./health-check.js";
 import { GATEWAY_PORT_MAX, GATEWAY_PORT_MIN } from "./port-selector.js";
 
 export interface GatewayProcessController {
   start(options: GatewayLaunchOptions): GatewayProcessIdentity;
-  stop(): Promise<void>;
+  stop(reason?: GatewayStopReason): Promise<void>;
+  setPort?(port: number): void;
+  markHealthReady?(identity: GatewayProcessIdentity): void;
+  markCapabilityReady?(identity: GatewayProcessIdentity): void;
+  markStartupFailed?(identity: GatewayProcessIdentity): void;
 }
 
 export interface ShowableWindow {
@@ -72,17 +76,23 @@ export async function waitForGatewayReadiness(
     "checkHealth" | "now" | "sleep" | "timeoutMs" | "pollIntervalMs" | "signal">,
   port: number,
   identity: GatewayProcessIdentity,
+  onHealthReady?: () => void,
 ): Promise<void> {
   if (options.timeoutMs <= 0 || options.pollIntervalMs < 0) {
     throw new Error("Invalid gateway readiness timing options.");
   }
   const deadline = options.now() + options.timeoutMs;
+  let healthReady = false;
 
   while (true) {
     options.signal.throwIfAborted();
     const status = await options.checkHealth(port, deadline, identity, options.signal);
     options.signal.throwIfAborted();
     if (!status.processAlive) throw new Error("Gateway process exited before readiness.");
+    if (status.serviceReady && !healthReady) {
+      healthReady = true;
+      onHealthReady?.();
+    }
     if (status.serviceReady && status.businessAvailable) return;
     if (options.now() >= deadline) throw new Error("Gateway readiness timed out.");
     await raceWithAbort(options.sleep(options.pollIntervalMs, options.signal), options.signal);
@@ -112,6 +122,7 @@ export async function startGatewayAndCreateWindow<TWindow extends ShowableWindow
       throw new Error(`Gateway port must be within ${GATEWAY_PORT_MIN}-${GATEWAY_PORT_MAX}.`);
     }
     const launchOptions = validateGatewayLaunchOptions(options.buildLaunchOptions(port));
+    options.gatewayProcess.setPort?.(port);
     options.signal.throwIfAborted();
     let identity: GatewayProcessIdentity;
     try {
@@ -124,14 +135,16 @@ export async function startGatewayAndCreateWindow<TWindow extends ShowableWindow
     }
 
     try {
-      await waitForGatewayReadiness(options, port, identity);
+      await waitForGatewayReadiness(options, port, identity, () => options.gatewayProcess.markHealthReady?.(identity));
+      options.gatewayProcess.markCapabilityReady?.(identity);
       options.signal.throwIfAborted();
       const window = await options.createWindow(options.signal);
       options.signal.throwIfAborted();
       window.show();
       return { window, port, ...identity };
     } catch (error) {
-      await rollbackOrThrow(error, () => options.gatewayProcess.stop());
+      options.gatewayProcess.markStartupFailed?.(identity);
+      await rollbackOrThrow(error, () => options.gatewayProcess.stop("startup-rollback"));
       throw error;
     }
   }

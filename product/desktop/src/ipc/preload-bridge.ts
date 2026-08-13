@@ -41,6 +41,11 @@ import {
   type UsageIpcRequest,
 } from "@uclaw/shared";
 import {
+  ImageOperationIpcRequestSchema,
+  ImageOperationIpcResponseSchema,
+  type ImageOperationIpcRequest,
+} from "@uclaw/shared/dist/image-operations.js";
+import {
   AutomationIpcRequestSchema,
   AutomationIpcResponseSchema,
   type AutomationIpcRequest,
@@ -92,6 +97,7 @@ import {
   SYSTEM_NODE_IPC_EVENT_CHANNEL,
   SYSTEM_VOICE_IPC_CHANNEL,
   PRODUCT_SERVICES_IPC_CHANNEL,
+  IMAGE_OPERATION_IPC_CHANNEL,
 } from "./channels.js";
 
 export interface ContextBridgeLike {
@@ -238,6 +244,12 @@ export function installPreloadBridge({
     if (response.method !== request.method || response.requestId !== request.requestId) throw new Error("IPC response does not match its request.");
     return response;
   };
+  const invokeImages = async (payload: unknown) => {
+    const request = ImageOperationIpcRequestSchema.parse(payload);
+    const response = ImageOperationIpcResponseSchema.parse(await ipcRenderer.invoke(IMAGE_OPERATION_IPC_CHANNEL, request));
+    if (response.method !== request.method || response.requestId !== request.requestId) throw new Error("IPC response does not match its request.");
+    return response;
+  };
   const subscribe = (listener: (event: IpcEvent) => void): (() => void) => {
     const receive = (_event: unknown, payload: unknown): void => {
       const parsed = IpcEventSchema.safeParse(payload);
@@ -323,5 +335,6 @@ export function installPreloadBridge({
     data: Object.freeze({ invoke: invokeData as (request: DataIpcRequest) => Promise<unknown> }),
     diagnostics: Object.freeze({ invoke: invokeDiagnostics as (request: DiagnosticsIpcRequest) => Promise<unknown> }),
     release: Object.freeze({ invoke: invokeRelease as (request: ReleaseIpcRequest) => Promise<unknown> }),
+    images: Object.freeze({ invoke: invokeImages as (request: ImageOperationIpcRequest) => Promise<unknown> }),
   }));
 }

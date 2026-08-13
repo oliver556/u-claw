@@ -12,6 +12,7 @@ export interface StreamRun {
   terminal?: RunTerminal;
   finalMessage?: Message;
   errorMessage?: string;
+  completedAt?: string;
 }
 
 export interface StreamState {
@@ -52,13 +53,13 @@ export function messageEventReducer(state: StreamState, event: StreamAction): St
       next = { ...run, approvals: [...run.approvals.filter((approval) => approval.id !== event.approval.id), event.approval] };
       break;
     case "final":
-      next = { ...run, terminal: "final", finalMessage: event.message };
+      next = { ...run, terminal: "final", finalMessage: event.message, completedAt: new Date().toISOString() };
       break;
     case "aborted":
-      next = { ...run, terminal: "aborted", errorMessage: event.reason ?? "已停止" };
+      next = { ...run, terminal: "aborted", errorMessage: event.reason ?? "已停止", completedAt: new Date().toISOString() };
       break;
     case "error":
-      next = { ...run, terminal: "error", errorMessage: event.error.message };
+      next = { ...run, terminal: "error", errorMessage: event.error.message, completedAt: new Date().toISOString() };
       break;
   }
 

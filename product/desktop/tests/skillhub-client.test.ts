@@ -111,6 +111,7 @@ metadata:
       "https://api.skillhub.cn/api/skills?page=2&pageSize=20&keyword=workspace+%26+files&category=productivity&labels=pricing_type%3A%21paid",
       { method: "GET", headers: { accept: "application/json" }, redirect: "error", signal: expect.any(AbortSignal) },
     );
+    expect((await client.search({ query: "", cursor: null, pageSize: 20 })).items[0]?.logoUrl).toBeNull();
   });
 
   it.each([
@@ -274,7 +275,7 @@ metadata:
 
     await expect(client.detail("workspace-reader")).resolves.toMatchObject({
       slug: "workspace-reader", name: "Workspace Reader", description: "Reads workspace files", version: "1.0.0",
-      pricingType: "free", risk: "high", manifest: { kind: "skill", id: "workspace-reader", version: "1.0.0", entry: "SKILL.md" },
+      pricingType: "free", risk: "high", logoUrl: null, manifest: { kind: "skill", id: "workspace-reader", version: "1.0.0", entry: "SKILL.md" },
     });
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([
       "https://api.skillhub.cn/api/v1/skills/workspace-reader?namespace=",

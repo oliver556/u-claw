@@ -4,11 +4,13 @@ import {
   PluginApprovalRequestSchema,
   ToolCallSchema,
   type ExecApprovalRequest,
+  type ContentBlock,
   type Message,
   type PluginApprovalRequest,
   type ToolCall,
 } from "@uclaw/shared";
 import { z } from "zod";
+import { posix, win32 } from "node:path";
 
 import { RawOpenClawModelsListResponseSchema } from "./mappers/model.js";
 
@@ -178,13 +180,24 @@ export const OpenClawHistoryMessageSchema = z.object({
   MediaPaths: z.array(z.string()).optional(),
   MediaType: z.string().optional(),
   MediaTypes: z.array(z.string()).optional(),
+  errorMessage: z.string().optional(),
   __openclaw: OpenClawRecordSchema,
+}).passthrough();
+
+const OpenClawTruncatedHistoryPlaceholderSchema = z.object({
+  role: z.literal("toolResult"),
+  content: z.union([z.string(), z.array(OpenClawContentBlockSchema)]),
+  timestamp: z.number().int().nonnegative().optional(),
+  __openclaw: OpenClawRecordSchema.extend({
+    truncated: z.literal(true),
+    reason: z.literal("oversized"),
+  }).passthrough(),
 }).passthrough();
 
 export const OpenClawHistoryResponseSchema = z.object({
   sessionKey: z.string().min(1),
   sessionId: z.string().min(1),
-  messages: z.array(OpenClawHistoryMessageSchema),
+  messages: z.array(z.union([OpenClawHistoryMessageSchema, OpenClawTruncatedHistoryPlaceholderSchema])),
   offset: z.number().int().nonnegative().optional(),
   nextOffset: z.number().nonnegative().refine(Number.isInteger).optional(),
   hasMore: z.boolean().optional(),
@@ -371,53 +384,148 @@ function toIso(timestamp: number): string {
   return new Date(timestamp).toISOString();
 }
 
-function contentBlocks(message: z.infer<typeof OpenClawHistoryMessageSchema>) {
-  if (typeof message.content === "string") {
-    return [{ id: `${message.__openclaw.id}:text`, type: "text" as const, text: message.content, format: "plain" as const }];
+type LocalPathFlavor = typeof posix | typeof win32;
+
+function controlledAssistantMediaPath(source: string, dataRoot: string | undefined): { source: string; name: string; mediaType: string } | undefined {
+  if (dataRoot === undefined || dataRoot.includes("\0") || source.includes("\0") || /^file:/iu.test(source)) return undefined;
+  const flavor: LocalPathFlavor = /^[A-Za-z]:[\\/]/u.test(dataRoot) || dataRoot.startsWith("\\\\") ? win32 : posix;
+  if (!flavor.isAbsolute(dataRoot) || !flavor.isAbsolute(source)) return undefined;
+  const workspaceRoot = flavor.resolve(dataRoot, "workspace");
+  const resolvedSource = flavor.resolve(source);
+  const relativeSource = flavor.relative(workspaceRoot, resolvedSource);
+  const compare = flavor === win32 ? relativeSource.toLocaleLowerCase("en-US") : relativeSource;
+  if (compare === "" || compare === ".." || compare.startsWith(`..${flavor.sep}`) || flavor.isAbsolute(relativeSource)) return undefined;
+  const extension = flavor.extname(resolvedSource).toLocaleLowerCase("en-US");
+  const mediaType = ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" } as Record<string, string>)[extension];
+  if (mediaType === undefined) return undefined;
+  return { source: resolvedSource, name: flavor.basename(resolvedSource), mediaType };
+}
+
+function splitAssistantMediaLines(text: string, dataRoot: string | undefined) {
+  const media: Array<{ source: string; name: string; mediaType: string }> = [];
+  const textLines: string[] = [];
+  for (const line of text.split(/\r?\n/u)) {
+    const match = /^MEDIA:\s*(\S(?:.*\S)?)\s*$/u.exec(line);
+    const controlled = match === null ? undefined : controlledAssistantMediaPath(match[1]!, dataRoot);
+    if (controlled === undefined) textLines.push(line);
+    else media.push(controlled);
   }
-  return message.content.map((block, index) => {
+  return { text: textLines.join("\n").trim(), media };
+}
+
+function contentBlocks(message: z.infer<typeof OpenClawHistoryMessageSchema>, gatewayOrigin?: string, dataRoot?: string): ContentBlock[] {
+  const hasManagedImage = Array.isArray(message.content) && message.content.some((block) =>
+    block.type === "image" && typeof block.url === "string" && block.url.startsWith("/api/chat/media/outgoing/"));
+  if (typeof message.content === "string") {
+    if (message.role !== "assistant" || gatewayOrigin === undefined) {
+      return [{ id: `${message.__openclaw.id}:text`, type: "text" as const, text: message.content, format: "plain" as const }];
+    }
+    const split = splitAssistantMediaLines(message.content, dataRoot);
+    const blocks = split.text === "" ? [] : [{ id: `${message.__openclaw.id}:text`, type: "text" as const, text: split.text, format: "plain" as const }];
+    return [...blocks, ...split.media.map((media, index) => assistantMediaBlock(message.__openclaw.id, index, media, gatewayOrigin))];
+  }
+  let assistantMediaIndex = 0;
+  return message.content.flatMap<ContentBlock>((block, index) => {
     if (block.type === "text" && typeof block.text === "string") {
-      return { id: `${message.__openclaw.id}:${index}`, type: "text" as const, text: block.text, format: "markdown" as const };
+      if (message.role !== "assistant" || gatewayOrigin === undefined) {
+        return [{ id: `${message.__openclaw.id}:${index}`, type: "text" as const, text: block.text, format: "markdown" as const }];
+      }
+      const split = splitAssistantMediaLines(block.text, dataRoot);
+      const blocks = split.text === "" ? [] : [{ id: `${message.__openclaw.id}:${index}`, type: "text" as const, text: split.text, format: "markdown" as const }];
+      return [...blocks, ...(hasManagedImage ? [] : split.media.map((media) => assistantMediaBlock(message.__openclaw.id, assistantMediaIndex++, media, gatewayOrigin)))];
     }
     if (block.type === "toolCall" && typeof block.id === "string") {
-      return { id: `${message.__openclaw.id}:${index}`, type: "tool-call" as const, toolCallId: block.id };
+      return [{ id: `${message.__openclaw.id}:${index}`, type: "tool-call" as const, toolCallId: block.id }];
     }
-    return { id: `${message.__openclaw.id}:${index}`, type: "unsupported" as const, originalType: block.type, summary: "Unsupported OpenClaw content" };
+    if (block.type === "image" && typeof block.url === "string" && block.url.startsWith("/api/chat/media/outgoing/")) {
+      const id = `${message.__openclaw.id}:${index}`;
+      const alt = typeof block.alt === "string" && block.alt !== "" ? block.alt : "生成的图片";
+      const mediaType = typeof block.mimeType === "string" && block.mimeType.startsWith("image/") ? block.mimeType : "image/png";
+      return [{
+        id,
+        type: "image" as const,
+        file: { id, name: alt, mediaType, size: 0, kind: "artifact" as const },
+        alt,
+        sourceUrl: gatewayOrigin === undefined ? block.url : `${gatewayOrigin}${block.url}`,
+      }];
+    }
+    return [{ id: `${message.__openclaw.id}:${index}`, type: "unsupported" as const, originalType: block.type, summary: "Unsupported OpenClaw content" }];
   });
 }
 
-export function mapOpenClawHistoryMessage(sessionKey: string, input: z.input<typeof OpenClawHistoryMessageSchema>): Message {
+function assistantMediaBlock(messageId: string, index: number, media: { source: string; name: string; mediaType: string }, gatewayOrigin: string): ContentBlock {
+  const id = `${messageId}:media:${index}`;
+  const sourceUrl = `${gatewayOrigin}/__openclaw__/assistant-media?source=${encodeURIComponent(media.source)}`;
+  return {
+    id,
+    type: "image" as const,
+    file: { id, name: media.name, mediaType: media.mediaType, size: 0, kind: "artifact" as const },
+    alt: media.name,
+    sourceUrl,
+  };
+}
+
+function hasRenderableAssistantContent(message: z.infer<typeof OpenClawHistoryMessageSchema>): boolean {
+  if (typeof message.content === "string") return message.content.trim() !== "";
+  return message.content.some((block) =>
+    block.type === "text" && typeof block.text === "string" && block.text.trim() !== ""
+    || block.type === "image" && typeof block.url === "string" && block.url.startsWith("/api/chat/media/outgoing/"));
+}
+
+const LOCAL_USER_PREFIX = "[uclaw-local-user-v1]\n\n";
+const LOCAL_RESULT_PREFIX = "[uclaw-local-result-v1]\n\n";
+
+function localInjection(message: z.infer<typeof OpenClawHistoryMessageSchema>): { role: "user" | "assistant"; content: typeof message.content } {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return { role: message.role === "toolResult" ? "assistant" : message.role as "user" | "assistant", content: message.content };
+  if (message.provider !== "openclaw" || message.model !== "gateway-injected") return { role: "assistant", content: message.content };
+  const [first, ...rest] = message.content;
+  if (first?.type !== "text" || typeof first.text !== "string") return { role: "assistant", content: message.content };
+  if (first.text.startsWith(LOCAL_USER_PREFIX)) return { role: "user", content: [{ ...first, text: first.text.slice(LOCAL_USER_PREFIX.length) }, ...rest] };
+  if (first.text.startsWith(LOCAL_RESULT_PREFIX)) return { role: "assistant", content: [{ ...first, text: first.text.slice(LOCAL_RESULT_PREFIX.length) }, ...rest] };
+  return { role: "assistant", content: message.content };
+}
+
+export function mapOpenClawHistoryMessage(sessionKey: string, input: z.input<typeof OpenClawHistoryMessageSchema>, gatewayOrigin?: string, dataRoot?: string): Message {
   const message = OpenClawHistoryMessageSchema.parse(input);
+  const local = localInjection(message);
   return MessageSchema.parse({
     id: message.__openclaw.id,
     sessionId: sessionKey,
-    role: message.role === "toolResult" ? "tool" : message.role,
+    role: message.role === "toolResult" ? "tool" : local.role,
     status: "completed",
-    blocks: contentBlocks(message),
+    blocks: contentBlocks({ ...message, role: local.role, content: local.content }, gatewayOrigin, dataRoot),
     createdAt: toIso(message.timestamp),
     ...(message.model ? { model: { id: message.model, label: message.model, ...(message.provider ? { providerId: message.provider } : {}) } } : {}),
   });
 }
 
-export function mapOpenClawHistoryResponse(input: z.input<typeof OpenClawHistoryResponseSchema>): Message[] {
+export function mapOpenClawHistoryResponse(input: z.input<typeof OpenClawHistoryResponseSchema>, gatewayOrigin?: string, dataRoot?: string): Message[] {
   const response = OpenClawHistoryResponseSchema.parse(input);
   const unique = new Map<string, z.infer<typeof OpenClawHistoryMessageSchema>>();
   for (const message of response.messages) {
-    if (!unique.has(message.__openclaw.id)) unique.set(message.__openclaw.id, message);
+    if (message.__openclaw.truncated === true && message.__openclaw.reason === "oversized") continue;
+    const historyMessage = OpenClawHistoryMessageSchema.parse(message);
+    if (!unique.has(historyMessage.__openclaw.id)) unique.set(historyMessage.__openclaw.id, historyMessage);
   }
   return [...unique.values()]
     .sort((left, right) => left.__openclaw.seq - right.__openclaw.seq || left.timestamp - right.timestamp)
-    .map((message) => mapOpenClawHistoryMessage(response.sessionKey, message));
+    .filter((message) => {
+      if (message.role === "tool" || message.role === "toolResult" || message.role === "system") return false;
+      return message.role !== "assistant" || hasRenderableAssistantContent(message);
+    })
+    .map((message) => mapOpenClawHistoryMessage(response.sessionKey, message, gatewayOrigin, dataRoot));
 }
 
 export function mapOpenClawMessageGetResponse(
   input: z.input<typeof OpenClawMessageGetResponseSchema>,
   sessionKey: string,
+  gatewayOrigin?: string,
+  dataRoot?: string,
 ): Message | undefined {
   const validatedSessionKey = z.string().min(1).parse(sessionKey);
   const response = OpenClawMessageGetResponseSchema.parse(input);
   if (!response.ok) return undefined;
-  return mapOpenClawHistoryMessage(validatedSessionKey, response.message);
+  return mapOpenClawHistoryMessage(validatedSessionKey, response.message, gatewayOrigin, dataRoot);
 }
 
 function approvalChoices(decisions: readonly z.infer<typeof ApprovalDecisionSchema>[] | undefined) {

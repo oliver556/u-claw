@@ -1,5 +1,7 @@
 # P3-T04 License Lifecycle Implementation Plan
 
+> **历史计划说明（2026-08-13）：** 本计划保留为已完成生命周期能力记录。第一版首次激活和授权服务器实施以[《第一版启动、激活与授权总方案》](../../第一版启动激活授权方案.md)为准；既有查询、撤销、reissue 和离线机制继续复用。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver LIC-002 signing, query, revoke, reissue, typed states, and bounded 24-hour offline tolerance without weakening the P3-T03 startup gate.

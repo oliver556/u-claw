@@ -29,6 +29,13 @@ export const SkillSourceSchema = z.discriminatedUnion("provider", [
 ]);
 
 const PricingTypeSchema = z.enum(["free", "paid"]);
+const SkillLogoUrlSchema = z.url().refine((value) => {
+  const url = new URL(value);
+  return url.protocol === "https:" && !url.username && !url.password && [
+    "api.skillhub.cn",
+    "skillhub-1388575217.cos.accelerate.myqcloud.com",
+  ].includes(url.hostname);
+}, "Skill logo must use a trusted SkillHub HTTPS URL.");
 const SkillCatalogBaseSchema = z.object({
   slug: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/),
   name: z.string().min(1).max(120),
@@ -44,6 +51,7 @@ const SkillCatalogBaseSchema = z.object({
   risk: CapabilityRiskSchema,
   mode: z.enum(["fixture", "live"]),
   categories: z.array(z.string().min(1).max(80)).max(32).default([]),
+  logoUrl: SkillLogoUrlSchema.nullable().optional(),
 }).strict();
 
 export const SkillCatalogItemSchema = SkillCatalogBaseSchema;
@@ -84,6 +92,13 @@ export const SkillOperationSchema = z.object({
 }).strict();
 export type SkillOperation = z.infer<typeof SkillOperationSchema>;
 
+export const SkillImportSelectionSchema = z.object({
+  token: z.string().min(16).max(160).regex(/^[A-Za-z0-9_-]+$/),
+  fileName: z.string().min(1).max(240),
+  sizeBytes: z.number().int().positive().max(20 * 1024 * 1024),
+}).strict();
+export type SkillImportSelection = z.infer<typeof SkillImportSelectionSchema>;
+
 const RequestIdSchema = z.string().min(1);
 const SearchParamsSchema = z.object({
   query: z.string().max(120),
@@ -93,6 +108,8 @@ const SearchParamsSchema = z.object({
 }).strict();
 const SlugParamsSchema = z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/) }).strict();
 const MutationParamsSchema = z.object({ slug: SlugParamsSchema.shape.slug, confirmation: SkillConfirmationSchema.nullable() }).strict();
+const SkillImportTokenSchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9_-]+$/);
+const SkillHubIdentitySchema = z.string().regex(/^@[a-z0-9][a-z0-9_-]{0,63}\/[a-z0-9][a-z0-9._-]{0,79}$/);
 
 export const SkillMissingRequirementsSchema = z.object({
   bins: z.array(z.string().min(1).max(160)).max(128),
@@ -105,6 +122,7 @@ export type SkillMissingRequirements = z.infer<typeof SkillMissingRequirementsSc
 
 export const SkillRuntimeItemSchema = z.object({
   id: z.string().min(1).max(160),
+  runtimeId: z.string().min(1).max(160).optional(),
   name: z.string().min(1).max(160),
   description: z.string().max(2_000).optional(),
   source: z.string().min(1).max(160),
@@ -114,7 +132,7 @@ export const SkillRuntimeItemSchema = z.object({
   modelVisible: z.boolean(),
   userInvocable: z.boolean(),
   commandVisible: z.boolean(),
-  availability: z.enum(["available", "disabled", "missing-dependency", "conflict", "error"]),
+  availability: z.enum(["available", "disabled", "missing-dependency", "conflict", "not-detected", "error"]),
   missing: SkillMissingRequirementsSchema,
   conflicts: z.array(z.string().min(1).max(160)).max(32),
 }).strict();
@@ -126,6 +144,14 @@ export const SkillRuntimeInventorySchema = z.object({
   skills: z.array(SkillRuntimeItemSchema),
 }).strict();
 export type SkillRuntimeInventory = z.infer<typeof SkillRuntimeInventorySchema>;
+
+export const LocalSkillDetailSchema = z.object({
+  slug: SlugParamsSchema.shape.slug,
+  name: z.string().min(1).max(120),
+  description: z.string().max(1_000),
+  markdown: z.string().max(1_048_576),
+}).strict();
+export type LocalSkillDetail = z.infer<typeof LocalSkillDetailSchema>;
 
 export const SkillCuratorEntrySchema = z.object({
   skillFile: z.string().min(1).max(1_024), skillKey: z.string().min(1).max(160), skillName: z.string().min(1).max(160),
@@ -290,12 +316,19 @@ export const SkillIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("skills.search"), requestId: RequestIdSchema, params: SearchParamsSchema }).strict(),
   z.object({ method: z.literal("skills.installed"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
   z.object({ method: z.literal("skills.detail"), requestId: RequestIdSchema, params: SlugParamsSchema }).strict(),
+  z.object({ method: z.literal("skills.local-detail"), requestId: RequestIdSchema, params: SlugParamsSchema }).strict(),
   z.object({ method: z.literal("skills.install"), requestId: RequestIdSchema, params: MutationParamsSchema }).strict(),
   z.object({ method: z.literal("skills.update"), requestId: RequestIdSchema, params: MutationParamsSchema }).strict(),
   z.object({ method: z.literal("skills.uninstall"), requestId: RequestIdSchema, params: SlugParamsSchema }).strict(),
   z.object({ method: z.literal("skills.set-enabled"), requestId: RequestIdSchema, params: MutationParamsSchema.extend({ enabled: z.boolean() }).strict() }).strict(),
   z.object({ method: z.literal("skills.operation"), requestId: RequestIdSchema, params: z.object({ operationId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("skills.runtime-status"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("skills.import-select"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("skills.import-prepare"), requestId: RequestIdSchema, params: z.object({ token: SkillImportTokenSchema }).strict() }).strict(),
+  z.object({ method: z.literal("skills.import-install"), requestId: RequestIdSchema, params: z.object({ token: SkillImportTokenSchema, confirmation: SkillConfirmationSchema }).strict() }).strict(),
+  z.object({ method: z.literal("skills.import-dispose"), requestId: RequestIdSchema, params: z.object({ token: SkillImportTokenSchema }).strict() }).strict(),
+  z.object({ method: z.literal("skills.open-hub"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal("skills.resolve-install"), requestId: RequestIdSchema, params: z.object({ identity: SkillHubIdentitySchema }).strict() }).strict(),
   z.object({ method: z.literal("skills.curator-status"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
   z.object({ method: z.literal("skills.curator-action"), requestId: RequestIdSchema, params: z.object({ skill: z.string().min(1), action: z.enum(["pin", "unpin", "restore"]) }).strict() }).strict(),
   z.object({ method: z.literal("skills.proposals-list"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
@@ -312,9 +345,16 @@ const SkillSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("skills.search"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillCatalogPageSchema }).strict(),
   z.object({ method: z.literal("skills.installed"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(SkillCatalogItemSchema) }).strict(),
   z.object({ method: z.literal("skills.detail"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillDetailSchema }).strict(),
+  z.object({ method: z.literal("skills.local-detail"), requestId: RequestIdSchema, ok: z.literal(true), result: LocalSkillDetailSchema }).strict(),
   ...(["skills.install", "skills.update", "skills.uninstall", "skills.set-enabled", "skills.operation"] as const).map((method) =>
     z.object({ method: z.literal(method), requestId: RequestIdSchema, ok: z.literal(true), result: SkillOperationSchema }).strict()),
   z.object({ method: z.literal("skills.runtime-status"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillRuntimeInventorySchema }).strict(),
+  z.object({ method: z.literal("skills.import-select"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillImportSelectionSchema.nullable() }).strict(),
+  z.object({ method: z.literal("skills.import-prepare"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillDetailSchema }).strict(),
+  z.object({ method: z.literal("skills.import-install"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillOperationSchema }).strict(),
+  z.object({ method: z.literal("skills.import-dispose"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ disposed: z.literal(true) }).strict() }).strict(),
+  z.object({ method: z.literal("skills.open-hub"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ opened: z.literal(true) }).strict() }).strict(),
+  z.object({ method: z.literal("skills.resolve-install"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillDetailSchema }).strict(),
   z.object({ method: z.literal("skills.curator-status"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillCuratorStatusSchema }).strict(),
   z.object({ method: z.literal("skills.curator-action"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillCuratorEntrySchema }).strict(),
   z.object({ method: z.literal("skills.proposals-list"), requestId: RequestIdSchema, ok: z.literal(true), result: SkillProposalManifestSchema }).strict(),
@@ -328,7 +368,7 @@ const SkillSuccessResponseSchema = z.discriminatedUnion("method", [
 export const SkillIpcResponseSchema = z.union([
   SkillSuccessResponseSchema,
   z.object({
-    method: z.enum(["skills.search", "skills.installed", "skills.detail", "skills.install", "skills.update", "skills.uninstall", "skills.set-enabled", "skills.operation", "skills.runtime-status", "skills.curator-status", "skills.curator-action", "skills.proposals-list", "skills.proposal-inspect", "skills.proposal-action", "skills.proposal-create", "skills.proposal-update", "skills.proposal-revise", "skills.proposal-request-revision"]),
+    method: z.enum(["skills.search", "skills.installed", "skills.detail", "skills.local-detail", "skills.install", "skills.update", "skills.uninstall", "skills.set-enabled", "skills.operation", "skills.runtime-status", "skills.import-select", "skills.import-prepare", "skills.import-install", "skills.import-dispose", "skills.open-hub", "skills.resolve-install", "skills.curator-status", "skills.curator-action", "skills.proposals-list", "skills.proposal-inspect", "skills.proposal-action", "skills.proposal-create", "skills.proposal-update", "skills.proposal-revise", "skills.proposal-request-revision"]),
     requestId: RequestIdSchema,
     ok: z.literal(false),
     error: UClawErrorSchema,

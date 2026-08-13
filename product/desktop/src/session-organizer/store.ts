@@ -28,6 +28,7 @@ export interface SessionOrganizerStore {
   setPinned(sessionId: string, pinned: boolean): Promise<SessionOrganizerDocument>;
   createGroup(name: string): Promise<SessionGroup>;
   renameGroup(groupId: string, name: string): Promise<SessionGroup>;
+  removeGroup(groupId: string): Promise<SessionOrganizerDocument>;
   assignGroup(sessionId: string, groupId: string | null): Promise<SessionOrganizerDocument>;
   removeSession(sessionId: string): Promise<SessionOrganizerDocument>;
 }
@@ -103,6 +104,20 @@ class FileSessionOrganizerStore implements SessionOrganizerStore {
       if (document.groups.some((item) => item.id !== groupId && item.name === group.name)) throw new Error("Session group already exists.");
       await this.writeNow({ ...document, groups: document.groups.map((item) => item.id === groupId ? group : item) });
       return group;
+    });
+  }
+
+  removeGroup(groupId: string): Promise<SessionOrganizerDocument> {
+    return this.mutate((document) => {
+      if (!document.groups.some((group) => group.id === groupId)) throw new Error("Session group was not found.");
+      return {
+        ...document,
+        groups: document.groups.filter((group) => group.id !== groupId),
+        sessions: document.sessions.flatMap((entry) => {
+          if (entry.groupId !== groupId) return [entry];
+          return entry.pinned ? [{ sessionId: entry.sessionId, pinned: true }] : [];
+        }),
+      };
     });
   }
 

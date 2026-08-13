@@ -188,6 +188,10 @@ class ScriptedWebSocket {
       }));
       return;
     }
+    if (frame.method === "chat.inject") {
+      queueMicrotask(() => this.respond(frame, { ok: true, messageId: `injected-${this.sent.length}` }));
+      return;
+    }
     if (frame.method !== "connect") return;
     if (ScriptedWebSocket.outcome === "authentication") {
       queueMicrotask(() => this.emit("message", {
@@ -313,6 +317,33 @@ describe("production desktop wiring", () => {
     expect(launch.env).not.toHaveProperty("OPENCLAW_GATEWAY_TOKEN");
     expect(launch.env.OPENCLAW_CONFIG_PATH).toBe(configPath);
     expect(launch.env).not.toHaveProperty("UNRELATED_HOST_SECRET");
+    await options.dispose?.();
+  });
+
+  it("exposes only dynamic gateway image authority to Electron main wiring", async () => {
+    const options = await createDesktopMainOptions(productionEnv);
+    expect(options.gatewayMediaToken).toBe("test-gateway-token");
+    expect(options.imageDataRoot).toBe(await realpath(dataRoot));
+    expect(options.gatewayOrigin?.()).toBeUndefined();
+    options.buildGatewayLaunchOptions(18790);
+    expect(options.gatewayOrigin?.()).toBe("http://127.0.0.1:18790");
+    await options.dispose?.();
+  });
+
+  it("writes local application turns through the official chat.inject RPC", async () => {
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
+    const options = await createDesktopMainOptions(productionEnv);
+    options.buildGatewayLaunchOptions(18790);
+    await options.probeCapabilities(18790, new AbortController().signal);
+
+    await options.injectChatMessage!("agent:main:main", "帮我打开 WPS", "uclaw-local-user-v1");
+
+    expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "chat.inject",
+        params: { sessionKey: "agent:main:main", message: "帮我打开 WPS", label: "uclaw-local-user-v1" },
+      }),
+    ]));
     await options.dispose?.();
   });
 

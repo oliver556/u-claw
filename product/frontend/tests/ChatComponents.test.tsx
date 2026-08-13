@@ -3,16 +3,73 @@
 import "@testing-library/jest-dom/vitest";
 
 import type { ApprovalRequest, ContentBlock, Message, ToolCall, ToolState } from "@uclaw/shared";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApprovalCard } from "../src/features/approvals/ApprovalCard";
+import { Composer } from "../src/features/chat/Composer";
 import { resolveApproval } from "../src/features/chat/Conversation";
 import { MessageContent } from "../src/features/chat/MessageContent";
 import { MessageList } from "../src/features/chat/MessageList";
 import { ToolRun } from "../src/features/tools/ToolRun";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe("Composer", () => {
+  it("renders a borderless composer with an icon-only send button", () => {
+    const { container } = render(<Composer
+      value="你好"
+      disabled={false}
+      sending={false}
+      attachmentsSupported
+      attachments={[]}
+      models={[{ value: "gpt-5.6-sol", label: "GPT" }]}
+      modelValue="gpt-5.6-sol"
+      modelLoading={false}
+      modelError={false}
+      skills={[]}
+      skillLoading={false}
+      onChange={vi.fn()}
+      onSelectAttachments={vi.fn()}
+      onDropFiles={vi.fn()}
+      onPrepareAttachment={vi.fn()}
+      onRemoveAttachment={vi.fn()}
+      onSend={vi.fn()}
+      onStop={vi.fn()}
+      onModelChange={vi.fn()}
+      onSkillChange={vi.fn()}
+    />);
+
+    expect(container.querySelector(".composer.borderless-composer")).toBeInTheDocument();
+    const sendButton = screen.getByRole("button", { name: "发送消息" });
+    expect(sendButton).toHaveAttribute("title", "发送");
+    expect(sendButton).toHaveTextContent("");
+    expect(sendButton.querySelector("svg")).toBeInTheDocument();
+  });
+
+  it("renders icon-only circular send and stop controls", () => {
+    const props = {
+      value: "你好", disabled: false, attachmentsSupported: true, attachments: [],
+      models: [{ value: "gpt-5.6-sol", label: "GPT" }], modelValue: "gpt-5.6-sol", modelLoading: false, modelError: false,
+      skills: [], skillLoading: false, onChange: vi.fn(), onSelectAttachments: vi.fn(), onDropFiles: vi.fn(),
+      onPrepareAttachment: vi.fn(), onRemoveAttachment: vi.fn(), onSend: vi.fn(), onStop: vi.fn(), onModelChange: vi.fn(), onSkillChange: vi.fn(),
+    };
+    const { rerender } = render(<Composer {...props} sending={false} />);
+    const send = screen.getByRole("button", { name: "发送消息" });
+    expect(send).toHaveClass("composer-action");
+    expect(send).toHaveTextContent("");
+    expect(send.querySelector(".lucide-arrow-up")).toBeInTheDocument();
+
+    rerender(<Composer {...props} sending />);
+    const stop = screen.getByRole("button", { name: "停止生成" });
+    expect(stop).toHaveClass("composer-action");
+    expect(stop).toHaveTextContent("");
+    expect(stop.querySelector(".lucide-square")).toBeInTheDocument();
+  });
+});
 
 describe("MessageContent", () => {
   it("allows https links without creating in-app navigation links", () => {
@@ -26,6 +83,20 @@ describe("MessageContent", () => {
     render(<MessageContent blocks={blocks} />);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.getByText("不可打开")).toBeVisible();
+  });
+
+  it("renders a managed outgoing image", () => {
+    const blocks: ContentBlock[] = [{
+      id: "image-1",
+      type: "image",
+      file: { id: "image-1", name: "portrait.png", mediaType: "image/png", size: 0, kind: "artifact" },
+      alt: "美女肖像",
+      sourceUrl: "/api/chat/media/outgoing/agent%3Amain%3Adashboard%3Atest/fc0adee3-cf57-47e3-ba7e-e4095976033f/full",
+    }];
+    render(<MessageContent blocks={blocks} />);
+    const image = blocks[0];
+    expect(image?.type).toBe("image");
+    expect(screen.getByRole("img", { name: "美女肖像" })).toHaveAttribute("src", image?.type === "image" ? image.sourceUrl : undefined);
   });
 
 });
@@ -71,6 +142,48 @@ describe("MessageList", () => {
     expect(screen.queryByText("你")).not.toBeInTheDocument();
   });
 
+  it("shows elapsed time between the user message and completed assistant reply", () => {
+    const messages: Message[] = [
+      { id: "user-1", sessionId: "session-1", role: "user", status: "completed", blocks: [{ id: "u", type: "text", text: "开始", format: "plain" }], createdAt: "2026-08-13T00:00:00.000Z" },
+      { id: "assistant-1", sessionId: "session-1", role: "assistant", status: "completed", blocks: [{ id: "a", type: "text", text: "完成", format: "plain" }], createdAt: "2026-08-13T00:01:26.000Z" },
+    ];
+
+    const { container } = render(<MessageList messages={messages} stream={{ order: [], runs: {} }} pendingTools={[]} pendingApprovals={[]} canResolveApprovals={false} onResolveApproval={vi.fn()} />);
+
+    expect(screen.getByText("耗时 1 分 26 秒")).toBeVisible();
+    const children = [...container.children];
+    expect(children[1]).toHaveClass("message-run-meta");
+    expect(children[2]).toHaveClass("assistant-message");
+  });
+
+  it("updates active processing time once per second before the assistant reply", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T00:00:01.000Z"));
+    const messages: Message[] = [
+      { id: "user-1", sessionId: "session-1", role: "user", status: "completed", blocks: [{ id: "u", type: "text", text: "开始", format: "plain" }], createdAt: "2026-08-13T00:00:00.000Z" },
+    ];
+
+    const { container } = render(<MessageList messages={messages} stream={{ order: [], runs: {} }} awaitingResponse pendingTools={[]} pendingApprovals={[]} canResolveApprovals={false} onResolveApproval={vi.fn()} />);
+    expect(screen.getByText("已处理 1 秒")).toBeVisible();
+    expect(container.children[1]).toHaveClass("message-run-meta");
+
+    act(() => { vi.advanceTimersByTime(2_000); });
+    expect(screen.getByText("已处理 3 秒")).toBeVisible();
+  });
+
+  it("keeps the completed duration on the same client clock as active processing", () => {
+    const messages: Message[] = [
+      { id: "user-1", sessionId: "session-1", role: "user", status: "completed", blocks: [{ id: "u", type: "text", text: "开始", format: "plain" }], createdAt: "2026-08-13T00:00:00.000Z" },
+      { id: "assistant-1", sessionId: "session-1", runId: "run-1", role: "assistant", status: "completed", blocks: [{ id: "a", type: "text", text: "完成", format: "plain" }], createdAt: "2026-08-13T00:00:07.000Z" },
+    ];
+    const stream = { order: ["run-1"], runs: { "run-1": { runId: "run-1", text: "", tools: [], approvals: [], terminal: "final" as const, finalMessage: messages[1], completedAt: "2026-08-13T00:00:08.000Z" } } };
+
+    render(<MessageList messages={messages} stream={stream} pendingTools={[]} pendingApprovals={[]} canResolveApprovals={false} onResolveApproval={vi.fn()} />);
+
+    expect(screen.getByText("耗时 8 秒")).toBeVisible();
+    expect(screen.queryByText("耗时 7 秒")).not.toBeInTheDocument();
+  });
+
   it("keeps final run tools and approvals visible without duplicating pending items", () => {
     const tool: ToolCall = { id: "tool-final", sessionId: "session-1", runId: "run-1", toolId: "exec", displayName: "Inspect workspace", state: "waiting-authorization", risk: "high" };
     const approval: ApprovalRequest = { id: "approval-final", family: "exec", sessionId: "session-1", toolCallId: tool.id, subject: { kind: "toolCall", id: tool.id }, title: "Inspect workspace", description: "Read files", risk: "high", permissions: [{ kind: "file-read", scope: "fixture", description: "Read fixture" }], choices: ["allow-once", "deny"], status: "pending" };
@@ -81,6 +194,27 @@ describe("MessageList", () => {
 
     expect(screen.getAllByRole("status").filter((item) => item.textContent?.includes("Inspect workspace"))).toHaveLength(1);
     expect(screen.getAllByLabelText(/命令执行授权/)).toHaveLength(1);
+  });
+
+  it("shows processing before and after the Gateway starts an empty response", () => {
+    const { rerender } = render(<MessageList messages={[]} stream={{ order: [], runs: {} }} awaitingResponse pendingTools={[]} pendingApprovals={[]} canResolveApprovals={false} onResolveApproval={vi.fn()} />);
+    expect(screen.getByRole("status", { name: "助手正在处理" })).toHaveTextContent("正在处理");
+
+    rerender(<MessageList messages={[]} stream={{ order: ["run-1"], runs: { "run-1": { runId: "run-1", sessionId: "session-1", text: "", tools: [], approvals: [] } } }} awaitingResponse pendingTools={[]} pendingApprovals={[]} canResolveApprovals={false} onResolveApproval={vi.fn()} />);
+    expect(screen.getByRole("status", { name: "助手正在处理" })).toHaveTextContent("正在处理");
+  });
+
+  it("does not append a final stream reply outside the message timeline", () => {
+    const messages: Message[] = [
+      { id: "user-1", sessionId: "session-1", role: "user", status: "completed", blocks: [{ id: "u1", type: "text", text: "第一问", format: "plain" }], createdAt: "2026-08-13T00:00:00.000Z" },
+      { id: "assistant-1", sessionId: "session-1", role: "assistant", status: "completed", blocks: [{ id: "a1", type: "text", text: "第一答", format: "plain" }], createdAt: "2026-08-13T00:00:01.000Z" },
+      { id: "user-2", sessionId: "session-1", role: "user", status: "completed", blocks: [{ id: "u2", type: "text", text: "第二问", format: "plain" }], createdAt: "2026-08-13T00:00:02.000Z" },
+    ];
+    const finalMessage: Message = { id: "assistant-2", sessionId: "session-1", runId: "run-2", role: "assistant", status: "completed", blocks: [{ id: "a2", type: "text", text: "第二答", format: "plain" }], createdAt: "2026-08-13T00:00:03.000Z" };
+    const stream = { order: ["run-2"], runs: { "run-2": { runId: "run-2", sessionId: "session-1", text: "", tools: [], approvals: [], terminal: "final" as const, finalMessage } } };
+
+    const { container } = render(<MessageList messages={messages} stream={stream} pendingTools={[]} pendingApprovals={[]} canResolveApprovals={false} onResolveApproval={vi.fn()} />);
+    expect([...container.querySelectorAll(".message-content")].map((item) => item.textContent)).toEqual(["第一问", "第一答", "第二问"]);
   });
 });
 

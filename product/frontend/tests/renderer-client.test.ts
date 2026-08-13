@@ -38,6 +38,7 @@ describe("createRendererClient", () => {
     await client.sessionOrganizer.setPinned("session-1", true);
     await client.sessionOrganizer.createGroup("发布");
     await client.sessionOrganizer.renameGroup("group-1", "正式发布");
+    await client.sessionOrganizer.removeGroup("group-1");
     await client.sessionOrganizer.assignGroup("session-1", null);
 
     expect(invoke.mock.calls.map(([request]) => request)).toEqual([
@@ -45,6 +46,7 @@ describe("createRendererClient", () => {
       expect.objectContaining({ method: "session-organizer.set-pinned", params: { sessionId: "session-1", pinned: true } }),
       expect.objectContaining({ method: "session-organizer.create-group", params: { name: "发布" } }),
       expect.objectContaining({ method: "session-organizer.rename-group", params: { groupId: "group-1", name: "正式发布" } }),
+      expect.objectContaining({ method: "session-organizer.remove-group", params: { groupId: "group-1" } }),
       expect.objectContaining({ method: "session-organizer.assign-group", params: { sessionId: "session-1", groupId: null } }),
     ]);
     expect(JSON.stringify(invoke.mock.calls)).not.toContain("path");

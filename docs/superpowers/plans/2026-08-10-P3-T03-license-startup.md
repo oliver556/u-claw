@@ -1,5 +1,7 @@
 # P3-T03 License Startup Implementation Plan
 
+> **历史计划说明（2026-08-13）：** 本计划对应已完成的旧版授权底座，不再直接代表第一版完整产品流程。后续实现以[《第一版启动、激活与授权总方案》](../../第一版启动激活授权方案.md)为准；复用 USB 指纹、本地验签和 gate，并补充未激活受限窗口与在线激活路径。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在 Go Launcher 启动 Electron/OpenClaw 前完成 LIC-001 独立启动凭据、Ed25519 授权和 Windows USB 指纹的 fail-closed 本地验证。

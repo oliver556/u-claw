@@ -135,6 +135,188 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
     expect(JSON.stringify(conversationMessages)).not.toMatch(/(?:api[_-]?key|authorization|bearer |password|secret|sk-(?:proj-)?[A-Za-z0-9_-]{8,})/i);
   });
 
+  it("keeps raw tool calls and tool results out of the conversation transcript", () => {
+    const message = (role: "user" | "assistant" | "toolResult", content: unknown, id: string, seq: number) => ({
+      role,
+      content,
+      timestamp: 1786604000000 + seq,
+      __openclaw: { id, recordTimestampMs: 1786604000000 + seq, seq },
+    });
+    const result = mapOpenClawHistoryResponse({
+      sessionKey: "agent:main:dashboard:test",
+      sessionId: "test",
+      messages: [
+        message("user", "规划杭州行程", "user-1", 1),
+        message("assistant", [{ type: "toolCall", id: "call-1", name: "web_search", arguments: { query: "杭州" } }], "tool-call-1", 2),
+        message("toolResult", [{ type: "text", text: "{\"status\":\"error\",\"tool\":\"web_search\"}" }], "tool-result-1", 3),
+        message("assistant", [{ type: "text", text: "杭州两日行程如下。" }], "assistant-1", 4),
+      ],
+    });
+
+    expect(result.map(({ role, blocks }) => ({ role, blocks }))).toEqual([
+      { role: "user", blocks: [{ id: "user-1:text", type: "text", text: "规划杭州行程", format: "plain" }] },
+      { role: "assistant", blocks: [{ id: "assistant-1:0", type: "text", text: "杭州两日行程如下。", format: "markdown" }] },
+    ]);
+  });
+
+  it("ignores oversized chat.history placeholders without timestamps", () => {
+    const result = mapOpenClawHistoryResponse({
+      sessionKey: "agent:main:dashboard:test",
+      sessionId: "test",
+      messages: [
+        {
+          role: "user",
+          content: "生成一张花园夕阳氛围的写实美女图",
+          timestamp: 1786632848000,
+          __openclaw: { id: "user-1", recordTimestampMs: 1786632848000, seq: 38 },
+        },
+        {
+          role: "toolResult",
+          content: [{ type: "text", text: "[chat.history omitted: message too large]" }],
+          __openclaw: {
+            truncated: true,
+            reason: "oversized",
+            id: "7a0ca708",
+            recordTimestampMs: 1786632848960,
+            seq: 39,
+          },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "生成好了。" }],
+          timestamp: 1786632849000,
+          __openclaw: { id: "assistant-1", recordTimestampMs: 1786632849000, seq: 40 },
+        },
+      ],
+    });
+
+    expect(result.map(({ role, blocks }) => ({ role, blocks }))).toEqual([
+      {
+        role: "user",
+        blocks: [{ id: "user-1:text", type: "text", text: "生成一张花园夕阳氛围的写实美女图", format: "plain" }],
+      },
+      {
+        role: "assistant",
+        blocks: [{ id: "assistant-1:0", type: "text", text: "生成好了。", format: "markdown" }],
+      },
+    ]);
+  });
+
+  it("keeps managed outgoing images in assistant history", () => {
+    const result = mapOpenClawHistoryResponse({
+      sessionKey: "agent:main:dashboard:test",
+      sessionId: "test",
+      messages: [{
+        role: "assistant",
+        content: [{
+          type: "image",
+          url: "/api/chat/media/outgoing/agent%3Amain%3Adashboard%3Atest/fc0adee3-cf57-47e3-ba7e-e4095976033f/full",
+          alt: "portrait.png",
+          mimeType: "image/png",
+          width: 1024,
+          height: 1536,
+        }],
+        timestamp: 1786604000000,
+        __openclaw: { id: "assistant-image-1", recordTimestampMs: 1786604000000, seq: 1 },
+      }],
+    }, "http://127.0.0.1:18789");
+
+    expect(result).toEqual([expect.objectContaining({
+      role: "assistant",
+      blocks: [{
+        id: "assistant-image-1:0",
+        type: "image",
+        file: {
+          id: "assistant-image-1:0",
+          name: "portrait.png",
+          mediaType: "image/png",
+          size: 0,
+          kind: "artifact",
+        },
+        alt: "portrait.png",
+        sourceUrl: "http://127.0.0.1:18789/api/chat/media/outgoing/agent%3Amain%3Adashboard%3Atest/fc0adee3-cf57-47e3-ba7e-e4095976033f/full",
+      }],
+    })]);
+  });
+
+  it.each([
+    {
+      label: "POSIX",
+      dataRoot: "/Users/test/.uclaw/data",
+      source: "/Users/test/.uclaw/data/workspace/.media/images/image_003.png",
+      encodedSource: "%2FUsers%2Ftest%2F.uclaw%2Fdata%2Fworkspace%2F.media%2Fimages%2Fimage_003.png",
+    },
+    {
+      label: "Windows",
+      dataRoot: "U:\\.uclaw\\data",
+      source: "U:\\.uclaw\\data\\workspace\\.media\\images\\image_003.png",
+      encodedSource: "U%3A%5C.uclaw%5Cdata%5Cworkspace%5C.media%5Cimages%5Cimage_003.png",
+    },
+  ])("maps an independent assistant MEDIA line under the controlled $label workspace", ({ dataRoot, source, encodedSource }) => {
+    const result = mapOpenClawHistoryResponse({
+      sessionKey: "agent:main:dashboard:test",
+      sessionId: "test",
+      messages: [{
+        role: "assistant",
+        content: [{ type: "text", text: `图片已生成。\nMEDIA:${source}` }],
+        timestamp: 1786604000000,
+        __openclaw: { id: "assistant-media-1", recordTimestampMs: 1786604000000, seq: 1 },
+      }],
+    }, "http://127.0.0.1:18789", dataRoot);
+
+    expect(result[0]?.blocks).toEqual([
+      { id: "assistant-media-1:0", type: "text", text: "图片已生成。", format: "markdown" },
+      {
+        id: "assistant-media-1:media:0",
+        type: "image",
+        file: { id: "assistant-media-1:media:0", name: "image_003.png", mediaType: "image/png", size: 0, kind: "artifact" },
+        alt: "image_003.png",
+        sourceUrl: `http://127.0.0.1:18789/__openclaw__/assistant-media?source=${encodedSource}`,
+      },
+    ]);
+  });
+
+  it.each([
+    "workspace/.media/images/relative.png",
+    "/Users/test/.uclaw/data/workspace/../credentials.png",
+    "/Users/test/.uclaw/other/image.png",
+    "file:///Users/test/.uclaw/data/workspace/.media/images/image.png",
+  ])("does not convert an untrusted MEDIA source: %s", (source) => {
+    const result = mapOpenClawHistoryResponse({
+      sessionKey: "agent:main:dashboard:test",
+      sessionId: "test",
+      messages: [{
+        role: "assistant",
+        content: [{ type: "text", text: `MEDIA:${source}` }],
+        timestamp: 1786604000000,
+        __openclaw: { id: "assistant-media-rejected", recordTimestampMs: 1786604000000, seq: 1 },
+      }],
+    }, "http://127.0.0.1:18789", "/Users/test/.uclaw/data");
+
+    expect(result[0]?.blocks).toEqual([{
+      id: "assistant-media-rejected:0", type: "text", text: `MEDIA:${source}`, format: "markdown",
+    }]);
+  });
+
+  it("removes a MEDIA line without duplicating an existing managed outgoing image", () => {
+    const result = mapOpenClawHistoryResponse({
+      sessionKey: "agent:main:dashboard:test",
+      sessionId: "test",
+      messages: [{
+        role: "assistant",
+        content: [
+          { type: "text", text: "完成。\nMEDIA:/Users/test/.uclaw/data/workspace/.media/images/image.png" },
+          { type: "image", url: "/api/chat/media/outgoing/session/fc0adee3-cf57-47e3-ba7e-e4095976033f/full", alt: "image.png", mimeType: "image/png" },
+        ],
+        timestamp: 1786604000000,
+        __openclaw: { id: "assistant-media-managed", recordTimestampMs: 1786604000000, seq: 1 },
+      }],
+    }, "http://127.0.0.1:18789", "/Users/test/.uclaw/data");
+
+    expect(result[0]?.blocks.filter((block) => block.type === "image")).toHaveLength(1);
+    expect(result[0]?.blocks[0]).toMatchObject({ type: "text", text: "完成。" });
+  });
+
   it("GATE-A05 maps the real configured models.list response and locks invalid view rejection", () => {
     const raw = OpenClawModelsListFixtureSchema.parse(fixture("models.list.json"));
     expect(raw.configured.requestFrame).toMatchObject({ method: "models.list", params: { view: "configured" } });

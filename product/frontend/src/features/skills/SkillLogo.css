@@ -1,0 +1,27 @@
+.skill-logo {
+  align-items: center;
+  background: var(--surface-elevated, #25282d);
+  border: 1px solid var(--border-subtle, #383c43);
+  border-radius: 6px;
+  display: inline-flex;
+  flex: 0 0 32px;
+  height: 32px;
+  justify-content: center;
+  overflow: hidden;
+  width: 32px;
+}
+
+.skill-logo img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.skill-logo-fallback {
+  color: var(--text-secondary, #aab0ba);
+}
+
+.skill-logo-fallback svg {
+  height: 17px;
+  width: 17px;
+}

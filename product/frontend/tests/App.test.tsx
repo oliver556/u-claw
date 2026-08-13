@@ -126,24 +126,44 @@ describe("U-Claw application shell", () => {
     expect(unsubscribe).toHaveBeenCalled();
   });
 
-  it("exposes six primary destinations and marks Work current", () => {
+  it("exposes billing destinations and marks Work current", () => {
     renderApp();
 
     const navigation = screen.getByRole("navigation", { name: "主导航" });
-    for (const label of ["工作", "文件", "记忆", "能力", "连接", "系统"]) {
+    for (const label of ["工作", "文件", "记忆", "能力", "连接", "用量", "余额", "系统"]) {
       expect(within(navigation).getByRole("link", { name: label })).toBeVisible();
     }
     expect(within(navigation).getByRole("link", { name: "工作" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("opens the usage and balance product views", async () => {
+    renderApp();
+
+    fireEvent.click(screen.getByRole("link", { name: "用量" }));
+    expect(await screen.findByRole("region", { name: "积分使用量" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("link", { name: "余额" }));
+    expect(await screen.findByRole("region", { name: "余额与积分" })).toBeVisible();
   });
 
   it("opens the authoritative Task and Artifact center from the titlebar", async () => {
     const invokeTaskArtifacts = vi.fn(async (request: { method: string; requestId: string }) => ({ method: request.method, requestId: request.requestId, ok: true, result: [] }));
     window.uclaw = { taskArtifacts: { invoke: invokeTaskArtifacts as never, subscribe: () => () => undefined } } as never;
     renderApp();
-    fireEvent.click(screen.getByRole("button", { name: "打开任务活动中心" }));
+    const titlebar = document.querySelector(".titlebar")!;
+    fireEvent.click(within(titlebar as HTMLElement).getByRole("button", { name: "打开任务活动中心" }));
     expect(await screen.findByRole("region", { name: "Task 活动中心" })).toBeVisible();
     expect(invokeTaskArtifacts).toHaveBeenCalledWith(expect.objectContaining({ method: "tasks.list" }));
     expect(invokeTaskArtifacts).toHaveBeenCalledWith(expect.objectContaining({ method: "artifacts.list" }));
+  });
+
+  it("opens the same Task and Artifact center from the session sidebar bell", async () => {
+    const invokeTaskArtifacts = vi.fn(async (request: { method: string; requestId: string }) => ({ method: request.method, requestId: request.requestId, ok: true, result: [] }));
+    window.uclaw = { taskArtifacts: { invoke: invokeTaskArtifacts as never, subscribe: () => () => undefined } } as never;
+    renderApp();
+    const sidebar = await screen.findByRole("complementary", { name: "会话栏" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "打开任务活动中心" }));
+    expect(await screen.findByRole("region", { name: "Task 活动中心" })).toBeVisible();
   });
 
   it("navigates to another primary destination", () => {
@@ -406,9 +426,12 @@ describe("U-Claw application shell", () => {
     const menu = screen.getByRole("menu", { name: "更多导航" });
     expect(menu).toBeVisible();
 
-    const system = within(menu).getByRole("menuitem", { name: "系统" });
+    const automation = within(menu).getByRole("menuitem", { name: "自动化" });
     expect(within(menu).getByRole("menuitem", { name: "连接" })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(automation).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "End" });
+    const system = within(menu).getByRole("menuitem", { name: "系统" });
     expect(system).toHaveFocus();
     fireEvent.click(system);
     expect(screen.getByRole("heading", { name: "系统" })).toBeVisible();
@@ -435,14 +458,14 @@ describe("U-Claw application shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
 
     const connection = screen.getByRole("menuitem", { name: "连接" });
-    const system = screen.getByRole("menuitem", { name: "系统" });
+    const automation = screen.getByRole("menuitem", { name: "自动化" });
     expect(connection).toHaveAttribute("tabindex", "0");
-    expect(system).toHaveAttribute("tabindex", "-1");
+    expect(automation).toHaveAttribute("tabindex", "-1");
     fireEvent.keyDown(connection, { key: "ArrowDown" });
     expect(connection).toHaveAttribute("tabindex", "-1");
-    expect(system).toHaveAttribute("tabindex", "0");
+    expect(automation).toHaveAttribute("tabindex", "0");
 
-    fireEvent.blur(system, { relatedTarget: screen.getByRole("main") });
+    fireEvent.blur(automation, { relatedTarget: screen.getByRole("main") });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 

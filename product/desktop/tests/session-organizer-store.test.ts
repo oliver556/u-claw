@@ -78,4 +78,18 @@ describe("session organizer USB store", () => {
     await store.removeSession("session-a");
     await expect(store.load()).resolves.toEqual({ schemaVersion: 1, groups: [{ id: "group-1", name: "正式发布" }], sessions: [] });
   });
+
+  it("removes a group without deleting sessions and preserves pinned metadata", async () => {
+    const store = createSessionOrganizerStore(await dataRoot("uclaw-organizer-remove-group-"), { createId: () => "group-1" });
+    const group = await store.createGroup("客户项目");
+    await store.assignGroup("session-pinned", group.id);
+    await store.setPinned("session-pinned", true);
+    await store.assignGroup("session-plain", group.id);
+
+    await expect(store.removeGroup(group.id)).resolves.toEqual({
+      schemaVersion: 1,
+      groups: [],
+      sessions: [{ sessionId: "session-pinned", pinned: true }],
+    });
+  });
 });

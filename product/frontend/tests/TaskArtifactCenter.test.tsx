@@ -46,4 +46,12 @@ describe("TaskArtifactCenter", () => {
     listener?.({ event: "task", payload: { type: "created", task: { id: "task-live", title: "Live task", status: "running", createdAt: "2026-08-12T08:00:00.000Z", updatedAt: "2026-08-12T08:01:00.000Z" } } });
     expect(await screen.findByText("Live task")).toBeVisible();
   });
+
+  it("closes the single activity center from its header", async () => {
+    const onClose = vi.fn();
+    const invoke = vi.fn(async (request: { method: string }) => ({ ok: true, result: request.method === "tasks.list" || request.method === "artifacts.list" ? [] : null }));
+    render(<TaskArtifactCenter invoke={invoke as never} subscribe={() => vi.fn()} onOpenSession={vi.fn()} onClose={onClose} />);
+    fireEvent.click(await screen.findByRole("button", { name: "关闭任务活动中心" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

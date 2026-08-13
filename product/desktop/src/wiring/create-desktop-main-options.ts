@@ -52,11 +52,13 @@ import { createAutomationDomainRegistration } from "../automation/automation-dom
 import { createTaskArtifactDispatcher } from "../task-artifacts/task-artifact-dispatcher.js";
 import { createTaskArtifactDomainRegistration } from "../task-artifacts/task-artifact-domain.js";
 import { createTaskArtifactFileService } from "../task-artifacts/task-artifact-files.js";
+import { createTaskArtifactAuthority } from "../task-artifacts/task-artifact-authority.js";
 import { createProductionSystemNodeDomain } from "../system-node/production-system-node.js";
 import { createProductionSystemVoiceDomain, createProductionTalkRunBridge, playSecureTemporaryAudio } from "../system-voice/production-system-voice.js";
 import type { AuthorizedWebContents } from "../ipc/register-ipc.js";
 import { createProductionProductServices } from "../product-services/production-product-services.js";
 import { createDesktopLogSink } from "../diagnostics/desktop-log-sink.js";
+import { createGatewayLogSink } from "../diagnostics/gateway-log-sink.js";
 import { createOpenClawDoctorRuntime } from "../diagnostics/openclaw-doctor-runtime.js";
 import {
   DesktopWiringError,
@@ -70,6 +72,8 @@ const REQUIRED_GATEWAY_METHODS = [
   "chat.history",
   "chat.send",
 ] as const;
+
+const ChatInjectResponseSchema = z.object({ ok: z.literal(true), messageId: z.string().min(1) }).strict();
 
 const GATEWAY_ENV_KEYS = [
   "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL",
@@ -176,6 +180,10 @@ class PortAwareGatewayTransport implements OpenClawTransport {
     }
     this.close();
     this.port = port;
+  }
+
+  getOrigin(): string | undefined {
+    return this.port === undefined ? undefined : `http://127.0.0.1:${this.port}`;
   }
 
   async connect(): Promise<HelloOk> {
@@ -441,6 +449,8 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   });
   const client = new OpenClawClient({
     transport,
+    gatewayOrigin: () => transport.getOrigin(),
+    dataRoot: () => environment.dataRoot,
     attachments,
     wechatRuntime,
     statusProjection: () => {
@@ -462,6 +472,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     baseEnvironment: env,
   });
   const desktopLog = createDesktopLogSink({ dataDir: environment.dataRoot, logsDir: join(environment.dataRoot, "diagnostics", "desktop-logs") });
+  const gatewayDiagnostics = createGatewayLogSink({ dataDir: environment.dataRoot, logsDir: join(environment.dataRoot, "diagnostics", "desktop-logs") });
   void desktopLog.append("desktop-started").catch(() => undefined);
   const skillRuntime = createOpenClawSkillRuntime({
     request: (method, params, schema) => transport.router.request(method, params as never, schema),
@@ -476,10 +487,15 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     request: (method, params, schema) => transport.router.request(method, params, schema),
     requireMethod: (method) => { if (!gatewayMethods.has(method)) throw new UClawUnsupportedError(method); },
   }));
-  const taskArtifactAuthority = createOpenClawTaskArtifactService({
+  const nativeTaskArtifactAuthority = createOpenClawTaskArtifactService({
     request: (method, params, schema) => transport.router.request(method, params, schema),
     onEvent: (event, listener) => transport.onEvent(event, listener),
     requireMethod: (method) => { if (!taskArtifactContractAvailable || !gatewayMethods.has(method)) throw new UClawUnsupportedError(method); },
+  });
+  const taskArtifactAuthority = createTaskArtifactAuthority({
+    native: nativeTaskArtifactAuthority,
+    client,
+    nativeAvailable: () => taskArtifactContractAvailable,
   });
   const taskArtifactFiles = createTaskArtifactFileService({
     dataRoot: environment.dataRoot,
@@ -606,12 +622,15 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   let developmentProviderReady = false;
 
   return {
+    gatewayMediaToken: environment.gatewayToken,
+    gatewayOrigin: () => transport.getOrigin(),
+    imageDataRoot: environment.dataRoot,
+    gatewayDiagnostics,
     spawn: (executable, args, options) => {
       const child = spawnChild(executable, [...args], options) as unknown as ReturnType<DesktopMainOptions["spawn"]>;
       gatewayProcessAlive = child.pid !== undefined && child.exitCode === null;
-      void desktopLog.append(gatewayProcessAlive ? "gateway-started" : "gateway-failed").catch(() => undefined);
-      child.on("error", () => { gatewayProcessAlive = false; void desktopLog.append("gateway-failed").catch(() => undefined); });
-      child.once("exit", () => { gatewayProcessAlive = false; void desktopLog.append("gateway-stopped").catch(() => undefined); });
+      child.on("error", () => { gatewayProcessAlive = false; });
+      child.once("exit", () => { gatewayProcessAlive = false; });
       child.once("close", () => { gatewayProcessAlive = false; });
       return child;
     },
@@ -633,7 +652,9 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
         const capabilities = await withAbort(client.gateway.negotiate(), signal, () => transport.close());
         const methods = capabilities.methods;
         gatewayMethods = methods;
-        taskArtifactContractAvailable = transport.serverVersion !== "2026.7.1-2";
+        taskArtifactContractAvailable = transport.serverVersion !== "2026.7.1-2"
+          && methods.has("tasks.list")
+          && methods.has("artifacts.list");
         if (!REQUIRED_GATEWAY_METHODS.every((method) => methods.has(method))) {
           throw new DesktopWiringError("UNSUPPORTED", "Gateway is missing required methods.");
         }
@@ -658,6 +679,9 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     modelSourceExecutors: {
       domestic: createOpenClawProviderExecutor(client),
       custom: createOpenClawProviderExecutor(client),
+    },
+    injectChatMessage: async (sessionId, message, label, signal) => {
+      await transport.router.request("chat.inject", { sessionKey: sessionId, message, label }, ChatInjectResponseSchema, signal);
     },
     dispose: async () => {
       if (disposed) return;

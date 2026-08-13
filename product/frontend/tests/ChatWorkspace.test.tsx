@@ -128,6 +128,57 @@ describe("chat workspace", () => {
     vi.restoreAllMocks();
   });
 
+  it("reads back an official SkillHub install even when the chat run reports an error", async () => {
+    const base = clientFixture();
+    const send = vi.fn(() => (async function* () {
+      yield { type: "started" as const, runId: "run-skill", sessionId: "session-1" };
+      yield {
+        type: "error" as const,
+        runId: "run-skill",
+        error: {
+          code: "NOT_FOUND" as const,
+          message: "Requested resource was not found.",
+          retryable: false,
+          recoveryActions: [],
+          causeDetails: {},
+        },
+      };
+    })());
+    const skillInvoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.runtime-status") return { method: request.method, requestId: request.requestId, ok: true, result: { workspaceDir: "w", managedSkillsDir: "m", skills: [] } };
+      if (request.method === "skills.installed") return { method: request.method, requestId: request.requestId, ok: true, result: [{
+        slug: "global-biblio-base", name: "Global Biblio Base", description: "Bibliography", version: "local", pricingType: "free", installedVersion: "local",
+        enabled: true, updateAvailable: false, source: { provider: "openclaw", origin: "workspace" }, permissions: [], permissionFingerprint: "empty",
+        risk: "low", mode: "live", categories: [],
+      }] };
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke: skillInvoke } } as any;
+    render(<App client={clientFixture({ chat: { ...base.chat, send } })} />);
+    const prompt = "请根据 https://skillhub.cn/install/skillhub.md，安装 @user_164f4c1f/global-biblio-base。";
+    fireEvent.change(await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" }), { target: { value: prompt } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    expect(await screen.findByText("Global Biblio Base 安装成功，OpenClaw 已完成读回。")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "关闭安装成功提示" }));
+    expect(screen.queryByText("Global Biblio Base 安装成功，OpenClaw 已完成读回。")).not.toBeInTheDocument();
+    expect(screen.queryByText("发送失败")).not.toBeInTheDocument();
+    expect(skillInvoke.mock.calls.some(([request]) => request.method === "skills.resolve-install")).toBe(false);
+    expect(screen.queryByRole("dialog", { name: /确认安装/ })).not.toBeInTheDocument();
+  });
+
+  it("does not inspect ordinary chat messages as Skill installs", async () => {
+    const base = clientFixture();
+    const skillInvoke = vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: { workspaceDir: "w", managedSkillsDir: "m", skills: [] } }));
+    window.uclaw = { skills: { invoke: skillInvoke } } as any;
+    render(<App client={base} />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" }), { target: { value: "帮我总结今天的工作" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(base.chat.send).toHaveBeenCalledOnce());
+    expect(skillInvoke.mock.calls.some(([request]) => request.method === "skills.resolve-install")).toBe(false);
+  });
+
   it("loads sessions and switches history", async () => {
     const client = clientFixture();
     render(<App client={client} />);
@@ -205,6 +256,7 @@ describe("chat workspace", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "新建会话" }));
     expect(await screen.findByText("开始一段新会话")).toBeVisible();
+    expect(client.sessions.create).toHaveBeenCalledWith();
     expect(client.sessions.get).toHaveBeenCalledWith("session-3");
   });
 
@@ -249,7 +301,7 @@ describe("chat workspace", () => {
     const remove = vi.fn(async (id: string) => { authoritative = authoritative.filter((session) => session.id !== id); });
     const organizerGet = vi.fn(async () => ({ schemaVersion: 1 as const, groups: [], sessions: [] }));
     const client = Object.assign(clientFixture({ sessions: { ...base.sessions, list, get, rename, remove } }), {
-      sessionOrganizer: { get: organizerGet, setPinned: vi.fn(), createGroup: vi.fn(), renameGroup: vi.fn(), assignGroup: vi.fn() },
+      sessionOrganizer: { get: organizerGet, setPinned: vi.fn(), createGroup: vi.fn(), renameGroup: vi.fn(), removeGroup: vi.fn(), assignGroup: vi.fn() },
     });
     vi.spyOn(window, "prompt").mockReturnValue("正式发布");
     render(<App client={client} />);
@@ -367,6 +419,31 @@ describe("chat workspace", () => {
     await waitFor(() => expect(document.querySelector('.composer-tools .ant-select-selection-item[title="文档整理"]')).not.toBeInTheDocument());
   });
 
+  it("shows an installed Skill under its local display name while sending the OpenClaw runtime id", async () => {
+    const send = vi.fn(async function* () {
+      yield { type: "started" as const, runId: "run-local-skill", sessionId: "session-1" };
+      yield { type: "final" as const, runId: "run-local-skill", message: { id: "local-skill-final", sessionId: "session-1", runId: "run-local-skill", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    });
+    window.uclaw = { skills: { invoke: vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return { method: request.method, requestId: request.requestId, ok: true, result: [{
+        slug: "contextweave-interactive-architecture", name: "架构图一键生成", description: "Architecture", version: "1.2.0", pricingType: "free", installedVersion: "1.2.0",
+        enabled: true, updateAvailable: false, source: { provider: "openclaw", origin: "workspace" }, permissions: [], permissionFingerprint: "empty", risk: "low", mode: "live", categories: [],
+      }] };
+      return { method: request.method, requestId: request.requestId, ok: true, result: { workspaceDir: "/workspace", managedSkillsDir: "/workspace/skills", skills: [
+        { id: "contextweave-interactive-architecture", runtimeId: "interactive-architecture-diagram", name: "interactive-architecture-diagram", description: "Architecture", source: "workspace", bundled: false, disabled: false, eligible: true, modelVisible: true, userInvocable: true, commandVisible: true, availability: "available", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] },
+      ] } };
+    }) } } as never;
+    const base = clientFixture();
+    render(<App client={clientFixture({ chat: { ...base.chat, send } })} />);
+
+    fireEvent.mouseDown(await screen.findByRole("combobox", { name: "下一条消息 Skill" }));
+    fireEvent.click(await screen.findByText("架构图一键生成"));
+    fireEvent.change(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" }), { target: { value: "生成架构图" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({ skillId: "interactive-architecture-diagram" }), expect.any(AbortSignal)));
+  });
+
   it("keeps the selected Skill after a failed send", async () => {
     window.uclaw = { skills: { invoke: vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: {
       workspaceDir: "/workspace", managedSkillsDir: "/workspace/skills", skills: [
@@ -443,6 +520,24 @@ describe("chat workspace", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeVisible());
     expect(composer).toHaveValue("");
     expect(screen.queryByText("发送失败")).not.toBeInTheDocument();
+  });
+
+  it("clears the composer immediately while a response is pending", async () => {
+    const gate = deferred<void>();
+    const base = clientFixture();
+    const send = vi.fn(async function* () {
+      yield { type: "started" as const, runId: "run-pending-composer", sessionId: "session-1" };
+      await gate.promise;
+      yield { type: "final" as const, runId: "run-pending-composer", message: { id: "pending-composer-final", sessionId: "session-1", runId: "run-pending-composer", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+    });
+    render(<App client={clientFixture({ chat: { ...base.chat, send } })} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "立即清空" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    expect(composer).toHaveValue("");
+    gate.resolve();
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeVisible());
   });
 
   it("stops a send before started and aborts as soon as run id arrives", async () => {
@@ -555,7 +650,7 @@ describe("chat workspace", () => {
     expect(resolveExec).toHaveBeenCalledOnce();
   });
 
-  it("restores failed message to composer for retry", async () => {
+  it("keeps a failed user message in the transcript and clears the composer", async () => {
     const client = clientFixture({ chat: { ...clientFixture().chat, send: vi.fn(async function* () { throw new Error("send failed"); }) } });
     render(<App client={client} />);
     const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
@@ -563,11 +658,33 @@ describe("chat workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("发送失败");
-    expect(composer).toHaveValue("保留这段草稿");
-    expect([...document.querySelectorAll(".message")].some((message) => message.textContent?.includes("保留这段草稿"))).toBe(false);
+    expect(composer).toHaveValue("");
+    const failedMessage = screen.getByLabelText("用户消息，发送失败");
+    expect(failedMessage).toHaveTextContent("保留这段草稿");
+    expect(failedMessage).toHaveTextContent("发送失败");
   });
 
-  it("reuses clientRequestId for an unchanged failed intent and rotates it after editing", async () => {
+  it("scrolls the conversation to the latest optimistic message", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: scrollTo });
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => 480 });
+    const gate = deferred<void>();
+    const base = clientFixture();
+    const send = vi.fn(async function* () {
+      yield { type: "started" as const, runId: "run-scroll", sessionId: "session-1" };
+      await gate.promise;
+    });
+    render(<App client={clientFixture({ chat: { ...base.chat, send } })} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    scrollTo.mockClear();
+    fireEvent.change(composer, { target: { value: "滚到最新消息" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 480, behavior: "smooth" }));
+    gate.resolve();
+  });
+
+  it("rotates clientRequestId after a failed message is re-entered", async () => {
     const base = clientFixture();
     let attempt = 0;
     const send = vi.fn((input: Parameters<UClawClient["chat"]["send"]>[0]) => (async function* () {
@@ -582,9 +699,10 @@ describe("chat workspace", () => {
     fireEvent.change(composer, { target: { value: "同一发送意图" } });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
     await screen.findByText("send failed");
+    fireEvent.change(composer, { target: { value: "同一发送意图" } });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect(send.mock.calls[1]![0].clientRequestId).toBe(send.mock.calls[0]![0].clientRequestId);
+    expect(send.mock.calls[1]![0].clientRequestId).not.toBe(send.mock.calls[0]![0].clientRequestId);
 
     fireEvent.change(composer, { target: { value: "新的发送意图" } });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
@@ -617,9 +735,10 @@ describe("chat workspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "添加附件" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "select" })));
+    fireEvent.change(composer, { target: { value: "选择附件" } });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect(send.mock.calls[1]![0].clientRequestId).toBe(send.mock.calls[0]![0].clientRequestId);
+    expect(send.mock.calls[1]![0].clientRequestId).not.toBe(send.mock.calls[0]![0].clientRequestId);
 
     fireEvent.click(screen.getByRole("button", { name: "添加附件" }));
     expect(await screen.findByText("new.txt")).toBeVisible();
@@ -677,10 +796,11 @@ describe("chat workspace", () => {
     const file = new File(["data"], "failed.txt", { type: "text/plain" });
     fireEvent.drop(container.querySelector(".composer")!, { dataTransfer: { files: [file] } });
     await screen.findByText("import failed");
+    fireEvent.change(composer, { target: { value: "拖放失败后重试" } });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
 
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect(send.mock.calls[1]![0].clientRequestId).toBe(send.mock.calls[0]![0].clientRequestId);
+    expect(send.mock.calls[1]![0].clientRequestId).not.toBe(send.mock.calls[0]![0].clientRequestId);
   });
 
   it("rotates clientRequestId as soon as the first dropped attachment is imported", async () => {
@@ -796,10 +916,11 @@ describe("chat workspace", () => {
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "get", params: { attachmentId: "attachment-failed" } }));
     fireEvent.click(screen.getByRole("button", { name: "重试 failed.txt" }));
     await waitFor(() => expect(invoke.mock.calls.filter(([request]) => request.method === "prepare").length).toBeGreaterThan(1));
+    fireEvent.change(composer, { target: { value: "失败附件" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect(send.mock.calls[1]![0].clientRequestId).toBe(send.mock.calls[0]![0].clientRequestId);
+    expect(send.mock.calls[1]![0].clientRequestId).not.toBe(send.mock.calls[0]![0].clientRequestId);
   });
 
   it("resets session paging metadata after a successful refresh", async () => {

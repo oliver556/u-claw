@@ -277,6 +277,7 @@ export function createSkillHubClient({
     risk: "high",
     mode: "live",
     categories: categories(item.labels, item.category),
+    logoUrl: null,
     manifest: { kind: "skill", id: item.slug, version: item.version, entry: "SKILL.md" },
   });
 
@@ -361,6 +362,7 @@ export function createSkillHubClient({
         risk: "high",
         mode: "live",
         categories: categories(response.skill.labels, response.skill.category),
+        logoUrl: null,
         manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },
       });
     },

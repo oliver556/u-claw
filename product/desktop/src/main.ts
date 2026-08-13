@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,8 +35,11 @@ import { createProviderStore, type ProviderStore } from "./providers/provider-st
 import type { ProviderNetworkService } from "./providers/provider-network.js";
 import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provider-config.js";
 import { createMainProcessModelRouting, type ExternalModelSourceExecutors } from "./providers/model-source-router.js";
+import { createLocalApplicationRouter, defaultApplicationRoots } from "./local-actions/application-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
 import { createSkillService } from "./skills/skill-service.js";
+import { createSkillImportService } from "./skills/skill-import-service.js";
+import { createSkillInstallCoordinator } from "./skills/skill-install-coordinator.js";
 import type { OpenClawSkillRuntime } from "./skills/openclaw-skill-runtime.js";
 import { createLivePluginRegistryClient, createUnavailablePluginRegistryClient } from "./plugins/registry-client.js";
 import { createOpenClawCliPluginRuntime } from "./plugins/openclaw-cli-runtime.js";
@@ -49,6 +52,7 @@ import { createMcpStore } from "./mcp/mcp-store.js";
 import { createDataService } from "./data/data-service.js";
 import { ProductionRuntimeConsistencyCoordinator } from "./data/production-consistency-coordinator.js";
 import { createDiagnosticsService, type DiagnosticsRuntimeInfo } from "./diagnostics/diagnostics-service.js";
+import type { GatewayDiagnosticSink } from "./diagnostics/gateway-log-sink.js";
 import { createMcpProtocolProbe, createOpenClawMcpRuntime } from "./mcp/mcp-runtime.js";
 import { createReleaseDispatcher } from "./release/release-dispatcher.js";
 import type { ReleaseService } from "./release/release-service.js";
@@ -60,6 +64,9 @@ import {
   type BrowserWindowConstructor,
   type DesktopWindow,
 } from "./window.js";
+import { installGatewayMediaRequestAuth } from "./gateway/media-request-auth.js";
+import { createImageOperationService } from "./images/image-operation-service.js";
+import { createImageOperationDispatcher } from "./images/image-operation-dispatcher.js";
 
 interface ElectronWorkspaceShell {
   openPath(path: string): Promise<string>;
@@ -247,13 +254,23 @@ export interface DesktopMainOptions {
   readinessPollIntervalMs?: number;
   gatewayStopTimeoutMs?: number;
   gatewayKillTimeoutMs?: number;
+  gatewayDiagnostics?: GatewayDiagnosticSink;
   consistencyCoordinator?: ProductionRuntimeConsistencyCoordinator;
   providers?: ProviderStore;
   providerNetwork?: ProviderNetworkService;
   providerConfig?: OpenClawProviderConfigBackend;
   modelSourceExecutors?: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
+  injectChatMessage?(
+    sessionId: string,
+    message: string,
+    label: "uclaw-local-user-v1" | "uclaw-local-result-v1",
+    signal?: AbortSignal,
+  ): Promise<void>;
   domainRegistrations?: DesktopDomainRegistry;
   dispose?(): Promise<void> | void;
+  gatewayMediaToken?: string;
+  gatewayOrigin?: () => string | undefined;
+  imageDataRoot?: string;
 }
 
 export interface RegisteredDesktopDomain {
@@ -342,6 +359,8 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
     spawn: options.spawn,
     stopTimeoutMs: options.gatewayStopTimeoutMs,
     killTimeoutMs: options.gatewayKillTimeoutMs,
+    diagnostics: options.gatewayDiagnostics,
+    now: options.now,
   });
   const fetchHealth = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const now = options.now ?? Date.now;
@@ -349,7 +368,7 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
   let stopPromise: Promise<void> | undefined;
   const stopGateway = (): Promise<void> => stopPromise ??= (async () => {
     const results = await Promise.allSettled([
-      gatewayProcess.stop(),
+      gatewayProcess.stop("application-quit"),
       Promise.resolve(options.dispose?.()),
     ]);
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
@@ -366,12 +385,13 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
   options.consistencyCoordinator?.bindLifecycle({
     stop: async (signal) => {
       signal?.throwIfAborted();
-      await gatewayProcess.stop();
+      await gatewayProcess.stop("consistency-restart");
     },
     start: async (signal) => {
       if (managedPort === undefined || managedLaunchOptions === undefined) throw new Error("Managed Gateway launch state is unavailable.");
       const restartController = new AbortController();
       const restartSignal = signal ? AbortSignal.any([signal, restartController.signal]) : restartController.signal;
+      gatewayProcess.setPort(managedPort);
       const identity = gatewayProcess.start(managedLaunchOptions);
       try {
         await waitForGatewayReadiness({
@@ -390,10 +410,12 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
           timeoutMs: options.readinessTimeoutMs ?? 30_000,
           pollIntervalMs: options.readinessPollIntervalMs ?? 250,
           signal: restartSignal,
-        }, managedPort, identity);
+        }, managedPort, identity, () => gatewayProcess.markHealthReady(identity));
+        gatewayProcess.markCapabilityReady(identity);
       } catch (error) {
         restartController.abort();
-        try { await gatewayProcess.stop(); } catch (stopError) {
+        gatewayProcess.markStartupFailed(identity);
+        try { await gatewayProcess.stop("startup-rollback"); } catch (stopError) {
           throw new AggregateError([error, stopError], "Managed Gateway restart and cleanup failed.", { cause: error });
         }
         throw error;
@@ -411,7 +433,11 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
         selectPort: options.selectPort ?? ((excludedPorts) => selectGatewayPort({ excludedPorts })),
         gatewayProcess: {
           start: (launchOptions) => gatewayProcess.start(launchOptions),
-          stop: stopGateway,
+          stop: (reason) => reason === "startup-rollback" ? gatewayProcess.stop(reason) : stopGateway(),
+          setPort: (port) => gatewayProcess.setPort(port),
+          markHealthReady: (identity) => gatewayProcess.markHealthReady(identity),
+          markCapabilityReady: (identity) => gatewayProcess.markCapabilityReady(identity),
+          markStartupFailed: (identity) => gatewayProcess.markStartupFailed(identity),
         },
         buildLaunchOptions: buildManagedLaunchOptions,
         checkHealth: (port, deadlineMs, identity, signal) => checkGatewayHealth({
@@ -543,9 +569,10 @@ export async function startElectronMain(
   portablePaths: PortableDesktopPaths,
 ): Promise<void> {
   const modelSourceExecutors = requireModelSourceExecutors(options.modelSourceExecutors);
-  const { app, BrowserWindow, dialog, ipcMain, shell } = await import("electron");
+  const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session: electronSession, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const client = requireElectronClient(options.client);
+  if (options.injectChatMessage === undefined) throw new Error("OpenClaw chat injection is required for local application actions.");
   const consistencyCoordinator = new ProductionRuntimeConsistencyCoordinator();
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
   const attachments = options.attachments ?? client.attachments;
@@ -555,6 +582,15 @@ export async function startElectronMain(
     providers,
     executors: modelSourceExecutors,
   });
+  const localApplications = createLocalApplicationRouter({
+    roots: defaultApplicationRoots(process.platform, process.env),
+    cachePath: join(portablePaths.cacheDir, "local-applications.json"),
+    openPath: (path) => shell.openPath(path),
+    inject: async (sessionId, message, label, signal) => {
+      await options.injectChatMessage!(sessionId, message, label, signal);
+    },
+  });
+  void localApplications.refresh().catch(() => undefined);
   const skillRuntimeRegistration = resolveSkillRuntimeRegistration(options.domainRegistrations);
   const skills = await createSkillService({
     dataDir: portablePaths.dataDir,
@@ -564,6 +600,21 @@ export async function startElectronMain(
     managedRoot: join(portablePaths.openClawState, "skills"),
     workspaceRoot: join(portablePaths.workspace, "skills"),
     runMutation: (operation) => consistencyCoordinator.runTrackedWrite(operation),
+  });
+  const skillImports = createSkillImportService({
+    dataDir: portablePaths.dataDir,
+    selectZip: async () => {
+      const selected = await dialog.showOpenDialog({
+        properties: ["openFile"],
+        filters: [{ name: "Skill ZIP", extensions: ["zip"] }],
+      });
+      return selected.canceled ? null : selected.filePaths[0] ?? null;
+    },
+  });
+  const skillInstallCoordinator = createSkillInstallCoordinator({
+    imports: skillImports,
+    skills,
+    openExternal: (url) => shell.openExternal(url),
   });
   const pluginRuntime = options.pluginRuntime ?? await createOpenClawCliPluginRuntime({
     runtimeRoot: process.env.UCLAW_RUNTIME_DIR ?? "",
@@ -649,6 +700,12 @@ export async function startElectronMain(
     app,
     createWindow: (registerIpc, signal) => {
       signal.throwIfAborted();
+      if (gatewayPort === undefined || options.gatewayMediaToken === undefined) throw new Error("Gateway media authentication is unavailable.");
+      const disposeMediaAuth = installGatewayMediaRequestAuth(
+        electronSession.defaultSession.webRequest as unknown as Parameters<typeof installGatewayMediaRequestAuth>[0],
+        gatewayPort,
+        options.gatewayMediaToken,
+      );
       return createMainWindow({
         BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
         preloadPath: resolvePreloadPath(moduleDir),
@@ -657,11 +714,32 @@ export async function startElectronMain(
         openExternal: (url) => shell.openExternal(url),
         devTools,
         showWhenReady: false,
-        beforeLoad: registerIpc,
+        beforeLoad: (window) => {
+          const disposeIpc = registerIpc(window);
+          return () => {
+            disposeIpc?.();
+            disposeMediaAuth();
+          };
+        },
       });
     },
     registerIpc: (window, dispatchClient) => {
       diagnosticsRuntime.gatewayStatus = "ready";
+      if (options.gatewayMediaToken === undefined || options.gatewayOrigin === undefined || options.imageDataRoot === undefined) throw new Error("Gateway image authority is unavailable.");
+      const images = createImageOperationDispatcher(createImageOperationService({
+        gatewayOrigin: () => {
+          const origin = options.gatewayOrigin!();
+          if (origin === undefined) throw new Error("Gateway origin is unavailable.");
+          return origin;
+        },
+        gatewayToken: options.gatewayMediaToken,
+        fetch,
+        nativeImage: nativeImage as unknown as Parameters<typeof createImageOperationService>[0]["nativeImage"],
+        clipboard: clipboard as unknown as Parameters<typeof createImageOperationService>[0]["clipboard"],
+        showSaveDialog: (dialogOptions) => dialog.showSaveDialog(dialogOptions),
+        dataRoot: options.imageDataRoot,
+        realpath,
+      }));
       const coreDispose = registerDesktopIpc({
       ipcMain: ipcMain as unknown as IpcMainLike,
       authorizedWebContents: window.webContents,
@@ -676,8 +754,9 @@ export async function startElectronMain(
       providers,
       providerNetwork: options.providerNetwork,
       providerConfig: options.providerConfig,
-      routeChatSend: modelRouting.routeChatSend,
+      routeChatSend: (input, signal) => localApplications.route(input, modelRouting.routeChatSend, signal),
       skills,
+      skillInstallCoordinator,
       plugins,
       channels,
       channelRuntime,
@@ -688,6 +767,7 @@ export async function startElectronMain(
       dispatchData: data.dispatch,
       dispatchDiagnostics: diagnostics.dispatch,
       dispatchRelease: createReleaseDispatcher(release),
+      dispatchImage: images,
       coordinateWrite: (operation) => consistencyCoordinator.runTrackedWrite(operation),
       selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
         const selected = await dialog.showOpenDialog({

@@ -30,6 +30,16 @@ describe("development provider bootstrap", () => {
     });
   });
 
+  it("uses the only public model when the optional model value is empty", () => {
+    expect(readDevelopmentProvider({
+      UCLAW_TEST_PROVIDER_BASE_URL: "https://provider.example/v1",
+      UCLAW_TEST_PROVIDER_API_KEY: "test-secret",
+      UCLAW_TEST_PROVIDER_MODEL: "",
+    })).toMatchObject({
+      model: "gpt-5.6-sol",
+    });
+  });
+
   it("creates once, refreshes the credential, and selects idempotently", async () => {
     let providers: Array<{ id: string; name: string; enabled: boolean; baseUrl: string | null; model: string }> = [];
     let selectedProviderId: string | null = null;
