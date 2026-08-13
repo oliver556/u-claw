@@ -31,6 +31,8 @@ import {
 import type { AuthorizedWebContents, IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import { createSessionOrganizerStore } from "./session-organizer/store.js";
+import { createChatQueueStore } from "./chat-queue/store.js";
+import { createChatQueueDispatcher } from "./chat-queue/dispatcher.js";
 import { createProviderStore, type ProviderStore } from "./providers/provider-store.js";
 import type { ProviderNetworkService } from "./providers/provider-network.js";
 import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provider-config.js";
@@ -576,6 +578,7 @@ export async function startElectronMain(
   const consistencyCoordinator = new ProductionRuntimeConsistencyCoordinator();
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
   const attachments = options.attachments ?? client.attachments;
+  const chatQueue = createChatQueueStore(portablePaths.dataDir);
   const providers = options.providers ?? createProviderStore({ dataDir: portablePaths.dataDir });
   const modelRouting = createMainProcessModelRouting({
     dataDir: portablePaths.dataDir,
@@ -591,6 +594,23 @@ export async function startElectronMain(
     },
   });
   void localApplications.refresh().catch(() => undefined);
+  const routeChatSend = (input: SendMessageInput, signal: AbortSignal) =>
+    localApplications.route(input, modelRouting.routeChatSend, signal);
+  const chatQueueDispatcher = createChatQueueDispatcher({
+    store: chatQueue,
+    send: (input) => routeChatSend(input, new AbortController().signal),
+    isGatewayAvailable: async () => (await client.gateway.getStatus()).businessAvailable,
+  });
+  const queueGatewayWatchController = new AbortController();
+  void (async () => {
+    try {
+      for await (const status of client.gateway.watchStatus(queueGatewayWatchController.signal)) {
+        if (status.businessAvailable) await chatQueueDispatcher.gatewayAvailable();
+      }
+    } catch {
+      // Gateway watch is best effort; normal IPC status handling remains authoritative.
+    }
+  })();
   const skillRuntimeRegistration = resolveSkillRuntimeRegistration(options.domainRegistrations);
   const skills = await createSkillService({
     dataDir: portablePaths.dataDir,
@@ -672,6 +692,10 @@ export async function startElectronMain(
   const runtimeOptions: DesktopMainOptions = {
     ...options,
     consistencyCoordinator,
+    dispose: async () => {
+      queueGatewayWatchController.abort();
+      await options.dispose?.();
+    },
     buildGatewayLaunchOptions: (port) => {
       gatewayPort = port;
       diagnosticsRuntime.gatewayPort = port;
@@ -681,6 +705,8 @@ export async function startElectronMain(
   const domainServices = new Map<string, unknown>([
     ["organizer", organizer],
     ["attachments", attachments],
+    ["chatQueue", chatQueue],
+    ["chatQueueDispatcher", chatQueueDispatcher],
     ["providers", providers],
     ["skills", skills],
     ["plugins", plugins],
@@ -751,10 +777,24 @@ export async function startElectronMain(
       client,
       organizer,
       attachments,
+      chatQueue,
+      chatQueueDispatcher,
       providers,
       providerNetwork: options.providerNetwork,
       providerConfig: options.providerConfig,
-      routeChatSend: (input, signal) => localApplications.route(input, modelRouting.routeChatSend, signal),
+      routeChatSend: async function* (input, signal) {
+        const releaseActivity = await chatQueueDispatcher.acquireSessionActivity(input.sessionId);
+        let terminal = false;
+        try {
+          for await (const event of await routeChatSend(input, signal)) {
+            if (event.type === "final" || event.type === "aborted" || event.type === "error") terminal = true;
+            yield event;
+          }
+        } finally {
+          releaseActivity();
+        }
+        if (terminal) void chatQueueDispatcher.sessionIdle(input.sessionId).catch(() => undefined);
+      },
       skills,
       skillInstallCoordinator,
       plugins,
