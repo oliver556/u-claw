@@ -441,6 +441,7 @@ describe("runDesktopMain", () => {
         queueMicrotask(() => {
           this.exitCode = 0;
           this.emit("exit", 0, null);
+          this.emit("close", 0, null);
         });
         return true;
       });
@@ -483,6 +484,7 @@ describe("runDesktopMain", () => {
           setTimeout(() => {
             this.exitCode = 0;
             this.emit("exit", 0, null);
+            this.emit("close", 0, null);
           }, 1);
         }
         return true;
@@ -542,6 +544,7 @@ describe("runDesktopMain", () => {
       fetch: vi.fn(async () => {
         child.exitCode = 1;
         child.emit("exit", 1, null);
+        child.emit("close", 1, null);
         return { ok: true };
       }),
       now: () => 0,
@@ -573,6 +576,7 @@ describe("runDesktopMain", () => {
           queueMicrotask(() => {
             this.exitCode = 0;
             this.emit("exit", 0, null);
+            this.emit("close", 0, null);
           });
         }
         return true;
