@@ -3,7 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 
 import type { ApprovalRequest, ContentBlock, Message, ToolCall, ToolState } from "@uclaw/shared";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApprovalCard } from "../src/features/approvals/ApprovalCard";
@@ -68,6 +68,44 @@ describe("Composer", () => {
     expect(stop).toHaveClass("composer-action");
     expect(stop).toHaveTextContent("");
     expect(stop.querySelector(".lucide-square")).toBeInTheDocument();
+  });
+
+  it("keeps the textarea editable while sending and routes keyboard submits", () => {
+    const onSend = vi.fn();
+    const onQueue = vi.fn();
+    render(<Composer
+      value="调整方向"
+      disabled={false}
+      sending
+      attachmentsSupported
+      attachments={[]}
+      models={[]}
+      modelLoading={false}
+      modelError={false}
+      skills={[]}
+      skillLoading={false}
+      onChange={vi.fn()}
+      onSelectAttachments={vi.fn()}
+      onDropFiles={vi.fn()}
+      onPrepareAttachment={vi.fn()}
+      onRemoveAttachment={vi.fn()}
+      onSend={onSend}
+      onQueue={onQueue}
+      onStop={vi.fn()}
+      onModelChange={vi.fn()}
+      onSkillChange={vi.fn()}
+    />);
+
+    const textarea = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
+    expect(textarea).toBeEnabled();
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onQueue).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -117,6 +117,57 @@ describe("chat workspace", () => {
     expect(await screen.findByRole("combobox", { name: "会话模型" })).toBeInTheDocument();
     expect(screen.queryByText("当前连接不支持模型列表")).not.toBeInTheDocument();
   });
+
+  it("steers an active run, queues with the platform shortcut, and edits authoritative queue items on save", async () => {
+    const pending = deferredStream();
+    const base = clientFixture();
+    const send = vi.fn((_input: Parameters<UClawClient["chat"]["send"]>[0]) => pending.stream);
+    const queuedItem = {
+      id: "queue-1", sessionId: "session-1", text: "稍后处理", attachmentIds: [], status: "queued" as const,
+      idempotencyKey: "queue-key-0001", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z",
+    };
+    let items = [queuedItem];
+    const queueInvoke = vi.fn(async (request: any) => {
+      if (request.method === "chat-queue.list") return { method: request.method, requestId: request.requestId, ok: true, result: { schemaVersion: 1, sessionId: "session-1", items } };
+      if (request.method === "chat-queue.add") {
+        const item = { ...queuedItem, id: "queue-2", text: request.params.text, idempotencyKey: request.params.idempotencyKey };
+        items = [...items, item];
+        return { method: request.method, requestId: request.requestId, ok: true, result: item };
+      }
+      if (request.method === "chat-queue.update") {
+        items = items.map((item) => item.id === request.params.itemId ? { ...item, text: request.params.text } : item);
+        return { method: request.method, requestId: request.requestId, ok: true, result: items.find((item) => item.id === request.params.itemId) };
+      }
+      if (request.method === "chat-queue.remove") return { method: request.method, requestId: request.requestId, ok: true, result: null };
+      return { method: request.method, requestId: request.requestId, ok: true, result: queuedItem };
+    });
+    window.uclaw = { chatQueue: { invoke: queueInvoke as never } };
+    render(<App client={clientFixture({ chat: { ...base.chat, send } })} />);
+
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    expect(await screen.findByLabelText("消息队列")).toBeVisible();
+    fireEvent.change(composer, { target: { value: "先开始" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    expect(composer).toBeEnabled();
+
+    fireEvent.change(composer, { target: { value: "立即调整" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].blocks).toEqual([{ type: "text", text: "立即调整", format: "plain" }]);
+
+    fireEvent.change(composer, { target: { value: "进入队列" } });
+    fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(queueInvoke).toHaveBeenCalledWith(expect.objectContaining({ method: "chat-queue.add", params: expect.objectContaining({ text: "进入队列" }) })));
+
+    fireEvent.click(screen.getByRole("button", { name: "更多：稍后处理" }));
+    expect(screen.getByRole("menu")).toHaveTextContent("编辑消息");
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑消息" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "编辑队列消息" }), { target: { value: "修改后处理" } });
+    expect(queueInvoke.mock.calls.some(([request]) => request.method === "chat-queue.update")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "保存队列消息" }));
+    await waitFor(() => expect(queueInvoke).toHaveBeenCalledWith(expect.objectContaining({ method: "chat-queue.update", params: expect.objectContaining({ itemId: "queue-1", text: "修改后处理" }) })));
+  });
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });

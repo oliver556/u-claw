@@ -1,9 +1,10 @@
-import { parseSkillInstallIntent, type ApprovalDecision, type ApprovalRequest, type Attachment, type CapabilitySet, type GatewayStatus, type Message, type MessageEvent, type Session, type SkillCatalogItem, type SkillRuntimeInventory, type ToolCall, type UClawClient } from "@uclaw/shared";
+import { parseSkillInstallIntent, type ApprovalDecision, type ApprovalRequest, type Attachment, type CapabilitySet, type ChatQueueDocument, type ChatQueueItem, type GatewayStatus, type Message, type MessageEvent, type Session, type SkillCatalogItem, type SkillRuntimeInventory, type ToolCall, type UClawClient } from "@uclaw/shared";
 import { AlertCircle, LoaderCircle, RotateCw, WifiOff, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
+import { QueuedMessageBar } from "./QueuedMessageBar";
 import { toProductModels } from "./product-model-catalog";
 import { useMessageStream } from "./useMessageStream";
 
@@ -39,8 +40,10 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [pendingTools, setPendingTools] = useState<ToolCall[]>([]);
   const [sending, setSending] = useState(false);
+  const activeSends = useRef(0);
   const [sendError, setSendError] = useState<string>();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [queueItems, setQueueItems] = useState<ChatQueueItem[]>([]);
   const attachmentsRef = useRef<Attachment[]>([]);
   const [models, setModels] = useState<Array<{ id: string; label: string; available: boolean }>>([]);
   const [modelState, setModelState] = useState<"idle" | "loading" | "error" | "selecting">("idle");
@@ -198,6 +201,32 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     return response.result;
   };
 
+  const queueInvoke = async (method: "chat-queue.list" | "chat-queue.add" | "chat-queue.update" | "chat-queue.remove" | "chat-queue.send", params: any) => {
+    const invoke = window.uclaw?.chatQueue?.invoke;
+    if (invoke === undefined) throw new Error("消息队列服务不可用");
+    const response = await invoke({ method, requestId: requestId(), params } as never);
+    if (!response.ok) throw new Error(response.error.message);
+    return response.result;
+  };
+
+  const refreshQueue = useCallback(async () => {
+    const invoke = window.uclaw?.chatQueue?.invoke;
+    if (invoke === undefined) { setQueueItems([]); return; }
+    try {
+      const response = await invoke({ method: "chat-queue.list", requestId: requestId(), params: { sessionId: session.id } });
+      if (!response.ok) throw new Error(response.error.message);
+      setQueueItems((response.result as ChatQueueDocument).items);
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "队列加载失败");
+    }
+  }, [session.id]);
+
+  useEffect(() => {
+    void refreshQueue();
+    const timer = window.setInterval(() => void refreshQueue(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [refreshQueue]);
+
   const invalidateSendIntent = () => { sendIntentId.current = undefined; };
   const updateAttachments = (update: (current: Attachment[]) => Attachment[]) => {
     const next = update(attachmentsRef.current);
@@ -278,8 +307,9 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     const text = draft.trim();
     const installIntent = parseSkillInstallIntent(text);
     const readyAttachments = attachments.filter((attachment) => attachment.state === "ready");
-    if ((text.length === 0 && readyAttachments.length === 0) || attachments.some((attachment) => attachment.state !== "ready") || sending || unavailable) return;
+    if ((text.length === 0 && readyAttachments.length === 0) || attachments.some((attachment) => attachment.state !== "ready") || unavailable) return;
     setSendError(undefined);
+    activeSends.current += 1;
     setSending(true);
     onDraftChange("");
     stopRequested.current = false;
@@ -347,7 +377,30 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
       activeRunId.current = undefined;
       sendController.current = undefined;
       stopRequested.current = false;
-      if (mounted.current) setSending(false);
+      activeSends.current = Math.max(0, activeSends.current - 1);
+      if (mounted.current) setSending(activeSends.current > 0);
+    }
+  };
+
+  const addToQueue = async () => {
+    const text = draft.trim();
+    const readyAttachments = attachments.filter((attachment) => attachment.state === "ready");
+    if ((text.length === 0 && readyAttachments.length === 0) || attachments.some((attachment) => attachment.state !== "ready") || unavailable) return;
+    try {
+      await queueInvoke("chat-queue.add", {
+        sessionId: session.id,
+        text,
+        attachmentIds: readyAttachments.map((attachment) => attachment.id),
+        ...(session.model?.id === undefined ? {} : { modelId: session.model.id }),
+        ...(selectedSkillId === undefined ? {} : { skillId: selectedSkillId }),
+        idempotencyKey: requestId(),
+      });
+      onDraftChange("");
+      updateAttachments(() => []);
+      setSelectedSkillId(undefined);
+      await refreshQueue();
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "加入队列失败");
     }
   };
 
@@ -397,6 +450,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     </div>
     {sendError ? <div className="send-error" role="alert"><AlertCircle /><span><strong>发送失败</strong>{sendError}</span></div> : null}
     {installedSkillName ? <div className="skill-install-status success" role="status"><span>{installedSkillName} 安装成功，OpenClaw 已完成读回。</span><button type="button" aria-label="关闭安装成功提示" title="关闭" onClick={() => setInstalledSkillName(undefined)}><X /></button></div> : null}
-    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} models={models.map((model) => ({ value: model.id, label: model.available ? model.label : `${model.label}（不可用）`, disabled: !model.available }))} modelValue={session.model?.id} modelLoading={modelState === "loading" || modelState === "selecting"} modelError={modelState === "error"} skills={skills.map((skill) => ({ value: skill.id, label: skill.name }))} skillValue={selectedSkillId} skillLoading={skillState === "loading"} onModelChange={(value) => void selectModel(value)} onSkillChange={(value) => { invalidateSendIntent(); setSelectedSkillId(value); }} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); updateAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
+    <QueuedMessageBar items={queueItems} onSend={(item) => { void queueInvoke("chat-queue.send", { sessionId: session.id, itemId: item.id }).then(refreshQueue).catch((error) => setSendError(error instanceof Error ? error.message : "发送队列消息失败")); }} onRemove={(item) => { void queueInvoke("chat-queue.remove", { sessionId: session.id, itemId: item.id }).then(refreshQueue).catch((error) => setSendError(error instanceof Error ? error.message : "删除队列消息失败")); }} onSave={(item, text) => { void queueInvoke("chat-queue.update", { sessionId: session.id, itemId: item.id, text }).then(refreshQueue).catch((error) => setSendError(error instanceof Error ? error.message : "编辑队列消息失败")); }} />
+    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} models={models.map((model) => ({ value: model.id, label: model.available ? model.label : `${model.label}（不可用）`, disabled: !model.available }))} modelValue={session.model?.id} modelLoading={modelState === "loading" || modelState === "selecting"} modelError={modelState === "error"} skills={skills.map((skill) => ({ value: skill.id, label: skill.name }))} skillValue={selectedSkillId} skillLoading={skillState === "loading"} onModelChange={(value) => void selectModel(value)} onSkillChange={(value) => { invalidateSendIntent(); setSelectedSkillId(value); }} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); updateAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onQueue={() => void addToQueue()} onStop={() => void stop()} />
   </section>;
 }
