@@ -39,7 +39,9 @@ func TestOpenAPIAdminContractRejectsShapeDrift(t *testing.T) {
 	_, audit := operationContract(t, doc, routes[8])
 	assertSchemaError(t, doc, mutation, routes[2].Response)
 	assertSchemaError(t, doc, summary, routes[3].Request)
-	assertSchemaError(t, doc, audit, routes[8].Response)
+	var auditPage struct{ Items json.RawMessage }
+	_ = json.Unmarshal(routes[8].Response, &auditPage)
+	assertSchemaError(t, doc, audit, auditPage.Items)
 	var value map[string]any
 	_ = json.Unmarshal(routes[3].Request, &value)
 	value["extra"] = true
@@ -124,7 +126,7 @@ func responseDTO(path string) any {
 	case "/internal/v1/licenses/{id}/disable", "/internal/v1/licenses/{id}/enable", "/internal/v1/licenses/{id}/revoke":
 		return &mutationResponse{}
 	case "/internal/v1/audit":
-		return &auditEventResponse{}
+		return &auditPageResponse{}
 	default:
 		return &inventorySummaryResponse{}
 	}

@@ -17,12 +17,19 @@ import (
 )
 
 type fixtureRepository struct {
-	license        License
-	recovery       RecoveryRecord
-	expireCalls    int
-	grant          *TokenGrant
-	expireMutation func(*License)
-	auditOutcomes  []string
+	license          License
+	recovery         RecoveryRecord
+	expireCalls      int
+	grant            *TokenGrant
+	expireMutation   func(*License)
+	auditOutcomes    []string
+	authorizeErr     error
+	recoveryAuditErr error
+	auditContext     context.Context
+	auditCtxErr      error
+	auditDeadline    time.Time
+	auditHasLimit    bool
+	authorizeCalls   int
 }
 
 type recoveryEnvelope struct{ calls int }
@@ -51,9 +58,23 @@ func (repository *fixtureRepository) ExpireLicense(_ context.Context, _ string, 
 func (repository *fixtureRepository) GetActivationForRecovery(context.Context, string) (RecoveryRecord, error) {
 	return repository.recovery, nil
 }
-func (repository *fixtureRepository) RecordRecovery(_ context.Context, _, _, outcome string) error {
+func (repository *fixtureRepository) AuthorizeRecovery(ctx context.Context, _, _ string) (RecoveryRecord, error) {
+	repository.authorizeCalls++
+	repository.auditContext = ctx
+	repository.auditCtxErr = ctx.Err()
+	repository.auditDeadline, repository.auditHasLimit = ctx.Deadline()
+	repository.auditOutcomes = append(repository.auditOutcomes, "authorized")
+	if repository.authorizeErr != nil {
+		return RecoveryRecord{}, repository.authorizeErr
+	}
+	return repository.recovery, nil
+}
+func (repository *fixtureRepository) RecordRecovery(ctx context.Context, _, _, outcome string) error {
+	repository.auditContext = ctx
+	repository.auditCtxErr = ctx.Err()
+	repository.auditDeadline, repository.auditHasLimit = ctx.Deadline()
 	repository.auditOutcomes = append(repository.auditOutcomes, outcome)
-	return nil
+	return repository.recoveryAuditErr
 }
 func (repository *fixtureRepository) CreateTokenGrant(_ context.Context, grant TokenGrant) (TokenGrant, error) {
 	if repository.grant != nil {
@@ -186,6 +207,140 @@ func TestRecoverRejectsInactiveLicenseBeforeDecrypting(t *testing.T) {
 				t.Fatalf("decrypt calls=%d", envelope.calls)
 			}
 		})
+	}
+}
+
+func TestRecoverDoesNotReturnMaterialWhenSuccessAuditFails(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "fixture-startup-secret-material-0001"
+	salt := []byte("0123456789abcdef")
+	hash := sha256.New()
+	hash.Write([]byte("uclaw-startup-secret-v1\x00"))
+	hash.Write(salt)
+	hash.Write([]byte{0})
+	hash.Write([]byte(secret))
+	repository := &fixtureRepository{
+		license:          License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: "active", StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)},
+		recovery:         RecoveryRecord{ActivationID: "act_fixture_001", DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", ArtifactEnvelope: []byte("sealed"), ArtifactKeyVersion: "kms-v1"},
+		recoveryAuditErr: errors.New("audit unavailable"),
+	}
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), MaximumGrace: time.Hour, Envelope: &recoveryEnvelope{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	material, err := service.Recover(context.Background(), RecoverInput{ActivationID: "act_fixture_001", StartupSecret: secret, RequestID: "request_fixture_001"})
+	if !errors.Is(err, ErrUnavailable) || material != nil {
+		t.Fatalf("material=%q error=%v", material, err)
+	}
+	if len(repository.auditOutcomes) != 2 || repository.auditOutcomes[0] != "authorized" || repository.auditOutcomes[1] != "succeeded" {
+		t.Fatalf("audit outcomes=%v", repository.auditOutcomes)
+	}
+}
+
+func TestRecoverRecordsAuthorizationThenFailureWhenDecryptFails(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "fixture-startup-secret-material-0001"
+	salt := []byte("0123456789abcdef")
+	hash := sha256.New()
+	hash.Write([]byte("uclaw-startup-secret-v1\x00"))
+	hash.Write(salt)
+	hash.Write([]byte{0})
+	hash.Write([]byte(secret))
+	repository := &fixtureRepository{
+		license:  License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: "active", StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)},
+		recovery: RecoveryRecord{ActivationID: "act_fixture_001", DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", ArtifactEnvelope: []byte("sealed"), ArtifactKeyVersion: "kms-v1"},
+	}
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), MaximumGrace: time.Hour, Envelope: failingRecoveryEnvelope{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	material, err := service.Recover(context.Background(), RecoverInput{ActivationID: "act_fixture_001", StartupSecret: secret, RequestID: "request_fixture_001"})
+	if !errors.Is(err, ErrUnavailable) || material != nil {
+		t.Fatalf("material=%q error=%v", material, err)
+	}
+	if len(repository.auditOutcomes) != 2 || repository.auditOutcomes[0] != "authorized" || repository.auditOutcomes[1] != "failed" {
+		t.Fatalf("audit outcomes=%v", repository.auditOutcomes)
+	}
+}
+
+type failingRecoveryEnvelope struct{}
+
+func (failingRecoveryEnvelope) Decrypt(context.Context, security.EnvelopeBinding, []byte) ([]byte, error) {
+	return nil, errors.New("decrypt failed")
+}
+
+func TestRecoverAuthorizesAfterSecretAuthenticationAndBeforeDecrypting(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "fixture-startup-secret-material-0001"
+	salt := []byte("0123456789abcdef")
+	hash := sha256.New()
+	hash.Write([]byte("uclaw-startup-secret-v1\x00"))
+	hash.Write(salt)
+	hash.Write([]byte{0})
+	hash.Write([]byte(secret))
+	repository := &fixtureRepository{
+		license:  License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: "active", StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)},
+		recovery: RecoveryRecord{ActivationID: "act_fixture_001", DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", ArtifactEnvelope: []byte("sealed"), ArtifactKeyVersion: "kms-v1"},
+	}
+	envelope := &recoveryEnvelope{}
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), MaximumGrace: time.Hour, Envelope: envelope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Recover(context.Background(), RecoverInput{ActivationID: "act_fixture_001", StartupSecret: "wrong-secret-material-that-is-long-enough", RequestID: "request_fixture_001"}); !errors.Is(err, ErrAuthentication) {
+		t.Fatalf("wrong secret error=%v", err)
+	}
+	if repository.authorizeCalls != 0 || envelope.calls != 0 {
+		t.Fatalf("wrong secret authorize=%d decrypt=%d", repository.authorizeCalls, envelope.calls)
+	}
+	if _, err = service.Recover(context.Background(), RecoverInput{ActivationID: "act_fixture_001", StartupSecret: secret, RequestID: "request_fixture_002"}); err != nil {
+		t.Fatal(err)
+	}
+	if repository.authorizeCalls != 1 || envelope.calls != 1 {
+		t.Fatalf("valid recovery authorize=%d decrypt=%d", repository.authorizeCalls, envelope.calls)
+	}
+}
+
+func TestRecoverSuccessAuditUsesIndependentBoundedContext(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "fixture-startup-secret-material-0001"
+	salt := []byte("0123456789abcdef")
+	hash := sha256.New()
+	hash.Write([]byte("uclaw-startup-secret-v1\x00"))
+	hash.Write(salt)
+	hash.Write([]byte{0})
+	hash.Write([]byte(secret))
+	repository := &fixtureRepository{
+		license:  License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: "active", StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)},
+		recovery: RecoveryRecord{ActivationID: "act_fixture_001", DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", ArtifactEnvelope: []byte("sealed"), ArtifactKeyVersion: "kms-v1"},
+	}
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), MaximumGrace: time.Hour, Envelope: &recoveryEnvelope{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	material, err := service.Recover(ctx, RecoverInput{ActivationID: "act_fixture_001", StartupSecret: secret, RequestID: "request_fixture_001"})
+	if err != nil || string(material) != "recovered" {
+		t.Fatalf("material=%q error=%v", material, err)
+	}
+	if repository.auditContext == nil || repository.auditCtxErr != nil {
+		t.Fatalf("audit context error=%v", repository.auditCtxErr)
+	}
+	if !repository.auditHasLimit || time.Until(repository.auditDeadline) <= 0 || time.Until(repository.auditDeadline) > 6*time.Second {
+		t.Fatalf("audit deadline=%v ok=%v", repository.auditDeadline, repository.auditHasLimit)
 	}
 }
 

@@ -13,7 +13,7 @@ const zod: Record<string, { parse(value: unknown): unknown }> = {
   AdminMutation: shared.AdminLicenseMutationSchema, AdminBalanceStatusRequest: shared.AdminMarkConfiguredSchema,
   AdminInventorySecret: shared.AdminInventorySecretSchema, AdminInventorySummary: shared.AdminInventorySummarySchema,
   AdminMutationResult: shared.AdminMutationResultSchema, AdminReissueResponse: shared.AdminReissueResponseSchema,
-  AdminAuditEvent: shared.AdminAuditEventSchema,
+  AdminAuditEvent: shared.AdminAuditEventSchema, AdminAuditPage: shared.AdminAuditPageSchema,
 };
 const deref = (value: any): any => value?.$ref ? deref(value.$ref.split("/").slice(1).reduce((node: any, key: string) => node[key], openapi)) : value;
 const schemaName = (schema: any): string => { const ref = schema?.$ref ?? schema?.items?.$ref; if (!ref) throw new Error("admin operation schema must use component ref"); return ref.split("/").at(-1)!; };
@@ -38,8 +38,8 @@ describe("admin OpenAPI shared contract", () => {
   });
   it("rejects swapped schemas and array-object shape drift", () => {
     const mutation = operationSchemas(fixture.routes[3]).request; const summary = operationSchemas(fixture.routes[2]).response; const audit = operationSchemas(fixture.routes[8]).response;
-    const mutationValidate=ajv.compile({$ref:`openapi#/components/schemas/${schemaName(mutation)}`}); const summaryValidate=ajv.compile({$ref:`openapi#/components/schemas/${schemaName(summary)}`}); const auditArray=ajv.compile({type:"array",items:{$ref:`openapi#/components/schemas/${schemaName(audit)}`}});
-    expect(mutationValidate(fixture.routes[2].response)).toBe(false); expect(summaryValidate(fixture.routes[3].request)).toBe(false); expect(auditArray(fixture.routes[8].response)).toBe(false); expect(auditArray([fixture.routes[8].response])).toBe(true);
+    const mutationValidate=ajv.compile({$ref:`openapi#/components/schemas/${schemaName(mutation)}`}); const summaryValidate=ajv.compile({$ref:`openapi#/components/schemas/${schemaName(summary)}`}); const auditValidate=ajv.compile({$ref:`openapi#/components/schemas/${schemaName(audit)}`});
+    expect(mutationValidate(fixture.routes[2].response)).toBe(false); expect(summaryValidate(fixture.routes[3].request)).toBe(false); expect(auditValidate(fixture.routes[8].response.items)).toBe(false); expect(auditValidate(fixture.routes[8].response)).toBe(true);
   });
   it("keeps pattern, enum, and minimum constraints aligned between AJV and Zod", () => {
     for (const [routeIndex, kind, patch] of [

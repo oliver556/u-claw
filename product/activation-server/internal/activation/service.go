@@ -171,7 +171,7 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 		return ActivateResult{}, err
 	}
 	if begin.Disposition == BindingBound {
-		return service.recoverBound(ctx, begin.Record)
+		return service.recoverBound(ctx, begin.Record, true)
 	}
 	return service.complete(ctx, begin.Record)
 }
@@ -214,17 +214,32 @@ func (service *Service) complete(ctx context.Context, record BoundRecord) (Activ
 	if err != nil {
 		return ActivateResult{}, err
 	}
-	return service.recoverBound(ctx, persisted)
+	return service.recoverBound(ctx, persisted, false)
 }
 
-func (service *Service) recoverBound(ctx context.Context, record BoundRecord) (ActivateResult, error) {
+func (service *Service) recoverBound(ctx context.Context, record BoundRecord, recovery bool) (ActivateResult, error) {
+	recoveryRequestID := record.RecoveryRequestID
+	if recovery && recoveryRequestID == "" {
+		return ActivateResult{}, ErrActivationServiceUnavailable
+	}
 	material, err := service.envelope.Decrypt(ctx, envelopeBinding(record, record.ArtifactKeyVersion), record.ArtifactEnvelope)
 	if err != nil {
+		if recovery {
+			_ = service.repository.RecordRecovery(ctx, record.ActivationID, recoveryRequestID, "failed")
+		}
 		return ActivateResult{}, errors.Join(ErrActivationServiceUnavailable, err)
 	}
 	var decoded activationMaterial
 	if err := decodeStrictJSON(material, &decoded); err != nil || !validActivationMaterial(decoded, record) {
+		if recovery {
+			_ = service.repository.RecordRecovery(ctx, record.ActivationID, recoveryRequestID, "failed")
+		}
 		return ActivateResult{}, ErrActivationServiceUnavailable
+	}
+	if recovery {
+		if err := service.repository.RecordRecovery(ctx, record.ActivationID, recoveryRequestID, "succeeded"); err != nil {
+			return ActivateResult{}, errors.Join(ErrActivationServiceUnavailable, err)
+		}
 	}
 	return ActivateResult{ActivationID: record.ActivationID, DeviceID: record.DeviceID, LicenseID: record.LicenseID, Envelope: append([]byte(nil), record.ArtifactEnvelope...), Material: material}, nil
 }

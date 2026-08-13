@@ -16,7 +16,7 @@ type AdminService interface {
 	Show(context.Context, adminservice.InventoryLocator) (adminservice.InventorySummary, error)
 	MutateLicense(context.Context, adminservice.Mutation) (adminservice.MutationResult, error)
 	MarkConfigured(context.Context, adminservice.InventoryLocator, adminservice.Operation) (adminservice.InventorySummary, error)
-	Audit(context.Context, adminservice.AuditQuery) ([]adminservice.AuditEvent, error)
+	Audit(context.Context, adminservice.AuditQuery) (adminservice.AuditPage, error)
 }
 
 type AdminHandlerOptions struct {
@@ -97,6 +97,10 @@ type auditEventResponse struct {
 	Reason         *string `json:"reason"`
 	IdempotencyKey *string `json:"idempotencyKey"`
 	CreatedAt      string  `json:"createdAt"`
+}
+type auditPageResponse struct {
+	Items      []auditEventResponse `json:"items"`
+	NextBefore *string              `json:"nextBefore"`
 }
 
 func (request adminOperationRequest) operation(operatorID string) adminservice.Operation {
@@ -259,16 +263,25 @@ func (handler *adminHandler) audit(writer http.ResponseWriter, request *http.Req
 		handler.writeError(writer, adminservice.ErrInvalidInput)
 		return
 	}
-	result, err := handler.service.Audit(request.Context(), adminservice.AuditQuery{Limit: limit, Before: request.URL.Query().Get("before")})
+	var before *adminservice.AuditCursor
+	if raw := request.URL.Query().Get("before"); raw != "" {
+		cursor, decodeErr := adminservice.DecodeAuditCursor(raw)
+		if decodeErr != nil {
+			handler.writeError(writer, decodeErr)
+			return
+		}
+		before = &cursor
+	}
+	result, err := handler.service.Audit(request.Context(), adminservice.AuditQuery{Limit: limit, Before: before})
 	if err != nil {
 		handler.writeError(writer, err)
 		return
 	}
-	responses := make([]auditEventResponse, len(result))
-	for index, item := range result {
+	responses := make([]auditEventResponse, len(result.Items))
+	for index, item := range result.Items {
 		responses[index] = auditEventResponse{item.EventID, item.ActorID, item.Action, item.Outcome, item.InventoryID, item.DeviceID, item.LicenseID, item.RequestID, item.Reason, item.IdempotencyKey, item.CreatedAt}
 	}
-	writeJSON(writer, http.StatusOK, responses)
+	writeJSON(writer, http.StatusOK, auditPageResponse{Items: responses, NextBefore: result.NextBefore})
 }
 
 func inventorySummary(item adminservice.InventorySummary) inventorySummaryResponse {

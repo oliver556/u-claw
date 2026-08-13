@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"syscall"
 
 	"u-claw-activation-server/internal/admin"
 )
@@ -199,14 +200,15 @@ func loadSigningKey(path string) (ed25519.PrivateKey, error) {
 }
 
 func readRegularFile(path string, minimumBytes int64, maximumBytes int64) ([]byte, error) {
-	file, err := os.Open(path)
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
 	}
+	file := os.NewFile(uintptr(fd), path)
 	defer file.Close()
 
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() < minimumBytes || info.Size() > maximumBytes {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() < minimumBytes || info.Size() > maximumBytes {
 		return nil, errors.New("secret file is invalid")
 	}
 	contents, err := io.ReadAll(io.LimitReader(file, maximumBytes+1))
