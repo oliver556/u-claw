@@ -131,7 +131,7 @@ func TestPublicHandlerServesClientPolicy(t *testing.T) {
 	handler := NewPublicHandler(PublicHandlerOptions{Activation: &fakePublicService{}, Lifecycle: &fakePublicService{}, RequestIDs: strings.NewReader(strings.Repeat("c", 64))})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/client-policy", nil))
-	if response.Code != http.StatusOK || response.Body.String() != "{\"minimumClientVersion\":\"1.0.0\",\"latestClientVersion\":\"1.0.0\",\"upgradeRequired\":false,\"statusRefreshSeconds\":300,\"maximumOfflineGraceSeconds\":86400}\n" {
+	if response.Code != http.StatusOK || response.Body.String() != "{\"minimumClientVersion\":\"1.0.0\",\"upgradeRequired\":false,\"feedUrl\":\"https://updates.u-claw.org/releases/\"}\n" {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }

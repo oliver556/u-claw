@@ -301,13 +301,11 @@
       "ClientPolicy": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["minimumClientVersion", "latestClientVersion", "upgradeRequired", "statusRefreshSeconds", "maximumOfflineGraceSeconds"],
+        "required": ["minimumClientVersion", "upgradeRequired", "feedUrl"],
         "properties": {
           "minimumClientVersion": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$" },
-          "latestClientVersion": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$" },
           "upgradeRequired": { "type": "boolean" },
-          "statusRefreshSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
-          "maximumOfflineGraceSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 }
+          "feedUrl": { "type": "string", "const": "https://updates.u-claw.org/releases/" }
         }
       },
       "LicenseStatusSummary": {

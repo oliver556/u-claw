@@ -46,7 +46,7 @@ describe("activation OpenAPI contract", () => {
       "requestId", "activationId", "code", "stage", "retryable", "supportCode",
     ]);
     expect(required("ClientPolicy")).toEqual([
-      "minimumClientVersion", "latestClientVersion", "upgradeRequired", "statusRefreshSeconds", "maximumOfflineGraceSeconds",
+      "minimumClientVersion", "upgradeRequired", "feedUrl",
     ]);
     expect(required("LicenseStatusSummary")).toEqual([
       "licenseId", "deviceId", "status", "revision", "notBefore", "expiresAt", "replacementLicenseId", "updatedAt",
@@ -107,6 +107,11 @@ describe("activation OpenAPI contract", () => {
     }
     expect(document.components.schemas.ClientPolicy.properties?.minimumClientVersion).toMatchObject({
       pattern: "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
+    });
+    expect(document.components.schemas.ClientPolicy.properties).toEqual({
+      minimumClientVersion: expect.any(Object),
+      upgradeRequired: { type: "boolean" },
+      feedUrl: { type: "string", const: "https://updates.u-claw.org/releases/" },
     });
     expect(document.paths["/health/live"].get.responses["200"].content["application/json"].schema)
       .toEqual({ $ref: "#/components/schemas/HealthResponse" });
