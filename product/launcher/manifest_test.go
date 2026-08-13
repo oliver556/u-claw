@@ -126,6 +126,21 @@ func TestValidateManifestRejectsMalformedBounds(t *testing.T) {
 	}
 }
 
+func TestValidateManifestRejectsLauncherOwnedStartupModeArguments(t *testing.T) {
+	for _, argument := range []string{
+		"--uclaw-startup-mode",
+		"--uclaw-startup-mode=activation-only",
+		"--uclaw-startup-mode=normal",
+		"--uclaw-startup-mode-shadow",
+	} {
+		manifest := validRuntimeManifest()
+		manifest.EntryArgs = []string{"resources/app.asar", argument}
+		if err := ValidateManifest(manifest); !errors.Is(err, ErrManifestInvalid) {
+			t.Fatalf("argument %q returned %v", argument, err)
+		}
+	}
+}
+
 func TestReadManifestIsStrict(t *testing.T) {
 	directory := t.TempDir()
 	public, private, err := ed25519.GenerateKey(rand.Reader)

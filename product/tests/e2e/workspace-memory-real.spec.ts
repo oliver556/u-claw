@@ -11,7 +11,7 @@ const desktopEntry = resolve("desktop/dist/entry.js");
 
 async function launchDesktop(dataDir: string, cacheDir: string): Promise<ElectronApplication> {
   return electron.launch({
-    args: [desktopEntry],
+    args: [desktopEntry, "--uclaw-startup-mode=normal"],
     env: {
       ...process.env,
       UCLAW_RUNTIME_DIR: uclawRuntime,

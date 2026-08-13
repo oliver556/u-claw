@@ -779,6 +779,7 @@ export async function startElectronMain(
       signal.throwIfAborted();
       return createMainWindow({
         BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
+        startupMode: "normal",
         preloadPath: resolvePreloadPath(moduleDir),
         rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
         rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
@@ -857,6 +858,7 @@ export async function startActivationMain(
     app, ipcMain: ipcMain as unknown as IpcMainLike, coordinator,
     createWindow: (registerIpc) => createMainWindow({
       BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
+      startupMode: "activation-only",
       preloadPath: resolvePreloadPath(moduleDir),
       rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
       rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
