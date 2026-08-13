@@ -15,6 +15,7 @@ import (
 
 	"u-claw-activation-server/internal/activation"
 	"u-claw-activation-server/internal/lifecycle"
+	"u-claw-activation-server/internal/policy"
 )
 
 const maximumRequestBodyBytes = 1 << 20
@@ -62,7 +63,7 @@ func (handler *publicHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/v1/licenses/") && strings.HasSuffix(request.URL.Path, "/status"):
 		handler.status(writer, request, requestID)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/client-policy":
-		writeJSON(writer, http.StatusOK, clientPolicy{MinimumClientVersion: "1.0.0", LatestClientVersion: "1.0.0", StatusRefreshSeconds: 300, MaximumOfflineGraceSeconds: 86400})
+		writeJSON(writer, http.StatusOK, policy.ProductionClientPolicy())
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/v1/activations/"):
 		handler.recover(writer, request, requestID)
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/device-tokens":
@@ -126,14 +127,6 @@ func (handler *publicHandler) deviceToken(writer http.ResponseWriter, request *h
 		return
 	}
 	writeJSON(writer, http.StatusOK, response)
-}
-
-type clientPolicy struct {
-	MinimumClientVersion       string `json:"minimumClientVersion"`
-	LatestClientVersion        string `json:"latestClientVersion"`
-	UpgradeRequired            bool   `json:"upgradeRequired"`
-	StatusRefreshSeconds       int    `json:"statusRefreshSeconds"`
-	MaximumOfflineGraceSeconds int    `json:"maximumOfflineGraceSeconds"`
 }
 
 type activationRequest struct {

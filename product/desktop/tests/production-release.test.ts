@@ -54,6 +54,7 @@ describe("production release configuration", () => {
   it.each([
     ["non-HTTPS feed", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "http://updates.example.test/" }],
     ["credentialed feed", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "https://user:pass@updates.example.test/" }],
+    ["activation API feed", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "https://api.u-claw.org/releases/" }],
     ["malformed key", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": "not-a-key" }), UCLAW_RELEASE_BASE_URL: "https://updates.example.test/" }],
     ["invalid revoked list", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_REVOKED_KEY_IDS: "{}", UCLAW_RELEASE_BASE_URL: "https://updates.example.test/" }],
   ])("rejects %s", (_name, source) => {
@@ -73,11 +74,11 @@ describe("production release configuration", () => {
     const service = createProductionReleaseService({ cacheDir, dataDir } as never, {
       UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }),
       UCLAW_RELEASE_REVOKED_KEY_IDS: JSON.stringify([]),
-      UCLAW_RELEASE_BASE_URL: "https://updates.example.test/releases/",
+      UCLAW_RELEASE_BASE_URL: "https://updates.u-claw.org/releases/",
     }, fetchImpl);
 
     expect(await service.check("stable")).toMatchObject({ state: "unavailable", retryable: false, message: "更新签名或兼容性验证失败。" });
-    expect(fetchImpl).toHaveBeenCalledWith(new URL("https://updates.example.test/releases/stable.json"), expect.objectContaining({ redirect: "error", credentials: "omit" }));
+    expect(fetchImpl).toHaveBeenCalledWith(new URL("https://updates.u-claw.org/releases/stable.json"), expect.objectContaining({ redirect: "error", credentials: "omit" }));
   });
 
   it("reports configuration failure without attempting network access", async () => {
