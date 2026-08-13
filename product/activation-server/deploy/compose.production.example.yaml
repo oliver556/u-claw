@@ -19,13 +19,13 @@ x-activation-app: &activation-app
     ADMIN_SECRET_FINGERPRINT_KEY_FILE: /run/secrets/admin_secret_fingerprint_key
     NEW_API_ALLOWED_HOSTS: ${NEW_API_ALLOWED_HOSTS:?set NEW_API_ALLOWED_HOSTS}
   secrets:
-    - activation_pepper
-    - license_signing_key
-    - status_signing_key
-    - kms_kek
-    - token_signing_key
-    - admin_operators
-    - admin_secret_fingerprint_key
+    - { source: activation_pepper, target: /run/secrets/activation_pepper, uid: "65532", gid: "65532", mode: 0400 }
+    - { source: license_signing_key, target: /run/secrets/license_signing_key, uid: "65532", gid: "65532", mode: 0400 }
+    - { source: status_signing_key, target: /run/secrets/status_signing_key, uid: "65532", gid: "65532", mode: 0400 }
+    - { source: kms_kek, target: /run/secrets/kms_kek, uid: "65532", gid: "65532", mode: 0400 }
+    - { source: token_signing_key, target: /run/secrets/token_signing_key, uid: "65532", gid: "65532", mode: 0400 }
+    - { source: admin_operators, target: /run/secrets/admin_operators, uid: "65532", gid: "65532", mode: 0400 }
+    - { source: admin_secret_fingerprint_key, target: /run/secrets/admin_secret_fingerprint_key, uid: "65532", gid: "65532", mode: 0400 }
   networks:
     - service_private
   read_only: true
@@ -52,6 +52,7 @@ services:
   migrate:
     image: postgres:17.6-alpine
     restart: "no"
+    user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -78,11 +79,11 @@ services:
         target: /migrations/004_device_access_proxy.sql
         mode: 0444
     secrets:
-      - migration_database_url
-      - migration_role
-      - migration_password
-      - app_role
-      - app_password
+      - { source: migration_database_url, target: /run/secrets/migration_database_url, uid: "0", gid: "0", mode: 0400 }
+      - { source: migration_role, target: /run/secrets/migration_role, uid: "0", gid: "0", mode: 0400 }
+      - { source: migration_password, target: /run/secrets/migration_password, uid: "0", gid: "0", mode: 0400 }
+      - { source: app_role, target: /run/secrets/app_role, uid: "0", gid: "0", mode: 0400 }
+      - { source: app_password, target: /run/secrets/app_password, uid: "0", gid: "0", mode: 0400 }
     networks:
       - service_private
     read_only: true
@@ -95,6 +96,7 @@ services:
   public-gateway:
     image: openresty/openresty:1.27.1.2-alpine
     restart: unless-stopped
+    user: "0:0"
     ports:
       - "443:8443"
     environment:
@@ -104,9 +106,9 @@ services:
         target: /usr/local/openresty/nginx/conf/nginx.conf
         mode: 0444
     secrets:
-      - tls_certificate
-      - tls_private_key
-      - rate_limit_hmac_key
+      - { source: tls_certificate, target: /run/secrets/tls_certificate, uid: "0", gid: "0", mode: 0400 }
+      - { source: tls_private_key, target: /run/secrets/tls_private_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: rate_limit_hmac_key, target: /run/secrets/rate_limit_hmac_key, uid: "0", gid: "0", mode: 0400 }
     networks:
       - public_edge
       - service_private
@@ -126,6 +128,7 @@ services:
   management-gateway:
     image: nginx:1.27.5-alpine
     restart: unless-stopped
+    user: "0:0"
     ports:
       - "127.0.0.1:8444:8444"
     configs:
@@ -133,9 +136,9 @@ services:
         target: /etc/nginx/nginx.conf
         mode: 0444
     secrets:
-      - tls_certificate
-      - tls_private_key
-      - management_client_ca
+      - { source: tls_certificate, target: /run/secrets/tls_certificate, uid: "0", gid: "0", mode: 0400 }
+      - { source: tls_private_key, target: /run/secrets/tls_private_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: management_client_ca, target: /run/secrets/management_client_ca, uid: "0", gid: "0", mode: 0400 }
     networks:
       - service_private
     read_only: true
