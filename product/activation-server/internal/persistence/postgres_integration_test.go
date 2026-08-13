@@ -569,6 +569,155 @@ func TestAdminRepositoryPostgreSQLAtomicLifecycleAndReplay(t *testing.T) {
 }
 
 func bytesOf(value byte) []byte { return bytes.Repeat([]byte{value}, 32) }
+
+func TestDeviceTokenStateMappingIsExplicit(t *testing.T) {
+	for action, want := range map[adminservice.DeviceTokenAction]string{adminservice.DeviceTokenDisable: "disabled", adminservice.DeviceTokenEnable: "active", adminservice.DeviceTokenRevoke: "revoked", adminservice.DeviceTokenReissue: "active"} {
+		got, ok := deviceTokenTargetStatus(action)
+		if !ok || got != want {
+			t.Fatalf("action=%s got=%s ok=%v", action, got, ok)
+		}
+	}
+}
+
+func TestAdminMappingAndDeviceTokenTransactionsPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("ACTIVATION_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("ACTIVATION_TEST_DATABASE_URL is not set; admin mapping/device-token PostgreSQL test skipped")
+	}
+	ctx := context.Background()
+	root, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	random := make([]byte, 8)
+	_, _ = rand.Read(random)
+	schema := "admin_security_test_" + hex.EncodeToString(random)
+	if _, err = root.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = root.Exec(ctx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE") }()
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err = Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	repository, _ := NewActivationRepository(pool)
+	createInventory := func(suffix string) string {
+		id := "00000000-0000-4000-8000-000000000" + suffix
+		_, createErr := repository.CreateInventory(ctx, []adminservice.InventoryRecord{{InventoryID: id, Username: "UCLAW-" + suffix, UsernameDisplay: "UCLAW-" + suffix, ActivationCodeDigest: bytesOf(0x61), NewAPIUserID: "usr_" + suffix, NewAPIUsername: "user_" + suffix, PolicyDigest: bytesOf(0x62)}}, adminservice.Operation{OperatorID: "operator_fixture", RequestID: "request-create-" + suffix, IdempotencyKey: "admin-create-" + suffix, Reason: "create fixture"})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		return id
+	}
+	mappingID := createInventory("301")
+	mappingOp := adminservice.Operation{OperatorID: "operator_fixture", RequestID: "request-map-301", IdempotencyKey: "admin-map-301", Reason: "configure mapping"}
+	mapping := adminservice.MappingInput{InventoryID: mappingID, NewAPIUserID: "usr_map_301", NewAPIUsername: "user_map_301", BaseURL: "https://api.example.test/v1", DefaultModel: "model-a", AllowedModels: []string{"model-a"}, RequestsPerMinute: 60, ConcurrentRequests: 2, APIKeyEnvelope: []byte("opaque-envelope"), APIKeyFingerprint: bytesOf(0x71), KeyVersion: "kms-v1", Operation: mappingOp}
+	first, err := repository.SetMapping(ctx, mapping)
+	if err != nil || first.Status != "configured" {
+		t.Fatalf("mapping=%+v err=%v", first, err)
+	}
+	if _, err = repository.SetMapping(ctx, mapping); err != nil {
+		t.Fatalf("mapping replay=%v", err)
+	}
+	conflict := mapping
+	conflict.APIKeyFingerprint = bytesOf(0x72)
+	if _, err = repository.SetMapping(ctx, conflict); !errors.Is(err, adminservice.ErrInvalidInput) {
+		t.Fatalf("mapping key conflict=%v", err)
+	}
+	missing := mapping
+	missing.InventoryID = "00000000-0000-4000-8000-000000000399"
+	missing.Operation = adminservice.Operation{OperatorID: "operator_fixture", RequestID: "request-map-missing", IdempotencyKey: "admin-map-missing", Reason: "missing target"}
+	if _, err = repository.SetMapping(ctx, missing); !errors.Is(err, adminservice.ErrInvalidInput) {
+		t.Fatalf("missing mapping=%v", err)
+	}
+	seedToken := func(suffix, status string) (string, string, string) {
+		inventoryID := createInventory(suffix)
+		deviceID := "10000000-0000-4000-8000-000000000" + suffix
+		licenseID := "20000000-0000-4000-8000-000000000" + suffix
+		seedActiveAdminFixture(t, ctx, pool, inventoryID, deviceID, licenseID, "grant-"+suffix)
+		if _, seedErr := pool.Exec(ctx, `INSERT INTO device_access_tokens(device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,revoked_at,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,now(),CASE WHEN $6='revoked' THEN now() ELSE NULL END,now(),now())`, "60000000-0000-4000-8000-000000000"+suffix, inventoryID, deviceID, licenseID, bytesOf(byte(suffix[2])), status); seedErr != nil {
+			t.Fatal(seedErr)
+		}
+		return inventoryID, deviceID, licenseID
+	}
+	_, _, stateLicense := seedToken("302", "active")
+	tokenOp := func(id, reason string) adminservice.Operation {
+		return adminservice.Operation{OperatorID: "operator_fixture", RequestID: "request-" + id, IdempotencyKey: "admin-" + id, Reason: reason}
+	}
+	mutate := func(action adminservice.DeviceTokenAction, id string) (adminservice.DeviceTokenResult, error) {
+		return repository.MutateDeviceToken(ctx, adminservice.DeviceTokenMutation{Action: action, LicenseID: stateLicense, Operation: tokenOp(id, "state transition")})
+	}
+	for _, step := range []struct {
+		action   adminservice.DeviceTokenAction
+		id, want string
+		revoked  bool
+	}{{adminservice.DeviceTokenDisable, "disable-302", "disabled", false}, {adminservice.DeviceTokenEnable, "enable-302", "active", false}, {adminservice.DeviceTokenRevoke, "revoke-302", "revoked", true}} {
+		result, stepErr := mutate(step.action, step.id)
+		if stepErr != nil || result.Status != step.want {
+			t.Fatalf("%s result=%+v err=%v", step.action, result, stepErr)
+		}
+		var status string
+		var revokedAt *time.Time
+		if stepErr = pool.QueryRow(ctx, `SELECT status,revoked_at FROM device_access_tokens WHERE license_id=$1 ORDER BY issued_at DESC LIMIT 1`, stateLicense).Scan(&status, &revokedAt); stepErr != nil || status != step.want || (revokedAt != nil) != step.revoked {
+			t.Fatalf("%s db status=%s revoked=%v err=%v", step.action, status, revokedAt, stepErr)
+		}
+	}
+	_, deviceConflict, conflictLicense := seedToken("303", "disabled")
+	if _, err = pool.Exec(ctx, `INSERT INTO device_access_tokens(device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) SELECT '60000000-0000-4000-8000-000000000393',inventory_id,device_id,license_id,$2,'active',now()+interval '1 second',now(),now() FROM device_access_tokens WHERE license_id=$1 LIMIT 1`, conflictLicense, bytesOf(0x73)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repository.MutateDeviceToken(ctx, adminservice.DeviceTokenMutation{Action: adminservice.DeviceTokenEnable, LicenseID: conflictLicense, Operation: tokenOp("enable-conflict", "one active guard")}); !errors.Is(err, adminservice.ErrInvalidInput) {
+		t.Fatalf("enable conflict device=%s err=%v", deviceConflict, err)
+	}
+	_, _, reissueLicense := seedToken("304", "active")
+	reissue := adminservice.DeviceTokenMutation{Action: adminservice.DeviceTokenReissue, LicenseID: reissueLicense, ReplacementTokenID: "60000000-0000-4000-8000-000000000394", ReplacementDigest: bytesOf(0x74), Operation: tokenOp("reissue-304", "rotate token")}
+	called := 0
+	result, err := repository.ReissueDeviceToken(ctx, reissue, func() error { called++; return nil })
+	if err != nil || result.Status != "active" || called != 1 {
+		t.Fatalf("reissue=%+v called=%d err=%v", result, called, err)
+	}
+	replay, err := repository.ReissueDeviceToken(ctx, reissue, func() error { called++; return nil })
+	if err != nil || !replay.Replayed || called != 1 {
+		t.Fatalf("replay=%+v called=%d err=%v", replay, called, err)
+	}
+	var oldRevoked, newActive int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE status='revoked'),count(*) FILTER(WHERE status='active') FROM device_access_tokens WHERE license_id=$1`, reissueLicense).Scan(&oldRevoked, &newActive); err != nil || oldRevoked != 1 || newActive != 1 {
+		t.Fatalf("reissue counts revoked=%d active=%d err=%v", oldRevoked, newActive, err)
+	}
+	_, _, rollbackLicense := seedToken("305", "active")
+	rollback := adminservice.DeviceTokenMutation{Action: adminservice.DeviceTokenReissue, LicenseID: rollbackLicense, ReplacementTokenID: "60000000-0000-4000-8000-000000000395", ReplacementDigest: bytesOf(0x75), Operation: tokenOp("reissue-305", "publish failure")}
+	if _, err = repository.ReissueDeviceToken(ctx, rollback, func() error { return errors.New("publish failed") }); err == nil {
+		t.Fatal("publish failure accepted")
+	}
+	var active, replacement int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE status='active'),count(*) FILTER(WHERE device_token_id=$2) FROM device_access_tokens WHERE license_id=$1`, rollbackLicense, rollback.ReplacementTokenID).Scan(&active, &replacement); err != nil || active != 1 || replacement != 0 {
+		t.Fatalf("rollback active=%d replacement=%d err=%v", active, replacement, err)
+	}
+	panicRollback := rollback
+	panicRollback.ReplacementTokenID = "60000000-0000-4000-8000-000000000396"
+	panicRollback.ReplacementDigest = bytesOf(0x76)
+	panicRollback.Operation = tokenOp("reissue-306", "publish panic")
+	if _, err = repository.ReissueDeviceToken(ctx, panicRollback, func() error { panic("publish panic") }); err == nil {
+		t.Fatal("publish panic accepted")
+	}
+	if err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE status='active'),count(*) FILTER(WHERE device_token_id=$2) FROM device_access_tokens WHERE license_id=$1`, rollbackLicense, panicRollback.ReplacementTokenID).Scan(&active, &replacement); err != nil || active != 1 || replacement != 0 {
+		t.Fatalf("panic rollback active=%d replacement=%d err=%v", active, replacement, err)
+	}
+	var failed int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE outcome='failed' AND action IN ('new-api.mapping.set','device-token.enable')`).Scan(&failed); err != nil || failed < 3 {
+		t.Fatalf("failed audits=%d err=%v", failed, err)
+	}
+}
 func seedActiveAdminFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, inventoryID, deviceID, licenseID, tokenID string) {
 	t.Helper()
 	queries := []string{

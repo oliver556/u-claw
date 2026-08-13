@@ -35,10 +35,12 @@ func trustedEnv(t *testing.T, overrides map[string]string) func(string) string {
 }
 
 type fakeAdminService struct {
-	mutation adminservice.Mutation
-	mapping  adminservice.MappingInput
-	token    adminservice.DeviceTokenMutation
-	execute  func() error
+	mutation          adminservice.Mutation
+	mapping           adminservice.MappingInput
+	token             adminservice.DeviceTokenMutation
+	execute           func() error
+	afterPublish      func() error
+	replayDeviceToken bool
 }
 
 func (service *fakeAdminService) PrepareGenerate(input adminservice.GenerateInput) (adminservice.GeneratePlan, error) {
@@ -215,9 +217,20 @@ func (service *fakeAdminService) PrepareDeviceTokenReissue(_ context.Context, mu
 	result, _ := service.MutateDeviceToken(context.Background(), mutation)
 	return adminservice.DeviceTokenReissuePlan{Mutation: mutation, Secret: result}, nil
 }
-func (service *fakeAdminService) ExecuteDeviceTokenReissue(ctx context.Context, plan adminservice.DeviceTokenReissuePlan) (adminservice.DeviceTokenResult, error) {
+func (service *fakeAdminService) ExecuteDeviceTokenReissue(ctx context.Context, plan adminservice.DeviceTokenReissuePlan, beforeCommit func() error) (adminservice.DeviceTokenResult, error) {
+	if service.replayDeviceToken {
+		return adminservice.DeviceTokenResult{}, adminservice.ErrSecretReplayUnavailable
+	}
 	if service.execute != nil {
 		if err := service.execute(); err != nil {
+			return adminservice.DeviceTokenResult{}, err
+		}
+	}
+	if err := beforeCommit(); err != nil {
+		return adminservice.DeviceTokenResult{}, err
+	}
+	if service.afterPublish != nil {
+		if err := service.afterPublish(); err != nil {
 			return adminservice.DeviceTokenResult{}, err
 		}
 	}
@@ -294,6 +307,64 @@ func TestDeviceTokenReissueWritesOnlyOutputFile(t *testing.T) {
 	info, _ := os.Stat(target)
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode=%o", info.Mode().Perm())
+	}
+}
+
+func TestDeviceTokenReissuePublishFailureRollsBackWithoutDeletingCompetingTarget(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "device-token.json")
+	licenseID := "00000000-0000-4000-8000-000000000003"
+	service := &fakeAdminService{execute: func() error { return os.WriteFile(target, []byte("competitor"), 0o600) }}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"device-token", "reissue", "--license-id", licenseID, "--confirm-target", adminservice.TargetDigest(licenseID), "--reason", "rotate", "--output-file", target}, trustedEnv(t, nil), service, &stdout, &stderr)
+	contents, err := os.ReadFile(target)
+	if code == 0 || err != nil || string(contents) != "competitor" {
+		t.Fatalf("code=%d contents=%q err=%v", code, contents, err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(directory, ".uclaw-admin-secret-*"))
+	if len(matches) != 0 {
+		t.Fatalf("staged residue=%v", matches)
+	}
+}
+
+func TestDeviceTokenReissueCommitFailureCompensatesPublishedOutput(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "device-token.json")
+	licenseID := "00000000-0000-4000-8000-000000000003"
+	service := &fakeAdminService{afterPublish: func() error { return errors.New("commit failed") }}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"device-token", "reissue", "--license-id", licenseID, "--confirm-target", adminservice.TargetDigest(licenseID), "--reason", "rotate", "--output-file", target}, trustedEnv(t, nil), service, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("commit failure accepted")
+	}
+	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("published output remains: %v", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(directory, ".uclaw-admin-secret-*"))
+	if len(matches) != 0 {
+		t.Fatalf("staged residue=%v", matches)
+	}
+}
+
+func TestDeviceTokenReissueReplayDoesNotPublishSecret(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "device-token.json")
+	licenseID := "00000000-0000-4000-8000-000000000003"
+	service := &fakeAdminService{replayDeviceToken: true}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"device-token", "reissue", "--license-id", licenseID, "--confirm-target", adminservice.TargetDigest(licenseID), "--reason", "retry rotation", "--output-file", target}, trustedEnv(t, nil), service, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("secret replay accepted")
+	}
+	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("replay published output: %v", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(directory, ".uclaw-admin-secret-*"))
+	if len(matches) != 0 {
+		t.Fatalf("replay staged residue=%v", matches)
+	}
+	if strings.Contains(stdout.String()+stderr.String(), "uclaw_dt_") {
+		t.Fatal("replay leaked token")
 	}
 }
 

@@ -62,3 +62,18 @@ func TestSecretEnvelopeRejectsTamperingAndStrictDocumentsWithoutLeakingPlaintext
 		t.Fatalf("empty secret error=%v", err)
 	}
 }
+
+func TestSecretEnvelopeRejectsEveryDuplicateDocumentField(t *testing.T) {
+	binding := SecretBinding{Purpose: "new-api-key", SubjectID: "00000000-0000-4000-8000-000000000001", KeyVersion: "kms-v1"}
+	service := NewSecretEnvelopeService(&testKMS{keys: map[string][]byte{"kms-v1": bytes.Repeat([]byte{9}, 32)}}, bytes.NewReader(bytes.Repeat([]byte{6}, 128)))
+	envelope, err := service.Encrypt(context.Background(), binding, []byte("runtime-"+strings.Repeat("d", 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"version", "keyVersion", "wrappedDek", "nonce", "ciphertext"} {
+		duplicate := bytes.Replace(envelope, []byte(`"`+field+`":`), []byte(`"`+field+`":null,"`+field+`":`), 1)
+		if _, decryptErr := service.Decrypt(context.Background(), binding, duplicate); !errors.Is(decryptErr, ErrSecretEnvelopeInvalid) {
+			t.Fatalf("duplicate %s error=%v", field, decryptErr)
+		}
+	}
+}
