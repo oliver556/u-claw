@@ -133,9 +133,9 @@ services:
       start_period: 5s
     depends_on:
       activation-1:
-        condition: service_healthy
+        condition: service_started
       activation-2:
-        condition: service_healthy
+        condition: service_started
 
   # Caddy obtains and renews the public DNS certificate. The IP endpoint uses
   # the explicitly supplied compatibility certificate; public CAs generally
@@ -294,6 +294,8 @@ configs:
           location = /health/ready {
             proxy_connect_timeout 2s;
             proxy_read_timeout 3s;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_next_upstream_tries 2;
             proxy_pass http://activation_public/health/ready;
           }
           location / { return 404; }
@@ -320,6 +322,8 @@ configs:
             proxy_set_header X-Forwarded-For $$http_x_forwarded_for;
             proxy_connect_timeout 2s;
             proxy_read_timeout 5s;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_next_upstream_tries 2;
             proxy_pass http://activation_public;
           }
           location ~ ^/(?:v1|model-api)/ {

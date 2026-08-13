@@ -404,7 +404,7 @@ func TestProductionGatewayStartupAndReadinessAreExecutable(t *testing.T) {
 		}
 	}
 	publicService := composeSection(t, compose, "  public-gateway:\n", "\n  # Caddy obtains")
-	for _, required := range []string{"condition: service_healthy", `test: ["CMD", "/bin/busybox", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8082/health/ready"]`} {
+	for _, required := range []string{`test: ["CMD", "/bin/busybox", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8082/health/ready"]`} {
 		if !strings.Contains(publicService, required) {
 			t.Errorf("public gateway readiness missing %q", required)
 		}
@@ -412,14 +412,58 @@ func TestProductionGatewayStartupAndReadinessAreExecutable(t *testing.T) {
 	if strings.Contains(publicService, "kill -0 1") {
 		t.Fatal("public gateway healthcheck only probes process liveness")
 	}
+	if strings.Contains(publicService, "condition: service_healthy") {
+		t.Fatal("public gateway startup requires both activation instances healthy")
+	}
+	if strings.Count(publicService, "condition: service_started") != 2 {
+		t.Fatal("public gateway must wait for both activation containers to start without requiring both healthy")
+	}
 	for _, required := range []string{"listen 127.0.0.1:8082;", "location = /health/ready", "proxy_pass http://activation_public/health/ready;", "proxy_connect_timeout 2s;", "proxy_read_timeout 3s;"} {
 		if !strings.Contains(publicConfig, required) {
 			t.Errorf("public gateway loopback readiness listener missing %q", required)
 		}
 	}
+	healthLocations := nginxLocationBlocks(publicConfig, "location = /health/ready {")
+	if len(healthLocations) != 2 {
+		t.Fatalf("health readiness location count = %d, want 2", len(healthLocations))
+	}
+	for index, location := range healthLocations {
+		for _, required := range []string{"proxy_next_upstream error timeout http_502 http_503 http_504;", "proxy_next_upstream_tries 2;"} {
+			if !strings.Contains(location, required) {
+				t.Errorf("health location %d missing %q", index, required)
+			}
+		}
+	}
 	caddyService := composeSection(t, compose, "  caddy-edge:\n", "\n  # Loopback binding")
 	if !strings.Contains(caddyService, "condition: service_healthy") {
 		t.Fatal("Caddy does not wait for healthy public gateway")
+	}
+}
+
+func nginxLocationBlocks(source, marker string) []string {
+	var blocks []string
+	for searchAt := 0; ; {
+		relative := strings.Index(source[searchAt:], marker)
+		if relative < 0 {
+			return blocks
+		}
+		start := searchAt + relative
+		depth := 0
+		for index := start; index < len(source); index++ {
+			switch source[index] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					blocks = append(blocks, source[start:index+1])
+					searchAt = index + 1
+					goto next
+				}
+			}
+		}
+		return blocks
+	next:
 	}
 }
 
