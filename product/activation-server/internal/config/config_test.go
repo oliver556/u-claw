@@ -196,6 +196,43 @@ func TestLoadAdminOperatorsRejectsDuplicateCredentialDigest(t *testing.T) {
 	}
 }
 
+func TestReadRegularFileRejectsSymlink(t *testing.T) {
+	directory := t.TempDir()
+	target := writeTestFile(t, directory, "target", []byte(strings.Repeat("s", 32)))
+	path := filepath.Join(directory, "secret-link")
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := readRegularFile(path, 32, maximumPepperBytes); err == nil {
+		t.Fatal("symlink secret file accepted")
+	}
+}
+
+func TestReadRegularFileRequiresOwnerOnlyPermissions(t *testing.T) {
+	for _, test := range []struct {
+		mode    os.FileMode
+		wantErr bool
+	}{
+		{mode: 0o400},
+		{mode: 0o600},
+		{mode: 0o644, wantErr: true},
+		{mode: 0o660, wantErr: true},
+	} {
+		t.Run(test.mode.String(), func(t *testing.T) {
+			path := writeTestFile(t, t.TempDir(), "secret", []byte(strings.Repeat("s", 32)))
+			if err := os.Chmod(path, test.mode); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := readRegularFile(path, 32, maximumPepperBytes)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("readRegularFile() error = %v, wantErr %t", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func writeSigningKey(t *testing.T, directory string) string {
 	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)

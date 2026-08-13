@@ -3,8 +3,10 @@ package admin
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRepository struct {
@@ -12,6 +14,8 @@ type fakeRepository struct {
 	shown    InventorySummary
 	mutation Mutation
 	target   ReissueTarget
+	audit    []AuditEvent
+	query    AuditQuery
 }
 
 func (repository *fakeRepository) PrepareReissueTarget(context.Context, Mutation) (ReissueTarget, error) {
@@ -38,7 +42,45 @@ func TestPrepareReissueReplayReturnsSameCredential(t *testing.T) {
 		t.Fatalf("replay changed credential: first=%#v second=%#v", first, second)
 	}
 }
-func (*fakeRepository) Audit(context.Context, AuditQuery) ([]AuditEvent, error) { return nil, nil }
+func (repository *fakeRepository) Audit(_ context.Context, query AuditQuery) ([]AuditEvent, error) {
+	repository.query = query
+	return repository.audit, nil
+}
+
+func TestAuditCursorRoundTripsTimestampAndUUID(t *testing.T) {
+	want := AuditCursor{CreatedAt: time.Date(2026, 8, 13, 1, 2, 3, 456, time.UTC), EventID: "00000000-0000-4000-8000-000000000002"}
+	encoded := EncodeAuditCursor(want)
+	got, err := DecodeAuditCursor(encoded)
+	if err != nil || !got.CreatedAt.Equal(want.CreatedAt) || got.EventID != want.EventID {
+		t.Fatalf("cursor=%+v error=%v encoded=%q", got, err, encoded)
+	}
+	for _, invalid := range []string{"", "not-base64", "e30", EncodeAuditCursor(AuditCursor{CreatedAt: want.CreatedAt, EventID: "not-a-uuid"})} {
+		if _, err = DecodeAuditCursor(invalid); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("invalid cursor %q error=%v", invalid, err)
+		}
+	}
+}
+
+func TestAuditReturnsStableNextCursorAtPageBoundary(t *testing.T) {
+	createdAt := "2026-08-13T01:02:03.000000456Z"
+	repository := &fakeRepository{audit: []AuditEvent{
+		{EventID: "00000000-0000-4000-8000-000000000003", CreatedAt: createdAt},
+		{EventID: "00000000-0000-4000-8000-000000000002", CreatedAt: createdAt},
+		{EventID: "00000000-0000-4000-8000-000000000001", CreatedAt: createdAt},
+	}}
+	service, _ := NewService(ServiceOptions{Repository: repository, Pepper: bytes.Repeat([]byte{1}, 32)})
+	page, err := service.Audit(context.Background(), AuditQuery{Limit: 2})
+	if err != nil || len(page.Items) != 2 || page.NextBefore == nil {
+		t.Fatalf("page=%+v error=%v", page, err)
+	}
+	cursor, err := DecodeAuditCursor(*page.NextBefore)
+	if err != nil || cursor.EventID != page.Items[1].EventID || cursor.CreatedAt.Format(time.RFC3339Nano) != createdAt {
+		t.Fatalf("cursor=%+v error=%v", cursor, err)
+	}
+	if repository.query.Limit != 3 {
+		t.Fatalf("repository limit=%d", repository.query.Limit)
+	}
+}
 
 func (repository *fakeRepository) CreateInventory(_ context.Context, records []InventoryRecord, operation Operation) ([]InventorySummary, error) {
 	repository.created = append([]InventoryRecord(nil), records...)

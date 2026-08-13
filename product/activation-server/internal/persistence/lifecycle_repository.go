@@ -86,6 +86,70 @@ func (repository *ActivationRepository) GetActivationForRecovery(ctx context.Con
 	return record, nil
 }
 
+func (repository *ActivationRepository) AuthorizeRecovery(ctx context.Context, activationID, requestID string) (lifecycle.RecoveryRecord, error) {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("begin recovery authorization: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var inventoryID, deviceID, licenseID string
+	err = tx.QueryRow(ctx, `SELECT inventory_id,device_id,license_id FROM activation_attempts WHERE activation_id=$1`, activationID).
+		Scan(&inventoryID, &deviceID, &licenseID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.RecoveryRecord{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("load recovery scope: %w", err)
+	}
+	var inventoryStatus, deviceStatus, licenseStatus, bindingStatus string
+	if err = tx.QueryRow(ctx, `SELECT status FROM activation_inventory WHERE id=$1 FOR UPDATE`, inventoryID).Scan(&inventoryStatus); err != nil {
+		return lifecycle.RecoveryRecord{}, mapRecoveryLockError(err, "inventory")
+	}
+	if err = tx.QueryRow(ctx, `SELECT status FROM devices WHERE device_id=$1 AND inventory_id=$2 FOR UPDATE`, deviceID, inventoryID).Scan(&deviceStatus); err != nil {
+		return lifecycle.RecoveryRecord{}, mapRecoveryLockError(err, "device")
+	}
+	if err = tx.QueryRow(ctx, `SELECT status FROM licenses WHERE license_id=$1 AND device_id=$2 FOR UPDATE`, licenseID, deviceID).Scan(&licenseStatus); err != nil {
+		return lifecycle.RecoveryRecord{}, mapRecoveryLockError(err, "license")
+	}
+	if err = tx.QueryRow(ctx, `SELECT status FROM new_api_bindings WHERE inventory_id=$1 AND device_id=$2 FOR UPDATE`, inventoryID, deviceID).Scan(&bindingStatus); err != nil {
+		return lifecycle.RecoveryRecord{}, mapRecoveryLockError(err, "binding")
+	}
+	var record lifecycle.RecoveryRecord
+	var stage string
+	err = tx.QueryRow(ctx, `SELECT activation_id,device_id,license_id,stage,artifact_envelope,artifact_key_version
+		FROM activation_attempts WHERE activation_id=$1 AND inventory_id=$2 AND device_id=$3 AND license_id=$4 FOR UPDATE`,
+		activationID, inventoryID, deviceID, licenseID).
+		Scan(&record.ActivationID, &record.DeviceID, &record.LicenseID, &stage, &record.ArtifactEnvelope, &record.ArtifactKeyVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.RecoveryRecord{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("lock recovery artifact: %w", err)
+	}
+	if inventoryStatus != "active" || deviceStatus != "active" || licenseStatus != "active" || bindingStatus != "active" ||
+		(stage != "server_bound" && stage != "committed") || len(record.ArtifactEnvelope) == 0 || record.ArtifactKeyVersion == "" {
+		return lifecycle.RecoveryRecord{}, lifecycle.ErrAuthentication
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO audit_events
+		(event_id,actor_type,actor_id,action,outcome,inventory_id,device_id,license_id,request_id,created_at)
+		VALUES (gen_random_uuid(),'client',$1,'activation.recovery_authorized','succeeded',$2,$3,$4,$5,clock_timestamp())`,
+		deviceID, inventoryID, deviceID, licenseID, requestID); err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("record recovery authorization: %w", err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("commit recovery authorization: %w", err)
+	}
+	return record, nil
+}
+
+func mapRecoveryLockError(err error, subject string) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.ErrAuthentication
+	}
+	return fmt.Errorf("lock recovery %s: %w", subject, err)
+}
+
 func (repository *ActivationRepository) RecordRecovery(ctx context.Context, activationID, requestID, outcome string) error {
 	if outcome != "succeeded" && outcome != "failed" {
 		return lifecycle.ErrUnavailable
@@ -124,15 +188,38 @@ func (repository *ActivationRepository) CreateTokenGrant(ctx context.Context, gr
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, grant.IdempotencyKey); err != nil {
 		return lifecycle.TokenGrant{}, fmt.Errorf("lock token idempotency key: %w", err)
 	}
-	existing, found, err := loadTokenGrant(ctx, tx, grant.IdempotencyKey, true)
+	existing, found, err := loadTokenGrant(ctx, tx, grant.IdempotencyKey, false)
 	if err != nil {
 		return lifecycle.TokenGrant{}, err
 	}
 	if found {
 		return compareTokenGrant(existing, grant)
 	}
-	var licenseStatus, deviceStatus, bindingStatus, setupStatus string
+	var inventoryID string
+	err = tx.QueryRow(ctx, `SELECT device.inventory_id FROM licenses license JOIN devices device ON device.device_id=license.device_id
+		WHERE license.license_id=$1 AND license.device_id=$2`, grant.LicenseID, grant.DeviceID).Scan(&inventoryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.TokenGrant{}, fmt.Errorf("load token scope: %w", err)
+	}
+	var inventoryStatus, licenseStatus, deviceStatus, bindingStatus, setupStatus string
 	var notBefore, expiresAt time.Time
+	err = tx.QueryRow(ctx, `SELECT status FROM activation_inventory WHERE id=$1 FOR UPDATE`, inventoryID).Scan(&inventoryStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.TokenGrant{}, fmt.Errorf("lock token inventory: %w", err)
+	}
+	err = tx.QueryRow(ctx, `SELECT status FROM devices WHERE device_id=$1 AND inventory_id=$2 FOR UPDATE`, grant.DeviceID, inventoryID).Scan(&deviceStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.TokenGrant{}, fmt.Errorf("lock token device: %w", err)
+	}
 	err = tx.QueryRow(ctx, `SELECT status,not_before,expires_at FROM licenses WHERE license_id=$1 AND device_id=$2 FOR UPDATE`, grant.LicenseID, grant.DeviceID).Scan(&licenseStatus, &notBefore, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
@@ -140,22 +227,15 @@ func (repository *ActivationRepository) CreateTokenGrant(ctx context.Context, gr
 	if err != nil {
 		return lifecycle.TokenGrant{}, fmt.Errorf("lock token license: %w", err)
 	}
-	err = tx.QueryRow(ctx, `SELECT status FROM devices WHERE device_id=$1 FOR UPDATE`, grant.DeviceID).Scan(&deviceStatus)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
-	}
-	if err != nil {
-		return lifecycle.TokenGrant{}, fmt.Errorf("lock token device: %w", err)
-	}
 	var policyDigest []byte
-	err = tx.QueryRow(ctx, `SELECT status,balance_setup_status,policy_digest FROM new_api_bindings WHERE device_id=$1 FOR UPDATE`, grant.DeviceID).Scan(&bindingStatus, &setupStatus, &policyDigest)
+	err = tx.QueryRow(ctx, `SELECT status,balance_setup_status,policy_digest FROM new_api_bindings WHERE inventory_id=$1 AND device_id=$2 FOR UPDATE`, inventoryID, grant.DeviceID).Scan(&bindingStatus, &setupStatus, &policyDigest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
 	}
 	if err != nil {
 		return lifecycle.TokenGrant{}, fmt.Errorf("lock token binding: %w", err)
 	}
-	if licenseStatus != "active" || deviceStatus != "active" || bindingStatus != "active" || setupStatus != "configured" || grant.IssuedAt.Before(notBefore) || !grant.IssuedAt.Before(expiresAt) || grant.ExpiresAt.After(expiresAt) {
+	if inventoryStatus != "active" || licenseStatus != "active" || deviceStatus != "active" || bindingStatus != "active" || setupStatus != "configured" || grant.IssuedAt.Before(notBefore) || !grant.IssuedAt.Before(expiresAt) || grant.ExpiresAt.After(expiresAt) {
 		return lifecycle.TokenGrant{}, lifecycle.ErrAuthentication
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO token_grants

@@ -83,13 +83,20 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	existing, found, err := loadAttempt(ctx, tx, "attempt.idempotency_key = $1", input.IdempotencyKey, true)
+	existing, found, err := loadAttempt(ctx, tx, "attempt.idempotency_key = $1", input.IdempotencyKey, false)
 	if err != nil {
 		return activation.BeginBindingResult{}, err
 	}
 	if found {
 		if err = ensureActivationRecoverable(ctx, tx, existing); err != nil {
 			return activation.BeginBindingResult{}, err
+		}
+		existing, found, err = loadAttempt(ctx, tx, "attempt.idempotency_key = $1", input.IdempotencyKey, true)
+		if err != nil {
+			return activation.BeginBindingResult{}, err
+		}
+		if !found {
+			return activation.BeginBindingResult{}, activation.ErrActivationInProgress
 		}
 		return resumeExisting(ctx, tx, input, existing)
 	}
@@ -117,10 +124,21 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 			if loadErr = ensureActivationRecoverable(ctx, tx, recovered); loadErr != nil {
 				return activation.BeginBindingResult{}, loadErr
 			}
+			recovered, ok, loadErr = loadAttempt(ctx, tx, "attempt.activation_id = $1", recovered.ActivationID, true)
+			if loadErr != nil {
+				return activation.BeginBindingResult{}, loadErr
+			}
+			if !ok {
+				return activation.BeginBindingResult{}, activation.ErrActivationInProgress
+			}
 			if recovered.ArtifactEnvelope != nil {
+				if err := recordActivationRecovery(ctx, tx, recovered, input.Record.RequestID); err != nil {
+					return activation.BeginBindingResult{}, err
+				}
 				if err := tx.Commit(ctx); err != nil {
 					return activation.BeginBindingResult{}, fmt.Errorf("commit recovery lookup: %w", err)
 				}
+				recovered.RecoveryRequestID = input.Record.RequestID
 				return activation.BeginBindingResult{Disposition: activation.BindingBound, Record: recovered}, nil
 			}
 			return resumeExisting(ctx, tx, input, recovered)
@@ -140,20 +158,52 @@ func (repository *ActivationRepository) BeginBinding(ctx context.Context, input 
 }
 
 func ensureActivationRecoverable(ctx context.Context, tx pgx.Tx, record activation.BoundRecord) error {
-	var allowed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM activation_inventory inventory
-		JOIN devices device ON device.inventory_id=inventory.id
-		JOIN licenses license ON license.device_id=device.device_id
-		JOIN new_api_bindings binding ON binding.inventory_id=inventory.id AND binding.device_id=device.device_id
-		WHERE inventory.id=$1 AND device.device_id=$2 AND license.license_id=$3
-		AND inventory.status='active' AND device.status='active' AND license.status='active' AND binding.status='active')`, record.InventoryID, record.DeviceID, record.LicenseID).Scan(&allowed)
+	var inventoryStatus, deviceStatus, licenseStatus, bindingStatus string
+	err := tx.QueryRow(ctx, `SELECT status FROM activation_inventory WHERE id=$1 FOR UPDATE`, record.InventoryID).Scan(&inventoryStatus)
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT status FROM devices WHERE device_id=$1 AND inventory_id=$2 FOR UPDATE`, record.DeviceID, record.InventoryID).Scan(&deviceStatus)
+	}
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT status FROM licenses WHERE license_id=$1 AND device_id=$2 FOR UPDATE`, record.LicenseID, record.DeviceID).Scan(&licenseStatus)
+	}
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT status FROM new_api_bindings WHERE inventory_id=$1 AND device_id=$2 FOR UPDATE`, record.InventoryID, record.DeviceID).Scan(&bindingStatus)
+	}
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return activation.ErrActivationCodeAlreadyBound
+		}
 		return fmt.Errorf("verify activation recovery status: %w", err)
 	}
-	if !allowed {
+	if !activationRecoveryAllowed(record, inventoryStatus, deviceStatus, licenseStatus, bindingStatus) {
 		return activation.ErrActivationCodeAlreadyBound
 	}
 	return nil
+}
+
+func recordActivationRecovery(ctx context.Context, tx pgx.Tx, record activation.BoundRecord, requestID string) error {
+	_, err := tx.Exec(ctx, `INSERT INTO audit_events
+		(event_id,actor_type,actor_id,action,outcome,inventory_id,device_id,license_id,request_id,created_at)
+		VALUES (gen_random_uuid(),'client',$1,'activation.recovery_authorized','succeeded',$2,$3,$4,$5,clock_timestamp())`,
+		record.DeviceID, record.InventoryID, record.DeviceID, record.LicenseID, requestID)
+	if err != nil {
+		return fmt.Errorf("record activation recovery: %w", err)
+	}
+	return nil
+}
+
+func activationRecoveryAllowed(record activation.BoundRecord, inventoryStatus, deviceStatus, licenseStatus, bindingStatus string) bool {
+	if deviceStatus != "active" || bindingStatus != "active" {
+		return false
+	}
+	if record.Stage == "requested" && len(record.ArtifactEnvelope) == 0 {
+		return inventoryStatus == "binding" && licenseStatus == "prepared"
+	}
+	if (record.Stage == "server_bound" || record.Stage == "committed") &&
+		len(record.ArtifactEnvelope) > 0 && record.ArtifactKeyVersion != "" {
+		return inventoryStatus == "active" && licenseStatus == "active"
+	}
+	return false
 }
 
 func (repository *ActivationRepository) CompleteBinding(ctx context.Context, input activation.CompleteBindingInput) (activation.BoundRecord, error) {
@@ -162,23 +212,29 @@ func (repository *ActivationRepository) CompleteBinding(ctx context.Context, inp
 		return activation.BoundRecord{}, fmt.Errorf("begin activation completion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	record := input.Record
-	result, err := tx.Exec(ctx, `UPDATE activation_attempts SET artifact_envelope=$1, artifact_key_version=$2,
-		pending_material_envelope=NULL, pending_material_key_version=NULL, stage='server_bound', updated_at=clock_timestamp()
-		WHERE activation_id=$3 AND stage='requested' AND EXISTS (
-			SELECT 1 FROM activation_inventory inventory WHERE inventory.id=activation_attempts.inventory_id
-			AND inventory.status='binding' AND inventory.binding_lease_token=$4)`,
-		record.ArtifactEnvelope, record.ArtifactKeyVersion, record.ActivationID, input.LeaseToken)
+	existing, found, err := loadAttempt(ctx, tx, "attempt.activation_id = $1", input.Record.ActivationID, false)
 	if err != nil {
-		return activation.BoundRecord{}, fmt.Errorf("complete activation attempt: %w", err)
+		return activation.BoundRecord{}, err
 	}
-	if result.RowsAffected() != 1 {
-		existing, found, loadErr := loadAttempt(ctx, tx, "attempt.activation_id = $1", record.ActivationID, false)
-		if loadErr != nil {
-			return activation.BoundRecord{}, loadErr
-		}
-		if found && (existing.Stage == "server_bound" || existing.Stage == "committed") &&
-			len(existing.ArtifactEnvelope) > 0 && existing.ArtifactKeyVersion != "" {
+	if !found {
+		return activation.BoundRecord{}, activation.ErrActivationInProgress
+	}
+	if err = ensureActivationRecoverable(ctx, tx, existing); err != nil {
+		return activation.BoundRecord{}, err
+	}
+	existing, found, err = loadAttempt(ctx, tx, "attempt.activation_id = $1", input.Record.ActivationID, true)
+	if err != nil {
+		return activation.BoundRecord{}, err
+	}
+	if !found {
+		return activation.BoundRecord{}, activation.ErrActivationInProgress
+	}
+	if existing.InventoryID != input.Record.InventoryID || existing.DeviceID != input.Record.DeviceID ||
+		existing.LicenseID != input.Record.LicenseID {
+		return activation.BoundRecord{}, activation.ErrActivationInProgress
+	}
+	if existing.Stage == "server_bound" || existing.Stage == "committed" {
+		if len(existing.ArtifactEnvelope) > 0 && existing.ArtifactKeyVersion != "" {
 			if err := tx.Commit(ctx); err != nil {
 				return activation.BoundRecord{}, fmt.Errorf("commit completed lookup: %w", err)
 			}
@@ -186,6 +242,13 @@ func (repository *ActivationRepository) CompleteBinding(ctx context.Context, inp
 		}
 		return activation.BoundRecord{}, activation.ErrActivationInProgress
 	}
+	if existing.Stage != "requested" || existing.LeaseToken != input.LeaseToken {
+		return activation.BoundRecord{}, activation.ErrActivationInProgress
+	}
+	record := existing
+	record.ArtifactEnvelope = input.Record.ArtifactEnvelope
+	record.ArtifactKeyVersion = input.Record.ArtifactKeyVersion
+
 	var completedAt time.Time
 	err = tx.QueryRow(ctx, `UPDATE activation_inventory SET status='active', activated_at=clock_timestamp(),
 		binding_lease_token=NULL, binding_lease_expires_at=NULL
@@ -197,10 +260,19 @@ func (repository *ActivationRepository) CompleteBinding(ctx context.Context, inp
 		}
 		return activation.BoundRecord{}, fmt.Errorf("complete activation inventory: %w", err)
 	}
-	result, err = tx.Exec(ctx, `UPDATE licenses SET status='active',updated_at=$1
+	result, err := tx.Exec(ctx, `UPDATE licenses SET status='active',updated_at=$1
 		WHERE license_id=$2 AND status='prepared'`, completedAt, record.LicenseID)
 	if err != nil {
 		return activation.BoundRecord{}, fmt.Errorf("activate license: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return activation.BoundRecord{}, activation.ErrActivationInProgress
+	}
+	result, err = tx.Exec(ctx, `UPDATE activation_attempts SET artifact_envelope=$1, artifact_key_version=$2,
+		pending_material_envelope=NULL, pending_material_key_version=NULL, stage='server_bound', updated_at=clock_timestamp()
+		WHERE activation_id=$3 AND stage='requested'`, record.ArtifactEnvelope, record.ArtifactKeyVersion, record.ActivationID)
+	if err != nil {
+		return activation.BoundRecord{}, fmt.Errorf("complete activation attempt: %w", err)
 	}
 	if result.RowsAffected() != 1 {
 		return activation.BoundRecord{}, activation.ErrActivationInProgress
@@ -284,9 +356,13 @@ func resumeExisting(ctx context.Context, tx pgx.Tx, input activation.BeginBindin
 		return activation.BeginBindingResult{}, activation.ErrIdempotencyConflict
 	}
 	if existing.ArtifactEnvelope != nil {
+		if err := recordActivationRecovery(ctx, tx, existing, input.Record.RequestID); err != nil {
+			return activation.BeginBindingResult{}, err
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return activation.BeginBindingResult{}, fmt.Errorf("commit bound lookup: %w", err)
 		}
+		existing.RecoveryRequestID = input.Record.RequestID
 		return activation.BeginBindingResult{Disposition: activation.BindingBound, Record: existing}, nil
 	}
 	leaseMicros := input.Record.LeaseExpiresAt.Sub(input.Record.NotBefore).Microseconds()
@@ -331,6 +407,12 @@ func insertBinding(ctx context.Context, tx pgx.Tx, input activation.BeginBinding
 		fingerprint); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO licenses
+		(license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,created_at,updated_at)
+		VALUES ($1,$2,'prepared',$3,$4,$5,$6,$7,$8,clock_timestamp(),clock_timestamp())`, record.LicenseID, record.DeviceID, record.Revision,
+		record.KeyID, record.StartupSecretSalt, record.StartupSecretHash[:], record.NotBefore, record.ExpiresAt); err != nil {
+		return err
+	}
 	result, err := tx.Exec(ctx, `UPDATE new_api_bindings SET device_id=$1,updated_at=clock_timestamp()
 		WHERE inventory_id=$2 AND device_id IS NULL AND balance_setup_status='configured' AND status='active'`,
 		record.DeviceID, record.InventoryID)
@@ -339,12 +421,6 @@ func insertBinding(ctx context.Context, tx pgx.Tx, input activation.BeginBinding
 	}
 	if result.RowsAffected() != 1 {
 		return activation.ErrNewAPINotConfigured
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO licenses
-		(license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,created_at,updated_at)
-		VALUES ($1,$2,'prepared',$3,$4,$5,$6,$7,$8,clock_timestamp(),clock_timestamp())`, record.LicenseID, record.DeviceID, record.Revision,
-		record.KeyID, record.StartupSecretSalt, record.StartupSecretHash[:], record.NotBefore, record.ExpiresAt); err != nil {
-		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO activation_attempts
 		(activation_id,idempotency_key,inventory_id,device_id,license_id,request_fingerprint,stage,

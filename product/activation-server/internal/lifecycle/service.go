@@ -18,6 +18,7 @@ import (
 )
 
 const receiptDomain = "uclaw-license-status-v1"
+const recoveryAuditTimeout = 5 * time.Second
 
 var (
 	ErrAuthentication      = errors.New("LICENSE_STATUS_AUTHENTICATION_FAILED")
@@ -63,6 +64,7 @@ type Repository interface {
 	GetLicense(context.Context, string) (License, error)
 	ExpireLicense(context.Context, string, time.Time) (License, error)
 	GetActivationForRecovery(context.Context, string) (RecoveryRecord, error)
+	AuthorizeRecovery(context.Context, string, string) (RecoveryRecord, error)
 	RecordRecovery(context.Context, string, string, string) error
 	CreateTokenGrant(context.Context, TokenGrant) (TokenGrant, error)
 }
@@ -149,8 +151,6 @@ func (service *Service) Recover(ctx context.Context, input RecoverInput) ([]byte
 	if service.envelope == nil || !identifierPattern.MatchString(input.ActivationID) || !identifierPattern.MatchString(input.RequestID) || len(input.StartupSecret) < 32 || len(input.StartupSecret) > 512 {
 		return nil, ErrAuthentication
 	}
-	outcome := "failed"
-	defer func() { _ = service.repository.RecordRecovery(ctx, input.ActivationID, input.RequestID, outcome) }()
 	record, err := service.repository.GetActivationForRecovery(ctx, input.ActivationID)
 	if err != nil {
 		return nil, err
@@ -159,12 +159,34 @@ func (service *Service) Recover(ctx context.Context, input RecoverInput) ([]byte
 	if err != nil || license.DeviceID != record.DeviceID || license.Status != "active" || !authenticate(license, input.StartupSecret) {
 		return nil, ErrAuthentication
 	}
-	material, err := service.envelope.Decrypt(ctx, security.EnvelopeBinding{ActivationID: record.ActivationID, DeviceID: record.DeviceID, LicenseID: record.LicenseID, KeyVersion: record.ArtifactKeyVersion}, record.ArtifactEnvelope)
+	record, err = service.authorizeRecovery(ctx, input)
 	if err != nil {
+		if errors.Is(err, ErrAuthentication) {
+			return nil, ErrAuthentication
+		}
 		return nil, errors.Join(ErrUnavailable, err)
 	}
-	outcome = "succeeded"
+	material, err := service.envelope.Decrypt(ctx, security.EnvelopeBinding{ActivationID: record.ActivationID, DeviceID: record.DeviceID, LicenseID: record.LicenseID, KeyVersion: record.ArtifactKeyVersion}, record.ArtifactEnvelope)
+	if err != nil {
+		_ = service.recordRecovery(ctx, input, "failed")
+		return nil, errors.Join(ErrUnavailable, err)
+	}
+	if err = service.recordRecovery(ctx, input, "succeeded"); err != nil {
+		return nil, errors.Join(ErrUnavailable, err)
+	}
 	return material, nil
+}
+
+func (service *Service) authorizeRecovery(ctx context.Context, input RecoverInput) (RecoveryRecord, error) {
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recoveryAuditTimeout)
+	defer cancel()
+	return service.repository.AuthorizeRecovery(auditCtx, input.ActivationID, input.RequestID)
+}
+
+func (service *Service) recordRecovery(ctx context.Context, input RecoverInput, outcome string) error {
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recoveryAuditTimeout)
+	defer cancel()
+	return service.repository.RecordRecovery(auditCtx, input.ActivationID, input.RequestID, outcome)
 }
 
 func (service *Service) DeviceToken(ctx context.Context, input DeviceTokenInput) (DeviceTokenResponse, error) {

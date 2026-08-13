@@ -55,7 +55,8 @@ func (repository *ActivationRepository) PrepareReissueTarget(ctx context.Context
 
 func (repository *ActivationRepository) Audit(ctx context.Context, query admin.AuditQuery) ([]admin.AuditEvent, error) {
 	rows, err := repository.pool.Query(ctx, `SELECT event_id,COALESCE(actor_id,''),action,outcome,inventory_id,device_id,license_id,request_id,reason,idempotency_key,created_at
-		FROM audit_events WHERE ($1::uuid IS NULL OR event_id < $1::uuid) ORDER BY event_id DESC LIMIT $2`, nullableString(query.Before), query.Limit)
+		FROM audit_events WHERE ($1::timestamptz IS NULL OR (created_at,event_id) < ($1::timestamptz,$2::uuid))
+		ORDER BY created_at DESC,event_id DESC LIMIT $3`, auditBeforeTime(query.Before), auditBeforeID(query.Before), query.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("query admin audit: %w", err)
 	}
@@ -74,6 +75,20 @@ func (repository *ActivationRepository) Audit(ctx context.Context, query admin.A
 		return nil, fmt.Errorf("read admin audit: %w", err)
 	}
 	return result, nil
+}
+
+func auditBeforeTime(cursor *admin.AuditCursor) any {
+	if cursor == nil {
+		return nil
+	}
+	return cursor.CreatedAt
+}
+
+func auditBeforeID(cursor *admin.AuditCursor) any {
+	if cursor == nil {
+		return nil
+	}
+	return cursor.EventID
 }
 
 func nullableString(value string) any {
@@ -233,13 +248,30 @@ func (repository *ActivationRepository) Mutate(ctx context.Context, mutation adm
 	}
 	var deviceID, inventoryID, status, usernameDisplay, usernameNormalized string
 	var revision int64
-	err = tx.QueryRow(ctx, `SELECT license.device_id,device.inventory_id,license.status,license.revision,inventory.username_display,inventory.username_normalized FROM licenses license JOIN devices device ON device.device_id=license.device_id JOIN activation_inventory inventory ON inventory.id=device.inventory_id WHERE license.license_id=$1 FOR UPDATE OF license,device,inventory`, mutation.LicenseID).Scan(&deviceID, &inventoryID, &status, &revision, &usernameDisplay, &usernameNormalized)
+	err = tx.QueryRow(ctx, `SELECT license.device_id,device.inventory_id FROM licenses license
+		JOIN devices device ON device.device_id=license.device_id WHERE license.license_id=$1`, mutation.LicenseID).
+		Scan(&deviceID, &inventoryID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		return replay, repository.adminFailure(ctx, action, mutation.Operation, nil, admin.ErrInvalidInput)
 	}
 	if err != nil {
-		return replay, fmt.Errorf("lock admin license: %w", err)
+		return replay, fmt.Errorf("load admin mutation scope: %w", err)
+	}
+	err = tx.QueryRow(ctx, `SELECT username_display,username_normalized FROM activation_inventory WHERE id=$1 FOR UPDATE`, inventoryID).
+		Scan(&usernameDisplay, &usernameNormalized)
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT device_id FROM devices WHERE device_id=$1 AND inventory_id=$2 FOR UPDATE`, deviceID, inventoryID).Scan(&deviceID)
+	}
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT status,revision FROM licenses WHERE license_id=$1 AND device_id=$2 FOR UPDATE`, mutation.LicenseID, deviceID).Scan(&status, &revision)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		_ = tx.Rollback(ctx)
+		return replay, repository.adminFailure(ctx, action, mutation.Operation, nil, admin.ErrInvalidInput)
+	}
+	if err != nil {
+		return replay, fmt.Errorf("lock admin mutation scope: %w", err)
 	}
 	target := map[admin.Action]string{admin.ActionDisable: "disabled", admin.ActionEnable: "active", admin.ActionRevoke: "revoked", admin.ActionReissue: "reissued"}[mutation.Action]
 	if !validAdminTransition(status, target) {

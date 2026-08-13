@@ -15,16 +15,19 @@ import (
 )
 
 type fakeRepository struct {
-	beginResult   BeginBindingResult
-	beginErr      error
-	complete      BoundRecord
-	completeErr   error
-	beginInput    BeginBindingInput
-	completeIn    CompleteBindingInput
-	beginCalls    int
-	finishCalls   int
-	validateErr   error
-	validateCalls int
+	beginResult        BeginBindingResult
+	beginErr           error
+	complete           BoundRecord
+	completeErr        error
+	beginInput         BeginBindingInput
+	completeIn         CompleteBindingInput
+	beginCalls         int
+	finishCalls        int
+	validateErr        error
+	validateCalls      int
+	recoveryOutcomes   []string
+	recoveryRequestIDs []string
+	recoveryErr        error
 }
 
 func (repository *fakeRepository) ValidateBinding(context.Context, ValidateBindingInput) error {
@@ -54,6 +57,12 @@ func (repository *fakeRepository) CompleteBinding(_ context.Context, input Compl
 }
 
 func (repository *fakeRepository) CommitActivation(context.Context, CommitInput) error { return nil }
+
+func (repository *fakeRepository) RecordRecovery(_ context.Context, _, requestID string, outcome string) error {
+	repository.recoveryOutcomes = append(repository.recoveryOutcomes, outcome)
+	repository.recoveryRequestIDs = append(repository.recoveryRequestIDs, requestID)
+	return repository.recoveryErr
+}
 
 type fakeSigner struct{ calls int }
 
@@ -181,8 +190,10 @@ func TestActivateReturnsSameBoundEnvelopeWithoutSigningAgain(t *testing.T) {
 		FingerprintVersion: "uclaw-usb-v1", FingerprintSHA256: strings.Repeat("a", 64), KeyID: "test-license-key",
 		NotBefore: time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC), ExpiresAt: time.Date(2027, 8, 13, 0, 0, 0, 0, time.UTC), Revision: 1,
 		StartupSecretSalt: bytes.Repeat([]byte{1}, 16), ArtifactKeyVersion: "kms-v1", Stage: "server_bound",
+		RequestID: "req_original_attempt_001",
 	}
 	record.StartupSecretHash = startupSecretHash(strings.Repeat("s", 32), record.StartupSecretSalt)
+	record.RecoveryRequestID = fixtureInput().RequestID
 	boundMaterial, err := json.Marshal(newActivationMaterial(record, pendingMaterial{StartupSecret: strings.Repeat("s", 32), BuiltinToken: strings.Repeat("t", 32)}, "fixture-signature"))
 	if err != nil {
 		t.Fatal(err)
@@ -204,6 +215,31 @@ func TestActivateReturnsSameBoundEnvelopeWithoutSigningAgain(t *testing.T) {
 	}
 	if !bytes.Equal(result.Envelope, repository.beginResult.Record.ArtifactEnvelope) || !bytes.Equal(result.Material, boundMaterial) {
 		t.Fatal("bound recovery did not return identical persisted material")
+	}
+	if len(repository.recoveryOutcomes) != 1 || repository.recoveryOutcomes[0] != "succeeded" {
+		t.Fatalf("recovery outcomes=%v", repository.recoveryOutcomes)
+	}
+	if len(repository.recoveryRequestIDs) != 1 || repository.recoveryRequestIDs[0] != fixtureInput().RequestID {
+		t.Fatalf("recovery request IDs=%v", repository.recoveryRequestIDs)
+	}
+}
+
+func TestActivateRejectsBoundRecoveryWithoutCurrentRequestIDBeforeDecrypt(t *testing.T) {
+	envelope := &fakeEnvelope{}
+	repository := &fakeRepository{beginResult: BeginBindingResult{
+		Disposition: BindingBound,
+		Record: BoundRecord{
+			ActivationID: "00000000-0000-4000-8000-000000000001", DeviceID: "00000000-0000-4000-8000-000000000002",
+			LicenseID: "00000000-0000-4000-8000-000000000003", RequestID: "req_original_attempt_001",
+			ArtifactEnvelope: []byte("sealed:invalid"), ArtifactKeyVersion: "kms-v1",
+		},
+	}}
+	service := newTestService(t, repository, &fakeSigner{}, envelope)
+	if _, err := service.Activate(context.Background(), fixtureInput()); !errors.Is(err, ErrActivationServiceUnavailable) {
+		t.Fatalf("error=%v", err)
+	}
+	if envelope.decryptCalls != 0 || len(repository.recoveryOutcomes) != 0 {
+		t.Fatalf("decrypt=%d recovery outcomes=%v", envelope.decryptCalls, repository.recoveryOutcomes)
 	}
 }
 

@@ -72,6 +72,7 @@ type BoundRecord struct {
 	ArtifactEnvelope          []byte
 	ArtifactKeyVersion        string
 	RequestID                 string
+	RecoveryRequestID         string
 	AuditEventID              string
 	StatusEventID             string
 	BoundAuditEventID         string
@@ -109,6 +110,7 @@ type Repository interface {
 	BeginBinding(context.Context, BeginBindingInput) (BeginBindingResult, error)
 	CompleteBinding(context.Context, CompleteBindingInput) (BoundRecord, error)
 	CommitActivation(context.Context, CommitInput) error
+	RecordRecovery(context.Context, string, string, string) error
 }
 
 type LicenseSigner interface {

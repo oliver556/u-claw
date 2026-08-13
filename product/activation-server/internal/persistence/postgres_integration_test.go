@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -18,6 +19,7 @@ import (
 
 	"u-claw-activation-server/internal/activation"
 	adminservice "u-claw-activation-server/internal/admin"
+	"u-claw-activation-server/internal/lifecycle"
 )
 
 func TestInitialMigrationContainsAuthoritativeTablesAndConstraints(t *testing.T) {
@@ -386,5 +388,227 @@ func TestValidateCommitReplayUsesIndependentCommitKeyAndGeneration(t *testing.T)
 		if err := validateCommitReplay("committed", &key, &generation, input); !errors.Is(err, activation.ErrIdempotencyConflict) {
 			t.Fatalf("conflicting replay error=%v", err)
 		}
+	}
+}
+
+func TestActivationRecoveryRequirementsMatchPersistedStage(t *testing.T) {
+	tests := []struct {
+		name            string
+		record          activation.BoundRecord
+		inventoryStatus string
+		deviceStatus    string
+		licenseStatus   string
+		bindingStatus   string
+		allowed         bool
+	}{
+		{name: "expired requested lease", record: activation.BoundRecord{Stage: "requested"}, inventoryStatus: "binding", deviceStatus: "active", licenseStatus: "prepared", bindingStatus: "active", allowed: true},
+		{name: "requested inventory already active", record: activation.BoundRecord{Stage: "requested"}, inventoryStatus: "active", deviceStatus: "active", licenseStatus: "prepared", bindingStatus: "active"},
+		{name: "requested license revoked", record: activation.BoundRecord{Stage: "requested"}, inventoryStatus: "binding", deviceStatus: "active", licenseStatus: "revoked", bindingStatus: "active"},
+		{name: "requested device disabled", record: activation.BoundRecord{Stage: "requested"}, inventoryStatus: "binding", deviceStatus: "disabled", licenseStatus: "prepared", bindingStatus: "active"},
+		{name: "requested binding revoked", record: activation.BoundRecord{Stage: "requested"}, inventoryStatus: "binding", deviceStatus: "active", licenseStatus: "prepared", bindingStatus: "revoked"},
+		{name: "server bound active material", record: activation.BoundRecord{Stage: "server_bound", ArtifactEnvelope: []byte("artifact"), ArtifactKeyVersion: "v1"}, inventoryStatus: "active", deviceStatus: "active", licenseStatus: "active", bindingStatus: "active", allowed: true},
+		{name: "committed active material", record: activation.BoundRecord{Stage: "committed", ArtifactEnvelope: []byte("artifact"), ArtifactKeyVersion: "v1"}, inventoryStatus: "active", deviceStatus: "active", licenseStatus: "active", bindingStatus: "active", allowed: true},
+		{name: "bound material with reissued license", record: activation.BoundRecord{Stage: "committed", ArtifactEnvelope: []byte("artifact"), ArtifactKeyVersion: "v1"}, inventoryStatus: "active", deviceStatus: "active", licenseStatus: "reissued", bindingStatus: "active"},
+		{name: "bound material with revoked inventory", record: activation.BoundRecord{Stage: "committed", ArtifactEnvelope: []byte("artifact"), ArtifactKeyVersion: "v1"}, inventoryStatus: "revoked", deviceStatus: "active", licenseStatus: "active", bindingStatus: "active"},
+		{name: "terminal failed attempt", record: activation.BoundRecord{Stage: "failed_before_bind"}, inventoryStatus: "binding", deviceStatus: "active", licenseStatus: "prepared", bindingStatus: "active"},
+		{name: "requested attempt cannot contain final artifact", record: activation.BoundRecord{Stage: "requested", ArtifactEnvelope: []byte("artifact"), ArtifactKeyVersion: "v1"}, inventoryStatus: "active", deviceStatus: "active", licenseStatus: "active", bindingStatus: "active"},
+		{name: "server bound attempt requires final artifact", record: activation.BoundRecord{Stage: "server_bound"}, inventoryStatus: "active", deviceStatus: "active", licenseStatus: "active", bindingStatus: "active"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			allowed := activationRecoveryAllowed(test.record, test.inventoryStatus, test.deviceStatus, test.licenseStatus, test.bindingStatus)
+			if allowed != test.allowed {
+				t.Fatalf("allowed=%v, want %v", allowed, test.allowed)
+			}
+		})
+	}
+}
+
+func TestPostgreSQLTransactionLockOrder(t *testing.T) {
+	activationSource, err := os.ReadFile("activation_repository.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifecycleSource, err := os.ReadFile("lifecycle_repository.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOrderedFragments(t, string(activationSource), "func (repository *ActivationRepository) BeginBinding", "func ensureActivationRecoverable",
+		"loadAttempt(ctx, tx, \"attempt.idempotency_key = $1\", input.IdempotencyKey, false)", "ensureActivationRecoverable(ctx, tx, existing)", "loadAttempt(ctx, tx, \"attempt.idempotency_key = $1\", input.IdempotencyKey, true)")
+	assertOrderedFragments(t, string(activationSource), "func (repository *ActivationRepository) CompleteBinding", "func (repository *ActivationRepository) CommitActivation",
+		"loadAttempt(ctx, tx, \"attempt.activation_id = $1\", input.Record.ActivationID, false)", "ensureActivationRecoverable(ctx, tx, existing)", "loadAttempt(ctx, tx, \"attempt.activation_id = $1\", input.Record.ActivationID, true)")
+	assertOrderedFragments(t, string(activationSource), "func insertBinding", "const attemptSelect",
+		"INSERT INTO devices", "INSERT INTO licenses", "UPDATE new_api_bindings", "INSERT INTO activation_attempts")
+	assertOrderedFragments(t, string(lifecycleSource), "func (repository *ActivationRepository) CreateTokenGrant", "func (repository *ActivationRepository) loadTokenGrant",
+		"FROM activation_inventory WHERE id=$1 FOR UPDATE", "FROM devices WHERE device_id=$1", "FROM licenses WHERE license_id=$1", "FROM new_api_bindings WHERE inventory_id=$1")
+	if !strings.Contains(string(lifecycleSource), "'activation.recovery_authorized','succeeded'") {
+		t.Fatal("AuthorizeRecovery must record authorization, not delivery")
+	}
+}
+
+func assertOrderedFragments(t *testing.T, source, start, end string, fragments ...string) {
+	t.Helper()
+	sectionStart := strings.Index(source, start)
+	if sectionStart < 0 {
+		t.Fatalf("source section %q..%q not found", start, end)
+	}
+	sectionEnd := strings.Index(source[sectionStart+len(start):], end)
+	if sectionEnd < 0 {
+		t.Fatalf("source section %q..%q not found", start, end)
+	}
+	section := source[sectionStart : sectionStart+len(start)+sectionEnd]
+	position := -1
+	for _, fragment := range fragments {
+		next := strings.Index(section, fragment)
+		if next < 0 || next <= position {
+			t.Fatalf("%s lock order missing or invalid at %q", start, fragment)
+		}
+		position = next
+	}
+}
+
+func TestBeginBindingPostgreSQLRecoversExpiredRequestedLeaseAndGuardsBoundArtifact(t *testing.T) {
+	databaseURL := os.Getenv("ACTIVATION_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("ACTIVATION_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	root, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	random := make([]byte, 8)
+	_, _ = rand.Read(random)
+	schema := "activation_recovery_test_" + hex.EncodeToString(random)
+	if _, err = root.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = root.Exec(ctx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE") }()
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err = Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+
+	digest := [32]byte{0x11}
+	requestFingerprint := [32]byte{0x22}
+	startupHash := [32]byte{0x33}
+	const inventoryID = "00000000-0000-4000-8000-000000000201"
+	if _, err = pool.Exec(ctx, `INSERT INTO activation_inventory
+		(id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at)
+		VALUES($1,'UCLAW-RECOVERY','UCLAW-RECOVERY',$2,'prepared','configured',now())`, inventoryID, digest[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO new_api_bindings
+		(inventory_id,new_api_user_id,new_api_username,balance_setup_status,status,policy_digest,created_at,updated_at)
+		VALUES($1,'usr_recovery','uclaw_recovery','configured','active',decode(repeat('44',32),'hex'),now(),now())`, inventoryID); err != nil {
+		t.Fatal(err)
+	}
+	repository, _ := NewActivationRepository(pool)
+	now := time.Now().UTC()
+	record := activation.BoundRecord{
+		ActivationID: "30000000-0000-4000-8000-000000000201", DeviceID: "10000000-0000-4000-8000-000000000201",
+		LicenseID: "20000000-0000-4000-8000-000000000201", LeaseToken: "40000000-0000-4000-8000-000000000201",
+		RequestFingerprint: requestFingerprint, FingerprintVersion: "uclaw-usb-v1", FingerprintSHA256: strings.Repeat("55", 32),
+		KeyID: "key_recovery", NotBefore: now, ExpiresAt: now.Add(24 * time.Hour), Revision: 1,
+		StartupSecretSalt: bytes.Repeat([]byte{0x66}, 16), StartupSecretHash: startupHash,
+		PendingMaterialEnvelope: []byte("pending-material"), PendingMaterialKeyVersion: "v1",
+		RequestID: "request-recovery-001", AuditEventID: "50000000-0000-4000-8000-000000000201",
+		StatusEventID: "60000000-0000-4000-8000-000000000201", BoundAuditEventID: "70000000-0000-4000-8000-000000000201",
+		LeaseExpiresAt: now.Add(time.Minute),
+	}
+	input := activation.BeginBindingInput{UsernameNormalized: "UCLAW-RECOVERY", ActivationCodeDigest: digest, IdempotencyKey: "recovery-idempotency-001", Record: record}
+	first, err := repository.BeginBinding(ctx, input)
+	if err != nil || first.Disposition != activation.BindingAcquired {
+		t.Fatalf("first begin=%#v err=%v", first, err)
+	}
+	conflict := input
+	conflict.Record.RequestFingerprint[0]++
+	if _, err = repository.BeginBinding(ctx, conflict); !errors.Is(err, activation.ErrIdempotencyConflict) {
+		t.Fatalf("different request recovery error=%v", err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE activation_inventory SET binding_lease_expires_at=now()-interval '1 second' WHERE id=$1`, inventoryID); err != nil {
+		t.Fatal(err)
+	}
+	input.Record.LeaseToken = "40000000-0000-4000-8000-000000000202"
+	resumed, err := repository.BeginBinding(ctx, input)
+	if err != nil || resumed.Disposition != activation.BindingAcquired || resumed.Record.LeaseToken != input.Record.LeaseToken {
+		t.Fatalf("resumed begin=%#v err=%v", resumed, err)
+	}
+	if !bytes.Equal(resumed.Record.PendingMaterialEnvelope, record.PendingMaterialEnvelope) {
+		t.Fatalf("pending material changed: %q", resumed.Record.PendingMaterialEnvelope)
+	}
+	resumed.Record.ArtifactEnvelope = []byte("artifact")
+	resumed.Record.ArtifactKeyVersion = "v1"
+	completed, err := repository.CompleteBinding(ctx, activation.CompleteBindingInput{LeaseToken: resumed.Record.LeaseToken, Record: resumed.Record})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Record.RequestID = "request-recovery-current-002"
+	bound, err := repository.BeginBinding(ctx, input)
+	if err != nil || bound.Disposition != activation.BindingBound || !bytes.Equal(bound.Record.ArtifactEnvelope, completed.ArtifactEnvelope) {
+		t.Fatalf("bound recovery=%#v err=%v", bound, err)
+	}
+	if bound.Record.RequestID != record.RequestID || bound.Record.RecoveryRequestID != input.Record.RequestID {
+		t.Fatalf("attempt request=%q recovery request=%q", bound.Record.RequestID, bound.Record.RecoveryRequestID)
+	}
+	var authorizedRequestID string
+	if err = pool.QueryRow(ctx, `SELECT request_id FROM audit_events WHERE action='activation.recovery_authorized' ORDER BY created_at DESC LIMIT 1`).Scan(&authorizedRequestID); err != nil {
+		t.Fatal(err)
+	}
+	if authorizedRequestID != input.Record.RequestID {
+		t.Fatalf("authorized request=%q want=%q", authorizedRequestID, input.Record.RequestID)
+	}
+	concurrentCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	errorsByOperation := make(chan error, 3)
+	go func() {
+		<-start
+		_, operationErr := repository.BeginBinding(concurrentCtx, input)
+		errorsByOperation <- operationErr
+	}()
+	go func() {
+		<-start
+		_, operationErr := repository.CreateTokenGrant(concurrentCtx, lifecycle.TokenGrant{
+			JTI: "concurrent-token-jti", DeviceID: record.DeviceID, LicenseID: record.LicenseID,
+			IdempotencyKey: "concurrent-token-grant-001", IssuedAt: now.Add(time.Minute), ExpiresAt: now.Add(2 * time.Minute),
+		})
+		errorsByOperation <- operationErr
+	}()
+	go func() {
+		<-start
+		_, operationErr := repository.Mutate(concurrentCtx, adminservice.Mutation{
+			Action: adminservice.ActionRevoke, LicenseID: record.LicenseID, ConfirmTarget: "UCLAW-RECOVERY",
+			Operation: adminservice.Operation{OperatorID: "operator-recovery", RequestID: "request-revoke-concurrent", IdempotencyKey: "revoke-concurrent-001", Reason: "concurrency lock order test"},
+		})
+		errorsByOperation <- operationErr
+	}()
+	close(start)
+	for range 3 {
+		select {
+		case operationErr := <-errorsByOperation:
+			var postgresError *pgconn.PgError
+			if errors.As(operationErr, &postgresError) && postgresError.Code == "40P01" {
+				t.Fatalf("concurrent recovery/revoke/token deadlocked: %v", operationErr)
+			}
+		case <-concurrentCtx.Done():
+			t.Fatal("concurrent recovery/revoke/token did not complete before timeout")
+		}
+	}
+	if _, err = pool.Exec(ctx, `UPDATE new_api_bindings SET status='revoked' WHERE inventory_id=$1`, inventoryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repository.BeginBinding(ctx, input); !errors.Is(err, activation.ErrActivationCodeAlreadyBound) {
+		t.Fatalf("revoked bound recovery error=%v", err)
 	}
 }

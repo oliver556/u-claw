@@ -61,11 +61,14 @@ func TestPublicHandlerServesRecoveryAndDeviceToken(t *testing.T) {
 
 func TestCommitRequiresNoBearerAndReturnsNoMaterial(t *testing.T) {
 	service := &fakePublicService{}
-	handler := NewPublicHandler(PublicHandlerOptions{Activation:service, Lifecycle:service, RequestIDs:strings.NewReader(strings.Repeat("a",64))})
-	request := httptest.NewRequest(http.MethodPost,"/v1/activations/act_fixture_001/commit",strings.NewReader(`{"idempotencyKey":"commit-fixture-001","artifactGeneration":1}`))
-	request.Header.Set("Content-Type","application/json")
-	response := httptest.NewRecorder(); handler.ServeHTTP(response,request)
-	if response.Code != http.StatusNoContent || response.Body.Len() != 0 { t.Fatalf("response=%d %q",response.Code,response.Body.String()) }
+	handler := NewPublicHandler(PublicHandlerOptions{Activation: service, Lifecycle: service, RequestIDs: strings.NewReader(strings.Repeat("a", 64))})
+	request := httptest.NewRequest(http.MethodPost, "/v1/activations/act_fixture_001/commit", strings.NewReader(`{"idempotencyKey":"commit-fixture-001","artifactGeneration":1}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || response.Body.Len() != 0 {
+		t.Fatalf("response=%d %q", response.Code, response.Body.String())
+	}
 }
 func (service *fakePublicService) Commit(ctx context.Context, _ activation.CommitInput) error {
 	service.activationContext = ctx

@@ -7,21 +7,26 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"regexp"
 	"strings"
+	"time"
 
 	"u-claw-activation-server/internal/inventory"
 )
 
 var (
 	ErrInvalidInput    = errors.New("admin input invalid")
+	ErrUnavailable     = errors.New("admin service unavailable")
 	identifierPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
 	idempotencyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
 	sha256Pattern      = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	uuidPattern        = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 )
 
 type Operation struct {
@@ -56,7 +61,15 @@ type InventorySummary struct {
 type InventoryLocator struct{ InventoryID, Username, DeviceID string }
 type AuditQuery struct {
 	Limit  int
-	Before string
+	Before *AuditCursor
+}
+type AuditCursor struct {
+	CreatedAt time.Time `json:"createdAt"`
+	EventID   string    `json:"eventId"`
+}
+type AuditPage struct {
+	Items      []AuditEvent `json:"items"`
+	NextBefore *string      `json:"nextBefore"`
 }
 type AuditEvent struct {
 	EventID        string  `json:"eventId"`
@@ -302,14 +315,60 @@ func (service *Service) ExecuteReissue(ctx context.Context, plan ReissuePlan) (M
 	return result, err
 }
 
-func (service *Service) Audit(ctx context.Context, query AuditQuery) ([]AuditEvent, error) {
+func EncodeAuditCursor(cursor AuditCursor) string {
+	payload, _ := json.Marshal(struct {
+		CreatedAt string `json:"createdAt"`
+		EventID   string `json:"eventId"`
+	}{cursor.CreatedAt.UTC().Format(time.RFC3339Nano), cursor.EventID})
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func DecodeAuditCursor(encoded string) (AuditCursor, error) {
+	payload, err := base64.RawURLEncoding.Strict().DecodeString(encoded)
+	if err != nil {
+		return AuditCursor{}, ErrInvalidInput
+	}
+	var raw struct {
+		CreatedAt string `json:"createdAt"`
+		EventID   string `json:"eventId"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err = decoder.Decode(&raw); err != nil || decoder.Decode(&struct{}{}) != io.EOF || !uuidPattern.MatchString(raw.EventID) {
+		return AuditCursor{}, ErrInvalidInput
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, raw.CreatedAt)
+	if err != nil || raw.CreatedAt != createdAt.UTC().Format(time.RFC3339Nano) {
+		return AuditCursor{}, ErrInvalidInput
+	}
+	return AuditCursor{CreatedAt: createdAt, EventID: raw.EventID}, nil
+}
+
+func (service *Service) Audit(ctx context.Context, query AuditQuery) (AuditPage, error) {
 	if query.Limit == 0 {
 		query.Limit = 100
 	}
-	if query.Limit < 1 || query.Limit > 500 || (query.Before != "" && !identifierPattern.MatchString(query.Before)) {
-		return nil, ErrInvalidInput
+	if query.Limit < 1 || query.Limit > 500 {
+		return AuditPage{}, ErrInvalidInput
 	}
-	return service.repository.Audit(ctx, query)
+	limit := query.Limit
+	query.Limit++
+	items, err := service.repository.Audit(ctx, query)
+	if err != nil {
+		return AuditPage{}, err
+	}
+	page := AuditPage{Items: items}
+	if len(items) > limit {
+		page.Items = items[:limit]
+		last := page.Items[len(page.Items)-1]
+		createdAt, parseErr := time.Parse(time.RFC3339Nano, last.CreatedAt)
+		if parseErr != nil || !uuidPattern.MatchString(last.EventID) {
+			return AuditPage{}, ErrUnavailable
+		}
+		next := EncodeAuditCursor(AuditCursor{CreatedAt: createdAt, EventID: last.EventID})
+		page.NextBefore = &next
+	}
+	return page, nil
 }
 
 func (service *Service) derive(key, purpose string, index, length int) []byte {
