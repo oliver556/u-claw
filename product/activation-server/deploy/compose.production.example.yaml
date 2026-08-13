@@ -19,19 +19,21 @@ x-activation-app: &activation-app
     ADMIN_SECRET_FINGERPRINT_KEY_FILE: /run/secrets/admin_secret_fingerprint_key
     NEW_API_ALLOWED_HOSTS: ${NEW_API_ALLOWED_HOSTS:?set NEW_API_ALLOWED_HOSTS}
   secrets:
-    - { source: activation_pepper, target: /run/secrets/activation_pepper, uid: "65532", gid: "65532", mode: 0400 }
-    - { source: license_signing_key, target: /run/secrets/license_signing_key, uid: "65532", gid: "65532", mode: 0400 }
-    - { source: status_signing_key, target: /run/secrets/status_signing_key, uid: "65532", gid: "65532", mode: 0400 }
-    - { source: kms_kek, target: /run/secrets/kms_kek, uid: "65532", gid: "65532", mode: 0400 }
-    - { source: token_signing_key, target: /run/secrets/token_signing_key, uid: "65532", gid: "65532", mode: 0400 }
-    - { source: admin_operators, target: /run/secrets/admin_operators, uid: "65532", gid: "65532", mode: 0400 }
-    - { source: admin_secret_fingerprint_key, target: /run/secrets/admin_secret_fingerprint_key, uid: "65532", gid: "65532", mode: 0400 }
+    - { source: activation_pepper, target: /run/secrets/activation_pepper, uid: "0", gid: "0", mode: 0400 }
+    - { source: license_signing_key, target: /run/secrets/license_signing_key, uid: "0", gid: "0", mode: 0400 }
+    - { source: status_signing_key, target: /run/secrets/status_signing_key, uid: "0", gid: "0", mode: 0400 }
+    - { source: kms_kek, target: /run/secrets/kms_kek, uid: "0", gid: "0", mode: 0400 }
+    - { source: token_signing_key, target: /run/secrets/token_signing_key, uid: "0", gid: "0", mode: 0400 }
+    - { source: admin_operators, target: /run/secrets/admin_operators, uid: "0", gid: "0", mode: 0400 }
+    - { source: admin_secret_fingerprint_key, target: /run/secrets/admin_secret_fingerprint_key, uid: "0", gid: "0", mode: 0400 }
   networks:
     - service_private
   read_only: true
   tmpfs:
     - /tmp:size=16m,mode=1777
+    - /run/uclaw-secrets:size=1m,mode=0700,uid=0,gid=0
   cap_drop: [ALL]
+  cap_add: [CHOWN, SETUID, SETGID]
   security_opt:
     - no-new-privileges:true
   stop_grace_period: 15s
