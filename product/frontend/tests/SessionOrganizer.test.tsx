@@ -50,6 +50,63 @@ describe("SessionSidebar organizer", () => {
     expect(value.onTogglePinned).toHaveBeenCalledWith(sessions[0], false);
   });
 
+  it("opens the session menu from the whole row without selecting and closes it reliably", () => {
+    const value = props();
+    const { rerender } = render(<SessionSidebar {...value} />);
+    const row = screen.getByRole("button", { name: /^知识库调研，/ }).closest(".session-row")!;
+
+    fireEvent.contextMenu(row);
+    expect(screen.getByRole("menu", { name: "知识库调研 会话菜单" })).toBeVisible();
+    expect(value.onSelect).not.toHaveBeenCalled();
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu", { name: "知识库调研 会话菜单" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "会话操作 知识库调研" }));
+    expect(screen.getByRole("menu", { name: "知识库调研 会话菜单" })).toBeVisible();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "知识库调研 会话菜单" })).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(row);
+    rerender(<SessionSidebar {...value} activeSessionId="session-2" />);
+    expect(screen.queryByRole("menu", { name: "知识库调研 会话菜单" })).not.toBeInTheDocument();
+  });
+
+  it("opens an in-app rename dialog with the current session title", async () => {
+    const value = props();
+    value.onRename.mockResolvedValue(undefined);
+    render(<SessionSidebar {...value} />);
+    const row = screen.getByRole("button", { name: /^发布检查，/ }).closest(".session-row")!;
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: "重命名会话" }));
+
+    expect(screen.queryByRole("menu", { name: "发布检查 会话菜单" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "重命名会话" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "会话名称" })).toHaveValue("发布检查");
+    fireEvent.change(screen.getByRole("textbox", { name: "会话名称" }), { target: { value: "发布检查 2" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存会话名称" }));
+
+    await waitFor(() => expect(value.onRename).toHaveBeenCalledWith(sessions[0], "发布检查 2"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "重命名会话" })).not.toBeInTheDocument());
+  });
+
+  it("keeps the rename dialog, input and backend error after a failed rename", async () => {
+    const value = props();
+    value.onRename.mockRejectedValue(new Error("标题已被占用"));
+    render(<SessionSidebar {...value} />);
+    const row = screen.getByRole("button", { name: /^发布检查，/ }).closest(".session-row")!;
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: "重命名会话" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "会话名称" }), { target: { value: "冲突标题" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存会话名称" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("标题已被占用");
+    expect(screen.getByRole("dialog", { name: "重命名会话" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "会话名称" })).toHaveValue("冲突标题");
+  });
+
   it("shows organizer loading and recoverable error states", () => {
     const value = props();
     const { rerender } = render(<SessionSidebar {...value} organizerState="loading" />);
@@ -126,6 +183,10 @@ describe("SessionSidebar organizer", () => {
     fireEvent.click(screen.getByRole("button", { name: "创建分组" }));
     expect(value.onCreateGroup).toHaveBeenCalledWith("客户 A");
 
+    fireEvent.click(screen.getByRole("button", { name: "分组操作 发布" }));
+    expect(screen.getByRole("button", { name: "重命名分组 发布" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "分组操作 发布" }));
+    expect(screen.queryByRole("button", { name: "重命名分组 发布" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "分组操作 发布" }));
     fireEvent.click(screen.getByRole("button", { name: "重命名分组 发布" }));
     expect(screen.getByRole("dialog", { name: "重命名分组" })).toBeInTheDocument();

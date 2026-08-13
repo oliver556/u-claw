@@ -364,6 +364,36 @@ describe("U-Claw application shell", () => {
     expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();
   });
 
+  it("renames a session through the in-app dialog and refreshes authoritative state", async () => {
+    const now = "2026-08-09T00:00:00.000Z";
+    const mock = new MockUClawClient({ clock: new ManualClock(now) });
+    let title = "本地旧标题";
+    const rename = vi.fn(async (_sessionId: string, _requestedTitle: string) => ({
+      id: "session-rename", title: "后端权威标题", createdAt: now, updatedAt: now, pinned: false, status: "idle" as const,
+    }));
+    const list = vi.fn(async () => ({ items: [{ id: "session-rename", title, createdAt: now, updatedAt: now, pinned: false, status: "idle" as const }], nextCursor: null, hasMore: false }));
+    const get = vi.fn(async () => ({ id: "session-rename", title, createdAt: now, updatedAt: now, pinned: false, status: "idle" as const }));
+    rename.mockImplementationOnce(async (sessionId, requestedTitle) => {
+      title = "后端权威标题";
+      return { id: sessionId, title, createdAt: now, updatedAt: now, pinned: false, status: "idle" as const };
+    });
+    const client: UClawClient = { ...mock, sessions: { ...mock.sessions, list, get, rename } };
+    render(<App client={client} />);
+
+    const row = (await screen.findByRole("button", { name: /^本地旧标题，/ })).closest(".session-row")!;
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: "重命名会话" }));
+    expect(screen.getByRole("textbox", { name: "会话名称" })).toHaveValue("本地旧标题");
+    fireEvent.change(screen.getByRole("textbox", { name: "会话名称" }), { target: { value: "用户提交标题" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存会话名称" }));
+
+    expect(await screen.findByRole("button", { name: /^后端权威标题，/ })).toBeVisible();
+    expect(rename).toHaveBeenCalledWith("session-rename", "用户提交标题");
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog", { name: "重命名会话" })).not.toBeInTheDocument();
+  });
+
   it("routes Windows controls through the injected bridge", () => {
     const invoke = vi.fn(async (request: WindowIpcRequest): Promise<IpcResponse> => ({ ...request, ok: true, result: null }));
     window.uclaw = { window: { invoke } };
