@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -115,6 +117,9 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("configuration ADMIN_SECRET_FINGERPRINT_KEY_FILE is invalid")
 	}
+	if sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["ACTIVATION_PEPPER_FILE"]) || sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["KMS_KEK_FILE"]) || constantTimeEqual(fingerprintKey, pepper) || constantTimeEqual(fingerprintKey, kek) {
+		return Config{}, errors.New("configuration ADMIN_SECRET_FINGERPRINT_KEY_FILE is invalid")
+	}
 	allowedHosts, err := parseAllowedNewAPIHosts(values["NEW_API_ALLOWED_HOSTS"])
 	if err != nil {
 		return Config{}, errors.New("configuration NEW_API_ALLOWED_HOSTS is invalid")
@@ -140,6 +145,23 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		AdminOperators:                adminOperators,
 		AdminSecretFingerprintKeyFile: values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], AdminSecretFingerprintKey: fingerprintKey, AllowedNewAPIHosts: allowedHosts,
 	}, nil
+}
+
+func sameSecretFile(first, second string) bool {
+	firstAbs, err1 := filepath.Abs(filepath.Clean(first))
+	secondAbs, err2 := filepath.Abs(filepath.Clean(second))
+	if err1 != nil || err2 != nil {
+		return true
+	}
+	if firstAbs == secondAbs {
+		return true
+	}
+	firstInfo, err1 := os.Stat(firstAbs)
+	secondInfo, err2 := os.Stat(secondAbs)
+	return err1 != nil || err2 != nil || os.SameFile(firstInfo, secondInfo)
+}
+func constantTimeEqual(first, second []byte) bool {
+	return len(first) == len(second) && subtle.ConstantTimeCompare(first, second) == 1
 }
 
 func loadAdminOperators(path string) (admin.OperatorRegistry, error) {

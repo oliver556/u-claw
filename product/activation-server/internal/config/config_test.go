@@ -265,6 +265,33 @@ func TestParseAllowedNewAPIHostsRejectsUnsafeOrNonCanonicalValues(t *testing.T) 
 	}
 }
 
+func TestLoadFromRequiresIndependentAdminFingerprintSecret(t *testing.T) {
+	directory := t.TempDir()
+	signing := writeSigningKey(t, directory)
+	pepper := writeTestFile(t, directory, "separate-pepper", []byte(strings.Repeat("p", 32)))
+	kek := writeTestFile(t, directory, "separate-kek", []byte(strings.Repeat("k", 32)))
+	fingerprint := writeTestFile(t, directory, "separate-fingerprint", []byte(strings.Repeat("f", 32)))
+	base := map[string]string{"DATABASE_URL": "postgres://database/uclaw", "ACTIVATION_PEPPER_FILE": pepper, "LICENSE_SIGNING_KEY_FILE": signing, "STATUS_SIGNING_KEY_FILE": signing, "LICENSE_KEY_ID": "license-key-001", "STATUS_KEY_ID": "status-key-001", "KMS_PROVIDER": "local-kek-v1", "KMS_KEY_VERSION": "kms-v1", "KMS_KEK_FILE": kek, "TOKEN_SIGNING_KEY_FILE": writeTestFile(t, directory, "separate-token", []byte(strings.Repeat("t", 32))), "ADMIN_OPERATORS_FILE": writeTestFile(t, directory, "separate-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)), "ADMIN_SECRET_FINGERPRINT_KEY_FILE": fingerprint, "NEW_API_ALLOWED_HOSTS": "api.example.test"}
+	if _, err := LoadFrom(func(name string) string { return base[name] }); err != nil {
+		t.Fatalf("independent secret rejected: %v", err)
+	}
+	for _, test := range []struct{ name, path string }{{"same path pepper", pepper}, {"same bytes pepper", writeTestFile(t, directory, "fingerprint-equals-pepper", []byte(strings.Repeat("p", 32)))}, {"same bytes kek", writeTestFile(t, directory, "fingerprint-equals-kek", []byte(strings.Repeat("k", 32)))}} {
+		t.Run(test.name, func(t *testing.T) {
+			values := maps.Clone(base)
+			values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"] = test.path
+			_, err := LoadFrom(func(name string) string { return values[name] })
+			if err == nil || !strings.Contains(err.Error(), "ADMIN_SECRET_FINGERPRINT_KEY_FILE") {
+				t.Fatalf("error=%v", err)
+			}
+			for _, sensitive := range []string{test.path, string([]byte(strings.Repeat("p", 32))), string([]byte(strings.Repeat("k", 32)))} {
+				if strings.Contains(err.Error(), sensitive) {
+					t.Fatalf("error leaked secret/path: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func writeSigningKey(t *testing.T, directory string) string {
 	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
