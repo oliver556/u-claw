@@ -33,16 +33,20 @@ func NormalProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLeas
 	return processSpec(paths, manifest, lease, arguments, portableProcessEnvironment(paths))
 }
 
-func ActivationProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLease) ProcessSpec {
+func ActivationProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLease, fingerprint usbFingerprint) ProcessSpec {
 	environment := []string{
 		"TEMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
 		"TMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
 		"UCLAW_CACHE_DIR=" + filepath.Join(paths.HostCacheRoot, "cache"),
 		"UCLAW_DATA_DIR=" + paths.DataDir,
+		"UCLAW_PACKAGE_ROOT=" + paths.PackageRoot,
+		"UCLAW_USB_FINGERPRINT_SCHEME=" + fingerprint.Scheme,
+		"UCLAW_USB_FINGERPRINT_SHA256=" + fingerprint.SHA256,
+		"UCLAW_CLIENT_VERSION=" + manifest.ProductVersion,
 	}
 	arguments := append(append([]string(nil), manifest.EntryArgs...), activationStartupArgument)
 	spec := processSpec(paths, manifest, lease, arguments, environment)
-	spec.EnvRemovePrefixes = []string{"OPENCLAW_"}
+	spec.EnvRemovePrefixes = []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT"}
 	return spec
 }
 

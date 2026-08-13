@@ -1,5 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { lstat, readFile, stat } from "node:fs/promises";
+import { createHash, randomUUID, timingSafeEqual, verify } from "node:crypto";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -8,6 +9,7 @@ import {
   MAX_ATTACHMENT_TOTAL_BYTES,
   UClawErrorSchema,
   type AttachmentImportInput,
+  type ActivationResponse,
   type AttachmentService,
   type ClientIpcRequest,
   type MessageEvent,
@@ -53,6 +55,11 @@ import { createMcpProtocolProbe, createOpenClawMcpRuntime } from "./mcp/mcp-runt
 import { createReleaseDispatcher } from "./release/release-dispatcher.js";
 import type { ReleaseService } from "./release/release-service.js";
 import { createProductionReleaseService } from "./release/production-release.js";
+import { registerActivationIpc } from "./activation/register-ipc.js";
+import { createActivationCoordinator, type ActivationCoordinator } from "./activation/coordinator.js";
+import { createActivationClient } from "./activation/client.js";
+import { createActivationArtifactWriter } from "./activation/artifact-writer.js";
+import { readActivationServiceConfiguration } from "./wiring/environment.js";
 import {
   createAdvancedConsoleController,
   createMainWindow,
@@ -843,8 +850,11 @@ export async function startActivationMain(
   const { app, BrowserWindow, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const devTools = !app.isPackaged;
-  await runActivationMain<DesktopWindow>({
-    app,
+  const coordinator = createProductionActivationCoordinator(portablePaths, process.env, {
+    exit: (code) => { process.exitCode = code; app.quit(); },
+  });
+  await startActivationMainWithRuntime(portablePaths, {
+    app, ipcMain: ipcMain as unknown as IpcMainLike, coordinator,
     createWindow: (registerIpc) => createMainWindow({
       BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
       preloadPath: resolvePreloadPath(moduleDir),
@@ -855,11 +865,92 @@ export async function startActivationMain(
       showWhenReady: true,
       beforeLoad: registerIpc,
     }),
-    registerIpc: (window) => registerActivationOnlyIpc({
-      ipcMain: ipcMain as unknown as IpcMainLike,
+  });
+}
+
+export function createProductionActivationCoordinator(
+  portablePaths: PortableDesktopPaths,
+  env: NodeJS.ProcessEnv,
+  options: { exit(code: number): void },
+): ActivationCoordinator {
+  const configuration = readActivationServiceConfiguration(env);
+  const fingerprintScheme = env.UCLAW_USB_FINGERPRINT_SCHEME;
+  const fingerprint = env.UCLAW_USB_FINGERPRINT_SHA256;
+  const clientVersion = env.UCLAW_CLIENT_VERSION;
+  const packageRoot = env.UCLAW_PACKAGE_ROOT;
+  if (fingerprintScheme !== "uclaw-usb-v1" || !fingerprint || !/^[a-f0-9]{64}$/u.test(fingerprint) || !clientVersion || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(clientVersion)
+      || !packageRoot || resolve(packageRoot) !== dirname(resolve(portablePaths.dataDir))) {
+    throw new Error("Activation USB identity and client version are not configured.");
+  }
+  const client = createActivationClient({ endpoint: configuration.endpoint });
+  const writer = createActivationArtifactWriter({ packageRoot, dataDir: portablePaths.dataDir });
+  return createActivationCoordinator({
+    preflight: async () => {
+      const [packageInfo, dataInfo] = await Promise.all([lstat(packageRoot), lstat(portablePaths.dataDir)]);
+      await writer.preflight();
+      return { usbPresent: packageInfo.isDirectory() && !packageInfo.isSymbolicLink() && dataInfo.isDirectory() && !dataInfo.isSymbolicLink() };
+    }, client, writer,
+    usbFingerprint: { version: "uclaw-usb-v1", sha256: fingerprint },
+    clientVersion,
+    randomUUID,
+    verifyLicense: async (response) => verifyActivationResponse(response, fingerprint, configuration.trustedPublicKeys, new Date()),
+    commitRemote: (activationId, idempotencyKey, generation, signal) => client.commit(activationId, { idempotencyKey, artifactGeneration: generation }, signal),
+    exit: options.exit,
+  });
+}
+
+export function verifyActivationResponse(
+  response: ActivationResponse,
+  trustedFingerprint: string,
+  trustedPublicKeys: Readonly<Record<string, string>>,
+  now: Date,
+): boolean {
+  const { license, startupCredential, builtinCredential } = response;
+  if (
+    license.deviceId !== response.deviceId || startupCredential.deviceId !== response.deviceId || builtinCredential.deviceId !== response.deviceId ||
+    license.licenseId !== response.licenseId || startupCredential.licenseId !== response.licenseId || builtinCredential.licenseId !== response.licenseId ||
+    license.usbFingerprint.scheme !== "uclaw-usb-v1" || license.usbFingerprint.sha256 !== trustedFingerprint
+  ) return false;
+  const notBefore = Date.parse(license.notBefore);
+  const expiresAt = Date.parse(license.expiresAt);
+  if (!Number.isFinite(notBefore) || !Number.isFinite(expiresAt) || expiresAt <= notBefore || now.getTime() < notBefore || now.getTime() >= expiresAt) return false;
+  try {
+    const salt = Buffer.from(license.startupSecretProof.startupSecretSalt, "hex");
+    if (salt.toString("hex") !== license.startupSecretProof.startupSecretSalt) return false;
+    const actualSecretHash = createHash("sha256")
+      .update(Buffer.from("uclaw-startup-secret-v1\0", "utf8"))
+      .update(salt)
+      .update(Buffer.from([0]))
+      .update(Buffer.from(startupCredential.startupSecret, "utf8"))
+      .digest();
+    const expectedSecretHash = Buffer.from(license.startupSecretProof.startupSecretHash, "hex");
+    if (expectedSecretHash.length !== actualSecretHash.length || !timingSafeEqual(actualSecretHash, expectedSecretHash)) return false;
+    const key = trustedPublicKeys[license.signature.keyId];
+    if (!key) return false;
+    const payload = [
+      "uclaw-startup-license-v1", license.schemaVersion, license.deviceId, license.licenseId,
+      license.usbFingerprint.scheme, license.usbFingerprint.sha256,
+      license.startupSecretProof.algorithm, license.startupSecretProof.startupSecretSalt, license.startupSecretProof.startupSecretHash,
+      license.notBefore, license.expiresAt, license.signature.algorithm, license.signature.keyId,
+    ];
+    return verify(null, Buffer.from(JSON.stringify(payload), "utf8"), key, Buffer.from(license.signature.value, "base64"));
+  } catch {
+    return false;
+  }
+}
+
+export async function startActivationMainWithRuntime(
+  _portablePaths: PortableDesktopPaths,
+  runtime: { app: DesktopAppLike; createWindow(registerIpc: (window: DesktopWindow) => void): Promise<DesktopWindow>; ipcMain: IpcMainLike; coordinator: ActivationCoordinator },
+): Promise<void> {
+  await runActivationMain({
+    app: runtime.app,
+    createWindow: runtime.createWindow,
+    registerIpc: (window) => registerActivationIpc({
+      ipcMain: runtime.ipcMain,
       authorizedWebContents: window.webContents,
+      coordinator: runtime.coordinator,
       closeWindow: () => window.close(),
     }),
   });
-  void portablePaths;
 }

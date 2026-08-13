@@ -110,6 +110,16 @@ export interface PreloadDependencies {
   reportInvalidEvent?(error: Error): void;
 }
 
+export function installActivationPreloadBridge({ contextBridge, ipcRenderer }: PreloadDependencies): void {
+  contextBridge.exposeInMainWorld("uclawActivation", Object.freeze({
+    preflight: () => ipcRenderer.invoke("activation.preflight", undefined),
+    submit: (input: unknown) => ipcRenderer.invoke("activation.submit", input),
+    commit: () => ipcRenderer.invoke("activation.commit", undefined),
+    cancel: () => ipcRenderer.invoke("activation.cancel", undefined),
+    close: () => ipcRenderer.invoke("window.close", undefined),
+  }));
+}
+
 function validateCorrelatedResponse(
   response: unknown,
   request: WindowIpcRequest | ClientIpcRequest,

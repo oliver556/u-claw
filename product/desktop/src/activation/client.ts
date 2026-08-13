@@ -1,8 +1,10 @@
 import {
   ActivationErrorSchema,
+  ActivationCommitSchema,
   ActivationRequestSchema,
   ActivationResponseSchema,
   type ActivationRequest,
+  type ActivationCommit,
   type ActivationResponse,
 } from "@uclaw/shared";
 import { Agent, type Dispatcher, fetch as undiciFetch } from "undici";
@@ -31,7 +33,8 @@ export interface ActivationClientOptions {
 }
 
 export interface ActivationClient {
-  activate(input: ActivationRequest): Promise<ActivationResponse>;
+  activate(input: ActivationRequest, signal?: AbortSignal): Promise<ActivationResponse>;
+  commit(activationId: string, input: ActivationCommit, signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -130,9 +133,11 @@ export function createActivationClient(options: ActivationClientOptions): Activa
     bodyTimeout: deadlines.bodyTimeout,
   })))({ connectTimeout, headersTimeout: requestTimeout, bodyTimeout: requestTimeout });
 
-  const requestOnce = async (input: ActivationRequest, signal: AbortSignal): Promise<ActivationResponse> => {
+  const requestOnce = async (input: ActivationRequest, signal: AbortSignal, cancelled: () => boolean): Promise<ActivationResponse> => {
     try {
-      if (signal.aborted) throw new ActivationClientError("TIMEOUT", "Activation service request timed out.", true);
+      if (signal.aborted) throw cancelled()
+        ? new ActivationClientError("NETWORK_ERROR", "Activation service request was cancelled.", false)
+        : new ActivationClientError("TIMEOUT", "Activation service request timed out.", true);
       const response = await fetchImpl(new URL("v1/activations", endpoint), {
         method: "POST",
         headers: {
@@ -159,7 +164,9 @@ export function createActivationClient(options: ActivationClientOptions): Activa
       return parsed.data;
     } catch (error) {
       if (error instanceof ActivationClientError) throw error;
-      if (signal.aborted) throw new ActivationClientError("TIMEOUT", "Activation service request timed out.", true);
+      if (signal.aborted) throw cancelled()
+        ? new ActivationClientError("NETWORK_ERROR", "Activation service request was cancelled.", false)
+        : new ActivationClientError("TIMEOUT", "Activation service request timed out.", true);
       if (isRedirectFailure(error)) {
         throw new ActivationClientError("REDIRECT_REJECTED", "Activation service redirect was rejected.", false);
       }
@@ -167,22 +174,57 @@ export function createActivationClient(options: ActivationClientOptions): Activa
     }
   };
 
+  const commitOnce = async (activationId: string, input: ActivationCommit, signal: AbortSignal, cancelled: () => boolean): Promise<void> => {
+    try {
+      const response = await fetchImpl(new URL(`v1/activations/${encodeURIComponent(activationId)}/commit`, endpoint), {
+        method: "POST", headers: { accept: "application/json", "content-type": "application/json", "idempotency-key": input.idempotencyKey },
+        body: JSON.stringify(input), redirect: "error", credentials: "omit", signal, dispatcher,
+      });
+      if (response.status >= 300 && response.status < 400) throw new ActivationClientError("REDIRECT_REJECTED", "Activation service redirect was rejected.", false, response.status);
+      if (response.status === 204) return;
+      const payload = await readBoundedJson(response, maxResponseBytes);
+      throw projectedRemoteError(payload, response.status);
+    } catch (error) {
+      if (error instanceof ActivationClientError) throw error;
+      if (signal.aborted) throw cancelled()
+        ? new ActivationClientError("NETWORK_ERROR", "Activation service request was cancelled.", false)
+        : new ActivationClientError("TIMEOUT", "Activation service request timed out.", true);
+      if (isRedirectFailure(error)) throw new ActivationClientError("REDIRECT_REJECTED", "Activation service redirect was rejected.", false);
+      throw new ActivationClientError("NETWORK_ERROR", "Activation service request failed.", true);
+    }
+  };
+
   return {
-    async activate(input) {
+    async activate(input, externalSignal) {
       const parsed = ActivationRequestSchema.parse(input);
       const controller = new AbortController();
+      const cancel = () => controller.abort();
+      externalSignal?.addEventListener("abort", cancel, { once: true });
+      if (externalSignal?.aborted) controller.abort();
       const timer = setTimeout(() => controller.abort(), requestTimeout);
       timer.unref?.();
       try {
         try {
-          return await requestOnce(parsed, controller.signal);
+          return await requestOnce(parsed, controller.signal, () => externalSignal?.aborted === true);
         } catch (error) {
           if (!(error instanceof ActivationClientError) || !error.retryable) throw error;
-          return await requestOnce(parsed, controller.signal);
+          return await requestOnce(parsed, controller.signal, () => externalSignal?.aborted === true);
         }
       } finally {
         clearTimeout(timer);
+        externalSignal?.removeEventListener("abort", cancel);
       }
+    },
+    async commit(activationId, input, externalSignal) {
+      const parsedId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u).parse(activationId);
+      const parsed = ActivationCommitSchema.parse(input);
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      externalSignal?.addEventListener("abort", cancel, { once: true });
+      if (externalSignal?.aborted) controller.abort();
+      const timer = setTimeout(() => controller.abort(), requestTimeout); timer.unref?.();
+      try { await commitOnce(parsedId, parsed, controller.signal, () => externalSignal?.aborted === true); }
+      finally { clearTimeout(timer); externalSignal?.removeEventListener("abort", cancel); }
     },
     async close() {
       await dispatcher.close();

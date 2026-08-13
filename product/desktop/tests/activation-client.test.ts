@@ -212,4 +212,28 @@ describe("activation client", () => {
     expect(String(error)).not.toContain(rawSecret);
     expect(JSON.stringify(error)).not.toContain(rawSecret);
   });
+
+  it("commits through the OpenAPI path with the shared strict body and idempotency key", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    const client = createActivationClient({ endpoint: "https://activation.example.test/", fetch });
+    await expect(client.commit("activation-001", { idempotencyKey: request.idempotencyKey, artifactGeneration: 7 })).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith(new URL("https://activation.example.test/v1/activations/activation-001/commit"), expect.objectContaining({
+      method: "POST", body: JSON.stringify({ idempotencyKey: request.idempotencyKey, artifactGeneration: 7 }),
+      headers: expect.objectContaining({ "idempotency-key": request.idempotencyKey }), redirect: "error",
+    }));
+  });
+
+  it("combines caller cancellation with the total request deadline", async () => {
+    const signals: AbortSignal[] = [];
+    const fetch = vi.fn((_url: string | URL, init: RequestInit) => {
+      signals.push(init.signal as AbortSignal);
+      return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
+    });
+    const client = createActivationClient({ endpoint: "https://activation.example.test/", fetch });
+    const controller = new AbortController();
+    const pending = client.commit("activation-001", { idempotencyKey: request.idempotencyKey, artifactGeneration: 1 }, controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+    expect(signals[0]?.aborted).toBe(true);
+  });
 });

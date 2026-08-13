@@ -1,9 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import { installPreloadBridge } from "./ipc/preload-bridge.js";
+import { installActivationPreloadBridge, installPreloadBridge } from "./ipc/preload-bridge.js";
+import { parseStartupMode } from "./startup/mode.js";
 
-installPreloadBridge({
+const dependencies = {
   contextBridge,
   ipcRenderer,
-  reportInvalidEvent: (error) => console.warn(error.message),
-});
+  reportInvalidEvent: (error: Error) => console.warn(error.message),
+};
+if (parseStartupMode(process.argv) === "activation-only") installActivationPreloadBridge(dependencies);
+else installPreloadBridge(dependencies);

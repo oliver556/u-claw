@@ -1,14 +1,42 @@
 import { EventEmitter } from "node:events";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ACTIVATION_ONLY_CAPABILITIES, assertActivationOnlyCapabilities, bootstrapDesktopApp, createProductionDataService, disposeDesktopIpc, registerActivationOnlyIpc, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runActivationMain, runDesktopMain, validateRendererUrl } from "../src/main.js";
+import { ACTIVATION_ONLY_CAPABILITIES, assertActivationOnlyCapabilities, bootstrapDesktopApp, createProductionDataService, disposeDesktopIpc, registerActivationOnlyIpc, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runActivationMain, runDesktopMain, startActivationMainWithRuntime, validateRendererUrl, verifyActivationResponse } from "../src/main.js";
 import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
+  it("fully verifies activation response binding, secret proof, validity, fingerprint, and signature", () => {
+    const keys = generateKeyPairSync("ed25519");
+    const fingerprint = "a".repeat(64); const secret = "x".repeat(32); const salt = Buffer.from("b".repeat(32), "hex");
+    const secretHash = createHash("sha256").update(Buffer.from("uclaw-startup-secret-v1\0")).update(salt).update(Buffer.from([0])).update(secret).digest("hex");
+    const license = { schemaVersion: 1 as const, deviceId: "device-001", licenseId: "license-001", usbFingerprint: { scheme: "uclaw-usb-v1" as const, sha256: fingerprint }, startupSecretProof: { algorithm: "sha256-salt-v1" as const, startupSecretSalt: salt.toString("hex"), startupSecretHash: secretHash }, notBefore: "2026-08-13T00:00:00.000Z", expiresAt: "2027-08-13T00:00:00.000Z", signature: { algorithm: "ed25519" as const, keyId: "activation-key", value: "" } };
+    const payload = ["uclaw-startup-license-v1", 1, license.deviceId, license.licenseId, license.usbFingerprint.scheme, fingerprint, license.startupSecretProof.algorithm, license.startupSecretProof.startupSecretSalt, secretHash, license.notBefore, license.expiresAt, license.signature.algorithm, license.signature.keyId];
+    license.signature.value = sign(null, Buffer.from(JSON.stringify(payload)), keys.privateKey).toString("base64");
+    const response = { activationId: "activation-001", deviceId: license.deviceId, licenseId: license.licenseId, license, startupCredential: { schemaVersion: 1 as const, deviceId: license.deviceId, licenseId: license.licenseId, startupSecret: secret }, builtinCredential: { schemaVersion: 1 as const, deviceId: license.deviceId, licenseId: license.licenseId, accessToken: "t".repeat(16), expiresAt: "2026-08-14T00:00:00.000Z" }, status: "active" as const };
+    const publicKey = keys.publicKey.export({ format: "pem", type: "spki" }).toString();
+    expect(verifyActivationResponse(response, fingerprint, { "activation-key": publicKey }, new Date("2026-08-13T12:00:00Z"))).toBe(true);
+    expect(verifyActivationResponse({ ...response, startupCredential: { ...response.startupCredential, startupSecret: "y".repeat(32) } }, fingerprint, { "activation-key": publicKey }, new Date("2026-08-13T12:00:00Z"))).toBe(false);
+    expect(verifyActivationResponse(response, "f".repeat(64), { "activation-key": publicKey }, new Date("2026-08-13T12:00:00Z"))).toBe(false);
+    expect(verifyActivationResponse(response, fingerprint, { "activation-key": publicKey }, new Date("2028-01-01T00:00:00Z"))).toBe(false);
+  });
+  it("production activation wiring registers only coordinator channels", async () => {
+    const handlers: string[] = [];
+    const coordinator = { preflight: vi.fn(), submit: vi.fn(), cancel: vi.fn(), close: vi.fn(), status: vi.fn() };
+    const window = { webContents: { mainFrame: {} }, close: vi.fn(), isDestroyed: () => false, isMinimized: () => false, restore: vi.fn(), focus: vi.fn() };
+    await startActivationMainWithRuntime({} as never, {
+      app: { requestSingleInstanceLock: () => true, quit: vi.fn(), whenReady: vi.fn(), on: vi.fn() },
+      createWindow: async (beforeLoad) => { beforeLoad(window as never); return window as never; },
+      ipcMain: { handle: (channel: string) => handlers.push(channel), removeHandler: vi.fn() } as never,
+      coordinator: coordinator as never,
+    });
+    expect(handlers.sort()).toEqual(["activation.cancel", "activation.commit", "activation.preflight", "activation.submit", "window.close"]);
+    expect(handlers).not.toContain("uclaw:client");
+  });
   it("allows exactly the activation-only IPC capability set", () => {
     expect(() => assertActivationOnlyCapabilities(ACTIVATION_ONLY_CAPABILITIES)).not.toThrow();
     expect(() => assertActivationOnlyCapabilities([...ACTIVATION_ONLY_CAPABILITIES, "client.invoke"])).toThrow("capabilities");
