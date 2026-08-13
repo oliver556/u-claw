@@ -7,7 +7,6 @@ import { ActivationClientError } from "../src/activation/errors.js";
 import { readActivationServiceConfiguration } from "../src/wiring/environment.js";
 
 const request = {
-  username: "UCLAW-TEST",
   activationCode: "0123456789ABCDEFGHJKMNPQRS",
   usbFingerprint: { version: "uclaw-usb-v1" as const, sha256: "a".repeat(64) },
   clientVersion: "1.0.0",
@@ -44,8 +43,9 @@ const response = {
     schemaVersion: 1,
     deviceId: "device-001",
     licenseId: "license-001",
-    accessToken: "t".repeat(16),
-    expiresAt: "2026-08-14T00:00:00.000Z",
+    endpoint: "https://license.example.test/model-api/",
+    model: "gpt-5.6-sol",
+    deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   },
   status: "active",
 };

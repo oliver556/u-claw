@@ -4,7 +4,6 @@ import { z } from "zod";
 
 export const ACTIVATION_IPC_CHANNELS = ["activation.preflight", "activation.submit", "activation.commit", "activation.cancel", "window.close"] as const;
 const SubmitSchema = z.object({
-  username: z.string().trim().min(3).max(128),
   activationCode: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/u),
 }).strict();
 

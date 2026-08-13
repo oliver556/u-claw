@@ -54,7 +54,6 @@ const material = (suffix = "001"): ActivationResponse => ({
 });
 
 const request = {
-  username: "UCLAW-TEST-USER",
   activationCode: "0123456789ABCDEFGHJKMNPQRS",
   usbFingerprint: { version: "uclaw-usb-v1" as const, sha256: "d".repeat(64) },
   clientVersion: "1.0.0",
@@ -62,28 +61,26 @@ const request = {
 };
 
 const journal = (response = material(), generation = 1) => ({
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
   activationId: response.activationId,
   idempotencyKey: request.idempotencyKey,
   generation,
   deviceId: response.deviceId,
   licenseId: response.licenseId,
   stage: "server_bound" as const,
-  username: request.username,
   requestHash: "e".repeat(64),
   usbFingerprint: request.usbFingerprint,
   clientVersion: request.clientVersion,
 });
 
 const requestedJournal = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
   stage: "requested" as const,
   activationId: null,
   deviceId: null,
   licenseId: null,
   generation: 1,
   idempotencyKey: request.idempotencyKey,
-  username: request.username,
   requestHash: "e".repeat(64),
   usbFingerprint: request.usbFingerprint,
   clientVersion: request.clientVersion,
@@ -115,6 +112,15 @@ describe("activation artifact writer", () => {
     expect(body).not.toContain(request.activationCode);
     expect(body).not.toContain("startupSecret");
     expect(body).not.toContain("accessToken");
+  });
+
+  it("reads a strict legacy v1 requested journal for controlled recovery", async () => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    const legacy = { ...requestedJournal, schemaVersion: 1, username: "UCLAW-TEST" };
+    await writer.preflight();
+    await writeFile(absolutePath(dataDir, paths.journal), JSON.stringify(legacy));
+    await expect(writer.readJournal()).resolves.toEqual(legacy);
   });
 
   it("rejects requested journals with invalid hashes or server-bound fields", async () => {
@@ -163,8 +169,7 @@ describe("activation artifact writer", () => {
     const dataDir = await tempRoot();
     const writer = createActivationArtifactWriter(writerOptions(dataDir));
 
-    const { username: _username, ...missingUsername } = journal();
-    await expect(writer.writeServerBoundJournal(missingUsername as never))
+    await expect(writer.writeServerBoundJournal({ ...journal(), username: "legacy-user" } as never))
       .rejects.toMatchObject({ code: "JOURNAL_INVALID" });
     await expect(writer.writeJournal({ ...journal(), stage: "committed" }))
       .resolves.toBeUndefined();

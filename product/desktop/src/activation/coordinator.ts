@@ -6,21 +6,25 @@ import { ActivationClientError } from "./errors.js";
 
 export type ActivationCoordinatorState = "checking" | "input" | "submitting" | "server-bound" | "writing" | "verifying" | "committing" | "complete" | "recovery-required" | "error";
 export interface ActivationStatus { state: ActivationCoordinatorState; code?: string; }
-export interface ActivationSubmitInput { username: string; activationCode: string; }
+export interface ActivationSubmitInput { activationCode: string; }
 
 interface JournalBase {
-  schemaVersion: 1; activationId: string | null; deviceId: string | null; licenseId: string | null;
+  schemaVersion: 2; activationId: string | null; deviceId: string | null; licenseId: string | null;
   idempotencyKey: string; generation: number; stage: "requested" | "server_bound" | "committed";
 }
 interface RequestedJournal extends JournalBase {
   stage: "requested"; activationId: null; deviceId: null; licenseId: null;
-  username: string; requestHash: string; usbFingerprint: ActivationRequest["usbFingerprint"]; clientVersion: string;
+  requestHash: string; usbFingerprint: ActivationRequest["usbFingerprint"]; clientVersion: string;
 }
 type BoundJournal = JournalBase & {
   stage: "server_bound" | "committed"; activationId: string; deviceId: string; licenseId: string;
-  username: string; requestHash: string; usbFingerprint: ActivationRequest["usbFingerprint"]; clientVersion: string;
+  requestHash: string; usbFingerprint: ActivationRequest["usbFingerprint"]; clientVersion: string;
 };
-type ActivationJournal = RequestedJournal | BoundJournal;
+interface LegacyJournal extends Omit<JournalBase, "schemaVersion"> {
+  schemaVersion: 1; username: string; requestHash: string;
+  usbFingerprint: ActivationRequest["usbFingerprint"]; clientVersion: string;
+}
+type ActivationJournal = RequestedJournal | BoundJournal | LegacyJournal;
 
 interface CoordinatorWriter {
   readJournal(): Promise<ActivationJournal | null>;
@@ -50,7 +54,7 @@ export interface ActivationCoordinatorDependencies {
 
 function requestHash(request: Omit<ActivationRequest, "idempotencyKey">): string {
   return createHash("sha256").update(JSON.stringify([
-    "uclaw-activation-request-v1", request.username, request.activationCode,
+    "uclaw-activation-request-v2", request.activationCode,
     request.usbFingerprint.version, request.usbFingerprint.sha256, request.clientVersion,
   ])).digest("hex");
 }
@@ -101,9 +105,9 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
       if (!isCurrent(active.token)) return current;
       if (journal.stage !== "requested" && (response.activationId !== journal.activationId || response.deviceId !== journal.deviceId || response.licenseId !== journal.licenseId)) return recovery("RECOVERY_REQUIRED");
       const bound: BoundJournal = {
-        schemaVersion: 1, activationId: response.activationId, deviceId: response.deviceId,
+        schemaVersion: 2, activationId: response.activationId, deviceId: response.deviceId,
         licenseId: response.licenseId, idempotencyKey: journal.idempotencyKey,
-        generation: journal.generation, stage: "server_bound", username: journal.username,
+        generation: journal.generation, stage: "server_bound",
         requestHash: journal.requestHash, usbFingerprint: journal.usbFingerprint,
         clientVersion: journal.clientVersion,
       };
@@ -146,10 +150,10 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
     async submit(input) {
       if (operation) return operationError();
       if (current.state !== "input" && current.state !== "recovery-required") return set("error", "INVALID_STATE");
-      const base = { username: input.username, activationCode: input.activationCode, usbFingerprint: deps.usbFingerprint, clientVersion: deps.clientVersion };
+      if (pendingJournal?.schemaVersion === 1) return recovery("RECOVERY_INPUT_REQUIRED");
+      const base = { activationCode: input.activationCode, usbFingerprint: deps.usbFingerprint, clientVersion: deps.clientVersion };
       if (pendingJournal) {
-        if (pendingJournal.username !== input.username
-            || pendingJournal.requestHash !== requestHash(base)
+        if (pendingJournal.requestHash !== requestHash(base)
             || pendingJournal.usbFingerprint.version !== deps.usbFingerprint.version
             || pendingJournal.usbFingerprint.sha256 !== deps.usbFingerprint.sha256
             || pendingJournal.clientVersion !== deps.clientVersion) return recovery("RECOVERY_INPUT_MISMATCH");
@@ -161,7 +165,7 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
         return run(pendingJournal, pendingRequest);
       }
       const request = { ...base, idempotencyKey: `activation:${deps.randomUUID()}` };
-      const journal: RequestedJournal = { schemaVersion: 1, stage: "requested", activationId: null, deviceId: null, licenseId: null, generation: 1, idempotencyKey: request.idempotencyKey, username: request.username, requestHash: requestHash(base), usbFingerprint: deps.usbFingerprint, clientVersion: deps.clientVersion };
+      const journal: RequestedJournal = { schemaVersion: 2, stage: "requested", activationId: null, deviceId: null, licenseId: null, generation: 1, idempotencyKey: request.idempotencyKey, requestHash: requestHash(base), usbFingerprint: deps.usbFingerprint, clientVersion: deps.clientVersion };
       const active = { token: ++nextToken, controller: new AbortController(), serverBound: false };
       operation = active; set("submitting");
       try { await deps.writer.writeJournal(journal); }

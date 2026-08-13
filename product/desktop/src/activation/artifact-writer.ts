@@ -18,13 +18,12 @@ const MAX_JSON_BYTES = 1024 * 1024;
 const MAX_BACKUP_BYTES = 4 * MAX_JSON_BYTES;
 
 const JournalBaseSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   idempotencyKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u),
   generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
 });
 const IdentifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u);
 const RequestBindingSchema = z.object({
-  username: z.string().trim().min(3).max(128),
   requestHash: z.string().regex(/^[a-f0-9]{64}$/u),
   usbFingerprint: z.object({
     version: z.literal("uclaw-usb-v1"),
@@ -47,8 +46,21 @@ const BoundJournalSchema = JournalBaseSchema.extend({
   ...RequestBindingSchema.shape,
 }).strict();
 const JournalSchema = z.union([RequestedJournalSchema, BoundJournalSchema]);
+const LegacyJournalBaseSchema = z.object({
+  schemaVersion: z.literal(1),
+  idempotencyKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u),
+  generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  username: z.string().trim().min(3).max(128), requestHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  usbFingerprint: z.object({ version: z.literal("uclaw-usb-v1"), sha256: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+  clientVersion: z.string().regex(/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u),
+});
+const LegacyJournalSchema = z.union([
+  LegacyJournalBaseSchema.extend({ stage: z.literal("requested"), activationId: z.null(), deviceId: z.null(), licenseId: z.null() }).strict(),
+  LegacyJournalBaseSchema.extend({ stage: z.enum(["server_bound", "committed"]), activationId: IdentifierSchema, deviceId: IdentifierSchema, licenseId: IdentifierSchema }).strict(),
+]);
 
 export type ActivationArtifactJournal = z.infer<typeof JournalSchema>;
+export type ActivationReadableJournal = ActivationArtifactJournal | z.infer<typeof LegacyJournalSchema>;
 export type ActivationRequestedJournal = z.infer<typeof RequestedJournalSchema>;
 export type ActivationServerBoundJournal = z.infer<typeof BoundJournalSchema>;
 
@@ -104,7 +116,7 @@ export interface ActivationArtifactWriter {
   preflight(): Promise<void>;
   writeJournal(journal: ActivationArtifactJournal): Promise<void>;
   writeServerBoundJournal(journal: ActivationServerBoundJournal): Promise<void>;
-  readJournal(): Promise<ActivationArtifactJournal | null>;
+  readJournal(): Promise<ActivationReadableJournal | null>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
   recoverPendingArtifacts(): Promise<void>;
@@ -266,7 +278,10 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
 
     async readJournal() {
       try {
-        return JournalSchema.parse(await readJson(journalPath));
+        const value = await readJson(journalPath);
+        return value && typeof value === "object" && "schemaVersion" in value && value.schemaVersion === 1
+          ? LegacyJournalSchema.parse(value)
+          : JournalSchema.parse(value);
       } catch (error) {
         if (isNotFound(error)) return null;
         if (error instanceof FsSafeError) throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Activation journal path is unsafe.");

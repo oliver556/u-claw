@@ -1,4 +1,4 @@
-import { Check, Eye, EyeOff, KeyRound, LockKeyhole, ShieldCheck, UserRound, Usb, X } from "lucide-react";
+import { Check, Eye, EyeOff, KeyRound, LockKeyhole, ShieldCheck, Usb, X } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { formatActivationCode, normalizeActivationCode, type ActivationApi, type ActivationStatus, useActivation } from "./useActivation";
@@ -9,7 +9,7 @@ declare global {
 }
 
 const progressCopy: Partial<Record<ActivationStatus["state"], [string, string]>> = {
-  submitting: ["正在验证激活信息", "正在安全校验用户名、激活码与库存状态"],
+  submitting: ["正在验证激活信息", "正在安全校验激活码与库存状态"],
   "server-bound": ["已绑定当前 U 盘", "正在获取设备专属启动授权"],
   writing: ["正在安全写入产品盘", "请勿拔出 U 盘或关闭窗口"],
   verifying: ["正在完成本地验签", "正在确认许可证与当前产品盘一致"],
@@ -17,8 +17,8 @@ const progressCopy: Partial<Record<ActivationStatus["state"], [string, string]>>
 };
 
 const errorCopy: Record<string, { title: string; detail: string; retry: boolean }> = {
-  ACTIVATION_INVALID: { title: "用户名或激活码不正确", detail: "请对照产品随附的激活卡重新输入。", retry: true },
-  INVALID_INPUT: { title: "激活信息格式不正确", detail: "用户名至少 3 个字符，激活码应为 26 位。", retry: true },
+  ACTIVATION_INVALID: { title: "激活码不正确", detail: "请对照产品随附的激活卡重新输入。", retry: true },
+  INVALID_INPUT: { title: "激活信息格式不正确", detail: "激活码应为 26 位。", retry: true },
   ACTIVATION_SERVICE_UNAVAILABLE: { title: "激活服务暂时不可用", detail: "请检查网络连接，稍后重试。", retry: true },
   ACTIVATION_CODE_ALREADY_BOUND: { title: "此激活码已绑定其他 U 盘", detail: "当前产品盘无法使用此激活码，请联系售后处理。", retry: false },
   USB_MISSING: { title: "未检测到产品盘", detail: "请重新插入 U-Claw 产品盘后重试。", retry: true },
@@ -55,7 +55,7 @@ function Processing({ status }: { status: ActivationStatus }) {
 }
 
 const activationTasks = [
-  ["验证激活凭据", "确认用户名、激活码与库存状态"],
+  ["验证激活凭据", "确认激活码与库存状态"],
   ["绑定 U 盘身份", "绑定当前产品盘的稳定设备标识"],
   ["签发启动许可证", "获取设备专属签名授权"],
   ["安全写入产品盘", "原子写入并读回启动凭据"],
@@ -85,24 +85,22 @@ function Success() {
   </section>;
 }
 
-function ActivationForm({ recovery, onSubmit }: { recovery: boolean; onSubmit(username: string, code: string): void }) {
-  const [username, setUsername] = useState("");
+function ActivationForm({ recovery, onSubmit }: { recovery: boolean; onSubmit(code: string): void }) {
   const [code, setCode] = useState("");
   const [visible, setVisible] = useState(false);
   const [invalid, setInvalid] = useState(false);
-  const usernameRef = useRef<HTMLInputElement>(null);
-  useEffect(() => usernameRef.current?.focus(), []);
+  const codeRef = useRef<HTMLInputElement>(null);
+  useEffect(() => codeRef.current?.focus(), []);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const valid = username.trim().length >= 3 && normalizeActivationCode(code).length === 26;
+    const valid = normalizeActivationCode(code).length === 26;
     setInvalid(!valid);
-    if (valid) onSubmit(username, code);
+    if (valid) onSubmit(code);
   };
   return <section className="activation-form-area">
-    <header><p className="activation-kicker">{recovery ? "同盘恢复" : "首次激活"}</p><h1>{recovery ? "继续完成本次激活" : "激活这套 U-Claw"}</h1><p>{recovery ? "检测到当前 U 盘有未完成的激活记录。请重新输入同一份激活信息继续。" : "激活码首次使用后将绑定当前 U 盘。换电脑、换接口或换盘符不受影响。"}</p></header>
+    <header><p className="activation-kicker">{recovery ? "同盘恢复" : "首次激活"}</p><h1>{recovery ? "继续完成本次激活" : "激活这套 U-Claw"}</h1><p>{recovery ? "检测到当前 U 盘有未完成的激活记录。请重新输入同一激活码继续。" : "激活码首次使用后将绑定当前 U 盘。换电脑、换接口或换盘符不受影响。"}</p></header>
     <form onSubmit={submit} noValidate>
-      <div className="activation-field"><label htmlFor="activation-username">用户名</label><div className="activation-input"><UserRound /><input id="activation-username" ref={usernameRef} value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" maxLength={128} aria-invalid={invalid && username.trim().length < 3} /></div><small>用户名位于产品随附的激活卡</small></div>
-      <div className="activation-field"><label htmlFor="activation-code">激活码</label><div className="activation-input"><KeyRound /><input id="activation-code" type={visible ? "text" : "password"} value={formatActivationCode(code)} onChange={(event) => setCode(event.target.value)} autoComplete="off" spellCheck={false} maxLength={30} aria-invalid={invalid && normalizeActivationCode(code).length !== 26} /><button type="button" aria-label={visible ? "隐藏激活码" : "显示激活码"} title={visible ? "隐藏激活码" : "显示激活码"} onClick={() => setVisible((value) => !value)}>{visible ? <EyeOff /> : <Eye />}</button></div><small>{invalid ? "请输入 26 位激活码" : "激活码不区分大小写"}</small></div>
+      <div className="activation-field"><label htmlFor="activation-code">激活码</label><div className="activation-input"><KeyRound /><input id="activation-code" ref={codeRef} type={visible ? "text" : "password"} value={formatActivationCode(code)} onChange={(event) => setCode(event.target.value)} autoComplete="off" spellCheck={false} maxLength={30} aria-invalid={invalid && normalizeActivationCode(code).length !== 26} /><button type="button" aria-label={visible ? "隐藏激活码" : "显示激活码"} title={visible ? "隐藏激活码" : "显示激活码"} onClick={() => setVisible((value) => !value)}>{visible ? <EyeOff /> : <Eye />}</button></div><small>{invalid ? "请输入 26 位激活码" : "激活码不区分大小写"}</small></div>
       <div className="activation-binding"><Usb /><div><small>即将绑定</small><strong>当前 U-Claw 产品盘</strong></div><span><LockKeyhole /> 安全读取</span></div>
       <button className="activation-primary" type="submit"><ShieldCheck />{recovery ? "继续恢复" : "激活当前 U 盘"}</button>
     </form>
@@ -123,8 +121,8 @@ export function ActivationFlow({ api }: { api: ActivationApi }) {
     <header className="activation-titlebar"><div><BrandMark /><strong>U-Claw</strong><span>启动与激活</span></div><button onClick={() => void close()} aria-label="关闭" title="关闭"><X /></button></header>
     <div className="activation-body"><Rail state={status.state} /><main id="activation-main" className="activation-stage" aria-live="polite">
       {status.state === "checking" && <Processing status={status} />}
-      {status.state === "input" && <ActivationForm recovery={false} onSubmit={(username, code) => void submit(username, code)} />}
-      {status.state === "recovery-required" && <ActivationForm recovery onSubmit={(username, code) => void submit(username, code)} />}
+      {status.state === "input" && <ActivationForm recovery={false} onSubmit={(code) => void submit(code)} />}
+      {status.state === "recovery-required" && <ActivationForm recovery onSubmit={(code) => void submit(code)} />}
       {processing && <Processing status={status} />}
       {status.state === "complete" && <Success />}
       {status.state === "error" && <ErrorView status={status} retry={() => void preflight()} close={close} />}

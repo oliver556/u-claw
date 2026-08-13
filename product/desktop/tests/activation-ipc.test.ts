@@ -11,8 +11,9 @@ describe("activation-only IPC", () => {
     const coordinator = { preflight: vi.fn(), submit: vi.fn(async () => { throw new Error("raw server body secret"); }), commit: vi.fn(), cancel: vi.fn(), close: vi.fn() };
     registerActivationIpc({ ipcMain: { handle: (c: string, h: Function) => handlers.set(c, h), removeHandler: vi.fn() } as never, authorizedWebContents: sender as never, coordinator: coordinator as never, closeWindow: vi.fn() });
     const invoke = (payload: unknown) => handlers.get("activation.submit")!({ sender, senderFrame: sender.mainFrame }, payload);
-    await expect(invoke({ username: "alice", activationCode: "0".repeat(26), usbFingerprint: {} })).resolves.toEqual({ state: "error", code: "INVALID_INPUT" });
-    await expect(invoke({ username: "alice", activationCode: "0".repeat(26) })).resolves.toEqual({ state: "error", code: "ACTIVATION_FAILED" });
+    await expect(invoke({ activationCode: "0".repeat(26), username: "alice" })).resolves.toEqual({ state: "error", code: "INVALID_INPUT" });
+    await expect(invoke({ activationCode: "0".repeat(26), usbFingerprint: {} })).resolves.toEqual({ state: "error", code: "INVALID_INPUT" });
+    await expect(invoke({ activationCode: "0".repeat(26) })).resolves.toEqual({ state: "error", code: "ACTIVATION_FAILED" });
   });
 
   it("treats activation.commit as a read-only status query", async () => {

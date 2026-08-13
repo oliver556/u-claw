@@ -5,7 +5,6 @@ import { createActivationCoordinator } from "../src/activation/coordinator.js";
 import { ActivationClientError } from "../src/activation/errors.js";
 
 const input = {
-  username: "UCLAW-TEST",
   activationCode: "0123456789ABCDEFGHJKMNPQRS",
 };
 const fingerprint = { version: "uclaw-usb-v1" as const, sha256: "a".repeat(64) };
@@ -57,18 +56,17 @@ function deferred<T>() {
 
 function requestedJournal() {
   const hash = createHash("sha256").update(JSON.stringify([
-    "uclaw-activation-request-v1", input.username, input.activationCode,
+    "uclaw-activation-request-v2", input.activationCode,
     fingerprint.version, fingerprint.sha256, "1.2.3",
   ])).digest("hex");
   return {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     activationId: null,
     deviceId: null,
     licenseId: null,
     idempotencyKey: "activation:fixed-uuid",
     generation: 1,
     stage: "requested" as const,
-    username: input.username,
     requestHash: hash,
     usbFingerprint: fingerprint,
     clientVersion: "1.2.3",
@@ -78,14 +76,13 @@ function requestedJournal() {
 function serverBoundJournal() {
   const binding = requestedJournal();
   return {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     idempotencyKey: "activation:fixed-uuid",
     generation: 1,
     activationId: response.activationId,
     deviceId: response.deviceId,
     licenseId: response.licenseId,
     stage: "server_bound" as const,
-    username: binding.username,
     requestHash: binding.requestHash,
     usbFingerprint: binding.usbFingerprint,
     clientVersion: binding.clientVersion,
@@ -135,14 +132,13 @@ describe("activation coordinator", () => {
       idempotencyKey: "activation:fixed-uuid",
     };
     expect(writer.writeJournal).toHaveBeenCalledWith({
-      schemaVersion: 1,
+      schemaVersion: 2,
       activationId: null,
       deviceId: null,
       licenseId: null,
       idempotencyKey: request.idempotencyKey,
       generation: 1,
       stage: "requested",
-      username: input.username,
       requestHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
       usbFingerprint: fingerprint,
       clientVersion: "1.2.3",
@@ -304,6 +300,15 @@ describe("activation coordinator", () => {
       { ...input, usbFingerprint: fingerprint, clientVersion: "1.2.3", idempotencyKey: pending.idempotencyKey },
       expect.any(AbortSignal),
     );
+  });
+
+  it("never replays a legacy v1 requested journal as a v2 request", async () => {
+    const legacy = { ...requestedJournal(), schemaVersion: 1 as const, username: "UCLAW-TEST" };
+    const { coordinator, writer, deps } = setup();
+    writer.readJournal.mockResolvedValue(legacy);
+    expect(await coordinator.preflight()).toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_REQUIRED" });
+    expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_REQUIRED" });
+    expect(deps.client.activate).not.toHaveBeenCalled();
   });
 
   it("replays activate for server-bound recovery and rejects mismatched response IDs", async () => {
