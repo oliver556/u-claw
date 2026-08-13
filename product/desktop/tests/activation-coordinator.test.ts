@@ -171,6 +171,20 @@ describe("activation coordinator", () => {
     expect(client.activate).toHaveBeenCalledOnce();
   });
 
+  it("returns the current redacted status when commit polls an active operation", async () => {
+    const artifactWrite = deferred<void>();
+    const { coordinator, writer } = setup();
+    writer.writeArtifacts.mockImplementation(() => artifactWrite.promise);
+    await coordinator.preflight();
+
+    const pending = coordinator.submit(input);
+    await vi.waitFor(() => expect(coordinator.status()).toEqual({ state: "writing" }));
+    expect(await coordinator.commit()).toEqual({ state: "writing" });
+
+    artifactWrite.resolve();
+    expect(await pending).toEqual({ state: "complete" });
+  });
+
   it("locks submission while the requested journal is being written", async () => {
     const journalWrite = deferred<void>();
     const { coordinator, writer, deps } = setup();

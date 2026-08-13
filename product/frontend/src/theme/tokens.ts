@@ -47,6 +47,20 @@ export const lightSemanticCssVariables: SemanticCssVariables = {
   "--uclaw-on-accent": "#ffffff",
   "--uclaw-shadow": "rgba(5, 5, 5, 0.12)",
   "--uclaw-shadow-lg": "rgba(5, 5, 5, 0.18)",
+  "--uclaw-activation-bg": "#f5f7f6",
+  "--uclaw-activation-surface": "#fbfcfb",
+  "--uclaw-activation-panel": "#f0f3f1",
+  "--uclaw-activation-text": "#17201b",
+  "--uclaw-activation-muted": "#66716a",
+  "--uclaw-activation-border": "rgba(20, 43, 29, 0.11)",
+  "--uclaw-activation-border-strong": "rgba(20, 43, 29, 0.20)",
+  "--uclaw-activation-accent": "#167a45",
+  "--uclaw-activation-accent-active": "#0f6035",
+  "--uclaw-activation-accent-soft": "#e5f4eb",
+  "--uclaw-activation-focus": "rgba(22, 122, 69, 0.14)",
+  "--uclaw-activation-shadow": "rgba(20, 43, 29, 0.06)",
+  "--uclaw-activation-progress": "#dfe6e1",
+  "--uclaw-activation-error-ring": "#fbe9e9",
 };
 
 export const darkSemanticCssVariables: SemanticCssVariables = {
@@ -90,6 +104,20 @@ export const darkSemanticCssVariables: SemanticCssVariables = {
   "--uclaw-on-accent": "#ffffff",
   "--uclaw-shadow": "rgba(0, 0, 0, 0.32)",
   "--uclaw-shadow-lg": "rgba(0, 0, 0, 0.48)",
+  "--uclaw-activation-bg": "#171c19",
+  "--uclaw-activation-surface": "#1c231f",
+  "--uclaw-activation-panel": "#222b26",
+  "--uclaw-activation-text": "#e8eee9",
+  "--uclaw-activation-muted": "#9eaaa2",
+  "--uclaw-activation-border": "rgba(221, 238, 227, 0.12)",
+  "--uclaw-activation-border-strong": "rgba(221, 238, 227, 0.22)",
+  "--uclaw-activation-accent": "#49aa6d",
+  "--uclaw-activation-accent-active": "#69c88b",
+  "--uclaw-activation-accent-soft": "#173523",
+  "--uclaw-activation-focus": "rgba(73, 170, 109, 0.28)",
+  "--uclaw-activation-shadow": "rgba(0, 0, 0, 0.28)",
+  "--uclaw-activation-progress": "#354039",
+  "--uclaw-activation-error-ring": "#3a191b",
 };
 
 const seedTokens: NonNullable<ThemeConfig["token"]> = {
