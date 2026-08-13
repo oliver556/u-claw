@@ -88,6 +88,7 @@ export interface RegisterIpcDependencies {
   organizer?: SessionOrganizerStore;
   attachments?: AttachmentService;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
+  importSelectedAttachments?(): Promise<Awaited<ReturnType<AttachmentService["get"]>>[]>;
   providers?: ProviderStore;
   providerNetwork?: ProviderNetworkService;
   providerConfig?: OpenClawProviderConfigBackend;
@@ -140,6 +141,7 @@ export function registerIpc({
   organizer,
   attachments,
   selectAttachments,
+  importSelectedAttachments,
   providers,
   providerNetwork,
   providerConfig,
@@ -170,7 +172,7 @@ export function registerIpc({
     "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group",
     "session-organizer.assign-group", "chat.send", "models.select-for-session",
   ]);
-  const attachmentWriteMethods = new Set(["select", "import", "prepare", "remove"]);
+  const attachmentWriteMethods = new Set(["select", "import", "import.begin", "import.chunk", "import.finish", "prepare", "cancel", "remove"]);
   const channelWriteMethods = new Set([
     "channels.create", "channels.update", "channels.remove", "channels.set-enabled", "channels.test",
     "channels.reconnect", "channels.wechat-login-start", "channels.wechat-login-refresh",
@@ -287,11 +289,26 @@ export function registerIpc({
       const invoke = async () => {
         let result: unknown = null;
         if (request.method === "select") {
-          if (selectAttachments === undefined) throw safeError("UNAVAILABLE", "Attachment selection is unavailable.");
-          const selected = await selectAttachments();
-          result = await Promise.all(selected.map((input) => attachments.import(input)));
+          if (importSelectedAttachments !== undefined) result = await importSelectedAttachments();
+          else {
+            if (selectAttachments === undefined) throw safeError("UNAVAILABLE", "Attachment selection is unavailable.");
+            const selected = await selectAttachments();
+            result = await Promise.all(selected.map((input) => attachments.import(input)));
+          }
         }
         if (request.method === "import") result = await attachments.import(request.params);
+        if (request.method === "import.begin") {
+          if (!attachments.beginImport) throw safeError("UNAVAILABLE", "Streaming attachment import is unavailable.");
+          result = await attachments.beginImport(request.params);
+        }
+        if (request.method === "import.chunk") {
+          if (!attachments.importChunk) throw safeError("UNAVAILABLE", "Streaming attachment import is unavailable.");
+          result = await attachments.importChunk(request.params);
+        }
+        if (request.method === "import.finish") {
+          if (!attachments.finishImport) throw safeError("UNAVAILABLE", "Streaming attachment import is unavailable.");
+          result = await attachments.finishImport(request.params);
+        }
         if (request.method === "get") result = await attachments.get(request.params.attachmentId);
         if (request.method === "prepare") {
           const states = [];
