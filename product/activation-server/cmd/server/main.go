@@ -55,7 +55,7 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	if err := persistence.Migrate(ctx, pool); err != nil {
+	if err := persistence.VerifyMigrations(ctx, pool); err != nil {
 		return err
 	}
 	kms, err := productionKMS(cfg)

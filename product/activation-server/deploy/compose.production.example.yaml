@@ -36,9 +36,55 @@ x-activation-app: &activation-app
 services:
   activation-1:
     <<: *activation-app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   activation-2:
     <<: *activation-app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    image: postgres:17.6-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        export ACTIVATION_DATABASE_URL="$$(cat /run/secrets/migration_database_url)"
+        export ACTIVATION_MIGRATION_ROLE="$$(cat /run/secrets/migration_role)"
+        export ACTIVATION_MIGRATION_PASSWORD="$$(cat /run/secrets/migration_password)"
+        export ACTIVATION_APP_ROLE="$$(cat /run/secrets/app_role)"
+        export ACTIVATION_APP_PASSWORD="$$(cat /run/secrets/app_password)"
+        exec /deploy/migrate.sh
+    configs:
+      - source: migrate_script
+        target: /deploy/migrate.sh
+        mode: 0555
+      - source: migration_001
+        target: /migrations/001_initial.sql
+        mode: 0444
+      - source: migration_002
+        target: /migrations/002_lifecycle.sql
+        mode: 0444
+      - source: migration_003
+        target: /migrations/003_admin.sql
+        mode: 0444
+    secrets:
+      - migration_database_url
+      - migration_role
+      - migration_password
+      - app_role
+      - app_password
+    networks:
+      - service_private
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
 
   public-gateway:
     image: openresty/openresty:1.27.1.2-alpine
@@ -123,8 +169,26 @@ secrets:
     file: ${MANAGEMENT_CLIENT_CA_FILE:?set MANAGEMENT_CLIENT_CA_FILE}
   rate_limit_hmac_key:
     file: ${RATE_LIMIT_HMAC_KEY_FILE:?set RATE_LIMIT_HMAC_KEY_FILE}
+  migration_database_url:
+    file: ${MIGRATION_DATABASE_URL_FILE:?set MIGRATION_DATABASE_URL_FILE}
+  migration_role:
+    file: ${MIGRATION_ROLE_FILE:?set MIGRATION_ROLE_FILE}
+  migration_password:
+    file: ${MIGRATION_PASSWORD_FILE:?set MIGRATION_PASSWORD_FILE}
+  app_role:
+    file: ${APP_ROLE_FILE:?set APP_ROLE_FILE}
+  app_password:
+    file: ${APP_PASSWORD_FILE:?set APP_PASSWORD_FILE}
 
 configs:
+  migrate_script:
+    file: ./migrate.sh
+  migration_001:
+    file: ../migrations/001_initial.sql
+  migration_002:
+    file: ../migrations/002_lifecycle.sql
+  migration_003:
+    file: ../migrations/003_admin.sql
   public_gateway:
     content: |
       worker_processes auto;

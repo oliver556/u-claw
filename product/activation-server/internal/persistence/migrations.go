@@ -108,6 +108,30 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
+func VerifyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
+	if pool == nil {
+		return errors.New("PostgreSQL pool is required")
+	}
+	for _, candidate := range []migration{
+		{version: 1, checksum: initialMigrationChecksum},
+		{version: 2, checksum: lifecycleMigrationChecksum},
+		{version: 3, checksum: adminMigrationChecksum},
+	} {
+		var checksum []byte
+		err := pool.QueryRow(ctx, "SELECT checksum FROM schema_migrations WHERE version = $1", candidate.version).Scan(&checksum)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("migration %d is not applied", candidate.version)
+		}
+		if err != nil {
+			return fmt.Errorf("read migration %d ledger: %w", candidate.version, err)
+		}
+		if !equalBytes(checksum, candidate.checksum) {
+			return fmt.Errorf("migration %d checksum mismatch", candidate.version)
+		}
+	}
+	return nil
+}
+
 func equalBytes(left, right []byte) bool {
 	if len(left) != len(right) {
 		return false

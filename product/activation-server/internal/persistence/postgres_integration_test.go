@@ -104,6 +104,27 @@ func TestInitialMigrationReleaseFileMatchesCompiledMigration(t *testing.T) {
 	}
 }
 
+func TestRuntimeMigrationVerificationIsReadOnly(t *testing.T) {
+	contents, err := os.ReadFile("migrations.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(contents)
+	start := strings.Index(source, "func VerifyMigrations(")
+	if start < 0 {
+		t.Fatal("VerifyMigrations is missing")
+	}
+	body := source[start:]
+	if end := strings.Index(body, "\nfunc "); end >= 0 {
+		body = body[:end]
+	}
+	for _, forbidden := range []string{"CREATE ", "ALTER ", "INSERT ", "UPDATE ", "DELETE ", "Exec("} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("runtime migration verification contains DDL/DML %q", forbidden)
+		}
+	}
+}
+
 func TestLifecycleMigrationContainsTaskFiveAndSixSchema(t *testing.T) {
 	sql := LifecycleMigrationSQL()
 	for _, fragment := range []string{
