@@ -8,9 +8,9 @@ type Response = { ok: boolean; result?: unknown; error?: { message: string } };
 type Invoke = (request: Request) => Promise<Response>;
 type Subscribe = (listener: (event: { event: "task"; payload: { type: string; task: Task } }) => void) => () => void;
 
-export interface TaskArtifactCenterProps { invoke?: Invoke; subscribe?: Subscribe; onOpenSession(sessionId: string): void; }
+export interface TaskArtifactCenterProps { invoke?: Invoke; subscribe?: Subscribe; onOpenSession(sessionId: string): void; onClose?(): void; }
 
-export function TaskArtifactCenter({ invoke: suppliedInvoke, subscribe: suppliedSubscribe, onOpenSession }: TaskArtifactCenterProps) {
+export function TaskArtifactCenter({ invoke: suppliedInvoke, subscribe: suppliedSubscribe, onOpenSession, onClose }: TaskArtifactCenterProps) {
   const bridge = (window as unknown as { uclaw?: { taskArtifacts?: { invoke: Invoke; subscribe: Subscribe } } }).uclaw?.taskArtifacts;
   const invoke = suppliedInvoke ?? bridge?.invoke;
   const subscribe = suppliedSubscribe ?? bridge?.subscribe;
@@ -55,7 +55,7 @@ export function TaskArtifactCenter({ invoke: suppliedInvoke, subscribe: supplied
   const shown = tab === "active" ? active : history;
 
   return <section className="task-artifact-center" aria-label="Task 活动中心" aria-busy={busy}>
-    <header className="data-toolbar"><strong>Task 活动中心</strong><button type="button" aria-label="刷新 Task 和成果" disabled={busy} onClick={() => void refresh()}><RefreshCw /></button>{busy ? <LoaderCircle className="spin" /> : null}</header>
+    <header className="data-toolbar"><strong>Task 活动中心</strong><span><button type="button" aria-label="刷新 Task 和成果" disabled={busy} onClick={() => void refresh()}><RefreshCw /></button>{onClose ? <button type="button" aria-label="关闭任务活动中心" onClick={onClose}><X /></button> : null}{busy ? <LoaderCircle className="spin" /> : null}</span></header>
     <div role="tablist" className="settings-tabs">
       <button role="tab" aria-selected={tab === "active"} onClick={() => setTab("active")}>运行中</button>
       <button role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>历史</button>

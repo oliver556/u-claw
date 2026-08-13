@@ -28,12 +28,15 @@ describe("startGatewayAndCreateWindow", () => {
       { processAlive: true, serviceReady: true, businessAvailable: true, checkedAtMs: 2 },
     ];
 
+    const setPort = vi.fn((port: number) => order.push(`set-port:${port}`));
+    const markHealthReady = vi.fn(() => order.push("health-ready"));
+    const markCapabilityReady = vi.fn(() => order.push("capability-ready"));
     const result = await startGatewayAndCreateWindow({
       selectPort: vi.fn(async () => {
         order.push("port");
         return 18790;
       }),
-      gatewayProcess: { start, stop: vi.fn(async () => undefined) },
+      gatewayProcess: { start, stop: vi.fn(async () => undefined), setPort, markHealthReady, markCapabilityReady },
       buildLaunchOptions: (port) => ({
         executable: "/runtime/node.exe",
         args: ["openclaw.js", "gateway", "--port", String(port)],
@@ -58,7 +61,16 @@ describe("startGatewayAndCreateWindow", () => {
       cwd: "/runtime",
       env: { UCLAW_DATA_DIR: "D:\\uclaw", UCLAW_GATEWAY_PORT: "18790" },
     });
-    expect(order).toEqual(["port", "start:18790", "poll", "window", "show"]);
+    expect(order).toEqual([
+      "port",
+      "set-port:18790",
+      "start:18790",
+      "health-ready",
+      "poll",
+      "capability-ready",
+      "window",
+      "show",
+    ]);
   });
 
   it("rejects invalid injected launch parameters before spawning", async () => {
@@ -99,10 +111,11 @@ describe("startGatewayAndCreateWindow", () => {
 
   it("stops the owned gateway when readiness fails and never shows a window", async () => {
     const stop = vi.fn(async () => undefined);
+    const markStartupFailed = vi.fn();
     const createWindow = vi.fn();
     await expect(startGatewayAndCreateWindow({
       selectPort: vi.fn(async () => 18789),
-      gatewayProcess: { start: vi.fn(() => ({ pid: 4321, instanceId: 1 })), stop },
+      gatewayProcess: { start: vi.fn(() => ({ pid: 4321, instanceId: 1 })), stop, markStartupFailed },
       buildLaunchOptions: () => ({ executable: "node", args: ["gateway"] }),
       checkHealth: vi.fn(async () => ({
         processAlive: false,
@@ -116,7 +129,8 @@ describe("startGatewayAndCreateWindow", () => {
       pollIntervalMs: 10,
       createWindow,
     })).rejects.toThrow("exited");
-    expect(stop).toHaveBeenCalledOnce();
+    expect(markStartupFailed).toHaveBeenCalledWith({ pid: 4321, instanceId: 1 });
+    expect(stop).toHaveBeenCalledWith("startup-rollback");
     expect(createWindow).not.toHaveBeenCalled();
   });
 

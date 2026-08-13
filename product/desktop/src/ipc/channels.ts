@@ -20,6 +20,7 @@ export const PRODUCT_SERVICES_IPC_CHANNEL = "uclaw:product-services";
 export const DATA_IPC_CHANNEL = "uclaw:data";
 export const DIAGNOSTICS_IPC_CHANNEL = "uclaw:diagnostics";
 export const RELEASE_IPC_CHANNEL = "uclaw:release";
+export const IMAGE_OPERATION_IPC_CHANNEL = "uclaw:image-operation";
 
 export const IPC_CHANNELS = Object.freeze([
   WINDOW_IPC_CHANNEL,
@@ -44,4 +45,5 @@ export const IPC_CHANNELS = Object.freeze([
   DATA_IPC_CHANNEL,
   DIAGNOSTICS_IPC_CHANNEL,
   RELEASE_IPC_CHANNEL,
+  IMAGE_OPERATION_IPC_CHANNEL,
 ] as const);

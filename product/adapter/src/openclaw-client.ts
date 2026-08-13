@@ -31,6 +31,7 @@ import { mapSession, mapSessionSummary, RawSessionSchema } from "./mappers/sessi
 import { mapOpenClawModel, RuntimeOpenClawModelsListResponseSchema } from "./mappers/model.js";
 import {
   OpenClawExecApprovalEventSchema,
+  OpenClawHistoryMessageSchema,
   OpenClawHistoryResponseSchema,
   OpenClawMessageGetResponseSchema,
   OpenClawPluginApprovalEventSchema,
@@ -433,6 +434,8 @@ export class AsyncEventQueue<T> {
 
 export interface OpenClawClientOptions {
   transport: OpenClawTransport;
+  gatewayOrigin?: () => string | undefined;
+  dataRoot?: () => string | undefined;
   attachments?: AttachmentManager;
   statusProjection?: () => Pick<GatewayStatus, "processAlive" | "usb">;
   now?: () => string;
@@ -542,7 +545,7 @@ export class OpenClawClient implements UClawClient {
         includeDerivedTitles: true,
         includeLastMessage: true,
       }, SessionPageSchema);
-      const items = uniqueById(raw.sessions.map(mapSessionSummary));
+      const items = uniqueById(raw.sessions.map(mapSessionSummary)).filter((session) => session.id !== "agent:main:main");
       const nextCursor = encodeNextOffset("sessions.list", raw.hasMore, raw.nextOffset, offset);
       return { items, nextCursor, hasMore: raw.hasMore };
     },
@@ -591,12 +594,12 @@ export class OpenClawClient implements UClawClient {
       }, OpenClawHistoryResponseSchema);
       if (raw.sessionKey !== sessionId) throw new RpcProtocolError("chat.history");
       const nextCursor = encodeNextOffset("chat.history", raw.hasMore === true, raw.nextOffset, offset);
-      return { items: uniqueById(mapOpenClawHistoryResponse(raw)), nextCursor, hasMore: raw.hasMore ?? false };
+      return { items: uniqueById(mapOpenClawHistoryResponse(raw, this.options.gatewayOrigin?.(), this.options.dataRoot?.())), nextCursor, hasMore: raw.hasMore ?? false };
     },
     get: async (sessionId, messageId) => {
       this.requireMethod("chat.message.get");
       const raw = await this.options.transport.router.request("chat.message.get", { sessionKey: sessionId, messageId }, OpenClawMessageGetResponseSchema);
-      const message = mapOpenClawMessageGetResponse(raw, sessionId);
+      const message = mapOpenClawMessageGetResponse(raw, sessionId, this.options.gatewayOrigin?.(), this.options.dataRoot?.());
       if (message === undefined) throw this.notFound("chat.message.get");
       return message;
     },
@@ -965,6 +968,7 @@ export class OpenClawClient implements UClawClient {
       if (canRecoverMissingFinal) {
         void (async () => {
           let completed = false;
+          let terminalFailed = false;
           for (let attempt = 0; attempt < 12; attempt += 1) {
             const wait = await this.options.transport.router.request(
               "agent.wait",
@@ -972,7 +976,12 @@ export class OpenClawClient implements UClawClient {
               AgentWaitResponseSchema,
               signal,
             );
-            if (wait.runId !== accepted.runId || wait.status === "error") throw new RpcProtocolError("agent.wait");
+            if (wait.runId !== accepted.runId) throw new RpcProtocolError("agent.wait");
+            if (wait.status === "error") {
+              terminalFailed = true;
+              completed = true;
+              break;
+            }
             if (wait.status === "ok") {
               completed = true;
               break;
@@ -995,10 +1004,36 @@ export class OpenClawClient implements UClawClient {
           }
           const turnMessages = userIndex < 0 ? [] : history.messages.slice(userIndex + 1);
           const nextUserIndex = turnMessages.findIndex((candidate) => candidate.role === "user");
-          const rawMessage = turnMessages.slice(0, nextUserIndex < 0 ? undefined : nextUserIndex).find((candidate) =>
+          const rawHistoryMessage = turnMessages.slice(0, nextUserIndex < 0 ? undefined : nextUserIndex).reverse().find((candidate) =>
             candidate.role === "assistant");
-          if (rawMessage === undefined) throw new RpcProtocolError("chat.history");
-          const [message] = mapOpenClawHistoryResponse({ ...history, messages: [rawMessage] });
+          if (rawHistoryMessage === undefined) throw new RpcProtocolError("chat.history");
+          const rawMessage = OpenClawHistoryMessageSchema.parse(rawHistoryMessage);
+          const hasSuccessfulReply = rawMessage.errorMessage === undefined && (
+            typeof rawMessage.content === "string"
+              ? rawMessage.content.trim() !== ""
+              : rawMessage.content.some((block) =>
+                block.type === "text" && typeof block.text === "string" && block.text.trim() !== ""
+                || block.type === "image" && typeof block.url === "string" && block.url.startsWith("/api/chat/media/outgoing/"))
+          );
+          if (terminalFailed && !hasSuccessfulReply) {
+            const blocked = /(?:^|\D)403(?:\D|$)|\bblocked\b/iu.test(rawMessage.errorMessage ?? "");
+            const message = blocked
+              ? "模型服务拒绝了此次请求（403）。请修改消息后重试。"
+              : "模型服务未能完成此次请求。请稍后重试。";
+            enqueue(MessageEventSchema.parse({
+              type: "error",
+              runId: accepted.runId,
+              error: {
+                code: "OPERATION_FAILED",
+                message,
+                retryable: true,
+                recoveryActions: ["retry"],
+                causeDetails: { operation: "chat.send", status: blocked ? "403" : "error" },
+              },
+            }));
+            return;
+          }
+          const [message] = mapOpenClawHistoryResponse({ ...history, messages: [rawMessage] }, this.options.gatewayOrigin?.(), this.options.dataRoot?.());
           if (message === undefined) throw new RpcProtocolError("chat.history");
           enqueue(MessageEventSchema.parse({
             type: "final",

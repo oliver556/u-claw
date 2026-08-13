@@ -12,25 +12,30 @@ import type {
 } from "@uclaw/shared";
 import { AlertTriangle, Download, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { InstalledSkillWorkbench } from "./InstalledSkillWorkbench";
 
 let requestSequence = 0;
 const nextRequestId = () => `skill-ui-${++requestSequence}`;
 const riskLabel: Record<CapabilityRisk, string> = { low: "低风险", medium: "中风险", high: "高风险", critical: "严重风险" };
 const permissionKindLabel = { filesystem: "文件", network: "网络", command: "命令", environment: "环境变量" } as const;
-const availabilityLabel = { available: "可用", disabled: "已禁用", "missing-dependency": "缺少依赖", conflict: "存在冲突", error: "读取失败" } as const;
+const availabilityLabel = { available: "可用", disabled: "已禁用", "missing-dependency": "缺少依赖", conflict: "存在冲突", "not-detected": "OpenClaw 未识别", error: "读取失败" } as const;
 type View = "catalog" | "installed" | "runtime" | "curator" | "proposals";
 type ProposalForm = "create" | "update" | null;
 
 const messageOf = (error: unknown, fallback: string) => error instanceof Error && error.message ? error.message : fallback;
 
 export function SkillManager({ publicView = false }: { publicView?: boolean } = {}) {
+  return publicView ? <InstalledSkillWorkbench /> : <AdvancedSkillManager />;
+}
+
+function AdvancedSkillManager() {
   const invoke = window.uclaw?.skills?.invoke;
   const mounted = useRef(true);
   const loadSequence = useRef(0);
   const proposalInspectSequence = useRef(0);
   const selectedProposalId = useRef<string | null>(null);
   const mutationPendingRef = useRef(false);
-  const [view, setView] = useState<View>(publicView ? "installed" : "catalog");
+  const [view, setView] = useState<View>("catalog");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [items, setItems] = useState<SkillCatalogItem[]>([]);
@@ -341,10 +346,10 @@ export function SkillManager({ publicView = false }: { publicView?: boolean } = 
   const actionLabel = action === "install" ? "安装" : action === "update" ? "更新" : "启用";
 
   return <section className="skill-manager" aria-label="技能管理">
-    {!publicView ? <div className="skill-view-tabs" role="tablist" aria-label="技能视图">
+    <div className="skill-view-tabs" role="tablist" aria-label="技能视图">
       {([['catalog', '免费目录'], ['installed', '已安装'], ['runtime', '运行状态'], ['curator', 'Curator'], ['proposals', 'Proposals']] as const).map(([id, label]) =>
         <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => switchView(id)}>{label}</button>)}
-    </div> : null}
+    </div>
 
     {(view === "catalog" || view === "installed") ? <>
       <div className="skill-toolbar">

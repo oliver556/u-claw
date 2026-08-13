@@ -10,6 +10,7 @@ import {
   type SkillConfirmation,
   type SkillCuratorStatus,
   type SkillDetail,
+  type LocalSkillDetail,
   type SkillOperation,
   type SkillProposalInspect,
   type SkillProposalCreateInput,
@@ -72,9 +73,11 @@ type ToggleJournal = z.infer<typeof ToggleJournalSchema>;
 type Journal = z.infer<typeof JournalSchema>;
 
 export interface SkillMutationInput { slug: string; confirmation: SkillConfirmation | null }
+export interface SkillBundleInstallInput { detail: SkillDetail; validated: ValidatedBundle; confirmation: SkillConfirmation }
 export interface SkillService {
   search(input: { query: string; category?: string | null; cursor: string | null; pageSize: number }): Promise<{ items: SkillCatalogItem[]; nextCursor: string | null; hasMore: boolean; mode: "fixture" | "live" }>;
   detail(slug: string): Promise<SkillDetail>;
+  localDetail(slug: string): Promise<LocalSkillDetail>;
   installed(): Promise<SkillCatalogItem[]>;
   runtimeStatus(): Promise<SkillRuntimeInventory>;
   curatorStatus(): Promise<SkillCuratorStatus>;
@@ -87,6 +90,7 @@ export interface SkillService {
   proposalRevise(input: SkillProposalReviseInput): Promise<SkillProposalInspect>;
   proposalRequestRevision(input: SkillProposalRevisionRequestInput): Promise<SkillProposalRevisionRun>;
   startInstall(input: SkillMutationInput): Promise<SkillOperation>;
+  startInstallBundle(input: SkillBundleInstallInput): Promise<SkillOperation>;
   startUpdate(input: SkillMutationInput): Promise<SkillOperation>;
   startUninstall(slug: string): Promise<SkillOperation>;
   setEnabled(input: SkillMutationInput & { enabled: boolean }): Promise<SkillOperation>;
@@ -378,7 +382,7 @@ export async function createSkillService({
       pricingType: normalized.pricingType, installedVersion: record?.version ?? null, enabled: record?.enabled ?? false,
       updateAvailable: record !== undefined && record.version !== normalized.version, source: normalized.source,
       permissions: normalized.permissions, permissionFingerprint: normalized.permissionFingerprint, risk: normalized.risk,
-      mode: normalized.mode, categories: normalized.categories,
+      mode: normalized.mode, categories: normalized.categories, logoUrl: normalized.logoUrl,
     };
   };
   const projectLocal = (item: LocalSkillItem, runtimeItem?: SkillRuntimeInventory["skills"][number]): SkillCatalogItem => {
@@ -392,7 +396,7 @@ export async function createSkillService({
       enabled: runtimeItem ? !runtimeItem.disabled : runtime ? false : record?.enabled ?? false,
       updateAvailable: false, source,
       permissions: [], permissionFingerprint: createHash("sha256").update("[]").digest("hex"), risk: "low",
-      mode: "live", categories: [],
+      mode: "live", categories: [], logoUrl: null,
     };
   };
   const loadRemoteDetail = async (slug: string): Promise<SkillDetail> => {
@@ -428,6 +432,12 @@ export async function createSkillService({
       ? runtime.status(conflicts)
       : { workspaceDir: "OpenClaw workspace", managedSkillsDir: "OpenClaw managed skills", skills: [] };
   };
+  const matchesRuntime = (local: LocalSkillItem, candidate: SkillRuntimeInventory["skills"][number]): boolean =>
+    isWorkspaceRuntimeItem(candidate) && [local.id, local.runtimeName, local.directoryKey].includes(candidate.id);
+  const runtimeForLocal = (local: LocalSkillItem, inventory?: SkillRuntimeInventory) => {
+    const matches = inventory?.skills.filter((candidate) => matchesRuntime(local, candidate)) ?? [];
+    return matches.length === 1 ? matches[0] : undefined;
+  };
   const runtimeStatus = async (): Promise<SkillRuntimeInventory> => {
     await recoverPendingTransactions();
     const local = await scan();
@@ -435,21 +445,37 @@ export async function createSkillService({
     const inventory = runtime
       ? await runtime.status(conflicts)
       : { workspaceDir: "OpenClaw workspace", managedSkillsDir: "OpenClaw managed skills", skills: [] };
-    const skills = inventory.skills.map((item) => {
+    const matchedRuntimeIds = new Set<string>();
+    const projectedLocal = local.items.flatMap((item) => {
+      const runtimeItem = runtimeForLocal(item, inventory);
+      if (!runtimeItem) return [];
+      matchedRuntimeIds.add(runtimeItem.id);
+      const collision = conflicts.get(item.id) ?? [];
+      return [{
+        ...runtimeItem,
+        id: item.id,
+        runtimeId: runtimeItem.id,
+        name: item.name,
+        description: item.description,
+        availability: collision.length === 0 ? runtimeItem.availability : "conflict" as const,
+        conflicts: collision.length === 0 ? runtimeItem.conflicts : [...collision],
+      }];
+    });
+    const skills = inventory.skills.filter((item) => !matchedRuntimeIds.has(item.id)).map((item) => {
       const collision = conflicts.get(item.id) ?? [];
       return collision.length === 0 ? item : { ...item, availability: "conflict" as const, conflicts: [...collision] };
     });
     for (const item of local.items) {
-      if (skills.some((candidate) => candidate.id === item.id)) continue;
+      if (projectedLocal.some((candidate) => candidate.id === item.id)) continue;
       const collision = conflicts.get(item.id) ?? [];
       skills.push({
         id: item.id, name: item.name, description: item.description, source: item.origin,
         bundled: item.origin === "portable-bundled", disabled: true, eligible: false,
         modelVisible: false, userInvocable: false, commandVisible: false,
-        availability: collision.length > 0 ? "conflict" : "error", missing: emptyMissing, conflicts: [...collision],
+        availability: collision.length > 0 ? "conflict" : "not-detected", missing: emptyMissing, conflicts: [...collision],
       });
     }
-    return { ...inventory, skills };
+    return { ...inventory, skills: [...skills, ...projectedLocal] };
   };
   const updateOperation = (id: string, patch: Partial<SkillOperation>) => {
     const current = operations.get(id);
@@ -503,16 +529,16 @@ export async function createSkillService({
     if (actualEnabled !== expectedEnabled) throw new Error("OpenClaw Skill readback mismatch.");
   };
   const synthesizeWorkspaceRecord = async (slug: string, inventory?: SkillRuntimeInventory): Promise<InstalledRecord> => {
-    const target = join(authoritativeRoot, slug);
-    await assertSafeExistingTarget(target);
-    const frontmatter = parseSkillMarkdownFrontmatter(await readFile(join(target, "SKILL.md"), "utf8"));
+    const localItem = (await scan()).items.find((item) => item.id === slug && item.origin === "workspace-installed");
+    if (!localItem) throw new Error("Workspace Skill is missing.");
+    const frontmatter = parseSkillMarkdownFrontmatter(localItem.markdown);
     if (frontmatter.slug !== undefined && frontmatter.slug !== slug) throw new Error("Workspace Skill identity mismatch.");
     const currentInventory = inventory ?? (runtime ? await runtimeReadback() : undefined);
-    const runtimeItem = currentInventory?.skills.find((item) => item.id === slug && isWorkspaceRuntimeItem(item));
+    const runtimeItem = runtimeForLocal(localItem, currentInventory);
     if (runtime && !runtimeItem) throw new Error("Workspace Skill is not detected by OpenClaw.");
     return { slug, version: frontmatter.version ?? "local", enabled: runtimeItem ? !runtimeItem.disabled : false };
   };
-  const installOrUpdate = async (detail: SkillDetail, action: "install" | "update", operationId: string): Promise<void> => {
+  const installOrUpdate = async (detail: SkillDetail, action: "install" | "update", operationId: string, prepared?: ValidatedBundle): Promise<void> => {
     state = await readState(statePath);
     if (action === "install" && (state.installed[detail.slug] || await pathExists(join(authoritativeRoot, detail.slug)))) {
       throw domainError("CONFLICT", "Skill is already installed.");
@@ -520,9 +546,8 @@ export async function createSkillService({
     if (action === "update" && !state.installed[detail.slug]) state = {
       ...state, installed: { ...state.installed, [detail.slug]: await synthesizeWorkspaceRecord(detail.slug) },
     };
-    const bundle = await client.download(detail.slug);
     updateOperation(operationId, { progress: 25, phase: "validating" });
-    const validated = validateSkillBundle(bundle, detail);
+    const validated = prepared ?? validateSkillBundle(await client.download(detail.slug), detail);
     const { target, staging, backup } = operationPaths(authoritativeRoot, detail.slug, operationId);
     const journalPath = join(transactionDir, `${operationId}.json`);
     const stateBeforeOperation = state;
@@ -595,6 +620,12 @@ export async function createSkillService({
       return { ...page, items: free };
     },
     detail: loadDetail,
+    async localDetail(slug) {
+      SlugSchema.parse(slug);
+      const item = (await scan()).items.find((candidate) => candidate.id === slug && candidate.origin === "workspace-installed");
+      if (!item) throw domainError("NOT_FOUND", "Workspace Skill not found.");
+      return { slug: item.id, name: item.name, description: item.description, markdown: item.markdown };
+    },
     async installed() {
       await recoverPendingTransactions();
       state = await readState(statePath);
@@ -603,13 +634,14 @@ export async function createSkillService({
       const bySlug = new Map<string, SkillCatalogItem>();
       for (const item of local.items) {
         if (item.origin !== "workspace-installed") continue;
-        const runtimeItem = inventory?.skills.find((candidate) => candidate.id === item.id && isWorkspaceRuntimeItem(candidate));
+        const runtimeItem = runtimeForLocal(item, inventory);
         bySlug.set(item.id, projectLocal(item, runtimeItem));
       }
       for (const [slug, record] of Object.entries(state.installed)) {
         if (!local.items.some((item) => item.id === slug && item.origin === "workspace-installed")) continue;
         if (!record.detail) continue;
-        const runtimeItem = inventory?.skills.find((candidate) => candidate.id === slug && isWorkspaceRuntimeItem(candidate));
+        const localItem = local.items.find((item) => item.id === slug && item.origin === "workspace-installed");
+        const runtimeItem = localItem ? runtimeForLocal(localItem, inventory) : undefined;
         bySlug.set(slug, { ...project(record.detail), source: { provider: "openclaw", origin: "workspace" }, enabled: runtimeItem ? !runtimeItem.disabled : runtime ? false : record.enabled });
       }
       return [...bySlug.values()];
@@ -632,6 +664,15 @@ export async function createSkillService({
         throw domainError("CONFLICT", "Skill is already installed.");
       }
       return start(input.slug, "install", (id) => installOrUpdate(detail, "install", id));
+    },
+    async startInstallBundle({ detail, validated, confirmation }) {
+      SkillDetailSchema.parse(detail);
+      confirm(detail, confirmation);
+      const persistedState = await readState(statePath);
+      if (persistedState.installed[detail.slug] || await pathExists(join(authoritativeRoot, detail.slug))) {
+        throw domainError("CONFLICT", "Skill is already installed.");
+      }
+      return start(detail.slug, "install", (id) => installOrUpdate(detail, "install", id, validated));
     },
     async startUpdate(input) {
       const detail = await loadRemoteDetail(input.slug);
@@ -696,7 +737,8 @@ export async function createSkillService({
           throw domainError("NOT_FOUND", "Workspace Skill not found.");
         }
         const inventory = runtime ? await runtime.status(conflicts) : undefined;
-        const runtimeItem = inventory?.skills.find((item) => item.id === input.slug && isWorkspaceRuntimeItem(item));
+        const localItem = local.items.find((item) => item.id === input.slug && item.origin === "workspace-installed")!;
+        const runtimeItem = runtimeForLocal(localItem, inventory);
         if (runtime && (!runtimeItem || runtimeItem.availability === "conflict")) {
           throw domainError("CONFLICT", "OpenClaw cannot identify a unique workspace Skill target.");
         }
@@ -726,9 +768,10 @@ export async function createSkillService({
         };
         await writeJsonAtomic(journalPath, journal);
         let runtimeAttempted = false;
+        const runtimeId = runtimeItem?.id ?? input.slug;
         try {
           runtimeAttempted = true;
-          const enabled = !(await runtime.setEnabled(input.slug, input.enabled)).disabled;
+          const enabled = !(await runtime.setEnabled(runtimeId, input.enabled)).disabled;
           if (enabled !== input.enabled) throw new Error("OpenClaw Skill enable readback mismatch.");
           journal = { ...journal, phase: "runtime-changed" };
           await writeJsonAtomic(journalPath, journal);
@@ -742,7 +785,7 @@ export async function createSkillService({
           state = previousState;
           if (runtimeAttempted) {
             try {
-              const compensated = await runtime.setEnabled(input.slug, record.enabled);
+              const compensated = await runtime.setEnabled(runtimeId, record.enabled);
               if (compensated.disabled === record.enabled) throw new Error("OpenClaw Skill compensation readback mismatch.");
             } catch {
               throw error;

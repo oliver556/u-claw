@@ -29,6 +29,7 @@ export interface ValidatedBundle {
 export interface SkillMarkdownFrontmatter {
   slug?: string;
   name: string;
+  displayName?: string;
   description: string;
   version?: string;
 }
@@ -64,7 +65,8 @@ export function parseSkillMarkdownFrontmatter(markdown: string): SkillMarkdownFr
     values.set(key, scalar(line.slice(separator + 1)));
   }
   const slug = values.get("slug");
-  const name = values.get("name") ?? values.get("displayName");
+  const displayName = values.get("displayName");
+  const name = values.get("name") ?? displayName;
   const description = values.get("description") ?? values.get("summary");
   const version = values.get("version");
   if (!name || !description) throw new Error("SKILL.md frontmatter lacks required identity.");
@@ -75,7 +77,7 @@ export function parseSkillMarkdownFrontmatter(markdown: string): SkillMarkdownFr
   ) {
     throw new Error("SKILL.md frontmatter identity is invalid.");
   }
-  return { slug, name, description, version };
+  return { slug, name, displayName, description, version };
 }
 
 function validRelativePath(value: string): boolean {
@@ -88,9 +90,15 @@ function validRelativePath(value: string): boolean {
     !WINDOWS_RESERVED_NAME.test(segment.split(".", 1)[0]!.replace(/ +$/u, "")));
 }
 
-export function validateSkillBundle(bundle: SkillBundle, expected: Pick<SkillDetail, "slug" | "version" | "permissionFingerprint">): ValidatedBundle {
+export function validateSkillBundle(
+  bundle: SkillBundle,
+  expected: Pick<SkillDetail, "slug" | "version" | "permissionFingerprint">,
+  sourcePolicy: "skillhub" | "local-import" = "skillhub",
+): ValidatedBundle {
   const source = new URL(bundle.sourceUrl);
-  if (source.protocol !== "https:" || source.hostname !== "api.skillhub.cn" || source.username || source.password) {
+  const trustedSkillHub = sourcePolicy === "skillhub" && source.protocol === "https:" && source.hostname === "api.skillhub.cn";
+  const trustedLocalImport = sourcePolicy === "local-import" && source.protocol === "uclaw-local:" && source.hostname === "import";
+  if ((!trustedSkillHub && !trustedLocalImport) || source.username || source.password) {
     throw new Error("Untrusted Skill package source.");
   }
   if (bundle.entries.length === 0 || bundle.entries.length > MAX_FILES) throw new Error("Skill package file count exceeds limit.");

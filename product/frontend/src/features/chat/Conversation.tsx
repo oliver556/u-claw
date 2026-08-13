@@ -1,5 +1,5 @@
-import type { ApprovalDecision, ApprovalRequest, Attachment, CapabilitySet, GatewayStatus, Message, MessageEvent, Session, SkillRuntimeInventory, ToolCall, UClawClient } from "@uclaw/shared";
-import { AlertCircle, LoaderCircle, RotateCw, WifiOff } from "lucide-react";
+import { parseSkillInstallIntent, type ApprovalDecision, type ApprovalRequest, type Attachment, type CapabilitySet, type GatewayStatus, type Message, type MessageEvent, type Session, type SkillCatalogItem, type SkillRuntimeInventory, type ToolCall, type UClawClient } from "@uclaw/shared";
+import { AlertCircle, LoaderCircle, RotateCw, WifiOff, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Composer } from "./Composer";
@@ -47,6 +47,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   const [skills, setSkills] = useState<Array<{ id: string; name: string }>>([]);
   const [skillState, setSkillState] = useState<"loading" | "ready" | "error">("loading");
   const [selectedSkillId, setSelectedSkillId] = useState<string>();
+  const [installedSkillName, setInstalledSkillName] = useState<string>();
   const activeRunId = useRef<string | undefined>(undefined);
   const sendController = useRef<AbortController | undefined>(undefined);
   const stopRequested = useRef(false);
@@ -54,6 +55,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   const mounted = useRef(true);
   const resolvingApprovals = useRef(new Set<string>());
   const defaultModelSelections = useRef(new Set<string>());
+  const conversationRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -63,6 +65,12 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     };
   }, []);
 
+  useEffect(() => {
+    if (!installedSkillName) return;
+    const timeout = window.setTimeout(() => setInstalledSkillName(undefined), 8_000);
+    return () => window.clearTimeout(timeout);
+  }, [installedSkillName]);
+
   const onStreamEvent = useCallback((event: MessageEvent) => {
     if (!mounted.current) return;
     if (event.type === "started") {
@@ -71,11 +79,23 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
       if (stopRequested.current) void client.chat.abort(event.runId).catch(() => undefined);
     } else if (event.type === "tool") onActivity(`工具：${event.tool.displayName}`);
     else if (event.type === "approval") onActivity(`等待授权：${event.approval.title}`);
-    else if (event.type === "final") onActivity("响应已完成");
+    else if (event.type === "final") {
+      setMessages((current) => current.some((message) => message.id === event.message.id)
+        ? current
+        : [...current, event.message]);
+      onActivity("响应已完成");
+    }
     else if (event.type === "aborted") onActivity("响应已停止");
     else if (event.type === "error") onActivity(`响应失败：${event.error.message}`);
   }, [client, onActivity]);
   const { state: stream, consume, dismissApproval } = useMessageStream(onStreamEvent);
+
+  useEffect(() => {
+    const element = conversationRef.current;
+    if (element === null) return;
+    if (typeof element.scrollTo === "function") element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
+    else element.scrollTop = element.scrollHeight;
+  }, [messages, stream, sending, sendError]);
 
   const loadHistory = useCallback(async () => {
     setHistoryState("loading");
@@ -149,11 +169,17 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     if (invoke === undefined) { setSkillState("error"); return; }
     let active = true;
     setSkillState("loading");
-    void invoke({ method: "skills.runtime-status", requestId: requestId(), params: {} }).then((response: any) => {
+    void Promise.all([
+      invoke({ method: "skills.runtime-status", requestId: requestId(), params: {} }),
+      invoke({ method: "skills.installed", requestId: requestId(), params: {} }),
+    ]).then(([runtimeResponse, installedResponse]: any[]) => {
       if (!active) return;
-      if (!response.ok) throw new Error(response.error.message);
-      const inventory = response.result as SkillRuntimeInventory;
-      setSkills(inventory.skills.filter((skill) => !skill.disabled && skill.availability === "available" && skill.eligible && skill.userInvocable && skill.commandVisible).map((skill) => ({ id: skill.id, name: skill.name })));
+      if (!runtimeResponse.ok) throw new Error(runtimeResponse.error.message);
+      const inventory = runtimeResponse.result as SkillRuntimeInventory;
+      const installed = installedResponse.ok && Array.isArray(installedResponse.result) ? installedResponse.result as SkillCatalogItem[] : [];
+      const installedBySlug = new Map(installed.map((skill) => [skill.slug, skill]));
+      setSkills(inventory.skills.filter((skill) => !skill.disabled && skill.availability === "available" && skill.eligible && skill.userInvocable && skill.commandVisible)
+        .map((skill) => ({ id: skill.runtimeId ?? skill.id, name: installedBySlug.get(skill.id)?.name ?? skill.name })));
       setSkillState("ready");
     }).catch(() => { if (active) setSkillState("error"); });
     return () => { active = false; };
@@ -250,10 +276,12 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
 
   const send = async () => {
     const text = draft.trim();
+    const installIntent = parseSkillInstallIntent(text);
     const readyAttachments = attachments.filter((attachment) => attachment.state === "ready");
     if ((text.length === 0 && readyAttachments.length === 0) || attachments.some((attachment) => attachment.state !== "ready") || sending || unavailable) return;
     setSendError(undefined);
     setSending(true);
+    onDraftChange("");
     stopRequested.current = false;
     const controller = new AbortController();
     sendController.current = controller;
@@ -264,9 +292,25 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
       createdAt: new Date().toISOString(),
     };
     setMessages((current) => [...current, optimistic]);
-    const restoreFailedDraft = (message: string) => {
-      setMessages((current) => current.filter((item) => item.id !== optimistic.id));
-      onDraftChange(text);
+    if (installIntent) setInstalledSkillName(undefined);
+    const readBackSkillInstall = async () => {
+      if (!installIntent) return false;
+      const invoke = window.uclaw?.skills?.invoke;
+      if (!invoke) return false;
+      const response: any = await invoke({ method: "skills.installed", requestId: requestId(), params: {} });
+      if (!response.ok) return false;
+      const expectedSlug = installIntent.identity.slice(installIntent.identity.indexOf("/") + 1);
+      const installed = (response.result as Array<{ slug: string; name: string }>).find((item) => item.slug === expectedSlug);
+      if (!installed) return false;
+      setInstalledSkillName(installed.name);
+      return true;
+    };
+    const markSendFailed = (message: string) => {
+      setMessages((current) => current.map((item) => item.id === optimistic.id ? {
+        ...item,
+        status: "failed",
+        error: { code: "OPERATION_FAILED", message, retryable: true },
+      } : item));
       setSendError(message);
     };
     try {
@@ -275,22 +319,28 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
       const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId, blocks, ...(selectedSkillId === undefined ? {} : { skillId: selectedSkillId }) }, controller.signal));
       if (!mounted.current) return;
       if (terminal?.type === "error") {
-        restoreFailedDraft(terminal.error.message);
-        await refreshAttachmentStates(readyAttachments);
+        const installed = await readBackSkillInstall().catch(() => false);
+        if (!installed) {
+          markSendFailed(terminal.error.message);
+          await refreshAttachmentStates(readyAttachments);
+        }
       }
-      else if (terminal?.type === "aborted") sendIntentId.current = undefined;
+      else if (terminal?.type === "aborted") {
+        onDraftChange(text);
+        sendIntentId.current = undefined;
+      }
       else if (terminal?.type === "final") {
-        onDraftChange("");
         setSelectedSkillId(undefined);
         const sentIds = new Set(readyAttachments.map((attachment) => attachment.id));
         updateAttachments((current) => current.filter((attachment) => !sentIds.has(attachment.id)));
         await Promise.all(readyAttachments.map((attachment) => attachmentInvoke("remove", { attachmentId: attachment.id }).catch(() => undefined)));
         sendIntentId.current = undefined;
+        await readBackSkillInstall().catch(() => false);
         onSendSuccess(session.id);
       }
     } catch (error) {
       if (mounted.current && !stopRequested.current) {
-        restoreFailedDraft(error instanceof Error ? error.message : "发送失败");
+        markSendFailed(error instanceof Error ? error.message : "发送失败");
         await refreshAttachmentStates(readyAttachments);
       }
     } finally {
@@ -338,14 +388,15 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
 
   return <section className="work-canvas">
     {unavailable ? <div className="connection-alert" role="alert"><WifiOff /><span><strong>服务连接已断开</strong><small>消息暂时无法发送，草稿仍保留在本机。</small></span><button type="button" onClick={() => void client.gateway.reconnect()}><RotateCw />重新连接</button></div> : null}
-    <div className="conversation" aria-busy={historyState === "loading"}>
+    <div className="conversation" ref={conversationRef} aria-busy={historyState === "loading"}>
       {historyState === "loading" ? <div className="conversation-state"><LoaderCircle className="spin" /><span>正在加载消息</span></div> : null}
       {historyState === "error" ? <div className="conversation-state" role="alert"><AlertCircle /><strong>消息加载失败</strong><span>{historyError}</span><button type="button" onClick={() => void loadHistory()}><RotateCw />重试</button></div> : null}
-      {historyState === "ready" ? <><MessageList messages={messages} stream={stream} pendingApprovals={pendingApprovals} pendingTools={pendingTools} canResolveApprovals={false} approvalCapabilities={approvalCapabilities} onResolveApproval={handleApproval} />
+      {historyState === "ready" ? <><MessageList messages={messages} stream={stream} awaitingResponse={sending} pendingApprovals={pendingApprovals} pendingTools={pendingTools} canResolveApprovals={false} approvalCapabilities={approvalCapabilities} onResolveApproval={handleApproval} />
         {historyHasMore ? <button className="history-load-more" type="button" disabled={historyPageState === "loading"} onClick={() => void loadMoreHistory()}>{historyPageState === "loading" ? <LoaderCircle className="spin" /> : <RotateCw />}加载更多消息</button> : null}
         {historyPageState === "error" ? <div className="history-page-error" role="alert"><span>{historyPageError}</span><button type="button" onClick={() => void loadMoreHistory()}><RotateCw />重试加载</button></div> : null}</> : null}
     </div>
     {sendError ? <div className="send-error" role="alert"><AlertCircle /><span><strong>发送失败</strong>{sendError}</span></div> : null}
+    {installedSkillName ? <div className="skill-install-status success" role="status"><span>{installedSkillName} 安装成功，OpenClaw 已完成读回。</span><button type="button" aria-label="关闭安装成功提示" title="关闭" onClick={() => setInstalledSkillName(undefined)}><X /></button></div> : null}
     <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} models={models.map((model) => ({ value: model.id, label: model.available ? model.label : `${model.label}（不可用）`, disabled: !model.available }))} modelValue={session.model?.id} modelLoading={modelState === "loading" || modelState === "selecting"} modelError={modelState === "error"} skills={skills.map((skill) => ({ value: skill.id, label: skill.name }))} skillValue={selectedSkillId} skillLoading={skillState === "loading"} onModelChange={(value) => void selectModel(value)} onSkillChange={(value) => { invalidateSendIntent(); setSelectedSkillId(value); }} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); updateAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
   </section>;
 }

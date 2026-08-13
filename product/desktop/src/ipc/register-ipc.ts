@@ -22,6 +22,8 @@ import {
   ReleaseIpcResponseSchema,
   SessionAdvancedIpcRequestSchema,
   SessionAdvancedIpcResponseSchema,
+  ImageOperationIpcRequestSchema,
+  ImageOperationIpcResponseSchema,
   UClawErrorSchema,
   WindowIpcRequestSchema,
   redactRendererText,
@@ -37,6 +39,7 @@ import {
   type MessageEvent,
   type SendMessageInput,
   type SessionAdvancedService,
+  type ImageOperationIpcRequest,
 } from "@uclaw/shared";
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
@@ -45,6 +48,7 @@ import { createProviderDispatcher } from "../providers/provider-dispatcher.js";
 import type { ProviderStore } from "../providers/provider-store.js";
 import { createSkillDispatcher } from "../skills/skill-dispatcher.js";
 import type { SkillService } from "../skills/skill-service.js";
+import type { SkillInstallCoordinator } from "../skills/skill-install-coordinator.js";
 import { createPluginDispatcher } from "../plugins/plugin-dispatcher.js";
 import type { PluginService } from "../plugins/plugin-service.js";
 import { createProviderNetworkService, type ProviderNetworkService } from "../providers/provider-network.js";
@@ -55,7 +59,7 @@ import { createMcpDispatcher, type McpRuntime } from "../mcp/mcp-dispatcher.js";
 import type { McpStore } from "../mcp/mcp-store.js";
 import type { OpenClawCapabilityRuntime } from "../capabilities/openclaw-capability-runtime.js";
 import { createSessionAdvancedDispatcher } from "../sessions/session-advanced-dispatcher.js";
-import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, RELEASE_IPC_CHANNEL, SESSION_ADVANCED_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, IMAGE_OPERATION_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, RELEASE_IPC_CHANNEL, SESSION_ADVANCED_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -88,6 +92,7 @@ export interface RegisterIpcDependencies {
   providerNetwork?: ProviderNetworkService;
   providerConfig?: OpenClawProviderConfigBackend;
   skills?: SkillService;
+  skillInstallCoordinator?: SkillInstallCoordinator;
   plugins?: PluginService;
   channels?: ChannelStore;
   channelRuntime?: ChannelRuntime;
@@ -98,6 +103,7 @@ export interface RegisterIpcDependencies {
   dispatchData?(request: DataIpcRequest): Promise<unknown>;
   dispatchDiagnostics?(request: DiagnosticsIpcRequest): Promise<unknown>;
   dispatchRelease?(request: ReleaseIpcRequest): Promise<unknown>;
+  dispatchImage?: ((request: ImageOperationIpcRequest) => Promise<unknown>) & { dispose?: () => void };
   coordinateWrite?<T>(operation: () => Promise<T>): Promise<T>;
   diagnosticsTimeoutMs?: number;
   routeChatSend?(input: SendMessageInput, signal: AbortSignal): AsyncIterable<MessageEvent> | Promise<AsyncIterable<MessageEvent>>;
@@ -138,6 +144,7 @@ export function registerIpc({
   providerNetwork,
   providerConfig,
   skills,
+  skillInstallCoordinator,
   plugins,
   channels,
   channelRuntime,
@@ -148,6 +155,7 @@ export function registerIpc({
   dispatchData,
   dispatchDiagnostics,
   dispatchRelease,
+  dispatchImage,
   coordinateWrite = (operation) => operation(),
   diagnosticsTimeoutMs = 15_000,
   routeChatSend,
@@ -192,7 +200,7 @@ export function registerIpc({
   const providerDispatcher = providers === undefined
     ? undefined
     : createProviderDispatcher(providers, providerNetwork ?? createProviderNetworkService(), providerConfig);
-  const skillDispatcher = skills === undefined ? undefined : createSkillDispatcher(skills);
+  const skillDispatcher = skills === undefined ? undefined : createSkillDispatcher(skills, skillInstallCoordinator);
   const pluginDispatcher = plugins === undefined ? undefined : createPluginDispatcher(plugins, capabilityRuntime);
   const channelDispatcher = channels === undefined || channelRuntime === undefined
     ? undefined
@@ -485,6 +493,19 @@ export function registerIpc({
     }
   });
 
+  if (dispatchImage !== undefined) ipcMain.handle(IMAGE_OPERATION_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = ImageOperationIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid image operation IPC request.");
+    try {
+      const response = ImageOperationIpcResponseSchema.parse(await dispatchImage(parsed.data));
+      if (response.method !== parsed.data.method || response.requestId !== parsed.data.requestId) throw new Error("Image response correlation failed.");
+      return response;
+    } catch {
+      throw safeError("UNKNOWN", "Invalid image operation IPC response.");
+    }
+  });
+
   let disposed = false;
   return () => {
     if (disposed) return;
@@ -504,5 +525,7 @@ export function registerIpc({
     if (dispatchData !== undefined) ipcMain.removeHandler(DATA_IPC_CHANNEL);
     if (dispatchDiagnostics !== undefined) ipcMain.removeHandler(DIAGNOSTICS_IPC_CHANNEL);
     if (dispatchRelease !== undefined) ipcMain.removeHandler(RELEASE_IPC_CHANNEL);
+    if (dispatchImage !== undefined) ipcMain.removeHandler(IMAGE_OPERATION_IPC_CHANNEL);
+    dispatchImage?.dispose?.();
   };
 }

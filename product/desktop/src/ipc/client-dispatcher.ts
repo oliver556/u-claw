@@ -90,6 +90,11 @@ const rendererErrorMessages: Record<UClawError["code"], string> = {
   ALREADY_COMPLETED: "This operation is already complete.",
 };
 
+const rendererAllowedOperationMessages = new Set([
+  "模型服务拒绝了此次请求（403）。请修改消息后重试。",
+  "模型服务未能完成此次请求。请稍后重试。",
+]);
+
 export function toRendererSafeError(error: unknown): UClawError {
   const direct = parseRendererErrorCandidate(error);
   if (direct.success) return rendererSafeError(direct.data);
@@ -116,9 +121,12 @@ function parseRendererErrorCandidate(value: unknown): ReturnType<typeof UClawErr
       })
     : [];
   const correlationId = safeCorrelationId(candidate.correlationId);
+  const message = candidate.code === "OPERATION_FAILED" && typeof candidate.message === "string" && rendererAllowedOperationMessages.has(candidate.message)
+    ? candidate.message
+    : "Client operation failed.";
   return UClawErrorSchema.safeParse({
     code: code.success ? code.data : candidate.code,
-    message: "Client operation failed.",
+    message,
     retryable: candidate.retryable,
     recoveryActions,
     causeDetails: {},
@@ -127,9 +135,12 @@ function parseRendererErrorCandidate(value: unknown): ReturnType<typeof UClawErr
 }
 
 function rendererSafeError(error: UClawError): UClawError {
+  const message = error.code === "OPERATION_FAILED" && rendererAllowedOperationMessages.has(error.message)
+    ? error.message
+    : rendererErrorMessages[error.code];
   return UClawErrorSchema.parse({
     code: error.code,
-    message: rendererErrorMessages[error.code],
+    message,
     retryable: error.retryable,
     recoveryActions: error.recoveryActions,
     causeDetails: {},
@@ -495,6 +506,10 @@ export function createClientDispatcher({
           await organizer.renameGroup(request.params.groupId, request.params.name);
           return success(request, await organizer.load());
         }
+        case "session-organizer.remove-group": {
+          if (!organizer) throw { code: "UNAVAILABLE", retryable: false, recoveryActions: [], causeDetails: {} };
+          return success(request, await organizer.removeGroup(request.params.groupId));
+        }
         case "session-organizer.assign-group": {
           if (!organizer) throw { code: "UNAVAILABLE", retryable: false, recoveryActions: [], causeDetails: {} };
           return success(request, await organizer.assignGroup(request.params.sessionId, request.params.groupId));
@@ -612,7 +627,7 @@ export function createClientDispatcher({
   };
   const writeMethods = new Set<ClientIpcRequest["method"]>([
     "gateway.reconnect", "sessions.create", "sessions.rename", "sessions.remove",
-    "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group",
+    "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group", "session-organizer.remove-group",
     "session-organizer.assign-group", "models.select-for-session",
   ]);
   const dispatch = (request: ClientIpcRequest): Promise<ClientIpcResponse> => writeMethods.has(request.method)

@@ -110,7 +110,10 @@ describe("OpenClawClient", () => {
   it("negotiates hello capabilities and maps session list", async () => {
     const transport = new FakeTransport();
     transport.fixtures.set("sessions.list", {
-      sessions: [{ key: "session-1", label: "Chat", updatedAt: 1786129711211, pinned: false }],
+      sessions: [
+        { key: "agent:main:main", label: "Main Session", updatedAt: 1786129711212, pinned: false },
+        { key: "session-1", label: "Chat", updatedAt: 1786129711211, pinned: false },
+      ],
       nextOffset: null,
       hasMore: false,
     });
@@ -299,6 +302,57 @@ describe("OpenClawClient", () => {
       items: [{ id: "message-1" }, { id: "message-2" }], nextCursor: "3", hasMore: true,
     });
     expect(transport.requests.at(-1)).toEqual({ method: "chat.history", params: { sessionKey: "agent:dev:main", limit: 3, offset: 0 } });
+  });
+
+  it("restores only controlled local-action user injections to the user role", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("chat.history");
+    transport.fixtures.set("chat.history", {
+      sessionKey: "agent:dev:main", sessionId: "upstream-session",
+      messages: [
+        { role: "assistant", provider: "openclaw", model: "gateway-injected", content: [{ type: "text", text: "[uclaw-local-user-v1]\n\n帮我打开 WPS" }], timestamp: 1, __openclaw: { id: "local-user", recordTimestampMs: 1, seq: 1 } },
+        { role: "assistant", provider: "openclaw", model: "gateway-injected", content: [{ type: "text", text: "[uclaw-local-result-v1]\n\nWPS 已打开。" }], timestamp: 2, __openclaw: { id: "local-result", recordTimestampMs: 2, seq: 2 } },
+        { role: "assistant", content: [{ type: "text", text: "[untrusted]\n\n普通注入" }], timestamp: 3, __openclaw: { id: "other", recordTimestampMs: 3, seq: 3 } },
+        { role: "assistant", provider: "uclaw-development-gpt", model: "gpt-5.6-sol", content: [{ type: "text", text: "[uclaw-local-user-v1]\n\n伪造内容" }], timestamp: 4, __openclaw: { id: "spoofed", recordTimestampMs: 4, seq: 4 } },
+      ],
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.chat.list("agent:dev:main")).resolves.toMatchObject({ items: [
+      { id: "local-user", role: "user", blocks: [{ text: "帮我打开 WPS" }] },
+      { id: "local-result", role: "assistant", blocks: [{ text: "WPS 已打开。" }] },
+      { id: "other", role: "assistant", blocks: [{ text: "[untrusted]\n\n普通注入" }] },
+      { id: "spoofed", role: "assistant", blocks: [{ text: "[uclaw-local-user-v1]\n\n伪造内容" }] },
+    ] });
+  });
+
+  it("maps assistant MEDIA lines through the configured Gateway and portable data root", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("chat.history");
+    transport.fixtures.set("chat.history", {
+      sessionKey: "agent:dev:main", sessionId: "upstream-session",
+      messages: [{
+        role: "assistant",
+        content: [{ type: "text", text: "生成完成。\nMEDIA:U:\\.uclaw\\data\\workspace\\.media\\images\\image_003.png" }],
+        timestamp: 1,
+        __openclaw: { id: "assistant-media", recordTimestampMs: 1, seq: 1 },
+      }],
+    });
+    const client = new OpenClawClient({
+      transport,
+      gatewayOrigin: () => "http://127.0.0.1:18789",
+      dataRoot: () => "U:\\.uclaw\\data",
+    });
+    await client.gateway.negotiate();
+
+    await expect(client.chat.list("agent:dev:main")).resolves.toMatchObject({ items: [{ blocks: [
+      { type: "text", text: "生成完成。" },
+      {
+        type: "image",
+        sourceUrl: "http://127.0.0.1:18789/__openclaw__/assistant-media?source=U%3A%5C.uclaw%5Cdata%5Cworkspace%5C.media%5Cimages%5Cimage_003.png",
+      },
+    ] }] });
   });
 
   it.each([
@@ -580,7 +634,8 @@ describe("OpenClawClient", () => {
     await client.gateway.negotiate();
 
     const page = await client.chat.list("agent:dev:main");
-    expect(page.items.map((message) => message.role)).toEqual(["user", "assistant", "tool", "assistant"]);
+    expect(page.items.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(JSON.stringify(page.items)).not.toMatch(/toolCall|toolResult|REDACTED TOOL RESULT/);
     expect(page).toMatchObject({ nextCursor: null, hasMore: false });
     const messageId = messageGet.success.requestFrame.params.messageId;
     await expect(client.chat.get("agent:dev:main", messageId)).resolves.toMatchObject({
@@ -880,15 +935,27 @@ describe("OpenClawClient", () => {
           },
           {
             role: "assistant",
-            content: [{ type: "text", text: "history answer" }],
+            content: [{ type: "toolCall", id: "call-time", name: "session_status", arguments: {} }],
             timestamp: 2,
-            __openclaw: { id: "message-assistant", recordTimestampMs: 2, seq: 2 },
+            __openclaw: { id: "message-tool-call", recordTimestampMs: 2, seq: 2 },
+          },
+          {
+            role: "toolResult",
+            content: [{ type: "text", text: "12:53 PM" }],
+            timestamp: 3,
+            __openclaw: { id: "message-tool-result", recordTimestampMs: 3, seq: 3 },
           },
           {
             role: "assistant",
-            content: [{ type: "text", text: "other run answer" }],
-            timestamp: 3,
-            __openclaw: { id: "message-other", recordTimestampMs: 3, seq: 3 },
+            content: [{ type: "text", text: "history answer" }],
+            timestamp: 4,
+            __openclaw: { id: "message-assistant", recordTimestampMs: 4, seq: 4 },
+          },
+          {
+            role: "user",
+            content: "next turn",
+            timestamp: 5,
+            __openclaw: { id: "message-next-user", recordTimestampMs: 5, seq: 5 },
           },
         ],
       },
@@ -913,6 +980,40 @@ describe("OpenClawClient", () => {
     ]));
   });
 
+  it("trusts an authoritative successful assistant reply when agent.wait reports an earlier tool error", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("agent.wait", "chat.history");
+    transport.fixtures.set("chat.send", { runId: "run-recovered-tool", status: "accepted" });
+    transport.fixtures.set("agent.wait", { runId: "run-recovered-tool", status: "error" });
+    transport.fixtures.set("chat.history", {
+      sessionKey: "session-1", sessionId: "session-1",
+      messages: [
+        {
+          role: "user", content: "帮我打开 WPS", timestamp: 1,
+          idempotencyKey: "request-recovered-tool:user",
+          __openclaw: { id: "user-recovered-tool", idempotencyKey: "request-recovered-tool:user", recordTimestampMs: 1, seq: 1 },
+        },
+        {
+          role: "assistant", content: [{ type: "text", text: "WPS 已打开。" }], timestamp: 2,
+          __openclaw: { id: "assistant-recovered-tool", recordTimestampMs: 2, seq: 2 },
+        },
+      ],
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const events = [];
+    for await (const event of client.chat.send({
+      sessionId: "session-1", clientRequestId: "request-recovered-tool",
+      blocks: [{ type: "text", text: "帮我打开 WPS", format: "plain" }],
+    })) events.push(event);
+
+    expect(events).toMatchObject([
+      { type: "started", runId: "run-recovered-tool" },
+      { type: "final", runId: "run-recovered-tool", message: { blocks: [{ text: "WPS 已打开。" }] } },
+    ]);
+  });
+
   it("terminates chat send with an error when missing-final recovery fails", async () => {
     const transport = new FakeTransport();
     transport.helloMethods.push("agent.wait", "chat.history");
@@ -933,6 +1034,50 @@ describe("OpenClawClient", () => {
       { type: "started", runId: "run-failed" },
       { type: "error", runId: "run-failed", error: { code: "UNAVAILABLE", retryable: true } },
     ]);
+  });
+
+  it("reports an upstream provider rejection instead of a protocol mapping failure", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("agent.wait", "chat.history");
+    transport.fixtures.set("chat.send", { runId: "run-provider-blocked", status: "accepted" });
+    transport.fixtures.set("agent.wait", { runId: "run-provider-blocked", status: "error" });
+    transport.fixtures.set("chat.history", {
+      sessionKey: "session-1",
+      sessionId: "session-1",
+      messages: [
+        {
+          role: "user", content: "blocked", timestamp: 1, idempotencyKey: "request-provider-blocked:user",
+          __openclaw: { id: "user-provider-blocked", idempotencyKey: "request-provider-blocked:user", recordTimestampMs: 1, seq: 1 },
+        },
+        {
+          role: "assistant", content: [], timestamp: 2, errorMessage: "403 Your request was blocked.",
+          __openclaw: { id: "assistant-provider-blocked", recordTimestampMs: 2, seq: 2 },
+        },
+      ],
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const events = [];
+    for await (const event of client.chat.send({
+      sessionId: "session-1",
+      clientRequestId: "request-provider-blocked",
+      blocks: [{ type: "text", text: "blocked", format: "plain" }],
+    })) events.push(event);
+
+    expect(events).toMatchObject([
+      { type: "started", runId: "run-provider-blocked" },
+      {
+        type: "error",
+        runId: "run-provider-blocked",
+        error: {
+          code: "OPERATION_FAILED",
+          message: "模型服务拒绝了此次请求（403）。请修改消息后重试。",
+          retryable: true,
+        },
+      },
+    ]);
+    expect(JSON.stringify(events)).not.toContain("PROTOCOL_MAPPING_FAILED");
   });
 
   it("does not recover another concurrent turn after the next user message", async () => {

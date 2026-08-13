@@ -3,6 +3,7 @@ import { z } from "zod";
 import { FileRefSchema, ISODateTimeSchema, ModelRefSchema, PageRequestSchema, ResourceRefSchema, StringMapValueSchema } from "./common.js";
 import { UClawErrorSchema, UClawErrorSummarySchema } from "./errors.js";
 import { ApprovalRequestSchema, ToolCallSchema } from "./tools.js";
+import { ControlledImageSourceUrlSchema } from "./image-operations.js";
 
 export const SessionSummarySchema = z
   .object({
@@ -39,7 +40,13 @@ export type CreateSessionInput = z.infer<typeof CreateSessionInputSchema>;
 export const ContentBlockSchema = z.discriminatedUnion("type", [
   z.object({ id: z.string(), type: z.literal("text"), text: z.string(), format: z.enum(["plain", "markdown"]) }).strict(),
   z.object({ id: z.string(), type: z.literal("code"), code: z.string(), language: z.string().optional(), filename: z.string().optional() }).strict(),
-  z.object({ id: z.string(), type: z.literal("image"), file: FileRefSchema, alt: z.string().optional() }).strict(),
+  z.object({
+    id: z.string(),
+    type: z.literal("image"),
+    file: FileRefSchema,
+    alt: z.string().optional(),
+    sourceUrl: ControlledImageSourceUrlSchema.optional(),
+  }).strict(),
   z.object({ id: z.string(), type: z.literal("file"), file: FileRefSchema }).strict(),
   z.object({ id: z.string(), type: z.literal("citation"), source: ResourceRefSchema, label: z.string(), excerpt: z.string().optional() }).strict(),
   z.object({ id: z.string(), type: z.literal("tool-call"), toolCallId: z.string().min(1) }).strict(),

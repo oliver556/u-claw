@@ -96,6 +96,32 @@ describe("createClientDispatcher stream ownership", () => {
     }
   });
 
+  it("preserves only allowlisted model operation messages", () => {
+    expect(toRendererSafeError({
+      code: "OPERATION_FAILED",
+      message: "模型服务拒绝了此次请求（403）。请修改消息后重试。",
+      retryable: true,
+      recoveryActions: ["retry"],
+      causeDetails: { operation: "chat.send", status: "403" },
+    })).toMatchObject({
+      code: "OPERATION_FAILED",
+      message: "模型服务拒绝了此次请求（403）。请修改消息后重试。",
+      retryable: true,
+    });
+
+    expect(toRendererSafeError({
+      code: "OPERATION_FAILED",
+      message: "failed with Bearer provider-secret at /Users/alice/private.txt",
+      retryable: true,
+      recoveryActions: ["retry"],
+      causeDetails: {},
+    })).toMatchObject({
+      code: "OPERATION_FAILED",
+      message: "Client operation failed.",
+      retryable: true,
+    });
+  });
+
   it("projects logs and diagnostics to safe export fields without conversation or path content", async () => {
     const dispatcher = createClientDispatcher({
       client: clientWith({
@@ -214,7 +240,9 @@ describe("createClientDispatcher stream ownership", () => {
     const organizer = {
       load: vi.fn(async () => ({ schemaVersion: 1 as const, groups: [], sessions: [] })),
       setPinned: vi.fn(async () => ({ schemaVersion: 1 as const, groups: [], sessions: [{ sessionId: "session-1", pinned: true }] })),
-      createGroup: vi.fn(), renameGroup: vi.fn(), assignGroup: vi.fn(),
+      createGroup: vi.fn(), renameGroup: vi.fn(),
+      removeGroup: vi.fn(async () => ({ schemaVersion: 1 as const, groups: [], sessions: [] })),
+      assignGroup: vi.fn(),
       removeSession: vi.fn(async () => ({ schemaVersion: 1 as const, groups: [], sessions: [] })),
     };
     const remove = vi.fn(async () => undefined);
@@ -226,6 +254,8 @@ describe("createClientDispatcher stream ownership", () => {
 
     await expect(dispatcher(request("session-organizer.get", "organizer-get", {}))).resolves.toMatchObject({ ok: true, result: { schemaVersion: 1 } });
     await expect(dispatcher(request("session-organizer.set-pinned", "organizer-pin", { sessionId: "session-1", pinned: true }))).resolves.toMatchObject({ ok: true, result: { sessions: [{ sessionId: "session-1", pinned: true }] } });
+    await expect(dispatcher(request("session-organizer.remove-group", "organizer-remove-group", { groupId: "group-1" }))).resolves.toMatchObject({ ok: true, result: { groups: [] } });
+    expect(organizer.removeGroup).toHaveBeenCalledWith("group-1");
     await expect(dispatcher(request("sessions.remove", "remove-1", { sessionId: "session-1" }))).resolves.toMatchObject({ ok: true });
     expect(remove).toHaveBeenCalledWith("session-1", undefined);
     expect(organizer.removeSession).toHaveBeenCalledWith("session-1");

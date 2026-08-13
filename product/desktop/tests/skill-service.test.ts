@@ -133,8 +133,37 @@ describe("portable Skill service", () => {
 
     expect(await service.installed()).toEqual([expect.objectContaining({ slug: "china-weather", enabled: false })]);
     expect(await service.runtimeStatus()).toEqual(expect.objectContaining({ skills: [
-      expect.objectContaining({ id: "china-weather", disabled: true, availability: "error" }),
+      expect.objectContaining({ id: "china-weather", disabled: true, availability: "not-detected" }),
     ] }));
+  });
+
+  it("maps a namespaced local slug to the OpenClaw runtime name and uses that key for toggles", async () => {
+    const dataDir = await makeRoot();
+    const workspaceRoot = join(dataDir, "workspace", "skills");
+    const skillRoot = join(workspaceRoot, "@user_bddf3fe6", "contextweave-interactive-architecture");
+    await mkdir(skillRoot, { recursive: true });
+    await writeFile(join(skillRoot, "SKILL.md"), "---\nname: interactive-architecture-diagram\nslug: contextweave-interactive-architecture\ndescription: Build architecture diagrams\nversion: 1.2.0\n---\n\n# Architecture\n");
+    let disabled = false;
+    const setEnabled = vi.fn(async (skillKey: string, enabled: boolean) => {
+      disabled = !enabled;
+      return { id: skillKey, name: skillKey, source: "workspace", bundled: false, disabled, eligible: enabled, modelVisible: enabled, userInvocable: true, commandVisible: enabled, availability: enabled ? "available" as const : "disabled" as const, missing: emptyMissing, conflicts: [] };
+    });
+    const runtime = runtimeFor(workspaceRoot, {
+      status: vi.fn(async () => ({ workspaceDir: "w", managedSkillsDir: "m", skills: [{
+        id: "interactive-architecture-diagram", name: "interactive-architecture-diagram", source: "workspace", bundled: false,
+        disabled, eligible: !disabled, modelVisible: !disabled, userInvocable: true, commandVisible: !disabled,
+        availability: disabled ? "disabled" as const : "available" as const, missing: emptyMissing, conflicts: [],
+      }] })),
+      setEnabled,
+    });
+    const service = await createSkillService({ dataDir, workspaceRoot, runtime, client: createFixtureSkillHubClient() });
+
+    expect(await service.runtimeStatus()).toEqual(expect.objectContaining({ skills: [expect.objectContaining({
+      id: "contextweave-interactive-architecture", runtimeId: "interactive-architecture-diagram", availability: "available",
+    })] }));
+    expect(await service.localDetail("contextweave-interactive-architecture")).toMatchObject({ markdown: expect.stringContaining("# Architecture") });
+    expect((await service.setEnabled({ slug: "contextweave-interactive-architecture", enabled: false, confirmation: null })).state).toBe("succeeded");
+    expect(setEnabled).toHaveBeenCalledWith("interactive-architecture-diagram", false);
   });
 
   it("serializes concurrent installs without losing either authoritative record", async () => {

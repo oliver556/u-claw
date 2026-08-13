@@ -3,6 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { SkillIpcRequestSchema } from "@uclaw/shared";
+
 import { SKILL_IPC_CHANNEL } from "../src/ipc/channels.js";
 import { installPreloadBridge } from "../src/ipc/preload-bridge.js";
 import { registerIpc } from "../src/ipc/register-ipc.js";
@@ -14,7 +16,7 @@ import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fi
 function skillService() {
   return {
     search: vi.fn(async () => ({ items: [], nextCursor: null, hasMore: false, mode: "fixture" as const })),
-    detail: vi.fn(), installed: vi.fn(async () => []), startInstall: vi.fn(), startUpdate: vi.fn(),
+    detail: vi.fn(), localDetail: vi.fn(), installed: vi.fn(async () => []), startInstall: vi.fn(), startInstallBundle: vi.fn(), startUpdate: vi.fn(),
     startUninstall: vi.fn(), setEnabled: vi.fn(), operation: vi.fn(), waitForOperation: vi.fn(),
     runtimeStatus: vi.fn(), curatorStatus: vi.fn(), curatorAction: vi.fn(), proposalsList: vi.fn(),
     proposalInspect: vi.fn(), proposalAction: vi.fn(), proposalCreate: vi.fn(), proposalUpdate: vi.fn(),
@@ -55,6 +57,44 @@ describe("Skill IPC", () => {
     expect(response).toMatchObject({ method: "skills.search", requestId: "skills-1", ok: true });
   });
 
+  it("routes controlled import and fixed hub actions through the coordinator", async () => {
+    const skills = skillService();
+    const imported = {
+      slug: "one", name: "One", description: "One", version: "1.0.0", pricingType: "free", installedVersion: null,
+      enabled: false, updateAvailable: false, source: { provider: "skillhub", url: "https://skillhub.cloud.tencent.com/skills" },
+      permissions: [], permissionFingerprint: "abc", risk: "high", mode: "live", categories: [],
+      manifest: { kind: "skill", id: "one", version: "1.0.0", entry: "SKILL.md" },
+    } as const;
+    const coordinator = {
+      selectImport: vi.fn(async () => ({ token: "selection-token-1", fileName: "skill.zip", sizeBytes: 123 })),
+      prepareImport: vi.fn(async () => imported),
+      installImport: vi.fn(async () => ({ id: "op-1", slug: "one", action: "install", state: "queued", progress: 0, phase: "queued" })),
+      disposeImport: vi.fn(async () => undefined),
+      resolveInstall: vi.fn(async () => imported),
+      openHub: vi.fn(async () => undefined),
+    };
+    const dispatch = createSkillDispatcher(skills, coordinator as any);
+    const confirmation = { permissionFingerprint: "abc", acceptedRisk: "high" as const };
+
+    await dispatch({ method: "skills.import-select", requestId: "s1", params: {} });
+    await dispatch({ method: "skills.import-prepare", requestId: "s2", params: { token: "selection-token-1" } });
+    await dispatch({ method: "skills.import-install", requestId: "s3", params: { token: "selection-token-1", confirmation } });
+    await dispatch({ method: "skills.import-dispose", requestId: "s4", params: { token: "selection-token-1" } });
+    await dispatch({ method: "skills.open-hub", requestId: "s5", params: {} });
+    await dispatch({ method: "skills.resolve-install", requestId: "s6", params: { identity: "@alice/one" } });
+
+    expect(coordinator.installImport).toHaveBeenCalledWith("selection-token-1", confirmation);
+    expect(coordinator.openHub).toHaveBeenCalledOnce();
+    expect(coordinator.resolveInstall).toHaveBeenCalledWith("@alice/one");
+  });
+
+  it("reports controlled install actions as unavailable when the coordinator is missing", async () => {
+    const dispatch = createSkillDispatcher(skillService());
+
+    await expect(dispatch({ method: "skills.open-hub", requestId: "missing-1", params: {} }))
+      .rejects.toMatchObject({ code: "UNAVAILABLE" });
+  });
+
   it("routes runtime, curator, and proposal methods through strict IPC", async () => {
     const skills = skillService();
     const now = "2026-08-11T00:00:00.000Z";
@@ -88,6 +128,19 @@ describe("Skill IPC", () => {
     expect(skills.proposalAction).toHaveBeenCalledWith("p1", "apply", undefined);
     expect(skills.proposalCreate).toHaveBeenCalledWith({ name: "one", description: "One", content: "# One", goal: undefined, evidence: undefined });
     expect(skills.proposalRequestRevision).toHaveBeenCalledWith({ proposalId: "p1", instructions: "Add tests", sessionKey: "session-key", targetAgentId: undefined, sessionId: undefined });
+  });
+
+  it("routes local markdown detail by slug without accepting a renderer path", async () => {
+    const skills = skillService();
+    skills.localDetail.mockResolvedValue({
+      slug: "one", name: "One", description: "One", markdown: "# One\n",
+    });
+    const dispatch = createSkillDispatcher(skills);
+
+    await expect(dispatch({ method: "skills.local-detail", requestId: "local-1", params: { slug: "one" } } as any))
+      .resolves.toMatchObject({ method: "skills.local-detail", ok: true, result: { markdown: "# One\n" } });
+    expect(() => SkillIpcRequestSchema.parse({ method: "skills.local-detail", requestId: "local-2", params: { slug: "one", path: "/tmp/SKILL.md" } }))
+      .toThrow();
   });
 
   it("rejects renderer paths and commands before dispatch", async () => {

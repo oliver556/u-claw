@@ -3,6 +3,8 @@ import {
   gatewayStatusFromWire,
   type ClientIpcEvent,
   type ClientIpcRequest,
+  type ImageOperationIpcRequest,
+  type ImageOperationIpcResponse,
   type IpcResponse,
   type MessageEvent,
   type SessionOrganizerService,
@@ -11,6 +13,22 @@ import {
   type ActivityCenterService,
   type ArtifactService,
 } from "@uclaw/shared";
+
+export type ImageOperationBridge = {
+  invoke(request: ImageOperationIpcRequest): Promise<ImageOperationIpcResponse>;
+};
+
+let imageOperationSequence = 0;
+
+export async function invokeImageOperation(
+  method: ImageOperationIpcRequest["method"],
+  sourceUrl: string,
+  suggestedName: string,
+): Promise<ImageOperationIpcResponse> {
+  const bridge = (window as unknown as { uclaw?: { images?: ImageOperationBridge } }).uclaw?.images;
+  if (!bridge) throw new Error("图片操作 RPC 未配置");
+  return bridge.invoke({ method, requestId: `image-ui-${++imageOperationSequence}`, params: { sourceUrl, suggestedName } });
+}
 
 export interface RendererClientBridge {
   invoke(request: ClientIpcRequest): Promise<IpcResponse>;
@@ -186,6 +204,7 @@ export function createRendererClient(bridge: RendererClientBridge): RendererClie
       setPinned: (sessionId, pinned) => invoke("session-organizer.set-pinned", { sessionId, pinned }),
       createGroup: (name) => invoke("session-organizer.create-group", { name }),
       renameGroup: (groupId, name) => invoke("session-organizer.rename-group", { groupId, name }),
+      removeGroup: (groupId) => invoke("session-organizer.remove-group", { groupId }),
       assignGroup: (sessionId, groupId) => invoke("session-organizer.assign-group", { sessionId, groupId }),
     },
     chat: {

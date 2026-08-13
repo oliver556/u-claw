@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
 
@@ -49,6 +49,165 @@ const inspected = {
 const manifest = { schema: "openclaw.skill-workshop.proposals-manifest.v1", updatedAt: "2026-08-12T00:00:00.000Z", proposals: [{ id: "proposal-1", kind: "create", status: "pending", title: "QA Skill", description: "Quality", skillName: "qa", skillKey: "qa", createdAt: "2026-08-12T00:00:00.000Z", updatedAt: "2026-08-12T00:00:00.000Z", scanState: "failed" }] };
 
 describe("SkillManager", () => {
+  it("renders the public installed Skill workbench with runtime status and filters", async () => {
+    const installed = { ...detail, installedVersion: detail.version, enabled: true, source: { provider: "openclaw", origin: "workspace" } };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return response(request, [installed]);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "hidden", managedSkillsDir: "hidden", skills: [runtimeItem] });
+      if (request.method === "skills.local-detail") return response(request, { slug: installed.slug, name: installed.name, description: installed.description, markdown: "---\nname: command-runner\ndescription: 运行批准命令\n---\n\n# 命令运行器\n\n- 安全执行\n- 记录结果\n\n| 项目 | 内容 |\n| --- | --- |\n| 依赖 | git |\n" });
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    expect(await screen.findByRole("heading", { name: "Skill" })).toBeVisible();
+    expect(screen.getByText("已安装")).toBeVisible();
+    expect(document.querySelector(".skill-status.missing-dependency")).toHaveTextContent("缺少依赖");
+    expect(screen.getByRole("button", { name: "发现更多 Skill" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "导入 Skill" })).toBeVisible();
+    expect(screen.queryByText("Curator")).not.toBeInTheDocument();
+    expect(screen.queryByText("hidden")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("搜索本地 Skill"), { target: { value: "not-found" } });
+    expect(screen.getByText("没有符合条件的 Skill")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+    const identityButton = screen.getByRole("button", { name: "打开 命令运行器详情" });
+    expect(identityButton.tagName).toBe("BUTTON");
+    expect(within(identityButton).getByRole("img", { name: "命令运行器 Skill 图标" })).toBeVisible();
+    expect(identityButton.querySelector("i")).not.toBeInTheDocument();
+    fireEvent.click(identityButton);
+    const drawer = await screen.findByRole("dialog", { name: "Skill 详情 命令运行器" });
+    expect(drawer).toHaveTextContent("git");
+    expect(drawer.querySelector(".skill-drawer-body")).toBeInTheDocument();
+    expect(drawer).toHaveTextContent("安全执行");
+    expect(drawer).not.toHaveTextContent("name: command-runner");
+    expect(within(drawer).getByRole("heading", { name: "命令运行器", level: 1 })).toBeVisible();
+    expect(within(drawer).getByRole("table")).toBeVisible();
+    expect(drawer.querySelector("footer")).toContainElement(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("button", { name: "查看修复建议" })).not.toBeInTheDocument();
+  });
+
+  it("shows the backend error when a local Skill enable change fails", async () => {
+    const installed = { ...detail, installedVersion: "local", version: "local", enabled: false, source: { provider: "openclaw", origin: "workspace" } };
+    const availableRuntime = { ...runtimeItem, disabled: true, eligible: true, availability: "disabled", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return response(request, [installed]);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [availableRuntime] });
+      if (request.method === "skills.set-enabled") return response(request, { id: "enable-1", slug: installed.slug, action: "enable", state: "failed", progress: 70, phase: "failed", error: "OpenClaw Skill readback mismatch." });
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    fireEvent.click(await screen.findByRole("switch", { name: "启用 命令运行器" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("OpenClaw Skill readback mismatch.");
+  });
+
+  it("shows a success toast when a local Skill enable change succeeds", async () => {
+    let enabled = false;
+    const installed = () => ({ ...detail, installedVersion: "local", version: "local", enabled, source: { provider: "openclaw", origin: "workspace" } });
+    const availableRuntime = { ...runtimeItem, disabled: true, eligible: true, availability: "disabled", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return response(request, [installed()]);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [availableRuntime] });
+      if (request.method === "skills.set-enabled") {
+        enabled = true;
+        return response(request, { id: "enable-1", slug: detail.slug, action: "enable", state: "succeeded", progress: 100, phase: "complete" });
+      }
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    fireEvent.click(await screen.findByRole("switch", { name: "启用 命令运行器" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("命令运行器已启用");
+  });
+
+  it("shows the backend message when SKILL.md cannot be read", async () => {
+    const installed = { ...detail, installedVersion: "local", version: "local", enabled: true, source: { provider: "openclaw", origin: "workspace" } };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return response(request, [installed]);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [{ ...runtimeItem, availability: "available", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] }] });
+      if (request.method === "skills.local-detail") return failure(request, "Workspace Skill not found.");
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "查看 命令运行器" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Workspace Skill not found.");
+  });
+
+  it("opens the fixed hub and prepares a selected ZIP before confirmation", async () => {
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return response(request, []);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [] });
+      if (request.method === "skills.open-hub") return response(request, { opened: true });
+      if (request.method === "skills.import-select") return response(request, { token: "selection-token-1", fileName: "useful.zip", sizeBytes: 1024 });
+      if (request.method === "skills.import-prepare") return response(request, { ...detail, risk: "high" });
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+    await screen.findByText("尚未安装 Skill");
+    fireEvent.click(screen.getByRole("button", { name: "发现更多 Skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
+    expect(await screen.findByRole("dialog", { name: "确认导入 命令运行器" })).toHaveTextContent("高风险");
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "skills.open-hub", params: {} }));
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "skills.import-prepare", params: { token: "selection-token-1" } }));
+  });
+
+  it("shows ZIP validation failures while the workbench data remains available", async () => {
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return response(request, []);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [] });
+      if (request.method === "skills.import-select") return response(request, { token: "selection-token-1", fileName: "broken.zip", sizeBytes: 1024 });
+      if (request.method === "skills.import-prepare") return failure(request, "Skill ZIP frontmatter 缺少 version");
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+    await screen.findByText("尚未安装 Skill");
+
+    fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Skill ZIP frontmatter 缺少 version");
+    expect(screen.getByText("尚未安装 Skill")).toBeVisible();
+  });
+
+  it("polls a confirmed ZIP install through OpenClaw readback and refreshes the workbench", async () => {
+    let installedReads = 0;
+    const installed = { ...detail, installedVersion: detail.version, enabled: true, source: { provider: "openclaw", origin: "workspace" } };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return response(request, installedReads++ === 0 ? [] : [installed]);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: installedReads > 1 ? [runtimeItem] : [] });
+      if (request.method === "skills.import-select") return response(request, { token: "selection-token-1", fileName: "useful.zip", sizeBytes: 1024 });
+      if (request.method === "skills.import-prepare") return response(request, { ...detail, risk: "high" });
+      if (request.method === "skills.import-install") return response(request, { id: "zip-op-1", slug: detail.slug, action: "install", state: "queued", progress: 0, phase: "queued" });
+      if (request.method === "skills.operation") return response(request, { id: "zip-op-1", slug: detail.slug, action: "install", state: "succeeded", progress: 100, phase: "complete" });
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+    await screen.findByText("尚未安装 Skill");
+
+    fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "我已了解网络来源 Skill 的高风险" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "skills.operation", params: { operationId: "zip-op-1" },
+    })));
+    expect(await screen.findByText("命令运行器")).toBeVisible();
+    expect(screen.getByText("命令运行器 安装成功，OpenClaw 已完成读回")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "关闭操作提示" }));
+    expect(screen.queryByText("命令运行器 安装成功，OpenClaw 已完成读回")).not.toBeInTheDocument();
+    expect(invoke.mock.calls.filter(([request]) => request.method === "skills.installed")).toHaveLength(2);
+  });
+
   it("renders loading, free catalog, pagination, and offline retry states", async () => {
     let attempts = 0;
     const invoke = vi.fn(async (request: any) => {

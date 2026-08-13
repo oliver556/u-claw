@@ -45,6 +45,7 @@ export interface SessionOrganizerService {
   setPinned(sessionId: string, pinned: boolean): Promise<SessionOrganizerDocument>;
   createGroup(name: string): Promise<SessionOrganizerDocument>;
   renameGroup(groupId: string, name: string): Promise<SessionOrganizerDocument>;
+  removeGroup(groupId: string): Promise<SessionOrganizerDocument>;
   assignGroup(sessionId: string, groupId: string | null): Promise<SessionOrganizerDocument>;
 }
 

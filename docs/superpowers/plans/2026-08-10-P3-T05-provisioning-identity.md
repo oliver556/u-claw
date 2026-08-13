@@ -1,5 +1,7 @@
 # P3-T05 Provisioning Identity Implementation Plan
 
+> **历史计划说明（2026-08-13）：** 本计划对应旧版完整制盘 saga。第一版改为发货前准备用户名、激活码和独立 New API 账户、人工设置余额，用户首次使用时绑定 USB；见[《第一版启动、激活与授权总方案》](../../第一版启动激活授权方案.md)。旧计划只作为原子写盘、幂等和补偿实现参考。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bind one physical device identity and license to one New API user/token/channel through an idempotent, recoverable manufacturing transaction.

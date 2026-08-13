@@ -1,5 +1,5 @@
 import type { Attachment } from "@uclaw/shared";
-import { LoaderCircle, Paperclip, RotateCw, Send, Square, X } from "lucide-react";
+import { ArrowUp, LoaderCircle, Paperclip, RotateCw, Square, X } from "lucide-react";
 import { Select } from "antd";
 
 interface ComposerProps {
@@ -28,7 +28,7 @@ interface ComposerProps {
 
 export function Composer({ value, disabled, sending, attachmentsSupported, attachments, models, modelValue, modelLoading, modelError, skills, skillValue, skillLoading, onChange, onSelectAttachments, onDropFiles, onPrepareAttachment, onRemoveAttachment, onSend, onStop, onModelChange, onSkillChange }: ComposerProps) {
   const readyAttachments = attachments.filter((attachment) => attachment.state === "ready");
-  return <div className="composer" onDragOver={(event) => { if (attachmentsSupported) event.preventDefault(); }} onDrop={(event) => { if (!attachmentsSupported) return; event.preventDefault(); onDropFiles([...event.dataTransfer.files]); }}>
+  return <div className="composer borderless-composer" onDragOver={(event) => { if (attachmentsSupported) event.preventDefault(); }} onDrop={(event) => { if (!attachmentsSupported) return; event.preventDefault(); onDropFiles([...event.dataTransfer.files]); }}>
     <label className="sr-only" htmlFor="chat-composer">给 U-Claw 发送消息</label>
     <textarea id="chat-composer" aria-label="给 U-Claw 发送消息" placeholder="输入消息，或用 @ 引用文件和能力" value={value} disabled={disabled || sending} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); onSend(); }
@@ -38,7 +38,7 @@ export function Composer({ value, disabled, sending, attachmentsSupported, attac
       <Select aria-label="会话模型" size="small" loading={modelLoading} status={modelError ? "error" : undefined} value={modelValue} placeholder={modelError ? "模型不可用" : "选择模型"} options={models} onChange={onModelChange} />
       <Select aria-label="下一条消息 Skill" size="small" allowClear loading={skillLoading} value={skillValue} placeholder="选择 Skill" options={skills} onChange={onSkillChange} onClear={() => onSkillChange(undefined)} />
       </div>
-      {sending ? <button className="send-button" type="button" aria-label="停止生成" onClick={onStop}><Square />停止</button> : <button className="send-button" type="button" aria-label="发送消息" disabled={disabled || (value.trim().length === 0 && readyAttachments.length === 0) || attachments.some((attachment) => attachment.state !== "ready")} onClick={onSend}><Send />发送</button>}
+      {sending ? <button className="send-button composer-action" type="button" aria-label="停止生成" title="停止" onClick={onStop}><Square /></button> : <button className="send-button composer-action" type="button" aria-label="发送消息" title="发送" disabled={disabled || (value.trim().length === 0 && readyAttachments.length === 0) || attachments.some((attachment) => attachment.state !== "ready")} onClick={onSend}><ArrowUp /></button>}
     </footer>
   </div>;
 }

@@ -52,6 +52,23 @@ describe("capability contracts", () => {
     })).toThrow();
   });
 
+  it("accepts controlled Skill import and hub actions without renderer paths or URLs", () => {
+    for (const request of [
+      { method: "skills.import-select", requestId: "select-1", params: {} },
+      { method: "skills.import-prepare", requestId: "prepare-1", params: { token: "selection-token-1" } },
+      { method: "skills.import-install", requestId: "install-1", params: { token: "selection-token-1", confirmation: { permissionFingerprint: "abc", acceptedRisk: "high" } } },
+      { method: "skills.import-dispose", requestId: "dispose-1", params: { token: "selection-token-1" } },
+      { method: "skills.open-hub", requestId: "hub-1", params: {} },
+      { method: "skills.resolve-install", requestId: "resolve-1", params: { identity: "@alice/example-skill" } },
+    ]) expect(() => SkillIpcRequestSchema.parse(request)).not.toThrow();
+
+    for (const request of [
+      { method: "skills.import-select", requestId: "bad-path", params: { path: "/tmp/skill.zip" } },
+      { method: "skills.open-hub", requestId: "bad-url", params: { url: "https://evil.example" } },
+      { method: "skills.resolve-install", requestId: "bad-identity", params: { identity: "@alice/example-skill", command: "curl | bash" } },
+    ]) expect(() => SkillIpcRequestSchema.parse(request)).toThrow();
+  });
+
   it("models filesystem, network, command, and environment permissions with risk", () => {
     for (const kind of ["filesystem", "network", "command", "environment"] as const) {
       expect(SkillPermissionSchema.parse({
@@ -69,6 +86,15 @@ describe("capability contracts", () => {
     expect(SkillCatalogItemSchema.parse({ ...base, source: { provider: "openclaw", origin: "workspace" } }).source).toEqual({ provider: "openclaw", origin: "workspace" });
     expect(SkillCatalogItemSchema.parse({ ...base, source: { provider: "portable", origin: "bundled" } }).source).toEqual({ provider: "portable", origin: "bundled" });
     expect(() => SkillCatalogItemSchema.parse({ ...base, source: { provider: "openclaw", origin: "workspace", path: "/secret" } })).toThrow();
+  });
+
+  it("accepts only trusted SkillHub HTTPS logo URLs", () => {
+    const base = { slug: "one", name: "One", description: "One", version: "1.0.0", pricingType: "free", installedVersion: null, enabled: false, updateAvailable: false, source: { provider: "skillhub", url: "https://api.skillhub.cn/api/v1/skills/one" }, permissions: [], permissionFingerprint: "empty", risk: "low", mode: "live", categories: [] } as const;
+    expect(SkillCatalogItemSchema.parse({ ...base, logoUrl: "https://api.skillhub.cn/assets/one.png" }).logoUrl).toBe("https://api.skillhub.cn/assets/one.png");
+    expect(SkillCatalogItemSchema.parse({ ...base, logoUrl: "https://skillhub-1388575217.cos.accelerate.myqcloud.com/logos/one.png" }).logoUrl).toContain("myqcloud.com");
+    for (const logoUrl of ["file:///tmp/one.png", "http://api.skillhub.cn/one.png", "https://api.skillhub.cn.evil.example/one.png", "data:image/png;base64,eA=="]) {
+      expect(() => SkillCatalogItemSchema.parse({ ...base, logoUrl })).toThrow();
+    }
   });
 
   it("models OpenClaw runtime eligibility, dependencies, conflicts, curator, and proposals", () => {

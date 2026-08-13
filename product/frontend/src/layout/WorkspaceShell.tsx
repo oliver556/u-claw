@@ -30,6 +30,8 @@ import { AppearanceSettings } from "../features/system/AppearanceSettings";
 import { SystemNodeManager } from "../features/system/SystemNodeManager";
 import { AdvancedVoiceSettings } from "../features/system/AdvancedVoiceSettings";
 import { ProductAuthorityStatus } from "../features/system/ProductAuthorityStatus";
+import { BalanceView } from "../features/billing/BalanceView";
+import { UsageView } from "../features/billing/UsageView";
 import { AppTitlebar } from "./AppTitlebar";
 import { PrimaryRail } from "./PrimaryRail";
 
@@ -163,7 +165,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
     setCreatingSession(true);
     setSessionError(undefined);
     try {
-      const created = await client.sessions.create({ title: "新会话" });
+      const created = await client.sessions.create();
       const [page, authoritative] = await Promise.all([client.sessions.list(), client.sessions.get(created.id)]);
       selectionRequest.current += 1;
       setSessions(page.items);
@@ -293,9 +295,11 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
         onLoadMore={() => void loadMoreSessions()}
         onRetry={() => void loadSessions()}
         onClose={() => setSessionsOpen(false)}
+        onOpenActivity={() => setActivityCenterOpen(true)}
         onTogglePinned={(session, pinned) => void updateOrganizer((service) => service.setPinned(session.id, pinned))}
         onCreateGroup={(name) => void updateOrganizer((service) => service.createGroup(name))}
         onRenameGroup={(group: SessionGroup, name) => void updateOrganizer((service) => service.renameGroup(group.id, name))}
+        onRemoveGroup={(group: SessionGroup) => void updateOrganizer((service) => service.removeGroup(group.id))}
         onAssignGroup={(session, groupId) => void updateOrganizer((service) => service.assignGroup(session.id, groupId))}
         onRetryOrganizer={() => void loadOrganizer()}
       /> : null}
@@ -304,11 +308,11 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
         {isWork ? activeSession === undefined
           ? <section className="work-canvas workspace-placeholder"><div className="conversation-state"><FolderArchive /><strong>{sessionState === "loading" ? "正在准备工作区" : "还没有会话"}</strong></div></section>
           : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} onSessionUpdated={(sessionId) => void refreshSessions(sessionId)} />
-          : route.path === "/files" ? <DataManager key="workspace" domain="workspace" onDirtyChange={setDataDirty} /> : route.path === "/memory" ? <DataManager key="memory" domain="memory" onDirtyChange={setDataDirty} /> : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/automation" ? <AutomationManager invoke={window.uclaw?.automation?.invoke} /> : route.path === "/connections" ? <ChannelSettings /> : route.path === "/system" ? <SystemCenter /> : <SecondaryView title={route.label} description={route.description} system={false} />}
+          : route.path === "/files" ? <DataManager key="workspace" domain="workspace" onDirtyChange={setDataDirty} /> : route.path === "/memory" ? <DataManager key="memory" domain="memory" onDirtyChange={setDataDirty} /> : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/automation" ? <AutomationManager invoke={window.uclaw?.automation?.invoke} /> : route.path === "/connections" ? <ChannelSettings /> : route.path === "/usage" ? <UsageView /> : route.path === "/balance" ? <BalanceView /> : route.path === "/system" ? <SystemCenter /> : <SecondaryView title={route.label} description={route.description} system={false} />}
       </main>
     </div>
     {activityCenterOpen ? <aside className="task-activity-center" aria-label="全局任务活动中心">
-      <TaskArtifactCenter onOpenSession={(sessionId) => {
+      <TaskArtifactCenter onClose={() => setActivityCenterOpen(false)} onOpenSession={(sessionId) => {
         navigate("/");
         void selectSession(sessionId);
         setActivityCenterOpen(false);

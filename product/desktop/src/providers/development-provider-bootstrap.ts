@@ -8,6 +8,7 @@ import {
 import type { ProviderStore } from "./provider-store.js";
 
 export const DEVELOPMENT_PROVIDER_ID = "uclaw-development-gpt";
+const DEVELOPMENT_PROVIDER_MODEL = "gpt-5.6-sol";
 
 export interface DevelopmentProvider extends ProviderDraft {
   apiKey: string;
@@ -27,8 +28,9 @@ export function readDevelopmentProvider(env: NodeJS.ProcessEnv): DevelopmentProv
   if (values.some((value) => value === undefined)) {
     throw configurationError("UNCONFIGURED", "Development model provider is not configured.");
   }
-  const [baseUrl, apiKey, model] = values as [string, string, string];
-  if (model !== "gpt-5.6-sol") {
+  const [baseUrl, apiKey, configuredModel] = values as [string, string, string];
+  const model = configuredModel === "" ? DEVELOPMENT_PROVIDER_MODEL : configuredModel;
+  if (model !== DEVELOPMENT_PROVIDER_MODEL) {
     throw configurationError("INVALID_ARGUMENT", "Development model provider is invalid.");
   }
   let draft: ProviderDraft;
