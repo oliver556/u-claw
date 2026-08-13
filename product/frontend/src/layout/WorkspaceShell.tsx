@@ -10,11 +10,12 @@ import {
   type SessionSummary,
   type UClawClient,
 } from "@uclaw/shared";
-import { Activity, AudioLines, Cpu, DatabaseBackup, FolderArchive, PackageCheck, Palette, PanelLeft, ShieldCheck, SquareTerminal } from "lucide-react";
+import { FolderArchive, PackageCheck, Palette, PanelLeft, SquareTerminal } from "lucide-react";
 import { Tooltip } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { unstable_usePrompt, useLocation, useNavigate } from "react-router-dom";
 
+import { firstReleaseSurface } from "../app/release-surface";
 import { routeForPath } from "../app/routes";
 import { Conversation } from "../features/chat/Conversation";
 import { SessionSidebar } from "../features/sessions/SessionSidebar";
@@ -23,13 +24,8 @@ import { AutomationManager } from "../features/automation/AutomationManager";
 import { ChannelSettings } from "../features/channels/ChannelSettings";
 import { TaskArtifactCenter } from "../features/activity/TaskArtifactCenter";
 import { DataManager } from "../features/data/DataManager";
-import { SystemDiagnostics } from "../features/system/SystemDiagnostics";
-import { MaintenanceCenter } from "../features/data/MaintenanceCenter";
 import { ReleaseCenter } from "../features/system/ReleaseCenter";
 import { AppearanceSettings } from "../features/system/AppearanceSettings";
-import { SystemNodeManager } from "../features/system/SystemNodeManager";
-import { AdvancedVoiceSettings } from "../features/system/AdvancedVoiceSettings";
-import { ProductAuthorityStatus } from "../features/system/ProductAuthorityStatus";
 import { BalanceView } from "../features/billing/BalanceView";
 import { UsageView } from "../features/billing/UsageView";
 import { AppTitlebar } from "./AppTitlebar";
@@ -45,18 +41,18 @@ function SecondaryView({ title, description, system }: { title: string; descript
 }
 
 function SystemCenter() {
-  const [view, setView] = useState<"diagnostics" | "system-node" | "system-voice" | "product-authority" | "maintenance" | "release" | "appearance">("diagnostics");
+  type SystemView = (typeof firstReleaseSurface.systemViews)[number];
+  const systemViews = [
+    { id: "release", label: "发布更新", icon: PackageCheck },
+    { id: "appearance", label: "外观", icon: Palette },
+  ] satisfies Array<{ id: SystemView; label: string; icon: typeof PackageCheck }>;
+  const visibleSystemViews = systemViews.filter((item) => firstReleaseSurface.systemViews.includes(item.id));
+  const [view, setView] = useState<SystemView>(visibleSystemViews[0]?.id ?? "release");
   return <div className="system-center">
     <div className="system-center-tabs" role="tablist" aria-label="系统工具">
-      <button type="button" role="tab" aria-selected={view === "diagnostics"} onClick={() => setView("diagnostics")}><Activity />诊断</button>
-      <button type="button" role="tab" aria-selected={view === "system-node"} onClick={() => setView("system-node")}><Cpu />设备与运行</button>
-      <button type="button" role="tab" aria-selected={view === "system-voice"} onClick={() => setView("system-voice")}><AudioLines />语音与通知</button>
-      <button type="button" role="tab" aria-selected={view === "product-authority"} onClick={() => setView("product-authority")}><ShieldCheck />产品授权</button>
-      <button type="button" role="tab" aria-selected={view === "maintenance"} onClick={() => setView("maintenance")}><DatabaseBackup />备份与存储</button>
-      <button type="button" role="tab" aria-selected={view === "release"} onClick={() => setView("release")}><PackageCheck />发布更新</button>
-      <button type="button" role="tab" aria-selected={view === "appearance"} onClick={() => setView("appearance")}><Palette />外观</button>
+      {visibleSystemViews.map(({ id, label, icon: Icon }) => <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => setView(id)}><Icon />{label}</button>)}
     </div>
-    {view === "diagnostics" ? <SystemDiagnostics /> : view === "system-node" ? <SystemNodeManager bridge={window.uclaw?.systemNode} /> : view === "system-voice" ? <AdvancedVoiceSettings bridge={window.uclaw?.systemVoice} /> : view === "product-authority" ? <ProductAuthorityStatus bridge={window.uclaw?.productServices} /> : view === "maintenance" ? <MaintenanceCenter /> : view === "release" ? <ReleaseCenter onOpenDiagnostics={() => setView("diagnostics")} /> : <AppearanceSettings />}
+    {view === "release" ? <ReleaseCenter /> : <AppearanceSettings />}
   </div>;
 }
 
