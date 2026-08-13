@@ -31,6 +31,7 @@ type ServiceOptions struct {
 	LicenseTTL time.Duration
 	Now        func() time.Time
 	Random     io.Reader
+	Observer   Observer
 }
 
 type Service struct {
@@ -44,6 +45,7 @@ type Service struct {
 	licenseTTL time.Duration
 	now        func() time.Time
 	random     io.Reader
+	observer   Observer
 }
 
 type pendingMaterial struct {
@@ -122,6 +124,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		repository: options.Repository, signer: options.Signer, envelope: options.Envelope,
 		pepper: append([]byte(nil), options.Pepper...), keyID: options.KeyID, keyVersion: options.KeyVersion,
 		leaseTTL: options.LeaseTTL, licenseTTL: options.LicenseTTL, now: options.Now, random: options.Random,
+		observer: options.Observer,
 	}, nil
 }
 
@@ -143,6 +146,7 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 		IdempotencyKey: input.IdempotencyKey, RequestFingerprint: fingerprint,
 		FingerprintVersion: input.FingerprintVersion, FingerprintSHA256: input.FingerprintSHA256,
 	}); err != nil {
+		service.recordDBFailure("validate_binding", err)
 		return ActivateResult{}, err
 	}
 	pending, err := service.newPendingMaterial()
@@ -157,6 +161,7 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 	binding := envelopeBinding(record, service.keyVersion)
 	record.PendingMaterialEnvelope, err = service.envelope.Encrypt(ctx, binding, pendingBytes)
 	if err != nil {
+		service.recordSigningFailure("kms")
 		return ActivateResult{}, errors.Join(ErrActivationServiceUnavailable, err)
 	}
 	record.PendingMaterialKeyVersion = service.keyVersion
@@ -168,7 +173,11 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 		Record:               record,
 	})
 	if err != nil {
+		service.recordDBFailure("begin_binding", err)
 		return ActivateResult{}, err
+	}
+	if begin.LeaseRecovered && service.observer != nil {
+		service.observer.RecordBindingLeaseStale()
 	}
 	if begin.Disposition == BindingBound {
 		return service.recoverBound(ctx, begin.Record, true)
@@ -181,13 +190,19 @@ func (service *Service) Commit(ctx context.Context, input CommitInput) error {
 		input.ArtifactGeneration < 1 || input.ArtifactGeneration > 9007199254740991 || !identifierPattern.MatchString(input.RequestID) {
 		return ErrActivationInvalid
 	}
-	return service.repository.CommitActivation(ctx, input)
+	err := service.repository.CommitActivation(ctx, input)
+	service.recordDBFailure("commit", err)
+	if errors.Is(err, ErrActivationInProgress) && service.observer != nil {
+		service.observer.RecordCommitStale()
+	}
+	return err
 }
 
 func (service *Service) complete(ctx context.Context, record BoundRecord) (ActivateResult, error) {
 	binding := envelopeBinding(record, record.PendingMaterialKeyVersion)
 	pendingBytes, err := service.envelope.Decrypt(ctx, binding, record.PendingMaterialEnvelope)
 	if err != nil {
+		service.recordSigningFailure("kms")
 		return ActivateResult{}, errors.Join(ErrActivationServiceUnavailable, err)
 	}
 	var pending pendingMaterial
@@ -197,6 +212,7 @@ func (service *Service) complete(ctx context.Context, record BoundRecord) (Activ
 	payload := signingPayload(record)
 	signature, err := service.signer.Sign(payload)
 	if err != nil {
+		service.recordSigningFailure("license")
 		return ActivateResult{}, errors.Join(ErrActivationServiceUnavailable, err)
 	}
 	material, err := json.Marshal(newActivationMaterial(record, pending, signature))
@@ -206,15 +222,31 @@ func (service *Service) complete(ctx context.Context, record BoundRecord) (Activ
 	finalBinding := envelopeBinding(record, service.keyVersion)
 	finalEnvelope, err := service.envelope.Encrypt(ctx, finalBinding, material)
 	if err != nil {
+		service.recordSigningFailure("kms")
 		return ActivateResult{}, errors.Join(ErrActivationServiceUnavailable, err)
 	}
 	record.ArtifactEnvelope = finalEnvelope
 	record.ArtifactKeyVersion = service.keyVersion
 	persisted, err := service.repository.CompleteBinding(ctx, CompleteBindingInput{LeaseToken: record.LeaseToken, Record: record})
 	if err != nil {
+		service.recordDBFailure("complete_binding", err)
 		return ActivateResult{}, err
 	}
 	return service.recoverBound(ctx, persisted, false)
+}
+
+func (service *Service) recordDBFailure(operation string, err error) {
+	if err != nil && service.observer != nil && !errors.Is(err, ErrActivationInvalid) &&
+		!errors.Is(err, ErrActivationCodeAlreadyBound) && !errors.Is(err, ErrActivationInProgress) &&
+		!errors.Is(err, ErrIdempotencyConflict) && !errors.Is(err, ErrNewAPINotConfigured) {
+		service.observer.RecordDBFailure(operation)
+	}
+}
+
+func (service *Service) recordSigningFailure(dependency string) {
+	if service.observer != nil {
+		service.observer.RecordSigningFailure(dependency)
+	}
 }
 
 func (service *Service) recoverBound(ctx context.Context, record BoundRecord, recovery bool) (ActivateResult, error) {

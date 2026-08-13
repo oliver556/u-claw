@@ -96,8 +96,16 @@ type ValidateBindingInput struct {
 }
 
 type BeginBindingResult struct {
-	Disposition BindingDisposition
-	Record      BoundRecord
+	Disposition    BindingDisposition
+	Record         BoundRecord
+	LeaseRecovered bool
+}
+
+type Observer interface {
+	RecordDBFailure(operation string)
+	RecordBindingLeaseStale()
+	RecordSigningFailure(dependency string)
+	RecordCommitStale()
 }
 
 type CompleteBindingInput struct {
