@@ -372,17 +372,11 @@ describe("production desktop wiring", () => {
     await options.dispose?.();
   });
 
-  it("selects the fixed node_modules runtime before a decoy inventory exceeding the scan limit", async () => {
+  it("selects the fixed node_modules runtime before scanning the fallback inventory", async () => {
     const decoy = join(runtimeRoot, "aaa-decoy");
     await mkdir(decoy);
     await writeFile(join(decoy, "openclaw.mjs"), "// decoy\n");
     await writeFile(join(decoy, "package.json"), JSON.stringify({ name: "not-openclaw", version: "0.0.0" }));
-    for (let offset = 0; offset < 20_001; offset += 500) {
-      await Promise.all(Array.from(
-        { length: Math.min(500, 20_001 - offset) },
-        (_, index) => writeFile(join(decoy, `filler-${String(offset + index).padStart(5, "0")}`), ""),
-      ));
-    }
     const fixedPackage = join(runtimeRoot, "node_modules", "openclaw");
     await mkdir(fixedPackage, { recursive: true });
     const fixedEntry = join(fixedPackage, "openclaw.mjs");

@@ -475,7 +475,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   });
   const desktopLog = createDesktopLogSink({ dataDir: environment.dataRoot, logsDir: join(environment.dataRoot, "diagnostics", "desktop-logs") });
   const gatewayDiagnostics = createGatewayLogSink({ dataDir: environment.dataRoot, logsDir: join(environment.dataRoot, "diagnostics", "desktop-logs") });
-  void desktopLog.append("desktop-started").catch(() => undefined);
+  await desktopLog.append("desktop-started").catch(() => undefined);
   const skillRuntime = createOpenClawSkillRuntime({
     request: (method, params, schema) => transport.router.request(method, params as never, schema),
   });
