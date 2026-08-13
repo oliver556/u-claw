@@ -31,7 +31,7 @@ interface CoordinatorWriter {
   writeJournal(journal: ActivationJournal): Promise<void>;
   writeServerBoundJournal(journal: BoundJournal): Promise<void>;
   recoverPendingArtifacts(): Promise<void>;
-  readServerBoundResponse(activationId: string, deviceId: string, licenseId: string): Promise<ActivationResponse>;
+  readServerBoundResponse(activationId: string, deviceId: string, licenseId: string, generation: number): Promise<ActivationResponse>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
   commitArtifacts(activationId: string, generation: number): Promise<void>;
@@ -173,7 +173,7 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
           const active = { token: ++nextToken, controller: new AbortController(), serverBound: true };
           operation = active;
           try {
-            const response = await deps.writer.readServerBoundResponse(legacy.activationId!, legacy.deviceId!, legacy.licenseId!);
+            const response = await deps.writer.readServerBoundResponse(legacy.activationId!, legacy.deviceId!, legacy.licenseId!, legacy.generation);
             const bound: BoundJournal = {
               schemaVersion: 2, stage: "server_bound", activationId: legacy.activationId!, deviceId: legacy.deviceId!, licenseId: legacy.licenseId!,
               idempotencyKey: legacy.idempotencyKey, generation: legacy.generation, requestHash: requestHash(base),

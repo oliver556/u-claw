@@ -346,7 +346,7 @@ describe("activation coordinator", () => {
     await coordinator.preflight();
     expect(await coordinator.submit(input)).toEqual({ state: "complete" });
     expect(deps.client.activate).not.toHaveBeenCalled();
-    expect(writer.readServerBoundResponse).toHaveBeenCalledWith(response.activationId, response.deviceId, response.licenseId);
+    expect(writer.readServerBoundResponse).toHaveBeenCalledWith(response.activationId, response.deviceId, response.licenseId, 1);
     expect(writer.writeServerBoundJournal).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: 2, stage: "server_bound" }));
   });
 

@@ -241,9 +241,40 @@ describe("activation artifact writer", () => {
     await writer.writeServerBoundJournal(journal(response));
     await writer.writeArtifacts({ generation: 1, response });
 
-    await expect(writer.readServerBoundResponse(response.activationId, response.deviceId, response.licenseId))
+    await expect(writer.readServerBoundResponse(response.activationId, response.deviceId, response.licenseId, 1))
       .resolves.toEqual(response);
-    await expect(writer.readServerBoundResponse("activation-other", response.deviceId, response.licenseId))
+    await expect(writer.readServerBoundResponse("activation-other", response.deviceId, response.licenseId, 1))
+      .rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
+  });
+
+  it("rejects same-identity artifact tampering before reconstructing a server-bound response", async () => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    const response = material();
+    await writer.writeServerBoundJournal(journal(response));
+    await writer.writeArtifacts({ generation: 1, response });
+    const tamperedToken = `uclaw_dt_${"Z".repeat(43)}`;
+    await writeFile(absolutePath(dataDir, paths.builtin), JSON.stringify({ ...response.builtinCredential, deviceToken: tamperedToken }));
+
+    const error = await writer.readServerBoundResponse(response.activationId, response.deviceId, response.licenseId, 1).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "ARTIFACT_INVALID" });
+    expect(`${String(error)}${JSON.stringify(error)}`).not.toContain(tamperedToken);
+  });
+
+  it.each([
+    ["generation", { generation: 2 }],
+    ["hash", { sha256: { startupCredential: "f".repeat(64), license: "f".repeat(64), builtinCredential: "f".repeat(64) } }],
+  ])("rejects a server-bound manifest %s mismatch", async (_name, patch) => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    const response = material();
+    await writer.writeServerBoundJournal(journal(response));
+    await writer.writeArtifacts({ generation: 1, response });
+    const manifestPath = absolutePath(dataDir, paths.generation);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, ...patch }));
+
+    await expect(writer.readServerBoundResponse(response.activationId, response.deviceId, response.licenseId, 1))
       .rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
   });
 
