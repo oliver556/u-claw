@@ -272,6 +272,9 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 			return &fakeChildProcess{}, nil
 		},
 		ActivationProcessSpec: ActivationProcessSpec,
+		ReadUSBFingerprint: func(string) (usbFingerprint, error) {
+			return usbFingerprint{Scheme: "uclaw-usb-v1", SHA256: strings.Repeat("a", 64)}, nil
+		},
 		MonitorUSB: func(ctx context.Context, _ string, _ time.Duration) error {
 			<-ctx.Done()
 			return ctx.Err()
@@ -299,9 +302,9 @@ func TestRunActivationCompletionRestartsFullGateOnce(t *testing.T) {
 	deps.AcquireRuntime = func(root string, _ Manifest) (RuntimeLease, error) {
 		return &fakeRuntimeLease{root: root}, nil
 	}
-	deps.ActivationProcessSpec = func(paths PortablePaths, manifest Manifest, lease RuntimeLease) ProcessSpec {
+	deps.ActivationProcessSpec = func(paths PortablePaths, manifest Manifest, lease RuntimeLease, fingerprint usbFingerprint) ProcessSpec {
 		activationSpecs++
-		return ActivationProcessSpec(paths, manifest, lease)
+		return ActivationProcessSpec(paths, manifest, lease, fingerprint)
 	}
 	deps.StartProcess = func(spec ProcessSpec) (ChildProcess, error) {
 		started++
@@ -329,6 +332,23 @@ func TestRunActivationCompletionRestartsFullGateOnce(t *testing.T) {
 	wantPrefix := []State{StateStarting, StateValidatingUSB, StateActivationRequired, StateCheckingRuntime, StateExtractingRuntime, StateStartingActivation, StateStarting}
 	if !reflect.DeepEqual(reporter.states[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("states = %v", reporter.states)
+	}
+}
+
+func TestRunDoesNotStartActivationWhenUSBFingerprintCannotBeRead(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.DetectActivationState = func(string) (ActivationState, error) { return ActivationRequired, nil }
+	deps.ReadUSBFingerprint = func(string) (usbFingerprint, error) { return usbFingerprint{}, errors.New("fingerprint unavailable") }
+	started := false
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { started = true; return &fakeChildProcess{}, nil }
+
+	err := Run(context.Background(), deps)
+	if err == nil || !strings.Contains(err.Error(), "fingerprint unavailable") {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if started {
+		t.Fatal("activation process started without a trusted USB fingerprint")
 	}
 }
 

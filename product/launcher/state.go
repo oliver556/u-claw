@@ -74,7 +74,8 @@ type Dependencies struct {
 	CheckSequence         func(string, Manifest) error
 	AcceptSequence        func(string, Manifest) error
 	FinalizeUpdate        func(string, Manifest) error
-	ActivationProcessSpec func(PortablePaths, Manifest, RuntimeLease) ProcessSpec
+	ActivationProcessSpec func(PortablePaths, Manifest, RuntimeLease, usbFingerprint) ProcessSpec
+	ReadUSBFingerprint    func(string) (usbFingerprint, error)
 	StartProcess          func(ProcessSpec) (ChildProcess, error)
 	MonitorUSB            func(context.Context, string, time.Duration) error
 	AppendLog             func(dataDir string, event string) error
@@ -157,7 +158,11 @@ func Run(ctx context.Context, deps Dependencies) error {
 		}
 		if activationOnly {
 			reporter.State(StateStartingActivation)
-			process, err := deps.StartProcess(deps.ActivationProcessSpec(deps.Paths, manifest, lease))
+			fingerprint, fingerprintErr := deps.ReadUSBFingerprint(deps.Paths.USBRoot)
+			if fingerprintErr != nil {
+				return reportFailure(reporter, errors.Join(fingerprintErr, lease.Close()))
+			}
+			process, err := deps.StartProcess(deps.ActivationProcessSpec(deps.Paths, manifest, lease, fingerprint))
 			if err != nil {
 				return reportFailure(reporter, errors.Join(ErrAppStartFailed, err, lease.Close()))
 			}
