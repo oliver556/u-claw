@@ -47,6 +47,15 @@ export const lightSemanticCssVariables: SemanticCssVariables = {
   "--uclaw-on-accent": "#ffffff",
   "--uclaw-shadow": "rgba(5, 5, 5, 0.12)",
   "--uclaw-shadow-lg": "rgba(5, 5, 5, 0.18)",
+  "--uclaw-image-preview-mask": "rgba(8, 10, 12, .94)",
+  "--uclaw-skill-accent": "#67a2ff",
+  "--uclaw-skill-accent-bg": "rgba(48, 110, 211, .18)",
+  "--uclaw-skill-muted": "#8290ad",
+  "--uclaw-skill-muted-bg": "rgba(89, 107, 139, .18)",
+  "--uclaw-skill-table-head-bg": "rgba(12, 17, 24, .18)",
+  "--uclaw-skill-logo-bg": "#25282d",
+  "--uclaw-skill-logo-border": "#383c43",
+  "--uclaw-skill-logo-text": "#aab0ba",
 };
 
 export const darkSemanticCssVariables: SemanticCssVariables = {
@@ -90,6 +99,15 @@ export const darkSemanticCssVariables: SemanticCssVariables = {
   "--uclaw-on-accent": "#ffffff",
   "--uclaw-shadow": "rgba(0, 0, 0, 0.32)",
   "--uclaw-shadow-lg": "rgba(0, 0, 0, 0.48)",
+  "--uclaw-image-preview-mask": "rgba(8, 10, 12, .94)",
+  "--uclaw-skill-accent": "#67a2ff",
+  "--uclaw-skill-accent-bg": "rgba(48, 110, 211, .18)",
+  "--uclaw-skill-muted": "#8290ad",
+  "--uclaw-skill-muted-bg": "rgba(89, 107, 139, .18)",
+  "--uclaw-skill-table-head-bg": "rgba(12, 17, 24, .18)",
+  "--uclaw-skill-logo-bg": "#25282d",
+  "--uclaw-skill-logo-border": "#383c43",
+  "--uclaw-skill-logo-text": "#aab0ba",
 };
 
 const seedTokens: NonNullable<ThemeConfig["token"]> = {
