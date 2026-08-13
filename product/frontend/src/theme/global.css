@@ -139,6 +139,7 @@ html[data-theme="dark"] .workspace-grid:not(.secondary-layout) .composer { backg
 .session-popover svg { width: 14px; height: 14px; }
 .session-popover .danger { color: var(--uclaw-error); }
 .session-popover label select { min-width: 0; flex: 1; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; }
+.session-rename-error { margin-top: 8px; color: var(--uclaw-error); font-size: 12px; }
 .session-groups { position: relative; }
 .session-group-heading { display: flex; align-items: center; }
 .session-group-heading .panel-label { flex: 1; }

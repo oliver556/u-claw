@@ -195,12 +195,9 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
     }
   };
 
-  const renameSession = async (summary: SessionSummary) => {
-    const title = window.prompt("会话名称", summary.title)?.trim();
-    if (title === undefined || title === "" || title === summary.title) return;
+  const renameSession = async (summary: SessionSummary, title: string) => {
     if (client.sessions.rename === undefined) {
-      setSessionError("当前连接不支持重命名会话");
-      return;
+      throw new Error("当前连接不支持重命名会话");
     }
     setSessionError(undefined);
     try {
@@ -211,7 +208,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
       setHasMoreSessions(page.hasMore);
       setActiveSession((current) => current?.id === summary.id ? authoritative : current);
     } catch (error) {
-      setSessionError(error instanceof Error ? error.message : "重命名会话失败");
+      throw error instanceof Error ? error : new Error("重命名会话失败");
     }
   };
 
@@ -290,7 +287,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
         hasMore={hasMoreSessions}
         onSelect={(id) => void selectSession(id)}
         onCreate={() => void createSession()}
-        onRename={(session) => void renameSession(session)}
+        onRename={renameSession}
         onRemove={(session) => void removeSession(session)}
         onLoadMore={() => void loadMoreSessions()}
         onRetry={() => void loadSessions()}
