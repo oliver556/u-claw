@@ -1,5 +1,5 @@
 export { packageName } from "./package-name.js";
-export { AttachmentManager, AttachmentServiceError } from "./attachments.js";
+export { AttachmentManager, AttachmentServiceError, createControlledAttachmentResolver } from "./attachments.js";
 export { createOpenClawAutomationService } from "./automation.js";
 export { createOpenClawTaskArtifactService } from "./task-artifacts.js";
 export { createOpenClawSystemNodeService } from "./system-node.js";
@@ -8,7 +8,7 @@ export type { OpenClawTaskArtifactOptions, TaskArtifactRouter } from "./task-art
 export type { OpenClawSystemNodeOptions } from "./system-node.js";
 export type { OpenClawSystemVoiceOptions } from "./system-voice.js";
 export type { AutomationRouter, AutomationService, OpenClawAutomationOptions } from "./automation.js";
-export type { AttachmentManagerOptions, OpenClawAttachment } from "./attachments.js";
+export type { AttachmentManagerOptions, ControlledAttachmentResolverOptions, OpenClawAttachment, OpenClawAttachmentResolver } from "./attachments.js";
 export { mapChatEvent, mapMessage } from "./mappers/chat.js";
 export { mapSession, mapSessionSummary } from "./mappers/session.js";
 export { mapOpenClawModel, RawOpenClawModelSchema, RawOpenClawModelsListResponseSchema } from "./mappers/model.js";
