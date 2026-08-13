@@ -92,7 +92,8 @@ describe("localhost license lifecycle backend", () => {
     expect(replacement.status.licenseId).not.toBe(issued.status.licenseId);
     expect(replacement.startupCredential.startupSecret).not.toBe(issued.startupCredential.startupSecret);
     expect(replacement.license.usbFingerprint.sha256).toBe(reissueInput.usbFingerprint);
-    expect(replacement.license.expiresAt).toBe(reissueInput.expiresAt);
+    expect(replacement.license.expiresAt).toBe("2028-08-10T00:00:00Z");
+    expect(Date.parse(replacement.license.expiresAt)).toBe(Date.parse(reissueInput.expiresAt));
     expect(replacement.license.signature.value).not.toBe(issued.license.signature.value);
     await expect(client.getLicenseStatus(issued.status.licenseId)).resolves.toMatchObject({
       status: { status: "reissued", replacementLicenseId: replacement.status.licenseId, revision: 2 },
