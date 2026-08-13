@@ -1,6 +1,8 @@
 import {
   AttachmentIpcRequestSchema,
   AttachmentIpcResponseSchema,
+  ChatQueueIpcRequestSchema,
+  ChatQueueIpcResponseSchema,
   ClientIpcRequestSchema,
   IpcEventSchema,
   IpcResponseSchema,
@@ -28,6 +30,7 @@ import {
   type ClientIpcRequest,
   type AttachmentIpcRequest,
   type AttachmentIpcResponse,
+  type ChatQueueIpcRequest,
   type IpcResponse,
   type IpcEvent,
   type WindowIpcRequest,
@@ -79,6 +82,7 @@ import {
 import {
   CLIENT_IPC_CHANNEL,
   ATTACHMENT_IPC_CHANNEL,
+  CHAT_QUEUE_IPC_CHANNEL,
   CLIENT_IPC_EVENT_CHANNEL,
   WINDOW_MAXIMIZED_EVENT_CHANNEL,
   WINDOW_IPC_CHANNEL,
@@ -147,6 +151,14 @@ export function installPreloadBridge({
   const invokeAttachments = async (payload: AttachmentIpcRequest): Promise<AttachmentIpcResponse> => {
     const request = AttachmentIpcRequestSchema.parse(payload);
     const response = AttachmentIpcResponseSchema.parse(await ipcRenderer.invoke(ATTACHMENT_IPC_CHANNEL, request));
+    if (response.method !== request.method || response.requestId !== request.requestId) {
+      throw new Error("IPC response does not match its request.");
+    }
+    return response;
+  };
+  const invokeChatQueue = async (payload: unknown) => {
+    const request = ChatQueueIpcRequestSchema.parse(payload);
+    const response = ChatQueueIpcResponseSchema.parse(await ipcRenderer.invoke(CHAT_QUEUE_IPC_CHANNEL, request));
     if (response.method !== request.method || response.requestId !== request.requestId) {
       throw new Error("IPC response does not match its request.");
     }
@@ -322,6 +334,7 @@ export function installPreloadBridge({
     window: Object.freeze({ invoke: invokeWindow, onMaximizedChange }),
     client: Object.freeze({ invoke: invokeClient, subscribe }),
     attachments: Object.freeze({ invoke: invokeAttachments }),
+    chatQueue: Object.freeze({ invoke: invokeChatQueue as (request: ChatQueueIpcRequest) => Promise<unknown> }),
     providers: Object.freeze({ invoke: invokeProviders as (request: ProviderIpcRequest) => Promise<unknown> }),
     skills: Object.freeze({ invoke: invokeSkills as (request: SkillIpcRequest) => Promise<unknown> }),
     plugins: Object.freeze({ invoke: invokePlugins as (request: PluginIpcRequest) => Promise<unknown> }),
