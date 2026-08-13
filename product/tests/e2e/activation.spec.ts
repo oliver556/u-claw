@@ -65,7 +65,6 @@ async function installActivationFixture(page: Page, mode: FixtureMode): Promise<
 }
 
 async function fillActivation(page: Page): Promise<void> {
-  await page.getByLabel("用户名").fill("UCLAW-8F2K9M");
   await page.getByRole("textbox", { name: "激活码" }).fill(activationCode);
 }
 
@@ -120,14 +119,13 @@ test("restricted bridge completes first activation without exposing normal IPC",
   await expect(page.getByText("这套 U-Claw 已可使用")).toBeVisible();
   await expectNoOverflow(page);
   expect(await page.evaluate(() => (window as any).__activationFixture.calls.filter((call: any) => call.method === "submit"))).toEqual([
-    { method: "submit", input: { username: "UCLAW-8F2K9M", activationCode } },
+    { method: "submit", input: { activationCode } },
   ]);
 });
 
 test("validates 26-character input and preserves real keyboard order", async ({ page }) => {
   await installActivationFixture(page, "success");
   await page.goto("/");
-  await page.getByLabel("用户名").fill("ab");
   await page.getByRole("textbox", { name: "激活码" }).fill("short");
   await page.getByRole("button", { name: "激活当前 U 盘" }).click();
   await expect(page.getByText("请输入 26 位激活码")).toBeVisible();
@@ -136,18 +134,18 @@ test("validates 26-character input and preserves real keyboard order", async ({ 
   await fillActivation(page);
   await page.getByRole("link", { name: "跳到主要内容" }).focus();
   const order: string[] = [];
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 4; index += 1) {
     await page.keyboard.press("Tab");
     order.push(await page.evaluate(() => {
       const active = document.activeElement as HTMLElement;
       return active.getAttribute("aria-label") || active.id || active.textContent?.trim() || "";
     }));
   }
-  expect(order).toEqual(["关闭", "activation-username", "activation-code", "显示激活码", "激活当前 U 盘"]);
+  expect(order).toEqual(["关闭", "activation-code", "显示激活码", "激活当前 U 盘"]);
 });
 
 for (const [mode, message] of [
-  ["invalid", "用户名或激活码不正确"],
+  ["invalid", "激活码不正确"],
   ["offline", "激活服务暂时不可用"],
 ] as const) test(`shows ${mode} failure and retries after recovery`, async ({ page }) => {
   await installActivationFixture(page, mode);

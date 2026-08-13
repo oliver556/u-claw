@@ -24,7 +24,7 @@ function bridge(preflight: ActivationApi["preflight"] = vi.fn(async (): Promise<
 afterEach(() => { cleanup(); vi.useRealTimers(); delete window.uclawActivation; delete window.uclaw; });
 
 describe("ActivationFlow", () => {
-  it("checks first, then focuses the username field", async () => {
+  it("checks first, then focuses the activation code field", async () => {
     let finishCheck!: (status: ActivationStatus) => void;
     const api = bridge(vi.fn(() => new Promise<ActivationStatus>((resolve) => { finishCheck = resolve; })));
     render(<ActivationFlow api={api} />);
@@ -32,22 +32,21 @@ describe("ActivationFlow", () => {
     finishCheck({ state: "input" });
     expect(await screen.findByRole("heading", { name: "激活这套 U-Claw" })).toBeVisible();
     expect(api.preflight).toHaveBeenCalledOnce();
-    expect(screen.getByLabelText("用户名")).toHaveFocus();
+    expect(screen.queryByLabelText("用户名")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("激活码")).toHaveFocus();
   });
 
   it("formats a 26-character code, hides it, supports reveal and Enter submit", async () => {
     const api = bridge();
     render(<ActivationFlow api={api} />);
-    const username = await screen.findByLabelText("用户名");
-    const activationCode = screen.getByLabelText("激活码");
-    fireEvent.change(username, { target: { value: "UCLAW-8F2K9M" } });
+    const activationCode = await screen.findByLabelText("激活码");
     fireEvent.change(activationCode, { target: { value: code.toLowerCase() } });
     expect(activationCode).toHaveValue("7K4P9-Q2MX8-RT6W3-NA5KC-4D7H2Q");
     expect(activationCode).toHaveAttribute("type", "password");
     fireEvent.click(screen.getByRole("button", { name: "显示激活码" }));
     expect(activationCode).toHaveAttribute("type", "text");
     fireEvent.submit(screen.getByRole("button", { name: "激活当前 U 盘" }).closest("form")!);
-    await waitFor(() => expect(api.submit).toHaveBeenCalledWith({ username: "UCLAW-8F2K9M", activationCode: code }));
+    await waitFor(() => expect(api.submit).toHaveBeenCalledWith({ activationCode: code }));
     expect(screen.getByText("这套 U-Claw 已可使用")).toBeVisible();
   });
 
@@ -63,7 +62,6 @@ describe("ActivationFlow", () => {
       .mockResolvedValueOnce({ state: "committing" });
     const view = render(<ActivationFlow api={api} />);
     await act(async () => { await Promise.resolve(); });
-    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "UCLAW-8F2K9M" } });
     fireEvent.change(screen.getByLabelText("激活码"), { target: { value: code } });
     fireEvent.submit(screen.getByRole("button", { name: "激活当前 U 盘" }).closest("form")!);
 
@@ -90,7 +88,6 @@ describe("ActivationFlow", () => {
     api.commit.mockImplementation(() => new Promise<ActivationStatus>((resolve) => { finishPoll = resolve; }));
     render(<ActivationFlow api={api} />);
     await act(async () => { await Promise.resolve(); });
-    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "UCLAW-8F2K9M" } });
     fireEvent.change(screen.getByLabelText("激活码"), { target: { value: code } });
     fireEvent.submit(screen.getByRole("button", { name: "激活当前 U 盘" }).closest("form")!);
     await act(async () => { await vi.advanceTimersByTimeAsync(250); });
@@ -128,11 +125,10 @@ describe("ActivationFlow", () => {
 
   it("keeps form controls in keyboard order", async () => {
     render(<ActivationFlow api={bridge()} />);
-    const username = await screen.findByLabelText("用户名");
-    const activationCode = screen.getByLabelText("激活码");
+    const activationCode = await screen.findByLabelText("激活码");
     const reveal = screen.getByRole("button", { name: "显示激活码" });
     const submit = screen.getByRole("button", { name: "激活当前 U 盘" });
-    expect([username, activationCode, reveal, submit].map((node) => node.tabIndex)).toEqual([0, 0, 0, 0]);
+    expect([activationCode, reveal, submit].map((node) => node.tabIndex)).toEqual([0, 0, 0]);
   });
 
   it("ignores an older preflight result that resolves after a newer check", async () => {

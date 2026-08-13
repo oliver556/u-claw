@@ -4,7 +4,7 @@ export type ActivationState = "checking" | "input" | "submitting" | "server-boun
 export interface ActivationStatus { state: ActivationState; code?: string }
 export interface ActivationApi {
   preflight(): Promise<ActivationStatus>;
-  submit(input: { username: string; activationCode: string }): Promise<ActivationStatus>;
+  submit(input: { activationCode: string }): Promise<ActivationStatus>;
   commit(): Promise<ActivationStatus>;
   cancel(): Promise<ActivationStatus>;
   close(): Promise<ActivationStatus>;
@@ -44,7 +44,7 @@ export function useActivation(api: ActivationApi) {
     return () => { mounted.current = false; };
   }, [preflight]);
 
-  const submit = useCallback(async (username: string, activationCode: string) => {
+  const submit = useCallback(async (activationCode: string) => {
     const token = ++operationToken.current;
     update({ state: "submitting" });
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -62,7 +62,7 @@ export function useActivation(api: ActivationApi) {
     };
     timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
     try {
-      const next = await api.submit({ username: username.trim(), activationCode: normalizeActivationCode(activationCode) });
+      const next = await api.submit({ activationCode: normalizeActivationCode(activationCode) });
       if (token === operationToken.current) update(next);
     } catch {
       if (token === operationToken.current) update({ state: "error", code: "ACTIVATION_FAILED" });
