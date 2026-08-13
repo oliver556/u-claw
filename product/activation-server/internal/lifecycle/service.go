@@ -3,14 +3,11 @@ package lifecycle
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io"
 	"regexp"
 	"time"
 
@@ -66,7 +63,6 @@ type Repository interface {
 	GetActivationForRecovery(context.Context, string) (RecoveryRecord, error)
 	AuthorizeRecovery(context.Context, string, string) (RecoveryRecord, error)
 	RecordRecovery(context.Context, string, string, string) error
-	CreateTokenGrant(context.Context, TokenGrant) (TokenGrant, error)
 }
 
 type RecoveryRecord struct {
@@ -78,73 +74,36 @@ type RecoveryRecord struct {
 }
 type RecoverInput struct{ ActivationID, StartupSecret, RequestID string }
 
-type TokenGrant struct {
-	JTI            string
-	DeviceID       string
-	LicenseID      string
-	IdempotencyKey string
-	IssuedAt       time.Time
-	ExpiresAt      time.Time
-}
-
-type DeviceTokenInput struct {
-	DeviceID       string
-	LicenseID      string
-	IdempotencyKey string
-	StartupSecret  string
-}
-
-type DeviceTokenResponse struct {
-	AccessToken string `json:"accessToken"`
-	TokenType   string `json:"tokenType"`
-	ExpiresAt   string `json:"expiresAt"`
-}
-
 type Envelope interface {
 	Decrypt(context.Context, security.EnvelopeBinding, []byte) ([]byte, error)
 }
 
 type ServiceOptions struct {
-	Repository      Repository
-	KeyID           string
-	PrivateKey      ed25519.PrivateKey
-	Now             func() time.Time
-	MaximumGrace    time.Duration
-	Envelope        Envelope
-	Random          io.Reader
-	TokenTTL        time.Duration
-	TokenSigningKey []byte
+	Repository   Repository
+	KeyID        string
+	PrivateKey   ed25519.PrivateKey
+	Now          func() time.Time
+	MaximumGrace time.Duration
+	Envelope     Envelope
 }
 
 type Service struct {
-	repository      Repository
-	keyID           string
-	privateKey      ed25519.PrivateKey
-	now             func() time.Time
-	maximumGrace    time.Duration
-	envelope        Envelope
-	random          io.Reader
-	tokenTTL        time.Duration
-	tokenSigningKey []byte
+	repository   Repository
+	keyID        string
+	privateKey   ed25519.PrivateKey
+	now          func() time.Time
+	maximumGrace time.Duration
+	envelope     Envelope
 }
 
 func NewService(options ServiceOptions) (*Service, error) {
-	if options.Repository == nil || !identifierPattern.MatchString(options.KeyID) || len(options.PrivateKey) != ed25519.PrivateKeySize || len(options.TokenSigningKey) < 32 || options.MaximumGrace <= 0 || options.MaximumGrace > 24*time.Hour {
+	if options.Repository == nil || !identifierPattern.MatchString(options.KeyID) || len(options.PrivateKey) != ed25519.PrivateKeySize || options.MaximumGrace <= 0 || options.MaximumGrace > 24*time.Hour {
 		return nil, errors.New("lifecycle service configuration invalid")
 	}
 	if options.Now == nil {
 		options.Now = time.Now
 	}
-	if options.Random == nil {
-		options.Random = rand.Reader
-	}
-	if options.TokenTTL == 0 {
-		options.TokenTTL = 15 * time.Minute
-	}
-	if options.TokenTTL <= 0 || options.TokenTTL > time.Hour {
-		return nil, errors.New("lifecycle token TTL invalid")
-	}
-	return &Service{repository: options.Repository, keyID: options.KeyID, privateKey: append(ed25519.PrivateKey(nil), options.PrivateKey...), now: options.Now, maximumGrace: options.MaximumGrace, envelope: options.Envelope, random: options.Random, tokenTTL: options.TokenTTL, tokenSigningKey: append([]byte(nil), options.TokenSigningKey...)}, nil
+	return &Service{repository: options.Repository, keyID: options.KeyID, privateKey: append(ed25519.PrivateKey(nil), options.PrivateKey...), now: options.Now, maximumGrace: options.MaximumGrace, envelope: options.Envelope}, nil
 }
 
 func (service *Service) Recover(ctx context.Context, input RecoverInput) ([]byte, error) {
@@ -187,43 +146,6 @@ func (service *Service) recordRecovery(ctx context.Context, input RecoverInput, 
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recoveryAuditTimeout)
 	defer cancel()
 	return service.repository.RecordRecovery(auditCtx, input.ActivationID, input.RequestID, outcome)
-}
-
-func (service *Service) DeviceToken(ctx context.Context, input DeviceTokenInput) (DeviceTokenResponse, error) {
-	if !identifierPattern.MatchString(input.DeviceID) || !identifierPattern.MatchString(input.LicenseID) || !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`).MatchString(input.IdempotencyKey) || len(input.StartupSecret) < 32 || len(input.StartupSecret) > 512 {
-		return DeviceTokenResponse{}, ErrAuthentication
-	}
-	license, err := service.repository.GetLicense(ctx, input.LicenseID)
-	if err != nil || license.DeviceID != input.DeviceID || license.Status != "active" || !authenticate(license, input.StartupSecret) {
-		return DeviceTokenResponse{}, ErrAuthentication
-	}
-	now := service.now().UTC()
-	if !now.Before(license.ExpiresAt) {
-		return DeviceTokenResponse{}, ErrAuthentication
-	}
-	jtiDigest := service.tokenMAC("jti", input.DeviceID, input.LicenseID, input.IdempotencyKey)
-	jti := base64.RawURLEncoding.EncodeToString(jtiDigest[:16])
-	expiresAt := now.Add(service.tokenTTL)
-	if expiresAt.After(license.ExpiresAt) {
-		expiresAt = license.ExpiresAt
-	}
-	grant, err := service.repository.CreateTokenGrant(ctx, TokenGrant{JTI: jti, DeviceID: input.DeviceID, LicenseID: input.LicenseID, IdempotencyKey: input.IdempotencyKey, IssuedAt: now, ExpiresAt: expiresAt})
-	if err != nil {
-		return DeviceTokenResponse{}, err
-	}
-	payload, _ := json.Marshal([]any{"uclaw-device-token-v1", grant.JTI, grant.DeviceID, grant.LicenseID, grant.IssuedAt.UTC().Format(time.RFC3339Nano), grant.ExpiresAt.UTC().Format(time.RFC3339Nano)})
-	signature := service.tokenMAC("token", string(payload))
-	token := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(signature)
-	return DeviceTokenResponse{AccessToken: token, TokenType: "Bearer", ExpiresAt: grant.ExpiresAt.UTC().Format(time.RFC3339Nano)}, nil
-}
-
-func (service *Service) tokenMAC(parts ...string) []byte {
-	mac := hmac.New(sha256.New, service.tokenSigningKey)
-	for _, part := range parts {
-		mac.Write([]byte(part))
-		mac.Write([]byte{0})
-	}
-	return mac.Sum(nil)
 }
 
 func (service *Service) Status(ctx context.Context, licenseID, startupSecret string) (Response, error) {

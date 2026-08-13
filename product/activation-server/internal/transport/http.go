@@ -29,7 +29,6 @@ type ActivationService interface {
 type LifecycleService interface {
 	Status(context.Context, string, string) (lifecycle.Response, error)
 	Recover(context.Context, lifecycle.RecoverInput) ([]byte, error)
-	DeviceToken(context.Context, lifecycle.DeviceTokenInput) (lifecycle.DeviceTokenResponse, error)
 }
 
 type PublicHandlerOptions struct {
@@ -66,8 +65,6 @@ func (handler *publicHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 		writeJSON(writer, http.StatusOK, policy.ProductionClientPolicy())
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/v1/activations/"):
 		handler.recover(writer, request, requestID)
-	case request.Method == http.MethodPost && request.URL.Path == "/v1/device-tokens":
-		handler.deviceToken(writer, request, requestID)
 	default:
 		handler.writeError(writer, requestID, "", nil, errNotFound)
 	}
@@ -98,39 +95,7 @@ func (handler *publicHandler) recover(writer http.ResponseWriter, request *http.
 	writeRawJSON(writer, http.StatusOK, material)
 }
 
-type deviceTokenRequest struct {
-	DeviceID       string `json:"deviceId"`
-	LicenseID      string `json:"licenseId"`
-	IdempotencyKey string `json:"idempotencyKey"`
-}
-
-func (handler *publicHandler) deviceToken(writer http.ResponseWriter, request *http.Request, requestID string) {
-	secret, ok := bearerSecret(request.Header.Values("Authorization"))
-	if !ok {
-		handler.writeError(writer, requestID, "", nil, lifecycle.ErrAuthentication)
-		return
-	}
-	var input deviceTokenRequest
-	if err := decodeRequest(writer, request, &input); err != nil {
-		handler.writeError(writer, requestID, "", nil, err)
-		return
-	}
-	if handler.lifecycle == nil {
-		handler.writeError(writer, requestID, "", nil, lifecycle.ErrUnavailable)
-		return
-	}
-	ctx, cancel := context.WithTimeout(request.Context(), operationTimeout)
-	defer cancel()
-	response, err := handler.lifecycle.DeviceToken(ctx, lifecycle.DeviceTokenInput{DeviceID: input.DeviceID, LicenseID: input.LicenseID, IdempotencyKey: input.IdempotencyKey, StartupSecret: secret})
-	if err != nil {
-		handler.writeError(writer, requestID, "", nil, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, response)
-}
-
 type activationRequest struct {
-	Username       string `json:"username"`
 	ActivationCode string `json:"activationCode"`
 	USBFingerprint struct {
 		Version string `json:"version"`
@@ -153,7 +118,7 @@ func (handler *publicHandler) activate(writer http.ResponseWriter, request *http
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), operationTimeout)
 	defer cancel()
-	result, err := handler.activation.Activate(ctx, activation.ActivateInput{Username: input.Username, ActivationCode: input.ActivationCode, FingerprintVersion: input.USBFingerprint.Version, FingerprintSHA256: input.USBFingerprint.SHA256, ClientVersion: input.ClientVersion, IdempotencyKey: input.IdempotencyKey, RequestID: requestID})
+	result, err := handler.activation.Activate(ctx, activation.ActivateInput{ActivationCode: input.ActivationCode, FingerprintVersion: input.USBFingerprint.Version, FingerprintSHA256: input.USBFingerprint.SHA256, ClientVersion: input.ClientVersion, IdempotencyKey: input.IdempotencyKey, RequestID: requestID})
 	if err != nil {
 		if result.ActivationID != "" {
 			stage = "server_bound"

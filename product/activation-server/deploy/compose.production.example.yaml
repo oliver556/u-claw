@@ -14,7 +14,7 @@ x-activation-app: &activation-app
     KMS_PROVIDER: local-kek-v1
     KMS_KEY_VERSION: ${KMS_KEY_VERSION:?set KMS_KEY_VERSION}
     KMS_KEK_FILE: /run/secrets/kms_kek
-    TOKEN_SIGNING_KEY_FILE: /run/secrets/token_signing_key
+    PUBLIC_MODEL_ENDPOINT: ${PUBLIC_MODEL_ENDPOINT:?set PUBLIC_MODEL_ENDPOINT}
     ADMIN_OPERATORS_FILE: /run/secrets/admin_operators
     ADMIN_SECRET_FINGERPRINT_KEY_FILE: /run/secrets/admin_secret_fingerprint_key
     NEW_API_ALLOWED_HOSTS: ${NEW_API_ALLOWED_HOSTS:?set NEW_API_ALLOWED_HOSTS}
@@ -23,7 +23,6 @@ x-activation-app: &activation-app
     - { source: license_signing_key, target: /run/secrets/license_signing_key, uid: "0", gid: "0", mode: 0400 }
     - { source: status_signing_key, target: /run/secrets/status_signing_key, uid: "0", gid: "0", mode: 0400 }
     - { source: kms_kek, target: /run/secrets/kms_kek, uid: "0", gid: "0", mode: 0400 }
-    - { source: token_signing_key, target: /run/secrets/token_signing_key, uid: "0", gid: "0", mode: 0400 }
     - { source: admin_operators, target: /run/secrets/admin_operators, uid: "0", gid: "0", mode: 0400 }
     - { source: admin_secret_fingerprint_key, target: /run/secrets/admin_secret_fingerprint_key, uid: "0", gid: "0", mode: 0400 }
   networks:
@@ -168,8 +167,6 @@ secrets:
     file: ${STATUS_SIGNING_KEY_FILE:?set STATUS_SIGNING_KEY_FILE}
   kms_kek:
     file: ${KMS_KEK_FILE:?set KMS_KEK_FILE}
-  token_signing_key:
-    file: ${TOKEN_SIGNING_KEY_FILE:?set TOKEN_SIGNING_KEY_FILE}
   admin_operators:
     file: ${ADMIN_OPERATORS_FILE:?set ADMIN_OPERATORS_FILE}
   admin_secret_fingerprint_key:
@@ -251,10 +248,7 @@ configs:
                   end
                 end
                 local body = cjson.decode(body_data or "") or {}
-                if type(body.username) == "string" then
-                  subjects[#subjects + 1] = {"username", string.lower(body.username), 20}
-                end
-                if type(body.deviceId) == "string" then
+          if type(body.deviceId) == "string" then
                   subjects[#subjects + 1] = {"device", body.deviceId, 30}
                 elseif type(body.usbFingerprint) == "table" and type(body.usbFingerprint.sha256) == "string" then
                   subjects[#subjects + 1] = {"device", body.usbFingerprint.sha256, 30}

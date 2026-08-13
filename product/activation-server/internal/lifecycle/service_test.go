@@ -20,7 +20,6 @@ type fixtureRepository struct {
 	license          License
 	recovery         RecoveryRecord
 	expireCalls      int
-	grant            *TokenGrant
 	expireMutation   func(*License)
 	auditOutcomes    []string
 	authorizeErr     error
@@ -76,17 +75,6 @@ func (repository *fixtureRepository) RecordRecovery(ctx context.Context, _, _, o
 	repository.auditOutcomes = append(repository.auditOutcomes, outcome)
 	return repository.recoveryAuditErr
 }
-func (repository *fixtureRepository) CreateTokenGrant(_ context.Context, grant TokenGrant) (TokenGrant, error) {
-	if repository.grant != nil {
-		if repository.grant.DeviceID != grant.DeviceID || repository.grant.LicenseID != grant.LicenseID || repository.grant.JTI != grant.JTI {
-			return TokenGrant{}, ErrIdempotencyConflict
-		}
-		return *repository.grant, nil
-	}
-	repository.grant = &grant
-	return grant, nil
-}
-
 func TestStatusSignsLauncherCompatibleReceipt(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -106,7 +94,7 @@ func TestStatusSignsLauncherCompatibleReceipt(t *testing.T) {
 		StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil),
 	}
 	service, err := NewService(ServiceOptions{
-		Repository: &fixtureRepository{license: license}, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"),
+		Repository: &fixtureRepository{license: license}, KeyID: "status-key-001", PrivateKey: privateKey,
 		Now: func() time.Time { return now }, MaximumGrace: 24 * time.Hour,
 	})
 	if err != nil {
@@ -140,43 +128,6 @@ func TestStatusSignsLauncherCompatibleReceipt(t *testing.T) {
 	}
 }
 
-func TestDeviceTokenIdempotentReplayIsDeterministic(t *testing.T) {
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Date(2026, 8, 13, 1, 2, 3, 0, time.UTC)
-	secret := "fixture-startup-secret-material-0001"
-	salt := []byte("0123456789abcdef")
-	hash := sha256.New()
-	hash.Write([]byte("uclaw-startup-secret-v1\x00"))
-	hash.Write(salt)
-	hash.Write([]byte{0})
-	hash.Write([]byte(secret))
-	repository := &fixtureRepository{license: License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: "active", Revision: 1, NotBefore: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), UpdatedAt: now, StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)}}
-	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), Now: func() time.Time { return now }, MaximumGrace: time.Hour})
-	if err != nil {
-		t.Fatal(err)
-	}
-	input := DeviceTokenInput{DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", IdempotencyKey: "token-fixture-001", StartupSecret: secret}
-	first, err := service.DeviceToken(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	service.now = func() time.Time { return now.Add(time.Minute) }
-	second, err := service.DeviceToken(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first != second {
-		t.Fatalf("replay changed token: first=%+v second=%+v", first, second)
-	}
-	input.DeviceID = "dev_fixture_002"
-	if _, err := service.DeviceToken(context.Background(), input); !errors.Is(err, ErrAuthentication) {
-		t.Fatalf("conflict=%v", err)
-	}
-}
-
 func TestRecoverRejectsInactiveLicenseBeforeDecrypting(t *testing.T) {
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -196,7 +147,7 @@ func TestRecoverRejectsInactiveLicenseBeforeDecrypting(t *testing.T) {
 				license:  License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: status, StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)},
 				recovery: RecoveryRecord{ActivationID: "act_fixture_001", DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", ArtifactEnvelope: []byte("sealed"), ArtifactKeyVersion: "kms-v1"},
 			}
-			service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), MaximumGrace: time.Hour, Envelope: envelope})
+			service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, MaximumGrace: time.Hour, Envelope: envelope})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -227,7 +178,7 @@ func TestRecoverDoesNotReturnMaterialWhenSuccessAuditFails(t *testing.T) {
 		recovery:         RecoveryRecord{ActivationID: "act_fixture_001", DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", ArtifactEnvelope: []byte("sealed"), ArtifactKeyVersion: "kms-v1"},
 		recoveryAuditErr: errors.New("audit unavailable"),
 	}
-	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), MaximumGrace: time.Hour, Envelope: &recoveryEnvelope{}})
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, MaximumGrace: time.Hour, Envelope: &recoveryEnvelope{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +207,7 @@ func TestRecoverRecordsAuthorizationThenFailureWhenDecryptFails(t *testing.T) {
 		license:  License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: "active", StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)},
 		recovery: RecoveryRecord{ActivationID: "act_fixture_001", DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", ArtifactEnvelope: []byte("sealed"), ArtifactKeyVersion: "kms-v1"},
 	}
-	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), MaximumGrace: time.Hour, Envelope: failingRecoveryEnvelope{}})
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, MaximumGrace: time.Hour, Envelope: failingRecoveryEnvelope{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +243,7 @@ func TestRecoverAuthorizesAfterSecretAuthenticationAndBeforeDecrypting(t *testin
 		recovery: RecoveryRecord{ActivationID: "act_fixture_001", DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", ArtifactEnvelope: []byte("sealed"), ArtifactKeyVersion: "kms-v1"},
 	}
 	envelope := &recoveryEnvelope{}
-	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), MaximumGrace: time.Hour, Envelope: envelope})
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, MaximumGrace: time.Hour, Envelope: envelope})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +277,7 @@ func TestRecoverSuccessAuditUsesIndependentBoundedContext(t *testing.T) {
 		license:  License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: "active", StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)},
 		recovery: RecoveryRecord{ActivationID: "act_fixture_001", DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001", ArtifactEnvelope: []byte("sealed"), ArtifactKeyVersion: "kms-v1"},
 	}
-	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), MaximumGrace: time.Hour, Envelope: &recoveryEnvelope{}})
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, MaximumGrace: time.Hour, Envelope: &recoveryEnvelope{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +313,7 @@ func TestStatusPersistsExpiryBeforeSigningReceipt(t *testing.T) {
 		NotBefore: now.Add(-48 * time.Hour), ExpiresAt: now.Add(-time.Second), UpdatedAt: now.Add(-time.Hour),
 		StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil),
 	}}
-	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), Now: func() time.Time { return now }, MaximumGrace: time.Hour})
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, Now: func() time.Time { return now }, MaximumGrace: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +340,7 @@ func TestStatusReauthenticatesRecordReturnedByExpiryTransaction(t *testing.T) {
 	hash.Write([]byte{0})
 	hash.Write([]byte(secret))
 	repository := &fixtureRepository{license: License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: "active", Revision: 1, NotBefore: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Second), UpdatedAt: now, StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)}}
-	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, TokenSigningKey: []byte("01234567890123456789012345678901"), Now: func() time.Time { return now }, MaximumGrace: time.Hour})
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: privateKey, Now: func() time.Time { return now }, MaximumGrace: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +388,7 @@ func TestStatusMatchesSharedProductionGolden(t *testing.T) {
 	hash.Write([]byte{0})
 	hash.Write([]byte(fixture.StartupSecret))
 	repository := &fixtureRepository{license: License{LicenseID: "lic_fixture_001", DeviceID: "dev_fixture_001", Status: "active", Revision: 2, NotBefore: now.Add(-time.Hour), ExpiresAt: now.Add(48 * time.Hour), UpdatedAt: now.Add(-time.Minute), StartupSecretSalt: salt, StartupSecretHash: hash.Sum(nil)}}
-	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: ed25519.NewKeyFromSeed(seed), TokenSigningKey: []byte("01234567890123456789012345678901"), Now: func() time.Time { return now }, MaximumGrace: 24 * time.Hour})
+	service, err := NewService(ServiceOptions{Repository: repository, KeyID: "status-key-001", PrivateKey: ed25519.NewKeyFromSeed(seed), Now: func() time.Time { return now }, MaximumGrace: 24 * time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}

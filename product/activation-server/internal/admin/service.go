@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"u-claw-activation-server/internal/deviceaccess"
 	"u-claw-activation-server/internal/inventory"
 )
 
@@ -183,6 +184,7 @@ type Service struct {
 	keyVersion           string
 	secretFingerprintKey []byte
 	allowedNewAPIHosts   map[string]struct{}
+	deviceAccess         *deviceaccess.Service
 }
 
 func NewService(options ServiceOptions) (*Service, error) {
@@ -199,7 +201,11 @@ func NewService(options ServiceOptions) (*Service, error) {
 			hosts[host] = struct{}{}
 		}
 	}
-	return &Service{repository: options.Repository, pepper: append([]byte(nil), options.Pepper...), random: options.Random, observer: options.Observer, secretEnvelope: options.SecretEnvelope, keyVersion: options.KeyVersion, secretFingerprintKey: append([]byte(nil), options.SecretFingerprintKey...), allowedNewAPIHosts: hosts}, nil
+	deviceAccess, err := deviceaccess.NewService(options.Pepper, options.Random)
+	if err != nil {
+		return nil, errors.New("admin service configuration invalid")
+	}
+	return &Service{repository: options.Repository, pepper: append([]byte(nil), options.Pepper...), random: options.Random, observer: options.Observer, secretEnvelope: options.SecretEnvelope, keyVersion: options.KeyVersion, secretFingerprintKey: append([]byte(nil), options.SecretFingerprintKey...), allowedNewAPIHosts: hosts, deviceAccess: deviceAccess}, nil
 }
 
 func (service *Service) Generate(ctx context.Context, input GenerateInput) ([]InventorySummary, error) {

@@ -19,7 +19,6 @@ var (
 )
 
 type ActivateInput struct {
-	Username           string
 	ActivationCode     string
 	FingerprintVersion string
 	FingerprintSHA256  string
@@ -77,17 +76,19 @@ type BoundRecord struct {
 	StatusEventID             string
 	BoundAuditEventID         string
 	Stage                     string
+	DeviceTokenID             string
+	DeviceTokenDigest         []byte
+	PublicModelEndpoint       string
+	DefaultModel              string
 }
 
 type BeginBindingInput struct {
-	UsernameNormalized   string
 	ActivationCodeDigest [32]byte
 	IdempotencyKey       string
 	Record               BoundRecord
 }
 
 type ValidateBindingInput struct {
-	UsernameNormalized   string
 	ActivationCodeDigest [32]byte
 	IdempotencyKey       string
 	RequestFingerprint   [32]byte

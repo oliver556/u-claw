@@ -71,7 +71,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, Observer: metrics,SecretFingerprintKey:cfg.AdminSecretFingerprintKey,AllowedNewAPIHosts:cfg.AllowedNewAPIHosts})
+	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, Observer: metrics, SecretFingerprintKey: cfg.AdminSecretFingerprintKey, AllowedNewAPIHosts: cfg.AllowedNewAPIHosts})
 	if err != nil {
 		return err
 	}
@@ -135,12 +135,13 @@ func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, kms security.KMS,
 	activationService, err := activation.NewService(activation.ServiceOptions{
 		Repository: repository, Signer: licenseSigner, Envelope: envelope, Pepper: cfg.ActivationPepper,
 		KeyID: cfg.LicenseKeyID, KeyVersion: cfg.KMSKeyVersion, LeaseTTL: time.Minute, LicenseTTL: 365 * 24 * time.Hour, Observer: observer,
+		PublicModelEndpoint: cfg.PublicModelEndpoint,
 	})
 	if err != nil {
 		return nil, err
 	}
 	lifecycleService, err := lifecycle.NewService(lifecycle.ServiceOptions{
-		Repository: repository, KeyID: cfg.StatusKeyID, PrivateKey: cfg.StatusSigningKey, TokenSigningKey: cfg.TokenSigningKey, MaximumGrace: 24 * time.Hour, Envelope: envelope,
+		Repository: repository, KeyID: cfg.StatusKeyID, PrivateKey: cfg.StatusSigningKey, MaximumGrace: 24 * time.Hour, Envelope: envelope,
 	})
 	if err != nil {
 		return nil, err

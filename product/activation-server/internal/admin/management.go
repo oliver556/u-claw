@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
-	"io"
 	"net"
 	"net/url"
 	"strings"
@@ -123,20 +121,13 @@ func (s *Service) PrepareDeviceTokenReissue(ctx context.Context, mutation Device
 	if err != nil {
 		return DeviceTokenReissuePlan{}, err
 	}
-	raw := make([]byte, 32)
-	if _, err := io.ReadFull(s.random, raw); err != nil {
-		return DeviceTokenReissuePlan{}, ErrUnavailable
-	}
-	token := "uclaw_dt_" + base64.RawURLEncoding.EncodeToString(raw)
-	mac := hmac.New(sha256.New, s.pepper)
-	mac.Write([]byte(token))
-	mutation.ReplacementDigest = mac.Sum(nil)
-	id, err := randomUUID(s.random)
+	credential, err := s.deviceAccess.Issue()
 	if err != nil {
 		return DeviceTokenReissuePlan{}, ErrUnavailable
 	}
-	mutation.ReplacementTokenID = id
-	return DeviceTokenReissuePlan{Mutation: mutation, Secret: DeviceTokenResult{DeviceTokenID: id, InventoryID: target.InventoryID, DeviceID: target.DeviceID, LicenseID: mutation.LicenseID, DeviceToken: token}}, nil
+	mutation.ReplacementDigest = credential.Digest
+	mutation.ReplacementTokenID = credential.ID
+	return DeviceTokenReissuePlan{Mutation: mutation, Secret: DeviceTokenResult{DeviceTokenID: credential.ID, InventoryID: target.InventoryID, DeviceID: target.DeviceID, LicenseID: mutation.LicenseID, DeviceToken: credential.Token}}, nil
 }
 func (s *Service) ExecuteDeviceTokenReissue(ctx context.Context, plan DeviceTokenReissuePlan, beforeCommit func() error) (DeviceTokenResult, error) {
 	if beforeCommit == nil {
@@ -162,9 +153,7 @@ func (s *Service) RecoverDeviceTokenReissue(ctx context.Context, mutation Device
 	if !outcome.Completed {
 		return DeviceTokenResult{}, ErrSecretReplayUnavailable
 	}
-	mac := hmac.New(sha256.New, s.pepper)
-	mac.Write([]byte(existing.DeviceToken))
-	if outcome.Result.DeviceTokenID != existing.DeviceTokenID || outcome.Result.DeviceID != existing.DeviceID || outcome.Result.LicenseID != existing.LicenseID || !hmac.Equal(mac.Sum(nil), outcome.TokenDigest) {
+	if outcome.Result.DeviceTokenID != existing.DeviceTokenID || outcome.Result.DeviceID != existing.DeviceID || outcome.Result.LicenseID != existing.LicenseID || !hmac.Equal(s.deviceAccess.Digest(existing.DeviceToken), outcome.TokenDigest) {
 		return DeviceTokenResult{}, ErrInvalidInput
 	}
 	return outcome.Result, nil
