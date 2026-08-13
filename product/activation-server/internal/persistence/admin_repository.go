@@ -16,6 +16,8 @@ import (
 	"u-claw-activation-server/internal/admin"
 )
 
+var errAdminPublishFailed = errors.New("admin publish failed")
+
 func (repository *ActivationRepository) PrepareReissueTarget(ctx context.Context, mutation admin.Mutation) (admin.ReissueTarget, error) {
 	fingerprint := adminFingerprint("license.reissue", mutation.Operation, mutation.LicenseID)
 	tx, err := repository.pool.Begin(ctx)
@@ -354,7 +356,7 @@ func (repository *ActivationRepository) mutateDeviceToken(ctx context.Context, m
 	}
 	if mutation.Action == admin.DeviceTokenReissue {
 		var activeScope bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM devices device JOIN new_api_bindings binding ON binding.inventory_id=device.inventory_id AND binding.device_id=device.device_id WHERE device.device_id=$1 AND device.inventory_id=$2 AND device.status='active' AND binding.status='active')`, deviceID, inventoryID).Scan(&activeScope); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM activation_inventory inventory JOIN devices device ON device.inventory_id=inventory.id JOIN new_api_bindings binding ON binding.inventory_id=inventory.id AND binding.device_id=device.device_id JOIN licenses license ON license.device_id=device.device_id WHERE inventory.id=$2 AND device.device_id=$1 AND license.license_id=$3 AND inventory.status='active' AND inventory.new_api_setup_status='configured' AND device.status='active' AND license.status='active' AND binding.status='active' AND binding.balance_setup_status='configured')`, deviceID, inventoryID, mutation.LicenseID).Scan(&activeScope); err != nil {
 			return replay, err
 		}
 		if !activeScope {
@@ -399,7 +401,11 @@ func (repository *ActivationRepository) mutateDeviceToken(ctx context.Context, m
 	}
 	if beforeCommit != nil {
 		if err = invokeBeforeCommit(beforeCommit); err != nil {
-			return replay, err
+			_ = tx.Rollback(ctx)
+			if auditErr := repository.auditDeviceTokenFailure(ctx, action, mutation.Operation, &inventoryID, &deviceID, &mutation.LicenseID); auditErr != nil {
+				return replay, auditErr
+			}
+			return replay, errAdminPublishFailed
 		}
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -411,10 +417,13 @@ func (repository *ActivationRepository) mutateDeviceToken(ctx context.Context, m
 func invokeBeforeCommit(callback func() error) (err error) {
 	defer func() {
 		if recover() != nil {
-			err = errors.New("admin publish failed")
+			err = errAdminPublishFailed
 		}
 	}()
-	return callback()
+	if callback() != nil {
+		return errAdminPublishFailed
+	}
+	return nil
 }
 
 func deviceTokenTargetStatus(action admin.DeviceTokenAction) (string, bool) {
@@ -432,7 +441,7 @@ func deviceTokenTargetStatus(action admin.DeviceTokenAction) (string, bool) {
 
 func (repository *ActivationRepository) PrepareDeviceTokenTarget(ctx context.Context, licenseID string) (admin.DeviceTokenResult, error) {
 	var result admin.DeviceTokenResult
-	err := repository.pool.QueryRow(ctx, `SELECT token.inventory_id,token.device_id,token.license_id,token.status FROM device_access_tokens token JOIN licenses license ON license.license_id=token.license_id AND license.device_id=token.device_id JOIN devices device ON device.device_id=token.device_id AND device.inventory_id=token.inventory_id JOIN new_api_bindings binding ON binding.inventory_id=token.inventory_id AND binding.device_id=token.device_id WHERE token.license_id=$1 AND token.status='active' AND license.status='active' AND device.status='active' AND binding.status='active' ORDER BY token.issued_at DESC LIMIT 1`, licenseID).Scan(&result.InventoryID, &result.DeviceID, &result.LicenseID, &result.Status)
+	err := repository.pool.QueryRow(ctx, `SELECT token.inventory_id,token.device_id,token.license_id,token.status FROM device_access_tokens token JOIN licenses license ON license.license_id=token.license_id AND license.device_id=token.device_id JOIN devices device ON device.device_id=token.device_id AND device.inventory_id=token.inventory_id JOIN activation_inventory inventory ON inventory.id=token.inventory_id JOIN new_api_bindings binding ON binding.inventory_id=token.inventory_id AND binding.device_id=token.device_id WHERE token.license_id=$1 AND token.status='active' AND inventory.status='active' AND inventory.new_api_setup_status='configured' AND license.status='active' AND device.status='active' AND binding.status='active' AND binding.balance_setup_status='configured' ORDER BY token.issued_at DESC LIMIT 1`, licenseID).Scan(&result.InventoryID, &result.DeviceID, &result.LicenseID, &result.Status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return result, admin.ErrInvalidInput
 	}
@@ -637,6 +646,13 @@ func recordAdminSuccess(ctx context.Context, tx pgx.Tx, action string, operation
 func (repository *ActivationRepository) auditAdminFailure(ctx context.Context, action string, operation admin.Operation, licenseID *string) error {
 	_, err := repository.pool.Exec(ctx, `INSERT INTO audit_events(event_id,actor_type,actor_id,action,outcome,license_id,request_id,reason,idempotency_key,created_at)
 		VALUES(gen_random_uuid(),'operator',$1,$2,'failed',$3,$4,$5,$6,clock_timestamp())`, operation.OperatorID, action, licenseID, operation.RequestID, operation.Reason, operation.IdempotencyKey)
+	if err != nil {
+		return fmt.Errorf("record failed admin audit: %w", err)
+	}
+	return nil
+}
+func (repository *ActivationRepository) auditDeviceTokenFailure(ctx context.Context, action string, operation admin.Operation, inventoryID, deviceID, licenseID *string) error {
+	_, err := repository.pool.Exec(ctx, `INSERT INTO audit_events(event_id,actor_type,actor_id,action,outcome,inventory_id,device_id,license_id,request_id,reason,idempotency_key,created_at) VALUES(gen_random_uuid(),'operator',$1,$2,'failed',$3,$4,$5,$6,$7,$8,clock_timestamp())`, operation.OperatorID, action, inventoryID, deviceID, licenseID, operation.RequestID, operation.Reason, operation.IdempotencyKey)
 	if err != nil {
 		return fmt.Errorf("record failed admin audit: %w", err)
 	}

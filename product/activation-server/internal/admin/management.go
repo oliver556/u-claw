@@ -110,6 +110,10 @@ func (s *Service) PrepareDeviceTokenReissue(ctx context.Context, mutation Device
 	if mutation.Action != DeviceTokenReissue || !uuidPattern.MatchString(mutation.LicenseID) || mutation.ConfirmTarget != TargetDigest(mutation.LicenseID) || validateOperation(mutation.Operation, true) != nil {
 		return DeviceTokenReissuePlan{}, ErrInvalidInput
 	}
+	target, err := s.repository.PrepareDeviceTokenTarget(ctx, mutation.LicenseID)
+	if err != nil {
+		return DeviceTokenReissuePlan{}, err
+	}
 	entropy := s.derive(mutation.Operation.IdempotencyKey, "device-token-reissue", 0, 48)
 	raw := entropy[:32]
 	token := "uclaw_dt_" + base64.RawURLEncoding.EncodeToString(raw)
@@ -121,10 +125,6 @@ func (s *Service) PrepareDeviceTokenReissue(ctx context.Context, mutation Device
 		return DeviceTokenReissuePlan{}, ErrUnavailable
 	}
 	mutation.ReplacementTokenID = id
-	target, err := s.repository.PrepareDeviceTokenTarget(ctx, mutation.LicenseID)
-	if err != nil {
-		return DeviceTokenReissuePlan{}, err
-	}
 	return DeviceTokenReissuePlan{Mutation: mutation, Secret: DeviceTokenResult{DeviceTokenID: id, InventoryID: target.InventoryID, DeviceID: target.DeviceID, LicenseID: mutation.LicenseID, DeviceToken: token}}, nil
 }
 func (s *Service) ExecuteDeviceTokenReissue(ctx context.Context, plan DeviceTokenReissuePlan, beforeCommit func() error) (DeviceTokenResult, error) {

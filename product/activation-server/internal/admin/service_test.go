@@ -11,15 +11,16 @@ import (
 )
 
 type fakeRepository struct {
-	created  []InventoryRecord
-	shown    InventorySummary
-	mutation Mutation
-	target   ReissueTarget
-	audit    []AuditEvent
-	query    AuditQuery
-	mapping  MappingInput
-	token    DeviceTokenMutation
-	reissue  func(func() error) (DeviceTokenResult, error)
+	created        []InventoryRecord
+	shown          InventorySummary
+	mutation       Mutation
+	target         ReissueTarget
+	audit          []AuditEvent
+	query          AuditQuery
+	mapping        MappingInput
+	token          DeviceTokenMutation
+	reissue        func(func() error) (DeviceTokenResult, error)
+	tokenTargetErr error
 }
 
 type fakeSecretEnvelope struct {
@@ -211,7 +212,10 @@ func (repository *fakeRepository) ReissueDeviceToken(_ context.Context, mutation
 	}
 	return DeviceTokenResult{DeviceTokenID: mutation.ReplacementTokenID, InventoryID: "00000000-0000-4000-8000-000000000001", DeviceID: "00000000-0000-4000-8000-000000000002", LicenseID: mutation.LicenseID, Status: "active"}, nil
 }
-func (*fakeRepository) PrepareDeviceTokenTarget(_ context.Context, licenseID string) (DeviceTokenResult, error) {
+func (repository *fakeRepository) PrepareDeviceTokenTarget(_ context.Context, licenseID string) (DeviceTokenResult, error) {
+	if repository.tokenTargetErr != nil {
+		return DeviceTokenResult{}, repository.tokenTargetErr
+	}
 	return DeviceTokenResult{InventoryID: "00000000-0000-4000-8000-000000000001", DeviceID: "00000000-0000-4000-8000-000000000002", LicenseID: licenseID, Status: "active"}, nil
 }
 
@@ -287,5 +291,15 @@ func TestDeviceTokenReissueDoesNotPublishCompletedReplay(t *testing.T) {
 	_, err = service.ExecuteDeviceTokenReissue(context.Background(), plan, func() error { published = true; return nil })
 	if !errors.Is(err, ErrSecretReplayUnavailable) || published {
 		t.Fatalf("error=%v published=%v", err, published)
+	}
+}
+
+func TestPrepareDeviceTokenReissueRejectsInactiveAuthorizationScope(t *testing.T) {
+	repository := &fakeRepository{tokenTargetErr: ErrInvalidInput}
+	service, _ := NewService(ServiceOptions{Repository: repository, Pepper: bytes.Repeat([]byte{9}, 32)})
+	licenseID := "00000000-0000-4000-8000-000000000003"
+	plan, err := service.PrepareDeviceTokenReissue(context.Background(), DeviceTokenMutation{Action: DeviceTokenReissue, LicenseID: licenseID, ConfirmTarget: TargetDigest(licenseID), Operation: operation()})
+	if !errors.Is(err, ErrInvalidInput) || plan.Secret.DeviceToken != "" || repository.token.ReplacementTokenID != "" {
+		t.Fatalf("plan=%+v mutation=%+v err=%v", plan, repository.token, err)
 	}
 }
