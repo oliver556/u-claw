@@ -41,7 +41,14 @@ describe("activation API contract", () => {
 		};
 
 		expect(BuiltinCredentialArtifactSchema.parse(credential)).toEqual(credential);
-		expect(BuiltinCredentialArtifactSchema.parse({ ...credential, endpoint: "https://127.0.0.1:8443/model-api/" })).toBeTruthy();
+		for (const endpoint of [
+			"HTTPS://host.test/v1",
+			"Https://host.test/v1",
+			"https://127.0.0.1:8443/model-api/",
+			"https://host.test/model-api/%3F/%23",
+		]) {
+			expect(BuiltinCredentialArtifactSchema.parse({ ...credential, endpoint })).toBeTruthy();
+		}
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, accessToken: "legacy-token-material" })).toThrow();
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, expiresAt: "2027-08-13T00:00:00Z" })).toThrow();
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, deviceToken: `uclaw_dt_${"A".repeat(42)}` })).toThrow();
@@ -54,6 +61,8 @@ describe("activation API contract", () => {
 			"https://user:password@license.example.test/model-api/",
 			"https://license.example.test/model-api/?region=test",
 			"https://license.example.test/model-api/#models",
+			"https://host.test/v1?",
+			"https://host.test/v1#",
 		]) {
 			expect(
 				() => BuiltinCredentialArtifactSchema.parse({ ...credential, endpoint }),

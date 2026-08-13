@@ -18,8 +18,8 @@ const isSecureModelEndpoint = (value: string): boolean => {
     return endpoint.protocol === "https:"
       && endpoint.username === ""
       && endpoint.password === ""
-      && endpoint.search === ""
-      && endpoint.hash === "";
+      && !value.includes("?")
+      && !value.includes("#");
   } catch {
     return false;
   }
