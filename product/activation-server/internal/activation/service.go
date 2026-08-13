@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"u-claw-activation-server/internal/deviceaccess"
 	"u-claw-activation-server/internal/inventory"
 	"u-claw-activation-server/internal/license"
+	"u-claw-activation-server/internal/modelendpoint"
 	"u-claw-activation-server/internal/security"
 )
 
@@ -118,7 +118,7 @@ var (
 
 func NewService(options ServiceOptions) (*Service, error) {
 	if options.Repository == nil || options.Signer == nil || options.Envelope == nil || len(options.Pepper) < sha256.Size ||
-		options.KeyID == "" || options.KeyVersion == "" || options.LeaseTTL <= 0 || options.LicenseTTL <= 0 || options.PublicModelEndpoint == "" {
+		options.KeyID == "" || options.KeyVersion == "" || options.LeaseTTL <= 0 || options.LicenseTTL <= 0 || !modelendpoint.Valid(options.PublicModelEndpoint) {
 		return nil, errors.New("activation service configuration invalid")
 	}
 	if options.Now == nil {
@@ -417,10 +417,7 @@ func validActivationMaterial(material activationMaterial, record BoundRecord) bo
 }
 
 func validBuiltinCredential(credential builtinCredentialArtifact) bool {
-	endpoint, err := url.Parse(credential.Endpoint)
-	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil ||
-		endpoint.Path != "/model-api/" || endpoint.RawPath != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" ||
-		credential.Model == "" || strings.TrimSpace(credential.Model) != credential.Model {
+	if !modelendpoint.Valid(credential.Endpoint) || credential.Model == "" || strings.TrimSpace(credential.Model) != credential.Model {
 		return false
 	}
 	const tokenPrefix = "uclaw_dt_"

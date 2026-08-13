@@ -102,6 +102,26 @@ func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T
 	}
 }
 
+func TestValidPublicModelEndpointMatchesSafeProxyContract(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://activation.example/model-api/",
+		"https://192.0.2.10/model-api/",
+	} {
+		if !validPublicModelEndpoint(endpoint) {
+			t.Fatalf("valid endpoint rejected: %q", endpoint)
+		}
+	}
+	for _, endpoint := range []string{
+		"https://activation.example/model-api%2F",
+		"https://activation.example/model-api/?",
+		"https://activation.example/model-api/#",
+	} {
+		if validPublicModelEndpoint(endpoint) {
+			t.Fatalf("unsafe endpoint accepted: %q", endpoint)
+		}
+	}
+}
+
 func TestLoadFromRejectsInvalidSecretFilesWithoutLeakingValues(t *testing.T) {
 	directory := t.TempDir()
 	validPepper := writeTestFile(t, directory, "pepper", []byte(strings.Repeat("p", 32)))

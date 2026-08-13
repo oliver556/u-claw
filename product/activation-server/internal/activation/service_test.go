@@ -331,6 +331,25 @@ func TestValidBuiltinCredentialRejectsUnsafeRecoveredEndpoint(t *testing.T) {
 	}
 }
 
+func TestNewServiceRejectsUnsafePublicModelEndpoint(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://public.example/model-api%2F",
+		"https://public.example/model-api/?",
+		"https://public.example/model-api/#",
+		"https://user:password@public.example/model-api/",
+	} {
+		repository := &fakeRepository{}
+		_, err := NewService(ServiceOptions{
+			Repository: repository, Signer: &fakeSigner{}, Envelope: &fakeEnvelope{},
+			Pepper: []byte("0123456789abcdef0123456789abcdef"), KeyID: "test-license-key", KeyVersion: "kms-v1",
+			LeaseTTL: time.Minute, LicenseTTL: time.Hour, PublicModelEndpoint: endpoint,
+		})
+		if err == nil {
+			t.Fatalf("unsafe endpoint accepted: %q", endpoint)
+		}
+	}
+}
+
 func TestActivateRejectsBoundRecoveryWithoutCurrentRequestIDBeforeDecrypt(t *testing.T) {
 	envelope := &fakeEnvelope{}
 	repository := &fakeRepository{beginResult: BeginBindingResult{
