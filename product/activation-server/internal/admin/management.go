@@ -1,12 +1,13 @@
 package admin
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"io"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 )
 
 var ErrSecretReplayUnavailable = errors.New("secret replay unavailable")
+var ErrRecoveryConfirmationRequired = errors.New("recovery confirmation required")
 
 type SecretBinding = security.SecretBinding
 type SecretEncrypter interface {
@@ -73,15 +75,22 @@ type DeviceTokenReissuePlan struct {
 	Mutation DeviceTokenMutation
 	Secret   DeviceTokenResult
 }
+type DeviceTokenReissueOutcome struct {
+	Result      DeviceTokenResult
+	TokenDigest []byte
+	Completed   bool
+}
 
 func (s *Service) SetMapping(ctx context.Context, input MappingInput) (MappingSummary, error) {
-	if s.secretEnvelope == nil || !validMapping(input) {
+	if s.secretEnvelope == nil || !s.validMapping(input) {
 		return MappingSummary{}, ErrInvalidInput
 	}
 	input.KeyVersion = s.keyVersion
 	workingKey := append([]byte(nil), input.APIKey...)
-	fingerprint := sha256.Sum256(workingKey)
-	input.APIKeyFingerprint = append([]byte(nil), fingerprint[:]...)
+	mac := hmac.New(sha256.New, s.secretFingerprintKey)
+	mac.Write([]byte("uclaw-admin-mapping-key-fingerprint-v1\x00"))
+	mac.Write(workingKey)
+	input.APIKeyFingerprint = mac.Sum(nil)
 	envelope, err := s.secretEnvelope.Encrypt(ctx, security.SecretBinding{Purpose: "new-api-key", SubjectID: input.InventoryID, KeyVersion: input.KeyVersion}, workingKey)
 	clear(workingKey)
 	if err != nil {
@@ -114,13 +123,15 @@ func (s *Service) PrepareDeviceTokenReissue(ctx context.Context, mutation Device
 	if err != nil {
 		return DeviceTokenReissuePlan{}, err
 	}
-	entropy := s.derive(mutation.Operation.IdempotencyKey, "device-token-reissue", 0, 48)
-	raw := entropy[:32]
+	raw := make([]byte, 32)
+	if _, err := io.ReadFull(s.random, raw); err != nil {
+		return DeviceTokenReissuePlan{}, ErrUnavailable
+	}
 	token := "uclaw_dt_" + base64.RawURLEncoding.EncodeToString(raw)
 	mac := hmac.New(sha256.New, s.pepper)
 	mac.Write([]byte(token))
 	mutation.ReplacementDigest = mac.Sum(nil)
-	id, err := randomUUID(bytes.NewReader(entropy[32:]))
+	id, err := randomUUID(s.random)
 	if err != nil {
 		return DeviceTokenReissuePlan{}, ErrUnavailable
 	}
@@ -140,15 +151,41 @@ func (s *Service) ExecuteDeviceTokenReissue(ctx context.Context, plan DeviceToke
 	}
 	return result, err
 }
+func (s *Service) RecoverDeviceTokenReissue(ctx context.Context, mutation DeviceTokenMutation, existing DeviceTokenResult) (DeviceTokenResult, error) {
+	if existing.DeviceTokenID == "" || existing.DeviceID == "" || existing.LicenseID != mutation.LicenseID || !strings.HasPrefix(existing.DeviceToken, "uclaw_dt_") {
+		return DeviceTokenResult{}, ErrInvalidInput
+	}
+	outcome, err := s.repository.ResolveDeviceTokenReissue(ctx, mutation)
+	if err != nil {
+		return DeviceTokenResult{}, ErrRecoveryConfirmationRequired
+	}
+	if !outcome.Completed {
+		return DeviceTokenResult{}, ErrSecretReplayUnavailable
+	}
+	mac := hmac.New(sha256.New, s.pepper)
+	mac.Write([]byte(existing.DeviceToken))
+	if outcome.Result.DeviceTokenID != existing.DeviceTokenID || outcome.Result.DeviceID != existing.DeviceID || outcome.Result.LicenseID != existing.LicenseID || !hmac.Equal(mac.Sum(nil), outcome.TokenDigest) {
+		return DeviceTokenResult{}, ErrInvalidInput
+	}
+	return outcome.Result, nil
+}
 func validDeviceTokenAction(a DeviceTokenAction) bool {
 	return a == DeviceTokenDisable || a == DeviceTokenEnable || a == DeviceTokenRevoke || a == DeviceTokenReissue
 }
-func validMapping(v MappingInput) bool {
-	if !uuidPattern.MatchString(v.InventoryID) || !identifierPattern.MatchString(v.NewAPIUserID) || !identifierPattern.MatchString(v.NewAPIUsername) || len(v.APIKey) == 0 || len(v.APIKey) > 16<<10 || v.RequestsPerMinute < 1 || v.RequestsPerMinute > 6000 || v.ConcurrentRequests < 1 || v.ConcurrentRequests > 100 || validateOperation(v.Operation, true) != nil {
+func (s *Service) validMapping(v MappingInput) bool {
+	if len(s.secretFingerprintKey) < 32 || len(s.allowedNewAPIHosts) == 0 || !uuidPattern.MatchString(v.InventoryID) || !identifierPattern.MatchString(v.NewAPIUserID) || !identifierPattern.MatchString(v.NewAPIUsername) || len(v.APIKey) < 16 || len(v.APIKey) > 16<<10 || strings.TrimSpace(string(v.APIKey)) == "" || v.RequestsPerMinute < 1 || v.RequestsPerMinute > 6000 || v.ConcurrentRequests < 1 || v.ConcurrentRequests > 100 || validateOperation(v.Operation, true) != nil {
 		return false
 	}
 	u, err := url.Parse(v.BaseURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Contains(v.BaseURL, "@") {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || net.ParseIP(host) != nil {
+		return false
+	}
+	// The model proxy must also reject non-public resolved IPs immediately before dialing.
+	if _, ok := s.allowedNewAPIHosts[host]; !ok {
 		return false
 	}
 	seen := map[string]bool{}

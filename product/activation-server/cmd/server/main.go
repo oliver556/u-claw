@@ -71,7 +71,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, Observer: metrics})
+	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, Observer: metrics,SecretFingerprintKey:cfg.AdminSecretFingerprintKey,AllowedNewAPIHosts:cfg.AllowedNewAPIHosts})
 	if err != nil {
 		return err
 	}

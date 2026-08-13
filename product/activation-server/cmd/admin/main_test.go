@@ -236,6 +236,12 @@ func (service *fakeAdminService) ExecuteDeviceTokenReissue(ctx context.Context, 
 	}
 	return service.MutateDeviceToken(ctx, plan.Mutation)
 }
+func (service *fakeAdminService) RecoverDeviceTokenReissue(_ context.Context, _ adminservice.DeviceTokenMutation, existing adminservice.DeviceTokenResult) (adminservice.DeviceTokenResult, error) {
+	if service.replayDeviceToken {
+		return adminservice.DeviceTokenResult{}, adminservice.ErrSecretReplayUnavailable
+	}
+	return existing, nil
+}
 
 func TestMappingSetReadsOnlySecureRegularKeyFileAndNeverLeaksSecret(t *testing.T) {
 	directory := t.TempDir()
@@ -282,6 +288,17 @@ func TestMappingSetReadsOnlySecureRegularKeyFileAndNeverLeaksSecret(t *testing.T
 		if strings.Contains(stdout.String()+stderr.String(), secret) {
 			t.Fatal("rejected secret leaked")
 		}
+	}
+	hardlink := filepath.Join(directory, "hardlink.key")
+	if err := os.Link(secure, hardlink); err != nil {
+		t.Fatal(err)
+	}
+	candidate := append([]string(nil), args...)
+	candidate[17] = hardlink
+	stdout.Reset()
+	stderr.Reset()
+	if run(context.Background(), candidate, trustedEnv(t, nil), service, &stdout, &stderr) == 0 {
+		t.Fatal("hardlinked key file accepted")
 	}
 }
 
@@ -346,6 +363,25 @@ func TestDeviceTokenReissueCommitFailureCompensatesPublishedOutput(t *testing.T)
 	}
 }
 
+func TestDeviceTokenReissueUnknownCommitPreservesPublishedOutput(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "device-token.json")
+	licenseID := "00000000-0000-4000-8000-000000000003"
+	service := &fakeAdminService{afterPublish: func() error { return adminservice.ErrRecoveryConfirmationRequired }}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"device-token", "reissue", "--license-id", licenseID, "--confirm-target", adminservice.TargetDigest(licenseID), "--reason", "rotate", "--output-file", target}, trustedEnv(t, nil), service, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("unknown commit accepted")
+	}
+	info, err := os.Lstat(target)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("recovery output missing info=%v err=%v", info, err)
+	}
+	if strings.Contains(stdout.String()+stderr.String(), target) || strings.Contains(stdout.String()+stderr.String(), "uclaw_dt_") {
+		t.Fatal("recovery error leaked sensitive output")
+	}
+}
+
 func TestDeviceTokenReissueReplayDoesNotPublishSecret(t *testing.T) {
 	directory := t.TempDir()
 	target := filepath.Join(directory, "device-token.json")
@@ -365,6 +401,24 @@ func TestDeviceTokenReissueReplayDoesNotPublishSecret(t *testing.T) {
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "uclaw_dt_") {
 		t.Fatal("replay leaked token")
+	}
+}
+
+func TestDeviceTokenReissueRejectsHardlinkedRecoveryFile(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "device-token.json")
+	link := filepath.Join(directory, "device-token-hardlink.json")
+	document := `{"schemaVersion":1,"deviceTokenId":"00000000-0000-4000-8000-000000000004","deviceId":"00000000-0000-4000-8000-000000000002","licenseId":"00000000-0000-4000-8000-000000000003","deviceToken":"uclaw_dt_` + strings.Repeat("A", 43) + `"}`
+	if err := os.WriteFile(target, []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(target, link); err != nil {
+		t.Fatal(err)
+	}
+	licenseID := "00000000-0000-4000-8000-000000000003"
+	var stdout, stderr bytes.Buffer
+	if run(context.Background(), []string{"device-token", "reissue", "--license-id", licenseID, "--confirm-target", adminservice.TargetDigest(licenseID), "--reason", "recover", "--output-file", link}, trustedEnv(t, nil), &fakeAdminService{}, &stdout, &stderr) == 0 {
+		t.Fatal("hardlinked recovery file accepted")
 	}
 }
 

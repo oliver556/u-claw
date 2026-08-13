@@ -19,18 +19,20 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	tokenKeyFile := writeTestFile(t, directory, "token-key", []byte(strings.Repeat("t", 32)))
 	operatorsFile := writeTestFile(t, directory, "admin-operators.json", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`))
 	values := map[string]string{
-		"DATABASE_URL":             " postgres://database.example/uclaw ",
-		"ACTIVATION_PEPPER_FILE":   pepperFile,
-		"LICENSE_SIGNING_KEY_FILE": keyFile,
-		"STATUS_SIGNING_KEY_FILE":  keyFile,
-		"LICENSE_KEY_ID":           "license-key-001",
-		"STATUS_KEY_ID":            "status-key-001",
-		"KMS_PROVIDER":             "external-kms",
-		"KMS_KEY_VERSION":          "kms-v1",
-		"KMS_KEK_FILE":             kekFile,
-		"TOKEN_SIGNING_KEY_FILE":   tokenKeyFile,
-		"ADMIN_OPERATORS_FILE":     operatorsFile,
-		"LISTEN_ADDRESS":           " 127.0.0.1:8080 ",
+		"DATABASE_URL":                      " postgres://database.example/uclaw ",
+		"ACTIVATION_PEPPER_FILE":            pepperFile,
+		"LICENSE_SIGNING_KEY_FILE":          keyFile,
+		"STATUS_SIGNING_KEY_FILE":           keyFile,
+		"LICENSE_KEY_ID":                    "license-key-001",
+		"STATUS_KEY_ID":                     "status-key-001",
+		"KMS_PROVIDER":                      "external-kms",
+		"KMS_KEY_VERSION":                   "kms-v1",
+		"KMS_KEK_FILE":                      kekFile,
+		"TOKEN_SIGNING_KEY_FILE":            tokenKeyFile,
+		"ADMIN_OPERATORS_FILE":              operatorsFile,
+		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "fingerprint-key", []byte(strings.Repeat("f", 32))),
+		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
+		"LISTEN_ADDRESS":                    " 127.0.0.1:8080 ",
 	}
 
 	got, err := LoadFrom(func(name string) string { return values[name] })
@@ -66,17 +68,19 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T) {
 	directory := t.TempDir()
 	values := map[string]string{
-		"DATABASE_URL":             "postgres://secret-user:secret-password@database/uclaw",
-		"ACTIVATION_PEPPER_FILE":   writeTestFile(t, directory, "required-pepper", []byte(strings.Repeat("p", 32))),
-		"LICENSE_SIGNING_KEY_FILE": writeSigningKey(t, directory),
-		"STATUS_SIGNING_KEY_FILE":  writeSigningKey(t, directory),
-		"LICENSE_KEY_ID":           "license-key-001",
-		"STATUS_KEY_ID":            "status-key-001",
-		"KMS_PROVIDER":             "external-kms",
-		"KMS_KEY_VERSION":          "kms-v1",
-		"KMS_KEK_FILE":             writeTestFile(t, directory, "required-kek", []byte(strings.Repeat("k", 32))),
-		"TOKEN_SIGNING_KEY_FILE":   writeTestFile(t, directory, "required-token-key", []byte(strings.Repeat("t", 32))),
-		"ADMIN_OPERATORS_FILE":     writeTestFile(t, directory, "required-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+		"DATABASE_URL":                      "postgres://secret-user:secret-password@database/uclaw",
+		"ACTIVATION_PEPPER_FILE":            writeTestFile(t, directory, "required-pepper", []byte(strings.Repeat("p", 32))),
+		"LICENSE_SIGNING_KEY_FILE":          writeSigningKey(t, directory),
+		"STATUS_SIGNING_KEY_FILE":           writeSigningKey(t, directory),
+		"LICENSE_KEY_ID":                    "license-key-001",
+		"STATUS_KEY_ID":                     "status-key-001",
+		"KMS_PROVIDER":                      "external-kms",
+		"KMS_KEY_VERSION":                   "kms-v1",
+		"KMS_KEK_FILE":                      writeTestFile(t, directory, "required-kek", []byte(strings.Repeat("k", 32))),
+		"TOKEN_SIGNING_KEY_FILE":            writeTestFile(t, directory, "required-token-key", []byte(strings.Repeat("t", 32))),
+		"ADMIN_OPERATORS_FILE":              writeTestFile(t, directory, "required-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "required-fingerprint-key", []byte(strings.Repeat("f", 32))),
+		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
 	}
 
 	for _, missingName := range requiredVariables {
@@ -118,17 +122,19 @@ func TestLoadFromRejectsInvalidSecretFilesWithoutLeakingValues(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			values := map[string]string{
-				"DATABASE_URL":             "postgres://secret-user:secret-password@database/uclaw",
-				"ACTIVATION_PEPPER_FILE":   test.pepperFile,
-				"LICENSE_SIGNING_KEY_FILE": test.keyFile,
-				"STATUS_SIGNING_KEY_FILE":  validKey,
-				"LICENSE_KEY_ID":           "license-key-001",
-				"STATUS_KEY_ID":            "status-key-001",
-				"KMS_PROVIDER":             "external-kms",
-				"KMS_KEY_VERSION":          "kms-v1",
-				"KMS_KEK_FILE":             writeTestFile(t, directory, "valid-kek", []byte(strings.Repeat("k", 32))),
-				"TOKEN_SIGNING_KEY_FILE":   writeTestFile(t, directory, "valid-token-key", []byte(strings.Repeat("t", 32))),
-				"ADMIN_OPERATORS_FILE":     writeTestFile(t, directory, "valid-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+				"DATABASE_URL":                      "postgres://secret-user:secret-password@database/uclaw",
+				"ACTIVATION_PEPPER_FILE":            test.pepperFile,
+				"LICENSE_SIGNING_KEY_FILE":          test.keyFile,
+				"STATUS_SIGNING_KEY_FILE":           validKey,
+				"LICENSE_KEY_ID":                    "license-key-001",
+				"STATUS_KEY_ID":                     "status-key-001",
+				"KMS_PROVIDER":                      "external-kms",
+				"KMS_KEY_VERSION":                   "kms-v1",
+				"KMS_KEK_FILE":                      writeTestFile(t, directory, "valid-kek", []byte(strings.Repeat("k", 32))),
+				"TOKEN_SIGNING_KEY_FILE":            writeTestFile(t, directory, "valid-token-key", []byte(strings.Repeat("t", 32))),
+				"ADMIN_OPERATORS_FILE":              writeTestFile(t, directory, "valid-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+				"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "valid-fingerprint-key", []byte(strings.Repeat("f", 32))),
+				"NEW_API_ALLOWED_HOSTS":             "api.example.test",
 			}
 			_, err := LoadFrom(func(name string) string { return values[name] })
 			if err == nil {
@@ -150,16 +156,18 @@ func TestLoadFromAcceptsOnlyExplicitKEKFormats(t *testing.T) {
 	directory := t.TempDir()
 	keyFile := writeSigningKey(t, directory)
 	baseValues := map[string]string{
-		"DATABASE_URL":             "postgres://database/uclaw",
-		"ACTIVATION_PEPPER_FILE":   writeTestFile(t, directory, "pepper", []byte(strings.Repeat("p", 32))),
-		"LICENSE_SIGNING_KEY_FILE": keyFile,
-		"STATUS_SIGNING_KEY_FILE":  keyFile,
-		"LICENSE_KEY_ID":           "license-key-001",
-		"STATUS_KEY_ID":            "status-key-001",
-		"KMS_PROVIDER":             "local-kek-v1",
-		"KMS_KEY_VERSION":          "kms-v1",
-		"TOKEN_SIGNING_KEY_FILE":   writeTestFile(t, directory, "token-key", []byte(strings.Repeat("t", 32))),
-		"ADMIN_OPERATORS_FILE":     writeTestFile(t, directory, "admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+		"DATABASE_URL":                      "postgres://database/uclaw",
+		"ACTIVATION_PEPPER_FILE":            writeTestFile(t, directory, "pepper", []byte(strings.Repeat("p", 32))),
+		"LICENSE_SIGNING_KEY_FILE":          keyFile,
+		"STATUS_SIGNING_KEY_FILE":           keyFile,
+		"LICENSE_KEY_ID":                    "license-key-001",
+		"STATUS_KEY_ID":                     "status-key-001",
+		"KMS_PROVIDER":                      "local-kek-v1",
+		"KMS_KEY_VERSION":                   "kms-v1",
+		"TOKEN_SIGNING_KEY_FILE":            writeTestFile(t, directory, "token-key", []byte(strings.Repeat("t", 32))),
+		"ADMIN_OPERATORS_FILE":              writeTestFile(t, directory, "admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "fingerprint-key-base", []byte(strings.Repeat("f", 32))),
+		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
 	}
 	for name, contents := range map[string][]byte{
 		"raw":    []byte(strings.Repeat("r", 32)),
@@ -230,6 +238,30 @@ func TestReadRegularFileRequiresOwnerOnlyPermissions(t *testing.T) {
 				t.Fatalf("readRegularFile() error = %v, wantErr %t", err, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestReadRegularFileRejectsHardlink(t *testing.T) {
+	directory := t.TempDir()
+	target := writeTestFile(t, directory, "target-hardlink", []byte(strings.Repeat("h", 32)))
+	link := filepath.Join(directory, "secret-hardlink")
+	if err := os.Link(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readRegularFile(link, 32, maximumPepperBytes); err == nil {
+		t.Fatal("hardlinked secret file accepted")
+	}
+}
+
+func TestParseAllowedNewAPIHostsRejectsUnsafeOrNonCanonicalValues(t *testing.T) {
+	hosts, err := parseAllowedNewAPIHosts("api.example.test,models.example.test")
+	if err != nil || len(hosts) != 2 || hosts[0] != "api.example.test" {
+		t.Fatalf("hosts=%v err=%v", hosts, err)
+	}
+	for _, value := range []string{"", "localhost", "127.0.0.1", "10.0.0.1", "[::1]", "API.Example.Test", "api.example.test:443", "*.example.test", "api.example.test,api.example.test"} {
+		if _, err = parseAllowedNewAPIHosts(value); err == nil {
+			t.Fatalf("unsafe allowlist accepted: %q", value)
+		}
 	}
 }
 

@@ -843,6 +843,11 @@ func TestPostgreSQLTransactionLockOrder(t *testing.T) {
 	if !strings.Contains(string(lifecycleSource), "'activation.recovery_authorized','succeeded'") {
 		t.Fatal("AuthorizeRecovery must record authorization, not delivery")
 	}
+	adminSource, err := os.ReadFile("admin_repository.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOrderedFragments(t, string(adminSource), "func (repository *ActivationRepository) mutateDeviceToken", "func invokeBeforeCommit", "SELECT id FROM activation_inventory WHERE id=$1 FOR UPDATE", "SELECT device_id FROM devices WHERE device_id=$1 AND inventory_id=$2 FOR UPDATE", "SELECT license_id FROM licenses", "SELECT inventory_id FROM new_api_bindings", "SELECT device_token_id,status FROM device_access_tokens")
 }
 
 func assertOrderedFragments(t *testing.T, source, start, end string, fragments ...string) {

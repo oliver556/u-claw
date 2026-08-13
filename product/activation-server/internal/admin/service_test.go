@@ -3,6 +3,8 @@ package admin
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"net/url"
 	"strings"
@@ -21,6 +23,8 @@ type fakeRepository struct {
 	token          DeviceTokenMutation
 	reissue        func(func() error) (DeviceTokenResult, error)
 	tokenTargetErr error
+	outcome        DeviceTokenReissueOutcome
+	outcomeErr     error
 }
 
 type fakeSecretEnvelope struct {
@@ -212,6 +216,9 @@ func (repository *fakeRepository) ReissueDeviceToken(_ context.Context, mutation
 	}
 	return DeviceTokenResult{DeviceTokenID: mutation.ReplacementTokenID, InventoryID: "00000000-0000-4000-8000-000000000001", DeviceID: "00000000-0000-4000-8000-000000000002", LicenseID: mutation.LicenseID, Status: "active"}, nil
 }
+func (repository *fakeRepository) ResolveDeviceTokenReissue(context.Context, DeviceTokenMutation) (DeviceTokenReissueOutcome, error) {
+	return repository.outcome, repository.outcomeErr
+}
 func (repository *fakeRepository) PrepareDeviceTokenTarget(_ context.Context, licenseID string) (DeviceTokenResult, error) {
 	if repository.tokenTargetErr != nil {
 		return DeviceTokenResult{}, repository.tokenTargetErr
@@ -222,7 +229,7 @@ func (repository *fakeRepository) PrepareDeviceTokenTarget(_ context.Context, li
 func TestSetMappingEncryptsAPIKeyWithInventoryBindingAndReturnsRedactedSummary(t *testing.T) {
 	repository := &fakeRepository{}
 	envelope := &fakeSecretEnvelope{}
-	service, err := NewService(ServiceOptions{Repository: repository, Pepper: bytes.Repeat([]byte{1}, 32), SecretEnvelope: envelope, KeyVersion: "kms-v1"})
+	service, err := NewService(ServiceOptions{Repository: repository, Pepper: bytes.Repeat([]byte{1}, 32), SecretEnvelope: envelope, KeyVersion: "kms-v1", SecretFingerprintKey: bytes.Repeat([]byte{8}, 32), AllowedNewAPIHosts: []string{"api.example.test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +252,7 @@ func TestSetMappingEncryptsAPIKeyWithInventoryBindingAndReturnsRedactedSummary(t
 }
 
 func TestSetMappingRejectsUnsafeEndpointModelsAndLimits(t *testing.T) {
-	service, _ := NewService(ServiceOptions{Repository: &fakeRepository{}, Pepper: bytes.Repeat([]byte{1}, 32), SecretEnvelope: &fakeSecretEnvelope{}, KeyVersion: "kms-v1"})
+	service, _ := NewService(ServiceOptions{Repository: &fakeRepository{}, Pepper: bytes.Repeat([]byte{1}, 32), SecretEnvelope: &fakeSecretEnvelope{}, KeyVersion: "kms-v1", SecretFingerprintKey: bytes.Repeat([]byte{8}, 32), AllowedNewAPIHosts: []string{"api.example.test"}})
 	valid := MappingInput{InventoryID: "00000000-0000-4000-8000-000000000001", NewAPIUserID: "usr_fixture_001", NewAPIUsername: "user_fixture_001", BaseURL: "https://api.example.test/v1", DefaultModel: "model-a", AllowedModels: []string{"model-a"}, RequestsPerMinute: 60, ConcurrentRequests: 2, APIKey: []byte("key"), Operation: operation()}
 	mutations := []func(*MappingInput){func(v *MappingInput) { v.BaseURL = "http://api.example.test" }, func(v *MappingInput) { v.BaseURL = "https://user@api.example.test" }, func(v *MappingInput) { v.BaseURL = "https://api.example.test/@unsafe" }, func(v *MappingInput) { v.DefaultModel = "other" }, func(v *MappingInput) { v.AllowedModels = []string{"model-a", "model-a"} }, func(v *MappingInput) { v.RequestsPerMinute = 6001 }, func(v *MappingInput) { v.ConcurrentRequests = 0 }}
 	for _, mutate := range mutations {
@@ -301,5 +308,75 @@ func TestPrepareDeviceTokenReissueRejectsInactiveAuthorizationScope(t *testing.T
 	plan, err := service.PrepareDeviceTokenReissue(context.Background(), DeviceTokenMutation{Action: DeviceTokenReissue, LicenseID: licenseID, ConfirmTarget: TargetDigest(licenseID), Operation: operation()})
 	if !errors.Is(err, ErrInvalidInput) || plan.Secret.DeviceToken != "" || repository.token.ReplacementTokenID != "" {
 		t.Fatalf("plan=%+v mutation=%+v err=%v", plan, repository.token, err)
+	}
+}
+
+func TestDeviceTokenReissueUsesRandomSourceNotIdempotencyDerivation(t *testing.T) {
+	makePlan := func(randomByte byte) DeviceTokenReissuePlan {
+		service, _ := NewService(ServiceOptions{Repository: &fakeRepository{}, Pepper: bytes.Repeat([]byte{9}, 32), Random: bytes.NewReader(bytes.Repeat([]byte{randomByte}, 64)), SecretFingerprintKey: bytes.Repeat([]byte{8}, 32), AllowedNewAPIHosts: []string{"api.example.test"}})
+		licenseID := "00000000-0000-4000-8000-000000000003"
+		plan, err := service.PrepareDeviceTokenReissue(context.Background(), DeviceTokenMutation{Action: DeviceTokenReissue, LicenseID: licenseID, ConfirmTarget: TargetDigest(licenseID), Operation: operation()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plan
+	}
+	first, second := makePlan(1), makePlan(2)
+	if first.Secret.DeviceToken == second.Secret.DeviceToken || first.Mutation.ReplacementTokenID == second.Mutation.ReplacementTokenID {
+		t.Fatal("token material did not follow crypto random source")
+	}
+}
+
+func TestMappingFingerprintUsesIndependentDomainHMAC(t *testing.T) {
+	makeFingerprint := func(keyByte byte) []byte {
+		repository := &fakeRepository{}
+		service, _ := NewService(ServiceOptions{Repository: repository, Pepper: bytes.Repeat([]byte{1}, 32), SecretEnvelope: &fakeSecretEnvelope{}, KeyVersion: "kms-v1", SecretFingerprintKey: bytes.Repeat([]byte{keyByte}, 32), AllowedNewAPIHosts: []string{"api.example.test"}})
+		input := MappingInput{InventoryID: "00000000-0000-4000-8000-000000000001", NewAPIUserID: "usr_fixture_001", NewAPIUsername: "user_fixture_001", BaseURL: "https://api.example.test/v1", DefaultModel: "model-a", AllowedModels: []string{"model-a"}, RequestsPerMinute: 60, ConcurrentRequests: 2, APIKey: []byte("runtime-" + strings.Repeat("k", 16)), Operation: operation()}
+		if _, err := service.SetMapping(context.Background(), input); err != nil {
+			t.Fatal(err)
+		}
+		return repository.mapping.APIKeyFingerprint
+	}
+	first, second := makeFingerprint(3), makeFingerprint(4)
+	raw := sha256.Sum256([]byte("runtime-" + strings.Repeat("k", 16)))
+	if bytes.Equal(first, second) || bytes.Equal(first, raw[:]) || len(first) != 32 {
+		t.Fatalf("fingerprints first=%x second=%x", first, second)
+	}
+}
+
+func TestMappingEndpointRequiresExactAllowedPublicHostname(t *testing.T) {
+	service, _ := NewService(ServiceOptions{Repository: &fakeRepository{}, Pepper: bytes.Repeat([]byte{1}, 32), SecretEnvelope: &fakeSecretEnvelope{}, KeyVersion: "kms-v1", SecretFingerprintKey: bytes.Repeat([]byte{4}, 32), AllowedNewAPIHosts: []string{"api.example.test"}})
+	valid := MappingInput{InventoryID: "00000000-0000-4000-8000-000000000001", NewAPIUserID: "usr_fixture_001", NewAPIUsername: "user_fixture_001", BaseURL: "https://api.example.test:8443/v1", DefaultModel: "model-a", AllowedModels: []string{"model-a"}, RequestsPerMinute: 60, ConcurrentRequests: 2, APIKey: []byte(strings.Repeat("k", 16)), Operation: operation()}
+	if _, err := service.SetMapping(context.Background(), valid); err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"sub.api.example.test", "localhost", "127.0.0.1", "10.0.0.1", "169.254.1.1", "[::1]"} {
+		candidate := valid
+		candidate.BaseURL = "https://" + host + "/v1"
+		if _, err := service.SetMapping(context.Background(), candidate); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("host %s accepted: %v", host, err)
+		}
+	}
+}
+
+func TestRecoverDeviceTokenReissueResolvesCommitOutcome(t *testing.T) {
+	token := "uclaw_dt_" + strings.Repeat("A", 43)
+	pepper := bytes.Repeat([]byte{9}, 32)
+	mac := hmac.New(sha256.New, pepper)
+	mac.Write([]byte(token))
+	result := DeviceTokenResult{DeviceTokenID: "00000000-0000-4000-8000-000000000004", DeviceID: "00000000-0000-4000-8000-000000000002", LicenseID: "00000000-0000-4000-8000-000000000003", DeviceToken: token}
+	mutation := DeviceTokenMutation{Action: DeviceTokenReissue, LicenseID: result.LicenseID, Operation: operation()}
+	for _, test := range []struct {
+		name       string
+		repository *fakeRepository
+		want       error
+	}{{"committed", &fakeRepository{outcome: DeviceTokenReissueOutcome{Result: DeviceTokenResult{DeviceTokenID: result.DeviceTokenID, DeviceID: result.DeviceID, LicenseID: result.LicenseID}, TokenDigest: mac.Sum(nil), Completed: true}}, nil}, {"not committed", &fakeRepository{}, ErrSecretReplayUnavailable}, {"unknown", &fakeRepository{outcomeErr: errors.New("db unavailable")}, ErrRecoveryConfirmationRequired}} {
+		t.Run(test.name, func(t *testing.T) {
+			service, _ := NewService(ServiceOptions{Repository: test.repository, Pepper: pepper})
+			_, err := service.RecoverDeviceTokenReissue(context.Background(), mutation, result)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("error=%v want=%v", err, test.want)
+			}
+		})
 	}
 }
