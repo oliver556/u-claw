@@ -11,8 +11,15 @@ import (
 
 const serviceUID = 65532
 const serviceGID = 65532
+const secretInitializationError = "secret initialization invalid"
 
 type secretSpec struct{ environment, target string }
+
+type secretInitOps struct {
+	chownDirectory func(*os.File, int, int) error
+	syncDirectory  func(*os.File) error
+	removeTarget   func(*os.Root, string) error
+}
 
 var activationSecretSpecs = []secretSpec{
 	{"ACTIVATION_PEPPER_FILE", "activation_pepper"}, {"LICENSE_SIGNING_KEY_FILE", "license_signing_key"}, {"STATUS_SIGNING_KEY_FILE", "status_signing_key"}, {"KMS_KEK_FILE", "kms_kek"}, {"TOKEN_SIGNING_KEY_FILE", "token_signing_key"}, {"ADMIN_OPERATORS_FILE", "admin_operators"}, {"ADMIN_SECRET_FINGERPRINT_KEY_FILE", "admin_secret_fingerprint_key"},
@@ -55,34 +62,68 @@ func main() {
 func fatal() { _, _ = fmt.Fprintln(os.Stderr, "secret initialization failed"); os.Exit(1) }
 
 func prepareSecrets(getenv func(string) string, targetDir string, uid, gid int) (map[string]string, error) {
+	return prepareSecretsWithOps(getenv, targetDir, uid, gid, defaultSecretInitOps())
+}
+
+func defaultSecretInitOps() secretInitOps {
+	return secretInitOps{
+		chownDirectory: func(directory *os.File, uid, gid int) error { return directory.Chown(uid, gid) },
+		syncDirectory:  func(directory *os.File) error { return directory.Sync() },
+		removeTarget:   func(root *os.Root, name string) error { return root.Remove(name) },
+	}
+}
+
+func prepareSecretsWithOps(getenv func(string) string, targetDir string, uid, gid int, ops secretInitOps) (map[string]string, error) {
 	if getenv == nil || targetDir == "" {
-		return nil, errors.New("secret initialization invalid")
+		return nil, initializationError()
 	}
 	if err := ensureTargetDirectory(targetDir); err != nil {
-		return nil, errors.New("secret initialization invalid")
+		return nil, initializationError()
 	}
 	directoryFD, err := syscall.Open(targetDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, errors.New("secret initialization invalid")
+		return nil, initializationError()
 	}
 	directory := os.NewFile(uintptr(directoryFD), targetDir)
 	defer directory.Close()
+	targetRoot, err := os.OpenRoot(targetDir)
+	if err != nil {
+		return nil, initializationError()
+	}
+	defer targetRoot.Close()
+	created := make([]string, 0, len(activationSecretSpecs))
+	cleanup := func() {
+		for index := len(created) - 1; index >= 0; index-- {
+			_ = ops.removeTarget(targetRoot, created[index])
+		}
+		_ = ops.syncDirectory(directory)
+	}
+	fail := func() (map[string]string, error) {
+		cleanup()
+		return nil, initializationError()
+	}
 	result := make(map[string]string, len(activationSecretSpecs))
 	for _, spec := range activationSecretSpecs {
 		target := filepath.Join(targetDir, spec.target)
-		if err := copySecret(getenv(spec.environment), target, uid, gid); err != nil {
-			return nil, err
+		wasCreated, copyErr := copySecret(getenv(spec.environment), target, uid, gid)
+		if wasCreated {
+			created = append(created, spec.target)
+		}
+		if copyErr != nil {
+			return fail()
 		}
 		result[spec.environment] = target
 	}
-	if err := directory.Chown(uid, gid); err != nil {
-		return nil, errors.New("secret initialization invalid")
+	if err = ops.syncDirectory(directory); err != nil {
+		return fail()
 	}
-	if err = directory.Sync(); err != nil {
-		return nil, errors.New("secret initialization invalid")
+	if err = ops.chownDirectory(directory, uid, gid); err != nil {
+		return fail()
 	}
 	return result, nil
 }
+
+func initializationError() error { return errors.New(secretInitializationError) }
 
 func ensureTargetDirectory(path string) error {
 	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
@@ -90,62 +131,65 @@ func ensureTargetDirectory(path string) error {
 	}
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
-		return errors.New("secret initialization invalid")
+		return initializationError()
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || int(stat.Uid) != os.Geteuid() || int(stat.Gid) != os.Getegid() {
-		return errors.New("secret initialization invalid")
+		return initializationError()
 	}
 	return nil
 }
 
-func copySecret(source, target string, uid, gid int) error {
+func copySecret(source, target string, uid, gid int) (bool, error) {
 	if source == "" || !filepath.IsAbs(source) {
-		return errors.New("secret initialization invalid")
+		return false, initializationError()
 	}
 	sourceFD, err := syscall.Open(source, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return errors.New("secret initialization invalid")
+		return false, initializationError()
 	}
 	sourceFile := os.NewFile(uintptr(sourceFD), source)
 	defer sourceFile.Close()
 	sourceInfo, err := sourceFile.Stat()
 	if !safeSource(sourceInfo, err) {
-		return errors.New("secret initialization invalid")
+		return false, initializationError()
 	}
 	targetFD, err := syscall.Open(target, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o400)
 	if err != nil {
-		return errors.New("secret initialization invalid")
+		return false, initializationError()
 	}
 	targetFile := os.NewFile(uintptr(targetFD), target)
-	cleanup := func() { _ = targetFile.Close(); _ = os.Remove(target) }
+	closeTarget := func() { _ = targetFile.Close() }
+	if err = targetFile.Chmod(0o400); err != nil {
+		closeTarget()
+		return true, initializationError()
+	}
 	if err = targetFile.Chown(uid, gid); err != nil {
-		cleanup()
-		return errors.New("secret initialization invalid")
+		closeTarget()
+		return true, initializationError()
 	}
 	if _, err = io.Copy(targetFile, sourceFile); err != nil {
-		cleanup()
-		return errors.New("secret initialization invalid")
+		closeTarget()
+		return true, initializationError()
 	}
 	if err = targetFile.Sync(); err != nil {
-		cleanup()
-		return errors.New("secret initialization invalid")
+		closeTarget()
+		return true, initializationError()
 	}
 	targetInfo, err := targetFile.Stat()
 	if err != nil || !targetInfo.Mode().IsRegular() || targetInfo.Mode().Perm() != 0o400 {
-		cleanup()
-		return errors.New("secret initialization invalid")
+		closeTarget()
+		return true, initializationError()
 	}
 	stat, ok := targetInfo.Sys().(*syscall.Stat_t)
 	if !ok || stat.Nlink != 1 || int(stat.Uid) != uid || int(stat.Gid) != gid {
-		cleanup()
-		return errors.New("secret initialization invalid")
+		closeTarget()
+		return true, initializationError()
 	}
 	if err = targetFile.Close(); err != nil {
-		_ = os.Remove(target)
-		return errors.New("secret initialization invalid")
+		return true, initializationError()
 	}
-	return nil
+	return true, nil
 }
 
 func safeSource(info os.FileInfo, err error) bool {
