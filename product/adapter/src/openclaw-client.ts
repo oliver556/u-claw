@@ -5,6 +5,7 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_ATTACHMENT_BASE64_TOTAL_LENGTH,
   MAX_ATTACHMENT_TOTAL_BYTES,
+  MAX_VIDEO_ATTACHMENT_BYTES,
   DoctorRepairActionIdSchema,
   DiagnosticLogEntrySchema,
   UClawErrorSchema,
@@ -49,7 +50,7 @@ import {
 import type { GatewayWebSocketState, HelloOk } from "./transport/gateway-websocket.js";
 import { ReconnectPolicy, type SequenceGap } from "./reconnect.js";
 import { AdapterServiceError, RpcClosedError, RpcProtocolError, RpcRemoteError, type EventFrame, type JsonValue } from "./transport/rpc-router.js";
-import { AttachmentServiceError, type AttachmentManager } from "./attachments.js";
+import { AttachmentServiceError, type OpenClawAttachmentResolver } from "./attachments.js";
 import { createOpenClawSessionAdvancedService } from "./session-advanced.js";
 import { createOpenClawChannelRuntime, type OpenClawManagedChannelRuntime } from "./openclaw-channel-runtime.js";
 
@@ -436,7 +437,7 @@ export interface OpenClawClientOptions {
   transport: OpenClawTransport;
   gatewayOrigin?: () => string | undefined;
   dataRoot?: () => string | undefined;
-  attachments?: AttachmentManager;
+  attachments?: OpenClawAttachmentResolver;
   statusProjection?: () => Pick<GatewayStatus, "processAlive" | "usb">;
   now?: () => string;
   reconnectPolicy?: ReconnectPolicy;
@@ -448,7 +449,7 @@ export interface OpenClawClientOptions {
 }
 
 export class OpenClawClient implements UClawClient {
-  readonly attachments: AttachmentManager | undefined;
+  readonly attachments: OpenClawAttachmentResolver | undefined;
   readonly sessionAdvanced: NonNullable<UClawClient["sessionAdvanced"]>;
   private readonly managedChannelRuntime: OpenClawManagedChannelRuntime;
   private capabilities: CapabilitySet | undefined;
@@ -831,10 +832,13 @@ export class OpenClawClient implements UClawClient {
     if (attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
       throw new AttachmentServiceError("INVALID_ARGUMENT", `单条消息最多发送 ${MAX_ATTACHMENTS_PER_MESSAGE} 个附件。`);
     }
-    const resolvedAttachments = attachmentIds.map((id) => this.options.attachments!.resolveForSend(id));
+    const resolvedAttachments = await Promise.all(attachmentIds.map((id) => this.options.attachments!.resolveForSend(id)));
     const rawAttachmentBytes = resolvedAttachments.reduce((total, attachment) => total + attachment.byteLength, 0);
     const encodedAttachmentLength = resolvedAttachments.reduce((total, attachment) => total + attachment.content.length, 0);
-    if (rawAttachmentBytes > MAX_ATTACHMENT_TOTAL_BYTES || encodedAttachmentLength > MAX_ATTACHMENT_BASE64_TOTAL_LENGTH) {
+    const hasVideo = resolvedAttachments.some((attachment) => attachment.mimeType.startsWith("video/"));
+    const rawLimit = hasVideo ? MAX_VIDEO_ATTACHMENT_BYTES : MAX_ATTACHMENT_TOTAL_BYTES;
+    const encodedLimit = hasVideo ? Math.ceil(MAX_VIDEO_ATTACHMENT_BYTES / 3) * 4 : MAX_ATTACHMENT_BASE64_TOTAL_LENGTH;
+    if (rawAttachmentBytes > rawLimit || encodedAttachmentLength > encodedLimit) {
       throw new AttachmentServiceError("FILE_TOO_LARGE", "附件累计大小超过单条消息限制。");
     }
     const attachments = resolvedAttachments.map(({ byteLength: _byteLength, ...attachment }) => attachment);
@@ -925,7 +929,7 @@ export class OpenClawClient implements UClawClient {
       const policyLimit = Math.min(
         this.hello?.policy.maxPayload ?? 64 * 1024,
         this.hello?.policy.maxBufferedBytes ?? 64 * 1024,
-        64 * 1024,
+        Number.POSITIVE_INFINITY,
       );
       const frameBytes = new TextEncoder().encode(JSON.stringify({
         type: "req", id: "x".repeat(64), method: "chat.send", params: requestParams,
@@ -933,15 +937,15 @@ export class OpenClawClient implements UClawClient {
       if (frameBytes > policyLimit) {
         throw new AttachmentServiceError("FILE_TOO_LARGE", `附件发送载荷超过 Gateway 限制（${frameBytes} > ${policyLimit} bytes）。`);
       }
-      for (const id of attachmentIds) this.options.attachments?.markUploading(id, 0);
+      for (const id of attachmentIds) this.options.attachments?.markUploading?.(id, 0);
       const acceptedRequest = this.options.transport.router.request("chat.send", requestParams, SendResponseSchema).then((accepted) => {
-        for (const id of attachmentIds) this.options.attachments?.markAttached(id);
+        for (const id of attachmentIds) this.options.attachments?.markAttached?.(id);
         return accepted;
       }, (error: unknown) => {
         const summary = error instanceof AdapterServiceError
           ? { code: error.uclawError.code, message: error.uclawError.message, retryable: error.uclawError.retryable }
           : { code: "UNAVAILABLE" as const, message: "附件发送失败。", retryable: true };
-        for (const id of attachmentIds) this.options.attachments?.markFailed(id, summary);
+        for (const id of attachmentIds) this.options.attachments?.markFailed?.(id, summary);
         throw error;
       });
       let removeAbortListener = (): void => undefined;

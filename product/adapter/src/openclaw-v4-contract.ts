@@ -376,7 +376,7 @@ const AttachmentRpcCaseSchema = RpcCaseSchema(
   ResponseFrameSchema,
 );
 const AttachmentCaseSchema = AttachmentRpcCaseSchema.and(z.object({
-  kind: z.enum(["image", "text", "oversized", "mime-mismatch"]),
+  kind: z.enum(["image", "video", "text", "oversized", "mime-mismatch"]),
 }).passthrough());
 export const OpenClawAttachmentFixtureSchema = z.object({ cases: z.array(AttachmentCaseSchema) }).strict();
 

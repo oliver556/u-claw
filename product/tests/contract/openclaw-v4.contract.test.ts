@@ -67,6 +67,19 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
     expect(mapped[3]).toMatchObject({ decodedBytes: 1049, error: { code: "INVALID_REQUEST" } });
   });
 
+  it.each(["video/mp4", "video/quicktime", "video/webm"])("accepts %s as an OpenClaw file attachment", (mimeType) => {
+    const raw = OpenClawAttachmentFixtureSchema.parse(fixture("attachments.json"));
+    const video = structuredClone(raw.cases[0]);
+    video.kind = "video";
+    video.requestFrame.params.message = "分析视频";
+    video.requestFrame.params.idempotencyKey = "stable-video-key";
+    video.requestFrame.params.attachments[0] = {
+      type: "file", fileName: "clip.mov", mimeType, content: "AAAAHGZ0eXBpc29tAAAAAA==",
+    };
+    expect(OpenClawAttachmentFixtureSchema.parse({ cases: [video] }).cases[0]?.requestFrame.params)
+      .toMatchObject({ message: "分析视频", idempotencyKey: "stable-video-key", attachments: [{ type: "file", mimeType }] });
+  });
+
   it("GATE-A02 validates approval events and every observed decision", () => {
     const raw = OpenClawApprovalsFixtureSchema.parse(fixture("approvals.json"));
     const exec = mapOpenClawExecApproval(raw.exec.allowOnce.event);
