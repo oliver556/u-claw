@@ -93,14 +93,14 @@ function ActivationForm({ recovery, onSubmit }: { recovery: boolean; onSubmit(co
   useEffect(() => codeRef.current?.focus(), []);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const valid = normalizeActivationCode(code).length === 26;
+    const valid = /^[0-9A-HJKMNP-TV-Z]{26}$/u.test(normalizeActivationCode(code));
     setInvalid(!valid);
     if (valid) onSubmit(code);
   };
   return <section className="activation-form-area">
     <header><p className="activation-kicker">{recovery ? "同盘恢复" : "首次激活"}</p><h1>{recovery ? "继续完成本次激活" : "激活这套 U-Claw"}</h1><p>{recovery ? "检测到当前 U 盘有未完成的激活记录。请重新输入同一激活码继续。" : "激活码首次使用后将绑定当前 U 盘。换电脑、换接口或换盘符不受影响。"}</p></header>
     <form onSubmit={submit} noValidate>
-      <div className="activation-field"><label htmlFor="activation-code">激活码</label><div className="activation-input"><KeyRound /><input id="activation-code" ref={codeRef} type={visible ? "text" : "password"} value={formatActivationCode(code)} onChange={(event) => setCode(event.target.value)} autoComplete="off" spellCheck={false} maxLength={30} aria-invalid={invalid && normalizeActivationCode(code).length !== 26} /><button type="button" aria-label={visible ? "隐藏激活码" : "显示激活码"} title={visible ? "隐藏激活码" : "显示激活码"} onClick={() => setVisible((value) => !value)}>{visible ? <EyeOff /> : <Eye />}</button></div><small>{invalid ? "请输入 26 位激活码" : "激活码不区分大小写"}</small></div>
+      <div className="activation-field"><label htmlFor="activation-code">激活码</label><div className="activation-input"><KeyRound /><input id="activation-code" ref={codeRef} type={visible ? "text" : "password"} value={formatActivationCode(code)} onChange={(event) => setCode(event.target.value)} autoComplete="off" spellCheck={false} maxLength={30} aria-invalid={invalid} aria-describedby="activation-code-help" aria-errormessage={invalid ? "activation-code-error" : undefined} /><button type="button" aria-label={visible ? "隐藏激活码" : "显示激活码"} title={visible ? "隐藏激活码" : "显示激活码"} onClick={() => setVisible((value) => !value)}>{visible ? <EyeOff /> : <Eye />}</button></div><small id="activation-code-help">激活码不区分大小写</small>{invalid && <small id="activation-code-error" role="alert">请输入 26 位有效激活码</small>}</div>
       <div className="activation-binding"><Usb /><div><small>即将绑定</small><strong>当前 U-Claw 产品盘</strong></div><span><LockKeyhole /> 安全读取</span></div>
       <button className="activation-primary" type="submit"><ShieldCheck />{recovery ? "继续恢复" : "激活当前 U 盘"}</button>
     </form>

@@ -128,7 +128,7 @@ test("validates 26-character input and preserves real keyboard order", async ({ 
   await page.goto("/");
   await page.getByRole("textbox", { name: "激活码" }).fill("short");
   await page.getByRole("button", { name: "激活当前 U 盘" }).click();
-  await expect(page.getByText("请输入 26 位激活码")).toBeVisible();
+  await expect(page.getByText("请输入 26 位有效激活码")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__activationFixture.calls.filter((call: any) => call.method === "submit"))).toEqual([]);
 
   await fillActivation(page);

@@ -14,11 +14,12 @@ const POLLABLE_STATES = new Set<ActivationState>(["server-bound", "writing", "ve
 const POLL_INTERVAL_MS = 250;
 
 export function normalizeActivationCode(value: string): string {
-  return value.toUpperCase().replace(/[^0-9A-HJKMNP-TV-Z]/gu, "").slice(0, 26);
+  return value.replaceAll("-", "").toUpperCase();
 }
 
 export function formatActivationCode(value: string): string {
   const normalized = normalizeActivationCode(value);
+  if (!/^[0-9A-HJKMNP-TV-Z]{0,26}$/u.test(normalized)) return value.toUpperCase();
   return [normalized.slice(0, 5), normalized.slice(5, 10), normalized.slice(10, 15), normalized.slice(15, 20), normalized.slice(20, 26)].filter(Boolean).join("-");
 }
 
