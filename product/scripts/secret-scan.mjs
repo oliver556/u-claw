@@ -15,7 +15,7 @@ const credentialField = "(?:api[_-]?key|new[_-]?api[_-]?(?:key|token)|access[_-]
 const quotedCredentialAssignment = new RegExp(`(?:^|[\\s{,])["']?${credentialField}["']?\\s*(?:=|:)\\s*(["'])([^"'\\x60\\r\\n]+)\\1`, "iu");
 const environmentCredentialAssignment = new RegExp(`^(?:export\\s+)?${credentialField}\\s*=\\s*([^\\s#]+)\\s*$`, "iu");
 const deviceTokenPattern = /\buclaw_dt_[A-Za-z0-9_-]{43}\b/gu;
-const activationCodeAssignment = /(?:^|[\s{,])["']?activation[_-]?code["']?\s*(?:=|:)\s*(["'])([0-9A-HJKMNP-TV-Z]{26})\1/iu;
+const activationCodeAssignment = /(?:^|[\s{,])["']?activation[_-]?code["']?\s*(?:=|:)\s*(["'`]?)([0-9A-HJKMNP-TV-Z]{26})\1(?![0-9A-HJKMNP-TV-Z])/iu;
 const activationCodePlaceholder = "TESTTESTTESTTESTTESTTEST12";
 const tokenPatterns = [
   /\bAKIA[0-9A-Z]{16}\b/gu,

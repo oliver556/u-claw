@@ -18,7 +18,11 @@ import {
   type BuiltinCredentialStore,
   type BuiltinModelCredential,
 } from "./builtin-credential-store.js";
-import { BuiltinServiceClientError, createBuiltinServiceClient } from "./builtin-service-client.js";
+import {
+  BuiltinServiceClientError,
+  createBuiltinServiceClient,
+  type BuiltinServiceClient,
+} from "./builtin-service-client.js";
 import type { ProviderStore } from "./provider-store.js";
 
 export type ModelSource = "builtin" | "domestic" | "custom";
@@ -71,6 +75,7 @@ export interface CreateMainProcessModelRoutingOptions {
   providers: ProviderStore;
   executors: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
   allowLoopbackHttp?: boolean;
+  builtinDataClient?: BuiltinServiceClient;
 }
 
 const BUILTIN_MAX_OUTPUT_TOKENS = 4_096;
@@ -185,9 +190,9 @@ export function createMainProcessModelRouting({
   providers,
   executors,
   allowLoopbackHttp = false,
+  builtinDataClient = createBuiltinServiceClient({ allowLoopbackHttp }),
 }: CreateMainProcessModelRoutingOptions) {
   const credentials = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp });
-  const builtinDataClient = createBuiltinServiceClient({ allowLoopbackHttp });
   const builtin = async (
     input: SendMessageInput,
     credential: BuiltinModelCredential,
