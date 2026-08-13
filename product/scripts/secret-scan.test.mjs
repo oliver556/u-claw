@@ -80,9 +80,16 @@ test("detects activation, device, bearer, and legacy New API secrets", () => {
 
 test("detects activation codes leaked from test paths", () => {
   const activationCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
-  assert.deepEqual(scanText("tests/leaked.txt", `activationCode = "${activationCode}"\n`), [
-    { path: "tests/leaked.txt", line: 1, rule: "ACTIVATION_CODE" },
-  ]);
+  const leaked = [
+    `ACTIVATION_CODE=${activationCode}`,
+    `activationCode: ${activationCode}`,
+    `activationCode: '${activationCode}'`,
+    `activationCode = \`${activationCode}\``,
+    `{"activationCode":"${activationCode}"}`,
+  ].join("\n");
+  assert.deepEqual(scanText("tests/leaked.txt", leaked), [1, 2, 3, 4, 5].map((line) => ({
+    path: "tests/leaked.txt", line, rule: "ACTIVATION_CODE",
+  })));
   assert.deepEqual(
     scanText("tests/dynamic-fixture.ts", "const activationCode = ['0123456789', 'ABCDEFGHJK', 'MNPQRS'].join('');\n"),
     [],
@@ -91,6 +98,10 @@ test("detects activation codes leaked from test paths", () => {
     scanText("tests/static-fixture.json", '{"activationCode":"TESTTESTTESTTESTTESTTEST12"}\n'),
     [],
   );
+  assert.deepEqual(scanText("tests/not-secrets.txt", [
+    `activationCode=${activationCode}0`,
+    `ordinary text ${activationCode}`,
+  ].join("\n")), []);
 });
 
 test("detects modern GitHub fine-grained access tokens", () => {

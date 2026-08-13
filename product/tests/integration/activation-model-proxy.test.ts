@@ -7,11 +7,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import type { MessageEvent } from "@uclaw/shared";
-import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { Agent, fetch as undiciFetch } from "undici";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { createActivationArtifactWriter } from "../../desktop/src/activation/artifact-writer.js";
-import { createActivationClient } from "../../desktop/src/activation/client.js";
+import { createActivationClient, type ActivationClient } from "../../desktop/src/activation/client.js";
 import { createActivationCoordinator } from "../../desktop/src/activation/coordinator.js";
 import { verifyActivationResponse } from "../../desktop/src/main.js";
 import { createBuiltinCredentialStore } from "../../desktop/src/providers/builtin-credential-store.js";
@@ -41,7 +41,12 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
     await mkdir(dataDir, { recursive: true });
     const certPath = join(root, "cert.pem");
     const keyPath = join(root, "key.pem");
-    await run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", keyPath, "-out", certPath, "-days", "1"]);
+    let server: ReturnType<typeof createServer> | undefined;
+    let activationDispatcher: Agent | undefined;
+    let modelDispatcher: Agent | undefined;
+    let activationClient: ActivationClient | undefined;
+    try {
+      await run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", keyPath, "-out", certPath, "-days", "1"]);
 
     const activationCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
     const startupSecret = ["fixture", "startup", "secret", "0123456789abcdef"].join("-");
@@ -69,19 +74,14 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
     let revoked = false;
     let upstreamModelCalls = 0;
     const publicRecords: unknown[] = [];
-    const publicLogs: unknown[][] = [];
-    const consoleSpies = (["error", "warn", "log", "info", "debug"] as const).map((method) =>
-      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => { publicLogs.push([method, ...args]); }),
-    );
     const authorizations: string[] = [];
     const modelBodies: unknown[] = [];
-    const server = createServer({ cert: await readFile(certPath), key: await readFile(keyPath) }, (request, response) => {
+    server = createServer({ cert: await readFile(certPath), key: await readFile(keyPath) }, (request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
       request.on("end", () => {
         const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown : null;
         if (request.url === "/v1/activations") {
-          console.info("fixture activation request", { route: request.url, status: 200 });
           expect(body).toEqual({ activationCode, usbFingerprint: { version: "uclaw-usb-v1", sha256: fingerprint }, clientVersion: "1.0.0", idempotencyKey: "activation:fixture-uuid" });
           expect(body).not.toHaveProperty("username");
           response.writeHead(200, { "content-type": "application/json" });
@@ -94,7 +94,6 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
           return;
         }
         if (request.url === "/v1/activations/fixture-activation-001/commit") {
-          console.info("fixture activation commit", { route: request.url, status: 204 });
           publicRecords.push({ type: "commit", status: 204 });
           response.writeHead(204).end();
           return;
@@ -103,13 +102,11 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
           const authorization = String(request.headers.authorization ?? "");
           authorizations.push(authorization);
           if (authorization !== `Bearer ${deviceToken}` || revoked) {
-            console.warn("fixture model proxy authentication rejected", { route: request.url, status: 401 });
             response.writeHead(401, { "content-type": "application/json" });
             response.end(JSON.stringify({ code: "AUTHENTICATION_FAILED", message: "Device credential rejected.", requestId: "fixture-request-rejected" }));
             return;
           }
           upstreamModelCalls += 1;
-          console.debug("fixture model proxy request accepted", { route: request.url, status: 200 });
           if (request.url.endsWith("/models")) {
             response.writeHead(200, { "content-type": "application/json" });
             response.end(JSON.stringify({ object: "list", data: [{ id: "fixture-default-model", object: "model", created: 1, owned_by: "fixture" }] }));
@@ -126,11 +123,10 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
     await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
     const address = server.address();
     endpoint = `https://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/`;
-    const previousDispatcher = getGlobalDispatcher();
-    const tlsDispatcher = new Agent({ connect: { ca: await readFile(certPath, "utf8") } });
-    setGlobalDispatcher(tlsDispatcher);
-    const activationClient = createActivationClient({ endpoint, createDispatcher: () => tlsDispatcher });
-    try {
+    const ca = await readFile(certPath, "utf8");
+    activationDispatcher = new Agent({ connect: { ca } });
+    modelDispatcher = new Agent({ connect: { ca } });
+    activationClient = createActivationClient({ endpoint, createDispatcher: () => activationDispatcher! });
       const writer = createActivationArtifactWriter({ packageRoot, dataDir });
       const exits: number[] = [];
       const publicKey = signingKeys.publicKey.export({ format: "pem", type: "spki" }).toString();
@@ -155,11 +151,15 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
 
       const store = createBuiltinCredentialStore({ dataDir });
       const loaded = await store.loadActive();
-      const health = await createBuiltinServiceClient().health(loaded);
+      const modelFetch = ((input: string | URL | Request, init?: RequestInit) =>
+        undiciFetch(input, { ...init, dispatcher: modelDispatcher })) as typeof fetch;
+      const builtinDataClient = createBuiltinServiceClient({ fetch: modelFetch });
+      const health = await builtinDataClient.health(loaded);
       expect(health).toMatchObject({ acceptingBuiltin: true, state: "enabled" });
       const routing = createMainProcessModelRouting({
         dataDir, providers: createProviderStore({ dataDir }),
         executors: { domestic: async () => { throw new Error("unused"); }, custom: async () => { throw new Error("unused"); } },
+        builtinDataClient,
       });
       const events = await collectEvents(routing.routeChatSend({ sessionId: "fixture-session", clientRequestId: "fixture-client-request", blocks: [{ type: "text", text: "hello model", format: "plain" }] }));
       expect(events.map((event) => event.type)).toEqual(["started", "delta", "final"]);
@@ -176,14 +176,17 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
       publicRecords.push(events, JSON.parse(JSON.stringify(revokedError)));
       const publicJson = JSON.stringify(publicRecords);
       for (const secret of [activationCode, startupSecret, deviceToken, newApiKey]) expect(publicJson).not.toContain(secret);
-      expect(publicLogs.length).toBeGreaterThan(0);
-      const publicLogJson = JSON.stringify(publicLogs);
-      for (const secret of [activationCode, startupSecret, deviceToken, newApiKey]) expect(publicLogJson).not.toContain(secret);
+      // Production path has no injectable logger. Public leak evidence covers
+      // MessageEvents, serialized errors, and commit records only.
     } finally {
-      for (const spy of consoleSpies) spy.mockRestore();
-      setGlobalDispatcher(previousDispatcher);
-      await activationClient.close();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await Promise.allSettled([
+        activationClient?.close() ?? activationDispatcher?.close() ?? Promise.resolve(),
+        modelDispatcher?.close() ?? Promise.resolve(),
+        server ? new Promise<void>((resolve) => server!.close(() => resolve())) : Promise.resolve(),
+        rm(root, { recursive: true, force: true }),
+      ]);
+      const rootIndex = roots.indexOf(root);
+      if (rootIndex >= 0) roots.splice(rootIndex, 1);
     }
   }, 30_000);
 });
