@@ -74,6 +74,24 @@ func TestMetricsExposeActivationSLOAndFailureSignals(t *testing.T) {
 	}
 }
 
+func TestMetricsExposeBoundedModelProxySignals(t *testing.T) {
+	metrics := NewMetrics()
+	metrics.RecordModelProxyAuthRejected()
+	metrics.RecordModelProxyAdmissionLimited()
+	metrics.RecordModelProxyUpstream("success", 125*time.Millisecond)
+	metrics.RecordModelProxyUpstream("secret-host", time.Second)
+	recorder := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	assertMetric(t, body, `uclaw_model_proxy_auth_rejected_total 1`)
+	assertMetric(t, body, `uclaw_model_proxy_admission_limited_total 1`)
+	assertMetric(t, body, `uclaw_model_proxy_upstream_total{outcome="success"} 1`)
+	assertMetric(t, body, `uclaw_model_proxy_upstream_total{outcome="unknown"} 1`)
+	if strings.Contains(body, "secret-host") {
+		t.Fatal("unbounded upstream label leaked")
+	}
+}
+
 func assertMetric(t *testing.T, body, metric string) {
 	t.Helper()
 	if !strings.Contains(body, metric+"\n") {

@@ -48,25 +48,61 @@ var stableActivationCodes = map[string]struct{}{
 // Metrics holds bounded-cardinality activation service metrics. Callers must
 // never pass customer identifiers as labels.
 type Metrics struct {
-	mu                  sync.Mutex
-	activationRequests  map[string]uint64
-	activationBuckets   []uint64
-	activationCount     uint64
-	activationSum       float64
-	dbFailures          map[string]uint64
-	bindingLeaseStale   uint64
-	signingFailures     map[string]uint64
-	commitStale         uint64
-	lifecycleOperations map[string]uint64
+	mu                         sync.Mutex
+	activationRequests         map[string]uint64
+	activationBuckets          []uint64
+	activationCount            uint64
+	activationSum              float64
+	dbFailures                 map[string]uint64
+	bindingLeaseStale          uint64
+	signingFailures            map[string]uint64
+	commitStale                uint64
+	lifecycleOperations        map[string]uint64
+	modelProxyAuthRejected     uint64
+	modelProxyAdmissionLimited uint64
+	modelProxyUpstream         map[string]uint64
+	modelProxyUpstreamBuckets  []uint64
+	modelProxyUpstreamCount    uint64
+	modelProxyUpstreamSum      float64
 }
 
 func NewMetrics() *Metrics {
 	return &Metrics{
-		activationRequests:  make(map[string]uint64),
-		activationBuckets:   make([]uint64, len(activationDurationBuckets)),
-		dbFailures:          make(map[string]uint64),
-		signingFailures:     make(map[string]uint64),
-		lifecycleOperations: make(map[string]uint64),
+		activationRequests:        make(map[string]uint64),
+		activationBuckets:         make([]uint64, len(activationDurationBuckets)),
+		dbFailures:                make(map[string]uint64),
+		signingFailures:           make(map[string]uint64),
+		lifecycleOperations:       make(map[string]uint64),
+		modelProxyUpstream:        make(map[string]uint64),
+		modelProxyUpstreamBuckets: make([]uint64, len(activationDurationBuckets)),
+	}
+}
+
+func (metrics *Metrics) RecordModelProxyAuthRejected() {
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	metrics.modelProxyAuthRejected++
+}
+func (metrics *Metrics) RecordModelProxyAdmissionLimited() {
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	metrics.modelProxyAdmissionLimited++
+}
+func (metrics *Metrics) RecordModelProxyUpstream(outcome string, duration time.Duration) {
+	outcome = boundedValue(outcome, []string{"success", "authentication_failed", "rate_limited", "unavailable", "invalid_response"})
+	seconds := duration.Seconds()
+	if seconds < 0 {
+		seconds = 0
+	}
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	metrics.modelProxyUpstream[outcome]++
+	metrics.modelProxyUpstreamCount++
+	metrics.modelProxyUpstreamSum += seconds
+	for i, b := range activationDurationBuckets {
+		if seconds <= b {
+			metrics.modelProxyUpstreamBuckets[i]++
+		}
 	}
 }
 
@@ -180,6 +216,14 @@ func (metrics *Metrics) render() string {
 	writeMap(&output, "uclaw_signing_failures_total", "License signing or KMS failures.", metrics.signingFailures, []string{"dependency"})
 	writeCounter(&output, "uclaw_commit_stale_total", "Stale activation commit attempts.", metrics.commitStale)
 	writeMap(&output, "uclaw_lifecycle_operations_total", "Reissue and revoke operations.", metrics.lifecycleOperations, []string{"action", "outcome"})
+	writeCounter(&output, "uclaw_model_proxy_auth_rejected_total", "Rejected model proxy authentication attempts.", metrics.modelProxyAuthRejected)
+	writeCounter(&output, "uclaw_model_proxy_admission_limited_total", "Rate or concurrency limited model proxy requests.", metrics.modelProxyAdmissionLimited)
+	writeMap(&output, "uclaw_model_proxy_upstream_total", "Model proxy upstream requests by bounded outcome.", metrics.modelProxyUpstream, []string{"outcome"})
+	output.WriteString("# HELP uclaw_model_proxy_upstream_duration_seconds Model proxy upstream latency.\n# TYPE uclaw_model_proxy_upstream_duration_seconds histogram\n")
+	for i, b := range activationDurationBuckets {
+		fmt.Fprintf(&output, "uclaw_model_proxy_upstream_duration_seconds_bucket{le=\"%g\"} %d\n", b, metrics.modelProxyUpstreamBuckets[i])
+	}
+	fmt.Fprintf(&output, "uclaw_model_proxy_upstream_duration_seconds_bucket{le=\"+Inf\"} %d\nuclaw_model_proxy_upstream_duration_seconds_sum %g\nuclaw_model_proxy_upstream_duration_seconds_count %d\n", metrics.modelProxyUpstreamCount, metrics.modelProxyUpstreamSum, metrics.modelProxyUpstreamCount)
 	return output.String()
 }
 
