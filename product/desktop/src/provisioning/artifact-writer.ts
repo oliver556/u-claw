@@ -376,7 +376,14 @@ export function createProvisioningArtifactWriter({
         await write(backupPath, `${JSON.stringify(backup)}\n`, MAX_BACKUP_BYTES);
         await write(startupPath, `${JSON.stringify(startup)}\n`);
         await write(licensePath, `${JSON.stringify(license)}\n`);
-        await credentialStore.provision({ endpoint: input.endpoint, model: input.model, mapping, issuedToken });
+        await credentialStore.provision({
+          schemaVersion: 1,
+          deviceId: mapping.deviceId,
+          licenseId: mapping.licenseId,
+          endpoint: input.endpoint,
+          model: input.model,
+          deviceToken: issuedToken.secret,
+        });
       } catch {
         await Promise.all(artifactPaths.map((path, index) => restore(path, previous[index] ?? null)));
         await remove(backupPath);
@@ -387,10 +394,12 @@ export function createProvisioningArtifactWriter({
     async finalizeCredential(input) {
       try {
         await credentialStore.provision({
+          schemaVersion: 1,
+          deviceId: input.mapping.deviceId,
+          licenseId: input.mapping.licenseId,
           endpoint: input.endpoint,
           model: input.model,
-          mapping: NewApiDeviceMappingSchema.parse(input.mapping),
-          issuedToken: NewApiIssuedTokenSchema.parse(input.issuedToken),
+          deviceToken: input.issuedToken.secret,
         });
         await credentialStore.loadActive();
       } catch {
@@ -409,8 +418,8 @@ export function createProvisioningArtifactWriter({
         if (startup.deviceId !== binding.deviceId || startup.licenseId !== binding.licenseId
             || license.deviceId !== binding.deviceId || license.licenseId !== binding.licenseId
             || license.usbFingerprint.sha256 !== binding.usbFingerprint
-            || credential.deviceId !== binding.deviceId || credential.userId !== binding.newApiUserId
-            || credential.tokenId !== binding.newApiTokenId) throw new Error("binding");
+            || credential.deviceId !== binding.deviceId
+            || credential.licenseId !== binding.licenseId) throw new Error("binding");
       } catch {
         throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact verification failed.");
       }

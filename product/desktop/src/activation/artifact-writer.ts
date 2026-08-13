@@ -125,7 +125,7 @@ export interface CreateActivationArtifactWriterOptions {
 const artifactPaths = [
   { root: "package", path: "license/.startup-credential.json" },
   { root: "package", path: "license/license.json" },
-  { root: "data", path: ".uclaw/activation-builtin-credential.v1.json" },
+  { root: "data", path: ".uclaw/builtin-model-credential.v1.json" },
   { root: "data", path: ".uclaw/activation-artifact-generation.v1.json" },
 ] as const;
 const journalPath = ".uclaw/activation-transaction.v1.json";
@@ -176,11 +176,6 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
     allowUnpinnedFilesystemForTest: options.allowUnpinnedFilesystemForTest,
     platformForTest: options.platformForTest,
   });
-  if (!credentialStore.provisionActivation || !credentialStore.loadActivation) {
-    throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Builtin activation credential store is unavailable.");
-  }
-  const provisionActivation = credentialStore.provisionActivation.bind(credentialStore);
-  const loadActivation = credentialStore.loadActivation.bind(credentialStore);
   const isNotFound = (error: unknown): boolean => error instanceof FsSafeError && error.code === "not-found";
   const prepare = async (): Promise<void> => {
     try {
@@ -319,7 +314,7 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         const bodies = [...artifactBodies, generationManifest];
         for (let index = 0; index < artifactPaths.length; index += 1) {
           await options.beforeArtifactWrite?.(index);
-          if (index === 2) await provisionActivation(response.builtinCredential);
+          if (index === 2) await credentialStore.provision(response.builtinCredential);
           else await writeAt(artifactPaths[index].root, artifactPaths[index].path, `${JSON.stringify(bodies[index])}\n`);
           await options.afterArtifactWrite?.(index);
         }
@@ -349,7 +344,15 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         const builtinBody = await (await dataSafeRoot).readText(artifactPaths[2].path);
         const startup = StartupCredentialArtifactSchema.parse(JSON.parse(startupBody));
         const license = StartupLicenseArtifactSchema.parse(JSON.parse(licenseBody));
-        const builtin = BuiltinCredentialArtifactSchema.parse(await loadActivation());
+        const loadedBuiltin = await credentialStore.loadActive();
+        const builtin = BuiltinCredentialArtifactSchema.parse({
+          schemaVersion: 1,
+          deviceId: loadedBuiltin.deviceId,
+          licenseId: loadedBuiltin.licenseId,
+          endpoint: loadedBuiltin.endpoint.href,
+          model: loadedBuiltin.model,
+          deviceToken: loadedBuiltin.deviceToken,
+        });
         const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3].path));
         if (manifest.schemaVersion !== 1 || manifest.activationId !== response.activationId
             || manifest.deviceId !== response.deviceId || manifest.licenseId !== response.licenseId

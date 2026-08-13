@@ -53,7 +53,7 @@ const issuedToken: NewApiIssuedToken = {
     policyDigest: mapping.policyDigest, generation: mapping.generation,
     status: "provisioning", createdAt: now, updatedAt: now,
   },
-  secret: "fixture-device-token-secret-material",
+  secret: `uclaw_dt_${"A".repeat(43)}`,
 };
 const startupCredential = {
   schemaVersion: 1 as const,
@@ -170,7 +170,7 @@ describe("provisioning artifact writer", () => {
     };
     const nextToken: NewApiIssuedToken = {
       token: { ...issuedToken.token, id: nextBinding.newApiTokenId, generation: 2 },
-      secret: "fixture-device-token-secret-material-next",
+      secret: `uclaw_dt_${"B".repeat(43)}`,
     };
     await first.writeArtifacts({
       transactionId: "txn_fixture_002", generation: 2,

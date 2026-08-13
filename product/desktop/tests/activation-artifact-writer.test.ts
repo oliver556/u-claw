@@ -2,7 +2,7 @@ import { link, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { ActivationRequest, ActivationResponse } from "@uclaw/shared";
+import type { ActivationResponse } from "@uclaw/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -47,15 +47,16 @@ const material = (suffix = "001"): ActivationResponse => ({
   },
   builtinCredential: {
     schemaVersion: 1, deviceId: `device-${suffix}`, licenseId: `license-${suffix}`,
-    accessToken: "t".repeat(16), expiresAt: "2026-08-14T00:00:00.000Z",
+    endpoint: "https://license.example.test/model-api/", model: "gpt-5.6-sol",
+    deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   },
   status: "active",
 });
 
-const request: ActivationRequest = {
+const request = {
   username: "UCLAW-TEST-USER",
   activationCode: "0123456789ABCDEFGHJKMNPQRS",
-  usbFingerprint: { version: "uclaw-usb-v1", sha256: "d".repeat(64) },
+  usbFingerprint: { version: "uclaw-usb-v1" as const, sha256: "d".repeat(64) },
   clientVersion: "1.0.0",
   idempotencyKey: "activation:test:requested:001",
 };
@@ -92,7 +93,6 @@ const paths = {
   startup: "license/.startup-credential.json",
   license: "license/license.json",
   builtin: ".uclaw/builtin-model-credential.v1.json",
-  activationBuiltin: ".uclaw/activation-builtin-credential.v1.json",
   generation: ".uclaw/activation-artifact-generation.v1.json",
   journal: ".uclaw/activation-transaction.v1.json",
   backup: ".uclaw/activation-artifact-backup.v1.json",
@@ -221,7 +221,8 @@ describe("activation artifact writer", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(join(dataDir, "license", "license.json")))
       .rejects.toMatchObject({ code: "ENOENT" });
-    expect(JSON.parse(await readFile(absolutePath(dataDir, paths.activationBuiltin), "utf8"))).toEqual(response.builtinCredential);
+    expect(JSON.parse(await readFile(absolutePath(dataDir, paths.builtin), "utf8"))).toEqual(response.builtinCredential);
+    expect(await readdir(join(dataDir, ".uclaw"))).not.toContain("activation-builtin-credential.v1.json");
     expect(JSON.parse(await readFile(absolutePath(dataDir, paths.generation), "utf8"))).toMatchObject({
       generation: 7, activationId: response.activationId, deviceId: response.deviceId, licenseId: response.licenseId,
     });
@@ -281,7 +282,7 @@ describe("activation artifact writer", () => {
     const writer = createActivationArtifactWriter({
       ...writerOptions(dataDir),
       afterArtifactWrite: async (index) => {
-        if (index === 2) await writeFile(absolutePath(dataDir, paths.activationBuiltin), "{}\n");
+        if (index === 2) await writeFile(absolutePath(dataDir, paths.builtin), "{}\n");
       },
     });
     await writer.writeServerBoundJournal(journal(response));
@@ -365,7 +366,7 @@ describe("activation artifact writer", () => {
     const mixed = material("002");
     const startupBody = `${JSON.stringify(mixed.startupCredential)}\n`;
     const licenseBody = await readFile(absolutePath(dataDir, paths.license), "utf8");
-    const builtinBody = await readFile(absolutePath(dataDir, paths.activationBuiltin), "utf8");
+    const builtinBody = await readFile(absolutePath(dataDir, paths.builtin), "utf8");
     await writeFile(absolutePath(dataDir, paths.startup), startupBody);
     const manifest = JSON.parse(await readFile(absolutePath(dataDir, paths.generation), "utf8"));
     const { createHash } = await import("node:crypto");
