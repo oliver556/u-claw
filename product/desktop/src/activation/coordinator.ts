@@ -31,6 +31,7 @@ interface CoordinatorWriter {
   writeJournal(journal: ActivationJournal): Promise<void>;
   writeServerBoundJournal(journal: BoundJournal): Promise<void>;
   recoverPendingArtifacts(): Promise<void>;
+  readServerBoundResponse(activationId: string, deviceId: string, licenseId: string): Promise<ActivationResponse>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
   commitArtifacts(activationId: string, generation: number): Promise<void>;
@@ -56,6 +57,13 @@ function requestHash(request: Omit<ActivationRequest, "idempotencyKey">): string
   return createHash("sha256").update(JSON.stringify([
     "uclaw-activation-request-v2", request.activationCode,
     request.usbFingerprint.version, request.usbFingerprint.sha256, request.clientVersion,
+  ])).digest("hex");
+}
+
+function legacyRequestHash(journal: LegacyJournal, activationCode: string): string {
+  return createHash("sha256").update(JSON.stringify([
+    "uclaw-activation-request-v1", journal.username, activationCode,
+    journal.usbFingerprint.version, journal.usbFingerprint.sha256, journal.clientVersion,
   ])).digest("hex");
 }
 
@@ -88,7 +96,7 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
     pendingJournal = null; pendingRequest = null; set("complete"); deps.exit(20); return current;
   };
 
-  const run = async (journal: ActivationJournal, request: ActivationRequest): Promise<ActivationStatus> => {
+  const run = async (journal: RequestedJournal | BoundJournal, request: ActivationRequest): Promise<ActivationStatus> => {
     if (operation) return operationError();
     const active = { token: ++nextToken, controller: new AbortController(), serverBound: journal.stage !== "requested" };
     operation = active;
@@ -150,9 +158,35 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
     async submit(input) {
       if (operation) return operationError();
       if (current.state !== "input" && current.state !== "recovery-required") return set("error", "INVALID_STATE");
-      if (pendingJournal?.schemaVersion === 1) return recovery("RECOVERY_INPUT_REQUIRED");
       const base = { activationCode: input.activationCode, usbFingerprint: deps.usbFingerprint, clientVersion: deps.clientVersion };
-      if (pendingJournal) {
+      if (pendingJournal?.schemaVersion === 1) {
+        const legacy = pendingJournal;
+        if (legacy.requestHash !== legacyRequestHash(legacy, input.activationCode)
+            || legacy.usbFingerprint.version !== deps.usbFingerprint.version
+            || legacy.usbFingerprint.sha256 !== deps.usbFingerprint.sha256
+            || legacy.clientVersion !== deps.clientVersion) return recovery("RECOVERY_INPUT_REQUIRED");
+        if (legacy.stage === "requested") {
+          try { await deps.writer.recoverPendingArtifacts(); }
+          catch { return recovery("RECOVERY_REQUIRED"); }
+          pendingJournal = null;
+        } else if (legacy.stage === "server_bound") {
+          const active = { token: ++nextToken, controller: new AbortController(), serverBound: true };
+          operation = active;
+          try {
+            const response = await deps.writer.readServerBoundResponse(legacy.activationId!, legacy.deviceId!, legacy.licenseId!);
+            const bound: BoundJournal = {
+              schemaVersion: 2, stage: "server_bound", activationId: legacy.activationId!, deviceId: legacy.deviceId!, licenseId: legacy.licenseId!,
+              idempotencyKey: legacy.idempotencyKey, generation: legacy.generation, requestHash: requestHash(base),
+              usbFingerprint: legacy.usbFingerprint, clientVersion: legacy.clientVersion,
+            };
+            await deps.writer.writeServerBoundJournal(bound);
+            pendingJournal = bound;
+            return await finish(bound, response, active.token);
+          } catch { return recovery("RECOVERY_REQUIRED"); }
+          finally { if (operation?.token === active.token) operation = null; }
+        }
+      }
+      if (pendingJournal?.schemaVersion === 2) {
         if (pendingJournal.requestHash !== requestHash(base)
             || pendingJournal.usbFingerprint.version !== deps.usbFingerprint.version
             || pendingJournal.usbFingerprint.sha256 !== deps.usbFingerprint.sha256
@@ -177,7 +211,7 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
     async commit() {
       if (operation) return current;
       if (!pendingJournal || current.state !== "recovery-required") return set("error", "INVALID_STATE");
-      return pendingRequest ? run(pendingJournal, pendingRequest) : recovery("RECOVERY_INPUT_REQUIRED");
+      return pendingRequest && pendingJournal.schemaVersion === 2 ? run(pendingJournal, pendingRequest) : recovery("RECOVERY_INPUT_REQUIRED");
     },
     cancel: interrupt, close: interrupt,
   };
