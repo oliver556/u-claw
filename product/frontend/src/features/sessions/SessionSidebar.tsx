@@ -15,7 +15,7 @@ interface SessionSidebarProps {
   hasMore?: boolean;
   onSelect(sessionId: string): void;
   onCreate(): void;
-  onRename(session: SessionSummary): void;
+  onRename(session: SessionSummary, title: string): Promise<void>;
   onRemove(session: SessionSummary): void;
   onLoadMore(): void;
   onRetry(): void;
@@ -44,11 +44,39 @@ export function SessionSidebar({
   const [activeGroupId, setActiveGroupId] = useState<string>();
   const [openSessionMenu, setOpenSessionMenu] = useState<string>();
   const [openGroupMenu, setOpenGroupMenu] = useState<string>();
+  const [renameSession, setRenameSession] = useState<SessionSummary>();
+  const [sessionName, setSessionName] = useState("");
+  const [renameError, setRenameError] = useState<string>();
+  const [renamingSession, setRenamingSession] = useState(false);
   const [groupDialog, setGroupDialog] = useState<{ mode: "create" } | { mode: "rename"; group: SessionGroup }>();
   const [groupName, setGroupName] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (searchOpen) searchRef.current?.focus(); }, [searchOpen]);
+  useEffect(() => {
+    if (openSessionMenu === undefined && openGroupMenu === undefined) return;
+    const closeOnOutsideInteraction = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('.session-popover, [data-session-menu-trigger="true"]')) return;
+      setOpenSessionMenu(undefined);
+      setOpenGroupMenu(undefined);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpenSessionMenu(undefined);
+      setOpenGroupMenu(undefined);
+    };
+    document.addEventListener("mousedown", closeOnOutsideInteraction);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideInteraction);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openGroupMenu, openSessionMenu]);
+  useEffect(() => {
+    setOpenSessionMenu(undefined);
+    setOpenGroupMenu(undefined);
+  }, [activeSessionId]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   const sortedSessions = useMemo(() => [...sessions].sort((left, right) => Number(right.pinned) - Number(left.pinned)
@@ -58,6 +86,33 @@ export function SessionSidebar({
   const activeGroup = groups.find((group) => group.id === activeGroupId);
   const groupOptions = [{ value: "", label: "未分组" }, ...groups.map((group) => ({ value: group.id, label: group.name }))];
   const closeMenus = () => { setOpenSessionMenu(undefined); setOpenGroupMenu(undefined); };
+  const openRenameDialog = (session: SessionSummary) => {
+    setRenameSession(session);
+    setSessionName(session.title);
+    setRenameError(undefined);
+    closeMenus();
+  };
+  const closeRenameDialog = () => {
+    if (renamingSession) return;
+    setRenameSession(undefined);
+    setSessionName("");
+    setRenameError(undefined);
+  };
+  const submitRenameDialog = async () => {
+    const title = sessionName.trim();
+    if (!renameSession || title === "" || title === renameSession.title || renamingSession) return;
+    setRenamingSession(true);
+    setRenameError(undefined);
+    try {
+      await onRename(renameSession, title);
+      setRenameSession(undefined);
+      setSessionName("");
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : "重命名会话失败");
+    } finally {
+      setRenamingSession(false);
+    }
+  };
   const closeGroupDialog = () => { setGroupDialog(undefined); setGroupName(""); };
   const submitGroupDialog = () => {
     const name = groupName.trim();
@@ -68,17 +123,17 @@ export function SessionSidebar({
   };
   const closeSearch = () => { setSearchOpen(false); setQuery(""); };
 
-  const sessionRow = (session: SessionSummary) => <div key={session.id} className={`session-row${activeSessionId === session.id ? " active" : ""}`}>
+  const sessionRow = (session: SessionSummary) => <div key={session.id} className={`session-row${activeSessionId === session.id ? " active" : ""}`} onContextMenu={(event) => { event.preventDefault(); setOpenGroupMenu(undefined); setOpenSessionMenu(session.id); }}>
     <button type="button" aria-label={`${session.title}，${session.lastMessagePreview ?? "暂无消息"}`} onClick={() => { closeMenus(); onSelect(session.id); }}>
       <strong>{session.title}</strong>
       <span>{session.lastMessagePreview ?? "暂无消息"}</span>
       <time>{new Date(session.updatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time>
     </button>
-    <button className="session-more" type="button" aria-label={`会话操作 ${session.title}`} aria-expanded={openSessionMenu === session.id} onClick={() => { setOpenGroupMenu(undefined); setOpenSessionMenu((current) => current === session.id ? undefined : session.id); }}><MoreHorizontal /></button>
+    <button className="session-more" data-session-menu-trigger="true" type="button" aria-label={`会话操作 ${session.title}`} aria-expanded={openSessionMenu === session.id} onClick={() => { setOpenGroupMenu(undefined); setOpenSessionMenu((current) => current === session.id ? undefined : session.id); }}><MoreHorizontal /></button>
     {openSessionMenu === session.id ? <div className="session-popover" role="menu" aria-label={`${session.title} 会话菜单`}>
       <button type="button" role="menuitem" aria-label={session.pinned ? "取消固定会话" : "固定会话"} onClick={() => { onTogglePinned(session, !session.pinned); closeMenus(); }}>{session.pinned ? <PinOff /> : <Pin />}{session.pinned ? "取消固定" : "固定"}</button>
       <label><Folder /><span>移到分组</span><select aria-label={`设置 ${session.title} 的分组`} value={session.groupId ?? ""} onChange={(event) => { onAssignGroup(session, event.target.value === "" ? null : event.target.value); closeMenus(); }}>{groupOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-      <button type="button" role="menuitem" aria-label="重命名会话" onClick={() => { onRename(session); closeMenus(); }}><Pencil />重命名</button>
+      <button type="button" role="menuitem" aria-label="重命名会话" onClick={() => openRenameDialog(session)}><Pencil />重命名</button>
       {session.id === "agent:main:main" ? null : <Popconfirm title="删除此会话？" description="删除后无法恢复。" okText="删除" cancelText="取消" onConfirm={() => { onRemove(session); closeMenus(); }}><button className="danger" type="button" role="menuitem" aria-label="删除会话"><Trash2 />删除</button></Popconfirm>}
     </div> : null}
   </div>;
@@ -107,13 +162,17 @@ export function SessionSidebar({
       {state === "ready" && sessions.length === 0 && view === "recent" ? <div className="session-state"><span>还没有会话</span><button type="button" onClick={onCreate}><Plus />新建会话</button></div> : null}
       {state === "ready" && searchOpen && visibleSessions.length === 0 ? <div className="session-state"><span>没有匹配的会话</span></div> : null}
       {state === "ready" && (view === "recent" || searchOpen) ? recentSections.map((section) => section.items.length > 0 ? <section className="session-section" key={section.id} aria-label={section.label}><p className="panel-label">{section.label}<span>{section.items.length}</span></p>{section.items.map(sessionRow)}</section> : null) : null}
-      {state === "ready" && view === "groups" && !searchOpen && !activeGroup ? <section className="session-groups" aria-label="我的分组"><div className="session-group-heading"><p className="panel-label">我的分组<span>{groups.length}</span></p><Tooltip title="新建分组"><button type="button" aria-label="新建分组" onClick={() => { setGroupName(""); setGroupDialog({ mode: "create" }); }}><FolderPlus /></button></Tooltip></div>{groups.length === 0 ? <div className="session-state"><span>还没有分组</span></div> : groups.map((group) => <div className="session-group-row" key={group.id}><button type="button" aria-label={`打开分组 ${group.name}`} onClick={() => { setActiveGroupId(group.id); closeMenus(); }}><Folder /><span>{group.name}</span><small>{sessions.filter((session) => session.groupId === group.id).length}</small></button><button type="button" aria-label={`分组操作 ${group.name}`} onClick={() => setOpenGroupMenu((current) => current === group.id ? undefined : group.id)}><MoreHorizontal /></button>{openGroupMenu === group.id ? <div className="session-popover" role="menu"><button type="button" aria-label={`重命名分组 ${group.name}`} onClick={() => { setGroupName(group.name); setGroupDialog({ mode: "rename", group }); closeMenus(); }}><Pencil />重命名</button><Popconfirm title="删除此分组？" description="组内会话会移到未分组，不会被删除。" okText="删除分组" cancelText="取消" onConfirm={() => { onRemoveGroup(group); closeMenus(); }}><button className="danger" type="button" aria-label={`删除分组 ${group.name}`}><Trash2 />删除</button></Popconfirm></div> : null}</div>)}</section> : null}
+      {state === "ready" && view === "groups" && !searchOpen && !activeGroup ? <section className="session-groups" aria-label="我的分组"><div className="session-group-heading"><p className="panel-label">我的分组<span>{groups.length}</span></p><Tooltip title="新建分组"><button type="button" aria-label="新建分组" onClick={() => { setGroupName(""); setGroupDialog({ mode: "create" }); }}><FolderPlus /></button></Tooltip></div>{groups.length === 0 ? <div className="session-state"><span>还没有分组</span></div> : groups.map((group) => <div className="session-group-row" key={group.id}><button type="button" aria-label={`打开分组 ${group.name}`} onClick={() => { setActiveGroupId(group.id); closeMenus(); }}><Folder /><span>{group.name}</span><small>{sessions.filter((session) => session.groupId === group.id).length}</small></button><button type="button" data-session-menu-trigger="true" aria-label={`分组操作 ${group.name}`} onClick={() => setOpenGroupMenu((current) => current === group.id ? undefined : group.id)}><MoreHorizontal /></button>{openGroupMenu === group.id ? <div className="session-popover" role="menu"><button type="button" aria-label={`重命名分组 ${group.name}`} onClick={() => { setGroupName(group.name); setGroupDialog({ mode: "rename", group }); closeMenus(); }}><Pencil />重命名</button><Popconfirm title="删除此分组？" description="组内会话会移到未分组，不会被删除。" okText="删除分组" cancelText="取消" onConfirm={() => { onRemoveGroup(group); closeMenus(); }}><button className="danger" type="button" aria-label={`删除分组 ${group.name}`}><Trash2 />删除</button></Popconfirm></div> : null}</div>)}</section> : null}
       {state === "ready" && view === "groups" && !searchOpen && activeGroup ? <section className="session-section" aria-label={activeGroup.name}><button className="session-group-back" type="button" aria-label="返回分组列表" onClick={() => setActiveGroupId(undefined)}><ChevronLeft />{activeGroup.name}</button>{displayedSessions.length > 0 ? displayedSessions.map(sessionRow) : <div className="session-state"><span>这个分组还没有会话</span></div>}</section> : null}
       {state === "ready" && hasMore ? <button className="session-load-more" type="button" onClick={onLoadMore}><MoreHorizontal />加载更多</button> : null}
     </div>
     <Tooltip title="收起会话栏"><button className="panel-edge-close" type="button" aria-label="收起会话栏" onClick={onClose}><PanelLeft /></button></Tooltip>
     <Modal title={groupDialog?.mode === "rename" ? "重命名分组" : "新建分组"} open={groupDialog !== undefined} onCancel={closeGroupDialog} onOk={submitGroupDialog} okButtonProps={{ disabled: groupName.trim() === "" }} okText={groupDialog?.mode === "rename" ? "保存分组名称" : "创建分组"} cancelText="取消" afterOpenChange={(open) => open && document.querySelector<HTMLInputElement>('input[aria-label="分组名称"]')?.focus()}>
       <Input aria-label="分组名称" value={groupName} maxLength={80} onChange={(event) => setGroupName(event.target.value)} onPressEnter={submitGroupDialog} />
+    </Modal>
+    <Modal title="重命名会话" open={renameSession !== undefined} onCancel={closeRenameDialog} onOk={() => void submitRenameDialog()} confirmLoading={renamingSession} okButtonProps={{ disabled: sessionName.trim() === "" || sessionName.trim() === renameSession?.title }} okText="保存会话名称" cancelText="取消" afterOpenChange={(open) => open && document.querySelector<HTMLInputElement>('input[aria-label="会话名称"]')?.focus()}>
+      <Input aria-label="会话名称" value={sessionName} maxLength={80} status={renameError ? "error" : undefined} onChange={(event) => setSessionName(event.target.value)} onPressEnter={() => void submitRenameDialog()} />
+      {renameError ? <div className="session-rename-error" role="alert">{renameError}</div> : null}
     </Modal>
   </aside>;
 }
