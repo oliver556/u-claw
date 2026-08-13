@@ -15,6 +15,17 @@ describe("activation-only IPC", () => {
     await expect(invoke({ username: "alice", activationCode: "0".repeat(26) })).resolves.toEqual({ state: "error", code: "ACTIVATION_FAILED" });
   });
 
+  it("treats activation.commit as a read-only status query", async () => {
+    const handlers = new Map<string, Function>(); const sender = { mainFrame: {} };
+    const status = { state: "writing" as const };
+    const coordinator = { preflight: vi.fn(), submit: vi.fn(), status: vi.fn(() => status), commit: vi.fn(), cancel: vi.fn(), close: vi.fn() };
+    registerActivationIpc({ ipcMain: { handle: (c: string, h: Function) => handlers.set(c, h), removeHandler: vi.fn() } as never, authorizedWebContents: sender as never, coordinator: coordinator as never });
+
+    await expect(handlers.get("activation.commit")!({ sender, senderFrame: sender.mainFrame }, undefined)).resolves.toEqual(status);
+    expect(coordinator.status).toHaveBeenCalledOnce();
+    expect(coordinator.commit).not.toHaveBeenCalled();
+  });
+
   it("rolls back partial registration and closes only after coordinator close", async () => {
     const registered = new Map<string, Function>();
     expect(() => registerActivationIpc({ ipcMain: { handle: (c: string, h: Function) => { if (c === "activation.commit") throw new Error("duplicate"); registered.set(c, h); }, removeHandler: (c: string) => registered.delete(c) } as never, authorizedWebContents: { mainFrame: {} } as never, coordinator: {} as never, closeWindow: vi.fn() })).toThrow("duplicate");

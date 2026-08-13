@@ -164,7 +164,7 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
       return run(journal, request);
     },
     async commit() {
-      if (operation) return operationError();
+      if (operation) return current;
       if (!pendingJournal || current.state !== "recovery-required") return set("error", "INVALID_STATE");
       return pendingRequest ? run(pendingJournal, pendingRequest) : recovery("RECOVERY_INPUT_REQUIRED");
     },
