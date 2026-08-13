@@ -415,6 +415,38 @@ func TestProductionGatewayStartupAndReadinessAreExecutable(t *testing.T) {
 	}
 }
 
+func TestActivationFailureRunbookMatchesGatewayTopologyAndTimeouts(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "docs", "runbooks", "激活服务故障处理.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runbook := string(contents)
+	boundary := composeSection(t, runbook, "## 范围与安全边界\n", "\n## 指标与告警")
+	for _, required := range []string{
+		"`caddy-edge:443`",
+		"`public-gateway:8443`",
+		"`activation-1:8080`",
+		"`activation-2:8080`",
+		"edge_private",
+		"mTLS",
+		"model proxy handler 60s",
+		"OpenResty `proxy_read_timeout` 70s",
+		"Go server `WriteTimeout` 75s",
+		"`/v1/*`",
+		"`/model-api/*`",
+		"`/health/ready`",
+	} {
+		if !strings.Contains(boundary, required) {
+			t.Errorf("runbook gateway boundary missing %q", required)
+		}
+	}
+	for _, obsolete := range []string{"`public-gateway:443`", "请求/响应 10s"} {
+		if strings.Contains(boundary, obsolete) {
+			t.Errorf("runbook retains obsolete gateway statement %q", obsolete)
+		}
+	}
+}
+
 func composeSection(t *testing.T, source, start, end string) string {
 	t.Helper()
 	startAt := strings.Index(source, start)
