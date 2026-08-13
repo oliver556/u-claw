@@ -24,8 +24,8 @@ describe("CapabilitiesView public navigation", () => {
 
     render(<CapabilitiesView />);
 
-    expect(await screen.findByText("尚未安装技能")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "技能" })).toBeVisible();
+    expect(await screen.findByText("尚未安装 Skill")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Skill" })).toBeVisible();
     expect(screen.queryByRole("tablist", { name: "能力类型" })).not.toBeInTheDocument();
     for (const label of ["模型", "用量", "插件", "MCP", "运行状态", "Curator", "Proposals", "免费目录"]) {
       expect(screen.queryByRole("tab", { name: label })).not.toBeInTheDocument();

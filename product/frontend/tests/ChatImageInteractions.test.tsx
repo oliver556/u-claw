@@ -57,8 +57,10 @@ afterEach(() => {
 
 describe("chat image preview", () => {
   it("uses a stable dark fullscreen backdrop in every app theme", () => {
-    const css = readFileSync(`${process.cwd()}/frontend/src/theme/global.css`, "utf8");
-    expect(css).toMatch(/\.image-preview\s*\{[^}]*background:\s*rgba\(8,\s*10,\s*12,\s*\.94\)/u);
+    const css = readFileSync(`${process.cwd()}/src/theme/global.css`, "utf8");
+    const tokens = readFileSync(`${process.cwd()}/src/theme/tokens.ts`, "utf8");
+    expect(css).toMatch(/\.image-preview\s*\{[^}]*background:\s*var\(--uclaw-image-preview-backdrop\)/u);
+    expect(tokens.match(/"--uclaw-image-preview-backdrop":\s*"rgba\(8, 10, 12, \.94\)"/gu)).toHaveLength(2);
   });
 
   it("opens fitted, locks scrolling, closes with Escape, and restores focus", async () => {
