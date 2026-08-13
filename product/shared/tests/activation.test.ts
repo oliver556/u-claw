@@ -5,6 +5,7 @@ import {
   ActivationErrorSchema,
   ActivationRequestSchema,
   ActivationResponseSchema,
+  BuiltinCredentialArtifactSchema,
   AdminInventoryGenerateSchema,
   AdminInventoryLocatorSchema,
   AdminMutationResultSchema,
@@ -14,7 +15,6 @@ import {
 } from "../src/index.js";
 
 const request = {
-  username: "UCLAW-00000001",
   activationCode: "0123456789ABCDEFGHJKMNPQRS",
   usbFingerprint: {
     version: "uclaw-usb-v1",
@@ -25,6 +25,28 @@ const request = {
 };
 
 describe("activation API contract", () => {
+	it("accepts activation code without username and rejects extra identity fields", () => {
+		expect(ActivationRequestSchema.parse(request)).toEqual(request);
+		expect(() => ActivationRequestSchema.parse({ ...request, username: "UCLAW-00000001" })).toThrow();
+	});
+
+	it("locks the long-lived builtin device credential fields", () => {
+		const credential = {
+			schemaVersion: 1,
+			deviceId: "dev_fixture_001",
+			licenseId: "lic_fixture_001",
+			endpoint: "https://api.u-claw.org/v1",
+			model: "uclaw-default",
+			deviceToken: `uclaw_dt_${"A".repeat(43)}`,
+		};
+
+		expect(BuiltinCredentialArtifactSchema.parse(credential)).toEqual(credential);
+		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, accessToken: "legacy-token-material" })).toThrow();
+		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, expiresAt: "2027-08-13T00:00:00Z" })).toThrow();
+		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, deviceToken: `uclaw_dt_${"A".repeat(42)}` })).toThrow();
+		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, deviceToken: `uclaw_dt_${"A".repeat(42)}!` })).toThrow();
+	});
+
 	it("keeps admin mutations explicit and redacted", () => {
 		const operation = { operatorId: "operator_fixture", requestId: "request_fixture_001", idempotencyKey: "admin-fixture-001", reason: "support request" };
 		expect(AdminInventoryGenerateSchema.parse({ count: 1, ...operation }).count).toBe(1);
@@ -72,8 +94,9 @@ describe("activation API contract", () => {
         schemaVersion: 1,
         deviceId: "dev_fixture_001",
         licenseId: "lic_fixture_001",
-        accessToken: "fixture-short-lived-token-material",
-        expiresAt: "2026-08-13T01:00:00.000Z",
+        endpoint: "https://api.u-claw.org/v1",
+        model: "uclaw-default",
+        deviceToken: `uclaw_dt_${"A".repeat(43)}`,
       },
       status: "active",
     };

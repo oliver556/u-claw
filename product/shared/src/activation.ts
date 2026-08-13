@@ -18,7 +18,6 @@ export const ActivationCodeSchema = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/u
 export type ActivationCode = z.infer<typeof ActivationCodeSchema>;
 
 export const ActivationRequestSchema = z.object({
-  username: z.string().trim().min(3).max(128),
   activationCode: ActivationCodeSchema,
   usbFingerprint: z.object({
     version: z.literal("uclaw-usb-v1"),
@@ -33,8 +32,9 @@ export const BuiltinCredentialArtifactSchema = z.object({
   schemaVersion: z.literal(1),
   deviceId: IdentifierSchema,
   licenseId: IdentifierSchema,
-  accessToken: z.string().min(16).max(8_192),
-  expiresAt: z.iso.datetime({ offset: true }),
+  endpoint: z.url(),
+  model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u),
+  deviceToken: z.string().regex(/^uclaw_dt_[A-Za-z0-9_-]{43}$/u),
 }).strict();
 export type BuiltinCredentialArtifact = z.infer<typeof BuiltinCredentialArtifactSchema>;
 
