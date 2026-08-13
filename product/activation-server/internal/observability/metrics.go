@@ -64,18 +64,25 @@ type Metrics struct {
 	modelProxyUpstreamBuckets  []uint64
 	modelProxyUpstreamCount    uint64
 	modelProxyUpstreamSum      float64
+	modelProxyFinalizeFailures map[string]uint64
 }
 
 func NewMetrics() *Metrics {
 	return &Metrics{
-		activationRequests:        make(map[string]uint64),
-		activationBuckets:         make([]uint64, len(activationDurationBuckets)),
-		dbFailures:                make(map[string]uint64),
-		signingFailures:           make(map[string]uint64),
-		lifecycleOperations:       make(map[string]uint64),
-		modelProxyUpstream:        make(map[string]uint64),
-		modelProxyUpstreamBuckets: make([]uint64, len(activationDurationBuckets)),
+		activationRequests:         make(map[string]uint64),
+		activationBuckets:          make([]uint64, len(activationDurationBuckets)),
+		dbFailures:                 make(map[string]uint64),
+		signingFailures:            make(map[string]uint64),
+		lifecycleOperations:        make(map[string]uint64),
+		modelProxyUpstream:         make(map[string]uint64),
+		modelProxyUpstreamBuckets:  make([]uint64, len(activationDurationBuckets)),
+		modelProxyFinalizeFailures: make(map[string]uint64),
 	}
+}
+func (metrics *Metrics) RecordModelProxyFinalizeFailure(operation string) {
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	metrics.modelProxyFinalizeFailures[boundedValue(operation, []string{"admission", "complete", "audit"})]++
 }
 
 func (metrics *Metrics) RecordModelProxyAuthRejected() {
@@ -219,6 +226,7 @@ func (metrics *Metrics) render() string {
 	writeCounter(&output, "uclaw_model_proxy_auth_rejected_total", "Rejected model proxy authentication attempts.", metrics.modelProxyAuthRejected)
 	writeCounter(&output, "uclaw_model_proxy_admission_limited_total", "Rate or concurrency limited model proxy requests.", metrics.modelProxyAdmissionLimited)
 	writeMap(&output, "uclaw_model_proxy_upstream_total", "Model proxy upstream requests by bounded outcome.", metrics.modelProxyUpstream, []string{"outcome"})
+	writeMap(&output, "uclaw_model_proxy_finalize_failures_total", "Model proxy finalize failures.", metrics.modelProxyFinalizeFailures, []string{"operation"})
 	output.WriteString("# HELP uclaw_model_proxy_upstream_duration_seconds Model proxy upstream latency.\n# TYPE uclaw_model_proxy_upstream_duration_seconds histogram\n")
 	for i, b := range activationDurationBuckets {
 		fmt.Fprintf(&output, "uclaw_model_proxy_upstream_duration_seconds_bucket{le=\"%g\"} %d\n", b, metrics.modelProxyUpstreamBuckets[i])

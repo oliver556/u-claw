@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -82,7 +83,7 @@ func TestModelProxyRepositoryPostgreSQLAuthorizationAdmissionAndAudit(t *testing
 		wg.Add(1)
 		go func(i int, r *ModelProxyRepository) {
 			defer wg.Done()
-			errs <- r.Admit(ctx, ids[3], []string{"60000000-0000-4000-8000-000000000001", "60000000-0000-4000-8000-000000000002"}[i], 60, 1)
+			errs <- r.Admit(ctx, ids[3], []string{"60000000-0000-4000-8000-000000000001", "60000000-0000-4000-8000-000000000002"}[i], 60, 1, 75*time.Second)
 		}(i, r)
 	}
 	wg.Wait()
@@ -107,29 +108,36 @@ func TestModelProxyRepositoryPostgreSQLAuthorizationAdmissionAndAudit(t *testing
 	if err = r1.Complete(ctx, requestID); err != nil {
 		t.Fatal(err)
 	}
-	if err = r2.Admit(ctx, ids[3], "60000000-0000-4000-8000-000000000003", 60, 1); err != nil {
+	if err = r2.Admit(ctx, ids[3], "60000000-0000-4000-8000-000000000003", 60, 1, 75*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err = r2.Complete(ctx, "60000000-0000-4000-8000-000000000003"); err != nil {
 		t.Fatal(err)
 	}
-	if err = r1.Admit(ctx, ids[3], "60000000-0000-4000-8000-000000000004", 2, 10); !errors.Is(err, modelproxy.ErrAdmissionLimited) {
+	if err = r1.Admit(ctx, ids[3], "60000000-0000-4000-8000-000000000004", 2, 10, 75*time.Second); !errors.Is(err, modelproxy.ErrAdmissionLimited) {
 		t.Fatalf("completed requests did not count toward RPM: %v", err)
 	}
 	if _, err = pool.Exec(ctx, `DELETE FROM model_proxy_admissions WHERE device_token_id=$1`, ids[3]); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = pool.Exec(ctx, `INSERT INTO model_proxy_admissions(request_id,device_token_id,started_at,lease_expires_at,completed_at) VALUES('60000000-0000-4000-8000-000000000007',$1,clock_timestamp()-interval '11 minutes',clock_timestamp()-interval '10 minutes',clock_timestamp()-interval '10 minutes')`, ids[3]); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = pool.Exec(ctx, `INSERT INTO model_proxy_admissions(request_id,device_token_id,started_at,lease_expires_at) VALUES('60000000-0000-4000-8000-000000000005',$1,clock_timestamp()-interval '2 minutes',clock_timestamp()-interval '1 minute')`, ids[3]); err != nil {
 		t.Fatal(err)
 	}
-	if err = r2.Admit(ctx, ids[3], "60000000-0000-4000-8000-000000000006", 1, 1); err != nil {
+	if err = r2.Admit(ctx, ids[3], "60000000-0000-4000-8000-000000000006", 1, 1, 75*time.Second); err != nil {
 		t.Fatalf("expired lease blocked admission: %v", err)
+	}
+	var retained int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM model_proxy_admissions WHERE request_id='60000000-0000-4000-8000-000000000007'`).Scan(&retained); err != nil || retained != 0 {
+		t.Fatalf("retained=%d err=%v", retained, err)
 	}
 	var expired int
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM model_proxy_admissions WHERE request_id='60000000-0000-4000-8000-000000000005'`).Scan(&expired); err != nil || expired != 0 {
 		t.Fatalf("expired=%d err=%v", expired, err)
 	}
-	if err = r1.Audit(ctx, modelproxy.Audit{RequestID: "req-pg-test", TokenID: ids[3], InventoryID: ids[0], DeviceID: ids[1], LicenseID: ids[2], Route: "chat", Outcome: "succeeded", Status: 200}); err != nil {
+	if err = r1.Audit(ctx, modelproxy.Audit{RequestID: "req-pg-test", TokenID: ids[3], InventoryID: ids[0], DeviceID: ids[1], LicenseID: ids[2], Route: "chat", Outcome: "succeeded"}); err != nil {
 		t.Fatal(err)
 	}
 	var count int

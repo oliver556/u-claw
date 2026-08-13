@@ -38,6 +38,16 @@ func TestSecureDialRejectsPrivateIPv4IPv6AndMixedAnswers(t *testing.T) {
 		}
 	}
 }
+func TestPublicIPRejectsIPv6SpecialPrefixes(t *testing.T) {
+	for _, raw := range []string{"::", "::1", "::ffff:127.0.0.1", "64:ff9b::1", "64:ff9b:1::1", "100::1", "2001::1", "2001:db8::1", "2002::1", "fc00::1", "fe80::1", "ff00::1"} {
+		if publicIP(net.ParseIP(raw)) {
+			t.Fatalf("accepted %s", raw)
+		}
+	}
+	if !publicIP(net.ParseIP("2001:4860:4860::8888")) {
+		t.Fatal("public IPv6 rejected")
+	}
+}
 func TestValidateBaseURLRequiresExactAllowedPublicHostname(t *testing.T) {
 	for _, raw := range []string{"http://api.example.test/v1", "https://localhost/v1", "https://127.0.0.1/v1", "https://evil.example.test/v1", "https://api.example.test@evil.test/v1"} {
 		if _, err := ValidateBaseURL(raw, []string{"api.example.test"}); !errors.Is(err, ErrUnsafeUpstream) {

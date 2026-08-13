@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,13 +21,81 @@ type fakeProxyService struct {
 	err           error
 	bearer, model string
 	completed     bool
+	ctxDeadline   bool
 }
 
-func (s *fakeProxyService) Authorize(_ context.Context, bearer, model, requestID string) (modelproxy.Grant, error) {
+func (s *fakeProxyService) Authorize(ctx context.Context, bearer, model, requestID string) (modelproxy.Grant, error) {
+	_, s.ctxDeadline = ctx.Deadline()
 	s.bearer = bearer
 	s.model = model
 	s.grant.RequestID = requestID
 	return s.grant, s.err
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("entropy failed") }
+
+func TestModelProxyHandlerRequestIDFailureStopsBeforeDependencies(t *testing.T) {
+	service := &fakeProxyService{grant: validGrant(t)}
+	called := false
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { called = true; return nil, errors.New("called") })}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, RequestIDs: failingReader{}})
+	req := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != 503 || !strings.Contains(res.Body.String(), "REQUEST_ID_UNAVAILABLE") || service.bearer != "" || called {
+		t.Fatalf("status=%d bearer=%q called=%v body=%s", res.Code, service.bearer, called, res.Body.String())
+	}
+}
+
+func TestModelProxyHandlerRejectsRepeatedRequestIDEntropy(t *testing.T) {
+	service := &fakeProxyService{err: modelproxy.ErrAuthenticationFailed}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: &http.Client{}, RequestIDs: bytes.NewReader(make([]byte, 32))})
+	for index := 0; index < 2; index++ {
+		request := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, request)
+		if index == 1 && (response.Code != 503 || !strings.Contains(response.Body.String(), "REQUEST_ID_UNAVAILABLE")) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestModelProxyHandlerCreatesDeadlineBeforeService(t *testing.T) {
+	service := &fakeProxyService{grant: validGrant(t), err: modelproxy.ErrAuthenticationFailed}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: &http.Client{}, Timeout: 20 * time.Millisecond})
+	req := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if !service.ctxDeadline {
+		t.Fatal("service context missing overall deadline")
+	}
+}
+
+func TestUpstreamDuplicateJSONRejected(t *testing.T) {
+	for _, body := range []string{`{"object":"list","object":"list","data":[]}`, `{"object":"list","data":[{"id":"allowed","id":"other","object":"model","created":1,"owned_by":"owner"}]}`} {
+		if rejectUpstreamDuplicateKeys([]byte(body)) == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+}
+
+func TestModelProxyHandlerMapsDuplicateUpstreamJSONTo502(t *testing.T) {
+	service := &fakeProxyService{grant: validGrant(t)}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"object":"list","data":[],"data":[]}`))}, nil
+	})}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}})
+	request := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != 502 {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
 }
 func (s *fakeProxyService) Complete(_ context.Context, _ modelproxy.Grant, _, _ string, _ int, _ *modelproxy.Usage) {
 	s.completed = true
@@ -52,8 +121,10 @@ func TestModelProxyHandlerRelaysStrictChatAndSanitizesHeaders(t *testing.T) {
 	service := &fakeProxyService{grant: validGrant(t)}
 	wantAuthorization := "Bearer " + string(service.grant.APIKey)
 	var upstream *http.Request
+	var upstreamAuthorization string
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		upstream = r
+		upstreamAuthorization = r.Header.Get("Authorization")
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}, "Set-Cookie": []string{"bad=1"}}, Body: io.NopCloser(strings.NewReader(`{"id":"chatcmpl_fixture","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))}, nil
 	})}
 	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}, RequestIDs: bytes.NewReader(make([]byte, 16))})
@@ -67,7 +138,7 @@ func TestModelProxyHandlerRelaysStrictChatAndSanitizesHeaders(t *testing.T) {
 	if res.Code != 200 {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
 	}
-	if upstream.Header.Get("Authorization") != wantAuthorization || upstream.Header.Get("Cookie") != "" || upstream.Header.Get("X-Forwarded-For") != "" {
+	if upstreamAuthorization != wantAuthorization || upstream.Header.Get("Authorization") != "" || upstream.Header.Get("Cookie") != "" || upstream.Header.Get("X-Forwarded-For") != "" {
 		t.Fatalf("headers=%v", upstream.Header)
 	}
 	if res.Header().Get("Set-Cookie") != "" {
@@ -153,6 +224,26 @@ func TestModelProxyHandlerAuthenticatesBeforeReadingBody(t *testing.T) {
 	}
 }
 
+func TestModelsAuthenticatesBeforeChunkedBodyCheck(t *testing.T) {
+	service := &fakeProxyService{grant: validGrant(t)}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: &http.Client{}})
+	request := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", strings.NewReader("x"))
+	request.ContentLength = -1
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != 401 {
+		t.Fatalf("unauth status=%d", response.Code)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/model-api/v1/models", strings.NewReader("x"))
+	request.ContentLength = -1
+	request.Header.Set("Authorization", "Bearer token")
+	response = httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != 400 {
+		t.Fatalf("auth status=%d", response.Code)
+	}
+}
+
 func TestUpstreamMinimalValidationRejectsMissingAndWrongTypes(t *testing.T) {
 	tests := []struct{ route, body string }{{"models", `{"object":"list"}`}, {"models", `{"object":"list","data":[{"id":3,"object":"model","created":1,"owned_by":"owner"}]}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[]}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":[]}}]}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":"1","completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{}}`}}
 	for _, test := range tests {
@@ -164,8 +255,9 @@ func TestUpstreamMinimalValidationRejectsMissingAndWrongTypes(t *testing.T) {
 
 type fakeProxyObserver struct{ outcomes []string }
 
-func (*fakeProxyObserver) RecordModelProxyAuthRejected()     {}
-func (*fakeProxyObserver) RecordModelProxyAdmissionLimited() {}
+func (*fakeProxyObserver) RecordModelProxyAuthRejected()          {}
+func (*fakeProxyObserver) RecordModelProxyAdmissionLimited()      {}
+func (*fakeProxyObserver) RecordModelProxyFinalizeFailure(string) {}
 func (o *fakeProxyObserver) RecordModelProxyUpstream(outcome string, _ time.Duration) {
 	o.outcomes = append(o.outcomes, outcome)
 }
