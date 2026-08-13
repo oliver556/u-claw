@@ -4,6 +4,13 @@ import { useEffect, useMemo } from "react";
 import { AppProviders } from "./providers";
 import { createRendererClient } from "./renderer-client";
 import { WorkspaceShell } from "../layout/WorkspaceShell";
+import { ActivationFlow } from "../features/activation/ActivationFlow";
+import { AppThemeProvider } from "../theme/ThemeProvider";
+
+export function RootApp() {
+  if (window.uclawActivation) return <AppThemeProvider><div className="theme-root"><ActivationFlow api={window.uclawActivation} /></div></AppThemeProvider>;
+  return <App />;
+}
 
 export function App({ client }: { client?: UClawClient }) {
   const preloadBridge = window.uclaw?.client;
