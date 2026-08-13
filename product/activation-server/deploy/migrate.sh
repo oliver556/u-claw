@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+# Rollback server/admin binaries may reuse this current migrator or skip migration.
+# Do not run an older migrator against a schema with newer ledger entries.
+
 : "${ACTIVATION_DATABASE_URL:?ACTIVATION_DATABASE_URL is required}"
 : "${ACTIVATION_MIGRATION_ROLE:?ACTIVATION_MIGRATION_ROLE is required}"
 : "${ACTIVATION_MIGRATION_PASSWORD:?ACTIVATION_MIGRATION_PASSWORD is required}"

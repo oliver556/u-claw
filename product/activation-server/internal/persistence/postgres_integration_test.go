@@ -181,7 +181,8 @@ func TestDeviceAccessProxyMigrationContainsLongLivedTokenAndProxySchema(t *testi
 		"CREATE TABLE device_access_tokens",
 		"device_token_id UUID PRIMARY KEY",
 		"inventory_id UUID NOT NULL REFERENCES activation_inventory(id)",
-		"device_id UUID NOT NULL REFERENCES devices(device_id)",
+		"ADD CONSTRAINT devices_device_inventory_unique UNIQUE (device_id, inventory_id)",
+		"FOREIGN KEY (device_id, inventory_id) REFERENCES devices(device_id, inventory_id)",
 		"token_digest BYTEA UNIQUE NOT NULL CHECK (octet_length(token_digest) = 32)",
 		"status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'revoked'))",
 		"CHECK ((status = 'revoked') = (revoked_at IS NOT NULL))",
@@ -195,7 +196,9 @@ func TestDeviceAccessProxyMigrationContainsLongLivedTokenAndProxySchema(t *testi
 		"CHECK ((api_key_envelope IS NULL) = (api_key_version IS NULL))",
 		"CHECK (requests_per_minute BETWEEN 1 AND 6000)",
 		"CHECK (concurrent_requests BETWEEN 1 AND 100)",
-		"balance_setup_status <> 'configured'",
+		"array_position(allowed_models, NULL) IS NULL",
+		"array_position(allowed_models, '') IS NULL",
+		"COALESCE(default_model = ANY(allowed_models), FALSE)",
 		"api_key_envelope IS NULL\n                AND api_key_version IS NULL\n                AND base_url IS NULL\n                AND default_model IS NULL\n                AND cardinality(allowed_models) = 0",
 		") NOT VALID",
 		"CREATE TABLE model_proxy_admissions",
@@ -223,6 +226,24 @@ func TestDeviceAccessProxyMigrationContainsLongLivedTokenAndProxySchema(t *testi
 	}
 	if string(contents) != sql {
 		t.Fatal("migrations/004_device_access_proxy.sql drifted from compiled migration")
+	}
+}
+
+func TestProductionComposeMountsCurrentMigrationSet(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "..", "deploy", "compose.production.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(contents)
+	for _, fragment := range []string{
+		"source: migrate_script",
+		"source: migration_004",
+		"target: /migrations/004_device_access_proxy.sql",
+		"migration_004:\n    file: ../migrations/004_device_access_proxy.sql",
+	} {
+		if !strings.Contains(compose, fragment) {
+			t.Errorf("production compose missing current migration config %q", fragment)
+		}
 	}
 }
 
@@ -360,6 +381,7 @@ func assertDeviceAccessProxySchema(t *testing.T, ctx context.Context, pool *pgxp
 	statements := []string{
 		`INSERT INTO activation_inventory (id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at) VALUES ('` + inventoryID + `','proxy-41','Proxy 41',decode(repeat('41',32),'hex'),'active','configured',now())`,
 		`INSERT INTO activation_inventory (id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at) VALUES ('00000000-0000-0000-0000-000000000042','proxy-42','Proxy 42',decode(repeat('42',32),'hex'),'prepared','pending',now())`,
+		`INSERT INTO activation_inventory (id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at) VALUES ('00000000-0000-0000-0000-000000000043','proxy-43','Proxy 43',decode(repeat('47',32),'hex'),'prepared','pending',now())`,
 		`INSERT INTO devices (device_id,inventory_id,fingerprint_version,fingerprint_sha256,status,created_at,updated_at) VALUES ('` + deviceID + `','` + inventoryID + `','uclaw-usb-v1',decode(repeat('41',32),'hex'),'active',now(),now())`,
 		`INSERT INTO licenses (license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,created_at,updated_at) VALUES ('` + licenseID + `','` + deviceID + `','active',1,'proxy-key',decode(repeat('41',16),'hex'),decode(repeat('42',32),'hex'),now(),now()+interval '30 days',now(),now())`,
 		`INSERT INTO device_access_tokens (device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) VALUES ('60000000-0000-0000-0000-000000000041','` + inventoryID + `','` + deviceID + `','` + licenseID + `',decode(repeat('43',32),'hex'),'active',now(),now(),now())`,
@@ -380,16 +402,81 @@ func assertDeviceAccessProxySchema(t *testing.T, ctx context.Context, pool *pgxp
 		{"short token digest", `INSERT INTO device_access_tokens (device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) VALUES ('60000000-0000-0000-0000-000000000042','` + inventoryID + `','` + deviceID + `','` + licenseID + `',decode('01','hex'),'disabled',now(),now(),now())`},
 		{"second active token", `INSERT INTO device_access_tokens (device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) VALUES ('60000000-0000-0000-0000-000000000043','` + inventoryID + `','` + deviceID + `','` + licenseID + `',decode(repeat('44',32),'hex'),'active',now(),now(),now())`},
 		{"revoked token without timestamp", `INSERT INTO device_access_tokens (device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) VALUES ('60000000-0000-0000-0000-000000000044','` + inventoryID + `','` + deviceID + `','` + licenseID + `',decode(repeat('46',32),'hex'),'revoked',now(),now(),now())`},
+		{"device from another inventory", `INSERT INTO device_access_tokens (device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at) VALUES ('60000000-0000-0000-0000-000000000045','00000000-0000-0000-0000-000000000043','` + deviceID + `','` + licenseID + `',decode(repeat('48',32),'hex'),'disabled',now(),now(),now())`},
 		{"api key envelope without version", `UPDATE new_api_bindings SET api_key_envelope=decode('45','hex') WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
 		{"request rate limit", `UPDATE new_api_bindings SET requests_per_minute=0 WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
 		{"concurrent request limit", `UPDATE new_api_bindings SET concurrent_requests=101 WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
 		{"incomplete configured proxy", `UPDATE new_api_bindings SET api_key_envelope=decode('45','hex'),api_key_version='fixture-kek-v1' WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
+		{"null allowed model", `UPDATE new_api_bindings SET api_key_envelope=decode('45','hex'),api_key_version='fixture-kek-v1',base_url='https://api.invalid/v1',default_model='fixture-model',allowed_models=ARRAY[NULL::text] WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
+		{"empty allowed model", `UPDATE new_api_bindings SET api_key_envelope=decode('45','hex'),api_key_version='fixture-kek-v1',base_url='https://api.invalid/v1',default_model='fixture-model',allowed_models=ARRAY['fixture-model',''] WHERE inventory_id='00000000-0000-0000-0000-000000000042'`},
 		{"expired admission lease", `INSERT INTO model_proxy_admissions (request_id,device_token_id,started_at,lease_expires_at) VALUES ('70000000-0000-0000-0000-000000000042','60000000-0000-0000-0000-000000000041',now(),now())`},
 	}
 	for _, fixture := range invalid {
-		if _, err := pool.Exec(ctx, fixture.sql); !postgresCode(err, "23514") && !(fixture.name == "second active token" && postgresCode(err, "23505")) {
+		if _, err := pool.Exec(ctx, fixture.sql); !postgresCode(err, "23514") && !(fixture.name == "second active token" && postgresCode(err, "23505")) && !(fixture.name == "device from another inventory" && postgresCode(err, "23503")) {
 			t.Fatalf("%s error = %v, want constraint violation", fixture.name, err)
 		}
+	}
+	if _, err := pool.Exec(ctx, `UPDATE new_api_bindings SET api_key_envelope=decode('45','hex'),api_key_version='fixture-kek-v1',base_url='https://api.invalid/v1',default_model='fixture-model',allowed_models=ARRAY['fixture-model'] WHERE inventory_id='00000000-0000-0000-0000-000000000042'`); err != nil {
+		t.Fatalf("valid proxy mapping: %v", err)
+	}
+}
+
+func TestMigratePostgreSQLUpgradesLegacyConfiguredBindingFromVersionThree(t *testing.T) {
+	databaseURL := os.Getenv("ACTIVATION_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("ACTIVATION_TEST_DATABASE_URL is not set; v1-v3 upgrade PostgreSQL test skipped")
+	}
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	random := make([]byte, 8)
+	if _, err := rand.Read(random); err != nil {
+		t.Fatal(err)
+	}
+	schema := "activation_upgrade_" + hex.EncodeToString(random)
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = admin.Exec(ctx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE") }()
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(ctx, migrationLedgerSQL); err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range []migration{
+		{version: 1, contents: initialMigration, checksum: initialMigrationChecksum},
+		{version: 2, contents: lifecycleMigration, checksum: lifecycleMigrationChecksum},
+		{version: 3, contents: adminMigration, checksum: adminMigrationChecksum},
+	} {
+		if _, err := pool.Exec(ctx, candidate.contents); err != nil {
+			t.Fatalf("apply legacy migration %d: %v", candidate.version, err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO schema_migrations(version,checksum,applied_at) VALUES($1,$2,now())`, candidate.version, candidate.checksum); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO activation_inventory(id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at) VALUES('00000000-0000-0000-0000-000000000051','legacy-51','Legacy 51',decode(repeat('51',32),'hex'),'prepared','configured',now())`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO new_api_bindings(inventory_id,new_api_user_id,new_api_username,balance_setup_status,status,policy_digest,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000051','legacy-user-51','legacy-51','configured','active',decode(repeat('52',32),'hex'),now(),now())`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("upgrade legacy v3 schema: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE new_api_bindings SET updated_at=now() WHERE inventory_id='00000000-0000-0000-0000-000000000051'`); err != nil {
+		t.Fatalf("legacy configured binding remains writable: %v", err)
 	}
 }
 

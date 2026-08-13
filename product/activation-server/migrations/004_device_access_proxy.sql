@@ -1,7 +1,10 @@
+ALTER TABLE devices
+    ADD CONSTRAINT devices_device_inventory_unique UNIQUE (device_id, inventory_id);
+
 CREATE TABLE device_access_tokens (
     device_token_id UUID PRIMARY KEY,
     inventory_id UUID NOT NULL REFERENCES activation_inventory(id),
-    device_id UUID NOT NULL REFERENCES devices(device_id),
+    device_id UUID NOT NULL,
     license_id UUID NOT NULL,
     token_digest BYTEA UNIQUE NOT NULL CHECK (octet_length(token_digest) = 32),
     status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'revoked')),
@@ -9,6 +12,7 @@ CREATE TABLE device_access_tokens (
     revoked_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
+    FOREIGN KEY (device_id, inventory_id) REFERENCES devices(device_id, inventory_id),
     FOREIGN KEY (license_id, device_id) REFERENCES licenses(license_id, device_id),
     CHECK ((status = 'revoked') = (revoked_at IS NOT NULL))
 );
@@ -30,10 +34,9 @@ ALTER TABLE new_api_bindings
         CHECK (requests_per_minute BETWEEN 1 AND 6000),
     ADD CONSTRAINT new_api_bindings_concurrent_requests_check
         CHECK (concurrent_requests BETWEEN 1 AND 100),
-    ADD CONSTRAINT new_api_bindings_configured_proxy_check
+    ADD CONSTRAINT new_api_bindings_proxy_mapping_check
         CHECK (
-            balance_setup_status <> 'configured'
-            OR (
+            (
                 api_key_envelope IS NULL
                 AND api_key_version IS NULL
                 AND base_url IS NULL
@@ -46,7 +49,9 @@ ALTER TABLE new_api_bindings
                 AND NULLIF(BTRIM(base_url), '') IS NOT NULL
                 AND NULLIF(BTRIM(default_model), '') IS NOT NULL
                 AND cardinality(allowed_models) > 0
-                AND default_model = ANY(allowed_models)
+                AND array_position(allowed_models, NULL) IS NULL
+                AND array_position(allowed_models, '') IS NULL
+                AND COALESCE(default_model = ANY(allowed_models), FALSE)
             )
         ) NOT VALID;
 
