@@ -185,7 +185,7 @@ describe("chat workspace", () => {
 
     const main = screen.getByRole("main");
     expect(await within(main).findByText("第一段历史")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     expect(await within(main).findByText("第二段历史")).toBeVisible();
     expect(within(main).queryByText("第一段历史")).not.toBeInTheDocument();
   });
@@ -207,7 +207,7 @@ describe("chat workspace", () => {
     expect(screen.getAllByText("共享消息")).toHaveLength(1);
     expect(list).toHaveBeenCalledWith("session-1", { cursor: "history-2" });
 
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     expect(await screen.findByText("第二会话消息")).toBeVisible();
     expect(screen.queryByRole("button", { name: "加载更多消息" })).not.toBeInTheDocument();
     expect(screen.queryByText("第三条消息")).not.toBeInTheDocument();
@@ -240,8 +240,8 @@ describe("chat workspace", () => {
     const sessionTwo = deferred<Awaited<ReturnType<UClawClient["sessions"]["get"]>>>();
     vi.mocked(client.sessions.get).mockImplementation((id) => id === "session-1" ? sessionOne.promise : sessionTwo.promise);
 
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
-    fireEvent.click(screen.getByRole("button", { name: /发布检查/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^发布检查，/ }));
     sessionOne.resolve({ id: "session-1", title: "发布检查", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" });
     await act(async () => undefined);
     sessionTwo.resolve({ id: "session-2", title: "知识库调研", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" });
@@ -276,13 +276,13 @@ describe("chat workspace", () => {
     const first = render(<App client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "新建会话" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /网关权威会话/ }).closest(".session-row")).toHaveClass("active"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^网关权威会话，/ }).closest(".session-row")).toHaveClass("active"));
     expect(list).toHaveBeenCalledTimes(2);
     expect(get).toHaveBeenCalledWith("session-3");
 
     first.unmount();
     render(<App client={client} />);
-    expect(await screen.findByRole("button", { name: /网关权威会话/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /^网关权威会话，/ })).toBeVisible();
   });
 
   it("reads authoritative session list after rename and delete", async () => {
@@ -306,13 +306,15 @@ describe("chat workspace", () => {
     vi.spyOn(window, "prompt").mockReturnValue("正式发布");
     render(<App client={client} />);
 
-    const firstRow = (await screen.findByRole("button", { name: /发布检查/ })).closest(".session-row")!;
-    fireEvent.click(within(firstRow as HTMLElement).getByRole("button", { name: "重命名会话" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /正式发布（权威）/ }).closest(".session-row")).toHaveClass("active"));
+    const firstRow = (await screen.findByRole("button", { name: /^发布检查，/ })).closest(".session-row")!;
+    fireEvent.click(within(firstRow as HTMLElement).getByRole("button", { name: "会话操作 发布检查" }));
+    fireEvent.click(within(firstRow as HTMLElement).getByRole("menuitem", { name: "重命名会话" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^正式发布（权威），/ }).closest(".session-row")).toHaveClass("active"));
 
-    const renamedRow = screen.getByRole("button", { name: /正式发布（权威）/ }).closest(".session-row")!;
-    fireEvent.click(within(renamedRow as HTMLElement).getByRole("button", { name: "删除会话" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: /正式发布（权威）/ })).not.toBeInTheDocument());
+    const renamedRow = screen.getByRole("button", { name: /^正式发布（权威），/ }).closest(".session-row")!;
+    fireEvent.click(within(renamedRow as HTMLElement).getByRole("button", { name: "会话操作 正式发布（权威）" }));
+    fireEvent.click(within(renamedRow as HTMLElement).getByRole("menuitem", { name: "删除会话" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^正式发布（权威），/ })).not.toBeInTheDocument());
     expect(list).toHaveBeenCalledTimes(3);
     expect(organizerGet).toHaveBeenCalledTimes(2);
   });
@@ -330,15 +332,16 @@ describe("chat workspace", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "新建会话" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("gateway readback failed");
-    expect(screen.getByRole("button", { name: /发布检查/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^发布检查，/ })).toBeVisible();
   });
 
   it("filters sessions by title or preview", async () => {
     render(<App client={clientFixture()} />);
     const sidebar = await screen.findByRole("complementary", { name: "会话栏" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "搜索会话" }));
     fireEvent.change(within(sidebar).getByRole("searchbox", { name: "搜索会话" }), { target: { value: "知识库" } });
-    expect(within(sidebar).getByRole("button", { name: /知识库调研/ })).toBeVisible();
-    expect(within(sidebar).queryByRole("button", { name: /发布检查/ })).not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: /^知识库调研，/ })).toBeVisible();
+    expect(within(sidebar).queryByRole("button", { name: /^发布检查，/ })).not.toBeInTheDocument();
   });
 
   it("keeps separate drafts while switching sessions", async () => {
@@ -346,12 +349,12 @@ describe("chat workspace", () => {
     const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
     await waitFor(() => expect(composer).toBeEnabled());
     fireEvent.change(composer, { target: { value: "发布会话草稿" } });
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue(""));
     fireEvent.change(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" }), { target: { value: "知识库草稿" } });
-    fireEvent.click(screen.getByRole("button", { name: /发布检查/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^发布检查，/ }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue("发布会话草稿"));
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue("知识库草稿"));
   });
 
@@ -615,7 +618,7 @@ describe("chat workspace", () => {
     fireEvent.change(composer, { target: { value: "旧会话发送" } });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
     pending.emit({ type: "started", runId: "run-old", sessionId: "session-1" });
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     expect(await within(screen.getByRole("main")).findByText("第二段历史")).toBeVisible();
     expect(signal?.aborted).toBe(true);
     pending.emit({ type: "final", runId: "run-old", message: { id: "old-final", sessionId: "session-1", runId: "run-old", role: "assistant", status: "completed", blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } });
