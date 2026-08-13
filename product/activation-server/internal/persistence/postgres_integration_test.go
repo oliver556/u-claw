@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -579,6 +580,16 @@ func TestDeviceTokenStateMappingIsExplicit(t *testing.T) {
 	}
 }
 
+func TestBeforeCommitFailureIsRedacted(t *testing.T) {
+	sensitive := "/runtime/secret/output/device-token.json"
+	for _, callback := range []func() error{func() error { return errors.New(sensitive) }, func() error { panic(sensitive) }} {
+		err := invokeBeforeCommit(callback)
+		if !errors.Is(err, errAdminPublishFailed) || strings.Contains(err.Error(), sensitive) {
+			t.Fatalf("error=%v", err)
+		}
+	}
+}
+
 func TestAdminMappingAndDeviceTokenTransactionsPostgreSQL(t *testing.T) {
 	databaseURL := os.Getenv("ACTIVATION_TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -703,6 +714,11 @@ func TestAdminMappingAndDeviceTokenTransactionsPostgreSQL(t *testing.T) {
 	if err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE status='active'),count(*) FILTER(WHERE device_token_id=$2) FROM device_access_tokens WHERE license_id=$1`, rollbackLicense, rollback.ReplacementTokenID).Scan(&active, &replacement); err != nil || active != 1 || replacement != 0 {
 		t.Fatalf("rollback active=%d replacement=%d err=%v", active, replacement, err)
 	}
+	var publishFailed int
+	var auditReason string
+	if err = pool.QueryRow(ctx, `SELECT count(*),COALESCE(max(reason),'') FROM audit_events WHERE outcome='failed' AND action='device-token.reissue' AND license_id=$1`, rollbackLicense).Scan(&publishFailed, &auditReason); err != nil || publishFailed != 1 || auditReason != "publish failure" {
+		t.Fatalf("publish failed audits=%d reason=%q err=%v", publishFailed, auditReason, err)
+	}
 	panicRollback := rollback
 	panicRollback.ReplacementTokenID = "60000000-0000-4000-8000-000000000396"
 	panicRollback.ReplacementDigest = bytesOf(0x76)
@@ -713,6 +729,27 @@ func TestAdminMappingAndDeviceTokenTransactionsPostgreSQL(t *testing.T) {
 	if err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE status='active'),count(*) FILTER(WHERE device_token_id=$2) FROM device_access_tokens WHERE license_id=$1`, rollbackLicense, panicRollback.ReplacementTokenID).Scan(&active, &replacement); err != nil || active != 1 || replacement != 0 {
 		t.Fatalf("panic rollback active=%d replacement=%d err=%v", active, replacement, err)
 	}
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE outcome='failed' AND action='device-token.reissue' AND license_id=$1`, rollbackLicense).Scan(&publishFailed); err != nil || publishFailed != 2 {
+		t.Fatalf("publish failed audits after panic=%d err=%v", publishFailed, err)
+	}
+	for index, status := range []string{"prepared", "revoked"} {
+		suffix := fmt.Sprintf("%03d", 306+index)
+		_, _, inactiveLicense := seedToken(suffix, "active")
+		if _, err = pool.Exec(ctx, `UPDATE activation_inventory SET status=$2,activated_at=CASE WHEN $2='prepared' THEN NULL ELSE activated_at END WHERE id=(SELECT inventory_id FROM device_access_tokens WHERE license_id=$1 LIMIT 1)`, inactiveLicense, status); err != nil {
+			t.Fatal(err)
+		}
+		inactive := adminservice.DeviceTokenMutation{Action: adminservice.DeviceTokenReissue, LicenseID: inactiveLicense, ReplacementTokenID: fmt.Sprintf("60000000-0000-4000-8000-000000000%03d", 397+index), ReplacementDigest: bytesOf(byte(0x77 + index)), Operation: tokenOp("reissue-inactive-"+suffix, "inactive inventory")}
+		published := false
+		if _, err = repository.ReissueDeviceToken(ctx, inactive, func() error { published = true; return nil }); !errors.Is(err, adminservice.ErrInvalidInput) || published {
+			t.Fatalf("inventory %s error=%v published=%v", status, err, published)
+		}
+		if _, err = repository.PrepareDeviceTokenTarget(ctx, inactiveLicense); !errors.Is(err, adminservice.ErrInvalidInput) {
+			t.Fatalf("prepare inventory %s=%v", status, err)
+		}
+		if err = pool.QueryRow(ctx, `SELECT count(*) FROM device_access_tokens WHERE license_id=$1 AND status='active'`, inactiveLicense).Scan(&active); err != nil || active != 1 {
+			t.Fatalf("inventory %s old active=%d err=%v", status, active, err)
+		}
+	}
 	var failed int
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE outcome='failed' AND action IN ('new-api.mapping.set','device-token.enable')`).Scan(&failed); err != nil || failed < 3 {
 		t.Fatalf("failed audits=%d err=%v", failed, err)
@@ -721,9 +758,9 @@ func TestAdminMappingAndDeviceTokenTransactionsPostgreSQL(t *testing.T) {
 func seedActiveAdminFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, inventoryID, deviceID, licenseID, tokenID string) {
 	t.Helper()
 	queries := []string{
-		`UPDATE activation_inventory SET status='active',activated_at=now() WHERE id='` + inventoryID + `'`,
+		`UPDATE activation_inventory SET status='active',new_api_setup_status='configured',activated_at=now() WHERE id='` + inventoryID + `'`,
 		`INSERT INTO devices(device_id,inventory_id,fingerprint_version,fingerprint_sha256,status,created_at,updated_at) VALUES('` + deviceID + `','` + inventoryID + `','uclaw-usb-v1',decode(repeat('31',32),'hex'),'active',now(),now())`,
-		`UPDATE new_api_bindings SET device_id='` + deviceID + `' WHERE inventory_id='` + inventoryID + `'`,
+		`UPDATE new_api_bindings SET device_id='` + deviceID + `',balance_setup_status='configured' WHERE inventory_id='` + inventoryID + `'`,
 		`INSERT INTO licenses(license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,created_at,updated_at) VALUES('` + licenseID + `','` + deviceID + `','active',1,'key_fixture',decode(repeat('41',16),'hex'),decode(repeat('42',32),'hex'),now()-interval '1 hour',now()+interval '1 year',now(),now())`,
 		`INSERT INTO token_grants(jti,device_id,license_id,policy_digest,status,issued_at,expires_at,created_at,idempotency_key) VALUES('` + tokenID + `','` + deviceID + `','` + licenseID + `',decode(repeat('21',32),'hex'),'active',now(),now()+interval '1 hour',now(),'token-idem-` + tokenID + `')`,
 	}
