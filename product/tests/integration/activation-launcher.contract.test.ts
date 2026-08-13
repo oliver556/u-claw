@@ -130,8 +130,9 @@ describe("activation launcher-to-desktop contract", () => {
           schemaVersion: 1 as const,
           deviceId: license.deviceId,
           licenseId: license.licenseId,
-          accessToken: "t".repeat(16),
-          expiresAt: "2026-08-14T00:00:00.000Z",
+          endpoint: "https://127.0.0.1/model-api/",
+          model: "fixture-default-model",
+          deviceToken: `uclaw_dt_${"A".repeat(43)}`,
         },
         status: "active" as const,
       };
@@ -221,7 +222,6 @@ describe("activation launcher-to-desktop contract", () => {
         state: "input",
       });
       const input = {
-        username: "UCLAW-TEST-USER",
         activationCode: "ABCDEFGHJKMNPQRSTVWXYZ2345",
       };
       await expect(coordinator.submit(input)).resolves.toEqual({
@@ -305,7 +305,14 @@ describe("activation launcher-to-desktop contract", () => {
       expect(requests[0]).toMatchObject({
         url: "/v1/activations",
         idempotencyKey: "activation:integration-uuid-001",
+        body: {
+          activationCode: input.activationCode,
+          usbFingerprint: { version: "uclaw-usb-v1", sha256: fingerprint },
+          clientVersion: "1.0.0",
+          idempotencyKey: "activation:integration-uuid-001",
+        },
       });
+      expect(Object.keys(requests[0]!.body as object)).not.toContain("username");
       expect(requests[1]).toMatchObject({
         url: "/v1/activations",
         idempotencyKey: "activation:integration-uuid-001",

@@ -11,8 +11,11 @@ const defaultMaxTotalBytes = 100 * 1024 * 1024;
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 const privateKeyBegin = /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/u;
 const privateKeyEnd = /-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/u;
-const quotedCredentialAssignment = /(?:^|[\s{,])["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|password|passwd|secret|token)["']?\s*(?:=|:)\s*(["'])([^"'`\r\n]+)\1/iu;
-const environmentCredentialAssignment = /^(?:export\s+)?(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|password|passwd|secret|token)\s*=\s*([^\s#]+)\s*$/iu;
+const credentialField = "(?:api[_-]?key|new[_-]?api[_-]?(?:key|token)|access[_-]?token|auth[_-]?token|issued[_-]?token|startup[_-]?secret|client[_-]?secret|private[_-]?key|password|passwd|secret|token)";
+const quotedCredentialAssignment = new RegExp(`(?:^|[\\s{,])["']?${credentialField}["']?\\s*(?:=|:)\\s*(["'])([^"'\\x60\\r\\n]+)\\1`, "iu");
+const environmentCredentialAssignment = new RegExp(`^(?:export\\s+)?${credentialField}\\s*=\\s*([^\\s#]+)\\s*$`, "iu");
+const deviceTokenPattern = /\buclaw_dt_[A-Za-z0-9_-]{43}\b/gu;
+const activationCodeAssignment = /(?:^|[\s{,])["']?activation[_-]?code["']?\s*(?:=|:)\s*(["'])([0-9A-HJKMNP-TV-Z]{26})\1/iu;
 const tokenPatterns = [
   /\bAKIA[0-9A-Z]{16}\b/gu,
   /\bgh[pousr]_[A-Za-z0-9]{36,255}\b/gu,
@@ -50,6 +53,19 @@ export function scanText(filePath, source) {
       continue;
     }
 
+    deviceTokenPattern.lastIndex = 0;
+    const deviceToken = deviceTokenPattern.exec(line)?.[0];
+    if (deviceToken && !isPlaceholder(deviceToken, { token: true })) {
+      findings.push({ path: filePath, line: index + 1, rule: "DEVICE_TOKEN" });
+      continue;
+    }
+
+    const activationCode = isTestFixturePath(filePath) ? undefined : activationCodeAssignment.exec(line)?.[2];
+    if (activationCode && !isPlaceholder(activationCode)) {
+      findings.push({ path: filePath, line: index + 1, rule: "ACTIVATION_CODE" });
+      continue;
+    }
+
     const quotedAssignment = quotedCredentialAssignment.exec(line);
     const environmentAssignment = environmentCredentialAssignment.exec(line);
     const assignedValue = quotedAssignment?.[2] ?? environmentAssignment?.[1];
@@ -67,6 +83,11 @@ export function scanText(filePath, source) {
     findings.push({ path: filePath, line: privateKeyStart + 1, rule: "PRIVATE_KEY_BLOCK" });
   }
   return findings;
+}
+
+function isTestFixturePath(filePath) {
+  return /(?:^|\/)(?:tests?|fixtures?)(?:\/|\.|$)/iu.test(filePath)
+    || /(?:^|\/)[^/]+_test\.[^/]+$/iu.test(filePath);
 }
 
 export async function scanTrackedRepository(startDirectory = process.cwd(), options = {}) {

@@ -117,6 +117,9 @@ describe("activation OpenAPI contract", () => {
     ]);
     expect(required("StartupCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "startupSecret"]);
     expect(required("BuiltinCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "endpoint", "model", "deviceToken"]);
+    expect(Object.keys(document.components.schemas.BuiltinCredential.properties ?? {})).toEqual(
+      ["schemaVersion", "deviceId", "licenseId", "endpoint", "model", "deviceToken"],
+    );
     expect(required("LicenseStatusReceipt")).toEqual(["value"]);
     expect(document.components.schemas.DeviceTokenRequest).toBeUndefined();
     expect(document.components.schemas.DeviceTokenResponse).toBeUndefined();
@@ -176,6 +179,9 @@ describe("activation OpenAPI contract", () => {
     expect(document.paths["/health/live"].get.responses["200"].content["application/json"].schema)
       .toEqual({ $ref: "#/components/schemas/HealthResponse" });
     expect(document.components.schemas.ActivationRequest.properties).not.toHaveProperty("username");
+    expect(Object.keys(document.components.schemas.ActivationRequest.properties ?? {})).toEqual(
+      ["activationCode", "usbFingerprint", "clientVersion", "idempotencyKey"],
+    );
     expect(document.components.schemas.BuiltinCredential.properties).toEqual({
       schemaVersion: { const: 1 },
       deviceId: { $ref: "#/components/schemas/Identifier" },
