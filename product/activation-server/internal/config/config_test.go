@@ -275,7 +275,7 @@ func TestLoadFromRequiresIndependentAdminFingerprintSecret(t *testing.T) {
 	if _, err := LoadFrom(func(name string) string { return base[name] }); err != nil {
 		t.Fatalf("independent secret rejected: %v", err)
 	}
-	for _, test := range []struct{ name, path string }{{"same path pepper", pepper}, {"same bytes pepper", writeTestFile(t, directory, "fingerprint-equals-pepper", []byte(strings.Repeat("p", 32)))}, {"same bytes kek", writeTestFile(t, directory, "fingerprint-equals-kek", []byte(strings.Repeat("k", 32)))}} {
+	for _, test := range []struct{ name, path string }{{"same path pepper", pepper}, {"same bytes pepper", writeTestFile(t, directory, "fingerprint-equals-pepper", []byte(strings.Repeat("p", 32)))}, {"same bytes kek", writeTestFile(t, directory, "fingerprint-equals-kek", []byte(strings.Repeat("k", 32)))}, {"same path token", base["TOKEN_SIGNING_KEY_FILE"]}, {"same bytes token", writeTestFile(t, directory, "fingerprint-equals-token", []byte(strings.Repeat("t", 32)))}} {
 		t.Run(test.name, func(t *testing.T) {
 			values := maps.Clone(base)
 			values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"] = test.path

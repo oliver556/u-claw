@@ -248,6 +248,26 @@ func TestProductionComposeMountsCurrentMigrationSet(t *testing.T) {
 	}
 }
 
+func TestProductionComposeMountsSecretsOwnerReadOnly(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "..", "deploy", "compose.production.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(contents)
+	for _, source := range []string{"activation_pepper", "license_signing_key", "status_signing_key", "kms_kek", "token_signing_key", "admin_operators", "admin_secret_fingerprint_key"} {
+		fragment := "source: " + source + ", target: /run/secrets/" + source + ", uid: \"65532\", gid: \"65532\", mode: 0400"
+		if !strings.Contains(compose, fragment) {
+			t.Errorf("activation secret mount not owner-read-only: %s", source)
+		}
+	}
+	for _, source := range []string{"migration_database_url", "migration_role", "migration_password", "app_role", "app_password", "tls_certificate", "tls_private_key", "rate_limit_hmac_key", "management_client_ca"} {
+		fragment := "source: " + source + ", target: /run/secrets/" + source + ", uid: \"0\", gid: \"0\", mode: 0400"
+		if !strings.Contains(compose, fragment) {
+			t.Errorf("root service secret mount not owner-read-only: %s", source)
+		}
+	}
+}
+
 func TestAdminRepositoryClaimsBeforeMutationAndCompletesResult(t *testing.T) {
 	contents, err := os.ReadFile("admin_repository.go")
 	if err != nil {

@@ -117,7 +117,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("configuration ADMIN_SECRET_FINGERPRINT_KEY_FILE is invalid")
 	}
-	if sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["ACTIVATION_PEPPER_FILE"]) || sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["KMS_KEK_FILE"]) || constantTimeEqual(fingerprintKey, pepper) || constantTimeEqual(fingerprintKey, kek) {
+	if sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["ACTIVATION_PEPPER_FILE"]) || sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["KMS_KEK_FILE"]) || sameSecretFile(values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], values["TOKEN_SIGNING_KEY_FILE"]) || constantTimeEqual(fingerprintKey, pepper) || constantTimeEqual(fingerprintKey, kek) || constantTimeEqual(fingerprintKey, tokenSigningKey) {
 		return Config{}, errors.New("configuration ADMIN_SECRET_FINGERPRINT_KEY_FILE is invalid")
 	}
 	allowedHosts, err := parseAllowedNewAPIHosts(values["NEW_API_ALLOWED_HOSTS"])
