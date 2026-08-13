@@ -141,20 +141,24 @@ type activationRequest struct {
 }
 
 func (handler *publicHandler) activate(writer http.ResponseWriter, request *http.Request, requestID string) {
+	stage := "failed_before_bind"
 	var input activationRequest
 	if err := decodeRequest(writer, request, &input); err != nil {
-		handler.writeError(writer, requestID, "", nil, err)
+		handler.writeError(writer, requestID, "", &stage, err)
 		return
 	}
 	if handler.activation == nil {
-		handler.writeError(writer, requestID, "", nil, activation.ErrActivationServiceUnavailable)
+		handler.writeError(writer, requestID, "", &stage, activation.ErrActivationServiceUnavailable)
 		return
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), operationTimeout)
 	defer cancel()
 	result, err := handler.activation.Activate(ctx, activation.ActivateInput{Username: input.Username, ActivationCode: input.ActivationCode, FingerprintVersion: input.USBFingerprint.Version, FingerprintSHA256: input.USBFingerprint.SHA256, ClientVersion: input.ClientVersion, IdempotencyKey: input.IdempotencyKey, RequestID: requestID})
 	if err != nil {
-		handler.writeError(writer, requestID, result.ActivationID, nil, err)
+		if result.ActivationID != "" {
+			stage = "server_bound"
+		}
+		handler.writeError(writer, requestID, result.ActivationID, &stage, err)
 		return
 	}
 	writeRawJSON(writer, http.StatusOK, result.Material)

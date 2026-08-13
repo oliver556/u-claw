@@ -103,11 +103,25 @@ describe("license lifecycle v1 contract", () => {
     const spkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
     const publicKey = createPublicKey({ key: Buffer.concat([spkiPrefix, rawPublicKey]), format: "der", type: "spki" });
     expect(verify(null, Buffer.from(canonical), publicKey, Buffer.from(signingGolden.signature, "base64"))).toBe(true);
+    expect(shared.StartupLicenseArtifactSchema.parse({
+      schemaVersion: 1, usernameId: payload.usernameId, deviceId: payload.deviceId, licenseId: payload.licenseId,
+      usbFingerprint: { scheme: payload.usbFingerprintVersion, sha256: payload.usbFingerprintSha256 },
+      startupSecretProof: { algorithm: "sha256-salt-v1", startupSecretSalt: payload.startupSecretSalt, startupSecretHash: payload.startupSecretHash },
+      notBefore: payload.notBefore, expiresAt: payload.expiresAt, revision: payload.revision,
+      signature: { algorithm: "ed25519", keyId: payload.keyId, value: signingGolden.signature },
+    })).toBeTruthy();
     expect(() => shared.StartupLicenseArtifactSchema.parse({
       schemaVersion: 1, usernameId: payload.usernameId, deviceId: payload.deviceId, licenseId: payload.licenseId,
       usbFingerprint: { scheme: payload.usbFingerprintVersion, sha256: payload.usbFingerprintSha256 },
       startupSecretProof: { algorithm: "sha256-salt-v1", startupSecretSalt: payload.startupSecretSalt, startupSecretHash: payload.startupSecretHash },
       notBefore: "2026-08-10T00:00:00.000Z", expiresAt: payload.expiresAt, revision: payload.revision,
+      signature: { algorithm: "ed25519", keyId: payload.keyId, value: signingGolden.signature },
+    })).toThrow();
+    expect(() => shared.StartupLicenseArtifactSchema.parse({
+      schemaVersion: 1, usernameId: payload.usernameId, deviceId: payload.deviceId, licenseId: payload.licenseId,
+      usbFingerprint: { scheme: payload.usbFingerprintVersion, sha256: payload.usbFingerprintSha256 },
+      startupSecretProof: { algorithm: "sha256-salt-v1", startupSecretSalt: payload.startupSecretSalt, startupSecretHash: payload.startupSecretHash },
+      notBefore: "2026-02-30T00:00:00Z", expiresAt: payload.expiresAt, revision: payload.revision,
       signature: { algorithm: "ed25519", keyId: payload.keyId, value: signingGolden.signature },
     })).toThrow();
   });

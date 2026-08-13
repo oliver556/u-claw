@@ -32,10 +32,7 @@ type fakeRepository struct {
 
 func (repository *fakeRepository) ValidateBinding(context.Context, ValidateBindingInput) error {
 	repository.validateCalls++
-	if repository.validateErr != nil {
-		return repository.validateErr
-	}
-	return repository.beginErr
+	return repository.validateErr
 }
 
 func (repository *fakeRepository) BeginBinding(_ context.Context, input BeginBindingInput) (BeginBindingResult, error) {
@@ -64,10 +61,16 @@ func (repository *fakeRepository) RecordRecovery(_ context.Context, _, requestID
 	return repository.recoveryErr
 }
 
-type fakeSigner struct{ calls int }
+type fakeSigner struct {
+	calls int
+	err   error
+}
 
 func (signer *fakeSigner) Sign(payload license.SigningPayload) (string, error) {
 	signer.calls++
+	if signer.err != nil {
+		return "", signer.err
+	}
 	return "fixture-signature", nil
 }
 
@@ -134,6 +137,55 @@ func TestActivateFirstBindingUsesTwoPhasesAndReturnsPersistedEnvelope(t *testing
 	}
 	if got := startupSecretHash(material.StartupCredential.StartupSecret, salt); hex.EncodeToString(got[:]) != material.License.StartupSecretProof.StartupSecretHash {
 		t.Fatal("startup secret does not match persisted proof")
+	}
+}
+
+func TestActivateKeepsActivationIDAfterBindingFailures(t *testing.T) {
+	t.Run("signing", func(t *testing.T) {
+		repository := &fakeRepository{}
+		service := newTestService(t, repository, &fakeSigner{err: errors.New("sign failed")}, &fakeEnvelope{})
+		result, err := service.Activate(context.Background(), fixtureInput())
+		if err == nil || result.ActivationID == "" || result.ActivationID != repository.beginInput.Record.ActivationID {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+	t.Run("persistence", func(t *testing.T) {
+		repository := &fakeRepository{completeErr: errors.New("persist failed")}
+		service := newTestService(t, repository, &fakeSigner{}, &fakeEnvelope{})
+		result, err := service.Activate(context.Background(), fixtureInput())
+		if err == nil || result.ActivationID == "" || result.ActivationID != repository.beginInput.Record.ActivationID {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+	t.Run("bound recovery", func(t *testing.T) {
+		record := BoundRecord{ActivationID: "act_fixture_001", RecoveryRequestID: "req_fixture_001", ArtifactKeyVersion: "kms-v1", ArtifactEnvelope: []byte("invalid")}
+		repository := &fakeRepository{beginResult: BeginBindingResult{Disposition: BindingBound, Record: record}}
+		service := newTestService(t, repository, &fakeSigner{}, &fakeEnvelope{})
+		result, err := service.Activate(context.Background(), fixtureInput())
+		if err == nil || result.ActivationID != record.ActivationID {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+}
+
+func TestActivateClassifiesBeginBindingErrorsByCommitAmbiguity(t *testing.T) {
+	t.Run("infrastructure error keeps candidate activation ID", func(t *testing.T) {
+		repository := &fakeRepository{beginErr: errors.New("transaction commit result unknown")}
+		service := newTestService(t, repository, &fakeSigner{}, &fakeEnvelope{})
+		result, err := service.Activate(context.Background(), fixtureInput())
+		if err == nil || result.ActivationID == "" || result.ActivationID != repository.beginInput.Record.ActivationID {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+	for _, businessError := range []error{ErrActivationInvalid, ErrNewAPINotConfigured, ErrIdempotencyConflict, ErrActivationCodeAlreadyBound, ErrActivationInProgress} {
+		t.Run(businessError.Error(), func(t *testing.T) {
+			repository := &fakeRepository{beginErr: businessError}
+			service := newTestService(t, repository, &fakeSigner{}, &fakeEnvelope{})
+			result, err := service.Activate(context.Background(), fixtureInput())
+			if !errors.Is(err, businessError) || result.ActivationID != "" {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+		})
 	}
 }
 

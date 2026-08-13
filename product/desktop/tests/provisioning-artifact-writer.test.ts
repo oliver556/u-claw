@@ -63,6 +63,7 @@ const startupCredential = {
 };
 const license = {
   schemaVersion: 1 as const,
+  usernameId: binding.newApiUserId,
   deviceId: binding.deviceId,
   licenseId: binding.licenseId,
   usbFingerprint: { scheme: "uclaw-usb-v1" as const, sha256: binding.usbFingerprint },
@@ -71,8 +72,9 @@ const license = {
     startupSecretSalt: mapping.startupSecretSalt,
     startupSecretHash: mapping.startupSecretHash,
   },
-  notBefore: now,
-  expiresAt: "2027-08-10T00:00:00.000Z",
+  notBefore: "2026-08-10T00:00:00Z",
+  expiresAt: "2027-08-10T00:00:00Z",
+  revision: 1,
   signature: { algorithm: "ed25519" as const, keyId: "fixture-key-001", value: "s".repeat(88) },
 };
 const journal = {
