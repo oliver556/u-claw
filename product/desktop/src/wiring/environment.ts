@@ -1,3 +1,4 @@
+import { createPublicKey } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
@@ -14,6 +15,11 @@ export interface DesktopWiringEnvironment {
   nodeExecutable: string;
   electronRunAsNode: boolean;
   gatewayToken: string;
+}
+
+export interface ActivationServiceConfiguration {
+  endpoint: URL;
+  trustedPublicKeys: Readonly<Record<string, string>>;
 }
 
 export class DesktopWiringError extends Error implements UClawError {
@@ -42,6 +48,40 @@ export class DesktopWiringError extends Error implements UClawError {
 function isWithin(parent: string, child: string): boolean {
   const candidate = relative(parent, child);
   return candidate === "" || (!candidate.startsWith("..") && !isAbsolute(candidate));
+}
+
+const activationKeyIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const ed25519SpkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
+
+export function readActivationServiceConfiguration(env: NodeJS.ProcessEnv): ActivationServiceConfiguration {
+  const rawEndpoint = env.UCLAW_ACTIVATION_ENDPOINT;
+  const rawKeys = env.UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS;
+  if (!rawEndpoint || !rawKeys) throw new DesktopWiringError("UNCONFIGURED", "Activation service is not configured.");
+  try {
+    const endpoint = new URL(rawEndpoint);
+    if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+      throw new Error("invalid activation endpoint");
+    }
+    if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
+    const parsed = JSON.parse(rawKeys) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid activation keys");
+    const entries = Object.entries(parsed as Record<string, unknown>);
+    if (entries.length < 1 || entries.length > 16) throw new Error("invalid activation keys");
+    const trustedPublicKeys: Record<string, string> = Object.create(null) as Record<string, string>;
+    for (const [keyId, encodedKey] of entries) {
+      if (!activationKeyIdPattern.test(keyId) || typeof encodedKey !== "string" || encodedKey.length > 128) {
+        throw new Error("invalid activation key");
+      }
+      const rawKey = Buffer.from(encodedKey, "base64");
+      if (rawKey.length !== 32 || rawKey.toString("base64") !== encodedKey) throw new Error("invalid activation key");
+      trustedPublicKeys[keyId] = createPublicKey({
+        key: Buffer.concat([ed25519SpkiPrefix, rawKey]), format: "der", type: "spki",
+      }).export({ format: "pem", type: "spki" }).toString();
+    }
+    return { endpoint, trustedPublicKeys };
+  } catch {
+    throw new DesktopWiringError("INVALID_ARGUMENT", "Activation service configuration is invalid.");
+  }
 }
 
 export async function readDesktopWiringEnvironment(env: NodeJS.ProcessEnv): Promise<DesktopWiringEnvironment> {
