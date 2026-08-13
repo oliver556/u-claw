@@ -5,6 +5,7 @@ import type { ContentBlock, ImageOperationIpcRequest, ImageOperationIpcResponse 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { MessageContent } from "../src/features/chat/MessageContent";
 
@@ -57,8 +58,8 @@ afterEach(() => {
 
 describe("chat image preview", () => {
   it("uses a stable dark fullscreen backdrop in every app theme", () => {
-    const css = readFileSync(`${process.cwd()}/frontend/src/theme/global.css`, "utf8");
-    expect(css).toMatch(/\.image-preview\s*\{[^}]*background:\s*rgba\(8,\s*10,\s*12,\s*\.94\)/u);
+    const css = readFileSync(resolve(import.meta.dirname, "../src/theme/global.css"), "utf8");
+    expect(css).toMatch(/\.image-preview\s*\{[^}]*background:\s*var\(--uclaw-image-preview-mask\)/u);
   });
 
   it("opens fitted, locks scrolling, closes with Escape, and restores focus", async () => {

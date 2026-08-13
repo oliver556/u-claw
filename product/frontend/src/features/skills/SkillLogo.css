@@ -1,7 +1,7 @@
 .skill-logo {
   align-items: center;
-  background: var(--surface-elevated, #25282d);
-  border: 1px solid var(--border-subtle, #383c43);
+  background: var(--uclaw-skill-logo-bg);
+  border: 1px solid var(--uclaw-skill-logo-border);
   border-radius: 6px;
   display: inline-flex;
   flex: 0 0 32px;
@@ -18,7 +18,7 @@
 }
 
 .skill-logo-fallback {
-  color: var(--text-secondary, #aab0ba);
+  color: var(--uclaw-skill-logo-text);
 }
 
 .skill-logo-fallback svg {
