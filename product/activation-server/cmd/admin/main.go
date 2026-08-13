@@ -44,7 +44,7 @@ type adminService interface {
 	ShowMapping(context.Context, string) (adminservice.MappingSummary, error)
 	MutateDeviceToken(context.Context, adminservice.DeviceTokenMutation) (adminservice.DeviceTokenResult, error)
 	PrepareDeviceTokenReissue(context.Context, adminservice.DeviceTokenMutation) (adminservice.DeviceTokenReissuePlan, error)
-	ExecuteDeviceTokenReissue(context.Context, adminservice.DeviceTokenReissuePlan) (adminservice.DeviceTokenResult, error)
+	ExecuteDeviceTokenReissue(context.Context, adminservice.DeviceTokenReissuePlan, func() error) (adminservice.DeviceTokenResult, error)
 }
 
 func main() { os.Exit(realMain(context.Background(), os.Args[1:], os.Getenv, os.Stdout, os.Stderr)) }
@@ -169,13 +169,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, service
 			if stageErr != nil {
 				return writeCLIError(stderr, stageErr)
 			}
-			result, callErr := service.ExecuteDeviceTokenReissue(ctx, plan)
+			result, callErr := service.ExecuteDeviceTokenReissue(ctx, plan, staged.commit)
 			if callErr != nil {
 				staged.abort()
+				staged.removePublished()
 				return writeCLIError(stderr, callErr)
-			}
-			if stageErr = staged.commit(); stageErr != nil {
-				return writeCLIError(stderr, stageErr)
 			}
 			result.DeviceToken = ""
 			return write(result)
@@ -420,25 +418,38 @@ func loadOperatorRegistry(path string) (adminservice.OperatorRegistry, error) {
 	return registry, nil
 }
 
-type stagedSecret struct{ temporary, final string }
+type stagedSecret struct {
+	temporary, final string
+	published        bool
+}
 
 func (value stagedSecret) abort() {
 	if value.temporary != "" {
 		_ = os.Remove(value.temporary)
 	}
 }
-func (value stagedSecret) commit() error {
+func (value *stagedSecret) commit() error {
 	if err := os.Link(value.temporary, value.final); err != nil {
 		value.abort()
 		return adminservice.ErrInvalidInput
 	}
 	value.abort()
+	value.published = true
 	directory, err := os.Open(filepath.Dir(value.final))
 	if err != nil {
 		return err
 	}
 	defer directory.Close()
 	return directory.Sync()
+}
+func (value stagedSecret) removePublished() {
+	if value.published && value.final != "" {
+		_ = os.Remove(value.final)
+		if directory, err := os.Open(filepath.Dir(value.final)); err == nil {
+			_ = directory.Sync()
+			_ = directory.Close()
+		}
+	}
 }
 
 func stageInventorySecrets(path string, values []adminservice.InventorySummary) (stagedSecret, error) {

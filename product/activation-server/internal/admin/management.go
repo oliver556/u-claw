@@ -6,12 +6,15 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
 
 	"u-claw-activation-server/internal/security"
 )
+
+var ErrSecretReplayUnavailable = errors.New("secret replay unavailable")
 
 type SecretBinding = security.SecretBinding
 type SecretEncrypter interface {
@@ -64,6 +67,7 @@ type DeviceTokenResult struct {
 	LicenseID     string `json:"licenseId"`
 	Status        string `json:"status"`
 	DeviceToken   string `json:"-"`
+	Replayed      bool   `json:"-"`
 }
 type DeviceTokenReissuePlan struct {
 	Mutation DeviceTokenMutation
@@ -98,11 +102,7 @@ func (s *Service) MutateDeviceToken(ctx context.Context, mutation DeviceTokenMut
 		return DeviceTokenResult{}, ErrInvalidInput
 	}
 	if mutation.Action == DeviceTokenReissue {
-		plan, err := s.PrepareDeviceTokenReissue(ctx, mutation)
-		if err != nil {
-			return DeviceTokenResult{}, err
-		}
-		return s.ExecuteDeviceTokenReissue(ctx, plan)
+		return DeviceTokenResult{}, ErrInvalidInput
 	}
 	return s.repository.MutateDeviceToken(ctx, mutation)
 }
@@ -127,8 +127,14 @@ func (s *Service) PrepareDeviceTokenReissue(ctx context.Context, mutation Device
 	}
 	return DeviceTokenReissuePlan{Mutation: mutation, Secret: DeviceTokenResult{DeviceTokenID: id, InventoryID: target.InventoryID, DeviceID: target.DeviceID, LicenseID: mutation.LicenseID, DeviceToken: token}}, nil
 }
-func (s *Service) ExecuteDeviceTokenReissue(ctx context.Context, plan DeviceTokenReissuePlan) (DeviceTokenResult, error) {
-	result, err := s.repository.MutateDeviceToken(ctx, plan.Mutation)
+func (s *Service) ExecuteDeviceTokenReissue(ctx context.Context, plan DeviceTokenReissuePlan, beforeCommit func() error) (DeviceTokenResult, error) {
+	if beforeCommit == nil {
+		return DeviceTokenResult{}, ErrInvalidInput
+	}
+	result, err := s.repository.ReissueDeviceToken(ctx, plan.Mutation, beforeCommit)
+	if err == nil && result.Replayed {
+		return DeviceTokenResult{}, ErrSecretReplayUnavailable
+	}
 	if err == nil {
 		result.DeviceToken = plan.Secret.DeviceToken
 	}

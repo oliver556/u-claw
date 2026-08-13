@@ -155,6 +155,7 @@ type Repository interface {
 	SetMapping(context.Context, MappingInput) (MappingSummary, error)
 	ShowMapping(context.Context, string) (MappingSummary, error)
 	MutateDeviceToken(context.Context, DeviceTokenMutation) (DeviceTokenResult, error)
+	ReissueDeviceToken(context.Context, DeviceTokenMutation, func() error) (DeviceTokenResult, error)
 	PrepareDeviceTokenTarget(context.Context, string) (DeviceTokenResult, error)
 }
 

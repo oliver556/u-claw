@@ -62,6 +62,9 @@ func (s *SecretEnvelopeService) Decrypt(ctx context.Context, binding SecretBindi
 	if s == nil || s.kms == nil || !validSecretBinding(binding) || len(encoded) == 0 || len(encoded) > maxEncodedEnvelopeBytes {
 		return nil, ErrSecretEnvelopeInvalid
 	}
+	if !uniqueSecretEnvelopeFields(encoded) {
+		return nil, ErrSecretEnvelopeInvalid
+	}
 	var doc envelopeDocument
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.DisallowUnknownFields()
@@ -87,6 +90,29 @@ func (s *SecretEnvelopeService) Decrypt(ctx context.Context, binding SecretBindi
 		return nil, ErrSecretEnvelopeInvalid
 	}
 	return plaintext, nil
+}
+
+func uniqueSecretEnvelopeFields(encoded []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return false
+	}
+	seen := map[string]bool{}
+	for decoder.More() {
+		keyToken, tokenErr := decoder.Token()
+		key, ok := keyToken.(string)
+		if tokenErr != nil || !ok || seen[key] {
+			return false
+		}
+		seen[key] = true
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			return false
+		}
+	}
+	closing, err := decoder.Token()
+	return err == nil && closing == json.Delim('}')
 }
 
 func validSecretBinding(binding SecretBinding) bool {
