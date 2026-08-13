@@ -47,10 +47,17 @@ func TestMigrationScriptUsesDedicatedLeastPrivilegeRoles(t *testing.T) {
 		"WHERE version = 4",
 		"VALUES (4, decode('$checksum_004', 'hex'), now())",
 		"REVOKE INSERT, UPDATE, DELETE ON TABLE public.schema_migrations",
+		"Rollback server/admin binaries may reuse this current migrator or skip migration",
+		"Do not run an older migrator against a schema with newer ledger entries",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("migrate.sh missing least-privilege control %q", required)
 		}
+	}
+	grantAt := strings.Index(script, "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public")
+	revokeLedgerAt := strings.Index(script, "REVOKE INSERT, UPDATE, DELETE ON TABLE public.schema_migrations")
+	if grantAt < 0 || revokeLedgerAt <= grantAt {
+		t.Fatal("migrate.sh must revoke schema_migrations DML after broad application table grants")
 	}
 }
 
@@ -140,7 +147,9 @@ func TestBackupRestorePreservesActivationStateAndExcludesPlaintextSecrets(t *tes
 	defer source.Close()
 	plaintextActivationCode := "ACTIVATION-PLAINTEXT-MUST-NOT-BE-IN-BACKUP-" + suffix
 	plaintextStartupSecret := "STARTUP-PLAINTEXT-MUST-NOT-BE-IN-BACKUP-" + suffix
-	insertRestoreFixtures(t, ctx, source, plaintextActivationCode, plaintextStartupSecret)
+	plaintextDeviceToken := "uclaw_dt_" + randomHex(t, 24)
+	plaintextNewAPIKey := "new_api_key_" + randomHex(t, 24)
+	tokenDigest, apiEnvelope := insertRestoreFixtures(t, ctx, source, plaintextActivationCode, plaintextStartupSecret, plaintextDeviceToken, plaintextNewAPIKey)
 
 	dumpPath := filepath.Join(t.TempDir(), "activation.dump")
 	runCommand(t, "", nil, "pg_dump", "--format=custom", "--no-owner", "--no-acl", "--file", dumpPath, sourceURL)
@@ -150,9 +159,14 @@ func TestBackupRestorePreservesActivationStateAndExcludesPlaintextSecrets(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{plaintextActivationCode, plaintextStartupSecret} {
+	for name, secret := range map[string]string{
+		"activation code": plaintextActivationCode,
+		"startup secret":  plaintextStartupSecret,
+		"device token":    plaintextDeviceToken,
+		"New API key":     plaintextNewAPIKey,
+	} {
 		if bytes.Contains(dump, []byte(secret)) {
-			t.Fatalf("backup contains plaintext secret marker %q", secret)
+			t.Fatalf("backup contains plaintext %s marker", name)
 		}
 	}
 
@@ -174,7 +188,7 @@ func TestBackupRestorePreservesActivationStateAndExcludesPlaintextSecrets(t *tes
 	}
 	defer restored.Close()
 
-	assertRestoredState(t, ctx, restored)
+	assertRestoredState(t, ctx, restored, tokenDigest, apiEnvelope)
 	assertRestoredUniqueConstraints(t, ctx, restored)
 	restoredAppURL, err := databaseURLForRole(restoreURL, appRole, "app-password-"+suffix)
 	if err != nil {
@@ -247,10 +261,12 @@ func assertApplicationRoleHasNoDDL(t *testing.T, ctx context.Context, appURL str
 	}
 }
 
-func insertRestoreFixtures(t *testing.T, ctx context.Context, pool *pgxpool.Pool, activationCode, startupSecret string) {
+func insertRestoreFixtures(t *testing.T, ctx context.Context, pool *pgxpool.Pool, activationCode, startupSecret, deviceToken, newAPIKey string) ([]byte, []byte) {
 	t.Helper()
 	activationDigest := sha256.Sum256([]byte(activationCode))
 	startupHash := sha256.Sum256([]byte(startupSecret))
+	tokenDigest := sha256.Sum256([]byte(deviceToken))
+	apiEnvelope := sha256.Sum256([]byte("new-api-envelope-v1:" + newAPIKey))
 	statements := []struct {
 		sql  string
 		args []any
@@ -268,10 +284,10 @@ func insertRestoreFixtures(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 			VALUES ('20000000-0000-0000-0000-000000000031','10000000-0000-0000-0000-000000000003','reissued',1,'fixture-key',decode(repeat('21',16),'hex'),$1,now(),now()+interval '30 days','20000000-0000-0000-0000-000000000032','2026-01-01T00:00:00Z',now())`, []any{startupHash[:]}},
 		{`INSERT INTO new_api_bindings
 			(inventory_id,device_id,new_api_user_id,new_api_username,balance_setup_status,status,policy_digest,api_key_envelope,api_key_version,base_url,default_model,allowed_models,requests_per_minute,concurrent_requests,created_at,updated_at)
-			VALUES ('00000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','fixture-api-user','fixture-api','configured','active',decode(repeat('23',32),'hex'),decode('55434c41572d4150492d454e56454c4f50452d5631','hex'),'fixture-kek-v1','https://api.invalid/v1','fixture-model',ARRAY['fixture-model'],120,4,now(),now())`, nil},
+			VALUES ('00000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','fixture-api-user','fixture-api','configured','active',decode(repeat('23',32),'hex'),$1,'fixture-kek-v1','https://api.invalid/v1','fixture-model',ARRAY['fixture-model'],120,4,now(),now())`, []any{apiEnvelope[:]}},
 		{`INSERT INTO device_access_tokens
 			(device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,created_at,updated_at)
-			VALUES ('60000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000032',decode(repeat('24',32),'hex'),'active',now(),now(),now())`, nil},
+			VALUES ('60000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000032',$1,'active',now(),now(),now())`, []any{tokenDigest[:]}},
 		{`INSERT INTO model_proxy_admissions
 			(request_id,device_token_id,started_at,lease_expires_at,completed_at)
 			VALUES ('70000000-0000-0000-0000-000000000003','60000000-0000-0000-0000-000000000003','2026-01-01T00:00:00Z','2026-01-01T00:01:00Z','2026-01-01T00:00:30Z')`, nil},
@@ -289,9 +305,10 @@ func insertRestoreFixtures(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 			t.Fatalf("insert backup fixture: %v", err)
 		}
 	}
+	return tokenDigest[:], apiEnvelope[:]
 }
 
-func assertRestoredState(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+func assertRestoredState(t *testing.T, ctx context.Context, pool *pgxpool.Pool, expectedTokenDigest, expectedAPIEnvelope []byte) {
 	t.Helper()
 	var prepared, binding, active, reissued, audits int
 	var entitlementRevision, oldRevision, newRevision, artifactGeneration int64
@@ -335,7 +352,7 @@ func assertRestoredState(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 	if string(envelope) != "UCLAW-ENVELOPE-V1" || audits != 4 {
 		t.Fatalf("restored artifact=%q audits=%d", envelope, audits)
 	}
-	if string(apiEnvelope) != "UCLAW-API-ENVELOPE-V1" || defaultModel != "fixture-model" || len(tokenDigest) != 32 || admissionCount != 1 {
+	if !bytes.Equal(apiEnvelope, expectedAPIEnvelope) || defaultModel != "fixture-model" || !bytes.Equal(tokenDigest, expectedTokenDigest) || admissionCount != 1 {
 		t.Fatalf("restored proxy state api_envelope=%q model=%q token_digest_len=%d admissions=%d", apiEnvelope, defaultModel, len(tokenDigest), admissionCount)
 	}
 }

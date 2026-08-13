@@ -71,6 +71,9 @@ services:
       - source: migration_003
         target: /migrations/003_admin.sql
         mode: 0444
+      - source: migration_004
+        target: /migrations/004_device_access_proxy.sql
+        mode: 0444
     secrets:
       - migration_database_url
       - migration_role
@@ -189,6 +192,8 @@ configs:
     file: ../migrations/002_lifecycle.sql
   migration_003:
     file: ../migrations/003_admin.sql
+  migration_004:
+    file: ../migrations/004_device_access_proxy.sql
   public_gateway:
     content: |
       worker_processes auto;
