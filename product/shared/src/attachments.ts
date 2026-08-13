@@ -88,4 +88,7 @@ export interface AttachmentService {
   prepare(id: string, signal?: AbortSignal): AsyncIterable<Attachment>;
   cancel(id: string): Promise<void>;
   remove(id: string): Promise<void>;
+  retain?(id: string): Promise<void>;
+  release?(id: string): Promise<void>;
+  referencedAttachmentIds?(): ReadonlySet<string> | Promise<ReadonlySet<string>>;
 }

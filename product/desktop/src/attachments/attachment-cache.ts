@@ -58,6 +58,7 @@ function toAttachment(metadata: StoredMetadata): Attachment {
 export function createAttachmentCache(options: AttachmentCacheOptions): AttachmentCache {
   const now = options.now ?? Date.now;
   const makeId = options.id ?? randomUUID;
+  const references = new Map<string, number>();
   const free = options.availableBytes ?? (async (path: string) => { const info = await statfs(path); return info.bavail * info.bsize; });
   const roots = async () => {
     const data = options.dataDir;
@@ -175,6 +176,19 @@ export function createAttachmentCache(options: AttachmentCacheOptions): Attachme
     },
     async cancel(id: string) { await rm(await importDir(id), { recursive: true, force: true }); },
     async remove(id: string) { await rm(await objectDir(id), { recursive: true, force: true }); },
+    async retain(id: string) {
+      await readStored(id);
+      references.set(id, (references.get(id) ?? 0) + 1);
+    },
+    async release(id: string) {
+      await readStored(id);
+      const remaining = Math.max(0, (references.get(id) ?? 0) - 1);
+      if (remaining === 0) references.delete(id);
+      else references.set(id, remaining);
+      const metadata = await readStored(id);
+      await writeFile(join(await objectDir(id), "metadata.json"), JSON.stringify({ ...metadata, lastUsedAt: now() }), { mode: 0o600 });
+    },
+    referencedAttachmentIds: () => new Set(references.keys()),
     async readPreview(id: string, range = { offset: 0, length: MAX_ATTACHMENT_BYTES }) {
       await readStored(id);
       const content = join(await objectDir(id), "content");

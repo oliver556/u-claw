@@ -28,7 +28,7 @@ export interface ResolvedOpenClawAttachment extends OpenClawAttachment {
 }
 
 export interface OpenClawAttachmentResolver extends AttachmentService {
-  resolveForSend(id: string): ResolvedOpenClawAttachment | Promise<ResolvedOpenClawAttachment>;
+  resolveForSend(id: string, maxEncodedBytes?: number): ResolvedOpenClawAttachment | Promise<ResolvedOpenClawAttachment>;
   markUploading?(id: string, progress: number): void;
   markAttached?(id: string): void;
   markFailed?(id: string, error: UClawErrorSummary): void;
@@ -128,6 +128,9 @@ export function createControlledAttachmentResolver(options: ControlledAttachment
       await options.source.remove(id);
       sendStates.delete(id);
     },
+    retain: options.source.retain?.bind(options.source),
+    release: options.source.release?.bind(options.source),
+    referencedAttachmentIds: options.source.referencedAttachmentIds?.bind(options.source),
     markUploading(id, progress) {
       sendStates.set(id, { state: "uploading", progress });
     },
@@ -140,7 +143,7 @@ export function createControlledAttachmentResolver(options: ControlledAttachment
         error: { code: failure.code, message: "附件发送失败。", retryable: failure.retryable },
       });
     },
-    async resolveForSend(id) {
+    async resolveForSend(id, maxEncodedBytes) {
       const attachment = await options.source.get(id);
       if (attachment.state !== "ready" && attachment.state !== "attached") {
         throw new AttachmentServiceError("INVALID_ARGUMENT", "附件尚未准备完成。");
@@ -151,6 +154,10 @@ export function createControlledAttachmentResolver(options: ControlledAttachment
       }
       const maxBytes = VIDEO_MEDIA_TYPES.has(mediaType) ? MAX_VIDEO_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES;
       if (size > maxBytes) throw new AttachmentServiceError("FILE_TOO_LARGE", `附件超过大小限制（${size} > ${maxBytes} bytes）。`);
+      const estimatedEncodedBytes = Math.ceil(size / 3) * 4;
+      if (maxEncodedBytes !== undefined && estimatedEncodedBytes > maxEncodedBytes) {
+        throw new AttachmentServiceError("FILE_TOO_LARGE", `附件发送载荷超过 Gateway 限制（预计 ${estimatedEncodedBytes} > ${maxEncodedBytes} bytes）。`);
+      }
       const contentPath = controlledContentPath(options.dataRoot, relativePath);
       await options.beforeRead?.(id);
       let before;

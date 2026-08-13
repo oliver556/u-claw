@@ -76,6 +76,18 @@ describe("attachment cache", () => {
     expect(metadata.lastUsedAt).toBe(20);
   });
 
+  it("tracks live draft references until the renderer releases them", async () => {
+    const { cache } = await setup();
+    const { importId } = await cache.beginImport!({ name: "pixel.png", mediaType: "image/png", size: PNG.length });
+    await cache.importChunk!({ importId, offset: 0, contentBase64: PNG.toString("base64") });
+    const attachment = await cache.finishImport!({ importId });
+
+    await cache.retain!(attachment.id);
+    expect(cache.referencedAttachmentIds!()).toEqual(new Set([attachment.id]));
+    await cache.release!(attachment.id);
+    expect(cache.referencedAttachmentIds!()).toEqual(new Set());
+  });
+
   it("imports a selected source file without renderer Base64 and rejects source symlinks", async () => {
     const { dataDir, cache } = await setup();
     const source = join(dataDir, "selected.png");

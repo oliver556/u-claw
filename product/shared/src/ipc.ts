@@ -89,6 +89,8 @@ export const AttachmentIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("prepare"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("cancel"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("remove"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
+  z.object({ method: z.literal("retain"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
+  z.object({ method: z.literal("release"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
 ]);
 export type AttachmentIpcRequest = z.infer<typeof AttachmentIpcRequestSchema>;
 
@@ -103,9 +105,11 @@ export const AttachmentIpcResponseSchema = z.union([
     z.object({ method: z.literal("prepare"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(AttachmentSchema) }).strict(),
     z.object({ method: z.literal("cancel"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
     z.object({ method: z.literal("remove"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+    z.object({ method: z.literal("retain"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+    z.object({ method: z.literal("release"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
   ]),
   z.object({
-    method: z.enum(["select", "import", "import.begin", "import.chunk", "import.finish", "get", "prepare", "cancel", "remove"]),
+    method: z.enum(["select", "import", "import.begin", "import.chunk", "import.finish", "get", "prepare", "cancel", "remove", "retain", "release"]),
     requestId: RequestIdSchema,
     ok: z.literal(false),
     error: UClawErrorSchema,
