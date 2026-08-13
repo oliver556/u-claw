@@ -30,6 +30,7 @@ import (
 )
 
 const shutdownTimeout = 10 * time.Second
+const healthcheckURL = "http://127.0.0.1:8080/health/ready"
 
 const (
 	readHeaderTimeout = 5 * time.Second
@@ -40,10 +41,36 @@ const (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--healthcheck" {
+		client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}}
+		if err := runHealthcheck(healthcheckURL, client); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("activation server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func runHealthcheck(endpoint string, client *http.Client) error {
+	if client == nil {
+		return errors.New("healthcheck client is required")
+	}
+	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return errors.New("healthcheck request is invalid")
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return errors.New("healthcheck request failed")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return errors.New("service is not ready")
+	}
+	return nil
 }
 
 func run() error {

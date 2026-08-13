@@ -36,6 +36,12 @@ x-activation-app: &activation-app
   security_opt:
     - no-new-privileges:true
   stop_grace_period: 15s
+  healthcheck:
+    test: ["CMD", "/activation-server", "--healthcheck"]
+    interval: 10s
+    timeout: 3s
+    retries: 6
+    start_period: 10s
 
 services:
   activation-1:
@@ -119,9 +125,17 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "openresty -t && kill -0 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
     depends_on:
-      - activation-1
-      - activation-2
+      activation-1:
+        condition: service_healthy
+      activation-2:
+        condition: service_healthy
 
   # Caddy obtains and renews the public DNS certificate. The IP endpoint uses
   # the explicitly supplied compatibility certificate; public CAs generally
@@ -156,7 +170,8 @@ services:
     security_opt:
       - no-new-privileges:true
     depends_on:
-      - public-gateway
+      public-gateway:
+        condition: service_healthy
 
   # Loopback binding plus mTLS keeps management routes off the public network.
   # Production should place this listener behind a private VPN/bastion as well.
@@ -262,12 +277,15 @@ configs:
       events { worker_connections 4096; }
       http {
         lua_shared_dict rate_limit 32m;
+        client_body_temp_path /tmp/client_body_temp 1 2;
         resolver 127.0.0.11 valid=10s ipv6=off;
         upstream activation_public {
           zone activation_public 64k;
           least_conn;
-          server activation-1:8080 resolve;
-          server activation-2:8080 resolve;
+          # Docker DNS is resolved when OpenResty starts. Restart this gateway
+          # after activation container IP changes so the upstream set refreshes.
+          server activation-1:8080;
+          server activation-2:8080;
           keepalive 64;
         }
         server {
