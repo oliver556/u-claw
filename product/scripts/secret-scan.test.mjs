@@ -109,8 +109,16 @@ test("scans every activation code assignment on one line", () => {
   const placeholder = "TESTTESTTESTTESTTESTTEST12";
   const finding = { path: "tests/same-line.ts", line: 1, rule: "ACTIVATION_CODE" };
   assert.deepEqual(scanText("tests/same-line.ts", `activationCode=${placeholder}; activationCode=${realCode}`), [finding]);
+  assert.deepEqual(scanText("tests/same-line.ts", `activationCode=${placeholder};activationCode=${realCode}`), [finding]);
   assert.deepEqual(scanText("tests/same-line.ts", `activationCode=${realCode}; activationCode=${placeholder}`), [finding]);
   assert.deepEqual(scanText("tests/same-line.ts", `activationCode=${placeholder}; activationCode=${placeholder}`), []);
+  assert.deepEqual(scanText("tests/same-line.ts", `activationCode=${placeholder}_leaked;activationCode=${realCode}`), [finding]);
+  assert.deepEqual(scanText("tests/same-line.ts", [
+    `activationCode=${realCode}_suffix`,
+    `activationCode=${realCode}-suffix`,
+    `activationCode=${realCode}Z`,
+    `myactivationCode=${realCode}`,
+  ].join("\n")), []);
 });
 
 test("detects modern GitHub fine-grained access tokens", () => {
