@@ -372,6 +372,8 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         throw new ActivationArtifactError("ARTIFACT_INVALID", "Legacy activation recovery artifacts changed after verification.");
       }
       try {
+        await write(journalPath, `${JSON.stringify({ ...expected, stage: "committed" })}\n`);
+        await remove(backupPath);
         await remove(journalPath);
       } catch (error) {
         if (error instanceof FsSafeError) throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Legacy activation recovery path is unsafe.");
