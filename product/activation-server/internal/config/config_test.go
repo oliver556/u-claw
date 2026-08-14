@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadFromPreservesConfigurationValues(t *testing.T) {
@@ -31,6 +32,11 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "fingerprint-key", []byte(strings.Repeat("f", 32))),
 		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
 		"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
+		"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
+		"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
+		"MODEL_PROXY_RESPONSE_BODY_BYTES":   "4194304",
+		"MODEL_PROXY_TIMEOUT":               "60s",
+		"MODEL_PROXY_ADMISSION_LEASE":       "65s",
 		"LISTEN_ADDRESS":                    " 127.0.0.1:8080 ",
 	}
 
@@ -62,6 +68,22 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	if got.AdminOperatorsFile != operatorsFile || len(got.AdminOperators) != 1 {
 		t.Fatal("admin operators were not loaded")
 	}
+	if got.NewAPIKMSKeyVersion != "new-api-kms-v2" || got.ModelProxyRequestBodyBytes != 1<<20 || got.ModelProxyResponseBodyBytes != 4<<20 || got.ModelProxyTimeout != 60*time.Second || got.ModelProxyAdmissionLease != 65*time.Second {
+		t.Fatalf("model proxy configuration not preserved: %#v", got)
+	}
+	for _, test := range []struct{ name, value string }{
+		{name: "NEW_API_KMS_KEY_VERSION", value: "?"},
+		{name: "MODEL_PROXY_REQUEST_BODY_BYTES", value: "0"},
+		{name: "MODEL_PROXY_RESPONSE_BODY_BYTES", value: "not-a-size"},
+		{name: "MODEL_PROXY_TIMEOUT", value: "0s"},
+		{name: "MODEL_PROXY_ADMISSION_LEASE", value: "60s"},
+	} {
+		invalid := maps.Clone(values)
+		invalid[test.name] = test.value
+		if _, err := LoadFrom(func(name string) string { return invalid[name] }); err == nil || !strings.Contains(err.Error(), test.name) {
+			t.Fatalf("%s=%q error=%v", test.name, test.value, err)
+		}
+	}
 }
 
 func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T) {
@@ -80,6 +102,11 @@ func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T
 		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "required-fingerprint-key", []byte(strings.Repeat("f", 32))),
 		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
 		"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
+		"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
+		"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
+		"MODEL_PROXY_RESPONSE_BODY_BYTES":   "4194304",
+		"MODEL_PROXY_TIMEOUT":               "60s",
+		"MODEL_PROXY_ADMISSION_LEASE":       "65s",
 	}
 
 	for _, missingName := range requiredVariables {
@@ -154,6 +181,11 @@ func TestLoadFromRejectsInvalidSecretFilesWithoutLeakingValues(t *testing.T) {
 				"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "valid-fingerprint-key", []byte(strings.Repeat("f", 32))),
 				"NEW_API_ALLOWED_HOSTS":             "api.example.test",
 				"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
+				"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
+				"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
+				"MODEL_PROXY_RESPONSE_BODY_BYTES":   "4194304",
+				"MODEL_PROXY_TIMEOUT":               "60s",
+				"MODEL_PROXY_ADMISSION_LEASE":       "65s",
 			}
 			_, err := LoadFrom(func(name string) string { return values[name] })
 			if err == nil {
@@ -187,6 +219,11 @@ func TestLoadFromAcceptsOnlyExplicitKEKFormats(t *testing.T) {
 		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "fingerprint-key-base", []byte(strings.Repeat("f", 32))),
 		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
 		"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
+		"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
+		"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
+		"MODEL_PROXY_RESPONSE_BODY_BYTES":   "4194304",
+		"MODEL_PROXY_TIMEOUT":               "60s",
+		"MODEL_PROXY_ADMISSION_LEASE":       "65s",
 	}
 	for name, contents := range map[string][]byte{
 		"raw":    []byte(strings.Repeat("r", 32)),
@@ -290,7 +327,7 @@ func TestLoadFromRequiresIndependentAdminFingerprintSecret(t *testing.T) {
 	pepper := writeTestFile(t, directory, "separate-pepper", []byte(strings.Repeat("p", 32)))
 	kek := writeTestFile(t, directory, "separate-kek", []byte(strings.Repeat("k", 32)))
 	fingerprint := writeTestFile(t, directory, "separate-fingerprint", []byte(strings.Repeat("f", 32)))
-	base := map[string]string{"DATABASE_URL": "postgres://database/uclaw", "ACTIVATION_PEPPER_FILE": pepper, "LICENSE_SIGNING_KEY_FILE": signing, "STATUS_SIGNING_KEY_FILE": signing, "LICENSE_KEY_ID": "license-key-001", "STATUS_KEY_ID": "status-key-001", "KMS_PROVIDER": "local-kek-v1", "KMS_KEY_VERSION": "kms-v1", "KMS_KEK_FILE": kek, "ADMIN_OPERATORS_FILE": writeTestFile(t, directory, "separate-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)), "ADMIN_SECRET_FINGERPRINT_KEY_FILE": fingerprint, "NEW_API_ALLOWED_HOSTS": "api.example.test", "PUBLIC_MODEL_ENDPOINT": "https://activation.example/model-api/"}
+	base := map[string]string{"DATABASE_URL": "postgres://database/uclaw", "ACTIVATION_PEPPER_FILE": pepper, "LICENSE_SIGNING_KEY_FILE": signing, "STATUS_SIGNING_KEY_FILE": signing, "LICENSE_KEY_ID": "license-key-001", "STATUS_KEY_ID": "status-key-001", "KMS_PROVIDER": "local-kek-v1", "KMS_KEY_VERSION": "kms-v1", "KMS_KEK_FILE": kek, "ADMIN_OPERATORS_FILE": writeTestFile(t, directory, "separate-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)), "ADMIN_SECRET_FINGERPRINT_KEY_FILE": fingerprint, "NEW_API_ALLOWED_HOSTS": "api.example.test", "PUBLIC_MODEL_ENDPOINT": "https://activation.example/model-api/", "NEW_API_KMS_KEY_VERSION": "new-api-kms-v2", "MODEL_PROXY_REQUEST_BODY_BYTES": "1048576", "MODEL_PROXY_RESPONSE_BODY_BYTES": "4194304", "MODEL_PROXY_TIMEOUT": "60s", "MODEL_PROXY_ADMISSION_LEASE": "65s"}
 	if _, err := LoadFrom(func(name string) string { return base[name] }); err != nil {
 		t.Fatalf("independent secret rejected: %v", err)
 	}

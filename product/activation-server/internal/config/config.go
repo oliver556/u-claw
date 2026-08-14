@@ -14,8 +14,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"u-claw-activation-server/internal/admin"
 	"u-claw-activation-server/internal/modelendpoint"
@@ -43,6 +45,11 @@ var requiredVariables = []string{
 	"ADMIN_OPERATORS_FILE",
 	"ADMIN_SECRET_FINGERPRINT_KEY_FILE",
 	"NEW_API_ALLOWED_HOSTS",
+	"NEW_API_KMS_KEY_VERSION",
+	"MODEL_PROXY_REQUEST_BODY_BYTES",
+	"MODEL_PROXY_RESPONSE_BODY_BYTES",
+	"MODEL_PROXY_TIMEOUT",
+	"MODEL_PROXY_ADMISSION_LEASE",
 }
 
 type Config struct {
@@ -65,6 +72,11 @@ type Config struct {
 	AdminSecretFingerprintKeyFile string
 	AdminSecretFingerprintKey     []byte
 	AllowedNewAPIHosts            []string
+	NewAPIKMSKeyVersion           string
+	ModelProxyRequestBodyBytes    int64
+	ModelProxyResponseBodyBytes   int64
+	ModelProxyTimeout             time.Duration
+	ModelProxyAdmissionLease      time.Duration
 }
 
 func Load() (Config, error) {
@@ -123,6 +135,25 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if !validPublicModelEndpoint(values["PUBLIC_MODEL_ENDPOINT"]) {
 		return Config{}, errors.New("configuration PUBLIC_MODEL_ENDPOINT is invalid")
 	}
+	if !keyVersionPattern.MatchString(values["NEW_API_KMS_KEY_VERSION"]) {
+		return Config{}, errors.New("configuration NEW_API_KMS_KEY_VERSION is invalid")
+	}
+	requestBodyBytes, err := parseModelProxyBytes(values["MODEL_PROXY_REQUEST_BODY_BYTES"])
+	if err != nil {
+		return Config{}, errors.New("configuration MODEL_PROXY_REQUEST_BODY_BYTES is invalid")
+	}
+	responseBodyBytes, err := parseModelProxyBytes(values["MODEL_PROXY_RESPONSE_BODY_BYTES"])
+	if err != nil || responseBodyBytes < requestBodyBytes {
+		return Config{}, errors.New("configuration MODEL_PROXY_RESPONSE_BODY_BYTES is invalid")
+	}
+	proxyTimeout, err := parseModelProxyDuration(values["MODEL_PROXY_TIMEOUT"])
+	if err != nil {
+		return Config{}, errors.New("configuration MODEL_PROXY_TIMEOUT is invalid")
+	}
+	admissionLease, err := parseModelProxyDuration(values["MODEL_PROXY_ADMISSION_LEASE"])
+	if err != nil || admissionLease <= proxyTimeout {
+		return Config{}, errors.New("configuration MODEL_PROXY_ADMISSION_LEASE is invalid")
+	}
 
 	return Config{
 		ListenAddress:                 listenAddress,
@@ -142,7 +173,27 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		AdminOperatorsFile:            values["ADMIN_OPERATORS_FILE"],
 		AdminOperators:                adminOperators,
 		AdminSecretFingerprintKeyFile: values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], AdminSecretFingerprintKey: fingerprintKey, AllowedNewAPIHosts: allowedHosts,
+		NewAPIKMSKeyVersion: values["NEW_API_KMS_KEY_VERSION"], ModelProxyRequestBodyBytes: requestBodyBytes, ModelProxyResponseBodyBytes: responseBodyBytes,
+		ModelProxyTimeout: proxyTimeout, ModelProxyAdmissionLease: admissionLease,
 	}, nil
+}
+
+var keyVersionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
+
+func parseModelProxyBytes(raw string) (int64, error) {
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 1 || value > 16<<20 {
+		return 0, errors.New("model proxy size invalid")
+	}
+	return value, nil
+}
+
+func parseModelProxyDuration(raw string) (time.Duration, error) {
+	value, err := time.ParseDuration(raw)
+	if err != nil || value < time.Second || value > 2*time.Minute {
+		return 0, errors.New("model proxy duration invalid")
+	}
+	return value, nil
 }
 
 func validPublicModelEndpoint(raw string) bool {

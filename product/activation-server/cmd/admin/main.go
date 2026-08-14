@@ -76,7 +76,7 @@ func realMain(ctx context.Context, args []string, getenv func(string) string, st
 		fmt.Fprintln(stderr, "admin service unavailable")
 		return 1
 	}
-	service, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, SecretEnvelope: security.NewSecretEnvelopeService(kms, nil), KeyVersion: cfg.KMSKeyVersion, SecretFingerprintKey: cfg.AdminSecretFingerprintKey, AllowedNewAPIHosts: cfg.AllowedNewAPIHosts})
+	service, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, SecretEnvelope: security.NewSecretEnvelopeService(kms, nil), KeyVersion: cfg.NewAPIKMSKeyVersion, SecretFingerprintKey: cfg.AdminSecretFingerprintKey, AllowedNewAPIHosts: cfg.AllowedNewAPIHosts})
 	if err != nil {
 		fmt.Fprintln(stderr, "admin service unavailable")
 		return 1

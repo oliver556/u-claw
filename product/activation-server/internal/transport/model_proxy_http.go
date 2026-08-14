@@ -19,8 +19,6 @@ import (
 	"u-claw-activation-server/internal/modelproxy"
 )
 
-const modelRequestLimit int64 = 1 << 20
-
 var (
 	modelNamePattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 	proxyIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
@@ -33,22 +31,26 @@ type ModelProxyService interface {
 	Complete(context.Context, modelproxy.Grant, string, string, int, *modelproxy.Usage)
 }
 type ModelProxyHandlerOptions struct {
-	Service      ModelProxyService
-	Client       *http.Client
-	AllowedHosts []string
-	RequestIDs   io.Reader
-	Timeout      time.Duration
-	Observer     modelproxy.Observer
+	Service           ModelProxyService
+	Client            *http.Client
+	AllowedHosts      []string
+	RequestIDs        io.Reader
+	Timeout           time.Duration
+	Observer          modelproxy.Observer
+	RequestBodyBytes  int64
+	ResponseBodyBytes int64
 }
 type modelProxyHandler struct {
-	service       ModelProxyService
-	client        *http.Client
-	allowedHosts  []string
-	requestIDs    io.Reader
-	timeout       time.Duration
-	observer      modelproxy.Observer
-	requestIDMu   sync.Mutex
-	lastRequestID string
+	service           ModelProxyService
+	client            *http.Client
+	allowedHosts      []string
+	requestIDs        io.Reader
+	timeout           time.Duration
+	observer          modelproxy.Observer
+	requestBodyBytes  int64
+	responseBodyBytes int64
+	requestIDMu       sync.Mutex
+	lastRequestID     string
 }
 
 func NewModelProxyHandler(o ModelProxyHandlerOptions) http.Handler {
@@ -58,7 +60,13 @@ func NewModelProxyHandler(o ModelProxyHandlerOptions) http.Handler {
 	if o.Timeout <= 0 {
 		o.Timeout = 60 * time.Second
 	}
-	return &modelProxyHandler{service: o.Service, client: o.Client, allowedHosts: append([]string(nil), o.AllowedHosts...), requestIDs: o.RequestIDs, timeout: o.Timeout, observer: o.Observer}
+	if o.RequestBodyBytes <= 0 {
+		o.RequestBodyBytes = 1 << 20
+	}
+	if o.ResponseBodyBytes <= 0 {
+		o.ResponseBodyBytes = 4 << 20
+	}
+	return &modelProxyHandler{service: o.Service, client: o.Client, allowedHosts: append([]string(nil), o.AllowedHosts...), requestIDs: o.RequestIDs, timeout: o.Timeout, observer: o.Observer, requestBodyBytes: o.RequestBodyBytes, responseBodyBytes: o.ResponseBodyBytes}
 }
 
 type chatMessage struct {
@@ -111,7 +119,7 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if route == "chat" {
-		if err := decodeModelRequest(w, r, &chat); err != nil {
+		if err := decodeModelRequest(w, r, &chat, h.requestBodyBytes); err != nil {
 			status := 400
 			if errors.Is(err, errBodyTooLarge) {
 				status = 413
@@ -181,9 +189,9 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeProxyError(w, 502, "UPSTREAM_UNAVAILABLE", requestID)
 		return
 	}
-	limit := int64(1 << 20)
+	limit := h.requestBodyBytes
 	if route == "chat" {
-		limit = 4 << 20
+		limit = h.responseBodyBytes
 	}
 	content, err := readBounded(response.Body, limit)
 	if err != nil || rejectUpstreamDuplicateKeys(content) != nil || !validUpstreamJSON(route, content) {
@@ -245,15 +253,15 @@ func strictBearer(values []string) (string, bool) {
 	token := strings.TrimPrefix(v, "Bearer ")
 	return token, token != "" && strings.TrimSpace(token) == token && !strings.ContainsAny(token, " \t\r\n")
 }
-func decodeModelRequest(w http.ResponseWriter, r *http.Request, out any) error {
+func decodeModelRequest(w http.ResponseWriter, r *http.Request, out any, limit int64) error {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
 		return errInvalidRequest
 	}
-	if r.ContentLength > modelRequestLimit {
+	if r.ContentLength > limit {
 		return errBodyTooLarge
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, modelRequestLimit)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	content, err := io.ReadAll(r.Body)
 	if err != nil {
 		var max *http.MaxBytesError

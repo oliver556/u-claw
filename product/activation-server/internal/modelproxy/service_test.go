@@ -208,9 +208,9 @@ func TestAuthorizeUsesSharedAPIKeyBoundaries(t *testing.T) {
 	}
 }
 
-func TestAuthorizeDerivesLeaseFromOverallDeadline(t *testing.T) {
+func TestAuthorizeUsesConfiguredAdmissionLease(t *testing.T) {
 	repo := &fakeRepository{auth: activeAuthorization()}
-	service, _ := NewService(ServiceOptions{Repository: repo, Digest: func(string) [32]byte { return [32]byte{} }, Envelope: &fakeEnvelope{value: runtimeSecret(t)}})
+	service, _ := NewService(ServiceOptions{Repository: repo, Digest: func(string) [32]byte { return [32]byte{} }, Envelope: &fakeEnvelope{value: runtimeSecret(t)}, AdmissionLease: 65 * time.Second})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	grant, err := service.Authorize(ctx, "token", "allowed", "req-123")
@@ -218,7 +218,7 @@ func TestAuthorizeDerivesLeaseFromOverallDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant.Clear()
-	if repo.lease < 39*time.Second || repo.lease > 41*time.Second {
+	if repo.lease != 65*time.Second {
 		t.Fatalf("lease=%s", repo.lease)
 	}
 }

@@ -116,14 +116,15 @@ func TestNewHTTPServerUsesSafeLimitsAndInjectedDatabaseCheck(t *testing.T) {
 func TestProductionKMSUsesConfiguredKEKAndRejectsUnsafeProviders(t *testing.T) {
 	for _, cfg := range []config.Config{
 		{},
-		{KMSProvider: "test", KMSKeyVersion: "kms-v1", KMSKEK: make([]byte, 32)},
-		{KMSProvider: "local-kek-v1", KMSKeyVersion: "kms-v1", KMSKEK: make([]byte, 31)},
+		{KMSProvider: "test", KMSKeyVersion: "kms-v1", NewAPIKMSKeyVersion: "new-api-v1", KMSKEK: make([]byte, 32)},
+		{KMSProvider: "local-kek-v1", KMSKeyVersion: "kms-v1", NewAPIKMSKeyVersion: "new-api-v1", KMSKEK: make([]byte, 31)},
+		{KMSProvider: "local-kek-v1", KMSKeyVersion: "kms-v1", KMSKEK: make([]byte, 32)},
 	} {
 		if _, err := productionKMS(cfg); err == nil {
 			t.Fatalf("unsafe config accepted: %#v", cfg)
 		}
 	}
-	kms, err := productionKMS(config.Config{KMSProvider: "local-kek-v1", KMSKeyVersion: "kms-v1", KMSKEK: []byte("01234567890123456789012345678901")})
+	kms, err := productionKMS(config.Config{KMSProvider: "local-kek-v1", KMSKeyVersion: "kms-v1", NewAPIKMSKeyVersion: "new-api-v1", KMSKEK: []byte("01234567890123456789012345678901")})
 	if err != nil {
 		t.Fatal(err)
 	}
