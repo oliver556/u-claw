@@ -110,8 +110,22 @@ func TestModelProxyHandlerUsesConfiguredBodyLimits(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	response = httptest.NewRecorder()
 	h.ServeHTTP(response, request)
-	if response.Code != http.StatusBadGateway {
+	if response.Code != http.StatusOK {
 		t.Fatalf("models response status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		model := `{"id":"allowed","object":"model","created":1,"owned_by":"owner"}`
+		body := `{"object":"list","data":[` + strings.Repeat(model+",", 17000) + model + `]}`
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	h = NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}, RequestBodyBytes: 1 << 20, ResponseBodyBytes: 4 << 20})
+	request = httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer token")
+	response = httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("oversized models response status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -318,7 +332,7 @@ func TestModelsAuthenticatesBeforeChunkedBodyCheck(t *testing.T) {
 }
 
 func TestUpstreamStrictValidationRejectsMissingAndWrongTypes(t *testing.T) {
-	tests := []struct{ route, body string }{{"models", `{"object":"list"}`}, {"models", `{"object":"list","data":[{"id":3,"object":"model","created":1,"owned_by":"owner"}]}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[]}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":[]},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":"1","completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{}}`}}
+	tests := []struct{ route, body string }{{"models", `{"object":"list"}`}, {"models", `{"object":"list","data":null}`}, {"models", `{"object":"list","data":[{"id":3,"object":"model","created":1,"owned_by":"owner"}]}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[]}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":[]},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":"1","completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{}}`}}
 	for _, test := range tests {
 		if validUpstreamJSON(test.route, []byte(test.body)) {
 			t.Fatalf("accepted route=%s body=%s", test.route, test.body)
@@ -338,7 +352,7 @@ func TestModelProxyHandlerRejectsMalformedAuthAndStrictPayloads(t *testing.T) {
 	for _, tc := range []struct {
 		name, auth, body string
 		status           int
-	}{{"two headers", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"extra whitespace", "Bearer  one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"stream", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":true}`, 400}, {"unknown", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false,"temperature":0}`, 400}, {"role", "Bearer one", `{"model":"allowed","messages":[{"role":"tool","content":"x"}],"stream":false}`, 400}} {
+	}{{"two headers", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"extra whitespace", "Bearer  one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"missing stream", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}]}`, 400}, {"stream", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":true}`, 400}, {"unknown", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false,"temperature":0}`, 400}, {"role", "Bearer one", `{"model":"allowed","messages":[{"role":"tool","content":"x"}],"stream":false}`, 400}} {
 		t.Run(tc.name, func(t *testing.T) {
 			service := &fakeProxyService{grant: validGrant(t)}
 			h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: &http.Client{}, AllowedHosts: []string{"api.example.test"}, RequestIDs: rand.Reader})

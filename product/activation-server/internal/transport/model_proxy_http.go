@@ -24,7 +24,10 @@ var (
 	proxyIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
 )
 
-const maxSafeInteger int64 = 9_007_199_254_740_991
+const (
+	maxSafeInteger          int64 = 9_007_199_254_740_991
+	modelsResponseBodyBytes       = 1 << 20
+)
 
 type ModelProxyService interface {
 	Authorize(context.Context, string, string, string) (modelproxy.Grant, error)
@@ -77,7 +80,7 @@ type chatRequest struct {
 	Model     string        `json:"model"`
 	Messages  []chatMessage `json:"messages"`
 	MaxTokens *int          `json:"max_tokens,omitempty"`
-	Stream    bool          `json:"stream"`
+	Stream    *bool         `json:"stream"`
 }
 type tokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
@@ -189,7 +192,11 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeProxyError(w, 502, "UPSTREAM_UNAVAILABLE", requestID)
 		return
 	}
-	content, err := readBounded(response.Body, h.responseBodyBytes)
+	responseBodyBytes := h.responseBodyBytes
+	if route == "models" {
+		responseBodyBytes = modelsResponseBodyBytes
+	}
+	content, err := readBounded(response.Body, responseBodyBytes)
 	if err != nil || rejectUpstreamDuplicateKeys(content) != nil || !validUpstreamJSON(route, content) {
 		h.observe("invalid_response", started)
 		outcome, status = "invalid_response", 502
@@ -289,7 +296,7 @@ func hasGETBody(w http.ResponseWriter, r *http.Request) (bool, error) {
 	return n > 0, nil
 }
 func validChat(c chatRequest) bool {
-	if !modelNamePattern.MatchString(c.Model) || c.Stream || len(c.Messages) == 0 || (c.MaxTokens != nil && (*c.MaxTokens < 1 || *c.MaxTokens > 32768)) {
+	if !modelNamePattern.MatchString(c.Model) || c.Stream == nil || *c.Stream || len(c.Messages) == 0 || (c.MaxTokens != nil && (*c.MaxTokens < 1 || *c.MaxTokens > 32768)) {
 		return false
 	}
 	for _, m := range c.Messages {
@@ -339,7 +346,7 @@ func validUpstreamJSON(route string, b []byte) bool {
 		}
 		var object string
 		var data []map[string]json.RawMessage
-		if json.Unmarshal(top["object"], &object) != nil || object != "list" || json.Unmarshal(top["data"], &data) != nil {
+		if json.Unmarshal(top["object"], &object) != nil || object != "list" || json.Unmarshal(top["data"], &data) != nil || data == nil {
 			return false
 		}
 		for _, m := range data {

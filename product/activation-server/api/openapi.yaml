@@ -117,6 +117,7 @@
         "security": [{ "BearerAuth": [] }],
         "responses": {
           "200": { "description": "Allowed OpenAI-compatible models", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OpenAIModelsResponse" } } } },
+          "400": { "description": "Invalid request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelProxyError" } } } },
           "401": { "description": "Device token rejected", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelProxyError" } } } },
           "429": { "description": "Proxy admission rejected", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelProxyError" } } } },
           "502": { "description": "Upstream request failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelProxyError" } } } },
