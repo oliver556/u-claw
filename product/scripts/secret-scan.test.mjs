@@ -104,6 +104,15 @@ test("detects activation codes leaked from test paths", () => {
   ].join("\n")), []);
 });
 
+test("scans every activation code assignment on one line", () => {
+  const realCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
+  const placeholder = "TESTTESTTESTTESTTESTTEST12";
+  const finding = { path: "tests/same-line.ts", line: 1, rule: "ACTIVATION_CODE" };
+  assert.deepEqual(scanText("tests/same-line.ts", `activationCode=${placeholder}; activationCode=${realCode}`), [finding]);
+  assert.deepEqual(scanText("tests/same-line.ts", `activationCode=${realCode}; activationCode=${placeholder}`), [finding]);
+  assert.deepEqual(scanText("tests/same-line.ts", `activationCode=${placeholder}; activationCode=${placeholder}`), []);
+});
+
 test("detects modern GitHub fine-grained access tokens", () => {
   const body = "11AA22bb33CC44dd55EE66ff77GG88hh99II00jj".repeat(3).slice(0, 82);
   const token = ["github", "pat", body].join("_");
