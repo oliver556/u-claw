@@ -1,9 +1,12 @@
 import { expect, test } from "@playwright/test";
 
+import { installBrowserTestBridge } from "./browser-test-bridge";
+
 async function installMaintenanceBridge(page: import("@playwright/test").Page) {
+  await installBrowserTestBridge(page);
   await page.addInitScript(() => {
     const ok = (request: any, result: any) => ({ method: request.method, requestId: request.requestId, ok: true, result });
-    (window as any).uclaw = { data: { invoke: async (request: any) => {
+    (window as any).uclaw = { ...((window as any).uclaw ?? {}), data: { invoke: async (request: any) => {
       if (request.method === "data.status") return ok(request, { state: "available", writable: true });
       if (request.method === "backup.preview") return ok(request, { previewToken: "preview-e2e", target: "当前 U 盘受控备份区", consistency: "runtime-coordination-required", trigger: "manual", retainLatest: 3, collections: [
         { id: "workspace-user-files", label: "用户文件", fileCount: 8, bytes: 4096, risk: "normal" },

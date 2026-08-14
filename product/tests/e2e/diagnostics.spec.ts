@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+import { installBrowserTestBridge } from "./browser-test-bridge";
+
 async function installDiagnosticsFixture(page: import("@playwright/test").Page) {
+  await installBrowserTestBridge(page);
   await page.addInitScript(() => {
     const log = { id: "fixture-log-1", timestamp: "2026-08-09T01:00:00.000Z", level: "info", source: "desktop", message: "Gateway ready." };
     const system = { product: { name: "U-Claw", version: "fixture" }, runtime: { node: "24.15.0", electron: "40.10.6", openclaw: "2026.7.1-2" }, platform: "win32", architecture: "x64", gateway: { status: "ready", port: 18789 }, proxy: "已配置（值已隐藏）", portableData: { state: "available", writable: true }, storage: { totalBytes: 1000, freeBytes: 400, usedBytes: 600 } };
@@ -13,7 +16,7 @@ async function installDiagnosticsFixture(page: import("@playwright/test").Page) 
       if (request.method.endsWith(".export")) return { method: request.method, requestId: request.requestId, ok: true, result: { name: request.params.fileName, relativePath: `exports/diagnostics/${request.params.fileName}`, bytes: 10, createdAt: "2026-08-09T01:00:00.000Z" } };
       throw new Error("Fixture supports diagnostics display only.");
     };
-    (window as any).uclaw = { diagnostics: { invoke } };
+    (window as any).uclaw = { ...((window as any).uclaw ?? {}), diagnostics: { invoke } };
   });
 }
 

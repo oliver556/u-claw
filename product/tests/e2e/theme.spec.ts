@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { installBrowserTestBridge } from "./browser-test-bridge";
+
 const settingsKey = "uclaw.settings.v1";
 
 async function openAppearance(page: Page) {
@@ -63,6 +65,7 @@ async function assertSemanticTextContrast(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await installBrowserTestBridge(page);
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/");
   await page.evaluate((key) => localStorage.removeItem(key), settingsKey);
@@ -128,7 +131,6 @@ test("keeps every primary route and overlay on dark semantic surfaces", async ({
   await page.getByRole("button", { name: "打开任务活动中心" }).click();
   await expect(page.locator(".task-activity-center")).toBeVisible();
   await assertNoLightSurfaceLeak(page);
-  await page.getByRole("button", { name: "关闭任务活动中心" }).click();
 
   await page.getByRole("button", { name: "打开全局搜索" }).click();
   await expect(page.locator(".command-modal")).toBeVisible();

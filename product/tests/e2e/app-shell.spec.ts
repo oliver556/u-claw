@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+import { installBrowserTestBridge } from "./browser-test-bridge";
+
+test.beforeEach(async ({ page }) => installBrowserTestBridge(page));
+
 const destinations = [
   ["工作", "/"],
   ["文件", "/files"],
@@ -54,9 +58,9 @@ test("keyboard focus is visible on primary navigation and drawer controls", asyn
   await expect(focused).toHaveCount(1);
   await expect(focused).toHaveCSS("outline-style", "solid");
 
-  const closeContext = page.getByRole("button", { name: "收起上下文舱" });
-  await closeContext.focus();
-  await expect(closeContext).toHaveCSS("outline-style", "solid");
+  const closeSessions = page.getByRole("button", { name: "收起会话栏" });
+  await closeSessions.focus();
+  await expect(closeSessions).toHaveCSS("outline-style", "solid");
 });
 
 test("mobile navigation reaches destinations hidden under More", async ({ page }) => {
@@ -88,7 +92,6 @@ test("mobile titlebar and icon controls preserve touch target sizes", async ({ p
     page.getByRole("button", { name: "打开任务活动中心" }),
     page.getByRole("button", { name: "关闭" }),
     page.getByRole("button", { name: "展开会话栏" }),
-    page.getByRole("button", { name: "展开上下文舱" }),
   ]) {
     const box = await control.boundingBox();
     expect(box?.width).toBeGreaterThanOrEqual(44);

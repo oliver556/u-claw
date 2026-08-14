@@ -1,9 +1,12 @@
 import { expect, test } from "@playwright/test";
 
+import { installBrowserTestBridge } from "./browser-test-bridge";
+
 async function installReleaseBridge(page: import("@playwright/test").Page) {
+  await installBrowserTestBridge(page);
   await page.addInitScript(() => {
     const ok = (request: any, result: any) => ({ method: request.method, requestId: request.requestId, ok: true, result });
-    (window as any).uclaw = { release: { invoke: async (request: any) => {
+    (window as any).uclaw = { ...((window as any).uclaw ?? {}), release: { invoke: async (request: any) => {
       if (request.method === "release.recovery") return ok(request, { state: "clean", message: "无待恢复更新。" });
       if (request.method === "release.check") return ok(request, { state: "available", checkedAt: "2026-08-09T00:00:00.000Z", currentVersion: "0.1.0", channel: "stable", update: { id: "release-42", version: "0.2.0", channel: "stable", publishedAt: "2026-08-09T00:00:00.000Z", notes: ["安全更新", "恢复流程改进"], compatibility: { platform: "win32", arch: "x64", runtimeId: "openclaw-2026.7.1-2-win-x64" }, bytes: 128, mandatory: false, previewToken: "preview-42" } });
       if (request.method === "uninstall.preview") return ok(request, { previewToken: "uninstall-token", scopes: [
