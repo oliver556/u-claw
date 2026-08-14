@@ -128,6 +128,33 @@ test("detects activation codes leaked from test paths", () => {
   ].join("\n")), []);
 });
 
+test("detects exact activation code keys across member assignment forms", () => {
+  const realCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
+  const placeholder = "TESTTESTTESTTESTTESTTEST12";
+  const path = "tests/member-assignments.ts";
+  const source = [
+    `request.activationCode = "${realCode}"`,
+    `obj["activationCode"] = '${realCode}'`,
+    `obj['activation_code'] = \`${realCode}\``,
+    `obj[\`activationCode\`] = ${realCode}`,
+    `log.info({ nested: { activationCode: "${realCode}" } })`,
+    `{"nested":{"activation_code":"${realCode}"}}`,
+    `request.activationCode = "${placeholder}"; obj["activationCode"] = "${realCode}"`,
+    `myactivationCode = "${realCode}"`,
+    `request.reactivationCode = "${realCode}"`,
+    `request.activationCodeSuffix = "${realCode}"`,
+    `obj["myactivationCode"] = "${realCode}"`,
+    `obj["activation" + "Code"] = "${realCode}"`,
+    `obj[key] = "${realCode}"`,
+  ].join("\n");
+
+  assert.deepEqual(scanText(path, source), [1, 2, 3, 4, 5, 6, 7].map((line) => ({
+    path,
+    line,
+    rule: "ACTIVATION_CODE",
+  })));
+});
+
 test("scans every activation code assignment on one line", () => {
   const realCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
   const placeholder = "TESTTESTTESTTESTTESTTEST12";

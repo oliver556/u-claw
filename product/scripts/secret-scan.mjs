@@ -15,7 +15,8 @@ const credentialField = "(?:api[_-]?key|new[_-]?api[_-]?(?:key|token)|access[_-]
 const quotedCredentialAssignment = new RegExp(`(?:^|[\\s{,])["']?${credentialField}["']?\\s*(?:=|:)\\s*(["'])([^"'\\x60\\r\\n]+)\\1`, "iu");
 const environmentCredentialAssignment = new RegExp(`^(?:export\\s+)?${credentialField}\\s*=\\s*([^\\s#]+)\\s*$`, "iu");
 const deviceTokenPattern = /(?:^|[^A-Za-z0-9_-])(uclaw_dt_[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/gu;
-const activationCodeAssignmentSource = String.raw`(?:^|[\s{\[\(,;])["']?activation[_-]?code["']?\s*(?:=|:)\s*(?:(["'\x60])([0-9A-HJKMNP-TV-Z]{26})\1|([0-9A-HJKMNP-TV-Z]{26})(?=$|[\s,;}\]\)]))`;
+const activationCodeKeySource = String.raw`(?:^|[^A-Za-z0-9_$\.\]])activation[_-]?code|\.\s*activation[_-]?code|\[\s*(?:"activation[_-]?code"|'activation[_-]?code'|\x60activation[_-]?code\x60)\s*\]|(?:^|[^A-Za-z0-9_$])(?:"activation[_-]?code"|'activation[_-]?code'|\x60activation[_-]?code\x60)`;
+const activationCodeAssignmentSource = String.raw`(?:${activationCodeKeySource})\s*(?:=|:)\s*(?:(["'\x60])([0-9A-HJKMNP-TV-Z]{26})\1|([0-9A-HJKMNP-TV-Z]{26})(?=$|[\s,;}\]\)]))`;
 const activationCodePlaceholder = "TESTTESTTESTTESTTESTTEST12";
 const tokenPatterns = [
   /\bAKIA[0-9A-Z]{16}\b/gu,
