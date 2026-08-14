@@ -212,7 +212,7 @@ func TestModelProxyHandlerFiltersModelsToAuthorization(t *testing.T) {
 	}
 }
 
-func TestModelProxyHandlerAllowsAndPreservesUpstreamExtensions(t *testing.T) {
+func TestModelProxyHandlerRejectsUpstreamExtensions(t *testing.T) {
 	cases := []struct{ route, body string }{
 		{"/model-api/v1/chat/completions", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","system_fingerprint":"fp_x","choices":[{"index":0,"message":{"role":"assistant","content":"ok","custom":"yes"},"finish_reason":"stop","logprobs":{"tokens":[]}}],"custom_top":{"x":1}}`},
 		{"/model-api/v1/models", `{"object":"list","custom_top":true,"data":[{"id":"allowed","object":"model","created":1,"owned_by":"owner","custom":"kept"}]}`},
@@ -236,7 +236,7 @@ func TestModelProxyHandlerAllowsAndPreservesUpstreamExtensions(t *testing.T) {
 		}
 		response := httptest.NewRecorder()
 		h.ServeHTTP(response, request)
-		if response.Code != 200 || !strings.Contains(response.Body.String(), "custom") {
+			if response.Code != 502 || !strings.Contains(response.Body.String(), "UPSTREAM_UNAVAILABLE") || strings.Contains(response.Body.String(), "custom") {
 			t.Fatalf("route=%s status=%d body=%s", test.route, response.Code, response.Body.String())
 		}
 	}
@@ -277,8 +277,8 @@ func TestModelsAuthenticatesBeforeChunkedBodyCheck(t *testing.T) {
 	}
 }
 
-func TestUpstreamMinimalValidationRejectsMissingAndWrongTypes(t *testing.T) {
-	tests := []struct{ route, body string }{{"models", `{"object":"list"}`}, {"models", `{"object":"list","data":[{"id":3,"object":"model","created":1,"owned_by":"owner"}]}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[]}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":[]}}]}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":"1","completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{}}`}}
+func TestUpstreamStrictValidationRejectsMissingAndWrongTypes(t *testing.T) {
+	tests := []struct{ route, body string }{{"models", `{"object":"list"}`}, {"models", `{"object":"list","data":[{"id":3,"object":"model","created":1,"owned_by":"owner"}]}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[]}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":[]},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":"1","completion_tokens":1,"total_tokens":2}}`}, {"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{}}`}}
 	for _, test := range tests {
 		if validUpstreamJSON(test.route, []byte(test.body)) {
 			t.Fatalf("accepted route=%s body=%s", test.route, test.body)
