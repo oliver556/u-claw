@@ -97,6 +97,8 @@ describe("activation OpenAPI contract", () => {
     expect(document.paths["/v1/device-tokens"]).toBeUndefined();
     expect(document.paths["/model-api/v1/models"].get.responses["200"].content["application/json"].schema)
       .toEqual({ $ref: "#/components/schemas/OpenAIModelsResponse" });
+    expect(document.paths["/model-api/v1/models"].get.responses["400"].content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/ModelProxyError" });
     expect(document.paths["/model-api/v1/chat/completions"].post.requestBody.content["application/json"].schema)
       .toEqual({ $ref: "#/components/schemas/OpenAIChatCompletionRequest" });
     expect(document.paths["/model-api/v1/chat/completions"].post.responses["200"].content["application/json"].schema)
