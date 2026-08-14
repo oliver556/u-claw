@@ -53,8 +53,9 @@ test("desktop renderer uses typed real-client bridge for model, history and stre
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "真实 Gateway 会话" })).toBeVisible();
-  await expect(page.getByRole("main").getByText(/GPT-5/)).toContainText("当前连接不支持模型列表");
+  await expect(page.getByRole("button", { name: /真实 Gateway 会话/ })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "会话模型" })).toBeVisible();
+  await expect(page.getByRole("main").getByText("openai/gpt-5")).toBeVisible();
   const composer = page.getByRole("textbox", { name: "给 U-Claw 发送消息" });
   await composer.fill("走真实 IPC 主链");
   await page.getByRole("button", { name: "发送消息" }).click();
