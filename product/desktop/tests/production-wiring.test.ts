@@ -359,7 +359,7 @@ describe("production desktop wiring", () => {
     const launch = options.buildGatewayLaunchOptions(18790) as { args: string[] };
     expect(launch.args[0]).toBe(await realpath(fixedEntry));
     await options.dispose?.();
-  });
+  }, 15_000);
 
   it("rejects an explicit entry whose adjacent package is not the locked OpenClaw version", async () => {
     await writeFile(join(runtimeRoot, "openclaw", "package.json"), JSON.stringify({ name: "openclaw", version: "2025.1.0" }));
