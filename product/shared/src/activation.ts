@@ -87,20 +87,6 @@ export const ActivationCommitSchema = z.object({
 }).strict();
 export type ActivationCommit = z.infer<typeof ActivationCommitSchema>;
 
-export const DeviceTokenRequestSchema = z.object({
-  deviceId: IdentifierSchema,
-  licenseId: IdentifierSchema,
-  idempotencyKey: IdempotencyKeySchema,
-}).strict();
-export type DeviceTokenRequest = z.infer<typeof DeviceTokenRequestSchema>;
-
-export const DeviceTokenResponseSchema = z.object({
-  accessToken: z.string().min(16).max(8_192),
-  tokenType: z.literal("Bearer"),
-  expiresAt: z.iso.datetime({ offset: true }),
-}).strict();
-export type DeviceTokenResponse = z.infer<typeof DeviceTokenResponseSchema>;
-
 export const ActivationStageSchema = z.enum([
   "requested",
   "server_bound",

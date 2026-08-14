@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import * as activationContract from "../src/activation.js";
+
 import {
   ActivationCommitSchema,
   ActivationErrorSchema,
@@ -25,6 +27,11 @@ const request = {
 };
 
 describe("activation API contract", () => {
+	it("does not export the removed short-lived device token protocol", () => {
+		expect(activationContract).not.toHaveProperty("DeviceTokenRequestSchema");
+		expect(activationContract).not.toHaveProperty("DeviceTokenResponseSchema");
+	});
+
 	it("accepts activation code without username and rejects extra identity fields", () => {
 		expect(ActivationRequestSchema.parse(request)).toEqual(request);
 		expect(() => ActivationRequestSchema.parse({ ...request, username: "UCLAW-00000001" })).toThrow();
