@@ -110,6 +110,9 @@ test("task activity center fits the 390px viewport", async ({ page }) => {
 
   const center = page.getByRole("complementary", { name: "全局任务活动中心" });
   await expect(center).toBeVisible();
+  await expect(center.getByText("Task/Artifact RPC 未配置")).toHaveCount(0);
+  await expect(center.getByRole("alert")).toHaveCount(0);
+  await expect(center.getByText("Task 活动中心")).toBeVisible();
   const box = await center.boundingBox();
   expect(box?.x).toBe(0);
   expect(box?.width).toBe(390);

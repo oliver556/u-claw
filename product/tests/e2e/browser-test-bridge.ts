@@ -1,7 +1,22 @@
 import type { Page } from "@playwright/test";
+import type { ArtifactSnapshot, TaskActivitySnapshot } from "@uclaw/shared";
+
+const activitySnapshot = {
+  contractVersion: 1,
+  generatedAt: "2026-08-08T08:00:00.000Z",
+  source: "openclaw",
+  tasks: [],
+} satisfies TaskActivitySnapshot;
+
+const artifactSnapshot = {
+  contractVersion: 1,
+  generatedAt: "2026-08-08T08:00:00.000Z",
+  source: "openclaw",
+  artifacts: [],
+} satisfies ArtifactSnapshot;
 
 export async function installBrowserTestBridge(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.addInitScript(({ activitySnapshot, artifactSnapshot }) => {
     const existing = (window as any).uclaw ?? {};
     if (existing.client) return;
 
@@ -87,8 +102,13 @@ export async function installBrowserTestBridge(page: Page): Promise<void> {
           const index = sessions.findIndex((item) => item.id === params.sessionId); if (index >= 0) sessions.splice(index, 1);
           messages.delete(params.sessionId); return success(request, null);
         }
-        if (request.method === "session-organizer.get") return success(request, { schemaVersion: 1, groups: [], sessions: [] });
-        if (request.method.startsWith("session-organizer.")) return success(request, null);
+        if ([
+          "session-organizer.get",
+          "session-organizer.set-pinned",
+          "session-organizer.create-group",
+          "session-organizer.rename-group",
+          "session-organizer.assign-group",
+        ].includes(request.method)) return success(request, { schemaVersion: 1, groups: [], sessions: [] });
         if (request.method === "chat.list") return success(request, { items: messages.get(params.sessionId) ?? [], nextCursor: null, hasMore: false });
         if (request.method === "chat.get") return success(request, (messages.get(params.sessionId) ?? []).find((item) => item.id === params.messageId));
         if (request.method === "chat.watch") return success(request, null);
@@ -128,7 +148,8 @@ export async function installBrowserTestBridge(page: Page): Promise<void> {
         if (request.method === "chat.cancel-stream") return success(request, null);
         if (request.method === "models.list") return success(request, []);
         if (request.method === "models.select-for-session") return success(request, null);
-        if (request.method === "activity.list" || request.method === "artifacts.list") return success(request, []);
+        if (request.method === "activity.list") return success(request, activitySnapshot);
+        if (request.method === "artifacts.list") return success(request, artifactSnapshot);
         throw new Error(`Unexpected browser test IPC method: ${request.method}`);
       },
     };
@@ -142,6 +163,13 @@ export async function installBrowserTestBridge(page: Page): Promise<void> {
       if (request.method === "skills.runtime-status") return success(request, { workspaceDir: "", managedSkillsDir: "", skills: [] });
       throw new Error(`Unexpected browser test skill method: ${request.method}`);
     } };
-    Object.defineProperty(window, "uclaw", { configurable: true, writable: true, value: { ...existing, client, data, skills } });
-  });
+    const taskArtifacts = existing.taskArtifacts ?? {
+      subscribe() { return () => undefined; },
+      async invoke(request: any) {
+        if (request.method === "tasks.list" || request.method === "artifacts.list") return success(request, []);
+        throw new Error(`Unexpected browser test Task/Artifact method: ${request.method}`);
+      },
+    };
+    Object.defineProperty(window, "uclaw", { configurable: true, writable: true, value: { ...existing, client, data, skills, taskArtifacts } });
+  }, { activitySnapshot, artifactSnapshot });
 }
