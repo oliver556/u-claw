@@ -167,6 +167,33 @@ describe("activation artifact writer", () => {
     await expect(writer.readJournal()).resolves.toBeNull();
   });
 
+  it("does not roll back committed legacy recovery when a v2 artifact backup is still present", async () => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    const previous = material("previous");
+    await writer.writeServerBoundJournal(journal(previous, 1));
+    await writer.writeArtifacts({ generation: 1, response: previous });
+    await writer.commitArtifacts(previous.activationId, 1);
+
+    const current = material("current");
+    await writer.writeServerBoundJournal(journal(current, 2));
+    await writer.writeArtifacts({ generation: 2, response: current });
+    const legacy = {
+      ...journal(current, 2), schemaVersion: 1 as const, username: "UCLAW-TEST",
+      usbFingerprint: { version: "uclaw-usb-v1" as const, sha256: "a".repeat(64) },
+    };
+    await writeFile(absolutePath(dataDir, paths.journal), JSON.stringify(legacy));
+
+    const recovered = await writer.readLegacyServerBoundRecovery(legacy);
+    await writer.commitLegacyServerBoundRecovery(legacy, recovered);
+    await createActivationArtifactWriter(writerOptions(dataDir)).recoverPendingArtifacts();
+
+    await expect(createActivationArtifactWriter(writerOptions(dataDir)).verifyArtifacts(current, 2))
+      .resolves.toBeUndefined();
+    await expect(writer.readJournal()).resolves.toBeNull();
+    await expect(readFile(absolutePath(dataDir, paths.backup))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("preserves a legacy server-bound journal when replacement artifact identity differs", async () => {
     const dataDir = await tempRoot();
     const writer = createActivationArtifactWriter(writerOptions(dataDir));
