@@ -204,6 +204,22 @@ describe("builtin service client endpoint and transport policy", () => {
       category: "invalid-response", code: "INVALID_RESPONSE_BODY",
     });
   });
+
+  it("accepts a valid chat response between two and four MiB without widening shared fields", async () => {
+    const encoded = `${JSON.stringify(responseBody)}${" ".repeat(2 * 1024 * 1024)}`;
+    expect(Buffer.byteLength(encoded)).toBeGreaterThan(2 * 1024 * 1024);
+    expect(Buffer.byteLength(encoded)).toBeLessThan(4 * 1024 * 1024);
+    const client = createBuiltinServiceClient({
+      fetch: async () => new Response(encoded, {
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(encoded)),
+        },
+      }),
+    });
+
+    await expect(client.execute(request, credential())).resolves.toMatchObject({ output: "world" });
+  });
 });
 
 describe("builtin service client error classification", () => {
