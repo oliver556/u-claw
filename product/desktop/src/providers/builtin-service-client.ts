@@ -196,7 +196,7 @@ export function createUnavailableBuiltinServiceClient(): BuiltinServiceClient {
 export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOptions = {}): BuiltinServiceClient {
   const fetchImpl = options.fetch ?? fetch;
   const timeoutMs = parsePositiveInteger(options.timeoutMs ?? 10_000, 60_000);
-  const maxResponseBytes = parsePositiveInteger(options.maxResponseBytes ?? 2 * 1024 * 1024, 4 * 1024 * 1024);
+  const maxResponseBytes = parsePositiveInteger(options.maxResponseBytes ?? 4 * 1024 * 1024, 4 * 1024 * 1024);
   const cooldownMs = parsePositiveInteger(options.circuitCooldownMs ?? 30_000, 10 * 60_000);
   const allowLoopbackHttp = options.allowLoopbackHttp ?? false;
   const now = options.now ?? Date.now;
