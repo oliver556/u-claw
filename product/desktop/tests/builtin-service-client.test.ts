@@ -172,13 +172,8 @@ describe("builtin service client endpoint and transport policy", () => {
         message: { ...responseBody.choices[0].message, custom: "ignored" },
       }],
     }) });
-    await expect(extended.execute(request, credential())).resolves.toEqual({
-      schemaVersion: 1,
-      requestId: request.requestId,
-      output: "world",
-      usage: { inputTokens: 1, outputTokens: 1 },
-      serviceState: "enabled",
-      serviceRevision: 1,
+    await expect(extended.execute(request, credential())).rejects.toMatchObject({
+      category: "invalid-response", code: "INVALID_RESPONSE_BODY",
     });
 
     const emptyChoices = createBuiltinServiceClient({ fetch: async () => jsonResponse({ ...responseBody, choices: [] }) });
@@ -205,8 +200,8 @@ describe("builtin service client endpoint and transport policy", () => {
         return jsonResponse(body);
       },
     });
-    await expect(withoutUsage.execute(request, credential())).resolves.toMatchObject({
-      usage: { inputTokens: 0, outputTokens: 0 },
+    await expect(withoutUsage.execute(request, credential())).rejects.toMatchObject({
+      category: "invalid-response", code: "INVALID_RESPONSE_BODY",
     });
   });
 });
@@ -322,7 +317,7 @@ describe("builtin service client error classification", () => {
     expect(JSON.stringify(error)).not.toContain("request-fixture-001");
   });
 
-  it("accepts model-list extensions without projecting them into health", async () => {
+  it("rejects model-list extensions outside the frozen proxy contract", async () => {
     const client = createBuiltinServiceClient({ fetch: async () => jsonResponse({
       object: "list",
       custom_top: { secret: ["ignored", "extension"].join("-") },
@@ -334,11 +329,8 @@ describe("builtin service client error classification", () => {
         custom: "ignored",
       }],
     }) });
-    await expect(client.health(credential())).resolves.toEqual({
-      schemaVersion: 1,
-      acceptingBuiltin: true,
-      state: "enabled",
-      revision: 1,
+    await expect(client.health(credential())).rejects.toMatchObject({
+      category: "invalid-response", code: "INVALID_RESPONSE_BODY",
     });
   });
 });

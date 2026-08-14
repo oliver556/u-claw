@@ -21,7 +21,12 @@ import (
 
 const modelRequestLimit int64 = 1 << 20
 
-var modelNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
+var (
+	modelNamePattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
+	proxyIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
+)
+
+const maxSafeInteger int64 = 9_007_199_254_740_991
 
 type ModelProxyService interface {
 	Authorize(context.Context, string, string, string) (modelproxy.Grant, error)
@@ -325,30 +330,43 @@ func validUpstreamJSON(route string, b []byte) bool {
 		return false
 	}
 	if route == "models" {
+		if !hasExactKeys(top, "object", "data") {
+			return false
+		}
 		var object string
 		var data []map[string]json.RawMessage
 		if json.Unmarshal(top["object"], &object) != nil || object != "list" || json.Unmarshal(top["data"], &data) != nil {
 			return false
 		}
 		for _, m := range data {
+			if !hasExactKeys(m, "id", "object", "created", "owned_by") {
+				return false
+			}
 			var id, obj, owner string
 			var created int64
-			if json.Unmarshal(m["id"], &id) != nil || id == "" || json.Unmarshal(m["object"], &obj) != nil || obj != "model" || json.Unmarshal(m["owned_by"], &owner) != nil || owner == "" || json.Unmarshal(m["created"], &created) != nil || created < 0 {
+			if json.Unmarshal(m["id"], &id) != nil || !modelNamePattern.MatchString(id) || json.Unmarshal(m["object"], &obj) != nil || obj != "model" || json.Unmarshal(m["owned_by"], &owner) != nil || !proxyIdentifierPattern.MatchString(owner) || json.Unmarshal(m["created"], &created) != nil || created < 0 || created > maxSafeInteger {
 				return false
 			}
 		}
 		return true
 	}
+	if !hasExactKeys(top, "id", "object", "created", "model", "choices", "usage") {
+		return false
+	}
 	var id, obj, model string
 	var created int64
 	var choices []map[string]json.RawMessage
-	if json.Unmarshal(top["id"], &id) != nil || id == "" || json.Unmarshal(top["object"], &obj) != nil || obj != "chat.completion" || json.Unmarshal(top["model"], &model) != nil || model == "" || json.Unmarshal(top["created"], &created) != nil || created < 0 || json.Unmarshal(top["choices"], &choices) != nil || len(choices) == 0 {
+	if json.Unmarshal(top["id"], &id) != nil || !proxyIdentifierPattern.MatchString(id) || json.Unmarshal(top["object"], &obj) != nil || obj != "chat.completion" || json.Unmarshal(top["model"], &model) != nil || !modelNamePattern.MatchString(model) || json.Unmarshal(top["created"], &created) != nil || created < 0 || created > maxSafeInteger || json.Unmarshal(top["choices"], &choices) != nil || len(choices) == 0 {
 		return false
 	}
 	for _, choice := range choices {
-		var index int
+		if !hasExactKeys(choice, "index", "message", "finish_reason") {
+			return false
+		}
+		var index int64
 		var message map[string]json.RawMessage
-		if json.Unmarshal(choice["index"], &index) != nil || index < 0 || json.Unmarshal(choice["message"], &message) != nil {
+		var finishReason string
+		if json.Unmarshal(choice["index"], &index) != nil || index < 0 || index > maxSafeInteger || json.Unmarshal(choice["message"], &message) != nil || !hasExactKeys(message, "role", "content") || json.Unmarshal(choice["finish_reason"], &finishReason) != nil || (finishReason != "stop" && finishReason != "length" && finishReason != "content_filter") {
 			return false
 		}
 		var role, content string
@@ -356,10 +374,20 @@ func validUpstreamJSON(route string, b []byte) bool {
 			return false
 		}
 	}
-	if raw, ok := top["usage"]; ok {
-		var fields map[string]json.RawMessage
-		var usage tokenUsage
-		if json.Unmarshal(raw, &fields) != nil || json.Unmarshal(fields["prompt_tokens"], &usage.PromptTokens) != nil || json.Unmarshal(fields["completion_tokens"], &usage.CompletionTokens) != nil || json.Unmarshal(fields["total_tokens"], &usage.TotalTokens) != nil || usage.PromptTokens < 0 || usage.CompletionTokens < 0 || usage.TotalTokens < 0 {
+	var fields map[string]json.RawMessage
+	var promptTokens, completionTokens, totalTokens int64
+	if json.Unmarshal(top["usage"], &fields) != nil || !hasExactKeys(fields, "prompt_tokens", "completion_tokens", "total_tokens") || json.Unmarshal(fields["prompt_tokens"], &promptTokens) != nil || json.Unmarshal(fields["completion_tokens"], &completionTokens) != nil || json.Unmarshal(fields["total_tokens"], &totalTokens) != nil || promptTokens < 0 || completionTokens < 0 || totalTokens < 0 || promptTokens > maxSafeInteger || completionTokens > maxSafeInteger || totalTokens > maxSafeInteger {
+		return false
+	}
+	return true
+}
+
+func hasExactKeys(value map[string]json.RawMessage, keys ...string) bool {
+	if len(value) != len(keys) {
+		return false
+	}
+	for _, key := range keys {
+		if _, ok := value[key]; !ok {
 			return false
 		}
 	}

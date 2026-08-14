@@ -136,13 +136,14 @@ export type OpenAIModelsResponse = z.infer<typeof OpenAIModelsResponseSchema>;
 
 export const OpenAIChatMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant"]),
-  content: z.string(),
+  content: z.string().min(1),
 }).strict();
 export type OpenAIChatMessage = z.infer<typeof OpenAIChatMessageSchema>;
 
 export const OpenAIChatCompletionRequestSchema = z.object({
   model: ModelSchema,
   messages: z.array(OpenAIChatMessageSchema).min(1),
+  max_tokens: z.number().int().min(1).max(32_768).optional(),
   stream: z.literal(false),
 }).strict();
 export type OpenAIChatCompletionRequest = z.infer<typeof OpenAIChatCompletionRequestSchema>;
@@ -159,7 +160,7 @@ export const OpenAIChatCompletionResponseSchema = z.object({
       content: z.string(),
     }).strict(),
     finish_reason: z.enum(["stop", "length", "content_filter"]),
-  }).strict()),
+  }).strict()).min(1),
   usage: z.object({
     prompt_tokens: OpenAITokenCountSchema,
     completion_tokens: OpenAITokenCountSchema,

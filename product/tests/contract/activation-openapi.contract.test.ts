@@ -91,8 +91,16 @@ describe("activation OpenAPI contract", () => {
       "/v1/activations/{activationId}",
       "/v1/activations/{activationId}/commit",
       "/v1/licenses/{licenseId}/status",
+      "/model-api/v1/models",
+      "/model-api/v1/chat/completions",
     ]));
     expect(document.paths["/v1/device-tokens"]).toBeUndefined();
+    expect(document.paths["/model-api/v1/models"].get.responses["200"].content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/OpenAIModelsResponse" });
+    expect(document.paths["/model-api/v1/chat/completions"].post.requestBody.content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/OpenAIChatCompletionRequest" });
+    expect(document.paths["/model-api/v1/chat/completions"].post.responses["200"].content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/OpenAIChatCompletionResponse" });
   });
 
   it("locks component names and required field sets", () => {
@@ -124,6 +132,9 @@ describe("activation OpenAPI contract", () => {
     expect(document.components.schemas.DeviceTokenRequest).toBeUndefined();
     expect(document.components.schemas.DeviceTokenResponse).toBeUndefined();
     expect(required("HealthResponse")).toEqual(["status"]);
+    expect(required("OpenAIModelsResponse")).toEqual(["object", "data"]);
+    expect(required("OpenAIChatCompletionRequest")).toEqual(["model", "messages", "stream"]);
+    expect(required("OpenAIChatCompletionResponse")).toEqual(["id", "object", "created", "model", "choices", "usage"]);
     for (const name of [
       "ActivationRequest", "ActivationResponse", "ActivationCommit", "ActivationError", "ClientPolicy",
       "StartupLicense", "StartupCredential", "BuiltinCredential", "LicenseStatusSummary", "LicenseStatusReceipt",

@@ -26,6 +26,7 @@ describe("builtin service operations v1 contract", () => {
         { role: "user", content: "Hello" },
         { role: "assistant", content: "Hi" },
       ],
+      max_tokens: 32_768,
       stream: false,
     };
     const response = {
@@ -42,6 +43,7 @@ describe("builtin service operations v1 contract", () => {
     expect(shared.OpenAIChatCompletionResponseSchema.parse(response)).toEqual(response);
     expect(() => shared.OpenAIModelsResponseSchema.parse(withUnknown(models))).toThrow();
     expect(() => shared.OpenAIChatCompletionRequestSchema.parse({ ...request, stream: true })).toThrow();
+    expect(() => shared.OpenAIChatCompletionRequestSchema.parse({ ...request, max_tokens: 32_769 })).toThrow();
     expect(() => shared.OpenAIChatCompletionRequestSchema.parse({ ...request, stream: false, temperature: 0 })).toThrow();
     expect(() => shared.OpenAIChatCompletionRequestSchema.parse({
       ...request,

@@ -3,6 +3,8 @@ import {
   BuiltinModelResponseSchema,
   BuiltinServiceHealthSchema,
   NewApiManagementErrorBodySchema,
+  OpenAIChatCompletionResponseSchema,
+  OpenAIModelsResponseSchema,
   type BuiltinModelRequest,
   type BuiltinModelResponse,
   type BuiltinServiceHealth,
@@ -51,34 +53,6 @@ const ProxyErrorSchema = z.object({
   message: z.string(),
   requestId: z.string(),
 }).strict();
-const OpenAIChatCompletionSchema = z.object({
-  id: z.string().min(1),
-  object: z.literal("chat.completion"),
-  created: z.number().int().min(0),
-  model: z.string().min(1),
-  choices: z.array(z.object({
-    index: z.number().int().min(0),
-    message: z.object({
-      role: z.literal("assistant"),
-      content: z.string(),
-    }),
-  })).min(1),
-  usage: z.object({
-    prompt_tokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    completion_tokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    total_tokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-  }).optional(),
-});
-const OpenAIModelsSchema = z.object({
-  object: z.literal("list"),
-  data: z.array(z.object({
-    id: z.string().min(1),
-    object: z.literal("model"),
-    created: z.number().int().min(0),
-    owned_by: z.string().min(1),
-  })),
-});
-
 export interface BuiltinServiceClient {
   execute(
     request: BuiltinModelRequest,
@@ -321,7 +295,7 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
     }
     const requestEpoch = circuitEpoch;
     try {
-      const result = await send("v1/chat/completions", OpenAIChatCompletionSchema, credential, {
+      const result = await send("v1/chat/completions", OpenAIChatCompletionResponseSchema, credential, {
         model: credential.model,
         messages: [{ role: "user", content: request.prompt }],
         max_tokens: request.maxOutputTokens,
@@ -334,8 +308,8 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
         requestId: request.requestId,
         output: choice.message.content,
         usage: {
-          inputTokens: result.usage?.prompt_tokens ?? 0,
-          outputTokens: result.usage?.completion_tokens ?? 0,
+          inputTokens: result.usage.prompt_tokens,
+          outputTokens: result.usage.completion_tokens,
         },
         serviceState: "enabled",
         serviceRevision: 1,
@@ -365,7 +339,7 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
   };
 
   const health = async (credential: BuiltinModelCredential, signal?: AbortSignal): Promise<BuiltinServiceHealth> => {
-    const models = await send("v1/models", OpenAIModelsSchema, credential, undefined, signal);
+    const models = await send("v1/models", OpenAIModelsResponseSchema, credential, undefined, signal);
     const acceptingBuiltin = models.data.some((model) => model.id === credential.model);
     return BuiltinServiceHealthSchema.parse({
       schemaVersion: 1,
