@@ -124,7 +124,7 @@ describe("activation artifact writer", () => {
       schemaVersion: 1,
       deviceId: current.deviceId,
       licenseId: current.licenseId,
-      accessToken: "legacy-short-lived-token",
+      accessToken: "t".repeat(16),
       expiresAt: "2026-08-14T00:00:00.000Z",
     }));
     await writeFile(absolutePath(dataDir, paths.builtin), JSON.stringify(current));
@@ -141,6 +141,67 @@ describe("activation artifact writer", () => {
     const legacy = { ...requestedJournal, schemaVersion: 1, username: "UCLAW-TEST" };
     await writer.preflight();
     await writeFile(absolutePath(dataDir, paths.journal), JSON.stringify(legacy));
+    await expect(writer.readJournal()).resolves.toEqual(legacy);
+  });
+
+  it("clears a legacy server-bound journal only after matching replacement artifacts are installed", async () => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    const current = material();
+    const legacy = {
+      ...journal(current), schemaVersion: 1 as const, username: "UCLAW-TEST",
+      usbFingerprint: { version: "uclaw-usb-v1" as const, sha256: "a".repeat(64) },
+    };
+    await writer.preflight();
+    await writeFile(absolutePath(dataDir, paths.journal), JSON.stringify(legacy));
+    await writeFile(absolutePath(dataDir, paths.startup), JSON.stringify(current.startupCredential));
+    await writeFile(absolutePath(dataDir, paths.license), JSON.stringify(current.license));
+
+    await expect(writer.readLegacyServerBoundRecovery(legacy)).rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
+    await expect(writer.readJournal()).resolves.toEqual(legacy);
+
+    await writeFile(absolutePath(dataDir, paths.builtin), JSON.stringify(current.builtinCredential), { mode: 0o600 });
+    const recovered = await writer.readLegacyServerBoundRecovery(legacy);
+    expect(recovered).toEqual(current);
+    await writer.commitLegacyServerBoundRecovery(legacy, recovered);
+    await expect(writer.readJournal()).resolves.toBeNull();
+  });
+
+  it("preserves a legacy server-bound journal when replacement artifact identity differs", async () => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    const current = material();
+    const legacy = {
+      ...journal(current), schemaVersion: 1 as const, username: "UCLAW-TEST",
+      usbFingerprint: { version: "uclaw-usb-v1" as const, sha256: "a".repeat(64) },
+    };
+    await writer.preflight();
+    await writeFile(absolutePath(dataDir, paths.journal), JSON.stringify(legacy));
+    await writeFile(absolutePath(dataDir, paths.startup), JSON.stringify(current.startupCredential));
+    await writeFile(absolutePath(dataDir, paths.license), JSON.stringify(current.license));
+    await writeFile(absolutePath(dataDir, paths.builtin), JSON.stringify(material("other").builtinCredential), { mode: 0o600 });
+
+    await expect(writer.readLegacyServerBoundRecovery(legacy)).rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
+    await expect(writer.readJournal()).resolves.toEqual(legacy);
+  });
+
+  it("preserves a legacy server-bound journal when artifacts change after recovery verification", async () => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    const current = material();
+    const legacy = {
+      ...journal(current), schemaVersion: 1 as const, username: "UCLAW-TEST",
+      usbFingerprint: { version: "uclaw-usb-v1" as const, sha256: "a".repeat(64) },
+    };
+    await writer.preflight();
+    await writeFile(absolutePath(dataDir, paths.journal), JSON.stringify(legacy));
+    await writeFile(absolutePath(dataDir, paths.startup), JSON.stringify(current.startupCredential));
+    await writeFile(absolutePath(dataDir, paths.license), JSON.stringify(current.license));
+    await writeFile(absolutePath(dataDir, paths.builtin), JSON.stringify(current.builtinCredential), { mode: 0o600 });
+    const recovered = await writer.readLegacyServerBoundRecovery(legacy);
+    await writeFile(absolutePath(dataDir, paths.builtin), JSON.stringify({ ...current.builtinCredential, model: "other" }), { mode: 0o600 });
+
+    await expect(writer.commitLegacyServerBoundRecovery(legacy, recovered)).rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
     await expect(writer.readJournal()).resolves.toEqual(legacy);
   });
 
