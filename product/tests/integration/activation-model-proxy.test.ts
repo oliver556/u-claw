@@ -32,6 +32,14 @@ async function collectEvents(stream: AsyncIterable<MessageEvent> | Promise<Async
   return events;
 }
 
+function closeServer(server: ReturnType<typeof createServer> | undefined): Promise<void> {
+  if (!server) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => server.close((error) => {
+    if (error) reject(error);
+    else resolve();
+  }));
+}
+
 describe("activation to Desktop model conversation through Node HTTPS proxy fixture", () => {
   it("persists formal device credential and emits assistant events without leaking secrets", async () => {
     const root = await mkdtemp(join(tmpdir(), "uclaw-activation-model-proxy-"));
@@ -179,14 +187,22 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
       // Production path has no injectable logger. Public leak evidence covers
       // MessageEvents, serialized errors, and commit records only.
     } finally {
-      await Promise.allSettled([
+      const closeResults = await Promise.allSettled([
         activationClient?.close() ?? activationDispatcher?.close() ?? Promise.resolve(),
         modelDispatcher?.close() ?? Promise.resolve(),
-        server ? new Promise<void>((resolve) => server!.close(() => resolve())) : Promise.resolve(),
-        rm(root, { recursive: true, force: true }),
+        closeServer(server),
       ]);
-      const rootIndex = roots.indexOf(root);
-      if (rootIndex >= 0) roots.splice(rootIndex, 1);
+      const removeResult = await Promise.allSettled([rm(root, { recursive: true, force: true })]);
+      if (removeResult[0].status === "fulfilled") {
+        const rootIndex = roots.indexOf(root);
+        if (rootIndex >= 0) roots.splice(rootIndex, 1);
+      }
+      const cleanupErrors = [...closeResults, ...removeResult]
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason);
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(cleanupErrors, "Activation model proxy fixture cleanup failed.");
+      }
     }
   }, 30_000);
 });
