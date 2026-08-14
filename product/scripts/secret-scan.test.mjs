@@ -78,6 +78,30 @@ test("detects activation, device, bearer, and legacy New API secrets", () => {
   ]);
 });
 
+test("enforces exact device token boundaries for every valid ending", () => {
+  const endingDash = `uclaw_dt_${"A".repeat(42)}-`;
+  const endingUnderscore = `uclaw_dt_${"B".repeat(42)}_`;
+  const allLetters = `uclaw_dt_${"C".repeat(43)}`;
+  const finding = (line) => ({ path: "notes/device-tokens.txt", line, rule: "DEVICE_TOKEN" });
+  const source = [
+    endingDash,
+    endingUnderscore,
+    allLetters,
+    `Authorization: Bearer ${endingDash}`,
+    `x${allLetters}`,
+    `${allLetters}x`,
+    `uclaw_dt_${"D".repeat(44)}`,
+    `uclaw_dt_fixture${"E".repeat(36)}`,
+  ].join("\n");
+
+  assert.deepEqual(scanText("notes/device-tokens.txt", source), [
+    finding(1),
+    finding(2),
+    finding(3),
+    finding(4),
+  ]);
+});
+
 test("detects activation codes leaked from test paths", () => {
   const activationCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
   const leaked = [
