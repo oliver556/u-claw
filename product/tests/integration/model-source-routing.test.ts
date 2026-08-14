@@ -136,7 +136,7 @@ describe("typed New API model source routing integration", () => {
       upstreamCalls += 1;
       return Response.json({
         id: "route-chat-001", object: "chat.completion", created: 1, model: "builtin-model",
-        choices: [{ index: 0, message: { role: "assistant", content: "builtin-answer" } }],
+        choices: [{ index: 0, message: { role: "assistant", content: "builtin-answer" }, finish_reason: "stop" }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
       });
     });
