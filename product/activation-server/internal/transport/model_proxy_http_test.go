@@ -100,6 +100,19 @@ func TestModelProxyHandlerUsesConfiguredBodyLimits(t *testing.T) {
 	if response.Code != http.StatusBadGateway {
 		t.Fatalf("response status=%d body=%s", response.Code, response.Body.String())
 	}
+
+	client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		body := `{"object":"list","data":[{"id":"` + strings.Repeat("x", 100) + `","object":"model","created":1,"owned_by":"owner"}]}`
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	h = NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}, RequestBodyBytes: 1 << 20, ResponseBodyBytes: 128})
+	request = httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer token")
+	response = httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("models response status=%d body=%s", response.Code, response.Body.String())
+	}
 }
 
 func TestUpstreamDuplicateJSONRejected(t *testing.T) {

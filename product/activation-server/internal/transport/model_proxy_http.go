@@ -189,11 +189,7 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeProxyError(w, 502, "UPSTREAM_UNAVAILABLE", requestID)
 		return
 	}
-	limit := h.requestBodyBytes
-	if route == "chat" {
-		limit = h.responseBodyBytes
-	}
-	content, err := readBounded(response.Body, limit)
+	content, err := readBounded(response.Body, h.responseBodyBytes)
 	if err != nil || rejectUpstreamDuplicateKeys(content) != nil || !validUpstreamJSON(route, content) {
 		h.observe("invalid_response", started)
 		outcome, status = "invalid_response", 502
