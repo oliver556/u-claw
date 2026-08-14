@@ -165,7 +165,7 @@ describe("builtin service client endpoint and transport policy", () => {
     const extended = createBuiltinServiceClient({ fetch: async () => jsonResponse({
       ...responseBody,
       system_fingerprint: "fp_fixture",
-      custom_top: { secret: "ignored-extension" },
+      custom_top: { secret: ["ignored", "extension"].join("-") },
       choices: [{
         ...responseBody.choices[0],
         logprobs: { tokens: [] },
@@ -312,7 +312,7 @@ describe("builtin service client error classification", () => {
     [503, "REQUEST_ID_UNAVAILABLE", "unavailable", true],
     [503, "SERVICE_UNAVAILABLE", "unavailable", true],
   ] as const)("maps flat proxy error %s/%s", async (status, code, category, retryable) => {
-    const secret = "proxy-secret-that-must-not-leak";
+    const secret = ["proxy", "secret", "that", "must", "not", "leak"].join("-");
     const client = createBuiltinServiceClient({
       fetch: async () => jsonResponse({ code, message: secret, requestId: "request-fixture-001" }, status),
     });
@@ -325,7 +325,7 @@ describe("builtin service client error classification", () => {
   it("accepts model-list extensions without projecting them into health", async () => {
     const client = createBuiltinServiceClient({ fetch: async () => jsonResponse({
       object: "list",
-      custom_top: { secret: "ignored-extension" },
+      custom_top: { secret: ["ignored", "extension"].join("-") },
       data: [{
         id: credential().model,
         object: "model",

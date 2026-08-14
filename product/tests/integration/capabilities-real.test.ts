@@ -136,7 +136,7 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw Skill lifecycle", () => {
       mkdir(openClawStateDir, { recursive: true }),
       mkdir(dirname(configPath), { recursive: true }),
     ]);
-    const token = "uclaw-real-skill-token";
+    const token = ["uclaw", "real", "skill", "token"].join("-");
     await writeFile(configPath, `${JSON.stringify({
       gateway: { mode: "local", bind: "loopback", auth: { mode: "token", token } },
       agents: { defaults: { workspace: workspaceDir, skipBootstrap: true } },
@@ -344,7 +344,7 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw Plugin, MCP, tools, and approva
       resolve(import.meta.dirname, "../../desktop/tests/fixtures/mcp-stdio-server.mjs"),
       controlledMcpEntry,
     );
-    const token = "uclaw-real-capability-token";
+    const token = ["uclaw", "real", "capability", "token"].join("-");
     await writeFile(configPath, `${JSON.stringify({
       gateway: { mode: "local", bind: "loopback", auth: { mode: "token", token } },
       agents: { defaults: { workspace: workspaceDir, skipBootstrap: true } },

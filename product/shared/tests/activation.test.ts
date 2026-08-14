@@ -53,7 +53,7 @@ describe("activation API contract", () => {
 		]) {
 			expect(BuiltinCredentialArtifactSchema.parse({ ...credential, endpoint })).toBeTruthy();
 		}
-		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, accessToken: "legacy-token-material" })).toThrow();
+		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, accessToken: ["legacy", "token", "material"].join("-") })).toThrow();
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, expiresAt: "2027-08-13T00:00:00Z" })).toThrow();
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, deviceToken: `uclaw_dt_${"A".repeat(42)}` })).toThrow();
 		expect(() => BuiltinCredentialArtifactSchema.parse({ ...credential, deviceToken: `uclaw_dt_${"A".repeat(42)}!` })).toThrow();

@@ -168,7 +168,11 @@ test("detects exact activation code keys across member assignment forms", () => 
 
 test("detects credential assignments through exact bare and member keys", () => {
   const startupSecret = ["A1b2C3d4", "E5f6G7h8", "I9j0K1l2"].join("");
+  const productionStartupSecret = "abcdef0123456789".repeat(4);
+  const singleClassStartupSecret = "s".repeat(32);
   const newApiKey = ["new-api-live", "A1b2C3d4E5f6G7h8"].join("-");
+  const singleClassNewApiKey = "n".repeat(24);
+  const singleClassIssuedToken = "t".repeat(24);
   const placeholder = "fixture-startup-secret-000000";
   const path = "tests/member-credentials.ts";
   const source = [
@@ -178,13 +182,19 @@ test("detects credential assignments through exact bare and member keys", () => 
     `obj['new_api_key'] = ${newApiKey}`,
     `startupSecret=${placeholder};request.startupSecret=${startupSecret}`,
     `newApiKey=${newApiKey};obj['newApiKey']=${placeholder}`,
+    `startupSecret = "${productionStartupSecret}"`,
+    `request.startupSecret = '${singleClassStartupSecret}'`,
+    `obj["newApiKey"] = "${singleClassNewApiKey}"`,
+    `{"issued_token":"${singleClassIssuedToken}"}`,
     `mystartupSecret = "${startupSecret}"`,
     `request.newApiKeySuffix = "${newApiKey}"`,
     `obj["startup" + "Secret"] = "${startupSecret}"`,
     `obj[key] = "${newApiKey}"`,
+    "token = 'active'",
+    "startupSecret = `runtime-${process.pid}`",
   ].join("\n");
 
-  assert.deepEqual(scanText(path, source), [1, 2, 3, 4, 5, 6].map((line) => ({
+  assert.deepEqual(scanText(path, source), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((line) => ({
     path,
     line,
     rule: "CREDENTIAL_ASSIGNMENT",
@@ -244,6 +254,8 @@ test("ignores schema declarations, property reads, and similarly named fields", 
     "previewToken: operation.previewToken,",
     "const token = request.params.token;",
     "const token = `work-chat-${process.pid}-${Date.now()}`;",
+    "let token: NewApiIssuedToken | undefined;",
+    "secret: SecretStateSchema,",
   ].join("\n");
 
   assert.deepEqual(scanText("src/config.ts", source), []);

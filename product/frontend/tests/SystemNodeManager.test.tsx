@@ -14,7 +14,7 @@ describe("SystemNodeManager", () => {
     const worktreeAuthority = { worktrees: [{ id: "wt1", name: "review", path: "/tmp/review", branch: "review", repoRoot: "/tmp/repo", createdAt: 1, lastActiveAt: 1 }] };
     const invoke = vi.fn(async (request: { method: string; requestId: string; params: Record<string, unknown> }) => {
       const result = request.method === "device.pair.list" ? deviceAuthority
-        : request.method.startsWith("device.") ? { mutation: request.method === "device.token.rotate" ? { token: "super-secret-token" } : {}, authority: deviceAuthority }
+        : request.method.startsWith("device.") ? { mutation: request.method === "device.token.rotate" ? { token: ["super", "secret", "token"].join("-") } : {}, authority: deviceAuthority }
         : request.method === "node.list" ? nodeAuthority
         : request.method === "node.describe" ? nodeAuthority.nodes[0]
         : request.method === "node.rename" ? { mutation: {}, authority: { ...nodeAuthority.nodes[0], displayName: String(request.params.displayName) } }

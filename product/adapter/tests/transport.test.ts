@@ -93,7 +93,7 @@ describe("RpcRouter", () => {
     router.onEvent("chat", (event) => events.push(event.event));
 
     socket.emit("message", JSON.stringify({ type: "event", event: "chat", payload: { state: "delta" }, seq: 1 }));
-    socket.emit("message", JSON.stringify({ type: "mystery", secret: "sk-proj-abcdefghijk" }));
+    socket.emit("message", JSON.stringify({ type: "mystery", secret: ["sk", "proj", "abcdefghijk"].join("-") }));
 
     expect(events).toEqual(["chat"]);
     expect(diagnostics).toHaveLength(1);

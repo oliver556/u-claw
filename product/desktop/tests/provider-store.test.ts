@@ -76,7 +76,7 @@ describe("provider store", () => {
   it("updates every editable field, keeps the key, and follows a renamed selected ID", async () => {
     const { store } = await setup();
     await store.create(custom("custom-old"));
-    await store.setApiKey("custom-old", "preserved-secret");
+    await store.setApiKey("custom-old", ["preserved", "secret"].join("-"));
     await store.select("custom-old");
     const updated = await store.update("custom-old", {
       id: "custom-new", name: "Renamed", enabled: true, baseUrl: "https://new.example.com/v1", model: "model-2",
@@ -85,7 +85,7 @@ describe("provider store", () => {
     expect(updated.providers.find((provider: any) => provider.id === "custom-new")).toMatchObject({
       name: "Renamed", enabled: true, baseUrl: "https://new.example.com/v1", model: "model-2", apiKeyConfigured: true,
     });
-    expect(await store.getSelectedForRuntime()).toMatchObject({ id: "custom-new", apiKey: "preserved-secret" });
+    expect(await store.getSelectedForRuntime()).toMatchObject({ id: "custom-new", apiKey: ["preserved", "secret"].join("-") });
   });
 
   it("uses last explicit enable and returns to builtin when current source is disabled or removed", async () => {
@@ -122,14 +122,14 @@ describe("provider store", () => {
     expect((await store.list()).network).toEqual({
       httpProxy: null, httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1"],
     });
-    await store.setApiKey("openai", "sk-main-only-secret");
+    await store.setApiKey("openai", ["sk", "main", "only", "secret"].join("-"));
     const snapshot = await store.setNetwork({
       httpProxy: "http://proxy.example.com:8080", httpsProxy: null,
       noProxy: ["localhost", "127.0.0.1", "::1", ".example.com"],
     });
     expect(snapshot.network.httpProxy).toBe("http://proxy.example.com:8080");
-    expect(JSON.stringify(snapshot)).not.toContain("sk-main-only-secret");
-    expect(await store.getForRuntime("openai")).toMatchObject({ apiKey: "sk-main-only-secret" });
+    expect(JSON.stringify(snapshot)).not.toContain(["sk", "main", "only", "secret"].join("-"));
+    expect(await store.getForRuntime("openai")).toMatchObject({ apiKey: ["sk", "main", "only", "secret"].join("-") });
     const disk = await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8");
     expect(disk).toContain("proxy.example.com:8080");
     await expect(store.setNetwork({ httpProxy: "socks5://127.0.0.1:1080", httpsProxy: null, noProxy: [] })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });

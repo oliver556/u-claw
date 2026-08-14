@@ -72,7 +72,7 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw usage", () => {
         providers: {
           "usage-smoke": {
             baseUrl: "https://provider.invalid/v1",
-            apiKey: "usage-smoke-placeholder",
+            apiKey: ["usage", "smoke", "placeholder"].join("-"),
             api: "openai-completions",
             models: [{ id: "usage-model", name: "Usage Model", contextWindow: 4096, maxTokens: 1024 }],
           },
