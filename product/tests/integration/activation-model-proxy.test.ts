@@ -122,7 +122,7 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
           }
           modelBodies.push(body);
           response.writeHead(200, { "content-type": "application/json" });
-          response.end(JSON.stringify({ id: "fixture-chat-001", object: "chat.completion", created: 1, model: "fixture-default-model", choices: [{ index: 0, message: { role: "assistant", content: "fixture assistant answer" } }], usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 } }));
+          response.end(JSON.stringify({ id: "fixture-chat-001", object: "chat.completion", created: 1, model: "fixture-default-model", choices: [{ index: 0, message: { role: "assistant", content: "fixture assistant answer" }, finish_reason: "stop" }], usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 } }));
           return;
         }
         response.writeHead(404).end();
