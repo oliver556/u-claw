@@ -118,7 +118,7 @@ export interface ActivationArtifactWriter {
   writeServerBoundJournal(journal: ActivationServerBoundJournal): Promise<void>;
   readJournal(): Promise<ActivationReadableJournal | null>;
   discardRequestedJournal(idempotencyKey: string): Promise<void>;
-  readServerBoundResponse(activationId: string, deviceId: string, licenseId: string, generation: number): Promise<ActivationResponse>;
+  retireLegacyCredential(): Promise<void>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
   recoverPendingArtifacts(): Promise<void>;
@@ -144,6 +144,7 @@ const artifactPaths = [
 ] as const;
 const journalPath = ".uclaw/activation-transaction.v1.json";
 const backupPath = ".uclaw/activation-artifact-backup.v1.json";
+const legacyBuiltinCredentialPath = ".uclaw/activation-builtin-credential.v1.json";
 
 const backupEntry = (body: Buffer | null): BackupEntry => body === null
   ? { present: false, body: null, sha256: null }
@@ -302,33 +303,11 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
       }
     },
 
-    async readServerBoundResponse(activationId, deviceId, licenseId, generation) {
+    async retireLegacyCredential() {
       try {
-        const startupBody = await (await packageSafeRoot).readText(artifactPaths[0].path);
-        const licenseBody = await (await packageSafeRoot).readText(artifactPaths[1].path);
-        const builtinBody = await (await dataSafeRoot).readText(artifactPaths[2].path);
-        const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3].path));
-        if (manifest.activationId !== activationId || manifest.deviceId !== deviceId || manifest.licenseId !== licenseId
-            || manifest.generation !== generation
-            || manifest.sha256.startupCredential !== createHash("sha256").update(startupBody).digest("hex")
-            || manifest.sha256.license !== createHash("sha256").update(licenseBody).digest("hex")
-            || manifest.sha256.builtinCredential !== createHash("sha256").update(builtinBody).digest("hex")) throw new Error("manifest");
-        const startup = StartupCredentialArtifactSchema.parse(JSON.parse(startupBody));
-        const license = StartupLicenseArtifactSchema.parse(JSON.parse(licenseBody));
-        const persistedBuiltin = BuiltinCredentialArtifactSchema.parse(JSON.parse(builtinBody));
-        const loadedBuiltin = await credentialStore.loadActive();
-        const builtinCredential = BuiltinCredentialArtifactSchema.parse({
-          schemaVersion: 1, deviceId: loadedBuiltin.deviceId, licenseId: loadedBuiltin.licenseId,
-          endpoint: loadedBuiltin.endpoint.href, model: loadedBuiltin.model, deviceToken: loadedBuiltin.deviceToken,
-        });
-        if (JSON.stringify(builtinCredential) !== JSON.stringify(persistedBuiltin)) throw new Error("credential");
-        const response = ActivationResponseSchema.parse({ activationId, deviceId, licenseId, license, startupCredential: startup, builtinCredential, status: "active" });
-        if (response.deviceId !== startup.deviceId || response.licenseId !== startup.licenseId
-            || response.deviceId !== license.deviceId || response.licenseId !== license.licenseId
-            || response.deviceId !== builtinCredential.deviceId || response.licenseId !== builtinCredential.licenseId) throw new Error("identity");
-        return response;
+        await remove(legacyBuiltinCredentialPath);
       } catch {
-        throw new ActivationArtifactError("ARTIFACT_INVALID", "Activation artifacts are invalid.");
+        throw new ActivationArtifactError("ARTIFACT_WRITE_FAILED", "Legacy activation credential could not be retired.");
       }
     },
 
