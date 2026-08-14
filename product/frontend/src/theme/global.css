@@ -149,8 +149,8 @@ kbd { padding: 1px 6px; border: 1px solid var(--uclaw-border-primary); border-ra
 .message > .message-content { max-width: min(78%, 680px); margin: 0; padding: 8px 12px; border-radius: 8px; }
 .assistant-message > .message-content { border: 1px solid var(--uclaw-border-secondary); background: var(--uclaw-bg-elevated); }
 .user-message { align-items: flex-end; }
-.user-message > .message-content { color: #fff; border: 1px solid var(--uclaw-primary-active); background: var(--uclaw-primary-active); }
-.user-message .message-content a { color: #fff; }
+.user-message > .message-content { color: var(--uclaw-on-accent); border: 1px solid var(--uclaw-primary-active); background: var(--uclaw-primary-active); }
+.user-message .message-content a { color: var(--uclaw-on-accent); }
 .tool-run { width: calc(100% - 34px); min-height: 60px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 16px; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--uclaw-border-primary); border-radius: 8px; text-align: left; }
 .tool-run:hover { background: var(--uclaw-bg-hover); }
 .tool-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 6px; color: var(--uclaw-primary-text); background: var(--uclaw-info-bg); }
