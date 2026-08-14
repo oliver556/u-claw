@@ -14,7 +14,7 @@ const privateKeyEnd = /-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/u;
 const credentialField = "(?:api[_-]?key|new[_-]?api[_-]?(?:key|token)|access[_-]?token|auth[_-]?token|issued[_-]?token|startup[_-]?secret|client[_-]?secret|private[_-]?key|password|passwd|secret|token)";
 const quotedCredentialAssignment = new RegExp(`(?:^|[\\s{,])["']?${credentialField}["']?\\s*(?:=|:)\\s*(["'])([^"'\\x60\\r\\n]+)\\1`, "iu");
 const environmentCredentialAssignment = new RegExp(`^(?:export\\s+)?${credentialField}\\s*=\\s*([^\\s#]+)\\s*$`, "iu");
-const deviceTokenPattern = /\buclaw_dt_[A-Za-z0-9_-]{43}\b/gu;
+const deviceTokenPattern = /(?:^|[^A-Za-z0-9_-])(uclaw_dt_[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/gu;
 const activationCodeAssignmentSource = String.raw`(?:^|[\s{\[\(,;])["']?activation[_-]?code["']?\s*(?:=|:)\s*(?:(["'\x60])([0-9A-HJKMNP-TV-Z]{26})\1|([0-9A-HJKMNP-TV-Z]{26})(?=$|[\s,;}\]\)]))`;
 const activationCodePlaceholder = "TESTTESTTESTTESTTESTTEST12";
 const tokenPatterns = [
@@ -55,7 +55,7 @@ export function scanText(filePath, source) {
     }
 
     deviceTokenPattern.lastIndex = 0;
-    const deviceToken = deviceTokenPattern.exec(line)?.[0];
+    const deviceToken = deviceTokenPattern.exec(line)?.[1];
     if (deviceToken && !isPlaceholder(deviceToken, { token: true })) {
       findings.push({ path: filePath, line: index + 1, rule: "DEVICE_TOKEN" });
       continue;
@@ -314,7 +314,7 @@ function isPlaceholder(value, options = {}) {
   if (!normalized || explicitPlaceholder.test(normalized) || conventionalPlaceholder.test(normalized)) return true;
   if (/^<[^>]+>$/u.test(normalized) || /^\$\{[^}]+\}$/u.test(normalized)) return true;
   if (/^(?:\.{3,}|[*xX0_-]{8,})$/u.test(normalized)) return true;
-  const tokenBody = normalized.replace(/^(?:gh[pousr]_|github_pat_|sk-(?:proj-)?|xox[baprs]-)/u, "");
+  const tokenBody = normalized.replace(/^(?:uclaw_dt_|gh[pousr]_|github_pat_|sk-(?:proj-)?|xox[baprs]-)/u, "");
   if ((options.token || tokenBody !== normalized) && conventionalTokenPlaceholder.test(tokenBody)) return true;
   return normalized === "AKIAIOSFODNN7EXAMPLE";
 }
