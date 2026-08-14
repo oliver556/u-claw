@@ -32,7 +32,7 @@ interface CoordinatorWriter {
   writeServerBoundJournal(journal: BoundJournal): Promise<void>;
   recoverPendingArtifacts(): Promise<void>;
   discardRequestedJournal(idempotencyKey: string): Promise<void>;
-  readServerBoundResponse(activationId: string, deviceId: string, licenseId: string, generation: number): Promise<ActivationResponse>;
+  retireLegacyCredential(): Promise<void>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
   commitArtifacts(activationId: string, generation: number): Promise<void>;
@@ -148,6 +148,7 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
       set("checking");
       try {
         pendingJournal = await deps.writer.readJournal(); pendingRequest = null;
+        if (pendingJournal?.schemaVersion === 1) await deps.writer.retireLegacyCredential();
         const result = await deps.preflight();
         if (!result.usbPresent) return set("error", "USB_MISSING");
         if (pendingJournal?.stage === "committed") {
@@ -176,20 +177,7 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
           catch { return recovery("RECOVERY_REQUIRED"); }
           pendingJournal = null;
         } else if (legacy.stage === "server_bound") {
-          const active = { token: ++nextToken, controller: new AbortController(), serverBound: true };
-          operation = active;
-          try {
-            const response = await deps.writer.readServerBoundResponse(legacy.activationId!, legacy.deviceId!, legacy.licenseId!, legacy.generation);
-            const bound: BoundJournal = {
-              schemaVersion: 2, stage: "server_bound", activationId: legacy.activationId!, deviceId: legacy.deviceId!, licenseId: legacy.licenseId!,
-              idempotencyKey: legacy.idempotencyKey, generation: legacy.generation, requestHash: requestHash(base),
-              usbFingerprint: legacy.usbFingerprint, clientVersion: legacy.clientVersion,
-            };
-            await deps.writer.writeServerBoundJournal(bound);
-            pendingJournal = bound;
-            return await finish(bound, response, active.token);
-          } catch { return recovery("RECOVERY_REQUIRED"); }
-          finally { if (operation?.token === active.token) operation = null; }
+          return recovery("LEGACY_RECOVERY_REISSUE_REQUIRED");
         }
       }
       if (pendingJournal?.schemaVersion === 2) {

@@ -90,6 +90,7 @@ const paths = {
   startup: "license/.startup-credential.json",
   license: "license/license.json",
   builtin: ".uclaw/builtin-model-credential.v1.json",
+  legacyBuiltin: ".uclaw/activation-builtin-credential.v1.json",
   generation: ".uclaw/activation-artifact-generation.v1.json",
   journal: ".uclaw/activation-transaction.v1.json",
   backup: ".uclaw/activation-artifact-backup.v1.json",
@@ -112,6 +113,26 @@ describe("activation artifact writer", () => {
     expect(body).not.toContain(request.activationCode);
     expect(body).not.toContain("startupSecret");
     expect(body).not.toContain("accessToken");
+  });
+
+  it("retires only the obsolete v1 activation credential", async () => {
+    const dataDir = await tempRoot();
+    const writer = createActivationArtifactWriter(writerOptions(dataDir));
+    const current = material().builtinCredential;
+    await mkdir(dirname(absolutePath(dataDir, paths.legacyBuiltin)), { recursive: true });
+    await writeFile(absolutePath(dataDir, paths.legacyBuiltin), JSON.stringify({
+      schemaVersion: 1,
+      deviceId: current.deviceId,
+      licenseId: current.licenseId,
+      accessToken: "legacy-short-lived-token",
+      expiresAt: "2026-08-14T00:00:00.000Z",
+    }));
+    await writeFile(absolutePath(dataDir, paths.builtin), JSON.stringify(current));
+
+    await writer.retireLegacyCredential();
+
+    await expect(readFile(absolutePath(dataDir, paths.legacyBuiltin))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(JSON.parse(await readFile(absolutePath(dataDir, paths.builtin), "utf8"))).toEqual(current);
   });
 
   it("reads a strict legacy v1 requested journal for controlled recovery", async () => {
@@ -245,50 +266,6 @@ describe("activation artifact writer", () => {
       generation: 7, activationId: response.activationId, deviceId: response.deviceId, licenseId: response.licenseId,
     });
     expect(JSON.parse(await readFile(absolutePath(dataDir, paths.backup), "utf8"))).toMatchObject({ generation: 7 });
-  });
-
-  it("reconstructs a strict server-bound response from persisted artifacts", async () => {
-    const dataDir = await tempRoot();
-    const writer = createActivationArtifactWriter(writerOptions(dataDir));
-    const response = material();
-    await writer.writeServerBoundJournal(journal(response));
-    await writer.writeArtifacts({ generation: 1, response });
-
-    await expect(writer.readServerBoundResponse(response.activationId, response.deviceId, response.licenseId, 1))
-      .resolves.toEqual(response);
-    await expect(writer.readServerBoundResponse("activation-other", response.deviceId, response.licenseId, 1))
-      .rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
-  });
-
-  it("rejects same-identity artifact tampering before reconstructing a server-bound response", async () => {
-    const dataDir = await tempRoot();
-    const writer = createActivationArtifactWriter(writerOptions(dataDir));
-    const response = material();
-    await writer.writeServerBoundJournal(journal(response));
-    await writer.writeArtifacts({ generation: 1, response });
-    const tamperedToken = `uclaw_dt_${"Z".repeat(43)}`;
-    await writeFile(absolutePath(dataDir, paths.builtin), JSON.stringify({ ...response.builtinCredential, deviceToken: tamperedToken }));
-
-    const error = await writer.readServerBoundResponse(response.activationId, response.deviceId, response.licenseId, 1).catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ code: "ARTIFACT_INVALID" });
-    expect(`${String(error)}${JSON.stringify(error)}`).not.toContain(tamperedToken);
-  });
-
-  it.each([
-    ["generation", { generation: 2 }],
-    ["hash", { sha256: { startupCredential: "f".repeat(64), license: "f".repeat(64), builtinCredential: "f".repeat(64) } }],
-  ])("rejects a server-bound manifest %s mismatch", async (_name, patch) => {
-    const dataDir = await tempRoot();
-    const writer = createActivationArtifactWriter(writerOptions(dataDir));
-    const response = material();
-    await writer.writeServerBoundJournal(journal(response));
-    await writer.writeArtifacts({ generation: 1, response });
-    const manifestPath = absolutePath(dataDir, paths.generation);
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    await writeFile(manifestPath, JSON.stringify({ ...manifest, ...patch }));
-
-    await expect(writer.readServerBoundResponse(response.activationId, response.deviceId, response.licenseId, 1))
-      .rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
   });
 
   it("restores the previous generation after a partial write", async () => {

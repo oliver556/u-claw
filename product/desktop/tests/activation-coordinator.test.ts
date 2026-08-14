@@ -109,8 +109,8 @@ function setup(overrides: Record<string, unknown> = {}) {
     writeJournal: vi.fn(async (): Promise<void> => undefined),
     writeServerBoundJournal: vi.fn(async () => undefined),
     discardRequestedJournal: vi.fn(async () => undefined),
+    retireLegacyCredential: vi.fn(async () => undefined),
     recoverPendingArtifacts: vi.fn(async () => undefined),
-    readServerBoundResponse: vi.fn(async () => response),
     writeArtifacts: vi.fn(async (): Promise<void> => undefined),
     verifyArtifacts: vi.fn(async () => undefined),
     commitArtifacts: vi.fn(async () => undefined),
@@ -367,23 +367,13 @@ describe("activation coordinator", () => {
     expect(deps.client.activate).not.toHaveBeenCalled();
   });
 
-  it("recovers a legacy v1 server-bound journal without activating again", async () => {
+  it("retires the obsolete credential and requires reissue for a legacy v1 server-bound journal", async () => {
     const pending = legacyRequestedJournal("server_bound");
     const { coordinator, writer, deps } = setup();
     writer.readJournal.mockResolvedValue(pending);
-    await coordinator.preflight();
-    expect(await coordinator.submit(input)).toEqual({ state: "complete" });
-    expect(deps.client.activate).not.toHaveBeenCalled();
-    expect(writer.readServerBoundResponse).toHaveBeenCalledWith(response.activationId, response.deviceId, response.licenseId, 1);
-    expect(writer.writeServerBoundJournal).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: 2, stage: "server_bound" }));
-  });
-
-  it("does not reactivate a legacy v1 server-bound journal when local artifacts are incomplete", async () => {
-    const { coordinator, writer, deps } = setup();
-    writer.readJournal.mockResolvedValue(legacyRequestedJournal("server_bound"));
-    writer.readServerBoundResponse.mockRejectedValue(new Error("incomplete"));
-    await coordinator.preflight();
-    expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "RECOVERY_REQUIRED" });
+    expect(await coordinator.preflight()).toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_REQUIRED" });
+    expect(writer.retireLegacyCredential).toHaveBeenCalledOnce();
+    expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "LEGACY_RECOVERY_REISSUE_REQUIRED" });
     expect(deps.client.activate).not.toHaveBeenCalled();
     expect(writer.writeServerBoundJournal).not.toHaveBeenCalled();
   });
@@ -392,6 +382,7 @@ describe("activation coordinator", () => {
     const { coordinator, writer, deps } = setup();
     writer.readJournal.mockResolvedValue(legacyRequestedJournal("committed"));
     expect(await coordinator.preflight()).toEqual({ state: "complete" });
+    expect(writer.retireLegacyCredential).toHaveBeenCalledOnce();
     expect(writer.recoverPendingArtifacts).toHaveBeenCalledOnce();
     expect(deps.client.activate).not.toHaveBeenCalled();
   });
