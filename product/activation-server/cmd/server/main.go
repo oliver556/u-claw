@@ -102,13 +102,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, Observer: metrics, SecretEnvelope: secretEncryptor, KeyVersion: cfg.KMSKeyVersion, SecretFingerprintKey: cfg.AdminSecretFingerprintKey, AllowedNewAPIHosts: cfg.AllowedNewAPIHosts})
+	adminApplication, err := adminservice.NewService(adminservice.ServiceOptions{Repository: repository, Pepper: cfg.ActivationPepper, Observer: metrics, SecretEnvelope: secretEncryptor, KeyVersion: cfg.NewAPIKMSKeyVersion, SecretFingerprintKey: cfg.AdminSecretFingerprintKey, AllowedNewAPIHosts: cfg.AllowedNewAPIHosts})
 	if err != nil {
 		return err
 	}
 	adminHandler := transport.NewAdminHandler(transport.AdminHandlerOptions{Service: adminApplication, Operators: cfg.AdminOperators})
 	application := newApplication(public, adminHandler, metrics)
-	server := newHTTPServer(cfg, func(ctx context.Context) error { return pool.Ping(ctx) }, application, kmsReadiness(kms, cfg.KMSKeyVersion))
+	server := newHTTPServer(cfg, func(ctx context.Context) error { return pool.Ping(ctx) }, application, kmsReadiness(kms, cfg.KMSKeyVersion, cfg.NewAPIKMSKeyVersion))
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -191,13 +191,14 @@ func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, envelope *securit
 	if err != nil {
 		return nil, err
 	}
-	modelService, err := modelproxy.NewService(modelproxy.ServiceOptions{Repository: modelRepository, Digest: digest, Envelope: envelope, Observer: metrics})
+	modelService, err := modelproxy.NewService(modelproxy.ServiceOptions{Repository: modelRepository, Digest: digest, Envelope: envelope, Observer: metrics, AdmissionLease: cfg.ModelProxyAdmissionLease})
 	if err != nil {
 		return nil, err
 	}
 	activationHandler := transport.NewPublicHandler(transport.PublicHandlerOptions{Activation: activationService, Lifecycle: lifecycleService})
 	modelHandler := transport.NewModelProxyHandler(transport.ModelProxyHandlerOptions{
 		Service: modelService, Client: modelproxy.NewUpstreamClient(modelproxy.NewSecureTransport(nil, nil)), AllowedHosts: cfg.AllowedNewAPIHosts, Observer: metrics,
+		Timeout: cfg.ModelProxyTimeout, RequestBodyBytes: cfg.ModelProxyRequestBodyBytes, ResponseBodyBytes: cfg.ModelProxyResponseBodyBytes,
 	})
 	return newPublicMux(activationHandler, modelHandler), nil
 }
@@ -227,7 +228,7 @@ func modelTokenDigest(pepper []byte) (func(string) [sha256.Size]byte, error) {
 }
 
 func productionKMS(cfg config.Config) (security.KMS, error) {
-	if cfg.KMSProvider != "local-kek-v1" || cfg.KMSKeyVersion == "" {
+	if cfg.KMSProvider != "local-kek-v1" || cfg.KMSKeyVersion == "" || cfg.NewAPIKMSKeyVersion == "" {
 		return nil, errors.New("production KMS configuration is required")
 	}
 	kms, err := security.NewKEK(cfg.KMSKEK, nil)
@@ -265,15 +266,20 @@ func newHTTPServer(cfg config.Config, databaseCheck transport.ReadinessCheck, de
 	}
 }
 
-func kmsReadiness(kms security.KMS, keyVersion string) transport.ReadinessCheck {
+func kmsReadiness(kms security.KMS, keyVersions ...string) transport.ReadinessCheck {
 	return func(ctx context.Context) error {
 		probe, ok := kms.(interface {
 			Probe(context.Context, string) error
 		})
-		if !ok || keyVersion == "" {
+		if !ok || len(keyVersions) == 0 {
 			return errors.New("KMS unavailable")
 		}
-		return probe.Probe(ctx, keyVersion)
+		for _, keyVersion := range keyVersions {
+			if keyVersion == "" || probe.Probe(ctx, keyVersion) != nil {
+				return errors.New("KMS unavailable")
+			}
+		}
+		return nil
 	}
 }
 

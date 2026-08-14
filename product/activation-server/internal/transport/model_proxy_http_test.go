@@ -75,6 +75,33 @@ func TestModelProxyHandlerCreatesDeadlineBeforeService(t *testing.T) {
 	}
 }
 
+func TestModelProxyHandlerUsesConfiguredBodyLimits(t *testing.T) {
+	service := &fakeProxyService{grant: validGrant(t)}
+	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: &http.Client{}, RequestBodyBytes: 64, ResponseBodyBytes: 128})
+	request := httptest.NewRequest(http.MethodPost, "/model-api/v1/chat/completions", strings.NewReader(`{"model":"allowed","messages":[{"role":"user","content":"`+strings.Repeat("x", 65)+`"}],"stream":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusRequestEntityTooLarge || service.bearer != "" {
+		t.Fatalf("request status=%d bearer=%q body=%s", response.Code, service.bearer, response.Body.String())
+	}
+
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		body := `{"id":"chatcmpl_fixture","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"` + strings.Repeat("x", 129) + `"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	h = NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}, RequestBodyBytes: 1 << 20, ResponseBodyBytes: 128})
+	request = httptest.NewRequest(http.MethodPost, "/model-api/v1/chat/completions", strings.NewReader(`{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer token")
+	response = httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("response status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestUpstreamDuplicateJSONRejected(t *testing.T) {
 	for _, body := range []string{`{"object":"list","object":"list","data":[]}`, `{"object":"list","data":[{"id":"allowed","id":"other","object":"model","created":1,"owned_by":"owner"}]}`} {
 		if rejectUpstreamDuplicateKeys([]byte(body)) == nil {
@@ -236,7 +263,7 @@ func TestModelProxyHandlerRejectsUpstreamExtensions(t *testing.T) {
 		}
 		response := httptest.NewRecorder()
 		h.ServeHTTP(response, request)
-			if response.Code != 502 || !strings.Contains(response.Body.String(), "UPSTREAM_UNAVAILABLE") || strings.Contains(response.Body.String(), "custom") {
+		if response.Code != 502 || !strings.Contains(response.Body.String(), "UPSTREAM_UNAVAILABLE") || strings.Contains(response.Body.String(), "custom") {
 			t.Fatalf("route=%s status=%d body=%s", test.route, response.Code, response.Body.String())
 		}
 	}

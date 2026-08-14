@@ -45,11 +45,12 @@ type SecretEnvelope interface {
 	DecryptSecret(context.Context, security.SecretBinding, []byte) ([]byte, error)
 }
 type ServiceOptions struct {
-	Repository Repository
-	Digest     func(string) [32]byte
-	Envelope   SecretEnvelope
-	Random     io.Reader
-	Observer   Observer
+	Repository     Repository
+	Digest         func(string) [32]byte
+	Envelope       SecretEnvelope
+	Random         io.Reader
+	Observer       Observer
+	AdmissionLease time.Duration
 }
 type Observer interface {
 	RecordModelProxyAuthRejected()
@@ -58,11 +59,12 @@ type Observer interface {
 	RecordModelProxyFinalizeFailure(string)
 }
 type Service struct {
-	repository Repository
-	digest     func(string) [32]byte
-	envelope   SecretEnvelope
-	random     io.Reader
-	observer   Observer
+	repository     Repository
+	digest         func(string) [32]byte
+	envelope       SecretEnvelope
+	random         io.Reader
+	observer       Observer
+	admissionLease time.Duration
 }
 
 func NewService(options ServiceOptions) (*Service, error) {
@@ -72,7 +74,13 @@ func NewService(options ServiceOptions) (*Service, error) {
 	if options.Random == nil {
 		options.Random = rand.Reader
 	}
-	return &Service{repository: options.Repository, digest: options.Digest, envelope: options.Envelope, random: options.Random, observer: options.Observer}, nil
+	if options.AdmissionLease <= 0 {
+		options.AdmissionLease = 75 * time.Second
+	}
+	if options.AdmissionLease < time.Second || options.AdmissionLease > 2*time.Minute {
+		return nil, errors.New("model proxy service configuration invalid")
+	}
+	return &Service{repository: options.Repository, digest: options.Digest, envelope: options.Envelope, random: options.Random, observer: options.Observer, admissionLease: options.AdmissionLease}, nil
 }
 
 type Grant struct {
@@ -105,17 +113,7 @@ func (s *Service) Authorize(ctx context.Context, bearer, model, requestID string
 		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "model.rejected"))
 		return Grant{}, ErrModelNotAllowed
 	}
-	lease := 75 * time.Second
-	if deadline, ok := ctx.Deadline(); ok {
-		lease = time.Until(deadline) + 10*time.Second
-		if lease > 2*time.Minute {
-			lease = 2 * time.Minute
-		}
-		if lease < 10*time.Second {
-			lease = 10 * time.Second
-		}
-	}
-	if err = s.repository.Admit(ctx, auth.TokenID, requestID, auth.RequestsPerMinute, auth.ConcurrentRequests, lease); err != nil {
+	if err = s.repository.Admit(ctx, auth.TokenID, requestID, auth.RequestsPerMinute, auth.ConcurrentRequests, s.admissionLease); err != nil {
 		if errors.Is(err, ErrAdmissionLimited) {
 			if s.observer != nil {
 				s.observer.RecordModelProxyAdmissionLimited()
