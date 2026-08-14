@@ -102,6 +102,17 @@ test("enforces exact device token boundaries for every valid ending", () => {
   ]);
 });
 
+test("scans every device token on a line while skipping only placeholders", () => {
+  const placeholder = `uclaw_dt_fixture${"A".repeat(36)}`;
+  const realToken = `uclaw_dt_${"B".repeat(43)}`;
+  const finding = { path: "notes/device-line.txt", line: 1, rule: "DEVICE_TOKEN" };
+
+  assert.deepEqual(scanText("notes/device-line.txt", `${placeholder}; ${realToken}`), [finding]);
+  assert.deepEqual(scanText("notes/device-line.txt", `${realToken}; ${placeholder}`), [finding]);
+  assert.deepEqual(scanText("notes/device-line.txt", `${realToken}; ${realToken}`), [finding]);
+  assert.deepEqual(scanText("notes/device-line.txt", `${placeholder}; ${placeholder}`), []);
+});
+
 test("detects activation codes leaked from test paths", () => {
   const activationCode = ["0123456789", "ABCDEFGHJK", "MNPQRS"].join("");
   const leaked = [
@@ -152,6 +163,31 @@ test("detects exact activation code keys across member assignment forms", () => 
     path,
     line,
     rule: "ACTIVATION_CODE",
+  })));
+});
+
+test("detects credential assignments through exact bare and member keys", () => {
+  const startupSecret = ["A1b2C3d4", "E5f6G7h8", "I9j0K1l2"].join("");
+  const newApiKey = ["new-api-live", "A1b2C3d4E5f6G7h8"].join("-");
+  const placeholder = "fixture-startup-secret-000000";
+  const path = "tests/member-credentials.ts";
+  const source = [
+    `request.startupSecret = "${startupSecret}"`,
+    `request.newApiKey = '${newApiKey}'`,
+    `obj["startup_secret"] = \`${startupSecret}\``,
+    `obj['new_api_key'] = ${newApiKey}`,
+    `startupSecret=${placeholder};request.startupSecret=${startupSecret}`,
+    `newApiKey=${newApiKey};obj['newApiKey']=${placeholder}`,
+    `mystartupSecret = "${startupSecret}"`,
+    `request.newApiKeySuffix = "${newApiKey}"`,
+    `obj["startup" + "Secret"] = "${startupSecret}"`,
+    `obj[key] = "${newApiKey}"`,
+  ].join("\n");
+
+  assert.deepEqual(scanText(path, source), [1, 2, 3, 4, 5, 6].map((line) => ({
+    path,
+    line,
+    rule: "CREDENTIAL_ASSIGNMENT",
   })));
 });
 
@@ -207,6 +243,7 @@ test("ignores schema declarations, property reads, and similarly named fields", 
     "secret: z.string().min(1).max(8_192).optional(),",
     "previewToken: operation.previewToken,",
     "const token = request.params.token;",
+    "const token = `work-chat-${process.pid}-${Date.now()}`;",
   ].join("\n");
 
   assert.deepEqual(scanText("src/config.ts", source), []);

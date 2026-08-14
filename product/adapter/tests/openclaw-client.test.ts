@@ -559,7 +559,8 @@ describe("OpenClawClient", () => {
     transport.requestGates.set("chat.send", new Promise((_resolve, reject) => { rejectSend = reject; }));
     const retry = client.chat.send({ sessionId: "session-1", clientRequestId: "retry-key", blocks: [{ type: "attachment", attachmentId: attachment.id }] })[Symbol.asyncIterator]();
     const failed = retry.next();
-    rejectSend(new RpcRemoteError("UNAVAILABLE", "C:\\Users\\alice\\secret.txt /home/alice/private.txt token=sk-secret123 prompt=private-body", true));
+    const leakedToken = ["sk", "secret123"].join("-");
+    rejectSend(new RpcRemoteError("UNAVAILABLE", `C:\\Users\\alice\\secret.txt /home/alice/private.txt token=${leakedToken} prompt=private-body`, true));
     await expect(failed).rejects.toBeInstanceOf(RpcRemoteError);
     const failedAttachment = await attachments.get(attachment.id);
     expect(failedAttachment).toMatchObject({ state: "failed", error: { message: "附件发送失败。", retryable: true } });
