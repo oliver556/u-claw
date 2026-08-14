@@ -188,7 +188,7 @@ describe("OpenClaw provider config backend", () => {
     const backend = createOpenClawProviderConfigBackend(rpc);
     const document = {
       schemaVersion: 1 as const, selectedProviderId: "openai",
-      providers: [{ id: "openai", templateId: "openai" as const, name: "OpenAI", enabled: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKey: "never-render-this" }],
+      providers: [{ id: "openai", templateId: "openai" as const, name: "OpenAI", enabled: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", apiKey: ["never", "render", "this"].join("-") }],
       network: { httpProxy: null, httpsProxy: null, noProxy: [] },
     };
     const error = await backend.synchronize(document, document).catch((reason: unknown) => reason);

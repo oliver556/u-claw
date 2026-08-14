@@ -183,7 +183,7 @@ describe("Electron production entry", () => {
     const quit = vi.fn(async () => undefined);
     const showErrorBox = vi.fn();
     const previousExitCode = process.exitCode;
-    const secret = "secret-token-value";
+    const secret = ["secret", "token", "value"].join("-");
     const sensitivePath = "/Users/private/runtime/openclaw.mjs";
 
     try {

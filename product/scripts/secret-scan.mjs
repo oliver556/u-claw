@@ -11,18 +11,17 @@ const defaultMaxTotalBytes = 100 * 1024 * 1024;
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 const privateKeyBegin = /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/u;
 const privateKeyEnd = /-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/u;
-const credentialField = "(?:api[_-]?key|new[_-]?api[_-]?(?:key|token)|access[_-]?token|auth[_-]?token|issued[_-]?token|startup[_-]?secret|client[_-]?secret|private[_-]?key|password|passwd|secret|token)";
 const deviceTokenPattern = /(?:^|[^A-Za-z0-9_-])(uclaw_dt_[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/gu;
 const activationCodeAssignmentSource = secretAssignmentSource({
   keySource: "activation[_-]?code",
   quotedValueSource: "[0-9A-HJKMNP-TV-Z]{26}",
   unquotedValueSource: "[0-9A-HJKMNP-TV-Z]{26}",
 });
-const credentialAssignmentSource = secretAssignmentSource({
-  keySource: credentialField,
-  quotedValueSource: "[^\"'\\x60\\r\\n]+",
-  unquotedValueSource: "[A-Za-z0-9_+=:-]{12,}",
-});
+const credentialAssignmentRules = [
+  credentialAssignmentRule("startup[_-]?secret", 16),
+  credentialAssignmentRule("(?:new[_-]?api[_-]?(?:key|token)|issued[_-]?token)", 24),
+  credentialAssignmentRule("(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|password|passwd|secret|token)", 16),
+];
 const activationCodePlaceholder = "TESTTESTTESTTESTTESTTEST12";
 const tokenPatterns = [
   /\bAKIA[0-9A-Z]{16}\b/gu,
@@ -68,13 +67,13 @@ export function scanText(filePath, source) {
     }
 
     const activationCodes = line.matchAll(new RegExp(activationCodeAssignmentSource, "giu"));
-    if ([...activationCodes].some((match) => (match[2] ?? match[3]) !== activationCodePlaceholder)) {
+    if ([...activationCodes].some((match) => (match[3] ?? match[4]) !== activationCodePlaceholder)) {
       findings.push({ path: filePath, line: index + 1, rule: "ACTIVATION_CODE" });
       continue;
     }
 
-    const credentials = line.matchAll(new RegExp(credentialAssignmentSource, "giu"));
-    if ([...credentials].some((match) => isCredentialValue(match[2] ?? match[3]))) {
+    if (credentialAssignmentRules.some(({ source, minLength }) => [...line.matchAll(new RegExp(source, "giu"))]
+      .some((match) => isStaticSecretValue(match[3] ?? match[4], minLength, match[2] !== undefined, match[1])))) {
       findings.push({ path: filePath, line: index + 1, rule: "CREDENTIAL_ASSIGNMENT" });
       continue;
     }
@@ -93,7 +92,18 @@ export function scanText(filePath, source) {
 function secretAssignmentSource({ keySource, quotedValueSource, unquotedValueSource }) {
   const quotedKey = String.raw`(?:"${keySource}"|'${keySource}'|\x60${keySource}\x60)`;
   const keyAccess = String.raw`(?:^|[^A-Za-z0-9_$\.\]])${keySource}(?![A-Za-z0-9_$])|\.\s*${keySource}(?![A-Za-z0-9_$])|\[\s*${quotedKey}\s*\]|(?:^|[^A-Za-z0-9_$])${quotedKey}`;
-  return String.raw`(?:${keyAccess})\s*(?:=|:)\s*(?:(["'\x60])(${quotedValueSource})\1|(${unquotedValueSource})(?=$|[\s,;}\]\)]))`;
+  return String.raw`(?:${keyAccess})\s*(=|:)\s*(?:(["'\x60])(${quotedValueSource})\2|(${unquotedValueSource})(?=$|[\s,;}\]\)]))`;
+}
+
+function credentialAssignmentRule(keySource, minLength) {
+  return {
+    source: secretAssignmentSource({
+      keySource,
+      quotedValueSource: "[^\"'\\x60\\r\\n]+",
+      unquotedValueSource: `[A-Za-z0-9_+=:-]{${minLength},}`,
+    }),
+    minLength,
+  };
 }
 
 export async function scanTrackedRepository(startDirectory = process.cwd(), options = {}) {
@@ -306,11 +316,12 @@ function containsHighConfidenceToken(line) {
   return false;
 }
 
-function isCredentialValue(value) {
-  if (isPlaceholder(value) || value.includes("${") || value.length < 12 || /^https?:\/\//iu.test(value)) return false;
-  if (containsHighConfidenceToken(value)) return true;
-  const classes = [/[a-z]/u, /[A-Z]/u, /\d/u, /[^A-Za-z0-9]/u];
-  return classes.filter((pattern) => pattern.test(value)).length >= 3;
+function isStaticSecretValue(value, minLength, quoted, operator) {
+  return value.length >= minLength
+    && !isPlaceholder(value)
+    && !value.includes("${")
+    && !/^https?:\/\//iu.test(value)
+    && (quoted || operator === "=" || !/^(?=.*[a-z])(?=.*[A-Z])[A-Za-z_$][A-Za-z0-9_$]*$/u.test(value));
 }
 
 function isPrivateKeyPlaceholder(value) {

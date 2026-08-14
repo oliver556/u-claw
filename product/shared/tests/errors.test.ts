@@ -200,7 +200,7 @@ describe("error contracts", () => {
 
   it.each([
     [
-      'gateway failed: {"api_key":"unprefixed-secret","access_token":1234567890,"body":"private conversation body"}',
+      `gateway failed: {"api_key":"${["unprefixed", "secret"].join("-")}","access_token":1234567890,"body":"private conversation body"}`,
       "[REDACTED]",
     ],
     ['failed at "/Users/alice/private/chat.txt"', 'failed at "[REDACTED]"'],

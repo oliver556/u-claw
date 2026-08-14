@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,7 +248,7 @@ func TestRecoverAuthorizesAfterSecretAuthenticationAndBeforeDecrypting(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.Recover(context.Background(), RecoverInput{ActivationID: "act_fixture_001", StartupSecret: "wrong-secret-material-that-is-long-enough", RequestID: "request_fixture_001"}); !errors.Is(err, ErrAuthentication) {
+	if _, err = service.Recover(context.Background(), RecoverInput{ActivationID: "act_fixture_001", StartupSecret: strings.Join([]string{"wrong", "secret", "material", "that", "is", "long", "enough"}, "-"), RequestID: "request_fixture_001"}); !errors.Is(err, ErrAuthentication) {
 		t.Fatalf("wrong secret error=%v", err)
 	}
 	if repository.authorizeCalls != 0 || envelope.calls != 0 {

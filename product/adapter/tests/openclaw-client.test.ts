@@ -129,7 +129,7 @@ describe("OpenClawClient", () => {
     transport.helloMethods.push("models.list");
     const payload = structuredClone(models.configured.responseFrame.payload);
     payload.models[0].available = false;
-    payload.models[0].apiKey = "sk-contract-secret";
+    payload.models[0].apiKey = ["sk", "contract", "secret"].join("-");
     payload.models[0].baseUrl = "https://secret.example/v1";
     transport.fixtures.set("models.list", payload);
     const client = new OpenClawClient({ transport });

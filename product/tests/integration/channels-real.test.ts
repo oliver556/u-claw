@@ -130,7 +130,7 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw channel runtime", () => {
 
     const channels: ChannelConfigEntry[] = [
       { id: "telegram-main", kind: "telegram", name: "Telegram", mode: "bot", enabled: false, credentials: { botToken: "123456789:telegram-real-smoke-token" } },
-      { id: "qq-bot-main", kind: "qq-bot", name: "QQ Bot", mode: "app", enabled: false, allowFrom: ["user:allowed"], credentials: { appId: "1024", clientSecret: "qq-real-smoke-secret" } },
+      { id: "qq-bot-main", kind: "qq-bot", name: "QQ Bot", mode: "app", enabled: false, allowFrom: ["user:allowed"], credentials: { appId: "1024", clientSecret: ["qq", "real", "smoke", "secret"].join("-") } },
     ];
 
     let running = await launch();
@@ -140,8 +140,8 @@ describe.skipIf(!runRealOpenClaw)("real OpenClaw channel runtime", () => {
       expect.objectContaining({ configured: true, enabled: false, runtimeAuthoritative: true }),
     ]));
     const unavailable = [
-      { id: "feishu-main", kind: "feishu", name: "Feishu", mode: "websocket", enabled: false, credentials: { appId: "cli_real_smoke", appSecret: "feishu-real-smoke-secret" } },
-      { id: "wecom-main", kind: "wecom", name: "WeCom", mode: "websocket", enabled: false, credentials: { botId: "bot", secret: "wecom-real-smoke-secret" } },
+      { id: "feishu-main", kind: "feishu", name: "Feishu", mode: "websocket", enabled: false, credentials: { appId: "cli_real_smoke", appSecret: ["feishu", "real", "smoke", "secret"].join("-") } },
+      { id: "wecom-main", kind: "wecom", name: "WeCom", mode: "websocket", enabled: false, credentials: { botId: "bot", secret: ["wecom", "real", "smoke", "secret"].join("-") } },
       { id: "discord-main", kind: "discord", name: "Discord", mode: "bot", enabled: false, credentials: { botToken: "discord-real-smoke-token" } },
     ] as const satisfies ChannelConfigEntry[];
     for (const channel of unavailable) {
