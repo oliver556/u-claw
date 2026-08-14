@@ -111,7 +111,7 @@ async function invalidJsonEndpoint(): Promise<string> {
 }
 
 describe("localhost provisioning identity transaction", () => {
-  it("provisions once under duplicate and concurrent calls, then loads active credential", async () => {
+  it("provisions once under duplicate and concurrent calls without creating an activation credential", async () => {
     const context = await setup();
     const [first, second] = await Promise.all([
       context.coordinator.provision(context.input),
@@ -119,9 +119,7 @@ describe("localhost provisioning identity transaction", () => {
     ]);
     expect(second).toEqual(first);
     await expect(context.coordinator.provision(context.input)).resolves.toEqual(first);
-    await expect(context.credentialStore.loadActive()).resolves.toMatchObject({
-      deviceId: first.deviceId, userId: first.newApiUserId, tokenId: first.newApiTokenId, model: context.input.model,
-    });
+    await expect(context.credentialStore.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_MISSING" });
     const audit = await context.newApiClient.listAuditEvents({ deviceId: first.deviceId, cursor: null, pageSize: 100 });
     expect(audit.items.filter((event) => event.action === "user.created")).toHaveLength(1);
     expect(audit.items.filter((event) => event.action === "token.created")).toHaveLength(1);
@@ -258,6 +256,15 @@ describe("localhost provisioning identity transaction", () => {
 
   it("revokes old token and replaces binding during reissue", async () => {
     const context = await setup();
+    const activationCredential = {
+      schemaVersion: 1 as const,
+      deviceId: "dev_activation_fixture_001",
+      licenseId: "lic_activation_fixture_001",
+      endpoint: context.input.endpoint,
+      model: "activation-model",
+      deviceToken: ["uclaw", "dt", "A1b2".repeat(11).slice(0, 43)].join("_"),
+    };
+    await context.credentialStore.provision(activationCredential);
     const active = await context.coordinator.provision(context.input);
     const originalControls = await context.newApiClient.getDeviceControls({ deviceId: active.deviceId });
     const reissued = await context.coordinator.applyLifecycle({
@@ -287,7 +294,12 @@ describe("localhost provisioning identity transaction", () => {
     await expect(context.newApiClient.revokeToken(active.newApiTokenId, {
       idempotencyKey: "verify-old-token-revoked",
     })).resolves.toMatchObject({ status: "revoked" });
-    await expect(context.credentialStore.loadActive()).resolves.toMatchObject({ tokenId: reissued.newApiTokenId });
+    await expect(context.credentialStore.loadActive()).resolves.toMatchObject({
+      deviceId: activationCredential.deviceId,
+      licenseId: activationCredential.licenseId,
+      deviceToken: activationCredential.deviceToken,
+      model: activationCredential.model,
+    });
   });
 
   it("resumes a reissue after the replacement artifact write fails", async () => {

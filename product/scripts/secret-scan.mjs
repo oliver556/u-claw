@@ -12,11 +12,17 @@ const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 const privateKeyBegin = /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/u;
 const privateKeyEnd = /-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/u;
 const credentialField = "(?:api[_-]?key|new[_-]?api[_-]?(?:key|token)|access[_-]?token|auth[_-]?token|issued[_-]?token|startup[_-]?secret|client[_-]?secret|private[_-]?key|password|passwd|secret|token)";
-const quotedCredentialAssignment = new RegExp(`(?:^|[\\s{,])["']?${credentialField}["']?\\s*(?:=|:)\\s*(["'])([^"'\\x60\\r\\n]+)\\1`, "iu");
-const environmentCredentialAssignment = new RegExp(`^(?:export\\s+)?${credentialField}\\s*=\\s*([^\\s#]+)\\s*$`, "iu");
 const deviceTokenPattern = /(?:^|[^A-Za-z0-9_-])(uclaw_dt_[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/gu;
-const activationCodeKeySource = String.raw`(?:^|[^A-Za-z0-9_$\.\]])activation[_-]?code|\.\s*activation[_-]?code|\[\s*(?:"activation[_-]?code"|'activation[_-]?code'|\x60activation[_-]?code\x60)\s*\]|(?:^|[^A-Za-z0-9_$])(?:"activation[_-]?code"|'activation[_-]?code'|\x60activation[_-]?code\x60)`;
-const activationCodeAssignmentSource = String.raw`(?:${activationCodeKeySource})\s*(?:=|:)\s*(?:(["'\x60])([0-9A-HJKMNP-TV-Z]{26})\1|([0-9A-HJKMNP-TV-Z]{26})(?=$|[\s,;}\]\)]))`;
+const activationCodeAssignmentSource = secretAssignmentSource({
+  keySource: "activation[_-]?code",
+  quotedValueSource: "[0-9A-HJKMNP-TV-Z]{26}",
+  unquotedValueSource: "[0-9A-HJKMNP-TV-Z]{26}",
+});
+const credentialAssignmentSource = secretAssignmentSource({
+  keySource: credentialField,
+  quotedValueSource: "[^\"'\\x60\\r\\n]+",
+  unquotedValueSource: "[A-Za-z0-9_+=:-]{12,}",
+});
 const activationCodePlaceholder = "TESTTESTTESTTESTTESTTEST12";
 const tokenPatterns = [
   /\bAKIA[0-9A-Z]{16}\b/gu,
@@ -55,9 +61,8 @@ export function scanText(filePath, source) {
       continue;
     }
 
-    deviceTokenPattern.lastIndex = 0;
-    const deviceToken = deviceTokenPattern.exec(line)?.[1];
-    if (deviceToken && !isPlaceholder(deviceToken, { token: true })) {
+    const deviceTokens = line.matchAll(new RegExp(deviceTokenPattern.source, deviceTokenPattern.flags));
+    if ([...deviceTokens].some((match) => !isPlaceholder(match[1], { token: true }))) {
       findings.push({ path: filePath, line: index + 1, rule: "DEVICE_TOKEN" });
       continue;
     }
@@ -68,10 +73,8 @@ export function scanText(filePath, source) {
       continue;
     }
 
-    const quotedAssignment = quotedCredentialAssignment.exec(line);
-    const environmentAssignment = environmentCredentialAssignment.exec(line);
-    const assignedValue = quotedAssignment?.[2] ?? environmentAssignment?.[1];
-    if (assignedValue && isCredentialValue(assignedValue)) {
+    const credentials = line.matchAll(new RegExp(credentialAssignmentSource, "giu"));
+    if ([...credentials].some((match) => isCredentialValue(match[2] ?? match[3]))) {
       findings.push({ path: filePath, line: index + 1, rule: "CREDENTIAL_ASSIGNMENT" });
       continue;
     }
@@ -85,6 +88,12 @@ export function scanText(filePath, source) {
     findings.push({ path: filePath, line: privateKeyStart + 1, rule: "PRIVATE_KEY_BLOCK" });
   }
   return findings;
+}
+
+function secretAssignmentSource({ keySource, quotedValueSource, unquotedValueSource }) {
+  const quotedKey = String.raw`(?:"${keySource}"|'${keySource}'|\x60${keySource}\x60)`;
+  const keyAccess = String.raw`(?:^|[^A-Za-z0-9_$\.\]])${keySource}(?![A-Za-z0-9_$])|\.\s*${keySource}(?![A-Za-z0-9_$])|\[\s*${quotedKey}\s*\]|(?:^|[^A-Za-z0-9_$])${quotedKey}`;
+  return String.raw`(?:${keyAccess})\s*(?:=|:)\s*(?:(["'\x60])(${quotedValueSource})\1|(${unquotedValueSource})(?=$|[\s,;}\]\)]))`;
 }
 
 export async function scanTrackedRepository(startDirectory = process.cwd(), options = {}) {
@@ -298,7 +307,7 @@ function containsHighConfidenceToken(line) {
 }
 
 function isCredentialValue(value) {
-  if (isPlaceholder(value) || value.length < 12 || /^https?:\/\//iu.test(value)) return false;
+  if (isPlaceholder(value) || value.includes("${") || value.length < 12 || /^https?:\/\//iu.test(value)) return false;
   if (containsHighConfidenceToken(value)) return true;
   const classes = [/[a-z]/u, /[A-Z]/u, /\d/u, /[^A-Za-z0-9]/u];
   return classes.filter((pattern) => pattern.test(value)).length >= 3;
