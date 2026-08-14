@@ -110,6 +110,8 @@ function setup(overrides: Record<string, unknown> = {}) {
     writeServerBoundJournal: vi.fn(async () => undefined),
     discardRequestedJournal: vi.fn(async () => undefined),
     retireLegacyCredential: vi.fn(async () => undefined),
+    readLegacyServerBoundRecovery: vi.fn(async (): Promise<any> => { throw new Error("reissue required"); }),
+    commitLegacyServerBoundRecovery: vi.fn(async () => undefined),
     recoverPendingArtifacts: vi.fn(async () => undefined),
     writeArtifacts: vi.fn(async (): Promise<void> => undefined),
     verifyArtifacts: vi.fn(async () => undefined),
@@ -374,8 +376,51 @@ describe("activation coordinator", () => {
     expect(await coordinator.preflight()).toEqual({ state: "recovery-required", code: "RECOVERY_INPUT_REQUIRED" });
     expect(writer.retireLegacyCredential).toHaveBeenCalledOnce();
     expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "LEGACY_RECOVERY_REISSUE_REQUIRED" });
+    expect(writer.readLegacyServerBoundRecovery).toHaveBeenCalledWith(pending);
     expect(deps.client.activate).not.toHaveBeenCalled();
     expect(writer.writeServerBoundJournal).not.toHaveBeenCalled();
+  });
+
+  it("completes legacy v1 server-bound recovery after a matching reissued credential is installed", async () => {
+    const pending = legacyRequestedJournal("server_bound");
+    const { coordinator, writer, deps } = setup();
+    writer.readJournal.mockResolvedValue(pending);
+    writer.readLegacyServerBoundRecovery.mockResolvedValue(response);
+    await coordinator.preflight();
+
+    expect(await coordinator.submit(input)).toEqual({ state: "complete" });
+    expect(writer.readLegacyServerBoundRecovery).toHaveBeenCalledWith(pending);
+    expect(deps.verifyLicense).toHaveBeenCalledWith(response);
+    expect(deps.commitRemote).toHaveBeenCalledWith(
+      pending.activationId, pending.idempotencyKey, pending.generation, expect.any(AbortSignal),
+    );
+    expect(writer.commitLegacyServerBoundRecovery).toHaveBeenCalledWith(pending, response);
+    expect(deps.exit).toHaveBeenCalledWith(20);
+    expect(deps.client.activate).not.toHaveBeenCalled();
+  });
+
+  it("preserves legacy v1 server-bound recovery when signature verification fails", async () => {
+    const pending = legacyRequestedJournal("server_bound");
+    const { coordinator, writer, deps } = setup({ verifyLicense: vi.fn(async () => false) });
+    writer.readJournal.mockResolvedValue(pending);
+    writer.readLegacyServerBoundRecovery.mockResolvedValue(response);
+    await coordinator.preflight();
+
+    expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "RECOVERY_REQUIRED" });
+    expect(deps.commitRemote).not.toHaveBeenCalled();
+    expect(writer.commitLegacyServerBoundRecovery).not.toHaveBeenCalled();
+  });
+
+  it("preserves legacy v1 server-bound recovery when remote commit fails", async () => {
+    const pending = legacyRequestedJournal("server_bound");
+    const { coordinator, writer, deps } = setup({ commitRemote: vi.fn(async () => { throw new Error("unknown"); }) });
+    writer.readJournal.mockResolvedValue(pending);
+    writer.readLegacyServerBoundRecovery.mockResolvedValue(response);
+    await coordinator.preflight();
+
+    expect(await coordinator.submit(input)).toEqual({ state: "recovery-required", code: "RECOVERY_REQUIRED" });
+    expect(writer.commitLegacyServerBoundRecovery).not.toHaveBeenCalled();
+    expect(deps.exit).not.toHaveBeenCalled();
   });
 
   it("cleans a legacy v1 committed journal without activation input", async () => {

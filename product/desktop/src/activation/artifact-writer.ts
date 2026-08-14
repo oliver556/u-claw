@@ -60,7 +60,8 @@ const LegacyJournalSchema = z.union([
 ]);
 
 export type ActivationArtifactJournal = z.infer<typeof JournalSchema>;
-export type ActivationReadableJournal = ActivationArtifactJournal | z.infer<typeof LegacyJournalSchema>;
+export type ActivationLegacyJournal = z.infer<typeof LegacyJournalSchema>;
+export type ActivationReadableJournal = ActivationArtifactJournal | ActivationLegacyJournal;
 export type ActivationRequestedJournal = z.infer<typeof RequestedJournalSchema>;
 export type ActivationServerBoundJournal = z.infer<typeof BoundJournalSchema>;
 
@@ -119,6 +120,8 @@ export interface ActivationArtifactWriter {
   readJournal(): Promise<ActivationReadableJournal | null>;
   discardRequestedJournal(idempotencyKey: string): Promise<void>;
   retireLegacyCredential(): Promise<void>;
+  readLegacyServerBoundRecovery(journal: ActivationLegacyJournal): Promise<ActivationResponse>;
+  commitLegacyServerBoundRecovery(journal: ActivationLegacyJournal, response: ActivationResponse): Promise<void>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
   recoverPendingArtifacts(): Promise<void>;
@@ -253,6 +256,52 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
     }
   };
 
+  const readLegacyServerBoundRecovery = async (expected: ActivationLegacyJournal): Promise<ActivationResponse> => {
+    try {
+      const trusted = LegacyJournalSchema.parse(expected);
+      const journal = LegacyJournalSchema.parse(await readJson(journalPath));
+      if (journal.stage !== "server_bound" || trusted.stage !== "server_bound"
+          || journal.idempotencyKey !== trusted.idempotencyKey
+          || journal.activationId !== trusted.activationId
+          || journal.deviceId !== trusted.deviceId
+          || journal.licenseId !== trusted.licenseId
+          || journal.generation !== trusted.generation
+          || journal.username !== trusted.username
+          || journal.requestHash !== trusted.requestHash
+          || journal.usbFingerprint.version !== trusted.usbFingerprint.version
+          || journal.usbFingerprint.sha256 !== trusted.usbFingerprint.sha256
+          || journal.clientVersion !== trusted.clientVersion) throw new Error("transaction");
+      const startup = StartupCredentialArtifactSchema.parse(JSON.parse(await (await packageSafeRoot).readText(artifactPaths[0].path)));
+      const license = StartupLicenseArtifactSchema.parse(JSON.parse(await (await packageSafeRoot).readText(artifactPaths[1].path)));
+      const loadedBuiltin = await credentialStore.loadActive();
+      const builtin = BuiltinCredentialArtifactSchema.parse({
+        schemaVersion: 1,
+        deviceId: loadedBuiltin.deviceId,
+        licenseId: loadedBuiltin.licenseId,
+        endpoint: loadedBuiltin.endpoint.href,
+        model: loadedBuiltin.model,
+        deviceToken: loadedBuiltin.deviceToken,
+      });
+      if (startup.deviceId !== journal.deviceId || startup.licenseId !== journal.licenseId
+          || license.deviceId !== journal.deviceId || license.licenseId !== journal.licenseId
+          || license.usbFingerprint.scheme !== journal.usbFingerprint.version
+          || license.usbFingerprint.sha256 !== journal.usbFingerprint.sha256
+          || builtin.deviceId !== journal.deviceId || builtin.licenseId !== journal.licenseId) throw new Error("identity");
+      return ActivationResponseSchema.parse({
+        activationId: journal.activationId,
+        deviceId: journal.deviceId,
+        licenseId: journal.licenseId,
+        license,
+        startupCredential: startup,
+        builtinCredential: builtin,
+        status: "active",
+      });
+    } catch (error) {
+      if (error instanceof FsSafeError) throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Legacy activation recovery path is unsafe.");
+      throw new ActivationArtifactError("ARTIFACT_INVALID", "Legacy activation recovery artifacts are invalid.");
+    }
+  };
+
   return {
     async preflight() {
       await prepare();
@@ -308,6 +357,25 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         await remove(legacyBuiltinCredentialPath);
       } catch {
         throw new ActivationArtifactError("ARTIFACT_WRITE_FAILED", "Legacy activation credential could not be retired.");
+      }
+    },
+
+    readLegacyServerBoundRecovery,
+    async commitLegacyServerBoundRecovery(expected, value) {
+      try {
+        const response = ActivationResponseSchema.parse(value);
+        const readback = await readLegacyServerBoundRecovery(expected);
+        if (JSON.stringify(readback) !== JSON.stringify(response)) throw new Error("binding");
+      } catch (error) {
+        if (error instanceof FsSafeError) throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Legacy activation recovery path is unsafe.");
+        if (error instanceof ActivationArtifactError) throw error;
+        throw new ActivationArtifactError("ARTIFACT_INVALID", "Legacy activation recovery artifacts changed after verification.");
+      }
+      try {
+        await remove(journalPath);
+      } catch (error) {
+        if (error instanceof FsSafeError) throw new ActivationArtifactError("ARTIFACT_PATH_UNSAFE", "Legacy activation recovery path is unsafe.");
+        throw new ActivationArtifactError("ARTIFACT_WRITE_FAILED", "Legacy activation recovery could not be completed.");
       }
     },
 

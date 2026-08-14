@@ -33,6 +33,8 @@ interface CoordinatorWriter {
   recoverPendingArtifacts(): Promise<void>;
   discardRequestedJournal(idempotencyKey: string): Promise<void>;
   retireLegacyCredential(): Promise<void>;
+  readLegacyServerBoundRecovery(journal: LegacyJournal): Promise<ActivationResponse>;
+  commitLegacyServerBoundRecovery(journal: LegacyJournal, response: ActivationResponse): Promise<void>;
   writeArtifacts(input: { generation: number; response: ActivationResponse }): Promise<void>;
   verifyArtifacts(response: ActivationResponse, generation: number): Promise<void>;
   commitArtifacts(activationId: string, generation: number): Promise<void>;
@@ -177,7 +179,22 @@ export function createActivationCoordinator(deps: ActivationCoordinatorDependenc
           catch { return recovery("RECOVERY_REQUIRED"); }
           pendingJournal = null;
         } else if (legacy.stage === "server_bound") {
-          return recovery("LEGACY_RECOVERY_REISSUE_REQUIRED");
+          let response: ActivationResponse;
+          try { response = await deps.writer.readLegacyServerBoundRecovery(legacy); }
+          catch { return recovery("LEGACY_RECOVERY_REISSUE_REQUIRED"); }
+          set("verifying");
+          try {
+            if (!await deps.verifyLicense(response)) return recovery("RECOVERY_REQUIRED");
+            set("committing");
+            await deps.commitRemote(
+              response.activationId, legacy.idempotencyKey, legacy.generation, new AbortController().signal,
+            );
+            await deps.writer.commitLegacyServerBoundRecovery(legacy, response);
+          } catch { return recovery("RECOVERY_REQUIRED"); }
+          pendingJournal = null;
+          set("complete");
+          deps.exit(20);
+          return current;
         }
       }
       if (pendingJournal?.schemaVersion === 2) {
