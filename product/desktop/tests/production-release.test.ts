@@ -54,14 +54,17 @@ describe("production release configuration", () => {
   it.each([
     ["non-HTTPS feed", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "http://updates.example.test/" }],
     ["credentialed feed", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "https://user:pass@updates.example.test/" }],
-    ["activation API feed", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "https://api.u-claw.org/releases/" }],
-    ["malformed key", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": "not-a-key" }), UCLAW_RELEASE_BASE_URL: "https://updates.example.test/" }],
-    ["invalid revoked list", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_REVOKED_KEY_IDS: "{}", UCLAW_RELEASE_BASE_URL: "https://updates.example.test/" }],
+    ["other host", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "https://updates.example.test/releases/" }],
+    ["other path", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "https://updates.yiyong.me/other/" }],
+    ["query", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "https://updates.yiyong.me/releases/?channel=stable" }],
+    ["fragment", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_BASE_URL: "https://updates.yiyong.me/releases/#stable" }],
+    ["malformed key", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": "not-a-key" }), UCLAW_RELEASE_BASE_URL: "https://updates.yiyong.me/releases/" }],
+    ["invalid revoked list", { UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }), UCLAW_RELEASE_REVOKED_KEY_IDS: "{}", UCLAW_RELEASE_BASE_URL: "https://updates.yiyong.me/releases/" }],
   ])("rejects %s", (_name, source) => {
     expect(parseProductionReleaseConfig(source)).toMatchObject({ ok: false, message: "发布更新配置无效。" });
   });
 
-  it("uses valid injected configuration on the production fetch path", async () => {
+  it("uses only a test-scoped HTTPS fixture override", async () => {
     const root = await mkdtemp(join(tmpdir(), "uclaw-production-release-"));
     const cacheDir = join(root, "host", "cache");
     const dataDir = join(root, "portable", ".uclaw", "data");
@@ -72,13 +75,23 @@ describe("production release configuration", () => {
       headers: { "content-length": "16" },
     }));
     const service = createProductionReleaseService({ cacheDir, dataDir } as never, {
+      NODE_ENV: "test",
       UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }),
       UCLAW_RELEASE_REVOKED_KEY_IDS: JSON.stringify([]),
-      UCLAW_RELEASE_BASE_URL: "https://updates.u-claw.org/releases/",
+      UCLAW_RELEASE_BASE_URL: "https://updates.yiyong.me/releases/",
+      UCLAW_TEST_RELEASE_FEED_URL: "https://fixture.example.test/releases/",
     }, fetchImpl);
 
     expect(await service.check("stable")).toMatchObject({ state: "unavailable", retryable: false, message: "更新签名或兼容性验证失败。" });
-    expect(fetchImpl).toHaveBeenCalledWith(new URL("https://updates.u-claw.org/releases/stable.json"), expect.objectContaining({ redirect: "error", credentials: "omit" }));
+    expect(fetchImpl).toHaveBeenCalledWith(new URL("https://fixture.example.test/releases/stable.json"), expect.objectContaining({ redirect: "error", credentials: "omit" }));
+  });
+
+  it("ignores the test override outside test mode", () => {
+    expect(parseProductionReleaseConfig({
+      UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS: JSON.stringify({ "release-2026": rawPublicKey() }),
+      UCLAW_RELEASE_BASE_URL: "https://updates.yiyong.me/releases/",
+      UCLAW_TEST_RELEASE_FEED_URL: "https://fixture.example.test/releases/",
+    })).toMatchObject({ ok: true, value: { baseUrl: new URL("https://updates.yiyong.me/releases/") } });
   });
 
   it("reports configuration failure without attempting network access", async () => {

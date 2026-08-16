@@ -20,11 +20,12 @@ type ProductionReleaseConfigResult =
 
 const keyIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const ed25519SpkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
-const productionReleaseOrigin = "https://updates.u-claw.org";
+const productionReleaseBaseURL = "https://updates.yiyong.me/releases/";
 
 export function parseProductionReleaseConfig(source: ProductionReleaseConfigSource): ProductionReleaseConfigResult {
   const encodedKeys = source.UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS;
-  const feed = source.UCLAW_RELEASE_BASE_URL;
+  const testFeed = source.NODE_ENV === "test" ? source.UCLAW_TEST_RELEASE_FEED_URL : undefined;
+  const feed = testFeed ?? source.UCLAW_RELEASE_BASE_URL;
   if (!encodedKeys || !feed) return { ok: false, message: "发布更新配置缺失。" };
   try {
     const parsedKeys = JSON.parse(encodedKeys) as unknown;
@@ -42,8 +43,9 @@ export function parseProductionReleaseConfig(source: ProductionReleaseConfigSour
     }
     if (!parsedRevoked.every((keyId) => typeof keyId === "string" && keyIdPattern.test(keyId))) throw new Error("invalid revocation list");
     const baseUrl = new URL(feed);
-    if (baseUrl.origin !== productionReleaseOrigin || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash) throw new Error("invalid release feed");
-    if (!baseUrl.pathname.endsWith("/")) baseUrl.pathname += "/";
+    if (testFeed) {
+      if (baseUrl.protocol !== "https:" || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash || !baseUrl.pathname.endsWith("/")) throw new Error("invalid test release feed");
+    } else if (baseUrl.href !== productionReleaseBaseURL) throw new Error("invalid production release feed");
     return { ok: true, value: { trustedKeys, revokedKeyIds: new Set(parsedRevoked as string[]), baseUrl } };
   } catch {
     return { ok: false, message: "发布更新配置无效。" };

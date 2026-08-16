@@ -72,7 +72,7 @@ jobs:
           UCLAW_LICENSE_STATUS_ENDPOINT: ${{ vars.UCLAW_LICENSE_STATUS_ENDPOINT }}
           UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS }}
           UCLAW_RUNTIME_REVOKED_KEY_IDS: ${{ vars.UCLAW_RUNTIME_REVOKED_KEY_IDS }}
-          UCLAW_RELEASE_BASE_URL: ${{ vars.UCLAW_RELEASE_BASE_URL }}
+          UCLAW_RELEASE_BASE_URL: https://updates.yiyong.me/releases/
           UCLAW_ACTIVATION_ENDPOINT: ${{ vars.UCLAW_ACTIVATION_ENDPOINT }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -125,9 +125,10 @@ jobs:
             $licenseKeysJson = ConvertTo-Json $licenseKeys -Compress
             $licenseStatusKeysJson = ConvertTo-Json $licenseStatusKeys -Compress
             $revokedKeyIDsJson = ConvertTo-Json @($revokedKeyIDs) -Compress
+            $expectedReleaseBaseURL = 'https://updates.yiyong.me/releases/'
             $releaseURI = [Uri]$env:UCLAW_RELEASE_BASE_URL
-            if (!$releaseURI.IsAbsoluteUri -or $releaseURI.Scheme -cne 'https' -or $releaseURI.UserInfo -or $releaseURI.Query -or $releaseURI.Fragment) {
-              throw 'Release feed must be an HTTPS URL without credentials, query, or fragment'
+            if ($releaseURI.AbsoluteUri -cne $expectedReleaseBaseURL) {
+              throw "Production release feed must be $expectedReleaseBaseURL"
             }
             $releaseBaseURL = $releaseURI.AbsoluteUri
             $licenseStatusURI = [Uri]$env:UCLAW_LICENSE_STATUS_ENDPOINT

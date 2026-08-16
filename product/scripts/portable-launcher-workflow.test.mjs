@@ -43,7 +43,10 @@ test("production launcher build requires and injects an Ed25519 trust root", asy
   const source = await readFile(workflowUrl, "utf8");
   assert.match(source, /UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
   assert.match(source, /UCLAW_RUNTIME_REVOKED_KEY_IDS:\s*\$\{\{\s*vars\.UCLAW_RUNTIME_REVOKED_KEY_IDS\s*\}\}/u);
-  assert.match(source, /UCLAW_RELEASE_BASE_URL:\s*\$\{\{\s*vars\.UCLAW_RELEASE_BASE_URL\s*\}\}/u);
+  assert.match(source, /UCLAW_RELEASE_BASE_URL:\s*https:\/\/updates\.yiyong\.me\/releases\//u);
+  assert.doesNotMatch(source, /vars\.UCLAW_RELEASE_BASE_URL/u);
+  assert.match(source, /\$expectedReleaseBaseURL\s*=\s*'https:\/\/updates\.yiyong\.me\/releases\/'/u);
+  assert.match(source, /\$releaseURI\.AbsoluteUri\s+-cne\s+\$expectedReleaseBaseURL/u);
   assert.match(source, /UCLAW_ACTIVATION_ENDPOINT:\s*\$\{\{\s*vars\.UCLAW_ACTIVATION_ENDPOINT\s*\}\}/u);
   assert.doesNotMatch(source, /UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS|trustedActivationKeys|activationKeysJson/u);
   assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS\)[\s\S]*throw/u);
