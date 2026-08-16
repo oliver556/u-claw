@@ -4,7 +4,9 @@ import test from "node:test";
 
 const workflowUrl = new URL("../../.github/workflows/portable-launcher.yml", import.meta.url);
 const e2eUrl = new URL("../tests/windows/launcher-e2e.ps1", import.meta.url);
+const offlineE2EUrl = new URL("../tests/windows/offline-updater-e2e.ps1", import.meta.url);
 const appManifestUrl = new URL("../launcher/app.manifest", import.meta.url);
+const updaterManifestUrl = new URL("../offline-updater/app.manifest", import.meta.url);
 
 test("portable launcher workflow pins tools and limits authority", async () => {
   const source = await readFile(workflowUrl, "utf8");
@@ -96,10 +98,12 @@ test("PowerShell E2E covers the frozen portable lifecycle", async () => {
     "missingStartupCredentialRejected",
     "missingLicenseRejected",
     "tamperedLicenseRejected",
+    "updateRestartReranFullGate",
   ]) {
     assert.match(source, new RegExp(`\\b${check}\\b`, "u"));
   }
   assert.match(source, /UCLAW_LAUNCHER_HEADLESS/u);
+  assert.match(source, /UCLAW_FIXTURE_UPDATE_RESTART_ONCE/u);
   assert.match(source, /sign-license-fixture\.mjs/u);
   assert.match(source, /-tags\s+licensefixture/u);
   assert.match(source, /main\.trustedStartupLicenseKeys=\$licenseTrustedKeysJson/u);
@@ -107,4 +111,38 @@ test("PowerShell E2E covers the frozen portable lifecycle", async () => {
   assert.match(source, /\.status-response\.json/u);
   assert.match(source, /\.partial-/u);
   assert.doesNotMatch(source, /Write-(Host|Verbose|Debug|Warning)|Start-Process[^\n]*-Verb\s+RunAs/iu);
+});
+
+test("Windows workflow gates online and offline updates in both PowerShell versions", async () => {
+  const [workflow, offlineE2E, updaterManifest] = await Promise.all([
+    readFile(workflowUrl, "utf8"),
+    readFile(offlineE2EUrl, "utf8"),
+    readFile(updaterManifestUrl, "utf8"),
+  ]);
+  assert.equal((workflow.match(/\.\\product\\tests\\windows\\offline-updater-e2e\.ps1/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/\.\\product\\tests\\windows\\launcher-e2e\.ps1/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/-OfflineUpdaterExe\b/gu) ?? []).length, 2);
+  assert.match(workflow, /offline-updater[\s\S]*rsrc_windows_amd64\.syso[\s\S]*-H windowsgui/u);
+  assert.match(workflow, /offline-updater[\s\S]*go test -race \.\/\.\.\./u);
+  assert.match(updaterManifest, /requestedExecutionLevel level="asInvoker" uiAccess="false"/u);
+  assert.doesNotMatch(`${workflow}\n${offlineE2E}\n${updaterManifest}`, /\bRunAs\b|requireAdministrator/iu);
+  assert.match(workflow, /product\/\.portable-launcher\/diagnostics\/\*\.json/u);
+  assert.doesNotMatch(workflow.slice(workflow.search(/uses: actions\/upload-artifact@/u)), /U-Claw-Update|runtime\.pkg|stable\.json/iu);
+  for (const field of [
+    "offlineUpdateSucceeded",
+    "licenseUnchanged",
+    "startupCredentialUnchanged",
+    "userDataUnchanged",
+    "tamperedManifestRejected",
+    "tamperedRuntimeRejected",
+    "downgradeRejected",
+    "multipleDrivesRequireSelection",
+    "runningApplicationRejected",
+    "interruptedSwitchRecovered",
+    "newVersionPassedFullLicenseGate",
+  ]) {
+    assert.match(offlineE2E, new RegExp(`\\b${field}\\b`, "u"));
+  }
+  assert.match(offlineE2E, /Get-FileHash[^\n]*SHA256/u);
+  assert.doesNotMatch(offlineE2E, /production|activation[_-]?code|api[_-]?token/iu);
 });

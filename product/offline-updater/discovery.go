@@ -16,8 +16,8 @@ type Candidate struct {
 var candidateRequiredFiles = []string{
 	"U-Claw.exe",
 	filepath.Join(".uclaw", "version.json"),
-	filepath.Join(".uclaw", "data", "license", "license.json"),
-	filepath.Join(".uclaw", "data", "license", ".startup-credential.json"),
+	filepath.Join(".uclaw", "license", "license.json"),
+	filepath.Join(".uclaw", "license", ".startup-credential.json"),
 }
 
 func discoverCandidates(roots []string) []Candidate {

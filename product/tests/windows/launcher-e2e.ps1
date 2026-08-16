@@ -86,6 +86,7 @@ $licenseStatusInRelease = Join-Path $licenseDirectory '.status-response.json'
 $originalLocalAppData = $env:LOCALAPPDATA
 $originalHeadless = $env:UCLAW_LAUNCHER_HEADLESS
 $originalHold = $env:UCLAW_FIXTURE_HOLD_MS
+$originalUpdateRestart = $env:UCLAW_FIXTURE_UPDATE_RESTART_ONCE
 $phase = 'SETUP'
 $firstProcess = $null
 
@@ -188,6 +189,19 @@ try {
         $secondMarkerTime -eq $firstMarkerTime
     Assert-True $secondLaunchReused 'SECOND_LAUNCH_REEXTRACTED'
 
+    $phase = 'UPDATE_RESTART'
+    Get-ChildItem -LiteralPath $dataDirectory -Filter '.fixture-ready-*' -File -ErrorAction SilentlyContinue |
+        Remove-Item -Force
+    $restartMarker = Join-Path $dataDirectory '.fixture-update-restart-requested'
+    Remove-Item -LiteralPath $restartMarker -Force -ErrorAction SilentlyContinue
+    $env:UCLAW_FIXTURE_UPDATE_RESTART_ONCE = '1'
+    $updateRestartExit = Invoke-Launcher $launcher $releaseRoot
+    $updateRestartReranFullGate = $updateRestartExit -eq 0 -and `
+        (Test-Path -LiteralPath $restartMarker -PathType Leaf) -and `
+        (@(Get-ChildItem -LiteralPath $dataDirectory -Filter '.fixture-ready-*' -File -ErrorAction SilentlyContinue).Count -eq 1)
+    Assert-True $updateRestartReranFullGate 'UPDATE_RESTART_DID_NOT_RERUN_GATE'
+    $env:UCLAW_FIXTURE_UPDATE_RESTART_ONCE = $null
+
     $manifestOriginal = [IO.File]::ReadAllText($versionInRelease)
     $packageOriginal = [IO.File]::ReadAllBytes($runtimePackageInRelease)
 
@@ -251,6 +265,7 @@ try {
         missingStartupCredentialRejected = $missingStartupCredentialRejected
         missingLicenseRejected = $missingLicenseRejected
         tamperedLicenseRejected = $tamperedLicenseRejected
+        updateRestartReranFullGate = $updateRestartReranFullGate
     }
     Write-Diagnostics $results
 }
@@ -275,6 +290,7 @@ finally {
     $env:LOCALAPPDATA = $originalLocalAppData
     $env:UCLAW_LAUNCHER_HEADLESS = $originalHeadless
     $env:UCLAW_FIXTURE_HOLD_MS = $originalHold
+    $env:UCLAW_FIXTURE_UPDATE_RESTART_ONCE = $originalUpdateRestart
     if (Test-Path -LiteralPath $workRoot) {
         Remove-Item -LiteralPath $workRoot -Recurse -Force
     }

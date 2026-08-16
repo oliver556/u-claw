@@ -8,11 +8,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func releaseFeed(version string) []byte {
-	return []byte(`{"version":"` + version + `","notes":["Fix"],"runtimeManifest":{"schemaVersion":1,"runtimeBytes":7}}`)
+	return []byte(`{"version":"` + version + `","notes":["Fix"],"runtimeManifest":{"schemaVersion":1,"productVersion":"` + version + `","targetPlatform":"win32","targetArch":"x64","runtimeArchive":"runtime.pkg","runtimeBytes":7}}`)
 }
 
 func TestRunRequiresExplicitConfirmationWithMultipleCandidates(t *testing.T) {
@@ -68,7 +69,7 @@ func TestRunCancellationDoesNotInstall(t *testing.T) {
 
 func TestRunStreamsHelperProtocolWithoutShell(t *testing.T) {
 	root := makeCandidateRoot(t)
-	manifest := []byte(`{"version":"2.0.0","notes":["Fix"],"runtimeManifest":{"schemaVersion":1,"runtimeBytes":5}}`)
+	manifest := []byte(`{"version":"2.0.0","notes":["Fix"],"runtimeManifest":{"schemaVersion":1,"productVersion":"2.0.0","targetPlatform":"win32","targetArch":"x64","runtimeArchive":"runtime.pkg","runtimeBytes":5}}`)
 	runtime := []byte{0, 1, 2, 3, 255}
 	payloadPath := writePayload(t, []byte("exe"), manifest, runtime, payloadMagic, uint32(len(manifest)), uint32(len(runtime)))
 	deps := Dependencies{
@@ -90,7 +91,7 @@ func TestRunStreamsHelperProtocolWithoutShell(t *testing.T) {
 				t.Fatal(err)
 			}
 			var want bytes.Buffer
-			helperHeader := []byte(`{"schemaVersion":1,"manifest":{"schemaVersion":1,"runtimeBytes":5}}`)
+			helperHeader := []byte(`{"schemaVersion":1,"manifest":{"schemaVersion":1,"productVersion":"2.0.0","targetPlatform":"win32","targetArch":"x64","runtimeArchive":"runtime.pkg","runtimeBytes":5}}`)
 			_ = binary.Write(&want, binary.BigEndian, uint32(len(helperHeader)))
 			want.Write(helperHeader)
 			want.Write(runtime)
@@ -175,6 +176,9 @@ func TestRunRejectsRuntimeLengthMismatchBeforeHelper(t *testing.T) {
 }
 
 func TestDefaultRunHelperUsesSecureInstallArguments(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Windows E2E executes the real Launcher helper")
+	}
 	dir := t.TempDir()
 	launcher := filepath.Join(dir, "U-Claw.exe")
 	argsPath := filepath.Join(dir, "args")

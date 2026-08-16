@@ -44,10 +44,16 @@ func run(ctx context.Context, deps Dependencies) error {
 		return errors.New("update manifest has no valid version")
 	}
 	var runtimeMetadata struct {
-		RuntimeBytes int64 `json:"runtimeBytes"`
+		ProductVersion string `json:"productVersion"`
+		TargetPlatform string `json:"targetPlatform"`
+		TargetArch     string `json:"targetArch"`
+		RuntimeArchive string `json:"runtimeArchive"`
+		RuntimeBytes   int64  `json:"runtimeBytes"`
 	}
-	if json.Unmarshal(summary.RuntimeManifest, &runtimeMetadata) != nil || runtimeMetadata.RuntimeBytes != payload.runtimeLength {
-		return errors.New("runtime payload length does not match manifest")
+	if json.Unmarshal(summary.RuntimeManifest, &runtimeMetadata) != nil || runtimeMetadata.RuntimeBytes != payload.runtimeLength ||
+		runtimeMetadata.ProductVersion != summary.Version || runtimeMetadata.TargetPlatform != "win32" ||
+		runtimeMetadata.TargetArch != "x64" || runtimeMetadata.RuntimeArchive != "runtime.pkg" {
+		return errors.New("runtime payload does not match release manifest")
 	}
 	roots, err := deps.CandidateRoots()
 	if err != nil {
@@ -102,6 +108,11 @@ func uint32Reader(value uint32) io.Reader {
 }
 
 func defaultRunHelper(ctx context.Context, launcher, root string, input io.Reader) error {
+	lock, err := acquireInstallLock(root)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	command := exec.CommandContext(ctx, launcher, "--release-fs-helper", "secure-install", "--root", root)
 	command.Stdin = input
 	if output, err := command.CombinedOutput(); err != nil {

@@ -3,14 +3,15 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 var requiredCandidateFiles = []string{
 	"U-Claw.exe",
 	filepath.Join(".uclaw", "version.json"),
-	filepath.Join(".uclaw", "data", "license", "license.json"),
-	filepath.Join(".uclaw", "data", "license", ".startup-credential.json"),
+	filepath.Join(".uclaw", "license", "license.json"),
+	filepath.Join(".uclaw", "license", ".startup-credential.json"),
 }
 
 func makeCandidateRoot(t *testing.T) string {
@@ -50,6 +51,9 @@ func TestDiscoverCandidatesRequiresAllRegularFiles(t *testing.T) {
 }
 
 func TestDiscoverCandidatesRejectsSymlinkedRequiredFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires optional Windows privileges")
+	}
 	root := makeCandidateRoot(t)
 	path := filepath.Join(root, "U-Claw.exe")
 	if err := os.Remove(path); err != nil {

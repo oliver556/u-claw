@@ -13,7 +13,9 @@ on:
       - 'product/tests/packaging/runtime-package.test.mjs'
       - 'product/tests/packaging/update-feed.test.mjs'
       - 'product/tests/windows/launcher-e2e.ps1'
+      - 'product/tests/windows/offline-updater-e2e.ps1'
       - 'product/tests/windows/sign-license-fixture.mjs'
+      - 'product/tests/windows/sign-runtime-fixture.mjs'
       - 'product/tests/windows/fixtures/portable-runtime*.go'
       - 'product/package.json'
       - 'product/package-lock.json'
@@ -63,6 +65,14 @@ jobs:
           try {
             go test -race ./...
             if ($LASTEXITCODE -ne 0) { throw 'Go launcher race tests failed' }
+          }
+          finally {
+            Pop-Location
+          }
+          Push-Location product\offline-updater
+          try {
+            go test -race ./...
+            if ($LASTEXITCODE -ne 0) { throw 'Go offline updater race tests failed' }
           }
           finally {
             Pop-Location
@@ -179,6 +189,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Fixture runtime tests failed' }
           go build -trimpath -o (Join-Path $outputRoot 'portable-runtime.exe') product\tests\windows\fixtures\portable-runtime.go
           if ($LASTEXITCODE -ne 0) { throw 'Fixture runtime build failed' }
+          Push-Location product\offline-updater
+          try {
+            if (Test-Path -LiteralPath rsrc_windows_amd64.syso) { throw 'Offline updater resource output already exists' }
+            try {
+              go run github.com/akavel/rsrc@v0.10.2 -manifest app.manifest -arch amd64 -o rsrc_windows_amd64.syso
+              if ($LASTEXITCODE -ne 0) { throw 'Offline updater manifest generation failed' }
+              go build -trimpath -tags updaterfixture -ldflags '-s -w -H windowsgui' -o (Join-Path $outputRoot 'U-Claw-Update-fixture.exe') .
+              if ($LASTEXITCODE -ne 0) { throw 'Offline updater build failed' }
+            }
+            finally {
+              Remove-Item -LiteralPath rsrc_windows_amd64.syso -Force -ErrorAction SilentlyContinue
+            }
+          }
+          finally {
+            Pop-Location
+          }
 
       - name: Windows PowerShell 5.1 portable lifecycle gate
         shell: powershell
@@ -188,6 +214,11 @@ jobs:
             -FixtureExe product\.portable-launcher\bin\portable-runtime.exe `
             -DiagnosticsPath product\.portable-launcher\diagnostics\windows-powershell-5.json `
             -CaseName windows-powershell-5
+          .\product\tests\windows\offline-updater-e2e.ps1 `
+            -OfflineUpdaterExe product\.portable-launcher\bin\U-Claw-Update-fixture.exe `
+            -FixtureExe product\.portable-launcher\bin\portable-runtime.exe `
+            -DiagnosticsPath product\.portable-launcher\diagnostics\offline-windows-powershell-5.json `
+            -CaseName offline-windows-powershell-5
 
       - name: PowerShell 7 portable lifecycle gate
         shell: pwsh
@@ -197,6 +228,11 @@ jobs:
             -FixtureExe product\.portable-launcher\bin\portable-runtime.exe `
             -DiagnosticsPath product\.portable-launcher\diagnostics\powershell-7.json `
             -CaseName powershell-7
+          .\product\tests\windows\offline-updater-e2e.ps1 `
+            -OfflineUpdaterExe product\.portable-launcher\bin\U-Claw-Update-fixture.exe `
+            -FixtureExe product\.portable-launcher\bin\portable-runtime.exe `
+            -DiagnosticsPath product\.portable-launcher\diagnostics\offline-powershell-7.json `
+            -CaseName offline-powershell-7
 
       - name: Upload sanitized lifecycle diagnostics
         if: always()

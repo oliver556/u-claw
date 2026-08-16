@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -88,6 +89,9 @@ func TestOpenPayloadRejectsTrailerOnlyAndSymlink(t *testing.T) {
 	target := writePayload(t, []byte("exe"), []byte("{}"), []byte("x"), payloadMagic, 2, 1)
 	link := filepath.Join(t.TempDir(), "linked.exe")
 	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skip("creating symlinks requires optional Windows privileges")
+		}
 		t.Fatal(err)
 	}
 	if payload, err := openPayload(link); err == nil {
