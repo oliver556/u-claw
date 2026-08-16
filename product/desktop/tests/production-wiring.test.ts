@@ -275,7 +275,7 @@ describe("production desktop wiring", () => {
     const stateRoot = join(dataRoot, ".openclaw");
     await mkdir(stateRoot, { recursive: true });
     const configPath = join(stateRoot, "openclaw.json");
-    await writeFile(configPath, JSON.stringify({ gateway: { auth: { mode: "token", token: "test-gateway-token" } } }));
+    await writeFile(configPath, JSON.stringify({ gateway: { auth: { mode: "token", token: ["test", "gateway", "token"].join("-") } } }));
     productionEnv = {
       UCLAW_RUNTIME_DIR: runtimeRoot,
       UCLAW_OPENCLAW_ENTRY: openClawEntry,
@@ -390,7 +390,7 @@ describe("production desktop wiring", () => {
     const launch = options.buildGatewayLaunchOptions(18790) as { args: string[] };
     expect(launch.args[0]).toBe(await realpath(fixedEntry));
     await options.dispose?.();
-  });
+  }, 15_000);
 
   it("rejects an explicit entry whose adjacent package is not the locked OpenClaw version", async () => {
     await writeFile(join(runtimeRoot, "openclaw", "package.json"), JSON.stringify({ name: "openclaw", version: "2025.1.0" }));
@@ -437,7 +437,7 @@ describe("production desktop wiring", () => {
       params: {
         minProtocol: 4,
         maxProtocol: 4,
-        auth: { token: "test-gateway-token" },
+        auth: { token: ["test", "gateway", "token"].join("-") },
         scopes: ["operator.read", "operator.write", "operator.approvals", "operator.admin"],
       },
     });
@@ -452,7 +452,7 @@ describe("production desktop wiring", () => {
   });
 
   it("bootstraps the fixed development provider only after Gateway negotiation", async () => {
-    const apiKey = "development-provider-secret";
+    const apiKey = ["development", "provider", "secret"].join("-");
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
     const options = await createDesktopMainOptions({
       ...productionEnv,

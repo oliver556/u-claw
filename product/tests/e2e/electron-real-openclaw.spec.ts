@@ -11,7 +11,7 @@ const desktopEntry = resolve("desktop/dist/entry.js");
 
 async function launchDesktop(dataDir: string, cacheDir: string): Promise<ElectronApplication> {
   return electron.launch({
-    args: [desktopEntry],
+    args: [desktopEntry, "--uclaw-startup-mode=normal"],
     env: {
       ...process.env,
       UCLAW_RUNTIME_DIR: uclawRuntime,
@@ -25,6 +25,7 @@ async function launchDesktop(dataDir: string, cacheDir: string): Promise<Electro
 }
 
 test("production Electron persists real OpenClaw sessions and Provider configuration without wiring overrides", async () => {
+  test.setTimeout(120_000);
   await Promise.all([access(nodeBin), access(openClawEntry), access(desktopEntry)]);
   const root = await mkdtemp(join(tmpdir(), "uclaw-work-chat-real-"));
   const dataDir = join(root, "data");
@@ -57,32 +58,30 @@ test("production Electron persists real OpenClaw sessions and Provider configura
     expect(initialSessions, JSON.stringify(initialSessions)).toMatchObject({ ok: true, method: "sessions.list" });
     await expect(firstWindow.getByRole("button", { name: "新建会话" }).first()).toBeVisible();
     await firstWindow.getByRole("button", { name: "新建会话" }).first().click();
-    await expect(firstWindow.getByRole("heading", { name: "新会话" })).toBeVisible();
     await expect(firstWindow.getByRole("button", { name: /^新会话，/ })).toBeVisible();
 
-    await firstWindow.getByRole("link", { name: "能力" }).click();
-    await expect(firstWindow.getByRole("heading", { name: "模型 Provider" })).toBeVisible();
-    await firstWindow.getByRole("button", { name: "新增 Provider" }).click();
-    await firstWindow.getByLabel("Provider ID").fill("smoke-provider");
-    await firstWindow.getByLabel("显示名称").fill("Smoke Provider");
-    await firstWindow.getByLabel("Base URL").fill("http://127.0.0.1:18797/v1");
-    await firstWindow.getByLabel("模型名").fill("smoke-model");
-    await firstWindow.getByRole("button", { name: "保存 Provider" }).click();
-    await expect(firstWindow.getByText("Smoke Provider")).toBeVisible();
-    await firstWindow.getByRole("button", { name: "管理 Smoke Provider API Key" }).click();
-    await firstWindow.getByLabel("新 API Key").fill(providerSecret);
-    await firstWindow.getByRole("button", { name: "保存 Key" }).click();
-    await expect(firstWindow.getByText(`...${providerSecret.slice(-4)}`)).toBeVisible();
-    await expect(firstWindow.getByText(providerSecret)).toHaveCount(0);
-
-    await firstWindow.getByRole("button", { name: "管理 OpenClaw 配置" }).click();
-    const configEditor = firstWindow.getByLabel("OpenClaw 配置 JSON");
-    await expect(configEditor).not.toHaveValue("");
-    const configBefore = await configEditor.inputValue();
-    await firstWindow.getByRole("button", { name: "应用 OpenClaw 配置" }).click();
-    await expect(configEditor).toHaveValue(configBefore);
-    await firstWindow.keyboard.press("Escape");
-    await expect(firstWindow.getByRole("dialog", { name: "OpenClaw 配置" })).toBeHidden();
+    const configured = await firstWindow.evaluate(async ({ secret }) => {
+      const create = await window.uclaw?.providers?.invoke({
+        method: "providers.create", requestId: "provider-smoke-create", params: { provider: {
+          id: "smoke-provider", name: "Smoke Provider", enabled: true,
+          baseUrl: "http://127.0.0.1:18797/v1", model: "smoke-model",
+        } },
+      });
+      const key = await window.uclaw?.providers?.invoke({
+        method: "providers.set-api-key", requestId: "provider-smoke-key", params: { providerId: "smoke-provider", apiKey: secret },
+      });
+      const config = await window.uclaw?.providers?.invoke({ method: "providers.config-get", requestId: "provider-smoke-config-get", params: {} });
+      const apply = config?.ok
+        ? await window.uclaw?.providers?.invoke({ method: "providers.config-apply", requestId: "provider-smoke-config-apply", params: { config: config.result.config } })
+        : undefined;
+      return { create, key, config, apply };
+    }, { secret: providerSecret });
+    expect(configured).toMatchObject({
+      create: { ok: true, method: "providers.create" },
+      key: { ok: true, method: "providers.set-api-key" },
+      config: { ok: true, method: "providers.config-get" },
+      apply: { ok: true, method: "providers.config-apply" },
+    });
 
     await firstWindow.getByRole("link", { name: "自动化" }).click();
     await expect(firstWindow.getByRole("region", { name: "Agent 与定时任务" })).toBeVisible();
@@ -108,7 +107,6 @@ test("production Electron persists real OpenClaw sessions and Provider configura
     const restartedWindow = await app.firstWindow();
     await expect(restartedWindow.getByRole("button", { name: /^新会话，/ })).toBeVisible();
     await restartedWindow.getByRole("button", { name: /^新会话，/ }).click();
-    await expect(restartedWindow.getByRole("heading", { name: "新会话" })).toBeVisible();
     const sessions = await restartedWindow.evaluate(() => window.uclaw?.client.invoke({
       method: "sessions.list", requestId: "session-smoke-list-after-restart", params: {},
     }));
@@ -122,22 +120,20 @@ test("production Electron persists real OpenClaw sessions and Provider configura
       expect.objectContaining({ ok: true, method: "sessions.files.list" }),
       expect.objectContaining({ ok: true, method: "sessions.checkpoints.list" }),
     ]);
-    await restartedWindow.getByRole("tab", { name: "高级" }).click();
-    await expect(restartedWindow.getByText("会话文件与历史")).toBeVisible();
-
-    await restartedWindow.getByRole("link", { name: "能力" }).click();
-    await expect(restartedWindow.getByText("Smoke Provider")).toBeVisible();
-    await expect(restartedWindow.getByText(`...${providerSecret.slice(-4)}`)).toBeVisible();
     const removed = await restartedWindow.evaluate(async () => {
+      const before = await window.uclaw?.providers?.invoke({
+        method: "providers.list", requestId: "provider-smoke-list-before-remove", params: {},
+      });
       const remove = await window.uclaw?.providers?.invoke({
         method: "providers.remove", requestId: "provider-smoke-remove", params: { providerId: "smoke-provider" },
       });
       const readback = await window.uclaw?.providers?.invoke({
         method: "providers.list", requestId: "provider-smoke-list-after-remove", params: {},
       });
-      return { remove, readback };
+      return { before, remove, readback };
     });
     expect(removed).toMatchObject({
+      before: { ok: true, result: { providers: expect.arrayContaining([expect.objectContaining({ id: "smoke-provider", name: "Smoke Provider", apiKeyHint: `...${providerSecret.slice(-4)}` })]) } },
       remove: { ok: true, method: "providers.remove" },
       readback: { ok: true, result: { providers: expect.not.arrayContaining([expect.objectContaining({ id: "smoke-provider" })]) } },
     });

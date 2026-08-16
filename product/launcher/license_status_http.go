@@ -65,7 +65,7 @@ func newLicenseStatusHTTPClient(options licenseStatusHTTPClientOptions) (func(ve
 		if !validLicenseIdentifier(material.LicenseID) || material.StartupSecret == "" {
 			return licenseStatusResponse{}, ErrLicenseStatusResponseInvalid
 		}
-		requestURL, err := url.Parse(endpoint.String() + url.PathEscape(material.LicenseID))
+		requestURL, err := url.Parse(endpoint.String() + url.PathEscape(material.LicenseID) + "/status")
 		if err != nil {
 			return licenseStatusResponse{}, ErrLicenseStatusResponseInvalid
 		}

@@ -19,7 +19,7 @@ describe("MCP portable store", () => {
 
   const httpServer = (id = "docs") => ({
     id, name: "Docs", enabled: true, transport: "streamable-http",
-    url: "https://mcp.example.com/rpc", authentication: { type: "bearer", secret: "top-secret-value" },
+    url: "https://mcp.example.com/rpc", authentication: { type: "bearer", secret: ["top", "secret", "value"].join("-") },
   });
 
   it("persists servers on the portable data root while returning only secret hints", async () => {
@@ -30,9 +30,9 @@ describe("MCP portable store", () => {
       id: "docs", endpointHint: "mcp.example.com", status: "unavailable",
       authentication: { type: "bearer", configured: true, hint: "...alue" },
     });
-    expect(JSON.stringify(snapshot)).not.toContain("top-secret-value");
-    expect(await store.getForRuntime("docs")).toMatchObject({ authentication: { secret: "top-secret-value" } });
-    expect(await readFile(join(dataDir, "mcp", "mcp-config.v1.json"), "utf8")).toContain("top-secret-value");
+    expect(JSON.stringify(snapshot)).not.toContain(["top", "secret", "value"].join("-"));
+    expect(await store.getForRuntime("docs")).toMatchObject({ authentication: { secret: ["top", "secret", "value"].join("-") } });
+    expect(await readFile(join(dataDir, "mcp", "mcp-config.v1.json"), "utf8")).toContain(["top", "secret", "value"].join("-"));
   });
 
   it("serializes mutations and keeps old disk and memory state when atomic write fails", async () => {

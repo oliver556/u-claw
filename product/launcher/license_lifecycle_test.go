@@ -81,6 +81,40 @@ func nullableString(value string) any {
 	return value
 }
 
+func TestActivationServerProductionStatusResponseIsLauncherCompatible(t *testing.T) {
+	var golden struct {
+		PublicKey, CheckedAt string
+		Response             licenseStatusResponse
+	}
+	contents, err := os.ReadFile(filepath.Join("..", "tests", "fixtures", "activation-status-response-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(contents, &golden); err != nil {
+		t.Fatal(err)
+	}
+	publicKey, err := base64.RawStdEncoding.DecodeString(golden.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, err := time.Parse(time.RFC3339Nano, golden.CheckedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, golden.Response.Status.ExpiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	material := verifiedLicenseMaterial{DeviceID: golden.Response.Status.DeviceID, LicenseID: golden.Response.Status.LicenseID, ExpiresAt: expiresAt}
+	receipt, err := verifyLicenseStatusResponse(golden.Response, material, now, map[string]ed25519.PublicKey{"status-key-001": publicKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameLicenseStatus(golden.Response.Status, receipt.Status) || receipt.Raw != golden.Response.Receipt.Value {
+		t.Fatal("activation server response drifted from launcher contract")
+	}
+}
+
 func (fixture *lifecycleFixture) verify() error {
 	return VerifyLicenseLifecycle(licenseLifecycleVerificationOptions{
 		PackageRoot: fixture.root,
@@ -417,7 +451,7 @@ func TestLicenseStatusHTTPClientUsesLoopbackTestBoundaryWithoutLeakingAuthorizat
 	fixture := newLifecycleFixture(t)
 	response := fixture.response(t, licenseStatusActive, fixture.now, fixture.now.Add(24*time.Hour))
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodGet || request.URL.Path != "/uclaw-license/v1/client-status/"+fixture.material.LicenseID {
+		if request.Method != http.MethodGet || request.URL.Path != "/v1/licenses/"+fixture.material.LicenseID+"/status" {
 			t.Fatalf("request = %s %s", request.Method, request.URL.Path)
 		}
 		if request.Header.Get("Authorization") != "Bearer "+fixture.material.StartupSecret {
@@ -428,7 +462,7 @@ func TestLicenseStatusHTTPClientUsesLoopbackTestBoundaryWithoutLeakingAuthorizat
 	}))
 	defer server.Close()
 	query, err := newLicenseStatusHTTPClient(licenseStatusHTTPClientOptions{
-		Endpoint:          server.URL + "/uclaw-license/v1/client-status/",
+		Endpoint:          server.URL + "/v1/licenses/",
 		AllowLoopbackHTTP: true,
 		HTTPClient:        server.Client(),
 	})

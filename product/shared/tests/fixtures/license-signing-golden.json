@@ -1,0 +1,19 @@
+{
+  "payload": {
+    "schemaVersion": 1,
+    "keyId": "test-license-key",
+    "usernameId": "usr_fixture_001",
+    "deviceId": "dev_fixture_001",
+    "licenseId": "lic_fixture_001",
+    "usbFingerprintVersion": "uclaw-usb-v1",
+    "usbFingerprintSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "startupSecretSalt": "00112233445566778899aabbccddeeff",
+    "startupSecretHash": "6086aa88c56aee8821f29e6352d097c08b5954b004fed0b721d86ac6ad599998",
+    "notBefore": "2026-08-10T00:00:00Z",
+    "expiresAt": "2027-08-10T00:00:00Z",
+    "revision": 1
+  },
+  "canonical": "[\"uclaw-startup-license-v1\",1,\"test-license-key\",\"usr_fixture_001\",\"dev_fixture_001\",\"lic_fixture_001\",\"uclaw-usb-v1\",\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"00112233445566778899aabbccddeeff\",\"6086aa88c56aee8821f29e6352d097c08b5954b004fed0b721d86ac6ad599998\",\"2026-08-10T00:00:00Z\",\"2027-08-10T00:00:00Z\",1]",
+  "publicKey": "fJwwIdxQJJjNzR8K+o3h0tKLgtCBzPu+/Q98tzATD9Y=",
+  "signature": "rQFZMvOPdiz3Om0jQtdw4gqGFaC9I+vJK1m7xieWbw79waunj95qekUAasils66GtAJACCowIJu1n3Du2a32Cg=="
+}

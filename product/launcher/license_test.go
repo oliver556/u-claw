@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -44,6 +43,7 @@ func newLicenseFixture(t *testing.T) licenseFixture {
 	}
 	license := startupLicense{
 		SchemaVersion: 1,
+		UsernameID:    "usr_fixture_001",
 		DeviceID:      credential.DeviceID,
 		LicenseID:     credential.LicenseID,
 		USBFingerprint: usbFingerprint{
@@ -57,6 +57,7 @@ func newLicenseFixture(t *testing.T) licenseFixture {
 		},
 		NotBefore: now.Add(-time.Hour).Format(time.RFC3339),
 		ExpiresAt: now.Add(time.Hour).Format(time.RFC3339),
+		Revision:  1,
 		Signature: licenseSignature{Algorithm: "ed25519", KeyID: "test-license-key"},
 	}
 	return licenseFixture{
@@ -174,27 +175,78 @@ func TestVerifyStartupLicenseRejectsUnsupportedCredentialSchema(t *testing.T) {
 }
 
 func TestLicenseSigningPayloadAndSecretProofMatchJavaScriptGoldens(t *testing.T) {
+	encoded, err := os.ReadFile(filepath.Join("..", "shared", "tests", "fixtures", "license-signing-golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden struct {
+		Payload struct {
+			SchemaVersion         int    `json:"schemaVersion"`
+			KeyID                 string `json:"keyId"`
+			UsernameID            string `json:"usernameId"`
+			DeviceID              string `json:"deviceId"`
+			LicenseID             string `json:"licenseId"`
+			USBFingerprintVersion string `json:"usbFingerprintVersion"`
+			USBFingerprintSHA256  string `json:"usbFingerprintSha256"`
+			StartupSecretSalt     string `json:"startupSecretSalt"`
+			StartupSecretHash     string `json:"startupSecretHash"`
+			NotBefore             string `json:"notBefore"`
+			ExpiresAt             string `json:"expiresAt"`
+			Revision              int64  `json:"revision"`
+		} `json:"payload"`
+		Canonical string `json:"canonical"`
+		PublicKey string `json:"publicKey"`
+		Signature string `json:"signature"`
+	}
+	if err := json.Unmarshal(encoded, &golden); err != nil {
+		t.Fatal(err)
+	}
 	license := startupLicense{
-		SchemaVersion: 1, DeviceID: "dev_fixture_001", LicenseID: "lic_fixture_001",
-		USBFingerprint: usbFingerprint{Scheme: "uclaw-usb-v1", SHA256: strings.Repeat("a", 64)},
+		SchemaVersion: golden.Payload.SchemaVersion, UsernameID: golden.Payload.UsernameID,
+		DeviceID: golden.Payload.DeviceID, LicenseID: golden.Payload.LicenseID, Revision: golden.Payload.Revision,
+		USBFingerprint: usbFingerprint{Scheme: golden.Payload.USBFingerprintVersion, SHA256: golden.Payload.USBFingerprintSHA256},
 		StartupSecretProof: startupSecretProof{
-			Algorithm: "sha256-salt-v1", StartupSecretSalt: strings.Repeat("b", 32), StartupSecretHash: strings.Repeat("c", 64),
+			Algorithm: "sha256-salt-v1", StartupSecretSalt: golden.Payload.StartupSecretSalt, StartupSecretHash: golden.Payload.StartupSecretHash,
 		},
-		NotBefore: "2026-08-10T00:00:00Z", ExpiresAt: "2027-08-10T00:00:00Z",
-		Signature: licenseSignature{Algorithm: "ed25519", KeyID: "test-license-key"},
+		NotBefore: golden.Payload.NotBefore, ExpiresAt: golden.Payload.ExpiresAt,
+		Signature: licenseSignature{Algorithm: "ed25519", KeyID: golden.Payload.KeyID, Value: golden.Signature},
 	}
 	payload, err := licenseSigningPayload(license)
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256(payload)
-	if hex.EncodeToString(digest[:]) != "34edff865f8c7cf2fda57541e51704e134e724703c670713fa97424ef5a6f3db" {
-		t.Fatalf("payload digest = %s", hex.EncodeToString(digest[:]))
+	if string(payload) != golden.Canonical {
+		t.Fatalf("payload = %s", payload)
+	}
+	publicKey, err := base64.StdEncoding.DecodeString(golden.PublicKey)
+	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		t.Fatal("golden public key invalid")
+	}
+	signature := mustDecodeBase64(t, golden.Signature)
+	if len(signature) != ed25519.SignatureSize || !ed25519.Verify(publicKey, payload, signature) {
+		t.Fatal("golden signature did not verify")
 	}
 	salt, _ := hex.DecodeString("00112233445566778899aabbccddeeff")
 	if got := startupSecretDigest("fixture-runtime-secret-generated-per-test-001", salt); got != "6086aa88c56aee8821f29e6352d097c08b5954b004fed0b721d86ac6ad599998" {
 		t.Fatalf("secret digest = %s", got)
 	}
+}
+
+func TestLicenseSigningPayloadRejectsUnsafeRevision(t *testing.T) {
+	fixture := newLicenseFixture(t)
+	fixture.license.Revision = 9_007_199_254_740_992
+	if _, err := licenseSigningPayload(fixture.license); !errors.Is(err, ErrLicenseFormatInvalid) {
+		t.Fatalf("returned %v", err)
+	}
+}
+
+func mustDecodeBase64(t *testing.T, value string) []byte {
+	t.Helper()
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decoded
 }
 
 func TestLicenseJSONPreservesFrozenStartupSecretFieldNames(t *testing.T) {

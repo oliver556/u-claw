@@ -1,0 +1,179 @@
+package persistence
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"u-claw-activation-server/internal/lifecycle"
+)
+
+func (repository *ActivationRepository) GetLicense(ctx context.Context, licenseID string) (lifecycle.License, error) {
+	var record lifecycle.License
+	var replacement *string
+	err := repository.pool.QueryRow(ctx, `SELECT license_id,device_id,status,revision,not_before,expires_at,
+		replacement_license_id,updated_at,startup_secret_salt,startup_secret_hash FROM licenses WHERE license_id=$1`, licenseID).
+		Scan(&record.LicenseID, &record.DeviceID, &record.Status, &record.Revision, &record.NotBefore, &record.ExpiresAt,
+			&replacement, &record.UpdatedAt, &record.StartupSecretSalt, &record.StartupSecretHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.License{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.License{}, fmt.Errorf("load license status: %w", err)
+	}
+	record.ReplacementLicenseID = replacement
+	return record, nil
+}
+
+func (repository *ActivationRepository) ExpireLicense(ctx context.Context, licenseID string, now time.Time) (lifecycle.License, error) {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return lifecycle.License{}, fmt.Errorf("begin license expiry: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var record lifecycle.License
+	var replacement *string
+	err = tx.QueryRow(ctx, `SELECT license_id,device_id,status,revision,not_before,expires_at,
+		replacement_license_id,updated_at,startup_secret_salt,startup_secret_hash FROM licenses WHERE license_id=$1 FOR UPDATE`, licenseID).
+		Scan(&record.LicenseID, &record.DeviceID, &record.Status, &record.Revision, &record.NotBefore, &record.ExpiresAt,
+			&replacement, &record.UpdatedAt, &record.StartupSecretSalt, &record.StartupSecretHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.License{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.License{}, fmt.Errorf("lock license expiry: %w", err)
+	}
+	record.ReplacementLicenseID = replacement
+	if record.Status == "active" && !now.Before(record.ExpiresAt) {
+		record.Status = "expired"
+		record.Revision++
+		record.UpdatedAt = now
+		if _, err := tx.Exec(ctx, `UPDATE licenses SET status='expired',revision=$1,updated_at=$2 WHERE license_id=$3`, record.Revision, now, licenseID); err != nil {
+			return lifecycle.License{}, fmt.Errorf("persist license expiry: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO license_status_events
+			(event_id,license_id,revision,status,created_at) VALUES (gen_random_uuid(),$1,$2,'expired',$3)`, licenseID, record.Revision, now); err != nil {
+			return lifecycle.License{}, fmt.Errorf("record license expiry: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return lifecycle.License{}, fmt.Errorf("commit license expiry: %w", err)
+	}
+	return record, nil
+}
+
+func (repository *ActivationRepository) GetActivationForRecovery(ctx context.Context, activationID string) (lifecycle.RecoveryRecord, error) {
+	var record lifecycle.RecoveryRecord
+	err := repository.pool.QueryRow(ctx, `SELECT attempt.activation_id,attempt.device_id,attempt.license_id,attempt.artifact_envelope,attempt.artifact_key_version
+		FROM activation_attempts attempt
+		JOIN licenses license ON license.license_id=attempt.license_id AND license.device_id=attempt.device_id
+		JOIN devices device ON device.device_id=attempt.device_id
+		JOIN activation_inventory inventory ON inventory.id=attempt.inventory_id AND inventory.id=device.inventory_id
+		JOIN new_api_bindings binding ON binding.inventory_id=inventory.id AND binding.device_id=device.device_id
+		WHERE attempt.activation_id=$1 AND attempt.stage IN ('server_bound','committed')
+		AND license.status='active' AND device.status='active' AND inventory.status='active' AND binding.status='active'`, activationID).
+		Scan(&record.ActivationID, &record.DeviceID, &record.LicenseID, &record.ArtifactEnvelope, &record.ArtifactKeyVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.RecoveryRecord{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("load activation recovery: %w", err)
+	}
+	return record, nil
+}
+
+func (repository *ActivationRepository) AuthorizeRecovery(ctx context.Context, activationID, requestID string) (lifecycle.RecoveryRecord, error) {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("begin recovery authorization: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var inventoryID, deviceID, licenseID string
+	err = tx.QueryRow(ctx, `SELECT inventory_id,device_id,license_id FROM activation_attempts WHERE activation_id=$1`, activationID).
+		Scan(&inventoryID, &deviceID, &licenseID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.RecoveryRecord{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("load recovery scope: %w", err)
+	}
+	var inventoryStatus, deviceStatus, licenseStatus, bindingStatus string
+	if err = tx.QueryRow(ctx, `SELECT status FROM activation_inventory WHERE id=$1 FOR UPDATE`, inventoryID).Scan(&inventoryStatus); err != nil {
+		return lifecycle.RecoveryRecord{}, mapRecoveryLockError(err, "inventory")
+	}
+	if err = tx.QueryRow(ctx, `SELECT status FROM devices WHERE device_id=$1 AND inventory_id=$2 FOR UPDATE`, deviceID, inventoryID).Scan(&deviceStatus); err != nil {
+		return lifecycle.RecoveryRecord{}, mapRecoveryLockError(err, "device")
+	}
+	if err = tx.QueryRow(ctx, `SELECT status FROM licenses WHERE license_id=$1 AND device_id=$2 FOR UPDATE`, licenseID, deviceID).Scan(&licenseStatus); err != nil {
+		return lifecycle.RecoveryRecord{}, mapRecoveryLockError(err, "license")
+	}
+	if err = tx.QueryRow(ctx, `SELECT status FROM new_api_bindings WHERE inventory_id=$1 AND device_id=$2 FOR UPDATE`, inventoryID, deviceID).Scan(&bindingStatus); err != nil {
+		return lifecycle.RecoveryRecord{}, mapRecoveryLockError(err, "binding")
+	}
+	var record lifecycle.RecoveryRecord
+	var stage string
+	err = tx.QueryRow(ctx, `SELECT activation_id,device_id,license_id,stage,artifact_envelope,artifact_key_version
+		FROM activation_attempts WHERE activation_id=$1 AND inventory_id=$2 AND device_id=$3 AND license_id=$4 FOR UPDATE`,
+		activationID, inventoryID, deviceID, licenseID).
+		Scan(&record.ActivationID, &record.DeviceID, &record.LicenseID, &stage, &record.ArtifactEnvelope, &record.ArtifactKeyVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.RecoveryRecord{}, lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("lock recovery artifact: %w", err)
+	}
+	if inventoryStatus != "active" || deviceStatus != "active" || licenseStatus != "active" || bindingStatus != "active" ||
+		(stage != "server_bound" && stage != "committed") || len(record.ArtifactEnvelope) == 0 || record.ArtifactKeyVersion == "" {
+		return lifecycle.RecoveryRecord{}, lifecycle.ErrAuthentication
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO audit_events
+		(event_id,actor_type,actor_id,action,outcome,inventory_id,device_id,license_id,request_id,created_at)
+		VALUES (gen_random_uuid(),'client',$1,'activation.recovery_authorized','succeeded',$2,$3,$4,$5,clock_timestamp())`,
+		deviceID, inventoryID, deviceID, licenseID, requestID); err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("record recovery authorization: %w", err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return lifecycle.RecoveryRecord{}, fmt.Errorf("commit recovery authorization: %w", err)
+	}
+	return record, nil
+}
+
+func mapRecoveryLockError(err error, subject string) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.ErrAuthentication
+	}
+	return fmt.Errorf("lock recovery %s: %w", subject, err)
+}
+
+func (repository *ActivationRepository) RecordRecovery(ctx context.Context, activationID, requestID, outcome string) error {
+	if outcome != "succeeded" && outcome != "failed" {
+		return lifecycle.ErrUnavailable
+	}
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin recovery audit: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var inventoryID, deviceID, licenseID string
+	err = tx.QueryRow(ctx, `SELECT inventory_id,device_id,license_id FROM activation_attempts WHERE activation_id=$1 FOR SHARE`, activationID).Scan(&inventoryID, &deviceID, &licenseID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lifecycle.ErrAuthentication
+	}
+	if err != nil {
+		return fmt.Errorf("load recovery audit scope: %w", err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO audit_events
+		(event_id,actor_type,actor_id,action,outcome,inventory_id,device_id,license_id,request_id,created_at)
+		VALUES (gen_random_uuid(),'client',$1,'activation.recovered',$2,$3,$4,$5,$6,clock_timestamp())`, deviceID, outcome, inventoryID, deviceID, licenseID, requestID)
+	if err != nil {
+		return fmt.Errorf("record recovery audit: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit recovery audit: %w", err)
+	}
+	return nil
+}

@@ -182,7 +182,7 @@ func ValidateManifest(manifest Manifest) error {
 		return ErrManifestInvalid
 	}
 	for _, argument := range manifest.EntryArgs {
-		if strings.ContainsRune(argument, 0) || utf8.RuneCountInString(argument) > 4096 {
+		if strings.ContainsRune(argument, 0) || utf8.RuneCountInString(argument) > 4096 || strings.HasPrefix(argument, "--uclaw-startup-mode") {
 			return ErrManifestInvalid
 		}
 	}

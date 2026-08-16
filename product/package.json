@@ -20,6 +20,7 @@
     "test": "npm run verify:reproducible && node --test scripts/*.test.mjs tests/packaging/*.test.mjs && npm run test:contract && npm run test --workspaces --if-present",
     "test:launcher-benchmark": "node --test scripts/launcher-benchmark-report.test.mjs",
     "test:portable-launcher": "node --test scripts/portable-launcher-workflow.test.mjs scripts/runtime-manifest.test.mjs",
+    "test:activation-server": "cd activation-server && go test -p=1 -count=1 ./... && go test -p=1 -race -count=1 ./... && go vet ./... && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /dev/null ./cmd/server",
     "test:contract": "vitest run tests/contract",
     "test:integration": "vitest run tests/integration",
     "test:secrets": "node scripts/secret-scan.mjs",

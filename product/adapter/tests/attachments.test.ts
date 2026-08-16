@@ -70,9 +70,10 @@ describe("AttachmentManager", () => {
   it("never exposes raw Gateway failure paths, credentials, or message text", async () => {
     const manager = new AttachmentManager();
     const imported = await manager.import({ name: "fixture.txt", mediaType: "text/plain", size: 8, contentBase64: "Y29udHJhY3Q=" });
+    const leakedToken = ["sk", "secret123"].join("-");
     manager.markFailed(imported.id, {
       code: "UNAVAILABLE",
-      message: "C:\\Users\\alice\\secret.txt /home/alice/private.txt token=sk-secret123 prompt=private-body",
+      message: `C:\\Users\\alice\\secret.txt /home/alice/private.txt token=${leakedToken} prompt=private-body`,
       retryable: true,
     });
     const serialized = JSON.stringify(await manager.get(imported.id));

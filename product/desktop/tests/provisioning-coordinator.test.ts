@@ -41,6 +41,8 @@ const policyDigest = (value: NewApiPolicy): string => createHash("sha256")
   .digest("hex");
 
 function license(licenseId = "lic_fixture_001", fingerprint = input.usbFingerprint): IssuedLicense {
+  const notBefore = "2026-08-10T00:00:00Z";
+  const expiresAt = "2027-08-10T00:00:00Z";
   const startupSecret = "fixture-startup-secret-material-001";
   const startupSecretSalt = "b".repeat(32);
   const startupSecretHash = createHash("sha256")
@@ -52,19 +54,19 @@ function license(licenseId = "lic_fixture_001", fingerprint = input.usbFingerpri
   return {
     status: {
       licenseId, deviceId: input.deviceId, status: "active", revision: 1,
-      notBefore: input.notBefore, expiresAt: input.expiresAt, replacementLicenseId: null, updatedAt: now,
+      notBefore, expiresAt, replacementLicenseId: null, updatedAt: now,
     },
     startupCredential: {
       schemaVersion: 1, deviceId: input.deviceId, licenseId,
       startupSecret,
     },
     license: {
-      schemaVersion: 1, deviceId: input.deviceId, licenseId,
+      schemaVersion: 1, usernameId: "usr_fixture_001", deviceId: input.deviceId, licenseId,
       usbFingerprint: { scheme: "uclaw-usb-v1", sha256: fingerprint },
       startupSecretProof: {
         algorithm: "sha256-salt-v1", startupSecretSalt, startupSecretHash,
       },
-      notBefore: input.notBefore, expiresAt: input.expiresAt,
+      notBefore, expiresAt, revision: 1,
       signature: { algorithm: "ed25519", keyId: "fixture-key-001", value: "s".repeat(88) },
     },
   };
@@ -274,6 +276,17 @@ describe("provisioning coordinator", () => {
     await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH", retryable: false });
     expect(context.newApiClient.createUser).not.toHaveBeenCalled();
     expect(context.licenseClient.revokeLicense).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a license whose validity represents a different instant", async () => {
+    const context = setup();
+    const mismatched = license();
+    mismatched.status = { ...mismatched.status, notBefore: "2026-08-10T00:00:01Z" };
+    mismatched.license = { ...mismatched.license, notBefore: "2026-08-10T00:00:01Z" };
+    vi.mocked(context.licenseClient.issueLicense).mockResolvedValueOnce(mismatched);
+
+    await expect(context.coordinator.provision(input)).rejects.toMatchObject({ code: "BINDING_MISMATCH" });
+    expect(context.newApiClient.createUser).not.toHaveBeenCalled();
   });
 
   it("rejects a schema-valid startup secret proof before any New API side effect", async () => {

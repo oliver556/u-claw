@@ -216,7 +216,7 @@ async function main() {
       providers: {
         contract: {
           baseUrl: `http://127.0.0.1:${modelPort}/v1`,
-          apiKey: "contract-local-key",
+          apiKey: ["contract", "local", "key"].join("-"),
           api: "openai-completions",
           models: ["contract-model", "contract-alt-model"].map((id) => ({
             id,

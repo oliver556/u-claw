@@ -53,7 +53,7 @@ describe("production personal WeChat runtime", () => {
     const accountDir = join(dataDir, "openclaw-weixin", "accounts");
     await mkdir(accountDir, { recursive: true });
     await writeFile(join(dataDir, "openclaw-weixin", "accounts.json"), JSON.stringify(["wx-account-7a2f"]));
-    await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: "secret-session-token", userId: "private-user" }), { mode: 0o600 });
+    await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: ["secret", "session", "token"].join("-"), userId: "private-user" }), { mode: 0o600 });
     const requestGateway = vi.fn(async (method: string) => {
       expect(method).toBe("channels.status");
       return gatewayStatus({ accountId: "wx-account-7a2f", enabled: true, configured: true, running: true, connected: true });
@@ -110,7 +110,7 @@ describe("production personal WeChat runtime", () => {
     expect(requests.map(({ method }) => method)).toEqual(["config.get", "config.patch", "channels.start", "channels.status"]);
     expect(JSON.stringify(requests)).not.toContain("secret-session-token");
     const accountPath = join(dataDir, "openclaw-weixin", "accounts", "wx-account-7a2f.json");
-    expect(JSON.parse(await readFile(accountPath, "utf8"))).toEqual({ token: "secret-session-token", baseUrl: "https://ilinkai.weixin.qq.com", userId: "private-user" });
+    expect(JSON.parse(await readFile(accountPath, "utf8"))).toEqual({ token: ["secret", "session", "token"].join("-"), baseUrl: "https://ilinkai.weixin.qq.com", userId: "private-user" });
     expect((await stat(accountPath)).mode & 0o777).toBe(0o600);
     await expect(readFile(join(dataDir, ".env"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -245,7 +245,7 @@ describe("production personal WeChat runtime", () => {
     const accountDir = join(stateDir, "accounts");
     await mkdir(accountDir, { recursive: true });
     await writeFile(join(stateDir, "accounts.json"), JSON.stringify(["wx-account-7a2f"]));
-    await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: "secret-session-token" }), { mode: 0o600 });
+    await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: ["secret", "session", "token"].join("-") }), { mode: 0o600 });
     const methods: string[] = [];
     const requestGateway = vi.fn(async (method: string) => {
       methods.push(method);

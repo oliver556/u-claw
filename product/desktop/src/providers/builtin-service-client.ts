@@ -3,6 +3,8 @@ import {
   BuiltinModelResponseSchema,
   BuiltinServiceHealthSchema,
   NewApiManagementErrorBodySchema,
+  OpenAIChatCompletionResponseSchema,
+  OpenAIModelsResponseSchema,
   type BuiltinModelRequest,
   type BuiltinModelResponse,
   type BuiltinServiceHealth,
@@ -33,7 +35,24 @@ const FIXED_SERVER_ERRORS = new Map<string, boolean>([
   ["503:unavailable:SERVICE_MAINTENANCE", false],
   ["503:unavailable:SERVICE_UNAVAILABLE", true],
 ]);
-
+const PROXY_ERRORS = new Map<string, readonly [NewApiErrorCategory, boolean]>([
+  ["400:INVALID_REQUEST", ["validation", false]],
+  ["401:AUTHENTICATION_FAILED", ["authentication", false]],
+  ["403:MODEL_NOT_ALLOWED", ["model-permission", false]],
+  ["404:NOT_FOUND", ["not-found", false]],
+  ["413:REQUEST_TOO_LARGE", ["validation", false]],
+  ["429:RATE_LIMITED", ["rate-limit", true]],
+  ["429:UPSTREAM_RATE_LIMITED", ["rate-limit", true]],
+  ["502:UPSTREAM_AUTHENTICATION_FAILED", ["upstream", false]],
+  ["502:UPSTREAM_UNAVAILABLE", ["upstream", true]],
+  ["503:REQUEST_ID_UNAVAILABLE", ["unavailable", true]],
+  ["503:SERVICE_UNAVAILABLE", ["unavailable", true]],
+]);
+const ProxyErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  requestId: z.string(),
+}).strict();
 export interface BuiltinServiceClient {
   execute(
     request: BuiltinModelRequest,
@@ -163,7 +182,7 @@ type CircuitState = "closed" | "open" | "half-open";
 function breakerCounted(error: BuiltinServiceClientError): boolean {
   return error.category === "transport"
     || error.category === "invalid-response"
-    || (error.category === "upstream" && error.code === "UPSTREAM_5XX")
+    || (error.category === "upstream" && error.retryable)
     || (error.category === "unavailable" && error.retryable && error.code !== "CIRCUIT_OPEN");
 }
 
@@ -177,7 +196,7 @@ export function createUnavailableBuiltinServiceClient(): BuiltinServiceClient {
 export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOptions = {}): BuiltinServiceClient {
   const fetchImpl = options.fetch ?? fetch;
   const timeoutMs = parsePositiveInteger(options.timeoutMs ?? 10_000, 60_000);
-  const maxResponseBytes = parsePositiveInteger(options.maxResponseBytes ?? 2 * 1024 * 1024, 4 * 1024 * 1024);
+  const maxResponseBytes = parsePositiveInteger(options.maxResponseBytes ?? 4 * 1024 * 1024, 4 * 1024 * 1024);
   const cooldownMs = parsePositiveInteger(options.circuitCooldownMs ?? 30_000, 10 * 60_000);
   const allowLoopbackHttp = options.allowLoopbackHttp ?? false;
   const now = options.now ?? Date.now;
@@ -189,10 +208,10 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
   const circuitOpen = (): BuiltinServiceClientError => clientError("unavailable", "CIRCUIT_OPEN", true);
 
   const send = async <T>(
-    route: "models/respond" | "health",
+    route: "v1/chat/completions" | "v1/models",
     schema: z.ZodType<T>,
     credential: BuiltinModelCredential,
-    body: BuiltinModelRequest | undefined,
+    body: unknown | undefined,
     callerSignal?: AbortSignal,
   ): Promise<T> => {
     if (callerSignal?.aborted) throw clientError("cancelled", "OPERATION_CANCELLED", false);
@@ -214,7 +233,7 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
         method: body === undefined ? "GET" : "POST",
         headers: {
           accept: "application/json",
-          authorization: `Bearer ${credential.tokenSecret}`,
+          authorization: `Bearer ${credential.deviceToken}`,
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -224,6 +243,13 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
       });
       const payload = await readBoundedJson(response, maxResponseBytes);
       if (!response.ok) {
+        const proxy = ProxyErrorSchema.safeParse(payload);
+        const mappedProxy = proxy.success
+          ? PROXY_ERRORS.get(`${response.status}:${proxy.data.code}`)
+          : undefined;
+        if (proxy.success && mappedProxy) {
+          throw clientError(mappedProxy[0], proxy.data.code, mappedProxy[1]);
+        }
         const parsed = NewApiManagementErrorBodySchema.safeParse(payload);
         const fixedRetryable = parsed.success
           ? FIXED_SERVER_ERRORS.get(`${response.status}:${parsed.data.error.category}:${parsed.data.error.code}`)
@@ -269,15 +295,31 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
     }
     const requestEpoch = circuitEpoch;
     try {
-      const result = await send("models/respond", BuiltinModelResponseSchema, credential, request, signal);
-      if (result.requestId !== request.requestId) {
-        throw clientError("invalid-response", "RESPONSE_REQUEST_MISMATCH", false);
-      }
+      const result = await send("v1/chat/completions", OpenAIChatCompletionResponseSchema, credential, {
+        model: credential.model,
+        messages: [{ role: "user", content: request.prompt }],
+        max_tokens: request.maxOutputTokens,
+        stream: false,
+      }, signal);
+      const choice = result.choices[0];
+      if (!choice) throw clientError("invalid-response", "INVALID_RESPONSE_BODY", false);
+      const response = BuiltinModelResponseSchema.safeParse({
+        schemaVersion: 1,
+        requestId: request.requestId,
+        output: choice.message.content,
+        usage: {
+          inputTokens: result.usage.prompt_tokens,
+          outputTokens: result.usage.completion_tokens,
+        },
+        serviceState: "enabled",
+        serviceRevision: 1,
+      });
+      if (!response.success) throw clientError("invalid-response", "INVALID_RESPONSE_BODY", false);
       if (requestEpoch === circuitEpoch) {
         state = "closed";
         consecutiveFailures = 0;
       }
-      return result;
+      return response.data;
     } catch (error) {
       if (!(error instanceof BuiltinServiceClientError)) throw error;
       if (requestEpoch !== circuitEpoch) throw error;
@@ -296,8 +338,16 @@ export function createBuiltinServiceClient(options: CreateBuiltinServiceClientOp
     }
   };
 
-  const health = async (credential: BuiltinModelCredential, signal?: AbortSignal): Promise<BuiltinServiceHealth> =>
-    send("health", BuiltinServiceHealthSchema, credential, undefined, signal);
+  const health = async (credential: BuiltinModelCredential, signal?: AbortSignal): Promise<BuiltinServiceHealth> => {
+    const models = await send("v1/models", OpenAIModelsResponseSchema, credential, undefined, signal);
+    const acceptingBuiltin = models.data.some((model) => model.id === credential.model);
+    return BuiltinServiceHealthSchema.parse({
+      schemaVersion: 1,
+      acceptingBuiltin,
+      state: acceptingBuiltin ? "enabled" : "disabled",
+      revision: 1,
+    });
+  };
 
   return { execute, health };
 }

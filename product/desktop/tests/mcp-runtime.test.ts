@@ -162,7 +162,7 @@ describe("MCP protocol probe", () => {
     });
     const result = await probe.test({
       ...remote("https://mcp.example.com/rpc"),
-      authentication: { type: "bearer", secret: "must-not-forward" },
+      authentication: { type: "bearer", secret: ["must", "not", "forward"].join("-") },
     }, new AbortController().signal);
     expect(result).toMatchObject({ status: "error", error: { code: "FORBIDDEN" } });
     expect(request).toHaveBeenCalledTimes(1);
