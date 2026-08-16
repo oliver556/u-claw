@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -332,6 +333,104 @@ func TestRunActivationCompletionRestartsFullGateOnce(t *testing.T) {
 	wantPrefix := []State{StateStarting, StateValidatingUSB, StateActivationRequired, StateCheckingRuntime, StateExtractingRuntime, StateStartingActivation, StateStarting}
 	if !reflect.DeepEqual(reporter.states[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("states = %v", reporter.states)
+	}
+}
+
+func TestRunUpdateRestartRerunsFullGateAndKeepsInstanceLock(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, lock, _ := successfulDependencies(t, reporter)
+	calls := map[string]int{}
+	logs := make([]string, 0)
+
+	probe := deps.ProbeDataDirectory
+	deps.ProbeDataDirectory = func(packageRoot, dataDir string) error { calls["probe"]++; return probe(packageRoot, dataDir) }
+	detect := deps.DetectActivationState
+	deps.DetectActivationState = func(packageRoot string) (ActivationState, error) { calls["activation"]++; return detect(packageRoot) }
+	verify := deps.VerifyLicense
+	deps.VerifyLicense = func(packageRoot, usbRoot string) error { calls["license"]++; return verify(packageRoot, usbRoot) }
+	cache := deps.EnsureHostCache
+	deps.EnsureHostCache = func(cacheRoot string) error { calls["cache"]++; return cache(cacheRoot) }
+	read := deps.ReadManifest
+	deps.ReadManifest = func(path string) (Manifest, error) { calls["manifest"]++; return read(path) }
+	check := deps.CheckSequence
+	deps.CheckSequence = func(cacheRoot string, manifest Manifest) error {
+		calls["sequence"]++
+		return check(cacheRoot, manifest)
+	}
+	prepare := deps.PrepareRuntime
+	deps.PrepareRuntime = func(ctx context.Context, cacheRoot, packageRoot string, manifest Manifest, extracting func()) (CacheResult, error) {
+		calls["prepare"]++
+		return prepare(ctx, cacheRoot, packageRoot, manifest, extracting)
+	}
+	leases := []*fakeRuntimeLease{
+		{root: filepath.Join(deps.Paths.CacheRoot, "generation-1")},
+		{root: filepath.Join(deps.Paths.CacheRoot, "generation-2")},
+	}
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) {
+		calls["lease"]++
+		return leases[calls["lease"]-1], nil
+	}
+	accept := deps.AcceptSequence
+	deps.AcceptSequence = func(cacheRoot string, manifest Manifest) error { calls["accept"]++; return accept(cacheRoot, manifest) }
+	finalize := deps.FinalizeUpdate
+	deps.FinalizeUpdate = func(packageRoot string, manifest Manifest) error {
+		calls["finalize"]++
+		return finalize(packageRoot, manifest)
+	}
+	lockCalls := 0
+	deps.AcquireInstanceLock = func(string) (InstanceLock, error) { lockCalls++; return lock, nil }
+	starts := 0
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		starts++
+		if starts == 2 && lock.closed {
+			t.Fatal("instance lock closed between runtime generations")
+		}
+		if starts == 1 {
+			return &fakeChildProcess{waitErr: exitCodeError(42)}, nil
+		}
+		return &fakeChildProcess{}, nil
+	}
+	deps.AppendLog = func(_ string, event string) error { logs = append(logs, event); return nil }
+
+	if err := Run(context.Background(), deps); err != nil {
+		t.Fatal(err)
+	}
+	for _, gate := range []string{"probe", "activation", "license", "cache", "manifest", "sequence", "prepare", "lease", "accept", "finalize"} {
+		if calls[gate] != 2 {
+			t.Fatalf("%s calls = %d", gate, calls[gate])
+		}
+	}
+	if lockCalls != 1 || !lock.closed {
+		t.Fatalf("instance lock calls=%d closed=%v", lockCalls, lock.closed)
+	}
+	for generation, lease := range leases {
+		if lease.CloseCalls() != 1 {
+			t.Fatalf("generation %d lease closes = %d", generation+1, lease.CloseCalls())
+		}
+	}
+	if !slices.Contains(logs, "update-restart-requested") {
+		t.Fatalf("logs = %v", logs)
+	}
+}
+
+func TestRunRejectsFourthConsecutiveUpdateRestart(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	starts := 0
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) {
+		return &fakeRuntimeLease{root: filepath.Join(deps.Paths.CacheRoot, fmt.Sprintf("generation-%d", starts+1))}, nil
+	}
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		starts++
+		return &fakeChildProcess{waitErr: exitCodeError(42)}, nil
+	}
+
+	err := Run(context.Background(), deps)
+	if !errors.Is(err, ErrAppExited) {
+		t.Fatalf("returned %v", err)
+	}
+	if starts != 4 {
+		t.Fatalf("starts = %d", starts)
 	}
 }
 

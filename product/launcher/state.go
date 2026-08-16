@@ -95,7 +95,15 @@ func Run(ctx context.Context, deps Dependencies) error {
 		}
 	}
 	appendLog("launcher-started")
-	for activationRuns := 0; ; {
+	activationRuns := 0
+	updateRestarts := 0
+	var instanceLock InstanceLock
+	defer func() {
+		if instanceLock != nil {
+			_ = instanceLock.Close()
+		}
+	}()
+	for {
 		reporter.State(StateStarting)
 
 		reporter.State(StateValidatingUSB)
@@ -124,11 +132,12 @@ func Run(ctx context.Context, deps Dependencies) error {
 			if err := deps.VerifyLicense(deps.Paths.PackageRoot, deps.Paths.USBRoot); err != nil {
 				return reportFailure(reporter, err)
 			}
-			lock, err := deps.AcquireInstanceLock(deps.Paths.DataDir)
-			if err != nil {
-				return reportFailure(reporter, err)
+			if instanceLock == nil {
+				instanceLock, err = deps.AcquireInstanceLock(deps.Paths.DataDir)
+				if err != nil {
+					return reportFailure(reporter, err)
+				}
 			}
-			defer lock.Close()
 		}
 		if err := deps.EnsureHostCache(deps.Paths.HostCacheRoot); err != nil {
 			return reportFailure(reporter, err)
@@ -216,10 +225,26 @@ func Run(ctx context.Context, deps Dependencies) error {
 			select {
 			case result := <-waitResult:
 				grace.Stop()
+				appendLog("runtime-stopped")
+				if isUpdateRestartExit(result.processErr) {
+					appendLog("update-restart-requested")
+					if result.leaseErr == nil && updateRestarts < 3 {
+						updateRestarts++
+						continue
+					}
+				}
 				return reportFailure(reporter, errors.Join(ErrAppExited, result.processErr, result.leaseErr))
 			case <-grace.C:
 				select {
 				case result := <-waitResult:
+					appendLog("runtime-stopped")
+					if isUpdateRestartExit(result.processErr) {
+						appendLog("update-restart-requested")
+						if result.leaseErr == nil && updateRestarts < 3 {
+							updateRestarts++
+							continue
+						}
+					}
 					return reportFailure(reporter, errors.Join(ErrAppExited, result.processErr, result.leaseErr))
 				default:
 				}
@@ -239,18 +264,26 @@ func Run(ctx context.Context, deps Dependencies) error {
 		reporter.State(StateReady)
 
 		monitorCtx, cancelMonitor := context.WithCancel(ctx)
-		defer cancelMonitor()
 		usbResult := make(chan error, 1)
 		go func() { usbResult <- deps.MonitorUSB(monitorCtx, deps.Paths.USBRoot, deps.USBInterval) }()
 
 		select {
 		case result := <-waitResult:
+			cancelMonitor()
 			appendLog("runtime-stopped")
+			if isUpdateRestartExit(result.processErr) {
+				appendLog("update-restart-requested")
+				if result.leaseErr == nil && updateRestarts < 3 {
+					updateRestarts++
+					continue
+				}
+			}
 			if err := errors.Join(result.processErr, result.leaseErr); err != nil {
 				return reportFailure(reporter, errors.Join(ErrAppExited, err))
 			}
 			return nil
 		case err := <-usbResult:
+			cancelMonitor()
 			appendLog("runtime-stopped")
 			if ctx.Err() != nil {
 				if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
@@ -260,6 +293,7 @@ func Run(ctx context.Context, deps Dependencies) error {
 			}
 			return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
 		case <-ctx.Done():
+			cancelMonitor()
 			appendLog("runtime-stopped")
 			if cleanupErr := stopAndWait(process, waitResult, deps.ProcessStopTimeout); cleanupErr != nil {
 				return reportFailure(reporter, errors.Join(ErrAppExited, cleanupErr))
