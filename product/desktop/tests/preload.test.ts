@@ -62,11 +62,12 @@ describe("installPreloadBridge", () => {
       ipcRenderer: { invoke, on, removeListener },
     });
 
-    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "providers", "skills", "plugins", "channels", "mcp", "sessionAdvanced", "usage", "automation", "taskArtifacts", "systemNode", "systemVoice", "productServices", "data", "diagnostics", "release", "images"]);
+    expect(Object.keys(api ?? {})).toEqual(["window", "client", "attachments", "chatQueue", "providers", "skills", "plugins", "channels", "mcp", "sessionAdvanced", "usage", "automation", "taskArtifacts", "systemNode", "systemVoice", "productServices", "data", "diagnostics", "release", "images"]);
     expect(api).not.toHaveProperty("ipcRenderer");
     expect(api).not.toHaveProperty("invoke");
     expect(Object.keys(api?.client as object)).toEqual(["invoke", "subscribe"]);
     expect(Object.keys(api?.window as object)).toEqual(["invoke", "onMaximizedChange"]);
+    expect(Object.keys(api?.chatQueue as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.providers as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.skills as object)).toEqual(["invoke"]);
     expect(Object.keys(api?.plugins as object)).toEqual(["invoke"]);

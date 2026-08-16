@@ -192,6 +192,10 @@ class ScriptedWebSocket {
       queueMicrotask(() => this.respond(frame, { ok: true, messageId: `injected-${this.sent.length}` }));
       return;
     }
+    if (frame.method === "chat.send") {
+      queueMicrotask(() => this.respond(frame, { runId: "run-attachment", status: "started" }));
+      return;
+    }
     if (frame.method !== "connect") return;
     if (ScriptedWebSocket.outcome === "authentication") {
       queueMicrotask(() => this.emit("message", {
@@ -421,6 +425,7 @@ describe("production desktop wiring", () => {
     expect(launch.args.join(" ")).not.toContain("test-gateway-token");
     expect(launch.env).not.toHaveProperty("OPENCLAW_GATEWAY_TOKEN");
     expect(options.client?.attachments).toBe(options.attachments);
+    expect(options.attachments).toMatchObject({ beginImport: expect.any(Function), importChunk: expect.any(Function), finishImport: expect.any(Function) });
     expect(options.client?.sessionAdvanced).toBeDefined();
     expect(options.providerConfig).toBeDefined();
     expect(options.pluginRuntime).toBeDefined();
@@ -483,6 +488,37 @@ describe("production desktop wiring", () => {
     const applyCount = ScriptedWebSocket.instances[0]!.sent.filter(({ method }) => method === "config.apply").length;
     await options.probeCapabilities(18796, new AbortController().signal);
     expect(ScriptedWebSocket.instances[0]!.sent.filter(({ method }) => method === "config.apply")).toHaveLength(applyCount);
+    await options.dispose?.();
+  });
+
+  it("sends a cached video through the production chat.send wiring", async () => {
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
+    const options = await createDesktopMainOptions(productionEnv);
+    options.buildGatewayLaunchOptions(18791);
+    await options.probeCapabilities(18791, new AbortController().signal);
+    const attachments = options.attachments!;
+    const bytes = Buffer.from("000000186674797069736f6d00000000", "hex");
+    const begun = await attachments.beginImport!({ name: "clip.mp4", mediaType: "video/mp4", size: bytes.length });
+    await attachments.importChunk!({ importId: begun.importId, offset: 0, contentBase64: bytes.toString("base64") });
+    const attachment = await attachments.finishImport!({ importId: begun.importId });
+
+    const iterator = options.client!.chat.send({
+      sessionId: "agent:main:main",
+      clientRequestId: "stable-production-video-key",
+      blocks: [{ type: "text", text: "分析视频", format: "plain" }, { type: "attachment", attachmentId: attachment.id }],
+    })[Symbol.asyncIterator]();
+    void iterator.next();
+    await vi.waitFor(() => expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "chat.send",
+        params: expect.objectContaining({
+          message: "分析视频",
+          idempotencyKey: "stable-production-video-key",
+          attachments: [{ type: "file", fileName: "clip.mp4", mimeType: "video/mp4", content: bytes.toString("base64") }],
+        }),
+      }),
+    ])));
+    await vi.waitFor(async () => expect(await attachments.get(attachment.id)).toMatchObject({ state: "attached", progress: 1 }));
     await options.dispose?.();
   });
 

@@ -3,14 +3,16 @@
 import "@testing-library/jest-dom/vitest";
 
 import type { ApprovalRequest, ContentBlock, Message, ToolCall, ToolState } from "@uclaw/shared";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApprovalCard } from "../src/features/approvals/ApprovalCard";
 import { Composer } from "../src/features/chat/Composer";
+import { AttachmentPreview } from "../src/features/chat/AttachmentPreview";
 import { resolveApproval } from "../src/features/chat/Conversation";
 import { MessageContent } from "../src/features/chat/MessageContent";
 import { MessageList } from "../src/features/chat/MessageList";
+import { QueuedMessageBar } from "../src/features/chat/QueuedMessageBar";
 import { ToolRun } from "../src/features/tools/ToolRun";
 
 afterEach(() => {
@@ -68,6 +70,87 @@ describe("Composer", () => {
     expect(stop).toHaveClass("composer-action");
     expect(stop).toHaveTextContent("");
     expect(stop.querySelector(".lucide-square")).toBeInTheDocument();
+  });
+
+  it("keeps the textarea editable while sending and routes keyboard submits", () => {
+    const onSend = vi.fn();
+    const onQueue = vi.fn();
+    render(<Composer
+      value="调整方向"
+      disabled={false}
+      sending
+      attachmentsSupported
+      attachments={[]}
+      models={[]}
+      modelLoading={false}
+      modelError={false}
+      skills={[]}
+      skillLoading={false}
+      onChange={vi.fn()}
+      onSelectAttachments={vi.fn()}
+      onDropFiles={vi.fn()}
+      onPrepareAttachment={vi.fn()}
+      onRemoveAttachment={vi.fn()}
+      onSend={onSend}
+      onQueue={onQueue}
+      onStop={vi.fn()}
+      onModelChange={vi.fn()}
+      onSkillChange={vi.fn()}
+    />);
+
+    const textarea = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
+    expect(textarea).toBeEnabled();
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onQueue).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("AttachmentPreview", () => {
+  it("renders image, video, and file previews with removal controls", () => {
+    const onRemove = vi.fn();
+    const attachments = [
+      { id: "image", file: { id: "image-file", name: "photo.png", mediaType: "image/png", size: 10, kind: "attachment" as const }, category: "image" as const, state: "ready" as const, progress: 1, previewUrl: "blob:image" },
+      { id: "video", file: { id: "video-file", name: "clip.mp4", mediaType: "video/mp4", size: 20, kind: "attachment" as const }, category: "video" as const, state: "uploading" as const, progress: 0.5, previewUrl: "blob:video", duration: 65 },
+      { id: "file", file: { id: "text-file", name: "notes.txt", mediaType: "text/plain", size: 30, kind: "attachment" as const }, category: "file" as const, state: "ready" as const, progress: 1 },
+    ];
+    render(<AttachmentPreview attachments={attachments} onRemove={onRemove} />);
+
+    expect(screen.getByRole("img", { name: "photo.png" })).toHaveAttribute("src", "blob:image");
+    expect(screen.getByLabelText("视频预览 clip.mp4")).toHaveTextContent("1:05");
+    expect(screen.getByLabelText("附件 notes.txt")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "移除 photo.png" }));
+    expect(onRemove).toHaveBeenCalledWith("image");
+  });
+});
+
+describe("QueuedMessageBar", () => {
+  it("edits the complete queued message and keeps the editor open when save fails", async () => {
+    const item = {
+      id: "queue-1", sessionId: "session-1", text: "稍后处理", attachmentIds: ["attachment-old"], status: "queued" as const,
+      idempotencyKey: "queue-key-0001", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z",
+    };
+    const onSave = vi.fn(async () => { throw new Error("保存失败"); });
+    const onAddAttachments = vi.fn(async () => ["attachment-new"]);
+    render(<QueuedMessageBar items={[item]} onSend={vi.fn()} onRemove={vi.fn()} onSave={onSave} onAddAttachments={onAddAttachments} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "更多：稍后处理" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑消息" }));
+    expect(screen.getByLabelText("队列附件 attachment-old")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "移除队列附件 attachment-old" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加队列附件" }));
+    expect(await screen.findByLabelText("队列附件 attachment-new")).toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "编辑队列消息" }), { target: { value: "修改后" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存队列消息" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("保存失败");
+    expect(screen.getByRole("textbox", { name: "编辑队列消息" })).toHaveValue("修改后");
+    expect(onSave).toHaveBeenCalledWith(item, "修改后", ["attachment-new"]);
   });
 });
 

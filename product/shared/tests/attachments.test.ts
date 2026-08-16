@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AttachmentCategorySchema,
+  AttachmentImportBeginInputSchema,
+  AttachmentImportChunkInputSchema,
   AttachmentImportInputSchema,
   AttachmentIpcRequestSchema,
   AttachmentSchema,
   MAX_ATTACHMENT_BASE64_LENGTH,
+  MAX_VIDEO_ATTACHMENT_BYTES,
 } from "../src/index.js";
 
 describe("attachment contracts", () => {
@@ -34,6 +38,41 @@ describe("attachment contracts", () => {
       mediaType: "text/plain",
       size: 1,
       contentBase64: "A".repeat(MAX_ATTACHMENT_BASE64_LENGTH + 4),
+    })).toThrow();
+  });
+
+  it("classifies supported image, video, and file MIME types", () => {
+    expect(AttachmentCategorySchema.parse("video")).toBe("video");
+    for (const mediaType of ["video/mp4", "video/quicktime", "video/webm"]) {
+      expect(AttachmentImportBeginInputSchema.parse({ name: "clip.mp4", mediaType, size: 1 })).toMatchObject({ mediaType });
+    }
+    expect(() => AttachmentImportBeginInputSchema.parse({ name: "clip.avi", mediaType: "video/x-msvideo", size: 1 })).toThrow();
+  });
+
+  it("accepts video up to 500 MB and rejects larger files", () => {
+    expect(AttachmentImportBeginInputSchema.parse({
+      name: "clip.mp4",
+      mediaType: "video/mp4",
+      size: MAX_VIDEO_ATTACHMENT_BYTES,
+    })).toBeTruthy();
+    expect(() => AttachmentImportBeginInputSchema.parse({
+      name: "clip.mp4",
+      mediaType: "video/mp4",
+      size: MAX_VIDEO_ATTACHMENT_BYTES + 1,
+    })).toThrow();
+  });
+
+  it("keeps large bytes in bounded chunks and forbids video in legacy Base64 import", () => {
+    expect(AttachmentImportChunkInputSchema.parse({
+      importId: "import-1",
+      offset: 0,
+      contentBase64: "Y2h1bms=",
+    })).toBeTruthy();
+    expect(() => AttachmentImportInputSchema.parse({
+      name: "clip.mp4",
+      mediaType: "video/mp4",
+      size: 8,
+      contentBase64: "Y2h1bms=",
     })).toThrow();
   });
 });

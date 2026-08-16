@@ -33,6 +33,8 @@ import {
 import type { AuthorizedWebContents, IpcMainLike } from "./ipc/register-ipc.js";
 import { registerIpc as registerDesktopIpc } from "./ipc/register-ipc.js";
 import { createSessionOrganizerStore } from "./session-organizer/store.js";
+import { createChatQueueStore } from "./chat-queue/store.js";
+import { createChatQueueDispatcher } from "./chat-queue/dispatcher.js";
 import { createProviderStore, type ProviderStore } from "./providers/provider-store.js";
 import type { ProviderNetworkService } from "./providers/provider-network.js";
 import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provider-config.js";
@@ -74,6 +76,8 @@ import {
 import { installGatewayMediaRequestAuth } from "./gateway/media-request-auth.js";
 import { createImageOperationService } from "./images/image-operation-service.js";
 import { createImageOperationDispatcher } from "./images/image-operation-dispatcher.js";
+import { createAttachmentCache } from "./attachments/attachment-cache.js";
+import { startAttachmentCleanup } from "./attachments/attachment-cleanup.js";
 
 interface ElectronWorkspaceShell {
   openPath(path: string): Promise<string>;
@@ -372,6 +376,7 @@ export interface DesktopMainOptions {
   pluginRuntime?: PluginRuntimeAdapter;
   capabilityRuntime?: OpenClawCapabilityRuntime;
   attachments?: AttachmentService;
+  referencedAttachmentIds?: () => ReadonlySet<string> | Promise<ReadonlySet<string>>;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
   releaseService?: ReleaseService;
   selectPort?(excludedPorts: readonly number[], signal: AbortSignal): Promise<number>;
@@ -636,6 +641,7 @@ export interface ReadSelectedAttachmentsOptions {
   maxTotalBytes?: number;
   concurrency?: number;
   stat?(path: string): Promise<{ isFile(): boolean; size: number }>;
+  lstat?(path: string): Promise<{ isFile(): boolean; isSymbolicLink(): boolean; size: number }>;
   readFile?(path: string): Promise<Buffer>;
 }
 
@@ -647,13 +653,16 @@ export async function readSelectedAttachments(
   const maxFileBytes = options.maxFileBytes ?? MAX_ATTACHMENT_BYTES;
   const maxTotalBytes = options.maxTotalBytes ?? MAX_ATTACHMENT_TOTAL_BYTES;
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 2, maxFiles));
-  const inspect = options.stat ?? stat;
+  const inspect = options.lstat ?? options.stat ?? lstat;
   const read = options.readFile ?? readFile;
   if (paths.length > maxFiles) {
     throw UClawErrorSchema.parse({ code: "INVALID_ARGUMENT", message: `一次最多选择 ${maxFiles} 个附件。`, retryable: false });
   }
   const inspected = await Promise.all(paths.map(async (path) => {
     const info = await inspect(path);
+    if ("isSymbolicLink" in info && typeof info.isSymbolicLink === "function" && info.isSymbolicLink()) {
+      throw UClawErrorSchema.parse({ code: "FILE_OUTSIDE_ALLOWED_ROOT", message: "不允许选择符号链接附件。", retryable: false });
+    }
     if (!info.isFile()) throw UClawErrorSchema.parse({ code: "INVALID_ARGUMENT", message: "选择项不是文件。", retryable: false });
     if (info.size > maxFileBytes) throw UClawErrorSchema.parse({ code: "FILE_TOO_LARGE", message: `附件超过大小限制（${info.size} > ${maxFileBytes} bytes）。`, retryable: false });
     return info;
@@ -703,7 +712,18 @@ export async function startElectronMain(
   if (options.injectChatMessage === undefined) throw new Error("OpenClaw chat injection is required for local application actions.");
   const consistencyCoordinator = new ProductionRuntimeConsistencyCoordinator();
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
-  const attachments = options.attachments ?? client.attachments;
+  const attachments = options.attachments ?? createAttachmentCache({ dataDir: portablePaths.dataDir });
+  const chatQueue = createChatQueueStore(portablePaths.dataDir);
+  const attachmentCleanup = startAttachmentCleanup({
+    dataDir: portablePaths.dataDir,
+    referencedAttachmentIds: async () => {
+      const referenced = new Set(await chatQueue.referencedAttachmentIds());
+      for (const attachmentId of await attachments.referencedAttachmentIds?.() ?? []) referenced.add(attachmentId);
+      for (const attachmentId of await options.referencedAttachmentIds?.() ?? []) referenced.add(attachmentId);
+      return referenced;
+    },
+  });
+  await attachmentCleanup.started;
   const providers = options.providers ?? createProviderStore({ dataDir: portablePaths.dataDir });
   const modelRouting = createMainProcessModelRouting({
     dataDir: portablePaths.dataDir,
@@ -719,6 +739,23 @@ export async function startElectronMain(
     },
   });
   void localApplications.refresh().catch(() => undefined);
+  const routeChatSend = (input: SendMessageInput, signal: AbortSignal) =>
+    localApplications.route(input, modelRouting.routeChatSend, signal);
+  const chatQueueDispatcher = createChatQueueDispatcher({
+    store: chatQueue,
+    send: (input) => routeChatSend(input, new AbortController().signal),
+    isGatewayAvailable: async () => (await client.gateway.getStatus()).businessAvailable,
+  });
+  const queueGatewayWatchController = new AbortController();
+  void (async () => {
+    try {
+      for await (const status of client.gateway.watchStatus(queueGatewayWatchController.signal)) {
+        if (status.businessAvailable) await chatQueueDispatcher.gatewayAvailable();
+      }
+    } catch {
+      // Gateway watch is best effort; normal IPC status handling remains authoritative.
+    }
+  })();
   const skillRuntimeRegistration = resolveSkillRuntimeRegistration(options.domainRegistrations);
   const skills = await createSkillService({
     dataDir: portablePaths.dataDir,
@@ -799,6 +836,11 @@ export async function startElectronMain(
   });
   const runtimeOptions: DesktopMainOptions = {
     ...options,
+    dispose: async () => {
+      attachmentCleanup.dispose();
+      queueGatewayWatchController.abort();
+      await options.dispose?.();
+    },
     consistencyCoordinator,
     buildGatewayLaunchOptions: (port) => {
       gatewayPort = port;
@@ -809,6 +851,8 @@ export async function startElectronMain(
   const domainServices = new Map<string, unknown>([
     ["organizer", organizer],
     ["attachments", attachments],
+    ["chatQueue", chatQueue],
+    ["chatQueueDispatcher", chatQueueDispatcher],
     ["providers", providers],
     ["skills", skills],
     ["plugins", plugins],
@@ -880,10 +924,24 @@ export async function startElectronMain(
       client,
       organizer,
       attachments,
+      chatQueue,
+      chatQueueDispatcher,
       providers,
       providerNetwork: options.providerNetwork,
       providerConfig: options.providerConfig,
-      routeChatSend: (input, signal) => localApplications.route(input, modelRouting.routeChatSend, signal),
+      routeChatSend: async function* (input, signal) {
+        const releaseActivity = await chatQueueDispatcher.acquireSessionActivity(input.sessionId);
+        let terminal = false;
+        try {
+          for await (const event of await routeChatSend(input, signal)) {
+            if (event.type === "final" || event.type === "aborted" || event.type === "error") terminal = true;
+            yield event;
+          }
+        } finally {
+          releaseActivity();
+        }
+        if (terminal) void chatQueueDispatcher.sessionIdle(input.sessionId).catch(() => undefined);
+      },
       skills,
       skillInstallCoordinator,
       plugins,
@@ -898,13 +956,19 @@ export async function startElectronMain(
       dispatchRelease: createReleaseDispatcher(release),
       dispatchImage: images,
       coordinateWrite: (operation) => consistencyCoordinator.runTrackedWrite(operation),
-      selectAttachments: options.selectAttachments ?? (attachments === undefined ? undefined : async () => {
+      selectAttachments: options.selectAttachments,
+      importSelectedAttachments: options.selectAttachments === undefined ? async () => {
         const selected = await dialog.showOpenDialog({
           properties: ["openFile", "multiSelections"],
-          filters: [{ name: "Supported attachments", extensions: ["png", "jpg", "jpeg", "gif", "webp", "txt", "pdf"] }],
+          filters: [{ name: "Supported attachments", extensions: ["png", "jpg", "jpeg", "gif", "webp", "mp4", "mov", "webm", "txt", "pdf"] }],
         });
-        return selected.canceled ? [] : readSelectedAttachments(selected.filePaths);
-      }),
+        return selected.canceled ? [] : Promise.all(selected.filePaths.map((path) => {
+          if (!("importFile" in attachments) || typeof attachments.importFile !== "function") {
+            return readSelectedAttachments([path]).then(([input]) => attachments.import(input));
+          }
+          return attachments.importFile(path) as Promise<import("@uclaw/shared").Attachment>;
+        }));
+      } : undefined,
       });
       let domainDispose: (() => void) | undefined;
       try {

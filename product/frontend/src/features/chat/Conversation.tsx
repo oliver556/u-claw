@@ -1,9 +1,11 @@
-import { parseSkillInstallIntent, type ApprovalDecision, type ApprovalRequest, type Attachment, type CapabilitySet, type GatewayStatus, type Message, type MessageEvent, type Session, type SkillCatalogItem, type SkillRuntimeInventory, type ToolCall, type UClawClient } from "@uclaw/shared";
+import { MAX_ATTACHMENT_CHUNK_BYTES, parseSkillInstallIntent, type ApprovalDecision, type ApprovalRequest, type Attachment, type CapabilitySet, type ChatQueueDocument, type ChatQueueItem, type GatewayStatus, type Message, type MessageEvent, type Session, type SkillCatalogItem, type SkillRuntimeInventory, type ToolCall, type UClawClient } from "@uclaw/shared";
 import { AlertCircle, LoaderCircle, RotateCw, WifiOff, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Composer } from "./Composer";
+import type { PreviewAttachment } from "./AttachmentPreview";
 import { MessageList } from "./MessageList";
+import { QueuedMessageBar } from "./QueuedMessageBar";
 import { toProductModels } from "./product-model-catalog";
 import { useMessageStream } from "./useMessageStream";
 
@@ -39,9 +41,14 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [pendingTools, setPendingTools] = useState<ToolCall[]>([]);
   const [sending, setSending] = useState(false);
+  const activeSends = useRef(0);
   const [sendError, setSendError] = useState<string>();
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const attachmentsRef = useRef<Attachment[]>([]);
+  const [attachments, setAttachments] = useState<PreviewAttachment[]>([]);
+  const [queueItems, setQueueItems] = useState<ChatQueueItem[]>([]);
+  const attachmentsRef = useRef<PreviewAttachment[]>([]);
+  const previewUrls = useRef(new Map<string, string>());
+  const cancelledImports = useRef(new Set<string>());
+  const activeImports = useRef(new Map<string, string>());
   const [models, setModels] = useState<Array<{ id: string; label: string; available: boolean }>>([]);
   const [modelState, setModelState] = useState<"idle" | "loading" | "error" | "selecting">("idle");
   const [skills, setSkills] = useState<Array<{ id: string; name: string }>>([]);
@@ -52,16 +59,28 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   const sendController = useRef<AbortController | undefined>(undefined);
   const stopRequested = useRef(false);
   const sendIntentId = useRef<string | undefined>(undefined);
+  const draftRef = useRef(draft);
   const mounted = useRef(true);
   const resolvingApprovals = useRef(new Set<string>());
   const defaultModelSelections = useRef(new Set<string>());
   const conversationRef = useRef<HTMLDivElement>(null);
+  draftRef.current = draft;
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       sendController.current?.abort();
+      activeImports.current.forEach((importId, temporaryId) => {
+        cancelledImports.current.add(temporaryId);
+        void window.uclaw?.attachments?.invoke({ method: "cancel", requestId: requestId(), params: { attachmentId: importId } }).catch(() => undefined);
+      });
+      activeImports.current.clear();
+      attachmentsRef.current.forEach((attachment) => {
+        void window.uclaw?.attachments?.invoke({ method: "release", requestId: requestId(), params: { attachmentId: attachment.id } } as never).catch(() => undefined);
+      });
+      previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+      previewUrls.current.clear();
     };
   }, []);
 
@@ -74,9 +93,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   const onStreamEvent = useCallback((event: MessageEvent) => {
     if (!mounted.current) return;
     if (event.type === "started") {
-      activeRunId.current = event.runId;
       onActivity("响应已开始");
-      if (stopRequested.current) void client.chat.abort(event.runId).catch(() => undefined);
     } else if (event.type === "tool") onActivity(`工具：${event.tool.displayName}`);
     else if (event.type === "approval") onActivity(`等待授权：${event.approval.title}`);
     else if (event.type === "final") {
@@ -190,7 +207,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   const legacyApprovalResolve = capabilities?.features.approvalResolve === true && capabilities?.features.execApproval === undefined && capabilities?.features.pluginApproval === undefined;
   const approvalCapabilities = { exec: capabilities?.features.execApproval === true || legacyApprovalResolve, plugin: capabilities?.features.pluginApproval === true || legacyApprovalResolve };
 
-  const attachmentInvoke = async (method: "select" | "import" | "get" | "prepare" | "remove", params: object) => {
+  const attachmentInvoke = async (method: "select" | "import" | "import.begin" | "import.chunk" | "import.finish" | "get" | "prepare" | "cancel" | "remove" | "retain" | "release", params: object) => {
     const invoke = window.uclaw?.attachments?.invoke;
     if (invoke === undefined) throw new Error("附件服务不可用");
     const response = await invoke({ method, requestId: requestId(), params } as never);
@@ -198,8 +215,34 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     return response.result;
   };
 
+  const queueInvoke = async (method: "chat-queue.list" | "chat-queue.add" | "chat-queue.update" | "chat-queue.remove" | "chat-queue.send", params: any) => {
+    const invoke = window.uclaw?.chatQueue?.invoke;
+    if (invoke === undefined) throw new Error("消息队列服务不可用");
+    const response = await invoke({ method, requestId: requestId(), params } as never);
+    if (!response.ok) throw new Error(response.error.message);
+    return response.result;
+  };
+
+  const refreshQueue = useCallback(async () => {
+    const invoke = window.uclaw?.chatQueue?.invoke;
+    if (invoke === undefined) { setQueueItems([]); return; }
+    try {
+      const response = await invoke({ method: "chat-queue.list", requestId: requestId(), params: { sessionId: session.id } });
+      if (!response.ok) throw new Error(response.error.message);
+      setQueueItems((response.result as ChatQueueDocument).items);
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "队列加载失败");
+    }
+  }, [session.id]);
+
+  useEffect(() => {
+    void refreshQueue();
+    const timer = window.setInterval(() => void refreshQueue(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [refreshQueue]);
+
   const invalidateSendIntent = () => { sendIntentId.current = undefined; };
-  const updateAttachments = (update: (current: Attachment[]) => Attachment[]) => {
+  const updateAttachments = (update: (current: PreviewAttachment[]) => PreviewAttachment[]) => {
     const next = update(attachmentsRef.current);
     attachmentsRef.current = next;
     setAttachments(next);
@@ -211,21 +254,86 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     try {
       const states = await attachmentInvoke("prepare", { attachmentId: id }) as Attachment[];
       const latest = states.at(-1);
-      if (latest) updateAttachments((current) => current.map((item) => item.id === id ? latest : item));
+      if (latest) updateAttachments((current) => current.map((item) => item.id === id ? { ...latest, previewUrl: item.previewUrl } : item));
     } catch (error) {
       updateAttachments((current) => current.map((item) => item.id === id ? { ...item, state: "failed", error: { code: "OPERATION_FAILED", message: error instanceof Error ? error.message : "附件处理失败", retryable: true } } : item));
     }
   };
 
-  const addAttachmentInputs = async (inputs: Array<{ name: string; mediaType: string; size: number; contentBase64: string }>) => {
-    for (const input of inputs) {
+  const bytesToBase64 = (bytes: Uint8Array) => {
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    }
+    return btoa(binary);
+  };
+
+  const readBlob = (blob: Blob) => new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("读取附件失败"));
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.readAsArrayBuffer(blob);
+  });
+
+  const releasePreview = (id: string) => {
+    const url = previewUrls.current.get(id);
+    if (url !== undefined) URL.revokeObjectURL(url);
+    previewUrls.current.delete(id);
+  };
+
+  const importFiles = async (files: File[]) => {
+    for (const file of files) {
+      const previewUrl = typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : undefined;
+      let temporaryId: string | undefined;
+      let importId: string | undefined;
       try {
-        const attachment = await attachmentInvoke("import", input) as Attachment;
-        if (!attachmentsRef.current.some((item) => item.id === attachment.id)) invalidateSendIntent();
-        updateAttachments((current) => [...current.filter((item) => item.id !== attachment.id), attachment]);
+        let attachment: Attachment;
+        if (file.type.startsWith("video/")) {
+          const started = await attachmentInvoke("import.begin", { name: file.name, mediaType: file.type, size: file.size }) as { importId: string };
+          importId = started.importId;
+          temporaryId = `import-${started.importId}`;
+          activeImports.current.set(temporaryId, started.importId);
+          const temporary: PreviewAttachment = { id: temporaryId, file: { id: temporaryId, name: file.name, mediaType: file.type, size: file.size, kind: "attachment" }, category: "video", state: "uploading", progress: 0, previewUrl };
+          if (previewUrl !== undefined) previewUrls.current.set(temporaryId, previewUrl);
+          updateAttachments((current) => [...current, temporary]);
+          for (let offset = 0; offset < file.size; offset += MAX_ATTACHMENT_CHUNK_BYTES) {
+            const chunk = new Uint8Array(await readBlob(file.slice(offset, Math.min(file.size, offset + MAX_ATTACHMENT_CHUNK_BYTES))));
+            const result = await attachmentInvoke("import.chunk", { importId: started.importId, offset, contentBase64: bytesToBase64(chunk) }) as { nextOffset: number };
+            if (cancelledImports.current.has(temporaryId)) break;
+            updateAttachments((current) => current.map((item) => item.id === temporaryId ? { ...item, progress: file.size === 0 ? 1 : result.nextOffset / file.size } : item));
+          }
+          if (cancelledImports.current.delete(temporaryId)) continue;
+          attachment = await attachmentInvoke("import.finish", { importId: started.importId }) as Attachment;
+          activeImports.current.delete(temporaryId);
+          if (cancelledImports.current.delete(temporaryId)) {
+            await attachmentInvoke("remove", { attachmentId: attachment.id }).catch(() => undefined);
+            continue;
+          }
+          previewUrls.current.delete(temporaryId);
+          if (previewUrl !== undefined) previewUrls.current.set(attachment.id, previewUrl);
+          await attachmentInvoke("retain", { attachmentId: attachment.id });
+          updateAttachments((current) => [...current.filter((item) => item.id !== temporaryId && item.id !== attachment.id), { ...attachment, previewUrl }]);
+          invalidateSendIntent();
+          void prepareAttachment(attachment.id);
+          continue;
+        }
+        const bytes = new Uint8Array(await readBlob(file));
+        attachment = await attachmentInvoke("import", { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, contentBase64: bytesToBase64(bytes) }) as Attachment;
+        if (previewUrl !== undefined) previewUrls.current.set(attachment.id, previewUrl);
+        await attachmentInvoke("retain", { attachmentId: attachment.id });
+        updateAttachments((current) => [...current.filter((item) => item.id !== attachment.id), { ...attachment, previewUrl }]);
+        invalidateSendIntent();
         void prepareAttachment(attachment.id);
       } catch (error) {
-        setSendError(error instanceof Error ? error.message : "添加附件失败");
+        const wasCancelled = temporaryId !== undefined && cancelledImports.current.delete(temporaryId);
+        if (temporaryId !== undefined) {
+          activeImports.current.delete(temporaryId);
+          releasePreview(temporaryId);
+          updateAttachments((current) => current.filter((item) => item.id !== temporaryId));
+        }
+        if (importId !== undefined && !wasCancelled) await attachmentInvoke("cancel", { attachmentId: importId }).catch(() => undefined);
+        if (previewUrl !== undefined && temporaryId === undefined) URL.revokeObjectURL(previewUrl);
+        if (!wasCancelled) setSendError(error instanceof Error ? error.message : "添加附件失败");
       }
     }
   };
@@ -241,6 +349,13 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
       });
       if (additions.length > 0) invalidateSendIntent();
       updateAttachments((current) => [...current, ...additions]);
+      try {
+        await Promise.all(additions.map((attachment) => attachmentInvoke("retain", { attachmentId: attachment.id })));
+      } catch (error) {
+        const additionIds = new Set(additions.map((attachment) => attachment.id));
+        updateAttachments((current) => current.filter((attachment) => !additionIds.has(attachment.id)));
+        throw error;
+      }
       additions.forEach((attachment) => void prepareAttachment(attachment.id));
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "选择附件失败");
@@ -249,20 +364,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
 
   const dropFiles = async (files: File[]) => {
     if (files.length === 0) return;
-    try {
-      const inputs = await Promise.all(files.map(async (file) => {
-        const contentBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onerror = () => reject(new Error("读取附件失败"));
-          reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
-          reader.readAsDataURL(file);
-        });
-        return { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, contentBase64 };
-      }));
-      await addAttachmentInputs(inputs);
-    } catch (error) {
-      setSendError(error instanceof Error ? error.message : "添加附件失败");
-    }
+    await importFiles(files);
   };
 
   const refreshAttachmentStates = async (sent: Attachment[]) => {
@@ -271,20 +373,27 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
       try { return await attachmentInvoke("get", { attachmentId: attachment.id }) as Attachment; }
       catch { return { ...attachment, state: "failed" as const, error: { code: "OPERATION_FAILED" as const, message: "附件发送失败", retryable: true } }; }
     }));
-    updateAttachments((current) => current.map((attachment) => refreshed.find((item) => item.id === attachment.id) ?? attachment));
+    updateAttachments((current) => current.map((attachment) => {
+      const state = refreshed.find((item) => item.id === attachment.id);
+      return state === undefined ? attachment : { ...state, previewUrl: attachment.previewUrl };
+    }));
   };
 
   const send = async () => {
     const text = draft.trim();
     const installIntent = parseSkillInstallIntent(text);
     const readyAttachments = attachments.filter((attachment) => attachment.state === "ready");
-    if ((text.length === 0 && readyAttachments.length === 0) || attachments.some((attachment) => attachment.state !== "ready") || sending || unavailable) return;
+    if ((text.length === 0 && readyAttachments.length === 0) || attachments.some((attachment) => attachment.state !== "ready") || unavailable) return;
     setSendError(undefined);
+    activeSends.current += 1;
     setSending(true);
     onDraftChange("");
     stopRequested.current = false;
     const controller = new AbortController();
     sendController.current = controller;
+    const sentIds = new Set(readyAttachments.map((attachment) => attachment.id));
+    readyAttachments.forEach((attachment) => releasePreview(attachment.id));
+    updateAttachments((current) => current.filter((attachment) => !sentIds.has(attachment.id)));
     onActivity("消息已发送");
     const optimistic: Message = {
       id: `local-${requestId()}`, sessionId: session.id, role: "user", status: "completed",
@@ -315,39 +424,74 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     };
     try {
       const blocks = [...(text === "" ? [] : [{ type: "text" as const, text, format: "plain" as const }]), ...readyAttachments.map((attachment) => ({ type: "attachment" as const, attachmentId: attachment.id }))];
-      const clientRequestId = sendIntentId.current ??= requestId();
-      const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId, blocks, ...(selectedSkillId === undefined ? {} : { skillId: selectedSkillId }) }, controller.signal));
+      const clientRequestId = sendIntentId.current ?? requestId();
+      sendIntentId.current = undefined;
+      const terminal = await consume(client.chat.send({ sessionId: session.id, clientRequestId, blocks, ...(selectedSkillId === undefined ? {} : { skillId: selectedSkillId }) }, controller.signal), (event) => {
+        if (event.type !== "started" || sendController.current !== controller) return;
+        activeRunId.current = event.runId;
+        if (stopRequested.current) void client.chat.abort(event.runId).catch(() => undefined);
+      });
       if (!mounted.current) return;
       if (terminal?.type === "error") {
         const installed = await readBackSkillInstall().catch(() => false);
         if (!installed) {
           markSendFailed(terminal.error.message);
+          updateAttachments((current) => [...readyAttachments.filter((sent) => !current.some((item) => item.id === sent.id)), ...current]);
           await refreshAttachmentStates(readyAttachments);
-        }
+        } else await Promise.all(readyAttachments.map((attachment) => attachmentInvoke("release", { attachmentId: attachment.id }).catch(() => undefined)));
       }
       else if (terminal?.type === "aborted") {
-        onDraftChange(text);
-        sendIntentId.current = undefined;
+        if (draftRef.current.trim() === "") onDraftChange(text);
+        updateAttachments((current) => [...readyAttachments.filter((sent) => !current.some((item) => item.id === sent.id)), ...current]);
       }
       else if (terminal?.type === "final") {
         setSelectedSkillId(undefined);
-        const sentIds = new Set(readyAttachments.map((attachment) => attachment.id));
-        updateAttachments((current) => current.filter((attachment) => !sentIds.has(attachment.id)));
-        await Promise.all(readyAttachments.map((attachment) => attachmentInvoke("remove", { attachmentId: attachment.id }).catch(() => undefined)));
         sendIntentId.current = undefined;
+        await Promise.all(readyAttachments.map((attachment) => attachmentInvoke("release", { attachmentId: attachment.id }).catch(() => undefined)));
         await readBackSkillInstall().catch(() => false);
         onSendSuccess(session.id);
       }
     } catch (error) {
       if (mounted.current && !stopRequested.current) {
         markSendFailed(error instanceof Error ? error.message : "发送失败");
+        updateAttachments((current) => [...readyAttachments.filter((sent) => !current.some((item) => item.id === sent.id)), ...current]);
         await refreshAttachmentStates(readyAttachments);
       }
     } finally {
-      activeRunId.current = undefined;
-      sendController.current = undefined;
-      stopRequested.current = false;
-      if (mounted.current) setSending(false);
+      if (!mounted.current) await Promise.all(readyAttachments.map((attachment) => attachmentInvoke("release", { attachmentId: attachment.id }).catch(() => undefined)));
+      if (sendController.current === controller) {
+        activeRunId.current = undefined;
+        sendController.current = undefined;
+        stopRequested.current = false;
+      }
+      activeSends.current = Math.max(0, activeSends.current - 1);
+      if (mounted.current) setSending(activeSends.current > 0);
+    }
+  };
+
+  const addToQueue = async () => {
+    const text = draft.trim();
+    const readyAttachments = attachments.filter((attachment) => attachment.state === "ready");
+    if ((text.length === 0 && readyAttachments.length === 0) || attachments.some((attachment) => attachment.state !== "ready") || unavailable) return;
+    try {
+      await queueInvoke("chat-queue.add", {
+        sessionId: session.id,
+        text,
+        attachmentIds: readyAttachments.map((attachment) => attachment.id),
+        ...(session.model?.id === undefined ? {} : { modelId: session.model.id }),
+        ...(selectedSkillId === undefined ? {} : { skillId: selectedSkillId }),
+        idempotencyKey: requestId(),
+      });
+      onDraftChange("");
+      readyAttachments.forEach((attachment) => {
+        releasePreview(attachment.id);
+      });
+      updateAttachments(() => []);
+      await Promise.all(readyAttachments.map((attachment) => attachmentInvoke("release", { attachmentId: attachment.id }).catch(() => undefined)));
+      setSelectedSkillId(undefined);
+      await refreshQueue();
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "加入队列失败");
     }
   };
 
@@ -397,6 +541,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     </div>
     {sendError ? <div className="send-error" role="alert"><AlertCircle /><span><strong>发送失败</strong>{sendError}</span></div> : null}
     {installedSkillName ? <div className="skill-install-status success" role="status"><span>{installedSkillName} 安装成功，OpenClaw 已完成读回。</span><button type="button" aria-label="关闭安装成功提示" title="关闭" onClick={() => setInstalledSkillName(undefined)}><X /></button></div> : null}
-    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} models={models.map((model) => ({ value: model.id, label: model.available ? model.label : `${model.label}（不可用）`, disabled: !model.available }))} modelValue={session.model?.id} modelLoading={modelState === "loading" || modelState === "selecting"} modelError={modelState === "error"} skills={skills.map((skill) => ({ value: skill.id, label: skill.name }))} skillValue={selectedSkillId} skillLoading={skillState === "loading"} onModelChange={(value) => void selectModel(value)} onSkillChange={(value) => { invalidateSendIntent(); setSelectedSkillId(value); }} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); void attachmentInvoke("remove", { attachmentId: id }).catch(() => undefined); updateAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onStop={() => void stop()} />
+    <QueuedMessageBar items={queueItems} onSend={(item) => { void queueInvoke("chat-queue.send", { sessionId: session.id, itemId: item.id }).then(refreshQueue).catch((error) => setSendError(error instanceof Error ? error.message : "发送队列消息失败")); }} onRemove={(item) => { void queueInvoke("chat-queue.remove", { sessionId: session.id, itemId: item.id }).then(refreshQueue).catch((error) => setSendError(error instanceof Error ? error.message : "删除队列消息失败")); }} onSave={async (item, text, attachmentIds) => { await queueInvoke("chat-queue.update", { sessionId: session.id, itemId: item.id, text, attachmentIds }); await refreshQueue(); }} onAddAttachments={async (currentIds) => { const selected = await attachmentInvoke("select", {}) as Attachment[]; const additions = selected.filter((attachment) => !currentIds.includes(attachment.id)); await Promise.all(additions.map((attachment) => attachmentInvoke("retain", { attachmentId: attachment.id }))); return additions.map((attachment) => attachment.id); }} onReleaseAttachments={(attachmentIds) => { void Promise.all(attachmentIds.map((attachmentId) => attachmentInvoke("release", { attachmentId }))); }} />
+    <Composer value={draft} disabled={unavailable || historyState !== "ready"} sending={sending} attachmentsSupported={attachmentsSupported} attachments={attachments} models={models.map((model) => ({ value: model.id, label: model.available ? model.label : `${model.label}（不可用）`, disabled: !model.available }))} modelValue={session.model?.id} modelLoading={modelState === "loading" || modelState === "selecting"} modelError={modelState === "error"} skills={skills.map((skill) => ({ value: skill.id, label: skill.name }))} skillValue={selectedSkillId} skillLoading={skillState === "loading"} onModelChange={(value) => void selectModel(value)} onSkillChange={(value) => { invalidateSendIntent(); setSelectedSkillId(value); }} onChange={(value) => { invalidateSendIntent(); onDraftChange(value); }} onSelectAttachments={() => void selectAttachments()} onDropFiles={(files) => void dropFiles(files)} onPasteFiles={(files) => void importFiles(files)} onPrepareAttachment={(id) => { void prepareAttachment(id); }} onRemoveAttachment={(id) => { invalidateSendIntent(); releasePreview(id); const importId = activeImports.current.get(id); if (importId !== undefined) { cancelledImports.current.add(id); activeImports.current.delete(id); void attachmentInvoke("cancel", { attachmentId: importId }).catch(() => undefined); } else { void attachmentInvoke("release", { attachmentId: id }).then(() => attachmentInvoke("remove", { attachmentId: id })).catch(() => undefined); } updateAttachments((current) => current.filter((attachment) => attachment.id !== id)); }} onSend={() => void send()} onQueue={() => void addToQueue()} onStop={() => void stop()} />
   </section>;
 }

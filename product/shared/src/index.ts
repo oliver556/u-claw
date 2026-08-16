@@ -7,6 +7,7 @@ export * from "./system-voice.js";
 export * from "./activity.js";
 export * from "./builtin-service-operations.js";
 export * from "./chat.js";
+export * from "./chat-queue.js";
 export * from "./capabilities.js";
 export * from "./skill-install-intent.js";
 export * from "./channels.js";

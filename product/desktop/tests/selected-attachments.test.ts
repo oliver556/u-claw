@@ -46,4 +46,14 @@ describe("readSelectedAttachments", () => {
     expect(error).toMatchObject({ code: "INVALID_ARGUMENT" });
     expect(readFile).not.toHaveBeenCalled();
   });
+
+  it("rejects selected symlinks before reading their content", async () => {
+    const readFile = vi.fn();
+    const error = await readSelectedAttachments(["linked.png"], {
+      lstat: vi.fn(async () => ({ isFile: () => true, isSymbolicLink: () => true, size: 8 })),
+      readFile,
+    }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "FILE_OUTSIDE_ALLOWED_ROOT" });
+    expect(readFile).not.toHaveBeenCalled();
+  });
 });

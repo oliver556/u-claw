@@ -1,11 +1,13 @@
 import { UClawErrorSchema } from "@uclaw/shared";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { type z } from "zod";
 
 import { AsyncEventQueue, OPENCLAW_IMPLEMENTED_METHODS, OpenClawClient, UClawUnsupportedError, type OpenClawTransport } from "../src/openclaw-client.js";
-import { AttachmentManager, AttachmentServiceError } from "../src/attachments.js";
+import { AttachmentManager, AttachmentServiceError, createControlledAttachmentResolver } from "../src/attachments.js";
 import { ManualClock } from "../src/mock/mock-client.js";
 import { ReconnectPolicy } from "../src/reconnect.js";
 import type { HelloOk } from "../src/transport/gateway-websocket.js";
@@ -495,6 +497,119 @@ describe("OpenClawClient", () => {
 
     expect(transport.requests.at(-1)).toEqual({ method: "chat.send", params: fixture.requestFrame.params });
     expect(await attachments.get(attachment.id)).toMatchObject({ state: "attached", progress: 1 });
+  });
+
+  it.each([
+    ["video/mp4", Buffer.from("000000186674797069736f6d00000000", "hex")],
+    ["video/quicktime", Buffer.from("00000018667479707174202000000000", "hex")],
+    ["video/webm", Buffer.from("1a45dfa39f4286810100000000000000", "hex")],
+  ])("sends text and %s from controlled cache in one idempotent chat.send", async (mediaType, bytes) => {
+    const dataRoot = await mkdtemp(join(tmpdir(), "uclaw-adapter-video-"));
+    const id = "video-1";
+    const relativePath = `uclaw/attachments/objects/${id}/content`;
+    const contentPath = join(dataRoot, relativePath);
+    await mkdir(resolve(contentPath, ".."), { recursive: true });
+    await writeFile(contentPath, bytes);
+    const source = {
+      get: vi.fn(async () => ({
+        id,
+        file: { id, name: "clip.mov", mediaType, size: bytes.length, kind: "attachment" as const, relativePath },
+        category: "video" as const,
+        state: "ready" as const,
+      })),
+      prepare: vi.fn(), cancel: vi.fn(), remove: vi.fn(), import: vi.fn(),
+    };
+    const transport = new FakeTransport();
+    transport.policy = { maxPayload: 1_000_000, maxBufferedBytes: 2_000_000 };
+    transport.fixtures.set("chat.send", { runId: "run-video", status: "started" });
+    const attachments = createControlledAttachmentResolver({ dataRoot, source });
+    const client = new OpenClawClient({ transport, attachments });
+    await client.gateway.negotiate();
+
+    const iterator = client.chat.send({
+      sessionId: "agent:main:main",
+      clientRequestId: "stable-video-key",
+      blocks: [{ type: "text", text: "分析视频", format: "plain" }, { type: "attachment", attachmentId: id }],
+    })[Symbol.asyncIterator]();
+    await iterator.next();
+
+    expect(transport.requests.at(-1)).toEqual({
+      method: "chat.send",
+      params: {
+        sessionKey: "agent:main:main",
+        message: "分析视频",
+        attachments: [{ type: "file", fileName: "clip.mov", mimeType: mediaType, content: bytes.toString("base64") }],
+        idempotencyKey: "stable-video-key",
+      },
+    });
+    await rm(dataRoot, { recursive: true, force: true });
+  });
+
+  it.each(["missing", "replaced", "mime-mismatch", "oversized"])("fails closed for %s controlled video cache", async (failure) => {
+    const dataRoot = await mkdtemp(join(tmpdir(), "uclaw-adapter-video-fail-"));
+    const id = "video-fail";
+    const relativePath = `uclaw/attachments/objects/${id}/content`;
+    const contentPath = join(dataRoot, relativePath);
+    const valid = Buffer.from("000000186674797069736f6d00000000", "hex");
+    await mkdir(resolve(contentPath, ".."), { recursive: true });
+    if (failure !== "missing") await writeFile(contentPath, failure === "mime-mismatch" ? Buffer.alloc(valid.length, 0x78) : valid);
+    const source = {
+      get: vi.fn(async () => ({
+        id,
+        file: { id, name: "clip.mp4", mediaType: "video/mp4", size: failure === "oversized" ? 500 * 1024 * 1024 + 1 : valid.length, kind: "attachment" as const, relativePath },
+        category: "video" as const,
+        state: "ready" as const,
+      })),
+      prepare: vi.fn(), cancel: vi.fn(), remove: vi.fn(), import: vi.fn(),
+    };
+    const transport = new FakeTransport();
+    const attachments = createControlledAttachmentResolver({
+      dataRoot,
+      source,
+      afterInspect: failure === "replaced" ? async () => {
+        const replacement = `${contentPath}.replacement`;
+        await writeFile(replacement, valid);
+        await rename(replacement, contentPath);
+      } : undefined,
+    });
+    const client = new OpenClawClient({ transport, attachments });
+    await client.gateway.negotiate();
+
+    const send = client.chat.send({ sessionId: "agent:main:main", clientRequestId: "stable-fail-key", blocks: [
+      { type: "text", text: "must not send alone", format: "plain" },
+      { type: "attachment", attachmentId: id },
+    ]})[Symbol.asyncIterator]();
+    await expect(send.next()).rejects.toBeDefined();
+    expect(transport.requests.some((request) => request.method === "chat.send")).toBe(false);
+    await rm(dataRoot, { recursive: true, force: true });
+  });
+
+  it("rejects a controlled video that cannot fit the negotiated Gateway frame before reading it", async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), "uclaw-adapter-video-policy-"));
+    const id = "video-policy";
+    const source = {
+      get: vi.fn(async () => ({
+        id,
+        file: { id, name: "clip.mp4", mediaType: "video/mp4", size: 20 * 1024 * 1024, kind: "attachment" as const, relativePath: `uclaw/attachments/objects/${id}/content` },
+        category: "video" as const,
+        state: "ready" as const,
+      })),
+      prepare: vi.fn(), cancel: vi.fn(), remove: vi.fn(), import: vi.fn(),
+    };
+    const beforeRead = vi.fn();
+    const transport = new FakeTransport();
+    transport.policy = { maxPayload: 25 * 1024 * 1024, maxBufferedBytes: 50 * 1024 * 1024 };
+    const client = new OpenClawClient({ transport, attachments: createControlledAttachmentResolver({ dataRoot, source, beforeRead }) });
+    await client.gateway.negotiate();
+
+    const send = client.chat.send({ sessionId: "agent:main:main", clientRequestId: "video-policy-key", blocks: [
+      { type: "text", text: "分析视频", format: "plain" },
+      { type: "attachment", attachmentId: id },
+    ] })[Symbol.asyncIterator]();
+    await expect(send.next()).rejects.toMatchObject({ uclawError: { code: "FILE_TOO_LARGE" } });
+    expect(beforeRead).not.toHaveBeenCalled();
+    expect(transport.requests.some((request) => request.method === "chat.send")).toBe(false);
+    await rm(dataRoot, { recursive: true, force: true });
   });
 
   it("resolves a selected Skill through the authoritative command catalog before chat.send", async () => {
