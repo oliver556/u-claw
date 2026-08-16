@@ -1,0 +1,17 @@
+server {
+    listen 443 ssl http2;
+    server_name updates.yiyong.me;
+
+    # Certificates are provisioned on the host and never stored in this repository.
+    ssl_certificate /etc/nginx/tls/updates.yiyong.me/fullchain.pem;
+    ssl_certificate_key /etc/nginx/tls/updates.yiyong.me/privkey.pem;
+
+    root /srv/uclaw-updates;
+
+    location /releases/ {
+        limit_except GET HEAD { deny all; }
+        autoindex off;
+        add_header X-Content-Type-Options nosniff always;
+        try_files $uri =404;
+    }
+}
