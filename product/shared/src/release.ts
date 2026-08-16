@@ -32,6 +32,7 @@ export const ReleaseOperationSchema = z.object({
   processedItems: z.number().int().nonnegative(), totalItems: z.number().int().nonnegative(),
   partialFailures: z.number().int().nonnegative(), message: z.string().max(500),
   recovery: z.enum(["none", "rolled-back", "recovery-required"]),
+  restartRequired: z.boolean(),
 }).strict();
 export type ReleaseOperation = z.infer<typeof ReleaseOperationSchema>;
 

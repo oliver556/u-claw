@@ -59,6 +59,32 @@ describe("IPC contracts", () => {
     expect(() => WindowIpcRequestSchema.parse({ method: "open-advanced-console", requestId: "request-3", params: { url: "https://evil.example" } })).toThrow();
   });
 
+  it("models a controlled update restart through window IPC", () => {
+    const request = {
+      method: "restart-for-update",
+      requestId: "restart-1",
+      params: { operationId: "operation-1" },
+    };
+    expect(WindowIpcRequestSchema.parse(request)).toMatchObject(request);
+    expect(IpcResponseSchema.parse({ method: request.method, requestId: request.requestId, ok: true, result: null })).toMatchObject({
+      method: "restart-for-update",
+      requestId: "restart-1",
+      ok: true,
+    });
+    expect(IpcResponseSchema.parse({
+      method: "restart-for-update",
+      requestId: "restart-1",
+      ok: false,
+      error: {
+        code: "CONFLICT",
+        message: "更新尚未完成。",
+        retryable: false,
+        recoveryActions: [],
+        causeDetails: {},
+      },
+    })).toMatchObject({ method: "restart-for-update", ok: false });
+  });
+
   it("parses a typed window failure response", () => {
     expect(IpcResponseSchema.parse({
       method: "close",

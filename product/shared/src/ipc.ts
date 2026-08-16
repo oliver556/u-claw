@@ -156,6 +156,7 @@ export const WindowIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("toggle-maximize"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
   z.object({ method: z.literal("close"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
   z.object({ method: z.literal("open-advanced-console"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
+  z.object({ method: z.literal("restart-for-update"), requestId: RequestIdSchema, params: z.object({ operationId: z.string().min(1).max(128) }).strict() }).strict(),
 ]);
 export type WindowIpcRequest = z.infer<typeof WindowIpcRequestSchema>;
 
@@ -164,12 +165,13 @@ export const WindowIpcSuccessResponseSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("toggle-maximize"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
   z.object({ method: z.literal("close"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
   z.object({ method: z.literal("open-advanced-console"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+  z.object({ method: z.literal("restart-for-update"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
 ]);
 export type WindowIpcSuccessResponse = z.infer<typeof WindowIpcSuccessResponseSchema>;
 
 export const WindowIpcFailureResponseSchema = z
   .object({
-    method: z.enum(["minimize", "toggle-maximize", "close", "open-advanced-console"]),
+    method: z.enum(["minimize", "toggle-maximize", "close", "open-advanced-console", "restart-for-update"]),
     requestId: RequestIdSchema,
     ok: z.literal(false),
     error: UClawErrorSchema,

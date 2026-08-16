@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { ReleaseIpcRequestSchema, ReleaseIpcResponseSchema } from "../src/release.js";
+import { ReleaseIpcRequestSchema, ReleaseIpcResponseSchema, ReleaseOperationSchema } from "../src/release.js";
 
 describe("release IPC contract", () => {
+  it("marks completed installs that require a controlled restart", () => {
+    expect(ReleaseOperationSchema.parse({
+      id: "operation-1",
+      kind: "install",
+      state: "completed",
+      phase: "completed",
+      processedItems: 3,
+      totalItems: 3,
+      partialFailures: 0,
+      message: "更新已安装。",
+      recovery: "none",
+      restartRequired: true,
+    }).restartRequired).toBe(true);
+  });
+
   it("allows only fixed release, recovery and uninstall actions", () => {
     expect(ReleaseIpcRequestSchema.parse({ method: "release.check", requestId: "check-1", params: { channel: "stable" } })).not.toHaveProperty("url");
     expect(ReleaseIpcRequestSchema.parse({ method: "release.install", requestId: "install-1", params: { updateId: "release-42", previewToken: "preview-42", confirmed: true } })).not.toHaveProperty("path");
