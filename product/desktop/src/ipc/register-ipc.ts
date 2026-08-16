@@ -180,7 +180,7 @@ export function registerIpc({
     "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group",
     "session-organizer.assign-group", "chat.send", "models.select-for-session",
   ]);
-  const attachmentWriteMethods = new Set(["select", "import", "import.begin", "import.chunk", "import.finish", "prepare", "cancel", "remove", "retain", "release"]);
+  const attachmentWriteMethods = new Set(["select", "import", "import.begin", "import.chunk", "import.finish", "prepare", "remove", "retain", "release"]);
   const channelWriteMethods = new Set([
     "channels.create", "channels.update", "channels.remove", "channels.set-enabled", "channels.test",
     "channels.reconnect", "channels.wechat-login-start", "channels.wechat-login-refresh",
