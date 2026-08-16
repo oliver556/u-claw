@@ -117,6 +117,202 @@ describe("chat workspace", () => {
     expect(await screen.findByRole("combobox", { name: "会话模型" })).toBeInTheDocument();
     expect(screen.queryByText("当前连接不支持模型列表")).not.toBeInTheDocument();
   });
+
+  it("steers an active run, queues with the platform shortcut, and edits authoritative queue items on save", async () => {
+    const pending = deferredStream();
+    const base = clientFixture();
+    const send = vi.fn((_input: Parameters<UClawClient["chat"]["send"]>[0]) => pending.stream);
+    const queuedItem = {
+      id: "queue-1", sessionId: "session-1", text: "稍后处理", attachmentIds: [], status: "queued" as const,
+      idempotencyKey: "queue-key-0001", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z",
+    };
+    let items = [queuedItem];
+    const queueInvoke = vi.fn(async (request: any) => {
+      if (request.method === "chat-queue.list") return { method: request.method, requestId: request.requestId, ok: true, result: { schemaVersion: 1, sessionId: "session-1", items } };
+      if (request.method === "chat-queue.add") {
+        const item = { ...queuedItem, id: "queue-2", text: request.params.text, idempotencyKey: request.params.idempotencyKey };
+        items = [...items, item];
+        return { method: request.method, requestId: request.requestId, ok: true, result: item };
+      }
+      if (request.method === "chat-queue.update") {
+        items = items.map((item) => item.id === request.params.itemId ? { ...item, text: request.params.text } : item);
+        return { method: request.method, requestId: request.requestId, ok: true, result: items.find((item) => item.id === request.params.itemId) };
+      }
+      if (request.method === "chat-queue.remove") return { method: request.method, requestId: request.requestId, ok: true, result: null };
+      return { method: request.method, requestId: request.requestId, ok: true, result: queuedItem };
+    });
+    window.uclaw = { chatQueue: { invoke: queueInvoke as never } };
+    render(<App client={clientFixture({ chat: { ...base.chat, send } })} />);
+
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    expect(await screen.findByLabelText("消息队列")).toBeVisible();
+    fireEvent.change(composer, { target: { value: "先开始" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    expect(composer).toBeEnabled();
+
+    fireEvent.change(composer, { target: { value: "立即调整" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].blocks).toEqual([{ type: "text", text: "立即调整", format: "plain" }]);
+
+    fireEvent.change(composer, { target: { value: "进入队列" } });
+    fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(queueInvoke).toHaveBeenCalledWith(expect.objectContaining({ method: "chat-queue.add", params: expect.objectContaining({ text: "进入队列" }) })));
+
+    fireEvent.click(screen.getByRole("button", { name: "更多：稍后处理" }));
+    expect(screen.getByRole("menu")).toHaveTextContent("编辑消息");
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑消息" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "编辑队列消息" }), { target: { value: "修改后处理" } });
+    expect(queueInvoke.mock.calls.some(([request]) => request.method === "chat-queue.update")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "保存队列消息" }));
+    await waitFor(() => expect(queueInvoke).toHaveBeenCalledWith(expect.objectContaining({ method: "chat-queue.update", params: expect.objectContaining({ itemId: "queue-1", text: "修改后处理" }) })));
+  });
+
+  it("moves submitted attachments out of the composer so steering and queueing do not reuse them", async () => {
+    const pending = deferredStream();
+    const base = clientFixture();
+    const attachment = { id: "attachment-first", file: { id: "file-first", name: "first.txt", mediaType: "text/plain", size: 4, kind: "attachment" as const }, state: "ready" as const, progress: 1 };
+    const attachmentInvoke = vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: request.method === "select" ? [attachment] : request.method === "prepare" ? [attachment] : null }));
+    const queueInvoke = vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: request.method === "chat-queue.list" ? { schemaVersion: 1, sessionId: "session-1", items: [] } : { id: "queue-2" } }));
+    const send = vi.fn((_input: Parameters<UClawClient["chat"]["send"]>[0]) => pending.stream);
+    window.uclaw = { attachments: { invoke: attachmentInvoke as never }, chatQueue: { invoke: queueInvoke as never } };
+    render(<App client={clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send } })} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "添加附件" }));
+    const composer = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "首条" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled());
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    expect(send.mock.calls[0]![0].blocks).toEqual(expect.arrayContaining([{ type: "attachment", attachmentId: "attachment-first" }]));
+    expect(screen.queryByLabelText("附件队列")).not.toBeInTheDocument();
+
+    fireEvent.change(composer, { target: { value: "调整" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![0].blocks).toEqual([{ type: "text", text: "调整", format: "plain" }]);
+
+    fireEvent.change(composer, { target: { value: "排队" } });
+    fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(queueInvoke).toHaveBeenCalledWith(expect.objectContaining({ method: "chat-queue.add", params: expect.objectContaining({ attachmentIds: [] }) })));
+  });
+
+  it("does not let an aborted older send overwrite a newer draft", async () => {
+    const terminal = deferred<void>();
+    const base = clientFixture();
+    const abort = vi.fn(async () => { terminal.resolve(); });
+    const send = vi.fn((_input: Parameters<UClawClient["chat"]["send"]>[0]) => (async function* () {
+      yield { type: "started" as const, runId: "run-old", sessionId: "session-1" };
+      await terminal.promise;
+      yield { type: "aborted" as const, runId: "run-old", reason: "Stopped" };
+    })());
+    render(<App client={clientFixture({ chat: { ...base.chat, send, abort } })} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "旧消息" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止生成" })).toBeVisible());
+    fireEvent.change(composer, { target: { value: "新草稿" } });
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
+    await waitFor(() => expect(abort).toHaveBeenCalledWith("run-old"));
+    await waitFor(() => expect(composer).toHaveValue("新草稿"));
+  });
+
+  it("imports pasted image and streamed video through one attachment pipeline while preserving text paste", async () => {
+    const base = clientFixture();
+    const readyImage = { id: "image-1", file: { id: "file-image", name: "photo.png", mediaType: "image/png", size: 3, kind: "attachment" as const }, category: "image" as const, state: "ready" as const, progress: 1 };
+    const readyVideo = { id: "video-1", file: { id: "file-video", name: "clip.mp4", mediaType: "video/mp4", size: 5, kind: "attachment" as const }, category: "video" as const, state: "ready" as const, progress: 1 };
+    const invoke = vi.fn(async (request: any) => {
+      const results: Record<string, unknown> = {
+        import: readyImage,
+        "import.begin": { importId: "stream-1" },
+        "import.chunk": { nextOffset: request.params.offset + 5 },
+        "import.finish": readyVideo,
+        prepare: [request.params.attachmentId === "video-1" ? readyVideo : readyImage],
+      };
+      return { method: request.method, requestId: request.requestId, ok: true, result: results[request.method] ?? null };
+    });
+    const createObjectURL = vi.fn((file: Blob) => `blob:${(file as File).name}`);
+    const revokeObjectURL = vi.fn();
+    const queueInvoke = vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: request.method === "chat-queue.list" ? { schemaVersion: 1, sessionId: "session-1", items: [] } : null }));
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    window.uclaw = { attachments: { invoke: invoke as never }, chatQueue: { invoke: queueInvoke as never } };
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) } });
+    const view = render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+
+    const textPaste = fireEvent.paste(composer, { clipboardData: { files: [], getData: () => "普通文本" } });
+    expect(textPaste).toBe(true);
+    expect(invoke).not.toHaveBeenCalled();
+
+    fireEvent.paste(composer, { clipboardData: { files: [new File(["png"], "photo.png", { type: "image/png" })] } });
+    expect(await screen.findByRole("img", { name: "photo.png" })).toBeVisible();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "import" }));
+    expect(screen.getByRole("img", { name: "photo.png" }).compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.paste(composer, { clipboardData: { files: [new File(["video"], "clip.mp4", { type: "video/mp4" })] } });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "import.finish" })));
+    expect(invoke.mock.calls.some(([request]) => request.method === "import" && request.params.name === "clip.mp4")).toBe(false);
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "import.chunk", params: expect.objectContaining({ importId: "stream-1", offset: 0 }) }));
+
+    fireEvent.click(screen.getByRole("button", { name: "移除 photo.png" }));
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:photo.png");
+    fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(queueInvoke).toHaveBeenCalledWith(expect.objectContaining({ method: "chat-queue.add", params: expect.objectContaining({ attachmentIds: ["video-1"] }) })));
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:clip.mp4");
+    view.unmount();
+    expect(createObjectURL).toHaveBeenCalledTimes(2);
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels a failed streamed video import without leaving a preview behind", async () => {
+    const base = clientFixture();
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "import.begin") return { method: request.method, requestId: request.requestId, ok: true, result: { importId: "failed-stream" } };
+      if (request.method === "import.chunk") return { method: request.method, requestId: request.requestId, ok: false, error: { code: "OPERATION_FAILED", message: "chunk failed", retryable: true, recoveryActions: [], causeDetails: {} } };
+      return { method: request.method, requestId: request.requestId, ok: true, result: null };
+    });
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:failed") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) } });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+
+    fireEvent.paste(composer, { clipboardData: { files: [new File(["video"], "broken.mp4", { type: "video/mp4" })] } });
+
+    expect(await screen.findByText("chunk failed")).toBeVisible();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "cancel", params: { attachmentId: "failed-stream" } }));
+    expect(screen.queryByLabelText("视频预览 broken.mp4")).not.toBeInTheDocument();
+  });
+
+  it("releases and cancels an in-progress video when it is removed", async () => {
+    const base = clientFixture();
+    let rejectChunk: ((reason: Error) => void) | undefined;
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "import.begin") return { method: request.method, requestId: request.requestId, ok: true, result: { importId: "active-stream" } };
+      if (request.method === "import.chunk") return new Promise((_resolve, reject) => { rejectChunk = reject; });
+      return { method: request.method, requestId: request.requestId, ok: true, result: null };
+    });
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:active") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    window.uclaw = { attachments: { invoke: invoke as never } };
+    const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) } });
+    render(<App client={client} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+
+    fireEvent.paste(composer, { clipboardData: { files: [new File(["video"], "active.mp4", { type: "video/mp4" })] } });
+    const remove = await screen.findByRole("button", { name: "移除 active.mp4" });
+    await waitFor(() => expect(rejectChunk).toBeDefined());
+    fireEvent.click(remove);
+    rejectChunk?.(new Error("cancelled"));
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "cancel", params: { attachmentId: "active-stream" } })));
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("cancelled")).not.toBeInTheDocument();
+  });
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
@@ -185,7 +381,7 @@ describe("chat workspace", () => {
 
     const main = screen.getByRole("main");
     expect(await within(main).findByText("第一段历史")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     expect(await within(main).findByText("第二段历史")).toBeVisible();
     expect(within(main).queryByText("第一段历史")).not.toBeInTheDocument();
   });
@@ -207,7 +403,7 @@ describe("chat workspace", () => {
     expect(screen.getAllByText("共享消息")).toHaveLength(1);
     expect(list).toHaveBeenCalledWith("session-1", { cursor: "history-2" });
 
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     expect(await screen.findByText("第二会话消息")).toBeVisible();
     expect(screen.queryByRole("button", { name: "加载更多消息" })).not.toBeInTheDocument();
     expect(screen.queryByText("第三条消息")).not.toBeInTheDocument();
@@ -240,8 +436,8 @@ describe("chat workspace", () => {
     const sessionTwo = deferred<Awaited<ReturnType<UClawClient["sessions"]["get"]>>>();
     vi.mocked(client.sessions.get).mockImplementation((id) => id === "session-1" ? sessionOne.promise : sessionTwo.promise);
 
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
-    fireEvent.click(screen.getByRole("button", { name: /发布检查/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^发布检查，/ }));
     sessionOne.resolve({ id: "session-1", title: "发布检查", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" });
     await act(async () => undefined);
     sessionTwo.resolve({ id: "session-2", title: "知识库调研", createdAt: "2026-08-08T08:00:00.000Z", updatedAt: "2026-08-08T08:00:00.000Z", pinned: false, status: "idle" });
@@ -276,13 +472,13 @@ describe("chat workspace", () => {
     const first = render(<App client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "新建会话" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /网关权威会话/ }).closest(".session-row")).toHaveClass("active"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^网关权威会话，/ }).closest(".session-row")).toHaveClass("active"));
     expect(list).toHaveBeenCalledTimes(2);
     expect(get).toHaveBeenCalledWith("session-3");
 
     first.unmount();
     render(<App client={client} />);
-    expect(await screen.findByRole("button", { name: /网关权威会话/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /^网关权威会话，/ })).toBeVisible();
   });
 
   it("reads authoritative session list after rename and delete", async () => {
@@ -303,16 +499,19 @@ describe("chat workspace", () => {
     const client = Object.assign(clientFixture({ sessions: { ...base.sessions, list, get, rename, remove } }), {
       sessionOrganizer: { get: organizerGet, setPinned: vi.fn(), createGroup: vi.fn(), renameGroup: vi.fn(), removeGroup: vi.fn(), assignGroup: vi.fn() },
     });
-    vi.spyOn(window, "prompt").mockReturnValue("正式发布");
     render(<App client={client} />);
 
-    const firstRow = (await screen.findByRole("button", { name: /发布检查/ })).closest(".session-row")!;
-    fireEvent.click(within(firstRow as HTMLElement).getByRole("button", { name: "重命名会话" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /正式发布（权威）/ }).closest(".session-row")).toHaveClass("active"));
+    const firstRow = (await screen.findByRole("button", { name: /^发布检查，/ })).closest(".session-row")!;
+    fireEvent.contextMenu(firstRow);
+    fireEvent.click(screen.getByRole("menuitem", { name: "重命名会话" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "会话名称" }), { target: { value: "正式发布" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存会话名称" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^正式发布（权威），/ }).closest(".session-row")).toHaveClass("active"));
 
-    const renamedRow = screen.getByRole("button", { name: /正式发布（权威）/ }).closest(".session-row")!;
-    fireEvent.click(within(renamedRow as HTMLElement).getByRole("button", { name: "删除会话" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: /正式发布（权威）/ })).not.toBeInTheDocument());
+    const renamedRow = screen.getByRole("button", { name: /^正式发布（权威），/ }).closest(".session-row")!;
+    fireEvent.contextMenu(renamedRow);
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除会话" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^正式发布（权威），/ })).not.toBeInTheDocument());
     expect(list).toHaveBeenCalledTimes(3);
     expect(organizerGet).toHaveBeenCalledTimes(2);
   });
@@ -330,15 +529,16 @@ describe("chat workspace", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "新建会话" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("gateway readback failed");
-    expect(screen.getByRole("button", { name: /发布检查/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^发布检查，/ })).toBeVisible();
   });
 
   it("filters sessions by title or preview", async () => {
     render(<App client={clientFixture()} />);
     const sidebar = await screen.findByRole("complementary", { name: "会话栏" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "搜索会话" }));
     fireEvent.change(within(sidebar).getByRole("searchbox", { name: "搜索会话" }), { target: { value: "知识库" } });
-    expect(within(sidebar).getByRole("button", { name: /知识库调研/ })).toBeVisible();
-    expect(within(sidebar).queryByRole("button", { name: /发布检查/ })).not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: /^知识库调研，/ })).toBeVisible();
+    expect(within(sidebar).queryByRole("button", { name: /^发布检查，/ })).not.toBeInTheDocument();
   });
 
   it("keeps separate drafts while switching sessions", async () => {
@@ -346,12 +546,12 @@ describe("chat workspace", () => {
     const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
     await waitFor(() => expect(composer).toBeEnabled());
     fireEvent.change(composer, { target: { value: "发布会话草稿" } });
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue(""));
     fireEvent.change(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" }), { target: { value: "知识库草稿" } });
-    fireEvent.click(screen.getByRole("button", { name: /发布检查/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^发布检查，/ }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue("发布会话草稿"));
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "给 U-Claw 发送消息" })).toHaveValue("知识库草稿"));
   });
 
@@ -605,6 +805,44 @@ describe("chat workspace", () => {
     expect(screen.queryByText("发送失败")).not.toBeInTheDocument();
   });
 
+  it("keeps stop bound to the newest send when an older started event arrives late", async () => {
+    const oldStart = deferred<void>();
+    const oldFinish = deferred<void>();
+    const newFinish = deferred<void>();
+    const base = clientFixture();
+    let sendCount = 0;
+    const send = vi.fn((_input: Parameters<UClawClient["chat"]["send"]>[0]) => {
+      sendCount += 1;
+      const current = sendCount;
+      return (async function* () {
+        if (current === 1) {
+          await oldStart.promise;
+          yield { type: "started" as const, runId: "run-old", sessionId: "session-1" };
+          await oldFinish.promise;
+          yield { type: "final" as const, runId: "run-old", message: { id: "old-final", sessionId: "session-1", runId: "run-old", role: "assistant" as const, status: "completed" as const, blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } };
+          return;
+        }
+        yield { type: "started" as const, runId: "run-new", sessionId: "session-1" };
+        await newFinish.promise;
+        yield { type: "aborted" as const, runId: "run-new", reason: "Stopped" };
+      })();
+    });
+    const abort = vi.fn(async (runId: string) => { if (runId === "run-new") newFinish.resolve(); });
+    render(<App client={clientFixture({ chat: { ...base.chat, send, abort } })} />);
+    const composer = await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" });
+    fireEvent.change(composer, { target: { value: "旧请求" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    fireEvent.change(composer, { target: { value: "新请求" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    oldStart.resolve();
+    await act(async () => undefined);
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
+    await waitFor(() => expect(abort).toHaveBeenCalledWith("run-new"));
+    expect(abort).not.toHaveBeenCalledWith("run-old");
+    oldFinish.resolve();
+  });
+
   it("does not let an old send completion reactivate its session after switching", async () => {
     const pending = deferredStream();
     let signal: AbortSignal | undefined;
@@ -615,7 +853,7 @@ describe("chat workspace", () => {
     fireEvent.change(composer, { target: { value: "旧会话发送" } });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
     pending.emit({ type: "started", runId: "run-old", sessionId: "session-1" });
-    fireEvent.click(screen.getByRole("button", { name: /知识库调研/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     expect(await within(screen.getByRole("main")).findByText("第二段历史")).toBeVisible();
     expect(signal?.aborted).toBe(true);
     pending.emit({ type: "final", runId: "run-old", message: { id: "old-final", sessionId: "session-1", runId: "run-old", role: "assistant", status: "completed", blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } });

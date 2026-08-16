@@ -15,8 +15,23 @@ import { PluginIpcRequestSchema, PluginIpcResponseSchema } from "./plugins.js";
 export { PluginIpcRequestSchema, PluginIpcResponseSchema } from "./plugins.js";
 export type { PluginIpcRequest, PluginIpcResponse } from "./plugins.js";
 
-import { AttachmentImportInputSchema, AttachmentSchema } from "./attachments.js";
+import {
+  AttachmentImportBeginInputSchema,
+  AttachmentImportChunkInputSchema,
+  AttachmentImportFinishInputSchema,
+  AttachmentImportInputSchema,
+  AttachmentSchema,
+} from "./attachments.js";
 import { ActivityDomainIdSchema, ArtifactSnapshotSchema, TaskActivitySnapshotSchema } from "./activity.js";
+import {
+  ChatQueueAddRequestSchema,
+  ChatQueueDocumentSchema,
+  ChatQueueItemSchema,
+  ChatQueueListRequestSchema,
+  ChatQueueRemoveRequestSchema,
+  ChatQueueSendRequestSchema,
+  ChatQueueUpdateRequestSchema,
+} from "./chat-queue.js";
 
 import {
   MessageEventSchema,
@@ -67,10 +82,15 @@ const SubscriptionIdSchema = z.string().min(1);
 export const AttachmentIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("select"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
   z.object({ method: z.literal("import"), requestId: RequestIdSchema, params: AttachmentImportInputSchema }).strict(),
+  z.object({ method: z.literal("import.begin"), requestId: RequestIdSchema, params: AttachmentImportBeginInputSchema }).strict(),
+  z.object({ method: z.literal("import.chunk"), requestId: RequestIdSchema, params: AttachmentImportChunkInputSchema }).strict(),
+  z.object({ method: z.literal("import.finish"), requestId: RequestIdSchema, params: AttachmentImportFinishInputSchema }).strict(),
   z.object({ method: z.literal("get"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("prepare"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("cancel"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
   z.object({ method: z.literal("remove"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
+  z.object({ method: z.literal("retain"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
+  z.object({ method: z.literal("release"), requestId: RequestIdSchema, params: z.object({ attachmentId: z.string().min(1) }).strict() }).strict(),
 ]);
 export type AttachmentIpcRequest = z.infer<typeof AttachmentIpcRequestSchema>;
 
@@ -78,19 +98,58 @@ export const AttachmentIpcResponseSchema = z.union([
   z.discriminatedUnion("method", [
     z.object({ method: z.literal("select"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(AttachmentSchema) }).strict(),
     z.object({ method: z.literal("import"), requestId: RequestIdSchema, ok: z.literal(true), result: AttachmentSchema }).strict(),
+    z.object({ method: z.literal("import.begin"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ importId: z.string().min(1) }).strict() }).strict(),
+    z.object({ method: z.literal("import.chunk"), requestId: RequestIdSchema, ok: z.literal(true), result: z.object({ nextOffset: z.number().int().nonnegative() }).strict() }).strict(),
+    z.object({ method: z.literal("import.finish"), requestId: RequestIdSchema, ok: z.literal(true), result: AttachmentSchema }).strict(),
     z.object({ method: z.literal("get"), requestId: RequestIdSchema, ok: z.literal(true), result: AttachmentSchema }).strict(),
     z.object({ method: z.literal("prepare"), requestId: RequestIdSchema, ok: z.literal(true), result: z.array(AttachmentSchema) }).strict(),
     z.object({ method: z.literal("cancel"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
     z.object({ method: z.literal("remove"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+    z.object({ method: z.literal("retain"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+    z.object({ method: z.literal("release"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
   ]),
   z.object({
-    method: z.enum(["select", "import", "get", "prepare", "cancel", "remove"]),
+    method: z.enum(["select", "import", "import.begin", "import.chunk", "import.finish", "get", "prepare", "cancel", "remove", "retain", "release"]),
     requestId: RequestIdSchema,
     ok: z.literal(false),
     error: UClawErrorSchema,
   }).strict(),
 ]);
 export type AttachmentIpcResponse = z.infer<typeof AttachmentIpcResponseSchema>;
+
+export const ChatQueueIpcRequestSchema = z.discriminatedUnion("method", [
+  z.object({ method: z.literal("chat-queue.list"), requestId: RequestIdSchema, params: ChatQueueListRequestSchema }).strict(),
+  z.object({ method: z.literal("chat-queue.add"), requestId: RequestIdSchema, params: ChatQueueAddRequestSchema }).strict(),
+  z.object({ method: z.literal("chat-queue.update"), requestId: RequestIdSchema, params: ChatQueueUpdateRequestSchema }).strict(),
+  z.object({ method: z.literal("chat-queue.remove"), requestId: RequestIdSchema, params: ChatQueueRemoveRequestSchema }).strict(),
+  z.object({ method: z.literal("chat-queue.send"), requestId: RequestIdSchema, params: ChatQueueSendRequestSchema }).strict(),
+]);
+export type ChatQueueIpcRequest = z.infer<typeof ChatQueueIpcRequestSchema>;
+
+const ChatQueueIpcMethodSchema = z.enum([
+  "chat-queue.list",
+  "chat-queue.add",
+  "chat-queue.update",
+  "chat-queue.remove",
+  "chat-queue.send",
+]);
+
+export const ChatQueueIpcResponseSchema = z.union([
+  z.discriminatedUnion("method", [
+    z.object({ method: z.literal("chat-queue.list"), requestId: RequestIdSchema, ok: z.literal(true), result: ChatQueueDocumentSchema }).strict(),
+    z.object({ method: z.literal("chat-queue.add"), requestId: RequestIdSchema, ok: z.literal(true), result: ChatQueueItemSchema }).strict(),
+    z.object({ method: z.literal("chat-queue.update"), requestId: RequestIdSchema, ok: z.literal(true), result: ChatQueueItemSchema }).strict(),
+    z.object({ method: z.literal("chat-queue.remove"), requestId: RequestIdSchema, ok: z.literal(true), result: z.null() }).strict(),
+    z.object({ method: z.literal("chat-queue.send"), requestId: RequestIdSchema, ok: z.literal(true), result: ChatQueueItemSchema }).strict(),
+  ]),
+  z.object({
+    method: ChatQueueIpcMethodSchema,
+    requestId: RequestIdSchema,
+    ok: z.literal(false),
+    error: UClawErrorSchema,
+  }).strict(),
+]);
+export type ChatQueueIpcResponse = z.infer<typeof ChatQueueIpcResponseSchema>;
 
 export const WindowIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("minimize"), requestId: RequestIdSchema, params: EmptyParamsSchema }).strict(),
@@ -236,7 +295,7 @@ export const ClientIpcEventSchema = z.discriminatedUnion("event", [
 ]);
 export type ClientIpcEvent = z.infer<typeof ClientIpcEventSchema>;
 
-export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, SessionAdvancedIpcRequestSchema, UsageIpcRequestSchema, DataIpcRequestSchema, DiagnosticsIpcRequestSchema, ReleaseIpcRequestSchema]);
+export const IpcRequestSchema = z.union([WindowIpcRequestSchema, ClientIpcRequestSchema, AttachmentIpcRequestSchema, ChatQueueIpcRequestSchema, ProviderIpcRequestSchema, SkillIpcRequestSchema, PluginIpcRequestSchema, ChannelIpcRequestSchema, McpIpcRequestSchema, SessionAdvancedIpcRequestSchema, UsageIpcRequestSchema, DataIpcRequestSchema, DiagnosticsIpcRequestSchema, ReleaseIpcRequestSchema]);
 export type IpcRequest = z.infer<typeof IpcRequestSchema>;
 export const IpcResponseSchema = z.union([
   WindowIpcSuccessResponseSchema,
@@ -244,6 +303,7 @@ export const IpcResponseSchema = z.union([
   ClientIpcSuccessResponseSchema,
   ClientIpcFailureResponseSchema,
   AttachmentIpcResponseSchema,
+  ChatQueueIpcResponseSchema,
   ProviderIpcResponseSchema,
   SkillIpcResponseSchema,
   PluginIpcResponseSchema,

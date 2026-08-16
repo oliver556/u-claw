@@ -1,7 +1,12 @@
+import { constants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
+
 import {
   AttachmentImportInputSchema,
   AttachmentSchema,
   MAX_ATTACHMENT_BYTES,
+  MAX_VIDEO_ATTACHMENT_BYTES,
   UClawErrorSchema,
   type Attachment,
   type AttachmentImportInput,
@@ -18,8 +23,22 @@ export interface OpenClawAttachment {
   content: string;
 }
 
-interface ResolvedOpenClawAttachment extends OpenClawAttachment {
+export interface ResolvedOpenClawAttachment extends OpenClawAttachment {
   byteLength: number;
+}
+
+export interface OpenClawAttachmentResolver extends AttachmentService {
+  resolveForSend(id: string, maxEncodedBytes?: number): ResolvedOpenClawAttachment | Promise<ResolvedOpenClawAttachment>;
+  markUploading?(id: string, progress: number): void;
+  markAttached?(id: string): void;
+  markFailed?(id: string, error: UClawErrorSummary): void;
+}
+
+export interface ControlledAttachmentResolverOptions {
+  dataRoot: string;
+  source: AttachmentService;
+  beforeRead?: (id: string) => void | Promise<void>;
+  afterInspect?: (id: string) => void | Promise<void>;
 }
 
 interface StoredAttachment {
@@ -44,6 +63,8 @@ export class AttachmentServiceError extends AdapterServiceError {
 
 const IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const FILE_MEDIA_TYPES = new Set(["text/plain", "application/pdf"]);
+const VIDEO_MEDIA_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const READ_CHUNK_BYTES = 3 * 1024 * 1024;
 
 function decodedBase64Length(content: string): number {
   if (content === "" || !/^[A-Za-z0-9+/]*={0,2}$/.test(content) || content.length % 4 !== 0) {
@@ -65,6 +86,13 @@ function matchesMediaType(bytes: Buffer, mediaType: string): boolean {
   if (mediaType === "image/gif") return bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a";
   if (mediaType === "image/webp") return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
   if (mediaType === "application/pdf") return bytes.subarray(0, 5).toString("ascii") === "%PDF-";
+  if (mediaType === "video/webm") return bytes.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+  if (mediaType === "video/mp4" || mediaType === "video/quicktime") {
+    if (bytes.subarray(4, 8).toString("ascii") !== "ftyp") return false;
+    return mediaType === "video/quicktime"
+      ? bytes.subarray(8, 12).toString("ascii") === "qt  "
+      : bytes.subarray(8, 12).toString("ascii") !== "qt  ";
+  }
   if (mediaType === "text/plain") {
     if (bytes.includes(0)) return false;
     try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); return true; } catch { return false; }
@@ -72,7 +100,122 @@ function matchesMediaType(bytes: Buffer, mediaType: string): boolean {
   return false;
 }
 
-export class AttachmentManager implements AttachmentService {
+function controlledContentPath(dataRoot: string, relativePath: string | undefined): string {
+  if (relativePath === undefined || relativePath.includes("\0") || isAbsolute(relativePath)) {
+    throw new AttachmentServiceError("INVALID_ARGUMENT", "附件缓存引用无效。");
+  }
+  const root = resolve(dataRoot, "uclaw", "attachments", "objects");
+  const content = resolve(dataRoot, relativePath);
+  const pathFromRoot = relative(root, content);
+  if (pathFromRoot === "" || pathFromRoot === ".." || pathFromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(pathFromRoot)) {
+    throw new AttachmentServiceError("INVALID_ARGUMENT", "附件缓存引用越出受控目录。");
+  }
+  return content;
+}
+
+export function createControlledAttachmentResolver(options: ControlledAttachmentResolverOptions): OpenClawAttachmentResolver {
+  const sendStates = new Map<string, Pick<Attachment, "state" | "progress" | "error">>();
+  const withSendState = (attachment: Attachment): Attachment => ({ ...attachment, ...sendStates.get(attachment.id) });
+  return {
+    ...options.source,
+    import: (input) => options.source.import(input),
+    get: async (id) => withSendState(await options.source.get(id)),
+    async *prepare(id, signal) {
+      for await (const attachment of options.source.prepare(id, signal)) yield withSendState(attachment);
+    },
+    cancel: (id) => options.source.cancel(id),
+    async remove(id) {
+      await options.source.remove(id);
+      sendStates.delete(id);
+    },
+    retain: options.source.retain?.bind(options.source),
+    release: options.source.release?.bind(options.source),
+    referencedAttachmentIds: options.source.referencedAttachmentIds?.bind(options.source),
+    markUploading(id, progress) {
+      sendStates.set(id, { state: "uploading", progress });
+    },
+    markAttached(id) {
+      sendStates.set(id, { state: "attached", progress: 1 });
+    },
+    markFailed(id, failure) {
+      sendStates.set(id, {
+        state: "failed",
+        error: { code: failure.code, message: "附件发送失败。", retryable: failure.retryable },
+      });
+    },
+    async resolveForSend(id, maxEncodedBytes) {
+      const attachment = await options.source.get(id);
+      if (attachment.state !== "ready" && attachment.state !== "attached") {
+        throw new AttachmentServiceError("INVALID_ARGUMENT", "附件尚未准备完成。");
+      }
+      const { mediaType, name, size, relativePath } = attachment.file;
+      if (![...IMAGE_MEDIA_TYPES, ...VIDEO_MEDIA_TYPES, ...FILE_MEDIA_TYPES].includes(mediaType)) {
+        throw new AttachmentServiceError("FILE_TYPE_UNSUPPORTED", `附件 MIME 不受支持：${mediaType}。`);
+      }
+      const maxBytes = VIDEO_MEDIA_TYPES.has(mediaType) ? MAX_VIDEO_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES;
+      if (size > maxBytes) throw new AttachmentServiceError("FILE_TOO_LARGE", `附件超过大小限制（${size} > ${maxBytes} bytes）。`);
+      const estimatedEncodedBytes = Math.ceil(size / 3) * 4;
+      if (maxEncodedBytes !== undefined && estimatedEncodedBytes > maxEncodedBytes) {
+        throw new AttachmentServiceError("FILE_TOO_LARGE", `附件发送载荷超过 Gateway 限制（预计 ${estimatedEncodedBytes} > ${maxEncodedBytes} bytes）。`);
+      }
+      const contentPath = controlledContentPath(options.dataRoot, relativePath);
+      await options.beforeRead?.(id);
+      let before;
+      try {
+        before = await lstat(contentPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new AttachmentServiceError("NOT_FOUND", "附件缓存不存在。");
+        throw error;
+      }
+      if (!before.isFile() || before.isSymbolicLink() || before.size !== size) {
+        throw new AttachmentServiceError("INVALID_ARGUMENT", "附件缓存已被替换或大小不匹配。");
+      }
+      await options.afterInspect?.(id);
+      const root = await realpath(resolve(options.dataRoot, "uclaw", "attachments", "objects"));
+      const actual = await realpath(contentPath);
+      const actualRelative = relative(root, actual);
+      if (actualRelative === "" || actualRelative === ".." || actualRelative.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(actualRelative)) {
+        throw new AttachmentServiceError("INVALID_ARGUMENT", "附件缓存越出受控目录。");
+      }
+      const handle = await open(contentPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const opened = await handle.stat();
+        if (!opened.isFile() || opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== size || opened.mtimeMs !== before.mtimeMs || opened.ctimeMs !== before.ctimeMs) {
+          throw new AttachmentServiceError("INVALID_ARGUMENT", "附件缓存已被替换。");
+        }
+        const header = Buffer.alloc(Math.min(64, size));
+        if (header.length > 0) await handle.read(header, 0, header.length, 0);
+        if (!matchesMediaType(header, mediaType)) {
+          throw new AttachmentServiceError("FILE_TYPE_UNSUPPORTED", `附件 MIME 与内容不符：${mediaType}。`);
+        }
+        const chunks: string[] = [];
+        const buffer = Buffer.alloc(Math.min(READ_CHUNK_BYTES, Math.max(1, size)));
+        let offset = 0;
+        while (offset < size) {
+          const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, size - offset), offset);
+          if (bytesRead === 0) throw new AttachmentServiceError("INVALID_ARGUMENT", "附件缓存读取不完整。");
+          chunks.push(buffer.subarray(0, bytesRead).toString("base64"));
+          offset += bytesRead;
+        }
+        const after = await handle.stat();
+        if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs) {
+          throw new AttachmentServiceError("INVALID_ARGUMENT", "附件缓存发送前发生变化。");
+        }
+        return {
+          type: IMAGE_MEDIA_TYPES.has(mediaType) ? "image" : "file",
+          fileName: name,
+          mimeType: mediaType,
+          content: chunks.join(""),
+          byteLength: size,
+        };
+      } finally {
+        await handle.close();
+      }
+    },
+  };
+}
+
+export class AttachmentManager implements OpenClawAttachmentResolver {
   private readonly items = new Map<string, StoredAttachment>();
   private readonly maxBytes: number;
   private readonly createId: () => string;

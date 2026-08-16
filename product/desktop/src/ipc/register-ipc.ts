@@ -1,6 +1,8 @@
 import {
   AttachmentIpcRequestSchema,
   AttachmentIpcResponseSchema,
+  ChatQueueIpcRequestSchema,
+  ChatQueueIpcResponseSchema,
   ClientIpcRequestSchema,
   ClientIpcResponseSchema,
   IpcResponseSchema,
@@ -44,6 +46,8 @@ import {
 
 import { createClientDispatcher, toRendererSafeError, toRendererSafeResponse } from "./client-dispatcher.js";
 import type { SessionOrganizerStore } from "../session-organizer/store.js";
+import type { ChatQueueStore } from "../chat-queue/store.js";
+import type { ChatQueueDispatcher } from "../chat-queue/dispatcher.js";
 import { createProviderDispatcher } from "../providers/provider-dispatcher.js";
 import type { ProviderStore } from "../providers/provider-store.js";
 import { createSkillDispatcher } from "../skills/skill-dispatcher.js";
@@ -59,7 +63,7 @@ import { createMcpDispatcher, type McpRuntime } from "../mcp/mcp-dispatcher.js";
 import type { McpStore } from "../mcp/mcp-store.js";
 import type { OpenClawCapabilityRuntime } from "../capabilities/openclaw-capability-runtime.js";
 import { createSessionAdvancedDispatcher } from "../sessions/session-advanced-dispatcher.js";
-import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, IMAGE_OPERATION_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, RELEASE_IPC_CHANNEL, SESSION_ADVANCED_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
+import { ATTACHMENT_IPC_CHANNEL, CHANNEL_IPC_CHANNEL, CHAT_QUEUE_IPC_CHANNEL, CLIENT_IPC_CHANNEL, CLIENT_IPC_EVENT_CHANNEL, DATA_IPC_CHANNEL, DIAGNOSTICS_IPC_CHANNEL, IMAGE_OPERATION_IPC_CHANNEL, MCP_IPC_CHANNEL, PLUGIN_IPC_CHANNEL, PROVIDER_IPC_CHANNEL, RELEASE_IPC_CHANNEL, SESSION_ADVANCED_IPC_CHANNEL, SKILL_IPC_CHANNEL, WINDOW_IPC_CHANNEL } from "./channels.js";
 
 export interface IpcMainLike {
   handle(channel: string, handler: (event: unknown, payload: unknown) => Promise<unknown>): void;
@@ -87,7 +91,10 @@ export interface RegisterIpcDependencies {
   client?: UClawClient;
   organizer?: SessionOrganizerStore;
   attachments?: AttachmentService;
+  chatQueue?: ChatQueueStore;
+  chatQueueDispatcher?: ChatQueueDispatcher;
   selectAttachments?(): Promise<AttachmentImportInput[]>;
+  importSelectedAttachments?(): Promise<Awaited<ReturnType<AttachmentService["get"]>>[]>;
   providers?: ProviderStore;
   providerNetwork?: ProviderNetworkService;
   providerConfig?: OpenClawProviderConfigBackend;
@@ -139,7 +146,10 @@ export function registerIpc({
   client,
   organizer,
   attachments,
+  chatQueue,
+  chatQueueDispatcher,
   selectAttachments,
+  importSelectedAttachments,
   providers,
   providerNetwork,
   providerConfig,
@@ -170,7 +180,7 @@ export function registerIpc({
     "session-organizer.set-pinned", "session-organizer.create-group", "session-organizer.rename-group",
     "session-organizer.assign-group", "chat.send", "models.select-for-session",
   ]);
-  const attachmentWriteMethods = new Set(["select", "import", "prepare", "remove"]);
+  const attachmentWriteMethods = new Set(["select", "import", "import.begin", "import.chunk", "import.finish", "prepare", "cancel", "remove", "retain", "release"]);
   const channelWriteMethods = new Set([
     "channels.create", "channels.update", "channels.remove", "channels.set-enabled", "channels.test",
     "channels.reconnect", "channels.wechat-login-start", "channels.wechat-login-refresh",
@@ -287,11 +297,26 @@ export function registerIpc({
       const invoke = async () => {
         let result: unknown = null;
         if (request.method === "select") {
-          if (selectAttachments === undefined) throw safeError("UNAVAILABLE", "Attachment selection is unavailable.");
-          const selected = await selectAttachments();
-          result = await Promise.all(selected.map((input) => attachments.import(input)));
+          if (importSelectedAttachments !== undefined) result = await importSelectedAttachments();
+          else {
+            if (selectAttachments === undefined) throw safeError("UNAVAILABLE", "Attachment selection is unavailable.");
+            const selected = await selectAttachments();
+            result = await Promise.all(selected.map((input) => attachments.import(input)));
+          }
         }
         if (request.method === "import") result = await attachments.import(request.params);
+        if (request.method === "import.begin") {
+          if (!attachments.beginImport) throw safeError("UNAVAILABLE", "Streaming attachment import is unavailable.");
+          result = await attachments.beginImport(request.params);
+        }
+        if (request.method === "import.chunk") {
+          if (!attachments.importChunk) throw safeError("UNAVAILABLE", "Streaming attachment import is unavailable.");
+          result = await attachments.importChunk(request.params);
+        }
+        if (request.method === "import.finish") {
+          if (!attachments.finishImport) throw safeError("UNAVAILABLE", "Streaming attachment import is unavailable.");
+          result = await attachments.finishImport(request.params);
+        }
         if (request.method === "get") result = await attachments.get(request.params.attachmentId);
         if (request.method === "prepare") {
           const states = [];
@@ -300,6 +325,14 @@ export function registerIpc({
         }
         if (request.method === "cancel") await attachments.cancel(request.params.attachmentId);
         if (request.method === "remove") await attachments.remove(request.params.attachmentId);
+        if (request.method === "retain") {
+          if (!attachments.retain) throw safeError("UNAVAILABLE", "Attachment references are unavailable.");
+          await attachments.retain(request.params.attachmentId);
+        }
+        if (request.method === "release") {
+          if (!attachments.release) throw safeError("UNAVAILABLE", "Attachment references are unavailable.");
+          await attachments.release(request.params.attachmentId);
+        }
         return result;
       };
       const result = await (attachmentWriteMethods.has(request.method) ? coordinateWrite(invoke) : invoke());
@@ -308,6 +341,28 @@ export function registerIpc({
       return AttachmentIpcResponseSchema.parse({
         method: request.method, requestId: request.requestId, ok: false,
         error: toRendererSafeError(error),
+      });
+    }
+  });
+
+  if (chatQueue !== undefined && chatQueueDispatcher !== undefined) ipcMain.handle(CHAT_QUEUE_IPC_CHANNEL, async (event, payload) => {
+    authorize(event);
+    const parsed = ChatQueueIpcRequestSchema.safeParse(payload);
+    if (!parsed.success) throw safeError("INVALID_ARGUMENT", "Invalid chat queue IPC request.");
+    const request = parsed.data;
+    try {
+      let result: unknown;
+      if (request.method === "chat-queue.list") result = await chatQueue.list(request.params.sessionId);
+      else if (request.method === "chat-queue.add") result = await chatQueue.add(request.params);
+      else if (request.method === "chat-queue.update") result = await chatQueue.update(request.params);
+      else if (request.method === "chat-queue.remove") {
+        await chatQueue.remove(request.params.sessionId, request.params.itemId);
+        result = null;
+      } else result = await chatQueueDispatcher.send(request.params.sessionId, request.params.itemId);
+      return ChatQueueIpcResponseSchema.parse({ method: request.method, requestId: request.requestId, ok: true, result });
+    } catch (error) {
+      return ChatQueueIpcResponseSchema.parse({
+        method: request.method, requestId: request.requestId, ok: false, error: toRendererSafeError(error),
       });
     }
   });
@@ -516,6 +571,7 @@ export function registerIpc({
     ipcMain.removeHandler(WINDOW_IPC_CHANNEL);
     ipcMain.removeHandler(CLIENT_IPC_CHANNEL);
     if (attachments !== undefined) ipcMain.removeHandler(ATTACHMENT_IPC_CHANNEL);
+    if (chatQueue !== undefined && chatQueueDispatcher !== undefined) ipcMain.removeHandler(CHAT_QUEUE_IPC_CHANNEL);
     if (providers !== undefined) ipcMain.removeHandler(PROVIDER_IPC_CHANNEL);
     if (skills !== undefined) ipcMain.removeHandler(SKILL_IPC_CHANNEL);
     if (plugins !== undefined) ipcMain.removeHandler(PLUGIN_IPC_CHANNEL);

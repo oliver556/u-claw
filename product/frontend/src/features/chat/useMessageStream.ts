@@ -72,7 +72,7 @@ export function messageEventReducer(state: StreamState, event: StreamAction): St
 export function useMessageStream(onEvent?: (event: MessageEvent) => void) {
   const [state, dispatch] = useReducer(messageEventReducer, initialStreamState);
 
-  const consume = useCallback(async (source: AsyncIterable<MessageEvent>) => {
+  const consume = useCallback(async (source: AsyncIterable<MessageEvent>, consumeEvent?: (event: MessageEvent) => void) => {
     const iterator = source[Symbol.asyncIterator]();
     let runId: string | undefined;
     try {
@@ -94,6 +94,7 @@ export function useMessageStream(onEvent?: (event: MessageEvent) => void) {
             };
             dispatch(event);
             onEvent?.(event);
+            consumeEvent?.(event);
           }
           throw failure;
         }
@@ -101,6 +102,7 @@ export function useMessageStream(onEvent?: (event: MessageEvent) => void) {
         runId = event.runId;
         dispatch(event);
         onEvent?.(event);
+        consumeEvent?.(event);
         if (event.type === "final" || event.type === "aborted" || event.type === "error") return event;
       }
     } finally {
