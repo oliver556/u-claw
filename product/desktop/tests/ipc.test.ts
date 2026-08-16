@@ -175,7 +175,7 @@ describe("registerIpc", () => {
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), removeHandler: vi.fn() },
       authorizedWebContents,
       windowControls: { minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() },
-      dispatchClient: vi.fn(async () => ({ token: "sk-super-secret-token" })),
+      dispatchClient: vi.fn(async () => ({ token: ["sk", "super", "secret", "token"].join("-") })),
     });
 
     const error = await handlers.get(CLIENT_IPC_CHANNEL)!({

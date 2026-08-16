@@ -1,0 +1,12 @@
+.git
+.gitignore
+Dockerfile
+**/*_test.go
+**/testdata
+api
+*.env
+*.key
+*.pem
+*credential*
+*secret*
+README*

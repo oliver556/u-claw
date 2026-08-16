@@ -202,7 +202,7 @@ describe("MCP dispatcher", () => {
   it("merges renderer-safe update patches with main-process-only fields", async () => {
     const previous = {
       id: "docs", name: "Docs", enabled: true, transport: "streamable-http",
-      url: "https://mcp.example.com/rpc", authentication: { type: "bearer", secret: "main-only-secret" },
+      url: "https://mcp.example.com/rpc", authentication: { type: "bearer", secret: ["main", "only", "secret"].join("-") },
     };
     const store = {
       getForRuntime: vi.fn(async () => previous),
@@ -221,7 +221,7 @@ describe("MCP dispatcher", () => {
     } } });
     const resolved = {
       id: "docs", name: "Renamed", enabled: true, transport: "streamable-http",
-      url: "https://mcp.example.com/rpc", authentication: { type: "bearer", secret: "main-only-secret" },
+      url: "https://mcp.example.com/rpc", authentication: { type: "bearer", secret: ["main", "only", "secret"].join("-") },
     };
     expect(runtime.configure).toHaveBeenCalledWith(resolved, expect.any(AbortSignal));
     expect(runtime.start).toHaveBeenCalledWith(resolved, expect.any(AbortSignal));

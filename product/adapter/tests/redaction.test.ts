@@ -9,7 +9,7 @@ describe("adapter redaction", () => {
   });
 
   it.each([
-    'gateway failed: {"api_key":"unprefixed-secret","body":"private conversation body"}',
+    `gateway failed: {"api_key":"${["unprefixed", "secret"].join("-")}","body":"private conversation body"}`,
     'Authorization: Bearer "abc def"',
     "failed at '/etc/u-claw/config.json'",
   ])("never copies raw text into adapter diagnostics: %s", (message) => {

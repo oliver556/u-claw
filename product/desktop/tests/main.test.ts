@@ -1,14 +1,195 @@
 import { EventEmitter } from "node:events";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { bootstrapDesktopApp, createProductionDataService, disposeDesktopIpc, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runDesktopMain, validateRendererUrl } from "../src/main.js";
+import { ACTIVATION_ONLY_CAPABILITIES, assertActivationOnlyCapabilities, bootstrapDesktopApp, createProductionDataService, disposeDesktopIpc, registerActivationOnlyIpc, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runActivationMain, runDesktopMain, startActivationMainWithRuntime, validateRendererUrl, verifyActivationResponse } from "../src/main.js";
 import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
+  it("passes explicit startup modes to normal and activation windows", async () => {
+    const source = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+    expect(source).toMatch(/createMainWindow\(\{[\s\S]*?startupMode: "normal"/);
+    expect(source).toMatch(/startActivationMain\([\s\S]*?createMainWindow\(\{[\s\S]*?startupMode: "activation-only"/);
+  });
+
+  it("fully verifies activation response binding, secret proof, validity, fingerprint, and signature", () => {
+    const keys = generateKeyPairSync("ed25519");
+    const fingerprint = "a".repeat(64); const secret = "x".repeat(32); const salt = Buffer.from("b".repeat(32), "hex");
+    const secretHash = createHash("sha256").update(Buffer.from("uclaw-startup-secret-v1\0")).update(salt).update(Buffer.from([0])).update(secret).digest("hex");
+    const license = { schemaVersion: 1 as const, usernameId: "username-001", deviceId: "device-001", licenseId: "license-001", usbFingerprint: { scheme: "uclaw-usb-v1" as const, sha256: fingerprint }, startupSecretProof: { algorithm: "sha256-salt-v1" as const, startupSecretSalt: salt.toString("hex"), startupSecretHash: secretHash }, notBefore: "2026-08-13T00:00:00Z", expiresAt: "2027-08-13T00:00:00Z", revision: 1, signature: { algorithm: "ed25519" as const, keyId: "activation-key", value: "" } };
+    const payload = ["uclaw-startup-license-v1", 1, license.signature.keyId, license.usernameId, license.deviceId, license.licenseId, license.usbFingerprint.scheme, fingerprint, license.startupSecretProof.startupSecretSalt, secretHash, license.notBefore, license.expiresAt, license.revision];
+    license.signature.value = sign(null, Buffer.from(JSON.stringify(payload)), keys.privateKey).toString("base64");
+    const response = { activationId: "activation-001", deviceId: license.deviceId, licenseId: license.licenseId, license, startupCredential: { schemaVersion: 1 as const, deviceId: license.deviceId, licenseId: license.licenseId, startupSecret: secret }, builtinCredential: { schemaVersion: 1 as const, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: "https://license.example.test/model-api/", model: "gpt-5.6-sol", deviceToken: `uclaw_dt_${"A".repeat(43)}` }, status: "active" as const };
+    const publicKey = keys.publicKey.export({ format: "pem", type: "spki" }).toString();
+    expect(verifyActivationResponse(response, fingerprint, { "activation-key": publicKey }, new Date("2026-08-13T12:00:00Z"))).toBe(true);
+    expect(verifyActivationResponse({ ...response, startupCredential: { ...response.startupCredential, startupSecret: "y".repeat(32) } }, fingerprint, { "activation-key": publicKey }, new Date("2026-08-13T12:00:00Z"))).toBe(false);
+    expect(verifyActivationResponse(response, "f".repeat(64), { "activation-key": publicKey }, new Date("2026-08-13T12:00:00Z"))).toBe(false);
+    expect(verifyActivationResponse(response, fingerprint, { "activation-key": publicKey }, new Date("2028-01-01T00:00:00Z"))).toBe(false);
+  });
+  it("production activation wiring registers only coordinator channels", async () => {
+    const handlers: string[] = [];
+    const coordinator = { preflight: vi.fn(), submit: vi.fn(), cancel: vi.fn(), close: vi.fn(), status: vi.fn() };
+    const window = { webContents: { mainFrame: {} }, close: vi.fn(), isDestroyed: () => false, isMinimized: () => false, restore: vi.fn(), focus: vi.fn() };
+    await startActivationMainWithRuntime({} as never, {
+      app: { requestSingleInstanceLock: () => true, quit: vi.fn(), whenReady: vi.fn(), on: vi.fn() },
+      createWindow: async (beforeLoad) => { beforeLoad(window as never); return window as never; },
+      ipcMain: { handle: (channel: string) => handlers.push(channel), removeHandler: vi.fn() } as never,
+      coordinator: coordinator as never,
+    });
+    expect(handlers.sort()).toEqual(["activation.cancel", "activation.commit", "activation.preflight", "activation.submit", "window.close"]);
+    expect(handlers).not.toContain("uclaw:client");
+  });
+  it("allows exactly the activation-only IPC capability set", () => {
+    expect(() => assertActivationOnlyCapabilities(ACTIVATION_ONLY_CAPABILITIES)).not.toThrow();
+    expect(() => assertActivationOnlyCapabilities([...ACTIVATION_ONLY_CAPABILITIES, "client.invoke"])).toThrow("capabilities");
+    expect(() => assertActivationOnlyCapabilities(ACTIVATION_ONLY_CAPABILITIES.slice(1))).toThrow("capabilities");
+  });
+
+  it("starts activation-only without a Gateway lifecycle", async () => {
+    const window = {
+      close: vi.fn(),
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      restore: vi.fn(),
+      focus: vi.fn(),
+    };
+    const registerIpc = vi.fn(() => ({ capabilities: ACTIVATION_ONLY_CAPABILITIES, dispose: vi.fn() }));
+    const createWindow = vi.fn(async (beforeLoad: (createdWindow: typeof window) => void) => {
+      beforeLoad(window);
+      return window;
+    });
+
+    await expect(runActivationMain({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow,
+      registerIpc,
+    })).resolves.toBe(window);
+
+    expect(createWindow).toHaveBeenCalledOnce();
+    expect(registerIpc).toHaveBeenCalledWith(window);
+  });
+
+  it("closes the activation window when IPC registration fails before load", async () => {
+    const close = vi.fn();
+    const window = {
+      close,
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      restore: vi.fn(),
+      focus: vi.fn(),
+    };
+
+    await expect(runActivationMain({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow: async (beforeLoad) => {
+        beforeLoad(window);
+        return window;
+      },
+      registerIpc: () => { throw new Error("IPC registration failed"); },
+    })).rejects.toThrow("IPC registration failed");
+
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects activation IPC unless sender and main frame both match", async () => {
+    const handlers = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const authorized = { mainFrame: {} };
+    const registration = registerActivationOnlyIpc({
+      ipcMain: {
+        handle: (channel, handler) => handlers.set(channel, handler),
+        removeHandler: (channel) => handlers.delete(channel),
+      },
+      authorizedWebContents: authorized,
+      closeWindow: vi.fn(),
+    });
+    const close = handlers.get("window.close")!;
+
+    await expect(close({ sender: {}, senderFrame: authorized.mainFrame }, undefined)).rejects.toThrow("Unauthorized");
+    await expect(close({ sender: authorized, senderFrame: {} }, undefined)).rejects.toThrow("Unauthorized");
+    await expect(close({ sender: authorized, senderFrame: authorized.mainFrame }, undefined)).resolves.toBeNull();
+    registration.dispose();
+  });
+
+  it("rolls back activation handlers when registration fails partway", () => {
+    const registered = new Set<string>();
+    const removeHandler = vi.fn((channel: string) => registered.delete(channel));
+
+    expect(() => registerActivationOnlyIpc({
+      ipcMain: {
+        handle: (channel) => {
+          if (channel === "activation.commit") throw new Error("duplicate handler");
+          registered.add(channel);
+        },
+        removeHandler,
+      },
+      authorizedWebContents: { mainFrame: {} },
+      closeWindow: vi.fn(),
+    })).toThrow("duplicate handler");
+
+    expect(registered).toEqual(new Set());
+    expect(removeHandler).toHaveBeenCalledWith("activation.submit");
+    expect(removeHandler).toHaveBeenCalledWith("activation.preflight");
+  });
+
+  it("continues partial rollback and preserves registration plus cleanup failures", () => {
+    const registered = new Set<string>();
+    const registrationError = new Error("duplicate handler");
+    const cleanupError = new Error("remove submit failed");
+
+    const caught = (() => {
+      try {
+        registerActivationOnlyIpc({
+          ipcMain: {
+            handle: (channel) => {
+              if (channel === "activation.commit") throw registrationError;
+              registered.add(channel);
+            },
+            removeHandler: (channel) => {
+              registered.delete(channel);
+              if (channel === "activation.submit") throw cleanupError;
+            },
+          },
+          authorizedWebContents: { mainFrame: {} },
+          closeWindow: vi.fn(),
+        });
+      } catch (error) {
+        return error;
+      }
+    })();
+
+    expect(caught).toBeInstanceOf(AggregateError);
+    expect((caught as AggregateError).errors).toEqual([registrationError, cleanupError]);
+    expect(registered).toEqual(new Set());
+  });
+
+  it("disposes activation handlers only once", () => {
+    const removeHandler = vi.fn();
+    const registration = registerActivationOnlyIpc({
+      ipcMain: { handle: vi.fn(), removeHandler },
+      authorizedWebContents: { mainFrame: {} },
+      closeWindow: vi.fn(),
+    });
+
+    registration.dispose();
+    registration.dispose();
+
+    expect(removeHandler).toHaveBeenCalledTimes(ACTIVATION_ONLY_CAPABILITIES.length);
+  });
+
   it("always removes core IPC when a domain IPC disposer fails", () => {
     const domain = vi.fn(() => { throw new Error("domain cleanup failed"); });
     const core = vi.fn();

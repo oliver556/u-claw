@@ -14,6 +14,51 @@ const fixture = JSON.parse(readFileSync(resolve(
 const withUnknown = (value: unknown): unknown => ({ ...(value as Record<string, unknown>), unknown: true });
 
 describe("builtin service operations v1 contract", () => {
+  it("validates strict OpenAI-compatible non-streaming model list and chat payloads", () => {
+    const models = {
+      object: "list",
+      data: [{ id: "uclaw-default", object: "model", created: 1_786_579_200, owned_by: "u-claw" }],
+    };
+    const request = {
+      model: "uclaw-default",
+      messages: [
+        { role: "system", content: "Answer concisely." },
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "Hi" },
+      ],
+      max_tokens: 32_768,
+      stream: false,
+    };
+    const response = {
+      id: "chatcmpl_fixture_001",
+      object: "chat.completion",
+      created: 1_786_579_200,
+      model: "uclaw-default",
+      choices: [{ index: 0, message: { role: "assistant", content: "Hello" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 8, completion_tokens: 1, total_tokens: 9 },
+    };
+
+    expect(shared.OpenAIModelsResponseSchema.parse(models)).toEqual(models);
+    expect(shared.OpenAIChatCompletionRequestSchema.parse(request)).toEqual(request);
+    expect(shared.OpenAIChatCompletionResponseSchema.parse(response)).toEqual(response);
+    expect(() => shared.OpenAIModelsResponseSchema.parse(withUnknown(models))).toThrow();
+    expect(() => shared.OpenAIChatCompletionRequestSchema.parse({ ...request, stream: true })).toThrow();
+    expect(() => shared.OpenAIChatCompletionRequestSchema.parse({ ...request, max_tokens: 32_769 })).toThrow();
+    expect(() => shared.OpenAIChatCompletionRequestSchema.parse({ ...request, stream: false, temperature: 0 })).toThrow();
+    expect(() => shared.OpenAIChatCompletionRequestSchema.parse({
+      ...request,
+      messages: [{ role: "tool", content: "forbidden" }],
+    })).toThrow();
+    expect(() => shared.OpenAIChatCompletionRequestSchema.parse({
+      ...request,
+      messages: [{ role: "user", content: [{ type: "text", text: "not plain text" }] }],
+    })).toThrow();
+    expect(() => shared.OpenAIChatCompletionResponseSchema.parse({
+      ...response,
+      choices: [{ ...response.choices[0], unknown: true }],
+    })).toThrow();
+  });
+
   it("accepts all four service states with matching reason codes", () => {
     expect(shared.BUILTIN_SERVICE_OPERATIONS_CONTRACT_VERSION).toBe(1);
     for (const status of fixture.statuses as unknown[]) {

@@ -68,12 +68,14 @@ type licenseSignature struct {
 
 type startupLicense struct {
 	SchemaVersion      int                `json:"schemaVersion"`
+	UsernameID         string             `json:"usernameId"`
 	DeviceID           string             `json:"deviceId"`
 	LicenseID          string             `json:"licenseId"`
 	USBFingerprint     usbFingerprint     `json:"usbFingerprint"`
 	StartupSecretProof startupSecretProof `json:"startupSecretProof"`
 	NotBefore          string             `json:"notBefore"`
 	ExpiresAt          string             `json:"expiresAt"`
+	Revision           int64              `json:"revision"`
 	Signature          licenseSignature   `json:"signature"`
 }
 
@@ -303,12 +305,12 @@ func rejectDuplicateJSONKeys(content []byte) error {
 func validateStartupLicense(license startupLicense) error {
 	notBefore, notBeforeErr := time.Parse(time.RFC3339, license.NotBefore)
 	expiresAt, expiresAtErr := time.Parse(time.RFC3339, license.ExpiresAt)
-	if license.SchemaVersion != 1 || !validLicenseIdentifier(license.DeviceID) || !validLicenseIdentifier(license.LicenseID) ||
+	if license.SchemaVersion != 1 || !validLicenseIdentifier(license.UsernameID) || !validLicenseIdentifier(license.DeviceID) || !validLicenseIdentifier(license.LicenseID) ||
 		license.USBFingerprint.Scheme != "uclaw-usb-v1" || !lowerSHA256Pattern.MatchString(license.USBFingerprint.SHA256) ||
 		license.StartupSecretProof.Algorithm != "sha256-salt-v1" ||
 		len(license.StartupSecretProof.StartupSecretSalt) < 32 || len(license.StartupSecretProof.StartupSecretSalt) > 128 || len(license.StartupSecretProof.StartupSecretSalt)%2 != 0 ||
 		!isLowerHex(license.StartupSecretProof.StartupSecretSalt) || !lowerSHA256Pattern.MatchString(license.StartupSecretProof.StartupSecretHash) ||
-		notBeforeErr != nil || expiresAtErr != nil || !expiresAt.After(notBefore) ||
+		notBeforeErr != nil || expiresAtErr != nil || !expiresAt.After(notBefore) || license.Revision < 1 || license.Revision > 9_007_199_254_740_991 ||
 		license.Signature.Algorithm != "ed25519" || !validLicenseIdentifier(license.Signature.KeyID) || license.Signature.Value == "" {
 		return ErrLicenseFormatInvalid
 	}
@@ -316,11 +318,21 @@ func validateStartupLicense(license startupLicense) error {
 }
 
 func licenseSigningPayload(license startupLicense) ([]byte, error) {
+	payloadLicense := license
+	payloadLicense.Signature.Value = "pending-signature"
+	if err := validateStartupLicense(payloadLicense); err != nil {
+		return nil, err
+	}
+	notBefore, _ := time.Parse(time.RFC3339, license.NotBefore)
+	expiresAt, _ := time.Parse(time.RFC3339, license.ExpiresAt)
+	if notBefore.UTC().Format(time.RFC3339) != license.NotBefore || expiresAt.UTC().Format(time.RFC3339) != license.ExpiresAt {
+		return nil, ErrLicenseFormatInvalid
+	}
 	value := []any{
-		"uclaw-startup-license-v1", license.SchemaVersion, license.DeviceID, license.LicenseID,
+		"uclaw-startup-license-v1", license.SchemaVersion, license.Signature.KeyID, license.UsernameID, license.DeviceID, license.LicenseID,
 		license.USBFingerprint.Scheme, license.USBFingerprint.SHA256,
-		license.StartupSecretProof.Algorithm, license.StartupSecretProof.StartupSecretSalt, license.StartupSecretProof.StartupSecretHash,
-		license.NotBefore, license.ExpiresAt, license.Signature.Algorithm, license.Signature.KeyID,
+		license.StartupSecretProof.StartupSecretSalt, license.StartupSecretProof.StartupSecretHash,
+		license.NotBefore, license.ExpiresAt, license.Revision,
 	}
 	return json.Marshal(value)
 }

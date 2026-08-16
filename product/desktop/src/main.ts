@@ -1,5 +1,6 @@
-import { readFile, realpath, stat } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { createHash, randomUUID, timingSafeEqual, verify } from "node:crypto";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -8,6 +9,7 @@ import {
   MAX_ATTACHMENT_TOTAL_BYTES,
   UClawErrorSchema,
   type AttachmentImportInput,
+  type ActivationResponse,
   type AttachmentService,
   type ClientIpcRequest,
   type MessageEvent,
@@ -57,6 +59,11 @@ import { createMcpProtocolProbe, createOpenClawMcpRuntime } from "./mcp/mcp-runt
 import { createReleaseDispatcher } from "./release/release-dispatcher.js";
 import type { ReleaseService } from "./release/release-service.js";
 import { createProductionReleaseService } from "./release/production-release.js";
+import { registerActivationIpc } from "./activation/register-ipc.js";
+import { createActivationCoordinator, type ActivationCoordinator } from "./activation/coordinator.js";
+import { createActivationClient } from "./activation/client.js";
+import { createActivationArtifactWriter } from "./activation/artifact-writer.js";
+import { readActivationServiceConfiguration } from "./wiring/environment.js";
 import {
   createAdvancedConsoleController,
   createMainWindow,
@@ -109,6 +116,127 @@ export interface AppWindowLike {
   isMinimized(): boolean;
   restore(): void;
   focus(): void;
+}
+
+export const ACTIVATION_ONLY_CAPABILITIES = [
+  "activation.preflight",
+  "activation.submit",
+  "activation.commit",
+  "activation.cancel",
+  "window.close",
+] as const;
+
+export type ActivationOnlyCapability = typeof ACTIVATION_ONLY_CAPABILITIES[number];
+
+export function assertActivationOnlyCapabilities(capabilities: readonly string[]): void {
+  if (
+    capabilities.length !== ACTIVATION_ONLY_CAPABILITIES.length ||
+    ACTIVATION_ONLY_CAPABILITIES.some((capability) => !capabilities.includes(capability))
+  ) {
+    throw new Error("Activation-only IPC capabilities must match the restricted allowlist.");
+  }
+}
+
+export interface ActivationIpcRegistration {
+  capabilities: readonly string[];
+  dispose(): void;
+}
+
+export interface RegisterActivationOnlyIpcDependencies {
+  ipcMain: IpcMainLike;
+  authorizedWebContents: AuthorizedWebContents;
+  closeWindow(): void;
+}
+
+export function registerActivationOnlyIpc({
+  ipcMain,
+  authorizedWebContents,
+  closeWindow,
+}: RegisterActivationOnlyIpcDependencies): ActivationIpcRegistration {
+  const registered: ActivationOnlyCapability[] = [];
+  try {
+    for (const capability of ACTIVATION_ONLY_CAPABILITIES) {
+      ipcMain.handle(capability, async (event) => {
+        const candidate = event as { sender?: unknown; senderFrame?: unknown };
+        if (
+          candidate.sender !== authorizedWebContents ||
+          candidate.senderFrame !== authorizedWebContents.mainFrame
+        ) {
+          throw new Error("Unauthorized activation IPC sender.");
+        }
+        if (capability === "window.close") {
+          closeWindow();
+          return null;
+        }
+        throw new Error("Activation service is unavailable.");
+      });
+      registered.push(capability);
+    }
+  } catch (error) {
+    const cleanupFailures: unknown[] = [];
+    for (const capability of registered.reverse()) {
+      try {
+        ipcMain.removeHandler(capability);
+      } catch (cleanupError) {
+        cleanupFailures.push(cleanupError);
+      }
+    }
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupFailures],
+        "Activation IPC registration and rollback failed.",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+
+  let active = true;
+  return {
+    capabilities: ACTIVATION_ONLY_CAPABILITIES,
+    dispose: () => {
+      if (!active) return;
+      active = false;
+      for (const capability of registered) ipcMain.removeHandler(capability);
+    },
+  };
+}
+
+export interface ActivationWindowLike extends AppWindowLike {
+  close(): void;
+}
+
+export interface ActivationMainRuntime<TWindow extends ActivationWindowLike> {
+  app: DesktopAppLike;
+  createWindow(registerIpc: (window: TWindow) => void): Promise<TWindow>;
+  registerIpc(window: TWindow): ActivationIpcRegistration;
+}
+
+export async function runActivationMain<TWindow extends ActivationWindowLike>(
+  runtime: ActivationMainRuntime<TWindow>,
+): Promise<TWindow | null> {
+  return bootstrapDesktopApp({
+    app: runtime.app,
+    createWindow: async (registerIpc) => runtime.createWindow((window) => {
+      try {
+        registerIpc(window);
+      } catch (error) {
+        window.close();
+        throw error;
+      }
+    }),
+    registerIpc: (window) => {
+      const registration = runtime.registerIpc(window);
+      try {
+        assertActivationOnlyCapabilities(registration.capabilities);
+      } catch (error) {
+        registration.dispose();
+        throw error;
+      }
+      return registration.dispose;
+    },
+    stopGateway: () => undefined,
+  });
 }
 
 const LOOPBACK_RENDERER_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
@@ -708,6 +836,7 @@ export async function startElectronMain(
       );
       return createMainWindow({
         BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
+        startupMode: "normal",
         preloadPath: resolvePreloadPath(moduleDir),
         rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
         rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
@@ -793,5 +922,118 @@ export async function startElectronMain(
         disposeDesktopIpc(domainDispose, coreDispose);
       };
     },
+  });
+}
+
+export async function startActivationMain(
+  portablePaths: PortableDesktopPaths,
+): Promise<void> {
+  const { app, BrowserWindow, ipcMain, shell } = await import("electron");
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const devTools = !app.isPackaged;
+  const coordinator = createProductionActivationCoordinator(portablePaths, process.env, {
+    exit: (code) => { process.exitCode = code; app.quit(); },
+  });
+  await startActivationMainWithRuntime(portablePaths, {
+    app, ipcMain: ipcMain as unknown as IpcMainLike, coordinator,
+    createWindow: (registerIpc) => createMainWindow({
+      BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
+      startupMode: "activation-only",
+      preloadPath: resolvePreloadPath(moduleDir),
+      rendererUrl: validateRendererUrl(process.env.UCLAW_RENDERER_URL),
+      rendererFile: join(moduleDir, "../../frontend/dist/index.html"),
+      openExternal: (url) => shell.openExternal(url),
+      devTools,
+      showWhenReady: true,
+      beforeLoad: registerIpc,
+    }),
+  });
+}
+
+export function createProductionActivationCoordinator(
+  portablePaths: PortableDesktopPaths,
+  env: NodeJS.ProcessEnv,
+  options: { exit(code: number): void },
+): ActivationCoordinator {
+  const configuration = readActivationServiceConfiguration(env);
+  const fingerprintScheme = env.UCLAW_USB_FINGERPRINT_SCHEME;
+  const fingerprint = env.UCLAW_USB_FINGERPRINT_SHA256;
+  const clientVersion = env.UCLAW_CLIENT_VERSION;
+  const packageRoot = env.UCLAW_PACKAGE_ROOT;
+  if (fingerprintScheme !== "uclaw-usb-v1" || !fingerprint || !/^[a-f0-9]{64}$/u.test(fingerprint) || !clientVersion || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(clientVersion)
+      || !packageRoot || resolve(packageRoot) !== dirname(resolve(portablePaths.dataDir))) {
+    throw new Error("Activation USB identity and client version are not configured.");
+  }
+  const client = createActivationClient({ endpoint: configuration.endpoint });
+  const writer = createActivationArtifactWriter({ packageRoot, dataDir: portablePaths.dataDir });
+  return createActivationCoordinator({
+    preflight: async () => {
+      const [packageInfo, dataInfo] = await Promise.all([lstat(packageRoot), lstat(portablePaths.dataDir)]);
+      await writer.preflight();
+      return { usbPresent: packageInfo.isDirectory() && !packageInfo.isSymbolicLink() && dataInfo.isDirectory() && !dataInfo.isSymbolicLink() };
+    }, client, writer,
+    usbFingerprint: { version: "uclaw-usb-v1", sha256: fingerprint },
+    clientVersion,
+    randomUUID,
+    verifyLicense: async (response) => verifyActivationResponse(response, fingerprint, configuration.trustedPublicKeys, new Date()),
+    commitRemote: (activationId, idempotencyKey, generation, signal) => client.commit(activationId, { idempotencyKey, artifactGeneration: generation }, signal),
+    exit: options.exit,
+  });
+}
+
+export function verifyActivationResponse(
+  response: ActivationResponse,
+  trustedFingerprint: string,
+  trustedPublicKeys: Readonly<Record<string, string>>,
+  now: Date,
+): boolean {
+  const { license, startupCredential, builtinCredential } = response;
+  if (
+    license.deviceId !== response.deviceId || startupCredential.deviceId !== response.deviceId || builtinCredential.deviceId !== response.deviceId ||
+    license.licenseId !== response.licenseId || startupCredential.licenseId !== response.licenseId || builtinCredential.licenseId !== response.licenseId ||
+    license.usbFingerprint.scheme !== "uclaw-usb-v1" || license.usbFingerprint.sha256 !== trustedFingerprint
+  ) return false;
+  const notBefore = Date.parse(license.notBefore);
+  const expiresAt = Date.parse(license.expiresAt);
+  if (!Number.isFinite(notBefore) || !Number.isFinite(expiresAt) || expiresAt <= notBefore || now.getTime() < notBefore || now.getTime() >= expiresAt) return false;
+  try {
+    const salt = Buffer.from(license.startupSecretProof.startupSecretSalt, "hex");
+    if (salt.toString("hex") !== license.startupSecretProof.startupSecretSalt) return false;
+    const actualSecretHash = createHash("sha256")
+      .update(Buffer.from("uclaw-startup-secret-v1\0", "utf8"))
+      .update(salt)
+      .update(Buffer.from([0]))
+      .update(Buffer.from(startupCredential.startupSecret, "utf8"))
+      .digest();
+    const expectedSecretHash = Buffer.from(license.startupSecretProof.startupSecretHash, "hex");
+    if (expectedSecretHash.length !== actualSecretHash.length || !timingSafeEqual(actualSecretHash, expectedSecretHash)) return false;
+    const key = trustedPublicKeys[license.signature.keyId];
+    if (!key) return false;
+    const payload = [
+      "uclaw-startup-license-v1", license.schemaVersion, license.signature.keyId, license.usernameId,
+      license.deviceId, license.licenseId,
+      license.usbFingerprint.scheme, license.usbFingerprint.sha256,
+      license.startupSecretProof.startupSecretSalt, license.startupSecretProof.startupSecretHash,
+      license.notBefore, license.expiresAt, license.revision,
+    ];
+    return verify(null, Buffer.from(JSON.stringify(payload), "utf8"), key, Buffer.from(license.signature.value, "base64"));
+  } catch {
+    return false;
+  }
+}
+
+export async function startActivationMainWithRuntime(
+  _portablePaths: PortableDesktopPaths,
+  runtime: { app: DesktopAppLike; createWindow(registerIpc: (window: DesktopWindow) => void): Promise<DesktopWindow>; ipcMain: IpcMainLike; coordinator: ActivationCoordinator },
+): Promise<void> {
+  await runActivationMain({
+    app: runtime.app,
+    createWindow: runtime.createWindow,
+    registerIpc: (window) => registerActivationIpc({
+      ipcMain: runtime.ipcMain,
+      authorizedWebContents: window.webContents,
+      coordinator: runtime.coordinator,
+      closeWindow: () => window.close(),
+    }),
   });
 }

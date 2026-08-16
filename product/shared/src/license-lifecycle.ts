@@ -7,6 +7,7 @@ export const LICENSE_LIFECYCLE_CONTRACT_VERSION = 1 as const;
 const IdentifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u);
 const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
 const TimestampSchema = z.iso.datetime({ offset: true });
+const CanonicalSigningTimestampSchema = z.iso.datetime({ offset: false, precision: 0 });
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SafeMessageSchema = RendererSafeTextSchema.pipe(z.string().min(1).max(300));
 
@@ -56,6 +57,7 @@ export const StartupCredentialArtifactSchema = z.object({
 
 export const StartupLicenseArtifactSchema = z.object({
   schemaVersion: z.literal(1),
+  usernameId: IdentifierSchema,
   deviceId: IdentifierSchema,
   licenseId: IdentifierSchema,
   usbFingerprint: z.object({
@@ -67,8 +69,9 @@ export const StartupLicenseArtifactSchema = z.object({
     startupSecretSalt: z.string().regex(/^[a-f0-9]{32,128}$/u).refine((value) => value.length % 2 === 0),
     startupSecretHash: Sha256Schema,
   }).strict(),
-  notBefore: TimestampSchema,
-  expiresAt: TimestampSchema,
+  notBefore: CanonicalSigningTimestampSchema,
+  expiresAt: CanonicalSigningTimestampSchema,
+  revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   signature: z.object({
     algorithm: z.literal("ed25519"),
     keyId: IdentifierSchema,

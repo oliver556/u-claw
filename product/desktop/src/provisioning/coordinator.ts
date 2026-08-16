@@ -95,6 +95,12 @@ function startupSecretHash(secret: string, saltHex: string): string {
     .digest("hex");
 }
 
+function sameTimestamp(left: string, right: string): boolean {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime === rightTime;
+}
+
 function resultFrom(journal: ProvisioningJournal, status: "active" | "disabled" | "revoked"): ProvisioningIdentityResult {
   return ProvisioningIdentityResultSchema.parse({
     transactionId: journal.transactionId,
@@ -325,11 +331,11 @@ export function createProvisioningCoordinator({
         compensation: { ...journal.compensation, license: "pending" },
       });
       if (issued.status.deviceId !== input.deviceId || issued.status.licenseId !== issued.license.licenseId
-          || issued.status.status !== "active" || issued.status.notBefore !== input.notBefore
-          || issued.status.expiresAt !== input.expiresAt || issued.status.replacementLicenseId !== null
+          || issued.status.status !== "active" || !sameTimestamp(issued.status.notBefore, input.notBefore)
+          || !sameTimestamp(issued.status.expiresAt, input.expiresAt) || issued.status.replacementLicenseId !== null
           || issued.startupCredential.deviceId !== input.deviceId || issued.startupCredential.licenseId !== issued.status.licenseId
           || issued.license.deviceId !== input.deviceId || issued.license.usbFingerprint.sha256 !== input.usbFingerprint
-          || issued.license.notBefore !== input.notBefore || issued.license.expiresAt !== input.expiresAt
+          || !sameTimestamp(issued.license.notBefore, input.notBefore) || !sameTimestamp(issued.license.expiresAt, input.expiresAt)
           || startupSecretHash(issued.startupCredential.startupSecret, issued.license.startupSecretProof.startupSecretSalt)
             !== issued.license.startupSecretProof.startupSecretHash) {
         throw new ProvisioningCoordinatorError("BINDING_MISMATCH", "license-issued", false);
@@ -560,8 +566,8 @@ export function createProvisioningCoordinator({
       if (authoritativeLicense.status.licenseId !== issued.status.licenseId
           || authoritativeLicense.status.deviceId !== input.deviceId
           || authoritativeLicense.status.status !== "active"
-          || authoritativeLicense.status.notBefore !== input.notBefore
-          || authoritativeLicense.status.expiresAt !== input.expiresAt
+          || !sameTimestamp(authoritativeLicense.status.notBefore, input.notBefore)
+          || !sameTimestamp(authoritativeLicense.status.expiresAt, input.expiresAt)
           || !mappingMatches(authoritativeMapping) || authoritativeMapping.status !== "active"
           || authoritativeUser.id !== user.id || authoritativeUser.deviceId !== input.deviceId
           || authoritativeUser.username !== input.username || authoritativeUser.status !== "active"

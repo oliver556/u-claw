@@ -1,0 +1,516 @@
+name: uclaw-activation-production
+
+x-activation-app: &activation-app
+  image: ${ACTIVATION_IMAGE:?set ACTIVATION_IMAGE to an immutable image digest}
+  restart: unless-stopped
+  environment:
+    LISTEN_ADDRESS: :8080
+    DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+    ACTIVATION_PEPPER_FILE: /run/secrets/activation_pepper
+    LICENSE_SIGNING_KEY_FILE: /run/secrets/license_signing_key
+    STATUS_SIGNING_KEY_FILE: /run/secrets/status_signing_key
+    LICENSE_KEY_ID: ${LICENSE_KEY_ID:?set LICENSE_KEY_ID}
+    STATUS_KEY_ID: ${STATUS_KEY_ID:?set STATUS_KEY_ID}
+    KMS_PROVIDER: local-kek-v1
+    KMS_KEY_VERSION: ${KMS_KEY_VERSION:?set KMS_KEY_VERSION}
+    NEW_API_KMS_KEY_VERSION: ${NEW_API_KMS_KEY_VERSION:?set NEW_API_KMS_KEY_VERSION}
+    MODEL_PROXY_REQUEST_BODY_BYTES: ${MODEL_PROXY_REQUEST_BODY_BYTES:-1048576}
+    MODEL_PROXY_RESPONSE_BODY_BYTES: ${MODEL_PROXY_RESPONSE_BODY_BYTES:-4194304}
+    MODEL_PROXY_TIMEOUT: ${MODEL_PROXY_TIMEOUT:-60s}
+    MODEL_PROXY_ADMISSION_LEASE: ${MODEL_PROXY_ADMISSION_LEASE:-65s}
+    KMS_KEK_FILE: /run/secrets/kms_kek
+    PUBLIC_MODEL_ENDPOINT: https://license.yiyong.me/model-api/
+    ADMIN_OPERATORS_FILE: /run/secrets/admin_operators
+    ADMIN_SECRET_FINGERPRINT_KEY_FILE: /run/secrets/admin_secret_fingerprint_key
+    NEW_API_ALLOWED_HOSTS: ${NEW_API_ALLOWED_HOSTS:?set NEW_API_ALLOWED_HOSTS}
+  secrets:
+    - { source: activation_pepper, target: /run/secrets/activation_pepper, uid: "0", gid: "0", mode: 0400 }
+    - { source: license_signing_key, target: /run/secrets/license_signing_key, uid: "0", gid: "0", mode: 0400 }
+    - { source: status_signing_key, target: /run/secrets/status_signing_key, uid: "0", gid: "0", mode: 0400 }
+    - { source: kms_kek, target: /run/secrets/kms_kek, uid: "0", gid: "0", mode: 0400 }
+    - { source: admin_operators, target: /run/secrets/admin_operators, uid: "0", gid: "0", mode: 0400 }
+    - { source: admin_secret_fingerprint_key, target: /run/secrets/admin_secret_fingerprint_key, uid: "0", gid: "0", mode: 0400 }
+  networks:
+    - service_private
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+    - /run/uclaw-secrets:size=1m,mode=0700,uid=0,gid=0
+  cap_drop: [ALL]
+  cap_add: [CHOWN, SETUID, SETGID]
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 15s
+  healthcheck:
+    test: ["CMD", "/activation-server", "--healthcheck"]
+    interval: 10s
+    timeout: 3s
+    retries: 6
+    start_period: 10s
+
+services:
+  activation-1:
+    <<: *activation-app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  activation-2:
+    <<: *activation-app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    image: postgres:17.6-alpine
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        export ACTIVATION_DATABASE_URL="$$(cat /run/secrets/migration_database_url)"
+        export ACTIVATION_MIGRATION_ROLE="$$(cat /run/secrets/migration_role)"
+        export ACTIVATION_MIGRATION_PASSWORD="$$(cat /run/secrets/migration_password)"
+        export ACTIVATION_APP_ROLE="$$(cat /run/secrets/app_role)"
+        export ACTIVATION_APP_PASSWORD="$$(cat /run/secrets/app_password)"
+        exec /deploy/migrate.sh
+    configs:
+      - source: migrate_script
+        target: /deploy/migrate.sh
+        mode: 0555
+      - source: migration_001
+        target: /migrations/001_initial.sql
+        mode: 0444
+      - source: migration_002
+        target: /migrations/002_lifecycle.sql
+        mode: 0444
+      - source: migration_003
+        target: /migrations/003_admin.sql
+        mode: 0444
+      - source: migration_004
+        target: /migrations/004_device_access_proxy.sql
+        mode: 0444
+    secrets:
+      - { source: migration_database_url, target: /run/secrets/migration_database_url, uid: "0", gid: "0", mode: 0400 }
+      - { source: migration_role, target: /run/secrets/migration_role, uid: "0", gid: "0", mode: 0400 }
+      - { source: migration_password, target: /run/secrets/migration_password, uid: "0", gid: "0", mode: 0400 }
+      - { source: app_role, target: /run/secrets/app_role, uid: "0", gid: "0", mode: 0400 }
+      - { source: app_password, target: /run/secrets/app_password, uid: "0", gid: "0", mode: 0400 }
+    networks:
+      - service_private
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  public-gateway:
+    image: openresty/openresty:1.27.1.2-alpine
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      RATE_LIMIT_HMAC_FILE: /run/secrets/rate_limit_hmac_key
+    configs:
+      - source: public_gateway
+        target: /usr/local/openresty/nginx/conf/nginx.conf
+        mode: 0444
+    secrets:
+      - { source: rate_limit_hmac_key, target: /run/secrets/rate_limit_hmac_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_server_certificate, target: /run/secrets/edge_upstream_server_certificate, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_server_private_key, target: /run/secrets/edge_upstream_server_private_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_client_ca, target: /run/secrets/edge_upstream_client_ca, uid: "0", gid: "0", mode: 0400 }
+    networks:
+      - edge_private
+      - service_private
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /usr/local/openresty/nginx/logs:size=16m,mode=0755
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/bin/busybox", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8082/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    depends_on:
+      activation-1:
+        condition: service_started
+      activation-2:
+        condition: service_started
+
+  # Caddy obtains and renews the public DNS certificate. The IP endpoint uses
+  # the explicitly supplied compatibility certificate; public CAs generally
+  # do not issue ACME certificates for bare IP addresses.
+  caddy-edge:
+    image: caddy:2.10.0-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    configs:
+      - source: caddy_edge
+        target: /etc/caddy/Caddyfile
+        mode: 0444
+    secrets:
+      - { source: tls_certificate, target: /run/secrets/tls_certificate, uid: "0", gid: "0", mode: 0400 }
+      - { source: tls_private_key, target: /run/secrets/tls_private_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_client_certificate, target: /run/secrets/edge_upstream_client_certificate, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_client_private_key, target: /run/secrets/edge_upstream_client_private_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: edge_upstream_server_ca, target: /run/secrets/edge_upstream_server_ca, uid: "0", gid: "0", mode: 0400 }
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - public_edge
+      - edge_private
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      public-gateway:
+        condition: service_healthy
+
+  # Loopback binding plus mTLS keeps management routes off the public network.
+  # Production should place this listener behind a private VPN/bastion as well.
+  management-gateway:
+    image: nginx:1.27.5-alpine
+    restart: unless-stopped
+    user: "0:0"
+    ports:
+      - "127.0.0.1:8444:8444"
+    configs:
+      - source: management_gateway
+        target: /etc/nginx/nginx.conf
+        mode: 0444
+    secrets:
+      - { source: tls_certificate, target: /run/secrets/tls_certificate, uid: "0", gid: "0", mode: 0400 }
+      - { source: tls_private_key, target: /run/secrets/tls_private_key, uid: "0", gid: "0", mode: 0400 }
+      - { source: management_client_ca, target: /run/secrets/management_client_ca, uid: "0", gid: "0", mode: 0400 }
+    networks:
+      - service_private
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=16m,mode=0755
+      - /var/run:size=1m,mode=0755
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - activation-1
+      - activation-2
+
+networks:
+  public_edge: {}
+  edge_private:
+    internal: true
+  service_private:
+    internal: true
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}
+
+secrets:
+  activation_pepper:
+    file: ${ACTIVATION_PEPPER_FILE:?set ACTIVATION_PEPPER_FILE}
+  license_signing_key:
+    file: ${LICENSE_SIGNING_KEY_FILE:?set LICENSE_SIGNING_KEY_FILE}
+  status_signing_key:
+    file: ${STATUS_SIGNING_KEY_FILE:?set STATUS_SIGNING_KEY_FILE}
+  kms_kek:
+    file: ${KMS_KEK_FILE:?set KMS_KEK_FILE}
+  admin_operators:
+    file: ${ADMIN_OPERATORS_FILE:?set ADMIN_OPERATORS_FILE}
+  admin_secret_fingerprint_key:
+    file: ${ADMIN_SECRET_FINGERPRINT_KEY_FILE:?set ADMIN_SECRET_FINGERPRINT_KEY_FILE}
+  tls_certificate:
+    file: ${TLS_CERTIFICATE_FILE:?set TLS_CERTIFICATE_FILE}
+  tls_private_key:
+    file: ${TLS_PRIVATE_KEY_FILE:?set TLS_PRIVATE_KEY_FILE}
+  management_client_ca:
+    file: ${MANAGEMENT_CLIENT_CA_FILE:?set MANAGEMENT_CLIENT_CA_FILE}
+  rate_limit_hmac_key:
+    file: ${RATE_LIMIT_HMAC_KEY_FILE:?set RATE_LIMIT_HMAC_KEY_FILE}
+  edge_upstream_server_certificate:
+    file: ${EDGE_UPSTREAM_SERVER_CERTIFICATE_FILE:?set EDGE_UPSTREAM_SERVER_CERTIFICATE_FILE}
+  edge_upstream_server_private_key:
+    file: ${EDGE_UPSTREAM_SERVER_PRIVATE_KEY_FILE:?set EDGE_UPSTREAM_SERVER_PRIVATE_KEY_FILE}
+  edge_upstream_client_certificate:
+    file: ${EDGE_UPSTREAM_CLIENT_CERTIFICATE_FILE:?set EDGE_UPSTREAM_CLIENT_CERTIFICATE_FILE}
+  edge_upstream_client_private_key:
+    file: ${EDGE_UPSTREAM_CLIENT_PRIVATE_KEY_FILE:?set EDGE_UPSTREAM_CLIENT_PRIVATE_KEY_FILE}
+  edge_upstream_client_ca:
+    file: ${EDGE_UPSTREAM_CLIENT_CA_FILE:?set EDGE_UPSTREAM_CLIENT_CA_FILE}
+  edge_upstream_server_ca:
+    file: ${EDGE_UPSTREAM_SERVER_CA_FILE:?set EDGE_UPSTREAM_SERVER_CA_FILE}
+  migration_database_url:
+    file: ${MIGRATION_DATABASE_URL_FILE:?set MIGRATION_DATABASE_URL_FILE}
+  migration_role:
+    file: ${MIGRATION_ROLE_FILE:?set MIGRATION_ROLE_FILE}
+  migration_password:
+    file: ${MIGRATION_PASSWORD_FILE:?set MIGRATION_PASSWORD_FILE}
+  app_role:
+    file: ${APP_ROLE_FILE:?set APP_ROLE_FILE}
+  app_password:
+    file: ${APP_PASSWORD_FILE:?set APP_PASSWORD_FILE}
+
+configs:
+  migrate_script:
+    file: ./migrate.sh
+  migration_001:
+    file: ../migrations/001_initial.sql
+  migration_002:
+    file: ../migrations/002_lifecycle.sql
+  migration_003:
+    file: ../migrations/003_admin.sql
+  migration_004:
+    file: ../migrations/004_device_access_proxy.sql
+  public_gateway:
+    content: |
+      worker_processes auto;
+      error_log stderr warn;
+      pid /tmp/nginx.pid;
+      env RATE_LIMIT_HMAC_FILE;
+      events { worker_connections 4096; }
+      http {
+        lua_shared_dict rate_limit 32m;
+        client_body_temp_path /tmp/client_body_temp 1 2;
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        upstream activation_public {
+          zone activation_public 64k;
+          least_conn;
+          # Docker DNS is resolved when OpenResty starts. Restart this gateway
+          # after activation container IP changes so the upstream set refreshes.
+          server activation-1:8080;
+          server activation-2:8080;
+          keepalive 64;
+        }
+        server {
+          listen 127.0.0.1:8082;
+          server_tokens off;
+          location = /health/ready {
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 3s;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_next_upstream_tries 2;
+            proxy_pass http://activation_public/health/ready;
+          }
+          location / { return 404; }
+        }
+        server {
+          listen 8443 ssl;
+          server_tokens off;
+          ssl_certificate /run/secrets/edge_upstream_server_certificate;
+          ssl_certificate_key /run/secrets/edge_upstream_server_private_key;
+          ssl_client_certificate /run/secrets/edge_upstream_client_ca;
+          ssl_verify_client on;
+          ssl_protocols TLSv1.2 TLSv1.3;
+          if ($$ssl_client_verify != SUCCESS) { return 403; }
+          client_max_body_size 1m;
+          client_body_timeout 5s;
+          keepalive_timeout 30s;
+          location ^~ /internal/ { return 404; }
+          location = /metrics { return 404; }
+          location = /health/ready {
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $$http_x_forwarded_for;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 5s;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_next_upstream_tries 2;
+            proxy_pass http://activation_public;
+          }
+          location ~ ^/(?:v1|model-api)/ {
+            access_by_lua_block {
+              local cjson = require "cjson.safe"
+              local key_file = assert(io.open(os.getenv("RATE_LIMIT_HMAC_FILE"), "rb"))
+              local secret = key_file:read("*a")
+              key_file:close()
+              -- edge_private is dedicated to Caddy and this gateway. Caddy
+              -- replaces X-Forwarded-For, so clients cannot forge this value.
+              local forwarded = ngx.var.http_x_forwarded_for
+              if not forwarded or forwarded == "" or string.find(forwarded, ",", 1, true) then
+                return ngx.exit(400)
+              end
+              local subjects = {{"ip", forwarded, 120}}
+              if ngx.req.get_method() == "POST" then
+                ngx.req.read_body()
+                local body_data = ngx.req.get_body_data()
+                if not body_data then
+                  local body_path = ngx.req.get_body_file()
+                  if body_path then
+                    local body_file = assert(io.open(body_path, "rb"))
+                    body_data = body_file:read("*a")
+                    body_file:close()
+                  end
+                end
+                local body = cjson.decode(body_data or "") or {}
+                if type(body.username) == "string" then
+                  subjects[#subjects + 1] = {"username", body.username, 30}
+                end
+                if type(body.deviceId) == "string" then
+                  subjects[#subjects + 1] = {"device", body.deviceId, 30}
+                end
+                if type(body.usbFingerprint) == "table" and type(body.usbFingerprint.sha256) == "string" then
+                  subjects[#subjects + 1] = {"usb", body.usbFingerprint.sha256, 30}
+                end
+              end
+              local window = math.floor(ngx.now() / 60)
+              for _, item in ipairs(subjects) do
+                local digest = ngx.encode_base64(ngx.hmac_sha1(secret, item[2]), true)
+                local count = ngx.shared.rate_limit:incr(item[1] .. ":" .. digest .. ":" .. window, 1, 0, 61)
+                if count > item[3] then
+                  ngx.status = 429
+                  ngx.header["Content-Type"] = "application/json"
+                  ngx.header["Retry-After"] = "60"
+                  ngx.say(cjson.encode({
+                    requestId = "gateway-rate-limit",
+                    activationId = cjson.null,
+                    code = "RATE_LIMIT_EXCEEDED",
+                    stage = cjson.null,
+                    retryable = true,
+                    supportCode = "RATE-LIMIT"
+                  }))
+                  return ngx.exit(429)
+                end
+              end
+            }
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $$http_x_forwarded_for;
+            proxy_connect_timeout 2s;
+            proxy_send_timeout 10s;
+            proxy_read_timeout 70s;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_next_upstream_tries 2;
+            proxy_pass http://activation_public;
+          }
+          location / { return 404; }
+        }
+      }
+  caddy_edge:
+    content: |
+      (public_routes) {
+        handle /internal/* {
+          respond 404
+        }
+        handle /metrics {
+          respond 404
+        }
+        handle /model-api/* {
+          reverse_proxy https://public-gateway:8443 {
+            header_up -X-Forwarded-For
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto https
+            transport http {
+              tls
+              tls_server_name public-gateway
+              tls_client_auth /run/secrets/edge_upstream_client_certificate /run/secrets/edge_upstream_client_private_key
+              tls_trusted_ca_certs /run/secrets/edge_upstream_server_ca
+            }
+          }
+        }
+        handle /v1/* {
+          reverse_proxy https://public-gateway:8443 {
+            header_up -X-Forwarded-For
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto https
+            transport http {
+              tls
+              tls_server_name public-gateway
+              tls_client_auth /run/secrets/edge_upstream_client_certificate /run/secrets/edge_upstream_client_private_key
+              tls_trusted_ca_certs /run/secrets/edge_upstream_server_ca
+            }
+          }
+        }
+        handle /health/ready {
+          reverse_proxy https://public-gateway:8443 {
+            header_up -X-Forwarded-For
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto https
+            transport http {
+              tls
+              tls_server_name public-gateway
+              tls_client_auth /run/secrets/edge_upstream_client_certificate /run/secrets/edge_upstream_client_private_key
+              tls_trusted_ca_certs /run/secrets/edge_upstream_server_ca
+            }
+          }
+        }
+        handle {
+          respond 404
+        }
+      }
+
+      license.yiyong.me {
+        import public_routes
+      }
+
+      https://121.41.89.103 {
+        tls /run/secrets/tls_certificate /run/secrets/tls_private_key
+        import public_routes
+      }
+  management_gateway:
+    content: |
+      worker_processes auto;
+      error_log stderr warn;
+      pid /tmp/nginx.pid;
+      events { worker_connections 1024; }
+      http {
+        upstream activation_management {
+          least_conn;
+          server activation-1:8080;
+          server activation-2:8080;
+          keepalive 16;
+        }
+        server {
+          listen 8444 ssl;
+          server_tokens off;
+          ssl_certificate /run/secrets/tls_certificate;
+          ssl_certificate_key /run/secrets/tls_private_key;
+          ssl_client_certificate /run/secrets/management_client_ca;
+          ssl_verify_client on;
+          ssl_protocols TLSv1.2 TLSv1.3;
+          client_max_body_size 1m;
+          client_body_timeout 5s;
+          keepalive_timeout 30s;
+          location ^~ /internal/v1/ {
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_connect_timeout 2s;
+            proxy_send_timeout 10s;
+            proxy_read_timeout 10s;
+            proxy_pass http://activation_management;
+          }
+          location = /metrics/activation-1 {
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 5s;
+            proxy_pass http://activation-1:8080/metrics;
+          }
+          location = /metrics/activation-2 {
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 5s;
+            proxy_pass http://activation-2:8080/metrics;
+          }
+          location / { return 404; }
+        }
+      }

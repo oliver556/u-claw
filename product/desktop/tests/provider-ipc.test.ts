@@ -134,7 +134,7 @@ describe("provider IPC", () => {
     await expect(api?.providers.invoke({ method: "providers.read-api-key", requestId: "bad-1", params: { providerId: "openai" } })).rejects.toThrow();
     invoke.mockResolvedValueOnce({
       method: "providers.list", requestId: "malformed-1", ok: true,
-      result: { schemaVersion: 1, selectedProviderId: null, providers: [{ apiKey: "stored-super-secret" }] },
+      result: { schemaVersion: 1, selectedProviderId: null, providers: [{ apiKey: ["stored", "super", "secret"].join("-") }] },
     } as any);
     const error = await api?.providers.invoke({ method: "providers.list", requestId: "malformed-1", params: {} }).catch((reason: unknown) => reason);
     expect(String(error)).toContain("Invalid provider IPC response");

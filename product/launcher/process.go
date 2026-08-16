@@ -13,12 +13,64 @@ import (
 
 var ErrProcessInvalid = errors.New("process specification invalid")
 
+// Populated at release build time with public activation configuration only.
+// Private keys, activation codes, and tokens must never enter the launcher binary.
+var activationServiceEndpoint = ""
+
 type ProcessSpec struct {
-	Path  string
-	Args  []string
-	Dir   string
-	Env   []string
-	Lease RuntimeLease
+	Path              string
+	Args              []string
+	Dir               string
+	Env               []string
+	EnvRemovePrefixes []string
+	Lease             RuntimeLease
+}
+
+const (
+	activationStartupArgument = "--uclaw-startup-mode=activation-only"
+	normalStartupArgument     = "--uclaw-startup-mode=normal"
+	activationCompletedCode   = 20
+)
+
+func NormalProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLease) ProcessSpec {
+	arguments := append(append([]string(nil), manifest.EntryArgs...), normalStartupArgument)
+	return processSpec(paths, manifest, lease, arguments, portableProcessEnvironment(paths))
+}
+
+func ActivationProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLease, fingerprint usbFingerprint) ProcessSpec {
+	environment := []string{
+		"TEMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
+		"TMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
+		"UCLAW_CACHE_DIR=" + filepath.Join(paths.HostCacheRoot, "cache"),
+		"UCLAW_DATA_DIR=" + paths.DataDir,
+		"UCLAW_PACKAGE_ROOT=" + paths.PackageRoot,
+		"UCLAW_USB_FINGERPRINT_SCHEME=" + fingerprint.Scheme,
+		"UCLAW_USB_FINGERPRINT_SHA256=" + fingerprint.SHA256,
+		"UCLAW_CLIENT_VERSION=" + manifest.ProductVersion,
+		"UCLAW_ACTIVATION_ENDPOINT=" + activationServiceEndpoint,
+		"UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS=" + trustedStartupLicenseKeys,
+	}
+	arguments := append(append([]string(nil), manifest.EntryArgs...), activationStartupArgument)
+	spec := processSpec(paths, manifest, lease, arguments, environment)
+	spec.EnvRemovePrefixes = []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_"}
+	return spec
+}
+
+func processSpec(paths PortablePaths, manifest Manifest, lease RuntimeLease, arguments []string, environment []string) ProcessSpec {
+	runtimeRoot := lease.RootPath()
+	entrypoint := filepath.Join(runtimeRoot, filepath.FromSlash(strings.ReplaceAll(manifest.Entrypoint, `\`, "/")))
+	return ProcessSpec{
+		Path:  entrypoint,
+		Args:  append([]string(nil), arguments...),
+		Dir:   filepath.Dir(entrypoint),
+		Env:   append(append([]string(nil), environment...), "UCLAW_RUNTIME_DIR="+runtimeRoot),
+		Lease: lease,
+	}
+}
+
+func ActivationCompleted(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == activationCompletedCode
 }
 
 type ManagedProcess struct {
@@ -37,7 +89,7 @@ func StartManagedProcess(spec ProcessSpec) (*ManagedProcess, error) {
 	}
 	command := exec.Command(spec.Path, spec.Args...)
 	command.Dir = spec.Dir
-	command.Env = mergeEnvironment(os.Environ(), spec.Env)
+	command.Env = mergeEnvironmentFiltered(os.Environ(), spec.Env, spec.EnvRemovePrefixes)
 	if err := spec.Lease.VerifyEntrypoint(spec.Path); err != nil {
 		return nil, err
 	}
@@ -97,11 +149,47 @@ func validateProcessSpec(spec ProcessSpec) error {
 			return ErrProcessInvalid
 		}
 	}
+	for _, prefix := range spec.EnvRemovePrefixes {
+		if prefix == "" || strings.ContainsAny(prefix, "=\x00") {
+			return ErrProcessInvalid
+		}
+	}
 	return nil
 }
 
 func mergeEnvironment(base []string, overrides []string) []string {
-	return mergeEnvironmentForPlatform(base, overrides, runtime.GOOS == "windows")
+	return mergeEnvironmentFiltered(base, overrides, nil)
+}
+
+func mergeEnvironmentFiltered(base []string, overrides []string, removePrefixes []string) []string {
+	caseInsensitive := runtime.GOOS == "windows"
+	return mergeEnvironmentForPlatform(filterEnvironment(base, removePrefixes, caseInsensitive), overrides, caseInsensitive)
+}
+
+func filterEnvironment(base []string, removePrefixes []string, caseInsensitive bool) []string {
+	filtered := make([]string, 0, len(base))
+	for _, entry := range base {
+		separator := strings.IndexByte(entry, '=')
+		if separator > 0 && !hasEnvironmentPrefix(entry[:separator], removePrefixes, caseInsensitive) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func hasEnvironmentPrefix(key string, prefixes []string, caseInsensitive bool) bool {
+	if caseInsensitive {
+		key = strings.ToUpper(key)
+	}
+	for _, prefix := range prefixes {
+		if caseInsensitive {
+			prefix = strings.ToUpper(prefix)
+		}
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeEnvironmentForPlatform(base []string, overrides []string, caseInsensitive bool) []string {

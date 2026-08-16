@@ -1,5 +1,6 @@
 import { installNavigationPolicy, type WebContentsLike } from "./security/navigation-policy.js";
 import { WINDOW_MAXIMIZED_EVENT_CHANNEL } from "./ipc/channels.js";
+import type { StartupMode } from "./startup/mode.js";
 
 export interface DesktopWebContents extends WebContentsLike {
   mainFrame: unknown;
@@ -37,6 +38,7 @@ export interface BrowserWindowOptionsLike {
   backgroundColor?: string;
   webPreferences: {
     preload?: string;
+    additionalArguments?: string[];
     contextIsolation: boolean;
     sandbox: boolean;
     nodeIntegration: boolean;
@@ -50,6 +52,7 @@ export interface BrowserWindowConstructor {
 
 export interface CreateMainWindowOptions {
   BrowserWindow: BrowserWindowConstructor;
+  startupMode: StartupMode;
   preloadPath: string;
   rendererUrl?: string;
   rendererFile?: string;
@@ -141,6 +144,7 @@ export async function createAdvancedConsoleWindow({
 
 export async function createMainWindow({
   BrowserWindow,
+  startupMode,
   preloadPath,
   rendererUrl,
   rendererFile,
@@ -159,6 +163,7 @@ export async function createMainWindow({
     backgroundColor: "#141414",
     webPreferences: {
       preload: preloadPath,
+      additionalArguments: [`--uclaw-startup-mode=${startupMode}`],
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,

@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { NewApiDeviceMapping, NewApiIssuedToken } from "@uclaw/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { redactAdapterRecord } from "../../adapter/src/redaction.js";
@@ -17,25 +16,14 @@ afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recur
 
 function typedCredential(endpoint = "http://127.0.0.1:18091/v1") {
   const suffix = randomUUID().replaceAll("-", "");
-  const timestamp = new Date().toISOString();
-  const userId = `usr_${suffix}`;
-  const tokenId = `tok_${suffix}`;
-  const mapping: NewApiDeviceMapping = {
-    deviceId: `dev_${suffix}`, licenseId: `lic_${suffix}`,
-    startupSecretHash: "a".repeat(64), startupSecretSalt: "b".repeat(32), usbFingerprint: "c".repeat(64),
-    newApiUserId: userId, newApiUsername: `user_${suffix}`, newApiTokenId: tokenId,
-    channelId: "channel_builtin_001", policyDigest: "d".repeat(64), generation: 1, previousTokenId: null,
-    status: "active", failure: null, createdAt: timestamp, updatedAt: timestamp,
+  return {
+    schemaVersion: 1 as const,
+    deviceId: `dev_${suffix}`,
+    licenseId: `lic_${suffix}`,
+    endpoint,
+    model: "gpt-5.6-sol",
+    deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   };
-  const issuedToken: NewApiIssuedToken = {
-    token: {
-      id: tokenId, userId, name: "device", channelId: mapping.channelId,
-      policyDigest: mapping.policyDigest, generation: mapping.generation,
-      status: "active", createdAt: timestamp, updatedAt: timestamp,
-    },
-    secret: randomBytes(32).toString("base64url"),
-  };
-  return { endpoint, model: "builtin-model", mapping, issuedToken };
 }
 
 async function setup() {
@@ -120,7 +108,7 @@ describe("model source router", () => {
     expect(error).toMatchObject({ category: "validation", code: "INVALID_REQUEST", retryable: false, causeDetails: {} });
     const serialized = JSON.stringify(error);
     expect(serialized).not.toContain(credential.endpoint);
-    expect(serialized).not.toContain(credential.issuedToken.secret);
+    expect(serialized).not.toContain(credential.deviceToken);
   });
 
   it("uses builtin when no external source is explicitly enabled", async () => {
@@ -131,21 +119,14 @@ describe("model source router", () => {
     expect(context.custom).not.toHaveBeenCalled();
   });
 
-  it("rejects provisioning credentials for ordinary builtin chat", async () => {
+  it("uses activated credentials for ordinary builtin chat", async () => {
     const context = await setup();
-    await context.credentials.provision({
-      ...context.credential,
-      mapping: { ...context.credential.mapping, status: "provisioning" },
-      issuedToken: {
-        ...context.credential.issuedToken,
-        token: { ...context.credential.issuedToken.token, status: "provisioning" },
-      },
-    });
-
-    await expect(context.router.execute({ prompt: "not-active" })).rejects.toMatchObject({
-      source: "builtin", category: "configuration",
-    });
-    expect(context.builtin).not.toHaveBeenCalled();
+    await expect(context.router.execute({ prompt: "active" })).resolves.toBe("builtin-result");
+    expect(context.builtin).toHaveBeenCalledWith(
+      { prompt: "active" },
+      expect.objectContaining({ deviceToken: context.credential.deviceToken, licenseId: context.credential.licenseId }),
+      undefined,
+    );
   });
 
   it("routes only to the last explicitly enabled domestic or custom source", async () => {
@@ -288,11 +269,9 @@ describe("model source router", () => {
     });
     const serialized = JSON.stringify({ error, log: redactAdapterRecord({
       builtinEndpoint: context.credential.endpoint,
-      newApiUsername: context.credential.mapping.newApiUsername,
-      builtinToken: context.credential.issuedToken.secret,
+      builtinToken: context.credential.deviceToken,
     }) });
     expect(serialized).not.toContain(context.credential.endpoint);
-    expect(serialized).not.toContain(context.credential.mapping.newApiUsername);
-    expect(serialized).not.toContain(context.credential.issuedToken.secret);
+    expect(serialized).not.toContain(context.credential.deviceToken);
   });
 });

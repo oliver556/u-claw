@@ -1,15 +1,21 @@
+import { join, resolve } from "node:path";
+
 import { FsSafeError, root as createSafeRoot } from "@openclaw/fs-safe";
 import { configureFsSafePython, getFsSafePythonConfig } from "@openclaw/fs-safe/config";
-
-import {
-  NewApiDeviceMappingSchema,
-  NewApiIssuedTokenSchema,
-  type NewApiDeviceMapping,
-  type NewApiIssuedToken,
-} from "@uclaw/shared";
+import { readSecureFile } from "@openclaw/fs-safe/secure-file";
+import type { BuiltinCredentialArtifact } from "@uclaw/shared";
+import { z } from "zod";
 
 const FILE_NAME = "builtin-model-credential.v1.json";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const PersistedCredentialSchema = z.object({
+  schemaVersion: z.literal(1),
+  deviceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
+  licenseId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
+  endpoint: z.string(),
+  model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u),
+  deviceToken: z.string().regex(/^uclaw_dt_[A-Za-z0-9_-]{43}$/u),
+}).strict();
 
 export type BuiltinCredentialErrorCode =
   | "BUILTIN_CREDENTIAL_MISSING"
@@ -24,19 +30,13 @@ export class BuiltinCredentialError extends Error {
   }
 }
 
-export interface BuiltinCredentialProvisioningInput {
-  endpoint: string;
-  model: string;
-  mapping: NewApiDeviceMapping;
-  issuedToken: NewApiIssuedToken;
-}
+export type BuiltinCredentialProvisioningInput = BuiltinCredentialArtifact;
 
 export interface BuiltinModelCredential {
   endpoint: URL;
   deviceId: string;
-  userId: string;
-  tokenId: string;
-  tokenSecret: string;
+  licenseId: string;
+  deviceToken: string;
   model: string;
 }
 
@@ -53,14 +53,6 @@ export interface CreateBuiltinCredentialStoreOptions {
   allowLoopbackHttp?: boolean;
   allowUnpinnedFilesystemForTest?: true;
   platformForTest?: NodeJS.Platform;
-}
-
-interface PersistedCredential {
-  schemaVersion: 1;
-  endpoint: string;
-  model: string;
-  mapping: NewApiDeviceMapping;
-  issuedToken: NewApiIssuedToken;
 }
 
 function validateEndpoint(value: string, allowLoopbackHttp: boolean): URL {
@@ -80,50 +72,24 @@ function validateEndpoint(value: string, allowLoopbackHttp: boolean): URL {
   return url;
 }
 
-function validatePersisted(
-  value: unknown,
-  allowLoopbackHttp: boolean,
-  requiredMappingStatus?: "active",
-): { persisted: PersistedCredential; credential: BuiltinModelCredential } {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+function validatePersisted(value: unknown, allowLoopbackHttp: boolean): {
+  persisted: BuiltinCredentialArtifact;
+  credential: BuiltinModelCredential;
+} {
+  const parsed = PersistedCredentialSchema.safeParse(value);
+  if (!parsed.success) {
     throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin model credential is invalid.");
   }
-  const record = value as Record<string, unknown>;
-  if (record.schemaVersion !== 1 || typeof record.endpoint !== "string" || typeof record.model !== "string"
-      || record.model.trim() !== record.model || record.model.length < 1 || record.model.length > 160) {
-    throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin model credential is invalid.");
-  }
-  const mapping = NewApiDeviceMappingSchema.safeParse(record.mapping);
-  const issuedToken = NewApiIssuedTokenSchema.safeParse(record.issuedToken);
-  if (!mapping.success || !issuedToken.success
-      || (mapping.data.status !== "provisioning" && mapping.data.status !== "active")
-      || (requiredMappingStatus !== undefined && mapping.data.status !== requiredMappingStatus)
-      || (mapping.data.status === "provisioning" && issuedToken.data.token.status !== "provisioning")
-      || (mapping.data.status === "active" && issuedToken.data.token.status !== "active")
-      || mapping.data.newApiUserId !== issuedToken.data.token.userId
-      || mapping.data.newApiTokenId !== issuedToken.data.token.id
-      || mapping.data.channelId !== issuedToken.data.token.channelId
-      || mapping.data.policyDigest !== issuedToken.data.token.policyDigest
-      || mapping.data.generation !== issuedToken.data.token.generation) {
-    throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin model credential is invalid.");
-  }
-  const endpoint = validateEndpoint(record.endpoint, allowLoopbackHttp);
-  const persisted: PersistedCredential = {
-    schemaVersion: 1,
-    endpoint: endpoint.href,
-    model: record.model,
-    mapping: mapping.data,
-    issuedToken: issuedToken.data,
-  };
+  const endpoint = validateEndpoint(parsed.data.endpoint, allowLoopbackHttp);
+  const persisted = { ...parsed.data, endpoint: endpoint.href };
   return {
     persisted,
     credential: {
       endpoint,
-      deviceId: mapping.data.deviceId,
-      userId: mapping.data.newApiUserId,
-      tokenId: issuedToken.data.token.id,
-      tokenSecret: issuedToken.data.secret,
-      model: record.model,
+      deviceId: persisted.deviceId,
+      licenseId: persisted.licenseId,
+      deviceToken: persisted.deviceToken,
+      model: persisted.model,
     },
   };
 }
@@ -157,22 +123,30 @@ export function createBuiltinCredentialStore({
     });
     return safeRoot;
   };
-  const load = async (requiredMappingStatus?: "active"): Promise<BuiltinModelCredential> => {
+  const load = async (): Promise<BuiltinModelCredential> => {
     let body: string;
     try {
-      body = await (await getSafeRoot()).readText(path);
+      await getSafeRoot();
+      body = (await readSecureFile({
+        filePath: join(resolve(dataDir), path),
+        label: "builtin credential",
+        trust: { trustedDirs: [resolve(dataDir)] },
+        io: { maxBytes: 1024 * 1024 },
+      })).buffer.toString("utf8");
     } catch (error) {
       if (error instanceof FsSafeError && error.code === "not-found") {
         throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_MISSING", "Builtin model credential is not configured.");
       }
-      if (error instanceof FsSafeError && ["symlink", "hardlink", "path-mismatch"].includes(error.code)) {
+      if (error instanceof FsSafeError && [
+        "symlink", "hardlink", "path-mismatch", "insecure-permissions", "permission-unverified", "not-owned",
+      ].includes(error.code)) {
         throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential target is unsafe.");
       }
       if (error instanceof BuiltinCredentialError) throw error;
       throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin model credential could not be read.");
     }
     try {
-      return validatePersisted(JSON.parse(body) as unknown, allowLoopbackHttp, requiredMappingStatus).credential;
+      return validatePersisted(JSON.parse(body) as unknown, allowLoopbackHttp).credential;
     } catch (error) {
       if (error instanceof BuiltinCredentialError) throw error;
       throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin model credential is invalid.");
@@ -181,15 +155,15 @@ export function createBuiltinCredentialStore({
   return {
     pinnedFilesystem: platform !== "win32",
     async provision(input) {
-      const { persisted } = validatePersisted({ schemaVersion: 1, ...input }, allowLoopbackHttp);
+      const { persisted } = validatePersisted(input, allowLoopbackHttp);
       try {
         await (await getSafeRoot()).write(path, `${JSON.stringify(persisted)}\n`, { mode: 0o600, overwrite: true });
       } catch {
         throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_UNSAFE", "Builtin credential could not be written safely.");
       }
     },
-    loadActive: () => load("active"),
-    loadForConnectivityCheck: () => load(),
+    loadActive: load,
+    loadForConnectivityCheck: load,
     async clear() {
       try {
         await (await getSafeRoot()).remove(path);

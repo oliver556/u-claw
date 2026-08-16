@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -109,6 +111,17 @@ type fakeChildProcess struct {
 	stopped bool
 }
 
+func processExitError(t *testing.T, code string) error {
+	t.Helper()
+	command := exec.Command(os.Args[0], "-test.run=TestLauncherProcessHelper")
+	command.Env = append(os.Environ(), "UCLAW_HELPER_MODE=exit"+code)
+	err := command.Run()
+	if err == nil {
+		t.Fatalf("helper exit %s returned nil", code)
+	}
+	return err
+}
+
 func (process *fakeChildProcess) Wait() error {
 	return process.waitErr
 }
@@ -199,6 +212,12 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 			}
 			return nil
 		},
+		DetectActivationState: func(packageRoot string) (ActivationState, error) {
+			if packageRoot != paths.PackageRoot {
+				t.Fatalf("activation package root = %q", packageRoot)
+			}
+			return LicenseGateRequired, nil
+		},
 		VerifyLicense: func(packageRoot string, usbRoot string) error {
 			if packageRoot != paths.PackageRoot || usbRoot != paths.USBRoot {
 				t.Fatalf("license paths = %q, %q", packageRoot, usbRoot)
@@ -252,11 +271,188 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 			startedSpec = spec
 			return &fakeChildProcess{}, nil
 		},
+		ActivationProcessSpec: ActivationProcessSpec,
+		ReadUSBFingerprint: func(string) (usbFingerprint, error) {
+			return usbFingerprint{Scheme: "uclaw-usb-v1", SHA256: strings.Repeat("a", 64)}, nil
+		},
 		MonitorUSB: func(ctx context.Context, _ string, _ time.Duration) error {
 			<-ctx.Done()
 			return ctx.Err()
 		},
 	}, lock, &startedSpec
+}
+
+func TestRunActivationCompletionRestartsFullGateOnce(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	activationExit := processExitError(t, "20")
+	classifications := []ActivationState{ActivationRequired, LicenseGateRequired}
+	probeCalls := 0
+	classifyCalls := 0
+	verifyCalls := 0
+	activationSpecs := 0
+	started := 0
+	deps.ProbeDataDirectory = func(string, string) error { probeCalls++; return nil }
+	deps.DetectActivationState = func(string) (ActivationState, error) {
+		state := classifications[classifyCalls]
+		classifyCalls++
+		return state, nil
+	}
+	deps.VerifyLicense = func(string, string) error { verifyCalls++; return nil }
+	deps.AcquireRuntime = func(root string, _ Manifest) (RuntimeLease, error) {
+		return &fakeRuntimeLease{root: root}, nil
+	}
+	deps.ActivationProcessSpec = func(paths PortablePaths, manifest Manifest, lease RuntimeLease, fingerprint usbFingerprint) ProcessSpec {
+		activationSpecs++
+		return ActivationProcessSpec(paths, manifest, lease, fingerprint)
+	}
+	deps.StartProcess = func(spec ProcessSpec) (ChildProcess, error) {
+		started++
+		if started == 1 {
+			if !slices.Contains(spec.Args, activationStartupArgument) {
+				t.Fatalf("activation args = %v", spec.Args)
+			}
+			return &fakeChildProcess{waitErr: activationExit}, nil
+		}
+		if slices.Contains(spec.Args, activationStartupArgument) {
+			t.Fatalf("normal args = %v", spec.Args)
+		}
+		if !slices.Contains(spec.Args, normalStartupArgument) {
+			t.Fatalf("normal args = %v", spec.Args)
+		}
+		return &fakeChildProcess{}, nil
+	}
+
+	if err := Run(context.Background(), deps); err != nil {
+		t.Fatal(err)
+	}
+	if probeCalls != 2 || classifyCalls != 2 || verifyCalls != 1 || activationSpecs != 1 || started != 2 {
+		t.Fatalf("probe=%d classify=%d verify=%d activationSpecs=%d started=%d", probeCalls, classifyCalls, verifyCalls, activationSpecs, started)
+	}
+	wantPrefix := []State{StateStarting, StateValidatingUSB, StateActivationRequired, StateCheckingRuntime, StateExtractingRuntime, StateStartingActivation, StateStarting}
+	if !reflect.DeepEqual(reporter.states[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("states = %v", reporter.states)
+	}
+}
+
+func TestRunDoesNotStartActivationWhenUSBFingerprintCannotBeRead(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.DetectActivationState = func(string) (ActivationState, error) { return ActivationRequired, nil }
+	deps.ReadUSBFingerprint = func(string) (usbFingerprint, error) { return usbFingerprint{}, errors.New("fingerprint unavailable") }
+	started := false
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { started = true; return &fakeChildProcess{}, nil }
+
+	err := Run(context.Background(), deps)
+	if err == nil || !strings.Contains(err.Error(), "fingerprint unavailable") {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if started {
+		t.Fatal("activation process started without a trusted USB fingerprint")
+	}
+}
+
+func TestRunDoesNotLaunchActivationTwice(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	activationExit := processExitError(t, "20")
+	classifyCalls := 0
+	started := 0
+	deps.DetectActivationState = func(string) (ActivationState, error) {
+		classifyCalls++
+		return ActivationRequired, nil
+	}
+	deps.AcquireRuntime = func(root string, _ Manifest) (RuntimeLease, error) {
+		return &fakeRuntimeLease{root: root}, nil
+	}
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		started++
+		return &fakeChildProcess{waitErr: activationExit}, nil
+	}
+
+	err := Run(context.Background(), deps)
+	if !errors.Is(err, ErrActivationRestartLimit) {
+		t.Fatalf("returned %v", err)
+	}
+	if classifyCalls != 2 || started != 1 {
+		t.Fatalf("classify=%d started=%d", classifyCalls, started)
+	}
+	want := [][2]string{{"E_ACTIVATION_RESTART_LIMIT", "激活完成后授权仍未生效，请重新启动 U-Claw。"}}
+	if !reflect.DeepEqual(reporter.failures, want) {
+		t.Fatalf("failures = %#v", reporter.failures)
+	}
+}
+
+func TestRunDoesNotRestartAfterOtherActivationExit(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	activationExit := processExitError(t, "21")
+	classifyCalls := 0
+	deps.DetectActivationState = func(string) (ActivationState, error) {
+		classifyCalls++
+		return ActivationRequired, nil
+	}
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		return &fakeChildProcess{waitErr: activationExit}, nil
+	}
+
+	err := Run(context.Background(), deps)
+	if !errors.Is(err, ErrActivationExited) {
+		t.Fatalf("returned %v", err)
+	}
+	if classifyCalls != 1 {
+		t.Fatalf("classify calls = %d", classifyCalls)
+	}
+	want := [][2]string{{"E_ACTIVATION_EXITED", "激活窗口意外退出，请重新启动 U-Claw。"}}
+	if !reflect.DeepEqual(reporter.failures, want) {
+		t.Fatalf("failures = %#v", reporter.failures)
+	}
+}
+
+func TestRunStopsActivationOnCancellationAndClosesLeaseOnce(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime")}
+	process := &blockingChildProcess{result: make(chan error, 1)}
+	deps.DetectActivationState = func(string) (ActivationState, error) { return ActivationRequired, nil }
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := Run(ctx, deps)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("returned %v", err)
+	}
+	if !process.stopped || lease.CloseCalls() != 1 {
+		t.Fatalf("stopped=%v lease closes=%d", process.stopped, lease.CloseCalls())
+	}
+	if len(reporter.failures) != 0 {
+		t.Fatalf("failures = %v", reporter.failures)
+	}
+}
+
+func TestRunStopsActivationWhenUSBIsRemovedAndClosesLeaseOnce(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime")}
+	process := &blockingChildProcess{result: make(chan error, 1)}
+	deps.DetectActivationState = func(string) (ActivationState, error) { return ActivationRequired, nil }
+	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
+	deps.MonitorUSB = func(context.Context, string, time.Duration) error { return ErrUSBDisconnected }
+
+	err := Run(context.Background(), deps)
+	if !errors.Is(err, ErrUSBDisconnected) {
+		t.Fatalf("returned %v", err)
+	}
+	if !process.stopped || lease.CloseCalls() != 1 {
+		t.Fatalf("stopped=%v lease closes=%d", process.stopped, lease.CloseCalls())
+	}
+	want := [][2]string{{"E_USB_DISCONNECTED", "U 盘已断开，请重新插入后再启动。"}}
+	if !reflect.DeepEqual(reporter.failures, want) {
+		t.Fatalf("failures = %#v", reporter.failures)
+	}
 }
 
 func TestRunReportsExtractingLaunchSequence(t *testing.T) {
@@ -768,13 +964,15 @@ func TestRunWaitsForProcessAfterStopTimeout(t *testing.T) {
 
 func TestStateTextUsesFixedChineseStatus(t *testing.T) {
 	want := map[State]string{
-		StateStarting:          "正在启动 U-Claw...",
-		StateValidatingUSB:     "正在检查 U 盘数据目录...",
-		StateValidatingLicense: "正在验证启动授权...",
-		StateCheckingRuntime:   "正在检查运行环境...",
-		StateExtractingRuntime: "首次启动，正在准备运行环境...",
-		StateStartingApp:       "正在打开 U-Claw...",
-		StateReady:             "U-Claw 已就绪。",
+		StateStarting:           "正在启动 U-Claw...",
+		StateActivationRequired: "需要先激活 U-Claw。",
+		StateStartingActivation: "正在打开激活窗口...",
+		StateValidatingUSB:      "正在检查 U 盘数据目录...",
+		StateValidatingLicense:  "正在验证启动授权...",
+		StateCheckingRuntime:    "正在检查运行环境...",
+		StateExtractingRuntime:  "首次启动，正在准备运行环境...",
+		StateStartingApp:        "正在打开 U-Claw...",
+		StateReady:              "U-Claw 已就绪。",
 	}
 	for state, text := range want {
 		if got := stateText(state); got != text {

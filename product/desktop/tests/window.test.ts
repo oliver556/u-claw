@@ -92,6 +92,7 @@ describe("createMainWindow", () => {
 
     await expect(createMainWindow({
       BrowserWindow: FailingWindow,
+      startupMode: "normal",
       preloadPath: "/runtime/preload.js",
       ...(source === "url" ? { rendererUrl: "http://127.0.0.1:5173" } : { rendererFile: "/runtime/index.html" }),
       openExternal: vi.fn(), beforeLoad: () => disposeIpc,
@@ -145,6 +146,7 @@ describe("createMainWindow", () => {
     const disposeIpc = vi.fn();
     await createMainWindow({
       BrowserWindow: FakeBrowserWindow,
+      startupMode: "activation-only",
       preloadPath: "/runtime/preload.js",
       rendererUrl: "http://127.0.0.1:5173",
       openExternal: vi.fn(async () => undefined),
@@ -166,6 +168,7 @@ describe("createMainWindow", () => {
       backgroundColor: "#141414",
       webPreferences: {
         preload: "/runtime/preload.js",
+        additionalArguments: ["--uclaw-startup-mode=activation-only"],
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,

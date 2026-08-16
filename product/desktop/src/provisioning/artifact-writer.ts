@@ -78,7 +78,7 @@ interface ArtifactBackup {
   schemaVersion: 1;
   transactionId: string;
   generation: number;
-  files: [BackupEntry, BackupEntry, BackupEntry];
+  files: [BackupEntry, BackupEntry];
 }
 
 function backupEntry(body: Buffer | null): BackupEntry {
@@ -94,7 +94,7 @@ function parseBackup(value: unknown): ArtifactBackup {
       || record.schemaVersion !== 1 || typeof record.transactionId !== "string"
       || !/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u.test(record.transactionId)
       || typeof record.generation !== "number" || !Number.isSafeInteger(record.generation) || record.generation < 1
-      || !Array.isArray(record.files) || record.files.length !== 3) throw new Error("backup");
+      || !Array.isArray(record.files) || (record.files.length !== 2 && record.files.length !== 3)) throw new Error("backup");
   const files = record.files.map((entry) => {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) throw new Error("backup");
     const item = entry as Record<string, unknown>;
@@ -105,8 +105,13 @@ function parseBackup(value: unknown): ArtifactBackup {
     const body = Buffer.from(item.body, "base64");
     if (body.toString("base64") !== item.body || createHash("sha256").update(body).digest("hex") !== item.sha256) throw new Error("backup");
     return item as unknown as BackupEntry;
-  }) as ArtifactBackup["files"];
-  return { schemaVersion: 1, transactionId: record.transactionId, generation: record.generation, files };
+  });
+  return {
+    schemaVersion: 1,
+    transactionId: record.transactionId,
+    generation: record.generation,
+    files: [files[0]!, files[1]!],
+  };
 }
 
 async function acquireLocalLock(key: string): Promise<() => void> {
@@ -164,7 +169,6 @@ export function createProvisioningArtifactWriter({
   const licenseDir = ".uclaw/license";
   const startupPath = ".uclaw/license/.startup-credential.json";
   const licensePath = ".uclaw/license/license.json";
-  const credentialPath = ".uclaw/builtin-model-credential.v1.json";
   const journalPath = ".uclaw/provisioning-transaction.v1.json";
   const lockPath = ".uclaw/provisioning.lock";
   const backupPath = ".uclaw/provisioning-artifact-backup.v1.json";
@@ -184,7 +188,7 @@ export function createProvisioningArtifactWriter({
       throw new ProvisioningArtifactError("ARTIFACT_PATH_UNSAFE", "Provisioning artifact directory is unsafe.");
     }
   };
-  const artifactPaths = [startupPath, licensePath, credentialPath] as const;
+  const artifactPaths = [startupPath, licensePath] as const;
 
   const isNotFound = (error: unknown): boolean => error instanceof FsSafeError && error.code === "not-found";
   const write = async (path: string, body: string | Buffer, maxBytes = MAX_JSON_BYTES): Promise<void> => {
@@ -376,7 +380,6 @@ export function createProvisioningArtifactWriter({
         await write(backupPath, `${JSON.stringify(backup)}\n`, MAX_BACKUP_BYTES);
         await write(startupPath, `${JSON.stringify(startup)}\n`);
         await write(licensePath, `${JSON.stringify(license)}\n`);
-        await credentialStore.provision({ endpoint: input.endpoint, model: input.model, mapping, issuedToken });
       } catch {
         await Promise.all(artifactPaths.map((path, index) => restore(path, previous[index] ?? null)));
         await remove(backupPath);
@@ -386,13 +389,8 @@ export function createProvisioningArtifactWriter({
 
     async finalizeCredential(input) {
       try {
-        await credentialStore.provision({
-          endpoint: input.endpoint,
-          model: input.model,
-          mapping: NewApiDeviceMappingSchema.parse(input.mapping),
-          issuedToken: NewApiIssuedTokenSchema.parse(input.issuedToken),
-        });
-        await credentialStore.loadActive();
+        NewApiDeviceMappingSchema.parse(input.mapping);
+        NewApiIssuedTokenSchema.parse(input.issuedToken);
       } catch {
         throw new ProvisioningArtifactError("ARTIFACT_WRITE_FAILED", "Active credential could not be finalized.");
       }
@@ -403,14 +401,9 @@ export function createProvisioningArtifactWriter({
       try {
         const startup = StartupCredentialArtifactSchema.parse(await boundedJson(startupPath));
         const license = StartupLicenseArtifactSchema.parse(await boundedJson(licensePath));
-        const credential = requireActive
-          ? await credentialStore.loadActive()
-          : await credentialStore.loadForConnectivityCheck();
         if (startup.deviceId !== binding.deviceId || startup.licenseId !== binding.licenseId
             || license.deviceId !== binding.deviceId || license.licenseId !== binding.licenseId
-            || license.usbFingerprint.sha256 !== binding.usbFingerprint
-            || credential.deviceId !== binding.deviceId || credential.userId !== binding.newApiUserId
-            || credential.tokenId !== binding.newApiTokenId) throw new Error("binding");
+            || license.usbFingerprint.sha256 !== binding.usbFingerprint) throw new Error("binding");
       } catch {
         throw new ProvisioningArtifactError("ARTIFACT_INVALID", "Provisioning artifact verification failed.");
       }
@@ -423,7 +416,7 @@ export function createProvisioningArtifactWriter({
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
-      await Promise.all([startupPath, licensePath, credentialPath].map(remove));
+      await Promise.all([startupPath, licensePath].map(remove));
     },
   };
 }
