@@ -4,13 +4,14 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { scanText, scanTrackedRepository } from "./secret-scan.mjs";
 
 const execFileAsync = promisify(execFile);
-const scannerPath = new URL("./secret-scan.mjs", import.meta.url).pathname;
-const productRoot = path.resolve(new URL("..", import.meta.url).pathname);
+const scannerPath = fileURLToPath(new URL("./secret-scan.mjs", import.meta.url));
+const productRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 test("detects private-key blocks and high-confidence credential assignments", () => {
   const beginPrivateKey = `-----BEGIN ${"PRIVATE KEY"}-----`;
