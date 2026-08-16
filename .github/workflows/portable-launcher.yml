@@ -6,10 +6,12 @@ on:
     paths:
       - '.github/workflows/portable-launcher.yml'
       - 'product/launcher/**'
+      - 'product/offline-updater/**'
       - 'product/packaging/**'
       - 'product/scripts/portable-launcher-workflow.test.mjs'
       - 'product/scripts/runtime-manifest*'
       - 'product/tests/packaging/runtime-package.test.mjs'
+      - 'product/tests/packaging/update-feed.test.mjs'
       - 'product/tests/windows/launcher-e2e.ps1'
       - 'product/tests/windows/sign-license-fixture.mjs'
       - 'product/tests/windows/fixtures/portable-runtime*.go'
@@ -48,6 +50,8 @@ jobs:
         run: |
           npm run test:portable-launcher --prefix product
           if ($LASTEXITCODE -ne 0) { throw 'Portable launcher contract tests failed' }
+          npm run test:update-packaging --prefix product
+          if ($LASTEXITCODE -ne 0) { throw 'Update packaging tests failed' }
           node --test product/tests/packaging/runtime-package.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Runtime packaging tests failed' }
 
