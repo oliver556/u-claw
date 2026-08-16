@@ -10,6 +10,9 @@ const destinations = [
   ["记忆", "/memory"],
   ["能力", "/capabilities"],
   ["连接", "/connections"],
+  ["自动化", "/automation"],
+  ["用量", "/usage"],
+  ["余额", "/balance"],
   ["系统", "/system"],
 ] as const;
 
@@ -20,7 +23,7 @@ async function expectNoHorizontalOverflow(page: import("@playwright/test").Page)
   }))).toEqual({ document: 0, body: 0 });
 }
 
-test("all six primary destinations are reachable", async ({ page }) => {
+test("all nine primary destinations are reachable", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
 
@@ -99,6 +102,7 @@ test("mobile titlebar and icon controls preserve touch target sizes", async ({ p
   }
 
   await page.getByRole("button", { name: "展开会话栏" }).click();
+  await page.getByRole("button", { name: "搜索会话" }).click();
   const sessionSearch = await page.locator(".session-search").boundingBox();
   expect(sessionSearch?.height).toBeGreaterThanOrEqual(44);
 });

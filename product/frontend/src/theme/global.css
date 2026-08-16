@@ -882,7 +882,7 @@ html[data-theme="dark"] .user-message > .message-content { background: var(--ucl
   .context-panel { top: 48px; bottom: 58px; width: min(320px, calc(100vw - 36px)); grid-template-rows: 58px 44px minmax(0, 1fr) 42px; }
   .icon-button, .panel-edge-close { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .session-search { height: 44px; }
-  .panel-edge-close { top: 5px; right: 48px; }
+  .panel-edge-close { top: 5px; right: -36px; }
   .context-tabs button { min-height: 44px; }
   .task-activity-center { top: 48px; bottom: 58px; width: 100vw; }
   .artifact-row { grid-template-columns: 34px minmax(0, 1fr); }
