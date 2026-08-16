@@ -4,6 +4,8 @@ import { Activity, Copy, Cpu, HardDrive, Maximize2, Minus, Radio, RotateCw, Sear
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { firstReleaseSurface } from "../app/release-surface";
+
 declare global {
   interface Window {
     uclaw?: {
@@ -96,10 +98,8 @@ function recoveryLabel(action: RecoveryAction): string {
   }[action];
 }
 
-export function AppTitlebar({ status, onReconnect, onOpenActivity }: { status?: GatewayStatus; onReconnect(): Promise<void>; onOpenActivity(): void }) {
+function GlobalSearchControl() {
   const [searchOpen, setSearchOpen] = useState(false);
-  const [isMaximized, setIsMaximized] = useState(false);
-  const [windowError, setWindowError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const searchOpenRef = useRef(false);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -133,6 +133,37 @@ export function AppTitlebar({ status, onReconnect, onOpenActivity }: { status?: 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [closeSearch, openSearch]);
+
+  return <>
+    <Tooltip title="打开全局搜索">
+      <button className="command-search" type="button" onClick={openSearch} aria-label="打开全局搜索">
+        <Search aria-hidden="true" /><span>搜索会话、文件或能力</span><kbd>Ctrl K</kbd>
+      </button>
+    </Tooltip>
+    <Modal
+      className="command-modal"
+      closable={false}
+      footer={null}
+      keyboard
+      maskClosable
+      onCancel={closeSearch}
+      open={searchOpen}
+      title={<span className="sr-only">全局搜索</span>}
+      width={620}
+      afterOpenChange={(open) => open && searchRef.current?.focus()}
+    >
+      <div className="command-dialog">
+        <Search aria-hidden="true" />
+        <input ref={searchRef} autoFocus type="search" aria-label="全局搜索" placeholder="搜索会话、文件或能力" />
+        <kbd>Esc</kbd>
+      </div>
+    </Modal>
+  </>;
+}
+
+export function AppTitlebar({ status, onReconnect, onOpenActivity }: { status?: GatewayStatus; onReconnect(): Promise<void>; onOpenActivity(): void }) {
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [windowError, setWindowError] = useState<string | null>(null);
 
   const invokeWindow = useCallback(async (method: WindowIpcRequest["method"]) => {
     const invoke = window.uclaw?.window?.invoke;
@@ -173,16 +204,12 @@ export function AppTitlebar({ status, onReconnect, onOpenActivity }: { status?: 
           <strong>U-Claw</strong>
           <span className="workspace-name">随身工作区</span>
         </div>
-        <Tooltip title="打开全局搜索">
-          <button className="command-search" type="button" onClick={openSearch} aria-label="打开全局搜索">
-            <Search aria-hidden="true" /><span>搜索会话、文件或能力</span><kbd>Ctrl K</kbd>
-          </button>
-        </Tooltip>
+        {firstReleaseSurface.titlebar.globalSearch ? <GlobalSearchControl /> : null}
         <Tooltip title="打开任务活动中心"><button className="activity-center-trigger" type="button" aria-label="打开任务活动中心" onClick={onOpenActivity}><Activity /></button></Tooltip>
         <div className="runtime-status" aria-label="运行状态">
           <span className="status-item"><i className={`status-dot ${usb.tone}`} /><HardDrive aria-hidden="true" />{usb.label}</span>
           <span className="status-item"><i className={`status-dot ${gateway.tone}`} /><Radio aria-hidden="true" />{gateway.label}</span>
-          <span className="model-status"><Cpu aria-hidden="true" />{status?.activeModel?.label ?? "模型加载中"}</span>
+          {firstReleaseSurface.titlebar.modelStatus ? <span className="model-status"><Cpu aria-hidden="true" />{status?.activeModel?.label ?? "模型加载中"}</span> : null}
         </div>
         <div className="window-controls" aria-label="窗口控制">
           <Tooltip title="最小化"><button type="button" aria-label="最小化" onClick={() => void invokeWindow("minimize")}><Minus aria-hidden="true" /></button></Tooltip>
@@ -198,24 +225,6 @@ export function AppTitlebar({ status, onReconnect, onOpenActivity }: { status?: 
           }}><RotateCw aria-hidden="true" />{recoveryLabel(action)}</button>;
         })}</div></div> : null}
       </header>
-      <Modal
-        className="command-modal"
-        closable={false}
-        footer={null}
-        keyboard
-        maskClosable
-        onCancel={closeSearch}
-        open={searchOpen}
-        title={<span className="sr-only">全局搜索</span>}
-        width={620}
-        afterOpenChange={(open) => open && searchRef.current?.focus()}
-      >
-        <div className="command-dialog">
-          <Search aria-hidden="true" />
-          <input ref={searchRef} autoFocus type="search" aria-label="全局搜索" placeholder="搜索会话、文件或能力" />
-          <kbd>Esc</kbd>
-        </div>
-      </Modal>
     </>
   );
 }

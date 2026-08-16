@@ -28,7 +28,7 @@ function bridge(state: "available" | "offline" | "unavailable" = "available", re
 describe("ReleaseCenter", () => {
   it("renders structured update metadata and installs only after confirmation", async () => {
     const release = bridge();
-    render(<ReleaseCenter bridge={release as any} onOpenDiagnostics={vi.fn()} />);
+    render(<ReleaseCenter bridge={release as any} />);
     expect(await screen.findByText("0.2.0")).toBeVisible();
     expect(screen.getByText("win32 · x64")).toBeVisible();
     expect(screen.getByText("安全更新")).toBeVisible();
@@ -38,23 +38,23 @@ describe("ReleaseCenter", () => {
   });
 
   it("shows offline retry and unavailable states", async () => {
-    const offline = bridge("offline"); render(<ReleaseCenter bridge={offline as any} onOpenDiagnostics={vi.fn()} />);
+    const offline = bridge("offline"); render(<ReleaseCenter bridge={offline as any} />);
     expect(await screen.findByText("当前离线，无法检查更新")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(offline.invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "release.retry" })));
     cleanup();
-    render(<ReleaseCenter bridge={bridge("unavailable") as any} onOpenDiagnostics={vi.fn()} />);
+    render(<ReleaseCenter bridge={bridge("unavailable") as any} />);
     expect(await screen.findByText("更新服务不可用")).toBeVisible();
     expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
   });
 
   it("shows a fail-closed production configuration reason", async () => {
-    render(<ReleaseCenter bridge={bridge("unavailable", "clean", false, "cleaning", "发布更新配置缺失。") as any} onOpenDiagnostics={vi.fn()} />);
+    render(<ReleaseCenter bridge={bridge("unavailable", "clean", false, "cleaning", "发布更新配置缺失。") as any} />);
     expect(await screen.findByText("发布更新配置缺失。")).toBeVisible();
   });
 
   it("keeps USB data protected and requires token confirmation for host cache cleanup", async () => {
-    const release = bridge("available", "clean", true); render(<ReleaseCenter bridge={release as any} onOpenDiagnostics={vi.fn()} />);
+    const release = bridge("available", "clean", true); render(<ReleaseCenter bridge={release as any} />);
     fireEvent.click(await screen.findByRole("tab", { name: "卸载与清理" }));
     expect(await screen.findByText("默认永久保留")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "清理本机缓存" }));
@@ -64,13 +64,13 @@ describe("ReleaseCenter", () => {
   });
 
   it("surfaces interrupted update recovery state", async () => {
-    render(<ReleaseCenter bridge={bridge("unavailable", "recovery-required") as any} onOpenDiagnostics={vi.fn()} />);
+    render(<ReleaseCenter bridge={bridge("unavailable", "recovery-required") as any} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("自动回滚失败，需要恢复");
   });
 
   it("previews and confirms explicit rollback", async () => {
     const release = bridge();
-    render(<ReleaseCenter bridge={release as any} onOpenDiagnostics={vi.fn()} />);
+    render(<ReleaseCenter bridge={release as any} />);
     fireEvent.click(await screen.findByRole("button", { name: "回滚上一版本" }));
     expect(await screen.findByText("将切换到已验证版本 0.0.9")).toBeVisible();
     fireEvent.click(within(screen.getByRole("dialog", { name: "确认版本回滚" })).getByRole("button", { name: "确认回滚" }));
@@ -81,21 +81,18 @@ describe("ReleaseCenter", () => {
 
   it("does not offer cancellation after an install enters switching", async () => {
     const release = bridge("available", "clean", true, "switching");
-    render(<ReleaseCenter bridge={release as any} onOpenDiagnostics={vi.fn()} />);
+    render(<ReleaseCenter bridge={release as any} />);
     fireEvent.click(await screen.findByRole("button", { name: "安装更新" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "确认安装更新" })).getByRole("button", { name: "确认安装" }));
     await waitFor(() => expect(screen.getByText("操作完成。")).toBeVisible());
     expect(screen.queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
   });
 
-  it("offers Doctor as UI navigation and never accepts command input", async () => {
-    const open = vi.fn(); const invoke = vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: null }));
-    window.uclaw = { window: { invoke: invoke as any } };
-    render(<ReleaseCenter bridge={bridge() as any} onOpenDiagnostics={open} />);
-    fireEvent.click(await screen.findByRole("button", { name: "打开 Doctor" }));
-    expect(open).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: "打开 CLI 控制台" }));
-    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "open-advanced-console", params: {} }));
+  it("does not expose diagnostics or CLI entry points", async () => {
+    render(<ReleaseCenter bridge={bridge() as any} />);
+    await screen.findByText("0.2.0");
+    expect(screen.queryByRole("button", { name: "打开 Doctor" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开 CLI 控制台" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /命令/ })).not.toBeInTheDocument();
   });
 });

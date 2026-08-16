@@ -2,6 +2,7 @@ import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
+import { firstReleaseHiddenPrimaryPathSet } from "../app/release-surface";
 import { primaryRoutes } from "../app/routes";
 
 export function PrimaryRail() {
@@ -12,8 +13,11 @@ export function PrimaryRail() {
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const moreItemRefs = useRef<Array<HTMLAnchorElement | null>>([]);
-  const directRoutes = primaryRoutes.slice(0, 4);
-  const moreRoutes = primaryRoutes.slice(4);
+  const visibleRoutes = primaryRoutes.filter((route) =>
+    !firstReleaseHiddenPrimaryPathSet.has(route.path),
+  );
+  const directRoutes = visibleRoutes.slice(0, 4);
+  const moreRoutes = visibleRoutes.slice(4);
 
   useEffect(() => {
     const updateViewport = () => {
@@ -62,7 +66,7 @@ export function PrimaryRail() {
 
   return (
     <nav className="primary-rail" aria-label="主导航">
-      {(isMobile ? directRoutes : primaryRoutes).map(({ path, label, icon: Icon }) => (
+      {(isMobile ? directRoutes : visibleRoutes).map(({ path, label, icon: Icon }) => (
         <Link key={path} className={`rail-link route-${label}${pathname === path ? " active" : ""}`} to={path} aria-current={pathname === path ? "page" : undefined}>
           <Icon aria-hidden="true" /><span>{label}</span>
         </Link>
