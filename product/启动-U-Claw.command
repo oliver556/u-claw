@@ -13,4 +13,4 @@ export UCLAW_DATA_DIR="${UCLAW_DATA_DIR:-$UCLAW_RUNTIME_DIR/data}"
 export UCLAW_CACHE_DIR="${UCLAW_CACHE_DIR:-$UCLAW_RUNTIME_DIR/cache}"
 export OPENCLAW_CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$UCLAW_DATA_DIR/.openclaw/openclaw.json}"
 
-exec "$PRODUCT_DIR/node_modules/.bin/electron" "$PRODUCT_DIR/desktop/dist/entry.js"
+exec "$PRODUCT_DIR/node_modules/.bin/electron" "$PRODUCT_DIR/desktop/dist/entry.js" --uclaw-startup-mode=normal

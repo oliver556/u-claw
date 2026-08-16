@@ -12,6 +12,7 @@ describe("local Electron launcher", () => {
     assert.match(source, /PRODUCT_DIR=/u);
     assert.match(source, /UCLAW_RUNTIME_DIR/u);
     assert.match(source, /desktop\/dist\/entry\.js/u);
+    assert.match(source, /--uclaw-startup-mode=normal/u);
     assert.doesNotMatch(source, /\.codex\/worktrees/u);
   });
 });
