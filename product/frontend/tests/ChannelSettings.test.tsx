@@ -7,6 +7,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelSettings } from "../src/features/channels/ChannelSettings";
+import { ManagedChannelSettings } from "../src/features/channels/ManagedChannelSettings";
 
 const snapshot: ChannelSnapshot = {
   schemaVersion: 1,
@@ -85,9 +86,23 @@ describe("ChannelSettings", () => {
     delete window.uclaw;
   });
 
+  it("shows only personal WeChat on the first-release surface", async () => {
+    const invoke = vi.fn(async (request: ChannelIpcRequest) => success(request));
+    window.uclaw = { channels: { invoke } } as never;
+    render(<ChannelSettings />);
+
+    expect(await screen.findByText("个人微信")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "新增连接" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("渠道筛选器")).not.toBeInTheDocument();
+    for (const label of ["Telegram", "QQ Bot", "飞书", "企业微信", "Discord"]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+    expect(invoke).not.toHaveBeenCalledWith(expect.objectContaining({ method: "channels.list-managed" }));
+  });
+
   it("shows unified status, last check and only masked credential hints", async () => {
     window.uclaw = { channels: { invoke: vi.fn(async (request: ChannelIpcRequest) => success(request)) } } as never;
-    render(<ChannelSettings />);
+    render(<ManagedChannelSettings />);
 
     expect(await screen.findByText("Telegram 主机器人")).toBeVisible();
     expect(screen.getAllByText("已连接").length).toBeGreaterThan(0);
@@ -179,7 +194,7 @@ describe("ChannelSettings", () => {
       ? { method: request.method, requestId: request.requestId, ok: true, result: { channelId: request.params.channelId, status: "connected", checkedAt: "2026-08-09T09:00:00.000Z" } } as ChannelIpcResponse
       : success(request));
     window.uclaw = { channels: { invoke } } as never;
-    render(<ChannelSettings />);
+    render(<ManagedChannelSettings />);
     await screen.findByText("Telegram 主机器人");
 
     fireEvent.click(screen.getByRole("button", { name: "测试 Telegram 主机器人" }));
@@ -209,7 +224,7 @@ describe("ChannelSettings", () => {
       return success(request);
     });
     window.uclaw = { channels: { invoke } } as never;
-    render(<ChannelSettings />);
+    render(<ManagedChannelSettings />);
     await screen.findByText("Discord 主机器人");
 
     expect(screen.getByText(/最近收取/u)).toBeVisible();
@@ -250,7 +265,7 @@ describe("ChannelSettings", () => {
     const pending = new Promise<ChannelIpcResponse>((resolve) => { resolveTest = resolve; });
     const invoke = vi.fn((request: ChannelIpcRequest) => request.method === "channels.test" ? pending : Promise.resolve(success(request)));
     window.uclaw = { channels: { invoke } } as never;
-    render(<ChannelSettings />);
+    render(<ManagedChannelSettings />);
     await screen.findByText("Telegram 主机器人");
 
     fireEvent.click(screen.getByRole("button", { name: "测试 Telegram 主机器人" }));
@@ -264,7 +279,7 @@ describe("ChannelSettings", () => {
   it("creates Telegram credentials and never pre-fills stored secrets while editing", async () => {
     const invoke = vi.fn(async (request: ChannelIpcRequest) => success(request));
     window.uclaw = { channels: { invoke } } as never;
-    render(<ChannelSettings />);
+    render(<ManagedChannelSettings />);
     await screen.findByText("Telegram 主机器人");
 
     fireEvent.click(screen.getByRole("button", { name: "新增连接" }));
@@ -289,7 +304,7 @@ describe("ChannelSettings", () => {
   it("submits QQ Bot allowFrom as a bounded line list", async () => {
     const invoke = vi.fn(async (request: ChannelIpcRequest) => success(request));
     window.uclaw = { channels: { invoke } } as never;
-    render(<ChannelSettings />);
+    render(<ManagedChannelSettings />);
     await screen.findByText("Telegram 主机器人");
 
     fireEvent.click(screen.getByRole("button", { name: "新增连接" }));
@@ -309,7 +324,7 @@ describe("ChannelSettings", () => {
 
   it("distinguishes Feishu and WeCom webhook credential contracts", async () => {
     window.uclaw = { channels: { invoke: vi.fn(async (request: ChannelIpcRequest) => success(request, { schemaVersion: 1, channels: [] })) } } as never;
-    render(<ChannelSettings />);
+    render(<ManagedChannelSettings />);
     await screen.findByText("还没有渠道配置");
     fireEvent.click(screen.getByRole("button", { name: "新增连接" }));
 
@@ -330,7 +345,7 @@ describe("ChannelSettings", () => {
   it("requires confirmation before deleting stored channel credentials", async () => {
     const invoke = vi.fn(async (request: ChannelIpcRequest) => success(request));
     window.uclaw = { channels: { invoke } } as never;
-    render(<ChannelSettings />);
+    render(<ManagedChannelSettings />);
     await screen.findByText("Telegram 主机器人");
 
     fireEvent.click(screen.getByRole("button", { name: "删除 Telegram 主机器人" }));
@@ -350,7 +365,7 @@ describe("ChannelSettings", () => {
       return success(request, empty);
     });
     window.uclaw = { channels: { invoke } } as never;
-    render(<ChannelSettings />);
+    render(<ManagedChannelSettings />);
 
     expect(await screen.findByText("渠道配置暂时不可用")).toBeVisible();
     expect(document.body.textContent).not.toContain("secret-token");

@@ -1,12 +1,12 @@
 import type { ReleaseBridge, ReleaseCheckResult, ReleaseIpcRequest, ReleaseOperation, ReleaseRollbackPreview, UninstallPreview } from "@uclaw/shared";
-import { AlertTriangle, CheckCircle2, Download, LoaderCircle, RefreshCw, ShieldCheck, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, LoaderCircle, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 let sequence = 0;
 const requestId = (method: string) => `release-${method}-${Date.now()}-${++sequence}`;
 const unavailableBridge: ReleaseBridge = { async invoke(request) { return { method: request.method, requestId: request.requestId, ok: false, error: { code: "UNAVAILABLE", message: "发布服务未配置。", retryable: false, recoveryActions: [], causeDetails: {} } } as any; } };
 
-export function ReleaseCenter({ bridge, onOpenDiagnostics }: { bridge?: ReleaseBridge; onOpenDiagnostics(): void }) {
+export function ReleaseCenter({ bridge }: { bridge?: ReleaseBridge }) {
   const resolved = bridge ?? window.uclaw?.release ?? unavailableBridge;
   const [tab, setTab] = useState<"updates" | "uninstall">("updates");
   const [channel, setChannel] = useState<"stable" | "beta">("stable");
@@ -53,7 +53,6 @@ export function ReleaseCenter({ bridge, onOpenDiagnostics }: { bridge?: ReleaseB
     } catch (caught) { setError(caught instanceof Error ? caught.message : "操作失败。"); }
   };
   const stateText = result?.state === "offline" ? "当前离线，无法检查更新" : result?.state === "unavailable" ? "更新服务不可用" : result?.state === "timeout" ? "更新检查超时" : result?.state === "cancelled" ? "更新检查已取消" : result?.state === "current" ? "当前已是最新版本" : "未发现更新";
-  const openCli = () => void window.uclaw?.window?.invoke?.({ method: "open-advanced-console", requestId: requestId("console"), params: {} });
   const cancelCheck = async () => { try { setResult(await invoke({ method: "release.cancel-check", requestId: requestId("cancel-check"), params: {} }) as ReleaseCheckResult); } finally { setChecking(false); } };
   const cancelOperation = async () => { if (operation) setOperation(await invoke({ method: "release.cancel", requestId: requestId("cancel"), params: { operationId: operation.id } }) as ReleaseOperation); };
   const previewRollback = async () => {
@@ -64,7 +63,7 @@ export function ReleaseCenter({ bridge, onOpenDiagnostics }: { bridge?: ReleaseB
     } catch (caught) { setError(caught instanceof Error ? caught.message : "回滚预览失败。"); }
   };
   return <section className="release-center secondary-view">
-    <header><div><h1>发布与恢复</h1><p>签名更新、Doctor 入口与受控卸载</p></div><div className="release-head-actions">{checking ? <button className="secondary-command" type="button" onClick={() => void cancelCheck()}><X />取消检查</button> : null}<button className="secondary-command" type="button" onClick={onOpenDiagnostics}><Stethoscope />打开 Doctor</button><button className="secondary-command" type="button" onClick={openCli}><SquareTerminal />打开 CLI 控制台</button></div></header>
+    <header><div><h1>发布与恢复</h1><p>签名更新与受控卸载</p></div><div className="release-head-actions">{checking ? <button className="secondary-command" type="button" onClick={() => void cancelCheck()}><X />取消检查</button> : null}</div></header>
     <div className="release-tabs" role="tablist" aria-label="发布工具"><button type="button" role="tab" aria-selected={tab === "updates"} onClick={() => setTab("updates")}><Download />更新</button><button type="button" role="tab" aria-selected={tab === "uninstall"} onClick={() => void openUninstall()}><Trash2 />卸载与清理</button></div>
     {error ? <div className="data-error" role="alert">{error}</div> : null}
     {recovery && recovery.state !== "clean" ? <div className={`release-recovery ${recovery.state}`} role="alert"><AlertTriangle />{recovery.message}</div> : null}
