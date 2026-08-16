@@ -146,7 +146,7 @@ describe("SkillManager", () => {
       if (request.method === "skills.installed") return response(request, []);
       if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [] });
       if (request.method === "skills.open-hub") return response(request, { opened: true });
-      if (request.method === "skills.import-select") return response(request, { token: "selection-token-1", fileName: "useful.zip", sizeBytes: 1024 });
+      if (request.method === "skills.import-select") return response(request, { token: "fixture-selection-token-1", fileName: "useful.zip", sizeBytes: 1024 });
       if (request.method === "skills.import-prepare") return response(request, { ...detail, risk: "high" });
       throw new Error(`unexpected ${request.method}`);
     });
@@ -157,14 +157,14 @@ describe("SkillManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
     expect(await screen.findByRole("dialog", { name: "确认导入 命令运行器" })).toHaveTextContent("高风险");
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "skills.open-hub", params: {} }));
-    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "skills.import-prepare", params: { token: "selection-token-1" } }));
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "skills.import-prepare", params: { token: "fixture-selection-token-1" } }));
   });
 
   it("shows ZIP validation failures while the workbench data remains available", async () => {
     const invoke = vi.fn(async (request: any) => {
       if (request.method === "skills.installed") return response(request, []);
       if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [] });
-      if (request.method === "skills.import-select") return response(request, { token: "selection-token-1", fileName: "broken.zip", sizeBytes: 1024 });
+      if (request.method === "skills.import-select") return response(request, { token: "fixture-selection-token-1", fileName: "broken.zip", sizeBytes: 1024 });
       if (request.method === "skills.import-prepare") return failure(request, "Skill ZIP frontmatter 缺少 version");
       throw new Error(`unexpected ${request.method}`);
     });
@@ -184,7 +184,7 @@ describe("SkillManager", () => {
     const invoke = vi.fn(async (request: any) => {
       if (request.method === "skills.installed") return response(request, installedReads++ === 0 ? [] : [installed]);
       if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: installedReads > 1 ? [runtimeItem] : [] });
-      if (request.method === "skills.import-select") return response(request, { token: "selection-token-1", fileName: "useful.zip", sizeBytes: 1024 });
+      if (request.method === "skills.import-select") return response(request, { token: "fixture-selection-token-1", fileName: "useful.zip", sizeBytes: 1024 });
       if (request.method === "skills.import-prepare") return response(request, { ...detail, risk: "high" });
       if (request.method === "skills.import-install") return response(request, { id: "zip-op-1", slug: detail.slug, action: "install", state: "queued", progress: 0, phase: "queued" });
       if (request.method === "skills.operation") return response(request, { id: "zip-op-1", slug: detail.slug, action: "install", state: "succeeded", progress: 100, phase: "complete" });

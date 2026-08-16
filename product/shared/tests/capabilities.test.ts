@@ -55,9 +55,9 @@ describe("capability contracts", () => {
   it("accepts controlled Skill import and hub actions without renderer paths or URLs", () => {
     for (const request of [
       { method: "skills.import-select", requestId: "select-1", params: {} },
-      { method: "skills.import-prepare", requestId: "prepare-1", params: { token: "selection-token-1" } },
-      { method: "skills.import-install", requestId: "install-1", params: { token: "selection-token-1", confirmation: { permissionFingerprint: "abc", acceptedRisk: "high" } } },
-      { method: "skills.import-dispose", requestId: "dispose-1", params: { token: "selection-token-1" } },
+      { method: "skills.import-prepare", requestId: "prepare-1", params: { token: "fixture-selection-token-1" } },
+      { method: "skills.import-install", requestId: "install-1", params: { token: "fixture-selection-token-1", confirmation: { permissionFingerprint: "abc", acceptedRisk: "high" } } },
+      { method: "skills.import-dispose", requestId: "dispose-1", params: { token: "fixture-selection-token-1" } },
       { method: "skills.open-hub", requestId: "hub-1", params: {} },
       { method: "skills.resolve-install", requestId: "resolve-1", params: { identity: "@alice/example-skill" } },
     ]) expect(() => SkillIpcRequestSchema.parse(request)).not.toThrow();

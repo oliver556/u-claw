@@ -66,7 +66,7 @@ describe("Skill IPC", () => {
       manifest: { kind: "skill", id: "one", version: "1.0.0", entry: "SKILL.md" },
     } as const;
     const coordinator = {
-      selectImport: vi.fn(async () => ({ token: "selection-token-1", fileName: "skill.zip", sizeBytes: 123 })),
+      selectImport: vi.fn(async () => ({ token: "fixture-selection-token-1", fileName: "skill.zip", sizeBytes: 123 })),
       prepareImport: vi.fn(async () => imported),
       installImport: vi.fn(async () => ({ id: "op-1", slug: "one", action: "install", state: "queued", progress: 0, phase: "queued" })),
       disposeImport: vi.fn(async () => undefined),
@@ -77,13 +77,13 @@ describe("Skill IPC", () => {
     const confirmation = { permissionFingerprint: "abc", acceptedRisk: "high" as const };
 
     await dispatch({ method: "skills.import-select", requestId: "s1", params: {} });
-    await dispatch({ method: "skills.import-prepare", requestId: "s2", params: { token: "selection-token-1" } });
-    await dispatch({ method: "skills.import-install", requestId: "s3", params: { token: "selection-token-1", confirmation } });
-    await dispatch({ method: "skills.import-dispose", requestId: "s4", params: { token: "selection-token-1" } });
+    await dispatch({ method: "skills.import-prepare", requestId: "s2", params: { token: "fixture-selection-token-1" } });
+    await dispatch({ method: "skills.import-install", requestId: "s3", params: { token: "fixture-selection-token-1", confirmation } });
+    await dispatch({ method: "skills.import-dispose", requestId: "s4", params: { token: "fixture-selection-token-1" } });
     await dispatch({ method: "skills.open-hub", requestId: "s5", params: {} });
     await dispatch({ method: "skills.resolve-install", requestId: "s6", params: { identity: "@alice/one" } });
 
-    expect(coordinator.installImport).toHaveBeenCalledWith("selection-token-1", confirmation);
+    expect(coordinator.installImport).toHaveBeenCalledWith("fixture-selection-token-1", confirmation);
     expect(coordinator.openHub).toHaveBeenCalledOnce();
     expect(coordinator.resolveInstall).toHaveBeenCalledWith("@alice/one");
   });
