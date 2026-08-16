@@ -432,6 +432,38 @@ describe("bootstrapDesktopApp", () => {
     expect(calls).toEqual(["ipc", "services"]);
   });
 
+  it("cleans up before exiting with the launcher update-restart code", async () => {
+    const calls: string[] = [];
+    let restartForUpdate: (() => Promise<void>) | undefined;
+    let finishStop: (() => void) | undefined;
+    const exit = vi.fn((code: number) => calls.push(`exit:${code}`));
+    await bootstrapDesktopApp({
+      app: {
+        requestSingleInstanceLock: () => true,
+        quit: vi.fn(),
+        exit,
+        whenReady: vi.fn(async () => undefined),
+        on: vi.fn(),
+      },
+      createWindow: vi.fn(async (registerIpc) => {
+        const window = { isDestroyed: () => false, isMinimized: () => false, restore: vi.fn(), focus: vi.fn() };
+        registerIpc(window);
+        return window;
+      }),
+      registerIpc: vi.fn((_window, restart) => {
+        restartForUpdate = restart;
+        return () => { calls.push("ipc"); };
+      }),
+      stopGateway: vi.fn(() => new Promise<void>((resolve) => { finishStop = () => { calls.push("services"); resolve(); }; })),
+    });
+
+    const pending = restartForUpdate!();
+    expect(exit).not.toHaveBeenCalled();
+    finishStop?.();
+    await pending;
+    expect(calls).toEqual(["ipc", "services", "exit:42"]);
+  });
+
   it("prevents every quit attempt until cleanup completes", async () => {
     const listeners = new Map<string, (event?: { preventDefault(): void }) => void>();
     const quit = vi.fn();
@@ -605,7 +637,7 @@ describe("runDesktopMain", () => {
     expect(buildGatewayLaunchOptions).toHaveBeenCalledWith(18791);
     expect(probeCapabilities).toHaveBeenCalledWith(18791, expect.any(AbortSignal));
     expect(show).toHaveBeenCalledOnce();
-    expect(registerIpc).toHaveBeenCalledWith(window, expect.any(Function));
+    expect(registerIpc).toHaveBeenCalledWith(window, expect.any(Function), expect.any(Function));
 
     listeners.get("before-quit")?.({ preventDefault: vi.fn() });
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");

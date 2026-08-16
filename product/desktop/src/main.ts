@@ -111,6 +111,7 @@ export function createProductionDataService(
 export interface DesktopAppLike {
   requestSingleInstanceLock(): boolean;
   quit(): void;
+  exit?(code: number): void;
   whenReady(): Promise<void>;
   on(event: string, listener: (event?: { preventDefault(): void }) => void): void;
 }
@@ -266,7 +267,7 @@ export function validateRendererUrl(value: string | undefined): string | undefin
 export interface BootstrapDesktopDependencies<TWindow extends AppWindowLike> {
   app: DesktopAppLike;
   createWindow(registerIpc: (window: TWindow) => (() => void) | void): Promise<TWindow>;
-  registerIpc(window: TWindow): (() => void) | void;
+  registerIpc(window: TWindow, restartForUpdate: () => Promise<void>): (() => void) | void;
   stopGateway(): Promise<void> | void;
   abortStartup?(): void;
   startupSignal?: AbortSignal;
@@ -312,6 +313,17 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
   });
   let shutdownStarted = false;
   let cleanupDone = false;
+  let updateRestartPromise: Promise<void> | undefined;
+  const restartForUpdate = (): Promise<void> => updateRestartPromise ??= (async () => {
+    abortStartup?.();
+    try {
+      await cleanupRuntime();
+    } finally {
+      cleanupDone = true;
+      if (!app.exit) throw new Error("Desktop application exit is unavailable.");
+      app.exit(42);
+    }
+  })();
   app.on("before-quit", (event) => {
     if (cleanupDone) return;
     event?.preventDefault();
@@ -339,7 +351,7 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
   try {
     await app.whenReady();
     window = await createWindow((createdWindow) => {
-      const registered = registerIpc(createdWindow);
+      const registered = registerIpc(createdWindow, restartForUpdate);
       if (!registered) return;
       let active = true;
       const dispose = (): void => {
@@ -449,7 +461,7 @@ export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWind
     registerIpc: (window: TWindow) => (() => void) | void,
     signal: AbortSignal,
   ): Promise<TWindow>;
-  registerIpc(window: TWindow, dispatchClient: DesktopMainOptions["dispatchClient"]): () => void;
+  registerIpc(window: TWindow, dispatchClient: DesktopMainOptions["dispatchClient"], restartForUpdate: () => Promise<void>): () => void;
 }
 
 export function disposeDesktopIpc(
@@ -594,7 +606,7 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
       });
       return started.window;
     },
-    registerIpc: (window) => runtime.registerIpc(window, options.dispatchClient),
+    registerIpc: (window, restartForUpdate) => runtime.registerIpc(window, options.dispatchClient, restartForUpdate),
   });
 }
 
@@ -896,7 +908,7 @@ export async function startElectronMain(
         },
       });
     },
-    registerIpc: (window, dispatchClient) => {
+    registerIpc: (window, dispatchClient, restartForUpdate) => {
       diagnosticsRuntime.gatewayStatus = "ready";
       if (options.gatewayMediaToken === undefined || options.gatewayOrigin === undefined || options.imageDataRoot === undefined) throw new Error("Gateway image authority is unavailable.");
       const images = createImageOperationDispatcher(createImageOperationService({
@@ -954,6 +966,8 @@ export async function startElectronMain(
       dispatchData: data.dispatch,
       dispatchDiagnostics: diagnostics.dispatch,
       dispatchRelease: createReleaseDispatcher(release),
+      canRestartForUpdate: (operationId) => release.canRestartForUpdate(operationId),
+      restartForUpdate,
       dispatchImage: images,
       coordinateWrite: (operation) => consistencyCoordinator.runTrackedWrite(operation),
       selectAttachments: options.selectAttachments,

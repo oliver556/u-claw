@@ -128,6 +128,27 @@ describe("release service", () => {
     expect(runMutation).toHaveBeenCalledOnce();
   });
 
+  it("authorizes controlled restart only for a completed install", async () => {
+    const setup = await fixture();
+    const checked = await setup.service.check("stable");
+    if (checked.state !== "available" || !checked.update) throw new Error("release preview unavailable");
+    const install = setup.service.install(checked.update.id, checked.update.previewToken, true);
+
+    expect(setup.service.canRestartForUpdate("unknown")).toBe(false);
+    expect(await setup.service.wait(install.id)).toMatchObject({
+      kind: "install",
+      state: "completed",
+      phase: "completed",
+      restartRequired: true,
+    });
+    expect(setup.service.canRestartForUpdate(install.id)).toBe(true);
+
+    const preview = await setup.service.previewUninstall();
+    const uninstall = setup.service.executeUninstall(["host-cache"], preview.previewToken, true);
+    expect(await setup.service.wait(uninstall.id)).toMatchObject({ kind: "uninstall", state: "completed", restartRequired: false });
+    expect(setup.service.canRestartForUpdate(uninstall.id)).toBe(false);
+  });
+
   it("fails a queued install when the consistency coordinator rejects it", async () => {
     const runMutation = async <T>(_operation: () => Promise<T>): Promise<T> => { throw new Error("runtime unavailable"); };
     const setup = await fixture({ runMutation });

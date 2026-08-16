@@ -9,7 +9,6 @@ const unavailableBridge: ReleaseBridge = { async invoke(request) { return { meth
 export function ReleaseCenter({ bridge }: { bridge?: ReleaseBridge }) {
   const resolved = bridge ?? window.uclaw?.release ?? unavailableBridge;
   const [tab, setTab] = useState<"updates" | "uninstall">("updates");
-  const [channel, setChannel] = useState<"stable" | "beta">("stable");
   const [checking, setChecking] = useState(true);
   const [result, setResult] = useState<ReleaseCheckResult>();
   const [preview, setPreview] = useState<UninstallPreview>();
@@ -26,10 +25,10 @@ export function ReleaseCenter({ bridge }: { bridge?: ReleaseBridge }) {
   }, [resolved]);
   const check = useCallback(async (retry = false) => {
     setChecking(true); setError(undefined);
-    try { setResult(await invoke(retry ? { method: "release.retry", requestId: requestId("retry"), params: {} } : { method: "release.check", requestId: requestId("check"), params: { channel } }) as ReleaseCheckResult); }
-    catch (caught) { setResult({ state: "unavailable", checkedAt: new Date().toISOString(), currentVersion: "未知", channel, retryable: false, message: caught instanceof Error ? caught.message : "发布服务不可用。" }); }
+    try { setResult(await invoke(retry ? { method: "release.retry", requestId: requestId("retry"), params: {} } : { method: "release.check", requestId: requestId("check"), params: { channel: "stable" } }) as ReleaseCheckResult); }
+    catch (caught) { setResult({ state: "unavailable", checkedAt: new Date().toISOString(), currentVersion: "未知", channel: "stable", retryable: false, message: caught instanceof Error ? caught.message : "发布服务不可用。" }); }
     finally { setChecking(false); }
-  }, [channel, invoke]);
+  }, [invoke]);
   useEffect(() => { void check(); }, [check]);
   useEffect(() => { void invoke({ method: "release.recovery", requestId: requestId("recovery"), params: {} }).then((value) => setRecovery(value as typeof recovery)).catch((caught) => setError(caught instanceof Error ? caught.message : "更新恢复检查失败。")); }, [invoke]);
   useEffect(() => {
@@ -55,6 +54,17 @@ export function ReleaseCenter({ bridge }: { bridge?: ReleaseBridge }) {
   const stateText = result?.state === "offline" ? "当前离线，无法检查更新" : result?.state === "unavailable" ? "更新服务不可用" : result?.state === "timeout" ? "更新检查超时" : result?.state === "cancelled" ? "更新检查已取消" : result?.state === "current" ? "当前已是最新版本" : "未发现更新";
   const cancelCheck = async () => { try { setResult(await invoke({ method: "release.cancel-check", requestId: requestId("cancel-check"), params: {} }) as ReleaseCheckResult); } finally { setChecking(false); } };
   const cancelOperation = async () => { if (operation) setOperation(await invoke({ method: "release.cancel", requestId: requestId("cancel"), params: { operationId: operation.id } }) as ReleaseOperation); };
+  const restartForUpdate = async () => {
+    if (!operation) return;
+    try {
+      const bridge = window.uclaw?.window;
+      if (!bridge?.invoke) throw new Error("更新重启服务不可用。");
+      const restartRequestId = requestId("restart");
+      const response = await bridge.invoke({ method: "restart-for-update", requestId: restartRequestId, params: { operationId: operation.id } });
+      if (response.method !== "restart-for-update" || response.requestId !== restartRequestId) throw new Error("更新重启响应关联失败。");
+      if (!response.ok) throw new Error(response.error.message);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "更新重启失败。"); }
+  };
   const previewRollback = async () => {
     try {
       const value = await invoke({ method: "release.rollback-preview", requestId: requestId("rollback-preview"), params: {} }) as ReleaseRollbackPreview;
@@ -68,10 +78,10 @@ export function ReleaseCenter({ bridge }: { bridge?: ReleaseBridge }) {
     {error ? <div className="data-error" role="alert">{error}</div> : null}
     {recovery && recovery.state !== "clean" ? <div className={`release-recovery ${recovery.state}`} role="alert"><AlertTriangle />{recovery.message}</div> : null}
     <div className="release-content">
-      {tab === "updates" ? <>{checking ? <div className="data-state"><LoaderCircle className="spin" /><strong>正在检查更新</strong></div> : result?.update ? <section className="release-update"><header><div><span>版本</span><strong>{result.update.version}</strong></div><em>{result.update.channel}</em></header><dl><div><dt>发布时间</dt><dd>{new Date(result.update.publishedAt).toLocaleString()}</dd></div><div><dt>兼容性</dt><dd>{result.update.compatibility.platform} · {result.update.compatibility.arch}</dd></div><div><dt>Runtime</dt><dd>{result.update.compatibility.runtimeId}</dd></div></dl><ul>{result.update.notes.map((note) => <li key={note}>{note}</li>)}</ul><div className="release-trust"><ShieldCheck />签名清单、版本绑定与校验和将在安装前验证</div><button type="button" onClick={() => setConfirm("install")}><Download />安装更新</button></section> : <div className="data-state"><AlertTriangle /><strong>{stateText}</strong>{result?.message ? <small>{result.message}</small> : null}{result?.retryable ? <button type="button" onClick={() => void check(true)}><RefreshCw />重试</button> : null}</div>}
-      <label className="release-channel">更新渠道<select value={channel} onChange={(event) => setChannel(event.target.value as "stable" | "beta")}><option value="stable">Stable</option><option value="beta">Beta</option></select></label><button type="button" onClick={() => void previewRollback()}><RefreshCw />回滚上一版本</button></> : <section className="uninstall-preview"><h2>卸载范围</h2>{preview ? preview.scopes.map((scope) => <div key={scope.id} className={scope.protected ? "protected" : ""}><span><strong>{scope.label}</strong><small>{scope.detail}</small></span>{scope.protected ? <ShieldCheck /> : scope.available ? <CheckCircle2 /> : <X />}</div>) : <div className="data-state"><LoaderCircle className="spin" /></div>}<button type="button" disabled={!preview} onClick={() => setConfirm("uninstall")}><Trash2 />清理本机缓存</button></section>}
+      {tab === "updates" ? <>{checking ? <div className="data-state"><LoaderCircle className="spin" /><strong>正在检查更新</strong></div> : result?.update ? <section className="release-update"><header><div><span>版本</span><strong>{result.update.version}</strong></div><em>{result.update.channel}</em></header><dl><div><dt>发布时间</dt><dd>{new Date(result.update.publishedAt).toLocaleString()}</dd></div><div><dt>兼容性</dt><dd>{result.update.compatibility.platform} · {result.update.compatibility.arch}</dd></div><div><dt>Runtime</dt><dd>{result.update.compatibility.runtimeId}</dd></div><div><dt>包大小</dt><dd>{result.update.bytes} 字节</dd></div></dl><ul>{result.update.notes.map((note) => <li key={note}>{note}</li>)}</ul><div className="release-trust"><ShieldCheck />签名清单、版本绑定与校验和将在安装前验证</div><button type="button" onClick={() => setConfirm("install")}><Download />安装更新</button></section> : <div className="data-state"><AlertTriangle /><strong>{stateText}</strong>{result?.message ? <small>{result.message}</small> : null}{result?.retryable ? <button type="button" onClick={() => void check(true)}><RefreshCw />重试</button> : null}</div>}
+      <button type="button" onClick={() => void previewRollback()}><RefreshCw />回滚上一版本</button></> : <section className="uninstall-preview"><h2>卸载范围</h2>{preview ? preview.scopes.map((scope) => <div key={scope.id} className={scope.protected ? "protected" : ""}><span><strong>{scope.label}</strong><small>{scope.detail}</small></span>{scope.protected ? <ShieldCheck /> : scope.available ? <CheckCircle2 /> : <X />}</div>) : <div className="data-state"><LoaderCircle className="spin" /></div>}<button type="button" disabled={!preview} onClick={() => setConfirm("uninstall")}><Trash2 />清理本机缓存</button></section>}
     </div>
-    {operation ? <aside className={`maintenance-operation ${operation.state}`}><div>{operation.state === "completed" ? <CheckCircle2 /> : operation.state === "failed" ? <AlertTriangle /> : <LoaderCircle className="spin" />}<span><strong>{operation.message}</strong><small>{operation.processedItems}/{operation.totalItems} 项{operation.partialFailures ? ` · ${operation.partialFailures} 项失败` : ""}{operation.recovery !== "none" ? ` · ${operation.recovery}` : ""}</small></span></div>{operation.kind === "install" && ["queued", "downloading", "verifying"].includes(operation.phase) ? <button type="button" onClick={() => void cancelOperation()}><X />取消</button> : null}</aside> : null}
+    {operation ? <aside className={`maintenance-operation ${operation.state}`}><div>{operation.state === "completed" ? <CheckCircle2 /> : operation.state === "failed" ? <AlertTriangle /> : <LoaderCircle className="spin" />}<span><strong>{operation.message}</strong><small>{operation.processedItems}/{operation.totalItems} 项{operation.partialFailures ? ` · ${operation.partialFailures} 项失败` : ""}{operation.recovery !== "none" ? ` · ${operation.recovery}` : ""}</small></span></div>{operation.kind === "install" && ["queued", "downloading", "verifying"].includes(operation.phase) ? <button type="button" onClick={() => void cancelOperation()}><X />取消</button> : null}{operation.kind === "install" && operation.state === "completed" && operation.phase === "completed" && operation.restartRequired ? <button type="button" onClick={() => void restartForUpdate()}><RefreshCw />重启并完成更新</button> : null}</aside> : null}
     {confirm ? <div className="data-modal-backdrop"><div className="data-modal" role="dialog" aria-modal="true" aria-label={confirm === "install" ? "确认安装更新" : confirm === "rollback" ? "确认版本回滚" : "确认清理本机缓存"}><h2>{confirm === "install" ? "确认安装更新" : confirm === "rollback" ? "确认版本回滚" : "确认清理本机缓存"}</h2><p>{confirm === "install" ? "下载仅进入受控暂存区；验签和校验通过后原子切换，失败自动回滚。" : confirm === "rollback" ? `将切换到已验证版本 ${rollbackPreview?.version ?? "未知"}` : "只清理 marker 证明归属的本机 U-Claw 缓存；U 盘用户数据保持不变。"}</p><div className="data-confirm-actions"><button type="button" onClick={() => setConfirm(undefined)}>取消</button><button type="button" onClick={() => void execute()}>{confirm === "install" ? "确认安装" : confirm === "rollback" ? "确认回滚" : "确认清理"}</button></div></div></div> : null}
   </section>;
 }

@@ -19,7 +19,7 @@ function bridge(state: "available" | "offline" | "unavailable" = "available", re
       { id: "usb-user-data", label: "U 盘用户数据", selected: false, protected: true, available: false, detail: "默认永久保留" },
       { id: "host-cache", label: "本机 U-Claw 缓存", selected: true, protected: false, available: true, detail: "仅 marker 证明归属的缓存" },
     ] });
-    if (["release.install", "uninstall.execute", "release.operation"].includes(request.method)) return ok({ id: "operation-1", kind: request.method === "uninstall.execute" ? "uninstall" : "install", state: operationRunning ? "running" : "completed", phase: operationRunning ? operationPhase : "completed", processedItems: 3, totalItems: 3, partialFailures: 0, message: "操作完成。", recovery: "none" });
+    if (["release.install", "uninstall.execute", "release.operation"].includes(request.method)) return ok({ id: "operation-1", kind: request.method === "uninstall.execute" ? "uninstall" : "install", state: operationRunning ? "running" : "completed", phase: operationRunning ? operationPhase : "completed", processedItems: 3, totalItems: 3, partialFailures: 0, message: "操作完成。", recovery: "none", restartRequired: !operationRunning && request.method !== "uninstall.execute" });
     throw new Error(`unexpected ${request.method}`);
   });
   return { invoke };
@@ -31,10 +31,30 @@ describe("ReleaseCenter", () => {
     render(<ReleaseCenter bridge={release as any} />);
     expect(await screen.findByText("0.2.0")).toBeVisible();
     expect(screen.getByText("win32 · x64")).toBeVisible();
+    expect(screen.getByText("128 字节")).toBeVisible();
     expect(screen.getByText("安全更新")).toBeVisible();
+    expect(screen.queryByText("Beta")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "安装更新" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "确认安装更新" })).getByRole("button", { name: "确认安装" }));
     await waitFor(() => expect(release.invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "release.install", params: { updateId: "release-42", previewToken: "preview-42", confirmed: true } })));
+  });
+
+  it("offers controlled restart only after a completed install", async () => {
+    const invokeWindow = vi.fn(async (request: any) => ({ method: request.method, requestId: request.requestId, ok: true, result: null }));
+    (window as any).uclaw = { window: { invoke: invokeWindow } };
+    const release = bridge();
+    render(<ReleaseCenter bridge={release as any} />);
+
+    expect(await screen.findByText("0.2.0")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "重启并完成更新" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "安装更新" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "确认安装更新" })).getByRole("button", { name: "确认安装" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重启并完成更新" }));
+
+    await waitFor(() => expect(invokeWindow).toHaveBeenCalledWith(expect.objectContaining({
+      method: "restart-for-update",
+      params: { operationId: "operation-1" },
+    })));
   });
 
   it("shows offline retry and unavailable states", async () => {

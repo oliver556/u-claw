@@ -165,7 +165,7 @@ export function AppTitlebar({ status, onReconnect, onOpenActivity }: { status?: 
   const [isMaximized, setIsMaximized] = useState(false);
   const [windowError, setWindowError] = useState<string | null>(null);
 
-  const invokeWindow = useCallback(async (method: WindowIpcRequest["method"]) => {
+  const invokeWindow = useCallback(async (method: Exclude<WindowIpcRequest["method"], "restart-for-update">) => {
     const invoke = window.uclaw?.window?.invoke;
     if (!invoke) {
       setWindowError("窗口控制不可用");

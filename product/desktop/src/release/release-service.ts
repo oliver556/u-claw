@@ -254,7 +254,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
   const install = (updateId: string, previewToken: string, confirmed: boolean): ReleaseOperation => {
     if (!confirmed || !checked || checked.manifest.id !== updateId || checked.previewToken !== previewToken) throw new Error("Update confirmation is stale.");
     const id = operationId(); const controller = new AbortController(); operationSignals.set(id, controller);
-    const initial = setOperation({ id, kind: "install", state: "queued", phase: "queued", processedItems: 0, totalItems: 3, partialFailures: 0, message: "更新已排队。", recovery: "none" });
+    const initial = setOperation({ id, kind: "install", state: "queued", phase: "queued", processedItems: 0, totalItems: 3, partialFailures: 0, message: "更新已排队。", recovery: "none", restartRequired: false });
     const manifest = checked.manifest; checked = undefined;
     void runMutation(async () => {
       const staging = join(options.packageRoot, `.update-staging-${id}`); const stagedPackage = join(staging, "runtime.pkg"); const stagedManifest = join(staging, "version.json");
@@ -266,7 +266,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
         if (options.secureInstall) {
           if (!validManifest(manifest, options, now(), highestSequence, acceptedIdentity, manifest.channel)) throw new Error("Update verification failed.");
           await options.secureInstall(manifest, controller.signal); controller.signal.throwIfAborted();
-          setOperation({ ...operations.get(id)!, state: "completed", phase: "completed", processedItems: 3, message: "安全更新已安装，重启后完成验收。" });
+          setOperation({ ...operations.get(id)!, state: "completed", phase: "completed", processedItems: 3, message: "安全更新已安装，重启后完成验收。", restartRequired: true });
           return;
         }
         const packageInfo = await lstat(options.packageRoot); if (!packageInfo.isDirectory() || packageInfo.isSymbolicLink()) throw new Error("Unsafe package root.");
@@ -290,7 +290,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
         await writeJsonDurable(transaction, { ...record, state: "complete" });
         await rm(staging, { recursive: true, force: true });
         await syncDirectory(options.packageRoot);
-        setOperation({ ...operations.get(id)!, state: "completed", phase: "completed", processedItems: 3, message: "安全更新已安装，重启后完成验收。" });
+        setOperation({ ...operations.get(id)!, state: "completed", phase: "completed", processedItems: 3, message: "安全更新已安装，重启后完成验收。", restartRequired: true });
       } catch (error) {
         const cancelled = controller.signal.aborted;
         if (!options.secureInstall) await rm(staging, { recursive: true, force: true }).catch(() => undefined);
@@ -365,7 +365,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
   const executeUninstall = (scopeIds: readonly "host-cache"[], previewToken: string, confirmed: boolean): ReleaseOperation => {
     if (!confirmed || !uninstallPreview || uninstallPreview.previewToken !== previewToken || scopeIds.length !== 1 || scopeIds[0] !== "host-cache") throw new Error("Uninstall confirmation is stale.");
     uninstallPreview = undefined; const id = operationId();
-    const initial = setOperation({ id, kind: "uninstall", state: "queued", phase: "queued", processedItems: 0, totalItems: 3, partialFailures: 0, message: "缓存清理已排队。", recovery: "none" });
+    const initial = setOperation({ id, kind: "uninstall", state: "queued", phase: "queued", processedItems: 0, totalItems: 3, partialFailures: 0, message: "缓存清理已排队。", recovery: "none", restartRequired: false });
     void runMutation(async () => {
       let processed = 0; let failures = 0;
       setOperation({ ...initial, state: "running", phase: "cleaning", message: "正在清理本机 U-Claw 自有缓存。" });
@@ -485,7 +485,12 @@ export function createReleaseService(options: ReleaseServiceOptions) {
   return {
     check, retry: () => check(lastChannel), cancelCheck: () => { activeCheck?.abort(new Error("cancelled")); return base("cancelled", { retryable: true, message: "更新检查已取消。" }); },
     install, previewRollback, rollback, previewUninstall, executeUninstall, recover,
-    operation: (id: string) => operations.get(id), cancel: (id: string) => { operationSignals.get(id)?.abort(new Error("cancelled")); return operations.get(id); },
+    operation: (id: string) => operations.get(id),
+    canRestartForUpdate: (id: string) => {
+      const operation = operations.get(id);
+      return operation?.kind === "install" && operation.state === "completed" && operation.phase === "completed" && operation.restartRequired;
+    },
+    cancel: (id: string) => { operationSignals.get(id)?.abort(new Error("cancelled")); return operations.get(id); },
     wait: async (id: string) => { while (["queued", "running"].includes(operations.get(id)?.state ?? "")) await new Promise((resolve) => setTimeout(resolve, 2)); return operations.get(id); },
   };
 }

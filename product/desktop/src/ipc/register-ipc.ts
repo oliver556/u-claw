@@ -110,6 +110,8 @@ export interface RegisterIpcDependencies {
   dispatchData?(request: DataIpcRequest): Promise<unknown>;
   dispatchDiagnostics?(request: DiagnosticsIpcRequest): Promise<unknown>;
   dispatchRelease?(request: ReleaseIpcRequest): Promise<unknown>;
+  canRestartForUpdate?(operationId: string): boolean;
+  restartForUpdate?(): Promise<void>;
   dispatchImage?: ((request: ImageOperationIpcRequest) => Promise<unknown>) & { dispose?: () => void };
   coordinateWrite?<T>(operation: () => Promise<T>): Promise<T>;
   diagnosticsTimeoutMs?: number;
@@ -165,6 +167,8 @@ export function registerIpc({
   dispatchData,
   dispatchDiagnostics,
   dispatchRelease,
+  canRestartForUpdate,
+  restartForUpdate,
   dispatchImage,
   coordinateWrite = (operation) => operation(),
   diagnosticsTimeoutMs = 15_000,
@@ -240,6 +244,11 @@ export function registerIpc({
       if (request.method === "open-advanced-console") {
         if (!windowControls.openAdvancedConsole) throw safeError("UNAVAILABLE", "Advanced console is unavailable.");
         await windowControls.openAdvancedConsole();
+      }
+      if (request.method === "restart-for-update") {
+        if (!canRestartForUpdate?.(request.params.operationId)) throw safeError("CONFLICT", "A completed update install is required before restart.");
+        if (!restartForUpdate) throw safeError("UNAVAILABLE", "Update restart is unavailable.");
+        await restartForUpdate();
       }
       return IpcResponseSchema.parse({
         method: request.method,
