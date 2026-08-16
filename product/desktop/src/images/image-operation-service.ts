@@ -194,13 +194,17 @@ async function atomicWrite(
     beginCommit();
     await rename(temporary, target);
   } catch (caught) {
-    void (async () => {
+    const cleanup = async () => {
       await unlinkFile(temporary).catch(() => undefined);
       await pendingIo?.catch(() => undefined);
       await handle?.close().catch(() => undefined);
       await unlinkFile(temporary).catch(() => undefined);
-    })();
-    if (UClawErrorSchema.safeParse(caught).success) throw caught;
+    };
+    if (UClawErrorSchema.safeParse(caught).success) {
+      void cleanup();
+      throw caught;
+    }
+    await cleanup();
     throw error("DATA_WRITE_FAILED", "图片保存失败，请重试。", true);
   }
 }
