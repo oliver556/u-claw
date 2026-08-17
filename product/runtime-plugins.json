@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "id": "openclaw-weixin",
+      "package": "@tencent-weixin/openclaw-weixin",
+      "version": "2.4.6",
+      "npmIntegrity": "sha512-qw9k3PLTiMWGNjjsknHgcTManH1w4j+Ji1ArWIaYLKCq3aFRsVwcqnPi127bvOoVMJGW4dbyJ8NECEMgoO+iRw==",
+      "openclawVersionRange": ">=2026.7.1-2 <2026.8.0"
+    }
+  ]
+}

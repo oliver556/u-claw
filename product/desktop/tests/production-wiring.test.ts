@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -547,6 +548,13 @@ describe("production desktop wiring", () => {
     await mkdir(pluginDir, { recursive: true });
     await writeFile(join(pluginDir, "openclaw.plugin.json"), JSON.stringify({ id: "openclaw-weixin" }));
     await writeFile(join(pluginDir, "package.json"), JSON.stringify({ name: "@tencent-weixin/openclaw-weixin", version: "2.4.6" }));
+    await mkdir(join(pluginDir, "dist"));
+    await writeFile(join(pluginDir, "dist/index.js"), "");
+    const files = await Promise.all(["openclaw.plugin.json", "package.json", "dist/index.js"].map(async (file) => {
+      const content = await readFile(join(pluginDir, file));
+      return { path: file, bytes: content.byteLength, sha256: createHash("sha256").update(content).digest("hex") };
+    }));
+    await writeFile(join(pluginDir, ".uclaw-plugin-manifest.json"), JSON.stringify({ schemaVersion: 1, plugins: [{ id: "openclaw-weixin", package: "@tencent-weixin/openclaw-weixin", version: "2.4.6", npmIntegrity: "sha512-qw9k3PLTiMWGNjjsknHgcTManH1w4j+Ji1ArWIaYLKCq3aFRsVwcqnPi127bvOoVMJGW4dbyJ8NECEMgoO+iRw==", openclawVersionRange: ">=2026.7.1-2 <2026.8.0", files }] }));
     const options = await createDesktopMainOptions(productionEnv);
 
     await expect((options.client!.channels as unknown as {

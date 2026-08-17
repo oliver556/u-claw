@@ -1,13 +1,18 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
+import { createReadStream } from "node:fs";
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import { z } from "zod";
+import { LOCKED_OPENCLAW_VERSION } from "@uclaw/shared";
 
 import type { WechatPersonalRuntime } from "./wechat-login-coordinator.js";
 
 const PLUGIN_ID = "openclaw-weixin";
 const PLUGIN_VERSION = "2.4.6";
+const PLUGIN_PACKAGE = "@tencent-weixin/openclaw-weixin";
+const semver = createRequire(import.meta.url)("semver") as { validRange(value: string): string | null; satisfies(version: string, range: string, options: { includePrerelease: boolean }): boolean };
 const API_BASE_URL = "https://ilinkai.weixin.qq.com";
 const FLOW_TTL_MS = 5 * 60_000;
 
@@ -15,9 +20,24 @@ const PluginManifestSchema = z.object({
   id: z.literal(PLUGIN_ID),
 }).passthrough();
 const PluginPackageSchema = z.object({
-  name: z.literal("@tencent-weixin/openclaw-weixin"),
+  name: z.literal(PLUGIN_PACKAGE),
   version: z.string(),
 }).passthrough();
+const PluginBuildManifestSchema = z.object({
+  schemaVersion: z.literal(1),
+  plugins: z.array(z.object({
+    id: z.literal(PLUGIN_ID),
+    package: z.literal(PLUGIN_PACKAGE),
+    version: z.literal(PLUGIN_VERSION),
+    npmIntegrity: z.string().regex(/^sha512-[A-Za-z0-9+/]+=*$/u),
+    openclawVersionRange: z.string().refine((range) => semver.validRange(range) !== null),
+    files: z.array(z.object({
+      path: z.string().min(1).refine((value) => !value.startsWith("/") && !value.includes("..") && !value.includes("\\")),
+      bytes: z.number().int().nonnegative(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    })).min(3),
+  })).min(1),
+});
 const QrResponseSchema = z.object({
   qrcode: z.string().min(1).max(4_096),
   qrcode_img_content: z.string().min(1).max(4_096),
@@ -135,11 +155,39 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
     }
     try {
       const packageJson = PluginPackageSchema.parse(JSON.parse(await readFile(join(options.pluginDir, "package.json"), "utf8")));
-      if (packageJson.version === PLUGIN_VERSION) return { available: true as const, pluginStatus: "installed" as const };
+      const buildManifest = PluginBuildManifestSchema.parse(JSON.parse(await readFile(join(options.pluginDir, ".uclaw-plugin-manifest.json"), "utf8")));
+      const locked = buildManifest.plugins[0];
+      const actualFiles: string[] = [];
+      const inventory = async (relativeDir = ""): Promise<void> => {
+        const children = await readdir(join(options.pluginDir, ...relativeDir.split("/").filter(Boolean)), { withFileTypes: true });
+        children.sort((left, right) => left.name.localeCompare(right.name, "en"));
+        for (const child of children) {
+          const relative = relativeDir ? `${relativeDir}/${child.name}` : child.name;
+          if (relative === ".uclaw-plugin-manifest.json") continue;
+          const info = await lstat(join(options.pluginDir, ...relative.split("/")));
+          if (info.isSymbolicLink()) throw new Error("WeChat plugin symlink is forbidden");
+          if (info.isDirectory()) await inventory(relative);
+          else if (info.isFile()) actualFiles.push(relative);
+          else throw new Error("WeChat plugin entry is unsupported");
+        }
+      };
+      await inventory();
+      const filesValid = await Promise.all(locked.files.map(async (file) => {
+        const absolute = join(options.pluginDir, ...file.path.split("/"));
+        const info = await lstat(absolute);
+        if (info.isSymbolicLink() || !info.isFile() || info.size !== file.bytes) return false;
+        const hash = createHash("sha256");
+        for await (const chunk of createReadStream(absolute)) hash.update(chunk);
+        return hash.digest("hex") === file.sha256;
+      }));
+      const expectedFiles = locked.files.map((file) => file.path).sort((left, right) => left.localeCompare(right, "en"));
+      if (packageJson.version === PLUGIN_VERSION && filesValid.every(Boolean) && JSON.stringify(actualFiles) === JSON.stringify(expectedFiles) && semver.satisfies(LOCKED_OPENCLAW_VERSION, locked.openclawVersionRange, { includePrerelease: true })) {
+        return { available: true as const, pluginStatus: "installed" as const };
+      }
     } catch {
       // The plugin exists, but its package identity cannot be verified.
     }
-    return { available: false as const, pluginStatus: "installed" as const, reason: `个人微信插件版本必须为 ${PLUGIN_VERSION}。` };
+    return { available: false as const, pluginStatus: "installed" as const, reason: `个人微信插件必须为锁定版本 ${PLUGIN_VERSION} 且兼容当前 OpenClaw。` };
   };
 
   const requireCapability = async () => {

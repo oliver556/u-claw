@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,15 +39,44 @@ describe("production personal WeChat runtime", () => {
     vi.restoreAllMocks();
   });
 
-  async function fixture() {
+  async function fixture(withBuildManifest = true) {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-wechat-runtime-"));
     cleanup.push(dataDir);
     const pluginDir = join(dataDir, "extensions", "openclaw-weixin");
     await mkdir(pluginDir, { recursive: true });
     await writeFile(join(pluginDir, "openclaw.plugin.json"), JSON.stringify({ id: "openclaw-weixin" }));
     await writeFile(join(pluginDir, "package.json"), JSON.stringify({ name: "@tencent-weixin/openclaw-weixin", version: "2.4.6" }));
+    await mkdir(join(pluginDir, "dist"));
+    await writeFile(join(pluginDir, "dist/index.js"), "");
+    if (withBuildManifest) {
+      const entries = await Promise.all(["openclaw.plugin.json", "package.json", "dist/index.js"].map(async (file) => {
+        const content = await readFile(join(pluginDir, file));
+        return { path: file, bytes: content.byteLength, sha256: createHash("sha256").update(content).digest("hex") };
+      }));
+      await writeFile(join(pluginDir, ".uclaw-plugin-manifest.json"), JSON.stringify({ schemaVersion: 1, plugins: [{ id: "openclaw-weixin", package: "@tencent-weixin/openclaw-weixin", version: "2.4.6", npmIntegrity: "sha512-qw9k3PLTiMWGNjjsknHgcTManH1w4j+Ji1ArWIaYLKCq3aFRsVwcqnPi127bvOoVMJGW4dbyJ8NECEMgoO+iRw==", openclawVersionRange: ">=2026.7.1-2 <2026.8.0", files: entries }] }));
+    }
     return { dataDir, pluginDir };
   }
+
+  it("requires the bundled build manifest before exposing the capability", async () => {
+    const { dataDir, pluginDir } = await fixture(false);
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway: vi.fn(), renderQr: async () => png });
+    await expect(runtime.capability(new AbortController().signal)).resolves.toMatchObject({ available: false, pluginStatus: "installed" });
+  });
+
+  it("rejects a bundled plugin when an inventoried file is modified", async () => {
+    const { dataDir, pluginDir } = await fixture();
+    await writeFile(join(pluginDir, "dist/index.js"), "tampered");
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway: vi.fn(), renderQr: async () => png });
+    await expect(runtime.capability(new AbortController().signal)).resolves.toMatchObject({ available: false, pluginStatus: "installed" });
+  });
+
+  it("rejects an untracked file added to the bundled plugin", async () => {
+    const { dataDir, pluginDir } = await fixture();
+    await writeFile(join(pluginDir, "unexpected.js"), "export default true");
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway: vi.fn(), renderQr: async () => png });
+    await expect(runtime.capability(new AbortController().signal)).resolves.toMatchObject({ available: false, pluginStatus: "installed" });
+  });
 
   it("reads installed plugin and connected account from OpenClaw authority after runtime restart", async () => {
     const { dataDir, pluginDir } = await fixture();
