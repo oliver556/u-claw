@@ -22,10 +22,12 @@ const execFileAsync = promisify(execFile);
 const runtimeVersions = JSON.parse(await readFile(new URL("../runtime-versions.json", import.meta.url), "utf8"));
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
 
-const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
-const MAX_FILE_BYTES = 512 * 1024 * 1024;
-const MAX_TREE_BYTES = 4 * 1024 * 1024 * 1024;
-const MAX_TREE_ENTRIES = 200_000;
+const DEFAULT_LIMITS = Object.freeze({
+  maxArchiveBytes: 1024 * 1024 * 1024,
+  maxFileBytes: 512 * 1024 * 1024,
+  maxTreeBytes: 4 * 1024 * 1024 * 1024,
+  maxTreeEntries: 200_000,
+});
 const END_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
 const LOCAL_SIGNATURE = 0x04034b50;
@@ -61,14 +63,14 @@ async function buildWindowsRuntimeImpl({
   adapterRoot,
   sharedRoot,
   outputDir,
-}, expectedDigests) {
+}, expectedDigests, limits = DEFAULT_LIMITS) {
   const output = path.resolve(requirePath(outputDir, "outputDir"));
   await requireMissing(output, "Windows runtime output already exists");
   await mkdir(path.dirname(output), { recursive: true });
   const temporary = await mkdtemp(path.join(path.dirname(output), ".windows-runtime-"));
   let published = false;
   try {
-    const budget = createBudget();
+    const budget = createBudget(limits);
     const electronEntries = await readZipStrict(electronArchive, budget, expectedDigests.electron);
     validateElectronEntries(electronEntries);
     await extractEntries(electronEntries, path.join(temporary, "electron"));
@@ -108,32 +110,47 @@ function requirePath(value, label) {
   return value;
 }
 
-function createBudget() {
-  return { entries: 0, bytes: 0 };
+function createBudget(limits = DEFAULT_LIMITS) {
+  return { entries: 0, bytes: 0, limits };
 }
 
 function chargeEntry(budget) {
   budget.entries += 1;
-  if (budget.entries > MAX_TREE_ENTRIES) throw new Error("Windows runtime exceeds entry count limit");
+  if (budget.entries > budget.limits.maxTreeEntries) throw new Error("Windows runtime exceeds entry count limit");
 }
 
 function chargeFile(budget, size, label) {
   if (!Number.isSafeInteger(size) || size < 0) throw new Error(`${label} has invalid size`);
-  if (size > MAX_FILE_BYTES) throw new Error(`${label} exceeds file size limit`);
+  if (size > budget.limits.maxFileBytes) throw new Error(`${label} exceeds file size limit`);
   chargeEntry(budget);
   budget.bytes += size;
-  if (!Number.isSafeInteger(budget.bytes) || budget.bytes > MAX_TREE_BYTES) {
+  if (!Number.isSafeInteger(budget.bytes) || budget.bytes > budget.limits.maxTreeBytes) {
     throw new Error("Windows runtime exceeds total size limit");
   }
 }
 
 async function readZipStrict(archive, budget, expectedDigest) {
   const archivePath = path.resolve(requirePath(archive, "archive"));
-  const bytes = await readRegularFileBounded(archivePath, "ZIP archive", MAX_ARCHIVE_BYTES);
+  const bytes = await readRegularFileBounded(archivePath, "ZIP archive", budget.limits.maxArchiveBytes);
   if (expectedDigest && createHash("sha256").update(bytes).digest("hex") !== expectedDigest) {
     throw new Error("cached runtime archive SHA-256 mismatch");
   }
   return parseZip(bytes, budget);
+}
+
+export function inspectWindowsRuntimeZip(bytes, limits) {
+  if (!Buffer.isBuffer(bytes)) throw new Error("ZIP archive bytes must be a Buffer");
+  const normalized = validateLimits(limits);
+  if (bytes.length > normalized.maxArchiveBytes) throw new Error("ZIP archive exceeds size limit");
+  return parseZip(bytes, createBudget(normalized)).map(({ name, isDirectory, size }) => ({ name, isDirectory, size }));
+}
+
+function validateLimits(value = DEFAULT_LIMITS) {
+  const normalized = { ...value };
+  for (const name of ["maxArchiveBytes", "maxFileBytes", "maxTreeBytes", "maxTreeEntries"]) {
+    if (!Number.isSafeInteger(normalized[name]) || normalized[name] <= 0) throw new Error(`invalid Windows runtime limit: ${name}`);
+  }
+  return normalized;
 }
 
 async function readRegularFileBounded(source, label, maxBytes) {
@@ -208,10 +225,16 @@ function parseZip(bytes, budget) {
     if (localOffset + 30 > bytes.length || bytes.readUInt32LE(localOffset) !== LOCAL_SIGNATURE) throw new Error("invalid ZIP local header");
     const localFlags = bytes.readUInt16LE(localOffset + 6);
     const localMethod = bytes.readUInt16LE(localOffset + 8);
+    const localChecksum = bytes.readUInt32LE(localOffset + 14);
+    const localCompressedSize = bytes.readUInt32LE(localOffset + 18);
+    const localSize = bytes.readUInt32LE(localOffset + 22);
     const localNameLength = bytes.readUInt16LE(localOffset + 26);
     const localExtraLength = bytes.readUInt16LE(localOffset + 28);
     const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
     if (localFlags !== flags || localMethod !== method || dataOffset + compressedSize > bytes.length) throw new Error("invalid ZIP local header");
+    if ((flags & 0x08) === 0 && (localChecksum !== checksum || localCompressedSize !== compressedSize || localSize !== size)) {
+      throw new Error("ZIP local and central metadata do not match");
+    }
     const localName = bytes.subarray(localOffset + 30, localOffset + 30 + localNameLength);
     if (!localName.equals(nameBytes)) throw new Error("ZIP entry names do not match");
     entries.push({ name: relative, isDirectory, method, checksum, size, compressed: bytes.subarray(dataOffset, dataOffset + compressedSize) });
@@ -459,33 +482,74 @@ function parseCLIArguments(arguments_) {
   return { cache: path.resolve(values["--cache"]), output: path.resolve(values["--output"]) };
 }
 
-async function runCLI() {
-  const { cache, output } = parseCLIArguments(process.argv.slice(2));
-  await execFileAsync("npm", ["run", "build"], { cwd: productRoot, windowsHide: true });
-  const appDependencyRoot = path.join(productRoot, "packaging", "windows-runtime-app");
-  await execFileAsync("npm", ["ci", "--omit=dev", "--ignore-scripts", "--os=win32", "--cpu=x64"], {
+export async function runWindowsRuntimeCLI(arguments_, overrides = {}) {
+  const dependencies = {
+    platform: process.platform,
+    versions: runtimeVersions,
+    productRoot,
+    npmExecPath: process.env.npm_execpath,
+    processExecPath: process.execPath,
+    execFile: execFileAsync,
+    buildRuntime: (options, expectedDigests) => buildWindowsRuntimeImpl(options, expectedDigests),
+    ...overrides,
+  };
+  const { cache, output } = parseCLIArguments(arguments_);
+  const archiveName = (url) => path.basename(new URL(url).pathname);
+  const electronArchive = path.join(cache, archiveName(dependencies.versions.windowsArtifacts.electron.url));
+  const nodeArchive = path.join(cache, archiveName(dependencies.versions.windowsArtifacts.node.url));
+  await verifyCachedArchive(electronArchive, dependencies.versions.windowsArtifacts.electron.sha256);
+  await verifyCachedArchive(nodeArchive, dependencies.versions.windowsArtifacts.node.sha256);
+
+  const npmCLI = await resolveNpmCLI(dependencies);
+  await dependencies.execFile(dependencies.processExecPath, [npmCLI, "run", "build"], { cwd: dependencies.productRoot, windowsHide: true });
+  const appDependencyRoot = path.join(dependencies.productRoot, "packaging", "windows-runtime-app");
+  await dependencies.execFile(dependencies.processExecPath, [npmCLI, "ci", "--omit=dev", "--ignore-scripts", "--os=win32", "--cpu=x64"], {
     cwd: appDependencyRoot,
     env: { ...process.env, npm_config_bin_links: "false" },
     windowsHide: true,
   });
-  const archiveName = (url) => path.basename(new URL(url).pathname);
-  await buildWindowsRuntimeImpl({
-    electronArchive: path.join(cache, archiveName(runtimeVersions.windowsArtifacts.electron.url)),
-    nodeArchive: path.join(cache, archiveName(runtimeVersions.windowsArtifacts.node.url)),
+  await dependencies.buildRuntime({
+    electronArchive,
+    nodeArchive,
     appDependencyRoot,
-    desktopRoot: path.join(productRoot, "desktop"),
-    frontendRoot: path.join(productRoot, "frontend"),
-    adapterRoot: path.join(productRoot, "adapter"),
-    sharedRoot: path.join(productRoot, "shared"),
+    desktopRoot: path.join(dependencies.productRoot, "desktop"),
+    frontendRoot: path.join(dependencies.productRoot, "frontend"),
+    adapterRoot: path.join(dependencies.productRoot, "adapter"),
+    sharedRoot: path.join(dependencies.productRoot, "shared"),
     outputDir: output,
   }, {
-    electron: runtimeVersions.windowsArtifacts.electron.sha256,
-    node: runtimeVersions.windowsArtifacts.node.sha256,
+    electron: dependencies.versions.windowsArtifacts.electron.sha256,
+    node: dependencies.versions.windowsArtifacts.node.sha256,
   });
 }
 
+async function verifyCachedArchive(archive, expectedDigest) {
+  const bytes = await readRegularFileBounded(archive, "cached runtime archive", DEFAULT_LIMITS.maxArchiveBytes);
+  if (createHash("sha256").update(bytes).digest("hex") !== expectedDigest) throw new Error("cached runtime archive SHA-256 mismatch");
+}
+
+async function resolveNpmCLI({ npmExecPath, processExecPath, platform }) {
+  if (npmExecPath !== undefined) return requireAbsoluteRegularFile(npmExecPath, "npm_execpath");
+  const executableDirectory = path.dirname(processExecPath);
+  const candidates = platform === "win32"
+    ? [path.join(executableDirectory, "node_modules", "npm", "bin", "npm-cli.js")]
+    : [path.resolve(executableDirectory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js")];
+  for (const candidate of candidates) {
+    const info = await lstat(candidate).catch(() => null);
+    if (info?.isFile() && !info.isSymbolicLink()) return candidate;
+  }
+  throw new Error("npm CLI could not be resolved for the current Node executable");
+}
+
+async function requireAbsoluteRegularFile(target, label) {
+  if (typeof target !== "string" || !path.isAbsolute(target)) throw new Error(`${label} must be an absolute regular file`);
+  const info = await lstat(target).catch(() => null);
+  if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`${label} must be an absolute regular file`);
+  return target;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runCLI().catch((error) => {
+  runWindowsRuntimeCLI(process.argv.slice(2)).catch((error) => {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
   });

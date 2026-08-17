@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { open, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import JSZip from "jszip";
 
-import { buildWindowsRuntime } from "../../packaging/build-windows-runtime.mjs";
+import {
+  buildWindowsRuntime,
+  inspectWindowsRuntimeZip,
+  runWindowsRuntimeCLI,
+} from "../../packaging/build-windows-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
 const nodeArchiveRoot = "node-v24.15.0-win-x64";
@@ -18,7 +24,7 @@ after(async () => {
   await Promise.all([...fixtureRoots].map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function writeZip(file, entries, platform = "DOS") {
+async function writeZip(file, entries, platform = "DOS", compression = "DEFLATE") {
   const zip = new JSZip();
   for (const entry of entries) {
     zip.file(entry.name, entry.body ?? "fixture", {
@@ -27,12 +33,45 @@ async function writeZip(file, entries, platform = "DOS") {
       unixPermissions: entry.unixPermissions,
     });
   }
-  let bytes = await zip.generateAsync({ type: "nodebuffer", platform, compression: "DEFLATE" });
+  let bytes = await zip.generateAsync({ type: "nodebuffer", platform, compression });
   for (const entry of entries.filter((candidate) => candidate.forceEmptyDeflate)) {
     bytes = forceEmptyDeflate(bytes, entry.name);
   }
   await writeFile(file, bytes);
 }
+
+function findCentralEntry(bytes, entryName) {
+  const signature = Buffer.from([0x50, 0x4b, 0x01, 0x02]);
+  const expected = Buffer.from(entryName);
+  let offset = bytes.indexOf(signature);
+  while (offset !== -1) {
+    const nameLength = bytes.readUInt16LE(offset + 28);
+    if (bytes.subarray(offset + 46, offset + 46 + nameLength).equals(expected)) return offset;
+    offset = bytes.indexOf(signature, offset + 4);
+  }
+  throw new Error(`missing central entry: ${entryName}`);
+}
+
+function patchEntryName(bytes, from, to) {
+  assert.equal(Buffer.byteLength(from), Buffer.byteLength(to));
+  const patched = Buffer.from(bytes);
+  const centralOffset = findCentralEntry(patched, from);
+  const localOffset = patched.readUInt32LE(centralOffset + 42);
+  Buffer.from(to).copy(patched, centralOffset + 46);
+  Buffer.from(to).copy(patched, localOffset + 30);
+  return patched;
+}
+
+function patchEntryField(bytes, entryName, centralFieldOffset, localFieldOffset, value) {
+  const patched = Buffer.from(bytes);
+  const centralOffset = findCentralEntry(patched, entryName);
+  const localOffset = patched.readUInt32LE(centralOffset + 42);
+  patched.writeUInt32LE(value, centralOffset + centralFieldOffset);
+  if (localFieldOffset !== undefined) patched.writeUInt32LE(value, localOffset + localFieldOffset);
+  return patched;
+}
+
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 function forceEmptyDeflate(bytes, entryName) {
   const name = Buffer.from(entryName);
@@ -136,6 +175,72 @@ test("assembles one complete offline Windows runtime without symlinks", async ()
   assert.equal(await hasSymlink(result.outputDir), false);
 });
 
+test("assembles stored ZIP entries", async () => {
+  const { options } = await fixture();
+  await writeZip(options.electronArchive, [
+    { name: "electron.exe", body: "electron" },
+    { name: "resources/default_app.asar", body: "default" },
+  ], "DOS", "STORE");
+  await writeZip(options.nodeArchive, [
+    { name: `${nodeArchiveRoot}/node.exe`, body: "node" },
+  ], "DOS", "STORE");
+  await buildWindowsRuntime(options);
+  assert.equal(await readFile(path.join(options.outputDir, "electron", "electron.exe"), "utf8"), "electron");
+  assert.equal(await readFile(path.join(options.outputDir, "node", "node.exe"), "utf8"), "node");
+});
+
+test("rejects corrupt ZIP CRC, declared size, partial data, and truncation", async (t) => {
+  for (const [name, mutate, message] of [
+    ["CRC", (bytes) => patchEntryField(bytes, "electron.exe", 16, 14, 0), /corrupt ZIP entry/i],
+    ["declared size", (bytes) => patchEntryField(bytes, "electron.exe", 24, 22, 9), /corrupt ZIP entry|invalid compressed ZIP entry/i],
+    ["partial data", (bytes) => {
+      const central = findCentralEntry(bytes, "electron.exe");
+      const compressed = bytes.readUInt32LE(central + 20);
+      return patchEntryField(bytes, "electron.exe", 20, 18, compressed - 1);
+    }, /corrupt ZIP entry|invalid compressed ZIP entry/i],
+    ["truncated", (bytes) => bytes.subarray(0, bytes.length - 1), /invalid ZIP/i],
+  ]) {
+    await t.test(name, async () => {
+      const { options } = await fixture();
+      await writeFile(options.electronArchive, mutate(await readFile(options.electronArchive)));
+      await assert.rejects(buildWindowsRuntime(options), message);
+    });
+  }
+});
+
+test("rejects duplicate and case-conflicting ZIP entries", async (t) => {
+  await t.test("duplicate", async () => {
+    const { options } = await fixture();
+    await writeZip(options.electronArchive, [
+      { name: "electron.exe" },
+      { name: "secondxx.exe" },
+    ]);
+    await writeFile(options.electronArchive, patchEntryName(await readFile(options.electronArchive), "secondxx.exe", "electron.exe"));
+    await assert.rejects(buildWindowsRuntime(options), /duplicate archive path/i);
+  });
+  await t.test("case conflict", async () => {
+    const { options } = await fixture();
+    await writeZip(options.electronArchive, [
+      { name: "electron.exe" },
+      { name: "ELECTRON.EXE" },
+    ]);
+    await assert.rejects(buildWindowsRuntime(options), /duplicate archive path/i);
+  });
+});
+
+test("enforces injectable ZIP entry and total byte budgets", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-windows-runtime-budget-"));
+  fixtureRoots.add(root);
+  const archive = path.join(root, "budget.zip");
+  await writeZip(archive, [
+    { name: "one", body: "123" },
+    { name: "two", body: "456" },
+  ], "DOS", "STORE");
+  const bytes = await readFile(archive);
+  assert.throws(() => inspectWindowsRuntimeZip(bytes, { maxArchiveBytes: 1024, maxFileBytes: 10, maxTreeBytes: 100, maxTreeEntries: 1 }), /entry count limit/i);
+  assert.throws(() => inspectWindowsRuntimeZip(bytes, { maxArchiveBytes: 1024, maxFileBytes: 10, maxTreeBytes: 5, maxTreeEntries: 10 }), /total size limit/i);
+});
+
 test("rejects each missing production build", async (t) => {
   for (const name of ["desktop", "frontend", "adapter", "shared"]) {
     await t.test(name, async () => {
@@ -211,6 +316,23 @@ test("rejects symlinks in copied source trees", async (t) => {
   await assert.rejects(buildWindowsRuntime(options), /symlink|unsupported source entry/i);
 });
 
+test("copies complete files when FileHandle.write performs partial writes", async () => {
+  const { options } = await fixture();
+  const probe = await open(path.join(options.desktopRoot, "dist", "entry.js"), "r");
+  const prototype = Object.getPrototypeOf(probe);
+  const originalWrite = prototype.write;
+  await probe.close();
+  prototype.write = function writePartially(buffer, offset, length, position) {
+    return originalWrite.call(this, buffer, offset, Math.min(length, 2), position);
+  };
+  try {
+    await buildWindowsRuntime(options);
+  } finally {
+    prototype.write = originalWrite;
+  }
+  assert.equal(await readFile(path.join(options.outputDir, "electron", "resources", "app", "desktop", "dist", "entry.js"), "utf8"), "desktop-build");
+});
+
 test("rejects a source file above the per-file size limit without reading it", async () => {
   const { options } = await fixture();
   const large = path.join(options.desktopRoot, "dist", "too-large.bin");
@@ -261,11 +383,98 @@ test("CLI rejects missing, duplicate, and unknown arguments before running build
     ["unknown", ["--cache=a", "--output=b", "--download"], /unknown argument: --download/u],
   ]) {
     await t.test(name, async () => {
-      await assert.rejects(execFileAsync(process.execPath, [script.pathname, ...arguments_]), (error) => {
+      await assert.rejects(execFileAsync(process.execPath, [fileURLToPath(script), ...arguments_]), (error) => {
         assert.match(error.stderr, message);
         assert.doesNotMatch(error.stderr, /npm ERR/u);
         return true;
       });
     });
   }
+});
+
+async function cliFixture() {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-windows-runtime-cli-"));
+  fixtureRoots.add(root);
+  const cache = path.join(root, "cache");
+  await mkdir(cache);
+  const electronName = "electron-fixture.zip";
+  const nodeName = "node-fixture.zip";
+  const electron = Buffer.from("electron archive");
+  const node = Buffer.from("node archive");
+  await writeFile(path.join(cache, electronName), electron);
+  await writeFile(path.join(cache, nodeName), node);
+  const npmCLI = path.join(root, "npm-cli.js");
+  await writeFile(npmCLI, "// fixture npm CLI");
+  return {
+    root,
+    cache,
+    npmCLI,
+    versions: {
+      node: "24.15.0",
+      windowsArtifacts: {
+        electron: { url: `https://example.test/${electronName}`, sha256: sha256(electron) },
+        node: { url: `https://example.test/${nodeName}`, sha256: sha256(node) },
+      },
+    },
+  };
+}
+
+test("Windows CLI executes npm CLI JS with the current Node executable", async () => {
+  const fixture = await cliFixture();
+  const commands = [];
+  const builds = [];
+  await runWindowsRuntimeCLI(["--cache", fixture.cache, "--output", path.join(fixture.root, "output")], {
+    platform: "win32",
+    versions: fixture.versions,
+    productRoot: fixture.root,
+    npmExecPath: fixture.npmCLI,
+    processExecPath: process.execPath,
+    execFile: async (...command) => commands.push(command),
+    buildRuntime: async (...options) => builds.push(options),
+  });
+
+  assert.equal(commands.length, 2);
+  assert.deepEqual(commands[0].slice(0, 2), [process.execPath, [fixture.npmCLI, "run", "build"]]);
+  assert.deepEqual(commands[1].slice(0, 2), [process.execPath, [fixture.npmCLI, "ci", "--omit=dev", "--ignore-scripts", "--os=win32", "--cpu=x64"]]);
+  assert.equal(commands.some(([executable]) => /npm(?:\.cmd)?$/iu.test(executable)), false);
+  assert.equal(builds.length, 1);
+});
+
+test("Windows CLI resolves npm-cli.js beside the current Node without PATH lookup", async () => {
+  const fixture = await cliFixture();
+  const fakeNode = path.join(fixture.root, "node.exe");
+  const pairedNpmCLI = path.join(fixture.root, "node_modules", "npm", "bin", "npm-cli.js");
+  await writeFile(fakeNode, "fixture node");
+  await mkdir(path.dirname(pairedNpmCLI), { recursive: true });
+  await writeFile(pairedNpmCLI, "// paired fixture npm CLI");
+  const commands = [];
+  await runWindowsRuntimeCLI(["--cache", fixture.cache, "--output", path.join(fixture.root, "output")], {
+    platform: "win32",
+    versions: fixture.versions,
+    productRoot: fixture.root,
+    npmExecPath: undefined,
+    processExecPath: fakeNode,
+    execFile: async (...command) => commands.push(command),
+    buildRuntime: async () => {},
+  });
+  assert.deepEqual(commands.map(([executable, arguments_]) => [executable, arguments_[0]]), [
+    [fakeNode, pairedNpmCLI],
+    [fakeNode, pairedNpmCLI],
+  ]);
+});
+
+test("CLI rejects a cache SHA mismatch before build and npm ci", async () => {
+  const fixture = await cliFixture();
+  fixture.versions.windowsArtifacts.electron.sha256 = "0".repeat(64);
+  let commandCount = 0;
+  await assert.rejects(runWindowsRuntimeCLI(["--cache", fixture.cache, "--output", path.join(fixture.root, "output")], {
+    platform: "win32",
+    versions: fixture.versions,
+    productRoot: fixture.root,
+    npmExecPath: fixture.npmCLI,
+    processExecPath: process.execPath,
+    execFile: async () => { commandCount += 1; },
+    buildRuntime: async () => assert.fail("buildRuntime must not run"),
+  }), /SHA-256 mismatch/i);
+  assert.equal(commandCount, 0);
 });
