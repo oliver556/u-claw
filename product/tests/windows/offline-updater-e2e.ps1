@@ -18,6 +18,11 @@ function Write-Utf8NoBom {
     [IO.File]::WriteAllText($Path, $Content, [Text.UTF8Encoding]::new($false))
 }
 
+function Convert-ToFixtureLinkerValue {
+    param([Parameter(Mandatory)][string]$Content)
+    return 'base64:' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Content))
+}
+
 function Invoke-Process {
     param([Parameter(Mandatory)][string]$Executable, [Parameter(Mandatory)][string]$WorkingDirectory)
     $process = Start-Process -FilePath $Executable -WorkingDirectory $WorkingDirectory -PassThru
@@ -33,8 +38,15 @@ function Invoke-Process {
 
 function Invoke-NodeChecked {
     param([Parameter(Mandatory)][string[]]$Arguments, [Parameter(Mandatory)][string]$Code)
-    $output = @(& node @Arguments 2>&1)
-    $exitCode = $LASTEXITCODE
+    $originalErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& node @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $originalErrorActionPreference
+    }
     if ($exitCode -ne 0) {
         foreach ($item in $output) {
             $line = $item.ToString()
@@ -172,9 +184,11 @@ try {
     $signLicenseFixture = Join-Path $repositoryRoot 'product\tests\windows\sign-license-fixture.mjs'
     Invoke-NodeChecked @($signLicenseFixture, '--license-dir', $fixtureLicenseDir, '--trusted-keys', $fixtureLicenseTrustedKeys) 'SIGN_LICENSE_FAILED'
     $licenseKeysJson = [IO.File]::ReadAllText($fixtureLicenseTrustedKeys).Trim()
+    $trustedKeysLinkerValue = Convert-ToFixtureLinkerValue $trustedKeysJson
+    $licenseKeysLinkerValue = Convert-ToFixtureLinkerValue $licenseKeysJson
     Push-Location (Join-Path $repositoryRoot 'product\launcher')
     try {
-        & go build -trimpath -tags licensefixture -ldflags "-s -w -H windowsgui -X main.trustedRuntimeKeys=$trustedKeysJson -X main.trustedStartupLicenseKeys=$licenseKeysJson -X main.trustedLicenseStatusKeys=$licenseKeysJson" -o $fixtureLauncher .
+        & go build -trimpath -tags licensefixture -ldflags "-s -w -H windowsgui -X main.trustedRuntimeKeys=$trustedKeysLinkerValue -X main.trustedStartupLicenseKeys=$licenseKeysLinkerValue -X main.trustedLicenseStatusKeys=$licenseKeysLinkerValue" -o $fixtureLauncher .
         Assert-True ($LASTEXITCODE -eq 0) 'BUILD_FIXTURE_LAUNCHER_FAILED'
     }
     finally { Pop-Location }

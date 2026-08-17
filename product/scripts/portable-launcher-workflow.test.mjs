@@ -94,8 +94,10 @@ test("PowerShell E2E covers the frozen portable lifecycle", async () => {
   assert.match(source, /UCLAW_FIXTURE_UPDATE_RESTART_ONCE/u);
   assert.match(source, /sign-license-fixture\.mjs/u);
   assert.match(source, /-tags\s+licensefixture/u);
-  assert.match(source, /main\.trustedStartupLicenseKeys=\$licenseTrustedKeysJson/u);
-  assert.match(source, /main\.trustedLicenseStatusKeys=\$licenseStatusTrustedKeysJson/u);
+  assert.match(source, /\[Convert\]::ToBase64String/u);
+  assert.match(source, /base64:/u);
+  assert.match(source, /main\.trustedStartupLicenseKeys=\$licenseTrustedKeysLinkerValue/u);
+  assert.match(source, /main\.trustedLicenseStatusKeys=\$licenseStatusTrustedKeysLinkerValue/u);
   assert.match(source, /\.status-response\.json/u);
   assert.match(source, /\.partial-/u);
   assert.doesNotMatch(source, /Write-(Host|Verbose|Debug|Warning)|Start-Process[^\n]*-Verb\s+RunAs/iu);
@@ -135,6 +137,8 @@ test("Windows workflow gates online and offline updates in both PowerShell versi
   }
   assert.match(offlineE2E, /Get-FileHash[^\n]*SHA256/u);
   assert.match(offlineE2E, /2>&1/u);
+  assert.match(offlineE2E, /\$ErrorActionPreference\s*=\s*['"]Continue['"]/u);
+  assert.match(offlineE2E, /\$ErrorActionPreference\s*=\s*\$originalErrorActionPreference/u);
   assert.match(offlineE2E, /\[Console\]::Error\.WriteLine\(\$line\)/u);
   assert.doesNotMatch(offlineE2E, /Write-Diagnostics[^\n]*(?:output|error|message)/iu);
   assert.doesNotMatch(offlineE2E, /production|activation[_-]?code|api[_-]?token/iu);

@@ -18,6 +18,11 @@ function Write-Utf8NoBom {
     [IO.File]::WriteAllText($Path, $Content, [Text.UTF8Encoding]::new($false))
 }
 
+function Convert-ToFixtureLinkerValue {
+    param([Parameter(Mandatory)][string]$Content)
+    return 'base64:' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Content))
+}
+
 function Invoke-Launcher {
     param([Parameter(Mandatory)][string]$Executable, [Parameter(Mandatory)][string]$WorkingDirectory)
     Remove-Item -LiteralPath $env:UCLAW_LAUNCHER_FAILURE_CODE_FILE -Force -ErrorAction SilentlyContinue
@@ -128,9 +133,12 @@ try {
     Assert-True ($LASTEXITCODE -eq 0) 'SIGN_LICENSE_FIXTURE_FAILED'
     $licenseTrustedKeysJson = [IO.File]::ReadAllText($fixtureLicenseTrustedKeys).Trim()
     $licenseStatusTrustedKeysJson = $licenseTrustedKeysJson
+    $trustedKeysLinkerValue = Convert-ToFixtureLinkerValue $trustedKeysJson
+    $licenseTrustedKeysLinkerValue = Convert-ToFixtureLinkerValue $licenseTrustedKeysJson
+    $licenseStatusTrustedKeysLinkerValue = Convert-ToFixtureLinkerValue $licenseStatusTrustedKeysJson
     Push-Location (Join-Path $repositoryRoot 'product\launcher')
     try {
-        & go build -trimpath -tags licensefixture -ldflags "-s -w -H windowsgui -X main.trustedRuntimeKeys=$trustedKeysJson -X main.trustedStartupLicenseKeys=$licenseTrustedKeysJson -X main.trustedLicenseStatusKeys=$licenseStatusTrustedKeysJson" -o $fixtureLauncher .
+        & go build -trimpath -tags licensefixture -ldflags "-s -w -H windowsgui -X main.trustedRuntimeKeys=$trustedKeysLinkerValue -X main.trustedStartupLicenseKeys=$licenseTrustedKeysLinkerValue -X main.trustedLicenseStatusKeys=$licenseStatusTrustedKeysLinkerValue" -o $fixtureLauncher .
         Assert-True ($LASTEXITCODE -eq 0) 'BUILD_SIGNED_FIXTURE_LAUNCHER_FAILED'
     }
     finally {
