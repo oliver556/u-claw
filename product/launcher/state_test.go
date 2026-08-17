@@ -25,6 +25,7 @@ func TestAcquireRuntimeLeaseVerifiesRuntimeTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := validRuntimeManifest()
+	manifest.Entrypoint = "runtime.bin"
 	manifest.RuntimeTreeSHA256 = digest
 
 	lease, err := AcquireRuntimeLease(root, manifest)
