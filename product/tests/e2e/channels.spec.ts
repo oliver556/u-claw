@@ -194,7 +194,7 @@ test("personal WeChat fixture completes QR refresh, confirmation, reconnect, and
   await page.getByRole("button", { name: "重新连接" }).click();
   await page.getByRole("button", { name: "退出登录" }).click();
   await page.getByRole("tooltip").filter({ hasText: "退出个人微信？" }).getByRole("button", { name: /退\s*出/u }).click();
-  await expect(page.getByText("已退出").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "扫码登录" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__wechatMethods.filter((method: string) => method !== "channels.wechat-status"))).toEqual([
     "channels.wechat-login-start", "channels.wechat-login-refresh",
     "channels.wechat-login-poll", "channels.wechat-login-poll", "channels.wechat-reconnect", "channels.wechat-logout",

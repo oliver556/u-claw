@@ -193,15 +193,37 @@ describe("ChannelSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始个人微信扫码登录" }));
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("img", { name: "个人微信登录二维码" })).toHaveAttribute("src", qrImage.value);
+    expect(screen.getByText(/^有效期至 /u)).toBeVisible();
     await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
 
     expect(screen.getAllByText("已扫码，等待手机确认").length).toBeGreaterThan(0);
+    expect(screen.getByText("扫码后请在手机微信确认")).toBeVisible();
     await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
     expect(screen.getByText("...7a2f")).toBeVisible();
     expect(screen.getAllByText("已连接").length).toBeGreaterThan(0);
     expect(screen.queryByRole("img", { name: "个人微信登录二维码" })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("wxid_private_account");
     expect(document.body.textContent).not.toContain("bot_token");
+  });
+
+  it("turns preparing into a business loading state", async () => {
+    const preparingWechat: WechatConnectionSnapshot = {
+      ...unavailableWechat,
+      capability: "available",
+      capabilityReason: undefined,
+      plugin: { ...unavailableWechat.plugin, status: "installed" },
+      status: "not-configured",
+      loginState: "preparing",
+      error: undefined,
+    };
+    const invoke = vi.fn(async (request: ChannelIpcRequest) => request.method.startsWith("channels.wechat-")
+      ? { method: request.method, requestId: request.requestId, ok: true, result: preparingWechat } as ChannelIpcResponse
+      : success(request));
+    window.uclaw = { channels: { invoke } } as never;
+    render(<ChannelSettings />);
+
+    expect(await screen.findByText("检查中")).toBeVisible();
+    expect(document.body.textContent).not.toContain("正在准备二维码");
   });
 
   it("requires a fresh scan and keeps logout available after personal WeChat authorization expires", async () => {
