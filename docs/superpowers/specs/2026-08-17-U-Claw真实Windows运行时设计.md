@@ -1,6 +1,6 @@
 # U-Claw 真实 Windows 运行时设计
 
-**状态：** 已确认
+**状态：** 已确认，等待 Windows 物理验收
 
 **日期：** 2026-08-17
 
@@ -14,7 +14,7 @@
 
 现有 Windows CI 使用 `product/tests/windows/fixtures/portable-runtime.go` 验证 Launcher 和更新事务。该 fixture 默认只运行 100 毫秒，并不包含 Electron、Node、OpenClaw 或 U-Claw 前端。它只能用于自动生命周期测试，不能作为人工验收包。
 
-仓库当前也没有把真实 Desktop、Frontend、Adapter、Shared、Electron、Node 和 OpenClaw 组装为 Windows runtime 的正式构建器。因此，现有 CI 通过只证明更新链路对 fixture 有效，不证明完整 U-Claw 能从 U 盘启动。
+此前仓库没有把真实 Desktop、Frontend、Adapter、Shared、Electron、Node 和 OpenClaw 组装为 Windows runtime 的正式构建器。该缺口现已由固定输入下载器、真实 runtime 组装器、Windows smoke kit 和断网 CI 门禁补齐；物理 Windows/U 盘验收仍待执行。
 
 ## 用户可见结构
 
@@ -99,7 +99,9 @@ runtime-source/
 -> 显示完整 U-Claw 主窗口
 ```
 
-首次断网启动不得请求下载 Electron、Node、OpenClaw、npm 包或前端资源。许可 fixture 可用于验收，但测试私钥不得进入 U 盘、ZIP、日志或 Git。
+首次断网启动不得请求下载 Electron、Node、OpenClaw、npm 包或前端资源。许可 fixture 只可用于真实 runtime/update smoke，不作为生产硬件绑定或生产激活证据；测试私钥不得进入 U 盘、ZIP、日志或 Git。
+
+生产验收必须先联网完成真实激活并完全退出，再断网执行首次正常完整启动。没有生产 activation/license-status endpoint 与公钥时，可使用 CI-only fixture 立即验证真实 runtime、Launcher、Gateway 和更新事务；该路径不需要 New API 服务器。
 
 ## 错误处理
 
@@ -134,6 +136,8 @@ runtime-source/
 6. 确认无管理员提权提示，无需关闭 Defender。
 7. 更换 USB 接口和另一台 Windows 主机重复。
 8. staging HTTPS 就绪后，再使用同一 `runtime.pkg` 和签名 feed 验证在线更新。
+
+2026-08-17 已在 macOS 构建机生成并校验真实 runtime smoke kit：初始 runtime `1.0.0`、更新 runtime `2.0.0`、Electron `40.10.6`、Node `24.15.0`、OpenClaw `2026.7.1-2`。输出未发现私钥。该记录证明构建与交付物完整，不替代 Win10/11、Defender、物理 U 盘和多主机验收。
 
 ## 完成条件
 

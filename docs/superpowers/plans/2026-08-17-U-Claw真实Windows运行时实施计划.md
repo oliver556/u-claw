@@ -8,6 +8,8 @@
 
 **Tech Stack:** Node.js 24.15.0、npm 11.12.1、Electron 40.10.6、OpenClaw 2026.7.1-2、ES modules、JSZip、Go Launcher、PowerShell 5.1/7、GitHub Actions Windows 2022。
 
+**2026-08-17 执行记录：** Task 1–8 已实现并通过本地门禁。真实 runtime smoke kit 已生成且未发现私钥；当前进入 Task 9 的 U 盘交付与 Windows 物理验收。即时 smoke 使用 CI-only fixture 授权，不需要 New API 服务器，也不替代生产激活验收。
+
 ---
 
 ## 文件结构
