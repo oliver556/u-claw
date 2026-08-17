@@ -162,7 +162,7 @@ try {
     $env:LOCALAPPDATA = $localAppData
     $env:UCLAW_LAUNCHER_HEADLESS = '1'
     $env:UCLAW_LAUNCHER_FAILURE_CODE_FILE = $failureCodePath
-    $env:UCLAW_FIXTURE_HOLD_MS = '100'
+    $env:UCLAW_FIXTURE_HOLD_MS = '2500'
 
     $phase = 'MISSING_STARTUP_CREDENTIAL'
     $credentialOriginal = [IO.File]::ReadAllBytes($startupCredentialInRelease)

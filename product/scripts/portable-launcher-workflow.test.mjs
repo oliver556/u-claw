@@ -139,6 +139,7 @@ test("PowerShell E2E covers the frozen portable lifecycle", async () => {
   }
   assert.match(source, /UCLAW_LAUNCHER_HEADLESS/u);
   assert.match(source, /UCLAW_LAUNCHER_FAILURE_CODE_FILE/u);
+  assert.match(source, /\$env:UCLAW_FIXTURE_HOLD_MS\s*=\s*['"]2500['"]/u);
   assert.match(source, /\^E_\[A-Z0-9_\]\{1,62\}\$/u);
   assert.match(source, /\[Console\]::Error\.WriteLine\([^\n]*\$failureCode/u);
   assert.match(source, /UCLAW_FIXTURE_UPDATE_RESTART_ONCE/u);
@@ -190,6 +191,7 @@ test("Windows workflow gates online and offline updates in both PowerShell versi
   assert.match(offlineE2E, /\$ErrorActionPreference\s*=\s*['"]Continue['"]/u);
   assert.match(offlineE2E, /\$ErrorActionPreference\s*=\s*\$originalErrorActionPreference/u);
   assert.match(offlineE2E, /\[Console\]::Error\.WriteLine\(\$line\)/u);
+  assert.match(offlineE2E, /\$env:UCLAW_FIXTURE_HOLD_MS\s*=\s*['"]2500['"]/u);
   assert.doesNotMatch(offlineE2E, /Write-Diagnostics[^\n]*(?:output|error|message)/iu);
   assert.doesNotMatch(offlineE2E, /production|activation[_-]?code|api[_-]?token/iu);
 });

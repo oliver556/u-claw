@@ -203,7 +203,7 @@ try {
 
     $env:LOCALAPPDATA = $localAppData
     $env:UCLAW_LAUNCHER_HEADLESS = '1'
-    $env:UCLAW_FIXTURE_HOLD_MS = '100'
+    $env:UCLAW_FIXTURE_HOLD_MS = '2500'
     Assert-True ((Invoke-Process $launcher $releaseRoot) -eq 0) 'INITIAL_LICENSE_GATE_FAILED'
     $licenseBefore = Get-SHA256 $licensePath
     $credentialBefore = Get-SHA256 $credentialPath
