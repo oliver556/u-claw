@@ -25,6 +25,10 @@ function secretDigest(secret, salt) {
     .digest("hex");
 }
 
+function canonicalTimestamp(milliseconds) {
+  return new Date(milliseconds).toISOString().replace(".000Z", "Z");
+}
+
 async function main() {
   const args = readArguments(process.argv.slice(2));
   const licenseDir = path.resolve(args.get("license-dir"));
@@ -33,7 +37,7 @@ async function main() {
   const keyId = "test-license-key";
   const startupSecret = randomBytes(32).toString("base64url");
   const salt = randomBytes(16);
-  const now = Date.now();
+  const now = Math.floor(Date.now() / 1000) * 1000;
   const credential = {
     schemaVersion: 1,
     deviceId: "dev_windows_fixture_001",
@@ -51,8 +55,8 @@ async function main() {
       startupSecretSalt: salt.toString("hex"),
       startupSecretHash: secretDigest(startupSecret, salt),
     },
-    notBefore: new Date(now - 5 * 60_000).toISOString(),
-    expiresAt: new Date(now + 60 * 60_000).toISOString(),
+    notBefore: canonicalTimestamp(now - 5 * 60_000),
+    expiresAt: canonicalTimestamp(now + 60 * 60_000),
     revision: 1,
     signature: { algorithm: "ed25519", keyId, value: "" },
   };
@@ -64,7 +68,7 @@ async function main() {
     license.notBefore, license.expiresAt, license.revision,
   ];
   license.signature.value = sign(null, Buffer.from(JSON.stringify(payload), "utf8"), privateKey).toString("base64");
-  const checkedAt = new Date(now).toISOString();
+  const checkedAt = canonicalTimestamp(now);
   const status = {
     licenseId: credential.licenseId,
     deviceId: credential.deviceId,

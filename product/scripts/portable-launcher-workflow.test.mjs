@@ -33,6 +33,8 @@ test("Windows license fixture matches the Launcher canonical signature contract"
     ]);
     assert.equal(license.usernameId, "usr_windows_fixture_001");
     assert.equal(license.revision, 1);
+    assert.match(license.notBefore, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    assert.match(license.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     const rawPublicKey = Buffer.from(trustedKeys[license.signature.keyId], "base64");
     const publicKey = createPublicKey({
       key: { kty: "OKP", crv: "Ed25519", x: rawPublicKey.toString("base64url") },
