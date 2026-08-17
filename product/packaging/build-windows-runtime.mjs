@@ -36,6 +36,7 @@ export async function buildWindowsRuntime({
   electronArchive,
   nodeArchive,
   appDependencyRoot,
+  portableSkillsRoot,
   desktopRoot,
   frontendRoot,
   adapterRoot,
@@ -46,6 +47,7 @@ export async function buildWindowsRuntime({
     electronArchive,
     nodeArchive,
     appDependencyRoot,
+    portableSkillsRoot,
     desktopRoot,
     frontendRoot,
     adapterRoot,
@@ -58,6 +60,7 @@ async function buildWindowsRuntimeImpl({
   electronArchive,
   nodeArchive,
   appDependencyRoot,
+  portableSkillsRoot,
   desktopRoot,
   frontendRoot,
   adapterRoot,
@@ -80,6 +83,7 @@ async function buildWindowsRuntimeImpl({
     await writeArchiveEntry(nodeEntry, path.join(temporary, "node", "node.exe"));
 
     const appRoot = path.join(temporary, "electron", "resources", "app");
+    await copyDirectory(portableSkillsRoot, path.join(temporary, "electron", "resources", "portable", "skills-cn"), "portable Skill source", budget);
     await copyAppDependencies(appDependencyRoot, appRoot, budget);
     await copyWorkspaceBuild("desktop", desktopRoot, appRoot, budget);
     await copyWorkspaceBuild("frontend", frontendRoot, appRoot, budget);
@@ -436,6 +440,9 @@ async function verifyWindowsRuntimeTree(root) {
     const info = await lstat(path.join(root, ...relative.split("/"))).catch(() => null);
     if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`Windows runtime required file is missing: ${relative}`);
   }
+  const skillsRoot = path.join(root, "electron", "resources", "portable", "skills-cn");
+  const skillsInfo = await lstat(skillsRoot).catch(() => null);
+  if (!skillsInfo?.isDirectory() || skillsInfo.isSymbolicLink()) throw new Error("Windows runtime portable Skill source is missing");
   const budget = createBudget();
   await verifyDirectory(root, "", budget);
 }
@@ -512,6 +519,7 @@ export async function runWindowsRuntimeCLI(arguments_, overrides = {}) {
     electronArchive,
     nodeArchive,
     appDependencyRoot,
+    portableSkillsRoot: path.join(dependencies.productRoot, "..", "portable", "skills-cn"),
     desktopRoot: path.join(dependencies.productRoot, "desktop"),
     frontendRoot: path.join(dependencies.productRoot, "frontend"),
     adapterRoot: path.join(dependencies.productRoot, "adapter"),

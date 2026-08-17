@@ -115,6 +115,10 @@ async function fixture() {
   await writeFile(path.join(appDependencyRoot, "package.json"), JSON.stringify({ name: "fixture", main: "desktop/dist/entry.js" }));
   await writeFile(path.join(appDependencyRoot, "node_modules", "openclaw", "openclaw.mjs"), "export default true;");
 
+  const portableSkillsRoot = path.join(root, "portable-skills");
+  await mkdir(path.join(portableSkillsRoot, "alpha-skill"), { recursive: true });
+  await writeFile(path.join(portableSkillsRoot, "alpha-skill", "SKILL.md"), "# Alpha skill\n");
+
   const roots = {};
   for (const [name, required] of [
     ["desktop", "entry.js"],
@@ -133,7 +137,8 @@ async function fixture() {
     options: {
       electronArchive,
       nodeArchive,
-      appDependencyRoot,
+    appDependencyRoot,
+    portableSkillsRoot,
       ...roots,
       outputDir: path.join(root, "runtime"),
     },
@@ -167,10 +172,12 @@ test("assembles one complete offline Windows runtime without symlinks", async ()
     "electron/resources/app/adapter/dist/index.js",
     "electron/resources/app/shared/dist/index.js",
     "electron/resources/app/node_modules/openclaw/openclaw.mjs",
+    "electron/resources/portable/skills-cn/alpha-skill/SKILL.md",
     "electron/resources/app/node_modules/@uclaw/adapter/dist/index.js",
     "electron/resources/app/node_modules/@uclaw/shared/dist/index.js",
     "node/node.exe",
   ]) assert.equal((await lstat(path.join(result.outputDir, relative))).isFile(), true, relative);
+  assert.equal(await readFile(path.join(result.outputDir, "electron/resources/portable/skills-cn/alpha-skill/SKILL.md"), "utf8"), "# Alpha skill\n");
   assert.equal(await readFile(path.join(result.outputDir, "node", "node.exe"), "utf8"), "node");
   assert.equal(await hasSymlink(result.outputDir), false);
 });
