@@ -50,37 +50,13 @@ test("portable launcher workflow builds windowsgui and runs both PowerShell gate
   assert.match(source, /shell:\s*pwsh\b/u);
 });
 
-test("production launcher build requires and injects an Ed25519 trust root", async () => {
+test("portable lifecycle build is self-contained and never consumes production configuration", async () => {
   const source = await readFile(workflowUrl, "utf8");
-  assert.match(source, /UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
-  assert.match(source, /UCLAW_RUNTIME_REVOKED_KEY_IDS:\s*\$\{\{\s*vars\.UCLAW_RUNTIME_REVOKED_KEY_IDS\s*\}\}/u);
-  assert.match(source, /UCLAW_RELEASE_BASE_URL:\s*https:\/\/updates\.yiyong\.me\/releases\//u);
-  assert.doesNotMatch(source, /vars\.UCLAW_RELEASE_BASE_URL/u);
-  assert.match(source, /\$expectedReleaseBaseURL\s*=\s*'https:\/\/updates\.yiyong\.me\/releases\/'/u);
-  assert.match(source, /\$releaseURI\.AbsoluteUri\s+-cne\s+\$expectedReleaseBaseURL/u);
-  assert.match(source, /UCLAW_ACTIVATION_ENDPOINT:\s*\$\{\{\s*vars\.UCLAW_ACTIVATION_ENDPOINT\s*\}\}/u);
-  assert.doesNotMatch(source, /UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS|trustedActivationKeys|activationKeysJson/u);
-  assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS\)[\s\S]*throw/u);
-  assert.match(source, /FromBase64String[\s\S]*Length\s*-ne\s*32/u);
-  assert.match(source, /main\.trustedRuntimeKeys=\$trustedKeysJson/u);
-  assert.match(source, /UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
-  assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS\)[\s\S]*throw/u);
-  assert.match(source, /main\.trustedStartupLicenseKeys=\$licenseKeysJson/u);
-  assert.match(source, /UCLAW_LICENSE_STATUS_ENDPOINT:\s*\$\{\{\s*vars\.UCLAW_LICENSE_STATUS_ENDPOINT\s*\}\}/u);
-  assert.match(source, /UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
-  assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_LICENSE_STATUS_ENDPOINT\)[\s\S]*throw/u);
-  assert.match(source, /main\.licenseStatusEndpoint=\$licenseStatusEndpoint/u);
-  assert.match(source, /main\.trustedLicenseStatusKeys=\$licenseStatusKeysJson/u);
-  assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_ACTIVATION_ENDPOINT\)[\s\S]*throw/u);
-  assert.match(source, /\$activationURI\.Scheme\s+-cne\s+'https'/u);
-  assert.match(source, /UCLAW_ACTIVATION_ENDPOINT[^\n]*-match[^\n]*\\s[^\n]*'[^\n]*\\\\/u);
-  assert.match(source, /main\.activationServiceEndpoint=\$activationEndpoint/u);
-  assert.equal((source.match(/main\.trustedStartupLicenseKeys=\$licenseKeysJson/gu) ?? []).length, 1);
+  assert.doesNotMatch(source, /\$\{\{\s*(?:vars|secrets)\./u);
   assert.match(source, /\$env:GOFLAGS\s*=\s*''/u);
-  assert.match(source, /main\.revokedRuntimeKeyIDs=\$revokedKeyIDsJson/u);
-  assert.match(source, /main\.releaseFeedBaseURL=\$releaseBaseURL/u);
+  assert.match(source, /go build -trimpath -ldflags '-s -w -H windowsgui'/u);
   assert.doesNotMatch(source, /go build[^\n]*-tags\s+licensefixture/iu);
-  assert.doesNotMatch(source, /BEGIN (?:OPENSSH |RSA |EC )?PRIVATE KEY/u);
+  assert.doesNotMatch(source, /main\.(?:trustedRuntimeKeys|trustedStartupLicenseKeys|trustedLicenseStatusKeys|activationServiceEndpoint)=/u);
 });
 
 test("portable launcher artifact contains diagnostics only", async () => {
