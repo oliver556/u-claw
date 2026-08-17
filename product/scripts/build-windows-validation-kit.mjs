@@ -33,7 +33,6 @@ export async function buildWindowsValidationKit(options) {
   const productRoot = path.resolve(requireText(options.productRoot ?? defaultProductRoot, "productRoot"));
   const cacheDir = path.resolve(requireText(options.cacheDir, "cacheDir"));
   const outputDir = path.resolve(requireText(options.outputDir, "outputDir"));
-  const usbDrive = validateUSBDrive(options.usbDrive ?? "U:");
   const versions = validateVersions(options.versions ?? ["1.0.0", "2.0.0"]);
   const now = validDate(options.now ?? new Date(), "now");
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -129,7 +128,7 @@ export async function buildWindowsValidationKit(options) {
       "--public-key", publicKeyPath,
       "--output", usbDir,
     ]);
-    await writeInitialOpenClawConfig(usbDir, usbDrive);
+    await writeInitialOpenClawConfig(usbDir, options.randomBytes ?? randomBytes);
 
     const feedDir = path.join(handoffDir, "online-feed");
     await runNodeScript(runner, productRoot, "packaging/build-update-feed.mjs", [
@@ -158,12 +157,13 @@ export async function buildWindowsValidationKit(options) {
     ]);
 
     await writeFile(path.join(handoffDir, "test-public.pem"), publicKeyPEM, { flag: "wx", mode: 0o644 });
-    await writeFile(path.join(handoffDir, "README.txt"), validationReadme(versions, usbDrive), {
+    await writeFile(path.join(handoffDir, "README.txt"), validationReadme(versions), {
       encoding: "utf8",
       flag: "wx",
       mode: 0o644,
     });
     await validateHandoff(handoffDir);
+    // Catches cooperative writers; a hostile native replacement between this check and rename remains a platform residual.
     await requireMissing(outputDir, "validation kit output already exists");
     await rename(handoffDir, outputDir);
     logger(`Windows validation kit written to ${outputDir}`);
@@ -173,13 +173,13 @@ export async function buildWindowsValidationKit(options) {
   }
 }
 
-async function writeInitialOpenClawConfig(usbDir, usbDrive) {
+async function writeInitialOpenClawConfig(usbDir, randomBytesFn) {
   const dataDirectory = path.join(usbDir, ".uclaw", "data");
   const openClawDirectory = path.join(dataDirectory, ".openclaw");
   await mkdir(path.join(dataDirectory, "workspace"), { recursive: true });
   await mkdir(openClawDirectory, { mode: 0o700 });
-  const token = randomBytes(32).toString("base64url");
-  const workspace = `${usbDrive}\\.uclaw\\data\\workspace`;
+  const token = randomBytesFn(32).toString("base64url");
+  const workspace = "${OPENCLAW_WORKSPACE_DIR}";
   const config = {
     gateway: { mode: "local", bind: "loopback", auth: { mode: "token", token } },
     agents: {
@@ -243,20 +243,21 @@ async function walkFiles(root) {
   return files;
 }
 
-function validationReadme(versions, usbDrive) {
+function validationReadme(versions) {
   return [
     "U-Claw Windows validation kit",
     "",
     `Initial version: ${versions[0]}`,
     `Update version: ${versions[1]}`,
-    `Expected USB drive during validation: ${usbDrive}`,
-    "",
     "1. Copy only the contents of U-Claw-test-USB to the root of the test USB drive.",
-    "2. On Windows 10 or 11, disconnect the network and double-click U-Claw.exe.",
-    "3. Confirm the U-Claw window and local Gateway become ready, then close U-Claw.",
-    "4. Copy U-Claw-Update-test.exe to the USB root and run it.",
-    "5. Double-click U-Claw.exe again and confirm the updated version starts.",
-    "6. Repeat after changing USB ports and on a second Windows computer.",
+    "2. On Windows 10 or 11, connect the network, double-click U-Claw.exe, and complete the existing real activation flow.",
+    "3. Confirm .uclaw\\license\\license.json and .uclaw\\license\\.startup-credential.json exist.",
+    "4. Exit U-Claw completely.",
+    "5. Disconnect the network, then double-click U-Claw.exe for the first normal full startup.",
+    "6. Confirm the U-Claw window and local Gateway become ready, then close U-Claw.",
+    "7. Copy U-Claw-Update-test.exe to the USB root and run it.",
+    "8. Double-click U-Claw.exe again and confirm the updated version starts.",
+    "9. Repeat after changing USB ports and on a second Windows computer.",
     "",
     "Do not use this test kit as a production release.",
     "",
@@ -274,11 +275,6 @@ function parseJSONOutput(stdout, script) {
 function requireText(value, label) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${label} is required`);
   return value;
-}
-
-function validateUSBDrive(value) {
-  if (!/^[A-Za-z]:$/u.test(value ?? "")) throw new Error("usbDrive must be a Windows drive letter");
-  return value.toUpperCase();
 }
 
 function validateVersions(value) {
@@ -316,13 +312,11 @@ async function runCLI() {
   const { values } = parseArgs({ options: {
     cache: { type: "string" },
     output: { type: "string" },
-    "usb-drive": { type: "string", default: "U:" },
     "feed-base-url": { type: "string", default: "" },
   } });
   await buildWindowsValidationKit({
     cacheDir: values.cache,
     outputDir: values.output,
-    usbDrive: values["usb-drive"],
     feedBaseURL: values["feed-base-url"],
   });
 }
