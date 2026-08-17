@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { constants } from "node:fs";
 import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   readdir,
   rename,
@@ -21,6 +23,8 @@ import { signRuntimeManifest } from "./runtime-manifest.mjs";
 const execFileAsync = promisify(execFile);
 const defaultProductRoot = fileURLToPath(new URL("../", import.meta.url));
 const runtimeVersions = JSON.parse(await readFile(new URL("../runtime-versions.json", import.meta.url), "utf8"));
+const publicKeyIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u;
+const maxPublicKeyMapBytes = 64 * 1024;
 const handoffEntries = [
   "README.txt",
   "U-Claw-Update-test.exe",
@@ -33,6 +37,10 @@ export async function buildWindowsValidationKit(options) {
   const productRoot = path.resolve(requireText(options.productRoot ?? defaultProductRoot, "productRoot"));
   const cacheDir = path.resolve(requireText(options.cacheDir, "cacheDir"));
   const outputDir = path.resolve(requireText(options.outputDir, "outputDir"));
+  const activationServiceEndpoint = normalizeHTTPSEndpoint(options.activationServiceEndpoint, "activation endpoint");
+  const activationPublicKeys = normalizePublicKeyMap(options.activationPublicKeys, "activation public keys");
+  const licenseStatusEndpoint = normalizeHTTPSEndpoint(options.licenseStatusEndpoint, "license status endpoint");
+  const licenseStatusPublicKeys = normalizePublicKeyMap(options.licenseStatusPublicKeys, "license status public keys");
   const versions = validateVersions(options.versions ?? ["1.0.0", "2.0.0"]);
   const now = validDate(options.now ?? new Date(), "now");
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -118,6 +126,10 @@ export async function buildWindowsValidationKit(options) {
       "-X", `main.trustedRuntimeKeys=${trustedKeys}`,
       "-X", "main.revokedRuntimeKeyIDs=[]",
       "-X", `main.releaseFeedBaseURL=${options.feedBaseURL ?? ""}`,
+      "-X", `main.activationServiceEndpoint=${activationServiceEndpoint}`,
+      "-X", `main.trustedStartupLicenseKeys=${JSON.stringify(activationPublicKeys)}`,
+      "-X", `main.licenseStatusEndpoint=${licenseStatusEndpoint}`,
+      "-X", `main.trustedLicenseStatusKeys=${JSON.stringify(licenseStatusPublicKeys)}`,
     ]);
 
     const usbDir = path.join(handoffDir, "U-Claw-test-USB");
@@ -249,6 +261,8 @@ function validationReadme(versions) {
     "",
     `Initial version: ${versions[0]}`,
     `Update version: ${versions[1]}`,
+    "This kit embeds the supplied real activation and license-status HTTPS endpoints and public verification keys.",
+    "The builder fails closed when any activation configuration is missing or invalid.",
     "1. Copy only the contents of U-Claw-test-USB to the root of the test USB drive.",
     "2. On Windows 10 or 11, connect the network, double-click U-Claw.exe, and complete the existing real activation flow.",
     "3. Confirm .uclaw\\license\\license.json and .uclaw\\license\\.startup-credential.json exist.",
@@ -275,6 +289,73 @@ function parseJSONOutput(stdout, script) {
 function requireText(value, label) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${label} is required`);
   return value;
+}
+
+function normalizeHTTPSEndpoint(value, label) {
+  let endpoint;
+  try {
+    endpoint = new URL(requireText(value, label));
+  } catch {
+    throw new Error(`${label} must be a credential-free HTTPS URL`);
+  }
+  if (endpoint.protocol !== "https:" || !endpoint.hostname || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    throw new Error(`${label} must be a credential-free HTTPS URL`);
+  }
+  if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
+  return endpoint.toString();
+}
+
+function normalizePublicKeyMap(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be a non-empty public key map`);
+  const entries = Object.entries(value);
+  if (entries.length < 1 || entries.length > 16) throw new Error(`${label} must be a non-empty public key map`);
+  const normalized = Object.create(null);
+  for (const [keyId, encodedKey] of entries.sort(([left], [right]) => left.localeCompare(right, "en"))) {
+    if (!publicKeyIdPattern.test(keyId) || typeof encodedKey !== "string" || encodedKey.length > 128) {
+      throw new Error(`${label} contains an invalid public key`);
+    }
+    const rawKey = Buffer.from(encodedKey, "base64");
+    if (rawKey.length !== 32 || rawKey.toString("base64") !== encodedKey) {
+      throw new Error(`${label} contains an invalid public key`);
+    }
+    normalized[keyId] = encodedKey;
+  }
+  return normalized;
+}
+
+export async function readPublicKeyMapFile(target, label) {
+  const file = path.resolve(requireText(target, `${label} file path`));
+  const bytes = await readBoundedRegularFile(file, label);
+  let value;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error(`${label} must contain valid JSON`);
+  }
+  return normalizePublicKeyMap(value, label);
+}
+
+async function readBoundedRegularFile(file, label) {
+  const before = await lstat(file).catch(() => null);
+  if (!before?.isFile() || before.isSymbolicLink() || before.size > maxPublicKeyMapBytes) {
+    throw new Error(`${label} must be a bounded regular file`);
+  }
+  const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)).catch(() => null);
+  if (!handle) throw new Error(`${label} must be a bounded regular file`);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
+      throw new Error(`${label} must be a bounded regular file`);
+    }
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    if (bytes.length > maxPublicKeyMapBytes || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs) {
+      throw new Error(`${label} changed during read`);
+    }
+    return bytes;
+  } finally {
+    await handle.close();
+  }
 }
 
 function validateVersions(value) {
@@ -313,11 +394,19 @@ async function runCLI() {
     cache: { type: "string" },
     output: { type: "string" },
     "feed-base-url": { type: "string", default: "" },
+    "activation-endpoint": { type: "string" },
+    "activation-public-keys": { type: "string" },
+    "license-status-endpoint": { type: "string" },
+    "license-status-public-keys": { type: "string" },
   } });
   await buildWindowsValidationKit({
     cacheDir: values.cache,
     outputDir: values.output,
     feedBaseURL: values["feed-base-url"],
+    activationServiceEndpoint: values["activation-endpoint"],
+    activationPublicKeys: await readPublicKeyMapFile(values["activation-public-keys"], "activation public keys"),
+    licenseStatusEndpoint: values["license-status-endpoint"],
+    licenseStatusPublicKeys: await readPublicKeyMapFile(values["license-status-public-keys"], "license status public keys"),
   });
 }
 

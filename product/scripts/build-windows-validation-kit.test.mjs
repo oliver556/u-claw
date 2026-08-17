@@ -9,6 +9,7 @@ import {
   readFile,
   readdir,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -127,9 +128,15 @@ test("builds an exact secret-free handoff with distinct signed runtimes", async 
   const publicJWK = createPublicKey(publicKey).export({ format: "jwk" });
   const rawPublicKey = Buffer.from(publicJWK.x, "base64url").toString("base64");
   assert.equal(linkerFlags.includes(`main.trustedRuntimeKeys=${JSON.stringify({ [initialManifest.signature.keyId]: rawPublicKey })}`), true);
+  assert.equal(linkerFlags.includes(`main.activationServiceEndpoint=${fixture.activationServiceEndpoint}`), true);
+  assert.equal(linkerFlags.includes(`main.trustedStartupLicenseKeys=${JSON.stringify(fixture.activationPublicKeys)}`), true);
+  assert.equal(linkerFlags.includes(`main.licenseStatusEndpoint=${fixture.licenseStatusEndpoint}`), true);
+  assert.equal(linkerFlags.includes(`main.trustedLicenseStatusKeys=${JSON.stringify(fixture.licenseStatusPublicKeys)}`), true);
 
   const readme = await readFile(path.join(result.handoffDir, "README.txt"), "utf8");
   assert.equal(readme.includes("U:"), false);
+  assert.match(readme, /supplied real activation and license-status HTTPS endpoints and public verification keys/iu);
+  assert.match(readme, /fails closed/iu);
   const activation = readme.indexOf("activation");
   const license = readme.indexOf("license.json");
   const exit = readme.indexOf("Exit U-Claw completely");
@@ -169,6 +176,42 @@ test("refuses existing output and removes partial output after failure", async (
   assert.equal(await readFile(path.join(raced.outputDir, "external.txt"), "utf8"), "external");
 });
 
+test("fails closed for missing or invalid activation configuration", async (t) => {
+  const fixture = await createFixture(t);
+  const cases = [
+    { activationServiceEndpoint: undefined },
+    { activationServiceEndpoint: "http://activation.example.test/" },
+    { activationServiceEndpoint: "https://user:password@activation.example.test/" },
+    { licenseStatusEndpoint: "https://license.example.test/status/?token=secret" },
+    { activationPublicKeys: {} },
+    { activationPublicKeys: { "activation-key": ["-----BEGIN", "PRIVATE", "KEY-----"].join(" ") } },
+    { licenseStatusPublicKeys: {} },
+  ];
+  for (const optionOverrides of cases) {
+    const calls = [];
+    await assert.rejects(fixture.build({ calls, optionOverrides }), /activation|license status|public key/iu);
+    assert.deepEqual(calls, []);
+    assert.equal(await exists(fixture.outputDir), false);
+  }
+});
+
+test("public-key JSON files must be regular non-symlink files", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uclaw-validation-key-file-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const real = path.join(root, "keys.json");
+  const linked = path.join(root, "linked.json");
+  const encodedKey = Buffer.alloc(32, 7).toString("base64");
+  const keys = { "z-activation-key": encodedKey, "a-activation-key": encodedKey };
+  await writeFile(real, JSON.stringify(keys));
+  await symlink(real, linked);
+  const { readPublicKeyMapFile } = await import("./build-windows-validation-kit.mjs");
+  assert.equal(JSON.stringify(await readPublicKeyMapFile(real, "activation public keys")), JSON.stringify({
+    "a-activation-key": encodedKey,
+    "z-activation-key": encodedKey,
+  }));
+  await assert.rejects(readPublicKeyMapFile(linked, "activation public keys"), /regular file/iu);
+});
+
 async function createFixture(t, { failAt, createOutputAfter } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "uclaw-validation-kit-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -177,11 +220,21 @@ async function createFixture(t, { failAt, createOutputAfter } = {}) {
   const temporaryRoot = path.join(root, "private-temporary");
   await mkdir(cacheDir);
   const injectedKeys = generateKeyPairSync("ed25519");
+  const activationKeys = generateKeyPairSync("ed25519");
+  const licenseStatusKeys = generateKeyPairSync("ed25519");
+  const activationServiceEndpoint = "https://activation.example.test/v1/";
+  const licenseStatusEndpoint = "https://license.example.test/v1/status/";
+  const activationPublicKeys = { "activation-key": rawPublicKey(activationKeys.publicKey) };
+  const licenseStatusPublicKeys = { "license-status-key": rawPublicKey(licenseStatusKeys.publicKey) };
 
   return {
     outputDir,
     temporaryRoot,
-    async build({ calls = [], logs = [], randomByteRequests = [], tokenBytes = Buffer.alloc(32, 0xa5) } = {}) {
+    activationServiceEndpoint,
+    licenseStatusEndpoint,
+    activationPublicKeys,
+    licenseStatusPublicKeys,
+    async build({ calls = [], logs = [], randomByteRequests = [], tokenBytes = Buffer.alloc(32, 0xa5), optionOverrides = {} } = {}) {
       const { buildWindowsValidationKit } = await import("./build-windows-validation-kit.mjs");
       const runner = async (command, args, options = {}) => {
         const call = { command, args: [...args], options };
@@ -216,10 +269,15 @@ async function createFixture(t, { failAt, createOutputAfter } = {}) {
         logger: line => logs.push(String(line)),
         temporaryRoot,
         signingKeyPair: injectedKeys,
+        activationServiceEndpoint,
+        activationPublicKeys,
+        licenseStatusEndpoint,
+        licenseStatusPublicKeys,
         randomBytes: size => {
           randomByteRequests.push(size);
           return tokenBytes;
         },
+        ...optionOverrides,
       });
     },
   };
@@ -268,4 +326,8 @@ async function exists(target) {
 
 function count(value, needle) {
   return value.split(needle).length - 1;
+}
+
+function rawPublicKey(publicKey) {
+  return Buffer.from(publicKey.export({ format: "jwk" }).x, "base64url").toString("base64");
 }
