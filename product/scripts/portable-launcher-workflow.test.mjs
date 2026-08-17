@@ -96,6 +96,18 @@ test("Windows CI launches the real runtime offline", async () => {
   assert.match(smoke, /\^UCLAW_REAL_RUNTIME_\[A-Z_\]\+\$/u);
   assert.match(smoke, /Write-SanitizedDiagnostic \$false \$failureCode/u);
   assert.doesNotMatch(smoke, /throw\s+\$_|Write-SanitizedDiagnostic[^\n]*Exception/iu);
+  assert.match(smoke, /Read-SafeLogRecord/u);
+  assert.match(smoke, /launcherEvent/u);
+  assert.match(smoke, /gatewayEvent/u);
+  assert.match(smoke, /gatewayPhase/u);
+  assert.match(smoke, /gatewayClassification/u);
+  assert.match(smoke, /gatewaySpawned/u);
+  assert.match(smoke, /gatewayHealthReady/u);
+  assert.match(smoke, /gatewayCapabilityReady/u);
+  assert.match(smoke, /gateway-spawned/u);
+  assert.match(smoke, /gateway-health-ready/u);
+  assert.match(smoke, /gateway-capability-ready/u);
+  assert.doesNotMatch(smoke, /stderrTail/u);
   assert.match(kit, /buildWindowsValidationKit/u);
   assert.match(kit, /fetchRuntimeArtifact/u);
   assert.match(kit, /-tags["'],\s*["']licensefixture/u);
