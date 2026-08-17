@@ -219,6 +219,7 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
     const accountIds: string[] = [];
     for (const entry of await readdir(accountsDir, { withFileTypes: true })) {
       if (!entry.name.endsWith(".json")) continue;
+      if (entry.name.endsWith(".context-tokens.json")) continue;
       if (!entry.isFile()) throw new Error("WeChat account credential must be a regular file");
       const rawId = entry.name.slice(0, -5);
       const accountId = normalizedAccountId(rawId);
@@ -226,6 +227,13 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
       accountIds.push(accountId);
     }
     return accountIds;
+  };
+
+  const invalidateAccount = async (accountId: string): Promise<void> => {
+    await rm(join(accountsDir, `${accountId}.json`), { force: true });
+    await rm(join(accountsDir, `${accountId}.context-tokens.json`), { force: true });
+    await ensureStateDirectory();
+    await atomicWrite(accountsPath, "[]");
   };
 
   const requestJson = async <T>(url: string, schema: z.ZodType<T>, signal: AbortSignal): Promise<T> => {
@@ -265,6 +273,7 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
       return { status: "connected" as const, loginState: "connected" as const, account: { accountIdHint: accountHint(accountId) } };
     }
     if (account?.lastError && /401|403|auth|token|logged.?out|登录/iu.test(account.lastError)) {
+      await invalidateAccount(accountId);
       return { status: "auth-failed" as const, loginState: "error" as const, account: { accountIdHint: accountHint(accountId) } };
     }
     return { status: "disconnected" as const, loginState: "error" as const, account: { accountIdHint: accountHint(accountId) } };
@@ -399,6 +408,8 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
       flows.delete(flowId);
     },
     reconnect: async (signal) => {
+      const current = await status(signal);
+      if (current.status === "auth-failed" || current.status === "not-configured") return current;
       const accountIds = await readAccounts();
       if (accountIds.length === 0) return { status: "not-configured", loginState: "idle" };
       const accountId = accountIds[0]!;
@@ -413,6 +424,11 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
         await options.requestGateway("channels.stop", { channel: PLUGIN_ID, accountId }, signal);
       }
       for (const accountId of accountIds) await rm(join(accountsDir, `${accountId}.json`), { force: true });
+      if (await existingDirectory(accountsDir)) {
+        for (const entry of await readdir(accountsDir, { withFileTypes: true })) {
+          if (entry.name.endsWith(".context-tokens.json")) await rm(join(accountsDir, entry.name), { force: true });
+        }
+      }
       await ensureStateDirectory();
       await atomicWrite(accountsPath, "[]");
       const remaining = await readAccounts();

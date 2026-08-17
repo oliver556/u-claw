@@ -15,6 +15,7 @@ type GatewayAccount = {
   configured: boolean;
   running: boolean;
   connected: boolean;
+  lastError?: string;
 };
 
 function gatewayStatus(account?: GatewayAccount) {
@@ -287,12 +288,37 @@ describe("production personal WeChat runtime", () => {
     await expect(runtime.reconnect(new AbortController().signal)).resolves.toMatchObject({ status: "connected", loginState: "connected" });
     await runtime.logout(new AbortController().signal);
 
-    expect(methods).toEqual(["channels.stop", "channels.start", "channels.status", "channels.stop"]);
+    expect(methods).toEqual(["channels.status", "channels.stop", "channels.start", "channels.status", "channels.stop"]);
     await expect(readFile(join(accountDir, "wx-account-7a2f.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(JSON.parse(await readFile(join(stateDir, "accounts.json"), "utf8"))).toEqual([]);
 
     const restarted = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway, renderQr: async () => png });
     await expect(restarted.status(new AbortController().signal)).resolves.toEqual({ status: "not-configured", loginState: "idle" });
+  });
+
+  it("invalidates stale credentials when Gateway reports authorization failure and requires a fresh scan", async () => {
+    const { dataDir, pluginDir } = await fixture();
+    const stateDir = join(dataDir, "openclaw-weixin");
+    const accountDir = join(stateDir, "accounts");
+    await mkdir(accountDir, { recursive: true });
+    await writeFile(join(stateDir, "accounts.json"), JSON.stringify(["wx-account-7a2f"]));
+    await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: "stale-secret" }), { mode: 0o600 });
+    const requestGateway = vi.fn(async (method: string) => {
+      expect(method).toBe("channels.status");
+      return gatewayStatus({
+        accountId: "wx-account-7a2f", enabled: true, configured: true, running: false, connected: false,
+        lastError: "401 unauthorized bot token",
+      });
+    });
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway, renderQr: async () => png });
+
+    await expect(runtime.status(new AbortController().signal)).resolves.toEqual({
+      status: "auth-failed", loginState: "error", account: { accountIdHint: "...7a2f" },
+    });
+    await expect(readFile(join(stateDir, "accounts.json"), "utf8")).resolves.toBe("[]");
+    await expect(readFile(join(accountDir, "wx-account-7a2f.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(runtime.reconnect(new AbortController().signal)).resolves.toEqual({ status: "not-configured", loginState: "idle" });
+    expect(requestGateway).toHaveBeenCalledOnce();
   });
 
   it("logout removes an orphaned account file even when the index omits it", async () => {
@@ -309,6 +335,24 @@ describe("production personal WeChat runtime", () => {
 
     expect(requestGateway).toHaveBeenCalledWith("channels.stop", { channel: "openclaw-weixin", accountId: "wx-orphan-7a2f" }, expect.any(AbortSignal));
     await expect(readFile(join(accountDir, "wx-orphan-7a2f.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("logout clears persisted per-peer context tokens without treating them as accounts", async () => {
+    const { dataDir, pluginDir } = await fixture();
+    const stateDir = join(dataDir, "openclaw-weixin");
+    const accountDir = join(stateDir, "accounts");
+    await mkdir(accountDir, { recursive: true });
+    await writeFile(join(stateDir, "accounts.json"), JSON.stringify(["wx-account-7a2f"]));
+    await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: "secret" }));
+    await writeFile(join(accountDir, "wx-account-7a2f.context-tokens.json"), JSON.stringify({ "peer@im.wechat": "context-secret" }));
+    const requestGateway = vi.fn(async () => ({ ok: true }));
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway, renderQr: async () => png });
+
+    await runtime.logout(new AbortController().signal);
+
+    expect(requestGateway).toHaveBeenCalledOnce();
+    expect(requestGateway).toHaveBeenCalledWith("channels.stop", { channel: "openclaw-weixin", accountId: "wx-account-7a2f" }, expect.any(AbortSignal));
+    await expect(readFile(join(accountDir, "wx-account-7a2f.context-tokens.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects an invalid account index instead of reporting an empty authority", async () => {
