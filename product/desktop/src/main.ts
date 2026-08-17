@@ -743,6 +743,7 @@ export async function startElectronMain(
     },
   });
   await attachmentCleanup.started;
+  onDesktopStage("domain-services");
   const providers = options.providers ?? createProviderStore({ dataDir: portablePaths.dataDir });
   const modelRouting = createMainProcessModelRouting({
     dataDir: portablePaths.dataDir,
