@@ -64,6 +64,13 @@ test("rejects mutable Windows runtime artifact pins", async () => {
       message: "Windows Node artifact SHA-256 must be a lowercase 64-character SHA-256 digest",
     },
     {
+      name: "wrong OpenClaw URL",
+      mutate: (candidate) => {
+        candidate.windowsArtifacts.openclaw.url = "https://registry.example.com/openclaw/-/openclaw-2026.7.1-2.tgz";
+      },
+      message: "Windows OpenClaw artifact URL must match pinned version",
+    },
+    {
       name: "OpenClaw integrity mismatch",
       mutate: (candidate) => {
         candidate.windowsArtifacts.openclaw.integrity = "sha512-invalid";
