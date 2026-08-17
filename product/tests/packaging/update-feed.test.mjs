@@ -107,7 +107,9 @@ test("builds one signed stable feed and byte-identical offline payload", async (
   const extracted = await extractOfflinePayload(offlinePath);
   assert.deepEqual(extracted.manifest, feedBytes);
   assert.deepEqual(extracted.runtime, runtimeBytes);
-  assert.equal((await stat(offlinePath)).mode & 0o100, 0o100);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(offlinePath)).mode & 0o100, 0o100);
+  }
 });
 
 test("rejects existing output, missing key, invalid self-verification, and non-positive sequence", async () => {
