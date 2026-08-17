@@ -117,14 +117,56 @@ describe("ChannelSettings", () => {
     expect(within(screen.getByText("飞书运维").closest("article") as HTMLElement).getByText("需要操作")).toBeVisible();
   });
 
-  it("shows personal WeChat as a distinct connection and explains missing plugin", async () => {
-    window.uclaw = { channels: { invoke: vi.fn(async (request: ChannelIpcRequest) => success(request)) } } as never;
+  it("turns unavailable personal WeChat internals into a disabled business recovery state", async () => {
+    const technicalUnavailable: WechatConnectionSnapshot = {
+      ...unavailableWechat,
+      capabilityReason: "Gateway RPC channels.wechat-login-start failed at C:\\uclaw\\runtime\\node_modules\\@tencent-weixin\\openclaw-weixin.",
+      error: {
+        category: "capability",
+        code: "WECHAT_PLUGIN_MISSING",
+        message: "Plugin ID openclaw-weixin missing; run npm install with token=secret-token.",
+        retryable: false,
+      },
+    };
+    const invoke = vi.fn(async (request: ChannelIpcRequest) => request.method.startsWith("channels.wechat-")
+      ? { method: request.method, requestId: request.requestId, ok: true, result: technicalUnavailable } as ChannelIpcResponse
+      : success(request));
+    window.uclaw = { channels: { invoke } } as never;
     render(<ChannelSettings />);
 
     expect(await screen.findByText("个人微信")).toBeVisible();
-    expect(screen.getByText("@tencent-weixin/openclaw-weixin@2.4.6")).toBeVisible();
-    expect(screen.getByText("需要安装并启用个人微信插件。")).toBeVisible();
+    expect(screen.getAllByText("组件缺失，需修复 U-Claw").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "开始个人微信扫码登录" })).toBeDisabled();
+    for (const internal of ["@tencent-weixin", "openclaw-weixin", "Plugin ID", "npm install", "Gateway RPC", "channels.wechat-login-start", "C:\\uclaw", "secret-token"]) {
+      expect(document.body.textContent).not.toContain(internal);
+    }
+  });
+
+  it("maps damaged, updating and repairing components to business states", async () => {
+    const cases = [
+      ["WECHAT_PLUGIN_DAMAGED", "组件损坏，需修复或更新 U-Claw"],
+      ["WECHAT_PLUGIN_UPDATING", "组件更新中"],
+      ["WECHAT_PLUGIN_REPAIRING", "组件修复中"],
+    ] as const;
+
+    for (const [code, expected] of cases) {
+      const state: WechatConnectionSnapshot = {
+        ...unavailableWechat,
+        plugin: { ...unavailableWechat.plugin, status: "installed" },
+        error: { category: "capability", code, message: `technical ${code}`, retryable: false },
+      };
+      const invoke = vi.fn(async (request: ChannelIpcRequest) => ({
+        method: request.method,
+        requestId: request.requestId,
+        ok: true,
+        result: state,
+      }) as ChannelIpcResponse);
+      window.uclaw = { channels: { invoke } } as never;
+      render(<ChannelSettings />);
+      expect((await screen.findAllByText(expected)).length).toBeGreaterThan(0);
+      expect(document.body.textContent).not.toContain(`technical ${code}`);
+      cleanup();
+    }
   });
 
   it("renders safe QR, polls confirmation, then shows masked connected account", async () => {
@@ -139,7 +181,7 @@ describe("ChannelSettings", () => {
         poll += 1;
         return { method: request.method, requestId: request.requestId, ok: true, result: poll === 1
           ? { ...available, status: "pending-verification", loginState: "awaiting-confirmation", flowId: "flow-1", qrGeneration: 1, qrImage, qrExpiresAt: "2026-08-09T09:05:00.000Z" }
-          : { ...available, status: "connected", loginState: "connected", account: { displayName: "微信账号", accountIdHint: "...7a2f" } } } as ChannelIpcResponse;
+          : { ...available, status: "connected", loginState: "connected", account: { displayName: "完整账号 wxid_private_account", accountIdHint: "...7a2f" } } } as ChannelIpcResponse;
       }
       return success(request);
     });
@@ -147,19 +189,22 @@ describe("ChannelSettings", () => {
     render(<ChannelSettings />);
     await act(async () => { await Promise.resolve(); });
 
+    expect(screen.getByText("可扫码连接")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "开始个人微信扫码登录" }));
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("img", { name: "个人微信登录二维码" })).toHaveAttribute("src", qrImage.value);
     await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
 
-    expect(screen.getAllByText("扫码后请在手机微信确认").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("已扫码，等待手机确认").length).toBeGreaterThan(0);
     await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
     expect(screen.getByText("...7a2f")).toBeVisible();
+    expect(screen.getAllByText("已连接").length).toBeGreaterThan(0);
     expect(screen.queryByRole("img", { name: "个人微信登录二维码" })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("wxid_private_account");
     expect(document.body.textContent).not.toContain("bot_token");
   });
 
-  it("offers authoritative reconnect and logout after personal WeChat login becomes invalid", async () => {
+  it("requires a fresh scan and keeps logout available after personal WeChat authorization expires", async () => {
     const invalid: WechatConnectionSnapshot = {
       ...unavailableWechat,
       capability: "available",
@@ -180,8 +225,10 @@ describe("ChannelSettings", () => {
     render(<ChannelSettings />);
 
     expect(await screen.findByText("...7a2f")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "重新连接" }));
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "channels.wechat-reconnect" })));
+    expect(screen.getAllByText("授权失效，需重新扫码").length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toContain("个人微信登录已失效。");
+    fireEvent.click(screen.getByRole("button", { name: "重新扫码" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "channels.wechat-login-start", params: { force: true } })));
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "退出登录" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
     const confirmation = await screen.findByText("退出个人微信？");
