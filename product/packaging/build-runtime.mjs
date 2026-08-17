@@ -45,7 +45,10 @@ export async function buildRuntime(options) {
   if (!inventory.files.has(normalizedEntrypoint.toLowerCase())) {
     throw new Error("runtime entrypoint does not exist");
   }
-  const electronExecutables = [...inventory.files].filter((file) => /(?:^|\/)electron\/.*\.exe$/iu.test(file));
+  const electronExecutables = [...inventory.files].filter((file) => (
+    /(?:^|\/)electron\/.*\.exe$/iu.test(file) &&
+    !file.startsWith("electron/resources/app/")
+  ));
   if (electronExecutables.length !== 1 || electronExecutables[0] !== normalizedEntrypoint.toLowerCase()) {
     throw new Error("runtime must contain exactly one Electron executable at the signed entrypoint");
   }

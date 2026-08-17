@@ -65,6 +65,18 @@ test("buildRuntime rejects a nested second Electron executable", async () => {
   );
 });
 
+test("buildRuntime permits dependency helper executables inside the Electron app", async () => {
+  const { root, runtime } = await fixtureRuntime();
+  const helperDirectory = path.join(runtime, "electron", "resources", "app", "node_modules", "dependency");
+  await mkdir(helperDirectory, { recursive: true });
+  await writeFile(path.join(helperDirectory, "helper.exe"), "dependency-helper");
+
+  const manifest = await buildRuntime(runtimeOptions(root, runtime));
+
+  assert.equal(manifest.entrypoint, "electron/electron.exe");
+  assert.equal(manifest.fileCount, 3);
+});
+
 test("buildRuntime rejects a runtime id that disagrees with canonical pins", async () => {
   const { root, runtime } = await fixtureRuntime();
   await assert.rejects(

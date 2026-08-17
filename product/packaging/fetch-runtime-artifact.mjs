@@ -3,10 +3,11 @@ import { link, lstat, mkdir, open, rm } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import path from "node:path";
 
-export async function fetchRuntimeArtifact({ url, output, sha256, maxBytes, trustedCa }) {
+export async function fetchRuntimeArtifact({ url, output, sha256, maxBytes, trustedCa, redirectOrigin }) {
   const targetURL = validateURL(url);
   validateSHA256(sha256);
   validateMaxBytes(maxBytes);
+  validateRedirectOrigin(redirectOrigin);
   const outputPath = path.resolve(output);
   await requireMissing(outputPath, "runtime artifact output already exists");
   await mkdir(path.dirname(outputPath), { recursive: true });
@@ -18,7 +19,7 @@ export async function fetchRuntimeArtifact({ url, output, sha256, maxBytes, trus
   try {
     const handle = await open(temporaryPath, "wx", 0o600);
     try {
-      const response = await request(targetURL, trustedCa);
+      const response = await requestArtifact(targetURL, trustedCa, redirectOrigin);
       if (response.statusCode !== 200) {
         response.resume();
         throw new Error("runtime artifact response status must be 200");
@@ -51,6 +52,34 @@ export async function fetchRuntimeArtifact({ url, output, sha256, maxBytes, trus
   }
 }
 
+async function requestArtifact(url, trustedCa, redirectOrigin) {
+  const response = await request(url, trustedCa);
+  if (response.statusCode !== 302) return response;
+  const location = response.headers.location;
+  response.resume();
+  if (!redirectOrigin || typeof location !== "string") {
+    throw new Error("runtime artifact redirect is not allowed");
+  }
+  let redirected;
+  try {
+    redirected = new URL(location, url);
+  } catch {
+    throw new Error("runtime artifact redirect is invalid");
+  }
+  if (
+    redirected.protocol !== "https:" || redirected.origin !== redirectOrigin ||
+    redirected.username || redirected.password || redirected.hash
+  ) {
+    throw new Error("runtime artifact redirect target is not allowed");
+  }
+  const redirectedResponse = await request(redirected, trustedCa);
+  if (redirectedResponse.statusCode >= 300 && redirectedResponse.statusCode < 400) {
+    redirectedResponse.resume();
+    throw new Error("runtime artifact redirect chain is not allowed");
+  }
+  return redirectedResponse;
+}
+
 function validateURL(value) {
   if (typeof value !== "string") throw new Error("runtime artifact URL is invalid");
   const hasRawQueryOrFragment = value.includes("?") || value.includes("#");
@@ -75,6 +104,19 @@ function validateSHA256(value) {
 function validateMaxBytes(value) {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error("runtime artifact maxBytes must be a positive safe integer");
+  }
+}
+
+function validateRedirectOrigin(value) {
+  if (value === undefined) return;
+  let origin;
+  try {
+    origin = new URL(value);
+  } catch {
+    throw new Error("runtime artifact redirect origin is invalid");
+  }
+  if (origin.protocol !== "https:" || origin.origin !== value || origin.username || origin.password) {
+    throw new Error("runtime artifact redirect origin is invalid");
   }
 }
 

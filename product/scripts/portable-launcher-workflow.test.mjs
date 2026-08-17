@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createPublicKey, verify } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -92,7 +92,48 @@ test("Windows CI launches the real runtime offline", async () => {
   assert.match(kit, /buildWindowsValidationKit/u);
   assert.match(kit, /fetchRuntimeArtifact/u);
   assert.match(kit, /-tags["'],\s*["']licensefixture/u);
+  assert.match(kit, /runner:\s*instrumentedRunner/u);
+  for (const stage of [
+    "fixture-license",
+    "validation-kit",
+    "runtime-v1",
+    "runtime-v2",
+    "package-v1",
+    "package-v2",
+    "launcher",
+    "release",
+    "feed",
+    "updater",
+    "fixture-copy",
+    "fixture-launcher",
+    "fixture-check",
+  ]) assert.match(kit, new RegExp(`\\b${stage}\\b`, "u"));
   assert.doesNotMatch(workflow.slice(workflow.search(/uses: actions\/upload-artifact@/u)), /real-runtime-smoke|U-Claw-test-USB|\.uclaw[\\/]data/iu);
+});
+
+test("real runtime smoke failures emit only a fixed safe stage code", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-real-runtime-smoke-secret-token-"));
+  try {
+    const output = path.join(root, "private-key-should-never-appear");
+    await mkdir(output);
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        fileURLToPath(realRuntimeKitUrl),
+        "--cache", path.join(root, "cache-with-token"),
+        "--output", output,
+      ]),
+      error => {
+        assert.equal(error.code, 1);
+        assert.equal(error.stdout, "");
+        assert.equal(error.stderr, "REAL_WINDOWS_RUNTIME_SMOKE_FAILED: setup\n");
+        assert.equal(error.stderr.includes(root), false);
+        assert.equal(error.stderr.includes("private-key-should-never-appear"), false);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("portable launcher workflow runs after relevant branch pushes", async () => {

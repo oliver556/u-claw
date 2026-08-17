@@ -105,10 +105,69 @@ test("fetchRuntimeArtifact rejects redirects without following them", async (t) 
     sha256: sha256("wrong"),
     maxBytes: 10,
     trustedCa: fixture.trustedCa,
-  }), { message: "runtime artifact response status must be 200" });
+  }), { message: "runtime artifact redirect is not allowed" });
   assert.equal(redirected, false);
   await assert.rejects(lstat(output), { code: "ENOENT" });
   assert.deepEqual(await siblingEntries(output), []);
+});
+
+test("fetchRuntimeArtifact follows one explicitly trusted redirect origin", async (t) => {
+  const runtime = Buffer.from("trusted redirected runtime");
+  const fixture = await withFixture(t, (request, response) => {
+    if (request.url === "/runtime.pkg") {
+      response.writeHead(302, { location: "/redirected?short-lived-signature=test" }).end();
+      return;
+    }
+    response.writeHead(200, { "content-length": runtime.length }).end(runtime);
+  });
+  const { output } = await fixtureOutput();
+
+  await fetchRuntimeArtifact({
+    url: fixture.url,
+    output,
+    sha256: sha256(runtime),
+    maxBytes: runtime.length,
+    trustedCa: fixture.trustedCa,
+    redirectOrigin: new URL(fixture.url).origin,
+  });
+
+  assert.deepEqual(await readFile(output), runtime);
+});
+
+test("fetchRuntimeArtifact rejects an untrusted target, unsafe target, and redirect chain", async (t) => {
+  for (const testCase of [
+    { name: "untrusted origin", location: "/redirected", redirectOrigin: "https://example.test", message: /target is not allowed/i },
+    { name: "credentials", location: "https://user:password@localhost/redirected", message: /target is not allowed/i },
+    { name: "fragment", location: "/redirected#fragment", message: /target is not allowed/i },
+    { name: "chain", location: "/second", secondRedirect: true, message: /redirect chain/i },
+  ]) {
+    await t.test(testCase.name, async (subtest) => {
+      const fixture = await withFixture(subtest, (request, response) => {
+        if (request.url === "/runtime.pkg") {
+          const location = testCase.location.startsWith("https://user:")
+            ? testCase.location.replace("localhost", request.headers.host)
+            : testCase.location;
+          response.writeHead(302, { location }).end();
+          return;
+        }
+        if (testCase.secondRedirect) {
+          response.writeHead(302, { location: "/final" }).end();
+          return;
+        }
+        response.writeHead(200).end("must-not-be-used");
+      });
+      const { output } = await fixtureOutput();
+      await assert.rejects(fetchRuntimeArtifact({
+        url: fixture.url,
+        output,
+        sha256: sha256("must-not-be-used"),
+        maxBytes: 1024,
+        trustedCa: fixture.trustedCa,
+        redirectOrigin: testCase.redirectOrigin ?? new URL(fixture.url).origin,
+      }), testCase.message);
+      await assert.rejects(lstat(output), { code: "ENOENT" });
+    });
+  }
 });
 
 test("fetchRuntimeArtifact removes temporary bytes that exceed maxBytes", async (t) => {
@@ -225,6 +284,7 @@ test("fetchRuntimeArtifact rejects unsafe URLs before making requests", async (t
   await assert.rejects(fetchRuntimeArtifact({ ...options, url: `${fixture.url}?` }), { message: "runtime artifact URL must not include query or fragment" });
   await assert.rejects(fetchRuntimeArtifact({ ...options, url: `${fixture.url}#` }), { message: "runtime artifact URL must not include query or fragment" });
   await assert.rejects(fetchRuntimeArtifact({ ...options, url: "not a URL" }), { message: "runtime artifact URL is invalid" });
+  await assert.rejects(fetchRuntimeArtifact({ ...options, url: fixture.url, redirectOrigin: "https://example.test/with-path" }), { message: "runtime artifact redirect origin is invalid" });
   assert.equal(requests, 0);
 });
 
