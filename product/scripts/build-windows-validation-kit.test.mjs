@@ -124,7 +124,7 @@ test("builds an exact secret-free handoff with distinct signed runtimes", async 
   assert.equal(configText.includes(productRoot), false);
 
   const launcherCall = calls.find(call => callName(call) === "go:launcher");
-  assert.equal(argumentAfter(launcherCall.args, "-tags"), "licensefixture");
+  assert.equal(launcherCall.args.includes("-tags"), false);
   const linkerFlags = argumentAfter(launcherCall.args, "-ldflags");
   const publicJWK = createPublicKey(publicKey).export({ format: "jwk" });
   const rawPublicKey = Buffer.from(publicJWK.x, "base64url").toString("base64");
@@ -200,7 +200,7 @@ test("fails closed for missing or invalid activation configuration", async (t) =
   }
 });
 
-test("licensefixture linker integration decodes all three trust maps", async () => {
+test("production linker integration decodes all three trust maps without fixture tags", async () => {
   const rawKey = Buffer.alloc(32, 9).toString("base64");
   const linkerFlags = [
     "-s", "-w",
@@ -209,13 +209,22 @@ test("licensefixture linker integration decodes all three trust maps", async () 
     "-X", `u-claw-launcher.trustedLicenseStatusKeys=${encodeFixtureLinkerJSON({ "license-status-key": rawKey })}`,
   ].join(" ");
   await execFileAsync("go", [
-    "test", "-tags", "licensefixture",
-    "-run", "^TestFixtureLinkedTrustConfiguration$",
+    "test",
+    "-run", "^TestLinkedTrustConfiguration$",
     "-count=1", "-ldflags", linkerFlags, ".",
   ], {
     cwd: path.join(productRoot, "launcher"),
     env: { ...process.env, UCLAW_TEST_LINKED_TRUST_CONFIG: "1" },
   });
+});
+
+test("production build excludes USB fingerprint and status fixtures", async () => {
+  const fingerprintFixture = await readFile(new URL("../launcher/usb_fingerprint_licensefixture_windows.go", import.meta.url), "utf8");
+  const statusFixture = await readFile(new URL("../launcher/license_status_query_licensefixture.go", import.meta.url), "utf8");
+  assert.match(fingerprintFixture, /^\/\/go:build windows && licensefixture$/mu);
+  assert.match(statusFixture, /^\/\/go:build licensefixture$/mu);
+  const script = await readFile(scriptPath, "utf8");
+  assert.doesNotMatch(script, /\["licensefixture"\]/u);
 });
 
 test("public-key JSON files must be regular non-symlink files", async (t) => {

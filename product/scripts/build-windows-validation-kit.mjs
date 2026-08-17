@@ -131,7 +131,7 @@ export async function buildWindowsValidationKit(options) {
       "-X", `main.trustedStartupLicenseKeys=${encodeFixtureLinkerJSON(activationPublicKeys)}`,
       "-X", `main.licenseStatusEndpoint=${licenseStatusEndpoint}`,
       "-X", `main.trustedLicenseStatusKeys=${encodeFixtureLinkerJSON(licenseStatusPublicKeys)}`,
-    ], ["licensefixture"]);
+    ]);
 
     const usbDir = path.join(handoffDir, "U-Claw-test-USB");
     await runNodeScript(runner, productRoot, "packaging/build-release.mjs", [
@@ -215,10 +215,9 @@ async function runNodeScript(runner, productRoot, relativeScript, args) {
   });
 }
 
-async function runGoBuild(runner, cwd, output, linkerValues = [], tags = []) {
+async function runGoBuild(runner, cwd, output, linkerValues = []) {
   const linkerFlags = ["-s", "-w", "-H", "windowsgui", ...linkerValues].join(" ");
-  const tagArguments = tags.length > 0 ? ["-tags", tags.join(",")] : [];
-  return runner("go", ["build", "-trimpath", ...tagArguments, "-ldflags", linkerFlags, "-o", output, "."], {
+  return runner("go", ["build", "-trimpath", "-ldflags", linkerFlags, "-o", output, "."], {
     cwd,
     env: { CGO_ENABLED: "0", GOOS: "windows", GOARCH: "amd64" },
     windowsHide: true,
