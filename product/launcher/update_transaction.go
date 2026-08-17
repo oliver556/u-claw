@@ -73,7 +73,7 @@ func FinalizeUpdateTransaction(packageRoot string, manifest Manifest) error {
 	if err != nil {
 		return ErrManifestInvalid
 	}
-	syncErr := directory.Sync()
+	syncErr := syncDirectory(directory)
 	closeErr = directory.Close()
 	if syncErr != nil || closeErr != nil {
 		return ErrManifestInvalid

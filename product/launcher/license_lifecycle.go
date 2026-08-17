@@ -565,7 +565,7 @@ func writeHostAuthorizationAnchor(options licenseLifecycleVerificationOptions, a
 	removeTemporary = false
 	if directory, err := root.Open(hostAuthorizationAnchorDirectory); err == nil {
 		defer directory.Close()
-		if err := directory.Sync(); err != nil {
+		if err := syncDirectory(directory); err != nil {
 			return ErrLicenseOfflineCacheInvalid
 		}
 	}
@@ -663,7 +663,7 @@ func atomicWriteLifecycleCache(packageRoot string, content []byte, random io.Rea
 	removeTemporary = false
 	if directory, err := root.Open("license"); err == nil {
 		defer directory.Close()
-		if err := directory.Sync(); err != nil {
+		if err := syncDirectory(directory); err != nil {
 			return ErrLicenseOfflineCacheInvalid
 		}
 	}

@@ -387,7 +387,7 @@ func syncReleaseFSRoot(root *os.Root) error {
 	if err != nil {
 		return err
 	}
-	syncErr := directory.Sync()
+	syncErr := syncDirectory(directory)
 	return errors.Join(syncErr, directory.Close())
 }
 
