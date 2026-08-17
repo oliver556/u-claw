@@ -6,14 +6,19 @@ on:
     paths:
       - '.github/workflows/portable-launcher.yml'
       - 'product/launcher/**'
+      - 'product/desktop/**'
       - 'product/offline-updater/**'
       - 'product/packaging/**'
+      - 'product/runtime-versions.json'
+      - 'product/scripts/build-windows-validation-kit.mjs'
       - 'product/scripts/portable-launcher-workflow.test.mjs'
       - 'product/scripts/runtime-manifest*'
       - 'product/tests/packaging/runtime-package.test.mjs'
       - 'product/tests/packaging/update-feed.test.mjs'
       - 'product/tests/windows/launcher-e2e.ps1'
       - 'product/tests/windows/offline-updater-e2e.ps1'
+      - 'product/tests/windows/build-real-runtime-smoke-kit.mjs'
+      - 'product/tests/windows/real-runtime-smoke.ps1'
       - 'product/tests/windows/sign-license-fixture.mjs'
       - 'product/tests/windows/sign-runtime-fixture.mjs'
       - 'product/tests/windows/fixtures/portable-runtime*.go'
@@ -23,14 +28,19 @@ on:
     paths:
       - '.github/workflows/portable-launcher.yml'
       - 'product/launcher/**'
+      - 'product/desktop/**'
       - 'product/offline-updater/**'
       - 'product/packaging/**'
+      - 'product/runtime-versions.json'
+      - 'product/scripts/build-windows-validation-kit.mjs'
       - 'product/scripts/portable-launcher-workflow.test.mjs'
       - 'product/scripts/runtime-manifest*'
       - 'product/tests/packaging/runtime-package.test.mjs'
       - 'product/tests/packaging/update-feed.test.mjs'
       - 'product/tests/windows/launcher-e2e.ps1'
       - 'product/tests/windows/offline-updater-e2e.ps1'
+      - 'product/tests/windows/build-real-runtime-smoke-kit.mjs'
+      - 'product/tests/windows/real-runtime-smoke.ps1'
       - 'product/tests/windows/sign-license-fixture.mjs'
       - 'product/tests/windows/sign-runtime-fixture.mjs'
       - 'product/tests/windows/fixtures/portable-runtime*.go'
@@ -44,7 +54,7 @@ jobs:
   verify:
     name: Windows portable launcher lifecycle
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -58,7 +68,9 @@ jobs:
         with:
           node-version: '24.15.0'
           cache: npm
-          cache-dependency-path: product/package-lock.json
+          cache-dependency-path: |
+            product/package-lock.json
+            product/packaging/windows-runtime-app/package-lock.json
 
       - name: Install locked Node dependencies
         shell: pwsh
@@ -121,6 +133,7 @@ jobs:
           finally {
             Pop-Location
           }
+
           go test product\tests\windows\fixtures\portable-runtime.go product\tests\windows\fixtures\portable-runtime_test.go
           if ($LASTEXITCODE -ne 0) { throw 'Fixture runtime tests failed' }
           go build -trimpath -o (Join-Path $outputRoot 'portable-runtime.exe') product\tests\windows\fixtures\portable-runtime.go
@@ -141,6 +154,15 @@ jobs:
           finally {
             Pop-Location
           }
+
+      - name: Build real Windows runtime smoke kit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node product\tests\windows\build-real-runtime-smoke-kit.mjs `
+            --cache product\.real-runtime-cache `
+            --output product\.real-runtime-smoke
+          if ($LASTEXITCODE -ne 0) { throw 'Real runtime smoke kit build failed' }
 
       - name: Windows PowerShell 5.1 portable lifecycle gate
         shell: powershell
@@ -169,6 +191,24 @@ jobs:
             -FixtureExe product\.portable-launcher\bin\portable-runtime.exe `
             -DiagnosticsPath product\.portable-launcher\diagnostics\offline-powershell-7.json `
             -CaseName offline-powershell-7
+
+      - name: Windows PowerShell 5.1 real runtime offline gate
+        shell: powershell
+        run: |
+          .\product\tests\windows\real-runtime-smoke.ps1 `
+            -LauncherExe product\.real-runtime-smoke\U-Claw-test-USB\U-Claw.exe `
+            -UsbRoot product\.real-runtime-smoke\U-Claw-test-USB `
+            -DiagnosticsPath product\.portable-launcher\diagnostics\real-runtime-windows-powershell-5.json `
+            -CaseName real-runtime-windows-powershell-5
+
+      - name: PowerShell 7 real runtime offline gate
+        shell: pwsh
+        run: |
+          .\product\tests\windows\real-runtime-smoke.ps1 `
+            -LauncherExe product\.real-runtime-smoke\U-Claw-test-USB\U-Claw.exe `
+            -UsbRoot product\.real-runtime-smoke\U-Claw-test-USB `
+            -DiagnosticsPath product\.portable-launcher\diagnostics\real-runtime-powershell-7.json `
+            -CaseName real-runtime-powershell-7
 
       - name: Upload sanitized lifecycle diagnostics
         if: always()

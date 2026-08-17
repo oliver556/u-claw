@@ -13,6 +13,8 @@ const execFileAsync = promisify(execFile);
 const workflowUrl = new URL("../../.github/workflows/portable-launcher.yml", import.meta.url);
 const e2eUrl = new URL("../tests/windows/launcher-e2e.ps1", import.meta.url);
 const offlineE2EUrl = new URL("../tests/windows/offline-updater-e2e.ps1", import.meta.url);
+const realRuntimeSmokeUrl = new URL("../tests/windows/real-runtime-smoke.ps1", import.meta.url);
+const realRuntimeKitUrl = new URL("../tests/windows/build-real-runtime-smoke-kit.mjs", import.meta.url);
 const appManifestUrl = new URL("../launcher/app.manifest", import.meta.url);
 const updaterManifestUrl = new URL("../offline-updater/app.manifest", import.meta.url);
 const signLicenseFixtureUrl = new URL("../tests/windows/sign-license-fixture.mjs", import.meta.url);
@@ -64,12 +66,33 @@ test("portable launcher workflow pins tools and limits authority", async () => {
   assert.match(source, /\n\s*pull_request:\s*\n/u);
   assert.match(source, /permissions:\s*\n\s*contents:\s*read/u);
   assert.match(source, /runs-on:\s*windows-2022/u);
-  assert.match(source, /timeout-minutes:\s*30/u);
+  assert.match(source, /timeout-minutes:\s*60/u);
   assert.match(source, /go-version:\s*['"]1\.25\.0['"]/u);
   assert.match(source, /node-version:\s*['"]24\.15\.0['"]/u);
   assert.match(source, /npm ci --ignore-scripts --prefix product/u);
   assert.match(source, /persist-credentials:\s*false/u);
   assert.doesNotMatch(source, /pull_request_target|\bsecrets\b|\bRunAs\b|requireAdministrator/iu);
+});
+
+test("Windows CI launches the real runtime offline", async () => {
+  const [workflow, smoke, kit] = await Promise.all([
+    readFile(workflowUrl, "utf8"),
+    readFile(realRuntimeSmokeUrl, "utf8"),
+    readFile(realRuntimeKitUrl, "utf8"),
+  ]);
+  assert.match(workflow, /build-real-runtime-smoke-kit\.mjs/u);
+  assert.equal((workflow.match(/\.\\product\\tests\\windows\\real-runtime-smoke\.ps1/gu) ?? []).length, 2);
+  assert.match(workflow, /shell:\s*powershell\b[\s\S]*real-runtime-smoke\.ps1/u);
+  assert.match(workflow, /shell:\s*pwsh\b[\s\S]*real-runtime-smoke\.ps1/u);
+  assert.match(smoke, /UCLAW_REAL_RUNTIME_READY/u);
+  assert.match(smoke, /New-NetFirewallRule/u);
+  assert.match(smoke, /Remove-NetFirewallRule/u);
+  assert.match(smoke, /runtime-ready\.json/u);
+  assert.match(smoke, /2026\.7\.1-2/u);
+  assert.match(kit, /buildWindowsValidationKit/u);
+  assert.match(kit, /fetchRuntimeArtifact/u);
+  assert.match(kit, /-tags["'],\s*["']licensefixture/u);
+  assert.doesNotMatch(workflow.slice(workflow.search(/uses: actions\/upload-artifact@/u)), /real-runtime-smoke|U-Claw-test-USB|\.uclaw[\\/]data/iu);
 });
 
 test("portable launcher workflow runs after relevant branch pushes", async () => {
@@ -95,7 +118,7 @@ test("portable launcher workflow builds windowsgui and runs both PowerShell gate
   assert.doesNotMatch(appManifest, /requireAdministrator|highestAvailable/u);
   assert.match(source, /portable-runtime\.go/u);
   assert.match(source, /launcher-e2e\.ps1/u);
-  assert.equal((source.match(/-LauncherExe\b/gu) ?? []).length, 2);
+  assert.equal((source.match(/-LauncherExe\b/gu) ?? []).length, 4);
   assert.match(source, /shell:\s*powershell\b/u);
   assert.match(source, /shell:\s*pwsh\b/u);
 });
