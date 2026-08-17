@@ -39,7 +39,7 @@ func NormalProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLeas
 		"UCLAW_NODE_BIN="+filepath.Join(runtimeRoot, "node", "node.exe"),
 		"UCLAW_OPENCLAW_ENTRY="+filepath.Join(runtimeRoot, "electron", "resources", "app", "node_modules", "openclaw", "openclaw.mjs"),
 	)
-	return processSpec(paths, manifest, lease, arguments, environment)
+	return processSpec(manifest, lease, runtimeRoot, arguments, environment)
 }
 
 func ActivationProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLease, fingerprint usbFingerprint) ProcessSpec {
@@ -56,13 +56,13 @@ func ActivationProcessSpec(paths PortablePaths, manifest Manifest, lease Runtime
 		"UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS=" + trustedStartupLicenseKeys,
 	}
 	arguments := append(append([]string(nil), manifest.EntryArgs...), activationStartupArgument)
-	spec := processSpec(paths, manifest, lease, arguments, environment)
-	spec.EnvRemovePrefixes = []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_"}
+	runtimeRoot := lease.RootPath()
+	spec := processSpec(manifest, lease, runtimeRoot, arguments, environment)
+	spec.EnvRemovePrefixes = []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_", "UCLAW_NODE_BIN=", "UCLAW_OPENCLAW_ENTRY="}
 	return spec
 }
 
-func processSpec(paths PortablePaths, manifest Manifest, lease RuntimeLease, arguments []string, environment []string) ProcessSpec {
-	runtimeRoot := lease.RootPath()
+func processSpec(manifest Manifest, lease RuntimeLease, runtimeRoot string, arguments []string, environment []string) ProcessSpec {
 	entrypoint := filepath.Join(runtimeRoot, filepath.FromSlash(strings.ReplaceAll(manifest.Entrypoint, `\`, "/")))
 	return ProcessSpec{
 		Path:  entrypoint,
@@ -155,7 +155,8 @@ func validateProcessSpec(spec ProcessSpec) error {
 		}
 	}
 	for _, prefix := range spec.EnvRemovePrefixes {
-		if prefix == "" || strings.ContainsAny(prefix, "=\x00") {
+		separator := strings.IndexByte(prefix, '=')
+		if prefix == "" || strings.ContainsRune(prefix, 0) || separator == 0 || (separator > 0 && separator != len(prefix)-1) {
 			return ErrProcessInvalid
 		}
 	}
@@ -175,22 +176,22 @@ func filterEnvironment(base []string, removePrefixes []string, caseInsensitive b
 	filtered := make([]string, 0, len(base))
 	for _, entry := range base {
 		separator := strings.IndexByte(entry, '=')
-		if separator > 0 && !hasEnvironmentPrefix(entry[:separator], removePrefixes, caseInsensitive) {
+		if separator > 0 && !hasEnvironmentPrefix(entry, removePrefixes, caseInsensitive) {
 			filtered = append(filtered, entry)
 		}
 	}
 	return filtered
 }
 
-func hasEnvironmentPrefix(key string, prefixes []string, caseInsensitive bool) bool {
+func hasEnvironmentPrefix(entry string, prefixes []string, caseInsensitive bool) bool {
 	if caseInsensitive {
-		key = strings.ToUpper(key)
+		entry = strings.ToUpper(entry)
 	}
 	for _, prefix := range prefixes {
 		if caseInsensitive {
 			prefix = strings.ToUpper(prefix)
 		}
-		if strings.HasPrefix(key, prefix) {
+		if strings.HasPrefix(entry, prefix) {
 			return true
 		}
 	}

@@ -62,8 +62,53 @@ func TestActivationProcessSpecUsesRestrictedStartupMode(t *testing.T) {
 	if !reflect.DeepEqual(spec.Env, wantEnv) {
 		t.Fatalf("environment = %v", spec.Env)
 	}
-	if !reflect.DeepEqual(spec.EnvRemovePrefixes, []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_"}) {
+	if !reflect.DeepEqual(spec.EnvRemovePrefixes, []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_", "UCLAW_NODE_BIN=", "UCLAW_OPENCLAW_ENTRY="}) {
 		t.Fatalf("environment removal prefixes = %v", spec.EnvRemovePrefixes)
+	}
+}
+
+func TestFilterEnvironmentSupportsExactAssignmentPrefixes(t *testing.T) {
+	base := []string{
+		"UCLAW_NODE_BIN=C:\\host\\node.exe",
+		"UCLAW_NODE_BINARY=keep",
+		"UCLAW_OPENCLAW_ENTRY=C:\\host\\openclaw.mjs",
+		"UCLAW_OPENCLAW_ENTRYPOINT=keep",
+	}
+	got := filterEnvironment(base, []string{"UCLAW_NODE_BIN=", "UCLAW_OPENCLAW_ENTRY="}, true)
+	want := []string{"UCLAW_NODE_BINARY=keep", "UCLAW_OPENCLAW_ENTRYPOINT=keep"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filtered environment = %v", got)
+	}
+}
+
+func TestManagedActivationProcessRemovesInheritedRuntimePaths(t *testing.T) {
+	t.Setenv("UCLAW_NODE_BIN", "C:\\host\\node.exe")
+	t.Setenv("UCLAW_OPENCLAW_ENTRY", "C:\\host\\openclaw.mjs")
+	output := filepath.Join(t.TempDir(), "environment")
+	paths := PortablePaths{
+		DataDir:       filepath.Join(t.TempDir(), "data"),
+		HostCacheRoot: filepath.Join(t.TempDir(), "host-cache"),
+	}
+	spec := ActivationProcessSpec(paths, validRuntimeManifest(), processTestLease(t.TempDir()), usbFingerprint{})
+	spec.Path = os.Args[0]
+	spec.Dir = filepath.Dir(os.Args[0])
+	spec.Args = []string{"-test.run=TestLauncherProcessHelper", "--", output}
+	spec.Env = append(spec.Env, "UCLAW_HELPER_MODE=write-runtime-paths")
+	spec.Lease = processTestLease(filepath.Dir(os.Args[0]))
+
+	process, err := StartManagedProcess(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "|" {
+		t.Fatalf("inherited runtime paths = %q", content)
 	}
 }
 
@@ -157,6 +202,41 @@ func TestNormalProcessSpecPreservesManifestArgumentsAndOpenClawEnvironment(t *te
 			t.Fatalf("%s values = %v, want [%s]", key, matches, wantValue)
 		}
 	}
+}
+
+func TestNormalProcessSpecUsesSingleRuntimeRootSnapshot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "runtime")
+	lease := &rootPathSnapshotLease{fakeRuntimeLease: processTestLease(root)}
+	manifest := validRuntimeManifest()
+	manifest.Entrypoint = `electron\electron.exe`
+
+	spec := NormalProcessSpec(PortablePaths{}, manifest, lease)
+
+	if lease.rootPathCalls != 1 {
+		t.Fatalf("RootPath calls = %d, want 1", lease.rootPathCalls)
+	}
+	if spec.Path != filepath.Join(root, "electron", "electron.exe") {
+		t.Fatalf("process path = %q", spec.Path)
+	}
+	if got := environmentValues(spec.Env, "UCLAW_NODE_BIN"); !reflect.DeepEqual(got, []string{filepath.Join(root, "node", "node.exe")}) {
+		t.Fatalf("UCLAW_NODE_BIN values = %v", got)
+	}
+	if got := environmentValues(spec.Env, "UCLAW_OPENCLAW_ENTRY"); !reflect.DeepEqual(got, []string{filepath.Join(root, "electron", "resources", "app", "node_modules", "openclaw", "openclaw.mjs")}) {
+		t.Fatalf("UCLAW_OPENCLAW_ENTRY values = %v", got)
+	}
+}
+
+type rootPathSnapshotLease struct {
+	*fakeRuntimeLease
+	rootPathCalls int
+}
+
+func (lease *rootPathSnapshotLease) RootPath() string {
+	lease.rootPathCalls++
+	if lease.rootPathCalls == 1 {
+		return lease.root
+	}
+	return lease.root + "-changed"
 }
 
 func TestNormalProcessEnvironmentOverridesInheritedRuntimePaths(t *testing.T) {
@@ -375,6 +455,18 @@ func TestLauncherProcessHelper(t *testing.T) {
 			os.Getenv("OPENCLAW_HOME"),
 			os.Getenv("OPENCLAW_STATE_DIR"),
 			os.Getenv("OPENCLAW_FUTURE_SETTING"),
+		}, "|")
+		if err := os.WriteFile(os.Args[separator+1], []byte(content), 0o600); err != nil {
+			os.Exit(3)
+		}
+		os.Exit(0)
+	case "write-runtime-paths":
+		if separator < 0 || len(os.Args) < separator+2 {
+			os.Exit(2)
+		}
+		content := strings.Join([]string{
+			os.Getenv("UCLAW_NODE_BIN"),
+			os.Getenv("UCLAW_OPENCLAW_ENTRY"),
 		}, "|")
 		if err := os.WriteFile(os.Args[separator+1], []byte(content), 0o600); err != nil {
 			os.Exit(3)
