@@ -69,6 +69,7 @@ func TestReleaseFSHelperSecureInstallUsesOneRootHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := root + ".original"
+	installedRoot := original
 	outside := filepath.Join(parent, "outside")
 	if err := os.Mkdir(outside, 0o700); err != nil {
 		t.Fatal(err)
@@ -78,6 +79,13 @@ func TestReleaseFSHelperSecureInstallUsesOneRootHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	releaseFSAfterOpenRoot = func() {
+		if runtime.GOOS == "windows" {
+			if err := os.Rename(root, original); err == nil {
+				t.Fatal("open root handle allowed directory replacement")
+			}
+			installedRoot = root
+			return
+		}
 		if err := os.Rename(root, original); err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +98,7 @@ func TestReleaseFSHelperSecureInstallUsesOneRootHandle(t *testing.T) {
 	if err := runReleaseFSHelper([]string{"secure-install", "--root", root}, releaseFSInstallInput(t, manifest, content), io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := os.ReadFile(filepath.Join(original, "runtime.pkg")); err != nil || !bytes.Equal(got, content) {
+	if got, err := os.ReadFile(filepath.Join(installedRoot, "runtime.pkg")); err != nil || !bytes.Equal(got, content) {
 		t.Fatalf("installed runtime=%q err=%v", got, err)
 	}
 	if got, err := os.ReadFile(outsideSentinel); err != nil || string(got) != "keep" {
