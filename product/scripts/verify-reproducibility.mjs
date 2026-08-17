@@ -62,6 +62,29 @@ export async function verifyWorkspacePins() {
   const desktop = manifests.find(([workspace]) => workspace === "desktop")[1];
   assertEqual(desktop.devDependencies?.electron, versions.electron, "desktop Electron pin");
   assertEqual(lockfile.packages?.["node_modules/electron"]?.version, versions.electron, "locked Electron version");
+  const windowsArtifacts = versions.windowsArtifacts ?? {};
+  assertEqual(
+    windowsArtifacts.electron?.url,
+    `https://github.com/electron/electron/releases/download/v${versions.electron}/electron-v${versions.electron}-win32-x64.zip`,
+    "Windows Electron artifact URL",
+  );
+  assertLowercaseSha256(windowsArtifacts.electron?.sha256, "Windows Electron artifact SHA-256");
+  assertEqual(
+    windowsArtifacts.node?.url,
+    `https://nodejs.org/dist/v${versions.node}/node-v${versions.node}-win-x64.zip`,
+    "Windows Node artifact URL",
+  );
+  assertLowercaseSha256(windowsArtifacts.node?.sha256, "Windows Node artifact SHA-256");
+  assertEqual(
+    windowsArtifacts.openclaw?.url,
+    `https://registry.npmjs.org/openclaw/-/openclaw-${versions.openclaw}.tgz`,
+    "Windows OpenClaw artifact URL",
+  );
+  assertEqual(
+    windowsArtifacts.openclaw?.integrity,
+    versions.openclawNpmIntegrity,
+    "Windows OpenClaw artifact integrity",
+  );
   const provenance = await readJson(`adapter/fixtures/openclaw-${versions.openclaw}/provenance.json`);
   assertEqual(provenance.openClawVersion, versions.openclaw, "OpenClaw fixture version");
   assertEqual(provenance.npmTarballIntegrity, versions.openclawNpmIntegrity, "OpenClaw npm integrity");
@@ -69,6 +92,12 @@ export async function verifyWorkspacePins() {
 
 function assertEqual(actual, expected, label) {
   if (actual !== expected) throw new Error(`${label} must be ${expected}; found ${actual}`);
+}
+
+function assertLowercaseSha256(value, label) {
+  if (!/^[a-f0-9]{64}$/u.test(value)) {
+    throw new Error(`${label} must be a lowercase 64-character SHA-256 digest`);
+  }
 }
 
 async function runCLI() {
