@@ -17,7 +17,7 @@ $previousLocalAppData = $env:LOCALAPPDATA
 $process = $null
 $ruleCreated = $false
 
-function Write-SanitizedDiagnostic([bool]$readyResult) {
+function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$failureCode) {
     [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($diagnostics))
     $record = [ordered]@{
         schemaVersion = 1
@@ -25,6 +25,7 @@ function Write-SanitizedDiagnostic([bool]$readyResult) {
         realRuntimeReady = $readyResult
         runtimeVersion = $expectedRuntimeVersion
         networkDisabled = $true
+        failureCode = $failureCode
     }
     [IO.File]::WriteAllText($diagnostics, (($record | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 }
@@ -49,10 +50,14 @@ try {
         throw 'UCLAW_REAL_RUNTIME_NOT_READY'
     }
     if ($body.Contains($root)) { throw 'UCLAW_REAL_RUNTIME_DIAGNOSTIC_PATH_LEAK' }
-    Write-SanitizedDiagnostic $true
+    Write-SanitizedDiagnostic $true $null
 }
 catch {
-    Write-SanitizedDiagnostic $false
+    $failureCode = $_.Exception.Message
+    if ($failureCode -notmatch '^UCLAW_REAL_RUNTIME_[A-Z_]+$') {
+        $failureCode = 'UCLAW_REAL_RUNTIME_UNKNOWN'
+    }
+    Write-SanitizedDiagnostic $false $failureCode
     throw 'UCLAW_REAL_RUNTIME_SMOKE_FAILED'
 }
 finally {

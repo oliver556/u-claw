@@ -92,6 +92,10 @@ test("Windows CI launches the real runtime offline", async () => {
   assert.match(smoke, /Remove-NetFirewallRule/u);
   assert.match(smoke, /runtime-ready\.json/u);
   assert.match(smoke, /2026\.7\.1-2/u);
+  assert.match(smoke, /failureCode/u);
+  assert.match(smoke, /\^UCLAW_REAL_RUNTIME_\[A-Z_\]\+\$/u);
+  assert.match(smoke, /Write-SanitizedDiagnostic \$false \$failureCode/u);
+  assert.doesNotMatch(smoke, /throw\s+\$_|Write-SanitizedDiagnostic[^\n]*Exception/iu);
   assert.match(kit, /buildWindowsValidationKit/u);
   assert.match(kit, /fetchRuntimeArtifact/u);
   assert.match(kit, /-tags["'],\s*["']licensefixture/u);
