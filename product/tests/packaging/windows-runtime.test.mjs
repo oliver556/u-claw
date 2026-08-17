@@ -137,8 +137,8 @@ async function fixture() {
     options: {
       electronArchive,
       nodeArchive,
-    appDependencyRoot,
-    portableSkillsRoot,
+      appDependencyRoot,
+      portableSkillsRoot,
       ...roots,
       outputDir: path.join(root, "runtime"),
     },

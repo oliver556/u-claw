@@ -62,7 +62,7 @@ func TestActivationProcessSpecUsesRestrictedStartupMode(t *testing.T) {
 	if !reflect.DeepEqual(spec.Env, wantEnv) {
 		t.Fatalf("environment = %v", spec.Env)
 	}
-	if !reflect.DeepEqual(spec.EnvRemovePrefixes, []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_", "UCLAW_NODE_BIN=", "UCLAW_OPENCLAW_ENTRY="}) {
+	if !reflect.DeepEqual(spec.EnvRemovePrefixes, []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_", "UCLAW_NODE_BIN=", "UCLAW_OPENCLAW_ENTRY=", "UCLAW_PORTABLE_SKILLS_DIR="}) {
 		t.Fatalf("environment removal prefixes = %v", spec.EnvRemovePrefixes)
 	}
 }

@@ -600,6 +600,7 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 		"UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS={}",
 		"UCLAW_NODE_BIN=" + filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID, "node", "node.exe"),
 		"UCLAW_OPENCLAW_ENTRY=" + filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID, "electron", "resources", "app", "node_modules", "openclaw", "openclaw.mjs"),
+		"UCLAW_PORTABLE_SKILLS_DIR=" + filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID, "electron", "resources", "portable", "skills-cn"),
 		"UCLAW_RUNTIME_DIR=" + filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID),
 	}
 	if !reflect.DeepEqual(startedSpec.Env, wantEnv) {

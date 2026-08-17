@@ -38,6 +38,7 @@ func NormalProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLeas
 	environment := append(portableProcessEnvironment(paths),
 		"UCLAW_NODE_BIN="+filepath.Join(runtimeRoot, "node", "node.exe"),
 		"UCLAW_OPENCLAW_ENTRY="+filepath.Join(runtimeRoot, "electron", "resources", "app", "node_modules", "openclaw", "openclaw.mjs"),
+		"UCLAW_PORTABLE_SKILLS_DIR="+filepath.Join(runtimeRoot, "electron", "resources", "portable", "skills-cn"),
 	)
 	return processSpec(manifest, lease, runtimeRoot, arguments, environment)
 }
@@ -58,7 +59,7 @@ func ActivationProcessSpec(paths PortablePaths, manifest Manifest, lease Runtime
 	arguments := append(append([]string(nil), manifest.EntryArgs...), activationStartupArgument)
 	runtimeRoot := lease.RootPath()
 	spec := processSpec(manifest, lease, runtimeRoot, arguments, environment)
-	spec.EnvRemovePrefixes = []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_", "UCLAW_NODE_BIN=", "UCLAW_OPENCLAW_ENTRY="}
+	spec.EnvRemovePrefixes = []string{"OPENCLAW_", "UCLAW_USB_FINGERPRINT_", "UCLAW_CLIENT_VERSION", "UCLAW_PACKAGE_ROOT", "UCLAW_ACTIVATION_", "UCLAW_NODE_BIN=", "UCLAW_OPENCLAW_ENTRY=", "UCLAW_PORTABLE_SKILLS_DIR="}
 	return spec
 }
 
