@@ -10,7 +10,8 @@ const updaterManifestUrl = new URL("../offline-updater/app.manifest", import.met
 
 test("portable launcher workflow pins tools and limits authority", async () => {
   const source = await readFile(workflowUrl, "utf8");
-  assert.match(source, /workflow_dispatch:\s*\n\s*pull_request:/u);
+  assert.match(source, /workflow_dispatch:\s*\n\s*push:/u);
+  assert.match(source, /\n\s*pull_request:\s*\n/u);
   assert.match(source, /permissions:\s*\n\s*contents:\s*read/u);
   assert.match(source, /runs-on:\s*windows-2022/u);
   assert.match(source, /timeout-minutes:\s*30/u);
@@ -19,6 +20,14 @@ test("portable launcher workflow pins tools and limits authority", async () => {
   assert.match(source, /npm ci --ignore-scripts --prefix product/u);
   assert.match(source, /persist-credentials:\s*false/u);
   assert.doesNotMatch(source, /pull_request_target|\bsecrets\b|\bRunAs\b|requireAdministrator/iu);
+});
+
+test("portable launcher workflow runs after relevant branch pushes", async () => {
+  const source = await readFile(workflowUrl, "utf8");
+  const push = source.slice(source.search(/\n\s*push:\s*\n/u), source.search(/\n\s*pull_request:\s*\n/u));
+  assert.match(push, /product\/launcher\/\*\*/u);
+  assert.match(push, /product\/offline-updater\/\*\*/u);
+  assert.match(push, /product\/tests\/windows\/offline-updater-e2e\.ps1/u);
 });
 
 test("portable launcher workflow builds windowsgui and runs both PowerShell gates", async () => {

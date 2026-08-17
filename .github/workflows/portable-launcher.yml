@@ -2,6 +2,23 @@ name: Portable launcher
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/portable-launcher.yml'
+      - 'product/launcher/**'
+      - 'product/offline-updater/**'
+      - 'product/packaging/**'
+      - 'product/scripts/portable-launcher-workflow.test.mjs'
+      - 'product/scripts/runtime-manifest*'
+      - 'product/tests/packaging/runtime-package.test.mjs'
+      - 'product/tests/packaging/update-feed.test.mjs'
+      - 'product/tests/windows/launcher-e2e.ps1'
+      - 'product/tests/windows/offline-updater-e2e.ps1'
+      - 'product/tests/windows/sign-license-fixture.mjs'
+      - 'product/tests/windows/sign-runtime-fixture.mjs'
+      - 'product/tests/windows/fixtures/portable-runtime*.go'
+      - 'product/package.json'
+      - 'product/package-lock.json'
   pull_request:
     paths:
       - '.github/workflows/portable-launcher.yml'
