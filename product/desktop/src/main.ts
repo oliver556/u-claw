@@ -78,7 +78,7 @@ import { createImageOperationService } from "./images/image-operation-service.js
 import { createImageOperationDispatcher } from "./images/image-operation-dispatcher.js";
 import { createAttachmentCache } from "./attachments/attachment-cache.js";
 import { startAttachmentCleanup } from "./attachments/attachment-cleanup.js";
-import { clearRuntimeReadiness, writeRuntimeReadiness } from "./runtime/readiness-signal.js";
+import { clearRuntimeReadiness, writeRuntimeReadiness, type RuntimeDesktopStage } from "./runtime/readiness-signal.js";
 
 interface ElectronWorkspaceShell {
   openPath(path: string): Promise<string>;
@@ -717,8 +717,11 @@ export async function readSelectedAttachments(
 export async function startElectronMain(
   options: DesktopMainOptions,
   portablePaths: PortableDesktopPaths,
+  onDesktopStage: (stage: RuntimeDesktopStage) => void = () => undefined,
 ): Promise<void> {
+  onDesktopStage("startup");
   await clearRuntimeReadiness(portablePaths.dataDir);
+  onDesktopStage("electron-runtime");
   const modelSourceExecutors = requireModelSourceExecutors(options.modelSourceExecutors);
   const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session: electronSession, shell } = await import("electron");
   const productVersion = app.getVersion();
@@ -729,6 +732,7 @@ export async function startElectronMain(
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
   const attachments = options.attachments ?? createAttachmentCache({ dataDir: portablePaths.dataDir });
   const chatQueue = createChatQueueStore(portablePaths.dataDir);
+  onDesktopStage("attachment-cleanup");
   const attachmentCleanup = startAttachmentCleanup({
     dataDir: portablePaths.dataDir,
     referencedAttachmentIds: async () => {
@@ -771,6 +775,7 @@ export async function startElectronMain(
       // Gateway watch is best effort; normal IPC status handling remains authoritative.
     }
   })();
+  onDesktopStage("skills");
   const skillRuntimeRegistration = resolveSkillRuntimeRegistration(options.domainRegistrations);
   const skills = await createSkillService({
     dataDir: portablePaths.dataDir,
@@ -796,6 +801,7 @@ export async function startElectronMain(
     skills,
     openExternal: (url) => shell.openExternal(url),
   });
+  onDesktopStage("plugins");
   const pluginRuntime = options.pluginRuntime ?? await createOpenClawCliPluginRuntime({
     runtimeRoot: process.env.UCLAW_RUNTIME_DIR ?? "",
     executable: process.execPath,
@@ -818,6 +824,7 @@ export async function startElectronMain(
   const mcpRuntime = createOpenClawMcpRuntime(client.mcp, mcpProbe);
   const mcp = createMcpStore({ dataDir: portablePaths.dataDir, runtimeAvailable: mcpRuntime.capability });
   const data = createProductionDataService(portablePaths, shell, consistencyCoordinator);
+  onDesktopStage("domain-services");
   const diagnosticsRuntime: DiagnosticsRuntimeInfo = {
     productVersion,
     openClawVersion: LOCKED_OPENCLAW_VERSION,
@@ -883,6 +890,7 @@ export async function startElectronMain(
   const services: DesktopDomainServiceAccessor = {
     get: <T>(name: string) => domainServices.get(name) as T | undefined,
   };
+  onDesktopStage("gateway-main");
   const window = await runDesktopMain<DesktopWindow>(runtimeOptions, {
     app,
     createWindow: (registerIpc, signal) => {
@@ -1005,6 +1013,7 @@ export async function startElectronMain(
     },
   });
   if (window !== null) {
+    onDesktopStage("readiness");
     await writeRuntimeReadiness(portablePaths.dataDir, {
       productVersion: app.getVersion(),
       runtimeVersion: LOCKED_OPENCLAW_VERSION,

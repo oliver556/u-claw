@@ -95,7 +95,7 @@ describe("Electron production entry", () => {
 
     expect(loadOptions).toHaveBeenCalledOnce();
     expect(startElectronMain).toHaveBeenCalledOnce();
-    expect(startElectronMain).toHaveBeenCalledWith(options, portablePaths);
+    expect(startElectronMain).toHaveBeenCalledWith(options, portablePaths, expect.any(Function));
     expect(calls).toEqual(["portable", "wiring"]);
   });
 
@@ -153,6 +153,34 @@ describe("Electron production entry", () => {
     expect(runtimeStartupFailureName(crossRealmError)).toBe("TypeError");
     const hostile = Object.defineProperty({}, "name", { get: () => { throw new Error("private"); } });
     expect(runtimeStartupFailureName(hostile)).toBe("UnknownError");
+  });
+
+  it("records a safe start-desktop sub-stage without replacing the root error", async () => {
+    const portablePaths = { dataDir: "/portable/data" } as PortableDesktopPaths;
+    const root = new DesktopWiringError("UNAVAILABLE", "secret path");
+    const recordStartupFailure = vi.fn(async () => undefined);
+
+    await expect(runElectronEntry({
+      argv: ["electron", "app", "--uclaw-startup-mode=normal"],
+      preparePortableDesktop: vi.fn(async () => portablePaths),
+      loadOptions: vi.fn(async () => ({
+        spawn: vi.fn(), buildGatewayLaunchOptions: vi.fn(), requiredMethods: [],
+        probeCapabilities: vi.fn(), dispatchClient: vi.fn(),
+      } as DesktopMainOptions)),
+      startElectronMain: vi.fn(async (_options, _paths, onDesktopStage) => {
+        onDesktopStage?.("skills");
+        throw root;
+      }),
+      startActivationMain: vi.fn(),
+      recordStartupFailure,
+    })).rejects.toBe(root);
+
+    expect(recordStartupFailure).toHaveBeenCalledWith(portablePaths, {
+      stage: "start-desktop",
+      desktopStage: "skills",
+      code: "UNAVAILABLE",
+      name: "DesktopWiringError",
+    });
   });
 
   it("does not statically load normal production wiring from the entry module", async () => {

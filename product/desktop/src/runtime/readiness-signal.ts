@@ -11,6 +11,7 @@ export interface RuntimeReadiness {
 export interface RuntimeStartupFailure {
   stage: "load-options" | "start-desktop";
   wiringStage?: RuntimeWiringStage;
+  desktopStage?: RuntimeDesktopStage;
   code: string;
   name: string;
 }
@@ -40,6 +41,27 @@ const RUNTIME_WIRING_STAGES: readonly RuntimeWiringStage[] = [
   "desktop-log",
   "domain-modules",
   "options-complete",
+];
+
+export type RuntimeDesktopStage =
+  | "startup"
+  | "electron-runtime"
+  | "attachment-cleanup"
+  | "skills"
+  | "plugins"
+  | "domain-services"
+  | "gateway-main"
+  | "readiness";
+
+const RUNTIME_DESKTOP_STAGES: readonly RuntimeDesktopStage[] = [
+  "startup",
+  "electron-runtime",
+  "attachment-cleanup",
+  "skills",
+  "plugins",
+  "domain-services",
+  "gateway-main",
+  "readiness",
 ];
 
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/u;
@@ -143,6 +165,7 @@ export async function writeRuntimeStartupFailure(
   if (
     !["load-options", "start-desktop"].includes(value.stage) ||
     (value.wiringStage !== undefined && !RUNTIME_WIRING_STAGES.includes(value.wiringStage)) ||
+    (value.desktopStage !== undefined && !RUNTIME_DESKTOP_STAGES.includes(value.desktopStage)) ||
     !/^[A-Z][A-Z0-9_]{1,63}$/u.test(value.code) ||
     !/^[A-Za-z][A-Za-z0-9]{1,63}$/u.test(value.name)
   ) {
@@ -163,6 +186,7 @@ export async function writeRuntimeStartupFailure(
       schemaVersion: 1,
       stage: value.stage,
       ...(value.wiringStage === undefined ? {} : { wiringStage: value.wiringStage }),
+      ...(value.desktopStage === undefined ? {} : { desktopStage: value.desktopStage }),
       code: value.code,
       name: value.name,
     })}\n`, "utf8");

@@ -13,6 +13,7 @@ import {
   clearRuntimeStartupFailure,
   writeRuntimeStartupFailure,
   type RuntimeStartupFailure,
+  type RuntimeDesktopStage,
   type RuntimeWiringStage,
 } from "./runtime/readiness-signal.js";
 
@@ -98,7 +99,11 @@ export interface ElectronEntryDependencies {
   preparePortableDesktop(): Promise<PortableDesktopPaths>;
   loadOptions(onWiringStage?: (stage: RuntimeWiringStage) => void): Promise<DesktopMainOptions>;
   startActivationMain(paths: PortableDesktopPaths): Promise<void>;
-  startElectronMain(options: DesktopMainOptions, paths: PortableDesktopPaths): Promise<void>;
+  startElectronMain(
+    options: DesktopMainOptions,
+    paths: PortableDesktopPaths,
+    onDesktopStage?: (stage: RuntimeDesktopStage) => void,
+  ): Promise<void>;
   clearStartupFailure?(paths: PortableDesktopPaths): Promise<void>;
   recordStartupFailure?(paths: PortableDesktopPaths, failure: RuntimeStartupFailure): Promise<void>;
 }
@@ -134,7 +139,7 @@ export async function runElectronEntry(
     preparePortableDesktop: prepareProductionPortableDesktop,
     loadOptions: (onWiringStage) => loadProductionDesktopOptions(undefined, onWiringStage),
     startActivationMain,
-    startElectronMain,
+    startElectronMain: (options, paths, onDesktopStage) => startElectronMain(options, paths, onDesktopStage),
     clearStartupFailure: (paths) => clearRuntimeStartupFailure(paths.dataDir),
     recordStartupFailure: (paths, failure) => writeRuntimeStartupFailure(paths.dataDir, failure),
   },
@@ -159,11 +164,13 @@ export async function runElectronEntry(
     }).catch(() => undefined);
     throw error;
   }
+  let desktopStage: RuntimeDesktopStage | undefined;
   try {
-    await dependencies.startElectronMain(options, paths);
+    await dependencies.startElectronMain(options, paths, (stage) => { desktopStage = stage; });
   } catch (error) {
     await dependencies.recordStartupFailure?.(paths, {
       stage: "start-desktop",
+      ...(desktopStage === undefined ? {} : { desktopStage }),
       code: runtimeStartupFailureCode(error),
       name: runtimeStartupFailureName(error),
     }).catch(() => undefined);

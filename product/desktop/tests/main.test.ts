@@ -25,6 +25,10 @@ describe("Electron client wiring", () => {
     expect(writeIndex).toBeGreaterThan(nullCheckIndex);
     expect(start).toContain("productVersion: app.getVersion()");
     expect(start).toContain("runtimeVersion: LOCKED_OPENCLAW_VERSION");
+    for (const stage of [
+      "startup", "electron-runtime", "attachment-cleanup", "skills", "plugins",
+      "domain-services", "gateway-main", "readiness",
+    ]) expect(start).toContain(`onDesktopStage("${stage}")`);
   });
 
   it("invalidates stale readiness but never records activation-only startup", async () => {

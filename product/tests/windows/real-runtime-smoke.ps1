@@ -48,6 +48,10 @@ function Read-SafeStartupFailure([string]$path) {
             'environment', 'development-provider', 'portable-skills', 'provider-store',
             'plugin-runtime', 'wechat-runtime', 'desktop-log', 'domain-modules', 'options-complete'
         ) -notcontains [string]$value.wiringStage) { return $null }
+        if ($value.PSObject.Properties.Name -contains 'desktopStage' -and @(
+            'startup', 'electron-runtime', 'attachment-cleanup', 'skills', 'plugins',
+            'domain-services', 'gateway-main', 'readiness'
+        ) -notcontains [string]$value.desktopStage) { return $null }
         if (@(
             'UNCONFIGURED', 'UNAVAILABLE', 'INVALID_ARGUMENT', 'FORBIDDEN', 'AUTH_FAILED',
             'PROTOCOL_ERROR', 'UNSUPPORTED', 'OFFLINE', 'CONFLICT', 'OPERATION_FAILED', 'UNKNOWN',
@@ -78,6 +82,7 @@ function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$fai
     $gatewayCapabilityReady = @($gatewayRecords | Where-Object { $_.event -eq 'gateway-capability-ready' }).Count -gt 0
     $startupStage = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.stage }
     $startupWiringStage = if ($null -eq $startupRecord -or -not ($startupRecord.PSObject.Properties.Name -contains 'wiringStage')) { $null } else { [string]$startupRecord.wiringStage }
+    $startupDesktopStage = if ($null -eq $startupRecord -or -not ($startupRecord.PSObject.Properties.Name -contains 'desktopStage')) { $null } else { [string]$startupRecord.desktopStage }
     $startupErrorCode = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.code }
     $startupErrorName = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.name }
     $gatewayPhase = $null
@@ -107,6 +112,7 @@ function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$fai
         gatewayCapabilityReady = $gatewayCapabilityReady
         startupStage = $startupStage
         startupWiringStage = $startupWiringStage
+        startupDesktopStage = $startupDesktopStage
         startupErrorCode = $startupErrorCode
         startupErrorName = $startupErrorName
     }
