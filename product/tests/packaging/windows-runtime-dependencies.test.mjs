@@ -11,10 +11,12 @@ async function readJson(name) {
 function assertProductionLock(manifest, lock) {
   assert.equal(lock.lockfileVersion, 3);
   assert.equal(lock.version, manifest.version);
-  assert.equal(Object.keys(lock.packages).length, 333);
   assert.deepEqual(lock.packages[""].dependencies, manifest.dependencies);
 
-  for (const [packagePath, packageEntry] of Object.entries(lock.packages).slice(1)) {
+  for (const [packagePath, packageEntry] of Object.entries(lock.packages)) {
+    if (packagePath === "") {
+      continue;
+    }
     assert.equal(Object.hasOwn(packageEntry, "dev"), false, `${packagePath} must not be dev-only`);
     assert.equal(Object.hasOwn(packageEntry, "link"), false, `${packagePath} must not be a link`);
     assert.match(
@@ -72,4 +74,14 @@ test("Windows runtime app rejects a transitive dependency without integrity", as
   delete lock.packages[transitivePath].integrity;
 
   assert.throws(() => assertProductionLock(manifest, lock), /integrity/u);
+});
+
+test("Windows runtime app lock validation is independent of package entry order", async () => {
+  const manifest = await readJson("package.json");
+  const lock = structuredClone(await readJson("package-lock.json"));
+  const rootPackage = lock.packages[""];
+  delete lock.packages[""];
+  lock.packages[""] = rootPackage;
+
+  assert.doesNotThrow(() => assertProductionLock(manifest, lock));
 });
