@@ -13,6 +13,7 @@ import {
   reportStartupFailure,
   runElectronEntry,
   startupDiagnosticCode,
+  runtimeStartupFailureCode,
 } from "../src/entry.js";
 import { DesktopWiringError } from "../src/wiring/environment.js";
 import type { DesktopMainOptions } from "../src/main.js";
@@ -113,6 +114,27 @@ describe("Electron production entry", () => {
     expect(startActivationMain).toHaveBeenCalledWith(portablePaths);
     expect(loadOptions).not.toHaveBeenCalled();
     expect(startElectronMain).not.toHaveBeenCalled();
+  });
+
+  it("records a safe load-options failure without replacing the root error", async () => {
+    const portablePaths = { dataDir: "/portable/data" } as PortableDesktopPaths;
+    const root = new DesktopWiringError("UNAVAILABLE", "secret path");
+    const recordStartupFailure = vi.fn(async () => undefined);
+
+    await expect(runElectronEntry({
+      argv: ["electron", "app", "--uclaw-startup-mode=normal"],
+      preparePortableDesktop: vi.fn(async () => portablePaths),
+      loadOptions: vi.fn(async () => { throw root; }),
+      startElectronMain: vi.fn(),
+      startActivationMain: vi.fn(),
+      recordStartupFailure,
+    })).rejects.toBe(root);
+
+    expect(recordStartupFailure).toHaveBeenCalledWith(portablePaths, {
+      stage: "load-options",
+      code: "UNAVAILABLE",
+    });
+    expect(runtimeStartupFailureCode(Object.assign(new Error("private"), { code: "ENOENT" }))).toBe("UNKNOWN");
   });
 
   it("does not statically load normal production wiring from the entry module", async () => {

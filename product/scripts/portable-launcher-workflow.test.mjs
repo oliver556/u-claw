@@ -104,6 +104,9 @@ test("Windows CI launches the real runtime offline", async () => {
   assert.match(smoke, /gatewaySpawned/u);
   assert.match(smoke, /gatewayHealthReady/u);
   assert.match(smoke, /gatewayCapabilityReady/u);
+  assert.match(smoke, /runtime-startup-failure\.json/u);
+  assert.match(smoke, /startupStage/u);
+  assert.match(smoke, /startupErrorCode/u);
   assert.match(smoke, /gateway-spawned/u);
   assert.match(smoke, /gateway-health-ready/u);
   assert.match(smoke, /gateway-capability-ready/u);

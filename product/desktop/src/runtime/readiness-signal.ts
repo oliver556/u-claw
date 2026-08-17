@@ -8,6 +8,11 @@ export interface RuntimeReadiness {
   gatewayReady: true;
 }
 
+export interface RuntimeStartupFailure {
+  stage: "load-options" | "start-desktop";
+  code: string;
+}
+
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/u;
 
 async function pathInfo(path: string) {
@@ -79,6 +84,48 @@ export async function writeRuntimeReadiness(
       runtimeVersion: value.runtimeVersion,
       gatewayReady: true,
     })}\n`, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporary, target);
+    replaced = true;
+  } finally {
+    await handle?.close().catch(() => undefined);
+    if (!replaced) await unlink(temporary).catch(() => undefined);
+  }
+}
+
+export async function clearRuntimeStartupFailure(dataDir: string): Promise<void> {
+  const directory = await diagnosticsDirectory(dataDir, false);
+  if (directory === undefined) return;
+  const target = join(directory, "runtime-startup-failure.json");
+  const info = await pathInfo(target);
+  if (info === undefined) return;
+  if (info.isSymbolicLink() || !info.isFile()) {
+    throw new Error("Runtime startup failure path must be a non-symlink file.");
+  }
+  await unlink(target);
+}
+
+export async function writeRuntimeStartupFailure(
+  dataDir: string,
+  value: RuntimeStartupFailure,
+): Promise<void> {
+  if (!["load-options", "start-desktop"].includes(value.stage) || !/^[A-Z][A-Z0-9_]{1,63}$/u.test(value.code)) {
+    throw new Error("Runtime startup failure diagnostic is invalid.");
+  }
+  const directory = (await diagnosticsDirectory(dataDir, true))!;
+  const target = join(directory, "runtime-startup-failure.json");
+  const targetInfo = await pathInfo(target);
+  if (targetInfo !== undefined && (targetInfo.isSymbolicLink() || !targetInfo.isFile())) {
+    throw new Error("Runtime startup failure path must be a non-symlink file.");
+  }
+  const temporary = join(directory, `.runtime-startup-failure-${randomUUID()}.tmp`);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  let replaced = false;
+  try {
+    handle = await open(temporary, "wx", 0o600);
+    await handle.writeFile(`${JSON.stringify({ schemaVersion: 1, stage: value.stage, code: value.code })}\n`, "utf8");
     await handle.sync();
     await handle.close();
     handle = undefined;

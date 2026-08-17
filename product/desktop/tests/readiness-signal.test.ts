@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { clearRuntimeReadiness, writeRuntimeReadiness } from "../src/runtime/readiness-signal.js";
+import { clearRuntimeReadiness, writeRuntimeReadiness, writeRuntimeStartupFailure } from "../src/runtime/readiness-signal.js";
 
 describe("runtime readiness signal", () => {
   const roots: string[] = [];
@@ -47,6 +47,21 @@ describe("runtime readiness signal", () => {
     expect(body).not.toContain(process.platform);
     expect((await lstat(path)).mode & 0o777).toBe(0o600);
     expect(await readdir(join(dataDir, "diagnostics"))).toEqual(["runtime-ready.json"]);
+  });
+
+  it("atomically writes only a fixed startup stage and error code", async () => {
+    const dataDir = await createDataDir();
+
+    await writeRuntimeStartupFailure(dataDir, {
+      stage: "load-options",
+      code: "UNAVAILABLE",
+      message: "secret at /private/runtime",
+    } as Parameters<typeof writeRuntimeStartupFailure>[1]);
+
+    const body = await readFile(join(dataDir, "diagnostics", "runtime-startup-failure.json"), "utf8");
+    expect(JSON.parse(body)).toEqual({ schemaVersion: 1, stage: "load-options", code: "UNAVAILABLE" });
+    expect(body).not.toContain("secret");
+    expect(body).not.toContain("/private/runtime");
   });
 
   it("replaces an old readiness record", async () => {

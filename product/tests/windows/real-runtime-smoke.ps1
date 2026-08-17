@@ -12,6 +12,7 @@ $launcher = [IO.Path]::GetFullPath((Join-Path $PWD $LauncherExe))
 $root = [IO.Path]::GetFullPath((Join-Path $PWD $UsbRoot))
 $diagnostics = [IO.Path]::GetFullPath((Join-Path $PWD $DiagnosticsPath))
 $ready = Join-Path $root '.uclaw\data\diagnostics\runtime-ready.json'
+$startupFailure = Join-Path $root '.uclaw\data\diagnostics\runtime-startup-failure.json'
 $launcherLog = Join-Path $root '.uclaw\data\diagnostics\desktop-logs\uclaw-launcher.jsonl'
 $gatewayLog = Join-Path $root '.uclaw\data\diagnostics\desktop-logs\uclaw-gateway.jsonl'
 $ruleName = 'UCLAW_REAL_RUNTIME_READY_' + [Guid]::NewGuid().ToString('N')
@@ -36,6 +37,18 @@ function Read-SafeLogRecords([string]$path, [string]$expectedSource, [string[]]$
     catch { }
 }
 
+function Read-SafeStartupFailure([string]$path) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $value = [IO.File]::ReadAllText($path) | ConvertFrom-Json
+        if ($value.schemaVersion -ne 1) { return $null }
+        if (@('load-options', 'start-desktop') -notcontains [string]$value.stage) { return $null }
+        if ([string]$value.code -notmatch '^[A-Z][A-Z0-9_]{1,63}$') { return $null }
+        return $value
+    }
+    catch { return $null }
+}
+
 function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$failureCode) {
     $launcherRecords = @(Read-SafeLogRecords $launcherLog 'launcher' @(
         'launcher-started', 'runtime-started', 'runtime-stopped', 'launcher-failed'
@@ -46,11 +59,14 @@ function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$fai
     ))
     $launcherRecord = if ($launcherRecords.Count -eq 0) { $null } else { $launcherRecords[-1] }
     $gatewayRecord = if ($gatewayRecords.Count -eq 0) { $null } else { $gatewayRecords[-1] }
+    $startupRecord = Read-SafeStartupFailure $startupFailure
     $launcherEvent = if ($null -eq $launcherRecord) { $null } else { [string]$launcherRecord.event }
     $gatewayEvent = if ($null -eq $gatewayRecord) { $null } else { [string]$gatewayRecord.event }
     $gatewaySpawned = @($gatewayRecords | Where-Object { $_.event -eq 'gateway-spawned' }).Count -gt 0
     $gatewayHealthReady = @($gatewayRecords | Where-Object { $_.event -eq 'gateway-health-ready' }).Count -gt 0
     $gatewayCapabilityReady = @($gatewayRecords | Where-Object { $_.event -eq 'gateway-capability-ready' }).Count -gt 0
+    $startupStage = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.stage }
+    $startupErrorCode = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.code }
     $gatewayPhase = $null
     $gatewayClassification = $null
     if ($null -ne $gatewayRecord -and $gatewayRecord.PSObject.Properties.Name -contains 'phase') {
@@ -76,6 +92,8 @@ function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$fai
         gatewaySpawned = $gatewaySpawned
         gatewayHealthReady = $gatewayHealthReady
         gatewayCapabilityReady = $gatewayCapabilityReady
+        startupStage = $startupStage
+        startupErrorCode = $startupErrorCode
     }
     [IO.File]::WriteAllText($diagnostics, (($record | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 }

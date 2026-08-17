@@ -9,6 +9,11 @@ import {
   configurePortableDesktopPaths,
   type PortableDesktopPaths,
 } from "./portable-paths.js";
+import {
+  clearRuntimeStartupFailure,
+  writeRuntimeStartupFailure,
+  type RuntimeStartupFailure,
+} from "./runtime/readiness-signal.js";
 
 const WIRING_MODULE_ENV = "UCLAW_DESKTOP_WIRING_MODULE";
 const DEVELOPMENT_ENV_KEYS = [
@@ -16,6 +21,10 @@ const DEVELOPMENT_ENV_KEYS = [
   "UCLAW_TEST_PROVIDER_API_KEY",
   "UCLAW_TEST_PROVIDER_MODEL",
 ] as const;
+const RUNTIME_STARTUP_FAILURE_CODES = new Set([
+  "UNCONFIGURED", "UNAVAILABLE", "INVALID_ARGUMENT", "FORBIDDEN", "AUTH_FAILED",
+  "PROTOCOL_ERROR", "UNSUPPORTED", "OFFLINE", "CONFLICT",
+]);
 
 export async function loadDevelopmentEnvironment(
   environment: NodeJS.ProcessEnv,
@@ -78,6 +87,14 @@ export interface ElectronEntryDependencies {
   loadOptions(): Promise<DesktopMainOptions>;
   startActivationMain(paths: PortableDesktopPaths): Promise<void>;
   startElectronMain(options: DesktopMainOptions, paths: PortableDesktopPaths): Promise<void>;
+  clearStartupFailure?(paths: PortableDesktopPaths): Promise<void>;
+  recordStartupFailure?(paths: PortableDesktopPaths, failure: RuntimeStartupFailure): Promise<void>;
+}
+
+export function runtimeStartupFailureCode(error: unknown): string {
+  if (typeof error !== "object" || error === null || !("code" in error)) return "UNKNOWN";
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && RUNTIME_STARTUP_FAILURE_CODES.has(code) ? code : "UNKNOWN";
 }
 
 export async function prepareProductionPortableDesktop(): Promise<PortableDesktopPaths> {
@@ -92,16 +109,36 @@ export async function runElectronEntry(
     loadOptions: loadProductionDesktopOptions,
     startActivationMain,
     startElectronMain,
+    clearStartupFailure: (paths) => clearRuntimeStartupFailure(paths.dataDir),
+    recordStartupFailure: (paths, failure) => writeRuntimeStartupFailure(paths.dataDir, failure),
   },
 ): Promise<void> {
   const mode = parseStartupMode(dependencies.argv);
   const paths = await dependencies.preparePortableDesktop();
+  await dependencies.clearStartupFailure?.(paths).catch(() => undefined);
   if (mode === "activation-only") {
     await dependencies.startActivationMain(paths);
     return;
   }
-  const options = await dependencies.loadOptions();
-  await dependencies.startElectronMain(options, paths);
+  let options: DesktopMainOptions;
+  try {
+    options = await dependencies.loadOptions();
+  } catch (error) {
+    await dependencies.recordStartupFailure?.(paths, {
+      stage: "load-options",
+      code: runtimeStartupFailureCode(error),
+    }).catch(() => undefined);
+    throw error;
+  }
+  try {
+    await dependencies.startElectronMain(options, paths);
+  } catch (error) {
+    await dependencies.recordStartupFailure?.(paths, {
+      stage: "start-desktop",
+      code: runtimeStartupFailureCode(error),
+    }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export type StartupDiagnosticCode =
