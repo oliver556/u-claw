@@ -124,14 +124,16 @@ test("builds an exact secret-free handoff with distinct signed runtimes", async 
   assert.equal(configText.includes(productRoot), false);
 
   const launcherCall = calls.find(call => callName(call) === "go:launcher");
+  assert.equal(argumentAfter(launcherCall.args, "-tags"), "licensefixture");
   const linkerFlags = argumentAfter(launcherCall.args, "-ldflags");
   const publicJWK = createPublicKey(publicKey).export({ format: "jwk" });
   const rawPublicKey = Buffer.from(publicJWK.x, "base64url").toString("base64");
-  assert.equal(linkerFlags.includes(`main.trustedRuntimeKeys=${JSON.stringify({ [initialManifest.signature.keyId]: rawPublicKey })}`), true);
+  assert.deepEqual(decodeFixtureLinkerJSON(linkerValue(linkerFlags, "main.trustedRuntimeKeys")), { [initialManifest.signature.keyId]: rawPublicKey });
   assert.equal(linkerFlags.includes(`main.activationServiceEndpoint=${fixture.activationServiceEndpoint}`), true);
-  assert.equal(linkerFlags.includes(`main.trustedStartupLicenseKeys=${JSON.stringify(fixture.activationPublicKeys)}`), true);
+  assert.deepEqual(decodeFixtureLinkerJSON(linkerValue(linkerFlags, "main.trustedStartupLicenseKeys")), fixture.activationPublicKeys);
   assert.equal(linkerFlags.includes(`main.licenseStatusEndpoint=${fixture.licenseStatusEndpoint}`), true);
-  assert.equal(linkerFlags.includes(`main.trustedLicenseStatusKeys=${JSON.stringify(fixture.licenseStatusPublicKeys)}`), true);
+  assert.deepEqual(decodeFixtureLinkerJSON(linkerValue(linkerFlags, "main.trustedLicenseStatusKeys")), fixture.licenseStatusPublicKeys);
+  assert.equal(linkerValue(linkerFlags, "main.revokedRuntimeKeyIDs"), "[]");
 
   const readme = await readFile(path.join(result.handoffDir, "README.txt"), "utf8");
   assert.equal(readme.includes("U:"), false);
@@ -182,17 +184,38 @@ test("fails closed for missing or invalid activation configuration", async (t) =
     { activationServiceEndpoint: undefined },
     { activationServiceEndpoint: "http://activation.example.test/" },
     { activationServiceEndpoint: "https://user:password@activation.example.test/" },
+    { activationServiceEndpoint: "https://activation.example.test/bad path/" },
     { licenseStatusEndpoint: "https://license.example.test/status/?token=secret" },
+    { feedBaseURL: "https://updates.example.test/releases/?channel=test" },
+    { feedBaseURL: "https://updates.example.test/bad path/" },
     { activationPublicKeys: {} },
     { activationPublicKeys: { "activation-key": ["-----BEGIN", "PRIVATE", "KEY-----"].join(" ") } },
     { licenseStatusPublicKeys: {} },
   ];
   for (const optionOverrides of cases) {
     const calls = [];
-    await assert.rejects(fixture.build({ calls, optionOverrides }), /activation|license status|public key/iu);
+    await assert.rejects(fixture.build({ calls, optionOverrides }), /activation|license status|release feed|public key/iu);
     assert.deepEqual(calls, []);
     assert.equal(await exists(fixture.outputDir), false);
   }
+});
+
+test("licensefixture linker integration decodes all three trust maps", async () => {
+  const rawKey = Buffer.alloc(32, 9).toString("base64");
+  const linkerFlags = [
+    "-s", "-w",
+    "-X", `u-claw-launcher.trustedRuntimeKeys=${encodeFixtureLinkerJSON({ "runtime-key": rawKey })}`,
+    "-X", `u-claw-launcher.trustedStartupLicenseKeys=${encodeFixtureLinkerJSON({ "activation-key": rawKey })}`,
+    "-X", `u-claw-launcher.trustedLicenseStatusKeys=${encodeFixtureLinkerJSON({ "license-status-key": rawKey })}`,
+  ].join(" ");
+  await execFileAsync("go", [
+    "test", "-tags", "licensefixture",
+    "-run", "^TestFixtureLinkedTrustConfiguration$",
+    "-count=1", "-ldflags", linkerFlags, ".",
+  ], {
+    cwd: path.join(productRoot, "launcher"),
+    env: { ...process.env, UCLAW_TEST_LINKED_TRUST_CONFIG: "1" },
+  });
 });
 
 test("public-key JSON files must be regular non-symlink files", async (t) => {
@@ -330,4 +353,20 @@ function count(value, needle) {
 
 function rawPublicKey(publicKey) {
   return Buffer.from(publicKey.export({ format: "jwk" }).x, "base64url").toString("base64");
+}
+
+function encodeFixtureLinkerJSON(value) {
+  return `base64:${Buffer.from(JSON.stringify(value)).toString("base64")}`;
+}
+
+function linkerValue(flags, name) {
+  const prefix = `${name}=`;
+  const assignment = flags.split(" ").find(value => value.startsWith(prefix));
+  assert.ok(assignment, `missing ${name}`);
+  return assignment.slice(prefix.length);
+}
+
+function decodeFixtureLinkerJSON(value) {
+  assert.match(value, /^base64:/u);
+  return JSON.parse(Buffer.from(value.slice("base64:".length), "base64").toString("utf8"));
 }

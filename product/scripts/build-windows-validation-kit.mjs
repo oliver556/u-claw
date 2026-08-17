@@ -41,6 +41,7 @@ export async function buildWindowsValidationKit(options) {
   const activationPublicKeys = normalizePublicKeyMap(options.activationPublicKeys, "activation public keys");
   const licenseStatusEndpoint = normalizeHTTPSEndpoint(options.licenseStatusEndpoint, "license status endpoint");
   const licenseStatusPublicKeys = normalizePublicKeyMap(options.licenseStatusPublicKeys, "license status public keys");
+  const feedBaseURL = normalizeHTTPSEndpoint(options.feedBaseURL ?? "", "release feed endpoint", { allowEmpty: true });
   const versions = validateVersions(options.versions ?? ["1.0.0", "2.0.0"]);
   const now = validDate(options.now ?? new Date(), "now");
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -120,17 +121,17 @@ export async function buildWindowsValidationKit(options) {
     )));
 
     const rawPublicKey = Buffer.from(keyPair.publicKey.export({ format: "jwk" }).x, "base64url").toString("base64");
-    const trustedKeys = JSON.stringify({ [keyId]: rawPublicKey });
+    const trustedKeys = { [keyId]: rawPublicKey };
     const launcherPath = path.join(temporaryRoot, "U-Claw.exe");
     await runGoBuild(runner, path.join(productRoot, "launcher"), launcherPath, [
-      "-X", `main.trustedRuntimeKeys=${trustedKeys}`,
+      "-X", `main.trustedRuntimeKeys=${encodeFixtureLinkerJSON(trustedKeys)}`,
       "-X", "main.revokedRuntimeKeyIDs=[]",
-      "-X", `main.releaseFeedBaseURL=${options.feedBaseURL ?? ""}`,
+      "-X", `main.releaseFeedBaseURL=${feedBaseURL}`,
       "-X", `main.activationServiceEndpoint=${activationServiceEndpoint}`,
-      "-X", `main.trustedStartupLicenseKeys=${JSON.stringify(activationPublicKeys)}`,
+      "-X", `main.trustedStartupLicenseKeys=${encodeFixtureLinkerJSON(activationPublicKeys)}`,
       "-X", `main.licenseStatusEndpoint=${licenseStatusEndpoint}`,
-      "-X", `main.trustedLicenseStatusKeys=${JSON.stringify(licenseStatusPublicKeys)}`,
-    ]);
+      "-X", `main.trustedLicenseStatusKeys=${encodeFixtureLinkerJSON(licenseStatusPublicKeys)}`,
+    ], ["licensefixture"]);
 
     const usbDir = path.join(handoffDir, "U-Claw-test-USB");
     await runNodeScript(runner, productRoot, "packaging/build-release.mjs", [
@@ -214,9 +215,10 @@ async function runNodeScript(runner, productRoot, relativeScript, args) {
   });
 }
 
-async function runGoBuild(runner, cwd, output, linkerValues = []) {
+async function runGoBuild(runner, cwd, output, linkerValues = [], tags = []) {
   const linkerFlags = ["-s", "-w", "-H", "windowsgui", ...linkerValues].join(" ");
-  return runner("go", ["build", "-trimpath", "-ldflags", linkerFlags, "-o", output, "."], {
+  const tagArguments = tags.length > 0 ? ["-tags", tags.join(",")] : [];
+  return runner("go", ["build", "-trimpath", ...tagArguments, "-ldflags", linkerFlags, "-o", output, "."], {
     cwd,
     env: { CGO_ENABLED: "0", GOOS: "windows", GOARCH: "amd64" },
     windowsHide: true,
@@ -263,6 +265,7 @@ function validationReadme(versions) {
     `Update version: ${versions[1]}`,
     "This kit embeds the supplied real activation and license-status HTTPS endpoints and public verification keys.",
     "The builder fails closed when any activation configuration is missing or invalid.",
+    "An empty release feed base URL explicitly disables Launcher online checks until an HTTPS feed is configured.",
     "1. Copy only the contents of U-Claw-test-USB to the root of the test USB drive.",
     "2. On Windows 10 or 11, connect the network, double-click U-Claw.exe, and complete the existing real activation flow.",
     "3. Confirm .uclaw\\license\\license.json and .uclaw\\license\\.startup-credential.json exist.",
@@ -291,7 +294,9 @@ function requireText(value, label) {
   return value;
 }
 
-function normalizeHTTPSEndpoint(value, label) {
+function normalizeHTTPSEndpoint(value, label, { allowEmpty = false } = {}) {
+  if (allowEmpty && value === "") return "";
+  if (typeof value !== "string" || /\s/u.test(value)) throw new Error(`${label} must be a credential-free HTTPS URL`);
   let endpoint;
   try {
     endpoint = new URL(requireText(value, label));
@@ -303,6 +308,10 @@ function normalizeHTTPSEndpoint(value, label) {
   }
   if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
   return endpoint.toString();
+}
+
+function encodeFixtureLinkerJSON(value) {
+  return `base64:${Buffer.from(JSON.stringify(value)).toString("base64")}`;
 }
 
 function normalizePublicKeyMap(value, label) {
