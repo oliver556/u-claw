@@ -49,4 +49,16 @@ describe("attachment cleanup", () => {
     await import("node:fs/promises").then(({ symlink }) => symlink(outside, join(dataDir, "uclaw", "attachments")));
     await expect(cleanupAttachmentCache({ dataDir })).rejects.toThrow(/symlink|unsafe/i);
   });
+
+  it("does not reject startup when the best-effort initial cleanup cannot run", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "uclaw-cleanup-startup-link-"));
+    const outside = await mkdtemp(join(tmpdir(), "uclaw-cleanup-startup-outside-"));
+    roots.push(dataDir, outside);
+    await mkdir(join(dataDir, "uclaw"));
+    await import("node:fs/promises").then(({ symlink }) => symlink(outside, join(dataDir, "uclaw", "attachments")));
+
+    const controller = startAttachmentCleanup({ dataDir, intervalMs: 60_000 });
+    await expect(controller.started).resolves.toBeUndefined();
+    controller.dispose();
+  });
 });

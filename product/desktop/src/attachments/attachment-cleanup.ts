@@ -43,7 +43,9 @@ export async function cleanupAttachmentCache(options: AttachmentCleanupOptions) 
 }
 export function startAttachmentCleanup(options: AttachmentCleanupOptions) {
   const run = () => cleanupAttachmentCache(options).then(() => undefined);
-  const started = run();
+  // Cleanup is maintenance work. A malformed or unavailable cache must not
+  // prevent the desktop runtime from starting; the interval will retry it.
+  const started = run().catch(() => undefined);
   const timer = setInterval(() => void run().catch(() => undefined), options.intervalMs ?? 60 * 60 * 1000);
   timer.unref?.();
   return { started, dispose: () => clearInterval(timer) };
