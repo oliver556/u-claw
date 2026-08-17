@@ -102,10 +102,19 @@ export function createBuiltinCredentialStore({
 }: CreateBuiltinCredentialStoreOptions): BuiltinCredentialStore {
   const platform = platformForTest ?? process.platform;
   if (platform === "win32" && allowUnpinnedFilesystemForTest !== true) {
-    throw new BuiltinCredentialError(
-      "BUILTIN_CREDENTIAL_UNSAFE",
-      "Pinned Windows filesystem access requires the P3-T08 native helper.",
-    );
+    const unavailable = async (): Promise<never> => {
+      throw new BuiltinCredentialError(
+        "BUILTIN_CREDENTIAL_UNSAFE",
+        "Pinned Windows filesystem access requires the P3-T08 native helper.",
+      );
+    };
+    return {
+      pinnedFilesystem: false,
+      provision: unavailable,
+      loadActive: unavailable,
+      loadForConnectivityCheck: unavailable,
+      clear: unavailable,
+    };
   }
   if (platform !== "win32") {
     configureFsSafePython({ mode: "require" });

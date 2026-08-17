@@ -55,11 +55,14 @@ describe("builtin credential store", () => {
     await expect(store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
   });
 
-  it("requires pinned filesystem access and rejects Windows before P3-T08", async () => {
+  it("keeps the runtime constructible while rejecting Windows credential I/O before P3-T08", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-builtin-windows-"));
     roots.push(dataDir);
-    expect(() => createBuiltinCredentialStore({ dataDir, platformForTest: "win32" }))
-      .toThrow(/P3-T08 native helper/u);
+    const unavailable = createBuiltinCredentialStore({ dataDir, platformForTest: "win32" });
+    expect(unavailable.pinnedFilesystem).toBe(false);
+    await expect(unavailable.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
+    await expect(unavailable.provision(provisionInput("https://builtin.example.test/v1")))
+      .rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
     const testOnly = createBuiltinCredentialStore({
       dataDir, platformForTest: "win32", allowUnpinnedFilesystemForTest: true,
     });
