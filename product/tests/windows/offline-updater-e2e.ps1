@@ -33,8 +33,15 @@ function Invoke-Process {
 
 function Invoke-NodeChecked {
     param([Parameter(Mandatory)][string[]]$Arguments, [Parameter(Mandatory)][string]$Code)
-    & node @Arguments
-    Assert-True ($LASTEXITCODE -eq 0) $Code
+    $output = @(& node @Arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        foreach ($item in $output) {
+            $line = $item.ToString()
+            if ($line.Length -gt 0) { [Console]::Error.WriteLine($line) }
+        }
+        throw $Code
+    }
 }
 
 function Write-Diagnostics {

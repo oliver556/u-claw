@@ -17,6 +17,8 @@ func statusReporterHeadless() bool {
 
 func (headlessStatusReporter) State(State) {}
 
-func (headlessStatusReporter) Fail(string, string) {}
+func (headlessStatusReporter) Fail(code string, _ string) {
+	recordHeadlessFailure(code)
+}
 
 func (headlessStatusReporter) Close() {}

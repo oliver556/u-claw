@@ -20,6 +20,7 @@ function Write-Utf8NoBom {
 
 function Invoke-Launcher {
     param([Parameter(Mandatory)][string]$Executable, [Parameter(Mandatory)][string]$WorkingDirectory)
+    Remove-Item -LiteralPath $env:UCLAW_LAUNCHER_FAILURE_CODE_FILE -Force -ErrorAction SilentlyContinue
     $process = Start-Process -FilePath $Executable -WorkingDirectory $WorkingDirectory -PassThru
     $processHandle = $process.Handle
     try {
@@ -83,8 +84,10 @@ $licenseDirectory = Join-Path $packageRoot 'license'
 $startupCredentialInRelease = Join-Path $licenseDirectory '.startup-credential.json'
 $licenseInRelease = Join-Path $licenseDirectory 'license.json'
 $licenseStatusInRelease = Join-Path $licenseDirectory '.status-response.json'
+$failureCodePath = Join-Path $workRoot 'launcher-failure-code'
 $originalLocalAppData = $env:LOCALAPPDATA
 $originalHeadless = $env:UCLAW_LAUNCHER_HEADLESS
+$originalFailureCodeFile = $env:UCLAW_LAUNCHER_FAILURE_CODE_FILE
 $originalHold = $env:UCLAW_FIXTURE_HOLD_MS
 $originalUpdateRestart = $env:UCLAW_FIXTURE_UPDATE_RESTART_ONCE
 $phase = 'SETUP'
@@ -150,6 +153,7 @@ try {
 
     $env:LOCALAPPDATA = $localAppData
     $env:UCLAW_LAUNCHER_HEADLESS = '1'
+    $env:UCLAW_LAUNCHER_FAILURE_CODE_FILE = $failureCodePath
     $env:UCLAW_FIXTURE_HOLD_MS = '100'
 
     $phase = 'MISSING_STARTUP_CREDENTIAL'
@@ -277,6 +281,12 @@ catch {
         phase = $phase
     }
     Write-Diagnostics $failure
+    if (Test-Path -LiteralPath $failureCodePath -PathType Leaf) {
+        $failureCode = [IO.File]::ReadAllText($failureCodePath).Trim()
+        if ($failureCode -cmatch '^E_[A-Z0-9_]{1,62}$') {
+            [Console]::Error.WriteLine(('PORTABLE_LAUNCHER_FAILURE_CODE: ' + $failureCode))
+        }
+    }
     [Console]::Error.WriteLine(('PORTABLE_LAUNCHER_E2E_FAILED_' + $phase + ': validation failed'))
     exit 1
 }
@@ -289,6 +299,7 @@ finally {
     }
     $env:LOCALAPPDATA = $originalLocalAppData
     $env:UCLAW_LAUNCHER_HEADLESS = $originalHeadless
+    $env:UCLAW_LAUNCHER_FAILURE_CODE_FILE = $originalFailureCodeFile
     $env:UCLAW_FIXTURE_HOLD_MS = $originalHold
     $env:UCLAW_FIXTURE_UPDATE_RESTART_ONCE = $originalUpdateRestart
     if (Test-Path -LiteralPath $workRoot) {

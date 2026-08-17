@@ -88,6 +88,9 @@ test("PowerShell E2E covers the frozen portable lifecycle", async () => {
     assert.match(source, new RegExp(`\\b${check}\\b`, "u"));
   }
   assert.match(source, /UCLAW_LAUNCHER_HEADLESS/u);
+  assert.match(source, /UCLAW_LAUNCHER_FAILURE_CODE_FILE/u);
+  assert.match(source, /\^E_\[A-Z0-9_\]\{1,62\}\$/u);
+  assert.match(source, /\[Console\]::Error\.WriteLine\([^\n]*\$failureCode/u);
   assert.match(source, /UCLAW_FIXTURE_UPDATE_RESTART_ONCE/u);
   assert.match(source, /sign-license-fixture\.mjs/u);
   assert.match(source, /-tags\s+licensefixture/u);
@@ -96,6 +99,8 @@ test("PowerShell E2E covers the frozen portable lifecycle", async () => {
   assert.match(source, /\.status-response\.json/u);
   assert.match(source, /\.partial-/u);
   assert.doesNotMatch(source, /Write-(Host|Verbose|Debug|Warning)|Start-Process[^\n]*-Verb\s+RunAs/iu);
+  const failureDiagnostic = source.slice(source.indexOf("$failure = [ordered]"), source.indexOf("Write-Diagnostics $failure"));
+  assert.doesNotMatch(failureDiagnostic, /failureCode/u);
 });
 
 test("Windows workflow gates online and offline updates in both PowerShell versions", async () => {
@@ -129,5 +134,8 @@ test("Windows workflow gates online and offline updates in both PowerShell versi
     assert.match(offlineE2E, new RegExp(`\\b${field}\\b`, "u"));
   }
   assert.match(offlineE2E, /Get-FileHash[^\n]*SHA256/u);
+  assert.match(offlineE2E, /2>&1/u);
+  assert.match(offlineE2E, /\[Console\]::Error\.WriteLine\(\$line\)/u);
+  assert.doesNotMatch(offlineE2E, /Write-Diagnostics[^\n]*(?:output|error|message)/iu);
   assert.doesNotMatch(offlineE2E, /production|activation[_-]?code|api[_-]?token/iu);
 });
