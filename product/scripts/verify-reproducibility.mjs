@@ -20,6 +20,35 @@ export function assertExactNpmVersion(userAgent, expected = "11.12.1") {
   }
 }
 
+export function validateWindowsArtifacts(versions) {
+  const windowsArtifacts = versions.windowsArtifacts ?? {};
+  if (
+    windowsArtifacts.electron?.url
+    !== `https://github.com/electron/electron/releases/download/v${versions.electron}/electron-v${versions.electron}-win32-x64.zip`
+  ) {
+    throw new Error("Windows Electron artifact URL must match pinned version");
+  }
+  assertLowercaseSha256(windowsArtifacts.electron?.sha256, "Windows Electron artifact SHA-256");
+
+  if (
+    windowsArtifacts.node?.url
+    !== `https://nodejs.org/dist/v${versions.node}/node-v${versions.node}-win-x64.zip`
+  ) {
+    throw new Error("Windows Node artifact URL must match pinned version");
+  }
+  assertLowercaseSha256(windowsArtifacts.node?.sha256, "Windows Node artifact SHA-256");
+
+  if (
+    windowsArtifacts.openclaw?.url
+    !== `https://registry.npmjs.org/openclaw/-/openclaw-${versions.openclaw}.tgz`
+  ) {
+    throw new Error("Windows OpenClaw artifact URL must match pinned version");
+  }
+  if (windowsArtifacts.openclaw?.integrity !== versions.openclawNpmIntegrity) {
+    throw new Error("Windows OpenClaw artifact integrity must match openclawNpmIntegrity");
+  }
+}
+
 export async function verifyWorkspacePins() {
   const [versions, rootPackage, lockfile, nodeVersion, npmConfig, rootOpenClaw, portableOpenClaw] = await Promise.all([
     readJson("runtime-versions.json"),
@@ -62,29 +91,7 @@ export async function verifyWorkspacePins() {
   const desktop = manifests.find(([workspace]) => workspace === "desktop")[1];
   assertEqual(desktop.devDependencies?.electron, versions.electron, "desktop Electron pin");
   assertEqual(lockfile.packages?.["node_modules/electron"]?.version, versions.electron, "locked Electron version");
-  const windowsArtifacts = versions.windowsArtifacts ?? {};
-  assertEqual(
-    windowsArtifacts.electron?.url,
-    `https://github.com/electron/electron/releases/download/v${versions.electron}/electron-v${versions.electron}-win32-x64.zip`,
-    "Windows Electron artifact URL",
-  );
-  assertLowercaseSha256(windowsArtifacts.electron?.sha256, "Windows Electron artifact SHA-256");
-  assertEqual(
-    windowsArtifacts.node?.url,
-    `https://nodejs.org/dist/v${versions.node}/node-v${versions.node}-win-x64.zip`,
-    "Windows Node artifact URL",
-  );
-  assertLowercaseSha256(windowsArtifacts.node?.sha256, "Windows Node artifact SHA-256");
-  assertEqual(
-    windowsArtifacts.openclaw?.url,
-    `https://registry.npmjs.org/openclaw/-/openclaw-${versions.openclaw}.tgz`,
-    "Windows OpenClaw artifact URL",
-  );
-  assertEqual(
-    windowsArtifacts.openclaw?.integrity,
-    versions.openclawNpmIntegrity,
-    "Windows OpenClaw artifact integrity",
-  );
+  validateWindowsArtifacts(versions);
   const provenance = await readJson(`adapter/fixtures/openclaw-${versions.openclaw}/provenance.json`);
   assertEqual(provenance.openClawVersion, versions.openclaw, "OpenClaw fixture version");
   assertEqual(provenance.npmTarballIntegrity, versions.openclawNpmIntegrity, "OpenClaw npm integrity");

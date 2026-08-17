@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   assertExactNodeVersion,
   assertExactNpmVersion,
+  validateWindowsArtifacts,
   verifyWorkspacePins,
 } from "./verify-reproducibility.mjs";
 
@@ -27,6 +28,61 @@ test("pins immutable Windows runtime artifacts", async () => {
       integrity: "sha512-ycF3yPcbjN6bUPeaUx6Mh6vze1hQWoD3CT/wWcmD7a8xaHHHRUaAlaq+lFxMHf1ssEgODVAwjlzYqp2twkYZ7g==",
     },
   });
+});
+
+test("rejects mutable Windows runtime artifact pins", async () => {
+  const versions = JSON.parse(
+    await readFile(new URL("../runtime-versions.json", import.meta.url), "utf8"),
+  );
+  const cases = [
+    {
+      name: "wrong Electron URL",
+      mutate: (candidate) => {
+        candidate.windowsArtifacts.electron.url = "https://github.com/electron/electron/releases/download/v40.10.5/electron-v40.10.5-win32-x64.zip";
+      },
+      message: "Windows Electron artifact URL must match pinned version",
+    },
+    {
+      name: "wrong Node URL",
+      mutate: (candidate) => {
+        candidate.windowsArtifacts.node.url = "https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip";
+      },
+      message: "Windows Node artifact URL must match pinned version",
+    },
+    {
+      name: "short SHA-256",
+      mutate: (candidate) => {
+        candidate.windowsArtifacts.electron.sha256 = "07248036";
+      },
+      message: "Windows Electron artifact SHA-256 must be a lowercase 64-character SHA-256 digest",
+    },
+    {
+      name: "uppercase SHA-256",
+      mutate: (candidate) => {
+        candidate.windowsArtifacts.node.sha256 = candidate.windowsArtifacts.node.sha256.toUpperCase();
+      },
+      message: "Windows Node artifact SHA-256 must be a lowercase 64-character SHA-256 digest",
+    },
+    {
+      name: "OpenClaw integrity mismatch",
+      mutate: (candidate) => {
+        candidate.windowsArtifacts.openclaw.integrity = "sha512-invalid";
+      },
+      message: "Windows OpenClaw artifact integrity must match openclawNpmIntegrity",
+    },
+  ];
+
+  for (const { name, mutate, message } of cases) {
+    const candidate = structuredClone(versions);
+    mutate(candidate);
+    assert.throws(
+      () => validateWindowsArtifacts(candidate),
+      (error) => {
+        assert.equal(error.message, message, name);
+        return true;
+      },
+    );
+  }
 });
 
 test("rejects any Node version other than the canonical pin", () => {
