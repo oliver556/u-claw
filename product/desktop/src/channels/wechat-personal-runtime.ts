@@ -78,6 +78,7 @@ type ActiveFlow = {
 export interface WechatPersonalRuntimeOptions {
   dataDir: string;
   pluginDir: string;
+  startupCapabilityFailure?: { pluginStatus: "installed" | "missing"; reason: string };
   requestGateway: GatewayRequest;
   renderQr(value: string): Promise<string>;
   fetch?: typeof globalThis.fetch;
@@ -148,6 +149,9 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
   };
 
   const pluginCapability = async () => {
+    if (options.startupCapabilityFailure !== undefined) {
+      return { available: false as const, ...options.startupCapabilityFailure };
+    }
     try {
       PluginManifestSchema.parse(JSON.parse(await readFile(join(options.pluginDir, "openclaw.plugin.json"), "utf8")));
     } catch {

@@ -25,6 +25,7 @@ import { MessageEventSchema, type MessageEvent, type ProviderConfigEntry, type P
 import { createClientDispatcher } from "../ipc/client-dispatcher.js";
 import { createAttachmentCache } from "../attachments/attachment-cache.js";
 import { createWechatPersonalRuntime } from "../channels/wechat-personal-runtime.js";
+import { bootstrapWechatPlugin } from "../channels/wechat-plugin-bootstrap.js";
 import { createOpenClawQrRenderer } from "../channels/wechat-qr-renderer.js";
 import { createOpenClawProviderConfigBackend } from "../providers/openclaw-provider-config.js";
 import { createOpenClawProviderExecutor } from "../providers/openclaw-provider-executor.js";
@@ -443,9 +444,17 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   let gatewayProcessAlive = false;
   const openClawStateDir = dirname(environment.openClawConfig);
   const wechatPluginDir = join(openClawStateDir, "extensions", "openclaw-weixin");
+  const wechatPluginBootstrap = await bootstrapWechatPlugin({
+    sourceDir: join(environment.runtimeRoot, "extensions", "openclaw-weixin"),
+    targetDir: wechatPluginDir,
+  });
   const wechatRuntime = createWechatPersonalRuntime({
     dataDir: openClawStateDir,
     pluginDir: wechatPluginDir,
+    startupCapabilityFailure: wechatPluginBootstrap.available ? undefined : {
+      pluginStatus: wechatPluginBootstrap.initialStatus === "missing" ? "missing" : "installed",
+      reason: wechatPluginBootstrap.reason,
+    },
     requestGateway: (method, params, signal) => transport.router.request(method, params as never, z.unknown(), signal),
     renderQr: createOpenClawQrRenderer(environment.runtimeRoot, wechatPluginDir),
   });

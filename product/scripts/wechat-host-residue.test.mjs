@@ -169,14 +169,13 @@ test("PowerShell gate records real Windows and physical USB blockers", async () 
   assert.doesNotMatch(source, /Remove-Item[\s\S]*WeChat Files|Tencent\\WeChat/i);
 });
 
-test("Windows launcher keeps plugin and account state on USB", async () => {
+test("Windows launcher delegates plugin repair to the controlled desktop bootstrap", async () => {
   const [launcher, installer, configServer] = await Promise.all([
     readFile(launcherUrl, "utf8"),
     readFile(installerUrl, "utf8"),
     readFile(configServerUrl, "utf8"),
   ]);
-  assert.match(launcher, /WECHAT_PLUGIN_DST=%STATE_DIR%\\extensions\\openclaw-weixin/i);
-  assert.doesNotMatch(launcher, /WECHAT_PLUGIN_DST=%USERPROFILE%/i);
+  assert.doesNotMatch(launcher, /WECHAT_PLUGIN_(?:SRC|DST)|xcopy[\s\S]{0,160}openclaw-weixin/i);
   assert.doesNotMatch(launcher, /mkdir "%USERPROFILE%\\\.openclaw\\extensions"/i);
   assert.doesNotMatch(installer, /openclaw-weixin/i);
   assert.doesNotMatch(installer, /%USERPROFILE%\\\.openclaw\\extensions/i);
