@@ -50,7 +50,7 @@ function Read-SafeStartupFailure([string]$path) {
         ) -notcontains [string]$value.wiringStage) { return $null }
         if (@(
             'UNCONFIGURED', 'UNAVAILABLE', 'INVALID_ARGUMENT', 'FORBIDDEN', 'AUTH_FAILED',
-            'PROTOCOL_ERROR', 'UNSUPPORTED', 'OFFLINE', 'CONFLICT', 'UNKNOWN',
+            'PROTOCOL_ERROR', 'UNSUPPORTED', 'OFFLINE', 'CONFLICT', 'OPERATION_FAILED', 'UNKNOWN',
             'ERR_MODULE_NOT_FOUND', 'ERR_PACKAGE_PATH_NOT_EXPORTED',
             'ERR_INVALID_PACKAGE_CONFIG', 'ERR_UNKNOWN_FILE_EXTENSION'
         ) -notcontains [string]$value.code) { return $null }

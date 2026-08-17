@@ -142,6 +142,7 @@ describe("Electron production entry", () => {
       name: "DesktopWiringError",
     });
     expect(runtimeStartupFailureCode(Object.assign(new Error("private"), { code: "ERR_MODULE_NOT_FOUND" }))).toBe("ERR_MODULE_NOT_FOUND");
+    expect(runtimeStartupFailureCode({ code: "OPERATION_FAILED", message: "private" })).toBe("OPERATION_FAILED");
     expect(runtimeStartupFailureCode(Object.assign(new Error("private"), { code: "ENOENT" }))).toBe("UNKNOWN");
     expect(runtimeStartupFailureCode({ code: "ERR_PRIVATE_SECRET" })).toBe("UNKNOWN");
     expect(runtimeStartupFailureName(new TypeError("private"))).toBe("TypeError");

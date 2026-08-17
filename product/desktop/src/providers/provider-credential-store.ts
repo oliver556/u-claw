@@ -39,7 +39,15 @@ export function createProviderCredentialStore({
 }: CreateProviderCredentialStoreOptions): ProviderCredentialStore {
   const platform = platformForTest ?? process.platform;
   if (platform === "win32" && allowUnpinnedFilesystemForTest !== true) {
-    throw credentialError("Pinned Windows credential storage requires the native filesystem helper.");
+    const unavailable = async (): Promise<never> => {
+      throw credentialError("Pinned Windows credential storage requires the native filesystem helper.");
+    };
+    return {
+      get: async () => undefined,
+      has: async () => false,
+      set: unavailable,
+      remove: unavailable,
+    };
   }
   if (platform !== "win32") configureFsSafePython({ mode: "require" });
   let safeRoot: ReturnType<typeof createSafeRoot> | undefined;

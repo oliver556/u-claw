@@ -9,6 +9,18 @@ const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 
 describe("provider credential store", () => {
+  it("starts on Windows without exposing unpinned credential reads or writes", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "uclaw-provider-credentials-windows-"));
+    roots.push(dataDir);
+
+    const store = createProviderCredentialStore({ dataDir, platformForTest: "win32" });
+
+    await expect(store.get("openai")).resolves.toBeUndefined();
+    await expect(store.has("openai")).resolves.toBe(false);
+    await expect(store.set("openai", "sk-windows")).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+    await expect(store.remove("openai")).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+  });
+
   it("stores keys in a pinned main-only mode-0600 target", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-provider-credentials-"));
     roots.push(dataDir);
