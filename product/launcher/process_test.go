@@ -42,6 +42,9 @@ func TestActivationProcessSpecUsesRestrictedStartupMode(t *testing.T) {
 		if strings.HasPrefix(entry, "OPENCLAW_") {
 			t.Fatalf("activation environment contains %q", entry)
 		}
+		if strings.HasPrefix(entry, "UCLAW_NODE_BIN=") || strings.HasPrefix(entry, "UCLAW_OPENCLAW_ENTRY=") {
+			t.Fatalf("activation environment contains %q", entry)
+		}
 	}
 	wantEnv := []string{
 		"TEMP=" + filepath.Join(paths.HostCacheRoot, "cache", "temp"),
@@ -144,6 +147,55 @@ func TestNormalProcessSpecPreservesManifestArgumentsAndOpenClawEnvironment(t *te
 	if !hasOpenClawEnvironment {
 		t.Fatalf("normal environment = %v", spec.Env)
 	}
+	wantRuntimeEnvironment := map[string]string{
+		"UCLAW_NODE_BIN":       filepath.Join(root, "node", "node.exe"),
+		"UCLAW_OPENCLAW_ENTRY": filepath.Join(root, "electron", "resources", "app", "node_modules", "openclaw", "openclaw.mjs"),
+	}
+	for key, wantValue := range wantRuntimeEnvironment {
+		matches := environmentValues(spec.Env, key)
+		if !reflect.DeepEqual(matches, []string{wantValue}) {
+			t.Fatalf("%s values = %v, want [%s]", key, matches, wantValue)
+		}
+	}
+}
+
+func TestNormalProcessEnvironmentOverridesInheritedRuntimePaths(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "runtime")
+	paths := PortablePaths{
+		DataDir:       filepath.Join(t.TempDir(), "data"),
+		HostCacheRoot: filepath.Join(t.TempDir(), "host-cache"),
+	}
+	spec := NormalProcessSpec(paths, validRuntimeManifest(), processTestLease(root))
+	merged := mergeEnvironmentForPlatform(
+		[]string{
+			"UCLAW_NODE_BIN=C:\\host\\node.exe",
+			"UCLAW_OPENCLAW_ENTRY=C:\\host\\openclaw.mjs",
+		},
+		spec.Env,
+		true,
+	)
+
+	wantRuntimeEnvironment := map[string]string{
+		"UCLAW_NODE_BIN":       filepath.Join(root, "node", "node.exe"),
+		"UCLAW_OPENCLAW_ENTRY": filepath.Join(root, "electron", "resources", "app", "node_modules", "openclaw", "openclaw.mjs"),
+	}
+	for key, wantValue := range wantRuntimeEnvironment {
+		matches := environmentValues(merged, key)
+		if !reflect.DeepEqual(matches, []string{wantValue}) {
+			t.Fatalf("merged %s values = %v, want [%s]", key, matches, wantValue)
+		}
+	}
+}
+
+func environmentValues(environment []string, key string) []string {
+	prefix := key + "="
+	var values []string
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, prefix) {
+			values = append(values, strings.TrimPrefix(entry, prefix))
+		}
+	}
+	return values
 }
 
 func TestActivationCompletedRecognizesOnlyExitCode20(t *testing.T) {

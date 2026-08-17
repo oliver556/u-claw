@@ -34,7 +34,12 @@ const (
 
 func NormalProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLease) ProcessSpec {
 	arguments := append(append([]string(nil), manifest.EntryArgs...), normalStartupArgument)
-	return processSpec(paths, manifest, lease, arguments, portableProcessEnvironment(paths))
+	runtimeRoot := lease.RootPath()
+	environment := append(portableProcessEnvironment(paths),
+		"UCLAW_NODE_BIN="+filepath.Join(runtimeRoot, "node", "node.exe"),
+		"UCLAW_OPENCLAW_ENTRY="+filepath.Join(runtimeRoot, "electron", "resources", "app", "node_modules", "openclaw", "openclaw.mjs"),
+	)
+	return processSpec(paths, manifest, lease, arguments, environment)
 }
 
 func ActivationProcessSpec(paths PortablePaths, manifest Manifest, lease RuntimeLease, fingerprint usbFingerprint) ProcessSpec {
