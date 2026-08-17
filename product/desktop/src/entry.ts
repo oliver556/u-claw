@@ -25,6 +25,9 @@ const RUNTIME_STARTUP_FAILURE_CODES = new Set([
   "UNCONFIGURED", "UNAVAILABLE", "INVALID_ARGUMENT", "FORBIDDEN", "AUTH_FAILED",
   "PROTOCOL_ERROR", "UNSUPPORTED", "OFFLINE", "CONFLICT",
 ]);
+const RUNTIME_STARTUP_FAILURE_NAMES = new Set([
+  "Error", "TypeError", "ReferenceError", "SyntaxError", "RangeError", "AggregateError", "DesktopWiringError",
+]);
 
 export async function loadDevelopmentEnvironment(
   environment: NodeJS.ProcessEnv,
@@ -94,7 +97,14 @@ export interface ElectronEntryDependencies {
 export function runtimeStartupFailureCode(error: unknown): string {
   if (typeof error !== "object" || error === null || !("code" in error)) return "UNKNOWN";
   const code = (error as { code?: unknown }).code;
-  return typeof code === "string" && RUNTIME_STARTUP_FAILURE_CODES.has(code) ? code : "UNKNOWN";
+  return typeof code === "string" && (RUNTIME_STARTUP_FAILURE_CODES.has(code) || /^ERR_[A-Z0-9_]{1,59}$/u.test(code))
+    ? code
+    : "UNKNOWN";
+}
+
+export function runtimeStartupFailureName(error: unknown): string {
+  if (!(error instanceof Error)) return "UnknownError";
+  return RUNTIME_STARTUP_FAILURE_NAMES.has(error.name) ? error.name : "UnknownError";
 }
 
 export async function prepareProductionPortableDesktop(): Promise<PortableDesktopPaths> {
@@ -127,6 +137,7 @@ export async function runElectronEntry(
     await dependencies.recordStartupFailure?.(paths, {
       stage: "load-options",
       code: runtimeStartupFailureCode(error),
+      name: runtimeStartupFailureName(error),
     }).catch(() => undefined);
     throw error;
   }
@@ -136,6 +147,7 @@ export async function runElectronEntry(
     await dependencies.recordStartupFailure?.(paths, {
       stage: "start-desktop",
       code: runtimeStartupFailureCode(error),
+      name: runtimeStartupFailureName(error),
     }).catch(() => undefined);
     throw error;
   }

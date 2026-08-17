@@ -55,11 +55,12 @@ describe("runtime readiness signal", () => {
     await writeRuntimeStartupFailure(dataDir, {
       stage: "load-options",
       code: "UNAVAILABLE",
+      name: "TypeError",
       message: "secret at /private/runtime",
     } as Parameters<typeof writeRuntimeStartupFailure>[1]);
 
     const body = await readFile(join(dataDir, "diagnostics", "runtime-startup-failure.json"), "utf8");
-    expect(JSON.parse(body)).toEqual({ schemaVersion: 1, stage: "load-options", code: "UNAVAILABLE" });
+    expect(JSON.parse(body)).toEqual({ schemaVersion: 1, stage: "load-options", code: "UNAVAILABLE", name: "TypeError" });
     expect(body).not.toContain("secret");
     expect(body).not.toContain("/private/runtime");
   });

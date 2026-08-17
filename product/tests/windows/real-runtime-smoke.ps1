@@ -44,6 +44,7 @@ function Read-SafeStartupFailure([string]$path) {
         if ($value.schemaVersion -ne 1) { return $null }
         if (@('load-options', 'start-desktop') -notcontains [string]$value.stage) { return $null }
         if ([string]$value.code -notmatch '^[A-Z][A-Z0-9_]{1,63}$') { return $null }
+        if (@('Error', 'TypeError', 'ReferenceError', 'SyntaxError', 'RangeError', 'AggregateError', 'DesktopWiringError', 'UnknownError') -notcontains [string]$value.name) { return $null }
         return $value
     }
     catch { return $null }
@@ -67,6 +68,7 @@ function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$fai
     $gatewayCapabilityReady = @($gatewayRecords | Where-Object { $_.event -eq 'gateway-capability-ready' }).Count -gt 0
     $startupStage = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.stage }
     $startupErrorCode = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.code }
+    $startupErrorName = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.name }
     $gatewayPhase = $null
     $gatewayClassification = $null
     if ($null -ne $gatewayRecord -and $gatewayRecord.PSObject.Properties.Name -contains 'phase') {
@@ -94,6 +96,7 @@ function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$fai
         gatewayCapabilityReady = $gatewayCapabilityReady
         startupStage = $startupStage
         startupErrorCode = $startupErrorCode
+        startupErrorName = $startupErrorName
     }
     [IO.File]::WriteAllText($diagnostics, (($record | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 }

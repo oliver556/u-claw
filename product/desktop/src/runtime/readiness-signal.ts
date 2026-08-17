@@ -11,6 +11,7 @@ export interface RuntimeReadiness {
 export interface RuntimeStartupFailure {
   stage: "load-options" | "start-desktop";
   code: string;
+  name: string;
 }
 
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/u;
@@ -111,7 +112,11 @@ export async function writeRuntimeStartupFailure(
   dataDir: string,
   value: RuntimeStartupFailure,
 ): Promise<void> {
-  if (!["load-options", "start-desktop"].includes(value.stage) || !/^[A-Z][A-Z0-9_]{1,63}$/u.test(value.code)) {
+  if (
+    !["load-options", "start-desktop"].includes(value.stage) ||
+    !/^[A-Z][A-Z0-9_]{1,63}$/u.test(value.code) ||
+    !/^[A-Za-z][A-Za-z0-9]{1,63}$/u.test(value.name)
+  ) {
     throw new Error("Runtime startup failure diagnostic is invalid.");
   }
   const directory = (await diagnosticsDirectory(dataDir, true))!;
@@ -125,7 +130,7 @@ export async function writeRuntimeStartupFailure(
   let replaced = false;
   try {
     handle = await open(temporary, "wx", 0o600);
-    await handle.writeFile(`${JSON.stringify({ schemaVersion: 1, stage: value.stage, code: value.code })}\n`, "utf8");
+    await handle.writeFile(`${JSON.stringify({ schemaVersion: 1, stage: value.stage, code: value.code, name: value.name })}\n`, "utf8");
     await handle.sync();
     await handle.close();
     handle = undefined;

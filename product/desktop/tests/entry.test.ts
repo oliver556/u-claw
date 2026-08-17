@@ -14,6 +14,7 @@ import {
   runElectronEntry,
   startupDiagnosticCode,
   runtimeStartupFailureCode,
+  runtimeStartupFailureName,
 } from "../src/entry.js";
 import { DesktopWiringError } from "../src/wiring/environment.js";
 import type { DesktopMainOptions } from "../src/main.js";
@@ -133,8 +134,11 @@ describe("Electron production entry", () => {
     expect(recordStartupFailure).toHaveBeenCalledWith(portablePaths, {
       stage: "load-options",
       code: "UNAVAILABLE",
+      name: "DesktopWiringError",
     });
+    expect(runtimeStartupFailureCode(Object.assign(new Error("private"), { code: "ERR_MODULE_NOT_FOUND" }))).toBe("ERR_MODULE_NOT_FOUND");
     expect(runtimeStartupFailureCode(Object.assign(new Error("private"), { code: "ENOENT" }))).toBe("UNKNOWN");
+    expect(runtimeStartupFailureName(new TypeError("private"))).toBe("TypeError");
   });
 
   it("does not statically load normal production wiring from the entry module", async () => {
