@@ -47,6 +47,13 @@ test("DATA-005 policy separates USB business data from host candidates", async (
   assert.ok(policy.hostCandidateKinds.includes("fixed-drive"));
   assert.ok(policy.hostCandidateKinds.includes("legacy-userprofile"));
   assert.equal(policy.markerFile, ".uclaw-residue-owner.json");
+  assert.equal(policy.wx10Wx12EvidenceBoundary.codeMockLocalhostEligible, false);
+  assert.deepEqual(policy.wx10Wx12EvidenceBoundary.requiredEvidenceClasses, [
+    "real-windows", "real-usb", "real-gateway", "real-tencent-ilink", "real-phone",
+  ]);
+  for (const id of ["first-scan-phone-confirmation", "gateway-connected", "text-inbound", "text-outbound", "auth-expired-rescan", "logout-clears-credentials", "usb-removal", "drive-letter-change", "host-residue"]) {
+    assert.ok(policy.wx10Wx12EvidenceBoundary.requiredCases.includes(id), id);
+  }
 });
 
 test("candidate inventory covers AppData, TEMP, fixed drives, and legacy USERPROFILE", () => {
@@ -167,6 +174,29 @@ test("PowerShell gate records real Windows and physical USB blockers", async () 
   assert.match(source, /Get-PSDrive[\s\S]*Root/);
   assert.match(source, /wechat-host-residue\.mjs/);
   assert.doesNotMatch(source, /Remove-Item[\s\S]*WeChat Files|Tencent\\WeChat/i);
+});
+
+test("WX-10/WX-12 collector is fail-closed and rejects non-real evidence classes", async () => {
+  const acceptanceUrl = new URL("../tests/windows/wechat-real-acceptance.ps1", import.meta.url);
+  const templateUrl = new URL("../tests/windows/wechat-real-acceptance.template.json", import.meta.url);
+  const checklistUrl = new URL("../../docs/验收记录/WX-10-WX-12-真机验收清单.md", import.meta.url);
+  const [source, template, checklist] = await Promise.all([
+    readFile(acceptanceUrl, "utf8"),
+    readFile(templateUrl, "utf8"),
+    readFile(checklistUrl, "utf8"),
+  ]);
+  assert.match(source, /Set-StrictMode -Version Latest/);
+  assert.match(source, /LOCAL_NODE_MUST_BE_ABSENT/);
+  assert.match(source, /PHYSICAL_USB_REQUIRED/);
+  assert.match(source, /real-tencent-ilink/);
+  assert.match(source, /codeOrMock = 'not-eligible'/);
+  assert.equal(JSON.parse(template).status, "blocked");
+  assert.equal(JSON.parse(template).evidenceClass, "needs-input");
+  for (const phrase of ["Win10 x64", "Win11 x64", "普通手机微信", "真实腾讯 iLink", "真实 OpenClaw Gateway", "二启", "授权失效", "拔出", "换盘符", "宿主机"]) {
+    assert.match(checklist, new RegExp(phrase));
+  }
+  assert.match(checklist, /localhost/);
+  assert.match(checklist, /needs-input/);
 });
 
 test("Windows launcher delegates plugin repair to the controlled desktop bootstrap", async () => {

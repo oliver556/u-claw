@@ -62,5 +62,10 @@
     "releasePluginArtifactInCheckout": "absent",
     "status": "needs-input",
     "requiredInput": "A released Windows bundle containing the exact plugin artifact and evidence from a real Windows host and physical USB drive."
+  },
+  "wx10Wx12EvidenceBoundary": {
+    "codeMockLocalhostEligible": false,
+    "requiredEvidenceClasses": ["real-windows", "real-usb", "real-gateway", "real-tencent-ilink", "real-phone"],
+    "requiredCases": ["plugin-missing-repair", "plugin-tamper-repair", "first-scan-phone-confirmation", "gateway-connected", "text-inbound", "text-outbound", "second-launch-recovery", "disconnect-reconnect", "auth-expired-rescan", "logout-clears-credentials", "usb-removal", "drive-letter-change", "host-residue"]
   }
 }

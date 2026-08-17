@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "caseId": "first-scan-phone-confirmation",
+  "status": "blocked",
+  "evidenceClass": "needs-input",
+  "assertions": [],
+  "artifacts": [],
+  "blockers": [
+    { "code": "REAL_EVIDENCE_REQUIRED", "message": "Replace with redacted evidence from a real Windows + physical USB + Tencent iLink + phone run." }
+  ]
+}
