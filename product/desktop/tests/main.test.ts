@@ -10,6 +10,31 @@ import { ACTIVATION_ONLY_CAPABILITIES, assertActivationOnlyCapabilities, bootstr
 import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
+  it("clears stale readiness before normal startup and records only a completed real runtime", async () => {
+    const source = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+    const start = source.slice(source.indexOf("export async function startElectronMain("), source.indexOf("export async function startActivationMain("));
+    const clearIndex = start.indexOf("await clearRuntimeReadiness(portablePaths.dataDir)");
+    const runIndex = start.indexOf("const window = await runDesktopMain<DesktopWindow>");
+    const nullCheckIndex = start.indexOf("if (window !== null)");
+    const writeIndex = start.indexOf("await writeRuntimeReadiness(portablePaths.dataDir");
+
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(start.indexOf("requireModelSourceExecutors"));
+    expect(runIndex).toBeGreaterThan(clearIndex);
+    expect(nullCheckIndex).toBeGreaterThan(runIndex);
+    expect(writeIndex).toBeGreaterThan(nullCheckIndex);
+    expect(start).toContain("productVersion: app.getVersion()");
+    expect(start).toContain("runtimeVersion: LOCKED_OPENCLAW_VERSION");
+  });
+
+  it("invalidates stale readiness but never records activation-only startup", async () => {
+    const source = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+    const activation = source.slice(source.indexOf("export async function startActivationMain("), source.indexOf("export function createProductionActivationCoordinator("));
+
+    expect(activation).toContain("await clearRuntimeReadiness(portablePaths.dataDir)");
+    expect(activation).not.toContain("writeRuntimeReadiness");
+  });
+
   it("passes explicit startup modes to normal and activation windows", async () => {
     const source = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
     expect(source).toMatch(/createMainWindow\(\{[\s\S]*?startupMode: "normal"/);

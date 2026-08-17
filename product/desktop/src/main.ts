@@ -78,6 +78,7 @@ import { createImageOperationService } from "./images/image-operation-service.js
 import { createImageOperationDispatcher } from "./images/image-operation-dispatcher.js";
 import { createAttachmentCache } from "./attachments/attachment-cache.js";
 import { startAttachmentCleanup } from "./attachments/attachment-cleanup.js";
+import { clearRuntimeReadiness, writeRuntimeReadiness } from "./runtime/readiness-signal.js";
 
 interface ElectronWorkspaceShell {
   openPath(path: string): Promise<string>;
@@ -717,8 +718,10 @@ export async function startElectronMain(
   options: DesktopMainOptions,
   portablePaths: PortableDesktopPaths,
 ): Promise<void> {
+  await clearRuntimeReadiness(portablePaths.dataDir);
   const modelSourceExecutors = requireModelSourceExecutors(options.modelSourceExecutors);
   const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session: electronSession, shell } = await import("electron");
+  const productVersion = app.getVersion();
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const client = requireElectronClient(options.client);
   if (options.injectChatMessage === undefined) throw new Error("OpenClaw chat injection is required for local application actions.");
@@ -816,7 +819,7 @@ export async function startElectronMain(
   const mcp = createMcpStore({ dataDir: portablePaths.dataDir, runtimeAvailable: mcpRuntime.capability });
   const data = createProductionDataService(portablePaths, shell, consistencyCoordinator);
   const diagnosticsRuntime: DiagnosticsRuntimeInfo = {
-    productVersion: "0.1.0",
+    productVersion,
     openClawVersion: LOCKED_OPENCLAW_VERSION,
     gatewayStatus: "starting",
   };
@@ -880,7 +883,7 @@ export async function startElectronMain(
   const services: DesktopDomainServiceAccessor = {
     get: <T>(name: string) => domainServices.get(name) as T | undefined,
   };
-  await runDesktopMain<DesktopWindow>(runtimeOptions, {
+  const window = await runDesktopMain<DesktopWindow>(runtimeOptions, {
     app,
     createWindow: (registerIpc, signal) => {
       signal.throwIfAborted();
@@ -1001,11 +1004,19 @@ export async function startElectronMain(
       };
     },
   });
+  if (window !== null) {
+    await writeRuntimeReadiness(portablePaths.dataDir, {
+      productVersion: app.getVersion(),
+      runtimeVersion: LOCKED_OPENCLAW_VERSION,
+      gatewayReady: true,
+    });
+  }
 }
 
 export async function startActivationMain(
   portablePaths: PortableDesktopPaths,
 ): Promise<void> {
+  await clearRuntimeReadiness(portablePaths.dataDir);
   const { app, BrowserWindow, ipcMain, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const devTools = !app.isPackaged;
