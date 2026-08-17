@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -125,7 +126,10 @@ describe("Electron production entry", () => {
     await expect(runElectronEntry({
       argv: ["electron", "app", "--uclaw-startup-mode=normal"],
       preparePortableDesktop: vi.fn(async () => portablePaths),
-      loadOptions: vi.fn(async () => { throw root; }),
+      loadOptions: vi.fn(async (onWiringStage) => {
+        onWiringStage?.("plugin-runtime");
+        throw root;
+      }),
       startElectronMain: vi.fn(),
       startActivationMain: vi.fn(),
       recordStartupFailure,
@@ -133,12 +137,21 @@ describe("Electron production entry", () => {
 
     expect(recordStartupFailure).toHaveBeenCalledWith(portablePaths, {
       stage: "load-options",
+      wiringStage: "plugin-runtime",
       code: "UNAVAILABLE",
       name: "DesktopWiringError",
     });
     expect(runtimeStartupFailureCode(Object.assign(new Error("private"), { code: "ERR_MODULE_NOT_FOUND" }))).toBe("ERR_MODULE_NOT_FOUND");
     expect(runtimeStartupFailureCode(Object.assign(new Error("private"), { code: "ENOENT" }))).toBe("UNKNOWN");
+    expect(runtimeStartupFailureCode({ code: "ERR_PRIVATE_SECRET" })).toBe("UNKNOWN");
     expect(runtimeStartupFailureName(new TypeError("private"))).toBe("TypeError");
+    expect(runtimeStartupFailureName({ name: "TypeError", message: "private" })).toBe("TypeError");
+    expect(runtimeStartupFailureName({ name: "PrivateRuntimeError", message: "private" })).toBe("UnknownError");
+    const crossRealmError = runInNewContext("new TypeError('private')") as unknown;
+    expect(crossRealmError).not.toBeInstanceOf(Error);
+    expect(runtimeStartupFailureName(crossRealmError)).toBe("TypeError");
+    const hostile = Object.defineProperty({}, "name", { get: () => { throw new Error("private"); } });
+    expect(runtimeStartupFailureName(hostile)).toBe("UnknownError");
   });
 
   it("does not statically load normal production wiring from the entry module", async () => {
@@ -164,10 +177,20 @@ describe("Electron production entry", () => {
   });
 
   it("uses the repository production factory when no test wiring module is configured", async () => {
-    await expect(loadProductionDesktopOptions({})).rejects.toMatchObject({
+    const stages: string[] = [];
+    await expect(loadProductionDesktopOptions({}, (stage) => stages.push(stage))).rejects.toMatchObject({
       code: "UNCONFIGURED",
       causeDetails: { operation: "desktop.wiring" },
     });
+    expect(stages).toEqual(["development-environment", "production-module", "environment"]);
+  });
+
+  it("records production-module before a controlled dynamic import fails", async () => {
+    const stages: string[] = [];
+    await expect(loadProductionDesktopOptions({
+      UCLAW_DESKTOP_WIRING_MODULE: fileURLToPath(new URL("../package.json", import.meta.url)),
+    }, (stage) => stages.push(stage))).rejects.toBeDefined();
+    expect(stages).toEqual(["development-environment", "production-module"]);
   });
 
   it("rejects an absolute wiring module outside controlled runtime roots", async () => {

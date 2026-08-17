@@ -66,6 +66,7 @@ import {
   readDesktopWiringEnvironment,
 } from "./environment.js";
 import { composeDesktopDomainModules } from "./domain-modules.js";
+import type { RuntimeWiringStage } from "../runtime/readiness-signal.js";
 
 const REQUIRED_GATEWAY_METHODS = [
   "sessions.list",
@@ -411,9 +412,15 @@ async function resolveBundledSkillsRoot(env: NodeJS.ProcessEnv): Promise<string>
   throw new DesktopWiringError("UNAVAILABLE", "Portable Skill source is unavailable.");
 }
 
-export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<DesktopMainOptions> {
+export async function createDesktopMainOptions(
+  env: NodeJS.ProcessEnv,
+  onWiringStage: (stage: RuntimeWiringStage) => void = () => undefined,
+): Promise<DesktopMainOptions> {
+  onWiringStage("environment");
   const environment = await readDesktopWiringEnvironment(env);
+  onWiringStage("development-provider");
   const developmentProvider = readDevelopmentProvider(env);
+  onWiringStage("portable-skills");
   const bundledSkillsRoot = await resolveBundledSkillsRoot(env);
   const domains = new ProductionDomainRegistry();
   const attachmentCache = createAttachmentCache({ dataDir: environment.dataRoot });
@@ -422,6 +429,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   const openClawConfig = createOpenClawProviderConfigBackend({
     request: (method, params) => transport.router.request(method, params as never, z.unknown()),
   });
+  onWiringStage("provider-store");
   const storedProviders = createProviderStore({ dataDir: environment.dataRoot, openClawConfig });
   let providerNetworkSettings = await storedProviders.getNetworkForRuntime();
   const providers: ProviderStore = {
@@ -433,6 +441,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     },
   };
   const providerNetwork = createProviderNetworkService();
+  onWiringStage("plugin-runtime");
   const pluginRuntime = await createOpenClawCliPluginRuntime({
     runtimeRoot: environment.runtimeRoot,
     executable: environment.nodeExecutable,
@@ -443,6 +452,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   let gatewayProcessAlive = false;
   const openClawStateDir = dirname(environment.openClawConfig);
   const wechatPluginDir = join(openClawStateDir, "extensions", "openclaw-weixin");
+  onWiringStage("wechat-runtime");
   const wechatRuntime = createWechatPersonalRuntime({
     dataDir: openClawStateDir,
     pluginDir: wechatPluginDir,
@@ -473,9 +483,11 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     stateDir: openClawStateDir,
     baseEnvironment: env,
   });
+  onWiringStage("desktop-log");
   const desktopLog = createDesktopLogSink({ dataDir: environment.dataRoot, logsDir: join(environment.dataRoot, "diagnostics", "desktop-logs") });
   const gatewayDiagnostics = createGatewayLogSink({ dataDir: environment.dataRoot, logsDir: join(environment.dataRoot, "diagnostics", "desktop-logs") });
   await desktopLog.append("desktop-started").catch(() => undefined);
+  onWiringStage("domain-modules");
   const skillRuntime = createOpenClawSkillRuntime({
     request: (method, params, schema) => transport.router.request(method, params as never, schema),
   });
@@ -623,6 +635,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   let disposed = false;
   let developmentProviderReady = false;
 
+  onWiringStage("options-complete");
   return {
     gatewayMediaToken: environment.gatewayToken,
     gatewayOrigin: () => transport.getOrigin(),

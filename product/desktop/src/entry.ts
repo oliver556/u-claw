@@ -13,6 +13,7 @@ import {
   clearRuntimeStartupFailure,
   writeRuntimeStartupFailure,
   type RuntimeStartupFailure,
+  type RuntimeWiringStage,
 } from "./runtime/readiness-signal.js";
 
 const WIRING_MODULE_ENV = "UCLAW_DESKTOP_WIRING_MODULE";
@@ -24,6 +25,8 @@ const DEVELOPMENT_ENV_KEYS = [
 const RUNTIME_STARTUP_FAILURE_CODES = new Set([
   "UNCONFIGURED", "UNAVAILABLE", "INVALID_ARGUMENT", "FORBIDDEN", "AUTH_FAILED",
   "PROTOCOL_ERROR", "UNSUPPORTED", "OFFLINE", "CONFLICT",
+  "ERR_MODULE_NOT_FOUND", "ERR_PACKAGE_PATH_NOT_EXPORTED", "ERR_INVALID_PACKAGE_CONFIG",
+  "ERR_UNKNOWN_FILE_EXTENSION",
 ]);
 const RUNTIME_STARTUP_FAILURE_NAMES = new Set([
   "Error", "TypeError", "ReferenceError", "SyntaxError", "RangeError", "AggregateError", "DesktopWiringError",
@@ -46,17 +49,23 @@ export async function loadDevelopmentEnvironment(
 }
 
 interface ProductionWiringModule {
-  createDesktopMainOptions?: (env: NodeJS.ProcessEnv) => DesktopMainOptions | Promise<DesktopMainOptions>;
+  createDesktopMainOptions?: (
+    env: NodeJS.ProcessEnv,
+    onWiringStage?: (stage: RuntimeWiringStage) => void,
+  ) => DesktopMainOptions | Promise<DesktopMainOptions>;
 }
 
 export async function loadProductionDesktopOptions(
   environment?: NodeJS.ProcessEnv,
+  onWiringStage?: (stage: RuntimeWiringStage) => void,
 ): Promise<DesktopMainOptions> {
+  onWiringStage?.("development-environment");
   const effectiveEnvironment = environment ?? await loadDevelopmentEnvironment(process.env);
+  onWiringStage?.("production-module");
   const modulePath = effectiveEnvironment[WIRING_MODULE_ENV];
   if (!modulePath) {
     const { createDesktopMainOptions } = await import("./wiring/create-desktop-main-options.js");
-    return createDesktopMainOptions(effectiveEnvironment);
+    return createDesktopMainOptions(effectiveEnvironment, onWiringStage);
   }
   if (!isAbsolute(modulePath)) {
     throw new Error("Desktop production wiring must use an absolute path within controlled runtime roots.");
@@ -81,13 +90,13 @@ export async function loadProductionDesktopOptions(
   if (typeof wiring.createDesktopMainOptions !== "function") {
     throw new Error("Desktop wiring module must export createDesktopMainOptions().");
   }
-  return wiring.createDesktopMainOptions(effectiveEnvironment);
+  return wiring.createDesktopMainOptions(effectiveEnvironment, onWiringStage);
 }
 
 export interface ElectronEntryDependencies {
   argv: readonly string[];
   preparePortableDesktop(): Promise<PortableDesktopPaths>;
-  loadOptions(): Promise<DesktopMainOptions>;
+  loadOptions(onWiringStage?: (stage: RuntimeWiringStage) => void): Promise<DesktopMainOptions>;
   startActivationMain(paths: PortableDesktopPaths): Promise<void>;
   startElectronMain(options: DesktopMainOptions, paths: PortableDesktopPaths): Promise<void>;
   clearStartupFailure?(paths: PortableDesktopPaths): Promise<void>;
@@ -95,16 +104,23 @@ export interface ElectronEntryDependencies {
 }
 
 export function runtimeStartupFailureCode(error: unknown): string {
-  if (typeof error !== "object" || error === null || !("code" in error)) return "UNKNOWN";
-  const code = (error as { code?: unknown }).code;
-  return typeof code === "string" && (RUNTIME_STARTUP_FAILURE_CODES.has(code) || /^ERR_[A-Z0-9_]{1,59}$/u.test(code))
-    ? code
-    : "UNKNOWN";
+  const code = safeStringProperty(error, "code");
+  return code !== undefined && RUNTIME_STARTUP_FAILURE_CODES.has(code) ? code : "UNKNOWN";
 }
 
 export function runtimeStartupFailureName(error: unknown): string {
-  if (!(error instanceof Error)) return "UnknownError";
-  return RUNTIME_STARTUP_FAILURE_NAMES.has(error.name) ? error.name : "UnknownError";
+  const name = safeStringProperty(error, "name");
+  return name !== undefined && RUNTIME_STARTUP_FAILURE_NAMES.has(name) ? name : "UnknownError";
+}
+
+function safeStringProperty(error: unknown, property: "code" | "name"): string | undefined {
+  if ((typeof error !== "object" && typeof error !== "function") || error === null) return undefined;
+  try {
+    const value = Reflect.get(error, property);
+    return typeof value === "string" ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function prepareProductionPortableDesktop(): Promise<PortableDesktopPaths> {
@@ -116,7 +132,7 @@ export async function runElectronEntry(
   dependencies: ElectronEntryDependencies = {
     argv: process.argv,
     preparePortableDesktop: prepareProductionPortableDesktop,
-    loadOptions: loadProductionDesktopOptions,
+    loadOptions: (onWiringStage) => loadProductionDesktopOptions(undefined, onWiringStage),
     startActivationMain,
     startElectronMain,
     clearStartupFailure: (paths) => clearRuntimeStartupFailure(paths.dataDir),
@@ -131,11 +147,13 @@ export async function runElectronEntry(
     return;
   }
   let options: DesktopMainOptions;
+  let wiringStage: RuntimeWiringStage | undefined;
   try {
-    options = await dependencies.loadOptions();
+    options = await dependencies.loadOptions((stage) => { wiringStage = stage; });
   } catch (error) {
     await dependencies.recordStartupFailure?.(paths, {
       stage: "load-options",
+      ...(wiringStage === undefined ? {} : { wiringStage }),
       code: runtimeStartupFailureCode(error),
       name: runtimeStartupFailureName(error),
     }).catch(() => undefined);

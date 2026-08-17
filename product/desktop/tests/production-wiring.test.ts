@@ -311,6 +311,25 @@ describe("production desktop wiring", () => {
     });
   });
 
+  it("reports fixed safe stages while loading production options", async () => {
+    const stages: string[] = [];
+
+    const options = await createDesktopMainOptions(productionEnv, (stage) => stages.push(stage));
+
+    expect(stages).toEqual([
+      "environment",
+      "development-provider",
+      "portable-skills",
+      "provider-store",
+      "plugin-runtime",
+      "wechat-runtime",
+      "desktop-log",
+      "domain-modules",
+      "options-complete",
+    ]);
+    await options.dispose?.();
+  });
+
   it("accepts the existing portable short token without weakening character validation", async () => {
     const configPath = productionEnv.OPENCLAW_CONFIG_PATH!;
     productionEnv.UNRELATED_HOST_SECRET = "must-not-reach-gateway";

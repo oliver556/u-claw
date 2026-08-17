@@ -43,7 +43,17 @@ function Read-SafeStartupFailure([string]$path) {
         $value = [IO.File]::ReadAllText($path) | ConvertFrom-Json
         if ($value.schemaVersion -ne 1) { return $null }
         if (@('load-options', 'start-desktop') -notcontains [string]$value.stage) { return $null }
-        if ([string]$value.code -notmatch '^[A-Z][A-Z0-9_]{1,63}$') { return $null }
+        if ($value.PSObject.Properties.Name -contains 'wiringStage' -and @(
+            'development-environment', 'production-module',
+            'environment', 'development-provider', 'portable-skills', 'provider-store',
+            'plugin-runtime', 'wechat-runtime', 'desktop-log', 'domain-modules', 'options-complete'
+        ) -notcontains [string]$value.wiringStage) { return $null }
+        if (@(
+            'UNCONFIGURED', 'UNAVAILABLE', 'INVALID_ARGUMENT', 'FORBIDDEN', 'AUTH_FAILED',
+            'PROTOCOL_ERROR', 'UNSUPPORTED', 'OFFLINE', 'CONFLICT', 'UNKNOWN',
+            'ERR_MODULE_NOT_FOUND', 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+            'ERR_INVALID_PACKAGE_CONFIG', 'ERR_UNKNOWN_FILE_EXTENSION'
+        ) -notcontains [string]$value.code) { return $null }
         if (@('Error', 'TypeError', 'ReferenceError', 'SyntaxError', 'RangeError', 'AggregateError', 'DesktopWiringError', 'UnknownError') -notcontains [string]$value.name) { return $null }
         return $value
     }
@@ -67,6 +77,7 @@ function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$fai
     $gatewayHealthReady = @($gatewayRecords | Where-Object { $_.event -eq 'gateway-health-ready' }).Count -gt 0
     $gatewayCapabilityReady = @($gatewayRecords | Where-Object { $_.event -eq 'gateway-capability-ready' }).Count -gt 0
     $startupStage = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.stage }
+    $startupWiringStage = if ($null -eq $startupRecord -or -not ($startupRecord.PSObject.Properties.Name -contains 'wiringStage')) { $null } else { [string]$startupRecord.wiringStage }
     $startupErrorCode = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.code }
     $startupErrorName = if ($null -eq $startupRecord) { $null } else { [string]$startupRecord.name }
     $gatewayPhase = $null
@@ -95,6 +106,7 @@ function Write-SanitizedDiagnostic([bool]$readyResult, [AllowNull()][string]$fai
         gatewayHealthReady = $gatewayHealthReady
         gatewayCapabilityReady = $gatewayCapabilityReady
         startupStage = $startupStage
+        startupWiringStage = $startupWiringStage
         startupErrorCode = $startupErrorCode
         startupErrorName = $startupErrorName
     }

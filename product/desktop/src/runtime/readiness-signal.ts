@@ -10,9 +10,37 @@ export interface RuntimeReadiness {
 
 export interface RuntimeStartupFailure {
   stage: "load-options" | "start-desktop";
+  wiringStage?: RuntimeWiringStage;
   code: string;
   name: string;
 }
+
+export type RuntimeWiringStage =
+  | "development-environment"
+  | "production-module"
+  | "environment"
+  | "development-provider"
+  | "portable-skills"
+  | "provider-store"
+  | "plugin-runtime"
+  | "wechat-runtime"
+  | "desktop-log"
+  | "domain-modules"
+  | "options-complete";
+
+const RUNTIME_WIRING_STAGES: readonly RuntimeWiringStage[] = [
+  "development-environment",
+  "production-module",
+  "environment",
+  "development-provider",
+  "portable-skills",
+  "provider-store",
+  "plugin-runtime",
+  "wechat-runtime",
+  "desktop-log",
+  "domain-modules",
+  "options-complete",
+];
 
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/u;
 
@@ -114,6 +142,7 @@ export async function writeRuntimeStartupFailure(
 ): Promise<void> {
   if (
     !["load-options", "start-desktop"].includes(value.stage) ||
+    (value.wiringStage !== undefined && !RUNTIME_WIRING_STAGES.includes(value.wiringStage)) ||
     !/^[A-Z][A-Z0-9_]{1,63}$/u.test(value.code) ||
     !/^[A-Za-z][A-Za-z0-9]{1,63}$/u.test(value.name)
   ) {
@@ -130,7 +159,13 @@ export async function writeRuntimeStartupFailure(
   let replaced = false;
   try {
     handle = await open(temporary, "wx", 0o600);
-    await handle.writeFile(`${JSON.stringify({ schemaVersion: 1, stage: value.stage, code: value.code, name: value.name })}\n`, "utf8");
+    await handle.writeFile(`${JSON.stringify({
+      schemaVersion: 1,
+      stage: value.stage,
+      ...(value.wiringStage === undefined ? {} : { wiringStage: value.wiringStage }),
+      code: value.code,
+      name: value.name,
+    })}\n`, "utf8");
     await handle.sync();
     await handle.close();
     handle = undefined;
