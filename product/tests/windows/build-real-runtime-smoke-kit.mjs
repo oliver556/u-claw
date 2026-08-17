@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, createPublicKey } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { cp, lstat, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { parseArgs } from "node:util";
@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { fetchRuntimeArtifact } from "../../packaging/fetch-runtime-artifact.mjs";
 import { buildWindowsValidationKit } from "../../scripts/build-windows-validation-kit.mjs";
+import { copyFixtureLicense } from "./copy-fixture-license.mjs";
 
 const execFileAsync = promisify(execFile);
 const productRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -163,10 +164,7 @@ async function main() {
 
       const usbRoot = path.join(outputDir, "U-Claw-test-USB");
       const licenseDir = path.join(usbRoot, ".uclaw", "license");
-      await runStage("fixture-copy", async () => {
-        await mkdir(licenseDir, { recursive: true });
-        await cp(fixtureLicense, licenseDir, { recursive: true, force: false, errorOnExist: true });
-      });
+      await runStage("fixture-copy", () => copyFixtureLicense(fixtureLicense, licenseDir));
       await runStage("fixture-launcher", () => buildFixtureLauncher(
         path.join(usbRoot, "U-Claw.exe"),
         path.join(outputDir, "test-public.pem"),

@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createPublicKey, verify } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+
+import { copyFixtureLicense } from "../tests/windows/copy-fixture-license.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -81,6 +83,7 @@ test("Windows CI launches the real runtime offline", async () => {
     readFile(realRuntimeKitUrl, "utf8"),
   ]);
   assert.match(workflow, /build-real-runtime-smoke-kit\.mjs/u);
+  assert.match(workflow, /copy-fixture-license\.mjs/u);
   assert.equal((workflow.match(/\.\\product\\tests\\windows\\real-runtime-smoke\.ps1/gu) ?? []).length, 2);
   assert.match(workflow, /shell:\s*powershell\b[\s\S]*real-runtime-smoke\.ps1/u);
   assert.match(workflow, /shell:\s*pwsh\b[\s\S]*real-runtime-smoke\.ps1/u);
@@ -131,6 +134,28 @@ test("real runtime smoke failures emit only a fixed safe stage code", async () =
         return true;
       },
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("fixture license copy is exact, exclusive, and rejects unexpected input", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-fixture-license-copy-"));
+  try {
+    const source = path.join(root, "source");
+    const target = path.join(root, "target");
+    await mkdir(source);
+    const entries = [".startup-credential.json", ".status-response.json", "license.json"];
+    await Promise.all(entries.map(entry => writeFile(path.join(source, entry), entry)));
+
+    await copyFixtureLicense(source, target);
+
+    assert.deepEqual((await readdir(target)).sort(), entries);
+    await assert.rejects(copyFixtureLicense(source, target), /already exists/i);
+    await writeFile(path.join(source, "unexpected.json"), "unexpected");
+    await rm(target, { recursive: true });
+    await assert.rejects(copyFixtureLicense(source, target), /unexpected/i);
+    await assert.rejects(readFile(target), { code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
