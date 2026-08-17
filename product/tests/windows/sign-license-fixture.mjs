@@ -42,6 +42,7 @@ async function main() {
   };
   const license = {
     schemaVersion: 1,
+    usernameId: "usr_windows_fixture_001",
     deviceId: credential.deviceId,
     licenseId: credential.licenseId,
     usbFingerprint: { scheme: "uclaw-usb-v1", sha256: "f".repeat(64) },
@@ -52,13 +53,15 @@ async function main() {
     },
     notBefore: new Date(now - 5 * 60_000).toISOString(),
     expiresAt: new Date(now + 60 * 60_000).toISOString(),
+    revision: 1,
     signature: { algorithm: "ed25519", keyId, value: "" },
   };
   const payload = [
-    "uclaw-startup-license-v1", license.schemaVersion, license.deviceId, license.licenseId,
+    "uclaw-startup-license-v1", license.schemaVersion, license.signature.keyId,
+    license.usernameId, license.deviceId, license.licenseId,
     license.usbFingerprint.scheme, license.usbFingerprint.sha256,
-    license.startupSecretProof.algorithm, license.startupSecretProof.startupSecretSalt, license.startupSecretProof.startupSecretHash,
-    license.notBefore, license.expiresAt, license.signature.algorithm, license.signature.keyId,
+    license.startupSecretProof.startupSecretSalt, license.startupSecretProof.startupSecretHash,
+    license.notBefore, license.expiresAt, license.revision,
   ];
   license.signature.value = sign(null, Buffer.from(JSON.stringify(payload), "utf8"), privateKey).toString("base64");
   const checkedAt = new Date(now).toISOString();
