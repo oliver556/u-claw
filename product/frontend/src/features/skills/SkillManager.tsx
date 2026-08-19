@@ -108,6 +108,7 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
   const [stale, setStale] = useState(false);
   const [detail, setDetail] = useState<SkillDetail>();
   const [detailPendingSlug, setDetailPendingSlug] = useState<string | null>(null);
+  const [detailPendingMode, setDetailPendingMode] = useState<"view" | "confirm" | null>(null);
   const [enableConfirmation, setEnableConfirmation] = useState<SkillCatalogItem>();
   const [detailMode, setDetailMode] = useState<"view" | "confirm">("view");
   const [action, setAction] = useState<"install" | "update" | "enable">("install");
@@ -120,6 +121,7 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
   const [proposalForm, setProposalForm] = useState<ProposalForm>(null);
   const [proposalRun, setProposalRun] = useState<SkillProposalRevisionRun>();
   const [mutationPending, setMutationPending] = useState(false);
+  const [mutationPendingTarget, setMutationPendingTarget] = useState<string | null>(null);
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
   const [createContent, setCreateContent] = useState("");
@@ -215,16 +217,22 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
     setError(messageOf(caught, fallback));
   };
 
-  const beginMutation = () => {
+  /** Acquires the synchronous mutation gate before React can render a disabled control. */
+  const beginMutation = (target: string | null = null) => {
     if (mutationPendingRef.current) return false;
     mutationPendingRef.current = true;
     setMutationPending(true);
+    setMutationPendingTarget(target);
     return true;
   };
 
+  /** Releases mutation feedback after Desktop accepts or rejects the start request. */
   const endMutation = () => {
     mutationPendingRef.current = false;
-    if (mounted.current) setMutationPending(false);
+    if (mounted.current) {
+      setMutationPending(false);
+      setMutationPendingTarget(null);
+    }
   };
 
   /** 串行读取技能详情，防止重复点击或跨卡片请求改变当前操作目标。 */
@@ -233,6 +241,7 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
     const sequence = ++detailLoadSequence.current;
     detailPendingSlugRef.current = item.slug;
     setDetailPendingSlug(item.slug);
+    setDetailPendingMode(nextMode);
     setError("");
     try {
       const response = await requireInvoke()(request("skills.detail", { slug: item.slug, expectedVersion: item.version }));
@@ -249,7 +258,10 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
     } finally {
       if (sequence === detailLoadSequence.current) {
         detailPendingSlugRef.current = null;
-        if (mounted.current) setDetailPendingSlug(null);
+        if (mounted.current) {
+          setDetailPendingSlug(null);
+          setDetailPendingMode(null);
+        }
       }
     }
   };
@@ -306,9 +318,10 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
     void poll(operation);
   };
 
+  /** Starts a confirmed lifecycle operation with immediate loading and duplicate-submit protection. */
   const confirmAction = async () => {
     const selected = action === "enable" ? enableConfirmation : detail;
-    if (!selected || !confirmed) return;
+    if (!selected || !confirmed || !beginMutation(selected.slug)) return;
     try {
       const method = action === "install" ? "skills.install" : action === "update" ? "skills.update" : "skills.set-enabled";
       const confirmation = {
@@ -325,15 +338,19 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
       setEnableConfirmation(undefined);
       setError("");
     } catch (caught) { showError(caught, "技能操作失败"); }
+    finally { endMutation(); }
   };
 
+  /** Starts a direct lifecycle operation while keeping every conflicting control locked. */
   const simpleAction = async (item: SkillCatalogItem, method: "skills.uninstall" | "skills.set-enabled", enabled = false) => {
+    if (!beginMutation(item.slug)) return;
     try {
       const params = method === "skills.uninstall" ? { slug: item.slug } : { slug: item.slug, enabled, confirmation: null };
       const response = await requireInvoke()(request(method, params));
       startOperation(requireSuccess<SkillOperation>(response, method));
       setError("");
     } catch (caught) { showError(caught, "技能操作失败"); }
+    finally { endMutation(); }
   };
 
   const toggleAction = (item: SkillCatalogItem) => {
@@ -491,17 +508,20 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
           const operation = operations[item.slug];
           const detailRequestPending = detailPendingSlug !== null;
           const activeDetailRequest = detailPendingSlug === item.slug;
-          const busy = detailRequestPending || operation?.state === "queued" || operation?.state === "running";
+          const viewRequestPending = activeDetailRequest && detailPendingMode === "view";
+          const confirmationRequestPending = activeDetailRequest && detailPendingMode === "confirm";
+          const startRequestPending = mutationPendingTarget === item.slug;
+          const busy = detailRequestPending || mutationPending || operation?.state === "queued" || operation?.state === "running";
           const identity = <div className="skill-identity"><div><strong>{item.name}</strong><span className={`risk-${item.risk}`}>{riskLabel[item.risk]}</span></div><p>{item.description}</p><small>{item.slug} · v{item.version}</small>{publicCatalog ? <div className="skill-marketplace-meta"><span>{item.ownerName ?? "未知作者"}</span>{item.downloads === undefined ? null : <span><Download />{item.downloads}</span>}{item.stars === undefined ? null : <span><Star />{item.stars}</span>}{item.requiresKey ? <span><KeyRound />API Key</span> : null}</div> : null}</div>;
           return <article className="skill-row" key={item.slug}>
             {publicCatalog ? <button type="button" className="skill-marketplace-detail-trigger" aria-label={`打开技能详情 ${item.name}`} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}><SkillLogo name={item.name} logoUrl={item.logoUrl} className="skill-marketplace-logo" />{identity}{activeDetailRequest ? <span className="skill-detail-pending" role="status"><RefreshCw className="spin" />正在读取详情</span> : null}</button> : identity}
             <div className="skill-permissions">{item.permissions.map((permission) => <span key={`${permission.kind}-${permission.target}`}>{permissionKindLabel[permission.kind]} · {permission.target}</span>)}</div>
             <div className="skill-actions">
-              {publicCatalog ? <Button size="small" aria-label={`查看详情 ${item.name}`} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}>详情</Button> : <button type="button" aria-label={`查看详情 ${item.name}`} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}>详情</button>}
-              {item.installedVersion === null ? publicCatalog ? <Button size="small" type="primary" aria-label={`安装 ${item.name}`} disabled={busy} icon={<Download />} onClick={() => void openDetail(item, "confirm", "install")}>安装</Button> : <button type="button" aria-label={`安装 ${item.name}`} disabled={busy} onClick={() => void openDetail(item, "confirm", "install")}><Download />安装</button> : <>
-                {item.updateAvailable ? publicCatalog ? <Button size="small" type="primary" aria-label={`更新 ${item.name}`} disabled={busy} icon={<RefreshCw />} onClick={() => void openDetail(item, "confirm", "update")}>更新</Button> : <button type="button" aria-label={`更新 ${item.name}`} disabled={busy} onClick={() => void openDetail(item, "confirm", "update")}><RefreshCw />更新</button> : null}
+              {publicCatalog ? <Button size="small" aria-label={`查看详情 ${item.name}`} aria-busy={viewRequestPending} loading={viewRequestPending} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}>详情</Button> : <button type="button" aria-label={`查看详情 ${item.name}`} aria-busy={viewRequestPending} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}>详情</button>}
+              {item.installedVersion === null ? publicCatalog ? <Button size="small" type="primary" aria-label={`安装 ${item.name}`} aria-busy={confirmationRequestPending} loading={confirmationRequestPending} disabled={busy} icon={<Download />} onClick={() => void openDetail(item, "confirm", "install")}>安装</Button> : <button type="button" aria-label={`安装 ${item.name}`} aria-busy={confirmationRequestPending} disabled={busy} onClick={() => void openDetail(item, "confirm", "install")}><Download />安装</button> : <>
+                {item.updateAvailable ? publicCatalog ? <Button size="small" type="primary" aria-label={`更新 ${item.name}`} aria-busy={confirmationRequestPending} loading={confirmationRequestPending} disabled={busy} icon={<RefreshCw />} onClick={() => void openDetail(item, "confirm", "update")}>更新</Button> : <button type="button" aria-label={`更新 ${item.name}`} aria-busy={confirmationRequestPending} disabled={busy} onClick={() => void openDetail(item, "confirm", "update")}><RefreshCw />更新</button> : null}
                 <label className="skill-switch"><input type="checkbox" role="switch" aria-label={`${item.enabled ? "禁用" : "启用"} ${item.name}`} checked={item.enabled} disabled={busy} onChange={() => toggleAction(item)} /><span>{item.enabled ? "已启用" : "已禁用"}</span></label>
-                {publicCatalog ? <Button size="small" danger aria-label={`卸载 ${item.name}`} disabled={busy} icon={<Trash2 />} onClick={() => void simpleAction(item, "skills.uninstall")}>卸载</Button> : <button type="button" aria-label={`卸载 ${item.name}`} disabled={busy} onClick={() => void simpleAction(item, "skills.uninstall")}><Trash2 />卸载</button>}
+                {publicCatalog ? <Button size="small" danger aria-label={`卸载 ${item.name}`} aria-busy={startRequestPending} loading={startRequestPending} disabled={busy} icon={<Trash2 />} onClick={() => void simpleAction(item, "skills.uninstall")}>卸载</Button> : <button type="button" aria-label={`卸载 ${item.name}`} aria-busy={startRequestPending} disabled={busy} onClick={() => void simpleAction(item, "skills.uninstall")}><Trash2 />卸载</button>}
               </>}
             </div>
             {operation ? <div className={`skill-progress ${operation.state}`}><progress aria-label={`${item.name}操作进度`} aria-valuenow={operation.progress} value={operation.progress} max="100" /><span>{operation.progress}%</span><span>{operation.state === "failed" ? "失败，可重试" : operation.state === "succeeded" ? "完成" : "处理中"}</span>{operation.error ? <span>{operation.error}</span> : null}</div> : null}
@@ -568,8 +588,8 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
     {dialogSkill && !(publicCatalog && detailMode === "view") ? <div className="skill-dialog-backdrop"><div className="skill-dialog" role="dialog" aria-modal="true" aria-label={detailMode === "view" ? `技能详情 ${dialogSkill.name}` : `确认${actionLabel}${dialogSkill.name}`}>
       <header>{detailMode === "confirm" ? <AlertTriangle /> : null}<div><strong>{detailMode === "view" ? dialogSkill.name : `${riskLabel[dialogSkill.risk]}权限确认`}</strong><span>{detailMode === "view" ? `v${dialogSkill.version} · ${dialogSkill.categories.map(skillCategoryLabel).join(", ")}` : dialogSkill.name}</span></div></header>
       <div className="skill-dialog-permissions">{dialogSkill.permissions.map((permission) => <div key={`${permission.kind}-${permission.target}`}><strong>{permissionKindLabel[permission.kind]} · {permission.target}</strong><span>{permission.reason}</span><em className={`risk-${permission.risk}`}>{riskLabel[permission.risk]}</em></div>)}</div>
-      {detailMode === "view" && detail ? <div className="skill-detail-meta"><span>来源 · {detail.source.provider}</span><span>{detail.source.provider === "skillhub" ? detail.source.url : detail.source.origin}</span><span>入口 · {detail.manifest.entry}</span></div> : detailMode === "confirm" ? <label className="skill-risk-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已了解{riskLabel[dialogSkill.risk]}权限</label> : null}
-      <footer><button type="button" onClick={() => { setDetail(undefined); setEnableConfirmation(undefined); }}>{detailMode === "view" ? "关闭" : "取消"}</button>{detailMode === "confirm" ? <button type="button" disabled={!confirmed} onClick={() => void confirmAction()}>确认{actionLabel}</button> : null}</footer>
+      {detailMode === "view" && detail ? <div className="skill-detail-meta"><span>来源 · {detail.source.provider}</span><span>{detail.source.provider === "skillhub" ? detail.source.url : detail.source.origin}</span><span>入口 · {detail.manifest.entry}</span></div> : detailMode === "confirm" ? <label className="skill-risk-confirm"><input type="checkbox" checked={confirmed} disabled={mutationPending} onChange={(event) => setConfirmed(event.target.checked)} />我已了解{riskLabel[dialogSkill.risk]}权限</label> : null}
+      <footer><Button onClick={() => { setDetail(undefined); setEnableConfirmation(undefined); }} disabled={mutationPending}>{detailMode === "view" ? "关闭" : "取消"}</Button>{detailMode === "confirm" ? <Button type="primary" aria-label={`确认${actionLabel}`} aria-busy={mutationPending} loading={mutationPending} disabled={!confirmed || mutationPending} onClick={() => void confirmAction()}>确认{actionLabel}</Button> : null}</footer>
     </div></div> : null}
   </section>;
 }

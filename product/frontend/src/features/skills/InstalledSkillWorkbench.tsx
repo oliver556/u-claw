@@ -1,6 +1,7 @@
 import type { LocalSkillDetail, SkillCatalogItem, SkillDetail, SkillIpcRequest, SkillOperation, SkillRuntimeItem } from "@uclaw/shared";
+import { Button } from "antd";
 import { AlertTriangle, Box, CircleCheck, Download, ExternalLink, Layers3, MoreHorizontal, PackageOpen, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { SafeMarkdown } from "../chat/MessageContent";
 import { SkillLogo } from "./SkillLogo";
@@ -26,6 +27,7 @@ export function skillMarkdownBody(markdown: string): string {
 
 export function InstalledSkillWorkbench() {
   const invoke = window.uclaw?.skills?.invoke;
+  const importPendingRef = useRef(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -106,8 +108,10 @@ export function InstalledSkillWorkbench() {
     } catch (caught) { setActionError(caught instanceof Error ? caught.message : "Skill ZIP 校验失败"); }
     finally { setImportState("idle"); }
   };
+  /** Starts one ZIP installation and exposes loading before Desktop returns an operation. */
   const installImport = async () => {
-    if (!importCandidate || !confirmed) return;
+    if (!importCandidate || !confirmed || importPendingRef.current) return;
+    importPendingRef.current = true;
     setActionError("");
     setImportState("installing");
     try {
@@ -121,7 +125,10 @@ export function InstalledSkillWorkbench() {
       setToast({ kind: "success", message: `${importCandidate.detail.name} 安装成功，OpenClaw 已完成读回` });
       await load();
     } catch (caught) { setActionError(caught instanceof Error ? caught.message : "Skill 安装失败"); }
-    finally { setImportState("idle"); }
+    finally {
+      importPendingRef.current = false;
+      setImportState("idle");
+    }
   };
   const cancelImport = async () => {
     const candidate = importCandidate;
@@ -157,7 +164,7 @@ export function InstalledSkillWorkbench() {
     {state === "ready" && filtered.length > 0 ? <div className="skill-table" role="table" aria-label="本地 Skill 列表"><div className="skill-table-head" role="row"><span>Skill</span><span>来源</span><span>版本</span><span>OpenClaw 状态</span><span>启用</span><span>操作</span></div>{filtered.map((item) => { const actual = runtimeFor(item.slug); const availability = actual?.availability ?? "not-detected"; const switchDisabled = togglingSlug === item.slug || !actual || actual.availability === "not-detected" || actual.availability === "conflict"; return <div className="skill-table-row" role="row" key={item.slug}><button type="button" className="skill-table-identity" aria-label={`打开 ${item.name}详情`} onClick={() => setSelected(item)}><SkillLogo name={item.name} logoUrl={item.logoUrl} /><div><strong>{item.name}{item.updateAvailable ? <small>可更新</small> : item.source.provider === "portable" ? <small>内置</small> : availability === "disabled" ? <small>已禁用</small> : null}</strong><span>{item.description}</span></div></button><span className="skill-table-meta">{sourceLabel(item)}<small>{sourceDetail(item)}</small></span><code>{item.installedVersion ?? item.version}</code><span className={`skill-status ${availability}`}>{availabilityLabel[availability]}<small>{availabilityDetail(actual)}</small></span><label className={`skill-native-switch${switchDisabled ? " disabled" : ""}`}><input type="checkbox" role="switch" aria-label={`${item.enabled ? "禁用" : "启用"} ${item.name}`} checked={item.enabled} disabled={switchDisabled} onChange={() => void toggle(item)} /><span /></label><button type="button" title="查看详情" aria-label={`查看 ${item.name}`} onClick={() => setSelected(item)}><MoreHorizontal /></button></div>; })}</div> : null}
     <div className="skill-security-note"><AlertTriangle /><span>ZIP 在本机校验并安装，不上传服务器。网络来源 Skill 统一按高风险确认。</span></div>
     {selected ? <div className="skill-drawer-backdrop" onMouseDown={() => setSelected(undefined)}><aside className="skill-drawer" role="dialog" aria-modal="true" aria-label={`Skill 详情 ${selected.name}`} onMouseDown={(event) => event.stopPropagation()}><header><div><span>SKILL DETAIL</span><h3>{selected.name}</h3><code>{selected.slug} · v{selected.version}</code></div><button aria-label="关闭 Skill 详情" onClick={() => setSelected(undefined)}><X /></button></header><div className="skill-drawer-body"><dl><dt>来源</dt><dd>{sourceLabel(selected)}</dd><dt>OpenClaw</dt><dd>{availabilityLabel[runtimeFor(selected.slug)?.availability ?? "not-detected"]}</dd><dt>权限风险</dt><dd>{selected.risk}</dd></dl>{runtimeFor(selected.slug)?.missing.bins.length ? <section><h4>缺少依赖</h4><p>{runtimeFor(selected.slug)?.missing.bins.join(", ")}</p></section> : null}{runtimeFor(selected.slug)?.conflicts.length ? <section><h4>冲突</h4><p>{runtimeFor(selected.slug)?.conflicts.join(", ")}</p></section> : null}<section className="skill-markdown"><h4>SKILL.md</h4>{detailState === "loading" ? <p>正在读取…</p> : null}{detailState === "error" ? <p role="alert">{detailError}</p> : null}{selectedDetail ? <div className="skill-markdown-reader"><SafeMarkdown text={skillMarkdownBody(selectedDetail.markdown)} /></div> : null}</section></div><footer><button onClick={() => setSelected(undefined)}>关闭</button></footer></aside></div> : null}
-    {importCandidate ? <div className="skill-dialog-backdrop"><div className="skill-dialog" role="dialog" aria-modal="true" aria-label={`确认导入 ${importCandidate.detail.name}`}><header><AlertTriangle /><div><strong>高风险安装确认</strong><span>{importCandidate.detail.name} · v{importCandidate.detail.version}</span></div></header><p>包已通过结构与路径校验。安装后将由 OpenClaw 权威读回确认。</p><label className="skill-risk-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已了解网络来源 Skill 的高风险</label><footer><button disabled={importState === "installing"} onClick={() => void cancelImport()}>取消</button><button disabled={!confirmed || importState === "installing"} onClick={() => void installImport()}>{importState === "installing" ? "安装中" : "确认安装"}</button></footer></div></div> : null}
+    {importCandidate ? <div className="skill-dialog-backdrop"><div className="skill-dialog" role="dialog" aria-modal="true" aria-label={`确认导入 ${importCandidate.detail.name}`}><header><AlertTriangle /><div><strong>高风险安装确认</strong><span>{importCandidate.detail.name} · v{importCandidate.detail.version}</span></div></header><p>包已通过结构与路径校验。安装后将由 OpenClaw 权威读回确认。</p><label className="skill-risk-confirm"><input type="checkbox" checked={confirmed} disabled={importState === "installing"} onChange={(event) => setConfirmed(event.target.checked)} />我已了解网络来源 Skill 的高风险</label><footer><Button disabled={importState === "installing"} onClick={() => void cancelImport()}>取消</Button><Button type="primary" aria-label="确认安装" aria-busy={importState === "installing"} loading={importState === "installing"} disabled={!confirmed || importState === "installing"} onClick={() => void installImport()}>确认安装</Button></footer></div></div> : null}
     </div>
   </section>;
 }

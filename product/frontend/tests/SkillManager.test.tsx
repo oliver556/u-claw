@@ -196,6 +196,27 @@ describe("SkillManager", () => {
     expect(await screen.findByRole("dialog", { name: "技能详情 命令运行器" })).toBeVisible();
   });
 
+  /** Shows the initiating install button as loading while its confirmation detail is fetched. */
+  it("shows loading on the marketplace install button while detail is pending", async () => {
+    let resolveDetail!: (value: any) => void;
+    const pendingDetail = new Promise((resolve) => { resolveDetail = resolve; });
+    const invoke = vi.fn(async (request: any) => request.method === "skills.detail"
+      ? pendingDetail
+      : response(request, { items: [detail], nextCursor: null, hasMore: false, mode: "live" }));
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    const install = await screen.findByRole("button", { name: "安装 命令运行器" });
+    fireEvent.click(install);
+
+    expect(install).toBeDisabled();
+    expect(install).toHaveAttribute("aria-busy", "true");
+    expect(install.querySelector(".ant-btn-loading-icon")).toBeInTheDocument();
+
+    resolveDetail(response({ method: "skills.detail", requestId: "install-detail" }, detail));
+    expect(await screen.findByRole("dialog", { name: "确认安装命令运行器" })).toBeVisible();
+  });
+
   it("shows detail failures above the marketplace list and restores its detail actions", async () => {
     const invoke = vi.fn(async (request: any) => request.method === "skills.detail"
       ? failure(request, "README 暂时不可用")
@@ -491,6 +512,40 @@ describe("SkillManager", () => {
     expect(invoke.mock.calls.filter(([request]) => request.method === "skills.installed")).toHaveLength(2);
   });
 
+  /** Keeps ZIP installation visibly pending and single-shot until Desktop accepts the operation. */
+  it("shows loading and blocks duplicate ZIP installation starts", async () => {
+    let resolveInstall!: (value: any) => void;
+    const installResponse = new Promise((resolve) => { resolveInstall = resolve; });
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return response(request, []);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [] });
+      if (request.method === "skills.import-select") return response(request, { token: "fixture-selection-token-1", fileName: "useful.zip", sizeBytes: 1024 });
+      if (request.method === "skills.import-prepare") return response(request, { ...detail, risk: "high" });
+      if (request.method === "skills.import-install") return installResponse;
+      if (request.method === "skills.operation") return response(request, { id: "zip-pending", slug: detail.slug, action: "install", state: "failed", progress: 10, phase: "failed", error: "fixture stop" });
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    renderPublicInstalledSkills();
+    await screen.findByText("尚未安装 Skill");
+
+    fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "我已了解网络来源 Skill 的高风险" }));
+    const confirm = screen.getByRole("button", { name: "确认安装" });
+    fireEvent.click(confirm);
+
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-busy", "true");
+    expect(confirm.querySelector(".ant-btn-loading-icon")).toBeInTheDocument();
+    fireEvent.click(confirm);
+    expect(invoke.mock.calls.filter(([request]) => request.method === "skills.import-install")).toHaveLength(1);
+
+    resolveInstall(response({ method: "skills.import-install", requestId: "zip-start" }, {
+      id: "zip-pending", slug: detail.slug, action: "install", state: "running", progress: 10, phase: "validating",
+    }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("fixture stop");
+  });
+
   it("renders loading, free catalog, pagination, and offline retry states", async () => {
     let attempts = 0;
     const invoke = vi.fn(async (request: any) => {
@@ -546,6 +601,39 @@ describe("SkillManager", () => {
         },
       },
     })));
+    await vi.waitFor(() => expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100"));
+  });
+
+  /** Keeps installation visibly pending and single-shot until the start IPC responds. */
+  it("shows loading and blocks duplicate confirmation while installation starts", async () => {
+    let resolveInstall!: (value: any) => void;
+    const installResponse = new Promise((resolve) => { resolveInstall = resolve; });
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.search") return response(request, { items: [detail], nextCursor: null, hasMore: false, mode: "fixture" });
+      if (request.method === "skills.detail") return response(request, detail);
+      if (request.method === "skills.install") return installResponse;
+      if (request.method === "skills.operation") return response(request, { id: "pending-install", slug: detail.slug, action: "install", state: "succeeded", progress: 100, phase: "complete" });
+      if (request.method === "skills.installed") return response(request, []);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [] });
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "安装 命令运行器" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "我已了解高风险权限" }));
+    const confirm = screen.getByRole("button", { name: "确认安装" });
+    fireEvent.click(confirm);
+
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-busy", "true");
+    expect(confirm.querySelector(".ant-btn-loading-icon")).toBeInTheDocument();
+    fireEvent.click(confirm);
+    expect(invoke.mock.calls.filter(([request]) => request.method === "skills.install")).toHaveLength(1);
+
+    resolveInstall(response({ method: "skills.install", requestId: "pending-start" }, {
+      id: "pending-install", slug: detail.slug, action: "install", state: "running", progress: 10, phase: "validating",
+    }));
     await vi.waitFor(() => expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100"));
   });
 
