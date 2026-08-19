@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -265,6 +266,18 @@ describe("production desktop wiring", () => {
   let dataRoot: string;
   let cacheRoot: string;
   let productionEnv: NodeJS.ProcessEnv;
+
+  async function writeWechatPlugin(pluginDir: string, distContent = "") {
+    await mkdir(join(pluginDir, "dist"), { recursive: true });
+    await writeFile(join(pluginDir, "openclaw.plugin.json"), JSON.stringify({ id: "openclaw-weixin" }));
+    await writeFile(join(pluginDir, "package.json"), JSON.stringify({ name: "@tencent-weixin/openclaw-weixin", version: "2.4.6" }));
+    await writeFile(join(pluginDir, "dist/index.js"), distContent);
+    const files = await Promise.all(["openclaw.plugin.json", "package.json", "dist/index.js"].map(async (file) => {
+      const content = await readFile(join(pluginDir, file));
+      return { path: file, bytes: content.byteLength, sha256: createHash("sha256").update(content).digest("hex") };
+    }));
+    await writeFile(join(pluginDir, ".uclaw-plugin-manifest.json"), JSON.stringify({ schemaVersion: 1, plugins: [{ id: "openclaw-weixin", package: "@tencent-weixin/openclaw-weixin", version: "2.4.6", npmIntegrity: "sha512-qw9k3PLTiMWGNjjsknHgcTManH1w4j+Ji1ArWIaYLKCq3aFRsVwcqnPi127bvOoVMJGW4dbyJ8NECEMgoO+iRw==", openclawVersionRange: ">=2026.7.1-2 <2026.8.0", files }] }));
+  }
 
   beforeEach(async () => {
     runtimeRoot = await mkdtemp(join(tmpdir(), "uclaw-production-wiring-"));
@@ -544,9 +557,7 @@ describe("production desktop wiring", () => {
 
   it("injects the executable personal WeChat runtime instead of the adapter Unsupported surface", async () => {
     const pluginDir = join(dirname(productionEnv.OPENCLAW_CONFIG_PATH!), "extensions", "openclaw-weixin");
-    await mkdir(pluginDir, { recursive: true });
-    await writeFile(join(pluginDir, "openclaw.plugin.json"), JSON.stringify({ id: "openclaw-weixin" }));
-    await writeFile(join(pluginDir, "package.json"), JSON.stringify({ name: "@tencent-weixin/openclaw-weixin", version: "2.4.6" }));
+    await writeWechatPlugin(pluginDir);
     const options = await createDesktopMainOptions(productionEnv);
 
     await expect((options.client!.channels as unknown as {
@@ -554,6 +565,32 @@ describe("production desktop wiring", () => {
     }).wechat.capability(new AbortController().signal)).resolves.toEqual({
       available: true,
       pluginStatus: "installed",
+    });
+    await options.dispose?.();
+  });
+
+  it("repairs the controlled WeChat extension from bundled runtime before gateway launch options are used", async () => {
+    const sourceDir = join(runtimeRoot, "extensions", "openclaw-weixin");
+    const targetDir = join(dirname(productionEnv.OPENCLAW_CONFIG_PATH!), "extensions", "openclaw-weixin");
+    await writeWechatPlugin(sourceDir, "trusted bundled runtime");
+
+    const options = await createDesktopMainOptions(productionEnv);
+
+    expect(await readFile(join(targetDir, "dist/index.js"), "utf8")).toBe("trusted bundled runtime");
+    expect(options.buildGatewayLaunchOptions).toBeTypeOf("function");
+    await expect((options.client!.channels as unknown as { wechat: { capability(signal: AbortSignal): Promise<unknown> } }).wechat.capability(new AbortController().signal)).resolves.toEqual({ available: true, pluginStatus: "installed" });
+    await options.dispose?.();
+  });
+
+  it("fails the WeChat capability closed when bundled repair source is damaged", async () => {
+    const sourceDir = join(runtimeRoot, "extensions", "openclaw-weixin");
+    await writeWechatPlugin(sourceDir, "trusted bundled runtime");
+    await writeFile(join(sourceDir, "dist/index.js"), "damaged after manifest");
+
+    const options = await createDesktopMainOptions(productionEnv);
+
+    await expect((options.client!.channels as unknown as { wechat: { capability(signal: AbortSignal): Promise<unknown> } }).wechat.capability(new AbortController().signal)).resolves.toMatchObject({
+      available: false, pluginStatus: "missing", reason: "随包个人微信组件校验失败，请重新安装 U-Claw。",
     });
     await options.dispose?.();
   });

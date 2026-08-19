@@ -131,7 +131,7 @@ jobs:
             done
           fi
 
-          # 6b) Install WeChat (Weixin) plugin into app/extensions/openclaw-weixin
+          # 6b) Install the locked WeChat (Weixin) plugin into app/extensions/openclaw-weixin
           # 官方 npm 包 @tencent-weixin/openclaw-weixin 自带 dist/index.js(发布时已编译,无需 build)。
           # config-server/server.js 把 app/extensions/openclaw-weixin 当作插件源,扫码登录后整目录
           # copy 到 ~/.openclaw/extensions/。它硬要求插件目录内 node_modules/qrcode-terminal 存在
@@ -140,21 +140,26 @@ jobs:
           (
             cd "$wx_tmp"
             echo '{"name":"wx-tmp","version":"1.0.0","private":true}' > package.json
-            npm install @tencent-weixin/openclaw-weixin@latest \
+            npm install @tencent-weixin/openclaw-weixin@2.4.6 \
               --registry="$mirror_npm" --no-audit --no-fund
           )
           wx_pkg="$wx_tmp/node_modules/@tencent-weixin/openclaw-weixin"
-          if [ -f "$wx_pkg/dist/index.js" ] && [ -f "$wx_pkg/openclaw.plugin.json" ]; then
-            wx_dest="$app_dir/extensions/openclaw-weixin"
-            mkdir -p "$wx_dest"
-            cp -R "$wx_pkg/." "$wx_dest/"
-            # 把 qrcode-terminal(被 npm 提升到顶层)放进插件自己的 node_modules
-            mkdir -p "$wx_dest/node_modules"
-            cp -R "$wx_tmp/node_modules/qrcode-terminal" "$wx_dest/node_modules/qrcode-terminal"
-            echo "WeChat plugin installed: $(du -sm "$wx_dest" | cut -f1) MB"
-          else
-            echo "WARN: WeChat plugin install failed, skipping (dist/index.js or openclaw.plugin.json missing)"
-          fi
+          test -f "$wx_pkg/dist/index.js"
+          test -f "$wx_pkg/openclaw.plugin.json"
+          test "$(node -p "require('$wx_pkg/package.json').version")" = "2.4.6"
+          test "$(npm view @tencent-weixin/openclaw-weixin@2.4.6 dist.integrity --registry="$mirror_npm")" = "sha512-qw9k3PLTiMWGNjjsknHgcTManH1w4j+Ji1ArWIaYLKCq3aFRsVwcqnPi127bvOoVMJGW4dbyJ8NECEMgoO+iRw=="
+          wx_dest="$app_dir/extensions/openclaw-weixin"
+          mkdir -p "$wx_dest"
+          cp -R "$wx_pkg/." "$wx_dest/"
+          mkdir -p "$wx_dest/node_modules"
+          test -d "$wx_tmp/node_modules/qrcode-terminal"
+          cp -R "$wx_tmp/node_modules/qrcode-terminal" "$wx_dest/node_modules/qrcode-terminal"
+          node product/scripts/runtime-plugin-manifest.mjs \
+            --plugin "$wx_dest" \
+            --lock product/runtime-plugins.json \
+            --output "$wx_dest/.uclaw-plugin-manifest.json"
+          cp "$wx_dest/.uclaw-plugin-manifest.json" "$app_dir/runtime-plugins.json"
+          echo "WeChat plugin installed: $(du -sm "$wx_dest" | cut -f1) MB"
           rm -rf "$wx_tmp"
 
           # 7) Belt-and-suspenders: even though we don't pre-install bundled

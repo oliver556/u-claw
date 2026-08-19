@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,7 @@ type GatewayAccount = {
   configured: boolean;
   running: boolean;
   connected: boolean;
+  lastError?: string;
 };
 
 function gatewayStatus(account?: GatewayAccount) {
@@ -38,15 +40,44 @@ describe("production personal WeChat runtime", () => {
     vi.restoreAllMocks();
   });
 
-  async function fixture() {
+  async function fixture(withBuildManifest = true) {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-wechat-runtime-"));
     cleanup.push(dataDir);
     const pluginDir = join(dataDir, "extensions", "openclaw-weixin");
     await mkdir(pluginDir, { recursive: true });
     await writeFile(join(pluginDir, "openclaw.plugin.json"), JSON.stringify({ id: "openclaw-weixin" }));
     await writeFile(join(pluginDir, "package.json"), JSON.stringify({ name: "@tencent-weixin/openclaw-weixin", version: "2.4.6" }));
+    await mkdir(join(pluginDir, "dist"));
+    await writeFile(join(pluginDir, "dist/index.js"), "");
+    if (withBuildManifest) {
+      const entries = await Promise.all(["openclaw.plugin.json", "package.json", "dist/index.js"].map(async (file) => {
+        const content = await readFile(join(pluginDir, file));
+        return { path: file, bytes: content.byteLength, sha256: createHash("sha256").update(content).digest("hex") };
+      }));
+      await writeFile(join(pluginDir, ".uclaw-plugin-manifest.json"), JSON.stringify({ schemaVersion: 1, plugins: [{ id: "openclaw-weixin", package: "@tencent-weixin/openclaw-weixin", version: "2.4.6", npmIntegrity: "sha512-qw9k3PLTiMWGNjjsknHgcTManH1w4j+Ji1ArWIaYLKCq3aFRsVwcqnPi127bvOoVMJGW4dbyJ8NECEMgoO+iRw==", openclawVersionRange: ">=2026.7.1-2 <2026.8.0", files: entries }] }));
+    }
     return { dataDir, pluginDir };
   }
+
+  it("requires the bundled build manifest before exposing the capability", async () => {
+    const { dataDir, pluginDir } = await fixture(false);
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway: vi.fn(), renderQr: async () => png });
+    await expect(runtime.capability(new AbortController().signal)).resolves.toMatchObject({ available: false, pluginStatus: "installed" });
+  });
+
+  it("rejects a bundled plugin when an inventoried file is modified", async () => {
+    const { dataDir, pluginDir } = await fixture();
+    await writeFile(join(pluginDir, "dist/index.js"), "tampered");
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway: vi.fn(), renderQr: async () => png });
+    await expect(runtime.capability(new AbortController().signal)).resolves.toMatchObject({ available: false, pluginStatus: "installed" });
+  });
+
+  it("rejects an untracked file added to the bundled plugin", async () => {
+    const { dataDir, pluginDir } = await fixture();
+    await writeFile(join(pluginDir, "unexpected.js"), "export default true");
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway: vi.fn(), renderQr: async () => png });
+    await expect(runtime.capability(new AbortController().signal)).resolves.toMatchObject({ available: false, pluginStatus: "installed" });
+  });
 
   it("reads installed plugin and connected account from OpenClaw authority after runtime restart", async () => {
     const { dataDir, pluginDir } = await fixture();
@@ -257,12 +288,37 @@ describe("production personal WeChat runtime", () => {
     await expect(runtime.reconnect(new AbortController().signal)).resolves.toMatchObject({ status: "connected", loginState: "connected" });
     await runtime.logout(new AbortController().signal);
 
-    expect(methods).toEqual(["channels.stop", "channels.start", "channels.status", "channels.stop"]);
+    expect(methods).toEqual(["channels.status", "channels.stop", "channels.start", "channels.status", "channels.stop"]);
     await expect(readFile(join(accountDir, "wx-account-7a2f.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(JSON.parse(await readFile(join(stateDir, "accounts.json"), "utf8"))).toEqual([]);
 
     const restarted = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway, renderQr: async () => png });
     await expect(restarted.status(new AbortController().signal)).resolves.toEqual({ status: "not-configured", loginState: "idle" });
+  });
+
+  it("invalidates stale credentials when Gateway reports authorization failure and requires a fresh scan", async () => {
+    const { dataDir, pluginDir } = await fixture();
+    const stateDir = join(dataDir, "openclaw-weixin");
+    const accountDir = join(stateDir, "accounts");
+    await mkdir(accountDir, { recursive: true });
+    await writeFile(join(stateDir, "accounts.json"), JSON.stringify(["wx-account-7a2f"]));
+    await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: "stale-secret" }), { mode: 0o600 });
+    const requestGateway = vi.fn(async (method: string) => {
+      expect(method).toBe("channels.status");
+      return gatewayStatus({
+        accountId: "wx-account-7a2f", enabled: true, configured: true, running: false, connected: false,
+        lastError: "401 unauthorized bot token",
+      });
+    });
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway, renderQr: async () => png });
+
+    await expect(runtime.status(new AbortController().signal)).resolves.toEqual({
+      status: "auth-failed", loginState: "error", account: { accountIdHint: "...7a2f" },
+    });
+    await expect(readFile(join(stateDir, "accounts.json"), "utf8")).resolves.toBe("[]");
+    await expect(readFile(join(accountDir, "wx-account-7a2f.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(runtime.reconnect(new AbortController().signal)).resolves.toEqual({ status: "not-configured", loginState: "idle" });
+    expect(requestGateway).toHaveBeenCalledOnce();
   });
 
   it("logout removes an orphaned account file even when the index omits it", async () => {
@@ -279,6 +335,24 @@ describe("production personal WeChat runtime", () => {
 
     expect(requestGateway).toHaveBeenCalledWith("channels.stop", { channel: "openclaw-weixin", accountId: "wx-orphan-7a2f" }, expect.any(AbortSignal));
     await expect(readFile(join(accountDir, "wx-orphan-7a2f.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("logout clears persisted per-peer context tokens without treating them as accounts", async () => {
+    const { dataDir, pluginDir } = await fixture();
+    const stateDir = join(dataDir, "openclaw-weixin");
+    const accountDir = join(stateDir, "accounts");
+    await mkdir(accountDir, { recursive: true });
+    await writeFile(join(stateDir, "accounts.json"), JSON.stringify(["wx-account-7a2f"]));
+    await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: "secret" }));
+    await writeFile(join(accountDir, "wx-account-7a2f.context-tokens.json"), JSON.stringify({ "peer@im.wechat": "context-secret" }));
+    const requestGateway = vi.fn(async () => ({ ok: true }));
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway, renderQr: async () => png });
+
+    await runtime.logout(new AbortController().signal);
+
+    expect(requestGateway).toHaveBeenCalledOnce();
+    expect(requestGateway).toHaveBeenCalledWith("channels.stop", { channel: "openclaw-weixin", accountId: "wx-account-7a2f" }, expect.any(AbortSignal));
+    await expect(readFile(join(accountDir, "wx-account-7a2f.context-tokens.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects an invalid account index instead of reporting an empty authority", async () => {
