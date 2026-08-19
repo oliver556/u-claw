@@ -10,6 +10,7 @@ import type {
   SkillProposalRevisionRun,
   SkillRuntimeInventory,
 } from "@uclaw/shared";
+import { Alert, Button, Input, Select } from "antd";
 import { AlertTriangle, Download, KeyRound, RefreshCw, Search, Star, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SafeMarkdown } from "../chat/MessageContent";
@@ -469,18 +470,21 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
     {(view === "catalog" || view === "installed") ? <>
       <div className="skill-toolbar">
         {view === "catalog" ? <>
-          <label><Search aria-hidden="true" /><span className="sr-only">搜索免费技能</span><input aria-label="搜索免费技能" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索免费技能" /></label>
-          <label className="skill-category"><span>分类</span><select aria-label="技能分类" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">全部</option>{categoryOptions.map((item) => <option value={item.value} key={item.value} disabled={item.disabled}>{item.label}</option>)}</select></label>
           {publicCatalog ? <>
-            <label className="skill-category"><span>API Key</span><select aria-label="API Key 要求" value={keyRequirement} onChange={(event) => setKeyRequirement(event.target.value as KeyRequirement)}><option value="all">全部</option><option value="required">需要</option><option value="not-required">不需要</option></select></label>
-            <label className="skill-category"><span>排序</span><select aria-label="技能排序" value={sort} onChange={(event) => setSort(event.target.value as MarketplaceSort)}><option value="score">综合</option><option value="downloads">下载量</option><option value="stars">收藏数</option><option value="updatedAt">最近更新</option></select></label>
-          </> : null}
+            <Input className="skill-search" aria-label="搜索免费技能" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索免费技能" prefix={<Search aria-hidden="true" />} allowClear />
+            <label className="skill-filter"><span>分类</span><Select aria-label="技能分类" value={category} virtual={false} onChange={setCategory} options={[{ value: "", label: "全部" }, ...categoryOptions]} /></label>
+            <label className="skill-filter"><span>API Key</span><Select aria-label="API Key 要求" value={keyRequirement} virtual={false} onChange={(value) => setKeyRequirement(value as KeyRequirement)} options={[{ value: "all", label: "全部" }, { value: "required", label: "需要" }, { value: "not-required", label: "不需要" }]} /></label>
+            <label className="skill-filter"><span>排序</span><Select aria-label="技能排序" value={sort} virtual={false} onChange={(value) => setSort(value as MarketplaceSort)} options={[{ value: "score", label: "综合" }, { value: "downloads", label: "下载量" }, { value: "stars", label: "收藏数" }, { value: "updatedAt", label: "最近更新" }]} /></label>
+          </> : <>
+            <label><Search aria-hidden="true" /><span className="sr-only">搜索免费技能</span><input aria-label="搜索免费技能" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索免费技能" /></label>
+            <label className="skill-category"><span>分类</span><select aria-label="技能分类" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">全部</option>{categoryOptions.map((item) => <option value={item.value} key={item.value} disabled={item.disabled}>{item.label}</option>)}</select></label>
+          </>}
         </> : <strong className="skill-installed-heading">U 盘已安装技能</strong>}
-        <button type="button" aria-label="刷新技能目录" onClick={() => void load()}><RefreshCw aria-hidden="true" /></button>
+        {publicCatalog ? <Button className="skill-refresh" aria-label="刷新技能目录" title="刷新技能目录" icon={<RefreshCw aria-hidden="true" />} onClick={() => void load()} /> : <button type="button" aria-label="刷新技能目录" onClick={() => void load()}><RefreshCw aria-hidden="true" /></button>}
         {view === "catalog" ? <span className={`skill-mode ${mode}`}>{stale ? "最近缓存" : mode === "fixture" ? "本地契约数据" : "SkillHub 在线"}</span> : null}
       </div>
       <div className="skill-results" role="region" aria-label="技能搜索结果" aria-busy={state === "loading"}>
-        {publicCatalog && error ? <div className="skill-error skill-marketplace-error" role="alert"><AlertTriangle /><div><strong>技能操作失败</strong><span>{error}</span></div>{state === "error" ? <button type="button" aria-label="重试技能目录" onClick={() => void load()}>重试</button> : null}</div> : null}
+        {publicCatalog && error ? <Alert className="skill-marketplace-error" type="error" showIcon role="alert" message="技能操作失败" description={error} action={state === "error" ? <Button size="small" aria-label="重试技能目录" onClick={() => void load()}>重试</Button> : undefined} /> : null}
         {state === "ready" && visibleItems.length === 0 ? <div className="skill-state" role="status"><strong>{view === "catalog" ? "没有匹配的免费技能" : "尚未安装技能"}</strong><span>{view === "catalog" ? "调整搜索条件后重试。" : "从免费目录安装后会显示在这里。"}</span></div> : null}
         {state === "ready" && visibleItems.length > 0 ? <div className={`skill-list${publicCatalog ? " marketplace" : ""}`} aria-label="免费技能列表">
         {visibleItems.map((item) => {
@@ -493,18 +497,18 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
             {publicCatalog ? <button type="button" className="skill-marketplace-detail-trigger" aria-label={`打开技能详情 ${item.name}`} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}><SkillLogo name={item.name} logoUrl={item.logoUrl} className="skill-marketplace-logo" />{identity}{activeDetailRequest ? <span className="skill-detail-pending" role="status"><RefreshCw className="spin" />正在读取详情</span> : null}</button> : identity}
             <div className="skill-permissions">{item.permissions.map((permission) => <span key={`${permission.kind}-${permission.target}`}>{permissionKindLabel[permission.kind]} · {permission.target}</span>)}</div>
             <div className="skill-actions">
-              <button type="button" aria-label={`查看详情 ${item.name}`} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}>详情</button>
-              {item.installedVersion === null ? <button type="button" aria-label={`安装 ${item.name}`} disabled={busy} onClick={() => void openDetail(item, "confirm", "install")}><Download />安装</button> : <>
-                {item.updateAvailable ? <button type="button" aria-label={`更新 ${item.name}`} disabled={busy} onClick={() => void openDetail(item, "confirm", "update")}><RefreshCw />更新</button> : null}
+              {publicCatalog ? <Button size="small" aria-label={`查看详情 ${item.name}`} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}>详情</Button> : <button type="button" aria-label={`查看详情 ${item.name}`} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}>详情</button>}
+              {item.installedVersion === null ? publicCatalog ? <Button size="small" type="primary" aria-label={`安装 ${item.name}`} disabled={busy} icon={<Download />} onClick={() => void openDetail(item, "confirm", "install")}>安装</Button> : <button type="button" aria-label={`安装 ${item.name}`} disabled={busy} onClick={() => void openDetail(item, "confirm", "install")}><Download />安装</button> : <>
+                {item.updateAvailable ? publicCatalog ? <Button size="small" type="primary" aria-label={`更新 ${item.name}`} disabled={busy} icon={<RefreshCw />} onClick={() => void openDetail(item, "confirm", "update")}>更新</Button> : <button type="button" aria-label={`更新 ${item.name}`} disabled={busy} onClick={() => void openDetail(item, "confirm", "update")}><RefreshCw />更新</button> : null}
                 <label className="skill-switch"><input type="checkbox" role="switch" aria-label={`${item.enabled ? "禁用" : "启用"} ${item.name}`} checked={item.enabled} disabled={busy} onChange={() => toggleAction(item)} /><span>{item.enabled ? "已启用" : "已禁用"}</span></label>
-                <button type="button" aria-label={`卸载 ${item.name}`} disabled={busy} onClick={() => void simpleAction(item, "skills.uninstall")}><Trash2 />卸载</button>
+                {publicCatalog ? <Button size="small" danger aria-label={`卸载 ${item.name}`} disabled={busy} icon={<Trash2 />} onClick={() => void simpleAction(item, "skills.uninstall")}>卸载</Button> : <button type="button" aria-label={`卸载 ${item.name}`} disabled={busy} onClick={() => void simpleAction(item, "skills.uninstall")}><Trash2 />卸载</button>}
               </>}
             </div>
             {operation ? <div className={`skill-progress ${operation.state}`}><progress aria-label={`${item.name}操作进度`} aria-valuenow={operation.progress} value={operation.progress} max="100" /><span>{operation.progress}%</span><span>{operation.state === "failed" ? "失败，可重试" : operation.state === "succeeded" ? "完成" : "处理中"}</span>{operation.error ? <span>{operation.error}</span> : null}</div> : null}
           </article>;
         })}
         </div> : null}
-        {state === "ready" && hasMore ? <button className="skill-load-more" type="button" aria-label="加载更多技能" onClick={() => void load(cursor, true)}>加载更多</button> : null}
+        {state === "ready" && hasMore ? publicCatalog ? <Button className="skill-load-more" aria-label="加载更多技能" onClick={() => void load(cursor, true)}>加载更多</Button> : <button className="skill-load-more" type="button" aria-label="加载更多技能" onClick={() => void load(cursor, true)}>加载更多</button> : null}
         {state === "loading" ? <div className="skill-state"><RefreshCw className="spin" /><strong>{view === "catalog" ? "正在加载免费技能" : "正在读取技能数据"}</strong></div> : null}
       </div>
     </> : null}

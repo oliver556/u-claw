@@ -55,6 +55,12 @@ const renderPublicInstalledSkills = () => {
   fireEvent.click(screen.getByRole("tab", { name: "我的技能" }));
 };
 
+/** Selects one visible Ant Design option through the same popup path used by users. */
+async function selectMarketplaceOption(label: string, option: string) {
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: label }));
+  fireEvent.click(await screen.findByText(option, { selector: ".ant-select-item-option-content" }));
+}
+
 describe("SkillManager", () => {
   it("keeps marketplace loading, list, and pagination inside the bounded results region", async () => {
     let resolveSearch!: (value: ReturnType<typeof response>) => void;
@@ -128,8 +134,8 @@ describe("SkillManager", () => {
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
       method: "skills.search", params: { query: "", category: null, cursor: null, pageSize: 40, sort: "score" },
     }));
-    expect(screen.getByLabelText("API Key 要求")).toHaveValue("all");
-    expect(screen.getByLabelText("技能排序")).toHaveValue("score");
+    expect(screen.getByRole("combobox", { name: "API Key 要求" }).closest(".ant-select")).toHaveTextContent("全部");
+    expect(screen.getByRole("combobox", { name: "技能排序" }).closest(".ant-select")).toHaveTextContent("综合");
     fireEvent.click(screen.getByRole("button", { name: "查看详情 命令运行器" }));
     const marketplaceDetail = await screen.findByRole("dialog", { name: "技能详情 命令运行器" });
     expect(marketplaceDetail).toHaveTextContent("U-Claw");
@@ -220,8 +226,8 @@ describe("SkillManager", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
       method: "skills.search", params: expect.objectContaining({ query: "command", sort: "score" }),
     })), { timeout: 600 });
-    fireEvent.change(screen.getByLabelText("技能分类"), { target: { value: "developer-tools" } });
-    fireEvent.change(screen.getByLabelText("技能排序"), { target: { value: "downloads" } });
+    await selectMarketplaceOption("技能分类", "developer-tools");
+    await selectMarketplaceOption("技能排序", "下载量");
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
       method: "skills.search", params: expect.objectContaining({ category: "developer-tools", sort: "downloads" }),
     })));
@@ -240,7 +246,7 @@ describe("SkillManager", () => {
     render(<SkillManager publicView />);
 
     expect(await screen.findByText("命令运行器")).toBeVisible();
-    fireEvent.change(screen.getByLabelText("技能分类"), { target: { value: "office-efficiency" } });
+    await selectMarketplaceOption("技能分类", "办公效率");
     const results = screen.getByRole("region", { name: "技能搜索结果" });
     await vi.waitFor(() => expect(results).toHaveAttribute("aria-busy", "true"));
     expect(screen.getByText("正在加载免费技能")).toBeVisible();
@@ -266,17 +272,17 @@ describe("SkillManager", () => {
     await screen.findByText("普通技能");
     invoke.mockClear();
 
-    fireEvent.change(screen.getByLabelText("API Key 要求"), { target: { value: "required" } });
+    await selectMarketplaceOption("API Key 要求", "需要");
     expect(screen.getByText("命令运行器")).toBeVisible();
     expect(screen.queryByText("普通技能")).not.toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText("API Key 要求"), { target: { value: "not-required" } });
+    await selectMarketplaceOption("API Key 要求", "不需要");
     expect(screen.getByText("普通技能")).toBeVisible();
     expect(screen.queryByText("命令运行器")).not.toBeInTheDocument();
     expect(screen.queryByText("要求未知技能")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("API Key 要求"), { target: { value: "required" } });
+    await selectMarketplaceOption("API Key 要求", "需要");
 
     fireEvent.click(screen.getByRole("button", { name: "查看详情 命令运行器" }));
     const drawer = await screen.findByRole("dialog", { name: "技能详情 命令运行器" });
@@ -704,10 +710,11 @@ describe("SkillManager", () => {
     window.uclaw = { skills: { invoke } } as any;
     render(<SkillManager publicView />);
 
-    expect(await screen.findByRole("option", { name: "付费技能" })).toBeDisabled();
-    expect(await screen.findByRole("option", { name: "办公效率" })).toHaveValue("office-efficiency");
-    expect(screen.getByRole("option", { name: "AI 智能体" })).toHaveValue("ai-agent");
-    fireEvent.change(screen.getByLabelText("技能分类"), { target: { value: "office-efficiency" } });
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "技能分类" }));
+    const paidOption = await screen.findByText("付费技能", { selector: ".ant-select-item-option-content" });
+    expect(paidOption.closest(".ant-select-item-option")).toHaveClass("ant-select-item-option-disabled");
+    expect(screen.getByText("AI 智能体", { selector: ".ant-select-item-option-content" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("办公效率", { selector: ".ant-select-item-option-content" }));
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
       method: "skills.search", params: expect.objectContaining({ category: "office-efficiency" }),
     })));
