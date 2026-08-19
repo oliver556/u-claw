@@ -556,11 +556,20 @@ export async function createSkillService({
     void running.finally(() => tasks.delete(operation.id));
     return operation;
   };
+  /** Verifies an installed workspace Skill through every identity OpenClaw may derive from SKILL.md. */
   const verifyPresent = async (slug: string, expectedEnabled: boolean): Promise<void> => {
     if (!runtime) return;
+    const local = await scan();
+    const localItems = local.items.filter((candidate) =>
+      candidate.id === slug && candidate.origin === "workspace-installed");
+    if (localItems.length !== 1) throw new Error("OpenClaw Skill readback mismatch.");
+    const localItem = localItems[0];
     const inventory = await runtimeReadback();
-    const item = inventory.skills.find((candidate) => candidate.id === slug && isWorkspaceRuntimeItem(candidate));
+    const item = runtimeForLocal(localItem, inventory);
     if (!item) throw new Error("OpenClaw Skill readback mismatch.");
+    const owners = local.items.filter((candidate) =>
+      candidate.origin === "workspace-installed" && matchesRuntime(candidate, item));
+    if (owners.length !== 1 || owners[0] !== localItem) throw new Error("OpenClaw Skill readback mismatch.");
     const actualEnabled = !item.disabled;
     if (actualEnabled !== expectedEnabled) throw new Error("OpenClaw Skill readback mismatch.");
   };

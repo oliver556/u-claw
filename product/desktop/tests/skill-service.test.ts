@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, cp, mkdir, mkdtemp, readFile, readdir, rename, stat, symlink, writeFile } from "node:fs/promises";
 import type { PathLike, RmOptions } from "node:fs";
 import { tmpdir } from "node:os";
@@ -61,6 +62,65 @@ describe("portable Skill service", () => {
 
     const rebuilt = await createSkillService({ dataDir, workspaceRoot, runtime, client: createFixtureSkillHubClient() });
     expect(await rebuilt.installed()).toEqual([expect.objectContaining({ slug: detail.slug, installedVersion: detail.version })]);
+  });
+
+  /** Reproduces SkillHub slugs that OpenClaw exposes under the SKILL.md runtime name. */
+  it("accepts OpenClaw install readback by the frontmatter runtime name", async () => {
+    const dataDir = await makeRoot();
+    const workspaceRoot = join(dataDir, "workspace", "skills");
+    const fixture = createFixtureSkillHubClient();
+    const baseDetail = await fixture.detail("workspace-reader");
+    const imaDetail = {
+      ...baseDetail,
+      slug: "ima-skills",
+      name: "IMA Skills",
+      source: { provider: "skillhub" as const, url: "https://api.skillhub.cn/api/v1/skills/ima-skills" },
+      manifest: { ...baseDetail.manifest, id: "ima-skills" },
+    };
+    const client = {
+      ...fixture,
+      detail: vi.fn(async (slug: string) => {
+        if (slug !== imaDetail.slug) throw tagSkillHubFailure(new Error("Skill not found."), "not-found");
+        return imaDetail;
+      }),
+      download: vi.fn(async (slug: string) => {
+        if (slug !== imaDetail.slug) throw tagSkillHubFailure(new Error("Skill not found."), "not-found");
+        const bundle = await fixture.download(slug);
+        const entries = bundle.entries.map((entry) => {
+          if (entry.path !== "SKILL.md" || entry.contentBase64 === undefined) return entry;
+          const markdown = Buffer.from(entry.contentBase64, "base64").toString("utf8")
+            .replace(`slug: ${slug}\n`, "")
+            .replace(`name: ${slug}`, "name: ima-skill");
+          return { ...entry, size: Buffer.byteLength(markdown), contentBase64: Buffer.from(markdown).toString("base64") };
+        });
+        return { ...bundle, entries, checksumSha256: createHash("sha256").update(JSON.stringify(entries)).digest("hex") };
+      }),
+    };
+    const runtime = runtimeFor(workspaceRoot, { status: vi.fn(async () => ({
+      workspaceDir: "OpenClaw workspace", managedSkillsDir: "OpenClaw managed skills", skills: [{
+        id: "ima-skill", name: "ima-skill", source: "workspace", bundled: false, disabled: false,
+        eligible: true, modelVisible: true, userInvocable: true, commandVisible: true,
+        availability: "available" as const, missing: emptyMissing, conflicts: [],
+      }],
+    })) });
+    const service = await createSkillService({ dataDir, workspaceRoot, runtime, client });
+    const detail = await service.detail(imaDetail.slug);
+
+    const result = await service.waitForOperation((await service.startInstall({
+      slug: detail.slug,
+      confirmation: { permissionFingerprint: detail.permissionFingerprint, acceptedRisk: detail.risk },
+    })).id);
+
+    expect(result).toMatchObject({ state: "succeeded", progress: 100, phase: "complete" });
+    expect(client.download).toHaveBeenCalledWith(imaDetail.slug);
+    await expect(readFile(join(workspaceRoot, detail.slug, "SKILL.md"), "utf8")).resolves.toContain("name: ima-skill");
+    expect(JSON.parse(await readFile(join(dataDir, "capabilities", "skill-state.json"), "utf8"))).toMatchObject({
+      installed: { "ima-skills": { slug: "ima-skills", version: imaDetail.version, enabled: true } },
+    });
+    const rebuilt = await createSkillService({ dataDir, workspaceRoot, runtime, client });
+    expect(await rebuilt.installed()).toEqual([
+      expect.objectContaining({ slug: "ima-skills", installedVersion: imaDetail.version, enabled: true }),
+    ]);
   });
 
   it("rolls back files and metadata when OpenClaw install readback fails", async () => {
