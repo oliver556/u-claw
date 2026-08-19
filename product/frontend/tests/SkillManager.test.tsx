@@ -56,6 +56,60 @@ const renderPublicInstalledSkills = () => {
 };
 
 describe("SkillManager", () => {
+  it("keeps marketplace loading, list, and pagination inside the bounded results region", async () => {
+    let resolveSearch!: (value: ReturnType<typeof response>) => void;
+    const invoke = vi.fn(() => new Promise<ReturnType<typeof response>>((resolve) => {
+      resolveSearch = resolve;
+    }));
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    const library = screen.getByLabelText("技能库");
+    const manager = screen.getByLabelText("技能管理");
+    const results = screen.getByRole("region", { name: "技能搜索结果" });
+    const toolbar = manager.querySelector(".skill-toolbar");
+    expect(library).toContainElement(manager);
+    expect(toolbar?.parentElement).toBe(results.parentElement);
+    expect(toolbar?.nextElementSibling).toBe(results);
+    expect(results).toContainElement(screen.getByText("正在加载免费技能"));
+
+    resolveSearch(response({ method: "skills.search", requestId: "marketplace-list" }, {
+      items: Array.from({ length: 40 }, (_, index) => ({ ...detail, slug: `skill-${index}`, name: `Skill ${index}` })),
+      nextCursor: "page-2",
+      hasMore: true,
+      mode: "live",
+    }));
+    expect(await screen.findByText("Skill 39")).toBeVisible();
+    expect(results).toContainElement(screen.getByLabelText("免费技能列表"));
+    expect(results).toContainElement(screen.getByRole("button", { name: "加载更多技能" }));
+  });
+
+  it("keeps the empty marketplace in the results row directly after its toolbar", async () => {
+    const invoke = vi.fn(async (request: any) => response(request, { items: [], nextCursor: null, hasMore: false, mode: "live" }));
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    expect(await screen.findByText("没有匹配的免费技能")).toBeVisible();
+    const manager = screen.getByLabelText("技能管理");
+    const results = screen.getByRole("region", { name: "技能搜索结果" });
+    expect(screen.getByRole("tablist", { name: "技能库视图" }).nextElementSibling).toBe(manager);
+    expect(manager.querySelector(".skill-toolbar")?.nextElementSibling).toBe(results);
+    expect(results.childElementCount).toBe(1);
+    expect(results.firstElementChild).toHaveClass("skill-state");
+  });
+
+  it("keeps marketplace errors inside the results region directly after its toolbar", async () => {
+    const invoke = vi.fn(async () => { throw new Error("offline"); });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    const manager = screen.getByLabelText("技能管理");
+    const results = screen.getByRole("region", { name: "技能搜索结果" });
+    const error = await screen.findByRole("alert");
+    expect(manager.querySelector(".skill-toolbar")?.nextElementSibling).toBe(results);
+    expect(results).toContainElement(error);
+  });
+
   it("opens the public Skill library on the marketplace and keeps installed Skills in a separate tab", async () => {
     const installed = { ...detail, installedVersion: detail.version, enabled: true, source: { provider: "openclaw", origin: "workspace" } };
     const invoke = vi.fn(async (request: any) => {

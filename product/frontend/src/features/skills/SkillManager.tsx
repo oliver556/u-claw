@@ -448,9 +448,10 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
         <button type="button" aria-label="刷新技能目录" onClick={() => void load()}><RefreshCw aria-hidden="true" /></button>
         {view === "catalog" ? <span className={`skill-mode ${mode}`}>{stale ? "最近缓存" : mode === "fixture" ? "本地契约数据" : "SkillHub 在线"}</span> : null}
       </div>
-      {publicCatalog && error ? <div className="skill-error skill-marketplace-error" role="alert"><AlertTriangle /><div><strong>技能操作失败</strong><span>{error}</span></div>{state === "error" ? <button type="button" aria-label="重试技能目录" onClick={() => void load()}>重试</button> : null}</div> : null}
-      {state === "ready" && visibleItems.length === 0 ? <div className="skill-state"><strong>{view === "catalog" ? "没有匹配的免费技能" : "尚未安装技能"}</strong><span>{view === "catalog" ? "调整搜索条件后重试。" : "从免费目录安装后会显示在这里。"}</span></div> : null}
-      {state === "ready" && visibleItems.length > 0 ? <div className={`skill-list${publicCatalog ? " marketplace" : ""}`} aria-label="免费技能列表">
+      <div className="skill-results" role="region" aria-label="技能搜索结果" aria-busy={state === "loading"}>
+        {publicCatalog && error ? <div className="skill-error skill-marketplace-error" role="alert"><AlertTriangle /><div><strong>技能操作失败</strong><span>{error}</span></div>{state === "error" ? <button type="button" aria-label="重试技能目录" onClick={() => void load()}>重试</button> : null}</div> : null}
+        {state === "ready" && visibleItems.length === 0 ? <div className="skill-state" role="status"><strong>{view === "catalog" ? "没有匹配的免费技能" : "尚未安装技能"}</strong><span>{view === "catalog" ? "调整搜索条件后重试。" : "从免费目录安装后会显示在这里。"}</span></div> : null}
+        {state === "ready" && visibleItems.length > 0 ? <div className={`skill-list${publicCatalog ? " marketplace" : ""}`} aria-label="免费技能列表">
         {visibleItems.map((item) => {
           const operation = operations[item.slug];
           const detailRequestPending = detailPendingSlug !== null;
@@ -471,8 +472,10 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
             {operation ? <div className={`skill-progress ${operation.state}`}><progress aria-label={`${item.name}操作进度`} aria-valuenow={operation.progress} value={operation.progress} max="100" /><span>{operation.progress}%</span><span>{operation.state === "failed" ? "失败，可重试" : operation.state === "succeeded" ? "完成" : "处理中"}</span>{operation.error ? <span>{operation.error}</span> : null}</div> : null}
           </article>;
         })}
-      </div> : null}
-      {state === "ready" && hasMore ? <button className="skill-load-more" type="button" aria-label="加载更多技能" onClick={() => void load(cursor, true)}>加载更多</button> : null}
+        </div> : null}
+        {state === "ready" && hasMore ? <button className="skill-load-more" type="button" aria-label="加载更多技能" onClick={() => void load(cursor, true)}>加载更多</button> : null}
+        {state === "loading" ? <div className="skill-state"><RefreshCw className="spin" /><strong>{view === "catalog" ? "正在加载免费技能" : "正在读取技能数据"}</strong></div> : null}
+      </div>
     </> : null}
 
     {view === "runtime" && state === "ready" ? <div className="skill-runtime-list">
@@ -514,7 +517,7 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
       </div>
     </div> : null}
 
-    {state === "loading" ? <div className="skill-state"><RefreshCw className="spin" /><strong>{view === "catalog" ? "正在加载免费技能" : "正在读取技能数据"}</strong></div> : null}
+    {state === "loading" && view !== "catalog" && view !== "installed" ? <div className="skill-state"><RefreshCw className="spin" /><strong>正在读取技能数据</strong></div> : null}
     {!publicCatalog && error ? <div className="skill-error" role="alert"><AlertTriangle /><div><strong>{view === "catalog" ? "技能目录离线" : "技能操作失败"}</strong><span>{error}</span></div>{state === "error" ? <button type="button" aria-label="重试技能目录" onClick={() => void load()}>重试</button> : null}</div> : null}
 
     {publicCatalog && detail && detailMode === "view" ? <div className="skill-drawer-backdrop" onMouseDown={() => setDetail(undefined)}><aside className="skill-drawer" role="dialog" aria-modal="true" aria-label={`技能详情 ${detail.name}`} onMouseDown={(event) => event.stopPropagation()}>
