@@ -24,6 +24,21 @@ export interface SkillHubSearchResult {
   stale?: boolean;
 }
 
+export type SkillHubFailureReason = "not-found" | "identity-conflict" | "forbidden" | "upstream-invalid" | "upstream-unavailable";
+
+/** Tags a marketplace failure so cache and service layers can preserve its security meaning. */
+export function tagSkillHubFailure(error: unknown, reason: SkillHubFailureReason): Error {
+  const tagged = error instanceof Error ? error : new Error("SkillHub request failed.");
+  return Object.assign(tagged, { skillHubFailureReason: reason });
+}
+
+/** Reads only a recognized marketplace failure reason from an unknown thrown value. */
+export function skillHubFailureReason(error: unknown): SkillHubFailureReason | undefined {
+  const reason = (error as { skillHubFailureReason?: unknown })?.skillHubFailureReason;
+  return reason === "not-found" || reason === "identity-conflict" || reason === "forbidden" ||
+    reason === "upstream-invalid" || reason === "upstream-unavailable" ? reason : undefined;
+}
+
 /** Private marketplace tuple used to pin detail and download to one exact Skill version. */
 export interface SkillHubIdentity {
   slug: string;
@@ -172,8 +187,10 @@ export function createFixtureSkillHubClient(options: FixtureOptions = {}): Skill
     /** Returns only the selected fixture version so cache tests mirror marketplace pinning. */
     async detail(slug, expectedVersion) {
       const found = catalog.find((item) => item.slug === slug);
-      if (!found) throw new Error("Skill not found.");
-      if (expectedVersion !== undefined && found.version !== expectedVersion) throw new Error("Fixture Skill version mismatch.");
+      if (!found) throw tagSkillHubFailure(new Error("Skill not found."), "not-found");
+      if (expectedVersion !== undefined && found.version !== expectedVersion) {
+        throw tagSkillHubFailure(new Error("Fixture Skill version mismatch."), "identity-conflict");
+      }
       const pricingType = options.detailPricingOverride?.[slug] ?? found.pricingType;
       return { ...found, pricingType };
     },

@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createFixtureSkillHubClient } from "../src/skills/fixture-client.js";
+import { createFixtureSkillHubClient, tagSkillHubFailure } from "../src/skills/fixture-client.js";
 import { createSkillService } from "../src/skills/skill-service.js";
 import type { OpenClawSkillRuntime } from "../src/skills/openclaw-skill-runtime.js";
 import { formalProposalRecord } from "./skill-proposal-fixture.js";
@@ -739,6 +739,40 @@ describe("portable Skill service", () => {
       client: createFixtureSkillHubClient({ detailPricingOverride: { "workspace-reader": "paid" } }),
     });
     await expect(paid.detail("workspace-reader")).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it.each([
+    [tagSkillHubFailure(Object.assign(new Error("missing"), { status: 404 }), "not-found"), "NOT_FOUND"],
+    [tagSkillHubFailure(new Error("identity changed"), "identity-conflict"), "CONFLICT"],
+    [tagSkillHubFailure(new Error("gateway offline"), "upstream-unavailable"), "UNAVAILABLE"],
+  ])("classifies remote detail failures without disguising them as not found", async (failure, code) => {
+    const fixture = createFixtureSkillHubClient();
+    const service = await createSkillService({
+      dataDir: await makeRoot(),
+      client: { ...fixture, detail: vi.fn(async () => { throw failure; }) },
+    });
+
+    await expect(service.detail("workspace-reader")).rejects.toMatchObject({ code });
+  });
+
+  it.each([
+    ["forbidden", "FORBIDDEN"],
+    ["upstream-invalid", "UNAVAILABLE"],
+  ] as const)("does not let an installed snapshot hide a %s live detail failure", async (reason, code) => {
+    const dataDir = await makeRoot();
+    const initial = await createSkillService({ dataDir, client: createFixtureSkillHubClient() });
+    const detail = await initial.detail("workspace-reader");
+    await initial.waitForOperation((await initial.startInstall({
+      slug: detail.slug,
+      confirmation: { permissionFingerprint: detail.permissionFingerprint, acceptedRisk: detail.risk },
+    })).id);
+    const fixture = createFixtureSkillHubClient();
+    const failing = await createSkillService({
+      dataDir,
+      client: { ...fixture, detail: vi.fn(async () => { throw tagSkillHubFailure(new Error("rejected"), reason); }) },
+    });
+
+    await expect(failing.detail("workspace-reader")).rejects.toMatchObject({ code });
   });
 
   it("requires the exact permission fingerprint and explicit high-risk confirmation", async () => {

@@ -6,7 +6,7 @@ import JSZip from "jszip";
 import { z } from "zod";
 
 import { parseSkillMarkdownFrontmatter } from "./bundle-validator.js";
-import { skillIdentityFingerprint, type SkillBundle, type SkillBundleEntry, type SkillHubClient, type SkillHubSearchResult } from "./fixture-client.js";
+import { skillIdentityFingerprint, tagSkillHubFailure, type SkillBundle, type SkillBundleEntry, type SkillHubClient, type SkillHubSearchResult } from "./fixture-client.js";
 
 const DEFAULT_ORIGIN = "https://api.skillhub.cn";
 const TRUSTED_API_HOST = "api.skillhub.cn";
@@ -257,8 +257,20 @@ function assertSuccess(response: Response): void {
   }
 }
 
+/** Separates transient transport failures from invalid upstream content and a missing detail record. */
+function detailRequestFailure(error: unknown, missingIsNotFound: boolean): "not-found" | "upstream-invalid" | "upstream-unavailable" {
+  const status = (error as { status?: unknown })?.status;
+  if (missingIsNotFound && status === 404) return "not-found";
+  if (typeof status === "number" && (status === 408 || status === 425 || status === 429 || status >= 500)) return "upstream-unavailable";
+  const name = error instanceof Error ? error.name : "";
+  return error instanceof TypeError || name === "AbortError" || name === "TimeoutError" ? "upstream-unavailable" : "upstream-invalid";
+}
+
 function safeRedirect(response: Response): string {
-  if (![301, 302, 303, 307, 308].includes(response.status)) throw new Error("SkillHub download did not return a redirect.");
+  if (![301, 302, 303, 307, 308].includes(response.status)) {
+    if (!response.ok || response.status >= 300) assertSuccess(response);
+    throw new Error("SkillHub download did not return a redirect.");
+  }
   const location = response.headers.get("location");
   if (!location) throw new Error("SkillHub download redirect is missing.");
   const target = new URL(location);
@@ -384,9 +396,16 @@ export function createSkillHubClient({
       if (category !== undefined && category !== null && !/^[a-z0-9][a-z0-9._-]{0,79}$/u.test(category)) throw new Error("SkillHub category is invalid.");
       if (category) url.searchParams.set("category", category);
       url.searchParams.set("labels", OFFICIAL_NOT_PAID_FILTER);
-      const response = await requestJson(url.toString(), SearchResponseSchema);
-      if (response.code !== 0) throw new Error("SkillHub API request failed.");
-      if (response.data.skills.some((item) => pricingDisposition(item) === "non-free")) throw new Error("Only explicitly free Skills are available.");
+      let response: z.infer<typeof SearchResponseSchema>;
+      try {
+        response = await requestJson(url.toString(), SearchResponseSchema);
+      } catch (error) {
+        throw tagSkillHubFailure(error, detailRequestFailure(error, false));
+      }
+      if (response.code !== 0) throw tagSkillHubFailure(new Error("SkillHub API request failed."), "upstream-invalid");
+      if (response.data.skills.some((item) => pricingDisposition(item) === "non-free")) {
+        throw tagSkillHubFailure(new Error("Only explicitly free Skills are available."), "forbidden");
+      }
       const pageProofs = new Map<string, FreeProof>();
       const omittedSlugs = new Set<string>();
       for (const item of response.data.skills) {
@@ -431,60 +450,73 @@ export function createSkillHubClient({
       const requestEpoch = catalogEpoch;
       const known = confirmedFree.get(slug);
       if (expectedVersion !== undefined && known && known.version !== expectedVersion) {
-        throw new Error("SkillHub detail version drifted from the requested catalog version.");
+        throw tagSkillHubFailure(new Error("SkillHub detail version drifted from the requested catalog version."), "identity-conflict");
       }
       const detailUrl = new URL(`/api/v1/skills/${encodeURIComponent(slug)}`, origin);
       detailUrl.searchParams.set("namespace", known?.namespace ?? "");
-      const response = await requestJson(detailUrl.toString(), DetailResponseSchema);
-      if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while loading detail.");
+      let response: z.infer<typeof DetailResponseSchema>;
+      try {
+        response = await requestJson(detailUrl.toString(), DetailResponseSchema);
+      } catch (error) {
+        throw tagSkillHubFailure(error, detailRequestFailure(error, true));
+      }
+      if (requestEpoch !== catalogEpoch) throw tagSkillHubFailure(new Error("SkillHub catalog changed while loading detail."), "identity-conflict");
       const pricing = pricingDisposition(response.skill);
       const namespace = response.namespace.handle;
       const version = response.latestVersion.version;
       if (expectedVersion !== undefined && version !== expectedVersion) {
-        throw new Error("SkillHub detail version drifted from the requested catalog version.");
+        throw tagSkillHubFailure(new Error("SkillHub detail version drifted from the requested catalog version."), "identity-conflict");
       }
       const identityMatchesProof = known !== undefined && known.slug === slug && known.namespace === namespace && known.version === version;
-      if (known && !identityMatchesProof) throw new Error("SkillHub detail identity drifted from its free catalog proof.");
+      if (known && !identityMatchesProof) throw tagSkillHubFailure(new Error("SkillHub detail identity drifted from its free catalog proof."), "identity-conflict");
       if (response.slug !== slug || response.skill.slug !== slug || pricing === "non-free" || (pricing === "unknown" && !identityMatchesProof)) {
-        if (pricing === "non-free" || (pricing === "unknown" && !identityMatchesProof)) throw new Error("Only explicitly free Skills are available.");
-        throw new Error("SkillHub detail identity mismatch.");
+        if (pricing === "non-free" || (pricing === "unknown" && !identityMatchesProof)) {
+          throw tagSkillHubFailure(new Error("Only explicitly free Skills are available."), "forbidden");
+        }
+        throw tagSkillHubFailure(new Error("SkillHub detail identity mismatch."), "identity-conflict");
       }
       if (!known) confirmedFree.set(slug, { slug, namespace, version, evidence: "explicit-free-metadata" });
       const markdownUrl = new URL(`/api/v1/skills/${encodeURIComponent(slug)}/file`, origin);
       markdownUrl.searchParams.set("path", "SKILL.md");
       markdownUrl.searchParams.set("version", version);
       markdownUrl.searchParams.set("namespace", namespace);
-      const markdown = new TextDecoder("utf-8", { fatal: true }).decode(await redirectedBody(
-        markdownUrl.toString(), MARKDOWN_LIMIT, "text/markdown, text/plain;q=0.9",
-        ["text/markdown", "text/plain", "application/octet-stream"],
-      ));
-      if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while loading detail.");
-      const frontmatter = parseSkillMarkdownFrontmatter(markdown);
-      if (
-        (frontmatter.slug !== undefined && frontmatter.slug !== slug) ||
-        (frontmatter.version !== undefined && frontmatter.version !== version)
-      ) throw new Error("SkillHub SKILL.md identity mismatch.");
-      return SkillDetailSchema.parse({
-        slug,
-        name: response.skill.displayName,
-        description: localizedText(response.skill.summary_zh, response.skill.summary),
-        version,
-        pricingType: "free",
-        installedVersion: null,
-        enabled: false,
-        updateAvailable: false,
-        source: { provider: "skillhub", url: detailUrl.toString() },
-        permissions: conservativePermissions,
-        permissionFingerprint: conservativeFingerprint,
-        risk: "high",
-        mode: "live",
-        categories: categories(response.skill.labels, response.skill.category),
-        identityFingerprint: skillIdentityFingerprint({ slug, namespace, version }),
-        logoUrl: marketplaceLogoUrl(response.skill.iconUrl),
-        ...marketplaceMetadata(response.namespace, response.skill, response.latestVersion, response),
-        readme: markdown,
-        manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },
-      });
+      let markdown: string;
+      try {
+        markdown = new TextDecoder("utf-8", { fatal: true }).decode(await redirectedBody(
+          markdownUrl.toString(), MARKDOWN_LIMIT, "text/markdown, text/plain;q=0.9",
+          ["text/markdown", "text/plain", "application/octet-stream"],
+        ));
+        // 详情身份由已验证的 SkillHub API tuple 决定；仍解析文档以拒绝畸形 frontmatter。
+        parseSkillMarkdownFrontmatter(markdown);
+      } catch (error) {
+        throw tagSkillHubFailure(error, detailRequestFailure(error, false));
+      }
+      if (requestEpoch !== catalogEpoch) throw tagSkillHubFailure(new Error("SkillHub catalog changed while loading detail."), "identity-conflict");
+      try {
+        return SkillDetailSchema.parse({
+          slug,
+          name: response.skill.displayName,
+          description: localizedText(response.skill.summary_zh, response.skill.summary),
+          version,
+          pricingType: "free",
+          installedVersion: null,
+          enabled: false,
+          updateAvailable: false,
+          source: { provider: "skillhub", url: detailUrl.toString() },
+          permissions: conservativePermissions,
+          permissionFingerprint: conservativeFingerprint,
+          risk: "high",
+          mode: "live",
+          categories: categories(response.skill.labels, response.skill.category),
+          identityFingerprint: skillIdentityFingerprint({ slug, namespace, version }),
+          logoUrl: marketplaceLogoUrl(response.skill.iconUrl),
+          ...marketplaceMetadata(response.namespace, response.skill, response.latestVersion, response),
+          readme: markdown,
+          manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },
+        });
+      } catch (error) {
+        throw tagSkillHubFailure(error, "upstream-invalid");
+      }
     },
     /** Downloads only the archive bound to the active catalog session's exact identity tuple. */
     async download(slug) {

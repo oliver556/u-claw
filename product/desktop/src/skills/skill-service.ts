@@ -24,7 +24,7 @@ import {
 import { z } from "zod";
 
 import { parseSkillMarkdownFrontmatter, validateSkillBundle, type ValidatedBundle } from "./bundle-validator.js";
-import type { SkillHubClient } from "./fixture-client.js";
+import { skillHubFailureReason, type SkillHubClient } from "./fixture-client.js";
 import { scanLocalSkills, type LocalSkillItem } from "./local-skill-scanner.js";
 import type { OpenClawSkillRuntime } from "./openclaw-skill-runtime.js";
 
@@ -102,8 +102,9 @@ const riskOrder: CapabilityRisk[] = ["low", "medium", "high", "critical"];
 const emptyState = (): SkillState => ({ schemaVersion: 1, installed: {} });
 const emptyMissing = { bins: [], anyBins: [], env: [], config: [], os: [] };
 
-function domainError(code: "FORBIDDEN" | "CONFIRMATION_REQUIRED" | "NOT_FOUND" | "CONFLICT" | "UNAVAILABLE", message: string) {
-  return UClawErrorSchema.parse({ code, message, retryable: code === "UNAVAILABLE", recoveryActions: [], causeDetails: {} });
+/** Creates a renderer-safe domain failure with explicit retry semantics. */
+function domainError(code: "FORBIDDEN" | "CONFIRMATION_REQUIRED" | "NOT_FOUND" | "CONFLICT" | "UNAVAILABLE", message: string, retryable = code === "UNAVAILABLE") {
+  return UClawErrorSchema.parse({ code, message, retryable, recoveryActions: [], causeDetails: {} });
 }
 
 function within(parent: string, child: string): boolean {
@@ -409,10 +410,18 @@ export async function createSkillService({
     try {
       found = await client.detail(slug, expectedVersion, confirmationBoundary);
     } catch (error) {
-      if (confirmationBoundary && /identity|version/iu.test(error instanceof Error ? error.message : "")) {
+      const reason = skillHubFailureReason(error);
+      const status = (error as { status?: unknown })?.status;
+      const legacyIdentityDrift = /^(?:SkillHub (?:detail (?:identity|version) drifted|catalog changed)|Skill identity changed)/u
+        .test(error instanceof Error ? error.message : "");
+      const identityDrifted = reason === "identity-conflict" || (reason === undefined && legacyIdentityDrift);
+      if (confirmationBoundary && identityDrifted) {
         throw domainError("CONFIRMATION_REQUIRED", "Skill identity changed; review the latest detail before installing.");
       }
-      throw domainError("NOT_FOUND", "Skill not found.");
+      if (reason === "forbidden") throw domainError("FORBIDDEN", "Paid Skills are not available.");
+      if (reason === "not-found" || (reason === undefined && status === 404)) throw domainError("NOT_FOUND", "Skill not found.");
+      if (identityDrifted) throw domainError("CONFLICT", "Skill catalog identity changed while loading detail.");
+      throw domainError("UNAVAILABLE", "SkillHub detail is temporarily unavailable.", reason !== "upstream-invalid");
     }
     const parsed = SkillDetailSchema.parse(found);
     if (confirmationBoundary && parsed.stale) {
@@ -420,8 +429,8 @@ export async function createSkillService({
     }
     if (expectedVersion !== undefined && parsed.version !== expectedVersion) {
       throw domainError(
-        confirmationBoundary ? "CONFIRMATION_REQUIRED" : "NOT_FOUND",
-        confirmationBoundary ? "Skill identity changed; review the latest detail before installing." : "Skill version not found.",
+        confirmationBoundary ? "CONFIRMATION_REQUIRED" : "CONFLICT",
+        confirmationBoundary ? "Skill identity changed; review the latest detail before installing." : "Skill version changed while loading detail.",
       );
     }
     if (parsed.pricingType !== "free") throw domainError("FORBIDDEN", "Paid Skills are not available.");
@@ -432,7 +441,7 @@ export async function createSkillService({
   const loadDetail = async (slug: string, expectedVersion?: string): Promise<SkillDetail> => {
     try { return await loadRemoteDetail(slug, expectedVersion); }
     catch (error) {
-      if ((error as { code?: unknown })?.code === "FORBIDDEN") throw error;
+      if ((error as { code?: unknown })?.code !== "UNAVAILABLE" || (error as { retryable?: unknown })?.retryable !== true) throw error;
       const snapshot = state.installed[slug]?.detail;
       if (snapshot && (expectedVersion === undefined || snapshot.version === expectedVersion)) {
         return { ...normalize(snapshot), ...project(snapshot) };

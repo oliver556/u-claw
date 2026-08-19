@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { SkillDetail } from "@uclaw/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { skillIdentityFingerprint, type SkillHubClient } from "../src/skills/fixture-client.js";
+import { skillIdentityFingerprint, tagSkillHubFailure, type SkillHubClient } from "../src/skills/fixture-client.js";
 import {
   createCachedSkillHubClient,
   classifySkillHubRateLimit,
@@ -284,7 +284,7 @@ describe("persistent SkillHub cache", () => {
     await initial.detail("workspace-reader");
 
     now = 25 * 60 * 60 * 1_000;
-    const failure = new Error("upstream unavailable");
+    const failure = tagSkillHubFailure(new Error("upstream unavailable"), "upstream-unavailable");
     const failing = upstream({
       search: vi.fn(async () => { throw failure; }),
       detail: vi.fn(async () => { throw failure; }),
@@ -294,6 +294,24 @@ describe("persistent SkillHub cache", () => {
     await expect(fallback.search(input)).resolves.toMatchObject({ stale: true, items: [{ slug: "workspace-reader" }] });
     await expect(fallback.detail("workspace-reader")).resolves.toMatchObject({ slug: "workspace-reader", stale: true });
   });
+
+  it.each(["not-found", "identity-conflict", "forbidden", "upstream-invalid"] as const)(
+    "does not use stale detail for a structured %s failure",
+    async (reason) => {
+      const cachePath = await makeCachePath();
+      let now = 0;
+      await createCachedSkillHubClient({ client: upstream(), cachePath, now: () => now }).detail("workspace-reader");
+      now = 25 * 60 * 60 * 1_000;
+      const failure = tagSkillHubFailure(new Error("rejected"), reason);
+      const fallback = createCachedSkillHubClient({
+        client: upstream({ detail: vi.fn(async () => { throw failure; }) }),
+        cachePath,
+        now: () => now,
+      });
+
+      await expect(fallback.detail("workspace-reader")).rejects.toBe(failure);
+    },
+  );
 
   it("bounds search and detail entries while preserving stale fallback for retained values", async () => {
     const cachePath = await makeCachePath();
@@ -318,7 +336,7 @@ describe("persistent SkillHub cache", () => {
     expect(Object.keys(persisted.details)).toHaveLength(2);
 
     now += 25 * 60 * 60 * 1_000;
-    const failure = new Error("upstream unavailable");
+    const failure = tagSkillHubFailure(new Error("upstream unavailable"), "upstream-unavailable");
     const fallback = createCachedSkillHubClient({
       client: upstream({
         search: vi.fn(async () => { throw failure; }),

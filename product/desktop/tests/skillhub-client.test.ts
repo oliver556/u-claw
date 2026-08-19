@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { parseSkillMarkdownFrontmatter, validateSkillBundle } from "../src/skills/bundle-validator.js";
 import { createSkillHubClient } from "../src/skills/skillhub-client.js";
+import { skillHubFailureReason } from "../src/skills/fixture-client.js";
 
 const namespace = { canonicalName: "@owner/workspace-reader", displayName: "owner", handle: "owner", publicSlug: "workspace-reader" };
 const searchItem = {
@@ -502,7 +503,7 @@ metadata:
     await expect(client.detail("workspace-reader")).resolves.toMatchObject({ logoUrl: null });
   });
 
-  it("rejects optional SKILL.md identity fields when they conflict with the API", async () => {
+  it("uses API identity for display when optional SKILL.md identity fields are stale", async () => {
     for (const markdown of [
       skillMd.replace("slug: workspace-reader", "slug: other-skill"),
       skillMd.replace("version: 1.0.0", "version: 2.0.0"),
@@ -511,8 +512,53 @@ metadata:
         .mockResolvedValueOnce(json(detailBody))
         .mockResolvedValueOnce(redirect("signed/skill.md"))
         .mockResolvedValueOnce(new Response(markdown, { headers: { "content-type": "text/markdown" } })) });
-      await expect(client.detail("workspace-reader")).rejects.toThrow("SKILL.md identity mismatch");
+      await expect(client.detail("workspace-reader")).resolves.toMatchObject({
+        slug: "workspace-reader",
+        version: "1.0.0",
+        name: "Workspace Reader",
+        readme: markdown,
+      });
     }
+  });
+
+  it("distinguishes a missing detail record from a missing README payload", async () => {
+    const missingDetail = createSkillHubClient({ fetch: vi.fn(async () => new Response(null, { status: 404 })) });
+    await expect(missingDetail.detail("workspace-reader")).rejects.toSatisfy((error: unknown) => skillHubFailureReason(error) === "not-found");
+
+    const missingReadme = createSkillHubClient({ fetch: vi.fn()
+      .mockResolvedValueOnce(json(detailBody))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(null, { status: 404 })) });
+    await expect(missingReadme.detail("workspace-reader")).rejects.toSatisfy((error: unknown) => skillHubFailureReason(error) === "upstream-invalid");
+  });
+
+  it.each([429, 503])("classifies README redirect HTTP %s as transient upstream failure", async (status) => {
+    const client = createSkillHubClient({ fetch: vi.fn()
+      .mockResolvedValueOnce(json(detailBody))
+      .mockResolvedValueOnce(new Response(null, { status })) });
+
+    await expect(client.detail("workspace-reader")).rejects.toSatisfy(
+      (error: unknown) => skillHubFailureReason(error) === "upstream-unavailable",
+    );
+  });
+
+  it("classifies an invalid search response so identity refresh cannot use stale detail", async () => {
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({ invalid: true })) });
+
+    await expect(client.search({ query: "", cursor: null, pageSize: 20 })).rejects.toSatisfy(
+      (error: unknown) => skillHubFailureReason(error) === "upstream-invalid",
+    );
+  });
+
+  it.each([
+    ["slug", skillMd.replace("slug: workspace-reader", "slug: other-skill")],
+    ["version", skillMd.replace("version: 1.0.0", "version: 2.0.0")],
+  ])("still rejects a downloaded bundle whose SKILL.md %s conflicts with the confirmed API identity", (_field, markdown) => {
+    expect(() => validateSkillBundle(bundleOf({ "SKILL.md": markdown }), {
+      slug: "workspace-reader",
+      version: "1.0.0",
+      permissionFingerprint: "unused-for-markdown-bundles",
+    })).toThrow("manifest does not match request");
   });
 
   it("rejects redirects to any host outside the fixed HTTPS COS boundary", async () => {

@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import { SkillDetailSchema, type SkillDetail } from "@uclaw/shared";
 import { z } from "zod";
 
-import { skillIdentityFingerprint, type SkillHubClient, type SkillHubIdentity, type SkillHubSearchResult } from "./fixture-client.js";
+import { skillHubFailureReason, skillIdentityFingerprint, tagSkillHubFailure, type SkillHubClient, type SkillHubIdentity, type SkillHubSearchResult } from "./fixture-client.js";
 
 export const SKILLHUB_SEARCH_TTL_MS = 30 * 60 * 1_000;
 export const SKILLHUB_DETAIL_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -260,7 +260,7 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
     const identity = options.client.confirmedIdentity(slug);
     if (!exact || !identity || identity.slug !== slug || identity.version !== exact.version ||
       (expectedVersion !== undefined && identity.version !== expectedVersion)) {
-      throw new Error("SkillHub identity is not confirmed by the live catalog.");
+      throw tagSkillHubFailure(new Error("SkillHub identity is not confirmed by the live catalog."), "identity-conflict");
     }
     return identity;
   });
@@ -346,17 +346,28 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
           const identity = forceRefresh
             ? await refreshLiveIdentity(slug, expectedVersion)
             : await confirmLiveIdentity(slug, expectedVersion);
-          if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while loading detail.");
+          if (requestEpoch !== catalogEpoch) throw tagSkillHubFailure(new Error("SkillHub catalog changed while loading detail."), "identity-conflict");
           // Upstream detail includes SKILL.md retrieval and validation, hence the longer README TTL.
-          const projected = publicDetail(await withRateLimitRetry(() => options.client.detail(slug, expectedVersion)));
-          if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while loading detail.");
+          const upstreamDetail = await withRateLimitRetry(() => options.client.detail(slug, expectedVersion));
+          let projected: SkillDetail;
+          try {
+            projected = publicDetail(upstreamDetail);
+          } catch (error) {
+            throw tagSkillHubFailure(error, "upstream-invalid");
+          }
+          if (requestEpoch !== catalogEpoch) throw tagSkillHubFailure(new Error("SkillHub catalog changed while loading detail."), "identity-conflict");
           const identityFingerprint = skillIdentityFingerprint(identity);
           if (projected.identityFingerprint !== undefined && projected.identityFingerprint !== identityFingerprint) {
-            throw new Error("SkillHub detail identity drifted from its live catalog proof.");
+            throw tagSkillHubFailure(new Error("SkillHub detail identity drifted from its live catalog proof."), "identity-conflict");
           }
-          const value = SkillDetailSchema.parse({ ...projected, identityFingerprint });
+          let value: SkillDetail;
+          try {
+            value = SkillDetailSchema.parse({ ...projected, identityFingerprint });
+          } catch (error) {
+            throw tagSkillHubFailure(error, "upstream-invalid");
+          }
           if (value.slug !== identity.slug || value.version !== identity.version) {
-            throw new Error("SkillHub detail identity drifted from its live catalog proof.");
+            throw tagSkillHubFailure(new Error("SkillHub detail identity drifted from its live catalog proof."), "identity-conflict");
           }
           upstreamProofs.set(slug, identity);
           confirmedDetails.set(slug, identity);
@@ -370,6 +381,8 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
           return { ...value, stale: false };
         } catch (error) {
           if (requestEpoch !== catalogEpoch) throw error;
+          const reason = skillHubFailureReason(error);
+          if (reason !== "upstream-unavailable") throw error;
           if (cached?.identity && cachedIdentityValid) {
             confirmedDetails.set(slug, cached.identity);
             return { ...cached.value, stale: true };
