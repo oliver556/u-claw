@@ -27,6 +27,13 @@ openclaw-2026.3.7.zip
 # ── OS files ──
 .DS_Store
 Thumbs.db
+.cursor/
+.playwright-cli/
+.superpowers/
+output/
+outputs/
+product/
+
 
 # ── Claude workspace ──
 .claude/
