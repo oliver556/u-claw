@@ -41,6 +41,7 @@ import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provide
 import { createMainProcessModelRouting, type ExternalModelSourceExecutors } from "./providers/model-source-router.js";
 import { createLocalApplicationRouter, defaultApplicationRoots } from "./local-actions/application-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
+import { createCachedSkillHubClient } from "./skills/skillhub-cache.js";
 import { createSkillService } from "./skills/skill-service.js";
 import { createSkillImportService } from "./skills/skill-import-service.js";
 import { createSkillInstallCoordinator } from "./skills/skill-install-coordinator.js";
@@ -759,7 +760,10 @@ export async function startElectronMain(
   const skillRuntimeRegistration = resolveSkillRuntimeRegistration(options.domainRegistrations);
   const skills = await createSkillService({
     dataDir: portablePaths.dataDir,
-    client: createSkillHubClient(),
+    client: createCachedSkillHubClient({
+      client: createSkillHubClient(),
+      cachePath: join(portablePaths.cacheDir, "skillhub-catalog.json"),
+    }),
     runtime: skillRuntimeRegistration?.runtime,
     bundledRoots: skillRuntimeRegistration?.bundledRoots ?? [],
     managedRoot: join(portablePaths.openClawState, "skills"),

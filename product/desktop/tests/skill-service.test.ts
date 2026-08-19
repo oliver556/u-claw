@@ -708,9 +708,9 @@ describe("portable Skill service", () => {
 
   it("searches only free fixture Skills with cursor pagination", async () => {
     const service = await createSkillService({ dataDir: await makeRoot(), client: createFixtureSkillHubClient() });
-    const first = await service.search({ query: "", cursor: null, pageSize: 1 });
+    const first = await service.search({ query: "", sort: "downloads", cursor: null, pageSize: 1 });
     expect(first.items).toHaveLength(1);
-    expect(first.items[0].pricingType).toBe("free");
+    expect(first.items[0]).toMatchObject({ pricingType: "free", ownerName: "U-Claw Fixtures", downloads: 879, requiresKey: false });
     expect(first.mode).toBe("fixture");
     expect(first.hasMore).toBe(true);
     const second = await service.search({ query: "", cursor: first.nextCursor, pageSize: 1 });

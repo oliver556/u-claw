@@ -75,7 +75,7 @@ type Journal = z.infer<typeof JournalSchema>;
 export interface SkillMutationInput { slug: string; confirmation: SkillConfirmation | null }
 export interface SkillBundleInstallInput { detail: SkillDetail; validated: ValidatedBundle; confirmation: SkillConfirmation }
 export interface SkillService {
-  search(input: { query: string; category?: string | null; cursor: string | null; pageSize: number }): Promise<{ items: SkillCatalogItem[]; nextCursor: string | null; hasMore: boolean; mode: "fixture" | "live" }>;
+  search(input: { query: string; category?: string | null; sort?: "score" | "downloads" | "stars" | "updatedAt"; cursor: string | null; pageSize: number }): Promise<{ items: SkillCatalogItem[]; nextCursor: string | null; hasMore: boolean; mode: "fixture" | "live" }>;
   detail(slug: string): Promise<SkillDetail>;
   localDetail(slug: string): Promise<LocalSkillDetail>;
   installed(): Promise<SkillCatalogItem[]>;
@@ -374,6 +374,7 @@ export async function createSkillService({
     const permissionFingerprint = createHash("sha256").update(JSON.stringify(detail.permissions)).digest("hex");
     return { ...detail, risk, permissionFingerprint };
   };
+  /** Combines remote catalog metadata with authoritative local install state. */
   const project = (detail: SkillDetail): SkillCatalogItem => {
     const normalized = normalize(detail);
     const record = state.installed[detail.slug];
@@ -383,6 +384,8 @@ export async function createSkillService({
       updateAvailable: record !== undefined && record.version !== normalized.version, source: normalized.source,
       permissions: normalized.permissions, permissionFingerprint: normalized.permissionFingerprint, risk: normalized.risk,
       mode: normalized.mode, categories: normalized.categories, logoUrl: normalized.logoUrl,
+      ownerName: normalized.ownerName, downloads: normalized.downloads, stars: normalized.stars,
+      requiresKey: normalized.requiresKey, updatedAt: normalized.updatedAt,
     };
   };
   const projectLocal = (item: LocalSkillItem, runtimeItem?: SkillRuntimeInventory["skills"][number]): SkillCatalogItem => {

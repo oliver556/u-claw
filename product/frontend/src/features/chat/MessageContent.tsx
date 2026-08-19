@@ -14,7 +14,8 @@ function safeExternalUrl(value: string): string | undefined {
   }
 }
 
-export function SafeMarkdown({ text }: { text: string }) {
+/** 渲染受清洗的 Markdown；不可信 Marketplace 内容可额外禁用图片请求。 */
+export function SafeMarkdown({ text, allowImages = true }: { text: string; allowImages?: boolean }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm]}
     rehypePlugins={[rehypeSanitize]}
@@ -22,6 +23,9 @@ export function SafeMarkdown({ text }: { text: string }) {
       a({ href, children }) {
         const safeHref = safeExternalUrl(href ?? "");
         return safeHref === undefined ? <span>{children}</span> : <a href={safeHref} target="_blank" rel="noreferrer noopener">{children}</a>;
+      },
+      img({ src, alt, title }) {
+        return allowImages ? <img src={src} alt={alt ?? ""} title={title} /> : <span>{alt}</span>;
       },
     }}
   >{text}</ReactMarkdown>;

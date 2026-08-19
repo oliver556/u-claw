@@ -168,6 +168,12 @@ describe("MessageContent", () => {
     expect(screen.getByText("不可打开")).toBeVisible();
   });
 
+  it("keeps Markdown images enabled for chat messages", () => {
+    const blocks: ContentBlock[] = [{ id: "markdown-image", type: "text", format: "markdown", text: "![结果图](https://example.com/result.png)" }];
+    render(<MessageContent blocks={blocks} />);
+    expect(screen.getByRole("img", { name: "结果图" })).toHaveAttribute("src", "https://example.com/result.png");
+  });
+
   it("renders a managed outgoing image", () => {
     const blocks: ContentBlock[] = [{
       id: "image-1",

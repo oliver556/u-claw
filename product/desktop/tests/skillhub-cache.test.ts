@@ -1,0 +1,220 @@
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import type { SkillDetail } from "@uclaw/shared";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { SkillHubClient } from "../src/skills/fixture-client.js";
+import {
+  createCachedSkillHubClient,
+  classifySkillHubRateLimit,
+  SKILLHUB_MAX_RETRY_AFTER_MS,
+} from "../src/skills/skillhub-cache.js";
+
+const roots: string[] = [];
+
+/** Creates an isolated cache path for one behavioral test. */
+async function makeCachePath(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "uclaw-skillhub-cache-"));
+  roots.push(root);
+  return join(root, "skillhub.json");
+}
+
+/** Produces a schema-valid public SkillHub detail without credentials. */
+function detail(slug = "workspace-reader"): SkillDetail {
+  return {
+    slug,
+    name: "Workspace Reader",
+    description: "Reads workspace files",
+    version: "1.0.0",
+    pricingType: "free",
+    installedVersion: null,
+    enabled: false,
+    updateAvailable: false,
+    source: { provider: "skillhub", url: `https://api.skillhub.cn/api/v1/skills/${slug}` },
+    permissions: [],
+    permissionFingerprint: "empty",
+    risk: "low",
+    mode: "live",
+    categories: ["productivity"],
+    logoUrl: null,
+    readme: "# Workspace Reader\n",
+    manifest: { kind: "skill", id: slug, version: "1.0.0", entry: "SKILL.md" },
+  };
+}
+
+/** Builds a minimal upstream client whose methods can be replaced per test. */
+function upstream(overrides: Partial<SkillHubClient> = {}): SkillHubClient {
+  const search: SkillHubClient["search"] = vi.fn(async () => ({
+    items: [detail()], nextCursor: null, hasMore: false, mode: "live" as const,
+  }));
+  return {
+    mode: "live",
+    search,
+    detail: vi.fn(async (slug) => detail(slug)),
+    download: vi.fn(async () => ({ sourceUrl: "https://api.skillhub.cn/download", compressedBytes: 0, checksumSha256: "empty", entries: [] })),
+    ...overrides,
+  };
+}
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+describe("persistent SkillHub cache", () => {
+  it("deduplicates concurrent catalog requests and persists schema-projected public data", async () => {
+    const cachePath = await makeCachePath();
+    let resolveSearch!: (value: Awaited<ReturnType<SkillHubClient["search"]>>) => void;
+    const search = vi.fn(() => new Promise<Awaited<ReturnType<SkillHubClient["search"]>>>((resolve) => { resolveSearch = resolve; }));
+    const client = createCachedSkillHubClient({ client: upstream({ search }), cachePath });
+    const input = { query: "private-search-text", category: "productivity", cursor: null, pageSize: 40 };
+
+    const first = client.search(input);
+    const second = client.search(input);
+    await vi.waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    resolveSearch({ items: [{ ...detail(), apiKey: "must-not-persist" } as SkillDetail], nextCursor: null, hasMore: false, mode: "live" });
+
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+    const persisted = await readFile(cachePath, "utf8");
+    expect(persisted).not.toContain("must-not-persist");
+    expect(persisted).not.toContain("private-search-text");
+    expect(await readdir(join(cachePath, ".."))).toEqual(["skillhub.json"]);
+  });
+
+  it("reuses catalog entries for 30 minutes and detail/readme entries for 24 hours across recreation", async () => {
+    const cachePath = await makeCachePath();
+    let now = 1_000;
+    const source = upstream();
+    const first = createCachedSkillHubClient({ client: source, cachePath, now: () => now });
+    const input = { query: "", cursor: null, pageSize: 40 };
+    await first.search(input);
+    await first.detail("workspace-reader");
+
+    now += 29 * 60 * 1_000;
+    const cachedSource = upstream({
+      search: vi.fn(async () => { throw new Error("offline"); }),
+      detail: vi.fn(async () => { throw new Error("offline"); }),
+    });
+    const second = createCachedSkillHubClient({ client: cachedSource, cachePath, now: () => now });
+    await expect(second.search(input)).resolves.toMatchObject({ items: [{ slug: "workspace-reader" }] });
+    await expect(second.detail("workspace-reader")).resolves.toMatchObject({
+      slug: "workspace-reader", readme: "# Workspace Reader\n",
+    });
+    expect(cachedSource.search).not.toHaveBeenCalled();
+    expect(cachedSource.detail).not.toHaveBeenCalled();
+
+    now += 2 * 60 * 1_000;
+    await expect(second.search(input)).resolves.toMatchObject({ items: [{ slug: "workspace-reader" }] });
+    expect(cachedSource.search).toHaveBeenCalledTimes(1);
+    expect(cachedSource.detail).not.toHaveBeenCalled();
+  });
+
+  it("returns stale successful values when refresh fails", async () => {
+    const cachePath = await makeCachePath();
+    let now = 0;
+    const input = { query: "", cursor: null, pageSize: 40 };
+    const initial = createCachedSkillHubClient({ client: upstream(), cachePath, now: () => now });
+    await initial.search(input);
+    await initial.detail("workspace-reader");
+
+    now = 25 * 60 * 60 * 1_000;
+    const failure = new Error("upstream unavailable");
+    const failing = upstream({
+      search: vi.fn(async () => { throw failure; }),
+      detail: vi.fn(async () => { throw failure; }),
+    });
+    const fallback = createCachedSkillHubClient({ client: failing, cachePath, now: () => now });
+
+    await expect(fallback.search(input)).resolves.toMatchObject({ stale: true, items: [{ slug: "workspace-reader" }] });
+    await expect(fallback.detail("workspace-reader")).resolves.toMatchObject({ slug: "workspace-reader", stale: true });
+  });
+
+  it("bounds search and detail entries while preserving stale fallback for retained values", async () => {
+    const cachePath = await makeCachePath();
+    let now = 0;
+    const client = createCachedSkillHubClient({
+      client: upstream(),
+      cachePath,
+      now: () => now,
+      maxSearchEntries: 2,
+      maxDetailEntries: 2,
+    });
+
+    for (const slug of ["oldest", "middle", "newest"]) {
+      now += 1;
+      await client.search({ query: slug, cursor: null, pageSize: 40 });
+      now += 1;
+      await client.detail(slug);
+    }
+
+    const persisted = JSON.parse(await readFile(cachePath, "utf8")) as { searches: object; details: object };
+    expect(Object.keys(persisted.searches)).toHaveLength(2);
+    expect(Object.keys(persisted.details)).toHaveLength(2);
+
+    now += 25 * 60 * 60 * 1_000;
+    const failure = new Error("upstream unavailable");
+    const fallback = createCachedSkillHubClient({
+      client: upstream({
+        search: vi.fn(async () => { throw failure; }),
+        detail: vi.fn(async () => { throw failure; }),
+      }),
+      cachePath,
+      now: () => now,
+      maxSearchEntries: 2,
+      maxDetailEntries: 2,
+    });
+
+    await expect(fallback.search({ query: "newest", cursor: null, pageSize: 40 })).resolves.toMatchObject({ stale: true });
+    await expect(fallback.detail("newest")).resolves.toMatchObject({ slug: "newest", stale: true });
+    await expect(fallback.search({ query: "oldest", cursor: null, pageSize: 40 })).rejects.toThrow("upstream unavailable");
+    await expect(fallback.detail("oldest")).rejects.toThrow("upstream unavailable");
+  });
+
+  it("honors Retry-After before exponential backoff and never retries unrelated failures", async () => {
+    const cachePath = await makeCachePath();
+    const rateLimited = Object.assign(new Error("rate limited"), { status: 429, retryAfter: "2" });
+    const search = vi.fn()
+      .mockRejectedValueOnce(rateLimited)
+      .mockRejectedValueOnce(Object.assign(new Error("rate limited"), { statusCode: 429 }))
+      .mockResolvedValueOnce({ items: [detail()], nextCursor: null, hasMore: false, mode: "live" });
+    const sleep = vi.fn(async () => undefined);
+    const client = createCachedSkillHubClient({ client: upstream({ search }), cachePath, sleep, retryBaseMs: 250, maxRetries: 2 });
+
+    await expect(client.search({ query: "", cursor: null, pageSize: 40 })).resolves.toMatchObject({ items: [{ slug: "workspace-reader" }] });
+    expect(sleep).toHaveBeenNthCalledWith(1, 2_000);
+    expect(sleep).toHaveBeenNthCalledWith(2, 500);
+
+    const detailFailure = vi.fn(async () => { throw new Error("invalid response"); });
+    const noRetry = createCachedSkillHubClient({ client: upstream({ detail: detailFailure }), cachePath: await makeCachePath(), sleep });
+    await expect(noRetry.detail("other-skill")).rejects.toThrow("invalid response");
+    expect(detailFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps Retry-After seconds, HTTP dates, and explicit milliseconds", () => {
+    const now = Date.parse("2026-08-20T00:00:00.000Z");
+    const farFuture = new Date(now + 24 * 60 * 60 * 1_000).toUTCString();
+
+    expect(classifySkillHubRateLimit({ status: 429, retryAfter: "999999" }, now)).toEqual({
+      retryAfterMs: SKILLHUB_MAX_RETRY_AFTER_MS,
+    });
+    expect(classifySkillHubRateLimit({ status: 429, headers: { "Retry-After": farFuture } }, now)).toEqual({
+      retryAfterMs: SKILLHUB_MAX_RETRY_AFTER_MS,
+    });
+    expect(classifySkillHubRateLimit({ status: 429, retryAfterMs: Number.MAX_SAFE_INTEGER }, now)).toEqual({
+      retryAfterMs: SKILLHUB_MAX_RETRY_AFTER_MS,
+    });
+  });
+
+  it("passes downloads through and restores live free-catalog proof after cache recreation", async () => {
+    const cachePath = await makeCachePath();
+    const source = upstream();
+    const client = createCachedSkillHubClient({ client: source, cachePath });
+
+    await client.download("workspace-reader");
+    await client.download("workspace-reader");
+
+    expect(source.download).toHaveBeenCalledTimes(2);
+    expect(source.search).toHaveBeenCalledTimes(1);
+  });
+});

@@ -12,8 +12,12 @@ const searchItem = {
   version: "1.0.0", labels: { requires_api_key: "false", pricing_type: "free", category: "productivity" }, namespace,
 };
 const detailBody = {
-  slug: "workspace-reader", namespace, latestVersion: { version: "1.0.0", changelog: null, createdAt: 1 },
-  skill: { slug: "workspace-reader", displayName: "Workspace Reader", summary: "Reads workspace files", summary_zh: null, labels: { requires_api_key: "false", pricing_type: "free", category: "productivity" } },
+  slug: "workspace-reader", namespace, latestVersion: { version: "1.0.0", changelog: null, createdAt: 1, updatedAt: "2026-08-19T12:00:00.000Z" },
+  skill: {
+    slug: "workspace-reader", displayName: "Workspace Reader", summary: "Reads workspace files", summary_zh: null,
+    labels: { requires_api_key: "false", pricing_type: "free", category: "productivity" },
+    upstream_owner_login: "upstream-owner", downloads: 879, stars: 4, requires_key: false,
+  },
 };
 const skillMd = `---
 slug: workspace-reader
@@ -112,6 +116,42 @@ metadata:
       { method: "GET", headers: { accept: "application/json" }, redirect: "error", signal: expect.any(AbortSignal) },
     );
     expect((await client.search({ query: "", cursor: null, pageSize: 20 })).items[0]?.logoUrl).toBeNull();
+  });
+
+  it("projects optional marketplace metadata and forwards the selected sort", async () => {
+    const enriched = {
+      ...searchItem,
+      upstream_owner_login: "upstream-owner",
+      downloads: 879,
+      stars: 4,
+      requires_key: true,
+      updated_at: "2026-08-19T12:00:00.000Z",
+    };
+    const fetch = vi.fn(async (_url: string) => json({ code: 0, data: { skills: [enriched], total: 1 }, message: "success" }));
+    const client = createSkillHubClient({ fetch });
+
+    await expect(client.search({ query: "", cursor: null, pageSize: 40, sort: "stars" })).resolves.toMatchObject({
+      items: [{ ownerName: "upstream-owner", downloads: 879, stars: 4, requiresKey: true, updatedAt: "2026-08-19T12:00:00.000Z" }],
+    });
+    expect(fetch.mock.calls[0]?.[0]).toContain("sort=stars");
+  });
+
+  it("ignores malformed optional marketplace metadata instead of leaking loose upstream values", async () => {
+    const malformed = {
+      ...searchItem,
+      labels: { pricing_type: "free" },
+      ownerName: { unsafe: true }, downloads: -1, stars: 2.5, requires_key: "sometimes", updatedAt: "yesterday",
+    };
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      code: 0, data: { skills: [malformed], total: 1 }, message: "success",
+    })) });
+
+    const [item] = (await client.search({ query: "", cursor: null, pageSize: 20 })).items;
+    expect(item).toMatchObject({ ownerName: "owner" });
+    expect(item).not.toHaveProperty("downloads");
+    expect(item).not.toHaveProperty("stars");
+    expect(item).not.toHaveProperty("requiresKey");
+    expect(item).not.toHaveProperty("updatedAt");
   });
 
   it.each([
@@ -275,7 +315,9 @@ metadata:
 
     await expect(client.detail("workspace-reader")).resolves.toMatchObject({
       slug: "workspace-reader", name: "Workspace Reader", description: "Reads workspace files", version: "1.0.0",
-      pricingType: "free", risk: "high", logoUrl: null, manifest: { kind: "skill", id: "workspace-reader", version: "1.0.0", entry: "SKILL.md" },
+      pricingType: "free", risk: "high", logoUrl: null, readme: canonicalSkillMd,
+      ownerName: "upstream-owner", downloads: 879, stars: 4, requiresKey: false, updatedAt: "2026-08-19T12:00:00.000Z",
+      manifest: { kind: "skill", id: "workspace-reader", version: "1.0.0", entry: "SKILL.md" },
     });
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([
       "https://api.skillhub.cn/api/v1/skills/workspace-reader?namespace=",

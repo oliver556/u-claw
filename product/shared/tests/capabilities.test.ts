@@ -4,6 +4,7 @@ import {
   CapabilityPackageKindSchema,
   SkillCuratorStatusSchema,
   SkillCatalogItemSchema,
+  SkillCatalogPageSchema,
   SkillIpcRequestSchema,
   SkillPermissionSchema,
   SkillIpcResponseSchema,
@@ -50,6 +51,31 @@ describe("capability contracts", () => {
       requestId: "bad-1",
       params: { slug: "git-tools", confirmation: { permissionFingerprint: "abc", acceptedRisk: "high" }, path: "/tmp", command: "npm install" },
     })).toThrow();
+  });
+
+  it("accepts bounded marketplace metadata and controlled search sorting", () => {
+    expect(SkillIpcRequestSchema.parse({
+      method: "skills.search",
+      requestId: "search-sort-1",
+      params: { query: "git", cursor: null, pageSize: 40, sort: "downloads" },
+    }).params).toMatchObject({ sort: "downloads" });
+    expect(() => SkillIpcRequestSchema.parse({
+      method: "skills.search",
+      requestId: "search-sort-bad",
+      params: { query: "git", cursor: null, pageSize: 40, sort: "popular" },
+    })).toThrow();
+
+    const base = {
+      slug: "one", name: "One", description: "One", version: "1.0.0", pricingType: "free",
+      installedVersion: null, enabled: false, updateAvailable: false,
+      source: { provider: "skillhub", url: "https://api.skillhub.cn/api/v1/skills/one" },
+      permissions: [], permissionFingerprint: "empty", risk: "low", mode: "live", categories: [],
+      ownerName: "owner", downloads: 879, stars: 4, requiresKey: false, updatedAt: "2026-08-19T12:00:00.000Z",
+    } as const;
+    expect(SkillCatalogItemSchema.parse(base)).toMatchObject({ ownerName: "owner", downloads: 879, stars: 4, requiresKey: false });
+    expect(SkillCatalogPageSchema.parse({ items: [base], nextCursor: null, hasMore: false, mode: "live", stale: true })).toMatchObject({ stale: true });
+    expect(() => SkillCatalogItemSchema.parse({ ...base, downloads: -1 })).toThrow();
+    expect(() => SkillCatalogItemSchema.parse({ ...base, updatedAt: "yesterday" })).toThrow();
   });
 
   it("accepts controlled Skill import and hub actions without renderer paths or URLs", () => {

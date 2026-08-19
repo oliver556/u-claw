@@ -16,6 +16,8 @@ const detail = {
   permissions: [{ kind: "command", access: "execute", target: "git", risk: "high", reason: "执行 Git 命令" }],
   permissionFingerprint: "permission-hash", risk: "high", mode: "fixture", categories: ["developer-tools"],
   manifest: { kind: "skill", id: "command-runner", version: "1.0.0", entry: "SKILL.md" },
+  ownerName: "U-Claw", downloads: 879, stars: 4, requiresKey: true,
+  readme: "---\nname: command-runner\n---\n\n# 命令运行器\n\n安全执行命令。",
 };
 
 const response = (request: any, result: unknown) => ({ method: request.method, requestId: request.requestId, ok: true, result });
@@ -48,7 +50,131 @@ const inspected = {
 };
 const manifest = { schema: "openclaw.skill-workshop.proposals-manifest.v1", updatedAt: "2026-08-12T00:00:00.000Z", proposals: [{ id: "proposal-1", kind: "create", status: "pending", title: "QA Skill", description: "Quality", skillName: "qa", skillKey: "qa", createdAt: "2026-08-12T00:00:00.000Z", updatedAt: "2026-08-12T00:00:00.000Z", scanState: "failed" }] };
 
+const renderPublicInstalledSkills = () => {
+  render(<SkillManager publicView />);
+  fireEvent.click(screen.getByRole("tab", { name: "我的技能" }));
+};
+
 describe("SkillManager", () => {
+  it("opens the public Skill library on the marketplace and keeps installed Skills in a separate tab", async () => {
+    const installed = { ...detail, installedVersion: detail.version, enabled: true, source: { provider: "openclaw", origin: "workspace" } };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.search") return response(request, { items: [detail], nextCursor: null, hasMore: false, mode: "fixture" });
+      if (request.method === "skills.detail") return response(request, detail);
+      if (request.method === "skills.installed") return response(request, [installed]);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [runtimeItem] });
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+
+    render(<SkillManager publicView />);
+
+    expect(await screen.findByRole("heading", { name: "技能商城" })).toBeVisible();
+    expect(screen.getByText("命令运行器")).toBeVisible();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "skills.search", params: { query: "", category: null, cursor: null, pageSize: 40, sort: "score" },
+    }));
+    expect(screen.getByLabelText("API Key 要求")).toHaveValue("all");
+    expect(screen.getByLabelText("技能排序")).toHaveValue("score");
+    fireEvent.click(screen.getByRole("button", { name: "查看详情 命令运行器" }));
+    const marketplaceDetail = await screen.findByRole("dialog", { name: "技能详情 命令运行器" });
+    expect(marketplaceDetail).toHaveTextContent("U-Claw");
+    expect(marketplaceDetail).toHaveTextContent("879");
+    expect(within(marketplaceDetail).getByRole("heading", { name: "命令运行器" })).toBeVisible();
+    fireEvent.click(within(marketplaceDetail).getByRole("button", { name: "关闭" }));
+    fireEvent.click(screen.getByRole("tab", { name: "我的技能" }));
+    expect(await screen.findByRole("heading", { name: "Skill" })).toBeVisible();
+    expect(screen.getByText("已安装")).toBeVisible();
+  });
+
+  it("debounces marketplace search and sends category and sort through IPC", async () => {
+    const invoke = vi.fn(async (request: any) => response(request, { items: [detail], nextCursor: null, hasMore: false, mode: "fixture" }));
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+    await screen.findByText("命令运行器");
+    invoke.mockClear();
+
+    fireEvent.change(screen.getByLabelText("搜索免费技能"), { target: { value: "command" } });
+    expect(invoke).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "skills.search", params: expect.objectContaining({ query: "command", sort: "score" }),
+    })), { timeout: 600 });
+    fireEvent.change(screen.getByLabelText("技能分类"), { target: { value: "developer-tools" } });
+    fireEvent.change(screen.getByLabelText("技能排序"), { target: { value: "downloads" } });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "skills.search", params: expect.objectContaining({ category: "developer-tools", sort: "downloads" }),
+    })));
+  });
+
+  it("filters API Key requirements locally and sanitizes marketplace README links", async () => {
+    const noKey = { ...detail, slug: "plain-skill", name: "普通技能", requiresKey: false };
+    const unknownKey = { ...detail, slug: "unknown-key-skill", name: "要求未知技能", requiresKey: undefined };
+    const unsafeDetail = { ...detail, readme: "# 命令运行器\n\n[危险链接](javascript:alert(1))\n\n![远程追踪图](https://tracker.example/pixel.png)" };
+    const invoke = vi.fn(async (request: any) => request.method === "skills.detail"
+      ? response(request, unsafeDetail)
+      : response(request, { items: [detail, noKey, unknownKey], nextCursor: null, hasMore: false, mode: "fixture" }));
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+    await screen.findByText("普通技能");
+    invoke.mockClear();
+
+    fireEvent.change(screen.getByLabelText("API Key 要求"), { target: { value: "required" } });
+    expect(screen.getByText("命令运行器")).toBeVisible();
+    expect(screen.queryByText("普通技能")).not.toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("API Key 要求"), { target: { value: "not-required" } });
+    expect(screen.getByText("普通技能")).toBeVisible();
+    expect(screen.queryByText("命令运行器")).not.toBeInTheDocument();
+    expect(screen.queryByText("要求未知技能")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("API Key 要求"), { target: { value: "required" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "查看详情 命令运行器" }));
+    const drawer = await screen.findByRole("dialog", { name: "技能详情 命令运行器" });
+    expect(within(drawer).getByText("危险链接")).not.toHaveAttribute("href");
+    expect(within(drawer).queryByRole("img", { name: "远程追踪图" })).not.toBeInTheDocument();
+  });
+
+  it("routes marketplace drawer installation through permission confirmation", async () => {
+    const invoke = vi.fn(async (request: any) => request.method === "skills.detail"
+      ? response(request, detail)
+      : response(request, { items: [detail], nextCursor: null, hasMore: false, mode: "fixture" }));
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情 命令运行器" }));
+    const drawer = await screen.findByRole("dialog", { name: "技能详情 命令运行器" });
+
+    fireEvent.click(within(drawer).getByRole("button", { name: "安装" }));
+
+    const confirmation = await screen.findByRole("dialog", { name: "确认安装命令运行器" });
+    expect(within(confirmation).getByRole("button", { name: "确认安装" })).toBeDisabled();
+    expect(invoke.mock.calls.some(([request]) => request.method === "skills.install")).toBe(false);
+  });
+
+  it("keeps the newest marketplace detail when an older request finishes later", async () => {
+    let resolveFirst!: (value: any) => void;
+    const firstDetail = new Promise((resolve) => { resolveFirst = resolve; });
+    const second = { ...detail, slug: "second-skill", name: "第二技能" };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.search") return response(request, { items: [detail, second], nextCursor: null, hasMore: false, mode: "fixture" });
+      if (request.method === "skills.detail" && request.params.slug === detail.slug) return firstDetail;
+      if (request.method === "skills.detail") return response(request, second);
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情 命令运行器" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看详情 第二技能" }));
+    expect(await screen.findByRole("dialog", { name: "技能详情 第二技能" })).toBeVisible();
+
+    resolveFirst(response({ method: "skills.detail", requestId: "first-detail" }, detail));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByRole("dialog", { name: "技能详情 第二技能" })).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "技能详情 命令运行器" })).not.toBeInTheDocument();
+  });
+
   it("renders the public installed Skill workbench with runtime status and filters", async () => {
     const installed = { ...detail, installedVersion: detail.version, enabled: true, source: { provider: "openclaw", origin: "workspace" } };
     const invoke = vi.fn(async (request: any) => {
@@ -58,7 +184,7 @@ describe("SkillManager", () => {
       throw new Error(`unexpected ${request.method}`);
     });
     window.uclaw = { skills: { invoke } } as any;
-    render(<SkillManager publicView />);
+    renderPublicInstalledSkills();
 
     expect(await screen.findByRole("heading", { name: "Skill" })).toBeVisible();
     expect(screen.getByText("已安装")).toBeVisible();
@@ -97,7 +223,7 @@ describe("SkillManager", () => {
       throw new Error(`unexpected ${request.method}`);
     });
     window.uclaw = { skills: { invoke } } as any;
-    render(<SkillManager publicView />);
+    renderPublicInstalledSkills();
 
     fireEvent.click(await screen.findByRole("switch", { name: "启用 命令运行器" }));
 
@@ -118,7 +244,7 @@ describe("SkillManager", () => {
       throw new Error(`unexpected ${request.method}`);
     });
     window.uclaw = { skills: { invoke } } as any;
-    render(<SkillManager publicView />);
+    renderPublicInstalledSkills();
 
     fireEvent.click(await screen.findByRole("switch", { name: "启用 命令运行器" }));
 
@@ -134,7 +260,7 @@ describe("SkillManager", () => {
       throw new Error(`unexpected ${request.method}`);
     });
     window.uclaw = { skills: { invoke } } as any;
-    render(<SkillManager publicView />);
+    renderPublicInstalledSkills();
 
     fireEvent.click(await screen.findByRole("button", { name: "查看 命令运行器" }));
 
@@ -151,7 +277,7 @@ describe("SkillManager", () => {
       throw new Error(`unexpected ${request.method}`);
     });
     window.uclaw = { skills: { invoke } } as any;
-    render(<SkillManager publicView />);
+    renderPublicInstalledSkills();
     await screen.findByText("尚未安装 Skill");
     fireEvent.click(screen.getByRole("button", { name: "发现更多 Skill" }));
     fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
@@ -169,7 +295,7 @@ describe("SkillManager", () => {
       throw new Error(`unexpected ${request.method}`);
     });
     window.uclaw = { skills: { invoke } } as any;
-    render(<SkillManager publicView />);
+    renderPublicInstalledSkills();
     await screen.findByText("尚未安装 Skill");
 
     fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
@@ -191,7 +317,7 @@ describe("SkillManager", () => {
       throw new Error(`unexpected ${request.method}`);
     });
     window.uclaw = { skills: { invoke } } as any;
-    render(<SkillManager publicView />);
+    renderPublicInstalledSkills();
     await screen.findByText("尚未安装 Skill");
 
     fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));

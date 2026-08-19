@@ -52,12 +52,19 @@ const SkillCatalogBaseSchema = z.object({
   mode: z.enum(["fixture", "live"]),
   categories: z.array(z.string().min(1).max(80)).max(32).default([]),
   logoUrl: SkillLogoUrlSchema.nullable().optional(),
+  ownerName: z.string().min(1).max(120).optional(),
+  downloads: z.number().int().nonnegative().optional(),
+  stars: z.number().int().nonnegative().optional(),
+  requiresKey: z.boolean().optional(),
+  updatedAt: z.iso.datetime().optional(),
 }).strict();
 
 export const SkillCatalogItemSchema = SkillCatalogBaseSchema;
 export type SkillCatalogItem = z.infer<typeof SkillCatalogItemSchema>;
 
 export const SkillDetailSchema = SkillCatalogBaseSchema.extend({
+  readme: z.string().max(1_048_576).optional(),
+  stale: z.boolean().optional(),
   manifest: z.object({
     kind: z.literal("skill"),
     id: z.string().min(1),
@@ -72,6 +79,7 @@ export const SkillCatalogPageSchema = z.object({
   nextCursor: z.string().nullable(),
   hasMore: z.boolean(),
   mode: z.enum(["fixture", "live"]),
+  stale: z.boolean().optional(),
 }).strict();
 export type SkillCatalogPage = z.infer<typeof SkillCatalogPageSchema>;
 
@@ -103,6 +111,7 @@ const RequestIdSchema = z.string().min(1);
 const SearchParamsSchema = z.object({
   query: z.string().max(120),
   category: z.string().min(1).max(80).nullable().optional(),
+  sort: z.enum(["score", "downloads", "stars", "updatedAt"]).optional(),
   cursor: z.string().nullable(),
   pageSize: z.number().int().min(1).max(50),
 }).strict();

@@ -154,6 +154,53 @@ function categories(labels: Record<string, string> | null | undefined, direct?: 
   return [...result];
 }
 
+type MarketplaceMetadata = Pick<SkillDetail, "ownerName" | "downloads" | "stars" | "requiresKey" | "updatedAt">;
+
+/** Projects only bounded, correctly typed marketplace fields from loose SkillHub payloads. */
+function marketplaceMetadata(namespace: z.infer<typeof NamespaceSchema>, ...sources: ReadonlyArray<Record<string, unknown>>): MarketplaceMetadata {
+  const entries = (keys: readonly string[]): unknown[] => sources.flatMap((source) => keys.map((key) => source[key]));
+  const text = (keys: readonly string[], max: number): string | undefined => entries(keys)
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= max)?.trim();
+  const count = (keys: readonly string[]): number | undefined => entries(keys)
+    .find((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+  const boolean = (keys: readonly string[]): boolean | undefined => {
+    for (const value of entries(keys)) {
+      if (typeof value === "boolean") return value;
+      if (typeof value === "string" && ["true", "false"].includes(value.trim().toLowerCase())) return value.trim().toLowerCase() === "true";
+    }
+    return undefined;
+  };
+  const timestamp = text(["updatedAt", "updated_at"], 80);
+  const updatedAt = timestamp !== undefined && z.iso.datetime().safeParse(timestamp).success ? timestamp : undefined;
+  const labels = sources.flatMap((source) => {
+    const candidate = source.labels;
+    return candidate !== null && typeof candidate === "object" && !Array.isArray(candidate) ? [candidate as Record<string, unknown>] : [];
+  });
+  const downloads = count(["downloads", "downloadCount", "download_count"]);
+  const stars = count(["stars", "starCount", "star_count"]);
+  const requiresKey = boolean(["requiresKey", "requires_key", "requiresApiKey", "requires_api_key"]) ??
+    marketplaceMetadataBoolean(labels, ["requiresKey", "requires_key", "requiresApiKey", "requires_api_key"]);
+  return {
+    ownerName: text(["ownerName", "owner_name", "upstream_owner_login"], 120) ?? namespace.displayName,
+    ...(downloads === undefined ? {} : { downloads }),
+    ...(stars === undefined ? {} : { stars }),
+    ...(requiresKey === undefined ? {} : { requiresKey }),
+    ...(updatedAt === undefined ? {} : { updatedAt }),
+  };
+}
+
+/** Reads a boolean label without allowing arbitrary strings into the shared contract. */
+function marketplaceMetadataBoolean(sources: ReadonlyArray<Record<string, unknown>>, keys: readonly string[]): boolean | undefined {
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === "boolean") return value;
+      if (typeof value === "string" && ["true", "false"].includes(value.trim().toLowerCase())) return value.trim().toLowerCase() === "true";
+    }
+  }
+  return undefined;
+}
+
 async function readBounded(response: Response, limit: number): Promise<Uint8Array> {
   const declared = response.headers.get("content-length");
   if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > limit)) throw new Error("SkillHub response exceeds limit.");
@@ -179,7 +226,12 @@ function responseType(response: Response): string {
 }
 
 function assertSuccess(response: Response): void {
-  if (!response.ok || response.redirected || response.status >= 300) throw new Error("SkillHub HTTP request failed.");
+  if (!response.ok || response.redirected || response.status >= 300) {
+    throw Object.assign(new Error("SkillHub HTTP request failed."), {
+      status: response.status,
+      retryAfter: response.headers.get("retry-after"),
+    });
+  }
 }
 
 function safeRedirect(response: Response): string {
@@ -262,6 +314,7 @@ export function createSkillHubClient({
     if (!allowedTypes.includes(responseType(response))) throw new Error("SkillHub response content type is invalid.");
     return readBounded(response, limit);
   };
+  /** Converts a loose upstream search record into the strict shared Skill contract. */
   const project = (item: z.infer<typeof SearchItemSchema>): SkillDetail => SkillDetailSchema.parse({
     slug: item.slug,
     name: item.name,
@@ -278,18 +331,20 @@ export function createSkillHubClient({
     mode: "live",
     categories: categories(item.labels, item.category),
     logoUrl: null,
+    ...marketplaceMetadata(item.namespace, item),
     manifest: { kind: "skill", id: item.slug, version: item.version, entry: "SKILL.md" },
   });
 
   return {
     mode: "live",
-    async search({ query, category, cursor, pageSize }): Promise<SkillHubSearchResult> {
+    async search({ query, category, sort, cursor, pageSize }): Promise<SkillHubSearchResult> {
       const page = cursor === null ? 1 : Number(cursor);
       if (!Number.isSafeInteger(page) || page < 1) throw new Error("SkillHub cursor is invalid.");
       const url = new URL("/api/skills", origin);
       url.searchParams.set("page", String(page));
       url.searchParams.set("pageSize", String(pageSize));
       url.searchParams.set("keyword", query);
+      if (sort) url.searchParams.set("sort", sort);
       if (category !== undefined && category !== null && !/^[a-z0-9][a-z0-9._-]{0,79}$/u.test(category)) throw new Error("SkillHub category is invalid.");
       if (category) url.searchParams.set("category", category);
       url.searchParams.set("labels", OFFICIAL_NOT_PAID_FILTER);
@@ -363,6 +418,8 @@ export function createSkillHubClient({
         mode: "live",
         categories: categories(response.skill.labels, response.skill.category),
         logoUrl: null,
+        ...marketplaceMetadata(response.namespace, response.skill, response.latestVersion, response),
+        readme: markdown,
         manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },
       });
     },

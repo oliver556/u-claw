@@ -21,11 +21,12 @@ export interface SkillHubSearchResult {
   nextCursor: string | null;
   hasMore: boolean;
   mode: "fixture" | "live";
+  stale?: boolean;
 }
 
 export interface SkillHubClient {
   readonly mode: "fixture" | "live";
-  search(input: { query: string; category?: string | null; cursor: string | null; pageSize: number }): Promise<SkillHubSearchResult>;
+  search(input: { query: string; category?: string | null; sort?: "score" | "downloads" | "stars" | "updatedAt"; cursor: string | null; pageSize: number }): Promise<SkillHubSearchResult>;
   detail(slug: string): Promise<SkillDetail>;
   download(slug: string): Promise<SkillBundle>;
   readonly failAfterBackup?: boolean;
@@ -54,6 +55,7 @@ export function permissionFingerprint(items: readonly SkillPermission[]): string
   return createHash("sha256").update(JSON.stringify(items)).digest("hex");
 }
 
+/** Builds a deterministic catalog/detail record for offline development and tests. */
 function detail(slug: string, pricingType: "free" | "paid" = "free", version = "1.0.0"): SkillDetail {
   const names: Record<string, string> = {
     "workspace-reader": "工作区读取器",
@@ -76,6 +78,12 @@ function detail(slug: string, pricingType: "free" | "paid" = "free", version = "
     risk: highestPermissionRisk(skillPermissions),
     mode: "fixture",
     categories: slug === "workspace-reader" ? ["productivity"] : ["developer-tools"],
+    ownerName: "U-Claw Fixtures",
+    downloads: slug === "workspace-reader" ? 879 : slug === "command-runner" ? 421 : 12,
+    stars: slug === "workspace-reader" ? 24 : slug === "command-runner" ? 11 : 1,
+    requiresKey: slug === "paid-private",
+    updatedAt: slug === "workspace-reader" ? "2026-08-19T12:00:00.000Z" : "2026-08-18T12:00:00.000Z",
+    readme: `# ${names[slug] ?? slug}\n\n${slug === "command-runner" ? "运行批准命令" : "读取便携工作区"}\n`,
     manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },
   };
 }
@@ -123,12 +131,16 @@ export function createFixtureSkillHubClient(options: FixtureOptions = {}): Skill
   return {
     mode: "fixture",
     failAfterBackup: options.failAfterBackup,
-    async search({ query, category, cursor, pageSize }) {
+    async search({ query, category, sort, cursor, pageSize }) {
       const offset = cursor === null ? 0 : Number(cursor);
       if (!Number.isSafeInteger(offset) || offset < 0 || (cursor !== null && String(offset) !== cursor)) throw new Error("Fixture SkillHub cursor is invalid.");
       const matches = catalog.filter((item) => item.pricingType === "free" &&
         (!category || item.categories.includes(category)) &&
         `${item.name} ${item.description} ${item.slug}`.toLowerCase().includes(query.trim().toLowerCase()));
+      if (sort && sort !== "score") matches.sort((left, right) => {
+        if (sort === "updatedAt") return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
+        return (right[sort] ?? 0) - (left[sort] ?? 0);
+      });
       const items = matches.slice(offset, offset + pageSize);
       const nextOffset = offset + items.length;
       return { items, nextCursor: nextOffset < matches.length ? String(nextOffset) : null, hasMore: nextOffset < matches.length, mode: "fixture" };
