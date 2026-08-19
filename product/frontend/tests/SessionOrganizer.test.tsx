@@ -135,6 +135,22 @@ describe("SessionSidebar organizer", () => {
     expect(screen.getByRole("menuitem", { name: "删除会话" })).toBeVisible();
   });
 
+  it("confirms session deletion from the portaled popover", async () => {
+    const value = props();
+    render(<SessionSidebar {...value} />);
+    const row = screen.getByRole("button", { name: /^知识库调研，/ }).closest(".session-row")!;
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除会话" }));
+    const confirmation = await screen.findByText("删除此会话？");
+    const confirmButton = within(confirmation.closest(".ant-popover-inner") as HTMLElement).getByRole("button", { name: /删\s*除/u });
+    fireEvent.mouseDown(confirmButton);
+    fireEvent.mouseUp(confirmButton);
+    fireEvent.click(confirmButton);
+
+    expect(value.onRemove).toHaveBeenCalledWith(sessions[1]);
+  });
+
   it("searches, pins, assigns and clears groups", () => {
     const value = props();
     render(<SessionSidebar {...value} />);

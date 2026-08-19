@@ -57,7 +57,7 @@ export function SessionSidebar({
     if (openSessionMenu === undefined && openGroupMenu === undefined) return;
     const closeOnOutsideInteraction = (event: MouseEvent) => {
       const target = event.target;
-      if (target instanceof Element && target.closest('.session-popover, [data-session-menu-trigger="true"]')) return;
+      if (target instanceof Element && target.closest('.session-popover, [data-session-menu-trigger="true"], .ant-popover')) return;
       setOpenSessionMenu(undefined);
       setOpenGroupMenu(undefined);
     };
