@@ -45,7 +45,7 @@ const SearchItemSchema = z.object({
 }).loose();
 const SearchResponseSchema = z.object({
   code: z.number().int(),
-  data: z.object({ skills: z.array(SearchItemSchema).max(50), total: z.number().int().nonnegative() }).strict(),
+  data: z.object({ skills: z.array(z.unknown()).max(50), total: z.number().int().nonnegative() }).strict(),
   message: z.string().max(500),
 }).strict();
 
@@ -403,12 +403,20 @@ export function createSkillHubClient({
         throw tagSkillHubFailure(error, detailRequestFailure(error, false));
       }
       if (response.code !== 0) throw tagSkillHubFailure(new Error("SkillHub API request failed."), "upstream-invalid");
-      if (response.data.skills.some((item) => pricingDisposition(item) === "non-free")) {
+      // 上游偶有孤立坏记录；逐条验证可免其污染同页合法 Skill 与 identity proof。
+      const validItems = response.data.skills.flatMap((candidate) => {
+        const parsed = SearchItemSchema.safeParse(candidate);
+        return parsed.success ? [parsed.data] : [];
+      });
+      if (response.data.skills.length > 0 && validItems.length === 0) {
+        throw tagSkillHubFailure(new Error("SkillHub search records are invalid."), "upstream-invalid");
+      }
+      if (validItems.some((item) => pricingDisposition(item) === "non-free")) {
         throw tagSkillHubFailure(new Error("Only explicitly free Skills are available."), "forbidden");
       }
       const pageProofs = new Map<string, FreeProof>();
       const omittedSlugs = new Set<string>();
-      for (const item of response.data.skills) {
+      for (const item of validItems) {
         if (omittedSlugs.has(item.slug)) continue;
         const proof: FreeProof = {
           slug: item.slug,
@@ -431,7 +439,7 @@ export function createSkillHubClient({
         }
         pageProofs.set(item.slug, proof);
       }
-      const safeItems = response.data.skills.filter((item, index, items) =>
+      const safeItems = validItems.filter((item, index, items) =>
         !omittedSlugs.has(item.slug) && items.findIndex((candidate) => candidate.slug === item.slug) === index);
       if (requestEpoch === catalogEpoch) {
         if (cursor === null) confirmedFree.clear();

@@ -46,6 +46,55 @@ function scalar(value: string): string {
   return trimmed;
 }
 
+/** 读取受限 YAML block scalar，并保留 identity parser 所需的确定性语义。 */
+function blockScalar(lines: readonly string[], start: number, end: number, header: string): { value: string; next: number } {
+  const matched = /^([|>])([+-]?)$/u.exec(header);
+  if (!matched) throw new Error("SKILL.md frontmatter scalar is invalid.");
+  const content: string[] = [];
+  let indent: number | undefined;
+  let next = start;
+  for (; next < end; next += 1) {
+    const line = lines[next]!;
+    if (line.trim() === "") {
+      content.push("");
+      continue;
+    }
+    const leading = /^( +)/u.exec(line)?.[1].length;
+    if (leading === undefined) break;
+    indent ??= leading;
+    if (leading < indent) throw new Error("SKILL.md frontmatter scalar is invalid.");
+    content.push(line.slice(indent));
+  }
+  if (indent === undefined || content.every((line) => line.trim() === "")) {
+    throw new Error("SKILL.md frontmatter scalar is invalid.");
+  }
+  const style = matched[1]!;
+  const chomp = matched[2]!;
+  let value: string;
+  if (style === "|") value = `${content.join("\n")}\n`;
+  else {
+    value = "";
+    let blankLines = 0;
+    let previous = "";
+    for (const line of content) {
+      if (line === "") {
+        blankLines += 1;
+        continue;
+      }
+      if (value === "") value = `${"\n".repeat(blankLines)}${line}`;
+      else if (blankLines > 0) value += `${"\n".repeat(blankLines)}${line}`;
+      else value += `${/^\s/u.test(previous) || /^\s/u.test(line) ? "\n" : " "}${line}`;
+      previous = line;
+      blankLines = 0;
+    }
+    value += "\n".repeat(blankLines + 1);
+  }
+  if (chomp === "-") value = value.replace(/\n+$/u, "");
+  else if (chomp !== "+") value = value.replace(/\n+$/u, "\n");
+  return { value, next };
+}
+
+/** 解析 Skill identity 所需的受限 YAML frontmatter。 */
 export function parseSkillMarkdownFrontmatter(markdown: string): SkillMarkdownFrontmatter {
   const normalized = markdown.replace(/^\uFEFF/u, "").replace(/\r\n?/gu, "\n");
   const lines = normalized.split("\n");
@@ -53,7 +102,8 @@ export function parseSkillMarkdownFrontmatter(markdown: string): SkillMarkdownFr
   const end = lines.indexOf("---", 1);
   if (end < 2) throw new Error("SKILL.md frontmatter is incomplete.");
   const values = new Map<string, string>();
-  for (const line of lines.slice(1, end)) {
+  for (let index = 1; index < end; index += 1) {
+    const line = lines[index]!;
     if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
     if (/^\s/u.test(line)) continue;
     const separator = line.indexOf(":");
@@ -62,7 +112,12 @@ export function parseSkillMarkdownFrontmatter(markdown: string): SkillMarkdownFr
     if (!/^[A-Za-z][A-Za-z0-9_-]*$/u.test(key)) throw new Error("SKILL.md frontmatter is invalid.");
     if (!["slug", "name", "displayName", "description", "summary", "version"].includes(key)) continue;
     if (values.has(key)) throw new Error("SKILL.md frontmatter is invalid.");
-    values.set(key, scalar(line.slice(separator + 1)));
+    const rawValue = line.slice(separator + 1).trim();
+    if (/^[|>]/u.test(rawValue)) {
+      const parsed = blockScalar(lines, index + 1, end, rawValue);
+      values.set(key, parsed.value);
+      index = parsed.next - 1;
+    } else values.set(key, scalar(rawValue));
   }
   const slug = values.get("slug");
   const displayName = values.get("displayName");

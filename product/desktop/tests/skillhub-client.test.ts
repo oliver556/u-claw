@@ -106,6 +106,24 @@ metadata:
 `)).toEqual({ slug: undefined, name: "free-tool-strategy", description: "Plans free tools", version: undefined });
   });
 
+  it("folds YAML block scalars and ignores whitespace-only lines when detecting indentation", () => {
+    expect(parseSkillMarkdownFrontmatter(`---
+name: Folded Skill
+description: >-
+  first line
+
+  second line
+---
+`).description).toBe("first line\nsecond line");
+    expect(parseSkillMarkdownFrontmatter(`---
+name: Literal Skill
+description: |
+${"    "}
+  actual text
+---
+`).description).toBe("\nactual text\n");
+  });
+
   it("maps the official free catalog contract with an exact credential-free request", async () => {
     const fetch = vi.fn(async () => json({ code: 0, data: { skills: [searchItem], total: 21 }, message: "success" }));
     const client = createSkillHubClient({ fetch });
@@ -521,6 +539,22 @@ metadata:
     }
   });
 
+  it("accepts a YAML block-scalar description for detail display and bundle validation", async () => {
+    const markdown = `---\nname: ima-skill\ndescription: |\n  第一行说明。\n  第二行说明。\nhomepage: https://ima.qq.com\n---\n# IMA\n`;
+    const client = createSkillHubClient({ fetch: vi.fn()
+      .mockResolvedValueOnce(json(detailBody))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(markdown, { headers: { "content-type": "text/markdown" } })) });
+
+    await expect(client.detail("workspace-reader")).resolves.toMatchObject({ readme: markdown });
+    expect(validateSkillBundle(bundleOf({ "SKILL.md": markdown }), {
+      slug: "workspace-reader",
+      version: "1.0.0",
+      permissionFingerprint: "unused-for-markdown-bundles",
+    }).manifest).toMatchObject({ id: "workspace-reader", version: "1.0.0" });
+    expect(parseSkillMarkdownFrontmatter(markdown).description).toBe("第一行说明。\n第二行说明。\n");
+  });
+
   it("distinguishes a missing detail record from a missing README payload", async () => {
     const missingDetail = createSkillHubClient({ fetch: vi.fn(async () => new Response(null, { status: 404 })) });
     await expect(missingDetail.detail("workspace-reader")).rejects.toSatisfy((error: unknown) => skillHubFailureReason(error) === "not-found");
@@ -546,6 +580,32 @@ metadata:
     const client = createSkillHubClient({ fetch: vi.fn(async () => json({ invalid: true })) });
 
     await expect(client.search({ query: "", cursor: null, pageSize: 20 })).rejects.toSatisfy(
+      (error: unknown) => skillHubFailureReason(error) === "upstream-invalid",
+    );
+  });
+
+  it("omits malformed search records without hiding valid siblings", async () => {
+    const malformed = { ...searchItem, slug: "broken-skill", namespace: null };
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      code: 0,
+      data: { skills: [searchItem, malformed], total: 2 },
+      message: "success",
+    })) });
+
+    await expect(client.search({ query: "workspace", cursor: null, pageSize: 20 })).resolves.toMatchObject({
+      items: [{ slug: "workspace-reader", version: "1.0.0" }],
+    });
+  });
+
+  it("rejects a non-empty search page when every record is malformed", async () => {
+    const malformed = { ...searchItem, namespace: null };
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      code: 0,
+      data: { skills: [malformed], total: 1 },
+      message: "success",
+    })) });
+
+    await expect(client.search({ query: "workspace", cursor: null, pageSize: 20 })).rejects.toSatisfy(
       (error: unknown) => skillHubFailureReason(error) === "upstream-invalid",
     );
   });
