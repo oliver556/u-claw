@@ -277,6 +277,33 @@ ${"    "}
     expect(client.confirmedIdentity("workspace-reader")).toBeUndefined();
   });
 
+  it("reconfirms one exact cached identity when another namespace reuses its slug", async () => {
+    const conflictingItem = {
+      ...searchItem,
+      version: "99.99.98",
+      namespace: { ...namespace, handle: "other-owner", canonicalName: "@other-owner/workspace-reader" },
+    };
+    const catalog = { code: 0, data: { skills: [searchItem, conflictingItem], total: 2 }, message: "success" };
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json(catalog))
+      .mockResolvedValueOnce(json(catalog))
+      .mockResolvedValueOnce(json(detailBody))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(canonicalSkillMd, { headers: { "content-type": "text/markdown" } }));
+    const client = createSkillHubClient({ fetch });
+
+    await expect(client.search({ query: "workspace-reader", cursor: null, pageSize: 20 })).resolves.toMatchObject({ items: [] });
+    await expect(client.refreshIdentity({ slug: "workspace-reader", namespace: "owner", version: "1.0.0" })).resolves.toEqual({
+      slug: "workspace-reader", namespace: "owner", version: "1.0.0",
+    });
+    await expect(client.detail("workspace-reader", "1.0.0")).resolves.toMatchObject({
+      slug: "workspace-reader", version: "1.0.0",
+    });
+    expect(client.confirmedIdentity("workspace-reader")).toEqual({
+      slug: "workspace-reader", namespace: "owner", version: "1.0.0",
+    });
+  });
+
   it("keeps the first catalog identity when a later page reuses its slug", async () => {
     const conflictingItem = { ...searchItem, namespace: { ...namespace, handle: "other-owner" } };
     const fetch = vi.fn()

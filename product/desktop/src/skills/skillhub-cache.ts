@@ -254,7 +254,17 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
   };
 
   /** Fetches and validates an exact live tuple without exposing namespace through public Skill data. */
-  const refreshLiveIdentity = (slug: string, expectedVersion?: string): Promise<SkillHubIdentity> => deduplicate(`proof-refresh:${slug}:${expectedVersion ?? "latest"}`, async () => {
+  const refreshLiveIdentity = (slug: string, expectedVersion?: string, expectedIdentity?: SkillHubIdentity): Promise<SkillHubIdentity> => deduplicate(`proof-refresh:${slug}:${expectedVersion ?? "latest"}:${expectedIdentity?.namespace ?? "search"}`, async () => {
+    if (expectedIdentity) {
+      if (expectedIdentity.slug !== slug || (expectedVersion !== undefined && expectedIdentity.version !== expectedVersion)) {
+        throw tagSkillHubFailure(new Error("SkillHub cached identity does not match the requested version."), "identity-conflict");
+      }
+      const refreshed = await withRateLimitRetry(() => options.client.refreshIdentity(expectedIdentity));
+      if (!sameIdentity(expectedIdentity, refreshed)) {
+        throw tagSkillHubFailure(new Error("SkillHub refreshed identity drifted from the requested tuple."), "identity-conflict");
+      }
+      return refreshed;
+    }
     const proof = await withRateLimitRetry(() => options.client.search({ query: slug, cursor: null, pageSize: 50 }));
     const exact = proof.items.find((item) => item.slug === slug);
     const identity = options.client.confirmedIdentity(slug);
@@ -279,6 +289,16 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
     /** Returns proof known by this wrapper without adding namespace to public Skill details. */
     confirmedIdentity(slug) {
       return upstreamProofs.get(slug) ?? confirmedDetails.get(slug);
+    },
+    /** Revalidates and records one exact tuple through the wrapped live client. */
+    async refreshIdentity(identity) {
+      const refreshed = await withRateLimitRetry(() => options.client.refreshIdentity(identity));
+      if (!sameIdentity(identity, refreshed)) {
+        throw tagSkillHubFailure(new Error("SkillHub refreshed identity drifted from the requested tuple."), "identity-conflict");
+      }
+      upstreamProofs.set(identity.slug, refreshed);
+      confirmedDetails.set(identity.slug, refreshed);
+      return refreshed;
     },
     /** Uses cache only for complete catalogs so cached and live pages cannot mix identity sessions. */
     async search(input) {
@@ -344,7 +364,7 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
       return deduplicate(`detail:${slug}:${expectedVersion ?? "latest"}:${forceRefresh ? "refresh" : "cached"}`, async () => {
         try {
           const identity = forceRefresh
-            ? await refreshLiveIdentity(slug, expectedVersion)
+            ? await refreshLiveIdentity(slug, expectedVersion, cached?.identity ?? confirmedDetails.get(slug) ?? upstreamProofs.get(slug))
             : await confirmLiveIdentity(slug, expectedVersion);
           if (requestEpoch !== catalogEpoch) throw tagSkillHubFailure(new Error("SkillHub catalog changed while loading detail."), "identity-conflict");
           // Upstream detail includes SKILL.md retrieval and validation, hence the longer README TTL.
@@ -397,7 +417,7 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
       // Archives are never cached, but transient rate limits still use the common retry policy.
       // A disk-cached response cannot restore the live client's in-memory free-catalog proof.
       const expected = confirmedDetails.get(slug);
-      const live = await refreshLiveIdentity(slug);
+      const live = await refreshLiveIdentity(slug, expected?.version, expected);
       if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while downloading.");
       if (expected && !sameIdentity(expected, live)) {
         throw new Error("SkillHub download identity drifted from the user-confirmed detail.");

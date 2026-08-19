@@ -351,6 +351,28 @@ export function createSkillHubClient({
     if (!allowedTypes.includes(responseType(response))) throw new Error("SkillHub response content type is invalid.");
     return readBounded(response, limit);
   };
+  /** Loads and validates one official not-paid catalog page before any identity proof is accepted. */
+  const catalogItems = async (url: URL): Promise<{ items: z.infer<typeof SearchItemSchema>[]; total: number }> => {
+    let response: z.infer<typeof SearchResponseSchema>;
+    try {
+      response = await requestJson(url.toString(), SearchResponseSchema);
+    } catch (error) {
+      throw tagSkillHubFailure(error, detailRequestFailure(error, false));
+    }
+    if (response.code !== 0) throw tagSkillHubFailure(new Error("SkillHub API request failed."), "upstream-invalid");
+    // 上游偶有孤立坏记录；逐条验证可免其污染同页合法 Skill 与 identity proof。
+    const validItems = response.data.skills.flatMap((candidate) => {
+      const parsed = SearchItemSchema.safeParse(candidate);
+      return parsed.success ? [parsed.data] : [];
+    });
+    if (response.data.skills.length > 0 && validItems.length === 0) {
+      throw tagSkillHubFailure(new Error("SkillHub search records are invalid."), "upstream-invalid");
+    }
+    if (validItems.some((item) => pricingDisposition(item) === "non-free")) {
+      throw tagSkillHubFailure(new Error("Only explicitly free Skills are available."), "forbidden");
+    }
+    return { items: validItems, total: response.data.total };
+  };
   /** Converts a loose upstream search record into the strict shared Skill contract. */
   const project = (item: z.infer<typeof SearchItemSchema>): SkillDetail => SkillDetailSchema.parse({
     slug: item.slug,
@@ -379,6 +401,29 @@ export function createSkillHubClient({
       const proof = confirmedFree.get(slug);
       return proof ? { slug: proof.slug, namespace: proof.namespace, version: proof.version } : undefined;
     },
+    /** Restores proof only when one exact cached tuple still exists in the official not-paid catalog. */
+    async refreshIdentity(identity) {
+      const requestEpoch = ++catalogEpoch;
+      const url = new URL("/api/skills", origin);
+      url.searchParams.set("page", "1");
+      url.searchParams.set("pageSize", "50");
+      url.searchParams.set("keyword", identity.slug);
+      url.searchParams.set("labels", OFFICIAL_NOT_PAID_FILTER);
+      const { items: candidates } = await catalogItems(url);
+      if (requestEpoch !== catalogEpoch) throw tagSkillHubFailure(new Error("SkillHub catalog changed while refreshing identity."), "identity-conflict");
+      const exact = candidates.filter((item) => item.slug === identity.slug &&
+        item.namespace.handle === identity.namespace && item.version === identity.version);
+      if (exact.length !== 1) {
+        throw tagSkillHubFailure(new Error("SkillHub exact identity is not confirmed by the live catalog."), "identity-conflict");
+      }
+      const proof: FreeProof = {
+        ...identity,
+        evidence: pricingDisposition(exact[0]!) === "free" ? "explicit-free-metadata" : "official-not-paid-filter",
+      };
+      confirmedFree.clear();
+      confirmedFree.set(identity.slug, proof);
+      return identity;
+    },
     /** Searches one stable catalog session; replacement requests atomically supersede older pages. */
     async search({ query, category, sort, cursor, pageSize }): Promise<SkillHubSearchResult> {
       const requestEpoch = cursor === null ? ++catalogEpoch : catalogEpoch;
@@ -396,24 +441,7 @@ export function createSkillHubClient({
       if (category !== undefined && category !== null && !/^[a-z0-9][a-z0-9._-]{0,79}$/u.test(category)) throw new Error("SkillHub category is invalid.");
       if (category) url.searchParams.set("category", category);
       url.searchParams.set("labels", OFFICIAL_NOT_PAID_FILTER);
-      let response: z.infer<typeof SearchResponseSchema>;
-      try {
-        response = await requestJson(url.toString(), SearchResponseSchema);
-      } catch (error) {
-        throw tagSkillHubFailure(error, detailRequestFailure(error, false));
-      }
-      if (response.code !== 0) throw tagSkillHubFailure(new Error("SkillHub API request failed."), "upstream-invalid");
-      // 上游偶有孤立坏记录；逐条验证可免其污染同页合法 Skill 与 identity proof。
-      const validItems = response.data.skills.flatMap((candidate) => {
-        const parsed = SearchItemSchema.safeParse(candidate);
-        return parsed.success ? [parsed.data] : [];
-      });
-      if (response.data.skills.length > 0 && validItems.length === 0) {
-        throw tagSkillHubFailure(new Error("SkillHub search records are invalid."), "upstream-invalid");
-      }
-      if (validItems.some((item) => pricingDisposition(item) === "non-free")) {
-        throw tagSkillHubFailure(new Error("Only explicitly free Skills are available."), "forbidden");
-      }
+      const { items: validItems, total } = await catalogItems(url);
       const pageProofs = new Map<string, FreeProof>();
       const omittedSlugs = new Set<string>();
       for (const item of validItems) {
@@ -448,8 +476,8 @@ export function createSkillHubClient({
       const consumed = page * pageSize;
       return {
         items: safeItems.map(project),
-        nextCursor: consumed < response.data.total ? String(page + 1) : null,
-        hasMore: consumed < response.data.total,
+        nextCursor: consumed < total ? String(page + 1) : null,
+        hasMore: consumed < total,
         mode: "live",
       };
     },

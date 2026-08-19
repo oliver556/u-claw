@@ -53,6 +53,7 @@ function upstream(overrides: Partial<SkillHubClient> = {}): SkillHubClient {
     mode: "live",
     search,
     confirmedIdentity: (slug) => ({ slug, namespace: "fixture", version: "1.0.0" }),
+    refreshIdentity: vi.fn(async (identity) => identity),
     detail: vi.fn(async (slug) => detail(slug)),
     download: vi.fn(async () => ({ sourceUrl: "https://api.skillhub.cn/download", compressedBytes: 0, checksumSha256: "empty", entries: [] })),
     ...overrides,
@@ -254,6 +255,27 @@ describe("persistent SkillHub cache", () => {
     await expect(client.detail("workspace-reader", "1.0.0")).rejects.toThrow(/identity.*drift/i);
   });
 
+  it("force-refreshes a disk-cached exact identity without relying on an ambiguous slug search", async () => {
+    const cachePath = await makeCachePath();
+    const identity = { slug: "workspace-reader", namespace: "owner-a", version: "1.0.0" };
+    const initialSource = Object.assign(upstream(), { confirmedIdentity: vi.fn(() => identity) });
+    await createCachedSkillHubClient({ client: initialSource, cachePath }).detail("workspace-reader", "1.0.0");
+    const refreshIdentity = vi.fn(async (candidate) => candidate);
+    const search = vi.fn(async () => { throw new Error("ambiguous slug search must not be used"); });
+    const restarted = createCachedSkillHubClient({
+      client: upstream({ search, refreshIdentity }),
+      cachePath,
+    });
+
+    await expect(restarted.detail("workspace-reader", "1.0.0", true)).resolves.toMatchObject({
+      slug: "workspace-reader",
+      version: "1.0.0",
+      identityFingerprint: skillIdentityFingerprint(identity),
+    });
+    expect(refreshIdentity).toHaveBeenCalledWith(identity);
+    expect(search).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["namespace", { slug: "workspace-reader", namespace: "owner-b", version: "1.0.0" }],
     ["version", { slug: "workspace-reader", namespace: "owner-a", version: "2.0.0" }],
@@ -266,12 +288,14 @@ describe("persistent SkillHub cache", () => {
     const liveItem = { ...detail(), version: liveIdentity.version, manifest: { ...detail().manifest, version: liveIdentity.version } };
     const search = vi.fn(async () => ({ items: [liveItem], nextCursor: null, hasMore: false, mode: "live" as const }));
     const download = vi.fn(async () => ({ sourceUrl: "https://api.skillhub.cn/download", compressedBytes: 0, checksumSha256: "empty", entries: [] }));
-    const restartedSource = Object.assign(upstream({ search, download }), { confirmedIdentity: vi.fn(() => liveIdentity) });
+    const refreshIdentity = vi.fn(async () => liveIdentity);
+    const restartedSource = Object.assign(upstream({ search, download, refreshIdentity }), { confirmedIdentity: vi.fn(() => liveIdentity) });
     const restarted = createCachedSkillHubClient({ client: restartedSource, cachePath });
 
     await expect(restarted.detail("workspace-reader")).resolves.toMatchObject({ slug: "workspace-reader", version: "1.0.0" });
     await expect(restarted.download("workspace-reader")).rejects.toThrow(/identity.*drift/i);
-    expect(search).toHaveBeenCalledOnce();
+    expect(refreshIdentity).toHaveBeenCalledOnce();
+    expect(search).not.toHaveBeenCalled();
     expect(download).not.toHaveBeenCalled();
   });
 

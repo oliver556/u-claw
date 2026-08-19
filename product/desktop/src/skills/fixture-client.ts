@@ -51,6 +51,8 @@ export interface SkillHubClient {
   search(input: { query: string; category?: string | null; sort?: "score" | "downloads" | "stars" | "updatedAt"; cursor: string | null; pageSize: number }): Promise<SkillHubSearchResult>;
   /** Returns an already validated private identity tuple without projecting namespace publicly. */
   confirmedIdentity(slug: string): SkillHubIdentity | undefined;
+  /** Revalidates one previously selected exact tuple against the authoritative free catalog. */
+  refreshIdentity(identity: SkillHubIdentity): Promise<SkillHubIdentity>;
   detail(slug: string, expectedVersion?: string, forceRefresh?: boolean): Promise<SkillDetail>;
   download(slug: string): Promise<SkillBundle>;
   readonly failAfterBackup?: boolean;
@@ -169,6 +171,14 @@ export function createFixtureSkillHubClient(options: FixtureOptions = {}): Skill
     confirmedIdentity(slug) {
       const found = catalog.find((item) => item.slug === slug);
       return found ? { slug, namespace: "fixture", version: found.version } : undefined;
+    },
+    /** Revalidates the complete fixture tuple so tests exercise production identity pinning. */
+    async refreshIdentity(identity) {
+      const current = catalog.find((item) => item.slug === identity.slug);
+      if (!current || identity.namespace !== "fixture" || identity.version !== current.version) {
+        throw tagSkillHubFailure(new Error("Fixture Skill identity mismatch."), "identity-conflict");
+      }
+      return identity;
     },
     async search({ query, category, sort, cursor, pageSize }) {
       const offset = cursor === null ? 0 : Number(cursor);
