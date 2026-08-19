@@ -31,7 +31,7 @@ const DetailEntrySchema = z.object({
   identity: SkillHubIdentitySchema.optional(),
 }).strict();
 const CacheStateSchema = z.object({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.literal(3),
   searches: z.record(z.string(), SearchEntrySchema),
   details: z.record(z.string(), DetailEntrySchema),
   detailVersions: z.record(z.string(), z.string().min(1)).default({}),
@@ -56,7 +56,7 @@ export interface CachedSkillHubClientOptions {
 
 /** Creates an empty, versioned cache state. */
 function emptyState(): CacheState {
-  return { schemaVersion: 2, searches: {}, details: {}, detailVersions: {} };
+  return { schemaVersion: 3, searches: {}, details: {}, detailVersions: {} };
 }
 
 /** Reads only schema-valid public cache data; missing or corrupt caches are cold starts. */
@@ -217,6 +217,7 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
   const inFlight = new Map<string, Promise<unknown>>();
   const upstreamProofs = new Map<string, SkillHubIdentity>();
   const confirmedDetails = new Map<string, SkillHubIdentity>();
+  let catalogEpoch = 0;
 
   /** Loads persistent state once before the first cache lookup. */
   const load = async (): Promise<void> => {
@@ -261,7 +262,6 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
       (expectedVersion !== undefined && identity.version !== expectedVersion)) {
       throw new Error("SkillHub identity is not confirmed by the live catalog.");
     }
-    upstreamProofs.set(slug, identity);
     return identity;
   });
 
@@ -280,17 +280,35 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
     confirmedIdentity(slug) {
       return upstreamProofs.get(slug) ?? confirmedDetails.get(slug);
     },
+    /** Uses cache only for complete catalogs so cached and live pages cannot mix identity sessions. */
     async search(input) {
       await load();
       const key = searchKey(input);
+      const operationKey = `search:${key}`;
+      const joinsPendingReplacement = input.cursor === null && inFlight.has(operationKey);
+      const requestEpoch = input.cursor === null && !joinsPendingReplacement ? ++catalogEpoch : catalogEpoch;
+      const priorProofs = input.cursor === null ? new Map<string, SkillHubIdentity>() : new Map(upstreamProofs);
+      if (input.cursor === null && !joinsPendingReplacement) upstreamProofs.clear();
       const cached = state.searches[key];
-      if (cached && now() - cached.storedAt < searchTtlMs) return { ...cached.value, stale: false };
-      return deduplicate(`search:${key}`, async () => {
+      if (cached && !cached.value.hasMore && now() - cached.storedAt < searchTtlMs) return { ...cached.value, stale: false };
+      return deduplicate(operationKey, async () => {
         try {
-          const value = publicSearchResult(await withRateLimitRetry(() => options.client.search(input)));
-          for (const item of value.items) {
+          const projected = publicSearchResult(await withRateLimitRetry(() => options.client.search(input)));
+          if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while loading search results.");
+          const accepted: SkillDetail[] = [];
+          const pageProofs = new Map<string, SkillHubIdentity>();
+          for (const item of projected.items) {
             const identity = options.client.confirmedIdentity(item.slug);
-            if (identity && identity.version === item.version) upstreamProofs.set(item.slug, identity);
+            if (!identity || identity.version !== item.version) continue;
+            const prior = priorProofs.get(item.slug) ?? pageProofs.get(item.slug);
+            if (prior && !sameIdentity(prior, identity)) continue;
+            pageProofs.set(item.slug, identity);
+            accepted.push(item);
+          }
+          const value = publicSearchResult({ ...projected, items: accepted });
+          if (requestEpoch === catalogEpoch) {
+            if (input.cursor === null) upstreamProofs.clear();
+            for (const [slug, identity] of pageProofs) upstreamProofs.set(slug, identity);
           }
           state.searches[key] = { storedAt: now(), value };
           pruneOldestEntries(state.searches, maxSearchEntries);
@@ -298,19 +316,26 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
           await persist().catch(() => undefined);
           return { ...value, stale: false };
         } catch (error) {
-          if (cached) return { ...cached.value, stale: true };
+          if (requestEpoch !== catalogEpoch) throw error;
+          if (cached) return { ...cached.value, nextCursor: null, hasMore: false, stale: true };
           throw error;
         }
       });
     },
+    /** Returns a cached detail only when it still matches the active catalog identity. */
     async detail(slug, expectedVersion, forceRefresh = false) {
       await load();
+      const requestEpoch = catalogEpoch;
       const cachedVersion = expectedVersion ?? state.detailVersions[slug];
       const key = cachedVersion ? detailKey(slug, cachedVersion) : undefined;
       const cached = key ? state.details[key] : undefined;
       const cachedFingerprint = cached?.identity ? skillIdentityFingerprint(cached.identity) : undefined;
+      const activeProof = upstreamProofs.get(slug);
       const cachedIdentityValid = cached?.identity !== undefined &&
         cached.value.identityFingerprint === cachedFingerprint &&
+        (activeProof === undefined || (expectedVersion === undefined
+          ? sameIdentity(cached.identity, activeProof)
+          : cached.identity.namespace === activeProof.namespace)) &&
         (expectedVersion === undefined || cached.value.version === expectedVersion);
       if (!forceRefresh && cached?.identity && cachedIdentityValid && now() - cached.storedAt < detailTtlMs) {
         confirmedDetails.set(slug, cached.identity);
@@ -321,12 +346,19 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
           const identity = forceRefresh
             ? await refreshLiveIdentity(slug, expectedVersion)
             : await confirmLiveIdentity(slug, expectedVersion);
+          if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while loading detail.");
           // Upstream detail includes SKILL.md retrieval and validation, hence the longer README TTL.
           const projected = publicDetail(await withRateLimitRetry(() => options.client.detail(slug, expectedVersion)));
-          const value = SkillDetailSchema.parse({ ...projected, identityFingerprint: skillIdentityFingerprint(identity) });
+          if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while loading detail.");
+          const identityFingerprint = skillIdentityFingerprint(identity);
+          if (projected.identityFingerprint !== undefined && projected.identityFingerprint !== identityFingerprint) {
+            throw new Error("SkillHub detail identity drifted from its live catalog proof.");
+          }
+          const value = SkillDetailSchema.parse({ ...projected, identityFingerprint });
           if (value.slug !== identity.slug || value.version !== identity.version) {
             throw new Error("SkillHub detail identity drifted from its live catalog proof.");
           }
+          upstreamProofs.set(slug, identity);
           confirmedDetails.set(slug, identity);
           state.details[detailKey(slug, value.version)] = { storedAt: now(), value, identity };
           state.detailVersions[slug] = value.version;
@@ -337,6 +369,7 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
           await persist().catch(() => undefined);
           return { ...value, stale: false };
         } catch (error) {
+          if (requestEpoch !== catalogEpoch) throw error;
           if (cached?.identity && cachedIdentityValid) {
             confirmedDetails.set(slug, cached.identity);
             return { ...cached.value, stale: true };
@@ -345,15 +378,21 @@ export function createCachedSkillHubClient(options: CachedSkillHubClientOptions)
         }
       });
     },
+    /** Refreshes the live tuple before returning any uncached install archive. */
     async download(slug) {
+      const requestEpoch = catalogEpoch;
       // Archives are never cached, but transient rate limits still use the common retry policy.
       // A disk-cached response cannot restore the live client's in-memory free-catalog proof.
       const expected = confirmedDetails.get(slug);
       const live = await refreshLiveIdentity(slug);
+      if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while downloading.");
       if (expected && !sameIdentity(expected, live)) {
         throw new Error("SkillHub download identity drifted from the user-confirmed detail.");
       }
-      return withRateLimitRetry(() => options.client.download(slug));
+      upstreamProofs.set(slug, live);
+      const bundle = await withRateLimitRetry(() => options.client.download(slug));
+      if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while downloading.");
+      return bundle;
     },
   };
 }

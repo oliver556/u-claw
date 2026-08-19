@@ -227,6 +227,33 @@ describe("SkillManager", () => {
     })));
   });
 
+  it("shows loading while a category replacement is pending", async () => {
+    let resolveFiltered!: (value: ReturnType<typeof response>) => void;
+    const filtered = { ...detail, slug: "office-helper", name: "办公助手" };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.params.category === "office-efficiency") {
+        return new Promise<ReturnType<typeof response>>((resolve) => { resolveFiltered = resolve; });
+      }
+      return response(request, { items: [detail], nextCursor: null, hasMore: false, mode: "live" });
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    expect(await screen.findByText("命令运行器")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("技能分类"), { target: { value: "office-efficiency" } });
+    const results = screen.getByRole("region", { name: "技能搜索结果" });
+    await vi.waitFor(() => expect(results).toHaveAttribute("aria-busy", "true"));
+    expect(screen.getByText("正在加载免费技能")).toBeVisible();
+    expect(screen.queryByLabelText("免费技能列表")).not.toBeInTheDocument();
+    expect(screen.queryByText("命令运行器")).not.toBeInTheDocument();
+
+    resolveFiltered(response({ method: "skills.search", requestId: "filtered" }, {
+      items: [filtered], nextCursor: null, hasMore: false, mode: "live",
+    }));
+    expect(await screen.findByText("办公助手")).toBeVisible();
+    expect(results).toHaveAttribute("aria-busy", "false");
+  });
+
   it("filters API Key requirements locally and sanitizes marketplace README links", async () => {
     const noKey = { ...detail, slug: "plain-skill", name: "普通技能", requiresKey: false };
     const unknownKey = { ...detail, slug: "unknown-key-skill", name: "要求未知技能", requiresKey: undefined };
@@ -652,7 +679,7 @@ describe("SkillManager", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
       method: "skills.search", params: expect.objectContaining({ category: "developer-tools" }),
     })));
-    fireEvent.click(screen.getByRole("button", { name: "查看详情 命令运行器" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看详情 命令运行器" }));
     const dialog = await screen.findByRole("dialog", { name: "技能详情 命令运行器" });
     expect(dialog).toHaveTextContent("developer-tools");
     expect(dialog).toHaveTextContent("git");
@@ -669,6 +696,20 @@ describe("SkillManager", () => {
     fireEvent.change(screen.getByLabelText("技能分类"), { target: { value: "writing" } });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
       method: "skills.search", params: expect.objectContaining({ category: "writing" }),
+    })));
+  });
+
+  it("shows official Chinese marketplace categories while sending their stable SkillHub keys", async () => {
+    const invoke = vi.fn(async (request: any) => response(request, { items: [detail], nextCursor: null, hasMore: false, mode: "live" }));
+    window.uclaw = { skills: { invoke } } as any;
+    render(<SkillManager publicView />);
+
+    expect(await screen.findByRole("option", { name: "付费技能" })).toBeDisabled();
+    expect(await screen.findByRole("option", { name: "办公效率" })).toHaveValue("office-efficiency");
+    expect(screen.getByRole("option", { name: "AI 智能体" })).toHaveValue("ai-agent");
+    fireEvent.change(screen.getByLabelText("技能分类"), { target: { value: "office-efficiency" } });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "skills.search", params: expect.objectContaining({ category: "office-efficiency" }),
     })));
   });
 

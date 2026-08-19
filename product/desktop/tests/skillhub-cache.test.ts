@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { SkillDetail } from "@uclaw/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { SkillHubClient } from "../src/skills/fixture-client.js";
+import { skillIdentityFingerprint, type SkillHubClient } from "../src/skills/fixture-client.js";
 import {
   createCachedSkillHubClient,
   classifySkillHubRateLimit,
@@ -125,6 +125,60 @@ describe("persistent SkillHub cache", () => {
     expect(cachedSource.detail).not.toHaveBeenCalled();
   });
 
+  it("refreshes paginated first pages so cached and live identity sessions cannot mix", async () => {
+    const cachePath = await makeCachePath();
+    const input = { query: "", cursor: null, pageSize: 40 };
+    const paginatedSearch = vi.fn(async () => ({
+      items: [detail()], nextCursor: "2", hasMore: true, mode: "live" as const,
+    }));
+    await createCachedSkillHubClient({ client: upstream({ search: paginatedSearch }), cachePath }).search(input);
+    const refreshedSearch = vi.fn(async () => ({
+      items: [detail()], nextCursor: "2", hasMore: true, mode: "live" as const,
+    }));
+
+    await expect(createCachedSkillHubClient({ client: upstream({ search: refreshedSearch }), cachePath }).search(input)).resolves.toMatchObject({
+      items: [{ slug: "workspace-reader" }], hasMore: true,
+    });
+    expect(refreshedSearch).toHaveBeenCalledOnce();
+  });
+
+  it("does not cache an older replacement response after a newer catalog wins", async () => {
+    const cachePath = await makeCachePath();
+    const inputA = { query: "", category: "office-efficiency", cursor: null, pageSize: 40 };
+    const inputB = { query: "", category: "education", cursor: null, pageSize: 40 };
+    const identityA = { slug: "workspace-reader", namespace: "owner-a", version: "1.0.0" };
+    const identityB = { slug: "workspace-reader", namespace: "owner-b", version: "1.0.0" };
+    let currentIdentity = identityA;
+    let resolveA!: (value: Awaited<ReturnType<SkillHubClient["search"]>>) => void;
+    let resolveB!: (value: Awaited<ReturnType<SkillHubClient["search"]>>) => void;
+    const search = vi.fn((input: Parameters<SkillHubClient["search"]>[0]) =>
+      new Promise<Awaited<ReturnType<SkillHubClient["search"]>>>((resolve) => {
+        if (input.category === "office-efficiency") resolveA = resolve;
+        else resolveB = resolve;
+      }));
+    const source = Object.assign(upstream({ search }), { confirmedIdentity: vi.fn(() => currentIdentity) });
+    const client = createCachedSkillHubClient({ client: source, cachePath });
+
+    const older = client.search(inputA);
+    await vi.waitFor(() => expect(search).toHaveBeenCalledTimes(1));
+    const newer = client.search(inputB);
+    await vi.waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+    currentIdentity = identityB;
+    resolveB({ items: [detail()], nextCursor: null, hasMore: false, mode: "live" });
+    await expect(newer).resolves.toMatchObject({ items: [{ slug: "workspace-reader" }] });
+    resolveA({ items: [detail()], nextCursor: null, hasMore: false, mode: "live" });
+    await expect(older).rejects.toThrow(/catalog changed/i);
+
+    currentIdentity = identityA;
+    const refreshedSearch = vi.fn(async () => ({ items: [detail()], nextCursor: null, hasMore: false, mode: "live" as const }));
+    const restarted = createCachedSkillHubClient({
+      client: Object.assign(upstream({ search: refreshedSearch }), { confirmedIdentity: vi.fn(() => identityA) }),
+      cachePath,
+    });
+    await restarted.search(inputA);
+    expect(refreshedSearch).toHaveBeenCalledOnce();
+  });
+
   it("restores live identity proof before uncached detail after a disk-cached search", async () => {
     const cachePath = await makeCachePath();
     const input = { query: "", cursor: null, pageSize: 40 };
@@ -186,6 +240,18 @@ describe("persistent SkillHub cache", () => {
     await expect(client.detail("workspace-reader", "1.0.0")).resolves.toMatchObject({ version: "1.0.0", readme: expect.stringContaining("1.0.0") });
 
     expect(detailRequest.mock.calls.map(([, expectedVersion]) => expectedVersion)).toEqual(["1.0.0", "2.0.0"]);
+  });
+
+  it("rejects a detail whose upstream namespace fingerprint conflicts with the live proof", async () => {
+    const cachePath = await makeCachePath();
+    const identity = { slug: "workspace-reader", namespace: "owner-a", version: "1.0.0" };
+    const conflicting = { ...identity, namespace: "owner-b" };
+    const source = Object.assign(upstream({
+      detail: vi.fn(async () => ({ ...detail(), identityFingerprint: skillIdentityFingerprint(conflicting) })),
+    }), { confirmedIdentity: vi.fn(() => identity) });
+    const client = createCachedSkillHubClient({ client: source, cachePath });
+
+    await expect(client.detail("workspace-reader", "1.0.0")).rejects.toThrow(/identity.*drift/i);
   });
 
   it.each([

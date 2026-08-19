@@ -35,8 +35,8 @@ const LabelsSchema = z.record(z.string(), z.string()).nullable().optional();
 const SearchItemSchema = z.object({
   slug: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/),
   name: z.string().min(1).max(120),
-  description: z.string().max(1_000),
-  description_zh: z.string().max(1_000).nullable().optional(),
+  description: z.string().max(JSON_LIMIT),
+  description_zh: z.string().max(JSON_LIMIT).nullable().optional(),
   version: z.string().min(1).max(80),
   labels: LabelsSchema,
   category: z.string().max(80).nullable().optional(),
@@ -56,8 +56,8 @@ const DetailResponseSchema = z.object({
   skill: z.object({
     slug: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/),
     displayName: z.string().min(1).max(120),
-    summary: z.string().max(1_000),
-    summary_zh: z.string().max(1_000).nullable().optional(),
+    summary: z.string().max(JSON_LIMIT),
+    summary_zh: z.string().max(JSON_LIMIT).nullable().optional(),
     labels: LabelsSchema,
     category: z.string().max(80).nullable().optional(),
     iconUrl: z.unknown().optional(),
@@ -154,6 +154,13 @@ function categories(labels: Record<string, string> | null | undefined, direct?: 
     }
   }
   return [...result];
+}
+
+/** Uses localized copy only when it contains visible text. */
+function localizedText(localized: string | null | undefined, fallback: string): string {
+  const selected = localized?.trim() ? localized : fallback;
+  const truncated = selected.slice(0, 1_000);
+  return /[\uD800-\uDBFF]$/u.test(truncated) ? truncated.slice(0, -1) : truncated;
 }
 
 /** Projects an upstream icon only when it uses an exact trusted SkillHub HTTPS host. */
@@ -310,6 +317,7 @@ export function createSkillHubClient({
     evidence: "explicit-free-metadata" | "official-not-paid-filter";
   };
   const confirmedFree = new Map<string, FreeProof>();
+  let catalogEpoch = 0;
   const request = (url: string, redirect: RequestRedirect = "error", accept = "application/json") => fetch(url, {
     method: "GET",
     headers: { accept },
@@ -335,7 +343,7 @@ export function createSkillHubClient({
   const project = (item: z.infer<typeof SearchItemSchema>): SkillDetail => SkillDetailSchema.parse({
     slug: item.slug,
     name: item.name,
-    description: item.description_zh ?? item.description,
+    description: localizedText(item.description_zh, item.description),
     version: item.version,
     pricingType: "free",
     installedVersion: null,
@@ -359,14 +367,20 @@ export function createSkillHubClient({
       const proof = confirmedFree.get(slug);
       return proof ? { slug: proof.slug, namespace: proof.namespace, version: proof.version } : undefined;
     },
+    /** Searches one stable catalog session; replacement requests atomically supersede older pages. */
     async search({ query, category, sort, cursor, pageSize }): Promise<SkillHubSearchResult> {
+      const requestEpoch = cursor === null ? ++catalogEpoch : catalogEpoch;
+      const priorProofs = cursor === null ? new Map<string, FreeProof>() : new Map(confirmedFree);
       const page = cursor === null ? 1 : Number(cursor);
       if (!Number.isSafeInteger(page) || page < 1) throw new Error("SkillHub cursor is invalid.");
       const url = new URL("/api/skills", origin);
       url.searchParams.set("page", String(page));
       url.searchParams.set("pageSize", String(pageSize));
       url.searchParams.set("keyword", query);
-      if (sort) url.searchParams.set("sort", sort);
+      if (sort) {
+        url.searchParams.set("sortBy", sort === "updatedAt" ? "updated_at" : sort);
+        url.searchParams.set("order", "desc");
+      }
       if (category !== undefined && category !== null && !/^[a-z0-9][a-z0-9._-]{0,79}$/u.test(category)) throw new Error("SkillHub category is invalid.");
       if (category) url.searchParams.set("category", category);
       url.searchParams.set("labels", OFFICIAL_NOT_PAID_FILTER);
@@ -374,7 +388,9 @@ export function createSkillHubClient({
       if (response.code !== 0) throw new Error("SkillHub API request failed.");
       if (response.data.skills.some((item) => pricingDisposition(item) === "non-free")) throw new Error("Only explicitly free Skills are available.");
       const pageProofs = new Map<string, FreeProof>();
+      const omittedSlugs = new Set<string>();
       for (const item of response.data.skills) {
+        if (omittedSlugs.has(item.slug)) continue;
         const proof: FreeProof = {
           slug: item.slug,
           namespace: item.namespace.handle,
@@ -383,14 +399,28 @@ export function createSkillHubClient({
         };
         const duplicate = pageProofs.get(item.slug);
         if (duplicate && (duplicate.namespace !== proof.namespace || duplicate.version !== proof.version)) {
-          throw new Error("SkillHub catalog identity is ambiguous.");
+          // A conflicting slug cannot be installed safely, but unrelated catalog records remain usable.
+          pageProofs.delete(item.slug);
+          omittedSlugs.add(item.slug);
+          continue;
+        }
+        const prior = priorProofs.get(item.slug);
+        if (prior && (prior.namespace !== proof.namespace || prior.version !== proof.version)) {
+          // Pagination retains the first visible tuple so an appended page cannot retarget its card.
+          omittedSlugs.add(item.slug);
+          continue;
         }
         pageProofs.set(item.slug, proof);
       }
-      for (const [slug, proof] of pageProofs) confirmedFree.set(slug, proof);
+      const safeItems = response.data.skills.filter((item, index, items) =>
+        !omittedSlugs.has(item.slug) && items.findIndex((candidate) => candidate.slug === item.slug) === index);
+      if (requestEpoch === catalogEpoch) {
+        if (cursor === null) confirmedFree.clear();
+        for (const [slug, proof] of pageProofs) confirmedFree.set(slug, proof);
+      }
       const consumed = page * pageSize;
       return {
-        items: response.data.skills.map(project),
+        items: safeItems.map(project),
         nextCursor: consumed < response.data.total ? String(page + 1) : null,
         hasMore: consumed < response.data.total,
         mode: "live",
@@ -398,6 +428,7 @@ export function createSkillHubClient({
     },
     /** Loads README only when live identity still matches the catalog version selected by the user. */
     async detail(slug, expectedVersion) {
+      const requestEpoch = catalogEpoch;
       const known = confirmedFree.get(slug);
       if (expectedVersion !== undefined && known && known.version !== expectedVersion) {
         throw new Error("SkillHub detail version drifted from the requested catalog version.");
@@ -405,6 +436,7 @@ export function createSkillHubClient({
       const detailUrl = new URL(`/api/v1/skills/${encodeURIComponent(slug)}`, origin);
       detailUrl.searchParams.set("namespace", known?.namespace ?? "");
       const response = await requestJson(detailUrl.toString(), DetailResponseSchema);
+      if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while loading detail.");
       const pricing = pricingDisposition(response.skill);
       const namespace = response.namespace.handle;
       const version = response.latestVersion.version;
@@ -417,7 +449,7 @@ export function createSkillHubClient({
         if (pricing === "non-free" || (pricing === "unknown" && !identityMatchesProof)) throw new Error("Only explicitly free Skills are available.");
         throw new Error("SkillHub detail identity mismatch.");
       }
-      confirmedFree.set(slug, known ?? { slug, namespace, version, evidence: "explicit-free-metadata" });
+      if (!known) confirmedFree.set(slug, { slug, namespace, version, evidence: "explicit-free-metadata" });
       const markdownUrl = new URL(`/api/v1/skills/${encodeURIComponent(slug)}/file`, origin);
       markdownUrl.searchParams.set("path", "SKILL.md");
       markdownUrl.searchParams.set("version", version);
@@ -426,6 +458,7 @@ export function createSkillHubClient({
         markdownUrl.toString(), MARKDOWN_LIMIT, "text/markdown, text/plain;q=0.9",
         ["text/markdown", "text/plain", "application/octet-stream"],
       ));
+      if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while loading detail.");
       const frontmatter = parseSkillMarkdownFrontmatter(markdown);
       if (
         (frontmatter.slug !== undefined && frontmatter.slug !== slug) ||
@@ -433,8 +466,8 @@ export function createSkillHubClient({
       ) throw new Error("SkillHub SKILL.md identity mismatch.");
       return SkillDetailSchema.parse({
         slug,
-        name: frontmatter.name,
-        description: frontmatter.description,
+        name: response.skill.displayName,
+        description: localizedText(response.skill.summary_zh, response.skill.summary),
         version,
         pricingType: "free",
         installedVersion: null,
@@ -453,13 +486,16 @@ export function createSkillHubClient({
         manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },
       });
     },
+    /** Downloads only the archive bound to the active catalog session's exact identity tuple. */
     async download(slug) {
+      const requestEpoch = catalogEpoch;
       const known = confirmedFree.get(slug);
       if (!known) throw new Error("SkillHub download identity is not confirmed.");
       const filesUrl = new URL(`/api/v1/skills/${encodeURIComponent(slug)}/files`, origin);
       filesUrl.searchParams.set("version", known.version);
       filesUrl.searchParams.set("namespace", known.namespace);
       const listing = await requestJson(filesUrl.toString(), FilesResponseSchema);
+      if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while downloading.");
       if (listing.version !== known.version || listing.namespace.handle !== known.namespace) {
         throw new Error("SkillHub download identity mismatch.");
       }
@@ -484,6 +520,7 @@ export function createSkillHubClient({
         downloadUrl.toString(), ZIP_LIMIT, "application/zip",
         ["application/zip", "application/x-zip-compressed", "application/octet-stream"],
       );
+      if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while downloading.");
       const zip = await JSZip.loadAsync(archive);
       if (Object.keys(zip.files).length > FILE_COUNT_LIMIT) throw new Error("SkillHub ZIP entry count exceeds limit.");
       const archivePaths = new Map<string, "file" | "directory">();
@@ -513,6 +550,7 @@ export function createSkillHubClient({
         if (createHash("sha256").update(content).digest("hex") !== expected.sha256) throw new Error("SkillHub ZIP file hash mismatch.");
         entries.push({ path: expected.path, type: "file", size: content.byteLength, contentBase64: Buffer.from(content).toString("base64") });
       }
+      if (requestEpoch !== catalogEpoch) throw new Error("SkillHub catalog changed while downloading.");
       return {
         sourceUrl: downloadUrl.toString(),
         compressedBytes: archive.byteLength,

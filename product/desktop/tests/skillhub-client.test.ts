@@ -134,7 +134,7 @@ metadata:
   });
 
   it("rejects detail when the selected catalog version is no longer current", async () => {
-    const fetch = vi.fn(async () => json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }));
+    const fetch = vi.fn(async (_url: string) => json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }));
     const client = createSkillHubClient({ fetch });
     await client.search({ query: "workspace-reader", cursor: null, pageSize: 20 });
 
@@ -157,7 +157,22 @@ metadata:
     await expect(client.search({ query: "", cursor: null, pageSize: 40, sort: "stars" })).resolves.toMatchObject({
       items: [{ ownerName: "upstream-owner", downloads: 879, stars: 4, requiresKey: true, updatedAt: "2026-08-19T12:00:00.000Z" }],
     });
-    expect(fetch.mock.calls[0]?.[0]).toContain("sort=stars");
+    expect(fetch.mock.calls[0]?.[0]).toContain("sortBy=stars&order=desc");
+  });
+
+  it.each([
+    ["score", "score"],
+    ["downloads", "downloads"],
+    ["stars", "stars"],
+    ["updatedAt", "updated_at"],
+  ] as const)("maps the %s sort to SkillHub's %s field", async (sort, sortBy) => {
+    const fetch = vi.fn(async (_url: string) => json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }));
+    const client = createSkillHubClient({ fetch });
+
+    await client.search({ query: "", cursor: null, pageSize: 20, sort });
+
+    expect(fetch.mock.calls[0]?.[0]).toContain(`sortBy=${sortBy}&order=desc`);
+    expect(fetch.mock.calls[0]?.[0]).not.toContain("sort=");
   });
 
   it("ignores malformed optional marketplace metadata instead of leaking loose upstream values", async () => {
@@ -222,16 +237,78 @@ metadata:
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("rejects duplicate filtered slugs with conflicting catalog identity", async () => {
+  it("drops ambiguous duplicate slugs without rejecting safe catalog items", async () => {
+    const safeItem = {
+      ...searchItem,
+      slug: "safe-skill",
+      name: "Safe Skill",
+      namespace: { ...namespace, canonicalName: "@owner/safe-skill", publicSlug: "safe-skill" },
+    };
     const client = createSkillHubClient({ fetch: vi.fn(async () => json({
       code: 0,
       data: {
-        skills: [searchItem, { ...searchItem, namespace: { ...namespace, handle: "other-owner" } }],
-        total: 2,
+        skills: [searchItem, { ...searchItem, namespace: { ...namespace, handle: "other-owner" } }, safeItem],
+        total: 3,
       },
       message: "success",
     })) });
-    await expect(client.search({ query: "", cursor: null, pageSize: 20 })).rejects.toThrow(/identity|duplicate/i);
+    await expect(client.search({ query: "", cursor: null, pageSize: 20 })).resolves.toMatchObject({
+      items: [{ slug: "safe-skill" }],
+    });
+    expect(client.confirmedIdentity("workspace-reader")).toBeUndefined();
+  });
+
+  it("keeps the first catalog identity when a later page reuses its slug", async () => {
+    const conflictingItem = { ...searchItem, namespace: { ...namespace, handle: "other-owner" } };
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 40 }, message: "success" }))
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [conflictingItem], total: 40 }, message: "success" }));
+    const client = createSkillHubClient({ fetch });
+
+    await client.search({ query: "", cursor: null, pageSize: 20 });
+    await expect(client.search({ query: "", cursor: "2", pageSize: 20 })).resolves.toMatchObject({ items: [] });
+    expect(client.confirmedIdentity("workspace-reader")).toEqual({
+      slug: "workspace-reader", namespace: "owner", version: "1.0.0",
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts a newer version from the same namespace in a replacement catalog", async () => {
+    const upgradedItem = { ...searchItem, version: "2.0.0" };
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [upgradedItem], total: 1 }, message: "success" }));
+    const client = createSkillHubClient({ fetch });
+
+    await client.search({ query: "", cursor: null, pageSize: 20 });
+    await expect(client.search({ query: "", category: "education", cursor: null, pageSize: 20 })).resolves.toMatchObject({
+      items: [{ slug: "workspace-reader", version: "2.0.0" }],
+    });
+    expect(client.confirmedIdentity("workspace-reader")).toEqual({
+      slug: "workspace-reader", namespace: "owner", version: "2.0.0",
+    });
+  });
+
+  it("discards an old detail response after a replacement catalog wins", async () => {
+    let resolveDetail!: (value: Response) => void;
+    const upgradedItem = { ...searchItem, version: "2.0.0" };
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }))
+      .mockImplementationOnce(async () => new Promise<Response>((resolve) => { resolveDetail = resolve; }))
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [upgradedItem], total: 1 }, message: "success" }));
+    const client = createSkillHubClient({ fetch });
+
+    await client.search({ query: "", cursor: null, pageSize: 20 });
+    const oldDetail = client.detail("workspace-reader", "1.0.0");
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await client.search({ query: "", category: "education", cursor: null, pageSize: 20 });
+    resolveDetail(json(detailBody));
+
+    await expect(oldDetail).rejects.toThrow(/catalog changed/i);
+    expect(client.confirmedIdentity("workspace-reader")).toEqual({
+      slug: "workspace-reader", namespace: "owner", version: "2.0.0",
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 
   it("fails closed when detail does not explicitly declare free pricing", async () => {
@@ -351,6 +428,62 @@ metadata:
       "https://api.skillhub.cn/api/v1/skills/workspace-reader/file?path=SKILL.md&version=1.0.0&namespace=owner",
       "https://skillhub-1388575217.cos.accelerate.myqcloud.com/signed/skill.md",
     ]);
+  });
+
+  it("uses SkillHub presentation fields while preserving the original SKILL.md", async () => {
+    const localizedDetail = {
+      ...detailBody,
+      skill: {
+        ...detailBody.skill,
+        displayName: "工作区读取器",
+        summary: "Reads workspace files",
+        summary_zh: "读取工作区文件",
+      },
+    };
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json(localizedDetail))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(canonicalSkillMd, { headers: { "content-type": "text/markdown" } }));
+    const client = createSkillHubClient({ fetch });
+
+    await expect(client.detail("workspace-reader")).resolves.toMatchObject({
+      name: "工作区读取器",
+      description: "读取工作区文件",
+      readme: canonicalSkillMd,
+    });
+  });
+
+  it("falls back when SkillHub Chinese descriptions are blank", async () => {
+    const blankChineseSearchItem = { ...searchItem, description_zh: "   " };
+    const blankChineseDetail = {
+      ...detailBody,
+      skill: { ...detailBody.skill, summary_zh: "   " },
+    };
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [blankChineseSearchItem], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json(blankChineseDetail))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(canonicalSkillMd, { headers: { "content-type": "text/markdown" } }));
+    const client = createSkillHubClient({ fetch });
+
+    await expect(client.search({ query: "", cursor: null, pageSize: 20 })).resolves.toMatchObject({
+      items: [{ description: "Reads workspace files" }],
+    });
+    await expect(client.detail("workspace-reader")).resolves.toMatchObject({
+      description: "Reads workspace files",
+    });
+  });
+
+  it("truncates oversized upstream descriptions without rejecting the catalog page", async () => {
+    const longDescription = "中".repeat(1_083);
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      code: 0,
+      data: { skills: [{ ...searchItem, description_zh: longDescription }], total: 1 },
+      message: "success",
+    })) });
+
+    const [item] = (await client.search({ query: "", cursor: null, pageSize: 20 })).items;
+    expect(item?.description).toBe("中".repeat(1_000));
   });
 
   it.each([

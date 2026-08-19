@@ -21,6 +21,22 @@ const nextRequestId = () => `skill-ui-${++requestSequence}`;
 const riskLabel: Record<CapabilityRisk, string> = { low: "低风险", medium: "中风险", high: "高风险", critical: "严重风险" };
 const permissionKindLabel = { filesystem: "文件", network: "网络", command: "命令", environment: "环境变量" } as const;
 const availabilityLabel = { available: "可用", disabled: "已禁用", "missing-dependency": "缺少依赖", conflict: "存在冲突", "not-detected": "OpenClaw 未识别", error: "读取失败" } as const;
+/** Mirrors SkillHub's top-level taxonomy while preserving stable filter keys. */
+const marketplaceCategoryOptions = [
+  { value: "pay-skill", label: "付费技能", disabled: true },
+  { value: "office-efficiency", label: "办公效率", disabled: false },
+  { value: "content-creation", label: "内容创作", disabled: false },
+  { value: "dev-programming", label: "开发编程", disabled: false },
+  { value: "data-analysis", label: "数据分析", disabled: false },
+  { value: "design-media", label: "设计多媒体", disabled: false },
+  { value: "ai-agent", label: "AI 智能体", disabled: false },
+  { value: "knowledge-management", label: "知识管理", disabled: false },
+  { value: "business-ops", label: "商业运营", disabled: false },
+  { value: "education", label: "教育学习", disabled: false },
+  { value: "professional", label: "行业专业", disabled: false },
+  { value: "it-ops-security", label: "IT 运维与安全", disabled: false },
+  { value: "life-service", label: "生活服务", disabled: false },
+] as const;
 type View = "catalog" | "installed" | "runtime" | "curator" | "proposals";
 type ProposalForm = "create" | "update" | null;
 type PublicView = "marketplace" | "installed";
@@ -28,6 +44,11 @@ type MarketplaceSort = "score" | "downloads" | "stars" | "updatedAt";
 type KeyRequirement = "all" | "required" | "not-required";
 
 const messageOf = (error: unknown, fallback: string) => error instanceof Error && error.message ? error.message : fallback;
+
+/** Returns an official Chinese category label, preserving unknown upstream keys visibly. */
+function skillCategoryLabel(value: string): string {
+  return marketplaceCategoryOptions.find((item) => item.value === value)?.label ?? value;
+}
 
 /** Keeps catalog presentation fields when a sparse detail response omits them. */
 function withCatalogPresentation(detail: SkillDetail, item: SkillCatalogItem): SkillDetail {
@@ -131,8 +152,10 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
     return response.result as T;
   };
 
+  /** Loads a replacement with visible pending state while preserving existing rows during pagination. */
   const load = useCallback(async (nextCursor: string | null = null, append = false) => {
     const sequence = ++loadSequence.current;
+    if (!append) setState("loading");
     setError("");
     try {
       const call = requireInvoke();
@@ -424,6 +447,14 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
 
   const dialogSkill = detail ?? enableConfirmation;
   const actionLabel = action === "install" ? "安装" : action === "update" ? "更新" : "启用";
+  const categoryOptions = publicCatalog
+    ? [
+      ...marketplaceCategoryOptions,
+      ...categories
+        .filter((value) => !marketplaceCategoryOptions.some((item) => item.value === value))
+        .map((value) => ({ value, label: value, disabled: false })),
+    ]
+    : categories.map((value) => ({ value, label: skillCategoryLabel(value), disabled: false }));
   const visibleItems = publicCatalog
     ? items.filter((item) => keyRequirement === "all" || (keyRequirement === "required" ? item.requiresKey === true : item.requiresKey === false))
     : items;
@@ -439,7 +470,7 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
       <div className="skill-toolbar">
         {view === "catalog" ? <>
           <label><Search aria-hidden="true" /><span className="sr-only">搜索免费技能</span><input aria-label="搜索免费技能" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索免费技能" /></label>
-          <label className="skill-category"><span>分类</span><select aria-label="技能分类" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">全部</option>{categories.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
+          <label className="skill-category"><span>分类</span><select aria-label="技能分类" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">全部</option>{categoryOptions.map((item) => <option value={item.value} key={item.value} disabled={item.disabled}>{item.label}</option>)}</select></label>
           {publicCatalog ? <>
             <label className="skill-category"><span>API Key</span><select aria-label="API Key 要求" value={keyRequirement} onChange={(event) => setKeyRequirement(event.target.value as KeyRequirement)}><option value="all">全部</option><option value="required">需要</option><option value="not-required">不需要</option></select></label>
             <label className="skill-category"><span>排序</span><select aria-label="技能排序" value={sort} onChange={(event) => setSort(event.target.value as MarketplaceSort)}><option value="score">综合</option><option value="downloads">下载量</option><option value="stars">收藏数</option><option value="updatedAt">最近更新</option></select></label>
@@ -524,14 +555,14 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
       <header><div><span>SKILL DETAIL</span><strong>{detail.name}</strong><code>{detail.slug} · v{detail.version}</code></div><button type="button" aria-label="关闭技能详情" onClick={() => setDetail(undefined)}><X /></button></header>
       <div className="skill-drawer-body">
         <div className="skill-marketplace-detail-identity"><SkillLogo name={detail.name} logoUrl={detail.logoUrl} className="skill-marketplace-detail-logo" /><div><p>{detail.description}</p><div className="skill-marketplace-meta"><span>{detail.ownerName ?? "未知作者"}</span>{detail.downloads === undefined ? null : <span><Download />{detail.downloads}</span>}{detail.stars === undefined ? null : <span><Star />{detail.stars}</span>}{detail.requiresKey ? <span><KeyRound />API Key</span> : null}</div></div></div>
-        <dl><dt>分类</dt><dd>{detail.categories.join(" / ") || "未分类"}</dd><dt>权限风险</dt><dd>{riskLabel[detail.risk]}</dd><dt>权限项</dt><dd>{detail.permissions.length}</dd>{detail.updatedAt ? <><dt>更新时间</dt><dd>{detail.updatedAt}</dd></> : null}{"stale" in detail && detail.stale === true ? <><dt>数据状态</dt><dd>最近缓存</dd></> : null}</dl>
+        <dl><dt>分类</dt><dd>{detail.categories.map(skillCategoryLabel).join(" / ") || "未分类"}</dd><dt>权限风险</dt><dd>{riskLabel[detail.risk]}</dd><dt>权限项</dt><dd>{detail.permissions.length}</dd>{detail.updatedAt ? <><dt>更新时间</dt><dd>{detail.updatedAt}</dd></> : null}{"stale" in detail && detail.stale === true ? <><dt>数据状态</dt><dd>最近缓存</dd></> : null}</dl>
         <section className="skill-markdown"><h4>README</h4><div className="skill-markdown-reader"><SafeMarkdown text={detail.readme ? skillMarkdownBody(detail.readme) : "暂无 README"} allowImages={false} /></div></section>
       </div>
       <footer><button type="button" onClick={() => setDetail(undefined)}>关闭</button>{detail.installedVersion === null ? <button type="button" onClick={() => beginDetailAction("install")}>安装</button> : detail.updateAvailable ? <button type="button" onClick={() => beginDetailAction("update")}>更新</button> : <button type="button" disabled>{detail.enabled ? "已安装" : "已禁用"}</button>}</footer>
     </aside></div> : null}
 
     {dialogSkill && !(publicCatalog && detailMode === "view") ? <div className="skill-dialog-backdrop"><div className="skill-dialog" role="dialog" aria-modal="true" aria-label={detailMode === "view" ? `技能详情 ${dialogSkill.name}` : `确认${actionLabel}${dialogSkill.name}`}>
-      <header>{detailMode === "confirm" ? <AlertTriangle /> : null}<div><strong>{detailMode === "view" ? dialogSkill.name : `${riskLabel[dialogSkill.risk]}权限确认`}</strong><span>{detailMode === "view" ? `v${dialogSkill.version} · ${dialogSkill.categories.join(", ")}` : dialogSkill.name}</span></div></header>
+      <header>{detailMode === "confirm" ? <AlertTriangle /> : null}<div><strong>{detailMode === "view" ? dialogSkill.name : `${riskLabel[dialogSkill.risk]}权限确认`}</strong><span>{detailMode === "view" ? `v${dialogSkill.version} · ${dialogSkill.categories.map(skillCategoryLabel).join(", ")}` : dialogSkill.name}</span></div></header>
       <div className="skill-dialog-permissions">{dialogSkill.permissions.map((permission) => <div key={`${permission.kind}-${permission.target}`}><strong>{permissionKindLabel[permission.kind]} · {permission.target}</strong><span>{permission.reason}</span><em className={`risk-${permission.risk}`}>{riskLabel[permission.risk]}</em></div>)}</div>
       {detailMode === "view" && detail ? <div className="skill-detail-meta"><span>来源 · {detail.source.provider}</span><span>{detail.source.provider === "skillhub" ? detail.source.url : detail.source.origin}</span><span>入口 · {detail.manifest.entry}</span></div> : detailMode === "confirm" ? <label className="skill-risk-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已了解{riskLabel[dialogSkill.risk]}权限</label> : null}
       <footer><button type="button" onClick={() => { setDetail(undefined); setEnableConfirmation(undefined); }}>{detailMode === "view" ? "关闭" : "取消"}</button>{detailMode === "confirm" ? <button type="button" disabled={!confirmed} onClick={() => void confirmAction()}>确认{actionLabel}</button> : null}</footer>
