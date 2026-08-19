@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 
-import { SkillDetailSchema, type SkillDetail, SkillPermissionSchema } from "@uclaw/shared";
+import { SKILLHUB_TRUSTED_LOGO_HOSTS, SkillDetailSchema, type SkillDetail, SkillPermissionSchema } from "@uclaw/shared";
 import JSZip from "jszip";
 import { z } from "zod";
 
 import { parseSkillMarkdownFrontmatter } from "./bundle-validator.js";
-import type { SkillBundle, SkillBundleEntry, SkillHubClient, SkillHubSearchResult } from "./fixture-client.js";
+import { skillIdentityFingerprint, type SkillBundle, type SkillBundleEntry, type SkillHubClient, type SkillHubSearchResult } from "./fixture-client.js";
 
 const DEFAULT_ORIGIN = "https://api.skillhub.cn";
 const TRUSTED_API_HOST = "api.skillhub.cn";
@@ -40,6 +40,7 @@ const SearchItemSchema = z.object({
   version: z.string().min(1).max(80),
   labels: LabelsSchema,
   category: z.string().max(80).nullable().optional(),
+  iconUrl: z.unknown().optional(),
   namespace: NamespaceSchema,
 }).loose();
 const SearchResponseSchema = z.object({
@@ -59,6 +60,7 @@ const DetailResponseSchema = z.object({
     summary_zh: z.string().max(1_000).nullable().optional(),
     labels: LabelsSchema,
     category: z.string().max(80).nullable().optional(),
+    iconUrl: z.unknown().optional(),
   }).loose(),
 }).loose();
 
@@ -152,6 +154,20 @@ function categories(labels: Record<string, string> | null | undefined, direct?: 
     }
   }
   return [...result];
+}
+
+/** Projects an upstream icon only when it uses an exact trusted SkillHub HTTPS host. */
+function marketplaceLogoUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password &&
+      SKILLHUB_TRUSTED_LOGO_HOSTS.some((host) => host === url.hostname)
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 type MarketplaceMetadata = Pick<SkillDetail, "ownerName" | "downloads" | "stars" | "requiresKey" | "updatedAt">;
@@ -276,6 +292,7 @@ function registerPath(
   paths.set(key, type);
 }
 
+/** Creates a live client that pins detail and download to validated catalog identity/version. */
 export function createSkillHubClient({
   baseUrl = DEFAULT_ORIGIN,
   fetch = globalThis.fetch,
@@ -330,13 +347,18 @@ export function createSkillHubClient({
     risk: "high",
     mode: "live",
     categories: categories(item.labels, item.category),
-    logoUrl: null,
+    logoUrl: marketplaceLogoUrl(item.iconUrl),
     ...marketplaceMetadata(item.namespace, item),
     manifest: { kind: "skill", id: item.slug, version: item.version, entry: "SKILL.md" },
   });
 
   return {
     mode: "live",
+    /** Returns only the identity tuple already proven by a validated catalog/detail response. */
+    confirmedIdentity(slug) {
+      const proof = confirmedFree.get(slug);
+      return proof ? { slug: proof.slug, namespace: proof.namespace, version: proof.version } : undefined;
+    },
     async search({ query, category, sort, cursor, pageSize }): Promise<SkillHubSearchResult> {
       const page = cursor === null ? 1 : Number(cursor);
       if (!Number.isSafeInteger(page) || page < 1) throw new Error("SkillHub cursor is invalid.");
@@ -374,14 +396,21 @@ export function createSkillHubClient({
         mode: "live",
       };
     },
-    async detail(slug) {
+    /** Loads README only when live identity still matches the catalog version selected by the user. */
+    async detail(slug, expectedVersion) {
       const known = confirmedFree.get(slug);
+      if (expectedVersion !== undefined && known && known.version !== expectedVersion) {
+        throw new Error("SkillHub detail version drifted from the requested catalog version.");
+      }
       const detailUrl = new URL(`/api/v1/skills/${encodeURIComponent(slug)}`, origin);
       detailUrl.searchParams.set("namespace", known?.namespace ?? "");
       const response = await requestJson(detailUrl.toString(), DetailResponseSchema);
       const pricing = pricingDisposition(response.skill);
       const namespace = response.namespace.handle;
       const version = response.latestVersion.version;
+      if (expectedVersion !== undefined && version !== expectedVersion) {
+        throw new Error("SkillHub detail version drifted from the requested catalog version.");
+      }
       const identityMatchesProof = known !== undefined && known.slug === slug && known.namespace === namespace && known.version === version;
       if (known && !identityMatchesProof) throw new Error("SkillHub detail identity drifted from its free catalog proof.");
       if (response.slug !== slug || response.skill.slug !== slug || pricing === "non-free" || (pricing === "unknown" && !identityMatchesProof)) {
@@ -417,7 +446,8 @@ export function createSkillHubClient({
         risk: "high",
         mode: "live",
         categories: categories(response.skill.labels, response.skill.category),
-        logoUrl: null,
+        identityFingerprint: skillIdentityFingerprint({ slug, namespace, version }),
+        logoUrl: marketplaceLogoUrl(response.skill.iconUrl),
         ...marketplaceMetadata(response.namespace, response.skill, response.latestVersion, response),
         readme: markdown,
         manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },

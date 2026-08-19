@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,12 +22,12 @@ async function makeCachePath(): Promise<string> {
 }
 
 /** Produces a schema-valid public SkillHub detail without credentials. */
-function detail(slug = "workspace-reader"): SkillDetail {
+function detail(slug = "workspace-reader", version = "1.0.0"): SkillDetail {
   return {
     slug,
     name: "Workspace Reader",
     description: "Reads workspace files",
-    version: "1.0.0",
+    version,
     pricingType: "free",
     installedVersion: null,
     enabled: false,
@@ -39,19 +39,20 @@ function detail(slug = "workspace-reader"): SkillDetail {
     mode: "live",
     categories: ["productivity"],
     logoUrl: null,
-    readme: "# Workspace Reader\n",
-    manifest: { kind: "skill", id: slug, version: "1.0.0", entry: "SKILL.md" },
+    readme: `# Workspace Reader ${version}\n`,
+    manifest: { kind: "skill", id: slug, version, entry: "SKILL.md" },
   };
 }
 
 /** Builds a minimal upstream client whose methods can be replaced per test. */
 function upstream(overrides: Partial<SkillHubClient> = {}): SkillHubClient {
-  const search: SkillHubClient["search"] = vi.fn(async () => ({
-    items: [detail()], nextCursor: null, hasMore: false, mode: "live" as const,
+  const search: SkillHubClient["search"] = vi.fn(async (input) => ({
+    items: [detail(input.query || "workspace-reader")], nextCursor: null, hasMore: false, mode: "live" as const,
   }));
   return {
     mode: "live",
     search,
+    confirmedIdentity: (slug) => ({ slug, namespace: "fixture", version: "1.0.0" }),
     detail: vi.fn(async (slug) => detail(slug)),
     download: vi.fn(async () => ({ sourceUrl: "https://api.skillhub.cn/download", compressedBytes: 0, checksumSha256: "empty", entries: [] })),
     ...overrides,
@@ -63,6 +64,20 @@ afterEach(async () => {
 });
 
 describe("persistent SkillHub cache", () => {
+  it("invalidates schema version 1 caches so newly projected logos are fetched", async () => {
+    const cachePath = await makeCachePath();
+    const input = { query: "", cursor: null, pageSize: 40 };
+    await createCachedSkillHubClient({ client: upstream(), cachePath }).search(input);
+    const legacy = JSON.parse(await readFile(cachePath, "utf8")) as { schemaVersion: number };
+    legacy.schemaVersion = 1;
+    await writeFile(cachePath, JSON.stringify(legacy));
+    const logoUrl = "https://cloudcache.tencent-cloud.com/qcloud/ui/static/workspace-reader.png";
+    const search = vi.fn(async () => ({ items: [{ ...detail(), logoUrl }], nextCursor: null, hasMore: false, mode: "live" as const }));
+
+    await expect(createCachedSkillHubClient({ client: upstream({ search }), cachePath }).search(input)).resolves.toMatchObject({ items: [{ logoUrl }] });
+    expect(search).toHaveBeenCalledOnce();
+  });
+
   it("deduplicates concurrent catalog requests and persists schema-projected public data", async () => {
     const cachePath = await makeCachePath();
     let resolveSearch!: (value: Awaited<ReturnType<SkillHubClient["search"]>>) => void;
@@ -99,7 +114,7 @@ describe("persistent SkillHub cache", () => {
     const second = createCachedSkillHubClient({ client: cachedSource, cachePath, now: () => now });
     await expect(second.search(input)).resolves.toMatchObject({ items: [{ slug: "workspace-reader" }] });
     await expect(second.detail("workspace-reader")).resolves.toMatchObject({
-      slug: "workspace-reader", readme: "# Workspace Reader\n",
+      slug: "workspace-reader", readme: "# Workspace Reader 1.0.0\n",
     });
     expect(cachedSource.search).not.toHaveBeenCalled();
     expect(cachedSource.detail).not.toHaveBeenCalled();
@@ -108,6 +123,90 @@ describe("persistent SkillHub cache", () => {
     await expect(second.search(input)).resolves.toMatchObject({ items: [{ slug: "workspace-reader" }] });
     expect(cachedSource.search).toHaveBeenCalledTimes(1);
     expect(cachedSource.detail).not.toHaveBeenCalled();
+  });
+
+  it("restores live identity proof before uncached detail after a disk-cached search", async () => {
+    const cachePath = await makeCachePath();
+    const input = { query: "", cursor: null, pageSize: 40 };
+    await createCachedSkillHubClient({ client: upstream(), cachePath }).search(input);
+
+    const confirmed = new Set<string>();
+    const search = vi.fn(async ({ query }: Parameters<SkillHubClient["search"]>[0]) => {
+      const items = query === "workspace-reader" ? [detail()] : [];
+      for (const item of items) confirmed.add(item.slug);
+      return { items, nextCursor: null, hasMore: false, mode: "live" as const };
+    });
+    const liveDetail = vi.fn(async (slug: string) => {
+      if (!confirmed.has(slug)) throw new Error("missing namespace proof");
+      return detail(slug);
+    });
+    const restarted = createCachedSkillHubClient({
+      client: upstream({ search, detail: liveDetail }),
+      cachePath,
+      detailTtlMs: 0,
+    });
+
+    await expect(restarted.search(input)).resolves.toMatchObject({ items: [{ slug: "workspace-reader" }] });
+    expect(search).not.toHaveBeenCalled();
+    await expect(restarted.detail("workspace-reader")).resolves.toMatchObject({ slug: "workspace-reader" });
+    await expect(restarted.detail("workspace-reader")).resolves.toMatchObject({ slug: "workspace-reader" });
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(search).toHaveBeenCalledWith({ query: "workspace-reader", cursor: null, pageSize: 50 });
+    expect(liveDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects uncached detail when live identity proof has no exact slug", async () => {
+    const cachePath = await makeCachePath();
+    const input = { query: "", cursor: null, pageSize: 40 };
+    await createCachedSkillHubClient({ client: upstream(), cachePath }).search(input);
+    const search = vi.fn(async () => ({ items: [detail("different-skill")], nextCursor: null, hasMore: false, mode: "live" as const }));
+    const liveDetail = vi.fn(async (slug: string) => detail(slug));
+    const restarted = createCachedSkillHubClient({ client: upstream({ search, detail: liveDetail }), cachePath });
+
+    await expect(restarted.search(input)).resolves.toMatchObject({ items: [{ slug: "workspace-reader" }] });
+    await expect(restarted.detail("workspace-reader")).rejects.toThrow(/identity/i);
+    expect(search).toHaveBeenCalledOnce();
+    expect(liveDetail).not.toHaveBeenCalled();
+  });
+
+  it("requests and caches detail independently by slug and expected version", async () => {
+    const cachePath = await makeCachePath();
+    let liveVersion = "1.0.0";
+    const search = vi.fn(async () => ({ items: [detail("workspace-reader", liveVersion)], nextCursor: null, hasMore: false, mode: "live" as const }));
+    const detailRequest = vi.fn(async (slug: string, expectedVersion?: string) => detail(slug, expectedVersion ?? liveVersion));
+    const source = Object.assign(upstream({ search, detail: detailRequest }), {
+      confirmedIdentity: () => ({ slug: "workspace-reader", namespace: "owner", version: liveVersion }),
+    });
+    const client = createCachedSkillHubClient({ client: source, cachePath });
+
+    await expect(client.detail("workspace-reader", "1.0.0")).resolves.toMatchObject({ version: "1.0.0", readme: expect.stringContaining("1.0.0") });
+    liveVersion = "2.0.0";
+    await expect(client.detail("workspace-reader", "2.0.0")).resolves.toMatchObject({ version: "2.0.0", readme: expect.stringContaining("2.0.0") });
+    liveVersion = "1.0.0";
+    await expect(client.detail("workspace-reader", "1.0.0")).resolves.toMatchObject({ version: "1.0.0", readme: expect.stringContaining("1.0.0") });
+
+    expect(detailRequest.mock.calls.map(([, expectedVersion]) => expectedVersion)).toEqual(["1.0.0", "2.0.0"]);
+  });
+
+  it.each([
+    ["namespace", { slug: "workspace-reader", namespace: "owner-b", version: "1.0.0" }],
+    ["version", { slug: "workspace-reader", namespace: "owner-a", version: "2.0.0" }],
+  ])("rejects download when live %s drifts from the cached detail identity", async (_field, liveIdentity) => {
+    const cachePath = await makeCachePath();
+    const confirmedIdentity = vi.fn(() => ({ slug: "workspace-reader", namespace: "owner-a", version: "1.0.0" }));
+    const initialSource = Object.assign(upstream(), { confirmedIdentity });
+    await createCachedSkillHubClient({ client: initialSource, cachePath }).detail("workspace-reader");
+
+    const liveItem = { ...detail(), version: liveIdentity.version, manifest: { ...detail().manifest, version: liveIdentity.version } };
+    const search = vi.fn(async () => ({ items: [liveItem], nextCursor: null, hasMore: false, mode: "live" as const }));
+    const download = vi.fn(async () => ({ sourceUrl: "https://api.skillhub.cn/download", compressedBytes: 0, checksumSha256: "empty", entries: [] }));
+    const restartedSource = Object.assign(upstream({ search, download }), { confirmedIdentity: vi.fn(() => liveIdentity) });
+    const restarted = createCachedSkillHubClient({ client: restartedSource, cachePath });
+
+    await expect(restarted.detail("workspace-reader")).resolves.toMatchObject({ slug: "workspace-reader", version: "1.0.0" });
+    await expect(restarted.download("workspace-reader")).rejects.toThrow(/identity.*drift/i);
+    expect(search).toHaveBeenCalledOnce();
+    expect(download).not.toHaveBeenCalled();
   });
 
   it("returns stale successful values when refresh fails", async () => {
@@ -206,7 +305,7 @@ describe("persistent SkillHub cache", () => {
     });
   });
 
-  it("passes downloads through and restores live free-catalog proof after cache recreation", async () => {
+  it("passes downloads through and refreshes live identity before each archive", async () => {
     const cachePath = await makeCachePath();
     const source = upstream();
     const client = createCachedSkillHubClient({ client: source, cachePath });
@@ -215,6 +314,6 @@ describe("persistent SkillHub cache", () => {
     await client.download("workspace-reader");
 
     expect(source.download).toHaveBeenCalledTimes(2);
-    expect(source.search).toHaveBeenCalledTimes(1);
+    expect(source.search).toHaveBeenCalledTimes(2);
   });
 });

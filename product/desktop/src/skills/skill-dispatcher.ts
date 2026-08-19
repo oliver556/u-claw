@@ -3,6 +3,7 @@ import { SkillIpcResponseSchema, type SkillIpcRequest, type SkillIpcResponse } f
 import type { SkillService } from "./skill-service.js";
 import type { SkillInstallCoordinator } from "./skill-install-coordinator.js";
 
+/** Creates the validated IPC dispatcher that forwards pinned Skill identity/version inputs. */
 export function createSkillDispatcher(service: SkillService, coordinator?: SkillInstallCoordinator) {
   const requireCoordinator = () => {
     if (!coordinator) {
@@ -21,7 +22,7 @@ export function createSkillDispatcher(service: SkillService, coordinator?: Skill
     switch (request.method) {
       case "skills.search": result = await service.search(request.params); break;
       case "skills.installed": result = await service.installed(); break;
-      case "skills.detail": result = await service.detail(request.params.slug); break;
+      case "skills.detail": result = await service.detail(request.params.slug, request.params.expectedVersion); break;
       case "skills.local-detail": result = await service.localDetail(request.params.slug); break;
       case "skills.install": result = await service.startInstall(request.params); break;
       case "skills.update": result = await service.startUpdate(request.params); break;

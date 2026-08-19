@@ -11,23 +11,28 @@ describe("SkillLogo", () => {
   afterEach(cleanup);
 
   it("renders a trusted SkillHub logo", () => {
-    render(<SkillLogo name="Workspace Reader" logoUrl="https://api.skillhub.cn/assets/workspace-reader.png" />);
-    expect(screen.getByRole("img", { name: "Workspace Reader Logo" })).toHaveAttribute("src", "https://api.skillhub.cn/assets/workspace-reader.png");
+    const logoUrl = "https://cloudcache.tencent-cloud.com/qcloud/ui/static/workspace-reader.png";
+    render(<SkillLogo name="Workspace Reader" logoUrl={logoUrl} />);
+    expect(screen.getByRole("img", { name: "Workspace Reader Logo" })).toHaveAttribute("src", logoUrl);
   });
 
   it.each([
     ["missing", undefined],
     ["untrusted", "file:///tmp/workspace-reader.png"],
-  ])("uses the unified Skill icon for %s logos", (_case, logoUrl) => {
+    ["host suffix attack", "https://cloudcache.tencent-cloud.com.evil.example/workspace-reader.png"],
+    ["insecure transport", "http://cloudcache.tencent-cloud.com/workspace-reader.png"],
+    ["embedded credentials", "https://user:pass@cloudcache.tencent-cloud.com/workspace-reader.png"],
+  ])("uses the Skill initial for %s logos", (_case, logoUrl) => {
     const { container } = render(<SkillLogo name="Workspace Reader" logoUrl={logoUrl} />);
-    expect(screen.queryByText("W")).not.toBeInTheDocument();
+    expect(screen.getByText("W")).toBeVisible();
     expect(screen.getByRole("img", { name: "Workspace Reader Skill 图标" })).toBeVisible();
-    expect(container.querySelector(".lucide-package")).toBeInTheDocument();
+    expect(container.querySelector(".lucide-package")).not.toBeInTheDocument();
   });
 
   it("falls back when a trusted logo fails to load", () => {
     const { container } = render(<SkillLogo name="Workspace Reader" logoUrl="https://api.skillhub.cn/assets/missing.png" />);
     fireEvent.error(screen.getByRole("img", { name: "Workspace Reader Logo" }));
-    expect(container.querySelector(".lucide-package")).toBeInTheDocument();
+    expect(screen.getByText("W")).toBeVisible();
+    expect(container.querySelector(".lucide-package")).not.toBeInTheDocument();
   });
 });

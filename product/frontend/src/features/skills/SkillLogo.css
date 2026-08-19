@@ -19,9 +19,7 @@
 
 .skill-logo-fallback {
   color: var(--text-secondary, var(--uclaw-text-secondary));
-}
-
-.skill-logo-fallback svg {
-  height: 17px;
-  width: 17px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
 }

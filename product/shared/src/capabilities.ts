@@ -29,12 +29,17 @@ export const SkillSourceSchema = z.discriminatedUnion("provider", [
 ]);
 
 const PricingTypeSchema = z.enum(["free", "paid"]);
+/** Canonical exact host allowlist for SkillHub logos across process trust boundaries. */
+export const SKILLHUB_TRUSTED_LOGO_HOSTS = [
+  "api.skillhub.cn",
+  "cloudcache.tencent-cloud.com",
+  "skillhub-1388575217.cos.accelerate.myqcloud.com",
+] as const;
+
 const SkillLogoUrlSchema = z.url().refine((value) => {
   const url = new URL(value);
-  return url.protocol === "https:" && !url.username && !url.password && [
-    "api.skillhub.cn",
-    "skillhub-1388575217.cos.accelerate.myqcloud.com",
-  ].includes(url.hostname);
+  return url.protocol === "https:" && !url.username && !url.password &&
+    SKILLHUB_TRUSTED_LOGO_HOSTS.some((host) => host === url.hostname);
 }, "Skill logo must use a trusted SkillHub HTTPS URL.");
 const SkillCatalogBaseSchema = z.object({
   slug: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/),
@@ -63,6 +68,7 @@ export const SkillCatalogItemSchema = SkillCatalogBaseSchema;
 export type SkillCatalogItem = z.infer<typeof SkillCatalogItemSchema>;
 
 export const SkillDetailSchema = SkillCatalogBaseSchema.extend({
+  identityFingerprint: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
   readme: z.string().max(1_048_576).optional(),
   stale: z.boolean().optional(),
   manifest: z.object({
@@ -85,6 +91,7 @@ export type SkillCatalogPage = z.infer<typeof SkillCatalogPageSchema>;
 
 export const SkillConfirmationSchema = z.object({
   permissionFingerprint: z.string().min(1).max(128),
+  identityFingerprint: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
   acceptedRisk: CapabilityRiskSchema,
 }).strict();
 export type SkillConfirmation = z.infer<typeof SkillConfirmationSchema>;
@@ -116,7 +123,13 @@ const SearchParamsSchema = z.object({
   pageSize: z.number().int().min(1).max(50),
 }).strict();
 const SlugParamsSchema = z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/) }).strict();
-const MutationParamsSchema = z.object({ slug: SlugParamsSchema.shape.slug, confirmation: SkillConfirmationSchema.nullable() }).strict();
+const ExpectedVersionSchema = z.string().min(1).max(80);
+const DetailParamsSchema = z.object({ slug: SlugParamsSchema.shape.slug, expectedVersion: ExpectedVersionSchema.optional() }).strict();
+const MutationParamsSchema = z.object({
+  slug: SlugParamsSchema.shape.slug,
+  expectedVersion: ExpectedVersionSchema.optional(),
+  confirmation: SkillConfirmationSchema.nullable(),
+}).strict();
 const SkillImportTokenSchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9_-]+$/);
 const SkillHubIdentitySchema = z.string().regex(/^@[a-z0-9][a-z0-9_-]{0,63}\/[a-z0-9][a-z0-9._-]{0,79}$/);
 
@@ -324,7 +337,7 @@ const ProposalRevisionRequestParamsSchema = SkillProposalRevisionRequestInputSch
 export const SkillIpcRequestSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("skills.search"), requestId: RequestIdSchema, params: SearchParamsSchema }).strict(),
   z.object({ method: z.literal("skills.installed"), requestId: RequestIdSchema, params: z.object({}).strict() }).strict(),
-  z.object({ method: z.literal("skills.detail"), requestId: RequestIdSchema, params: SlugParamsSchema }).strict(),
+  z.object({ method: z.literal("skills.detail"), requestId: RequestIdSchema, params: DetailParamsSchema }).strict(),
   z.object({ method: z.literal("skills.local-detail"), requestId: RequestIdSchema, params: SlugParamsSchema }).strict(),
   z.object({ method: z.literal("skills.install"), requestId: RequestIdSchema, params: MutationParamsSchema }).strict(),
   z.object({ method: z.literal("skills.update"), requestId: RequestIdSchema, params: MutationParamsSchema }).strict(),

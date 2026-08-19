@@ -72,11 +72,11 @@ type RemoveJournal = z.infer<typeof RemoveJournalSchema>;
 type ToggleJournal = z.infer<typeof ToggleJournalSchema>;
 type Journal = z.infer<typeof JournalSchema>;
 
-export interface SkillMutationInput { slug: string; confirmation: SkillConfirmation | null }
+export interface SkillMutationInput { slug: string; expectedVersion?: string; confirmation: SkillConfirmation | null }
 export interface SkillBundleInstallInput { detail: SkillDetail; validated: ValidatedBundle; confirmation: SkillConfirmation }
 export interface SkillService {
   search(input: { query: string; category?: string | null; sort?: "score" | "downloads" | "stars" | "updatedAt"; cursor: string | null; pageSize: number }): Promise<{ items: SkillCatalogItem[]; nextCursor: string | null; hasMore: boolean; mode: "fixture" | "live" }>;
-  detail(slug: string): Promise<SkillDetail>;
+  detail(slug: string, expectedVersion?: string): Promise<SkillDetail>;
   localDetail(slug: string): Promise<LocalSkillDetail>;
   installed(): Promise<SkillCatalogItem[]>;
   runtimeStatus(): Promise<SkillRuntimeInventory>;
@@ -333,6 +333,7 @@ async function assertInstalledVersion(target: string, validated: ValidatedBundle
   if (manifest.id !== validated.manifest.id || manifest.version !== validated.manifest.version) throw new Error("Installed Skill version readback mismatch.");
 }
 
+/** Creates the portable Skill service and enforces identity/version confirmation at mutations. */
 export async function createSkillService({
   dataDir,
   client,
@@ -402,24 +403,47 @@ export async function createSkillService({
       mode: "live", categories: [], logoUrl: null,
     };
   };
-  const loadRemoteDetail = async (slug: string): Promise<SkillDetail> => {
-    const found = await client.detail(slug).catch(() => { throw domainError("NOT_FOUND", "Skill not found."); });
+  /** Loads one pinned remote detail and maps identity drift at mutation time to reconfirmation. */
+  const loadRemoteDetail = async (slug: string, expectedVersion?: string, confirmationBoundary = false): Promise<SkillDetail> => {
+    let found: SkillDetail;
+    try {
+      found = await client.detail(slug, expectedVersion, confirmationBoundary);
+    } catch (error) {
+      if (confirmationBoundary && /identity|version/iu.test(error instanceof Error ? error.message : "")) {
+        throw domainError("CONFIRMATION_REQUIRED", "Skill identity changed; review the latest detail before installing.");
+      }
+      throw domainError("NOT_FOUND", "Skill not found.");
+    }
     const parsed = SkillDetailSchema.parse(found);
+    if (confirmationBoundary && parsed.stale) {
+      throw domainError("CONFIRMATION_REQUIRED", "Live Skill identity is unavailable; review the detail again before installing.");
+    }
+    if (expectedVersion !== undefined && parsed.version !== expectedVersion) {
+      throw domainError(
+        confirmationBoundary ? "CONFIRMATION_REQUIRED" : "NOT_FOUND",
+        confirmationBoundary ? "Skill identity changed; review the latest detail before installing." : "Skill version not found.",
+      );
+    }
     if (parsed.pricingType !== "free") throw domainError("FORBIDDEN", "Paid Skills are not available.");
     const normalized = normalize(parsed);
     return { ...normalized, ...project(normalized) };
   };
-  const loadDetail = async (slug: string): Promise<SkillDetail> => {
-    try { return await loadRemoteDetail(slug); }
+  /** Falls back to an installed snapshot only for ordinary detail reads, never paid results. */
+  const loadDetail = async (slug: string, expectedVersion?: string): Promise<SkillDetail> => {
+    try { return await loadRemoteDetail(slug, expectedVersion); }
     catch (error) {
       if ((error as { code?: unknown })?.code === "FORBIDDEN") throw error;
       const snapshot = state.installed[slug]?.detail;
-      if (snapshot) return { ...normalize(snapshot), ...project(snapshot) };
+      if (snapshot && (expectedVersion === undefined || snapshot.version === expectedVersion)) {
+        return { ...normalize(snapshot), ...project(snapshot) };
+      }
       throw error;
     }
   };
-  const confirm = (detail: SkillDetail, confirmation: SkillConfirmation | null): void => {
+  /** Verifies permissions, risk, and marketplace identity against the exact detail the user accepted. */
+  const confirm = (detail: SkillDetail, confirmation: SkillConfirmation | null, requireIdentity = false): void => {
     if (!confirmation || confirmation.permissionFingerprint !== detail.permissionFingerprint ||
+      (requireIdentity && (!detail.identityFingerprint || confirmation.identityFingerprint !== detail.identityFingerprint)) ||
       riskOrder.indexOf(confirmation.acceptedRisk) < riskOrder.indexOf(detail.risk)) {
       throw domainError("CONFIRMATION_REQUIRED", "Skill permissions require explicit confirmation.");
     }
@@ -660,8 +684,8 @@ export async function createSkillService({
     proposalRevise: (input) => enqueueMutation(() => requireRuntime().reviseProposal(input)),
     proposalRequestRevision: (input) => enqueueMutation(() => requireRuntime().requestProposalRevision(input)),
     async startInstall(input) {
-      const detail = await loadRemoteDetail(input.slug);
-      confirm(detail, input.confirmation);
+      const detail = await loadRemoteDetail(input.slug, input.expectedVersion, true);
+      confirm(detail, input.confirmation, detail.mode === "live" && detail.source.provider === "skillhub");
       const persistedState = await readState(statePath);
       if (persistedState.installed[detail.slug] || await pathExists(join(authoritativeRoot, detail.slug))) {
         throw domainError("CONFLICT", "Skill is already installed.");
@@ -678,8 +702,8 @@ export async function createSkillService({
       return start(detail.slug, "install", (id) => installOrUpdate(detail, "install", id, validated));
     },
     async startUpdate(input) {
-      const detail = await loadRemoteDetail(input.slug);
-      confirm(detail, input.confirmation);
+      const detail = await loadRemoteDetail(input.slug, input.expectedVersion, true);
+      confirm(detail, input.confirmation, detail.mode === "live" && detail.source.provider === "skillhub");
       return start(input.slug, "update", (id) => installOrUpdate(detail, "update", id));
     },
     async startUninstall(slug) {

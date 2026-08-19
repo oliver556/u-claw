@@ -24,10 +24,19 @@ export interface SkillHubSearchResult {
   stale?: boolean;
 }
 
+/** Private marketplace tuple used to pin detail and download to one exact Skill version. */
+export interface SkillHubIdentity {
+  slug: string;
+  namespace: string;
+  version: string;
+}
+
 export interface SkillHubClient {
   readonly mode: "fixture" | "live";
   search(input: { query: string; category?: string | null; sort?: "score" | "downloads" | "stars" | "updatedAt"; cursor: string | null; pageSize: number }): Promise<SkillHubSearchResult>;
-  detail(slug: string): Promise<SkillDetail>;
+  /** Returns an already validated private identity tuple without projecting namespace publicly. */
+  confirmedIdentity(slug: string): SkillHubIdentity | undefined;
+  detail(slug: string, expectedVersion?: string, forceRefresh?: boolean): Promise<SkillDetail>;
   download(slug: string): Promise<SkillBundle>;
   readonly failAfterBackup?: boolean;
 }
@@ -53,6 +62,15 @@ export function highestPermissionRisk(items: readonly SkillPermission[]): Capabi
 
 export function permissionFingerprint(items: readonly SkillPermission[]): string {
   return createHash("sha256").update(JSON.stringify(items)).digest("hex");
+}
+
+/** Creates the opaque token that binds confirmation to one private SkillHub identity tuple. */
+export function skillIdentityFingerprint(identity: SkillHubIdentity): string {
+  return createHash("sha256").update(JSON.stringify({
+    slug: identity.slug,
+    namespace: identity.namespace,
+    version: identity.version,
+  })).digest("hex");
 }
 
 /** Builds a deterministic catalog/detail record for offline development and tests. */
@@ -122,6 +140,7 @@ function makeBundle(slug: string, version: string, invalid?: FixtureOptions["inv
   };
 }
 
+/** Creates deterministic fixture data while enforcing requested version identity in tests. */
 export function createFixtureSkillHubClient(options: FixtureOptions = {}): SkillHubClient {
   const catalog = [
     detail("workspace-reader", "free", options.versionOverride?.["workspace-reader"]),
@@ -131,6 +150,11 @@ export function createFixtureSkillHubClient(options: FixtureOptions = {}): Skill
   return {
     mode: "fixture",
     failAfterBackup: options.failAfterBackup,
+    /** Returns fixture identity without adding namespace to public Skill details. */
+    confirmedIdentity(slug) {
+      const found = catalog.find((item) => item.slug === slug);
+      return found ? { slug, namespace: "fixture", version: found.version } : undefined;
+    },
     async search({ query, category, sort, cursor, pageSize }) {
       const offset = cursor === null ? 0 : Number(cursor);
       if (!Number.isSafeInteger(offset) || offset < 0 || (cursor !== null && String(offset) !== cursor)) throw new Error("Fixture SkillHub cursor is invalid.");
@@ -145,9 +169,11 @@ export function createFixtureSkillHubClient(options: FixtureOptions = {}): Skill
       const nextOffset = offset + items.length;
       return { items, nextCursor: nextOffset < matches.length ? String(nextOffset) : null, hasMore: nextOffset < matches.length, mode: "fixture" };
     },
-    async detail(slug) {
+    /** Returns only the selected fixture version so cache tests mirror marketplace pinning. */
+    async detail(slug, expectedVersion) {
       const found = catalog.find((item) => item.slug === slug);
       if (!found) throw new Error("Skill not found.");
+      if (expectedVersion !== undefined && found.version !== expectedVersion) throw new Error("Fixture Skill version mismatch.");
       const pricingType = options.detailPricingOverride?.[slug] ?? found.pricingType;
       return { ...found, pricingType };
     },

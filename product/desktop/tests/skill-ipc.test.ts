@@ -57,6 +57,41 @@ describe("Skill IPC", () => {
     expect(response).toMatchObject({ method: "skills.search", requestId: "skills-1", ok: true });
   });
 
+  it("routes expected marketplace versions and opaque confirmations without namespace", async () => {
+    const skills = skillService();
+    const dispatch = createSkillDispatcher(skills);
+    const identityFingerprint = "a".repeat(64);
+    skills.detail.mockResolvedValue({
+      slug: "one", name: "One", description: "One", version: "1.2.3", pricingType: "free",
+      installedVersion: null, enabled: false, updateAvailable: false,
+      source: { provider: "skillhub", url: "https://api.skillhub.cn/api/v1/skills/one" },
+      permissions: [], permissionFingerprint: "permissions", identityFingerprint,
+      risk: "high", mode: "live", categories: [],
+      manifest: { kind: "skill", id: "one", version: "1.2.3", entry: "SKILL.md" },
+    });
+    skills.startInstall.mockResolvedValue({
+      id: "install-one", slug: "one", action: "install", state: "queued", progress: 0, phase: "queued",
+    });
+
+    await dispatch({ method: "skills.detail", requestId: "detail-version", params: { slug: "one", expectedVersion: "1.2.3" } });
+    await dispatch({
+      method: "skills.install",
+      requestId: "install-version",
+      params: {
+        slug: "one",
+        expectedVersion: "1.2.3",
+        confirmation: { permissionFingerprint: "permissions", identityFingerprint, acceptedRisk: "high" },
+      },
+    });
+
+    expect(skills.detail).toHaveBeenCalledWith("one", "1.2.3");
+    expect(skills.startInstall).toHaveBeenCalledWith({
+      slug: "one",
+      expectedVersion: "1.2.3",
+      confirmation: { permissionFingerprint: "permissions", identityFingerprint, acceptedRisk: "high" },
+    });
+  });
+
   it("routes controlled import and fixed hub actions through the coordinator", async () => {
     const skills = skillService();
     const imported = {

@@ -752,6 +752,35 @@ describe("portable Skill service", () => {
     })).rejects.toMatchObject({ code: "CONFIRMATION_REQUIRED" });
   });
 
+  it("does not let installation refresh replace the identity the user confirmed", async () => {
+    const fixture = createFixtureSkillHubClient();
+    let detailCalls = 0;
+    const client = {
+      ...fixture,
+      mode: "live" as const,
+      detail: vi.fn(async (slug: string, expectedVersion?: string) => ({
+        ...(await fixture.detail(slug, expectedVersion)),
+        mode: "live" as const,
+        identityFingerprint: (detailCalls++ === 0 ? "a" : "b").repeat(64),
+      })),
+      download: vi.fn(fixture.download),
+    };
+    const service = await createSkillService({ dataDir: await makeRoot(), client });
+    const shown = await service.detail("workspace-reader", "1.0.0");
+
+    await expect(service.startInstall({
+      slug: shown.slug,
+      expectedVersion: shown.version,
+      confirmation: {
+        permissionFingerprint: shown.permissionFingerprint,
+        identityFingerprint: shown.identityFingerprint,
+        acceptedRisk: shown.risk,
+      },
+    })).rejects.toMatchObject({ code: "CONFIRMATION_REQUIRED" });
+    expect(client.download).not.toHaveBeenCalled();
+    expect(client.detail).toHaveBeenNthCalledWith(2, "workspace-reader", "1.0.0", true);
+  });
+
   it("installs into the portable data directory and persists enable state", async () => {
     const dataDir = await makeRoot();
     const service = await createSkillService({ dataDir, client: createFixtureSkillHubClient() });

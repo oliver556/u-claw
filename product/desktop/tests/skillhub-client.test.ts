@@ -10,6 +10,7 @@ const namespace = { canonicalName: "@owner/workspace-reader", displayName: "owne
 const searchItem = {
   slug: "workspace-reader", name: "Workspace Reader", description: "Reads workspace files", description_zh: null,
   version: "1.0.0", labels: { requires_api_key: "false", pricing_type: "free", category: "productivity" }, namespace,
+  iconUrl: "https://cloudcache.tencent-cloud.com/qcloud/ui/static/workspace-reader.png",
 };
 const detailBody = {
   slug: "workspace-reader", namespace, latestVersion: { version: "1.0.0", changelog: null, createdAt: 1, updatedAt: "2026-08-19T12:00:00.000Z" },
@@ -17,6 +18,7 @@ const detailBody = {
     slug: "workspace-reader", displayName: "Workspace Reader", summary: "Reads workspace files", summary_zh: null,
     labels: { requires_api_key: "false", pricing_type: "free", category: "productivity" },
     upstream_owner_login: "upstream-owner", downloads: 879, stars: 4, requires_key: false,
+    iconUrl: "https://skillhub-1388575217.cos.accelerate.myqcloud.com/skill-icons/workspace-reader.png",
   },
 };
 const skillMd = `---
@@ -115,7 +117,29 @@ metadata:
       "https://api.skillhub.cn/api/skills?page=2&pageSize=20&keyword=workspace+%26+files&category=productivity&labels=pricing_type%3A%21paid",
       { method: "GET", headers: { accept: "application/json" }, redirect: "error", signal: expect.any(AbortSignal) },
     );
-    expect((await client.search({ query: "", cursor: null, pageSize: 20 })).items[0]?.logoUrl).toBeNull();
+    expect((await client.search({ query: "", cursor: null, pageSize: 20 })).items[0]?.logoUrl).toBe("https://cloudcache.tencent-cloud.com/qcloud/ui/static/workspace-reader.png");
+  });
+
+  it("keeps confirmed namespace identity on the internal client seam", async () => {
+    const client = createSkillHubClient({ fetch: vi.fn(async () => json({
+      code: 0, data: { skills: [searchItem], total: 1 }, message: "success",
+    })) });
+
+    const result = await client.search({ query: "workspace-reader", cursor: null, pageSize: 20 });
+
+    expect(client.confirmedIdentity("workspace-reader")).toEqual({
+      slug: "workspace-reader", namespace: "owner", version: "1.0.0",
+    });
+    expect(result.items[0]).not.toHaveProperty("namespace");
+  });
+
+  it("rejects detail when the selected catalog version is no longer current", async () => {
+    const fetch = vi.fn(async () => json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }));
+    const client = createSkillHubClient({ fetch });
+    await client.search({ query: "workspace-reader", cursor: null, pageSize: 20 });
+
+    await expect(client.detail("workspace-reader", "2.0.0")).rejects.toThrow(/version/i);
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("projects optional marketplace metadata and forwards the selected sort", async () => {
@@ -313,17 +337,36 @@ metadata:
       .mockResolvedValueOnce(new Response(canonicalSkillMd, { headers: { "content-type": "text/markdown", "content-length": String(Buffer.byteLength(canonicalSkillMd)) } }));
     const client = createSkillHubClient({ fetch });
 
-    await expect(client.detail("workspace-reader")).resolves.toMatchObject({
+    const result = await client.detail("workspace-reader");
+    expect(result).toMatchObject({
       slug: "workspace-reader", name: "Workspace Reader", description: "Reads workspace files", version: "1.0.0",
-      pricingType: "free", risk: "high", logoUrl: null, readme: canonicalSkillMd,
+      pricingType: "free", risk: "high", logoUrl: "https://skillhub-1388575217.cos.accelerate.myqcloud.com/skill-icons/workspace-reader.png", readme: canonicalSkillMd,
       ownerName: "upstream-owner", downloads: 879, stars: 4, requiresKey: false, updatedAt: "2026-08-19T12:00:00.000Z",
+      identityFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
       manifest: { kind: "skill", id: "workspace-reader", version: "1.0.0", entry: "SKILL.md" },
     });
+    expect(result).not.toHaveProperty("namespace");
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([
       "https://api.skillhub.cn/api/v1/skills/workspace-reader?namespace=",
       "https://api.skillhub.cn/api/v1/skills/workspace-reader/file?path=SKILL.md&version=1.0.0&namespace=owner",
       "https://skillhub-1388575217.cos.accelerate.myqcloud.com/signed/skill.md",
     ]);
+  });
+
+  it.each([
+    "https://cloudcache.tencent-cloud.com.evil.example/tracker.png",
+    "https://user:pass@cloudcache.tencent-cloud.com/tracker.png",
+    "http://cloudcache.tencent-cloud.com/tracker.png",
+  ])("drops untrusted marketplace logo URL %s from search and detail responses", async (untrusted) => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [{ ...searchItem, iconUrl: untrusted }], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json({ ...detailBody, skill: { ...detailBody.skill, iconUrl: untrusted } }))
+      .mockResolvedValueOnce(redirect("signed/skill.md"))
+      .mockResolvedValueOnce(new Response(canonicalSkillMd, { headers: { "content-type": "text/markdown" } }));
+    const client = createSkillHubClient({ fetch });
+
+    await expect(client.search({ query: "", cursor: null, pageSize: 20 })).resolves.toMatchObject({ items: [{ logoUrl: null }] });
+    await expect(client.detail("workspace-reader")).resolves.toMatchObject({ logoUrl: null });
   });
 
   it("rejects optional SKILL.md identity fields when they conflict with the API", async () => {

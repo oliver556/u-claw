@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CapabilityPackageKindSchema,
+  SKILLHUB_TRUSTED_LOGO_HOSTS,
   SkillCuratorStatusSchema,
   SkillCatalogItemSchema,
   SkillCatalogPageSchema,
@@ -78,6 +79,24 @@ describe("capability contracts", () => {
     expect(() => SkillCatalogItemSchema.parse({ ...base, updatedAt: "yesterday" })).toThrow();
   });
 
+  it("binds Skill detail and installation to an expected version and opaque identity", () => {
+    const identityFingerprint = "a".repeat(64);
+    expect(SkillIpcRequestSchema.parse({
+      method: "skills.detail",
+      requestId: "detail-version-1",
+      params: { slug: "git-tools", expectedVersion: "1.2.3" },
+    }).params).toEqual({ slug: "git-tools", expectedVersion: "1.2.3" });
+    expect(SkillIpcRequestSchema.parse({
+      method: "skills.install",
+      requestId: "install-version-1",
+      params: {
+        slug: "git-tools",
+        expectedVersion: "1.2.3",
+        confirmation: { permissionFingerprint: "permissions", identityFingerprint, acceptedRisk: "high" },
+      },
+    }).params).toMatchObject({ expectedVersion: "1.2.3", confirmation: { identityFingerprint } });
+  });
+
   it("accepts controlled Skill import and hub actions without renderer paths or URLs", () => {
     for (const request of [
       { method: "skills.import-select", requestId: "select-1", params: {} },
@@ -115,10 +134,16 @@ describe("capability contracts", () => {
   });
 
   it("accepts only trusted SkillHub HTTPS logo URLs", () => {
+    expect(SKILLHUB_TRUSTED_LOGO_HOSTS).toEqual([
+      "api.skillhub.cn",
+      "cloudcache.tencent-cloud.com",
+      "skillhub-1388575217.cos.accelerate.myqcloud.com",
+    ]);
     const base = { slug: "one", name: "One", description: "One", version: "1.0.0", pricingType: "free", installedVersion: null, enabled: false, updateAvailable: false, source: { provider: "skillhub", url: "https://api.skillhub.cn/api/v1/skills/one" }, permissions: [], permissionFingerprint: "empty", risk: "low", mode: "live", categories: [] } as const;
     expect(SkillCatalogItemSchema.parse({ ...base, logoUrl: "https://api.skillhub.cn/assets/one.png" }).logoUrl).toBe("https://api.skillhub.cn/assets/one.png");
     expect(SkillCatalogItemSchema.parse({ ...base, logoUrl: "https://skillhub-1388575217.cos.accelerate.myqcloud.com/logos/one.png" }).logoUrl).toContain("myqcloud.com");
-    for (const logoUrl of ["file:///tmp/one.png", "http://api.skillhub.cn/one.png", "https://api.skillhub.cn.evil.example/one.png", "data:image/png;base64,eA=="]) {
+    expect(SkillCatalogItemSchema.parse({ ...base, logoUrl: "https://cloudcache.tencent-cloud.com/qcloud/ui/static/one.png" }).logoUrl).toContain("tencent-cloud.com");
+    for (const logoUrl of ["file:///tmp/one.png", "http://api.skillhub.cn/one.png", "https://api.skillhub.cn.evil.example/one.png", "https://cloudcache.tencent-cloud.com.evil.example/one.png", "https://user:pass@cloudcache.tencent-cloud.com/one.png", "data:image/png;base64,eA=="]) {
       expect(() => SkillCatalogItemSchema.parse({ ...base, logoUrl })).toThrow();
     }
   });

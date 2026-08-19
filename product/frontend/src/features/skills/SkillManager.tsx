@@ -29,6 +29,19 @@ type KeyRequirement = "all" | "required" | "not-required";
 
 const messageOf = (error: unknown, fallback: string) => error instanceof Error && error.message ? error.message : fallback;
 
+/** Keeps catalog presentation fields when a sparse detail response omits them. */
+function withCatalogPresentation(detail: SkillDetail, item: SkillCatalogItem): SkillDetail {
+  return {
+    ...detail,
+    logoUrl: detail.logoUrl ?? item.logoUrl ?? null,
+    ownerName: detail.ownerName ?? item.ownerName,
+    downloads: detail.downloads ?? item.downloads,
+    stars: detail.stars ?? item.stars,
+    requiresKey: detail.requiresKey ?? item.requiresKey,
+    updatedAt: detail.updatedAt ?? item.updatedAt,
+  };
+}
+
 /** 在产品导航中提供公共技能库，后台入口仍保留完整高级管理能力。 */
 export function SkillManager({ publicView = false }: { publicView?: boolean } = {}) {
   return publicView ? <PublicSkillLibrary /> : <AdvancedSkillManager />;
@@ -53,6 +66,7 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
   const mounted = useRef(true);
   const loadSequence = useRef(0);
   const detailLoadSequence = useRef(0);
+  const detailPendingSlugRef = useRef<string | null>(null);
   const proposalInspectSequence = useRef(0);
   const selectedProposalId = useRef<string | null>(null);
   const mutationPendingRef = useRef(false);
@@ -71,6 +85,7 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
   const [mode, setMode] = useState<"fixture" | "live">("fixture");
   const [stale, setStale] = useState(false);
   const [detail, setDetail] = useState<SkillDetail>();
+  const [detailPendingSlug, setDetailPendingSlug] = useState<string | null>(null);
   const [enableConfirmation, setEnableConfirmation] = useState<SkillCatalogItem>();
   const [detailMode, setDetailMode] = useState<"view" | "confirm">("view");
   const [action, setAction] = useState<"install" | "update" | "enable">("install");
@@ -188,14 +203,18 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
     if (mounted.current) setMutationPending(false);
   };
 
-  /** 读取所选技能详情，并丢弃卸载后或较新选择之后返回的旧响应。 */
+  /** 串行读取技能详情，防止重复点击或跨卡片请求改变当前操作目标。 */
   const openDetail = async (item: SkillCatalogItem, nextMode: "view" | "confirm", nextAction: "install" | "update" = "install") => {
+    if (detailPendingSlugRef.current !== null) return;
     const sequence = ++detailLoadSequence.current;
+    detailPendingSlugRef.current = item.slug;
+    setDetailPendingSlug(item.slug);
+    setError("");
     try {
-      const response = await requireInvoke()(request("skills.detail", { slug: item.slug }));
+      const response = await requireInvoke()(request("skills.detail", { slug: item.slug, expectedVersion: item.version }));
       const nextDetail = requireSuccess<SkillDetail>(response, "skills.detail");
       if (!mounted.current || sequence !== detailLoadSequence.current) return;
-      setDetail(nextDetail);
+      setDetail(withCatalogPresentation(nextDetail, item));
       setEnableConfirmation(undefined);
       setDetailMode(nextMode);
       setAction(nextAction);
@@ -203,6 +222,11 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
       setError("");
     } catch (caught) {
       if (mounted.current && sequence === detailLoadSequence.current) showError(caught, "技能详情读取失败");
+    } finally {
+      if (sequence === detailLoadSequence.current) {
+        detailPendingSlugRef.current = null;
+        if (mounted.current) setDetailPendingSlug(null);
+      }
     }
   };
 
@@ -266,8 +290,11 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
       const confirmation = {
         permissionFingerprint: selected.permissionFingerprint,
         acceptedRisk: selected.risk,
+        ...(action !== "enable" && detail?.identityFingerprint ? { identityFingerprint: detail.identityFingerprint } : {}),
       };
-      const params = action === "enable" ? { slug: selected.slug, enabled: true, confirmation } : { slug: selected.slug, confirmation };
+      const params = action === "enable"
+        ? { slug: selected.slug, enabled: true, confirmation }
+        : { slug: selected.slug, expectedVersion: selected.version, confirmation };
       const response = await requireInvoke()(request(method, params));
       startOperation(requireSuccess<SkillOperation>(response, method));
       setDetail(undefined);
@@ -421,17 +448,20 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
         <button type="button" aria-label="刷新技能目录" onClick={() => void load()}><RefreshCw aria-hidden="true" /></button>
         {view === "catalog" ? <span className={`skill-mode ${mode}`}>{stale ? "最近缓存" : mode === "fixture" ? "本地契约数据" : "SkillHub 在线"}</span> : null}
       </div>
+      {publicCatalog && error ? <div className="skill-error skill-marketplace-error" role="alert"><AlertTriangle /><div><strong>技能操作失败</strong><span>{error}</span></div>{state === "error" ? <button type="button" aria-label="重试技能目录" onClick={() => void load()}>重试</button> : null}</div> : null}
       {state === "ready" && visibleItems.length === 0 ? <div className="skill-state"><strong>{view === "catalog" ? "没有匹配的免费技能" : "尚未安装技能"}</strong><span>{view === "catalog" ? "调整搜索条件后重试。" : "从免费目录安装后会显示在这里。"}</span></div> : null}
       {state === "ready" && visibleItems.length > 0 ? <div className={`skill-list${publicCatalog ? " marketplace" : ""}`} aria-label="免费技能列表">
         {visibleItems.map((item) => {
           const operation = operations[item.slug];
-          const busy = operation?.state === "queued" || operation?.state === "running";
+          const detailRequestPending = detailPendingSlug !== null;
+          const activeDetailRequest = detailPendingSlug === item.slug;
+          const busy = detailRequestPending || operation?.state === "queued" || operation?.state === "running";
+          const identity = <div className="skill-identity"><div><strong>{item.name}</strong><span className={`risk-${item.risk}`}>{riskLabel[item.risk]}</span></div><p>{item.description}</p><small>{item.slug} · v{item.version}</small>{publicCatalog ? <div className="skill-marketplace-meta"><span>{item.ownerName ?? "未知作者"}</span>{item.downloads === undefined ? null : <span><Download />{item.downloads}</span>}{item.stars === undefined ? null : <span><Star />{item.stars}</span>}{item.requiresKey ? <span><KeyRound />API Key</span> : null}</div> : null}</div>;
           return <article className="skill-row" key={item.slug}>
-            {publicCatalog ? <SkillLogo name={item.name} logoUrl={item.logoUrl} className="skill-marketplace-logo" /> : null}
-            <div className="skill-identity"><div><strong>{item.name}</strong><span className={`risk-${item.risk}`}>{riskLabel[item.risk]}</span></div><p>{item.description}</p><small>{item.slug} · v{item.version}</small>{publicCatalog ? <div className="skill-marketplace-meta"><span>{item.ownerName ?? "未知作者"}</span>{item.downloads === undefined ? null : <span><Download />{item.downloads}</span>}{item.stars === undefined ? null : <span><Star />{item.stars}</span>}{item.requiresKey ? <span><KeyRound />API Key</span> : null}</div> : null}</div>
+            {publicCatalog ? <button type="button" className="skill-marketplace-detail-trigger" aria-label={`打开技能详情 ${item.name}`} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}><SkillLogo name={item.name} logoUrl={item.logoUrl} className="skill-marketplace-logo" />{identity}{activeDetailRequest ? <span className="skill-detail-pending" role="status"><RefreshCw className="spin" />正在读取详情</span> : null}</button> : identity}
             <div className="skill-permissions">{item.permissions.map((permission) => <span key={`${permission.kind}-${permission.target}`}>{permissionKindLabel[permission.kind]} · {permission.target}</span>)}</div>
             <div className="skill-actions">
-              <button type="button" aria-label={`查看详情 ${item.name}`} onClick={() => void openDetail(item, "view")}>详情</button>
+              <button type="button" aria-label={`查看详情 ${item.name}`} disabled={detailRequestPending} onClick={() => void openDetail(item, "view")}>详情</button>
               {item.installedVersion === null ? <button type="button" aria-label={`安装 ${item.name}`} disabled={busy} onClick={() => void openDetail(item, "confirm", "install")}><Download />安装</button> : <>
                 {item.updateAvailable ? <button type="button" aria-label={`更新 ${item.name}`} disabled={busy} onClick={() => void openDetail(item, "confirm", "update")}><RefreshCw />更新</button> : null}
                 <label className="skill-switch"><input type="checkbox" role="switch" aria-label={`${item.enabled ? "禁用" : "启用"} ${item.name}`} checked={item.enabled} disabled={busy} onChange={() => toggleAction(item)} /><span>{item.enabled ? "已启用" : "已禁用"}</span></label>
@@ -485,7 +515,7 @@ function AdvancedSkillManager({ publicCatalog = false }: { publicCatalog?: boole
     </div> : null}
 
     {state === "loading" ? <div className="skill-state"><RefreshCw className="spin" /><strong>{view === "catalog" ? "正在加载免费技能" : "正在读取技能数据"}</strong></div> : null}
-    {error ? <div className="skill-error" role="alert"><AlertTriangle /><div><strong>{view === "catalog" ? "技能目录离线" : "技能操作失败"}</strong><span>{error}</span></div>{state === "error" ? <button type="button" aria-label="重试技能目录" onClick={() => void load()}>重试</button> : null}</div> : null}
+    {!publicCatalog && error ? <div className="skill-error" role="alert"><AlertTriangle /><div><strong>{view === "catalog" ? "技能目录离线" : "技能操作失败"}</strong><span>{error}</span></div>{state === "error" ? <button type="button" aria-label="重试技能目录" onClick={() => void load()}>重试</button> : null}</div> : null}
 
     {publicCatalog && detail && detailMode === "view" ? <div className="skill-drawer-backdrop" onMouseDown={() => setDetail(undefined)}><aside className="skill-drawer" role="dialog" aria-modal="true" aria-label={`技能详情 ${detail.name}`} onMouseDown={(event) => event.stopPropagation()}>
       <header><div><span>SKILL DETAIL</span><strong>{detail.name}</strong><code>{detail.slug} · v{detail.version}</code></div><button type="button" aria-label="关闭技能详情" onClick={() => setDetail(undefined)}><X /></button></header>
