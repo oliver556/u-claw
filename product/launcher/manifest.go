@@ -89,8 +89,11 @@ func readManifestFile(path string) (Manifest, error) {
 		return Manifest{}, ErrManifestInvalid
 	}
 	defer file.Close()
+	return readManifest(file)
+}
 
-	decoder := json.NewDecoder(io.LimitReader(file, maxManifestBytes+1))
+func readManifest(reader io.Reader) (Manifest, error) {
+	decoder := json.NewDecoder(io.LimitReader(reader, maxManifestBytes+1))
 	decoder.DisallowUnknownFields()
 	var manifest Manifest
 	if err := decoder.Decode(&manifest); err != nil {

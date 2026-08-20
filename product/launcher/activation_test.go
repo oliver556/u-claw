@@ -102,8 +102,8 @@ func TestActivationArtifactsEnableNormalWorkspaceHarness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deps.VerifyLicense = func(root, usbRoot string) error {
-		return VerifyStartupLicense(licenseVerificationOptions{
+	deps.VerifyLocalLicense = func(root, usbRoot string) (verifiedLicenseMaterial, error) {
+		return VerifyStartupLicenseMaterial(licenseVerificationOptions{
 			PackageRoot: root,
 			USBRoot:     usbRoot,
 			Now:         func() time.Time { return now },
@@ -113,26 +113,12 @@ func TestActivationArtifactsEnableNormalWorkspaceHarness(t *testing.T) {
 			TrustedPublicKeys: map[string]ed25519.PublicKey{"activation-key": publicKey},
 		})
 	}
-	deps.ReadManifest = func(path string) (Manifest, error) {
-		if path != filepath.Join(packageRoot, "version.json") {
-			t.Fatalf("manifest path = %q", path)
-		}
+	deps.VerifyOnlineLicense = func(verifiedLicenseMaterial) error { return nil }
+	deps.EnforceRelease = func(_ context.Context, progress func(State)) (requiredReleaseResult, error) {
+		progress(StateCheckingVersion)
 		manifest := validRuntimeManifest()
 		manifest.Entrypoint = `electron\electron.exe`
-		return manifest, nil
-	}
-	deps.PrepareRuntime = func(_ context.Context, _ string, packageRootArg string, manifest Manifest, extracting func()) (CacheResult, error) {
-		if packageRootArg != packageRoot {
-			t.Fatalf("runtime package root = %q", packageRootArg)
-		}
-		extracting()
-		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest))}, nil
-	}
-	deps.FinalizeUpdate = func(packageRootArg string, _ Manifest) error {
-		if packageRootArg != packageRoot {
-			t.Fatalf("update package root = %q", packageRootArg)
-		}
-		return nil
+		return requiredReleaseResult{Manifest: manifest, RuntimePath: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest))}, nil
 	}
 	deps.StartProcess = func(spec ProcessSpec) (ChildProcess, error) {
 		if !slices.Contains(spec.Args, normalStartupArgument) || slices.Contains(spec.Args, activationStartupArgument) {

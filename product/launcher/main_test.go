@@ -12,39 +12,6 @@ import (
 	"testing"
 )
 
-func TestPrepareRuntimeForLaunchReportsOnlyRealExtraction(t *testing.T) {
-	packageRoot, manifest := writePackageFixture(t)
-	cacheRoot := t.TempDir()
-	extractions := 0
-	first, err := prepareRuntimeForLaunch(
-		context.Background(),
-		cacheRoot,
-		packageRoot,
-		manifest,
-		func() { extractions++ },
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Reused || extractions != 1 {
-		t.Fatalf("first reused=%v extractions=%d", first.Reused, extractions)
-	}
-
-	second, err := prepareRuntimeForLaunch(
-		context.Background(),
-		cacheRoot,
-		packageRoot,
-		manifest,
-		func() { extractions++ },
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !second.Reused || extractions != 1 || second.Path != first.Path {
-		t.Fatalf("second=%#v extractions=%d", second, extractions)
-	}
-}
-
 func TestLauncherMainRejectsInvalidPortablePaths(t *testing.T) {
 	reporter := &recordingReporter{}
 	err := launcherMain(context.Background(), "U-Claw.exe", filepath.Join(t.TempDir(), "local"), reporter)
@@ -62,16 +29,23 @@ func TestHeadlessStatusReporterSupportsAutomatedFailureChecks(t *testing.T) {
 		t.Fatal("headless status mode was not enabled")
 	}
 	reporter := NewStatusReporter()
-	reporter.State(StateCheckingRuntime)
+	reporter.State(StateCheckingVersion)
 	reporter.Fail("E_PACKAGE_INVALID", "运行时文件校验失败。")
 	reporter.Close()
 }
 
-func TestLauncherDependenciesWireProductionLicenseGate(t *testing.T) {
-	paths := PortablePaths{PackageRoot: filepath.Join(t.TempDir(), ".uclaw"), USBRoot: t.TempDir()}
-	dependencies := launcherDependencies(paths, &recordingReporter{})
-	if dependencies.VerifyLicense == nil {
-		t.Fatal("production license gate is not configured")
+func TestLauncherDependenciesWireProductionStartupGates(t *testing.T) {
+	root := t.TempDir()
+	paths := PortablePaths{
+		PackageRoot: filepath.Join(root, ".uclaw"), USBRoot: root,
+		HostCacheRoot: filepath.Join(t.TempDir(), "U-Claw"), CacheRoot: filepath.Join(t.TempDir(), "U-Claw", "runtimes"),
+	}
+	dependencies := launcherDependencies(paths, &recordingReporter{}, filepath.Join(root, "U-Claw.exe"))
+	if dependencies.VerifyLocalLicense == nil || dependencies.VerifyOnlineLicense == nil || dependencies.EnforceRelease == nil {
+		t.Fatal("production startup gates are not configured")
+	}
+	if _, err := dependencies.EnforceRelease(context.Background(), func(State) {}); !errors.Is(err, ErrReleasePolicyUnavailable) {
+		t.Fatalf("missing release configuration returned %v", err)
 	}
 	if dependencies.DetectActivationState == nil {
 		t.Fatal("activation classification is not configured")

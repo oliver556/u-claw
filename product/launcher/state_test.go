@@ -208,12 +208,6 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 		Reporter:           reporter,
 		USBInterval:        time.Hour,
 		ProcessStopTimeout: time.Second,
-		ReadManifest: func(path string) (Manifest, error) {
-			if path != filepath.Join(paths.PackageRoot, "version.json") {
-				t.Fatalf("manifest path = %q", path)
-			}
-			return manifest, nil
-		},
 		ProbeDataDirectory: func(packageRoot string, dataDir string) error {
 			if packageRoot != paths.PackageRoot || dataDir != paths.DataDir {
 				t.Fatalf("probe paths = %q, %q", packageRoot, dataDir)
@@ -226,12 +220,13 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 			}
 			return LicenseGateRequired, nil
 		},
-		VerifyLicense: func(packageRoot string, usbRoot string) error {
+		VerifyLocalLicense: func(packageRoot string, usbRoot string) (verifiedLicenseMaterial, error) {
 			if packageRoot != paths.PackageRoot || usbRoot != paths.USBRoot {
 				t.Fatalf("license paths = %q, %q", packageRoot, usbRoot)
 			}
-			return nil
+			return verifiedLicenseMaterial{}, nil
 		},
+		VerifyOnlineLicense: func(verifiedLicenseMaterial) error { return nil },
 		EnsureHostCache: func(cacheRoot string) error {
 			if cacheRoot != paths.HostCacheRoot {
 				t.Fatalf("host cache root = %q", cacheRoot)
@@ -244,36 +239,18 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 			}
 			return lock, nil
 		},
-		PrepareRuntime: func(_ context.Context, cacheRoot string, packageRoot string, got Manifest, extracting func()) (CacheResult, error) {
-			if cacheRoot != paths.CacheRoot || packageRoot != paths.PackageRoot || !reflect.DeepEqual(got, manifest) {
-				t.Fatalf("runtime inputs differ")
-			}
-			extracting()
-			return CacheResult{Path: filepath.Join(paths.CacheRoot, runtimeInstallName(manifest))}, nil
+		EnforceRelease: func(_ context.Context, progress func(State)) (requiredReleaseResult, error) {
+			progress(StateCheckingVersion)
+			return requiredReleaseResult{
+				Manifest: manifest, RuntimePath: filepath.Join(paths.CacheRoot, runtimeInstallName(manifest)),
+			}, nil
 		},
+		RestartBootstrap: func() error { return errors.New("unexpected bootstrap restart") },
 		AcquireRuntime: func(root string, got Manifest) (RuntimeLease, error) {
 			if root != filepath.Join(paths.CacheRoot, runtimeInstallName(manifest)) || !reflect.DeepEqual(got, manifest) {
 				t.Fatalf("runtime lease inputs differ")
 			}
 			return lease, nil
-		},
-		CheckSequence: func(cacheRoot string, got Manifest) error {
-			if cacheRoot != paths.HostCacheRoot || !reflect.DeepEqual(got, manifest) {
-				t.Fatalf("sequence preflight inputs differ")
-			}
-			return nil
-		},
-		AcceptSequence: func(cacheRoot string, got Manifest) error {
-			if cacheRoot != paths.HostCacheRoot || !reflect.DeepEqual(got, manifest) {
-				t.Fatalf("sequence inputs differ")
-			}
-			return nil
-		},
-		FinalizeUpdate: func(packageRoot string, got Manifest) error {
-			if packageRoot != paths.PackageRoot || !reflect.DeepEqual(got, manifest) {
-				t.Fatalf("update finalization inputs differ")
-			}
-			return nil
 		},
 		StartProcess: func(spec ProcessSpec) (ChildProcess, error) {
 			startedSpec = spec
@@ -288,6 +265,98 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 			return ctx.Err()
 		},
 	}, lock, &startedSpec
+}
+
+func TestRunOrdersLocalReleaseOnlineLicenseThenShell(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	events := []string{}
+	deps.ProbeDataDirectory = func(string, string) error { events = append(events, "usb"); return nil }
+	deps.DetectActivationState = func(string) (ActivationState, error) {
+		events = append(events, "classify")
+		return LicenseGateRequired, nil
+	}
+	deps.VerifyLocalLicense = func(string, string) (verifiedLicenseMaterial, error) {
+		events = append(events, "local-license")
+		return verifiedLicenseMaterial{DeviceID: "device-1"}, nil
+	}
+	deps.EnsureHostCache = func(string) error { events = append(events, "host-cache"); return nil }
+	deps.EnforceRelease = func(context.Context, func(State)) (requiredReleaseResult, error) {
+		events = append(events, "online-release")
+		manifest := validRuntimeManifest()
+		return requiredReleaseResult{Manifest: manifest, RuntimePath: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest))}, nil
+	}
+	deps.VerifyOnlineLicense = func(material verifiedLicenseMaterial) error {
+		if material.DeviceID != "device-1" {
+			t.Fatalf("license material = %#v", material)
+		}
+		events = append(events, "online-license")
+		return nil
+	}
+	deps.AcquireInstanceLock = func(string) (InstanceLock, error) { events = append(events, "lock"); return &fakeInstanceLock{}, nil }
+	deps.AcquireRuntime = func(root string, manifest Manifest) (RuntimeLease, error) {
+		events = append(events, "runtime")
+		return &fakeRuntimeLease{root: root}, nil
+	}
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		events = append(events, "shell")
+		return &fakeChildProcess{}, nil
+	}
+
+	if err := Run(context.Background(), deps); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"usb", "classify", "local-license", "host-cache", "online-release", "online-license", "lock", "runtime", "shell"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events = %v", events)
+	}
+}
+
+func TestRunUpdatesUnactivatedDeviceBeforeActivationOnly(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.DetectActivationState = func(string) (ActivationState, error) { return ActivationRequired, nil }
+	manifest := validRuntimeManifest()
+	deps.EnforceRelease = func(context.Context, func(State)) (requiredReleaseResult, error) {
+		return requiredReleaseResult{
+			Manifest: manifest, RuntimePath: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest)), RestartRequired: true,
+		}, nil
+	}
+	restarted := false
+	deps.RestartBootstrap = func() error { restarted = true; return nil }
+	started := false
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { started = true; return &fakeChildProcess{}, nil }
+
+	if err := Run(context.Background(), deps); err != nil {
+		t.Fatal(err)
+	}
+	if !restarted || started {
+		t.Fatalf("restarted=%v activation started=%v", restarted, started)
+	}
+	if !slices.Contains(reporter.states, StateRestarting) {
+		t.Fatalf("states = %v", reporter.states)
+	}
+}
+
+func TestRunFailsClosedWhenReleaseServiceUnavailable(t *testing.T) {
+	reporter := &recordingReporter{}
+	deps, _, _ := successfulDependencies(t, reporter)
+	deps.EnforceRelease = func(context.Context, func(State)) (requiredReleaseResult, error) {
+		return requiredReleaseResult{}, ErrReleasePolicyUnavailable
+	}
+	onlineLicense, started := false, false
+	deps.VerifyOnlineLicense = func(verifiedLicenseMaterial) error { onlineLicense = true; return nil }
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { started = true; return &fakeChildProcess{}, nil }
+
+	if err := Run(context.Background(), deps); !errors.Is(err, ErrReleasePolicyUnavailable) {
+		t.Fatalf("returned %v", err)
+	}
+	if onlineLicense || started {
+		t.Fatalf("onlineLicense=%v shell=%v", onlineLicense, started)
+	}
+	if !reflect.DeepEqual(reporter.failures, [][2]string{{"E_RELEASE_POLICY_UNAVAILABLE", "无法确认必需版本，请检查网络后重试。"}}) {
+		t.Fatalf("failures = %v", reporter.failures)
+	}
 }
 
 func TestRunActivationCompletionRestartsFullGateOnce(t *testing.T) {
@@ -306,7 +375,10 @@ func TestRunActivationCompletionRestartsFullGateOnce(t *testing.T) {
 		classifyCalls++
 		return state, nil
 	}
-	deps.VerifyLicense = func(string, string) error { verifyCalls++; return nil }
+	deps.VerifyLocalLicense = func(string, string) (verifiedLicenseMaterial, error) {
+		verifyCalls++
+		return verifiedLicenseMaterial{}, nil
+	}
 	deps.AcquireRuntime = func(root string, _ Manifest) (RuntimeLease, error) {
 		return &fakeRuntimeLease{root: root}, nil
 	}
@@ -337,7 +409,7 @@ func TestRunActivationCompletionRestartsFullGateOnce(t *testing.T) {
 	if probeCalls != 2 || classifyCalls != 2 || verifyCalls != 1 || activationSpecs != 1 || started != 2 {
 		t.Fatalf("probe=%d classify=%d verify=%d activationSpecs=%d started=%d", probeCalls, classifyCalls, verifyCalls, activationSpecs, started)
 	}
-	wantPrefix := []State{StateStarting, StateValidatingUSB, StateActivationRequired, StateCheckingRuntime, StateExtractingRuntime, StateStartingActivation, StateStarting}
+	wantPrefix := []State{StateStarting, StateValidatingUSB, StateActivationRequired, StateCheckingVersion, StateStartingActivation, StateStarting}
 	if !reflect.DeepEqual(reporter.states[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("states = %v", reporter.states)
 	}
@@ -463,7 +535,7 @@ func TestRunStopsActivationWhenUSBIsRemovedAndClosesLeaseOnce(t *testing.T) {
 	}
 }
 
-func TestRunReportsExtractingLaunchSequence(t *testing.T) {
+func TestRunReportsVersionAndLicenseGateSequence(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, lock, startedSpec := successfulDependencies(t, reporter)
 	if err := Run(context.Background(), deps); err != nil {
@@ -473,8 +545,8 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 		StateStarting,
 		StateValidatingUSB,
 		StateValidatingLicense,
-		StateCheckingRuntime,
-		StateExtractingRuntime,
+		StateCheckingVersion,
+		StateValidatingOnline,
 		StateStartingApp,
 		StateReady,
 	}
@@ -520,9 +592,9 @@ func TestRunAcquiresRuntimeLeaseBeforeStart(t *testing.T) {
 	manifest.Entrypoint = `electron\electron.exe`
 	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "leased-runtime")}
 	var events []string
-	deps.PrepareRuntime = func(context.Context, string, string, Manifest, func()) (CacheResult, error) {
-		events = append(events, "prepare")
-		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest))}, nil
+	deps.EnforceRelease = func(context.Context, func(State)) (requiredReleaseResult, error) {
+		events = append(events, "release")
+		return requiredReleaseResult{Manifest: manifest, RuntimePath: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest))}, nil
 	}
 	deps.AcquireRuntime = func(root string, got Manifest) (RuntimeLease, error) {
 		events = append(events, "acquire")
@@ -546,7 +618,7 @@ func TestRunAcquiresRuntimeLeaseBeforeStart(t *testing.T) {
 	if err := Run(context.Background(), deps); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(events, []string{"prepare", "acquire", "start"}) {
+	if !reflect.DeepEqual(events, []string{"release", "acquire", "start"}) {
 		t.Fatalf("events = %v", events)
 	}
 	if lease.CloseCalls() != 1 {
@@ -626,16 +698,13 @@ func TestRunClosesRuntimeLeaseOnRepresentativeExitPaths(t *testing.T) {
 	}
 }
 
-func TestRunSkipsExtractingStateForReusableRuntime(t *testing.T) {
+func TestRunLaunchesAlreadyRequiredRuntimeWithoutUpdateStates(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
-	deps.PrepareRuntime = func(_ context.Context, _ string, _ string, manifest Manifest, _ func()) (CacheResult, error) {
-		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest)), Reused: true}, nil
-	}
 	if err := Run(context.Background(), deps); err != nil {
 		t.Fatal(err)
 	}
-	wantStates := []State{StateStarting, StateValidatingUSB, StateValidatingLicense, StateCheckingRuntime, StateStartingApp, StateReady}
+	wantStates := []State{StateStarting, StateValidatingUSB, StateValidatingLicense, StateCheckingVersion, StateValidatingOnline, StateStartingApp, StateReady}
 	if !reflect.DeepEqual(reporter.states, wantStates) {
 		t.Fatalf("states = %v", reporter.states)
 	}
@@ -665,26 +734,21 @@ func TestRunRejectsLicenseBeforeLockOrRuntimeWork(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
 	locked := false
-	readRuntime := false
-	prepared := false
+	releaseChecked := false
 	started := false
-	deps.VerifyLicense = func(packageRoot string, usbRoot string) error {
+	deps.VerifyLocalLicense = func(packageRoot string, usbRoot string) (verifiedLicenseMaterial, error) {
 		if packageRoot != deps.Paths.PackageRoot || usbRoot != deps.Paths.USBRoot {
 			t.Fatalf("license paths = %q, %q", packageRoot, usbRoot)
 		}
-		return errors.Join(ErrStartupSecretInvalid, errors.New("secret=must-not-leak device=dev_private"))
+		return verifiedLicenseMaterial{}, errors.Join(ErrStartupSecretInvalid, errors.New("secret=must-not-leak device=dev_private"))
 	}
 	deps.AcquireInstanceLock = func(string) (InstanceLock, error) {
 		locked = true
 		return &fakeInstanceLock{}, nil
 	}
-	deps.ReadManifest = func(string) (Manifest, error) {
-		readRuntime = true
-		return validRuntimeManifest(), nil
-	}
-	deps.PrepareRuntime = func(context.Context, string, string, Manifest, func()) (CacheResult, error) {
-		prepared = true
-		return CacheResult{}, nil
+	deps.EnforceRelease = func(context.Context, func(State)) (requiredReleaseResult, error) {
+		releaseChecked = true
+		return requiredReleaseResult{}, nil
 	}
 	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
 		started = true
@@ -695,8 +759,8 @@ func TestRunRejectsLicenseBeforeLockOrRuntimeWork(t *testing.T) {
 	if !errors.Is(err, ErrStartupSecretInvalid) {
 		t.Fatalf("returned %v", err)
 	}
-	if locked || readRuntime || prepared || started {
-		t.Fatalf("post-license work ran: lock=%v read=%v prepare=%v start=%v", locked, readRuntime, prepared, started)
+	if locked || releaseChecked || started {
+		t.Fatalf("post-license work ran: lock=%v release=%v start=%v", locked, releaseChecked, started)
 	}
 	wantStates := []State{StateStarting, StateValidatingUSB, StateValidatingLicense}
 	if !reflect.DeepEqual(reporter.states, wantStates) {
@@ -740,11 +804,11 @@ func TestRunStopsBeforeRuntimeWhenHostCacheOwnershipFails(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
 	deps.EnsureHostCache = func(string) error { return ErrCachePreparationFailed }
-	prepared := false
+	releaseChecked := false
 	started := false
-	deps.PrepareRuntime = func(context.Context, string, string, Manifest, func()) (CacheResult, error) {
-		prepared = true
-		return CacheResult{}, nil
+	deps.EnforceRelease = func(context.Context, func(State)) (requiredReleaseResult, error) {
+		releaseChecked = true
+		return requiredReleaseResult{}, nil
 	}
 	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
 		started = true
@@ -754,8 +818,8 @@ func TestRunStopsBeforeRuntimeWhenHostCacheOwnershipFails(t *testing.T) {
 	if err := Run(context.Background(), deps); !errors.Is(err, ErrCachePreparationFailed) {
 		t.Fatalf("returned %v", err)
 	}
-	if prepared || started {
-		t.Fatalf("prepared=%v started=%v", prepared, started)
+	if releaseChecked || started {
+		t.Fatalf("releaseChecked=%v started=%v", releaseChecked, started)
 	}
 	if !reflect.DeepEqual(reporter.failures, [][2]string{{"E_CACHE_FAILED", "无法准备本机运行缓存，请检查磁盘空间。"}}) {
 		t.Fatalf("failures = %#v", reporter.failures)
@@ -806,10 +870,6 @@ func TestRunCancellationStopsProcessWithoutFailureDialog(t *testing.T) {
 func TestRunMapsProcessStartErrors(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
-	accepted := false
-	finalized := false
-	deps.AcceptSequence = func(string, Manifest) error { accepted = true; return nil }
-	deps.FinalizeUpdate = func(string, Manifest) error { finalized = true; return nil }
 	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
 		return nil, errors.New("CreateProcess failed at C:\\private")
 	}
@@ -819,9 +879,6 @@ func TestRunMapsProcessStartErrors(t *testing.T) {
 	want := [][2]string{{"E_APP_START_FAILED", "无法启动 U-Claw，请重新启动。"}}
 	if !reflect.DeepEqual(reporter.failures, want) {
 		t.Fatalf("failures = %#v", reporter.failures)
-	}
-	if accepted || finalized {
-		t.Fatalf("failed process committed update: accepted=%v finalized=%v", accepted, finalized)
 	}
 }
 
@@ -883,90 +940,57 @@ func TestRunPropagatesRuntimeLeaseCloseErrorAfterStopAndWait(t *testing.T) {
 	}
 }
 
-func TestRunPreservesUpdateWhenProcessExitsBeforeReadiness(t *testing.T) {
+func TestRunDoesNotRollbackWhenRequiredRuntimeExitsBeforeReadiness(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
 	deps.StartupGrace = time.Second
-	accepted := false
-	finalized := false
-	deps.AcceptSequence = func(string, Manifest) error { accepted = true; return nil }
-	deps.FinalizeUpdate = func(string, Manifest) error { finalized = true; return nil }
+	starts := 0
 	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		starts++
 		return &fakeChildProcess{waitErr: errors.New("runtime initialization failed")}, nil
 	}
 
 	if err := Run(context.Background(), deps); !errors.Is(err, ErrAppExited) {
 		t.Fatalf("returned %v", err)
 	}
-	if accepted || finalized {
-		t.Fatalf("early process exit committed update: accepted=%v finalized=%v", accepted, finalized)
+	if starts != 1 {
+		t.Fatalf("required runtime starts = %d", starts)
 	}
 }
 
-func TestRunWaitsForProcessAfterStopFailure(t *testing.T) {
+func TestRunFailedShellQueriesHigherSequenceWithoutStartingOldRuntime(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
-	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime")}
-	process := &releasableStopFailingChildProcess{result: make(chan error, 1)}
-	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
-	deps.AcceptSequence = func(string, Manifest) error { return ErrManifestInvalid }
-	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
-
-	result := make(chan error, 1)
-	go func() { result <- Run(context.Background(), deps) }()
-	select {
-	case err := <-result:
-		t.Fatalf("launcher exited before child: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-	if lease.CloseCalls() != 0 {
-		t.Fatalf("lease closed before wait completed: %d", lease.CloseCalls())
-	}
-	process.result <- nil
-	select {
-	case err := <-result:
-		if !errors.Is(err, ErrManifestInvalid) || err.Error() == "" || !strings.Contains(err.Error(), "terminate failed") {
-			t.Fatalf("returned %v", err)
+	deps.StartupGrace = time.Second
+	deps.RepairPollInterval = time.Millisecond
+	first := validRuntimeManifest()
+	second := first
+	second.ReleaseSequence++
+	second.ReleaseID = "release-43"
+	second.Signature = &ManifestSignature{Sequence: second.ReleaseSequence, Value: "repair-signature"}
+	checks := 0
+	deps.EnforceRelease = func(context.Context, func(State)) (requiredReleaseResult, error) {
+		checks++
+		if checks == 1 {
+			return requiredReleaseResult{Manifest: first, RuntimePath: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(first))}, nil
 		}
-	case <-time.After(time.Second):
-		t.Fatal("launcher did not exit after child")
+		return requiredReleaseResult{
+			Manifest: second, RuntimePath: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(second)), RestartRequired: true,
+		}, nil
 	}
-	if lease.CloseCalls() != 1 {
-		t.Fatalf("lease close calls = %d", lease.CloseCalls())
+	starts := 0
+	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) {
+		starts++
+		return &fakeChildProcess{waitErr: errors.New("required shell failed")}, nil
 	}
-}
+	restarts := 0
+	deps.RestartBootstrap = func() error { restarts++; return nil }
 
-func TestRunWaitsForProcessAfterStopTimeout(t *testing.T) {
-	reporter := &recordingReporter{}
-	deps, _, _ := successfulDependencies(t, reporter)
-	deps.ProcessStopTimeout = 10 * time.Millisecond
-	lease := &fakeRuntimeLease{root: filepath.Join(t.TempDir(), "runtime")}
-	process := &releasableTimeoutChildProcess{result: make(chan error, 1)}
-	deps.AcquireRuntime = func(string, Manifest) (RuntimeLease, error) { return lease, nil }
-	deps.AcceptSequence = func(string, Manifest) error { return ErrManifestInvalid }
-	deps.StartProcess = func(ProcessSpec) (ChildProcess, error) { return process, nil }
-
-	result := make(chan error, 1)
-	go func() { result <- Run(context.Background(), deps) }()
-	select {
-	case err := <-result:
-		t.Fatalf("launcher exited before child: %v", err)
-	case <-time.After(100 * time.Millisecond):
+	if err := Run(context.Background(), deps); err != nil {
+		t.Fatal(err)
 	}
-	if lease.CloseCalls() != 0 {
-		t.Fatalf("lease closed before wait completed: %d", lease.CloseCalls())
-	}
-	process.result <- nil
-	select {
-	case err := <-result:
-		if !errors.Is(err, ErrManifestInvalid) || !errors.Is(err, ErrProcessStopFailed) {
-			t.Fatalf("returned %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("launcher did not exit after child")
-	}
-	if lease.CloseCalls() != 1 {
-		t.Fatalf("lease close calls = %d", lease.CloseCalls())
+	if checks != 2 || starts != 1 || restarts != 1 {
+		t.Fatalf("checks=%d starts=%d restarts=%d", checks, starts, restarts)
 	}
 }
 
@@ -977,8 +1001,12 @@ func TestStateTextUsesFixedChineseStatus(t *testing.T) {
 		StateStartingActivation: "正在打开激活窗口...",
 		StateValidatingUSB:      "正在检查 U 盘数据目录...",
 		StateValidatingLicense:  "正在验证启动授权...",
-		StateCheckingRuntime:    "正在检查运行环境...",
-		StateExtractingRuntime:  "首次启动，正在准备运行环境...",
+		StateCheckingVersion:    "正在检查版本...",
+		StateDownloadingUpdate:  "正在下载更新...",
+		StateVerifyingUpdate:    "正在验证更新...",
+		StateInstallingUpdate:   "正在安装更新...",
+		StateRestarting:         "正在重启 U-Claw...",
+		StateValidatingOnline:   "正在确认许可证在线状态...",
 		StateStartingApp:        "正在打开 U-Claw...",
 		StateReady:              "U-Claw 已就绪。",
 	}

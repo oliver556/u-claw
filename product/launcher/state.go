@@ -15,8 +15,12 @@ const (
 	StateStartingActivation State = "STARTING_ACTIVATION"
 	StateValidatingUSB      State = "VALIDATING_USB"
 	StateValidatingLicense  State = "VALIDATING_LICENSE"
-	StateCheckingRuntime    State = "CHECKING_RUNTIME"
-	StateExtractingRuntime  State = "EXTRACTING_RUNTIME"
+	StateCheckingVersion    State = "CHECKING_VERSION"
+	StateDownloadingUpdate  State = "DOWNLOADING_UPDATE"
+	StateVerifyingUpdate    State = "VERIFYING_UPDATE"
+	StateInstallingUpdate   State = "INSTALLING_UPDATE"
+	StateRestarting         State = "RESTARTING_BOOTSTRAP"
+	StateValidatingOnline   State = "VALIDATING_ONLINE_LICENSE"
 	StateStartingApp        State = "STARTING_APP"
 	StateReady              State = "READY"
 )
@@ -33,10 +37,18 @@ func stateText(state State) string {
 		return "正在检查 U 盘数据目录..."
 	case StateValidatingLicense:
 		return "正在验证启动授权..."
-	case StateCheckingRuntime:
-		return "正在检查运行环境..."
-	case StateExtractingRuntime:
-		return "首次启动，正在准备运行环境..."
+	case StateCheckingVersion:
+		return "正在检查版本..."
+	case StateDownloadingUpdate:
+		return "正在下载更新..."
+	case StateVerifyingUpdate:
+		return "正在验证更新..."
+	case StateInstallingUpdate:
+		return "正在安装更新..."
+	case StateRestarting:
+		return "正在重启 U-Claw..."
+	case StateValidatingOnline:
+		return "正在确认许可证在线状态..."
 	case StateStartingApp:
 		return "正在打开 U-Claw..."
 	case StateReady:
@@ -63,17 +75,16 @@ type Dependencies struct {
 	USBInterval           time.Duration
 	StartupGrace          time.Duration
 	ProcessStopTimeout    time.Duration
-	ReadManifest          func(path string) (Manifest, error)
+	RepairPollInterval    time.Duration
 	ProbeDataDirectory    func(packageRoot string, dataDir string) error
 	DetectActivationState func(packageRoot string) (ActivationState, error)
-	VerifyLicense         func(packageRoot string, usbRoot string) error
+	VerifyLocalLicense    func(packageRoot string, usbRoot string) (verifiedLicenseMaterial, error)
+	VerifyOnlineLicense   func(verifiedLicenseMaterial) error
 	EnsureHostCache       func(cacheRoot string) error
 	AcquireInstanceLock   func(dataDir string) (InstanceLock, error)
-	PrepareRuntime        func(context.Context, string, string, Manifest, func()) (CacheResult, error)
+	EnforceRelease        func(context.Context, func(State)) (requiredReleaseResult, error)
+	RestartBootstrap      func() error
 	AcquireRuntime        func(string, Manifest) (RuntimeLease, error)
-	CheckSequence         func(string, Manifest) error
-	AcceptSequence        func(string, Manifest) error
-	FinalizeUpdate        func(string, Manifest) error
 	ActivationProcessSpec func(PortablePaths, Manifest, RuntimeLease, usbFingerprint) ProcessSpec
 	ReadUSBFingerprint    func(string) (usbFingerprint, error)
 	StartProcess          func(ProcessSpec) (ChildProcess, error)
@@ -95,6 +106,7 @@ func Run(ctx context.Context, deps Dependencies) error {
 		}
 	}
 	appendLog("launcher-started")
+	var failedReleaseSequence uint64
 	for activationRuns := 0; ; {
 		reporter.State(StateStarting)
 
@@ -107,9 +119,10 @@ func Run(ctx context.Context, deps Dependencies) error {
 			return reportFailure(reporter, err)
 		}
 		activationOnly := activationState == ActivationRequired
+		var licenseMaterial verifiedLicenseMaterial
 		if activationState == LicenseLocalInvalid {
 			reporter.State(StateValidatingLicense)
-			if err := deps.VerifyLicense(deps.Paths.PackageRoot, deps.Paths.USBRoot); err != nil {
+			if _, err := deps.VerifyLocalLicense(deps.Paths.PackageRoot, deps.Paths.USBRoot); err != nil {
 				return reportFailure(reporter, err)
 			}
 			return reportFailure(reporter, ErrLicenseLocalInvalid)
@@ -121,46 +134,63 @@ func Run(ctx context.Context, deps Dependencies) error {
 			reporter.State(StateActivationRequired)
 		} else {
 			reporter.State(StateValidatingLicense)
-			if err := deps.VerifyLicense(deps.Paths.PackageRoot, deps.Paths.USBRoot); err != nil {
+			licenseMaterial, err = deps.VerifyLocalLicense(deps.Paths.PackageRoot, deps.Paths.USBRoot)
+			if err != nil {
+				return reportFailure(reporter, err)
+			}
+		}
+		if err := deps.EnsureHostCache(deps.Paths.HostCacheRoot); err != nil {
+			return reportFailure(reporter, err)
+		}
+
+		release, err := deps.EnforceRelease(ctx, reporter.State)
+		if err != nil {
+			if errors.Is(err, ErrRuntimeAuditFailed) {
+				appendLog("runtime-audit-failed")
+			}
+			reportFailure(reporter, err)
+			if deps.RepairPollInterval <= 0 {
+				return err
+			}
+			if waitErr := waitForRepairPolicy(ctx, deps.RepairPollInterval); waitErr != nil {
+				return waitErr
+			}
+			continue
+		}
+		if release.RestartRequired {
+			reporter.State(StateRestarting)
+			if err := deps.RestartBootstrap(); err != nil {
+				return reportFailure(reporter, err)
+			}
+			return nil
+		}
+		if failedReleaseSequence != 0 && release.Manifest.ReleaseSequence <= failedReleaseSequence {
+			if err := waitForRepairPolicy(ctx, deps.RepairPollInterval); err != nil {
+				return err
+			}
+			continue
+		}
+		var closeInstanceLock func()
+		if !activationOnly {
+			reporter.State(StateValidatingOnline)
+			if err := deps.VerifyOnlineLicense(licenseMaterial); err != nil {
 				return reportFailure(reporter, err)
 			}
 			lock, err := deps.AcquireInstanceLock(deps.Paths.DataDir)
 			if err != nil {
 				return reportFailure(reporter, err)
 			}
-			defer lock.Close()
-		}
-		if err := deps.EnsureHostCache(deps.Paths.HostCacheRoot); err != nil {
-			return reportFailure(reporter, err)
-		}
-
-		reporter.State(StateCheckingRuntime)
-		manifest, err := deps.ReadManifest(filepath.Join(deps.Paths.PackageRoot, "version.json"))
-		if err != nil {
-			return reportFailure(reporter, err)
-		}
-		if err := deps.CheckSequence(deps.Paths.HostCacheRoot, manifest); err != nil {
-			return reportFailure(reporter, err)
-		}
-		cache, err := deps.PrepareRuntime(
-			ctx,
-			deps.Paths.CacheRoot,
-			deps.Paths.PackageRoot,
-			manifest,
-			func() { reporter.State(StateExtractingRuntime) },
-		)
-		if err != nil {
-			if errors.Is(err, ErrRuntimeAuditFailed) {
-				appendLog("runtime-audit-failed")
+			closed := false
+			closeInstanceLock = func() {
+				if !closed {
+					closed = true
+					_ = lock.Close()
+				}
 			}
-			return reportFailure(reporter, err)
+			defer closeInstanceLock()
 		}
-		if cache.Verification == "fast" {
-			appendLog("runtime-verify-fast")
-		} else if cache.Verification == "full" {
-			appendLog("runtime-verify-full")
-		}
-		lease, err := deps.AcquireRuntime(cache.Path, manifest)
+		manifest := release.Manifest
+		lease, err := deps.AcquireRuntime(release.RuntimePath, manifest)
 		if err != nil {
 			return reportFailure(reporter, err)
 		}
@@ -212,7 +242,19 @@ func Run(ctx context.Context, deps Dependencies) error {
 		process, err := deps.StartProcess(NormalProcessSpec(deps.Paths, manifest, lease))
 		if err != nil {
 			appendLog("launcher-failed")
-			return reportFailure(reporter, errors.Join(ErrAppStartFailed, err, lease.Close()))
+			failure := errors.Join(ErrAppStartFailed, err, lease.Close())
+			reportFailure(reporter, failure)
+			if closeInstanceLock != nil {
+				closeInstanceLock()
+			}
+			if err := waitForRepairPolicy(ctx, deps.RepairPollInterval); err != nil {
+				if deps.RepairPollInterval <= 0 {
+					return failure
+				}
+				return err
+			}
+			failedReleaseSequence = manifest.ReleaseSequence
+			continue
 		}
 		appendLog("runtime-started")
 		waitResult := make(chan processWaitResult, 1)
@@ -224,11 +266,35 @@ func Run(ctx context.Context, deps Dependencies) error {
 			select {
 			case result := <-waitResult:
 				grace.Stop()
-				return reportFailure(reporter, errors.Join(ErrAppExited, result.processErr, result.leaseErr))
+				failure := errors.Join(ErrAppExited, result.processErr, result.leaseErr)
+				reportFailure(reporter, failure)
+				if closeInstanceLock != nil {
+					closeInstanceLock()
+				}
+				if err := waitForRepairPolicy(ctx, deps.RepairPollInterval); err != nil {
+					if deps.RepairPollInterval <= 0 {
+						return failure
+					}
+					return err
+				}
+				failedReleaseSequence = manifest.ReleaseSequence
+				continue
 			case <-grace.C:
 				select {
 				case result := <-waitResult:
-					return reportFailure(reporter, errors.Join(ErrAppExited, result.processErr, result.leaseErr))
+					failure := errors.Join(ErrAppExited, result.processErr, result.leaseErr)
+					reportFailure(reporter, failure)
+					if closeInstanceLock != nil {
+						closeInstanceLock()
+					}
+					if err := waitForRepairPolicy(ctx, deps.RepairPollInterval); err != nil {
+						if deps.RepairPollInterval <= 0 {
+							return failure
+						}
+						return err
+					}
+					failedReleaseSequence = manifest.ReleaseSequence
+					continue
 				default:
 				}
 			case <-ctx.Done():
@@ -237,12 +303,6 @@ func Run(ctx context.Context, deps Dependencies) error {
 				}
 				return ctx.Err()
 			}
-		}
-		if err := deps.AcceptSequence(deps.Paths.HostCacheRoot, manifest); err != nil {
-			return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
-		}
-		if err := deps.FinalizeUpdate(deps.Paths.PackageRoot, manifest); err != nil {
-			return reportFailure(reporter, errors.Join(err, stopAndWait(process, waitResult, deps.ProcessStopTimeout)))
 		}
 		reporter.State(StateReady)
 
@@ -274,6 +334,20 @@ func Run(ctx context.Context, deps Dependencies) error {
 			}
 			return ctx.Err()
 		}
+	}
+}
+
+func waitForRepairPolicy(ctx context.Context, interval time.Duration) error {
+	if interval <= 0 {
+		return ErrAppStartFailed
+	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -396,6 +470,14 @@ func diagnosticFor(err error) (string, string) {
 		return "E_USB_DISCONNECTED", "U 盘已断开，请重新插入后再启动。"
 	case errors.Is(err, ErrUSBNotWritable), errors.Is(err, ErrPortablePathInvalid):
 		return "E_USB_UNAVAILABLE", "无法使用 U 盘数据目录，请检查连接和写入权限。"
+	case errors.Is(err, ErrReleasePolicyUnavailable):
+		return "E_RELEASE_POLICY_UNAVAILABLE", "无法确认必需版本，请检查网络后重试。"
+	case errors.Is(err, ErrReleasePolicyInvalid):
+		return "E_RELEASE_POLICY_INVALID", "版本策略签名或有效期无效，请联系服务人员。"
+	case errors.Is(err, ErrReleaseDownloadUnavailable):
+		return "E_RELEASE_DOWNLOAD_UNAVAILABLE", "无法下载必需版本，请检查网络后重试。"
+	case errors.Is(err, ErrBootstrapRestartFailed):
+		return "E_BOOTSTRAP_RESTART_FAILED", "更新已安装，但 U-Claw 无法重启，请手动重新打开。"
 	case errors.Is(err, ErrManifestInvalid):
 		return "E_MANIFEST_INVALID", "运行时清单无效，请重新下载 U-Claw。"
 	case errors.Is(err, ErrPackageInvalid):
