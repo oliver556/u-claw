@@ -81,12 +81,14 @@ describe("OpenClaw provider config backend", () => {
         api: "openai-completions",
         models: [
           { id: "deepseek-chat", name: "DeepSeek", compat: {
+            requiresStringContent: true,
             supportsStore: false,
             supportsDeveloperRole: false,
             supportsReasoningEffort: false,
             maxTokensField: "max_tokens",
           } },
           { id: "qwen-max", name: "Qwen", compat: {
+            requiresStringContent: true,
             supportsStore: false,
             supportsDeveloperRole: false,
             supportsReasoningEffort: false,
@@ -120,8 +122,8 @@ describe("OpenClaw provider config backend", () => {
               apiKey: "[REDACTED]",
               api: "openai-completions",
               models: [
-                { id: "deepseek-chat", name: "DeepSeek", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" } },
-                { id: "qwen-max", name: "Qwen", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" } },
+                { id: "deepseek-chat", name: "DeepSeek", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { requiresStringContent: true, supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" } },
+                { id: "qwen-max", name: "Qwen", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { requiresStringContent: true, supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" } },
               ],
             } } },
           },

@@ -117,6 +117,7 @@ function commercialModelConfig(model: CommercialProviderModel): JsonObject {
     contextWindow: 128_000,
     maxTokens: 8_192,
     compat: {
+      requiresStringContent: true,
       supportsStore: false,
       supportsDeveloperRole: false,
       supportsReasoningEffort: false,
