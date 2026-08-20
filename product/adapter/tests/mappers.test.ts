@@ -17,6 +17,17 @@ describe("chat mapper", () => {
     });
   });
 
+  it("accepts documented OpenClaw delta envelope extensions", () => {
+    expect(mapChatEvent({
+      state: "delta",
+      runId: "run-commercial",
+      sessionKey: "session-commercial",
+      seq: 2,
+      deltaText: "streamed",
+      message: { role: "assistant", content: [{ type: "text", text: "streamed" }], timestamp: 1 },
+    } as never)).toEqual({ type: "delta", runId: "run-commercial", mode: "append", text: "streamed" });
+  });
+
   it("maps final, error, and aborted terminal states", () => {
     const message = { id: "m-1", sessionKey: "session-1", runId: "run-1", role: "assistant" as const, status: "completed" as const, blocks: [{ id: "b-1", type: "text", text: "done", format: "markdown" as const }], createdAt: now };
     expect(mapChatEvent({ state: "final", runId: "run-1", sessionKey: "session-1", message })).toMatchObject({ type: "final", runId: "run-1" });

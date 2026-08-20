@@ -43,10 +43,10 @@ export const RawMessageSchema = z.object({
 }).strict();
 
 export const RawChatEventSchema = z.discriminatedUnion("state", [
-  z.object({ state: z.literal("delta"), runId: z.string().min(1), sessionKey: z.string().min(1), deltaText: z.string(), replace: z.boolean().optional() }).strict(),
+  z.object({ state: z.literal("delta"), runId: z.string().min(1), sessionKey: z.string().min(1), deltaText: z.string(), replace: z.boolean().optional() }).passthrough(),
   z.object({ state: z.literal("final"), runId: z.string().min(1), sessionKey: z.string().min(1), message: RawMessageSchema }).strict(),
-  z.object({ state: z.literal("aborted"), runId: z.string().min(1), sessionKey: z.string().min(1), errorMessage: z.string().optional() }).strict(),
-  z.object({ state: z.literal("error"), runId: z.string().min(1), sessionKey: z.string().min(1), errorKind: z.string().optional(), errorMessage: z.string().min(1).optional() }).strict(),
+  z.object({ state: z.literal("aborted"), runId: z.string().min(1), sessionKey: z.string().min(1), errorMessage: z.string().optional() }).passthrough(),
+  z.object({ state: z.literal("error"), runId: z.string().min(1), sessionKey: z.string().min(1), errorKind: z.string().optional(), errorMessage: z.string().min(1).optional() }).passthrough(),
 ]);
 
 function mapBlock(input: z.infer<typeof RawBlockSchema>, gatewayOrigin?: string): ContentBlock {

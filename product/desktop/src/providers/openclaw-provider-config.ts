@@ -78,6 +78,53 @@ function getPath(value: JsonObject, path: readonly string[]): unknown {
   return current;
 }
 
+function isRedactedSecret(value: unknown): boolean {
+  return value === RENDERER_REDACTED || value === OPENCLAW_REDACTED;
+}
+
+function matchesSecretRef(value: unknown): boolean {
+  if (isRedactedSecret(value)) return true;
+  if (!isObject(value) || Object.keys(value).length !== 3) return false;
+  return (value.source === "file" || isRedactedSecret(value.source))
+    && (value.provider === "uclaw_commercial" || isRedactedSecret(value.provider))
+    && (value.id === "/deviceToken" || isRedactedSecret(value.id));
+}
+
+function matchesSecretProvider(value: unknown, credentialPath?: string): boolean {
+  if (!isObject(value) || Object.keys(value).length !== 3) return false;
+  const pathMatches = credentialPath === undefined
+    ? isRedactedSecret(value.path) || typeof value.path === "string" && isAbsolute(value.path) && !value.path.includes("\0")
+    : value.path === credentialPath || isRedactedSecret(value.path);
+  return (value.source === "file" || isRedactedSecret(value.source))
+    && pathMatches
+    && (value.mode === "json" || isRedactedSecret(value.mode));
+}
+
+function isCommercialModelReadback(value: unknown): value is CommercialProviderModel[] {
+  return Array.isArray(value) && value.length > 0 && value.every((model) =>
+    isObject(model)
+    && typeof model.id === "string" && model.id.trim() !== ""
+    && typeof model.name === "string" && model.name.trim() !== "");
+}
+
+function commercialModelConfig(model: CommercialProviderModel): JsonObject {
+  return {
+    id: model.id,
+    name: model.name,
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 8_192,
+    compat: {
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      maxTokensField: "max_tokens",
+    },
+  };
+}
+
 function secretKey(key: string): boolean {
   const normalized = normalizeKey(key);
   return /(?:^|_)(?:authorization|cookie|credential|key|password|private_key|secret|token)(?:_|$)/u.test(normalized);
@@ -403,7 +450,7 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
       if (input.models.length === 0 || input.models.some(({ id, name }) => id.trim() === "" || name.trim() === "")) {
         throw backendError("INVALID_ARGUMENT", "Commercial model catalog is empty or invalid.");
       }
-      const uniqueModels = [...new Map(input.models.map((model) => [model.id, { id: model.id, name: model.name }])).values()];
+      const uniqueModels = [...new Map(input.models.map((model) => [model.id, commercialModelConfig(model)])).values()];
       await getSchema();
       const before = await getConfig();
       const next = structuredClone(before.config);
@@ -430,9 +477,11 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
       const provider = getPath(readback.config, ["models", "providers", "uclaw-commercial"]);
       const secretProvider = getPath(readback.config, ["secrets", "providers", "uclaw_commercial"]);
       if (!isObject(provider) || provider.baseUrl !== endpoint.href
-        || !isObject(provider.apiKey) || provider.apiKey.source !== "file" || provider.apiKey.provider !== "uclaw_commercial" || provider.apiKey.id !== "/deviceToken"
-        || !Array.isArray(provider.models) || provider.models.length !== uniqueModels.length
-        || !isObject(secretProvider) || secretProvider.source !== "file" || secretProvider.path !== input.credentialPath || secretProvider.mode !== "json") {
+        || provider.api !== "openai-completions"
+        || !matchesSecretRef(provider.apiKey)
+        || canonical(provider.models) !== canonical(uniqueModels)
+        || getPath(readback.config, ["models", "mode"]) !== "merge"
+        || !matchesSecretProvider(secretProvider, input.credentialPath)) {
         throw backendError("CONFLICT", "OpenClaw commercial Provider readback did not match the write.");
       }
       return true;
@@ -444,12 +493,11 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
       return {
         configured: isObject(provider)
           && typeof provider.baseUrl === "string"
-          && isObject(provider.apiKey)
-          && provider.apiKey.source === "file"
-          && provider.apiKey.provider === "uclaw_commercial"
-          && provider.apiKey.id === "/deviceToken"
-          && isObject(secretProvider)
-          && secretProvider.source === "file",
+          && provider.api === "openai-completions"
+          && matchesSecretRef(provider.apiKey)
+          && isCommercialModelReadback(provider.models)
+          && getPath(config, ["models", "mode"]) === "merge"
+          && matchesSecretProvider(secretProvider),
       };
     },
     async getRendererConfig() {

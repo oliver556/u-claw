@@ -79,11 +79,75 @@ describe("OpenClaw provider config backend", () => {
         baseUrl: "https://commercial.example.test/model-api/v1",
         apiKey: { source: "file", provider: "uclaw_commercial", id: "/deviceToken" },
         api: "openai-completions",
-        models: [{ id: "deepseek-chat", name: "DeepSeek" }, { id: "qwen-max", name: "Qwen" }],
+        models: [
+          { id: "deepseek-chat", name: "DeepSeek", compat: {
+            supportsStore: false,
+            supportsDeveloperRole: false,
+            supportsReasoningEffort: false,
+            maxTokensField: "max_tokens",
+          } },
+          { id: "qwen-max", name: "Qwen", compat: {
+            supportsStore: false,
+            supportsDeveloperRole: false,
+            supportsReasoningEffort: false,
+            maxTokensField: "max_tokens",
+          } },
+        ],
       } } },
     });
     expect(JSON.stringify(applied)).not.toContain("uclaw_dt_");
     expect(applied.models.providers["uclaw-commercial"]).not.toHaveProperty("model");
+  });
+
+  it("accepts OpenClaw-redacted commercial SecretRef readback while verifying non-secret fields", async () => {
+    const { rpc, request } = fakeRpc({ gateway: { mode: "local" } });
+    let reads = 0;
+    request.mockImplementation(async (method: string, params: Record<string, unknown>) => {
+      if (method === "config.schema") return { schema: { type: "object" }, uiHints: {} };
+      if (method === "config.get") {
+        reads += 1;
+        if (reads === 1) return { config: { gateway: { mode: "local" } }, hash: "hash-1", valid: true };
+        return {
+          config: {
+            gateway: { mode: "local" },
+            secrets: { providers: { uclaw_commercial: {
+              source: "__OPENCLAW_REDACTED__",
+              path: "__OPENCLAW_REDACTED__",
+              mode: "__OPENCLAW_REDACTED__",
+            } } },
+            models: { mode: "merge", providers: { "uclaw-commercial": {
+              baseUrl: "https://commercial.example.test/model-api/v1",
+              apiKey: "[REDACTED]",
+              api: "openai-completions",
+              models: [
+                { id: "deepseek-chat", name: "DeepSeek", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" } },
+                { id: "qwen-max", name: "Qwen", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" } },
+              ],
+            } } },
+          },
+          hash: "hash-2",
+          valid: true,
+        };
+      }
+      if (method === "config.apply") {
+        expect(JSON.parse(String(params.raw))).toMatchObject({
+          models: { providers: { "uclaw-commercial": {
+            apiKey: { source: "file", provider: "uclaw_commercial", id: "/deviceToken" },
+          } } },
+        });
+        return { ok: true };
+      }
+      throw new Error(`unexpected ${method}`);
+    });
+    const backend = createOpenClawProviderConfigBackend(rpc);
+    const input = {
+      endpoint: "https://commercial.example.test/model-api/v1/",
+      credentialPath: "/portable/data/.uclaw/builtin-model-credential.v1.json",
+      models: [{ id: "deepseek-chat", name: "DeepSeek" }, { id: "qwen-max", name: "Qwen" }],
+    };
+
+    await expect(backend.synchronizeCommercial(input)).resolves.toBe(true);
+    await expect(backend.readCommercial()).resolves.toEqual({ configured: true });
   });
 
   it("stages a compact valid config before deleting the final Provider to satisfy OpenClaw size-drop protection", async () => {
