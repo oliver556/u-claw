@@ -21,6 +21,7 @@ import {
   mapOpenClawModel,
   mapOpenClawPluginApproval,
   mapOpenClawSessionToolEvent,
+  mapOpenClawTranscriptToolEvents,
   mapOpenClawSessionsPatchEvidence,
   RawOpenClawModelsListResponseSchema,
 } from "../../adapter/src/index.js";
@@ -130,6 +131,14 @@ describe("OpenClaw 2026.7.1-2 protocol-v4 contract gates", () => {
     expect(() => mapOpenClawMessageGetResponse(messageGet.success.responseFrame.payload)).toThrow();
     expect(mapOpenClawSessionToolEvent(tools.start)).toMatchObject({ toolId: "sessions_list", state: "running" });
     expect(mapOpenClawSessionToolEvent(tools.result)).toMatchObject({ toolId: "sessions_list", state: "succeeded" });
+    expect(mapOpenClawTranscriptToolEvents(
+      history.responseFrame.payload.sessionKey,
+      "run-from-transcript",
+      history.responseFrame.payload.messages,
+    )).toMatchObject([
+      { id: "call_contract_sessions", toolId: "sessions_list", state: "running" },
+      { id: "call_contract_sessions", toolId: "sessions_list", state: "succeeded" },
+    ]);
 
     const serializedConversation = JSON.stringify([history, messageGet.success]);
     expect(serializedConversation).not.toContain("Use sessions_list exactly once");

@@ -170,6 +170,12 @@ const OpenClawRecordSchema = z.object({
   seq: z.number().int().nonnegative(),
 }).passthrough();
 const OpenClawContentBlockSchema = z.object({ type: z.string().min(1) }).passthrough();
+const OpenClawToolCallBlockSchema = z.object({
+  type: z.literal("toolCall"),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  arguments: z.unknown().optional(),
+}).passthrough();
 
 export const OpenClawHistoryMessageSchema = z.object({
   role: z.enum(["user", "assistant", "system", "tool", "toolResult"]),
@@ -656,6 +662,58 @@ export function mapOpenClawSessionToolEvent(input: unknown): ToolCall {
     ...(event.data.phase === "start" ? { startedAt: toIso(event.ts) } : { finishedAt: toIso(event.ts) }),
     ...(failure ? { error: { code: "OPERATION_FAILED", message: failure.message, retryable: false } } : {}),
   });
+}
+
+export function mapOpenClawTranscriptToolEvents(
+  sessionKey: string,
+  runId: string,
+  input: readonly unknown[],
+): ToolCall[] {
+  const tools: ToolCall[] = [];
+  const names = new Map<string, string>();
+  for (const candidate of input) {
+    const parsed = OpenClawHistoryMessageSchema.safeParse(candidate);
+    if (!parsed.success) continue;
+    const message = parsed.data;
+    if (message.role === "assistant" && Array.isArray(message.content)) {
+      for (const block of message.content) {
+        const call = OpenClawToolCallBlockSchema.safeParse(block);
+        if (!call.success) continue;
+        names.set(call.data.id, call.data.name);
+        tools.push(mapOpenClawSessionToolEvent({
+          runId,
+          sessionKey,
+          ts: message.timestamp,
+          data: {
+            phase: "start",
+            toolCallId: call.data.id,
+            name: call.data.name,
+            ...(call.data.arguments === undefined ? {} : { args: call.data.arguments }),
+          },
+        }));
+      }
+      continue;
+    }
+    if (message.role !== "toolResult") continue;
+    const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
+    if (toolCallId === undefined || toolCallId.length === 0) continue;
+    const toolName = typeof message.toolName === "string" && message.toolName.length > 0
+      ? message.toolName
+      : names.get(toolCallId) ?? "unknown-tool";
+    tools.push(mapOpenClawSessionToolEvent({
+      runId,
+      sessionKey,
+      ts: message.timestamp,
+      data: {
+        phase: "result",
+        toolCallId,
+        name: toolName,
+        isError: message.isError === true,
+        result: message.content,
+      },
+    }));
+  }
+  return tools;
 }
 
 export function mapOpenClawAttachmentEvidence(input: z.input<typeof AttachmentCaseSchema>) {

@@ -53,6 +53,7 @@ export {
   mapOpenClawMessageGetResponse,
   mapOpenClawPluginApproval,
   mapOpenClawSessionToolEvent,
+  mapOpenClawTranscriptToolEvents,
   mapOpenClawSessionsPatchEvidence,
 } from "./openclaw-v4-contract.js";
 export { ReconnectPolicy, SequenceGapDetector, systemClock } from "./reconnect.js";

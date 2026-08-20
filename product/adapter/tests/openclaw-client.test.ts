@@ -170,6 +170,65 @@ describe("OpenClawClient", () => {
     expect(JSON.stringify(await client.models.list())).not.toMatch(/sk-contract-secret|secret\.example|openai-completions/);
   });
 
+  it("maps the real tools.catalog groups response to the product tool directory", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("tools.catalog");
+    transport.fixtures.set("tools.catalog", {
+      agentId: "main",
+      profiles: [{ id: "coding", label: "Coding" }],
+      groups: [{
+        id: "core",
+        label: "Core tools",
+        source: "core",
+        tools: [{
+          id: "read",
+          label: "Read",
+          description: "Read a file",
+          source: "core",
+          risk: "low",
+          defaultProfiles: ["coding", "full"],
+        }],
+      }, {
+        id: "plugin-calendar",
+        label: "Calendar",
+        source: "plugin",
+        pluginId: "calendar",
+        tools: [{
+          id: "calendar.list",
+          label: "List events",
+          description: "List calendar events",
+          source: "plugin",
+          pluginId: "calendar",
+          defaultProfiles: ["full"],
+        }],
+      }],
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.tools.list()).resolves.toEqual([
+      {
+        id: "read", name: "Read", description: "Read a file", source: "built-in",
+        available: true, risk: "low",
+      },
+      {
+        id: "calendar.list", name: "List events", description: "List calendar events", source: "plugin",
+        sourceId: "calendar", available: true, risk: "unknown",
+      },
+    ]);
+    expect(transport.requests.at(-1)).toEqual({ method: "tools.catalog", params: {} });
+  });
+
+  it("accepts an empty real tools.catalog groups response", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("tools.catalog");
+    transport.fixtures.set("tools.catalog", { agentId: "main", profiles: [], groups: [] });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    await expect(client.tools.list()).resolves.toEqual([]);
+  });
+
   it("maps real session pagination, filters, ordering, and duplicate rows", async () => {
     const transport = new FakeTransport();
     transport.fixtures.set("sessions.list", {
@@ -1113,12 +1172,63 @@ describe("OpenClawClient", () => {
 
     expect(events).toMatchObject([
       { type: "started", runId: "run-wait" },
+      { type: "tool", runId: "run-wait", tool: { id: "call-time", toolId: "session_status", state: "running" } },
       { type: "final", runId: "run-wait", message: { role: "assistant", blocks: [expect.objectContaining({ text: "history answer" })] } },
     ]);
     expect(transport.requests).toEqual(expect.arrayContaining([
       { method: "agent.wait", params: { runId: "run-wait", timeoutMs: 10_000 } },
       { method: "chat.history", params: { sessionKey: "session-1" } },
     ]));
+  });
+
+  it("maps transcript toolCall and toolResult records to canonical tool events during recovery", async () => {
+    const transport = new FakeTransport();
+    transport.helloMethods.push("agent.wait", "chat.history");
+    transport.fixtures.set("chat.send", { runId: "run-tool-recovery", status: "accepted" });
+    transport.fixtures.set("agent.wait", { runId: "run-tool-recovery", status: "ok" });
+    transport.fixtures.set("chat.history", {
+      sessionKey: "session-1",
+      sessionId: "session-1",
+      messages: [
+        {
+          role: "user", content: "read package", timestamp: 1,
+          idempotencyKey: "request-tool-recovery:user",
+          __openclaw: { id: "user-tool-recovery", idempotencyKey: "request-tool-recovery:user", recordTimestampMs: 1, seq: 1 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call-read", name: "read", arguments: { path: "package.json" } }],
+          stopReason: "toolUse",
+          timestamp: 2,
+          __openclaw: { id: "assistant-tool-call", recordTimestampMs: 2, seq: 2 },
+        },
+        {
+          role: "toolResult", toolCallId: "call-read", toolName: "read", isError: false,
+          content: [{ type: "text", text: "package content" }], timestamp: 3,
+          __openclaw: { id: "tool-result", recordTimestampMs: 3, seq: 3 },
+        },
+        {
+          role: "assistant", content: [{ type: "text", text: "done" }], timestamp: 4,
+          __openclaw: { id: "assistant-final", recordTimestampMs: 4, seq: 4 },
+        },
+      ],
+    });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const events = [];
+    for await (const event of client.chat.send({
+      sessionId: "session-1",
+      clientRequestId: "request-tool-recovery",
+      blocks: [{ type: "text", text: "read package", format: "plain" }],
+    })) events.push(event);
+
+    expect(events).toMatchObject([
+      { type: "started", runId: "run-tool-recovery" },
+      { type: "tool", runId: "run-tool-recovery", tool: { id: "call-read", toolId: "read", state: "running" } },
+      { type: "tool", runId: "run-tool-recovery", tool: { id: "call-read", toolId: "read", state: "succeeded" } },
+      { type: "final", runId: "run-tool-recovery", message: { blocks: [{ text: "done" }] } },
+    ]);
   });
 
   it("trusts an authoritative successful assistant reply when agent.wait reports an earlier tool error", async () => {

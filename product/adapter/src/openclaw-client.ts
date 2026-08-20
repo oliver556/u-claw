@@ -14,6 +14,7 @@ import {
   type GatewayStatus,
   type MessageEvent,
   type Page,
+  type ToolSummary,
   type ToolCall,
   type ApprovalRequest,
   type ChannelErrorSummary,
@@ -42,6 +43,7 @@ import {
   mapOpenClawMessageGetResponse,
   mapOpenClawPluginApproval,
   mapOpenClawSessionToolEvent,
+  mapOpenClawTranscriptToolEvents,
 } from "./openclaw-v4-contract.js";
 import {
   mapToolCall,
@@ -192,7 +194,7 @@ const SessionModelReadbackSchema = z.object({
   nextCursor: z.string().min(1).nullable().optional(),
   hasMore: z.boolean().optional(),
 }).passthrough();
-const ToolCatalogSchema = z.object({
+const LegacyToolCatalogSchema = z.object({
   tools: z.array(z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -203,6 +205,48 @@ const ToolCatalogSchema = z.object({
     risk: z.enum(["low", "medium", "high", "critical", "unknown"]),
   }).strict()),
 }).strict();
+const RuntimeToolCatalogSchema = z.object({
+  agentId: z.string().min(1),
+  profiles: z.array(z.unknown()).optional(),
+  groups: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    source: z.enum(["core", "plugin"]),
+    pluginId: z.string().min(1).optional(),
+    tools: z.array(z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      description: z.string().optional(),
+      source: z.enum(["core", "plugin"]),
+      pluginId: z.string().min(1).optional(),
+      risk: z.enum(["low", "medium", "high"]).optional(),
+    }).passthrough()),
+  }).passthrough()),
+}).passthrough();
+const ToolCatalogSchema = z.union([LegacyToolCatalogSchema, RuntimeToolCatalogSchema]);
+
+function mapToolCatalog(catalog: z.infer<typeof ToolCatalogSchema>): ToolSummary[] {
+  const legacy = LegacyToolCatalogSchema.safeParse(catalog);
+  if (legacy.success) return legacy.data.tools;
+  const runtime = RuntimeToolCatalogSchema.parse(catalog);
+  const tools = new Map<string, ToolSummary>();
+  for (const group of runtime.groups) {
+    for (const tool of group.tools) {
+      if (tools.has(tool.id)) continue;
+      const pluginId = tool.pluginId ?? group.pluginId;
+      tools.set(tool.id, {
+        id: tool.id,
+        name: tool.label,
+        ...(tool.description === undefined ? {} : { description: tool.description }),
+        source: tool.source === "core" ? "built-in" : "plugin",
+        ...(pluginId === undefined ? {} : { sourceId: pluginId }),
+        available: true,
+        risk: tool.risk ?? "unknown",
+      });
+    }
+  }
+  return [...tools.values()];
+}
 
 const ToolCallResponseSchema = z.object({ toolCall: RawToolCallSchema }).strict();
 const ExecApprovalListSchema = z.array(OpenClawExecApprovalEventSchema);
@@ -615,7 +659,7 @@ export class OpenClawClient implements UClawClient {
   readonly tools: UClawClient["tools"] = {
     list: async () => {
       this.requireMethod("tools.catalog");
-      return (await this.options.transport.router.request("tools.catalog", {}, ToolCatalogSchema)).tools;
+      return mapToolCatalog(await this.options.transport.router.request("tools.catalog", {}, ToolCatalogSchema));
     },
     getCall: async (toolCallId) => {
       this.requireMethod("session.tool.get");
@@ -1007,7 +1051,13 @@ export class OpenClawClient implements UClawClient {
           }
           const turnMessages = userIndex < 0 ? [] : history.messages.slice(userIndex + 1);
           const nextUserIndex = turnMessages.findIndex((candidate) => candidate.role === "user");
-          const rawHistoryMessage = turnMessages.slice(0, nextUserIndex < 0 ? undefined : nextUserIndex).reverse().find((candidate) =>
+          const currentTurn = turnMessages.slice(0, nextUserIndex < 0 ? undefined : nextUserIndex);
+          for (const tool of mapOpenClawTranscriptToolEvents(input.sessionId, accepted.runId, currentTurn)) {
+            if (this.recordToolRun(tool)) {
+              enqueue(MessageEventSchema.parse({ type: "tool", runId: accepted.runId, tool }));
+            }
+          }
+          const rawHistoryMessage = currentTurn.reverse().find((candidate) =>
             candidate.role === "assistant");
           if (rawHistoryMessage === undefined) throw new RpcProtocolError("chat.history");
           const rawMessage = OpenClawHistoryMessageSchema.parse(rawHistoryMessage);
