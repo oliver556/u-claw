@@ -630,7 +630,7 @@ func validUpstreamJSON(route string, b []byte) bool {
 		return false
 	}
 	if route == "models" {
-		if !hasExactKeys(top, "object", "data") {
+		if !hasAllowedKeys(top, []string{"object", "data"}, "success") {
 			return false
 		}
 		var object string
@@ -638,14 +638,31 @@ func validUpstreamJSON(route string, b []byte) bool {
 		if json.Unmarshal(top["object"], &object) != nil || object != "list" || json.Unmarshal(top["data"], &data) != nil || data == nil {
 			return false
 		}
+		if success, ok := top["success"]; ok {
+			var value bool
+			if json.Unmarshal(success, &value) != nil {
+				return false
+			}
+		}
 		for _, m := range data {
-			if !hasExactKeys(m, "id", "object", "created", "owned_by") {
+			if !hasAllowedKeys(m, []string{"id", "object", "created", "owned_by"}, "supported_endpoint_types") {
 				return false
 			}
 			var id, obj, owner string
 			var created int64
 			if json.Unmarshal(m["id"], &id) != nil || !modelNamePattern.MatchString(id) || json.Unmarshal(m["object"], &obj) != nil || obj != "model" || json.Unmarshal(m["owned_by"], &owner) != nil || !proxyIdentifierPattern.MatchString(owner) || json.Unmarshal(m["created"], &created) != nil || created < 0 || created > maxSafeInteger {
 				return false
+			}
+			if endpoints, ok := m["supported_endpoint_types"]; ok {
+				var values []string
+				if json.Unmarshal(endpoints, &values) != nil || values == nil {
+					return false
+				}
+				for _, value := range values {
+					if !proxyIdentifierPattern.MatchString(value) {
+						return false
+					}
+				}
 			}
 		}
 		return true
@@ -679,8 +696,19 @@ func validUpstreamJSON(route string, b []byte) bool {
 	}
 	var fields map[string]json.RawMessage
 	var promptTokens, completionTokens, totalTokens int64
-	if json.Unmarshal(top["usage"], &fields) != nil || !hasExactKeys(fields, "prompt_tokens", "completion_tokens", "total_tokens") || json.Unmarshal(fields["prompt_tokens"], &promptTokens) != nil || json.Unmarshal(fields["completion_tokens"], &completionTokens) != nil || json.Unmarshal(fields["total_tokens"], &totalTokens) != nil || promptTokens < 0 || completionTokens < 0 || totalTokens < 0 || promptTokens > maxSafeInteger || completionTokens > maxSafeInteger || totalTokens > maxSafeInteger {
+	if json.Unmarshal(top["usage"], &fields) != nil || !hasAllowedKeys(fields, []string{"prompt_tokens", "completion_tokens", "total_tokens"}, "completion_tokens_details") || json.Unmarshal(fields["prompt_tokens"], &promptTokens) != nil || json.Unmarshal(fields["completion_tokens"], &completionTokens) != nil || json.Unmarshal(fields["total_tokens"], &totalTokens) != nil || promptTokens < 0 || completionTokens < 0 || totalTokens < 0 || promptTokens > maxSafeInteger || completionTokens > maxSafeInteger || totalTokens > maxSafeInteger {
 		return false
+	}
+	if details, ok := fields["completion_tokens_details"]; ok {
+		var values map[string]int64
+		if json.Unmarshal(details, &values) != nil || values == nil {
+			return false
+		}
+		for _, value := range values {
+			if value < 0 || value > maxSafeInteger {
+				return false
+			}
+		}
 	}
 	return true
 }
@@ -722,6 +750,25 @@ func hasExactKeys(value map[string]json.RawMessage, keys ...string) bool {
 	}
 	for _, key := range keys {
 		if _, ok := value[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func hasAllowedKeys(value map[string]json.RawMessage, required []string, optional ...string) bool {
+	allowed := make(map[string]struct{}, len(required)+len(optional))
+	for _, key := range required {
+		if _, ok := value[key]; !ok {
+			return false
+		}
+		allowed[key] = struct{}{}
+	}
+	for _, key := range optional {
+		allowed[key] = struct{}{}
+	}
+	for key := range value {
+		if _, ok := allowed[key]; !ok {
 			return false
 		}
 	}

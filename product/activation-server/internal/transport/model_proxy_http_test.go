@@ -179,7 +179,7 @@ func TestModelProxyHandlerRelaysStrictChatAndSanitizesHeaders(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		upstream = r
 		upstreamAuthorization = r.Header.Get("Authorization")
-		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}, "Set-Cookie": []string{"bad=1"}}, Body: io.NopCloser(strings.NewReader(`{"id":"chatcmpl_fixture","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))}, nil
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}, "Set-Cookie": []string{"bad=1"}}, Body: io.NopCloser(strings.NewReader(`{"id":"chatcmpl_fixture","object":"chat.completion","created":1,"model":"allowed","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"completion_tokens_details":{"reasoning_tokens":0}}}`))}, nil
 	})}
 	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}, RequestIDs: bytes.NewReader(make([]byte, 16))})
 	req := httptest.NewRequest(http.MethodPost, "/model-api/v1/chat/completions", strings.NewReader(`{"model":"allowed","messages":[{"role":"user","content":"hello"}],"stream":false}`))
@@ -197,6 +197,9 @@ func TestModelProxyHandlerRelaysStrictChatAndSanitizesHeaders(t *testing.T) {
 	}
 	if res.Header().Get("Set-Cookie") != "" {
 		t.Fatal("response cookie relayed")
+	}
+	if !strings.Contains(res.Body.String(), `"completion_tokens_details"`) {
+		t.Fatalf("response extension missing: %s", res.Body.String())
 	}
 	if !service.completed {
 		t.Fatal("admission not completed")
@@ -254,14 +257,14 @@ func TestModelProxyHandlerRecordsUpstreamOutcome(t *testing.T) {
 func TestModelProxyHandlerReturnsGlobalModelsWithoutDeviceFiltering(t *testing.T) {
 	service := &fakeProxyService{grant: validGrant(t)}
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"object":"list","data":[{"id":"allowed","object":"model","created":1,"owned_by":"owner"},{"id":"blocked","object":"model","created":1,"owned_by":"owner"}]}`))}, nil
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"object":"list","success":true,"data":[{"id":"allowed","object":"model","created":1,"owned_by":"owner","supported_endpoint_types":["openai"]},{"id":"blocked","object":"model","created":1,"owned_by":"owner","supported_endpoint_types":["openai"]}]}`))}, nil
 	})}
 	h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}})
 	req := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	h.ServeHTTP(res, req)
-	if res.Code != 200 || !strings.Contains(res.Body.String(), "blocked") || !strings.Contains(res.Body.String(), "allowed") {
+	if res.Code != 200 || !strings.Contains(res.Body.String(), "blocked") || !strings.Contains(res.Body.String(), "allowed") || !strings.Contains(res.Body.String(), `"success":true`) || !strings.Contains(res.Body.String(), `"supported_endpoint_types"`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
 	}
 }
@@ -307,6 +310,31 @@ func TestModelProxyHandlerRejectsUpstreamExtensions(t *testing.T) {
 		h.ServeHTTP(response, request)
 		if response.Code != 502 || !strings.Contains(response.Body.String(), "UPSTREAM_UNAVAILABLE") || strings.Contains(response.Body.String(), "custom") {
 			t.Fatalf("route=%s status=%d body=%s", test.route, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestUpstreamValidationAcceptsOpenAICompatibleExtensions(t *testing.T) {
+	tests := []struct{ route, body string }{
+		{"models", `{"object":"list","success":true,"data":[{"id":"gpt-5.5","object":"model","created":1,"owned_by":"newapi","supported_endpoint_types":["openai"]}]}`},
+		{"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"gpt-5.5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"completion_tokens_details":{"reasoning_tokens":0}}}`},
+	}
+	for _, test := range tests {
+		if !validUpstreamJSON(test.route, []byte(test.body)) {
+			t.Fatalf("rejected route=%s body=%s", test.route, test.body)
+		}
+	}
+}
+
+func TestUpstreamValidationRejectsMalformedOpenAICompatibleExtensions(t *testing.T) {
+	tests := []struct{ route, body string }{
+		{"models", `{"object":"list","success":"true","data":[]}`},
+		{"models", `{"object":"list","data":[{"id":"gpt-5.5","object":"model","created":1,"owned_by":"newapi","supported_endpoint_types":"openai"}]}`},
+		{"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"gpt-5.5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"completion_tokens_details":{"reasoning_tokens":-1}}}`},
+	}
+	for _, test := range tests {
+		if validUpstreamJSON(test.route, []byte(test.body)) {
+			t.Fatalf("accepted route=%s body=%s", test.route, test.body)
 		}
 	}
 }
