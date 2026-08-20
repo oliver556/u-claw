@@ -42,6 +42,7 @@ export interface BuiltinModelCredential {
 
 export interface BuiltinCredentialStore {
   readonly pinnedFilesystem: boolean;
+  readonly credentialPath: string;
   provision(input: BuiltinCredentialProvisioningInput): Promise<void>;
   loadActive(): Promise<BuiltinModelCredential>;
   loadForConnectivityCheck(): Promise<BuiltinModelCredential>;
@@ -154,6 +155,7 @@ export function createBuiltinCredentialStore({
   };
   return {
     pinnedFilesystem: platform !== "win32",
+    credentialPath: join(resolve(dataDir), path),
     async provision(input) {
       const { persisted } = validatePersisted(input, allowLoopbackHttp);
       try {

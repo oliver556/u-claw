@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 import {
   UClawErrorSchema,
   normalizeKey,
@@ -20,10 +22,23 @@ export interface RendererConfigSnapshot {
 
 export interface OpenClawProviderConfigBackend {
   synchronize(previous: ProviderConfigDocument, next: ProviderConfigDocument): Promise<void>;
+  synchronizeCommercial(input: CommercialProviderConfig): Promise<boolean>;
+  readCommercial(): Promise<{ configured: boolean }>;
   getRendererConfig(): Promise<RendererConfigSnapshot>;
   patchRendererConfig(patch: JsonObject): Promise<RendererConfigSnapshot>;
   applyRendererConfig(config: JsonObject): Promise<RendererConfigSnapshot>;
   applyMainConfig(config: JsonObject): Promise<void>;
+}
+
+export interface CommercialProviderModel {
+  id: string;
+  name: string;
+}
+
+export interface CommercialProviderConfig {
+  endpoint: string;
+  credentialPath: string;
+  models: readonly CommercialProviderModel[];
 }
 
 interface ConfigReadback {
@@ -374,6 +389,68 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
   return {
     async synchronize(previous, next) {
       await synchronizeProviderConfig(previous, next);
+    },
+    async synchronizeCommercial(input) {
+      const endpoint = new URL(input.endpoint);
+      if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+        throw backendError("INVALID_ARGUMENT", "Commercial Provider endpoint is invalid.");
+      }
+      endpoint.pathname = endpoint.pathname.replace(/\/+$/u, "");
+      if (!endpoint.pathname.endsWith("/v1")) endpoint.pathname = `${endpoint.pathname}/v1`;
+      if (!isAbsolute(input.credentialPath) || input.credentialPath.includes("\0")) {
+        throw backendError("INVALID_ARGUMENT", "Commercial credential path is invalid.");
+      }
+      if (input.models.length === 0 || input.models.some(({ id, name }) => id.trim() === "" || name.trim() === "")) {
+        throw backendError("INVALID_ARGUMENT", "Commercial model catalog is empty or invalid.");
+      }
+      const uniqueModels = [...new Map(input.models.map((model) => [model.id, { id: model.id, name: model.name }])).values()];
+      await getSchema();
+      const before = await getConfig();
+      const next = structuredClone(before.config);
+      const secrets = isObject(next.secrets) ? next.secrets : (next.secrets = {});
+      const secretProviders = isObject(secrets.providers) ? secrets.providers : (secrets.providers = {});
+      secretProviders.uclaw_commercial = { source: "file", path: input.credentialPath, mode: "json" };
+      const models = isObject(next.models) ? next.models : (next.models = {});
+      models.mode = "merge";
+      const providers = isObject(models.providers) ? models.providers : (models.providers = {});
+      providers["uclaw-commercial"] = {
+        baseUrl: endpoint.href,
+        apiKey: { source: "file", provider: "uclaw_commercial", id: "/deviceToken" },
+        api: "openai-completions",
+        models: uniqueModels,
+      };
+      if (canonical(before.config) === canonical(next)) return false;
+      const response = assertJsonObject(await rpc.request("config.apply", {
+        raw: JSON.stringify(next),
+        baseHash: before.hash,
+        restartDelayMs: 60_000,
+      }), "OpenClaw commercial Provider write response is invalid.");
+      if (response.ok !== true) throw backendError("OPERATION_FAILED", "OpenClaw commercial Provider write failed.", true);
+      const readback = await getConfig();
+      const provider = getPath(readback.config, ["models", "providers", "uclaw-commercial"]);
+      const secretProvider = getPath(readback.config, ["secrets", "providers", "uclaw_commercial"]);
+      if (!isObject(provider) || provider.baseUrl !== endpoint.href
+        || !isObject(provider.apiKey) || provider.apiKey.source !== "file" || provider.apiKey.provider !== "uclaw_commercial" || provider.apiKey.id !== "/deviceToken"
+        || !Array.isArray(provider.models) || provider.models.length !== uniqueModels.length
+        || !isObject(secretProvider) || secretProvider.source !== "file" || secretProvider.path !== input.credentialPath || secretProvider.mode !== "json") {
+        throw backendError("CONFLICT", "OpenClaw commercial Provider readback did not match the write.");
+      }
+      return true;
+    },
+    async readCommercial() {
+      const { config } = await getConfig();
+      const provider = getPath(config, ["models", "providers", "uclaw-commercial"]);
+      const secretProvider = getPath(config, ["secrets", "providers", "uclaw_commercial"]);
+      return {
+        configured: isObject(provider)
+          && typeof provider.baseUrl === "string"
+          && isObject(provider.apiKey)
+          && provider.apiKey.source === "file"
+          && provider.apiKey.provider === "uclaw_commercial"
+          && provider.apiKey.id === "/deviceToken"
+          && isObject(secretProvider)
+          && secretProvider.source === "file",
+      };
     },
     async getRendererConfig() {
       const [{ schema, uiHints }, { config }] = await Promise.all([getSchema(), getConfig()]);

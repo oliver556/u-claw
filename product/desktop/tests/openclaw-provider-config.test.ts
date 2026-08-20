@@ -55,6 +55,37 @@ function fakeRpc(initial: Record<string, unknown> = configFixture()) {
 }
 
 describe("OpenClaw provider config backend", () => {
+  it("registers uclaw-commercial with a deviceToken file SecretRef and dynamic models", async () => {
+    const { rpc, request } = fakeRpc({ gateway: { mode: "local" } });
+    const backend = createOpenClawProviderConfigBackend(rpc);
+
+    await backend.synchronizeCommercial({
+      endpoint: "https://commercial.example.test/model-api/v1/",
+      credentialPath: "/portable/data/.uclaw/builtin-model-credential.v1.json",
+      models: [
+        { id: "deepseek-chat", name: "DeepSeek" },
+        { id: "qwen-max", name: "Qwen" },
+      ],
+    });
+
+    const applied = JSON.parse(String(request.mock.calls.find(([method]) => method === "config.apply")?.[1].raw));
+    expect(applied).toMatchObject({
+      secrets: { providers: { uclaw_commercial: {
+        source: "file",
+        path: "/portable/data/.uclaw/builtin-model-credential.v1.json",
+        mode: "json",
+      } } },
+      models: { mode: "merge", providers: { "uclaw-commercial": {
+        baseUrl: "https://commercial.example.test/model-api/v1",
+        apiKey: { source: "file", provider: "uclaw_commercial", id: "/deviceToken" },
+        api: "openai-completions",
+        models: [{ id: "deepseek-chat", name: "DeepSeek" }, { id: "qwen-max", name: "Qwen" }],
+      } } },
+    });
+    expect(JSON.stringify(applied)).not.toContain("uclaw_dt_");
+    expect(applied.models.providers["uclaw-commercial"]).not.toHaveProperty("model");
+  });
+
   it("stages a compact valid config before deleting the final Provider to satisfy OpenClaw size-drop protection", async () => {
     const initial = configFixture("sk-live-secret");
     Object.assign(initial.models.providers.openai.models[0], {

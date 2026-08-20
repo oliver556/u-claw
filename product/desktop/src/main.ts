@@ -398,6 +398,7 @@ export interface DesktopMainOptions {
   providers?: ProviderStore;
   providerNetwork?: ProviderNetworkService;
   providerConfig?: OpenClawProviderConfigBackend;
+  commercialProviderBootstrap?(coordinator: ProductionRuntimeConsistencyCoordinator): Promise<void>;
   modelSourceExecutors?: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
   injectChatMessage?(
     sessionId: string,
@@ -760,8 +761,11 @@ export async function startElectronMain(
     },
   });
   void localApplications.refresh().catch(() => undefined);
+  // Keep modelRouting constructed as the temporary legacy commercial fallback until
+  // the commercial OpenClaw E2E gate passes; production chat authority is OpenClaw.
+  void modelRouting;
   const routeChatSend = (input: SendMessageInput, signal: AbortSignal) =>
-    localApplications.route(input, modelRouting.routeChatSend, signal);
+    localApplications.route(input, (input, signal) => client.chat.send(input, signal), signal);
   const chatQueueDispatcher = createChatQueueDispatcher({
     store: chatQueue,
     send: (input) => routeChatSend(input, new AbortController().signal),
@@ -846,6 +850,7 @@ export async function startElectronMain(
   );
   const devTools = !app.isPackaged;
   let gatewayPort: number | undefined;
+  let commercialProviderBootstrapState: "idle" | "running" | "done" = "idle";
   const openAdvancedConsole = createAdvancedConsoleController({
     BrowserWindow: BrowserWindow as unknown as BrowserWindowConstructor,
     getGatewayPort: () => {
@@ -868,6 +873,17 @@ export async function startElectronMain(
         ? "ready"
         : state === "partial" ? "degraded" : "offline";
       options.onGatewayCapabilityState?.(state);
+      if (state === "full" && options.commercialProviderBootstrap && commercialProviderBootstrapState === "idle") {
+        commercialProviderBootstrapState = "running";
+        void options.commercialProviderBootstrap(consistencyCoordinator).then(
+          () => { commercialProviderBootstrapState = "done"; },
+          async () => {
+            commercialProviderBootstrapState = "idle";
+            diagnosticsRuntime.gatewayStatus = "degraded";
+            await options.gatewayDiagnostics?.append({ event: "commercial-provider-bootstrap-failed" });
+          },
+        );
+      }
     },
     buildGatewayLaunchOptions: (port) => {
       gatewayPort = port;

@@ -29,6 +29,11 @@ import { bootstrapWechatPlugin } from "../channels/wechat-plugin-bootstrap.js";
 import { createOpenClawQrRenderer } from "../channels/wechat-qr-renderer.js";
 import { createOpenClawProviderConfigBackend } from "../providers/openclaw-provider-config.js";
 import { createOpenClawProviderExecutor } from "../providers/openclaw-provider-executor.js";
+import { createBuiltinCredentialStore } from "../providers/builtin-credential-store.js";
+import {
+  fetchCommercialModels,
+  synchronizeExistingCommercialOpenClawCredential,
+} from "../providers/commercial-openclaw-lifecycle.js";
 import {
   bootstrapDevelopmentProvider,
   readDevelopmentProvider,
@@ -423,6 +428,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   const openClawConfig = createOpenClawProviderConfigBackend({
     request: (method, params) => transport.router.request(method, params as never, z.unknown()),
   });
+  const commercialCredentialStore = createBuiltinCredentialStore({ dataDir: environment.dataRoot });
   const storedProviders = createProviderStore({ dataDir: environment.dataRoot, openClawConfig });
   let providerNetworkSettings = await storedProviders.getNetworkForRuntime();
   const providers: ProviderStore = {
@@ -684,6 +690,14 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     providers,
     providerNetwork,
     providerConfig: openClawConfig,
+    commercialProviderBootstrap: (coordinator) => synchronizeExistingCommercialOpenClawCredential({
+      store: commercialCredentialStore,
+      config: openClawConfig,
+      gateway: coordinator,
+      reconnect: () => client.gateway.reconnect(),
+      fetchModels: (credential) => fetchCommercialModels(credential),
+      listModels: () => client.models.list(),
+    }),
     pluginRuntime,
     capabilityRuntime,
     domainRegistrations: domains,
