@@ -769,7 +769,7 @@ func validImageResponse(top map[string]json.RawMessage) bool {
 
 func validImageUsage(raw json.RawMessage) bool {
 	var usage map[string]json.RawMessage
-	if json.Unmarshal(raw, &usage) != nil || len(usage) == 0 || !hasAllowedKeys(usage, nil, "input_tokens", "output_tokens", "total_tokens", "input_tokens_details") {
+	if json.Unmarshal(raw, &usage) != nil || len(usage) == 0 || !hasAllowedKeys(usage, nil, "input_tokens", "output_tokens", "total_tokens", "input_tokens_details", "output_tokens_details") {
 		return false
 	}
 	for _, key := range []string{"input_tokens", "output_tokens", "total_tokens"} {
@@ -777,7 +777,11 @@ func validImageUsage(raw json.RawMessage) bool {
 			return false
 		}
 	}
-	if rawDetails, ok := usage["input_tokens_details"]; ok {
+	for _, key := range []string{"input_tokens_details", "output_tokens_details"} {
+		rawDetails, ok := usage[key]
+		if !ok {
+			continue
+		}
 		var details map[string]json.RawMessage
 		if json.Unmarshal(rawDetails, &details) != nil || details == nil || !hasAllowedKeys(details, nil, "text_tokens", "image_tokens") {
 			return false

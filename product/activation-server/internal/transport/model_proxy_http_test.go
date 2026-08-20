@@ -347,6 +347,8 @@ func TestImageResponseValidationRejectsUnknownAndMalformedExtensions(t *testing.
 		`{"created":1,"data":[{"url":"https://media.example.test/image.png","b64_json":"cG5n"}]}`,
 		`{"created":1,"data":[{"b64_json":"cG5n"}],"usage":{"total_tokens":-1}}`,
 		`{"created":1,"data":[{"b64_json":"cG5n"}],"usage":{"custom_tokens":1}}`,
+		`{"created":1,"data":[{"b64_json":"cG5n"}],"usage":{"output_tokens_details":{"custom_tokens":1}}}`,
+		`{"created":1,"data":[{"b64_json":"cG5n"}],"usage":{"output_tokens_details":{"image_tokens":-1}}}`,
 	}
 	for _, body := range tests {
 		if validUpstreamJSON("images.generations", []byte(body)) {
