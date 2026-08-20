@@ -689,6 +689,25 @@ ${"    "}
     expect(bundle.entries.map((entry) => entry.path)).toEqual(["SKILL.md", "manifest.yaml"]);
   });
 
+  it("ignores stale transport metadata while keeping installable files verified", async () => {
+    const listedFiles = {
+      "SKILL.md": canonicalSkillMd,
+      "_meta.json": JSON.stringify({ slug: "workspace-reader", version: "7.2.0" }),
+    };
+    const archive = await zipOf({ "SKILL.md": canonicalSkillMd });
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ code: 0, data: { skills: [searchItem], total: 1 }, message: "success" }))
+      .mockResolvedValueOnce(json(filesBody(listedFiles)))
+      .mockResolvedValueOnce(redirect("signed/stale-meta.zip"))
+      .mockResolvedValueOnce(new Response(responseBody(archive), { headers: { "content-type": "application/zip" } }));
+    const client = createSkillHubClient({ fetch });
+    await client.search({ query: "workspace", cursor: null, pageSize: 20 });
+
+    await expect(client.download("workspace-reader")).resolves.toMatchObject({
+      entries: [{ path: "SKILL.md", type: "file" }],
+    });
+  });
+
   it("accepts safe explicit directory entries while projecting only listed files", async () => {
     const files = { "SKILL.md": canonicalSkillMd, "docs/readme.md": "# Notes\n" };
     const zip = new JSZip();

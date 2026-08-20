@@ -143,7 +143,7 @@ describe("SkillManager", () => {
     expect(within(marketplaceDetail).getByRole("heading", { name: "命令运行器" })).toBeVisible();
     fireEvent.click(within(marketplaceDetail).getByRole("button", { name: "关闭" }));
     fireEvent.click(screen.getByRole("tab", { name: "我的技能" }));
-    expect(await screen.findByRole("heading", { name: "Skill" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "我的技能" })).toBeVisible();
     expect(screen.getByText("已安装")).toBeVisible();
   });
 
@@ -364,7 +364,7 @@ describe("SkillManager", () => {
     window.uclaw = { skills: { invoke } } as any;
     renderPublicInstalledSkills();
 
-    expect(await screen.findByRole("heading", { name: "Skill" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "我的技能" })).toBeVisible();
     expect(screen.getByText("已安装")).toBeVisible();
     expect(document.querySelector(".skill-status.missing-dependency")).toHaveTextContent("缺少依赖");
     expect(screen.getByRole("button", { name: "发现更多 Skill" })).toBeVisible();
@@ -396,7 +396,7 @@ describe("SkillManager", () => {
   });
 
   it("shows the backend error when a local Skill enable change fails", async () => {
-    const installed = { ...detail, installedVersion: "local", version: "local", enabled: false, source: { provider: "openclaw", origin: "workspace" } };
+    const installed = { ...detail, installedVersion: "local", version: "local", enabled: false, permissions: [], source: { provider: "openclaw", origin: "workspace" } };
     const availableRuntime = { ...runtimeItem, disabled: true, eligible: true, availability: "disabled", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] };
     const invoke = vi.fn(async (request: any) => {
       if (request.method === "skills.installed") return response(request, [installed]);
@@ -412,9 +412,45 @@ describe("SkillManager", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("OpenClaw Skill readback mismatch.");
   });
 
+  it("confirms installed permissions before re-enabling a high-risk Skill", async () => {
+    let enabled = false;
+    const installed = () => ({ ...detail, installedVersion: detail.version, enabled });
+    const disabledRuntime = { ...runtimeItem, disabled: true, eligible: false, availability: "disabled", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] };
+    const invoke = vi.fn(async (request: any) => {
+      if (request.method === "skills.installed") return response(request, [installed()]);
+      if (request.method === "skills.runtime-status") return response(request, { workspaceDir: "w", managedSkillsDir: "m", skills: [disabledRuntime] });
+      if (request.method === "skills.set-enabled") {
+        enabled = true;
+        return response(request, { id: "enable-confirmed", slug: detail.slug, action: "enable", state: "succeeded", progress: 100, phase: "complete" });
+      }
+      throw new Error(`unexpected ${request.method}`);
+    });
+    window.uclaw = { skills: { invoke } } as any;
+    renderPublicInstalledSkills();
+
+    fireEvent.click(await screen.findByRole("switch", { name: "启用 命令运行器" }));
+    const dialog = await screen.findByRole("dialog", { name: "确认启用 命令运行器" });
+    expect(dialog).toHaveTextContent("执行 Git 命令");
+    expect(screen.getByRole("button", { name: "确认启用" })).toBeDisabled();
+    expect(invoke.mock.calls.some(([request]) => request.method === "skills.set-enabled")).toBe(false);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "我已了解高风险权限" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认启用" }));
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      method: "skills.set-enabled",
+      params: {
+        slug: detail.slug,
+        enabled: true,
+        confirmation: { permissionFingerprint: detail.permissionFingerprint, acceptedRisk: detail.risk },
+      },
+    })));
+    expect(await screen.findByRole("status")).toHaveTextContent("命令运行器已启用");
+  });
+
   it("shows a success toast when a local Skill enable change succeeds", async () => {
     let enabled = false;
-    const installed = () => ({ ...detail, installedVersion: "local", version: "local", enabled, source: { provider: "openclaw", origin: "workspace" } });
+    const installed = () => ({ ...detail, installedVersion: "local", version: "local", enabled, permissions: [], source: { provider: "openclaw", origin: "workspace" } });
     const availableRuntime = { ...runtimeItem, disabled: true, eligible: true, availability: "disabled", missing: { bins: [], anyBins: [], env: [], config: [], os: [] }, conflicts: [] };
     const invoke = vi.fn(async (request: any) => {
       if (request.method === "skills.installed") return response(request, [installed()]);
@@ -547,7 +583,9 @@ describe("SkillManager", () => {
     resolveInstall(response({ method: "skills.import-install", requestId: "zip-start" }, {
       id: "zip-pending", slug: detail.slug, action: "install", state: "running", progress: 10, phase: "validating",
     }));
+    expect(await screen.findByRole("dialog", { name: "确认导入 命令运行器" })).toBeVisible();
     expect(await screen.findByRole("alert")).toHaveTextContent("fixture stop");
+    expect(screen.getByRole("button", { name: "重新选择 Skill" })).toBeEnabled();
   });
 
   it("renders loading, free catalog, pagination, and offline retry states", async () => {

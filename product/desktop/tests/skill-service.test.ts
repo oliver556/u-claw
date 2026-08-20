@@ -355,6 +355,26 @@ describe("portable Skill service", () => {
     expect(client.detail).not.toHaveBeenCalled();
   });
 
+  it("keeps the permission confirmation cause when re-enabling an installed Skill", async () => {
+    const dataDir = await makeRoot();
+    const workspaceRoot = join(dataDir, "workspace", "skills");
+    const runtime = runtimeFor(workspaceRoot);
+    const service = await createSkillService({ dataDir, workspaceRoot, runtime, client: createFixtureSkillHubClient() });
+    const detail = await service.detail("workspace-reader");
+    await service.waitForOperation((await service.startInstall({
+      slug: detail.slug,
+      confirmation: { permissionFingerprint: detail.permissionFingerprint, acceptedRisk: detail.risk },
+    })).id);
+    expect((await service.setEnabled({ slug: detail.slug, enabled: false, confirmation: null })).state).toBe("succeeded");
+
+    const failed = await service.setEnabled({ slug: detail.slug, enabled: true, confirmation: null });
+
+    expect(failed).toMatchObject({
+      state: "failed",
+      error: "Skill permissions require explicit confirmation.",
+    });
+  });
+
   it("retains a durable toggle journal when state persistence and runtime compensation both fail", async () => {
     const dataDir = await makeRoot();
     const workspaceRoot = join(dataDir, "workspace", "skills");

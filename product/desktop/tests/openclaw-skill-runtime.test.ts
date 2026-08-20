@@ -24,9 +24,24 @@ describe("OpenClaw Skill runtime", () => {
   });
 
   it("fails when OpenClaw readback disagrees", async () => {
-    const request = vi.fn().mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce(status(false));
-    await expect(createOpenClawSkillRuntime({ request }).setEnabled("china-weather", false))
+    const request = vi.fn().mockResolvedValueOnce({ ok: true }).mockResolvedValue(status(false));
+    await expect(createOpenClawSkillRuntime({ request, readbackAttempts: 4, waitForReadback: async () => undefined }).setEnabled("china-weather", false))
       .rejects.toThrow("readback");
+  });
+
+  it("waits for an eventually consistent Skill enablement readback", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(status(false))
+      .mockResolvedValueOnce(status(false))
+      .mockResolvedValueOnce(status(false))
+      .mockResolvedValueOnce(status(true));
+
+    await expect(createOpenClawSkillRuntime({ request, waitForReadback: async () => undefined }).setEnabled("china-weather", false))
+      .resolves.toMatchObject({ disabled: true });
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      "skills.update", "skills.status", "skills.status", "skills.status", "skills.status",
+    ]);
   });
 
   it("reads back the nonbundled workspace Skill when a bundled namesake appears first", async () => {

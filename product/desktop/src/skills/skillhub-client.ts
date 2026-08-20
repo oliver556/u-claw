@@ -567,11 +567,12 @@ export function createSkillHubClient({
       if (listing.version !== known.version || listing.namespace.handle !== known.namespace) {
         throw new Error("SkillHub download identity mismatch.");
       }
-      if (listing.count !== listing.files.length || listing.files.length === 0 || !listing.files.some((file) => file.path === "SKILL.md")) {
+      const installableFiles = listing.files.filter((file) => file.path !== "_meta.json");
+      if (listing.count !== listing.files.length || installableFiles.length === 0 || !installableFiles.some((file) => file.path === "SKILL.md")) {
         throw new Error("SkillHub file manifest is invalid.");
       }
       const listedPaths = new Map<string, "file" | "directory">();
-      for (const file of listing.files) {
+      for (const file of installableFiles) {
         if (!validRelativePath(file.path)) throw new Error("SkillHub file manifest contains an unsafe path.");
         registerPath(
           listedPaths, file.path, "file",
@@ -579,7 +580,7 @@ export function createSkillHubClient({
           "SkillHub file manifest contains file/directory conflicts.",
         );
       }
-      if (listing.files.reduce((total, file) => total + file.size, 0) > TOTAL_FILE_LIMIT) throw new Error("SkillHub file manifest exceeds limit.");
+      if (installableFiles.reduce((total, file) => total + file.size, 0) > TOTAL_FILE_LIMIT) throw new Error("SkillHub file manifest exceeds limit.");
       const downloadUrl = new URL("/api/v1/download", origin);
       downloadUrl.searchParams.set("slug", slug);
       downloadUrl.searchParams.set("version", listing.version);
@@ -605,10 +606,10 @@ export function createSkillHubClient({
           "SkillHub ZIP contains file/directory conflicts.",
         );
         if (entry.dir) continue;
-        if (entry.name !== "_meta.json" && !listing.files.some((file) => file.path === entry.name)) throw new Error("SkillHub ZIP contains an unlisted file.");
+        if (entry.name !== "_meta.json" && !installableFiles.some((file) => file.path === entry.name)) throw new Error("SkillHub ZIP contains an unlisted file.");
       }
       const entries: SkillBundleEntry[] = [];
-      for (const expected of listing.files) {
+      for (const expected of installableFiles) {
         const entry = zip.file(expected.path);
         if (!entry) throw new Error("SkillHub ZIP is missing a listed file.");
         const declaredSize = (entry as unknown as { _data?: { uncompressedSize?: unknown } })._data?.uncompressedSize;

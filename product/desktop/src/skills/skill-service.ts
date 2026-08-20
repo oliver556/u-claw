@@ -107,6 +107,14 @@ function domainError(code: "FORBIDDEN" | "CONFIRMATION_REQUIRED" | "NOT_FOUND" |
   return UClawErrorSchema.parse({ code, message, retryable, recoveryActions: [], causeDetails: {} });
 }
 
+/** Preserves renderer-safe domain causes while redacting unexpected internal failures. */
+function operationErrorMessage(error: unknown): string {
+  const domain = UClawErrorSchema.safeParse(error);
+  if (domain.success && ["FORBIDDEN", "CONFIRMATION_REQUIRED", "NOT_FOUND", "CONFLICT", "UNAVAILABLE"].includes(domain.data.code)) return domain.data.message;
+  if (error instanceof Error && error.message.startsWith("OpenClaw Skill ")) return error.message;
+  return "Skill operation failed. Retry or restart U-Claw for recovery.";
+}
+
 function within(parent: string, child: string): boolean {
   const candidate = relative(parent, child);
   return candidate === "" || (!candidate.startsWith("..") && !isAbsolute(candidate));
@@ -546,8 +554,8 @@ export async function createSkillService({
         await recoverBeforeMutation();
         await task(operation.id);
         updateOperation(operation.id, { state: "succeeded", progress: 100, phase: "complete" });
-      } catch {
-        updateOperation(operation.id, { state: "failed", phase: "failed", error: "Skill operation failed. Retry or restart U-Claw for recovery." });
+      } catch (error) {
+        updateOperation(operation.id, { state: "failed", phase: "failed", error: operationErrorMessage(error) });
       }
     }).catch(() => {
       updateOperation(operation.id, { state: "failed", phase: "failed", error: "Skill operation failed. Retry or restart U-Claw for recovery." });

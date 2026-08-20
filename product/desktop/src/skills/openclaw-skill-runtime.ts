@@ -41,23 +41,32 @@ export interface OpenClawSkillRuntime {
 
 const optional = (value: string | undefined, key: string): Record<string, string> => value === undefined ? {} : { [key]: value };
 
+/** Creates the Gateway-backed Skill runtime with a bounded, testable readback policy. */
 export function createOpenClawSkillRuntime({
   request,
   randomId = randomUUID,
+  readbackAttempts = 21,
+  waitForReadback = () => new Promise((resolve) => setTimeout(resolve, 100)),
 }: {
   request: RpcRequest;
   randomId?: () => string;
+  readbackAttempts?: number;
+  waitForReadback?: () => Promise<void>;
 }): OpenClawSkillRuntime {
   const status = async (conflicts: ReadonlyMap<string, readonly string[]> = new Map()) =>
     mapOpenClawSkillStatus(await request("skills.status", {}, RawOpenClawSkillStatusSchema), conflicts);
   return {
     status,
+    /** Updates one workspace Skill and tolerates the Gateway's brief stale status cache. */
     async setEnabled(skillKey, enabled) {
       await request("skills.update", { skillKey, enabled }, z.object({ ok: z.literal(true) }).passthrough());
-      const item = (await status()).skills.find((candidate) => candidate.id === skillKey &&
-        !candidate.bundled && candidate.source.toLowerCase().includes("workspace"));
-      if (!item || item.disabled === enabled) throw new Error("OpenClaw Skill readback mismatch.");
-      return item;
+      for (let attempt = 0; attempt < readbackAttempts; attempt += 1) {
+        const item = (await status()).skills.find((candidate) => candidate.id === skillKey &&
+          !candidate.bundled && candidate.source.toLowerCase().includes("workspace"));
+        if (item && item.disabled !== enabled) return item;
+        if (attempt < readbackAttempts - 1) await waitForReadback();
+      }
+      throw new Error("OpenClaw Skill readback mismatch.");
     },
     curatorStatus: () => request("skills.curator.status", {}, SkillCuratorStatusSchema),
     curatorAction: (skill, action) => request(`skills.curator.${action}`, { skill }, SkillCuratorEntrySchema),
