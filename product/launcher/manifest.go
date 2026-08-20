@@ -35,23 +35,32 @@ var (
 )
 
 type Manifest struct {
-	SchemaVersion     int                `json:"schemaVersion"`
-	ProductVersion    string             `json:"productVersion"`
-	NodeVersion       string             `json:"nodeVersion"`
-	ElectronVersion   string             `json:"electronVersion"`
-	RuntimeVersion    string             `json:"runtimeVersion"`
-	RuntimeID         string             `json:"runtimeId"`
-	TargetPlatform    string             `json:"targetPlatform"`
-	TargetArch        string             `json:"targetArch"`
-	RuntimeArchive    string             `json:"runtimeArchive"`
-	RuntimeSHA256     string             `json:"runtimeSha256"`
-	RuntimeTreeSHA256 string             `json:"runtimeTreeSha256"`
-	RuntimeBytes      int64              `json:"runtimeBytes"`
-	UnpackedBytes     int64              `json:"unpackedBytes"`
-	FileCount         int64              `json:"fileCount"`
-	Entrypoint        string             `json:"entrypoint"`
-	EntryArgs         []string           `json:"entryArgs"`
-	Signature         *ManifestSignature `json:"signature,omitempty"`
+	SchemaVersion     int                 `json:"schemaVersion"`
+	ReleaseID         string              `json:"releaseId"`
+	ReleaseSequence   uint64              `json:"releaseSequence"`
+	ProductVersion    string              `json:"productVersion"`
+	NodeVersion       string              `json:"nodeVersion"`
+	ElectronVersion   string              `json:"electronVersion"`
+	RuntimeVersion    string              `json:"runtimeVersion"`
+	RuntimeID         string              `json:"runtimeId"`
+	TargetPlatform    string              `json:"targetPlatform"`
+	TargetArch        string              `json:"targetArch"`
+	RuntimeArchive    string              `json:"runtimeArchive"`
+	RuntimeSHA256     string              `json:"runtimeSha256"`
+	RuntimeTreeSHA256 string              `json:"runtimeTreeSha256"`
+	RuntimeBytes      int64               `json:"runtimeBytes"`
+	UnpackedBytes     int64               `json:"unpackedBytes"`
+	FileCount         int64               `json:"fileCount"`
+	Entrypoint        string              `json:"entrypoint"`
+	EntryArgs         []string            `json:"entryArgs"`
+	CriticalFiles     []RuntimeFileDigest `json:"criticalFiles"`
+	Signature         *ManifestSignature  `json:"signature,omitempty"`
+}
+
+type RuntimeFileDigest struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
 }
 
 type ManifestSignature struct {
@@ -101,12 +110,12 @@ func manifestSigningPayload(manifest Manifest) ([]byte, error) {
 		return nil, ErrManifestInvalid
 	}
 	value := []any{
-		"uclaw-runtime-manifest-v1", manifest.SchemaVersion, manifest.ProductVersion,
+		"uclaw-runtime-manifest-v2", manifest.SchemaVersion, manifest.ReleaseID, manifest.ReleaseSequence, manifest.ProductVersion,
 		manifest.NodeVersion, manifest.ElectronVersion, manifest.RuntimeVersion,
 		manifest.RuntimeID, manifest.TargetPlatform, manifest.TargetArch,
 		manifest.RuntimeArchive, manifest.RuntimeSHA256, manifest.RuntimeTreeSHA256,
 		manifest.RuntimeBytes, manifest.UnpackedBytes, manifest.FileCount,
-		manifest.Entrypoint, manifest.EntryArgs, manifest.Signature.Algorithm,
+		manifest.Entrypoint, manifest.EntryArgs, manifest.CriticalFiles, manifest.Signature.Algorithm,
 		manifest.Signature.KeyID, manifest.Signature.SignedAt, manifest.Signature.ExpiresAt,
 		manifest.Signature.Sequence,
 	}
@@ -163,6 +172,8 @@ func VerifyManifestSignature(manifest Manifest, now time.Time) error {
 
 func ValidateManifest(manifest Manifest) error {
 	if manifest.SchemaVersion != 1 ||
+		!runtimeIDPattern.MatchString(manifest.ReleaseID) ||
+		manifest.ReleaseSequence == 0 || manifest.ReleaseSequence > uint64(maxSafeJSONInteger) ||
 		!isSafeVersion(manifest.ProductVersion) ||
 		!isSafeVersion(manifest.NodeVersion) ||
 		!isSafeVersion(manifest.ElectronVersion) ||
@@ -178,7 +189,8 @@ func ValidateManifest(manifest Manifest) error {
 		manifest.FileCount <= 0 || manifest.FileCount > maxSafeJSONInteger ||
 		!isSafeWindowsRelativePath(manifest.Entrypoint) ||
 		manifest.EntryArgs == nil ||
-		len(manifest.EntryArgs) > 64 {
+		len(manifest.EntryArgs) > 64 ||
+		len(manifest.CriticalFiles) == 0 || len(manifest.CriticalFiles) > 512 {
 		return ErrManifestInvalid
 	}
 	for _, argument := range manifest.EntryArgs {
@@ -186,7 +198,28 @@ func ValidateManifest(manifest Manifest) error {
 			return ErrManifestInvalid
 		}
 	}
+	entrypointCovered := false
+	seenCritical := make(map[string]struct{}, len(manifest.CriticalFiles))
+	for _, file := range manifest.CriticalFiles {
+		canonical := strings.ToLower(strings.ReplaceAll(file.Path, `\`, "/"))
+		if !isSafeWindowsRelativePath(file.Path) || file.Size < 0 || file.Size > maxSafeJSONInteger || !sha256Pattern.MatchString(file.SHA256) {
+			return ErrManifestInvalid
+		}
+		if _, exists := seenCritical[canonical]; exists {
+			return ErrManifestInvalid
+		}
+		seenCritical[canonical] = struct{}{}
+		if strings.EqualFold(canonical, strings.ReplaceAll(manifest.Entrypoint, `\`, "/")) {
+			entrypointCovered = true
+		}
+	}
+	if !entrypointCovered {
+		return ErrManifestInvalid
+	}
 	if manifest.Signature != nil && (manifest.Signature.Sequence > uint64(maxSafeJSONInteger) || !runtimeIDPattern.MatchString(manifest.Signature.KeyID)) {
+		return ErrManifestInvalid
+	}
+	if manifest.Signature != nil && manifest.Signature.Sequence != manifest.ReleaseSequence {
 		return ErrManifestInvalid
 	}
 	return nil

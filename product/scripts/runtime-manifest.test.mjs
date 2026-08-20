@@ -12,6 +12,8 @@ import { createHash, generateKeyPairSync, verify } from "node:crypto";
 function validManifest(overrides = {}) {
   return {
     schemaVersion: 1,
+    releaseId: "release-42",
+    releaseSequence: 42,
     productVersion: "0.1.0",
     nodeVersion: "24.15.0",
     electronVersion: "40.10.6",
@@ -27,6 +29,7 @@ function validManifest(overrides = {}) {
     fileCount: 8,
     entrypoint: "electron/electron.exe",
     entryArgs: ["resources/app.asar"],
+    criticalFiles: [{ path: "electron/electron.exe", size: 8, sha256: "c".repeat(64) }],
     ...overrides,
   };
 }
@@ -183,5 +186,5 @@ test("uses the cross-language canonical signing payload", () => {
       value: "",
     },
   });
-  assert.equal(createHash("sha256").update(runtimeManifestSigningPayload(manifest)).digest("hex"), "bb7ad70619f7524d325cf326d432a5a6be0bb84aa87ea24aa6ac7623b6cd4754");
+  assert.equal(createHash("sha256").update(runtimeManifestSigningPayload(manifest)).digest("hex"), "1d5df2ef301f1e28f55707eaa8a427e3308c2ce8d7a124cfbaac5389db4e9a77");
 });

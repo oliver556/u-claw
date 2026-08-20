@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,7 +22,10 @@ type windowsRuntimeLease struct {
 
 func AcquireRuntimeLease(rootPath string, manifest Manifest) (RuntimeLease, error) {
 	rootPath = filepath.Clean(rootPath)
-	if !filepath.IsAbs(rootPath) {
+	if !filepath.IsAbs(rootPath) || !runtimeCacheUsable(rootPath, manifest) {
+		if runtimeDirectoryAuditable(rootPath) {
+			_, _ = runtimeFullAudit(rootPath)
+		}
 		return nil, ErrPackageInvalid
 	}
 	lease := &windowsRuntimeLease{rootPath: rootPath, manifestEntrypoint: manifest.Entrypoint}
@@ -34,53 +38,27 @@ func AcquireRuntimeLease(rootPath string, manifest Manifest) (RuntimeLease, erro
 	}
 	lease.handles = append(lease.handles, root)
 
-	files := make([]runtimeTreeFile, 0)
 	entrypointFound := false
-	var visit func(*os.File, string) error
-	visit = func(directory *os.File, relativeDirectory string) error {
-		entries, err := directory.ReadDir(-1)
-		if err != nil {
-			return err
+	for _, expected := range manifest.CriticalFiles {
+		relative := strings.ReplaceAll(expected.Path, `\`, string(filepath.Separator))
+		absolute := filepath.Join(rootPath, relative)
+		child, information, err := openRuntimeLeasePath(absolute)
+		if err != nil || !runtimeLeaseFileValid(information) {
+			_ = lease.Close()
+			return nil, ErrPackageInvalid
 		}
-		for _, entry := range entries {
-			relative := entry.Name()
-			if relativeDirectory != "." {
-				relative = filepath.Join(relativeDirectory, entry.Name())
-			}
-			if relativeDirectory == "." && entry.Name() == cacheMarkerName {
-				continue
-			}
-			child, information, err := openRuntimeLeasePath(filepath.Join(rootPath, relative))
-			if err != nil {
-				return err
-			}
-			lease.handles = append(lease.handles, child)
-			if information.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-				return ErrPackageInvalid
-			}
-			if information.FileAttributes&syscall.FILE_ATTRIBUTE_DIRECTORY != 0 {
-				if err := visit(child, relative); err != nil {
-					return err
-				}
-				continue
-			}
-			if information.NumberOfLinks != 1 {
-				return ErrPackageInvalid
-			}
-			record, identity, err := hashRuntimeLeaseFile(child, filepath.ToSlash(relative), information)
-			if err != nil {
-				return err
-			}
-			files = append(files, record)
-			absolute := filepath.Join(rootPath, relative)
-			if runtimeLeaseEntrypointMatches(rootPath, manifest.Entrypoint, absolute, true) {
-				lease.entrypointIdentity = identity
-				entrypointFound = true
-			}
+		lease.handles = append(lease.handles, child)
+		record, identity, err := hashRuntimeLeaseFile(child, filepath.ToSlash(relative), information)
+		if err != nil || record.size != expected.Size || hex.EncodeToString(record.digest[:]) != strings.ToLower(expected.SHA256) {
+			_ = lease.Close()
+			return nil, ErrPackageInvalid
 		}
-		return nil
+		if runtimeLeaseEntrypointMatches(rootPath, manifest.Entrypoint, absolute, true) {
+			lease.entrypointIdentity = identity
+			entrypointFound = true
+		}
 	}
-	if err := visit(root, "."); err != nil || !entrypointFound || runtimeTreeDigest(files) != strings.ToLower(manifest.RuntimeTreeSHA256) {
+	if !entrypointFound {
 		_ = lease.Close()
 		return nil, ErrPackageInvalid
 	}

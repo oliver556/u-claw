@@ -52,6 +52,8 @@ export async function buildRuntime(options) {
 
   const provisionalManifest = {
     schemaVersion: 1,
+    releaseId: options.releaseId,
+    releaseSequence: options.releaseSequence,
     productVersion: options.productVersion,
     nodeVersion: runtimeVersions.node,
     electronVersion: runtimeVersions.electron,
@@ -67,6 +69,13 @@ export async function buildRuntime(options) {
     fileCount: inventory.fileCount,
     entrypoint: normalizedEntrypoint,
     entryArgs: [...(options.entryArgs ?? [])],
+    criticalFiles: inventory.fileRecords.filter((record) => {
+      const canonical = record.path.toLowerCase();
+      const base = path.posix.basename(canonical);
+      return canonical === normalizedEntrypoint.toLowerCase() || canonical === "resources/app.asar" ||
+        base === "node.exe" || base === "openclaw.mjs" || base.endsWith(".node") ||
+        (base.includes("sidecar") && base.endsWith(".exe"));
+    }),
   };
   validateRuntimeManifest(provisionalManifest);
 
@@ -151,7 +160,7 @@ async function inventoryRuntime(inputDir) {
 
   await visit("");
   entries.sort((left, right) => left.localeCompare(right, "en"));
-  return { entries, files, fileCount, unpackedBytes, treeSha256: hashRuntimeTree(fileRecords) };
+  return { entries, files, fileRecords, fileCount, unpackedBytes, treeSha256: hashRuntimeTree(fileRecords) };
 }
 
 export function hashRuntimeTree(records) {
@@ -192,6 +201,8 @@ async function runCLI() {
       input: { type: "string" },
       output: { type: "string" },
       "product-version": { type: "string" },
+      "release-id": { type: "string" },
+      "release-sequence": { type: "string" },
       "runtime-id": { type: "string" },
       entrypoint: { type: "string" },
       "entry-arg": { type: "string", multiple: true, default: [] },
@@ -201,6 +212,8 @@ async function runCLI() {
     inputDir: values.input,
     outputFile: values.output,
     productVersion: values["product-version"],
+    releaseId: values["release-id"],
+    releaseSequence: Number(values["release-sequence"]),
     runtimeId: values["runtime-id"],
     entrypoint: values.entrypoint,
     entryArgs: values["entry-arg"],

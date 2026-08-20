@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,11 +20,15 @@ import (
 const cacheMarkerName = ".uclaw-runtime.json"
 const hostCacheMarkerName = ".uclaw-cache.json"
 
-var ErrCachePreparationFailed = errors.New("runtime cache preparation failed")
+var (
+	ErrCachePreparationFailed = errors.New("runtime cache preparation failed")
+	ErrRuntimeAuditFailed     = errors.New("runtime integrity audit failed")
+)
 
 type CacheResult struct {
-	Path   string
-	Reused bool
+	Path         string
+	Reused       bool
+	Verification string
 }
 
 type hostCacheMarker struct {
@@ -97,12 +103,12 @@ func EnsureHostCacheOwnership(cacheRoot string) error {
 }
 
 func ensureOwnedCacheDirectories(root *os.Root) error {
-	for _, directory := range []string{filepath.Join("cache", "temp"), filepath.Join("cache", "node-compile")} {
+	for _, directory := range []string{"runtimes", filepath.Join("cache", "temp"), filepath.Join("cache", "node-compile")} {
 		if err := root.MkdirAll(directory, 0o700); err != nil {
 			return ErrCachePreparationFailed
 		}
 	}
-	return nil
+	return ensureRuntimeAnchor(root)
 }
 
 func EnsureRuntimeCache(
@@ -117,6 +123,32 @@ func EnsureRuntimeCache(
 	if err := ValidateManifest(manifest); err != nil {
 		return CacheResult{}, err
 	}
+	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
+		return CacheResult{}, ErrCachePreparationFailed
+	}
+	root, err := os.OpenRoot(cacheRoot)
+	if err != nil {
+		return CacheResult{}, ErrCachePreparationFailed
+	}
+	defer root.Close()
+
+	installName := runtimeInstallName(manifest)
+	cachePath := filepath.Join(cacheRoot, installName)
+	cacheInfo, cacheInfoErr := root.Lstat(installName)
+	cacheIsOwnedDirectory := cacheInfoErr == nil && cacheInfo.IsDir() && cacheInfo.Mode()&os.ModeSymlink == 0
+	if cacheIsOwnedDirectory {
+		if runtimeCacheUsable(cachePath, manifest) {
+			return CacheResult{Path: cachePath, Reused: true, Verification: "fast"}, nil
+		}
+		_, _ = runtimeFullAudit(cachePath)
+		return CacheResult{}, ErrRuntimeAuditFailed
+	}
+	if cacheInfoErr == nil {
+		return CacheResult{}, ErrRuntimeAuditFailed
+	} else if !errors.Is(cacheInfoErr, os.ErrNotExist) {
+		return CacheResult{}, ErrCachePreparationFailed
+	}
+
 	packageDirectory, err := os.OpenRoot(packageRoot)
 	if err != nil {
 		return CacheResult{}, ErrCachePreparationFailed
@@ -134,33 +166,12 @@ func EnsureRuntimeCache(
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
 		return CacheResult{}, ErrCachePreparationFailed
 	}
-	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
-		return CacheResult{}, ErrCachePreparationFailed
-	}
-	root, err := os.OpenRoot(cacheRoot)
-	if err != nil {
-		return CacheResult{}, ErrCachePreparationFailed
-	}
-	defer root.Close()
-	if err := removeStalePartialCaches(root, manifest.RuntimeID); err != nil {
+	requiredSpace := uint64(manifest.RuntimeBytes) + uint64(manifest.UnpackedBytes) + 64<<20
+	if requiredSpace < uint64(manifest.RuntimeBytes) || !runtimeInstallSpaceAvailable(cacheRoot, requiredSpace) {
 		return CacheResult{}, ErrCachePreparationFailed
 	}
 
-	cachePath := filepath.Join(cacheRoot, manifest.RuntimeID)
-	cacheInfo, cacheInfoErr := root.Lstat(manifest.RuntimeID)
-	cacheIsOwnedDirectory := cacheInfoErr == nil && cacheInfo.IsDir() && cacheInfo.Mode()&os.ModeSymlink == 0
-	if cacheIsOwnedDirectory && runtimeCacheUsable(cachePath, manifest) {
-		return CacheResult{Path: cachePath, Reused: true}, nil
-	}
-	if cacheInfoErr == nil {
-		if err := root.RemoveAll(manifest.RuntimeID); err != nil {
-			return CacheResult{}, ErrCachePreparationFailed
-		}
-	} else if !errors.Is(cacheInfoErr, os.ErrNotExist) {
-		return CacheResult{}, ErrCachePreparationFailed
-	}
-
-	temporaryPath, err := os.MkdirTemp(cacheRoot, manifest.RuntimeID+".partial-")
+	temporaryPath, err := os.MkdirTemp(cacheRoot, installName+".partial-")
 	if err != nil {
 		return CacheResult{}, ErrCachePreparationFailed
 	}
@@ -190,11 +201,15 @@ func EnsureRuntimeCache(
 	if err := writeCacheMarker(temporaryPath, manifest); err != nil {
 		return CacheResult{}, ErrCachePreparationFailed
 	}
-	if err := root.Rename(temporaryName, manifest.RuntimeID); err != nil {
+	if err := root.Rename(temporaryName, installName); err != nil {
 		return CacheResult{}, ErrCachePreparationFailed
 	}
 	committed = true
-	return CacheResult{Path: cachePath, Reused: false}, nil
+	return CacheResult{Path: cachePath, Reused: false, Verification: "full"}, nil
+}
+
+func runtimeInstallName(manifest Manifest) string {
+	return fmt.Sprintf("%d-%s", manifest.ReleaseSequence, strings.ToLower(manifest.RuntimeTreeSHA256))
 }
 
 type countingReader struct {
@@ -209,15 +224,97 @@ func (reader *countingReader) Read(buffer []byte) (int, error) {
 }
 
 func runtimeCacheUsable(cachePath string, manifest Manifest) bool {
-	marker, err := readManifestFile(filepath.Join(cachePath, cacheMarkerName))
+	if !runtimeDirectoryAuditable(cachePath) {
+		return false
+	}
+	marker, err := readCacheMarker(cachePath)
 	if err != nil || !reflect.DeepEqual(marker, manifest) {
 		return false
 	}
-	if !runtimeEntrypointUsable(cachePath, manifest.Entrypoint) {
-		return false
+	return verifyCriticalRuntimeFiles(cachePath, manifest) == nil
+}
+
+func readCacheMarker(cachePath string) (Manifest, error) {
+	root, err := os.OpenRoot(cachePath)
+	if err != nil {
+		return Manifest{}, ErrPackageInvalid
 	}
-	digest, err := runtimeTreeDigestAt(cachePath)
-	return err == nil && digest == strings.ToLower(manifest.RuntimeTreeSHA256)
+	defer root.Close()
+	entry, err := root.Lstat(cacheMarkerName)
+	if err != nil || !entry.Mode().IsRegular() || entry.Mode()&os.ModeSymlink != 0 || entry.Size() > maxManifestBytes {
+		return Manifest{}, ErrPackageInvalid
+	}
+	file, err := root.Open(cacheMarkerName)
+	if err != nil {
+		return Manifest{}, ErrPackageInvalid
+	}
+	info, statErr := file.Stat()
+	if statErr != nil {
+		file.Close()
+		return Manifest{}, ErrPackageInvalid
+	}
+	links, linkErr := fileLinkCount(file, info)
+	decoder := json.NewDecoder(io.LimitReader(file, maxManifestBytes+1))
+	decoder.DisallowUnknownFields()
+	var manifest Manifest
+	decodeErr := decoder.Decode(&manifest)
+	trailingErr := ensureJSONEnd(decoder)
+	closeErr := file.Close()
+	if linkErr != nil || links != 1 || !os.SameFile(entry, info) || decodeErr != nil || trailingErr != nil || closeErr != nil || ValidateManifest(manifest) != nil {
+		return Manifest{}, ErrPackageInvalid
+	}
+	return manifest, nil
+}
+
+func runtimeDirectoryAuditable(cachePath string) bool {
+	info, err := os.Lstat(cachePath)
+	return err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0
+}
+
+func verifyCriticalRuntimeFiles(cachePath string, manifest Manifest) error {
+	root, err := os.OpenRoot(cachePath)
+	if err != nil {
+		return ErrPackageInvalid
+	}
+	defer root.Close()
+	for _, expected := range manifest.CriticalFiles {
+		name := strings.ReplaceAll(expected.Path, `\`, string(os.PathSeparator))
+		if !runtimeRelativePathHasNoLinks(root, name) {
+			return ErrPackageInvalid
+		}
+		info, err := root.Lstat(name)
+		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() != expected.Size {
+			return ErrPackageInvalid
+		}
+		file, err := root.Open(name)
+		if err != nil {
+			return ErrPackageInvalid
+		}
+		links, linkErr := fileLinkCount(file, info)
+		hash := sha256.New()
+		_, copyErr := io.Copy(hash, file)
+		after, statErr := file.Stat()
+		closeErr := file.Close()
+		actual := hex.EncodeToString(hash.Sum(nil))
+		if linkErr != nil || links != 1 || copyErr != nil || statErr != nil || closeErr != nil ||
+			!os.SameFile(info, after) || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) ||
+			subtle.ConstantTimeCompare([]byte(strings.ToLower(expected.SHA256)), []byte(actual)) != 1 {
+			return ErrPackageInvalid
+		}
+	}
+	return nil
+}
+
+func runtimeRelativePathHasNoLinks(root *os.Root, name string) bool {
+	parts := strings.Split(filepath.Clean(name), string(os.PathSeparator))
+	for index := range parts {
+		candidate := filepath.Join(parts[:index+1]...)
+		info, err := root.Lstat(candidate)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || index < len(parts)-1 && !info.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 type runtimeTreeFile struct {
@@ -352,18 +449,5 @@ func writeCacheMarker(cachePath string, manifest Manifest) error {
 	return closeErr
 }
 
-func removeStalePartialCaches(root *os.Root, runtimeID string) error {
-	entries, err := os.ReadDir(root.Name())
-	if err != nil {
-		return err
-	}
-	prefix := runtimeID + ".partial-"
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), prefix) {
-			if err := root.RemoveAll(entry.Name()); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
+var runtimeFullAudit = runtimeTreeDigestAt
+var runtimeInstallSpaceAvailable = hostHasRuntimeInstallSpace

@@ -9,10 +9,13 @@ import (
 )
 
 var launcherLogEvents = map[string]bool{
-	"launcher-started": true,
-	"runtime-started":  true,
-	"runtime-stopped":  true,
-	"launcher-failed":  true,
+	"launcher-started":     true,
+	"runtime-started":      true,
+	"runtime-stopped":      true,
+	"launcher-failed":      true,
+	"runtime-verify-fast":  true,
+	"runtime-verify-full":  true,
+	"runtime-audit-failed": true,
 }
 
 func appendLauncherLog(dataDir string, event string) error {

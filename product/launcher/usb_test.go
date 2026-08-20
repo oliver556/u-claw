@@ -21,7 +21,7 @@ func TestResolvePortablePathsUsesExecutableAndLocalAppData(t *testing.T) {
 	if paths.USBRoot != usbRoot ||
 		paths.PackageRoot != filepath.Join(usbRoot, ".uclaw") ||
 		paths.DataDir != filepath.Join(usbRoot, ".uclaw", "data") ||
-		paths.CacheRoot != filepath.Join(localAppData, "U-Claw", "runtime") {
+		paths.CacheRoot != filepath.Join(localAppData, "U-Claw", "runtimes") {
 		t.Fatalf("paths = %#v", paths)
 	}
 }

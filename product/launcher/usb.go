@@ -36,7 +36,7 @@ func ResolvePortablePaths(executablePath string, localAppData string) (PortableP
 		PackageRoot:   packageRoot,
 		DataDir:       filepath.Join(packageRoot, "data"),
 		HostCacheRoot: hostCacheRoot,
-		CacheRoot:     filepath.Join(hostCacheRoot, "runtime"),
+		CacheRoot:     filepath.Join(hostCacheRoot, "runtimes"),
 	}, nil
 }
 

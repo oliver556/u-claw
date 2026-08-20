@@ -126,7 +126,7 @@ func TestActivationArtifactsEnableNormalWorkspaceHarness(t *testing.T) {
 			t.Fatalf("runtime package root = %q", packageRootArg)
 		}
 		extracting()
-		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, manifest.RuntimeID)}, nil
+		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest))}, nil
 	}
 	deps.FinalizeUpdate = func(packageRootArg string, _ Manifest) error {
 		if packageRootArg != packageRoot {

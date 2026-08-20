@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,22 @@ func manifestForArchive(archive []byte, entries []archiveEntry) Manifest {
 		}
 	}
 	manifest.RuntimeTreeSHA256 = runtimeTreeDigest(files)
+	entrypointFound := false
+	for _, file := range files {
+		if strings.EqualFold(file.path, strings.ReplaceAll(manifest.Entrypoint, `\`, "/")) {
+			entrypointFound = true
+			break
+		}
+	}
+	if !entrypointFound && len(files) > 0 {
+		manifest.Entrypoint = files[0].path
+	}
+	manifest.CriticalFiles = nil
+	for _, file := range files {
+		if strings.EqualFold(file.path, strings.ReplaceAll(manifest.Entrypoint, `\`, "/")) || strings.EqualFold(file.path, "resources/app.asar") {
+			manifest.CriticalFiles = append(manifest.CriticalFiles, RuntimeFileDigest{Path: file.path, Size: file.size, SHA256: hex.EncodeToString(file.digest[:])})
+		}
+	}
 	return manifest
 }
 

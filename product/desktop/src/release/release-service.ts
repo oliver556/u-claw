@@ -14,9 +14,10 @@ export interface SignedReleaseManifest {
 }
 
 export interface RuntimeManifest {
-  schemaVersion: 1; productVersion: string; nodeVersion: string; electronVersion: string; runtimeVersion: string;
+  schemaVersion: 1; releaseId: string; releaseSequence: number; productVersion: string; nodeVersion: string; electronVersion: string; runtimeVersion: string;
   runtimeId: string; targetPlatform: "win32"; targetArch: "x64"; runtimeArchive: "runtime.pkg";
   runtimeSha256: string; runtimeTreeSha256: string; runtimeBytes: number; unpackedBytes: number; fileCount: number; entrypoint: string; entryArgs: string[];
+  criticalFiles: Array<{ path: string; size: number; sha256: string }>;
   signature: { algorithm: "ed25519"; keyId: string; signedAt: string; expiresAt: string; sequence: number; value: string };
 }
 
@@ -44,11 +45,11 @@ interface RollbackTransaction {
 type UnsignedReleaseManifest = Omit<SignedReleaseManifest, "signature">;
 export const canonicalReleasePayload = (manifest: UnsignedReleaseManifest): Buffer => Buffer.from(JSON.stringify(manifest));
 export const canonicalRuntimePayload = (runtime: RuntimeManifest): Buffer => Buffer.from(JSON.stringify([
-  "uclaw-runtime-manifest-v1",
-  runtime.schemaVersion, runtime.productVersion, runtime.nodeVersion, runtime.electronVersion,
+  "uclaw-runtime-manifest-v2",
+  runtime.schemaVersion, runtime.releaseId, runtime.releaseSequence, runtime.productVersion, runtime.nodeVersion, runtime.electronVersion,
   runtime.runtimeVersion, runtime.runtimeId, runtime.targetPlatform, runtime.targetArch,
   runtime.runtimeArchive, runtime.runtimeSha256, runtime.runtimeTreeSha256, runtime.runtimeBytes,
-  runtime.unpackedBytes, runtime.fileCount, runtime.entrypoint, runtime.entryArgs,
+  runtime.unpackedBytes, runtime.fileCount, runtime.entrypoint, runtime.entryArgs, runtime.criticalFiles,
   runtime.signature.algorithm, runtime.signature.keyId, runtime.signature.signedAt,
   runtime.signature.expiresAt, runtime.signature.sequence,
 ]));
@@ -107,11 +108,11 @@ function validManifest(value: SignedReleaseManifest, options: ReleaseServiceOpti
 function validRuntimeManifest(runtime: RuntimeManifest, release: SignedReleaseManifest, options: ReleaseServiceOptions, now: Date): boolean {
   if (!validRuntimeSignature(runtime, options, now)) return false;
   const { signature } = runtime;
-  return signature.sequence === release.sequence && runtime.runtimeId === options.runtimeId && runtime.targetPlatform === options.platform && runtime.targetArch === options.arch &&
+  return signature.sequence === release.sequence && runtime.releaseSequence === release.sequence && runtime.releaseId === release.id && runtime.runtimeId === options.runtimeId && runtime.targetPlatform === options.platform && runtime.targetArch === options.arch &&
     runtime.productVersion === release.version && runtime.runtimeArchive === "runtime.pkg" && runtime.runtimeBytes === release.package.bytes && runtime.runtimeSha256 === release.package.sha256;
 }
 
-const runtimeManifestKeys = ["electronVersion", "entryArgs", "entrypoint", "fileCount", "nodeVersion", "productVersion", "runtimeArchive", "runtimeBytes", "runtimeId", "runtimeSha256", "runtimeTreeSha256", "runtimeVersion", "schemaVersion", "signature", "targetArch", "targetPlatform", "unpackedBytes"];
+const runtimeManifestKeys = ["criticalFiles", "electronVersion", "entryArgs", "entrypoint", "fileCount", "nodeVersion", "productVersion", "releaseId", "releaseSequence", "runtimeArchive", "runtimeBytes", "runtimeId", "runtimeSha256", "runtimeTreeSha256", "runtimeVersion", "schemaVersion", "signature", "targetArch", "targetPlatform", "unpackedBytes"];
 
 function validRuntimeSignature(runtime: RuntimeManifest, options: ReleaseServiceOptions, now: Date): boolean {
   if (!runtime || typeof runtime !== "object" || Object.keys(runtime).sort().join("\0") !== runtimeManifestKeys.join("\0")) return false;
@@ -120,7 +121,10 @@ function validRuntimeSignature(runtime: RuntimeManifest, options: ReleaseService
   if (!signature || !key || signature.algorithm !== "ed25519" || options.revokedKeyIds.has(signature.keyId)) return false;
   try { if (!verify(null, canonicalRuntimePayload(runtime), key, Buffer.from(signature.value, "base64"))) return false; } catch { return false; }
   if (Date.parse(signature.expiresAt) <= now.getTime() || Date.parse(signature.signedAt) > now.getTime() + 300_000 || !Number.isSafeInteger(signature.sequence) || signature.sequence < 1) return false;
-  return runtime.schemaVersion === 1 && runtime.runtimeId === options.runtimeId && runtime.targetPlatform === options.platform && runtime.targetArch === options.arch && runtime.runtimeArchive === "runtime.pkg" &&
+  const criticalPaths = runtime.criticalFiles?.map((file) => file.path.replaceAll("\\", "/").toLowerCase()) ?? [];
+  const criticalValid = criticalPaths.length > 0 && criticalPaths.length <= 512 && new Set(criticalPaths).size === criticalPaths.length && criticalPaths.includes(runtime.entrypoint.replaceAll("\\", "/").toLowerCase()) &&
+    runtime.criticalFiles.every((file) => Number.isSafeInteger(file.size) && file.size >= 0 && /^[a-f0-9]{64}$/u.test(file.sha256));
+  return runtime.schemaVersion === 1 && runtime.releaseSequence === signature.sequence && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(runtime.releaseId) && criticalValid && runtime.runtimeId === options.runtimeId && runtime.targetPlatform === options.platform && runtime.targetArch === options.arch && runtime.runtimeArchive === "runtime.pkg" &&
     Number.isSafeInteger(runtime.runtimeBytes) && runtime.runtimeBytes > 0 && /^[a-f0-9]{64}$/u.test(runtime.runtimeSha256) && /^[a-f0-9]{64}$/u.test(runtime.runtimeTreeSha256);
 }
 

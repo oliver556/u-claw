@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -24,7 +26,13 @@ func TestAcquireRuntimeLeaseVerifiesRuntimeTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := validRuntimeManifest()
+	manifest.Entrypoint = "runtime.bin"
+	fileDigest := sha256.Sum256([]byte("trusted"))
+	manifest.CriticalFiles = []RuntimeFileDigest{{Path: "runtime.bin", Size: 7, SHA256: hex.EncodeToString(fileDigest[:])}}
 	manifest.RuntimeTreeSHA256 = digest
+	if err := writeCacheMarker(root, manifest); err != nil {
+		t.Fatal(err)
+	}
 
 	lease, err := AcquireRuntimeLease(root, manifest)
 	if err != nil {
@@ -193,7 +201,7 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 	manifest := validRuntimeManifest()
 	manifest.Entrypoint = `electron\electron.exe`
 	lock := &fakeInstanceLock{}
-	lease := &fakeRuntimeLease{root: filepath.Join(paths.CacheRoot, manifest.RuntimeID)}
+	lease := &fakeRuntimeLease{root: filepath.Join(paths.CacheRoot, runtimeInstallName(manifest))}
 	var startedSpec ProcessSpec
 	return Dependencies{
 		Paths:              paths,
@@ -241,10 +249,10 @@ func successfulDependencies(t *testing.T, reporter Reporter) (Dependencies, *fak
 				t.Fatalf("runtime inputs differ")
 			}
 			extracting()
-			return CacheResult{Path: filepath.Join(paths.CacheRoot, manifest.RuntimeID)}, nil
+			return CacheResult{Path: filepath.Join(paths.CacheRoot, runtimeInstallName(manifest))}, nil
 		},
 		AcquireRuntime: func(root string, got Manifest) (RuntimeLease, error) {
-			if root != filepath.Join(paths.CacheRoot, manifest.RuntimeID) || !reflect.DeepEqual(got, manifest) {
+			if root != filepath.Join(paths.CacheRoot, runtimeInstallName(manifest)) || !reflect.DeepEqual(got, manifest) {
 				t.Fatalf("runtime lease inputs differ")
 			}
 			return lease, nil
@@ -476,11 +484,11 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 	if !reporter.closed || !lock.closed {
 		t.Fatalf("cleanup reporter=%v lock=%v", reporter.closed, lock.closed)
 	}
-	wantEntrypoint := filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID, "electron", "electron.exe")
+	wantEntrypoint := filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(validRuntimeManifest()), "electron", "electron.exe")
 	if startedSpec.Path != wantEntrypoint || startedSpec.Dir != filepath.Dir(wantEntrypoint) {
 		t.Fatalf("process path/dir = %q, %q", startedSpec.Path, startedSpec.Dir)
 	}
-	if startedSpec.Lease == nil || startedSpec.Lease.RootPath() != filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID) {
+	if startedSpec.Lease == nil || startedSpec.Lease.RootPath() != filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(validRuntimeManifest())) {
 		t.Fatalf("process lease = %#v", startedSpec.Lease)
 	}
 	if startedSpec.Lease.(*fakeRuntimeLease).CloseCalls() != 1 {
@@ -498,7 +506,7 @@ func TestRunReportsExtractingLaunchSequence(t *testing.T) {
 		"UCLAW_RELEASE_BASE_URL=",
 		"UCLAW_RELEASE_REVOKED_KEY_IDS=[]",
 		"UCLAW_RELEASE_TRUSTED_PUBLIC_KEYS={}",
-		"UCLAW_RUNTIME_DIR=" + filepath.Join(deps.Paths.CacheRoot, validRuntimeManifest().RuntimeID),
+		"UCLAW_RUNTIME_DIR=" + filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(validRuntimeManifest())),
 	}
 	if !reflect.DeepEqual(startedSpec.Env, wantEnv) {
 		t.Fatalf("process env = %v", startedSpec.Env)
@@ -514,11 +522,11 @@ func TestRunAcquiresRuntimeLeaseBeforeStart(t *testing.T) {
 	var events []string
 	deps.PrepareRuntime = func(context.Context, string, string, Manifest, func()) (CacheResult, error) {
 		events = append(events, "prepare")
-		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, manifest.RuntimeID)}, nil
+		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest))}, nil
 	}
 	deps.AcquireRuntime = func(root string, got Manifest) (RuntimeLease, error) {
 		events = append(events, "acquire")
-		if root != filepath.Join(deps.Paths.CacheRoot, manifest.RuntimeID) || !reflect.DeepEqual(got, manifest) {
+		if root != filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest)) || !reflect.DeepEqual(got, manifest) {
 			t.Fatalf("acquire inputs differ")
 		}
 		return lease, nil
@@ -622,7 +630,7 @@ func TestRunSkipsExtractingStateForReusableRuntime(t *testing.T) {
 	reporter := &recordingReporter{}
 	deps, _, _ := successfulDependencies(t, reporter)
 	deps.PrepareRuntime = func(_ context.Context, _ string, _ string, manifest Manifest, _ func()) (CacheResult, error) {
-		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, manifest.RuntimeID), Reused: true}, nil
+		return CacheResult{Path: filepath.Join(deps.Paths.CacheRoot, runtimeInstallName(manifest)), Reused: true}, nil
 	}
 	if err := Run(context.Background(), deps); err != nil {
 		t.Fatal(err)

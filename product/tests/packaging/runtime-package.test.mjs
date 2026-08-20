@@ -27,6 +27,8 @@ function runtimeOptions(root, runtime, overrides = {}) {
     inputDir: runtime,
     outputFile: path.join(root, "runtime.pkg"),
     productVersion: "0.1.0",
+    releaseId: "release-42",
+    releaseSequence: 42,
     runtimeId: "openclaw-2026.7.1-2-win-x64",
     entrypoint: "electron/electron.exe",
     entryArgs: ["resources/app.asar"],
@@ -211,6 +213,8 @@ test("buildRelease rejects a signed non-archive package", async () => {
   const bytes = (await stat(runtimePackage)).size;
   const manifest = signFixtureManifest({
     schemaVersion: 1,
+    releaseId: "release-42",
+    releaseSequence: 42,
     productVersion: "0.1.0",
     nodeVersion: "24.15.0",
     electronVersion: "40.10.6",
@@ -226,6 +230,7 @@ test("buildRelease rejects a signed non-archive package", async () => {
     fileCount: 1,
     entrypoint: "electron/electron.exe",
     entryArgs: [],
+    criticalFiles: [{ path: "electron/electron.exe", size: 1, sha256: "0".repeat(64) }],
   });
   const launcher = path.join(root, "launcher.exe");
   await writeFile(launcher, "launcher-binary");

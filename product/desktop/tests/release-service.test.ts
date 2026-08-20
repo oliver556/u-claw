@@ -12,10 +12,10 @@ const publicKey = keys.publicKey.export({ type: "spki", format: "pem" }).toStrin
 
 function manifest(overrides: Partial<SignedReleaseManifest> = {}): SignedReleaseManifest {
   const runtimeUnsigned = {
-    schemaVersion: 1 as const, productVersion: "0.2.0", nodeVersion: "24.15.0", electronVersion: "40.10.6", runtimeVersion: "2026.7.1-2",
+    schemaVersion: 1 as const, releaseId: "release-42", releaseSequence: 42, productVersion: "0.2.0", nodeVersion: "24.15.0", electronVersion: "40.10.6", runtimeVersion: "2026.7.1-2",
     runtimeId: "openclaw-2026.7.1-2-win-x64", targetPlatform: "win32" as const, targetArch: "x64" as const, runtimeArchive: "runtime.pkg" as const,
     runtimeSha256: createHash("sha256").update("runtime").digest("hex"), runtimeTreeSha256: "b".repeat(64), runtimeBytes: 7, unpackedBytes: 7, fileCount: 1,
-    entrypoint: "electron/electron.exe", entryArgs: [] as string[],
+    entrypoint: "electron/electron.exe", entryArgs: [] as string[], criticalFiles: [{ path: "electron/electron.exe", size: 7, sha256: createHash("sha256").update("runtime").digest("hex") }],
   };
   const runtimeManifest = { ...runtimeUnsigned, signature: { algorithm: "ed25519" as const, keyId: "release-2026", signedAt: "2026-08-09T00:00:00.000Z", expiresAt: "2026-08-10T00:00:00.000Z", sequence: 42, value: "" } };
   runtimeManifest.signature.value = sign(null, canonicalRuntimePayload(runtimeManifest as RuntimeManifest), keys.privateKey).toString("base64");
@@ -57,6 +57,8 @@ describe("release service", () => {
     const setup = await fixture();
     const previous = manifest({ version: "0.1.0", sequence: 41 }).runtimeManifest;
     previous.productVersion = "0.1.0";
+    previous.releaseId = "release-41";
+    previous.releaseSequence = 41;
     previous.signature.sequence = 41;
     previous.signature.value = sign(null, canonicalRuntimePayload(previous), keys.privateKey).toString("base64");
     await writeFile(join(setup.packageRoot, "runtime.pkg"), "runtime");
@@ -75,6 +77,8 @@ describe("release service", () => {
     const active = manifest().runtimeManifest;
     const previous = manifest({ version: "0.1.0", sequence: 41 }).runtimeManifest;
     previous.productVersion = "0.1.0";
+    previous.releaseId = "release-41";
+    previous.releaseSequence = 41;
     previous.signature.sequence = 41;
     previous.signature.value = sign(null, canonicalRuntimePayload(previous), keys.privateKey).toString("base64");
     await writeFile(join(setup.packageRoot, "runtime.pkg"), "runtime");
@@ -99,6 +103,8 @@ describe("release service", () => {
     const active = manifest().runtimeManifest;
     const previous = manifest({ version: "0.1.0", sequence: 41 }).runtimeManifest;
     previous.productVersion = "0.1.0";
+    previous.releaseId = "release-41";
+    previous.releaseSequence = 41;
     previous.signature.sequence = 41;
     previous.signature.value = sign(null, canonicalRuntimePayload(previous), keys.privateKey).toString("base64");
     await writeFile(join(setup.packageRoot, "runtime.pkg"), "runtime");

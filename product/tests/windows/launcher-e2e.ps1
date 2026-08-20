@@ -72,8 +72,8 @@ $unicodePrefix = ([string][char]0x4E2D) + ([string][char]0x6587)
 $releaseRoot = Join-Path $workRoot ($unicodePrefix + ' U disk')
 $localAppData = Join-Path $workRoot 'Local App Data'
 $runtimeId = 'openclaw-2026.7.1-2-win-x64'
-$cachePath = Join-Path (Join-Path (Join-Path $localAppData 'U-Claw') 'runtime') $runtimeId
-$cacheMarker = Join-Path $cachePath '.uclaw-runtime.json'
+$cachePath = $null
+$cacheMarker = $null
 $launcher = Join-Path $releaseRoot 'U-Claw.exe'
 $packageRoot = Join-Path $releaseRoot '.uclaw'
 $dataDirectory = Join-Path $packageRoot 'data'
@@ -103,6 +103,8 @@ try {
         --input $runtimeSource `
         --output $runtimePackage `
         --product-version '0.1.0' `
+        --release-id 'release-1' `
+        --release-sequence '1' `
         --runtime-id $runtimeId `
         --entrypoint 'electron/electron.exe')
     Assert-True ($LASTEXITCODE -eq 0) 'BUILD_RUNTIME_FAILED'
@@ -116,6 +118,10 @@ try {
         --public-key $fixturePublicKey `
         --trusted-keys $fixtureTrustedKeys
     Assert-True ($LASTEXITCODE -eq 0) 'SIGN_RUNTIME_FIXTURE_FAILED'
+    $signedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $runtimeInstallName = ([string]$signedManifest.releaseSequence + '-' + [string]$signedManifest.runtimeTreeSha256).ToLowerInvariant()
+    $cachePath = Join-Path (Join-Path (Join-Path $localAppData 'U-Claw') 'runtimes') $runtimeInstallName
+    $cacheMarker = Join-Path $cachePath '.uclaw-runtime.json'
     $trustedKeysJson = [IO.File]::ReadAllText($fixtureTrustedKeys).Trim()
     $signLicenseFixture = Join-Path $repositoryRoot 'product\tests\windows\sign-license-fixture.mjs'
     & node $signLicenseFixture `
@@ -203,17 +209,17 @@ try {
     $truncatedLength = [Math]::Max(1, [Math]::Floor($packageOriginal.Length / 2))
     [byte[]]$truncated = $packageOriginal[0..($truncatedLength - 1)]
     [IO.File]::WriteAllBytes($runtimePackageInRelease, $truncated)
-    $truncatedPackageRejected = (Invoke-Launcher $launcher $releaseRoot) -ne 0
-    Assert-True $truncatedPackageRejected 'TRUNCATED_PACKAGE_ACCEPTED'
+    $truncatedPackageIgnoredOnWarm = (Invoke-Launcher $launcher $releaseRoot) -eq 0
+    Assert-True $truncatedPackageIgnoredOnWarm 'WARM_START_READ_RUNTIME_PACKAGE'
     [IO.File]::WriteAllBytes($runtimePackageInRelease, $packageOriginal)
 
     $phase = 'PARTIAL_CACHE'
-    $partialPath = Join-Path ([IO.Path]::GetDirectoryName($cachePath)) ($runtimeId + '.partial-interrupted')
+    $partialPath = Join-Path ([IO.Path]::GetDirectoryName($cachePath)) ($runtimeInstallName + '.partial-interrupted')
     [void][IO.Directory]::CreateDirectory($partialPath)
     Write-Utf8NoBom (Join-Path $partialPath '.uclaw-runtime.json') '{}'
     $partialExit = Invoke-Launcher $launcher $releaseRoot
-    $partialCacheRejected = $partialExit -eq 0 -and -not (Test-Path -LiteralPath $partialPath)
-    Assert-True $partialCacheRejected 'PARTIAL_CACHE_REUSED'
+    $partialCacheIgnored = $partialExit -eq 0 -and (Test-Path -LiteralPath $partialPath)
+    Assert-True $partialCacheIgnored 'PARTIAL_CACHE_REUSED_OR_DELETED'
 
     $phase = 'DUPLICATE_LAUNCH'
     Get-ChildItem -LiteralPath $dataDirectory -Filter '.fixture-ready-*' -File -ErrorAction SilentlyContinue |
@@ -243,8 +249,8 @@ try {
         firstLaunch = $firstLaunch
         secondLaunchReused = $secondLaunchReused
         invalidHashRejected = $invalidHashRejected
-        truncatedPackageRejected = $truncatedPackageRejected
-        partialCacheRejected = $partialCacheRejected
+        truncatedPackageIgnoredOnWarm = $truncatedPackageIgnoredOnWarm
+        partialCacheIgnored = $partialCacheIgnored
         unicodeSpacePath = $unicodeSpacePath
         duplicateLaunchRejected = $duplicateLaunchRejected
         dataStayedOnUSB = $dataStayedOnUSB

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,6 +19,8 @@ import (
 
 func signedRuntimeManifest(t *testing.T, manifest Manifest, keyID string, private ed25519.PrivateKey, signedAt, expiresAt time.Time, sequence uint64) Manifest {
 	t.Helper()
+	manifest.ReleaseSequence = sequence
+	manifest.ReleaseID = fmt.Sprintf("release-%d", sequence)
 	manifest.Signature = &ManifestSignature{Algorithm: "ed25519", KeyID: keyID, SignedAt: signedAt.UTC().Format(time.RFC3339), ExpiresAt: expiresAt.UTC().Format(time.RFC3339), Sequence: sequence}
 	payload, err := manifestSigningPayload(manifest)
 	if err != nil {
@@ -38,6 +41,8 @@ func trustRuntimeTestKey(t *testing.T, keyID string, public ed25519.PublicKey) {
 func validRuntimeManifest() Manifest {
 	return Manifest{
 		SchemaVersion:     1,
+		ReleaseID:         "release-42",
+		ReleaseSequence:   42,
 		ProductVersion:    "0.1.0",
 		NodeVersion:       "24.15.0",
 		ElectronVersion:   "40.10.6",
@@ -53,6 +58,7 @@ func validRuntimeManifest() Manifest {
 		FileCount:         8,
 		Entrypoint:        `electron\electron.exe`,
 		EntryArgs:         []string{"resources/app.asar"},
+		CriticalFiles:     []RuntimeFileDigest{{Path: `electron\electron.exe`, Size: 10, SHA256: strings.Repeat("c", 64)}},
 	}
 }
 
@@ -64,6 +70,7 @@ func TestValidateManifestAcceptsFrozenContract(t *testing.T) {
 	manifest.RuntimeSHA256 = strings.Repeat("A", 64)
 	manifest.RuntimeArchive = "资源/runtime package.pkg"
 	manifest.Entrypoint = "node_modules/@scope/package/客户端.exe"
+	manifest.CriticalFiles[0].Path = manifest.Entrypoint
 	if err := ValidateManifest(manifest); err != nil {
 		t.Fatalf("valid Unicode relative paths rejected: %v", err)
 	}
@@ -105,6 +112,8 @@ func TestValidateManifestRejectsUnsafeWindowsPaths(t *testing.T) {
 func TestValidateManifestRejectsMalformedBounds(t *testing.T) {
 	mutations := []func(*Manifest){
 		func(value *Manifest) { value.SchemaVersion = 2 },
+		func(value *Manifest) { value.ReleaseID = "bad release" },
+		func(value *Manifest) { value.ReleaseSequence = 0 },
 		func(value *Manifest) { value.ProductVersion = "" },
 		func(value *Manifest) { value.NodeVersion = "" },
 		func(value *Manifest) { value.ElectronVersion = "" },
@@ -116,6 +125,7 @@ func TestValidateManifestRejectsMalformedBounds(t *testing.T) {
 		func(value *Manifest) { value.UnpackedBytes = -1 },
 		func(value *Manifest) { value.FileCount = 0 },
 		func(value *Manifest) { value.EntryArgs = []string{"bad\x00argument"} },
+		func(value *Manifest) { value.CriticalFiles = nil },
 	}
 	for index, mutate := range mutations {
 		manifest := validRuntimeManifest()
@@ -155,6 +165,7 @@ func TestReadManifestIsStrict(t *testing.T) {
 	manifest.FileCount = 1
 	manifest.Entrypoint = "electron.exe"
 	manifest.EntryArgs = []string{}
+	manifest.CriticalFiles = []RuntimeFileDigest{{Path: "electron.exe", Size: 1, SHA256: strings.Repeat("c", 64)}}
 	manifest = signedRuntimeManifest(t, manifest, "fixture", private, time.Now().Add(-time.Minute), time.Now().Add(time.Hour), 7)
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
@@ -267,6 +278,7 @@ func TestManifestSigningPayloadMatchesJavaScriptGolden(t *testing.T) {
 	manifest.FileCount = 1
 	manifest.Entrypoint = "electron/electron.exe"
 	manifest.EntryArgs = []string{"<arg>", "line\u2029end"}
+	manifest.CriticalFiles = []RuntimeFileDigest{{Path: "electron/electron.exe", Size: 8, SHA256: strings.Repeat("c", 64)}}
 	manifest.Signature = &ManifestSignature{
 		Algorithm: "ed25519", KeyID: "fixture",
 		SignedAt: "2026-08-09T00:00:00.000Z", ExpiresAt: "2027-08-09T00:00:00.000Z",
@@ -277,7 +289,7 @@ func TestManifestSigningPayloadMatchesJavaScriptGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(payload)
-	if hex.EncodeToString(digest[:]) != "bb7ad70619f7524d325cf326d432a5a6be0bb84aa87ea24aa6ac7623b6cd4754" {
+	if hex.EncodeToString(digest[:]) != "1d5df2ef301f1e28f55707eaa8a427e3308c2ce8d7a124cfbaac5389db4e9a77" {
 		t.Fatalf("payload digest mismatch: %s", hex.EncodeToString(digest[:]))
 	}
 }

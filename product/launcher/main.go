@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"time"
 )
 
@@ -156,19 +155,19 @@ func prepareRuntimeForLaunch(
 	manifest Manifest,
 	extracting func(),
 ) (CacheResult, error) {
-	if !runtimeCacheReusable(cacheRoot, manifest) {
+	if !runtimeCacheInstalled(cacheRoot, manifest) {
 		extracting()
 	}
 	return EnsureRuntimeCache(ctx, cacheRoot, packageRoot, manifest)
 }
 
-func runtimeCacheReusable(cacheRoot string, manifest Manifest) bool {
+func runtimeCacheInstalled(cacheRoot string, manifest Manifest) bool {
 	root, err := os.OpenRoot(cacheRoot)
 	if err != nil {
 		return false
 	}
 	defer root.Close()
-	info, err := root.Lstat(manifest.RuntimeID)
-	return err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 &&
-		runtimeCacheUsable(filepath.Join(cacheRoot, manifest.RuntimeID), manifest)
+	installName := runtimeInstallName(manifest)
+	info, err := root.Lstat(installName)
+	return err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0
 }

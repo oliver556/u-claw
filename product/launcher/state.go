@@ -150,7 +150,15 @@ func Run(ctx context.Context, deps Dependencies) error {
 			func() { reporter.State(StateExtractingRuntime) },
 		)
 		if err != nil {
+			if errors.Is(err, ErrRuntimeAuditFailed) {
+				appendLog("runtime-audit-failed")
+			}
 			return reportFailure(reporter, err)
+		}
+		if cache.Verification == "fast" {
+			appendLog("runtime-verify-fast")
+		} else if cache.Verification == "full" {
+			appendLog("runtime-verify-full")
 		}
 		lease, err := deps.AcquireRuntime(cache.Path, manifest)
 		if err != nil {
@@ -392,6 +400,8 @@ func diagnosticFor(err error) (string, string) {
 		return "E_MANIFEST_INVALID", "运行时清单无效，请重新下载 U-Claw。"
 	case errors.Is(err, ErrPackageInvalid):
 		return "E_PACKAGE_INVALID", "运行时文件校验失败，请重新下载 U-Claw。"
+	case errors.Is(err, ErrRuntimeAuditFailed):
+		return "E_RUNTIME_AUDIT_FAILED", "本机运行时完整性审计失败，已阻止启动。"
 	case errors.Is(err, ErrCachePreparationFailed), errors.Is(err, ErrExtractionFailed):
 		return "E_CACHE_FAILED", "无法准备本机运行缓存，请检查磁盘空间。"
 	case errors.Is(err, ErrAppStartFailed), errors.Is(err, ErrProcessInvalid):

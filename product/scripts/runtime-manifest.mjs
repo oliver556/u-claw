@@ -44,8 +44,9 @@ export function validateRuntimeManifest(value) {
         : `invalid runtime manifest: ${fields.join(", ")}`,
     );
   }
-  for (const field of ["runtimeArchive", "entrypoint"]) {
-    if (!isSafeWindowsRelativePath(value[field])) {
+  for (const field of ["runtimeArchive", "entrypoint", ...value.criticalFiles.map((file) => file.path)]) {
+    const candidate = field === "runtimeArchive" || field === "entrypoint" ? value[field] : field;
+    if (!isSafeWindowsRelativePath(candidate)) {
       throw new Error(`${field}: unsafe Windows relative path`);
     }
   }
@@ -55,6 +56,13 @@ export function validateRuntimeManifest(value) {
   if (value.entryArgs.some((argument) => argument.startsWith("--uclaw-startup-mode"))) {
     throw new Error("entryArgs: startup mode is launcher-owned");
   }
+  const canonicalCritical = value.criticalFiles.map((file) => file.path.replaceAll("\\", "/").toLowerCase());
+  if (new Set(canonicalCritical).size !== canonicalCritical.length || !canonicalCritical.includes(value.entrypoint.replaceAll("\\", "/").toLowerCase())) {
+    throw new Error("criticalFiles: must uniquely include entrypoint");
+  }
+  if (value.signature && value.signature.sequence !== value.releaseSequence) {
+    throw new Error("signature.sequence: must equal releaseSequence");
+  }
   return value;
 }
 
@@ -62,11 +70,11 @@ export function runtimeManifestSigningPayload(value) {
   if (!value.signature) throw new Error("runtime manifest signature metadata is required");
   const signature = value.signature;
   return Buffer.from(JSON.stringify([
-    "uclaw-runtime-manifest-v1",
-    value.schemaVersion, value.productVersion, value.nodeVersion, value.electronVersion,
+    "uclaw-runtime-manifest-v2",
+    value.schemaVersion, value.releaseId, value.releaseSequence, value.productVersion, value.nodeVersion, value.electronVersion,
     value.runtimeVersion, value.runtimeId, value.targetPlatform, value.targetArch,
     value.runtimeArchive, value.runtimeSha256, value.runtimeTreeSha256, value.runtimeBytes,
-    value.unpackedBytes, value.fileCount, value.entrypoint, value.entryArgs,
+    value.unpackedBytes, value.fileCount, value.entrypoint, value.entryArgs, value.criticalFiles,
     signature.algorithm, signature.keyId, signature.signedAt, signature.expiresAt,
     signature.sequence,
   ]));
@@ -75,7 +83,7 @@ export function runtimeManifestSigningPayload(value) {
 export function signRuntimeManifest(manifest, { keyId, privateKey, signedAt, expiresAt, sequence }) {
   validateRuntimeManifest(manifest);
   if (manifest.signature !== undefined) throw new Error("runtime manifest is already signed");
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(keyId) || !Number.isSafeInteger(sequence) || sequence < 1) throw new Error("invalid runtime signing metadata");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(keyId) || !Number.isSafeInteger(sequence) || sequence < 1 || manifest.releaseSequence !== sequence) throw new Error("invalid runtime signing metadata");
   const signedTime = new Date(signedAt); const expiryTime = new Date(expiresAt);
   if (!Number.isFinite(signedTime.getTime()) || !Number.isFinite(expiryTime.getTime()) || expiryTime <= signedTime) throw new Error("invalid runtime signature lifetime");
   const signature = { algorithm: "ed25519", keyId, signedAt: signedTime.toISOString(), expiresAt: expiryTime.toISOString(), sequence, value: "" };
