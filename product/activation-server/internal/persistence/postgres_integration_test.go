@@ -20,6 +20,7 @@ import (
 
 	"u-claw-activation-server/internal/activation"
 	adminservice "u-claw-activation-server/internal/admin"
+	"u-claw-activation-server/internal/policy"
 )
 
 func TestInitialMigrationContainsAuthoritativeTablesAndConstraints(t *testing.T) {
@@ -89,7 +90,7 @@ func TestInitialMigrationContainsAuthoritativeTablesAndConstraints(t *testing.T)
 			t.Errorf("migration ledger missing constraint %q", fragment)
 		}
 	}
-	if latestMigrationVersion != 4 || len(initialMigrationChecksum) != 32 {
+	if latestMigrationVersion != 5 || len(initialMigrationChecksum) != 32 {
 		t.Fatal("migration version/checksum metadata is invalid")
 	}
 }
@@ -136,7 +137,7 @@ func TestLifecycleMigrationContainsTaskFiveAndSixSchema(t *testing.T) {
 			t.Errorf("lifecycle migration missing %q", fragment)
 		}
 	}
-	if latestMigrationVersion != 4 || len(lifecycleMigrationChecksum) != 32 {
+	if latestMigrationVersion != 5 || len(lifecycleMigrationChecksum) != 32 {
 		t.Fatal("lifecycle migration version/checksum metadata is invalid")
 	}
 }
@@ -216,7 +217,7 @@ func TestDeviceAccessProxyMigrationContainsLongLivedTokenAndProxySchema(t *testi
 			t.Errorf("device access/proxy migration stores plaintext secret %q", forbidden)
 		}
 	}
-	if latestMigrationVersion != 4 || len(deviceAccessProxyMigrationChecksum) != 32 {
+	if latestMigrationVersion != 5 || len(deviceAccessProxyMigrationChecksum) != 32 {
 		t.Fatal("device access/proxy migration version/checksum metadata is invalid")
 	}
 
@@ -240,10 +241,43 @@ func TestProductionComposeMountsCurrentMigrationSet(t *testing.T) {
 		"source: migration_004",
 		"target: /migrations/004_device_access_proxy.sql",
 		"migration_004:\n    file: ../migrations/004_device_access_proxy.sql",
+		"source: migration_005",
+		"target: /migrations/005_release_policy.sql",
+		"migration_005:\n    file: ../migrations/005_release_policy.sql",
 	} {
 		if !strings.Contains(compose, fragment) {
 			t.Errorf("production compose missing current migration config %q", fragment)
 		}
+	}
+}
+
+func TestReleasePolicyMigrationContainsMonotonicDualSlotSchema(t *testing.T) {
+	sql := ReleasePolicyMigrationSQL()
+	for _, fragment := range []string{
+		"CREATE TABLE production_releases",
+		"release_sequence BIGINT PRIMARY KEY CHECK (release_sequence BETWEEN 1 AND 9007199254740991)",
+		"manifest_readback_verified BOOLEAN NOT NULL",
+		"cdn_available BOOLEAN NOT NULL",
+		"status TEXT NOT NULL CHECK (status IN ('current', 'stable', 'withdrawn'))",
+		"CREATE UNIQUE INDEX production_releases_one_current_idx",
+		"CREATE TABLE production_release_state",
+		"policy_epoch BIGINT NOT NULL CHECK (policy_epoch BETWEEN 1 AND 9007199254740991)",
+		"current_sequence BIGINT UNIQUE NOT NULL",
+		"previous_stable_sequence BIGINT UNIQUE",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("release policy migration missing %q", fragment)
+		}
+	}
+	if len(releasePolicyMigrationChecksum) != 32 {
+		t.Fatal("release policy migration checksum invalid")
+	}
+	contents, err := os.ReadFile(filepath.Join("..", "..", "migrations", "005_release_policy.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != sql {
+		t.Fatal("migrations/005_release_policy.sql drifted from compiled migration")
 	}
 }
 
@@ -333,19 +367,44 @@ func TestMigratePostgreSQLIsIdempotentAndEnforcesUniqueBindings(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ANY($1)`, []string{
 		"activation_inventory", "devices", "licenses", "activation_attempts",
 		"new_api_bindings", "token_grants", "audit_events", "license_status_events", "schema_migrations", "admin_operations",
-		"device_access_tokens", "model_proxy_admissions",
+		"device_access_tokens", "model_proxy_admissions", "production_releases", "production_release_state",
 	}).Scan(&tableCount); err != nil {
 		t.Fatal(err)
 	}
-	if tableCount != 12 {
-		t.Fatalf("table count = %d, want 12", tableCount)
+	if tableCount != 14 {
+		t.Fatalf("table count = %d, want 14", tableCount)
 	}
 	var migrationCount int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4) AND octet_length(checksum) = 32`).Scan(&migrationCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5) AND octet_length(checksum) = 32`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 4 {
-		t.Fatalf("migration record count = %d, want 4", migrationCount)
+	if migrationCount != 5 {
+		t.Fatalf("migration record count = %d, want 5", migrationCount)
+	}
+	releaseRepository, err := NewReleasePolicyRepository(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := func(sequence uint64, id, version string) policy.Release {
+		return policy.Release{ReleaseSequence: sequence, ReleaseID: id, ContentVersion: version, Reason: policy.ReleaseReasonRelease, ManifestURL: "https://cdn.example.test/releases/" + id + "/manifest.json", ManifestSHA256: strings.Repeat("a", 64), ManifestReadbackVerified: true, CDNAvailable: true, ContentSourceSequence: sequence}
+	}
+	if _, err = releaseRepository.Publish(ctx, release(105, "release-105", "1.5.0")); err != nil {
+		t.Fatal(err)
+	}
+	state, err := releaseRepository.Publish(ctx, release(106, "release-106", "1.6.0"))
+	if err != nil || state.Current.ReleaseSequence != 106 || state.PreviousStable.ReleaseSequence != 105 {
+		t.Fatalf("release slots=%+v err=%v", state, err)
+	}
+	state, err = releaseRepository.ForwardRollback(ctx, release(107, "release-107", "ignored"))
+	if err != nil || state.Current.ContentVersion != "1.5.0" || state.Current.RollbackFromSequence != 106 || state.PreviousStable.ReleaseSequence != 105 {
+		t.Fatalf("forward rollback=%+v err=%v", state, err)
+	}
+	var withdrawn string
+	if err = pool.QueryRow(ctx, `SELECT status FROM production_releases WHERE release_sequence=106`).Scan(&withdrawn); err != nil || withdrawn != policy.ReleaseStatusWithdrawn {
+		t.Fatalf("withdrawn=%q err=%v", withdrawn, err)
+	}
+	if _, err = releaseRepository.Publish(ctx, release(106, "release-106b", "1.6.1")); !errors.Is(err, policy.ErrSequenceRegression) {
+		t.Fatalf("sequence regression=%v", err)
 	}
 	for _, query := range []string{
 		`SELECT device_token_id,inventory_id,device_id,license_id,token_digest,status,issued_at,revoked_at,created_at,updated_at FROM device_access_tokens LIMIT 0`,

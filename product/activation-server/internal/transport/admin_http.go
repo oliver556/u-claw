@@ -8,7 +8,13 @@ import (
 	"strings"
 
 	adminservice "u-claw-activation-server/internal/admin"
+	"u-claw-activation-server/internal/policy"
 )
+
+type ReleasePolicyAdmin interface {
+	Publish(context.Context, policy.Release) (policy.ProductionState, error)
+	ForwardRollback(context.Context, policy.Release) (policy.ProductionState, error)
+}
 
 type AdminService interface {
 	Generate(context.Context, adminservice.GenerateInput) ([]adminservice.InventorySummary, error)
@@ -24,11 +30,13 @@ type AdminService interface {
 type AdminHandlerOptions struct {
 	Service   AdminService
 	Operators adminservice.OperatorRegistry
+	Release   ReleasePolicyAdmin
 }
 
 type adminHandler struct {
 	service   AdminService
 	operators adminservice.OperatorRegistry
+	release   ReleasePolicyAdmin
 	mux       *http.ServeMux
 }
 
@@ -57,6 +65,28 @@ type adminImportRequest struct {
 type adminBalanceStatusRequest struct {
 	adminOperationRequest
 	BalanceStatus string `json:"balanceStatus"`
+}
+type adminReleaseRequest struct {
+	adminOperationRequest
+	ReleaseSequence          uint64 `json:"releaseSequence"`
+	ReleaseID                string `json:"releaseId"`
+	ContentVersion           string `json:"contentVersion,omitempty"`
+	ManifestURL              string `json:"manifestUrl"`
+	ManifestSHA256           string `json:"manifestSha256"`
+	ManifestReadbackVerified bool   `json:"manifestReadbackVerified"`
+	CDNAvailable             bool   `json:"cdnAvailable"`
+}
+type releaseSlotResponse struct {
+	ReleaseSequence uint64 `json:"releaseSequence"`
+	ReleaseID       string `json:"releaseId"`
+	ContentVersion  string `json:"contentVersion"`
+	Reason          string `json:"reason"`
+	Status          string `json:"status"`
+}
+type productionSlotsResponse struct {
+	PolicyEpoch    uint64               `json:"policyEpoch"`
+	Current        releaseSlotResponse  `json:"current"`
+	PreviousStable *releaseSlotResponse `json:"previousStable"`
 }
 
 type inventorySecretResponse struct {
@@ -110,7 +140,7 @@ func (request adminOperationRequest) operation(operatorID string) adminservice.O
 }
 
 func NewAdminHandler(options AdminHandlerOptions) http.Handler {
-	handler := &adminHandler{service: options.Service, operators: options.Operators, mux: http.NewServeMux()}
+	handler := &adminHandler{service: options.Service, operators: options.Operators, release: options.Release, mux: http.NewServeMux()}
 	handler.mux.HandleFunc("POST /internal/v1/inventory", handler.generate)
 	handler.mux.HandleFunc("POST /internal/v1/inventory/import", handler.importInventory)
 	handler.mux.HandleFunc("GET /internal/v1/inventory/{id}", handler.show)
@@ -123,7 +153,58 @@ func NewAdminHandler(options AdminHandlerOptions) http.Handler {
 		handler.mux.HandleFunc("POST /internal/v1/device-tokens/{licenseId}/"+string(action), handler.mutateDeviceToken(action))
 	}
 	handler.mux.HandleFunc("GET /internal/v1/audit", handler.audit)
+	handler.mux.HandleFunc("POST /internal/v1/releases/publish", handler.publishRelease)
+	handler.mux.HandleFunc("POST /internal/v1/releases/forward-rollback", handler.forwardRollback)
 	return handler
+}
+
+func (handler *adminHandler) publishRelease(writer http.ResponseWriter, request *http.Request) {
+	handler.changeRelease(writer, request, false)
+}
+
+func (handler *adminHandler) forwardRollback(writer http.ResponseWriter, request *http.Request) {
+	handler.changeRelease(writer, request, true)
+}
+
+func (handler *adminHandler) changeRelease(writer http.ResponseWriter, request *http.Request, rollback bool) {
+	var input adminReleaseRequest
+	if decodeRequest(writer, request, &input) != nil {
+		handler.writeError(writer, adminservice.ErrInvalidInput)
+		return
+	}
+	if _, ok := authenticatedOperator(request, input.OperatorID); !ok || handler.release == nil {
+		handler.writeError(writer, adminservice.ErrInvalidInput)
+		return
+	}
+	release := policy.Release{ReleaseSequence: input.ReleaseSequence, ReleaseID: input.ReleaseID, ContentVersion: input.ContentVersion, ManifestURL: input.ManifestURL, ManifestSHA256: input.ManifestSHA256, ManifestReadbackVerified: input.ManifestReadbackVerified, CDNAvailable: input.CDNAvailable}
+	var state policy.ProductionState
+	var err error
+	if rollback {
+		state, err = handler.release.ForwardRollback(request.Context(), release)
+	} else {
+		state, err = handler.release.Publish(request.Context(), release)
+	}
+	if err != nil {
+		handler.writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, productionSlots(state))
+}
+
+func productionSlots(state policy.ProductionState) productionSlotsResponse {
+	response := productionSlotsResponse{PolicyEpoch: state.PolicyEpoch}
+	if state.Current != nil {
+		response.Current = releaseSlot(*state.Current)
+	}
+	if state.PreviousStable != nil {
+		previous := releaseSlot(*state.PreviousStable)
+		response.PreviousStable = &previous
+	}
+	return response
+}
+
+func releaseSlot(release policy.Release) releaseSlotResponse {
+	return releaseSlotResponse{ReleaseSequence: release.ReleaseSequence, ReleaseID: release.ReleaseID, ContentVersion: release.ContentVersion, Reason: release.Reason, Status: release.Status}
 }
 
 func (handler *adminHandler) showMapping(writer http.ResponseWriter, request *http.Request) {
@@ -332,7 +413,7 @@ func inventorySummaries(items []adminservice.InventorySummary) []inventorySummar
 }
 
 func (handler *adminHandler) writeError(writer http.ResponseWriter, err error) {
-	if errors.Is(err, adminservice.ErrInvalidInput) {
+	if errors.Is(err, adminservice.ErrInvalidInput) || errors.Is(err, policy.ErrInvalidRelease) || errors.Is(err, policy.ErrArtifactUnavailable) || errors.Is(err, policy.ErrSequenceRegression) || errors.Is(err, policy.ErrPreviousStableUnavailable) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"code": "ADMIN_INVALID"})
 		return
 	}

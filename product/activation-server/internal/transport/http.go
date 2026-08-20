@@ -31,15 +31,21 @@ type LifecycleService interface {
 	Recover(context.Context, lifecycle.RecoverInput) ([]byte, error)
 }
 
+type ClientPolicyService interface {
+	Current(context.Context) (policy.ClientPolicy, error)
+}
+
 type PublicHandlerOptions struct {
 	Activation ActivationService
 	Lifecycle  LifecycleService
+	Policy     ClientPolicyService
 	RequestIDs io.Reader
 }
 
 type publicHandler struct {
 	activation ActivationService
 	lifecycle  LifecycleService
+	policy     ClientPolicyService
 	requestIDs io.Reader
 }
 
@@ -48,7 +54,7 @@ func NewPublicHandler(options PublicHandlerOptions) http.Handler {
 	if randomSource == nil {
 		randomSource = rand.Reader
 	}
-	return &publicHandler{activation: options.Activation, lifecycle: options.Lifecycle, requestIDs: randomSource}
+	return &publicHandler{activation: options.Activation, lifecycle: options.Lifecycle, policy: options.Policy, requestIDs: randomSource}
 }
 
 func (handler *publicHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -62,12 +68,27 @@ func (handler *publicHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/v1/licenses/") && strings.HasSuffix(request.URL.Path, "/status"):
 		handler.status(writer, request, requestID)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/client-policy":
-		writeJSON(writer, http.StatusOK, policy.ProductionClientPolicy())
+		handler.clientPolicy(writer, request, requestID)
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/v1/activations/"):
 		handler.recover(writer, request, requestID)
 	default:
 		handler.writeError(writer, requestID, "", nil, errNotFound)
 	}
+}
+
+func (handler *publicHandler) clientPolicy(writer http.ResponseWriter, request *http.Request, requestID string) {
+	if handler.policy == nil {
+		handler.writeError(writer, requestID, "", nil, policy.ErrUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), operationTimeout)
+	defer cancel()
+	clientPolicy, err := handler.policy.Current(ctx)
+	if err != nil {
+		handler.writeError(writer, requestID, "", nil, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, clientPolicy)
 }
 
 func (handler *publicHandler) recover(writer http.ResponseWriter, request *http.Request, requestID string) {
@@ -313,6 +334,8 @@ func projectError(err error) (int, string, bool, string) {
 		return http.StatusNotFound, "ACTIVATION_NOT_FOUND", false, "ACT-REQ-404"
 	case errors.Is(err, lifecycle.ErrAuthentication):
 		return http.StatusUnauthorized, "AUTHENTICATION_FAILED", false, "ACT-AUTH-001"
+	case errors.Is(err, policy.ErrUnavailable), errors.Is(err, policy.ErrArtifactUnavailable):
+		return http.StatusServiceUnavailable, "RELEASE_POLICY_UNAVAILABLE", true, "REL-POL-001"
 	case errors.Is(err, activation.ErrActivationInvalid):
 		return http.StatusBadRequest, "ACTIVATION_INVALID", false, "ACT-INV-001"
 	case errors.Is(err, activation.ErrActivationCodeAlreadyBound):

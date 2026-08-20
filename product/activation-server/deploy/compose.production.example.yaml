@@ -94,6 +94,9 @@ services:
       - source: migration_004
         target: /migrations/004_device_access_proxy.sql
         mode: 0444
+      - source: migration_005
+        target: /migrations/005_release_policy.sql
+        mode: 0444
     secrets:
       - { source: migration_database_url, target: /run/secrets/migration_database_url, uid: "0", gid: "0", mode: 0400 }
       - { source: migration_role, target: /run/secrets/migration_role, uid: "0", gid: "0", mode: 0400 }
@@ -279,6 +282,8 @@ configs:
     file: ../migrations/003_admin.sql
   migration_004:
     file: ../migrations/004_device_access_proxy.sql
+  migration_005:
+    file: ../migrations/005_release_policy.sql
   public_gateway:
     content: |
       worker_processes auto;

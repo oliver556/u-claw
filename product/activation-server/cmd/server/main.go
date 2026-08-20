@@ -25,6 +25,7 @@ import (
 	"u-claw-activation-server/internal/modelproxy"
 	"u-claw-activation-server/internal/observability"
 	"u-claw-activation-server/internal/persistence"
+	"u-claw-activation-server/internal/policy"
 	"u-claw-activation-server/internal/security"
 	"u-claw-activation-server/internal/transport"
 )
@@ -94,7 +95,15 @@ func run() error {
 	}
 	metrics := observability.NewMetrics()
 	artifactEnvelope, secretEncryptor := newRuntimeEnvelopes(kms)
-	public, err := buildPublicHandler(cfg, pool, artifactEnvelope, metrics)
+	releaseRepository, err := persistence.NewReleasePolicyRepository(pool)
+	if err != nil {
+		return err
+	}
+	releasePolicy, err := policy.NewService(policy.ServiceOptions{Repository: releaseRepository, KeyID: cfg.StatusKeyID, PrivateKey: cfg.StatusSigningKey, TTL: 5 * time.Minute})
+	if err != nil {
+		return err
+	}
+	public, err := buildPublicHandler(cfg, pool, artifactEnvelope, metrics, releasePolicy)
 	if err != nil {
 		return err
 	}
@@ -106,7 +115,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	adminHandler := transport.NewAdminHandler(transport.AdminHandlerOptions{Service: adminApplication, Operators: cfg.AdminOperators})
+	adminHandler := transport.NewAdminHandler(transport.AdminHandlerOptions{Service: adminApplication, Operators: cfg.AdminOperators, Release: releasePolicy})
 	application := newApplication(public, adminHandler, metrics)
 	server := newHTTPServer(cfg, func(ctx context.Context) error { return pool.Ping(ctx) }, application, kmsReadiness(kms, cfg.KMSKeyVersion, cfg.NewAPIKMSKeyVersion))
 
@@ -160,7 +169,7 @@ func newRuntimeEnvelopes(kms security.KMS) (*security.EnvelopeService, secretEnc
 	return envelope, secretEncryptor{envelope: envelope}
 }
 
-func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, envelope *security.EnvelopeService, metrics *observability.Metrics) (http.Handler, error) {
+func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, envelope *security.EnvelopeService, metrics *observability.Metrics, releasePolicy *policy.Service) (http.Handler, error) {
 	repository, err := persistence.NewActivationRepository(pool)
 	if err != nil {
 		return nil, err
@@ -195,7 +204,7 @@ func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, envelope *securit
 	if err != nil {
 		return nil, err
 	}
-	activationHandler := transport.NewPublicHandler(transport.PublicHandlerOptions{Activation: activationService, Lifecycle: lifecycleService})
+	activationHandler := transport.NewPublicHandler(transport.PublicHandlerOptions{Activation: activationService, Lifecycle: lifecycleService, Policy: releasePolicy})
 	modelHandler := transport.NewModelProxyHandler(transport.ModelProxyHandlerOptions{
 		Service: modelService, Client: modelproxy.NewUpstreamClient(modelproxy.NewSecureTransport(nil, nil)), AllowedHosts: cfg.AllowedNewAPIHosts, Observer: metrics,
 		Timeout: cfg.ModelProxyTimeout, RequestBodyBytes: cfg.ModelProxyRequestBodyBytes, ResponseBodyBytes: cfg.ModelProxyResponseBodyBytes, EnabledModels: cfg.EnabledNewAPIModels,

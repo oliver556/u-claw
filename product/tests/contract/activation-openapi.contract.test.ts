@@ -92,6 +92,8 @@ describe("activation OpenAPI contract", () => {
       "/v1/licenses/{licenseId}/status",
       "/model-api/v1/models",
       "/model-api/v1/chat/completions",
+	  "/internal/v1/releases/publish",
+	  "/internal/v1/releases/forward-rollback",
     ]));
     expect(document.paths["/v1/device-tokens"]).toBeUndefined();
     expect(document.paths["/model-api/v1/models"].get.responses["200"].content["application/json"].schema)
@@ -116,7 +118,8 @@ describe("activation OpenAPI contract", () => {
       "requestId", "activationId", "code", "stage", "retryable", "supportCode",
     ]);
     expect(required("ClientPolicy")).toEqual([
-      "minimumClientVersion", "upgradeRequired", "feedUrl",
+	  "schemaVersion", "policyEpoch", "requiredReleaseSequence", "releaseId", "contentVersion", "reason",
+	  "manifestUrl", "manifestSha256", "issuedAt", "expiresAt", "signature",
     ]);
     expect(required("LicenseStatusSummary")).toEqual([
       "licenseId", "deviceId", "status", "revision", "notBefore", "expiresAt", "replacementLicenseId", "updatedAt",
@@ -133,6 +136,14 @@ describe("activation OpenAPI contract", () => {
     expect(document.components.schemas.DeviceTokenRequest).toBeUndefined();
     expect(document.components.schemas.DeviceTokenResponse).toBeUndefined();
     expect(required("HealthResponse")).toEqual(["status"]);
+	expect(required("ReleasePolicySignature")).toEqual(["algorithm", "keyId", "value"]);
+	expect(required("AdminReleasePublishRequest")).toEqual([
+	  "operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "contentVersion", "manifestUrl", "manifestSha256", "manifestReadbackVerified", "cdnAvailable",
+	]);
+	expect(required("AdminReleaseRollbackRequest")).toEqual([
+	  "operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "manifestUrl", "manifestSha256", "manifestReadbackVerified", "cdnAvailable",
+	]);
+	expect(required("ProductionReleaseSlots")).toEqual(["policyEpoch", "current", "previousStable"]);
     expect(required("OpenAIModelsResponse")).toEqual(["object", "data"]);
     expect(required("OpenAIChatCompletionRequest")).toEqual(["model", "messages", "stream"]);
     expect(required("OpenAIChatCompletionResponse")).toEqual(["id", "object", "created", "model", "choices", "usage"]);
@@ -140,6 +151,7 @@ describe("activation OpenAPI contract", () => {
       "ActivationRequest", "ActivationResponse", "ActivationCommit", "ActivationError", "ClientPolicy",
       "StartupLicense", "StartupCredential", "BuiltinCredential", "LicenseStatusSummary", "LicenseStatusReceipt",
       "LicenseStatusResponse", "HealthResponse",
+	  "ReleasePolicySignature", "AdminReleasePublishRequest", "AdminReleaseRollbackRequest", "ProductionReleaseSlot", "ProductionReleaseSlots",
     ]) expect(document.components.schemas[name].additionalProperties).toBe(false);
     expect(document.components.schemas.ActivationResponse.properties).toMatchObject({
       license: { $ref: "#/components/schemas/StartupLicense" },
@@ -180,14 +192,8 @@ describe("activation OpenAPI contract", () => {
         pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
       });
     }
-    expect(document.components.schemas.ClientPolicy.properties?.minimumClientVersion).toMatchObject({
-      pattern: "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
-    });
-    expect(document.components.schemas.ClientPolicy.properties).toEqual({
-      minimumClientVersion: expect.any(Object),
-      upgradeRequired: { type: "boolean" },
-      feedUrl: { type: "string", const: "https://updates.u-claw.org/releases/" },
-    });
+	 expect(document.components.schemas.ClientPolicy.properties?.requiredReleaseSequence).toMatchObject({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
+	 expect(document.components.schemas.ClientPolicy.properties?.signature).toEqual({ $ref: "#/components/schemas/ReleasePolicySignature" });
     expect(document.paths["/health/live"].get.responses["200"].content["application/json"].schema)
       .toEqual({ $ref: "#/components/schemas/HealthResponse" });
     expect(document.components.schemas.ActivationRequest.properties).not.toHaveProperty("username");

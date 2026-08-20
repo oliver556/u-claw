@@ -11,6 +11,7 @@ import (
 
 	"u-claw-activation-server/internal/activation"
 	"u-claw-activation-server/internal/lifecycle"
+	"u-claw-activation-server/internal/policy"
 )
 
 type fakePublicService struct {
@@ -22,6 +23,12 @@ type fakePublicService struct {
 	activationContext context.Context
 	statusContext     context.Context
 	recovered         []byte
+	clientPolicy      policy.ClientPolicy
+	policyErr         error
+}
+
+func (service *fakePublicService) Current(context.Context) (policy.ClientPolicy, error) {
+	return service.clientPolicy, service.policyErr
 }
 
 func (service *fakePublicService) Recover(context.Context, lifecycle.RecoverInput) ([]byte, error) {
@@ -165,11 +172,18 @@ func TestActivateValidationErrorReportsFailedBeforeBind(t *testing.T) {
 }
 
 func TestPublicHandlerServesClientPolicy(t *testing.T) {
-	handler := NewPublicHandler(PublicHandlerOptions{Activation: &fakePublicService{}, Lifecycle: &fakePublicService{}, RequestIDs: strings.NewReader(strings.Repeat("c", 64))})
+	service := &fakePublicService{clientPolicy: policy.ClientPolicy{SchemaVersion: 1, PolicyEpoch: 107, RequiredReleaseSequence: 107, ReleaseID: "release-107", ContentVersion: "1.5.0", Reason: policy.ReleaseReasonRelease, ManifestURL: "https://cdn.example.test/releases/107/manifest.json", ManifestSHA256: strings.Repeat("a", 64), IssuedAt: "2026-08-21T01:02:03Z", ExpiresAt: "2026-08-21T01:07:03Z", Signature: policy.Signature{Algorithm: "ed25519", KeyID: "policy-key", Value: strings.Repeat("A", 88)}}}
+	handler := NewPublicHandler(PublicHandlerOptions{Activation: service, Lifecycle: service, Policy: service, RequestIDs: strings.NewReader(strings.Repeat("c", 64))})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/client-policy", nil))
-	if response.Code != http.StatusOK || response.Body.String() != "{\"minimumClientVersion\":\"1.0.0\",\"upgradeRequired\":false,\"feedUrl\":\"https://updates.u-claw.org/releases/\"}\n" {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"requiredReleaseSequence":107`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+	service.policyErr = policy.ErrUnavailable
+	failed := httptest.NewRecorder()
+	handler.ServeHTTP(failed, httptest.NewRequest(http.MethodGet, "/v1/client-policy", nil))
+	if failed.Code != http.StatusServiceUnavailable || strings.Contains(failed.Body.String(), "release-107") {
+		t.Fatalf("fail-closed=%d %s", failed.Code, failed.Body.String())
 	}
 }
 

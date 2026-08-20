@@ -11,6 +11,7 @@ import (
 	"time"
 
 	adminservice "u-claw-activation-server/internal/admin"
+	"u-claw-activation-server/internal/policy"
 )
 
 func httpOperators(secret string) adminservice.OperatorRegistry {
@@ -22,6 +23,25 @@ type fakeHTTPAdmin struct {
 	mutation   adminservice.Mutation
 	token      adminservice.DeviceTokenMutation
 	auditQuery adminservice.AuditQuery
+}
+
+type fakeReleaseAdmin struct {
+	published policy.Release
+	rollback  policy.Release
+}
+
+func (service *fakeReleaseAdmin) Publish(_ context.Context, release policy.Release) (policy.ProductionState, error) {
+	service.published = release
+	release.Status = policy.ReleaseStatusCurrent
+	return policy.ProductionState{PolicyEpoch: 107, Current: &release}, nil
+}
+func (service *fakeReleaseAdmin) ForwardRollback(_ context.Context, release policy.Release) (policy.ProductionState, error) {
+	service.rollback = release
+	release.ContentVersion = "1.5.0"
+	release.Reason = policy.ReleaseReasonRollback
+	release.Status = policy.ReleaseStatusCurrent
+	stable := policy.Release{ReleaseSequence: 105, ReleaseID: "release-105", ContentVersion: "1.5.0", Reason: policy.ReleaseReasonRelease, Status: policy.ReleaseStatusStable}
+	return policy.ProductionState{PolicyEpoch: 108, Current: &release, PreviousStable: &stable}, nil
 }
 
 func (*fakeHTTPAdmin) Generate(context.Context, adminservice.GenerateInput) ([]adminservice.InventorySummary, error) {
@@ -130,6 +150,28 @@ func TestAdminHTTPBalanceStatusUsesDesignedPatchRoute(t *testing.T) {
 	handler.ServeHTTP(oldResponse, old)
 	if oldResponse.Code != http.StatusNotFound {
 		t.Fatalf("old route status=%d", oldResponse.Code)
+	}
+}
+
+func TestAdminHTTPPublishesVerifiedReleaseAndForwardRollback(t *testing.T) {
+	releases := &fakeReleaseAdmin{}
+	handler := NewAdminHandler(AdminHandlerOptions{Service: &fakeHTTPAdmin{}, Release: releases, Operators: httpOperators(strings.Repeat("a", 32))})
+	base := `"operatorId":"operator_fixture","requestId":"request_fixture_001","idempotencyKey":"release-fixture-001","reason":"release operation","releaseSequence":107,"releaseId":"release-107","manifestUrl":"https://cdn.example.test/releases/107/manifest.json","manifestSha256":"` + strings.Repeat("a", 64) + `","manifestReadbackVerified":true,"cdnAvailable":true`
+	for _, test := range []struct{ path, extra string }{
+		{"/internal/v1/releases/publish", `,"contentVersion":"1.7.0"`},
+		{"/internal/v1/releases/forward-rollback", ""},
+	} {
+		request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader("{"+base+test.extra+"}"))
+		request.Header.Set("Authorization", "Bearer "+strings.Repeat("a", 32))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"policyEpoch"`) {
+			t.Fatalf("%s status=%d body=%s", test.path, response.Code, response.Body.String())
+		}
+	}
+	if releases.published.ContentVersion != "1.7.0" || releases.rollback.ContentVersion != "" {
+		t.Fatalf("publish=%+v rollback=%+v", releases.published, releases.rollback)
 	}
 }
 

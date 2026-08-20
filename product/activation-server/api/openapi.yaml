@@ -36,7 +36,8 @@
           "200": {
             "description": "Current client policy",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ClientPolicy" } } }
-          }
+          },
+          "503": { "$ref": "#/components/responses/503" }
         }
       }
     },
@@ -203,6 +204,22 @@
         "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 } }, { "name": "before", "in": "query", "description": "Opaque base64url cursor containing the preceding event timestamp and UUID", "schema": { "type": "string", "minLength": 1, "maxLength": 512 } }],
         "responses": { "200": { "description": "Audit events", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminAuditPage" } } } }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } }
       }
+    },
+    "/internal/v1/releases/publish": {
+      "post": {
+        "operationId": "adminPublishRelease", "security": [{ "AdminBearerAuth": [] }],
+        "description": "Atomically move production.previousStable to current and production.current to a fully read-back verified higher releaseSequence.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminReleasePublishRequest" } } } },
+        "responses": { "200": { "description": "Production release slots", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProductionReleaseSlots" } } } }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } }
+      }
+    },
+    "/internal/v1/releases/forward-rollback": {
+      "post": {
+        "operationId": "adminForwardRollbackRelease", "security": [{ "AdminBearerAuth": [] }],
+        "description": "Publish previousStable content under a new higher releaseSequence and mark the failed current release withdrawn.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminReleaseRollbackRequest" } } } },
+        "responses": { "200": { "description": "Production release slots", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProductionReleaseSlots" } } } }, "400": { "$ref": "#/components/responses/AdminError" }, "401": { "$ref": "#/components/responses/AdminError" }, "503": { "$ref": "#/components/responses/AdminError" } }
+      }
     }
   },
   "components": {
@@ -342,12 +359,51 @@
       "ClientPolicy": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["minimumClientVersion", "upgradeRequired", "feedUrl"],
+        "description": "Signed short-lived global production policy. Client startup continues only when localReleaseSequence exactly equals requiredReleaseSequence.",
+        "required": ["schemaVersion", "policyEpoch", "requiredReleaseSequence", "releaseId", "contentVersion", "reason", "manifestUrl", "manifestSha256", "issuedAt", "expiresAt", "signature"],
         "properties": {
-          "minimumClientVersion": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$" },
-          "upgradeRequired": { "type": "boolean" },
-          "feedUrl": { "type": "string", "const": "https://updates.u-claw.org/releases/" }
+          "schemaVersion": { "const": 1 },
+          "policyEpoch": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+          "requiredReleaseSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+          "releaseId": { "$ref": "#/components/schemas/ReleaseId" },
+          "contentVersion": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$" },
+          "reason": { "enum": ["release", "rollback"] },
+          "manifestUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+          "manifestSha256": { "$ref": "#/components/schemas/SHA256" },
+          "issuedAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "signature": { "$ref": "#/components/schemas/ReleasePolicySignature" }
         }
+      },
+      "ReleaseId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+      "SHA256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "ReleasePolicySignature": {
+        "type": "object", "additionalProperties": false, "required": ["algorithm", "keyId", "value"],
+        "properties": { "algorithm": { "const": "ed25519" }, "keyId": { "$ref": "#/components/schemas/ReleaseId" }, "value": { "type": "string", "minLength": 88, "maxLength": 88 } }
+      },
+      "AdminReleasePublishRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "contentVersion", "manifestUrl", "manifestSha256", "manifestReadbackVerified", "cdnAvailable"],
+        "properties": {
+          "operatorId": { "$ref": "#/components/schemas/Identifier" }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "idempotencyKey": { "$ref": "#/components/schemas/Identifier" }, "reason": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "releaseSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "releaseId": { "$ref": "#/components/schemas/ReleaseId" }, "contentVersion": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$" }, "manifestUrl": { "type": "string", "format": "uri", "pattern": "^https://" }, "manifestSha256": { "$ref": "#/components/schemas/SHA256" }, "manifestReadbackVerified": { "const": true }, "cdnAvailable": { "const": true }
+        }
+      },
+      "AdminReleaseRollbackRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "manifestUrl", "manifestSha256", "manifestReadbackVerified", "cdnAvailable"],
+        "properties": {
+          "operatorId": { "$ref": "#/components/schemas/Identifier" }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "idempotencyKey": { "$ref": "#/components/schemas/Identifier" }, "reason": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "releaseSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "releaseId": { "$ref": "#/components/schemas/ReleaseId" }, "manifestUrl": { "type": "string", "format": "uri", "pattern": "^https://" }, "manifestSha256": { "$ref": "#/components/schemas/SHA256" }, "manifestReadbackVerified": { "const": true }, "cdnAvailable": { "const": true }
+        }
+      },
+      "ProductionReleaseSlot": {
+        "type": "object", "additionalProperties": false, "required": ["releaseSequence", "releaseId", "contentVersion", "reason", "status"],
+        "properties": { "releaseSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "releaseId": { "$ref": "#/components/schemas/ReleaseId" }, "contentVersion": { "type": "string" }, "reason": { "enum": ["release", "rollback"] }, "status": { "enum": ["current", "stable"] } }
+      },
+      "ProductionReleaseSlots": {
+        "type": "object", "additionalProperties": false, "required": ["policyEpoch", "current", "previousStable"],
+        "properties": { "policyEpoch": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "current": { "$ref": "#/components/schemas/ProductionReleaseSlot" }, "previousStable": { "oneOf": [{ "$ref": "#/components/schemas/ProductionReleaseSlot" }, { "type": "null" }] } }
       },
       "LicenseStatusSummary": {
         "type": "object",
