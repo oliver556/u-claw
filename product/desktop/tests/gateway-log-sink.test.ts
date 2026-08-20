@@ -6,6 +6,24 @@ import { describe, expect, it } from "vitest";
 import { createGatewayLogSink } from "../src/diagnostics/gateway-log-sink.js";
 
 describe("gateway log sink", () => {
+  it.each([
+    { name: "API key", secret: `sk-${"A1b2".repeat(8)}`, line: `apiKey=sk-${"A1b2".repeat(8)}` },
+    { name: "Authorization", secret: `Authorization: Bearer sk-${"C3d4".repeat(8)}`, line: `Authorization: Bearer sk-${"C3d4".repeat(8)}` },
+    { name: "deviceToken", secret: `uclaw_dt_${"B".repeat(43)}`, line: `deviceToken=uclaw_dt_${"B".repeat(43)}` },
+  ])("redacts $name before persistence", async ({ secret, line }) => {
+    const dataDir = await mkdtemp(join(tmpdir(), "uclaw-gateway-log-secret-"));
+    const logsDir = join(dataDir, "diagnostics", "desktop-logs");
+    const sink = createGatewayLogSink({ dataDir, logsDir });
+
+    await sink.append({
+      event: "gateway-exited",
+      stderrTail: line,
+    });
+
+    const content = await readFile(join(logsDir, "uclaw-gateway.jsonl"), "utf8");
+    expect(content).not.toContain(secret);
+  });
+
   it("writes Gateway records to an independent JSONL and rotates one history file", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-gateway-log-"));
     const logsDir = join(dataDir, "diagnostics", "desktop-logs");

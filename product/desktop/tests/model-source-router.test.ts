@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -41,6 +41,13 @@ async function setup() {
 }
 
 describe("model source router", () => {
+  it("keeps ordinary Electron chat free of model-inference direct clients", async () => {
+    const source = await readFile(new URL("../src/providers/model-source-router.ts", import.meta.url), "utf8");
+
+    expect(source).not.toContain("createBuiltinServiceClient");
+    expect(source).not.toContain("builtinDataClient.execute");
+  });
+
   it("keeps the typed builtin client inside the main-process boundary", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-model-route-"));
     roots.push(dataDir);
