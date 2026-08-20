@@ -50,6 +50,45 @@ describe("RpcRouter", () => {
     expect(() => UClawErrorSchema.parse((remoteError as RpcRemoteError).uclawError)).not.toThrow();
   });
 
+  it("accepts official Gateway error details without turning the handshake into a protocol failure", async () => {
+    const socket = new FakeSocket();
+    const gateway = new GatewayWebSocket({
+      url: "ws://gateway.test",
+      webSocketFactory: () => socket,
+      connectParams: () => ({
+        client: { id: "gateway-client", mode: "backend" },
+        role: "operator",
+        scopes: ["operator.read", "operator.admin"],
+      }),
+    });
+    const connection = gateway.connect();
+    socket.emit("open");
+    socket.emit("message", JSON.stringify({
+      type: "event",
+      event: "connect.challenge",
+      payload: { nonce: "n-1", ts: 1 },
+    }));
+    const request = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+
+    socket.emit("message", JSON.stringify({
+      type: "res",
+      id: request.id,
+      ok: false,
+      error: {
+        code: "INVALID_REQUEST",
+        message: "pairing required",
+        retryable: true,
+        details: { code: "PAIRING_REQUIRED", requestedScopes: ["operator.read"] },
+      },
+    }));
+
+    await expect(connection).rejects.toMatchObject({
+      name: "RpcRemoteError",
+      message: "pairing required",
+      uclawError: { code: "OPERATION_FAILED", retryable: true },
+    });
+  });
+
   it("rejects timed out requests and all pending requests on close", async () => {
     vi.useFakeTimers();
     const socket = new FakeSocket();

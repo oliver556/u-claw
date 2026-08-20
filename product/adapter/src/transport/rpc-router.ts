@@ -30,6 +30,7 @@ const ErrorResponseSchema = z.object({
   error: z.object({
     code: z.string().min(1),
     message: z.string().min(1),
+    details: z.json().optional(),
     retryable: z.boolean().optional(),
     retryAfterMs: z.number().int().nonnegative().optional(),
   }).strict(),

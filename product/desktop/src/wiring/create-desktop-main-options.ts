@@ -200,7 +200,7 @@ class PortAwareGatewayTransport implements OpenClawTransport {
       url: `ws://127.0.0.1:${this.port}`,
       webSocketFactory: (url) => new (globalThis.WebSocket as unknown as new (url: string) => WebSocketLike)(url),
       connectParams: () => ({
-        client: { id: "u-claw-desktop", mode: "desktop" },
+        client: { id: "gateway-client", mode: "backend" },
         role: "operator",
         scopes: ["operator.read", "operator.write", "operator.approvals", "operator.admin"],
         caps: ["protocol-v4"],

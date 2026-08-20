@@ -17,7 +17,10 @@ const ChallengeSchema = z.object({
 export type GatewayChallenge = z.infer<typeof ChallengeSchema>;
 
 const ConnectParamsSchema = z.object({
-  client: z.object({ id: z.literal("u-claw-desktop"), mode: z.string().min(1) }).strict(),
+  client: z.union([
+    z.object({ id: z.literal("u-claw-desktop"), mode: z.string().min(1) }).strict(),
+    z.object({ id: z.literal("gateway-client"), mode: z.literal("backend") }).strict(),
+  ]),
   role: z.literal("operator"),
   scopes: z.array(z.string().min(1)),
   caps: z.array(z.string().min(1)).default([]),

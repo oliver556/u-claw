@@ -446,6 +446,12 @@ describe("production desktop wiring", () => {
       params: {
         minProtocol: 4,
         maxProtocol: 4,
+        client: {
+          id: "gateway-client",
+          mode: "backend",
+          platform: "uclaw-desktop",
+          version: "0.1.0",
+        },
         auth: { token: ["test", "gateway", "token"].join("-") },
         scopes: ["operator.read", "operator.write", "operator.approvals", "operator.admin"],
       },
