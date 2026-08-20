@@ -136,6 +136,7 @@ export function redactRendererText(text: string, contextKey?: string): string {
     .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, REDACTED)
     .replace(/\b(?:sk|rk)_live_[A-Za-z0-9_-]{16,}\b/g, REDACTED)
     .replace(/\bsk-(?:proj-)?[A-Za-z0-9_-]{8,}\b/gi, REDACTED)
+    .replace(/\buclaw_dt_[A-Za-z0-9_-]{43}\b/g, REDACTED)
     .replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, REDACTED)
     .replace(/\bfile:\/\/\/[^\r\n"'<>]*/gi, REDACTED)
     .replace(/\b[A-Za-z]:[\\/][^\r\n"'<>]*/g, REDACTED)

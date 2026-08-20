@@ -166,6 +166,34 @@ func TestAuthorizeModelAdmissionAndSecretBinding(t *testing.T) {
 	}
 }
 
+func TestAuthorizeUsesServerSharedUpstreamInsteadOfDeviceMapping(t *testing.T) {
+	authorization := activeAuthorization()
+	authorization.Envelope = nil
+	authorization.KeyVersion = ""
+	authorization.BaseURL = ""
+	authorization.DefaultModel = ""
+	authorization.AllowedModels = []string{"legacy-only"}
+	repository := &fakeRepository{auth: authorization}
+	key := runtimeSecret(t)
+	service, err := NewService(ServiceOptions{
+		Repository:      repository,
+		Digest:          func(string) [32]byte { return [32]byte{} },
+		UpstreamBaseURL: "https://api.example.test/v1",
+		UpstreamAPIKey:  key,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := service.Authorize(context.Background(), "device-token", "new-global-model", "req-shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.Authorization.BaseURL != "https://api.example.test/v1" || !bytes.Equal(grant.APIKey, key) {
+		t.Fatalf("grant=%+v", grant.Authorization)
+	}
+	grant.Clear()
+}
+
 func TestAuthorizeMapsLookupAndDecryptFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name               string

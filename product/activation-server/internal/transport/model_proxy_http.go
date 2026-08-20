@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"path"
 	"regexp"
@@ -27,6 +29,7 @@ var (
 const (
 	maxSafeInteger          int64 = 9_007_199_254_740_991
 	modelsResponseBodyBytes       = 1 << 20
+	maximumErrorBodyBytes         = 64 << 10
 )
 
 type ModelProxyService interface {
@@ -42,6 +45,7 @@ type ModelProxyHandlerOptions struct {
 	Observer          modelproxy.Observer
 	RequestBodyBytes  int64
 	ResponseBodyBytes int64
+	EnabledModels     []string
 }
 type modelProxyHandler struct {
 	service           ModelProxyService
@@ -52,6 +56,7 @@ type modelProxyHandler struct {
 	observer          modelproxy.Observer
 	requestBodyBytes  int64
 	responseBodyBytes int64
+	enabledModels     map[string]struct{}
 	requestIDMu       sync.Mutex
 	lastRequestID     string
 }
@@ -69,18 +74,38 @@ func NewModelProxyHandler(o ModelProxyHandlerOptions) http.Handler {
 	if o.ResponseBodyBytes <= 0 {
 		o.ResponseBodyBytes = 4 << 20
 	}
-	return &modelProxyHandler{service: o.Service, client: o.Client, allowedHosts: append([]string(nil), o.AllowedHosts...), requestIDs: o.RequestIDs, timeout: o.Timeout, observer: o.Observer, requestBodyBytes: o.RequestBodyBytes, responseBodyBytes: o.ResponseBodyBytes}
+	enabledModels := make(map[string]struct{}, len(o.EnabledModels))
+	for _, model := range o.EnabledModels {
+		enabledModels[model] = struct{}{}
+	}
+	return &modelProxyHandler{service: o.Service, client: o.Client, allowedHosts: append([]string(nil), o.AllowedHosts...), requestIDs: o.RequestIDs, timeout: o.Timeout, observer: o.Observer, requestBodyBytes: o.RequestBodyBytes, responseBodyBytes: o.ResponseBodyBytes, enabledModels: enabledModels}
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string          `json:"role"`
+	Content    *string         `json:"content,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+	ToolCalls  json.RawMessage `json:"tool_calls,omitempty"`
 }
 type chatRequest struct {
-	Model     string        `json:"model"`
-	Messages  []chatMessage `json:"messages"`
-	MaxTokens *int          `json:"max_tokens,omitempty"`
-	Stream    *bool         `json:"stream"`
+	Model         string          `json:"model"`
+	Messages      []chatMessage   `json:"messages"`
+	MaxTokens     *int            `json:"max_tokens,omitempty"`
+	Stream        *bool           `json:"stream"`
+	StreamOptions json.RawMessage `json:"stream_options,omitempty"`
+	Tools         json.RawMessage `json:"tools,omitempty"`
+	ToolChoice    json.RawMessage `json:"tool_choice,omitempty"`
+}
+
+type imageGenerationRequest struct {
+	Model          string `json:"model"`
+	Prompt         string `json:"prompt"`
+	N              *int   `json:"n,omitempty"`
+	Quality        string `json:"quality,omitempty"`
+	ResponseFormat string `json:"response_format,omitempty"`
+	Size           string `json:"size,omitempty"`
+	Style          string `json:"style,omitempty"`
 }
 type tokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
@@ -101,6 +126,10 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		route = "models"
 	case r.Method == http.MethodPost && r.URL.Path == "/model-api/v1/chat/completions":
 		route = "chat"
+	case r.Method == http.MethodPost && r.URL.Path == "/model-api/v1/images/generations":
+		route = "images.generations"
+	case r.Method == http.MethodPost && r.URL.Path == "/model-api/v1/images/edits":
+		route = "images.edits"
 	default:
 		writeProxyError(w, 404, "NOT_FOUND", requestID)
 		return
@@ -114,6 +143,9 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	var chat chatRequest
+	var image imageGenerationRequest
+	var upstreamBody []byte
+	var upstreamContentType string
 	if route == "models" {
 		nonempty, readErr := hasGETBody(w, r)
 		if readErr != nil || nonempty {
@@ -134,12 +166,45 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeProxyError(w, 400, "INVALID_REQUEST", requestID)
 			return
 		}
+		upstreamBody, _ = json.Marshal(chat)
+		upstreamContentType = "application/json"
+	}
+	if route == "images.generations" {
+		if err := decodeModelRequest(w, r, &image, h.requestBodyBytes); err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, errBodyTooLarge) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			writeProxyError(w, status, map[bool]string{true: "REQUEST_TOO_LARGE", false: "INVALID_REQUEST"}[status == http.StatusRequestEntityTooLarge], requestID)
+			return
+		}
+		if !validImageGeneration(image) {
+			writeProxyError(w, http.StatusBadRequest, "INVALID_REQUEST", requestID)
+			return
+		}
+		upstreamBody, _ = json.Marshal(image)
+		upstreamContentType = "application/json"
+	}
+	if route == "images.edits" {
+		var parseErr error
+		image.Model, upstreamBody, upstreamContentType, parseErr = restrictedImageEdit(w, r, h.requestBodyBytes)
+		if parseErr != nil {
+			status := http.StatusBadRequest
+			if errors.Is(parseErr, errBodyTooLarge) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			writeProxyError(w, status, map[bool]string{true: "REQUEST_TOO_LARGE", false: "INVALID_REQUEST"}[status == http.StatusRequestEntityTooLarge], requestID)
+			return
+		}
 	}
 	if h.service == nil || h.client == nil {
 		writeProxyError(w, 503, "SERVICE_UNAVAILABLE", requestID)
 		return
 	}
 	model := chat.Model
+	if strings.HasPrefix(route, "images.") {
+		model = image.Model
+	}
 	grant, err := h.service.Authorize(ctx, bearer, model, requestID)
 	if err != nil {
 		status, code := serviceError(err)
@@ -149,6 +214,11 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer grant.Clear()
 	outcome, status, usage := "unavailable", 502, (*modelproxy.Usage)(nil)
 	defer func() { h.service.Complete(ctx, grant, route, outcome, status, usage) }()
+	if model != "" && !h.modelEnabled(model) {
+		outcome, status = "model_not_found", http.StatusNotFound
+		writeProxyError(w, status, "MODEL_NOT_FOUND", requestID)
+		return
+	}
 	target, err := modelproxy.ValidateBaseURL(grant.Authorization.BaseURL, h.allowedHosts)
 	if err != nil {
 		outcome, status = "unavailable", 503
@@ -156,33 +226,71 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upstreamURL := *target
-	upstreamURL.Path = path.Join(strings.TrimSuffix(target.Path, "/"), map[bool]string{true: "chat/completions", false: "models"}[route == "chat"])
+	upstreamPath := "models"
+	switch route {
+	case "chat":
+		upstreamPath = "chat/completions"
+	case "images.generations":
+		upstreamPath = "images/generations"
+	case "images.edits":
+		upstreamPath = "images/edits"
+	}
+	upstreamURL.Path = path.Join(strings.TrimSuffix(target.Path, "/"), upstreamPath)
 	var body io.Reader
-	if route == "chat" {
-		encoded, _ := json.Marshal(chat)
-		body = bytes.NewReader(encoded)
+	if len(upstreamBody) > 0 {
+		body = bytes.NewReader(upstreamBody)
 	}
 	upstream, _ := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), body)
 	upstream.Header.Set("Authorization", "Bearer "+string(grant.APIKey))
 	upstream.Header.Set("Accept", "application/json")
+	if route == "chat" && chat.Stream != nil && *chat.Stream {
+		upstream.Header.Set("Accept", "text/event-stream")
+	}
 	upstream.Header.Set("X-Request-ID", requestID)
-	if route == "chat" {
-		upstream.Header.Set("Content-Type", "application/json")
+	if upstreamContentType != "" {
+		upstream.Header.Set("Content-Type", upstreamContentType)
 	}
 	started := time.Now()
 	response, err := h.client.Do(upstream)
 	upstream.Header.Del("Authorization")
 	if err != nil {
 		h.observe("unavailable", started)
-		writeProxyError(w, 502, "UPSTREAM_UNAVAILABLE", requestID)
+		outcome = "unavailable"
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+			writeProxyError(w, status, "UPSTREAM_TIMEOUT", requestID)
+			return
+		}
+		status = http.StatusBadGateway
+		writeProxyError(w, status, "UPSTREAM_UNAVAILABLE", requestID)
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		mappedStatus, code, mappedOutcome := upstreamError(response.StatusCode)
+		errorBody, _ := readBounded(response.Body, maximumErrorBodyBytes)
+		mappedStatus, code, mappedOutcome := upstreamError(response.StatusCode, errorBody)
 		h.observe(mappedOutcome, started)
 		outcome, status = mappedOutcome, mappedStatus
 		writeProxyError(w, mappedStatus, code, requestID)
+		return
+	}
+	if route == "chat" && chat.Stream != nil && *chat.Stream {
+		if !isEventStream(response.Header.Get("Content-Type")) {
+			h.observe("invalid_response", started)
+			outcome, status = "invalid_response", http.StatusBadGateway
+			writeProxyError(w, status, "UPSTREAM_UNAVAILABLE", requestID)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(response.StatusCode)
+		if err := relaySSE(w, response.Body, h.responseBodyBytes); err != nil {
+			h.observe("invalid_response", started)
+			outcome = "invalid_response"
+			return
+		}
+		outcome, status = "succeeded", response.StatusCode
+		h.observe("success", started)
 		return
 	}
 	mediaType, _, mediaErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
@@ -203,8 +311,8 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeProxyError(w, 502, "UPSTREAM_UNAVAILABLE", requestID)
 		return
 	}
-	if route == "models" {
-		content = filterModels(content, grant.Authorization.AllowedModels)
+	if route == "models" && len(h.enabledModels) > 0 {
+		content = filterModels(content, h.enabledModelIDs())
 	}
 	if route == "chat" {
 		var response struct {
@@ -220,6 +328,22 @@ func (h *modelProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(content)
+}
+
+func (h *modelProxyHandler) modelEnabled(model string) bool {
+	if len(h.enabledModels) == 0 {
+		return true
+	}
+	_, ok := h.enabledModels[model]
+	return ok
+}
+
+func (h *modelProxyHandler) enabledModelIDs() []string {
+	models := make([]string, 0, len(h.enabledModels))
+	for model := range h.enabledModels {
+		models = append(models, model)
+	}
+	return models
 }
 func (h *modelProxyHandler) observe(outcome string, started time.Time) {
 	if h.observer != nil {
@@ -296,15 +420,115 @@ func hasGETBody(w http.ResponseWriter, r *http.Request) (bool, error) {
 	return n > 0, nil
 }
 func validChat(c chatRequest) bool {
-	if !modelNamePattern.MatchString(c.Model) || c.Stream == nil || *c.Stream || len(c.Messages) == 0 || (c.MaxTokens != nil && (*c.MaxTokens < 1 || *c.MaxTokens > 32768)) {
+	if !modelNamePattern.MatchString(c.Model) || c.Stream == nil || len(c.Messages) == 0 || (c.MaxTokens != nil && (*c.MaxTokens < 1 || *c.MaxTokens > 32768)) {
 		return false
 	}
 	for _, m := range c.Messages {
-		if (m.Role != "system" && m.Role != "user" && m.Role != "assistant") || m.Content == "" {
+		switch m.Role {
+		case "system", "user":
+			if m.Content == nil || *m.Content == "" || m.Name != "" || m.ToolCallID != "" || len(m.ToolCalls) > 0 {
+				return false
+			}
+		case "assistant":
+			if (m.Content == nil || *m.Content == "") && (len(m.ToolCalls) == 0 || string(m.ToolCalls) == "null") {
+				return false
+			}
+			if m.ToolCallID != "" {
+				return false
+			}
+		case "tool":
+			if m.Content == nil || *m.Content == "" || !proxyIdentifierPattern.MatchString(m.ToolCallID) || len(m.ToolCalls) > 0 {
+				return false
+			}
+		default:
 			return false
 		}
 	}
+	if len(c.Tools) > 0 && string(c.Tools) == "null" {
+		return false
+	}
 	return true
+}
+
+func validImageGeneration(request imageGenerationRequest) bool {
+	return modelNamePattern.MatchString(request.Model) && strings.TrimSpace(request.Prompt) != "" && len(request.Prompt) <= 64<<10 && (request.N == nil || (*request.N >= 1 && *request.N <= 10))
+}
+
+func restrictedImageEdit(w http.ResponseWriter, r *http.Request, limit int64) (string, []byte, string, error) {
+	mediaType, parameters, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/form-data" || parameters["boundary"] == "" {
+		return "", nil, "", errInvalidRequest
+	}
+	if r.ContentLength > limit {
+		return "", nil, "", errBodyTooLarge
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	reader := multipart.NewReader(r.Body, parameters["boundary"])
+	buffer := &bytes.Buffer{}
+	writer := multipart.NewWriter(buffer)
+	values := map[string]string{}
+	files := 0
+	for {
+		part, partErr := reader.NextPart()
+		if errors.Is(partErr, io.EOF) {
+			break
+		}
+		if partErr != nil {
+			var max *http.MaxBytesError
+			if errors.As(partErr, &max) {
+				return "", nil, "", errBodyTooLarge
+			}
+			return "", nil, "", errInvalidRequest
+		}
+		name, filename := part.FormName(), part.FileName()
+		switch {
+		case name == "image[]" && filename != "" && files < 4:
+			baseName := path.Base(strings.ReplaceAll(filename, `\`, "/"))
+			if !validImageFilename(baseName) {
+				return "", nil, "", errInvalidRequest
+			}
+			fileWriter, createErr := writer.CreateFormFile("image[]", baseName)
+			if createErr != nil {
+				return "", nil, "", errInvalidRequest
+			}
+			if _, createErr = io.Copy(fileWriter, part); createErr != nil {
+				return "", nil, "", errInvalidRequest
+			}
+			files++
+		case (name == "model" || name == "prompt") && filename == "" && values[name] == "":
+			value, readErr := io.ReadAll(io.LimitReader(part, 64<<10+1))
+			if readErr != nil || len(value) > 64<<10 {
+				return "", nil, "", errInvalidRequest
+			}
+			values[name] = string(value)
+		default:
+			return "", nil, "", errInvalidRequest
+		}
+	}
+	if files == 0 || !modelNamePattern.MatchString(values["model"]) || strings.TrimSpace(values["prompt"]) == "" {
+		return "", nil, "", errInvalidRequest
+	}
+	for _, name := range []string{"model", "prompt"} {
+		if err := writer.WriteField(name, values[name]); err != nil {
+			return "", nil, "", errInvalidRequest
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return "", nil, "", errInvalidRequest
+	}
+	return values["model"], buffer.Bytes(), writer.FormDataContentType(), nil
+}
+
+func validImageFilename(name string) bool {
+	if name == "" || name == "." || len(name) > 128 || strings.ContainsAny(name, "\r\n\x00") {
+		return false
+	}
+	switch strings.ToLower(path.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".webp":
+		return true
+	default:
+		return false
+	}
 }
 func serviceError(err error) (int, string) {
 	switch {
@@ -318,14 +542,79 @@ func serviceError(err error) (int, string) {
 		return 503, "SERVICE_UNAVAILABLE"
 	}
 }
-func upstreamError(status int) (int, string, string) {
+func upstreamError(status int, body []byte) (int, string, string) {
 	switch status {
-	case 401, 403:
+	case 401:
 		return 502, "UPSTREAM_AUTHENTICATION_FAILED", "authentication_failed"
+	case 403:
+		return 502, "UPSTREAM_PERMISSION_DENIED", "permission_denied"
 	case 429:
+		if insufficientBalance(body) {
+			return 402, "BALANCE_INSUFFICIENT", "balance_insufficient"
+		}
 		return 429, "UPSTREAM_RATE_LIMITED", "rate_limited"
+	case 404:
+		if modelMissing(body) {
+			return 404, "MODEL_NOT_FOUND", "model_not_found"
+		}
+		return 502, "UPSTREAM_UNAVAILABLE", "unavailable"
 	default:
 		return 502, "UPSTREAM_UNAVAILABLE", "unavailable"
+	}
+}
+
+func upstreamErrorText(body []byte) string {
+	var response struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &response) != nil {
+		return ""
+	}
+	return strings.ToLower(response.Error.Code + " " + response.Error.Message)
+}
+
+func insufficientBalance(body []byte) bool {
+	text := upstreamErrorText(body)
+	return strings.Contains(text, "insufficient_quota") || strings.Contains(text, "balance") || strings.Contains(text, "quota exhausted") || strings.Contains(text, "余额") || strings.Contains(text, "额度不足")
+}
+
+func modelMissing(body []byte) bool {
+	text := upstreamErrorText(body)
+	return strings.Contains(text, "model_not_found") || strings.Contains(text, "model not found") || strings.Contains(text, "模型不存在")
+}
+
+func isEventStream(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	return err == nil && mediaType == "text/event-stream"
+}
+
+func relaySSE(w http.ResponseWriter, body io.Reader, limit int64) error {
+	reader := bufio.NewReader(io.LimitReader(body, limit+1))
+	written := int64(0)
+	flusher, _ := w.(http.Flusher)
+	for {
+		line, err := reader.ReadBytes('\n')
+		written += int64(len(line))
+		if written > limit {
+			return errors.New("bounded response invalid")
+		}
+		if len(line) > 0 {
+			if _, writeErr := w.Write(line); writeErr != nil {
+				return writeErr
+			}
+			if flusher != nil && (bytes.Equal(line, []byte("\n")) || bytes.Equal(line, []byte("\r\n"))) {
+				flusher.Flush()
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 	}
 }
 func readBounded(r io.Reader, limit int64) ([]byte, error) {
@@ -361,6 +650,9 @@ func validUpstreamJSON(route string, b []byte) bool {
 		}
 		return true
 	}
+	if strings.HasPrefix(route, "images.") {
+		return validImageResponse(top)
+	}
 	if !hasExactKeys(top, "id", "object", "created", "model", "choices", "usage") {
 		return false
 	}
@@ -388,6 +680,37 @@ func validUpstreamJSON(route string, b []byte) bool {
 	var fields map[string]json.RawMessage
 	var promptTokens, completionTokens, totalTokens int64
 	if json.Unmarshal(top["usage"], &fields) != nil || !hasExactKeys(fields, "prompt_tokens", "completion_tokens", "total_tokens") || json.Unmarshal(fields["prompt_tokens"], &promptTokens) != nil || json.Unmarshal(fields["completion_tokens"], &completionTokens) != nil || json.Unmarshal(fields["total_tokens"], &totalTokens) != nil || promptTokens < 0 || completionTokens < 0 || totalTokens < 0 || promptTokens > maxSafeInteger || completionTokens > maxSafeInteger || totalTokens > maxSafeInteger {
+		return false
+	}
+	return true
+}
+
+func validImageResponse(top map[string]json.RawMessage) bool {
+	if !hasExactKeys(top, "created", "data") {
+		return false
+	}
+	var created int64
+	var data []map[string]json.RawMessage
+	if json.Unmarshal(top["created"], &created) != nil || created < 0 || created > maxSafeInteger || json.Unmarshal(top["data"], &data) != nil || len(data) == 0 {
+		return false
+	}
+	for _, item := range data {
+		if len(item) != 1 {
+			return false
+		}
+		var value string
+		if raw, ok := item["url"]; ok {
+			if json.Unmarshal(raw, &value) != nil || value == "" {
+				return false
+			}
+			continue
+		}
+		if raw, ok := item["b64_json"]; ok {
+			if json.Unmarshal(raw, &value) != nil || value == "" {
+				return false
+			}
+			continue
+		}
 		return false
 	}
 	return true

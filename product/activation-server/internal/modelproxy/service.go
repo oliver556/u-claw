@@ -45,12 +45,14 @@ type SecretEnvelope interface {
 	DecryptSecret(context.Context, security.SecretBinding, []byte) ([]byte, error)
 }
 type ServiceOptions struct {
-	Repository     Repository
-	Digest         func(string) [32]byte
-	Envelope       SecretEnvelope
-	Random         io.Reader
-	Observer       Observer
-	AdmissionLease time.Duration
+	Repository      Repository
+	Digest          func(string) [32]byte
+	Envelope        SecretEnvelope
+	Random          io.Reader
+	Observer        Observer
+	AdmissionLease  time.Duration
+	UpstreamBaseURL string
+	UpstreamAPIKey  []byte
 }
 type Observer interface {
 	RecordModelProxyAuthRejected()
@@ -59,16 +61,18 @@ type Observer interface {
 	RecordModelProxyFinalizeFailure(string)
 }
 type Service struct {
-	repository     Repository
-	digest         func(string) [32]byte
-	envelope       SecretEnvelope
-	random         io.Reader
-	observer       Observer
-	admissionLease time.Duration
+	repository      Repository
+	digest          func(string) [32]byte
+	envelope        SecretEnvelope
+	random          io.Reader
+	observer        Observer
+	admissionLease  time.Duration
+	upstreamBaseURL string
+	upstreamAPIKey  []byte
 }
 
 func NewService(options ServiceOptions) (*Service, error) {
-	if options.Repository == nil || options.Digest == nil || options.Envelope == nil {
+	if options.Repository == nil || options.Digest == nil || (options.Envelope == nil && options.UpstreamBaseURL == "") {
 		return nil, errors.New("model proxy service configuration invalid")
 	}
 	if options.Random == nil {
@@ -80,7 +84,10 @@ func NewService(options ServiceOptions) (*Service, error) {
 	if options.AdmissionLease < time.Second || options.AdmissionLease > 2*time.Minute {
 		return nil, errors.New("model proxy service configuration invalid")
 	}
-	return &Service{repository: options.Repository, digest: options.Digest, envelope: options.Envelope, random: options.Random, observer: options.Observer, admissionLease: options.AdmissionLease}, nil
+	if (options.UpstreamBaseURL == "") != (len(options.UpstreamAPIKey) == 0) || (len(options.UpstreamAPIKey) > 0 && !apikey.Valid(options.UpstreamAPIKey)) {
+		return nil, errors.New("model proxy service configuration invalid")
+	}
+	return &Service{repository: options.Repository, digest: options.Digest, envelope: options.Envelope, random: options.Random, observer: options.Observer, admissionLease: options.AdmissionLease, upstreamBaseURL: options.UpstreamBaseURL, upstreamAPIKey: append([]byte(nil), options.UpstreamAPIKey...)}, nil
 }
 
 type Grant struct {
@@ -102,14 +109,14 @@ func (s *Service) Authorize(ctx context.Context, bearer, model, requestID string
 	if err != nil {
 		return Grant{}, ErrServiceUnavailable
 	}
-	if !active(auth) {
+	if !s.active(auth) {
 		if s.observer != nil {
 			s.observer.RecordModelProxyAuthRejected()
 		}
 		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "authentication.rejected"))
 		return Grant{}, ErrAuthenticationFailed
 	}
-	if model != "" && !contains(auth.AllowedModels, model) {
+	if s.upstreamBaseURL == "" && model != "" && !contains(auth.AllowedModels, model) {
 		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "model.rejected"))
 		return Grant{}, ErrModelNotAllowed
 	}
@@ -127,6 +134,11 @@ func (s *Service) Authorize(ctx context.Context, bearer, model, requestID string
 			s.observer.RecordModelProxyFinalizeFailure("admission")
 		}
 		return Grant{}, ErrServiceUnavailable
+	}
+	if s.upstreamBaseURL != "" {
+		auth.BaseURL = s.upstreamBaseURL
+		_ = s.repository.Audit(ctx, auditOf(auth, requestID, "admitted"))
+		return Grant{Authorization: auth, RequestID: requestID, APIKey: append([]byte(nil), s.upstreamAPIKey...)}, nil
 	}
 	plaintext, err := s.envelope.DecryptSecret(ctx, security.SecretBinding{Purpose: "new-api-key", SubjectID: auth.InventoryID, KeyVersion: auth.KeyVersion}, auth.Envelope)
 	if err != nil || !apikey.Valid(plaintext) {
@@ -152,8 +164,9 @@ func (s *Service) finalize(ctx context.Context, grant Grant, route, outcome stri
 		s.observer.RecordModelProxyFinalizeFailure("audit")
 	}
 }
-func active(a Authorization) bool {
-	return a.TokenStatus == "active" && a.InventoryStatus == "active" && a.DeviceStatus == "active" && a.LicenseStatus == "active" && a.BindingStatus == "active" && a.SetupStatus == "configured" && a.BalanceStatus == "configured" && len(a.Envelope) > 0 && a.KeyVersion != "" && a.BaseURL != "" && a.DefaultModel != "" && a.RequestsPerMinute > 0 && a.ConcurrentRequests > 0
+func (s *Service) active(a Authorization) bool {
+	base := a.TokenStatus == "active" && a.InventoryStatus == "active" && a.DeviceStatus == "active" && a.LicenseStatus == "active" && a.BindingStatus == "active" && a.SetupStatus == "configured" && a.BalanceStatus == "configured" && a.RequestsPerMinute > 0 && a.ConcurrentRequests > 0
+	return base && (s.upstreamBaseURL != "" || (len(a.Envelope) > 0 && a.KeyVersion != "" && a.BaseURL != "" && a.DefaultModel != ""))
 }
 func contains(values []string, want string) bool {
 	for _, v := range values {

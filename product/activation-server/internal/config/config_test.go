@@ -31,6 +31,9 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 		"ADMIN_OPERATORS_FILE":              operatorsFile,
 		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "fingerprint-key", []byte(strings.Repeat("f", 32))),
 		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
+		"NEW_API_BASE_URL":                  "https://api.example.test/v1",
+		"NEW_API_KEY_FILE":                  writeTestFile(t, directory, "new-api-key", []byte(strings.Repeat("n", 32))),
+		"NEW_API_ENABLED_MODELS":            "deepseek-chat,qwen-plus,doubao-pro",
 		"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
 		"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
 		"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
@@ -71,7 +74,13 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	if got.NewAPIKMSKeyVersion != "new-api-kms-v2" || got.ModelProxyRequestBodyBytes != 1<<20 || got.ModelProxyResponseBodyBytes != 4<<20 || got.ModelProxyTimeout != 60*time.Second || got.ModelProxyAdmissionLease != 65*time.Second {
 		t.Fatalf("model proxy configuration not preserved: %#v", got)
 	}
+	if got.NewAPIBaseURL != values["NEW_API_BASE_URL"] || string(got.NewAPIKey) != strings.Repeat("n", 32) || strings.Join(got.EnabledNewAPIModels, ",") != values["NEW_API_ENABLED_MODELS"] {
+		t.Fatal("global New API configuration not preserved")
+	}
 	for _, test := range []struct{ name, value string }{
+		{name: "NEW_API_BASE_URL", value: "http://api.example.test/v1"},
+		{name: "NEW_API_KEY_FILE", value: filepath.Join(directory, "missing-new-api-key")},
+		{name: "NEW_API_ENABLED_MODELS", value: "valid-model,?"},
 		{name: "NEW_API_KMS_KEY_VERSION", value: "?"},
 		{name: "MODEL_PROXY_REQUEST_BODY_BYTES", value: "0"},
 		{name: "MODEL_PROXY_RESPONSE_BODY_BYTES", value: "not-a-size"},
@@ -101,6 +110,8 @@ func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T
 		"ADMIN_OPERATORS_FILE":              writeTestFile(t, directory, "required-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
 		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "required-fingerprint-key", []byte(strings.Repeat("f", 32))),
 		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
+		"NEW_API_BASE_URL":                  "https://api.example.test/v1",
+		"NEW_API_KEY_FILE":                  writeTestFile(t, directory, "required-new-api-key", []byte(strings.Repeat("n", 32))),
 		"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
 		"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
 		"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
@@ -180,6 +191,8 @@ func TestLoadFromRejectsInvalidSecretFilesWithoutLeakingValues(t *testing.T) {
 				"ADMIN_OPERATORS_FILE":              writeTestFile(t, directory, "valid-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
 				"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "valid-fingerprint-key", []byte(strings.Repeat("f", 32))),
 				"NEW_API_ALLOWED_HOSTS":             "api.example.test",
+				"NEW_API_BASE_URL":                  "https://api.example.test/v1",
+				"NEW_API_KEY_FILE":                  writeTestFile(t, directory, "valid-new-api-key", []byte(strings.Repeat("n", 32))),
 				"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
 				"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
 				"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
@@ -218,6 +231,8 @@ func TestLoadFromAcceptsOnlyExplicitKEKFormats(t *testing.T) {
 		"ADMIN_OPERATORS_FILE":              writeTestFile(t, directory, "admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
 		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "fingerprint-key-base", []byte(strings.Repeat("f", 32))),
 		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
+		"NEW_API_BASE_URL":                  "https://api.example.test/v1",
+		"NEW_API_KEY_FILE":                  writeTestFile(t, directory, "base-new-api-key", []byte(strings.Repeat("n", 32))),
 		"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
 		"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
 		"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
@@ -327,7 +342,7 @@ func TestLoadFromRequiresIndependentAdminFingerprintSecret(t *testing.T) {
 	pepper := writeTestFile(t, directory, "separate-pepper", []byte(strings.Repeat("p", 32)))
 	kek := writeTestFile(t, directory, "separate-kek", []byte(strings.Repeat("k", 32)))
 	fingerprint := writeTestFile(t, directory, "separate-fingerprint", []byte(strings.Repeat("f", 32)))
-	base := map[string]string{"DATABASE_URL": "postgres://database/uclaw", "ACTIVATION_PEPPER_FILE": pepper, "LICENSE_SIGNING_KEY_FILE": signing, "STATUS_SIGNING_KEY_FILE": signing, "LICENSE_KEY_ID": "license-key-001", "STATUS_KEY_ID": "status-key-001", "KMS_PROVIDER": "local-kek-v1", "KMS_KEY_VERSION": "kms-v1", "KMS_KEK_FILE": kek, "ADMIN_OPERATORS_FILE": writeTestFile(t, directory, "separate-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)), "ADMIN_SECRET_FINGERPRINT_KEY_FILE": fingerprint, "NEW_API_ALLOWED_HOSTS": "api.example.test", "PUBLIC_MODEL_ENDPOINT": "https://activation.example/model-api/", "NEW_API_KMS_KEY_VERSION": "new-api-kms-v2", "MODEL_PROXY_REQUEST_BODY_BYTES": "1048576", "MODEL_PROXY_RESPONSE_BODY_BYTES": "4194304", "MODEL_PROXY_TIMEOUT": "60s", "MODEL_PROXY_ADMISSION_LEASE": "65s"}
+	base := map[string]string{"DATABASE_URL": "postgres://database/uclaw", "ACTIVATION_PEPPER_FILE": pepper, "LICENSE_SIGNING_KEY_FILE": signing, "STATUS_SIGNING_KEY_FILE": signing, "LICENSE_KEY_ID": "license-key-001", "STATUS_KEY_ID": "status-key-001", "KMS_PROVIDER": "local-kek-v1", "KMS_KEY_VERSION": "kms-v1", "KMS_KEK_FILE": kek, "ADMIN_OPERATORS_FILE": writeTestFile(t, directory, "separate-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)), "ADMIN_SECRET_FINGERPRINT_KEY_FILE": fingerprint, "NEW_API_ALLOWED_HOSTS": "api.example.test", "NEW_API_BASE_URL": "https://api.example.test/v1", "NEW_API_KEY_FILE": writeTestFile(t, directory, "separate-new-api-key", []byte(strings.Repeat("n", 32))), "PUBLIC_MODEL_ENDPOINT": "https://activation.example/model-api/", "NEW_API_KMS_KEY_VERSION": "new-api-kms-v2", "MODEL_PROXY_REQUEST_BODY_BYTES": "1048576", "MODEL_PROXY_RESPONSE_BODY_BYTES": "4194304", "MODEL_PROXY_TIMEOUT": "60s", "MODEL_PROXY_ADMISSION_LEASE": "65s"}
 	if _, err := LoadFrom(func(name string) string { return base[name] }); err != nil {
 		t.Fatalf("independent secret rejected: %v", err)
 	}

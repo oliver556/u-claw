@@ -206,6 +206,7 @@ describe("error contracts", () => {
     ['failed at "/Users/alice/private/chat.txt"', 'failed at "[REDACTED]"'],
     ["opened '/etc/u-claw/config.json'", "opened '[REDACTED]'"],
     ['Authorization: Bearer "abc def"', "Authorization: Bearer [REDACTED]"],
+    [`deviceToken=uclaw_dt_${"D".repeat(43)}`, "deviceToken=[REDACTED]"],
   ])("fully redacts quoted or structured sensitive text: %s", (message, expected) => {
     expect(RendererSafeTextSchema.parse(message)).toBe(expected);
   });

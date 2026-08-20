@@ -23,6 +23,9 @@ x-activation-app: &activation-app
     ADMIN_OPERATORS_FILE: /run/secrets/admin_operators
     ADMIN_SECRET_FINGERPRINT_KEY_FILE: /run/secrets/admin_secret_fingerprint_key
     NEW_API_ALLOWED_HOSTS: ${NEW_API_ALLOWED_HOSTS:?set NEW_API_ALLOWED_HOSTS}
+    NEW_API_BASE_URL: ${NEW_API_BASE_URL:?set NEW_API_BASE_URL}
+    NEW_API_KEY_FILE: /run/secrets/new_api_key
+    NEW_API_ENABLED_MODELS: ${NEW_API_ENABLED_MODELS:-}
   secrets:
     - { source: activation_pepper, target: /run/secrets/activation_pepper, uid: "0", gid: "0", mode: 0400 }
     - { source: license_signing_key, target: /run/secrets/license_signing_key, uid: "0", gid: "0", mode: 0400 }
@@ -30,6 +33,7 @@ x-activation-app: &activation-app
     - { source: kms_kek, target: /run/secrets/kms_kek, uid: "0", gid: "0", mode: 0400 }
     - { source: admin_operators, target: /run/secrets/admin_operators, uid: "0", gid: "0", mode: 0400 }
     - { source: admin_secret_fingerprint_key, target: /run/secrets/admin_secret_fingerprint_key, uid: "0", gid: "0", mode: 0400 }
+    - { source: new_api_key, target: /run/secrets/new_api_key, uid: "0", gid: "0", mode: 0400 }
   networks:
     - service_private
   read_only: true
@@ -231,6 +235,8 @@ secrets:
     file: ${ADMIN_OPERATORS_FILE:?set ADMIN_OPERATORS_FILE}
   admin_secret_fingerprint_key:
     file: ${ADMIN_SECRET_FINGERPRINT_KEY_FILE:?set ADMIN_SECRET_FINGERPRINT_KEY_FILE}
+  new_api_key:
+    file: ${NEW_API_KEY_FILE:?set NEW_API_KEY_FILE}
   tls_certificate:
     file: ${TLS_CERTIFICATE_FILE:?set TLS_CERTIFICATE_FILE}
   tls_private_key:

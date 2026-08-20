@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"u-claw-activation-server/internal/admin"
+	"u-claw-activation-server/internal/apikey"
 	"u-claw-activation-server/internal/modelendpoint"
+	"u-claw-activation-server/internal/modelproxy"
 )
 
 const defaultListenAddress = ":8080"
@@ -45,6 +47,8 @@ var requiredVariables = []string{
 	"ADMIN_OPERATORS_FILE",
 	"ADMIN_SECRET_FINGERPRINT_KEY_FILE",
 	"NEW_API_ALLOWED_HOSTS",
+	"NEW_API_BASE_URL",
+	"NEW_API_KEY_FILE",
 	"NEW_API_KMS_KEY_VERSION",
 	"MODEL_PROXY_REQUEST_BODY_BYTES",
 	"MODEL_PROXY_RESPONSE_BODY_BYTES",
@@ -72,6 +76,10 @@ type Config struct {
 	AdminSecretFingerprintKeyFile string
 	AdminSecretFingerprintKey     []byte
 	AllowedNewAPIHosts            []string
+	NewAPIBaseURL                 string
+	NewAPIKeyFile                 string
+	NewAPIKey                     []byte
+	EnabledNewAPIModels           []string
 	NewAPIKMSKeyVersion           string
 	ModelProxyRequestBodyBytes    int64
 	ModelProxyResponseBodyBytes   int64
@@ -132,6 +140,19 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("configuration NEW_API_ALLOWED_HOSTS is invalid")
 	}
+	if _, err = modelproxy.ValidateBaseURL(values["NEW_API_BASE_URL"], allowedHosts); err != nil {
+		return Config{}, errors.New("configuration NEW_API_BASE_URL is invalid")
+	}
+	newAPIKey, err := readRegularFile(values["NEW_API_KEY_FILE"], 16, 16<<10)
+	if err != nil || !apikey.Valid(newAPIKey) {
+		clear(newAPIKey)
+		return Config{}, errors.New("configuration NEW_API_KEY_FILE is invalid")
+	}
+	enabledModels, err := parseEnabledModels(getenv("NEW_API_ENABLED_MODELS"))
+	if err != nil {
+		clear(newAPIKey)
+		return Config{}, errors.New("configuration NEW_API_ENABLED_MODELS is invalid")
+	}
 	if !validPublicModelEndpoint(values["PUBLIC_MODEL_ENDPOINT"]) {
 		return Config{}, errors.New("configuration PUBLIC_MODEL_ENDPOINT is invalid")
 	}
@@ -173,9 +194,32 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		AdminOperatorsFile:            values["ADMIN_OPERATORS_FILE"],
 		AdminOperators:                adminOperators,
 		AdminSecretFingerprintKeyFile: values["ADMIN_SECRET_FINGERPRINT_KEY_FILE"], AdminSecretFingerprintKey: fingerprintKey, AllowedNewAPIHosts: allowedHosts,
+		NewAPIBaseURL: values["NEW_API_BASE_URL"], NewAPIKeyFile: values["NEW_API_KEY_FILE"], NewAPIKey: newAPIKey, EnabledNewAPIModels: enabledModels,
 		NewAPIKMSKeyVersion: values["NEW_API_KMS_KEY_VERSION"], ModelProxyRequestBodyBytes: requestBodyBytes, ModelProxyResponseBodyBytes: responseBodyBytes,
 		ModelProxyTimeout: proxyTimeout, ModelProxyAdmissionLease: admissionLease,
 	}, nil
+}
+
+var enabledModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
+
+func parseEnabledModels(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	seen := map[string]struct{}{}
+	models := make([]string, 0)
+	for _, value := range strings.Split(raw, ",") {
+		model := strings.TrimSpace(value)
+		if !enabledModelPattern.MatchString(model) {
+			return nil, errors.New("model invalid")
+		}
+		if _, exists := seen[model]; exists {
+			continue
+		}
+		seen[model] = struct{}{}
+		models = append(models, model)
+	}
+	return models, nil
 }
 
 var keyVersionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)

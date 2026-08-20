@@ -2,6 +2,8 @@ import { constants } from "node:fs";
 import { appendFile, lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
+import { redactRendererText } from "@uclaw/shared";
+
 export interface GatewayDiagnosticRecord {
   event: string;
   [key: string]: unknown;
@@ -43,7 +45,7 @@ export function createGatewayLogSink(input: {
       timestamp: (input.now?.() ?? new Date()).toISOString(),
       source: "gateway",
       ...record,
-    })}\n`;
+    }, (key, value) => typeof value === "string" ? redactRendererText(value, key) : value)}\n`;
     const info = await lstat(path).catch((error: NodeJS.ErrnoException) =>
       error.code === "ENOENT" ? undefined : Promise.reject(error));
     if (info && (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1)) {

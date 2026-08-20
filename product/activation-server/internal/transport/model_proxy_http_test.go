@@ -251,7 +251,7 @@ func TestModelProxyHandlerRecordsUpstreamOutcome(t *testing.T) {
 	}
 }
 
-func TestModelProxyHandlerFiltersModelsToAuthorization(t *testing.T) {
+func TestModelProxyHandlerReturnsGlobalModelsWithoutDeviceFiltering(t *testing.T) {
 	service := &fakeProxyService{grant: validGrant(t)}
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"object":"list","data":[{"id":"allowed","object":"model","created":1,"owned_by":"owner"},{"id":"blocked","object":"model","created":1,"owned_by":"owner"}]}`))}, nil
@@ -261,8 +261,23 @@ func TestModelProxyHandlerFiltersModelsToAuthorization(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	h.ServeHTTP(res, req)
-	if res.Code != 200 || strings.Contains(res.Body.String(), "blocked") || !strings.Contains(res.Body.String(), "allowed") {
+	if res.Code != 200 || !strings.Contains(res.Body.String(), "blocked") || !strings.Contains(res.Body.String(), "allowed") {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestModelProxyHandlerAppliesOneGlobalEnabledModelSet(t *testing.T) {
+	service := &fakeProxyService{grant: validGrant(t)}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"object":"list","data":[{"id":"enabled","object":"model","created":1,"owned_by":"owner"},{"id":"disabled","object":"model","created":1,"owned_by":"owner"}]}`))}, nil
+	})}
+	handler := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}, EnabledModels: []string{"enabled"}})
+	request := httptest.NewRequest(http.MethodGet, "/model-api/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"enabled"`) || strings.Contains(response.Body.String(), `"id":"disabled"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -352,7 +367,7 @@ func TestModelProxyHandlerRejectsMalformedAuthAndStrictPayloads(t *testing.T) {
 	for _, tc := range []struct {
 		name, auth, body string
 		status           int
-	}{{"two headers", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"extra whitespace", "Bearer  one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"missing stream", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}]}`, 400}, {"stream", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":true}`, 400}, {"unknown", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false,"temperature":0}`, 400}, {"role", "Bearer one", `{"model":"allowed","messages":[{"role":"tool","content":"x"}],"stream":false}`, 400}} {
+	}{{"two headers", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"extra whitespace", "Bearer  one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false}`, 401}, {"missing stream", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}]}`, 400}, {"unknown", "Bearer one", `{"model":"allowed","messages":[{"role":"user","content":"x"}],"stream":false,"temperature":0}`, 400}, {"role", "Bearer one", `{"model":"allowed","messages":[{"role":"tool","content":"x"}],"stream":false}`, 400}} {
 		t.Run(tc.name, func(t *testing.T) {
 			service := &fakeProxyService{grant: validGrant(t)}
 			h := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: &http.Client{}, AllowedHosts: []string{"api.example.test"}, RequestIDs: rand.Reader})
@@ -377,7 +392,7 @@ func TestModelProxyHandlerMapsUpstreamFailuresAndRoutesExactly(t *testing.T) {
 	for _, tc := range []struct {
 		upstream, want int
 		code           string
-	}{{401, 502, "UPSTREAM_AUTHENTICATION_FAILED"}, {403, 502, "UPSTREAM_AUTHENTICATION_FAILED"}, {429, 429, "UPSTREAM_RATE_LIMITED"}, {500, 502, "UPSTREAM_UNAVAILABLE"}} {
+	}{{401, 502, "UPSTREAM_AUTHENTICATION_FAILED"}, {403, 502, "UPSTREAM_PERMISSION_DENIED"}, {429, 429, "UPSTREAM_RATE_LIMITED"}, {500, 502, "UPSTREAM_UNAVAILABLE"}} {
 		service := &fakeProxyService{grant: validGrant(t)}
 		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: tc.upstream, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"secret":"upstream-body"}`))}, nil

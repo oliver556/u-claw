@@ -191,14 +191,14 @@ func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, envelope *securit
 	if err != nil {
 		return nil, err
 	}
-	modelService, err := modelproxy.NewService(modelproxy.ServiceOptions{Repository: modelRepository, Digest: digest, Envelope: envelope, Observer: metrics, AdmissionLease: cfg.ModelProxyAdmissionLease})
+	modelService, err := modelproxy.NewService(modelproxy.ServiceOptions{Repository: modelRepository, Digest: digest, Envelope: envelope, Observer: metrics, AdmissionLease: cfg.ModelProxyAdmissionLease, UpstreamBaseURL: cfg.NewAPIBaseURL, UpstreamAPIKey: cfg.NewAPIKey})
 	if err != nil {
 		return nil, err
 	}
 	activationHandler := transport.NewPublicHandler(transport.PublicHandlerOptions{Activation: activationService, Lifecycle: lifecycleService})
 	modelHandler := transport.NewModelProxyHandler(transport.ModelProxyHandlerOptions{
 		Service: modelService, Client: modelproxy.NewUpstreamClient(modelproxy.NewSecureTransport(nil, nil)), AllowedHosts: cfg.AllowedNewAPIHosts, Observer: metrics,
-		Timeout: cfg.ModelProxyTimeout, RequestBodyBytes: cfg.ModelProxyRequestBodyBytes, ResponseBodyBytes: cfg.ModelProxyResponseBodyBytes,
+		Timeout: cfg.ModelProxyTimeout, RequestBodyBytes: cfg.ModelProxyRequestBodyBytes, ResponseBodyBytes: cfg.ModelProxyResponseBodyBytes, EnabledModels: cfg.EnabledNewAPIModels,
 	})
 	return newPublicMux(activationHandler, modelHandler), nil
 }
