@@ -25,6 +25,11 @@ function secretDigest(secret, salt) {
     .digest("hex");
 }
 
+/** 输出 Go launcher 要求的无小数秒 RFC3339 时间。 */
+function canonicalTimestamp(milliseconds) {
+  return new Date(milliseconds).toISOString().replace(/\.\d{3}Z$/u, "Z");
+}
+
 /** 生成仅供 Windows 真机 smoke test 使用的短期授权材料。 */
 async function main() {
   const args = readArguments(process.argv.slice(2));
@@ -52,8 +57,8 @@ async function main() {
       startupSecretSalt: salt.toString("hex"),
       startupSecretHash: secretDigest(startupSecret, salt),
     },
-    notBefore: new Date(now - 5 * 60_000).toISOString(),
-    expiresAt: new Date(now + 24 * 60 * 60_000).toISOString(),
+    notBefore: canonicalTimestamp(now - 5 * 60_000),
+    expiresAt: canonicalTimestamp(now + 24 * 60 * 60_000),
     revision: 1,
     signature: { algorithm: "ed25519", keyId, value: "" },
   };
