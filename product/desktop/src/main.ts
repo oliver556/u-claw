@@ -40,6 +40,7 @@ import type { ProviderNetworkService } from "./providers/provider-network.js";
 import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provider-config.js";
 import { createCommercialOpenClawReadinessGate } from "./providers/commercial-openclaw-lifecycle.js";
 import { createCommercialImageChatRouter } from "./providers/commercial-image-chat-router.js";
+import type { OpenClawImageInference } from "./providers/openclaw-image-cli-runtime.js";
 import { installBundledCommercialImageExtension } from "./providers/commercial-image-extension-bootstrap.js";
 import { createMainProcessModelRouting, type ExternalModelSourceExecutors } from "./providers/model-source-router.js";
 import { createLocalApplicationRouter, defaultApplicationRoots } from "./local-actions/application-router.js";
@@ -402,11 +403,12 @@ export interface DesktopMainOptions {
   providerNetwork?: ProviderNetworkService;
   providerConfig?: OpenClawProviderConfigBackend;
   commercialProviderBootstrap?(coordinator: ProductionRuntimeConsistencyCoordinator): Promise<void>;
+  commercialImageInference?: OpenClawImageInference;
   modelSourceExecutors?: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
   injectChatMessage?(
     sessionId: string,
     message: string,
-    label: "uclaw-local-user-v1" | "uclaw-local-result-v1",
+    label: "uclaw-local-user-v1" | "uclaw-local-result-v1" | "uclaw-commercial-image-v1",
     signal?: AbortSignal,
   ): Promise<void>;
   domainRegistrations?: DesktopDomainRegistry;
@@ -776,7 +778,13 @@ export async function startElectronMain(
   void modelRouting;
   const commercialProviderReadiness = createCommercialOpenClawReadinessGate();
   const commercialImageChat = createCommercialImageChatRouter({
-    chat: client.chat,
+    chat: {
+      ...client.chat,
+      injectAssistant: (sessionId, message, label, signal) => options.injectChatMessage!(sessionId, message, label, signal),
+    },
+    imageInference: options.commercialImageInference ?? {
+      infer: async () => { throw new Error("OpenClaw image inference runtime is unavailable."); },
+    },
     sessionModel: async (sessionId) => (await client.sessions.get(sessionId)).model?.id,
   });
   const routeChatSend = (input: SendMessageInput, signal: AbortSignal) =>

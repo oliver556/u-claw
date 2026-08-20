@@ -8,12 +8,10 @@ const PROVIDER_ID = "uclaw-commercial";
 const MODEL_ID = "gpt-image-2";
 const DEFAULT_SIZE = "1024x1024";
 
-function multipartEdit({ req, inputImages, model, count }) {
+function multipartEdit({ req, inputImages, model }) {
   const form = new FormData();
   form.set("model", model);
   form.set("prompt", req.prompt);
-  form.set("n", String(count));
-  form.set("size", req.size ?? DEFAULT_SIZE);
   for (const [index, image] of inputImages.entries()) {
     const mimeType = image.mimeType?.trim() || "image/png";
     form.append("image[]", new Blob([new Uint8Array(image.buffer)], { type: mimeType }), imageSourceUploadFileName({

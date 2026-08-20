@@ -50,6 +50,7 @@ import type {
   RegisteredDesktopDomain,
 } from "../main.js";
 import { createOpenClawCliPluginRuntime } from "../plugins/openclaw-cli-runtime.js";
+import { createOpenClawImageCliRuntime } from "../providers/openclaw-image-cli-runtime.js";
 import { createOpenClawCapabilityRuntime } from "../capabilities/openclaw-capability-runtime.js";
 import { createOpenClawSkillRuntime } from "../skills/openclaw-skill-runtime.js";
 import { createUsageDispatcher } from "../usage/usage-dispatcher.js";
@@ -447,6 +448,13 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     dataDir: environment.dataRoot,
     baseEnvironment: env,
   });
+  const commercialImageInference = await createOpenClawImageCliRuntime({
+    runtimeRoot: environment.runtimeRoot,
+    executable: environment.nodeExecutable,
+    entrypoint: environment.openClawEntry,
+    dataDir: environment.dataRoot,
+    baseEnvironment: env,
+  });
   let gatewayProcessAlive = false;
   const openClawStateDir = dirname(environment.openClawConfig);
   const wechatPluginDir = join(openClawStateDir, "extensions", "openclaw-weixin");
@@ -698,6 +706,7 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
       fetchModels: (credential) => fetchCommercialModels(credential),
       listModels: () => client.models.list(),
     }),
+    commercialImageInference,
     pluginRuntime,
     capabilityRuntime,
     domainRegistrations: domains,

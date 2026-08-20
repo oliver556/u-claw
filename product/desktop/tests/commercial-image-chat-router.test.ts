@@ -15,6 +15,12 @@ async function* events(): AsyncIterable<MessageEvent> {
   yield { type: "started", runId: "run-image", sessionId: "agent:main:image-session" };
 }
 
+async function collect(events: AsyncIterable<MessageEvent>): Promise<MessageEvent[]> {
+  const collected: MessageEvent[] = [];
+  for await (const event of events) collected.push(event);
+  return collected;
+}
+
 function imageMessage(sourceUrl: string): Message {
   return {
     id: "assistant-image",
@@ -32,50 +38,85 @@ function imageMessage(sourceUrl: string): Message {
 }
 
 describe("commercial OpenClaw image chat router", () => {
-  it("routes the first image turn through OpenClaw image_generate without a reference", async () => {
+  it("routes the first image turn through OpenClaw image inference without a reference", async () => {
     const send = vi.fn(() => events());
+    const infer = vi.fn(async () => ({ path: "/controlled/generated.png", mimeType: "image/png", size: 128 }));
+    const injectAssistant = vi.fn(async () => undefined);
+    const generated = imageMessage("http://127.0.0.1:18789/__openclaw__/assistant-media?source=%2Fcontrolled%2Fgenerated.png");
+    const list = vi.fn()
+      .mockResolvedValueOnce({ items: [], hasMore: false })
+      .mockResolvedValueOnce({ items: [generated], hasMore: false });
     const router = createCommercialImageChatRouter({
-      chat: { send, list: vi.fn(async () => ({ items: [], hasMore: false })) },
+      chat: { send, list, injectAssistant },
+      imageInference: { infer },
     });
 
-    await router.route(input("生成一只蓝色小猫"));
+    const routed = await router.route(input("生成一只蓝色小猫"));
+    const result = await collect(routed);
 
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({
-      blocks: [{
-        type: "text",
-        format: "plain",
-        text: expect.stringMatching(/^\/tool image_generate action=generate model=uclaw-commercial\/gpt-image-2 prompt=/u),
-      }],
-    }), undefined);
-    const [sent] = send.mock.calls[0] as unknown as [SendMessageInput, AbortSignal?];
-    expect(sent.blocks[0]?.type === "text" ? sent.blocks[0].text : "").not.toContain(" image=");
+    expect(send).not.toHaveBeenCalled();
+    expect(infer).toHaveBeenCalledWith({
+      prompt: "生成一只蓝色小猫",
+      model: "uclaw-commercial/gpt-image-2",
+      clientRequestId: "request-8",
+    }, undefined);
+    expect(result.map((event) => event.type)).toEqual(["started", "final"]);
+    expect(result[1]).toMatchObject({ type: "final", message: generated });
+    expect(injectAssistant).toHaveBeenCalledWith(
+      "agent:main:image-session",
+      "MEDIA: /controlled/generated.png",
+      "uclaw-commercial-image-v1",
+      undefined,
+    );
   });
 
   it("reads the previous image from OpenClaw history and passes it to image_generate edit", async () => {
     const path = "/controlled/openclaw/media/generated.png";
     const sourceUrl = `http://127.0.0.1:18789/__openclaw__/assistant-media?source=${encodeURIComponent(path)}`;
     const send = vi.fn(() => events());
-    const list = vi.fn(async () => ({ items: [imageMessage(sourceUrl)], hasMore: false }));
-    const router = createCommercialImageChatRouter({ chat: { send, list } });
+    const previous = imageMessage(sourceUrl);
+    const edited = { ...imageMessage("http://127.0.0.1:18789/__openclaw__/assistant-media?source=%2Fcontrolled%2Fedited.png"), id: "assistant-edited" };
+    const list = vi.fn()
+      .mockResolvedValueOnce({ items: [previous], hasMore: false })
+      .mockResolvedValueOnce({ items: [previous, edited], hasMore: false });
+    const infer = vi.fn(async () => ({ path: "/controlled/edited.png", mimeType: "image/png", size: 128 }));
+    const injectAssistant = vi.fn(async () => undefined);
+    const router = createCommercialImageChatRouter({ chat: { send, list, injectAssistant }, imageInference: { infer } });
 
-    await router.route(input("把主体颜色改成红色"));
+    const routed = await router.route(input("把主体颜色改成红色"));
+    const result = await collect(routed);
 
     expect(list).toHaveBeenCalledWith("agent:main:image-session");
-    const [sent] = send.mock.calls[0] as unknown as [SendMessageInput, AbortSignal?];
-    const command = sent.blocks[0]?.type === "text" ? sent.blocks[0].text : "";
-    expect(command).toContain(` image=${JSON.stringify(path)}`);
-    expect(command).toContain(`prompt=${JSON.stringify("把主体颜色改成红色")}`);
+    expect(send).not.toHaveBeenCalled();
+    expect(infer).toHaveBeenCalledWith({
+      prompt: "把主体颜色改成红色",
+      model: "uclaw-commercial/gpt-image-2",
+      clientRequestId: "request-9",
+      image: path,
+    }, undefined);
+    expect(result.at(-1)).toMatchObject({ type: "final", message: edited });
+    expect(injectAssistant).toHaveBeenCalledWith(
+      "agent:main:image-session",
+      "MEDIA: /controlled/edited.png",
+      "uclaw-commercial-image-v1",
+      undefined,
+    );
   });
 
   it("keeps non-image models on ordinary OpenClaw chat.send", async () => {
     const send = vi.fn(() => events());
     const list = vi.fn(async () => ({ items: [], hasMore: false }));
-    const router = createCommercialImageChatRouter({ chat: { send, list } });
+    const infer = vi.fn();
+    const router = createCommercialImageChatRouter({
+      chat: { send, list, injectAssistant: vi.fn() },
+      imageInference: { infer },
+    });
     const normal = { ...input("hello"), modelId: "uclaw-commercial/gpt-5.5" };
 
     await router.route(normal);
 
     expect(send).toHaveBeenCalledWith(normal, undefined);
     expect(list).not.toHaveBeenCalled();
+    expect(infer).not.toHaveBeenCalled();
   });
 });

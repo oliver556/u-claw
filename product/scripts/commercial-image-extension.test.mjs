@@ -17,5 +17,6 @@ test("commercial image extension owns the OpenClaw provider and multipart edit c
   assert.match(source, /buildGenerateRequest/u);
   assert.match(source, /buildEditRequest:\s*multipartEdit/u);
   assert.match(source, /form\.append\("image\[\]"/u);
+  assert.doesNotMatch(source, /form\.set\("(?:n|size)"/u);
   assert.doesNotMatch(source, /uclaw_dt_|Bearer\s+[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9_-]{16,}/u);
 });
