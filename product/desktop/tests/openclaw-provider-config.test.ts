@@ -110,6 +110,29 @@ describe("OpenClaw provider config backend", () => {
     expect(applied.models.providers["uclaw-commercial"]).not.toHaveProperty("model");
   });
 
+  it("uses OpenAI thinking compatibility only for DeepSeek commercial models", async () => {
+    const { rpc, request } = fakeRpc({ gateway: { mode: "local" } });
+    const backend = createOpenClawProviderConfigBackend(rpc);
+
+    await backend.synchronizeCommercial({
+      endpoint: "https://commercial.example.test/model-api/v1/",
+      credentialPath: "/portable/data/.uclaw/builtin-model-credential.v1.json",
+      models: [
+        { id: "gpt-5.5", name: "GPT 5.5" },
+        { id: "gpt-image-2", name: "GPT Image 2" },
+        { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+        { id: "qwen3-max", name: "Qwen 3 Max" },
+      ],
+    });
+
+    const applied = JSON.parse(String(request.mock.calls.find(([method]) => method === "config.apply")?.[1].raw));
+    const models = applied.models.providers["uclaw-commercial"].models;
+    expect(models.find(({ id }: { id: string }) => id === "deepseek-v4-flash").compat.thinkingFormat).toBe("openai");
+    for (const id of ["gpt-5.5", "gpt-image-2", "qwen3-max"]) {
+      expect(models.find((model: { id: string }) => model.id === id).compat).not.toHaveProperty("thinkingFormat");
+    }
+  });
+
   it("migrates legacy commercial aliases from plaintext deviceToken values to the file SecretRef", async () => {
     const firstToken = `uclaw_dt_${"A".repeat(43)}`;
     const secondToken = `uclaw_dt_${"B".repeat(43)}`;
@@ -167,7 +190,7 @@ describe("OpenClaw provider config backend", () => {
               apiKey: "[REDACTED]",
               api: "openai-completions",
               models: [
-                { id: "deepseek-chat", name: "DeepSeek", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { requiresStringContent: true, supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" } },
+                { id: "deepseek-chat", name: "DeepSeek", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { requiresStringContent: true, supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", thinkingFormat: "openai" } },
                 { id: "qwen-max", name: "Qwen", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { requiresStringContent: true, supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" } },
               ],
             } } },

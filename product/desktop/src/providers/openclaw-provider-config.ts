@@ -125,6 +125,7 @@ function commercialModelConfig(model: CommercialProviderModel): JsonObject {
       supportsDeveloperRole: false,
       supportsReasoningEffort: false,
       maxTokensField: "max_tokens",
+      ...(/^deepseek(?:[-_/]|$)/iu.test(model.id) ? { thinkingFormat: "openai" } : {}),
     },
   };
 }
