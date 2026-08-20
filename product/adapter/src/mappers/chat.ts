@@ -16,11 +16,12 @@ const ErrorSummarySchema = z.object({
 const KnownRawBlockSchema = z.discriminatedUnion("type", [
   z.object({ id: z.string().min(1), type: z.literal("text"), text: z.string(), format: z.enum(["plain", "markdown"]) }).strict(),
   z.object({ id: z.string().min(1), type: z.literal("code"), code: z.string(), language: z.string().optional(), filename: z.string().optional() }).strict(),
+  z.object({ id: z.string().min(1), type: z.literal("image"), url: z.string().min(1), mimeType: z.string().min(1), alt: z.string().optional() }).strict(),
   z.object({ id: z.string().min(1), type: z.literal("tool-call"), toolCallId: z.string().min(1) }).strict(),
   z.object({ id: z.string().min(1), type: z.literal("notice"), level: z.enum(["info", "warning", "error"]), text: z.string() }).strict(),
 ]);
 
-const knownBlockTypes = new Set(["text", "code", "tool-call", "notice"]);
+const knownBlockTypes = new Set(["text", "code", "image", "tool-call", "notice"]);
 const UnknownRawBlockSchema = z.object({
   id: z.string().min(1),
   type: z.string().min(1).refine((type) => !knownBlockTypes.has(type), "Known block must match its schema"),
@@ -48,7 +49,7 @@ export const RawChatEventSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("error"), runId: z.string().min(1), sessionKey: z.string().min(1), errorKind: z.string().optional(), errorMessage: z.string().min(1).optional() }).strict(),
 ]);
 
-function mapBlock(input: z.infer<typeof RawBlockSchema>): ContentBlock {
+function mapBlock(input: z.infer<typeof RawBlockSchema>, gatewayOrigin?: string): ContentBlock {
   const known = KnownRawBlockSchema.safeParse(input);
   if (!known.success) {
     return { id: input.id, type: "unsupported", originalType: input.type, summary: "Unsupported content" };
@@ -66,6 +67,15 @@ function mapBlock(input: z.infer<typeof RawBlockSchema>): ContentBlock {
       ...(block.filename === undefined ? {} : { filename: block.filename }),
     };
   }
+  if (block.type === "image") {
+    return {
+      id: block.id,
+      type: "image",
+      file: { id: block.id, name: block.alt ?? "生成的图片", mediaType: block.mimeType, size: 0, kind: "artifact" },
+      ...(block.alt === undefined ? {} : { alt: block.alt }),
+      ...(gatewayOrigin === undefined ? {} : { sourceUrl: `${gatewayOrigin}${block.url}` }),
+    };
+  }
   if (block.type === "tool-call") {
     return { id: block.id, type: "tool-call", toolCallId: block.toolCallId };
   }
@@ -78,15 +88,33 @@ function errorCode(code: string | undefined): "TIMEOUT" | "CANCELLED" | "UNKNOWN
   return "UNKNOWN";
 }
 
-export function mapMessage(payload: z.input<typeof RawMessageSchema>): Message {
-  const raw = RawMessageSchema.parse(payload);
+export function mapCanonicalMessage(input: {
+  id: string;
+  sessionId: string;
+  role: Message["role"];
+  status: Message["status"];
+  blocks: ContentBlock[];
+  createdAt: string;
+  updatedAt?: string;
+  model?: Message["model"];
+  error?: Message["error"];
+}): Message {
   return MessageSchema.parse({
+    ...input,
+    blocks: input.blocks.map((block) => block.type === "text" && input.role === "assistant"
+      ? { ...block, format: "markdown" as const }
+      : block),
+  });
+}
+
+export function mapMessage(payload: z.input<typeof RawMessageSchema>, gatewayOrigin?: string): Message {
+  const raw = RawMessageSchema.parse(payload);
+  return mapCanonicalMessage({
     id: raw.id,
     sessionId: raw.sessionKey,
-    ...(raw.runId === undefined ? {} : { runId: raw.runId }),
     role: raw.role,
     status: raw.status,
-    blocks: raw.blocks.map(mapBlock),
+    blocks: raw.blocks.map((block) => mapBlock(block, gatewayOrigin)),
     createdAt: raw.createdAt,
     ...(raw.updatedAt === undefined ? {} : { updatedAt: raw.updatedAt }),
     ...(raw.model === undefined ? {} : { model: raw.model }),
@@ -96,13 +124,13 @@ export function mapMessage(payload: z.input<typeof RawMessageSchema>): Message {
   });
 }
 
-export function mapChatEvent(payload: z.input<typeof RawChatEventSchema>): MessageEvent {
+export function mapChatEvent(payload: z.input<typeof RawChatEventSchema>, gatewayOrigin?: string): MessageEvent {
   const raw = RawChatEventSchema.parse(payload);
   if (raw.state === "delta") {
     return MessageEventSchema.parse({ type: "delta", runId: raw.runId, mode: raw.replace === true ? "replace" : "append", text: raw.deltaText });
   }
   if (raw.state === "final") {
-    return MessageEventSchema.parse({ type: "final", runId: raw.runId, message: mapMessage(raw.message) });
+    return MessageEventSchema.parse({ type: "final", runId: raw.runId, message: mapMessage(raw.message, gatewayOrigin) });
   }
   if (raw.state === "aborted") {
     return MessageEventSchema.parse({ type: "aborted", runId: raw.runId, ...(raw.errorMessage === undefined ? {} : { reason: raw.errorMessage }) });

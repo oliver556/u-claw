@@ -53,7 +53,7 @@ export function messageEventReducer(state: StreamState, event: StreamAction): St
       next = { ...run, approvals: [...run.approvals.filter((approval) => approval.id !== event.approval.id), event.approval] };
       break;
     case "final":
-      next = { ...run, terminal: "final", finalMessage: event.message, completedAt: new Date().toISOString() };
+      next = { ...run, text: "", terminal: "final", finalMessage: event.message, completedAt: new Date().toISOString() };
       break;
     case "aborted":
       next = { ...run, terminal: "aborted", errorMessage: event.reason ?? "已停止", completedAt: new Date().toISOString() };
@@ -71,6 +71,12 @@ export function messageEventReducer(state: StreamState, event: StreamAction): St
 
 export function useMessageStream(onEvent?: (event: MessageEvent) => void) {
   const [state, dispatch] = useReducer(messageEventReducer, initialStreamState);
+
+  const apply = useCallback((event: MessageEvent, consumeEvent?: (event: MessageEvent) => void) => {
+    dispatch(event);
+    onEvent?.(event);
+    consumeEvent?.(event);
+  }, [onEvent]);
 
   const consume = useCallback(async (source: AsyncIterable<MessageEvent>, consumeEvent?: (event: MessageEvent) => void) => {
     const iterator = source[Symbol.asyncIterator]();
@@ -92,27 +98,23 @@ export function useMessageStream(onEvent?: (event: MessageEvent) => void) {
                 causeDetails: { operation: "chat.stream" },
               },
             };
-            dispatch(event);
-            onEvent?.(event);
-            consumeEvent?.(event);
+            apply(event, consumeEvent);
           }
           throw failure;
         }
         const event = item.value;
         runId = event.runId;
-        dispatch(event);
-        onEvent?.(event);
-        consumeEvent?.(event);
+        apply(event, consumeEvent);
         if (event.type === "final" || event.type === "aborted" || event.type === "error") return event;
       }
     } finally {
       await iterator.return?.();
     }
-  }, [onEvent]);
+  }, [apply]);
 
   const dismissApproval = useCallback((approvalId: string) => {
     dispatch({ type: "dismiss-approval", approvalId });
   }, []);
 
-  return { state, consume, dismissApproval };
+  return { state, consume, apply, dismissApproval };
 }

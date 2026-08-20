@@ -76,6 +76,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
   const [activeSession, setActiveSession] = useState<Session>();
   const [capabilities, setCapabilities] = useState<CapabilitySet>();
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus>();
+  const [reconnectVersion, setReconnectVersion] = useState(0);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState<Record<string, string[]>>({});
   const [activityCenterOpen, setActivityCenterOpen] = useState(false);
@@ -266,9 +267,14 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
 
   const organizedSessions = organizeSessions(sessions, organizer, "");
 
+  const reconnect = async () => {
+    await client.gateway.reconnect();
+    setReconnectVersion((current) => current + 1);
+  };
+
   return <div className="app-shell">
     <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById("main")?.focus(); }}>跳到主要内容</a>
-    <AppTitlebar status={gatewayStatus} onReconnect={() => client.gateway.reconnect()} onOpenActivity={() => setActivityCenterOpen(true)} />
+    <AppTitlebar status={gatewayStatus} onReconnect={reconnect} onOpenActivity={() => setActivityCenterOpen(true)} />
     <div className={isWork ? `workspace-grid context-collapsed${sessionsOpen ? "" : " sessions-collapsed"}` : "workspace-grid secondary-layout"}>
       <PrimaryRail />
       {isWork && sessionsOpen ? <SessionSidebar
@@ -300,7 +306,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
         {isWork && !sessionsOpen ? <Tooltip title="展开会话栏"><button className="sessions-reopen icon-button" type="button" aria-label="展开会话栏" onClick={() => setSessionsOpen(true)}><PanelLeft /></button></Tooltip> : null}
         {isWork ? activeSession === undefined
           ? <section className="work-canvas workspace-placeholder"><div className="conversation-state"><FolderArchive /><strong>{sessionState === "loading" ? "正在准备工作区" : "还没有会话"}</strong></div></section>
-          : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} onSessionUpdated={(sessionId) => void refreshSessions(sessionId)} />
+          : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} reconnectVersion={reconnectVersion} onReconnect={reconnect} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} onSessionUpdated={(sessionId) => void refreshSessions(sessionId)} />
           : route.path === "/files" ? <DataManager key="workspace" domain="workspace" onDirtyChange={setDataDirty} /> : route.path === "/memory" ? <DataManager key="memory" domain="memory" onDirtyChange={setDataDirty} /> : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/automation" ? <AutomationManager invoke={window.uclaw?.automation?.invoke} /> : route.path === "/connections" ? <ChannelSettings /> : route.path === "/usage" ? <UsageView /> : route.path === "/balance" ? <BalanceView /> : route.path === "/system" ? <SystemCenter /> : <SecondaryView title={route.label} description={route.description} system={false} />}
       </main>
     </div>

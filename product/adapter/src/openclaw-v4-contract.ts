@@ -10,6 +10,8 @@ import {
   type ToolCall,
 } from "@uclaw/shared";
 import { z } from "zod";
+
+import { mapCanonicalMessage } from "./mappers/chat.js";
 import { posix, win32 } from "node:path";
 
 import { RawOpenClawModelsListResponseSchema } from "./mappers/model.js";
@@ -446,7 +448,7 @@ function contentBlocks(message: z.infer<typeof OpenClawHistoryMessageSchema>, ga
         type: "image" as const,
         file: { id, name: alt, mediaType, size: 0, kind: "artifact" as const },
         alt,
-        sourceUrl: gatewayOrigin === undefined ? block.url : `${gatewayOrigin}${block.url}`,
+        ...(gatewayOrigin === undefined ? {} : { sourceUrl: `${gatewayOrigin}${block.url}` }),
       }];
     }
     return [{ id: `${message.__openclaw.id}:${index}`, type: "unsupported" as const, originalType: block.type, summary: "Unsupported OpenClaw content" }];
@@ -488,7 +490,7 @@ function localInjection(message: z.infer<typeof OpenClawHistoryMessageSchema>): 
 export function mapOpenClawHistoryMessage(sessionKey: string, input: z.input<typeof OpenClawHistoryMessageSchema>, gatewayOrigin?: string, dataRoot?: string): Message {
   const message = OpenClawHistoryMessageSchema.parse(input);
   const local = localInjection(message);
-  return MessageSchema.parse({
+  return mapCanonicalMessage({
     id: message.__openclaw.id,
     sessionId: sessionKey,
     role: message.role === "toolResult" ? "tool" : local.role,

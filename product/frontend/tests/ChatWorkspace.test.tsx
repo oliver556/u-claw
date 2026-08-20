@@ -855,7 +855,7 @@ describe("chat workspace", () => {
     pending.emit({ type: "started", runId: "run-old", sessionId: "session-1" });
     fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
     expect(await within(screen.getByRole("main")).findByText("第二段历史")).toBeVisible();
-    expect(signal?.aborted).toBe(true);
+    expect(signal?.aborted).toBe(false);
     pending.emit({ type: "final", runId: "run-old", message: { id: "old-final", sessionId: "session-1", runId: "run-old", role: "assistant", status: "completed", blocks: [], createdAt: "2026-08-08T08:01:00.000Z" } });
     pending.finish();
     await act(async () => undefined);

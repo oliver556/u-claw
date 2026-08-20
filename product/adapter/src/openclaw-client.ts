@@ -1474,7 +1474,7 @@ export class OpenClawClient implements UClawClient {
   private processChatFrame(frame: EventFrame, event: z.infer<typeof RawChatEventSchema>): { event: MessageEvent; accepted: boolean } {
     const cached = this.processedChatFrames.get(frame);
     if (cached !== undefined) return cached;
-    const mapped = mapChatEvent(event);
+    const mapped = mapChatEvent(event, this.options.gatewayOrigin?.());
     const terminal = mapped.type === "final" || mapped.type === "aborted" || mapped.type === "error";
     const key = `${event.sessionKey}:${mapped.runId}`;
     const accepted = !terminal || !this.terminalRuns.has(key);

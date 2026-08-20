@@ -19,6 +19,8 @@ interface ConversationProps {
   onActivity(message: string): void;
   onSendSuccess(sessionId: string): void;
   onSessionUpdated(sessionId: string): void;
+  onReconnect(): Promise<void>;
+  reconnectVersion?: number;
 }
 
 function requestId() {
@@ -30,7 +32,7 @@ export async function resolveApproval(client: Pick<UClawClient, "approvals">, ap
   return client.approvals.resolvePlugin({ ref: { family: "plugin", id: approval.id }, decision });
 }
 
-export function Conversation({ client, session, capabilities, gatewayStatus, draft, onDraftChange, onActivity, onSendSuccess, onSessionUpdated }: ConversationProps) {
+export function Conversation({ client, session, capabilities, gatewayStatus, draft, onDraftChange, onActivity, onSendSuccess, onSessionUpdated, onReconnect, reconnectVersion = 0 }: ConversationProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">("loading");
   const [historyError, setHistoryError] = useState<string>();
@@ -70,7 +72,6 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     mounted.current = true;
     return () => {
       mounted.current = false;
-      sendController.current?.abort();
       activeImports.current.forEach((importId, temporaryId) => {
         cancelledImports.current.add(temporaryId);
         void window.uclaw?.attachments?.invoke({ method: "cancel", requestId: requestId(), params: { attachmentId: importId } }).catch(() => undefined);
@@ -105,7 +106,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
     else if (event.type === "aborted") onActivity("响应已停止");
     else if (event.type === "error") onActivity(`响应失败：${event.error.message}`);
   }, [client, onActivity]);
-  const { state: stream, consume, dismissApproval } = useMessageStream(onStreamEvent);
+  const { state: stream, consume, apply: applyStreamEvent, dismissApproval } = useMessageStream(onStreamEvent);
 
   useEffect(() => {
     const element = conversationRef.current;
@@ -140,6 +141,20 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   }, [client, session.id]);
 
   useEffect(() => { void loadHistory(); }, [loadHistory]);
+
+  useEffect(() => {
+    if (reconnectVersion === 0 || client.chat.watch === undefined) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        for await (const event of client.chat.watch!(session.id, controller.signal)) applyStreamEvent(event);
+      } catch {
+        // History calibration below remains authoritative when a subscription closes.
+      }
+    })();
+    void loadHistory();
+    return () => controller.abort();
+  }, [applyStreamEvent, client, loadHistory, reconnectVersion, session.id]);
 
   const loadMoreHistory = async () => {
     if (!historyHasMore || historyNextCursor === null || historyPageState === "loading") return;
@@ -531,7 +546,7 @@ export function Conversation({ client, session, capabilities, gatewayStatus, dra
   };
 
   return <section className="work-canvas">
-    {unavailable ? <div className="connection-alert" role="alert"><WifiOff /><span><strong>服务连接已断开</strong><small>消息暂时无法发送，草稿仍保留在本机。</small></span><button type="button" onClick={() => void client.gateway.reconnect()}><RotateCw />重新连接</button></div> : null}
+    {unavailable ? <div className="connection-alert" role="alert"><WifiOff /><span><strong>服务连接已断开</strong><small>消息暂时无法发送，草稿仍保留在本机。</small></span><button type="button" onClick={() => void onReconnect()}><RotateCw />重新连接</button></div> : null}
     <div className="conversation" ref={conversationRef} aria-busy={historyState === "loading"}>
       {historyState === "loading" ? <div className="conversation-state"><LoaderCircle className="spin" /><span>正在加载消息</span></div> : null}
       {historyState === "error" ? <div className="conversation-state" role="alert"><AlertCircle /><strong>消息加载失败</strong><span>{historyError}</span><button type="button" onClick={() => void loadHistory()}><RotateCw />重试</button></div> : null}
