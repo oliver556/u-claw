@@ -190,9 +190,12 @@ describe("ChannelSettings", () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(screen.getByText("可扫码连接")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "开始个人微信扫码登录" }));
+    const scanButton = screen.getByRole("button", { name: "开始个人微信扫码登录" });
+    expect(scanButton).toHaveClass("ant-btn-primary");
+    fireEvent.click(scanButton);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("img", { name: "个人微信登录二维码" })).toHaveAttribute("src", qrImage.value);
+    expect(screen.getByRole("button", { name: "取消" })).toHaveClass("ant-btn-text");
     expect(screen.getByText(/^有效期至 /u)).toBeVisible();
     await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
 
@@ -204,6 +207,34 @@ describe("ChannelSettings", () => {
     expect(screen.queryByRole("img", { name: "个人微信登录二维码" })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("wxid_private_account");
     expect(document.body.textContent).not.toContain("bot_token");
+  });
+
+  it("uses warning and primary recovery hierarchy when an account is disconnected", async () => {
+    const interrupted: WechatConnectionSnapshot = {
+      ...unavailableWechat,
+      capability: "available",
+      capabilityReason: undefined,
+      plugin: { ...unavailableWechat.plugin, status: "installed" },
+      status: "network-error",
+      loginState: "error",
+      account: { accountIdHint: "...7a2f" },
+      error: { category: "network", code: "WECHAT_NETWORK_ERROR", message: "network unavailable", retryable: true },
+    };
+    const invoke = vi.fn(async (request: ChannelIpcRequest) => ({
+      method: request.method,
+      requestId: request.requestId,
+      ok: true,
+      result: interrupted,
+    }) as ChannelIpcResponse);
+    window.uclaw = { channels: { invoke } } as never;
+    render(<ChannelSettings />);
+
+    const status = (await screen.findAllByText("连接中断，可重连"))
+      .map((node) => node.closest(".ant-tag"))
+      .find((node): node is HTMLElement => node instanceof HTMLElement);
+    expect(status).toHaveClass("ant-tag-gold");
+    expect(screen.getByRole("button", { name: "重新连接" })).toHaveClass("ant-btn-primary");
+    expect(screen.getByRole("button", { name: "退出登录" })).toHaveClass("ant-btn-text", "ant-btn-dangerous");
   });
 
   it("turns preparing into a business loading state", async () => {

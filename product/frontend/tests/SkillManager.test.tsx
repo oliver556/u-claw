@@ -371,6 +371,10 @@ describe("SkillManager", () => {
     expect(screen.getByRole("button", { name: "导入 Skill" })).toBeVisible();
     expect(screen.queryByText("Curator")).not.toBeInTheDocument();
     expect(screen.queryByText("hidden")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("搜索本地 Skill").closest(".ant-input-affix-wrapper")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "按状态筛选" }).closest(".ant-select")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "按来源筛选" }).closest(".ant-select")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /命令运行器/ })).toHaveClass("ant-switch");
 
     fireEvent.change(screen.getByLabelText("搜索本地 Skill"), { target: { value: "not-found" } });
     expect(screen.getByText("没有符合条件的 Skill")).toBeVisible();

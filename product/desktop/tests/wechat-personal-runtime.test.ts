@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -14,8 +14,8 @@ type GatewayAccount = {
   enabled: boolean;
   configured: boolean;
   running: boolean;
-  connected: boolean;
-  lastError?: string;
+  connected?: boolean | null;
+  lastError?: string | null;
 };
 
 function gatewayStatus(account?: GatewayAccount) {
@@ -79,6 +79,32 @@ describe("production personal WeChat runtime", () => {
     await expect(runtime.capability(new AbortController().signal)).resolves.toMatchObject({ available: false, pluginStatus: "installed" });
   });
 
+  it("accepts a valid plugin whose nested traversal differs from lexical path order", async () => {
+    const { dataDir, pluginDir } = await fixture();
+    const nestedFiles = [
+      ["node_modules/zod/src/v4/classic/checks.ts", "classic"],
+      ["node_modules/zod/src/v4-mini/index.ts", "mini"],
+    ] as const;
+    const manifestPath = join(pluginDir, ".uclaw-plugin-manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    for (const [relative, content] of nestedFiles) {
+      await mkdir(dirname(join(pluginDir, relative)), { recursive: true });
+      await writeFile(join(pluginDir, relative), content);
+      manifest.plugins[0].files.push({
+        path: relative,
+        bytes: Buffer.byteLength(content),
+        sha256: createHash("sha256").update(content).digest("hex"),
+      });
+    }
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway: vi.fn(), renderQr: async () => png });
+
+    await expect(runtime.capability(new AbortController().signal)).resolves.toEqual({
+      available: true,
+      pluginStatus: "installed",
+    });
+  });
+
   it("reads installed plugin and connected account from OpenClaw authority after runtime restart", async () => {
     const { dataDir, pluginDir } = await fixture();
     const accountDir = join(dataDir, "openclaw-weixin", "accounts");
@@ -87,7 +113,7 @@ describe("production personal WeChat runtime", () => {
     await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: ["secret", "session", "token"].join("-"), userId: "private-user" }), { mode: 0o600 });
     const requestGateway = vi.fn(async (method: string) => {
       expect(method).toBe("channels.status");
-      return gatewayStatus({ accountId: "wx-account-7a2f", enabled: true, configured: true, running: true, connected: true });
+      return gatewayStatus({ accountId: "wx-account-7a2f", enabled: true, configured: true, running: true, connected: null, lastError: null });
     });
 
     const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway, renderQr: async () => png });
@@ -103,18 +129,18 @@ describe("production personal WeChat runtime", () => {
     expect(requestGateway).toHaveBeenCalledWith("channels.status", { channel: "openclaw-weixin", probe: false }, expect.any(AbortSignal));
   });
 
-  it("runs scan confirmation, writes only plugin authority, then proves connected runtime readback", async () => {
+  it("runs scan confirmation, writes plugin and channel authority, then proves connected runtime readback", async () => {
     const { dataDir, pluginDir } = await fixture();
     const fetch = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ qrcode: "private-qr-id", qrcode_img_content: "private-qr-payload" }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         status: "confirmed",
-        ilink_bot_id: "wx-account-7a2f",
+        ilink_bot_id: "wx-account@im.bot",
         ilink_user_id: "private-user",
         bot_token: "secret-session-token",
         baseurl: "https://ilinkai.weixin.qq.com",
       }), { status: 200 }));
-    const gatewayAccount = { accountId: "wx-account-7a2f", enabled: true, configured: true, running: true, connected: true };
+    const gatewayAccount = { accountId: "wx-account-im-bot", enabled: true, configured: true, running: true, connected: true };
     const requests: Array<{ method: string; params: unknown }> = [];
     const requestGateway = vi.fn(async (method: string, params: unknown) => {
       requests.push({ method, params });
@@ -137,10 +163,14 @@ describe("production personal WeChat runtime", () => {
     const connected = await runtime.poll(started.flowId, new AbortController().signal);
 
     expect(started).toEqual({ flowId: "runtime-flow-1", qrImage: { kind: "data-url", value: png }, qrExpiresAt: "2026-08-12T00:05:00.000Z" });
-    expect(connected).toEqual({ status: "connected", loginState: "connected", account: { accountIdHint: "...7a2f" } });
+    expect(connected).toEqual({ status: "connected", loginState: "connected", account: { accountIdHint: "...-bot" } });
     expect(requests.map(({ method }) => method)).toEqual(["config.get", "config.patch", "channels.start", "channels.status"]);
+    expect(JSON.parse((requests.find(({ method }) => method === "config.patch")?.params as { raw: string }).raw)).toEqual({
+      plugins: { entries: { "openclaw-weixin": { enabled: true } } },
+      channels: { "openclaw-weixin": { channelConfigUpdatedAt: "2026-08-12T00:00:00.000Z" } },
+    });
     expect(JSON.stringify(requests)).not.toContain("secret-session-token");
-    const accountPath = join(dataDir, "openclaw-weixin", "accounts", "wx-account-7a2f.json");
+    const accountPath = join(dataDir, "openclaw-weixin", "accounts", "wx-account-im-bot.json");
     expect(JSON.parse(await readFile(accountPath, "utf8"))).toEqual({ token: ["secret", "session", "token"].join("-"), baseUrl: "https://ilinkai.weixin.qq.com", userId: "private-user" });
     expect((await stat(accountPath)).mode & 0o777).toBe(0o600);
     await expect(readFile(join(dataDir, ".env"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
@@ -270,26 +300,61 @@ describe("production personal WeChat runtime", () => {
     }
   });
 
-  it("reconnects through OpenClaw and logout removes authority before a fresh runtime reads status", async () => {
+  it("repairs missing channel configuration on reconnect and logout removes authority", async () => {
     const { dataDir, pluginDir } = await fixture();
     const stateDir = join(dataDir, "openclaw-weixin");
     const accountDir = join(stateDir, "accounts");
     await mkdir(accountDir, { recursive: true });
-    await writeFile(join(stateDir, "accounts.json"), JSON.stringify(["wx-account-7a2f"]));
-    await writeFile(join(accountDir, "wx-account-7a2f.json"), JSON.stringify({ token: ["secret", "session", "token"].join("-") }), { mode: 0o600 });
+    await writeFile(join(stateDir, "accounts.json"), JSON.stringify(["wx-account-im.bot"]));
+    await writeFile(join(accountDir, "wx-account-im.bot.json"), JSON.stringify({ token: ["secret", "session", "token"].join("-") }), { mode: 0o600 });
     const methods: string[] = [];
-    const requestGateway = vi.fn(async (method: string) => {
+    let started = false;
+    const requestGateway = vi.fn(async (method: string, params: unknown) => {
       methods.push(method);
-      if (method === "channels.status") return gatewayStatus({ accountId: "wx-account-7a2f", enabled: true, configured: true, running: true, connected: true });
+      if (method === "config.get") return { hash: "config-hash", valid: true };
+      if (method === "config.patch") {
+        expect(JSON.parse((params as { raw: string }).raw)).toEqual({
+          plugins: { entries: { "openclaw-weixin": { enabled: true } } },
+          channels: { "openclaw-weixin": { channelConfigUpdatedAt: "2026-08-12T00:00:00.000Z" } },
+        });
+      }
+      if (method === "channels.start") started = true;
+      if (method === "channels.status") {
+        return gatewayStatus({
+          accountId: "wx-account-im-bot",
+          enabled: true,
+          configured: started,
+          running: started,
+          connected: started,
+          ...(started ? {} : { lastError: "not configured" }),
+        });
+      }
       return { ok: true };
     });
-    const runtime = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway, renderQr: async () => png });
+    const runtime = createWechatPersonalRuntime({
+      dataDir,
+      pluginDir,
+      requestGateway,
+      renderQr: async () => png,
+      now: () => new Date("2026-08-12T00:00:00.000Z"),
+    });
 
     await expect(runtime.reconnect(new AbortController().signal)).resolves.toMatchObject({ status: "connected", loginState: "connected" });
+    expect(JSON.parse(await readFile(join(stateDir, "accounts.json"), "utf8"))).toEqual(["wx-account-im-bot"]);
+    await expect(readFile(join(accountDir, "wx-account-im-bot.json"), "utf8")).resolves.toContain("secret-session-token");
+    await expect(readFile(join(accountDir, "wx-account-im.bot.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await runtime.logout(new AbortController().signal);
 
-    expect(methods).toEqual(["channels.status", "channels.stop", "channels.start", "channels.status", "channels.stop"]);
-    await expect(readFile(join(accountDir, "wx-account-7a2f.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(methods).toEqual([
+      "channels.status",
+      "channels.stop",
+      "config.get",
+      "config.patch",
+      "channels.start",
+      "channels.status",
+      "channels.stop",
+    ]);
+    await expect(readFile(join(accountDir, "wx-account-im-bot.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(JSON.parse(await readFile(join(stateDir, "accounts.json"), "utf8"))).toEqual([]);
 
     const restarted = createWechatPersonalRuntime({ dataDir, pluginDir, requestGateway, renderQr: async () => png });

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -45,6 +45,30 @@ describe("WeChat plugin startup bootstrap", () => {
       available: true, initialStatus: "missing", status: "repaired",
     });
     expect(JSON.parse(await readFile(join(targetDir, "package.json"), "utf8"))).toMatchObject({ version: "2.4.6" });
+  });
+
+  it("accepts a trusted source whose nested directory traversal differs from lexical path order", async () => {
+    const { sourceDir, targetDir } = await fixture();
+    const nestedFiles = [
+      ["node_modules/zod/src/v4/classic/checks.ts", "classic"],
+      ["node_modules/zod/src/v4-mini/index.ts", "mini"],
+    ] as const;
+    const manifestPath = join(sourceDir, ".uclaw-plugin-manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    for (const [relative, content] of nestedFiles) {
+      await mkdir(dirname(join(sourceDir, relative)), { recursive: true });
+      await writeFile(join(sourceDir, relative), content);
+      manifest.plugins[0].files.push({
+        path: relative,
+        bytes: Buffer.byteLength(content),
+        sha256: createHash("sha256").update(content).digest("hex"),
+      });
+    }
+    await writeFile(manifestPath, JSON.stringify(manifest));
+
+    await expect(bootstrapWechatPlugin({ sourceDir, targetDir })).resolves.toEqual({
+      available: true, initialStatus: "missing", status: "repaired",
+    });
   });
 
   it("repairs a tampered target atomically", async () => {

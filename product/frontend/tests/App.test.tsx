@@ -3,7 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 
 import { ManualClock, MockUClawClient } from "@uclaw/adapter";
-import type { ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, UClawClient, WindowIpcRequest } from "@uclaw/shared";
+import type { ClientIpcEvent, ClientIpcRequest, GatewayStatus, IpcResponse, ProviderIpcRequest, ProviderIpcResponse, ProviderSnapshot, UClawClient, WindowIpcRequest } from "@uclaw/shared";
 import { transferableAbortController } from "node:util";
 import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -130,13 +130,46 @@ describe("U-Claw application shell", () => {
     renderApp();
 
     const navigation = screen.getByRole("navigation", { name: "主导航" });
-    for (const label of ["工作", "能力", "连接", "用量", "余额", "系统"]) {
+    for (const label of ["工作", "模型", "能力", "连接", "用量", "余额", "系统"]) {
       expect(within(navigation).getByRole("link", { name: label })).toBeVisible();
     }
     for (const label of ["文件", "记忆", "自动化"]) {
       expect(within(navigation).queryByRole("link", { name: label })).not.toBeInTheDocument();
     }
     expect(within(navigation).getByRole("link", { name: "工作" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("opens Provider settings from the primary Model destination", async () => {
+    const snapshot: ProviderSnapshot = {
+      schemaVersion: 1,
+      selectedProviderId: null,
+      providers: [{
+        id: "openai",
+        templateId: "openai",
+        name: "OpenAI",
+        enabled: false,
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-5.4",
+        apiKeyConfigured: false,
+        verification: { state: "unverified" },
+      }],
+      network: { httpProxy: null, httpsProxy: null, noProxy: ["localhost", "127.0.0.1", "::1"] },
+    };
+    /** 返回 Provider 页所需的权威快照。 */
+    const invoke = vi.fn(async (request: ProviderIpcRequest): Promise<ProviderIpcResponse> => ({
+      method: request.method,
+      requestId: request.requestId,
+      ok: true,
+      result: snapshot,
+    } as ProviderIpcResponse));
+    window.uclaw = { providers: { invoke } } as typeof window.uclaw;
+    renderApp();
+
+    fireEvent.click(screen.getByRole("link", { name: "模型" }));
+
+    expect(await screen.findByRole("heading", { name: "模型 Provider" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "管理 OpenAI API Key" })).toBeVisible();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "providers.list" }));
   });
 
   it("does not mount deferred titlebar controls", () => {
@@ -459,10 +492,12 @@ describe("U-Claw application shell", () => {
     const menu = screen.getByRole("menu", { name: "更多导航" });
     expect(menu).toBeVisible();
 
-    for (const label of ["工作", "能力", "连接", "用量"]) {
+    for (const label of ["工作", "模型", "能力", "连接"]) {
       expect(screen.getByRole("link", { name: label })).toBeVisible();
     }
     expect(within(menu).queryByRole("menuitem", { name: "自动化" })).not.toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "用量" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     expect(within(menu).getByRole("menuitem", { name: "余额" })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     const system = within(menu).getByRole("menuitem", { name: "系统" });
@@ -491,15 +526,15 @@ describe("U-Claw application shell", () => {
     renderApp();
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
 
+    const usage = screen.getByRole("menuitem", { name: "用量" });
     const balance = screen.getByRole("menuitem", { name: "余额" });
-    const system = screen.getByRole("menuitem", { name: "系统" });
-    expect(balance).toHaveAttribute("tabindex", "0");
-    expect(system).toHaveAttribute("tabindex", "-1");
-    fireEvent.keyDown(balance, { key: "ArrowDown" });
+    expect(usage).toHaveAttribute("tabindex", "0");
     expect(balance).toHaveAttribute("tabindex", "-1");
-    expect(system).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(usage, { key: "ArrowDown" });
+    expect(usage).toHaveAttribute("tabindex", "-1");
+    expect(balance).toHaveAttribute("tabindex", "0");
 
-    fireEvent.blur(system, { relatedTarget: screen.getByRole("main") });
+    fireEvent.blur(balance, { relatedTarget: screen.getByRole("main") });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
@@ -511,8 +546,9 @@ describe("U-Claw application shell", () => {
     fireEvent(window, new Event("resize"));
 
     expect(screen.getByRole("button", { name: "更多" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "模型" })).toBeVisible();
     expect(screen.getByRole("link", { name: "连接" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "用量" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "用量" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "余额" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("会话栏")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("上下文舱")).not.toBeInTheDocument();

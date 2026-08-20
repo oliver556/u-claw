@@ -64,6 +64,7 @@ async function hashFile(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
+/** 校验插件目录、锁定版本与 manifest 中的逐文件完整性。 */
 async function verify(root: string): Promise<{ valid: true; manifest: VerifiedManifest } | { valid: false; status: WechatPluginInitialStatus }> {
   try {
     const rootInfo = await lstat(root);
@@ -79,7 +80,7 @@ async function verify(root: string): Promise<{ valid: true; manifest: VerifiedMa
       !semver.satisfies(LOCKED_OPENCLAW_VERSION, manifest.openclawVersionRange, { includePrerelease: true })) {
       return { valid: false, status: "incompatible" };
     }
-    const actual = await inventory(root);
+    const actual = (await inventory(root)).sort((left, right) => left.localeCompare(right, "en"));
     const expected = manifest.files.map((file) => file.path).sort((left, right) => left.localeCompare(right, "en"));
     if (JSON.stringify(actual) !== JSON.stringify(expected)) return { valid: false, status: "tampered" };
     for (const file of manifest.files) {

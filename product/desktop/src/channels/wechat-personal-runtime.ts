@@ -58,8 +58,8 @@ const GatewayStatusSchema = z.object({
     enabled: z.boolean().optional(),
     configured: z.boolean().optional(),
     running: z.boolean().optional(),
-    connected: z.boolean().optional(),
-    lastError: z.string().optional(),
+    connected: z.boolean().nullable().optional(),
+    lastError: z.string().nullable().optional(),
   }).passthrough())),
   channelDefaultAccountId: z.record(z.string(), z.string()).optional(),
 }).passthrough();
@@ -87,8 +87,14 @@ export interface WechatPersonalRuntimeOptions {
 }
 
 function normalizedAccountId(value: string): string {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9._-]/gu, "-").slice(0, 128);
-  if (normalized.length === 0) throw new Error("WeChat account identifier is invalid");
+  const normalized = value.trim().toLowerCase()
+    .replace(/[^a-z0-9_-]+/gu, "-")
+    .replace(/^-+/u, "")
+    .replace(/-+$/u, "")
+    .slice(0, 64);
+  if (normalized.length === 0 || ["__proto__", "prototype", "constructor"].includes(normalized)) {
+    throw new Error("WeChat account identifier is invalid");
+  }
   return normalized;
 }
 
@@ -148,6 +154,7 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
     if (!await existingDirectory(accountsDir)) await mkdir(accountsDir, { mode: 0o700 });
   };
 
+  /** 校验个人微信插件身份、版本与逐文件完整性。 */
   const pluginCapability = async () => {
     if (options.startupCapabilityFailure !== undefined) {
       return { available: false as const, ...options.startupCapabilityFailure };
@@ -176,6 +183,7 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
         }
       };
       await inventory();
+      actualFiles.sort((left, right) => left.localeCompare(right, "en"));
       const filesValid = await Promise.all(locked.files.map(async (file) => {
         const absolute = join(options.pluginDir, ...file.path.split("/"));
         const info = await lstat(absolute);
@@ -199,15 +207,46 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
     if (!capability.available) throw new Error("WeChat plugin is unavailable");
   };
 
+  /** 读取账号索引，并迁移旧版保留点号、与 OpenClaw 不一致的凭据文件名。 */
   const readAccounts = async (): Promise<string[]> => {
     if (!await existingDirectory(stateDir)) return [];
     try {
       const info = await lstat(accountsPath);
       if (info.isSymbolicLink() || !info.isFile()) throw new Error("WeChat account index must be a regular file");
       const parsed = AccountIndexSchema.parse(JSON.parse(await readFile(accountsPath, "utf8")) as unknown);
-      return parsed
+      const normalized = parsed
         .map(normalizedAccountId)
         .filter((value, index, values) => values.indexOf(value) === index);
+      if (parsed.some((value, index) => normalized[index] !== value)) {
+        if (await existingDirectory(accountsDir)) {
+          for (const legacyId of parsed) {
+            const accountId = normalizedAccountId(legacyId);
+            if (accountId === legacyId) continue;
+            if (!/^[a-z0-9_-][a-z0-9._-]{0,127}$/u.test(legacyId) || legacyId.includes("..")) {
+              throw new Error("WeChat account index contains an unsafe legacy identifier");
+            }
+            const source = join(accountsDir, `${legacyId}.json`);
+            const target = join(accountsDir, `${accountId}.json`);
+            let sourceInfo;
+            try {
+              sourceInfo = await lstat(source);
+            } catch (error) {
+              if (isMissing(error)) continue;
+              throw error;
+            }
+            if (sourceInfo.isSymbolicLink() || !sourceInfo.isFile()) throw new Error("WeChat account credential must be a regular file");
+            try {
+              await lstat(target);
+              throw new Error("WeChat account credential migration conflicts with an existing file");
+            } catch (error) {
+              if (!isMissing(error)) throw error;
+            }
+            await rename(source, target);
+          }
+        }
+        await atomicWrite(accountsPath, JSON.stringify(normalized, null, 2));
+      }
+      return normalized;
     } catch (error) {
       if (isMissing(error)) return [];
       throw error;
@@ -257,6 +296,7 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
     };
   };
 
+  /** 将 OpenClaw channel snapshot 投影为产品连接状态，兼容插件不提供 connected 字段。 */
   const status = async (signal: AbortSignal, preferredAccountId?: string) => {
     const accountIds = await readAccounts();
     if (accountIds.length === 0) return { status: "not-configured" as const, loginState: "idle" as const };
@@ -269,7 +309,11 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
       : gatewayAccounts.find((candidate) => accountIds.includes(candidate.accountId) && candidate.connected === true)?.accountId
         ?? (defaultAccountId && accountIds.includes(defaultAccountId) ? defaultAccountId : accountIds[0]!);
     const account = gatewayAccounts.find((candidate) => candidate.accountId === accountId);
-    if (account?.connected === true && account.running !== false) {
+    const connected = account?.enabled !== false && (
+      (account?.connected === true && account.running !== false)
+      || (account?.configured === true && account.running === true && account.connected == null)
+    );
+    if (connected) {
       return { status: "connected" as const, loginState: "connected" as const, account: { accountIdHint: accountHint(accountId) } };
     }
     if (account?.lastError && /401|403|auth|token|logged.?out|登录/iu.test(account.lastError)) {
@@ -296,10 +340,14 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
     await atomicWrite(accountsPath, JSON.stringify([accountId], null, 2));
   };
 
+  /** 启用插件并更新时间戳，令 Gateway 将已落盘账号识别为已配置 channel。 */
   const enableAndStart = async (accountId: string, signal: AbortSignal): Promise<void> => {
     const config = ConfigGetSchema.parse(await options.requestGateway("config.get", {}, signal));
     await options.requestGateway("config.patch", {
-      raw: JSON.stringify({ plugins: { entries: { [PLUGIN_ID]: { enabled: true } } } }),
+      raw: JSON.stringify({
+        plugins: { entries: { [PLUGIN_ID]: { enabled: true } } },
+        channels: { [PLUGIN_ID]: { channelConfigUpdatedAt: now().toISOString() } },
+      }),
       baseHash: config.hash,
     }, signal);
     await options.requestGateway("channels.start", { channel: PLUGIN_ID, accountId }, signal);
@@ -407,6 +455,7 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
     cancel: async (flowId) => {
       flows.delete(flowId);
     },
+    /** 修复可能缺失的 channel 配置，再重启已保存账号。 */
     reconnect: async (signal) => {
       const current = await status(signal);
       if (current.status === "auth-failed" || current.status === "not-configured") return current;
@@ -414,7 +463,7 @@ export function createWechatPersonalRuntime(options: WechatPersonalRuntimeOption
       if (accountIds.length === 0) return { status: "not-configured", loginState: "idle" };
       const accountId = accountIds[0]!;
       await options.requestGateway("channels.stop", { channel: PLUGIN_ID, accountId }, signal);
-      await options.requestGateway("channels.start", { channel: PLUGIN_ID, accountId }, signal);
+      await enableAndStart(accountId, signal);
       return status(signal);
     },
     logout: async (signal) => {

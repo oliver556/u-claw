@@ -28,6 +28,7 @@ import { ReleaseCenter } from "../features/system/ReleaseCenter";
 import { AppearanceSettings } from "../features/system/AppearanceSettings";
 import { BalanceView } from "../features/billing/BalanceView";
 import { UsageView } from "../features/billing/UsageView";
+import { ProviderSettings } from "../features/providers/ProviderSettings";
 import { AppTitlebar } from "./AppTitlebar";
 import { PrimaryRail } from "./PrimaryRail";
 
@@ -58,6 +59,7 @@ function SystemCenter() {
 
 type WorkspaceClient = UClawClient & { sessionOrganizer?: SessionOrganizerService };
 
+/** 统筹主导航、会话及各产品工作面的桌面 Shell。 */
 export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -301,7 +303,7 @@ export function WorkspaceShell({ client }: { client: WorkspaceClient }) {
         {isWork ? activeSession === undefined
           ? <section className="work-canvas workspace-placeholder"><div className="conversation-state"><FolderArchive /><strong>{sessionState === "loading" ? "正在准备工作区" : "还没有会话"}</strong></div></section>
           : <Conversation key={activeSession.id} client={client} session={activeSession} capabilities={capabilities} gatewayStatus={gatewayStatus} draft={drafts[activeSession.id] ?? ""} onDraftChange={(value) => setDrafts((current) => ({ ...current, [activeSession.id]: value }))} onActivity={(message) => appendActivity(activeSession.id, message)} onSendSuccess={(sessionId) => void refreshSessions(sessionId)} onSessionUpdated={(sessionId) => void refreshSessions(sessionId)} />
-          : route.path === "/files" ? <DataManager key="workspace" domain="workspace" onDirtyChange={setDataDirty} /> : route.path === "/memory" ? <DataManager key="memory" domain="memory" onDirtyChange={setDataDirty} /> : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/automation" ? <AutomationManager invoke={window.uclaw?.automation?.invoke} /> : route.path === "/connections" ? <ChannelSettings /> : route.path === "/usage" ? <UsageView /> : route.path === "/balance" ? <BalanceView /> : route.path === "/system" ? <SystemCenter /> : <SecondaryView title={route.label} description={route.description} system={false} />}
+          : route.path === "/models" ? <ProviderSettings /> : route.path === "/files" ? <DataManager key="workspace" domain="workspace" onDirtyChange={setDataDirty} /> : route.path === "/memory" ? <DataManager key="memory" domain="memory" onDirtyChange={setDataDirty} /> : route.path === "/capabilities" ? <CapabilitiesView /> : route.path === "/automation" ? <AutomationManager invoke={window.uclaw?.automation?.invoke} /> : route.path === "/connections" ? <ChannelSettings /> : route.path === "/usage" ? <UsageView /> : route.path === "/balance" ? <BalanceView /> : route.path === "/system" ? <SystemCenter /> : <SecondaryView title={route.label} description={route.description} system={false} />}
       </main>
     </div>
     {activityCenterOpen ? <aside className="task-activity-center" aria-label="全局任务活动中心">

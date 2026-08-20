@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Brain, BriefcaseBusiness, CalendarClock, ChartNoAxesCombined, Folder, PlugZap, Settings, Sparkles, WalletCards } from "lucide-react";
+import { Brain, BriefcaseBusiness, CalendarClock, ChartNoAxesCombined, Cpu, Folder, PlugZap, Settings, Sparkles, WalletCards } from "lucide-react";
 
 export type PrimaryRoute = {
   path: string;
@@ -10,6 +10,7 @@ export type PrimaryRoute = {
 
 export const primaryRoutes: PrimaryRoute[] = [
   { path: "/", label: "工作", description: "会话、工具执行和任务产物", icon: BriefcaseBusiness },
+  { path: "/models", label: "模型", description: "配置模型 Provider 与 API Key", icon: Cpu },
   { path: "/files", label: "文件", description: "查看 U 盘工作区文件", icon: Folder },
   { path: "/memory", label: "记忆", description: "查看 Agent 长期与项目记忆", icon: Brain },
   { path: "/capabilities", label: "能力", description: "管理本地已安装 Skill", icon: Sparkles },
