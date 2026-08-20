@@ -863,6 +863,63 @@ describe("chat workspace", () => {
     expect(within(screen.getByRole("main")).getByText("第二段历史")).toBeVisible();
   });
 
+  it("keeps the Gateway run alive when switching sessions", async () => {
+    const pending = deferredStream();
+    let signal: AbortSignal | undefined;
+    const base = clientFixture();
+    const abort = vi.fn(async () => undefined);
+    const send = vi.fn((_input, value) => { signal = value; return pending.stream; });
+    render(<App client={clientFixture({ chat: { ...base.chat, send, abort } })} />);
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "给 U-Claw 发送消息" }), { target: { value: "后台继续执行" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    pending.emit({ type: "started", runId: "run-background", sessionId: "session-1" });
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole("button", { name: /^知识库调研，/ }));
+    expect(await within(screen.getByRole("main")).findByText("第二段历史")).toBeVisible();
+    expect(signal?.aborted).toBe(false);
+    expect(abort).not.toHaveBeenCalled();
+
+    pending.emit({ type: "final", runId: "run-background", message: { id: "background-final", sessionId: "session-1", runId: "run-background", role: "assistant", status: "completed", blocks: [{ id: "background-text", type: "text", text: "后台完成", format: "plain" }], createdAt: "2026-08-20T08:01:00.000Z" } });
+    pending.finish();
+  });
+
+  it("reconnects, resubscribes, and calibrates the active session from chat.history", async () => {
+    const base = clientFixture();
+    const reconnect = vi.fn(async () => undefined);
+    const list = vi.fn(base.chat.list);
+    const watch = vi.fn(async function* () {});
+    const disconnected = { connectionState: "failed" as const, protocolVersion: 4 as const, phase: "failed" as const, processAlive: true, serviceReady: false, businessAvailable: false, since: "2026-08-20T08:00:00.000Z", attempt: 1, usb: { state: "available" as const, dataWritable: true } };
+    const client = clientFixture({
+      gateway: { ...base.gateway, getStatus: vi.fn(async () => disconnected), watchStatus: vi.fn(async function* () { yield disconnected; }), reconnect },
+      chat: { ...base.chat, list, watch },
+    });
+    render(<App client={client} />);
+
+    await within(screen.getByRole("main")).findByText("第一段历史");
+    fireEvent.click(screen.getByRole("button", { name: "重新连接" }));
+
+    await waitFor(() => expect(reconnect).toHaveBeenCalledOnce());
+    await waitFor(() => expect(watch).toHaveBeenCalledWith("session-1", expect.any(AbortSignal)));
+    expect(list.mock.calls.filter(([id]) => id === "session-1")).toHaveLength(2);
+  });
+
+  it("drops temporary text deltas after the authoritative final replaces them", () => {
+    const started = messageEventReducer(initialStreamState, { type: "started", runId: "run-authoritative", sessionId: "session-1" });
+    const streaming = messageEventReducer(started, { type: "delta", runId: "run-authoritative", mode: "append", text: "临时内容" });
+    const final = messageEventReducer(streaming, {
+      type: "final",
+      runId: "run-authoritative",
+      message: { id: "message-authoritative", sessionId: "session-1", runId: "run-authoritative", role: "assistant", status: "completed", blocks: [{ id: "block-authoritative", type: "text", text: "权威最终内容", format: "plain" }], createdAt: "2026-08-20T08:01:00.000Z" },
+    });
+
+    expect(final.runs["run-authoritative"].text).toBe("");
+    expect(final.runs["run-authoritative"].finalMessage?.blocks).toEqual([
+      expect.objectContaining({ type: "text", text: "权威最终内容" }),
+    ]);
+  });
+
   it("removes a stream approval after resolving it once", async () => {
     const base = clientFixture();
     const approval = { id: "approval-stream", family: "exec" as const, sessionId: "session-1", toolCallId: "tool-stream", subject: { kind: "toolCall" as const, id: "tool-stream" }, title: "Inspect workspace", description: "Read files", risk: "high" as const, permissions: [{ kind: "file-read" as const, scope: "fixture", description: "Read fixture" }], choices: ["allow-once" as const, "deny" as const], status: "pending" as const };
