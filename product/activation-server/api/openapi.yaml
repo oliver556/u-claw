@@ -422,13 +422,12 @@
       "BuiltinCredential": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "deviceId", "licenseId", "endpoint", "model", "deviceToken"],
+        "required": ["schemaVersion", "deviceId", "licenseId", "endpoint", "deviceToken"],
         "properties": {
-          "schemaVersion": { "const": 1 },
+          "schemaVersion": { "const": 2 },
           "deviceId": { "$ref": "#/components/schemas/Identifier" },
           "licenseId": { "$ref": "#/components/schemas/Identifier" },
           "endpoint": { "type": "string", "format": "uri", "pattern": "^[Hh][Tt][Tt][Pp][Ss]://(?:\\[[0-9A-Fa-f:.]+\\]|[^/?#@\\[\\]\\\\\\u0000-\\u0020\\u007F:]+)(?::[0-9]+)?(?:/[^?#@\\\\\\u0000-\\u0020\\u007F]*)?$" },
-          "model": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
           "deviceToken": { "type": "string", "pattern": "^uclaw_dt_[A-Za-z0-9_-]{43}$" }
         }
       },

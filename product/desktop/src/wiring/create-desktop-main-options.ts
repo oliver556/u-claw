@@ -1,5 +1,4 @@
 import { spawn as spawnChild } from "node:child_process";
-import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -20,7 +19,7 @@ import {
   type OpenClawTransport,
   type WebSocketLike,
 } from "@uclaw/adapter";
-import { MessageEventSchema, type MessageEvent, type ProviderConfigEntry, type ProviderNetworkSettings, type SendMessageInput } from "@uclaw/shared";
+import type { ProviderConfigEntry } from "@uclaw/shared";
 
 import { createClientDispatcher } from "../ipc/client-dispatcher.js";
 import { createAttachmentCache } from "../attachments/attachment-cache.js";
@@ -28,7 +27,6 @@ import { createWechatPersonalRuntime } from "../channels/wechat-personal-runtime
 import { bootstrapWechatPlugin } from "../channels/wechat-plugin-bootstrap.js";
 import { createOpenClawQrRenderer } from "../channels/wechat-qr-renderer.js";
 import { createOpenClawProviderConfigBackend } from "../providers/openclaw-provider-config.js";
-import { createOpenClawProviderExecutor } from "../providers/openclaw-provider-executor.js";
 import { createBuiltinCredentialStore } from "../providers/builtin-credential-store.js";
 import {
   fetchCommercialModels,
@@ -41,7 +39,6 @@ import {
 import { createProviderStore, type ProviderStore } from "../providers/provider-store.js";
 import {
   applyProviderNetworkEnvironment,
-  createProviderHttpClient,
   createProviderNetworkService,
 } from "../providers/provider-network.js";
 import type {
@@ -280,108 +277,6 @@ function normalizeGatewayFailure(error: unknown): never {
   throw error;
 }
 
-type ProviderExecutor = (
-  input: SendMessageInput,
-  provider: ProviderConfigEntry,
-  signal?: AbortSignal,
-  network?: ProviderNetworkSettings,
-) => Promise<AsyncIterable<MessageEvent>>;
-
-const providerHttpClient = createProviderHttpClient();
-
-export function createRegisteredProviderExecutor(
-  registry: DesktopDomainRegistry,
-  source: "domestic" | "custom",
-  nativeExecutor?: ProviderExecutor,
-): ProviderExecutor {
-  return async (input, provider, signal, network) => {
-    if (provider.id === "zai" && provider.baseUrl === null && nativeExecutor !== undefined) {
-      return nativeExecutor(input, provider, signal, network);
-    }
-    const registration = registry.resolve<RegisteredDesktopDomain & { execute?: ProviderExecutor }>(`provider.executor.${source}`) ??
-      registry.resolve<RegisteredDesktopDomain & { execute?: ProviderExecutor }>("provider.executor.openai-compatible");
-    if (typeof registration?.execute !== "function") {
-      throw new DesktopWiringError("UNCONFIGURED", "External model provider executor is not registered.");
-    }
-    return registration.execute(input, provider, signal, network);
-  };
-}
-
-async function executeOpenAICompatibleProvider(
-  input: SendMessageInput,
-  provider: ProviderConfigEntry,
-  signal?: AbortSignal,
-  network?: ProviderNetworkSettings,
-): Promise<AsyncIterable<MessageEvent>> {
-  if (input.skillId !== undefined) {
-    throw new DesktopWiringError("UNSUPPORTED", "External model providers do not support Skills.");
-  }
-  if (provider.baseUrl === null) {
-    throw new DesktopWiringError("UNCONFIGURED", "Model provider is not configured.");
-  }
-  const endpoint = new URL(provider.baseUrl);
-  const loopback = endpoint.hostname === "localhost" || endpoint.hostname === "127.0.0.1" || endpoint.hostname === "[::1]";
-  if (provider.apiKey === undefined && !loopback) throw new DesktopWiringError("UNCONFIGURED", "Model provider is not configured.");
-  if (input.blocks.some((block) => block.type !== "text")) {
-    throw new DesktopWiringError("UNSUPPORTED", "External provider attachments are not supported.");
-  }
-  const prompt = input.blocks.map((block) => block.type === "text" ? block.text : "").join("\n\n");
-  const payload = await providerHttpClient.requestJson({
-    url: `${provider.baseUrl.replace(/\/+$/u, "")}/chat/completions`,
-    init: {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(provider.apiKey === undefined ? {} : { authorization: `Bearer ${provider.apiKey}` }),
-      },
-      body: JSON.stringify({
-        model: provider.model,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 4_096,
-        stream: false,
-      }),
-      signal,
-    },
-    ...(network === undefined ? {} : { network }),
-  });
-  const content = typeof payload === "object" && payload !== null &&
-    "choices" in payload && Array.isArray(payload.choices) &&
-    typeof payload.choices[0] === "object" && payload.choices[0] !== null &&
-    "message" in payload.choices[0] && typeof payload.choices[0].message === "object" && payload.choices[0].message !== null &&
-    "content" in payload.choices[0].message && typeof payload.choices[0].message.content === "string"
-    ? payload.choices[0].message.content
-    : undefined;
-  if (content === undefined) throw new Error("External model provider response failed validation.");
-
-  const digest = createHash("sha256")
-    .update("uclaw-external-chat-v1\0")
-    .update(input.sessionId)
-    .update("\0")
-    .update(input.clientRequestId)
-    .digest("hex");
-  const runId = `run_${digest.slice(0, 32)}`;
-  const events = [
-    MessageEventSchema.parse({ type: "started", runId, sessionId: input.sessionId }),
-    MessageEventSchema.parse({ type: "delta", runId, mode: "append", text: content }),
-    MessageEventSchema.parse({
-      type: "final",
-      runId,
-      message: {
-        id: `msg_${digest.slice(0, 32)}`,
-        sessionId: input.sessionId,
-        runId,
-        role: "assistant",
-        status: "completed",
-        blocks: [{ id: `block_${digest.slice(0, 32)}`, type: "text", text: content, format: "markdown" }],
-        createdAt: new Date().toISOString(),
-      },
-    }),
-  ];
-  return (async function* (): AsyncIterable<MessageEvent> {
-    yield* events;
-  })();
-}
-
 async function resolveExistingSkillRoot(candidate: string): Promise<string | undefined> {
   if (!isAbsolute(candidate) || candidate.includes("\0")) return undefined;
   try {
@@ -610,10 +505,6 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     productServices: { dataDir: environment.dataRoot, environment: env, services: productServices },
   }, [
     {
-      name: "provider.executor.openai-compatible",
-      register: () => ({ execute: executeOpenAICompatibleProvider, dispose: () => undefined }),
-    },
-    {
       name: "skills.runtime",
       register: () => ({
         runtime: skillRuntime,
@@ -710,10 +601,6 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
     pluginRuntime,
     capabilityRuntime,
     domainRegistrations: domains,
-    modelSourceExecutors: {
-      domestic: createOpenClawProviderExecutor(client),
-      custom: createOpenClawProviderExecutor(client),
-    },
     injectChatMessage: async (sessionId, message, label, signal) => {
       await transport.router.request("chat.inject", { sessionKey: sessionId, message, label }, ChatInjectResponseSchema, signal);
     },

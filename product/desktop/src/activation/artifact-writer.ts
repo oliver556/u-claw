@@ -275,11 +275,10 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
       const license = StartupLicenseArtifactSchema.parse(JSON.parse(await (await packageSafeRoot).readText(artifactPaths[1].path)));
       const loadedBuiltin = await credentialStore.loadActive();
       const builtin = BuiltinCredentialArtifactSchema.parse({
-        schemaVersion: 1,
+        schemaVersion: 2,
         deviceId: loadedBuiltin.deviceId,
         licenseId: loadedBuiltin.licenseId,
         endpoint: loadedBuiltin.endpoint.href,
-        model: loadedBuiltin.model,
         deviceToken: loadedBuiltin.deviceToken,
       });
       if (startup.deviceId !== journal.deviceId || startup.licenseId !== journal.licenseId
@@ -453,11 +452,10 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         const license = StartupLicenseArtifactSchema.parse(JSON.parse(licenseBody));
         const loadedBuiltin = await credentialStore.loadActive();
         const builtin = BuiltinCredentialArtifactSchema.parse({
-          schemaVersion: 1,
+          schemaVersion: 2,
           deviceId: loadedBuiltin.deviceId,
           licenseId: loadedBuiltin.licenseId,
           endpoint: loadedBuiltin.endpoint.href,
-          model: loadedBuiltin.model,
           deviceToken: loadedBuiltin.deviceToken,
         });
         const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3].path));

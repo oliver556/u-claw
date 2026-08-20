@@ -42,7 +42,6 @@ import { createCommercialOpenClawReadinessGate } from "./providers/commercial-op
 import { createCommercialImageChatRouter } from "./providers/commercial-image-chat-router.js";
 import type { OpenClawImageInference } from "./providers/openclaw-image-cli-runtime.js";
 import { installBundledCommercialImageExtension } from "./providers/commercial-image-extension-bootstrap.js";
-import { createMainProcessModelRouting, type ExternalModelSourceExecutors } from "./providers/model-source-router.js";
 import { createLocalApplicationRouter, defaultApplicationRoots } from "./local-actions/application-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
 import { createSkillService } from "./skills/skill-service.js";
@@ -404,7 +403,6 @@ export interface DesktopMainOptions {
   providerConfig?: OpenClawProviderConfigBackend;
   commercialProviderBootstrap?(coordinator: ProductionRuntimeConsistencyCoordinator): Promise<void>;
   commercialImageInference?: OpenClawImageInference;
-  modelSourceExecutors?: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
   injectChatMessage?(
     sessionId: string,
     message: string,
@@ -634,13 +632,6 @@ export function requireElectronClient(client: UClawClient | undefined): UClawCli
   return client;
 }
 
-export function requireModelSourceExecutors(
-  executors: DesktopMainOptions["modelSourceExecutors"],
-): ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>> {
-  if (!executors) throw new Error("Desktop production wiring must provide model source executors.");
-  return executors;
-}
-
 export function requireChannelRuntime(client: UClawClient): ChannelRuntime {
   const runtime = client.channels as unknown as Partial<ChannelRuntime>;
   const methods: ReadonlyArray<keyof ChannelRuntime> = [
@@ -732,7 +723,6 @@ export async function startElectronMain(
   options: DesktopMainOptions,
   portablePaths: PortableDesktopPaths,
 ): Promise<void> {
-  const modelSourceExecutors = requireModelSourceExecutors(options.modelSourceExecutors);
   const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session: electronSession, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const commercialImageExtensionSourceDir = basename(moduleDir) === "src"
@@ -759,11 +749,6 @@ export async function startElectronMain(
   });
   await attachmentCleanup.started;
   const providers = options.providers ?? createProviderStore({ dataDir: portablePaths.dataDir });
-  const modelRouting = createMainProcessModelRouting({
-    dataDir: portablePaths.dataDir,
-    providers,
-    executors: modelSourceExecutors,
-  });
   const localApplications = createLocalApplicationRouter({
     roots: defaultApplicationRoots(process.platform, process.env),
     cachePath: join(portablePaths.cacheDir, "local-applications.json"),
@@ -773,9 +758,6 @@ export async function startElectronMain(
     },
   });
   void localApplications.refresh().catch(() => undefined);
-  // Keep modelRouting constructed as the temporary legacy commercial fallback until
-  // the commercial OpenClaw E2E gate passes; production chat authority is OpenClaw.
-  void modelRouting;
   const commercialProviderReadiness = createCommercialOpenClawReadinessGate();
   const commercialImageChat = createCommercialImageChatRouter({
     chat: {

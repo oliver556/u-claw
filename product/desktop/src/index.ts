@@ -20,8 +20,6 @@ export * from "./mcp/stdio-policy.js";
 export * from "./new-api-management/index.js";
 export * from "./providers/provider-store.js";
 export * from "./providers/builtin-credential-store.js";
-export * from "./providers/builtin-service-client.js";
-export * from "./providers/model-source-router.js";
 export * from "./providers/openclaw-provider-executor.js";
 export * from "./channels/channel-store.js";
 export * from "./channels/channel-dispatcher.js";

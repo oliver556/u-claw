@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import type { MessageEvent } from "@uclaw/shared";
 import { Agent, fetch as undiciFetch } from "undici";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -15,9 +14,7 @@ import { createActivationClient, type ActivationClient } from "../../desktop/src
 import { createActivationCoordinator } from "../../desktop/src/activation/coordinator.js";
 import { verifyActivationResponse } from "../../desktop/src/main.js";
 import { createBuiltinCredentialStore } from "../../desktop/src/providers/builtin-credential-store.js";
-import { createBuiltinServiceClient } from "../../desktop/src/providers/builtin-service-client.js";
-import { createMainProcessModelRouting } from "../../desktop/src/providers/model-source-router.js";
-import { createProviderStore } from "../../desktop/src/providers/provider-store.js";
+import { fetchCommercialModels } from "../../desktop/src/providers/commercial-openclaw-lifecycle.js";
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -25,12 +22,6 @@ const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-
-async function collectEvents(stream: AsyncIterable<MessageEvent> | Promise<AsyncIterable<MessageEvent>>) {
-  const events: MessageEvent[] = [];
-  for await (const event of await stream) events.push(event);
-  return events;
-}
 
 function closeServer(server: ReturnType<typeof createServer> | undefined): Promise<void> {
   if (!server) return Promise.resolve();
@@ -40,8 +31,8 @@ function closeServer(server: ReturnType<typeof createServer> | undefined): Promi
   }));
 }
 
-describe("activation to Desktop model conversation through Node HTTPS proxy fixture", () => {
-  it("persists formal device credential and emits assistant events without leaking secrets", async () => {
+describe("activation to OpenClaw commercial Provider through Node HTTPS proxy fixture", () => {
+  it("persists a model-agnostic device credential and reads the dynamic catalog without leaking secrets", async () => {
     const root = await mkdtemp(join(tmpdir(), "uclaw-activation-model-proxy-"));
     roots.push(root);
     const packageRoot = join(root, "package");
@@ -83,7 +74,6 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
     let upstreamModelCalls = 0;
     const publicRecords: unknown[] = [];
     const authorizations: string[] = [];
-    const modelBodies: unknown[] = [];
     server = createServer({ cert: await readFile(certPath), key: await readFile(keyPath) }, (request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
@@ -96,7 +86,7 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
           response.end(JSON.stringify({
             activationId: "fixture-activation-001", deviceId: license.deviceId, licenseId: license.licenseId, license,
             startupCredential: { schemaVersion: 1, deviceId: license.deviceId, licenseId: license.licenseId, startupSecret },
-            builtinCredential: { schemaVersion: 1, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: `${endpoint}model-api/`, model: "fixture-default-model", deviceToken },
+            builtinCredential: { schemaVersion: 2, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: `${endpoint}model-api/`, deviceToken },
             status: "active",
           }));
           return;
@@ -120,7 +110,6 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
             response.end(JSON.stringify({ object: "list", data: [{ id: "fixture-default-model", object: "model", created: 1, owned_by: "fixture" }] }));
             return;
           }
-          modelBodies.push(body);
           response.writeHead(200, { "content-type": "application/json" });
           response.end(JSON.stringify({ id: "fixture-chat-001", object: "chat.completion", created: 1, model: "fixture-default-model", choices: [{ index: 0, message: { role: "assistant", content: "fixture assistant answer" }, finish_reason: "stop" }], usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 } }));
           return;
@@ -151,7 +140,7 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
 
       const credentialPath = join(dataDir, ".uclaw", "builtin-model-credential.v1.json");
       const credentialBody = JSON.parse(await readFile(credentialPath, "utf8"));
-      expect(credentialBody).toEqual({ schemaVersion: 1, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: `${endpoint}model-api/`, model: "fixture-default-model", deviceToken });
+      expect(credentialBody).toEqual({ schemaVersion: 2, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: `${endpoint}model-api/`, deviceToken });
       if (process.platform !== "win32") expect((await stat(credentialPath)).mode & 0o777).toBe(0o600);
       const credentialArtifacts = (await readdir(join(dataDir, ".uclaw"))).filter((name) => name.includes("credential"));
       expect(credentialArtifacts).toEqual(["builtin-model-credential.v1.json"]);
@@ -161,27 +150,19 @@ describe("activation to Desktop model conversation through Node HTTPS proxy fixt
       const loaded = await store.loadActive();
       const modelFetch = ((input: string | URL | Request, init?: RequestInit) =>
         undiciFetch(input, { ...init, dispatcher: modelDispatcher })) as typeof fetch;
-      const builtinDataClient = createBuiltinServiceClient({ fetch: modelFetch });
-      const health = await builtinDataClient.health(loaded);
-      expect(health).toMatchObject({ acceptingBuiltin: true, state: "enabled" });
-      const routing = createMainProcessModelRouting({
-        dataDir, providers: createProviderStore({ dataDir }),
-        executors: { domestic: async () => { throw new Error("unused"); }, custom: async () => { throw new Error("unused"); } },
-        builtinDataClient,
-      });
-      const events = await collectEvents(routing.routeChatSend({ sessionId: "fixture-session", clientRequestId: "fixture-client-request", blocks: [{ type: "text", text: "hello model", format: "plain" }] }));
-      expect(events.map((event) => event.type)).toEqual(["started", "delta", "final"]);
-      expect(events[2]).toMatchObject({ type: "final", message: { role: "assistant", blocks: [{ text: "fixture assistant answer" }] } });
-      expect(modelBodies).toEqual([{ model: "fixture-default-model", messages: [{ role: "user", content: "hello model" }], max_tokens: 4096, stream: false }]);
-      expect(authorizations).toEqual([`Bearer ${deviceToken}`, `Bearer ${deviceToken}`]);
+      expect(loaded.model).toBeUndefined();
+      await expect(fetchCommercialModels(loaded, modelFetch)).resolves.toEqual([
+        { id: "fixture-default-model", name: "fixture-default-model" },
+      ]);
+      expect(authorizations).toEqual([`Bearer ${deviceToken}`]);
       expect(authorizations.join(" ")).not.toContain("New API");
 
       const callsBeforeRevocation = upstreamModelCalls;
       revoked = true;
-      const revokedError = await routing.routeChatSend({ sessionId: "fixture-session", clientRequestId: "fixture-revoked-request", blocks: [{ type: "text", text: "revoked", format: "plain" }] }).catch((error: unknown) => error);
-      expect(revokedError).toMatchObject({ category: "authentication", code: "AUTHENTICATION_FAILED", retryable: false });
+      const revokedError = await fetchCommercialModels(loaded, modelFetch).catch((error: unknown) => error);
+      expect(revokedError).toBeInstanceOf(Error);
       expect(upstreamModelCalls).toBe(callsBeforeRevocation);
-      publicRecords.push(events, JSON.parse(JSON.stringify(revokedError)));
+      publicRecords.push(JSON.parse(JSON.stringify(revokedError)));
       const publicJson = JSON.stringify(publicRecords);
       for (const secret of [activationCode, startupSecret, deviceToken, newApiKey]) expect(publicJson).not.toContain(secret);
       // Production path has no injectable logger. Public leak evidence covers

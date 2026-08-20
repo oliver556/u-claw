@@ -11,7 +11,7 @@ import {
   startLocalNewApiManagementServer,
   type LocalNewApiManagementServer,
 } from "../../desktop/src/new-api-management/index.js";
-import { createBuiltinServiceClient } from "../../desktop/src/providers/builtin-service-client.js";
+import { createLegacyBuiltinServiceClientForTest as createBuiltinServiceClient } from "../../desktop/tests/helpers/legacy-builtin-service-client.js";
 import { createMainProcessModelRouting, ModelSourceFailure } from "../../desktop/src/providers/model-source-router.js";
 import { createProviderStore } from "../../desktop/src/providers/provider-store.js";
 
@@ -145,7 +145,7 @@ describe("typed New API model source routing integration", () => {
     const custom = vi.fn(async (input: SendMessageInput) => externalEvents(input.sessionId, "custom"));
     const routing = createMainProcessModelRouting({
       dataDir, providers, allowLoopbackHttp: true, executors: { domestic, custom },
-      builtinDataClient: createBuiltinServiceClient({ allowLoopbackHttp: true, fetch: proxyFetch }),
+      legacyBuiltinClient: createBuiltinServiceClient({ allowLoopbackHttp: true, fetch: proxyFetch }),
     });
     await routing.credentials.provision({
       schemaVersion: 1, deviceId: "route_lifecycle_device", licenseId: "route_lifecycle_license",

@@ -128,15 +128,17 @@ func TestActivateFirstBindingUsesTwoPhasesAndReturnsPersistedEnvelope(t *testing
 	}
 	if material.Status != "active" || material.License.SchemaVersion != 1 ||
 		material.License.Signature.Algorithm != "ed25519" || material.License.Signature.KeyID != "test-license-key" ||
-		material.StartupCredential.SchemaVersion != 1 || material.BuiltinCredential.SchemaVersion != 1 ||
+		material.StartupCredential.SchemaVersion != 1 || material.BuiltinCredential.SchemaVersion != 2 ||
 		material.BuiltinCredential.Endpoint != "https://public.example/model-api/" ||
-		material.BuiltinCredential.Model != "model-a" ||
 		!strings.HasPrefix(material.BuiltinCredential.DeviceToken, "uclaw_dt_") {
 		t.Fatalf("material does not match frozen activation response: %+v", material)
 	}
 	encoded := string(result.Material)
 	if strings.Contains(encoded, `"accessToken"`) {
 		t.Fatalf("legacy builtin token fields leaked: %s", encoded)
+	}
+	if strings.Contains(encoded, `"model"`) {
+		t.Fatalf("single-model credential field leaked: %s", encoded)
 	}
 	salt, err := hex.DecodeString(material.License.StartupSecretProof.StartupSecretSalt)
 	if err != nil {
@@ -309,9 +311,9 @@ func TestActivateFreshBindingUsesCurrentPublicEndpoint(t *testing.T) {
 
 func TestValidBuiltinCredentialRejectsUnsafeRecoveredEndpoint(t *testing.T) {
 	valid := builtinCredentialArtifact{
-		Endpoint:    "https://public.example/model-api/",
-		Model:       "model-a",
-		DeviceToken: "uclaw_dt_" + strings.Repeat("A", 43),
+		SchemaVersion: 2,
+		Endpoint:      "https://public.example/model-api/",
+		DeviceToken:   "uclaw_dt_" + strings.Repeat("A", 43),
 	}
 	if !validBuiltinCredential(valid) {
 		t.Fatal("valid credential rejected")
@@ -328,6 +330,16 @@ func TestValidBuiltinCredentialRejectsUnsafeRecoveredEndpoint(t *testing.T) {
 		if validBuiltinCredential(credential) {
 			t.Fatalf("unsafe endpoint accepted: %q", endpoint)
 		}
+	}
+	legacy := valid
+	legacy.SchemaVersion = 1
+	legacy.Model = "legacy-model"
+	if !validBuiltinCredential(legacy) {
+		t.Fatal("legacy credential rejected")
+	}
+	legacy.Model = ""
+	if validBuiltinCredential(legacy) {
+		t.Fatal("legacy credential without model accepted")
 	}
 }
 

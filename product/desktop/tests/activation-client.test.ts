@@ -40,11 +40,10 @@ const response = {
     startupSecret: "x".repeat(32),
   },
   builtinCredential: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     deviceId: "device-001",
     licenseId: "license-001",
     endpoint: "https://license.example.test/model-api/",
-    model: "gpt-5.6-sol",
     deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   },
   status: "active",

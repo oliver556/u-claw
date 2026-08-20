@@ -48,11 +48,10 @@ export const ActivationRequestSchema = z.object({
 export type ActivationRequest = z.infer<typeof ActivationRequestSchema>;
 
 export const BuiltinCredentialArtifactSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   deviceId: IdentifierSchema,
   licenseId: IdentifierSchema,
   endpoint: SecureModelEndpointSchema,
-  model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u),
   deviceToken: z.string().regex(/^uclaw_dt_[A-Za-z0-9_-]{43}$/u),
 }).strict();
 export type BuiltinCredentialArtifact = z.infer<typeof BuiltinCredentialArtifactSchema>;

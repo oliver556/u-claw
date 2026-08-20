@@ -5,10 +5,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createDesktopMainOptions,
-  createRegisteredProviderExecutor,
-} from "../src/wiring/create-desktop-main-options.js";
+import { createDesktopMainOptions } from "../src/wiring/create-desktop-main-options.js";
 import * as desktopMain from "../src/main.js";
 import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fixture.js";
 
@@ -657,7 +654,7 @@ describe("production desktop wiring", () => {
     await options.dispose?.();
   });
 
-  it("registers production Usage IPC and routes external providers through OpenClaw", async () => {
+  it("registers production Usage IPC without an Electron model inference fallback", async () => {
     ScriptedWebSocket.outcome = "usage";
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
     const fetchSpy = vi.fn(async () => { throw new Error("HTTP executor must not run"); });
@@ -686,23 +683,8 @@ describe("production desktop wiring", () => {
       params: { startDate: "2026-08-12", endDate: "2026-08-12" },
     })).resolves.toMatchObject({ ok: true, result: { newApi: null } });
 
-    await expect(options.modelSourceExecutors!.custom({
-      sessionId: "agent:main:external",
-      clientRequestId: "external-1",
-      blocks: [{ type: "text", text: "hello", format: "plain" }],
-    }, {
-      id: "external-provider",
-      name: "External",
-      enabled: true,
-      baseUrl: "https://provider.example/v1",
-      model: "model-1",
-      apiKey: "provider-key",
-    })).resolves.toBeDefined();
+    expect(options).not.toHaveProperty("modelSourceExecutors");
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([
-      expect.objectContaining({ method: "sessions.patch", params: { key: "agent:main:external", model: "external-provider/model-1" } }),
-      expect.objectContaining({ method: "sessions.list" }),
-    ]));
 
     disposeUsage();
     await options.dispose?.();
@@ -824,7 +806,7 @@ describe("production desktop wiring", () => {
     });
   });
 
-  it("spawns only the configured runtime and supplies a real OpenClaw provider executor", async () => {
+  it("spawns only the configured runtime and exposes no model-source executor", async () => {
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
     const options = await createDesktopMainOptions(productionEnv);
     try {
@@ -833,97 +815,10 @@ describe("production desktop wiring", () => {
 
       expect(typeof options.spawn).toBe("function");
       expect(launch.executable).toBe(process.execPath);
-      await expect(options.modelSourceExecutors!.custom({
-        sessionId: "session-1",
-        clientRequestId: "request-1",
-        blocks: [{ type: "text", text: "hello", format: "plain" }],
-      }, {
-        id: "custom",
-        name: "Custom",
-        enabled: true,
-        baseUrl: "https://provider.example/v1",
-        model: "model-1",
-        apiKey: "provider-key",
-      })).resolves.toBeDefined();
-      expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([
-        expect.objectContaining({ method: "sessions.patch", params: { key: "session-1", model: "custom/model-1" } }),
-      ]));
+      expect(options).not.toHaveProperty("modelSourceExecutors");
     } finally {
       await options.dispose?.();
     }
-  });
-
-  it("allows a loopback OpenAI-compatible local model without an API key through OpenClaw", async () => {
-    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
-    const options = await createDesktopMainOptions(productionEnv);
-    try {
-      options.buildGatewayLaunchOptions(18793);
-      await options.probeCapabilities(18793, new AbortController().signal);
-      await expect(options.modelSourceExecutors!.custom({
-        sessionId: "session-local",
-        clientRequestId: "request-local",
-        blocks: [{ type: "text", text: "hello", format: "plain" }],
-      }, {
-        id: "ollama-local",
-        name: "Ollama",
-        enabled: true,
-        baseUrl: "http://127.0.0.1:11434/v1",
-        model: "llama3.2",
-      })).resolves.toBeDefined();
-      expect(ScriptedWebSocket.instances[0]!.sent).toEqual(expect.arrayContaining([
-        expect.objectContaining({ method: "sessions.patch", params: { key: "session-local", model: "ollama-local/llama3.2" } }),
-      ]));
-    } finally {
-      await options.dispose?.();
-    }
-  });
-
-  it("routes the ZAI native template through OpenClaw instead of the HTTP executor", async () => {
-    const openAiCompatible = vi.fn();
-    const native = vi.fn(async () => "native-result");
-    const registry = {
-      resolve: vi.fn(() => ({ execute: openAiCompatible })),
-    } as never;
-    const execute = createRegisteredProviderExecutor(registry, "domestic", native as never);
-
-    await expect(execute({} as never, {
-      id: "zai",
-      templateId: "zai",
-      name: "Z.AI",
-      enabled: true,
-      baseUrl: null,
-      model: "glm-5",
-      apiKey: "zai-key",
-    })).resolves.toBe("native-result");
-    expect(native).toHaveBeenCalledOnce();
-    expect(openAiCompatible).not.toHaveBeenCalled();
-  });
-
-  it("does not bypass OpenClaw for an external provider target", async () => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ choices: [{ message: { content: "unsafe response" } }] }),
-    }));
-    vi.stubGlobal("fetch", fetch);
-    Object.defineProperty(globalThis, "WebSocket", { configurable: true, writable: true, value: ScriptedWebSocket });
-    const options = await createDesktopMainOptions(productionEnv);
-    options.buildGatewayLaunchOptions(18794);
-    await options.probeCapabilities(18794, new AbortController().signal);
-
-    await expect(options.modelSourceExecutors!.custom({
-      sessionId: "session-unsafe",
-      clientRequestId: "request-unsafe",
-      blocks: [{ type: "text", text: "hello", format: "plain" }],
-    }, {
-      id: "unsafe",
-      name: "Unsafe",
-      enabled: true,
-      baseUrl: "http://169.254.169.254/v1",
-      model: "model-1",
-      apiKey: "provider-key",
-    })).resolves.toBeDefined();
-    expect(fetch).not.toHaveBeenCalled();
-    await options.dispose?.();
   });
 
   it("shares saved provider proxy settings with the managed Gateway launch", async () => {

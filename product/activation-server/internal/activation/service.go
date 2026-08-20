@@ -105,7 +105,7 @@ type builtinCredentialArtifact struct {
 	DeviceID      string `json:"deviceId"`
 	LicenseID     string `json:"licenseId"`
 	Endpoint      string `json:"endpoint"`
-	Model         string `json:"model"`
+	Model         string `json:"model,omitempty"`
 	DeviceToken   string `json:"deviceToken"`
 }
 
@@ -290,6 +290,14 @@ func (service *Service) recoverBound(ctx context.Context, record BoundRecord, re
 		}
 		return boundFailure(record, ErrActivationServiceUnavailable)
 	}
+	if decoded.BuiltinCredential.SchemaVersion == 1 {
+		decoded.BuiltinCredential.SchemaVersion = 2
+		decoded.BuiltinCredential.Model = ""
+		material, err = json.Marshal(decoded)
+		if err != nil {
+			return boundFailure(record, ErrActivationServiceUnavailable)
+		}
+	}
 	if recovery {
 		if err := service.repository.RecordRecovery(ctx, record.ActivationID, recoveryRequestID, "succeeded"); err != nil {
 			return boundFailure(record, errors.Join(ErrActivationServiceUnavailable, err))
@@ -393,7 +401,7 @@ func newActivationMaterial(record BoundRecord, pending pendingMaterial, signatur
 			NotBefore: notBefore, ExpiresAt: expiresAt, Revision: record.Revision,
 		},
 		StartupCredential: startupCredentialArtifact{SchemaVersion: 1, DeviceID: record.DeviceID, LicenseID: record.LicenseID, StartupSecret: pending.StartupSecret},
-		BuiltinCredential: builtinCredentialArtifact{SchemaVersion: 1, DeviceID: record.DeviceID, LicenseID: record.LicenseID, Endpoint: record.PublicModelEndpoint, Model: record.DefaultModel, DeviceToken: pending.DeviceToken},
+		BuiltinCredential: builtinCredentialArtifact{SchemaVersion: 2, DeviceID: record.DeviceID, LicenseID: record.LicenseID, Endpoint: record.PublicModelEndpoint, DeviceToken: pending.DeviceToken},
 	}
 	material.License.USBFingerprint.Scheme = record.FingerprintVersion
 	material.License.USBFingerprint.SHA256 = record.FingerprintSHA256
@@ -412,16 +420,19 @@ func validActivationMaterial(material activationMaterial, record BoundRecord) bo
 		material.License.SchemaVersion == 1 && material.License.DeviceID == record.DeviceID && material.License.LicenseID == record.LicenseID &&
 		material.License.Signature.Algorithm == "ed25519" && material.License.Signature.KeyID == record.KeyID && material.License.Signature.Value != "" &&
 		material.StartupCredential.SchemaVersion == 1 && material.StartupCredential.DeviceID == record.DeviceID && material.StartupCredential.LicenseID == record.LicenseID &&
-		material.BuiltinCredential.SchemaVersion == 1 && material.BuiltinCredential.DeviceID == record.DeviceID && material.BuiltinCredential.LicenseID == record.LicenseID &&
+		material.BuiltinCredential.DeviceID == record.DeviceID && material.BuiltinCredential.LicenseID == record.LicenseID &&
 		validBuiltinCredential(material.BuiltinCredential)
 }
 
 func validBuiltinCredential(credential builtinCredentialArtifact) bool {
-	if !modelendpoint.Valid(credential.Endpoint) || credential.Model == "" || strings.TrimSpace(credential.Model) != credential.Model {
+	if !modelendpoint.Valid(credential.Endpoint) {
 		return false
 	}
 	const tokenPrefix = "uclaw_dt_"
-	return strings.HasPrefix(credential.DeviceToken, tokenPrefix) && len(credential.DeviceToken) == len(tokenPrefix)+43
+	validToken := strings.HasPrefix(credential.DeviceToken, tokenPrefix) && len(credential.DeviceToken) == len(tokenPrefix)+43
+	validLegacy := credential.SchemaVersion == 1 && credential.Model != "" && strings.TrimSpace(credential.Model) == credential.Model
+	validCurrent := credential.SchemaVersion == 2 && credential.Model == ""
+	return validToken && (validLegacy || validCurrent)
 }
 
 func decodeStrictJSON(encoded []byte, output any) error {

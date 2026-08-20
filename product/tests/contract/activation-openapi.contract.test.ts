@@ -35,11 +35,10 @@ describe("activation OpenAPI contract", () => {
     ajv.addSchema(document, "openapi");
     const validate = ajv.compile({ $ref: "openapi#/components/schemas/BuiltinCredential" });
     const credential = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       deviceId: "dev_fixture_001",
       licenseId: "lic_fixture_001",
       endpoint: "https://license.example.test/model-api/",
-      model: "uclaw-default",
       deviceToken: `uclaw_dt_${"A".repeat(43)}`,
     };
 
@@ -126,9 +125,9 @@ describe("activation OpenAPI contract", () => {
       "schemaVersion", "usernameId", "deviceId", "licenseId", "usbFingerprint", "startupSecretProof", "notBefore", "expiresAt", "revision", "signature",
     ]);
     expect(required("StartupCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "startupSecret"]);
-    expect(required("BuiltinCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "endpoint", "model", "deviceToken"]);
+    expect(required("BuiltinCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "endpoint", "deviceToken"]);
     expect(Object.keys(document.components.schemas.BuiltinCredential.properties ?? {})).toEqual(
-      ["schemaVersion", "deviceId", "licenseId", "endpoint", "model", "deviceToken"],
+      ["schemaVersion", "deviceId", "licenseId", "endpoint", "deviceToken"],
     );
     expect(required("LicenseStatusReceipt")).toEqual(["value"]);
     expect(document.components.schemas.DeviceTokenRequest).toBeUndefined();
@@ -196,7 +195,7 @@ describe("activation OpenAPI contract", () => {
       ["activationCode", "usbFingerprint", "clientVersion", "idempotencyKey"],
     );
     expect(document.components.schemas.BuiltinCredential.properties).toEqual({
-      schemaVersion: { const: 1 },
+      schemaVersion: { const: 2 },
       deviceId: { $ref: "#/components/schemas/Identifier" },
       licenseId: { $ref: "#/components/schemas/Identifier" },
       endpoint: {
@@ -204,7 +203,6 @@ describe("activation OpenAPI contract", () => {
         format: "uri",
         pattern: "^[Hh][Tt][Tt][Pp][Ss]://(?:\\[[0-9A-Fa-f:.]+\\]|[^/?#@\\[\\]\\\\\\u0000-\\u0020\\u007F:]+)(?::[0-9]+)?(?:/[^?#@\\\\\\u0000-\\u0020\\u007F]*)?$",
       },
-      model: expect.any(Object),
       deviceToken: { type: "string", pattern: "^uclaw_dt_[A-Za-z0-9_-]{43}$" },
     });
     for (const status of ["401", "403", "429", "503"]) {

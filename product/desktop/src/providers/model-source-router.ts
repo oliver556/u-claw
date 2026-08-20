@@ -20,7 +20,7 @@ import {
 } from "./builtin-credential-store.js";
 import {
   BuiltinServiceClientError,
-  createBuiltinServiceClient,
+  createRemovedBuiltinServiceClient,
   type BuiltinServiceClient,
 } from "./builtin-service-client.js";
 import type { ProviderStore } from "./provider-store.js";
@@ -75,7 +75,7 @@ export interface CreateMainProcessModelRoutingOptions {
   providers: ProviderStore;
   executors: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
   allowLoopbackHttp?: boolean;
-  builtinDataClient?: BuiltinServiceClient;
+  legacyBuiltinClient?: BuiltinServiceClient;
 }
 
 const BUILTIN_MAX_OUTPUT_TOKENS = 4_096;
@@ -177,7 +177,7 @@ export function createModelSourceRouter<Request, Result>({
       try {
         return await executors.builtin(request, credential, signal);
       } catch (error) {
-        if (error instanceof BuiltinServiceClientError) throw error;
+        if (error instanceof BuiltinServiceClientError || (error instanceof Error && error.name === "BuiltinServiceClientError")) throw error;
         if (error instanceof ModelSourceFailure && error.source === "builtin") throw error;
         throw new ModelSourceFailure("builtin", "upstream");
       }
@@ -190,7 +190,7 @@ export function createMainProcessModelRouting({
   providers,
   executors,
   allowLoopbackHttp = false,
-  builtinDataClient = createBuiltinServiceClient({ allowLoopbackHttp }),
+  legacyBuiltinClient = createRemovedBuiltinServiceClient(),
 }: CreateMainProcessModelRoutingOptions) {
   const credentials = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp });
   const builtin = async (
@@ -199,7 +199,7 @@ export function createMainProcessModelRouting({
     signal?: AbortSignal,
   ): Promise<AsyncIterable<MessageEvent>> => {
     const request = toBuiltinModelRequest(input, credential);
-    const response = await builtinDataClient.execute(request, credential, signal);
+    const response = await legacyBuiltinClient.execute(request, credential, signal);
     return toBuiltinMessageStream(input, response);
   };
   const router = createModelSourceRouter({ providers, credentials, executors: { ...executors, builtin } });

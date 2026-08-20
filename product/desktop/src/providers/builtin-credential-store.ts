@@ -8,15 +8,24 @@ import { z } from "zod";
 
 const FILE_NAME = "builtin-model-credential.v1.json";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
-const PersistedCredentialSchema = z.object({
-  schemaVersion: z.literal(1),
+const PersistedCredentialFields = {
   deviceTokenId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u).optional(),
   deviceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
   licenseId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
   endpoint: z.string(),
-  model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u),
   deviceToken: z.string().regex(/^uclaw_dt_[A-Za-z0-9_-]{43}$/u),
+};
+const LegacyPersistedCredentialSchema = z.object({
+  schemaVersion: z.literal(1),
+  ...PersistedCredentialFields,
+  model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u),
 }).strict();
+const CurrentPersistedCredentialSchema = z.object({
+  schemaVersion: z.literal(2),
+  ...PersistedCredentialFields,
+}).strict();
+const PersistedCredentialSchema = z.union([CurrentPersistedCredentialSchema, LegacyPersistedCredentialSchema]);
+type LegacyPersistedCredential = z.infer<typeof LegacyPersistedCredentialSchema>;
 
 export type BuiltinCredentialErrorCode =
   | "BUILTIN_CREDENTIAL_MISSING"
@@ -31,14 +40,14 @@ export class BuiltinCredentialError extends Error {
   }
 }
 
-export type BuiltinCredentialProvisioningInput = BuiltinCredentialArtifact;
+export type BuiltinCredentialProvisioningInput = BuiltinCredentialArtifact | LegacyPersistedCredential;
 
 export interface BuiltinModelCredential {
   endpoint: URL;
   deviceId: string;
   licenseId: string;
   deviceToken: string;
-  model: string;
+  model?: string;
 }
 
 export interface BuiltinCredentialStore {
@@ -75,7 +84,7 @@ function validateEndpoint(value: string, allowLoopbackHttp: boolean): URL {
 }
 
 function validatePersisted(value: unknown, allowLoopbackHttp: boolean): {
-  persisted: BuiltinCredentialArtifact;
+  persisted: BuiltinCredentialProvisioningInput;
   credential: BuiltinModelCredential;
 } {
   const parsed = PersistedCredentialSchema.safeParse(value);
@@ -91,7 +100,7 @@ function validatePersisted(value: unknown, allowLoopbackHttp: boolean): {
       deviceId: persisted.deviceId,
       licenseId: persisted.licenseId,
       deviceToken: persisted.deviceToken,
-      model: persisted.model,
+      ...("model" in persisted ? { model: persisted.model } : {}),
     },
   };
 }

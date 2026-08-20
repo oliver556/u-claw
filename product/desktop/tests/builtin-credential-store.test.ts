@@ -20,11 +20,10 @@ async function setup(allowLoopbackHttp = true) {
 function provisionInput(endpoint = "http://127.0.0.1:18090/v1") {
   const suffix = randomUUID().replaceAll("-", "");
   return {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     deviceId: `dev_${suffix}`,
     licenseId: `lic_${suffix}`,
     endpoint,
-    model: "gpt-5.6-sol",
     deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   };
 }
@@ -84,7 +83,6 @@ describe("builtin credential store", () => {
       deviceId: input.deviceId,
       licenseId: input.licenseId,
       deviceToken: input.deviceToken,
-      model: input.model,
     });
     const path = join(dataDir, ".uclaw", "builtin-model-credential.v1.json");
     expect((await stat(path)).mode & 0o777).toBe(0o600);
@@ -105,7 +103,24 @@ describe("builtin credential store", () => {
       deviceId: input.deviceId,
       licenseId: input.licenseId,
       deviceToken: input.deviceToken,
-      model: input.model,
+    });
+  });
+
+  it("loads a legacy single-model credential without making its model authoritative", async () => {
+    const { dataDir, store } = await setup();
+    const current = provisionInput();
+    const credentialDir = join(dataDir, ".uclaw");
+    await mkdir(credentialDir, { recursive: true });
+    await writeFile(join(credentialDir, "builtin-model-credential.v1.json"), `${JSON.stringify({
+      ...current,
+      schemaVersion: 1,
+      model: "legacy-model",
+    })}\n`, { mode: 0o600 });
+
+    await expect(store.loadActive()).resolves.toMatchObject({
+      endpoint: new URL(`${current.endpoint}/`),
+      deviceToken: current.deviceToken,
+      model: "legacy-model",
     });
   });
 

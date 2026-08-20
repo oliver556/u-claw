@@ -1,9 +1,9 @@
 import type { BuiltinModelCredential } from "../src/providers/builtin-credential-store.js";
 import {
   BuiltinServiceClientError,
-  createBuiltinServiceClient,
+  createLegacyBuiltinServiceClientForTest as createBuiltinServiceClient,
   createUnavailableBuiltinServiceClient,
-} from "../src/providers/builtin-service-client.js";
+} from "./helpers/legacy-builtin-service-client.js";
 import { describe, expect, it, vi } from "vitest";
 
 const credential = (endpoint = "https://builtin.example.test/v1/"): BuiltinModelCredential => ({

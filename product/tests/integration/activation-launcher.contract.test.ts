@@ -127,11 +127,10 @@ describe("activation launcher-to-desktop contract", () => {
           startupSecret,
         },
         builtinCredential: {
-          schemaVersion: 1 as const,
+          schemaVersion: 2 as const,
           deviceId: license.deviceId,
           licenseId: license.licenseId,
           endpoint: "https://127.0.0.1/model-api/",
-          model: "fixture-default-model",
           deviceToken: `uclaw_dt_${"A".repeat(43)}`,
         },
         status: "active" as const,

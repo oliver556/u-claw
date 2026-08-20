@@ -37,13 +37,12 @@ describe("activation API contract", () => {
 		expect(() => ActivationRequestSchema.parse({ ...request, username: "UCLAW-00000001" })).toThrow();
 	});
 
-	it("locks the long-lived builtin device credential fields", () => {
+	it("locks the model-agnostic commercial device credential fields", () => {
 		const credential = {
-			schemaVersion: 1,
+			schemaVersion: 2,
 			deviceId: "dev_fixture_001",
 			licenseId: "lic_fixture_001",
 			endpoint: "https://license.example.test/model-api/",
-			model: "uclaw-default",
 			deviceToken: `uclaw_dt_${"A".repeat(43)}`,
 		};
 
@@ -137,11 +136,10 @@ describe("activation API contract", () => {
         startupSecret: "fixture-generated-secret-material-001",
       },
       builtinCredential: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         deviceId: "dev_fixture_001",
         licenseId: "lic_fixture_001",
         endpoint: "https://api.u-claw.org/v1",
-        model: "uclaw-default",
         deviceToken: `uclaw_dt_${"A".repeat(43)}`,
       },
       status: "active",

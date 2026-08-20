@@ -93,7 +93,7 @@ describe("commercial OpenClaw credential lifecycle", () => {
     });
 
     await rotateCommercialOpenClawCredential({
-      next: { schemaVersion: 1, deviceId: "device-001", licenseId: "license-001", endpoint: credential.endpoint.href, model: "legacy-only", deviceToken: credential.deviceToken },
+      next: { schemaVersion: 2, deviceId: "device-001", licenseId: "license-001", endpoint: credential.endpoint.href, deviceToken: credential.deviceToken },
       store,
       config,
       gateway,
@@ -114,7 +114,7 @@ describe("commercial OpenClaw credential lifecycle", () => {
   it("fails closed when authoritative model readback omits an enabled model", async () => {
     const token = `uclaw_dt_${"R".repeat(43)}`;
     await expect(rotateCommercialOpenClawCredential({
-      next: { schemaVersion: 1, deviceId: "device-001", licenseId: "license-001", endpoint: "https://commercial.example.test/model-api/v1/", model: "legacy-only", deviceToken: token },
+      next: { schemaVersion: 2, deviceId: "device-001", licenseId: "license-001", endpoint: "https://commercial.example.test/model-api/v1/", deviceToken: token },
       store: { credentialPath: "/credential.json", provision: async () => undefined, loadActive: async () => ({ endpoint: new URL("https://commercial.example.test/model-api/v1/"), deviceToken: token }) },
       config: { synchronizeCommercial: async () => true, readCommercial: async () => ({ configured: true }) },
       gateway: { restartManagedGateway: async () => undefined },

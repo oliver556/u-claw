@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ACTIVATION_ONLY_CAPABILITIES, assertActivationOnlyCapabilities, bootstrapDesktopApp, createProductionDataService, disposeDesktopIpc, registerActivationOnlyIpc, requireChannelRuntime, requireElectronClient, requireModelSourceExecutors, runActivationMain, runDesktopMain, startActivationMainWithRuntime, validateRendererUrl, verifyActivationResponse } from "../src/main.js";
+import { ACTIVATION_ONLY_CAPABILITIES, assertActivationOnlyCapabilities, bootstrapDesktopApp, createProductionDataService, disposeDesktopIpc, registerActivationOnlyIpc, requireChannelRuntime, requireElectronClient, runActivationMain, runDesktopMain, startActivationMainWithRuntime, validateRendererUrl, verifyActivationResponse } from "../src/main.js";
 import { ProductionRuntimeConsistencyCoordinator } from "../src/data/production-consistency-coordinator.js";
 
 describe("Electron client wiring", () => {
@@ -23,7 +23,7 @@ describe("Electron client wiring", () => {
     const license = { schemaVersion: 1 as const, usernameId: "username-001", deviceId: "device-001", licenseId: "license-001", usbFingerprint: { scheme: "uclaw-usb-v1" as const, sha256: fingerprint }, startupSecretProof: { algorithm: "sha256-salt-v1" as const, startupSecretSalt: salt.toString("hex"), startupSecretHash: secretHash }, notBefore: "2026-08-13T00:00:00Z", expiresAt: "2027-08-13T00:00:00Z", revision: 1, signature: { algorithm: "ed25519" as const, keyId: "activation-key", value: "" } };
     const payload = ["uclaw-startup-license-v1", 1, license.signature.keyId, license.usernameId, license.deviceId, license.licenseId, license.usbFingerprint.scheme, fingerprint, license.startupSecretProof.startupSecretSalt, secretHash, license.notBefore, license.expiresAt, license.revision];
     license.signature.value = sign(null, Buffer.from(JSON.stringify(payload)), keys.privateKey).toString("base64");
-    const response = { activationId: "activation-001", deviceId: license.deviceId, licenseId: license.licenseId, license, startupCredential: { schemaVersion: 1 as const, deviceId: license.deviceId, licenseId: license.licenseId, startupSecret: secret }, builtinCredential: { schemaVersion: 1 as const, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: "https://license.example.test/model-api/", model: "gpt-5.6-sol", deviceToken: `uclaw_dt_${"A".repeat(43)}` }, status: "active" as const };
+    const response = { activationId: "activation-001", deviceId: license.deviceId, licenseId: license.licenseId, license, startupCredential: { schemaVersion: 1 as const, deviceId: license.deviceId, licenseId: license.licenseId, startupSecret: secret }, builtinCredential: { schemaVersion: 2 as const, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: "https://license.example.test/model-api/", deviceToken: `uclaw_dt_${"A".repeat(43)}` }, status: "active" as const };
     const publicKey = keys.publicKey.export({ format: "pem", type: "spki" }).toString();
     expect(verifyActivationResponse(response, fingerprint, { "activation-key": publicKey }, new Date("2026-08-13T12:00:00Z"))).toBe(true);
     expect(verifyActivationResponse({ ...response, startupCredential: { ...response.startupCredential, startupSecret: "y".repeat(32) } }, fingerprint, { "activation-key": publicKey }, new Date("2026-08-13T12:00:00Z"))).toBe(false);
@@ -214,10 +214,6 @@ describe("Electron client wiring", () => {
 
   it("rejects production startup without a real UClawClient", () => {
     expect(() => requireElectronClient(undefined)).toThrow("UClawClient");
-  });
-
-  it("fails closed when production model-source executors are missing", () => {
-    expect(() => requireModelSourceExecutors(undefined)).toThrow("model source executors");
   });
 
   it("does not expose the loopback HTTP test policy through production options", async () => {
