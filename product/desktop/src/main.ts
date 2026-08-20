@@ -25,7 +25,7 @@ import {
   type GatewayHealthDependencies,
 } from "./gateway/health-check.js";
 import { selectGatewayPort } from "./gateway/port-selector.js";
-import { startGatewayAndCreateWindow, validateGatewayLaunchOptions, waitForGatewayReadiness, type ShowableWindow } from "./gateway/startup.js";
+import { startGatewayAndCreateWindow, validateGatewayLaunchOptions, waitForGatewayReadiness, type GatewayCapabilityState, type ShowableWindow } from "./gateway/startup.js";
 import {
   applyPortableEnvironmentToLaunchOptions,
   type PortableDesktopPaths,
@@ -270,6 +270,7 @@ export interface BootstrapDesktopDependencies<TWindow extends AppWindowLike> {
   stopGateway(): Promise<void> | void;
   abortStartup?(): void;
   startupSignal?: AbortSignal;
+  acquireHostGlobalLock?(): Promise<boolean> | boolean;
 }
 
 export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
@@ -279,7 +280,12 @@ export async function bootstrapDesktopApp<TWindow extends AppWindowLike>({
   stopGateway,
   abortStartup,
   startupSignal,
+  acquireHostGlobalLock,
 }: BootstrapDesktopDependencies<TWindow>): Promise<TWindow | null> {
+  if (acquireHostGlobalLock && !await acquireHostGlobalLock()) {
+    app.quit();
+    return null;
+  }
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     return null;
@@ -404,6 +410,8 @@ export interface DesktopMainOptions {
   gatewayMediaToken?: string;
   gatewayOrigin?: () => string | undefined;
   imageDataRoot?: string;
+  releaseId?: string;
+  onGatewayCapabilityState?(state: GatewayCapabilityState): void;
 }
 
 export interface RegisteredDesktopDomain {
@@ -445,6 +453,7 @@ export function resolveSkillRuntimeRegistration(
 
 export interface DesktopMainRuntime<TWindow extends AppWindowLike & ShowableWindow> {
   app: DesktopAppLike;
+  acquireHostGlobalLock?(): Promise<boolean> | boolean;
   createWindow(
     registerIpc: (window: TWindow) => (() => void) | void,
     signal: AbortSignal,
@@ -494,6 +503,7 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
     killTimeoutMs: options.gatewayKillTimeoutMs,
     diagnostics: options.gatewayDiagnostics,
     now: options.now,
+    releaseId: options.releaseId,
   });
   const fetchHealth = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const now = options.now ?? Date.now;
@@ -519,6 +529,7 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
     stop: async (signal) => {
       signal?.throwIfAborted();
       await gatewayProcess.stop("consistency-restart");
+      options.onGatewayCapabilityState?.("local-only");
     },
     start: async (signal) => {
       if (managedPort === undefined || managedLaunchOptions === undefined) throw new Error("Managed Gateway launch state is unavailable.");
@@ -543,14 +554,19 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
           timeoutMs: options.readinessTimeoutMs ?? 30_000,
           pollIntervalMs: options.readinessPollIntervalMs ?? 250,
           signal: restartSignal,
-        }, managedPort, identity, () => gatewayProcess.markHealthReady(identity));
+        }, managedPort, identity, () => {
+          gatewayProcess.markHealthReady(identity);
+          options.onGatewayCapabilityState?.("partial");
+        });
         gatewayProcess.markCapabilityReady(identity);
+        options.onGatewayCapabilityState?.("full");
       } catch (error) {
         restartController.abort();
         gatewayProcess.markStartupFailed(identity);
         try { await gatewayProcess.stop("startup-rollback"); } catch (stopError) {
           throw new AggregateError([error, stopError], "Managed Gateway restart and cleanup failed.", { cause: error });
         }
+        options.onGatewayCapabilityState?.("local-only");
         throw error;
       }
     },
@@ -561,8 +577,13 @@ export async function runDesktopMain<TWindow extends AppWindowLike & ShowableWin
     stopGateway,
     abortStartup: () => startupController.abort(new DOMException("Desktop shutdown requested.", "AbortError")),
     startupSignal: startupController.signal,
+    acquireHostGlobalLock: runtime.acquireHostGlobalLock,
     createWindow: async (registerIpc) => {
       const started = await startGatewayAndCreateWindow({
+        attemptId: randomUUID(),
+        releaseId: options.releaseId,
+        onCapabilityState: options.onGatewayCapabilityState,
+        keepShellOnGatewayFailure: true,
         selectPort: options.selectPort ?? ((excludedPorts) => selectGatewayPort({ excludedPorts })),
         gatewayProcess: {
           start: (launchOptions) => gatewayProcess.start(launchOptions),
@@ -842,6 +863,12 @@ export async function startElectronMain(
       await options.dispose?.();
     },
     consistencyCoordinator,
+    onGatewayCapabilityState: (state) => {
+      diagnosticsRuntime.gatewayStatus = state === "full"
+        ? "ready"
+        : state === "partial" ? "degraded" : "offline";
+      options.onGatewayCapabilityState?.(state);
+    },
     buildGatewayLaunchOptions: (port) => {
       gatewayPort = port;
       diagnosticsRuntime.gatewayPort = port;
@@ -897,7 +924,6 @@ export async function startElectronMain(
       });
     },
     registerIpc: (window, dispatchClient) => {
-      diagnosticsRuntime.gatewayStatus = "ready";
       if (options.gatewayMediaToken === undefined || options.gatewayOrigin === undefined || options.imageDataRoot === undefined) throw new Error("Gateway image authority is unavailable.");
       const images = createImageOperationDispatcher(createImageOperationService({
         gatewayOrigin: () => {

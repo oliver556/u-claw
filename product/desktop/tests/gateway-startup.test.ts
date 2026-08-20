@@ -16,7 +16,7 @@ function startGatewayAndCreateWindow<TWindow extends ShowableWindow>(
 }
 
 describe("startGatewayAndCreateWindow", () => {
-  it("selects a port, starts the owned gateway, waits for business readiness, then shows the window", async () => {
+  it("shows the Shell before starting the owned gateway and then waits for business readiness", async () => {
     const order: string[] = [];
     const show = vi.fn(() => order.push("show"));
     const start = vi.fn((launch) => {
@@ -63,13 +63,13 @@ describe("startGatewayAndCreateWindow", () => {
     });
     expect(order).toEqual([
       "port",
+      "window",
+      "show",
       "set-port:18790",
       "start:18790",
       "health-ready",
       "poll",
       "capability-ready",
-      "window",
-      "show",
     ]);
   });
 
@@ -88,7 +88,7 @@ describe("startGatewayAndCreateWindow", () => {
       sleep: vi.fn(),
       timeoutMs: 1_000,
       pollIntervalMs: 10,
-      createWindow: vi.fn(),
+      createWindow: vi.fn(async () => ({ show: vi.fn() })),
     })).rejects.toThrow("launch options");
     expect(start).not.toHaveBeenCalled();
   });
@@ -104,15 +104,16 @@ describe("startGatewayAndCreateWindow", () => {
       sleep: vi.fn(),
       timeoutMs: 1_000,
       pollIntervalMs: 10,
-      createWindow: vi.fn(),
+      createWindow: vi.fn(async () => ({ show: vi.fn() })),
     })).rejects.toThrow("18789-18799");
     expect(start).not.toHaveBeenCalled();
   });
 
-  it("stops the owned gateway when readiness fails and never shows a window", async () => {
+  it("stops the owned gateway when readiness fails and keeps the Shell visible", async () => {
     const stop = vi.fn(async () => undefined);
     const markStartupFailed = vi.fn();
-    const createWindow = vi.fn();
+    const show = vi.fn();
+    const createWindow = vi.fn(async () => ({ show }));
     await expect(startGatewayAndCreateWindow({
       selectPort: vi.fn(async () => 18789),
       gatewayProcess: { start: vi.fn(() => ({ pid: 4321, instanceId: 1 })), stop, markStartupFailed },
@@ -131,7 +132,8 @@ describe("startGatewayAndCreateWindow", () => {
     })).rejects.toThrow("exited");
     expect(markStartupFailed).toHaveBeenCalledWith({ pid: 4321, instanceId: 1 });
     expect(stop).toHaveBeenCalledWith("startup-rollback");
-    expect(createWindow).not.toHaveBeenCalled();
+    expect(createWindow).toHaveBeenCalledOnce();
+    expect(show).toHaveBeenCalledOnce();
   });
 
   it("does not retry another port when the gateway exits before readiness", async () => {
@@ -221,7 +223,7 @@ describe("startGatewayAndCreateWindow", () => {
       sleep: vi.fn(),
       timeoutMs: 1_000,
       pollIntervalMs: 10,
-      createWindow: vi.fn(),
+      createWindow: vi.fn(async () => ({ show: vi.fn() })),
     })).rejects.toBe(startError);
 
     expect(selectPort).toHaveBeenCalledTimes(1);
@@ -244,11 +246,48 @@ describe("startGatewayAndCreateWindow", () => {
       sleep: vi.fn(),
       timeoutMs: 1_000,
       pollIntervalMs: 10,
-      createWindow: vi.fn(),
+      createWindow: vi.fn(async () => ({ show: vi.fn() })),
     }).catch((error: unknown) => error);
 
     expect(caught).toBeInstanceOf(AggregateError);
     expect((caught as AggregateError).errors).toEqual([startupError, cleanupError]);
     expect((caught as Error & { cause?: unknown }).cause).toBe(startupError);
+  });
+
+  it("reuses one Shell and stops each owned Gateway across ten attempts", async () => {
+    const show = vi.fn();
+    const createWindow = vi.fn(async () => ({ show }));
+    const stop = vi.fn(async () => undefined);
+    let instanceId = 0;
+    const gatewayProcess = {
+      start: vi.fn(() => ({ pid: 4_000 + ++instanceId, instanceId })),
+      stop,
+    };
+    const dependencies = {
+      selectPort: vi.fn(async () => 18789),
+      gatewayProcess,
+      buildLaunchOptions: () => ({ executable: "node", args: ["gateway"] }),
+      checkHealth: vi.fn(async () => ({
+        processAlive: true,
+        serviceReady: true,
+        businessAvailable: true,
+        checkedAtMs: 0,
+      })),
+      now: () => 0,
+      sleep: vi.fn(async () => undefined),
+      timeoutMs: 1_000,
+      pollIntervalMs: 10,
+      createWindow,
+    };
+
+    for (let attempt = 1; attempt <= 10; attempt += 1) {
+      await startGatewayAndCreateWindow({ ...dependencies, attemptId: `attempt-${attempt}` });
+    }
+
+    expect(createWindow).toHaveBeenCalledOnce();
+    expect(show).toHaveBeenCalledOnce();
+    expect(gatewayProcess.start).toHaveBeenCalledTimes(10);
+    expect(stop).toHaveBeenCalledTimes(9);
+    expect(stop).toHaveBeenCalledWith("manual-restart");
   });
 });

@@ -690,18 +690,18 @@ describe("runDesktopMain", () => {
         whenReady: vi.fn(async () => undefined),
         on: vi.fn(),
       },
-      createWindow: vi.fn(),
+      createWindow: vi.fn(async () => ({
+        show: vi.fn(), isDestroyed: () => false, isMinimized: () => false, restore: vi.fn(), focus: vi.fn(),
+      })),
       registerIpc: vi.fn(),
     });
-    const rejected = expect(pending).rejects.toThrow("readiness timed out");
-
     await vi.advanceTimersByTimeAsync(101);
-    await rejected;
+    await expect(pending).resolves.toMatchObject({ show: expect.any(Function) });
     expect(child.kill).toHaveBeenCalledTimes(1);
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
   });
 
-  it("does not create a window when the owned gateway exits during health fetch", async () => {
+  it("keeps the window when the owned gateway exits during health fetch", async () => {
     class FakeChild extends EventEmitter {
       pid = 8125;
       exitCode: number | null = null;
@@ -713,7 +713,9 @@ describe("runDesktopMain", () => {
       if (excluded.length > 0) throw new Error("no other candidate");
       return 18793;
     });
-    const createWindow = vi.fn();
+    const createWindow = vi.fn(async () => ({
+      show: vi.fn(), isDestroyed: () => false, isMinimized: () => false, restore: vi.fn(), focus: vi.fn(),
+    }));
 
     await expect(runDesktopMain({
       spawn: vi.fn(() => child),
@@ -739,15 +741,15 @@ describe("runDesktopMain", () => {
       },
       createWindow,
       registerIpc: vi.fn(),
-    })).rejects.toThrow("exited before readiness");
+    })).resolves.toMatchObject({ show: expect.any(Function) });
 
-    expect(createWindow).not.toHaveBeenCalled();
+    expect(createWindow).toHaveBeenCalledOnce();
     expect(selectPort).toHaveBeenCalledTimes(1);
     expect(selectPort).toHaveBeenNthCalledWith(1, [], expect.any(AbortSignal));
     expect(child.kill).not.toHaveBeenCalled();
   });
 
-  it("aborts readiness on quit without spawning another port or creating a window", async () => {
+  it("aborts readiness on quit without spawning another port", async () => {
     class FakeChild extends EventEmitter {
       pid: number;
       exitCode: number | null = null;
@@ -816,6 +818,6 @@ describe("runDesktopMain", () => {
     expect(fetchSignal?.aborted).toBe(true);
     expect(spawn).toHaveBeenCalledOnce();
     expect(children[0].kill).toHaveBeenCalledWith("SIGTERM");
-    expect(createWindow).not.toHaveBeenCalled();
+    expect(createWindow).toHaveBeenCalledOnce();
   });
 });

@@ -16,6 +16,8 @@ export interface ShowableWindow {
 }
 
 export interface GatewayStartupDependencies<TWindow extends ShowableWindow> {
+  attemptId?: string;
+  releaseId?: string;
   selectPort(excludedPorts: readonly number[], signal: AbortSignal): Promise<number>;
   gatewayProcess: GatewayProcessController;
   buildLaunchOptions(port: number): unknown;
@@ -31,14 +33,33 @@ export interface GatewayStartupDependencies<TWindow extends ShowableWindow> {
   pollIntervalMs: number;
   createWindow(signal: AbortSignal): Promise<TWindow>;
   signal: AbortSignal;
+  onCapabilityState?(state: GatewayCapabilityState): void;
+  keepShellOnGatewayFailure?: boolean;
 }
+
+export type GatewayCapabilityState = "full" | "partial" | "local-only" | "blocked";
 
 export interface GatewayStartupResult<TWindow extends ShowableWindow> {
   window: TWindow;
   port: number;
-  pid: number;
-  instanceId: number;
+  pid?: number;
+  instanceId?: number;
+  attemptId?: string;
+  releaseId?: string;
+  capabilityState: GatewayCapabilityState;
 }
+
+interface ActiveGatewayAttempt {
+  attemptId: string;
+  shell: ActiveShell;
+  result: Promise<GatewayStartupResult<ShowableWindow>>;
+}
+
+interface ActiveShell {
+  window?: Promise<ShowableWindow>;
+}
+
+const activeAttempts = new WeakMap<GatewayProcessController, ActiveGatewayAttempt>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -102,6 +123,37 @@ export async function waitForGatewayReadiness(
 export async function startGatewayAndCreateWindow<TWindow extends ShowableWindow>(
   options: GatewayStartupDependencies<TWindow>,
 ): Promise<GatewayStartupResult<TWindow>> {
+  if (options.attemptId === undefined) {
+    return startGatewayAttempt(options, {});
+  }
+
+  const active = activeAttempts.get(options.gatewayProcess);
+  if (active?.attemptId === options.attemptId) {
+    return active.result as Promise<GatewayStartupResult<TWindow>>;
+  }
+
+  const shell = active?.shell ?? {};
+  const result: Promise<GatewayStartupResult<TWindow>> = (async () => {
+    if (active) {
+      await active.result.catch(() => undefined);
+      await options.gatewayProcess.stop("manual-restart");
+    }
+    return startGatewayAttempt(options, shell);
+  })();
+  activeAttempts.set(options.gatewayProcess, {
+    attemptId: options.attemptId,
+    shell,
+    result: result as Promise<GatewayStartupResult<ShowableWindow>>,
+  });
+  return result;
+}
+
+async function startGatewayAttempt<TWindow extends ShowableWindow>(
+  options: GatewayStartupDependencies<TWindow>,
+  shell: ActiveShell,
+): Promise<GatewayStartupResult<TWindow>> {
+  options.signal.throwIfAborted();
+
   const excludedPorts: number[] = [];
   let lastPortRaceError: unknown;
 
@@ -122,34 +174,80 @@ export async function startGatewayAndCreateWindow<TWindow extends ShowableWindow
       throw new Error(`Gateway port must be within ${GATEWAY_PORT_MIN}-${GATEWAY_PORT_MAX}.`);
     }
     const launchOptions = validateGatewayLaunchOptions(options.buildLaunchOptions(port));
+    shell.window ??= createAndShowShell(options);
+    const window = await shell.window as TWindow;
+    options.onCapabilityState?.("local-only");
     options.gatewayProcess.setPort?.(port);
     options.signal.throwIfAborted();
     let identity: GatewayProcessIdentity;
     try {
-      identity = options.gatewayProcess.start(launchOptions);
+      identity = options.gatewayProcess.start({
+        ...launchOptions,
+        ...(options.attemptId === undefined ? {} : { attemptId: options.attemptId }),
+        ...(options.releaseId === undefined ? {} : { releaseId: options.releaseId }),
+      });
     } catch (error) {
-      if (options.signal.aborted || !isAddressInUseError(error)) throw error;
+      if (options.signal.aborted || !isAddressInUseError(error)) {
+        if (!options.keepShellOnGatewayFailure) throw error;
+        options.onCapabilityState?.("local-only");
+        return {
+          window,
+          port,
+          attemptId: options.attemptId,
+          releaseId: options.releaseId,
+          capabilityState: "local-only",
+        };
+      }
       excludedPorts.push(port);
       lastPortRaceError = error;
       continue;
     }
 
     try {
-      await waitForGatewayReadiness(options, port, identity, () => options.gatewayProcess.markHealthReady?.(identity));
+      await waitForGatewayReadiness(options, port, identity, () => {
+        options.gatewayProcess.markHealthReady?.(identity);
+        options.onCapabilityState?.("partial");
+      });
       options.gatewayProcess.markCapabilityReady?.(identity);
-      options.signal.throwIfAborted();
-      const window = await options.createWindow(options.signal);
-      options.signal.throwIfAborted();
-      window.show();
-      return { window, port, ...identity };
+      options.onCapabilityState?.("full");
+      return {
+        window,
+        port,
+        ...identity,
+        attemptId: options.attemptId ?? identity.attemptId,
+        releaseId: options.releaseId ?? identity.releaseId,
+        capabilityState: "full",
+      };
     } catch (error) {
       options.gatewayProcess.markStartupFailed?.(identity);
+      options.onCapabilityState?.("local-only");
       await rollbackOrThrow(error, () => options.gatewayProcess.stop("startup-rollback"));
+      if (options.signal.aborted) throw options.signal.reason ?? error;
+      if (options.keepShellOnGatewayFailure) {
+        return {
+          window,
+          port,
+          ...identity,
+          attemptId: options.attemptId ?? identity.attemptId,
+          releaseId: options.releaseId ?? identity.releaseId,
+          capabilityState: "local-only",
+        };
+      }
       throw error;
     }
   }
 
   throw lastPortRaceError ?? new Error("Gateway startup failed.");
+}
+
+async function createAndShowShell<TWindow extends ShowableWindow>(
+  options: GatewayStartupDependencies<TWindow>,
+): Promise<TWindow> {
+  options.signal.throwIfAborted();
+  const window = await options.createWindow(options.signal);
+  options.signal.throwIfAborted();
+  window.show();
+  return window;
 }
 
 function isAddressInUseError(error: unknown, seen = new Set<object>()): boolean {

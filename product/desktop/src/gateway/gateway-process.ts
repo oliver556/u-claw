@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 
@@ -41,11 +42,16 @@ export interface GatewayLaunchOptions {
   args: readonly string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  attemptId?: string;
+  releaseId?: string;
 }
 
 export interface GatewayProcessIdentity {
   pid: number;
   instanceId: number;
+  attemptId?: string;
+  port?: number;
+  releaseId?: string;
 }
 
 export interface GatewayProcessManagerOptions {
@@ -54,6 +60,8 @@ export interface GatewayProcessManagerOptions {
   killTimeoutMs?: number;
   diagnostics?: GatewayDiagnosticSink;
   now?: () => number;
+  releaseId?: string;
+  createAttemptId?: () => string;
 }
 
 export type GatewayStopReason = "application-quit" | "startup-rollback" | "consistency-restart" | "manual-restart" | "unspecified";
@@ -68,6 +76,8 @@ interface OwnedGatewayProcess {
   child: GatewayChildProcess;
   pid: number;
   instanceId: number;
+  attemptId: string;
+  releaseId: string;
   completion: Promise<GatewayCompletion>;
   diagnosticsComplete: Promise<void>;
   outcome: GatewayCompletion | null;
@@ -134,6 +144,8 @@ export class GatewayProcessManager extends EventEmitter {
   private readonly stopTimeoutMs: number;
   private readonly killTimeoutMs: number;
   private readonly now: () => number;
+  private readonly createAttemptId: () => string;
+  private readonly releaseId: string;
   private nextPort: number | undefined;
 
   constructor(private readonly options: GatewayProcessManagerOptions) {
@@ -141,6 +153,8 @@ export class GatewayProcessManager extends EventEmitter {
     this.stopTimeoutMs = options.stopTimeoutMs ?? 5_000;
     this.killTimeoutMs = options.killTimeoutMs ?? 2_000;
     this.now = options.now ?? Date.now;
+    this.createAttemptId = options.createAttemptId ?? randomUUID;
+    this.releaseId = options.releaseId ?? "unknown";
   }
 
   getState(): GatewayProcessState {
@@ -196,6 +210,8 @@ export class GatewayProcessManager extends EventEmitter {
       const result = this.options.diagnostics?.append({
         pid: owned.pid,
         instanceId: owned.instanceId,
+        attemptId: owned.attemptId,
+        releaseId: owned.releaseId,
         timestamp: new Date(this.now()).toISOString(),
         ...(owned.port === undefined ? {} : { port: owned.port }),
         startedAt: new Date(owned.startedAt).toISOString(),
@@ -214,7 +230,14 @@ export class GatewayProcessManager extends EventEmitter {
     return tail === "" ? undefined : tail;
   }
 
-  start({ executable, args, cwd, env }: GatewayLaunchOptions): GatewayProcessIdentity {
+  start({
+    executable,
+    args,
+    cwd,
+    env,
+    attemptId = this.createAttemptId(),
+    releaseId = this.releaseId,
+  }: GatewayLaunchOptions): GatewayProcessIdentity {
     if (this.owned) throw new Error("Gateway process is already owned.");
     this.setState({ phase: "starting" });
 
@@ -253,6 +276,8 @@ export class GatewayProcessManager extends EventEmitter {
         child,
         pid,
         instanceId: this.nextInstanceId++,
+        attemptId,
+        releaseId,
         completion,
         diagnosticsComplete,
         outcome: null,
@@ -327,7 +352,13 @@ export class GatewayProcessManager extends EventEmitter {
       });
       this.record(ownedRecord, { event: "gateway-spawned", phase: "starting" });
       this.setState({ phase: "running", pid });
-      return { pid, instanceId: ownedRecord.instanceId };
+      return {
+        pid,
+        instanceId: ownedRecord.instanceId,
+        attemptId: ownedRecord.attemptId,
+        ...(ownedRecord.port === undefined ? {} : { port: ownedRecord.port }),
+        releaseId: ownedRecord.releaseId,
+      };
     } catch (error) {
       const message = "Gateway process failed to start.";
       this.setState({ phase: "failed", message });
