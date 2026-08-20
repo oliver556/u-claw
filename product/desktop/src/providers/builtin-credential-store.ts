@@ -10,6 +10,7 @@ const FILE_NAME = "builtin-model-credential.v1.json";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PersistedCredentialSchema = z.object({
   schemaVersion: z.literal(1),
+  deviceTokenId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u).optional(),
   deviceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
   licenseId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
   endpoint: z.string(),

@@ -91,7 +91,25 @@ describe("builtin credential store", () => {
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...input, endpoint: `${input.endpoint}/` });
   });
 
-  it("rejects extra fields and malformed device tokens", async () => {
+  it("loads a server-reissued credential carrying deviceTokenId", async () => {
+    const { dataDir, store } = await setup();
+    const input = provisionInput();
+    const credentialDir = join(dataDir, ".uclaw");
+    await mkdir(credentialDir, { recursive: true });
+    await writeFile(join(credentialDir, "builtin-model-credential.v1.json"), `${JSON.stringify({
+      ...input,
+      deviceTokenId: `dt_${randomUUID().replaceAll("-", "")}`,
+    })}\n`, { mode: 0o600 });
+
+    await expect(store.loadActive()).resolves.toMatchObject({
+      deviceId: input.deviceId,
+      licenseId: input.licenseId,
+      deviceToken: input.deviceToken,
+      model: input.model,
+    });
+  });
+
+  it("rejects extra fields and malformed token fields", async () => {
     const { store } = await setup();
     const input = provisionInput();
     await expect(store.provision({
@@ -102,6 +120,10 @@ describe("builtin credential store", () => {
       ...input,
       deviceToken: `uclaw_dt_${"A".repeat(42)}`,
     })).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
+    await expect(store.provision({
+      ...input,
+      deviceTokenId: "invalid token id",
+    } as never)).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
   });
 
   it("rejects a hardlinked credential target", async () => {
