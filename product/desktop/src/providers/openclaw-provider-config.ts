@@ -50,6 +50,8 @@ const SENSITIVE_VALUE = /(?:bearer\s+|\bsk[-_]|api[-_ ]?key\s*[:=]|token\s*[:=]|
 const RENDERER_REDACTED = "[REDACTED]";
 const OPENCLAW_REDACTED = "__OPENCLAW_REDACTED__";
 const LEGACY_COMMERCIAL_PROVIDER_IDS = new Set(["openai", "uclaw-builtin"]);
+const COMMERCIAL_IMAGE_MODEL_ID = "gpt-image-2";
+const COMMERCIAL_IMAGE_PLUGIN_ID = "uclaw-commercial-image";
 
 function backendError(code: UClawError["code"], message: string, retryable = false): UClawError {
   return UClawErrorSchema.parse({ code, message, retryable, recoveryActions: retryable ? ["retry"] : [], causeDetails: {} });
@@ -490,6 +492,11 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
         api: "openai-completions",
         models: uniqueModels,
       };
+      if (input.models.some(({ id }) => id === COMMERCIAL_IMAGE_MODEL_ID)) {
+        const plugins = isObject(next.plugins) ? next.plugins : (next.plugins = {});
+        const entries = isObject(plugins.entries) ? plugins.entries : (plugins.entries = {});
+        entries[COMMERCIAL_IMAGE_PLUGIN_ID] = { enabled: true };
+      }
       if (canonical(before.config) === canonical(next)) return false;
       const response = assertJsonObject(await rpc.request("config.apply", {
         raw: JSON.stringify(next),
@@ -500,12 +507,14 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
       const readback = await getConfig();
       const provider = getPath(readback.config, ["models", "providers", "uclaw-commercial"]);
       const secretProvider = getPath(readback.config, ["secrets", "providers", "uclaw_commercial"]);
+      const imagePlugin = getPath(readback.config, ["plugins", "entries", COMMERCIAL_IMAGE_PLUGIN_ID]);
       if (!isObject(provider) || provider.baseUrl !== endpoint.href
         || provider.api !== "openai-completions"
         || !matchesSecretRef(provider.apiKey)
         || canonical(provider.models) !== canonical(uniqueModels)
         || getPath(readback.config, ["models", "mode"]) !== "merge"
-        || !matchesSecretProvider(secretProvider, input.credentialPath)) {
+        || !matchesSecretProvider(secretProvider, input.credentialPath)
+        || input.models.some(({ id }) => id === COMMERCIAL_IMAGE_MODEL_ID) && (!isObject(imagePlugin) || imagePlugin.enabled !== true)) {
         throw backendError("CONFLICT", "OpenClaw commercial Provider readback did not match the write.");
       }
       return true;
@@ -514,6 +523,9 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
       const { config } = await getConfig();
       const provider = getPath(config, ["models", "providers", "uclaw-commercial"]);
       const secretProvider = getPath(config, ["secrets", "providers", "uclaw_commercial"]);
+      const imagePlugin = getPath(config, ["plugins", "entries", COMMERCIAL_IMAGE_PLUGIN_ID]);
+      const providerModels = isObject(provider) && Array.isArray(provider.models) ? provider.models : [];
+      const hasImageModel = providerModels.some((model) => isObject(model) && model.id === COMMERCIAL_IMAGE_MODEL_ID);
       return {
         configured: isObject(provider)
           && typeof provider.baseUrl === "string"
@@ -521,7 +533,8 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
           && matchesSecretRef(provider.apiKey)
           && isCommercialModelReadback(provider.models)
           && getPath(config, ["models", "mode"]) === "merge"
-          && matchesSecretProvider(secretProvider),
+          && matchesSecretProvider(secretProvider)
+          && (!hasImageModel || isObject(imagePlugin) && imagePlugin.enabled === true),
       };
     },
     async getRendererConfig() {

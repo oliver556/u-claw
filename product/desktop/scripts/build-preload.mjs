@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { cp, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 await build({
@@ -19,3 +20,7 @@ await build({
     "@uclaw/shared/dist/product-services.js": fileURLToPath(new URL("../../shared/dist/product-services.js", import.meta.url)),
   },
 });
+
+const extensionOutput = new URL("../dist/openclaw-extensions/uclaw-commercial-image/", import.meta.url);
+await rm(extensionOutput, { recursive: true, force: true });
+await cp(new URL("../../openclaw-extensions/uclaw-commercial-image/", import.meta.url), extensionOutput, { recursive: true });

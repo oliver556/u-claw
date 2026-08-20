@@ -39,6 +39,8 @@ import { createProviderStore, type ProviderStore } from "./providers/provider-st
 import type { ProviderNetworkService } from "./providers/provider-network.js";
 import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provider-config.js";
 import { createCommercialOpenClawReadinessGate } from "./providers/commercial-openclaw-lifecycle.js";
+import { createCommercialImageChatRouter } from "./providers/commercial-image-chat-router.js";
+import { installBundledCommercialImageExtension } from "./providers/commercial-image-extension-bootstrap.js";
 import { createMainProcessModelRouting, type ExternalModelSourceExecutors } from "./providers/model-source-router.js";
 import { createLocalApplicationRouter, defaultApplicationRoots } from "./local-actions/application-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
@@ -731,6 +733,13 @@ export async function startElectronMain(
   const modelSourceExecutors = requireModelSourceExecutors(options.modelSourceExecutors);
   const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session: electronSession, shell } = await import("electron");
   const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const commercialImageExtensionSourceDir = basename(moduleDir) === "src"
+    ? resolve(moduleDir, "../../openclaw-extensions/uclaw-commercial-image")
+    : join(moduleDir, "openclaw-extensions", "uclaw-commercial-image");
+  await installBundledCommercialImageExtension({
+    sourceDir: commercialImageExtensionSourceDir,
+    targetDir: join(portablePaths.openClawState, "extensions", "uclaw-commercial-image"),
+  });
   const client = requireElectronClient(options.client);
   if (options.injectChatMessage === undefined) throw new Error("OpenClaw chat injection is required for local application actions.");
   const consistencyCoordinator = new ProductionRuntimeConsistencyCoordinator();
@@ -766,10 +775,14 @@ export async function startElectronMain(
   // the commercial OpenClaw E2E gate passes; production chat authority is OpenClaw.
   void modelRouting;
   const commercialProviderReadiness = createCommercialOpenClawReadinessGate();
+  const commercialImageChat = createCommercialImageChatRouter({
+    chat: client.chat,
+    sessionModel: async (sessionId) => (await client.sessions.get(sessionId)).model?.id,
+  });
   const routeChatSend = (input: SendMessageInput, signal: AbortSignal) =>
     localApplications.route(input, async (input, signal) => {
       await commercialProviderReadiness.wait(signal);
-      return client.chat.send(input, signal);
+      return commercialImageChat.route(input, signal);
     }, signal);
   const chatQueueDispatcher = createChatQueueDispatcher({
     store: chatQueue,

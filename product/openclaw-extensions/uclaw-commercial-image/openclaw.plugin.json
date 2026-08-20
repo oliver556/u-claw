@@ -1,0 +1,17 @@
+{
+  "id": "uclaw-commercial-image",
+  "name": "U-Claw Commercial Image",
+  "description": "Routes U-Claw commercial image generation and edits through OpenClaw.",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "imageGenerationProviders": [
+      "uclaw-commercial"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false
+  }
+}

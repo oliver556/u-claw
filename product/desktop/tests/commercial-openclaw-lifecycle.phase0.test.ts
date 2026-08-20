@@ -17,21 +17,21 @@ describe("phase 0 commercial OpenClaw chat lifecycle contract", () => {
     const route = productionChatRouteSource();
 
     expect(route).toContain("await commercialProviderReadiness.wait(signal)");
-    expect(route).toContain("client.chat.send(input, signal)");
+    expect(route).toContain("commercialImageChat.route(input, signal)");
     expect(route).not.toContain("modelRouting.routeChatSend");
   });
 
   it("keeps second-turn context in the same OpenClaw session instead of a prompt-only direct request", () => {
     const route = productionChatRouteSource();
 
-    expect(route, "第二轮必须复用 OpenClaw session/transcript").toContain("client.chat.send(input, signal)");
+    expect(route, "第二轮必须复用 OpenClaw session/transcript").toContain("commercialImageChat.route(input, signal)");
     expect(route, "商业直连只发送当前 prompt，无法保留第一轮上下文").not.toContain("modelRouting.routeChatSend");
   });
 
   it("lets the second-turn image edit resolve the previous image from OpenClaw transcript", () => {
     const route = productionChatRouteSource();
 
-    expect(route, "上一张图片必须由同一 OpenClaw session 的 transcript 提供").toContain("client.chat.send(input, signal)");
+    expect(route, "上一张图片必须由同一 OpenClaw session 的 transcript 提供").toContain("commercialImageChat.route(input, signal)");
     expect(route, "不得由商业直连另建图片上下文").not.toContain("modelRouting.routeChatSend");
   });
 });

@@ -65,6 +65,7 @@ describe("OpenClaw provider config backend", () => {
       models: [
         { id: "deepseek-chat", name: "DeepSeek" },
         { id: "qwen-max", name: "Qwen" },
+        { id: "gpt-image-2", name: "GPT Image 2" },
       ],
     });
 
@@ -94,8 +95,16 @@ describe("OpenClaw provider config backend", () => {
             supportsReasoningEffort: false,
             maxTokensField: "max_tokens",
           } },
+          { id: "gpt-image-2", name: "GPT Image 2", compat: {
+            requiresStringContent: true,
+            supportsStore: false,
+            supportsDeveloperRole: false,
+            supportsReasoningEffort: false,
+            maxTokensField: "max_tokens",
+          } },
         ],
       } } },
+      plugins: { entries: { "uclaw-commercial-image": { enabled: true } } },
     });
     expect(JSON.stringify(applied)).not.toContain("uclaw_dt_");
     expect(applied.models.providers["uclaw-commercial"]).not.toHaveProperty("model");
