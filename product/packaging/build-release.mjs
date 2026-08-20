@@ -73,7 +73,7 @@ export async function buildRelease(options) {
   }
 }
 
-async function validateRuntimeArchive(archivePath, manifest) {
+export async function validateRuntimeArchive(archivePath, manifest) {
   const records = [];
   const pending = [];
   const seen = new Set();

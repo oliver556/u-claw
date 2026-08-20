@@ -45,6 +45,9 @@ export async function buildRuntime(options) {
   if (!inventory.files.has(normalizedEntrypoint.toLowerCase())) {
     throw new Error("runtime entrypoint does not exist");
   }
+  if (!inventory.files.has("resources/app.asar")) {
+    throw new Error("runtime Electron application bundle resources/app.asar does not exist");
+  }
   const electronExecutables = [...inventory.files].filter((file) => /(?:^|\/)electron\/.*\.exe$/iu.test(file));
   if (electronExecutables.length !== 1 || electronExecutables[0] !== normalizedEntrypoint.toLowerCase()) {
     throw new Error("runtime must contain exactly one Electron executable at the signed entrypoint");
@@ -116,7 +119,7 @@ export async function buildRuntime(options) {
   }
 }
 
-async function inventoryRuntime(inputDir) {
+export async function inventoryRuntime(inputDir) {
   const entries = [];
   const files = new Set();
   const fileRecords = [];

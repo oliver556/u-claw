@@ -1,0 +1,221 @@
+name: Product release CDN gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Workflow run containing final-windows-runtime artifact
+        required: true
+        type: string
+      source_commit_sha:
+        description: Full commit SHA used to build final runtime
+        required: true
+        type: string
+      runtime_artifact_name:
+        description: Final runtime artifact name
+        required: true
+        default: final-windows-runtime
+        type: string
+      release_id:
+        description: Immutable release identifier
+        required: true
+        type: string
+      release_sequence:
+        description: Monotonic release sequence
+        required: true
+        type: string
+      product_version:
+        description: Product version
+        required: true
+        type: string
+      signed_at:
+        description: Manifest signature start time (ISO 8601)
+        required: true
+        type: string
+      expires_at:
+        description: Manifest signature expiry time (ISO 8601)
+        required: true
+        type: string
+      cdn_upload_base_url:
+        description: HTTPS upload prefix ending in release ID
+        required: true
+        type: string
+      cdn_readback_base_url:
+        description: HTTPS public readback prefix ending in release ID
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: product-release-${{ inputs.release_sequence }}
+  cancel-in-progress: false
+
+jobs:
+  validate-inputs:
+    name: Validate immutable release inputs
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate commit and release sequence
+        shell: pwsh
+        env:
+          UCLAW_SOURCE_COMMIT_SHA: ${{ inputs.source_commit_sha }}
+          UCLAW_RELEASE_SEQUENCE: ${{ inputs.release_sequence }}
+        run: |
+          if ($env:UCLAW_SOURCE_COMMIT_SHA -cnotmatch '^[0-9a-f]{40}$') { throw 'source_commit_sha must be a full lowercase commit SHA' }
+          $sequence = 0L
+          if (-not [long]::TryParse($env:UCLAW_RELEASE_SEQUENCE, [ref]$sequence) -or $sequence -lt 1) { throw 'release_sequence must be a positive integer' }
+
+  release-gate:
+    name: Build, upload, and verify immutable release
+    runs-on: windows-2022
+    timeout-minutes: 60
+    environment: production-release
+    needs: validate-inputs
+    env:
+      UCLAW_SOURCE_COMMIT_SHA: ${{ inputs.source_commit_sha }}
+      UCLAW_PRODUCT_VERSION: ${{ inputs.product_version }}
+      UCLAW_RELEASE_ID: ${{ inputs.release_id }}
+      UCLAW_RELEASE_SEQUENCE: ${{ inputs.release_sequence }}
+      UCLAW_SIGNED_AT: ${{ inputs.signed_at }}
+      UCLAW_EXPIRES_AT: ${{ inputs.expires_at }}
+      UCLAW_CDN_UPLOAD_BASE_URL: ${{ inputs.cdn_upload_base_url }}
+      UCLAW_CDN_READBACK_BASE_URL: ${{ inputs.cdn_readback_base_url }}
+    steps:
+      - name: Check out fixed source commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_commit_sha }}
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: product/.node-version
+          cache: npm
+          cache-dependency-path: product/package-lock.json
+
+      - name: Download final Windows runtime from fixed run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.runtime_artifact_name }}
+          path: product/dist/runtime-source
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+
+      - name: Verify runtime provenance
+        shell: pwsh
+        run: |
+          $provenance = Get-Content product/dist/runtime-source/runtime-provenance.json -Raw | ConvertFrom-Json
+          if ($provenance.commitSha -cne $env:UCLAW_SOURCE_COMMIT_SHA) { throw 'runtime provenance commit mismatch' }
+          if ($provenance.runtimeKind -cne 'final') { throw 'runtime provenance is not final' }
+          if (-not (Test-Path product/dist/runtime-source/windows-runtime/electron/electron.exe -PathType Leaf)) { throw 'final Electron executable missing' }
+
+      - name: Install locked dependencies
+        run: npm ci --prefix product
+
+      - name: Build
+        run: npm run build --prefix product
+
+      - name: Typecheck
+        run: npm run typecheck --prefix product
+
+      - name: Test
+        run: npm test --prefix product
+
+      - name: Secret scan
+        run: npm run test:secrets --prefix product
+
+      - name: Prepare release directories and signing key
+        shell: pwsh
+        env:
+          RELEASE_MANIFEST_PRIVATE_KEY: ${{ secrets.RELEASE_MANIFEST_PRIVATE_KEY }}
+        run: |
+          New-Item -ItemType Directory -Force product/dist/release-evidence | Out-Null
+          Set-Content -Path "$env:RUNNER_TEMP/release-manifest-private-key.pem" -Value $env:RELEASE_MANIFEST_PRIVATE_KEY -NoNewline
+
+      - name: Build signed release artifacts
+        shell: pwsh
+        run: |
+          node product/packaging/release-gate-cli.mjs build `
+            --repo-root . `
+            --runtime product/dist/runtime-source/windows-runtime `
+            --output product/dist/candidate `
+            --product-version $env:UCLAW_PRODUCT_VERSION `
+            --release-id $env:UCLAW_RELEASE_ID `
+            --release-sequence $env:UCLAW_RELEASE_SEQUENCE `
+            --runtime-id openclaw-2026.7.1-2-win-x64 `
+            --entrypoint electron/electron.exe `
+            --entry-arg resources/app.asar `
+            --key-id production-release-v1 `
+            --private-key "$env:RUNNER_TEMP/release-manifest-private-key.pem" `
+            --signed-at $env:UCLAW_SIGNED_AT `
+            --expires-at $env:UCLAW_EXPIRES_AT `
+            > product/dist/release-evidence/build.json
+          Remove-Item "$env:RUNNER_TEMP/release-manifest-private-key.pem" -Force
+
+      - name: Smoke final runtime
+        shell: pwsh
+        run: |
+          node product/packaging/release-gate-cli.mjs smoke `
+            --repo-root . `
+            --runtime product/dist/runtime-source/windows-runtime `
+            --manifest product/dist/candidate/runtime-manifest.json `
+            --output product/dist/release-evidence/smoke.json
+
+      - name: Promote candidate to acceptance
+        run: node product/packaging/release-gate-cli.mjs promote --source product/dist/candidate --output product/dist/acceptance
+
+      - name: Promote acceptance to production
+        run: node product/packaging/release-gate-cli.mjs promote --source product/dist/acceptance --output product/dist/production
+
+      - name: Verify promotion SHA-256 equality
+        run: >-
+          node product/packaging/release-gate-cli.mjs verify-promotions
+          --candidate product/dist/candidate
+          --acceptance product/dist/acceptance
+          --production product/dist/production
+          --output product/dist/release-evidence/promotions.json
+
+      - name: Upload complete production artifact set
+        env:
+          UCLAW_CDN_UPLOAD_TOKEN: ${{ secrets.UCLAW_CDN_UPLOAD_TOKEN }}
+        run: >-
+          node product/packaging/release-gate-cli.mjs upload
+          --source product/dist/production
+          --artifacts product/dist/release-evidence/build.json
+          --release-id $env:UCLAW_RELEASE_ID
+          --base-url $env:UCLAW_CDN_UPLOAD_BASE_URL
+          --output product/dist/release-evidence/upload.json
+
+      - name: CDN readback verification
+        run: >-
+          node product/packaging/release-gate-cli.mjs verify-cdn
+          --artifacts product/dist/release-evidence/build.json
+          --release-id $env:UCLAW_RELEASE_ID
+          --base-url $env:UCLAW_CDN_READBACK_BASE_URL
+          --output product/dist/release-evidence/cdn-readback.json
+
+      - name: Emit requiredReleaseSequence switch authorization
+        run: >-
+          node product/packaging/release-gate-cli.mjs authorize
+          --release-id $env:UCLAW_RELEASE_ID
+          --release-sequence $env:UCLAW_RELEASE_SEQUENCE
+          --commit-sha $env:UCLAW_SOURCE_COMMIT_SHA
+          --build-evidence product/dist/release-evidence/build.json
+          --smoke-evidence product/dist/release-evidence/smoke.json
+          --promotion-evidence product/dist/release-evidence/promotions.json
+          --upload-evidence product/dist/release-evidence/upload.json
+          --cdn-evidence product/dist/release-evidence/cdn-readback.json
+          --output product/dist/release-evidence/pointer-switch-authorization.json
+
+      - name: Preserve release artifacts and gate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: product-release-${{ inputs.release_id }}
+          if-no-files-found: error
+          path: |
+            product/dist/production/*
+            product/dist/release-evidence/*

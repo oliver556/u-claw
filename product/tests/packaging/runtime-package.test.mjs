@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, verify } from "node:crypto";
-import { mkdtemp, mkdir, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -45,6 +45,15 @@ test("buildRuntime rejects missing input and entrypoint", async () => {
   await assert.rejects(
     buildRuntime(runtimeOptions(root, runtime, { entrypoint: "missing.exe" })),
     /entrypoint/i,
+  );
+});
+
+test("buildRuntime rejects a final runtime without the Electron application bundle", async () => {
+  const { root, runtime } = await fixtureRuntime();
+  await rm(path.join(runtime, "resources", "app.asar"));
+  await assert.rejects(
+    buildRuntime(runtimeOptions(root, runtime)),
+    /application bundle|app\.asar/i,
   );
 });
 

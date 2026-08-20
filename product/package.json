@@ -24,6 +24,7 @@
     "test:contract": "vitest run tests/contract",
     "test:integration": "vitest run tests/integration",
     "test:secrets": "node scripts/secret-scan.mjs",
+    "release:gate": "node packaging/release-gate-cli.mjs",
     "capture:openclaw-v4": "node scripts/capture-openclaw-v4.mjs",
     "sanitize:openclaw-v4": "node scripts/sanitize-openclaw-v4-capture.mjs",
     "test:e2e": "playwright test",
