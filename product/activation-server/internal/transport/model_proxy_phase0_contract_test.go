@@ -112,7 +112,7 @@ func TestPhase0ImageGenerationContract(t *testing.T) {
 				t.Fatalf("missing %s in body: %s", field, body)
 			}
 		}
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"url":"https://media.example.test/generated.png"}]}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"cG5n","revised_prompt":"a red panda"}],"background":"opaque","output_format":"png","quality":"high","size":"1024x1024","model":"gpt-image-2","usage":{"input_tokens":10,"output_tokens":20,"total_tokens":30,"input_tokens_details":{"text_tokens":10,"image_tokens":0}}}`))}, nil
 	})}
 	handler := NewModelProxyHandler(ModelProxyHandlerOptions{Service: service, Client: client, AllowedHosts: []string{"api.example.test"}})
 	request := contractJSONRequest("/model-api/v1/images/generations", `{"model":"allowed","prompt":"red panda","size":"1024x1024"}`)
@@ -120,7 +120,7 @@ func TestPhase0ImageGenerationContract(t *testing.T) {
 
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "generated.png") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"b64_json":"cG5n"`) || !strings.Contains(response.Body.String(), `"revised_prompt":"a red panda"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

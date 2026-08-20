@@ -339,6 +339,22 @@ func TestUpstreamValidationRejectsMalformedOpenAICompatibleExtensions(t *testing
 	}
 }
 
+func TestImageResponseValidationRejectsUnknownAndMalformedExtensions(t *testing.T) {
+	tests := []string{
+		`{"created":1,"data":[{"b64_json":"cG5n"}],"custom":"value"}`,
+		`{"created":1,"data":[{"b64_json":"cG5n"}],"background":true}`,
+		`{"created":1,"data":[{"b64_json":"cG5n","revised_prompt":1}]}`,
+		`{"created":1,"data":[{"url":"https://media.example.test/image.png","b64_json":"cG5n"}]}`,
+		`{"created":1,"data":[{"b64_json":"cG5n"}],"usage":{"total_tokens":-1}}`,
+		`{"created":1,"data":[{"b64_json":"cG5n"}],"usage":{"custom_tokens":1}}`,
+	}
+	for _, body := range tests {
+		if validUpstreamJSON("images.generations", []byte(body)) {
+			t.Fatalf("accepted body=%s", body)
+		}
+	}
+}
+
 func TestModelProxyHandlerAuthenticatesBeforeReadingBody(t *testing.T) {
 	for _, body := range []string{"{", strings.Repeat("x", (1<<20)+1)} {
 		service := &fakeProxyService{grant: validGrant(t)}

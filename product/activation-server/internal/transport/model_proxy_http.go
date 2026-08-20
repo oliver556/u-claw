@@ -714,7 +714,7 @@ func validUpstreamJSON(route string, b []byte) bool {
 }
 
 func validImageResponse(top map[string]json.RawMessage) bool {
-	if !hasExactKeys(top, "created", "data") {
+	if !hasAllowedKeys(top, []string{"created", "data"}, "background", "output_format", "quality", "size", "model", "usage") {
 		return false
 	}
 	var created int64
@@ -722,8 +722,30 @@ func validImageResponse(top map[string]json.RawMessage) bool {
 	if json.Unmarshal(top["created"], &created) != nil || created < 0 || created > maxSafeInteger || json.Unmarshal(top["data"], &data) != nil || len(data) == 0 {
 		return false
 	}
+	for _, key := range []string{"background", "output_format", "quality", "size"} {
+		if raw, ok := top[key]; ok {
+			var value string
+			if json.Unmarshal(raw, &value) != nil || value == "" || len(value) > 128 {
+				return false
+			}
+		}
+	}
+	if raw, ok := top["model"]; ok {
+		var model string
+		if json.Unmarshal(raw, &model) != nil || !modelNamePattern.MatchString(model) {
+			return false
+		}
+	}
+	if raw, ok := top["usage"]; ok && !validImageUsage(raw) {
+		return false
+	}
 	for _, item := range data {
-		if len(item) != 1 {
+		if !hasAllowedKeys(item, nil, "url", "b64_json", "revised_prompt") {
+			return false
+		}
+		_, hasURL := item["url"]
+		_, hasBase64 := item["b64_json"]
+		if hasURL == hasBase64 {
 			return false
 		}
 		var value string
@@ -731,17 +753,47 @@ func validImageResponse(top map[string]json.RawMessage) bool {
 			if json.Unmarshal(raw, &value) != nil || value == "" {
 				return false
 			}
-			continue
-		}
-		if raw, ok := item["b64_json"]; ok {
+		} else if raw, ok := item["b64_json"]; ok {
 			if json.Unmarshal(raw, &value) != nil || value == "" {
 				return false
 			}
-			continue
 		}
-		return false
+		if raw, ok := item["revised_prompt"]; ok {
+			if json.Unmarshal(raw, &value) != nil || len(value) > 64<<10 {
+				return false
+			}
+		}
 	}
 	return true
+}
+
+func validImageUsage(raw json.RawMessage) bool {
+	var usage map[string]json.RawMessage
+	if json.Unmarshal(raw, &usage) != nil || len(usage) == 0 || !hasAllowedKeys(usage, nil, "input_tokens", "output_tokens", "total_tokens", "input_tokens_details") {
+		return false
+	}
+	for _, key := range []string{"input_tokens", "output_tokens", "total_tokens"} {
+		if value, ok := usage[key]; ok && !validTokenCount(value) {
+			return false
+		}
+	}
+	if rawDetails, ok := usage["input_tokens_details"]; ok {
+		var details map[string]json.RawMessage
+		if json.Unmarshal(rawDetails, &details) != nil || details == nil || !hasAllowedKeys(details, nil, "text_tokens", "image_tokens") {
+			return false
+		}
+		for _, value := range details {
+			if !validTokenCount(value) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validTokenCount(raw json.RawMessage) bool {
+	var value int64
+	return json.Unmarshal(raw, &value) == nil && value >= 0 && value <= maxSafeInteger
 }
 
 func hasExactKeys(value map[string]json.RawMessage, keys ...string) bool {
