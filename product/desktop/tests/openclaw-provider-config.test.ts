@@ -101,6 +101,42 @@ describe("OpenClaw provider config backend", () => {
     expect(applied.models.providers["uclaw-commercial"]).not.toHaveProperty("model");
   });
 
+  it("migrates legacy commercial aliases from plaintext deviceToken values to the file SecretRef", async () => {
+    const firstToken = `uclaw_dt_${"A".repeat(43)}`;
+    const secondToken = `uclaw_dt_${"B".repeat(43)}`;
+    const { rpc, request } = fakeRpc({
+      gateway: { mode: "local" },
+      models: { mode: "merge", providers: {
+        openai: {
+          baseUrl: "https://commercial.example.test/model-api/v1",
+          apiKey: firstToken,
+          api: "openai-completions",
+          models: [{ id: "gpt-5.5", name: "gpt-5.5" }],
+        },
+        "uclaw-builtin": {
+          baseUrl: "https://commercial.example.test/model-api/v1/",
+          apiKey: secondToken,
+          api: "openai-completions",
+          models: [{ id: "gpt-5.5", name: "gpt-5.5" }],
+        },
+      } },
+    });
+
+    await createOpenClawProviderConfigBackend(rpc).synchronizeCommercial({
+      endpoint: "https://commercial.example.test/model-api/v1/",
+      credentialPath: "/portable/data/.uclaw/builtin-model-credential.v1.json",
+      models: [{ id: "gpt-5.5", name: "GPT 5.5" }],
+    });
+
+    const raw = String(request.mock.calls.find(([method]) => method === "config.apply")?.[1].raw);
+    const applied = JSON.parse(raw);
+    const secretRef = { source: "file", provider: "uclaw_commercial", id: "/deviceToken" };
+    expect(applied.models.providers.openai.apiKey).toEqual(secretRef);
+    expect(applied.models.providers["uclaw-builtin"].apiKey).toEqual(secretRef);
+    expect(raw).not.toContain(firstToken);
+    expect(raw).not.toContain(secondToken);
+  });
+
   it("accepts OpenClaw-redacted commercial SecretRef readback while verifying non-secret fields", async () => {
     const { rpc, request } = fakeRpc({ gateway: { mode: "local" } });
     let reads = 0;

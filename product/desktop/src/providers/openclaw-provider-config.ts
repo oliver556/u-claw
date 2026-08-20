@@ -49,6 +49,7 @@ interface ConfigReadback {
 const SENSITIVE_VALUE = /(?:bearer\s+|\bsk[-_]|api[-_ ]?key\s*[:=]|token\s*[:=]|secret\s*[:=])/iu;
 const RENDERER_REDACTED = "[REDACTED]";
 const OPENCLAW_REDACTED = "__OPENCLAW_REDACTED__";
+const LEGACY_COMMERCIAL_PROVIDER_IDS = new Set(["openai", "uclaw-builtin"]);
 
 function backendError(code: UClawError["code"], message: string, retryable = false): UClawError {
   return UClawErrorSchema.parse({ code, message, retryable, recoveryActions: retryable ? ["retry"] : [], causeDetails: {} });
@@ -124,6 +125,27 @@ function commercialModelConfig(model: CommercialProviderModel): JsonObject {
       maxTokensField: "max_tokens",
     },
   };
+}
+
+function normalizedProviderEndpoint(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    const endpoint = new URL(value);
+    if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) return undefined;
+    endpoint.pathname = endpoint.pathname.replace(/\/+$/u, "");
+    return endpoint.href;
+  } catch {
+    return undefined;
+  }
+}
+
+function migrateLegacyCommercialCredentials(providers: JsonObject, endpoint: string): void {
+  for (const providerId of LEGACY_COMMERCIAL_PROVIDER_IDS) {
+    const provider = providers[providerId];
+    if (!isObject(provider) || typeof provider.apiKey !== "string"
+      || normalizedProviderEndpoint(provider.baseUrl) !== endpoint) continue;
+    provider.apiKey = { source: "file", provider: "uclaw_commercial", id: "/deviceToken" };
+  }
 }
 
 function secretKey(key: string): boolean {
@@ -461,6 +483,7 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
       const models = isObject(next.models) ? next.models : (next.models = {});
       models.mode = "merge";
       const providers = isObject(models.providers) ? models.providers : (models.providers = {});
+      migrateLegacyCommercialCredentials(providers, endpoint.href);
       providers["uclaw-commercial"] = {
         baseUrl: endpoint.href,
         apiKey: { source: "file", provider: "uclaw_commercial", id: "/deviceToken" },
