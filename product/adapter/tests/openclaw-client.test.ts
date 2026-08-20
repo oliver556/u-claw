@@ -499,6 +499,31 @@ describe("OpenClawClient", () => {
     expect(await attachments.get(attachment.id)).toMatchObject({ state: "attached", progress: 1 });
   });
 
+  it("keeps selected model on the session and omits unsupported modelId from OpenClaw v4 chat.send", async () => {
+    const transport = new FakeTransport();
+    transport.fixtures.set("chat.send", { runId: "run-commercial", status: "accepted" });
+    const client = new OpenClawClient({ transport });
+    await client.gateway.negotiate();
+
+    const iterator = client.chat.send({
+      sessionId: "agent:main:commercial",
+      clientRequestId: "commercial-request",
+      modelId: "uclaw-commercial/gpt-5.5",
+      blocks: [{ type: "text", text: "hello", format: "plain" }],
+    })[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+
+    expect(transport.requests.at(-1)).toEqual({
+      method: "chat.send",
+      params: {
+        sessionKey: "agent:main:commercial",
+        message: "hello",
+        idempotencyKey: "commercial-request",
+      },
+    });
+  });
+
   it.each([
     ["video/mp4", Buffer.from("000000186674797069736f6d00000000", "hex")],
     ["video/quicktime", Buffer.from("00000018667479707174202000000000", "hex")],

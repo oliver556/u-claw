@@ -16,6 +16,7 @@ describe("phase 0 commercial OpenClaw chat lifecycle contract", () => {
   it("routes commercial chat through observable OpenClaw chat.send", () => {
     const route = productionChatRouteSource();
 
+    expect(route).toContain("await commercialProviderReadiness.wait(signal)");
     expect(route).toContain("client.chat.send(input, signal)");
     expect(route).not.toContain("modelRouting.routeChatSend");
   });

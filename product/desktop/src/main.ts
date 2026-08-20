@@ -38,6 +38,7 @@ import { createChatQueueDispatcher } from "./chat-queue/dispatcher.js";
 import { createProviderStore, type ProviderStore } from "./providers/provider-store.js";
 import type { ProviderNetworkService } from "./providers/provider-network.js";
 import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provider-config.js";
+import { createCommercialOpenClawReadinessGate } from "./providers/commercial-openclaw-lifecycle.js";
 import { createMainProcessModelRouting, type ExternalModelSourceExecutors } from "./providers/model-source-router.js";
 import { createLocalApplicationRouter, defaultApplicationRoots } from "./local-actions/application-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
@@ -764,8 +765,12 @@ export async function startElectronMain(
   // Keep modelRouting constructed as the temporary legacy commercial fallback until
   // the commercial OpenClaw E2E gate passes; production chat authority is OpenClaw.
   void modelRouting;
+  const commercialProviderReadiness = createCommercialOpenClawReadinessGate();
   const routeChatSend = (input: SendMessageInput, signal: AbortSignal) =>
-    localApplications.route(input, (input, signal) => client.chat.send(input, signal), signal);
+    localApplications.route(input, async (input, signal) => {
+      await commercialProviderReadiness.wait(signal);
+      return client.chat.send(input, signal);
+    }, signal);
   const chatQueueDispatcher = createChatQueueDispatcher({
     store: chatQueue,
     send: (input) => routeChatSend(input, new AbortController().signal),
@@ -875,7 +880,7 @@ export async function startElectronMain(
       options.onGatewayCapabilityState?.(state);
       if (state === "full" && options.commercialProviderBootstrap && commercialProviderBootstrapState === "idle") {
         commercialProviderBootstrapState = "running";
-        void options.commercialProviderBootstrap(consistencyCoordinator).then(
+        void commercialProviderReadiness.run(() => options.commercialProviderBootstrap!(consistencyCoordinator)).then(
           () => { commercialProviderBootstrapState = "done"; },
           async () => {
             commercialProviderBootstrapState = "idle";

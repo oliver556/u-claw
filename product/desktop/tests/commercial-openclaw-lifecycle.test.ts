@@ -1,11 +1,48 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createCommercialOpenClawReadinessGate,
   fetchCommercialModels,
   rotateCommercialOpenClawCredential,
 } from "../src/providers/commercial-openclaw-lifecycle.js";
 
 describe("commercial OpenClaw credential lifecycle", () => {
+  it("holds the first chat until Provider bootstrap and gateway reconnect finish", async () => {
+    const order: string[] = [];
+    let releaseBootstrap: (() => void) | undefined;
+    const bootstrapReleased = new Promise<void>((resolve) => { releaseBootstrap = resolve; });
+    const readiness = createCommercialOpenClawReadinessGate();
+    const bootstrap = readiness.run(async () => {
+      order.push("bootstrap-started");
+      await bootstrapReleased;
+      order.push("bootstrap-ready");
+    });
+    const firstChat = (async () => {
+      await readiness.wait();
+      order.push("chat-started");
+    })();
+
+    await vi.waitFor(() => expect(order).toEqual(["bootstrap-started"]));
+    releaseBootstrap?.();
+    await Promise.all([bootstrap, firstChat]);
+
+    expect(order).toEqual(["bootstrap-started", "bootstrap-ready", "chat-started"]);
+  });
+
+  it("lets an aborted chat stop waiting without cancelling Provider bootstrap", async () => {
+    let releaseBootstrap: (() => void) | undefined;
+    const readiness = createCommercialOpenClawReadinessGate();
+    const bootstrap = readiness.run(() => new Promise<void>((resolve) => { releaseBootstrap = resolve; }));
+    const controller = new AbortController();
+    const waiting = readiness.wait(controller.signal);
+
+    controller.abort(new DOMException("Chat cancelled", "AbortError"));
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    releaseBootstrap?.();
+    await bootstrap;
+    await expect(readiness.wait()).resolves.toBeUndefined();
+  });
+
   it("reads the global model catalog with deviceToken without returning or logging it", async () => {
     const token = `uclaw_dt_${"C".repeat(43)}`;
     const fetch = vi.fn(async () => new Response(JSON.stringify({ data: [

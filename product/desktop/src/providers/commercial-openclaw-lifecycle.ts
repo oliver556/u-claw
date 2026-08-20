@@ -30,6 +30,43 @@ export interface RotateCommercialOpenClawCredentialOptions {
 
 type ExistingCommercialOpenClawCredentialOptions = Omit<RotateCommercialOpenClawCredentialOptions, "next">;
 
+export interface CommercialOpenClawReadinessGate {
+  run(operation: () => Promise<void>): Promise<void>;
+  wait(signal?: AbortSignal): Promise<void>;
+}
+
+export function createCommercialOpenClawReadinessGate(): CommercialOpenClawReadinessGate {
+  let pending: Promise<void> | undefined;
+
+  return {
+    run: (operation) => {
+      if (pending !== undefined) return pending;
+      const current = Promise.resolve().then(operation);
+      pending = current;
+      void current.then(
+        () => { if (pending === current) pending = undefined; },
+        () => { if (pending === current) pending = undefined; },
+      );
+      return current;
+    },
+    wait: async (signal) => {
+      const current = pending;
+      if (current === undefined) return;
+      signal?.throwIfAborted();
+      if (signal === undefined) {
+        await current;
+        return;
+      }
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = (): void => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) onAbort();
+        void current.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+      });
+    },
+  };
+}
+
 function assertReadback(
   models: readonly CommercialProviderModel[],
   configuration: { configured: boolean },

@@ -929,7 +929,6 @@ export class OpenClawClient implements UClawClient {
         message: text,
         ...(attachments.length === 0 ? {} : { attachments: attachments.map((attachment) => ({ ...attachment })) }),
         idempotencyKey: input.clientRequestId,
-        ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       };
       const frameBytes = new TextEncoder().encode(JSON.stringify({
         type: "req", id: "x".repeat(64), method: "chat.send", params: requestParams,
