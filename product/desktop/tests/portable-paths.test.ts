@@ -1,4 +1,4 @@
-import { lstat, mkdir, mkdtemp, readFile, symlink } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,6 +47,38 @@ describe("portable desktop paths", () => {
     expect(marker).toEqual({ schemaVersion: 1, product: "U-Claw", purpose: "rebuildable-cache" });
     expect(JSON.parse(await readFile(join(paths.logs, ".uclaw-log-ownership.json"), "utf8"))).toEqual(LOG_OWNERSHIP_MANIFEST);
     expect((await lstat(paths.userData)).isDirectory()).toBe(true);
+  });
+
+  it("accepts the previous owned log manifest during production startup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "uclaw-portable-legacy-logs-"));
+    const dataDir = join(root, "usb", ".uclaw", "data");
+    const cacheDir = join(root, "host", "U-Claw", "cache");
+    const logsDir = join(dataDir, "diagnostics", "desktop-logs");
+    await mkdir(logsDir, { recursive: true });
+    await writeFile(join(logsDir, ".uclaw-log-ownership.json"), `${JSON.stringify({
+      ...LOG_OWNERSHIP_MANIFEST,
+      files: [...LOG_OWNERSHIP_MANIFEST.files, "request-trace.jsonl"],
+    })}\n`);
+
+    expect(() => configurePortableDesktopPaths({
+      setPath: vi.fn(),
+      commandLine: { appendSwitch: vi.fn() },
+    }, {
+      UCLAW_DATA_DIR: dataDir,
+      UCLAW_CACHE_DIR: cacheDir,
+    })).not.toThrow();
+
+    await writeFile(join(logsDir, ".uclaw-log-ownership.json"), `${JSON.stringify({
+      ...LOG_OWNERSHIP_MANIFEST,
+      files: [...LOG_OWNERSHIP_MANIFEST.files, "unowned.log"],
+    })}\n`);
+    expect(() => configurePortableDesktopPaths({
+      setPath: vi.fn(),
+      commandLine: { appendSwitch: vi.fn() },
+    }, {
+      UCLAW_DATA_DIR: dataDir,
+      UCLAW_CACHE_DIR: cacheDir,
+    })).toThrow("Invalid log ownership marker.");
   });
 
   it("rejects missing, relative, overlapping, and NUL paths", () => {

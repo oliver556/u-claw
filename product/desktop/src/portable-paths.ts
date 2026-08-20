@@ -33,6 +33,17 @@ export const LOG_OWNERSHIP_MANIFEST = {
   ],
 } as const;
 
+const PREVIOUS_LOG_OWNERSHIP_MANIFEST = {
+  ...LOG_OWNERSHIP_MANIFEST,
+  files: [...LOG_OWNERSHIP_MANIFEST.files, "request-trace.jsonl"],
+} as const;
+
+export function isSupportedLogOwnershipManifest(value: unknown): boolean {
+  const encoded = JSON.stringify(value);
+  return encoded === JSON.stringify(LOG_OWNERSHIP_MANIFEST)
+    || encoded === JSON.stringify(PREVIOUS_LOG_OWNERSHIP_MANIFEST);
+}
+
 export interface PortableDesktopPaths {
   dataDir: string;
   cacheDir: string;
@@ -187,7 +198,10 @@ function ensureLogOwnership(logsDir: string, dataDir: string): void {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   if (markerInfo !== null) {
-    if (!markerInfo.isFile() || markerInfo.isSymbolicLink() || markerInfo.nlink !== 1 || readFileSync(markerPath, "utf8") !== expected) throw new Error("Invalid log ownership marker.");
+    if (!markerInfo.isFile() || markerInfo.isSymbolicLink() || markerInfo.nlink !== 1) throw new Error("Invalid log ownership marker.");
+    let marker: unknown;
+    try { marker = JSON.parse(readFileSync(markerPath, "utf8")) as unknown; } catch { throw new Error("Invalid log ownership marker."); }
+    if (!isSupportedLogOwnershipManifest(marker)) throw new Error("Invalid log ownership marker.");
     return;
   }
   const descriptor = openSync(markerPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);

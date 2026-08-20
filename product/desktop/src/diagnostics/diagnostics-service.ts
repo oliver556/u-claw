@@ -22,7 +22,7 @@ import {
   type UClawError,
 } from "@uclaw/shared";
 
-import { LOG_OWNERSHIP_MANIFEST } from "../portable-paths.js";
+import { isSupportedLogOwnershipManifest, LOG_OWNERSHIP_MANIFEST } from "../portable-paths.js";
 
 const MAX_CONFIG_BYTES = 1_000_000;
 const MAX_EXPORT_BYTES = 10 * 1024 * 1024;
@@ -326,8 +326,7 @@ export function createDiagnosticsService(options: DiagnosticsServiceOptions) {
   const ownedLogNames = async (logs: Root): Promise<string[]> => {
     const manifest = JSON.parse(await logs.readText(OWNERSHIP_MANIFEST, { maxBytes: MAX_MANIFEST_BYTES })) as unknown;
     if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) throw safeError("CONTRACT_INCOMPATIBLE", "日志所有权清单无效。");
-    const record = manifest as Record<string, unknown>;
-    if (JSON.stringify(record) !== JSON.stringify(LOG_OWNERSHIP_MANIFEST)) throw safeError("CONTRACT_INCOMPATIBLE", "日志所有权清单无效。");
+    if (!isSupportedLogOwnershipManifest(manifest)) throw safeError("CONTRACT_INCOMPATIBLE", "日志所有权清单无效。");
     const allowed = new Set<string>(LOG_OWNERSHIP_MANIFEST.files.filter((name) => OWNED_LOG_NAME.test(name)));
     const entries = await logs.list(".", { withFileTypes: true });
     return entries.filter((entry) => allowed.has(entry.name) && entry.isFile && !entry.isSymbolicLink && entry.nlink === 1).map((entry) => entry.name).sort();
