@@ -179,7 +179,9 @@ describe("chat workspace", () => {
     window.uclaw = { attachments: { invoke: attachmentInvoke as never }, chatQueue: { invoke: queueInvoke as never } };
     render(<App client={clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send } })} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "添加附件" }));
+    const addAttachment = await screen.findByRole("button", { name: "添加附件" });
+    await waitFor(() => expect(addAttachment).toBeEnabled());
+    fireEvent.click(addAttachment);
     expect(await screen.findByLabelText("附件预览")).toHaveTextContent("first.txt");
     const composer = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
     fireEvent.change(composer, { target: { value: "首条" } });
