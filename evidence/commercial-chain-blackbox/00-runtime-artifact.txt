@@ -1,0 +1,26 @@
+U-Claw commercial-chain blackbox gate runtime input
+
+Target branch: codex/uclaw-refactor-final
+Local HEAD: a02c3bb08c726c4c281a1c6f9c374140ff3fb126
+Remote integrated HEAD: a5c5d989881d9fe147215f7d1baf6b1b6b538dbc
+
+Use this Windows final runtime artifact only:
+- workflow: product.yml
+- run id: 32473646655
+- artifact id: 9443717301
+- artifact name: final-windows-runtime
+- digest: sha256:146681cd27f21f959f599ad8235581c1cd35842fa90dbb86d606957906736f5f
+- run head: 52d50fee0e8227d5fed2dcc673109fb2bf9b7174
+- prior Win final runtime / physical USB gate: PASS
+
+Do not use:
+- artifact id: 9442474022
+- reason: runtime-provenance mismatch, hidden files/dotfiles omitted by upload artifact path
+
+Frozen area for this gate:
+- .github/workflows/product.yml
+- product/packaging/final-windows-runtime.mjs
+- product/tests/packaging/final-windows-runtime.test.mjs
+- product/packaging/runtime-app lock
+- Node/npm/Electron/OpenClaw runtime pins
+

@@ -1,0 +1,30 @@
+status=blocked
+
+Safe negative checks that do not require spending model tokens:
+
+1. Missing Authorization
+   curl -i https://<activation-host>/model-api/v1/models
+   Expected: HTTP 401, code AUTHENTICATION_FAILED.
+
+2. Malformed Authorization
+   curl -i -H "Authorization: Bearer bad token" https://<activation-host>/model-api/v1/models
+   Expected: HTTP 401, code AUTHENTICATION_FAILED.
+
+3. Disallowed model
+   POST /model-api/v1/chat/completions with valid deviceToken and model not in allowed_models.
+   Expected: HTTP 403, code MODEL_NOT_ALLOWED, no upstream spend.
+
+4. Handler disabled model
+   POST a model not in server EnabledModels.
+   Expected: HTTP 404, code MODEL_NOT_FOUND, no upstream spend.
+
+5. Invalid image edit multipart
+   POST /model-api/v1/images/edits with no image[].
+   Expected: HTTP 400, code INVALID_REQUEST, no upstream spend.
+
+Evidence to paste:
+- request id: <redacted>
+- HTTP status/code per case
+- redacted response body
+- audit outcome, if available: authentication.rejected | model.rejected | model_not_found
+

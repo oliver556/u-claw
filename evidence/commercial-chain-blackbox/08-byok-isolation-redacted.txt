@@ -1,0 +1,24 @@
+status=blocked
+
+Local contract evidence:
+- OpenClaw-only production chat contract allows Electron model HTTP only for explicit BYOK credential verification.
+- Commercial Provider uses file SecretRef: provider=uclaw_commercial id=/deviceToken.
+- Builtin commercial credential schema does not contain New API key or BYOK API key fields.
+- BYOK provider config must not receive deviceToken.
+- Commercial provider config must not receive BYOK API keys.
+
+Manual Windows checks:
+1. Configure a BYOK provider with a test key.
+2. Activate commercial credential with endpoint/deviceTokenId/model/deviceToken.
+3. Send commercial chat. Confirm OpenClaw provider is `uclaw-commercial/<model>`.
+4. Send BYOK verification or BYOK-selected chat if product path exposes it.
+5. Inspect redacted OpenClaw config snapshot.
+6. Confirm BYOK key is absent from `uclaw-commercial`; deviceToken absent from BYOK provider.
+7. Confirm logs do not contain `sk-`, `Authorization: Bearer <secret>`, `uclaw_dt_`, or DB password.
+
+Evidence to paste:
+- selected commercial model: <redacted>
+- selected BYOK provider/model: <redacted>
+- config redaction snapshot hash: <sha256>
+- secret scan result: <pass/fail>
+

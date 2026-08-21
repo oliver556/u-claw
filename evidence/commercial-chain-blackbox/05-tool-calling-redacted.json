@@ -1,0 +1,26 @@
+{
+  "status": "blocked",
+  "scenario": "At least one real OpenClaw tool call event and result must appear through chat.send.",
+  "requiredSignals": [
+    "chat.send event: started",
+    "tool event: running or started",
+    "tool result event: succeeded",
+    "assistant final references tool result",
+    "chat.history contains corresponding tool call/result projection"
+  ],
+  "forbiddenSignals": [
+    "U-Claw local-actions natural language router handles the request",
+    "local_ runId",
+    "Renderer or Electron calls model inference endpoint directly"
+  ],
+  "redactedEvidenceToPaste": {
+    "sessionId": "<redacted-session-id>",
+    "runId": "<redacted-run-id>",
+    "toolCallId": "<redacted-tool-call-id>",
+    "toolName": "<tool-name>",
+    "toolStarted": false,
+    "toolSucceeded": false,
+    "historyRecovered": false
+  }
+}
+

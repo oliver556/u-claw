@@ -1,0 +1,30 @@
+{
+  "status": "blocked",
+  "request": {
+    "method": "GET",
+    "url": "https://<activation-host>/model-api/v1/models",
+    "headers": {
+      "Authorization": "Bearer [REDACTED_DEVICE_TOKEN]",
+      "Accept": "application/json"
+    }
+  },
+  "expected": {
+    "httpStatus": 200,
+    "object": "list",
+    "mustIncludePreferredDefault": "gpt-5.5",
+    "imageModelExpectedIfEnabled": "gpt-image-2",
+    "policy": "Returned models must be service-side enabled/allowed models, not a client hardcoded list."
+  },
+  "redactedResponseToPaste": {
+    "object": "list",
+    "data": [
+      {
+        "id": "gpt-5.5",
+        "object": "model",
+        "created": 0,
+        "owned_by": "uclaw"
+      }
+    ]
+  }
+}
+

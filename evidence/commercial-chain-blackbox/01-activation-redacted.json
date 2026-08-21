@@ -1,0 +1,28 @@
+{
+  "status": "blocked",
+  "reason": "Real activation code, Windows final runtime, physical USB, and commercial license/device binding were not available in this local validation window.",
+  "expectedCredentialArtifact": {
+    "path": "<USB_ROOT>\\.uclaw\\builtin-model-credential.v1.json",
+    "schemaVersion": 2,
+    "requiredFields": [
+      "schemaVersion",
+      "deviceId",
+      "licenseId",
+      "endpoint",
+      "deviceTokenId",
+      "model",
+      "deviceToken"
+    ],
+    "defaultModel": "gpt-5.5",
+    "secretHandling": "deviceToken must be redacted in shared evidence; New API key must not exist in the USB credential."
+  },
+  "redactedEvidenceToPaste": {
+    "deviceId": "<redacted-device-id-prefix-or-hash>",
+    "licenseId": "<redacted-license-id-prefix-or-hash>",
+    "endpoint": "https://<host>/model-api/",
+    "deviceTokenId": "<redacted-device-token-id-prefix-or-hash>",
+    "model": "gpt-5.5",
+    "deviceToken": "[REDACTED]"
+  }
+}
+

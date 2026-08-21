@@ -1,0 +1,24 @@
+status=blocked
+reason=No authorized Windows final runtime plus commercial deviceToken available in this local window.
+
+Expected observation:
+1. U-Claw renderer sends ordinary natural language input.
+2. Electron route waits for commercial Provider readiness.
+3. OpenClaw receives chat.send.
+4. uclaw-commercial Provider calls /model-api/v1/chat/completions.
+5. Response is text/event-stream with multiple data frames.
+6. Evidence redacts Authorization, deviceToken, deviceTokenId, API keys, DB passwords, and raw secrets.
+
+Redacted SSE template:
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+X-Request-ID: <request-id>
+
+data: {"id":"<redacted>","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"<redacted>","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"content":"<first-token>"},"finish_reason":null}]}
+
+data: {"id":"<redacted>","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"content":"<second-token>"},"finish_reason":null}]}
+
+data: [DONE]
+

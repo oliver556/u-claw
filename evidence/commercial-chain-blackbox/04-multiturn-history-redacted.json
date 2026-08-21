@@ -1,0 +1,27 @@
+{
+  "status": "blocked",
+  "scenario": "Second turn must reference first turn through the same OpenClaw session/transcript.",
+  "steps": [
+    "Create or select one U-Claw chat session.",
+    "Send first message: 记住门禁暗号是 UCLAW-E2E-20260821。",
+    "Wait for final assistant response.",
+    "Send second message in the same session: 刚才的门禁暗号是什么？",
+    "Confirm second assistant response includes UCLAW-E2E-20260821.",
+    "Call or capture chat.history for the same session.",
+    "Confirm live final and history projection match."
+  ],
+  "redactedEvidenceToPaste": {
+    "sessionId": "<redacted-session-id>",
+    "firstRunId": "<redacted-run-id>",
+    "secondRunId": "<redacted-run-id>",
+    "historyRoles": [
+      "user",
+      "assistant",
+      "user",
+      "assistant"
+    ],
+    "contextConfirmed": false,
+    "liveHistoryConsistent": false
+  }
+}
+

@@ -1,0 +1,32 @@
+{
+  "status": "blocked",
+  "reason": "Real paid requests and server-side billing/usage readback were not authorized in this local window.",
+  "expectedForChat": {
+    "route": "chat",
+    "outcome": "succeeded",
+    "usageFields": [
+      "prompt_tokens",
+      "completion_tokens",
+      "total_tokens"
+    ]
+  },
+  "expectedForImage": {
+    "route": "images.generations or images.edits",
+    "outcome": "succeeded",
+    "usageFields": [
+      "input_tokens",
+      "output_tokens",
+      "total_tokens"
+    ]
+  },
+  "redactedEvidenceToPaste": {
+    "requestId": "<redacted-request-id>",
+    "deviceTokenId": "<redacted-device-token-id-or-hash>",
+    "model": "<model-id>",
+    "route": "<route>",
+    "httpStatus": 0,
+    "usage": {},
+    "billingDebited": false
+  }
+}
+
