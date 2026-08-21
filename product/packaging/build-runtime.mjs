@@ -19,6 +19,7 @@ import { parseArgs } from "node:util";
 import { create as createTar } from "tar";
 
 import {
+  isSafeMacOSRelativePath,
   isSafeWindowsRelativePath,
   validateRuntimeManifest,
 } from "../scripts/runtime-manifest.mjs";
@@ -27,9 +28,10 @@ import { selectRuntimeTarget } from "../scripts/runtime-versions.mjs";
 const runtimeVersions = JSON.parse(
   await readFile(new URL("../runtime-versions.json", import.meta.url), "utf8"),
 );
-const runtimeTarget = selectRuntimeTarget(runtimeVersions, "win-x64");
 
 export async function buildRuntime(options) {
+  const runtimeTargetId = options.target ?? "win-x64";
+  const runtimeTarget = selectRuntimeTarget(runtimeVersions, runtimeTargetId);
   const expectedRuntimeId = runtimeTarget.runtimeId;
   if (options.runtimeId !== expectedRuntimeId) {
     throw new Error(`runtimeId must be ${expectedRuntimeId}`);
@@ -42,6 +44,9 @@ export async function buildRuntime(options) {
     throw new Error("runtime input must be a real directory");
   }
   if (!options.allowFixtureRuntime) {
+    if (runtimeTargetId !== "win-x64") {
+      throw new Error(`${runtimeTargetId} final runtime packaging requires a finalized platform runtime input`);
+    }
     if (!options.provenancePath) throw new Error("final runtime provenance is required");
     const { validateFinalWindowsRuntime } = await import("./final-windows-runtime.mjs");
     await validateFinalWindowsRuntime({
@@ -51,18 +56,13 @@ export async function buildRuntime(options) {
     });
   }
 
-  const inventory = await inventoryRuntime(inputDir);
-  const normalizedEntrypoint = normalizeRuntimePath(options.entrypoint);
-  if (!inventory.files.has(normalizedEntrypoint.toLowerCase())) {
+  const inventory = await inventoryTargetRuntime(inputDir, { target: runtimeTargetId });
+  const normalizedEntrypoint = normalizeRuntimePath(runtimeTargetId, options.entrypoint);
+  const canonicalEntrypoint = canonicalRuntimePath(runtimeTargetId, normalizedEntrypoint);
+  if (!inventory.files.has(canonicalEntrypoint)) {
     throw new Error("runtime entrypoint does not exist");
   }
-  if (!inventory.files.has("resources/app.asar")) {
-    throw new Error("runtime Electron application bundle resources/app.asar does not exist");
-  }
-  const electronExecutables = [...inventory.files].filter((file) => path.posix.basename(file).toLowerCase() === "electron.exe");
-  if (electronExecutables.length !== 1 || electronExecutables[0] !== normalizedEntrypoint.toLowerCase()) {
-    throw new Error("runtime must contain exactly one Electron executable at the signed entrypoint");
-  }
+  validateTargetRuntimeInventory(runtimeTargetId, inventory, normalizedEntrypoint);
 
   const provisionalManifest = {
     schemaVersion: 1,
@@ -73,6 +73,7 @@ export async function buildRuntime(options) {
     electronVersion: runtimeVersions.electron,
     runtimeVersion: runtimeVersions.openclaw,
     runtimeId: options.runtimeId,
+    ...(options.target === undefined ? {} : { target: runtimeTargetId }),
     targetPlatform: runtimeTarget.targetPlatform,
     targetArch: runtimeTarget.targetArch,
     runtimeArchive: "runtime.pkg",
@@ -83,13 +84,7 @@ export async function buildRuntime(options) {
     fileCount: inventory.fileCount,
     entrypoint: normalizedEntrypoint,
     entryArgs: [...(options.entryArgs ?? [])],
-    criticalFiles: inventory.fileRecords.filter((record) => {
-      const canonical = record.path.toLowerCase();
-      const base = path.posix.basename(canonical);
-      return canonical === normalizedEntrypoint.toLowerCase() || canonical === "resources/app.asar" ||
-        base === "node.exe" || base === "openclaw.mjs" || base.endsWith(".node") ||
-        (base.includes("sidecar") && base.endsWith(".exe"));
-    }),
+    criticalFiles: criticalRuntimeFiles(runtimeTargetId, inventory.fileRecords, normalizedEntrypoint),
   };
   validateRuntimeManifest(provisionalManifest);
 
@@ -130,13 +125,18 @@ export async function buildRuntime(options) {
   }
 }
 
-export async function inventoryRuntime(inputDir) {
+export async function inventoryRuntime(inputDir, options = {}) {
+  return inventoryTargetRuntime(inputDir, options);
+}
+
+export async function inventoryTargetRuntime(inputDir, { target = "win-x64" } = {}) {
   const entries = [];
   const files = new Set();
   const fileRecords = [];
   const seen = new Set();
   let fileCount = 0;
   let unpackedBytes = 0;
+  const isSafeRuntimePath = targetPathValidator(target);
 
   async function visit(relativeDirectory) {
     const absoluteDirectory = relativeDirectory
@@ -146,10 +146,10 @@ export async function inventoryRuntime(inputDir) {
     children.sort((left, right) => left.name.localeCompare(right.name, "en"));
     for (const child of children) {
       const relative = relativeDirectory ? `${relativeDirectory}/${child.name}` : child.name;
-      if (!isSafeWindowsRelativePath(relative)) {
+      if (!isSafeRuntimePath(relative)) {
         throw new Error(`unsafe runtime path: ${relative}`);
       }
-      const canonical = relative.toLowerCase();
+      const canonical = canonicalRuntimePath(target, relative);
       if (seen.has(canonical)) throw new Error(`duplicate runtime path: ${relative}`);
       seen.add(canonical);
 
@@ -189,9 +189,57 @@ export function hashRuntimeTree(records) {
   return hash.digest("hex");
 }
 
-function normalizeRuntimePath(value) {
-  if (!isSafeWindowsRelativePath(value)) throw new Error("runtime entrypoint is unsafe");
-  return value.replaceAll("\\", "/");
+function targetPathValidator(target) {
+  if (target === "win-x64") return isSafeWindowsRelativePath;
+  if (target === "macos-arm64") return isSafeMacOSRelativePath;
+  throw new Error(`unsupported runtime target: ${target}`);
+}
+
+function normalizeRuntimePath(target, value) {
+  const normalized = target === "win-x64" ? value.replaceAll("\\", "/") : value;
+  if (!targetPathValidator(target)(normalized)) throw new Error("runtime entrypoint is unsafe");
+  return normalized;
+}
+
+function canonicalRuntimePath(target, value) {
+  const normalized = target === "win-x64" ? value.replaceAll("\\", "/") : value;
+  return target === "win-x64" ? normalized.toLowerCase() : normalized.normalize("NFC").toLowerCase();
+}
+
+function validateTargetRuntimeInventory(target, inventory, normalizedEntrypoint) {
+  if (target === "win-x64") {
+    if (!inventory.files.has("resources/app.asar")) {
+      throw new Error("runtime Electron application bundle resources/app.asar does not exist");
+    }
+    const electronExecutables = [...inventory.files].filter((file) => path.posix.basename(file).toLowerCase() === "electron.exe");
+    if (electronExecutables.length !== 1 || electronExecutables[0] !== normalizedEntrypoint.toLowerCase()) {
+      throw new Error("runtime must contain exactly one Electron executable at the signed entrypoint");
+    }
+    return;
+  }
+  if (target === "macos-arm64") {
+    if (!normalizedEntrypoint.startsWith("Electron.app/Contents/MacOS/")) {
+      throw new Error("macos-arm64 runtime entrypoint must be inside Electron.app/Contents/MacOS");
+    }
+    if (!inventory.files.has("electron.app/contents/resources/app.asar")) {
+      throw new Error("runtime Electron application bundle Electron.app/Contents/Resources/app.asar does not exist");
+    }
+    return;
+  }
+  throw new Error(`unsupported runtime target: ${target}`);
+}
+
+function criticalRuntimeFiles(target, fileRecords, normalizedEntrypoint) {
+  const canonicalEntrypoint = canonicalRuntimePath(target, normalizedEntrypoint);
+  return fileRecords.filter((record) => {
+    const canonical = canonicalRuntimePath(target, record.path);
+    const base = path.posix.basename(canonical);
+    if (canonical === canonicalEntrypoint) return true;
+    if (target === "win-x64" && canonical === "resources/app.asar") return true;
+    if (target === "macos-arm64" && canonical === "electron.app/contents/resources/app.asar") return true;
+    return base === "node.exe" || base === "openclaw.mjs" || base.endsWith(".node") ||
+      (target === "win-x64" && base.includes("sidecar") && base.endsWith(".exe"));
+  });
 }
 
 async function requireMissing(target, message) {
@@ -218,6 +266,7 @@ async function runCLI() {
       "release-id": { type: "string" },
       "release-sequence": { type: "string" },
       "runtime-id": { type: "string" },
+      target: { type: "string" },
       entrypoint: { type: "string" },
       "entry-arg": { type: "string", multiple: true, default: [] },
       provenance: { type: "string" },
@@ -232,6 +281,7 @@ async function runCLI() {
     releaseId: values["release-id"],
     releaseSequence: Number(values["release-sequence"]),
     runtimeId: values["runtime-id"],
+    target: values.target,
     entrypoint: values.entrypoint,
     entryArgs: values["entry-arg"],
     provenancePath: values.provenance,
