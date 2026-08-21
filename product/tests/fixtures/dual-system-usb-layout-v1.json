@@ -1,0 +1,161 @@
+{
+  "contractVersion": 1,
+  "rootName": "U-Claw",
+  "expectedTopLevelEntries": ["U-Claw.exe", "U-Claw.app", "app", "data", ".uclaw"],
+  "usbManifest": {
+    "schemaVersion": 1,
+    "product": "U-Claw",
+    "usbLayoutVersion": 1,
+    "minimumBootstrapVersion": "0.1.0",
+    "dataRoot": "data",
+    "licenseRoot": ".uclaw/license",
+    "targets": {
+      "win-x64": {
+        "entry": "U-Claw.exe",
+        "package": "app/packages/win-x64/runtime.pkg",
+        "manifest": "app/manifests/win-x64.version.json",
+        "current": "app/current/win-x64.json",
+        "installState": "app/install-state/win-x64.json"
+      },
+      "macos-arm64": {
+        "entry": "U-Claw.app",
+        "package": "app/packages/macos-arm64/runtime.pkg",
+        "manifest": "app/manifests/macos-arm64.version.json",
+        "current": "app/current/macos-arm64.json",
+        "installState": "app/install-state/macos-arm64.json"
+      }
+    },
+    "signature": {
+      "algorithm": "ed25519",
+      "keyId": "dual-system-fixture",
+      "value": "fixture-signature-value"
+    }
+  },
+  "runtimeManifests": {
+    "win-x64": {
+      "schemaVersion": 1,
+      "releaseId": "release-win-1",
+      "releaseSequence": 1,
+      "productVersion": "0.1.0",
+      "nodeVersion": "24.15.0",
+      "electronVersion": "40.10.6",
+      "runtimeVersion": "2026.7.1-2",
+      "runtimeId": "openclaw-2026.7.1-2-win-x64",
+      "target": "win-x64",
+      "targetPlatform": "win32",
+      "targetArch": "x64",
+      "runtimeArchive": "runtime.pkg",
+      "runtimeSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runtimeTreeSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimeBytes": 1024,
+      "unpackedBytes": 4096,
+      "fileCount": 8,
+      "entrypoint": "electron/electron.exe",
+      "entryArgs": ["resources/app.asar"],
+      "criticalFiles": [
+        {
+          "path": "electron/electron.exe",
+          "size": 8,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ]
+    },
+    "macos-arm64": {
+      "schemaVersion": 1,
+      "releaseId": "release-macos-1",
+      "releaseSequence": 1,
+      "productVersion": "0.1.0",
+      "nodeVersion": "24.15.0",
+      "electronVersion": "40.10.6",
+      "runtimeVersion": "2026.7.1-2",
+      "runtimeId": "openclaw-2026.7.1-2-macos-arm64",
+      "target": "macos-arm64",
+      "targetPlatform": "darwin",
+      "targetArch": "arm64",
+      "runtimeArchive": "runtime.pkg",
+      "runtimeSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "runtimeTreeSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "runtimeBytes": 1024,
+      "unpackedBytes": 4096,
+      "fileCount": 8,
+      "entrypoint": "Electron.app/Contents/MacOS/Electron",
+      "entryArgs": [],
+      "criticalFiles": [
+        {
+          "path": "Electron.app/Contents/MacOS/Electron",
+          "size": 8,
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ]
+    }
+  },
+  "current": {
+    "win-x64": {
+      "schemaVersion": 1,
+      "target": "win-x64",
+      "releaseId": "release-win-1",
+      "releaseSequence": 1,
+      "runtimeId": "openclaw-2026.7.1-2-win-x64",
+      "manifest": "app/manifests/win-x64.version.json",
+      "package": "app/packages/win-x64/runtime.pkg",
+      "installedAt": "2026-08-21T00:00:00.000Z"
+    },
+    "macos-arm64": {
+      "schemaVersion": 1,
+      "target": "macos-arm64",
+      "releaseId": "release-macos-1",
+      "releaseSequence": 1,
+      "runtimeId": "openclaw-2026.7.1-2-macos-arm64",
+      "manifest": "app/manifests/macos-arm64.version.json",
+      "package": "app/packages/macos-arm64/runtime.pkg",
+      "installedAt": "2026-08-21T00:00:00.000Z"
+    }
+  },
+  "installState": {
+    "win-x64": {
+      "schemaVersion": 1,
+      "target": "win-x64",
+      "transactionId": "txn-win-1",
+      "state": "completed",
+      "releaseId": "release-win-1",
+      "releaseSequence": 1,
+      "manifest": "app/manifests/win-x64.version.json",
+      "package": "app/packages/win-x64/runtime.pkg",
+      "updatedAt": "2026-08-21T00:00:00.000Z"
+    },
+    "macos-arm64": {
+      "schemaVersion": 1,
+      "target": "macos-arm64",
+      "transactionId": "txn-macos-1",
+      "state": "completed",
+      "releaseId": "release-macos-1",
+      "releaseSequence": 1,
+      "manifest": "app/manifests/macos-arm64.version.json",
+      "package": "app/packages/macos-arm64/runtime.pkg",
+      "updatedAt": "2026-08-21T00:00:00.000Z"
+    }
+  },
+  "sharedData": {
+    "root": "data",
+    "requiredSubdirs": ["data/.openclaw", "data/outputs", "data/logs"],
+    "environment": {
+      "UCLAW_USB_ROOT": "<usb-root>",
+      "UCLAW_DATA_DIR": "<usb-root>/data",
+      "UCLAW_OPENCLAW_HOME": "<usb-root>/data/.openclaw",
+      "OPENCLAW_HOME": "<usb-root>/data",
+      "OPENCLAW_STATE_DIR": "<usb-root>/data/.openclaw"
+    },
+    "legacyReadonlyProbe": ".uclaw/data",
+    "firstWriteRoot": "data"
+  },
+  "licenseIdentity": {
+    "root": ".uclaw/license",
+    "bindingScope": "physical-usb",
+    "sharedFiles": ["license.json", ".startup-credential.json", ".lifecycle-cache.json"],
+    "forbiddenUniqueFields": ["volumeName", "mountPath", "driveLetter"],
+    "serverMapping": {
+      "fingerprintVersion": 2,
+      "deviceAliasesRequired": true
+    }
+  }
+}

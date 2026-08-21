@@ -1,0 +1,141 @@
+{
+  "contractVersion": 1,
+  "requiredHostMatrix": [
+    {
+      "id": "windows-10-x64-win-target",
+      "osFamily": "windows-10",
+      "arch": "x64",
+      "target": "win-x64",
+      "role": "single-target"
+    },
+    {
+      "id": "windows-11-x64-win-target",
+      "osFamily": "windows-11",
+      "arch": "x64",
+      "target": "win-x64",
+      "role": "single-target"
+    },
+    {
+      "id": "macos-arm64-mac-target",
+      "osFamily": "macos",
+      "arch": "arm64",
+      "target": "macos-arm64",
+      "role": "single-target"
+    },
+    {
+      "id": "same-usb-windows-macos",
+      "osFamily": "macos",
+      "arch": "arm64",
+      "role": "cross-os"
+    }
+  ],
+  "cases": [
+    {
+      "id": "win-runtime-target-files",
+      "category": "layout",
+      "target": "win-x64",
+      "title": "Windows target owns only win-x64 runtime package and state files",
+      "pass": [
+        "app/packages/win-x64/runtime.pkg exists",
+        "app/manifests/win-x64.version.json exists",
+        "app/current/win-x64.json exists",
+        "app/install-state/win-x64.json exists"
+      ]
+    },
+    {
+      "id": "macos-runtime-target-files",
+      "category": "layout",
+      "target": "macos-arm64",
+      "title": "macOS target owns only macos-arm64 runtime package and state files",
+      "pass": [
+        "app/packages/macos-arm64/runtime.pkg exists",
+        "app/manifests/macos-arm64.version.json exists",
+        "app/current/macos-arm64.json exists",
+        "app/install-state/macos-arm64.json exists"
+      ]
+    },
+    {
+      "id": "shared-data-root-authority",
+      "category": "shared-data",
+      "target": "shared",
+      "title": "Business data authority is root data directory",
+      "pass": [
+        "data/.openclaw exists",
+        "data/outputs exists",
+        "data/logs exists",
+        "new writes go to data instead of .uclaw/data"
+      ]
+    },
+    {
+      "id": "shared-license-identity",
+      "category": "license",
+      "target": "shared",
+      "title": "License identity is shared and bound to physical USB",
+      "pass": [
+        ".uclaw/license/license.json exists",
+        ".uclaw/license/.startup-credential.json exists",
+        ".uclaw/license/.lifecycle-cache.json exists",
+        "identity ignores volume name, mount path, and drive letter"
+      ]
+    },
+    {
+      "id": "windows-activation-macos-first-launch",
+      "category": "cross-os",
+      "target": "cross-os",
+      "title": "Windows activation is accepted on first macOS launch",
+      "pass": [
+        "macOS submits its platform fingerprint and evidence",
+        "server maps fingerprint_version 2 device_aliases to the same licensed device"
+      ]
+    },
+    {
+      "id": "macos-activation-windows-first-launch",
+      "category": "cross-os",
+      "target": "cross-os",
+      "title": "macOS activation is accepted on first Windows launch",
+      "pass": [
+        "Windows submits its platform fingerprint and evidence",
+        "server maps fingerprint_version 2 device_aliases to the same licensed device"
+      ]
+    },
+    {
+      "id": "win-update-does-not-touch-macos",
+      "category": "isolation",
+      "target": "win-x64",
+      "title": "Windows target update does not mutate macOS package or state",
+      "pass": [
+        "macos-arm64 runtime.pkg digest unchanged",
+        "macos-arm64 manifest/current/install-state unchanged"
+      ]
+    },
+    {
+      "id": "macos-update-does-not-touch-win",
+      "category": "isolation",
+      "target": "macos-arm64",
+      "title": "macOS target update does not mutate Windows package or state",
+      "pass": [
+        "win-x64 runtime.pkg digest unchanged",
+        "win-x64 manifest/current/install-state unchanged"
+      ]
+    },
+    {
+      "id": "drive-letter-mountpoint-change",
+      "category": "identity",
+      "target": "cross-os",
+      "title": "Drive letter and mount point changes do not change authorization result",
+      "pass": [
+        "same physical USB remains authorized after Windows drive-letter change",
+        "same physical USB remains authorized after macOS mount-point change"
+      ]
+    },
+    {
+      "id": "different-usb-rejected",
+      "category": "identity",
+      "target": "cross-os",
+      "title": "Different physical USB is rejected",
+      "pass": [
+        "changed physical USB fingerprint is not mapped to existing device aliases"
+      ]
+    }
+  ]
+}

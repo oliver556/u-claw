@@ -15,6 +15,7 @@ export * from "./client.js";
 export * from "./common.js";
 export * from "./data.js";
 export * from "./diagnostics.js";
+export * from "./dual-system-usb.js";
 export * from "./errors.js";
 export * from "./gateway.js";
 export * from "./ipc.js";
