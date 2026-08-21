@@ -70,6 +70,7 @@ describe("commercial OpenClaw credential lifecycle", () => {
     const order: string[] = [];
     const credential = {
       endpoint: new URL("https://commercial.example.test/model-api/v1/"),
+      model: "gpt-5.5",
       deviceToken: `uclaw_dt_${"N".repeat(43)}`,
     };
     const store = {
@@ -93,7 +94,7 @@ describe("commercial OpenClaw credential lifecycle", () => {
     });
 
     await rotateCommercialOpenClawCredential({
-      next: { schemaVersion: 2, deviceId: "device-001", licenseId: "license-001", endpoint: credential.endpoint.href, deviceToken: credential.deviceToken },
+      next: { schemaVersion: 2, deviceId: "device-001", licenseId: "license-001", endpoint: credential.endpoint.href, deviceTokenId: "dt_fixture_001", model: credential.model, deviceToken: credential.deviceToken },
       store,
       config,
       gateway,
@@ -106,6 +107,7 @@ describe("commercial OpenClaw credential lifecycle", () => {
     expect(config.synchronizeCommercial).toHaveBeenCalledWith({
       endpoint: credential.endpoint.href,
       credentialPath: store.credentialPath,
+      defaultModel: credential.model,
       models: [{ id: "deepseek-chat", name: "DeepSeek" }, { id: "qwen-max", name: "Qwen" }],
     });
     expect(JSON.stringify(config.synchronizeCommercial.mock.calls)).not.toContain(credential.deviceToken);
@@ -114,8 +116,8 @@ describe("commercial OpenClaw credential lifecycle", () => {
   it("fails closed when authoritative model readback omits an enabled model", async () => {
     const token = `uclaw_dt_${"R".repeat(43)}`;
     await expect(rotateCommercialOpenClawCredential({
-      next: { schemaVersion: 2, deviceId: "device-001", licenseId: "license-001", endpoint: "https://commercial.example.test/model-api/v1/", deviceToken: token },
-      store: { credentialPath: "/credential.json", provision: async () => undefined, loadActive: async () => ({ endpoint: new URL("https://commercial.example.test/model-api/v1/"), deviceToken: token }) },
+      next: { schemaVersion: 2, deviceId: "device-001", licenseId: "license-001", endpoint: "https://commercial.example.test/model-api/v1/", deviceTokenId: "dt_fixture_001", model: "gpt-5.5", deviceToken: token },
+      store: { credentialPath: "/credential.json", provision: async () => undefined, loadActive: async () => ({ endpoint: new URL("https://commercial.example.test/model-api/v1/"), model: "gpt-5.5", deviceToken: token }) },
       config: { synchronizeCommercial: async () => true, readCommercial: async () => ({ configured: true }) },
       gateway: { restartManagedGateway: async () => undefined },
       reconnect: async () => undefined,

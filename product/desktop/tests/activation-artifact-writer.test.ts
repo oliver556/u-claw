@@ -51,6 +51,8 @@ const material = (suffix = "001"): ActivationResponse => ({
   builtinCredential: {
     schemaVersion: 2, deviceId: `device-${suffix}`, licenseId: `license-${suffix}`,
     endpoint: "https://license.example.test/model-api/",
+    deviceTokenId: `dt_fixture_${suffix}`,
+    model: "gpt-5.5",
     deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   },
   status: "active",

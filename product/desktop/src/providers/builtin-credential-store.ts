@@ -8,23 +8,35 @@ import { z } from "zod";
 
 const FILE_NAME = "builtin-model-credential.v1.json";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const DEFAULT_BUILTIN_TEXT_MODEL = "gpt-5.5";
+const ModelSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u);
 const PersistedCredentialFields = {
-  deviceTokenId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u).optional(),
   deviceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
   licenseId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
   endpoint: z.string(),
+  deviceTokenId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u).optional(),
   deviceToken: z.string().regex(/^uclaw_dt_[A-Za-z0-9_-]{43}$/u),
 };
 const LegacyPersistedCredentialSchema = z.object({
   schemaVersion: z.literal(1),
   ...PersistedCredentialFields,
-  model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u),
+  model: ModelSchema,
 }).strict();
 const CurrentPersistedCredentialSchema = z.object({
   schemaVersion: z.literal(2),
-  ...PersistedCredentialFields,
+  deviceId: PersistedCredentialFields.deviceId,
+  licenseId: PersistedCredentialFields.licenseId,
+  endpoint: PersistedCredentialFields.endpoint,
+  deviceTokenId: PersistedCredentialFields.deviceTokenId,
+  model: ModelSchema.optional(),
+  deviceToken: PersistedCredentialFields.deviceToken,
+}).strict();
+const CurrentProvisioningCredentialSchema = CurrentPersistedCredentialSchema.extend({
+  deviceTokenId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u),
+  model: ModelSchema,
 }).strict();
 const PersistedCredentialSchema = z.union([CurrentPersistedCredentialSchema, LegacyPersistedCredentialSchema]);
+type PersistedCredential = z.infer<typeof PersistedCredentialSchema>;
 type LegacyPersistedCredential = z.infer<typeof LegacyPersistedCredentialSchema>;
 
 export type BuiltinCredentialErrorCode =
@@ -46,8 +58,9 @@ export interface BuiltinModelCredential {
   endpoint: URL;
   deviceId: string;
   licenseId: string;
+  deviceTokenId?: string;
   deviceToken: string;
-  model?: string;
+  model: string;
 }
 
 export interface BuiltinCredentialStore {
@@ -84,7 +97,7 @@ function validateEndpoint(value: string, allowLoopbackHttp: boolean): URL {
 }
 
 function validatePersisted(value: unknown, allowLoopbackHttp: boolean): {
-  persisted: BuiltinCredentialProvisioningInput;
+  persisted: PersistedCredential;
   credential: BuiltinModelCredential;
 } {
   const parsed = PersistedCredentialSchema.safeParse(value);
@@ -99,8 +112,9 @@ function validatePersisted(value: unknown, allowLoopbackHttp: boolean): {
       endpoint,
       deviceId: persisted.deviceId,
       licenseId: persisted.licenseId,
+      ...("deviceTokenId" in persisted && persisted.deviceTokenId !== undefined ? { deviceTokenId: persisted.deviceTokenId } : {}),
       deviceToken: persisted.deviceToken,
-      ...("model" in persisted ? { model: persisted.model } : {}),
+      model: "model" in persisted && persisted.model !== undefined ? persisted.model : DEFAULT_BUILTIN_TEXT_MODEL,
     },
   };
 }
@@ -169,6 +183,9 @@ export function createBuiltinCredentialStore({
     pinnedFilesystem: platform !== "win32",
     credentialPath: join(resolve(dataDir), path),
     async provision(input) {
+      if (input.schemaVersion === 2 && !CurrentProvisioningCredentialSchema.safeParse(input).success) {
+        throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_INVALID", "Builtin model credential is invalid.");
+      }
       const { persisted } = validatePersisted(input, allowLoopbackHttp);
       try {
         await (await getSafeRoot()).write(path, `${JSON.stringify(persisted)}\n`, { mode: 0o600, overwrite: true });

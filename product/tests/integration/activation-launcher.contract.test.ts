@@ -131,6 +131,8 @@ describe("activation launcher-to-desktop contract", () => {
           deviceId: license.deviceId,
           licenseId: license.licenseId,
           endpoint: "https://127.0.0.1/model-api/",
+          deviceTokenId: "dt_fixture_001",
+          model: "gpt-5.5",
           deviceToken: `uclaw_dt_${"A".repeat(43)}`,
         },
         status: "active" as const,

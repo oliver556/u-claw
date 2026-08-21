@@ -10,7 +10,7 @@ import type {
 interface CommercialCredentialStore {
   readonly credentialPath: string;
   provision(input: BuiltinCredentialArtifact): Promise<void>;
-  loadActive(): Promise<Pick<BuiltinModelCredential, "endpoint" | "deviceToken">>;
+  loadActive(): Promise<Pick<BuiltinModelCredential, "endpoint" | "deviceToken" | "model">>;
 }
 
 interface CommercialModelReadback {
@@ -98,6 +98,7 @@ export async function rotateCommercialOpenClawCredential({
   await config.synchronizeCommercial({
     endpoint: credential.endpoint.href,
     credentialPath: store.credentialPath,
+    defaultModel: credential.model,
     models,
   });
   await gateway.restartManagedGateway();
@@ -120,6 +121,7 @@ export async function synchronizeExistingCommercialOpenClawCredential({
   const changed = await config.synchronizeCommercial({
     endpoint: credential.endpoint.href,
     credentialPath: store.credentialPath,
+    defaultModel: credential.model,
     models,
   });
   if (changed) {

@@ -130,6 +130,7 @@ func TestActivateFirstBindingUsesTwoPhasesAndReturnsPersistedEnvelope(t *testing
 		material.License.Signature.Algorithm != "ed25519" || material.License.Signature.KeyID != "test-license-key" ||
 		material.StartupCredential.SchemaVersion != 1 || material.BuiltinCredential.SchemaVersion != 2 ||
 		material.BuiltinCredential.Endpoint != "https://public.example/model-api/" ||
+		material.BuiltinCredential.DeviceTokenID == "" || material.BuiltinCredential.Model != "model-a" ||
 		!strings.HasPrefix(material.BuiltinCredential.DeviceToken, "uclaw_dt_") {
 		t.Fatalf("material does not match frozen activation response: %+v", material)
 	}
@@ -137,8 +138,8 @@ func TestActivateFirstBindingUsesTwoPhasesAndReturnsPersistedEnvelope(t *testing
 	if strings.Contains(encoded, `"accessToken"`) {
 		t.Fatalf("legacy builtin token fields leaked: %s", encoded)
 	}
-	if strings.Contains(encoded, `"model"`) {
-		t.Fatalf("single-model credential field leaked: %s", encoded)
+	if strings.Contains(encoded, `"apiKey"`) || strings.Contains(encoded, `"newApi"`) || strings.Contains(encoded, `"Authorization"`) {
+		t.Fatalf("server-only New API material leaked: %s", encoded)
 	}
 	salt, err := hex.DecodeString(material.License.StartupSecretProof.StartupSecretSalt)
 	if err != nil {
@@ -313,6 +314,8 @@ func TestValidBuiltinCredentialRejectsUnsafeRecoveredEndpoint(t *testing.T) {
 	valid := builtinCredentialArtifact{
 		SchemaVersion: 2,
 		Endpoint:      "https://public.example/model-api/",
+		DeviceTokenID: "dt_fixture_001",
+		Model:         "gpt-5.5",
 		DeviceToken:   "uclaw_dt_" + strings.Repeat("A", 43),
 	}
 	if !validBuiltinCredential(valid) {
@@ -333,6 +336,7 @@ func TestValidBuiltinCredentialRejectsUnsafeRecoveredEndpoint(t *testing.T) {
 	}
 	legacy := valid
 	legacy.SchemaVersion = 1
+	legacy.DeviceTokenID = ""
 	legacy.Model = "legacy-model"
 	if !validBuiltinCredential(legacy) {
 		t.Fatal("legacy credential rejected")

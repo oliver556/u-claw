@@ -276,6 +276,8 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
         deviceId: loadedBuiltin.deviceId,
         licenseId: loadedBuiltin.licenseId,
         endpoint: loadedBuiltin.endpoint.href,
+        ...(loadedBuiltin.deviceTokenId === undefined ? {} : { deviceTokenId: loadedBuiltin.deviceTokenId }),
+        model: loadedBuiltin.model,
         deviceToken: loadedBuiltin.deviceToken,
       });
       if (startup.deviceId !== journal.deviceId || startup.licenseId !== journal.licenseId
@@ -453,6 +455,8 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
           deviceId: loadedBuiltin.deviceId,
           licenseId: loadedBuiltin.licenseId,
           endpoint: loadedBuiltin.endpoint.href,
+          ...(loadedBuiltin.deviceTokenId === undefined ? {} : { deviceTokenId: loadedBuiltin.deviceTokenId }),
+          model: loadedBuiltin.model,
           deviceToken: loadedBuiltin.deviceToken,
         });
         const manifest = GenerationManifestSchema.parse(await readJson(artifactPaths[3].path));

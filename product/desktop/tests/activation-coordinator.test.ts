@@ -35,11 +35,13 @@ const response = {
     startupSecret: "x".repeat(32),
   },
   builtinCredential: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     deviceId: "device-001",
     licenseId: "license-001",
-    accessToken: "t".repeat(16),
-    expiresAt: "2026-08-14T00:00:00.000Z",
+    endpoint: "https://license.example.test/model-api/",
+    deviceTokenId: "dt_fixture_001",
+    model: "gpt-5.5",
+    deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   },
   status: "active" as const,
 };

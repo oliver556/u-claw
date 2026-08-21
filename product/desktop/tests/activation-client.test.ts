@@ -44,6 +44,8 @@ const response = {
     deviceId: "device-001",
     licenseId: "license-001",
     endpoint: "https://license.example.test/model-api/",
+    deviceTokenId: "dt_fixture_001",
+    model: "gpt-5.5",
     deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   },
   status: "active",

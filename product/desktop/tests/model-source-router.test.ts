@@ -21,7 +21,7 @@ function typedCredential(endpoint = "http://127.0.0.1:18091/v1") {
     deviceId: `dev_${suffix}`,
     licenseId: `lic_${suffix}`,
     endpoint,
-    model: "gpt-5.6-sol",
+    model: "gpt-5.5",
     deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   };
 }

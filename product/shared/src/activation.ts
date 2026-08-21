@@ -9,6 +9,7 @@ export const ACTIVATION_CONTRACT_VERSION = 1 as const;
 
 const IdentifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u);
 const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
+const ModelSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u);
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SemverSchema = z.string().regex(/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u);
 const SecureModelEndpointPattern = /^[Hh][Tt][Tt][Pp][Ss]:\/\/(?:\[[0-9A-Fa-f:.]+\]|[^/?#@[\]\\\u0000-\u0020\u007F:]+)(?::[0-9]+)?(?:\/[^?#@\\\u0000-\u0020\u007F]*)?$/u;
@@ -52,6 +53,8 @@ export const BuiltinCredentialArtifactSchema = z.object({
   deviceId: IdentifierSchema,
   licenseId: IdentifierSchema,
   endpoint: SecureModelEndpointSchema,
+  deviceTokenId: IdentifierSchema,
+  model: ModelSchema,
   deviceToken: z.string().regex(/^uclaw_dt_[A-Za-z0-9_-]{43}$/u),
 }).strict();
 export type BuiltinCredentialArtifact = z.infer<typeof BuiltinCredentialArtifactSchema>;

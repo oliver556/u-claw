@@ -32,7 +32,7 @@ function closeServer(server: ReturnType<typeof createServer> | undefined): Promi
 }
 
 describe("activation to OpenClaw commercial Provider through Node HTTPS proxy fixture", () => {
-  it("persists a model-agnostic device credential and reads the dynamic catalog without leaking secrets", async () => {
+  it("persists device credential default model and reads the dynamic catalog without leaking secrets", async () => {
     const root = await mkdtemp(join(tmpdir(), "uclaw-activation-model-proxy-"));
     roots.push(root);
     const packageRoot = join(root, "package");
@@ -86,7 +86,7 @@ describe("activation to OpenClaw commercial Provider through Node HTTPS proxy fi
           response.end(JSON.stringify({
             activationId: "fixture-activation-001", deviceId: license.deviceId, licenseId: license.licenseId, license,
             startupCredential: { schemaVersion: 1, deviceId: license.deviceId, licenseId: license.licenseId, startupSecret },
-            builtinCredential: { schemaVersion: 2, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: `${endpoint}model-api/`, deviceToken },
+            builtinCredential: { schemaVersion: 2, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: `${endpoint}model-api/`, deviceTokenId: "dt_fixture_001", model: "gpt-5.5", deviceToken },
             status: "active",
           }));
           return;
@@ -140,7 +140,7 @@ describe("activation to OpenClaw commercial Provider through Node HTTPS proxy fi
 
       const credentialPath = join(dataDir, ".uclaw", "builtin-model-credential.v1.json");
       const credentialBody = JSON.parse(await readFile(credentialPath, "utf8"));
-      expect(credentialBody).toEqual({ schemaVersion: 2, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: `${endpoint}model-api/`, deviceToken });
+      expect(credentialBody).toEqual({ schemaVersion: 2, deviceId: license.deviceId, licenseId: license.licenseId, endpoint: `${endpoint}model-api/`, deviceTokenId: "dt_fixture_001", model: "gpt-5.5", deviceToken });
       if (process.platform !== "win32") expect((await stat(credentialPath)).mode & 0o777).toBe(0o600);
       const credentialArtifacts = (await readdir(join(dataDir, ".uclaw"))).filter((name) => name.includes("credential"));
       expect(credentialArtifacts).toEqual(["builtin-model-credential.v1.json"]);
@@ -150,7 +150,7 @@ describe("activation to OpenClaw commercial Provider through Node HTTPS proxy fi
       const loaded = await store.loadActive();
       const modelFetch = ((input: string | URL | Request, init?: RequestInit) =>
         undiciFetch(input, { ...init, dispatcher: modelDispatcher })) as typeof fetch;
-      expect(loaded.model).toBeUndefined();
+      expect(loaded.model).toBe("gpt-5.5");
       await expect(fetchCommercialModels(loaded, modelFetch)).resolves.toEqual([
         { id: "fixture-default-model", name: "fixture-default-model" },
       ]);

@@ -38,6 +38,7 @@ export interface CommercialProviderModel {
 export interface CommercialProviderConfig {
   endpoint: string;
   credentialPath: string;
+  defaultModel: string;
   models: readonly CommercialProviderModel[];
 }
 
@@ -50,6 +51,7 @@ const SENSITIVE_VALUE = /(?:bearer\s+|\bsk[-_]|api[-_ ]?key\s*[:=]|token\s*[:=]|
 const RENDERER_REDACTED = "[REDACTED]";
 const OPENCLAW_REDACTED = "__OPENCLAW_REDACTED__";
 const LEGACY_COMMERCIAL_PROVIDER_IDS = new Set(["openai", "uclaw-builtin"]);
+const COMMERCIAL_DEFAULT_TEXT_MODEL_ID = "gpt-5.5";
 const COMMERCIAL_IMAGE_MODEL_ID = "gpt-image-2";
 const COMMERCIAL_IMAGE_PLUGIN_ID = "uclaw-commercial-image";
 
@@ -128,6 +130,13 @@ function commercialModelConfig(model: CommercialProviderModel): JsonObject {
       ...(/^deepseek(?:[-_/]|$)/iu.test(model.id) ? { thinkingFormat: "openai" } : {}),
     },
   };
+}
+
+function selectCommercialDefaultModel(models: readonly CommercialProviderModel[], preferred?: string): string | undefined {
+  const ids = new Set(models.map(({ id }) => id));
+  if (preferred !== undefined && ids.has(preferred)) return preferred;
+  if (ids.has(COMMERCIAL_DEFAULT_TEXT_MODEL_ID)) return COMMERCIAL_DEFAULT_TEXT_MODEL_ID;
+  return models.find(({ id }) => id !== COMMERCIAL_IMAGE_MODEL_ID)?.id ?? models[0]?.id;
 }
 
 function normalizedProviderEndpoint(value: unknown): string | undefined {
@@ -476,6 +485,10 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
       if (input.models.length === 0 || input.models.some(({ id, name }) => id.trim() === "" || name.trim() === "")) {
         throw backendError("INVALID_ARGUMENT", "Commercial model catalog is empty or invalid.");
       }
+      const selectedDefaultModel = selectCommercialDefaultModel(input.models, input.defaultModel);
+      if (selectedDefaultModel === undefined) {
+        throw backendError("INVALID_ARGUMENT", "Commercial model catalog is empty or invalid.");
+      }
       const uniqueModels = [...new Map(input.models.map((model) => [model.id, commercialModelConfig(model)])).values()];
       await getSchema();
       const before = await getConfig();
@@ -493,6 +506,10 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
         api: "openai-completions",
         models: uniqueModels,
       };
+      const agents = isObject(next.agents) ? next.agents : (next.agents = {});
+      const defaults = isObject(agents.defaults) ? agents.defaults : (agents.defaults = {});
+      const modelDefaults = isObject(defaults.model) ? defaults.model : (defaults.model = {});
+      modelDefaults.primary = `uclaw-commercial/${selectedDefaultModel}`;
       if (input.models.some(({ id }) => id === COMMERCIAL_IMAGE_MODEL_ID)) {
         const plugins = isObject(next.plugins) ? next.plugins : (next.plugins = {});
         const entries = isObject(plugins.entries) ? plugins.entries : (plugins.entries = {});
@@ -513,6 +530,7 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
         || provider.api !== "openai-completions"
         || !matchesSecretRef(provider.apiKey)
         || canonical(provider.models) !== canonical(uniqueModels)
+        || getPath(readback.config, ["agents", "defaults", "model", "primary"]) !== `uclaw-commercial/${selectedDefaultModel}`
         || getPath(readback.config, ["models", "mode"]) !== "merge"
         || !matchesSecretProvider(secretProvider, input.credentialPath)
         || input.models.some(({ id }) => id === COMMERCIAL_IMAGE_MODEL_ID) && (!isObject(imagePlugin) || imagePlugin.enabled !== true)) {
@@ -527,12 +545,18 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
       const imagePlugin = getPath(config, ["plugins", "entries", COMMERCIAL_IMAGE_PLUGIN_ID]);
       const providerModels = isObject(provider) && Array.isArray(provider.models) ? provider.models : [];
       const hasImageModel = providerModels.some((model) => isObject(model) && model.id === COMMERCIAL_IMAGE_MODEL_ID);
+      const defaultModel = selectCommercialDefaultModel(providerModels.flatMap((model) =>
+        isObject(model) && typeof model.id === "string" && typeof model.name === "string"
+          ? [{ id: model.id, name: model.name }]
+          : []));
       return {
         configured: isObject(provider)
           && typeof provider.baseUrl === "string"
           && provider.api === "openai-completions"
           && matchesSecretRef(provider.apiKey)
           && isCommercialModelReadback(provider.models)
+          && defaultModel !== undefined
+          && getPath(config, ["agents", "defaults", "model", "primary"]) === `uclaw-commercial/${defaultModel}`
           && getPath(config, ["models", "mode"]) === "merge"
           && matchesSecretProvider(secretProvider)
           && (!hasImageModel || isObject(imagePlugin) && imagePlugin.enabled === true),

@@ -37,12 +37,14 @@ describe("activation API contract", () => {
 		expect(() => ActivationRequestSchema.parse({ ...request, username: "UCLAW-00000001" })).toThrow();
 	});
 
-	it("locks the model-agnostic commercial device credential fields", () => {
+	it("locks the commercial device credential fields without server API keys", () => {
 		const credential = {
 			schemaVersion: 2,
 			deviceId: "dev_fixture_001",
 			licenseId: "lic_fixture_001",
 			endpoint: "https://license.example.test/model-api/",
+			deviceTokenId: "dt_fixture_001",
+			model: "gpt-5.5",
 			deviceToken: `uclaw_dt_${"A".repeat(43)}`,
 		};
 
@@ -140,6 +142,8 @@ describe("activation API contract", () => {
         deviceId: "dev_fixture_001",
         licenseId: "lic_fixture_001",
         endpoint: "https://api.u-claw.org/v1",
+        deviceTokenId: "dt_fixture_001",
+        model: "gpt-5.5",
         deviceToken: `uclaw_dt_${"A".repeat(43)}`,
       },
       status: "active",

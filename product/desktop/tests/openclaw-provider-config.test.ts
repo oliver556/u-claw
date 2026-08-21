@@ -62,7 +62,9 @@ describe("OpenClaw provider config backend", () => {
     await backend.synchronizeCommercial({
       endpoint: "https://commercial.example.test/model-api/v1/",
       credentialPath: "/portable/data/.uclaw/builtin-model-credential.v1.json",
+      defaultModel: "gpt-5.5",
       models: [
+        { id: "gpt-5.5", name: "GPT 5.5" },
         { id: "deepseek-chat", name: "DeepSeek" },
         { id: "qwen-max", name: "Qwen" },
         { id: "gpt-image-2", name: "GPT Image 2" },
@@ -81,6 +83,13 @@ describe("OpenClaw provider config backend", () => {
         apiKey: { source: "file", provider: "uclaw_commercial", id: "/deviceToken" },
         api: "openai-completions",
         models: [
+          { id: "gpt-5.5", name: "GPT 5.5", compat: {
+            requiresStringContent: true,
+            supportsStore: false,
+            supportsDeveloperRole: false,
+            supportsReasoningEffort: false,
+            maxTokensField: "max_tokens",
+          } },
           { id: "deepseek-chat", name: "DeepSeek", compat: {
             requiresStringContent: true,
             supportsStore: false,
@@ -104,6 +113,7 @@ describe("OpenClaw provider config backend", () => {
           } },
         ],
       } } },
+      agents: { defaults: { model: { primary: "uclaw-commercial/gpt-5.5" } } },
       plugins: { entries: { "uclaw-commercial-image": { enabled: true } } },
     });
     expect(JSON.stringify(applied)).not.toContain("uclaw_dt_");
@@ -117,6 +127,7 @@ describe("OpenClaw provider config backend", () => {
     await backend.synchronizeCommercial({
       endpoint: "https://commercial.example.test/model-api/v1/",
       credentialPath: "/portable/data/.uclaw/builtin-model-credential.v1.json",
+      defaultModel: "gpt-5.5",
       models: [
         { id: "gpt-5.5", name: "GPT 5.5" },
         { id: "gpt-image-2", name: "GPT Image 2" },
@@ -157,6 +168,7 @@ describe("OpenClaw provider config backend", () => {
     await createOpenClawProviderConfigBackend(rpc).synchronizeCommercial({
       endpoint: "https://commercial.example.test/model-api/v1/",
       credentialPath: "/portable/data/.uclaw/builtin-model-credential.v1.json",
+      defaultModel: "gpt-5.5",
       models: [{ id: "gpt-5.5", name: "GPT 5.5" }],
     });
 
@@ -194,6 +206,7 @@ describe("OpenClaw provider config backend", () => {
                 { id: "qwen-max", name: "Qwen", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8_192, compat: { requiresStringContent: true, supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" } },
               ],
             } } },
+            agents: { defaults: { model: { primary: "uclaw-commercial/deepseek-chat" } } },
           },
           hash: "hash-2",
           valid: true,
@@ -213,6 +226,7 @@ describe("OpenClaw provider config backend", () => {
     const input = {
       endpoint: "https://commercial.example.test/model-api/v1/",
       credentialPath: "/portable/data/.uclaw/builtin-model-credential.v1.json",
+      defaultModel: "deepseek-chat",
       models: [{ id: "deepseek-chat", name: "DeepSeek" }, { id: "qwen-max", name: "Qwen" }],
     };
 

@@ -39,6 +39,8 @@ describe("activation OpenAPI contract", () => {
       deviceId: "dev_fixture_001",
       licenseId: "lic_fixture_001",
       endpoint: "https://license.example.test/model-api/",
+      deviceTokenId: "dt_fixture_001",
+      model: "gpt-5.5",
       deviceToken: `uclaw_dt_${"A".repeat(43)}`,
     };
 
@@ -128,9 +130,9 @@ describe("activation OpenAPI contract", () => {
       "schemaVersion", "usernameId", "deviceId", "licenseId", "usbFingerprint", "startupSecretProof", "notBefore", "expiresAt", "revision", "signature",
     ]);
     expect(required("StartupCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "startupSecret"]);
-    expect(required("BuiltinCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "endpoint", "deviceToken"]);
+    expect(required("BuiltinCredential")).toEqual(["schemaVersion", "deviceId", "licenseId", "endpoint", "deviceTokenId", "model", "deviceToken"]);
     expect(Object.keys(document.components.schemas.BuiltinCredential.properties ?? {})).toEqual(
-      ["schemaVersion", "deviceId", "licenseId", "endpoint", "deviceToken"],
+      ["schemaVersion", "deviceId", "licenseId", "endpoint", "deviceTokenId", "model", "deviceToken"],
     );
     expect(required("LicenseStatusReceipt")).toEqual(["value"]);
     expect(document.components.schemas.DeviceTokenRequest).toBeUndefined();
@@ -213,6 +215,8 @@ describe("activation OpenAPI contract", () => {
         format: "uri",
         pattern: "^[Hh][Tt][Tt][Pp][Ss]://(?:\\[[0-9A-Fa-f:.]+\\]|[^/?#@\\[\\]\\\\\\u0000-\\u0020\\u007F:]+)(?::[0-9]+)?(?:/[^?#@\\\\\\u0000-\\u0020\\u007F]*)?$",
       },
+      deviceTokenId: { $ref: "#/components/schemas/Identifier" },
+      model: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
       deviceToken: { type: "string", pattern: "^uclaw_dt_[A-Za-z0-9_-]{43}$" },
     });
     for (const status of ["401", "403", "429", "503"]) {

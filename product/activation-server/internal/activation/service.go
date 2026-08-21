@@ -105,7 +105,8 @@ type builtinCredentialArtifact struct {
 	DeviceID      string `json:"deviceId"`
 	LicenseID     string `json:"licenseId"`
 	Endpoint      string `json:"endpoint"`
-	Model         string `json:"model,omitempty"`
+	DeviceTokenID string `json:"deviceTokenId,omitempty"`
+	Model         string `json:"model"`
 	DeviceToken   string `json:"deviceToken"`
 }
 
@@ -292,7 +293,8 @@ func (service *Service) recoverBound(ctx context.Context, record BoundRecord, re
 	}
 	if decoded.BuiltinCredential.SchemaVersion == 1 {
 		decoded.BuiltinCredential.SchemaVersion = 2
-		decoded.BuiltinCredential.Model = ""
+		decoded.BuiltinCredential.DeviceTokenID = record.DeviceTokenID
+		decoded.BuiltinCredential.Model = record.DefaultModel
 		material, err = json.Marshal(decoded)
 		if err != nil {
 			return boundFailure(record, ErrActivationServiceUnavailable)
@@ -401,7 +403,7 @@ func newActivationMaterial(record BoundRecord, pending pendingMaterial, signatur
 			NotBefore: notBefore, ExpiresAt: expiresAt, Revision: record.Revision,
 		},
 		StartupCredential: startupCredentialArtifact{SchemaVersion: 1, DeviceID: record.DeviceID, LicenseID: record.LicenseID, StartupSecret: pending.StartupSecret},
-		BuiltinCredential: builtinCredentialArtifact{SchemaVersion: 2, DeviceID: record.DeviceID, LicenseID: record.LicenseID, Endpoint: record.PublicModelEndpoint, DeviceToken: pending.DeviceToken},
+		BuiltinCredential: builtinCredentialArtifact{SchemaVersion: 2, DeviceID: record.DeviceID, LicenseID: record.LicenseID, Endpoint: record.PublicModelEndpoint, DeviceTokenID: pending.DeviceTokenID, Model: record.DefaultModel, DeviceToken: pending.DeviceToken},
 	}
 	material.License.USBFingerprint.Scheme = record.FingerprintVersion
 	material.License.USBFingerprint.SHA256 = record.FingerprintSHA256
@@ -430,8 +432,10 @@ func validBuiltinCredential(credential builtinCredentialArtifact) bool {
 	}
 	const tokenPrefix = "uclaw_dt_"
 	validToken := strings.HasPrefix(credential.DeviceToken, tokenPrefix) && len(credential.DeviceToken) == len(tokenPrefix)+43
+	validTokenID := credential.DeviceTokenID == "" || identifierPattern.MatchString(credential.DeviceTokenID)
+	validModel := credential.Model != "" && strings.TrimSpace(credential.Model) == credential.Model
 	validLegacy := credential.SchemaVersion == 1 && credential.Model != "" && strings.TrimSpace(credential.Model) == credential.Model
-	validCurrent := credential.SchemaVersion == 2 && credential.Model == ""
+	validCurrent := credential.SchemaVersion == 2 && validTokenID && credential.DeviceTokenID != "" && validModel
 	return validToken && (validLegacy || validCurrent)
 }
 

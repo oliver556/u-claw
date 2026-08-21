@@ -26,6 +26,8 @@ function provisionInput(endpoint = "http://127.0.0.1:18090/v1") {
     deviceId: `dev_${suffix}`,
     licenseId: `lic_${suffix}`,
     endpoint,
+    deviceTokenId: `dt_${suffix}`,
+    model: "gpt-5.5",
     deviceToken: `uclaw_dt_${"A".repeat(43)}`,
   };
 }
@@ -84,6 +86,8 @@ describe("builtin credential store", () => {
       endpoint: new URL(input.endpoint),
       deviceId: input.deviceId,
       licenseId: input.licenseId,
+      deviceTokenId: input.deviceTokenId,
+      model: input.model,
       deviceToken: input.deviceToken,
     });
     const path = join(dataDir, ".uclaw", "builtin-model-credential.v1.json");
@@ -104,6 +108,8 @@ describe("builtin credential store", () => {
     await expect(store.loadActive()).resolves.toMatchObject({
       deviceId: input.deviceId,
       licenseId: input.licenseId,
+      deviceTokenId: expect.any(String),
+      model: input.model,
       deviceToken: input.deviceToken,
     });
   });
@@ -140,6 +146,14 @@ describe("builtin credential store", () => {
     await expect(store.provision({
       ...input,
       deviceTokenId: "invalid token id",
+    } as never)).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
+    await expect(store.provision({
+      ...input,
+      model: undefined,
+    } as never)).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
+    await expect(store.provision({
+      ...input,
+      deviceTokenId: undefined,
     } as never)).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_INVALID" });
   });
 
