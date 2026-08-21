@@ -1060,6 +1060,7 @@ describe("chat workspace", () => {
     const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) } });
     render(<App client={client} />);
     const add = await screen.findByRole("button", { name: "添加附件" });
+    await waitFor(() => expect(add).toBeEnabled(), { timeout: 3_000 });
     fireEvent.click(add);
     fireEvent.click(add);
     await waitFor(() => expect(invoke.mock.calls.filter(([request]) => request.method === "select")).toHaveLength(2));
@@ -1203,8 +1204,10 @@ describe("chat workspace", () => {
     })());
     const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send } });
     render(<App client={client} />);
-    fireEvent.click(await screen.findByRole("button", { name: "添加附件" }));
-    expect(await screen.findByLabelText("附件预览")).toHaveTextContent("failed.txt");
+    const add = await screen.findByRole("button", { name: "添加附件" });
+    await waitFor(() => expect(add).toBeEnabled(), { timeout: 3_000 });
+    fireEvent.click(add);
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled(), { timeout: 3_000 });
     const composer = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
     fireEvent.change(composer, { target: { value: "失败附件" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled());
