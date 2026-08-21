@@ -24,6 +24,8 @@
     "test:contract": "vitest run tests/contract",
     "test:integration": "vitest run tests/integration",
     "test:secrets": "node scripts/secret-scan.mjs",
+    "build:final-windows-runtime": "node packaging/final-windows-runtime.mjs build",
+    "validate:final-windows-runtime": "node packaging/final-windows-runtime.mjs validate",
     "release:gate": "node packaging/release-gate-cli.mjs",
     "capture:openclaw-v4": "node scripts/capture-openclaw-v4.mjs",
     "sanitize:openclaw-v4": "node scripts/sanitize-openclaw-v4-capture.mjs",
@@ -31,6 +33,7 @@
     "typecheck": "npm run verify:reproducible && npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "ajv": "8.20.0",
     "tar": "7.5.2",
     "typescript": "5.9.3"

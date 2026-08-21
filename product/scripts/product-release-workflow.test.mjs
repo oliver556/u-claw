@@ -3,12 +3,21 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const workflow = await readFile(new URL("../../.github/workflows/product-release.yml", import.meta.url), "utf8");
+const productWorkflow = await readFile(new URL("../../.github/workflows/product.yml", import.meta.url), "utf8");
+
+test("Windows product workflow builds and uploads final-windows-runtime", () => {
+  assert.match(productWorkflow, /runs-on:\s*windows-2022/u);
+  assert.match(productWorkflow, /build:final-windows-runtime/u);
+  assert.match(productWorkflow, /name:\s*final-windows-runtime/u);
+  assert.match(productWorkflow, /runtime-provenance\.json/u);
+});
 
 test("commercial release workflow uses only product inputs", () => {
   assert.match(workflow, /product\/packaging\/release-gate-cli\.mjs/u);
   assert.doesNotMatch(workflow, /(?:^|[\s'"/])u-claw-app\//mu);
   assert.doesNotMatch(workflow, /(?:^|[\s'"/])portable\//mu);
   assert.doesNotMatch(workflow, /@latest|\|\|\s*true/u);
+  assert.doesNotMatch(workflow, /--test-fixture-runtime/u);
 });
 
 test("commercial release workflow gates pointer authorization after CDN readback", () => {
@@ -43,6 +52,13 @@ test("workflow runs build, typecheck, tests, secret scan, and final runtime smok
     "release-gate-cli.mjs smoke",
   ]) assert.match(workflow, new RegExp(command.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
   assert.doesNotMatch(workflow, /continue-on-error:\s*true/u);
+});
+
+test("release workflow requires final runtime provenance and application bundle", () => {
+  assert.match(workflow, /Validate final runtime provenance/u);
+  assert.match(workflow, /runtime-provenance\.json/u);
+  assert.match(workflow, /app\.asar/u);
+  assert.match(workflow, /validate:final-windows-runtime/u);
 });
 
 test("official release builds and verifies Bootstrap with production release policy trust", () => {

@@ -106,6 +106,7 @@ try {
         --release-id 'release-1' `
         --release-sequence '1' `
         --runtime-id $runtimeId `
+        --test-fixture-runtime `
         --entrypoint 'electron/electron.exe')
     Assert-True ($LASTEXITCODE -eq 0) 'BUILD_RUNTIME_FAILED'
     Write-Utf8NoBom $unsignedManifestPath (($manifestLines -join [Environment]::NewLine) + [Environment]::NewLine)

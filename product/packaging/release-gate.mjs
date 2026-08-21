@@ -16,6 +16,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { buildRuntime, hashFile, inventoryRuntime } from "./build-runtime.mjs";
+import { validateFinalWindowsRuntime } from "./final-windows-runtime.mjs";
 import { validateRuntimeArchive } from "./build-release.mjs";
 import { signRuntimeManifest } from "../scripts/runtime-manifest.mjs";
 import { pointerSwitchAuthorizationSigningPayload, releaseAuthorizationArtifactNames } from "./release-authorization.mjs";
@@ -41,6 +42,11 @@ export function assertCommercialBuildInputs(repoRoot, inputPaths) {
 
 export async function buildReleaseArtifacts(options) {
   assertCommercialBuildInputs(options.repoRoot, [options.runtimeDir, options.launcherPath]);
+  await validateFinalWindowsRuntime({
+    runtimeDir: options.runtimeDir,
+    provenancePath: options.provenancePath ?? path.join(path.dirname(path.resolve(options.runtimeDir)), "runtime-provenance.json"),
+    expectedCommitSha: options.commitSha,
+  });
   const launcherPath = path.resolve(options.launcherPath);
   await requireRegularFile(launcherPath, "official Bootstrap launcher");
   const verifyLauncherPolicyConfig = options.verifyLauncherPolicyConfig ?? verifyOfficialLauncherPolicyConfig;
@@ -57,6 +63,8 @@ export async function buildReleaseArtifacts(options) {
     const runtimePackage = path.join(temporary, "runtime.pkg");
     const unsigned = await buildRuntime({
       inputDir: options.runtimeDir,
+      provenancePath: options.provenancePath ?? path.join(path.dirname(path.resolve(options.runtimeDir)), "runtime-provenance.json"),
+      commitSha: options.commitSha,
       outputFile: runtimePackage,
       productVersion: options.productVersion,
       releaseId: options.releaseId,
@@ -267,6 +275,10 @@ export async function uploadReleaseArtifacts(baseUrl, sourceDir, expectedArtifac
 
 export async function runFinalRuntimeSmoke({ repoRoot, runtimeDir, manifest, runner = defaultRunner }) {
   assertCommercialBuildInputs(repoRoot, [runtimeDir]);
+  await validateFinalWindowsRuntime({
+    runtimeDir,
+    provenancePath: path.join(path.dirname(path.resolve(runtimeDir)), "runtime-provenance.json"),
+  });
   if (!Array.isArray(manifest.criticalFiles) || manifest.criticalFiles.length === 0) {
     throw new Error("final runtime smoke requires signed criticalFiles evidence");
   }

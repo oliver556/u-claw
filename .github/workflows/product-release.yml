@@ -110,16 +110,15 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.source_run_id }}
 
-      - name: Verify runtime provenance
-        shell: pwsh
-        run: |
-          $provenance = Get-Content product/dist/runtime-source/runtime-provenance.json -Raw | ConvertFrom-Json
-          if ($provenance.commitSha -cne $env:UCLAW_SOURCE_COMMIT_SHA) { throw 'runtime provenance commit mismatch' }
-          if ($provenance.runtimeKind -cne 'final') { throw 'runtime provenance is not final' }
-          if (-not (Test-Path product/dist/runtime-source/windows-runtime/electron/electron.exe -PathType Leaf)) { throw 'final Electron executable missing' }
-
       - name: Install locked dependencies
         run: npm ci --prefix product
+
+      - name: Validate final runtime provenance, PE, app.asar, and artifact hash
+        run: >-
+          npm run validate:final-windows-runtime --prefix product --
+          --runtime dist/runtime-source/windows-runtime
+          --provenance dist/runtime-source/runtime-provenance.json
+          --commit $env:UCLAW_SOURCE_COMMIT_SHA
 
       - name: Build
         run: npm run build --prefix product
@@ -241,6 +240,8 @@ jobs:
           node product/packaging/release-gate-cli.mjs build `
             --repo-root . `
             --runtime product/dist/runtime-source/windows-runtime `
+            --provenance product/dist/runtime-source/runtime-provenance.json `
+            --commit-sha $env:UCLAW_SOURCE_COMMIT_SHA `
             --launcher product/dist/launcher/U-Claw.exe `
             --output product/dist/candidate `
             --product-version $env:UCLAW_PRODUCT_VERSION `

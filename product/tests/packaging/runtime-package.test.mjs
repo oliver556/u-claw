@@ -6,7 +6,8 @@ import path from "node:path";
 import test from "node:test";
 
 import { buildRelease as buildOfficialRelease } from "../../packaging/build-release.mjs";
-import { buildRuntime } from "../../packaging/build-runtime.mjs";
+import { buildRuntime, inventoryRuntime } from "../../packaging/build-runtime.mjs";
+import { createRuntimeProvenance } from "../../packaging/final-windows-runtime.mjs";
 import { runtimeManifestSigningPayload, signRuntimeManifest, validateRuntimeManifest } from "../../scripts/runtime-manifest.mjs";
 
 const fixtureSigningKeys = generateKeyPairSync("ed25519");
@@ -18,8 +19,24 @@ async function fixtureRuntime() {
   const runtime = path.join(root, "runtime source");
   await mkdir(path.join(runtime, "electron"), { recursive: true });
   await mkdir(path.join(runtime, "resources"), { recursive: true });
-  await writeFile(path.join(runtime, "electron", "electron.exe"), "launcher");
+  const executable = Buffer.alloc(512);
+  executable.write("MZ", 0, "ascii");
+  executable.writeUInt32LE(0x80, 0x3c);
+  executable.write("PE\0\0", 0x80, "binary");
+  executable.writeUInt16LE(0x8664, 0x84);
+  await writeFile(path.join(runtime, "electron", "electron.exe"), executable);
   await writeFile(path.join(runtime, "resources", "app.asar"), "application");
+  await mkdir(path.join(runtime, "node_modules", "openclaw"), { recursive: true });
+  await writeFile(path.join(runtime, "node_modules", "openclaw", "openclaw.mjs"), "export {};");
+  await writeFile(path.join(runtime, "node_modules", "openclaw", "package.json"), JSON.stringify({ name: "openclaw", version: "2026.7.1-2" }));
+  const inventory = await inventoryRuntime(runtime);
+  const provenancePath = path.join(root, "runtime-provenance.json");
+  const provenance = createRuntimeProvenance({
+    commitSha: "a".repeat(40), treeSha256: inventory.treeSha256, fileCount: inventory.fileCount, unpackedBytes: inventory.unpackedBytes,
+    host: { os: "win32", arch: "x64", runner: "fixture" },
+    toolVersions: { node: "24.15.0", npm: "11.12.1", electron: "40.10.6", openclaw: "2026.7.1-2" },
+  });
+  await writeFile(provenancePath, `${JSON.stringify(provenance)}\n`);
   return { root, runtime };
 }
 
@@ -33,6 +50,8 @@ function runtimeOptions(root, runtime, overrides = {}) {
     runtimeId: "openclaw-2026.7.1-2-win-x64",
     entrypoint: "electron/electron.exe",
     entryArgs: ["resources/app.asar"],
+    provenancePath: path.join(root, "runtime-provenance.json"),
+    commitSha: "a".repeat(40),
     ...overrides,
   };
 }
@@ -58,22 +77,29 @@ test("buildRuntime rejects a final runtime without the Electron application bund
   );
 });
 
+test("buildRuntime rejects missing final runtime provenance", async () => {
+  const { root, runtime } = await fixtureRuntime();
+  await rm(path.join(root, "runtime-provenance.json"));
+  await assert.rejects(buildRuntime(runtimeOptions(root, runtime)), /provenance/i);
+});
+
 test("buildRuntime rejects a second activation Electron executable", async () => {
   const { root, runtime } = await fixtureRuntime();
-  await writeFile(path.join(runtime, "electron", "activation.exe"), "second-electron");
+  await mkdir(path.join(runtime, "activation"));
+  await writeFile(path.join(runtime, "activation", "electron.exe"), "second-electron");
   await assert.rejects(
     buildRuntime(runtimeOptions(root, runtime)),
-    /exactly one Electron|activation\.exe/i,
+    /exactly one Electron/i,
   );
 });
 
 test("buildRuntime rejects a nested second Electron executable", async () => {
   const { root, runtime } = await fixtureRuntime();
   await mkdir(path.join(runtime, "tools", "electron"), { recursive: true });
-  await writeFile(path.join(runtime, "tools", "electron", "activation.exe"), "second-electron");
+  await writeFile(path.join(runtime, "tools", "electron", "electron.exe"), "second-electron");
   await assert.rejects(
     buildRuntime(runtimeOptions(root, runtime)),
-    /exactly one Electron|activation\.exe/i,
+    /exactly one Electron/i,
   );
 });
 
@@ -120,8 +146,7 @@ test("buildRuntime creates a strict manifest from real package bounds", async ()
   assert.equal(manifest.runtimeVersion, "2026.7.1-2");
   assert.equal(manifest.targetPlatform, "win32");
   assert.equal(manifest.targetArch, "x64");
-  assert.equal(manifest.fileCount, 2);
-  assert.equal(manifest.unpackedBytes, Buffer.byteLength("launcherapplication"));
+  assert.equal(manifest.fileCount, 4);
   assert.equal(manifest.runtimeBytes, (await stat(options.outputFile)).size);
   assert.match(manifest.runtimeSha256, /^[a-f0-9]{64}$/u);
   assert.match(manifest.runtimeTreeSha256, /^[a-f0-9]{64}$/u);

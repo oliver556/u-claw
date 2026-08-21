@@ -47,3 +47,46 @@ jobs:
 
       - name: Test
         run: npm test --prefix product
+
+  final-windows-runtime:
+    name: Build final-windows-runtime
+    runs-on: windows-2022
+    needs: verify
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: product/.node-version
+          cache: npm
+          cache-dependency-path: |
+            product/package-lock.json
+            product/packaging/runtime-app/package-lock.json
+
+      - name: Install locked product dependencies
+        run: npm ci --prefix product
+
+      - name: Install locked OpenClaw runtime dependencies
+        run: npm ci --prefix product/packaging/runtime-app
+
+      - name: Build product application
+        run: npm run build --prefix product
+
+      - name: Assemble final Windows runtime
+        run: npm run build:final-windows-runtime --prefix product -- --repo-root .. --output dist/final-windows-runtime --commit ${{ github.sha }}
+
+      - name: Validate final Windows runtime
+        run: npm run validate:final-windows-runtime --prefix product -- --runtime dist/final-windows-runtime/windows-runtime --provenance dist/final-windows-runtime/runtime-provenance.json --commit ${{ github.sha }}
+
+      - name: Upload final-windows-runtime
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: final-windows-runtime
+          path: |
+            product/dist/final-windows-runtime/windows-runtime
+            product/dist/final-windows-runtime/runtime-provenance.json
+          if-no-files-found: error
+          retention-days: 14

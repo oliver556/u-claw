@@ -76,6 +76,18 @@ test("pins Electron to the canonical runtime version", async () => {
   assert.equal(lockfile.packages["node_modules/electron"].integrity, "sha512-TGjlkOU9Lg6K4KjDbsErywCWCIDaNgLh0q+xj0nlpRoQhevI7VBIxBTtJI/V30lypyLAaXMpnP9O9jui1/qRFw==");
 });
 
+test("pins final runtime OpenClaw dependencies with canonical integrity", async () => {
+  const [versions, runtimePackage, runtimeLockfile] = await Promise.all([
+    readJson("runtime-versions.json"),
+    readJson("packaging/runtime-app/package.json"),
+    readJson("packaging/runtime-app/package-lock.json"),
+  ]);
+  assert.equal(runtimePackage.engines.node, versions.node);
+  assert.equal(runtimePackage.dependencies.openclaw, versions.openclaw);
+  assert.equal(runtimeLockfile.packages["node_modules/openclaw"].version, versions.openclaw);
+  assert.equal(runtimeLockfile.packages["node_modules/openclaw"].integrity, versions.openclawNpmIntegrity);
+});
+
 test("gates install, build, typecheck, and tests on reproducibility verification", () => {
   assert.equal(rootPackage.scripts.preinstall, "node scripts/verify-reproducibility.mjs");
   assert.equal(rootPackage.scripts["verify:reproducible"], "node scripts/verify-reproducibility.mjs");

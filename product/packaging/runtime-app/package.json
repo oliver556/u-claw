@@ -1,0 +1,11 @@
+{
+  "name": "uclaw-final-runtime-dependencies",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "24.15.0"
+  },
+  "dependencies": {
+    "openclaw": "2026.7.1-2"
+  }
+}

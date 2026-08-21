@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://u-claw.org/schemas/runtime-provenance.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runtimeKind", "commitSha", "buildHost", "toolVersions", "artifact"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runtimeKind": { "const": "final" },
+    "commitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "buildHost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "runner"],
+      "properties": {
+        "os": { "const": "win32" },
+        "arch": { "const": "x64" },
+        "runner": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "toolVersions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "npm", "electron", "openclaw"],
+      "properties": {
+        "node": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "npm": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "electron": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "openclaw": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+$" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "hashAlgorithm", "treeSha256", "fileCount", "unpackedBytes"],
+      "properties": {
+        "path": { "const": "windows-runtime" },
+        "hashAlgorithm": { "const": "sha256" },
+        "treeSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "fileCount": { "type": "integer", "minimum": 1 },
+        "unpackedBytes": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

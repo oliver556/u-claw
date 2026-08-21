@@ -21,11 +21,13 @@ export function assertExactNpmVersion(userAgent, expected = "11.12.1") {
 }
 
 export async function verifyWorkspacePins() {
-  const [versions, plugins, rootPackage, lockfile, nodeVersion, npmConfig, rootOpenClaw, portableOpenClaw] = await Promise.all([
+  const [versions, plugins, rootPackage, lockfile, runtimePackage, runtimeLockfile, nodeVersion, npmConfig, rootOpenClaw, portableOpenClaw] = await Promise.all([
     readJson("runtime-versions.json"),
     readJson("runtime-plugins.json"),
     readJson("package.json"),
     readJson("package-lock.json"),
+    readJson("packaging/runtime-app/package.json"),
+    readJson("packaging/runtime-app/package-lock.json"),
     readFile(new URL(".node-version", productUrl), "utf8"),
     readFile(new URL(".npmrc", productUrl), "utf8"),
     readFile(new URL("../OPENCLAW_VERSION", productUrl), "utf8"),
@@ -43,6 +45,11 @@ export async function verifyWorkspacePins() {
   assertEqual(rootPackage.packageManager, `npm@${versions.npm}`, "package.json packageManager");
   assertEqual(rootOpenClaw.trim(), versions.openclaw, "OPENCLAW_VERSION");
   assertEqual(portableOpenClaw.trim(), versions.openclaw, "portable/OPENCLAW_VERSION");
+  assertEqual(runtimePackage.engines?.node, versions.node, "runtime-app Node pin");
+  assertEqual(runtimePackage.dependencies?.openclaw, versions.openclaw, "runtime-app OpenClaw pin");
+  assertEqual(runtimeLockfile.packages?.[""]?.dependencies?.openclaw, versions.openclaw, "runtime-app lock root OpenClaw pin");
+  assertEqual(runtimeLockfile.packages?.["node_modules/openclaw"]?.version, versions.openclaw, "runtime-app locked OpenClaw version");
+  assertEqual(runtimeLockfile.packages?.["node_modules/openclaw"]?.integrity, versions.openclawNpmIntegrity, "runtime-app locked OpenClaw integrity");
   const wechat = plugins.plugins?.find((plugin) => plugin.id === "openclaw-weixin");
   if (!wechat || wechat.package !== "@tencent-weixin/openclaw-weixin" || wechat.version !== "2.4.6" || wechat.openclawVersionRange !== ">=2026.7.1-2 <2026.8.0" || !/^sha512-[A-Za-z0-9+/]+=*$/u.test(wechat.npmIntegrity)) {
     throw new Error("runtime-plugins.json must contain the locked WeChat plugin and npm integrity");

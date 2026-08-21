@@ -39,6 +39,15 @@ export async function buildRuntime(options) {
   if (!inputInfo?.isDirectory() || inputInfo.isSymbolicLink()) {
     throw new Error("runtime input must be a real directory");
   }
+  if (!options.allowFixtureRuntime) {
+    if (!options.provenancePath) throw new Error("final runtime provenance is required");
+    const { validateFinalWindowsRuntime } = await import("./final-windows-runtime.mjs");
+    await validateFinalWindowsRuntime({
+      runtimeDir: inputDir,
+      provenancePath: options.provenancePath,
+      expectedCommitSha: options.commitSha,
+    });
+  }
 
   const inventory = await inventoryRuntime(inputDir);
   const normalizedEntrypoint = normalizeRuntimePath(options.entrypoint);
@@ -48,7 +57,7 @@ export async function buildRuntime(options) {
   if (!inventory.files.has("resources/app.asar")) {
     throw new Error("runtime Electron application bundle resources/app.asar does not exist");
   }
-  const electronExecutables = [...inventory.files].filter((file) => /(?:^|\/)electron\/.*\.exe$/iu.test(file));
+  const electronExecutables = [...inventory.files].filter((file) => path.posix.basename(file).toLowerCase() === "electron.exe");
   if (electronExecutables.length !== 1 || electronExecutables[0] !== normalizedEntrypoint.toLowerCase()) {
     throw new Error("runtime must contain exactly one Electron executable at the signed entrypoint");
   }
@@ -209,6 +218,9 @@ async function runCLI() {
       "runtime-id": { type: "string" },
       entrypoint: { type: "string" },
       "entry-arg": { type: "string", multiple: true, default: [] },
+      provenance: { type: "string" },
+      commit: { type: "string" },
+      "test-fixture-runtime": { type: "boolean", default: false },
     },
   });
   const manifest = await buildRuntime({
@@ -220,6 +232,9 @@ async function runCLI() {
     runtimeId: values["runtime-id"],
     entrypoint: values.entrypoint,
     entryArgs: values["entry-arg"],
+    provenancePath: values.provenance,
+    commitSha: values.commit,
+    allowFixtureRuntime: values["test-fixture-runtime"],
   });
   process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
 }

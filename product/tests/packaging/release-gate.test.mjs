@@ -17,15 +17,39 @@ import {
   verifyPromotionDigests,
   writePointerSwitchAuthorization,
 } from "../../packaging/release-gate.mjs";
+import { createRuntimeProvenance } from "../../packaging/final-windows-runtime.mjs";
+import { inventoryRuntime } from "../../packaging/build-runtime.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+
+function peExecutable() {
+  const value = Buffer.alloc(512);
+  value.write("MZ", 0, "ascii");
+  value.writeUInt32LE(0x80, 0x3c);
+  value.write("PE\0\0", 0x80, "binary");
+  value.writeUInt16LE(0x8664, 0x84);
+  return value;
+}
 
 async function fixtureFinalRuntime(root) {
   const runtime = path.join(root, "product", "dist", "windows-runtime");
   await mkdir(path.join(runtime, "electron"), { recursive: true });
   await mkdir(path.join(runtime, "resources"), { recursive: true });
-  await writeFile(path.join(runtime, "electron", "electron.exe"), "final-electron");
+  await mkdir(path.join(runtime, "node_modules", "openclaw"), { recursive: true });
+  await writeFile(path.join(runtime, "electron", "electron.exe"), peExecutable());
   await writeFile(path.join(runtime, "resources", "app.asar"), "final-app");
+  await writeFile(path.join(runtime, "node_modules", "openclaw", "openclaw.mjs"), "export {};");
+  await writeFile(path.join(runtime, "node_modules", "openclaw", "package.json"), JSON.stringify({ name: "openclaw", version: "2026.7.1-2" }));
+  const inventory = await inventoryRuntime(runtime);
+  const provenance = createRuntimeProvenance({
+    commitSha: "a".repeat(40),
+    treeSha256: inventory.treeSha256,
+    fileCount: inventory.fileCount,
+    unpackedBytes: inventory.unpackedBytes,
+    host: { os: "win32", arch: "x64", runner: "fixture" },
+    toolVersions: { node: "24.15.0", npm: "11.12.1", electron: "40.10.6", openclaw: "2026.7.1-2" },
+  });
+  await writeFile(path.join(path.dirname(runtime), "runtime-provenance.json"), `${JSON.stringify(provenance)}\n`);
   return runtime;
 }
 
@@ -88,10 +112,10 @@ test("build emits runtime package, inventory, SPDX SBOM, tree digest, and signed
   assert.equal(manifest.signature.sequence, 42);
   assert.equal(manifest.runtimeTreeSha256, (await readFile(path.join(output, "runtime-tree.sha256"), "utf8")).trim());
   const inventory = JSON.parse(await readFile(path.join(output, "inventory.json"), "utf8"));
-  assert.equal(inventory.files.length, 2);
+  assert.equal(inventory.files.length, 4);
   const sbom = JSON.parse(await readFile(path.join(output, "sbom.spdx.json"), "utf8"));
   assert.equal(sbom.spdxVersion, "SPDX-2.3");
-  assert.equal(sbom.files.length, 2);
+  assert.equal(sbom.files.length, 4);
   assert.equal(await readFile(path.join(output, "U-Claw.exe"), "utf8"), "official-launcher");
 });
 
@@ -247,7 +271,7 @@ test("final runtime smoke refuses fixture paths and reports command failure", as
     entrypoint: "electron/electron.exe",
     electronVersion: "40.10.6",
     criticalFiles: [
-      { path: "electron/electron.exe", size: 14, sha256: sha256("final-electron") },
+      { path: "electron/electron.exe", size: 512, sha256: createHash("sha256").update(peExecutable()).digest("hex") },
       { path: "resources/app.asar", size: 9, sha256: sha256("final-app") },
     ],
   };
@@ -262,7 +286,7 @@ test("final runtime smoke refuses fixture paths and reports command failure", as
   assert.match(result.executable, /product[/\\]dist[/\\]windows-runtime/);
 
   await writeFile(path.join(finalRuntime, "resources", "app.asar"), "tampered");
-  await assert.rejects(runFinalRuntimeSmoke({ repoRoot: root, runtimeDir: finalRuntime, manifest, runner: fakeRunner }), /critical file mismatch/i);
+  await assert.rejects(runFinalRuntimeSmoke({ repoRoot: root, runtimeDir: finalRuntime, manifest, runner: fakeRunner }), /artifact hash|critical file mismatch/i);
   await writeFile(path.join(finalRuntime, "resources", "app.asar"), "final-app");
 
   await assert.rejects(runFinalRuntimeSmoke({

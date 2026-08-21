@@ -27,6 +27,7 @@ export async function runReleaseGateCli(argv = process.argv.slice(2)) {
       acceptance: { type: "string" },
       production: { type: "string" },
       manifest: { type: "string" },
+      provenance: { type: "string" },
       evidence: { type: "string" },
       artifacts: { type: "string" },
       "base-url": { type: "string" },
@@ -53,6 +54,8 @@ export async function runReleaseGateCli(argv = process.argv.slice(2)) {
     result = await buildReleaseArtifacts({
       repoRoot: required(values, "repo-root"),
       runtimeDir: required(values, "runtime"),
+      provenancePath: required(values, "provenance"),
+      commitSha: required(values, "commit-sha"),
       launcherPath: required(values, "launcher"),
       outputDir: required(values, "output"),
       productVersion: required(values, "product-version"),
