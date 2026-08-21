@@ -2,14 +2,13 @@ import { z } from "zod";
 
 import { ISODateTimeSchema } from "./common.js";
 import { UClawErrorSchema } from "./errors.js";
+import { RuntimeReleaseCompatibilitySchema } from "./runtime-target.js";
 
 const RequestIdSchema = z.string().min(1).max(128);
 const TokenSchema = z.string().min(8).max(128).regex(/^[A-Za-z0-9._-]+$/);
 const UpdateIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/);
 export const ReleaseChannelSchema = z.enum(["stable", "beta"]);
-export const ReleaseCompatibilitySchema = z.object({
-  platform: z.literal("win32"), arch: z.literal("x64"), runtimeId: z.string().min(1).max(128),
-}).strict();
+export const ReleaseCompatibilitySchema = RuntimeReleaseCompatibilitySchema;
 export const ReleaseUpdateSchema = z.object({
   id: UpdateIdSchema, version: z.string().min(1).max(128), channel: ReleaseChannelSchema,
   publishedAt: ISODateTimeSchema, notes: z.array(z.string().min(1).max(2_000)).max(50),

@@ -157,6 +157,36 @@ describe("release service", () => {
     expect(await healthy.service.retry()).toMatchObject({ state: "available" });
   });
 
+  it("accepts target-aware macOS release manifests", async () => {
+    const mac = manifest();
+    mac.compatibility = { target: "macos-arm64", platform: "darwin", arch: "arm64", runtimeId: "openclaw-2026.7.1-2-macos-arm64" };
+    mac.runtimeManifest = {
+      ...mac.runtimeManifest,
+      target: "macos-arm64",
+      targetPlatform: "darwin",
+      targetArch: "arm64",
+      runtimeId: "openclaw-2026.7.1-2-macos-arm64",
+      entrypoint: "Electron.app/Contents/MacOS/Electron",
+      criticalFiles: [{ path: "Electron.app/Contents/MacOS/Electron", size: 7, sha256: createHash("sha256").update("runtime").digest("hex") }],
+    };
+    mac.runtimeManifest.signature.value = sign(null, canonicalRuntimePayload(mac.runtimeManifest), keys.privateKey).toString("base64");
+    const { signature: _signature, ...unsigned } = mac;
+    mac.signature.value = sign(null, canonicalReleasePayload(unsigned), keys.privateKey).toString("base64");
+
+    const setup = await fixture({
+      target: "macos-arm64",
+      platform: "darwin",
+      arch: "arm64",
+      runtimeId: "openclaw-2026.7.1-2-macos-arm64",
+      fetchManifest: vi.fn(async () => mac),
+    });
+
+    expect(await setup.service.check("stable")).toMatchObject({
+      state: "available",
+      update: { compatibility: { target: "macos-arm64", platform: "darwin", arch: "arm64" } },
+    });
+  });
+
   it("reports a valid same-version manifest as current", async () => {
     const setup = await fixture({ currentVersion: "0.2.0" });
     expect(await setup.service.check("stable")).toMatchObject({ state: "current", currentVersion: "0.2.0" });

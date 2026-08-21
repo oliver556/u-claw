@@ -6,5 +6,19 @@
   "openclawNpmIntegrity": "sha512-ycF3yPcbjN6bUPeaUx6Mh6vze1hQWoD3CT/wWcmD7a8xaHHHRUaAlaq+lFxMHf1ssEgODVAwjlzYqp2twkYZ7g==",
   "runtimeId": "openclaw-2026.7.1-2-win-x64",
   "targetPlatform": "win32",
-  "targetArch": "x64"
+  "targetArch": "x64",
+  "targets": {
+    "win-x64": {
+      "targetPlatform": "win32",
+      "targetArch": "x64",
+      "runtimeId": "openclaw-2026.7.1-2-win-x64",
+      "entrypoint": "electron/electron.exe"
+    },
+    "macos-arm64": {
+      "targetPlatform": "darwin",
+      "targetArch": "arm64",
+      "runtimeId": "openclaw-2026.7.1-2-macos-arm64",
+      "entrypoint": "Electron.app/Contents/MacOS/Electron"
+    }
+  }
 }

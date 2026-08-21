@@ -76,6 +76,32 @@ func TestValidateManifestAcceptsFrozenContract(t *testing.T) {
 	}
 }
 
+func TestValidateManifestAcceptsTargetAwareMacOSContract(t *testing.T) {
+	manifest := validRuntimeManifest()
+	manifest.RuntimeID = "openclaw-2026.7.1-2-macos-arm64"
+	manifest.Target = "macos-arm64"
+	manifest.TargetPlatform = "darwin"
+	manifest.TargetArch = "arm64"
+	manifest.Entrypoint = "Electron.app/Contents/MacOS/Electron"
+	manifest.CriticalFiles = []RuntimeFileDigest{{Path: "Electron.app/Contents/MacOS/Electron", Size: 10, SHA256: strings.Repeat("c", 64)}}
+	if err := ValidateManifest(manifest); err != nil {
+		t.Fatalf("valid macOS manifest rejected: %v", err)
+	}
+}
+
+func TestValidateManifestRejectsMismatchedTargetTriple(t *testing.T) {
+	for _, mutate := range []func(*Manifest){
+		func(value *Manifest) { value.Target = "macos-arm64" },
+		func(value *Manifest) { value.TargetPlatform = "win32"; value.TargetArch = "arm64" },
+	} {
+		manifest := validRuntimeManifest()
+		mutate(&manifest)
+		if err := ValidateManifest(manifest); !errors.Is(err, ErrManifestInvalid) {
+			t.Fatalf("mismatched target returned %v", err)
+		}
+	}
+}
+
 func TestValidateManifestRejectsInvalidRuntimeIDs(t *testing.T) {
 	for _, runtimeID := range []string{"", " openclaw", "openclaw/win", "openclaw:win", "openclaw win", "运行时"} {
 		manifest := validRuntimeManifest()
@@ -106,6 +132,27 @@ func TestValidateManifestRejectsUnsafeWindowsPaths(t *testing.T) {
 				t.Fatalf("%s path %q returned %v", field, value, err)
 			}
 		}
+	}
+}
+
+func TestValidateManifestRejectsUnsafeMacOSPathsAndCriticalCollisions(t *testing.T) {
+	manifest := validRuntimeManifest()
+	manifest.RuntimeID = "openclaw-2026.7.1-2-macos-arm64"
+	manifest.Target = "macos-arm64"
+	manifest.TargetPlatform = "darwin"
+	manifest.TargetArch = "arm64"
+	manifest.Entrypoint = "Electron.app/Contents/MacOS/Electron"
+	manifest.CriticalFiles = []RuntimeFileDigest{{Path: "Electron.app/Contents/MacOS/Electron", Size: 10, SHA256: strings.Repeat("c", 64)}}
+	for _, path := range []string{"", "/runtime.pkg", "../runtime.pkg", "packages/../runtime.pkg", "runtime.pkg\x00payload", "a//b", "a/./b"} {
+		candidate := manifest
+		candidate.RuntimeArchive = path
+		if err := ValidateManifest(candidate); !errors.Is(err, ErrManifestInvalid) {
+			t.Fatalf("macOS path %q returned %v", path, err)
+		}
+	}
+	manifest.CriticalFiles = append(manifest.CriticalFiles, RuntimeFileDigest{Path: "Electron.app/Contents/MacOS/electron", Size: 10, SHA256: strings.Repeat("d", 64)})
+	if err := ValidateManifest(manifest); !errors.Is(err, ErrManifestInvalid) {
+		t.Fatalf("critical collision returned %v", err)
 	}
 }
 
@@ -291,6 +338,28 @@ func TestManifestSigningPayloadMatchesJavaScriptGolden(t *testing.T) {
 	digest := sha256.Sum256(payload)
 	if hex.EncodeToString(digest[:]) != "1d5df2ef301f1e28f55707eaa8a427e3308c2ce8d7a124cfbaac5389db4e9a77" {
 		t.Fatalf("payload digest mismatch: %s", hex.EncodeToString(digest[:]))
+	}
+}
+
+func TestManifestSigningPayloadUsesV3WhenTargetIsExplicit(t *testing.T) {
+	manifest := validRuntimeManifest()
+	manifest.Target = "macos-arm64"
+	manifest.TargetPlatform = "darwin"
+	manifest.TargetArch = "arm64"
+	manifest.RuntimeID = "openclaw-2026.7.1-2-macos-arm64"
+	manifest.Entrypoint = "Electron.app/Contents/MacOS/Electron"
+	manifest.CriticalFiles = []RuntimeFileDigest{{Path: "Electron.app/Contents/MacOS/Electron", Size: 8, SHA256: strings.Repeat("c", 64)}}
+	manifest.Signature = &ManifestSignature{
+		Algorithm: "ed25519", KeyID: "fixture",
+		SignedAt: "2026-08-09T00:00:00.000Z", ExpiresAt: "2027-08-09T00:00:00.000Z",
+		Sequence: 42,
+	}
+	payload, err := manifestSigningPayload(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), "uclaw-runtime-manifest-v3") {
+		t.Fatalf("payload domain not bumped: %s", payload)
 	}
 }
 

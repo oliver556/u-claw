@@ -10,6 +10,11 @@ const validateSchema = new Ajv2020({ allErrors: true, formats: { "date-time": tr
 const invalidWindowsCharacters = /[<>:"|?*\u0000-\u001f\u007f]/u;
 const windowsDeviceName = /^(?:CON|PRN|AUX|NUL|CLOCK\$|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])$/iu;
 
+export const runtimeTargets = Object.freeze({
+  "win-x64": Object.freeze({ targetPlatform: "win32", targetArch: "x64" }),
+  "macos-arm64": Object.freeze({ targetPlatform: "darwin", targetArch: "arm64" }),
+});
+
 function schemaErrorFields(errors) {
   return [...new Set(errors.map((error) => {
     const path = error.instancePath.replaceAll("/", ".").replace(/^\./u, "");
@@ -17,6 +22,19 @@ function schemaErrorFields(errors) {
     if (error.keyword === "additionalProperties") return error.params.additionalProperty;
     return path || "manifest";
   }))];
+}
+
+export function runtimeTargetForPlatformArch(targetPlatform, targetArch) {
+  return Object.entries(runtimeTargets).find(
+    ([, target]) => target.targetPlatform === targetPlatform && target.targetArch === targetArch,
+  )?.[0];
+}
+
+export function runtimeManifestTarget(value) {
+  const inferred = runtimeTargetForPlatformArch(value?.targetPlatform, value?.targetArch);
+  if (!inferred) throw new Error("targetPlatform/targetArch: unsupported runtime target");
+  if (value.target !== undefined && value.target !== inferred) throw new Error("target: must match targetPlatform and targetArch");
+  return value.target ?? inferred;
 }
 
 export function isSafeWindowsRelativePath(value) {
@@ -32,6 +50,24 @@ export function isSafeWindowsRelativePath(value) {
   });
 }
 
+export function isSafeMacOSRelativePath(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 32767) return false;
+  if (value.startsWith("/") || value.includes("\0")) return false;
+
+  return value.split("/").every((segment) => (
+    segment.length > 0 && segment !== "." && segment !== ".."
+  ));
+}
+
+function targetPathValidator(target) {
+  return target === "win-x64" ? isSafeWindowsRelativePath : isSafeMacOSRelativePath;
+}
+
+function canonicalRuntimePath(target, value) {
+  const normalized = value.replaceAll("\\", "/");
+  return target === "win-x64" ? normalized.toLowerCase() : normalized.normalize("NFC").toLowerCase();
+}
+
 export function validateRuntimeManifest(value) {
   if (!validateSchema(value)) {
     const fields = schemaErrorFields(validateSchema.errors ?? []);
@@ -44,10 +80,12 @@ export function validateRuntimeManifest(value) {
         : `invalid runtime manifest: ${fields.join(", ")}`,
     );
   }
+  const target = runtimeManifestTarget(value);
+  const isSafeRuntimePath = targetPathValidator(target);
   for (const field of ["runtimeArchive", "entrypoint", ...value.criticalFiles.map((file) => file.path)]) {
     const candidate = field === "runtimeArchive" || field === "entrypoint" ? value[field] : field;
-    if (!isSafeWindowsRelativePath(candidate)) {
-      throw new Error(`${field}: unsafe Windows relative path`);
+    if (!isSafeRuntimePath(candidate)) {
+      throw new Error(`${field}: unsafe ${target} relative path`);
     }
   }
   if (value.entryArgs.some((argument) => argument.includes("\0"))) {
@@ -56,8 +94,8 @@ export function validateRuntimeManifest(value) {
   if (value.entryArgs.some((argument) => argument.startsWith("--uclaw-startup-mode"))) {
     throw new Error("entryArgs: startup mode is launcher-owned");
   }
-  const canonicalCritical = value.criticalFiles.map((file) => file.path.replaceAll("\\", "/").toLowerCase());
-  if (new Set(canonicalCritical).size !== canonicalCritical.length || !canonicalCritical.includes(value.entrypoint.replaceAll("\\", "/").toLowerCase())) {
+  const canonicalCritical = value.criticalFiles.map((file) => canonicalRuntimePath(target, file.path));
+  if (new Set(canonicalCritical).size !== canonicalCritical.length || !canonicalCritical.includes(canonicalRuntimePath(target, value.entrypoint))) {
     throw new Error("criticalFiles: must uniquely include entrypoint");
   }
   if (value.signature && value.signature.sequence !== value.releaseSequence) {
@@ -69,6 +107,17 @@ export function validateRuntimeManifest(value) {
 export function runtimeManifestSigningPayload(value) {
   if (!value.signature) throw new Error("runtime manifest signature metadata is required");
   const signature = value.signature;
+  if (value.target !== undefined) {
+    return Buffer.from(JSON.stringify([
+      "uclaw-runtime-manifest-v3",
+      value.schemaVersion, value.releaseId, value.releaseSequence, value.productVersion, value.nodeVersion, value.electronVersion,
+      value.runtimeVersion, value.runtimeId, value.targetPlatform, value.targetArch, value.target,
+      value.runtimeArchive, value.runtimeSha256, value.runtimeTreeSha256, value.runtimeBytes,
+      value.unpackedBytes, value.fileCount, value.entrypoint, value.entryArgs, value.criticalFiles,
+      signature.algorithm, signature.keyId, signature.signedAt, signature.expiresAt,
+      signature.sequence,
+    ]));
+  }
   return Buffer.from(JSON.stringify([
     "uclaw-runtime-manifest-v2",
     value.schemaVersion, value.releaseId, value.releaseSequence, value.productVersion, value.nodeVersion, value.electronVersion,

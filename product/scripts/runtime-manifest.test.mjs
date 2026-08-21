@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isSafeMacOSRelativePath,
   isSafeWindowsRelativePath,
   runtimeManifestSigningPayload,
+  runtimeManifestTarget,
   signRuntimeManifest,
   validateRuntimeManifest,
 } from "./runtime-manifest.mjs";
@@ -37,6 +39,35 @@ function validManifest(overrides = {}) {
 test("accepts the frozen runtime manifest", () => {
   const manifest = validManifest();
   assert.equal(validateRuntimeManifest(manifest), manifest);
+});
+
+test("infers legacy win-x64 runtime target without requiring a v3 field", () => {
+  assert.equal(runtimeManifestTarget(validManifest()), "win-x64");
+  assert.equal(validateRuntimeManifest(validManifest()).target, undefined);
+});
+
+test("accepts target-aware macOS runtime manifests", () => {
+  const manifest = validManifest({
+    runtimeId: "openclaw-2026.7.1-2-macos-arm64",
+    target: "macos-arm64",
+    targetPlatform: "darwin",
+    targetArch: "arm64",
+    entrypoint: "Electron.app/Contents/MacOS/Electron",
+    criticalFiles: [{ path: "Electron.app/Contents/MacOS/Electron", size: 8, sha256: "c".repeat(64) }],
+  });
+  assert.equal(runtimeManifestTarget(manifest), "macos-arm64");
+  assert.equal(validateRuntimeManifest(manifest), manifest);
+});
+
+test("rejects mismatched runtime target triples", () => {
+  assert.throws(
+    () => validateRuntimeManifest(validManifest({ target: "macos-arm64" })),
+    /target/,
+  );
+  assert.throws(
+    () => validateRuntimeManifest(validManifest({ targetPlatform: "win32", targetArch: "arm64" })),
+    /targetPlatform\/targetArch/,
+  );
 });
 
 test("rejects unknown or missing manifest fields", () => {
@@ -85,6 +116,33 @@ test("rejects unsafe Windows runtime paths", () => {
   ]) {
     assert.equal(isSafeWindowsRelativePath(value), false, value);
   }
+});
+
+test("validates macOS runtime paths and Unicode/case critical-file collisions", () => {
+  for (const value of [
+    "Electron.app/Contents/MacOS/Electron",
+    "Frameworks/U-Claw Helper.app/Contents/MacOS/U-Claw Helper",
+    "资源/客户端",
+  ]) {
+    assert.equal(isSafeMacOSRelativePath(value), true, value);
+  }
+  for (const value of ["", "/runtime.pkg", "../runtime.pkg", "packages/../runtime.pkg", "runtime.pkg\0payload", "a//b", "a/./b"]) {
+    assert.equal(isSafeMacOSRelativePath(value), false, value);
+  }
+  assert.throws(
+    () => validateRuntimeManifest(validManifest({
+      runtimeId: "openclaw-2026.7.1-2-macos-arm64",
+      target: "macos-arm64",
+      targetPlatform: "darwin",
+      targetArch: "arm64",
+      entrypoint: "Electron.app/Contents/MacOS/Electron",
+      criticalFiles: [
+        { path: "Electron.app/Contents/MacOS/Electron", size: 8, sha256: "c".repeat(64) },
+        { path: "Electron.app/Contents/MacOS/electron", size: 8, sha256: "d".repeat(64) },
+      ],
+    })),
+    /criticalFiles/,
+  );
 });
 
 test("validates both archive and entrypoint paths", () => {
@@ -167,6 +225,26 @@ test("signature binds key, lifetime and anti-replay sequence", () => {
     mutate(tampered);
     assert.equal(verify(null, runtimeManifestSigningPayload(tampered), keys.publicKey, Buffer.from(signed.signature.value, "base64")), false);
   }
+});
+
+test("uses v3 signing payload when target is explicit", () => {
+  const manifest = validManifest({
+    target: "macos-arm64",
+    targetPlatform: "darwin",
+    targetArch: "arm64",
+    runtimeId: "openclaw-2026.7.1-2-macos-arm64",
+    entrypoint: "Electron.app/Contents/MacOS/Electron",
+    criticalFiles: [{ path: "Electron.app/Contents/MacOS/Electron", size: 8, sha256: "c".repeat(64) }],
+    signature: {
+      algorithm: "ed25519",
+      keyId: "fixture",
+      signedAt: "2026-08-09T00:00:00.000Z",
+      expiresAt: "2027-08-09T00:00:00.000Z",
+      sequence: 42,
+      value: "",
+    },
+  });
+  assert.match(runtimeManifestSigningPayload(manifest).toString("utf8"), /uclaw-runtime-manifest-v3/);
 });
 
 test("uses the cross-language canonical signing payload", () => {

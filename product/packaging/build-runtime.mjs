@@ -22,13 +22,15 @@ import {
   isSafeWindowsRelativePath,
   validateRuntimeManifest,
 } from "../scripts/runtime-manifest.mjs";
+import { selectRuntimeTarget } from "../scripts/runtime-versions.mjs";
 
 const runtimeVersions = JSON.parse(
   await readFile(new URL("../runtime-versions.json", import.meta.url), "utf8"),
 );
+const runtimeTarget = selectRuntimeTarget(runtimeVersions, "win-x64");
 
 export async function buildRuntime(options) {
-  const expectedRuntimeId = runtimeVersions.runtimeId;
+  const expectedRuntimeId = runtimeTarget.runtimeId;
   if (options.runtimeId !== expectedRuntimeId) {
     throw new Error(`runtimeId must be ${expectedRuntimeId}`);
   }
@@ -71,8 +73,8 @@ export async function buildRuntime(options) {
     electronVersion: runtimeVersions.electron,
     runtimeVersion: runtimeVersions.openclaw,
     runtimeId: options.runtimeId,
-    targetPlatform: runtimeVersions.targetPlatform,
-    targetArch: runtimeVersions.targetArch,
+    targetPlatform: runtimeTarget.targetPlatform,
+    targetArch: runtimeTarget.targetArch,
     runtimeArchive: "runtime.pkg",
     runtimeSha256: "0".repeat(64),
     runtimeTreeSha256: inventory.treeSha256,

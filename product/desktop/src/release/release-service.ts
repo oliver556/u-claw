@@ -8,14 +8,18 @@ import type { ReleaseCheckResult, ReleaseOperation, ReleaseUpdate, UninstallPrev
 export interface SignedReleaseManifest {
   schemaVersion: 1; id: string; version: string; channel: "stable" | "beta";
   publishedAt: string; expiresAt: string; sequence: number; notes: string[];
-  compatibility: { platform: "win32"; arch: "x64"; runtimeId: string };
+  compatibility: { target?: RuntimeTarget; platform: TargetPlatform; arch: TargetArch; runtimeId: string };
   package: { bytes: number; sha256: string }; runtimeManifest: RuntimeManifest; mandatory: boolean;
   signature: { algorithm: "ed25519"; keyId: string; value: string };
 }
 
+type RuntimeTarget = "win-x64" | "macos-arm64";
+type TargetPlatform = "win32" | "darwin";
+type TargetArch = "x64" | "arm64";
+
 export interface RuntimeManifest {
   schemaVersion: 1; releaseId: string; releaseSequence: number; productVersion: string; nodeVersion: string; electronVersion: string; runtimeVersion: string;
-  runtimeId: string; targetPlatform: "win32"; targetArch: "x64"; runtimeArchive: "runtime.pkg";
+  runtimeId: string; target?: RuntimeTarget; targetPlatform: TargetPlatform; targetArch: TargetArch; runtimeArchive: "runtime.pkg";
   runtimeSha256: string; runtimeTreeSha256: string; runtimeBytes: number; unpackedBytes: number; fileCount: number; entrypoint: string; entryArgs: string[];
   criticalFiles: Array<{ path: string; size: number; sha256: string }>;
   signature: { algorithm: "ed25519"; keyId: string; signedAt: string; expiresAt: string; sequence: number; value: string };
@@ -44,7 +48,7 @@ interface RollbackTransaction {
 
 type UnsignedReleaseManifest = Omit<SignedReleaseManifest, "signature">;
 export const canonicalReleasePayload = (manifest: UnsignedReleaseManifest): Buffer => Buffer.from(JSON.stringify(manifest));
-export const canonicalRuntimePayload = (runtime: RuntimeManifest): Buffer => Buffer.from(JSON.stringify([
+export const canonicalRuntimePayload = (runtime: RuntimeManifest): Buffer => Buffer.from(JSON.stringify(runtime.target === undefined ? [
   "uclaw-runtime-manifest-v2",
   runtime.schemaVersion, runtime.releaseId, runtime.releaseSequence, runtime.productVersion, runtime.nodeVersion, runtime.electronVersion,
   runtime.runtimeVersion, runtime.runtimeId, runtime.targetPlatform, runtime.targetArch,
@@ -52,10 +56,18 @@ export const canonicalRuntimePayload = (runtime: RuntimeManifest): Buffer => Buf
   runtime.unpackedBytes, runtime.fileCount, runtime.entrypoint, runtime.entryArgs, runtime.criticalFiles,
   runtime.signature.algorithm, runtime.signature.keyId, runtime.signature.signedAt,
   runtime.signature.expiresAt, runtime.signature.sequence,
+] : [
+  "uclaw-runtime-manifest-v3",
+  runtime.schemaVersion, runtime.releaseId, runtime.releaseSequence, runtime.productVersion, runtime.nodeVersion, runtime.electronVersion,
+  runtime.runtimeVersion, runtime.runtimeId, runtime.targetPlatform, runtime.targetArch, runtime.target,
+  runtime.runtimeArchive, runtime.runtimeSha256, runtime.runtimeTreeSha256, runtime.runtimeBytes,
+  runtime.unpackedBytes, runtime.fileCount, runtime.entrypoint, runtime.entryArgs, runtime.criticalFiles,
+  runtime.signature.algorithm, runtime.signature.keyId, runtime.signature.signedAt,
+  runtime.signature.expiresAt, runtime.signature.sequence,
 ]));
 
 export interface ReleaseServiceOptions {
-  currentVersion: string; channel: "stable" | "beta"; platform: "win32"; arch: "x64"; runtimeId: string;
+  currentVersion: string; channel: "stable" | "beta"; target?: RuntimeTarget; platform: TargetPlatform; arch: TargetArch; runtimeId: string;
   cacheRoot: string; packageRoot: string; trustedKeys: Record<string, string>; revokedKeyIds: Set<string>;
   highestSequence?: number; timeoutMs?: number; now?: () => Date;
   configurationError?: string;
@@ -112,7 +124,7 @@ function validManifest(value: SignedReleaseManifest, options: ReleaseServiceOpti
   if (!verify(null, canonicalReleasePayload(unsigned), key, Buffer.from(signature.value, "base64"))) return false;
   const version = parseVersion(value.version); const current = parseVersion(options.currentVersion);
   if (!version || !current || compareVersion(version, current) < 0) return false;
-  if (value.channel !== channel || value.compatibility.platform !== options.platform || value.compatibility.arch !== options.arch || value.compatibility.runtimeId !== options.runtimeId) return false;
+  if (value.channel !== channel || value.compatibility.platform !== options.platform || value.compatibility.arch !== options.arch || value.compatibility.runtimeId !== options.runtimeId || !targetFieldsMatch(value.compatibility, options)) return false;
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value.id) || !Number.isSafeInteger(value.sequence) || value.sequence < highestSequence) return false;
   if (value.sequence === highestSequence && (!acceptedIdentity || !sameUpdateIdentity(value.runtimeManifest, acceptedIdentity))) return false;
   if (!Number.isFinite(Date.parse(value.publishedAt)) || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= now.getTime()) return false;
@@ -122,14 +134,17 @@ function validManifest(value: SignedReleaseManifest, options: ReleaseServiceOpti
 function validRuntimeManifest(runtime: RuntimeManifest, release: SignedReleaseManifest, options: ReleaseServiceOptions, now: Date): boolean {
   if (!validRuntimeSignature(runtime, options, now)) return false;
   const { signature } = runtime;
-  return signature.sequence === release.sequence && runtime.releaseSequence === release.sequence && runtime.releaseId === release.id && runtime.runtimeId === options.runtimeId && runtime.targetPlatform === options.platform && runtime.targetArch === options.arch &&
+  return signature.sequence === release.sequence && runtime.releaseSequence === release.sequence && runtime.releaseId === release.id && runtime.runtimeId === options.runtimeId && runtime.targetPlatform === options.platform && runtime.targetArch === options.arch && targetFieldsMatch({ target: runtime.target, platform: runtime.targetPlatform, arch: runtime.targetArch }, options) &&
     runtime.productVersion === release.version && runtime.runtimeArchive === "runtime.pkg" && runtime.runtimeBytes === release.package.bytes && runtime.runtimeSha256 === release.package.sha256;
 }
 
-const runtimeManifestKeys = ["criticalFiles", "electronVersion", "entryArgs", "entrypoint", "fileCount", "nodeVersion", "productVersion", "releaseId", "releaseSequence", "runtimeArchive", "runtimeBytes", "runtimeId", "runtimeSha256", "runtimeTreeSha256", "runtimeVersion", "schemaVersion", "signature", "targetArch", "targetPlatform", "unpackedBytes"];
+const runtimeManifestKeysV2 = ["criticalFiles", "electronVersion", "entryArgs", "entrypoint", "fileCount", "nodeVersion", "productVersion", "releaseId", "releaseSequence", "runtimeArchive", "runtimeBytes", "runtimeId", "runtimeSha256", "runtimeTreeSha256", "runtimeVersion", "schemaVersion", "signature", "targetArch", "targetPlatform", "unpackedBytes"];
+const runtimeManifestKeysV3 = ["criticalFiles", "electronVersion", "entryArgs", "entrypoint", "fileCount", "nodeVersion", "productVersion", "releaseId", "releaseSequence", "runtimeArchive", "runtimeBytes", "runtimeId", "runtimeSha256", "runtimeTreeSha256", "runtimeVersion", "schemaVersion", "signature", "target", "targetArch", "targetPlatform", "unpackedBytes"];
 
 function validRuntimeSignature(runtime: RuntimeManifest, options: ReleaseServiceOptions, now: Date): boolean {
-  if (!runtime || typeof runtime !== "object" || Object.keys(runtime).sort().join("\0") !== runtimeManifestKeys.join("\0")) return false;
+  if (!runtime || typeof runtime !== "object") return false;
+  const keys = Object.keys(runtime).sort().join("\0");
+  if (keys !== runtimeManifestKeysV2.join("\0") && keys !== runtimeManifestKeysV3.join("\0")) return false;
   const { signature } = runtime;
   const key = options.trustedKeys[signature?.keyId];
   if (!signature || !key || signature.algorithm !== "ed25519" || options.revokedKeyIds.has(signature.keyId)) return false;
@@ -138,8 +153,21 @@ function validRuntimeSignature(runtime: RuntimeManifest, options: ReleaseService
   const criticalPaths = runtime.criticalFiles?.map((file) => file.path.replaceAll("\\", "/").toLowerCase()) ?? [];
   const criticalValid = criticalPaths.length > 0 && criticalPaths.length <= 512 && new Set(criticalPaths).size === criticalPaths.length && criticalPaths.includes(runtime.entrypoint.replaceAll("\\", "/").toLowerCase()) &&
     runtime.criticalFiles.every((file) => Number.isSafeInteger(file.size) && file.size >= 0 && /^[a-f0-9]{64}$/u.test(file.sha256));
-  return runtime.schemaVersion === 1 && runtime.releaseSequence === signature.sequence && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(runtime.releaseId) && criticalValid && runtime.runtimeId === options.runtimeId && runtime.targetPlatform === options.platform && runtime.targetArch === options.arch && runtime.runtimeArchive === "runtime.pkg" &&
+  return runtime.schemaVersion === 1 && runtime.releaseSequence === signature.sequence && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(runtime.releaseId) && criticalValid && runtime.runtimeId === options.runtimeId && runtime.targetPlatform === options.platform && runtime.targetArch === options.arch && targetFieldsMatch({ target: runtime.target, platform: runtime.targetPlatform, arch: runtime.targetArch }, options) && runtime.runtimeArchive === "runtime.pkg" &&
     Number.isSafeInteger(runtime.runtimeBytes) && runtime.runtimeBytes > 0 && /^[a-f0-9]{64}$/u.test(runtime.runtimeSha256) && /^[a-f0-9]{64}$/u.test(runtime.runtimeTreeSha256);
+}
+
+function runtimeTargetForPlatformArch(platform: TargetPlatform, arch: TargetArch): RuntimeTarget | undefined {
+  if (platform === "win32" && arch === "x64") return "win-x64";
+  if (platform === "darwin" && arch === "arm64") return "macos-arm64";
+  return undefined;
+}
+
+function targetFieldsMatch(value: { target?: RuntimeTarget; platform: TargetPlatform; arch: TargetArch }, options: ReleaseServiceOptions): boolean {
+  const inferred = runtimeTargetForPlatformArch(value.platform, value.arch);
+  if (!inferred) return false;
+  if (value.target !== undefined && value.target !== inferred) return false;
+  return options.target === undefined || options.target === inferred;
 }
 
 function parseVersion(value: string): readonly [number, number, number] | undefined {

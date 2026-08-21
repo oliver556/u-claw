@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ReleaseIpcRequestSchema, ReleaseIpcResponseSchema } from "../src/release.js";
+import { ReleaseCompatibilitySchema, ReleaseIpcRequestSchema, ReleaseIpcResponseSchema } from "../src/release.js";
 
 describe("release IPC contract", () => {
   it("allows only fixed release, recovery and uninstall actions", () => {
@@ -22,5 +22,25 @@ describe("release IPC contract", () => {
       } },
     });
     expect(JSON.stringify(response)).not.toMatch(/(?:https?:\/\/|[A-Za-z]:\\\\|\/Users\/|\/tmp\/)/);
+  });
+
+  it("keeps legacy win-x64 release compatibility valid and accepts target-aware macOS", () => {
+    expect(ReleaseCompatibilitySchema.parse({
+      platform: "win32",
+      arch: "x64",
+      runtimeId: "openclaw-2026.7.1-2-win-x64",
+    })).not.toHaveProperty("target");
+    expect(ReleaseCompatibilitySchema.parse({
+      target: "macos-arm64",
+      platform: "darwin",
+      arch: "arm64",
+      runtimeId: "openclaw-2026.7.1-2-macos-arm64",
+    })).toMatchObject({ target: "macos-arm64" });
+    expect(ReleaseCompatibilitySchema.safeParse({
+      target: "macos-arm64",
+      platform: "win32",
+      arch: "x64",
+      runtimeId: "openclaw-2026.7.1-2-win-x64",
+    }).success).toBe(false);
   });
 });

@@ -43,6 +43,7 @@ type Manifest struct {
 	ElectronVersion   string              `json:"electronVersion"`
 	RuntimeVersion    string              `json:"runtimeVersion"`
 	RuntimeID         string              `json:"runtimeId"`
+	Target            string              `json:"target,omitempty"`
 	TargetPlatform    string              `json:"targetPlatform"`
 	TargetArch        string              `json:"targetArch"`
 	RuntimeArchive    string              `json:"runtimeArchive"`
@@ -70,6 +71,16 @@ type ManifestSignature struct {
 	ExpiresAt string `json:"expiresAt"`
 	Sequence  uint64 `json:"sequence"`
 	Value     string `json:"value"`
+}
+
+type runtimeTarget struct {
+	TargetPlatform string
+	TargetArch     string
+}
+
+var runtimeTargets = map[string]runtimeTarget{
+	"win-x64":     {TargetPlatform: "win32", TargetArch: "x64"},
+	"macos-arm64": {TargetPlatform: "darwin", TargetArch: "arm64"},
 }
 
 func ReadManifest(path string) (Manifest, error) {
@@ -112,6 +123,19 @@ func manifestSigningPayload(manifest Manifest) ([]byte, error) {
 	if manifest.Signature == nil {
 		return nil, ErrManifestInvalid
 	}
+	if manifest.Target != "" {
+		value := []any{
+			"uclaw-runtime-manifest-v3", manifest.SchemaVersion, manifest.ReleaseID, manifest.ReleaseSequence, manifest.ProductVersion,
+			manifest.NodeVersion, manifest.ElectronVersion, manifest.RuntimeVersion,
+			manifest.RuntimeID, manifest.TargetPlatform, manifest.TargetArch, manifest.Target,
+			manifest.RuntimeArchive, manifest.RuntimeSHA256, manifest.RuntimeTreeSHA256,
+			manifest.RuntimeBytes, manifest.UnpackedBytes, manifest.FileCount,
+			manifest.Entrypoint, manifest.EntryArgs, manifest.CriticalFiles, manifest.Signature.Algorithm,
+			manifest.Signature.KeyID, manifest.Signature.SignedAt, manifest.Signature.ExpiresAt,
+			manifest.Signature.Sequence,
+		}
+		return canonicalJSONPayload(value)
+	}
 	value := []any{
 		"uclaw-runtime-manifest-v2", manifest.SchemaVersion, manifest.ReleaseID, manifest.ReleaseSequence, manifest.ProductVersion,
 		manifest.NodeVersion, manifest.ElectronVersion, manifest.RuntimeVersion,
@@ -122,16 +146,7 @@ func manifestSigningPayload(manifest Manifest) ([]byte, error) {
 		manifest.Signature.KeyID, manifest.Signature.SignedAt, manifest.Signature.ExpiresAt,
 		manifest.Signature.Sequence,
 	}
-	var output strings.Builder
-	encoder := json.NewEncoder(&output)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
-		return nil, err
-	}
-	payload := strings.TrimSuffix(output.String(), "\n")
-	payload = strings.ReplaceAll(payload, `\u2028`, " ")
-	payload = strings.ReplaceAll(payload, `\u2029`, " ")
-	return []byte(payload), nil
+	return canonicalJSONPayload(value)
 }
 
 func VerifyManifestSignature(manifest Manifest, now time.Time) error {
@@ -174,7 +189,9 @@ func VerifyManifestSignature(manifest Manifest, now time.Time) error {
 }
 
 func ValidateManifest(manifest Manifest) error {
+	target, targetErr := manifestTarget(manifest)
 	if manifest.SchemaVersion != 1 ||
+		targetErr != nil ||
 		!runtimeIDPattern.MatchString(manifest.ReleaseID) ||
 		manifest.ReleaseSequence == 0 || manifest.ReleaseSequence > uint64(maxSafeJSONInteger) ||
 		!isSafeVersion(manifest.ProductVersion) ||
@@ -182,15 +199,13 @@ func ValidateManifest(manifest Manifest) error {
 		!isSafeVersion(manifest.ElectronVersion) ||
 		!isSafeVersion(manifest.RuntimeVersion) ||
 		!runtimeIDPattern.MatchString(manifest.RuntimeID) ||
-		manifest.TargetPlatform != "win32" ||
-		manifest.TargetArch != "x64" ||
-		!isSafeWindowsRelativePath(manifest.RuntimeArchive) ||
+		!isSafeTargetRelativePath(target, manifest.RuntimeArchive) ||
 		!sha256Pattern.MatchString(manifest.RuntimeSHA256) ||
 		!sha256Pattern.MatchString(manifest.RuntimeTreeSHA256) ||
 		manifest.RuntimeBytes <= 0 || manifest.RuntimeBytes > maxSafeJSONInteger ||
 		manifest.UnpackedBytes <= 0 || manifest.UnpackedBytes > maxSafeJSONInteger ||
 		manifest.FileCount <= 0 || manifest.FileCount > maxSafeJSONInteger ||
-		!isSafeWindowsRelativePath(manifest.Entrypoint) ||
+		!isSafeTargetRelativePath(target, manifest.Entrypoint) ||
 		manifest.EntryArgs == nil ||
 		len(manifest.EntryArgs) > 64 ||
 		len(manifest.CriticalFiles) == 0 || len(manifest.CriticalFiles) > 512 {
@@ -204,15 +219,15 @@ func ValidateManifest(manifest Manifest) error {
 	entrypointCovered := false
 	seenCritical := make(map[string]struct{}, len(manifest.CriticalFiles))
 	for _, file := range manifest.CriticalFiles {
-		canonical := strings.ToLower(strings.ReplaceAll(file.Path, `\`, "/"))
-		if !isSafeWindowsRelativePath(file.Path) || file.Size < 0 || file.Size > maxSafeJSONInteger || !sha256Pattern.MatchString(file.SHA256) {
+		canonical := canonicalRuntimePath(target, file.Path)
+		if !isSafeTargetRelativePath(target, file.Path) || file.Size < 0 || file.Size > maxSafeJSONInteger || !sha256Pattern.MatchString(file.SHA256) {
 			return ErrManifestInvalid
 		}
 		if _, exists := seenCritical[canonical]; exists {
 			return ErrManifestInvalid
 		}
 		seenCritical[canonical] = struct{}{}
-		if strings.EqualFold(canonical, strings.ReplaceAll(manifest.Entrypoint, `\`, "/")) {
+		if canonical == canonicalRuntimePath(target, manifest.Entrypoint) {
 			entrypointCovered = true
 		}
 	}
@@ -226,6 +241,19 @@ func ValidateManifest(manifest Manifest) error {
 		return ErrManifestInvalid
 	}
 	return nil
+}
+
+func canonicalJSONPayload(value []any) ([]byte, error) {
+	var output strings.Builder
+	encoder := json.NewEncoder(&output)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	payload := strings.TrimSuffix(output.String(), "\n")
+	payload = strings.ReplaceAll(payload, `\u2028`, " ")
+	payload = strings.ReplaceAll(payload, `\u2029`, " ")
+	return []byte(payload), nil
 }
 
 func ValidatePackage(baseDir string, manifest Manifest) error {
@@ -312,4 +340,40 @@ func isSafeWindowsRelativePath(value string) bool {
 		}
 	}
 	return true
+}
+
+func manifestTarget(manifest Manifest) (string, error) {
+	for targetID, target := range runtimeTargets {
+		if target.TargetPlatform == manifest.TargetPlatform && target.TargetArch == manifest.TargetArch {
+			if manifest.Target != "" && manifest.Target != targetID {
+				return "", ErrManifestInvalid
+			}
+			return targetID, nil
+		}
+	}
+	return "", ErrManifestInvalid
+}
+
+func isSafeTargetRelativePath(target string, value string) bool {
+	if target == "win-x64" {
+		return isSafeWindowsRelativePath(value)
+	}
+	return isSafeMacOSRelativePath(value)
+}
+
+func isSafeMacOSRelativePath(value string) bool {
+	if value == "" || utf8.RuneCountInString(value) > 32767 || strings.HasPrefix(value, "/") || strings.ContainsRune(value, 0) {
+		return false
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalRuntimePath(target string, value string) string {
+	normalized := strings.ReplaceAll(value, `\`, "/")
+	return strings.ToLower(normalized)
 }

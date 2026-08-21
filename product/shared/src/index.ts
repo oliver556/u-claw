@@ -32,5 +32,7 @@ export * from "./plugins.js";
 export * from "./product-services.js";
 export * from "./provisioning-identity.js";
 export * from "./release.js";
+export * from "./runtime-target.js";
 export * from "./tools.js";
+export * from "./usb-layout.js";
 export * from "./usage.js";

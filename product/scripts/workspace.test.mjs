@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { runtimeTargetsFromVersions, selectRuntimeTarget } from "./runtime-versions.mjs";
+
 const rootUrl = new URL("../", import.meta.url);
 const rootPackage = JSON.parse(await readFile(new URL("package.json", rootUrl), "utf8"));
 const lockfile = JSON.parse(await readFile(new URL("package-lock.json", rootUrl), "utf8"));
@@ -40,10 +42,40 @@ test("uses one audited source for runtime and package-manager versions", async (
     runtimeId: "openclaw-2026.7.1-2-win-x64",
     targetPlatform: "win32",
     targetArch: "x64",
+    targets: {
+      "win-x64": {
+        targetPlatform: "win32",
+        targetArch: "x64",
+        runtimeId: "openclaw-2026.7.1-2-win-x64",
+        entrypoint: "electron/electron.exe",
+      },
+      "macos-arm64": {
+        targetPlatform: "darwin",
+        targetArch: "arm64",
+        runtimeId: "openclaw-2026.7.1-2-macos-arm64",
+        entrypoint: "Electron.app/Contents/MacOS/Electron",
+      },
+    },
   });
   assert.equal(nodeVersion.trim(), versions.node);
   assert.equal(rootPackage.engines.node, versions.node);
   assert.equal(rootPackage.packageManager, `npm@${versions.npm}`);
+});
+
+test("adapts runtime versions into target-specific runtime identities", async () => {
+  const versions = await readJson("runtime-versions.json");
+  assert.deepEqual(runtimeTargetsFromVersions(versions), versions.targets);
+  assert.deepEqual(selectRuntimeTarget(versions, "win-x64"), versions.targets["win-x64"]);
+  assert.deepEqual(selectRuntimeTarget(versions, "macos-arm64"), versions.targets["macos-arm64"]);
+  assert.deepEqual(runtimeTargetsFromVersions({
+    runtimeId: "openclaw-2026.7.1-2-win-x64",
+    targetPlatform: "win32",
+    targetArch: "x64",
+  }), { "win-x64": { ...versions.targets["win-x64"], entrypoint: "electron/electron.exe" } });
+  assert.throws(
+    () => runtimeTargetsFromVersions({ ...versions, runtimeId: "other-win-x64" }),
+    /legacy win-x64/,
+  );
 });
 
 test("pins every direct external dependency and mirrors it in the lockfile", async () => {

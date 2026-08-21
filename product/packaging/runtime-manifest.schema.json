@@ -55,8 +55,9 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
     },
-    "targetPlatform": { "const": "win32" },
-    "targetArch": { "const": "x64" },
+    "target": { "enum": ["win-x64", "macos-arm64"] },
+    "targetPlatform": { "enum": ["win32", "darwin"] },
+    "targetArch": { "enum": ["x64", "arm64"] },
     "runtimeArchive": { "type": "string", "minLength": 1, "maxLength": 32767 },
     "runtimeSha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
     "runtimeTreeSha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
