@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,11 +41,11 @@ func (repository *ActivationRepository) ValidateBinding(ctx context.Context, inp
 		}
 		return nil
 	}
-	var status, setupStatus string
+	var inventoryID, status, setupStatus string
 	var mappingReady bool
 	var boundVersion *string
 	var boundFingerprint []byte
-	err = repository.pool.QueryRow(ctx, `SELECT inventory.status,inventory.new_api_setup_status,
+	err = repository.pool.QueryRow(ctx, `SELECT inventory.id,inventory.status,inventory.new_api_setup_status,
 		COALESCE(binding.status='active' AND binding.balance_setup_status='configured'
 			AND length(binding.api_key_envelope)>0 AND binding.api_key_version<>'' AND binding.base_url<>''
 			AND binding.default_model<>'' AND cardinality(binding.allowed_models)>0
@@ -51,7 +53,7 @@ func (repository *ActivationRepository) ValidateBinding(ctx context.Context, inp
 		device.fingerprint_version,device.fingerprint_sha256 FROM activation_inventory inventory
 		LEFT JOIN new_api_bindings binding ON binding.inventory_id=inventory.id
 		LEFT JOIN devices device ON device.inventory_id=inventory.id WHERE inventory.activation_code_digest=$1`,
-		input.ActivationCodeDigest[:]).Scan(&status, &setupStatus, &mappingReady, &boundVersion, &boundFingerprint)
+		input.ActivationCodeDigest[:]).Scan(&inventoryID, &status, &setupStatus, &mappingReady, &boundVersion, &boundFingerprint)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return activation.ErrActivationInvalid
 	}
@@ -67,6 +69,15 @@ func (repository *ActivationRepository) ValidateBinding(ctx context.Context, inp
 	if boundVersion != nil && *boundVersion == input.FingerprintVersion && bytes.Equal(boundFingerprint, fingerprint) {
 		return nil
 	}
+	if len(input.DeviceAliases) > 0 {
+		matched, err := repository.deviceAliasMatches(ctx, inventoryID, input.DeviceAliases)
+		if err != nil {
+			return err
+		}
+		if matched {
+			return nil
+		}
+	}
 	return activation.ErrActivationCodeAlreadyBound
 }
 
@@ -76,7 +87,35 @@ func (repository *ActivationRepository) loadAttemptByIdempotency(ctx context.Con
 		return activation.BoundRecord{}, false, fmt.Errorf("acquire activation lookup: %w", err)
 	}
 	defer conn.Release()
-	return scanAttempt(conn.QueryRow(ctx, attemptSelect+" WHERE attempt.idempotency_key=$1", key))
+	record, found, err := scanAttempt(conn.QueryRow(ctx, attemptSelect+" WHERE attempt.idempotency_key=$1", key))
+	if err != nil || !found {
+		return record, found, err
+	}
+	if err := loadDeviceAliases(ctx, conn, &record); err != nil {
+		return activation.BoundRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func (repository *ActivationRepository) deviceAliasMatches(ctx context.Context, inventoryID string, aliases []activation.DeviceAliasInput) (bool, error) {
+	for _, alias := range aliases {
+		fingerprint, err := decodeFingerprint(alias.Fingerprint.SHA256)
+		if err != nil {
+			return false, activation.ErrActivationInvalid
+		}
+		var exists bool
+		err = repository.pool.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM device_aliases
+			WHERE inventory_id=$1 AND target=$2 AND fingerprint_version=$3 AND fingerprint_sha256=$4
+		)`, inventoryID, alias.Target, alias.Fingerprint.Version, fingerprint).Scan(&exists)
+		if err != nil {
+			return false, fmt.Errorf("match device alias: %w", err)
+		}
+		if exists {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (repository *ActivationRepository) BeginBinding(ctx context.Context, input activation.BeginBindingInput) (activation.BeginBindingResult, error) {
@@ -436,6 +475,9 @@ func insertBinding(ctx context.Context, tx pgx.Tx, input activation.BeginBinding
 		fingerprint); err != nil {
 		return err
 	}
+	if err := insertDeviceAliases(ctx, tx, record); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO licenses
 		(license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,created_at,updated_at)
 		VALUES ($1,$2,'prepared',$3,$4,$5,$6,$7,$8,clock_timestamp(),clock_timestamp())`, record.LicenseID, record.DeviceID, record.Revision,
@@ -481,7 +523,14 @@ func loadAttempt(ctx context.Context, tx pgx.Tx, where string, argument any, loc
 	if lock {
 		query += " FOR UPDATE OF attempt"
 	}
-	return scanAttempt(tx.QueryRow(ctx, query, argument))
+	record, found, err := scanAttempt(tx.QueryRow(ctx, query, argument))
+	if err != nil || !found {
+		return record, found, err
+	}
+	if err := loadDeviceAliases(ctx, tx, &record); err != nil {
+		return activation.BoundRecord{}, false, err
+	}
+	return record, true, nil
 }
 
 func loadAttemptByInventoryAndDevice(ctx context.Context, tx pgx.Tx, inventoryID string, record activation.BoundRecord) (activation.BoundRecord, bool, error) {
@@ -489,12 +538,126 @@ func loadAttemptByInventoryAndDevice(ctx context.Context, tx pgx.Tx, inventoryID
 	if err != nil {
 		return activation.BoundRecord{}, false, activation.ErrActivationInvalid
 	}
-	return scanAttempt(tx.QueryRow(ctx, attemptSelect+` WHERE attempt.inventory_id=$1 AND device.fingerprint_version=$2
+	matched, found, err := scanAttempt(tx.QueryRow(ctx, attemptSelect+` WHERE attempt.inventory_id=$1 AND device.fingerprint_version=$2
 		AND device.fingerprint_sha256=$3 AND inventory.status='active' AND device.status='active'
 		AND license.status='active' AND EXISTS (SELECT 1 FROM new_api_bindings binding
 		WHERE binding.inventory_id=inventory.id AND binding.device_id=device.device_id AND binding.status='active')
 		ORDER BY attempt.created_at DESC LIMIT 1`, inventoryID,
 		record.FingerprintVersion, fingerprint))
+	if err != nil || found {
+		if found {
+			if err := loadDeviceAliases(ctx, tx, &matched); err != nil {
+				return activation.BoundRecord{}, false, err
+			}
+		}
+		return matched, found, err
+	}
+	for _, alias := range record.DeviceAliases {
+		matched, found, err = loadAttemptByInventoryAndAlias(ctx, tx, inventoryID, alias)
+		if err != nil || found {
+			if found {
+				if err := loadDeviceAliases(ctx, tx, &matched); err != nil {
+					return activation.BoundRecord{}, false, err
+				}
+			}
+			return matched, found, err
+		}
+	}
+	return activation.BoundRecord{}, false, nil
+}
+
+func loadAttemptByInventoryAndAlias(ctx context.Context, tx pgx.Tx, inventoryID string, alias activation.DeviceAliasInput) (activation.BoundRecord, bool, error) {
+	fingerprint, err := decodeFingerprint(alias.Fingerprint.SHA256)
+	if err != nil {
+		return activation.BoundRecord{}, false, activation.ErrActivationInvalid
+	}
+	return scanAttempt(tx.QueryRow(ctx, attemptSelect+` JOIN device_aliases alias
+		ON alias.inventory_id=inventory.id AND alias.device_id=device.device_id
+		WHERE attempt.inventory_id=$1 AND alias.target=$2 AND alias.fingerprint_version=$3
+		AND alias.fingerprint_sha256=$4 AND inventory.status='active' AND device.status='active'
+		AND license.status='active' AND EXISTS (SELECT 1 FROM new_api_bindings binding
+		WHERE binding.inventory_id=inventory.id AND binding.device_id=device.device_id AND binding.status='active')
+		ORDER BY attempt.created_at DESC LIMIT 1`, inventoryID,
+		alias.Target, alias.Fingerprint.Version, fingerprint))
+}
+
+type deviceAliasEvidenceRecord struct {
+	Target                 string `json:"target"`
+	Platform               string `json:"platform"`
+	Arch                   string `json:"arch"`
+	Source                 string `json:"source"`
+	BusType                string `json:"busType,omitempty"`
+	BusProtocol            string `json:"busProtocol,omitempty"`
+	DeviceLocation         string `json:"deviceLocation,omitempty"`
+	Vendor                 string `json:"vendor"`
+	Product                string `json:"product"`
+	Revision               string `json:"revision,omitempty"`
+	Serial                 string `json:"serial"`
+	CapacityBytes          int64  `json:"capacityBytes"`
+	UniqueDescriptorSHA256 string `json:"uniqueDescriptorSha256,omitempty"`
+	VolumeUUID             string `json:"volumeUuid,omitempty"`
+	MediaUUID              string `json:"mediaUuid,omitempty"`
+}
+
+func insertDeviceAliases(ctx context.Context, tx pgx.Tx, record activation.BoundRecord) error {
+	for _, alias := range record.DeviceAliases {
+		fingerprint, err := decodeFingerprint(alias.Fingerprint.SHA256)
+		if err != nil {
+			return activation.ErrActivationInvalid
+		}
+		evidence, err := json.Marshal(deviceAliasEvidenceRecord{
+			Target: alias.Evidence.Target, Platform: alias.Evidence.Platform, Arch: alias.Evidence.Arch, Source: alias.Evidence.Source,
+			BusType: alias.Evidence.BusType, BusProtocol: alias.Evidence.BusProtocol, DeviceLocation: alias.Evidence.DeviceLocation,
+			Vendor: alias.Evidence.Vendor, Product: alias.Evidence.Product, Revision: alias.Evidence.Revision,
+			Serial: alias.Evidence.Serial, CapacityBytes: alias.Evidence.CapacityBytes,
+			UniqueDescriptorSHA256: alias.Evidence.UniqueDescriptorSHA256, VolumeUUID: alias.Evidence.VolumeUUID, MediaUUID: alias.Evidence.MediaUUID,
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO device_aliases
+			(inventory_id,device_id,target,fingerprint_version,fingerprint_sha256,evidence,created_at)
+			VALUES ($1,$2,$3,$4,$5,$6,clock_timestamp())`,
+			record.InventoryID, record.DeviceID, alias.Target, alias.Fingerprint.Version, fingerprint, evidence); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type deviceAliasQueryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func loadDeviceAliases(ctx context.Context, queryer deviceAliasQueryer, record *activation.BoundRecord) error {
+	rows, err := queryer.Query(ctx, `SELECT target,fingerprint_version,encode(fingerprint_sha256,'hex'),evidence
+		FROM device_aliases WHERE inventory_id=$1 AND device_id=$2 ORDER BY target`, record.InventoryID, record.DeviceID)
+	if err != nil {
+		return fmt.Errorf("load device aliases: %w", err)
+	}
+	defer rows.Close()
+	var aliases []activation.DeviceAliasInput
+	for rows.Next() {
+		var alias activation.DeviceAliasInput
+		var evidence []byte
+		if err := rows.Scan(&alias.Target, &alias.Fingerprint.Version, &alias.Fingerprint.SHA256, &evidence); err != nil {
+			return fmt.Errorf("scan device alias: %w", err)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(evidence))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&alias.Evidence); err != nil {
+			return fmt.Errorf("decode device alias evidence: %w", err)
+		}
+		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			return fmt.Errorf("decode device alias evidence: %w", err)
+		}
+		aliases = append(aliases, alias)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("scan device aliases: %w", err)
+	}
+	record.DeviceAliases = aliases
+	return nil
 }
 
 type rowScanner interface{ Scan(...any) error }
@@ -542,7 +705,7 @@ func mapBindingError(err error) error {
 		switch postgresError.ConstraintName {
 		case "activation_attempts_idempotency_key_key":
 			return activation.ErrIdempotencyConflict
-		case "devices_fingerprint_version_fingerprint_sha256_key":
+		case "devices_fingerprint_version_fingerprint_sha256_key", "device_aliases_target_fingerprint_unique":
 			return activation.ErrActivationCodeAlreadyBound
 		}
 	}

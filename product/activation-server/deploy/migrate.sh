@@ -37,6 +37,7 @@ checksum_002=$(checksum_file "$migration_dir/002_lifecycle.sql")
 checksum_003=$(checksum_file "$migration_dir/003_admin.sql")
 checksum_004=$(checksum_file "$migration_dir/004_device_access_proxy.sql")
 checksum_005=$(checksum_file "$migration_dir/005_release_policy.sql")
+checksum_006=$(checksum_file "$migration_dir/006_device_aliases.sql")
 
 psql "$ACTIVATION_DATABASE_URL" -X --set=ON_ERROR_STOP=1 \
     --set=migration_role="$ACTIVATION_MIGRATION_ROLE" \
@@ -177,6 +178,21 @@ SELECT NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 5) AS apply_0
     \i $migration_dir/005_release_policy.sql
     INSERT INTO schema_migrations(version, checksum, applied_at)
     VALUES (5, decode('$checksum_005', 'hex'), now());
+\endif
+
+SELECT EXISTS (
+    SELECT 1 FROM schema_migrations
+    WHERE version = 6 AND checksum <> decode('$checksum_006', 'hex')
+) AS checksum_mismatch_006 \gset
+\if :checksum_mismatch_006
+    \echo 'migration 6 checksum mismatch'
+    \quit 1
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 6) AS apply_006 \gset
+\if :apply_006
+    \i $migration_dir/006_device_aliases.sql
+    INSERT INTO schema_migrations(version, checksum, applied_at)
+    VALUES (6, decode('$checksum_006', 'hex'), now());
 \endif
 COMMIT;
 RESET ROLE;

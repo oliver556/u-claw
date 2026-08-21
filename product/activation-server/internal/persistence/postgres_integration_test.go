@@ -90,7 +90,7 @@ func TestInitialMigrationContainsAuthoritativeTablesAndConstraints(t *testing.T)
 			t.Errorf("migration ledger missing constraint %q", fragment)
 		}
 	}
-	if latestMigrationVersion != 5 || len(initialMigrationChecksum) != 32 {
+	if latestMigrationVersion != 6 || len(initialMigrationChecksum) != 32 {
 		t.Fatal("migration version/checksum metadata is invalid")
 	}
 }
@@ -137,7 +137,7 @@ func TestLifecycleMigrationContainsTaskFiveAndSixSchema(t *testing.T) {
 			t.Errorf("lifecycle migration missing %q", fragment)
 		}
 	}
-	if latestMigrationVersion != 5 || len(lifecycleMigrationChecksum) != 32 {
+	if latestMigrationVersion != 6 || len(lifecycleMigrationChecksum) != 32 {
 		t.Fatal("lifecycle migration version/checksum metadata is invalid")
 	}
 }
@@ -217,7 +217,7 @@ func TestDeviceAccessProxyMigrationContainsLongLivedTokenAndProxySchema(t *testi
 			t.Errorf("device access/proxy migration stores plaintext secret %q", forbidden)
 		}
 	}
-	if latestMigrationVersion != 5 || len(deviceAccessProxyMigrationChecksum) != 32 {
+	if latestMigrationVersion != 6 || len(deviceAccessProxyMigrationChecksum) != 32 {
 		t.Fatal("device access/proxy migration version/checksum metadata is invalid")
 	}
 
@@ -244,6 +244,9 @@ func TestProductionComposeMountsCurrentMigrationSet(t *testing.T) {
 		"source: migration_005",
 		"target: /migrations/005_release_policy.sql",
 		"migration_005:\n    file: ../migrations/005_release_policy.sql",
+		"source: migration_006",
+		"target: /migrations/006_device_aliases.sql",
+		"migration_006:\n    file: ../migrations/006_device_aliases.sql",
 	} {
 		if !strings.Contains(compose, fragment) {
 			t.Errorf("production compose missing current migration config %q", fragment)
@@ -278,6 +281,37 @@ func TestReleasePolicyMigrationContainsMonotonicDualSlotSchema(t *testing.T) {
 	}
 	if string(contents) != sql {
 		t.Fatal("migrations/005_release_policy.sql drifted from compiled migration")
+	}
+}
+
+func TestDeviceAliasesMigrationContainsControlledAliasSchema(t *testing.T) {
+	sql := DeviceAliasesMigrationSQL()
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS device_aliases",
+		"CONSTRAINT device_aliases_inventory_target_pk PRIMARY KEY (inventory_id, target)",
+		"CONSTRAINT device_aliases_target_fingerprint_unique UNIQUE (target, fingerprint_version, fingerprint_sha256)",
+		"target TEXT NOT NULL CHECK (target IN ('win-x64', 'macos-arm64'))",
+		"fingerprint_version TEXT NOT NULL CHECK (fingerprint_version IN ('uclaw-usb-v1', 'uclaw-usb-v2'))",
+		"fingerprint_sha256 BYTEA NOT NULL CHECK (octet_length(fingerprint_sha256) = 32)",
+		"evidence JSONB NOT NULL CHECK",
+		"evidence->>'target' = target",
+		"NOT (evidence ?| ARRAY['volumeName', 'mountPath', 'driveLetter'])",
+		"FOREIGN KEY (device_id, inventory_id) REFERENCES devices(device_id, inventory_id)",
+		"CREATE INDEX IF NOT EXISTS device_aliases_device_id_idx",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("device aliases migration missing %q", fragment)
+		}
+	}
+	if len(deviceAliasesMigrationChecksum) != 32 {
+		t.Fatal("device aliases migration checksum invalid")
+	}
+	contents, err := os.ReadFile(filepath.Join("..", "..", "migrations", "006_device_aliases.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != sql {
+		t.Fatal("migrations/006_device_aliases.sql drifted from compiled migration")
 	}
 }
 
@@ -367,19 +401,19 @@ func TestMigratePostgreSQLIsIdempotentAndEnforcesUniqueBindings(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ANY($1)`, []string{
 		"activation_inventory", "devices", "licenses", "activation_attempts",
 		"new_api_bindings", "token_grants", "audit_events", "license_status_events", "schema_migrations", "admin_operations",
-		"device_access_tokens", "model_proxy_admissions", "production_releases", "production_release_state",
+		"device_access_tokens", "model_proxy_admissions", "production_releases", "production_release_state", "device_aliases",
 	}).Scan(&tableCount); err != nil {
 		t.Fatal(err)
 	}
-	if tableCount != 14 {
-		t.Fatalf("table count = %d, want 14", tableCount)
+	if tableCount != 15 {
+		t.Fatalf("table count = %d, want 15", tableCount)
 	}
 	var migrationCount int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5) AND octet_length(checksum) = 32`).Scan(&migrationCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5,6) AND octet_length(checksum) = 32`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 5 {
-		t.Fatalf("migration record count = %d, want 5", migrationCount)
+	if migrationCount != 6 {
+		t.Fatalf("migration record count = %d, want 6", migrationCount)
 	}
 	releaseRepository, err := NewReleasePolicyRepository(pool)
 	if err != nil {
@@ -1082,5 +1116,150 @@ func TestBeginBindingPostgreSQLRecoversExpiredRequestedLeaseAndGuardsBoundArtifa
 	}
 	if _, err = repository.BeginBinding(ctx, input); !errors.Is(err, activation.ErrActivationCodeAlreadyBound) {
 		t.Fatalf("revoked bound recovery error=%v", err)
+	}
+}
+
+func TestBeginBindingPostgreSQLPersistsDeviceAliasesAndRecoversByAlias(t *testing.T) {
+	databaseURL := os.Getenv("ACTIVATION_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("ACTIVATION_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	root, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	random := make([]byte, 8)
+	_, _ = rand.Read(random)
+	schema := "activation_alias_test_" + hex.EncodeToString(random)
+	if _, err = root.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = root.Exec(ctx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE") }()
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err = Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+
+	digest := [32]byte{0x91}
+	const inventoryID = "00000000-0000-4000-8000-000000000901"
+	if _, err = pool.Exec(ctx, `INSERT INTO activation_inventory
+		(id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at)
+		VALUES($1,'UCLAW-ALIASES','UCLAW-ALIASES',$2,'prepared','configured',now())`, inventoryID, digest[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO new_api_bindings
+		(inventory_id,new_api_user_id,new_api_username,balance_setup_status,status,policy_digest,api_key_envelope,api_key_version,base_url,default_model,allowed_models,created_at,updated_at)
+		VALUES($1,'usr_aliases','uclaw_aliases','configured','active',decode(repeat('92',32),'hex'),decode('01','hex'),'kms-v1','https://api.invalid/v1','model-a',ARRAY['model-a'],now(),now())`, inventoryID); err != nil {
+		t.Fatal(err)
+	}
+
+	repository, _ := NewActivationRepository(pool)
+	now := time.Now().UTC()
+	requestFingerprint := [32]byte{0x93}
+	record := activation.BoundRecord{
+		ActivationID: "30000000-0000-4000-8000-000000000901", DeviceID: "10000000-0000-4000-8000-000000000901",
+		LicenseID: "20000000-0000-4000-8000-000000000901", LeaseToken: "40000000-0000-4000-8000-000000000901",
+		RequestFingerprint: requestFingerprint, FingerprintVersion: "uclaw-usb-v1", FingerprintSHA256: strings.Repeat("94", 32),
+		DeviceAliases: testDeviceAliases(), KeyID: "key_aliases", NotBefore: now, ExpiresAt: now.Add(24 * time.Hour), Revision: 1,
+		StartupSecretSalt: bytes.Repeat([]byte{0x95}, 16), PendingMaterialEnvelope: []byte("pending-material"), PendingMaterialKeyVersion: "v1",
+		RequestID: "request-aliases-001", AuditEventID: "50000000-0000-4000-8000-000000000901",
+		StatusEventID: "60000000-0000-4000-8000-000000000901", BoundAuditEventID: "70000000-0000-4000-8000-000000000901",
+		LeaseExpiresAt: now.Add(time.Minute),
+	}
+	record.StartupSecretHash = [32]byte{0x96}
+	input := activation.BeginBindingInput{ActivationCodeDigest: digest, IdempotencyKey: "aliases-idempotency-001", Record: record}
+	if err := repository.ValidateBinding(ctx, activation.ValidateBindingInput{
+		ActivationCodeDigest: digest, IdempotencyKey: input.IdempotencyKey, RequestFingerprint: requestFingerprint,
+		FingerprintVersion: record.FingerprintVersion, FingerprintSHA256: record.FingerprintSHA256, DeviceAliases: record.DeviceAliases,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := repository.BeginBinding(ctx, input)
+	if err != nil || first.Disposition != activation.BindingAcquired {
+		t.Fatalf("first begin=%#v err=%v", first, err)
+	}
+	var aliasCount int
+	var evidence string
+	if err = pool.QueryRow(ctx, `SELECT count(*),string_agg(evidence::text,' ' ORDER BY target) FROM device_aliases WHERE inventory_id=$1`, inventoryID).Scan(&aliasCount, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if aliasCount != 2 || strings.Contains(evidence, "volumeName") || strings.Contains(evidence, "mountPath") || strings.Contains(evidence, "driveLetter") {
+		t.Fatalf("alias persistence count=%d evidence=%s", aliasCount, evidence)
+	}
+
+	first.Record.ArtifactEnvelope = []byte("artifact")
+	first.Record.ArtifactKeyVersion = "v1"
+	first.Record.DeviceTokenID = "60000000-0000-4000-8000-000000000901"
+	first.Record.DeviceTokenDigest = bytes.Repeat([]byte{0x97}, 32)
+	completed, err := repository.CompleteBinding(ctx, activation.CompleteBindingInput{LeaseToken: first.Record.LeaseToken, Record: first.Record})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(completed.DeviceAliases) != 2 || completed.DeviceAliases[0].Target != "macos-arm64" || completed.DeviceAliases[1].Target != "win-x64" {
+		t.Fatalf("loaded aliases=%+v", completed.DeviceAliases)
+	}
+
+	recoveryFingerprint := [32]byte{0x98}
+	recovery := record
+	recovery.ActivationID = "30000000-0000-4000-8000-000000000902"
+	recovery.DeviceID = "10000000-0000-4000-8000-000000000902"
+	recovery.LicenseID = "20000000-0000-4000-8000-000000000902"
+	recovery.RequestFingerprint = recoveryFingerprint
+	recovery.FingerprintSHA256 = strings.Repeat("99", 32)
+	recovery.DeviceAliases = []activation.DeviceAliasInput{testDeviceAliases()[0]}
+	recovery.RequestID = "request-aliases-002"
+	if err := repository.ValidateBinding(ctx, activation.ValidateBindingInput{
+		ActivationCodeDigest: digest, IdempotencyKey: "aliases-idempotency-002", RequestFingerprint: recoveryFingerprint,
+		FingerprintVersion: recovery.FingerprintVersion, FingerprintSHA256: recovery.FingerprintSHA256, DeviceAliases: recovery.DeviceAliases,
+	}); err != nil {
+		t.Fatalf("alias validate=%v", err)
+	}
+	bound, err := repository.BeginBinding(ctx, activation.BeginBindingInput{ActivationCodeDigest: digest, IdempotencyKey: "aliases-idempotency-002", Record: recovery})
+	if err != nil || bound.Disposition != activation.BindingBound || !bytes.Equal(bound.Record.ArtifactEnvelope, completed.ArtifactEnvelope) {
+		t.Fatalf("alias recovery=%#v err=%v", bound, err)
+	}
+	if bound.Record.RecoveryRequestID != recovery.RequestID || len(bound.Record.DeviceAliases) != 2 {
+		t.Fatalf("alias recovery record=%+v", bound.Record)
+	}
+}
+
+func testDeviceAliases() []activation.DeviceAliasInput {
+	return []activation.DeviceAliasInput{
+		{
+			Target: "macos-arm64",
+			Fingerprint: activation.DeviceAliasFingerprint{
+				Version: "uclaw-usb-v2",
+				SHA256:  strings.Repeat("aa", 32),
+			},
+			Evidence: activation.DeviceAliasEvidence{
+				Target: "macos-arm64", Platform: "darwin", Arch: "arm64", Source: "macos-diskutil",
+				BusProtocol: "USB", DeviceLocation: "external", Vendor: "ACME", Product: "FLASH DRIVE",
+				Revision: "1.00", Serial: "SN123", CapacityBytes: 64_000_000_000,
+				VolumeUUID: "4f2b2fc0-3e70-49a0-9dfc-0e012aef0001", MediaUUID: "7A9877AE-2941-4F87-83EF-C9B7DF8DA111",
+			},
+		},
+		{
+			Target: "win-x64",
+			Fingerprint: activation.DeviceAliasFingerprint{
+				Version: "uclaw-usb-v1",
+				SHA256:  strings.Repeat("bb", 32),
+			},
+			Evidence: activation.DeviceAliasEvidence{
+				Target: "win-x64", Platform: "win32", Arch: "x64", Source: "windows-storage-descriptor",
+				BusType: "USB", Vendor: "ACME", Product: "FLASH DRIVE", Revision: "1.00",
+				Serial: "SN123", CapacityBytes: 64_000_000_000, UniqueDescriptorSHA256: strings.Repeat("cc", 32),
+			},
+		},
 	}
 }

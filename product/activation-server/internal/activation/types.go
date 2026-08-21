@@ -90,6 +90,7 @@ type BoundRecord struct {
 	RequestFingerprint        [32]byte
 	FingerprintVersion        string
 	FingerprintSHA256         string
+	DeviceAliases             []DeviceAliasInput
 	KeyID                     string
 	NotBefore                 time.Time
 	ExpiresAt                 time.Time
@@ -124,6 +125,7 @@ type ValidateBindingInput struct {
 	RequestFingerprint   [32]byte
 	FingerprintVersion   string
 	FingerprintSHA256    string
+	DeviceAliases        []DeviceAliasInput
 }
 
 type BeginBindingResult struct {

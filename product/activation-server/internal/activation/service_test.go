@@ -263,6 +263,24 @@ func TestActivateAcceptsCrossSystemDeviceAliasesWithoutChangingCredentialV1(t *t
 	if input.DeviceAliases[0].Fingerprint.SHA256 == input.DeviceAliases[1].Fingerprint.SHA256 {
 		t.Fatal("fixture does not model different OS fingerprints")
 	}
+	if len(repository.validateInput.DeviceAliases) != 2 || repository.validateInput.DeviceAliases[0].Target != "macos-arm64" ||
+		repository.validateInput.DeviceAliases[1].Target != "win-x64" {
+		t.Fatalf("validate aliases not canonical: %+v", repository.validateInput.DeviceAliases)
+	}
+	if len(repository.beginInput.Record.DeviceAliases) != 2 || len(repository.completeIn.Record.DeviceAliases) != 2 {
+		t.Fatalf("aliases not carried to persistence: begin=%+v complete=%+v", repository.beginInput.Record.DeviceAliases, repository.completeIn.Record.DeviceAliases)
+	}
+}
+
+func TestActivateLegacyRequestKeepsDeviceAliasesEmpty(t *testing.T) {
+	repository := &fakeRepository{}
+	service := newTestService(t, repository, &fakeSigner{}, &fakeEnvelope{})
+	if _, err := service.Activate(context.Background(), fixtureInput()); err != nil {
+		t.Fatal(err)
+	}
+	if repository.validateInput.DeviceAliases != nil || repository.beginInput.Record.DeviceAliases != nil || repository.completeIn.Record.DeviceAliases != nil {
+		t.Fatalf("legacy aliases persisted: validate=%+v begin=%+v complete=%+v", repository.validateInput.DeviceAliases, repository.beginInput.Record.DeviceAliases, repository.completeIn.Record.DeviceAliases)
+	}
 }
 
 func TestCanonicalRequestFingerprintIncludesDeviceAliasesWhenPresent(t *testing.T) {

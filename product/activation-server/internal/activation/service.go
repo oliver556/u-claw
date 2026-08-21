@@ -159,6 +159,7 @@ func (service *Service) Activate(ctx context.Context, input ActivateInput) (Acti
 		ActivationCodeDigest: array32(digest),
 		IdempotencyKey:       input.IdempotencyKey, RequestFingerprint: fingerprint,
 		FingerprintVersion: input.FingerprintVersion, FingerprintSHA256: input.FingerprintSHA256,
+		DeviceAliases: canonicalDeviceAliases(input.DeviceAliases),
 	}); err != nil {
 		service.recordDBFailure("validate_binding", err)
 		return ActivateResult{}, err
@@ -356,7 +357,8 @@ func (service *Service) newBindingRecord(input ActivateInput, fingerprint [32]by
 		ActivationID: activationID, InventoryID: inventoryID, UsernameID: inventoryID,
 		DeviceID: deviceID, LicenseID: licenseID, LeaseToken: leaseToken, LeaseExpiresAt: now.Add(service.leaseTTL),
 		RequestFingerprint: fingerprint, FingerprintVersion: input.FingerprintVersion, FingerprintSHA256: input.FingerprintSHA256,
-		KeyID: service.keyID, NotBefore: now, ExpiresAt: now.Add(service.licenseTTL), Revision: 1,
+		DeviceAliases: canonicalDeviceAliases(input.DeviceAliases),
+		KeyID:         service.keyID, NotBefore: now, ExpiresAt: now.Add(service.licenseTTL), Revision: 1,
 		StartupSecretSalt: salt, StartupSecretHash: startupSecretHash(startupSecret, salt), RequestID: input.RequestID,
 		AuditEventID: auditEventID, StatusEventID: statusEventID, BoundAuditEventID: boundAuditEventID, Stage: "requested",
 	}, nil

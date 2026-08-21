@@ -14,7 +14,7 @@ import (
 const (
 	migrationAdvisoryLockID int64 = 0x55434c41574d4947
 	migrationLockSQL              = "SELECT pg_advisory_xact_lock($1)"
-	latestMigrationVersion  int64 = 5
+	latestMigrationVersion  int64 = 6
 )
 
 const migrationLedgerSQL = `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -37,6 +37,9 @@ var deviceAccessProxyMigration string
 
 //go:embed migrations/005_release_policy.sql
 var releasePolicyMigration string
+
+//go:embed migrations/006_device_aliases.sql
+var deviceAliasesMigration string
 
 var initialMigrationChecksum = func() []byte {
 	digest := sha256.Sum256([]byte(initialMigration))
@@ -63,6 +66,11 @@ var releasePolicyMigrationChecksum = func() []byte {
 	return digest[:]
 }()
 
+var deviceAliasesMigrationChecksum = func() []byte {
+	digest := sha256.Sum256([]byte(deviceAliasesMigration))
+	return digest[:]
+}()
+
 func InitialMigrationSQL() string {
 	return initialMigration
 }
@@ -76,6 +84,8 @@ func AdminMigrationSQL() string { return adminMigration }
 func DeviceAccessProxyMigrationSQL() string { return deviceAccessProxyMigration }
 
 func ReleasePolicyMigrationSQL() string { return releasePolicyMigration }
+
+func DeviceAliasesMigrationSQL() string { return deviceAliasesMigration }
 
 type migration struct {
 	version  int64
@@ -105,6 +115,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		{version: 3, contents: adminMigration, checksum: adminMigrationChecksum},
 		{version: 4, contents: deviceAccessProxyMigration, checksum: deviceAccessProxyMigrationChecksum},
 		{version: 5, contents: releasePolicyMigration, checksum: releasePolicyMigrationChecksum},
+		{version: 6, contents: deviceAliasesMigration, checksum: deviceAliasesMigrationChecksum},
 	} {
 		var checksum []byte
 		err = tx.QueryRow(ctx, "SELECT checksum FROM schema_migrations WHERE version = $1", candidate.version).Scan(&checksum)
@@ -140,6 +151,7 @@ func VerifyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		{version: 3, checksum: adminMigrationChecksum},
 		{version: 4, checksum: deviceAccessProxyMigrationChecksum},
 		{version: 5, checksum: releasePolicyMigrationChecksum},
+		{version: 6, checksum: deviceAliasesMigrationChecksum},
 	} {
 		var checksum []byte
 		err := pool.QueryRow(ctx, "SELECT checksum FROM schema_migrations WHERE version = $1", candidate.version).Scan(&checksum)
