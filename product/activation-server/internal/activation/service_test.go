@@ -20,6 +20,7 @@ type fakeRepository struct {
 	complete           BoundRecord
 	completeErr        error
 	beginInput         BeginBindingInput
+	validateInput      ValidateBindingInput
 	completeIn         CompleteBindingInput
 	beginCalls         int
 	finishCalls        int
@@ -30,8 +31,9 @@ type fakeRepository struct {
 	recoveryErr        error
 }
 
-func (repository *fakeRepository) ValidateBinding(context.Context, ValidateBindingInput) error {
+func (repository *fakeRepository) ValidateBinding(_ context.Context, input ValidateBindingInput) error {
 	repository.validateCalls++
+	repository.validateInput = input
 	return repository.validateErr
 }
 
@@ -206,6 +208,20 @@ func TestActivateRejectsInvalidOpenAPIInputBeforeDependencies(t *testing.T) {
 		"bad semver":            func(input *ActivateInput) { input.ClientVersion = "v1" },
 		"short idempotency":     func(input *ActivateInput) { input.IdempotencyKey = "short" },
 		"bad request ID":        func(input *ActivateInput) { input.RequestID = "bad request" },
+		"duplicate alias target": func(input *ActivateInput) {
+			input.DeviceAliases = append(fixtureDeviceAliases(), fixtureDeviceAliases()[0])
+		},
+		"alias target mismatch": func(input *ActivateInput) {
+			input.DeviceAliases = fixtureDeviceAliases()
+			input.DeviceAliases[1].Target = "win-x64"
+		},
+		"macos alias with windows bus": func(input *ActivateInput) {
+			input.DeviceAliases = fixtureDeviceAliases()
+			input.DeviceAliases[1].Evidence.BusType = "USB"
+		},
+		"too many aliases": func(input *ActivateInput) {
+			input.DeviceAliases = []DeviceAliasInput{{Target: "a"}, {Target: "b"}, {Target: "c"}, {Target: "d"}, {Target: "e"}}
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -222,6 +238,66 @@ func TestActivateRejectsInvalidOpenAPIInputBeforeDependencies(t *testing.T) {
 				t.Fatal("invalid input reached dependencies")
 			}
 		})
+	}
+}
+
+func TestActivateAcceptsCrossSystemDeviceAliasesWithoutChangingCredentialV1(t *testing.T) {
+	repository := &fakeRepository{}
+	service := newTestService(t, repository, &fakeSigner{}, &fakeEnvelope{})
+	input := fixtureInput()
+	input.DeviceAliases = fixtureDeviceAliases()
+	result, err := service.Activate(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Material) == 0 || repository.validateCalls != 1 {
+		t.Fatal("aliased activation did not complete")
+	}
+	var material activationMaterial
+	if err := json.Unmarshal(result.Material, &material); err != nil {
+		t.Fatal(err)
+	}
+	if material.License.USBFingerprint.Scheme != "uclaw-usb-v1" || material.License.USBFingerprint.SHA256 != input.FingerprintSHA256 {
+		t.Fatalf("credential fingerprint changed: %+v", material.License.USBFingerprint)
+	}
+	if input.DeviceAliases[0].Fingerprint.SHA256 == input.DeviceAliases[1].Fingerprint.SHA256 {
+		t.Fatal("fixture does not model different OS fingerprints")
+	}
+}
+
+func TestCanonicalRequestFingerprintIncludesDeviceAliasesWhenPresent(t *testing.T) {
+	digest := bytes.Repeat([]byte{1}, 32)
+	input := fixtureInput()
+	legacy, err := canonicalRequestFingerprint(digest, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.DeviceAliases = fixtureDeviceAliases()
+	withAliases, err := canonicalRequestFingerprint(digest, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reordered := input
+	reordered.DeviceAliases = []DeviceAliasInput{input.DeviceAliases[1], input.DeviceAliases[0]}
+	reorderedFingerprint, err := canonicalRequestFingerprint(digest, reordered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := input
+	changed.DeviceAliases = fixtureDeviceAliases()
+	changed.DeviceAliases[1].Fingerprint.SHA256 = strings.Repeat("d", 64)
+	changedFingerprint, err := canonicalRequestFingerprint(digest, changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy == withAliases {
+		t.Fatal("aliases did not affect idempotency fingerprint")
+	}
+	if withAliases != reorderedFingerprint {
+		t.Fatal("alias order changed idempotency fingerprint")
+	}
+	if withAliases == changedFingerprint {
+		t.Fatal("alias fingerprint change did not affect idempotency fingerprint")
 	}
 }
 
@@ -456,5 +532,35 @@ func fixtureInput() ActivateInput {
 		ActivationCode:     "TESTTESTTESTTESTTESTTEST12",
 		FingerprintVersion: "uclaw-usb-v1", FingerprintSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ClientVersion: "1.0.0", IdempotencyKey: "activation-fixture-001", RequestID: "req_fixture_001",
+	}
+}
+
+func fixtureDeviceAliases() []DeviceAliasInput {
+	return []DeviceAliasInput{
+		{
+			Target: "win-x64",
+			Fingerprint: DeviceAliasFingerprint{
+				Version: "uclaw-usb-v1",
+				SHA256:  strings.Repeat("a", 64),
+			},
+			Evidence: DeviceAliasEvidence{
+				Target: "win-x64", Platform: "win32", Arch: "x64", Source: "windows-storage-descriptor",
+				BusType: "USB", Vendor: "ACME", Product: "FLASH DRIVE", Revision: "1.00", Serial: "SN123",
+				CapacityBytes: 64_000_000_000, UniqueDescriptorSHA256: strings.Repeat("b", 64),
+			},
+		},
+		{
+			Target: "macos-arm64",
+			Fingerprint: DeviceAliasFingerprint{
+				Version: "uclaw-usb-v2",
+				SHA256:  strings.Repeat("c", 64),
+			},
+			Evidence: DeviceAliasEvidence{
+				Target: "macos-arm64", Platform: "darwin", Arch: "arm64", Source: "macos-diskutil",
+				BusProtocol: "USB", DeviceLocation: "external", Vendor: "ACME", Product: "FLASH DRIVE", Revision: "1.00",
+				Serial: "SN123", CapacityBytes: 64_000_000_000, VolumeUUID: "4f2b2fc0-3e70-49a0-9dfc-0e012aef0001",
+				MediaUUID: "7A9877AE-2941-4F87-83EF-C9B7DF8DA111",
+			},
+		},
 	}
 }

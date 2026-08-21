@@ -17,6 +17,7 @@ import (
 type fakePublicService struct {
 	activateResult    activation.ActivateResult
 	activateErr       error
+	activateInput     activation.ActivateInput
 	commitErr         error
 	status            lifecycle.Response
 	statusErr         error
@@ -34,7 +35,8 @@ func (service *fakePublicService) Current(context.Context) (policy.ClientPolicy,
 func (service *fakePublicService) Recover(context.Context, lifecycle.RecoverInput) ([]byte, error) {
 	return service.recovered, nil
 }
-func (service *fakePublicService) Activate(context.Context, activation.ActivateInput) (activation.ActivateResult, error) {
+func (service *fakePublicService) Activate(_ context.Context, input activation.ActivateInput) (activation.ActivateResult, error) {
+	service.activateInput = input
 	return service.activateResult, service.activateErr
 }
 
@@ -107,6 +109,32 @@ func TestPublicHandlerUsesStrictBoundedJSONAndNoRedirect(t *testing.T) {
 	}
 }
 
+func TestPublicHandlerForwardsDeviceAliasesAndRejectsMutableEvidenceFields(t *testing.T) {
+	service := &fakePublicService{activateResult: activation.ActivateResult{Material: []byte(`{"activationId":"act_fixture_001"}`)}}
+	handler := NewPublicHandler(PublicHandlerOptions{Activation: service, Lifecycle: service, RequestIDs: strings.NewReader(strings.Repeat("a", 64))})
+	body := activationBodyWithDeviceAliases("")
+	request := httptest.NewRequest(http.MethodPost, "/v1/activations", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(service.activateInput.DeviceAliases) != 2 ||
+		service.activateInput.DeviceAliases[0].Fingerprint.SHA256 == service.activateInput.DeviceAliases[1].Fingerprint.SHA256 {
+		t.Fatalf("aliases=%+v", service.activateInput.DeviceAliases)
+	}
+	for _, field := range []string{`"volumeName":"U-Claw"`, `"mountPath":"/Volumes/U-Claw"`, `"driveLetter":"E:"`} {
+		request := httptest.NewRequest(http.MethodPost, "/v1/activations", strings.NewReader(activationBodyWithDeviceAliases(field)))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("mutable field %s accepted: %d %s", field, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestPublicHandlerProjectsStableRedactedErrors(t *testing.T) {
 	secret := "Authorization: Bearer private-secret"
 	service := &fakePublicService{activateErr: errors.Join(activation.ErrActivationServiceUnavailable, errors.New(secret))}
@@ -126,6 +154,14 @@ func TestPublicHandlerProjectsStableRedactedErrors(t *testing.T) {
 	if len(projected) != 6 || projected["code"] != "ACTIVATION_SERVICE_UNAVAILABLE" || projected["requestId"] == "" {
 		t.Fatalf("error=%#v", projected)
 	}
+}
+
+func activationBodyWithDeviceAliases(extraMacEvidence string) string {
+	extra := ""
+	if extraMacEvidence != "" {
+		extra = "," + extraMacEvidence
+	}
+	return `{"activationCode":"TESTTESTTESTTESTTESTTEST12","usbFingerprint":{"version":"uclaw-usb-v1","sha256":"` + strings.Repeat("a", 64) + `"},"deviceAliases":[{"target":"win-x64","fingerprint":{"version":"uclaw-usb-v1","sha256":"` + strings.Repeat("a", 64) + `"},"evidence":{"target":"win-x64","platform":"win32","arch":"x64","source":"windows-storage-descriptor","busType":"USB","vendor":"ACME","product":"FLASH DRIVE","revision":"1.00","serial":"SN123","capacityBytes":64000000000,"uniqueDescriptorSha256":"` + strings.Repeat("b", 64) + `"}},{"target":"macos-arm64","fingerprint":{"version":"uclaw-usb-v2","sha256":"` + strings.Repeat("c", 64) + `"},"evidence":{"target":"macos-arm64","platform":"darwin","arch":"arm64","source":"macos-diskutil","busProtocol":"USB","deviceLocation":"external","vendor":"ACME","product":"FLASH DRIVE","revision":"1.00","serial":"SN123","capacityBytes":64000000000,"volumeUuid":"4f2b2fc0-3e70-49a0-9dfc-0e012aef0001","mediaUuid":"7A9877AE-2941-4F87-83EF-C9B7DF8DA111"` + extra + `}}],"clientVersion":"1.0.0","idempotencyKey":"activation-001"}`
 }
 
 func TestActivateErrorReportsBindingStageAndActivationID(t *testing.T) {

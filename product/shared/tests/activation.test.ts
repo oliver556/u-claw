@@ -37,6 +37,56 @@ describe("activation API contract", () => {
 		expect(() => ActivationRequestSchema.parse({ ...request, username: "UCLAW-00000001" })).toThrow();
 	});
 
+	it("accepts controlled cross-system aliases without requiring equal fingerprints", () => {
+		const aliased = {
+			...request,
+			deviceAliases: [
+				{
+					target: "win-x64",
+					fingerprint: { version: "uclaw-usb-v1", sha256: "a".repeat(64) },
+					evidence: {
+						target: "win-x64",
+						platform: "win32",
+						arch: "x64",
+						source: "windows-storage-descriptor",
+						busType: "USB",
+						vendor: "ACME",
+						product: "FLASH DRIVE",
+						serial: "SN123",
+						capacityBytes: 64_000_000_000,
+					},
+				},
+				{
+					target: "macos-arm64",
+					fingerprint: { version: "uclaw-usb-v2", sha256: "c".repeat(64) },
+					evidence: {
+						target: "macos-arm64",
+						platform: "darwin",
+						arch: "arm64",
+						source: "macos-diskutil",
+						busProtocol: "USB",
+						deviceLocation: "external",
+						vendor: "ACME",
+						product: "FLASH DRIVE",
+						serial: "SN123",
+						capacityBytes: 64_000_000_000,
+						volumeUuid: "4f2b2fc0-3e70-49a0-9dfc-0e012aef0001",
+					},
+				},
+			],
+		};
+		const parsed = ActivationRequestSchema.parse(aliased);
+		expect(parsed.deviceAliases?.[0]?.fingerprint.sha256).not.toBe(parsed.deviceAliases?.[1]?.fingerprint.sha256);
+		expect(() => ActivationRequestSchema.parse({
+			...aliased,
+			deviceAliases: [aliased.deviceAliases[0], { ...aliased.deviceAliases[1], target: "win-x64" }],
+		})).toThrow();
+		expect(() => ActivationRequestSchema.parse({
+			...aliased,
+			deviceAliases: [{ ...aliased.deviceAliases[1], evidence: { ...aliased.deviceAliases[1].evidence, mountPath: "/Volumes/U-Claw" } }],
+		})).toThrow();
+	});
+
 	it("locks the commercial device credential fields without server API keys", () => {
 		const credential = {
 			schemaVersion: 2,

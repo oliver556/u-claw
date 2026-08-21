@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -111,10 +112,11 @@ type builtinCredentialArtifact struct {
 }
 
 var (
-	identifierPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
-	idempotencyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
-	sha256Pattern      = regexp.MustCompile(`^[a-f0-9]{64}$`)
-	semverPattern      = regexp.MustCompile(`^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
+	identifierPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
+	idempotencyPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
+	sha256Pattern       = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	semverPattern       = regexp.MustCompile(`^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
+	hardwareUUIDPattern = regexp.MustCompile(`^[A-Fa-f0-9][A-Fa-f0-9-]{6,62}[A-Fa-f0-9]$`)
 )
 
 func NewService(options ServiceOptions) (*Service, error) {
@@ -376,7 +378,12 @@ func canonicalRequestFingerprint(digest []byte, input ActivateInput) ([32]byte, 
 	if len(digest) != sha256.Size {
 		return [32]byte{}, errors.New("invalid activation request")
 	}
-	encoded, _ := json.Marshal([]any{requestFingerprintDomain, hex.EncodeToString(digest), input.FingerprintVersion, input.FingerprintSHA256, input.ClientVersion})
+	base := []any{requestFingerprintDomain, hex.EncodeToString(digest), input.FingerprintVersion, input.FingerprintSHA256, input.ClientVersion}
+	if len(input.DeviceAliases) == 0 {
+		encoded, _ := json.Marshal(base)
+		return sha256.Sum256(encoded), nil
+	}
+	encoded, _ := json.Marshal(append(base, canonicalDeviceAliases(input.DeviceAliases)))
 	return sha256.Sum256(encoded), nil
 }
 
@@ -390,7 +397,76 @@ func validateActivateInput(input ActivateInput) error {
 	if err != nil || normalizedCode != input.ActivationCode {
 		return errors.New("invalid activation input")
 	}
+	if err := validateDeviceAliases(input.DeviceAliases); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateDeviceAliases(aliases []DeviceAliasInput) error {
+	if len(aliases) == 0 {
+		return nil
+	}
+	if len(aliases) > 4 {
+		return errors.New("invalid activation input")
+	}
+	seen := make(map[string]struct{}, len(aliases))
+	for _, alias := range aliases {
+		if _, ok := seen[alias.Target]; ok {
+			return errors.New("invalid activation input")
+		}
+		seen[alias.Target] = struct{}{}
+		if alias.Target != alias.Evidence.Target || (alias.Target != "win-x64" && alias.Target != "macos-arm64") ||
+			(alias.Fingerprint.Version != "uclaw-usb-v1" && alias.Fingerprint.Version != "uclaw-usb-v2") ||
+			!sha256Pattern.MatchString(alias.Fingerprint.SHA256) {
+			return errors.New("invalid activation input")
+		}
+		if alias.Target == "win-x64" {
+			if !validWindowsAliasEvidence(alias.Evidence) {
+				return errors.New("invalid activation input")
+			}
+			continue
+		}
+		if !validMacOSAliasEvidence(alias.Evidence) {
+			return errors.New("invalid activation input")
+		}
+	}
+	return nil
+}
+
+func validWindowsAliasEvidence(evidence DeviceAliasEvidence) bool {
+	return evidence.Platform == "win32" && evidence.Arch == "x64" && evidence.Source == "windows-storage-descriptor" &&
+		evidence.BusType == "USB" && evidence.BusProtocol == "" && evidence.DeviceLocation == "" &&
+		validEvidenceString(evidence.Vendor) && validEvidenceString(evidence.Product) && validOptionalEvidenceString(evidence.Revision) &&
+		validEvidenceString(evidence.Serial) && evidence.CapacityBytes > 0 &&
+		(evidence.UniqueDescriptorSHA256 == "" || sha256Pattern.MatchString(evidence.UniqueDescriptorSHA256)) &&
+		evidence.VolumeUUID == "" && evidence.MediaUUID == ""
+}
+
+func validMacOSAliasEvidence(evidence DeviceAliasEvidence) bool {
+	location := evidence.DeviceLocation == "external" || evidence.DeviceLocation == "removable" || evidence.DeviceLocation == "ejectable"
+	return evidence.Platform == "darwin" && evidence.Arch == "arm64" && evidence.Source == "macos-diskutil" &&
+		evidence.BusType == "" && evidence.BusProtocol == "USB" && location &&
+		validEvidenceString(evidence.Vendor) && validEvidenceString(evidence.Product) && validOptionalEvidenceString(evidence.Revision) &&
+		validEvidenceString(evidence.Serial) && evidence.CapacityBytes > 0 && hardwareUUIDPattern.MatchString(evidence.VolumeUUID) &&
+		(evidence.MediaUUID == "" || hardwareUUIDPattern.MatchString(evidence.MediaUUID)) && evidence.UniqueDescriptorSHA256 == ""
+}
+
+func validEvidenceString(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return trimmed == value && len(trimmed) >= 1 && len(trimmed) <= 256
+}
+
+func validOptionalEvidenceString(value string) bool {
+	return value == "" || validEvidenceString(value)
+}
+
+func canonicalDeviceAliases(aliases []DeviceAliasInput) []DeviceAliasInput {
+	canonical := append([]DeviceAliasInput(nil), aliases...)
+	sort.Slice(canonical, func(left, right int) bool {
+		return canonical[left].Target < canonical[right].Target
+	})
+	return canonical
 }
 
 func newActivationMaterial(record BoundRecord, pending pendingMaterial, signature string) activationMaterial {

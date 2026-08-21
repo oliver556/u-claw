@@ -4,6 +4,7 @@ import {
   StartupCredentialArtifactSchema,
   StartupLicenseArtifactSchema,
 } from "./license-lifecycle.js";
+import { DualSystemUsbDeviceAliasSchema } from "./dual-system-usb.js";
 
 export const ACTIVATION_CONTRACT_VERSION = 1 as const;
 
@@ -43,9 +44,16 @@ export const ActivationRequestSchema = z.object({
     version: z.literal("uclaw-usb-v1"),
     sha256: Sha256Schema,
   }).strict(),
+  deviceAliases: z.array(DualSystemUsbDeviceAliasSchema).min(1).max(4).optional(),
   clientVersion: SemverSchema,
   idempotencyKey: IdempotencyKeySchema,
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (!value.deviceAliases) return;
+  const targets = new Set(value.deviceAliases.map((alias) => alias.target));
+  if (targets.size !== value.deviceAliases.length) {
+    context.addIssue({ code: "custom", path: ["deviceAliases"], message: "Device aliases must be target-distinct." });
+  }
+});
 export type ActivationRequest = z.infer<typeof ActivationRequestSchema>;
 
 export const BuiltinCredentialArtifactSchema = z.object({

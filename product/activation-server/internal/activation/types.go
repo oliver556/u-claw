@@ -22,9 +22,39 @@ type ActivateInput struct {
 	ActivationCode     string
 	FingerprintVersion string
 	FingerprintSHA256  string
+	DeviceAliases      []DeviceAliasInput
 	ClientVersion      string
 	IdempotencyKey     string
 	RequestID          string
+}
+
+type DeviceAliasInput struct {
+	Target      string                 `json:"target"`
+	Fingerprint DeviceAliasFingerprint `json:"fingerprint"`
+	Evidence    DeviceAliasEvidence    `json:"evidence"`
+}
+
+type DeviceAliasFingerprint struct {
+	Version string `json:"version"`
+	SHA256  string `json:"sha256"`
+}
+
+type DeviceAliasEvidence struct {
+	Target                 string `json:"target"`
+	Platform               string `json:"platform"`
+	Arch                   string `json:"arch"`
+	Source                 string `json:"source"`
+	BusType                string `json:"busType,omitempty"`
+	BusProtocol            string `json:"busProtocol,omitempty"`
+	DeviceLocation         string `json:"deviceLocation,omitempty"`
+	Vendor                 string `json:"vendor"`
+	Product                string `json:"product"`
+	Revision               string `json:"revision,omitempty"`
+	Serial                 string `json:"serial"`
+	CapacityBytes          int64  `json:"capacityBytes"`
+	UniqueDescriptorSHA256 string `json:"uniqueDescriptorSha256,omitempty"`
+	VolumeUUID             string `json:"volumeUuid,omitempty"`
+	MediaUUID              string `json:"mediaUuid,omitempty"`
 }
 
 type ActivateResult struct {

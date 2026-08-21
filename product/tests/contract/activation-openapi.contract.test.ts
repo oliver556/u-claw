@@ -204,8 +204,15 @@ describe("activation OpenAPI contract", () => {
       .toEqual({ $ref: "#/components/schemas/HealthResponse" });
     expect(document.components.schemas.ActivationRequest.properties).not.toHaveProperty("username");
     expect(Object.keys(document.components.schemas.ActivationRequest.properties ?? {})).toEqual(
-      ["activationCode", "usbFingerprint", "clientVersion", "idempotencyKey"],
+      ["activationCode", "usbFingerprint", "deviceAliases", "clientVersion", "idempotencyKey"],
     );
+    expect(document.components.schemas.ActivationRequest.properties?.deviceAliases).toMatchObject({
+      type: "array",
+      minItems: 1,
+      maxItems: 4,
+      items: { $ref: "#/components/schemas/DeviceAlias" },
+    });
+    expect(JSON.stringify(document.components.schemas.DeviceAlias)).not.toMatch(/volumeName|mountPath|driveLetter/u);
     expect(document.components.schemas.BuiltinCredential.properties).toEqual({
       schemaVersion: { const: 2 },
       deviceId: { $ref: "#/components/schemas/Identifier" },

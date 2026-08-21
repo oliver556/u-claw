@@ -122,8 +122,9 @@ type activationRequest struct {
 		Version string `json:"version"`
 		SHA256  string `json:"sha256"`
 	} `json:"usbFingerprint"`
-	ClientVersion  string `json:"clientVersion"`
-	IdempotencyKey string `json:"idempotencyKey"`
+	DeviceAliases  []activation.DeviceAliasInput `json:"deviceAliases,omitempty"`
+	ClientVersion  string                        `json:"clientVersion"`
+	IdempotencyKey string                        `json:"idempotencyKey"`
 }
 
 func (handler *publicHandler) activate(writer http.ResponseWriter, request *http.Request, requestID string) {
@@ -139,7 +140,7 @@ func (handler *publicHandler) activate(writer http.ResponseWriter, request *http
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), operationTimeout)
 	defer cancel()
-	result, err := handler.activation.Activate(ctx, activation.ActivateInput{ActivationCode: input.ActivationCode, FingerprintVersion: input.USBFingerprint.Version, FingerprintSHA256: input.USBFingerprint.SHA256, ClientVersion: input.ClientVersion, IdempotencyKey: input.IdempotencyKey, RequestID: requestID})
+	result, err := handler.activation.Activate(ctx, activation.ActivateInput{ActivationCode: input.ActivationCode, FingerprintVersion: input.USBFingerprint.Version, FingerprintSHA256: input.USBFingerprint.SHA256, DeviceAliases: input.DeviceAliases, ClientVersion: input.ClientVersion, IdempotencyKey: input.IdempotencyKey, RequestID: requestID})
 	if err != nil {
 		if result.ActivationID != "" {
 			stage = "server_bound"
