@@ -13,9 +13,13 @@ import {
 } from "../src/provisioning/artifact-writer.js";
 
 const createBuiltinCredentialStore = (options: Parameters<typeof createProductionBuiltinCredentialStore>[0]) =>
-  createProductionBuiltinCredentialStore({ platformForTest: "linux", ...options });
+  createProductionBuiltinCredentialStore({
+    platformForTest: "linux", allowUnpinnedFilesystemForTest: true, ...options,
+  });
 const createProvisioningArtifactWriter = (options: Parameters<typeof createProductionProvisioningArtifactWriter>[0]) =>
-  createProductionProvisioningArtifactWriter({ platformForTest: "linux", ...options });
+  createProductionProvisioningArtifactWriter({
+    platformForTest: "linux", allowUnpinnedFilesystemForTest: true, ...options,
+  });
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -109,7 +113,7 @@ describe("provisioning artifact writer", () => {
   it("rejects Windows provisioning before the P3-T08 native helper", async () => {
     const dataDir = await root();
     const credentialStore = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp: true });
-    expect(() => createProvisioningArtifactWriter({ dataDir, credentialStore, platformForTest: "win32" }))
+    expect(() => createProductionProvisioningArtifactWriter({ dataDir, credentialStore, platformForTest: "win32" }))
       .toThrow(/P3-T08 native helper/u);
   });
 

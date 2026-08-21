@@ -30,7 +30,9 @@ async function setup() {
   const dataDir = await mkdtemp(join(tmpdir(), "uclaw-model-router-"));
   roots.push(dataDir);
   const providers = createProviderStore({ dataDir, platformForTest: "linux" });
-  const credentials = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp: true, platformForTest: "linux" });
+  const credentials = createBuiltinCredentialStore({
+    dataDir, allowLoopbackHttp: true, platformForTest: "linux", allowUnpinnedFilesystemForTest: true,
+  });
   const credential = typedCredential();
   await credentials.provision(credential);
   const builtin = vi.fn(async () => "builtin-result");
@@ -57,6 +59,7 @@ describe("model source router", () => {
     const routing = createMainProcessModelRouting({
       dataDir,
       platformForTest: "linux",
+      allowUnpinnedFilesystemForTest: true,
       providers,
       executors,
     });
@@ -77,6 +80,7 @@ describe("model source router", () => {
     const routing = createMainProcessModelRouting({
       dataDir,
       platformForTest: "linux",
+      allowUnpinnedFilesystemForTest: true,
       providers,
       executors: { domestic: vi.fn(), custom: vi.fn() },
     });
@@ -104,6 +108,7 @@ describe("model source router", () => {
     const routing = createMainProcessModelRouting({
       dataDir,
       platformForTest: "linux",
+      allowUnpinnedFilesystemForTest: true,
       providers,
       executors: { domestic: vi.fn(), custom: vi.fn() },
     });

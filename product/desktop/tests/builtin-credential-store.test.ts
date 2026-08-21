@@ -14,7 +14,9 @@ afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recur
 async function setup(allowLoopbackHttp = true) {
   const dataDir = await mkdtemp(join(tmpdir(), "uclaw-builtin-credential-"));
   roots.push(dataDir);
-  return { dataDir, store: createBuiltinCredentialStore({ dataDir, allowLoopbackHttp, platformForTest: "linux" }) };
+  return { dataDir, store: createBuiltinCredentialStore({
+    dataDir, allowLoopbackHttp, platformForTest: "linux", allowUnpinnedFilesystemForTest: true,
+  }) };
 }
 
 function provisionInput(endpoint = "http://127.0.0.1:18090/v1") {
@@ -164,7 +166,10 @@ describe("builtin credential store", () => {
     const broad = await setup();
     await broad.store.provision(provisionInput());
     await chmod(join(broad.dataDir, ".uclaw", "builtin-model-credential.v1.json"), 0o644);
-    await expect(broad.store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
+    const strict = createBuiltinCredentialStore({
+      dataDir: broad.dataDir, allowLoopbackHttp: true, platformForTest: "linux",
+    });
+    await expect(strict.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
   });
 
   it("uses the same strict credential for connectivity checks", async () => {

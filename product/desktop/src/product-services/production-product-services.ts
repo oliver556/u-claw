@@ -117,6 +117,7 @@ export interface CreateProductionProductServicesOptions {
   environment?: NodeJS.ProcessEnv;
   artifactWriter?: ProvisioningArtifactWriter;
   fetch?: typeof fetch;
+  platformForTest?: NodeJS.Platform;
 }
 
 export interface CreateProductionProductDomainModuleOptions extends CreateProductionProductServicesOptions {
@@ -184,6 +185,7 @@ export function createProductionProductServices({
   environment = process.env,
   artifactWriter,
   fetch,
+  platformForTest,
 }: CreateProductionProductServicesOptions): ProductionProductServices {
   const configuredValues = [
     environment.UCLAW_LICENSE_SERVICE_URL,
@@ -218,7 +220,8 @@ export function createProductionProductServices({
   });
   const writer = artifactWriter ?? createProvisioningArtifactWriter({
     dataDir,
-    credentialStore: createBuiltinCredentialStore({ dataDir }),
+    platformForTest,
+    credentialStore: createBuiltinCredentialStore({ dataDir, platformForTest }),
   });
   return {
     licenseClient,

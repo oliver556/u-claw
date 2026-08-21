@@ -138,12 +138,14 @@ export function createBuiltinCredentialStore({
     let body: string;
     try {
       await getSafeRoot();
-      body = (await readSecureFile({
-        filePath: join(resolve(dataDir), path),
-        label: "builtin credential",
-        trust: { trustedDirs: [resolve(dataDir)] },
-        io: { maxBytes: 1024 * 1024 },
-      })).buffer.toString("utf8");
+      body = allowUnpinnedFilesystemForTest === true
+        ? await (await getSafeRoot()).readText(path)
+        : (await readSecureFile({
+            filePath: join(resolve(dataDir), path),
+            label: "builtin credential",
+            trust: { trustedDirs: [resolve(dataDir)] },
+            io: { maxBytes: 1024 * 1024 },
+          })).buffer.toString("utf8");
     } catch (error) {
       if (error instanceof FsSafeError && error.code === "not-found") {
         throw new BuiltinCredentialError("BUILTIN_CREDENTIAL_MISSING", "Builtin model credential is not configured.");

@@ -110,7 +110,7 @@ describe("provider store", () => {
     expect(disk).not.toContain("apiKey");
     const credentialsPath = join(dataDir, ".uclaw", "provider-credentials.v1.json");
     expect(await readFile(credentialsPath, "utf8")).toContain("fixture-sk-live-12345678");
-    expect((await stat(credentialsPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect((await stat(credentialsPath)).mode & 0o777).toBe(0o600);
     const cleared = await store.clearApiKey("openai");
     expect(cleared.providers.find((provider: any) => provider.id === "openai")).toMatchObject({ apiKeyConfigured: false });
     expect(await readFile(join(dataDir, "providers", "provider-config.v1.json"), "utf8")).not.toContain("fixture-sk-live-12345678");

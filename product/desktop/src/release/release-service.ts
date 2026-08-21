@@ -72,7 +72,14 @@ const operationId = () => `operation-${token()}`;
 
 async function syncFile(path: string): Promise<void> {
   const handle = await open(path, constants.O_RDONLY);
-  try { await handle.sync(); } finally { await handle.close(); }
+  try {
+    await handle.sync().catch((error: NodeJS.ErrnoException) => {
+      if (
+        process.platform !== "win32" ||
+        !["EINVAL", "ENOTSUP", "EPERM"].includes(error.code ?? "")
+      ) throw error;
+    });
+  } finally { await handle.close(); }
 }
 
 async function syncDirectory(path: string): Promise<void> {

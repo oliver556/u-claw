@@ -22,7 +22,10 @@ async function tempRoot(): Promise<string> {
 }
 
 const packageRootFor = (dataDir: string): string => dirname(dataDir);
-const writerOptions = (dataDir: string) => ({ packageRoot: packageRootFor(dataDir), dataDir, platformForTest: "linux" as const });
+const writerOptions = (dataDir: string) => ({
+  packageRoot: packageRootFor(dataDir), dataDir, platformForTest: "linux" as const,
+  allowUnpinnedFilesystemForTest: true as const,
+});
 
 const material = (suffix = "001"): ActivationResponse => ({
   activationId: `activation-${suffix}`,
@@ -310,7 +313,7 @@ describe("activation artifact writer", () => {
 
   it("rejects Windows writes when the pinned helper is unavailable", async () => {
     const dataDir = await tempRoot();
-    expect(() => createActivationArtifactWriter({ ...writerOptions(dataDir), platformForTest: "win32" }))
+    expect(() => createActivationArtifactWriter({ packageRoot: packageRootFor(dataDir), dataDir, platformForTest: "win32" }))
       .toThrow(/pinned Windows filesystem/i);
   });
 

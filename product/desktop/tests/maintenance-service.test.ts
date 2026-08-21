@@ -1,4 +1,4 @@
-import { chmod, link, mkdir, mkdtemp, readFile, rename, symlink, truncate, utimes, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rename, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -284,15 +284,12 @@ describe("maintenance service", () => {
   });
 
   it("reports bounded partial failures when a cleanup file cannot be deleted", async () => {
-    const { cacheDir, service } = await fixture();
+    const { service } = await fixture(true, {
+      async beforeCleanupMove() { throw new Error("injected delete failure"); },
+    });
     const preview = await service.previewCleanup(["cache:electron"]);
-    await chmod(join(cacheDir, "electron"), 0o500);
-    try {
-      const started = service.executeCleanup(["cache:electron"], preview.previewToken);
-      expect(await waitForTerminal(service, started.id)).toMatchObject({ state: "completed", partialFailures: 1, failures: [{ candidateId: "cache:electron", code: "DELETE_FAILED" }] });
-    } finally {
-      await chmod(join(cacheDir, "electron"), 0o700);
-    }
+    const started = service.executeCleanup(["cache:electron"], preview.previewToken);
+    expect(await waitForTerminal(service, started.id)).toMatchObject({ state: "completed", partialFailures: 1, failures: [{ candidateId: "cache:electron", code: "DELETE_FAILED" }] });
   });
 
   it("quarantines and identity-checks a cleanup target before deleting it", async () => {

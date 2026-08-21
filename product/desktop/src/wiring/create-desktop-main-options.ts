@@ -490,7 +490,9 @@ export async function createDesktopMainOptions(
     onDisconnect: (listener) => transport.onDisconnect(listener),
     clearPendingTalkRuns: talkRunBridge.clearPending,
   });
-  const productServices = createProductionProductServices({ dataDir: environment.dataRoot, environment: env });
+  const productServices = createProductionProductServices({
+    dataDir: environment.dataRoot, environment: env, platformForTest,
+  });
   const newApiUsageConfigured = [
     env.UCLAW_LICENSE_SERVICE_URL,
     env.UCLAW_LICENSE_MANAGEMENT_CREDENTIAL,
