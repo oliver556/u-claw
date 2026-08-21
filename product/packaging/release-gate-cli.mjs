@@ -93,7 +93,7 @@ export async function runReleaseGateCli(argv = process.argv.slice(2)) {
     const verified = await verifyCdnReadback(required(values, "base-url"), expected, { releaseId: values["release-id"] });
     result = {
       completedAt: new Date().toISOString(),
-      artifacts: Object.fromEntries(Object.entries(verified).map(([name, record]) => [name, { bytes: record.bytes, sha256: record.sha256 }])),
+      artifacts: verified,
     };
   } else if (command === "upload") {
     const expected = await readArtifactRecords(required(values, "artifacts"));
@@ -119,7 +119,10 @@ export async function runReleaseGateCli(argv = process.argv.slice(2)) {
           upload: JSON.parse(await readFile(required(values, "upload-evidence"), "utf8")),
           cdnReadback: JSON.parse(await readFile(required(values, "cdn-evidence"), "utf8")),
         };
-    return writePointerSwitchAuthorization(required(values, "output"), evidence);
+    return writePointerSwitchAuthorization(required(values, "output"), evidence, {
+      keyId: required(values, "key-id"),
+      privateKey: await readFile(required(values, "private-key"), "utf8"),
+    });
   } else {
     throw new Error("usage: release-gate-cli.mjs build|smoke|promote|verify-promotions|upload|verify-cdn|authorize");
   }

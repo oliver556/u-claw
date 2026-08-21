@@ -9,8 +9,12 @@ x-activation-app: &activation-app
     ACTIVATION_PEPPER_FILE: /run/secrets/activation_pepper
     LICENSE_SIGNING_KEY_FILE: /run/secrets/license_signing_key
     STATUS_SIGNING_KEY_FILE: /run/secrets/status_signing_key
+    RELEASE_POLICY_SIGNING_KEY_FILE: /run/secrets/release_policy_signing_key
+    RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE: /run/secrets/release_authorization_public_key
     LICENSE_KEY_ID: ${LICENSE_KEY_ID:?set LICENSE_KEY_ID}
     STATUS_KEY_ID: ${STATUS_KEY_ID:?set STATUS_KEY_ID}
+    RELEASE_POLICY_KEY_ID: ${RELEASE_POLICY_KEY_ID:?set RELEASE_POLICY_KEY_ID}
+    RELEASE_AUTHORIZATION_KEY_ID: ${RELEASE_AUTHORIZATION_KEY_ID:?set RELEASE_AUTHORIZATION_KEY_ID}
     KMS_PROVIDER: local-kek-v1
     KMS_KEY_VERSION: ${KMS_KEY_VERSION:?set KMS_KEY_VERSION}
     NEW_API_KMS_KEY_VERSION: ${NEW_API_KMS_KEY_VERSION:?set NEW_API_KMS_KEY_VERSION}
@@ -30,6 +34,8 @@ x-activation-app: &activation-app
     - { source: activation_pepper, target: /run/secrets/activation_pepper, uid: "0", gid: "0", mode: 0400 }
     - { source: license_signing_key, target: /run/secrets/license_signing_key, uid: "0", gid: "0", mode: 0400 }
     - { source: status_signing_key, target: /run/secrets/status_signing_key, uid: "0", gid: "0", mode: 0400 }
+    - { source: release_policy_signing_key, target: /run/secrets/release_policy_signing_key, uid: "0", gid: "0", mode: 0400 }
+    - { source: release_authorization_public_key, target: /run/secrets/release_authorization_public_key, uid: "0", gid: "0", mode: 0400 }
     - { source: kms_kek, target: /run/secrets/kms_kek, uid: "0", gid: "0", mode: 0400 }
     - { source: admin_operators, target: /run/secrets/admin_operators, uid: "0", gid: "0", mode: 0400 }
     - { source: admin_secret_fingerprint_key, target: /run/secrets/admin_secret_fingerprint_key, uid: "0", gid: "0", mode: 0400 }
@@ -232,6 +238,10 @@ secrets:
     file: ${LICENSE_SIGNING_KEY_FILE:?set LICENSE_SIGNING_KEY_FILE}
   status_signing_key:
     file: ${STATUS_SIGNING_KEY_FILE:?set STATUS_SIGNING_KEY_FILE}
+  release_policy_signing_key:
+    file: ${RELEASE_POLICY_SIGNING_KEY_FILE:?set RELEASE_POLICY_SIGNING_KEY_FILE}
+  release_authorization_public_key:
+    file: ${RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE:?set RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE}
   kms_kek:
     file: ${KMS_KEK_FILE:?set KMS_KEK_FILE}
   admin_operators:

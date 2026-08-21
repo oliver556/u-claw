@@ -26,6 +26,7 @@ import (
 	"u-claw-activation-server/internal/observability"
 	"u-claw-activation-server/internal/persistence"
 	"u-claw-activation-server/internal/policy"
+	"u-claw-activation-server/internal/releaseauth"
 	"u-claw-activation-server/internal/security"
 	"u-claw-activation-server/internal/transport"
 )
@@ -99,7 +100,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	releasePolicy, err := policy.NewService(policy.ServiceOptions{Repository: releaseRepository, KeyID: cfg.StatusKeyID, PrivateKey: cfg.StatusSigningKey, TTL: 5 * time.Minute})
+	releasePolicy, err := policy.NewService(policy.ServiceOptions{Repository: releaseRepository, KeyID: cfg.ReleasePolicyKeyID, PrivateKey: cfg.ReleasePolicySigningKey, TTL: 5 * time.Minute})
+	if err != nil {
+		return err
+	}
+	releaseAuthorization, err := releaseauth.NewVerifier(cfg.ReleaseAuthorizationKeyID, cfg.ReleaseAuthorizationPublicKey, nil)
 	if err != nil {
 		return err
 	}
@@ -115,7 +120,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	adminHandler := transport.NewAdminHandler(transport.AdminHandlerOptions{Service: adminApplication, Operators: cfg.AdminOperators, Release: releasePolicy})
+	adminHandler := transport.NewAdminHandler(transport.AdminHandlerOptions{Service: adminApplication, Operators: cfg.AdminOperators, Release: releasePolicy, ReleaseAuthorization: releaseAuthorization})
 	application := newApplication(public, adminHandler, metrics)
 	server := newHTTPServer(cfg, func(ctx context.Context) error { return pool.Ping(ctx) }, application, kmsReadiness(kms, cfg.KMSKeyVersion, cfg.NewAPIKMSKeyVersion))
 
@@ -258,7 +263,7 @@ func newHTTPServer(cfg config.Config, databaseCheck transport.ReadinessCheck, de
 			kmsCheck = value
 		}
 	}
-	checks := []transport.ReadinessCheck{databaseCheck, signerReadiness(cfg.LicenseSigningKey), signerReadiness(cfg.StatusSigningKey)}
+	checks := []transport.ReadinessCheck{databaseCheck, signerReadiness(cfg.LicenseSigningKey), signerReadiness(cfg.StatusSigningKey), signerReadiness(cfg.ReleasePolicySigningKey)}
 	if kmsCheck != nil {
 		checks = append(checks, kmsCheck)
 	} else {

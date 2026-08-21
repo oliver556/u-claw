@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync, verify } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +10,7 @@ import {
   assertCommercialBuildInputs,
   buildReleaseArtifacts,
   promoteReleaseArtifacts,
+  pointerSwitchAuthorizationSigningPayload,
   runFinalRuntimeSmoke,
   uploadReleaseArtifacts,
   verifyCdnReadback,
@@ -163,6 +164,10 @@ test("pointer authorization requires build, final-runtime smoke, promotion, uplo
     "sbom.spdx.json",
     "runtime-tree.sha256",
   ].map((name) => [name, { bytes: 7, sha256: sha256(name) }]));
+  const cdnArtifact = Object.fromEntries(Object.entries(artifact).map(([name, record]) => [name, {
+    ...record,
+    url: `https://cdn.example.test/releases/release-42/${name}`,
+  }]));
   const complete = {
     releaseId: "release-42",
     releaseSequence: 42,
@@ -171,17 +176,26 @@ test("pointer authorization requires build, final-runtime smoke, promotion, uplo
     smoke: { runtimeKind: "final", completedAt: "2026-08-21T00:01:00.000Z" },
     promotions: { completedAt: "2026-08-21T00:02:00.000Z", artifacts: artifact },
     upload: { completedAt: "2026-08-21T00:03:00.000Z", artifacts: artifact },
-    cdnReadback: { completedAt: "2026-08-21T00:04:00.000Z", artifacts: artifact },
+    cdnReadback: { completedAt: "2026-08-21T00:04:00.000Z", artifacts: cdnArtifact },
   };
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const signing = { keyId: "release-gate-2026-01", privateKey, clock: () => new Date("2026-08-21T00:05:00.000Z") };
   for (const missing of ["build", "smoke", "promotions", "upload", "cdnReadback"]) {
     const evidence = structuredClone(complete);
     delete evidence[missing];
-    await assert.rejects(writePointerSwitchAuthorization(proofPath, evidence), new RegExp(missing, "i"));
+    await assert.rejects(writePointerSwitchAuthorization(proofPath, evidence, signing), new RegExp(missing, "i"));
   }
-  const proof = await writePointerSwitchAuthorization(proofPath, complete);
+  await assert.rejects(writePointerSwitchAuthorization(proofPath, complete), /authorization signing key/i);
+  const proof = await writePointerSwitchAuthorization(proofPath, complete, signing);
   assert.equal(proof.allowed, true);
   assert.equal(proof.requiredReleaseSequence, 42);
   assert.equal(proof.gate, "cdn-readback-complete");
+  assert.equal(proof.manifestUrl, cdnArtifact["runtime-manifest.json"].url);
+  assert.equal(proof.manifestSha256, artifact["runtime-manifest.json"].sha256);
+  assert.equal(proof.runtimeSha256, artifact["runtime.pkg"].sha256);
+  assert.equal(proof.signature.keyId, signing.keyId);
+  assert.equal(proof.expiresAt, "2026-08-21T00:15:00.000Z");
+  assert.equal(verify(null, pointerSwitchAuthorizationSigningPayload(proof), publicKey, Buffer.from(proof.signature.value, "base64")), true);
 });
 
 test("final runtime smoke refuses fixture paths and reports command failure", async () => {

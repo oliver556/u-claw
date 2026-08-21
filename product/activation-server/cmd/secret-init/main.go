@@ -22,7 +22,7 @@ type secretInitOps struct {
 }
 
 var activationSecretSpecs = []secretSpec{
-	{"ACTIVATION_PEPPER_FILE", "activation_pepper"}, {"LICENSE_SIGNING_KEY_FILE", "license_signing_key"}, {"STATUS_SIGNING_KEY_FILE", "status_signing_key"}, {"KMS_KEK_FILE", "kms_kek"}, {"ADMIN_OPERATORS_FILE", "admin_operators"}, {"ADMIN_SECRET_FINGERPRINT_KEY_FILE", "admin_secret_fingerprint_key"},
+	{"ACTIVATION_PEPPER_FILE", "activation_pepper"}, {"LICENSE_SIGNING_KEY_FILE", "license_signing_key"}, {"STATUS_SIGNING_KEY_FILE", "status_signing_key"}, {"RELEASE_POLICY_SIGNING_KEY_FILE", "release_policy_signing_key"}, {"RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE", "release_authorization_public_key"}, {"KMS_KEK_FILE", "kms_kek"}, {"ADMIN_OPERATORS_FILE", "admin_operators"}, {"ADMIN_SECRET_FINGERPRINT_KEY_FILE", "admin_secret_fingerprint_key"},
 }
 
 func main() {

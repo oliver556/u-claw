@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, sign } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
   copyFile,
@@ -18,15 +18,11 @@ import { promisify } from "node:util";
 import { buildRuntime, hashFile, inventoryRuntime } from "./build-runtime.mjs";
 import { validateRuntimeArchive } from "./build-release.mjs";
 import { signRuntimeManifest } from "../scripts/runtime-manifest.mjs";
+import { pointerSwitchAuthorizationSigningPayload, releaseAuthorizationArtifactNames } from "./release-authorization.mjs";
+export { pointerSwitchAuthorizationSigningPayload } from "./release-authorization.mjs";
 
 const execFileAsync = promisify(execFile);
-const requiredArtifacts = [
-  "runtime.pkg",
-  "runtime-manifest.json",
-  "inventory.json",
-  "sbom.spdx.json",
-  "runtime-tree.sha256",
-];
+const requiredArtifacts = releaseAuthorizationArtifactNames;
 
 export function assertCommercialBuildInputs(repoRoot, inputPaths) {
   const root = path.resolve(repoRoot);
@@ -293,7 +289,7 @@ async function defaultRunner(file, args) {
   }
 }
 
-export async function writePointerSwitchAuthorization(outputPath, evidence) {
+export async function writePointerSwitchAuthorization(outputPath, evidence, options = {}) {
   for (const stage of ["build", "smoke", "promotions", "upload", "cdnReadback"]) {
     if (!evidence?.[stage]) throw new Error(`pointer switch blocked: missing ${stage} evidence`);
   }
@@ -318,6 +314,19 @@ export async function writePointerSwitchAuthorization(outputPath, evidence) {
       throw new Error(`pointer switch blocked: ${stage} artifact digests do not match build`);
     }
   }
+  const manifestReadback = evidence.cdnReadback.artifacts["runtime-manifest.json"];
+  const runtimeReadback = evidence.cdnReadback.artifacts["runtime.pkg"];
+  for (const [name, record] of Object.entries(evidence.cdnReadback.artifacts)) {
+    validateCdnArtifactRecord(name, record, evidence.releaseId);
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(options.keyId ?? "") || !options.privateKey) {
+    throw new Error("pointer switch blocked: authorization signing key is required");
+  }
+  const issuedAt = new Date((options.clock ?? (() => new Date()))());
+  const ttlMs = options.ttlMs ?? 10 * 60 * 1000;
+  if (!Number.isFinite(issuedAt.getTime()) || !Number.isSafeInteger(ttlMs) || ttlMs < 1 || ttlMs > 15 * 60 * 1000 || times.at(-1) > issuedAt.getTime()) {
+    throw new Error("pointer switch blocked: authorization lifetime is invalid");
+  }
   const proof = {
     schemaVersion: 1,
     allowed: true,
@@ -325,7 +334,11 @@ export async function writePointerSwitchAuthorization(outputPath, evidence) {
     releaseId: evidence.releaseId,
     requiredReleaseSequence: evidence.releaseSequence,
     commitSha: evidence.commitSha.toLowerCase(),
+    manifestUrl: manifestReadback.url,
+    manifestSha256: manifestReadback.sha256.toLowerCase(),
+    runtimeSha256: runtimeReadback.sha256.toLowerCase(),
     artifacts,
+    cdnReadback: evidence.cdnReadback.artifacts,
     evidence: {
       buildCompletedAt: evidence.build.completedAt,
       finalRuntimeSmokeCompletedAt: evidence.smoke.completedAt,
@@ -333,7 +346,11 @@ export async function writePointerSwitchAuthorization(outputPath, evidence) {
       uploadCompletedAt: evidence.upload.completedAt,
       cdnReadbackCompletedAt: evidence.cdnReadback.completedAt,
     },
+    issuedAt: issuedAt.toISOString(),
+    expiresAt: new Date(issuedAt.getTime() + ttlMs).toISOString(),
+    signature: { algorithm: "ed25519", keyId: options.keyId, value: "" },
   };
+  proof.signature.value = sign(null, pointerSwitchAuthorizationSigningPayload(proof), options.privateKey).toString("base64");
   await writeJsonExclusive(outputPath, proof);
   return proof;
 }
@@ -348,6 +365,20 @@ function validateDigestRecord(name, record) {
   const safeName = name.length > 0 && !name.includes("\\") && !path.isAbsolute(name) && segments.every((segment) => segment && segment !== "." && segment !== "..");
   if (!safeName || !Number.isSafeInteger(record?.bytes) || record.bytes < 0 || !/^[a-f0-9]{64}$/iu.test(record?.sha256 ?? "")) {
     throw new Error(`invalid artifact digest record: ${name}`);
+  }
+}
+
+function validateCdnArtifactRecord(name, record, releaseId) {
+  validateDigestRecord(name, record);
+  let url;
+  try {
+    url = new URL(record.url);
+  } catch {
+    throw new Error(`invalid CDN readback URL: ${name}`);
+  }
+  const segments = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || segments.at(-1) !== name || segments.at(-2) !== releaseId) {
+    throw new Error(`invalid CDN readback URL: ${name}`);
   }
 }
 

@@ -85,9 +85,10 @@ func TestNewHTTPServerUsesSafeLimitsAndInjectedDatabaseCheck(t *testing.T) {
 	}
 	databaseCalled := false
 	server := newHTTPServer(config.Config{
-		ListenAddress:     "127.0.0.1:0",
-		LicenseSigningKey: privateKey,
-		StatusSigningKey:  privateKey,
+		ListenAddress:           "127.0.0.1:0",
+		LicenseSigningKey:       privateKey,
+		StatusSigningKey:        privateKey,
+		ReleasePolicySigningKey: privateKey,
 	}, func(context.Context) error {
 		databaseCalled = true
 		return nil

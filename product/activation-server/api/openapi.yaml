@@ -381,20 +381,41 @@
         "type": "object", "additionalProperties": false, "required": ["algorithm", "keyId", "value"],
         "properties": { "algorithm": { "const": "ed25519" }, "keyId": { "$ref": "#/components/schemas/ReleaseId" }, "value": { "type": "string", "minLength": 88, "maxLength": 88 } }
       },
+      "ReleaseAuthorizationArtifact": {
+        "type": "object", "additionalProperties": false, "required": ["bytes", "sha256"],
+        "properties": { "bytes": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "sha256": { "$ref": "#/components/schemas/SHA256" } }
+      },
+      "ReleaseAuthorizationReadback": {
+        "type": "object", "additionalProperties": false, "required": ["bytes", "sha256", "url"],
+        "properties": { "bytes": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "sha256": { "$ref": "#/components/schemas/SHA256" }, "url": { "type": "string", "format": "uri", "pattern": "^https://" } }
+      },
+      "ReleaseAuthorizationEvidence": {
+        "type": "object", "additionalProperties": false,
+        "required": ["buildCompletedAt", "finalRuntimeSmokeCompletedAt", "promotionsCompletedAt", "uploadCompletedAt", "cdnReadbackCompletedAt"],
+        "properties": { "buildCompletedAt": { "type": "string", "format": "date-time" }, "finalRuntimeSmokeCompletedAt": { "type": "string", "format": "date-time" }, "promotionsCompletedAt": { "type": "string", "format": "date-time" }, "uploadCompletedAt": { "type": "string", "format": "date-time" }, "cdnReadbackCompletedAt": { "type": "string", "format": "date-time" } }
+      },
+      "PointerSwitchAuthorization": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schemaVersion", "allowed", "gate", "releaseId", "requiredReleaseSequence", "commitSha", "manifestUrl", "manifestSha256", "runtimeSha256", "artifacts", "cdnReadback", "evidence", "issuedAt", "expiresAt", "signature"],
+        "properties": {
+          "schemaVersion": { "const": 1 }, "allowed": { "const": true }, "gate": { "const": "cdn-readback-complete" }, "releaseId": { "$ref": "#/components/schemas/ReleaseId" }, "requiredReleaseSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "commitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }, "manifestUrl": { "type": "string", "format": "uri", "pattern": "^https://" }, "manifestSha256": { "$ref": "#/components/schemas/SHA256" }, "runtimeSha256": { "$ref": "#/components/schemas/SHA256" },
+          "artifacts": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/ReleaseAuthorizationArtifact" }, "minProperties": 5, "maxProperties": 5 }, "cdnReadback": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/ReleaseAuthorizationReadback" }, "minProperties": 5, "maxProperties": 5 }, "evidence": { "$ref": "#/components/schemas/ReleaseAuthorizationEvidence" }, "issuedAt": { "type": "string", "format": "date-time" }, "expiresAt": { "type": "string", "format": "date-time" }, "signature": { "$ref": "#/components/schemas/ReleasePolicySignature" }
+        }
+      },
       "AdminReleasePublishRequest": {
         "type": "object", "additionalProperties": false,
-        "required": ["operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "contentVersion", "manifestUrl", "manifestSha256", "manifestReadbackVerified", "cdnAvailable"],
+        "required": ["operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "contentVersion", "manifestUrl", "manifestSha256", "authorization"],
         "properties": {
           "operatorId": { "$ref": "#/components/schemas/Identifier" }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "idempotencyKey": { "$ref": "#/components/schemas/Identifier" }, "reason": { "type": "string", "minLength": 1, "maxLength": 512 },
-          "releaseSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "releaseId": { "$ref": "#/components/schemas/ReleaseId" }, "contentVersion": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$" }, "manifestUrl": { "type": "string", "format": "uri", "pattern": "^https://" }, "manifestSha256": { "$ref": "#/components/schemas/SHA256" }, "manifestReadbackVerified": { "const": true }, "cdnAvailable": { "const": true }
+          "releaseSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "releaseId": { "$ref": "#/components/schemas/ReleaseId" }, "contentVersion": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$" }, "manifestUrl": { "type": "string", "format": "uri", "pattern": "^https://" }, "manifestSha256": { "$ref": "#/components/schemas/SHA256" }, "authorization": { "$ref": "#/components/schemas/PointerSwitchAuthorization" }
         }
       },
       "AdminReleaseRollbackRequest": {
         "type": "object", "additionalProperties": false,
-        "required": ["operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "manifestUrl", "manifestSha256", "manifestReadbackVerified", "cdnAvailable"],
+        "required": ["operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "manifestUrl", "manifestSha256", "authorization"],
         "properties": {
           "operatorId": { "$ref": "#/components/schemas/Identifier" }, "requestId": { "$ref": "#/components/schemas/Identifier" }, "idempotencyKey": { "$ref": "#/components/schemas/Identifier" }, "reason": { "type": "string", "minLength": 1, "maxLength": 512 },
-          "releaseSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "releaseId": { "$ref": "#/components/schemas/ReleaseId" }, "manifestUrl": { "type": "string", "format": "uri", "pattern": "^https://" }, "manifestSha256": { "$ref": "#/components/schemas/SHA256" }, "manifestReadbackVerified": { "const": true }, "cdnAvailable": { "const": true }
+          "releaseSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "releaseId": { "$ref": "#/components/schemas/ReleaseId" }, "manifestUrl": { "type": "string", "format": "uri", "pattern": "^https://" }, "manifestSha256": { "$ref": "#/components/schemas/SHA256" }, "authorization": { "$ref": "#/components/schemas/PointerSwitchAuthorization" }
         }
       },
       "ProductionReleaseSlot": {

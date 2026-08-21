@@ -199,17 +199,24 @@ jobs:
           --output product/dist/release-evidence/cdn-readback.json
 
       - name: Emit requiredReleaseSequence switch authorization
-        run: >-
-          node product/packaging/release-gate-cli.mjs authorize
-          --release-id $env:UCLAW_RELEASE_ID
-          --release-sequence $env:UCLAW_RELEASE_SEQUENCE
-          --commit-sha $env:UCLAW_SOURCE_COMMIT_SHA
-          --build-evidence product/dist/release-evidence/build.json
-          --smoke-evidence product/dist/release-evidence/smoke.json
-          --promotion-evidence product/dist/release-evidence/promotions.json
-          --upload-evidence product/dist/release-evidence/upload.json
-          --cdn-evidence product/dist/release-evidence/cdn-readback.json
-          --output product/dist/release-evidence/pointer-switch-authorization.json
+        shell: pwsh
+        env:
+          RELEASE_AUTHORIZATION_PRIVATE_KEY: ${{ secrets.RELEASE_AUTHORIZATION_PRIVATE_KEY }}
+        run: |
+          Set-Content -Path "$env:RUNNER_TEMP/release-authorization-private-key.pem" -Value $env:RELEASE_AUTHORIZATION_PRIVATE_KEY -NoNewline
+          node product/packaging/release-gate-cli.mjs authorize `
+            --release-id $env:UCLAW_RELEASE_ID `
+            --release-sequence $env:UCLAW_RELEASE_SEQUENCE `
+            --commit-sha $env:UCLAW_SOURCE_COMMIT_SHA `
+            --build-evidence product/dist/release-evidence/build.json `
+            --smoke-evidence product/dist/release-evidence/smoke.json `
+            --promotion-evidence product/dist/release-evidence/promotions.json `
+            --upload-evidence product/dist/release-evidence/upload.json `
+            --cdn-evidence product/dist/release-evidence/cdn-readback.json `
+            --key-id production-release-gate-v1 `
+            --private-key "$env:RUNNER_TEMP/release-authorization-private-key.pem" `
+            --output product/dist/release-evidence/pointer-switch-authorization.json
+          Remove-Item "$env:RUNNER_TEMP/release-authorization-private-key.pem" -Force
 
       - name: Preserve release artifacts and gate evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

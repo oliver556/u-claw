@@ -3,7 +3,11 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +16,7 @@ import (
 
 	adminservice "u-claw-activation-server/internal/admin"
 	"u-claw-activation-server/internal/policy"
+	"u-claw-activation-server/internal/releaseauth"
 )
 
 func httpOperators(secret string) adminservice.OperatorRegistry {
@@ -154,14 +159,35 @@ func TestAdminHTTPBalanceStatusUsesDesignedPatchRoute(t *testing.T) {
 }
 
 func TestAdminHTTPPublishesVerifiedReleaseAndForwardRollback(t *testing.T) {
+	now := time.Date(2026, 8, 21, 1, 5, 0, 0, time.UTC)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := releaseauth.NewVerifier("release-gate-2026-01", publicKey, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
 	releases := &fakeReleaseAdmin{}
-	handler := NewAdminHandler(AdminHandlerOptions{Service: &fakeHTTPAdmin{}, Release: releases, Operators: httpOperators(strings.Repeat("a", 32))})
-	base := `"operatorId":"operator_fixture","requestId":"request_fixture_001","idempotencyKey":"release-fixture-001","reason":"release operation","releaseSequence":107,"releaseId":"release-107","manifestUrl":"https://cdn.example.test/releases/107/manifest.json","manifestSha256":"` + strings.Repeat("a", 64) + `","manifestReadbackVerified":true,"cdnAvailable":true`
-	for _, test := range []struct{ path, extra string }{
-		{"/internal/v1/releases/publish", `,"contentVersion":"1.7.0"`},
-		{"/internal/v1/releases/forward-rollback", ""},
+	handler := NewAdminHandler(AdminHandlerOptions{Service: &fakeHTTPAdmin{}, Release: releases, ReleaseAuthorization: verifier, Operators: httpOperators(strings.Repeat("a", 32))})
+	proof := releaseAuthorizationFixture(now, 107)
+	proof.Signature.Value = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, releaseauth.SigningPayload(proof)))
+	for _, test := range []struct {
+		path           string
+		contentVersion any
+	}{
+		{"/internal/v1/releases/publish", "1.7.0"},
+		{"/internal/v1/releases/forward-rollback", nil},
 	} {
-		request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader("{"+base+test.extra+"}"))
+		payload := map[string]any{"operatorId": "operator_fixture", "requestId": "request_fixture_001", "idempotencyKey": "release-fixture-001", "reason": "release operation", "releaseSequence": 107, "releaseId": "release-107", "manifestUrl": proof.ManifestURL, "manifestSha256": proof.ManifestSHA256, "authorization": proof}
+		if test.contentVersion != nil {
+			payload["contentVersion"] = test.contentVersion
+		}
+		encoded, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		request := httptest.NewRequest(http.MethodPost, test.path, bytes.NewReader(encoded))
 		request.Header.Set("Authorization", "Bearer "+strings.Repeat("a", 32))
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
@@ -173,6 +199,80 @@ func TestAdminHTTPPublishesVerifiedReleaseAndForwardRollback(t *testing.T) {
 	if releases.published.ContentVersion != "1.7.0" || releases.rollback.ContentVersion != "" {
 		t.Fatalf("publish=%+v rollback=%+v", releases.published, releases.rollback)
 	}
+}
+
+func TestAdminHTTPRejectsAdminBearerWithoutValidReleaseAuthorization(t *testing.T) {
+	now := time.Date(2026, 8, 21, 1, 5, 0, 0, time.UTC)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := releaseauth.NewVerifier("release-gate-2026-01", publicKey, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewAdminHandler(AdminHandlerOptions{Service: &fakeHTTPAdmin{}, Release: &fakeReleaseAdmin{}, ReleaseAuthorization: verifier, Operators: httpOperators(strings.Repeat("a", 32))})
+	valid := releaseAuthorizationFixture(now, 107)
+	valid.Signature.Value = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, releaseauth.SigningPayload(valid)))
+	for _, test := range []struct {
+		name  string
+		proof any
+	}{
+		{name: "missing proof", proof: nil},
+		{name: "bad signature", proof: func() releaseauth.Authorization {
+			value := valid
+			value.Signature.Value = base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+			return value
+		}()},
+		{name: "wrong key id", proof: func() releaseauth.Authorization { value := valid; value.Signature.KeyID = "wrong-key"; return value }()},
+		{name: "wrong sequence", proof: func() releaseauth.Authorization { value := valid; value.RequiredReleaseSequence++; return value }()},
+		{name: "wrong digest", proof: func() releaseauth.Authorization {
+			value := valid
+			value.ManifestSHA256 = strings.Repeat("f", 64)
+			return value
+		}()},
+		{name: "expired", proof: func() releaseauth.Authorization {
+			value := valid
+			value.IssuedAt = now.Add(-11 * time.Minute).Format(time.RFC3339)
+			value.ExpiresAt = now.Format(time.RFC3339)
+			value.Signature.Value = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, releaseauth.SigningPayload(value)))
+			return value
+		}()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			payload := map[string]any{"operatorId": "operator_fixture", "requestId": "request_fixture_001", "idempotencyKey": "release-fixture-001", "reason": "release operation", "releaseSequence": 107, "releaseId": "release-107", "contentVersion": "1.7.0", "manifestUrl": valid.ManifestURL, "manifestSha256": valid.ManifestSHA256}
+			if test.proof != nil {
+				payload["authorization"] = test.proof
+			}
+			encoded, _ := json.Marshal(payload)
+			request := httptest.NewRequest(http.MethodPost, "/internal/v1/releases/publish", bytes.NewReader(encoded))
+			request.Header.Set("Authorization", "Bearer "+strings.Repeat("a", 32))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func releaseAuthorizationFixture(now time.Time, sequence uint64) releaseauth.Authorization {
+	releaseID := "release-107"
+	baseURL := "https://cdn.example.test/releases/" + releaseID + "/"
+	artifacts := map[string]releaseauth.Artifact{
+		"inventory.json":        {Bytes: 11, SHA256: strings.Repeat("a", 64)},
+		"runtime-manifest.json": {Bytes: 12, SHA256: strings.Repeat("b", 64)},
+		"runtime-tree.sha256":   {Bytes: 13, SHA256: strings.Repeat("c", 64)},
+		"runtime.pkg":           {Bytes: 14, SHA256: strings.Repeat("d", 64)},
+		"sbom.spdx.json":        {Bytes: 15, SHA256: strings.Repeat("e", 64)},
+	}
+	readback := make(map[string]releaseauth.Artifact, len(artifacts))
+	for name, artifact := range artifacts {
+		artifact.URL = baseURL + name
+		readback[name] = artifact
+	}
+	return releaseauth.Authorization{SchemaVersion: 1, Allowed: true, Gate: "cdn-readback-complete", ReleaseID: releaseID, RequiredReleaseSequence: sequence, CommitSHA: strings.Repeat("a", 40), ManifestURL: baseURL + "runtime-manifest.json", ManifestSHA256: artifacts["runtime-manifest.json"].SHA256, RuntimeSHA256: artifacts["runtime.pkg"].SHA256, Artifacts: artifacts, CDNReadback: readback, Evidence: releaseauth.Evidence{BuildCompletedAt: now.Add(-5 * time.Minute).Format(time.RFC3339), FinalRuntimeSmokeCompletedAt: now.Add(-4 * time.Minute).Format(time.RFC3339), PromotionsCompletedAt: now.Add(-3 * time.Minute).Format(time.RFC3339), UploadCompletedAt: now.Add(-2 * time.Minute).Format(time.RFC3339), CDNReadbackCompletedAt: now.Add(-time.Minute).Format(time.RFC3339)}, IssuedAt: now.Add(-30 * time.Second).Format(time.RFC3339), ExpiresAt: now.Add(9*time.Minute + 30*time.Second).Format(time.RFC3339), Signature: releaseauth.Signature{Algorithm: "ed25519", KeyID: "release-gate-2026-01"}}
 }
 
 func TestAdminHTTPShowsRedactedMappingAndControlsDeviceToken(t *testing.T) {

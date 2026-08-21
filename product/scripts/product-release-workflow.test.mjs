@@ -30,6 +30,8 @@ test("commercial release workflow gates pointer authorization after CDN readback
   }
   assert.doesNotMatch(workflow, /(?:set|switch|update)[^\n]*requiredReleaseSequence/iu);
   assert.match(workflow, /pointer-switch-authorization\.json/u);
+  assert.match(workflow, /RELEASE_AUTHORIZATION_PRIVATE_KEY/u);
+  assert.match(workflow, /authorize[\s\S]*--key-id production-release-gate-v1[\s\S]*--private-key/u);
 });
 
 test("workflow runs build, typecheck, tests, secret scan, and final runtime smoke without silent failures", () => {

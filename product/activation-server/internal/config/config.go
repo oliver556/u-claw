@@ -38,8 +38,12 @@ var requiredVariables = []string{
 	"ACTIVATION_PEPPER_FILE",
 	"LICENSE_SIGNING_KEY_FILE",
 	"STATUS_SIGNING_KEY_FILE",
+	"RELEASE_POLICY_SIGNING_KEY_FILE",
+	"RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE",
 	"LICENSE_KEY_ID",
 	"STATUS_KEY_ID",
+	"RELEASE_POLICY_KEY_ID",
+	"RELEASE_AUTHORIZATION_KEY_ID",
 	"KMS_PROVIDER",
 	"KMS_KEY_VERSION",
 	"KMS_KEK_FILE",
@@ -64,8 +68,12 @@ type Config struct {
 	ActivationPepper              []byte
 	LicenseSigningKey             ed25519.PrivateKey
 	StatusSigningKey              ed25519.PrivateKey
+	ReleasePolicySigningKey       ed25519.PrivateKey
+	ReleaseAuthorizationPublicKey ed25519.PublicKey
 	LicenseKeyID                  string
 	StatusKeyID                   string
+	ReleasePolicyKeyID            string
+	ReleaseAuthorizationKeyID     string
 	KMSProvider                   string
 	KMSKeyVersion                 string
 	KMSKEKFile                    string
@@ -120,6 +128,14 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	statusSigningKey, err := loadSigningKey(values["STATUS_SIGNING_KEY_FILE"])
 	if err != nil {
 		return Config{}, errors.New("configuration STATUS_SIGNING_KEY_FILE is invalid")
+	}
+	releasePolicySigningKey, err := loadSigningKey(values["RELEASE_POLICY_SIGNING_KEY_FILE"])
+	if err != nil || sameSecretFile(values["RELEASE_POLICY_SIGNING_KEY_FILE"], values["STATUS_SIGNING_KEY_FILE"]) || constantTimeEqual(releasePolicySigningKey, statusSigningKey) {
+		return Config{}, errors.New("configuration RELEASE_POLICY_SIGNING_KEY_FILE is invalid")
+	}
+	releaseAuthorizationPublicKey, err := loadVerificationKey(values["RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE"])
+	if err != nil || constantTimeEqual(releaseAuthorizationPublicKey, releasePolicySigningKey.Public().(ed25519.PublicKey)) || constantTimeEqual(releaseAuthorizationPublicKey, statusSigningKey.Public().(ed25519.PublicKey)) {
+		return Config{}, errors.New("configuration RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE is invalid")
 	}
 	kek, err := loadKEK(values["KMS_KEK_FILE"])
 	if err != nil {
@@ -184,8 +200,12 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		ActivationPepper:              pepper,
 		LicenseSigningKey:             signingKey,
 		StatusSigningKey:              statusSigningKey,
+		ReleasePolicySigningKey:       releasePolicySigningKey,
+		ReleaseAuthorizationPublicKey: releaseAuthorizationPublicKey,
 		LicenseKeyID:                  values["LICENSE_KEY_ID"],
 		StatusKeyID:                   values["STATUS_KEY_ID"],
+		ReleasePolicyKeyID:            values["RELEASE_POLICY_KEY_ID"],
+		ReleaseAuthorizationKeyID:     values["RELEASE_AUTHORIZATION_KEY_ID"],
 		KMSProvider:                   values["KMS_PROVIDER"],
 		KMSKeyVersion:                 values["KMS_KEY_VERSION"],
 		KMSKEKFile:                    values["KMS_KEK_FILE"],
@@ -332,6 +352,18 @@ func loadSigningKey(path string) (ed25519.PrivateKey, error) {
 		return nil, errors.New("signing key self-check failed")
 	}
 	return privateKey, nil
+}
+
+func loadVerificationKey(path string) (ed25519.PublicKey, error) {
+	encoded, err := readRegularFile(path, 1, maximumKeyFileBytes)
+	if err != nil {
+		return nil, err
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimSpace(string(encoded)))
+	if err != nil || len(decoded) != ed25519.PublicKeySize {
+		return nil, errors.New("invalid Ed25519 public key")
+	}
+	return ed25519.PublicKey(decoded), nil
 }
 
 func readRegularFile(path string, minimumBytes int64, maximumBytes int64) ([]byte, error) {

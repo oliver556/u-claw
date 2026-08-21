@@ -138,11 +138,15 @@ describe("activation OpenAPI contract", () => {
     expect(required("HealthResponse")).toEqual(["status"]);
 	expect(required("ReleasePolicySignature")).toEqual(["algorithm", "keyId", "value"]);
 	expect(required("AdminReleasePublishRequest")).toEqual([
-	  "operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "contentVersion", "manifestUrl", "manifestSha256", "manifestReadbackVerified", "cdnAvailable",
+	  "operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "contentVersion", "manifestUrl", "manifestSha256", "authorization",
 	]);
 	expect(required("AdminReleaseRollbackRequest")).toEqual([
-	  "operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "manifestUrl", "manifestSha256", "manifestReadbackVerified", "cdnAvailable",
+	  "operatorId", "requestId", "idempotencyKey", "reason", "releaseSequence", "releaseId", "manifestUrl", "manifestSha256", "authorization",
 	]);
+	expect(required("PointerSwitchAuthorization")).toEqual([
+	  "schemaVersion", "allowed", "gate", "releaseId", "requiredReleaseSequence", "commitSha", "manifestUrl", "manifestSha256", "runtimeSha256", "artifacts", "cdnReadback", "evidence", "issuedAt", "expiresAt", "signature",
+	]);
+	expect(required("ReleaseAuthorizationEvidence")).toEqual(["buildCompletedAt", "finalRuntimeSmokeCompletedAt", "promotionsCompletedAt", "uploadCompletedAt", "cdnReadbackCompletedAt"]);
 	expect(required("ProductionReleaseSlots")).toEqual(["policyEpoch", "current", "previousStable"]);
     expect(required("OpenAIModelsResponse")).toEqual(["object", "data"]);
     expect(required("OpenAIChatCompletionRequest")).toEqual(["model", "messages", "stream"]);
@@ -151,7 +155,7 @@ describe("activation OpenAPI contract", () => {
       "ActivationRequest", "ActivationResponse", "ActivationCommit", "ActivationError", "ClientPolicy",
       "StartupLicense", "StartupCredential", "BuiltinCredential", "LicenseStatusSummary", "LicenseStatusReceipt",
       "LicenseStatusResponse", "HealthResponse",
-	  "ReleasePolicySignature", "AdminReleasePublishRequest", "AdminReleaseRollbackRequest", "ProductionReleaseSlot", "ProductionReleaseSlots",
+	  "ReleasePolicySignature", "ReleaseAuthorizationArtifact", "ReleaseAuthorizationReadback", "ReleaseAuthorizationEvidence", "PointerSwitchAuthorization", "AdminReleasePublishRequest", "AdminReleaseRollbackRequest", "ProductionReleaseSlot", "ProductionReleaseSlots",
     ]) expect(document.components.schemas[name].additionalProperties).toBe(false);
     expect(document.components.schemas.ActivationResponse.properties).toMatchObject({
       license: { $ref: "#/components/schemas/StartupLicense" },

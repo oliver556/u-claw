@@ -9,6 +9,7 @@ import (
 
 	adminservice "u-claw-activation-server/internal/admin"
 	"u-claw-activation-server/internal/policy"
+	"u-claw-activation-server/internal/releaseauth"
 )
 
 type ReleasePolicyAdmin interface {
@@ -28,16 +29,18 @@ type AdminService interface {
 }
 
 type AdminHandlerOptions struct {
-	Service   AdminService
-	Operators adminservice.OperatorRegistry
-	Release   ReleasePolicyAdmin
+	Service              AdminService
+	Operators            adminservice.OperatorRegistry
+	Release              ReleasePolicyAdmin
+	ReleaseAuthorization *releaseauth.Verifier
 }
 
 type adminHandler struct {
-	service   AdminService
-	operators adminservice.OperatorRegistry
-	release   ReleasePolicyAdmin
-	mux       *http.ServeMux
+	service              AdminService
+	operators            adminservice.OperatorRegistry
+	release              ReleasePolicyAdmin
+	releaseAuthorization *releaseauth.Verifier
+	mux                  *http.ServeMux
 }
 
 type adminOperationRequest struct {
@@ -68,13 +71,12 @@ type adminBalanceStatusRequest struct {
 }
 type adminReleaseRequest struct {
 	adminOperationRequest
-	ReleaseSequence          uint64 `json:"releaseSequence"`
-	ReleaseID                string `json:"releaseId"`
-	ContentVersion           string `json:"contentVersion,omitempty"`
-	ManifestURL              string `json:"manifestUrl"`
-	ManifestSHA256           string `json:"manifestSha256"`
-	ManifestReadbackVerified bool   `json:"manifestReadbackVerified"`
-	CDNAvailable             bool   `json:"cdnAvailable"`
+	ReleaseSequence uint64                    `json:"releaseSequence"`
+	ReleaseID       string                    `json:"releaseId"`
+	ContentVersion  string                    `json:"contentVersion,omitempty"`
+	ManifestURL     string                    `json:"manifestUrl"`
+	ManifestSHA256  string                    `json:"manifestSha256"`
+	Authorization   releaseauth.Authorization `json:"authorization"`
 }
 type releaseSlotResponse struct {
 	ReleaseSequence uint64 `json:"releaseSequence"`
@@ -140,7 +142,7 @@ func (request adminOperationRequest) operation(operatorID string) adminservice.O
 }
 
 func NewAdminHandler(options AdminHandlerOptions) http.Handler {
-	handler := &adminHandler{service: options.Service, operators: options.Operators, release: options.Release, mux: http.NewServeMux()}
+	handler := &adminHandler{service: options.Service, operators: options.Operators, release: options.Release, releaseAuthorization: options.ReleaseAuthorization, mux: http.NewServeMux()}
 	handler.mux.HandleFunc("POST /internal/v1/inventory", handler.generate)
 	handler.mux.HandleFunc("POST /internal/v1/inventory/import", handler.importInventory)
 	handler.mux.HandleFunc("GET /internal/v1/inventory/{id}", handler.show)
@@ -176,7 +178,11 @@ func (handler *adminHandler) changeRelease(writer http.ResponseWriter, request *
 		handler.writeError(writer, adminservice.ErrInvalidInput)
 		return
 	}
-	release := policy.Release{ReleaseSequence: input.ReleaseSequence, ReleaseID: input.ReleaseID, ContentVersion: input.ContentVersion, ManifestURL: input.ManifestURL, ManifestSHA256: input.ManifestSHA256, ManifestReadbackVerified: input.ManifestReadbackVerified, CDNAvailable: input.CDNAvailable}
+	if handler.releaseAuthorization == nil || handler.releaseAuthorization.Verify(input.Authorization, releaseauth.ExpectedRelease{ReleaseSequence: input.ReleaseSequence, ReleaseID: input.ReleaseID, ManifestURL: input.ManifestURL, ManifestSHA256: input.ManifestSHA256}) != nil {
+		handler.writeError(writer, adminservice.ErrInvalidInput)
+		return
+	}
+	release := policy.Release{ReleaseSequence: input.ReleaseSequence, ReleaseID: input.ReleaseID, ContentVersion: input.ContentVersion, ManifestURL: input.ManifestURL, ManifestSHA256: input.ManifestSHA256, ManifestReadbackVerified: true, CDNAvailable: true}
 	var state policy.ProductionState
 	var err error
 	if rollback {

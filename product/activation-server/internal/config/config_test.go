@@ -19,28 +19,32 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	kekFile := writeTestFile(t, directory, "kek", []byte(strings.Repeat("k", 32)))
 	operatorsFile := writeTestFile(t, directory, "admin-operators.json", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`))
 	values := map[string]string{
-		"DATABASE_URL":                      " postgres://database.example/uclaw ",
-		"ACTIVATION_PEPPER_FILE":            pepperFile,
-		"LICENSE_SIGNING_KEY_FILE":          keyFile,
-		"STATUS_SIGNING_KEY_FILE":           keyFile,
-		"LICENSE_KEY_ID":                    "license-key-001",
-		"STATUS_KEY_ID":                     "status-key-001",
-		"KMS_PROVIDER":                      "external-kms",
-		"KMS_KEY_VERSION":                   "kms-v1",
-		"KMS_KEK_FILE":                      kekFile,
-		"ADMIN_OPERATORS_FILE":              operatorsFile,
-		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "fingerprint-key", []byte(strings.Repeat("f", 32))),
-		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
-		"NEW_API_BASE_URL":                  "https://api.example.test/v1",
-		"NEW_API_KEY_FILE":                  writeTestFile(t, directory, "new-api-key", []byte(strings.Repeat("n", 32))),
-		"NEW_API_ENABLED_MODELS":            "deepseek-chat,qwen-plus,doubao-pro",
-		"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
-		"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
-		"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
-		"MODEL_PROXY_RESPONSE_BODY_BYTES":   "4194304",
-		"MODEL_PROXY_TIMEOUT":               "60s",
-		"MODEL_PROXY_ADMISSION_LEASE":       "65s",
-		"LISTEN_ADDRESS":                    " 127.0.0.1:8080 ",
+		"DATABASE_URL":                          " postgres://database.example/uclaw ",
+		"ACTIVATION_PEPPER_FILE":                pepperFile,
+		"LICENSE_SIGNING_KEY_FILE":              keyFile,
+		"STATUS_SIGNING_KEY_FILE":               keyFile,
+		"RELEASE_POLICY_SIGNING_KEY_FILE":       writeReleasePolicySigningKey(t, directory),
+		"RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE": writeVerificationKey(t, directory),
+		"LICENSE_KEY_ID":                        "license-key-001",
+		"STATUS_KEY_ID":                         "status-key-001",
+		"RELEASE_POLICY_KEY_ID":                 "release-policy-key-001",
+		"RELEASE_AUTHORIZATION_KEY_ID":          "release-gate-key-001",
+		"KMS_PROVIDER":                          "external-kms",
+		"KMS_KEY_VERSION":                       "kms-v1",
+		"KMS_KEK_FILE":                          kekFile,
+		"ADMIN_OPERATORS_FILE":                  operatorsFile,
+		"ADMIN_SECRET_FINGERPRINT_KEY_FILE":     writeTestFile(t, directory, "fingerprint-key", []byte(strings.Repeat("f", 32))),
+		"NEW_API_ALLOWED_HOSTS":                 "api.example.test",
+		"NEW_API_BASE_URL":                      "https://api.example.test/v1",
+		"NEW_API_KEY_FILE":                      writeTestFile(t, directory, "new-api-key", []byte(strings.Repeat("n", 32))),
+		"NEW_API_ENABLED_MODELS":                "deepseek-chat,qwen-plus,doubao-pro",
+		"PUBLIC_MODEL_ENDPOINT":                 "https://activation.example/model-api/",
+		"NEW_API_KMS_KEY_VERSION":               "new-api-kms-v2",
+		"MODEL_PROXY_REQUEST_BODY_BYTES":        "1048576",
+		"MODEL_PROXY_RESPONSE_BODY_BYTES":       "4194304",
+		"MODEL_PROXY_TIMEOUT":                   "60s",
+		"MODEL_PROXY_ADMISSION_LEASE":           "65s",
+		"LISTEN_ADDRESS":                        " 127.0.0.1:8080 ",
 	}
 
 	got, err := LoadFrom(func(name string) string { return values[name] })
@@ -61,6 +65,14 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	}
 	if len(got.LicenseSigningKey) != ed25519.PrivateKeySize {
 		t.Fatalf("signing key length = %d, want %d", len(got.LicenseSigningKey), ed25519.PrivateKeySize)
+	}
+	if len(got.ReleasePolicySigningKey) != ed25519.PrivateKeySize || len(got.ReleaseAuthorizationPublicKey) != ed25519.PublicKeySize || got.ReleasePolicyKeyID != "release-policy-key-001" || got.ReleaseAuthorizationKeyID != "release-gate-key-001" {
+		t.Fatal("independent release signing and authorization keys were not loaded")
+	}
+	reusedStatusKey := maps.Clone(values)
+	reusedStatusKey["RELEASE_POLICY_SIGNING_KEY_FILE"] = values["STATUS_SIGNING_KEY_FILE"]
+	if _, err := LoadFrom(func(name string) string { return reusedStatusKey[name] }); err == nil || !strings.Contains(err.Error(), "RELEASE_POLICY_SIGNING_KEY_FILE") {
+		t.Fatalf("status signing key reuse accepted: %v", err)
 	}
 	if got.KMSKEKFile != kekFile || string(got.KMSKEK) != strings.Repeat("k", 32) {
 		t.Fatal("KEK file was not loaded")
@@ -98,26 +110,30 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 func TestLoadFromRequiresEveryConfigurationNameWithoutLeakingValues(t *testing.T) {
 	directory := t.TempDir()
 	values := map[string]string{
-		"DATABASE_URL":                      "postgres://secret-user:secret-password@database/uclaw",
-		"ACTIVATION_PEPPER_FILE":            writeTestFile(t, directory, "required-pepper", []byte(strings.Repeat("p", 32))),
-		"LICENSE_SIGNING_KEY_FILE":          writeSigningKey(t, directory),
-		"STATUS_SIGNING_KEY_FILE":           writeSigningKey(t, directory),
-		"LICENSE_KEY_ID":                    "license-key-001",
-		"STATUS_KEY_ID":                     "status-key-001",
-		"KMS_PROVIDER":                      "external-kms",
-		"KMS_KEY_VERSION":                   "kms-v1",
-		"KMS_KEK_FILE":                      writeTestFile(t, directory, "required-kek", []byte(strings.Repeat("k", 32))),
-		"ADMIN_OPERATORS_FILE":              writeTestFile(t, directory, "required-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
-		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "required-fingerprint-key", []byte(strings.Repeat("f", 32))),
-		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
-		"NEW_API_BASE_URL":                  "https://api.example.test/v1",
-		"NEW_API_KEY_FILE":                  writeTestFile(t, directory, "required-new-api-key", []byte(strings.Repeat("n", 32))),
-		"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
-		"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
-		"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
-		"MODEL_PROXY_RESPONSE_BODY_BYTES":   "4194304",
-		"MODEL_PROXY_TIMEOUT":               "60s",
-		"MODEL_PROXY_ADMISSION_LEASE":       "65s",
+		"DATABASE_URL":                          "postgres://secret-user:secret-password@database/uclaw",
+		"ACTIVATION_PEPPER_FILE":                writeTestFile(t, directory, "required-pepper", []byte(strings.Repeat("p", 32))),
+		"LICENSE_SIGNING_KEY_FILE":              writeSigningKey(t, directory),
+		"STATUS_SIGNING_KEY_FILE":               writeSigningKey(t, directory),
+		"RELEASE_POLICY_SIGNING_KEY_FILE":       writeReleasePolicySigningKey(t, directory),
+		"RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE": writeVerificationKey(t, directory),
+		"LICENSE_KEY_ID":                        "license-key-001",
+		"STATUS_KEY_ID":                         "status-key-001",
+		"RELEASE_POLICY_KEY_ID":                 "release-policy-key-001",
+		"RELEASE_AUTHORIZATION_KEY_ID":          "release-gate-key-001",
+		"KMS_PROVIDER":                          "external-kms",
+		"KMS_KEY_VERSION":                       "kms-v1",
+		"KMS_KEK_FILE":                          writeTestFile(t, directory, "required-kek", []byte(strings.Repeat("k", 32))),
+		"ADMIN_OPERATORS_FILE":                  writeTestFile(t, directory, "required-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+		"ADMIN_SECRET_FINGERPRINT_KEY_FILE":     writeTestFile(t, directory, "required-fingerprint-key", []byte(strings.Repeat("f", 32))),
+		"NEW_API_ALLOWED_HOSTS":                 "api.example.test",
+		"NEW_API_BASE_URL":                      "https://api.example.test/v1",
+		"NEW_API_KEY_FILE":                      writeTestFile(t, directory, "required-new-api-key", []byte(strings.Repeat("n", 32))),
+		"PUBLIC_MODEL_ENDPOINT":                 "https://activation.example/model-api/",
+		"NEW_API_KMS_KEY_VERSION":               "new-api-kms-v2",
+		"MODEL_PROXY_REQUEST_BODY_BYTES":        "1048576",
+		"MODEL_PROXY_RESPONSE_BODY_BYTES":       "4194304",
+		"MODEL_PROXY_TIMEOUT":                   "60s",
+		"MODEL_PROXY_ADMISSION_LEASE":           "65s",
 	}
 
 	for _, missingName := range requiredVariables {
@@ -179,26 +195,30 @@ func TestLoadFromRejectsInvalidSecretFilesWithoutLeakingValues(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			values := map[string]string{
-				"DATABASE_URL":                      "postgres://secret-user:secret-password@database/uclaw",
-				"ACTIVATION_PEPPER_FILE":            test.pepperFile,
-				"LICENSE_SIGNING_KEY_FILE":          test.keyFile,
-				"STATUS_SIGNING_KEY_FILE":           validKey,
-				"LICENSE_KEY_ID":                    "license-key-001",
-				"STATUS_KEY_ID":                     "status-key-001",
-				"KMS_PROVIDER":                      "external-kms",
-				"KMS_KEY_VERSION":                   "kms-v1",
-				"KMS_KEK_FILE":                      writeTestFile(t, directory, "valid-kek", []byte(strings.Repeat("k", 32))),
-				"ADMIN_OPERATORS_FILE":              writeTestFile(t, directory, "valid-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
-				"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "valid-fingerprint-key", []byte(strings.Repeat("f", 32))),
-				"NEW_API_ALLOWED_HOSTS":             "api.example.test",
-				"NEW_API_BASE_URL":                  "https://api.example.test/v1",
-				"NEW_API_KEY_FILE":                  writeTestFile(t, directory, "valid-new-api-key", []byte(strings.Repeat("n", 32))),
-				"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
-				"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
-				"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
-				"MODEL_PROXY_RESPONSE_BODY_BYTES":   "4194304",
-				"MODEL_PROXY_TIMEOUT":               "60s",
-				"MODEL_PROXY_ADMISSION_LEASE":       "65s",
+				"DATABASE_URL":                          "postgres://secret-user:secret-password@database/uclaw",
+				"ACTIVATION_PEPPER_FILE":                test.pepperFile,
+				"LICENSE_SIGNING_KEY_FILE":              test.keyFile,
+				"STATUS_SIGNING_KEY_FILE":               validKey,
+				"RELEASE_POLICY_SIGNING_KEY_FILE":       writeReleasePolicySigningKey(t, directory),
+				"RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE": writeVerificationKey(t, directory),
+				"LICENSE_KEY_ID":                        "license-key-001",
+				"STATUS_KEY_ID":                         "status-key-001",
+				"RELEASE_POLICY_KEY_ID":                 "release-policy-key-001",
+				"RELEASE_AUTHORIZATION_KEY_ID":          "release-gate-key-001",
+				"KMS_PROVIDER":                          "external-kms",
+				"KMS_KEY_VERSION":                       "kms-v1",
+				"KMS_KEK_FILE":                          writeTestFile(t, directory, "valid-kek", []byte(strings.Repeat("k", 32))),
+				"ADMIN_OPERATORS_FILE":                  writeTestFile(t, directory, "valid-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+				"ADMIN_SECRET_FINGERPRINT_KEY_FILE":     writeTestFile(t, directory, "valid-fingerprint-key", []byte(strings.Repeat("f", 32))),
+				"NEW_API_ALLOWED_HOSTS":                 "api.example.test",
+				"NEW_API_BASE_URL":                      "https://api.example.test/v1",
+				"NEW_API_KEY_FILE":                      writeTestFile(t, directory, "valid-new-api-key", []byte(strings.Repeat("n", 32))),
+				"PUBLIC_MODEL_ENDPOINT":                 "https://activation.example/model-api/",
+				"NEW_API_KMS_KEY_VERSION":               "new-api-kms-v2",
+				"MODEL_PROXY_REQUEST_BODY_BYTES":        "1048576",
+				"MODEL_PROXY_RESPONSE_BODY_BYTES":       "4194304",
+				"MODEL_PROXY_TIMEOUT":                   "60s",
+				"MODEL_PROXY_ADMISSION_LEASE":           "65s",
 			}
 			_, err := LoadFrom(func(name string) string { return values[name] })
 			if err == nil {
@@ -220,25 +240,29 @@ func TestLoadFromAcceptsOnlyExplicitKEKFormats(t *testing.T) {
 	directory := t.TempDir()
 	keyFile := writeSigningKey(t, directory)
 	baseValues := map[string]string{
-		"DATABASE_URL":                      "postgres://database/uclaw",
-		"ACTIVATION_PEPPER_FILE":            writeTestFile(t, directory, "pepper", []byte(strings.Repeat("p", 32))),
-		"LICENSE_SIGNING_KEY_FILE":          keyFile,
-		"STATUS_SIGNING_KEY_FILE":           keyFile,
-		"LICENSE_KEY_ID":                    "license-key-001",
-		"STATUS_KEY_ID":                     "status-key-001",
-		"KMS_PROVIDER":                      "local-kek-v1",
-		"KMS_KEY_VERSION":                   "kms-v1",
-		"ADMIN_OPERATORS_FILE":              writeTestFile(t, directory, "admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
-		"ADMIN_SECRET_FINGERPRINT_KEY_FILE": writeTestFile(t, directory, "fingerprint-key-base", []byte(strings.Repeat("f", 32))),
-		"NEW_API_ALLOWED_HOSTS":             "api.example.test",
-		"NEW_API_BASE_URL":                  "https://api.example.test/v1",
-		"NEW_API_KEY_FILE":                  writeTestFile(t, directory, "base-new-api-key", []byte(strings.Repeat("n", 32))),
-		"PUBLIC_MODEL_ENDPOINT":             "https://activation.example/model-api/",
-		"NEW_API_KMS_KEY_VERSION":           "new-api-kms-v2",
-		"MODEL_PROXY_REQUEST_BODY_BYTES":    "1048576",
-		"MODEL_PROXY_RESPONSE_BODY_BYTES":   "4194304",
-		"MODEL_PROXY_TIMEOUT":               "60s",
-		"MODEL_PROXY_ADMISSION_LEASE":       "65s",
+		"DATABASE_URL":                          "postgres://database/uclaw",
+		"ACTIVATION_PEPPER_FILE":                writeTestFile(t, directory, "pepper", []byte(strings.Repeat("p", 32))),
+		"LICENSE_SIGNING_KEY_FILE":              keyFile,
+		"STATUS_SIGNING_KEY_FILE":               keyFile,
+		"RELEASE_POLICY_SIGNING_KEY_FILE":       writeReleasePolicySigningKey(t, directory),
+		"RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE": writeVerificationKey(t, directory),
+		"LICENSE_KEY_ID":                        "license-key-001",
+		"STATUS_KEY_ID":                         "status-key-001",
+		"RELEASE_POLICY_KEY_ID":                 "release-policy-key-001",
+		"RELEASE_AUTHORIZATION_KEY_ID":          "release-gate-key-001",
+		"KMS_PROVIDER":                          "local-kek-v1",
+		"KMS_KEY_VERSION":                       "kms-v1",
+		"ADMIN_OPERATORS_FILE":                  writeTestFile(t, directory, "admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+		"ADMIN_SECRET_FINGERPRINT_KEY_FILE":     writeTestFile(t, directory, "fingerprint-key-base", []byte(strings.Repeat("f", 32))),
+		"NEW_API_ALLOWED_HOSTS":                 "api.example.test",
+		"NEW_API_BASE_URL":                      "https://api.example.test/v1",
+		"NEW_API_KEY_FILE":                      writeTestFile(t, directory, "base-new-api-key", []byte(strings.Repeat("n", 32))),
+		"PUBLIC_MODEL_ENDPOINT":                 "https://activation.example/model-api/",
+		"NEW_API_KMS_KEY_VERSION":               "new-api-kms-v2",
+		"MODEL_PROXY_REQUEST_BODY_BYTES":        "1048576",
+		"MODEL_PROXY_RESPONSE_BODY_BYTES":       "4194304",
+		"MODEL_PROXY_TIMEOUT":                   "60s",
+		"MODEL_PROXY_ADMISSION_LEASE":           "65s",
 	}
 	for name, contents := range map[string][]byte{
 		"raw":    []byte(strings.Repeat("r", 32)),
@@ -342,7 +366,7 @@ func TestLoadFromRequiresIndependentAdminFingerprintSecret(t *testing.T) {
 	pepper := writeTestFile(t, directory, "separate-pepper", []byte(strings.Repeat("p", 32)))
 	kek := writeTestFile(t, directory, "separate-kek", []byte(strings.Repeat("k", 32)))
 	fingerprint := writeTestFile(t, directory, "separate-fingerprint", []byte(strings.Repeat("f", 32)))
-	base := map[string]string{"DATABASE_URL": "postgres://database/uclaw", "ACTIVATION_PEPPER_FILE": pepper, "LICENSE_SIGNING_KEY_FILE": signing, "STATUS_SIGNING_KEY_FILE": signing, "LICENSE_KEY_ID": "license-key-001", "STATUS_KEY_ID": "status-key-001", "KMS_PROVIDER": "local-kek-v1", "KMS_KEY_VERSION": "kms-v1", "KMS_KEK_FILE": kek, "ADMIN_OPERATORS_FILE": writeTestFile(t, directory, "separate-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)), "ADMIN_SECRET_FINGERPRINT_KEY_FILE": fingerprint, "NEW_API_ALLOWED_HOSTS": "api.example.test", "NEW_API_BASE_URL": "https://api.example.test/v1", "NEW_API_KEY_FILE": writeTestFile(t, directory, "separate-new-api-key", []byte(strings.Repeat("n", 32))), "PUBLIC_MODEL_ENDPOINT": "https://activation.example/model-api/", "NEW_API_KMS_KEY_VERSION": "new-api-kms-v2", "MODEL_PROXY_REQUEST_BODY_BYTES": "1048576", "MODEL_PROXY_RESPONSE_BODY_BYTES": "4194304", "MODEL_PROXY_TIMEOUT": "60s", "MODEL_PROXY_ADMISSION_LEASE": "65s"}
+	base := map[string]string{"DATABASE_URL": "postgres://database/uclaw", "ACTIVATION_PEPPER_FILE": pepper, "LICENSE_SIGNING_KEY_FILE": signing, "STATUS_SIGNING_KEY_FILE": signing, "RELEASE_POLICY_SIGNING_KEY_FILE": writeReleasePolicySigningKey(t, directory), "RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE": writeVerificationKey(t, directory), "LICENSE_KEY_ID": "license-key-001", "STATUS_KEY_ID": "status-key-001", "RELEASE_POLICY_KEY_ID": "release-policy-key-001", "RELEASE_AUTHORIZATION_KEY_ID": "release-gate-key-001", "KMS_PROVIDER": "local-kek-v1", "KMS_KEY_VERSION": "kms-v1", "KMS_KEK_FILE": kek, "ADMIN_OPERATORS_FILE": writeTestFile(t, directory, "separate-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)), "ADMIN_SECRET_FINGERPRINT_KEY_FILE": fingerprint, "NEW_API_ALLOWED_HOSTS": "api.example.test", "NEW_API_BASE_URL": "https://api.example.test/v1", "NEW_API_KEY_FILE": writeTestFile(t, directory, "separate-new-api-key", []byte(strings.Repeat("n", 32))), "PUBLIC_MODEL_ENDPOINT": "https://activation.example/model-api/", "NEW_API_KMS_KEY_VERSION": "new-api-kms-v2", "MODEL_PROXY_REQUEST_BODY_BYTES": "1048576", "MODEL_PROXY_RESPONSE_BODY_BYTES": "4194304", "MODEL_PROXY_TIMEOUT": "60s", "MODEL_PROXY_ADMISSION_LEASE": "65s"}
 	if _, err := LoadFrom(func(name string) string { return base[name] }); err != nil {
 		t.Fatalf("independent secret rejected: %v", err)
 	}
@@ -571,6 +595,24 @@ func writeSigningKey(t *testing.T, directory string) string {
 		t.Fatal(err)
 	}
 	return writeTestFile(t, directory, "signing-key", []byte(base64.RawStdEncoding.EncodeToString(privateKey)))
+}
+
+func writeReleasePolicySigningKey(t *testing.T, directory string) string {
+	t.Helper()
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writeTestFile(t, directory, "release-policy-signing-key", []byte(base64.RawStdEncoding.EncodeToString(privateKey)))
+}
+
+func writeVerificationKey(t *testing.T, directory string) string {
+	t.Helper()
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writeTestFile(t, directory, "release-authorization-public-key", []byte(base64.RawStdEncoding.EncodeToString(publicKey)))
 }
 
 func writeTestFile(t *testing.T, directory string, name string, contents []byte) string {
