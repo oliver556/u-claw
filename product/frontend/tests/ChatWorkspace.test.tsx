@@ -1062,11 +1062,12 @@ describe("chat workspace", () => {
     const add = await screen.findByRole("button", { name: "添加附件" });
     fireEvent.click(add);
     fireEvent.click(add);
+    await waitFor(() => expect(invoke.mock.calls.filter(([request]) => request.method === "select")).toHaveLength(2));
     first.resolve([attachment]);
     second.resolve([attachment]);
 
-    expect(await screen.findByText("same.txt")).toBeVisible();
     await waitFor(() => expect(invoke.mock.calls.filter(([request]) => request.method === "prepare")).toHaveLength(1));
+    expect(await screen.findByLabelText("附件预览")).toHaveTextContent("same.txt");
   });
 
   it("preserves clientRequestId when a dropped attachment import fails", async () => {
@@ -1203,13 +1204,14 @@ describe("chat workspace", () => {
     const client = clientFixture({ gateway: { ...base.gateway, negotiate: vi.fn(async () => ({ protocolVersion: 4 as const, methods: new Set(["chat.send"]), events: new Set<string>(), features: { attachments: true } })) }, chat: { ...base.chat, send } });
     render(<App client={client} />);
     fireEvent.click(await screen.findByRole("button", { name: "添加附件" }));
+    expect(await screen.findByLabelText("附件预览")).toHaveTextContent("failed.txt");
     const composer = screen.getByRole("textbox", { name: "给 U-Claw 发送消息" });
     fireEvent.change(composer, { target: { value: "失败附件" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
 
-    expect(await screen.findByText("上传失败")).toBeVisible();
-    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "get", params: { attachmentId: "attachment-failed" } }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ method: "get", params: { attachmentId: "attachment-failed" } })));
+    expect(await screen.findByLabelText("附件队列")).toHaveTextContent("上传失败");
     fireEvent.click(screen.getByRole("button", { name: "重试 failed.txt" }));
     await waitFor(() => expect(invoke.mock.calls.filter(([request]) => request.method === "prepare").length).toBeGreaterThan(1));
     fireEvent.change(composer, { target: { value: "失败附件" } });
