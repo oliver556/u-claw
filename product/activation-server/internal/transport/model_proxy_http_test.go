@@ -318,6 +318,8 @@ func TestUpstreamValidationAcceptsOpenAICompatibleExtensions(t *testing.T) {
 	tests := []struct{ route, body string }{
 		{"models", `{"object":"list","success":true,"data":[{"id":"gpt-5.5","object":"model","created":1,"owned_by":"newapi","supported_endpoint_types":["openai"]}]}`},
 		{"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"gpt-5.5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"completion_tokens_details":{"reasoning_tokens":0}}}`},
+		{"chat", `{"id":"chatcmpl_tool","object":"chat.completion","created":1,"model":"qwen3-max","system_fingerprint":"fp_x","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Shanghai\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":0}}}`},
+		{"chat", `{"id":"chatcmpl_reasoning","object":"chat.completion","created":1,"model":"deepseek-v4-flash","choices":[{"index":0,"message":{"role":"assistant","content":"ok","reasoning_content":"brief chain"},"finish_reason":"stop","logprobs":null}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`},
 	}
 	for _, test := range tests {
 		if !validUpstreamJSON(test.route, []byte(test.body)) {
@@ -331,6 +333,8 @@ func TestUpstreamValidationRejectsMalformedOpenAICompatibleExtensions(t *testing
 		{"models", `{"object":"list","success":"true","data":[]}`},
 		{"models", `{"object":"list","data":[{"id":"gpt-5.5","object":"model","created":1,"owned_by":"newapi","supported_endpoint_types":"openai"}]}`},
 		{"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"gpt-5.5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"completion_tokens_details":{"reasoning_tokens":-1}}}`},
+		{"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"qwen3-max","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`},
+		{"chat", `{"id":"chatcmpl_x","object":"chat.completion","created":1,"model":"deepseek-v4-flash","choices":[{"index":0,"message":{"role":"assistant","content":"ok","reasoning_content":1},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`},
 	}
 	for _, test := range tests {
 		if validUpstreamJSON(test.route, []byte(test.body)) {

@@ -670,7 +670,7 @@ func validUpstreamJSON(route string, b []byte) bool {
 	if strings.HasPrefix(route, "images.") {
 		return validImageResponse(top)
 	}
-	if !hasExactKeys(top, "id", "object", "created", "model", "choices", "usage") {
+	if !hasAllowedKeys(top, []string{"id", "object", "created", "model", "choices", "usage"}, "system_fingerprint", "service_tier") {
 		return false
 	}
 	var id, obj, model string
@@ -680,26 +680,31 @@ func validUpstreamJSON(route string, b []byte) bool {
 		return false
 	}
 	for _, choice := range choices {
-		if !hasExactKeys(choice, "index", "message", "finish_reason") {
+		if !hasAllowedKeys(choice, []string{"index", "message", "finish_reason"}, "logprobs") {
 			return false
 		}
 		var index int64
 		var message map[string]json.RawMessage
 		var finishReason string
-		if json.Unmarshal(choice["index"], &index) != nil || index < 0 || index > maxSafeInteger || json.Unmarshal(choice["message"], &message) != nil || !hasExactKeys(message, "role", "content") || json.Unmarshal(choice["finish_reason"], &finishReason) != nil || (finishReason != "stop" && finishReason != "length" && finishReason != "content_filter") {
+		if json.Unmarshal(choice["index"], &index) != nil || index < 0 || index > maxSafeInteger || json.Unmarshal(choice["message"], &message) != nil ||
+			json.Unmarshal(choice["finish_reason"], &finishReason) != nil || (finishReason != "stop" && finishReason != "length" && finishReason != "content_filter" && finishReason != "tool_calls") ||
+			!validChatResponseMessage(message) {
 			return false
 		}
-		var role, content string
-		if json.Unmarshal(message["role"], &role) != nil || role != "assistant" || json.Unmarshal(message["content"], &content) != nil {
+		if raw, ok := choice["logprobs"]; ok && string(raw) != "null" {
 			return false
 		}
 	}
 	var fields map[string]json.RawMessage
 	var promptTokens, completionTokens, totalTokens int64
-	if json.Unmarshal(top["usage"], &fields) != nil || !hasAllowedKeys(fields, []string{"prompt_tokens", "completion_tokens", "total_tokens"}, "completion_tokens_details") || json.Unmarshal(fields["prompt_tokens"], &promptTokens) != nil || json.Unmarshal(fields["completion_tokens"], &completionTokens) != nil || json.Unmarshal(fields["total_tokens"], &totalTokens) != nil || promptTokens < 0 || completionTokens < 0 || totalTokens < 0 || promptTokens > maxSafeInteger || completionTokens > maxSafeInteger || totalTokens > maxSafeInteger {
+	if json.Unmarshal(top["usage"], &fields) != nil || !hasAllowedKeys(fields, []string{"prompt_tokens", "completion_tokens", "total_tokens"}, "prompt_tokens_details", "completion_tokens_details") || json.Unmarshal(fields["prompt_tokens"], &promptTokens) != nil || json.Unmarshal(fields["completion_tokens"], &completionTokens) != nil || json.Unmarshal(fields["total_tokens"], &totalTokens) != nil || promptTokens < 0 || completionTokens < 0 || totalTokens < 0 || promptTokens > maxSafeInteger || completionTokens > maxSafeInteger || totalTokens > maxSafeInteger {
 		return false
 	}
-	if details, ok := fields["completion_tokens_details"]; ok {
+	for _, key := range []string{"prompt_tokens_details", "completion_tokens_details"} {
+		details, ok := fields[key]
+		if !ok {
+			continue
+		}
 		var values map[string]int64
 		if json.Unmarshal(details, &values) != nil || values == nil {
 			return false
@@ -708,6 +713,56 @@ func validUpstreamJSON(route string, b []byte) bool {
 			if value < 0 || value > maxSafeInteger {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+func validChatResponseMessage(message map[string]json.RawMessage) bool {
+	if !hasAllowedKeys(message, []string{"role", "content"}, "tool_calls", "reasoning_content") {
+		return false
+	}
+	var role string
+	if json.Unmarshal(message["role"], &role) != nil || role != "assistant" {
+		return false
+	}
+	if string(message["content"]) != "null" {
+		var content string
+		if json.Unmarshal(message["content"], &content) != nil {
+			return false
+		}
+	}
+	if raw, ok := message["reasoning_content"]; ok && string(raw) != "null" {
+		var reasoning string
+		if json.Unmarshal(raw, &reasoning) != nil {
+			return false
+		}
+	}
+	if raw, ok := message["tool_calls"]; ok && !validToolCalls(raw) {
+		return false
+	}
+	return true
+}
+
+func validToolCalls(raw json.RawMessage) bool {
+	var calls []map[string]json.RawMessage
+	if json.Unmarshal(raw, &calls) != nil || len(calls) == 0 || len(calls) > 128 {
+		return false
+	}
+	for _, call := range calls {
+		if !hasExactKeys(call, "id", "type", "function") {
+			return false
+		}
+		var id, kind string
+		var fn map[string]json.RawMessage
+		if json.Unmarshal(call["id"], &id) != nil || !proxyIdentifierPattern.MatchString(id) ||
+			json.Unmarshal(call["type"], &kind) != nil || kind != "function" ||
+			json.Unmarshal(call["function"], &fn) != nil || !hasExactKeys(fn, "name", "arguments") {
+			return false
+		}
+		var name, arguments string
+		if json.Unmarshal(fn["name"], &name) != nil || !proxyIdentifierPattern.MatchString(name) || json.Unmarshal(fn["arguments"], &arguments) != nil {
+			return false
 		}
 	}
 	return true
