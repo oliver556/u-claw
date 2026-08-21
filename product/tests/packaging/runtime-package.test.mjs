@@ -5,12 +5,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { buildRelease } from "../../packaging/build-release.mjs";
+import { buildRelease as buildOfficialRelease } from "../../packaging/build-release.mjs";
 import { buildRuntime } from "../../packaging/build-runtime.mjs";
 import { runtimeManifestSigningPayload, signRuntimeManifest, validateRuntimeManifest } from "../../scripts/runtime-manifest.mjs";
 
 const fixtureSigningKeys = generateKeyPairSync("ed25519");
 const signFixtureManifest = (manifest) => signRuntimeManifest(manifest, { keyId: "fixture-release-key", privateKey: fixtureSigningKeys.privateKey, signedAt: "2026-08-09T00:00:00.000Z", expiresAt: "2027-08-09T00:00:00.000Z", sequence: 42 });
+const buildRelease = (options) => buildOfficialRelease({ ...options, allowFixtureLauncher: true });
 
 async function fixtureRuntime() {
   const root = await mkdtemp(path.join(tmpdir(), "uclaw-runtime-"));
@@ -142,6 +143,22 @@ test("buildRelease writes only the portable release layout", async () => {
   const writtenManifest = JSON.parse(await readFile(path.join(outputDir, ".uclaw", "version.json"), "utf8"));
   assert.deepEqual(writtenManifest, manifest);
   assert.equal(verify(null, runtimeManifestSigningPayload(writtenManifest), fixtureSigningKeys.publicKey, Buffer.from(writtenManifest.signature.value, "base64")), true);
+});
+
+test("official buildRelease fails closed when Bootstrap policy config verification fails", async () => {
+  const { root, runtime } = await fixtureRuntime();
+  const runtimePackage = path.join(root, "runtime.pkg");
+  const manifest = signFixtureManifest(await buildRuntime(runtimeOptions(root, runtime, { outputFile: runtimePackage })));
+  const launcher = path.join(root, "launcher.exe");
+  await writeFile(launcher, "launcher-binary");
+  await assert.rejects(buildOfficialRelease({
+    launcherPath: launcher,
+    runtimePackagePath: runtimePackage,
+    manifest,
+    outputDir: path.join(root, "official release"),
+    trustedPublicKeys: { "fixture-release-key": fixtureSigningKeys.publicKey },
+    verifyLauncherPolicyConfig: async () => { throw new Error("missing trusted release policy keys"); },
+  }), /missing trusted release policy keys/i);
 });
 
 test("buildRelease rejects invalid manifest, mismatched package, and existing output", async () => {

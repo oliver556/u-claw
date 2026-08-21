@@ -97,6 +97,11 @@ jobs:
           cache: npm
           cache-dependency-path: product/package-lock.json
 
+      - name: Set up pinned Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.25.0'
+
       - name: Download final Windows runtime from fixed run
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -128,6 +133,100 @@ jobs:
       - name: Secret scan
         run: npm run test:secrets --prefix product
 
+      - name: Build official Bootstrap launcher
+        shell: pwsh
+        env:
+          UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS }}
+          UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS }}
+          UCLAW_LICENSE_STATUS_ENDPOINT: ${{ vars.UCLAW_LICENSE_STATUS_ENDPOINT }}
+          UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS }}
+          UCLAW_RUNTIME_REVOKED_KEY_IDS: ${{ vars.UCLAW_RUNTIME_REVOKED_KEY_IDS }}
+          UCLAW_RELEASE_BASE_URL: ${{ vars.UCLAW_RELEASE_BASE_URL }}
+          UCLAW_RELEASE_POLICY_ENDPOINT: ${{ vars.UCLAW_RELEASE_POLICY_ENDPOINT }}
+          UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS }}
+          UCLAW_ACTIVATION_ENDPOINT: ${{ vars.UCLAW_ACTIVATION_ENDPOINT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @(
+            'UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS',
+            'UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS',
+            'UCLAW_LICENSE_STATUS_ENDPOINT',
+            'UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS',
+            'UCLAW_RELEASE_BASE_URL',
+            'UCLAW_RELEASE_POLICY_ENDPOINT',
+            'UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS',
+            'UCLAW_ACTIVATION_ENDPOINT'
+          )) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "$name is required for official Bootstrap builds"
+            }
+          }
+          function Convert-TrustedKeys([string]$value, [string]$label, [bool]$productionPolicy = $false) {
+            $keys = ConvertFrom-Json $value -AsHashtable
+            if ($keys.Count -lt 1 -or $keys.Count -gt 16) { throw "$label key count is invalid" }
+            foreach ($keyID in $keys.Keys) {
+              if ($keyID -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { throw "$label key ID is invalid" }
+              if ($productionPolicy -and $keyID -match '^(?i:test|fixture|example|dev-)') { throw "$label key ID is not production" }
+              $keyBytes = [Convert]::FromBase64String($keys[$keyID])
+              if ($keyBytes.Length -ne 32) { throw "$label key must be a raw Ed25519 public key" }
+            }
+            return $keys
+          }
+          function Convert-HttpsEndpoint([string]$value, [string]$label) {
+            if ($value -match "[\s'\\]") { throw "$label contains unsafe linker characters" }
+            $uri = [Uri]$value
+            if (!$uri.IsAbsoluteUri -or $uri.Scheme -cne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) {
+              throw "$label must be an HTTPS URL without credentials, query, or fragment"
+            }
+            return $uri
+          }
+          try {
+            $runtimeKeysJson = ConvertTo-Json (Convert-TrustedKeys $env:UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS 'Runtime') -Compress
+            $licenseKeysJson = ConvertTo-Json (Convert-TrustedKeys $env:UCLAW_LICENSE_TRUSTED_PUBLIC_KEYS 'License') -Compress
+            $licenseStatusKeysJson = ConvertTo-Json (Convert-TrustedKeys $env:UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS 'License status') -Compress
+            $releasePolicyKeysJson = ConvertTo-Json (Convert-TrustedKeys $env:UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS 'Release policy' $true) -Compress
+            $revokedKeyIDs = @(ConvertFrom-Json ($env:UCLAW_RUNTIME_REVOKED_KEY_IDS ?? '[]'))
+            if ($revokedKeyIDs.Count -gt 64) { throw 'Revoked runtime key count is invalid' }
+            foreach ($keyID in $revokedKeyIDs) {
+              if ($keyID -isnot [string] -or $keyID -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { throw 'Revoked runtime key ID is invalid' }
+            }
+            $revokedKeyIDsJson = ConvertTo-Json @($revokedKeyIDs) -Compress
+            $releaseBaseURL = (Convert-HttpsEndpoint $env:UCLAW_RELEASE_BASE_URL 'Release feed').AbsoluteUri
+            $licenseStatusEndpoint = (Convert-HttpsEndpoint $env:UCLAW_LICENSE_STATUS_ENDPOINT 'License status endpoint').AbsoluteUri
+            $activationEndpoint = (Convert-HttpsEndpoint $env:UCLAW_ACTIVATION_ENDPOINT 'Activation endpoint').AbsoluteUri
+            $releasePolicyURI = Convert-HttpsEndpoint $env:UCLAW_RELEASE_POLICY_ENDPOINT 'Release policy endpoint'
+            if ($releasePolicyURI.Host -match '(?i)(^localhost$|\.test$|\.invalid$|\.example(?:\.(?:com|net|org))?$)') { throw 'Release policy endpoint is not production' }
+            $releasePolicyEndpoint = $releasePolicyURI.AbsoluteUri
+          }
+          catch {
+            throw "Invalid official Bootstrap configuration: $($_.Exception.Message)"
+          }
+          New-Item -ItemType Directory -Force product/dist/launcher | Out-Null
+          $launcherOutput = Join-Path $PWD 'product/dist/launcher/U-Claw.exe'
+          $env:GOFLAGS = ''
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          Push-Location product/launcher
+          try {
+            if (Test-Path -LiteralPath rsrc_windows_amd64.syso) { throw 'Bootstrap resource output already exists' }
+            try {
+              go run github.com/akavel/rsrc@v0.10.2 -manifest app.manifest -arch amd64 -o rsrc_windows_amd64.syso
+              if ($LASTEXITCODE -ne 0) { throw 'Bootstrap manifest generation failed' }
+              $ldflags = "-s -w -H windowsgui -X 'main.trustedRuntimeKeys=$runtimeKeysJson' -X 'main.trustedStartupLicenseKeys=$licenseKeysJson' -X 'main.trustedLicenseStatusKeys=$licenseStatusKeysJson' -X 'main.licenseStatusEndpoint=$licenseStatusEndpoint' -X 'main.revokedRuntimeKeyIDs=$revokedKeyIDsJson' -X 'main.releaseFeedBaseURL=$releaseBaseURL' -X 'main.releasePolicyEndpoint=$releasePolicyEndpoint' -X 'main.trustedReleasePolicyKeys=$releasePolicyKeysJson' -X 'main.activationServiceEndpoint=$activationEndpoint'"
+              go build -trimpath -ldflags $ldflags -o $launcherOutput .
+              if ($LASTEXITCODE -ne 0) { throw 'Bootstrap build failed' }
+            }
+            finally {
+              Remove-Item -LiteralPath rsrc_windows_amd64.syso -Force -ErrorAction SilentlyContinue
+            }
+          }
+          finally {
+            Pop-Location
+          }
+          & $launcherOutput --verify-official-release-policy-config
+          if ($LASTEXITCODE -ne 0) { throw 'Bootstrap release policy configuration verification failed' }
+
       - name: Prepare release directories and signing key
         shell: pwsh
         env:
@@ -142,6 +241,7 @@ jobs:
           node product/packaging/release-gate-cli.mjs build `
             --repo-root . `
             --runtime product/dist/runtime-source/windows-runtime `
+            --launcher product/dist/launcher/U-Claw.exe `
             --output product/dist/candidate `
             --product-version $env:UCLAW_PRODUCT_VERSION `
             --release-id $env:UCLAW_RELEASE_ID `

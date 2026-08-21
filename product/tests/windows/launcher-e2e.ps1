@@ -146,6 +146,7 @@ try {
         --runtime-package $runtimePackage `
         --manifest $manifestPath `
         --public-key $fixturePublicKey `
+        --test-fixture-launcher `
         --output $releaseRoot
     Assert-True ($LASTEXITCODE -eq 0) 'BUILD_RELEASE_FAILED'
     [void][IO.Directory]::CreateDirectory($licenseDirectory)

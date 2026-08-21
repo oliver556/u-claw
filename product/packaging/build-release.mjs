@@ -35,6 +35,7 @@ export async function buildRelease(options) {
   const runtimePackagePath = path.resolve(options.runtimePackagePath);
   const outputDir = path.resolve(options.outputDir);
   await requireRegularFile(launcherPath, "launcher input");
+  const verifyLauncherPolicyConfig = options.verifyLauncherPolicyConfig ?? verifyOfficialLauncherPolicyConfig;
   const packageInfo = await requireRegularFile(runtimePackagePath, "runtime package");
   if (packageInfo.size !== manifest.runtimeBytes || !await digestMatches(runtimePackagePath, manifest.runtimeSha256)) {
     throw new Error("runtime package does not match manifest");
@@ -49,7 +50,9 @@ export async function buildRelease(options) {
   try {
     const packageRoot = path.join(temporaryRoot, ".uclaw");
     await mkdir(path.join(packageRoot, "data"), { recursive: true });
-    await copyFile(launcherPath, path.join(temporaryRoot, "U-Claw.exe"), constants.COPYFILE_EXCL);
+    const outputLauncher = path.join(temporaryRoot, "U-Claw.exe");
+    await copyFile(launcherPath, outputLauncher, constants.COPYFILE_EXCL);
+    if (!options.allowFixtureLauncher) await verifyLauncherPolicyConfig(outputLauncher);
     await copyFile(runtimePackagePath, path.join(packageRoot, "runtime.pkg"), constants.COPYFILE_EXCL);
     await writeFile(
       path.join(packageRoot, "version.json"),
@@ -70,6 +73,17 @@ export async function buildRelease(options) {
     committed = true;
   } finally {
     if (!committed) await rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+async function verifyOfficialLauncherPolicyConfig(launcherPath) {
+  try {
+    await execFileAsync(launcherPath, ["--verify-official-release-policy-config"], {
+      windowsHide: true,
+      timeout: 30_000,
+    });
+  } catch {
+    throw new Error("launcher release policy configuration is missing or invalid");
   }
 }
 
@@ -168,6 +182,7 @@ async function runCLI() {
       manifest: { type: "string" },
       "public-key": { type: "string" },
       output: { type: "string" },
+      "test-fixture-launcher": { type: "boolean", default: false },
     },
   });
   const manifest = JSON.parse(await readFile(values.manifest, "utf8"));
@@ -179,6 +194,7 @@ async function runCLI() {
     manifest,
     outputDir: values.output,
     trustedPublicKeys: { [manifest.signature?.keyId]: publicKey },
+    allowFixtureLauncher: values["test-fixture-launcher"],
   });
 }
 

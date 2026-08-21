@@ -40,7 +40,10 @@ export function assertCommercialBuildInputs(repoRoot, inputPaths) {
 }
 
 export async function buildReleaseArtifacts(options) {
-  assertCommercialBuildInputs(options.repoRoot, [options.runtimeDir]);
+  assertCommercialBuildInputs(options.repoRoot, [options.runtimeDir, options.launcherPath]);
+  const launcherPath = path.resolve(options.launcherPath);
+  await requireRegularFile(launcherPath, "official Bootstrap launcher");
+  const verifyLauncherPolicyConfig = options.verifyLauncherPolicyConfig ?? verifyOfficialLauncherPolicyConfig;
   const outputDir = path.resolve(options.outputDir);
   await requireMissing(outputDir, "release artifact output already exists");
   const parent = path.dirname(outputDir);
@@ -48,6 +51,9 @@ export async function buildReleaseArtifacts(options) {
   const temporary = await mkdtemp(path.join(parent, ".release-artifacts-"));
   let committed = false;
   try {
+    const outputLauncher = path.join(temporary, "U-Claw.exe");
+    await copyFile(launcherPath, outputLauncher);
+    await verifyLauncherPolicyConfig(outputLauncher);
     const runtimePackage = path.join(temporary, "runtime.pkg");
     const unsigned = await buildRuntime({
       inputDir: options.runtimeDir,
@@ -101,6 +107,17 @@ export async function buildReleaseArtifacts(options) {
     return { manifest, inventory, sbom, artifacts };
   } finally {
     if (!committed) await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+export async function verifyOfficialLauncherPolicyConfig(launcherPath) {
+  try {
+    await execFileAsync(path.resolve(launcherPath), ["--verify-official-release-policy-config"], {
+      windowsHide: true,
+      timeout: 30_000,
+    });
+  } catch {
+    throw new Error("official Bootstrap release policy configuration is missing or invalid");
   }
 }
 
@@ -436,6 +453,12 @@ async function requireMissing(target, message) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
+}
+
+async function requireRegularFile(target, label) {
+  const info = await lstat(target).catch(() => null);
+  if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`${label} must be a regular file`);
+  return info;
 }
 
 function ensureTrailingSlash(url) {

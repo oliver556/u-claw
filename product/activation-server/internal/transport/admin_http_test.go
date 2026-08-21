@@ -261,6 +261,7 @@ func releaseAuthorizationFixture(now time.Time, sequence uint64) releaseauth.Aut
 	releaseID := "release-107"
 	baseURL := "https://cdn.example.test/releases/" + releaseID + "/"
 	artifacts := map[string]releaseauth.Artifact{
+		"U-Claw.exe":            {Bytes: 10, SHA256: strings.Repeat("f", 64)},
 		"inventory.json":        {Bytes: 11, SHA256: strings.Repeat("a", 64)},
 		"runtime-manifest.json": {Bytes: 12, SHA256: strings.Repeat("b", 64)},
 		"runtime-tree.sha256":   {Bytes: 13, SHA256: strings.Repeat("c", 64)},

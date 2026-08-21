@@ -44,6 +44,8 @@ test("production launcher build requires and injects an Ed25519 trust root", asy
   assert.match(source, /UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
   assert.match(source, /UCLAW_RUNTIME_REVOKED_KEY_IDS:\s*\$\{\{\s*vars\.UCLAW_RUNTIME_REVOKED_KEY_IDS\s*\}\}/u);
   assert.match(source, /UCLAW_RELEASE_BASE_URL:\s*\$\{\{\s*vars\.UCLAW_RELEASE_BASE_URL\s*\}\}/u);
+  assert.match(source, /UCLAW_RELEASE_POLICY_ENDPOINT:\s*\$\{\{\s*vars\.UCLAW_RELEASE_POLICY_ENDPOINT\s*\}\}/u);
+  assert.match(source, /UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
   assert.match(source, /UCLAW_ACTIVATION_ENDPOINT:\s*\$\{\{\s*vars\.UCLAW_ACTIVATION_ENDPOINT\s*\}\}/u);
   assert.doesNotMatch(source, /UCLAW_ACTIVATION_TRUSTED_PUBLIC_KEYS|trustedActivationKeys|activationKeysJson/u);
   assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_RUNTIME_TRUSTED_PUBLIC_KEYS\)[\s\S]*throw/u);
@@ -65,7 +67,13 @@ test("production launcher build requires and injects an Ed25519 trust root", asy
   assert.match(source, /\$env:GOFLAGS\s*=\s*''/u);
   assert.match(source, /main\.revokedRuntimeKeyIDs=\$revokedKeyIDsJson/u);
   assert.match(source, /main\.releaseFeedBaseURL=\$releaseBaseURL/u);
+  assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_RELEASE_POLICY_ENDPOINT\)[\s\S]*throw/u);
+  assert.match(source, /IsNullOrWhiteSpace\(\$env:UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS\)[\s\S]*throw/u);
+  assert.match(source, /main\.releasePolicyEndpoint=\$releasePolicyEndpoint/u);
+  assert.match(source, /main\.trustedReleasePolicyKeys=\$releasePolicyKeysJson/u);
+  assert.match(source, /--verify-official-release-policy-config/u);
   assert.doesNotMatch(source, /go build[^\n]*-tags\s+licensefixture/iu);
+  assert.doesNotMatch(source, /--test-fixture-launcher/u);
   assert.doesNotMatch(source, /BEGIN (?:OPENSSH |RSA |EC )?PRIVATE KEY/u);
 });
 

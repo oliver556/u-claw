@@ -70,6 +70,7 @@ func TestVerifierRequiresValidFreshProofMatchingRelease(t *testing.T) {
 
 func fixtureAuthorization(now time.Time) Authorization {
 	readback := map[string]Artifact{
+		"U-Claw.exe":            {Bytes: 10, SHA256: digest("f"), URL: "https://cdn.example.test/releases/release-42/U-Claw.exe"},
 		"inventory.json":        {Bytes: 11, SHA256: digest("a"), URL: "https://cdn.example.test/releases/release-42/inventory.json"},
 		"runtime-manifest.json": {Bytes: 12, SHA256: digest("b"), URL: "https://cdn.example.test/releases/release-42/runtime-manifest.json"},
 		"runtime-tree.sha256":   {Bytes: 13, SHA256: digest("c"), URL: "https://cdn.example.test/releases/release-42/runtime-tree.sha256"},

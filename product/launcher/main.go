@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 )
 
@@ -41,6 +44,12 @@ func runReleaseFSHelperEntry(
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--verify-official-release-policy-config" {
+		if validateOfficialReleasePolicyConfig(releasePolicyEndpoint, trustedReleasePolicyKeys) != nil {
+			os.Exit(2)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--release-fs-helper" {
 		executablePath, err := os.Executable()
 		if err != nil {
@@ -65,6 +74,33 @@ func main() {
 	if err := launcherMain(ctx, executablePath, os.Getenv("LOCALAPPDATA"), reporter); err != nil {
 		os.Exit(1)
 	}
+}
+
+func validateOfficialReleasePolicyConfig(endpoint string, encodedKeys string) error {
+	policyURL, err := url.Parse(endpoint)
+	if err != nil || policyURL.Scheme != "https" || policyURL.Host == "" || policyURL.User != nil ||
+		policyURL.RawQuery != "" || policyURL.Fragment != "" {
+		return ErrReleasePolicyInvalid
+	}
+	host := strings.ToLower(policyURL.Hostname())
+	if host == "localhost" || net.ParseIP(host) != nil || !strings.Contains(host, ".") ||
+		strings.HasSuffix(host, ".test") || strings.HasSuffix(host, ".invalid") ||
+		strings.HasSuffix(host, ".example") || strings.HasSuffix(host, ".example.com") ||
+		strings.HasSuffix(host, ".example.net") || strings.HasSuffix(host, ".example.org") {
+		return ErrReleasePolicyInvalid
+	}
+	keys, err := parseReleasePolicyKeys(encodedKeys)
+	if err != nil || len(keys) > 16 {
+		return ErrReleasePolicyInvalid
+	}
+	for keyID := range keys {
+		lower := strings.ToLower(keyID)
+		if strings.HasPrefix(lower, "test") || strings.HasPrefix(lower, "fixture") ||
+			strings.HasPrefix(lower, "example") || strings.HasPrefix(lower, "dev-") {
+			return ErrReleasePolicyInvalid
+		}
+	}
+	return nil
 }
 
 func launcherMain(ctx context.Context, executablePath string, localAppData string, reporter Reporter) error {

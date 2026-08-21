@@ -12,6 +12,33 @@ import (
 	"testing"
 )
 
+func TestOfficialReleasePolicyConfigurationFailsClosed(t *testing.T) {
+	trustFixture := newLicenseFixture(t)
+	keys := fmt.Sprintf(
+		`{"production-release-policy-v1":%q}`,
+		base64.StdEncoding.EncodeToString(trustFixture.publicKey),
+	)
+	for _, test := range []struct {
+		name     string
+		endpoint string
+		keys     string
+	}{
+		{name: "missing endpoint", keys: keys},
+		{name: "missing trusted keys", endpoint: "https://release-policy.u-claw.org/v1/required"},
+		{name: "fixture endpoint", endpoint: "https://release-policy.example.test/v1/required", keys: keys},
+		{name: "fixture key id", endpoint: "https://release-policy.u-claw.org/v1/required", keys: fmt.Sprintf(`{"fixture-policy-key":%q}`, base64.StdEncoding.EncodeToString(trustFixture.publicKey))},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateOfficialReleasePolicyConfig(test.endpoint, test.keys); !errors.Is(err, ErrReleasePolicyInvalid) {
+				t.Fatalf("configuration returned %v", err)
+			}
+		})
+	}
+	if err := validateOfficialReleasePolicyConfig("https://release-policy.u-claw.org/v1/required", keys); err != nil {
+		t.Fatalf("valid production configuration returned %v", err)
+	}
+}
+
 func TestLauncherMainRejectsInvalidPortablePaths(t *testing.T) {
 	reporter := &recordingReporter{}
 	err := launcherMain(context.Background(), "U-Claw.exe", filepath.Join(t.TempDir(), "local"), reporter)

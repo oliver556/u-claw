@@ -1,4 +1,5 @@
 export const releaseAuthorizationArtifactNames = [
+  "U-Claw.exe",
   "inventory.json",
   "runtime-manifest.json",
   "runtime-tree.sha256",

@@ -23,7 +23,7 @@ var (
 	releaseIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 	sha256Pattern     = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	commitPattern     = regexp.MustCompile(`^[a-f0-9]{40}$`)
-	requiredArtifacts = []string{"inventory.json", "runtime-manifest.json", "runtime-tree.sha256", "runtime.pkg", "sbom.spdx.json"}
+	requiredArtifacts = []string{"U-Claw.exe", "inventory.json", "runtime-manifest.json", "runtime-tree.sha256", "runtime.pkg", "sbom.spdx.json"}
 )
 
 type Artifact struct {

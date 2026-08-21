@@ -20,6 +20,7 @@ export async function runReleaseGateCli(argv = process.argv.slice(2)) {
     options: {
       "repo-root": { type: "string" },
       runtime: { type: "string" },
+      launcher: { type: "string" },
       output: { type: "string" },
       source: { type: "string" },
       candidate: { type: "string" },
@@ -52,6 +53,7 @@ export async function runReleaseGateCli(argv = process.argv.slice(2)) {
     result = await buildReleaseArtifacts({
       repoRoot: required(values, "repo-root"),
       runtimeDir: required(values, "runtime"),
+      launcherPath: required(values, "launcher"),
       outputDir: required(values, "output"),
       productVersion: required(values, "product-version"),
       releaseId: required(values, "release-id"),

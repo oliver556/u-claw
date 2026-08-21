@@ -44,3 +44,15 @@ test("workflow runs build, typecheck, tests, secret scan, and final runtime smok
   ]) assert.match(workflow, new RegExp(command.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
   assert.doesNotMatch(workflow, /continue-on-error:\s*true/u);
 });
+
+test("official release builds and verifies Bootstrap with production release policy trust", () => {
+  assert.match(workflow, /name: Build official Bootstrap launcher/u);
+  assert.match(workflow, /UCLAW_RELEASE_POLICY_ENDPOINT:\s*\$\{\{\s*vars\.UCLAW_RELEASE_POLICY_ENDPOINT\s*\}\}/u);
+  assert.match(workflow, /UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS:\s*\$\{\{\s*vars\.UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS\s*\}\}/u);
+  assert.match(workflow, /GetEnvironmentVariable\(\$name\)[\s\S]*throw/u);
+  assert.match(workflow, /main\.releasePolicyEndpoint=\$releasePolicyEndpoint/u);
+  assert.match(workflow, /main\.trustedReleasePolicyKeys=\$releasePolicyKeysJson/u);
+  assert.match(workflow, /--verify-official-release-policy-config/u);
+  assert.match(workflow, /--launcher\s+product\/dist\/launcher\/U-Claw\.exe/u);
+  assert.doesNotMatch(workflow, /--test-fixture-launcher/u);
+});

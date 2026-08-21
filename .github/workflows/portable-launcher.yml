@@ -73,6 +73,8 @@ jobs:
           UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_LICENSE_STATUS_TRUSTED_PUBLIC_KEYS }}
           UCLAW_RUNTIME_REVOKED_KEY_IDS: ${{ vars.UCLAW_RUNTIME_REVOKED_KEY_IDS }}
           UCLAW_RELEASE_BASE_URL: ${{ vars.UCLAW_RELEASE_BASE_URL }}
+          UCLAW_RELEASE_POLICY_ENDPOINT: ${{ vars.UCLAW_RELEASE_POLICY_ENDPOINT }}
+          UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS: ${{ vars.UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS }}
           UCLAW_ACTIVATION_ENDPOINT: ${{ vars.UCLAW_ACTIVATION_ENDPOINT }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -90,6 +92,12 @@ jobs:
           }
           if ([string]::IsNullOrWhiteSpace($env:UCLAW_RELEASE_BASE_URL)) {
             throw 'UCLAW_RELEASE_BASE_URL is required for production Launcher builds'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:UCLAW_RELEASE_POLICY_ENDPOINT)) {
+            throw 'UCLAW_RELEASE_POLICY_ENDPOINT is required for production Launcher builds'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS)) {
+            throw 'UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS is required for production Launcher builds'
           }
           if ([string]::IsNullOrWhiteSpace($env:UCLAW_ACTIVATION_ENDPOINT)) {
             throw 'UCLAW_ACTIVATION_ENDPOINT is required for production Launcher builds'
@@ -116,6 +124,13 @@ jobs:
               $keyBytes = [Convert]::FromBase64String($licenseStatusKeys[$keyID])
               if ($keyBytes.Length -ne 32) { throw 'Trusted license status key must be a raw Ed25519 public key' }
             }
+            $releasePolicyKeys = ConvertFrom-Json $env:UCLAW_RELEASE_POLICY_TRUSTED_PUBLIC_KEYS -AsHashtable
+            if ($releasePolicyKeys.Count -lt 1 -or $releasePolicyKeys.Count -gt 16) { throw 'Trusted release policy key count is invalid' }
+            foreach ($keyID in $releasePolicyKeys.Keys) {
+              if ($keyID -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' -or $keyID -match '^(?i:test|fixture|example|dev-)') { throw 'Trusted release policy key ID is invalid for production' }
+              $keyBytes = [Convert]::FromBase64String($releasePolicyKeys[$keyID])
+              if ($keyBytes.Length -ne 32) { throw 'Trusted release policy key must be a raw Ed25519 public key' }
+            }
             $revokedKeyIDs = @(ConvertFrom-Json ($env:UCLAW_RUNTIME_REVOKED_KEY_IDS ?? '[]'))
             if ($revokedKeyIDs.Count -gt 64) { throw 'Revoked runtime key count is invalid' }
             foreach ($keyID in $revokedKeyIDs) {
@@ -124,12 +139,21 @@ jobs:
             $trustedKeysJson = ConvertTo-Json $trustedKeys -Compress
             $licenseKeysJson = ConvertTo-Json $licenseKeys -Compress
             $licenseStatusKeysJson = ConvertTo-Json $licenseStatusKeys -Compress
+            $releasePolicyKeysJson = ConvertTo-Json $releasePolicyKeys -Compress
             $revokedKeyIDsJson = ConvertTo-Json @($revokedKeyIDs) -Compress
             $releaseURI = [Uri]$env:UCLAW_RELEASE_BASE_URL
             if (!$releaseURI.IsAbsoluteUri -or $releaseURI.Scheme -cne 'https' -or $releaseURI.UserInfo -or $releaseURI.Query -or $releaseURI.Fragment) {
               throw 'Release feed must be an HTTPS URL without credentials, query, or fragment'
             }
             $releaseBaseURL = $releaseURI.AbsoluteUri
+            $releasePolicyURI = [Uri]$env:UCLAW_RELEASE_POLICY_ENDPOINT
+            if ($env:UCLAW_RELEASE_POLICY_ENDPOINT -match "[\s'\\]") {
+              throw 'Release policy endpoint contains unsafe linker characters'
+            }
+            if (!$releasePolicyURI.IsAbsoluteUri -or $releasePolicyURI.Scheme -cne 'https' -or $releasePolicyURI.UserInfo -or $releasePolicyURI.Query -or $releasePolicyURI.Fragment -or $releasePolicyURI.Host -match '(?i)(^localhost$|\.test$|\.invalid$|\.example(?:\.(?:com|net|org))?$)') {
+              throw 'Release policy endpoint must be a production HTTPS URL without credentials, query, or fragment'
+            }
+            $releasePolicyEndpoint = $releasePolicyURI.AbsoluteUri
             $licenseStatusURI = [Uri]$env:UCLAW_LICENSE_STATUS_ENDPOINT
             if (!$licenseStatusURI.IsAbsoluteUri -or $licenseStatusURI.Scheme -cne 'https' -or $licenseStatusURI.UserInfo -or $licenseStatusURI.Query -or $licenseStatusURI.Fragment) {
               throw 'License status endpoint must be an HTTPS URL without credentials, query, or fragment'
@@ -159,9 +183,12 @@ jobs:
             try {
               go run github.com/akavel/rsrc@v0.10.2 -manifest app.manifest -arch amd64 -o rsrc_windows_amd64.syso
               if ($LASTEXITCODE -ne 0) { throw 'Launcher manifest generation failed' }
-              $ldflags = "-s -w -H windowsgui -X 'main.trustedRuntimeKeys=$trustedKeysJson' -X 'main.trustedStartupLicenseKeys=$licenseKeysJson' -X 'main.trustedLicenseStatusKeys=$licenseStatusKeysJson' -X 'main.licenseStatusEndpoint=$licenseStatusEndpoint' -X 'main.revokedRuntimeKeyIDs=$revokedKeyIDsJson' -X 'main.releaseFeedBaseURL=$releaseBaseURL' -X 'main.activationServiceEndpoint=$activationEndpoint'"
-              go build -trimpath -ldflags $ldflags -o (Join-Path $outputRoot 'U-Claw.exe') .
+              $ldflags = "-s -w -H windowsgui -X 'main.trustedRuntimeKeys=$trustedKeysJson' -X 'main.trustedStartupLicenseKeys=$licenseKeysJson' -X 'main.trustedLicenseStatusKeys=$licenseStatusKeysJson' -X 'main.licenseStatusEndpoint=$licenseStatusEndpoint' -X 'main.revokedRuntimeKeyIDs=$revokedKeyIDsJson' -X 'main.releaseFeedBaseURL=$releaseBaseURL' -X 'main.releasePolicyEndpoint=$releasePolicyEndpoint' -X 'main.trustedReleasePolicyKeys=$releasePolicyKeysJson' -X 'main.activationServiceEndpoint=$activationEndpoint'"
+              $launcherOutput = Join-Path $outputRoot 'U-Claw.exe'
+              go build -trimpath -ldflags $ldflags -o $launcherOutput .
               if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed' }
+              & $launcherOutput --verify-official-release-policy-config
+              if ($LASTEXITCODE -ne 0) { throw 'Launcher release policy configuration verification failed' }
             }
             finally {
               Remove-Item -LiteralPath rsrc_windows_amd64.syso -Force -ErrorAction SilentlyContinue

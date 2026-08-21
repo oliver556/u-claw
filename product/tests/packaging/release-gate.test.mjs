@@ -29,6 +29,13 @@ async function fixtureFinalRuntime(root) {
   return runtime;
 }
 
+async function fixtureLauncher(root) {
+  const launcher = path.join(root, "product", "dist", "launcher", "U-Claw.exe");
+  await mkdir(path.dirname(launcher), { recursive: true });
+  await writeFile(launcher, "official-launcher");
+  return launcher;
+}
+
 test("commercial release input rejects archived and fixture roots", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "uclaw-release-input-"));
   const valid = path.join(root, "product", "dist", "windows-runtime");
@@ -48,10 +55,13 @@ test("build emits runtime package, inventory, SPDX SBOM, tree digest, and signed
   const root = await mkdtemp(path.join(tmpdir(), "uclaw-release-build-"));
   const runtime = await fixtureFinalRuntime(root);
   const output = path.join(root, "candidate");
+  const launcher = await fixtureLauncher(root);
   const keys = generateKeyPairSync("ed25519");
   const result = await buildReleaseArtifacts({
     repoRoot: root,
     runtimeDir: runtime,
+    launcherPath: launcher,
+    verifyLauncherPolicyConfig: async () => {},
     outputDir: output,
     productVersion: "0.1.0",
     releaseId: "release-42",
@@ -66,6 +76,7 @@ test("build emits runtime package, inventory, SPDX SBOM, tree digest, and signed
   });
 
   assert.deepEqual(Object.keys(result.artifacts).sort(), [
+    "U-Claw.exe",
     "inventory.json",
     "runtime-manifest.json",
     "runtime-tree.sha256",
@@ -81,6 +92,36 @@ test("build emits runtime package, inventory, SPDX SBOM, tree digest, and signed
   const sbom = JSON.parse(await readFile(path.join(output, "sbom.spdx.json"), "utf8"));
   assert.equal(sbom.spdxVersion, "SPDX-2.3");
   assert.equal(sbom.files.length, 2);
+  assert.equal(await readFile(path.join(output, "U-Claw.exe"), "utf8"), "official-launcher");
+});
+
+test("build blocks an official Bootstrap whose embedded release policy config fails verification", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "uclaw-release-launcher-policy-"));
+  const runtime = await fixtureFinalRuntime(root);
+  const launcher = await fixtureLauncher(root);
+  const keys = generateKeyPairSync("ed25519");
+  let verified = false;
+  await assert.rejects(buildReleaseArtifacts({
+    repoRoot: root,
+    runtimeDir: runtime,
+    launcherPath: launcher,
+    outputDir: path.join(root, "candidate"),
+    productVersion: "0.1.0",
+    releaseId: "release-42",
+    releaseSequence: 42,
+    runtimeId: "openclaw-2026.7.1-2-win-x64",
+    entrypoint: "electron/electron.exe",
+    entryArgs: ["resources/app.asar"],
+    keyId: "fixture-release-key",
+    privateKey: keys.privateKey,
+    signedAt: "2026-08-21T00:00:00.000Z",
+    expiresAt: "2027-08-21T00:00:00.000Z",
+    verifyLauncherPolicyConfig: async () => {
+      verified = true;
+      throw new Error("missing release policy endpoint");
+    },
+  }), /missing release policy endpoint/i);
+  assert.equal(verified, true);
 });
 
 test("candidate, acceptance, and production are byte-identical promotions", async () => {
@@ -158,6 +199,7 @@ test("pointer authorization requires build, final-runtime smoke, promotion, uplo
   const root = await mkdtemp(path.join(tmpdir(), "uclaw-release-proof-"));
   const proofPath = path.join(root, "pointer-switch-authorization.json");
   const artifact = Object.fromEntries([
+    "U-Claw.exe",
     "runtime.pkg",
     "runtime-manifest.json",
     "inventory.json",
