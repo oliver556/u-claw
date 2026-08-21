@@ -10,6 +10,8 @@ test("Windows product workflow builds and uploads final-windows-runtime", () => 
   assert.match(productWorkflow, /build:final-windows-runtime/u);
   assert.match(productWorkflow, /name:\s*final-windows-runtime/u);
   assert.match(productWorkflow, /runtime-provenance\.json/u);
+  const uploadStep = productWorkflow.slice(productWorkflow.indexOf("name: Upload final-windows-runtime"));
+  assert.match(uploadStep, /include-hidden-files:\s*true/u);
 });
 
 test("commercial release workflow uses only product inputs", () => {

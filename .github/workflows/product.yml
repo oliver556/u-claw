@@ -89,4 +89,5 @@ jobs:
             product/dist/final-windows-runtime/windows-runtime
             product/dist/final-windows-runtime/runtime-provenance.json
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 14
