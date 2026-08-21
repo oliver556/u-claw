@@ -695,12 +695,30 @@ func validUpstreamJSON(route string, b []byte) bool {
 			return false
 		}
 	}
-	var fields map[string]json.RawMessage
-	var promptTokens, completionTokens, totalTokens int64
-	if json.Unmarshal(top["usage"], &fields) != nil || !hasAllowedKeys(fields, []string{"prompt_tokens", "completion_tokens", "total_tokens"}, "prompt_tokens_details", "completion_tokens_details") || json.Unmarshal(fields["prompt_tokens"], &promptTokens) != nil || json.Unmarshal(fields["completion_tokens"], &completionTokens) != nil || json.Unmarshal(fields["total_tokens"], &totalTokens) != nil || promptTokens < 0 || completionTokens < 0 || totalTokens < 0 || promptTokens > maxSafeInteger || completionTokens > maxSafeInteger || totalTokens > maxSafeInteger {
+	if !validChatUsage(top["usage"]) {
 		return false
 	}
-	for _, key := range []string{"prompt_tokens_details", "completion_tokens_details"} {
+	return true
+}
+
+func validChatUsage(raw json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || !hasAllowedKeys(fields, []string{"prompt_tokens", "completion_tokens", "total_tokens"},
+		"prompt_tokens_details", "completion_tokens_details", "input_tokens", "output_tokens", "input_tokens_details",
+		"usage_semantic", "usage_source", "claude_cache_creation_5_m_tokens", "claude_cache_creation_1_h_tokens") {
+		return false
+	}
+	for _, key := range []string{"prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens", "claude_cache_creation_5_m_tokens", "claude_cache_creation_1_h_tokens"} {
+		if value, ok := fields[key]; ok && !validTokenCount(value) {
+			return false
+		}
+	}
+	for _, key := range []string{"usage_semantic", "usage_source"} {
+		if value, ok := fields[key]; ok && !validUsageLabel(value) {
+			return false
+		}
+	}
+	for _, key := range []string{"prompt_tokens_details", "completion_tokens_details", "input_tokens_details"} {
 		details, ok := fields[key]
 		if !ok {
 			continue
@@ -716,6 +734,11 @@ func validUpstreamJSON(route string, b []byte) bool {
 		}
 	}
 	return true
+}
+
+func validUsageLabel(raw json.RawMessage) bool {
+	var value string
+	return json.Unmarshal(raw, &value) == nil && value != "" && len(value) <= 128 && !strings.ContainsAny(value, "\r\n\x00")
 }
 
 func validChatResponseMessage(message map[string]json.RawMessage) bool {
