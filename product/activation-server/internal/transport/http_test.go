@@ -208,6 +208,13 @@ func TestActivateValidationErrorReportsFailedBeforeBind(t *testing.T) {
 }
 
 func TestPublicHandlerServesClientPolicy(t *testing.T) {
+	nilPolicyHandler := NewPublicHandler(PublicHandlerOptions{Activation: &fakePublicService{}, Lifecycle: &fakePublicService{}, RequestIDs: strings.NewReader(strings.Repeat("b", 64))})
+	nilPolicyResponse := httptest.NewRecorder()
+	nilPolicyHandler.ServeHTTP(nilPolicyResponse, httptest.NewRequest(http.MethodGet, "/v1/client-policy", nil))
+	if nilPolicyResponse.Code != http.StatusServiceUnavailable || !strings.Contains(nilPolicyResponse.Body.String(), "RELEASE_POLICY_UNAVAILABLE") {
+		t.Fatalf("nil policy=%d %s", nilPolicyResponse.Code, nilPolicyResponse.Body.String())
+	}
+
 	service := &fakePublicService{clientPolicy: policy.ClientPolicy{SchemaVersion: 1, PolicyEpoch: 107, RequiredReleaseSequence: 107, ReleaseID: "release-107", ContentVersion: "1.5.0", Reason: policy.ReleaseReasonRelease, ManifestURL: "https://cdn.example.test/releases/107/manifest.json", ManifestSHA256: strings.Repeat("a", 64), IssuedAt: "2026-08-21T01:02:03Z", ExpiresAt: "2026-08-21T01:07:03Z", Signature: policy.Signature{Algorithm: "ed25519", KeyID: "policy-key", Value: strings.Repeat("A", 88)}}}
 	handler := NewPublicHandler(PublicHandlerOptions{Activation: service, Lifecycle: service, Policy: service, RequestIDs: strings.NewReader(strings.Repeat("c", 64))})
 	response := httptest.NewRecorder()

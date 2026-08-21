@@ -38,12 +38,8 @@ var requiredVariables = []string{
 	"ACTIVATION_PEPPER_FILE",
 	"LICENSE_SIGNING_KEY_FILE",
 	"STATUS_SIGNING_KEY_FILE",
-	"RELEASE_POLICY_SIGNING_KEY_FILE",
-	"RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE",
 	"LICENSE_KEY_ID",
 	"STATUS_KEY_ID",
-	"RELEASE_POLICY_KEY_ID",
-	"RELEASE_AUTHORIZATION_KEY_ID",
 	"KMS_PROVIDER",
 	"KMS_KEY_VERSION",
 	"KMS_KEK_FILE",
@@ -70,6 +66,7 @@ type Config struct {
 	StatusSigningKey              ed25519.PrivateKey
 	ReleasePolicySigningKey       ed25519.PrivateKey
 	ReleaseAuthorizationPublicKey ed25519.PublicKey
+	ReleasePolicyConfigured       bool
 	LicenseKeyID                  string
 	StatusKeyID                   string
 	ReleasePolicyKeyID            string
@@ -129,13 +126,28 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("configuration STATUS_SIGNING_KEY_FILE is invalid")
 	}
-	releasePolicySigningKey, err := loadSigningKey(values["RELEASE_POLICY_SIGNING_KEY_FILE"])
-	if err != nil || sameSecretFile(values["RELEASE_POLICY_SIGNING_KEY_FILE"], values["STATUS_SIGNING_KEY_FILE"]) || constantTimeEqual(releasePolicySigningKey, statusSigningKey) {
-		return Config{}, errors.New("configuration RELEASE_POLICY_SIGNING_KEY_FILE is invalid")
-	}
-	releaseAuthorizationPublicKey, err := loadVerificationKey(values["RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE"])
-	if err != nil || constantTimeEqual(releaseAuthorizationPublicKey, releasePolicySigningKey.Public().(ed25519.PublicKey)) || constantTimeEqual(releaseAuthorizationPublicKey, statusSigningKey.Public().(ed25519.PublicKey)) {
-		return Config{}, errors.New("configuration RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE is invalid")
+	releasePolicySigningKeyFile := getenv("RELEASE_POLICY_SIGNING_KEY_FILE")
+	releaseAuthorizationPublicKeyFile := getenv("RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE")
+	releasePolicyKeyID := getenv("RELEASE_POLICY_KEY_ID")
+	releaseAuthorizationKeyID := getenv("RELEASE_AUTHORIZATION_KEY_ID")
+	releasePolicyConfigured := strings.TrimSpace(releasePolicySigningKeyFile) != "" &&
+		strings.TrimSpace(releaseAuthorizationPublicKeyFile) != "" &&
+		strings.TrimSpace(releasePolicyKeyID) != "" &&
+		strings.TrimSpace(releaseAuthorizationKeyID) != ""
+	var releasePolicySigningKey ed25519.PrivateKey
+	var releaseAuthorizationPublicKey ed25519.PublicKey
+	if releasePolicyConfigured {
+		releasePolicySigningKey, err = loadSigningKey(releasePolicySigningKeyFile)
+		if err != nil || sameSecretFile(releasePolicySigningKeyFile, values["STATUS_SIGNING_KEY_FILE"]) || constantTimeEqual(releasePolicySigningKey, statusSigningKey) {
+			return Config{}, errors.New("configuration RELEASE_POLICY_SIGNING_KEY_FILE is invalid")
+		}
+		releaseAuthorizationPublicKey, err = loadVerificationKey(releaseAuthorizationPublicKeyFile)
+		if err != nil || constantTimeEqual(releaseAuthorizationPublicKey, releasePolicySigningKey.Public().(ed25519.PublicKey)) || constantTimeEqual(releaseAuthorizationPublicKey, statusSigningKey.Public().(ed25519.PublicKey)) {
+			return Config{}, errors.New("configuration RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE is invalid")
+		}
+	} else {
+		releasePolicyKeyID = ""
+		releaseAuthorizationKeyID = ""
 	}
 	kek, err := loadKEK(values["KMS_KEK_FILE"])
 	if err != nil {
@@ -202,10 +214,11 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		StatusSigningKey:              statusSigningKey,
 		ReleasePolicySigningKey:       releasePolicySigningKey,
 		ReleaseAuthorizationPublicKey: releaseAuthorizationPublicKey,
+		ReleasePolicyConfigured:       releasePolicyConfigured,
 		LicenseKeyID:                  values["LICENSE_KEY_ID"],
 		StatusKeyID:                   values["STATUS_KEY_ID"],
-		ReleasePolicyKeyID:            values["RELEASE_POLICY_KEY_ID"],
-		ReleaseAuthorizationKeyID:     values["RELEASE_AUTHORIZATION_KEY_ID"],
+		ReleasePolicyKeyID:            releasePolicyKeyID,
+		ReleaseAuthorizationKeyID:     releaseAuthorizationKeyID,
 		KMSProvider:                   values["KMS_PROVIDER"],
 		KMSKeyVersion:                 values["KMS_KEY_VERSION"],
 		KMSKEKFile:                    values["KMS_KEK_FILE"],

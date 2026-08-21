@@ -174,11 +174,15 @@ func (handler *adminHandler) changeRelease(writer http.ResponseWriter, request *
 		handler.writeError(writer, adminservice.ErrInvalidInput)
 		return
 	}
-	if _, ok := authenticatedOperator(request, input.OperatorID); !ok || handler.release == nil {
+	if _, ok := authenticatedOperator(request, input.OperatorID); !ok {
 		handler.writeError(writer, adminservice.ErrInvalidInput)
 		return
 	}
-	if handler.releaseAuthorization == nil || handler.releaseAuthorization.Verify(input.Authorization, releaseauth.ExpectedRelease{ReleaseSequence: input.ReleaseSequence, ReleaseID: input.ReleaseID, ManifestURL: input.ManifestURL, ManifestSHA256: input.ManifestSHA256}) != nil {
+	if handler.release == nil || handler.releaseAuthorization == nil {
+		handler.writeError(writer, policy.ErrUnavailable)
+		return
+	}
+	if handler.releaseAuthorization.Verify(input.Authorization, releaseauth.ExpectedRelease{ReleaseSequence: input.ReleaseSequence, ReleaseID: input.ReleaseID, ManifestURL: input.ManifestURL, ManifestSHA256: input.ManifestSHA256}) != nil {
 		handler.writeError(writer, adminservice.ErrInvalidInput)
 		return
 	}
@@ -419,6 +423,10 @@ func inventorySummaries(items []adminservice.InventorySummary) []inventorySummar
 }
 
 func (handler *adminHandler) writeError(writer http.ResponseWriter, err error) {
+	if errors.Is(err, policy.ErrUnavailable) {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"code": "RELEASE_POLICY_UNAVAILABLE"})
+		return
+	}
 	if errors.Is(err, adminservice.ErrInvalidInput) || errors.Is(err, policy.ErrInvalidRelease) || errors.Is(err, policy.ErrArtifactUnavailable) || errors.Is(err, policy.ErrSequenceRegression) || errors.Is(err, policy.ErrPreviousStableUnavailable) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"code": "ADMIN_INVALID"})
 		return

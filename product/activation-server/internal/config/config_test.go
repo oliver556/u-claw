@@ -66,7 +66,7 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 	if len(got.LicenseSigningKey) != ed25519.PrivateKeySize {
 		t.Fatalf("signing key length = %d, want %d", len(got.LicenseSigningKey), ed25519.PrivateKeySize)
 	}
-	if len(got.ReleasePolicySigningKey) != ed25519.PrivateKeySize || len(got.ReleaseAuthorizationPublicKey) != ed25519.PublicKeySize || got.ReleasePolicyKeyID != "release-policy-key-001" || got.ReleaseAuthorizationKeyID != "release-gate-key-001" {
+	if !got.ReleasePolicyConfigured || len(got.ReleasePolicySigningKey) != ed25519.PrivateKeySize || len(got.ReleaseAuthorizationPublicKey) != ed25519.PublicKeySize || got.ReleasePolicyKeyID != "release-policy-key-001" || got.ReleaseAuthorizationKeyID != "release-gate-key-001" {
 		t.Fatal("independent release signing and authorization keys were not loaded")
 	}
 	reusedStatusKey := maps.Clone(values)
@@ -104,6 +104,47 @@ func TestLoadFromPreservesConfigurationValues(t *testing.T) {
 		if _, err := LoadFrom(func(name string) string { return invalid[name] }); err == nil || !strings.Contains(err.Error(), test.name) {
 			t.Fatalf("%s=%q error=%v", test.name, test.value, err)
 		}
+	}
+}
+
+func TestLoadFromAllowsCommercialConfigurationWithoutReleasePolicy(t *testing.T) {
+	directory := t.TempDir()
+	keyFile := writeSigningKey(t, directory)
+	values := map[string]string{
+		"DATABASE_URL":                          "postgres://database.example/uclaw",
+		"ACTIVATION_PEPPER_FILE":                writeTestFile(t, directory, "commercial-pepper", []byte(strings.Repeat("p", 32))),
+		"LICENSE_SIGNING_KEY_FILE":              keyFile,
+		"STATUS_SIGNING_KEY_FILE":               keyFile,
+		"LICENSE_KEY_ID":                        "license-key-001",
+		"STATUS_KEY_ID":                         "status-key-001",
+		"KMS_PROVIDER":                          "local-kek-v1",
+		"KMS_KEY_VERSION":                       "kms-v1",
+		"KMS_KEK_FILE":                          writeTestFile(t, directory, "commercial-kek", []byte(strings.Repeat("k", 32))),
+		"ADMIN_OPERATORS_FILE":                  writeTestFile(t, directory, "commercial-admin-operators", []byte(`{"operator_fixture":"`+strings.Repeat("1", 64)+`"}`)),
+		"ADMIN_SECRET_FINGERPRINT_KEY_FILE":     writeTestFile(t, directory, "commercial-fingerprint-key", []byte(strings.Repeat("f", 32))),
+		"NEW_API_ALLOWED_HOSTS":                 "api.example.test",
+		"NEW_API_BASE_URL":                      "https://api.example.test/v1",
+		"NEW_API_KEY_FILE":                      writeTestFile(t, directory, "commercial-new-api-key", []byte(strings.Repeat("n", 32))),
+		"PUBLIC_MODEL_ENDPOINT":                 "https://activation.example/model-api/",
+		"NEW_API_KMS_KEY_VERSION":               "new-api-kms-v2",
+		"MODEL_PROXY_REQUEST_BODY_BYTES":        "1048576",
+		"MODEL_PROXY_RESPONSE_BODY_BYTES":       "4194304",
+		"MODEL_PROXY_TIMEOUT":                   "60s",
+		"MODEL_PROXY_ADMISSION_LEASE":           "65s",
+		"RELEASE_POLICY_KEY_ID":                 "release-policy-key-ignored",
+		"RELEASE_AUTHORIZATION_KEY_ID":          "release-gate-key-ignored",
+		"RELEASE_AUTHORIZATION_PUBLIC_KEY_FILE": writeVerificationKey(t, directory),
+	}
+
+	got, err := LoadFrom(func(name string) string { return values[name] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReleasePolicyConfigured || len(got.ReleasePolicySigningKey) != 0 || len(got.ReleaseAuthorizationPublicKey) != 0 || got.ReleasePolicyKeyID != "" || got.ReleaseAuthorizationKeyID != "" {
+		t.Fatalf("release policy should be disabled when signing config is missing: %#v", got)
+	}
+	if got.PublicModelEndpoint == "" || got.NewAPIBaseURL == "" || len(got.NewAPIKey) == 0 || len(got.StatusSigningKey) != ed25519.PrivateKeySize || len(got.LicenseSigningKey) != ed25519.PrivateKeySize {
+		t.Fatal("commercial activation/model proxy configuration was not loaded")
 	}
 }
 

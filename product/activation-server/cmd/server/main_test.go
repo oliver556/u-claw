@@ -88,6 +88,7 @@ func TestNewHTTPServerUsesSafeLimitsAndInjectedDatabaseCheck(t *testing.T) {
 		ListenAddress:           "127.0.0.1:0",
 		LicenseSigningKey:       privateKey,
 		StatusSigningKey:        privateKey,
+		ReleasePolicyConfigured: true,
 		ReleasePolicySigningKey: privateKey,
 	}, func(context.Context) error {
 		databaseCalled = true
@@ -111,6 +112,29 @@ func TestNewHTTPServerUsesSafeLimitsAndInjectedDatabaseCheck(t *testing.T) {
 	}
 	if !databaseCalled {
 		t.Fatal("injected database readiness check was not called")
+	}
+}
+
+func TestNewHTTPServerDoesNotRequireReleasePolicyForCommercialPaths(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := newHTTPServer(config.Config{
+		ListenAddress:     "127.0.0.1:0",
+		LicenseSigningKey: privateKey,
+		StatusSigningKey:  privateKey,
+	}, func(context.Context) error { return nil }, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("X-Path", request.URL.Path)
+		writer.WriteHeader(http.StatusOK)
+	}), transport.ReadinessCheck(func(context.Context) error { return nil }))
+
+	for _, path := range []string{"/health/ready", "/v1/activations", "/model-api/v1/chat/completions"} {
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
 	}
 }
 

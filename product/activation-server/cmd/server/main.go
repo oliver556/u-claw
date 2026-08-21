@@ -96,19 +96,26 @@ func run() error {
 	}
 	metrics := observability.NewMetrics()
 	artifactEnvelope, secretEncryptor := newRuntimeEnvelopes(kms)
-	releaseRepository, err := persistence.NewReleasePolicyRepository(pool)
-	if err != nil {
-		return err
+	var releasePolicyClient transport.ClientPolicyService
+	var releasePolicyAdmin transport.ReleasePolicyAdmin
+	var releaseAuthorization *releaseauth.Verifier
+	if cfg.ReleasePolicyConfigured {
+		releaseRepository, err := persistence.NewReleasePolicyRepository(pool)
+		if err != nil {
+			return err
+		}
+		releasePolicy, err := policy.NewService(policy.ServiceOptions{Repository: releaseRepository, KeyID: cfg.ReleasePolicyKeyID, PrivateKey: cfg.ReleasePolicySigningKey, TTL: 5 * time.Minute})
+		if err != nil {
+			return err
+		}
+		releaseAuthorization, err = releaseauth.NewVerifier(cfg.ReleaseAuthorizationKeyID, cfg.ReleaseAuthorizationPublicKey, nil)
+		if err != nil {
+			return err
+		}
+		releasePolicyClient = releasePolicy
+		releasePolicyAdmin = releasePolicy
 	}
-	releasePolicy, err := policy.NewService(policy.ServiceOptions{Repository: releaseRepository, KeyID: cfg.ReleasePolicyKeyID, PrivateKey: cfg.ReleasePolicySigningKey, TTL: 5 * time.Minute})
-	if err != nil {
-		return err
-	}
-	releaseAuthorization, err := releaseauth.NewVerifier(cfg.ReleaseAuthorizationKeyID, cfg.ReleaseAuthorizationPublicKey, nil)
-	if err != nil {
-		return err
-	}
-	public, err := buildPublicHandler(cfg, pool, artifactEnvelope, metrics, releasePolicy)
+	public, err := buildPublicHandler(cfg, pool, artifactEnvelope, metrics, releasePolicyClient)
 	if err != nil {
 		return err
 	}
@@ -120,7 +127,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	adminHandler := transport.NewAdminHandler(transport.AdminHandlerOptions{Service: adminApplication, Operators: cfg.AdminOperators, Release: releasePolicy, ReleaseAuthorization: releaseAuthorization})
+	adminHandler := transport.NewAdminHandler(transport.AdminHandlerOptions{Service: adminApplication, Operators: cfg.AdminOperators, Release: releasePolicyAdmin, ReleaseAuthorization: releaseAuthorization})
 	application := newApplication(public, adminHandler, metrics)
 	server := newHTTPServer(cfg, func(ctx context.Context) error { return pool.Ping(ctx) }, application, kmsReadiness(kms, cfg.KMSKeyVersion, cfg.NewAPIKMSKeyVersion))
 
@@ -174,7 +181,7 @@ func newRuntimeEnvelopes(kms security.KMS) (*security.EnvelopeService, secretEnc
 	return envelope, secretEncryptor{envelope: envelope}
 }
 
-func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, envelope *security.EnvelopeService, metrics *observability.Metrics, releasePolicy *policy.Service) (http.Handler, error) {
+func buildPublicHandler(cfg config.Config, pool *pgxpool.Pool, envelope *security.EnvelopeService, metrics *observability.Metrics, releasePolicy transport.ClientPolicyService) (http.Handler, error) {
 	repository, err := persistence.NewActivationRepository(pool)
 	if err != nil {
 		return nil, err
@@ -263,7 +270,10 @@ func newHTTPServer(cfg config.Config, databaseCheck transport.ReadinessCheck, de
 			kmsCheck = value
 		}
 	}
-	checks := []transport.ReadinessCheck{databaseCheck, signerReadiness(cfg.LicenseSigningKey), signerReadiness(cfg.StatusSigningKey), signerReadiness(cfg.ReleasePolicySigningKey)}
+	checks := []transport.ReadinessCheck{databaseCheck, signerReadiness(cfg.LicenseSigningKey), signerReadiness(cfg.StatusSigningKey)}
+	if cfg.ReleasePolicyConfigured {
+		checks = append(checks, signerReadiness(cfg.ReleasePolicySigningKey))
+	}
 	if kmsCheck != nil {
 		checks = append(checks, kmsCheck)
 	} else {

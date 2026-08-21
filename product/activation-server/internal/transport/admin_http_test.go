@@ -257,6 +257,21 @@ func TestAdminHTTPRejectsAdminBearerWithoutValidReleaseAuthorization(t *testing.
 	}
 }
 
+func TestAdminHTTPReportsReleasePolicyUnavailableWhenSignerMissing(t *testing.T) {
+	handler := NewAdminHandler(AdminHandlerOptions{Service: &fakeHTTPAdmin{}, Operators: httpOperators(strings.Repeat("a", 32))})
+	body := `{"operatorId":"operator_fixture","requestId":"request_fixture_001","idempotencyKey":"release-fixture-001","reason":"release operation","releaseSequence":107,"releaseId":"release-107","contentVersion":"1.7.0","manifestUrl":"https://cdn.example.test/releases/release-107/runtime-manifest.json","manifestSha256":"` + strings.Repeat("b", 64) + `","authorization":{"schemaVersion":1}}`
+	for _, path := range []string{"/internal/v1/releases/publish", "/internal/v1/releases/forward-rollback"} {
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+strings.Repeat("a", 32))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "RELEASE_POLICY_UNAVAILABLE") {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
 func releaseAuthorizationFixture(now time.Time, sequence uint64) releaseauth.Authorization {
 	releaseID := "release-107"
 	baseURL := "https://cdn.example.test/releases/" + releaseID + "/"
