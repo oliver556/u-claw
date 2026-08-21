@@ -35,6 +35,18 @@ func TestUSBFingerprintFallbackNormalizesStableFields(t *testing.T) {
 	}
 }
 
+func TestWindowsLegacyUSBFingerprintPayloadStillUsesV1(t *testing.T) {
+	fingerprint, err := fingerprintStorageDescriptor(storageDescriptorIdentity{
+		BusType: busTypeUSB, Vendor: "WINUSB", Product: "Legacy", Revision: "1", Serial: "SERIAL-001", Capacity: 8_000_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.Scheme != usbFingerprintSchemeV1 || fingerprint.SHA256 != "26ab9bbe8bd931370c70725fe5c106a43853dacc4833eefd3458787f004479f7" {
+		t.Fatalf("legacy fingerprint changed: %#v", fingerprint)
+	}
+}
+
 func TestUSBFingerprintFallbackFailsClosedWithoutHardwareIdentity(t *testing.T) {
 	tests := []storageDescriptorIdentity{
 		{BusType: 0, Serial: "serial", Capacity: 1},

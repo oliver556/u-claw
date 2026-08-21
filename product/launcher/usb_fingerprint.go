@@ -9,6 +9,8 @@ import (
 )
 
 const (
+	usbFingerprintSchemeV1               = "uclaw-usb-v1"
+	usbFingerprintSchemeV2               = "uclaw-usb-v2"
 	storageDeviceProperty         uint32 = 0
 	storageDeviceUniqueIDProperty uint32 = 3
 	busTypeUSB                    uint32 = 7
@@ -33,9 +35,9 @@ func fingerprintUniqueDescriptor(descriptor []byte) (usbFingerprint, error) {
 		return usbFingerprint{}, ErrLicenseUSBIdentityUnavailable
 	}
 	hasher := sha256.New()
-	hasher.Write([]byte("uclaw-usb-v1\x00unique\x00"))
+	hasher.Write([]byte(usbFingerprintSchemeV1 + "\x00unique\x00"))
 	hasher.Write(descriptor)
-	return usbFingerprint{Scheme: "uclaw-usb-v1", SHA256: hex.EncodeToString(hasher.Sum(nil))}, nil
+	return usbFingerprint{Scheme: usbFingerprintSchemeV1, SHA256: hex.EncodeToString(hasher.Sum(nil))}, nil
 }
 
 func fingerprintUniqueStorageDescriptor(descriptor []byte) (usbFingerprint, error) {
@@ -65,12 +67,12 @@ func fingerprintStorageDescriptor(identity storageDescriptorIdentity) (usbFinger
 		return usbFingerprint{}, ErrLicenseUSBIdentityUnavailable
 	}
 	canonical := strings.Join([]string{
-		"uclaw-usb-v1", "fallback", normalizeUSBIdentityField(identity.Vendor),
+		usbFingerprintSchemeV1, "fallback", normalizeUSBIdentityField(identity.Vendor),
 		normalizeUSBIdentityField(identity.Product), normalizeUSBIdentityField(identity.Revision),
 		serial, strconv.FormatUint(identity.Capacity, 10),
 	}, "\x00")
 	digest := sha256.Sum256([]byte(canonical))
-	return usbFingerprint{Scheme: "uclaw-usb-v1", SHA256: hex.EncodeToString(digest[:])}, nil
+	return usbFingerprint{Scheme: usbFingerprintSchemeV1, SHA256: hex.EncodeToString(digest[:])}, nil
 }
 
 func normalizeUSBIdentityField(value string) string {

@@ -14,6 +14,8 @@ export const DualSystemUsbTargetArchSchema = z.enum(["x64", "arm64"]);
 const HexSha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SemverLikeSchema = z.string().min(1).max(64).regex(/^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9._-]+)?$/u);
 const StableIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/u);
+const HardwareEvidenceStringSchema = z.string().trim().min(1).max(256);
+const HardwareUUIDSchema = z.string().trim().min(8).max(64).regex(/^[A-Fa-f0-9][A-Fa-f0-9-]{6,62}[A-Fa-f0-9]$/u);
 
 export const DualSystemUsbTargetPathsSchema = z.object({
   entry: ControlledRelativePathSchema,
@@ -123,6 +125,69 @@ export const DualSystemUsbLicenseIdentitySchema = z.object({
   }).strict(),
 }).strict();
 export type DualSystemUsbLicenseIdentity = z.infer<typeof DualSystemUsbLicenseIdentitySchema>;
+
+export const DualSystemUsbFingerprintSchemeSchema = z.enum(["uclaw-usb-v1", "uclaw-usb-v2"]);
+export type DualSystemUsbFingerprintScheme = z.infer<typeof DualSystemUsbFingerprintSchemeSchema>;
+
+export const DualSystemUsbIdentityEvidenceSchema = z.discriminatedUnion("target", [
+  z.object({
+    target: z.literal("win-x64"),
+    platform: z.literal("win32"),
+    arch: z.literal("x64"),
+    source: z.literal("windows-storage-descriptor"),
+    busType: z.literal("USB"),
+    vendor: HardwareEvidenceStringSchema,
+    product: HardwareEvidenceStringSchema,
+    revision: HardwareEvidenceStringSchema.optional(),
+    serial: HardwareEvidenceStringSchema,
+    capacityBytes: z.number().int().positive(),
+    uniqueDescriptorSha256: HexSha256Schema.optional(),
+  }).strict(),
+  z.object({
+    target: z.literal("macos-arm64"),
+    platform: z.literal("darwin"),
+    arch: z.literal("arm64"),
+    source: z.literal("macos-diskutil"),
+    busProtocol: z.literal("USB"),
+    deviceLocation: z.enum(["external", "removable", "ejectable"]),
+    vendor: HardwareEvidenceStringSchema,
+    product: HardwareEvidenceStringSchema,
+    revision: HardwareEvidenceStringSchema.optional(),
+    serial: HardwareEvidenceStringSchema,
+    capacityBytes: z.number().int().positive(),
+    volumeUuid: HardwareUUIDSchema,
+    mediaUuid: HardwareUUIDSchema.optional(),
+  }).strict(),
+]);
+export type DualSystemUsbIdentityEvidence = z.infer<typeof DualSystemUsbIdentityEvidenceSchema>;
+
+export const DualSystemUsbDeviceAliasSchema = z.object({
+  fingerprint: z.object({
+    version: DualSystemUsbFingerprintSchemeSchema,
+    sha256: HexSha256Schema,
+  }).strict(),
+  target: DualSystemUsbTargetSchema,
+  evidence: DualSystemUsbIdentityEvidenceSchema,
+}).strict().superRefine((value, context) => {
+  if (value.target !== value.evidence.target) {
+    context.addIssue({ code: "custom", path: ["evidence", "target"], message: "Alias target must match evidence target." });
+  }
+});
+export type DualSystemUsbDeviceAlias = z.infer<typeof DualSystemUsbDeviceAliasSchema>;
+
+export const DualSystemUsbLicenseDeviceMappingInputSchema = z.object({
+  schemaVersion: z.literal(1),
+  fingerprintVersion: z.literal(2),
+  deviceId: StableIdSchema.optional(),
+  licenseId: StableIdSchema.optional(),
+  deviceAliases: z.array(DualSystemUsbDeviceAliasSchema).min(1).max(4),
+}).strict().superRefine((value, context) => {
+  const targets = new Set(value.deviceAliases.map((alias) => alias.target));
+  if (targets.size !== value.deviceAliases.length) {
+    context.addIssue({ code: "custom", path: ["deviceAliases"], message: "Device aliases must be target-distinct." });
+  }
+});
+export type DualSystemUsbLicenseDeviceMappingInput = z.infer<typeof DualSystemUsbLicenseDeviceMappingInputSchema>;
 
 export const DualSystemUsbLayoutFixtureSchema = z.object({
   contractVersion: z.literal(DUAL_SYSTEM_USB_LAYOUT_CONTRACT_VERSION),
