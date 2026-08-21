@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   isSafeMacOSRelativePath,
@@ -10,6 +13,8 @@ import {
   validateRuntimeManifest,
 } from "./runtime-manifest.mjs";
 import { createHash, generateKeyPairSync, verify } from "node:crypto";
+
+const productRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function validManifest(overrides = {}) {
   return {
@@ -265,4 +270,36 @@ test("uses the cross-language canonical signing payload", () => {
     },
   });
   assert.equal(createHash("sha256").update(runtimeManifestSigningPayload(manifest)).digest("hex"), "1d5df2ef301f1e28f55707eaa8a427e3308c2ce8d7a124cfbaac5389db4e9a77");
+});
+
+test("dual-system layout fixture maps into the production runtime manifest schema", () => {
+  const layout = JSON.parse(readFileSync(resolve(productRoot, "tests/fixtures/dual-system-usb-layout-v1.json"), "utf8"));
+  const matrix = JSON.parse(readFileSync(resolve(productRoot, "tests/fixtures/dual-system-usb-acceptance-matrix-v1.json"), "utf8"));
+  const targets = {
+    "win-x64": { targetPlatform: "win32", targetArch: "x64" },
+    "macos-arm64": { targetPlatform: "darwin", targetArch: "arm64" },
+  };
+
+  for (const [target, expected] of Object.entries(targets)) {
+    const runtime = layout.runtimeManifests[target];
+    assert.equal(validateRuntimeManifest(runtime), runtime);
+    assert.equal(runtimeManifestTarget(runtime), target);
+    assert.equal(runtime.targetPlatform, expected.targetPlatform);
+    assert.equal(runtime.targetArch, expected.targetArch);
+    assert.equal(layout.usbManifest.targets[target].package, `app/packages/${target}/${runtime.runtimeArchive}`);
+    assert.equal(layout.current[target].package, layout.usbManifest.targets[target].package);
+    assert.equal(layout.current[target].manifest, layout.usbManifest.targets[target].manifest);
+    assert.equal(layout.installState[target].package, layout.usbManifest.targets[target].package);
+    assert.equal(layout.installState[target].manifest, layout.usbManifest.targets[target].manifest);
+  }
+
+  for (const target of Object.keys(targets)) {
+    const paths = layout.usbManifest.targets[target];
+    const caseForTarget = matrix.cases.find((candidate) => candidate.target === target && candidate.category === "layout");
+    assert.ok(caseForTarget, `${target} layout acceptance case missing`);
+    assert.ok(caseForTarget.pass.includes(`${paths.package} exists`), `${target} package path missing from acceptance matrix`);
+    assert.ok(caseForTarget.pass.includes(`${paths.manifest} exists`), `${target} manifest path missing from acceptance matrix`);
+    assert.ok(caseForTarget.pass.includes(`${paths.current} exists`), `${target} current path missing from acceptance matrix`);
+    assert.ok(caseForTarget.pass.includes(`${paths.installState} exists`), `${target} install-state path missing from acceptance matrix`);
+  }
 });

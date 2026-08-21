@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+func TestMain(m *testing.M) {
+	previous := runtimeTargetForCurrentHost
+	runtimeTargetForCurrentHost = func() (string, error) { return "win-x64", nil }
+	code := m.Run()
+	runtimeTargetForCurrentHost = previous
+	os.Exit(code)
+}
+
 func TestResolvePortablePathsUsesExecutableAndLocalAppData(t *testing.T) {
 	usbRoot := filepath.Join(t.TempDir(), "中文 U 盘")
 	executable := filepath.Join(usbRoot, "U-Claw.exe")
@@ -21,8 +29,77 @@ func TestResolvePortablePathsUsesExecutableAndLocalAppData(t *testing.T) {
 	if paths.USBRoot != usbRoot ||
 		paths.PackageRoot != filepath.Join(usbRoot, ".uclaw") ||
 		paths.DataDir != filepath.Join(usbRoot, ".uclaw", "data") ||
-		paths.CacheRoot != filepath.Join(localAppData, "U-Claw", "runtimes") {
+		paths.CacheRoot != filepath.Join(localAppData, "U-Claw", "runtimes") ||
+		paths.TargetCacheRoot != filepath.Join(localAppData, "U-Claw", "runtimes", paths.Target) {
 		t.Fatalf("paths = %#v", paths)
+	}
+}
+
+func TestResolvePortablePathsForTargetSelectsDualSystemPaths(t *testing.T) {
+	usbRoot := filepath.Join(t.TempDir(), "U-Claw")
+	localAppData := filepath.Join(t.TempDir(), "Local App Data")
+	tests := []struct {
+		target string
+		entry  string
+	}{
+		{target: "win-x64", entry: "U-Claw.exe"},
+		{target: "macos-arm64", entry: "U-Claw.app"},
+	}
+	for _, test := range tests {
+		t.Run(test.target, func(t *testing.T) {
+			paths, err := ResolvePortablePathsForTarget(filepath.Join(usbRoot, test.entry), localAppData, test.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected := RuntimeTargetPaths{
+				Entry:        filepath.Join(usbRoot, test.entry),
+				Package:      filepath.Join(usbRoot, "app", "packages", test.target, "runtime.pkg"),
+				Manifest:     filepath.Join(usbRoot, "app", "manifests", test.target+".version.json"),
+				Current:      filepath.Join(usbRoot, "app", "current", test.target+".json"),
+				InstallState: filepath.Join(usbRoot, "app", "install-state", test.target+".json"),
+			}
+			if paths.Target != test.target || paths.TargetPaths != expected {
+				t.Fatalf("target paths = %#v", paths)
+			}
+			if paths.PackageRoot != filepath.Join(usbRoot, ".uclaw") || paths.CacheRoot != filepath.Join(localAppData, "U-Claw", "runtimes") {
+				t.Fatalf("legacy-compatible roots changed: %#v", paths)
+			}
+			if paths.TargetCacheRoot != filepath.Join(localAppData, "U-Claw", "runtimes", test.target) {
+				t.Fatalf("target cache root = %q", paths.TargetCacheRoot)
+			}
+		})
+	}
+}
+
+func TestRuntimeTargetForPlatformArch(t *testing.T) {
+	for _, test := range []struct {
+		goos   string
+		goarch string
+		target string
+	}{
+		{goos: "windows", goarch: "amd64", target: "win-x64"},
+		{goos: "darwin", goarch: "arm64", target: "macos-arm64"},
+	} {
+		t.Run(test.target, func(t *testing.T) {
+			target, err := RuntimeTargetForPlatformArch(test.goos, test.goarch)
+			if err != nil || target != test.target {
+				t.Fatalf("target = %q, %v", target, err)
+			}
+		})
+	}
+	for _, test := range [][2]string{{"linux", "amd64"}, {"darwin", "amd64"}, {"windows", "arm64"}} {
+		if _, err := RuntimeTargetForPlatformArch(test[0], test[1]); !errors.Is(err, ErrPortablePathInvalid) {
+			t.Fatalf("%v returned %v", test, err)
+		}
+	}
+}
+
+func TestResolveRuntimeTargetPathsRejectsInvalidInput(t *testing.T) {
+	if _, err := ResolveRuntimeTargetPaths("relative", "win-x64"); !errors.Is(err, ErrPortablePathInvalid) {
+		t.Fatalf("relative root returned %v", err)
+	}
+	if _, err := ResolveRuntimeTargetPaths(t.TempDir(), "linux-x64"); !errors.Is(err, ErrPortablePathInvalid) {
+		t.Fatalf("unknown target returned %v", err)
 	}
 }
 
