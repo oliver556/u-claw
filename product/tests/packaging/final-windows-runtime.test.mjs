@@ -8,6 +8,7 @@ import test from "node:test";
 import {
   buildFinalWindowsRuntime,
   createRuntimeProvenance,
+  npmVersion,
   validateFinalWindowsRuntime,
   validateRuntimeProvenance,
 } from "../../packaging/final-windows-runtime.mjs";
@@ -63,6 +64,45 @@ test("official builder refuses non-Windows hosts", async () => {
     platform: "darwin",
     arch: "arm64",
   }), /must be built on Windows x64/i);
+});
+
+test("npm version is read through the Node executable when npm exposes a JS CLI", async () => {
+  const calls = [];
+  const version = await npmVersion({
+    env: {
+      npm_execpath: "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+      npm_config_user_agent: "npm/11.12.1 node/v24.15.0",
+    },
+    execPath: "C:\\Program Files\\nodejs\\node.exe",
+    execFileImpl: async (...args) => {
+      calls.push(args);
+      return { stdout: "11.12.1\n" };
+    },
+  });
+
+  assert.equal(version, "11.12.1");
+  assert.deepEqual(calls, [[
+    "C:\\Program Files\\nodejs\\node.exe",
+    ["C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js", "--version"],
+    { encoding: "utf8", windowsHide: true },
+  ]]);
+});
+
+test("npm version avoids spawning Windows npm command shims", async () => {
+  let spawned = false;
+  const version = await npmVersion({
+    env: {
+      npm_execpath: "C:\\Program Files\\nodejs\\npm.cmd",
+      npm_config_user_agent: "npm/11.12.1 node/v24.15.0",
+    },
+    execFileImpl: async () => {
+      spawned = true;
+      throw new Error("must not run");
+    },
+  });
+
+  assert.equal(version, "11.12.1");
+  assert.equal(spawned, false);
 });
 
 test("final runtime rejects non-final provenance and missing provenance", async () => {

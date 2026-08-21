@@ -116,9 +116,23 @@ export async function validateFinalWindowsRuntime({ runtimeDir, provenancePath, 
   return { provenance, inventory };
 }
 
-async function npmVersion() {
-  const { stdout } = await execFileAsync(process.platform === "win32" ? "npm.cmd" : "npm", ["--version"], { encoding: "utf8", windowsHide: true });
-  return stdout.trim();
+function npmVersionFromUserAgent(userAgent) {
+  return /^npm\/([^\s]+)/u.exec(userAgent ?? "")?.[1];
+}
+
+function npmCliEntrypoint(env) {
+  const candidate = env.npm_execpath;
+  if (typeof candidate !== "string" || candidate.length === 0) return undefined;
+  return /\.(?:cjs|mjs|js)$/iu.test(candidate) ? candidate : undefined;
+}
+
+export async function npmVersion({ env = process.env, execPath = process.execPath, execFileImpl = execFileAsync } = {}) {
+  const npmCli = npmCliEntrypoint(env);
+  if (npmCli) {
+    const { stdout } = await execFileImpl(execPath, [npmCli, "--version"], { encoding: "utf8", windowsHide: true });
+    return stdout.trim();
+  }
+  return npmVersionFromUserAgent(env.npm_config_user_agent) ?? versions.npm;
 }
 
 async function requireMissing(target) {
