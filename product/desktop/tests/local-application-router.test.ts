@@ -26,7 +26,7 @@ describe("createLocalApplicationRouter", () => {
     const openPath = vi.fn(async () => "");
     const inject = vi.fn(async () => undefined);
     const fallback = vi.fn();
-    const router = createLocalApplicationRouter({ roots: [root], cachePath: join(root, "cache.json"), openPath, inject });
+    const router = createLocalApplicationRouter({ roots: [root], cachePath: join(root, "cache.json"), openPath, inject, platform: "darwin" });
 
     const events = [];
     for await (const event of await router.route({
@@ -46,7 +46,7 @@ describe("createLocalApplicationRouter", () => {
     const openPath = vi.fn(async () => "");
     const router = createLocalApplicationRouter({
       roots: [root], cachePath: join(root, "cache.json"), openPath,
-      inject: vi.fn(async () => undefined),
+      inject: vi.fn(async () => undefined), platform: "darwin",
     });
     await router.refresh();
     await mkdir(join(root, "New App.app"));
@@ -66,7 +66,7 @@ describe("createLocalApplicationRouter", () => {
       const fallbackStream = (async function* () { yield { type: "started" as const, runId: "fallback", sessionId: "session-1" }; })();
       const fallback = vi.fn(async () => fallbackStream);
       const router = createLocalApplicationRouter({
-        roots: [root], cachePath: join(root, "cache.json"), openPath: vi.fn(), inject: vi.fn(),
+        roots: [root], cachePath: join(root, "cache.json"), openPath: vi.fn(), inject: vi.fn(), platform: "darwin",
       });
 
       expect(await router.route({ sessionId: "session-1", clientRequestId: "request", blocks: [{ type: "text", text, format: "plain" }] }, fallback)).toBe(fallbackStream);
@@ -79,7 +79,7 @@ describe("createLocalApplicationRouter", () => {
     const openPath = vi.fn(async () => "");
     const router = createLocalApplicationRouter({
       roots: [root], cachePath: join(root, "cache.json"), openPath,
-      inject: vi.fn(async () => undefined),
+      inject: vi.fn(async () => undefined), platform: "darwin",
     });
 
     await Promise.all([
@@ -99,7 +99,7 @@ describe("createLocalApplicationRouter", () => {
   it("falls back when an indexed target no longer exists", async () => {
     const root = await fixture();
     const router = createLocalApplicationRouter({
-      roots: [root], cachePath: join(root, "cache.json"), openPath: vi.fn(), inject: vi.fn(),
+      roots: [root], cachePath: join(root, "cache.json"), openPath: vi.fn(), inject: vi.fn(), platform: "darwin",
     });
     await router.refresh();
     await rm(join(root, "WPS Office.app"), { recursive: true });
@@ -121,7 +121,7 @@ describe("createLocalApplicationRouter", () => {
     }));
     const fallback = vi.fn();
     const openPath = vi.fn(async () => "");
-    const router = createLocalApplicationRouter({ roots: [root], cachePath, openPath, inject: vi.fn(async () => undefined) });
+    const router = createLocalApplicationRouter({ roots: [root], cachePath, openPath, inject: vi.fn(async () => undefined), platform: "darwin" });
 
     for await (const _event of await router.route({
       sessionId: "session-1", clientRequestId: "request",
