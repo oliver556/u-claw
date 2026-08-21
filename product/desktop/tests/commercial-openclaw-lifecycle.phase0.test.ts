@@ -17,21 +17,34 @@ describe("phase 0 commercial OpenClaw chat lifecycle contract", () => {
     const route = productionChatRouteSource();
 
     expect(route).toContain("await commercialProviderReadiness.wait(signal)");
-    expect(route).toContain("commercialImageChat.route(input, signal)");
+    expect(route).toContain("return client.chat.send(input, signal)");
     expect(route).not.toContain("modelRouting.routeChatSend");
+    expect(route).not.toContain("localApplications.route");
+    expect(route).not.toContain("commercialImageChat.route");
   });
 
   it("keeps second-turn context in the same OpenClaw session instead of a prompt-only direct request", () => {
     const route = productionChatRouteSource();
 
-    expect(route, "第二轮必须复用 OpenClaw session/transcript").toContain("commercialImageChat.route(input, signal)");
+    expect(route, "第二轮必须复用 OpenClaw session/transcript").toContain("client.chat.send(input, signal)");
     expect(route, "商业直连只发送当前 prompt，无法保留第一轮上下文").not.toContain("modelRouting.routeChatSend");
+    expect(route, "本地动作正则会绕过 OpenClaw session/transcript").not.toContain("localApplications.route");
   });
 
   it("lets the second-turn image edit resolve the previous image from OpenClaw transcript", () => {
     const route = productionChatRouteSource();
 
-    expect(route, "上一张图片必须由同一 OpenClaw session 的 transcript 提供").toContain("commercialImageChat.route(input, signal)");
+    expect(route, "上一张图片必须由 OpenClaw Agent/tool chain 从同一 session transcript 解析").toContain("client.chat.send(input, signal)");
     expect(route, "不得由商业直连另建图片上下文").not.toContain("modelRouting.routeChatSend");
+    expect(route, "不得由 U-Claw 图片 CLI 和 chat.inject 伪造图片回复").not.toContain("commercialImageChat.route");
+  });
+
+  it("does not intercept natural language local application requests before OpenClaw", () => {
+    const route = productionChatRouteSource();
+
+    expect(route).toContain("client.chat.send(input, signal)");
+    expect(route).not.toContain("requestedApplication");
+    expect(route).not.toContain("openPath");
+    expect(route).not.toContain("local_");
   });
 });

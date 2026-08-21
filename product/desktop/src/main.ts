@@ -39,10 +39,7 @@ import { createProviderStore, type ProviderStore } from "./providers/provider-st
 import type { ProviderNetworkService } from "./providers/provider-network.js";
 import type { OpenClawProviderConfigBackend } from "./providers/openclaw-provider-config.js";
 import { createCommercialOpenClawReadinessGate } from "./providers/commercial-openclaw-lifecycle.js";
-import { createCommercialImageChatRouter } from "./providers/commercial-image-chat-router.js";
-import type { OpenClawImageInference } from "./providers/openclaw-image-cli-runtime.js";
 import { installBundledCommercialImageExtension } from "./providers/commercial-image-extension-bootstrap.js";
-import { createLocalApplicationRouter, defaultApplicationRoots } from "./local-actions/application-router.js";
 import { createSkillHubClient } from "./skills/skillhub-client.js";
 import { createSkillService } from "./skills/skill-service.js";
 import { createSkillImportService } from "./skills/skill-import-service.js";
@@ -402,7 +399,6 @@ export interface DesktopMainOptions {
   providerNetwork?: ProviderNetworkService;
   providerConfig?: OpenClawProviderConfigBackend;
   commercialProviderBootstrap?(coordinator: ProductionRuntimeConsistencyCoordinator): Promise<void>;
-  commercialImageInference?: OpenClawImageInference;
   injectChatMessage?(
     sessionId: string,
     message: string,
@@ -733,7 +729,6 @@ export async function startElectronMain(
     targetDir: join(portablePaths.openClawState, "extensions", "uclaw-commercial-image"),
   });
   const client = requireElectronClient(options.client);
-  if (options.injectChatMessage === undefined) throw new Error("OpenClaw chat injection is required for local application actions.");
   const consistencyCoordinator = new ProductionRuntimeConsistencyCoordinator();
   const organizer = createSessionOrganizerStore(portablePaths.dataDir);
   const attachments = options.attachments ?? createAttachmentCache({ dataDir: portablePaths.dataDir });
@@ -749,31 +744,11 @@ export async function startElectronMain(
   });
   await attachmentCleanup.started;
   const providers = options.providers ?? createProviderStore({ dataDir: portablePaths.dataDir });
-  const localApplications = createLocalApplicationRouter({
-    roots: defaultApplicationRoots(process.platform, process.env),
-    cachePath: join(portablePaths.cacheDir, "local-applications.json"),
-    openPath: (path) => shell.openPath(path),
-    inject: async (sessionId, message, label, signal) => {
-      await options.injectChatMessage!(sessionId, message, label, signal);
-    },
-  });
-  void localApplications.refresh().catch(() => undefined);
   const commercialProviderReadiness = createCommercialOpenClawReadinessGate();
-  const commercialImageChat = createCommercialImageChatRouter({
-    chat: {
-      ...client.chat,
-      injectAssistant: (sessionId, message, label, signal) => options.injectChatMessage!(sessionId, message, label, signal),
-    },
-    imageInference: options.commercialImageInference ?? {
-      infer: async () => { throw new Error("OpenClaw image inference runtime is unavailable."); },
-    },
-    sessionModel: async (sessionId) => (await client.sessions.get(sessionId)).model?.id,
-  });
-  const routeChatSend = (input: SendMessageInput, signal: AbortSignal) =>
-    localApplications.route(input, async (input, signal) => {
-      await commercialProviderReadiness.wait(signal);
-      return commercialImageChat.route(input, signal);
-    }, signal);
+  const routeChatSend = async (input: SendMessageInput, signal: AbortSignal) => {
+    await commercialProviderReadiness.wait(signal);
+    return client.chat.send(input, signal);
+  };
   const chatQueueDispatcher = createChatQueueDispatcher({
     store: chatQueue,
     send: (input) => routeChatSend(input, new AbortController().signal),

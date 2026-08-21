@@ -39,6 +39,10 @@ describe("OpenClaw-only production chat contract", () => {
     for (const forbidden of [
       "createMainProcessModelRouting",
       "createLegacyBuiltinServiceClientForTest",
+      "createLocalApplicationRouter",
+      "localApplications.route",
+      "createCommercialImageChatRouter",
+      "createOpenClawImageCliRuntime",
       "modelSourceExecutors",
       "/chat/completions",
       "/images/generations",
