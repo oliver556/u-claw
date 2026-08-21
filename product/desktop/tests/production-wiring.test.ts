@@ -5,9 +5,12 @@ import { dirname, join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDesktopMainOptions } from "../src/wiring/create-desktop-main-options.js";
+import { createDesktopMainOptions as createProductionDesktopMainOptions } from "../src/wiring/create-desktop-main-options.js";
 import * as desktopMain from "../src/main.js";
 import { formalProposalInspect, formalProposalRecord } from "./skill-proposal-fixture.js";
+
+const createDesktopMainOptions = (env: NodeJS.ProcessEnv) =>
+  createProductionDesktopMainOptions(env, { platformForTest: "linux" });
 
 class ScriptedWebSocket {
   static instances: ScriptedWebSocket[] = [];

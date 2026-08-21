@@ -72,6 +72,7 @@ export interface CreateModelSourceRouterOptions<Request, Result> {
 
 export interface CreateMainProcessModelRoutingOptions {
   dataDir: string;
+  platformForTest?: NodeJS.Platform;
   providers: ProviderStore;
   executors: ExternalModelSourceExecutors<SendMessageInput, AsyncIterable<MessageEvent>>;
   allowLoopbackHttp?: boolean;
@@ -187,12 +188,13 @@ export function createModelSourceRouter<Request, Result>({
 
 export function createMainProcessModelRouting({
   dataDir,
+  platformForTest,
   providers,
   executors,
   allowLoopbackHttp = false,
   legacyBuiltinClient = createRemovedBuiltinServiceClient(),
 }: CreateMainProcessModelRoutingOptions) {
-  const credentials = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp });
+  const credentials = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp, platformForTest });
   const builtin = async (
     input: SendMessageInput,
     credential: BuiltinModelCredential,

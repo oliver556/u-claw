@@ -6,11 +6,16 @@ import { join } from "node:path";
 import type { NewApiDeviceMapping, NewApiIssuedToken } from "@uclaw/shared";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createBuiltinCredentialStore } from "../src/providers/builtin-credential-store.js";
+import { createBuiltinCredentialStore as createProductionBuiltinCredentialStore } from "../src/providers/builtin-credential-store.js";
 import {
   ProvisioningArtifactError,
-  createProvisioningArtifactWriter,
+  createProvisioningArtifactWriter as createProductionProvisioningArtifactWriter,
 } from "../src/provisioning/artifact-writer.js";
+
+const createBuiltinCredentialStore = (options: Parameters<typeof createProductionBuiltinCredentialStore>[0]) =>
+  createProductionBuiltinCredentialStore({ platformForTest: "linux", ...options });
+const createProvisioningArtifactWriter = (options: Parameters<typeof createProductionProvisioningArtifactWriter>[0]) =>
+  createProductionProvisioningArtifactWriter({ platformForTest: "linux", ...options });
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -141,7 +146,7 @@ describe("provisioning artifact writer", () => {
       join(dataDir, ".uclaw", "license", "license.json"),
       join(dataDir, ".uclaw", "provisioning-transaction.v1.json"),
     ]) {
-      expect((await lstat(path)).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") expect((await lstat(path)).mode & 0o777).toBe(0o600);
     }
     await expect(readFile(join(dataDir, ".uclaw", "builtin-model-credential.v1.json"), "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });

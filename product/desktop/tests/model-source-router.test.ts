@@ -29,8 +29,8 @@ function typedCredential(endpoint = "http://127.0.0.1:18091/v1") {
 async function setup() {
   const dataDir = await mkdtemp(join(tmpdir(), "uclaw-model-router-"));
   roots.push(dataDir);
-  const providers = createProviderStore({ dataDir });
-  const credentials = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp: true });
+  const providers = createProviderStore({ dataDir, platformForTest: "linux" });
+  const credentials = createBuiltinCredentialStore({ dataDir, allowLoopbackHttp: true, platformForTest: "linux" });
   const credential = typedCredential();
   await credentials.provision(credential);
   const builtin = vi.fn(async () => "builtin-result");
@@ -51,11 +51,12 @@ describe("model source router", () => {
   it("keeps the typed builtin client inside the main-process boundary", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-model-route-"));
     roots.push(dataDir);
-    const providers = createProviderStore({ dataDir });
+    const providers = createProviderStore({ dataDir, platformForTest: "linux" });
     const bypass = vi.fn(async () => "bypassed-result");
     const executors = { builtin: bypass, domestic: vi.fn(), custom: vi.fn() };
     const routing = createMainProcessModelRouting({
       dataDir,
+      platformForTest: "linux",
       providers,
       executors,
     });
@@ -72,9 +73,10 @@ describe("model source router", () => {
   it("fails closed when production builtin endpoint is missing or not HTTPS", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-model-unavailable-"));
     roots.push(dataDir);
-    const providers = createProviderStore({ dataDir });
+    const providers = createProviderStore({ dataDir, platformForTest: "linux" });
     const routing = createMainProcessModelRouting({
       dataDir,
+      platformForTest: "linux",
       providers,
       executors: { domestic: vi.fn(), custom: vi.fn() },
     });
@@ -98,9 +100,10 @@ describe("model source router", () => {
   ] as const)("fails closed for builtin chat input that has no bounded text mapping", async ({ blocks }) => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-main-model-invalid-input-"));
     roots.push(dataDir);
-    const providers = createProviderStore({ dataDir });
+    const providers = createProviderStore({ dataDir, platformForTest: "linux" });
     const routing = createMainProcessModelRouting({
       dataDir,
+      platformForTest: "linux",
       providers,
       executors: { domestic: vi.fn(), custom: vi.fn() },
     });

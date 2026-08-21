@@ -152,7 +152,14 @@ async function safeRead(file: InventoryFile): Promise<Buffer> {
 
 async function syncDirectory(path: string): Promise<void> {
   const handle = await open(path, "r");
-  try { await handle.sync(); } finally { await handle.close(); }
+  try {
+    await handle.sync().catch((error: NodeJS.ErrnoException) => {
+      if (
+        process.platform !== "win32" ||
+        !["EINVAL", "ENOTSUP", "EPERM"].includes(error.code ?? "")
+      ) throw error;
+    });
+  } finally { await handle.close(); }
 }
 
 async function removeTree(safeRoot: Root, safeId: string): Promise<void> {

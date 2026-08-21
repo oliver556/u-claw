@@ -103,7 +103,7 @@ describe("system voice desktop domain", () => {
     let audioPath = "";
     await playSecureTemporaryAudio(Buffer.from("audio").toString("base64"), { cacheRoot: root, play: async (path) => {
       audioPath = path;
-      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o600);
       await expect(readFile(path, "utf8")).resolves.toBe("audio");
     } });
     await expect(stat(audioPath)).rejects.toMatchObject({ code: "ENOENT" });
@@ -118,7 +118,7 @@ describe("system voice desktop domain", () => {
     expect(play).not.toHaveBeenCalled();
   });
 
-  it("rejects a temporary audio directory with broad permissions", async () => {
+  it.skipIf(process.platform === "win32")("rejects a temporary audio directory with broad permissions", async () => {
     const root = await mkdtemp(join(tmpdir(), "uclaw-system-voice-audio-"));
     const directory = join(root, "system-voice");
     await mkdir(directory, { mode: 0o700 });

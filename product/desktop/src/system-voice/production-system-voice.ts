@@ -33,8 +33,7 @@ export async function playSecureTemporaryAudio(audioBase64: string, options: Sec
   const currentUid = process.getuid?.();
   if (
     directoryInfo.isSymbolicLink() || !directoryInfo.isDirectory() ||
-    (currentUid !== undefined && directoryInfo.uid !== currentUid) ||
-    (directoryInfo.mode & 0o777) !== 0o700 ||
+    (currentUid !== undefined && (directoryInfo.uid !== currentUid || (directoryInfo.mode & 0o777) !== 0o700)) ||
     relativeDirectory === "" || relativeDirectory.startsWith("..") || isAbsolute(relativeDirectory)
   ) {
     throw new Error("Secure temporary audio directory is unavailable.");

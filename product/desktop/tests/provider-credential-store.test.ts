@@ -12,13 +12,13 @@ describe("provider credential store", () => {
   it("stores keys in a pinned main-only mode-0600 target", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "uclaw-provider-credentials-"));
     roots.push(dataDir);
-    const store = createProviderCredentialStore({ dataDir });
+    const store = createProviderCredentialStore({ dataDir, platformForTest: "linux" });
     await store.set("openai", "sk-main-only");
 
     await expect(store.get("openai")).resolves.toBe("sk-main-only");
     await expect(store.has("openai")).resolves.toBe(true);
     const path = join(dataDir, ".uclaw", "provider-credentials.v1.json");
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect(await readFile(path, "utf8")).toContain("sk-main-only");
   });
 
@@ -30,7 +30,7 @@ describe("provider credential store", () => {
     await writeFile(source, "preserve", { mode: 0o600 });
     await link(source, join(dataDir, ".uclaw", "provider-credentials.v1.json"));
 
-    const store = createProviderCredentialStore({ dataDir });
+    const store = createProviderCredentialStore({ dataDir, platformForTest: "linux" });
     await expect(store.set("openai", "sk-rejected")).rejects.toMatchObject({ code: "OPERATION_FAILED" });
     expect(await readFile(source, "utf8")).toBe("preserve");
   });

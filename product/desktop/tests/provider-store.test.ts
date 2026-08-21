@@ -29,7 +29,7 @@ describe("provider store", () => {
     roots.push(dataDir);
     const create = (desktop as any).createProviderStore;
     expect(create).toBeTypeOf("function");
-    return { dataDir, store: create({ dataDir, ...options }) as Store };
+    return { dataDir, store: create({ dataDir, platformForTest: "linux", ...options }) as Store };
   }
 
   const custom = (id: string) => ({
@@ -335,7 +335,7 @@ describe("provider store", () => {
     await mkdir(join(dataDir, "providers"), { recursive: true });
     await writeFile(join(dataDir, "providers", "provider-config.v1.json"), "{ secret-key-fragment", "utf8");
     const create = (desktop as any).createProviderStore;
-    const error = await (create({ dataDir }) as Store).list().catch((reason: unknown) => reason);
+    const error = await (create({ dataDir, platformForTest: "linux" }) as Store).list().catch((reason: unknown) => reason);
     expect(error).toMatchObject({
       code: "OPERATION_FAILED",
       message: "Provider configuration could not be loaded.",

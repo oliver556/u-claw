@@ -142,7 +142,7 @@ describe("production personal WeChat runtime", () => {
     expect(JSON.stringify(requests)).not.toContain("secret-session-token");
     const accountPath = join(dataDir, "openclaw-weixin", "accounts", "wx-account-7a2f.json");
     expect(JSON.parse(await readFile(accountPath, "utf8"))).toEqual({ token: ["secret", "session", "token"].join("-"), baseUrl: "https://ilinkai.weixin.qq.com", userId: "private-user" });
-    expect((await stat(accountPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect((await stat(accountPath)).mode & 0o777).toBe(0o600);
     await expect(readFile(join(dataDir, ".env"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 

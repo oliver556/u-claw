@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -74,7 +74,9 @@ describe("image operation service", () => {
     ["%2Fdata%2Fworkspace%2Flink.png", "/etc/secret.png"],
   ])("rejects assistant media outside the real workspace: %s", async (rawSource, resolvedSource) => {
     const sourceUrl = `http://127.0.0.1:18789/__openclaw__/assistant-media?source=${rawSource}`;
-    const realpath = vi.fn(async (path: string) => path === "/data/workspace/link.png" ? resolvedSource : path);
+    const linkedSource = resolve("/data/workspace/link.png");
+    const resolvedTarget = /^[A-Z]:\\|^\\\\/iu.test(resolvedSource) ? resolvedSource : resolve(resolvedSource);
+    const realpath = vi.fn(async (path: string) => path === linkedSource ? resolvedTarget : path);
     const { service, fetch } = setup({ realpath });
     await expect(service.copy({ sourceUrl, suggestedName: "image.png" })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
     expect(fetch).not.toHaveBeenCalled();

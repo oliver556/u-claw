@@ -22,7 +22,7 @@ async function tempRoot(): Promise<string> {
 }
 
 const packageRootFor = (dataDir: string): string => dirname(dataDir);
-const writerOptions = (dataDir: string) => ({ packageRoot: packageRootFor(dataDir), dataDir });
+const writerOptions = (dataDir: string) => ({ packageRoot: packageRootFor(dataDir), dataDir, platformForTest: "linux" as const });
 
 const material = (suffix = "001"): ActivationResponse => ({
   activationId: `activation-${suffix}`,

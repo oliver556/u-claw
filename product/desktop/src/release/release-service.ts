@@ -77,7 +77,14 @@ async function syncFile(path: string): Promise<void> {
 
 async function syncDirectory(path: string): Promise<void> {
   const handle = await open(path, constants.O_RDONLY);
-  try { await handle.sync(); } finally { await handle.close(); }
+  try {
+    await handle.sync().catch((error: NodeJS.ErrnoException) => {
+      if (
+        process.platform !== "win32" ||
+        !["EINVAL", "ENOTSUP", "EPERM"].includes(error.code ?? "")
+      ) throw error;
+    });
+  } finally { await handle.close(); }
 }
 
 async function writeJsonDurable(path: string, value: unknown, exclusive = false): Promise<void> {
@@ -216,6 +223,14 @@ export function createReleaseService(options: ReleaseServiceOptions) {
     } catch { return undefined; }
   };
   const loadSequence = async () => {
+    const pathInfo = await lstat(sequencePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (pathInfo === undefined) return;
+    if (!pathInfo.isFile() || pathInfo.isSymbolicLink() || pathInfo.nlink !== 1 || pathInfo.size < 1 || pathInfo.size > 4096) {
+      throw new Error("Release sequence record is invalid.");
+    }
     let handle;
     try { handle = await open(sequencePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
     let text: string;

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -15,6 +16,6 @@ describe("sandbox preload build", () => {
     expect(output).toContain("require(\"electron\")");
     expect(output).not.toMatch(/\bimport\s+(?:[\w*{]|\()/);
     expect(output).not.toContain("@uclaw/shared");
-    expect(resolvePreloadPath("/runtime/desktop/dist")).toBe("/runtime/desktop/dist/preload.cjs");
+    expect(resolvePreloadPath("/runtime/desktop/dist")).toBe(join("/runtime/desktop/dist", "preload.cjs"));
   });
 });

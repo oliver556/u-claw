@@ -313,7 +313,10 @@ async function resolveBundledSkillsRoot(env: NodeJS.ProcessEnv): Promise<string>
   throw new DesktopWiringError("UNAVAILABLE", "Portable Skill source is unavailable.");
 }
 
-export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<DesktopMainOptions> {
+export async function createDesktopMainOptions(
+  env: NodeJS.ProcessEnv,
+  { platformForTest }: { platformForTest?: NodeJS.Platform } = {},
+): Promise<DesktopMainOptions> {
   const environment = await readDesktopWiringEnvironment(env);
   const developmentProvider = readDevelopmentProvider(env);
   const bundledSkillsRoot = await resolveBundledSkillsRoot(env);
@@ -324,8 +327,8 @@ export async function createDesktopMainOptions(env: NodeJS.ProcessEnv): Promise<
   const openClawConfig = createOpenClawProviderConfigBackend({
     request: (method, params) => transport.router.request(method, params as never, z.unknown()),
   });
-  const commercialCredentialStore = createBuiltinCredentialStore({ dataDir: environment.dataRoot });
-  const storedProviders = createProviderStore({ dataDir: environment.dataRoot, openClawConfig });
+  const commercialCredentialStore = createBuiltinCredentialStore({ dataDir: environment.dataRoot, platformForTest });
+  const storedProviders = createProviderStore({ dataDir: environment.dataRoot, openClawConfig, platformForTest });
   let providerNetworkSettings = await storedProviders.getNetworkForRuntime();
   const providers: ProviderStore = {
     ...storedProviders,

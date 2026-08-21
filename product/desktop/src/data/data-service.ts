@@ -111,6 +111,14 @@ function isPathWithin(rootPath: string, candidatePath: string): boolean {
   return child === "" || (!child.startsWith("..") && !isAbsolute(child));
 }
 
+async function rejectSymbolicPathSegments(rootPath: string, id: string): Promise<void> {
+  let candidate = rootPath;
+  for (const segment of id.split("/")) {
+    candidate = join(candidate, segment);
+    if ((await lstat(candidate)).isSymbolicLink()) throw safeError("FORBIDDEN", "拒绝不安全的数据路径。");
+  }
+}
+
 function safeError(code: UClawError["code"], message: string, retryable = false): UClawError {
   return UClawErrorSchema.parse({
     code,
@@ -344,6 +352,7 @@ export function createDataService(options: DataServiceOptions) {
   const invokeWorkspaceShell = async (safeRoot: Root, id: string, action: WorkspaceShellAction): Promise<void> => {
     if (!options.workspaceShell) throw safeError("UNAVAILABLE", "受控系统打开组件尚未安装。");
     const targetPath = resolve(workspaceRoot, id);
+    await rejectSymbolicPathSegments(safeRoot.rootReal, id);
     const info = await safeRoot.stat(id);
     if (!isFile(info) && !isDirectory(info)) throw safeError("FORBIDDEN", "拒绝不安全的数据路径。");
 

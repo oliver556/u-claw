@@ -14,7 +14,7 @@ afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recur
 async function setup(allowLoopbackHttp = true) {
   const dataDir = await mkdtemp(join(tmpdir(), "uclaw-builtin-credential-"));
   roots.push(dataDir);
-  return { dataDir, store: createBuiltinCredentialStore({ dataDir, allowLoopbackHttp }) };
+  return { dataDir, store: createBuiltinCredentialStore({ dataDir, allowLoopbackHttp, platformForTest: "linux" }) };
 }
 
 function provisionInput(endpoint = "http://127.0.0.1:18090/v1") {
@@ -40,7 +40,7 @@ describe("builtin credential store", () => {
     const dataDir = join(root, "plain-file");
     await writeFile(dataDir, "not a directory");
 
-    createBuiltinCredentialStore({ dataDir });
+    createBuiltinCredentialStore({ dataDir, platformForTest: "linux" });
     await new Promise<void>((resolve) => setImmediate(resolve));
   });
 
@@ -50,7 +50,7 @@ describe("builtin credential store", () => {
     const dataDir = join(root, "plain-file");
     await writeFile(dataDir, "not a directory");
 
-    const store = createBuiltinCredentialStore({ dataDir });
+    const store = createBuiltinCredentialStore({ dataDir, platformForTest: "linux" });
     await expect(store.loadActive()).rejects.toMatchObject({ code: "BUILTIN_CREDENTIAL_UNSAFE" });
   });
 
@@ -63,7 +63,7 @@ describe("builtin credential store", () => {
       dataDir, platformForTest: "win32", allowUnpinnedFilesystemForTest: true,
     });
     expect(testOnly.pinnedFilesystem).toBe(false);
-    const native = createBuiltinCredentialStore({ dataDir });
+    const native = createBuiltinCredentialStore({ dataDir, platformForTest: "linux" });
     expect(native.pinnedFilesystem).toBe(true);
     expect(getFsSafePythonConfig().mode).toBe("require");
   });
@@ -85,7 +85,7 @@ describe("builtin credential store", () => {
       deviceToken: input.deviceToken,
     });
     const path = join(dataDir, ".uclaw", "builtin-model-credential.v1.json");
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...input, endpoint: `${input.endpoint}/` });
   });
 
@@ -152,7 +152,7 @@ describe("builtin credential store", () => {
     expect(await readFile(source, "utf8")).toBe("preserve-me");
   });
 
-  it("rejects symlinked and broadly readable credential targets", async () => {
+  it.skipIf(process.platform === "win32")("rejects symlinked and broadly readable credential targets", async () => {
     const linked = await setup();
     const linkedDir = join(linked.dataDir, ".uclaw");
     await mkdir(linkedDir, { recursive: true });

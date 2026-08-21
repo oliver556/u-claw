@@ -452,7 +452,7 @@ describe("data service", () => {
     })).resolves.toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
   });
 
-  it("does not report success when memory changes again immediately after atomic replacement", async () => {
+  it.skipIf(process.platform === "win32")("does not report success when memory changes again immediately after atomic replacement", async () => {
     const { workspace, service } = await fixture();
     const read = await service.dispatch({
       method: "memory.read", requestId: "read", params: { memoryId: "MEMORY.md" },

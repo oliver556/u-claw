@@ -40,6 +40,7 @@ export interface ProviderStore {
 
 export interface CreateProviderStoreOptions {
   dataDir: string;
+  platformForTest?: NodeJS.Platform;
   writeAtomically?: (path: string, body: string) => Promise<void>;
   credentials?: ProviderCredentialStore;
   openClawConfig?: OpenClawProviderConfigBackend;
@@ -120,8 +121,9 @@ function cloneDocument(document: ProviderConfigDocument): ProviderConfigDocument
 
 export function createProviderStore({
   dataDir,
+  platformForTest,
   writeAtomically = defaultAtomicWrite,
-  credentials = createProviderCredentialStore({ dataDir }),
+  credentials = createProviderCredentialStore({ dataDir, platformForTest }),
   openClawConfig,
 }: CreateProviderStoreOptions): ProviderStore {
   const configPath = join(dataDir, "providers", configFileName);
