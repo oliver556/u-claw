@@ -215,7 +215,7 @@ func assertRestoredUniqueConstraints(t *testing.T, ctx context.Context, pool *pg
 		{"activation digest", `INSERT INTO activation_inventory (id,username_normalized,username_display,activation_code_digest,status,new_api_setup_status,created_at) VALUES ('00000000-0000-0000-0000-000000000092','fixture-unique','duplicate',decode(repeat('02',32),'hex'),'prepared','pending',now())`},
 		{"device fingerprint", `INSERT INTO devices (device_id,inventory_id,fingerprint_version,fingerprint_sha256,status,created_at,updated_at) VALUES ('10000000-0000-0000-0000-000000000093','00000000-0000-0000-0000-000000000002','uclaw-usb-v1',decode(repeat('13',32),'hex'),'active',now(),now())`},
 		{"license revision", `INSERT INTO licenses (license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,created_at,updated_at) VALUES ('20000000-0000-0000-0000-000000000093','10000000-0000-0000-0000-000000000003','active',2,'fixture-key',decode(repeat('93',16),'hex'),decode(repeat('93',32),'hex'),now(),now()+interval '30 days',now(),now())`},
-		{"activation idempotency", `INSERT INTO activation_attempts (activation_id,idempotency_key,request_fingerprint,stage,request_id,created_at,updated_at) VALUES ('30000000-0000-0000-0000-000000000093','fixture-activation',decode(repeat('93',32),'hex'),'requested','fixture-duplicate',now(),now())`},
+		{"activation idempotency", `INSERT INTO activation_attempts (activation_id,idempotency_key,request_fingerprint,stage,request_id,active_status_event_id,bound_audit_event_id,created_at,updated_at) VALUES ('30000000-0000-0000-0000-000000000093','fixture-activation',decode(repeat('93',32),'hex'),'requested','fixture-duplicate','40000000-0000-0000-0000-000000000093','50000000-0000-0000-0000-000000000093',now(),now())`},
 	}
 	for _, statement := range statements {
 		if _, err := pool.Exec(ctx, statement.sql); !postgresCode(err, "23505") {
@@ -286,6 +286,8 @@ func insertRestoreFixtures(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 			('00000000-0000-0000-0000-000000000003','fixture-active','Fixture Active',decode(repeat('03',32),'hex'),'active','configured',3,now(),now())`, []any{activationDigest[:]}},
 		{`INSERT INTO devices (device_id,inventory_id,fingerprint_version,fingerprint_sha256,status,created_at,updated_at)
 			VALUES ('10000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000003','uclaw-usb-v1',decode(repeat('13',32),'hex'),'reissued',now(),now())`, nil},
+		{`INSERT INTO device_aliases (inventory_id,device_id,target,fingerprint_version,fingerprint_sha256,evidence,created_at)
+			VALUES ('00000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','macos-arm64','uclaw-usb-v2',decode(repeat('14',32),'hex'),'{"target":"macos-arm64","platform":"darwin","arch":"arm64","source":"macos-diskutil","vendor":"ACME","product":"FLASH DRIVE","serial":"SN123","capacityBytes":64000000000}'::jsonb,now())`, nil},
 		{`INSERT INTO licenses (license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,created_at,updated_at) VALUES
 			('20000000-0000-0000-0000-000000000032','10000000-0000-0000-0000-000000000003','active',2,'fixture-key',decode(repeat('22',16),'hex'),$1,now(),now()+interval '30 days',now(),now())`, []any{startupHash[:]}},
 		{`INSERT INTO licenses (license_id,device_id,status,revision,key_id,startup_secret_salt,startup_secret_hash,not_before,expires_at,replacement_license_id,created_at,updated_at)
@@ -318,7 +320,7 @@ func insertRestoreFixtures(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 
 func assertRestoredState(t *testing.T, ctx context.Context, pool *pgxpool.Pool, expectedTokenDigest, expectedAPIEnvelope []byte) {
 	t.Helper()
-	var prepared, binding, active, reissued, audits int
+	var prepared, binding, active, reissued, audits, migrationCount, aliasCount int
 	var entitlementRevision, oldRevision, newRevision, artifactGeneration int64
 	var envelope []byte
 	var apiEnvelope, tokenDigest []byte
@@ -351,6 +353,12 @@ func assertRestoredState(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM model_proxy_admissions WHERE device_token_id='60000000-0000-0000-0000-000000000003' AND completed_at IS NOT NULL`).Scan(&admissionCount); err != nil {
 		t.Fatal(err)
 	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version=6 AND octet_length(checksum)=32`).Scan(&migrationCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM device_aliases WHERE inventory_id='00000000-0000-0000-0000-000000000003'`).Scan(&aliasCount); err != nil {
+		t.Fatal(err)
+	}
 	if prepared != 1 || binding != 1 || active != 1 || reissued != 1 {
 		t.Fatalf("restored states prepared=%d binding=%d active=%d reissued=%d", prepared, binding, active, reissued)
 	}
@@ -362,6 +370,9 @@ func assertRestoredState(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	}
 	if !bytes.Equal(apiEnvelope, expectedAPIEnvelope) || defaultModel != "fixture-model" || !bytes.Equal(tokenDigest, expectedTokenDigest) || admissionCount != 1 {
 		t.Fatalf("restored proxy state api_envelope=%q model=%q token_digest_len=%d admissions=%d", apiEnvelope, defaultModel, len(tokenDigest), admissionCount)
+	}
+	if migrationCount != 1 || aliasCount != 1 {
+		t.Fatalf("restored migration/alias state migration_006=%d aliases=%d", migrationCount, aliasCount)
 	}
 }
 
