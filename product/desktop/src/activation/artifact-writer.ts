@@ -194,7 +194,9 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
     allowUnpinnedFilesystemForTest: options.allowUnpinnedFilesystemForTest,
     platformForTest: options.platformForTest,
   });
-  const isNotFound = (error: unknown): boolean => error instanceof FsSafeError && error.code === "not-found";
+  const isNotFound = (error: unknown): boolean =>
+    (error instanceof FsSafeError && error.code === "not-found") ||
+    (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT");
   const prepare = async (): Promise<void> => {
     try {
       const [packageFs, dataFs] = await Promise.all([packageSafeRoot, dataSafeRoot]);
@@ -212,18 +214,13 @@ export function createActivationArtifactWriter(options: CreateActivationArtifact
   const write = (path: string, body: string | Buffer, maxBytes = MAX_JSON_BYTES) =>
     writeAt("data", path, body, maxBytes);
   const removeAt = async (kind: "package" | "data", path: string): Promise<void> => {
-    const removeDirect = async (): Promise<void> => {
-      try {
-        await (await rootFor(kind)).remove(path);
-      } catch (error) {
-        if (!isNotFound(error)) throw error;
-      }
-    };
-    if (kind === "data" && options.removeForTest) {
-      await options.removeForTest(path, removeDirect);
-      return;
+    const removeDirect = async (): Promise<void> => (await rootFor(kind)).remove(path);
+    try {
+      if (kind === "data" && options.removeForTest) await options.removeForTest(path, removeDirect);
+      else await removeDirect();
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
     }
-    await removeDirect();
   };
   const remove = (path: string) => removeAt("data", path);
   const snapshot = async (kind: "package" | "data", path: string): Promise<Buffer | null> => {

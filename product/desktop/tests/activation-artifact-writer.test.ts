@@ -448,7 +448,15 @@ describe("activation artifact writer", () => {
     await expect(initial.commitArtifacts(response.activationId, 1)).rejects.toMatchObject({ code: "ARTIFACT_WRITE_FAILED" });
     expect(await initial.readJournal()).toMatchObject({ stage: "committed" });
 
-    const restarted = createActivationArtifactWriter(writerOptions(dataDir));
+    const restarted = createActivationArtifactWriter({
+      ...writerOptions(dataDir),
+      removeForTest: async (path, remove) => {
+        if (boundary === 1 && path === paths.backup) {
+          throw Object.assign(new Error("missing cleanup target"), { code: "ENOENT" });
+        }
+        await remove();
+      },
+    });
     await restarted.recoverPendingArtifacts();
     await expect(restarted.verifyArtifacts(response, 1)).resolves.toBeUndefined();
     expect(await restarted.readJournal()).toBeNull();
