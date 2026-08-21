@@ -23,7 +23,7 @@ function sourceFiles(path: string): Array<{ path: string; body: string }> {
   return readdirSync(root, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.ts$/u.test(entry.name))
     .map((entry) => ({
-      path: join(entry.parentPath, entry.name).slice(productRoot.length + 1),
+      path: join(entry.parentPath, entry.name).slice(productRoot.length + 1).replaceAll("\\", "/"),
       body: readFileSync(join(entry.parentPath, entry.name), "utf8"),
     }));
 }
