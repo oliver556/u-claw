@@ -27,4 +27,3 @@ Evidence to paste:
 - HTTP status/code per case
 - redacted response body
 - audit outcome, if available: authentication.rejected | model.rejected | model_not_found
-

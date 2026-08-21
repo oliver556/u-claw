@@ -21,4 +21,3 @@ data: {"id":"<redacted>","object":"chat.completion.chunk","model":"gpt-5.5","cho
 data: {"id":"<redacted>","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"content":"<second-token>"},"finish_reason":null}]}
 
 data: [DONE]
-

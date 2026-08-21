@@ -155,4 +155,3 @@ Select-String -Path "$EvidenceRoot\*" -Recurse -Pattern "sk-|Authorization: Bear
 - Provide or authorize Windows/operator execution with real credentials/quota.
 - Decide whether image edit server/protocol failure, if observed, blocks release or becomes explicit known FAIL.
 - Preserve runtime artifact freeze unless commercial E2E finds a defect outside the frozen runtime packaging line.
-

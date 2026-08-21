@@ -21,4 +21,3 @@ Evidence to paste:
 - selected BYOK provider/model: <redacted>
 - config redaction snapshot hash: <sha256>
 - secret scan result: <pass/fail>
-

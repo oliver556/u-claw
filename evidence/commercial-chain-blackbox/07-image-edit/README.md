@@ -33,4 +33,3 @@ Required redacted evidence:
 - History after app restart showing edited artifact.
 
 Fail if server/protocol rejects multipart edit, OpenClaw cannot provide source image, or U-Claw bypasses OpenClaw tool chain.
-

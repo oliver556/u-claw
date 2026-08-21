@@ -26,4 +26,3 @@ Required redacted evidence:
 - Secret scan result for log bundle.
 
 Fail if U-Claw directly calls `/images/generations` from renderer/Electron default chat path without OpenClaw tool chain.
-

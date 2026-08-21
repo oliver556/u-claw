@@ -23,4 +23,3 @@ Frozen area for this gate:
 - product/tests/packaging/final-windows-runtime.test.mjs
 - product/packaging/runtime-app lock
 - Node/npm/Electron/OpenClaw runtime pins
-
