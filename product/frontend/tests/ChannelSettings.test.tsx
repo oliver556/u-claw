@@ -106,7 +106,9 @@ describe("ChannelSettings", () => {
 
     expect(await screen.findByText("Telegram 主机器人")).toBeVisible();
     expect(screen.getAllByText("已连接").length).toBeGreaterThan(0);
-    expect(screen.getByText(/2026\/08\/09 16:30/u)).toBeVisible();
+    const checkedAt = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+      .format(new Date(snapshot.channels[0].lastCheckedAt as string));
+    expect(screen.getByText(`最后检查：${checkedAt}`)).toBeVisible();
     expect(screen.getByText("...7890")).toBeVisible();
     expect(document.body.textContent).not.toContain("123456:complete-secret");
 

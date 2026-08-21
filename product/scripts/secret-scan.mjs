@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -142,6 +142,14 @@ export async function scanTrackedRepository(startDirectory = process.cwd(), opti
   const worktreePaths = await listWorktreePaths(root);
   for (const file of worktreePaths) {
     const absolutePath = path.join(root, file);
+    let pathMetadata;
+    try {
+      pathMetadata = await lstat(absolutePath);
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    if (pathMetadata.isSymbolicLink()) continue;
     let handle;
     try {
       handle = await open(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);

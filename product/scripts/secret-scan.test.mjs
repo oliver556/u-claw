@@ -458,13 +458,15 @@ test("activation server container is a Go 1.25 linux/amd64 nonroot scratch image
 
 test("worktree scan opens without following links and reads through the same descriptor with a bound", async () => {
   const scanner = await readFile(scannerPath, "utf8");
+  assert.match(scanner, /lstat\(absolutePath\)/u);
+  assert.match(scanner, /pathMetadata\.isSymbolicLink\(\)/u);
   assert.match(scanner, /open\(absolutePath, constants\.O_RDONLY \| constants\.O_NOFOLLOW\)/u);
   assert.match(scanner, /handle\.stat\(\)/u);
   assert.match(scanner, /handle\.read\(/u);
   assert.match(scanner, /limits\.nextReadSize\(length\)/u);
   assert.match(scanner, /maxFileBytes - length \+ 1/u);
   assert.match(scanner, /finally\s*\{\s*await handle\.close\(\)/u);
-  assert.doesNotMatch(scanner, /lstat\(absolutePath\)|readFile\(absolutePath\)/u);
+  assert.doesNotMatch(scanner, /readFile\(absolutePath\)/u);
 });
 
 test("activation server test gate runs tests, race detector, vet, and linux build serially", async () => {
