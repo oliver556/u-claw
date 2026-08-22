@@ -96,13 +96,14 @@ function matchesSecretRef(value: unknown): boolean {
 }
 
 function matchesSecretProvider(value: unknown, credentialPath?: string): boolean {
-  if (!isObject(value) || Object.keys(value).length !== 3) return false;
+  if (!isObject(value) || ![3, 4].includes(Object.keys(value).length)) return false;
   const pathMatches = credentialPath === undefined
     ? isRedactedSecret(value.path) || typeof value.path === "string" && isAbsolute(value.path) && !value.path.includes("\0")
     : value.path === credentialPath || isRedactedSecret(value.path);
   return (value.source === "file" || isRedactedSecret(value.source))
     && pathMatches
-    && (value.mode === "json" || isRedactedSecret(value.mode));
+    && (value.mode === "json" || isRedactedSecret(value.mode))
+    && (value.allowInsecurePath === undefined || value.allowInsecurePath === true || isRedactedSecret(value.allowInsecurePath));
 }
 
 function isCommercialModelReadback(value: unknown): value is CommercialProviderModel[] {
@@ -495,7 +496,12 @@ export function createOpenClawProviderConfigBackend(rpc: OpenClawConfigRpc): Ope
       const next = structuredClone(before.config);
       const secrets = isObject(next.secrets) ? next.secrets : (next.secrets = {});
       const secretProviders = isObject(secrets.providers) ? secrets.providers : (secrets.providers = {});
-      secretProviders.uclaw_commercial = { source: "file", path: input.credentialPath, mode: "json" };
+      secretProviders.uclaw_commercial = {
+        source: "file",
+        path: input.credentialPath,
+        mode: "json",
+        allowInsecurePath: true,
+      };
       const models = isObject(next.models) ? next.models : (next.models = {});
       models.mode = "merge";
       const providers = isObject(models.providers) ? models.providers : (models.providers = {});

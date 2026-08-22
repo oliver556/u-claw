@@ -77,6 +77,7 @@ describe("OpenClaw provider config backend", () => {
         source: "file",
         path: "/portable/data/.uclaw/builtin-model-credential.v1.json",
         mode: "json",
+        allowInsecurePath: true,
       } } },
       models: { mode: "merge", providers: { "uclaw-commercial": {
         baseUrl: "https://commercial.example.test/model-api/v1",
