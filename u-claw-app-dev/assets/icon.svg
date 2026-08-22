@@ -1,12 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1a1a2e"/>
-      <stop offset="100%" style="stop-color:#0a0a1a"/>
+      <stop offset="0%" style="stop-color:#f7fbff"/>
+      <stop offset="100%" style="stop-color:#e6f4ff"/>
     </linearGradient>
     <linearGradient id="claw" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#ff8f65"/>
-      <stop offset="100%" style="stop-color:#ff6b35"/>
+      <stop offset="0%" style="stop-color:#69b1ff"/>
+      <stop offset="58%" style="stop-color:#1677ff"/>
+      <stop offset="100%" style="stop-color:#0958d9"/>
     </linearGradient>
     <filter id="glow">
       <feGaussianBlur stdDeviation="8" result="blur"/>
@@ -18,8 +19,8 @@
   <rect width="1024" height="1024" rx="200" fill="url(#bg)"/>
 
   <!-- Outer ring -->
-  <circle cx="512" cy="512" r="420" fill="none" stroke="#ff6b35" stroke-width="6" opacity="0.15"/>
-  <circle cx="512" cy="512" r="380" fill="none" stroke="#ff6b35" stroke-width="3" opacity="0.1"/>
+  <circle cx="512" cy="512" r="420" fill="none" stroke="#1677ff" stroke-width="6" opacity="0.16"/>
+  <circle cx="512" cy="512" r="380" fill="none" stroke="#69b1ff" stroke-width="3" opacity="0.18"/>
 
   <!-- Lobster/Claw body -->
   <g filter="url(#glow)">
@@ -29,11 +30,11 @@
 
     <!-- Left pincer -->
     <path d="M320 380 C280 300, 220 320, 240 380 C260 440, 310 420, 340 400Z"
-          fill="#ff8f65" opacity="0.8"/>
+          fill="#69b1ff" opacity="0.88"/>
 
     <!-- Right pincer -->
     <path d="M704 380 C744 300, 804 320, 784 380 C764 440, 714 420, 684 400Z"
-          fill="#ff8f65" opacity="0.8"/>
+          fill="#69b1ff" opacity="0.88"/>
   </g>
 
   <!-- U letter -->
@@ -43,12 +44,12 @@
   <!-- Eyes -->
   <circle cx="430" cy="360" r="24" fill="#ffffff"/>
   <circle cx="594" cy="360" r="24" fill="#ffffff"/>
-  <circle cx="435" cy="355" r="10" fill="#1a1a2e"/>
-  <circle cx="599" cy="355" r="10" fill="#1a1a2e"/>
+  <circle cx="435" cy="355" r="10" fill="#10162b"/>
+  <circle cx="599" cy="355" r="10" fill="#10162b"/>
 
   <!-- Antennae -->
-  <path d="M430 320 C420 260, 360 220, 320 200" fill="none" stroke="#ff8f65" stroke-width="8" stroke-linecap="round" opacity="0.7"/>
-  <path d="M594 320 C604 260, 664 220, 704 200" fill="none" stroke="#ff8f65" stroke-width="8" stroke-linecap="round" opacity="0.7"/>
-  <circle cx="316" cy="196" r="12" fill="#ff6b35" opacity="0.8"/>
-  <circle cx="708" cy="196" r="12" fill="#ff6b35" opacity="0.8"/>
+  <path d="M430 320 C420 260, 360 220, 320 200" fill="none" stroke="#69b1ff" stroke-width="8" stroke-linecap="round" opacity="0.78"/>
+  <path d="M594 320 C604 260, 664 220, 704 200" fill="none" stroke="#69b1ff" stroke-width="8" stroke-linecap="round" opacity="0.78"/>
+  <circle cx="316" cy="196" r="12" fill="#1677ff" opacity="0.84"/>
+  <circle cx="708" cy="196" r="12" fill="#1677ff" opacity="0.84"/>
 </svg>
