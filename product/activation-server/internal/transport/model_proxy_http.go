@@ -723,6 +723,9 @@ func validChatUsage(raw json.RawMessage) bool {
 		if !ok {
 			continue
 		}
+		if string(details) == "null" {
+			continue
+		}
 		var values map[string]int64
 		if json.Unmarshal(details, &values) != nil || values == nil {
 			return false
