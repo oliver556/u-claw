@@ -1,0 +1,133 @@
+{
+  "name": "u-claw",
+  "version": "2.1.17",
+  "description": "U-Claw - AI 助手桌面版，插上 U 盘就能用",
+  "main": "src/main.js",
+  "author": "U-Claw <hello@u-claw.org> (https://u-claw.org)",
+  "license": "MIT",
+  "homepage": "https://u-claw.org",
+  "scripts": {
+    "sync-lib": "node scripts/sync-lib.js",
+    "patch-openclaw": "node scripts/patch-openclaw.js",
+    "start": "npm run patch-openclaw && npm run sync-lib && electron .",
+    "dev": "npm run patch-openclaw && npm run sync-lib && electron . --dev",
+    "build:mac": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac",
+    "build:mac-arm64": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac --arm64",
+    "build:mac-x64": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac --x64",
+    "build:win": "npm run patch-openclaw && npm run sync-lib && electron-builder --win",
+    "build:all": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac --win",
+    "postinstall": "electron-builder install-app-deps && npm run patch-openclaw"
+  },
+  "build": {
+    "appId": "org.u-claw.desktop",
+    "productName": "U-Claw",
+    "copyright": "Copyright © 2026 U-Claw",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*",
+      "!node_modules/**/*.md",
+      "node_modules/openclaw/**/*.md",
+      "node_modules/openclaw/skills/**/*",
+      "node_modules/openclaw/dist/extensions/**/skills/**/*",
+      "node_modules/openclaw/src/agents/templates/**/*",
+      "node_modules/openclaw/docs/reference/templates/**/*",
+      "!node_modules/**/CHANGELOG*",
+      "!node_modules/**/test/**",
+      "!node_modules/**/tests/**",
+      "!node_modules/**/.cache"
+    ],
+    "asar": false,
+    "extraResources": [
+      {
+        "from": "resources/Config.html",
+        "to": "resources/Config.html"
+      },
+      {
+        "from": "resources/context",
+        "to": "resources/context"
+      },
+      {
+        "from": "resources/runtime",
+        "to": "resources/runtime"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns",
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "U-Claw",
+      "icon": "assets/icon.icns",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "U-Claw"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Development"
+    }
+  },
+  "dependencies": {
+    "openclaw": "2026.7.1-2"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0"
+  }
+}
