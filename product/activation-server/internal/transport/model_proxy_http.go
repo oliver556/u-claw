@@ -745,14 +745,19 @@ func validUsageLabel(raw json.RawMessage) bool {
 }
 
 func validChatResponseMessage(message map[string]json.RawMessage) bool {
-	if !hasAllowedKeys(message, []string{"role", "content"}, "tool_calls", "reasoning_content") {
+	if !hasAllowedKeys(message, []string{"role"}, "content", "tool_calls", "reasoning_content") {
 		return false
 	}
 	var role string
 	if json.Unmarshal(message["role"], &role) != nil || role != "assistant" {
 		return false
 	}
-	if string(message["content"]) != "null" {
+	content, hasContent := message["content"]
+	toolCalls, hasToolCalls := message["tool_calls"]
+	if !hasContent && !hasToolCalls {
+		return false
+	}
+	if hasContent && string(content) != "null" {
 		var content string
 		if json.Unmarshal(message["content"], &content) != nil {
 			return false
@@ -764,7 +769,7 @@ func validChatResponseMessage(message map[string]json.RawMessage) bool {
 			return false
 		}
 	}
-	if raw, ok := message["tool_calls"]; ok && !validToolCalls(raw) {
+	if hasToolCalls && !validToolCalls(toolCalls) {
 		return false
 	}
 	return true
