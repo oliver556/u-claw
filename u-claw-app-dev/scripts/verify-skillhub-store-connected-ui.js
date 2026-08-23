@@ -490,7 +490,7 @@ async function fillSkillHubSearch(page, query) {
     page,
     `
       const inputs = allNodes().filter((node) => node instanceof HTMLInputElement);
-      const input = inputs.find((node) => /SkillHub|skills/i.test(node.placeholder || node.getAttribute("aria-label") || ""));
+      const input = inputs.find((node) => /技能商店|技能|SkillHub|skills/i.test(node.placeholder || node.getAttribute("aria-label") || ""));
       if (!input) return false;
       input.focus();
       input.value = value;
@@ -585,6 +585,66 @@ async function installSkillInstallRequestProbe(page) {
 }
 
 /**
+ * Installs a browser-side probe that intercepts SkillHub uninstall requests.
+ */
+async function installSkillUninstallRequestProbe(page) {
+  const installed = await evaluateInDom(
+    page,
+    `
+      globalThis.__uclawSkillHubUninstallRequests ??= [];
+      const host = allNodes().find((node) => node instanceof HTMLElement && node.tagName.toLowerCase() === "openclaw-skills-page");
+      const client = host?.client;
+      if (!client || typeof client.request !== "function") return false;
+      if (client.__uclawSkillHubUninstallProbe === true) return true;
+      const original = client.request.bind(client);
+      client.request = async (method, params, ...rest) => {
+        if (method === "skills.uninstall") {
+          globalThis.__uclawSkillHubUninstallRequests.push({ params, ts: Date.now() });
+          return { ok: true, skillKey: params?.skillKey || null, targetDir: "/tmp/skillhub-uninstall-probe" };
+        }
+        return original(method, params, ...rest);
+      };
+      client.__uclawSkillHubUninstallProbe = true;
+      return true;
+    `,
+  );
+
+  if (!installed) {
+    throw new Error("Could not install SkillHub skills.uninstall request probe");
+  }
+}
+
+/**
+ * Installs a browser-side probe that fails legacy ClawHub detail requests.
+ */
+async function installSkillDetailFailureProbe(page) {
+  const installed = await evaluateInDom(
+    page,
+    `
+      globalThis.__uclawSkillHubDetailRequests ??= [];
+      const host = allNodes().find((node) => node instanceof HTMLElement && node.tagName.toLowerCase() === "openclaw-skills-page");
+      const client = host?.client;
+      if (!client || typeof client.request !== "function") return false;
+      if (client.__uclawSkillHubDetailFailureProbe === true) return true;
+      const original = client.request.bind(client);
+      client.request = async (method, params, ...rest) => {
+        if (method === "skills.detail") {
+          globalThis.__uclawSkillHubDetailRequests.push({ params, ts: Date.now() });
+          throw new Error(\`ClawHub /api/v1/skills/\${params?.slug || ""} failed (404): Skill not found\`);
+        }
+        return original(method, params, ...rest);
+      };
+      client.__uclawSkillHubDetailFailureProbe = true;
+      return true;
+    `,
+  );
+
+  if (!installed) {
+    throw new Error("Could not install SkillHub skills.detail failure probe");
+  }
+}
+
+/**
  * Delays the next intercepted SkillHub search so loading UI is observable.
  */
 async function delayNextSkillHubSearch(page) {
@@ -612,6 +672,13 @@ async function getLastSkillSearchRequest(page) {
  */
 async function getSkillInstallRequestCount(page) {
   return page.evaluate(() => globalThis.__uclawSkillHubInstallRequests?.length ?? 0);
+}
+
+/**
+ * Reads intercepted SkillHub uninstall request count.
+ */
+async function getSkillUninstallRequestCount(page) {
+  return page.evaluate(() => globalThis.__uclawSkillHubUninstallRequests?.length ?? 0);
 }
 
 /**
@@ -779,6 +846,76 @@ async function clickFirstSkillHubInstallButton(page) {
 }
 
 /**
+ * Opens the first visible remote SkillHub dense row without hitting its action button.
+ */
+async function clickFirstSkillHubDetailRow(page) {
+  const row = page.locator(".skillhub-dense-row", { has: page.locator("[data-skillhub-install-button='true']") }).first();
+  if ((await row.count()) === 0) {
+    throw new Error("No visible remote SkillHub dense row found");
+  }
+  await row.scrollIntoViewIfNeeded();
+  await row.click({ position: { x: 24, y: 24 } });
+}
+
+/**
+ * Closes the currently visible SkillHub detail dialog.
+ */
+async function closeSkillHubDetailDialog(page) {
+  const clicked = await evaluateInDom(
+    page,
+    `
+      const dialogs = allNodes().filter((node) => node instanceof HTMLDialogElement && node.open);
+      const dialog = dialogs.at(-1);
+      const button = [...allNodes()].find((node) => {
+        if (!(node instanceof HTMLButtonElement)) return false;
+        const rect = node.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        return (node.innerText || node.textContent || "").trim().includes("关闭");
+      }) || (dialog ? [...dialog.querySelectorAll("button")].find((node) => (node.innerText || node.textContent || "").trim().includes("关闭")) : null);
+      if (!button && dialog) {
+        dialog.close();
+        return true;
+      }
+      if (!button) return false;
+      button.click();
+      return true;
+    `,
+  );
+
+  return clicked;
+}
+
+/**
+ * Clicks the first visible SkillHub dense-row uninstall button.
+ */
+async function clickFirstSkillHubUninstallButton(page) {
+  const rect = await evaluateInDom(
+    page,
+    `
+      const buttons = allNodes().filter((node) => node instanceof HTMLButtonElement);
+      for (const button of buttons) {
+        const rect = button.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0 || button.disabled) continue;
+        if ((button.innerText || button.textContent || "").trim() !== "卸载") continue;
+        button.scrollIntoView({ block: "center", inline: "center" });
+        const visibleRect = button.getBoundingClientRect();
+        if (visibleRect.bottom < 0 || visibleRect.top > window.innerHeight || visibleRect.right < 0 || visibleRect.left > window.innerWidth) continue;
+        const x = visibleRect.left + visibleRect.width / 2;
+        const y = visibleRect.top + visibleRect.height / 2;
+        return { x, y, text: (button.innerText || button.textContent || "").trim() };
+      }
+      return null;
+    `,
+  );
+
+  if (!rect) {
+    throw new Error("No visible enabled SkillHub uninstall button found");
+  }
+
+  await page.mouse.click(rect.x, rect.y);
+}
+
+/**
  * Runs read-only store acceptance against a real Gateway dashboard.
  */
 async function runAcceptance(options) {
@@ -864,6 +1001,40 @@ async function runAcceptance(options) {
       throw new Error(`SkillHub page summary missing total: ${JSON.stringify(denseState.pageSummary)}`);
     }
 
+    stage = "detail-fallback";
+    const simulated = await evaluateInDom(
+      page,
+      `
+        const host = document.querySelector("openclaw-skills-page");
+        const item = host?.skillHubHomeResults?.find((skill) => skill?.install?.reference || skill?.id || skill?.slug);
+        if (!host || !item) return false;
+        host.clawhubDetailSlug = item.install?.reference || item.id || item.slug;
+        host.clawhubDetail = null;
+        host.clawhubDetailLoading = false;
+        host.clawhubDetailError = "ClawHub /api/v1/skills/" + (item.slug || "") + " failed (404): Skill not found";
+        host.requestUpdate?.();
+        return true;
+      `,
+    );
+    if (!simulated) {
+      throw new Error("Could not simulate SkillHub detail 404 fallback state");
+    }
+    await page.waitForFunction(
+      () => {
+        const host = document.querySelector("openclaw-skills-page");
+        return host?.clawhubDetailLoading === false && Boolean(host?.clawhubDetailSlug);
+      },
+      null,
+      { timeout: 15000 },
+    );
+    await waitForText(page, "安装来源", 15000);
+    const detailText = await getVisibleText(page);
+    if (/Skill not found|404|技能商店搜索失败/.test(detailText)) {
+      throw new Error(`SkillHub cached detail fallback leaked legacy detail error: ${JSON.stringify(detailText.slice(-800))}`);
+    }
+    await page.keyboard.press("Escape").catch(() => undefined);
+    await closeSkillHubDetailDialog(page);
+
     stage = "install-click";
     await installSkillInstallRequestProbe(page);
     const installCountBefore = await getSkillInstallRequestCount(page);
@@ -939,6 +1110,19 @@ async function runAcceptance(options) {
     stage = "primary-tabs";
     await clickButtonText(page, "全部");
     await waitForText(page, "筛选已安装技能", 10000);
+    await waitForText(page, "卸载", 10000);
+    await installSkillUninstallRequestProbe(page);
+    const uninstallCountBefore = await getSkillUninstallRequestCount(page);
+    await clickFirstSkillHubUninstallButton(page);
+    await page.waitForFunction(
+      (count) => (globalThis.__uclawSkillHubUninstallRequests?.length ?? 0) > count,
+      uninstallCountBefore,
+      { timeout: 15000 },
+    );
+    const uninstallRequest = await page.evaluate(() => globalThis.__uclawSkillHubUninstallRequests?.at(-1) ?? null);
+    if (!uninstallRequest?.params?.skillKey) {
+      throw new Error(`SkillHub uninstall request missing skillKey: ${JSON.stringify(uninstallRequest)}`);
+    }
     await clickButtonText(page, "可用");
     await waitForText(page, "筛选已安装技能", 10000);
     await clickButtonText(page, "需配置");
@@ -975,6 +1159,7 @@ async function runAcceptance(options) {
             clickTarget: globalThis.__uclawSkillHubClickTarget || null,
             clickEvents: globalThis.__uclawSkillHubClickEvents?.slice(-5) || [],
             installRequests: globalThis.__uclawSkillHubInstallRequests || [],
+            uninstallRequests: globalThis.__uclawSkillHubUninstallRequests || [],
             searchRequests: globalThis.__uclawSkillHubSearchRequests?.length || 0,
             hostState: (() => {
               const host = document.querySelector("openclaw-skills-page");

@@ -2,12 +2,16 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
+const openclawDistDir = path.join(root, "node_modules", "openclaw", "dist");
 const controlUiDir = path.join(root, "node_modules", "openclaw", "dist", "control-ui");
 const assetsDir = path.join(controlUiDir, "assets");
 const swPath = path.join(controlUiDir, "sw.js");
 const indexHtmlPath = path.join(controlUiDir, "index.html");
 const manifestPath = path.join(controlUiDir, "manifest.webmanifest");
 const controlUiGatewayPath = path.join(root, "node_modules", "openclaw", "dist", "control-ui-CuoxgbYo.js");
+const skillsGatewayPath = path.join(openclawDistDir, "skills-ieKSTXPw.js");
+const serverMethodsPath = path.join(openclawDistDir, "server-methods-NpEcZnvp.js");
+const coreDescriptorsPath = path.join(openclawDistDir, "core-descriptors-DRUtdasO.js");
 const officialIconSvgPath = path.join(root, "assets", "icon.svg");
 const officialIconPngPath = path.join(root, "assets", "icon.png");
 const officialIconIcoPath = path.join(root, "assets", "icon.ico");
@@ -51,6 +55,126 @@ function patchControlUiBrandAssets() {
     if (copyFileIfChanged(source, target)) {
       console.log(`patched ${path.relative(root, target)}`);
     }
+  }
+}
+
+/**
+ * Adds the minimal OpenClaw Gateway method needed by the installed-skill uninstall UI.
+ */
+function patchSkillsUninstallGateway() {
+  const uninstallFunction = [
+    "/**",
+    " * Removes one installed skill and clears its ClawHub tracking record when present.",
+    " */",
+    "async function uninstallWorkspaceSkill(params) {",
+    "\tconst status = buildWorkspaceSkillStatus(params.workspaceDir, {",
+    "\t\tconfig: params.config,",
+    "\t\tagentId: params.agentId",
+    "\t});",
+    "\tconst skill = status.skills.find((candidate) => candidate.skillKey === params.skillKey || candidate.name === params.skillKey);",
+    "\tif (!skill) return {",
+    "\t\tok: false,",
+    "\t\terror: `Skill not found: ${params.skillKey}`,",
+    "\t\terrorKind: \"invalid-request\"",
+    "\t};",
+    "\tif (skill.bundled || skill.source === \"openclaw-bundled\") return {",
+    "\t\tok: false,",
+    "\t\terror: `Bundled skill cannot be uninstalled: ${skill.skillKey}`,",
+    "\t\terrorKind: \"invalid-request\"",
+    "\t};",
+    "\tawait fs.rm(skill.baseDir, { recursive: true, force: true });",
+    "\tif (skill.clawhub) await untrackClawHubSkill(params.workspaceDir, skill.skillKey);",
+    "\treturn {",
+    "\t\tok: true,",
+    "\t\tskillKey: skill.skillKey,",
+    "\t\ttargetDir: skill.baseDir,",
+    "\t\t...skill.clawhub ? { tracked: true } : {}",
+    "\t};",
+    "}",
+  ].join("\n");
+  const uninstallHandler = [
+    "\t\"skills.uninstall\": async ({ params, respond, context }) => {",
+    "\t\tif (!params || typeof params !== \"object\") {",
+    "\t\t\trespond(false, void 0, errorShape(ErrorCodes.INVALID_REQUEST, \"skills.uninstall requires a skillKey\"));",
+    "\t\t\treturn;",
+    "\t\t}",
+    "\t\tconst skillKey = typeof params.skillKey === \"string\" ? params.skillKey.trim() : \"\";",
+    "\t\tif (!skillKey) {",
+    "\t\t\trespond(false, void 0, errorShape(ErrorCodes.INVALID_REQUEST, \"skills.uninstall requires a skillKey\"));",
+    "\t\t\treturn;",
+    "\t\t}",
+    "\t\tconst resolved = resolveSkillsAgentWorkspace(params, context);",
+    "\t\tif (!resolved.ok) {",
+    "\t\t\trespond(false, void 0, resolved.error);",
+    "\t\t\treturn;",
+    "\t\t}",
+    "\t\ttry {",
+    "\t\t\tconst result = await uninstallWorkspaceSkill({",
+    "\t\t\t\tworkspaceDir: resolved.workspaceDir,",
+    "\t\t\t\tskillKey,",
+    "\t\t\t\tconfig: resolved.cfg,",
+    "\t\t\t\tagentId: resolved.agentId",
+    "\t\t\t});",
+    "\t\t\trespond(result.ok, result, result.ok ? void 0 : errorShape(ErrorCodes.INVALID_REQUEST, result.error));",
+    "\t\t} catch (err) {",
+    "\t\t\trespond(false, void 0, errorShape(ErrorCodes.UNAVAILABLE, formatErrorMessage(err)));",
+    "\t\t}",
+    "\t},",
+  ].join("\n");
+
+  const skillsBefore = read(skillsGatewayPath);
+  let skillsAfter = skillsBefore;
+  if (!skillsAfter.includes("l as untrackClawHubSkill")) {
+    skillsAfter = skillsAfter.replace(
+      "i as readLocalSkillCardContentSync, p as validateRequestedSkillSlug",
+      "i as readLocalSkillCardContentSync, l as untrackClawHubSkill, p as validateRequestedSkillSlug",
+    );
+  }
+  if (!skillsAfter.includes("async function uninstallWorkspaceSkill(params)")) {
+    skillsAfter = skillsAfter.replace(
+      "//#endregion\n//#region src/skills/discovery/bins.ts",
+      `${uninstallFunction}\n//#endregion\n//#region src/skills/discovery/bins.ts`,
+    );
+  }
+  if (!skillsAfter.includes("\"skills.uninstall\": async")) {
+    skillsAfter = skillsAfter.replace("\t\"skills.update\": async ({ params, respond, context }) => {", `${uninstallHandler}\n\t\"skills.update\": async ({ params, respond, context }) => {`);
+  }
+  if (
+    !skillsAfter.includes("l as untrackClawHubSkill") ||
+    !skillsAfter.includes("async function uninstallWorkspaceSkill(params)") ||
+    !skillsAfter.includes("\"skills.uninstall\": async")
+  ) {
+    throw new Error(`Could not patch skills.uninstall gateway handler in ${skillsGatewayPath}`);
+  }
+  if (writeIfChanged(skillsGatewayPath, skillsBefore, skillsAfter)) {
+    console.log(`patched ${path.relative(root, skillsGatewayPath)}`);
+  }
+
+  const methodsBefore = read(serverMethodsPath);
+  let methodsAfter = methodsBefore;
+  if (!methodsAfter.includes("\"skills.uninstall\"")) {
+    methodsAfter = methodsAfter.replace("\t\t\t\"skills.install\",\n\t\t\t\"skills.update\",", "\t\t\t\"skills.install\",\n\t\t\t\"skills.uninstall\",\n\t\t\t\"skills.update\",");
+  }
+  if (!methodsAfter.includes("\"skills.uninstall\"")) {
+    throw new Error(`Could not patch skills.uninstall server method in ${serverMethodsPath}`);
+  }
+  if (writeIfChanged(serverMethodsPath, methodsBefore, methodsAfter)) {
+    console.log(`patched ${path.relative(root, serverMethodsPath)}`);
+  }
+
+  const descriptorsBefore = read(coreDescriptorsPath);
+  let descriptorsAfter = descriptorsBefore;
+  if (!descriptorsAfter.includes("name: \"skills.uninstall\"")) {
+    descriptorsAfter = descriptorsAfter.replace(
+      "\t{\n\t\tname: \"skills.install\",\n\t\tscope: \"operator.admin\"\n\t},\n\t{\n\t\tname: \"skills.update\",",
+      "\t{\n\t\tname: \"skills.install\",\n\t\tscope: \"operator.admin\"\n\t},\n\t{\n\t\tname: \"skills.uninstall\",\n\t\tscope: \"operator.admin\"\n\t},\n\t{\n\t\tname: \"skills.update\",",
+    );
+  }
+  if (!descriptorsAfter.includes("name: \"skills.uninstall\"")) {
+    throw new Error(`Could not patch skills.uninstall descriptor in ${coreDescriptorsPath}`);
+  }
+  if (writeIfChanged(coreDescriptorsPath, descriptorsBefore, descriptorsAfter)) {
+    console.log(`patched ${path.relative(root, coreDescriptorsPath)}`);
   }
 }
 
@@ -277,7 +401,7 @@ function patchServiceWorker() {
   let source = read(swPath);
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1";',
   );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
@@ -387,7 +511,8 @@ function patchConfigFormUiCopy() {
     ["label:`Hooks`", "label:`Hooks`"],
     ["description:`Webhooks and event hooks`", "description:`Webhooks 与事件 hooks`"],
     ["label:`Skills`", "label:`技能`"],
-    ["description:`Skill packs and capabilities`", "description:`SkillHub 技能包与能力`"],
+    ["description:`Skill packs and capabilities`", "description:`技能商店技能包与能力`"],
+    ["description:`SkillHub 技能包与能力`", "description:`技能商店技能包与能力`"],
     ["label:`Tools`", "label:`工具`"],
     ["description:`Tool configurations (browser, search, etc.)`", "description:`工具配置（browser、search 等）`"],
     ["label:`Gateway`", "label:`Gateway`"],
@@ -533,12 +658,79 @@ function patchIndexUiCopy() {
     ["Config hash missing; refresh and retry.", "配置版本缺失，请刷新后重试。"],
     [
       "`Review the ClawHub warning before installing this skill.`",
-      "`安装前请复核 SkillHub 风险提示。`",
+      "`安装前请复核技能商店风险提示。`",
     ],
-    ["Ye=[`overview`]", "Ye=[`overview`,`skills`]"],
+    ["Ye=[`overview`]", "Ye=[`agents`,`tasks`,`skills`,`config`]"],
+    ["Ye=[`overview`,`skills`]", "Ye=[`agents`,`tasks`,`skills`,`config`]"],
     [
       "sidebarPinnedRoutes:Xe(c.sidebarPinnedRoutes)??r.sidebarPinnedRoutes",
+      "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`config`]",
+    ],
+    [
       "sidebarPinnedRoutes:[...new Set([...(Xe(c.sidebarPinnedRoutes)??r.sidebarPinnedRoutes),`skills`])]",
+      "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`config`]",
+    ],
+    [
+      "sidebarPinnedRoutes:[...new Set([...(Xe(c.sidebarPinnedRoutes)??r.sidebarPinnedRoutes),`agents`,`tasks`,`skills`,`config`])]",
+      "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`config`]",
+    ],
+  ];
+
+  for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
+    const before = read(file);
+    let after = replacePairs(before, pairs);
+    const sidebarSessionNameHelper =
+      "function UcIsVisibleSessionAgentId(e){let t=j(e??``);return!!t&&!t.startsWith(`uclaw-expert-`)}function UcSidebarSessionName(e,t){let n=Ae(t.key,t),r=A(t.key)?.agentId;if(!r||n!==t.key)return n;let i=e.context?.agentIdentity?.get?.(r),a=w(i?.name)??w(i?.identity?.name)??``;if(!a){let t=e.context?.agents.state.agentsList?.agents?.find(e=>j(e.id)===j(r));a=w(t?.identity?.name)??w(t?.name)??``}if(!a){let e={\"uclaw-expert-copywriter\":`文案写手`,\"uclaw-expert-xiaohongshu\":`小红书写手`,\"uclaw-expert-career\":`职业顾问`,\"uclaw-expert-machine-learning\":`机器学习`,\"uclaw-expert-resume\":`简历写手`,\"uclaw-expert-startup-ideas\":`创业点子王`};a=e[j(r)]??``}return a&&a!==r?a:n}";
+    if (after.includes("function UcIsVisibleSessionAgentId(e)")) {
+      after = after.replace(
+        /function UcIsVisibleSessionAgentId\(e\)\{[\s\S]*?\}function UcSidebarSessionName\(e,t\)\{[\s\S]*?\}var F=class extends d\{/,
+        `${sidebarSessionNameHelper}var F=class extends d{`,
+      );
+    } else if (after.includes("function UcSidebarSessionName(e,t)")) {
+      after = after.replace(
+        /function UcSidebarSessionName\(e,t\)\{[\s\S]*?\}var F=class extends d\{/,
+        `${sidebarSessionNameHelper}var F=class extends d{`,
+      );
+    } else {
+      after = after.replace("var F=class extends d{", `${sidebarSessionNameHelper}var F=class extends d{`);
+    }
+    after = after.replace(
+      "label:Ae(t.key,t),meta:Br(t.updatedAt)",
+      "label:UcSidebarSessionName(this,t),meta:Br(t.updatedAt)",
+    );
+    after = after.replace(
+      "function Ar(e){let t=new Set,n=[],r=r=>{let i=j(r);t.has(i)||(t.add(i),n.push({id:i,label:jr(e,i)}))};r(Er(e,e.sessionKey)),r(e.agentsList?.defaultId??`main`);for(let t of e.agentsList?.agents??[])r(t.id);for(let t of e.sessionsResult?.sessions??[]){let e=A(t.key);e&&r(e.agentId)}return n}",
+      "function Ar(e){let t=new Set,n=[],r=r=>{let i=j(r);UcIsVisibleSessionAgentId(i)&&!t.has(i)&&(t.add(i),n.push({id:i,label:jr(e,i)}))};r(e.agentsList?.defaultId??`main`);return n.length?n:[{id:`main`,label:`main`}]}",
+    );
+    const moreStart = "renderMoreSection(){";
+    const moreEnd = "renderChatFallback(){";
+    const moreStartIndex = after.indexOf(moreStart);
+    const moreEndIndex = moreStartIndex >= 0 ? after.indexOf(moreEnd, moreStartIndex) : -1;
+    if (moreStartIndex >= 0 && moreEndIndex > moreStartIndex) {
+      after = `${after.slice(0, moreStartIndex)}renderMoreSection(){return l}${after.slice(moreEndIndex)}`;
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Projects the first-level U-Claw navigation to four user-facing capability groups.
+ */
+function patchPrimaryNavigationProjection() {
+  const pairs = [
+    [
+      "enabledRouteIds(){return Xa(this.context?.runtimeConfig.state.configSnapshot)?we:Xv}",
+      "enabledRouteIds(){return[`agents`,`tasks`,`skills`,`config`]}",
+    ],
+    [
+      "config:{titleKey:`nav.settings`,subtitleKey:`subtitles.config`}",
+      "config:{titleKey:`tabs.config`,subtitleKey:`subtitles.config`}",
+    ],
+    [
+      "function Hc(){return[{id:`nav-overview`,label:D(`overview.palette.items.overview`),icon:`barChart`,category:`navigation`,action:`nav:overview`},{id:`nav-sessions`,label:D(`overview.palette.items.sessions`),icon:`fileText`,category:`navigation`,action:`nav:sessions`},{id:`nav-cron`,label:D(`overview.palette.items.scheduled`),icon:`scrollText`,category:`navigation`,action:`nav:cron`},{id:`nav-skills`,label:D(`overview.palette.items.skills`),icon:`zap`,category:`navigation`,action:`nav:skills`},{id:`nav-config`,label:D(`overview.palette.items.settings`),icon:`settings`,category:`navigation`,action:`nav:config`},{id:`nav-agents`,label:D(`overview.palette.items.agents`),icon:`folder`,category:`navigation`,action:`nav:agents`},{id:`slash:verbose`,label:`/verbose`,icon:`terminal`,category:`search`,action:`/verbose full`,description:`Toggle verbose mode.`}]}",
+      "function Hc(){return[{id:`nav-agents`,label:`智能体`,icon:`folder`,category:`navigation`,action:`nav:agents`},{id:`nav-workflows`,label:`工作流`,icon:`scrollText`,category:`navigation`,action:`nav:tasks`},{id:`nav-skills`,label:`技能库`,icon:`zap`,category:`navigation`,action:`nav:skills`},{id:`nav-models`,label:`模型`,icon:`settings`,category:`navigation`,action:`nav:config`},{id:`slash:verbose`,label:`/verbose`,icon:`terminal`,category:`search`,action:`/verbose full`,description:`Toggle verbose mode.`}]}",
     ],
   ];
 
@@ -617,12 +809,32 @@ function patchI18nUiCopy() {
     ["save:`Save`", "save:`保存`"],
     ["saving:`Saving…`", "saving:`保存中…`"],
     ["saveAndPublish:`Save & Publish`", "saveAndPublish:`保存并发布`"],
-    ["skills:`Skills`", "skills:`SkillHub`"],
-    ["skills:`技能`", "skills:`SkillHub`"],
-    ["skillWorkshop:`Skill Workshop`", "skillWorkshop:`SkillHub 工坊`"],
-    ["skillWorkshop:`技能工坊`", "skillWorkshop:`SkillHub 工坊`"],
-    ["skills:`Skills and API keys.`", "skills:`SkillHub store, installs, and local skill management.`"],
-    ["skills:`技能和 API 密钥。`", "skills:`SkillHub 商店、安装与本地技能管理。`"],
+    ["agents:`Agents`", "agents:`智能体`"],
+    ["agents:`代理`", "agents:`智能体`"],
+    ["tasks:`Tasks`", "tasks:`工作流`"],
+    ["tasks:`任务`", "tasks:`工作流`"],
+    ["config:`Config`", "config:`模型`"],
+    ["config:`配置`", "config:`模型`"],
+    ["skills:`Skills`", "skills:`技能库`"],
+    ["skills:`技能`", "skills:`技能库`"],
+    ["skills:`SkillHub`", "skills:`技能库`"],
+    ["skills:`技能商店`", "skills:`技能库`"],
+    ["skillWorkshop:`Skill Workshop`", "skillWorkshop:`技能商店工坊`"],
+    ["skillWorkshop:`技能工坊`", "skillWorkshop:`技能商店工坊`"],
+    ["skillWorkshop:`SkillHub 工坊`", "skillWorkshop:`技能商店工坊`"],
+    ["skillsFilter:`SkillHub 筛选`", "skillsFilter:`技能商店筛选`"],
+    ["agents:`Workspace, tools, and identity.`", "agents:`专家、会话与身份。`"],
+    ["agents:`工作区、工具与身份。`", "agents:`专家、会话与身份。`"],
+    ["agents:`工作区、工具、身份。`", "agents:`专家、会话与身份。`"],
+    ["tasks:`Background jobs: subagents, cron runs, and CLI.`", "tasks:`自动任务、子智能体与运行记录。`"],
+    ["tasks:`后台任务：子智能体、定时运行与 CLI。`", "tasks:`自动任务、子智能体与运行记录。`"],
+    ["config:`Edit openclaw.json.`", "config:`模型、供应商与默认参数。`"],
+    ["config:`编辑 openclaw.json。`", "config:`模型、供应商与默认参数。`"],
+    ["skills:`Skills and API keys.`", "skills:`技能库、安装与本地技能管理。`"],
+    ["skills:`技能和 API 密钥。`", "skills:`技能库、安装与本地技能管理。`"],
+    ["skills:`SkillHub 商店、安装与本地技能管理。`", "skills:`技能库、安装与本地技能管理。`"],
+    ["skills:`SkillHub store, installs, and local skill management.`", "skills:`技能库、安装与本地技能管理。`"],
+    ["skills:`技能商店、安装与本地技能管理。`", "skills:`技能库、安装与本地技能管理。`"],
     ["importing:`Importing…`", "importing:`导入中…`"],
     ["importFromRelays:`Import from Relays`", "importFromRelays:`从 relays 导入`"],
     ["showAdvanced:`Show Advanced`", "showAdvanced:`显示高级项`"],
@@ -1208,7 +1420,8 @@ function patchSecondaryPagesInlineUiCopy() {
  */
 function patchTertiaryPagesI18nUiCopy() {
   const pairs = [
-    ["subtitles:{agents:`工作区、工具与身份。`,activity:`浏览器本地工具活动摘要。`,overview:`状态、入口与健康度。`,workboard:`Agent 工作队列与会话交接。`,worktrees:`隔离 Agent 任务 checkout 与恢复快照。`,channels:`渠道与设置。`,instances:`已连接客户端与节点。`,sessions:`活跃会话与默认项。`,usage:`API 用量与成本。`,cron:`唤醒与周期运行。`,tasks:`后台任务：子智能体、定时运行与 CLI。`,skills:`SkillHub store, installs, and local skill management.`", "subtitles:{agents:`工作区、工具与身份。`,activity:`浏览器本地工具活动摘要。`,overview:`状态、入口与健康度。`,workboard:`Agent 工作队列与会话交接。`,worktrees:`隔离 Agent 任务 checkout 与恢复快照。`,channels:`渠道与设置。`,instances:`已连接客户端与节点。`,sessions:`活跃会话与默认项。`,usage:`API 用量与成本。`,cron:`唤醒与周期运行。`,tasks:`后台任务：子智能体、定时运行与 CLI。`,skills:`SkillHub 商店、安装与本地技能管理。`"],
+    ["subtitles:{agents:`工作区、工具与身份。`,activity:`浏览器本地工具活动摘要。`,overview:`状态、入口与健康度。`,workboard:`Agent 工作队列与会话交接。`,worktrees:`隔离 Agent 任务 checkout 与恢复快照。`,channels:`渠道与设置。`,instances:`已连接客户端与节点。`,sessions:`活跃会话与默认项。`,usage:`API 用量与成本。`,cron:`唤醒与周期运行。`,tasks:`后台任务：子智能体、定时运行与 CLI。`,skills:`SkillHub 商店、安装与本地技能管理。`", "subtitles:{agents:`工作区、工具与身份。`,activity:`浏览器本地工具活动摘要。`,overview:`状态、入口与健康度。`,workboard:`Agent 工作队列与会话交接。`,worktrees:`隔离 Agent 任务 checkout 与恢复快照。`,channels:`渠道与设置。`,instances:`已连接客户端与节点。`,sessions:`活跃会话与默认项。`,usage:`API 用量与成本。`,cron:`唤醒与周期运行。`,tasks:`后台任务：子智能体、定时运行与 CLI。`,skills:`技能商店、安装与本地技能管理。`"],
+    ["subtitles:{agents:`工作区、工具与身份。`,activity:`浏览器本地工具活动摘要。`,overview:`状态、入口与健康度。`,workboard:`Agent 工作队列与会话交接。`,worktrees:`隔离 Agent 任务 checkout 与恢复快照。`,channels:`渠道与设置。`,instances:`已连接客户端与节点。`,sessions:`活跃会话与默认项。`,usage:`API 用量与成本。`,cron:`唤醒与周期运行。`,tasks:`后台任务：子智能体、定时运行与 CLI。`,skills:`技能和 API 密钥。`", "subtitles:{agents:`工作区、工具与身份。`,activity:`浏览器本地工具活动摘要。`,overview:`状态、入口与健康度。`,workboard:`Agent 工作队列与会话交接。`,worktrees:`隔离 Agent 任务 checkout 与恢复快照。`,channels:`渠道与设置。`,instances:`已连接客户端与节点。`,sessions:`活跃会话与默认项。`,usage:`API 用量与成本。`,cron:`唤醒与周期运行。`,tasks:`后台任务：子智能体、定时运行与 CLI。`,skills:`技能商店、安装与本地技能管理。`"],
     ["mcp:`MCP servers, auth, tools, and diagnostics.`", "mcp:`MCP servers、认证、工具与诊断。`"],
     ["debug:{snapshotsTitle:`Snapshots`", "debug:{snapshotsTitle:`快照`"],
     ["snapshotsSubtitle:`Status, health, and heartbeat data.`", "snapshotsSubtitle:`状态、健康度与心跳数据。`"],
@@ -1550,16 +1763,16 @@ function patchSkillWorkshopPageUiCopy() {
     ["title:`No proposals here`", "title:`这里暂无提案`"],
     [
       "body:`Skill Workshop proposals will appear here when your agent drafts them.`",
-      "body:`Agent 起草 SkillHub 工坊提案后会出现在这里。`",
+      "body:`Agent 起草技能商店工坊提案后会出现在这里。`",
     ],
-    ['aria-label="No Skill Workshop proposals"', 'aria-label="暂无 SkillHub 工坊提案"'],
-    ['<p class="sw-empty-state__eyebrow">Skill Workshop</p>', '<p class="sw-empty-state__eyebrow">SkillHub 工坊</p>'],
+    ['aria-label="No Skill Workshop proposals"', 'aria-label="暂无技能商店工坊提案"'],
+    ['<p class="sw-empty-state__eyebrow">Skill Workshop</p>', '<p class="sw-empty-state__eyebrow">技能商店工坊</p>'],
     ["<h2>No proposals yet</h2>", "<h2>暂无提案</h2>"],
     [
       "<p>${G(e,`Your agent`)} hasn't drafted any skill proposals.</p>",
-      "<p>当前 Agent 尚未起草任何 SkillHub 提案。</p>",
+      "<p>当前 Agent 尚未起草任何 技能商店提案。</p>",
     ],
-    ["<p>${G(e,`你的 Agent`)} 尚未起草任何 SkillHub 提案。</p>", "<p>当前 Agent 尚未起草任何 SkillHub 提案。</p>"],
+    ["<p>${G(e,`你的 Agent`)} 尚未起草任何 技能商店提案。</p>", "<p>当前 Agent 尚未起草任何 技能商店提案。</p>"],
     [
       '<div class="sw-empty-state__footer">New proposals will appear here for review.</div>',
       '<div class="sw-empty-state__footer">新提案会出现在这里等待复核。</div>',
@@ -1577,20 +1790,29 @@ function patchSkillWorkshopPageUiCopy() {
     ["`Loading proposals…`", "`正在加载提案…`"],
     ["`No proposals match the current filter.`", "`没有提案符合当前筛选。`"],
     ["`No ${k[e.statusFilter].toLowerCase()} proposals.`", "`暂无${k[e.statusFilter]}提案。`"],
-    ["`Skill Workshop is not ready.`", "`SkillHub 工坊尚未就绪。`"],
+    ["`Skill Workshop is not ready.`", "`技能商店工坊尚未就绪。`"],
     [
       "`Could not prepare a Skill Workshop session.`",
-      "`无法准备 SkillHub 工坊会话。`",
+      "`无法准备技能商店工坊会话。`",
     ],
     [
       "label:`Skill Workshop: ${n.slug||n.key}`.slice(0,80)",
+      "label:`技能商店工坊：${n.slug||n.key}`.slice(0,80)",
+    ],
+    [
       "label:`SkillHub 工坊：${n.slug||n.key}`.slice(0,80)",
+      "label:`技能商店工坊：${n.slug||n.key}`.slice(0,80)",
     ],
   ];
 
   for (const file of listAssetFiles(/^skill-workshop-page-.*\.js$/, "skill-workshop-page")) {
     const before = read(file);
-    const after = replacePairs(before, pairs);
+    const after = replacePairs(before, pairs)
+      .replaceAll("Agent 起草 SkillHub 工坊提案后会出现在这里。", "Agent 起草技能商店工坊提案后会出现在这里。")
+      .replaceAll("暂无 SkillHub 工坊提案", "暂无技能商店工坊提案")
+      .replaceAll("SkillHub 工坊", "技能商店工坊")
+      .replaceAll("当前 Agent 尚未起草任何 SkillHub 提案。", "当前 Agent 尚未起草任何技能商店提案。")
+      .replaceAll("无法准备 SkillHub 工坊会话。", "无法准备技能商店工坊会话。");
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -1610,14 +1832,14 @@ function patchDeepAgentsChatI18nUiCopy() {
     ["setDefaultTitle:`Set as the default agent`", "setDefaultTitle:`设为默认 Agent`"],
     ["selectTitle:`Select an agent`", "selectTitle:`选择 Agent`"],
     ["selectSubtitle:`Pick an agent to inspect its workspace and tools.`", "selectSubtitle:`选择 Agent 以查看工作区与工具。`"],
-    ["tabs:{overview:`概览`,files:`Files`,tools:`Tools`,skills:`SkillHub`,channels:`渠道`,cronJobs:`Cron Jobs`}", "tabs:{overview:`概览`,files:`文件`,tools:`工具`,skills:`SkillHub`,channels:`渠道`,cronJobs:`定时任务`}"],
+    ["tabs:{overview:`概览`,files:`Files`,tools:`Tools`,skills:`技能商店`,channels:`渠道`,cronJobs:`Cron Jobs`}", "tabs:{overview:`概览`,files:`文件`,tools:`工具`,skills:`技能商店`,channels:`渠道`,cronJobs:`定时任务`}"],
     ["context:{title:`Agent Context`", "context:{title:`Agent 上下文`"],
     ["openFilesTab:`Open Files tab`", "openFilesTab:`打开文件 tab`"],
     ["primaryModel:`Primary Model`", "primaryModel:`主模型`"],
     ["thinkingDefault:`Thinking Default`", "thinkingDefault:`Thinking 默认值`"],
     ["identityName:`Identity Name`", "identityName:`身份名称`"],
     ["identityAvatar:`Identity Avatar`", "identityAvatar:`身份头像`"],
-    ["skillsFilter:`Skills Filter`", "skillsFilter:`SkillHub 筛选`"],
+    ["skillsFilter:`Skills Filter`", "skillsFilter:`技能商店筛选`"],
     ["configurationSubtitle:`Workspace, identity, and model configuration.`", "configurationSubtitle:`工作区、身份与模型配置。`"],
     ["schedulingSubtitle:`Workspace and scheduling targets.`", "schedulingSubtitle:`工作区与定时任务目标。`"],
     ["channels:{title:`Channels`", "channels:{title:`渠道`"],
@@ -2027,11 +2249,13 @@ function listSkillsPageAssets() {
 function patchSkillsPageBranding() {
   for (const file of listSkillsPageAssets()) {
     const before = read(file);
-    const after = before
-      .replaceAll(">ClawHub<", ">SkillHub<")
-      .replaceAll("ClawHub link invalid", "SkillHub 链接无效")
-      .replaceAll("Search ClawHub skills…", "搜索 SkillHub 技能…")
-      .replaceAll("No skills found on ClawHub.", "SkillHub 暂无匹配技能。");
+  const after = before
+      .replaceAll(">技能商店<", ">技能商店<")
+      .replaceAll(">SkillHub<", ">技能商店<")
+      .replaceAll("ClawHub link invalid", "技能商店链接无效")
+      .replaceAll("SkillHub 链接无效", "技能商店链接无效")
+      .replaceAll("Search ClawHub skills…", "搜索技能商店技能…")
+      .replaceAll("技能商店暂无匹配技能。", "技能商店暂无匹配技能。");
 
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
@@ -2071,11 +2295,12 @@ function patchSkillsPageUiCopy() {
     ["onDetail关闭", "onDetailClose"],
     ["onClawHubDetail关闭", "onClawHubDetailClose"],
     ["<div class=\"card-title\">技能</div>", "<div class=\"card-title\">技能库</div>"],
-    ["搜索、安装 SkillHub 技能，并管理已安装项。", "发现更懂你的专家技能，并管理已安装项。"],
-    ["从 SkillHub 商店检索新技能", "让 AI 从通用走向专用"],
+    ["搜索、安装技能商店技能，并管理已安装项。", "发现更懂你的专家技能，并管理已安装项。"],
+    ["从技能商店检索新技能", "让 AI 从通用走向专用"],
     ["已安装技能及其当前状态。", "发现更懂你的专家技能，并管理已安装项。"],
-    ["从 SkillHub 检索并安装技能", "让 AI 从通用走向专用"],
-    ["未找到技能。", "暂无已安装 SkillHub 技能。"],
+    ["从技能商店检索并安装技能", "让 AI 从通用走向专用"],
+    ["未找到技能。", "暂无已安装技能商店技能。"],
+    ["暂无已安装 SkillHub 技能。", "暂无已安装技能商店技能。"],
   ];
   const pairs = [
     ["label:`All`", "label:`全部`"],
@@ -2092,6 +2317,8 @@ function patchSkillsPageUiCopy() {
     ["Skill Card not loaded.", "Skill Card 未加载。"],
     ["`Install ${t.skill.displayName}`", "`安装 ${t.skill.displayName}`"],
     ["Skill not found.", "未找到技能。"],
+    ["SkillHub 详情暂不可用。", "技能商店详情暂不可用。"],
+    ["兼容模式：请重启 U-Claw 以启用完整技能商店分页。", "兼容模式：请重启 U-Claw 以启用完整技能商店分页。"],
     ["\n                          By\n", "\n                          作者：\n"],
     ["`${n} (default)`", "`${n} (默认)`"],
     ["placeholder=\"Filter installed skills\"", "placeholder=\"筛选已安装技能\""],
@@ -2099,14 +2326,14 @@ function patchSkillsPageUiCopy() {
     ["Searching…", "搜索中…"],
     [
       "${e.clawhubSearchLoading?a`<span class=\"muted\">搜索中…</span>`:o}",
-      "${e.clawhubSearchLoading?a`<span class=\"muted\">正在检索 SkillHub…</span>`:a`<span class=\"chip\">远程检索</span>`}",
+      "${e.clawhubSearchLoading?a`<span class=\"muted\">正在检索技能商店…</span>`:a`<span class=\"chip\">远程检索</span>`}",
     ],
     [
       "${e.clawhubSearchError}",
       "${UcSkillHubErrorText(e.clawhubSearchError)}",
     ],
     ["Not connected to gateway.", "尚未连接 Gateway。"],
-    ["No skills found.", "暂无已安装 SkillHub 技能。"],
+    ["No skills found.", "暂无已安装技能商店技能。"],
     ["`Unavailable`", "`不可用`"],
     ["`Clean`", "`安全`"],
     ["`Pending`", "`待检测`"],
@@ -2148,8 +2375,8 @@ function patchSkillsPageStoreDiscovery() {
     "function UcSkillHubApiQuery(e){let t=e.clawhubQuery?.trim?.()||e.clawhubSearchQuery?.trim?.()||``,n=e.skillHubApiKeyFilter===`needs-key`?`api key configuration`:e.skillHubApiKeyFilter===`configured`?`verified official`:``;return[t,n].filter(Boolean).join(` `).trim()}",
     "function UcSkillHubApiCategory(e){let t=e.skillHubCategory||`all`;return t===`all`?``:UcSkillHubApiCategoryMap()[t]||t}",
     "function UcSkillHubApiUrl(e,t){let n=UcSkillHubApiSort(e.skillHubSort),r=new URL(`/__uclaw__/skillhub/skills`,window.location.origin);r.searchParams.set(`page`,String(Math.max(1,Number(t)||1))),r.searchParams.set(`pageSize`,String(e.skillHubPageSize||24)),r.searchParams.set(`sortBy`,n.sortBy),r.searchParams.set(`order`,n.order);let i=UcSkillHubApiQuery(e),s=UcSkillHubApiCategory(e);return i&&r.searchParams.set(`q`,i),s&&r.searchParams.set(`category`,s),e.skillHubApiKeyFilter&&r.searchParams.set(`apiKey`,e.skillHubApiKeyFilter),r.toString()}",
-    "async function UcSkillHubLoadApiSkills(e,t){let n=await fetch(UcSkillHubApiUrl(e,t),{headers:{Accept:`application/json`}}),r=await n.text(),i=n.headers.get(`content-type`)||``;if(!i.includes(`application/json`))throw Error(`SkillHub Gateway 代理未生效，请重启 U-Claw 后重试。`);let s=JSON.parse(r);if(!n.ok||s?.code&&s.code!==0)throw Error(s?.message||`SkillHub API ${n.status}`);let c=Array.isArray(s?.data?.skills)?s.data.skills:[],l=c.map(UcSkillHubNormalizeApiSkill);return{items:l,total:Math.max(0,Number(s?.data?.total)||l.length),message:l.length?`第 ${t} 页已加载`:t>1?`本页暂无数据，可返回上一页。`:`暂无匹配 SkillHub 技能。`,compat:!1}}",
-    "async function UcSkillHubFallbackSkillsSearch(e,t,n){let r=e.client;if(!r?.request)throw n;let i=UcSkillHubApiQuery(e)||`agent`,s=Math.max(1,Number(e.skillHubPageSize)||24),c=Math.min(80,Math.max(s,t*s)),l=await r.request(`skills.search`,{query:i,limit:c}),u=Array.isArray(l?.results)?l.results:[],d=(t-1)*s,m=u.slice(d,d+s);if(!m.length&&t>1)throw n;return{items:m,total:u.length,message:`当前 Gateway 尚未启用 SkillHub 分页代理，已使用兼容模式加载。重启 U-Claw 后可使用完整分页。`,compat:!0}}",
+    "async function UcSkillHubLoadApiSkills(e,t){let n=await fetch(UcSkillHubApiUrl(e,t),{headers:{Accept:`application/json`}}),r=await n.text(),i=n.headers.get(`content-type`)||``;if(!i.includes(`application/json`))throw Error(`技能商店 Gateway 代理未生效，请重启 U-Claw 后重试。`);let s=JSON.parse(r);if(!n.ok||s?.code&&s.code!==0)throw Error(s?.message||`技能商店 API ${n.status}`);let c=Array.isArray(s?.data?.skills)?s.data.skills:[],l=c.map(UcSkillHubNormalizeApiSkill);return{items:l,total:Math.max(0,Number(s?.data?.total)||l.length),message:l.length?`第 ${t} 页已加载`:t>1?`本页暂无数据，可返回上一页。`:`暂无匹配技能商店技能。`,compat:!1}}",
+    "async function UcSkillHubFallbackSkillsSearch(e,t,n){let r=e.client;if(!r?.request)throw n;let i=UcSkillHubApiQuery(e)||`agent`,s=Math.max(1,Number(e.skillHubPageSize)||24),c=Math.min(80,Math.max(s,t*s)),l=await r.request(`skills.search`,{query:i,limit:c}),u=Array.isArray(l?.results)?l.results:[],d=(t-1)*s,m=u.slice(d,d+s);if(!m.length&&t>1)throw n;return{items:m,total:u.length,message:`当前 Gateway 尚未启用技能商店分页代理，已使用兼容模式加载。重启 U-Claw 后可使用完整分页。`,compat:!0}}",
     "function UcSkillHubNormalizeApiSkill(e){let t=e?.namespace??{},n=t.handle||t.publicSlug||e?.ownerHandle||``,r=e?.slug||t.publicSlug||e?.name,i=t.canonicalName||(n&&r?`@${n}/${r}`:r),s=e?.labels??{},c=s.requires_api_key===!0||String(s.requires_api_key).toLowerCase()===`true`,l=e?.iconUrl||e?.icon_url||e?.iconURL||e?.logoUrl||e?.imageUrl||e?.avatarUrl||e?.publisher?.logoUrl||``;return{...e,id:i,slug:r,displayName:e?.name||r,summary:e?.description_zh||e?.description||``,description:e?.description_zh||e?.description||``,ownerHandle:n,owner:{handle:n,displayName:t.displayName||n},publisher:e?.publisher,iconUrl:l,logoUrl:e?.logoUrl||e?.publisher?.logoUrl,imageUrl:e?.imageUrl,avatarUrl:e?.avatarUrl,downloads:e?.downloads,stars:e?.stars,version:e?.version,categories:[e?.category,...(e?.subCategories??[]).map(e=>e?.key),...(e?.subCategories??[]).map(e=>e?.name)].filter(Boolean),topics:e?.tags??[],labels:{...s,requires_api_key:c},install:{reference:i},trust:{installability:`installable`},native:{skill:e}}}",
     "function UcSkillHubStoreTabs(e){let t=e.clawhubQuery?.trim()?`search`:e.skillHubTab||`recommended`,n=[{id:`recommended`,label:`推荐`},{id:`installable`,label:`可安装`},{id:`installed`,label:`已安装`},{id:`needs-setup`,label:`需配置`}];return e.clawhubQuery?.trim()?[{id:`search`,label:`搜索结果`},...n]:n}",
     "function UcSkillHubCategoryDefs(){return[{id:`all`,label:`全部`,icon:`🗂`},{id:`office`,label:`办公效率`,icon:`📎`},{id:`content`,label:`内容创作`,icon:`✍️`},{id:`coding`,label:`开发编程`,icon:`💻`},{id:`data`,label:`数据分析`,icon:`📊`},{id:`design`,label:`设计多媒体`,icon:`🎨`},{id:`agent`,label:`AI Agent`,icon:`🤖`},{id:`knowledge`,label:`知识管理`,icon:`🧠`},{id:`business`,label:`商业运营`,icon:`📣`},{id:`education`,label:`教育学习`,icon:`🎓`},{id:`industry`,label:`行业专业`,icon:`🏢`},{id:`itops`,label:`IT 运维与安全`,icon:`🛡️`},{id:`life`,label:`生活服务`,icon:`🎯`},{id:`other`,label:`其他`,icon:`▫`}]}",
@@ -2165,11 +2392,12 @@ function patchSkillsPageStoreDiscovery() {
     "function UcSkillHubSceneLabels(e){let t=e.native?.skill??e,n=Array.isArray(t?.subCategories)?t.subCategories:[],r=n.map(e=>e?.name).filter(e=>typeof e==`string`&&/[\\u4e00-\\u9fff]/.test(e)).map(e=>e.trim()).filter(Boolean);if(r.length)return[...new Set(r)];let i=[t?.categoryName,t?.category_zh,t?.categoryZh,t?.sceneName,t?.scene_zh].filter(e=>typeof e==`string`&&e.trim()).map(e=>e.trim());if(i.length)return[...new Set(i)];return UcSkillHubItemCategories(e).map(UcSkillHubCategoryLabel).filter(Boolean)}",
     "function UcSkillHubMatchesCategory(e,t){return!t||t===`all`?!0:UcSkillHubItemCategories(e).includes(t)}",
     "function UcSkillHubStats(e){let t=e.native?.skill?.stats??{},n=e.metrics??{};return{downloads:e.downloads??t.downloads??0,stars:e.stars??t.stars??0,installs:e.installs??t.installs??n.rolling60DayInstalls??null}}",
-    "function UcSkillHubTrustLabel(e){let t=e.trust?.installability;return t===`installable`?`可安装`:t===`blocked`?`已阻止`:t===`review`?`需复核`:t===`unknown`?`待检测`:`U-Claw 校验`}",
-    "function UcSkillHubDisplayText(e){let t=String(e??``).trim();if(!t)return``;let n=t.replaceAll(`OpenClaw`,`U-Claw`).replaceAll(`ClawHub`,`SkillHub`);if(/controlling web pages/i.test(n)&&/browser tool/i.test(n))return`用于控制网页、处理多步骤流程、登录检查、标签页管理与失败恢复。`;if(/connected .*node canvases/i.test(n)||/node canvases/i.test(n))return`在已连接的 U-Claw 节点画布上展示 HTML，支持导航、快照与调试。`;if(/^Use when\\b/i.test(n))return`适用：${n.replace(/^Use when\\s*/i,``)}`;if(/^Present\\b/i.test(n))return`用于展示：${n.replace(/^Present\\s*/i,``)}`;return n}",
+    "function UcSkillHubTrustLabel(e){let t=e.trust?.installability;return t===`installable`?`可安装`:t===`blocked`?`已阻止`:t===`review`?`需复核`:t===`unknown`?`待检测`:`技能商店校验`}",
+    "function UcSkillHubDisplayText(e){let t=String(e??``).trim();if(!t)return``;let n=t.replaceAll(`OpenClaw`,`U-Claw`).replaceAll(`ClawHub`,`技能商店`);if(/controlling web pages/i.test(n)&&/browser tool/i.test(n))return`用于控制网页、处理多步骤流程、登录检查、标签页管理与失败恢复。`;if(/connected .*node canvases/i.test(n)||/node canvases/i.test(n))return`在已连接的 U-Claw 节点画布上展示 HTML，支持导航、快照与调试。`;if(/^Use when\\b/i.test(n))return`适用：${n.replace(/^Use when\\s*/i,``)}`;if(/^Present\\b/i.test(n))return`用于展示：${n.replace(/^Present\\s*/i,``)}`;return n}",
     "function UcSkillHubInstallRef(e){return e.install?.reference||[e.ownerHandle||e.owner?.handle,e.slug].filter(Boolean).join(`/`)||e.slug}",
     "function UcSkillHubQualifiedRef(e){let t=e.ownerHandle||e.owner?.handle||e.publisher?.handle||e.native?.ownerHandle||e.native?.owner?.handle,n=e.slug;return t&&n?`@${t}/${n}`:UcSkillHubInstallRef(e)}",
     "function UcSkillHubDetailRef(e,t){let n=e?.owner?.handle||e?.native?.ownerHandle||e?.native?.owner?.handle,r=e?.skill?.slug||t;return typeof r==`string`&&r.startsWith(`@`)?r:n&&r?`@${n}/${r}`:r}",
+    "function UcSkillHubCachedPageDetail(e,t){let n=String(t??``).trim(),r=n.startsWith(`@`)?n.slice(1).split(`/`):[],i=r.length===2?r[1]:n,a=r.length===2?r[0]:``,s=[...(e.skillHubHomeResults??[]),...(e.clawhubResults??[])],c=s.find(e=>{let t=e.native?.skill??e,r=e.slug||t.slug,c=e.ownerHandle||e.owner?.handle||t.namespace?.handle||t.ownerHandle,l=c&&r?`@${c}/${r}`:r;return l===n||r===i&&(!a||c===a)});if(!c)return null;let l=c.native?.skill??c,u=c.slug||l.slug||i,d=c.ownerHandle||c.owner?.handle||l.namespace?.handle||l.ownerHandle,m=c.displayName||l.name||u,h=c.summary||l.description_zh||l.description||``,p=Array.isArray(c.categories)?c.categories:Array.isArray(l.subCategories)?[l.category,...l.subCategories.map(e=>e?.name||e?.key)].filter(Boolean):[],g=Array.isArray(c.topics)?c.topics:Array.isArray(l.tags)?l.tags:[];return{skill:{slug:u,displayName:m,summary:h,categories:p,topics:g,labels:c.labels||l.labels||{},homepage:l.homepage,iconUrl:c.iconUrl||l.iconUrl,downloads:c.downloads??l.downloads,stars:c.stars??l.stars},latestVersion:c.version||l.version?{version:c.version||l.version}:null,owner:{handle:d,displayName:c.owner?.displayName||l.namespace?.displayName||d},readmeMarkdown:l.readmeMarkdown||l.readme||h,metadata:{}}}",
     "function UcSkillHubIdentity(e){return UcSkillHubQualifiedRef(e)||e.id||e.slug}",
     "function UcSkillHubSortScore(e){let t=UcSkillHubStats(e),n=e.trust?.installability===`installable`?1e6:e.trust?.installability===`review`?5e5:0;return n+(t.downloads||0)+(t.stars||0)*100+(t.installs||0)*20}",
     "function UcSkillHubMergeResults(e){let t=new Map;for(let n of e){let e=UcSkillHubIdentity(n);if(!e||t.has(e))continue;t.set(e,n)}return[...t.values()].sort((e,t)=>UcSkillHubSortScore(t)-UcSkillHubSortScore(e))}",
@@ -2177,31 +2405,32 @@ function patchSkillsPageStoreDiscovery() {
     "function UcSkillHubMatchesApiKeyFilter(e,t,n){return!t||t===`all`?!0:t===`configured`?n?!UcSkillHubLocalNeedsSetup(e):e.trust?.installability===`installable`:t===`needs-key`?n?UcSkillHubLocalNeedsSetup(e):e.trust?.installability!==`installable`:!0}",
     "function UcSkillHubLocalSkills(e){return(e.report?.skills??[]).filter(e=>!(e?.source===`openclaw-bundled`||e?.bundled===!0))}",
     "function UcSkillHubLocalNeedsSetup(e){let t=e.missing??{};return e.eligible===!1||Object.values(t).some(e=>Array.isArray(e)&&e.length>0)}",
-    "function UcSkillHubErrorText(e){let t=String(e??``),n=t.toLowerCase();return n.includes(`timeout`)||n.includes(`timed out`)?`SkillHub 请求超时，请稍后重试。`:n.includes(`429`)||n.includes(`rate limit`)?`SkillHub 请求过于频繁，请稍后再试。`:n.includes(`401`)||n.includes(`403`)||n.includes(`unauthorized`)||n.includes(`forbidden`)||n.includes(`auth`)?`SkillHub 连接未授权，请检查 Gateway 登录状态。`:/\\b5\\d\\d\\b/.test(n)||n.includes(`server error`)?`SkillHub 服务暂不可用，请稍后重试。`:n.includes(`network`)||n.includes(`fetch`)?`SkillHub 网络请求失败，请检查连接。`:t?`SkillHub 搜索失败：${t}`:`SkillHub 搜索失败。`}",
+    "async function UcSkillHubUninstall(e,t){let n=e.client;if(!n?.request||!e.connected||!t||e.skillsBusyKey)return;e.skillsBusyKey=t,e.requestUpdate?.();try{let r=await n.request(`skills.uninstall`,{agentId:e.skillsAgentId??e.agentsList?.defaultId??void 0,skillKey:t});if(!r?.ok)throw Error(r?.error||`卸载失败`);e.skillsDetailKey===t&&(e.skillsDetailKey=null),await S(e,{clearMessages:!0})}catch(r){e.skillMessages={...e.skillMessages,[t]:{kind:`error`,message:`卸载技能失败：${r instanceof Error?r.message:String(r)}`}},e.requestUpdate?.()}finally{e.skillsBusyKey===t&&(e.skillsBusyKey=null,e.requestUpdate?.())}}",
+    "function UcSkillHubErrorText(e){let t=String(e??``),n=t.toLowerCase();return n.includes(`timeout`)||n.includes(`timed out`)?`技能商店请求超时，请稍后重试。`:n.includes(`429`)||n.includes(`rate limit`)?`技能商店请求过于频繁，请稍后再试。`:n.includes(`401`)||n.includes(`403`)||n.includes(`unauthorized`)||n.includes(`forbidden`)||n.includes(`auth`)?`技能商店连接未授权，请检查 Gateway 登录状态。`:/\\b5\\d\\d\\b/.test(n)||n.includes(`server error`)?`技能商店服务暂不可用，请稍后重试。`:n.includes(`network`)||n.includes(`fetch`)?`技能商店网络请求失败，请检查连接。`:t?`技能商店搜索失败：${t}`:`技能商店搜索失败。`}",
     "function UcSkillHubFormatMetric(e){let t=Number(e??0);return Number.isFinite(t)&&t>0?t>=1e4?`${(t/1e4).toFixed(t>=1e5?1:0)}万`:String(Math.round(t)):`-`}",
     "function UcSkillHubIconUrl(e){let t=e.iconUrl||e.icon_url||e.iconURL||e.logoUrl||e.imageUrl||e.avatarUrl||e.icon||e.logo||e.avatar||e.native?.skill?.iconUrl||e.native?.skill?.icon_url||e.native?.skill?.iconURL||e.native?.skill?.logoUrl||e.native?.skill?.imageUrl||e.native?.skill?.icon||e.native?.skill?.publisher?.logoUrl||e.publisher?.logoUrl||e.publisher?.image||e.publisher?.avatarUrl||e.owner?.image||e.owner?.avatarUrl;return typeof t==`string`&&(/^(https:|data:|\\/)/.test(t)?t:``)}",
     "function UcSkillHubIconGlyph(e){let t=UcSkillHubCategoryDef(UcSkillHubItemCategories(e)[0])?.icon,n=e.icon;return typeof n==`string`&&!/^(https?:|data:|\\/)/.test(n)&&n.length<=4?n:t||`▫`}",
     "function UcSkillHubRenderIcon(e){let t=UcSkillHubIconUrl(e),n=UcSkillHubIconGlyph(e);return a`<span class=\"skillhub-icon\" aria-hidden=\"true\" style=\"width: 36px; height: 36px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; position: relative; overflow: hidden; flex: 0 0 auto; background: linear-gradient(135deg, #e9f2ff, #f6fbff); color: #0f5fd7; font-size: 18px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(15,95,215,.12);\"><span>${n}</span>${t?a`<img data-skillhub-icon-img=\"true\" src=${t} alt=\"\" loading=\"lazy\" @error=${e=>{e.currentTarget.style.display=`none`}} style=\"position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;\"/>`:o}</span>`}",
     "function UcSkillHubBuildViewModel(e){let t=e.clawhubQuery?.trim(),n=t?`search`:e.skillHubTab||`recommended`,r=e.skillHubCategory||`all`,i=UcSkillHubLocalSkills(e),s=e.skillHubHomeResults??[],c=[];if(n===`installed`)c=i;else if(n===`needs-setup`)c=i.filter(UcSkillHubLocalNeedsSetup);else c=s.filter(e=>n===`installable`?e.trust?.installability===`installable`:!0);let l=n===`installed`||n===`needs-setup`;l&&(c=c.filter(e=>UcSkillHubMatchesCategory(e,r)).filter(t=>UcSkillHubMatchesApiKeyFilter(t,e.skillHubApiKeyFilter,l)),e.skillHubSort!==`recommended`&&(c=UcSkillHubApplySort(c,e.skillHubSort)));let u=t?`搜索结果`:n===`recommended`?`推荐首页`:n===`installable`?`可安装技能`:n===`installed`?`已安装技能`:`需配置技能`,d=Math.max(1,Number(e.skillHubPage)||1),m=Math.max(1,Number(e.skillHubPageSize)||24),h=Math.max(0,Number(e.skillHubTotal)||c.length),p=Math.max(1,Math.ceil(h/m));return{query:t,tab:n,category:r,apiKeyFilter:e.skillHubApiKeyFilter||`all`,sort:e.skillHubSort||`recommended`,items:c,totalItems:h,page:d,pageSize:m,pageCount:p,hasMore:!l&&d<p,loadMoreMessage:e.skillHubLoadMoreMessage||``,isLocal:l,title:u,localCount:i.length,needsSetupCount:i.filter(UcSkillHubLocalNeedsSetup).length,installableCount:s.filter(e=>e.trust?.installability===`installable`).length,pageError:e.skillHubPageError||``}}",
     "function UcSkillHubRenderTopTabs(e,t){let n=e.skillHubTab===`recommended`,r=[{id:`all`,label:`全部`},{id:`ready`,label:`可用`},{id:`needs-setup`,label:`需配置`},{id:`disabled`,label:`已停用`}];return a`<div class=\"agent-tabs\" data-skillhub-primary-tabs=\"true\" style=\"margin-top: 0; flex: 1 1 auto; min-width: 0;\"> <button class=\"agent-tab ${n?`active`:``}\" @click=${()=>e.onSkillHubTabChange?.(`recommended`)}>推荐</button>${r.map(r=>a`<button class=\"agent-tab ${!n&&e.statusFilter===r.id?`active`:``}\" @click=${()=>{e.onSkillHubTabChange?.(`local`),e.onStatusFilterChange?.(r.id)}}>${r.label}<span class=\"agent-tab-count\">${t[r.id]}</span></button>`)}</div>`}",
-    "function UcSkillHubRenderToolbar(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading,r=UcSkillHubCategoryDefs().filter(e=>e.id!==`other`);return a`<div data-skillhub-toolbar=\"true\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 154px 154px 154px; align-items: center; gap: 8px; min-height: 40px;\"><label class=\"field\" data-skillhub-search=\"true\" style=\"margin: 0; min-width: 0; position: relative;\"><input .value=${e.clawhubQuery} @input=${t=>e.onClawHubQueryChange(t.target.value)} placeholder=\"搜索 SkillHub 技能…\" autocomplete=\"off\" name=\"clawhub-search\" aria-busy=${n?`true`:`false`} style=\"height: 36px; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 ${n?`72px`:`12px`} 0 12px; box-shadow: inset 0 0 0 1px rgba(15,95,215,.04);\"/>${n?a`<span data-skillhub-loading=\"true\" class=\"muted\" style=\"position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; pointer-events: none;\">搜索中…</span>`:o}</label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"场景筛选\" .value=${t.category} @change=${t=>e.onSkillHubCategoryChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\">${r.map(e=>a`<option value=${e.id}>${e.id===`all`?`全部场景`:e.label}</option>`)}</select></label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"API Key 筛选\" .value=${t.apiKeyFilter} @change=${t=>e.onSkillHubApiKeyFilterChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"all\">API Key 不限</option><option value=\"configured\">仅看已配置</option><option value=\"needs-key\">仅看需配置</option></select></label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"排序\" .value=${t.sort} @change=${t=>e.onSkillHubSortChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"recommended\">排序 推荐精选</option><option value=\"downloads\">下载最多</option><option value=\"stars\">收藏最多</option><option value=\"name\">名称 A-Z</option></select></label></div>`}",
+    "function UcSkillHubRenderToolbar(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading,r=UcSkillHubCategoryDefs().filter(e=>e.id!==`other`);return a`<div data-skillhub-toolbar=\"true\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 154px 154px 154px; align-items: center; gap: 8px; min-height: 40px;\"><label class=\"field\" data-skillhub-search=\"true\" style=\"margin: 0; min-width: 0; position: relative;\"><input .value=${e.clawhubQuery} @input=${t=>e.onClawHubQueryChange(t.target.value)} placeholder=\"搜索技能商店技能…\" autocomplete=\"off\" name=\"clawhub-search\" aria-busy=${n?`true`:`false`} style=\"height: 36px; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 ${n?`72px`:`12px`} 0 12px; box-shadow: inset 0 0 0 1px rgba(15,95,215,.04);\"/>${n?a`<span data-skillhub-loading=\"true\" class=\"muted\" style=\"position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; pointer-events: none;\">搜索中…</span>`:o}</label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"场景筛选\" .value=${t.category} @change=${t=>e.onSkillHubCategoryChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\">${r.map(e=>a`<option value=${e.id}>${e.id===`all`?`全部场景`:e.label}</option>`)}</select></label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"API Key 筛选\" .value=${t.apiKeyFilter} @change=${t=>e.onSkillHubApiKeyFilterChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"all\">API Key 不限</option><option value=\"configured\">仅看已配置</option><option value=\"needs-key\">仅看需配置</option></select></label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"排序\" .value=${t.sort} @change=${t=>e.onSkillHubSortChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"recommended\">排序 推荐精选</option><option value=\"downloads\">下载最多</option><option value=\"stars\">收藏最多</option><option value=\"name\">名称 A-Z</option></select></label></div>`}",
     "function UcSkillHubRenderTableHead(){return a`<div class=\"skillhub-dense-head\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--panel-2);\"><span>技能</span><span>场景</span><span>下载</span><span>收藏</span><span>操作</span></div>`}",
-    "function UcSkillHubRenderSkillRow(e,t,n){let r=UcSkillHubSceneLabels(t),i=UcSkillHubStats(t),s=n?UcSkillHubLocalNeedsSetup(t):!1,c=n?t.name:t.displayName,l=n?UcSkillHubDisplayText(t.description):t.summary?UcSkillHubDisplayText(t.summary):UcSkillHubInstallRef(t),u=n?`已安装`:UcSkillHubTrustLabel(t),d=n?t.source:UcSkillHubInstallRef(t),m=n?`-`:UcSkillHubFormatMetric(i.downloads),h=n?`-`:UcSkillHubFormatMetric(i.stars||i.installs),p=n?t.skillKey:UcSkillHubQualifiedRef(t),g=r.join(`、`);return a`<div class=\"skillhub-dense-row list-item-clickable\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; align-items: center; min-height: 68px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel);\" @click=${()=>n?e.onDetailOpen(t.skillKey):e.onClawHubDetailOpen(p)}><div style=\"display: flex; min-width: 0; gap: 10px; align-items: center;\">${UcSkillHubRenderIcon(t)}<div style=\"min-width: 0;\"><div style=\"display: flex; align-items: center; gap: 6px; min-width: 0;\"><span style=\"font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${c}</span>${t.version?a`<span class=\"muted\" style=\"font-size: 12px;\">v${t.version}</span>`:o}${t.official?a`<span class=\"chip chip-ok\">官方</span>`:o}</div><div class=\"list-sub\" style=\"white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;\">${w(l,120)}</div><div class=\"muted\" style=\"font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${d}</div></div></div><div>${r.length?a`<span class=\"chip\" title=${g}>${r[0]}</span>`:a`<span class=\"chip\">其他</span>`}</div><div class=\"muted\">↓ ${m}</div><div class=\"muted\">☆ ${h}</div><div style=\"display: flex; justify-content: flex-end; align-items: center; gap: 6px;\">${n?a`<span class=\"chip ${s?`chip-warn`:`chip-ok`}\">${s?`需配置`:u}</span>`:a`<button type=\"button\" data-skillhub-install-button=\"true\" data-skillhub-install-ready=${typeof e.onClawHubInstall} class=\"btn btn--sm\" ?disabled=${e.clawhubInstallSlug!==null} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onClawHubInstall?.(p)}}>${e.clawhubInstallSlug===p?`安装中…`:e.clawhubInstallSlug?`等待中`:`安装`}</button>`}</div></div>`}",
+    "function UcSkillHubRenderSkillRow(e,t,n){let r=UcSkillHubSceneLabels(t),i=UcSkillHubStats(t),s=n?UcSkillHubLocalNeedsSetup(t):!1,c=n?t.name:t.displayName,l=n?UcSkillHubDisplayText(t.description):t.summary?UcSkillHubDisplayText(t.summary):UcSkillHubInstallRef(t),u=n?`已安装`:UcSkillHubTrustLabel(t),d=n?t.source:UcSkillHubInstallRef(t),m=n?`-`:UcSkillHubFormatMetric(i.downloads),h=n?`-`:UcSkillHubFormatMetric(i.stars||i.installs),p=n?t.skillKey:UcSkillHubQualifiedRef(t),g=r.join(`、`);return a`<div class=\"skillhub-dense-row list-item-clickable\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; align-items: center; min-height: 68px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel);\" @click=${()=>n?e.onDetailOpen(t.skillKey):e.onClawHubDetailOpen(p)}><div style=\"display: flex; min-width: 0; gap: 10px; align-items: center;\">${UcSkillHubRenderIcon(t)}<div style=\"min-width: 0;\"><div style=\"display: flex; align-items: center; gap: 6px; min-width: 0;\"><span style=\"font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${c}</span>${t.version?a`<span class=\"muted\" style=\"font-size: 12px;\">v${t.version}</span>`:o}${t.official?a`<span class=\"chip chip-ok\">官方</span>`:o}</div><div class=\"list-sub\" style=\"white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;\">${w(l,120)}</div><div class=\"muted\" style=\"font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${d}</div></div></div><div>${r.length?a`<span class=\"chip\" title=${g}>${r[0]}</span>`:a`<span class=\"chip\">其他</span>`}</div><div class=\"muted\">↓ ${m}</div><div class=\"muted\">☆ ${h}</div><div style=\"display: flex; justify-content: flex-end; align-items: center; gap: 6px;\">${n?a`<span class=\"chip ${s?`chip-warn`:`chip-ok`}\">${s?`需配置`:u}</span><button type=\"button\" data-skillhub-uninstall-button=\"true\" class=\"btn btn--sm\" ?disabled=${e.skillsBusyKey===t.skillKey} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onUninstall?.(t.skillKey)}}>${e.skillsBusyKey===t.skillKey?`卸载中…`:`卸载`}</button>`:a`<button type=\"button\" data-skillhub-install-button=\"true\" data-skillhub-install-ready=${typeof e.onClawHubInstall} class=\"btn btn--sm\" ?disabled=${e.clawhubInstallSlug!==null} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onClawHubInstall?.(p)}}>${e.clawhubInstallSlug===p?`安装中…`:e.clawhubInstallSlug?`等待中`:`安装`}</button>`}</div></div>`}",
     "function UcSkillHubPageNumbers(e){let t=e.page,n=e.pageCount,r=new Set([1,n,t,t-1,t+1,t-2,t+2].filter(e=>e>=1&&e<=n)),i=[...r].sort((e,t)=>e-t),s=[];for(let e=0;e<i.length;e++)e>0&&i[e]-i[e-1]>1&&s.push(`ellipsis-${i[e]}`),s.push(i[e]);return s}",
     "function UcSkillHubRenderPagination(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading,r=UcSkillHubPageNumbers(t);return t.isLocal?o:a`<div data-skillhub-pagination=\"true\" class=\"muted\" style=\"display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px; border-top: 1px solid var(--border); flex-wrap: wrap;\"><span data-skillhub-page-summary=\"true\">第 ${t.page} / ${t.pageCount} 页 · 共 ${UcSkillHubFormatMetric(t.totalItems)} 项</span><div style=\"display: flex; gap: 6px; align-items: center; flex-wrap: wrap;\"><button type=\"button\" class=\"btn btn--sm\" data-skillhub-prev-page-button=\"true\" ?disabled=${n||t.page<=1} @click=${r=>{r.preventDefault(),r.stopPropagation(),e.onSkillHubPageChange?.(t.page-1)}}>上一页</button>${r.map(r=>typeof r==`string`?a`<span style=\"padding: 0 2px;\">…</span>`:a`<button type=\"button\" class=\"btn btn--sm ${r===t.page?`primary`:``}\" data-skillhub-page-button=\"true\" data-skillhub-page=${r} ?disabled=${n||r===t.page} @click=${i=>{i.preventDefault(),i.stopPropagation(),e.onSkillHubPageChange?.(r)}}>${r}</button>`)}<button type=\"button\" class=\"btn btn--sm\" data-skillhub-next-page-button=\"true\" ?disabled=${n||t.page>=t.pageCount} @click=${r=>{r.preventDefault(),r.stopPropagation(),e.onSkillHubPageChange?.(t.page+1)}}>${n?`加载中…`:`下一页`}</button></div>${t.loadMoreMessage?a`<span data-skillhub-load-more-message=\"true\">${t.loadMoreMessage}</span>`:o}</div>`}",
-    "function UcSkillHubRenderList(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading;return t.items.length===0?a`<div class=\"muted\" style=\"padding: 18px 12px;\">${n?`正在检索 SkillHub 技能…`:t.pageError?UcSkillHubErrorText(t.pageError):`暂无匹配 SkillHub 技能。`}</div>`:a`<div class=\"skillhub-dense-table\" data-skillhub-dense-list=\"true\" style=\"border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel);\">${UcSkillHubRenderTableHead()}${t.items.map(n=>UcSkillHubRenderSkillRow(e,n,t.isLocal))}${UcSkillHubRenderPagination(e,t)}</div>`}",
+    "function UcSkillHubRenderList(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading;return t.items.length===0?a`<div class=\"muted\" style=\"padding: 18px 12px;\">${n?`正在检索技能商店技能…`:t.pageError?UcSkillHubErrorText(t.pageError):`暂无匹配技能商店技能。`}</div>`:a`<div class=\"skillhub-dense-table\" data-skillhub-dense-list=\"true\" style=\"border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel);\">${UcSkillHubRenderTableHead()}${t.items.map(n=>UcSkillHubRenderSkillRow(e,n,t.isLocal))}${UcSkillHubRenderPagination(e,t)}</div>`}",
     "function q(e){let t=UcSkillHubBuildViewModel(e);return a`",
     "    <section class=\"skillhub-content\" data-skillhub-content=\"dense\" style=\"min-width: 0; display: grid; gap: 10px; align-content: start; margin-top: 10px;\">",
     "        ${UcSkillHubRenderToolbar(e,t)}",
     "        ${e.clawhubSearchError?a`<div class=\"callout danger\">${UcSkillHubErrorText(e.clawhubSearchError)}</div>`:o}",
     "        ${e.clawhubInstallMessage?a`<div class=\"callout ${e.clawhubInstallMessage.kind===`error`?`danger`:`success`}\" style=\"position: relative; padding-right: 44px;\"><button type=\"button\" class=\"btn btn--sm\" aria-label=\"关闭安装提示\" data-skillhub-install-message-close=\"true\" style=\"position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; padding: 0;\" .onclick=${n=>{n.preventDefault(),e.onClawHubInstallMessageClose?.()}}>×</button><div style=\"max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;\">${e.clawhubInstallMessage.text}</div><div style=\"display: flex; flex-wrap: wrap; gap: 8px; margin-top: ${e.clawhubInstallMessage.acknowledgeSlug||e.clawhubInstallMessage.forceSlug?`10px`:`0`};\">${e.clawhubInstallMessage.acknowledgeSlug?a`<button type=\"button\" class=\"btn btn--sm\" style=\"white-space: normal;\" ?disabled=${e.clawhubInstallSlug===e.clawhubInstallMessage.acknowledgeSlug} .onclick=${n=>{n.preventDefault(),e.onClawHubInstall(e.clawhubInstallMessage?.acknowledgeSlug??``,!0,e.clawhubInstallMessage?.acknowledgeVersion)}}>${e.clawhubInstallMessage.acknowledgeLabel??`确认风险并安装`}</button>`:o}${e.clawhubInstallMessage.forceSlug?a`<button type=\"button\" class=\"btn btn--sm primary\" data-skillhub-force-install-button=\"true\" style=\"white-space: normal;\" ?disabled=${e.clawhubInstallSlug===e.clawhubInstallMessage.forceSlug} .onclick=${n=>{n.preventDefault(),e.onClawHubInstall(e.clawhubInstallMessage?.forceSlug??``,!1,e.clawhubInstallMessage?.forceVersion,!0)}}>${e.clawhubInstallMessage.forceLabel??`覆盖重装`}</button>`:o}</div></div>`:o}",
-    "        ${e.skillHubHomeLoading&&!t.query&&t.tab===`recommended`?a`<div class=\"muted\" style=\"font-size: 12px;\">正在加载 SkillHub 推荐…</div>`:o}",
+    "        ${e.skillHubHomeLoading&&!t.query&&t.tab===`recommended`?a`<div class=\"muted\" style=\"font-size: 12px;\">正在加载技能商店推荐…</div>`:o}",
     "        ${e.skillHubHomeErrors?.length&&!t.query&&t.tab===`recommended`?a`<div class=\"callout\">部分推荐源暂不可用：${e.skillHubHomeErrors.join(`、`)} <button class=\"btn btn--sm\" style=\"margin-left: 8px;\" @click=${()=>e.onSkillHubRetryHome?.()}>重试</button></div>`:o}",
-    "        ${!e.connected?a`<div class=\"muted\">SkillHub 暂不可用，请连接 Gateway 后重试。</div>`:o}",
+    "        ${!e.connected?a`<div class=\"muted\">技能商店暂不可用，请连接 Gateway 后重试。</div>`:o}",
     "        ${UcSkillHubRenderList(e,t)}",
     "      </section>",
     "  `}",
-    "function J(e){let t=e.clawhubDetail,n=t?.skill,i=t?.latestVersion,s=Array.isArray(n?.categories)?n.categories:[],c=Array.isArray(n?.topics)?n.topics:[],u=t?.readmeMarkdown??t?.readme??i?.readmeMarkdown??i?.readme??null,d=t?.owner;return a`",
+    "function J(e){let t=e.clawhubDetail??UcSkillHubCachedPageDetail(e,e.clawhubDetailSlug),n=t?.skill,i=t?.latestVersion,s=Array.isArray(n?.categories)?n.categories:[],c=Array.isArray(n?.topics)?n.topics:[],u=t?.readmeMarkdown??t?.readme??i?.readmeMarkdown??i?.readme??null,d=t?.owner;return a`",
     "    <dialog",
     "      class=\"md-preview-dialog\"",
     "      ${l(R)}",
@@ -2221,11 +2450,11 @@ function patchSkillsPageStoreDiscovery() {
     "          </button>",
     "        </div>",
     "        <div class=\"md-preview-dialog__body\" style=\"display: grid; gap: 16px;\">",
-    "          ${e.clawhubDetailLoading?a`<div class=\"muted\">${f(`common.loading`)}</div>`:e.clawhubDetailError?a`<div class=\"callout danger\">${UcSkillHubErrorText(e.clawhubDetailError)}</div>`:n?a`",
+    "          ${e.clawhubDetailLoading?a`<div class=\"muted\">${f(`common.loading`)}</div>`:e.clawhubDetailError&&!t?a`<div class=\"callout danger\">${UcSkillHubErrorText(e.clawhubDetailError)}</div>`:n?a`",
     "                    <div class=\"callout\" style=\"display: grid; gap: 6px; border-color: var(--border); background: var(--panel-2);\">",
     "                      <div style=\"font-weight: 600;\">安装来源</div>",
     "                      <div class=\"muted\" style=\"font-size: 13px; overflow-wrap: anywhere;\">${d?.handle?`${d.handle}/`:``}${n.slug??e.clawhubDetailSlug}</div>",
-    "                      <div class=\"muted\" style=\"font-size: 12px;\">安装动作走 U-Claw SkillHub 安装与信任检查链路。</div>",
+    "                      <div class=\"muted\" style=\"font-size: 12px;\">安装动作走 U-Claw 技能商店安装与信任检查链路。</div>",
     "                    </div>",
     "                    <div style=\"font-size: 14px; line-height: 1.5;\">",
     "                      ${UcSkillHubDisplayText(n.summary)}",
@@ -2255,7 +2484,7 @@ function patchSkillsPageStoreDiscovery() {
     "                    >",
     "                      ${e.clawhubInstallSlug===UcSkillHubDetailRef(t,e.clawhubDetailSlug)?`安装中…`:e.clawhubInstallSlug?`等待 ${e.clawhubInstallSlug}`:`安装 ${n.displayName}`}",
     "                    </button>",
-    "                  `:a`<div class=\"muted\">SkillHub 详情暂不可用。</div>`}",
+    "                  `:a`<div class=\"muted\">技能商店详情暂不可用。</div>`}",
     "        </div>",
     "      </div>",
     "    </dialog>",
@@ -2313,7 +2542,7 @@ function patchSkillsPageStoreDiscovery() {
     "        ${e.error?a`<div class=\"callout danger\" style=\"margin-top: 12px;\">${e.error}</div>`:o}",
     "        ${u.length===0?a`",
     "              <div class=\"muted\" style=\"margin-top: 16px\">",
-    "                ${!e.connected&&!e.report?`尚未连接 Gateway。`:`暂无已安装 SkillHub 技能。`}",
+    "                ${!e.connected&&!e.report?`尚未连接 Gateway。`:`暂无已安装技能商店技能。`}",
     "              </div>",
     "            `:a`",
     "              <div class=\"agent-skills-groups\" style=\"margin-top: 16px;\">",
@@ -2362,6 +2591,75 @@ function patchSkillsPageStoreDiscovery() {
       /<div style="margin-top: 16px; border-top: 1px solid var\(--border\); padding-top: 16px;">[\s\S]*?\$\{q\(e\)\}\s*<\/div>/,
       "${q(e)}",
     );
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Keeps installed SkillHub rows actionable after the marketplace layout patch.
+ */
+function patchSkillsPageLocalUninstallActions() {
+  const localToggle = `        <label class="skill-toggle-wrap" @click=\${e=>e.stopPropagation()}>
+          <input
+            type="checkbox"
+            class="skill-toggle"
+            .checked=\${!e.disabled}
+            ?disabled=\${n}
+            @change=\${n=>{n.stopPropagation(),t.onToggle(e.skillKey,e.disabled)}}
+          />
+        </label>`;
+  const localToggleWithUninstall = `${localToggle}
+        <button
+          class="btn btn--sm"
+          ?disabled=\${n}
+          @click=\${i=>{i.stopPropagation(),t.onUninstall?.(e.skillKey)}}
+        >
+          \${n?\`卸载中…\`:\`卸载\`}
+        </button>`;
+  const detailStatus = `            <span style="font-size: 13px; font-weight: 500;">
+              \${e.disabled?\`已停用\`:\`已启用\`}
+            </span>`;
+  const detailStatusWithUninstall = `${detailStatus}
+            <button
+              class="btn btn--sm"
+              ?disabled=\${n}
+              @click=\${()=>t.onUninstall(e.skillKey)}
+            >
+              \${n?\`卸载中…\`:\`卸载\`}
+            </button>`;
+
+  for (const file of listSkillsPageAssets()) {
+    const before = read(file);
+    let after = before;
+
+    if (!after.includes("t.onUninstall?.(e.skillKey)")) {
+      after = after.replace(localToggle, localToggleWithUninstall);
+    }
+    after = after.replace(
+      "@click=${e=>{e.stopPropagation(),t.onUninstall?.(e.skillKey)}}",
+      "@click=${i=>{i.stopPropagation(),t.onUninstall?.(e.skillKey)}}",
+    );
+    if (!after.includes("@click=${()=>t.onUninstall(e.skillKey)}")) {
+      after = after.replace(detailStatus, detailStatusWithUninstall);
+    }
+    after = after.replace(
+      "onInstall:(e,t,n)=>void m(this,e,t,n),onDetailOpen",
+      "onInstall:(e,t,n)=>void m(this,e,t,n),onUninstall:e=>void UcSkillHubUninstall(this,e),onDetailOpen",
+    );
+
+    if (
+      !after.includes("onUninstall:e=>void UcSkillHubUninstall(this,e)") ||
+      !after.includes("t.onUninstall?.(e.skillKey)") ||
+      !after.includes("@click=${()=>t.onUninstall(e.skillKey)}")
+    ) {
+      if (!path.basename(file).startsWith("skills-page-")) {
+        continue;
+      }
+      throw new Error(`Could not patch SkillHub local uninstall actions in ${file}`);
+    }
+
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -2444,7 +2742,7 @@ function patchSkillsPageStoreHomeState() {
   const legacyConstructorPatched =
     "this.clawhubSearchTimer=null,this.skillHubTab=`recommended`,this.skillHubCategory=`all`,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.loadSkillHubHome=async()=>{let e=this.client;if(!e||!this.connected||this.skillHubHomeLoading)return;this.skillHubHomeLoading=!0,this.skillHubHomeErrors=[],this.requestUpdate?.();let t=[];try{let n=await Promise.allSettled(UcSkillHubHomeSeeds().map(t=>e.request(`skills.search`,{query:t,limit:20}).then(e=>e?.results??[])));for(let[e,r]of n.entries())r.status===`fulfilled`?t.push(...r.value):this.skillHubHomeErrors=[...this.skillHubHomeErrors,UcSkillHubHomeSeeds()[e]];this.skillHubHomeResults=UcSkillHubMergeResults(t).slice(0,40),this.skillHubHomeLoaded=!0}catch(e){this.skillHubHomeErrors=[String(e)]}finally{this.skillHubHomeLoading=!1,this.requestUpdate?.()}},this.changeSkillHubTab=e=>{this.skillHubTab=e,this.requestUpdate?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.requestUpdate?.()}}createRenderRoot(){return this}";
   const constructorPatched =
-    "this.clawhubSearchTimer=null,this.skillHubTab=`recommended`,this.skillHubCategory=`all`,this.skillHubApiKeyFilter=`all`,this.skillHubSort=`recommended`,this.skillHubPage=1,this.skillHubPageSize=24,this.skillHubTotal=0,this.skillHubPageError=null,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.skillHubHomeRequestId=0,this.skillHubLoadMoreMessage=null,this.loadSkillHubPage=async(e=1)=>{let t=Math.max(1,Number(e)||1),n=(this.skillHubHomeRequestId||0)+1;this.skillHubHomeRequestId=n,this.skillHubPage=t,this.skillHubHomeLoading=!0,this.skillHubPageError=null,this.skillHubHomeErrors=[],this.skillHubLoadMoreMessage=`正在加载第 ${t} 页…`,this.requestUpdate?.();try{let e;try{e=await UcSkillHubLoadApiSkills(this,t)}catch(n){e=await UcSkillHubFallbackSkillsSearch(this,t,n)}if(this.skillHubHomeRequestId!==n)return;let r=e.items||[],i=this.skillHubSort===`name`?UcSkillHubApplySort(r,`name`):r;this.skillHubHomeResults=i,this.skillHubTotal=Math.max(0,Number(e.total)||i.length),this.skillHubHomeLoaded=!0,this.skillHubPageError=e.compat?`兼容模式：请重启 U-Claw 以启用完整 SkillHub 分页。`:null,this.skillHubLoadMoreMessage=e.message}catch(e){this.skillHubHomeRequestId===n&&(this.skillHubPageError=String(e),this.skillHubHomeErrors=[String(e)],this.skillHubHomeResults=[],this.skillHubTotal=0,this.skillHubLoadMoreMessage=`第 ${t} 页加载失败，请稍后重试。`)}finally{this.skillHubHomeRequestId===n&&(this.skillHubHomeLoading=!1,this.requestUpdate?.())}},this.loadSkillHubHome=async(e=1)=>this.loadSkillHubPage?.(e),this.reloadSkillHubStore=()=>{this.skillHubPage=1,this.skillHubLoadMoreMessage=null,void this.loadSkillHubPage?.(1)},this.changeSkillHubTab=e=>{this.skillHubTab=e,this.skillHubPage=1,this.skillHubLoadMoreMessage=null,this.requestUpdate?.(),(e===`recommended`||this.clawhubSearchQuery?.trim?.())&&this.reloadSkillHubStore?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubApiKeyFilter=e=>{this.skillHubApiKeyFilter=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubSort=e=>{this.skillHubSort=e||`recommended`,this.reloadSkillHubStore?.()},this.changeSkillHubPage=e=>{void this.loadSkillHubPage?.(e)}}createRenderRoot(){return this}";
+    "this.clawhubSearchTimer=null,this.skillHubTab=`recommended`,this.skillHubCategory=`all`,this.skillHubApiKeyFilter=`all`,this.skillHubSort=`recommended`,this.skillHubPage=1,this.skillHubPageSize=24,this.skillHubTotal=0,this.skillHubPageError=null,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.skillHubHomeRequestId=0,this.skillHubLoadMoreMessage=null,this.loadSkillHubPage=async(e=1)=>{let t=Math.max(1,Number(e)||1),n=(this.skillHubHomeRequestId||0)+1;this.skillHubHomeRequestId=n,this.skillHubPage=t,this.skillHubHomeLoading=!0,this.skillHubPageError=null,this.skillHubHomeErrors=[],this.skillHubLoadMoreMessage=`正在加载第 ${t} 页…`,this.requestUpdate?.();try{let e;try{e=await UcSkillHubLoadApiSkills(this,t)}catch(n){e=await UcSkillHubFallbackSkillsSearch(this,t,n)}if(this.skillHubHomeRequestId!==n)return;let r=e.items||[],i=this.skillHubSort===`name`?UcSkillHubApplySort(r,`name`):r;this.skillHubHomeResults=i,this.skillHubTotal=Math.max(0,Number(e.total)||i.length),this.skillHubHomeLoaded=!0,this.skillHubPageError=e.compat?`兼容模式：请重启 U-Claw 以启用完整技能商店分页。`:null,this.skillHubLoadMoreMessage=e.message}catch(e){this.skillHubHomeRequestId===n&&(this.skillHubPageError=String(e),this.skillHubHomeErrors=[String(e)],this.skillHubHomeResults=[],this.skillHubTotal=0,this.skillHubLoadMoreMessage=`第 ${t} 页加载失败，请稍后重试。`)}finally{this.skillHubHomeRequestId===n&&(this.skillHubHomeLoading=!1,this.requestUpdate?.())}},this.loadSkillHubHome=async(e=1)=>this.loadSkillHubPage?.(e),this.reloadSkillHubStore=()=>{this.skillHubPage=1,this.skillHubLoadMoreMessage=null,void this.loadSkillHubPage?.(1)},this.changeSkillHubTab=e=>{this.skillHubTab=e,this.skillHubPage=1,this.skillHubLoadMoreMessage=null,this.requestUpdate?.(),(e===`recommended`||this.clawhubSearchQuery?.trim?.())&&this.reloadSkillHubStore?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubApiKeyFilter=e=>{this.skillHubApiKeyFilter=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubSort=e=>{this.skillHubSort=e||`recommended`,this.reloadSkillHubStore?.()},this.changeSkillHubPage=e=>{void this.loadSkillHubPage?.(e)}}createRenderRoot(){return this}";
   const legacyHandlerState =
     "this.changeSkillHubTab=e=>{this.skillHubTab=e,this.requestUpdate?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.requestUpdate?.()}";
   const oldHandlerState =
@@ -2535,15 +2833,19 @@ function patchSkillsPageSearchIdentityRequests() {
   const searchOriginal = "n.request(`skills.search`,{query:t,limit:20})";
   const searchPatched = "n.request(`skills.search`,{query:t,limit:40})";
   const riskTextOriginal =
+    "function Ks(e,t){return t?`${e}\\n\\n${t}`:e}function qs(e){return Ks(`安装前请复核技能商店风险提示。`,e)}";
+  const riskTextSkillHubPrevious =
     "function Ks(e,t){return t?`${e}\\n\\n${t}`:e}function qs(e){return Ks(`安装前请复核 SkillHub 风险提示。`,e)}";
   const riskTextPatched =
-    "function UcSkillHubRiskText(e){let t=String(e??``).trim();if(!t)return``;let n=[...t.matchAll(/https?:\\/\\/\\S+/g)].map(e=>e[0].replace(/[|)]+$/g,``)),r=[`SkillHub 安全扫描提示：该版本存在安全发现，安装前请确认你信任来源与用途。`];/suspicious|not clean|risk|blast radius/i.test(t)&&r.push(`原因：安全状态未完全通过，可能包含较大的指令或工具调用权限范围。`);let i=[...new Set(n)];return i.length&&r.push(`相关链接：\\n${i.join(`\\n`)}`),r.join(`\\n\\n`)}function Ks(e,t){let n=UcSkillHubRiskText(t);return n?`${e}\\n\\n${n}`:e}function qs(e){return Ks(`安装前请复核 SkillHub 风险提示。`,e)}";
+    "function UcSkillHubRiskText(e){let t=String(e??``).trim();if(!t)return``;let n=[...t.matchAll(/https?:\\/\\/\\S+/g)].map(e=>e[0].replace(/[|)]+$/g,``)),r=[`技能商店安全扫描提示：该版本存在安全发现，安装前请确认你信任来源与用途。`];/suspicious|not clean|risk|blast radius/i.test(t)&&r.push(`原因：安全状态未完全通过，可能包含较大的指令或工具调用权限范围。`);let i=[...new Set(n)];return i.length&&r.push(`相关链接：\\n${i.join(`\\n`)}`),r.join(`\\n\\n`)}function Ks(e,t){let n=UcSkillHubRiskText(t);return n?`${e}\\n\\n${n}`:e}function qs(e){return Ks(`安装前请复核技能商店风险提示。`,e)}";
   const detailOriginal =
     "async function _c(e,t){if(!e.client||!e.connected)return;let n=e.client;e.clawhubDetailSlug=t,e.clawhubDetailLoading=!0,e.clawhubDetailError=null,e.clawhubDetail=null,await rc(()=>t===e.clawhubDetailSlug,()=>n.request(`skills.detail`,{slug:t}),t=>{e.clawhubDetail=t??null},t=>{e.clawhubDetailError=Ws(t)},()=>{e.clawhubDetailLoading=!1})}";
   const detailPatched =
-    "function UcSkillHubRefParts(e){let t=typeof e==`string`?e.trim():``;if(t.startsWith(`@`)){let e=t.slice(1).split(`/`);if(e.length===2&&e[0]&&e[1])return{display:t,slug:e[1],ownerHandle:e[0]}}return{display:t,slug:t}}async function _c(e,t){if(!e.client||!e.connected)return;let r=UcSkillHubRefParts(t),n=e.client;e.clawhubDetailSlug=r.display,e.clawhubDetailLoading=!0,e.clawhubDetailError=null,e.clawhubDetail=null,await rc(()=>r.display===e.clawhubDetailSlug,()=>n.request(`skills.detail`,{slug:r.slug}),t=>{e.clawhubDetail=t??null},t=>{e.clawhubDetailError=Ws(t)},()=>{e.clawhubDetailLoading=!1})}";
+    "function UcSkillHubRefParts(e){let t=typeof e==`string`?e.trim():``;if(t.startsWith(`@`)){let e=t.slice(1).split(`/`);if(e.length===2&&e[0]&&e[1])return{display:t,slug:e[1],ownerHandle:e[0]}}return{display:t,slug:t}}function UcSkillHubCachedDetail(e,t){let n=UcSkillHubRefParts(t),r=[...(e.skillHubHomeResults??[]),...(e.clawhubSearchResults??[])],i=r.find(e=>{let r=e?.native?.skill??e,i=e?.slug||r?.slug,a=e?.ownerHandle||e?.owner?.handle||r?.namespace?.handle||r?.ownerHandle,o=a&&i?`@${a}/${i}`:i;return n.display&&[e?.id,e?.install?.reference,o].includes(n.display)||i&&i===n.slug&&(!n.ownerHandle||a===n.ownerHandle)});if(!i)return null;let a=i.native?.skill??i,o=i.slug||a.slug||n.slug,s=i.ownerHandle||i.owner?.handle||a.namespace?.handle||a.ownerHandle,c=i.displayName||a.name||o,l=i.summary||a.description_zh||a.description||``,u=Array.isArray(i.categories)?i.categories:Array.isArray(a.subCategories)?[a.category,...a.subCategories.map(e=>e?.name||e?.key)].filter(Boolean):[],d=Array.isArray(i.topics)?i.topics:Array.isArray(a.tags)?a.tags:[];return{skill:{slug:o,displayName:c,summary:l,categories:u,topics:d,labels:i.labels||a.labels||{},homepage:a.homepage,iconUrl:i.iconUrl||a.iconUrl,downloads:i.downloads??a.downloads,stars:i.stars??a.stars},latestVersion:i.version||a.version?{version:i.version||a.version}:null,owner:{handle:s,displayName:i.owner?.displayName||a.namespace?.displayName||s},readmeMarkdown:a.readmeMarkdown||a.readme||l,metadata:{}}}async function _c(e,t){if(!e.client||!e.connected)return;let r=UcSkillHubRefParts(t),n=e.client;e.clawhubDetailSlug=r.display,e.clawhubDetailLoading=!0,e.clawhubDetailError=null,e.clawhubDetail=null;let i=UcSkillHubCachedDetail(e,t);if(i){e.clawhubDetail=i,e.clawhubDetailLoading=!1,e.requestUpdate?.();return}await rc(()=>r.display===e.clawhubDetailSlug,()=>n.request(`skills.detail`,{slug:r.slug}),t=>{e.clawhubDetail=t??null},t=>{e.clawhubDetailError=Ws(t)},()=>{e.clawhubDetailLoading=!1})}";
   const detailUnsafeOwnerHandle =
     "function UcSkillHubRefParts(e){let t=typeof e==`string`?e.trim():``;if(t.startsWith(`@`)){let e=t.slice(1).split(`/`);if(e.length===2&&e[0]&&e[1])return{display:t,slug:e[1],ownerHandle:e[0]}}return{display:t,slug:t}}async function _c(e,t){if(!e.client||!e.connected)return;let r=UcSkillHubRefParts(t),n=e.client;e.clawhubDetailSlug=r.display,e.clawhubDetailLoading=!0,e.clawhubDetailError=null,e.clawhubDetail=null,await rc(()=>r.display===e.clawhubDetailSlug,()=>n.request(`skills.detail`,{slug:r.slug,...r.ownerHandle?{ownerHandle:r.ownerHandle}:{}}),t=>{e.clawhubDetail=t??null},t=>{e.clawhubDetailError=Ws(t)},()=>{e.clawhubDetailLoading=!1})}";
+  const detailNoCachePrevious =
+    "function UcSkillHubRefParts(e){let t=typeof e==`string`?e.trim():``;if(t.startsWith(`@`)){let e=t.slice(1).split(`/`);if(e.length===2&&e[0]&&e[1])return{display:t,slug:e[1],ownerHandle:e[0]}}return{display:t,slug:t}}async function _c(e,t){if(!e.client||!e.connected)return;let r=UcSkillHubRefParts(t),n=e.client;e.clawhubDetailSlug=r.display,e.clawhubDetailLoading=!0,e.clawhubDetailError=null,e.clawhubDetail=null,await rc(()=>r.display===e.clawhubDetailSlug,()=>n.request(`skills.detail`,{slug:r.slug}),t=>{e.clawhubDetail=t??null},t=>{e.clawhubDetailError=Ws(t)},()=>{e.clawhubDetailLoading=!1})}";
   const installOriginal =
     "async function yc(e,t,n=!1,r){if(!e.client||!e.connected)return;let i=nc(e);e.clawhubInstallSlug=t,e.clawhubInstallMessage=null;try{let a=await e.client.request(`skills.install`,{...ec(e),source:`clawhub`,slug:t,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{}});if(!H(e,i)||(await sc(e),!H(e,i)))return;e.clawhubInstallMessage={kind:`success`,text:Ks(a?.message??`Installed ${t}`,a?.warning)}}catch(n){if(H(e,i)){let r=Gs(n),i=r?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED;e.clawhubInstallMessage={kind:`error`,text:i?qs(r?.warning):Ks(Ws(n),r?.warning),...i?{acknowledgeSlug:t}:{},...i&&r?.version?{acknowledgeVersion:r.version}:{},...i?{acknowledgeLabel:`Acknowledge risk and install`}:{}}}}finally{H(e,i)&&e.clawhubInstallSlug===t&&(e.clawhubInstallSlug=null)}}";
   const installPatched =
@@ -2561,8 +2863,13 @@ function patchSkillsPageSearchIdentityRequests() {
     const before = read(file);
     let after = before.replace(searchOriginal, searchPatched);
     after = after.replace(riskTextOriginal, riskTextPatched);
+    after = after.replace(riskTextSkillHubPrevious, riskTextPatched);
+    after = after
+      .replaceAll("SkillHub 安全扫描提示", "技能商店安全扫描提示")
+      .replaceAll("安装前请复核 SkillHub 风险提示", "安装前请复核技能商店风险提示");
     after = after.replace(detailOriginal, detailPatched);
     after = after.replace(detailUnsafeOwnerHandle, detailPatched);
+    after = after.replace(detailNoCachePrevious, detailPatched);
     after = after.replace(installOriginal, installPatched);
     after = after.replace(installPatchedPrevious, installPatched);
     after = after.replace(installPatchedForcePrevious, installPatched);
@@ -2593,7 +2900,8 @@ function patchSkillsSharedUiCopy() {
   const pairs = [
     ["label:`Workspace Skills`", "label:`工作区技能`"],
     ["label:`Built-in Skills`", "label:`内置依赖`"],
-    ["label:`Installed Skills`", "label:`已安装 SkillHub`"],
+    ["label:`Installed Skills`", "label:`已安装技能商店`"],
+    ["label:`已安装 SkillHub`", "label:`已安装技能商店`"],
     ["label:`Extra Skills`", "label:`额外技能`"],
     ["label:`Other Skills`", "label:`其他技能`"],
     ["`disabled`", "`已停用`"],
@@ -2831,7 +3139,7 @@ function patchAssistantIdentityUiCopy() {
  * Adds a SkillHub dropdown beside the model selector while binding through Agent skills.
  */
 function patchChatSkillHubDropdown() {
-  const helper = `function UcSkillHubItems(e){return(e.report?.skills??[]).filter(e=>e&&typeof e.name==\`string\`&&e.name.trim()&&!(e?.source===\`openclaw-bundled\`||e?.bundled===!0))}function UcSkillHubHasCjk(e){return/[\\u3400-\\u9fff]/.test(String(e??\`\`))}function UcSkillHubTextCandidates(e){return e.flat(3).map(e=>String(e??\`\`).trim()).filter(Boolean)}function UcSkillHubPickChinese(e){let t=UcSkillHubTextCandidates(e);return t.find(UcSkillHubHasCjk)||t[0]||\`\`}function UcSkillHubChineseTitle(e){let t=UcSkillHubPickChinese([e.displayName,e.display_name,e.title,e.label,e.name_zh,e.nameZh,e.metadata?.displayName,e.metadata?.title,e.native?.skill?.displayName,e.native?.skill?.title,e.name,e.slug]);if(UcSkillHubHasCjk(t))return t;let n=UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description]);let r=String(n).split(/[：:。.!?；;\\n]/)[0]?.trim();return UcSkillHubHasCjk(r)&&r.length<=18?r:t}function UcSkillHubLabel(e){return UcSkillHubChineseTitle(e)||e.name}function UcSkillHubNormalizeText(e){let t=String(e??\`\`).trim();if(!t)return\`\`;let n=t.replaceAll(\`OpenClaw\`,\`U-Claw\`).replaceAll(\`ClawHub\`,\`SkillHub\`);if(/controlling web pages/i.test(n)&&/browser tool/i.test(n))return\`用于控制网页、处理多步骤流程、登录检查、标签页管理与失败恢复。\`;if(/connected .*node canvases/i.test(n)||/node canvases/i.test(n))return\`在已连接的 U-Claw 节点画布上展示 HTML，支持导航、快照与调试。\`;if(/^Use when\\b/i.test(n))return\`适用：\${n.replace(/^Use when\\s*/i,\`\`)}\`;return n}function UcSkillHubDescription(e){return UcSkillHubNormalizeText(UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description,e.source,\`SkillHub 技能\`]))}function UcSkillHubDropdown(e){let t=UcSkillHubItems(e),n=e.selectedSkill||\`\`,r=t.find(e=>e.name===n),i=!e.connected?\`技能暂不可用\`:e.loading?\`加载中…\`:r?UcSkillHubLabel(r):n||\`选择你的技能\`,a=!e.connected||e.saving,o=e.error||e.notice;return s\`
+  const helper = `function UcSkillHubItems(e){return(e.report?.skills??[]).filter(e=>e&&typeof e.name==\`string\`&&e.name.trim()&&!(e?.source===\`openclaw-bundled\`||e?.bundled===!0))}function UcSkillHubHasCjk(e){return/[\\u3400-\\u9fff]/.test(String(e??\`\`))}function UcSkillHubTextCandidates(e){return e.flat(3).map(e=>String(e??\`\`).trim()).filter(Boolean)}function UcSkillHubPickChinese(e){let t=UcSkillHubTextCandidates(e);return t.find(UcSkillHubHasCjk)||t[0]||\`\`}function UcSkillHubChineseTitle(e){let t=UcSkillHubPickChinese([e.displayName,e.display_name,e.title,e.label,e.name_zh,e.nameZh,e.metadata?.displayName,e.metadata?.title,e.native?.skill?.displayName,e.native?.skill?.title,e.name,e.slug]);if(UcSkillHubHasCjk(t))return t;let n=UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description]);let r=String(n).split(/[：:。.!?；;\\n]/)[0]?.trim();return UcSkillHubHasCjk(r)&&r.length<=18?r:t}function UcSkillHubLabel(e){return UcSkillHubChineseTitle(e)||e.name}function UcSkillHubNormalizeText(e){let t=String(e??\`\`).trim();if(!t)return\`\`;let n=t.replaceAll(\`OpenClaw\`,\`U-Claw\`).replaceAll(\`ClawHub\`,\`SkillHub\`);if(/controlling web pages/i.test(n)&&/browser tool/i.test(n))return\`用于控制网页、处理多步骤流程、登录检查、标签页管理与失败恢复。\`;if(/connected .*node canvases/i.test(n)||/node canvases/i.test(n))return\`在已连接的 U-Claw 节点画布上展示 HTML，支持导航、快照与调试。\`;if(/^Use when\\b/i.test(n))return\`适用：\${n.replace(/^Use when\\s*/i,\`\`)}\`;return n}function UcSkillHubDescription(e){return UcSkillHubNormalizeText(UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description,e.source,\`技能商店技能\`]))}function UcSkillHubDropdown(e){let t=UcSkillHubItems(e),n=e.selectedSkill||\`\`,r=t.find(e=>e.name===n),i=!e.connected?\`技能暂不可用\`:e.loading?\`加载中…\`:r?UcSkillHubLabel(r):n||\`选择你的技能\`,a=!e.connected||e.saving,o=e.error||e.notice;return s\`
     <details
       class="chat-controls__session chat-controls__inline-select chat-controls__skillhub"
       @toggle=\${t=>{t.currentTarget.open&&e.onOpen?.()}}
@@ -2851,10 +3159,10 @@ function patchChatSkillHubDropdown() {
       </summary>
       <div
         class="chat-controls__inline-select-menu"
-        aria-label="SkillHub"
+        aria-label="技能商店"
       >
-        <div class="chat-controls__inline-select-section-label">SkillHub</div>
-        \${e.loading?s\`<div class="chat-controls__inline-select-empty">正在加载 SkillHub 技能…</div>\`:t.length===0?s\`<div class="chat-controls__inline-select-empty">未找到可用于聊天的 SkillHub 技能。</div>\`:l(t,u=>u.name,u=>s\`
+        <div class="chat-controls__inline-select-section-label">技能商店</div>
+        \${e.loading?s\`<div class="chat-controls__inline-select-empty">正在加载技能商店技能…</div>\`:t.length===0?s\`<div class="chat-controls__inline-select-empty">未找到可用于聊天的技能商店技能。</div>\`:l(t,u=>u.name,u=>s\`
               <button
                 class="chat-controls__inline-select-option \${u.name===n?\`chat-controls__inline-select-option--selected\`:\`\`}"
                 data-chat-skillhub-option=\${u.name}
@@ -2887,24 +3195,32 @@ function patchChatSkillHubDropdown() {
   const constructorState =
     "this.unreadPatchGuard=new sn,this.uclawSkillHubReport=null,this.uclawSkillHubAgentId=null,this.uclawSkillHubLoading=!1,this.uclawSkillHubSaving=!1,this.uclawSkillHubError=null,this.uclawSkillHubNotice=null,this.uclawSkillHubSelected=``,this.loadUclawSkillHubSkills=async e=>{let t=this.state;if(!t?.client||!t.connected||!e)return;this.uclawSkillHubAgentId===e&&this.uclawSkillHubReport&&!this.uclawSkillHubError||(this.uclawSkillHubAgentId=e,this.uclawSkillHubLoading=!0,this.uclawSkillHubError=null,this.requestUpdate?.(),await t.client.request(`skills.status`,{agentId:e}).then(t=>{this.state&&x_(this.state)===e&&(this.uclawSkillHubReport=t,this.uclawSkillHubAgentId=e)}).catch(e=>{this.uclawSkillHubError=`技能暂不可用：${e instanceof Error?e.message:String(e)}`}).finally(()=>{this.uclawSkillHubLoading=!1,this.requestUpdate?.()}))},this.selectUclawSkillHubSkill=async(e,t)=>{let n=this.state,r=t?.trim?.()??``;if(!n?.connected||!r||this.uclawSkillHubSaving)return;let i=this.context.runtimeConfig;if(!i)return this.uclawSkillHubError=`技能配置服务不可用`,this.requestUpdate?.();this.uclawSkillHubSaving=!0,this.uclawSkillHubError=null,this.uclawSkillHubNotice=null,this.requestUpdate?.();let a=-1,o=!1,s=[];try{await i.ensureLoaded(),a=i.ensureAgentEntry(e);if(a<0)throw Error(`无法创建 Agent 技能配置`);let t=i.state.configForm??i.state.configSnapshot?.config,n=Array.isArray(t?.agents?.list)?t.agents.list[a]:void 0,c=Array.isArray(n?.skills)?n.skills.filter(e=>typeof e==`string`&&e.trim()).map(e=>e.trim()):null;o=Array.isArray(c),s=o?c:[];let l=[...new Set([...s,r])];i.patchForm([`agents`,`list`,a,`skills`],l);let u=await i.save();if(u===!1)throw Error(i.state.lastError??`保存失败`);await this.context.agents.refreshList(),this.uclawSkillHubSelected=r,this.uclawSkillHubNotice=`已保存，新会话生效`}catch(e){try{a>=0&&(o?i.patchForm([`agents`,`list`,a,`skills`],s):i.removeFormValue?.([`agents`,`list`,a,`skills`]))}catch{}this.uclawSkillHubError=`保存技能选择失败：${e instanceof Error?e.message:String(e)}`}finally{this.uclawSkillHubSaving=!1,this.requestUpdate?.()}},this.handleCommandPaletteSlashCommand=";
   const legacyConstructorState =
-    "this.unreadPatchGuard=new sn,this.uclawSkillHubReport=null,this.uclawSkillHubAgentId=null,this.uclawSkillHubLoading=!1,this.uclawSkillHubSaving=!1,this.uclawSkillHubError=null,this.uclawSkillHubNotice=null,this.uclawSkillHubSelected=``,this.loadUclawSkillHubSkills=async e=>{let t=this.state;if(!t?.client||!t.connected||!e)return;this.uclawSkillHubAgentId===e&&this.uclawSkillHubReport&&!this.uclawSkillHubError||(this.uclawSkillHubAgentId=e,this.uclawSkillHubLoading=!0,this.uclawSkillHubError=null,this.requestUpdate?.(),await t.client.request(`skills.status`,{agentId:e}).then(t=>{this.state&&x_(this.state)===e&&(this.uclawSkillHubReport=t,this.uclawSkillHubAgentId=e)}).catch(e=>{this.uclawSkillHubError=`SkillHub 暂不可用：${e instanceof Error?e.message:String(e)}`}).finally(()=>{this.uclawSkillHubLoading=!1,this.requestUpdate?.()}))},this.selectUclawSkillHubSkill=async(e,t)=>{let n=this.state,r=t?.trim?.()??``;if(!n?.connected||!r||this.uclawSkillHubSaving)return;let i=this.context.runtimeConfig;if(!i)return this.uclawSkillHubError=`SkillHub 配置服务不可用`,this.requestUpdate?.();this.uclawSkillHubSaving=!0,this.uclawSkillHubError=null,this.uclawSkillHubNotice=null,this.requestUpdate?.();try{await i.ensureLoaded();let t=i.ensureAgentEntry(e);if(t<0)throw Error(`无法创建 Agent 技能配置`);i.patchForm([`agents`,`list`,t,`skills`],[r]);let a=await i.save();if(a===!1)throw Error(i.state.lastError??`保存失败`);await this.context.agents.refreshList(),this.uclawSkillHubSelected=r,this.uclawSkillHubNotice=`已保存，新会话生效`}catch(e){this.uclawSkillHubError=`保存 SkillHub 选择失败：${e instanceof Error?e.message:String(e)}`}finally{this.uclawSkillHubSaving=!1,this.requestUpdate?.()}},this.handleCommandPaletteSlashCommand=";
+    "this.unreadPatchGuard=new sn,this.uclawSkillHubReport=null,this.uclawSkillHubAgentId=null,this.uclawSkillHubLoading=!1,this.uclawSkillHubSaving=!1,this.uclawSkillHubError=null,this.uclawSkillHubNotice=null,this.uclawSkillHubSelected=``,this.loadUclawSkillHubSkills=async e=>{let t=this.state;if(!t?.client||!t.connected||!e)return;this.uclawSkillHubAgentId===e&&this.uclawSkillHubReport&&!this.uclawSkillHubError||(this.uclawSkillHubAgentId=e,this.uclawSkillHubLoading=!0,this.uclawSkillHubError=null,this.requestUpdate?.(),await t.client.request(`skills.status`,{agentId:e}).then(t=>{this.state&&x_(this.state)===e&&(this.uclawSkillHubReport=t,this.uclawSkillHubAgentId=e)}).catch(e=>{this.uclawSkillHubError=`技能商店暂不可用：${e instanceof Error?e.message:String(e)}`}).finally(()=>{this.uclawSkillHubLoading=!1,this.requestUpdate?.()}))},this.selectUclawSkillHubSkill=async(e,t)=>{let n=this.state,r=t?.trim?.()??``;if(!n?.connected||!r||this.uclawSkillHubSaving)return;let i=this.context.runtimeConfig;if(!i)return this.uclawSkillHubError=`技能配置服务不可用`,this.requestUpdate?.();this.uclawSkillHubSaving=!0,this.uclawSkillHubError=null,this.uclawSkillHubNotice=null,this.requestUpdate?.();try{await i.ensureLoaded();let t=i.ensureAgentEntry(e);if(t<0)throw Error(`无法创建 Agent 技能配置`);i.patchForm([`agents`,`list`,t,`skills`],[r]);let a=await i.save();if(a===!1)throw Error(i.state.lastError??`保存失败`);await this.context.agents.refreshList(),this.uclawSkillHubSelected=r,this.uclawSkillHubNotice=`已保存，新会话生效`}catch(e){this.uclawSkillHubError=`保存技能选择失败：${e instanceof Error?e.message:String(e)}`}finally{this.uclawSkillHubSaving=!1,this.requestUpdate?.()}},this.handleCommandPaletteSlashCommand=";
 
   for (const file of listAssetFiles(/^chat-page-.*\.js$/, "chat-page")) {
     let source = read(file);
-    source = source.replaceAll("`SkillHub skill`", "`SkillHub 技能`");
+    source = source.replaceAll("`SkillHub skill`", "`技能商店技能`");
+    source = source
+      .replaceAll("aria-label=\"SkillHub\"", "aria-label=\"技能商店\"")
+      .replaceAll("SkillHub：${i}", "技能商店：${i}")
+      .replaceAll(">SkillHub<", ">技能商店<")
+      .replaceAll("正在加载 SkillHub 技能…", "正在加载技能商店技能…")
+      .replaceAll("未找到可用于聊天的 SkillHub 技能。", "未找到可用于聊天的技能商店技能。")
+      .replaceAll("`SkillHub 技能`", "`技能商店技能`")
+      .replaceAll("replaceAll(`ClawHub`,`SkillHub`)", "replaceAll(`ClawHub`,`技能商店`)");
     source = source.replaceAll("n||`选择 Skill`", "n||`选择你的技能`");
     source = source.replaceAll(
-      "i=e.loading?`加载中…`:r?UcSkillHubLabel(r):n||`选择 SkillHub`",
+      "i=e.loading?`加载中…`:r?UcSkillHubLabel(r):n||`选择你的技能`",
       "i=!e.connected?`技能暂不可用`:e.loading?`加载中…`:r?UcSkillHubLabel(r):n||`选择你的技能`",
     );
-    source = source.replaceAll("n||`选择 SkillHub`", "n||`选择你的技能`");
-    source = source.replaceAll("`SkillHub 暂不可用`", "`技能暂不可用`");
-    source = source.replaceAll("SkillHub 暂不可用：${e instanceof Error?e.message:String(e)}", "技能暂不可用：${e instanceof Error?e.message:String(e)}");
-    source = source.replaceAll("`SkillHub 配置服务不可用`", "`技能配置服务不可用`");
-    source = source.replaceAll("`保存 SkillHub 选择失败：${e instanceof Error?e.message:String(e)}`", "`保存技能选择失败：${e instanceof Error?e.message:String(e)}`");
-    source = source.replaceAll("保存 SkillHub 选择失败：${e instanceof Error?e.message:String(e)}", "保存技能选择失败：${e instanceof Error?e.message:String(e)}");
+    source = source.replaceAll("n||`选择你的技能`", "n||`选择你的技能`");
+    source = source.replaceAll("`技能暂不可用`", "`技能暂不可用`");
+    source = source.replaceAll("技能商店暂不可用：${e instanceof Error?e.message:String(e)}", "技能暂不可用：${e instanceof Error?e.message:String(e)}");
+    source = source.replaceAll("`技能配置服务不可用`", "`技能配置服务不可用`");
+    source = source.replaceAll("`保存技能选择失败：${e instanceof Error?e.message:String(e)}`", "`保存技能选择失败：${e instanceof Error?e.message:String(e)}`");
+    source = source.replaceAll("保存技能选择失败：${e instanceof Error?e.message:String(e)}", "保存技能选择失败：${e instanceof Error?e.message:String(e)}");
     source = source.replaceAll(
-      "i=!e.connected?`SkillHub 暂不可用`:e.loading?`加载中…`:r?UcSkillHubLabel(r):n||`选择 SkillHub`",
+      "i=!e.connected?`技能暂不可用`:e.loading?`加载中…`:r?UcSkillHubLabel(r):n||`选择你的技能`",
       "i=!e.connected?`技能暂不可用`:e.loading?`加载中…`:r?UcSkillHubLabel(r):n||`选择你的技能`",
     );
     source = source
@@ -3094,7 +3410,259 @@ function patchAgentsPageUiCopy() {
   for (const file of listAssetFiles(/^agents-page-.*\.js$/, "agents-page")) {
     const before = read(file);
     const recovered = replacePairs(before, recoveryPairs);
-    const after = replacePairs(recovered, pairs);
+    let after = replacePairs(recovered, pairs)
+      .replace("this.agentsPanel=`files`,this.toolsCatalogLoading", "this.agentsPanel=`overview`,this.toolsCatalogLoading");
+
+    const expertLandingHelper = [
+      "function UcExpertTemplates(){return[",
+      "{id:`copywriter`,name:`文案写手`,avatar:`文`,category:`内容创作`,description:`把需求转成清晰、克制、可发布的中文文案。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是专业中文文案写手。先澄清目标人群、渠道、语气和转化目标，再给出可直接发布的标题、正文、备选表达和修改建议。回答要具体、克制、可执行。`},",
+      "{id:`xiaohongshu`,name:`小红书写手`,avatar:`红`,category:`内容创作`,description:`面向种草、标题、封面文案与笔记结构。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是小红书内容专家。围绕人群痛点、使用场景、标题钩子、封面文字、正文结构和互动引导来产出笔记。避免夸大承诺，优先给多版可选方案。`},",
+      "{id:`career`,name:`职业顾问`,avatar:`职`,category:`职业发展`,description:`梳理职业选择、面试准备、简历表达与成长计划。`,model:`默认模型`,skills:[],safety:`restricted`,prompt:`你是职业顾问。帮助用户拆解职业问题、简历定位、面试表达和行动计划。涉及重大职业选择时，说明假设和权衡，避免替用户做不可逆决定。`},",
+      "{id:`machine-learning`,name:`机器学习`,avatar:`学`,category:`开发编程`,description:`解释模型、算法、实验设计与工程落地。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是机器学习专家。用准确术语解释算法、实验设计、数据处理、评估指标和工程落地。回答要包含关键假设、常见坑和可验证步骤。`},",
+      "{id:`resume`,name:`简历写手`,avatar:`历`,category:`职业发展`,description:`把经历整理成更清楚的岗位匹配表达。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是简历写手。根据岗位目标提炼经历、量化成果、优化项目描述和个人优势。优先输出可复制到简历中的中文表达，并指出需要用户补充的数据。`},",
+      "{id:`startup-ideas`,name:`创业点子王`,avatar:`创`,category:`商业运营`,description:`从人群、痛点、渠道和验证成本推演业务想法。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是创业点子顾问。围绕用户群、刚需场景、现有替代方案、获客渠道、MVP 和验证成本生成想法。每个想法都要给风险、验证方法和下一步行动。`},",
+      "{id:`product-manager`,name:`产品经理`,avatar:`产`,category:`产品策略`,description:`拆需求、写 PRD、排优先级和验收标准。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是产品经理。先明确用户、场景、目标指标、约束和边界，再输出需求拆解、PRD 结构、优先级、交互流程、验收标准和风险。回答要克制、可执行，避免空泛口号。`},",
+      "{id:`data-analyst`,name:`数据分析师`,avatar:`数`,category:`数据分析`,description:`拆指标、看口径、找异常和给分析框架。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是数据分析师。围绕业务问题定义指标口径、拆解漏斗、定位异常、设计对比和输出结论。回答需区分事实、假设和建议，并提示需要补充的数据。`},",
+      "{id:`code-reviewer`,name:`代码审查`,avatar:`码`,category:`开发编程`,description:`按风险、回归、可维护性和测试缺口审查代码。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是资深代码审查专家。优先指出 bug、回归风险、安全风险、边界条件和缺失测试，按严重程度排序。不要泛泛评价风格；每个问题都要说明影响、触发条件和建议修复方向。`},",
+      "{id:`test-designer`,name:`测试用例专家`,avatar:`测`,category:`质量保障`,description:`把需求转成边界、回归和验收用例。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是测试用例专家。根据需求拆分正常路径、异常路径、边界条件、兼容性、回归范围和验收标准。输出清晰的测试矩阵，并标注优先级和需要准备的数据。`},",
+      "{id:`meeting-summary`,name:`会议纪要`,avatar:`会`,category:`办公效率`,description:`整理会议摘要、决议、待办和风险跟进。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是会议纪要专家。把输入内容整理成背景、关键讨论、明确决议、待办事项、负责人、截止时间和未决问题。缺少信息时用待确认标注，不要编造。`},",
+      "{id:`translation-polish`,name:`翻译润色`,avatar:`译`,category:`办公效率`,description:`中英互译、商务表达、语气调整和润色。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是翻译润色专家。根据目标读者和语气要求进行中英互译、改写和润色。保留原意，说明关键措辞差异，并在需要时给正式、自然、简洁多个版本。`},",
+      "{id:`contract-review`,name:`合同审阅`,avatar:`合`,category:`办公效率`,description:`梳理条款风险、缺失信息和谈判问题。`,model:`默认模型`,skills:[],safety:`restricted`,prompt:`你是合同审阅助手，不构成法律意见。帮助用户梳理合同结构、关键义务、付款、违约、解除、保密、知识产权和争议解决条款中的风险点，并给出需要向专业律师确认的问题清单。`},",
+      "{id:`customer-support`,name:`客服话术`,avatar:`客`,category:`商业运营`,description:`生成回复模板、安抚话术和升级路径。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是客服话术专家。根据客户情绪、问题类型、业务规则和可提供补偿，输出礼貌、清晰、可执行的回复模板。复杂问题要给升级路径、记录要点和禁止承诺。`},",
+      "{id:`operation-planner`,name:`活动运营`,avatar:`营`,category:`商业运营`,description:`设计活动方案、渠道节奏、转化路径和复盘指标。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是活动运营专家。围绕目标用户、核心卖点、渠道、时间节奏、资源预算和转化指标设计活动方案。输出活动机制、文案方向、执行清单、风险和复盘指标。`},",
+      "{id:`ppt-outline`,name:`汇报策划`,avatar:`演`,category:`办公效率`,description:`把材料整理成汇报结构、页面标题和讲述节奏。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是汇报策划专家。根据受众、目标和材料，整理故事线、章节结构、页面标题、关键论据和讲述节奏。优先让结论明确、证据充分、下一步清楚。`}",
+      "]}",
+      "function UcExpertAgentId(e){return`uclaw-expert-${e.id}`}",
+      "function UcExpertDefaultAgentId(e){return e.agentsList?.defaultId??`main`}",
+      "function UcExpertPersonaStore(){try{let e=JSON.parse(globalThis.localStorage?.getItem(`uclaw.expertPersonas.v1`)||`{}`);return e&&typeof e==`object`&&!Array.isArray(e)?e:{}}catch{return{}}}",
+      "function UcSetExpertPersona(e,t){try{if(!e)return;let n=UcExpertPersonaStore();n[e]=t,globalThis.localStorage?.setItem(`uclaw.expertPersonas.v1`,JSON.stringify(n))}catch{}}",
+      "function UcExpertPrompt(e){return[`# ${e.name}`,``,e.prompt,``,`## 回答原则`,`- 默认使用中文，除非用户要求其他语言。`,`- 先识别用户目标和约束，再给出专业建议。`,`- 不确定时说明假设，并给出可验证的下一步。`,``,`## U-Claw Expert Metadata`,`- Template: ${e.id}` ,`- Category: ${e.category}`,`- Model: ${e.model}`,`- Skills: ${Array.isArray(e.skills)&&e.skills.length?e.skills.join(`, `):`默认继承`}`].join(`\\n`)}",
+      "function UcCustomExpertDefaults(){return{name:``,avatar:`专`,description:``,prompt:``,model:``,skills:[]}}",
+      "function UcExpertSlug(e){return(e||`custom`).toLowerCase().replace(/[^a-z0-9\\u4e00-\\u9fa5]+/g,`-`).replace(/^-+|-+$/g,``).slice(0,48)||`custom`}",
+      "function UcCustomExpertAgentId(e){return`uclaw-expert-custom-${UcExpertSlug(e)}`}",
+      "function UcCustomExpertPrompt(e,t){let n=Array.isArray(e.skills)&&e.skills.length?e.skills.join(`, `):`默认继承`;return[`# ${e.name}`,``,e.description?`> ${e.description}`:``,e.description?``:``,e.prompt,``,`## 回答原则`,`- 默认使用中文，除非用户要求其他语言。`,`- 按专家角色给出更专业、可执行的回答。`,`- 不确定时说明假设，并给出可验证的下一步。`,``,`## U-Claw Expert Metadata`,`- Custom Expert: ${t}`,`- Model: ${e.model||`默认继承`}`,`- Skills: ${n}`].filter(e=>e!==``).join(`\\n`)}",
+      "function UcExpertAvailableSkills(e){return(e.agentSkills?.report?.skills??[]).filter(e=>e&&typeof e.name==`string`&&e.name.trim()).map(e=>({name:e.name.trim(),description:String(e.description||e.summary||``)}))}",
+      "function UcExpertConfigEntry(e,t){return(e.config?.form?.agents?.list??[]).find(e=>e?.id===t)??null}",
+      "function UcExpertSectionTitle(e,t,n){return a`<div class='uclaw-expert-section-title'><span class='uclaw-step'>${e}</span><div><div class='card-title'>${t}</div>${n?a`<div class='card-sub'>${n}</div>`:null}</div></div>`}",
+      "function UcCustomExpertForm(e){let t=e.customExpertForm??UcCustomExpertDefaults(),n=new Set(Array.isArray(t.skills)?t.skills:[]),r=UcExpertAvailableSkills(e),i=!!e.expertCreateBusyId,o=Array.isArray(t.skills)?t.skills.length:0,s=(t.avatar??`专`).trim()||`专`,c=(t.name??``).trim()||`自定义专家`,l=(t.description??``).trim()||`补充一句说明，让会话更容易辨认`,u=!!(t.prompt??``).trim();return a`<section class='uclaw-create-panel uclaw-custom-expert-form' data-uclaw-custom-expert-form data-preserve-on-failure='表单失败不会清空'>${UcExpertSectionTitle(`2`,`自定义创建`,`没有合适模板时，用一张专家卡片快速定义角色。`)}<div class='uclaw-custom-card-head'><div class='uclaw-custom-preview-avatar'>${s.slice(0,4)}</div><div class='uclaw-custom-preview-copy'><div class='uclaw-custom-preview-title'>${c}</div><div class='uclaw-custom-preview-sub'>${l}</div></div><span class='uclaw-custom-preview-badge'>${u?`Prompt 已填写`:`待填写`}</span></div><div class='uclaw-custom-expert-grid'><label class='uclaw-custom-expert-field'><span class='uclaw-field-top'><span>专家名称</span><b>必填</b></span><input class='input uclaw-form-control' .value=${t.name??``} placeholder='例如：合同审阅专家' @input=${t=>e.onCustomExpertField?.(`name`,t.target.value)} /></label><label class='uclaw-custom-expert-field'><span class='uclaw-field-top'><span>头像</span><em>1-4 字</em></span><input class='input uclaw-form-control' maxlength='4' .value=${t.avatar??``} placeholder='专' @input=${t=>e.onCustomExpertField?.(`avatar`,t.target.value)} /></label><label class='uclaw-custom-expert-field wide'><span class='uclaw-field-top'><span>一句话描述</span><em>用于会话识别</em></span><input class='input uclaw-form-control' .value=${t.description??``} placeholder='说明这个专家适合解决什么问题' @input=${t=>e.onCustomExpertField?.(`description`,t.target.value)} /></label><label class='uclaw-custom-expert-field wide'><span class='uclaw-field-top'><span>Prompt</span><b>必填</b></span><textarea class='input uclaw-form-control uclaw-custom-expert-textarea' .value=${t.prompt??``} placeholder='写清楚专家角色、回答原则、边界和输出格式。' @input=${t=>e.onCustomExpertField?.(`prompt`,t.target.value)}></textarea></label><details class='uclaw-expert-options wide'><summary><span>模型与技能</span><span>${t.model?`已选模型`:o?`${o} 个技能`:`可选`}</span></summary><div class='uclaw-expert-options-body'><label class='uclaw-custom-expert-field'><span>模型</span><select class='input uclaw-form-control' .value=${t.model??``} @change=${t=>e.onCustomExpertField?.(`model`,t.target.value)}><option value=''>继承默认模型</option>${ie(e.config?.form,t.model||void 0,e.modelCatalog,t.model||null)}</select></label><div class='uclaw-custom-expert-field wide'><div class='row uclaw-section-head compact'><span>技能选择</span><button class='btn btn--sm' type='button' ?disabled=${e.agentSkills?.loading} @click=${()=>e.onCustomExpertRefreshSkills?.()}>${e.agentSkills?.loading?`刷新中…`:`刷新`}</button></div>${e.agentSkills?.error?a`<div class='uclaw-expert-status danger'>技能读取失败：${e.agentSkills.error}</div>`:null}<div class='uclaw-custom-expert-skills'>${r.length?r.map(r=>a`<label class='uclaw-custom-expert-skill'><input type='checkbox' .checked=${n.has(r.name)} @change=${t=>e.onCustomExpertSkill?.(r.name,t.target.checked)} /><span>${r.name}</span>${r.description?a`<small>${r.description}</small>`:null}</label>`):a`<div class='muted uclaw-empty-state'>暂无可选技能。点击刷新读取当前技能状态。</div>`}</div></div></div></details></div><div class='uclaw-custom-expert-actions'><button class='btn primary' type='button' ?disabled=${i||!e.connected} @click=${()=>e.onCreateCustomExpert?.()}>${e.expertCreateBusyId===`custom`?`创建中…`:`创建并进入会话`}</button><button class='btn btn--ghost' type='button' ?disabled=${i} @click=${()=>e.onResetCustomExpert?.()}>清空</button></div></section>`}",
+      "function UcCustomExpertModal(e){return e.customExpertModalOpen?a`<div class='uclaw-custom-expert-modal' data-uclaw-custom-expert-modal role='dialog' aria-modal='true' aria-label='自定义创建专家' @click=${t=>{t.target===t.currentTarget&&e.onCloseCustomExpert?.()}}><div class='uclaw-custom-expert-modal-card'><div class='uclaw-modal-head'><div><div class='card-title'>自定义创建专家</div><div class='card-sub'>填写角色信息后，会写入 AGENTS.md 并进入对应专家会话。</div></div><button class='btn btn--ghost uclaw-modal-close' type='button' @click=${()=>e.onCloseCustomExpert?.()} aria-label='关闭'>关闭</button></div>${UcCustomExpertForm(e)}</div></div>`:null}",
+      "function UcExpertTemplateByAgentId(e){return UcExpertTemplates().find(t=>UcExpertAgentId(t)===e)??null}",
+      "function UcHiddenExpertIds(){try{return new Set(JSON.parse(globalThis.localStorage?.getItem(`uclaw.hiddenExperts.v1`)||`[]`).filter(e=>typeof e==`string`&&e.trim()))}catch{return new Set}}",
+      "function UcSetHiddenExpertId(e,t){try{let n=UcHiddenExpertIds();t?n.add(e):n.delete(e),globalThis.localStorage?.setItem(`uclaw.hiddenExperts.v1`,JSON.stringify([...n]))}catch{}}",
+      "function UcExpertSessions(e,t){return(e.sessionsResult?.sessions??[]).filter(e=>e&&typeof e.key==`string`&&m(e.key)?.agentId===t).slice(0,5)}",
+      "function UcRecentExpertSessions(e){return(e.sessionsResult?.sessions??[]).filter(e=>e&&typeof e.key==`string`).slice(0,6)}",
+      "function UcExpertCatalog(e){let t=UcHiddenExpertIds(),n=e.agentsList?.agents??[],r=new Map(n.map(e=>[e.id,e])),i=new Set(UcExpertTemplates().map(UcExpertAgentId)),a=UcExpertTemplates().map(t=>{let n=UcExpertAgentId(t),i=r.get(n)??null,o=UcExpertConfigEntry(e,n);return{...t,agentId:n,source:`built-in`,installed:!!i,agent:i,model:o?.model?String(o.model):t.model,skills:Array.isArray(o?.skills)?o.skills:t.skills,sessionCount:UcExpertSessions(e,n).length}}),o=n.filter(e=>typeof e.id==`string`&&e.id.startsWith(`uclaw-expert-`)&&!i.has(e.id)&&!t.has(e.id)).map(t=>{let n=UcExpertConfigEntry(e,t.id);return{id:t.id,name:t.name||t.id,avatar:t.emoji||`专`,category:`自定义专家`,description:`用户创建的专家，复用 OpenClaw Agent 与 AGENTS.md。`,model:n?.model?String(n.model):t.model?String(t.model):`默认模型`,skills:Array.isArray(n?.skills)?n.skills:[],safety:`allowed`,prompt:`打开 AGENTS.md 查看或编辑专家提示词。`,agentId:t.id,source:`custom`,installed:!0,agent:t,sessionCount:UcExpertSessions(e,t.id).length}});return[...a,...o]}",
+      "function UcExpertActionButtons(e,t){let n=t.installed?`创建会话`:`选择创建`,r=e.expertCreateBusyId===t.id;return a`<div class='uclaw-expert-card-actions'><button class='btn btn--sm primary' type='button' ?disabled=${!!e.expertCreateBusyId||!e.connected} @click=${()=>t.installed?e.onNewExpertSession?.(t.agentId,t.name):e.onCreateExpert?.(t.id)}>${r?`创建中…`:n}</button></div>`}",
+      "function UcExpertTemplateCard(e,t){return a`<article class='uclaw-expert-card ${t.installed?`is-installed`:`is-template`}' data-uclaw-expert-card=${t.agentId}><div class='uclaw-expert-card-main'><div class='uclaw-expert-avatar'>${t.avatar}</div><div class='uclaw-expert-body'><div class='uclaw-expert-name'>${t.name}</div><div class='uclaw-expert-meta'>${t.category} · ${t.installed?`已可用`:`模板`}</div><div class='uclaw-expert-desc'>${t.description}</div></div></div>${UcExpertActionButtons(e,t)}</article>`}",
+      "function UcExpertTemplatePicker(e,t){let n=t.filter(e=>e.source===`built-in`);return a`<section class='uclaw-create-panel uclaw-expert-manager' data-uclaw-expert-manager>${UcExpertSectionTitle(`1`,`选择专家创建`,`优先从模板开始，选择后自动创建专家并进入会话。`)}<div class='uclaw-expert-card-grid'>${n.map(t=>UcExpertTemplateCard(e,t))}</div></section>`}",
+      "function UcExpertManagement(e,t){return UcExpertTemplatePicker(e,t)}",
+      "function UcExpertDetail(e,t){return null}",
+      "function UcExpertLanding(e,t,n){let r=UcExpertCatalog(e);return a`",
+      "    <section class='uclaw-expert-landing' data-uclaw-expert-landing data-uclaw-expert-create-center>",
+      "      <div class='uclaw-expert-page-head'>",
+      "        <div>",
+      "          <h2>创建专家</h2>",
+      "          <p>选择一个专家模板，或自定义一个角色。</p>",
+      "        </div>",
+      "        <button class='btn primary uclaw-open-custom-expert' type='button' ?disabled=${!!e.expertCreateBusyId||!e.connected} @click=${()=>e.onOpenCustomExpert?.()}>自定义创建</button>",
+      "      </div>",
+      "      ${e.expertCreateError?a`<div class='uclaw-expert-status danger'>${e.expertCreateError}</div>`:e.expertCreateMessage?a`<div class='uclaw-expert-status ok'>${e.expertCreateMessage}</div>`:null}",
+      "      <div class='uclaw-create-layout'>",
+      "        ${UcExpertTemplatePicker(e,r)}",
+      "      </div>",
+      "      ${UcCustomExpertModal(e)}",
+      "    </section>",
+      "  `}",
+    ].join("\n");
+
+    const expertLandingStart = "function UcExpertTemplates(){return[";
+    if (after.includes(expertLandingStart)) {
+      const start = after.indexOf(expertLandingStart);
+      const end = after.indexOf("function Qn(e){", start);
+      if (end >= 0) {
+        after = `${after.slice(0, start)}${expertLandingHelper}${after.slice(end)}`;
+      }
+    } else {
+      after = after.replace("function Qn(e){", `${expertLandingHelper}function Qn(e){`);
+    }
+    if (!after.includes("${UcExpertLanding(e,i,n)}")) {
+      after = after.replace(
+        '<div class="agents-layout">\n      <section class="agents-toolbar">',
+        '<div class="agents-layout">\n      ${UcExpertLanding(e,i,n)}\n      <section class="agents-toolbar">',
+      );
+    }
+    if (!after.includes("sessionsResult:this.sessionsResult")) {
+      after = after.replace(
+        "agentSkills:{report:this.agentSkillsReport,loading:this.agentSkillsLoading,error:this.agentSkillsError,agentId:this.agentSkillsAgentId,filter:this.skillsFilter},toolsCatalog:",
+        "agentSkills:{report:this.agentSkillsReport,loading:this.agentSkillsLoading,error:this.agentSkillsError,agentId:this.agentSkillsAgentId,filter:this.skillsFilter},sessionsResult:this.sessionsResult,toolsCatalog:",
+      );
+    }
+    if (!after.includes("expertCreateBusyId:null")) {
+      after = after.replace(
+        "this.agentSkillsReport=null,this.agentSkillsAgentId=null,this.skillsFilter=``,",
+        "this.agentSkillsReport=null,this.agentSkillsAgentId=null,this.expertCreateBusyId=null,this.expertCreateMessage=null,this.expertCreateError=null,this.skillsFilter=``,",
+      );
+    }
+    if (!after.includes("customExpertForm=UcCustomExpertDefaults()")) {
+      after = after.replace(
+        "this.expertCreateBusyId=null,this.expertCreateMessage=null,this.expertCreateError=null,this.skillsFilter=``,",
+        "this.expertCreateBusyId=null,this.expertCreateMessage=null,this.expertCreateError=null,this.customExpertForm=UcCustomExpertDefaults(),this.skillsFilter=``,",
+      );
+    }
+    if (!after.includes("customExpertModalOpen=!1")) {
+      after = after.replace(
+        "this.customExpertForm=UcCustomExpertDefaults(),this.skillsFilter=``,",
+        "this.customExpertForm=UcCustomExpertDefaults(),this.customExpertModalOpen=!1,this.skillsFilter=``,",
+      );
+    }
+    if (!after.includes("async createExpertFromTemplate(")) {
+      after = after.replace(
+        "runCronJobNow(e){let t=this.cron.cronJobs.find(t=>t.id===e);t&&xe(this.cron,t,`force`).finally(()=>{this.cron={...this.cron,cronJobs:[...this.cron.cronJobs]}})}render(){",
+        "runCronJobNow(e){let t=this.cron.cronJobs.find(t=>t.id===e);t&&xe(this.cron,t,`force`).finally(()=>{this.cron={...this.cron,cronJobs:[...this.cron.cronJobs]}})}openExpertSession(e){e&&(this.context.gateway.setSessionKey(e),this.context.navigate(`chat`,{search:`?session=${encodeURIComponent(e)}`}))}async createSessionForExpert(e,t){if(!this.client||!this.connected){this.expertCreateError=`Gateway 未连接，无法创建专家会话。`;return}this.expertCreateBusyId=`session-${e}`,this.expertCreateMessage=null,this.expertCreateError=null;try{let n=await this.client.request(`sessions.create`,{agentId:e,label:t||e});if(!n?.key)throw new Error(`sessions.create returned no key`);this.expertCreateMessage=`已创建专家会话：${t||e}`,this.openExpertSession(n.key)}catch(e){this.expertCreateError=`创建专家会话失败：${e instanceof Error?e.message:String(e)}`}finally{this.expertCreateBusyId=null,this.requestUpdate()}}continueExpertSession(e,t){let n=UcExpertSessions({sessionsResult:this.sessionsResult},e)[0];n?.key?this.openExpertSession(n.key):void this.createSessionForExpert(e,t)}async editExpert(e){this.selectAgent(e),this.agentsPanel=`files`,this.agentFileActive=`AGENTS.md`,this.expertCreateMessage=`已打开专家核心文件 AGENTS.md，可编辑 prompt 后保存。`,this.expertCreateError=null,await this.loadAgentFiles(e,!0),await ke(this,e,`AGENTS.md`,{force:!0,preserveDraft:!0}),this.requestUpdate()}archiveExpert(e,t){if(UcExpertTemplateByAgentId(e)){this.expertCreateMessage=`内置专家不会归档；可编辑后另存为自定义专家。`,this.expertCreateError=null}else UcSetHiddenExpertId(e,!0),this.expertCreateMessage=`已从专家列表归档：${t||e}。底层 Agent 与历史会话未删除。`,this.expertCreateError=null;this.requestUpdate()}async createExpertFromTemplate(e){let t=UcExpertTemplates().find(t=>t.id===e);if(!t)return;if(!this.client||!this.connected){this.expertCreateError=`Gateway 未连接，无法创建专家。`;return}if(this.context.runtimeConfig.state.configFormDirty){this.expertCreateError=`存在未保存配置，请先保存或撤销后再创建专家。`;return}let n=this.client,r=UcExpertAgentId(t),i=t.name,a=`~/.openclaw/agents/${r}/workspace`;this.expertCreateBusyId=t.id,this.expertCreateMessage=null,this.expertCreateError=null;try{let e=(this.agentsList?.agents??[]).some(e=>e.id===r);if(!e)try{await n.request(`agents.create`,{name:r,workspace:a,emoji:t.avatar})}catch(e){if(!/already exists/i.test(String(e)))throw e}await n.request(`agents.update`,{agentId:r,name:i,workspace:a,emoji:t.avatar});let o=UcExpertPrompt(t);await n.request(`agents.files.set`,{agentId:r,name:`AGENTS.md`,content:o});let s=await n.request(`agents.files.get`,{agentId:r,name:`AGENTS.md`});if(!s?.file?.content?.includes(t.prompt))throw new Error(`AGENTS.md readback missing expert prompt`);await this.context.runtimeConfig.refresh({discardPendingChanges:!0});let c=this.ensureAgentIndex(r);if(c<0)throw new Error(`runtimeConfig readback missing agent ${r}`);if(Array.isArray(t.skills)&&t.skills.length>0)this.context.runtimeConfig.patchForm([`agents`,`list`,c,`skills`],t.skills);if(typeof t.modelRef==`string`&&t.modelRef.trim())this.context.runtimeConfig.patchForm([`agents`,`list`,c,`model`],t.modelRef.trim());(Array.isArray(t.skills)&&t.skills.length>0||typeof t.modelRef==`string`&&t.modelRef.trim())&&await this.context.runtimeConfig.save();await this.context.agents.refreshList(),this.syncAgentState();let l=this.agentsList?.agents?.find(e=>e.id===r);if(!l)throw new Error(`agents.list readback missing ${r}`);this.agentsSelectedId=r,this.context.agentIdentity.ensure([r]);let u=await n.request(`sessions.create`,{agentId:r,label:i});if(!u?.key)throw new Error(`sessions.create returned no key`);this.expertCreateMessage=`已创建专家并进入会话：${i}`,this.openExpertSession(u.key)}catch(e){this.expertCreateError=`创建专家失败：${e instanceof Error?e.message:String(e)}`}finally{this.expertCreateBusyId=null,this.requestUpdate()}}render(){",
+      );
+    }
+    if (!after.includes("async createSessionForExpert(")) {
+      after = after.replace(
+        "runCronJobNow(e){let t=this.cron.cronJobs.find(t=>t.id===e);t&&xe(this.cron,t,`force`).finally(()=>{this.cron={...this.cron,cronJobs:[...this.cron.cronJobs]}})}async createExpertFromTemplate",
+        "runCronJobNow(e){let t=this.cron.cronJobs.find(t=>t.id===e);t&&xe(this.cron,t,`force`).finally(()=>{this.cron={...this.cron,cronJobs:[...this.cron.cronJobs]}})}openExpertSession(e){e&&(this.context.gateway.setSessionKey(e),this.context.navigate(`chat`,{search:`?session=${encodeURIComponent(e)}`}))}async createSessionForExpert(e,t){if(!this.client||!this.connected){this.expertCreateError=`Gateway 未连接，无法创建专家会话。`;return}this.expertCreateBusyId=`session-${e}`,this.expertCreateMessage=null,this.expertCreateError=null;try{let n=await this.client.request(`sessions.create`,{agentId:e,label:t||e});if(!n?.key)throw new Error(`sessions.create returned no key`);this.expertCreateMessage=`已创建专家会话：${t||e}`,this.openExpertSession(n.key)}catch(e){this.expertCreateError=`创建专家会话失败：${e instanceof Error?e.message:String(e)}`}finally{this.expertCreateBusyId=null,this.requestUpdate()}}continueExpertSession(e,t){let n=UcExpertSessions({sessionsResult:this.sessionsResult},e)[0];n?.key?this.openExpertSession(n.key):void this.createSessionForExpert(e,t)}async editExpert(e){this.selectAgent(e),this.agentsPanel=`files`,this.agentFileActive=`AGENTS.md`,this.expertCreateMessage=`已打开专家核心文件 AGENTS.md，可编辑 prompt 后保存。`,this.expertCreateError=null,await this.loadAgentFiles(e,!0),await ke(this,e,`AGENTS.md`,{force:!0,preserveDraft:!0}),this.requestUpdate()}archiveExpert(e,t){if(UcExpertTemplateByAgentId(e)){this.expertCreateMessage=`内置专家不会归档；可编辑后另存为自定义专家。`,this.expertCreateError=null}else UcSetHiddenExpertId(e,!0),this.expertCreateMessage=`已从专家列表归档：${t||e}。底层 Agent 与历史会话未删除。`,this.expertCreateError=null;this.requestUpdate()}async createExpertFromTemplate",
+      );
+    }
+    if (!after.includes("async createCustomExpert(")) {
+      after = after.replace(
+        "archiveExpert(e,t){if(UcExpertTemplateByAgentId(e)){this.expertCreateMessage=`内置专家不会归档；可编辑后另存为自定义专家。`,this.expertCreateError=null}else UcSetHiddenExpertId(e,!0),this.expertCreateMessage=`已从专家列表归档：${t||e}。底层 Agent 与历史会话未删除。`,this.expertCreateError=null;this.requestUpdate()}async createExpertFromTemplate",
+        "archiveExpert(e,t){if(UcExpertTemplateByAgentId(e)){this.expertCreateMessage=`内置专家不会归档；可编辑后另存为自定义专家。`,this.expertCreateError=null}else UcSetHiddenExpertId(e,!0),this.expertCreateMessage=`已从专家列表归档：${t||e}。底层 Agent 与历史会话未删除。`,this.expertCreateError=null;this.requestUpdate()}resetCustomExpertForm(){this.customExpertForm=UcCustomExpertDefaults(),this.expertCreateError=null,this.requestUpdate()}updateCustomExpertField(e,t){this.customExpertForm={...(this.customExpertForm??UcCustomExpertDefaults()),[e]:t},this.requestUpdate()}toggleCustomExpertSkill(e,t){let n=new Set(this.customExpertForm?.skills??[]);t?n.add(e):n.delete(e),this.customExpertForm={...(this.customExpertForm??UcCustomExpertDefaults()),skills:[...n]},this.requestUpdate()}refreshCustomExpertSkills(){let e=this.resolveSelectedAgentId()??this.agentsList?.defaultId??this.agentsList?.agents?.[0]?.id??`main`;e&&je(this,e).finally(()=>this.requestUpdate())}async createCustomExpert(){let e=this.customExpertForm??UcCustomExpertDefaults(),t=(e.name??``).trim(),n=(e.prompt??``).trim();if(!this.client||!this.connected){this.expertCreateError=`Gateway 未连接，无法创建专家。`;return}if(!t||!n){this.expertCreateError=`请填写专家名称和 Prompt。`;return}if(this.context.runtimeConfig.state.configFormDirty){this.expertCreateError=`存在未保存配置，请先保存或撤销后再创建专家。`;return}let r=this.client,i=UcCustomExpertAgentId(t),a=(e.avatar??``).trim()||`专`,o=(e.description??``).trim(),s=(e.model??``).trim(),c=Array.isArray(e.skills)?e.skills.filter(e=>typeof e==`string`&&e.trim()).map(e=>e.trim()):[],l=`~/.openclaw/agents/${i}/workspace`;this.expertCreateBusyId=`custom`,this.expertCreateMessage=null,this.expertCreateError=null;try{let e=(this.agentsList?.agents??[]).some(e=>e.id===i);if(!e)try{await r.request(`agents.create`,{name:i,workspace:l,emoji:a})}catch(e){if(!/already exists/i.test(String(e)))throw e}await r.request(`agents.update`,{agentId:i,name:t,workspace:l,emoji:a});let u=UcCustomExpertPrompt({name:t,avatar:a,description:o,prompt:n,model:s,skills:c},i);await r.request(`agents.files.set`,{agentId:i,name:`AGENTS.md`,content:u});let d=await r.request(`agents.files.get`,{agentId:i,name:`AGENTS.md`});if(!d?.file?.content?.includes(n))throw new Error(`AGENTS.md readback missing expert prompt`);await this.context.runtimeConfig.refresh({discardPendingChanges:!0});let f=this.ensureAgentIndex(i);if(f<0)throw new Error(`runtimeConfig readback missing agent ${i}`);s?this.context.runtimeConfig.patchForm([`agents`,`list`,f,`model`],s):this.context.runtimeConfig.removeFormValue?.([`agents`,`list`,f,`model`]);c.length?this.context.runtimeConfig.patchForm([`agents`,`list`,f,`skills`],c):this.context.runtimeConfig.removeFormValue?.([`agents`,`list`,f,`skills`]);let p=await this.context.runtimeConfig.save();if(p===!1)throw new Error(this.context.runtimeConfig.state.lastError??`保存失败`);await this.context.runtimeConfig.refresh({discardPendingChanges:!0});let m=w(this.context.runtimeConfig.state)?.agents?.list,y=Array.isArray(m)?m.find(e=>e?.id===i):null;if(!y)throw new Error(`runtimeConfig readback missing agent ${i}`);let b=typeof y.model==`string`?y.model.trim():y.model&&typeof y.model==`object`?String(y.model.primary??y.model.model??y.model.id??``).trim():``;if(s&&b!==s)throw new Error(`model readback mismatch`);let x=Array.isArray(y.skills)?y.skills:[];if(c.some(e=>!x.includes(e)))throw new Error(`skills readback mismatch`);await this.context.agents.refreshList(),this.syncAgentState();let S=this.agentsList?.agents?.find(e=>e.id===i);if(!S)throw new Error(`agents.list readback missing ${i}`);this.agentsSelectedId=i,this.context.agentIdentity.ensure([i]);let C=await r.request(`sessions.create`,{agentId:i,label:t});if(!C?.key)throw new Error(`sessions.create returned no key`);this.customExpertForm=UcCustomExpertDefaults(),this.expertCreateMessage=`已创建自定义专家并进入会话：${t}`,this.openExpertSession(C.key)}catch(e){this.expertCreateError=`创建自定义专家失败：${e instanceof Error?e.message:String(e)}`}finally{this.expertCreateBusyId=null,this.requestUpdate()}}async createExpertFromTemplate",
+      );
+    }
+    if (!after.includes("openCustomExpertModal()")) {
+      after = after.replace(
+        "resetCustomExpertForm(){this.customExpertForm=UcCustomExpertDefaults(),this.expertCreateError=null,this.requestUpdate()}",
+        "openCustomExpertModal(){this.customExpertModalOpen=!0,this.expertCreateError=null,this.requestUpdate()}closeCustomExpertModal(){this.customExpertModalOpen=!1,this.requestUpdate()}resetCustomExpertForm(){this.customExpertForm=UcCustomExpertDefaults(),this.expertCreateError=null,this.requestUpdate()}",
+      );
+    }
+    after = after.replace(
+      "this.customExpertForm=UcCustomExpertDefaults(),this.expertCreateMessage=`已创建自定义专家并进入会话：${t}`",
+      "this.customExpertForm=UcCustomExpertDefaults(),this.customExpertModalOpen=!1,this.expertCreateMessage=`已创建自定义专家并进入会话：${t}`",
+    );
+    after = after
+      .replace(
+        "async editExpert(e){this.selectAgent(e),this.agentsPanel=`overview`,this.agentFileActive=`AGENTS.md`",
+        "async editExpert(e){this.selectAgent(e),this.agentsPanel=`files`,this.agentFileActive=`AGENTS.md`",
+      )
+      .replace(
+        "if(!this.client||!this.connected){this.expertCreateError=`Gateway 未连接，无法创建专家。`;return}let n=this.client,",
+        "if(!this.client||!this.connected){this.expertCreateError=`Gateway 未连接，无法创建专家。`;return}if(this.context.runtimeConfig.state.configFormDirty){this.expertCreateError=`存在未保存配置，请先保存或撤销后再创建专家。`;return}let n=this.client,",
+      )
+      .replace(
+        "let n=this.client,r=UcExpertAgentId(t),i=t.name;this.expertCreateBusyId",
+        "let n=this.client,r=UcExpertAgentId(t),i=t.name,a=`~/.openclaw/agents/${r}/workspace`;this.expertCreateBusyId",
+      )
+      .replace(
+        "agents.create`,{name:r,workspace:`default`,emoji:t.avatar}",
+        "agents.create`,{name:r,workspace:a,emoji:t.avatar}",
+      )
+      .replace(
+        "agents.update`,{agentId:r,name:i,emoji:t.avatar}",
+        "agents.update`,{agentId:r,name:i,workspace:a,emoji:t.avatar}",
+      )
+      .replace(
+        "await n.request(`agents.update`,{agentId:r,name:i,workspace:a,emoji:t.avatar});let a=UcExpertPrompt(t);await n.request(`agents.files.set`,{agentId:r,name:`AGENTS.md`,content:a});let o=await n.request(`agents.files.get`,{agentId:r,name:`AGENTS.md`});if(!o?.file?.content?.includes(t.prompt))",
+        "await n.request(`agents.update`,{agentId:r,name:i,workspace:a,emoji:t.avatar});let p=UcExpertPrompt(t);await n.request(`agents.files.set`,{agentId:r,name:`AGENTS.md`,content:p});let q=await n.request(`agents.files.get`,{agentId:r,name:`AGENTS.md`});if(!q?.file?.content?.includes(t.prompt))",
+      )
+      .replace(
+        "label:`${t||e} 专家会话`",
+        "label:t||e",
+      )
+      .replace(
+        "label:`${i} 专家会话`",
+        "label:i",
+      )
+      .replace(
+        "label:`${t} 专家会话`",
+        "label:t",
+      );
+    after = after
+      .replace(
+        "try{let n=await this.client.request(`sessions.create`,{agentId:e,label:t||e});if(!n?.key)throw new Error(`sessions.create returned no key`);this.expertCreateMessage=`已创建专家会话：${t||e}`,this.openExpertSession(n.key)}catch(e){this.expertCreateError=`创建专家会话失败：${e instanceof Error?e.message:String(e)}`}",
+        "try{let r=UcExpertTemplateByAgentId(e),i=t||r?.name||e,a=r?UcExpertPrompt(r):`打开 ${e} 的 AGENTS.md 查看专家提示词。`,o=UcExpertDefaultAgentId(this),n=await this.client.request(`sessions.create`,{agentId:o,label:i});if(!n?.key)throw new Error(`sessions.create returned no key`);UcSetExpertPersona(n.key,{agentId:e,name:i,avatar:r?.avatar??`专`,description:r?.description??``,prompt:a,source:r?`built-in`:`custom`}),this.expertCreateMessage=`已在 main 下创建专家会话：${i}`,this.openExpertSession(n.key)}catch(e){this.expertCreateError=`创建专家会话失败：${e instanceof Error?e.message:String(e)}`}",
+      )
+      .replace(
+        "this.agentsSelectedId=r,this.context.agentIdentity.ensure([r]);let u=await n.request(`sessions.create`,{agentId:r,label:i});if(!u?.key)throw new Error(`sessions.create returned no key`);this.expertCreateMessage=`已创建专家并进入会话：${i}`,this.openExpertSession(u.key)",
+        "this.context.agentIdentity.ensure([r]);let u=UcExpertDefaultAgentId(this),d=await n.request(`sessions.create`,{agentId:u,label:i});if(!d?.key)throw new Error(`sessions.create returned no key`);UcSetExpertPersona(d.key,{agentId:r,name:i,avatar:t.avatar,description:t.description,prompt:o,source:`built-in`,templateId:t.id,model:t.model,skills:t.skills}),this.expertCreateMessage=`已在 main 下创建专家会话：${i}`,this.openExpertSession(d.key)",
+      )
+      .replace(
+        "this.agentsSelectedId=r,this.context.agentIdentity.ensure([r]);let l=await n.request(`sessions.create`,{agentId:r,label:i});if(!l?.key)throw new Error(`sessions.create returned no key`);this.context.gateway.setSessionKey(l.key),this.expertCreateMessage=`已创建专家并进入会话：${i}`,this.context.navigate(`chat`,{search:`?session=${encodeURIComponent(l.key)}`})",
+        "this.context.agentIdentity.ensure([r]);let l=UcExpertDefaultAgentId(this),u=await n.request(`sessions.create`,{agentId:l,label:i});if(!u?.key)throw new Error(`sessions.create returned no key`);UcSetExpertPersona(u.key,{agentId:r,name:i,avatar:t.avatar,description:t.description,prompt:o,source:`built-in`,templateId:t.id,model:t.model,skills:t.skills}),this.expertCreateMessage=`已在 main 下创建专家会话：${i}`,this.openExpertSession(u.key)",
+      )
+      .replace(
+        "this.agentsSelectedId=i,this.context.agentIdentity.ensure([i]);let C=await r.request(`sessions.create`,{agentId:i,label:t});if(!C?.key)throw new Error(`sessions.create returned no key`);this.customExpertForm=UcCustomExpertDefaults(),this.expertCreateMessage=`已创建自定义专家并进入会话：${t}`,this.openExpertSession(C.key)",
+        "this.context.agentIdentity.ensure([i]);let C=UcExpertDefaultAgentId(this),R=await r.request(`sessions.create`,{agentId:C,label:t});if(!R?.key)throw new Error(`sessions.create returned no key`);UcSetExpertPersona(R.key,{agentId:i,name:t,avatar:a,description:o,prompt:u,source:`custom`,model:s,skills:c}),this.customExpertForm=UcCustomExpertDefaults(),this.expertCreateMessage=`已在 main 下创建自定义专家会话：${t}`,this.openExpertSession(R.key)",
+      );
+    after = after.replace(
+      "this.agentsSelectedId=i,this.context.agentIdentity.ensure([i]);let C=await r.request(`sessions.create`,{agentId:i,label:t});if(!C?.key)throw new Error(`sessions.create returned no key`);this.customExpertForm=UcCustomExpertDefaults(),this.customExpertModalOpen=!1,this.expertCreateMessage=`已创建自定义专家并进入会话：${t}`,this.openExpertSession(C.key)",
+      "this.context.agentIdentity.ensure([i]);let C=UcExpertDefaultAgentId(this),R=await r.request(`sessions.create`,{agentId:C,label:t});if(!R?.key)throw new Error(`sessions.create returned no key`);UcSetExpertPersona(R.key,{agentId:i,name:t,avatar:a,description:o,prompt:u,source:`custom`,model:s,skills:c}),this.customExpertForm=UcCustomExpertDefaults(),this.customExpertModalOpen=!1,this.expertCreateMessage=`已在 main 下创建自定义专家会话：${t}`,this.openExpertSession(R.key)",
+    );
+    after = after.replaceAll(",category:`专家会话`", "");
+    if (!after.includes("expertCreateBusyId:this.expertCreateBusyId")) {
+      after = after.replace(
+        "sessionsResult:this.sessionsResult,toolsCatalog:",
+        "sessionsResult:this.sessionsResult,expertCreateBusyId:this.expertCreateBusyId,expertCreateMessage:this.expertCreateMessage,expertCreateError:this.expertCreateError,connected:this.connected,toolsCatalog:",
+      );
+    }
+    if (!after.includes("customExpertForm:this.customExpertForm")) {
+      after = after.replace(
+        "expertCreateError:this.expertCreateError,connected:this.connected,toolsCatalog:",
+        "expertCreateError:this.expertCreateError,customExpertForm:this.customExpertForm,connected:this.connected,toolsCatalog:",
+      );
+    }
+    if (!after.includes("customExpertModalOpen:this.customExpertModalOpen")) {
+      after = after.replace(
+        "customExpertForm:this.customExpertForm,connected:this.connected,toolsCatalog:",
+        "customExpertForm:this.customExpertForm,customExpertModalOpen:this.customExpertModalOpen,connected:this.connected,toolsCatalog:",
+      );
+    }
+    if (!after.includes("onCreateExpert:e=>void this.createExpertFromTemplate(e)")) {
+      after = after.replace(
+        "modelCatalog:this.chatModelCatalog,onRefresh:",
+        "modelCatalog:this.chatModelCatalog,onCreateExpert:e=>void this.createExpertFromTemplate(e),onRefresh:",
+      );
+    }
+    if (!after.includes("onContinueExpert:(e,t)=>this.continueExpertSession(e,t)")) {
+      after = after.replace(
+        "modelCatalog:this.chatModelCatalog,onCreateExpert:e=>void this.createExpertFromTemplate(e),onRefresh:",
+        "modelCatalog:this.chatModelCatalog,onCreateExpert:e=>void this.createExpertFromTemplate(e),onContinueExpert:(e,t)=>this.continueExpertSession(e,t),onNewExpertSession:(e,t)=>void this.createSessionForExpert(e,t),onEditExpert:e=>void this.editExpert(e),onArchiveExpert:(e,t)=>this.archiveExpert(e,t),onOpenSession:e=>this.openExpertSession(e),onRefresh:",
+      );
+    }
+    if (!after.includes("onCreateCustomExpert:()=>void this.createCustomExpert()")) {
+      after = after.replace(
+        "onOpenSession:e=>this.openExpertSession(e),onRefresh:",
+        "onOpenSession:e=>this.openExpertSession(e),onCustomExpertField:(e,t)=>this.updateCustomExpertField(e,t),onCustomExpertSkill:(e,t)=>this.toggleCustomExpertSkill(e,t),onCustomExpertRefreshSkills:()=>this.refreshCustomExpertSkills(),onCreateCustomExpert:()=>void this.createCustomExpert(),onResetCustomExpert:()=>this.resetCustomExpertForm(),onRefresh:",
+      );
+    }
+    if (!after.includes("onOpenCustomExpert:()=>this.openCustomExpertModal()")) {
+      after = after.replace(
+        "onResetCustomExpert:()=>this.resetCustomExpertForm(),onRefresh:",
+        "onResetCustomExpert:()=>this.resetCustomExpertForm(),onOpenCustomExpert:()=>this.openCustomExpertModal(),onCloseCustomExpert:()=>this.closeCustomExpertModal(),onRefresh:",
+      );
+    }
+    if (!after.includes("`expertCreateBusyId`")) {
+      after = after.replace(
+        "n([i()],$.prototype,`agentSkillsAgentId`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
+        "n([i()],$.prototype,`agentSkillsAgentId`,void 0),n([i()],$.prototype,`expertCreateBusyId`,void 0),n([i()],$.prototype,`expertCreateMessage`,void 0),n([i()],$.prototype,`expertCreateError`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
+      );
+    }
+    if (!after.includes("`customExpertForm`")) {
+      after = after.replace(
+        "n([i()],$.prototype,`expertCreateError`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
+        "n([i()],$.prototype,`expertCreateError`,void 0),n([i()],$.prototype,`customExpertForm`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
+      );
+    }
+    if (!after.includes("`customExpertModalOpen`")) {
+      after = after.replace(
+        "n([i()],$.prototype,`customExpertForm`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
+        "n([i()],$.prototype,`customExpertForm`,void 0),n([i()],$.prototype,`customExpertModalOpen`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
+      );
+    }
+
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -3742,6 +4310,569 @@ openclaw-skills-page .statusDot.ok {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--uclaw-teal) 10%, transparent);
 }
 
+openclaw-agents-page .uclaw-expert-landing {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+openclaw-agents-page .uclaw-expert-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 92px;
+}
+
+openclaw-agents-page .uclaw-expert-current {
+  flex: 0 0 auto;
+  max-width: min(320px, 40vw);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+openclaw-agents-page .uclaw-expert-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  gap: 14px;
+}
+
+openclaw-agents-page .agents-layout > .uclaw-expert-landing ~ * {
+  display: none !important;
+}
+
+openclaw-agents-page .uclaw-expert-landing {
+  display: grid;
+  gap: 12px;
+  max-width: 1160px;
+}
+
+openclaw-agents-page .uclaw-expert-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+openclaw-agents-page .uclaw-expert-page-head h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 720;
+}
+
+openclaw-agents-page .uclaw-expert-page-head p {
+  max-width: 720px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.42;
+}
+
+openclaw-agents-page .uclaw-create-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+openclaw-agents-page .uclaw-create-panel {
+  min-width: 0;
+}
+
+openclaw-agents-page .uclaw-open-custom-expert {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding-inline: 16px;
+}
+
+openclaw-agents-page .uclaw-expert-section-title {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+openclaw-agents-page .uclaw-step {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+openclaw-agents-page .uclaw-expert-status {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+openclaw-agents-page .uclaw-expert-status.ok {
+  border-color: color-mix(in srgb, var(--uclaw-teal) 32%, var(--border));
+  color: var(--uclaw-teal-strong);
+  background: color-mix(in srgb, var(--uclaw-teal) 10%, transparent);
+}
+
+openclaw-agents-page .uclaw-expert-status.danger {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+}
+
+openclaw-agents-page .uclaw-section-head {
+  justify-content: space-between;
+}
+
+openclaw-agents-page .uclaw-template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+openclaw-agents-page .uclaw-expert-manager,
+openclaw-agents-page .uclaw-expert-detail {
+  min-width: 0;
+}
+
+openclaw-agents-page .uclaw-expert-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+openclaw-agents-page .uclaw-custom-expert-form {
+  align-self: start;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-raised) 98%, white), color-mix(in srgb, var(--surface) 96%, white)),
+    var(--surface-raised);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+openclaw-agents-page .uclaw-custom-expert-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: color-mix(in srgb, var(--text) 42%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+openclaw-agents-page .uclaw-custom-expert-modal-card {
+  display: grid;
+  gap: 12px;
+  width: min(680px, calc(100vw - 56px));
+  max-height: calc(100vh - 56px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent));
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+  box-shadow: 0 24px 80px color-mix(in srgb, var(--text) 32%, transparent);
+}
+
+openclaw-agents-page .uclaw-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+openclaw-agents-page .uclaw-modal-close {
+  flex: 0 0 auto;
+}
+
+openclaw-agents-page .uclaw-custom-expert-modal .uclaw-custom-expert-form {
+  padding: 12px;
+  border-color: color-mix(in srgb, var(--border) 82%, var(--accent));
+  background: #ffffff;
+  box-shadow: none;
+}
+
+openclaw-agents-page .uclaw-custom-card-head {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 56px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--accent));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-raised));
+}
+
+openclaw-agents-page .uclaw-custom-preview-avatar {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 750;
+}
+
+openclaw-agents-page .uclaw-custom-preview-copy {
+  min-width: 0;
+}
+
+openclaw-agents-page .uclaw-custom-preview-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+openclaw-agents-page .uclaw-custom-preview-sub {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+openclaw-agents-page .uclaw-custom-preview-badge {
+  align-self: start;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+openclaw-agents-page .uclaw-custom-expert-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+openclaw-agents-page .uclaw-custom-expert-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+openclaw-agents-page .uclaw-custom-expert-field.wide {
+  grid-column: 1 / -1;
+}
+
+openclaw-agents-page .uclaw-field-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 18px;
+}
+
+openclaw-agents-page .uclaw-field-top b,
+openclaw-agents-page .uclaw-field-top em {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+openclaw-agents-page .uclaw-field-top b {
+  color: var(--accent);
+}
+
+openclaw-agents-page .uclaw-field-top em {
+  color: var(--muted);
+}
+
+openclaw-agents-page .uclaw-form-control {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--text));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 54%, transparent);
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+openclaw-agents-page .uclaw-form-control:focus {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 60%, transparent);
+}
+
+openclaw-agents-page select.uclaw-form-control {
+  cursor: pointer;
+}
+
+openclaw-agents-page .uclaw-custom-expert-textarea {
+  min-height: 108px;
+  padding: 10px 11px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+openclaw-agents-page .uclaw-expert-options {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, var(--accent));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+openclaw-agents-page .uclaw-expert-options.wide {
+  grid-column: 1 / -1;
+}
+
+openclaw-agents-page .uclaw-expert-options summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 12px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+openclaw-agents-page .uclaw-expert-options summary span:last-child {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+openclaw-agents-page .uclaw-expert-options-body {
+  display: grid;
+  gap: 10px;
+  padding: 2px 10px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+openclaw-agents-page .uclaw-custom-expert-skills {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+openclaw-agents-page .uclaw-custom-expert-skill {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--accent));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+openclaw-agents-page .uclaw-custom-expert-skill small {
+  display: -webkit-box;
+  overflow: hidden;
+  grid-column: 2;
+  color: var(--muted);
+  font-weight: 400;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+openclaw-agents-page .uclaw-custom-expert-actions,
+openclaw-agents-page .uclaw-section-head.compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+openclaw-agents-page .uclaw-custom-expert-actions .primary {
+  flex: 1 1 180px;
+  justify-content: center;
+  min-height: 38px;
+}
+
+openclaw-agents-page .uclaw-expert-card {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 96%, white);
+}
+
+openclaw-agents-page .uclaw-expert-card.is-installed {
+  border-color: color-mix(in srgb, var(--uclaw-teal) 28%, var(--border));
+}
+
+openclaw-agents-page .uclaw-expert-card-main {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+openclaw-agents-page .uclaw-expert-card-actions,
+openclaw-agents-page .uclaw-expert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+openclaw-agents-page .uclaw-expert-card-actions .btn {
+  min-height: 32px;
+  padding-inline: 11px;
+  font-size: 12px;
+}
+
+openclaw-agents-page .uclaw-expert-pill {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+}
+
+openclaw-agents-page .uclaw-expert-detail-grid {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+openclaw-agents-page .uclaw-expert-avatar.large {
+  width: 56px;
+  height: 56px;
+  font-size: 18px;
+}
+
+openclaw-agents-page .uclaw-expert-kv {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+openclaw-agents-page .uclaw-expert-kv div {
+  display: grid;
+  gap: 3px;
+}
+
+openclaw-agents-page .uclaw-expert-kv dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+openclaw-agents-page .uclaw-expert-kv dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+openclaw-agents-page .uclaw-expert-template {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 96px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 82%, transparent);
+}
+
+openclaw-agents-page .uclaw-expert-avatar {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+openclaw-agents-page .uclaw-expert-body {
+  min-width: 0;
+}
+
+openclaw-agents-page .uclaw-expert-name {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+openclaw-agents-page .uclaw-expert-meta,
+openclaw-agents-page .uclaw-expert-desc {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.32;
+}
+
+openclaw-agents-page .uclaw-expert-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+openclaw-agents-page .uclaw-session-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+openclaw-agents-page .uclaw-session-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+openclaw-agents-page .uclaw-empty-state {
+  padding: 14px 0;
+}
+
 openclaw-channels-page .card,
 openclaw-agents-page .card,
 openclaw-skills-page .card,
@@ -3761,6 +4892,42 @@ openclaw-config-page .card {
   .chat-controls__skillhub,
   .chat-composer-model-control {
     max-width: 100%;
+  }
+
+  openclaw-agents-page .uclaw-expert-grid,
+  openclaw-agents-page .uclaw-create-layout,
+  openclaw-agents-page .uclaw-template-grid,
+  openclaw-agents-page .uclaw-expert-card-grid,
+  openclaw-agents-page .uclaw-expert-detail-grid,
+  openclaw-agents-page .uclaw-custom-expert-grid,
+  openclaw-agents-page .uclaw-custom-expert-skills {
+    grid-template-columns: 1fr;
+  }
+
+  openclaw-agents-page .uclaw-expert-hero,
+  openclaw-agents-page .uclaw-expert-template {
+    align-items: stretch;
+  }
+
+  openclaw-agents-page .uclaw-expert-page-head,
+  openclaw-agents-page .uclaw-modal-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  openclaw-agents-page .uclaw-open-custom-expert,
+  openclaw-agents-page .uclaw-modal-close {
+    width: 100%;
+    justify-content: center;
+  }
+
+  openclaw-agents-page .uclaw-custom-expert-modal {
+    padding: 12px;
+  }
+
+  openclaw-agents-page .uclaw-custom-expert-modal-card {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
   }
 }
 
@@ -3801,6 +4968,7 @@ ${markerEnd}`;
   }
 }
 
+patchSkillsUninstallGateway();
 patchChatPage();
 patchChatUiCopy();
 patchAssistantIdentityUiCopy();
@@ -3809,6 +4977,7 @@ patchSkillsPageBranding();
 patchSkillsPageBundledVisibility();
 patchSkillsPageUiCopy();
 patchSkillsPageStoreDiscovery();
+patchSkillsPageLocalUninstallActions();
 patchSkillsPageSearchConnectionSync();
 patchSkillsPageDefaultStoreSearch();
 patchSkillsPageStoreHomeState();
@@ -3830,6 +4999,7 @@ patchControlUiManifestBranding();
 patchControlUiShellBranding();
 patchControlUiSkillHubProxy();
 patchIndexUiCopy();
+patchPrimaryNavigationProjection();
 patchFinalUiPolish();
 patchControlUiBrandAssets();
 patchControlUiTheme();

@@ -113,7 +113,7 @@ const forbiddenAutoLoadMoreTokens = [
   "skillHubCanLoadMore",
   "skillHubSearchCanLoadMore",
   "UcSkillHubAppendResults",
-  "正在请求更多 SkillHub 数据",
+  "正在请求更多技能商店数据",
   "本页没有新增结果",
 ];
 

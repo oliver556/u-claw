@@ -13,9 +13,9 @@ const officialIconPngPath = path.join(root, "assets", "icon.png");
 const officialIconIcoPath = path.join(root, "assets", "icon.ico");
 
 const visibleSkillHubTexts = [
-  "搜索 SkillHub 技能…",
-  "暂无匹配 SkillHub 技能。",
-  "SkillHub 链接无效",
+  "搜索技能商店技能…",
+  "暂无匹配技能商店技能。",
+  "技能商店链接无效",
   "筛选已安装技能",
   "安装中…",
   "UcSkillHubLoadApiSkills",
@@ -67,8 +67,8 @@ const visibleSkillHubTexts = [
   "aria-busy",
   "搜索中…",
   "下一页",
-  "SkillHub 请求超时，请稍后重试。",
-  "SkillHub 搜索失败：${t}",
+  "技能商店请求超时，请稍后重试。",
+  "技能商店搜索失败：${t}",
   "安装中…",
   "等待中",
   "确认风险并安装",
@@ -92,7 +92,7 @@ const chatSkillHubTokens = [
   "data-chat-skillhub-select",
   "选择你的技能",
   "技能暂不可用",
-  "SkillHub 技能",
+  "技能商店技能",
   "function UcSkillHubNormalizeText",
   "function UcSkillHubHasCjk",
   "function UcSkillHubPickChinese",
@@ -125,11 +125,96 @@ const requiredUiPolishTexts = {
     "运行指定技能。",
     "TTS 动作",
   ],
-  skillsShared: ["工作区技能", "内置依赖", "已安装 SkillHub"],
+  skillsShared: ["工作区技能", "内置依赖", "已安装技能商店"],
   agents: [
     "按 Agent 管理可见技能与工作区技能，保存后生效。",
     "全部启用",
     "保存中…",
+    "function UcExpertTemplates(){return[",
+    "function UcExpertCatalog(e){",
+    "function UcCustomExpertDefaults(){",
+    "function UcExpertDefaultAgentId(e){",
+    "function UcSetExpertPersona(e,t){",
+    "uclaw.expertPersonas.v1",
+    "function UcCustomExpertForm(e){",
+    "function UcCustomExpertModal(e){",
+    "function UcExpertSectionTitle",
+    "function UcExpertTemplatePicker",
+    "function UcExpertTemplateCard",
+    "function UcExpertManagement(e,t){",
+    "function UcExpertDetail(e,t){",
+    "data-uclaw-expert-landing",
+    "data-uclaw-expert-create-center",
+    "data-uclaw-custom-expert-form",
+    "data-uclaw-custom-expert-modal",
+    "选择专家创建",
+    "自定义创建",
+    "创建并进入会话",
+    "模型与技能",
+    "表单失败不会清空",
+    "文案写手",
+    "小红书写手",
+    "职业顾问",
+    "机器学习",
+    "简历写手",
+    "创业点子王",
+    "产品经理",
+    "数据分析师",
+    "代码审查",
+    "测试用例专家",
+    "会议纪要",
+    "翻译润色",
+    "合同审阅",
+    "客服话术",
+    "活动运营",
+    "汇报策划",
+    "uclaw-custom-card-head",
+    "uclaw-custom-expert-modal",
+    "uclaw-open-custom-expert",
+    "uclaw-form-control",
+    "Prompt 已填写",
+    "customExpertModalOpen",
+    "sessionsResult:this.sessionsResult",
+    "this.agentsPanel=`overview`",
+    "async createExpertFromTemplate",
+    "async createCustomExpert",
+    "async createSessionForExpert",
+    "continueExpertSession",
+    "openExpertSession",
+    "editExpert",
+    "this.agentsPanel=`files`,this.agentFileActive=`AGENTS.md`",
+    "archiveExpert",
+    "agents.create",
+    "agents.update",
+    "agents.files.set",
+    "agents.files.get",
+    "sessions.create",
+    "已在 main 下创建专家会话",
+    "已在 main 下创建自定义专家会话",
+    "label:i",
+    "label:t",
+    "AGENTS.md",
+    "~/.openclaw/agents/${r}/workspace",
+    "存在未保存配置，请先保存或撤销后再创建专家。",
+    "runtimeConfig readback",
+    "model readback mismatch",
+    "skills readback mismatch",
+    "agents.list readback",
+    "创建中…",
+    "onCreateExpert",
+    "onCreateCustomExpert",
+    "onOpenCustomExpert",
+    "onCloseCustomExpert",
+    "onCustomExpertField",
+    "onCustomExpertSkill",
+    "onCustomExpertRefreshSkills",
+    "onContinueExpert",
+    "onNewExpertSession",
+    "onEditExpert",
+    "onArchiveExpert",
+    "onOpenSession",
+    "customExpertForm:this.customExpertForm",
+    "expertCreateBusyId",
     "正在加载运行时工具目录…",
     "当前可用",
     "快捷预设",
@@ -157,7 +242,7 @@ const requiredUiPolishTexts = {
   configForm: [
     "label:`环境变量`",
     "description:`API keys 与认证配置`",
-    "description:`SkillHub 技能包与能力`",
+    "description:`技能商店技能包与能力`",
     "description:`用户界面偏好`",
     "不支持的 schema，请使用 Raw。",
   ],
@@ -182,13 +267,32 @@ const requiredUiPolishTexts = {
   index: [
     "配置版本缺失，请重新加载后重试。",
     "配置版本缺失，请刷新后重试。",
-    "安装前请复核 SkillHub 风险提示。",
-    "Ye=[`overview`,`skills`]",
-    "sidebarPinnedRoutes:[...new Set([...(Xe(c.sidebarPinnedRoutes)??r.sidebarPinnedRoutes),`skills`])]",
+    "安装前请复核技能商店风险提示。",
+    "Ye=[`agents`,`tasks`,`skills`,`config`]",
+    "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`config`]",
+    "enabledRouteIds(){return[`agents`,`tasks`,`skills`,`config`]}",
+    "renderMoreSection(){return l}",
+    "function UcIsVisibleSessionAgentId(e)",
+    "function UcSidebarSessionName(e,t)",
+    "label:UcSidebarSessionName(this,t)",
+    "agentIdentity?.get",
+    "\"uclaw-expert-copywriter\":`文案写手`",
+    "function Ar(e){let t=new Set,n=[],r=r=>{let i=j(r);UcIsVisibleSessionAgentId(i)",
+    "config:{titleKey:`tabs.config`,subtitleKey:`subtitles.config`}",
+    "id:`nav-workflows`,label:`工作流`,icon:`scrollText`,category:`navigation`,action:`nav:tasks`",
+    "id:`nav-models`,label:`模型`,icon:`settings`,category:`navigation`,action:`nav:config`",
     "Wm=`U-Claw`",
     "assistantIdentity:{agentId:null,name:`U-Claw`,avatar:null,avatarSource:null,avatarStatus:null,avatarReason:null}",
   ],
   i18n: [
+    "agents:`智能体`",
+    "tasks:`工作流`",
+    "skills:`技能库`",
+    "config:`模型`",
+    "agents:`专家、会话与身份。`",
+    "tasks:`自动任务、子智能体与运行记录。`",
+    "skills:`技能库、安装与本地技能管理。`",
+    "config:`模型、供应商与默认参数。`",
     "subtitle:`U-Claw Gateway`",
     "title:`如何连接`",
     "step1:`在主机启动 Gateway：`",
@@ -211,7 +315,7 @@ const requiredUiPolishTexts = {
     "eventUnarchived:`已恢复`",
     "eventStale:`过期会话`",
     "activity:`活动`",
-    "tasks:`后台任务：子智能体、定时运行与 CLI。`",
+    "tasks:`自动任务、子智能体与运行记录。`",
     "loading:`正在加载任务…`",
     "activity:{title:`活动`",
     "argumentHiddenOne:`1 个参数已隐藏`",
@@ -277,7 +381,7 @@ const requiredUiPolishTexts = {
     "上一页",
   ],
   tertiaryI18n: [
-    "skills:`SkillHub 商店、安装与本地技能管理。`",
+    "skills:`技能库、安装与本地技能管理。`",
     "title:`U-Claw 移动端`",
     "qrAlt:`U-Claw 移动端配对二维码`",
     "waiting:`U-Claw 移动端扫码后会自动连接。`",
@@ -302,10 +406,10 @@ const requiredUiPolishTexts = {
   ],
   skillWorkshopPage: [
     "k={all:`全部`,pending:`待复核`,applied:`已应用`,rejected:`已拒绝`,quarantined:`已隔离`,stale:`已过期`}",
-    'aria-label="暂无 SkillHub 工坊提案"',
-    '<p class="sw-empty-state__eyebrow">SkillHub 工坊</p>',
+    'aria-label="暂无技能商店工坊提案"',
+    '<p class="sw-empty-state__eyebrow">技能商店工坊</p>',
     "<h2>暂无提案</h2>",
-    "当前 Agent 尚未起草任何 SkillHub 提案。",
+    "当前 Agent 尚未起草任何技能商店提案。",
     "新提案会出现在这里等待复核。",
     "<span>看板</span>",
     "<span>今日</span>",
@@ -334,7 +438,7 @@ const requiredUiPolishTexts = {
     "--border-hover: #91caff",
     "--uclaw-teal: #4096ff",
     "linear-gradient(135deg, var(--primary), var(--uclaw-teal) 58%, var(--uclaw-claw))",
-    "max-width: 760px",
+    "width:min(100%,760px)",
     ".sidebar-brand__title",
     ".agent-chat__avatar--logo",
     ".nav-item--active",
@@ -345,6 +449,13 @@ const requiredUiPolishTexts = {
     ".agent-chat__input-btn--talk:hover:not(:disabled)",
     ".agent-chat__input-btn--talk[aria-pressed=\"true\"]",
     "flex: 0 1 224px",
+    "agents-layout > .uclaw-expert-landing ~ *",
+    "grid-template-columns: repeat(3, minmax(260px, 1fr))",
+    ".uclaw-expert-options.wide",
+    "grid-column: 1 / -1",
+    "background: #ffffff",
+    "-webkit-line-clamp: 2",
+    "-webkit-line-clamp: 3",
     "height: 32px",
     "width: 44px",
     ".chat-controls__skillhub .chat-controls__inline-select-trigger",
@@ -437,6 +548,15 @@ function listAssets(pattern, label) {
 function assertContains(errors, file, source, token, reason) {
   if (!source.includes(token)) {
     errors.push(`${path.relative(root, file)} missing ${reason}: ${JSON.stringify(token)}`);
+  }
+}
+
+/**
+ * Records a forbidden token so generated minified code cannot regress into known runtime crashes.
+ */
+function assertNotContains(errors, file, source, token, reason) {
+  if (source.includes(token)) {
+    errors.push(`${path.relative(root, file)} contains ${reason}: ${JSON.stringify(token)}`);
   }
 }
 
@@ -738,6 +858,66 @@ function verifyServiceWorker(errors) {
     );
   }
 
+  if (!match[1].includes("primary-nav-ia-2")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing primary-nav-ia-2: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("expert-landing-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-landing-1: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("expert-create-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-create-1: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("expert-management-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-management-1: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("expert-custom-form-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-custom-form-1: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("expert-session-label-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-session-label-1: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("expert-create-modal-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-create-modal-1: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("expert-main-session-2")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-main-session-2: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("expert-visual-density-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-visual-density-1: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("expert-modal-layout-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-modal-layout-1: ${match[1]}`,
+    );
+  }
+
   assertContains(errors, swPath, source, 'title: "U-Claw"', "U-Claw push fallback title");
   assertContains(errors, swPath, source, 'data.title || "U-Claw"', "U-Claw push default title");
 }
@@ -801,24 +981,36 @@ function verifyStartupLoadingBranding(errors) {
 }
 
 /**
- * Verifies the existing Skills route is discoverable as SkillHub in primary locales.
+ * Verifies the existing Skills route is discoverable as a first-level skill library.
  */
 function verifySkillHubNavigation(errors) {
   const checks = [
     {
       files: listAssets(/^i18n-.*\.js$/, "base i18n"),
       tokens: [
-        "skills:`SkillHub`",
-        "skillWorkshop:`SkillHub 工坊`",
-        "skills:`SkillHub 商店、安装与本地技能管理。`",
+        "agents:`智能体`",
+        "tasks:`工作流`",
+        "skills:`技能库`",
+        "config:`模型`",
+        "skillWorkshop:`技能商店工坊`",
+        "agents:`专家、会话与身份。`",
+        "tasks:`自动任务、子智能体与运行记录。`",
+        "skills:`技能库、安装与本地技能管理。`",
+        "config:`模型、供应商与默认参数。`",
       ],
     },
     {
       files: listAssets(/^zh-CN-.*\.js$/, "zh-CN i18n"),
       tokens: [
-        "skills:`SkillHub`",
-        "skillWorkshop:`SkillHub 工坊`",
-        "skills:`SkillHub 商店、安装与本地技能管理。`",
+        "agents:`智能体`",
+        "tasks:`工作流`",
+        "skills:`技能库`",
+        "config:`模型`",
+        "skillWorkshop:`技能商店工坊`",
+        "agents:`专家、会话与身份。`",
+        "tasks:`自动任务、子智能体与运行记录。`",
+        "skills:`技能库、安装与本地技能管理。`",
+        "config:`模型、供应商与默认参数。`",
       ],
     },
   ];
@@ -828,6 +1020,39 @@ function verifySkillHubNavigation(errors) {
       const source = readUtf8(file);
       for (const token of check.tokens) {
         assertContains(errors, file, source, token, "SkillHub navigation text");
+      }
+    }
+  }
+}
+
+/**
+ * Verifies the first-level navigation hides low-frequency OpenClaw routes.
+ */
+function verifyPrimaryNavigationProjection(errors) {
+  for (const file of listAssets(/^index-.*\.js$/, "index js")) {
+    const source = readUtf8(file);
+    assertContains(errors, file, source, "enabledRouteIds(){return[`agents`,`tasks`,`skills`,`config`]}", "primary navigation projection");
+    assertContains(errors, file, source, "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`config`]", "fixed primary navigation order");
+    assertContains(errors, file, source, "renderMoreSection(){return l}", "hidden first-level more section");
+    assertContains(errors, file, source, "config:{titleKey:`tabs.config`,subtitleKey:`subtitles.config`}", "model route label source");
+
+    const start = source.indexOf("function Hc(){return[");
+    const end = source.indexOf("function Uc(){return Hc()}", start);
+    if (start < 0 || end < 0) {
+      errors.push(`${path.relative(root, file)} missing command palette navigation function`);
+      continue;
+    }
+
+    const palette = source.slice(start, end);
+    for (const token of ["nav-agents", "nav-workflows", "nav-skills", "nav-models"]) {
+      if (!palette.includes(token)) {
+        errors.push(`${path.relative(root, file)} command palette missing primary item: ${token}`);
+      }
+    }
+
+    for (const token of ["nav-overview", "nav-sessions", "nav-cron", "nav-config"]) {
+      if (palette.includes(token)) {
+        errors.push(`${path.relative(root, file)} command palette still exposes low-priority route: ${token}`);
       }
     }
   }
@@ -868,6 +1093,18 @@ function verifyUiPolish(errors) {
       const source = readUtf8(file);
       for (const token of requiredUiPolishTexts[check.label]) {
         assertContains(errors, file, source, token, "U-Claw UI polish text");
+      }
+      if (check.label === "agents") {
+        assertNotContains(errors, file, source, "let a=UcExpertPrompt(t)", "expert template TDZ regression");
+        assertNotContains(errors, file, source, "sessions.create`,{agentId:r,label:i}", "expert sessions must be created under main");
+        assertNotContains(errors, file, source, "sessions.create`,{agentId:i,label:t}", "custom expert sessions must be created under main");
+        assertNotContains(errors, file, source, "sessions.create`,{agentId:o,label:i,category:", "sessions.create schema must not include category");
+        assertNotContains(errors, file, source, "sessions.create`,{agentId:u,label:i,category:", "expert sessions.create schema must not include category");
+        assertNotContains(errors, file, source, "sessions.create`,{agentId:l,label:i,category:", "legacy expert sessions.create schema must not include category");
+        assertNotContains(errors, file, source, "sessions.create`,{agentId:C,label:t,category:", "custom sessions.create schema must not include category");
+      }
+      if (check.label === "index") {
+        assertNotContains(errors, file, source, "for(let t of e.agentsList?.agents??[])r(t.id)", "expert agents must not appear as sidebar branches");
       }
     }
   }
@@ -1028,7 +1265,8 @@ function verifyHighRiskResiduals(errors) {
     {
       files: listAssets(/^(?:i18n|zh-CN)-.*\.js$/, "base and zh-CN i18n"),
       tokens: [
-        "skills:`SkillHub store, installs, and local skill management.`",
+        "skills:`Skills and API keys.`",
+        "skills:`SkillHub 商店、安装与本地技能管理。`",
         "debug:{snapshotsTitle:`Snapshots`",
         "manualRpcTitle:`Manual RPC`",
         "execApprovalNeeded:`Exec approval needed`",
@@ -1231,6 +1469,7 @@ function main() {
     verifyBrandAssets(errors);
     verifyStartupLoadingBranding(errors);
     verifySkillHubNavigation(errors);
+    verifyPrimaryNavigationProjection(errors);
     verifyUiPolish(errors);
     verifyChatVoiceButtonBlue(errors);
     verifyChatSkillHubDropdown(errors);
