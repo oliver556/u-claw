@@ -7,6 +7,11 @@ const assetsDir = path.join(root, "node_modules", "openclaw", "dist", "control-u
 const requiredTokens = [
   "function UcSkillHubDropdown",
   "function UcSkillHubItems",
+  "function UcSkillHubHasCjk",
+  "function UcSkillHubPickChinese",
+  "function UcSkillHubChineseTitle",
+  "description_zh",
+  "summary_zh",
   "data-chat-skillhub-select",
   "data-chat-skillhub-option",
   "skills.status",
@@ -29,6 +34,7 @@ const forbiddenTokens = [
   "SkillHub 暂不可用",
   "l(t,e=>e.name,e=>s",
   "t.find(e=>u.name===n)",
+  "function UcSkillHubLabel(e){return e.displayName||e.title||e.name}",
 ];
 
 /**

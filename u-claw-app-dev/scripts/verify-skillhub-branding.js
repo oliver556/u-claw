@@ -14,10 +14,13 @@ const officialIconIcoPath = path.join(root, "assets", "icon.ico");
 
 const visibleSkillHubTexts = [
   "搜索 SkillHub 技能…",
-  "暂无匹配技能。可重试、换关键词，或查看已安装 SkillHub 技能。",
+  "暂无匹配 SkillHub 技能。",
   "SkillHub 链接无效",
   "筛选已安装技能",
   "安装中…",
+  "UcSkillHubLoadApiSkills",
+  "UcSkillHubFallbackSkillsSearch",
+  "兼容模式",
   "推荐首页",
   "安装来源",
   "README 暂无",
@@ -27,11 +30,16 @@ const visibleSkillHubTexts = [
   "UcSkillHubDisplayText",
   "UcSkillHubErrorText",
   "changeClawHubQuery(e){this.syncGatewayState()",
-  "UcSkillHubHomeSeeds",
+  "UcSkillHubApiUrl",
   "this.loadSkillHubHome=async",
+  "icon_url",
+  "iconURL",
+  "logoUrl",
+  "imageUrl",
   "推荐首页",
   "UcSkillHubBuildViewModel",
   "UcSkillHubRenderIcon",
+  "data-skillhub-icon-img",
   "skillhub-dense-row",
   "data-skillhub-toolbar",
   "data-skillhub-search",
@@ -52,12 +60,13 @@ const visibleSkillHubTexts = [
   "收藏最多",
   "名称 A-Z",
   "data-skillhub-loading",
-  "data-skillhub-load-more",
-  "onSkillHubLoadMore",
-  "skillHubVisibleCount",
+  "data-skillhub-pagination",
+  "data-skillhub-page-button",
+  "skillHubPage",
+  "skillHubTotal",
   "aria-busy",
   "搜索中…",
-  "继续向下滚动加载更多",
+  "下一页",
   "SkillHub 请求超时，请稍后重试。",
   "SkillHub 搜索失败：${t}",
   "安装中…",
@@ -85,6 +94,11 @@ const chatSkillHubTokens = [
   "技能暂不可用",
   "SkillHub 技能",
   "function UcSkillHubNormalizeText",
+  "function UcSkillHubHasCjk",
+  "function UcSkillHubPickChinese",
+  "function UcSkillHubChineseTitle",
+  "description_zh",
+  "summary_zh",
   "skills.status",
   "runtimeConfig",
   "已保存，新会话生效",
@@ -676,9 +690,21 @@ function verifyServiceWorker(errors) {
     );
   }
 
-  if (!match[1].includes("skillhub-dense-ui-5")) {
+  if (!match[1].includes("skillhub-dense-ui-6")) {
     errors.push(
-      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-dense-ui-5: ${match[1]}`,
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-dense-ui-6: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("skillhub-field-map-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-field-map-1: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("skillhub-proxy-fallback-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-proxy-fallback-1: ${match[1]}`,
     );
   }
 

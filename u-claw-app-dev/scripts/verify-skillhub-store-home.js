@@ -22,13 +22,39 @@ const bundledFilterTokens = ["source===`openclaw-bundled`", "bundled===!0"];
 const strictInstallableToken = "trust?.installability===`installable`";
 
 const denseUiTokens = [
+  "__uclaw__/skillhub/skills",
+  "UcSkillHubApiUrl",
+  "UcSkillHubApiCategoryMap",
+  "UcSkillHubApiCategory",
+  "UcSkillHubLoadApiSkills",
+  "UcSkillHubFallbackSkillsSearch",
+  "skills.search",
+  "兼容模式",
+  "UcSkillHubNormalizeApiSkill",
+  "icon_url",
+  "iconURL",
+  "logoUrl",
+  "imageUrl",
+  "skillHubPage",
+  "skillHubPageSize",
+  "skillHubTotal",
+  "skillHubPageError",
   "UcSkillHubBuildViewModel",
   "UcSkillHubRenderIcon",
+  "data-skillhub-icon-img",
   "UcSkillHubRenderSkillRow",
+  "UcSkillHubSceneLabels",
+  "office-efficiency",
+  "knowledge-management",
+  "dev-programming",
+  "UcSkillHubRenderPagination",
   "skillhub-dense-row",
   "data-skillhub-dense-list",
   "data-skillhub-toolbar",
   "data-skillhub-search",
+  "data-skillhub-pagination",
+  "data-skillhub-page-button",
+  "data-skillhub-page-summary",
   "data-skillhub-content",
   "data-skillhub-primary-tabs",
   "data-skillhub-single-layer",
@@ -51,16 +77,15 @@ const denseUiTokens = [
   "收藏最多",
   "名称 A-Z",
   "data-skillhub-loading",
-  "data-skillhub-load-more",
-  "onSkillHubLoadMore",
-  "skillHubVisibleCount",
-  "skillHubLoadedSeedIndex",
-  "skillHubCanLoadMore",
-  "UcSkillHubRequestSeeds",
-  "UcSkillHubAppendResults",
+  "data-skillhub-next-page-button",
+  "data-skillhub-prev-page-button",
+  "data-skillhub-load-more-message",
   "aria-busy",
   "搜索中…",
-  "继续向下滚动加载更多",
+  "正在加载第",
+  "第 ${t.page} / ${t.pageCount} 页",
+  "共",
+  "下一页",
   "data-skillhub-install-message-close",
   "覆盖重装",
 ];
@@ -73,6 +98,23 @@ const forbiddenLeftCategoryNavTokens = [
   "让 AI 从通用走向专用",
   "最多 40 项",
   "<div class=\"card-title\">SkillHub 商店</div>",
+];
+
+const forbiddenAutoLoadMoreTokens = [
+  "UcSkillHubShouldLoadMore",
+  "UcSkillHubMaybeLoadMore",
+  "skillHubWindowScrollHandler",
+  "window.addEventListener(`scroll`",
+  "继续下滑加载更多",
+  "UcSkillHubRequestSeeds",
+  "skillHubLoadedSeedIndex",
+  "skillHubSearchSeedIndex",
+  "skillHubVisibleCount",
+  "skillHubCanLoadMore",
+  "skillHubSearchCanLoadMore",
+  "UcSkillHubAppendResults",
+  "正在请求更多 SkillHub 数据",
+  "本页没有新增结果",
 ];
 
 const identityRefTokens = ["UcSkillHubQualifiedRef", "ownerHandle"];
@@ -94,7 +136,6 @@ const orangePrimaryTokens = [
   "primary-orange",
 ];
 
-const fakeSearchParamPattern = /(?:^|[,{]\s*)(?:category|sort|page|cursor|offset|["'`](?:category|sort|page|cursor|offset)["'`])\s*:/g;
 const unsafeOwnerHandleDetailPattern = /skills\.detail[`"'][\s\S]{0,180}ownerHandle/;
 
 /**
@@ -232,7 +273,6 @@ function assertGroupedLiterals(errors, file, source, values, reason, maxSpan) {
 function verifyStoreHomeAsset(file, errors) {
   const source = readUtf8(file);
 
-  assertGroupedLiterals(errors, file, source, homepageSeedQueries, "homepage seed query", 1600);
   const tabsStart = source.indexOf("function UcSkillHubRenderTopTabs");
   const tabsEnd = tabsStart >= 0 ? source.indexOf("function UcSkillHubRenderToolbar", tabsStart) : -1;
   const tabsSource = tabsStart >= 0 && tabsEnd > tabsStart ? source.slice(tabsStart, tabsEnd) : "";
@@ -251,6 +291,10 @@ function verifyStoreHomeAsset(file, errors) {
     assertNotContains(errors, file, source, token, "left-side SkillHub category nav token");
   }
 
+  for (const token of forbiddenAutoLoadMoreTokens) {
+    assertNotContains(errors, file, source, token, "abandoned auto load-more token");
+  }
+
   for (const token of bundledFilterTokens) {
     assertContains(errors, file, source, token, "bundled skills visibility filter");
   }
@@ -267,55 +311,6 @@ function verifyStoreHomeAsset(file, errors) {
 
   for (const token of orangePrimaryTokens) {
     assertNotContains(errors, file, source.toLowerCase(), token.toLowerCase(), "orange primary color token");
-  }
-}
-
-/**
- * Returns windows around every `skills.search` request occurrence.
- */
-function findSearchRequestWindows(source) {
-  const windows = [];
-  let cursor = 0;
-
-  while (true) {
-    const index = source.indexOf("skills.search", cursor);
-    if (index === -1) {
-      return windows;
-    }
-
-    windows.push(source.slice(Math.max(0, index - 500), Math.min(source.length, index + 900)));
-    cursor = index + "skills.search".length;
-  }
-}
-
-/**
- * Verifies SkillHub search stays on the documented `query` plus `limit:40` contract.
- */
-function verifySearchRequestContract(files, errors) {
-  const requestWindows = [];
-
-  for (const file of files) {
-    const source = readUtf8(file);
-    for (const windowSource of findSearchRequestWindows(source)) {
-      requestWindows.push({ file, source: windowSource });
-    }
-  }
-
-  if (requestWindows.length === 0) {
-    errors.push("Missing skills.search request in generated SkillHub route assets");
-    return;
-  }
-
-  if (!requestWindows.some((entry) => entry.source.includes("limit:40"))) {
-    errors.push("skills.search request missing PRD limit:40 contract");
-  }
-
-  for (const entry of requestWindows) {
-    fakeSearchParamPattern.lastIndex = 0;
-    const match = fakeSearchParamPattern.exec(entry.source);
-    if (match) {
-      errors.push(`${relative(entry.file)} skills.search request contains fake param token: ${JSON.stringify(match[0].trim())}`);
-    }
   }
 }
 
@@ -343,7 +338,6 @@ function main() {
       verifyStoreHomeAsset(file, errors);
     }
     const routeAssets = listSkillHubRouteAssets();
-    verifySearchRequestContract(routeAssets, errors);
     verifyDetailRequestContract(routeAssets, errors);
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
