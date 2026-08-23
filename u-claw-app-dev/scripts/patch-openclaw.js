@@ -3595,10 +3595,6 @@ pre,
   outline-offset: 2px;
 }
 
-.chat-thread-inner {
-  max-width: 760px;
-}
-
 .agent-chat__composer-controls,
 .agent-chat__toolbar,
 .chat-controls,
