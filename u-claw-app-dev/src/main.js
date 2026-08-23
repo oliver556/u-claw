@@ -3,11 +3,18 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const { createVideoAdapterServer } = require('./video-adapter');
 
 // ── Constants ──
 const APP_NAME = 'U-Claw';
 const DEFAULT_PORT = 18789;
 const MAX_PORT = 18799;
+const DEFAULT_VIDEO_ADAPTER_PORT = 18808;
+const MAX_VIDEO_ADAPTER_PORT = 18818;
+const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'jimeng-video-3-720p';
+const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://api.gmnlee.com/v1';
+const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || DEFAULT_VIDEO_ADAPTER_BASE_URL;
+const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
 // room so we never hard-fail with a scary dialog before the engine is up. The
@@ -16,7 +23,7 @@ const MAX_PORT = 18799;
 const GATEWAY_STARTUP_TIMEOUT = 180000;
 
 // ── Paths ──
-const isDev = process.argv.includes('--dev') || !app.isPackaged;
+const isDev = process.argv.includes('--dev') || process.defaultApp || !app.isPackaged;
 const appRoot = isDev ? __dirname + '/..' : process.resourcesPath + '/..';
 const resourcesPath = isDev
   ? path.join(__dirname, '..', 'resources')
@@ -113,6 +120,8 @@ let gatewayProcess = null;
 let gatewayPort = DEFAULT_PORT;
 let gatewayReady = false;
 let configServerPort = null; // mini HTTP server for Config.html
+let videoAdapterServer = null;
+let videoAdapterPort = null;
 
 // ── Config Management ──
 function ensureConfig() {
@@ -138,6 +147,120 @@ function getConfig() {
   } catch {
     return { gateway: { mode: 'local', auth: { token: 'uclaw' } } };
   }
+}
+
+function saveConfig(config) {
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
+
+function getProviderValue(provider, keys) {
+  for (const key of keys) {
+    if (typeof provider[key] === 'string' && provider[key].trim()) {
+      return provider[key].trim();
+    }
+  }
+  return '';
+}
+
+function findNewApiCredentials(config) {
+  const env = config.env || {};
+  const envBaseUrl = process.env.UCLAW_NEW_API_BASE_URL || env.UCLAW_NEW_API_BASE_URL;
+  const envApiKey = process.env.UCLAW_NEW_API_KEY || env.UCLAW_NEW_API_KEY;
+  if (envBaseUrl || envApiKey) {
+    return { newApiBaseUrl: envBaseUrl, newApiKey: envApiKey };
+  }
+
+  const providers = config.models?.providers || {};
+  for (const provider of Object.values(providers)) {
+    if (!provider || typeof provider !== 'object') continue;
+    const baseUrl = getProviderValue(provider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url']);
+    const apiKey = getProviderValue(provider, ['apiKey', 'api_key', 'key']);
+    if (baseUrl && apiKey && /api\.gmnlee\.com/i.test(baseUrl)) {
+      return { newApiBaseUrl: baseUrl, newApiKey: apiKey };
+    }
+  }
+
+  return {};
+}
+
+function getVideoAdapterOptions() {
+  const config = getConfig();
+  const env = config.env || {};
+  const newApiCredentials = findNewApiCredentials(config);
+  return {
+    defaultModel: UCLAW_VIDEO_MODEL,
+    newApiBaseUrl: newApiCredentials.newApiBaseUrl,
+    newApiKey: newApiCredentials.newApiKey,
+    videoProvider: process.env.UCLAW_VIDEO_PROVIDER || env.UCLAW_VIDEO_PROVIDER || ''
+  };
+}
+
+function ensureVideoAdapterConfig(adapterBaseUrl) {
+  const config = getConfig();
+  const existingLitellm = config.models?.providers?.litellm;
+  if (existingLitellm && !Array.isArray(existingLitellm.models)) {
+    existingLitellm.models = [{
+      id: 'gpt-image-2',
+      name: 'gpt-image-2',
+      reasoning: false,
+      input: ['text', 'image'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 8192
+    }];
+  }
+
+  const existingXai = config.models?.providers?.xai || {};
+  const newApiCredentials = findNewApiCredentials(config);
+  const adapterApiKey = UCLAW_VIDEO_ADAPTER_API_KEY
+    || (UCLAW_VIDEO_ADAPTER_BASE_URL ? newApiCredentials.newApiKey : '')
+    || existingXai.apiKey
+    || 'uclaw-video-adapter';
+  const existingModels = Array.isArray(existingXai.models) ? existingXai.models : [];
+  const hasVideoModel = existingModels.some(model => model && model.id === UCLAW_VIDEO_MODEL);
+
+  const xaiModels = hasVideoModel ? existingModels : [
+    ...existingModels,
+    {
+      id: UCLAW_VIDEO_MODEL,
+      name: UCLAW_VIDEO_MODEL,
+      reasoning: false,
+      input: ['text', 'image'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 8192
+    }
+  ];
+
+  config.models = config.models || {};
+  config.models.mode = config.models.mode || 'merge';
+  config.models.providers = config.models.providers || {};
+  config.models.providers.xai = {
+    ...existingXai,
+    baseUrl: adapterBaseUrl,
+    apiKey: adapterApiKey,
+    api: existingXai.api || 'openai-completions',
+    models: xaiModels
+  };
+
+  config.agents = config.agents || {};
+  config.agents.defaults = config.agents.defaults || {};
+  config.agents.defaults.videoGenerationModel = {
+    ...(config.agents.defaults.videoGenerationModel || {}),
+    primary: `xai/${UCLAW_VIDEO_MODEL}`,
+    timeoutMs: Math.max(Number(config.agents.defaults.videoGenerationModel?.timeoutMs) || 0, 600000)
+  };
+  if (!config.agents.defaults.imageModel && config.agents.defaults.imageGenerationModel?.primary) {
+    config.agents.defaults.imageModel = {
+      primary: config.agents.defaults.imageGenerationModel.primary,
+      timeoutMs: config.agents.defaults.imageGenerationModel.timeoutMs || 180000
+    };
+  }
+  config.agents.defaults.mediaMaxMb = Math.max(Number(config.agents.defaults.mediaMaxMb) || 0, 256);
+
+  saveConfig(config);
+  console.log(`[${APP_NAME}] Video adapter config set to ${adapterBaseUrl}`);
 }
 
 function hasModelConfigured() {
@@ -169,11 +292,33 @@ function isPortAvailable(port) {
   });
 }
 
-async function findAvailablePort() {
-  for (let port = DEFAULT_PORT; port <= MAX_PORT; port++) {
+async function findAvailablePort(start = DEFAULT_PORT, end = MAX_PORT) {
+  for (let port = start; port <= end; port++) {
     if (await isPortAvailable(port)) return port;
   }
-  throw new Error(`No available port in range ${DEFAULT_PORT}-${MAX_PORT}`);
+  throw new Error(`No available port in range ${start}-${end}`);
+}
+
+function startVideoAdapter(port) {
+  return new Promise((resolve, reject) => {
+    const server = createVideoAdapterServer(getVideoAdapterOptions());
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      videoAdapterServer = server;
+      videoAdapterPort = port;
+      console.log(`[${APP_NAME}] Video adapter ready on http://127.0.0.1:${port}/xai/v1`);
+      resolve(port);
+    });
+  });
+}
+
+function stopVideoAdapter() {
+  if (videoAdapterServer) {
+    console.log(`[${APP_NAME}] Stopping video adapter...`);
+    videoAdapterServer.close();
+    videoAdapterServer = null;
+    videoAdapterPort = null;
+  }
 }
 
 // ── Mini HTTP Server for Config.html ──
@@ -263,6 +408,10 @@ function startGateway(port) {
     // temp dir each time), so the cache survives and subsequent starts are fast.
     const compileCacheDir = path.join(userDataPath, '.cache', 'v8-compile-cache');
     try { fs.mkdirSync(compileCacheDir, { recursive: true }); } catch {}
+    const mediaPreviewRoots = [
+      process.env.UCLAW_MEDIA_PREVIEW_ROOTS,
+      path.join(configDir, 'media'),
+    ].filter(Boolean).join(path.delimiter);
 
     const env = {
       ...process.env,
@@ -271,6 +420,7 @@ function startGateway(port) {
       OPENCLAW_CONFIG_PATH: configPath,
       OPENCLAW_EMBEDDED_IN: APP_NAME,
       NODE_COMPILE_CACHE: compileCacheDir,
+      UCLAW_MEDIA_PREVIEW_ROOTS: mediaPreviewRoots,
     };
 
     if (process.platform === 'win32') {
@@ -492,6 +642,7 @@ function setupIPC() {
     port: gatewayPort,
     token: getToken(),
     hasModel: hasModelConfigured(),
+    videoAdapterPort,
   }));
 
   ipcMain.handle('open-dashboard', () => {
@@ -518,6 +669,16 @@ app.whenReady().then(async () => {
   await startConfigServer();
 
   try {
+    const configuredVideoAdapterBaseUrl = UCLAW_VIDEO_ADAPTER_BASE_URL.trim();
+    if (configuredVideoAdapterBaseUrl) {
+      ensureVideoAdapterConfig(configuredVideoAdapterBaseUrl.replace(/\/+$/, ''));
+      console.log(`[${APP_NAME}] Using external video adapter ${configuredVideoAdapterBaseUrl}`);
+    } else {
+      const adapterPort = await findAvailablePort(DEFAULT_VIDEO_ADAPTER_PORT, MAX_VIDEO_ADAPTER_PORT);
+      await startVideoAdapter(adapterPort);
+      ensureVideoAdapterConfig(`http://127.0.0.1:${adapterPort}/xai/v1`);
+    }
+
     // Find port and start gateway
     const port = await findAvailablePort();
     await startGateway(port);
@@ -540,11 +701,13 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   stopGateway();
+  stopVideoAdapter();
   app.quit();
 });
 
 app.on('before-quit', () => {
   stopGateway();
+  stopVideoAdapter();
 });
 
 app.on('activate', () => {
