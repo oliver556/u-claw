@@ -11,6 +11,7 @@
     "patch-openclaw": "node scripts/patch-openclaw.js",
     "start": "npm run patch-openclaw && npm run sync-lib && electron .",
     "dev": "npm run patch-openclaw && npm run sync-lib && electron . --dev",
+    "dev:video": "UCLAW_VIDEO_PROVIDER=volcengine UCLAW_VIDEO_ADAPTER_BASE_URL=https://video-adapter.560777.xyz/xai/v1 UCLAW_VIDEO_ADAPTER_API_KEY=uclaw-video-adapter npm run dev",
     "build:mac": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac",
     "build:mac-arm64": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac --arm64",
     "build:mac-x64": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac --x64",

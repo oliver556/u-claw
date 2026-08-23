@@ -10,6 +10,7 @@ const manifestPath = path.join(controlUiDir, "manifest.webmanifest");
 const officialIconSvgPath = path.join(root, "assets", "icon.svg");
 const officialIconPngPath = path.join(root, "assets", "icon.png");
 const officialIconIcoPath = path.join(root, "assets", "icon.ico");
+const localRootsPath = path.join(root, "node_modules", "openclaw", "dist", "local-roots-CAoJyC6u.js");
 
 function read(file) {
   return fs.readFileSync(file, "utf8");
@@ -98,17 +99,335 @@ function patchChatPage() {
 
   for (const file of files) {
     const before = read(file);
-    if (before.includes("Q(o?.message)??o") && before.includes("`video_generate`")) {
-      continue;
+    let after = before;
+
+    if (!(before.includes("Q(o?.message)??o") && before.includes("`video_generate`"))) {
+      after = after.replace(/function Li\(e\)\{[\s\S]*?\}var Ri=/, replacement);
+      if (after === before) {
+        throw new Error(`Could not patch internal media event filter in ${file}`);
+      }
     }
 
-    const after = before.replace(/function Li\(e\)\{[\s\S]*?\}var Ri=/, replacement);
-    if (after === before) {
-      throw new Error(`Could not patch internal media event filter in ${file}`);
+    const emptyVideoToolOutput =
+      "l?e.preview?s`${h} ${wx(e.outputText)}`:Tx({label:d?`Tool error`:`Tool output`,text:e.outputText}):d?Tx({label:`Tool error`,text:`No output — tool failed.`}):c";
+    const videoToolOutput =
+      "l?e.preview?s`${h} ${wx(e.outputText)}`:Tx({label:d?`Tool error`:`Tool output`,text:e.outputText}):d?Tx({label:`Tool error`,text:`No output — tool failed.`}):e.name===`video_generate`?Tx({label:`Tool output`,text:`视频生成中，请稍等。完成后会自动显示视频。`}):c";
+    if (!after.includes("视频生成中，请稍等")) {
+      after = after.replace(emptyVideoToolOutput, videoToolOutput);
     }
-    writeIfChanged(file, before, after);
-    console.log(`patched ${path.relative(root, file)}`);
+
+    const localMediaGuard =
+      "function zS(e,t){if(FS(e))return!0;let n=IS(e),r=n?[RS(n)]:";
+    const uclawMediaGuard =
+      "function zS(e,t){if(FS(e))return!0;let n=IS(e);if(n&&RS(n).includes(`/.openclaw/media/`))return!0;let r=n?[RS(n)]:";
+    if (!after.includes("RS(n).includes(`/.openclaw/media/`)")) {
+      after = after.replace(localMediaGuard, uclawMediaGuard);
+    }
+
+    const mediaDirectiveSplit =
+      "let r=t[1],i=zr(r),u=i??r,d=i?[i]:r.split(/\\s+/).filter(Boolean),f=c.length,p=0,m=[],h=!1;for(let e of d){";
+    const mediaDirectiveWithOpenclawPath =
+      "let r=t[1],i=zr(r),u=i??r,d=i?[i]:r.split(/\\s+/).filter(Boolean),f=c.length,p=0,m=[],h=!1,y=/[\\\\/]\\.openclaw[\\\\/]media[\\\\/]/.test(u);if(!i&&y){let e=wr(Er(u));Rr(e,{allowSpaces:!0,allowBareFilename:!0})&&(d=[e])}for(let e of d){";
+    if (!after.includes("openclaw[\\\\/]media")) {
+      after = after.replace(mediaDirectiveSplit, mediaDirectiveWithOpenclawPath);
+    }
+
+    const lightboxFunction = `function uClawEnsureMediaLightboxStyle(){if(document.getElementById(\`uclaw-media-lightbox-style\`))return;let e=document.createElement(\`style\`);e.id=\`uclaw-media-lightbox-style\`,e.textContent=[\`.uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:32px;outline:0}.uclaw-media-lightbox__viewer{max-width:96vw;max-height:92vh;display:flex;align-items:center;justify-content:center}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45)}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;min-width:38px;height:38px;padding:0 13px;display:inline-flex;align-items:center;justify-content:center;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button--close{font-size:20px;font-weight:500;padding-bottom:2px}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:88vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}}\`].join(\`\`),document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e==\`string\`?e.trim():\`\`;if(!n)return;uClawEnsureMediaLightboxStyle(),document.querySelector(\`.uclaw-media-lightbox\`)?.remove();let r=document.createElement(\`div\`);r.className=\`uclaw-media-lightbox\`,r.tabIndex=-1,r.setAttribute(\`role\`,\`dialog\`),r.setAttribute(\`aria-modal\`,\`true\`);let i=()=>{document.removeEventListener(\`keydown\`,a,!0),r.remove()},a=e=>{e.key===\`Escape\`&&(e.preventDefault(),i())};r.addEventListener(\`click\`,e=>{e.target===r&&i()});let o=document.createElement(\`div\`);o.className=\`uclaw-media-lightbox__toolbar\`;let s=document.createElement(\`a\`);s.className=\`uclaw-media-lightbox__button\`,s.href=n,s.target=\`_blank\`,s.rel=\`noreferrer\`,s.download=t.label||\`\`,s.textContent=\`下载\`;let c=document.createElement(\`button\`);c.className=\`uclaw-media-lightbox__button uclaw-media-lightbox__button--close\`,c.type=\`button\`,c.setAttribute(\`aria-label\`,\`关闭预览\`),c.textContent=\`×\`,c.addEventListener(\`click\`,i),o.append(s,c);let l=document.createElement(\`div\`);l.className=\`uclaw-media-lightbox__viewer\`;let u=(t.kind||\`\`).toLowerCase()===\`video\`||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(u?\`video\`:\`img\`);d.src=n,u?(d.controls=!0,d.autoplay=!0,d.playsInline=!0,d.preload=\`metadata\`):d.alt=t.label||\`Preview\`,d.addEventListener(\`click\`,e=>e.stopPropagation()),l.appendChild(d),r.append(o,l),document.body.appendChild(r),document.addEventListener(\`keydown\`,a,!0),requestAnimationFrame(()=>r.focus({preventScroll:!0}))}`;
+    const lightboxFunctionV2 = `function uClawEnsureMediaLightboxStyle(){if(document.getElementById(\`uclaw-media-lightbox-style\`))return;let e=document.createElement(\`style\`);e.id=\`uclaw-media-lightbox-style\`,e.textContent=[\`.uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:32px 48px;outline:0;overflow:hidden}.uclaw-media-lightbox__viewer{max-width:96vw;max-height:90vh;display:flex;align-items:center;justify-content:center;overflow:hidden}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:90vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45);transform-origin:center center;transition:transform .14s ease}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__button--close{font-size:22px;font-weight:500;padding-bottom:2px}.uclaw-media-lightbox__zoom{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:1;display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:999px;background:rgba(20,20,20,.72);box-shadow:0 8px 28px rgba(0,0,0,.34);backdrop-filter:blur(10px)}.uclaw-media-lightbox__zoom-button{border:0;border-radius:999px;width:32px;height:32px;background:rgba(255,255,255,.9);color:#111;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font:600 14px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.uclaw-media-lightbox__zoom-button:hover{background:#fff}.uclaw-media-lightbox__zoom-button svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__zoom-value{min-width:48px;color:#fff;text-align:center;font:600 12px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:84vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}.uclaw-media-lightbox__zoom{bottom:12px}}\`].join(\`\`),document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e==\`string\`?e.trim():\`\`;if(!n)return;uClawEnsureMediaLightboxStyle(),document.querySelector(\`.uclaw-media-lightbox\`)?.remove();let r=document.createElement(\`div\`);r.className=\`uclaw-media-lightbox\`,r.tabIndex=-1,r.setAttribute(\`role\`,\`dialog\`),r.setAttribute(\`aria-modal\`,\`true\`);let i=1,a=()=>{d.style.transform=\`scale(\${i})\`,v.textContent=\`\${Math.round(i*100)}%\`},o=()=>{document.removeEventListener(\`keydown\`,s,!0),r.remove()},s=e=>{e.key===\`Escape\`&&(e.preventDefault(),o())};r.addEventListener(\`click\`,e=>{e.target===r&&o()});let c=document.createElement(\`div\`);c.className=\`uclaw-media-lightbox__toolbar\`;let l=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>\`,u=document.createElement(\`a\`);u.className=\`uclaw-media-lightbox__button\`,u.href=n,u.target=\`_blank\`,u.rel=\`noreferrer\`,u.download=t.label||\`\`,u.title=\`下载\`,u.setAttribute(\`aria-label\`,\`下载\`),u.innerHTML=l;let f=document.createElement(\`button\`);f.className=\`uclaw-media-lightbox__button uclaw-media-lightbox__button--close\`,f.type=\`button\`,f.setAttribute(\`aria-label\`,\`关闭预览\`),f.title=\`关闭\`,f.textContent=\`×\`,f.addEventListener(\`click\`,o),c.append(u,f);let p=document.createElement(\`div\`);p.className=\`uclaw-media-lightbox__viewer\`;let m=(t.kind||\`\`).toLowerCase()===\`video\`||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(m?\`video\`:\`img\`);d.src=n,m?(d.controls=!0,d.autoplay=!0,d.playsInline=!0,d.preload=\`metadata\`):d.alt=t.label||\`Preview\`,d.addEventListener(\`click\`,e=>e.stopPropagation()),p.appendChild(d);let h=document.createElement(\`div\`);h.className=\`uclaw-media-lightbox__zoom\`;let y=(e,t,n)=>{let r=document.createElement(\`button\`);return r.className=\`uclaw-media-lightbox__zoom-button\`,r.type=\`button\`,r.title=t,r.setAttribute(\`aria-label\`,t),r.innerHTML=e,r.addEventListener(\`click\`,e=>{e.preventDefault(),e.stopPropagation(),n()}),r},g=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>\`,b=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>\`,w=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M16 3h3a2 2 0 0 1 2 2v3"></path><path d="M8 21H5a2 2 0 0 1-2-2v-3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>\`,v=document.createElement(\`span\`);v.className=\`uclaw-media-lightbox__zoom-value\`,h.append(y(g,\`缩小\`,()=>{i=Math.max(.5,Math.round((i-.25)*100)/100),a()}),v,y(b,\`放大\`,()=>{i=Math.min(3,Math.round((i+.25)*100)/100),a()}),y(w,\`适配\`,()=>{i=1,a()})),r.append(c,p,h),document.body.appendChild(r),a(),document.addEventListener(\`keydown\`,s,!0),requestAnimationFrame(()=>r.focus({preventScroll:!0}))}`;
+    const lightboxFunctionV3 = `function uClawEnsureMediaLightboxStyle(){let e=document.getElementById("uclaw-media-lightbox-style");e&&e.remove();e=document.createElement("style");e.id="uclaw-media-lightbox-style";e.textContent=".uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:42px 52px;outline:0;overflow:hidden}.uclaw-media-lightbox--full{padding:0}.uclaw-media-lightbox__viewer{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:90vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45);transform-origin:center center;transition:transform .14s ease,width .14s ease,height .14s ease,border-radius .14s ease}.uclaw-media-lightbox--full .uclaw-media-lightbox__viewer img,.uclaw-media-lightbox--full .uclaw-media-lightbox__viewer video{width:100vw;height:100vh;max-width:100vw;max-height:100vh;border-radius:0;box-shadow:none}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__button--close{font-size:22px;font-weight:500;padding-bottom:2px}.uclaw-media-lightbox__zoom{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:1;display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:999px;background:rgba(20,20,20,.74);box-shadow:0 8px 28px rgba(0,0,0,.34);backdrop-filter:blur(10px)}.uclaw-media-lightbox__zoom-button{border:0;border-radius:999px;width:32px;height:32px;background:rgba(255,255,255,.92);color:#111;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font:600 14px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.uclaw-media-lightbox__zoom-button:hover{background:#fff}.uclaw-media-lightbox__zoom-button svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__zoom-value{min-width:48px;color:#fff;text-align:center;font:600 12px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox--full{padding:0}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:84vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}.uclaw-media-lightbox__zoom{bottom:12px}}";document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e=="string"?e.trim():"";if(!n)return;uClawEnsureMediaLightboxStyle();document.querySelector(".uclaw-media-lightbox")?.remove();let r=document.createElement("div");r.className="uclaw-media-lightbox";r.tabIndex=-1;r.setAttribute("role","dialog");r.setAttribute("aria-modal","true");let i=1,a=false,o='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M16 3h3a2 2 0 0 1 2 2v3"></path><path d="M8 21H5a2 2 0 0 1-2-2v-3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>',s='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5H3"></path><path d="M16 3v5h5"></path><path d="M8 21v-5H3"></path><path d="M16 21v-5h5"></path></svg>',c=()=>{d.style.transform="scale("+i+")";v.textContent=Math.round(i*100)+"%";r.classList.toggle("uclaw-media-lightbox--full",a);w.innerHTML=a?s:o;w.title=a?"退出全屏":"全屏";w.setAttribute("aria-label",w.title)},l=()=>{document.removeEventListener("keydown",u,true);r.remove()},u=e=>{if(e.key==="Escape"){e.preventDefault();l()}else if(e.key==="+"||e.key==="="){e.preventDefault();i=Math.min(3,Math.round((i+.25)*100)/100);c()}else if(e.key==="-"||e.key==="_"){e.preventDefault();i=Math.max(.5,Math.round((i-.25)*100)/100);c()}else if(e.key==="0"){e.preventDefault();i=1;c()}else if(e.key.toLowerCase()==="f"){e.preventDefault();a=!a;i=1;c()}};r.addEventListener("click",e=>{e.target===r&&l()});let f=document.createElement("div");f.className="uclaw-media-lightbox__toolbar";let p='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>',m=document.createElement("a");m.className="uclaw-media-lightbox__button";m.href=n;m.target="_blank";m.rel="noreferrer";m.download=t.label||"";m.title="下载";m.setAttribute("aria-label","下载");m.innerHTML=p;let h=document.createElement("button");h.className="uclaw-media-lightbox__button uclaw-media-lightbox__button--close";h.type="button";h.setAttribute("aria-label","关闭预览");h.title="关闭";h.textContent="×";h.addEventListener("click",l);f.append(m,h);let y=document.createElement("div");y.className="uclaw-media-lightbox__viewer";let g=(t.kind||"").toLowerCase()==="video"||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(g?"video":"img");d.src=n;if(g){d.controls=true;d.autoplay=true;d.playsInline=true;d.preload="metadata"}else d.alt=t.label||"Preview";d.addEventListener("click",e=>e.stopPropagation());d.addEventListener("dblclick",e=>{e.preventDefault();a=!a;i=1;c()});y.appendChild(d);let b=document.createElement("div");b.className="uclaw-media-lightbox__zoom";let S=(e,t,n)=>{let r=document.createElement("button");r.className="uclaw-media-lightbox__zoom-button";r.type="button";r.title=t;r.setAttribute("aria-label",t);r.innerHTML=e;r.addEventListener("click",e=>{e.preventDefault();e.stopPropagation();n()});return r},C='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>',T='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>',v=document.createElement("span");v.className="uclaw-media-lightbox__zoom-value";let w=S(o,"全屏",()=>{a=!a;i=1;c()});b.append(S(C,"缩小",()=>{i=Math.max(.5,Math.round((i-.25)*100)/100);c()}),v,S(T,"放大",()=>{i=Math.min(3,Math.round((i+.25)*100)/100);c()}),w);r.append(f,y,b);document.body.appendChild(r);c();document.addEventListener("keydown",u,true);requestAnimationFrame(()=>r.focus({preventScroll:true}))}`;
+    if (after.includes("function uClawEnsureMediaLightboxStyle()")) {
+      after = after.replace(
+        /function uClawEnsureMediaLightboxStyle\(\)\{[\s\S]*?\}function mS\(\)\{return s`/,
+        `${lightboxFunctionV3}function mS(){return s\``,
+      );
+    } else {
+      after = after.replace("function mS(){return s`", `${lightboxFunctionV3}function mS(){return s\``);
+    }
+
+    const userImageBrowserOpen = "an(e,{allowDataImage:!0})";
+    const userImageLightboxOpen = "uClawOpenMediaLightbox(e,{kind:`image`})";
+    if (after.includes(userImageBrowserOpen)) {
+      after = after.replace(userImageBrowserOpen, userImageLightboxOpen);
+    }
+
+    const assistantImageBrowserOpen = "@click=${()=>an(l,{allowDataImage:!0})}";
+    const assistantImageLightboxOpen =
+      "@click=${()=>uClawOpenMediaLightbox(l,{kind:`image`,label:e.label})}";
+    if (after.includes(assistantImageBrowserOpen)) {
+      after = after.replace(assistantImageBrowserOpen, assistantImageLightboxOpen);
+    }
+
+    const inlineVideo =
+      `              <video
+                controls
+                preload="metadata"
+                src=\${l}
+                @loadedmetadata=\${()=>a?.()}
+              ></video>`;
+    const inlineVideoWithPreview =
+      `              <button
+                class="uclaw-media-preview-button"
+                type="button"
+                aria-label="Open video preview"
+                title="Open preview"
+                @click=\${t=>{t.preventDefault(),t.stopPropagation(),uClawOpenMediaLightbox(l,{kind:\`video\`,label:e.label})}}
+              >
+                ⤢
+              </button>
+              <video
+                controls
+                preload="metadata"
+                src=\${l}
+                @loadedmetadata=\${()=>a?.()}
+              ></video>`;
+    if (!after.includes("uclaw-media-preview-button")) {
+      after = after.replace(inlineVideo, inlineVideoWithPreview);
+    }
+
+    const videoAttachmentFilenameLink = `              <a
+                class="chat-assistant-attachment-card__link"
+                href=\${l}
+                target="_blank"
+                rel="noreferrer"
+                >\${e.label}</a
+              >
+`;
+    if (after.includes(videoAttachmentFilenameLink)) {
+      after = after.replace(videoAttachmentFilenameLink, "");
+    }
+
+    const chatStateRunId =
+      "chatAttachments:[],chatRunId:null,chatStream:null";
+    const chatStateRunIdWithMap =
+      "chatAttachments:[],chatRunId:null,chatRunIdBySession:new Map,chatStream:null";
+    if (!after.includes("chatRunIdBySession:new Map")) {
+      if (!after.includes(chatStateRunId)) {
+        throw new Error(`Could not patch chat run id state in ${file}`);
+      }
+      after = after.replace(chatStateRunId, chatStateRunIdWithMap);
+    }
+
+    if (!after.includes("chatRunIdBySession?.get(t)")) {
+      const beforeSwitchSession = after;
+      after = after.replace(
+        /function y_\(e,t\)\{let n=e\.sessionKey;[\s\S]*?e\.resetChatScroll\(\)\}/,
+        "function y_(e,t){let n=e.sessionKey,r=e.chatRunId;e.chatRunIdBySession&&(r?e.chatRunIdBySession.set(n,r):e.chatRunIdBySession.delete(n)),Xu(e,n),m_(e,n),g_(e,n),e.sessionKey=t,e.selectedChatSessionArchived=e.sessionsResult?.sessions.some(e=>e.archived===!0&&I(e.key,t))===!0,e.currentSessionId=null,e.reconnectResumeSessionId=null,e.chatMessage=``,e.chatAttachments=[],e.chatReplyTarget=null,e.chatMessages=__(e,t),e.chatToolMessages=[],e.chatStreamSegments=[],e.chatThinkingLevel=null,e.chatVerboseLevel=null,e.chatStream=null,e.chatSideResult=null,e.lastError=null,e.chatError=null,e.chatAvatarUrl=null,e.chatAvatarSource=null,e.chatAvatarStatus=null,e.chatAvatarReason=null,Rf(e),e.chatQueue=h_(e,t),$u(e),e.resetChatInputHistoryNavigation(),e.chatStreamStartedAt=null,gc(e,{clearLocalRun:!0,clearChatStream:!0,clearToolStream:!0,clearSideResultTerminalRuns:!0,clearRunStatus:!0}),e.chatRunId=e.chatRunIdBySession?.get(t)??null,e.resetChatScroll()}"
+      );
+      if (after === beforeSwitchSession) {
+        throw new Error(`Could not patch chat session run id restore in ${file}`);
+      }
+    }
+
+    const gcRunState =
+      "function gc(e,t={}){let n=Date.now(),r=t.runId??e.chatRunId??null,i=nc(t.sessionKey)??e.sessionKey;if(";
+    const gcRunStateWithMap =
+      "function gc(e,t={}){let n=Date.now(),r=t.runId??e.chatRunId??null,i=nc(t.sessionKey)??e.sessionKey;t.outcome&&e.chatRunIdBySession?.delete(i);if(";
+    if (!after.includes("t.outcome&&e.chatRunIdBySession?.delete(i)")) {
+      if (!after.includes(gcRunState)) {
+        throw new Error(`Could not patch chat terminal run id cleanup in ${file}`);
+      }
+      after = after.replace(gcRunState, gcRunStateWithMap);
+    }
+
+    const captureLocalRun =
+      "if(!e.chatRunId&&r&&typeof t.runId==`string`&&(e.chatRunId=t.runId,e.chatStreamStartedAt??=Date.now()),";
+    const captureLocalRunWithMap =
+      "if(!e.chatRunId&&r&&typeof t.runId==`string`&&(e.chatRunId=t.runId,e.chatRunIdBySession?.set(e.sessionKey,t.runId),e.chatStreamStartedAt??=Date.now()),";
+    if (!after.includes("e.chatRunIdBySession?.set(e.sessionKey,t.runId)")) {
+      if (!after.includes(captureLocalRun)) {
+        throw new Error(`Could not patch local chat run id capture in ${file}`);
+      }
+      after = after.replace(captureLocalRun, captureLocalRunWithMap);
+    }
+
+    const activeRunIndicator =
+      "if(e.stream===null&&l.some(e=>e.sendState===`sending`&&Rb(e)))t.push({kind:`reading-indicator`,key:`stream:${e.sessionKey}:pending`});else if(e.stream!==null)";
+    const activeRunIndicatorWithAbort =
+      "if(e.stream===null&&(l.some(e=>e.sendState===`sending`&&Rb(e))||e.canAbort===!0))t.push({kind:`reading-indicator`,key:`stream:${e.sessionKey}:pending`});else if(e.stream!==null)";
+    const activeRunIndicatorWithRunStatus =
+      "if(e.stream===null&&(l.some(e=>e.sendState===`sending`&&Rb(e))||e.canAbort===!0&&e.runStatus?.phase!==`done`&&e.runStatus?.phase!==`interrupted`))t.push({kind:`reading-indicator`,key:`stream:${e.sessionKey}:pending`});else if(e.stream!==null)";
+    const activeRunIndicatorWithLocalRun =
+      "if(e.stream===null&&(l.some(e=>e.sendState===`sending`&&Rb(e))||typeof e.chatRunId==`string`&&e.chatRunId.length>0))t.push({kind:`reading-indicator`,key:`stream:${e.sessionKey}:pending`});else if(e.stream!==null)";
+    if (!after.includes("typeof e.chatRunId==`string`&&e.chatRunId.length>0")) {
+      if (after.includes(activeRunIndicatorWithRunStatus)) {
+        after = after.replace(activeRunIndicatorWithRunStatus, activeRunIndicatorWithLocalRun);
+      } else if (after.includes(activeRunIndicatorWithAbort)) {
+        after = after.replace(activeRunIndicatorWithAbort, activeRunIndicatorWithLocalRun);
+      } else if (after.includes(activeRunIndicator)) {
+        after = after.replace(activeRunIndicator, activeRunIndicatorWithLocalRun);
+      } else {
+        throw new Error(`Could not patch active run reading indicator in ${file}`);
+      }
+    }
+
+    const strictNewSessionIdle =
+      "function u_(e){return!e.chatLoading&&!e.chatSending&&!e.chatRunId&&e.chatStream===null&&e.chatQueue.length===0}";
+    const resilientNewSessionIdle =
+      "function u_(e){return!e.chatLoading&&!e.chatSending&&e.chatStream===null&&e.chatQueue.length===0}";
+    if (after.includes(strictNewSessionIdle)) {
+      after = after.replace(strictNewSessionIdle, resilientNewSessionIdle);
+    }
+
+    const inactiveRunDrop =
+      "if(!r&&!i){if(t.state===`final`){let n=kg(t.message);if(n&&!zl(n)){let r=P(t.sessionKey)?t.agentId??fe(e):t.agentId;jg(e,t.sessionKey,n,r)}}return null}";
+    const inactiveRunCache =
+      "if(!r&&!i){let n=P(t.sessionKey)?t.agentId??fe(e):t.agentId,a={sessionKey:t.sessionKey,agentId:n},o=()=>zc(e.chatMessagesBySession,e,a),s=()=>{if(!e.chatMessagesBySession)return;Lc(e.chatMessagesBySession,e,a,o().filter(e=>e?.__uclawInactiveRunId!==t.runId))};if(t.state===`final`){s();let r=kg(t.message);r&&!zl(r)&&jg(e,t.sessionKey,r,n)}else if(t.state===`delta`){let r=o().find(e=>e?.__uclawInactiveRunId===t.runId),i=Array.isArray(r?.content)?r.content.find(e=>e?.type===`text`)?.text:typeof r?.content==`string`?r.content:typeof r?.text==`string`?r.text:null,c=Eg(typeof i==`string`?i:null,t);if(typeof c==`string`&&c.trim()&&!Ml(c)&&!Li(t.message)){let r={role:`assistant`,content:[{type:`text`,text:c}],timestamp:Date.now(),__uclawInactiveRunId:t.runId};s();e.chatMessagesBySession&&Rc(e.chatMessagesBySession,e,a,r)}}else(t.state===`aborted`||t.state===`error`)&&s();return null}";
+    const inactiveRunCacheWithMap =
+      "if(!r&&!i){let n=P(t.sessionKey)?t.agentId??fe(e):t.agentId,a={sessionKey:t.sessionKey,agentId:n},o=()=>zc(e.chatMessagesBySession,e,a),s=()=>{if(!e.chatMessagesBySession)return;Lc(e.chatMessagesBySession,e,a,o().filter(e=>e?.__uclawInactiveRunId!==t.runId))};if(t.state===`final`){s();e.chatRunIdBySession?.delete(t.sessionKey);let r=kg(t.message);r&&!zl(r)&&jg(e,t.sessionKey,r,n)}else if(t.state===`delta`){let r=o().find(e=>e?.__uclawInactiveRunId===t.runId),i=Array.isArray(r?.content)?r.content.find(e=>e?.type===`text`)?.text:typeof r?.content==`string`?r.content:typeof r?.text==`string`?r.text:null,c=Eg(typeof i==`string`?i:null,t);if(typeof c==`string`&&c.trim()&&!Ml(c)&&!Li(t.message)){let r={role:`assistant`,content:[{type:`text`,text:c}],timestamp:Date.now(),__uclawInactiveRunId:t.runId};s();e.chatMessagesBySession&&Rc(e.chatMessagesBySession,e,a,r)}}else(t.state===`aborted`||t.state===`error`)&&(s(),e.chatRunIdBySession?.delete(t.sessionKey));return null}";
+    if (!after.includes("__uclawInactiveRunId")) {
+      if (!after.includes(inactiveRunDrop)) {
+        throw new Error(`Could not patch inactive chat run cache in ${file}`);
+      }
+      after = after.replace(inactiveRunDrop, inactiveRunCacheWithMap);
+    } else if (!after.includes("e.chatRunIdBySession?.delete(t.sessionKey)")) {
+      if (!after.includes(inactiveRunCache)) {
+        throw new Error(`Could not patch inactive chat run id cleanup in ${file}`);
+      }
+      after = after.replace(inactiveRunCache, inactiveRunCacheWithMap);
+    }
+
+    const renderCacheKey =
+      "e.streamStartedAt===t.streamStartedAt&&e.queue===t.queue&&e.showToolCalls===t.showToolCalls";
+    const renderCacheKeyWithAbort =
+      "e.streamStartedAt===t.streamStartedAt&&e.queue===t.queue&&e.canAbort===t.canAbort&&e.showToolCalls===t.showToolCalls";
+    const renderCacheKeyWithRunStatus =
+      "e.streamStartedAt===t.streamStartedAt&&e.queue===t.queue&&e.canAbort===t.canAbort&&e.runStatus===t.runStatus&&e.showToolCalls===t.showToolCalls";
+    const renderCacheKeyWithRunStatusAndLocalRun =
+      "e.streamStartedAt===t.streamStartedAt&&e.queue===t.queue&&e.canAbort===t.canAbort&&e.runStatus===t.runStatus&&e.chatRunId===t.chatRunId&&e.showToolCalls===t.showToolCalls";
+    if (!after.includes("e.canAbort===t.canAbort")) {
+      after = after.replace(renderCacheKey, renderCacheKeyWithAbort);
+    }
+    if (!after.includes("e.runStatus===t.runStatus")) {
+      if (!after.includes(renderCacheKeyWithAbort)) {
+        throw new Error(`Could not patch chat render cache runStatus in ${file}`);
+      }
+      after = after.replace(renderCacheKeyWithAbort, renderCacheKeyWithRunStatus);
+    }
+    if (!after.includes("e.chatRunId===t.chatRunId")) {
+      if (!after.includes(renderCacheKeyWithRunStatus)) {
+        throw new Error(`Could not patch chat render cache chatRunId in ${file}`);
+      }
+      after = after.replace(renderCacheKeyWithRunStatus, renderCacheKeyWithRunStatusAndLocalRun);
+    }
+
+    const renderItemsInput =
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,showToolCalls:e.showToolCalls";
+    const renderItemsInputWithAbort =
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,canAbort:e.canAbort,showToolCalls:e.showToolCalls";
+    const renderItemsInputWithRunStatus =
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,canAbort:e.canAbort,runStatus:e.runStatus,showToolCalls:e.showToolCalls";
+    const renderItemsInputWithRunStatusAndLocalRun =
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,canAbort:e.canAbort,runStatus:e.runStatus,chatRunId:e.chatRunId,showToolCalls:e.showToolCalls";
+    if (!after.includes("queue:e.queue,canAbort:e.canAbort")) {
+      after = after.replace(renderItemsInput, renderItemsInputWithAbort);
+    }
+    if (!after.includes("queue:e.queue,canAbort:e.canAbort,runStatus:e.runStatus")) {
+      if (!after.includes(renderItemsInputWithAbort)) {
+        throw new Error(`Could not patch chat render input runStatus in ${file}`);
+      }
+      after = after.replace(renderItemsInputWithAbort, renderItemsInputWithRunStatus);
+    }
+    if (!after.includes("chatRunId:e.chatRunId,showToolCalls")) {
+      if (!after.includes(renderItemsInputWithRunStatus)) {
+        throw new Error(`Could not patch chat render input chatRunId in ${file}`);
+      }
+      after = after.replace(renderItemsInputWithRunStatus, renderItemsInputWithRunStatusAndLocalRun);
+    }
+
+    const chatThreadProps =
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,showThinking:e.showThinking";
+    const chatThreadPropsWithAbort =
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,canAbort:e.canAbort,showThinking:e.showThinking";
+    const chatThreadPropsWithRunStatus =
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,canAbort:e.canAbort,runStatus:e.runStatus,showThinking:e.showThinking";
+    const chatThreadPropsWithRunStatusAndLocalRun =
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,canAbort:e.canAbort,runStatus:e.runStatus,chatRunId:e.chatRunId,showThinking:e.showThinking";
+    if (!after.includes("queue:e.queue,canAbort:e.canAbort")) {
+      after = after.replace(chatThreadProps, chatThreadPropsWithAbort);
+    }
+    if (!after.includes("queue:e.queue,canAbort:e.canAbort,runStatus:e.runStatus")) {
+      if (!after.includes(chatThreadPropsWithAbort)) {
+        throw new Error(`Could not patch chat thread props runStatus in ${file}`);
+      }
+      after = after.replace(chatThreadPropsWithAbort, chatThreadPropsWithRunStatus);
+    }
+    if (!after.includes("chatRunId:e.chatRunId,showThinking")) {
+      if (!after.includes(chatThreadPropsWithRunStatus)) {
+        throw new Error(`Could not patch chat thread props chatRunId in ${file}`);
+      }
+      after = after.replace(chatThreadPropsWithRunStatus, chatThreadPropsWithRunStatusAndLocalRun);
+    }
+
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
   }
+}
+
+function patchControlCss() {
+  if (!fs.existsSync(assetsDir)) {
+    throw new Error(`Missing OpenClaw control-ui assets: ${assetsDir}`);
+  }
+
+  const files = fs
+    .readdirSync(assetsDir)
+    .filter((name) => /^index-.*\.css$/.test(name))
+    .map((name) => path.join(assetsDir, name));
+
+  if (files.length === 0) {
+    throw new Error(`Missing control-ui stylesheet in ${assetsDir}`);
+  }
+
+  const css = [
+    ".chat-assistant-attachment-card--video{position:relative}",
+    ".uclaw-media-preview-button{position:absolute;top:8px;right:8px;z-index:1;border:0;border-radius:999px;background:rgba(0,0,0,.62);color:#fff;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;font-size:17px;line-height:1;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}",
+    ".uclaw-media-preview-button:hover{background:rgba(0,0,0,.82)}",
+  ].join("");
+
+  for (const file of files) {
+    const before = read(file);
+    if (before.includes(".uclaw-media-preview-button")) continue;
+    const after = `${before}\n${css}\n`;
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+function patchLocalMediaRoots() {
+  if (!fs.existsSync(localRootsPath)) {
+    throw new Error(`Missing OpenClaw local roots module: ${localRootsPath}`);
+  }
+
+  let source = read(localRootsPath);
+  const before = source;
+
+  if (!source.includes("function getUClawMediaPreviewRoots")) {
+    source = source.replace(
+      "let cachedPreferredTmpDir;\nfunction resolveCachedPreferredTmpDir()",
+      `let cachedPreferredTmpDir;
+function getUClawMediaPreviewRoots(env = process.env) {
+\tconst raw = env.UCLAW_MEDIA_PREVIEW_ROOTS?.trim();
+\tif (!raw) return [];
+\treturn raw.split(path.delimiter).map((entry) => entry.trim()).filter(Boolean).map((entry) => path.resolve(resolveUserPath(entry, env))).filter((entry) => entry !== path.parse(entry).root);
+}
+function resolveCachedPreferredTmpDir()`,
+    );
+  }
+
+  if (!source.includes("...getUClawMediaPreviewRoots()")) {
+    source = source.replace(
+      'path.join(resolvedStateDir, "media"),\n\t\tpath.join(resolvedStateDir, "canvas"),',
+      'path.join(resolvedStateDir, "media"),\n\t\t...getUClawMediaPreviewRoots(),\n\t\tpath.join(resolvedStateDir, "canvas"),',
+    );
+  }
+
+  if (source === before) return;
+  if (!source.includes("function getUClawMediaPreviewRoots") || !source.includes("...getUClawMediaPreviewRoots()")) {
+    throw new Error(`Could not patch local media preview roots in ${localRootsPath}`);
+  }
+  writeIfChanged(localRootsPath, before, source);
+  console.log(`patched ${path.relative(root, localRootsPath)}`);
 }
 
 function patchServiceWorker() {
@@ -119,7 +438,7 @@ function patchServiceWorker() {
   let source = read(swPath);
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-5-chat-composer-controls-polish-3";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-5-chat-composer-controls-polish-3-media-preview-roots-1";',
   );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
@@ -3555,4 +3874,6 @@ patchIndexUiCopy();
 patchFinalUiPolish();
 patchControlUiBrandAssets();
 patchControlUiTheme();
+patchControlCss();
+patchLocalMediaRoots();
 patchServiceWorker();
