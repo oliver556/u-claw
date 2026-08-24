@@ -203,7 +203,7 @@ function mergeObjects(base, override) {
 
 function buildConfig(options, sourceConfigs) {
   const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-  const existingConfig = options.customer ? {} : (sourceConfigs[0] || {});
+  const existingConfig = (options.customer || options.streamer) ? {} : (sourceConfigs[0] || {});
   const mergedConfig = mergeObjects(template, existingConfig);
   mergedConfig.meta = {
     lastTouchedVersion: findConfigMeta(sourceConfigs)?.lastTouchedVersion || readOpenClawVersion(),

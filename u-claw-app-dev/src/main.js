@@ -87,13 +87,26 @@ function getNodeBin() {
   throw new Error(`Bundled Node.js runtime not found: ${nodeBin}`);
 }
 
-// Portable mode: if a `portable/` directory exists next to the .app bundle, use it for data
+// Portable mode: launcher-provided data dir wins in both dev and packaged runs.
+// Falling back to desktop userData when this env is present would write portable
+// installs into the host machine's platform-specific app data directory.
 function getPortableDataPath() {
-  const envPortableDir = process.env.UCLAW_PORTABLE_DATA_DIR;
-  if (envPortableDir && fs.existsSync(envPortableDir)) {
-    console.log(`[${APP_NAME}] Portable mode: data in ${envPortableDir}`);
-    return envPortableDir;
+  const envPortableDir = process.env.UCLAW_PORTABLE_DATA_DIR?.trim();
+  if (envPortableDir) {
+    const resolvedPortableDir = path.resolve(envPortableDir);
+    try {
+      fs.mkdirSync(resolvedPortableDir, { recursive: true });
+      if (!fs.statSync(resolvedPortableDir).isDirectory()) {
+        throw new Error('path is not a directory');
+      }
+    } catch (error) {
+      throw new Error(`Invalid UCLAW_PORTABLE_DATA_DIR ${resolvedPortableDir}: ${error.message}`);
+    }
+    console.log(`[${APP_NAME}] Portable mode: data in ${resolvedPortableDir}`);
+    return resolvedPortableDir;
   }
+
+  if (!app.isPackaged) return null;
 
   const appPath = app.getAppPath(); // inside .app/Contents/Resources/app
   // Walk up to the .app's parent directory
@@ -106,9 +119,16 @@ function getPortableDataPath() {
   return null;
 }
 
+function getDesktopUserDataPath() {
+  const envDevDataDir = process.env.UCLAW_DEV_DATA_DIR?.trim();
+  if (isDev && envDevDataDir) return path.resolve(envDevDataDir);
+  if (isDev) return path.join(app.getPath('appData'), 'u-claw-dev');
+  return app.getPath('userData');
+}
+
 // User data — portable or default
-const portablePath = app.isPackaged ? getPortableDataPath() : null;
-const userDataPath = portablePath || app.getPath('userData');
+const portablePath = getPortableDataPath();
+const userDataPath = portablePath || getDesktopUserDataPath();
 const configDir = path.join(userDataPath, '.openclaw');
 const configPath = path.join(configDir, 'openclaw.json');
 
@@ -274,6 +294,54 @@ function findNewApiCredentials(config) {
   }
 
   return {};
+}
+
+function readJsonIfExists(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    console.warn(`[${APP_NAME}] Failed to read config ${filePath}: ${error.message}`);
+    return null;
+  }
+}
+
+function syncDevNewApiCredentialsFromDesktop() {
+  if (!isDev || portablePath) return;
+  if (process.env.UCLAW_NEW_API_KEY?.trim()) return;
+
+  const desktopConfigPath = path.join(app.getPath('appData'), 'u-claw', '.openclaw', 'openclaw.json');
+  if (path.resolve(desktopConfigPath) === path.resolve(configPath)) return;
+
+  const sourceConfig = readJsonIfExists(desktopConfigPath);
+  if (!sourceConfig) return;
+
+  const targetConfig = getConfig();
+  const sourceProviders = sourceConfig.models?.providers || {};
+  const targetProviders = targetConfig.models?.providers || {};
+  let changed = false;
+
+  for (const providerName of ['custom', 'litellm']) {
+    const sourceProvider = sourceProviders[providerName];
+    const targetProvider = targetProviders[providerName];
+    if (!sourceProvider || !targetProvider) continue;
+
+    const sourceApiKey = getProviderValue(sourceProvider, ['apiKey', 'api_key', 'key']);
+    const sourceBaseUrl = getProviderValue(sourceProvider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url']);
+    if (sourceApiKey && !getProviderValue(targetProvider, ['apiKey', 'api_key', 'key'])) {
+      targetProvider.apiKey = sourceApiKey;
+      changed = true;
+    }
+    if (sourceBaseUrl && !getProviderValue(targetProvider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url'])) {
+      targetProvider.baseUrl = sourceBaseUrl;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    saveConfig(targetConfig);
+    console.log(`[${APP_NAME}] Synced dev New API credentials from desktop config`);
+  }
 }
 
 function getVideoAdapterOptions() {
@@ -782,6 +850,7 @@ app.whenReady().then(async () => {
 
   // Setup
   ensureConfig();
+  syncDevNewApiCredentialsFromDesktop();
   sanitizePortableStatePaths();
   createMenu();
   setupIPC();
