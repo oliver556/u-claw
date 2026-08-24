@@ -41,6 +41,7 @@ const visibleSkillHubTexts = [
   "UcSkillHubRenderIcon",
   "data-skillhub-icon-img",
   "skillhub-dense-row",
+  "e.onClawHubInstall?.(t)",
   "data-skillhub-toolbar",
   "data-skillhub-search",
   "data-skillhub-content",
@@ -85,7 +86,9 @@ const skillHubIdentityTokens = [
   "limit:40",
   "function UcSkillHubRefParts",
   "ownerHandle",
-  "slug:a.display",
+  "installSource",
+  "source:a.installSource||`clawhub`",
+  "slug:a.slug",
 ];
 const chatSkillHubTokens = [
   "function UcSkillHubDropdown",

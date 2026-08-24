@@ -10,12 +10,12 @@ const indexHtmlPath = path.join(controlUiDir, "index.html");
 const manifestPath = path.join(controlUiDir, "manifest.webmanifest");
 const controlUiGatewayPath = path.join(root, "node_modules", "openclaw", "dist", "control-ui-CuoxgbYo.js");
 const skillsGatewayPath = path.join(openclawDistDir, "skills-ieKSTXPw.js");
+const schemaPath = path.join(openclawDistDir, "schema-BuOFpc7K.js");
 const serverMethodsPath = path.join(openclawDistDir, "server-methods-NpEcZnvp.js");
 const coreDescriptorsPath = path.join(openclawDistDir, "core-descriptors-DRUtdasO.js");
 const officialIconSvgPath = path.join(root, "assets", "icon.svg");
 const officialIconPngPath = path.join(root, "assets", "icon.png");
 const officialIconIcoPath = path.join(root, "assets", "icon.ico");
-const openclawDistDir = path.join(root, "node_modules", "openclaw", "dist");
 const localRootsPath = path.join(openclawDistDir, "local-roots-CAoJyC6u.js");
 
 function read(file) {
@@ -176,6 +176,166 @@ function patchSkillsUninstallGateway() {
   }
   if (writeIfChanged(coreDescriptorsPath, descriptorsBefore, descriptorsAfter)) {
     console.log(`patched ${path.relative(root, coreDescriptorsPath)}`);
+  }
+}
+
+/**
+ * Installs SkillHub API entries that are not mirrored by the ClawHub install endpoint.
+ */
+function patchSkillHubInstallGateway() {
+  const installFunction = [
+    "const UCLAW_SKILLHUB_API_ORIGIN = \"https://api.skillhub.cn\";",
+    "async function installSkillFromSkillHub(params) {",
+    "\tlet slug;",
+    "\ttry {",
+    "\t\tslug = validateRequestedSkillSlug(params.slug);",
+    "\t} catch (err) {",
+    "\t\treturn {",
+    "\t\t\tok: false,",
+    "\t\t\terror: formatErrorMessage(err),",
+    "\t\t\tfailureKind: \"invalid-request\"",
+    "\t\t};",
+    "\t}",
+    "\tconst version = typeof params.version === \"string\" && params.version.trim() ? params.version.trim() : void 0;",
+    "\tconst url = new URL(\"/api/v1/download\", UCLAW_SKILLHUB_API_ORIGIN);",
+    "\turl.searchParams.set(\"slug\", slug);",
+    "\tif (version) url.searchParams.set(\"version\", version);",
+    "\tconst tempDir = path.join(resolveStateDir(), \"tmp\", \"skillhub-downloads\");",
+    "\tawait fs.mkdir(tempDir, { recursive: true });",
+    "\tconst archivePath = path.join(tempDir, `${slug}-${randomUUID()}.zip`);",
+    "\ttry {",
+    "\t\tconst response = await fetch(url, { redirect: \"follow\" });",
+    "\t\tif (!response.ok) {",
+    "\t\t\tconst body = await response.text().catch(() => response.statusText);",
+    "\t\t\treturn {",
+    "\t\t\t\tok: false,",
+    "\t\t\t\terror: `SkillHub /api/v1/download?slug=${slug} failed (${response.status}): ${body || response.statusText}`,",
+    "\t\t\t\tfailureKind: response.status >= 400 && response.status < 500 ? \"invalid-request\" : \"unavailable\"",
+    "\t\t\t};",
+    "\t\t}",
+    "\t\tconst bytes = Buffer.from(await response.arrayBuffer());",
+    "\t\tawait fs.writeFile(archivePath, bytes);",
+    "\t\tconst result = await installSkillArchiveFromPath({",
+    "\t\t\tworkspaceDir: params.workspaceDir,",
+    "\t\t\tslug,",
+    "\t\t\tarchivePath,",
+    "\t\t\tforce: params.force,",
+    "\t\t\ttimeoutMs: params.timeoutMs,",
+    "\t\t\tlogger: params.logger,",
+    "\t\t\tpolicy: {",
+    "\t\t\t\tconfig: params.config,",
+    "\t\t\t\tinstallId: \"skillhub\",",
+    "\t\t\t\torigin: {",
+    "\t\t\t\t\ttype: \"skillhub\",",
+    "\t\t\t\t\tregistry: UCLAW_SKILLHUB_API_ORIGIN,",
+    "\t\t\t\t\tslug,",
+    "\t\t\t\t\t...version ? { version } : {}",
+    "\t\t\t\t},",
+    "\t\t\t\tsource: {",
+    "\t\t\t\t\tkind: \"skillhub\",",
+    "\t\t\t\t\tauthority: \"third-party\",",
+    "\t\t\t\t\tmutable: false,",
+    "\t\t\t\t\tnetwork: true",
+    "\t\t\t\t},",
+    "\t\t\t\trequestedSpecifier: `skillhub:${slug}${version ? `@${version}` : \"\"}`",
+    "\t\t\t}",
+    "\t\t});",
+    "\t\treturn result.ok ? {",
+    "\t\t\tok: true,",
+    "\t\t\tslug,",
+    "\t\t\t...version ? { version } : {},",
+    "\t\t\ttargetDir: result.targetDir",
+    "\t\t} : result;",
+    "\t} catch (err) {",
+    "\t\treturn {",
+    "\t\t\tok: false,",
+    "\t\t\terror: formatErrorMessage(err),",
+    "\t\t\tfailureKind: \"unavailable\"",
+    "\t\t};",
+    "\t} finally {",
+    "\t\tawait fs.rm(archivePath, { force: true }).catch(() => {});",
+    "\t}",
+    "}",
+  ].join("\n");
+
+  const installHandler = [
+    "\t\tif (params && typeof params === \"object\" && \"source\" in params && params.source === \"skillhub\") {",
+    "\t\t\tconst p = params;",
+    "\t\t\tconst result = await installSkillFromSkillHub({",
+    "\t\t\t\tworkspaceDir: workspaceDirRaw,",
+    "\t\t\t\tslug: p.slug,",
+    "\t\t\t\tversion: p.version,",
+    "\t\t\t\tforce: Boolean(p.force),",
+    "\t\t\t\ttimeoutMs: p.timeoutMs,",
+    "\t\t\t\tconfig: cfg,",
+    "\t\t\t\tlogger: context.logGateway",
+    "\t\t\t});",
+    "\t\t\tconst errorCode = !result.ok && result.failureKind === \"invalid-request\" ? ErrorCodes.INVALID_REQUEST : ErrorCodes.UNAVAILABLE;",
+    "\t\t\trespond(result.ok, result.ok ? {",
+    "\t\t\t\tok: true,",
+    "\t\t\t\tmessage: `已安装 ${result.slug}${result.version ? `@${result.version}` : \"\"}`,",
+    "\t\t\t\tstdout: \"\",",
+    "\t\t\t\tstderr: \"\",",
+    "\t\t\t\tcode: 0,",
+    "\t\t\t\tslug: result.slug,",
+    "\t\t\t\t...result.version ? { version: result.version } : {},",
+    "\t\t\t\ttargetDir: result.targetDir",
+    "\t\t\t} : result, result.ok ? void 0 : errorShape(errorCode, result.error));",
+    "\t\t\treturn;",
+    "\t\t}",
+  ].join("\n");
+
+  const skillsBefore = read(skillsGatewayPath);
+  let skillsAfter = skillsBefore;
+  if (!skillsAfter.includes("async function installSkillFromSkillHub(params)")) {
+    skillsAfter = skillsAfter.replace(
+      "//#endregion\n//#region src/skills/discovery/bins.ts",
+      `${installFunction}\n//#endregion\n//#region src/skills/discovery/bins.ts`,
+    );
+  }
+  if (!skillsAfter.includes("params.source === \"skillhub\"")) {
+    skillsAfter = skillsAfter.replace(
+      "\t\tif (params && typeof params === \"object\" && \"source\" in params && params.source === \"upload\") {",
+      `${installHandler}\n\t\tif (params && typeof params === \"object\" && \"source\" in params && params.source === \"upload\") {`,
+    );
+  }
+  skillsAfter = skillsAfter
+    .replaceAll("message: `Installed ${record.slug}`", "message: `已安装 ${record.slug}`")
+    .replaceAll("message: `Installed ${result.slug}@${result.version}`", "message: `已安装 ${result.slug}@${result.version}`")
+    .replaceAll("message: `Installed ${result.slug}${result.version ? `@${result.version}` : \"\"}`", "message: `已安装 ${result.slug}${result.version ? `@${result.version}` : \"\"}`");
+  if (
+    !skillsAfter.includes("async function installSkillFromSkillHub(params)") ||
+    !skillsAfter.includes("params.source === \"skillhub\"")
+  ) {
+    throw new Error(`Could not patch SkillHub install gateway handler in ${skillsGatewayPath}`);
+  }
+  if (writeIfChanged(skillsGatewayPath, skillsBefore, skillsAfter)) {
+    console.log(`patched ${path.relative(root, skillsGatewayPath)}`);
+  }
+
+  const schemaBefore = read(schemaPath);
+  let schemaAfter = schemaBefore;
+  const skillHubInstallSchema = [
+    "\tType.Object({",
+    "\t\tagentId: Type.Optional(NonEmptyString),",
+    "\t\tsource: Type.Literal(\"skillhub\"),",
+    "\t\tslug: NonEmptyString,",
+    "\t\tversion: Type.Optional(NonEmptyString),",
+    "\t\tforce: Type.Optional(Type.Boolean()),",
+    "\t\ttimeoutMs: Type.Optional(Type.Integer({ minimum: 1e3 }))",
+    "\t}, { additionalProperties: false }),",
+  ].join("\n");
+  if (!schemaAfter.includes("source: Type.Literal(\"skillhub\")")) {
+    schemaAfter = schemaAfter.replace(
+      "\tType.Object({\n\t\tagentId: Type.Optional(NonEmptyString),\n\t\tsource: Type.Literal(\"upload\"),",
+      `${skillHubInstallSchema}\n\tType.Object({\n\t\tagentId: Type.Optional(NonEmptyString),\n\t\tsource: Type.Literal(\"upload\"),`,
+    );
+  }
+  if (!schemaAfter.includes("source: Type.Literal(\"skillhub\")")) {
+    throw new Error(`Could not patch SkillHub install schema in ${schemaPath}`);
+  }
+  if (writeIfChanged(schemaPath, schemaBefore, schemaAfter)) {
+    console.log(`patched ${path.relative(root, schemaPath)}`);
   }
 }
 
@@ -2716,7 +2876,7 @@ function patchSkillsPageStoreDiscovery() {
     "function UcSkillHubRenderTopTabs(e,t){let n=e.skillHubTab===`recommended`,r=[{id:`all`,label:`全部`},{id:`ready`,label:`可用`},{id:`needs-setup`,label:`需配置`},{id:`disabled`,label:`已停用`}];return a`<div class=\"agent-tabs\" data-skillhub-primary-tabs=\"true\" style=\"margin-top: 0; flex: 1 1 auto; min-width: 0;\"> <button class=\"agent-tab ${n?`active`:``}\" @click=${()=>e.onSkillHubTabChange?.(`recommended`)}>推荐</button>${r.map(r=>a`<button class=\"agent-tab ${!n&&e.statusFilter===r.id?`active`:``}\" @click=${()=>{e.onSkillHubTabChange?.(`local`),e.onStatusFilterChange?.(r.id)}}>${r.label}<span class=\"agent-tab-count\">${t[r.id]}</span></button>`)}</div>`}",
     "function UcSkillHubRenderToolbar(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading,r=UcSkillHubCategoryDefs().filter(e=>e.id!==`other`);return a`<div data-skillhub-toolbar=\"true\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 154px 154px 154px; align-items: center; gap: 8px; min-height: 40px;\"><label class=\"field\" data-skillhub-search=\"true\" style=\"margin: 0; min-width: 0; position: relative;\"><input .value=${e.clawhubQuery} @input=${t=>e.onClawHubQueryChange(t.target.value)} placeholder=\"搜索技能商店技能…\" autocomplete=\"off\" name=\"clawhub-search\" aria-busy=${n?`true`:`false`} style=\"height: 36px; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 ${n?`72px`:`12px`} 0 12px; box-shadow: inset 0 0 0 1px rgba(15,95,215,.04);\"/>${n?a`<span data-skillhub-loading=\"true\" class=\"muted\" style=\"position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; pointer-events: none;\">搜索中…</span>`:o}</label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"场景筛选\" .value=${t.category} @change=${t=>e.onSkillHubCategoryChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\">${r.map(e=>a`<option value=${e.id}>${e.id===`all`?`全部场景`:e.label}</option>`)}</select></label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"API Key 筛选\" .value=${t.apiKeyFilter} @change=${t=>e.onSkillHubApiKeyFilterChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"all\">API Key 不限</option><option value=\"configured\">仅看已配置</option><option value=\"needs-key\">仅看需配置</option></select></label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"排序\" .value=${t.sort} @change=${t=>e.onSkillHubSortChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"recommended\">排序 推荐精选</option><option value=\"downloads\">下载最多</option><option value=\"stars\">收藏最多</option><option value=\"name\">名称 A-Z</option></select></label></div>`}",
     "function UcSkillHubRenderTableHead(){return a`<div class=\"skillhub-dense-head\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--panel-2);\"><span>技能</span><span>场景</span><span>下载</span><span>收藏</span><span>操作</span></div>`}",
-    "function UcSkillHubRenderSkillRow(e,t,n){let r=UcSkillHubSceneLabels(t),i=UcSkillHubStats(t),s=n?UcSkillHubLocalNeedsSetup(t):!1,c=n?t.name:t.displayName,l=n?UcSkillHubDisplayText(t.description):t.summary?UcSkillHubDisplayText(t.summary):UcSkillHubInstallRef(t),u=n?`已安装`:UcSkillHubTrustLabel(t),d=n?t.source:UcSkillHubInstallRef(t),m=n?`-`:UcSkillHubFormatMetric(i.downloads),h=n?`-`:UcSkillHubFormatMetric(i.stars||i.installs),p=n?t.skillKey:UcSkillHubQualifiedRef(t),g=r.join(`、`);return a`<div class=\"skillhub-dense-row list-item-clickable\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; align-items: center; min-height: 68px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel);\" @click=${()=>n?e.onDetailOpen(t.skillKey):e.onClawHubDetailOpen(p)}><div style=\"display: flex; min-width: 0; gap: 10px; align-items: center;\">${UcSkillHubRenderIcon(t)}<div style=\"min-width: 0;\"><div style=\"display: flex; align-items: center; gap: 6px; min-width: 0;\"><span style=\"font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${c}</span>${t.version?a`<span class=\"muted\" style=\"font-size: 12px;\">v${t.version}</span>`:o}${t.official?a`<span class=\"chip chip-ok\">官方</span>`:o}</div><div class=\"list-sub\" style=\"white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;\">${w(l,120)}</div><div class=\"muted\" style=\"font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${d}</div></div></div><div>${r.length?a`<span class=\"chip\" title=${g}>${r[0]}</span>`:a`<span class=\"chip\">其他</span>`}</div><div class=\"muted\">↓ ${m}</div><div class=\"muted\">☆ ${h}</div><div style=\"display: flex; justify-content: flex-end; align-items: center; gap: 6px;\">${n?a`<span class=\"chip ${s?`chip-warn`:`chip-ok`}\">${s?`需配置`:u}</span><button type=\"button\" data-skillhub-uninstall-button=\"true\" class=\"btn btn--sm\" ?disabled=${e.skillsBusyKey===t.skillKey} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onUninstall?.(t.skillKey)}}>${e.skillsBusyKey===t.skillKey?`卸载中…`:`卸载`}</button>`:a`<button type=\"button\" data-skillhub-install-button=\"true\" data-skillhub-install-ready=${typeof e.onClawHubInstall} class=\"btn btn--sm\" ?disabled=${e.clawhubInstallSlug!==null} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onClawHubInstall?.(p)}}>${e.clawhubInstallSlug===p?`安装中…`:e.clawhubInstallSlug?`等待中`:`安装`}</button>`}</div></div>`}",
+    "function UcSkillHubRenderSkillRow(e,t,n){let r=UcSkillHubSceneLabels(t),i=UcSkillHubStats(t),s=n?UcSkillHubLocalNeedsSetup(t):!1,c=n?t.name:t.displayName,l=n?UcSkillHubDisplayText(t.description):t.summary?UcSkillHubDisplayText(t.summary):UcSkillHubInstallRef(t),u=n?`已安装`:UcSkillHubTrustLabel(t),d=n?t.source:UcSkillHubInstallRef(t),m=n?`-`:UcSkillHubFormatMetric(i.downloads),h=n?`-`:UcSkillHubFormatMetric(i.stars||i.installs),p=n?t.skillKey:UcSkillHubQualifiedRef(t),g=r.join(`、`);return a`<div class=\"skillhub-dense-row list-item-clickable\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; align-items: center; min-height: 68px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel);\" @click=${()=>n?e.onDetailOpen(t.skillKey):e.onClawHubDetailOpen(p)}><div style=\"display: flex; min-width: 0; gap: 10px; align-items: center;\">${UcSkillHubRenderIcon(t)}<div style=\"min-width: 0;\"><div style=\"display: flex; align-items: center; gap: 6px; min-width: 0;\"><span style=\"font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${c}</span>${t.version?a`<span class=\"muted\" style=\"font-size: 12px;\">v${t.version}</span>`:o}${t.official?a`<span class=\"chip chip-ok\">官方</span>`:o}</div><div class=\"list-sub\" style=\"white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;\">${w(l,120)}</div><div class=\"muted\" style=\"font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${d}</div></div></div><div>${r.length?a`<span class=\"chip\" title=${g}>${r[0]}</span>`:a`<span class=\"chip\">其他</span>`}</div><div class=\"muted\">↓ ${m}</div><div class=\"muted\">☆ ${h}</div><div style=\"display: flex; justify-content: flex-end; align-items: center; gap: 6px;\">${n?a`<span class=\"chip ${s?`chip-warn`:`chip-ok`}\">${s?`需配置`:u}</span><button type=\"button\" data-skillhub-uninstall-button=\"true\" class=\"btn btn--sm\" ?disabled=${e.skillsBusyKey===t.skillKey} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onUninstall?.(t.skillKey)}}>${e.skillsBusyKey===t.skillKey?`卸载中…`:`卸载`}</button>`:a`<button type=\"button\" data-skillhub-install-button=\"true\" data-skillhub-install-ready=${typeof e.onClawHubInstall} class=\"btn btn--sm\" ?disabled=${e.clawhubInstallSlug!==null} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onClawHubInstall?.(t)}}>${e.clawhubInstallSlug===p?`安装中…`:e.clawhubInstallSlug?`等待中`:`安装`}</button>`}</div></div>`}",
     "function UcSkillHubPageNumbers(e){let t=e.page,n=e.pageCount,r=new Set([1,n,t,t-1,t+1,t-2,t+2].filter(e=>e>=1&&e<=n)),i=[...r].sort((e,t)=>e-t),s=[];for(let e=0;e<i.length;e++)e>0&&i[e]-i[e-1]>1&&s.push(`ellipsis-${i[e]}`),s.push(i[e]);return s}",
     "function UcSkillHubRenderPagination(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading,r=UcSkillHubPageNumbers(t);return t.isLocal?o:a`<div data-skillhub-pagination=\"true\" class=\"muted\" style=\"display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px; border-top: 1px solid var(--border); flex-wrap: wrap;\"><span data-skillhub-page-summary=\"true\">第 ${t.page} / ${t.pageCount} 页 · 共 ${UcSkillHubFormatMetric(t.totalItems)} 项</span><div style=\"display: flex; gap: 6px; align-items: center; flex-wrap: wrap;\"><button type=\"button\" class=\"btn btn--sm\" data-skillhub-prev-page-button=\"true\" ?disabled=${n||t.page<=1} @click=${r=>{r.preventDefault(),r.stopPropagation(),e.onSkillHubPageChange?.(t.page-1)}}>上一页</button>${r.map(r=>typeof r==`string`?a`<span style=\"padding: 0 2px;\">…</span>`:a`<button type=\"button\" class=\"btn btn--sm ${r===t.page?`primary`:``}\" data-skillhub-page-button=\"true\" data-skillhub-page=${r} ?disabled=${n||r===t.page} @click=${i=>{i.preventDefault(),i.stopPropagation(),e.onSkillHubPageChange?.(r)}}>${r}</button>`)}<button type=\"button\" class=\"btn btn--sm\" data-skillhub-next-page-button=\"true\" ?disabled=${n||t.page>=t.pageCount} @click=${r=>{r.preventDefault(),r.stopPropagation(),e.onSkillHubPageChange?.(t.page+1)}}>${n?`加载中…`:`下一页`}</button></div>${t.loadMoreMessage?a`<span data-skillhub-load-more-message=\"true\">${t.loadMoreMessage}</span>`:o}</div>`}",
     "function UcSkillHubRenderList(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading;return t.items.length===0?a`<div class=\"muted\" style=\"padding: 18px 12px;\">${n?`正在检索技能商店技能…`:t.pageError?UcSkillHubErrorText(t.pageError):`暂无匹配技能商店技能。`}</div>`:a`<div class=\"skillhub-dense-table\" data-skillhub-dense-list=\"true\" style=\"border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel);\">${UcSkillHubRenderTableHead()}${t.items.map(n=>UcSkillHubRenderSkillRow(e,n,t.isLocal))}${UcSkillHubRenderPagination(e,t)}</div>`}",
@@ -3141,6 +3301,10 @@ function patchSkillsPageSearchIdentityRequests() {
     "function UcSkillHubRiskText(e){let t=String(e??``).trim();if(!t)return``;let n=[...t.matchAll(/https?:\\/\\/\\S+/g)].map(e=>e[0].replace(/[|)]+$/g,``)),r=[`技能商店安全扫描提示：该版本存在安全发现，安装前请确认你信任来源与用途。`];/suspicious|not clean|risk|blast radius/i.test(t)&&r.push(`原因：安全状态未完全通过，可能包含较大的指令或工具调用权限范围。`);let i=[...new Set(n)];return i.length&&r.push(`相关链接：\\n${i.join(`\\n`)}`),r.join(`\\n\\n`)}function Ks(e,t){let n=UcSkillHubRiskText(t);return n?`${e}\\n\\n${n}`:e}function qs(e){return Ks(`安装前请复核技能商店风险提示。`,e)}";
   const detailOriginal =
     "async function _c(e,t){if(!e.client||!e.connected)return;let n=e.client;e.clawhubDetailSlug=t,e.clawhubDetailLoading=!0,e.clawhubDetailError=null,e.clawhubDetail=null,await rc(()=>t===e.clawhubDetailSlug,()=>n.request(`skills.detail`,{slug:t}),t=>{e.clawhubDetail=t??null},t=>{e.clawhubDetailError=Ws(t)},()=>{e.clawhubDetailLoading=!1})}";
+  const refPartsOriginal =
+    "function UcSkillHubRefParts(e){let t=typeof e==`string`?e.trim():``;if(t.startsWith(`@`)){let e=t.slice(1).split(`/`);if(e.length===2&&e[0]&&e[1])return{display:t,slug:e[1],ownerHandle:e[0]}}return{display:t,slug:t}}";
+  const refPartsPatched =
+    "function UcSkillHubRefParts(e){if(e&&typeof e==`object`){let t=e.native?.skill??e,n=e.slug||t?.slug||t?.namespace?.publicSlug||t?.name||``,r=e.ownerHandle||e.owner?.handle||t?.namespace?.handle||t?.ownerHandle||``,i=e.source||t?.source||``,a=r&&n?`@${r}/${n}`:String(n||``),o=i&&i!==`clawhub`?`skillhub`:`clawhub`;return{display:a,slug:String(n||a).trim(),ownerHandle:r,installSource:o,input:e}}let t=typeof e==`string`?e.trim():``;if(t.startsWith(`@`)){let e=t.slice(1).split(`/`);if(e.length===2&&e[0]&&e[1])return{display:t,slug:e[1],ownerHandle:e[0],installSource:`clawhub`,input:t}}return{display:t,slug:t,installSource:`clawhub`,input:t}}";
   const detailPatched =
     "function UcSkillHubRefParts(e){let t=typeof e==`string`?e.trim():``;if(t.startsWith(`@`)){let e=t.slice(1).split(`/`);if(e.length===2&&e[0]&&e[1])return{display:t,slug:e[1],ownerHandle:e[0]}}return{display:t,slug:t}}function UcSkillHubCachedDetail(e,t){let n=UcSkillHubRefParts(t),r=[...(e.skillHubHomeResults??[]),...(e.clawhubSearchResults??[])],i=r.find(e=>{let r=e?.native?.skill??e,i=e?.slug||r?.slug,a=e?.ownerHandle||e?.owner?.handle||r?.namespace?.handle||r?.ownerHandle,o=a&&i?`@${a}/${i}`:i;return n.display&&[e?.id,e?.install?.reference,o].includes(n.display)||i&&i===n.slug&&(!n.ownerHandle||a===n.ownerHandle)});if(!i)return null;let a=i.native?.skill??i,o=i.slug||a.slug||n.slug,s=i.ownerHandle||i.owner?.handle||a.namespace?.handle||a.ownerHandle,c=i.displayName||a.name||o,l=i.summary||a.description_zh||a.description||``,u=Array.isArray(i.categories)?i.categories:Array.isArray(a.subCategories)?[a.category,...a.subCategories.map(e=>e?.name||e?.key)].filter(Boolean):[],d=Array.isArray(i.topics)?i.topics:Array.isArray(a.tags)?a.tags:[];return{skill:{slug:o,displayName:c,summary:l,categories:u,topics:d,labels:i.labels||a.labels||{},homepage:a.homepage,iconUrl:i.iconUrl||a.iconUrl,downloads:i.downloads??a.downloads,stars:i.stars??a.stars},latestVersion:i.version||a.version?{version:i.version||a.version}:null,owner:{handle:s,displayName:i.owner?.displayName||a.namespace?.displayName||s},readmeMarkdown:a.readmeMarkdown||a.readme||l,metadata:{}}}async function _c(e,t){if(!e.client||!e.connected)return;let r=UcSkillHubRefParts(t),n=e.client;e.clawhubDetailSlug=r.display,e.clawhubDetailLoading=!0,e.clawhubDetailError=null,e.clawhubDetail=null;let i=UcSkillHubCachedDetail(e,t);if(i){e.clawhubDetail=i,e.clawhubDetailLoading=!1,e.requestUpdate?.();return}await rc(()=>r.display===e.clawhubDetailSlug,()=>n.request(`skills.detail`,{slug:r.slug}),t=>{e.clawhubDetail=t??null},t=>{e.clawhubDetailError=Ws(t)},()=>{e.clawhubDetailLoading=!1})}";
   const detailUnsafeOwnerHandle =
@@ -3148,8 +3312,10 @@ function patchSkillsPageSearchIdentityRequests() {
   const detailNoCachePrevious =
     "function UcSkillHubRefParts(e){let t=typeof e==`string`?e.trim():``;if(t.startsWith(`@`)){let e=t.slice(1).split(`/`);if(e.length===2&&e[0]&&e[1])return{display:t,slug:e[1],ownerHandle:e[0]}}return{display:t,slug:t}}async function _c(e,t){if(!e.client||!e.connected)return;let r=UcSkillHubRefParts(t),n=e.client;e.clawhubDetailSlug=r.display,e.clawhubDetailLoading=!0,e.clawhubDetailError=null,e.clawhubDetail=null,await rc(()=>r.display===e.clawhubDetailSlug,()=>n.request(`skills.detail`,{slug:r.slug}),t=>{e.clawhubDetail=t??null},t=>{e.clawhubDetailError=Ws(t)},()=>{e.clawhubDetailLoading=!1})}";
   const installOriginal =
-    "async function yc(e,t,n=!1,r){if(!e.client||!e.connected)return;let i=nc(e);e.clawhubInstallSlug=t,e.clawhubInstallMessage=null;try{let a=await e.client.request(`skills.install`,{...ec(e),source:`clawhub`,slug:t,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{}});if(!H(e,i)||(await sc(e),!H(e,i)))return;e.clawhubInstallMessage={kind:`success`,text:Ks(a?.message??`Installed ${t}`,a?.warning)}}catch(n){if(H(e,i)){let r=Gs(n),i=r?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED;e.clawhubInstallMessage={kind:`error`,text:i?qs(r?.warning):Ks(Ws(n),r?.warning),...i?{acknowledgeSlug:t}:{},...i&&r?.version?{acknowledgeVersion:r.version}:{},...i?{acknowledgeLabel:`Acknowledge risk and install`}:{}}}}finally{H(e,i)&&e.clawhubInstallSlug===t&&(e.clawhubInstallSlug=null)}}";
+    "async function yc(e,t,n=!1,r){if(!e.client||!e.connected)return;let i=nc(e);e.clawhubInstallSlug=t,e.clawhubInstallMessage=null;try{let a=await e.client.request(`skills.install`,{...ec(e),source:`clawhub`,slug:t,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{}});if(!H(e,i)||(await sc(e),!H(e,i)))return;e.clawhubInstallMessage={kind:`success`,text:Ks(a?.message??`已安装 ${t}`,a?.warning)}}catch(n){if(H(e,i)){let r=Gs(n),i=r?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED;e.clawhubInstallMessage={kind:`error`,text:i?qs(r?.warning):Ks(Ws(n),r?.warning),...i?{acknowledgeSlug:t}:{},...i&&r?.version?{acknowledgeVersion:r.version}:{},...i?{acknowledgeLabel:`Acknowledge risk and install`}:{}}}}finally{H(e,i)&&e.clawhubInstallSlug===t&&(e.clawhubInstallSlug=null)}}";
   const installPatched =
+    "async function yc(e,t,n=!1,r,i=!1){if(!e.client||!e.connected)return;let a=UcSkillHubRefParts(t),o=nc(e);e.clawhubInstallSlug=a.display,e.clawhubInstallMessage=null,e.requestUpdate?.();try{let s=await e.client.request(`skills.install`,{...ec(e),source:`clawhub`,slug:a.slug,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{},...i?{force:!0}:{}});if(!H(e,o)&&e.clawhubInstallSlug!==a.display)return;e.clawhubInstallMessage={kind:`success`,text:Ks(s?.message??`已安装 ${a.display}`,s?.warning)},e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null),e.requestUpdate?.(),await sc(e).catch(()=>{})}catch(s){if(H(e,o)||e.clawhubInstallSlug===a.display){let c=Gs(s),l=c?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED,u=Ws(s),d=!i&&/already exists|force\\/update/i.test(u);e.clawhubInstallMessage={kind:`error`,text:l?qs(c?.warning):Ks(u,c?.warning),...l?{acknowledgeSlug:a.slug}:{},...l&&c?.version?{acknowledgeVersion:c.version}:{},...l?{acknowledgeLabel:`确认风险并安装`}:{},...d?{forceSlug:a.slug,forceLabel:`覆盖重装`}:{},...d&&r?{forceVersion:r}:{}},e.requestUpdate?.()}}finally{e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null,e.requestUpdate?.())}}";
+  const installPatchedSlugDisplayPrevious =
     "async function yc(e,t,n=!1,r,i=!1){if(!e.client||!e.connected)return;let a=UcSkillHubRefParts(t),o=nc(e);e.clawhubInstallSlug=a.display,e.clawhubInstallMessage=null,e.requestUpdate?.();try{let s=await e.client.request(`skills.install`,{...ec(e),source:`clawhub`,slug:a.display,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{},...i?{force:!0}:{}});if(!H(e,o)&&e.clawhubInstallSlug!==a.display)return;e.clawhubInstallMessage={kind:`success`,text:Ks(s?.message??`Installed ${a.display}`,s?.warning)},e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null),e.requestUpdate?.(),await sc(e).catch(()=>{})}catch(s){if(H(e,o)||e.clawhubInstallSlug===a.display){let c=Gs(s),l=c?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED,u=Ws(s),d=!i&&/already exists|force\\/update/i.test(u);e.clawhubInstallMessage={kind:`error`,text:l?qs(c?.warning):Ks(u,c?.warning),...l?{acknowledgeSlug:a.display}:{},...l&&c?.version?{acknowledgeVersion:c.version}:{},...l?{acknowledgeLabel:`确认风险并安装`}:{},...d?{forceSlug:a.display,forceLabel:`覆盖重装`}:{},...d&&r?{forceVersion:r}:{}},e.requestUpdate?.()}}finally{e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null,e.requestUpdate?.())}}";
   const installPatchedRefreshBlockingPrevious =
     "async function yc(e,t,n=!1,r,i=!1){if(!e.client||!e.connected)return;let a=UcSkillHubRefParts(t),o=nc(e);e.clawhubInstallSlug=a.display,e.clawhubInstallMessage=null,e.requestUpdate?.();try{let s=await e.client.request(`skills.install`,{...ec(e),source:`clawhub`,slug:a.display,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{},...i?{force:!0}:{}});if(!H(e,o)||(await sc(e),!H(e,o)))return;e.clawhubInstallMessage={kind:`success`,text:Ks(s?.message??`Installed ${a.display}`,s?.warning)},e.requestUpdate?.()}catch(s){if(H(e,o)||e.clawhubInstallSlug===a.display){let c=Gs(s),l=c?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED,u=Ws(s),d=!i&&/already exists|force\\/update/i.test(u);e.clawhubInstallMessage={kind:`error`,text:l?qs(c?.warning):Ks(u,c?.warning),...l?{acknowledgeSlug:a.display}:{},...l&&c?.version?{acknowledgeVersion:c.version}:{},...l?{acknowledgeLabel:`确认风险并安装`}:{},...d?{forceSlug:a.display,forceLabel:`覆盖重装`}:{},...d&&r?{forceVersion:r}:{}},e.requestUpdate?.()}}finally{e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null,e.requestUpdate?.())}}";
@@ -3176,6 +3342,14 @@ function patchSkillsPageSearchIdentityRequests() {
     after = after.replace(installPatchedForcePrevious, installPatched);
     after = after.replace(installPatchedNoRefreshPrevious, installPatched);
     after = after.replace(installPatchedRefreshBlockingPrevious, installPatched);
+    after = after.replace(installPatchedSlugDisplayPrevious, installPatched);
+    after = after.replaceAll(refPartsOriginal, refPartsPatched);
+    after = after.replaceAll("source:`clawhub`,slug:a.slug", "source:a.installSource||`clawhub`,slug:a.slug");
+    after = after.replaceAll("acknowledgeSlug:a.slug", "acknowledgeSlug:a.input??a.display");
+    after = after.replaceAll("forceSlug:a.slug", "forceSlug:a.input??a.display");
+    after = after.replaceAll("`Installed ${a.display}`", "`已安装 ${a.display}`");
+    after = after.replaceAll("`Installed ${t}`", "`已安装 ${t}`");
+    after = after.replaceAll("??`Installed`", "??`已安装`");
     after = after.replaceAll("acknowledgeLabel:`Acknowledge risk and install`", "acknowledgeLabel:`确认风险并安装`");
     if (
       after === before &&
@@ -5270,6 +5444,7 @@ ${markerEnd}`;
 }
 
 patchSkillsUninstallGateway();
+patchSkillHubInstallGateway();
 patchChatPage();
 patchChatUiCopy();
 patchAssistantIdentityUiCopy();
