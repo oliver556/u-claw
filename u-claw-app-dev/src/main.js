@@ -12,8 +12,7 @@ const MAX_PORT = 18799;
 const DEFAULT_VIDEO_ADAPTER_PORT = 18808;
 const MAX_VIDEO_ADAPTER_PORT = 18818;
 const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'jimeng-video-3-720p';
-const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://api.gmnlee.com/v1';
-const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || DEFAULT_VIDEO_ADAPTER_BASE_URL;
+const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
 const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
@@ -92,18 +91,53 @@ let videoAdapterServer = null;
 let videoAdapterPort = null;
 
 // ── Config Management ──
+function loadBundledDefaultConfig() {
+  const defaultConfigPath = path.join(resourcesPath, 'default-openclaw.json');
+  try {
+    if (fs.existsSync(defaultConfigPath)) {
+      return JSON.parse(fs.readFileSync(defaultConfigPath, 'utf8'));
+    }
+  } catch (error) {
+    console.warn(`[${APP_NAME}] Failed to load bundled default config: ${error.message}`);
+  }
+
+  return {
+    gateway: {
+      mode: 'local',
+      auth: { token: 'uclaw' }
+    }
+  };
+}
+
+function applyRuntimeConfigEnv(config) {
+  const nextConfig = JSON.parse(JSON.stringify(config));
+  const newApiKey = process.env.UCLAW_NEW_API_KEY || '';
+  const newApiBaseUrl = process.env.UCLAW_NEW_API_BASE_URL || '';
+  const videoAdapterBaseUrl = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
+  const videoAdapterApiKey = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
+
+  const providers = nextConfig.models?.providers || {};
+  for (const providerName of ['custom', 'litellm']) {
+    if (!providers[providerName]) continue;
+    if (newApiKey) providers[providerName].apiKey = newApiKey;
+    if (newApiBaseUrl) providers[providerName].baseUrl = newApiBaseUrl;
+  }
+
+  if (providers.xai) {
+    if (videoAdapterBaseUrl) providers.xai.baseUrl = videoAdapterBaseUrl.replace(/\/+$/, '');
+    if (videoAdapterApiKey) providers.xai.apiKey = videoAdapterApiKey;
+  }
+
+  return nextConfig;
+}
+
 function ensureConfig() {
   fs.mkdirSync(configDir, { recursive: true });
   fs.mkdirSync(path.join(userDataPath, 'memory'), { recursive: true });
   fs.mkdirSync(path.join(userDataPath, 'backups'), { recursive: true });
 
   if (!fs.existsSync(configPath)) {
-    const defaultConfig = {
-      gateway: {
-        mode: 'local',
-        auth: { token: 'uclaw' }
-      }
-    };
+    const defaultConfig = applyRuntimeConfigEnv(loadBundledDefaultConfig());
     fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
     console.log(`[${APP_NAME}] Created default config at ${configPath}`);
   }
@@ -120,6 +154,64 @@ function getConfig() {
 function saveConfig(config) {
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
+
+function normalizePortableDataPathString(value) {
+  if (!portablePath || typeof value !== 'string') return value;
+  return value
+    .replace(/~[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable[\\/]data/g, userDataPath)
+    .replace(/(?:[A-Za-z]:)?[\\/](?:Users|home)[^"'\r\n]*?[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable[\\/]data/g, userDataPath);
+}
+
+function normalizePortableDataPathsInJson(value, stats) {
+  if (typeof value === 'string') {
+    const nextValue = normalizePortableDataPathString(value);
+    if (nextValue !== value) stats.changed += 1;
+    return nextValue;
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => normalizePortableDataPathsInJson(item, stats));
+  }
+  if (value && typeof value === 'object') {
+    for (const key of Object.keys(value)) {
+      value[key] = normalizePortableDataPathsInJson(value[key], stats);
+    }
+  }
+  return value;
+}
+
+function listJsonFiles(dirPath) {
+  if (!fs.existsSync(dirPath)) return [];
+  const files = [];
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const entryPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) files.push(...listJsonFiles(entryPath));
+    else if (entry.isFile() && entry.name.endsWith('.json')) files.push(entryPath);
+  }
+  return files;
+}
+
+function sanitizePortableStatePaths() {
+  if (!portablePath) return;
+  const agentsDir = path.join(configDir, 'agents');
+  let changedFiles = 0;
+  for (const filePath of listJsonFiles(agentsDir)) {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      const stats = { changed: 0 };
+      const next = normalizePortableDataPathsInJson(parsed, stats);
+      if (stats.changed > 0) {
+        fs.writeFileSync(filePath, `${JSON.stringify(next, null, 2)}\n`);
+        changedFiles += 1;
+      }
+    } catch (error) {
+      console.warn(`[${APP_NAME}] Skipped portable state path migration for ${filePath}: ${error.message}`);
+    }
+  }
+  if (changedFiles > 0) {
+    console.log(`[${APP_NAME}] Migrated portable state paths in ${changedFiles} file(s)`);
+  }
 }
 
 function getProviderValue(provider, keys) {
@@ -362,6 +454,35 @@ function getConfigURL() {
   return `http://127.0.0.1:${configServerPort}/?port=${gatewayPort}`;
 }
 
+function portableChildHomeEnv(baseEnv) {
+  if (!portablePath) return baseEnv;
+
+  const portableHome = path.join(userDataPath, '.home');
+  const codexHome = path.join(userDataPath, '.codex');
+  const appData = path.join(portableHome, 'AppData', 'Roaming');
+  const localAppData = path.join(portableHome, 'AppData', 'Local');
+  for (const dir of [portableHome, codexHome, appData, localAppData]) {
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  }
+
+  const nextEnv = {
+    ...baseEnv,
+    HOME: portableHome,
+    CODEX_HOME: codexHome,
+  };
+
+  if (process.platform === 'win32') {
+    const parsedHome = path.parse(portableHome);
+    nextEnv.USERPROFILE = portableHome;
+    nextEnv.APPDATA = appData;
+    nextEnv.LOCALAPPDATA = localAppData;
+    if (parsedHome.root) nextEnv.HOMEDRIVE = parsedHome.root.replace(/[\\/]$/, '');
+    if (parsedHome.root) nextEnv.HOMEPATH = portableHome.slice(parsedHome.root.length - 1);
+  }
+
+  return nextEnv;
+}
+
 // ── Gateway Management ──
 function startGateway(port) {
   return new Promise((resolve, reject) => {
@@ -381,7 +502,7 @@ function startGateway(port) {
       path.join(configDir, 'media'),
     ].filter(Boolean).join(path.delimiter);
 
-    const env = {
+    const env = portableChildHomeEnv({
       ...process.env,
       OPENCLAW_HOME: userDataPath,
       OPENCLAW_STATE_DIR: configDir,
@@ -389,7 +510,7 @@ function startGateway(port) {
       OPENCLAW_EMBEDDED_IN: APP_NAME,
       NODE_COMPILE_CACHE: compileCacheDir,
       UCLAW_MEDIA_PREVIEW_ROOTS: mediaPreviewRoots,
-    };
+    });
 
     if (process.platform === 'win32') {
       env.OPENCLAW_DISABLE_BONJOUR = '1';
@@ -619,6 +740,7 @@ app.whenReady().then(async () => {
 
   // Setup
   ensureConfig();
+  sanitizePortableStatePaths();
   createMenu();
   setupIPC();
   createWindow();

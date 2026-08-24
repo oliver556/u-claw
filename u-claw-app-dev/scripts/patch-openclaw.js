@@ -10,7 +10,8 @@ const manifestPath = path.join(controlUiDir, "manifest.webmanifest");
 const officialIconSvgPath = path.join(root, "assets", "icon.svg");
 const officialIconPngPath = path.join(root, "assets", "icon.png");
 const officialIconIcoPath = path.join(root, "assets", "icon.ico");
-const localRootsPath = path.join(root, "node_modules", "openclaw", "dist", "local-roots-CAoJyC6u.js");
+const openclawDistDir = path.join(root, "node_modules", "openclaw", "dist");
+const localRootsPath = path.join(openclawDistDir, "local-roots-CAoJyC6u.js");
 
 function read(file) {
   return fs.readFileSync(file, "utf8");
@@ -266,6 +267,306 @@ function resolveCachedPreferredTmpDir()`,
   }
   writeIfChanged(localRootsPath, before, source);
   console.log(`patched ${path.relative(root, localRootsPath)}`);
+}
+
+/**
+ * Keeps OpenAI-compatible image generation independent of provider-hosted CDN
+ * URLs. New API defaults image responses to `url`; request inline base64 first,
+ * then safely download a returned URL when an upstream channel ignores that
+ * request option.
+ */
+function patchOpenAiCompatibleImageResponses() {
+  if (!fs.existsSync(openclawDistDir)) {
+    throw new Error(`Missing OpenClaw dist directory: ${openclawDistDir}`);
+  }
+
+  const imageRuntimeFiles = fs
+    .readdirSync(openclawDistDir)
+    .filter((name) => /^image-generation-.*\.js$/.test(name))
+    .map((name) => path.join(openclawDistDir, name))
+    .filter((file) => read(file).includes("function createOpenAiCompatibleImageGenerationProvider(options)"));
+  if (imageRuntimeFiles.length === 0) {
+    throw new Error(`Missing OpenAI-compatible image generation runtime in ${openclawDistDir}`);
+  }
+
+  const webMediaRuntimeName = fs
+    .readdirSync(openclawDistDir)
+    .find((name) => /^web-media-.*\.js$/.test(name) && read(path.join(openclawDistDir, name)).includes("async function loadWebMediaRaw"));
+  if (!webMediaRuntimeName) {
+    throw new Error(`Missing web media runtime in ${openclawDistDir}`);
+  }
+  const webMediaImport = `import { r as loadWebMediaRaw } from "./${webMediaRuntimeName}";`;
+
+  for (const file of imageRuntimeFiles) {
+    const before = read(file);
+    let after = before;
+
+    if (!after.includes(webMediaImport)) {
+      after = after.replace(
+        /(import \{ r as resolveGeneratedMediaMaxBytes \} from "\.\/configured-max-bytes-[^"]+\.js";)/,
+        `$1\n${webMediaImport}`,
+      );
+    }
+
+    if (!after.includes("async function materializeOpenAiCompatibleImageUrls")) {
+      after = after.replace(
+        "function parseOpenAiCompatibleImageResponse(payload, options = {}) {",
+        `async function materializeOpenAiCompatibleImageUrls(payload, options = {}) {
+\tif (!isRecord(payload) || !Array.isArray(payload.data)) return payload;
+\tconst maxBytes = options.maxBytes ?? MAX_IMAGE_BYTES;
+\tconst data = await Promise.all(payload.data.map(async (entry, index) => {
+\t\tif (!isRecord(entry) || normalizeOptionalString(entry.b64_json)) return entry;
+\t\tconst url = normalizeOptionalString(entry.url);
+\t\tif (!url) return entry;
+\t\tconst media = await loadWebMediaRaw(url, {
+\t\t\tmaxBytes,
+\t\t\tssrfPolicy: options.ssrfPolicy,
+\t\t\treadIdleTimeoutMs: options.timeoutMs
+\t\t});
+\t\tif (media.kind !== "image") throw new Error(\`OpenAI-compatible image \${index + 1} URL did not return an image\`);
+\t\treturn {
+\t\t\t...entry,
+\t\t\tb64_json: media.buffer.toString("base64"),
+\t\t\tmime_type: normalizeOptionalString(entry.mime_type) ?? normalizeOptionalString(media.contentType)
+\t\t};
+\t}));
+\treturn {
+\t\t...payload,
+\t\tdata
+\t};
+}
+function parseOpenAiCompatibleImageResponse(payload, options = {}) {`,
+      );
+    }
+
+    const originalParse = `const images = parseOpenAiCompatibleImageResponse(await readProviderJsonResponse(response, \`${"${options.id}"}.image-generation\`, { maxBytes: resolveInlineImageJsonResponseMaxBytes(resolveResponseMaxImages({
+\t\t\t\t\tcount,
+\t\t\t\t\tmode,
+\t\t\t\t\toptions
+\t\t\t\t}), resolveGeneratedMediaMaxBytes(req.cfg, "image")) }), {`;
+    const patchedParse = `const generatedMediaMaxBytes = resolveGeneratedMediaMaxBytes(req.cfg, "image");
+\t\t\t\tconst payload = await readProviderJsonResponse(response, \`${"${options.id}"}.image-generation\`, { maxBytes: resolveInlineImageJsonResponseMaxBytes(resolveResponseMaxImages({
+\t\t\t\t\tcount,
+\t\t\t\t\tmode,
+\t\t\t\t\toptions
+\t\t\t\t}), generatedMediaMaxBytes) });
+\t\t\t\tconst materializedPayload = await materializeOpenAiCompatibleImageUrls(payload, {
+\t\t\t\t\tmaxBytes: generatedMediaMaxBytes,
+\t\t\t\t\tssrfPolicy: req.ssrfPolicy,
+\t\t\t\t\ttimeoutMs
+\t\t\t\t});
+\t\t\t\tconst images = parseOpenAiCompatibleImageResponse(materializedPayload, {`;
+    if (!after.includes("const materializedPayload = await materializeOpenAiCompatibleImageUrls")) {
+      after = after.replace(originalParse, patchedParse);
+    }
+
+    if (
+      !after.includes("async function materializeOpenAiCompatibleImageUrls")
+      || !after.includes("const materializedPayload = await materializeOpenAiCompatibleImageUrls")
+      || !after.includes(webMediaImport)
+    ) {
+      throw new Error(`Could not patch OpenAI-compatible image URL responses in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+
+  const litellmProviderFiles = fs
+    .readdirSync(openclawDistDir)
+    .filter((name) => /^image-generation-provider-.*\.js$/.test(name))
+    .map((name) => path.join(openclawDistDir, name))
+    .filter((file) => read(file).includes("function buildLitellmImageGenerationProvider()"));
+  if (litellmProviderFiles.length === 0) {
+    throw new Error(`Missing LiteLLM image generation provider in ${openclawDistDir}`);
+  }
+
+  for (const file of litellmProviderFiles) {
+    const before = read(file);
+    let after = before;
+    if (!after.includes('response_format: "b64_json"')) {
+      after = after.replace(
+        "size: req.size ?? DEFAULT_SIZE",
+        'size: req.size ?? DEFAULT_SIZE,\n\t\t\t\tresponse_format: "b64_json"',
+      );
+    }
+    if (!after.includes('response_format: "b64_json"')) {
+      throw new Error(`Could not request inline LiteLLM image responses in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Allows the xAI video provider to call U-Claw's loopback-only adapter without
+ * weakening SSRF protection for other providers, tools, or private addresses.
+ */
+function patchXaiVideoLoopbackAccess() {
+  if (!fs.existsSync(openclawDistDir)) {
+    throw new Error(`Missing OpenClaw dist directory: ${openclawDistDir}`);
+  }
+
+  const files = fs
+    .readdirSync(openclawDistDir)
+    .filter((name) => /^video-generation-provider-.*\.js$/.test(name))
+    .map((name) => path.join(openclawDistDir, name));
+  const patchedPolicy =
+    "allowPrivateNetwork: /^http:\\/\\/127\\.0\\.0\\.1(?::\\d+)?(?:\\/|$)/i.test(resolveXaiVideoBaseUrl(req)),";
+  let xaiProviderCount = 0;
+
+  for (const file of files) {
+    const before = read(file);
+    if (!before.includes("//#region extensions/xai/video-generation-provider.ts")) continue;
+    xaiProviderCount += 1;
+
+    if (before.includes(patchedPolicy)) continue;
+    const after = before.replace(
+      "allowPrivateNetwork: false,\n\t\t\t\tdefaultHeaders:",
+      `${patchedPolicy}\n\t\t\t\tdefaultHeaders:`,
+    );
+    if (after === before) {
+      throw new Error(`Could not patch xAI video loopback access in ${file}`);
+    }
+    writeIfChanged(file, before, after);
+    console.log(`patched ${path.relative(root, file)}`);
+  }
+
+  if (xaiProviderCount === 0) {
+    throw new Error(`Missing xAI video provider in ${openclawDistDir}`);
+  }
+}
+
+/**
+ * Preserves the completed xAI task ID and original video URL when the local
+ * machine cannot download the provider-hosted file. OpenClaw already supports
+ * URL-only generated videos, so the task remains deliverable without coupling
+ * this fallback to any specific CDN hostname.
+ */
+function patchXaiVideoDownloadFallback() {
+  if (!fs.existsSync(openclawDistDir)) {
+    throw new Error(`Missing OpenClaw dist directory: ${openclawDistDir}`);
+  }
+
+  const providerFiles = fs
+    .readdirSync(openclawDistDir)
+    .filter((name) => /^video-generation-provider-.*\.js$/.test(name))
+    .map((name) => path.join(openclawDistDir, name));
+  let xaiProviderCount = 0;
+
+  const downloadOriginal = `\t\t\t\treturn {
+\t\t\t\t\tvideos: [await downloadXaiVideo({
+\t\t\t\t\t\turl: videoUrl,
+\t\t\t\t\t\ttimeoutMs: createProviderOperationTimeoutResolver({
+\t\t\t\t\t\t\tdeadline,
+\t\t\t\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS
+\t\t\t\t\t\t}),
+\t\t\t\t\t\tfetchFn,
+\t\t\t\t\t\tmaxBytes: resolveGeneratedVideoMaxBytes(req)
+\t\t\t\t\t})],
+\t\t\t\t\tmodel: normalizeOptionalString(req.model) ?? DEFAULT_XAI_VIDEO_MODEL,
+\t\t\t\t\tmetadata: {
+\t\t\t\t\t\trequestId,
+\t\t\t\t\t\tstatus: completed.status,
+\t\t\t\t\t\tvideoUrl,
+\t\t\t\t\t\tmode: resolveXaiVideoMode(req)
+\t\t\t\t\t}
+\t\t\t\t};`;
+  const downloadPatched = `\t\t\t\tlet downloadedVideo;
+\t\t\t\tlet uClawDownloadWarning;
+\t\t\t\ttry {
+\t\t\t\t\tdownloadedVideo = await downloadXaiVideo({
+\t\t\t\t\t\turl: videoUrl,
+\t\t\t\t\t\ttimeoutMs: createProviderOperationTimeoutResolver({
+\t\t\t\t\t\t\tdeadline,
+\t\t\t\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS
+\t\t\t\t\t\t}),
+\t\t\t\t\t\tfetchFn,
+\t\t\t\t\t\tmaxBytes: resolveGeneratedVideoMaxBytes(req)
+\t\t\t\t\t});
+\t\t\t\t} catch (error) {
+\t\t\t\t\tconst downloadError = error instanceof Error ? error.message : String(error);
+\t\t\t\t\tuClawDownloadWarning = \`\u539f\u89c6\u9891\u5df2\u751f\u6210\u6210\u529f\uff0c\u4f46 U-Claw \u8fde\u63a5\u539f\u89c6\u9891\u5730\u5740\u4e0b\u8f7d\u5931\u8d25\u3002\u751f\u6210\u94fe\u8def\u5df2\u7ecf\u5b8c\u6210\uff1b\u5931\u8d25\u53d1\u751f\u5728\u5f53\u524d\u8bbe\u5907\u4e0b\u8f7d\u539f\u89c6\u9891\u9636\u6bb5\uff0c\u5e38\u89c1\u539f\u56e0\u662f\u4ee3\u7406\u3001DNS \u6216\u7f51\u7edc\u9650\u5236\u3002\u8bf7\u590d\u5236\u4e0b\u65b9\u539f\u59cb\u89c6\u9891\u94fe\u63a5\u5230\u6d4f\u89c8\u5668\u6253\u5f00\u6216\u4e0b\u8f7d\u3002\\n\u4efb\u52a1 ID\uff1a\${requestId}\\n\u539f\u59cb\u89c6\u9891\u94fe\u63a5\uff1a\${videoUrl}\\n\u4e0b\u8f7d\u9519\u8bef\uff1a\${downloadError}\`;
+\t\t\t\t\tdownloadedVideo = {
+\t\t\t\t\t\turl: videoUrl,
+\t\t\t\t\t\tmimeType: \"video/mp4\",
+\t\t\t\t\t\tfileName: \`video-\${requestId}.mp4\`
+\t\t\t\t\t};
+\t\t\t\t}
+\t\t\t\treturn {
+\t\t\t\t\tvideos: [downloadedVideo],
+\t\t\t\t\tmodel: normalizeOptionalString(req.model) ?? DEFAULT_XAI_VIDEO_MODEL,
+\t\t\t\t\tmetadata: {
+\t\t\t\t\t\trequestId,
+\t\t\t\t\t\tstatus: completed.status,
+\t\t\t\t\t\tvideoUrl,
+\t\t\t\t\t\t...uClawDownloadWarning ? { uClawDownloadWarning } : {},
+\t\t\t\t\t\tmode: resolveXaiVideoMode(req)
+\t\t\t\t\t}
+\t\t\t\t};`;
+
+  for (const file of providerFiles) {
+    const before = read(file);
+    if (!before.includes("//#region extensions/xai/video-generation-provider.ts")) continue;
+    xaiProviderCount += 1;
+    if (before.includes("uClawDownloadWarning")) continue;
+    const after = before.replace(downloadOriginal, downloadPatched);
+    if (after === before) {
+      throw new Error(`Could not patch xAI video download fallback in ${file}`);
+    }
+    writeIfChanged(file, before, after);
+    console.log(`patched ${path.relative(root, file)}`);
+  }
+
+  if (xaiProviderCount === 0) {
+    throw new Error(`Missing xAI video provider in ${openclawDistDir}`);
+  }
+
+  const toolFiles = fs
+    .readdirSync(openclawDistDir)
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => path.join(openclawDistDir, name))
+    .filter((file) => read(file).includes("async function executeVideoGenerationJob(params)"));
+  if (toolFiles.length === 0) {
+    throw new Error(`Missing video generation tool runtime in ${openclawDistDir}`);
+  }
+
+  for (const file of toolFiles) {
+    const before = read(file);
+    const jobStart = before.indexOf("async function executeVideoGenerationJob(params)");
+    const jobEnd = before.indexOf("\nfunction createVideoGenerateTool", jobStart);
+    if (jobStart === -1 || jobEnd === -1) {
+      throw new Error(`Could not locate video generation job in ${file}`);
+    }
+
+    const misplacedWarningLine = "\n\t\t...uClawDownloadWarning ? [uClawDownloadWarning] : [],";
+    const prefix = before.slice(0, jobStart).replaceAll(misplacedWarningLine, "");
+    let job = before.slice(jobStart, jobEnd);
+    const suffix = before.slice(jobEnd);
+    if (!job.includes("const uClawDownloadWarning = normalizeOptionalString")) {
+      job = job.replace(
+        "\tconst warning = ignoredOverrides.length > 0 ? `Ignored unsupported overrides for ${result.provider}/${result.model}: ${ignoredOverrides.map(formatIgnoredVideoGenerationOverride).join(\", \")}.` : void 0;",
+        "\tconst warning = ignoredOverrides.length > 0 ? `Ignored unsupported overrides for ${result.provider}/${result.model}: ${ignoredOverrides.map(formatIgnoredVideoGenerationOverride).join(\", \")}.` : void 0;\n\tconst uClawDownloadWarning = normalizeOptionalString(result.metadata?.uClawDownloadWarning);",
+      );
+    }
+    if (!job.includes("...uClawDownloadWarning ? [uClawDownloadWarning] : []")) {
+      job = job.replace(
+        "\t\t...warning ? [`Warning: ${warning}`] : [],",
+        "\t\t...warning ? [`Warning: ${warning}`] : [],\n\t\t...uClawDownloadWarning ? [uClawDownloadWarning] : [],",
+      );
+    }
+    const after = `${prefix}${job}${suffix}`;
+    if (
+      !job.includes("const uClawDownloadWarning = normalizeOptionalString")
+      || !job.includes("...uClawDownloadWarning ? [uClawDownloadWarning] : []")
+    ) {
+      throw new Error(`Could not patch video download warning output in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
 }
 
 function patchServiceWorker() {
@@ -3710,4 +4011,7 @@ patchControlUiBrandAssets();
 patchControlUiTheme();
 patchControlCss();
 patchLocalMediaRoots();
+patchOpenAiCompatibleImageResponses();
+patchXaiVideoLoopbackAccess();
+patchXaiVideoDownloadFallback();
 patchServiceWorker();

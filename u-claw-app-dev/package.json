@@ -8,15 +8,19 @@
   "homepage": "https://u-claw.org",
   "scripts": {
     "sync-lib": "node scripts/sync-lib.js",
+    "sync:config": "node scripts/sync-openclaw-config.js",
+    "prepare-build": "npm run patch-openclaw && npm run sync-lib && npm run sync:config",
     "patch-openclaw": "node scripts/patch-openclaw.js",
     "start": "npm run patch-openclaw && npm run sync-lib && electron .",
     "dev": "npm run patch-openclaw && npm run sync-lib && electron . --dev",
-    "dev:video": "UCLAW_VIDEO_ADAPTER_BASE_URL=https://api.gmnlee.com/v1 npm run dev",
-    "build:mac": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac",
-    "build:mac-arm64": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac --arm64",
-    "build:mac-x64": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac --x64",
-    "build:win": "npm run patch-openclaw && npm run sync-lib && electron-builder --win",
-    "build:all": "npm run patch-openclaw && npm run sync-lib && electron-builder --mac --win",
+    "dev:video": "npm run dev",
+    "build:mac": "npm run prepare-build && electron-builder --mac",
+    "build:mac-arm64": "npm run prepare-build && electron-builder --mac --arm64",
+    "build:mac-x64": "npm run prepare-build && electron-builder --mac --x64",
+    "build:win": "npm run prepare-build && electron-builder --win",
+    "build:all": "npm run prepare-build && electron-builder --mac --win",
+    "package:portable:customer": "node scripts/package-portable.js --edition customer",
+    "package:portable:streamer": "node scripts/package-portable.js --edition streamer",
     "postinstall": "electron-builder install-app-deps && npm run patch-openclaw"
   },
   "build": {
@@ -46,6 +50,10 @@
       {
         "from": "resources/Config.html",
         "to": "resources/Config.html"
+      },
+      {
+        "from": "resources/default-openclaw.json",
+        "to": "resources/default-openclaw.json"
       },
       {
         "from": "resources/context",

@@ -3,10 +3,11 @@
 
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const DEFAULT_PORT = 18789;
-const DEFAULT_OPENCLAW_HOME = "/Users/biancheng/Library/Application Support/u-claw";
+const DEFAULT_OPENCLAW_HOME = path.join(os.homedir(), "Library", "Application Support", "u-claw");
 
 const appRoot = path.resolve(__dirname, "..");
 const openclawPath = path.join(appRoot, "node_modules", "openclaw");
