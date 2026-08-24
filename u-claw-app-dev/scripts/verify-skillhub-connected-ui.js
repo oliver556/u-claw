@@ -247,15 +247,15 @@ async function ensureConnected(page, dashboardUrl, gatewayWebSocketUrl, token) {
 
   await page.waitForSelector("body", { timeout: 15000 });
 
-  if ((await page.locator("text=选择 SkillHub").count()) > 0) {
-    await page.waitForFunction(() => document.body.innerText.includes("选择 SkillHub"), null, { timeout: 20000 });
+  if ((await page.locator("text=选择你的技能").count()) > 0) {
+    await page.waitForFunction(() => document.body.innerText.includes("选择你的技能"), null, { timeout: 20000 });
     await page.waitForTimeout(1500);
     return;
   }
 
   const loginGate = page.locator("openclaw-login-gate");
   if ((await loginGate.count()) === 0) {
-    await page.waitForFunction(() => document.body.innerText.includes("选择 SkillHub"), null, { timeout: 20000 });
+    await page.waitForFunction(() => document.body.innerText.includes("选择你的技能"), null, { timeout: 20000 });
     return;
   }
 
@@ -288,7 +288,7 @@ async function ensureConnected(page, dashboardUrl, gatewayWebSocketUrl, token) {
     "button:has-text('连接')",
   ]);
   await connectButton.click();
-  await page.waitForFunction(() => document.body.innerText.includes("选择 SkillHub"), null, { timeout: 30000 });
+  await page.waitForFunction(() => document.body.innerText.includes("选择你的技能"), null, { timeout: 30000 });
   await page.waitForTimeout(1500);
 }
 
@@ -370,11 +370,11 @@ async function collectUiDiagnostics(page) {
   try {
     return await page.evaluate(() => ({
       url: window.location.href.replace(/#.*$/, "#[redacted]"),
-      hasSkillHubText: document.body.innerText.includes("选择 SkillHub"),
+      hasSkillHubText: document.body.innerText.includes("选择你的技能"),
       skillHubOpen: document.querySelector("details.chat-controls__skillhub")?.open ?? null,
       skillHubText: document.querySelector("details.chat-controls__skillhub")?.innerText.slice(0, 500) ?? null,
       notice: document.body.innerText.includes("已保存，新会话生效"),
-      errorText: document.body.innerText.includes("保存 SkillHub 选择失败"),
+      errorText: document.body.innerText.includes("保存技能选择失败"),
       bodyTail: document.body.innerText.slice(-800),
     }));
   } catch (error) {

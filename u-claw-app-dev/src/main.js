@@ -35,24 +35,56 @@ const openclawPath = isDev
 
 const openclawEntry = path.join(openclawPath, 'openclaw.mjs');
 
-// Bundled Node.js runtime (OpenClaw needs standalone Node, not Electron's)
+/**
+ * Looks up an executable in PATH so dev launches do not depend on shell
+ * expansion. macOS GUI/Electron processes can have a different PATH from zsh.
+ */
+function findExecutableInPath(command) {
+  const pathValue = process.env.PATH || '';
+  const extensions = process.platform === 'win32'
+    ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';')
+    : [''];
+
+  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
+    for (const ext of extensions) {
+      const candidate = path.join(dir, process.platform === 'win32' ? command + ext : command);
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return candidate;
+      } catch {}
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolves the standalone Node.js runtime used by OpenClaw Gateway.
+ * Packaged builds must use bundled runtime; dev builds may fall back to PATH.
+ */
 function getNodeBin() {
   const platform = process.platform;
   const arch = process.arch;
+  const envNodeBin = process.env.UCLAW_NODE_BIN;
+  if (envNodeBin && fs.existsSync(envNodeBin)) return envNodeBin;
+
   if (isDev) {
     const devNodeDir = path.join(__dirname, '..', 'resources', 'runtime', `node-${platform}-${arch}`);
     const devNodeBin = platform === 'win32'
       ? path.join(devNodeDir, 'node.exe')
       : path.join(devNodeDir, 'bin', 'node');
     if (fs.existsSync(devNodeBin)) return devNodeBin;
-    return 'node';
+    const pathNodeBin = findExecutableInPath('node');
+    if (pathNodeBin) return pathNodeBin;
+    throw new Error('Node.js executable not found. Set UCLAW_NODE_BIN or install Node.js for dev launch.');
   }
+
   const nodeDir = path.join(process.resourcesPath, 'resources', 'runtime', `node-${platform}-${arch}`);
   const nodeBin = platform === 'win32'
     ? path.join(nodeDir, 'node.exe')
     : path.join(nodeDir, 'bin', 'node');
   if (fs.existsSync(nodeBin)) return nodeBin;
-  return 'node';
+  throw new Error(`Bundled Node.js runtime not found: ${nodeBin}`);
 }
 
 // Portable mode: if a `portable/` directory exists next to the .app bundle, use it for data
@@ -551,20 +583,30 @@ function startGateway(port) {
 
     // Poll for gateway readiness
     const startTime = Date.now();
+    let settled = false;
     const checkReady = () => {
+      if (settled) return;
+
       if (Date.now() - startTime > GATEWAY_STARTUP_TIMEOUT) {
+        settled = true;
         reject(new Error('Gateway startup timeout'));
         return;
       }
 
       const req = http.get(`http://127.0.0.1:${port}/`, (res) => {
+        if (settled) return;
+        settled = true;
         gatewayReady = true;
         gatewayPort = port;
         console.log(`[${APP_NAME}] Gateway ready on port ${port}`);
+        res.resume();
         resolve(port);
       });
-      req.on('error', () => setTimeout(checkReady, 500));
+      req.on('error', () => {
+        if (!settled) setTimeout(checkReady, 500);
+      });
       req.setTimeout(2000, () => {
+        if (settled) return;
         req.destroy();
         setTimeout(checkReady, 500);
       });
