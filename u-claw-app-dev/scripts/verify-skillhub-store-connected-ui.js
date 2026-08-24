@@ -570,7 +570,7 @@ async function installSkillInstallRequestProbe(page) {
           if (params?.force === true) {
             return { message: "验证覆盖重装已触发" };
           }
-          throw new Error("Skill already exists at /Users/biancheng/Library/Application Support/u-claw/.openclaw/workspace/skills/browser-use. Re-run with force/update.");
+          throw new Error("failed to install skill: Error: EPERM: operation not permitted, rename 'C:\\\\Users\\\\EDY\\\\AppData\\\\Local\\\\U-Claw\\\\usb-portable\\\\data\\\\.openclaw\\\\workspace\\\\skills\\\\.fs-safe-move-1584-test.tmp' -> 'C:\\\\Users\\\\EDY\\\\AppData\\\\Local\\\\U-Claw\\\\usb-portable\\\\data\\\\.openclaw\\\\workspace\\\\skills\\\\tencent-docs'");
         }
         return original(method, params, ...rest);
       };
@@ -1044,6 +1044,11 @@ async function runAcceptance(options) {
       installCountBefore,
       { timeout: 15000 },
     );
+    const firstInstall = await page.evaluate(() => globalThis.__uclawSkillHubInstallRequests?.at(-1)?.params ?? null);
+    if (firstInstall?.source !== "skillhub" || !firstInstall?.slug || firstInstall.slug.startsWith("@")) {
+      throw new Error(`SkillHub list install used wrong request shape: ${JSON.stringify(firstInstall)}`);
+    }
+    await waitForText(page, "Windows 拒绝写入技能安装目录", 15000);
     await waitForText(page, "覆盖重装", 15000);
     const forceCountBefore = await getSkillInstallRequestCount(page);
     await clickButtonText(page, "覆盖重装");
@@ -1053,7 +1058,7 @@ async function runAcceptance(options) {
       { timeout: 15000 },
     );
     const forcedInstall = await page.evaluate(() => globalThis.__uclawSkillHubInstallRequests?.at(-1)?.params ?? null);
-    if (forcedInstall?.force !== true) {
+    if (forcedInstall?.force !== true || forcedInstall?.source !== "skillhub") {
       throw new Error(`SkillHub force reinstall did not pass force:true: ${JSON.stringify(forcedInstall)}`);
     }
     await waitForText(page, "验证覆盖重装已触发", 15000);
@@ -1074,6 +1079,10 @@ async function runAcceptance(options) {
 
     await selectSkillHubToolbarOption(page, "API Key 筛选", "needs-key");
     requestCount = await waitForSkillSearchRequestIncrease(page, requestCount, "API Key filter change");
+    const apiKeyRequest = await getLastSkillSearchRequest(page);
+    if (apiKeyRequest?.params?.apiKey !== "needs-key") {
+      throw new Error(`SkillHub API Key select did not send apiKey: ${JSON.stringify(apiKeyRequest)}`);
+    }
     await page.waitForTimeout(300);
 
     await selectSkillHubToolbarOption(page, "排序", "downloads");
@@ -1134,20 +1143,21 @@ async function runAcceptance(options) {
 
     stage = "search";
     requestCount = await getSkillSearchRequestCount(page);
-    await fillSkillHubSearch(page, "lark");
+    await fillSkillHubSearch(page, "小说");
     requestCount = await waitForSkillSearchRequestIncrease(page, requestCount, "search query page 1");
     const searchPageOneRequest = await page.evaluate(() => globalThis.__uclawSkillHubSearchRequests?.at(-1) ?? null);
-    if (searchPageOneRequest?.params?.page !== "1" || !String(searchPageOneRequest?.params?.q || "").includes("lark")) {
-      throw new Error(`SkillHub search page 1 request missing q/page: ${JSON.stringify(searchPageOneRequest)}`);
+    if (searchPageOneRequest?.params?.page !== "1" || !String(searchPageOneRequest?.params?.keyword || "").includes("小说")) {
+      throw new Error(`SkillHub search page 1 request missing keyword/page: ${JSON.stringify(searchPageOneRequest)}`);
     }
     await waitForText(page, "搜索结果", 30000);
+    await waitForText(page, "小说", 30000);
     await waitForDenseRows(page, 1, 30000);
     await waitForSkillHubRequestIdle(page);
     await clickSkillHubNextPageButton(page);
     requestCount = await waitForSkillSearchRequestIncrease(page, requestCount, "search page 2");
     const searchPageRequest = await page.evaluate(() => globalThis.__uclawSkillHubSearchRequests?.at(-1) ?? null);
-    if (searchPageRequest?.params?.page !== "2" || !String(searchPageRequest?.params?.q || "").includes("lark")) {
-      throw new Error(`SkillHub search page 2 request missing q/page: ${JSON.stringify(searchPageRequest)}`);
+    if (searchPageRequest?.params?.page !== "2" || !String(searchPageRequest?.params?.keyword || "").includes("小说")) {
+      throw new Error(`SkillHub search page 2 request missing keyword/page: ${JSON.stringify(searchPageRequest)}`);
     }
     await fillSkillHubSearch(page, "");
     await waitForText(page, "推荐首页", 30000);

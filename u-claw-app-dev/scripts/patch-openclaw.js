@@ -9,6 +9,7 @@ const swPath = path.join(controlUiDir, "sw.js");
 const indexHtmlPath = path.join(controlUiDir, "index.html");
 const manifestPath = path.join(controlUiDir, "manifest.webmanifest");
 const controlUiGatewayPath = path.join(root, "node_modules", "openclaw", "dist", "control-ui-CuoxgbYo.js");
+const installPackageDirPath = path.join(openclawDistDir, "install-package-dir-DhuK4F77.js");
 const skillsGatewayPath = path.join(openclawDistDir, "skills-ieKSTXPw.js");
 const schemaPath = path.join(openclawDistDir, "schema-BuOFpc7K.js");
 const serverMethodsPath = path.join(openclawDistDir, "server-methods-NpEcZnvp.js");
@@ -336,6 +337,55 @@ function patchSkillHubInstallGateway() {
   }
   if (writeIfChanged(schemaPath, schemaBefore, schemaAfter)) {
     console.log(`patched ${path.relative(root, schemaPath)}`);
+  }
+}
+
+/**
+ * Adds a Windows fallback when atomic staged directory rename is denied.
+ */
+function patchWindowsInstallPublishFallback() {
+  const before = read(installPackageDirPath);
+  let after = before;
+  const helper = [
+    "function isUcWindowsSkillPublishRenameDenied(error) {",
+    "\treturn process.platform === \"win32\" && error?.code === \"EPERM\" && String(error).includes(\".fs-safe-move-\");",
+    "}",
+    "async function publishInstallStageWithUcWindowsFallback(params) {",
+    "\ttry {",
+    "\t\tawait movePathWithCopyFallback({",
+    "\t\t\tfrom: params.from,",
+    "\t\t\tsourceHardlinks: params.sourceHardlinks,",
+    "\t\t\tto: params.to",
+    "\t\t});",
+    "\t\treturn;",
+    "\t} catch (error) {",
+    "\t\tif (!isUcWindowsSkillPublishRenameDenied(error)) throw error;",
+    "\t\tparams.logger?.warn?.(`Windows denied staged rename into ${params.to}; retrying with direct copy.`);",
+    "\t\tawait fs.cp(params.from, params.to, {",
+    "\t\t\trecursive: true,",
+    "\t\t\tforce: true,",
+    "\t\t\terrorOnExist: false,",
+    "\t\t\tverbatimSymlinks: true",
+    "\t\t});",
+    "\t\tawait fs.rm(params.from, { recursive: true, force: true }).catch(() => void 0);",
+    "\t}",
+    "}",
+  ].join("\n");
+  if (!after.includes("publishInstallStageWithUcWindowsFallback")) {
+    after = after.replace(
+      "async function installPackageDir(params) {",
+      `${helper}\nasync function installPackageDir(params) {`,
+    );
+  }
+  after = after.replace(
+    /\t\tawait movePathWithCopyFallback\(\{\n\t\t\tfrom: stageDir,\n\t\t\tsourceHardlinks,\n\t\t\tto: canonicalTargetDir\n\t\t\}\);/,
+    "\t\tawait publishInstallStageWithUcWindowsFallback({\n\t\t\tfrom: stageDir,\n\t\t\tsourceHardlinks,\n\t\t\tto: canonicalTargetDir,\n\t\t\tlogger: params.logger\n\t\t});",
+  );
+  if (!after.includes("publishInstallStageWithUcWindowsFallback")) {
+    throw new Error(`Could not patch Windows install publish fallback in ${installPackageDirPath}`);
+  }
+  if (writeIfChanged(installPackageDirPath, before, after)) {
+    console.log(`patched ${path.relative(root, installPackageDirPath)}`);
   }
 }
 
@@ -2642,7 +2692,9 @@ function buildUcSkillHubApiUrl(source) {
 \tconst sortBy = source.searchParams.get("sortBy") || "score";
 \ttarget.searchParams.set("sortBy", UCLAW_SKILLHUB_SORTS.has(sortBy) ? sortBy : "score");
 \ttarget.searchParams.set("order", source.searchParams.get("order") === "asc" ? "asc" : "desc");
-\tfor (const key of ["q", "category"]) {
+\tconst keyword = source.searchParams.get("keyword")?.trim() || source.searchParams.get("q")?.trim();
+\tif (keyword) target.searchParams.set("keyword", keyword.slice(0, 120));
+\tfor (const key of ["category", "apiKey"]) {
 \t\tconst value = source.searchParams.get(key)?.trim();
 \t\tif (value) target.searchParams.set(key, value.slice(0, 120));
 \t}
@@ -2680,8 +2732,15 @@ async function handleUcSkillHubSkillsProxyRequest(req, res) {
       `${helper}async function handleControlUiHttpRequest(req, res, opts) {`,
     );
   }
-  after = after.replace('for (const key of ["q", "category", "apiKey"]) {', 'for (const key of ["q", "category"]) {');
-  after = after.replace('for (const key of ["q"]) {', 'for (const key of ["q", "category"]) {');
+  after = after.replace('for (const key of ["q", "category", "apiKey"]) {', 'for (const key of ["category", "apiKey"]) {');
+  after = after.replace('for (const key of ["q", "category"]) {', 'for (const key of ["category", "apiKey"]) {');
+  after = after.replace('for (const key of ["q"]) {', 'for (const key of ["category", "apiKey"]) {');
+  if (!after.includes('target.searchParams.set("keyword", keyword.slice(0, 120));')) {
+    after = after.replace(
+      '\ttarget.searchParams.set("order", source.searchParams.get("order") === "asc" ? "asc" : "desc");\n\tfor (const key of ["category", "apiKey"]) {',
+      '\ttarget.searchParams.set("order", source.searchParams.get("order") === "asc" ? "asc" : "desc");\n\tconst keyword = source.searchParams.get("keyword")?.trim() || source.searchParams.get("q")?.trim();\n\tif (keyword) target.searchParams.set("keyword", keyword.slice(0, 120));\n\tfor (const key of ["category", "apiKey"]) {',
+    );
+  }
 
   after = after.replace(
     "async function handleControlUiHttpRequest(req, res, opts) {\n\tconst urlRaw = req.url;",
@@ -2835,7 +2894,7 @@ function patchSkillsPageStoreDiscovery() {
     "function UcSkillHubApiSort(e){return e===`downloads`?{sortBy:`downloads`,order:`desc`}:e===`stars`?{sortBy:`stars`,order:`desc`}:e===`name`?{sortBy:`score`,order:`desc`}:{sortBy:`score`,order:`desc`}}",
     "function UcSkillHubApiQuery(e){let t=e.clawhubQuery?.trim?.()||e.clawhubSearchQuery?.trim?.()||``,n=e.skillHubApiKeyFilter===`needs-key`?`api key configuration`:e.skillHubApiKeyFilter===`configured`?`verified official`:``;return[t,n].filter(Boolean).join(` `).trim()}",
     "function UcSkillHubApiCategory(e){let t=e.skillHubCategory||`all`;return t===`all`?``:UcSkillHubApiCategoryMap()[t]||t}",
-    "function UcSkillHubApiUrl(e,t){let n=UcSkillHubApiSort(e.skillHubSort),r=new URL(`/__uclaw__/skillhub/skills`,window.location.origin);r.searchParams.set(`page`,String(Math.max(1,Number(t)||1))),r.searchParams.set(`pageSize`,String(e.skillHubPageSize||24)),r.searchParams.set(`sortBy`,n.sortBy),r.searchParams.set(`order`,n.order);let i=UcSkillHubApiQuery(e),s=UcSkillHubApiCategory(e);return i&&r.searchParams.set(`q`,i),s&&r.searchParams.set(`category`,s),e.skillHubApiKeyFilter&&r.searchParams.set(`apiKey`,e.skillHubApiKeyFilter),r.toString()}",
+    "function UcSkillHubApiUrl(e,t){let n=UcSkillHubApiSort(e.skillHubSort),r=new URL(`/__uclaw__/skillhub/skills`,window.location.origin);r.searchParams.set(`page`,String(Math.max(1,Number(t)||1))),r.searchParams.set(`pageSize`,String(e.skillHubPageSize||24)),r.searchParams.set(`sortBy`,n.sortBy),r.searchParams.set(`order`,n.order);let i=UcSkillHubApiQuery(e),s=UcSkillHubApiCategory(e);return i&&r.searchParams.set(`keyword`,i),s&&r.searchParams.set(`category`,s),e.skillHubApiKeyFilter&&r.searchParams.set(`apiKey`,e.skillHubApiKeyFilter),r.toString()}",
     "async function UcSkillHubLoadApiSkills(e,t){let n=await fetch(UcSkillHubApiUrl(e,t),{headers:{Accept:`application/json`}}),r=await n.text(),i=n.headers.get(`content-type`)||``;if(!i.includes(`application/json`))throw Error(`技能商店 Gateway 代理未生效，请重启 U-Claw 后重试。`);let s=JSON.parse(r);if(!n.ok||s?.code&&s.code!==0)throw Error(s?.message||`技能商店 API ${n.status}`);let c=Array.isArray(s?.data?.skills)?s.data.skills:[],l=c.map(UcSkillHubNormalizeApiSkill);return{items:l,total:Math.max(0,Number(s?.data?.total)||l.length),message:l.length?`第 ${t} 页已加载`:t>1?`本页暂无数据，可返回上一页。`:`暂无匹配技能商店技能。`,compat:!1}}",
     "async function UcSkillHubFallbackSkillsSearch(e,t,n){let r=e.client;if(!r?.request)throw n;let i=UcSkillHubApiQuery(e)||`agent`,s=Math.max(1,Number(e.skillHubPageSize)||24),c=Math.min(80,Math.max(s,t*s)),l=await r.request(`skills.search`,{query:i,limit:c}),u=Array.isArray(l?.results)?l.results:[],d=(t-1)*s,m=u.slice(d,d+s);if(!m.length&&t>1)throw n;return{items:m,total:u.length,message:`当前 Gateway 尚未启用技能商店分页代理，已使用兼容模式加载。重启 U-Claw 后可使用完整分页。`,compat:!0}}",
     "function UcSkillHubNormalizeApiSkill(e){let t=e?.namespace??{},n=t.handle||t.publicSlug||e?.ownerHandle||``,r=e?.slug||t.publicSlug||e?.name,i=t.canonicalName||(n&&r?`@${n}/${r}`:r),s=e?.labels??{},c=s.requires_api_key===!0||String(s.requires_api_key).toLowerCase()===`true`,l=e?.iconUrl||e?.icon_url||e?.iconURL||e?.logoUrl||e?.imageUrl||e?.avatarUrl||e?.publisher?.logoUrl||``;return{...e,id:i,slug:r,displayName:e?.name||r,summary:e?.description_zh||e?.description||``,description:e?.description_zh||e?.description||``,ownerHandle:n,owner:{handle:n,displayName:t.displayName||n},publisher:e?.publisher,iconUrl:l,logoUrl:e?.logoUrl||e?.publisher?.logoUrl,imageUrl:e?.imageUrl,avatarUrl:e?.avatarUrl,downloads:e?.downloads,stars:e?.stars,version:e?.version,categories:[e?.category,...(e?.subCategories??[]).map(e=>e?.key),...(e?.subCategories??[]).map(e=>e?.name)].filter(Boolean),topics:e?.tags??[],labels:{...s,requires_api_key:c},install:{reference:i},trust:{installability:`installable`},native:{skill:e}}}",
@@ -3052,6 +3111,7 @@ function patchSkillsPageStoreDiscovery() {
       /<div style="margin-top: 16px; border-top: 1px solid var\(--border\); padding-top: 16px;">[\s\S]*?\$\{q\(e\)\}\s*<\/div>/,
       "${q(e)}",
     );
+    after = after.replaceAll("e.onClawHubInstall?.(p)}}", "e.onClawHubInstall?.(t)}}");
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -3314,7 +3374,7 @@ function patchSkillsPageSearchIdentityRequests() {
   const installOriginal =
     "async function yc(e,t,n=!1,r){if(!e.client||!e.connected)return;let i=nc(e);e.clawhubInstallSlug=t,e.clawhubInstallMessage=null;try{let a=await e.client.request(`skills.install`,{...ec(e),source:`clawhub`,slug:t,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{}});if(!H(e,i)||(await sc(e),!H(e,i)))return;e.clawhubInstallMessage={kind:`success`,text:Ks(a?.message??`已安装 ${t}`,a?.warning)}}catch(n){if(H(e,i)){let r=Gs(n),i=r?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED;e.clawhubInstallMessage={kind:`error`,text:i?qs(r?.warning):Ks(Ws(n),r?.warning),...i?{acknowledgeSlug:t}:{},...i&&r?.version?{acknowledgeVersion:r.version}:{},...i?{acknowledgeLabel:`Acknowledge risk and install`}:{}}}}finally{H(e,i)&&e.clawhubInstallSlug===t&&(e.clawhubInstallSlug=null)}}";
   const installPatched =
-    "async function yc(e,t,n=!1,r,i=!1){if(!e.client||!e.connected)return;let a=UcSkillHubRefParts(t),o=nc(e);e.clawhubInstallSlug=a.display,e.clawhubInstallMessage=null,e.requestUpdate?.();try{let s=await e.client.request(`skills.install`,{...ec(e),source:`clawhub`,slug:a.slug,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{},...i?{force:!0}:{}});if(!H(e,o)&&e.clawhubInstallSlug!==a.display)return;e.clawhubInstallMessage={kind:`success`,text:Ks(s?.message??`已安装 ${a.display}`,s?.warning)},e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null),e.requestUpdate?.(),await sc(e).catch(()=>{})}catch(s){if(H(e,o)||e.clawhubInstallSlug===a.display){let c=Gs(s),l=c?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED,u=Ws(s),d=!i&&/already exists|force\\/update/i.test(u);e.clawhubInstallMessage={kind:`error`,text:l?qs(c?.warning):Ks(u,c?.warning),...l?{acknowledgeSlug:a.slug}:{},...l&&c?.version?{acknowledgeVersion:c.version}:{},...l?{acknowledgeLabel:`确认风险并安装`}:{},...d?{forceSlug:a.slug,forceLabel:`覆盖重装`}:{},...d&&r?{forceVersion:r}:{}},e.requestUpdate?.()}}finally{e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null,e.requestUpdate?.())}}";
+    "async function yc(e,t,n=!1,r,i=!1){if(!e.client||!e.connected)return;let a=UcSkillHubRefParts(t),o=nc(e);e.clawhubInstallSlug=a.display,e.clawhubInstallMessage=null,e.requestUpdate?.();try{let s=await e.client.request(`skills.install`,{...ec(e),source:a.installSource||`clawhub`,slug:a.slug,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{},...i?{force:!0}:{}});if(!H(e,o)&&e.clawhubInstallSlug!==a.display)return;e.clawhubInstallMessage={kind:`success`,text:Ks(s?.message??`已安装 ${a.display}`,s?.warning)},e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null),e.requestUpdate?.(),await sc(e).catch(()=>{})}catch(s){if(H(e,o)||e.clawhubInstallSlug===a.display){let c=Gs(s),l=c?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED,u=Ws(s),f=/eperm.*rename|fs-safe-move/i.test(u),d=!i&&(/already exists|force\\/update/i.test(u)||f),h=f?`Windows 拒绝写入技能安装目录，通常是目录已存在、被占用或杀毒软件正在扫描。请关闭正在使用该技能的窗口或进程后再点“覆盖重装”。\\n\\n原始错误：${u}`:u;e.clawhubInstallMessage={kind:`error`,text:l?qs(c?.warning):Ks(h,c?.warning),...l?{acknowledgeSlug:a.input??a.display}:{},...l&&c?.version?{acknowledgeVersion:c.version}:{},...l?{acknowledgeLabel:`确认风险并安装`}:{},...d?{forceSlug:a.input??a.display,forceLabel:`覆盖重装`}:{},...d&&r?{forceVersion:r}:{}},e.requestUpdate?.()}}finally{e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null,e.requestUpdate?.())}}";
   const installPatchedSlugDisplayPrevious =
     "async function yc(e,t,n=!1,r,i=!1){if(!e.client||!e.connected)return;let a=UcSkillHubRefParts(t),o=nc(e);e.clawhubInstallSlug=a.display,e.clawhubInstallMessage=null,e.requestUpdate?.();try{let s=await e.client.request(`skills.install`,{...ec(e),source:`clawhub`,slug:a.display,...r?{version:r}:{},...n?{acknowledgeClawHubRisk:!0}:{},...i?{force:!0}:{}});if(!H(e,o)&&e.clawhubInstallSlug!==a.display)return;e.clawhubInstallMessage={kind:`success`,text:Ks(s?.message??`Installed ${a.display}`,s?.warning)},e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null),e.requestUpdate?.(),await sc(e).catch(()=>{})}catch(s){if(H(e,o)||e.clawhubInstallSlug===a.display){let c=Gs(s),l=c?.clawhubTrustCode===zs.RISK_ACKNOWLEDGEMENT_REQUIRED,u=Ws(s),d=!i&&/already exists|force\\/update/i.test(u);e.clawhubInstallMessage={kind:`error`,text:l?qs(c?.warning):Ks(u,c?.warning),...l?{acknowledgeSlug:a.display}:{},...l&&c?.version?{acknowledgeVersion:c.version}:{},...l?{acknowledgeLabel:`确认风险并安装`}:{},...d?{forceSlug:a.display,forceLabel:`覆盖重装`}:{},...d&&r?{forceVersion:r}:{}},e.requestUpdate?.()}}finally{e.clawhubInstallSlug===a.display&&(e.clawhubInstallSlug=null,e.requestUpdate?.())}}";
   const installPatchedRefreshBlockingPrevious =
@@ -3344,8 +3404,15 @@ function patchSkillsPageSearchIdentityRequests() {
     after = after.replace(installPatchedRefreshBlockingPrevious, installPatched);
     after = after.replace(installPatchedSlugDisplayPrevious, installPatched);
     after = after.replaceAll(refPartsOriginal, refPartsPatched);
+    after = after.replace(
+      /function UcSkillHubRefParts\(e\)\{let t=typeof e==`string`\?e\.trim\(\):``;if\(t\.startsWith\(`@`\)\)\{let e=t\.slice\(1\)\.split\(`\/`\);if\(e\.length===2&&e\[0\]&&e\[1\]\)return\{display:t,slug:e\[1\],ownerHandle:e\[0\]\}\}return\{display:t,slug:t\}\}/g,
+      refPartsPatched,
+    );
+    after = after.replaceAll("source:`clawhub`,slug:a.display", "source:a.installSource||`clawhub`,slug:a.slug");
     after = after.replaceAll("source:`clawhub`,slug:a.slug", "source:a.installSource||`clawhub`,slug:a.slug");
+    after = after.replaceAll("acknowledgeSlug:a.display", "acknowledgeSlug:a.input??a.display");
     after = after.replaceAll("acknowledgeSlug:a.slug", "acknowledgeSlug:a.input??a.display");
+    after = after.replaceAll("forceSlug:a.display", "forceSlug:a.input??a.display");
     after = after.replaceAll("forceSlug:a.slug", "forceSlug:a.input??a.display");
     after = after.replaceAll("`Installed ${a.display}`", "`已安装 ${a.display}`");
     after = after.replaceAll("`Installed ${t}`", "`已安装 ${t}`");
@@ -5445,6 +5512,7 @@ ${markerEnd}`;
 
 patchSkillsUninstallGateway();
 patchSkillHubInstallGateway();
+patchWindowsInstallPublishFallback();
 patchChatPage();
 patchChatUiCopy();
 patchAssistantIdentityUiCopy();
