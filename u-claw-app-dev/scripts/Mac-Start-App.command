@@ -2,11 +2,22 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-ARCHIVE="$ROOT/app/desktop-archive/u-claw-app-mac-arm64.tar.gz"
+HOST_ARCH="$(uname -m)"
+if [ "$(sysctl -in hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then
+  MAC_ARCH="arm64"
+elif [ "$HOST_ARCH" = "x86_64" ]; then
+  MAC_ARCH="x64"
+else
+  echo "[U-Claw] Unsupported Mac architecture: $HOST_ARCH"
+  read -r -p "Press Enter to exit..."
+  exit 1
+fi
+
+ARCHIVE="$ROOT/app/desktop-archive/u-claw-app-mac-$MAC_ARCH.tar.gz"
 ARCHIVE_SHA_FILE="$ARCHIVE.sha256"
 USB_DATA_DIR="$ROOT/data"
 CACHE_ROOT="$HOME/Library/Caches/U-Claw"
-APP_CACHE_DIR="$CACHE_ROOT/u-claw-app-mac-arm64"
+APP_CACHE_DIR="$CACHE_ROOT/u-claw-app-mac-$MAC_ARCH"
 RUN_DATA_DIR="$CACHE_ROOT/usb-portable/data"
 APP_BIN="$APP_CACHE_DIR/U-Claw.app/Contents/MacOS/U-Claw"
 STAMP_FILE="$APP_CACHE_DIR/.u-claw-archive.sha256"
@@ -33,6 +44,7 @@ sync_back() {
 
 echo "[U-Claw] $(date '+%Y-%m-%d %H:%M:%S')"
 echo "[U-Claw] USB root: $ROOT"
+echo "[U-Claw] Mac architecture: $MAC_ARCH"
 echo "[U-Claw] USB data dir: $USB_DATA_DIR"
 echo "[U-Claw] Runtime data dir: $RUN_DATA_DIR"
 

@@ -166,8 +166,10 @@ npm run package:portable:customer -- --usb /Volumes/UCLAW-01
 
 ```txt
 重新构建 Mac arm64 app
+重新构建 Mac x64 app
 重新构建 Windows x64 app
-生成 Mac tar.gz + SHA-256 manifest
+生成 Mac arm64 tar.gz + SHA-256 manifest
+生成 Mac x64 tar.gz + SHA-256 manifest
 生成 Windows zip + SHA-256 manifest
 生成 New API key 为空的客户 openclaw.json
 生成 release/portable-customer/U-Claw
@@ -178,9 +180,24 @@ npm run package:portable:customer -- --usb /Volumes/UCLAW-01
 打包时会按平台裁剪 Node runtime：
 
 ```txt
-Mac 包只保留 node-darwin-arm64
+Mac arm64 包只保留 node-darwin-arm64
+Mac x64 包只保留 node-darwin-x64
 Windows 包只保留 node-win32-x64
 旧 runtime 备份和其他平台 runtime 不进入交付包
+```
+
+Mac 启动脚本必须按宿主机架构选择归档：
+
+```txt
+arm64  -> u-claw-app-mac-arm64.tar.gz
+x86_64 -> u-claw-app-mac-x64.tar.gz
+```
+
+两套 Mac App 缓存必须分开：
+
+```txt
+~/Library/Caches/U-Claw/u-claw-app-mac-arm64
+~/Library/Caches/U-Claw/u-claw-app-mac-x64
 ```
 
 Windows 首次启动：
@@ -201,6 +218,8 @@ npm run package:portable:streamer -- --usb /Volumes/UCLAW-01
 ```
 
 流程与客户版相同，但 `custom/litellm` 自动继承当前桌面 New API key。
+
+主播/内部版同样必须同时携带 Mac arm64、Mac x64 和 Windows x64 三套 App 归档。
 
 ### 只生成 stage，不写 U 盘
 

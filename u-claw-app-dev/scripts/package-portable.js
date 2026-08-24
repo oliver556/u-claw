@@ -8,9 +8,11 @@ const appDir = path.resolve(__dirname, '..');
 const releaseDir = path.join(appDir, 'release');
 const packageJson = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'));
 const version = packageJson.version;
-const macAppDir = path.join(releaseDir, 'mac-arm64', 'U-Claw.app');
+const macArm64AppDir = path.join(releaseDir, 'mac-arm64', 'U-Claw.app');
+const macX64AppDir = path.join(releaseDir, 'mac', 'U-Claw.app');
 const winAppDir = path.join(releaseDir, 'win-unpacked');
-const macArchive = path.join(releaseDir, 'u-claw-app-mac-arm64.tar.gz');
+const macArm64Archive = path.join(releaseDir, 'u-claw-app-mac-arm64.tar.gz');
+const macX64Archive = path.join(releaseDir, 'u-claw-app-mac-x64.tar.gz');
 const winArchive = path.join(releaseDir, 'u-claw-app-win-x64.zip');
 
 function usage() {
@@ -23,7 +25,7 @@ function usage() {
 Options:
   --edition <customer|streamer>  Package edition. Added by the npm scripts.
   --usb <mount>                  Deploy to <mount>/U-Claw after staging.
-  --skip-build                   Reuse current release/mac-arm64 and release/win-unpacked.
+  --skip-build                   Reuse current release/mac-arm64, release/mac, and release/win-unpacked.
 `);
 }
 
@@ -104,11 +106,23 @@ function copyAtomic(source, destination) {
   fs.renameSync(temporary, destination);
 }
 
+function ensureSourceRuntime(name) {
+  const runtimeDir = path.join(appDir, 'resources', 'runtime', name);
+  const nodeBin = name.startsWith('node-win32-')
+    ? path.join(runtimeDir, 'node.exe')
+    : path.join(runtimeDir, 'bin', 'node');
+  ensureFile(nodeBin, `${name} runtime. Run ./setup.sh or ./setup.bat first`);
+}
+
 function buildApps() {
   ensureDir(path.join(appDir, 'node_modules', 'electron-builder'), 'electron-builder dependency');
+  ensureSourceRuntime('node-darwin-arm64');
+  ensureSourceRuntime('node-darwin-x64');
+  ensureSourceRuntime('node-win32-x64');
   run('npm', ['run', 'patch-openclaw']);
   run('npm', ['run', 'sync-lib']);
   run('npx', ['electron-builder', '--mac', '--arm64', '--dir']);
+  run('npx', ['electron-builder', '--mac', '--x64', '--dir']);
   run('npx', ['electron-builder', '--win', '--x64', '--dir', '-c.npmRebuild=false']);
 }
 
@@ -122,15 +136,22 @@ function keepPackagedRuntime(runtimeRoot, expectedName, label) {
 }
 
 function buildArchives() {
-  ensureDir(macAppDir, 'Mac arm64 app');
-  ensureFile(path.join(macAppDir, 'Contents', 'MacOS', 'U-Claw'), 'Mac executable');
+  ensureDir(macArm64AppDir, 'Mac arm64 app');
+  ensureFile(path.join(macArm64AppDir, 'Contents', 'MacOS', 'U-Claw'), 'Mac arm64 executable');
+  ensureDir(macX64AppDir, 'Mac x64 app');
+  ensureFile(path.join(macX64AppDir, 'Contents', 'MacOS', 'U-Claw'), 'Mac x64 executable');
   ensureDir(winAppDir, 'Windows x64 app');
   ensureFile(path.join(winAppDir, 'U-Claw.exe'), 'Windows executable');
 
   keepPackagedRuntime(
-    path.join(macAppDir, 'Contents', 'Resources', 'resources', 'runtime'),
+    path.join(macArm64AppDir, 'Contents', 'Resources', 'resources', 'runtime'),
     'node-darwin-arm64',
-    'Mac'
+    'Mac arm64'
+  );
+  keepPackagedRuntime(
+    path.join(macX64AppDir, 'Contents', 'Resources', 'resources', 'runtime'),
+    'node-darwin-x64',
+    'Mac x64'
   );
   keepPackagedRuntime(
     path.join(winAppDir, 'resources', 'resources', 'runtime'),
@@ -138,12 +159,17 @@ function buildArchives() {
     'Windows'
   );
 
-  const macTemporary = `${macArchive}.new`;
+  const macArm64Temporary = `${macArm64Archive}.new`;
+  const macX64Temporary = `${macX64Archive}.new`;
   const winTemporary = path.join(releaseDir, 'u-claw-app-win-x64.new.zip');
-  fs.rmSync(macTemporary, { force: true });
+  fs.rmSync(macArm64Temporary, { force: true });
+  fs.rmSync(macX64Temporary, { force: true });
   fs.rmSync(winTemporary, { force: true });
 
-  run('tar', ['-czf', macTemporary, '-C', path.dirname(macAppDir), path.basename(macAppDir)], {
+  run('tar', ['-czf', macArm64Temporary, '-C', path.dirname(macArm64AppDir), path.basename(macArm64AppDir)], {
+    env: { COPYFILE_DISABLE: '1' }
+  });
+  run('tar', ['-czf', macX64Temporary, '-C', path.dirname(macX64AppDir), path.basename(macX64AppDir)], {
     env: { COPYFILE_DISABLE: '1' }
   });
   run('zip', ['-qry', winTemporary, '.'], {
@@ -151,7 +177,8 @@ function buildArchives() {
     env: { COPYFILE_DISABLE: '1' }
   });
 
-  fs.renameSync(macTemporary, macArchive);
+  fs.renameSync(macArm64Temporary, macArm64Archive);
+  fs.renameSync(macX64Temporary, macX64Archive);
   fs.renameSync(winTemporary, winArchive);
 }
 
@@ -181,7 +208,7 @@ function generateConfig(edition, destination) {
   }
 }
 
-function packageNotes(edition, macHash, winHash) {
+function packageNotes(edition, macArm64Hash, macX64Hash, winHash) {
   const keyRule = edition === 'customer'
     ? 'New API key: empty; customer enters credentials after delivery.'
     : 'New API key: inherited automatically from current desktop config.';
@@ -192,6 +219,7 @@ Built: ${localDisplayTime()}
 Mac:
   Double-click Mac-Start-App.command
   App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-arm64
+  App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-x64
   Data cache: ~/Library/Caches/U-Claw/usb-portable/data
 
 Windows:
@@ -210,15 +238,18 @@ Video chain:
   xai.apiKey = uclaw-video-adapter
 
 Artifacts:
-  u-claw-app-mac-arm64.tar.gz  sha256=${macHash}
+  u-claw-app-mac-arm64.tar.gz  sha256=${macArm64Hash}
+  u-claw-app-mac-x64.tar.gz    sha256=${macX64Hash}
   u-claw-app-win-x64.zip       sha256=${winHash}
 `;
 }
 
 function assembleStage(edition) {
-  ensureFile(macArchive, 'Mac archive');
+  ensureFile(macArm64Archive, 'Mac arm64 archive');
+  ensureFile(macX64Archive, 'Mac x64 archive');
   ensureFile(winArchive, 'Windows archive');
-  const macHash = sha256(macArchive);
+  const macArm64Hash = sha256(macArm64Archive);
+  const macX64Hash = sha256(macX64Archive);
   const winHash = sha256(winArchive);
   const stageRoot = path.join(releaseDir, `portable-${edition}`, 'U-Claw');
   const archiveDir = path.join(stageRoot, 'app', 'desktop-archive');
@@ -228,17 +259,19 @@ function assembleStage(edition) {
   fs.mkdirSync(archiveDir, { recursive: true });
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
 
-  fs.copyFileSync(macArchive, path.join(archiveDir, path.basename(macArchive)));
+  fs.copyFileSync(macArm64Archive, path.join(archiveDir, path.basename(macArm64Archive)));
+  fs.copyFileSync(macX64Archive, path.join(archiveDir, path.basename(macX64Archive)));
   fs.copyFileSync(winArchive, path.join(archiveDir, path.basename(winArchive)));
-  writeText(path.join(archiveDir, `${path.basename(macArchive)}.sha256`), `${macHash}\n`);
+  writeText(path.join(archiveDir, `${path.basename(macArm64Archive)}.sha256`), `${macArm64Hash}\n`);
+  writeText(path.join(archiveDir, `${path.basename(macX64Archive)}.sha256`), `${macX64Hash}\n`);
   writeText(path.join(archiveDir, `${path.basename(winArchive)}.sha256`), `${winHash}\n`);
   fs.copyFileSync(path.join(appDir, 'scripts', 'Mac-Start-App.command'), path.join(stageRoot, 'Mac-Start-App.command'));
   fs.copyFileSync(path.join(appDir, 'scripts', 'Windows-Start-App.bat'), path.join(stageRoot, 'Windows-Start-App.bat'));
   fs.chmodSync(path.join(stageRoot, 'Mac-Start-App.command'), 0o755);
   generateConfig(edition, configPath);
-  writeText(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), packageNotes(edition, macHash, winHash));
+  writeText(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), packageNotes(edition, macArm64Hash, macX64Hash, winHash));
 
-  return { stageRoot, macHash, winHash };
+  return { stageRoot, macArm64Hash, macX64Hash, winHash };
 }
 
 function localTimestamp(separator = '-') {
@@ -281,6 +314,8 @@ function deploy(stage, usbRoot) {
     'UCLAW-PACKAGE-NOTES.txt',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz.sha256',
+    'app/desktop-archive/u-claw-app-mac-x64.tar.gz',
+    'app/desktop-archive/u-claw-app-mac-x64.tar.gz.sha256',
     'app/desktop-archive/u-claw-app-win-x64.zip',
     'app/desktop-archive/u-claw-app-win-x64.zip.sha256',
     'data/.openclaw/openclaw.json'
@@ -304,9 +339,14 @@ function deploy(stage, usbRoot) {
   }
   fs.chmodSync(path.join(targetRoot, 'Mac-Start-App.command'), 0o755);
 
-  const deployedMacHash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macArchive)));
+  const deployedMacArm64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macArm64Archive)));
+  const deployedMacX64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macX64Archive)));
   const deployedWinHash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(winArchive)));
-  if (deployedMacHash !== stage.macHash || deployedWinHash !== stage.winHash) {
+  if (
+    deployedMacArm64Hash !== stage.macArm64Hash
+    || deployedMacX64Hash !== stage.macX64Hash
+    || deployedWinHash !== stage.winHash
+  ) {
     throw new Error('Deployed archive hash verification failed');
   }
 
@@ -325,7 +365,8 @@ function main() {
   buildArchives();
   const stage = assembleStage(options.edition);
   console.log(`[package:portable] staged ${stage.stageRoot}`);
-  console.log(`[package:portable] Mac sha256 ${stage.macHash}`);
+  console.log(`[package:portable] Mac arm64 sha256 ${stage.macArm64Hash}`);
+  console.log(`[package:portable] Mac x64 sha256 ${stage.macX64Hash}`);
   console.log(`[package:portable] Windows sha256 ${stage.winHash}`);
   if (options.usb) deploy(stage, options.usb);
 }

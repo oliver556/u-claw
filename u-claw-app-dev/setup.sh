@@ -59,7 +59,7 @@ if [ -z "$NODE_BIN" ]; then
         exit 1
     fi
 
-    RUNTIME_DIR="$APP_DIR/resources/runtime/node-${OS}-${ARCH}"
+    RUNTIME_DIR="$APP_DIR/resources/runtime/node-${PLATFORM}"
     NODE_BIN_PATH="$RUNTIME_DIR/bin/node"
 
     if [ -f "$NODE_BIN_PATH" ]; then
@@ -107,16 +107,18 @@ echo ""
 # ---- 3. Download Node.js runtime for packaging ----
 echo -e "  ${BOLD}[3/4] 准备打包用 Node.js runtime...${NC}"
 
-# For packaging, we need the runtime in resources/ for the target platform
+# For packaging, we need the runtime in resources/ for every packaged target.
 ARCH=$(uname -m)
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-RUNTIME_DIR="$APP_DIR/resources/runtime/node-${OS}-${ARCH}"
 
-if [ -f "$RUNTIME_DIR/bin/node" ]; then
-    echo -e "  ${GREEN}Runtime 已就绪 ✓${NC}"
-else
-    PLATFORM="${OS}-${ARCH}"
-    [ "$OS" = "darwin" ] && [ "$ARCH" = "x86_64" ] && PLATFORM="darwin-x64"
+ensure_runtime() {
+    PLATFORM="$1"
+    RUNTIME_DIR="$APP_DIR/resources/runtime/node-${PLATFORM}"
+
+    if [ -f "$RUNTIME_DIR/bin/node" ]; then
+        echo -e "  ${GREEN}Runtime 已就绪 ($PLATFORM) ✓${NC}"
+        return
+    fi
 
     echo -e "  ${YELLOW}下载 Node.js $NODE_VER runtime ($PLATFORM)...${NC}"
     TARBALL="node-${NODE_VER}-${PLATFORM}.tar.gz"
@@ -127,7 +129,17 @@ else
     tar -xzf "/tmp/$TARBALL" -C "$RUNTIME_DIR" --strip-components=1
     rm -f "/tmp/$TARBALL"
     chmod +x "$RUNTIME_DIR/bin/node"
-    echo -e "  ${GREEN}Runtime 下载完成 ✓${NC}"
+    echo -e "  ${GREEN}Runtime 下载完成 ($PLATFORM) ✓${NC}"
+}
+
+if [ "$OS" = "darwin" ]; then
+    ensure_runtime "darwin-arm64"
+    ensure_runtime "darwin-x64"
+elif [ "$OS" = "linux" ]; then
+    ensure_runtime "linux-x64"
+else
+    echo -e "  ${RED}不支持的系统: $OS${NC}"
+    exit 1
 fi
 echo ""
 
