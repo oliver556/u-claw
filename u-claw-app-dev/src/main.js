@@ -17,7 +17,7 @@ const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '
 const ACTIVATION_ONLY_ARG = '--activation-only';
 const isActivationOnlyMode = process.argv.includes(ACTIVATION_ONLY_ARG)
   || process.env.UCLAW_ACTIVATION_ONLY === '1';
-const ACTIVATION_SERVICE_UNAVAILABLE = 'ACTIVATION_SERVICE_UNAVAILABLE';
+const ACTIVATION_STATIC_PREVIEW_COMPLETE = 'ACTIVATION_STATIC_PREVIEW_COMPLETE';
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
 // room so we never hard-fail with a scary dialog before the engine is up. The
@@ -708,6 +708,7 @@ function getActivationPreflight() {
   const usbSummary = (process.env.UCLAW_USB_FINGERPRINT_SUMMARY || '').trim();
   const usbLabel = (process.env.UCLAW_USB_LABEL || '').trim();
   const activationEndpoint = (process.env.UCLAW_ACTIVATION_ENDPOINT || '').trim();
+  const usbStatus = usbSummary ? 'pass' : 'preview';
 
   return {
     mode: 'activation-only',
@@ -716,9 +717,9 @@ function getActivationPreflight() {
     arch: process.arch,
     activationEndpointConfigured: Boolean(activationEndpoint),
     usb: {
-      label: usbLabel || '等待 Launcher 提供产品盘信息',
-      summary: usbSummary || '待接入',
-      status: usbSummary ? 'pass' : 'pending',
+      label: usbLabel || '静态预览产品盘（未读取真实 U 盘）',
+      summary: usbSummary || 'PREVIEW-ONLY',
+      status: usbStatus,
     },
     checks: [
       {
@@ -736,14 +737,14 @@ function getActivationPreflight() {
       {
         id: 'usb',
         label: 'U 盘身份与数据目录',
-        status: usbSummary ? 'pass' : 'pending',
-        detail: usbSummary ? `设备标识摘要 ${usbSummary}` : '等待 Launcher preflight 接入',
+        status: usbStatus,
+        detail: usbSummary ? `设备标识摘要 ${usbSummary}` : '静态预览：未读取真实 USB 指纹',
       },
       {
         id: 'gateway',
         label: 'Gateway 启动条件',
-        status: 'pending',
-        detail: '授权通过后再启动 OpenClaw Gateway',
+        status: 'preview',
+        detail: '静态预览：正式授权通过后再启动 OpenClaw Gateway',
       },
     ],
   };
@@ -755,10 +756,10 @@ function getActivationPreflight() {
  */
 function submitActivation() {
   return {
-    ok: false,
-    code: ACTIVATION_SERVICE_UNAVAILABLE,
-    message: '激活服务尚未接入。本页已处于受限模式，后续切片会连接正式授权服务。',
-    retryable: true,
+    ok: true,
+    code: ACTIVATION_STATIC_PREVIEW_COMPLETE,
+    message: '静态预览完成：未联网、未写入授权材料，也未完成真实激活。',
+    retryable: false,
   };
 }
 

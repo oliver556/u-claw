@@ -68,8 +68,8 @@
     .close::before, .close::after { content: ""; position: absolute; top: 5px; left: 0; width: 12px; height: 1px; background: currentColor; transform: rotate(45deg); }
     .close::after { transform: rotate(-45deg); }
 
-    .stage { min-height: 0; overflow: auto; display: grid; place-items: center; padding: 34px 24px 42px; background: var(--canvas); }
-    .setup-shell { width: min(900px, 100%); min-height: min(690px, calc(100dvh - 120px)); display: grid; grid-template-rows: 84px minmax(0, 1fr) 72px; overflow: hidden; border: 1px solid rgba(22, 119, 255, .16); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+    .stage { min-height: 0; overflow: auto; display: grid; align-items: start; justify-items: center; padding: 34px 24px 42px; background: var(--canvas); }
+    .setup-shell { width: min(900px, 100%); height: min(690px, calc(100dvh - 120px)); min-height: 560px; display: grid; grid-template-rows: 84px minmax(0, 1fr) 72px; overflow: hidden; border: 1px solid rgba(22, 119, 255, .16); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
     .setup-steps { display: flex; align-items: center; justify-content: center; padding: 0 36px; border-bottom: 1px solid var(--divider); background: var(--surface); }
     .step { position: relative; display: flex; align-items: center; gap: 8px; color: var(--text-3); }
     .step:not(:last-child) { margin-right: 68px; }
@@ -83,13 +83,14 @@
     .step.done .step-number::after { content: "✓"; font-size: 15px; font-weight: 750; }
     .step strong { font-size: 13px; font-weight: 620; white-space: nowrap; }
     .setup-content { min-height: 0; overflow: auto; }
-    .screen { display: none; min-height: 100%; padding: 38px 68px 34px; }
+    .screen { display: none; min-height: 100%; padding: 24px 52px 20px; }
     .screen.active { display: block; }
-    .screen-head { display: grid; gap: 8px; margin-bottom: 24px; }
+    .screen-head { display: grid; gap: 8px; margin-bottom: 18px; }
     .status-kicker { width: max-content; display: inline-flex; align-items: center; gap: 7px; color: var(--blue); font-size: 12px; font-weight: 650; }
     .status-kicker::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px var(--selected); }
     .status-kicker.success { color: var(--green); }
     .status-kicker.warning { color: #ad6800; }
+    .status-kicker.preview { color: var(--blue); }
     h1, h2, p { margin: 0; }
     .screen-head h1 { font-size: 28px; line-height: 1.18; font-weight: 690; }
     .screen-head p { max-width: 620px; color: var(--text-2); line-height: 1.65; }
@@ -97,8 +98,8 @@
     .notice-card, .check-card { overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
     .notice-card-head { min-height: 48px; display: flex; align-items: center; gap: 9px; padding: 0 14px; border-bottom: 1px solid var(--divider); background: var(--surface); }
     .notice-card-head strong { font-size: 13px; }
-    .notice-list { max-height: 280px; overflow: auto; padding: 4px 16px; }
-    .notice-item { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 13px 0; }
+    .notice-list { max-height: 180px; overflow: auto; padding: 4px 16px; }
+    .notice-item { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 10px 0; }
     .notice-item + .notice-item { border-top: 1px solid var(--divider); }
     .notice-icon { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; color: var(--blue); background: var(--selected); font-size: 12px; font-weight: 700; }
     .notice-icon.warn { color: #ad6800; background: var(--orange-bg); }
@@ -121,10 +122,12 @@
     .check-state { min-width: 58px; padding: 4px 7px; border-radius: var(--r-sm); color: var(--text-3); background: #f5f5f5; font-size: 11px; text-align: center; }
     .check-state.running { color: var(--blue); background: var(--selected); }
     .check-state.pass { color: #237804; background: var(--green-bg); }
+    .check-state.preview { color: var(--blue-dark); background: var(--selected); }
     .check-state.pending { color: #ad6800; background: var(--orange-bg); }
     .check-state.fail { color: #cf1322; background: var(--red-bg); }
     .check-state.running::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 5px; vertical-align: -1px; border: 1.5px solid var(--blue-border); border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; }
     .check-state.pass::before { content: "✓"; margin-right: 4px; font-weight: 750; }
+    .check-state.preview::before { content: "•"; margin-right: 4px; font-weight: 750; }
     .check-summary { min-height: 52px; display: flex; align-items: center; gap: 9px; margin-top: 14px; padding: 9px 12px; border: 1px solid var(--blue-border); border-radius: var(--r-md); color: var(--blue-dark); background: var(--selected); }
     .check-summary.done { border-color: var(--green-border); color: #237804; background: var(--green-bg); }
     .check-summary.warn { border-color: #ffe58f; color: #ad6800; background: var(--orange-bg); }
@@ -150,11 +153,16 @@
     .field.error .input-error { display: block; }
     .bind-card { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--green-border); border-radius: var(--r-md); background: var(--green-bg); }
     .bind-card.pending { border-color: #ffe58f; background: var(--orange-bg); }
+    .bind-card.preview { border-color: var(--blue-border); background: var(--selected); }
+    .usb { position: relative; width: 24px; height: 31px; flex: none; border: 1px solid var(--blue-border); border-radius: 4px 4px 6px 6px; background: var(--surface); }
+    .usb::before { content: ""; position: absolute; top: -6px; left: 6px; width: 10px; height: 6px; border: 1px solid var(--border); border-bottom: 0; border-radius: 2px 2px 0 0; background: var(--surface); }
+    .usb::after { content: ""; position: absolute; left: 7px; bottom: 6px; width: 9px; height: 2px; border-radius: 1px; background: var(--blue); }
     .bind-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
     .bind-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
     .bind-copy small { overflow: hidden; color: var(--text-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
     .bind-state { color: #237804; font-size: 11px; font-weight: 620; white-space: nowrap; }
     .bind-card.pending .bind-state { color: #ad6800; }
+    .bind-card.preview .bind-state { color: var(--blue-dark); }
     .side-card h2 { margin-bottom: 14px; font-size: 14px; }
     .side-card dl { margin: 0; }
     .side-card dl div { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--divider); }
@@ -167,14 +175,21 @@
     .form-note { color: var(--text-3); font-size: 11px; line-height: 1.55; }
     .form-alert { padding: 9px 11px; border: 1px solid #ffccc7; border-radius: var(--r-md); color: #cf1322; background: var(--red-bg); font-size: 11px; line-height: 1.5; }
 
-    .finish { display: grid; justify-items: center; padding-top: 48px; text-align: center; }
-    .success-seal { width: 66px; height: 66px; display: grid; place-items: center; margin-bottom: 18px; border-radius: 50%; color: #fff; background: var(--green); box-shadow: 0 8px 22px rgba(82, 196, 26, .2); font-size: 28px; font-weight: 750; }
+    .finish { display: grid; justify-items: center; padding-top: 22px; text-align: center; }
+    .success-seal { width: 58px; height: 58px; display: grid; place-items: center; margin-bottom: 14px; border-radius: 50%; color: #fff; background: var(--green); box-shadow: 0 8px 22px rgba(82, 196, 26, .2); font-size: 26px; font-weight: 750; }
+    .success-seal.preview { background: var(--blue); box-shadow: 0 8px 22px rgba(22, 119, 255, .2); }
     .finish h1 { font-size: 28px; }
     .finish p { max-width: 560px; margin-top: 9px; color: var(--text-2); line-height: 1.65; }
-    .ready-card { width: min(610px, 100%); margin-top: 24px; padding: 16px; border: 1px solid #ffe58f; border-radius: var(--r-lg); background: var(--orange-bg); text-align: left; }
+    .ready-card { width: min(610px, 100%); margin-top: 18px; padding: 14px; border: 1px solid var(--green-border); border-radius: var(--r-lg); background: var(--green-bg); text-align: left; }
+    .ready-card.preview { border-color: var(--blue-border); background: var(--selected); }
     .ready-line { display: flex; align-items: center; gap: 10px; }
     .ready-line strong { font-size: 13px; }
     .ready-line small { display: block; margin-top: 4px; color: var(--text-2); font-size: 11px; }
+    .ready-card dl { display: grid; grid-template-columns: repeat(3, 1fr); margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--blue-border); }
+    .ready-card dl div { display: grid; gap: 4px; padding: 0 12px; }
+    .ready-card dl div + div { border-left: 1px solid var(--blue-border); }
+    .ready-card dt { color: var(--text-3); font-size: 10px; }
+    .ready-card dd { margin: 0; font-size: 11px; font-weight: 650; }
 
     .setup-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 32px; border-top: 1px solid var(--divider); background: var(--surface); }
     .footer-note { color: var(--text-3); font-size: 11px; }
@@ -196,13 +211,16 @@
       html, body { overflow: auto; }
       .desktop { min-height: 100dvh; height: auto; }
       .stage { min-height: calc(100dvh - var(--titlebar-height)); padding: 14px; place-items: start center; }
-      .setup-shell { min-height: calc(100dvh - 28px - var(--titlebar-height)); }
+      .setup-shell { height: calc(100dvh - 28px - var(--titlebar-height)); min-height: 0; }
       .setup-steps { justify-content: flex-start; overflow-x: auto; padding: 0 18px; }
       .step:not(:last-child) { margin-right: 44px; }
       .step:not(:last-child)::after { width: 30px; }
       .screen { padding: 28px 20px; }
       .activate-grid { grid-template-columns: 1fr; }
       .side-card { display: none; }
+      .ready-card dl { grid-template-columns: 1fr; gap: 10px; }
+      .ready-card dl div { padding: 0; }
+      .ready-card dl div + div { padding-top: 10px; border-top: 1px solid var(--blue-border); border-left: 0; }
       .setup-footer { align-items: stretch; padding: 12px 18px; }
       .footer-note { display: none; }
       .footer-actions { width: 100%; justify-content: flex-end; }
@@ -237,7 +255,7 @@
             <header class="screen-head">
               <span class="status-kicker">首次启动</span>
               <h1>欢迎使用 U-Claw</h1>
-              <p>开始前，请了解 AI 工作空间的运行边界。确认后，U-Claw 会检查当前客户端是否处于受限激活模式。</p>
+              <p>开始前，请了解 AI 工作空间的运行边界。确认后，U-Claw 会检查当前电脑与产品盘是否满足首次激活条件。</p>
             </header>
             <div class="notice-card">
               <div class="notice-card-head"><span class="notice-icon warn">!</span><strong>使用须知与责任说明</strong></div>
@@ -256,7 +274,7 @@
             <header class="screen-head">
               <span class="status-kicker">启动前检查</span>
               <h1>确认当前客户端处于受限激活模式</h1>
-              <p>本页只读取 Launcher 传入的脱敏状态，不启动 OpenClaw Gateway，不加载工作区数据。</p>
+              <p>检查只读取系统、产品盘和启动条件，不会扫描个人文件。未完成真实授权前，不启动 OpenClaw Gateway。</p>
             </header>
             <div class="check-card" id="checkCard"></div>
             <div class="check-summary" id="checkSummary"><span class="summary-dot"></span><div><strong>准备开始检查</strong><small>点击“开始检查”后读取受限模式状态。</small></div></div>
@@ -272,8 +290,8 @@
               <form class="form-card" id="activationForm" novalidate>
                 <div class="field" id="userField"><label for="username">激活用户名</label><input class="input" id="username" autocomplete="username" placeholder="UCLAW-XXXXXXXX"><small>来自产品随附的激活卡或管理员分配。</small><small class="input-error">请输入有效的激活用户名。</small></div>
                 <div class="field" id="codeField"><label for="activationCode">激活码</label><input class="input" id="activationCode" autocomplete="one-time-code" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX"><small>支持粘贴自动分组；首次使用后绑定当前 U 盘。</small><small class="input-error">激活码格式不正确。</small></div>
-                <div class="bind-card pending" id="bindCard"><span class="bind-copy"><strong id="usbLabel">等待 Launcher 提供产品盘信息</strong><small id="usbSummary">设备标识摘要：待接入</small></span><span class="bind-state" id="usbState">待接入</span></div>
-                <p class="form-note">本切片只实现受限激活壳层。正式版本不会在页面内保存激活码，也不会向 renderer 暴露完整 USB 指纹、Token 或签名。</p>
+                <div class="bind-card preview" id="bindCard"><span class="usb" aria-hidden="true"></span><span class="bind-copy"><strong id="usbLabel">静态预览产品盘（未读取真实 U 盘）</strong><small id="usbSummary">设备标识摘要：PREVIEW-ONLY</small></span><span class="bind-state" id="usbState">预览</span></div>
+                <p class="form-note">静态阶段只预览完整视觉流程，不联网、不写入授权材料，也不向 renderer 暴露完整 USB 指纹、Token 或签名。</p>
               </form>
               <aside class="side-card">
                 <h2>受限模式状态</h2>
@@ -283,19 +301,20 @@
                   <div><dt>Config.html</dt><dd><span class="dot orange"></span> 不开放</dd></div>
                   <div><dt>激活服务</dt><dd id="endpointState"><span class="dot orange"></span> 待接入</dd></div>
                 </dl>
-                <div class="api-state"><span class="dot orange"></span><span>激活成功后，客户端必须退出并由 Launcher 重新执行完整授权 gate。</span></div>
+                <div class="api-state"><span class="dot orange"></span><span>正式激活成功后，客户端必须退出并由 Launcher 重新执行完整授权 gate。</span></div>
               </aside>
             </div>
             <div class="form-alert" id="formAlert" hidden>请确认激活用户名和激活码后继续。</div>
           </section>
 
           <section class="screen finish" id="screen-finish">
-            <div class="success-seal">!</div>
-            <span class="status-kicker warning">等待后续切片</span>
-            <h1>受限激活页已就绪</h1>
-            <p>当前切片已经建立 activation-only 安全壳层。正式激活 API、授权写盘和完整 gate 重启将在后续切片接入。</p>
-            <div class="ready-card">
-              <div class="ready-line"><span><strong>当前未执行真实激活</strong><small id="finishDetail">激活服务尚未接入，未写入任何授权材料。</small></span></div>
+            <div class="success-seal preview">✓</div>
+            <span class="status-kicker preview">静态流程完成</span>
+            <h1>U-Claw 激活流程预览完成</h1>
+            <p>界面、交互和状态闭环已完成。当前没有调用激活服务，也没有写入任何授权材料。</p>
+            <div class="ready-card preview">
+              <div class="ready-line"><span class="success-seal preview" style="width:34px;height:34px;margin:0;font-size:16px;box-shadow:none;">✓</span><span><strong>静态预览完成</strong><small id="finishDetail">未联网、未写入授权材料、未完成真实激活。</small></span></div>
+              <dl><div><dt>当前产品盘</dt><dd id="finishDisk">静态预览</dd></div><div><dt>Gateway</dt><dd><span class="dot orange"></span> 未启动</dd></div><div><dt>授权材料</dt><dd>未写入</dd></div></dl>
             </div>
           </section>
         </div>
@@ -314,7 +333,7 @@
 
   <script>
     const order = ['notice', 'check', 'activate', 'finish'];
-    const stateLabels = { pass: '通过', pending: '待接入', fail: '失败', running: '检查中' };
+    const stateLabels = { pass: '通过', preview: '预览', pending: '待接入', fail: '失败', running: '检查中' };
     let current = 'notice';
     let checksDone = false;
     let preflight = null;
@@ -375,8 +394,8 @@
       const rows = checks.length ? checks : [
         { id: 'os', label: '操作系统与架构', detail: '等待读取', status: 'pending' },
         { id: 'runtime', label: '受信客户端 runtime', detail: '等待读取', status: 'pending' },
-        { id: 'usb', label: 'U 盘身份与数据目录', detail: '等待 Launcher preflight 接入', status: 'pending' },
-        { id: 'gateway', label: 'Gateway 启动条件', detail: '授权通过后再启动', status: 'pending' },
+        { id: 'usb', label: 'U 盘身份与数据目录', detail: '静态预览：未读取真实 USB 指纹', status: 'preview' },
+        { id: 'gateway', label: 'Gateway 启动条件', detail: '静态预览：正式授权通过后再启动', status: 'preview' },
       ];
       $('#checkCard').innerHTML = rows.map((check) => `
         <div class="check-row" data-check="${escapeHtml(check.id)}">
@@ -386,10 +405,13 @@
         </div>
       `).join('');
       const hasPending = rows.some((check) => check.status === 'pending');
+      const hasPreview = rows.some((check) => check.status === 'preview');
       $('#checkSummary').className = hasPending ? 'check-summary warn' : 'check-summary done';
       $('#checkSummary').innerHTML = hasPending
         ? '<span class="summary-dot"></span><div><strong>部分能力等待 Launcher 接入</strong><small>本页仍保持受限模式，不会启动 Gateway 或 Config。</small></div>'
-        : '<span class="summary-dot"></span><div><strong>检查完成</strong><small>受限激活模式可继续。</small></div>';
+        : hasPreview
+          ? '<span class="summary-dot"></span><div><strong>静态检查完成，可以继续</strong><small>这是预览状态；未读取真实 USB 指纹，也不会启动 Gateway。</small></div>'
+          : '<span class="summary-dot"></span><div><strong>检查完成</strong><small>受限激活模式可继续。</small></div>';
     }
 
     function updatePreflight(nextPreflight) {
@@ -397,9 +419,10 @@
       renderChecks(preflight.checks || []);
       $('#usbLabel').textContent = preflight.usb?.label || '等待 Launcher 提供产品盘信息';
       $('#usbSummary').textContent = `设备标识摘要：${preflight.usb?.summary || '待接入'}`;
-      const usbReady = preflight.usb?.status === 'pass';
-      $('#bindCard').classList.toggle('pending', !usbReady);
-      $('#usbState').textContent = usbReady ? '可绑定' : '待接入';
+      const usbStatus = preflight.usb?.status || 'preview';
+      $('#bindCard').classList.toggle('pending', usbStatus === 'pending');
+      $('#bindCard').classList.toggle('preview', usbStatus === 'preview');
+      $('#usbState').textContent = usbStatus === 'pass' ? '可绑定' : usbStatus === 'preview' ? '预览' : '待接入';
       $('#endpointState').innerHTML = preflight.activationEndpointConfigured
         ? '<span class="dot green"></span> 已配置'
         : '<span class="dot orange"></span> 待接入';
@@ -453,6 +476,7 @@
         activationCode: $('#activationCode').value.trim().toUpperCase(),
       });
       $('#finishDetail').textContent = `${result.code || 'ACTIVATION_PENDING'}：${result.message || '等待后续切片接入。'}`;
+      $('#finishDisk').textContent = preflight?.usb?.label || '静态预览';
       setScreen('finish');
       showToast(result.message || '激活服务尚未接入', result.ok ? '' : 'error');
     }

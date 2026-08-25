@@ -31,7 +31,7 @@ function sliceBetween(source, start, end) {
 }
 
 requireText(main, "const ACTIVATION_ONLY_ARG = '--activation-only';", 'activation-only arg');
-requireText(main, 'ACTIVATION_SERVICE_UNAVAILABLE', 'activation unavailable error code');
+requireText(main, 'ACTIVATION_STATIC_PREVIEW_COMPLETE', 'activation static preview code');
 requireText(main, 'function setupActivationIPC()', 'activation IPC setup');
 requireText(main, 'function loadActivationPage()', 'activation page loader');
 requireText(main, "mainWindow.loadFile(path.join(__dirname, 'activation.html'));", 'activation local loadFile');
@@ -73,11 +73,14 @@ for (const required of [
   'placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX"',
   'formatActivationCode',
   'escapeHtml',
+  '静态流程完成',
+  'preview',
+  '未联网、未写入授权材料、未完成真实激活',
 ]) {
   requireText(activationHtml, required, `activation page marker ${required}`);
 }
 
-for (const forbidden of ['UCLAW-8F2K9M', '7K4P-9Q2M-X8RT-6W3N-A5LC', 'Gateway 在线', 'custom/gpt-5.5']) {
+for (const forbidden of ['UCLAW-8F2K9M', '7K4P-9Q2M-X8RT-6W3N-A5LC', 'Gateway 在线', 'custom/gpt-5.5', '本地启动授权有效']) {
   if (activationHtml.includes(forbidden)) {
     throw new Error(`Activation page must not keep demo value: ${forbidden}`);
   }
