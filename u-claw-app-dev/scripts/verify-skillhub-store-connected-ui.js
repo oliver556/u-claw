@@ -422,12 +422,75 @@ async function getSkillHubDenseRowKeys(page, limit = 8) {
 }
 
 /**
+ * Simulates a remote SkillHub row that is already present in local skills.status.
+ */
+async function simulateFirstRemoteSkillInstalled(page) {
+  const result = await evaluateInDom(
+    page,
+    `
+      const host = document.querySelector("openclaw-skills-page");
+      const item = host?.skillHubHomeResults?.find((skill) => skill?.slug || skill?.install?.reference || skill?.id);
+      if (!host || !item) return { ok: false, reason: "remote item not found" };
+      const skillKey = item.slug || String(item.install?.reference || item.id || "").split("/").pop();
+      if (!skillKey) return { ok: false, reason: "skill key not found" };
+      const localSkill = {
+        name: skillKey,
+        skillKey,
+        source: "skillhub",
+        description: item.description || item.summary || item.displayName || skillKey,
+        eligible: true,
+        missing: {},
+      };
+      const existing = Array.isArray(host.report?.skills) ? host.report.skills : [];
+      host.report = { ...(host.report || {}), skills: [localSkill, ...existing.filter((skill) => skill?.skillKey !== skillKey && skill?.name !== skillKey)] };
+      host.requestUpdate?.();
+      return { ok: true, skillKey };
+    `,
+  );
+
+  if (!result?.ok) {
+    throw new Error(`Could not simulate installed SkillHub row: ${JSON.stringify(result)}`);
+  }
+  return result.skillKey;
+}
+
+/**
+ * Waits for any remote dense row to render the remembered-installed affordance.
+ */
+async function waitForRememberedInstalledSkillRow(page, timeout = 15000) {
+  const deadline = Date.now() + timeout;
+  let lastState = null;
+
+  while (Date.now() < deadline) {
+    lastState = await evaluateInDom(
+      page,
+      `
+        const rows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("skillhub-dense-row"));
+        for (const row of rows) {
+          const badge = row.querySelector("[data-skillhub-installed-badge='true']");
+          const uninstall = row.querySelector("[data-skillhub-uninstall-button='true']");
+          const actionText = (row.lastElementChild?.innerText || row.lastElementChild?.textContent || "").replace(/\\s+/g, " ").trim();
+          if (badge && uninstall) {
+            return { ok: true, text: (row.innerText || row.textContent || "").replace(/\\s+/g, " ").trim(), actionText };
+          }
+        }
+        return { ok: false, rowCount: rows.length, text: rows.map((row) => (row.innerText || row.textContent || "").replace(/\\s+/g, " ").trim()).slice(0, 3) };
+      `,
+    );
+    if (lastState?.ok) return lastState;
+    await page.waitForTimeout(200);
+  }
+
+  throw new Error(`Remembered installed SkillHub row not rendered: ${JSON.stringify(lastState)}`);
+}
+
+/**
  * Resets toolbar filters to the broad recommended list before testing numbered pagination.
  */
 async function resetSkillHubToolbarForPagination(page, requestCount) {
   let nextCount = requestCount;
 
-  await selectSkillHubToolbarOption(page, "场景筛选", "all");
+  await clickSkillHubSceneOption(page, "all");
   nextCount = await waitForSkillSearchRequestIncrease(page, nextCount, "scene reset for load more");
 
   await selectSkillHubToolbarOption(page, "API Key 筛选", "all");
@@ -721,6 +784,28 @@ async function waitForSkillSearchRequestIncrease(page, previousCount, label) {
 }
 
 /**
+ * Clicks a scene option in the standalone SkillHub scene picker.
+ */
+async function clickSkillHubSceneOption(page, value) {
+  const result = await evaluateInDom(
+    page,
+    `
+      const picker = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-scene-picker") === "true");
+      const button = picker ? [...picker.querySelectorAll("[data-skillhub-scene-option='true']")].find((node) => node.getAttribute("data-skillhub-scene-value") === value) : null;
+      if (!picker) return { ok: false, reason: "scene picker not found" };
+      if (!button) return { ok: false, reason: "scene option not found", values: [...picker.querySelectorAll("[data-skillhub-scene-option='true']")].map((node) => node.getAttribute("data-skillhub-scene-value")) };
+      button.click();
+      return { ok: true };
+    `,
+    value,
+  );
+
+  if (!result?.ok) {
+    throw new Error(`Could not click SkillHub scene ${value}: ${JSON.stringify(result)}`);
+  }
+}
+
+/**
  * Changes a SkillHub toolbar select by its accessible label.
  */
 async function selectSkillHubToolbarOption(page, label, value) {
@@ -970,20 +1055,83 @@ async function runAcceptance(options) {
         const selects = toolbarNode ? toolbarNode.querySelectorAll("select").length : 0;
         const toolbarButtons = toolbarNode ? toolbarNode.querySelectorAll("button").length : 0;
         const optionTexts = toolbarNode ? [...toolbarNode.querySelectorAll("select")].map((select) => [...select.options].map((option) => option.textContent?.trim())) : [];
+        const scenePicker = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-scene-picker") === "true");
+        const sceneStrip = scenePicker?.querySelector("[data-skillhub-scene-strip='true']");
+        const sceneOptions = scenePicker ? [...scenePicker.querySelectorAll("[data-skillhub-scene-option='true']")].map((node) => ({ value: node.getAttribute("data-skillhub-scene-value"), text: node.textContent?.trim(), pressed: node.getAttribute("aria-pressed") })) : [];
+        const sceneIconCount = scenePicker ? scenePicker.querySelectorAll(".skillhub-scene-icon").length : 0;
+        const sceneSvgCount = scenePicker ? scenePicker.querySelectorAll(".skillhub-scene-icon svg").length : 0;
+        const leakedFallbackIcons = scenePicker ? [...scenePicker.querySelectorAll("[data-skillhub-scene-option='true']")].some((node) => /^(?:p|c|b|square)\s/.test(node.textContent?.trim() || "")) : false;
+        const sceneStripStyle = sceneStrip ? getComputedStyle(sceneStrip) : null;
+        const scenePickerStyle = scenePicker ? getComputedStyle(scenePicker) : null;
+        const scenePickerRect = scenePicker?.getBoundingClientRect();
+        const toolbarRect = toolbarNode?.getBoundingClientRect();
         const leftNav = allNodes().some((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-category-nav") === "true");
         const pagination = allNodes().some((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-pagination") === "true");
         const pageButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && node.getAttribute("data-skillhub-page-button") === "true").length;
         const pageSummary = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-page-summary") === "true")?.textContent || "";
-        return { rowCount: rows.length, iconCount: icons.length, sceneTexts, toolbar, search, searchBorder, selects, toolbarButtons, optionTexts, leftNav, pagination, pageButtons, pageSummary };
+        const categoryApi = globalThis.UClawSkillHubCategories;
+        const publicCategories = categoryApi?.list?.() || [];
+        return {
+          rowCount: rows.length,
+          iconCount: icons.length,
+          sceneTexts,
+          toolbar,
+          search,
+          searchBorder,
+          selects,
+          toolbarButtons,
+          optionTexts,
+          scenePicker: Boolean(scenePicker),
+          sceneOptions,
+          sceneIconCount,
+          sceneSvgCount,
+          leakedFallbackIcons,
+          sceneWrap: sceneStripStyle?.flexWrap,
+          sceneOverflowX: sceneStripStyle?.overflowX,
+          sceneFlexShrink: scenePickerStyle?.flexShrink,
+          sceneToolbarGap: scenePickerRect && toolbarRect ? Math.round(toolbarRect.top - scenePickerRect.bottom) : null,
+          sceneHeight: scenePickerRect ? Math.round(scenePickerRect.height) : null,
+          leftNav,
+          pagination,
+          pageButtons,
+          pageSummary,
+          publicCategoryApi: Boolean(categoryApi),
+          publicCategoryCount: publicCategories.length,
+          publicCategoryOfficeLabel: categoryApi?.label?.("office"),
+          publicCategoryOfficeApi: categoryApi?.apiCategory?.("office"),
+          publicCategorySlugLabel: categoryApi?.label?.("knowledge-management"),
+        };
       `,
     );
     if (!denseState.toolbar) throw new Error("SkillHub toolbar not found");
     if (!denseState.search) throw new Error("SkillHub toolbar search input not found");
     if (!denseState.searchBorder) throw new Error("SkillHub toolbar search input has no visible border");
-    if (denseState.selects < 3) throw new Error("SkillHub toolbar scene/API/sort selects not found");
+    if (!denseState.scenePicker) throw new Error("SkillHub standalone scene picker not found");
+    if (denseState.sceneWrap !== "wrap" || denseState.sceneOverflowX === "auto" || denseState.sceneOverflowX === "scroll") {
+      throw new Error(`SkillHub scene picker should wrap instead of horizontal scrolling: ${JSON.stringify(denseState)}`);
+    }
+    if (denseState.sceneFlexShrink !== "0" || denseState.sceneToolbarGap === null || denseState.sceneToolbarGap < 0 || denseState.sceneHeight < 30) {
+      throw new Error(`SkillHub scene picker should reserve natural height above toolbar: ${JSON.stringify(denseState)}`);
+    }
+    if (denseState.selects < 2) throw new Error("SkillHub toolbar API/sort selects not found");
     if (denseState.toolbarButtons !== 0) throw new Error("SkillHub toolbar should not include a redundant refresh button");
+    if (!denseState.publicCategoryApi || denseState.publicCategoryCount < 12) {
+      throw new Error(`SkillHub category registry should be exposed for external callers: ${JSON.stringify(denseState)}`);
+    }
+    if (
+      denseState.publicCategoryOfficeLabel !== "办公效率" ||
+      denseState.publicCategoryOfficeApi !== "office-efficiency" ||
+      denseState.publicCategorySlugLabel !== "知识管理"
+    ) {
+      throw new Error(`SkillHub public category API returned wrong mapping: ${JSON.stringify(denseState)}`);
+    }
     const flatOptions = denseState.optionTexts.flat();
-    for (const label of ["全部场景", "办公效率", "知识管理", "开发编程", "数据分析", "仅看已配置", "仅看需配置", "下载最多", "收藏最多", "名称 A-Z"]) {
+    const sceneLabels = denseState.sceneOptions.map((option) => option.text);
+    for (const label of ["全部场景", "办公效率", "知识管理", "开发编程", "数据分析"]) {
+      if (!sceneLabels.some((text) => text.includes(label))) throw new Error(`SkillHub scene picker option missing: ${label}`);
+    }
+    if (denseState.leakedFallbackIcons) throw new Error(`SkillHub scene picker leaked fallback text icons: ${JSON.stringify(denseState)}`);
+    for (const label of ["仅看已配置", "仅看需配置", "下载最多", "收藏最多", "名称 A-Z"]) {
       if (!flatOptions.includes(label)) throw new Error(`SkillHub toolbar option missing: ${label}`);
     }
     if (denseState.leftNav) throw new Error("Unexpected SkillHub left category nav found");
@@ -999,6 +1147,96 @@ async function runAcceptance(options) {
     if (denseState.pageButtons < 2) throw new Error(`Expected multiple SkillHub page buttons, found ${denseState.pageButtons}`);
     if (!/第\s+1\s+\/\s+\d+\s+页\s+·\s+共/.test(denseState.pageSummary)) {
       throw new Error(`SkillHub page summary missing total: ${JSON.stringify(denseState.pageSummary)}`);
+    }
+    const scrollState = await evaluateInDom(
+      page,
+      `
+        const shell = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-scroll-shell") === "true");
+        const table = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-scroll-table") === "true");
+        const toolbar = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-toolbar") === "true");
+        const head = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("skillhub-dense-head"));
+        const title = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("page-title") && node.textContent?.includes("技能库"));
+        const pageHeader = title?.closest(".content-header");
+        const host = shell?.closest("openclaw-skills-page");
+        const content = shell?.closest(".content");
+        const pageScroller = table?.closest(".content") || document.scrollingElement;
+        if (!shell || !table || !toolbar || !head || !title || !pageHeader || !host || !content || !pageScroller) {
+          return { ok: false, reason: "scroll nodes missing", hasShell: Boolean(shell), hasTable: Boolean(table), hasToolbar: Boolean(toolbar), hasHead: Boolean(head), hasTitle: Boolean(title), hasPageHeader: Boolean(pageHeader), hasHost: Boolean(host), hasContent: Boolean(content), hasPageScroller: Boolean(pageScroller) };
+        }
+        table.scrollTop = 0;
+        const toolbarTopBefore = toolbar.getBoundingClientRect().top;
+        const pageScrollBefore = pageScroller.scrollTop;
+        const documentScrollBefore = document.scrollingElement?.scrollTop ?? 0;
+        table.scrollTop = 120;
+        const toolbarTopAfter = toolbar.getBoundingClientRect().top;
+        const pageScrollAfter = pageScroller.scrollTop;
+        const documentScrollAfter = document.scrollingElement?.scrollTop ?? 0;
+        const tableStyle = getComputedStyle(table);
+        const shellStyle = getComputedStyle(shell);
+        const hostStyle = getComputedStyle(host);
+        const headStyle = getComputedStyle(head);
+        const titleStyle = getComputedStyle(title);
+        const pageHeaderStyle = getComputedStyle(pageHeader);
+        const shellRect = shell.getBoundingClientRect();
+        const contentRect = content.getBoundingClientRect();
+        const headRect = head.getBoundingClientRect();
+        const tableRect = table.getBoundingClientRect();
+        const titleRect = title.getBoundingClientRect();
+        const pageHeaderRect = pageHeader.getBoundingClientRect();
+        const headBg = headStyle.backgroundColor;
+        const headBgAlphaMatch = headBg.match(/rgba?\\(([^)]+)\\)/);
+        const headBgAlpha = headBgAlphaMatch ? Number((headBgAlphaMatch[1].split(",")[3] || "1").trim()) : 1;
+        const titleFontSize = Number.parseFloat(titleStyle.fontSize) || 0;
+        const titleLineHeight = Number.parseFloat(titleStyle.lineHeight) || 0;
+        const shellBottomGap = Math.round(contentRect.bottom - shellRect.bottom);
+        return {
+          ok: true,
+          flexShell: shell.getAttribute("data-skillhub-flex-fill") === "true" && Number.parseFloat(shellStyle.flexGrow) >= 1 && shellStyle.height !== "0px",
+          flexHost: hostStyle.display === "flex" && hostStyle.flexDirection === "column",
+          shellBottomGap,
+          shellHeight: Math.round(shellRect.height),
+          contentHeight: Math.round(contentRect.height),
+          tableScrollable: table.scrollHeight > table.clientHeight + 24,
+          tableScrollTop: table.scrollTop,
+          tableOverflowY: tableStyle.overflowY,
+          shellOverflowY: shellStyle.overflowY,
+          toolbarStable: Math.abs(toolbarTopAfter - toolbarTopBefore) < 1,
+          pageScrollStable: pageScrollBefore === pageScrollAfter && documentScrollBefore === documentScrollAfter,
+          opaqueHead: headBgAlpha >= 0.98 && headBg !== "rgba(0, 0, 0, 0)" && Number.parseInt(headStyle.zIndex, 10) >= 5,
+          headSticksInsideTable: headRect.top >= tableRect.top - 1 && headRect.bottom <= tableRect.bottom,
+          pageHeaderSafe: pageHeaderStyle.overflow === "visible" && pageHeaderStyle.maxHeight === "none" && Number.parseFloat(pageHeaderStyle.paddingTop) <= 2 && pageHeaderRect.height >= 48 && pageHeaderRect.height <= 72,
+          titleVisible: titleRect.height >= Math.max(20, titleFontSize * 1.1) && titleLineHeight >= titleFontSize * 1.1 && titleRect.top >= pageHeaderRect.top - 1 && titleRect.top >= contentRect.top - 1,
+          titleOverflow: titleStyle.overflow,
+          pageHeaderOverflow: pageHeaderStyle.overflow,
+          pageHeaderMaxHeight: pageHeaderStyle.maxHeight,
+          pageHeaderPaddingTop: pageHeaderStyle.paddingTop,
+          pageHeaderHeight: Math.round(pageHeaderRect.height),
+          titleHeight: Math.round(titleRect.height),
+          titleLineHeight: Math.round(titleLineHeight),
+          titleFontSize: Math.round(titleFontSize),
+          headBackground: headBg,
+          headZIndex: headStyle.zIndex,
+          toolbarTopBefore,
+          toolbarTopAfter,
+          pageScrollBefore,
+          pageScrollAfter,
+          documentScrollBefore,
+          documentScrollAfter,
+        };
+      `,
+    );
+    if (!scrollState.ok || !scrollState.flexShell || !scrollState.flexHost || scrollState.shellBottomGap > 48 || scrollState.shellBottomGap < -4 || !scrollState.tableScrollable || scrollState.tableScrollTop <= 0 || !/auto|scroll/.test(scrollState.tableOverflowY) || scrollState.shellOverflowY !== "hidden" || !scrollState.toolbarStable || !scrollState.pageScrollStable || !scrollState.opaqueHead || !scrollState.headSticksInsideTable || !scrollState.pageHeaderSafe || !scrollState.titleVisible) {
+      throw new Error(`SkillHub dense list should be the only scroll container: ${JSON.stringify(scrollState)}`);
+    }
+
+    stage = "installed-memory";
+    await simulateFirstRemoteSkillInstalled(page);
+    const remembered = await waitForRememberedInstalledSkillRow(page);
+    if (!remembered.text.includes("已安装") || !remembered.text.includes("卸载")) {
+      throw new Error(`SkillHub remembered installed row missing installed/uninstall copy: ${JSON.stringify(remembered)}`);
+    }
+    if (/已安装/.test(remembered.actionText)) {
+      throw new Error(`SkillHub remembered installed row duplicated installed copy in action column: ${JSON.stringify(remembered)}`);
     }
 
     stage = "detail-fallback";
@@ -1068,14 +1306,36 @@ async function runAcceptance(options) {
     stage = "request-backed-toolbar";
     await installSkillSearchRequestProbe(page);
     let requestCount = await getSkillSearchRequestCount(page);
-    await selectSkillHubToolbarOption(page, "场景筛选", "office");
+    await clickSkillHubSceneOption(page, "office");
     requestCount = await waitForSkillSearchRequestIncrease(page, requestCount, "scene filter change");
     const sceneRequest = await getLastSkillSearchRequest(page);
     if (sceneRequest?.params?.category !== "office-efficiency") {
-      throw new Error(`SkillHub scene select sent wrong category: ${JSON.stringify(sceneRequest)}`);
+      throw new Error(`SkillHub scene picker sent wrong category: ${JSON.stringify(sceneRequest)}`);
     }
     await waitForText(page, "搜索中…", 15000).catch(() => undefined);
     await waitForDenseRows(page, 1, 45000);
+    const activeSceneCountState = await evaluateInDom(
+      page,
+      `
+        const picker = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-scene-picker") === "true");
+        const options = picker ? [...picker.querySelectorAll("[data-skillhub-scene-option='true']")] : [];
+        const active = options.find((node) => node.getAttribute("aria-pressed") === "true");
+        const all = options.find((node) => node.getAttribute("data-skillhub-scene-value") === "all");
+        return {
+          activeValue: active?.getAttribute("data-skillhub-scene-value") || "",
+          activeText: active?.textContent?.trim() || "",
+          allText: all?.textContent?.trim() || "",
+        };
+      `,
+    );
+    if (
+      activeSceneCountState.activeValue !== "office"
+      || !/办公效率/.test(activeSceneCountState.activeText)
+      || !/\d/.test(activeSceneCountState.activeText)
+      || /\d/.test(activeSceneCountState.allText)
+    ) {
+      throw new Error(`SkillHub scene count should follow the selected option: ${JSON.stringify(activeSceneCountState)}`);
+    }
 
     await selectSkillHubToolbarOption(page, "API Key 筛选", "needs-key");
     requestCount = await waitForSkillSearchRequestIncrease(page, requestCount, "API Key filter change");
@@ -1095,11 +1355,33 @@ async function runAcceptance(options) {
       const beforePage = await getActiveSkillHubPage(page);
       if (beforePage !== 1) throw new Error(`Expected active SkillHub page 1 before pagination, got ${beforePage}`);
       await waitForSkillHubRequestIdle(page);
+      const scrolledBeforeNext = await evaluateInDom(
+        page,
+        `
+          const table = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-scroll-table") === "true");
+          if (!table) return { ok: false, reason: "table missing" };
+          table.scrollTop = table.scrollHeight;
+          return { ok: true, scrollTop: table.scrollTop, clientHeight: table.clientHeight, scrollHeight: table.scrollHeight };
+        `,
+      );
+      if (!scrolledBeforeNext.ok || scrolledBeforeNext.scrollTop <= 0) {
+        throw new Error(`SkillHub table could not be scrolled before next page: ${JSON.stringify(scrolledBeforeNext)}`);
+      }
       await delayNextSkillHubSearch(page);
       await clickSkillHubNextPageButton(page);
       await waitForText(page, "正在加载第 2 页", 5000);
       requestCount = await waitForSkillSearchRequestIncrease(page, requestCount, "dense list page 2");
       await waitForTextPattern(page, /第\s+2\s+\/\s+\d+\s+页\s+·\s+共/, 15000);
+      const afterNextScroll = await evaluateInDom(
+        page,
+        `
+          const table = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-skillhub-scroll-table") === "true");
+          return table ? { ok: true, scrollTop: table.scrollTop } : { ok: false, reason: "table missing" };
+        `,
+      );
+      if (!afterNextScroll.ok || afterNextScroll.scrollTop > 2) {
+        throw new Error(`SkillHub table scroll did not reset after next page: ${JSON.stringify(afterNextScroll)}`);
+      }
       const afterPage = await getActiveSkillHubPage(page);
       const afterPageRows = await getSkillHubDenseRowKeys(page, beforePageRows.length);
       if (afterPage !== 2) {

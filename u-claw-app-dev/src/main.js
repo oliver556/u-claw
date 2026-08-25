@@ -712,6 +712,11 @@ function createWindow() {
     backgroundColor: '#0a0a0a',
   });
 
+  if (process.platform === 'win32') {
+    // Remove the native menu bar entirely on Windows; auto-hide can reappear via Alt.
+    mainWindow.setMenu(null);
+  }
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
@@ -748,6 +753,12 @@ function loadConfigPage() {
 
 // ── Menu ──
 function createMenu() {
+  if (process.platform === 'win32') {
+    // Windows renders this menu inside the app chrome; remove it entirely.
+    Menu.setApplicationMenu(null);
+    return;
+  }
+
   const template = [
     {
       label: APP_NAME,

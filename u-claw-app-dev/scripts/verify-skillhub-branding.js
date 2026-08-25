@@ -38,17 +38,32 @@ const visibleSkillHubTexts = [
   "imageUrl",
   "推荐首页",
   "UcSkillHubBuildViewModel",
+  "UcSkillHubCategoryRegistry",
+  "UcSkillHubCategoryPublicApi",
+  "UClawSkillHubCategories",
   "UcSkillHubRenderIcon",
   "data-skillhub-icon-img",
+  "UcSkillHubInstalledIndex",
+  "UcSkillHubInstalledMatch",
+  "data-skillhub-installed-badge",
   "skillhub-dense-row",
+  "data-skillhub-scroll-shell",
+  "data-skillhub-scroll-table",
+  "data-skillhub-flex-fill",
+  "overscroll-behavior: contain",
   "e.onClawHubInstall?.(t)",
+  "UcSkillHubRenderScenePicker",
+  "data-skillhub-scene-picker",
+  "data-skillhub-scene-option",
+  "c=i&&!t.isLocal?UcSkillHubFormatMetric(t.totalItems)",
+  "skillhub-scene-icon",
   "data-skillhub-toolbar",
   "data-skillhub-search",
   "data-skillhub-content",
   "data-skillhub-primary-tabs",
   "data-skillhub-single-layer",
   "API Key 不限",
-  "场景筛选",
+  "场景分类",
   "全部场景",
   "办公效率",
   "知识管理",
@@ -134,6 +149,8 @@ const requiredUiPolishTexts = {
     "全部启用",
     "保存中…",
     "function UcExpertTemplates(){return[",
+    "function UcExpertExtraTemplates(){return UcExpertExtraTemplateSpecs().map(UcExpertTemplateItem)}",
+    "function UcExpertTemplateItem(e){",
     "function UcExpertCatalog(e){",
     "function UcCustomExpertDefaults(){",
     "function UcExpertDefaultAgentId(e){",
@@ -142,38 +159,70 @@ const requiredUiPolishTexts = {
     "function UcCustomExpertForm(e){",
     "function UcCustomExpertModal(e){",
     "function UcExpertSectionTitle",
+    "function UcExpertCategories(){",
+    "function UcExpertIconSvg(e){",
+    "function UcExpertCategoryRail",
+    "expertCategoryFilter:this.expertCategoryFilter",
+    "onExpertCategoryChange:e=>{this.expertCategoryFilter=e||`all`",
+    "updateComplete?.then",
+    "behavior:`auto`",
+    "type='button' aria-pressed",
+    "preventDefault(),e.onExpertCategoryChange",
+    "function UcExpertDirectoryBlock",
     "function UcExpertTemplatePicker",
+    "s=i===`all`?n:n.filter",
+    "${c} · ${s.length} 个专家模板",
     "function UcExpertTemplateCard",
     "function UcExpertManagement(e,t){",
     "function UcExpertDetail(e,t){",
     "data-uclaw-expert-landing",
     "data-uclaw-expert-create-center",
+    "uclaw-expert-directory-shell",
+    "uclaw-expert-directory-pane",
+    "data-uclaw-expert-scroll-list",
+    "uclaw-expert-category-rail",
+    "uclaw-expert-card--directory",
     "data-uclaw-custom-expert-form",
     "data-uclaw-custom-expert-modal",
-    "选择专家创建",
-    "自定义创建",
+    "专家目录",
     "创建并进入会话",
     "模型与技能",
     "表单失败不会清空",
     "文案写手",
     "小红书写手",
+    "社群文案",
+    "短视频脚本",
     "职业顾问",
-    "机器学习",
     "简历写手",
-    "创业点子王",
+    "面试教练",
+    "学习教练",
     "产品经理",
     "数据分析师",
+    "创业点子王",
+    "用户研究",
+    "机器学习",
     "代码审查",
     "测试用例专家",
+    "架构顾问",
     "会议纪要",
     "翻译润色",
+    "汇报策划",
+    "文档整理",
     "合同审阅",
     "客服话术",
-    "活动运营",
+    "商务邮件",
+    "销售顾问",
+    "SEO 内容策划",
+    "品牌语气官",
+    "管理教练",
+    "增长分析师",
+    "前端架构师",
+    "邮件助理",
+    "NDA 审阅",
+    "客户成功顾问",
     "汇报策划",
     "uclaw-custom-card-head",
     "uclaw-custom-expert-modal",
-    "uclaw-open-custom-expert",
     "uclaw-form-control",
     "Prompt 已填写",
     "customExpertModalOpen",
@@ -440,7 +489,8 @@ const requiredUiPolishTexts = {
     "--bg-content: #f7f9fc",
     "--border-hover: #91caff",
     "--uclaw-teal: #4096ff",
-    "linear-gradient(135deg, var(--primary), var(--uclaw-teal) 58%, var(--uclaw-claw))",
+    "object-fit: contain",
+    "background: #ffffff",
     "width:min(100%,760px)",
     ".sidebar-brand__title",
     ".agent-chat__avatar--logo",
@@ -456,6 +506,30 @@ const requiredUiPolishTexts = {
     "grid-template-columns: repeat(3, minmax(260px, 1fr))",
     ".uclaw-expert-options.wide",
     "grid-column: 1 / -1",
+    ".content openclaw-agents-page",
+    "openclaw-agents-page .uclaw-expert-directory-pane",
+    "openclaw-agents-page .uclaw-expert-directory-list",
+    "openclaw-agents-page .uclaw-expert-category-block",
+    "grid-template-columns: 172px minmax(0, 1fr)",
+    "grid-auto-rows: max-content",
+    "align-content: start",
+    "width: 100%",
+    "background: transparent",
+    "cursor: pointer",
+    "overflow-y: auto",
+    "overscroll-behavior: contain",
+    "padding-bottom: 28px",
+    "openclaw-skills-page [data-skillhub-scene-option=\"true\"]",
+    "color: #1f2937",
+    "color: rgba(255, 255, 255, 0.86)",
+    "openclaw-skills-page .content-header",
+    "max-height: none",
+    "min-height: 54px",
+    "padding-top: 0",
+    "openclaw-skills-page .page-sub,",
+    "flex: 0 0 auto",
+    "max-width: none",
+    "repeat(auto-fit, minmax(min(100%, 340px), 1fr))",
     "background: #ffffff",
     "-webkit-line-clamp: 2",
     "-webkit-line-clamp: 3",
@@ -819,6 +893,102 @@ function verifyServiceWorker(errors) {
     );
   }
 
+  if (!match[1].includes("skillhub-installed-memory-2")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-installed-memory-2: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-list-scroll-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-list-scroll-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-list-flex-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-list-flex-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-viewport-fix-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-viewport-fix-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-page-scroll-reset-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-page-scroll-reset-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-category-registry-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-category-registry-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-scene-picker-2")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-scene-picker-2: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-scene-font-color-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-scene-font-color-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-page-header-safe-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-page-header-safe-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-compact-header-wrap-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-compact-header-wrap-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("skillhub-active-scene-count-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-active-scene-count-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("expert-directory-scroll-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-directory-scroll-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("expert-directory-responsive-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-directory-responsive-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("expert-directory-bottom-padding-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-directory-bottom-padding-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("expert-category-compact-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-category-compact-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("expert-category-filter-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-category-filter-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("expert-category-whitespace-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-category-whitespace-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("expert-templates-108-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-templates-108-1: ${match[1]}`,
+    );
+  }
+  if (!match[1].includes("expert-custom-button-removed-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing expert-custom-button-removed-1: ${match[1]}`,
+    );
+  }
+
   if (!match[1].includes("skillhub-field-map-1")) {
     errors.push(
       `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing skillhub-field-map-1: ${match[1]}`,
@@ -1098,6 +1268,8 @@ function verifyUiPolish(errors) {
         assertContains(errors, file, source, token, "U-Claw UI polish text");
       }
       if (check.label === "agents") {
+        assertNotContains(errors, file, source, "自定义创建已关闭", "custom expert disabled button must be removed");
+        assertNotContains(errors, file, source, "uclaw-open-custom-expert", "custom expert disabled button class must be removed");
         assertNotContains(errors, file, source, "let a=UcExpertPrompt(t)", "expert template TDZ regression");
         assertNotContains(errors, file, source, "sessions.create`,{agentId:r,label:i}", "expert sessions must be created under main");
         assertNotContains(errors, file, source, "sessions.create`,{agentId:i,label:t}", "custom expert sessions must be created under main");

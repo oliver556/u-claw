@@ -538,6 +538,10 @@ function patchChatPage() {
   }
 }
 
+/**
+ * Applies deterministic Control UI CSS overrides that are not available through
+ * OpenClaw configuration, including U-Claw media preview and composer polish.
+ */
 function patchControlCss() {
   if (!fs.existsSync(assetsDir)) {
     throw new Error(`Missing OpenClaw control-ui assets: ${assetsDir}`);
@@ -904,6 +908,10 @@ function patchXaiVideoDownloadFallback() {
   }
 }
 
+/**
+ * Bumps the embedded Control UI cache marker whenever visible patched assets
+ * change, so the desktop shell does not keep stale CSS or copy.
+ */
 function patchServiceWorker() {
   if (!fs.existsSync(swPath)) {
     throw new Error(`Missing OpenClaw service worker: ${swPath}`);
@@ -912,7 +920,19 @@ function patchServiceWorker() {
   let source = read(swPath);
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3";',
+  );
+  source = source.replace(
+    /skillhub-scene-picker-2(?!-skillhub-scene-font-color-1)/,
+    "skillhub-scene-picker-2-skillhub-scene-font-color-1",
+  );
+  source = source.replace(
+    /expert-templates-108-1(?!-expert-custom-button-removed-1)/,
+    "expert-templates-108-1-expert-custom-button-removed-1",
+  );
+  source = source.replace(
+    /sidebar-command-shelf-3(?!-yanjian-logo-1)/,
+    "sidebar-command-shelf-3-yanjian-logo-1",
   );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
@@ -1190,6 +1210,8 @@ function patchIndexUiCopy() {
   for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
     const before = read(file);
     let after = replacePairs(before, pairs);
+    const sessionRenameDialogHelper =
+      "function UcEnsureSessionRenameDialogStyle(){if(document.getElementById(`uclaw-session-rename-style`))return;let e=document.createElement(`style`);e.id=`uclaw-session-rename-style`;e.textContent=`.uclaw-session-rename{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.28);display:flex;align-items:center;justify-content:center;padding:24px}.uclaw-session-rename__panel{width:min(420px,calc(100vw - 48px));border:1px solid rgba(148,163,184,.35);border-radius:8px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.22);padding:18px}.uclaw-session-rename__title{font:600 16px/1.4 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;color:#111827;margin-bottom:12px}.uclaw-session-rename__input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:10px 12px;font:14px/1.4 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;color:#111827;outline:none}.uclaw-session-rename__input:focus{border-color:#1677ff;box-shadow:0 0 0 3px rgba(22,119,255,.16)}.uclaw-session-rename__actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.uclaw-session-rename__button{border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#1f2937;padding:8px 14px;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer}.uclaw-session-rename__button--primary{border-color:#1677ff;background:#1677ff;color:#fff}`;document.head.appendChild(e)}function UcPromptSessionName(e,t){return new Promise(n=>{if(typeof document===`undefined`){n(typeof window!==`undefined`?window.prompt(e,t):null);return}UcEnsureSessionRenameDialogStyle();let r=!1,i=()=>{r||(r=!0,document.removeEventListener(`keydown`,u,!0),a.remove())},o=e=>{i(),n(e)},a=document.createElement(`div`);a.className=`uclaw-session-rename`,a.setAttribute(`role`,`dialog`),a.setAttribute(`aria-modal`,`true`);let s=document.createElement(`div`);s.className=`uclaw-session-rename__panel`;let c=document.createElement(`div`);c.className=`uclaw-session-rename__title`,c.textContent=e||`重命名会话`;let l=document.createElement(`input`);l.className=`uclaw-session-rename__input`,l.type=`text`,l.value=typeof t===`string`?t:``,l.maxLength=120,l.setAttribute(`aria-label`,c.textContent);let d=document.createElement(`div`);d.className=`uclaw-session-rename__actions`;let h=document.createElement(`button`);h.type=`button`,h.className=`uclaw-session-rename__button`,h.textContent=`取消`;let m=document.createElement(`button`);m.type=`button`,m.className=`uclaw-session-rename__button uclaw-session-rename__button--primary`,m.textContent=`保存`,h.addEventListener(`click`,()=>o(null)),m.addEventListener(`click`,()=>o(l.value)),a.addEventListener(`click`,e=>{e.target===a&&o(null)});let u=e=>{e.key===`Escape`?(e.preventDefault(),o(null)):e.key===`Enter`&&(e.preventDefault(),o(l.value))};document.addEventListener(`keydown`,u,!0),d.append(h,m),s.append(c,l,d),a.append(s),document.body.appendChild(a),requestAnimationFrame(()=>{l.focus({preventScroll:!0}),l.select()})})}";
     const sidebarSessionNameHelper =
       "function UcIsVisibleSessionAgentId(e){let t=j(e??``);return!!t&&!t.startsWith(`uclaw-expert-`)}function UcSidebarSessionName(e,t){let n=Ae(t.key,t),r=A(t.key)?.agentId;if(!r||n!==t.key)return n;let i=e.context?.agentIdentity?.get?.(r),a=w(i?.name)??w(i?.identity?.name)??``;if(!a){let t=e.context?.agents.state.agentsList?.agents?.find(e=>j(e.id)===j(r));a=w(t?.identity?.name)??w(t?.name)??``}if(!a){let e={\"uclaw-expert-copywriter\":`文案写手`,\"uclaw-expert-xiaohongshu\":`小红书写手`,\"uclaw-expert-career\":`职业顾问`,\"uclaw-expert-machine-learning\":`机器学习`,\"uclaw-expert-resume\":`简历写手`,\"uclaw-expert-startup-ideas\":`创业点子王`};a=e[j(r)]??``}return a&&a!==r?a:n}";
     if (after.includes("function UcIsVisibleSessionAgentId(e)")) {
@@ -1206,8 +1228,20 @@ function patchIndexUiCopy() {
       after = after.replace("var F=class extends d{", `${sidebarSessionNameHelper}var F=class extends d{`);
     }
     after = after.replace(
+      /function UcEnsureSessionRenameDialogStyle\(\)\{[\s\S]*?\}function UcPromptSessionName\(e,t\)\{[\s\S]*?\}(?=function UcIsVisibleSessionAgentId)/,
+      "",
+    );
+    after = after.replace(
+      "function UcIsVisibleSessionAgentId",
+      `${sessionRenameDialogHelper}function UcIsVisibleSessionAgentId`,
+    );
+    after = after.replace(
       "label:Ae(t.key,t),meta:Br(t.updatedAt)",
       "label:UcSidebarSessionName(this,t),meta:Br(t.updatedAt)",
+    );
+    after = after.replace(
+      "renameSession(e){let t=window.prompt(D(`sessionsView.renameSessionPrompt`),e.label);t!==null&&this.patchSession(e,{label:w(t)??null})}",
+      "async renameSession(e){let t=await UcPromptSessionName(D(`sessionsView.renameSessionPrompt`),e.label);t!==null&&await this.patchSession(e,{label:w(t)??null})}",
     );
     after = after.replace(
       "function Ar(e){let t=new Set,n=[],r=r=>{let i=j(r);t.has(i)||(t.add(i),n.push({id:i,label:jr(e,i)}))};r(Er(e,e.sessionKey)),r(e.agentsList?.defaultId??`main`);for(let t of e.agentsList?.agents??[])r(t.id);for(let t of e.sessionsResult?.sessions??[]){let e=A(t.key);e&&r(e.agentId)}return n}",
@@ -2621,6 +2655,53 @@ function patchControlUiHtmlBranding() {
 }
 
 /**
+ * Locks Control UI to light color mode and hides the temporary footer actions
+ * that are not part of the current U-Claw public surface.
+ */
+function patchFixedLightModeAndFooterActions() {
+  if (!fs.existsSync(indexHtmlPath)) {
+    throw new Error(`Missing OpenClaw control-ui HTML: ${indexHtmlPath}`);
+  }
+
+  const htmlBefore = read(indexHtmlPath);
+  let htmlAfter = htmlBefore
+    .replace('<meta name="color-scheme" content="dark light" />', '<meta name="color-scheme" content="light" />')
+    .replace('var mode = MODES[m] ? m : legacy ? legacy.split(":")[1] : "system";', 'var mode = "light";');
+  if (!htmlAfter.includes('var mode = "light";')) {
+    throw new Error(`Could not lock bootstrap color mode in ${indexHtmlPath}`);
+  }
+  if (writeIfChanged(indexHtmlPath, htmlBefore, htmlAfter)) {
+    console.log(`patched ${path.relative(root, indexHtmlPath)}`);
+  }
+
+  for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
+    const before = read(file);
+    let after = before;
+    after = after.replace("themeMode:`system`", "themeMode:`light`");
+    after = after.replace("themeMode:m,chatShowThinking", "themeMode:`light`,chatShowThinking");
+    after = after.replace("themeMode:e.themeMode,chatShowThinking", "themeMode:`light`,chatShowThinking");
+    after = after.replace(
+      "function Sv(e){if(typeof document>`u`)return;let t=document.documentElement,n=xg(e.theme,e.themeMode);t.dataset.theme=n,t.dataset.themeMode=n.endsWith(`light`)?`light`:`dark`,t.style.colorScheme=t.dataset.themeMode,",
+      "function Sv(e){if(typeof document>`u`)return;let t=document.documentElement,n=xg(e.theme,`light`);t.dataset.theme=n,t.dataset.themeMode=`light`,t.style.colorScheme=`light`,",
+    );
+    after = after.replace(
+      "return o(),{get mode(){return t.themeMode},setMode(e,n){",
+      "return o(),{get mode(){return `light`},setMode(e,n){e=`light`;",
+    );
+    if (
+      !after.includes("n=xg(e.theme,`light`)") ||
+      !after.includes("get mode(){return `light`}") ||
+      !after.includes("themeMode:`light`,chatShowThinking")
+    ) {
+      throw new Error(`Could not lock runtime color mode in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
  * Rebrands PWA/install metadata without touching Gateway runtime names.
  */
 function patchControlUiManifestBranding() {
@@ -2889,20 +2970,25 @@ function patchSkillsPageUiCopy() {
  */
 function patchSkillsPageStoreDiscovery() {
   const patched = [
-    "function UcSkillHubSceneQueryMap(){return{all:``,office:`productivity automation docs office`,content:`content writing copy`,coding:`coding developer github`,data:`data analytics sheet`,design:`design image video`,agent:`agent assistant browser`,knowledge:`knowledge research search`,business:`business sales marketing`,education:`education learn course`,industry:`legal medical finance`,itops:`security devops server`,life:`travel weather service`}}",
-    "function UcSkillHubApiCategoryMap(){return{office:`office-efficiency`,content:`content-creation`,coding:`dev-programming`,data:`data-analysis`,design:`design-multimedia`,knowledge:`knowledge-management`,business:`business-operations`,education:`education-learning`,industry:`industry-professional`,itops:`it-ops-security`,life:`life-service`}}",
+    "function UcSkillHubCategoryRegistry(){return{categories:[{id:`all`,label:`全部`,selectLabel:`全部场景`,icon:`layers`,apiCategory:``,sceneQuery:``},{id:`office`,label:`办公效率`,icon:`paperclip`,apiCategory:`office-efficiency`,sceneQuery:`productivity automation docs office`,aliases:[`automation`,`productivity`,`utility`,`utilities`,`integrations`,`office-efficiency`]},{id:`content`,label:`内容创作`,icon:`pen`,apiCategory:`content-creation`,sceneQuery:`content writing copy`,aliases:[`content-creation`]},{id:`coding`,label:`开发编程`,icon:`code`,apiCategory:`dev-programming`,sceneQuery:`coding developer github`,aliases:[`development`,`dev-programming`]},{id:`data`,label:`数据分析`,icon:`chart`,apiCategory:`data-analysis`,sceneQuery:`data analytics sheet`,aliases:[`data-analysis`]},{id:`design`,label:`设计多媒体`,icon:`palette`,apiCategory:`design-multimedia`,sceneQuery:`design image video`,aliases:[`multimodal`,`design-multimedia`]},{id:`agent`,label:`AI Agent`,icon:`bot`,apiCategory:``,sceneQuery:`agent assistant browser`,aliases:[`browser`]},{id:`knowledge`,label:`知识管理`,icon:`brain`,apiCategory:`knowledge-management`,sceneQuery:`knowledge research search`,aliases:[`research`,`knowledge-management`]},{id:`business`,label:`商业运营`,icon:`megaphone`,apiCategory:`business-operations`,sceneQuery:`business sales marketing`,aliases:[`communication`,`communications`,`business-operations`]},{id:`education`,label:`教育学习`,icon:`graduation`,apiCategory:`education-learning`,sceneQuery:`education learn course`,aliases:[`education-learning`]},{id:`industry`,label:`行业专业`,icon:`building`,apiCategory:`industry-professional`,sceneQuery:`legal medical finance`,aliases:[`industry-professional`]},{id:`itops`,label:`IT 运维与安全`,icon:`shield`,apiCategory:`it-ops-security`,sceneQuery:`security devops server`,aliases:[`it-ops-security`]},{id:`life`,label:`生活服务`,icon:`target`,apiCategory:`life-service`,sceneQuery:`travel weather service`,aliases:[`life-service`]},{id:`other`,label:`其他`,icon:`square`,apiCategory:``,sceneQuery:``,aliases:[]}]} }",
+    "function UcSkillHubCategoryList(){return UcSkillHubCategoryRegistry().categories}",
+    "function UcSkillHubCategoryAliasMap(){let e={};for(let t of UcSkillHubCategoryList())for(let n of t.aliases||[])e[n]=t.id;return e}",
+    "function UcSkillHubSceneQueryMap(){return Object.fromEntries(UcSkillHubCategoryList().map(e=>[e.id,e.sceneQuery||``]))}",
+    "function UcSkillHubApiCategoryMap(){return Object.fromEntries(UcSkillHubCategoryList().filter(e=>e.apiCategory).map(e=>[e.id,e.apiCategory]))}",
     "function UcSkillHubApiSort(e){return e===`downloads`?{sortBy:`downloads`,order:`desc`}:e===`stars`?{sortBy:`stars`,order:`desc`}:e===`name`?{sortBy:`score`,order:`desc`}:{sortBy:`score`,order:`desc`}}",
     "function UcSkillHubApiQuery(e){let t=e.clawhubQuery?.trim?.()||e.clawhubSearchQuery?.trim?.()||``,n=e.skillHubApiKeyFilter===`needs-key`?`api key configuration`:e.skillHubApiKeyFilter===`configured`?`verified official`:``;return[t,n].filter(Boolean).join(` `).trim()}",
-    "function UcSkillHubApiCategory(e){let t=e.skillHubCategory||`all`;return t===`all`?``:UcSkillHubApiCategoryMap()[t]||t}",
+    "function UcSkillHubApiCategory(e){let t=UcSkillHubNormalizeCategoryId(e.skillHubCategory||`all`);return t===`all`?``:UcSkillHubApiCategoryMap()[t]||t}",
     "function UcSkillHubApiUrl(e,t){let n=UcSkillHubApiSort(e.skillHubSort),r=new URL(`/__uclaw__/skillhub/skills`,window.location.origin);r.searchParams.set(`page`,String(Math.max(1,Number(t)||1))),r.searchParams.set(`pageSize`,String(e.skillHubPageSize||24)),r.searchParams.set(`sortBy`,n.sortBy),r.searchParams.set(`order`,n.order);let i=UcSkillHubApiQuery(e),s=UcSkillHubApiCategory(e);return i&&r.searchParams.set(`keyword`,i),s&&r.searchParams.set(`category`,s),e.skillHubApiKeyFilter&&r.searchParams.set(`apiKey`,e.skillHubApiKeyFilter),r.toString()}",
     "async function UcSkillHubLoadApiSkills(e,t){let n=await fetch(UcSkillHubApiUrl(e,t),{headers:{Accept:`application/json`}}),r=await n.text(),i=n.headers.get(`content-type`)||``;if(!i.includes(`application/json`))throw Error(`技能商店 Gateway 代理未生效，请重启 U-Claw 后重试。`);let s=JSON.parse(r);if(!n.ok||s?.code&&s.code!==0)throw Error(s?.message||`技能商店 API ${n.status}`);let c=Array.isArray(s?.data?.skills)?s.data.skills:[],l=c.map(UcSkillHubNormalizeApiSkill);return{items:l,total:Math.max(0,Number(s?.data?.total)||l.length),message:l.length?`第 ${t} 页已加载`:t>1?`本页暂无数据，可返回上一页。`:`暂无匹配技能商店技能。`,compat:!1}}",
     "async function UcSkillHubFallbackSkillsSearch(e,t,n){let r=e.client;if(!r?.request)throw n;let i=UcSkillHubApiQuery(e)||`agent`,s=Math.max(1,Number(e.skillHubPageSize)||24),c=Math.min(80,Math.max(s,t*s)),l=await r.request(`skills.search`,{query:i,limit:c}),u=Array.isArray(l?.results)?l.results:[],d=(t-1)*s,m=u.slice(d,d+s);if(!m.length&&t>1)throw n;return{items:m,total:u.length,message:`当前 Gateway 尚未启用技能商店分页代理，已使用兼容模式加载。重启 U-Claw 后可使用完整分页。`,compat:!0}}",
     "function UcSkillHubNormalizeApiSkill(e){let t=e?.namespace??{},n=t.handle||t.publicSlug||e?.ownerHandle||``,r=e?.slug||t.publicSlug||e?.name,i=t.canonicalName||(n&&r?`@${n}/${r}`:r),s=e?.labels??{},c=s.requires_api_key===!0||String(s.requires_api_key).toLowerCase()===`true`,l=e?.iconUrl||e?.icon_url||e?.iconURL||e?.logoUrl||e?.imageUrl||e?.avatarUrl||e?.publisher?.logoUrl||``;return{...e,id:i,slug:r,displayName:e?.name||r,summary:e?.description_zh||e?.description||``,description:e?.description_zh||e?.description||``,ownerHandle:n,owner:{handle:n,displayName:t.displayName||n},publisher:e?.publisher,iconUrl:l,logoUrl:e?.logoUrl||e?.publisher?.logoUrl,imageUrl:e?.imageUrl,avatarUrl:e?.avatarUrl,downloads:e?.downloads,stars:e?.stars,version:e?.version,categories:[e?.category,...(e?.subCategories??[]).map(e=>e?.key),...(e?.subCategories??[]).map(e=>e?.name)].filter(Boolean),topics:e?.tags??[],labels:{...s,requires_api_key:c},install:{reference:i},trust:{installability:`installable`},native:{skill:e}}}",
     "function UcSkillHubStoreTabs(e){let t=e.clawhubQuery?.trim()?`search`:e.skillHubTab||`recommended`,n=[{id:`recommended`,label:`推荐`},{id:`installable`,label:`可安装`},{id:`installed`,label:`已安装`},{id:`needs-setup`,label:`需配置`}];return e.clawhubQuery?.trim()?[{id:`search`,label:`搜索结果`},...n]:n}",
-    "function UcSkillHubCategoryDefs(){return[{id:`all`,label:`全部`,icon:`🗂`},{id:`office`,label:`办公效率`,icon:`📎`},{id:`content`,label:`内容创作`,icon:`✍️`},{id:`coding`,label:`开发编程`,icon:`💻`},{id:`data`,label:`数据分析`,icon:`📊`},{id:`design`,label:`设计多媒体`,icon:`🎨`},{id:`agent`,label:`AI Agent`,icon:`🤖`},{id:`knowledge`,label:`知识管理`,icon:`🧠`},{id:`business`,label:`商业运营`,icon:`📣`},{id:`education`,label:`教育学习`,icon:`🎓`},{id:`industry`,label:`行业专业`,icon:`🏢`},{id:`itops`,label:`IT 运维与安全`,icon:`🛡️`},{id:`life`,label:`生活服务`,icon:`🎯`},{id:`other`,label:`其他`,icon:`▫`}]}",
-    "function UcSkillHubCategoryDef(e){return UcSkillHubCategoryDefs().find(t=>t.id===e)||UcSkillHubCategoryDefs().at(-1)}",
-    "function UcSkillHubCategoryLabel(e){let t={agent:`AI Agent`,browser:`AI Agent`,research:`知识管理`,automation:`办公效率`,productivity:`办公效率`,coding:`开发编程`,development:`开发编程`,data:`数据分析`,communication:`商业运营`,communications:`商业运营`,multimodal:`设计多媒体`,design:`设计多媒体`,content:`内容创作`,utility:`办公效率`,utilities:`办公效率`,integrations:`办公效率`,knowledge:`知识管理`,office:`办公效率`,business:`商业运营`,education:`教育学习`,industry:`行业专业`,itops:`IT 运维与安全`,life:`生活服务`,other:`其他`,\"office-efficiency\":`办公效率`,\"knowledge-management\":`知识管理`,\"dev-programming\":`开发编程`,\"content-creation\":`内容创作`,\"life-service\":`生活服务`,\"data-analysis\":`数据分析`,\"design-multimedia\":`设计多媒体`,\"business-operations\":`商业运营`,\"education-learning\":`教育学习`,\"industry-professional\":`行业专业`,\"it-ops-security\":`IT 运维与安全`};return t[e]??e}",
-    "function UcSkillHubNormalizeCategoryId(e){let t=String(e??``).toLowerCase().replaceAll(` `,`-`),n={browser:`agent`,research:`knowledge`,automation:`office`,productivity:`office`,development:`coding`,communication:`business`,communications:`business`,multimodal:`design`,utility:`office`,utilities:`office`,integrations:`office`,\"office-efficiency\":`office`,\"knowledge-management\":`knowledge`,\"dev-programming\":`coding`,\"content-creation\":`content`,\"life-service\":`life`,\"data-analysis\":`data`,\"design-multimedia\":`design`,\"business-operations\":`business`,\"education-learning\":`education`,\"industry-professional\":`industry`,\"it-ops-security\":`itops`};return n[t]??t}",
+    "function UcSkillHubCategoryDefs(){return UcSkillHubCategoryList()}",
+    "function UcSkillHubCategoryDef(e){let t=UcSkillHubNormalizeCategoryId(e);return UcSkillHubCategoryDefs().find(e=>e.id===t)||UcSkillHubCategoryDefs().at(-1)}",
+    "function UcSkillHubCategoryLabel(e){let t=UcSkillHubNormalizeCategoryId(e),n=UcSkillHubCategoryDefs().find(e=>e.id===t);return n?.label??e}",
+    "function UcSkillHubNormalizeCategoryId(e){let t=String(e??``).toLowerCase().replaceAll(` `,`-`),n=UcSkillHubCategoryAliasMap();return n[t]??t}",
+    "function UcSkillHubCategoryPublicApi(){let e=()=>UcSkillHubCategoryDefs().filter(e=>e.id!==`other`).map(e=>({...e,aliases:[...(e.aliases||[])]}));return{version:`2026-08-25`,list:e,all:e,get:e=>UcSkillHubCategoryDef(e),label:e=>UcSkillHubCategoryLabel(e),normalize:e=>UcSkillHubNormalizeCategoryId(e),apiCategory:e=>UcSkillHubApiCategory({skillHubCategory:e}),sceneQuery:e=>UcSkillHubSceneQueryMap()[UcSkillHubNormalizeCategoryId(e)]||``}}",
+    "function UcSkillHubExposeCategoryApi(){try{typeof globalThis<`u`&&(globalThis.UClawSkillHubCategories=UcSkillHubCategoryPublicApi())}catch{}}UcSkillHubExposeCategoryApi();",
     "function UcSkillHubArray(e){return Array.isArray(e)?e.filter(e=>typeof e==`string`&&e.trim()).map(e=>e.trim()):[]}",
     "function UcSkillHubCategories(e){let t=e.native?.skill?.categories??e.categories??[];return UcSkillHubArray(t)}",
     "function UcSkillHubTopics(e){let t=e.native?.skill?.topics??e.topics??[];return UcSkillHubArray(t)}",
@@ -2924,6 +3010,10 @@ function patchSkillsPageStoreDiscovery() {
     "function UcSkillHubApplySort(e,t){let n=[...e];return t===`downloads`?n.sort((e,t)=>(UcSkillHubStats(t).downloads||0)-(UcSkillHubStats(e).downloads||0)):t===`stars`?n.sort((e,t)=>(UcSkillHubStats(t).stars||UcSkillHubStats(t).installs||0)-(UcSkillHubStats(e).stars||UcSkillHubStats(e).installs||0)):t===`name`?n.sort((e,t)=>String(e.displayName||e.name||e.slug||``).localeCompare(String(t.displayName||t.name||t.slug||``))):n.sort((e,t)=>UcSkillHubSortScore(t)-UcSkillHubSortScore(e))}",
     "function UcSkillHubMatchesApiKeyFilter(e,t,n){return!t||t===`all`?!0:t===`configured`?n?!UcSkillHubLocalNeedsSetup(e):e.trust?.installability===`installable`:t===`needs-key`?n?UcSkillHubLocalNeedsSetup(e):e.trust?.installability!==`installable`:!0}",
     "function UcSkillHubLocalSkills(e){return(e.report?.skills??[]).filter(e=>!(e?.source===`openclaw-bundled`||e?.bundled===!0))}",
+    "function UcSkillHubInstallKey(e){let t=String(e??``).trim().toLowerCase();return t?t.replace(/^@/,``):``}",
+    "function UcSkillHubInstalledCandidateKeys(e){let t=e?.clawhub??{},n=e?.native?.skill??e,r=n?.namespace??{},i=[e?.skillKey,e?.name,e?.slug,e?.id,e?.install?.reference,t?.slug,t?.ownerHandle&&t?.slug?`@${t.ownerHandle}/${t.slug}`:``,t?.ownerHandle&&t?.slug?`${t.ownerHandle}/${t.slug}`:``,e?.ownerHandle&&e?.slug?`@${e.ownerHandle}/${e.slug}`:``,e?.ownerHandle&&e?.slug?`${e.ownerHandle}/${e.slug}`:``,e?.owner?.handle&&e?.slug?`@${e.owner.handle}/${e.slug}`:``,r?.canonicalName,r?.handle&&n?.slug?`@${r.handle}/${n.slug}`:``,r?.handle&&n?.slug?`${r.handle}/${n.slug}`:``,n?.slug,n?.name];let s=String(e?.baseDir??``).split(/[\\\\/]/).filter(Boolean).at(-1);return[...new Set([...i,s].map(UcSkillHubInstallKey).filter(Boolean))]}",
+    "function UcSkillHubInstalledIndex(e){let t=new Map;for(let n of e)for(let e of UcSkillHubInstalledCandidateKeys(n))t.has(e)||t.set(e,n);return t}",
+    "function UcSkillHubInstalledMatch(e,t){let n=UcSkillHubInstalledIndex(UcSkillHubLocalSkills(e));for(let e of UcSkillHubInstalledCandidateKeys(t)){let t=n.get(e);if(t)return t}return null}",
     "function UcSkillHubLocalNeedsSetup(e){let t=e.missing??{};return e.eligible===!1||Object.values(t).some(e=>Array.isArray(e)&&e.length>0)}",
     "async function UcSkillHubUninstall(e,t){let n=e.client;if(!n?.request||!e.connected||!t||e.skillsBusyKey)return;e.skillsBusyKey=t,e.requestUpdate?.();try{let r=await n.request(`skills.uninstall`,{agentId:e.skillsAgentId??e.agentsList?.defaultId??void 0,skillKey:t});if(!r?.ok)throw Error(r?.error||`卸载失败`);e.skillsDetailKey===t&&(e.skillsDetailKey=null),await S(e,{clearMessages:!0})}catch(r){e.skillMessages={...e.skillMessages,[t]:{kind:`error`,message:`卸载技能失败：${r instanceof Error?r.message:String(r)}`}},e.requestUpdate?.()}finally{e.skillsBusyKey===t&&(e.skillsBusyKey=null,e.requestUpdate?.())}}",
     "function UcSkillHubErrorText(e){let t=String(e??``),n=t.toLowerCase();return n.includes(`timeout`)||n.includes(`timed out`)?`技能商店请求超时，请稍后重试。`:n.includes(`429`)||n.includes(`rate limit`)?`技能商店请求过于频繁，请稍后再试。`:n.includes(`401`)||n.includes(`403`)||n.includes(`unauthorized`)||n.includes(`forbidden`)||n.includes(`auth`)?`技能商店连接未授权，请检查 Gateway 登录状态。`:/\\b5\\d\\d\\b/.test(n)||n.includes(`server error`)?`技能商店服务暂不可用，请稍后重试。`:n.includes(`network`)||n.includes(`fetch`)?`技能商店网络请求失败，请检查连接。`:t?`技能商店搜索失败：${t}`:`技能商店搜索失败。`}",
@@ -2931,16 +3021,21 @@ function patchSkillsPageStoreDiscovery() {
     "function UcSkillHubIconUrl(e){let t=e.iconUrl||e.icon_url||e.iconURL||e.logoUrl||e.imageUrl||e.avatarUrl||e.icon||e.logo||e.avatar||e.native?.skill?.iconUrl||e.native?.skill?.icon_url||e.native?.skill?.iconURL||e.native?.skill?.logoUrl||e.native?.skill?.imageUrl||e.native?.skill?.icon||e.native?.skill?.publisher?.logoUrl||e.publisher?.logoUrl||e.publisher?.image||e.publisher?.avatarUrl||e.owner?.image||e.owner?.avatarUrl;return typeof t==`string`&&(/^(https:|data:|\\/)/.test(t)?t:``)}",
     "function UcSkillHubIconGlyph(e){let t=UcSkillHubCategoryDef(UcSkillHubItemCategories(e)[0])?.icon,n=e.icon;return typeof n==`string`&&!/^(https?:|data:|\\/)/.test(n)&&n.length<=4?n:t||`▫`}",
     "function UcSkillHubRenderIcon(e){let t=UcSkillHubIconUrl(e),n=UcSkillHubIconGlyph(e);return a`<span class=\"skillhub-icon\" aria-hidden=\"true\" style=\"width: 36px; height: 36px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; position: relative; overflow: hidden; flex: 0 0 auto; background: linear-gradient(135deg, #e9f2ff, #f6fbff); color: #0f5fd7; font-size: 18px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(15,95,215,.12);\"><span>${n}</span>${t?a`<img data-skillhub-icon-img=\"true\" src=${t} alt=\"\" loading=\"lazy\" @error=${e=>{e.currentTarget.style.display=`none`}} style=\"position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;\"/>`:o}</span>`}",
-    "function UcSkillHubBuildViewModel(e){let t=e.clawhubQuery?.trim(),n=t?`search`:e.skillHubTab||`recommended`,r=e.skillHubCategory||`all`,i=UcSkillHubLocalSkills(e),s=e.skillHubHomeResults??[],c=[];if(n===`installed`)c=i;else if(n===`needs-setup`)c=i.filter(UcSkillHubLocalNeedsSetup);else c=s.filter(e=>n===`installable`?e.trust?.installability===`installable`:!0);let l=n===`installed`||n===`needs-setup`;l&&(c=c.filter(e=>UcSkillHubMatchesCategory(e,r)).filter(t=>UcSkillHubMatchesApiKeyFilter(t,e.skillHubApiKeyFilter,l)),e.skillHubSort!==`recommended`&&(c=UcSkillHubApplySort(c,e.skillHubSort)));let u=t?`搜索结果`:n===`recommended`?`推荐首页`:n===`installable`?`可安装技能`:n===`installed`?`已安装技能`:`需配置技能`,d=Math.max(1,Number(e.skillHubPage)||1),m=Math.max(1,Number(e.skillHubPageSize)||24),h=Math.max(0,Number(e.skillHubTotal)||c.length),p=Math.max(1,Math.ceil(h/m));return{query:t,tab:n,category:r,apiKeyFilter:e.skillHubApiKeyFilter||`all`,sort:e.skillHubSort||`recommended`,items:c,totalItems:h,page:d,pageSize:m,pageCount:p,hasMore:!l&&d<p,loadMoreMessage:e.skillHubLoadMoreMessage||``,isLocal:l,title:u,localCount:i.length,needsSetupCount:i.filter(UcSkillHubLocalNeedsSetup).length,installableCount:s.filter(e=>e.trust?.installability===`installable`).length,pageError:e.skillHubPageError||``}}",
+    "function UcSkillHubBuildViewModel(e){let t=e.clawhubQuery?.trim(),n=t?`search`:e.skillHubTab||`recommended`,r=e.skillHubCategory||`all`,i=UcSkillHubLocalSkills(e),s=e.skillHubHomeResults??[],c=[],l=UcSkillHubInstalledIndex(i);if(n===`installed`)c=i;else if(n===`needs-setup`)c=i.filter(UcSkillHubLocalNeedsSetup);else c=s.filter(t=>n===`installable`?t.trust?.installability===`installable`&&!UcSkillHubInstalledCandidateKeys(t).some(e=>l.has(e)):!0);let u=n===`installed`||n===`needs-setup`;u&&(c=c.filter(e=>UcSkillHubMatchesCategory(e,r)).filter(t=>UcSkillHubMatchesApiKeyFilter(t,e.skillHubApiKeyFilter,u)),e.skillHubSort!==`recommended`&&(c=UcSkillHubApplySort(c,e.skillHubSort)));let d=t?`搜索结果`:n===`recommended`?`推荐首页`:n===`installable`?`可安装技能`:n===`installed`?`已安装技能`:`需配置技能`,m=Math.max(1,Number(e.skillHubPage)||1),h=Math.max(1,Number(e.skillHubPageSize)||24),p=Math.max(0,Number(e.skillHubTotal)||c.length),g=Math.max(1,Math.ceil(p/h));return{query:t,tab:n,category:r,apiKeyFilter:e.skillHubApiKeyFilter||`all`,sort:e.skillHubSort||`recommended`,items:c,totalItems:p,page:m,pageSize:h,pageCount:g,hasMore:!u&&m<g,loadMoreMessage:e.skillHubLoadMoreMessage||``,isLocal:u,title:d,localCount:i.length,needsSetupCount:i.filter(UcSkillHubLocalNeedsSetup).length,installableCount:s.filter(e=>e.trust?.installability===`installable`&&!UcSkillHubInstalledCandidateKeys(e).some(e=>l.has(e))).length,pageError:e.skillHubPageError||``}}",
     "function UcSkillHubRenderTopTabs(e,t){let n=e.skillHubTab===`recommended`,r=[{id:`all`,label:`全部`},{id:`ready`,label:`可用`},{id:`needs-setup`,label:`需配置`},{id:`disabled`,label:`已停用`}];return a`<div class=\"agent-tabs\" data-skillhub-primary-tabs=\"true\" style=\"margin-top: 0; flex: 1 1 auto; min-width: 0;\"> <button class=\"agent-tab ${n?`active`:``}\" @click=${()=>e.onSkillHubTabChange?.(`recommended`)}>推荐</button>${r.map(r=>a`<button class=\"agent-tab ${!n&&e.statusFilter===r.id?`active`:``}\" @click=${()=>{e.onSkillHubTabChange?.(`local`),e.onStatusFilterChange?.(r.id)}}>${r.label}<span class=\"agent-tab-count\">${t[r.id]}</span></button>`)}</div>`}",
-    "function UcSkillHubRenderToolbar(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading,r=UcSkillHubCategoryDefs().filter(e=>e.id!==`other`);return a`<div data-skillhub-toolbar=\"true\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 154px 154px 154px; align-items: center; gap: 8px; min-height: 40px;\"><label class=\"field\" data-skillhub-search=\"true\" style=\"margin: 0; min-width: 0; position: relative;\"><input .value=${e.clawhubQuery} @input=${t=>e.onClawHubQueryChange(t.target.value)} placeholder=\"搜索技能商店技能…\" autocomplete=\"off\" name=\"clawhub-search\" aria-busy=${n?`true`:`false`} style=\"height: 36px; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 ${n?`72px`:`12px`} 0 12px; box-shadow: inset 0 0 0 1px rgba(15,95,215,.04);\"/>${n?a`<span data-skillhub-loading=\"true\" class=\"muted\" style=\"position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; pointer-events: none;\">搜索中…</span>`:o}</label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"场景筛选\" .value=${t.category} @change=${t=>e.onSkillHubCategoryChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\">${r.map(e=>a`<option value=${e.id}>${e.id===`all`?`全部场景`:e.label}</option>`)}</select></label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"API Key 筛选\" .value=${t.apiKeyFilter} @change=${t=>e.onSkillHubApiKeyFilterChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"all\">API Key 不限</option><option value=\"configured\">仅看已配置</option><option value=\"needs-key\">仅看需配置</option></select></label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"排序\" .value=${t.sort} @change=${t=>e.onSkillHubSortChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"recommended\">排序 推荐精选</option><option value=\"downloads\">下载最多</option><option value=\"stars\">收藏最多</option><option value=\"name\">名称 A-Z</option></select></label></div>`}",
-    "function UcSkillHubRenderTableHead(){return a`<div class=\"skillhub-dense-head\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--panel-2);\"><span>技能</span><span>场景</span><span>下载</span><span>收藏</span><span>操作</span></div>`}",
-    "function UcSkillHubRenderSkillRow(e,t,n){let r=UcSkillHubSceneLabels(t),i=UcSkillHubStats(t),s=n?UcSkillHubLocalNeedsSetup(t):!1,c=n?t.name:t.displayName,l=n?UcSkillHubDisplayText(t.description):t.summary?UcSkillHubDisplayText(t.summary):UcSkillHubInstallRef(t),u=n?`已安装`:UcSkillHubTrustLabel(t),d=n?t.source:UcSkillHubInstallRef(t),m=n?`-`:UcSkillHubFormatMetric(i.downloads),h=n?`-`:UcSkillHubFormatMetric(i.stars||i.installs),p=n?t.skillKey:UcSkillHubQualifiedRef(t),g=r.join(`、`);return a`<div class=\"skillhub-dense-row list-item-clickable\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; align-items: center; min-height: 68px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel);\" @click=${()=>n?e.onDetailOpen(t.skillKey):e.onClawHubDetailOpen(p)}><div style=\"display: flex; min-width: 0; gap: 10px; align-items: center;\">${UcSkillHubRenderIcon(t)}<div style=\"min-width: 0;\"><div style=\"display: flex; align-items: center; gap: 6px; min-width: 0;\"><span style=\"font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${c}</span>${t.version?a`<span class=\"muted\" style=\"font-size: 12px;\">v${t.version}</span>`:o}${t.official?a`<span class=\"chip chip-ok\">官方</span>`:o}</div><div class=\"list-sub\" style=\"white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;\">${w(l,120)}</div><div class=\"muted\" style=\"font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${d}</div></div></div><div>${r.length?a`<span class=\"chip\" title=${g}>${r[0]}</span>`:a`<span class=\"chip\">其他</span>`}</div><div class=\"muted\">↓ ${m}</div><div class=\"muted\">☆ ${h}</div><div style=\"display: flex; justify-content: flex-end; align-items: center; gap: 6px;\">${n?a`<span class=\"chip ${s?`chip-warn`:`chip-ok`}\">${s?`需配置`:u}</span><button type=\"button\" data-skillhub-uninstall-button=\"true\" class=\"btn btn--sm\" ?disabled=${e.skillsBusyKey===t.skillKey} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onUninstall?.(t.skillKey)}}>${e.skillsBusyKey===t.skillKey?`卸载中…`:`卸载`}</button>`:a`<button type=\"button\" data-skillhub-install-button=\"true\" data-skillhub-install-ready=${typeof e.onClawHubInstall} class=\"btn btn--sm\" ?disabled=${e.clawhubInstallSlug!==null} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onClawHubInstall?.(t)}}>${e.clawhubInstallSlug===p?`安装中…`:e.clawhubInstallSlug?`等待中`:`安装`}</button>`}</div></div>`}",
+    "function UcSkillHubCategoryIconName(e){let t=typeof e==`object`?e.id:e,n={all:`layers`,office:`calendar`,content:`pen`,coding:`code`,data:`chart`,design:`presentation`,agent:`brain`,knowledge:`brain`,business:`chart`,education:`graduation`,industry:`briefcase`,itops:`code`,life:`calendar`,other:`layers`};return n[t]||`layers`}",
+    "function UcSkillHubRenderCategoryIcon(e){return typeof UcExpertIconSvg==`function`?UcExpertIconSvg(UcSkillHubCategoryIconName(e)):null}",
+    "function UcSkillHubRenderScenePicker(e,t){let n=UcSkillHubCategoryDefs().filter(e=>e.id!==`other`),r=t.category||`all`;return a`<div data-skillhub-scene-picker=\"true\" aria-label=\"场景分类\" style=\"display: grid; grid-template-columns: auto minmax(0,1fr); align-items: start; gap: 8px; flex: 0 0 auto; min-height: 0; overflow: visible;\"><span class=\"muted\" style=\"font-size: 12px; white-space: nowrap; line-height: 32px;\">场景</span><div data-skillhub-scene-strip=\"true\" style=\"display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; overflow: visible; align-items: center; align-content: flex-start;\">${n.map(n=>{let i=r===n.id,s=n.id===`all`?`全部场景`:n.label,c=i&&!t.isLocal?UcSkillHubFormatMetric(t.totalItems):``,l=UcSkillHubRenderCategoryIcon(n);return a`<button type=\"button\" class=\"btn btn--sm ${i?`primary`:``}\" data-skillhub-scene-option=\"true\" data-skillhub-scene-value=${n.id} aria-pressed=${i?`true`:`false`} style=\"display: inline-flex; align-items: center; gap: 6px; height: 32px; white-space: nowrap; flex: 0 1 auto; max-width: 100%; min-width: 0;\" @click=${t=>{t.preventDefault(),t.stopPropagation(),e.onSkillHubCategoryChange?.(n.id)}}>${l?a`<span class=\"skillhub-scene-icon\" aria-hidden=\"true\">${l}</span>`:o}<span style=\"overflow: hidden; text-overflow: ellipsis;\">${s}</span>${c?a`<span class=\"muted\" style=\"font-size: 11px; flex: 0 0 auto;\">${c}</span>`:o}</button>`})}</div></div>`}",
+    "function UcSkillHubRenderToolbar(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading;return a`<div data-skillhub-toolbar=\"true\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 154px 154px; align-items: center; gap: 8px; min-height: 40px;\"><label class=\"field\" data-skillhub-search=\"true\" style=\"margin: 0; min-width: 0; position: relative;\"><input .value=${e.clawhubQuery} @input=${t=>e.onClawHubQueryChange(t.target.value)} placeholder=\"搜索技能商店技能…\" autocomplete=\"off\" name=\"clawhub-search\" aria-busy=${n?`true`:`false`} style=\"height: 36px; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 ${n?`72px`:`12px`} 0 12px; box-shadow: inset 0 0 0 1px rgba(15,95,215,.04);\"/>${n?a`<span data-skillhub-loading=\"true\" class=\"muted\" style=\"position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; pointer-events: none;\">搜索中…</span>`:o}</label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"API Key 筛选\" .value=${t.apiKeyFilter} @change=${t=>e.onSkillHubApiKeyFilterChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"all\">API Key 不限</option><option value=\"configured\">仅看已配置</option><option value=\"needs-key\">仅看需配置</option></select></label><label class=\"field\" style=\"margin: 0;\"><select aria-label=\"排序\" .value=${t.sort} @change=${t=>e.onSkillHubSortChange?.(t.target.value)} style=\"height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 0 10px; width: 100%;\"><option value=\"recommended\">排序 推荐精选</option><option value=\"downloads\">下载最多</option><option value=\"stars\">收藏最多</option><option value=\"name\">名称 A-Z</option></select></label></div>`}",
+    "function UcSkillHubRenderTableHead(){return a`<div class=\"skillhub-dense-head\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); background: var(--panel-strong, #ffffff); position: sticky; top: 0; z-index: 5; box-shadow: 0 1px 0 var(--border); isolation: isolate;\"><span>技能</span><span>场景</span><span>下载</span><span>收藏</span><span>操作</span></div>`}",
+    "function UcSkillHubRenderSkillRow(e,t,n){let r=UcSkillHubSceneLabels(t),i=UcSkillHubStats(t),s=n?null:UcSkillHubInstalledMatch(e,t),c=n?UcSkillHubLocalNeedsSetup(t):s?UcSkillHubLocalNeedsSetup(s):!1,l=n?t.name:t.displayName,u=n?UcSkillHubDisplayText(t.description):t.summary?UcSkillHubDisplayText(t.summary):UcSkillHubInstallRef(t),d=n?`已安装`:s?`已安装`:UcSkillHubTrustLabel(t),m=n?t.source:UcSkillHubInstallRef(t),h=n?`-`:UcSkillHubFormatMetric(i.downloads),p=n?`-`:UcSkillHubFormatMetric(i.stars||i.installs),g=n?t.skillKey:UcSkillHubQualifiedRef(t),b=s?.skillKey||t.skillKey,y=r.join(`、`);return a`<div class=\"skillhub-dense-row list-item-clickable\" style=\"display: grid; grid-template-columns: minmax(280px,1fr) 120px 88px 88px 96px; gap: 14px; align-items: center; min-height: 68px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel);\" @click=${()=>n?e.onDetailOpen(t.skillKey):e.onClawHubDetailOpen(g)}><div style=\"display: flex; min-width: 0; gap: 10px; align-items: center;\">${UcSkillHubRenderIcon(t)}<div style=\"min-width: 0;\"><div style=\"display: flex; align-items: center; gap: 6px; min-width: 0;\"><span style=\"font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${l}</span>${t.version?a`<span class=\"muted\" style=\"font-size: 12px;\">v${t.version}</span>`:o}${t.official?a`<span class=\"chip chip-ok\">官方</span>`:o}${s?a`<span class=\"chip chip-ok\" data-skillhub-installed-badge=\"true\">已安装</span>`:o}</div><div class=\"list-sub\" style=\"white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;\">${w(u,120)}</div><div class=\"muted\" style=\"font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\">${m}</div></div></div><div>${r.length?a`<span class=\"chip\" title=${y}>${r[0]}</span>`:a`<span class=\"chip\">其他</span>`}</div><div class=\"muted\">↓ ${h}</div><div class=\"muted\">☆ ${p}</div><div style=\"display: flex; justify-content: flex-end; align-items: center; gap: 6px;\">${n?a`<span class=\"chip ${c?`chip-warn`:`chip-ok`}\">${c?`需配置`:d}</span><button type=\"button\" data-skillhub-uninstall-button=\"true\" class=\"btn btn--sm\" ?disabled=${e.skillsBusyKey===b} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onUninstall?.(b)}}>${e.skillsBusyKey===b?`卸载中…`:`卸载`}</button>`:s?a`<button type=\"button\" data-skillhub-uninstall-button=\"true\" class=\"btn btn--sm\" ?disabled=${e.skillsBusyKey===b} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onUninstall?.(b)}}>${e.skillsBusyKey===b?`卸载中…`:`卸载`}</button>`:a`<button type=\"button\" data-skillhub-install-button=\"true\" data-skillhub-install-ready=${typeof e.onClawHubInstall} class=\"btn btn--sm\" ?disabled=${e.clawhubInstallSlug!==null} .onclick=${n=>{n.preventDefault(),n.stopPropagation(),e.onClawHubInstall?.(t)}}>${e.clawhubInstallSlug===g?`安装中…`:e.clawhubInstallSlug?`等待中`:`安装`}</button>`}</div></div>`}",
     "function UcSkillHubPageNumbers(e){let t=e.page,n=e.pageCount,r=new Set([1,n,t,t-1,t+1,t-2,t+2].filter(e=>e>=1&&e<=n)),i=[...r].sort((e,t)=>e-t),s=[];for(let e=0;e<i.length;e++)e>0&&i[e]-i[e-1]>1&&s.push(`ellipsis-${i[e]}`),s.push(i[e]);return s}",
     "function UcSkillHubRenderPagination(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading,r=UcSkillHubPageNumbers(t);return t.isLocal?o:a`<div data-skillhub-pagination=\"true\" class=\"muted\" style=\"display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px; border-top: 1px solid var(--border); flex-wrap: wrap;\"><span data-skillhub-page-summary=\"true\">第 ${t.page} / ${t.pageCount} 页 · 共 ${UcSkillHubFormatMetric(t.totalItems)} 项</span><div style=\"display: flex; gap: 6px; align-items: center; flex-wrap: wrap;\"><button type=\"button\" class=\"btn btn--sm\" data-skillhub-prev-page-button=\"true\" ?disabled=${n||t.page<=1} @click=${r=>{r.preventDefault(),r.stopPropagation(),e.onSkillHubPageChange?.(t.page-1)}}>上一页</button>${r.map(r=>typeof r==`string`?a`<span style=\"padding: 0 2px;\">…</span>`:a`<button type=\"button\" class=\"btn btn--sm ${r===t.page?`primary`:``}\" data-skillhub-page-button=\"true\" data-skillhub-page=${r} ?disabled=${n||r===t.page} @click=${i=>{i.preventDefault(),i.stopPropagation(),e.onSkillHubPageChange?.(r)}}>${r}</button>`)}<button type=\"button\" class=\"btn btn--sm\" data-skillhub-next-page-button=\"true\" ?disabled=${n||t.page>=t.pageCount} @click=${r=>{r.preventDefault(),r.stopPropagation(),e.onSkillHubPageChange?.(t.page+1)}}>${n?`加载中…`:`下一页`}</button></div>${t.loadMoreMessage?a`<span data-skillhub-load-more-message=\"true\">${t.loadMoreMessage}</span>`:o}</div>`}",
-    "function UcSkillHubRenderList(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading;return t.items.length===0?a`<div class=\"muted\" style=\"padding: 18px 12px;\">${n?`正在检索技能商店技能…`:t.pageError?UcSkillHubErrorText(t.pageError):`暂无匹配技能商店技能。`}</div>`:a`<div class=\"skillhub-dense-table\" data-skillhub-dense-list=\"true\" style=\"border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel);\">${UcSkillHubRenderTableHead()}${t.items.map(n=>UcSkillHubRenderSkillRow(e,n,t.isLocal))}${UcSkillHubRenderPagination(e,t)}</div>`}",
+    "function UcSkillHubRenderList(e,t){let n=e.clawhubSearchLoading||e.skillHubHomeLoading;return t.items.length===0?a`<div class=\"muted\" style=\"padding: 18px 12px;\">${n?`正在检索技能商店技能…`:t.pageError?UcSkillHubErrorText(t.pageError):`暂无匹配技能商店技能。`}</div>`:a`<div class=\"skillhub-dense-table\" data-skillhub-dense-list=\"true\" data-skillhub-scroll-table=\"true\" style=\"border: 1px solid var(--border); border-radius: 8px; overflow-y: auto; overflow-x: hidden; background: var(--panel); flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; position: relative; isolation: isolate;\">${UcSkillHubRenderTableHead()}${t.items.map(n=>UcSkillHubRenderSkillRow(e,n,t.isLocal))}${UcSkillHubRenderPagination(e,t)}</div>`}",
+    "function UcSkillHubScrollTableTop(e){let t=()=>{let t=e?.querySelector?.(`[data-skillhub-scroll-table=\"true\"]`);t&&(t.scrollTop=0)};t(),typeof requestAnimationFrame==`function`&&requestAnimationFrame(()=>t()),e?.updateComplete?.then?.(()=>{typeof requestAnimationFrame==`function`?requestAnimationFrame(()=>t()):t()})}",
     "function q(e){let t=UcSkillHubBuildViewModel(e);return a`",
-    "    <section class=\"skillhub-content\" data-skillhub-content=\"dense\" style=\"min-width: 0; display: grid; gap: 10px; align-content: start; margin-top: 10px;\">",
+    "    <section class=\"skillhub-content\" data-skillhub-content=\"dense\" style=\"min-width: 0; display: flex; flex-direction: column; gap: 10px; margin-top: 10px; flex: 1 1 auto; min-height: 0; overflow: hidden;\">",
+    "        ${UcSkillHubRenderScenePicker(e,t)}",
     "        ${UcSkillHubRenderToolbar(e,t)}",
     "        ${e.clawhubSearchError?a`<div class=\"callout danger\">${UcSkillHubErrorText(e.clawhubSearchError)}</div>`:o}",
     "        ${e.clawhubInstallMessage?a`<div class=\"callout ${e.clawhubInstallMessage.kind===`error`?`danger`:`success`}\" style=\"position: relative; padding-right: 44px;\"><button type=\"button\" class=\"btn btn--sm\" aria-label=\"关闭安装提示\" data-skillhub-install-message-close=\"true\" style=\"position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; padding: 0;\" .onclick=${n=>{n.preventDefault(),e.onClawHubInstallMessageClose?.()}}>×</button><div style=\"max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;\">${e.clawhubInstallMessage.text}</div><div style=\"display: flex; flex-wrap: wrap; gap: 8px; margin-top: ${e.clawhubInstallMessage.acknowledgeSlug||e.clawhubInstallMessage.forceSlug?`10px`:`0`};\">${e.clawhubInstallMessage.acknowledgeSlug?a`<button type=\"button\" class=\"btn btn--sm\" style=\"white-space: normal;\" ?disabled=${e.clawhubInstallSlug===e.clawhubInstallMessage.acknowledgeSlug} .onclick=${n=>{n.preventDefault(),e.onClawHubInstall(e.clawhubInstallMessage?.acknowledgeSlug??``,!0,e.clawhubInstallMessage?.acknowledgeVersion)}}>${e.clawhubInstallMessage.acknowledgeLabel??`确认风险并安装`}</button>`:o}${e.clawhubInstallMessage.forceSlug?a`<button type=\"button\" class=\"btn btn--sm primary\" data-skillhub-force-install-button=\"true\" style=\"white-space: normal;\" ?disabled=${e.clawhubInstallSlug===e.clawhubInstallMessage.forceSlug} .onclick=${n=>{n.preventDefault(),e.onClawHubInstall(e.clawhubInstallMessage?.forceSlug??``,!1,e.clawhubInstallMessage?.forceVersion,!0)}}>${e.clawhubInstallMessage.forceLabel??`覆盖重装`}</button>`:o}</div></div>`:o}",
@@ -3012,7 +3107,7 @@ function patchSkillsPageStoreDiscovery() {
   ].join("\n");
   const singleLayerLayout = [
     "return a`",
-    "    <section class=\"card\" data-skillhub-single-layer=\"true\">",
+    "    <section class=\"card\" data-skillhub-single-layer=\"true\" data-skillhub-scroll-shell=\"true\" data-skillhub-flex-fill=\"true\" style=\"flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;\">",
     "      <div class=\"row\" style=\"justify-content: space-between; align-items: center; gap: 12px;\">",
     "        ${UcSkillHubRenderTopTabs(e,i)}",
     "        <button",
@@ -3088,6 +3183,7 @@ function patchSkillsPageStoreDiscovery() {
   for (const file of listSkillsPageAssets()) {
     const before = read(file);
     const helperStarts = [
+      before.indexOf("function UcSkillHubCategoryRegistry("),
       before.indexOf("function UcSkillHubHomeSeeds("),
       before.indexOf("function UcSkillHubSceneQueryMap("),
       before.indexOf("function UcSkillHubApiUrl("),
@@ -3105,8 +3201,16 @@ function patchSkillsPageStoreDiscovery() {
     }
     let after = `${before.slice(0, start)}${patched}${before.slice(end)}`;
     const layoutPattern =
-      /return a`\s*<section class="card">[\s\S]*?<\/section>\s*\n\n\s*\$\{m\?X\(m,e\):o\}/;
+      /return a`\s*<section class="card"[^>]*data-skillhub-single-layer="true"[^>]*>[\s\S]*?<\/section>\s*\n\n\s*\$\{m\?X\(m,e\):o\}/;
     after = after.replace(layoutPattern, singleLayerLayout);
+    after = after.replace(
+      '<section class="card" data-skillhub-single-layer="true" data-skillhub-scroll-shell="true" style="height: calc(100vh - 300px); min-height: 420px; display: flex; flex-direction: column; overflow: hidden;">',
+      '<section class="card" data-skillhub-single-layer="true" data-skillhub-scroll-shell="true" data-skillhub-flex-fill="true" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">',
+    );
+    after = after.replace(
+      '<section class="card" data-skillhub-single-layer="true">',
+      '<section class="card" data-skillhub-single-layer="true" data-skillhub-scroll-shell="true" data-skillhub-flex-fill="true" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">',
+    );
     after = after.replace(
       /<div style="margin-top: 16px; border-top: 1px solid var\(--border\); padding-top: 16px;">[\s\S]*?\$\{q\(e\)\}\s*<\/div>/,
       "${q(e)}",
@@ -3263,13 +3367,13 @@ function patchSkillsPageStoreHomeState() {
   const legacyConstructorPatched =
     "this.clawhubSearchTimer=null,this.skillHubTab=`recommended`,this.skillHubCategory=`all`,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.loadSkillHubHome=async()=>{let e=this.client;if(!e||!this.connected||this.skillHubHomeLoading)return;this.skillHubHomeLoading=!0,this.skillHubHomeErrors=[],this.requestUpdate?.();let t=[];try{let n=await Promise.allSettled(UcSkillHubHomeSeeds().map(t=>e.request(`skills.search`,{query:t,limit:20}).then(e=>e?.results??[])));for(let[e,r]of n.entries())r.status===`fulfilled`?t.push(...r.value):this.skillHubHomeErrors=[...this.skillHubHomeErrors,UcSkillHubHomeSeeds()[e]];this.skillHubHomeResults=UcSkillHubMergeResults(t).slice(0,40),this.skillHubHomeLoaded=!0}catch(e){this.skillHubHomeErrors=[String(e)]}finally{this.skillHubHomeLoading=!1,this.requestUpdate?.()}},this.changeSkillHubTab=e=>{this.skillHubTab=e,this.requestUpdate?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.requestUpdate?.()}}createRenderRoot(){return this}";
   const constructorPatched =
-    "this.clawhubSearchTimer=null,this.skillHubTab=`recommended`,this.skillHubCategory=`all`,this.skillHubApiKeyFilter=`all`,this.skillHubSort=`recommended`,this.skillHubPage=1,this.skillHubPageSize=24,this.skillHubTotal=0,this.skillHubPageError=null,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.skillHubHomeRequestId=0,this.skillHubLoadMoreMessage=null,this.loadSkillHubPage=async(e=1)=>{let t=Math.max(1,Number(e)||1),n=(this.skillHubHomeRequestId||0)+1;this.skillHubHomeRequestId=n,this.skillHubPage=t,this.skillHubHomeLoading=!0,this.skillHubPageError=null,this.skillHubHomeErrors=[],this.skillHubLoadMoreMessage=`正在加载第 ${t} 页…`,this.requestUpdate?.();try{let e;try{e=await UcSkillHubLoadApiSkills(this,t)}catch(n){e=await UcSkillHubFallbackSkillsSearch(this,t,n)}if(this.skillHubHomeRequestId!==n)return;let r=e.items||[],i=this.skillHubSort===`name`?UcSkillHubApplySort(r,`name`):r;this.skillHubHomeResults=i,this.skillHubTotal=Math.max(0,Number(e.total)||i.length),this.skillHubHomeLoaded=!0,this.skillHubPageError=e.compat?`兼容模式：请重启 U-Claw 以启用完整技能商店分页。`:null,this.skillHubLoadMoreMessage=e.message}catch(e){this.skillHubHomeRequestId===n&&(this.skillHubPageError=String(e),this.skillHubHomeErrors=[String(e)],this.skillHubHomeResults=[],this.skillHubTotal=0,this.skillHubLoadMoreMessage=`第 ${t} 页加载失败，请稍后重试。`)}finally{this.skillHubHomeRequestId===n&&(this.skillHubHomeLoading=!1,this.requestUpdate?.())}},this.loadSkillHubHome=async(e=1)=>this.loadSkillHubPage?.(e),this.reloadSkillHubStore=()=>{this.skillHubPage=1,this.skillHubLoadMoreMessage=null,void this.loadSkillHubPage?.(1)},this.changeSkillHubTab=e=>{this.skillHubTab=e,this.skillHubPage=1,this.skillHubLoadMoreMessage=null,this.requestUpdate?.(),(e===`recommended`||this.clawhubSearchQuery?.trim?.())&&this.reloadSkillHubStore?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubApiKeyFilter=e=>{this.skillHubApiKeyFilter=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubSort=e=>{this.skillHubSort=e||`recommended`,this.reloadSkillHubStore?.()},this.changeSkillHubPage=e=>{void this.loadSkillHubPage?.(e)}}createRenderRoot(){return this}";
+    "this.clawhubSearchTimer=null,this.skillHubTab=`recommended`,this.skillHubCategory=`all`,this.skillHubApiKeyFilter=`all`,this.skillHubSort=`recommended`,this.skillHubPage=1,this.skillHubPageSize=24,this.skillHubTotal=0,this.skillHubPageError=null,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.skillHubHomeRequestId=0,this.skillHubLoadMoreMessage=null,this.loadSkillHubPage=async(e=1)=>{let t=Math.max(1,Number(e)||1),n=(this.skillHubHomeRequestId||0)+1;this.skillHubHomeRequestId=n,this.skillHubPage=t,this.skillHubHomeLoading=!0,this.skillHubPageError=null,this.skillHubHomeErrors=[],this.skillHubLoadMoreMessage=`正在加载第 ${t} 页…`,this.requestUpdate?.(),UcSkillHubScrollTableTop(this);try{let e;try{e=await UcSkillHubLoadApiSkills(this,t)}catch(n){e=await UcSkillHubFallbackSkillsSearch(this,t,n)}if(this.skillHubHomeRequestId!==n)return;let r=e.items||[],i=this.skillHubSort===`name`?UcSkillHubApplySort(r,`name`):r;this.skillHubHomeResults=i,this.skillHubTotal=Math.max(0,Number(e.total)||i.length),this.skillHubHomeLoaded=!0,this.skillHubPageError=e.compat?`兼容模式：请重启 U-Claw 以启用完整技能商店分页。`:null,this.skillHubLoadMoreMessage=e.message}catch(e){this.skillHubHomeRequestId===n&&(this.skillHubPageError=String(e),this.skillHubHomeErrors=[String(e)],this.skillHubHomeResults=[],this.skillHubTotal=0,this.skillHubLoadMoreMessage=`第 ${t} 页加载失败，请稍后重试。`)}finally{this.skillHubHomeRequestId===n&&(this.skillHubHomeLoading=!1,this.requestUpdate?.(),UcSkillHubScrollTableTop(this))}},this.loadSkillHubHome=async(e=1)=>this.loadSkillHubPage?.(e),this.reloadSkillHubStore=()=>{this.skillHubPage=1,this.skillHubLoadMoreMessage=null,void this.loadSkillHubPage?.(1)},this.changeSkillHubTab=e=>{this.skillHubTab=e,this.skillHubPage=1,this.skillHubLoadMoreMessage=null,this.requestUpdate?.(),UcSkillHubScrollTableTop(this),(e===`recommended`||this.clawhubSearchQuery?.trim?.())&&this.reloadSkillHubStore?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubApiKeyFilter=e=>{this.skillHubApiKeyFilter=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubSort=e=>{this.skillHubSort=e||`recommended`,this.reloadSkillHubStore?.()},this.changeSkillHubPage=e=>{void this.loadSkillHubPage?.(e)}}createRenderRoot(){return this}";
   const legacyHandlerState =
     "this.changeSkillHubTab=e=>{this.skillHubTab=e,this.requestUpdate?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.requestUpdate?.()}";
   const oldHandlerState =
     "this.changeSkillHubTab=e=>{this.skillHubTab=e,this.skillHubVisibleCount=40},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`},this.changeSkillHubApiKeyFilter=e=>{this.skillHubApiKeyFilter=e||`all`},this.changeSkillHubSort=e=>{this.skillHubSort=e||`recommended`},this.loadMoreSkillHub=()=>{this.skillHubVisibleCount=Math.min(320,(this.skillHubVisibleCount||40)+40),this.requestUpdate?.()}";
   const newHandlerState =
-    "this.changeSkillHubTab=e=>{this.skillHubTab=e,this.skillHubPage=1,this.skillHubLoadMoreMessage=null,this.requestUpdate?.(),(e===`recommended`||this.clawhubSearchQuery?.trim?.())&&this.reloadSkillHubStore?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubApiKeyFilter=e=>{this.skillHubApiKeyFilter=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubSort=e=>{this.skillHubSort=e||`recommended`,this.reloadSkillHubStore?.()},this.changeSkillHubPage=e=>{void this.loadSkillHubPage?.(e)}";
+    "this.changeSkillHubTab=e=>{this.skillHubTab=e,this.skillHubPage=1,this.skillHubLoadMoreMessage=null,this.requestUpdate?.(),UcSkillHubScrollTableTop(this),(e===`recommended`||this.clawhubSearchQuery?.trim?.())&&this.reloadSkillHubStore?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubApiKeyFilter=e=>{this.skillHubApiKeyFilter=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubSort=e=>{this.skillHubSort=e||`recommended`,this.reloadSkillHubStore?.()},this.changeSkillHubPage=e=>{void this.loadSkillHubPage?.(e)}";
   const constructorLeak =
     "this.clawhubInstallSlug=null,this.clawhubInstallMessage=null,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.clawhubVerdicts={},this.clawhubVerdictsLoading=!1";
   const constructorLeakClean =
@@ -3681,6 +3785,21 @@ function patchAssistantIdentityUiCopy() {
  * Adds a SkillHub dropdown beside the model selector while binding through Agent skills.
  */
 function patchChatSkillHubDropdown() {
+  const deepThinkingHelper = `function UcDeepThinkingControl(e){let t=e.onboarding,n=t?!1:e.settings.chatShowThinking,r=t?\`深度思考暂不可用\`:n?\`深度思考已开启\`:\`深度思考已关闭\`;return s\`
+    <openclaw-tooltip .content=\${r}>
+      <button
+        class="chat-controls__deep-thinking \${n?\`chat-controls__deep-thinking--active\`:\`\`}"
+        type="button"
+        ?disabled=\${t}
+        aria-pressed=\${n}
+        aria-label=\${r}
+        @click=\${()=>{t||e.onSettingsChange({...e.settings,chatShowThinking:!e.settings.chatShowThinking})}}
+      >
+        <span class="chat-controls__deep-thinking-icon" aria-hidden="true">\${z.brain}</span>
+        <span class="chat-controls__deep-thinking-label">深度思考</span>
+      </button>
+    </openclaw-tooltip>\`}`;
+  const deepThinkingRender = `    \${UcDeepThinkingControl(e)}`;
   const helper = `function UcSkillHubItems(e){return(e.report?.skills??[]).filter(e=>e&&typeof e.name==\`string\`&&e.name.trim()&&!(e?.source===\`openclaw-bundled\`||e?.bundled===!0))}function UcSkillHubHasCjk(e){return/[\\u3400-\\u9fff]/.test(String(e??\`\`))}function UcSkillHubTextCandidates(e){return e.flat(3).map(e=>String(e??\`\`).trim()).filter(Boolean)}function UcSkillHubPickChinese(e){let t=UcSkillHubTextCandidates(e);return t.find(UcSkillHubHasCjk)||t[0]||\`\`}function UcSkillHubChineseTitle(e){let t=UcSkillHubPickChinese([e.displayName,e.display_name,e.title,e.label,e.name_zh,e.nameZh,e.metadata?.displayName,e.metadata?.title,e.native?.skill?.displayName,e.native?.skill?.title,e.name,e.slug]);if(UcSkillHubHasCjk(t))return t;let n=UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description]);let r=String(n).split(/[：:。.!?；;\\n]/)[0]?.trim();return UcSkillHubHasCjk(r)&&r.length<=18?r:t}function UcSkillHubLabel(e){return UcSkillHubChineseTitle(e)||e.name}function UcSkillHubNormalizeText(e){let t=String(e??\`\`).trim();if(!t)return\`\`;let n=t.replaceAll(\`OpenClaw\`,\`U-Claw\`).replaceAll(\`ClawHub\`,\`SkillHub\`);if(/controlling web pages/i.test(n)&&/browser tool/i.test(n))return\`用于控制网页、处理多步骤流程、登录检查、标签页管理与失败恢复。\`;if(/connected .*node canvases/i.test(n)||/node canvases/i.test(n))return\`在已连接的 U-Claw 节点画布上展示 HTML，支持导航、快照与调试。\`;if(/^Use when\\b/i.test(n))return\`适用：\${n.replace(/^Use when\\s*/i,\`\`)}\`;return n}function UcSkillHubDescription(e){return UcSkillHubNormalizeText(UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description,e.source,\`技能商店技能\`]))}function UcSkillHubDropdown(e){let t=UcSkillHubItems(e),n=e.selectedSkill||\`\`,r=t.find(e=>e.name===n),i=!e.connected?\`技能暂不可用\`:e.loading?\`加载中…\`:r?UcSkillHubLabel(r):n||\`选择你的技能\`,a=!e.connected||e.saving,o=e.error||e.notice;return s\`
     <details
       class="chat-controls__session chat-controls__inline-select chat-controls__skillhub"
@@ -3779,6 +3898,13 @@ function patchChatSkillHubDropdown() {
     );
     source = source.replaceAll(legacyConstructorState, constructorState);
 
+    if (!source.includes("function UcDeepThinkingControl(")) {
+      if (!source.includes("function Dw(e){")) {
+        throw new Error(`Could not locate composer controls helper in ${file}`);
+      }
+      source = source.replace("function Dw(e){", `${deepThinkingHelper}function Dw(e){`);
+    }
+
     if (!source.includes("function UcSkillHubDropdown(")) {
       if (!source.includes("function Dw(e){")) {
         throw new Error(`Could not locate composer controls helper in ${file}`);
@@ -3803,6 +3929,21 @@ function patchChatSkillHubDropdown() {
         throw new Error(`Could not inject SkillHub props into chat composer in ${file}`);
       }
       source = source.replace(original, patched);
+    }
+
+    if (!source.includes(deepThinkingRender)) {
+      const skillHubRender = `    \${e.skillHub?UcSkillHubDropdown(e.skillHub):c}`;
+      const modelControl = `    <div
+      class="chat-composer-model-control"`;
+      if (source.includes(skillHubRender)) {
+        source = source.replace(skillHubRender, `${deepThinkingRender}
+${skillHubRender}`);
+      } else if (source.includes(modelControl)) {
+        source = source.replace(modelControl, `${deepThinkingRender}
+${modelControl}`);
+      } else {
+        throw new Error(`Could not locate composer control insertion point in ${file}`);
+      }
     }
 
     if (!source.includes("UcSkillHubDropdown(e.skillHub)")) {
@@ -3955,25 +4096,122 @@ function patchAgentsPageUiCopy() {
     let after = replacePairs(recovered, pairs)
       .replace("this.agentsPanel=`files`,this.toolsCatalogLoading", "this.agentsPanel=`overview`,this.toolsCatalogLoading");
 
-    const expertLandingHelper = [
-      "function UcExpertTemplates(){return[",
-      "{id:`copywriter`,name:`文案写手`,avatar:`文`,category:`内容创作`,description:`把需求转成清晰、克制、可发布的中文文案。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是专业中文文案写手。先澄清目标人群、渠道、语气和转化目标，再给出可直接发布的标题、正文、备选表达和修改建议。回答要具体、克制、可执行。`},",
-      "{id:`xiaohongshu`,name:`小红书写手`,avatar:`红`,category:`内容创作`,description:`面向种草、标题、封面文案与笔记结构。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是小红书内容专家。围绕人群痛点、使用场景、标题钩子、封面文字、正文结构和互动引导来产出笔记。避免夸大承诺，优先给多版可选方案。`},",
-      "{id:`career`,name:`职业顾问`,avatar:`职`,category:`职业发展`,description:`梳理职业选择、面试准备、简历表达与成长计划。`,model:`默认模型`,skills:[],safety:`restricted`,prompt:`你是职业顾问。帮助用户拆解职业问题、简历定位、面试表达和行动计划。涉及重大职业选择时，说明假设和权衡，避免替用户做不可逆决定。`},",
-      "{id:`machine-learning`,name:`机器学习`,avatar:`学`,category:`开发编程`,description:`解释模型、算法、实验设计与工程落地。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是机器学习专家。用准确术语解释算法、实验设计、数据处理、评估指标和工程落地。回答要包含关键假设、常见坑和可验证步骤。`},",
-      "{id:`resume`,name:`简历写手`,avatar:`历`,category:`职业发展`,description:`把经历整理成更清楚的岗位匹配表达。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是简历写手。根据岗位目标提炼经历、量化成果、优化项目描述和个人优势。优先输出可复制到简历中的中文表达，并指出需要用户补充的数据。`},",
-      "{id:`startup-ideas`,name:`创业点子王`,avatar:`创`,category:`商业运营`,description:`从人群、痛点、渠道和验证成本推演业务想法。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是创业点子顾问。围绕用户群、刚需场景、现有替代方案、获客渠道、MVP 和验证成本生成想法。每个想法都要给风险、验证方法和下一步行动。`},",
-      "{id:`product-manager`,name:`产品经理`,avatar:`产`,category:`产品策略`,description:`拆需求、写 PRD、排优先级和验收标准。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是产品经理。先明确用户、场景、目标指标、约束和边界，再输出需求拆解、PRD 结构、优先级、交互流程、验收标准和风险。回答要克制、可执行，避免空泛口号。`},",
-      "{id:`data-analyst`,name:`数据分析师`,avatar:`数`,category:`数据分析`,description:`拆指标、看口径、找异常和给分析框架。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是数据分析师。围绕业务问题定义指标口径、拆解漏斗、定位异常、设计对比和输出结论。回答需区分事实、假设和建议，并提示需要补充的数据。`},",
-      "{id:`code-reviewer`,name:`代码审查`,avatar:`码`,category:`开发编程`,description:`按风险、回归、可维护性和测试缺口审查代码。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是资深代码审查专家。优先指出 bug、回归风险、安全风险、边界条件和缺失测试，按严重程度排序。不要泛泛评价风格；每个问题都要说明影响、触发条件和建议修复方向。`},",
-      "{id:`test-designer`,name:`测试用例专家`,avatar:`测`,category:`质量保障`,description:`把需求转成边界、回归和验收用例。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是测试用例专家。根据需求拆分正常路径、异常路径、边界条件、兼容性、回归范围和验收标准。输出清晰的测试矩阵，并标注优先级和需要准备的数据。`},",
-      "{id:`meeting-summary`,name:`会议纪要`,avatar:`会`,category:`办公效率`,description:`整理会议摘要、决议、待办和风险跟进。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是会议纪要专家。把输入内容整理成背景、关键讨论、明确决议、待办事项、负责人、截止时间和未决问题。缺少信息时用待确认标注，不要编造。`},",
-      "{id:`translation-polish`,name:`翻译润色`,avatar:`译`,category:`办公效率`,description:`中英互译、商务表达、语气调整和润色。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是翻译润色专家。根据目标读者和语气要求进行中英互译、改写和润色。保留原意，说明关键措辞差异，并在需要时给正式、自然、简洁多个版本。`},",
-      "{id:`contract-review`,name:`合同审阅`,avatar:`合`,category:`办公效率`,description:`梳理条款风险、缺失信息和谈判问题。`,model:`默认模型`,skills:[],safety:`restricted`,prompt:`你是合同审阅助手，不构成法律意见。帮助用户梳理合同结构、关键义务、付款、违约、解除、保密、知识产权和争议解决条款中的风险点，并给出需要向专业律师确认的问题清单。`},",
-      "{id:`customer-support`,name:`客服话术`,avatar:`客`,category:`商业运营`,description:`生成回复模板、安抚话术和升级路径。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是客服话术专家。根据客户情绪、问题类型、业务规则和可提供补偿，输出礼貌、清晰、可执行的回复模板。复杂问题要给升级路径、记录要点和禁止承诺。`},",
-      "{id:`operation-planner`,name:`活动运营`,avatar:`营`,category:`商业运营`,description:`设计活动方案、渠道节奏、转化路径和复盘指标。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是活动运营专家。围绕目标用户、核心卖点、渠道、时间节奏、资源预算和转化指标设计活动方案。输出活动机制、文案方向、执行清单、风险和复盘指标。`},",
-      "{id:`ppt-outline`,name:`汇报策划`,avatar:`演`,category:`办公效率`,description:`把材料整理成汇报结构、页面标题和讲述节奏。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是汇报策划专家。根据受众、目标和材料，整理故事线、章节结构、页面标题、关键论据和讲述节奏。优先让结论明确、证据充分、下一步清楚。`}",
+	    const expertLandingHelper = [
+      "function UcExpertTemplatePrompt(e,t){let n={\"内容创作\":`围绕平台、受众、语气、素材和转化目标，产出可发布内容与改写版本。`,\"职场成长\":`围绕岗位目标、个人经历、沟通对象和成长约束，给出可执行路径。`,\"产品运营\":`围绕用户、场景、指标、实验和资源约束，拆解方案与验证步骤。`,\"技术研发\":`围绕系统边界、输入输出、风险、测试和可维护性，给出工程化建议。`,\"办公效率\":`围绕材料、受众、截止时间和输出格式，整理结构化交付物。`,\"法务商务\":`围绕交易背景、责任边界、风险点和沟通目标，给出审慎建议与待确认清单。`};return`你是${e}。${n[t]||`围绕用户目标、输入材料和约束，给出专业建议。`}先确认目标、输入材料、限制条件和成功标准，再输出结构化结果、可复用模板、检查清单和下一步建议。`}",
+      "function UcExpertTemplateItem(e){let[t,n,r,i,a,o,s]=e;return{id:t,name:n,avatar:n.slice(0,1),icon:a,category:r,description:i,model:`默认模型`,skills:[],safety:s||`allowed`,prompt:o||UcExpertTemplatePrompt(n,r)}}",
+      "function UcExpertExtraTemplateSpecs(){return[",
+      "[`seo-content`,`SEO 内容策划`,`内容创作`,`关键词、搜索意图、标题结构和长文大纲。`,`search`],",
+      "[`brand-tone`,`品牌语气官`,`内容创作`,`统一品牌表达、禁用词、语气边界和示例句。`,`pen`],",
+      "[`title-planner`,`标题策划`,`内容创作`,`为文章、短视频、活动页生成多风格标题。`,`pen`],",
+      "[`ad-copy`,`广告文案`,`内容创作`,`卖点拆解、投放标题、短文案和 A/B 版本。`,`presentation`],",
+      "[`livestream-script`,`直播脚本`,`内容创作`,`直播节奏、开场话术、产品讲解和促单脚本。`,`video`],",
+      "[`course-writer`,`课程文案`,`内容创作`,`课程卖点、章节文案、作业说明和招生表达。`,`graduation`],",
+      "[`newsletter-editor`,`邮件通讯编辑`,`内容创作`,`Newsletter 选题、导语、分栏和行动按钮文案。`,`mail`],",
+      "[`press-release`,`新闻稿写手`,`内容创作`,`新闻稿结构、亮点提炼、引用语和发布口径。`,`file-text`],",
+      "[`podcast-outline`,`播客提纲`,`内容创作`,`访谈问题、节目结构、开场结尾和金句提炼。`,`message`],",
+      "[`story-editor`,`故事编辑`,`内容创作`,`人物、冲突、节奏、叙事线和表达润色。`,`notebook`],",
+      "[`wechat-article`,`公众号编辑`,`内容创作`,`公众号选题、结构、标题和金句段落。`,`file-text`],",
+      "[`ecommerce-detail`,`电商详情页`,`内容创作`,`商品卖点、场景利益、FAQ 和转化文案。`,`boxes`],",
+      "[`content-calendar`,`内容日历`,`内容创作`,`月度选题、栏目节奏、发布计划和复盘口径。`,`calendar`],",
+      "[`case-study-writer`,`案例写手`,`内容创作`,`客户案例、问题方案结果和可引用证据。`,`file-text`],",
+      "[`okr-coach`,`OKR 教练`,`职场成长`,`目标拆解、KR 设计、周复盘和风险校准。`,`chart`],",
+      "[`manager-coach`,`管理教练`,`职场成长`,`一对一沟通、团队节奏、反馈和授权建议。`,`briefcase`],",
+      "[`workplace-communication`,`职场沟通顾问`,`职场成长`,`向上汇报、跨部门协作、冲突表达和邮件措辞。`,`speech`],",
+      "[`performance-review`,`绩效复盘`,`职场成长`,`绩效材料、成果量化、问题复盘和改进计划。`,`file-user`],",
+      "[`onboarding-coach`,`新人融入教练`,`职场成长`,`入职 30/60/90 天计划、学习清单和沟通节奏。`,`graduation`],",
+      "[`leadership-coach`,`领导力教练`,`职场成长`,`团队目标、授权、反馈、激励和管理边界。`,`briefcase`],",
+      "[`conflict-mediator`,`冲突调解顾问`,`职场成长`,`还原事实、识别利益点、设计对话脚本。`,`speech`],",
+      "[`promotion-planner`,`晋升规划师`,`职场成长`,`晋升材料、影响力证明、能力差距和行动计划。`,`chart`],",
+      "[`career-switch`,`转行顾问`,`职场成长`,`转行路径、能力迁移、作品集和风险评估。`,`briefcase`],",
+      "[`job-search`,`求职策略师`,`职场成长`,`岗位筛选、投递策略、作品准备和面试节奏。`,`search`],",
+      "[`negotiation-coach`,`薪酬谈判教练`,`职场成长`,`报价区间、谈判话术、筹码和退让策略。`,`handshake`],",
+      "[`training-designer`,`培训设计师`,`职场成长`,`培训目标、课程结构、练习任务和评估方式。`,`graduation`],",
+      "[`personal-brand`,`个人品牌顾问`,`职场成长`,`定位、内容主题、履历表达和影响力建设。`,`lightbulb`],",
+      "[`productivity-coach`,`效率教练`,`职场成长`,`任务系统、时间块、复盘节奏和低摩擦执行。`,`calendar`],",
+      "[`growth-analyst`,`增长分析师`,`产品运营`,`拉新、激活、留存、转化和复购拆解。`,`chart`],",
+      "[`ab-test`,`实验设计师`,`产品运营`,`A/B 实验假设、分组、样本、指标和结论口径。`,`test`],",
+      "[`pricing-strategy`,`定价策略师`,`产品运营`,`价格带、套餐、折扣、竞品和利润测算。`,`chart`],",
+      "[`retention-ops`,`留存运营`,`产品运营`,`用户分层、触达节奏、流失预警和召回方案。`,`calendar`],",
+      "[`crm-ops`,`CRM 运营`,`产品运营`,`客户分层、生命周期、触达模板和转化路径。`,`network`],",
+      "[`product-launch`,`产品发布经理`,`产品运营`,`发布节奏、传播卖点、灰度策略和复盘指标。`,`presentation`],",
+      "[`competitor-analysis`,`竞品分析师`,`产品运营`,`竞品维度、差异点、机会判断和风险提醒。`,`search`],",
+      "[`ux-writer`,`UX 文案`,`产品运营`,`按钮、空状态、错误提示和引导文案。`,`pen`],",
+      "[`requirements-analyst`,`需求分析师`,`产品运营`,`用户故事、边界、优先级和验收条件。`,`boxes`],",
+      "[`metrics-designer`,`指标设计师`,`产品运营`,`北极星指标、过程指标、口径和看板结构。`,`chart`],",
+      "[`monetization`,`商业化顾问`,`产品运营`,`变现模式、价格实验、转化漏斗和风险。`,`lightbulb`],",
+      "[`community-growth`,`社区增长`,`产品运营`,`社群机制、活动、激励体系和复盘方法。`,`message`],",
+      "[`operation-sop`,`运营 SOP 专家`,`产品运营`,`标准流程、角色分工、检查点和异常处理。`,`file-text`],",
+      "[`market-research`,`市场研究员`,`产品运营`,`市场规模、用户画像、渠道和机会判断。`,`search`],",
+      "[`frontend-architect`,`前端架构师`,`技术研发`,`组件边界、状态管理、性能和可维护性。`,`code`],",
+      "[`backend-architect`,`后端架构师`,`技术研发`,`服务边界、接口、数据一致性和扩展性。`,`network`],",
+      "[`devops-engineer`,`DevOps 工程师`,`技术研发`,`CI/CD、部署、监控、回滚和环境治理。`,`code`],",
+      "[`security-reviewer`,`安全审查`,`技术研发`,`权限、输入校验、数据泄露和攻击面检查。`,`search`,``, `restricted`],",
+      "[`database-tuner`,`数据库优化`,`技术研发`,`索引、查询计划、事务、冷热数据和容量。`,`chart`],",
+      "[`api-designer`,`API 设计师`,`技术研发`,`接口契约、错误码、分页、幂等和兼容性。`,`code`],",
+      "[`prompt-engineer`,`Prompt 工程师`,`技术研发`,`角色、上下文、约束、评估集和失败样本。`,`brain`],",
+      "[`data-engineer`,`数据工程师`,`技术研发`,`数据管道、口径、质量检查和任务调度。`,`network`],",
+      "[`mlops-engineer`,`MLOps 工程师`,`技术研发`,`训练、部署、监控、回滚和模型评估。`,`brain`],",
+      "[`mobile-engineer`,`移动端工程师`,`技术研发`,`端侧体验、兼容性、性能、埋点和发布。`,`code`],",
+      "[`performance-engineer`,`性能优化专家`,`技术研发`,`瓶颈定位、指标、压测和优化优先级。`,`chart`],",
+      "[`incident-review`,`故障复盘专家`,`技术研发`,`事故时间线、根因、影响面和改进项。`,`test`],",
+      "[`automation-engineer`,`自动化脚本专家`,`技术研发`,`重复任务、脚本边界、日志和失败恢复。`,`code`],",
+      "[`technical-writer`,`技术文档专家`,`技术研发`,`README、API 文档、迁移指南和示例。`,`file-text`],",
+      "[`email-assistant`,`邮件助理`,`办公效率`,`收件意图、回复结构、语气和后续动作。`,`mail`],",
+      "[`calendar-planner`,`日程规划`,`办公效率`,`会议排期、优先级、缓冲时间和提醒。`,`calendar`],",
+      "[`travel-planner`,`差旅规划`,`办公效率`,`行程、交通、预算、材料和风险预案。`,`calendar`],",
+      "[`daily-brief`,`每日简报`,`办公效率`,`把多来源信息整理为摘要、风险和待办。`,`file-text`],",
+      "[`decision-memo`,`决策备忘录`,`办公效率`,`背景、选项、利弊、建议和待确认问题。`,`chart`],",
+      "[`research-brief`,`资料速读`,`办公效率`,`提炼资料要点、证据、争议和行动建议。`,`search`],",
+      "[`spreadsheet-helper`,`表格助手`,`办公效率`,`表头设计、公式思路、清洗规则和分析口径。`,`chart`],",
+      "[`process-sop`,`流程 SOP`,`办公效率`,`流程步骤、负责人、输入输出和检查点。`,`file-text`],",
+      "[`action-tracker`,`待办追踪`,`办公效率`,`事项拆解、负责人、截止时间和风险提醒。`,`calendar`],",
+      "[`meeting-facilitator`,`会议主持`,`办公效率`,`会议目标、议程、控场话术和决议收口。`,`speech`],",
+      "[`knowledge-base`,`知识库整理`,`办公效率`,`知识分类、标签、摘要和维护规则。`,`notebook`],",
+      "[`report-editor`,`报告润色`,`办公效率`,`逻辑顺序、标题层级、表达克制和结论强化。`,`file-text`],",
+      "[`checklist-maker`,`清单专家`,`办公效率`,`把复杂任务拆成检查清单和交付标准。`,`test`],",
+      "[`procurement-comparison`,`采购比选`,`办公效率`,`供应商维度、报价比较、风险和建议。`,`boxes`],",
+      "[`nda-review`,`NDA 审阅`,`法务商务`,`保密范围、期限、例外、违约和返还条款。`,`contract`,``, `restricted`],",
+      "[`procurement-contract`,`采购合同助手`,`法务商务`,`验收、付款、交付、违约和售后风险。`,`contract`,``, `restricted`],",
+      "[`compliance-checker`,`合规检查`,`法务商务`,`宣传、数据、流程和外部承诺的风险清单。`,`search`,``, `restricted`],",
+      "[`privacy-policy`,`隐私政策助手`,`法务商务`,`数据收集、使用、共享、保存和用户权利。`,`file-text`,``, `restricted`],",
+      "[`tender-assistant`,`投标助手`,`法务商务`,`标书响应、评分点、材料清单和风险。`,`file-text`],",
+      "[`invoice-letter`,`开票沟通`,`法务商务`,`开票信息、付款节点、催办和确认话术。`,`mail`],",
+      "[`collection-letter`,`回款催收`,`法务商务`,`催收节奏、措辞边界、证据和升级路径。`,`mail`,``, `restricted`],",
+      "[`partner-proposal`,`合作方案`,`法务商务`,`合作价值、资源投入、分工和里程碑。`,`handshake`],",
+      "[`account-manager`,`大客户经理`,`法务商务`,`客户关系、关键人、续约风险和跟进计划。`,`briefcase`],",
+      "[`negotiation-strategy`,`谈判策略`,`法务商务`,`底线、筹码、让步、替代方案和话术。`,`handshake`],",
+      "[`risk-register`,`风险登记册`,`法务商务`,`风险描述、影响、概率、负责人和缓解措施。`,`test`],",
+      "[`due-diligence`,`尽调清单`,`法务商务`,`主体、财务、合同、人员和运营资料清单。`,`search`,``, `restricted`],",
+      "[`business-plan`,`商业计划书`,`法务商务`,`市场、产品、模式、财务和融资表达。`,`presentation`],",
+      "[`customer-success`,`客户成功顾问`,`法务商务`,`上线、培训、健康度、续约和扩展策略。`,`headset`]",
       "]}",
+      "function UcExpertExtraTemplates(){return UcExpertExtraTemplateSpecs().map(UcExpertTemplateItem)}",
+      "function UcExpertTemplates(){return[",
+      "{id:`copywriter`,name:`文案写手`,avatar:`文`,icon:`pen`,category:`内容创作`,description:`把需求转成清晰、克制、可发布的中文文案。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是专业中文文案写手。先澄清目标人群、渠道、语气和转化目标，再给出可直接发布的标题、正文、备选表达和修改建议。回答要具体、克制、可执行。`},",
+      "{id:`xiaohongshu`,name:`小红书写手`,avatar:`红`,icon:`notebook`,category:`内容创作`,description:`面向种草、标题、封面文案与笔记结构。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是小红书内容专家。围绕人群痛点、使用场景、标题钩子、封面文字、正文结构和互动引导来产出笔记。避免夸大承诺，优先给多版可选方案。`},",
+      "{id:`community-copy`,name:`社群文案`,avatar:`群`,icon:`message`,category:`内容创作`,description:`群公告、转化话术、活动预热与复购提醒。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是社群文案专家。根据社群阶段、成员画像、转化目标和禁用表达，产出公告、活动预热、复购提醒和互动话术。`},",
+      "{id:`short-video-script`,name:`短视频脚本`,avatar:`视`,icon:`video`,category:`内容创作`,description:`拆开场钩子、分镜节奏、口播脚本和转化结尾。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是短视频脚本策划。围绕目标用户、平台、时长、镜头节奏和转化目标，输出开场钩子、分镜、口播词和结尾引导。`},",
+      "{id:`career`,name:`职业顾问`,avatar:`职`,icon:`briefcase`,category:`职场成长`,description:`梳理职业选择、面试准备、简历表达与成长计划。`,model:`默认模型`,skills:[],safety:`restricted`,prompt:`你是职业顾问。帮助用户拆解职业问题、简历定位、面试表达和行动计划。涉及重大职业选择时，说明假设和权衡，避免替用户做不可逆决定。`},",
+      "{id:`resume`,name:`简历写手`,avatar:`历`,icon:`file-user`,category:`职场成长`,description:`把经历整理成更清楚的岗位匹配表达。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是简历写手。根据岗位目标提炼经历、量化成果、优化项目描述和个人优势。优先输出可复制到简历中的中文表达，并指出需要用户补充的数据。`},",
+      "{id:`interview-coach`,name:`面试教练`,avatar:`面`,icon:`speech`,category:`职场成长`,description:`模拟追问、STAR 表达、薪资沟通与复盘建议。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是面试教练。围绕目标岗位模拟面试追问，帮助用户用 STAR 结构表达经历，并给出薪资沟通、追问准备和复盘建议。`},",
+      "{id:`study-coach`,name:`学习教练`,avatar:`学`,icon:`graduation`,category:`职场成长`,description:`制定学习路径、练习计划、复盘节奏和资料清单。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是学习教练。根据目标、基础、时间和约束拆出学习路径、练习计划、阶段检查点和复盘方法。`},",
+      "{id:`product-manager`,name:`产品经理`,avatar:`产`,icon:`boxes`,category:`产品运营`,description:`拆需求、写 PRD、排优先级和验收标准。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是产品经理。先明确用户、场景、目标指标、约束和边界，再输出需求拆解、PRD 结构、优先级、交互流程、验收标准和风险。回答要克制、可执行，避免空泛口号。`},",
+      "{id:`data-analyst`,name:`数据分析师`,avatar:`数`,icon:`chart`,category:`产品运营`,description:`拆指标、看口径、找异常和给分析框架。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是数据分析师。围绕业务问题定义指标口径、拆解漏斗、定位异常、设计对比和输出结论。回答需区分事实、假设和建议，并提示需要补充的数据。`},",
+      "{id:`startup-ideas`,name:`创业点子王`,avatar:`创`,icon:`lightbulb`,category:`产品运营`,description:`从人群、痛点、渠道和验证成本推演业务想法。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是创业点子顾问。围绕用户群、刚需场景、现有替代方案、获客渠道、MVP 和验证成本生成想法。每个想法都要给风险、验证方法和下一步行动。`},",
+      "{id:`user-research`,name:`用户研究`,avatar:`研`,icon:`search`,category:`产品运营`,description:`设计访谈提纲、问卷、洞察归纳和机会点判断。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是用户研究专家。帮助用户设计访谈、问卷、样本筛选、洞察归纳和机会点判断，并区分事实、推断和待验证假设。`},",
+      "{id:`machine-learning`,name:`机器学习`,avatar:`机`,icon:`brain`,category:`技术研发`,description:`解释模型、算法、实验设计与工程落地。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是机器学习专家。用准确术语解释算法、实验设计、数据处理、评估指标和工程落地。回答要包含关键假设、常见坑和可验证步骤。`},",
+      "{id:`code-reviewer`,name:`代码审查`,avatar:`码`,icon:`code`,category:`技术研发`,description:`按风险、回归、可维护性和测试缺口审查代码。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是资深代码审查专家。优先指出 bug、回归风险、安全风险、边界条件和缺失测试，按严重程度排序。不要泛泛评价风格；每个问题都要说明影响、触发条件和建议修复方向。`},",
+      "{id:`test-designer`,name:`测试用例专家`,avatar:`测`,icon:`test`,category:`技术研发`,description:`把需求转成边界、回归和验收用例。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是测试用例专家。根据需求拆分正常路径、异常路径、边界条件、兼容性、回归范围和验收标准。输出清晰的测试矩阵，并标注优先级和需要准备的数据。`},",
+      "{id:`architecture-advisor`,name:`架构顾问`,avatar:`架`,icon:`network`,category:`技术研发`,description:`拆模块边界、接口契约、演进路径和风险回滚。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是软件架构顾问。帮助用户识别模块边界、接口契约、数据流、演进路径、回滚方案和技术风险。`},",
+      "{id:`meeting-summary`,name:`会议纪要`,avatar:`会`,icon:`calendar`,category:`办公效率`,description:`整理会议摘要、决议、待办和风险跟进。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是会议纪要专家。把输入内容整理成背景、关键讨论、明确决议、待办事项、负责人、截止时间和未决问题。缺少信息时用待确认标注，不要编造。`},",
+      "{id:`translation-polish`,name:`翻译润色`,avatar:`译`,icon:`languages`,category:`办公效率`,description:`中英互译、商务表达、语气调整和润色。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是翻译润色专家。根据目标读者和语气要求进行中英互译、改写和润色。保留原意，说明关键措辞差异，并在需要时给正式、自然、简洁多个版本。`},",
+      "{id:`ppt-outline`,name:`汇报策划`,avatar:`演`,icon:`presentation`,category:`办公效率`,description:`把材料整理成汇报结构、页面标题和讲述节奏。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是汇报策划专家。根据受众、目标和材料，整理故事线、章节结构、页面标题、关键论据和讲述节奏。优先让结论明确、证据充分、下一步清楚。`},",
+      "{id:`document-organizer`,name:`文档整理`,avatar:`档`,icon:`file-text`,category:`办公效率`,description:`整理散乱材料、提炼章节、生成摘要和待办。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是文档整理专家。把散乱材料整理成结构化目录、摘要、关键结论、待办和风险清单，保留原意并标出信息缺口。`},",
+      "{id:`contract-review`,name:`合同审阅`,avatar:`合`,icon:`contract`,category:`法务商务`,description:`梳理条款风险、缺失信息和谈判问题。`,model:`默认模型`,skills:[],safety:`restricted`,prompt:`你是合同审阅助手，不构成法律意见。帮助用户梳理合同结构、关键义务、付款、违约、解除、保密、知识产权和争议解决条款中的风险点，并给出需要向专业律师确认的问题清单。`},",
+      "{id:`customer-support`,name:`客服话术`,avatar:`客`,icon:`headset`,category:`法务商务`,description:`生成回复模板、安抚话术和升级路径。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是客服话术专家。根据客户情绪、问题类型、业务规则和可提供补偿，输出礼貌、清晰、可执行的回复模板。复杂问题要给升级路径、记录要点和禁止承诺。`},",
+      "{id:`business-email`,name:`商务邮件`,avatar:`邮`,icon:`mail`,category:`法务商务`,description:`报价、跟进、拒绝、邀请与合作沟通邮件。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是商务邮件专家。根据沟通对象、目标和语气，撰写报价、跟进、拒绝、邀请和合作沟通邮件，并给出正式、自然、简短版本。`},",
+      "{id:`sales-advisor`,name:`销售顾问`,avatar:`售`,icon:`handshake`,category:`法务商务`,description:`梳理客户画像、异议处理、跟进节奏和成交话术。`,model:`默认模型`,skills:[],safety:`allowed`,prompt:`你是销售顾问。帮助用户梳理客户画像、关键诉求、异议处理、跟进节奏和成交话术，避免过度承诺。`}",
+      "].concat(UcExpertExtraTemplates())}",
       "function UcExpertAgentId(e){return`uclaw-expert-${e.id}`}",
       "function UcExpertDefaultAgentId(e){return e.agentsList?.defaultId??`main`}",
       "function UcExpertPersonaStore(){try{let e=JSON.parse(globalThis.localStorage?.getItem(`uclaw.expertPersonas.v1`)||`{}`);return e&&typeof e==`object`&&!Array.isArray(e)?e:{}}catch{return{}}}",
@@ -3985,6 +4223,12 @@ function patchAgentsPageUiCopy() {
       "function UcCustomExpertPrompt(e,t){let n=Array.isArray(e.skills)&&e.skills.length?e.skills.join(`, `):`默认继承`;return[`# ${e.name}`,``,e.description?`> ${e.description}`:``,e.description?``:``,e.prompt,``,`## 回答原则`,`- 默认使用中文，除非用户要求其他语言。`,`- 按专家角色给出更专业、可执行的回答。`,`- 不确定时说明假设，并给出可验证的下一步。`,``,`## U-Claw Expert Metadata`,`- Custom Expert: ${t}`,`- Model: ${e.model||`默认继承`}`,`- Skills: ${n}`].filter(e=>e!==``).join(`\\n`)}",
       "function UcExpertAvailableSkills(e){return(e.agentSkills?.report?.skills??[]).filter(e=>e&&typeof e.name==`string`&&e.name.trim()).map(e=>({name:e.name.trim(),description:String(e.description||e.summary||``)}))}",
       "function UcExpertConfigEntry(e,t){return(e.config?.form?.agents?.list??[]).find(e=>e?.id===t)??null}",
+      "function UcExpertCategories(){return[{id:`all`,label:`全部`,icon:`layers`},{id:`content`,label:`内容创作`,icon:`pen`},{id:`career`,label:`职场成长`,icon:`briefcase`},{id:`product`,label:`产品运营`,icon:`chart`},{id:`tech`,label:`技术研发`,icon:`code`},{id:`office`,label:`办公效率`,icon:`calendar`},{id:`business`,label:`法务商务`,icon:`contract`}]}",
+      "function UcExpertCategoryId(e){return e===`内容创作`?`content`:e===`职场成长`?`career`:e===`产品运营`?`product`:e===`技术研发`?`tech`:e===`办公效率`?`office`:e===`法务商务`?`business`:`custom`}",
+      "function UcExpertCategoryTone(e){return`tone-${UcExpertCategoryId(e)}`}",
+      "function UcExpertCategoryCounts(e){let t=new Map([[`all`,e.length]]);for(let n of e){let e=UcExpertCategoryId(n.category);t.set(e,(t.get(e)||0)+1)}return t}",
+      "function UcExpertIconSvg(e){let t={layers:a`<svg viewBox='0 0 24 24'><path d='m12 3 8 4-8 4-8-4 8-4Z'></path><path d='m4 12 8 4 8-4'></path><path d='m4 17 8 4 8-4'></path></svg>`,pen:a`<svg viewBox='0 0 24 24'><path d='M12 20h9'></path><path d='M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z'></path></svg>`,notebook:a`<svg viewBox='0 0 24 24'><path d='M6 4h11a2 2 0 0 1 2 2v14H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z'></path><path d='M8 4v16'></path><path d='M11 8h5'></path></svg>`,message:a`<svg viewBox='0 0 24 24'><path d='M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z'></path><path d='M8 9h8'></path><path d='M8 13h5'></path></svg>`,video:a`<svg viewBox='0 0 24 24'><rect x='3' y='6' width='13' height='12' rx='2'></rect><path d='m16 10 5-3v10l-5-3v-4Z'></path></svg>`,briefcase:a`<svg viewBox='0 0 24 24'><rect x='3' y='7' width='18' height='13' rx='2'></rect><path d='M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'></path><path d='M3 12h18'></path></svg>`,\"file-user\":a`<svg viewBox='0 0 24 24'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z'></path><path d='M14 2v6h6'></path><circle cx='12' cy='14' r='2'></circle><path d='M8 20a4 4 0 0 1 8 0'></path></svg>`,speech:a`<svg viewBox='0 0 24 24'><path d='M7 8h10'></path><path d='M7 12h7'></path><path d='M21 12a8 8 0 0 1-8 8H8l-5 3V12a8 8 0 1 1 18 0Z'></path></svg>`,graduation:a`<svg viewBox='0 0 24 24'><path d='m22 10-10-5-10 5 10 5 10-5Z'></path><path d='M6 12v5c3 2 9 2 12 0v-5'></path></svg>`,boxes:a`<svg viewBox='0 0 24 24'><path d='m7.5 4 4.5 2.5L7.5 9 3 6.5 7.5 4Z'></path><path d='m16.5 4 4.5 2.5L16.5 9 12 6.5 16.5 4Z'></path><path d='m12 11 4.5 2.5L12 16l-4.5-2.5L12 11Z'></path><path d='M3 6.5V12l4.5 2.5'></path><path d='M21 6.5V12l-4.5 2.5'></path><path d='M7.5 13.5V19L12 21l4.5-2v-5.5'></path></svg>`,chart:a`<svg viewBox='0 0 24 24'><path d='M4 19V5'></path><path d='M4 19h17'></path><path d='m7 15 4-4 3 3 5-7'></path></svg>`,lightbulb:a`<svg viewBox='0 0 24 24'><path d='M9 18h6'></path><path d='M10 22h4'></path><path d='M8 14a6 6 0 1 1 8 0c-.8.7-1 1.7-1 3H9c0-1.3-.2-2.3-1-3Z'></path></svg>`,search:a`<svg viewBox='0 0 24 24'><circle cx='11' cy='11' r='7'></circle><path d='m20 20-3.5-3.5'></path><path d='m8.5 11 1.8 1.8 3.8-4'></path></svg>`,brain:a`<svg viewBox='0 0 24 24'><path d='M9 3a3 3 0 0 0-3 3v1a4 4 0 0 0 0 8v1a3 3 0 0 0 3 3'></path><path d='M15 3a3 3 0 0 1 3 3v1a4 4 0 0 1 0 8v1a3 3 0 0 1-3 3'></path><path d='M9 3v18'></path><path d='M15 3v18'></path><path d='M6 9h3'></path><path d='M15 9h3'></path></svg>`,code:a`<svg viewBox='0 0 24 24'><path d='m8 9-4 3 4 3'></path><path d='m16 9 4 3-4 3'></path><path d='m14 5-4 14'></path></svg>`,test:a`<svg viewBox='0 0 24 24'><path d='M10 2v6L5 19a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3L14 8V2'></path><path d='M8 2h8'></path><path d='M7 16h10'></path></svg>`,network:a`<svg viewBox='0 0 24 24'><rect x='3' y='3' width='7' height='7' rx='2'></rect><rect x='14' y='3' width='7' height='7' rx='2'></rect><rect x='8.5' y='14' width='7' height='7' rx='2'></rect><path d='M10 6.5h4'></path><path d='M6.5 10v3'></path><path d='M17.5 10v3'></path></svg>`,calendar:a`<svg viewBox='0 0 24 24'><rect x='3' y='4' width='18' height='17' rx='2'></rect><path d='M8 2v4'></path><path d='M16 2v4'></path><path d='M3 10h18'></path><path d='m8 15 2 2 5-5'></path></svg>`,languages:a`<svg viewBox='0 0 24 24'><path d='M5 4h8'></path><path d='M9 4v14'></path><path d='M4 18h10'></path><path d='M6 9c1 3 3 5 7 6'></path><path d='M13 9c-1 3-3 5-7 6'></path><path d='m17 20 3-8 3 8'></path><path d='M18 17h4'></path></svg>`,presentation:a`<svg viewBox='0 0 24 24'><path d='M3 4h18'></path><rect x='5' y='4' width='14' height='10' rx='1'></rect><path d='M12 14v6'></path><path d='m8 20 4-3 4 3'></path></svg>`,\"file-text\":a`<svg viewBox='0 0 24 24'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z'></path><path d='M14 2v6h6'></path><path d='M8 13h8'></path><path d='M8 17h6'></path></svg>`,contract:a`<svg viewBox='0 0 24 24'><path d='M7 3h10a2 2 0 0 1 2 2v16l-3-2-3 2-3-2-3 2V5a2 2 0 0 1 2-2Z'></path><path d='M9 8h6'></path><path d='M9 12h6'></path><path d='M9 16h4'></path></svg>`,headset:a`<svg viewBox='0 0 24 24'><path d='M4 13a8 8 0 0 1 16 0'></path><path d='M4 13v3a2 2 0 0 0 2 2h1v-7H6a2 2 0 0 0-2 2Z'></path><path d='M20 13v3a2 2 0 0 1-2 2h-1v-7h1a2 2 0 0 1 2 2Z'></path><path d='M16 18c0 2-2 3-4 3'></path></svg>`,mail:a`<svg viewBox='0 0 24 24'><rect x='3' y='5' width='18' height='14' rx='2'></rect><path d='m3 7 9 7 9-7'></path></svg>`,handshake:a`<svg viewBox='0 0 24 24'><path d='M8 12 5 9l4-4 4 4'></path><path d='m16 12 3-3-4-4-4 4'></path><path d='m8 12 4 4 4-4'></path><path d='M12 16v4'></path></svg>`};return t[e]??t.layers}",
+      "function UcExpertIcon(e){return a`<span class='uclaw-expert-avatar ${UcExpertCategoryTone(e.category)}' aria-hidden='true'>${UcExpertIconSvg(e.icon)}</span>`}",
       "function UcExpertSectionTitle(e,t,n){return a`<div class='uclaw-expert-section-title'><span class='uclaw-step'>${e}</span><div><div class='card-title'>${t}</div>${n?a`<div class='card-sub'>${n}</div>`:null}</div></div>`}",
       "function UcCustomExpertForm(e){let t=e.customExpertForm??UcCustomExpertDefaults(),n=new Set(Array.isArray(t.skills)?t.skills:[]),r=UcExpertAvailableSkills(e),i=!!e.expertCreateBusyId,o=Array.isArray(t.skills)?t.skills.length:0,s=(t.avatar??`专`).trim()||`专`,c=(t.name??``).trim()||`自定义专家`,l=(t.description??``).trim()||`补充一句说明，让会话更容易辨认`,u=!!(t.prompt??``).trim();return a`<section class='uclaw-create-panel uclaw-custom-expert-form' data-uclaw-custom-expert-form data-preserve-on-failure='表单失败不会清空'>${UcExpertSectionTitle(`2`,`自定义创建`,`没有合适模板时，用一张专家卡片快速定义角色。`)}<div class='uclaw-custom-card-head'><div class='uclaw-custom-preview-avatar'>${s.slice(0,4)}</div><div class='uclaw-custom-preview-copy'><div class='uclaw-custom-preview-title'>${c}</div><div class='uclaw-custom-preview-sub'>${l}</div></div><span class='uclaw-custom-preview-badge'>${u?`Prompt 已填写`:`待填写`}</span></div><div class='uclaw-custom-expert-grid'><label class='uclaw-custom-expert-field'><span class='uclaw-field-top'><span>专家名称</span><b>必填</b></span><input class='input uclaw-form-control' .value=${t.name??``} placeholder='例如：合同审阅专家' @input=${t=>e.onCustomExpertField?.(`name`,t.target.value)} /></label><label class='uclaw-custom-expert-field'><span class='uclaw-field-top'><span>头像</span><em>1-4 字</em></span><input class='input uclaw-form-control' maxlength='4' .value=${t.avatar??``} placeholder='专' @input=${t=>e.onCustomExpertField?.(`avatar`,t.target.value)} /></label><label class='uclaw-custom-expert-field wide'><span class='uclaw-field-top'><span>一句话描述</span><em>用于会话识别</em></span><input class='input uclaw-form-control' .value=${t.description??``} placeholder='说明这个专家适合解决什么问题' @input=${t=>e.onCustomExpertField?.(`description`,t.target.value)} /></label><label class='uclaw-custom-expert-field wide'><span class='uclaw-field-top'><span>Prompt</span><b>必填</b></span><textarea class='input uclaw-form-control uclaw-custom-expert-textarea' .value=${t.prompt??``} placeholder='写清楚专家角色、回答原则、边界和输出格式。' @input=${t=>e.onCustomExpertField?.(`prompt`,t.target.value)}></textarea></label><details class='uclaw-expert-options wide'><summary><span>模型与技能</span><span>${t.model?`已选模型`:o?`${o} 个技能`:`可选`}</span></summary><div class='uclaw-expert-options-body'><label class='uclaw-custom-expert-field'><span>模型</span><select class='input uclaw-form-control' .value=${t.model??``} @change=${t=>e.onCustomExpertField?.(`model`,t.target.value)}><option value=''>继承默认模型</option>${ie(e.config?.form,t.model||void 0,e.modelCatalog,t.model||null)}</select></label><div class='uclaw-custom-expert-field wide'><div class='row uclaw-section-head compact'><span>技能选择</span><button class='btn btn--sm' type='button' ?disabled=${e.agentSkills?.loading} @click=${()=>e.onCustomExpertRefreshSkills?.()}>${e.agentSkills?.loading?`刷新中…`:`刷新`}</button></div>${e.agentSkills?.error?a`<div class='uclaw-expert-status danger'>技能读取失败：${e.agentSkills.error}</div>`:null}<div class='uclaw-custom-expert-skills'>${r.length?r.map(r=>a`<label class='uclaw-custom-expert-skill'><input type='checkbox' .checked=${n.has(r.name)} @change=${t=>e.onCustomExpertSkill?.(r.name,t.target.checked)} /><span>${r.name}</span>${r.description?a`<small>${r.description}</small>`:null}</label>`):a`<div class='muted uclaw-empty-state'>暂无可选技能。点击刷新读取当前技能状态。</div>`}</div></div></div></details></div><div class='uclaw-custom-expert-actions'><button class='btn primary' type='button' ?disabled=${i||!e.connected} @click=${()=>e.onCreateCustomExpert?.()}>${e.expertCreateBusyId===`custom`?`创建中…`:`创建并进入会话`}</button><button class='btn btn--ghost' type='button' ?disabled=${i} @click=${()=>e.onResetCustomExpert?.()}>清空</button></div></section>`}",
       "function UcCustomExpertModal(e){return e.customExpertModalOpen?a`<div class='uclaw-custom-expert-modal' data-uclaw-custom-expert-modal role='dialog' aria-modal='true' aria-label='自定义创建专家' @click=${t=>{t.target===t.currentTarget&&e.onCloseCustomExpert?.()}}><div class='uclaw-custom-expert-modal-card'><div class='uclaw-modal-head'><div><div class='card-title'>自定义创建专家</div><div class='card-sub'>填写角色信息后，会写入 AGENTS.md 并进入对应专家会话。</div></div><button class='btn btn--ghost uclaw-modal-close' type='button' @click=${()=>e.onCloseCustomExpert?.()} aria-label='关闭'>关闭</button></div>${UcCustomExpertForm(e)}</div></div>`:null}",
@@ -3994,32 +4238,40 @@ function patchAgentsPageUiCopy() {
       "function UcExpertSessions(e,t){return(e.sessionsResult?.sessions??[]).filter(e=>e&&typeof e.key==`string`&&m(e.key)?.agentId===t).slice(0,5)}",
       "function UcRecentExpertSessions(e){return(e.sessionsResult?.sessions??[]).filter(e=>e&&typeof e.key==`string`).slice(0,6)}",
       "function UcExpertCatalog(e){let t=UcHiddenExpertIds(),n=e.agentsList?.agents??[],r=new Map(n.map(e=>[e.id,e])),i=new Set(UcExpertTemplates().map(UcExpertAgentId)),a=UcExpertTemplates().map(t=>{let n=UcExpertAgentId(t),i=r.get(n)??null,o=UcExpertConfigEntry(e,n);return{...t,agentId:n,source:`built-in`,installed:!!i,agent:i,model:o?.model?String(o.model):t.model,skills:Array.isArray(o?.skills)?o.skills:t.skills,sessionCount:UcExpertSessions(e,n).length}}),o=n.filter(e=>typeof e.id==`string`&&e.id.startsWith(`uclaw-expert-`)&&!i.has(e.id)&&!t.has(e.id)).map(t=>{let n=UcExpertConfigEntry(e,t.id);return{id:t.id,name:t.name||t.id,avatar:t.emoji||`专`,category:`自定义专家`,description:`用户创建的专家，复用 OpenClaw Agent 与 AGENTS.md。`,model:n?.model?String(n.model):t.model?String(t.model):`默认模型`,skills:Array.isArray(n?.skills)?n.skills:[],safety:`allowed`,prompt:`打开 AGENTS.md 查看或编辑专家提示词。`,agentId:t.id,source:`custom`,installed:!0,agent:t,sessionCount:UcExpertSessions(e,t.id).length}});return[...a,...o]}",
-      "function UcExpertActionButtons(e,t){let n=t.installed?`创建会话`:`选择创建`,r=e.expertCreateBusyId===t.id;return a`<div class='uclaw-expert-card-actions'><button class='btn btn--sm primary' type='button' ?disabled=${!!e.expertCreateBusyId||!e.connected} @click=${()=>t.installed?e.onNewExpertSession?.(t.agentId,t.name):e.onCreateExpert?.(t.id)}>${r?`创建中…`:n}</button></div>`}",
-      "function UcExpertTemplateCard(e,t){return a`<article class='uclaw-expert-card ${t.installed?`is-installed`:`is-template`}' data-uclaw-expert-card=${t.agentId}><div class='uclaw-expert-card-main'><div class='uclaw-expert-avatar'>${t.avatar}</div><div class='uclaw-expert-body'><div class='uclaw-expert-name'>${t.name}</div><div class='uclaw-expert-meta'>${t.category} · ${t.installed?`已可用`:`模板`}</div><div class='uclaw-expert-desc'>${t.description}</div></div></div>${UcExpertActionButtons(e,t)}</article>`}",
-      "function UcExpertTemplatePicker(e,t){let n=t.filter(e=>e.source===`built-in`);return a`<section class='uclaw-create-panel uclaw-expert-manager' data-uclaw-expert-manager>${UcExpertSectionTitle(`1`,`选择专家创建`,`优先从模板开始，选择后自动创建专家并进入会话。`)}<div class='uclaw-expert-card-grid'>${n.map(t=>UcExpertTemplateCard(e,t))}</div></section>`}",
+      "function UcExpertActionButtons(e,t){let n=e.expertCreateBusyId===t.id;return a`<div class='uclaw-expert-card-actions'><button class='btn btn--sm primary' type='button' ?disabled=${!!e.expertCreateBusyId||!e.connected} @click=${()=>t.installed?e.onNewExpertSession?.(t.agentId,t.name):e.onCreateExpert?.(t.id)}>${n?`创建中…`:`选择创建`}</button></div>`}",
+      "function UcExpertCategoryRail(e,t){let n=UcExpertCategoryCounts(t),r=e.expertCategoryFilter??`all`;return a`<nav class='uclaw-expert-category-rail' aria-label='专家分类'>${UcExpertCategories().map(i=>a`<button class='uclaw-expert-category-link ${r===i.id?`active`:``} ${i.id!==`all`?`tone-${i.id}`:``}' type='button' aria-pressed=${r===i.id?`true`:`false`} @click=${t=>{t.preventDefault(),e.onExpertCategoryChange?.(i.id)}}><span class='uclaw-expert-category-icon'>${UcExpertIconSvg(i.icon)}</span><span>${i.label}</span><b>${n.get(i.id)||0}</b></button>`)}</nav>`}",
+      "function UcExpertTemplateCard(e,t){return a`<article class='uclaw-expert-card uclaw-expert-card--directory ${t.installed?`is-installed`:`is-template`}' data-uclaw-expert-card=${t.agentId}><div class='uclaw-expert-card-main'>${UcExpertIcon(t)}<div class='uclaw-expert-body'><div class='uclaw-expert-name'>${t.name}</div><div class='uclaw-expert-meta'>${t.category} · ${t.installed?`已可用`:`模板`}</div><div class='uclaw-expert-desc'>${t.description}</div></div></div>${UcExpertActionButtons(e,t)}</article>`}",
+      "function UcExpertDirectoryBlock(e,t,n){let r=t.filter(e=>UcExpertCategoryId(e.category)===n.id);return r.length?a`<section class='uclaw-expert-category-block' id=${`uclaw-expert-category-${n.id}`}><div class='uclaw-expert-category-head'><div><div class='uclaw-expert-category-title'><span class='uclaw-expert-category-icon ${`tone-${n.id}`}'>${UcExpertIconSvg(n.icon)}</span>${n.label}</div><p>${n.label===`内容创作`?`标题、正文、脚本与平台表达。`:n.label===`职场成长`?`简历、面试、学习和成长路径。`:n.label===`产品运营`?`需求、指标、增长和验证。`:n.label===`技术研发`?`代码、测试、架构和模型工程。`:n.label===`办公效率`?`会议、翻译、汇报和文档整理。`:`合同、客服、销售和商务沟通。`}</p></div><span>${r.length} 个专家</span></div><div class='uclaw-expert-directory-grid'>${r.map(t=>UcExpertTemplateCard(e,t))}</div></section>`:o}",
+      "function UcExpertTemplatePicker(e,t){let n=t.filter(e=>e.source===`built-in`),r=UcExpertCategories().filter(e=>e.id!==`all`),i=e.expertCategoryFilter??`all`,o=i===`all`?r:r.filter(e=>e.id===i),s=i===`all`?n:n.filter(e=>UcExpertCategoryId(e.category)===i),c=UcExpertCategories().find(e=>e.id===i)?.label??`全部`;return a`<section class='uclaw-create-panel uclaw-expert-manager' data-uclaw-expert-manager id='uclaw-expert-directory-top'><div class='uclaw-expert-directory-shell'>${UcExpertCategoryRail(e,n)}<div class='uclaw-expert-directory-pane'><div class='uclaw-expert-directory-summary'>${c} · ${s.length} 个专家模板</div><div class='uclaw-expert-directory-list' data-uclaw-expert-scroll-list='true'>${o.map(t=>UcExpertDirectoryBlock(e,n,t))}</div></div></div></section>`}",
       "function UcExpertManagement(e,t){return UcExpertTemplatePicker(e,t)}",
       "function UcExpertDetail(e,t){return null}",
       "function UcExpertLanding(e,t,n){let r=UcExpertCatalog(e);return a`",
       "    <section class='uclaw-expert-landing' data-uclaw-expert-landing data-uclaw-expert-create-center>",
       "      <div class='uclaw-expert-page-head'>",
       "        <div>",
-      "          <h2>创建专家</h2>",
-      "          <p>选择一个专家模板，或自定义一个角色。</p>",
+      "          <h2>专家目录</h2>",
+      "          <p>从专家模板快速创建智能体，覆盖内容创作、职场成长、产品运营、技术研发、办公效率、法务商务等常见场景。</p>",
       "        </div>",
-      "        <button class='btn primary uclaw-open-custom-expert' type='button' ?disabled=${!!e.expertCreateBusyId||!e.connected} @click=${()=>e.onOpenCustomExpert?.()}>自定义创建</button>",
       "      </div>",
       "      ${e.expertCreateError?a`<div class='uclaw-expert-status danger'>${e.expertCreateError}</div>`:e.expertCreateMessage?a`<div class='uclaw-expert-status ok'>${e.expertCreateMessage}</div>`:null}",
       "      <div class='uclaw-create-layout'>",
       "        ${UcExpertTemplatePicker(e,r)}",
       "      </div>",
-      "      ${UcCustomExpertModal(e)}",
       "    </section>",
-      "  `}",
-    ].join("\n");
+	      "  `}",
+	    ].join("\n");
 
-    const expertLandingStart = "function UcExpertTemplates(){return[";
-    if (after.includes(expertLandingStart)) {
-      const start = after.indexOf(expertLandingStart);
+	    const expertLandingHelperStart = "function UcExpertTemplatePrompt(";
+	    const expertRenderStart = "function Qn(e){";
+	    const existingExpertHelperStart = after.indexOf(expertLandingHelperStart);
+	    const existingExpertRenderStart = after.indexOf(expertRenderStart);
+	    if (existingExpertHelperStart >= 0 && existingExpertRenderStart > existingExpertHelperStart) {
+	      after = `${after.slice(0, existingExpertHelperStart)}${after.slice(existingExpertRenderStart)}`;
+	    }
+
+	    const expertLandingStart = "function UcExpertTemplates(){return[";
+	    if (after.includes(expertLandingStart)) {
+	      const start = after.indexOf(expertLandingStart);
       const end = after.indexOf("function Qn(e){", start);
       if (end >= 0) {
         after = `${after.slice(0, start)}${expertLandingHelper}${after.slice(end)}`;
@@ -4162,6 +4414,12 @@ function patchAgentsPageUiCopy() {
         "customExpertForm:this.customExpertForm,customExpertModalOpen:this.customExpertModalOpen,connected:this.connected,toolsCatalog:",
       );
     }
+    if (!after.includes("expertCategoryFilter:this.expertCategoryFilter")) {
+      after = after.replace(
+        "customExpertForm:this.customExpertForm,customExpertModalOpen:this.customExpertModalOpen,connected:this.connected,toolsCatalog:",
+        "customExpertForm:this.customExpertForm,customExpertModalOpen:this.customExpertModalOpen,expertCategoryFilter:this.expertCategoryFilter??`all`,connected:this.connected,toolsCatalog:",
+      );
+    }
     if (!after.includes("onCreateExpert:e=>void this.createExpertFromTemplate(e)")) {
       after = after.replace(
         "modelCatalog:this.chatModelCatalog,onRefresh:",
@@ -4186,6 +4444,16 @@ function patchAgentsPageUiCopy() {
         "onResetCustomExpert:()=>this.resetCustomExpertForm(),onOpenCustomExpert:()=>this.openCustomExpertModal(),onCloseCustomExpert:()=>this.closeCustomExpertModal(),onRefresh:",
       );
     }
+    if (!after.includes("onExpertCategoryChange:e=>{this.expertCategoryFilter=e||`all`")) {
+      after = after.replace(
+        "onCloseCustomExpert:()=>this.closeCustomExpertModal(),onRefresh:",
+        "onCloseCustomExpert:()=>this.closeCustomExpertModal(),onExpertCategoryChange:e=>{this.expertCategoryFilter=e||`all`;let t=()=>this.renderRoot?.querySelector?.(`[data-uclaw-expert-scroll-list=\"true\"]`)?.scrollTo?.({top:0,left:0,behavior:`auto`});this.requestUpdate(),t(),this.updateComplete?.then?.(()=>{t(),requestAnimationFrame?.(()=>t())})},onRefresh:",
+      );
+    }
+    after = after.replace(
+      "onExpertCategoryChange:e=>{this.expertCategoryFilter=e||`all`,this.requestUpdate(),setTimeout(()=>this.renderRoot?.querySelector?.(`[data-uclaw-expert-scroll-list=\"true\"]`)?.scrollTo?.(0,0),0)},onRefresh:",
+      "onExpertCategoryChange:e=>{this.expertCategoryFilter=e||`all`;let t=()=>this.renderRoot?.querySelector?.(`[data-uclaw-expert-scroll-list=\"true\"]`)?.scrollTo?.({top:0,left:0,behavior:`auto`});this.requestUpdate(),t(),this.updateComplete?.then?.(()=>{t(),requestAnimationFrame?.(()=>t())})},onRefresh:",
+    );
     if (!after.includes("`expertCreateBusyId`")) {
       after = after.replace(
         "n([i()],$.prototype,`agentSkillsAgentId`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
@@ -4202,6 +4470,12 @@ function patchAgentsPageUiCopy() {
       after = after.replace(
         "n([i()],$.prototype,`customExpertForm`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
         "n([i()],$.prototype,`customExpertForm`,void 0),n([i()],$.prototype,`customExpertModalOpen`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
+      );
+    }
+    if (!after.includes("`expertCategoryFilter`")) {
+      after = after.replace(
+        "n([i()],$.prototype,`customExpertModalOpen`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
+        "n([i()],$.prototype,`customExpertModalOpen`,void 0),n([i()],$.prototype,`expertCategoryFilter`,void 0),n([i()],$.prototype,`skillsFilter`,void 0),",
       );
     }
 
@@ -4452,11 +4726,19 @@ body {
 }
 
 .content:not(.content--chat):not(.content--workboard) {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   overflow: auto;
   padding: 16px;
   background: var(--bg-content);
   background-image: linear-gradient(180deg, #f8fafc 0%, #f7f9fc 100%);
+}
+
+.content:not(.content--chat):not(.content--workboard):has(openclaw-skills-page) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .content > openclaw-router-outlet,
@@ -4466,6 +4748,119 @@ body {
 .content openclaw-skills-page,
 .content openclaw-channels-page {
   min-width: 0;
+}
+
+.content > openclaw-router-outlet {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.content openclaw-agents-page {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.content:has(openclaw-skills-page) openclaw-router-outlet,
+openclaw-router-outlet:has(openclaw-skills-page) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.content openclaw-skills-page {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+openclaw-skills-page .page-title {
+  line-height: 1.24;
+  min-height: 1.24em;
+  overflow: visible;
+}
+
+openclaw-skills-page .page-sub,
+openclaw-skills-page .page-subtitle {
+  line-height: 1.45;
+  min-height: 1.45em;
+}
+
+openclaw-skills-page .content-header {
+  flex: 0 0 auto;
+  max-height: none;
+  min-height: 54px;
+  overflow: visible;
+  padding-top: 0;
+  padding-bottom: 4px;
+}
+
+openclaw-skills-page .content-header > div {
+  min-width: 0;
+  overflow: visible;
+  padding-top: 0;
+}
+
+openclaw-skills-page .settings-workspace,
+openclaw-skills-page .settings-workspace__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+openclaw-skills-page [data-skillhub-flex-fill="true"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+openclaw-skills-page [data-skillhub-scene-picker="true"] {
+  background: var(--panel);
+  isolation: isolate;
+}
+
+openclaw-skills-page [data-skillhub-scene-option="true"] {
+  color: #1f2937;
+  font-weight: 650;
+}
+
+openclaw-skills-page [data-skillhub-scene-option="true"] .muted {
+  color: #64748b;
+}
+
+openclaw-skills-page [data-skillhub-scene-option="true"].primary,
+openclaw-skills-page [data-skillhub-scene-option="true"][aria-pressed="true"] {
+  color: #ffffff;
+}
+
+openclaw-skills-page [data-skillhub-scene-option="true"].primary .muted,
+openclaw-skills-page [data-skillhub-scene-option="true"][aria-pressed="true"] .muted {
+  color: rgba(255, 255, 255, 0.86);
+}
+
+openclaw-skills-page .skillhub-scene-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  height: 16px;
+  place-items: center;
+  width: 16px;
+}
+
+openclaw-skills-page .skillhub-scene-icon svg {
+  fill: none;
+  height: 16px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 16px;
 }
 
 .card,
@@ -4520,6 +4915,20 @@ body {
   border-right-color: color-mix(in srgb, var(--uclaw-navy) 10%, var(--border));
 }
 
+.sidebar-footer-icon,
+.sidebar-mode-switch {
+  display: none !important;
+}
+
+.chat-workbench,
+.chat-workbench--workspace-collapsed {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.chat-workspace-rail {
+  display: none !important;
+}
+
 .topbar {
   border-bottom-color: color-mix(in srgb, var(--uclaw-navy) 9%, var(--border));
   backdrop-filter: blur(14px);
@@ -4529,11 +4938,9 @@ body {
 .topbar-brand__logo,
 .login-gate__logo,
 .agent-chat__avatar--logo img {
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 10px;
-  background:
-    radial-gradient(circle at 30% 24%, #bae0ff 0 16%, transparent 17%),
-    linear-gradient(135deg, var(--primary), var(--uclaw-teal) 58%, var(--uclaw-claw));
+  background: #ffffff;
   box-shadow: 0 6px 16px rgba(22, 119, 255, 0.18);
 }
 
@@ -4576,6 +4983,282 @@ body {
 .sidebar-new-session,
 .dashboard-header__breadcrumb-current {
   color: var(--accent);
+}
+
+.sidebar-shell{position:relative}
+.sidebar-shell__body{padding-top:36px}
+.sidebar--collapsed .sidebar-shell__body{padding-top:50px}
+.sidebar-sessions>.sidebar-new-session,
+.sidebar-sessions>openclaw-tooltip>.sidebar-new-session,
+.sidebar-sessions>.sidebar-new-session-group{position:absolute;top:62px;left:16px;right:16px;z-index:12;margin:0}
+.sidebar-sessions>openclaw-tooltip{display:contents}
+.sidebar--collapsed .sidebar-sessions>.sidebar-new-session,
+.sidebar--collapsed .sidebar-sessions>openclaw-tooltip>.sidebar-new-session,
+.sidebar--collapsed .sidebar-sessions>.sidebar-new-session-group{top:62px;left:14px;right:14px}
+
+/* sidebar-command-shelf-3 */
+.shell-nav {
+  border-right-color: color-mix(in srgb, var(--border) 78%, transparent);
+}
+
+.sidebar {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 253, 0.82) 52%, rgba(246, 248, 252, 0.94) 100%),
+    #f8fafc;
+  box-shadow: inset -1px 0 color-mix(in srgb, var(--border) 46%, transparent);
+}
+
+.sidebar-shell {
+  padding: 17px 14px 12px;
+}
+
+.sidebar-brand {
+  min-height: 38px;
+  padding: 0 8px 14px;
+  border-bottom: 0;
+}
+
+.sidebar-brand__identity {
+  gap: 9px;
+}
+
+.sidebar-brand__logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  box-shadow: 0 5px 14px rgba(22, 119, 255, 0.12);
+}
+
+.sidebar-brand__title {
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.sidebar-brand__icon,
+.sidebar-session-sort,
+.sidebar-session-group-actions {
+  border-radius: 7px;
+}
+
+.sidebar-brand__icon:hover:not(:disabled),
+.sidebar-brand__icon:focus-visible,
+.sidebar-session-sort:hover,
+.sidebar-session-sort[aria-expanded="true"],
+.sidebar-session-group-actions:hover,
+.sidebar-session-group-actions[aria-expanded="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-subtle) 42%, white 58%);
+}
+
+.sidebar-nav {
+  padding: 12px 0 6px;
+}
+
+.nav-section {
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.nav-section__label,
+.sidebar-recent-sessions__head {
+  color: #7e8796;
+}
+
+.nav-section__label-text,
+.sidebar-recent-sessions__label-text {
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 12px;
+  font-weight: 660;
+}
+
+.nav-item {
+  min-height: 44px;
+  border-radius: 8px;
+  padding: 0 11px;
+  gap: 10px;
+  font-size: 15px;
+  color: #717b8d;
+  border-color: transparent;
+  background: transparent;
+  transition: background .14s ease, border-color .14s ease, color .14s ease, transform .14s ease;
+}
+
+.nav-item:hover {
+  color: var(--uclaw-navy);
+  background: rgba(255, 255, 255, 0.58);
+  border-color: transparent;
+}
+
+.nav-item.active,
+.nav-item--active {
+  color: var(--uclaw-navy);
+  background: color-mix(in srgb, var(--accent-subtle) 38%, white 62%);
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.nav-item.active:before,
+.nav-item--active:before {
+  content: none;
+}
+
+.nav-item.active .nav-item__icon,
+.nav-item--active .nav-item__icon {
+  color: var(--accent);
+}
+
+.nav-item__icon,
+.nav-item__icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.nav-item__text {
+  font-weight: 650;
+}
+
+.sidebar-sessions {
+  gap: 8px;
+  padding: 0 6px;
+}
+
+.sidebar-sessions>.sidebar-new-session,
+.sidebar-sessions>openclaw-tooltip>.sidebar-new-session {
+  left: 20px;
+  right: 72px;
+}
+
+.sidebar-sessions>.sidebar-new-session-group {
+  left: 20px;
+  right: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px;
+  gap: 8px;
+  align-items: center;
+  width: auto;
+}
+
+.sidebar-new-session {
+  min-height: 46px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: none;
+  gap: 10px;
+  padding: 0 13px;
+  font-size: 15px;
+  font-weight: 680;
+}
+
+.sidebar-new-session:hover:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-subtle) 28%, white 72%);
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+}
+
+.sidebar-new-session--worktree {
+  width: 46px;
+  min-height: 46px;
+  justify-content: center;
+  padding: 0;
+  color: #8792a4;
+  background: transparent;
+}
+
+.sidebar-new-session__icon,
+.sidebar-new-session__icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.sidebar-recent-sessions {
+  gap: 4px;
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+}
+
+.sidebar-recent-sessions__head {
+  min-height: 28px;
+  padding: 0 6px;
+}
+
+.sidebar-recent-session {
+  min-height: 36px;
+  border-radius: 7px;
+  color: #6f7989;
+  position: relative;
+  background: transparent;
+  border-color: transparent;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
+}
+
+.sidebar-recent-session:hover {
+  color: var(--uclaw-navy);
+  background: rgba(255, 255, 255, 0.56);
+  border-color: transparent;
+}
+
+.sidebar-recent-session--active {
+  color: var(--uclaw-navy);
+  background: rgba(22, 119, 255, 0.075);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.sidebar-recent-session--active:before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  transform: translateY(-50%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-subtle) 56%, transparent);
+}
+
+.sidebar-recent-session__link {
+  padding-left: 24px;
+}
+
+.sidebar-recent-session__name {
+  color: inherit;
+  font-weight: 540;
+}
+
+.sidebar-recent-session--active .sidebar-recent-session__name {
+  font-weight: 680;
+}
+
+.sidebar-shell__footer {
+  border-top-color: color-mix(in srgb, var(--border) 54%, transparent);
+  padding-top: 12px;
+}
+
+.sidebar-footer-bar {
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.sidebar-status__dot {
+  width: 9px;
+  height: 9px;
+}
+
+.sidebar--collapsed .sidebar-shell {
+  padding: 12px 8px 10px;
+}
+
+.sidebar--collapsed .sidebar-brand {
+  border-bottom: 0;
+}
+
+.sidebar--collapsed .nav-item:before,
+.sidebar--collapsed .sidebar-recent-session--active:before {
+  content: none;
 }
 
 .btn:not(.btn--ghost):not(.btn--icon),
@@ -4680,6 +5363,57 @@ pre,
   align-items: center;
   gap: 8px;
   row-gap: 6px;
+}
+
+.chat-settings-popover-wrapper{display:none}
+
+.chat-controls__deep-thinking {
+  flex: 0 0 auto;
+  min-width: 78px;
+  max-width: 96px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #667085;
+  box-shadow: none;
+  font: 600 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .14s ease, background .14s ease, border-color .14s ease;
+}
+
+.chat-controls__deep-thinking:hover:not(:disabled),
+.chat-controls__deep-thinking:focus-visible {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-subtle) 64%, white 36%);
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.chat-controls__deep-thinking--active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-subtle) 82%, white 18%);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+
+.chat-controls__deep-thinking:disabled {
+  color: #98a2b3;
+  background: transparent;
+  border-color: transparent;
+  cursor: not-allowed;
+}
+
+.chat-controls__deep-thinking svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
 }
 
 .chat-controls__skillhub,
@@ -4884,9 +5618,28 @@ openclaw-agents-page .agents-layout > .uclaw-expert-landing ~ * {
 }
 
 openclaw-agents-page .uclaw-expert-landing {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  max-width: 1160px;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+openclaw-agents-page:has(.uclaw-expert-landing) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+openclaw-agents-page:has(.uclaw-expert-landing) .agents-layout {
+  height: max(420px, calc(100dvh - 154px));
+  max-height: calc(100dvh - 154px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 openclaw-agents-page .uclaw-expert-page-head {
@@ -4916,17 +5669,14 @@ openclaw-agents-page .uclaw-create-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
+  flex: 1 1 auto;
   gap: 12px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 openclaw-agents-page .uclaw-create-panel {
   min-width: 0;
-}
-
-openclaw-agents-page .uclaw-open-custom-expert {
-  flex: 0 0 auto;
-  min-height: 36px;
-  padding-inline: 16px;
 }
 
 openclaw-agents-page .uclaw-expert-section-title {
@@ -4981,6 +5731,8 @@ openclaw-agents-page .uclaw-template-grid {
 
 openclaw-agents-page .uclaw-expert-manager,
 openclaw-agents-page .uclaw-expert-detail {
+  height: 100%;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -4989,6 +5741,155 @@ openclaw-agents-page .uclaw-expert-card-grid {
   grid-template-columns: repeat(3, minmax(260px, 1fr));
   gap: 8px;
   margin-top: 8px;
+}
+
+openclaw-agents-page .uclaw-expert-directory-shell {
+  display: grid;
+  grid-template-columns: 172px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 94%, white);
+}
+
+openclaw-agents-page .uclaw-expert-category-rail {
+  position: sticky;
+  top: 12px;
+  display: grid;
+  align-content: start;
+  align-self: start;
+  grid-auto-rows: max-content;
+  gap: 6px;
+  max-height: 100%;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+openclaw-agents-page .uclaw-expert-directory-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+openclaw-agents-page .uclaw-expert-category-link {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  gap: 9px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  text-decoration: none;
+}
+
+openclaw-agents-page .uclaw-expert-category-link:hover,
+openclaw-agents-page .uclaw-expert-category-link.active {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+}
+
+openclaw-agents-page .uclaw-expert-category-link b {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+openclaw-agents-page .uclaw-expert-category-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, var(--border));
+  border-radius: 8px;
+  color: var(--accent);
+  background: color-mix(in srgb, currentColor 9%, transparent);
+}
+
+openclaw-agents-page .uclaw-expert-directory-list {
+  display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding-bottom: 28px;
+  padding-right: 4px;
+  scroll-behavior: smooth;
+}
+
+openclaw-agents-page .uclaw-expert-directory-summary {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+openclaw-agents-page .uclaw-expert-category-block {
+  display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
+  gap: 8px;
+  min-width: 0;
+  scroll-margin-top: 16px;
+}
+
+openclaw-agents-page .uclaw-expert-category-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+openclaw-agents-page .uclaw-expert-category-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 760;
+}
+
+openclaw-agents-page .uclaw-expert-category-head p {
+  margin: 3px 0 0 36px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+openclaw-agents-page .uclaw-expert-category-head > span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+openclaw-agents-page .uclaw-expert-directory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 8px;
 }
 
 openclaw-agents-page .uclaw-custom-expert-form {
@@ -5269,10 +6170,19 @@ openclaw-agents-page .uclaw-custom-expert-actions .primary {
 openclaw-agents-page .uclaw-expert-card {
   display: grid;
   gap: 8px;
+  min-width: 0;
   padding: 9px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-raised) 96%, white);
+}
+
+openclaw-agents-page .uclaw-expert-card--directory {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 74px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--surface-raised) 98%, white);
 }
 
 openclaw-agents-page .uclaw-expert-card.is-installed {
@@ -5297,12 +6207,15 @@ openclaw-agents-page .uclaw-expert-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 openclaw-agents-page .uclaw-expert-card-actions .btn {
+  flex: 0 0 auto;
   min-height: 32px;
   padding-inline: 11px;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 openclaw-agents-page .uclaw-expert-pill {
@@ -5369,10 +6282,50 @@ openclaw-agents-page .uclaw-expert-avatar {
   place-items: center;
   width: 34px;
   height: 34px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, var(--border));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
   font-weight: 700;
+}
+
+openclaw-agents-page .uclaw-expert-avatar svg,
+openclaw-agents-page .uclaw-expert-category-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+openclaw-agents-page .tone-content {
+  color: var(--accent);
+}
+
+openclaw-agents-page .tone-career {
+  color: #7c3aed;
+}
+
+openclaw-agents-page .tone-product {
+  color: #0f766e;
+}
+
+openclaw-agents-page .tone-tech {
+  color: #2563eb;
+}
+
+openclaw-agents-page .tone-office {
+  color: #d97706;
+}
+
+openclaw-agents-page .tone-business {
+  color: #e11d48;
+}
+
+openclaw-agents-page .tone-custom {
+  color: #64748b;
 }
 
 openclaw-agents-page .uclaw-expert-body {
@@ -5380,9 +6333,12 @@ openclaw-agents-page .uclaw-expert-body {
 }
 
 openclaw-agents-page .uclaw-expert-name {
+  overflow: hidden;
   color: var(--text);
   font-size: 13px;
   font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 openclaw-agents-page .uclaw-expert-meta,
@@ -5438,11 +6394,21 @@ openclaw-config-page .card {
 
   openclaw-agents-page .uclaw-expert-grid,
   openclaw-agents-page .uclaw-create-layout,
+  openclaw-agents-page .uclaw-expert-directory-shell,
+  openclaw-agents-page .uclaw-expert-directory-grid,
   openclaw-agents-page .uclaw-template-grid,
   openclaw-agents-page .uclaw-expert-card-grid,
   openclaw-agents-page .uclaw-expert-detail-grid,
   openclaw-agents-page .uclaw-custom-expert-grid,
   openclaw-agents-page .uclaw-custom-expert-skills {
+    grid-template-columns: 1fr;
+  }
+
+  openclaw-agents-page .uclaw-expert-category-rail {
+    position: static;
+  }
+
+  openclaw-agents-page .uclaw-expert-card--directory {
     grid-template-columns: 1fr;
   }
 
@@ -5457,7 +6423,6 @@ openclaw-config-page .card {
     flex-direction: column;
   }
 
-  openclaw-agents-page .uclaw-open-custom-expert,
   openclaw-agents-page .uclaw-modal-close {
     width: 100%;
     justify-content: center;
@@ -5494,6 +6459,77 @@ openclaw-config-page .card {
   .chat-controls__inline-select-menu {
     max-height: min(360px, calc(100vh - 128px));
   }
+}
+
+/* chat-composer-surface-1 */
+.agent-chat__composer-shell {
+  margin: 8px auto calc(28px + var(--safe-area-bottom, 0px)) !important;
+}
+
+.agent-chat__input {
+  min-height: 52px;
+  max-height: 152px;
+  border: 1px solid #d8e2ef !important;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: visible;
+  box-shadow: 0 10px 28px rgba(16, 22, 43, 0.08) !important;
+}
+
+.agent-chat__input:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 34%, #d8e2ef) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.16), 0 12px 30px rgba(16, 22, 43, 0.1) !important;
+}
+
+.agent-chat__composer-footer {
+  min-height: 48px;
+  padding: 0 var(--chat-box-inset) var(--chat-box-inset);
+  border-top-color: rgba(216, 226, 239, 0.72);
+}
+
+.agent-chat__composer-combobox > textarea {
+  min-height: 38px;
+}
+
+/* chat-composer-attachment-float-1 */
+.chat-attachments-preview {
+  position: absolute;
+  left: var(--chat-box-inset);
+  bottom: calc(100% + 8px);
+  z-index: 6;
+  max-width: min(420px, calc(100% - var(--chat-box-inset) * 2));
+  max-height: 76px;
+  margin: 0;
+  padding: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid #d8e2ef;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 30px rgba(16, 22, 43, 0.12);
+}
+
+.chat-attachment-thumb {
+  flex: 0 0 60px;
+}
+
+.chat-attachment-thumb--file {
+  flex-basis: 180px;
+}
+
+.agent-chat__composer-actions .chat-send-btn--voice {
+  color: var(--accent) !important;
+  border-color: #c9d8ea !important;
+  background: #f7fbff !important;
+}
+
+.agent-chat__composer-actions .chat-send-btn--voice:hover:not(:disabled),
+.agent-chat__composer-actions .chat-send-btn--voice:focus-visible {
+  color: var(--accent-hover) !important;
+  border-color: #91caff !important;
+  background: #eaf5ff !important;
 }
 ${markerEnd}`;
 
@@ -5539,6 +6575,7 @@ patchSkillWorkshopPageUiCopy();
 patchDeepAgentsChatI18nUiCopy();
 patchOverviewPageUiCopy();
 patchControlUiHtmlBranding();
+patchFixedLightModeAndFooterActions();
 patchControlUiManifestBranding();
 patchControlUiShellBranding();
 patchControlUiSkillHubProxy();
