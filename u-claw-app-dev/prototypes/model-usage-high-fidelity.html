@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>U-Claw 模型与用量</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --uclaw-bg-window: #f5f5f5;
+        --uclaw-bg-titlebar: #fafafa;
+        --uclaw-bg-sidebar: #fafafa;
+        --uclaw-bg-canvas: #ffffff;
+        --uclaw-bg-elevated: #ffffff;
+        --uclaw-bg-input: #ffffff;
+        --uclaw-bg-hover: rgba(0, 0, 0, 0.04);
+        --uclaw-bg-selected: #e6f4ff;
+        --uclaw-text-primary: rgba(0, 0, 0, 0.88);
+        --uclaw-text-secondary: rgba(0, 0, 0, 0.65);
+        --uclaw-text-tertiary: rgba(0, 0, 0, 0.45);
+        --uclaw-text-disabled: rgba(0, 0, 0, 0.25);
+        --uclaw-icon-primary: rgba(0, 0, 0, 0.65);
+        --uclaw-icon-muted: rgba(0, 0, 0, 0.45);
+        --uclaw-border-primary: #d9d9d9;
+        --uclaw-border-secondary: rgba(5, 5, 5, 0.06);
+        --uclaw-primary: #1677ff;
+        --uclaw-primary-hover: #4096ff;
+        --uclaw-primary-active: #0958d9;
+        --uclaw-primary-border: #91caff;
+        --uclaw-primary-text: #1677ff;
+        --uclaw-focus-ring: rgba(22, 119, 255, 0.35);
+        --uclaw-success: #52c41a;
+        --uclaw-success-bg: #f6ffed;
+        --uclaw-warning: #faad14;
+        --uclaw-warning-bg: #fffbe6;
+        --uclaw-error: #ff4d4f;
+        --uclaw-error-bg: #fff2f0;
+        --uclaw-info-bg: #e6f4ff;
+        --uclaw-surface-subtle: #f0f0f0;
+        --uclaw-app-backdrop: #e8edf4;
+        --uclaw-on-accent: #ffffff;
+        --shadow-soft: 0 1px 2px rgba(9, 39, 84, 0.04), 0 10px 28px rgba(9, 39, 84, 0.06);
+        --radius-sm: 4px;
+        --radius-md: 6px;
+        --radius-lg: 8px;
+        --titlebar-height: 48px;
+        --rail-width: 72px;
+        --side-width: 264px;
+        --right-width: 304px;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+        font-size: 14px;
+        color: var(--uclaw-text-primary);
+        background: var(--uclaw-app-backdrop);
+        -webkit-font-smoothing: antialiased;
+      }
+      button, input { font: inherit; color: inherit; }
+      button { border: 0; background: none; cursor: pointer; }
+      button:focus-visible, input:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--uclaw-focus-ring); }
+      svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+      .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+      .app-shell { width: 100vw; height: 100dvh; display: grid; grid-template-rows: var(--titlebar-height) 1fr; background: var(--uclaw-bg-window); }
+      .titlebar {
+        display: grid;
+        grid-template-columns: minmax(230px, 1fr) minmax(300px, 430px) minmax(360px, 1fr) 138px;
+        align-items: center;
+        background: var(--uclaw-bg-titlebar);
+        border-bottom: 1px solid var(--uclaw-border-secondary);
+        user-select: none;
+      }
+      .titlebar-brand { height: 100%; display: flex; align-items: center; gap: 9px; padding: 0 16px; min-width: 0; }
+      .brand-mark {
+        width: 24px;
+        height: 24px;
+        border-radius: 7px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        background: var(--uclaw-primary);
+        color: var(--uclaw-on-accent);
+      }
+      .brand-mark span { width: 3px; border-radius: 2px; background: currentColor; }
+      .brand-mark span:nth-child(1) { height: 7px; }
+      .brand-mark span:nth-child(2) { height: 13px; }
+      .brand-mark span:nth-child(3) { height: 9px; }
+      .titlebar-brand strong { font-size: 14px; font-weight: 650; }
+      .workspace-name { padding-left: 10px; border-left: 1px solid var(--uclaw-border-primary); color: var(--uclaw-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .command-search {
+        height: 32px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 10px;
+        border: 1px solid var(--uclaw-border-primary);
+        border-radius: var(--radius-md);
+        background: var(--uclaw-bg-input);
+        color: var(--uclaw-text-tertiary);
+        text-align: left;
+      }
+      .command-search span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+      kbd { min-width: 30px; height: 20px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--uclaw-border-primary); border-radius: var(--radius-sm); background: var(--uclaw-bg-window); color: var(--uclaw-text-tertiary); font: 11px/1 ui-monospace, Consolas, monospace; }
+      .runtime-status { height: 100%; display: flex; align-items: center; justify-content: flex-end; gap: 3px; padding: 0 8px 0 12px; min-width: 0; }
+      .status-item, .model-chip {
+        min-height: 32px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 8px;
+        border-radius: var(--radius-md);
+        color: var(--uclaw-text-secondary);
+        white-space: nowrap;
+      }
+      .status-item:hover, .model-chip:hover { background: var(--uclaw-bg-hover); }
+      .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--uclaw-text-disabled); flex: none; }
+      .status-dot.success { background: var(--uclaw-success); }
+      .status-dot.warning { background: var(--uclaw-warning); }
+      .model-chip { background: var(--uclaw-bg-hover); }
+      .window-controls { height: 100%; display: grid; grid-template-columns: repeat(3, 46px); }
+      .window-controls button { display: grid; place-items: center; border-radius: 0; }
+      .window-controls button:hover { background: rgba(0, 0, 0, 0.08); }
+      .window-controls .close:hover { color: #fff; background: #c42b1c; }
+      .window-controls svg { width: 13px; height: 13px; stroke-width: 1.5; }
+
+      .workspace-grid { min-height: 0; display: grid; grid-template-columns: var(--rail-width) var(--side-width) minmax(700px, 1fr) var(--right-width); }
+      .rail, .side, .right-panel { min-height: 0; background: var(--uclaw-bg-sidebar); }
+      .rail { padding: 10px 8px; border-right: 1px solid var(--uclaw-border-secondary); display: flex; flex-direction: column; justify-content: space-between; }
+      .rail-main { display: flex; flex-direction: column; gap: 3px; }
+      .rail-item {
+        width: 56px;
+        min-height: 52px;
+        padding: 6px 4px;
+        border-radius: var(--radius-md);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        color: var(--uclaw-text-secondary);
+      }
+      .rail-item svg { width: 19px; height: 19px; }
+      .rail-item span { font-size: 12px; }
+      .rail-item:hover { background: var(--uclaw-bg-hover); color: var(--uclaw-text-primary); }
+      .rail-item.active { background: var(--uclaw-bg-selected); color: var(--uclaw-primary-text); font-weight: 600; }
+
+      .side { border-right: 1px solid var(--uclaw-border-secondary); display: grid; grid-template-rows: 74px 44px minmax(0, 1fr) 92px; overflow: hidden; }
+      .side-head { padding: 14px 12px 8px 16px; display: flex; align-items: center; justify-content: space-between; }
+      .kicker { font-size: 11px; color: var(--uclaw-text-tertiary); }
+      .side-head h1 { margin: 4px 0 0; font-size: 17px; line-height: 1.2; font-weight: 650; }
+      .icon-button { width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: var(--radius-md); color: var(--uclaw-icon-primary); }
+      .icon-button:hover { background: var(--uclaw-bg-hover); color: var(--uclaw-text-primary); }
+      .primary-soft { color: var(--uclaw-primary-text); background: var(--uclaw-bg-selected); }
+      .side-search { margin: 0 12px 10px; height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid var(--uclaw-border-primary); border-radius: var(--radius-md); background: var(--uclaw-bg-input); color: var(--uclaw-icon-muted); }
+      .side-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; }
+      .nav-list { min-height: 0; overflow: auto; padding: 0 8px 10px; }
+      .nav-section-label { height: 30px; padding: 0 7px; display: flex; align-items: center; color: var(--uclaw-text-tertiary); font-size: 12px; }
+      .page-row { width: 100%; min-height: 58px; padding: 9px 10px; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 9px; text-align: left; border-radius: var(--radius-md); }
+      .page-row:hover { background: var(--uclaw-bg-hover); }
+      .page-row.active { background: var(--uclaw-bg-selected); }
+      .page-icon { width: 31px; height: 31px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--uclaw-surface-subtle); color: var(--uclaw-text-secondary); }
+      .page-row.active .page-icon { background: #fff; color: var(--uclaw-primary-text); box-shadow: inset 0 0 0 1px var(--uclaw-primary-border); }
+      .page-row strong, .page-row small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+      .page-row strong { font-size: 13px; font-weight: 620; }
+      .page-row small { margin-top: 3px; font-size: 11px; color: var(--uclaw-text-tertiary); }
+      .portable-status { padding: 12px 16px 14px; border-top: 1px solid var(--uclaw-border-secondary); }
+      .portable-status .line { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--uclaw-text-secondary); }
+      .portable-status strong { font-size: 11px; font-weight: 550; }
+      .meter { height: 4px; margin: 10px 0 7px; border-radius: 2px; background: rgba(0, 0, 0, 0.08); overflow: hidden; }
+      .meter span { display: block; width: 58%; height: 100%; border-radius: inherit; background: var(--uclaw-primary); }
+      .portable-status p { margin: 0; color: var(--uclaw-text-tertiary); font-size: 11px; }
+
+      .main { min-width: 0; min-height: 0; display: grid; grid-template-rows: 64px minmax(0, 1fr); background: var(--uclaw-bg-canvas); }
+      .main-head { padding: 0 22px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--uclaw-border-secondary); }
+      .main-head h2 { margin: 0; font-size: 17px; font-weight: 650; }
+      .main-head p { margin: 4px 0 0; color: var(--uclaw-text-tertiary); font-size: 11px; }
+      .head-actions { display: flex; align-items: center; gap: 8px; }
+      .ghost-button, .primary-button {
+        min-height: 32px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        border-radius: var(--radius-md);
+        border: 1px solid transparent;
+        color: var(--uclaw-text-secondary);
+      }
+      .ghost-button { border-color: var(--uclaw-border-primary); background: var(--uclaw-bg-input); }
+      .ghost-button:hover { border-color: #bfbfbf; color: var(--uclaw-text-primary); }
+      .primary-button { color: var(--uclaw-on-accent); background: var(--uclaw-primary); }
+      .primary-button:hover { background: var(--uclaw-primary-hover); }
+
+      .dashboard-scroll { min-height: 0; overflow: auto; padding: 18px 22px 28px; }
+      .summary-grid { display: grid; grid-template-columns: 1.3fr repeat(3, minmax(150px, 1fr)); gap: 12px; }
+      .panel {
+        border: 1px solid var(--uclaw-border-secondary);
+        border-radius: var(--radius-lg);
+        background: var(--uclaw-bg-elevated);
+        box-shadow: var(--shadow-soft);
+      }
+      .balance-panel { min-height: 128px; padding: 16px 18px; display: grid; align-content: space-between; }
+      .panel-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--uclaw-text-secondary); font-size: 12px; }
+      .panel-label span { display: inline-flex; align-items: center; gap: 6px; }
+      .balance-value { display: flex; align-items: baseline; gap: 10px; }
+      .balance-value strong { font-size: 40px; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+      .balance-value small { color: var(--uclaw-text-tertiary); }
+      .balance-actions { display: flex; align-items: center; gap: 8px; }
+      .metric-panel { min-height: 128px; padding: 16px; display: grid; align-content: space-between; }
+      .metric-panel strong { display: block; font-size: 25px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+      .metric-panel small { color: var(--uclaw-text-tertiary); font-size: 11px; }
+      .trend { height: 34px; display: grid; grid-template-columns: repeat(12, 1fr); align-items: end; gap: 3px; }
+      .trend span { min-height: 3px; border-radius: 2px 2px 0 0; background: var(--uclaw-primary-border); }
+      .trend span.hot { background: var(--uclaw-primary); }
+
+      .content-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; margin-top: 12px; align-items: start; }
+      .section-panel { padding: 16px; }
+      .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+      .section-title h3 { margin: 0; font-size: 15px; font-weight: 650; }
+      .section-title p { margin: 4px 0 0; color: var(--uclaw-text-tertiary); font-size: 11px; }
+      .segmented { display: inline-flex; padding: 2px; border-radius: var(--radius-md); background: var(--uclaw-surface-subtle); }
+      .segmented button { min-height: 28px; padding: 0 10px; border-radius: var(--radius-sm); color: var(--uclaw-text-secondary); font-size: 12px; }
+      .segmented button.active { color: var(--uclaw-primary-text); background: var(--uclaw-bg-elevated); box-shadow: 0 1px 2px rgba(9, 39, 84, 0.08); }
+      .model-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+      .model-card {
+        min-height: 154px;
+        padding: 13px;
+        border: 1px solid var(--uclaw-border-primary);
+        border-radius: var(--radius-lg);
+        background: var(--uclaw-bg-canvas);
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 10px;
+      }
+      .model-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .model-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .model-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--uclaw-info-bg); color: var(--uclaw-primary-text); }
+      .model-name strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 650; }
+      .model-name small { display: block; margin-top: 1px; color: var(--uclaw-text-tertiary); font-size: 10px; text-transform: uppercase; }
+      .discount { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--uclaw-error-bg); color: #cf1322; font-size: 11px; white-space: nowrap; }
+      .model-tags { display: flex; flex-wrap: wrap; gap: 6px; align-content: start; }
+      .tag { min-height: 24px; padding: 3px 7px; border-radius: var(--radius-sm); background: var(--uclaw-surface-subtle); color: var(--uclaw-text-secondary); font-size: 11px; }
+      .current-line { display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 1px solid var(--uclaw-border-secondary); color: var(--uclaw-text-tertiary); font-size: 11px; }
+      .current-line strong { color: var(--uclaw-primary-active); font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+      .config-list { display: grid; gap: 8px; }
+      .config-row { min-height: 64px; padding: 10px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid var(--uclaw-border-primary); border-radius: var(--radius-lg); }
+      .config-row .page-icon { width: 34px; height: 34px; }
+      .config-row strong { display: block; font-size: 13px; }
+      .config-row small { display: block; margin-top: 3px; color: var(--uclaw-text-tertiary); font-size: 11px; }
+      .state-chip { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--uclaw-text-secondary); font-size: 11px; }
+
+      .chart-panel { margin-top: 12px; padding: 16px; }
+      .usage-chart { height: 142px; display: grid; grid-template-columns: repeat(14, 1fr); align-items: end; gap: 8px; padding: 12px 0 4px; border-bottom: 1px solid var(--uclaw-border-secondary); }
+      .usage-day { display: grid; gap: 6px; justify-items: center; color: var(--uclaw-text-tertiary); font-size: 10px; }
+      .bar { width: 100%; max-width: 26px; min-height: 4px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, var(--uclaw-primary-hover), var(--uclaw-primary)); }
+      .bar.low { background: var(--uclaw-primary-border); }
+      .bar.warn { background: var(--uclaw-warning); }
+
+      .ledger-panel { margin-top: 12px; overflow: hidden; }
+      .ledger-head { height: 58px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--uclaw-border-secondary); }
+      .ledger-head h3 { margin: 0; font-size: 15px; font-weight: 650; }
+      .ledger-head p { margin: 3px 0 0; color: var(--uclaw-text-tertiary); font-size: 11px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      th, td { height: 44px; padding: 0 12px; border-bottom: 1px solid var(--uclaw-border-secondary); text-align: left; white-space: nowrap; }
+      th { height: 36px; color: var(--uclaw-text-tertiary); font-weight: 550; background: var(--uclaw-bg-titlebar); }
+      td { color: var(--uclaw-text-secondary); font-variant-numeric: tabular-nums; }
+      td strong { color: var(--uclaw-text-primary); font-weight: 600; }
+      .model-dot { display: inline-flex; align-items: center; gap: 6px; }
+      .model-dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--uclaw-primary); }
+      .model-dot.image::before { background: var(--uclaw-warning); }
+      .model-dot.video::before { background: var(--uclaw-success); }
+      .cost { color: #cf1322; font-weight: 650; }
+      .pager { height: 48px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; color: var(--uclaw-text-tertiary); font-size: 11px; }
+      .pager button { width: 28px; height: 28px; border-radius: var(--radius-md); border: 1px solid var(--uclaw-border-primary); color: var(--uclaw-icon-muted); }
+
+      .right-panel { border-left: 1px solid var(--uclaw-border-secondary); display: grid; grid-template-rows: 58px minmax(0, 1fr) 44px; overflow: hidden; }
+      .right-head { padding: 0 14px 0 16px; display: flex; align-items: center; justify-content: space-between; }
+      .right-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+      .right-content { min-height: 0; overflow: auto; padding: 12px 10px; }
+      .note-block { padding: 12px; border: 1px solid var(--uclaw-border-primary); border-radius: var(--radius-lg); background: var(--uclaw-bg-elevated); margin-bottom: 10px; }
+      .note-block h3 { margin: 0 0 8px; display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 650; }
+      .note-block p { margin: 0; color: var(--uclaw-text-secondary); font-size: 11px; line-height: 1.55; }
+      .cap-list { display: grid; gap: 8px; }
+      .cap-row { display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start; }
+      .cap-row svg { width: 15px; height: 15px; margin-top: 1px; }
+      .cap-row strong { display: block; font-size: 11px; font-weight: 620; }
+      .cap-row small { display: block; margin-top: 2px; color: var(--uclaw-text-tertiary); font-size: 10px; line-height: 1.45; }
+      .warning-note { border-color: #ffe58f; background: var(--uclaw-warning-bg); }
+      .right-footer { padding: 0 14px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--uclaw-border-secondary); color: var(--uclaw-text-tertiary); font-size: 10px; }
+
+      @media (max-width: 1180px) {
+        .workspace-grid { grid-template-columns: var(--rail-width) 220px minmax(620px, 1fr); }
+        .right-panel { display: none; }
+        .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .content-grid { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 900px) {
+        html, body { overflow: auto; height: auto; }
+        .app-shell { min-height: 100dvh; height: auto; }
+        .titlebar { grid-template-columns: 1fr 138px; }
+        .command-search, .runtime-status { display: none; }
+        .workspace-grid { grid-template-columns: 64px minmax(0, 1fr); }
+        .side { display: none; }
+        .main { min-height: calc(100dvh - var(--titlebar-height)); }
+        .summary-grid, .model-grid { grid-template-columns: 1fr; }
+        .dashboard-scroll { padding: 14px; }
+        table { min-width: 760px; }
+        .ledger-panel { overflow-x: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <svg class="icon-sprite" aria-hidden="true">
+      <defs>
+        <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></symbol>
+        <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+        <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 4A2.5 2.5 0 0 0 7 6.5v.4A3.5 3.5 0 0 0 5.5 13v.5A3.5 3.5 0 0 0 9 17h.5V4Z"/><path d="M14.5 4A2.5 2.5 0 0 1 17 6.5v.4a3.5 3.5 0 0 1 1.5 6.1v.5A3.5 3.5 0 0 1 15 17h-.5V4Z"/></symbol>
+        <symbol id="i-zap" viewBox="0 0 24 24"><path d="m13 2-9 13h7l-1 7 9-13h-7z"/></symbol>
+        <symbol id="i-plug" viewBox="0 0 24 24"><path d="m12 22 4-4-3-3 3-3-4-4-3 3-3-3 4-4M5 13l6 6M14 5l3-3M19 10l3-3"/></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.5v-.1A1.7 1.7 0 0 0 8.4 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2V9.5h.3A1.7 1.7 0 0 0 4 8.4a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.46 3.6l.06.06A1.7 1.7 0 0 0 8.4 4 1.7 1.7 0 0 0 9.5 2.3V2h4.1v.3A1.7 1.7 0 0 0 15 4a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8c.18.6.7 1 1.3 1.2h.3v4.1h-.3c-.6.1-1.1.6-1.3 1.2Z"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="i-drive" viewBox="0 0 24 24"><path d="M7 3h10v7a5 5 0 0 1-10 0zM9 21h6M12 15v6M9 7h.01M15 7h.01"/></symbol>
+        <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></symbol>
+        <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3M9 9h6v6H9z"/></symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 16v-4M12 16V8M16 16v-7"/></symbol>
+        <symbol id="i-credit" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h.01M11 15h3"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+        <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18M7 12h10M10 19h4"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></symbol>
+        <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 4.3 2.7 18a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z"/></symbol>
+        <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 15-5-5L5 20"/></symbol>
+        <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+        <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+        <symbol id="i-square" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/></symbol>
+        <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+      </defs>
+    </svg>
+
+    <div class="app-shell">
+      <header class="titlebar">
+        <div class="titlebar-brand">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <strong>U-Claw</strong>
+          <span class="workspace-name">随身工作区</span>
+        </div>
+        <button class="command-search" type="button" aria-label="打开全局搜索">
+          <svg><use href="#i-search" /></svg><span>搜索会话、文件、模型或能力</span><kbd>Ctrl K</kbd>
+        </button>
+        <div class="runtime-status" aria-label="运行状态">
+          <button class="status-item" type="button"><span class="status-dot success"></span><svg><use href="#i-drive" /></svg><span>U 盘已连接</span></button>
+          <button class="status-item" type="button"><span class="status-dot success"></span><svg><use href="#i-radio" /></svg><span>Gateway</span></button>
+          <button class="model-chip" type="button"><svg><use href="#i-cpu" /></svg><span>GPT 5.6 Luna</span></button>
+        </div>
+        <div class="window-controls" aria-label="窗口控制">
+          <button type="button" aria-label="最小化"><svg><use href="#i-minus" /></svg></button>
+          <button type="button" aria-label="最大化"><svg><use href="#i-square" /></svg></button>
+          <button class="close" type="button" aria-label="关闭"><svg><use href="#i-close" /></svg></button>
+        </div>
+      </header>
+
+      <div class="workspace-grid">
+        <nav class="rail" aria-label="主导航">
+          <div class="rail-main">
+            <button class="rail-item" type="button"><svg><use href="#i-message" /></svg><span>工作</span></button>
+            <button class="rail-item" type="button"><svg><use href="#i-folder" /></svg><span>文件</span></button>
+            <button class="rail-item" type="button"><svg><use href="#i-brain" /></svg><span>记忆</span></button>
+            <button class="rail-item active" type="button"><svg><use href="#i-zap" /></svg><span>能力</span></button>
+            <button class="rail-item" type="button"><svg><use href="#i-plug" /></svg><span>连接</span></button>
+          </div>
+          <button class="rail-item" type="button"><svg><use href="#i-settings" /></svg><span>系统</span></button>
+        </nav>
+
+        <aside class="side">
+          <div class="side-head">
+            <div><span class="kicker">能力中心</span><h1>模型与用量</h1></div>
+            <button class="icon-button primary-soft" type="button" aria-label="刷新"><svg><use href="#i-radio" /></svg></button>
+          </div>
+          <label class="side-search"><svg><use href="#i-search" /></svg><input type="search" placeholder="搜索模型、会话" /></label>
+          <div class="nav-list">
+            <div class="nav-section-label">模型</div>
+            <button class="page-row active" type="button">
+              <span class="page-icon"><svg><use href="#i-chart" /></svg></span>
+              <span><strong>模型与用量</strong><small>余额、模型、流水</small></span>
+            </button>
+            <button class="page-row" type="button">
+              <span class="page-icon"><svg><use href="#i-cpu" /></svg></span>
+              <span><strong>模型配置</strong><small>文本、图片、视频默认值</small></span>
+            </button>
+            <button class="page-row" type="button">
+              <span class="page-icon"><svg><use href="#i-zap" /></svg></span>
+              <span><strong>技能库</strong><small>OpenClaw 原能力</small></span>
+            </button>
+            <div class="nav-section-label">流水</div>
+            <button class="page-row" type="button">
+              <span class="page-icon"><svg><use href="#i-credit" /></svg></span>
+              <span><strong>用量明细</strong><small>来自 usage.cost</small></span>
+            </button>
+            <button class="page-row" type="button">
+              <span class="page-icon"><svg><use href="#i-clock" /></svg></span>
+              <span><strong>会话明细</strong><small>按会话展开日志</small></span>
+            </button>
+          </div>
+          <div class="portable-status">
+            <div class="line"><span><span class="status-dot success"></span>数据已落盘</span><strong>58%</strong></div>
+            <div class="meter"><span></span></div>
+            <p>U 盘 data 为权威主库</p>
+          </div>
+        </aside>
+
+        <main class="main">
+          <header class="main-head">
+            <div>
+              <h2>模型与用量</h2>
+              <p>账户余额、模型配置和 OpenClaw 用量流水集中展示。</p>
+            </div>
+            <div class="head-actions">
+              <button class="ghost-button" type="button"><svg><use href="#i-filter" /></svg><span>筛选</span></button>
+              <button class="ghost-button" type="button"><svg><use href="#i-download" /></svg><span>导出 CSV</span></button>
+              <button class="primary-button" type="button"><svg><use href="#i-radio" /></svg><span>刷新</span></button>
+            </div>
+          </header>
+
+          <div class="dashboard-scroll">
+            <section class="summary-grid" aria-label="用量摘要">
+              <div class="panel balance-panel">
+                <div class="panel-label"><span><svg><use href="#i-credit" /></svg>账户余额</span><span class="state-chip"><span class="status-dot success"></span>New API 已连接</span></div>
+                <div class="balance-value"><strong>42,982,186</strong><small>词元</small></div>
+                <div class="balance-actions">
+                  <button class="primary-button" type="button"><svg><use href="#i-plus" /></svg><span>充值词元</span></button>
+                  <button class="ghost-button" type="button"><svg><use href="#i-clock" /></svg><span>充值记录</span></button>
+                </div>
+              </div>
+              <div class="panel metric-panel">
+                <div class="panel-label"><span>今日消耗</span><small>2 次交互</small></div>
+                <strong>587,943</strong>
+                <div class="trend"><span></span><span></span><span class="hot" style="height: 31px"></span><span></span><span></span><span></span><span></span><span></span><span></span><span class="low" style="height: 6px"></span><span class="hot" style="height: 18px"></span><span class="hot" style="height: 24px"></span></div>
+              </div>
+              <div class="panel metric-panel">
+                <div class="panel-label"><span>近 7 天消耗</span><small>3 次交互</small></div>
+                <strong>795,658</strong>
+                <small>按会话流水聚合，含缓存读写</small>
+              </div>
+              <div class="panel metric-panel">
+                <div class="panel-label"><span>预计可用</span><small>按近 7 天均值</small></div>
+                <strong>378 天</strong>
+                <small>低于 14 天时提醒充值</small>
+              </div>
+            </section>
+
+            <section class="content-grid">
+              <div class="panel section-panel">
+                <div class="section-title">
+                  <div><h3>可用模型包</h3><p>只展示已验证可进入 U-Claw UI 的模型。</p></div>
+                  <div class="segmented" role="group" aria-label="模型分类"><button class="active" type="button">全部</button><button type="button">文本</button><button type="button">图片</button><button type="button">视频</button></div>
+                </div>
+                <div class="model-grid">
+                  <article class="model-card">
+                    <div class="model-top">
+                      <div class="model-name"><span class="model-icon"><svg><use href="#i-message" /></svg></span><span><strong>OpenAI</strong><small>Text & Chat</small></span></div>
+                      <span class="discount">3.8 折</span>
+                    </div>
+                    <div class="model-tags"><span class="tag">GPT 5.6 Luna</span><span class="tag">GPT 5.5</span><span class="tag">GPT 5.4</span><span class="tag">代码</span><span class="tag">问答</span></div>
+                    <div class="current-line"><span>当前默认</span><strong>GPT 5.6 Luna</strong></div>
+                  </article>
+                  <article class="model-card">
+                    <div class="model-top">
+                      <div class="model-name"><span class="model-icon"><svg><use href="#i-image" /></svg></span><span><strong>图像生成</strong><small>Image</small></span></div>
+                      <span class="discount">已验证</span>
+                    </div>
+                    <div class="model-tags"><span class="tag">文生图</span><span class="tag">图生图</span><span class="tag">编辑扩图</span><span class="tag">商品图</span></div>
+                    <div class="current-line"><span>当前默认</span><strong>GPT Image 2</strong></div>
+                  </article>
+                  <article class="model-card">
+                    <div class="model-top">
+                      <div class="model-name"><span class="model-icon"><svg><use href="#i-video" /></svg></span><span><strong>视频生成</strong><small>Video</small></span></div>
+                      <span class="discount">经 adapter</span>
+                    </div>
+                    <div class="model-tags"><span class="tag">文生视频</span><span class="tag">图生视频</span><span class="tag">5-15s</span><span class="tag">排队</span></div>
+                    <div class="current-line"><span>当前默认</span><strong>Seedance 2.0 Mini</strong></div>
+                  </article>
+                </div>
+              </div>
+
+              <div class="panel section-panel">
+                <div class="section-title">
+                  <div><h3>当前配置</h3><p>来自 openclaw.json 和 adapter。</p></div>
+                </div>
+                <div class="config-list">
+                  <div class="config-row">
+                    <span class="page-icon"><svg><use href="#i-message" /></svg></span>
+                    <span><strong>文字对话</strong><small>文本模型直连 New API</small></span>
+                    <span class="state-chip"><span class="status-dot success"></span>正常</span>
+                  </div>
+                  <div class="config-row">
+                    <span class="page-icon"><svg><use href="#i-image" /></svg></span>
+                    <span><strong>图片生成</strong><small>图片模型直连 New API</small></span>
+                    <span class="state-chip"><span class="status-dot success"></span>正常</span>
+                  </div>
+                  <div class="config-row">
+                    <span class="page-icon"><svg><use href="#i-video" /></svg></span>
+                    <span><strong>视频生成</strong><small>本机 adapter 转发</small></span>
+                    <span class="state-chip"><span class="status-dot warning"></span>限流</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel chart-panel">
+              <div class="section-title">
+                <div><h3>每日消耗趋势</h3><p>近 14 天，单位：词元。流水由前端聚合。</p></div>
+                <div class="segmented" role="group" aria-label="图表口径"><button class="active" type="button">词元</button><button type="button">费用</button></div>
+              </div>
+              <div class="usage-chart" aria-label="每日消耗柱状图">
+                <div class="usage-day"><span class="bar low" style="height: 6px"></span><span>12</span></div>
+                <div class="usage-day"><span class="bar" style="height: 88px"></span><span>13</span></div>
+                <div class="usage-day"><span class="bar low" style="height: 5px"></span><span>14</span></div>
+                <div class="usage-day"><span class="bar low" style="height: 7px"></span><span>15</span></div>
+                <div class="usage-day"><span class="bar low" style="height: 6px"></span><span>16</span></div>
+                <div class="usage-day"><span class="bar low" style="height: 5px"></span><span>17</span></div>
+                <div class="usage-day"><span class="bar low" style="height: 6px"></span><span>18</span></div>
+                <div class="usage-day"><span class="bar low" style="height: 4px"></span><span>19</span></div>
+                <div class="usage-day"><span class="bar low" style="height: 5px"></span><span>20</span></div>
+                <div class="usage-day"><span class="bar low" style="height: 8px"></span><span>21</span></div>
+                <div class="usage-day"><span class="bar low" style="height: 10px"></span><span>22</span></div>
+                <div class="usage-day"><span class="bar" style="height: 18px"></span><span>23</span></div>
+                <div class="usage-day"><span class="bar" style="height: 27px"></span><span>24</span></div>
+                <div class="usage-day"><span class="bar warn" style="height: 38px"></span><span>今天</span></div>
+              </div>
+            </section>
+
+            <section class="panel ledger-panel">
+              <div class="ledger-head">
+                <div><h3>使用流水</h3><p>可按会话、模型、工具和日期筛选。</p></div>
+                <div class="segmented" role="group" aria-label="流水时间"><button class="active" type="button">7 天</button><button type="button">30 天</button><button type="button">全部</button></div>
+              </div>
+              <table>
+                <thead>
+                  <tr><th>时间</th><th>会话</th><th>模型</th><th>输入</th><th>输出</th><th>缓存</th><th>耗时</th><th>消耗</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>08-25 17:02</td><td><strong>视频剪辑 / main</strong></td><td><span class="model-dot video">Seedance 2.0 Mini</span></td><td>16.3k</td><td>20</td><td>1.6k</td><td>42s</td><td class="cost">-199,695</td></tr>
+                  <tr><td>08-25 16:58</td><td><strong>hello</strong></td><td><span class="model-dot">GPT 5.6 Luna</span></td><td>32.6k</td><td>1.6k</td><td>0</td><td>5.5s</td><td class="cost">-388,248</td></tr>
+                  <tr><td>08-24 14:30</td><td><strong>对话（未关联本地会话）</strong></td><td><span class="model-dot">GPT 5.6 Luna</span></td><td>15.4k</td><td>278</td><td>0</td><td>3.4s</td><td class="cost">-207,715</td></tr>
+                  <tr><td>08-13 21:06</td><td><strong>商品主图生成</strong></td><td><span class="model-dot image">GPT Image 2</span></td><td>4.8k</td><td>1 张</td><td>0</td><td>59s</td><td class="cost">-5,365,161</td></tr>
+                  <tr><td>08-12 09:40</td><td><strong>合同摘要</strong></td><td><span class="model-dot">GPT 5.6 Luna</span></td><td>21.4k</td><td>37</td><td>50.4k</td><td>3.0s</td><td class="cost">-64,064</td></tr>
+                </tbody>
+              </table>
+              <div class="pager"><span>共 85 条 · 1 / 9</span><span><button type="button" aria-label="上一页">‹</button> <button type="button" aria-label="下一页">›</button></span></div>
+            </section>
+          </div>
+        </main>
+
+        <aside class="right-panel">
+          <header class="right-head">
+            <h2>接入边界</h2>
+            <button class="icon-button" type="button" aria-label="关闭"><svg><use href="#i-close" /></svg></button>
+          </header>
+          <div class="right-content">
+            <div class="note-block">
+              <h3><svg><use href="#i-check" /></svg>可直接复用</h3>
+              <div class="cap-list">
+                <div class="cap-row"><svg><use href="#i-chart" /></svg><span><strong>用量统计</strong><small>调用 `usage.cost` 聚合日期、模型、费用。</small></span></div>
+                <div class="cap-row"><svg><use href="#i-clock" /></svg><span><strong>会话流水</strong><small>按 session 展示 token、耗时、错误和工具调用。</small></span></div>
+                <div class="cap-row"><svg><use href="#i-download" /></svg><span><strong>导出</strong><small>沿用原版 CSV / JSON 导出能力。</small></span></div>
+              </div>
+            </div>
+            <div class="note-block warning-note">
+              <h3><svg><use href="#i-alert" /></svg>暂不做假 UI</h3>
+              <p>充值金额、微信支付、第三方订单号还没有确认 OpenClaw 原方法。页面保留入口状态，但正式开发前必须进入能力矩阵。</p>
+            </div>
+            <div class="note-block">
+              <h3><svg><use href="#i-info" /></svg>数据口径</h3>
+              <p>“余额”来自 New API 账户；“消耗”来自 OpenClaw 本地用量聚合。两者可能有同步延迟，正式页需展示刷新时间。</p>
+            </div>
+          </div>
+          <footer class="right-footer"><span>原型状态</span><strong>评审稿</strong></footer>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>
