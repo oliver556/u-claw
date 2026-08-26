@@ -109,6 +109,8 @@ for (const required of [
   'finishPhone',
   'formatActivationCode',
   'escapeHtml',
+  '.step.done .step-number::after { content: ""; position: absolute;',
+  'transform: translate(-50%, -58%) rotate(45deg);',
   '.button.primary:hover:not(:disabled) { border-color: var(--blue-hover); color: #fff;',
   '.button.text:hover:not(:disabled) { border-color: transparent; color: var(--text);',
   '.button.inline:hover:not(:disabled) { border-color: var(--blue); color: var(--blue);',
