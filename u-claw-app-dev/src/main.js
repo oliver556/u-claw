@@ -36,6 +36,7 @@ const ACTIVATION_ONLY_ARG = '--activation-only';
 const isActivationOnlyMode = process.argv.includes(ACTIVATION_ONLY_ARG)
   || process.env.UCLAW_ACTIVATION_ONLY === '1';
 const ACTIVATION_STATIC_PREVIEW_COMPLETE = 'ACTIVATION_STATIC_PREVIEW_COMPLETE';
+const UCLAW_ACTIVATION_REQUIRE_CLOUD = process.env.UCLAW_ACTIVATION_REQUIRE_CLOUD === '1';
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
 // room so we never hard-fail with a scary dialog before the engine is up. The
@@ -528,6 +529,30 @@ function writeActivationState(payload) {
   safeWriteJson(activationStatePath, marker);
   writeDirtyMarker('activation');
   return marker;
+}
+
+/**
+ * Allows local UI acceptance to proceed when an optional cloud endpoint is set
+ * but not reachable. Production can opt out with UCLAW_ACTIVATION_REQUIRE_CLOUD.
+ */
+function canUseActivationStaticFallback() {
+  return isDev && !UCLAW_ACTIVATION_REQUIRE_CLOUD;
+}
+
+/**
+ * Persists and returns the static activation preview result used before the
+ * real cloud redeem + privileged write-helper slice is enabled.
+ */
+function createStaticActivationResult(payload, message) {
+  const activationState = writeActivationState(payload);
+  return {
+    ok: true,
+    code: ACTIVATION_STATIC_PREVIEW_COMPLETE,
+    message: message || '首启登录流程已通过本地验证；真实激活服务接入后会写入授权材料。',
+    phoneMasked: activationState.phoneMasked,
+    activationPersisted: true,
+    retryable: false,
+  };
 }
 
 /**
@@ -1413,13 +1438,18 @@ async function sendActivationSMS(payload = {}) {
     return { ok: false, message: '请输入有效的手机号。', retryable: true };
   }
   if (UCLAW_ACTIVATION_ENDPOINT) {
-    const result = await postActivationJSON('/v1/auth/sms/send', { phone, purpose: 'login' });
-    return {
-      ok: true,
-      status: result.status || 'sent',
-      devCode: result.devCode || '',
-      message: result.devCode ? `验证码已发送，开发环境验证码为 ${result.devCode}。` : '验证码已发送。',
-    };
+    try {
+      const result = await postActivationJSON('/v1/auth/sms/send', { phone, purpose: 'login' });
+      return {
+        ok: true,
+        status: result.status || 'sent',
+        devCode: result.devCode || '',
+        message: result.devCode ? `验证码已发送，开发环境验证码为 ${result.devCode}。` : '验证码已发送。',
+      };
+    } catch (error) {
+      if (!canUseActivationStaticFallback()) throw error;
+      logLifecycle(`activation cloud sms fallback: ${error.message}`);
+    }
   }
   return {
     ok: true,
@@ -1450,40 +1480,38 @@ async function submitActivation(payload = {}) {
     return { ok: false, message: '激活码格式不正确。', retryable: true };
   }
   if (UCLAW_ACTIVATION_ENDPOINT) {
-    const login = await postActivationJSON('/v1/auth/sms/login', { phone, purpose: 'login', code: smsCode });
-    const redeem = await postActivationJSON('/v1/activation/redeem', {
-      activationCode,
-      deviceSummary: process.env.UCLAW_USB_FINGERPRINT_SUMMARY || 'PREVIEW-ONLY',
-    }, { accessToken: login.accessToken });
-    writeOpenClawActivationConfig(redeem);
-    const activationState = writeActivationState({
-      phone,
-      activationCode,
-      source: 'cloud',
-      phoneMasked: redeem.phoneMasked,
-      newapiBaseUrl: redeem.newapiBaseUrl,
-      newapiToken: redeem.newapiToken,
-      tokenVersion: redeem.tokenVersion,
-      uclawAccessToken: login.accessToken,
-    });
-    return {
-      ok: true,
-      code: 'ACTIVATION_CLOUD_COMPLETE',
-      message: '激活完成，New API 配置已写入本地。',
-      phoneMasked: activationState.phoneMasked,
-      activationPersisted: true,
-      retryable: false,
-    };
+    try {
+      const login = await postActivationJSON('/v1/auth/sms/login', { phone, purpose: 'login', code: smsCode });
+      const redeem = await postActivationJSON('/v1/activation/redeem', {
+        activationCode,
+        deviceSummary: process.env.UCLAW_USB_FINGERPRINT_SUMMARY || 'PREVIEW-ONLY',
+      }, { accessToken: login.accessToken });
+      writeOpenClawActivationConfig(redeem);
+      const activationState = writeActivationState({
+        phone,
+        activationCode,
+        source: 'cloud',
+        phoneMasked: redeem.phoneMasked,
+        newapiBaseUrl: redeem.newapiBaseUrl,
+        newapiToken: redeem.newapiToken,
+        tokenVersion: redeem.tokenVersion,
+        uclawAccessToken: login.accessToken,
+      });
+      return {
+        ok: true,
+        code: 'ACTIVATION_CLOUD_COMPLETE',
+        message: '激活完成，New API 配置已写入本地。',
+        phoneMasked: activationState.phoneMasked,
+        activationPersisted: true,
+        retryable: false,
+      };
+    } catch (error) {
+      if (!canUseActivationStaticFallback()) throw error;
+      logLifecycle(`activation cloud submit fallback: ${error.message}`);
+      return createStaticActivationResult({ phone, activationCode }, '激活服务未连通，已进入本地静态验收完成态。');
+    }
   }
-  const activationState = writeActivationState({ phone, activationCode });
-  return {
-    ok: true,
-    code: ACTIVATION_STATIC_PREVIEW_COMPLETE,
-    message: '首启登录流程已通过本地验证；真实激活服务接入后会写入授权材料。',
-    phoneMasked: activationState.phoneMasked,
-    activationPersisted: true,
-    retryable: false,
-  };
+  return createStaticActivationResult({ phone, activationCode });
 }
 
 /**

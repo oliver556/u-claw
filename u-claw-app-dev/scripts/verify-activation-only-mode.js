@@ -36,6 +36,8 @@ requireText(main, "const activationStatePath = path.join(configDir, 'uclaw-activ
 requireText(main, 'function hasCompletedActivation()', 'activation completion checker');
 requireText(main, 'function shouldShowActivationOnStartup()', 'startup activation gate');
 requireText(main, 'function writeActivationState', 'activation state writer');
+requireText(main, 'function canUseActivationStaticFallback()', 'activation static fallback guard');
+requireText(main, 'function createStaticActivationResult', 'activation static fallback result');
 requireText(main, 'async function postActivationJSON', 'activation cloud HTTP client');
 requireText(main, 'async function getActivationJSON', 'activation cloud GET client');
 requireText(main, 'async function getCloudModelUsageSummary', 'cloud model usage summary client');
@@ -44,6 +46,8 @@ requireText(main, "postActivationJSON('/v1/auth/sms/send'", 'cloud SMS send');
 requireText(main, "postActivationJSON('/v1/auth/sms/login'", 'cloud SMS login');
 requireText(main, "postActivationJSON('/v1/activation/redeem'", 'cloud activation redeem');
 requireText(main, 'ACTIVATION_CLOUD_COMPLETE', 'cloud activation completion code');
+requireText(main, 'UCLAW_ACTIVATION_REQUIRE_CLOUD', 'activation cloud required opt-out');
+requireText(main, 'activation cloud submit fallback', 'activation cloud submit fallback');
 requireText(main, 'uclaw:get-model-usage-summary', 'normal usage summary IPC channel');
 requireText(main, 'function setupActivationIPC()', 'activation IPC setup');
 requireText(main, 'function loadActivationPage()', 'activation page loader');
