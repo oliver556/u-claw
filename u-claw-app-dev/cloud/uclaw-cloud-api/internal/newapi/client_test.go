@@ -67,6 +67,33 @@ func TestAddQuotaReturnsStatusError(t *testing.T) {
 	}
 }
 
+func TestAddQuotaSendsManageActionPayload(t *testing.T) {
+	var gotPayload AddQuotaRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("Decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	err = client.AddQuota(context.Background(), AddQuotaRequest{UserID: 42, Quota: 1000})
+	if err != nil {
+		t.Fatalf("AddQuota() error = %v", err)
+	}
+
+	if gotPayload.UserID != 42 || gotPayload.Action != "add_quota" || gotPayload.Mode != "add" || gotPayload.Value != 1000 {
+		t.Fatalf("payload = %+v", gotPayload)
+	}
+}
+
 func TestCreateTokenDecodesTokenPresence(t *testing.T) {
 	var gotPath string
 	var gotPayload CreateTokenRequest

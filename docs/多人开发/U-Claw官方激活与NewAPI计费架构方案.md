@@ -1085,7 +1085,37 @@ deploy/newapi-local/logs
 
 这些目录只用于本地，不提交 Git。
 
-联调流程：
+自动联调流程：
+
+```bash
+cd u-claw-app-dev/cloud/uclaw-cloud-api
+./deploy/scripts/newapi-local-up.sh
+./deploy/scripts/newapi-local-spike.sh
+```
+
+`newapi-local-spike.sh` 会自动：
+
+1. 检查 `/api/setup`。
+2. 如未初始化，则创建本地 root。
+3. 登录 root 获取 dashboard access token。
+4. 创建手机号格式测试用户。
+5. 按 username 查询 New API user id。
+6. 调 `POST /api/user/manage` 给用户加 quota。
+7. 登录测试用户并创建 `uclaw-main` token。
+
+本地默认 root：
+
+```text
+root / UclawLocal@2026
+```
+
+如果已有本地 root 密码：
+
+```bash
+NEWAPI_LOCAL_ROOT_PASSWORD=<password> ./deploy/scripts/newapi-local-spike.sh
+```
+
+手动联调流程：
 
 1. 启动本地 New API。
 2. 打开 `http://127.0.0.1:3000` 完成初始化。
@@ -1117,6 +1147,15 @@ go run ./cmd/adminctl spike newapi add-quota \
 - 本地 New API 只用于接口 spike。
 - 最终上线前仍必须用 OVH New API + 香港 Nginx 管理路径再跑一次完整验收。
 - 本地 SQLite 结果不能作为生产性能或高并发结论。
+
+当前本地实测结论：
+
+- `calciumion/new-api:latest` 当前本地版本为 `v1.0.0-rc.26`。
+- `POST /api/user/` 可用 admin dashboard token 创建同手机号用户。
+- `GET /api/user/search?keyword=<phone>` 可按 username 查到 user id。
+- `POST /api/user/manage` 加额度 payload 必须是 `{id, action:"add_quota", mode:"add", value}`。
+- `POST /api/token/` 需要用目标用户身份调用，不能用 admin token 直接给任意用户创建 token。
+- `POST /api/token/` 成功响应未返回明文 token，但 SQLite `tokens` 表已创建 key；生产前必须继续确认可返回 token 的接口或可接受流程。
 
 ### 12.1 New API 管理能力
 

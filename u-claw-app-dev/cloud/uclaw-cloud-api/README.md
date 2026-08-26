@@ -40,9 +40,12 @@ go run ./cmd/adminctl activation generate 5
 
 ```bash
 ./deploy/scripts/newapi-local-up.sh
+./deploy/scripts/newapi-local-spike.sh
 ```
 
-打开 `http://127.0.0.1:3000` 完成初始化，并在 New API 后台获取管理 token。
+一键脚本会自动初始化本地 root、创建测试用户、查询 user id、加 quota，并用测试用户身份创建 token。
+
+如需手动联调，再打开 `http://127.0.0.1:3000` 完成初始化，并在 New API 后台获取管理 token。
 
 ```bash
 export NEWAPI_ADMIN_BASE_URL=https://newapi-admin.example.com

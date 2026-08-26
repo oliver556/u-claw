@@ -52,6 +52,24 @@ go run ./cmd/adminctl spike newapi add-quota \
   --quota 100000
 ```
 
+也可以使用一键本地脚本自动完成初始化与 spike：
+
+```bash
+./deploy/scripts/newapi-local-spike.sh
+```
+
+默认 root 账号：
+
+```text
+root / UclawLocal@2026
+```
+
+如果已用其他 root 密码初始化：
+
+```bash
+NEWAPI_LOCAL_ROOT_PASSWORD=<password> ./deploy/scripts/newapi-local-spike.sh
+```
+
 ## 数据位置
 
 本地 New API 数据写入：

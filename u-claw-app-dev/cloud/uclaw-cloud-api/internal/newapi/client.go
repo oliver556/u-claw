@@ -49,6 +49,11 @@ func (c *Client) CreateUser(ctx context.Context, req CreateUserRequest) error {
 
 // AddQuota credits quota to a New API user through the admin manage endpoint.
 func (c *Client) AddQuota(ctx context.Context, req AddQuotaRequest) error {
+	req.Action = "add_quota"
+	if req.Mode == "" {
+		req.Mode = "add"
+	}
+	req.Value = req.Quota
 	return c.postJSON(ctx, "/api/user/manage", req, nil)
 }
 
@@ -101,10 +106,13 @@ type CreateUserRequest struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
-// AddQuotaRequest is the assumed Phase 0 payload for POST /api/user/manage.
+// AddQuotaRequest is the verified Phase 0 payload for POST /api/user/manage.
 type AddQuotaRequest struct {
-	UserID int64 `json:"id"`
-	Quota  int64 `json:"quota"`
+	UserID int64  `json:"id"`
+	Action string `json:"action"`
+	Mode   string `json:"mode"`
+	Value  int64  `json:"value"`
+	Quota  int64  `json:"-"`
 }
 
 // CreateTokenRequest is the assumed Phase 0 payload for POST /api/token/.
