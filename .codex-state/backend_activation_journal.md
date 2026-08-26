@@ -133,3 +133,11 @@
 - Files changed: `u-claw-app-dev/cloud/uclaw-cloud-api/internal/recharge/*`, `internal/postgres/recharge_store.go`, `internal/httpapi/server.go`, `deploy/scripts/activation-local-e2e.sh`, `README.md`, `docs/activation-newapi-recharge-prd.md`。
 - Commands run: `go test ./...`, `go vet ./...`, `./deploy/scripts/activation-local-e2e.sh`。
 - Next: 接模型页充值按钮/记录 UI；随后接 Alipay/WeChat 官方下单、验签回调和补偿 worker。
+
+## 2026-08-27 02:36
+
+- Did: 将 Electron 模型页“充值”按钮接入 `uclaw:recharge-model-quota` IPC；main 进程创建 `dev_10` 虚拟订单、调用虚拟回调、刷新 New API usage；patch-openclaw 注入按钮状态与成功/失败提示。
+- Result: 软件内模型页可点击充值并完成端到端虚拟充值，余额从 `100,000` 刷新为 `150,000`；E2E 截图输出 `/tmp/uclaw-model-usage-ui.png`。
+- Files changed: `u-claw-app-dev/src/main.js`, `src/preload.js`, `scripts/patch-openclaw.js`, `scripts/verify-cloud-model-usage-ui.js`。
+- Commands run: `node scripts/verify-cloud-model-usage-ui.js`, `go test ./...`, `go vet ./...`, `npm run patch-openclaw`, `node scripts/verify-model-usage-dashboard.js`, `node scripts/verify-activation-only-mode.js`。
+- Next: 做更高保真的充值套餐弹窗和充值记录 UI；真实支付接 Alipay/WeChat 官方下单与验签回调。

@@ -217,10 +217,39 @@ async function assertElectronModelUsageUI() {
     if (clicked) break;
     await sleep(500);
   }
+  let sawInitialUsage = false;
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`(() => {
       const text = document.body.innerText || '';
       return text.includes('账户余额') && text.includes('100,000') && text.includes('New API');
+    })()`);
+    if (ok) {
+      sawInitialUsage = true;
+      break;
+    }
+    await sleep(500);
+  }
+  if (!sawInitialUsage) {
+    const bodyText = await evalJS('document.body.innerText || ""');
+    cdp.close();
+    throw new Error(`model usage UI did not show initial cloud data:\n${bodyText.slice(0, 2000)}`);
+  }
+  const recharged = await evalJS(`(() => {
+    const button = [...document.querySelectorAll('button')]
+      .find((node) => (node.textContent || '').trim() === '充值' && !node.disabled);
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`);
+  if (!recharged) {
+    const bodyText = await evalJS('document.body.innerText || ""');
+    cdp.close();
+    throw new Error(`model usage UI recharge button not clickable:\n${bodyText.slice(0, 2000)}`);
+  }
+  for (let i = 0; i < 120; i += 1) {
+    const ok = await evalJS(`(() => {
+      const text = document.body.innerText || '';
+      return text.includes('150,000') && text.includes('虚拟充值成功');
     })()`);
     if (ok) {
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
@@ -232,7 +261,7 @@ async function assertElectronModelUsageUI() {
   }
   const bodyText = await evalJS('document.body.innerText || ""');
   cdp.close();
-  throw new Error(`model usage UI did not show cloud data:\n${bodyText.slice(0, 2000)}`);
+  throw new Error(`model usage UI did not show recharged cloud data:\n${bodyText.slice(0, 2000)}`);
 }
 
 /**
@@ -269,6 +298,11 @@ function cleanup() {
     ]);
     for (let i = 0; i < 60; i += 1) {
       const ready = spawnSync('docker', ['exec', pgContainer, 'pg_isready', '-U', 'uclaw', '-d', 'postgres'], { stdio: 'ignore' });
+      if (ready.status === 0) break;
+      await sleep(300);
+    }
+    for (let i = 0; i < 60; i += 1) {
+      const ready = spawnSync('docker', ['exec', pgContainer, 'psql', '-U', 'uclaw', '-d', 'uclaw_cloud', '-tc', 'SELECT 1'], { stdio: 'ignore' });
       if (ready.status === 0) break;
       await sleep(300);
     }

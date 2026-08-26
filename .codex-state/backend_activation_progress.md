@@ -18,11 +18,12 @@
 - [x] Add New API provisioning for same-phone user, token key, quota, and account mapping
 - [x] Add New API balance/usage/ledger summary API and model page cloud display
 - [x] Add virtual recharge order and callback flow that credits New API quota
+- [x] Wire model page recharge button to virtual order callback and refreshed balance
 
 ### Current status
-- Current step: 虚拟充值订单与回调闭环完成
-- Last completed: `/v1/recharge/plans`、`/v1/recharge/orders`、`/v1/payments/virtual/notify` 已可创建 dev 订单、接受非 production 虚拟回调，并幂等调用 New API `add_quota`。
-- Next action: 接模型页充值按钮/记录 UI；随后替换为 Alipay/WeChat 官方支付下单与验签回调。
+- Current step: 模型页虚拟充值按钮闭环完成
+- Last completed: Electron 模型页“充值”按钮已通过 main IPC 创建 `dev_10` 虚拟订单、触发虚拟回调、刷新 New API 余额；UI E2E 验证余额从 `100000` 变为 `150000`。
+- Next action: 设计并接入真实充值套餐弹窗、充值记录 UI；随后替换为 Alipay/WeChat 官方支付下单与验签回调。
 
 ### Notes
 - 阿里云 U-Claw 服务负责账号、激活、订单、支付回调、New API 管理编排。
@@ -51,3 +52,4 @@
 - New API usage summary 已接 `/api/user/self` 与 `/api/log/self`；模型页通过 `window.uclaw.getModelUsageSummary()` 走 Electron main 代理，不直接暴露本地文件路径。
 - 最新完整验证通过：`node scripts/verify-activation-only-mode.js`、`node scripts/verify-model-usage-dashboard.js`、`node scripts/verify-cloud-model-usage-ui.js`、`go test ./...`、`go vet ./...`、`./deploy/scripts/smoke-local.sh`、`./deploy/scripts/newapi-local-spike.sh`、`./deploy/scripts/activation-local-e2e.sh`、`VERSION=0.1.9-test ./deploy/scripts/release-linux-amd64.sh`、`git diff --check`。
 - 虚拟充值回调只在非 production 启用；`activation-local-e2e.sh` 已覆盖余额从 `100000` 增加到 `150000`。
+- 最新 UI 验证通过：`node scripts/verify-cloud-model-usage-ui.js` 点击模型页“充值”并断言 `150,000`；另通过 `go test ./...`、`go vet ./...`、`npm run patch-openclaw`、`node scripts/verify-model-usage-dashboard.js`、`node scripts/verify-activation-only-mode.js`。

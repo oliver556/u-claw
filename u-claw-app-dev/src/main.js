@@ -534,7 +534,8 @@ function writeActivationState(payload) {
  * Posts JSON to the U-Claw activation service from the trusted main process.
  */
 async function postActivationJSON(pathname, payload, options = {}) {
-  if (!UCLAW_ACTIVATION_ENDPOINT) {
+  const endpoint = String(options.endpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  if (!endpoint) {
     throw new Error('activation endpoint is not configured');
   }
   const controller = new AbortController();
@@ -542,7 +543,7 @@ async function postActivationJSON(pathname, payload, options = {}) {
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
-    const response = await fetch(`${UCLAW_ACTIVATION_ENDPOINT}${pathname}`, {
+    const response = await fetch(`${endpoint}${pathname}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload || {}),
@@ -602,6 +603,48 @@ async function getCloudModelUsageSummary() {
     return { ok: false, message: 'uclaw access token is not available' };
   }
   return getActivationJSON('/v1/newapi/usage/summary', { endpoint, accessToken });
+}
+
+/**
+ * Creates a virtual recharge order and immediately simulates the local callback for UI validation.
+ */
+async function rechargeCloudModelQuota(payload = {}) {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  const planCode = String(payload.planCode || 'dev_10').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured' };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available' };
+  }
+  if (!planCode) {
+    return { ok: false, message: 'recharge plan is required' };
+  }
+  try {
+    const created = await postActivationJSON('/v1/recharge/orders', {
+      planCode,
+      provider: 'virtual',
+    }, { endpoint, accessToken });
+    const orderNo = String(created?.order?.orderNo || '').trim();
+    if (!orderNo) {
+      throw new Error('recharge order response missing orderNo');
+    }
+    const callback = await postActivationJSON('/v1/payments/virtual/notify', {
+      orderNo,
+      providerEventId: `electron-${orderNo}-${Date.now()}`,
+    }, { endpoint });
+    const usage = await getCloudModelUsageSummary();
+    return {
+      ok: true,
+      order: callback.order || created.order,
+      usage,
+      message: '虚拟充值成功，余额已刷新。',
+    };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error) };
+  }
 }
 
 /**
@@ -1716,6 +1759,7 @@ function setupIPC() {
 
   ipcMain.handle('open-config', () => loadConfigPage());
   ipcMain.handle('uclaw:get-model-usage-summary', () => getCloudModelUsageSummary());
+  ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
 }
 
 // ── App Lifecycle ──
