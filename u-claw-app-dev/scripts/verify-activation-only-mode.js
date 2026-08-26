@@ -32,15 +32,31 @@ function sliceBetween(source, start, end) {
 
 requireText(main, "const ACTIVATION_ONLY_ARG = '--activation-only';", 'activation-only arg');
 requireText(main, 'ACTIVATION_STATIC_PREVIEW_COMPLETE', 'activation static preview code');
+requireText(main, "const activationStatePath = path.join(configDir, 'uclaw-activation.json');", 'activation state path');
+requireText(main, 'function hasCompletedActivation()', 'activation completion checker');
+requireText(main, 'function shouldShowActivationOnStartup()', 'startup activation gate');
+requireText(main, 'function writeActivationState', 'activation state writer');
 requireText(main, 'function setupActivationIPC()', 'activation IPC setup');
 requireText(main, 'function loadActivationPage()', 'activation page loader');
 requireText(main, "mainWindow.loadFile(path.join(__dirname, 'activation.html'));", 'activation local loadFile');
 requireText(main, 'Activation-only mode starting', 'activation lifecycle branch');
+requireText(main, 'Activation gate starting', 'activation startup gate branch');
 requireText(main, 'function createActivationMenu()', 'activation menu');
+requireText(main, 'additionalArguments: activationWindowMode ? [ACTIVATION_ONLY_ARG] : [],', 'activation renderer argv');
 
 const lifecycleBranch = sliceBetween(main, 'Activation-only mode starting', '  // Setup');
 for (const required of ['createMenu();', 'setupActivationIPC();', 'createWindow();', 'return;']) {
   requireText(lifecycleBranch, required, `activation early-return ${required}`);
+}
+
+const startupGateBranch = sliceBetween(main, 'Activation gate starting', '  // Setup');
+for (const required of ['activationWindowMode = true;', 'createMenu();', 'setupActivationIPC();', 'createWindow();', 'return;']) {
+  requireText(startupGateBranch, required, `startup activation gate ${required}`);
+}
+for (const forbidden of ['startConfigServer', 'startGateway', 'startVideoAdapter', 'setupIPC();', 'ensureConfig();']) {
+  if (startupGateBranch.includes(forbidden)) {
+    throw new Error(`Startup activation gate must not call ${forbidden}`);
+  }
 }
 for (const forbidden of ['startConfigServer', 'startGateway', 'startVideoAdapter', 'setupIPC();', 'ensureConfig();']) {
   if (lifecycleBranch.includes(forbidden)) {

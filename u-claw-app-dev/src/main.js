@@ -156,6 +156,7 @@ const syncStateDir = path.join(userDataPath, '.uclaw-sync');
 const dirtyMarkerPath = path.join(syncStateDir, 'dirty.json');
 const lastSyncPath = path.join(syncStateDir, 'last-sync.json');
 const uiStatePath = path.join(configDir, 'uclaw-ui-state.json');
+const activationStatePath = path.join(configDir, 'uclaw-activation.json');
 const logsDir = path.join(userDataPath, 'logs');
 
 try {
@@ -185,6 +186,7 @@ let portableSyncPromise = null;
 let portableFinalSyncDone = false;
 let shutdownPromise = null;
 const holdMainWindowUntilReady = UCLAW_LAUNCHER_GUI && Boolean(UCLAW_PORTABLE_WORK_DATA_DIR || UCLAW_PORTABLE_DATA_DIR);
+let activationWindowMode = isActivationOnlyMode;
 
 // ── Config Management ──
 function loadBundledDefaultConfig() {
@@ -475,6 +477,49 @@ function readActiveSessionKey() {
   return typeof state?.activeSessionKey === 'string' && state.activeSessionKey.trim()
     ? state.activeSessionKey.trim()
     : '';
+}
+
+/**
+ * Returns true when local activation material exists. The current preview marker
+ * is intentionally minimal; real cloud activation will replace it with signed
+ * license metadata and encrypted New API token state.
+ */
+function hasCompletedActivation() {
+  if (process.env.UCLAW_SKIP_ACTIVATION_GATE === '1') return true;
+  const state = readJsonFile(activationStatePath);
+  return state?.status === 'activated'
+    && typeof state.phoneMasked === 'string'
+    && typeof state.activatedAt === 'string';
+}
+
+/**
+ * Decides whether normal startup must stop at the first-login activation page.
+ */
+function shouldShowActivationOnStartup() {
+  if (isActivationOnlyMode) return true;
+  return !hasCompletedActivation();
+}
+
+/**
+ * Persists the preview activation marker used to avoid showing first-login UI on
+ * every launch. Later slices will store signed cloud license data here.
+ */
+function writeActivationState(payload) {
+  const phone = String(payload.phone || '').trim();
+  const activationCode = String(payload.activationCode || '').trim().toUpperCase();
+  const marker = {
+    schemaVersion: 1,
+    status: 'activated',
+    source: 'local-preview',
+    phoneMasked: `${phone.slice(0, 3)}****${phone.slice(7)}`,
+    activationCodeSuffix: activationCode.replace(/-/g, '').slice(-4),
+    tokenStatus: 'pending_cloud_activation',
+    activatedAt: new Date().toISOString(),
+  };
+  fs.mkdirSync(configDir, { recursive: true });
+  safeWriteJson(activationStatePath, marker);
+  writeDirtyMarker('activation');
+  return marker;
 }
 
 function extractSessionKeyFromUrl(rawUrl) {
@@ -1188,11 +1233,13 @@ function submitActivation(payload = {}) {
   if (!/^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}$/.test(activationCode)) {
     return { ok: false, message: '激活码格式不正确。', retryable: true };
   }
+  const activationState = writeActivationState({ phone, activationCode });
   return {
     ok: true,
     code: ACTIVATION_STATIC_PREVIEW_COMPLETE,
     message: '首启登录流程已通过本地验证；真实激活服务接入后会写入授权材料。',
-    phoneMasked: `${phone.slice(0, 3)}****${phone.slice(7)}`,
+    phoneMasked: activationState.phoneMasked,
+    activationPersisted: true,
     retryable: false,
   };
 }
@@ -1239,20 +1286,21 @@ function persistMainWindowSession() {
  */
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: isActivationOnlyMode ? 960 : 1200,
-    height: isActivationOnlyMode ? 760 : 800,
-    minWidth: isActivationOnlyMode ? 720 : 800,
-    minHeight: isActivationOnlyMode ? 620 : 600,
+    width: activationWindowMode ? 960 : 1200,
+    height: activationWindowMode ? 760 : 800,
+    minWidth: activationWindowMode ? 720 : 800,
+    minHeight: activationWindowMode ? 620 : 600,
     title: APP_NAME,
     icon: path.join(__dirname, '..', 'assets', 'icon.png'),
-    frame: !isActivationOnlyMode,
+    frame: !activationWindowMode,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: activationWindowMode ? [ACTIVATION_ONLY_ARG] : [],
     },
     show: false,
-    backgroundColor: isActivationOnlyMode ? '#f1f5f9' : '#0a0a0a',
+    backgroundColor: activationWindowMode ? '#f1f5f9' : '#0a0a0a',
   });
 
   if (process.platform === 'win32') {
@@ -1285,7 +1333,7 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  if (isActivationOnlyMode) {
+  if (activationWindowMode) {
     loadActivationPage();
   } else {
     loadAppPage();
@@ -1518,6 +1566,16 @@ app.whenReady().then(async () => {
 
   if (isActivationOnlyMode) {
     console.log(`[${APP_NAME}] Activation-only mode starting...`);
+    activationWindowMode = true;
+    createMenu();
+    setupActivationIPC();
+    createWindow();
+    return;
+  }
+
+  if (shouldShowActivationOnStartup()) {
+    console.log(`[${APP_NAME}] Activation gate starting...`);
+    activationWindowMode = true;
     createMenu();
     setupActivationIPC();
     createWindow();
