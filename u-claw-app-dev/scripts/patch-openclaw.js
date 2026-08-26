@@ -492,6 +492,98 @@ function patchChatPage() {
       throw new Error(`Could not patch terminal chat tool stream cleanup in ${file}`);
     }
 
+    const sessionRefreshAnchor =
+      "function ph(e){return e.sessions.refresh({...fh(e),...Me(e,e.sessionKey),force:!0})}function mh(e,t){";
+    const sessionRefreshWithStatusPollingV1 =
+      "function ph(e){return e.sessions.refresh({...fh(e),...Me(e,e.sessionKey),force:!0})}function uClawStopChatStatusPoll(e){let t=e?.uClawChatStatusPollTimer;t!=null&&(globalThis.clearTimeout(t),e.uClawChatStatusPollTimer=null)}function uClawScheduleChatStatusPoll(e){if(!e||!e.connected||!e.client||!e.chatRunId&&e.chatStream==null||e.uClawChatStatusPollTimer!=null)return;let t=0,n=20,r=()=>{e.uClawChatStatusPollTimer=null;if(!e.connected||!e.client||!e.chatRunId&&e.chatStream==null){uClawStopChatStatusPoll(e);return}let i=e.sessionKey;Promise.resolve(ph(e)).then(()=>{e.sessionKey===i&&yc(e,{publishRunStatus:!0})}).catch(()=>{}).finally(()=>{if(!e.connected||e.sessionKey!==i||!e.chatRunId&&e.chatStream==null){uClawStopChatStatusPoll(e);return}t+=1,t<n?e.uClawChatStatusPollTimer=globalThis.setTimeout(r,1500):uClawStopChatStatusPoll(e)})};e.uClawChatStatusPollTimer=globalThis.setTimeout(r,1200)}function mh(e,t){";
+    const sessionRefreshWithStatusPolling =
+      "function ph(e){return e.sessions.refresh({...fh(e),...Me(e,e.sessionKey),force:!0})}function uClawStopChatStatusPoll(e){let t=e?.uClawChatStatusPollTimer;t!=null&&(globalThis.clearTimeout(t),e.uClawChatStatusPollTimer=null)}function uClawRefreshChatStatusNow(e){if(!e||!e.connected||!e.client)return Promise.resolve();let t=e.sessionKey;return Promise.resolve(ph(e)).then(()=>{e.sessionKey===t&&(yc(e,{publishRunStatus:!0}),e.requestUpdate?.())}).catch(()=>{})}function uClawScheduleChatStatusPoll(e){if(!e||!e.connected||!e.client||!e.chatRunId&&e.chatStream==null||e.uClawChatStatusPollTimer!=null)return;let t=0,n=20,r=()=>{e.uClawChatStatusPollTimer=null;if(!e.connected||!e.client||!e.chatRunId&&e.chatStream==null){uClawStopChatStatusPoll(e);return}let i=e.sessionKey;Promise.resolve(ph(e)).then(()=>{e.sessionKey===i&&yc(e,{publishRunStatus:!0})}).catch(()=>{}).finally(()=>{if(!e.connected||e.sessionKey!==i||!e.chatRunId&&e.chatStream==null){uClawStopChatStatusPoll(e);return}t+=1,t<n?e.uClawChatStatusPollTimer=globalThis.setTimeout(r,1500):uClawStopChatStatusPoll(e)})};e.uClawChatStatusPollTimer=globalThis.setTimeout(r,1200)}function mh(e,t){";
+    if (!after.includes("function uClawRefreshChatStatusNow(")) {
+      if (after.includes(sessionRefreshWithStatusPollingV1)) {
+        after = after.replace(sessionRefreshWithStatusPollingV1, sessionRefreshWithStatusPolling);
+      } else if (!after.includes("function uClawScheduleChatStatusPoll(")) {
+        after = after.replace(sessionRefreshAnchor, sessionRefreshWithStatusPolling);
+      }
+    }
+
+    const terminalStatusPublish =
+      "t.publishRunStatus!==!1&&(e.chatRunStatus=a,fc(e,a))";
+    const terminalStatusPublishWithFinalRefresh =
+      "t.publishRunStatus!==!1&&(e.chatRunStatus=a,fc(e,a)),uClawRefreshChatStatusNow(e),globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e),900)";
+    if (
+      after.includes(terminalStatusPublish)
+      && !after.includes("globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e),900)")
+    ) {
+      after = after.replace(terminalStatusPublish, terminalStatusPublishWithFinalRefresh);
+    }
+
+    if (
+      !after.includes("function uClawRefreshChatStatusNow(")
+      || !after.includes("globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e),900)")
+    ) {
+      after = after.replace(sessionRefreshAnchor, sessionRefreshWithStatusPolling);
+    }
+
+    const localRunClear =
+      "t.clearLocalRun&&(e.chatRunId=null),t.clearSideResultTerminalRuns";
+    const localRunClearWithPollStop =
+      "t.clearLocalRun&&(e.chatRunId=null,uClawStopChatStatusPoll(e)),t.clearSideResultTerminalRuns";
+    if (after.includes(localRunClear)) {
+      after = after.replace(localRunClear, localRunClearWithPollStop);
+    }
+
+    const commandTrackRun =
+      "a.trackRunId&&(e.chatRunId=a.trackRunId,e.chatStream=``,e.chatSending=!1)";
+    const commandTrackRunWithPoll =
+      "a.trackRunId&&(e.chatRunId=a.trackRunId,e.chatStream=``,e.chatSending=!1,uClawScheduleChatStatusPoll(e))";
+    if (after.includes(commandTrackRun)) {
+      after = after.replace(commandTrackRun, commandTrackRunWithPoll);
+    }
+
+    const sendRunStarted =
+      "e.chatRunId=r.runId,t||(e.chatStream=``,e.chatStreamStartedAt=d)";
+    const sendRunStartedWithPoll =
+      "e.chatRunId=r.runId,uClawScheduleChatStatusPoll(e),t||(e.chatStream=``,e.chatStreamStartedAt=d)";
+    if (after.includes(sendRunStarted)) {
+      after = after.replace(sendRunStarted, sendRunStartedWithPoll);
+    }
+
+    const eventRunStarted =
+      "e.chatRunId=t.runId,e.chatStreamStartedAt??=Date.now()";
+    const eventRunStartedWithPoll =
+      "e.chatRunId=t.runId,uClawScheduleChatStatusPoll(e),e.chatStreamStartedAt??=Date.now()";
+    if (after.includes(eventRunStarted)) {
+      after = after.replace(eventRunStarted, eventRunStartedWithPoll);
+    }
+
+    const disconnectReset =
+      "t.resetToolStream(),t.requestUpdate?.();return";
+    const disconnectResetWithPollStop =
+      "t.resetToolStream(),uClawStopChatStatusPoll(t),t.requestUpdate?.();return";
+    if (after.includes(disconnectReset)) {
+      after = after.replace(disconnectReset, disconnectResetWithPollStop);
+    }
+
+    const paneDisconnect =
+      "disconnectedCallback(){this.nativeDraftCleanup?.(),this.nativeDraftCleanup=null,this.announceCommandPaletteTarget(null),XC(this.paneId),this.state=void 0,this.connectedClient=null,super.disconnectedCallback()}";
+    const paneDisconnectWithPollStop =
+      "disconnectedCallback(){this.nativeDraftCleanup?.(),this.nativeDraftCleanup=null,this.announceCommandPaletteTarget(null),XC(this.paneId),this.state&&uClawStopChatStatusPoll(this.state),this.state=void 0,this.connectedClient=null,super.disconnectedCallback()}";
+    if (after.includes(paneDisconnect)) {
+      after = after.replace(paneDisconnect, paneDisconnectWithPollStop);
+    }
+
+    if (
+      !after.includes("function uClawScheduleChatStatusPoll(")
+      || !after.includes("function uClawRefreshChatStatusNow(")
+      || !after.includes("Promise.resolve(ph(e))")
+      || !after.includes("yc(e,{publishRunStatus:!0})")
+      || !after.includes("uClawScheduleChatStatusPoll(e)")
+      || !after.includes("uClawStopChatStatusPoll(e)")
+      || !after.includes("globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e),900)")
+    ) {
+      throw new Error(`Could not patch chat status polling in ${file}`);
+    }
+
     const lightboxFunction = `function uClawEnsureMediaLightboxStyle(){if(document.getElementById(\`uclaw-media-lightbox-style\`))return;let e=document.createElement(\`style\`);e.id=\`uclaw-media-lightbox-style\`,e.textContent=[\`.uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:32px;outline:0}.uclaw-media-lightbox__viewer{max-width:96vw;max-height:92vh;display:flex;align-items:center;justify-content:center}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45)}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;min-width:38px;height:38px;padding:0 13px;display:inline-flex;align-items:center;justify-content:center;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button--close{font-size:20px;font-weight:500;padding-bottom:2px}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:88vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}}\`].join(\`\`),document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e==\`string\`?e.trim():\`\`;if(!n)return;uClawEnsureMediaLightboxStyle(),document.querySelector(\`.uclaw-media-lightbox\`)?.remove();let r=document.createElement(\`div\`);r.className=\`uclaw-media-lightbox\`,r.tabIndex=-1,r.setAttribute(\`role\`,\`dialog\`),r.setAttribute(\`aria-modal\`,\`true\`);let i=()=>{document.removeEventListener(\`keydown\`,a,!0),r.remove()},a=e=>{e.key===\`Escape\`&&(e.preventDefault(),i())};r.addEventListener(\`click\`,e=>{e.target===r&&i()});let o=document.createElement(\`div\`);o.className=\`uclaw-media-lightbox__toolbar\`;let s=document.createElement(\`a\`);s.className=\`uclaw-media-lightbox__button\`,s.href=n,s.target=\`_blank\`,s.rel=\`noreferrer\`,s.download=t.label||\`\`,s.textContent=\`下载\`;let c=document.createElement(\`button\`);c.className=\`uclaw-media-lightbox__button uclaw-media-lightbox__button--close\`,c.type=\`button\`,c.setAttribute(\`aria-label\`,\`关闭预览\`),c.textContent=\`×\`,c.addEventListener(\`click\`,i),o.append(s,c);let l=document.createElement(\`div\`);l.className=\`uclaw-media-lightbox__viewer\`;let u=(t.kind||\`\`).toLowerCase()===\`video\`||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(u?\`video\`:\`img\`);d.src=n,u?(d.controls=!0,d.autoplay=!0,d.playsInline=!0,d.preload=\`metadata\`):d.alt=t.label||\`Preview\`,d.addEventListener(\`click\`,e=>e.stopPropagation()),l.appendChild(d),r.append(o,l),document.body.appendChild(r),document.addEventListener(\`keydown\`,a,!0),requestAnimationFrame(()=>r.focus({preventScroll:!0}))}`;
     const lightboxFunctionV2 = `function uClawEnsureMediaLightboxStyle(){if(document.getElementById(\`uclaw-media-lightbox-style\`))return;let e=document.createElement(\`style\`);e.id=\`uclaw-media-lightbox-style\`,e.textContent=[\`.uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:32px 48px;outline:0;overflow:hidden}.uclaw-media-lightbox__viewer{max-width:96vw;max-height:90vh;display:flex;align-items:center;justify-content:center;overflow:hidden}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:90vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45);transform-origin:center center;transition:transform .14s ease}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__button--close{font-size:22px;font-weight:500;padding-bottom:2px}.uclaw-media-lightbox__zoom{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:1;display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:999px;background:rgba(20,20,20,.72);box-shadow:0 8px 28px rgba(0,0,0,.34);backdrop-filter:blur(10px)}.uclaw-media-lightbox__zoom-button{border:0;border-radius:999px;width:32px;height:32px;background:rgba(255,255,255,.9);color:#111;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font:600 14px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.uclaw-media-lightbox__zoom-button:hover{background:#fff}.uclaw-media-lightbox__zoom-button svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__zoom-value{min-width:48px;color:#fff;text-align:center;font:600 12px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:84vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}.uclaw-media-lightbox__zoom{bottom:12px}}\`].join(\`\`),document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e==\`string\`?e.trim():\`\`;if(!n)return;uClawEnsureMediaLightboxStyle(),document.querySelector(\`.uclaw-media-lightbox\`)?.remove();let r=document.createElement(\`div\`);r.className=\`uclaw-media-lightbox\`,r.tabIndex=-1,r.setAttribute(\`role\`,\`dialog\`),r.setAttribute(\`aria-modal\`,\`true\`);let i=1,a=()=>{d.style.transform=\`scale(\${i})\`,v.textContent=\`\${Math.round(i*100)}%\`},o=()=>{document.removeEventListener(\`keydown\`,s,!0),r.remove()},s=e=>{e.key===\`Escape\`&&(e.preventDefault(),o())};r.addEventListener(\`click\`,e=>{e.target===r&&o()});let c=document.createElement(\`div\`);c.className=\`uclaw-media-lightbox__toolbar\`;let l=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>\`,u=document.createElement(\`a\`);u.className=\`uclaw-media-lightbox__button\`,u.href=n,u.target=\`_blank\`,u.rel=\`noreferrer\`,u.download=t.label||\`\`,u.title=\`下载\`,u.setAttribute(\`aria-label\`,\`下载\`),u.innerHTML=l;let f=document.createElement(\`button\`);f.className=\`uclaw-media-lightbox__button uclaw-media-lightbox__button--close\`,f.type=\`button\`,f.setAttribute(\`aria-label\`,\`关闭预览\`),f.title=\`关闭\`,f.textContent=\`×\`,f.addEventListener(\`click\`,o),c.append(u,f);let p=document.createElement(\`div\`);p.className=\`uclaw-media-lightbox__viewer\`;let m=(t.kind||\`\`).toLowerCase()===\`video\`||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(m?\`video\`:\`img\`);d.src=n,m?(d.controls=!0,d.autoplay=!0,d.playsInline=!0,d.preload=\`metadata\`):d.alt=t.label||\`Preview\`,d.addEventListener(\`click\`,e=>e.stopPropagation()),p.appendChild(d);let h=document.createElement(\`div\`);h.className=\`uclaw-media-lightbox__zoom\`;let y=(e,t,n)=>{let r=document.createElement(\`button\`);return r.className=\`uclaw-media-lightbox__zoom-button\`,r.type=\`button\`,r.title=t,r.setAttribute(\`aria-label\`,t),r.innerHTML=e,r.addEventListener(\`click\`,e=>{e.preventDefault(),e.stopPropagation(),n()}),r},g=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>\`,b=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>\`,w=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M16 3h3a2 2 0 0 1 2 2v3"></path><path d="M8 21H5a2 2 0 0 1-2-2v-3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>\`,v=document.createElement(\`span\`);v.className=\`uclaw-media-lightbox__zoom-value\`,h.append(y(g,\`缩小\`,()=>{i=Math.max(.5,Math.round((i-.25)*100)/100),a()}),v,y(b,\`放大\`,()=>{i=Math.min(3,Math.round((i+.25)*100)/100),a()}),y(w,\`适配\`,()=>{i=1,a()})),r.append(c,p,h),document.body.appendChild(r),a(),document.addEventListener(\`keydown\`,s,!0),requestAnimationFrame(()=>r.focus({preventScroll:!0}))}`;
     const lightboxFunctionV3 = `function uClawEnsureMediaLightboxStyle(){let e=document.getElementById("uclaw-media-lightbox-style");e&&e.remove();e=document.createElement("style");e.id="uclaw-media-lightbox-style";e.textContent=".uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:42px 52px;outline:0;overflow:hidden}.uclaw-media-lightbox--full{padding:0}.uclaw-media-lightbox__viewer{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:90vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45);transform-origin:center center;transition:transform .14s ease,width .14s ease,height .14s ease,border-radius .14s ease}.uclaw-media-lightbox--full .uclaw-media-lightbox__viewer img,.uclaw-media-lightbox--full .uclaw-media-lightbox__viewer video{width:100vw;height:100vh;max-width:100vw;max-height:100vh;border-radius:0;box-shadow:none}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__button--close{font-size:22px;font-weight:500;padding-bottom:2px}.uclaw-media-lightbox__zoom{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:1;display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:999px;background:rgba(20,20,20,.74);box-shadow:0 8px 28px rgba(0,0,0,.34);backdrop-filter:blur(10px)}.uclaw-media-lightbox__zoom-button{border:0;border-radius:999px;width:32px;height:32px;background:rgba(255,255,255,.92);color:#111;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font:600 14px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.uclaw-media-lightbox__zoom-button:hover{background:#fff}.uclaw-media-lightbox__zoom-button svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__zoom-value{min-width:48px;color:#fff;text-align:center;font:600 12px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox--full{padding:0}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:84vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}.uclaw-media-lightbox__zoom{bottom:12px}}";document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e=="string"?e.trim():"";if(!n)return;uClawEnsureMediaLightboxStyle();document.querySelector(".uclaw-media-lightbox")?.remove();let r=document.createElement("div");r.className="uclaw-media-lightbox";r.tabIndex=-1;r.setAttribute("role","dialog");r.setAttribute("aria-modal","true");let i=1,a=false,o='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M16 3h3a2 2 0 0 1 2 2v3"></path><path d="M8 21H5a2 2 0 0 1-2-2v-3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>',s='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5H3"></path><path d="M16 3v5h5"></path><path d="M8 21v-5H3"></path><path d="M16 21v-5h5"></path></svg>',c=()=>{d.style.transform="scale("+i+")";v.textContent=Math.round(i*100)+"%";r.classList.toggle("uclaw-media-lightbox--full",a);w.innerHTML=a?s:o;w.title=a?"退出全屏":"全屏";w.setAttribute("aria-label",w.title)},l=()=>{document.removeEventListener("keydown",u,true);r.remove()},u=e=>{if(e.key==="Escape"){e.preventDefault();l()}else if(e.key==="+"||e.key==="="){e.preventDefault();i=Math.min(3,Math.round((i+.25)*100)/100);c()}else if(e.key==="-"||e.key==="_"){e.preventDefault();i=Math.max(.5,Math.round((i-.25)*100)/100);c()}else if(e.key==="0"){e.preventDefault();i=1;c()}else if(e.key.toLowerCase()==="f"){e.preventDefault();a=!a;i=1;c()}};r.addEventListener("click",e=>{e.target===r&&l()});let f=document.createElement("div");f.className="uclaw-media-lightbox__toolbar";let p='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>',m=document.createElement("a");m.className="uclaw-media-lightbox__button";m.href=n;m.target="_blank";m.rel="noreferrer";m.download=t.label||"";m.title="下载";m.setAttribute("aria-label","下载");m.innerHTML=p;let h=document.createElement("button");h.className="uclaw-media-lightbox__button uclaw-media-lightbox__button--close";h.type="button";h.setAttribute("aria-label","关闭预览");h.title="关闭";h.textContent="×";h.addEventListener("click",l);f.append(m,h);let y=document.createElement("div");y.className="uclaw-media-lightbox__viewer";let g=(t.kind||"").toLowerCase()==="video"||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(g?"video":"img");d.src=n;if(g){d.controls=true;d.autoplay=true;d.playsInline=true;d.preload="metadata"}else d.alt=t.label||"Preview";d.addEventListener("click",e=>e.stopPropagation());d.addEventListener("dblclick",e=>{e.preventDefault();a=!a;i=1;c()});y.appendChild(d);let b=document.createElement("div");b.className="uclaw-media-lightbox__zoom";let S=(e,t,n)=>{let r=document.createElement("button");r.className="uclaw-media-lightbox__zoom-button";r.type="button";r.title=t;r.setAttribute("aria-label",t);r.innerHTML=e;r.addEventListener("click",e=>{e.preventDefault();e.stopPropagation();n()});return r},C='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>',T='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>',v=document.createElement("span");v.className="uclaw-media-lightbox__zoom-value";let w=S(o,"全屏",()=>{a=!a;i=1;c()});b.append(S(C,"缩小",()=>{i=Math.max(.5,Math.round((i-.25)*100)/100);c()}),v,S(T,"放大",()=>{i=Math.min(3,Math.round((i+.25)*100)/100);c()}),w);r.append(f,y,b);document.body.appendChild(r);c();document.addEventListener("keydown",u,true);requestAnimationFrame(()=>r.focus({preventScroll:true}))}`;
@@ -624,6 +716,34 @@ function patchChatPage() {
 `;
     if (after.includes(videoAttachmentFilenameLink)) {
       after = after.replace(videoAttachmentFilenameLink, "");
+    }
+
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Lets terminal reconciliation clear stale sidebar running state when older
+ * session rows have hasActiveRun but no activeRunIds to match against.
+ */
+function patchSessionTerminalReconcile() {
+  const staleGuard =
+    "if(!n.some(t=>Ue(e.key,t))||(e.hasActiveRun===!0||xn(e))&&(!r||!e.activeRunIds?.includes(r)))return e;";
+  const sessionTerminalReconcileWithMissingRunIds =
+    "if(!n.some(t=>Ue(e.key,t))||(e.hasActiveRun===!0||xn(e))&&e.activeRunIds?.length&&(!r||!e.activeRunIds.includes(r)))return e;";
+
+  for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
+    const before = read(file);
+    let after = before;
+
+    if (!after.includes(sessionTerminalReconcileWithMissingRunIds)) {
+      after = after.replace(staleGuard, sessionTerminalReconcileWithMissingRunIds);
+    }
+
+    if (!after.includes(sessionTerminalReconcileWithMissingRunIds)) {
+      throw new Error(`Could not patch session terminal reconcile in ${file}`);
     }
 
     if (writeIfChanged(file, before, after)) {
@@ -958,6 +1078,10 @@ function patchConfiguredUclawImageGenerationModelsOnly() {
       'const requestedModel = readStringParam(params, "model");\n\t\t\tconst model = requestedModel?.trim() === UCLAW_FIXED_IMAGE_GENERATION_MODEL ? UCLAW_FIXED_IMAGE_GENERATION_MODEL : void 0;\n\t\t\tconst configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);',
       'const configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);\n\t\t\tconst requestedModel = readStringParam(params, "model");\n\t\t\tconst configuredImageModelRefs = new Set([\n\t\t\t\tconfiguredImageGenerationModelConfig.primary,\n\t\t\t\t...configuredImageGenerationModelConfig.fallbacks ?? []\n\t\t\t].filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()));\n\t\t\tconst model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;',
     );
+    after = after.replace(
+      'const model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;\n\t\t\tconst configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);\n\t\t\tconst imageGenerationModelConfig = resolveImageGenerationModelConfigForTool({',
+      'const model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;\n\t\t\tconst imageGenerationModelConfig = resolveImageGenerationModelConfigForTool({',
+    );
 
     if (
       after.includes('const UCLAW_FIXED_IMAGE_GENERATION_MODEL = "litellm/gpt-image-2";')
@@ -1086,6 +1210,32 @@ function patchXaiVideoLoopbackAccess() {
 \t\t}`,
       );
     }
+    if (!after.includes("const statusResult = await fetchWithTimeoutGuarded(statusUrl,")) {
+      after = after.replace(
+        "for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {\n\t\tconst payload = readXaiStatusResponse(await readXaiVideoJson(await fetchProviderOperationResponse({\n\t\t\tstage: \"poll\",\n\t\t\turl: `${params.baseUrl}/videos/${params.requestId}`,\n\t\t\tinit: {\n\t\t\t\tmethod: \"GET\",\n\t\t\t\theaders: params.headers\n\t\t\t},\n\t\t\ttimeoutMs: createProviderOperationTimeoutResolver({\n\t\t\t\tdeadline,\n\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS\n\t\t\t}),\n\t\t\tfetchFn: params.fetchFn,\n\t\t\tprovider: \"xai\",\n\t\t\trequestFailedMessage: \"xAI video status request failed\"\n\t\t})));\n\t\tconst normalizedStatus = payload.status.toLowerCase();\n\t\tif (normalizedStatus === \"done\") return payload;\n\t\tif (XAI_VIDEO_TERMINAL_FAILURE_STATUSES.has(normalizedStatus)) throw new Error(normalizeOptionalString(payload.error?.message) ?? `xAI video generation ${normalizedStatus}`);",
+        `const statusUrl = \`\${params.baseUrl}/videos/\${params.requestId}\`;
+\tfor (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+\t\tconst statusResult = await fetchWithTimeoutGuarded(statusUrl, {
+\t\t\t\tmethod: "GET",
+\t\t\t\theaders: params.headers
+\t\t\t}, createProviderOperationTimeoutResolver({
+\t\t\t\tdeadline,
+\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS
+\t\t\t}), params.fetchFn, {
+\t\t\tssrfPolicy: params.ssrfPolicy,
+\t\t\tdispatcherPolicy: params.dispatcherPolicy
+\t\t});
+\t\ttry {
+\t\t\tawait assertOkOrThrowHttpError(statusResult.response, "xAI video status request failed");
+\t\t\tconst payload = readXaiStatusResponse(await readXaiVideoJson(statusResult.response));
+\t\t\tconst normalizedStatus = payload.status.toLowerCase();
+\t\t\tif (normalizedStatus === "done") return payload;
+\t\t\tif (XAI_VIDEO_TERMINAL_FAILURE_STATUSES.has(normalizedStatus)) throw new Error(normalizeOptionalString(payload.error?.message) ?? \`xAI video generation \${normalizedStatus}\`);
+\t\t} finally {
+\t\t\tawait statusResult.release();
+\t\t}`,
+      );
+    }
     after = after.replace(
       "baseUrl,\n\t\t\t\t\tfetchFn\n\t\t\t\t});",
       "baseUrl,\n\t\t\t\t\tfetchFn,\n\t\t\t\t\tssrfPolicy: requestSsrFPolicy,\n\t\t\t\t\tdispatcherPolicy\n\t\t\t\t});",
@@ -1179,6 +1329,45 @@ function patchConfiguredMediaResultDownloadTrust() {
       after = after.replace(
         "async function downloadXaiVideo(params) {\n\tconst result = await fetchWithTimeoutGuarded(",
         "async function downloadXaiVideo(params) {\n\tconst downloadSsrFPolicy = mergeSsrFPolicies(params.ssrfPolicy, ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist(params.url));\n\tconst result = await fetchWithTimeoutGuarded(",
+      );
+    }
+    if (!after.includes("const downloadSsrFPolicy = mergeSsrFPolicies(")) {
+      after = after.replace(
+        `async function downloadXaiVideo(params) {
+\tconst response = await fetchProviderDownloadResponse({
+\t\turl: params.url,
+\t\tinit: { method: "GET" },
+\t\ttimeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+\t\tfetchFn: params.fetchFn,
+\t\tprovider: "xai",
+\t\trequestFailedMessage: "xAI generated video download failed"
+\t});
+\tconst mimeType = normalizeOptionalString(response.headers.get("content-type")) ?? "video/mp4";
+\treturn {
+\t\tbuffer: await readResponseWithLimit(response, params.maxBytes, { onOverflow: ({ maxBytes }) => /* @__PURE__ */ new Error(\`xAI generated video download exceeds \${maxBytes} bytes\`) }),
+\t\tmimeType,
+\t\tfileName: \`video-1.\${extensionForMime(mimeType)?.slice(1) ?? "mp4"}\`
+\t};
+}`,
+        `async function downloadXaiVideo(params) {
+\tconst downloadSsrFPolicy = mergeSsrFPolicies(params.ssrfPolicy, ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist(params.url));
+\tconst result = await fetchWithTimeoutGuarded(params.url, { method: "GET" }, params.timeoutMs ?? DEFAULT_TIMEOUT_MS, params.fetchFn, {
+\t\tssrfPolicy: downloadSsrFPolicy,
+\t\tdispatcherPolicy: params.dispatcherPolicy
+\t});
+\ttry {
+\t\tawait assertOkOrThrowHttpError(result.response, "xAI generated video download failed");
+\t\tconst response = result.response;
+\t\tconst mimeType = normalizeOptionalString(response.headers.get("content-type")) ?? "video/mp4";
+\t\treturn {
+\t\t\tbuffer: await readResponseWithLimit(response, params.maxBytes, { onOverflow: ({ maxBytes }) => /* @__PURE__ */ new Error(\`xAI generated video download exceeds \${maxBytes} bytes\`) }),
+\t\t\tmimeType,
+\t\t\tfileName: \`video-1.\${extensionForMime(mimeType)?.slice(1) ?? "mp4"}\`
+\t\t};
+\t} finally {
+\t\tawait result.release();
+\t}
+}`,
       );
     }
     after = after.replace(
@@ -1514,6 +1703,9 @@ ${markerEnd}`;
 
   for (const file of listAssetFiles(/^index-.*\.css$/, "index css")) {
     const before = read(file);
+    if (before.includes(block)) {
+      continue;
+    }
     const withoutOld = before.replace(
       new RegExp(`${escapeRegExp(markerStart)}[\\s\\S]*?${escapeRegExp(markerEnd)}\\n?`),
       "",
@@ -1566,6 +1758,22 @@ function patchServiceWorker() {
   source = source.replace(
     /config-model-dashboard-1(?!-sidebar-new-session-width-1)/,
     "config-model-dashboard-1-sidebar-new-session-width-1",
+  );
+  source = source.replace(
+    /sidebar-new-session-width-1(?!-chat-status-poll-1)/,
+    "sidebar-new-session-width-1-chat-status-poll-1",
+  );
+  source = source.replace(
+    /chat-status-poll-1(?:-global-font-scale-\d+)?(?!-global-font-scale-2)/,
+    "chat-status-poll-1-global-font-scale-2",
+  );
+  source = source.replace(
+    /global-font-scale-2(?!-session-reconcile-missing-runids-1)/,
+    "global-font-scale-2-session-reconcile-missing-runids-1",
+  );
+  source = source.replace(
+    /session-reconcile-missing-runids-1(?!-chat-terminal-final-refresh-1)/,
+    "session-reconcile-missing-runids-1-chat-terminal-final-refresh-1",
   );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
@@ -5326,6 +5534,13 @@ function patchControlUiTheme() {
 :root[data-theme-mode="light"] {
   --font-body: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --font-display: var(--font-body);
+  --control-ui-text-scale: 1.16;
+  --control-ui-text-xs: calc(11px * var(--control-ui-text-scale));
+  --control-ui-text-sm: calc(12px * var(--control-ui-text-scale));
+  --control-ui-text-md: calc(14px * var(--control-ui-text-scale));
+  --control-ui-text-lg: calc(16px * var(--control-ui-text-scale));
+  --control-ui-input-text-size: max(16px, calc(14px * var(--control-ui-text-scale)));
+  --chat-text-size: var(--control-ui-text-md);
   --uclaw-navy: #10162b;
   --uclaw-navy-soft: #1a2140;
   --uclaw-claw: #69b1ff;
@@ -5375,7 +5590,36 @@ body {
   background:
     linear-gradient(180deg, rgba(230, 244, 255, 0.78), rgba(247, 249, 252, 0.88) 44%, rgba(255, 255, 255, 0) 72%),
     var(--bg);
+  font-size: var(--control-ui-text-md);
+  line-height: 1.6;
   letter-spacing: 0;
+}
+
+input,
+textarea,
+select {
+  font-size: var(--control-ui-input-text-size);
+}
+
+.btn:not(.btn--icon),
+.sw-btn,
+.chip,
+.pill,
+.input,
+.list-sub,
+.muted,
+.sidebar-recent-session,
+.chat-controls__inline-select-label,
+.topnav-shell .dashboard-header__breadcrumb {
+  font-size: max(var(--control-ui-text-sm), 0.94em);
+}
+
+.agent-chat__message,
+.chat-bubble,
+.chat-message,
+.cm-preview {
+  font-size: var(--chat-text-size);
+  line-height: 1.62;
 }
 
 .content {
@@ -7193,6 +7437,9 @@ ${markerEnd}`;
 
   for (const file of listAssetFiles(/^index-.*\.css$/, "index css")) {
     const before = read(file);
+    if (before.includes(block)) {
+      continue;
+    }
     const withoutOld = before.replace(
       new RegExp(`${escapeRegExp(markerStart)}[\\s\\S]*?${escapeRegExp(markerEnd)}`),
       "",
@@ -7208,6 +7455,7 @@ patchSkillsUninstallGateway();
 patchSkillHubInstallGateway();
 patchWindowsInstallPublishFallback();
 patchChatPage();
+patchSessionTerminalReconcile();
 patchChatUiCopy();
 patchAssistantIdentityUiCopy();
 patchChatSkillHubDropdown();
