@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"uclaw-cloud-api/internal/license"
 )
 
 var activationCodePattern = regexp.MustCompile(`^(?:[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}|[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}-[A-Z0-9]{6})$`)
@@ -50,18 +52,19 @@ type FirstStartRequest struct {
 
 // FirstStartResult is the public activation envelope consumed by Electron activation-only mode.
 type FirstStartResult struct {
-	OK                    bool          `json:"ok"`
-	ActivationID          string        `json:"activationId"`
-	Status                string        `json:"status"`
-	Stage                 string        `json:"stage"`
-	UsernameMasked        string        `json:"usernameMasked"`
-	USBFingerprintSummary string        `json:"usbFingerprintSummary"`
-	ArtifactStatus        string        `json:"artifactStatus"`
-	Message               string        `json:"message"`
-	NewAPIBaseURL         string        `json:"newapiBaseUrl"`
-	NewAPIToken           string        `json:"newapiToken"`
-	TokenVersion          int           `json:"tokenVersion"`
-	DefaultModels         DefaultModels `json:"defaultModels"`
+	OK                    bool             `json:"ok"`
+	ActivationID          string           `json:"activationId"`
+	Status                string           `json:"status"`
+	Stage                 string           `json:"stage"`
+	UsernameMasked        string           `json:"usernameMasked"`
+	USBFingerprintSummary string           `json:"usbFingerprintSummary"`
+	ArtifactStatus        string           `json:"artifactStatus"`
+	Message               string           `json:"message"`
+	NewAPIBaseURL         string           `json:"newapiBaseUrl"`
+	NewAPIToken           string           `json:"newapiToken"`
+	TokenVersion          int              `json:"tokenVersion"`
+	DefaultModels         DefaultModels    `json:"defaultModels"`
+	LicenseArtifact       license.Artifact `json:"licenseArtifact"`
 }
 
 // CommitRequest records the client write-helper result for a server-bound activation.
@@ -122,6 +125,11 @@ type FirstStartAttemptStore interface {
 	CommitFirstStartAttempt(ctx context.Context, activationID string, writeStatus string, at time.Time) error
 }
 
+// LicenseSigner signs server-issued license artifacts for client write helpers.
+type LicenseSigner interface {
+	Sign(req license.Request) (license.Artifact, error)
+}
+
 // Config controls the activation redeem slice.
 type Config struct {
 	AllowAnyCode      bool
@@ -131,6 +139,7 @@ type Config struct {
 	DefaultImageModel string
 	DefaultVideoModel string
 	Provisioner       NewAPIProvisioner
+	LicenseSigner     LicenseSigner
 }
 
 // Service owns activation-code validation and the client-facing activation contract.
@@ -161,6 +170,9 @@ func NewService(store Store, cfg Config) (*Service, error) {
 	}
 	if strings.TrimSpace(cfg.DefaultVideoModel) == "" {
 		cfg.DefaultVideoModel = "xai/jimeng-video-3-720p"
+	}
+	if cfg.LicenseSigner == nil {
+		cfg.LicenseSigner = license.NewDevelopmentSigner()
 	}
 	return &Service{store: store, cfg: cfg, now: time.Now, commits: make(map[string]string)}, nil
 }
@@ -234,6 +246,22 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 		return FirstStartResult{}, err
 	}
 	activationID := activationIDFor(username, code, usbSummary, req.IdempotencyKey)
+	licenseArtifact, err := s.cfg.LicenseSigner.Sign(license.Request{
+		ActivationID:          activationID,
+		Subject:               username,
+		USBFingerprintSummary: usbSummary,
+		NewAPIBaseURL:         result.NewAPIBaseURL,
+		TokenVersion:          result.TokenVersion,
+		DefaultModels: license.DefaultModels{
+			Text:  result.DefaultModels.Text,
+			Image: result.DefaultModels.Image,
+			Video: result.DefaultModels.Video,
+		},
+		IssuedAt: at,
+	})
+	if err != nil {
+		return FirstStartResult{}, err
+	}
 	if attemptStore, ok := s.store.(FirstStartAttemptStore); ok {
 		if err := attemptStore.RecordFirstStartAttempt(ctx, FirstStartAttempt{
 			ActivationID:          activationID,
@@ -261,6 +289,7 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 		NewAPIToken:           result.NewAPIToken,
 		TokenVersion:          result.TokenVersion,
 		DefaultModels:         result.DefaultModels,
+		LicenseArtifact:       licenseArtifact,
 	}, nil
 }
 

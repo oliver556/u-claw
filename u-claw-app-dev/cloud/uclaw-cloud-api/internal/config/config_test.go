@@ -19,6 +19,8 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"DEV_SMS_CODE":                "654321",
 		"SMS_CODE_PEPPER":             "sms-pepper",
 		"ACTIVATION_CODE_PEPPER":      "activation-pepper",
+		"LICENSE_SIGNING_KEY_ID":      " license-key-1 ",
+		"LICENSE_SIGNING_SEED_HEX":    strings.Repeat("11", 32),
 		"WECHAT_PAY_MCH_ID":           " mch-1 ",
 		"WECHAT_PAY_APP_ID":           " app-1 ",
 		"WECHAT_PAY_API_V3_KEY":       " v3-key ",
@@ -75,6 +77,9 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	if cfg.ActivationCodePepper != "activation-pepper" {
 		t.Fatalf("ActivationCodePepper = %q", cfg.ActivationCodePepper)
 	}
+	if cfg.LicenseSigningKeyID != "license-key-1" || cfg.LicenseSigningSeedHex != strings.Repeat("11", 32) {
+		t.Fatalf("license signing config not loaded: %+v", cfg)
+	}
 	if !cfg.WeChatPayConfigured() {
 		t.Fatalf("WeChatPayConfigured() = false for %+v", cfg)
 	}
@@ -93,7 +98,7 @@ func TestValidateForServeReportsMissingFields(t *testing.T) {
 	}
 
 	message := err.Error()
-	for _, name := range []string{"DATABASE_URL", "JWT_SECRET", "NEWAPI_ADMIN_BASE_URL", "NEWAPI_ADMIN_TOKEN", "NEWAPI_USER_PASSWORD_SECRET"} {
+	for _, name := range []string{"DATABASE_URL", "JWT_SECRET", "NEWAPI_ADMIN_BASE_URL", "NEWAPI_ADMIN_TOKEN", "NEWAPI_USER_PASSWORD_SECRET", "LICENSE_SIGNING_KEY_ID", "LICENSE_SIGNING_SEED_HEX"} {
 		if !strings.Contains(message, name) {
 			t.Fatalf("ValidateForServe() error %q missing %s", message, name)
 		}

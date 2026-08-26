@@ -19,7 +19,7 @@ for _ in $(seq 1 30); do
     activation_json="$(curl -fsS -X POST http://127.0.0.1:8080/v1/activations \
       -H 'Content-Type: application/json' \
       -d '{"username":"UCLAW-BIANCHENG","activationCode":"ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","usbFingerprintSummary":"PREVIEW-ONLY","idempotencyKey":"smoke-local-1"}')"
-    activation_id="$(printf '%s' "$activation_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); if(!j.ok||j.status!=="server_bound"||!j.activationId) process.exit(1); process.stdout.write(j.activationId);});')"
+    activation_id="$(printf '%s' "$activation_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); const a=j.licenseArtifact; if(!j.ok||j.status!=="server_bound"||!j.activationId||!a||!a.payload||a.payload.activationId!==j.activationId||!a.signature||a.signature.algorithm!=="Ed25519"||!a.signature.value) process.exit(1); process.stdout.write(j.activationId);});')"
     curl -fsS -X POST "http://127.0.0.1:8080/v1/activations/${activation_id}/commit" \
       -H 'Content-Type: application/json' \
       -d '{"writeStatus":"verified"}' >/dev/null

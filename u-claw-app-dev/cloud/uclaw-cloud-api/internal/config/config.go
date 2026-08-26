@@ -25,6 +25,8 @@ type Config struct {
 	DevSMSCode               string
 	SMSCodePepper            string
 	ActivationCodePepper     string
+	LicenseSigningKeyID      string
+	LicenseSigningSeedHex    string
 	WeChatPayMchID           string
 	WeChatPayAppID           string
 	WeChatPayAPIV3Key        string
@@ -61,6 +63,8 @@ func Load(getenv Getter) (Config, error) {
 		DevSMSCode:               withDefault(getenv("DEV_SMS_CODE"), "123456"),
 		SMSCodePepper:            withDefault(getenv("SMS_CODE_PEPPER"), "uclaw-dev-sms-code-pepper"),
 		ActivationCodePepper:     withDefault(getenv("ACTIVATION_CODE_PEPPER"), "uclaw-dev-activation-code-pepper"),
+		LicenseSigningKeyID:      strings.TrimSpace(getenv("LICENSE_SIGNING_KEY_ID")),
+		LicenseSigningSeedHex:    strings.TrimSpace(getenv("LICENSE_SIGNING_SEED_HEX")),
 		WeChatPayMchID:           strings.TrimSpace(getenv("WECHAT_PAY_MCH_ID")),
 		WeChatPayAppID:           strings.TrimSpace(getenv("WECHAT_PAY_APP_ID")),
 		WeChatPayAPIV3Key:        strings.TrimSpace(getenv("WECHAT_PAY_API_V3_KEY")),
@@ -113,6 +117,12 @@ func (cfg Config) ValidateForServe() error {
 	}
 	if cfg.NewAPIUserPasswordSecret == "" {
 		missing = append(missing, "NEWAPI_USER_PASSWORD_SECRET")
+	}
+	if cfg.LicenseSigningKeyID == "" {
+		missing = append(missing, "LICENSE_SIGNING_KEY_ID")
+	}
+	if cfg.LicenseSigningSeedHex == "" {
+		missing = append(missing, "LICENSE_SIGNING_SEED_HEX")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))

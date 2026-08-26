@@ -175,11 +175,23 @@ func TestFirstStartActivationFlowDoesNotRequireBearerToken(t *testing.T) {
 		t.Fatalf("activate status = %d body = %s", activateRec.Code, activateRec.Body.String())
 	}
 	var activatePayload struct {
-		OK             bool   `json:"ok"`
-		ActivationID   string `json:"activationId"`
-		Status         string `json:"status"`
-		ArtifactStatus string `json:"artifactStatus"`
-		NewAPIToken    string `json:"newapiToken"`
+		OK              bool   `json:"ok"`
+		ActivationID    string `json:"activationId"`
+		Status          string `json:"status"`
+		ArtifactStatus  string `json:"artifactStatus"`
+		NewAPIToken     string `json:"newapiToken"`
+		LicenseArtifact struct {
+			Payload struct {
+				SchemaVersion string `json:"schemaVersion"`
+				ActivationID  string `json:"activationId"`
+				Subject       string `json:"subject"`
+			} `json:"payload"`
+			Signature struct {
+				Algorithm string `json:"algorithm"`
+				KeyID     string `json:"keyId"`
+				Value     string `json:"value"`
+			} `json:"signature"`
+		} `json:"licenseArtifact"`
 	}
 	if err := json.Unmarshal(activateRec.Body.Bytes(), &activatePayload); err != nil {
 		t.Fatalf("decode activation response: %v", err)
@@ -189,6 +201,13 @@ func TestFirstStartActivationFlowDoesNotRequireBearerToken(t *testing.T) {
 	}
 	if activatePayload.ArtifactStatus != "pending_client_write" || activatePayload.NewAPIToken != "preview-token" {
 		t.Fatalf("unexpected activation artifact payload: %+v", activatePayload)
+	}
+	if activatePayload.LicenseArtifact.Payload.SchemaVersion != "uclaw.license.v1" ||
+		activatePayload.LicenseArtifact.Payload.ActivationID != activatePayload.ActivationID ||
+		activatePayload.LicenseArtifact.Payload.Subject != "UCLAW-BIANCHENG" ||
+		activatePayload.LicenseArtifact.Signature.Algorithm != "Ed25519" ||
+		activatePayload.LicenseArtifact.Signature.Value == "" {
+		t.Fatalf("unexpected license artifact: %+v", activatePayload.LicenseArtifact)
 	}
 
 	commitRec := httptest.NewRecorder()

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"uclaw-cloud-api/internal/license"
 )
 
 func TestRedeemReturnsClientConfig(t *testing.T) {
@@ -86,9 +88,11 @@ func TestRedeemRejectsUnconfiguredStore(t *testing.T) {
 }
 
 func TestActivateFirstStartReturnsServerBoundEnvelope(t *testing.T) {
+	signer := license.NewDevelopmentSigner()
 	service, err := NewService(NewMemoryStore(true), Config{
 		NewAPIBaseURL: "https://api.example.com/v1/",
 		PreviewToken:  "preview-token",
+		LicenseSigner: signer,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -118,6 +122,15 @@ func TestActivateFirstStartReturnsServerBoundEnvelope(t *testing.T) {
 	}
 	if result.NewAPIToken != "preview-token" {
 		t.Fatalf("token = %q", result.NewAPIToken)
+	}
+	if result.LicenseArtifact.Payload.ActivationID != result.ActivationID {
+		t.Fatalf("license activation id = %q, want %q", result.LicenseArtifact.Payload.ActivationID, result.ActivationID)
+	}
+	if result.LicenseArtifact.Payload.Subject != "UCLAW-BIANCHENG" {
+		t.Fatalf("license subject = %q", result.LicenseArtifact.Payload.Subject)
+	}
+	if err := license.Verify(result.LicenseArtifact, signer.PublicKeyHex()); err != nil {
+		t.Fatalf("license verify: %v", err)
 	}
 }
 

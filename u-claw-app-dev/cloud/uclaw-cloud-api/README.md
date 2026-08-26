@@ -46,6 +46,8 @@ cd ../.. && node scripts/verify-cloud-model-usage-ui.js
 ```bash
 export DATABASE_URL=postgres://uclaw:change-me@127.0.0.1:5432/uclaw_cloud?sslmode=disable
 export ACTIVATION_CODE_PEPPER=change-me-at-least-32-bytes
+export LICENSE_SIGNING_KEY_ID=prod-ed25519-2026-08
+export LICENSE_SIGNING_SEED_HEX=<32-byte-ed25519-seed-hex>
 go run ./cmd/adminctl activation seed --code ABCD-EFGH-IJKL-MNOP
 ```
 
@@ -84,12 +86,21 @@ curl -sS -X POST http://127.0.0.1:8080/v1/activations \
   -d '{"username":"UCLAW-BIANCHENG","activationCode":"ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","usbFingerprintSummary":"PREVIEW-ONLY","idempotencyKey":"local-dev-1"}'
 ```
 
-当前切片返回 `server_bound` 与 `pending_client_write`，表示服务端已接受绑定请求，但客户端写盘 helper 还没有上报授权材料写入完成。写盘 helper 验证后调用：
+当前切片返回 `server_bound`、`pending_client_write` 与 `licenseArtifact`。`licenseArtifact` 是 `license.json` 可持久化授权材料，包含 canonical payload 和 Ed25519 signature；客户端写盘 helper 还没有上报授权材料写入完成。写盘 helper 验证后调用：
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8080/v1/activations/<activationId>/commit \
   -H 'Content-Type: application/json' \
   -d '{"writeStatus":"verified"}'
+```
+
+验收时可检查响应中存在：
+
+```text
+licenseArtifact.payload.schemaVersion = uclaw.license.v1
+licenseArtifact.payload.activationId = <activationId>
+licenseArtifact.signature.algorithm = Ed25519
+licenseArtifact.signature.value = <base64 signature>
 ```
 
 ## New API 用量摘要

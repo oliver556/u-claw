@@ -11,6 +11,7 @@ import (
 	"uclaw-cloud-api/internal/activation"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/config"
+	"uclaw-cloud-api/internal/license"
 	"uclaw-cloud-api/internal/newapi"
 	"uclaw-cloud-api/internal/provisioning"
 	"uclaw-cloud-api/internal/recharge"
@@ -413,11 +414,20 @@ func buildActivationService(cfg config.Config, store activation.Store) *activati
 			panic(fmt.Sprintf("build newapi provisioner: %v", err))
 		}
 	}
+	licenseSigner := license.NewDevelopmentSigner()
+	if cfg.LicenseSigningSeedHex != "" {
+		signer, err := license.NewEd25519SignerFromSeedHex(cfg.LicenseSigningKeyID, cfg.LicenseSigningSeedHex, 0)
+		if err != nil {
+			panic(fmt.Sprintf("build license signer: %v", err))
+		}
+		licenseSigner = signer
+	}
 	service, err := activation.NewService(store, activation.Config{
 		AllowAnyCode:  !cfg.IsProduction(),
 		NewAPIBaseURL: cfg.NewAPIClientBaseURL,
 		PreviewToken:  cfg.NewAPIPreviewToken,
 		Provisioner:   provisioner,
+		LicenseSigner: licenseSigner,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("build activation service: %v", err))
