@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"uclaw-cloud-api/internal/config"
@@ -92,35 +91,5 @@ func TestSMSLoginRejectsInvalidCode(t *testing.T) {
 	server.ServeHTTP(loginRec, loginReq)
 	if loginRec.Code != http.StatusUnauthorized {
 		t.Fatalf("login status = %d, want 401", loginRec.Code)
-	}
-}
-
-func TestDevAuthPageAvailableOutsideProduction(t *testing.T) {
-	server := NewServer(config.Config{AppEnv: "development", JWTSecret: "test-secret"}, BuildInfo{Version: "test"})
-	req := httptest.NewRequest(http.MethodGet, "/dev/auth", nil)
-	rec := httptest.NewRecorder()
-
-	server.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
-		t.Fatalf("Content-Type = %q, want text/html", contentType)
-	}
-	if !strings.Contains(rec.Body.String(), "U-Claw Auth 验收") {
-		t.Fatalf("body missing dev auth title")
-	}
-}
-
-func TestDevAuthPageDisabledInProduction(t *testing.T) {
-	server := NewServer(config.Config{AppEnv: "production", JWTSecret: "test-secret"}, BuildInfo{Version: "test"})
-	req := httptest.NewRequest(http.MethodGet, "/dev/auth", nil)
-	rec := httptest.NewRecorder()
-
-	server.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }

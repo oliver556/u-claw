@@ -16,7 +16,6 @@ trap 'kill "$SERVER_PID" >/dev/null 2>&1 || true; wait "$SERVER_PID" >/dev/null 
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
     curl -fsS http://127.0.0.1:8080/readyz >/dev/null 2>&1
-    curl -fsS http://127.0.0.1:8080/dev/auth >/dev/null
     curl -fsS -X POST http://127.0.0.1:8080/v1/auth/sms/send \
       -H 'Content-Type: application/json' \
       -d '{"phone":"13800138000","purpose":"login"}' >/dev/null

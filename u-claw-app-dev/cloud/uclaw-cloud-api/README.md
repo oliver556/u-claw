@@ -38,12 +38,6 @@ go run ./cmd/adminctl activation generate 5
 
 开发环境默认短信码为 `123456`，响应会返回 `devCode`，生产环境不会暴露。
 
-浏览器验收页：
-
-```text
-http://127.0.0.1:8080/dev/auth
-```
-
 ```bash
 curl -sS -X POST http://127.0.0.1:8080/v1/auth/sms/send \
   -H 'Content-Type: application/json' \

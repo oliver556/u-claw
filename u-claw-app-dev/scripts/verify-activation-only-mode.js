@@ -49,7 +49,7 @@ for (const forbidden of ['startConfigServer', 'startGateway', 'startVideoAdapter
 }
 
 const activationIpc = sliceBetween(main, 'function setupActivationIPC()', 'function loadActivationPage()');
-for (const channel of ['activation:get-preflight', 'activation:submit', 'activation:window-action']) {
+for (const channel of ['activation:get-preflight', 'activation:send-sms', 'activation:submit', 'activation:window-action']) {
   requireText(activationIpc, channel, `activation IPC channel ${channel}`);
 }
 for (const forbidden of ['get-gateway-status', 'open-dashboard', 'open-config']) {
@@ -69,13 +69,17 @@ for (const forbidden of ['getGatewayStatus', 'openDashboard', 'openConfig']) {
 for (const required of [
   '首次启动激活',
   '受限模式不启动 OpenClaw Gateway',
-  'placeholder="UCLAW-XXXXXXXX"',
-  'placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX"',
+  '登录并绑定当前 U-Claw 产品盘',
+  'placeholder="请输入手机号"',
+  'placeholder="6 位验证码"',
+  'placeholder="XXXX-XXXX-XXXX-XXXX"',
+  'sendSMS',
+  'finishPhone',
   'formatActivationCode',
   'escapeHtml',
-  '静态流程完成',
+  'U-Claw 首次登录完成',
   'preview',
-  '未联网、未写入授权材料、未完成真实激活',
+  '等待云端激活兑换接入',
 ]) {
   requireText(activationHtml, required, `activation page marker ${required}`);
 }

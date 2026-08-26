@@ -1152,14 +1152,47 @@ function getActivationPreflight() {
 }
 
 /**
- * Handles activation submit attempts for the first slice. Real activation will
- * replace this with the HTTPS activation client and privileged write helper.
+ * Handles SMS requests for the first-login activation page. The local dev code
+ * keeps the renderer flow testable until Aliyun SMS is wired behind this seam.
  */
-function submitActivation() {
+function sendActivationSMS(payload = {}) {
+  const phone = String(payload.phone || '').trim();
+  if (!/^1[3-9]\d{9}$/.test(phone)) {
+    return { ok: false, message: '请输入有效的手机号。', retryable: true };
+  }
+  return {
+    ok: true,
+    status: 'sent',
+    devCode: isDev ? '123456' : '',
+    message: isDev ? '验证码已发送，开发环境验证码为 123456。' : '验证码已发送。',
+  };
+}
+
+/**
+ * Handles activation submit attempts for the first-login slice. Real activation
+ * will replace this with the HTTPS activation client and privileged write helper.
+ */
+function submitActivation(payload = {}) {
+  const phone = String(payload.phone || '').trim();
+  const smsCode = String(payload.smsCode || '').trim();
+  const activationCode = String(payload.activationCode || '').trim().toUpperCase();
+  if (!/^1[3-9]\d{9}$/.test(phone)) {
+    return { ok: false, message: '手机号格式不正确。', retryable: true };
+  }
+  if (!/^\d{6}$/.test(smsCode)) {
+    return { ok: false, message: '请输入 6 位短信验证码。', retryable: true };
+  }
+  if (isDev && smsCode !== '123456') {
+    return { ok: false, message: '开发环境验证码为 123456。', retryable: true };
+  }
+  if (!/^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}$/.test(activationCode)) {
+    return { ok: false, message: '激活码格式不正确。', retryable: true };
+  }
   return {
     ok: true,
     code: ACTIVATION_STATIC_PREVIEW_COMPLETE,
-    message: '静态预览完成：未联网、未写入授权材料，也未完成真实激活。',
+    message: '首启登录流程已通过本地验证；真实激活服务接入后会写入授权材料。',
+    phoneMasked: `${phone.slice(0, 3)}****${phone.slice(7)}`,
     retryable: false,
   };
 }
@@ -1170,7 +1203,8 @@ function submitActivation() {
  */
 function setupActivationIPC() {
   ipcMain.handle('activation:get-preflight', () => getActivationPreflight());
-  ipcMain.handle('activation:submit', () => submitActivation());
+  ipcMain.handle('activation:send-sms', (_event, payload) => sendActivationSMS(payload));
+  ipcMain.handle('activation:submit', (_event, payload) => submitActivation(payload));
   ipcMain.handle('activation:window-action', (_event, action) => {
     if (!mainWindow) return { ok: false };
     if (action === 'minimize') mainWindow.minimize();
