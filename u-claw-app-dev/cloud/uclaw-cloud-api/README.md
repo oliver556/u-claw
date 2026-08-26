@@ -34,6 +34,8 @@ go run ./cmd/adminctl activation generate 5
 DATABASE_URL=postgres://uclaw:change-me@127.0.0.1:5432/uclaw_cloud?sslmode=disable \
   go run ./cmd/adminctl activation seed --code ABCD-EFGH-IJKL-MNOP
 ./deploy/scripts/smoke-local.sh
+./deploy/scripts/newapi-local-spike.sh
+./deploy/scripts/activation-local-e2e.sh
 ```
 
 ## PostgreSQL 激活存储
@@ -103,6 +105,10 @@ go run ./cmd/adminctl spike newapi add-quota \
   --user-id 123 \
   --quota 100000
 
+go run ./cmd/adminctl spike newapi provision \
+  --username 13800138000 \
+  --quota 100000
+
 go run ./cmd/adminctl spike newapi \
   --username 13800138000 \
   --password random-password \
@@ -116,6 +122,8 @@ Spike 结果填写到：
 ```text
 docs/spike-results.md
 ```
+
+`provision` 会执行生产同构链路：创建同名 New API 用户、用户登录、创建 API token、调用 `/api/token/{id}/key` 取真实 key、admin add quota，并只输出 `token_present=true`，不打印明文 key。
 
 ## Release
 

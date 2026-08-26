@@ -9,19 +9,22 @@ import (
 
 // Config is the runtime interface for U-Claw Cloud API process configuration.
 type Config struct {
-	AppEnv               string
-	HTTPAddr             string
-	DatabaseURL          string
-	JWTSecret            string
-	NewAPIAdminBaseURL   string
-	NewAPIAdminToken     string
-	NewAPIClientBaseURL  string
-	NewAPIPreviewToken   string
-	NewAPIHTTPTimeout    time.Duration
-	AuthTokenTTL         time.Duration
-	DevSMSCode           string
-	SMSCodePepper        string
-	ActivationCodePepper string
+	AppEnv                   string
+	HTTPAddr                 string
+	DatabaseURL              string
+	JWTSecret                string
+	NewAPIAdminBaseURL       string
+	NewAPIAdminToken         string
+	NewAPIClientBaseURL      string
+	NewAPIPreviewToken       string
+	NewAPIHTTPTimeout        time.Duration
+	NewAPIActivationQuota    int64
+	NewAPITokenName          string
+	NewAPIUserPasswordSecret string
+	AuthTokenTTL             time.Duration
+	DevSMSCode               string
+	SMSCodePepper            string
+	ActivationCodePepper     string
 }
 
 // Getter reads a configuration value from a backing store such as environment variables.
@@ -34,19 +37,22 @@ func Load(getenv Getter) (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:               withDefault(getenv("APP_ENV"), "development"),
-		HTTPAddr:             withDefault(getenv("UCLAW_HTTP_ADDR"), ":8080"),
-		DatabaseURL:          strings.TrimSpace(getenv("DATABASE_URL")),
-		JWTSecret:            strings.TrimSpace(getenv("JWT_SECRET")),
-		NewAPIAdminBaseURL:   strings.TrimRight(strings.TrimSpace(getenv("NEWAPI_ADMIN_BASE_URL")), "/"),
-		NewAPIAdminToken:     strings.TrimSpace(getenv("NEWAPI_ADMIN_TOKEN")),
-		NewAPIClientBaseURL:  strings.TrimRight(withDefault(getenv("NEWAPI_CLIENT_BASE_URL"), "https://api.gmnlee.com/v1"), "/"),
-		NewAPIPreviewToken:   withDefault(getenv("NEWAPI_PREVIEW_TOKEN"), "uclaw-preview-newapi-token"),
-		NewAPIHTTPTimeout:    10 * time.Second,
-		AuthTokenTTL:         24 * time.Hour,
-		DevSMSCode:           withDefault(getenv("DEV_SMS_CODE"), "123456"),
-		SMSCodePepper:        withDefault(getenv("SMS_CODE_PEPPER"), "uclaw-dev-sms-code-pepper"),
-		ActivationCodePepper: withDefault(getenv("ACTIVATION_CODE_PEPPER"), "uclaw-dev-activation-code-pepper"),
+		AppEnv:                   withDefault(getenv("APP_ENV"), "development"),
+		HTTPAddr:                 withDefault(getenv("UCLAW_HTTP_ADDR"), ":8080"),
+		DatabaseURL:              strings.TrimSpace(getenv("DATABASE_URL")),
+		JWTSecret:                strings.TrimSpace(getenv("JWT_SECRET")),
+		NewAPIAdminBaseURL:       strings.TrimRight(strings.TrimSpace(getenv("NEWAPI_ADMIN_BASE_URL")), "/"),
+		NewAPIAdminToken:         strings.TrimSpace(getenv("NEWAPI_ADMIN_TOKEN")),
+		NewAPIClientBaseURL:      strings.TrimRight(withDefault(getenv("NEWAPI_CLIENT_BASE_URL"), "https://api.gmnlee.com/v1"), "/"),
+		NewAPIPreviewToken:       withDefault(getenv("NEWAPI_PREVIEW_TOKEN"), "uclaw-preview-newapi-token"),
+		NewAPIHTTPTimeout:        10 * time.Second,
+		NewAPIActivationQuota:    0,
+		NewAPITokenName:          withDefault(getenv("NEWAPI_TOKEN_NAME"), "uclaw-main"),
+		NewAPIUserPasswordSecret: withDefault(getenv("NEWAPI_USER_PASSWORD_SECRET"), "uclaw-dev-newapi-user-password-secret"),
+		AuthTokenTTL:             24 * time.Hour,
+		DevSMSCode:               withDefault(getenv("DEV_SMS_CODE"), "123456"),
+		SMSCodePepper:            withDefault(getenv("SMS_CODE_PEPPER"), "uclaw-dev-sms-code-pepper"),
+		ActivationCodePepper:     withDefault(getenv("ACTIVATION_CODE_PEPPER"), "uclaw-dev-activation-code-pepper"),
 	}
 
 	if raw := strings.TrimSpace(getenv("NEWAPI_HTTP_TIMEOUT")); raw != "" {
@@ -55,6 +61,13 @@ func Load(getenv Getter) (Config, error) {
 			return Config{}, fmt.Errorf("parse NEWAPI_HTTP_TIMEOUT: %w", err)
 		}
 		cfg.NewAPIHTTPTimeout = timeout
+	}
+	if raw := strings.TrimSpace(getenv("NEWAPI_ACTIVATION_QUOTA")); raw != "" {
+		quota, err := parseNonNegativeInt64(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse NEWAPI_ACTIVATION_QUOTA: %w", err)
+		}
+		cfg.NewAPIActivationQuota = quota
 	}
 	if raw := strings.TrimSpace(getenv("AUTH_TOKEN_TTL")); raw != "" {
 		timeout, err := time.ParseDuration(raw)
@@ -82,6 +95,9 @@ func (cfg Config) ValidateForServe() error {
 	if cfg.NewAPIAdminToken == "" {
 		missing = append(missing, "NEWAPI_ADMIN_TOKEN")
 	}
+	if cfg.NewAPIUserPasswordSecret == "" {
+		missing = append(missing, "NEWAPI_USER_PASSWORD_SECRET")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
 	}
@@ -100,4 +116,16 @@ func withDefault(value string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// parseNonNegativeInt64 parses quota-like config where zero means disabled.
+func parseNonNegativeInt64(raw string) (int64, error) {
+	var value int64
+	for _, ch := range raw {
+		if ch < '0' || ch > '9' {
+			return 0, fmt.Errorf("invalid integer %q", raw)
+		}
+		value = value*10 + int64(ch-'0')
+	}
+	return value, nil
 }

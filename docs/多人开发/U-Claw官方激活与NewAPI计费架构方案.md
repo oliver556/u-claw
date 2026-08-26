@@ -1237,7 +1237,9 @@ go run ./cmd/adminctl spike newapi add-quota \
 - 已完成 `/v1/activation/redeem` contract，客户端可写入 `openclaw.json`。
 - 已完成 PostgreSQL store 第一刀：`sms_codes`、`uclaw_users`、`activation_codes` 持久化；`DATABASE_URL` 配置后服务使用 PG，否则本地 smoke 使用内存 store。
 - 已新增 `adminctl activation seed --code <code>`，可把随 U 盘发放的激活码 seed 到 PostgreSQL。
-- 尚未完成 New API 自动创建用户、New API token 明文回收、初始 quota 发放；这是下一开发切片。
+- 已完成 New API 自动创建同名用户、用户登录、创建 API token、通过 `POST /api/token/{id}/key` 取真实 key、初始 quota 发放、`newapi_accounts` 映射落库。
+- 已完成完整本地 E2E：临时 PostgreSQL + 本地 New API + U-Claw Cloud API + 激活码 seed + SMS/login/redeem，返回可用 `sk-` token。
+- 尚未完成余额/用量/流水查询 API 与充值支付回调；这是下一开发切片。
 
 ### Phase 2: 客户端激活与配置写入
 

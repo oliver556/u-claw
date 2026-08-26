@@ -8,14 +8,17 @@ import (
 
 func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	values := map[string]string{
-		"NEWAPI_ADMIN_BASE_URL":  " https://newapi.example.com/ ",
-		"NEWAPI_CLIENT_BASE_URL": " https://api.example.com/v1/ ",
-		"NEWAPI_PREVIEW_TOKEN":   "preview-token",
-		"NEWAPI_HTTP_TIMEOUT":    "3s",
-		"AUTH_TOKEN_TTL":         "2h",
-		"DEV_SMS_CODE":           "654321",
-		"SMS_CODE_PEPPER":        "sms-pepper",
-		"ACTIVATION_CODE_PEPPER": "activation-pepper",
+		"NEWAPI_ADMIN_BASE_URL":       " https://newapi.example.com/ ",
+		"NEWAPI_CLIENT_BASE_URL":      " https://api.example.com/v1/ ",
+		"NEWAPI_PREVIEW_TOKEN":        "preview-token",
+		"NEWAPI_HTTP_TIMEOUT":         "3s",
+		"NEWAPI_ACTIVATION_QUOTA":     "100000",
+		"NEWAPI_TOKEN_NAME":           "uclaw-desktop",
+		"NEWAPI_USER_PASSWORD_SECRET": "password-secret",
+		"AUTH_TOKEN_TTL":              "2h",
+		"DEV_SMS_CODE":                "654321",
+		"SMS_CODE_PEPPER":             "sms-pepper",
+		"ACTIVATION_CODE_PEPPER":      "activation-pepper",
 	}
 
 	cfg, err := Load(func(key string) string {
@@ -43,6 +46,15 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	if cfg.NewAPIHTTPTimeout != 3*time.Second {
 		t.Fatalf("NewAPIHTTPTimeout = %v, want 3s", cfg.NewAPIHTTPTimeout)
 	}
+	if cfg.NewAPIActivationQuota != 100000 {
+		t.Fatalf("NewAPIActivationQuota = %d, want 100000", cfg.NewAPIActivationQuota)
+	}
+	if cfg.NewAPITokenName != "uclaw-desktop" {
+		t.Fatalf("NewAPITokenName = %q", cfg.NewAPITokenName)
+	}
+	if cfg.NewAPIUserPasswordSecret != "password-secret" {
+		t.Fatalf("NewAPIUserPasswordSecret = %q", cfg.NewAPIUserPasswordSecret)
+	}
 	if cfg.AuthTokenTTL != 2*time.Hour {
 		t.Fatalf("AuthTokenTTL = %v, want 2h", cfg.AuthTokenTTL)
 	}
@@ -64,7 +76,7 @@ func TestValidateForServeReportsMissingFields(t *testing.T) {
 	}
 
 	message := err.Error()
-	for _, name := range []string{"DATABASE_URL", "JWT_SECRET", "NEWAPI_ADMIN_BASE_URL", "NEWAPI_ADMIN_TOKEN"} {
+	for _, name := range []string{"DATABASE_URL", "JWT_SECRET", "NEWAPI_ADMIN_BASE_URL", "NEWAPI_ADMIN_TOKEN", "NEWAPI_USER_PASSWORD_SECRET"} {
 		if !strings.Contains(message, name) {
 			t.Fatalf("ValidateForServe() error %q missing %s", message, name)
 		}

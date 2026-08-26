@@ -12,6 +12,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"uclaw-cloud-api/internal/auth"
+	"uclaw-cloud-api/internal/provisioning"
 )
 
 // Store implements persistent auth and activation-code storage on PostgreSQL.
@@ -121,8 +122,10 @@ SET status = 'bound',
   bound_phone = $3,
   bound_at = $4
 WHERE code_hash = $1
-  AND status = 'unused'
-  AND (expires_at IS NULL OR expires_at > $4)
+  AND (
+    (status = 'unused' AND (expires_at IS NULL OR expires_at > $4))
+    OR (status = 'bound' AND bound_user_id = $2 AND bound_phone = $3)
+  )
 `, codeHash, userID, phone, at)
 	if err != nil {
 		return fmt.Errorf("redeem activation code: %w", err)
@@ -133,6 +136,33 @@ WHERE code_hash = $1
 	}
 	if rows != 1 {
 		return fmt.Errorf("activation code is invalid or already bound")
+	}
+	return nil
+}
+
+// SaveNewAPIAccount upserts the New API account mapping after successful provisioning.
+func (s *Store) SaveNewAPIAccount(ctx context.Context, account provisioning.Account) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO newapi_accounts (
+  uclaw_user_id,
+  newapi_base_url,
+  newapi_user_id,
+  newapi_username,
+  token_fingerprint,
+  token_rotated_at,
+  created_at,
+  updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, now(), now())
+ON CONFLICT (uclaw_user_id) DO UPDATE SET
+  newapi_base_url = EXCLUDED.newapi_base_url,
+  newapi_user_id = EXCLUDED.newapi_user_id,
+  newapi_username = EXCLUDED.newapi_username,
+  token_fingerprint = EXCLUDED.token_fingerprint,
+  token_rotated_at = EXCLUDED.token_rotated_at,
+  updated_at = now()
+`, account.UClawUserID, account.NewAPIBaseURL, account.NewAPIUserID, account.NewAPIUsername, account.TokenFingerprint, account.TokenRotatedAt)
+	if err != nil {
+		return fmt.Errorf("save newapi account: %w", err)
 	}
 	return nil
 }

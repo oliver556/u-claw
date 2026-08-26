@@ -36,6 +36,24 @@ type RedeemResult struct {
 	DefaultModels DefaultModels `json:"defaultModels"`
 }
 
+// ProvisionRequest identifies the U-Claw user that needs a New API account.
+type ProvisionRequest struct {
+	UserID int64
+	Phone  string
+}
+
+// ProvisionResult carries the New API client credential returned to U-Claw desktop.
+type ProvisionResult struct {
+	NewAPIUserID int64
+	Token        string
+	TokenVersion int
+}
+
+// NewAPIProvisioner creates or restores the user's New API account and token.
+type NewAPIProvisioner interface {
+	ProvisionNewAPI(ctx context.Context, req ProvisionRequest) (ProvisionResult, error)
+}
+
 // Store persists activation-code binding decisions.
 type Store interface {
 	Redeem(ctx context.Context, code string, userID int64, phone string, at time.Time) error
@@ -49,6 +67,7 @@ type Config struct {
 	DefaultTextModel  string
 	DefaultImageModel string
 	DefaultVideoModel string
+	Provisioner       NewAPIProvisioner
 }
 
 // Service owns activation-code validation and the client-facing activation contract.
@@ -97,12 +116,22 @@ func (s *Service) Redeem(ctx context.Context, req RedeemRequest) (RedeemResult, 
 	if err := s.store.Redeem(ctx, code, req.UserID, phone, s.now()); err != nil {
 		return RedeemResult{}, err
 	}
+	token := s.cfg.PreviewToken
+	tokenVersion := 1
+	if s.cfg.Provisioner != nil {
+		result, err := s.cfg.Provisioner.ProvisionNewAPI(ctx, ProvisionRequest{UserID: req.UserID, Phone: phone})
+		if err != nil {
+			return RedeemResult{}, err
+		}
+		token = result.Token
+		tokenVersion = result.TokenVersion
+	}
 	return RedeemResult{
 		Status:        "activated",
 		PhoneMasked:   maskPhone(phone),
 		NewAPIBaseURL: strings.TrimRight(s.cfg.NewAPIBaseURL, "/"),
-		NewAPIToken:   s.cfg.PreviewToken,
-		TokenVersion:  1,
+		NewAPIToken:   token,
+		TokenVersion:  tokenVersion,
 		DefaultModels: DefaultModels{
 			Text:  s.cfg.DefaultTextModel,
 			Image: s.cfg.DefaultImageModel,
@@ -137,7 +166,10 @@ func (s *MemoryStore) Redeem(_ context.Context, code string, userID int64, phone
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	code = strings.ToUpper(strings.TrimSpace(code))
-	if _, exists := s.bound[code]; exists {
+	if existing, exists := s.bound[code]; exists {
+		if existing.UserID == userID && existing.Phone == phone {
+			return nil
+		}
 		return fmt.Errorf("activation code is already bound")
 	}
 	if !s.allowAnyCode {

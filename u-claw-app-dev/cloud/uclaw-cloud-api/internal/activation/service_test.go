@@ -40,7 +40,7 @@ func TestRedeemReturnsClientConfig(t *testing.T) {
 	}
 }
 
-func TestRedeemRejectsDuplicateCode(t *testing.T) {
+func TestRedeemAllowsSameUserRetry(t *testing.T) {
 	store := NewMemoryStore(true)
 	service, err := NewService(store, Config{})
 	if err != nil {
@@ -50,8 +50,22 @@ func TestRedeemRejectsDuplicateCode(t *testing.T) {
 	if _, err := service.Redeem(context.Background(), req); err != nil {
 		t.Fatalf("first redeem: %v", err)
 	}
-	if _, err := service.Redeem(context.Background(), req); err == nil {
-		t.Fatal("second redeem succeeded, want duplicate error")
+	if _, err := service.Redeem(context.Background(), req); err != nil {
+		t.Fatalf("second redeem same user: %v", err)
+	}
+}
+
+func TestRedeemRejectsDuplicateCodeForDifferentUser(t *testing.T) {
+	store := NewMemoryStore(true)
+	service, err := NewService(store, Config{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if _, err := service.Redeem(context.Background(), RedeemRequest{UserID: 1, Phone: "13800138000", ActivationCode: "ABCD-EFGH-IJKL"}); err != nil {
+		t.Fatalf("first redeem: %v", err)
+	}
+	if _, err := service.Redeem(context.Background(), RedeemRequest{UserID: 2, Phone: "13900139000", ActivationCode: "ABCD-EFGH-IJKL"}); err == nil {
+		t.Fatal("second redeem different user succeeded, want duplicate error")
 	}
 }
 

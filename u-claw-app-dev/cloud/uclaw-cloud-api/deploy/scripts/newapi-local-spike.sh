@@ -5,8 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BASE_URL="${NEWAPI_ADMIN_BASE_URL:-http://127.0.0.1:${NEWAPI_LOCAL_PORT:-3000}}"
 ROOT_USERNAME="${NEWAPI_LOCAL_ROOT_USERNAME:-root}"
 ROOT_PASSWORD="${NEWAPI_LOCAL_ROOT_PASSWORD:-UclawLocal@2026}"
-DEFAULT_TEST_USERNAME="139$(date +%s | tail -c 9)"
+TIME_SUFFIX="$(date +%s | tail -c 9)"
+PROVISION_SUFFIX="$(printf '%08d' "$((10#$TIME_SUFFIX + 1))" | tail -c 9)"
+DEFAULT_TEST_USERNAME="139$TIME_SUFFIX"
 TEST_USERNAME="${NEWAPI_LOCAL_TEST_USERNAME:-$DEFAULT_TEST_USERNAME}"
+PROVISION_USERNAME="${NEWAPI_LOCAL_PROVISION_USERNAME:-139$PROVISION_SUFFIX}"
 TEST_PASSWORD="${NEWAPI_LOCAL_TEST_PASSWORD:-UclawTest@2026}"
 TEST_QUOTA="${NEWAPI_LOCAL_TEST_QUOTA:-100000}"
 
@@ -54,4 +57,12 @@ NEWAPI_ADMIN_BASE_URL="$BASE_URL" NEWAPI_ADMIN_TOKEN="$user_token" \
   go run ./cmd/adminctl spike newapi create-token \
     --token-name uclaw-main
 
-echo "{\"ok\":true,\"step\":\"local_spike\",\"base_url\":\"$BASE_URL\",\"username\":\"$TEST_USERNAME\",\"user_id\":$user_id,\"quota\":$TEST_QUOTA}"
+NEWAPI_ADMIN_BASE_URL="$BASE_URL" \
+NEWAPI_ADMIN_TOKEN="$admin_token" \
+NEWAPI_CLIENT_BASE_URL="$BASE_URL/v1" \
+NEWAPI_ACTIVATION_QUOTA="$TEST_QUOTA" \
+  go run ./cmd/adminctl spike newapi provision \
+    --username "$PROVISION_USERNAME" \
+    --quota "$TEST_QUOTA"
+
+echo "{\"ok\":true,\"step\":\"local_spike\",\"base_url\":\"$BASE_URL\",\"username\":\"$TEST_USERNAME\",\"user_id\":$user_id,\"provision_username\":\"$PROVISION_USERNAME\",\"quota\":$TEST_QUOTA}"

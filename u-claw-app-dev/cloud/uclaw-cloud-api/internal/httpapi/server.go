@@ -11,6 +11,8 @@ import (
 	"uclaw-cloud-api/internal/activation"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/config"
+	"uclaw-cloud-api/internal/newapi"
+	"uclaw-cloud-api/internal/provisioning"
 )
 
 const developmentJWTSecret = "uclaw-development-only-secret-change-before-production"
@@ -32,6 +34,7 @@ type ServerOptions struct {
 type PersistentStore interface {
 	auth.Store
 	activation.Store
+	provisioning.Store
 }
 
 type sendSMSRequest struct {
@@ -174,10 +177,27 @@ func buildActivationService(cfg config.Config, store activation.Store) *activati
 	if store == nil {
 		store = activation.NewMemoryStore(!cfg.IsProduction())
 	}
+	var provisioner activation.NewAPIProvisioner
+	if persistentStore, ok := store.(provisioning.Store); ok && cfg.NewAPIAdminBaseURL != "" && cfg.NewAPIAdminToken != "" {
+		admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout})
+		if err != nil {
+			panic(fmt.Sprintf("build newapi admin client: %v", err))
+		}
+		provisioner, err = provisioning.NewService(admin, persistentStore, provisioning.Config{
+			ClientBaseURL:  cfg.NewAPIClientBaseURL,
+			TokenName:      cfg.NewAPITokenName,
+			InitialQuota:   cfg.NewAPIActivationQuota,
+			PasswordSecret: cfg.NewAPIUserPasswordSecret,
+		})
+		if err != nil {
+			panic(fmt.Sprintf("build newapi provisioner: %v", err))
+		}
+	}
 	service, err := activation.NewService(store, activation.Config{
 		AllowAnyCode:  !cfg.IsProduction(),
 		NewAPIBaseURL: cfg.NewAPIClientBaseURL,
 		PreviewToken:  cfg.NewAPIPreviewToken,
+		Provisioner:   provisioner,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("build activation service: %v", err))

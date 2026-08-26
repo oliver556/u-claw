@@ -11,6 +11,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"uclaw-cloud-api/internal/auth"
+	"uclaw-cloud-api/internal/provisioning"
 )
 
 // newMockStore creates a PostgreSQL store with sqlmock so store behavior is testable without a live DB.
@@ -129,6 +130,31 @@ func TestStoreSeedActivationCodeHashesPrintedCode(t *testing.T) {
 
 	if err := store.SeedActivationCode(context.Background(), "ABCD-EFGH-IJKL-MNOP", batchID); err != nil {
 		t.Fatalf("SeedActivationCode() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestStoreSaveNewAPIAccountUpsertsMapping(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	rotatedAt := time.Date(2026, 8, 27, 1, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO newapi_accounts")).
+		WithArgs(int64(5), "https://api.example.com/v1", int64(9), "13800138000", "fingerprint", rotatedAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := store.SaveNewAPIAccount(context.Background(), provisioning.Account{
+		UClawUserID:      5,
+		NewAPIBaseURL:    "https://api.example.com/v1",
+		NewAPIUserID:     9,
+		NewAPIUsername:   "13800138000",
+		TokenFingerprint: "fingerprint",
+		TokenRotatedAt:   rotatedAt,
+	})
+	if err != nil {
+		t.Fatalf("SaveNewAPIAccount() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

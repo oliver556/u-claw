@@ -64,6 +64,7 @@ go run ./cmd/adminctl spike newapi add-quota \
 本地 New API SQLite 单容器可用于 Phase 0 管理 API 联调。
 已验证：admin 创建用户、按 username 查询 user id、用户登录后创建 API token、admin add quota。
 重要修正：add quota 不能使用 {id, quota}，必须使用 {id, action:"add_quota", mode:"add", value}。
-重要发现：POST /api/token/ 成功响应不返回明文 token；token key 已落库，生产链路需要确认是否可通过 API 响应拿 key，或改用 New API 支持的可返回 key 的接口/流程。
+重要发现：POST /api/token/ 成功响应不返回明文 token；需用 token 所属用户 access token 调 `POST /api/token/{id}/key` 获取真实 key。
+2026-08-27 补验：`spike newapi provision` 已跑通创建同名用户、用户登录、创建 token、搜索 token id、fetch real key、admin add quota；脚本只输出 `token_present=true`，不打印明文 key。
 未完成：普通用户 token 查询余额/流水接口、OVH New API + 香港 Nginx 路径验收。
 ```

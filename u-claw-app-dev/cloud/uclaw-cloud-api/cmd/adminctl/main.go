@@ -11,10 +11,13 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"uclaw-cloud-api/internal/activation"
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/newapi"
 	"uclaw-cloud-api/internal/postgres"
+	"uclaw-cloud-api/internal/provisioning"
 )
 
 // main provides operational commands that do not belong in the public HTTP process.
@@ -135,12 +138,62 @@ func runSpike(args []string) {
 		spikeCreateToken(ctx, client, commandArgs)
 	case "add-quota":
 		spikeAddQuota(ctx, client, commandArgs)
+	case "provision":
+		spikeProvision(ctx, client, cfg, commandArgs)
 	case "full":
 		spikeFull(ctx, client, commandArgs)
 	default:
 		usage()
 		os.Exit(2)
 	}
+}
+
+// spikeProvisionStore captures New API account mappings for local spike output.
+type spikeProvisionStore struct {
+	account provisioning.Account
+}
+
+// SaveNewAPIAccount captures provisioning output without writing local spike data to production DB.
+func (s *spikeProvisionStore) SaveNewAPIAccount(_ context.Context, account provisioning.Account) error {
+	s.account = account
+	return nil
+}
+
+// spikeProvision verifies the production New API orchestration path without printing raw API keys.
+func spikeProvision(ctx context.Context, client *newapi.Client, cfg config.Config, args []string) {
+	username := requiredFlag(args, "--username")
+	quota := cfg.NewAPIActivationQuota
+	if raw := optionalFlag(args, "--quota", ""); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			log.Fatalf("--quota must be a non-negative integer")
+		}
+		quota = parsed
+	}
+	store := &spikeProvisionStore{}
+	service, err := provisioning.NewService(client, store, provisioning.Config{
+		ClientBaseURL:  cfg.NewAPIClientBaseURL,
+		TokenName:      cfg.NewAPITokenName,
+		InitialQuota:   quota,
+		PasswordSecret: cfg.NewAPIUserPasswordSecret,
+	})
+	if err != nil {
+		log.Fatalf("provision service: %v", err)
+	}
+	result, err := service.ProvisionNewAPI(ctx, activation.ProvisionRequest{UserID: time.Now().Unix(), Phone: username})
+	if err != nil {
+		log.Fatalf("provision newapi: %v", err)
+	}
+	printJSON(map[string]any{
+		"step":              "provision",
+		"ok":                true,
+		"username":          username,
+		"newapi_user_id":    result.NewAPIUserID,
+		"token_present":     result.Token != "",
+		"token_version":     result.TokenVersion,
+		"quota":             quota,
+		"mapping_persisted": store.account.NewAPIUserID == result.NewAPIUserID,
+	})
 }
 
 // spikeCreateUser verifies New API user creation with the planned phone-as-username rule.
@@ -285,5 +338,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi create-user --username <phone> --password <password>")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi create-token [--token-name <name>]")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi add-quota --user-id <id> --quota <tokens>")
+	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi provision --username <phone> [--quota <tokens>]")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi full --username <phone> --password <password> [--token-name <name>] [--user-id <id> --quota <tokens>]")
 }
