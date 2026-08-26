@@ -20,6 +20,7 @@
 ```text
 New API Docker tag:
 New API admin base URL:
+本地 New API URL:
 香港 Nginx endpoint:
 测试手机号:
 测试时间:
@@ -38,6 +39,8 @@ add quota:
 ## 建议命令
 
 ```bash
+./deploy/scripts/newapi-local-up.sh
+
 export NEWAPI_ADMIN_BASE_URL=
 export NEWAPI_ADMIN_TOKEN=
 

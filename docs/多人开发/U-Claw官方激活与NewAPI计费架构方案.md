@@ -1034,6 +1034,90 @@ POST /v1/payments/alipay/notify
 
 正式开发前必须用计划部署的 New API Docker tag 实测。
 
+### 12.0 本地 New API 联调实验室
+
+可以先在开发机本地启动一个 New API 实例，用于验证 U-Claw Cloud API 的管理调用形态。
+
+本地联调代码位置：
+
+```text
+u-claw-app-dev/cloud/uclaw-cloud-api/deploy/newapi-local
+```
+
+启动方式：
+
+```bash
+cd u-claw-app-dev/cloud/uclaw-cloud-api
+./deploy/scripts/newapi-local-up.sh
+```
+
+默认访问：
+
+```text
+http://127.0.0.1:3000
+```
+
+如果端口冲突：
+
+```bash
+NEWAPI_LOCAL_PORT=33000 ./deploy/scripts/newapi-local-up.sh
+```
+
+本地联调使用 SQLite 单容器 New API：
+
+```text
+calciumion/new-api:latest
+```
+
+原因：
+
+- 足够验证创建用户、创建 token、add quota、查余额/流水这些接口形态。
+- 不需要本机额外安装 PostgreSQL / Redis。
+- 不影响阿里云 1 核 1G 的生产部署策略。
+- 数据目录可随时删除重建，适合试错。
+
+本地数据目录：
+
+```text
+deploy/newapi-local/data
+deploy/newapi-local/logs
+```
+
+这些目录只用于本地，不提交 Git。
+
+联调流程：
+
+1. 启动本地 New API。
+2. 打开 `http://127.0.0.1:3000` 完成初始化。
+3. 在 New API 后台获取管理 token 或可调用管理接口的 token。
+4. 设置：
+
+```bash
+export NEWAPI_ADMIN_BASE_URL=http://127.0.0.1:3000
+export NEWAPI_ADMIN_TOKEN=<new-api-admin-token>
+```
+
+5. 执行：
+
+```bash
+go run ./cmd/adminctl spike newapi create-user \
+  --username <phone> \
+  --password <random-password>
+
+go run ./cmd/adminctl spike newapi create-token \
+  --token-name uclaw-main
+
+go run ./cmd/adminctl spike newapi add-quota \
+  --user-id <newapi-user-id> \
+  --quota <quota-tokens>
+```
+
+注意：
+
+- 本地 New API 只用于接口 spike。
+- 最终上线前仍必须用 OVH New API + 香港 Nginx 管理路径再跑一次完整验收。
+- 本地 SQLite 结果不能作为生产性能或高并发结论。
+
 ### 12.1 New API 管理能力
 
 - 创建用户。

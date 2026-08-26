@@ -1,0 +1,13 @@
+services:
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: uclaw-newapi-local
+    restart: unless-stopped
+    command: --log-dir /app/logs
+    ports:
+      - "${NEWAPI_LOCAL_PORT:-3000}:3000"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs

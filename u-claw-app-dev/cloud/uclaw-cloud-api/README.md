@@ -36,6 +36,14 @@ go run ./cmd/adminctl activation generate 5
 
 ## New API Spike
 
+可以先本地启动 New API 联调环境：
+
+```bash
+./deploy/scripts/newapi-local-up.sh
+```
+
+打开 `http://127.0.0.1:3000` 完成初始化，并在 New API 后台获取管理 token。
+
 ```bash
 export NEWAPI_ADMIN_BASE_URL=https://newapi-admin.example.com
 export NEWAPI_ADMIN_TOKEN=change-me
