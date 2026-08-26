@@ -16,6 +16,8 @@ type Config struct {
 	NewAPIAdminBaseURL string
 	NewAPIAdminToken   string
 	NewAPIHTTPTimeout  time.Duration
+	AuthTokenTTL       time.Duration
+	DevSMSCode         string
 }
 
 // Getter reads a configuration value from a backing store such as environment variables.
@@ -35,6 +37,8 @@ func Load(getenv Getter) (Config, error) {
 		NewAPIAdminBaseURL: strings.TrimRight(strings.TrimSpace(getenv("NEWAPI_ADMIN_BASE_URL")), "/"),
 		NewAPIAdminToken:   strings.TrimSpace(getenv("NEWAPI_ADMIN_TOKEN")),
 		NewAPIHTTPTimeout:  10 * time.Second,
+		AuthTokenTTL:       24 * time.Hour,
+		DevSMSCode:         withDefault(getenv("DEV_SMS_CODE"), "123456"),
 	}
 
 	if raw := strings.TrimSpace(getenv("NEWAPI_HTTP_TIMEOUT")); raw != "" {
@@ -43,6 +47,13 @@ func Load(getenv Getter) (Config, error) {
 			return Config{}, fmt.Errorf("parse NEWAPI_HTTP_TIMEOUT: %w", err)
 		}
 		cfg.NewAPIHTTPTimeout = timeout
+	}
+	if raw := strings.TrimSpace(getenv("AUTH_TOKEN_TTL")); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse AUTH_TOKEN_TTL: %w", err)
+		}
+		cfg.AuthTokenTTL = timeout
 	}
 
 	return cfg, nil

@@ -10,6 +10,8 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	values := map[string]string{
 		"NEWAPI_ADMIN_BASE_URL": " https://newapi.example.com/ ",
 		"NEWAPI_HTTP_TIMEOUT":   "3s",
+		"AUTH_TOKEN_TTL":        "2h",
+		"DEV_SMS_CODE":          "654321",
 	}
 
 	cfg, err := Load(func(key string) string {
@@ -30,6 +32,12 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.NewAPIHTTPTimeout != 3*time.Second {
 		t.Fatalf("NewAPIHTTPTimeout = %v, want 3s", cfg.NewAPIHTTPTimeout)
+	}
+	if cfg.AuthTokenTTL != 2*time.Hour {
+		t.Fatalf("AuthTokenTTL = %v, want 2h", cfg.AuthTokenTTL)
+	}
+	if cfg.DevSMSCode != "654321" {
+		t.Fatalf("DevSMSCode = %q, want 654321", cfg.DevSMSCode)
 	}
 }
 

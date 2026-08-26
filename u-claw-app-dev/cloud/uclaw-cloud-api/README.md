@@ -34,6 +34,20 @@ go run ./cmd/adminctl activation generate 5
 ./deploy/scripts/smoke-local.sh
 ```
 
+## 本地手机号登录
+
+开发环境默认短信码为 `123456`，响应会返回 `devCode`，生产环境不会暴露。
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/v1/auth/sms/send \
+  -H 'Content-Type: application/json' \
+  -d '{"phone":"13800138000","purpose":"login"}'
+
+curl -sS -X POST http://127.0.0.1:8080/v1/auth/sms/login \
+  -H 'Content-Type: application/json' \
+  -d '{"phone":"13800138000","purpose":"login","code":"123456"}'
+```
+
 ## New API Spike
 
 可以先本地启动 New API 联调环境：
