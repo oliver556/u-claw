@@ -61,6 +61,11 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, build)
 	})
+	if !cfg.IsProduction() {
+		mux.HandleFunc("GET /dev/auth", func(w http.ResponseWriter, r *http.Request) {
+			writeDevAuthPage(w, cfg)
+		})
+	}
 	mux.HandleFunc("POST /v1/auth/sms/send", func(w http.ResponseWriter, r *http.Request) {
 		var req sendSMSRequest
 		if err := decodeJSON(r, &req); err != nil {
