@@ -24,6 +24,12 @@ const strictInstallableToken = "trust?.installability===`installable`";
 const denseUiTokens = [
   "__uclaw__/skillhub/skills",
   "UcSkillHubApiUrl",
+  "UcSkillHubCategoryRegistry",
+  "UcSkillHubCategoryPublicApi",
+  "UcSkillHubExposeCategoryApi",
+  "UClawSkillHubCategories",
+  "selectLabel",
+  "apiCategory",
   "UcSkillHubApiCategoryMap",
   "UcSkillHubApiCategory",
   "UcSkillHubLoadApiSkills",
@@ -44,12 +50,30 @@ const denseUiTokens = [
   "data-skillhub-icon-img",
   "UcSkillHubRenderSkillRow",
   "UcSkillHubSceneLabels",
+  "UcSkillHubInstalledIndex",
+  "UcSkillHubInstalledMatch",
+  "data-skillhub-installed-badge",
   "office-efficiency",
   "knowledge-management",
   "dev-programming",
   "UcSkillHubRenderPagination",
   "skillhub-dense-row",
   "data-skillhub-dense-list",
+  "data-skillhub-scroll-shell",
+  "data-skillhub-scroll-table",
+  "data-skillhub-flex-fill",
+  "var(--panel-strong, #ffffff)",
+  "z-index: 5",
+  "position: relative; isolation: isolate",
+  "UcSkillHubScrollTableTop",
+  "scrollTop=0",
+  "overscroll-behavior: contain",
+  "UcSkillHubRenderScenePicker",
+  "data-skillhub-scene-picker",
+  "data-skillhub-scene-option",
+  "c=i&&!t.isLocal?UcSkillHubFormatMetric(t.totalItems)",
+  "skillhub-scene-icon",
+  "position: sticky",
   "data-skillhub-toolbar",
   "data-skillhub-search",
   "data-skillhub-pagination",
@@ -64,7 +88,7 @@ const denseUiTokens = [
   "收藏",
   "操作",
   "API Key 不限",
-  "场景筛选",
+  "场景分类",
   "全部场景",
   "办公效率",
   "知识管理",
@@ -88,6 +112,19 @@ const denseUiTokens = [
   "下一页",
   "data-skillhub-install-message-close",
   "覆盖重装",
+];
+
+const skillHubLayoutCssTokens = [
+  "openclaw-skills-page .content-header",
+  "max-height: none",
+  "min-height: 54px",
+  "padding-top: 0",
+  "openclaw-skills-page .page-title",
+  "line-height: 1.24",
+  "min-height: 1.24em",
+  "openclaw-skills-page .page-sub,",
+  "flex: 0 0 auto",
+  "height: 100%",
 ];
 
 const forbiddenLeftCategoryNavTokens = [
@@ -178,6 +215,13 @@ function listAssets(pattern, label) {
  */
 function listSkillsAssets() {
   return listAssets(/^skills-page-.*\.js$/, "skills-page");
+}
+
+/**
+ * Finds generated global CSS chunks.
+ */
+function listIndexCssAssets() {
+  return listAssets(/^index-.*\.css$/, "index css");
 }
 
 /**
@@ -315,6 +359,16 @@ function verifyStoreHomeAsset(file, errors) {
 }
 
 /**
+ * Verifies global CSS keeps the SkillHub shell compatible with zoomed and wide viewports.
+ */
+function verifySkillHubLayoutCss(file, errors) {
+  const source = readUtf8(file);
+  for (const token of skillHubLayoutCssTokens) {
+    assertContains(errors, file, source, token, "SkillHub viewport layout CSS token");
+  }
+}
+
+/**
  * Verifies details stay within the Gateway schema while install keeps owner-qualified refs.
  */
 function verifyDetailRequestContract(files, errors) {
@@ -336,6 +390,9 @@ function main() {
     const skillsAssets = listSkillsAssets();
     for (const file of skillsAssets) {
       verifyStoreHomeAsset(file, errors);
+    }
+    for (const file of listIndexCssAssets()) {
+      verifySkillHubLayoutCss(file, errors);
     }
     const routeAssets = listSkillHubRouteAssets();
     verifyDetailRequestContract(routeAssets, errors);

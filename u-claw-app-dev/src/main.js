@@ -30,6 +30,10 @@ const SYSTEM_PROXY_ENV_KEYS = [
   'npm_config_proxy',
   'npm_config_https_proxy',
 ];
+const ACTIVATION_ONLY_ARG = '--activation-only';
+const isActivationOnlyMode = process.argv.includes(ACTIVATION_ONLY_ARG)
+  || process.env.UCLAW_ACTIVATION_ONLY === '1';
+const ACTIVATION_STATIC_PREVIEW_COMPLETE = 'ACTIVATION_STATIC_PREVIEW_COMPLETE';
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
 // room so we never hard-fail with a scary dialog before the engine is up. The
@@ -1095,6 +1099,99 @@ function stopGateway() {
   });
 }
 
+// ── Activation-only Mode ──
+/**
+ * Builds the sanitized startup snapshot exposed to the activation renderer.
+ * Launcher-owned hardware data must be passed in via env/argv; never infer or
+ * expose full USB descriptors from the Electron page.
+ */
+function getActivationPreflight() {
+  const usbSummary = (process.env.UCLAW_USB_FINGERPRINT_SUMMARY || '').trim();
+  const usbLabel = (process.env.UCLAW_USB_LABEL || '').trim();
+  const activationEndpoint = (process.env.UCLAW_ACTIVATION_ENDPOINT || '').trim();
+  const usbStatus = usbSummary ? 'pass' : 'preview';
+
+  return {
+    mode: 'activation-only',
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    activationEndpointConfigured: Boolean(activationEndpoint),
+    usb: {
+      label: usbLabel || '静态预览产品盘（未读取真实 U 盘）',
+      summary: usbSummary || 'PREVIEW-ONLY',
+      status: usbStatus,
+    },
+    checks: [
+      {
+        id: 'os',
+        label: '操作系统与架构',
+        status: 'pass',
+        detail: `${process.platform} · ${process.arch}`,
+      },
+      {
+        id: 'runtime',
+        label: '受信客户端 runtime',
+        status: 'pass',
+        detail: app.isPackaged ? '已由当前客户端加载' : '开发模式客户端',
+      },
+      {
+        id: 'usb',
+        label: 'U 盘身份与数据目录',
+        status: usbStatus,
+        detail: usbSummary ? `设备标识摘要 ${usbSummary}` : '静态预览：未读取真实 USB 指纹',
+      },
+      {
+        id: 'gateway',
+        label: 'Gateway 启动条件',
+        status: 'preview',
+        detail: '静态预览：正式授权通过后再启动 OpenClaw Gateway',
+      },
+    ],
+  };
+}
+
+/**
+ * Handles activation submit attempts for the first slice. Real activation will
+ * replace this with the HTTPS activation client and privileged write helper.
+ */
+function submitActivation() {
+  return {
+    ok: true,
+    code: ACTIVATION_STATIC_PREVIEW_COMPLETE,
+    message: '静态预览完成：未联网、未写入授权材料，也未完成真实激活。',
+    retryable: false,
+  };
+}
+
+/**
+ * Registers only the activation IPC surface. Do not add normal dashboard,
+ * config, Gateway, file, or OpenClaw handlers here.
+ */
+function setupActivationIPC() {
+  ipcMain.handle('activation:get-preflight', () => getActivationPreflight());
+  ipcMain.handle('activation:submit', () => submitActivation());
+  ipcMain.handle('activation:window-action', (_event, action) => {
+    if (!mainWindow) return { ok: false };
+    if (action === 'minimize') mainWindow.minimize();
+    if (action === 'maximize') {
+      if (mainWindow.isMaximized()) mainWindow.unmaximize();
+      else mainWindow.maximize();
+    }
+    if (action === 'close') mainWindow.close();
+    return { ok: true };
+  });
+}
+
+/**
+ * Loads the repository-owned activation page without starting Gateway or the
+ * Config.html server.
+ */
+function loadActivationPage() {
+  if (!mainWindow) return;
+  mainWindow.loadFile(path.join(__dirname, 'activation.html'));
+}
+
 // ── Window Management ──
 function persistMainWindowSession() {
   if (!mainWindow) return;
@@ -1102,22 +1199,32 @@ function persistMainWindowSession() {
   if (sessionKey) persistActiveSessionKey(sessionKey);
 }
 
+/**
+ * Creates the main Electron window. In activation-only mode it uses frameless
+ * chrome so the high-fidelity startup page owns its titlebar controls.
+ */
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
+    width: isActivationOnlyMode ? 960 : 1200,
+    height: isActivationOnlyMode ? 760 : 800,
+    minWidth: isActivationOnlyMode ? 720 : 800,
+    minHeight: isActivationOnlyMode ? 620 : 600,
     title: APP_NAME,
     icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+    frame: !isActivationOnlyMode,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
     show: false,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: isActivationOnlyMode ? '#f1f5f9' : '#0a0a0a',
   });
+
+  if (process.platform === 'win32') {
+    // Remove the native menu bar entirely on Windows; auto-hide can reappear via Alt.
+    mainWindow.setMenu(null);
+  }
 
   mainWindow.once('ready-to-show', () => {
     if (!holdMainWindowUntilReady || gatewayReady || appIsQuitting) {
@@ -1144,7 +1251,11 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  loadAppPage();
+  if (isActivationOnlyMode) {
+    loadActivationPage();
+  } else {
+    loadAppPage();
+  }
 }
 
 function loadAppPage() {
@@ -1227,7 +1338,46 @@ async function requestAppQuit({ confirm = true } = {}) {
 }
 
 // ── Menu ──
+/**
+ * Creates a minimal activation menu with no dashboard/config/data-folder entry.
+ */
+function createActivationMenu() {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: APP_NAME,
+      submenu: [
+        { label: `About ${APP_NAME}`, role: 'about' },
+        { type: 'separator' },
+        { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+  ]));
+}
+
+/**
+ * Creates the normal application menu. Activation-only mode uses a separate,
+ * smaller menu so users cannot navigate to normal app capabilities.
+ */
 function createMenu() {
+  if (process.platform === 'win32') {
+    // Windows renders this menu inside the app chrome; remove it entirely.
+    Menu.setApplicationMenu(null);
+    return;
+  }
+
+  if (isActivationOnlyMode) {
+    createActivationMenu();
+    return;
+  }
+
   const template = [
     {
       label: APP_NAME,
@@ -1331,6 +1481,14 @@ function setupIPC() {
 // ── App Lifecycle ──
 app.whenReady().then(async () => {
   logLifecycle(`v${app.getVersion()} starting...`);
+
+  if (isActivationOnlyMode) {
+    console.log(`[${APP_NAME}] Activation-only mode starting...`);
+    createMenu();
+    setupActivationIPC();
+    createWindow();
+    return;
+  }
 
   // Setup
   ensureConfig();
