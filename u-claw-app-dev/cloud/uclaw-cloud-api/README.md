@@ -34,6 +34,7 @@ go run ./cmd/adminctl activation generate 5
 DATABASE_URL=postgres://uclaw:change-me@127.0.0.1:5432/uclaw_cloud?sslmode=disable \
   go run ./cmd/adminctl activation seed --code ABCD-EFGH-IJKL-MNOP
 ./deploy/scripts/smoke-local.sh
+./deploy/scripts/activation-artifact-local-e2e.sh
 ./deploy/scripts/newapi-local-spike.sh
 ./deploy/scripts/activation-local-e2e.sh
 cd ../.. && node scripts/verify-cloud-model-usage-ui.js
@@ -101,6 +102,32 @@ licenseArtifact.payload.schemaVersion = uclaw.license.v1
 licenseArtifact.payload.activationId = <activationId>
 licenseArtifact.signature.algorithm = Ed25519
 licenseArtifact.signature.value = <base64 signature>
+```
+
+也可以运行一键验收脚本：
+
+```bash
+./deploy/scripts/activation-artifact-local-e2e.sh
+```
+
+脚本会自动启动本地 API、提交首启激活、校验 `licenseArtifact`、调用 commit，并输出摘要。产物会写入：
+
+```text
+dist/activation-acceptance/latest-summary.json
+dist/activation-acceptance/license-artifact.json
+dist/activation-acceptance/activation-response.json
+```
+
+验收通过时摘要中应看到：
+
+```text
+ok = true
+activationStatus = server_bound
+artifactStatus = pending_client_write
+commitStatus = committed
+licenseSchema = uclaw.license.v1
+signatureAlgorithm = Ed25519
+signaturePresent = true
 ```
 
 ## New API 用量摘要
