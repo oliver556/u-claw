@@ -32,6 +32,19 @@ CREATE TABLE IF NOT EXISTS activation_codes (
 CREATE INDEX IF NOT EXISTS idx_activation_codes_status ON activation_codes(status);
 CREATE INDEX IF NOT EXISTS idx_activation_codes_bound_user_id ON activation_codes(bound_user_id);
 
+CREATE TABLE IF NOT EXISTS sms_codes (
+  phone TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  consumed_at TIMESTAMPTZ,
+  PRIMARY KEY (phone, purpose)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sms_codes_expires_at ON sms_codes(expires_at);
+
 CREATE TABLE IF NOT EXISTS newapi_accounts (
   id BIGSERIAL PRIMARY KEY,
   uclaw_user_id BIGINT NOT NULL UNIQUE REFERENCES uclaw_users(id),

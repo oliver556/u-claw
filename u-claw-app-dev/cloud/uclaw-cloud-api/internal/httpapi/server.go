@@ -28,6 +28,12 @@ type ServerOptions struct {
 	Activation *activation.Service
 }
 
+// PersistentStore is the shared PostgreSQL seam for auth and activation slices.
+type PersistentStore interface {
+	auth.Store
+	activation.Store
+}
+
 type sendSMSRequest struct {
 	Phone   string `json:"phone"`
 	Purpose string `json:"purpose"`
@@ -47,8 +53,16 @@ type activationRedeemRequest struct {
 // NewServer returns the HTTP interface for activation, payment, and health routes.
 func NewServer(cfg config.Config, build BuildInfo) http.Handler {
 	return NewServerWithOptions(cfg, build, ServerOptions{
-		Auth:       buildDefaultAuthService(cfg),
-		Activation: buildDefaultActivationService(cfg),
+		Auth:       buildAuthService(cfg, nil),
+		Activation: buildActivationService(cfg, nil),
+	})
+}
+
+// NewServerWithStore returns the HTTP interface backed by persistent storage.
+func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStore) http.Handler {
+	return NewServerWithOptions(cfg, build, ServerOptions{
+		Auth:       buildAuthService(cfg, store),
+		Activation: buildActivationService(cfg, store),
 	})
 }
 
@@ -130,8 +144,11 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 	return mux
 }
 
-// buildDefaultAuthService creates local auth dependencies until PostgreSQL and Aliyun SMS are wired.
-func buildDefaultAuthService(cfg config.Config) *auth.Service {
+// buildAuthService creates auth dependencies, defaulting to memory storage for local smoke tests.
+func buildAuthService(cfg config.Config, store auth.Store) *auth.Service {
+	if store == nil {
+		store = auth.NewMemoryStore()
+	}
 	secret := cfg.JWTSecret
 	if secret == "" {
 		secret = developmentJWTSecret
@@ -140,9 +157,10 @@ func buildDefaultAuthService(cfg config.Config) *auth.Service {
 	if err != nil {
 		panic(fmt.Sprintf("build token manager: %v", err))
 	}
-	service, err := auth.NewService(auth.NewMemoryStore(), manager, auth.ServiceConfig{
+	service, err := auth.NewService(store, manager, auth.ServiceConfig{
 		TokenTTL:    cfg.AuthTokenTTL,
 		DevSMSCode:  cfg.DevSMSCode,
+		CodePepper:  cfg.SMSCodePepper,
 		ExposeCodes: !cfg.IsProduction(),
 	})
 	if err != nil {
@@ -151,9 +169,12 @@ func buildDefaultAuthService(cfg config.Config) *auth.Service {
 	return service
 }
 
-// buildDefaultActivationService creates the activation redeem dependency for local dev.
-func buildDefaultActivationService(cfg config.Config) *activation.Service {
-	service, err := activation.NewService(activation.NewMemoryStore(!cfg.IsProduction()), activation.Config{
+// buildActivationService creates activation dependencies, using memory only outside production.
+func buildActivationService(cfg config.Config, store activation.Store) *activation.Service {
+	if store == nil {
+		store = activation.NewMemoryStore(!cfg.IsProduction())
+	}
+	service, err := activation.NewService(store, activation.Config{
 		AllowAnyCode:  !cfg.IsProduction(),
 		NewAPIBaseURL: cfg.NewAPIClientBaseURL,
 		PreviewToken:  cfg.NewAPIPreviewToken,

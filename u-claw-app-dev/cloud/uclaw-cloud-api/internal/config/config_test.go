@@ -14,6 +14,8 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"NEWAPI_HTTP_TIMEOUT":    "3s",
 		"AUTH_TOKEN_TTL":         "2h",
 		"DEV_SMS_CODE":           "654321",
+		"SMS_CODE_PEPPER":        "sms-pepper",
+		"ACTIVATION_CODE_PEPPER": "activation-pepper",
 	}
 
 	cfg, err := Load(func(key string) string {
@@ -46,6 +48,12 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.DevSMSCode != "654321" {
 		t.Fatalf("DevSMSCode = %q, want 654321", cfg.DevSMSCode)
+	}
+	if cfg.SMSCodePepper != "sms-pepper" {
+		t.Fatalf("SMSCodePepper = %q", cfg.SMSCodePepper)
+	}
+	if cfg.ActivationCodePepper != "activation-pepper" {
+		t.Fatalf("ActivationCodePepper = %q", cfg.ActivationCodePepper)
 	}
 }
 

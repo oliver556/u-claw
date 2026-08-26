@@ -31,8 +31,22 @@ go test ./...
 go vet ./...
 go run ./cmd/api serve
 go run ./cmd/adminctl activation generate 5
+DATABASE_URL=postgres://uclaw:change-me@127.0.0.1:5432/uclaw_cloud?sslmode=disable \
+  go run ./cmd/adminctl activation seed --code ABCD-EFGH-IJKL-MNOP
 ./deploy/scripts/smoke-local.sh
 ```
+
+## PostgreSQL 激活存储
+
+配置 `DATABASE_URL` 后，`cmd/api serve` 会使用 PostgreSQL 保存短信验证码、手机号用户与激活码绑定；未配置时只使用内存 store，供本地 smoke 和 Electron 首启验证。
+
+```bash
+export DATABASE_URL=postgres://uclaw:change-me@127.0.0.1:5432/uclaw_cloud?sslmode=disable
+export ACTIVATION_CODE_PEPPER=change-me-at-least-32-bytes
+go run ./cmd/adminctl activation seed --code ABCD-EFGH-IJKL-MNOP
+```
+
+`activation generate` 输出的码形如 `ABCD-EFGH-IJKL-MNOP`，与客户端激活页输入格式一致。
 
 ## 本地手机号登录
 

@@ -1230,6 +1230,15 @@ go run ./cmd/adminctl spike newapi add-quota \
 - 客户端能拿到 baseUrl/token。
 - 激活码不可重复使用。
 
+当前实现进度：
+
+- 已完成 Go 项目骨架、健康检查、New API spike CLI、本地 New API lab。
+- 已完成手机号短信登录 API 的开发态链路，并接入 Electron 首启激活页。
+- 已完成 `/v1/activation/redeem` contract，客户端可写入 `openclaw.json`。
+- 已完成 PostgreSQL store 第一刀：`sms_codes`、`uclaw_users`、`activation_codes` 持久化；`DATABASE_URL` 配置后服务使用 PG，否则本地 smoke 使用内存 store。
+- 已新增 `adminctl activation seed --code <code>`，可把随 U 盘发放的激活码 seed 到 PostgreSQL。
+- 尚未完成 New API 自动创建用户、New API token 明文回收、初始 quota 发放；这是下一开发切片。
+
 ### Phase 2: 客户端激活与配置写入
 
 范围：

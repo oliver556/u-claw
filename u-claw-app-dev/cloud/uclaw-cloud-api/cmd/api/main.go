@@ -12,6 +12,7 @@ import (
 
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/httpapi"
+	"uclaw-cloud-api/internal/postgres"
 )
 
 var (
@@ -54,9 +55,15 @@ func runServe(cfg config.Config) error {
 		}
 	}
 
+	handler, cleanup, err := buildHTTPHandler(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewServer(cfg, httpapi.BuildInfo{Version: version, Commit: commit, BuiltAt: builtAt}),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -80,6 +87,27 @@ func runServe(cfg config.Config) error {
 		}
 		return err
 	}
+}
+
+// buildHTTPHandler wires production storage when DATABASE_URL is configured.
+func buildHTTPHandler(cfg config.Config) (http.Handler, func(), error) {
+	build := httpapi.BuildInfo{Version: version, Commit: commit, BuiltAt: builtAt}
+	if cfg.DatabaseURL == "" {
+		return httpapi.NewServer(cfg, build), func() {}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store, err := postgres.Open(ctx, cfg.DatabaseURL, cfg.ActivationCodePepper)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		if err := store.Close(); err != nil {
+			log.Printf("close postgres: %v", err)
+		}
+	}
+	return httpapi.NewServerWithStore(cfg, build, store), cleanup, nil
 }
 
 // runWorker starts the Phase 0 worker placeholder with production config validation.

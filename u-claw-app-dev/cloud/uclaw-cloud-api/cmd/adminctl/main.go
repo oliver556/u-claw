@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base32"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/newapi"
+	"uclaw-cloud-api/internal/postgres"
 )
 
 // main provides operational commands that do not belong in the public HTTP process.
@@ -35,15 +37,28 @@ func main() {
 
 // runActivation handles activation-code operational commands.
 func runActivation(args []string) {
-	if len(args) < 1 || args[0] != "generate" {
+	if len(args) < 1 {
 		usage()
 		os.Exit(2)
 	}
+	switch args[0] {
+	case "generate":
+		runActivationGenerate(args[1:])
+	case "seed":
+		runActivationSeed(args[1:])
+	default:
+		usage()
+		os.Exit(2)
+	}
+}
+
+// runActivationGenerate prints human-readable codes for USB-card operations.
+func runActivationGenerate(args []string) {
 	count := 10
-	if len(args) > 1 {
-		parsed, err := strconv.Atoi(args[1])
+	if len(args) > 0 {
+		parsed, err := strconv.Atoi(args[0])
 		if err != nil || parsed <= 0 {
-			log.Fatalf("invalid activation count %q", args[1])
+			log.Fatalf("invalid activation count %q", args[0])
 		}
 		count = parsed
 	}
@@ -54,6 +69,40 @@ func runActivation(args []string) {
 		}
 		fmt.Println(code)
 	}
+}
+
+// runActivationSeed persists an already printed activation code into PostgreSQL.
+func runActivationSeed(args []string) {
+	code := requiredFlag(args, "--code")
+	cfg, err := config.Load(os.Getenv)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+	if cfg.DatabaseURL == "" {
+		log.Fatal("DATABASE_URL is required")
+	}
+	store, err := postgres.Open(context.Background(), cfg.DatabaseURL, cfg.ActivationCodePepper)
+	if err != nil {
+		log.Fatalf("postgres: %v", err)
+	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			log.Printf("close postgres: %v", err)
+		}
+	}()
+
+	batchID := sql.NullInt64{}
+	if raw := optionalFlag(args, "--batch-id", ""); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			log.Fatalf("--batch-id must be a positive integer")
+		}
+		batchID = sql.NullInt64{Int64: parsed, Valid: true}
+	}
+	if err := store.SeedActivationCode(context.Background(), code, batchID); err != nil {
+		log.Fatalf("seed activation code: %v", err)
+	}
+	printJSON(map[string]any{"step": "activation_seed", "ok": true})
 }
 
 // runSpike handles external-system verification commands for Phase 0.
@@ -183,7 +232,7 @@ func generateActivationCode() (string, error) {
 		return "", err
 	}
 	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf)
-	return "UCLAW-" + encoded[:4] + "-" + encoded[4:8] + "-" + encoded[8:12] + "-" + encoded[12:16], nil
+	return encoded[:4] + "-" + encoded[4:8] + "-" + encoded[8:12] + "-" + encoded[12:16], nil
 }
 
 // requiredFlag returns a flag value or exits because admin commands must fail loudly.
@@ -232,6 +281,7 @@ func printJSON(payload any) {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl activation generate [count]")
+	fmt.Fprintln(os.Stderr, "  uclaw-adminctl activation seed --code <activation-code> [--batch-id <id>]")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi create-user --username <phone> --password <password>")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi create-token [--token-name <name>]")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi add-quota --user-id <id> --quota <tokens>")
