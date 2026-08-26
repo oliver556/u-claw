@@ -71,6 +71,347 @@ OVH New API
   └─ sub2api 号池/上游渠道适配
 ```
 
+### 3.1 项目结构与代码位置
+
+当前仓库已有三个容易混淆的位置：
+
+```text
+<repo>/u-claw-app
+<repo>/product
+<repo>/u-claw-app-dev
+```
+
+根据 `docs/多人开发/开发硬性要求.md`：
+
+- `u-claw-app` 是归档原版 OpenClaw Electron 桌面壳，禁止修改。
+- `product` 是旧版本产品工程，当前不作为本轮开发对象，禁止继续在里面开发。
+- `u-claw-app-dev` 是本轮正式开发目录。
+
+因此，U-Claw 官方激活与 New API 计费后端的新代码应放在：
+
+```text
+<repo>/u-claw-app-dev/cloud/uclaw-cloud-api
+```
+
+不要放在：
+
+```text
+<repo>/product/activation-server
+<repo>/product/*
+<repo>/u-claw-app/*
+```
+
+原因：
+
+- 遵守当前多人开发硬性边界。
+- 避免把新阿里云后端写进已归档或旧产品目录。
+- 让 U-Claw 客户端、Control UI patch、云端后端都收口在 `u-claw-app-dev` 这一本轮工作目录下。
+- 后续打包或部署时，可明确区分客户端工程与云端服务工程。
+
+建议新建目录结构：
+
+```text
+u-claw-app-dev/
+  cloud/
+    uclaw-cloud-api/
+      cmd/
+        api/
+          main.go
+        worker/
+          main.go
+        adminctl/
+          main.go
+      internal/
+        auth/
+        activation/
+        newapi/
+        recharge/
+        payment/
+        sms/
+        config/
+        db/
+        jobs/
+      migrations/
+      api/
+        openapi.yaml
+      deploy/
+        Dockerfile
+        docker-compose.dev.yml
+        nginx-admin-route.example.conf
+      docs/
+        spike-results.md
+      go.mod
+      README.md
+```
+
+目录职责：
+
+| 路径 | 职责 |
+| --- | --- |
+| `cmd/api` | 阿里云 U-Claw Cloud API HTTP 服务 |
+| `cmd/worker` | 异步任务：创建 New API 用户、创建/轮换 token、加 quota、补偿重试 |
+| `cmd/adminctl` | 激活码批量生成、导出、P0 Spike 命令行工具 |
+| `internal/auth` | 手机号、短信验证码、JWT 登录态 |
+| `internal/activation` | 激活码、批次、绑定、作废 |
+| `internal/newapi` | New API Admin/User API client |
+| `internal/recharge` | 充值套餐、订单、订单状态机 |
+| `internal/payment` | 微信/支付宝官方支付下单、验签、回调 |
+| `internal/sms` | 阿里云短信适配 |
+| `internal/db` | PostgreSQL 查询、事务、migration 集成 |
+| `internal/jobs` | Redis/asynq 任务定义与处理器 |
+| `migrations` | PostgreSQL schema migration |
+| `api/openapi.yaml` | 客户端与后台 API 契约 |
+| `deploy` | Docker、开发 compose、Nginx 示例配置 |
+| `docs/spike-results.md` | Phase 0 Spike 实测记录 |
+
+客户端侧改造仍保留在现有路径：
+
+```text
+u-claw-app-dev/scripts/patch-openclaw.js
+u-claw-app-dev/resources/*
+u-claw-app-dev/src/*
+```
+
+边界要求：
+
+- 云端后端代码只写入 `u-claw-app-dev/cloud/uclaw-cloud-api`。
+- 客户端 UI 与 OpenClaw Control UI patch 仍走 `u-claw-app-dev/scripts/patch-openclaw.js`。
+- `product/activation-server` 只允许作为历史参考，不允许继续开发。
+- 不在客户端保存支付密钥、New API admin token、阿里云短信密钥。
+- New API admin endpoint、支付密钥、短信密钥只通过云端服务环境变量或 secret manager 注入。
+
+### 3.2 阿里云 1 核 1G 打包与部署策略
+
+阿里云 U-Claw Cloud API 会单独部署到一台 1 核 1G ECS。该机器只承载激活、账号、订单、支付回调、New API 管理编排，不承载模型请求、不部署 New API、不部署 sub2api。
+
+#### 3.2.1 代码位置与部署位置
+
+开发态代码位置：
+
+```text
+<repo>/u-claw-app-dev/cloud/uclaw-cloud-api
+```
+
+生产态部署位置：
+
+```text
+/opt/uclaw-cloud-api
+/etc/uclaw-cloud-api/uclaw-cloud-api.env
+/var/log/uclaw-cloud-api
+```
+
+二者关系：
+
+- 仓库保存源码、migration、Dockerfile、systemd 模板、部署脚本。
+- CI 或本地 release 脚本产出 Linux 二进制和 migration。
+- 阿里云 ECS 只接收 release 包，不直接作为开发目录。
+
+建议 release 包结构：
+
+```text
+uclaw-cloud-api-linux-amd64.tar.gz
+  bin/
+    uclaw-cloud-api
+    uclaw-adminctl
+  migrations/
+    000001_init.sql
+  deploy/
+    systemd/
+      uclaw-cloud-api.service
+    nginx/
+      uclaw-cloud-api.conf
+    env/
+      uclaw-cloud-api.env.example
+  README.md
+```
+
+#### 3.2.2 推荐部署方式
+
+推荐优先使用：
+
+```text
+Go static binary + systemd + Nginx + PostgreSQL
+```
+
+不推荐在 1 核 1G MVP 阶段使用：
+
+```text
+Docker Compose 同机部署 Go API + PostgreSQL + Redis + Admin UI
+```
+
+原因：
+
+- 1G 内存下，Docker daemon、PostgreSQL、Redis、Nginx、Go API 同机运行余量很小。
+- 支付回调与激活链路要求稳定，不能因内存抖动导致进程被 OOM kill。
+- U-Claw Cloud API 的主要负载是短请求和少量补偿任务，Go binary + systemd 足够。
+
+#### 3.2.3 数据库与队列取舍
+
+首选方案：
+
+```text
+阿里云 ECS：Go API + worker + Nginx
+阿里云 RDS PostgreSQL 或独立 PostgreSQL：业务数据
+```
+
+如果预算要求全部放在 1 核 1G ECS：
+
+```text
+阿里云 ECS：Go API + worker + Nginx + 本机 PostgreSQL
+```
+
+此时 MVP 不引入 Redis/asynq，先使用 PostgreSQL job/outbox 表做异步任务与补偿重试：
+
+- 支付回调只落库订单和回调审计。
+- `payment_orders` 从 `paid` 进入待入账状态。
+- worker 低并发扫描 job/outbox 表。
+- worker 幂等调用 New API add quota。
+- 成功后订单进入 `credited`。
+
+Redis 可作为 Phase 3+ 增强项，不作为 1 核 1G MVP 必需项。
+
+#### 3.2.4 进程模型
+
+MVP 使用单个 Go binary，多模式启动：
+
+```text
+uclaw-cloud-api serve
+uclaw-cloud-api worker
+uclaw-adminctl activation generate
+uclaw-adminctl spike newapi
+```
+
+1 核 1G 生产建议：
+
+- `serve` 与 `worker` 可以先合并为同一 systemd service 内的单进程模式。
+- worker 并发固定为 1。
+- HTTP server 连接池和 PostgreSQL 连接池收紧。
+- 后续订单量上升后，再拆成独立 `uclaw-cloud-worker.service`。
+
+#### 3.2.5 systemd 服务建议
+
+服务文件放在仓库：
+
+```text
+u-claw-app-dev/cloud/uclaw-cloud-api/deploy/systemd/uclaw-cloud-api.service
+```
+
+生产安装到：
+
+```text
+/etc/systemd/system/uclaw-cloud-api.service
+```
+
+运行约束：
+
+- `Restart=always`
+- `RestartSec=3`
+- `EnvironmentFile=/etc/uclaw-cloud-api/uclaw-cloud-api.env`
+- `WorkingDirectory=/opt/uclaw-cloud-api`
+- `User=uclaw`
+- `NoNewPrivileges=true`
+
+#### 3.2.6 Nginx 与 HTTPS
+
+阿里云 ECS 上只需要轻量 Nginx：
+
+- 公开路径：登录、短信、激活、恢复、充值下单、支付回调、订单状态。
+- 管理后台路径：只允许管理员 IP 或额外管理鉴权。
+- 健康检查：`/healthz`、`/readyz`。
+
+不建议在该 1 核 1G 机器上安装 1Panel。1Panel 继续留给香港反代机器或更高配置运维机。
+
+#### 3.2.7 配置与密钥
+
+所有生产密钥只放服务器环境文件或云厂商 secret manager：
+
+```text
+/etc/uclaw-cloud-api/uclaw-cloud-api.env
+```
+
+至少包含：
+
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `ALIYUN_SMS_ACCESS_KEY_ID`
+- `ALIYUN_SMS_ACCESS_KEY_SECRET`
+- `WECHAT_PAY_*`
+- `ALIPAY_*`
+- `NEWAPI_ADMIN_BASE_URL`
+- `NEWAPI_ADMIN_TOKEN`
+
+文件权限：
+
+```text
+chown root:uclaw /etc/uclaw-cloud-api/uclaw-cloud-api.env
+chmod 0640 /etc/uclaw-cloud-api/uclaw-cloud-api.env
+```
+
+#### 3.2.8 发布流程
+
+MVP 发布流程：
+
+1. 本地或 CI 构建 Linux amd64 binary。
+2. 打包 `bin/`、`migrations/`、`deploy/`。
+3. 上传到阿里云 `/opt/uclaw-cloud-api/releases/<version>`。
+4. 执行 migration。
+5. 切换 `/opt/uclaw-cloud-api/current` 软链接。
+6. `systemctl restart uclaw-cloud-api`。
+7. 检查 `/healthz`、短信发送、激活码兑换、支付回调模拟、New API add quota spike。
+
+#### 3.2.9 最小资源配置
+
+1 核 1G 下建议：
+
+- 开 1-2G swap，只作为兜底，不依赖 swap 承载常态压力。
+- Go 进程目标常驻内存小于 150MB。
+- PostgreSQL 连接池小于 10。
+- worker 并发为 1。
+- 日志走 journald + logrotate，不落巨大业务日志。
+- 支付 raw callback 只存必要字段和脱敏原文，不无限增长。
+
+#### 3.2.10 后续扩容路径
+
+当订单、短信、激活量上升：
+
+1. PostgreSQL 迁到 RDS。
+2. worker 拆到独立进程或独立机器。
+3. Redis/asynq 引入异步队列。
+4. 管理后台从 API 进程拆出静态前端或独立服务。
+5. 阿里云 ECS 从 1 核 1G 升级到 2 核 2G。
+
+#### 3.2.11 本轮 MVP 打包结论
+
+本轮先按 1 核 1G ECS 可稳定运行的最小形态落地：
+
+```text
+Go static binary + systemd + Nginx + PostgreSQL
+```
+
+固定结论：
+
+- 代码位置：`u-claw-app-dev/cloud/uclaw-cloud-api`。
+- 生产目录：`/opt/uclaw-cloud-api`。
+- 生产配置：`/etc/uclaw-cloud-api/uclaw-cloud-api.env`。
+- 阿里云 ECS 不安装 1Panel。
+- 阿里云 ECS 不部署 New API。
+- 阿里云 ECS 不部署 sub2api。
+- MVP 不强制部署 Redis/asynq。
+- MVP 使用 PostgreSQL job/outbox 表承接支付后异步补偿任务。
+- 支付回调只验签、落库、快速返回。
+- New API add quota 由低并发 worker 幂等执行。
+- worker 并发先固定为 1。
+- 充值与激活之外的模型调用流量不经过阿里云 ECS。
+
+Phase 0 开发时必须同步产出：
+
+- Linux amd64 release 构建脚本。
+- `deploy/systemd/uclaw-cloud-api.service`。
+- `deploy/nginx/uclaw-cloud-api.conf`。
+- `deploy/env/uclaw-cloud-api.env.example`。
+- PostgreSQL migration。
+- New API spike CLI。
+
 ## 4. 服务边界
 
 ### 4.1 阿里云 U-Claw Cloud API
@@ -734,6 +1075,7 @@ POST /v1/payments/alipay/notify
 
 目标：
 
+- 在 `u-claw-app-dev/cloud/uclaw-cloud-api` 初始化最小 Go module 或 Spike CLI。
 - 验证 New API 管理 API。
 - 验证香港 Nginx 路径。
 - 验证支付回调可跑通。
@@ -748,7 +1090,7 @@ POST /v1/payments/alipay/notify
 
 范围：
 
-- Go 项目初始化。
+- 在 `u-claw-app-dev/cloud/uclaw-cloud-api` 完成 Go 项目骨架。
 - PostgreSQL schema。
 - 阿里云短信。
 - 手机号登录。
