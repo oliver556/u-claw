@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
+	"uclaw-cloud-api/internal/activation"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/config"
 )
@@ -21,7 +24,8 @@ type BuildInfo struct {
 
 // ServerOptions carries service dependencies that tests and production wiring can replace.
 type ServerOptions struct {
-	Auth *auth.Service
+	Auth       *auth.Service
+	Activation *activation.Service
 }
 
 type sendSMSRequest struct {
@@ -35,9 +39,17 @@ type smsLoginRequest struct {
 	Code    string `json:"code"`
 }
 
+type activationRedeemRequest struct {
+	ActivationCode string `json:"activationCode"`
+	DeviceSummary  string `json:"deviceSummary"`
+}
+
 // NewServer returns the HTTP interface for activation, payment, and health routes.
 func NewServer(cfg config.Config, build BuildInfo) http.Handler {
-	return NewServerWithOptions(cfg, build, ServerOptions{Auth: buildDefaultAuthService(cfg)})
+	return NewServerWithOptions(cfg, build, ServerOptions{
+		Auth:       buildDefaultAuthService(cfg),
+		Activation: buildDefaultActivationService(cfg),
+	})
 }
 
 // NewServerWithOptions returns the HTTP interface with explicit dependencies for tests.
@@ -87,6 +99,34 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, result)
 	})
+	mux.HandleFunc("POST /v1/activation/redeem", func(w http.ResponseWriter, r *http.Request) {
+		claims, err := verifyBearer(r, options.Auth)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		var req activationRedeemRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, fmt.Errorf("token subject is invalid"))
+			return
+		}
+		result, err := options.Activation.Redeem(r.Context(), activation.RedeemRequest{
+			UserID:         userID,
+			Phone:          claims.Phone,
+			ActivationCode: req.ActivationCode,
+			DeviceSummary:  req.DeviceSummary,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
 	return mux
 }
 
@@ -109,6 +149,32 @@ func buildDefaultAuthService(cfg config.Config) *auth.Service {
 		panic(fmt.Sprintf("build auth service: %v", err))
 	}
 	return service
+}
+
+// buildDefaultActivationService creates the activation redeem dependency for local dev.
+func buildDefaultActivationService(cfg config.Config) *activation.Service {
+	service, err := activation.NewService(activation.NewMemoryStore(!cfg.IsProduction()), activation.Config{
+		AllowAnyCode:  !cfg.IsProduction(),
+		NewAPIBaseURL: cfg.NewAPIClientBaseURL,
+		PreviewToken:  cfg.NewAPIPreviewToken,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("build activation service: %v", err))
+	}
+	return service
+}
+
+// verifyBearer extracts and validates the U-Claw access token.
+func verifyBearer(r *http.Request, service *auth.Service) (auth.TokenClaims, error) {
+	if service == nil {
+		return auth.TokenClaims{}, fmt.Errorf("auth service is not configured")
+	}
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return auth.TokenClaims{}, fmt.Errorf("authorization bearer token is required")
+	}
+	return service.VerifyAccessToken(strings.TrimSpace(strings.TrimPrefix(header, prefix)))
 }
 
 // decodeJSON reads a JSON request body and rejects malformed or absent objects.

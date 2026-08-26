@@ -36,6 +36,12 @@ requireText(main, "const activationStatePath = path.join(configDir, 'uclaw-activ
 requireText(main, 'function hasCompletedActivation()', 'activation completion checker');
 requireText(main, 'function shouldShowActivationOnStartup()', 'startup activation gate');
 requireText(main, 'function writeActivationState', 'activation state writer');
+requireText(main, 'async function postActivationJSON', 'activation cloud HTTP client');
+requireText(main, 'function writeOpenClawActivationConfig', 'OpenClaw activation config writer');
+requireText(main, "postActivationJSON('/v1/auth/sms/send'", 'cloud SMS send');
+requireText(main, "postActivationJSON('/v1/auth/sms/login'", 'cloud SMS login');
+requireText(main, "postActivationJSON('/v1/activation/redeem'", 'cloud activation redeem');
+requireText(main, 'ACTIVATION_CLOUD_COMPLETE', 'cloud activation completion code');
 requireText(main, 'function setupActivationIPC()', 'activation IPC setup');
 requireText(main, 'function loadActivationPage()', 'activation page loader');
 requireText(main, "mainWindow.loadFile(path.join(__dirname, 'activation.html'));", 'activation local loadFile');

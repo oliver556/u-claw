@@ -133,6 +133,11 @@ func (s *Service) Login(ctx context.Context, phone string, purpose string, code 
 	return LoginResult{AccessToken: token, User: User{ID: user.ID, Phone: MaskPhone(phone)}}, nil
 }
 
+// VerifyAccessToken validates a U-Claw access token for authenticated API calls.
+func (s *Service) VerifyAccessToken(token string) (TokenClaims, error) {
+	return s.tokens.VerifyAccessToken(token)
+}
+
 // MaskPhone hides the middle digits before returning phone numbers to clients.
 func MaskPhone(phone string) string {
 	phone = strings.TrimSpace(phone)

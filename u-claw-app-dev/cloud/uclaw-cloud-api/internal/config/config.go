@@ -9,15 +9,17 @@ import (
 
 // Config is the runtime interface for U-Claw Cloud API process configuration.
 type Config struct {
-	AppEnv             string
-	HTTPAddr           string
-	DatabaseURL        string
-	JWTSecret          string
-	NewAPIAdminBaseURL string
-	NewAPIAdminToken   string
-	NewAPIHTTPTimeout  time.Duration
-	AuthTokenTTL       time.Duration
-	DevSMSCode         string
+	AppEnv              string
+	HTTPAddr            string
+	DatabaseURL         string
+	JWTSecret           string
+	NewAPIAdminBaseURL  string
+	NewAPIAdminToken    string
+	NewAPIClientBaseURL string
+	NewAPIPreviewToken  string
+	NewAPIHTTPTimeout   time.Duration
+	AuthTokenTTL        time.Duration
+	DevSMSCode          string
 }
 
 // Getter reads a configuration value from a backing store such as environment variables.
@@ -30,15 +32,17 @@ func Load(getenv Getter) (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:             withDefault(getenv("APP_ENV"), "development"),
-		HTTPAddr:           withDefault(getenv("UCLAW_HTTP_ADDR"), ":8080"),
-		DatabaseURL:        strings.TrimSpace(getenv("DATABASE_URL")),
-		JWTSecret:          strings.TrimSpace(getenv("JWT_SECRET")),
-		NewAPIAdminBaseURL: strings.TrimRight(strings.TrimSpace(getenv("NEWAPI_ADMIN_BASE_URL")), "/"),
-		NewAPIAdminToken:   strings.TrimSpace(getenv("NEWAPI_ADMIN_TOKEN")),
-		NewAPIHTTPTimeout:  10 * time.Second,
-		AuthTokenTTL:       24 * time.Hour,
-		DevSMSCode:         withDefault(getenv("DEV_SMS_CODE"), "123456"),
+		AppEnv:              withDefault(getenv("APP_ENV"), "development"),
+		HTTPAddr:            withDefault(getenv("UCLAW_HTTP_ADDR"), ":8080"),
+		DatabaseURL:         strings.TrimSpace(getenv("DATABASE_URL")),
+		JWTSecret:           strings.TrimSpace(getenv("JWT_SECRET")),
+		NewAPIAdminBaseURL:  strings.TrimRight(strings.TrimSpace(getenv("NEWAPI_ADMIN_BASE_URL")), "/"),
+		NewAPIAdminToken:    strings.TrimSpace(getenv("NEWAPI_ADMIN_TOKEN")),
+		NewAPIClientBaseURL: strings.TrimRight(withDefault(getenv("NEWAPI_CLIENT_BASE_URL"), "https://api.gmnlee.com/v1"), "/"),
+		NewAPIPreviewToken:  withDefault(getenv("NEWAPI_PREVIEW_TOKEN"), "uclaw-preview-newapi-token"),
+		NewAPIHTTPTimeout:   10 * time.Second,
+		AuthTokenTTL:        24 * time.Hour,
+		DevSMSCode:          withDefault(getenv("DEV_SMS_CODE"), "123456"),
 	}
 
 	if raw := strings.TrimSpace(getenv("NEWAPI_HTTP_TIMEOUT")); raw != "" {

@@ -19,9 +19,14 @@ for _ in $(seq 1 30); do
     curl -fsS -X POST http://127.0.0.1:8080/v1/auth/sms/send \
       -H 'Content-Type: application/json' \
       -d '{"phone":"13800138000","purpose":"login"}' >/dev/null
-    curl -fsS -X POST http://127.0.0.1:8080/v1/auth/sms/login \
+    login_json="$(curl -fsS -X POST http://127.0.0.1:8080/v1/auth/sms/login \
       -H 'Content-Type: application/json' \
-      -d '{"phone":"13800138000","purpose":"login","code":"123456"}' >/dev/null
+      -d '{"phone":"13800138000","purpose":"login","code":"123456"}')"
+    access_token="$(printf '%s' "$login_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); if(!j.accessToken) process.exit(1); process.stdout.write(j.accessToken);});')"
+    curl -fsS -X POST http://127.0.0.1:8080/v1/activation/redeem \
+      -H 'Content-Type: application/json' \
+      -H "Authorization: Bearer $access_token" \
+      -d '{"activationCode":"ABCD-EFGH-IJKL-MNOP","deviceSummary":"PREVIEW-ONLY"}' >/dev/null
     echo "smoke ok"
     exit 0
   fi

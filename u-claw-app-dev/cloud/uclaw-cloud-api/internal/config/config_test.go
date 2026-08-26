@@ -8,10 +8,12 @@ import (
 
 func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	values := map[string]string{
-		"NEWAPI_ADMIN_BASE_URL": " https://newapi.example.com/ ",
-		"NEWAPI_HTTP_TIMEOUT":   "3s",
-		"AUTH_TOKEN_TTL":        "2h",
-		"DEV_SMS_CODE":          "654321",
+		"NEWAPI_ADMIN_BASE_URL":  " https://newapi.example.com/ ",
+		"NEWAPI_CLIENT_BASE_URL": " https://api.example.com/v1/ ",
+		"NEWAPI_PREVIEW_TOKEN":   "preview-token",
+		"NEWAPI_HTTP_TIMEOUT":    "3s",
+		"AUTH_TOKEN_TTL":         "2h",
+		"DEV_SMS_CODE":           "654321",
 	}
 
 	cfg, err := Load(func(key string) string {
@@ -29,6 +31,12 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.NewAPIAdminBaseURL != "https://newapi.example.com" {
 		t.Fatalf("NewAPIAdminBaseURL = %q", cfg.NewAPIAdminBaseURL)
+	}
+	if cfg.NewAPIClientBaseURL != "https://api.example.com/v1" {
+		t.Fatalf("NewAPIClientBaseURL = %q", cfg.NewAPIClientBaseURL)
+	}
+	if cfg.NewAPIPreviewToken != "preview-token" {
+		t.Fatalf("NewAPIPreviewToken = %q", cfg.NewAPIPreviewToken)
 	}
 	if cfg.NewAPIHTTPTimeout != 3*time.Second {
 		t.Fatalf("NewAPIHTTPTimeout = %v, want 3s", cfg.NewAPIHTTPTimeout)

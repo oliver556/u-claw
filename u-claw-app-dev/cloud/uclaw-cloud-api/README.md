@@ -48,6 +48,15 @@ curl -sS -X POST http://127.0.0.1:8080/v1/auth/sms/login \
   -d '{"phone":"13800138000","purpose":"login","code":"123456"}'
 ```
 
+登录后用返回的 `accessToken` 兑换 U 盘激活码：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/v1/activation/redeem \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer <accessToken>" \
+  -d '{"activationCode":"ABCD-EFGH-IJKL-MNOP","deviceSummary":"PREVIEW-ONLY"}'
+```
+
 ## New API Spike
 
 可以先本地启动 New API 联调环境：

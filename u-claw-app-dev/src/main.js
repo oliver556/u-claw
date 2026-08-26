@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const crypto = require('crypto');
 const { createVideoAdapterServer } = require('./video-adapter');
 
 // ── Constants ──
@@ -15,6 +16,7 @@ const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://video-adapter.gmnlee.com/xai/v1'
 const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'jimeng-video-3-720p';
 const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
 const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
+const UCLAW_ACTIVATION_ENDPOINT = (process.env.UCLAW_ACTIVATION_ENDPOINT || '').trim().replace(/\/+$/, '');
 const UCLAW_PORTABLE_DATA_DIR = process.env.UCLAW_PORTABLE_DATA_DIR?.trim() || '';
 const UCLAW_PORTABLE_WORK_DATA_DIR = process.env.UCLAW_PORTABLE_WORK_DATA_DIR?.trim() || '';
 const UCLAW_USB_DATA_DIR = (process.env.UCLAW_USB_DATA_DIR?.trim() || UCLAW_PORTABLE_DATA_DIR);
@@ -507,19 +509,93 @@ function shouldShowActivationOnStartup() {
 function writeActivationState(payload) {
   const phone = String(payload.phone || '').trim();
   const activationCode = String(payload.activationCode || '').trim().toUpperCase();
+  const token = String(payload.newapiToken || '').trim();
   const marker = {
     schemaVersion: 1,
     status: 'activated',
-    source: 'local-preview',
-    phoneMasked: `${phone.slice(0, 3)}****${phone.slice(7)}`,
+    source: payload.source || 'local-preview',
+    phoneMasked: payload.phoneMasked || `${phone.slice(0, 3)}****${phone.slice(7)}`,
     activationCodeSuffix: activationCode.replace(/-/g, '').slice(-4),
-    tokenStatus: 'pending_cloud_activation',
+    newapiBaseUrl: payload.newapiBaseUrl || '',
+    tokenVersion: Number(payload.tokenVersion) || 1,
+    tokenStatus: token ? 'configured' : 'pending_cloud_activation',
+    tokenFingerprint: token ? crypto.createHash('sha256').update(token).digest('hex').slice(0, 16) : '',
     activatedAt: new Date().toISOString(),
   };
   fs.mkdirSync(configDir, { recursive: true });
   safeWriteJson(activationStatePath, marker);
   writeDirtyMarker('activation');
   return marker;
+}
+
+/**
+ * Posts JSON to the U-Claw activation service from the trusted main process.
+ */
+async function postActivationJSON(pathname, payload, options = {}) {
+  if (!UCLAW_ACTIVATION_ENDPOINT) {
+    throw new Error('activation endpoint is not configured');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 12000);
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
+    const response = await fetch(`${UCLAW_ACTIVATION_ENDPOINT}${pathname}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload || {}),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Writes New API credentials and default model selections into OpenClaw config.
+ */
+function writeOpenClawActivationConfig(result) {
+  const baseUrl = String(result.newapiBaseUrl || '').replace(/\/+$/, '');
+  const token = String(result.newapiToken || '').trim();
+  if (!baseUrl || !token) {
+    throw new Error('activation response missing New API config');
+  }
+  const config = fs.existsSync(configPath) ? getConfig() : applyRuntimeConfigEnv(loadBundledDefaultConfig());
+  config.models = config.models || {};
+  config.models.providers = config.models.providers || {};
+  for (const providerName of ['custom', 'litellm']) {
+    config.models.providers[providerName] = config.models.providers[providerName] || {};
+    config.models.providers[providerName].baseUrl = baseUrl;
+    config.models.providers[providerName].apiKey = token;
+  }
+  config.agents = config.agents || {};
+  config.agents.defaults = config.agents.defaults || {};
+  if (result.defaultModels?.text) {
+    config.agents.defaults.model = { ...(config.agents.defaults.model || {}), primary: result.defaultModels.text };
+  }
+  if (result.defaultModels?.image) {
+    config.agents.defaults.imageGenerationModel = {
+      ...(config.agents.defaults.imageGenerationModel || {}),
+      primary: result.defaultModels.image,
+    };
+    config.agents.defaults.imageModel = {
+      ...(config.agents.defaults.imageModel || {}),
+      primary: result.defaultModels.image,
+    };
+  }
+  if (result.defaultModels?.video) {
+    config.agents.defaults.videoGenerationModel = {
+      ...(config.agents.defaults.videoGenerationModel || {}),
+      primary: result.defaultModels.video,
+    };
+  }
+  saveConfig(config);
 }
 
 function extractSessionKeyFromUrl(rawUrl) {
@@ -1153,7 +1229,6 @@ function stopGateway() {
 function getActivationPreflight() {
   const usbSummary = (process.env.UCLAW_USB_FINGERPRINT_SUMMARY || '').trim();
   const usbLabel = (process.env.UCLAW_USB_LABEL || '').trim();
-  const activationEndpoint = (process.env.UCLAW_ACTIVATION_ENDPOINT || '').trim();
   const usbStatus = usbSummary ? 'pass' : 'preview';
 
   return {
@@ -1161,7 +1236,7 @@ function getActivationPreflight() {
     appVersion: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
-    activationEndpointConfigured: Boolean(activationEndpoint),
+    activationEndpointConfigured: Boolean(UCLAW_ACTIVATION_ENDPOINT),
     usb: {
       label: usbLabel || '静态预览产品盘（未读取真实 U 盘）',
       summary: usbSummary || 'PREVIEW-ONLY',
@@ -1200,10 +1275,19 @@ function getActivationPreflight() {
  * Handles SMS requests for the first-login activation page. The local dev code
  * keeps the renderer flow testable until Aliyun SMS is wired behind this seam.
  */
-function sendActivationSMS(payload = {}) {
+async function sendActivationSMS(payload = {}) {
   const phone = String(payload.phone || '').trim();
   if (!/^1[3-9]\d{9}$/.test(phone)) {
     return { ok: false, message: '请输入有效的手机号。', retryable: true };
+  }
+  if (UCLAW_ACTIVATION_ENDPOINT) {
+    const result = await postActivationJSON('/v1/auth/sms/send', { phone, purpose: 'login' });
+    return {
+      ok: true,
+      status: result.status || 'sent',
+      devCode: result.devCode || '',
+      message: result.devCode ? `验证码已发送，开发环境验证码为 ${result.devCode}。` : '验证码已发送。',
+    };
   }
   return {
     ok: true,
@@ -1217,7 +1301,7 @@ function sendActivationSMS(payload = {}) {
  * Handles activation submit attempts for the first-login slice. Real activation
  * will replace this with the HTTPS activation client and privileged write helper.
  */
-function submitActivation(payload = {}) {
+async function submitActivation(payload = {}) {
   const phone = String(payload.phone || '').trim();
   const smsCode = String(payload.smsCode || '').trim();
   const activationCode = String(payload.activationCode || '').trim().toUpperCase();
@@ -1232,6 +1316,31 @@ function submitActivation(payload = {}) {
   }
   if (!/^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}$/.test(activationCode)) {
     return { ok: false, message: '激活码格式不正确。', retryable: true };
+  }
+  if (UCLAW_ACTIVATION_ENDPOINT) {
+    const login = await postActivationJSON('/v1/auth/sms/login', { phone, purpose: 'login', code: smsCode });
+    const redeem = await postActivationJSON('/v1/activation/redeem', {
+      activationCode,
+      deviceSummary: process.env.UCLAW_USB_FINGERPRINT_SUMMARY || 'PREVIEW-ONLY',
+    }, { accessToken: login.accessToken });
+    writeOpenClawActivationConfig(redeem);
+    const activationState = writeActivationState({
+      phone,
+      activationCode,
+      source: 'cloud',
+      phoneMasked: redeem.phoneMasked,
+      newapiBaseUrl: redeem.newapiBaseUrl,
+      newapiToken: redeem.newapiToken,
+      tokenVersion: redeem.tokenVersion,
+    });
+    return {
+      ok: true,
+      code: 'ACTIVATION_CLOUD_COMPLETE',
+      message: '激活完成，New API 配置已写入本地。',
+      phoneMasked: activationState.phoneMasked,
+      activationPersisted: true,
+      retryable: false,
+    };
   }
   const activationState = writeActivationState({ phone, activationCode });
   return {
