@@ -76,7 +76,7 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 		return activation.ProvisionResult{}, fmt.Errorf("phone is required")
 	}
 
-	password := s.passwordFor(req.UserID, phone)
+	password := DeriveUserPassword(req.UserID, phone, s.cfg.PasswordSecret)
 	createErr := s.admin.CreateUser(ctx, newapi.CreateUserRequest{
 		Username:    phone,
 		Password:    password,
@@ -137,9 +137,9 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 	return activation.ProvisionResult{NewAPIUserID: user.ID, Token: key, TokenVersion: 1}, nil
 }
 
-// passwordFor derives a retry-stable New API dashboard password without storing plaintext.
-func (s *Service) passwordFor(userID int64, phone string) string {
-	mac := hmac.New(sha256.New, []byte(s.cfg.PasswordSecret))
+// DeriveUserPassword derives a retry-stable New API dashboard password without storing plaintext.
+func DeriveUserPassword(userID int64, phone string, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(fmt.Sprintf("%d:%s", userID, phone)))
 	sum := mac.Sum(nil)
 	return "Uclaw@" + base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(sum[:5])

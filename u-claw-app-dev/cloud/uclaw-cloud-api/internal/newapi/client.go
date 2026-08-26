@@ -137,6 +137,34 @@ func (c *Client) FetchTokenKey(ctx context.Context, tokenID int64) (string, erro
 	return key, nil
 }
 
+// GetSelf returns the authenticated New API dashboard user profile and quota counters.
+func (c *Client) GetSelf(ctx context.Context) (SelfUser, error) {
+	var response selfUserResponse
+	if err := c.getJSON(ctx, "/api/user/self", &response); err != nil {
+		return SelfUser{}, err
+	}
+	if response.Data.ID <= 0 {
+		return SelfUser{}, fmt.Errorf("newapi self response has no user id")
+	}
+	return response.Data, nil
+}
+
+// ListSelfLogs returns recent logs visible to the authenticated New API dashboard user.
+func (c *Client) ListSelfLogs(ctx context.Context, page int, pageSize int) (SelfLogsPage, error) {
+	if page < 0 {
+		page = 0
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	var response selfLogsResponse
+	path := fmt.Sprintf("/api/log/self?p=%d&page_size=%d", page, pageSize)
+	if err := c.getJSON(ctx, path, &response); err != nil {
+		return SelfLogsPage{}, err
+	}
+	return response.Data, nil
+}
+
 // postJSON sends a JSON admin request and decodes the optional JSON response.
 func (c *Client) postJSON(ctx context.Context, path string, body any, out any) error {
 	return c.postJSONWithAuth(ctx, path, body, out, true)
@@ -221,6 +249,10 @@ func apiStatus(out any) (apiStatusFields, bool) {
 		return apiStatusFields{success: value.Success, message: value.Message}, true
 	case *tokenKeyResponse:
 		return apiStatusFields{success: value.Success, message: value.Message}, true
+	case *selfUserResponse:
+		return apiStatusFields{success: value.Success, message: value.Message}, true
+	case *selfLogsResponse:
+		return apiStatusFields{success: value.Success, message: value.Message}, true
 	default:
 		return apiStatusFields{}, false
 	}
@@ -277,6 +309,44 @@ type Token struct {
 	Name string `json:"name"`
 }
 
+// SelfUser is the subset of /api/user/self used by U-Claw usage cards.
+type SelfUser struct {
+	ID           int64  `json:"id"`
+	Username     string `json:"username"`
+	Quota        int64  `json:"quota"`
+	UsedQuota    int64  `json:"used_quota"`
+	RequestCount int64  `json:"request_count"`
+}
+
+// LogItem is one New API account log/usage row.
+type LogItem struct {
+	ID               int64  `json:"id"`
+	UserID           int64  `json:"user_id"`
+	CreatedAt        int64  `json:"created_at"`
+	Type             int    `json:"type"`
+	Content          string `json:"content"`
+	Username         string `json:"username"`
+	TokenName        string `json:"token_name"`
+	ModelName        string `json:"model_name"`
+	Quota            int64  `json:"quota"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	UseTime          int64  `json:"use_time"`
+	Channel          int64  `json:"channel"`
+	ChannelName      string `json:"channel_name"`
+	TokenID          int64  `json:"token_id"`
+	Group            string `json:"group"`
+	RequestID        string `json:"request_id"`
+}
+
+// SelfLogsPage captures New API's paged self-log response.
+type SelfLogsPage struct {
+	Page     int       `json:"page"`
+	PageSize int       `json:"page_size"`
+	Total    int       `json:"total"`
+	Items    []LogItem `json:"items"`
+}
+
 type searchUsersResponse struct {
 	Data struct {
 		Items []User `json:"items"`
@@ -299,6 +369,18 @@ type tokenKeyResponse struct {
 	} `json:"data"`
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
+}
+
+type selfUserResponse struct {
+	Data    SelfUser `json:"data"`
+	Success bool     `json:"success"`
+	Message string   `json:"message,omitempty"`
+}
+
+type selfLogsResponse struct {
+	Data    SelfLogsPage `json:"data"`
+	Success bool         `json:"success"`
+	Message string       `json:"message,omitempty"`
 }
 
 type apiStatusResponse struct {

@@ -15,5 +15,6 @@ if (isActivationOnlyMode) {
     getGatewayStatus: () => ipcRenderer.invoke('get-gateway-status'),
     openDashboard: () => ipcRenderer.invoke('open-dashboard'),
     openConfig: () => ipcRenderer.invoke('open-config'),
+    getModelUsageSummary: () => ipcRenderer.invoke('uclaw:get-model-usage-summary'),
   });
 }

@@ -36,6 +36,7 @@ DATABASE_URL=postgres://uclaw:change-me@127.0.0.1:5432/uclaw_cloud?sslmode=disab
 ./deploy/scripts/smoke-local.sh
 ./deploy/scripts/newapi-local-spike.sh
 ./deploy/scripts/activation-local-e2e.sh
+cd ../.. && node scripts/verify-cloud-model-usage-ui.js
 ```
 
 ## PostgreSQL 激活存储
@@ -72,6 +73,17 @@ curl -sS -X POST http://127.0.0.1:8080/v1/activation/redeem \
   -H "Authorization: Bearer <accessToken>" \
   -d '{"activationCode":"ABCD-EFGH-IJKL-MNOP","deviceSummary":"PREVIEW-ONLY"}'
 ```
+
+## New API 用量摘要
+
+模型页进入或手动刷新时，请求 U-Claw Cloud API 聚合 New API 余额、今日用量、近 7 天、累计用量和最近流水：
+
+```bash
+curl -sS http://127.0.0.1:8080/v1/newapi/usage/summary \
+  -H "Authorization: Bearer <accessToken>"
+```
+
+该接口实时登录同手机号 New API 账号读取 `/api/user/self` 与 `/api/log/self`，不在阿里云长期保存完整消费流水。
 
 ## New API Spike
 

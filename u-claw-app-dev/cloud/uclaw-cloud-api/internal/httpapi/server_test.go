@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"uclaw-cloud-api/internal/config"
+	"uclaw-cloud-api/internal/provisioning"
 )
 
 func TestHealthzReturnsOK(t *testing.T) {
@@ -150,6 +151,88 @@ func TestActivationRedeemRequiresBearerToken(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestUsageSummaryReturnsNewAPICounters(t *testing.T) {
+	secret := "test-newapi-password-secret"
+	expectedPassword := provisioning.DeriveUserPassword(1, "13800138000", secret)
+	newAPIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			var req map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode login request: %v", err)
+			}
+			if req["username"] != "13800138000" || req["password"] != expectedPassword {
+				t.Fatalf("login request = %+v", req)
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"user-access-token"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":9,"username":"13800138000","quota":100000,"used_quota":24171,"request_count":3}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/log/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":50,"total":1,"items":[{"id":1,"created_at":1787762761,"model_name":"gpt-5.5","quota":24171}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer newAPIServer.Close()
+
+	server := NewServer(config.Config{
+		AppEnv:                   "development",
+		JWTSecret:                "test-secret",
+		DevSMSCode:               "654321",
+		NewAPIAdminBaseURL:       newAPIServer.URL,
+		NewAPIAdminToken:         "admin-token",
+		NewAPIUserPasswordSecret: secret,
+	}, BuildInfo{Version: "test"})
+
+	accessToken := loginForTest(t, server, "13800138000", "654321")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/newapi/usage/summary", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Status          string `json:"status"`
+		AccountBalance  int64  `json:"accountBalance"`
+		UsedQuota       int64  `json:"usedQuota"`
+		CumulativeUsage int64  `json:"cumulativeUsage"`
+		Records         []struct {
+			ModelName string `json:"modelName"`
+			Quota     int64  `json:"quota"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode usage response: %v", err)
+	}
+	if payload.Status != "ok" || payload.AccountBalance != 100000 || payload.UsedQuota != 24171 || payload.CumulativeUsage != 24171 {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if len(payload.Records) != 1 || payload.Records[0].ModelName != "gpt-5.5" {
+		t.Fatalf("records = %+v", payload.Records)
+	}
+}
+
+func TestUsageSummaryRequiresNewAPIConfig(t *testing.T) {
+	server := NewServer(config.Config{
+		AppEnv:     "development",
+		JWTSecret:  "test-secret",
+		DevSMSCode: "654321",
+	}, BuildInfo{Version: "test"})
+	accessToken := loginForTest(t, server, "13800138000", "654321")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/newapi/usage/summary", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 body = %s", rec.Code, rec.Body.String())
 	}
 }
 

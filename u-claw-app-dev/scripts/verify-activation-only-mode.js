@@ -37,11 +37,14 @@ requireText(main, 'function hasCompletedActivation()', 'activation completion ch
 requireText(main, 'function shouldShowActivationOnStartup()', 'startup activation gate');
 requireText(main, 'function writeActivationState', 'activation state writer');
 requireText(main, 'async function postActivationJSON', 'activation cloud HTTP client');
+requireText(main, 'async function getActivationJSON', 'activation cloud GET client');
+requireText(main, 'async function getCloudModelUsageSummary', 'cloud model usage summary client');
 requireText(main, 'function writeOpenClawActivationConfig', 'OpenClaw activation config writer');
 requireText(main, "postActivationJSON('/v1/auth/sms/send'", 'cloud SMS send');
 requireText(main, "postActivationJSON('/v1/auth/sms/login'", 'cloud SMS login');
 requireText(main, "postActivationJSON('/v1/activation/redeem'", 'cloud activation redeem');
 requireText(main, 'ACTIVATION_CLOUD_COMPLETE', 'cloud activation completion code');
+requireText(main, 'uclaw:get-model-usage-summary', 'normal usage summary IPC channel');
 requireText(main, 'function setupActivationIPC()', 'activation IPC setup');
 requireText(main, 'function loadActivationPage()', 'activation page loader');
 requireText(main, "mainWindow.loadFile(path.join(__dirname, 'activation.html'));", 'activation local loadFile');
@@ -87,6 +90,9 @@ for (const forbidden of ['getGatewayStatus', 'openDashboard', 'openConfig']) {
     throw new Error(`Activation preload must not expose ${forbidden}`);
   }
 }
+
+const preloadNormalBranch = sliceBetween(preload, '} else {', '\n}');
+requireText(preloadNormalBranch, 'getModelUsageSummary', 'normal preload model usage bridge');
 
 for (const required of [
   '首次启动激活',

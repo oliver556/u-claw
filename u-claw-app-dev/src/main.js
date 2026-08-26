@@ -516,10 +516,12 @@ function writeActivationState(payload) {
     source: payload.source || 'local-preview',
     phoneMasked: payload.phoneMasked || `${phone.slice(0, 3)}****${phone.slice(7)}`,
     activationCodeSuffix: activationCode.replace(/-/g, '').slice(-4),
+    activationEndpoint: payload.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT,
     newapiBaseUrl: payload.newapiBaseUrl || '',
     tokenVersion: Number(payload.tokenVersion) || 1,
     tokenStatus: token ? 'configured' : 'pending_cloud_activation',
     tokenFingerprint: token ? crypto.createHash('sha256').update(token).digest('hex').slice(0, 16) : '',
+    uclawAccessToken: String(payload.uclawAccessToken || '').trim(),
     activatedAt: new Date().toISOString(),
   };
   fs.mkdirSync(configDir, { recursive: true });
@@ -555,6 +557,51 @@ async function postActivationJSON(pathname, payload, options = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Reads authenticated JSON from the U-Claw cloud service through Electron main.
+ */
+async function getActivationJSON(pathname, options = {}) {
+  const endpoint = String(options.endpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  if (!endpoint) {
+    throw new Error('activation endpoint is not configured');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 12000);
+  try {
+    const headers = {};
+    if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
+    const response = await fetch(`${endpoint}${pathname}`, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fetches New API usage summary via U-Claw cloud using the local activation token.
+ */
+async function getCloudModelUsageSummary() {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured' };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available' };
+  }
+  return getActivationJSON('/v1/newapi/usage/summary', { endpoint, accessToken });
 }
 
 /**
@@ -1332,6 +1379,7 @@ async function submitActivation(payload = {}) {
       newapiBaseUrl: redeem.newapiBaseUrl,
       newapiToken: redeem.newapiToken,
       tokenVersion: redeem.tokenVersion,
+      uclawAccessToken: login.accessToken,
     });
     return {
       ok: true,
@@ -1667,6 +1715,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('open-config', () => loadConfigPage());
+  ipcMain.handle('uclaw:get-model-usage-summary', () => getCloudModelUsageSummary());
 }
 
 // ── App Lifecycle ──

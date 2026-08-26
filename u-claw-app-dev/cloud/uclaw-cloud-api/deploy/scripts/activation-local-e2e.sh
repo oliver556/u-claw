@@ -48,6 +48,19 @@ if [[ "$pg_ready" != "true" ]]; then
   exit 1
 fi
 
+db_ready=false
+for _ in $(seq 1 60); do
+  if docker exec "$PG_CONTAINER" psql -U uclaw -d uclaw_cloud -tc "SELECT 1" >/dev/null 2>&1; then
+    db_ready=true
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$db_ready" != "true" ]]; then
+  docker logs "$PG_CONTAINER" >&2 || true
+  exit 1
+fi
+
 docker exec "$PG_CONTAINER" psql -U uclaw -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'uclaw_cloud'" \
   | grep -q 1 || docker exec "$PG_CONTAINER" psql -U uclaw -d postgres -c "CREATE DATABASE uclaw_cloud" >/dev/null
 docker exec -i "$PG_CONTAINER" psql -U uclaw -d uclaw_cloud >/dev/null < migrations/000001_init.sql
@@ -97,4 +110,10 @@ redeem_json="$(curl -fsS -X POST "http://${API_ADDR}/v1/activation/redeem" \
   -d "{\"activationCode\":\"$ACTIVATION_CODE\",\"deviceSummary\":\"LOCAL-E2E\"}")"
 
 printf '%s' "$redeem_json" | node_get "if(j.status!=='activated'||!j.newapiToken||!j.newapiToken.startsWith('sk-')){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'activation_local_e2e',phoneMasked:j.phoneMasked,token_present:true,baseUrl:j.newapiBaseUrl}))"
+echo
+
+usage_json="$(curl -fsS -X GET "http://${API_ADDR}/v1/newapi/usage/summary" \
+  -H "Authorization: Bearer $access_token")"
+
+printf '%s' "$usage_json" | node_get "if(j.status!=='ok'||j.accountBalance!==100000||!Array.isArray(j.records)){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'usage_summary_e2e',accountBalance:j.accountBalance,usedQuota:j.usedQuota,records:j.records.length}))"
 echo

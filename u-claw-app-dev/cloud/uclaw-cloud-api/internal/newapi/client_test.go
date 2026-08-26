@@ -240,3 +240,56 @@ func TestFetchTokenKeyAddsOpenAIStylePrefix(t *testing.T) {
 		t.Fatalf("key = %q", key)
 	}
 }
+
+func TestGetSelfReturnsQuotaCounters(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/api/user/self" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"id":26,"username":"13800138000","quota":12345,"used_quota":678,"request_count":9}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "user-access-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	user, err := client.GetSelf(context.Background())
+	if err != nil {
+		t.Fatalf("GetSelf() error = %v", err)
+	}
+	if gotAuth != "Bearer user-access-token" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if user.ID != 26 || user.Quota != 12345 || user.UsedQuota != 678 || user.RequestCount != 9 {
+		t.Fatalf("user = %+v", user)
+	}
+}
+
+func TestListSelfLogsReturnsPagedItems(t *testing.T) {
+	var gotURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":2,"total":1,"items":[{"id":1,"created_at":1787762761,"model_name":"gpt-5.5","quota":42,"prompt_tokens":10,"completion_tokens":5,"request_id":"req_1"}]}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "user-access-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	page, err := client.ListSelfLogs(context.Background(), 0, 2)
+	if err != nil {
+		t.Fatalf("ListSelfLogs() error = %v", err)
+	}
+	if gotURL != "/api/log/self?p=0&page_size=2" {
+		t.Fatalf("url = %q", gotURL)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Quota != 42 {
+		t.Fatalf("page = %+v", page)
+	}
+}

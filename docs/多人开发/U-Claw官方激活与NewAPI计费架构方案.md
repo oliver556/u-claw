@@ -553,18 +553,22 @@ Phase 0 开发时必须同步产出：
 
 ```text
 1. 客户端进入模型页。
-2. 客户端使用本地 New API token 请求香港 New API endpoint。
-3. 查询：
+2. 客户端携带 U-Claw access token 请求阿里云 U-Claw Cloud API。
+3. 阿里云用手机号同名 New API 账号临时登录 New API dashboard。
+4. 阿里云实时读取 New API：
    - 余额 / quota。
    - 使用流水。
    - 充值或 quota 变动记录，如 New API 支持。
-4. U-Claw 页面按 New API 原生 quota 展示。
-5. 可辅助显示约人民币 / 约 token，但不作为对账口径。
+5. 阿里云聚合今日用量、近 7 天、累计用量和最近记录。
+6. U-Claw 页面按 New API 原生 quota 展示。
+7. 可辅助显示约人民币 / 约 token，但不作为对账口径。
 ```
 
 说明：
 
 - 阿里云不保存完整消费流水。
+- 余额、用量、流水的 source of truth 仍是 New API。
+- 阿里云本接口只在进入模型页或用户手动刷新时读取 New API。
 - 若 New API 查询接口不可用，页面显示“New API 数据暂不可用”。
 - 可在客户端做短期缓存，但 source of truth 仍是 New API。
 
@@ -826,7 +830,51 @@ Content-Type: application/json
 }
 ```
 
-### 7.4 充值套餐
+### 7.4 模型页余额 / 用量 / 流水摘要
+
+```http
+GET /v1/newapi/usage/summary
+Authorization: Bearer <uclaw_access_token>
+```
+
+返回：
+
+```json
+{
+  "status": "ok",
+  "newapiUserId": 123,
+  "newapiUsername": "13800138000",
+  "accountBalance": 100000,
+  "usedQuota": 24171,
+  "requestCount": 3,
+  "todayUsage": 0,
+  "last7DaysUsage": 24171,
+  "cumulativeUsage": 24171,
+  "recentRecordText": "1 条最近记录",
+  "records": [
+    {
+      "id": 1,
+      "createdAt": 1787762761,
+      "modelName": "gpt-5.5",
+      "quota": 24171,
+      "promptTokens": 0,
+      "completionTokens": 0,
+      "requestId": "..."
+    }
+  ],
+  "refreshedAt": "2026-08-27T00:00:00Z",
+  "unit": "quota"
+}
+```
+
+实现状态：
+
+- 已接 New API `/api/user/self` 读取余额、已用 quota、请求数。
+- 已接 New API `/api/log/self?p=0&page_size=50` 读取当前用户最近流水。
+- 已纳入 `activation-local-e2e.sh`，激活后自动验证可读取 `accountBalance=100000`。
+- 已纳入 Electron UI 验收脚本 `u-claw-app-dev/scripts/verify-cloud-model-usage-ui.js`，可验证模型页实际展示 `100,000` 余额与 `New API quota`。
+
+### 7.5 充值套餐
 
 ```http
 GET /v1/recharge/plans
@@ -848,7 +896,7 @@ Authorization: Bearer <uclaw_access_token>
 }
 ```
 
-### 7.5 创建充值订单
+### 7.6 创建充值订单
 
 ```http
 POST /v1/recharge/orders
@@ -872,7 +920,7 @@ Content-Type: application/json
 }
 ```
 
-### 7.6 查询订单状态
+### 7.7 查询订单状态
 
 ```http
 GET /v1/recharge/orders/{orderNo}
@@ -892,7 +940,7 @@ Authorization: Bearer <uclaw_access_token>
 }
 ```
 
-### 7.7 支付回调
+### 7.8 支付回调
 
 ```http
 POST /v1/payments/wechat/notify

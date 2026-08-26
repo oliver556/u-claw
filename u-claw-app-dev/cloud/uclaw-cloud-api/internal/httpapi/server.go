@@ -13,6 +13,7 @@ import (
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/newapi"
 	"uclaw-cloud-api/internal/provisioning"
+	"uclaw-cloud-api/internal/usage"
 )
 
 const developmentJWTSecret = "uclaw-development-only-secret-change-before-production"
@@ -28,6 +29,7 @@ type BuildInfo struct {
 type ServerOptions struct {
 	Auth       *auth.Service
 	Activation *activation.Service
+	Usage      *usage.Service
 }
 
 // PersistentStore is the shared PostgreSQL seam for auth and activation slices.
@@ -58,6 +60,7 @@ func NewServer(cfg config.Config, build BuildInfo) http.Handler {
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, nil),
 		Activation: buildActivationService(cfg, nil),
+		Usage:      buildUsageService(cfg),
 	})
 }
 
@@ -66,6 +69,7 @@ func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStor
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, store),
 		Activation: buildActivationService(cfg, store),
+		Usage:      buildUsageService(cfg),
 	})
 }
 
@@ -144,6 +148,31 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, result)
 	})
+	mux.HandleFunc("GET /v1/newapi/usage/summary", func(w http.ResponseWriter, r *http.Request) {
+		claims, err := verifyBearer(r, options.Auth)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Usage == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("newapi usage service is not configured"))
+			return
+		}
+		userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, fmt.Errorf("token subject is invalid"))
+			return
+		}
+		result, err := options.Usage.GetSummary(r.Context(), usage.SummaryRequest{
+			UserID: userID,
+			Phone:  claims.Phone,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
 	return mux
 }
 
@@ -201,6 +230,24 @@ func buildActivationService(cfg config.Config, store activation.Store) *activati
 	})
 	if err != nil {
 		panic(fmt.Sprintf("build activation service: %v", err))
+	}
+	return service
+}
+
+// buildUsageService creates the New API read-side service when admin access is configured.
+func buildUsageService(cfg config.Config) *usage.Service {
+	if cfg.NewAPIAdminBaseURL == "" || cfg.NewAPIAdminToken == "" {
+		return nil
+	}
+	admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout})
+	if err != nil {
+		panic(fmt.Sprintf("build newapi usage client: %v", err))
+	}
+	service, err := usage.NewService(admin, usage.Config{
+		PasswordSecret: cfg.NewAPIUserPasswordSecret,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("build usage service: %v", err))
 	}
 	return service
 }
