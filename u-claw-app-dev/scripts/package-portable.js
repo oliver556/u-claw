@@ -233,23 +233,46 @@ function generateConfig(edition, destination) {
 
 function seedStreamerAuthStore(edition, stageRoot) {
   if (edition !== 'streamer') return;
-  const sourceDb = path.join(desktopAgentDir, 'openclaw-agent.sqlite');
-  ensureFile(sourceDb, 'desktop streamer auth store');
+  const configPath = path.join(stageRoot, 'data', '.openclaw', 'openclaw.json');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const providers = config.models?.providers || {};
+  const customKey = providers.custom?.apiKey;
+  const litellmKey = providers.litellm?.apiKey || customKey;
+  if (!customKey || !litellmKey) throw new Error('Streamer auth store requires custom/litellm API keys');
 
+  const now = Date.now();
+  const store = {
+    profiles: {
+      'custom:manual': { type: 'api_key', provider: 'custom', key: customKey },
+      'litellm:manual': { type: 'api_key', provider: 'litellm', key: litellmKey }
+    },
+    order: {
+      custom: ['custom:manual'],
+      litellm: ['litellm:manual']
+    },
+    lastGood: {
+      custom: 'custom:manual',
+      litellm: 'litellm:manual'
+    }
+  };
+  const state = {
+    providers: {
+      custom: { lastGoodProfileId: 'custom:manual' },
+      litellm: { lastGoodProfileId: 'litellm:manual' }
+    }
+  };
   const destinationDir = path.join(stageRoot, 'data', '.openclaw', 'agents', 'main', 'agent');
   fs.mkdirSync(destinationDir, { recursive: true });
-  for (const name of [
-    'openclaw-agent.sqlite',
-    'openclaw-agent.sqlite-shm',
-    'openclaw-agent.sqlite-wal',
-    'models.json'
-  ]) {
-    const source = path.join(desktopAgentDir, name);
-    if (fs.existsSync(source) && fs.statSync(source).isFile()) {
-      fs.copyFileSync(source, path.join(destinationDir, name));
-    }
-  }
-  ensureFile(path.join(destinationDir, 'openclaw-agent.sqlite'), 'streamer package auth store');
+  const sourceModels = path.join(desktopAgentDir, 'models.json');
+  if (fs.existsSync(sourceModels)) fs.copyFileSync(sourceModels, path.join(destinationDir, 'models.json'));
+  const dbPath = path.join(destinationDir, 'openclaw-agent.sqlite');
+  fs.rmSync(dbPath, { force: true });
+  run('sqlite3', [dbPath, [
+    'CREATE TABLE IF NOT EXISTS auth_profile_store (store_key TEXT PRIMARY KEY NOT NULL, store_json TEXT NOT NULL, updated_at INTEGER NOT NULL);',
+    'CREATE TABLE IF NOT EXISTS auth_profile_state (state_key TEXT PRIMARY KEY NOT NULL, state_json TEXT NOT NULL, updated_at INTEGER NOT NULL);',
+    `INSERT INTO auth_profile_store(store_key, store_json, updated_at) VALUES('primary', json('${JSON.stringify(store).replace(/'/g, "''")}'), ${now});`,
+    `INSERT INTO auth_profile_state(state_key, state_json, updated_at) VALUES('primary', json('${JSON.stringify(state).replace(/'/g, "''")}'), ${now});`
+  ].join(' ')]);
 }
 
 function packageNotes(edition, macArm64Hash, macX64Hash, winHash) {
