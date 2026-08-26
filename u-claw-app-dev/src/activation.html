@@ -144,7 +144,7 @@
     .form-card { display: grid; gap: 11px; }
     .field { display: grid; gap: 6px; }
     .field label { font-size: 12px; font-weight: 620; }
-    .sms-row { display: grid; grid-template-columns: minmax(0, 1fr) 118px; gap: 8px; align-items: end; }
+    .sms-row { display: grid; grid-template-columns: minmax(0, 1fr) 136px; gap: 10px; align-items: end; }
     .input { width: 100%; height: 39px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-md); color: var(--text); background: var(--surface); }
     .input:hover { border-color: var(--blue-border); }
     .input:focus { border-color: var(--blue); }
@@ -152,18 +152,6 @@
     .input-error { display: none; color: #cf1322 !important; }
     .field.error .input { border-color: var(--red); box-shadow: 0 0 0 3px rgba(255, 77, 79, .1); }
     .field.error .input-error { display: block; }
-    .bind-card { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--green-border); border-radius: var(--r-md); background: var(--green-bg); }
-    .bind-card.pending { border-color: #ffe58f; background: var(--orange-bg); }
-    .bind-card.preview { border-color: var(--blue-border); background: var(--selected); }
-    .usb { position: relative; width: 22px; height: 28px; flex: none; border: 1px solid var(--blue-border); border-radius: 4px 4px 6px 6px; background: var(--surface); }
-    .usb::before { content: ""; position: absolute; top: -6px; left: 6px; width: 10px; height: 6px; border: 1px solid var(--border); border-bottom: 0; border-radius: 2px 2px 0 0; background: var(--surface); }
-    .usb::after { content: ""; position: absolute; left: 7px; bottom: 6px; width: 9px; height: 2px; border-radius: 1px; background: var(--blue); }
-    .bind-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
-    .bind-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-    .bind-copy small { overflow: hidden; color: var(--text-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-    .bind-state { color: #237804; font-size: 11px; font-weight: 620; white-space: nowrap; }
-    .bind-card.pending .bind-state { color: #ad6800; }
-    .bind-card.preview .bind-state { color: var(--blue-dark); }
     .side-card h2 { margin-bottom: 14px; font-size: 14px; }
     .side-card dl { margin: 0; }
     .side-card dl div { min-height: 36px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--divider); }
@@ -203,7 +191,7 @@
     .button:disabled { cursor: not-allowed; opacity: .42; }
     .button.text { border-color: transparent; background: transparent; }
     .button.text:hover { border-color: transparent; background: var(--selected); }
-    .button.inline { width: 100%; height: 39px; padding: 0 10px; color: var(--blue-dark); border-color: var(--blue-border); background: var(--selected); box-shadow: none; white-space: nowrap; }
+    .button.inline { width: 100%; min-width: 136px; height: 39px; padding: 0 12px; color: var(--blue-dark); border-color: var(--blue-border); background: var(--selected); box-shadow: none; white-space: nowrap; }
     .arrow { font-size: 18px; line-height: 0; }
     .toast { position: fixed; top: 62px; right: 20px; z-index: 60; padding: 10px 13px; border: 1px solid var(--divider); border-radius: var(--r-md); color: var(--text); background: var(--surface); box-shadow: var(--shadow); opacity: 0; transform: translateY(-8px); pointer-events: none; transition: opacity .16s, transform .16s; }
     .toast.show { opacity: 1; transform: translateY(0); }
@@ -298,7 +286,6 @@
                   <button class="button inline" id="sendSmsButton" type="button">发送验证码</button>
                 </div>
                 <div class="field" id="codeField"><label for="activationCode">U 盘激活码</label><input class="input" id="activationCode" autocomplete="one-time-code" placeholder="XXXX-XXXX-XXXX-XXXX"><small>激活码随 U 盘提供，首次使用后绑定当前手机号。</small><small class="input-error">激活码格式不正确。</small></div>
-                <div class="bind-card preview" id="bindCard"><span class="usb" aria-hidden="true"></span><span class="bind-copy"><strong id="usbLabel">静态预览产品盘（未读取真实 U 盘）</strong><small id="usbSummary">设备标识摘要：PREVIEW-ONLY</small></span><span class="bind-state" id="usbState">预览</span></div>
                 <p class="form-note">当前切片先完成首启登录界面与本地验证码闭环；真实云端激活会在下一步接入阿里云激活服务。</p>
               </form>
               <aside class="side-card">
@@ -425,12 +412,6 @@
     function updatePreflight(nextPreflight) {
       preflight = nextPreflight;
       renderChecks(preflight.checks || []);
-      $('#usbLabel').textContent = preflight.usb?.label || '等待 Launcher 提供产品盘信息';
-      $('#usbSummary').textContent = `设备标识摘要：${preflight.usb?.summary || '待接入'}`;
-      const usbStatus = preflight.usb?.status || 'preview';
-      $('#bindCard').classList.toggle('pending', usbStatus === 'pending');
-      $('#bindCard').classList.toggle('preview', usbStatus === 'preview');
-      $('#usbState').textContent = usbStatus === 'pass' ? '可绑定' : usbStatus === 'preview' ? '预览' : '待接入';
       $('#endpointState').innerHTML = preflight.activationEndpointConfigured
         ? '<span class="dot green"></span> 已配置'
         : '<span class="dot orange"></span> 待接入';
