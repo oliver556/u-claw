@@ -11,9 +11,25 @@ const DEFAULT_PORT = 18789;
 const MAX_PORT = 18799;
 const DEFAULT_VIDEO_ADAPTER_PORT = 18808;
 const MAX_VIDEO_ADAPTER_PORT = 18818;
+const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://video-adapter.gmnlee.com/xai/v1';
 const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'jimeng-video-3-720p';
 const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
 const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
+const UCLAW_PORTABLE_DATA_DIR = process.env.UCLAW_PORTABLE_DATA_DIR?.trim() || '';
+const UCLAW_PORTABLE_WORK_DATA_DIR = process.env.UCLAW_PORTABLE_WORK_DATA_DIR?.trim() || '';
+const UCLAW_USB_DATA_DIR = (process.env.UCLAW_USB_DATA_DIR?.trim() || UCLAW_PORTABLE_DATA_DIR);
+const UCLAW_LAUNCHER_GUI = process.env.UCLAW_LAUNCHER_GUI === '1';
+const UCLAW_INHERIT_SYSTEM_PROXY = process.env.UCLAW_INHERIT_SYSTEM_PROXY === '1';
+const SYSTEM_PROXY_ENV_KEYS = [
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'npm_config_proxy',
+  'npm_config_https_proxy',
+];
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
 // room so we never hard-fail with a scary dialog before the engine is up. The
@@ -91,16 +107,16 @@ function getNodeBin() {
 // Falling back to desktop userData when this env is present would write portable
 // installs into the host machine's platform-specific app data directory.
 function getPortableDataPath() {
-  const envPortableDir = process.env.UCLAW_PORTABLE_DATA_DIR?.trim();
-  if (envPortableDir) {
-    const resolvedPortableDir = path.resolve(envPortableDir);
+  const workDataDir = UCLAW_PORTABLE_WORK_DATA_DIR || UCLAW_PORTABLE_DATA_DIR;
+  if (workDataDir) {
+    const resolvedPortableDir = path.resolve(workDataDir);
     try {
       fs.mkdirSync(resolvedPortableDir, { recursive: true });
       if (!fs.statSync(resolvedPortableDir).isDirectory()) {
         throw new Error('path is not a directory');
       }
     } catch (error) {
-      throw new Error(`Invalid UCLAW_PORTABLE_DATA_DIR ${resolvedPortableDir}: ${error.message}`);
+      throw new Error(`Invalid portable data dir ${resolvedPortableDir}: ${error.message}`);
     }
     console.log(`[${APP_NAME}] Portable mode: data in ${resolvedPortableDir}`);
     return resolvedPortableDir;
@@ -131,6 +147,19 @@ const portablePath = getPortableDataPath();
 const userDataPath = portablePath || getDesktopUserDataPath();
 const configDir = path.join(userDataPath, '.openclaw');
 const configPath = path.join(configDir, 'openclaw.json');
+const usbDataPath = UCLAW_USB_DATA_DIR ? path.resolve(UCLAW_USB_DATA_DIR) : null;
+const syncStateDir = path.join(userDataPath, '.uclaw-sync');
+const dirtyMarkerPath = path.join(syncStateDir, 'dirty.json');
+const lastSyncPath = path.join(syncStateDir, 'last-sync.json');
+const uiStatePath = path.join(configDir, 'uclaw-ui-state.json');
+const logsDir = path.join(userDataPath, 'logs');
+
+try {
+  fs.mkdirSync(userDataPath, { recursive: true });
+  app.setPath('userData', userDataPath);
+} catch (error) {
+  console.warn(`[${APP_NAME}] Failed to set Electron userData path: ${error.message}`);
+}
 
 // ── State ──
 let mainWindow = null;
@@ -138,9 +167,20 @@ let tray = null;
 let gatewayProcess = null;
 let gatewayPort = DEFAULT_PORT;
 let gatewayReady = false;
+let configServer = null;
 let configServerPort = null; // mini HTTP server for Config.html
 let videoAdapterServer = null;
 let videoAdapterPort = null;
+let appIsQuitting = false;
+let quitConfirmationOpen = false;
+let gatewayStopping = false;
+let gatewayRestartTimer = null;
+let gatewayRestartAttempts = 0;
+let portableSyncTimer = null;
+let portableSyncPromise = null;
+let portableFinalSyncDone = false;
+let shutdownPromise = null;
+const holdMainWindowUntilReady = UCLAW_LAUNCHER_GUI && Boolean(UCLAW_PORTABLE_WORK_DATA_DIR || UCLAW_PORTABLE_DATA_DIR);
 
 // ── Config Management ──
 function loadBundledDefaultConfig() {
@@ -197,7 +237,15 @@ function ensureConfig() {
 
 function getConfig() {
   try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const runtimeVideoAdapterBaseUrl = process.env.UCLAW_RUNTIME_VIDEO_ADAPTER_BASE_URL || '';
+    if (runtimeVideoAdapterBaseUrl && config.models?.providers?.xai) {
+      config.models.providers.xai = {
+        ...config.models.providers.xai,
+        baseUrl: runtimeVideoAdapterBaseUrl
+      };
+    }
+    return config;
   } catch {
     return { gateway: { mode: 'local', auth: { token: 'uclaw' } } };
   }
@@ -206,6 +254,240 @@ function getConfig() {
 function saveConfig(config) {
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  writeDirtyMarker('config');
+}
+
+function safeWriteJson(filePath, value) {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+    return true;
+  } catch (error) {
+    console.warn(`[${APP_NAME}] Failed to write ${filePath}: ${error.message}`);
+    return false;
+  }
+}
+
+function readJsonFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function redactLogLine(value) {
+  return String(value)
+    .replace(/(api[_-]?key["'=:\s]+)[^"',\s]+/ig, '$1[redacted]')
+    .replace(/(authorization["'=:\s]+bearer\s+)[^"',\s]+/ig, '$1[redacted]');
+}
+
+function appendLogFile(fileName, message) {
+  try {
+    fs.mkdirSync(logsDir, { recursive: true });
+    const line = `[${new Date().toISOString()}] ${redactLogLine(message)}\n`;
+    fs.appendFileSync(path.join(logsDir, fileName), line);
+  } catch {}
+}
+
+function logLifecycle(message) {
+  console.log(`[${APP_NAME}] ${message}`);
+  appendLogFile('main.log', message);
+}
+
+function portableUsbSyncEnabled() {
+  return Boolean(usbDataPath && portablePath && path.resolve(usbDataPath) !== path.resolve(userDataPath));
+}
+
+function writeDirtyMarker(reason) {
+  if (!portablePath) return;
+  const marker = {
+    dirty: true,
+    reason,
+    updatedAt: new Date().toISOString(),
+    workDataDir: userDataPath,
+    usbDataDir: usbDataPath || ''
+  };
+  safeWriteJson(dirtyMarkerPath, marker);
+  if (portableUsbSyncEnabled()) {
+    safeWriteJson(path.join(usbDataPath, '.uclaw-sync', 'dirty.json'), marker);
+  }
+}
+
+function writeLastSyncMarker(reason, success) {
+  const marker = {
+    success,
+    reason,
+    syncedAt: new Date().toISOString(),
+    workDataDir: userDataPath,
+    usbDataDir: usbDataPath || ''
+  };
+  safeWriteJson(lastSyncPath, marker);
+  if (portableUsbSyncEnabled()) {
+    safeWriteJson(path.join(usbDataPath, '.uclaw-sync', 'last-sync.json'), marker);
+  }
+}
+
+function clearDirtyMarker() {
+  for (const filePath of [
+    dirtyMarkerPath,
+    portableUsbSyncEnabled() ? path.join(usbDataPath, '.uclaw-sync', 'dirty.json') : ''
+  ].filter(Boolean)) {
+    try { fs.rmSync(filePath, { force: true }); } catch {}
+  }
+}
+
+function spawnForSync(command, args, successExitCode) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    child.stdout.on('data', data => appendLogFile('main.log', data.toString().trim()));
+    child.stderr.on('data', data => appendLogFile('main.log', data.toString().trim()));
+    child.on('error', (error) => {
+      logLifecycle(`portable sync failed to start: ${error.message}`);
+      resolve(false);
+    });
+    child.on('exit', (code) => {
+      resolve(successExitCode(code));
+    });
+  });
+}
+
+function portableSyncExcludeArgs() {
+  if (process.platform === 'win32') {
+    return {
+      dirs: [
+        path.join(userDataPath, '.cache', 'v8-compile-cache'),
+        path.join(userDataPath, '.home', 'AppData', 'Roaming', 'u-claw', 'Cache'),
+        path.join(userDataPath, '.home', 'AppData', 'Roaming', 'u-claw', 'Code Cache'),
+        path.join(userDataPath, '.home', 'AppData', 'Roaming', 'u-claw', 'GPUCache'),
+        path.join(userDataPath, '.home', 'AppData', 'Roaming', 'u-claw', 'DawnCache'),
+        path.join(userDataPath, '.home', 'AppData', 'Roaming', 'u-claw', 'Crashpad'),
+      ],
+      files: ['Cookies', 'Cookies-journal', 'LOCK', 'SingletonCookie', 'SingletonLock', 'SingletonSocket']
+    };
+  }
+
+  return [
+    '--exclude', '.cache/v8-compile-cache/',
+    '--exclude', '**/Cache/',
+    '--exclude', '**/Code Cache/',
+    '--exclude', '**/GPUCache/',
+    '--exclude', '**/DawnCache/',
+    '--exclude', '**/Crashpad/',
+    '--exclude', '**/Network/Cookies',
+    '--exclude', '**/Network/Cookies-journal',
+    '--exclude', '**/LOCK',
+    '--exclude', '**/SingletonCookie',
+    '--exclude', '**/SingletonLock',
+    '--exclude', '**/SingletonSocket',
+    '--exclude', '.openclaw/openclaw.json',
+    '--exclude', '.openclaw/openclaw.json.last-good',
+  ];
+}
+
+async function runPortableDataSync(reason, options = {}) {
+  if (!portableUsbSyncEnabled()) return true;
+  if (portableSyncPromise) return portableSyncPromise;
+
+  portableSyncPromise = (async () => {
+    try {
+      fs.mkdirSync(usbDataPath, { recursive: true });
+      const success = process.platform === 'win32'
+        ? await (() => {
+          const excludes = portableSyncExcludeArgs();
+          return spawnForSync('robocopy', [
+          userDataPath,
+          usbDataPath,
+          '/E',
+          '/XD',
+          ...excludes.dirs,
+          '/XF',
+          ...excludes.files,
+          '/R:2',
+          '/W:1',
+          '/XJ',
+          '/NFL',
+          '/NDL',
+          '/NJH',
+          '/NJS',
+          '/NP'
+          ], code => code !== null && code < 8);
+        })()
+        : await spawnForSync('rsync', [
+          '-a',
+          ...portableSyncExcludeArgs(),
+          `${userDataPath}${path.sep}`,
+          `${usbDataPath}${path.sep}`
+        ], code => code === 0);
+
+      writeLastSyncMarker(reason, success);
+      if (success && options.clearDirty) clearDirtyMarker();
+      logLifecycle(`portable sync ${success ? 'ok' : 'failed'} (${reason})`);
+      return success;
+    } finally {
+      portableSyncPromise = null;
+    }
+  })();
+
+  return portableSyncPromise;
+}
+
+function startPortableSyncTimer() {
+  if (!portableUsbSyncEnabled() || portableSyncTimer) return;
+  writeDirtyMarker('running');
+  portableSyncTimer = setInterval(() => {
+    runPortableDataSync('periodic').catch(error => {
+      logLifecycle(`portable sync error: ${error.message}`);
+    });
+  }, 30000);
+}
+
+async function finalPortableDataSync(reason) {
+  if (portableSyncTimer) {
+    clearInterval(portableSyncTimer);
+    portableSyncTimer = null;
+  }
+  const success = await runPortableDataSync(reason, { clearDirty: true });
+  if (reason === 'after-stop') portableFinalSyncDone = success;
+  return success;
+}
+
+function persistActiveSessionKey(sessionKey) {
+  const key = typeof sessionKey === 'string' ? sessionKey.trim() : '';
+  if (!key || key.toLowerCase() === 'unknown') return;
+  safeWriteJson(uiStatePath, {
+    activeSessionKey: key,
+    updatedAt: new Date().toISOString()
+  });
+  writeDirtyMarker('active-session');
+}
+
+function readActiveSessionKey() {
+  const state = readJsonFile(uiStatePath);
+  return typeof state?.activeSessionKey === 'string' && state.activeSessionKey.trim()
+    ? state.activeSessionKey.trim()
+    : '';
+}
+
+function extractSessionKeyFromUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    const session = url.searchParams.get('session');
+    if (session?.trim()) return session.trim();
+  } catch {}
+  return '';
+}
+
+function dashboardUrl() {
+  const token = getToken();
+  const activeSessionKey = readActiveSessionKey();
+  const sessionSearch = activeSessionKey ? `?session=${encodeURIComponent(activeSessionKey)}` : '';
+  const routePath = activeSessionKey ? '/chat' : '/';
+  return `http://127.0.0.1:${gatewayPort}${routePath}${sessionSearch}#token=${token}`;
 }
 
 function normalizePortableDataPathString(value) {
@@ -358,6 +640,7 @@ function getVideoAdapterOptions() {
 
 function ensureVideoAdapterConfig(adapterBaseUrl) {
   const config = getConfig();
+  const before = JSON.stringify(config);
   const existingLitellm = config.models?.providers?.litellm;
   if (existingLitellm && !Array.isArray(existingLitellm.models)) {
     existingLitellm.models = [{
@@ -419,8 +702,15 @@ function ensureVideoAdapterConfig(adapterBaseUrl) {
   }
   config.agents.defaults.mediaMaxMb = Math.max(Number(config.agents.defaults.mediaMaxMb) || 0, 256);
 
-  saveConfig(config);
-  console.log(`[${APP_NAME}] Video adapter config set to ${adapterBaseUrl}`);
+  if (JSON.stringify(config) !== before) {
+    saveConfig(config);
+    console.log(`[${APP_NAME}] Video adapter config set to ${adapterBaseUrl}`);
+  }
+}
+
+function ensureRuntimeVideoAdapterConfig(adapterBaseUrl) {
+  process.env.UCLAW_RUNTIME_VIDEO_ADAPTER_BASE_URL = adapterBaseUrl;
+  console.log(`[${APP_NAME}] Runtime video adapter set to ${adapterBaseUrl}`);
 }
 
 function hasModelConfigured() {
@@ -473,12 +763,22 @@ function startVideoAdapter(port) {
 }
 
 function stopVideoAdapter() {
-  if (videoAdapterServer) {
-    console.log(`[${APP_NAME}] Stopping video adapter...`);
-    videoAdapterServer.close();
-    videoAdapterServer = null;
-    videoAdapterPort = null;
-  }
+  if (!videoAdapterServer) return Promise.resolve();
+
+  const serverToStop = videoAdapterServer;
+  videoAdapterServer = null;
+  videoAdapterPort = null;
+  logLifecycle('Stopping video adapter...');
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    serverToStop.close(finish);
+    setTimeout(finish, 2000);
+  });
 }
 
 // ── Mini HTTP Server for Config.html ──
@@ -506,6 +806,7 @@ function startConfigServer() {
             const existing = getConfig();
             const merged = Object.assign(existing, newConfig);
             fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
+            writeDirtyMarker('config-server');
             console.log(`[${APP_NAME}] Config saved`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true }));
@@ -524,8 +825,7 @@ function startConfigServer() {
         // Switch to dashboard after short delay
         setTimeout(() => {
           if (mainWindow && gatewayReady) {
-            const token = getToken();
-            mainWindow.loadURL(`http://127.0.0.1:${gatewayPort}/#token=${token}`);
+            mainWindow.loadURL(dashboardUrl());
           }
         }, 500);
         return;
@@ -543,10 +843,30 @@ function startConfigServer() {
     });
     // Listen on random available port
     server.listen(0, '127.0.0.1', () => {
+      configServer = server;
       configServerPort = server.address().port;
       console.log(`[${APP_NAME}] Config server on http://127.0.0.1:${configServerPort}`);
       resolve(configServerPort);
     });
+  });
+}
+
+function stopConfigServer() {
+  if (!configServer) return Promise.resolve();
+
+  const serverToStop = configServer;
+  configServer = null;
+  configServerPort = null;
+  logLifecycle('Stopping config server...');
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    serverToStop.close(finish);
+    setTimeout(finish, 2000);
   });
 }
 
@@ -583,13 +903,41 @@ function portableChildHomeEnv(baseEnv) {
   return nextEnv;
 }
 
+function stripSystemProxyEnv(baseEnv) {
+  if (UCLAW_INHERIT_SYSTEM_PROXY) return baseEnv;
+
+  const nextEnv = { ...baseEnv };
+  let stripped = false;
+  for (const key of SYSTEM_PROXY_ENV_KEYS) {
+    if (nextEnv[key]) stripped = true;
+    delete nextEnv[key];
+  }
+  if (stripped) {
+    logLifecycle('System proxy env stripped for gateway; set UCLAW_INHERIT_SYSTEM_PROXY=1 to keep shell proxy env.');
+  }
+  return nextEnv;
+}
+
 // ── Gateway Management ──
+function taskkillProcessTree(pid, force = false) {
+  if (process.platform !== 'win32' || !pid) return;
+  const args = ['/PID', String(pid), '/T'];
+  if (force) args.push('/F');
+  try {
+    spawn('taskkill', args, {
+      stdio: 'ignore',
+      windowsHide: true,
+    }).on('error', () => {});
+  } catch {}
+}
+
 function startGateway(port) {
   return new Promise((resolve, reject) => {
-    console.log(`[${APP_NAME}] Starting OpenClaw gateway on port ${port}...`);
+    gatewayStopping = false;
+    logLifecycle(`Starting OpenClaw gateway on port ${port}...`);
 
     const nodeBin = getNodeBin();
-    console.log(`[${APP_NAME}] Using Node.js: ${nodeBin}`);
+    logLifecycle(`Using Node.js: ${nodeBin}`);
 
     // Persist the V8 compile cache to a fixed local dir under userData so the
     // gateway's heavy first-run compile is paid only once. userDataPath is stable
@@ -602,7 +950,7 @@ function startGateway(port) {
       path.join(configDir, 'media'),
     ].filter(Boolean).join(path.delimiter);
 
-    const env = portableChildHomeEnv({
+    const env = stripSystemProxyEnv(portableChildHomeEnv({
       ...process.env,
       OPENCLAW_HOME: userDataPath,
       OPENCLAW_STATE_DIR: configDir,
@@ -610,7 +958,7 @@ function startGateway(port) {
       OPENCLAW_EMBEDDED_IN: APP_NAME,
       NODE_COMPILE_CACHE: compileCacheDir,
       UCLAW_MEDIA_PREVIEW_ROOTS: mediaPreviewRoots,
-    });
+    }));
 
     if (process.platform === 'win32') {
       env.OPENCLAW_DISABLE_BONJOUR = '1';
@@ -626,27 +974,37 @@ function startGateway(port) {
       env,
       cwd: openclawPath,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
 
     gatewayProcess.stdout.on('data', (data) => {
       const msg = data.toString().trim();
-      if (msg) console.log(`[OpenClaw] ${msg}`);
+      if (msg) {
+        console.log(`[OpenClaw] ${msg}`);
+        appendLogFile('gateway.log', msg);
+      }
     });
 
     gatewayProcess.stderr.on('data', (data) => {
       const msg = data.toString().trim();
-      if (msg) console.error(`[OpenClaw:err] ${msg}`);
+      if (msg) {
+        console.error(`[OpenClaw:err] ${msg}`);
+        appendLogFile('gateway.log', `ERR ${msg}`);
+      }
     });
 
     gatewayProcess.on('error', (err) => {
-      console.error(`[${APP_NAME}] Gateway process error:`, err);
+      logLifecycle(`Gateway process error: ${err.message}`);
       reject(err);
     });
 
-    gatewayProcess.on('exit', (code) => {
-      console.log(`[${APP_NAME}] Gateway exited with code ${code}`);
+    gatewayProcess.on('exit', (code, signal) => {
+      logLifecycle(`Gateway exited with code ${code ?? 'null'} signal ${signal ?? 'null'}`);
       gatewayProcess = null;
       gatewayReady = false;
+      if (!gatewayStopping && !appIsQuitting) {
+        scheduleGatewayRestart(`exit code=${code ?? 'null'} signal=${signal ?? 'null'}`);
+      }
     });
 
     // Poll for gateway readiness
@@ -657,6 +1015,8 @@ function startGateway(port) {
 
       if (Date.now() - startTime > GATEWAY_STARTUP_TIMEOUT) {
         settled = true;
+        gatewayStopping = true;
+        if (gatewayProcess) gatewayProcess.kill('SIGTERM');
         reject(new Error('Gateway startup timeout'));
         return;
       }
@@ -666,7 +1026,8 @@ function startGateway(port) {
         settled = true;
         gatewayReady = true;
         gatewayPort = port;
-        console.log(`[${APP_NAME}] Gateway ready on port ${port}`);
+        gatewayRestartAttempts = 0;
+        logLifecycle(`Gateway ready on port ${port}`);
         res.resume();
         resolve(port);
       });
@@ -684,17 +1045,63 @@ function startGateway(port) {
   });
 }
 
+function scheduleGatewayRestart(reason) {
+  if (gatewayRestartTimer || appIsQuitting) return;
+  gatewayRestartAttempts += 1;
+  const delay = Math.min(30000, 1000 * (2 ** Math.min(gatewayRestartAttempts - 1, 5)));
+  logLifecycle(`Gateway restart scheduled in ${delay}ms (${reason})`);
+  gatewayRestartTimer = setTimeout(async () => {
+    gatewayRestartTimer = null;
+    if (appIsQuitting || gatewayProcess) return;
+    try {
+      const port = await findAvailablePort();
+      await startGateway(port);
+      loadAppPage();
+    } catch (error) {
+      logLifecycle(`Gateway restart failed: ${error.message}`);
+      scheduleGatewayRestart(error.message);
+    }
+  }, delay);
+}
+
 function stopGateway() {
-  if (gatewayProcess) {
-    console.log(`[${APP_NAME}] Stopping gateway...`);
-    gatewayProcess.kill('SIGTERM');
-    setTimeout(() => {
-      if (gatewayProcess) gatewayProcess.kill('SIGKILL');
-    }, 5000);
+  gatewayStopping = true;
+  if (gatewayRestartTimer) {
+    clearTimeout(gatewayRestartTimer);
+    gatewayRestartTimer = null;
   }
+  if (!gatewayProcess) return Promise.resolve();
+
+  const processToStop = gatewayProcess;
+  logLifecycle('Stopping gateway...');
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    processToStop.once('exit', finish);
+    taskkillProcessTree(processToStop.pid);
+    try { processToStop.kill('SIGTERM'); } catch {}
+    setTimeout(() => {
+      if (!settled && gatewayProcess === processToStop) {
+        logLifecycle('Gateway did not stop after SIGTERM; sending SIGKILL');
+        taskkillProcessTree(processToStop.pid, true);
+        try { processToStop.kill('SIGKILL'); } catch {}
+      }
+    }, 5000);
+    setTimeout(finish, 6500);
+  });
 }
 
 // ── Window Management ──
+function persistMainWindowSession() {
+  if (!mainWindow) return;
+  const sessionKey = extractSessionKeyFromUrl(mainWindow.webContents.getURL());
+  if (sessionKey) persistActiveSessionKey(sessionKey);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -713,11 +1120,22 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+    if (!holdMainWindowUntilReady || gatewayReady || appIsQuitting) {
+      mainWindow.show();
+    }
   });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  mainWindow.webContents.on('did-navigate', persistMainWindowSession);
+  mainWindow.webContents.on('did-navigate-in-page', persistMainWindowSession);
+
+  mainWindow.on('close', (event) => {
+    if (appIsQuitting) return;
+    event.preventDefault();
+    requestAppQuit().catch(error => logLifecycle(`Quit request error: ${error.message}`));
   });
 
   // Open external links in browser
@@ -733,9 +1151,12 @@ function loadAppPage() {
   if (!mainWindow) return;
 
   if (gatewayReady) {
-    const token = getToken();
-    mainWindow.loadURL(`http://127.0.0.1:${gatewayPort}/#token=${token}`);
+    const load = mainWindow.loadURL(dashboardUrl());
+    Promise.resolve(load)
+      .then(() => revealMainWindow())
+      .catch(error => logLifecycle(`Failed to load dashboard: ${error.message}`));
   } else {
+    if (holdMainWindowUntilReady) return;
     const loadingHtml = path.join(__dirname, 'loading.html');
     mainWindow.loadFile(loadingHtml);
   }
@@ -743,7 +1164,66 @@ function loadAppPage() {
 
 function loadConfigPage() {
   if (!mainWindow || !gatewayReady || !configServerPort) return;
-  mainWindow.loadURL(getConfigURL());
+  const load = mainWindow.loadURL(getConfigURL());
+  Promise.resolve(load)
+    .then(() => revealMainWindow())
+    .catch(error => logLifecycle(`Failed to load config page: ${error.message}`));
+}
+
+function revealMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+async function loadShutdownPage() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const shutdownHtml = path.join(__dirname, 'shutdown.html');
+  try {
+    await mainWindow.loadFile(shutdownHtml);
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+  } catch (error) {
+    logLifecycle(`Failed to load shutdown page: ${error.message}`);
+  }
+}
+
+async function confirmAppQuit() {
+  if (quitConfirmationOpen) return false;
+  quitConfirmationOpen = true;
+  try {
+    const options = {
+      type: 'warning',
+      title: `退出 ${APP_NAME}?`,
+      message: `退出 ${APP_NAME}?`,
+      detail: '将安全停止本地服务、清理运行进程，并把运行数据同步回 U 盘。',
+      buttons: ['取消', '退出'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const result = mainWindow
+      ? await dialog.showMessageBox(mainWindow, options)
+      : await dialog.showMessageBox(options);
+    return result.response === 1;
+  } finally {
+    quitConfirmationOpen = false;
+  }
+}
+
+async function requestAppQuit({ confirm = true } = {}) {
+  if (shutdownPromise) return shutdownPromise;
+  if (confirm && !(await confirmAppQuit())) return null;
+
+  appIsQuitting = true;
+  logLifecycle('Shutdown requested');
+  persistMainWindowSession();
+  await loadShutdownPage();
+  await new Promise(resolve => setTimeout(resolve, 150));
+
+  return shutdownApp()
+    .catch(error => logLifecycle(`Shutdown error: ${error.message}`))
+    .finally(() => app.exit(0));
 }
 
 // ── Menu ──
@@ -764,8 +1244,7 @@ function createMenu() {
           accelerator: 'CmdOrCtrl+D',
           click: () => {
             if (mainWindow && gatewayReady) {
-              const token = getToken();
-              mainWindow.loadURL(`http://127.0.0.1:${gatewayPort}/#token=${token}`);
+              mainWindow.loadURL(dashboardUrl());
             }
           }
         },
@@ -775,7 +1254,13 @@ function createMenu() {
           click: () => shell.openPath(userDataPath)
         },
         { type: 'separator' },
-        { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() }
+        {
+          label: 'Quit',
+          accelerator: 'CmdOrCtrl+Q',
+          click: () => {
+            requestAppQuit().catch(error => logLifecycle(`Quit request error: ${error.message}`));
+          }
+        }
       ]
     },
     {
@@ -836,8 +1321,7 @@ function setupIPC() {
 
   ipcMain.handle('open-dashboard', () => {
     if (mainWindow && gatewayReady) {
-      const token = getToken();
-      mainWindow.loadURL(`http://127.0.0.1:${gatewayPort}/#token=${token}`);
+      mainWindow.loadURL(dashboardUrl());
     }
   });
 
@@ -846,10 +1330,11 @@ function setupIPC() {
 
 // ── App Lifecycle ──
 app.whenReady().then(async () => {
-  console.log(`[${APP_NAME}] v${app.getVersion()} starting...`);
+  logLifecycle(`v${app.getVersion()} starting...`);
 
   // Setup
   ensureConfig();
+  startPortableSyncTimer();
   syncDevNewApiCredentialsFromDesktop();
   sanitizePortableStatePaths();
   createMenu();
@@ -867,7 +1352,7 @@ app.whenReady().then(async () => {
     } else {
       const adapterPort = await findAvailablePort(DEFAULT_VIDEO_ADAPTER_PORT, MAX_VIDEO_ADAPTER_PORT);
       await startVideoAdapter(adapterPort);
-      ensureVideoAdapterConfig(`http://127.0.0.1:${adapterPort}/xai/v1`);
+      ensureRuntimeVideoAdapterConfig(`http://127.0.0.1:${adapterPort}/xai/v1`);
     }
 
     // Find port and start gateway
@@ -890,15 +1375,30 @@ app.whenReady().then(async () => {
   }
 });
 
+function shutdownApp() {
+  if (shutdownPromise) return shutdownPromise;
+  appIsQuitting = true;
+  shutdownPromise = (async () => {
+    logLifecycle('Shutdown started');
+    await finalPortableDataSync('before-stop');
+    await stopGateway();
+    await stopVideoAdapter();
+    await stopConfigServer();
+    await finalPortableDataSync('after-stop');
+    logLifecycle('Shutdown complete');
+  })();
+  return shutdownPromise;
+}
+
 app.on('window-all-closed', () => {
-  stopGateway();
-  stopVideoAdapter();
   app.quit();
 });
 
-app.on('before-quit', () => {
-  stopGateway();
-  stopVideoAdapter();
+app.on('before-quit', (event) => {
+  if (appIsQuitting && portableFinalSyncDone) return;
+  event.preventDefault();
+  requestAppQuit({ confirm: false })
+    .catch(error => logLifecycle(`Quit request error: ${error.message}`));
 });
 
 app.on('activate', () => {

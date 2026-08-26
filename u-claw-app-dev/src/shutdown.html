@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>U-Claw - Shutting Down</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at 12% 88%, rgba(69, 196, 176, 0.16), transparent 34%), #f5f7f9;
+  color: #1f2937;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  -webkit-app-region: drag;
+}
+.panel {
+  width: min(560px, calc(100vw - 48px));
+  padding: 40px 36px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(15, 23, 42, 0.05);
+  border-radius: 20px;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.12);
+  -webkit-app-region: no-drag;
+}
+.header {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 20px;
+  align-items: center;
+}
+.mark {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: rgba(69, 196, 176, 0.16);
+  display: grid;
+  place-items: center;
+}
+.dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #45c4b0;
+  box-shadow: 0 0 0 0 rgba(69, 196, 176, 0.34);
+  animation: pulse 1.8s ease-out infinite;
+}
+.eyebrow {
+  color: #2bb9a6;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  margin-bottom: 10px;
+}
+h1 {
+  font-size: 28px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #111827;
+}
+.copy {
+  margin-top: 16px;
+  color: #4b5563;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.progress {
+  height: 4px;
+  background: #e8edf2;
+  border-radius: 999px;
+  margin: 30px 0 32px;
+  overflow: hidden;
+}
+.bar {
+  width: 38%;
+  height: 100%;
+  background: #45c4b0;
+  border-radius: inherit;
+  animation: move 1.7s ease-in-out infinite;
+}
+.steps {
+  display: grid;
+  gap: 22px;
+  color: #374151;
+  font-size: 14px;
+}
+.step {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: center;
+  gap: 14px;
+}
+.step::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #45c4b0;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(69, 196, 176, 0.34); }
+  70% { box-shadow: 0 0 0 18px rgba(69, 196, 176, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(69, 196, 176, 0); }
+}
+@keyframes move {
+  0% { transform: translateX(-110%); }
+  55% { transform: translateX(95%); }
+  100% { transform: translateX(270%); }
+}
+@media (max-width: 520px) {
+  .panel { padding: 32px 24px; }
+  .header { grid-template-columns: 1fr; }
+  h1 { font-size: 24px; }
+}
+</style>
+</head>
+<body>
+<main class="panel">
+  <section class="header">
+    <div class="mark"><div class="dot"></div></div>
+    <div>
+      <div class="eyebrow">SAFE EJECT SEQUENCE</div>
+      <h1>正在安全退出 U-Claw</h1>
+    </div>
+  </section>
+  <p class="copy">正在停止本地服务并清理运行进程。请暂时不要拔出 U 盘。</p>
+  <div class="progress"><div class="bar"></div></div>
+  <div class="steps">
+    <div class="step">停止本地服务</div>
+    <div class="step">清理 Agent 进程</div>
+    <div class="step">释放 USB 运行时文件句柄</div>
+  </div>
+</main>
+</body>
+</html>

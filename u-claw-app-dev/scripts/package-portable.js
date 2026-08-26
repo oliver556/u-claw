@@ -14,6 +14,12 @@ const winAppDir = path.join(releaseDir, 'win-unpacked');
 const macArm64Archive = path.join(releaseDir, 'u-claw-app-mac-arm64.tar.gz');
 const macX64Archive = path.join(releaseDir, 'u-claw-app-mac-x64.tar.gz');
 const winArchive = path.join(releaseDir, 'u-claw-app-win-x64.zip');
+const macLauncherSource = path.join(appDir, 'scripts', 'launcher', 'macos', 'main.c');
+const macStartScript = path.join(appDir, 'scripts', 'Mac-Start-App.command');
+const macLauncherScriptInclude = path.join(appDir, 'scripts', 'launcher', 'macos', 'generated-start-script.inc');
+const macLauncherBinary = path.join(releaseDir, 'launcher', 'macos', 'U-Claw Launcher');
+const winLauncherSourceDir = path.join(appDir, 'scripts', 'launcher', 'windows');
+const winLauncherBinary = path.join(releaseDir, 'launcher', 'U-Claw Launcher.exe');
 
 function usage() {
   console.log(`Usage:
@@ -25,7 +31,7 @@ function usage() {
 Options:
   --edition <customer|streamer>  Package edition. Added by the npm scripts.
   --usb <mount>                  Deploy to <mount>/U-Claw after staging.
-  --skip-build                   Reuse current release/mac-arm64, release/mac, and release/win-unpacked.
+  --skip-build                   Reuse current release archives and rebuild only launcher/stage files.
 `);
 }
 
@@ -104,6 +110,22 @@ function copyAtomic(source, destination) {
     throw new Error(`Copy verification failed: ${destination}`);
   }
   fs.renameSync(temporary, destination);
+}
+
+function copyDirReplacing(source, destination) {
+  const temporary = `${destination}.new`;
+  fs.rmSync(temporary, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.cpSync(source, temporary, { recursive: true });
+  fs.rmSync(destination, { recursive: true, force: true });
+  fs.renameSync(temporary, destination);
+}
+
+function copyDirIfMissing(source, destination) {
+  if (fs.existsSync(destination)) return false;
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.cpSync(source, destination, { recursive: true });
+  return true;
 }
 
 function ensureSourceRuntime(name) {
@@ -200,7 +222,7 @@ function generateConfig(edition, destination) {
   if (edition === 'streamer' && !hasNewApiKey) {
     throw new Error('Streamer package is missing the New API key');
   }
-  if (providers.xai?.baseUrl !== 'http://127.0.0.1:18808/xai/v1') {
+  if (providers.xai?.baseUrl !== 'https://video-adapter.gmnlee.com/xai/v1') {
     throw new Error(`Wrong xai base URL: ${providers.xai?.baseUrl || '(empty)'}`);
   }
   if (providers.xai?.apiKey !== 'uclaw-video-adapter') {
@@ -216,32 +238,151 @@ function packageNotes(edition, macArm64Hash, macX64Hash, winHash) {
 Version: ${version}
 Built: ${localDisplayTime()}
 
-Mac:
-  Double-click Mac-Start-App.command
+  Mac:
+  Formal entry: double-click U-Claw Launcher.app
+  Diagnostic entry: Mac-Start-App.command
   App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-arm64
   App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-x64
-  Data cache: ~/Library/Caches/U-Claw/usb-portable/data
+  USB data: <USB>/U-Claw/data
+  Runtime data cache: ~/Library/Caches/U-Claw/usb-portable-<usb-id>/data
+  Logs to return:
+    <USB>/U-Claw/data/logs/U-Claw-Launcher.log
+    <USB>/U-Claw/data/logs/Mac-Start-App.log
+    <USB>/U-Claw/data/logs/main.log
+    <USB>/U-Claw/data/logs/gateway.log
+    ~/Library/Caches/U-Claw/launcher-logs/U-Claw-Launcher.log
+    ~/Library/Caches/U-Claw/launcher-logs/Mac-Start-App.log
 
-Windows:
-  Double-click Windows-Start-App.bat
+  Windows:
+  Formal entry: double-click U-Claw Launcher.exe
+  Diagnostic entry: Windows-Start-App.bat
   App cache: %LOCALAPPDATA%\\U-Claw\\usb-portable\\app-win-x64
-  Data cache: %LOCALAPPDATA%\\U-Claw\\usb-portable\\data
+  USB data: <USB>\\U-Claw\\data
+  Runtime data cache: %LOCALAPPDATA%\\U-Claw\\usb-portable\\data-<usb-id>
   First launch: verify SHA-256, then extract with Windows tar.exe.
   Later launches: reuse the computer app cache without extracting again.
+  Logs to return:
+    <USB>\\U-Claw\\data\\logs\\U-Claw-Launcher.log
+    <USB>\\U-Claw\\data\\logs\\Windows-Start-App.log
+    <USB>\\U-Claw\\data\\logs\\main.log
+    <USB>\\U-Claw\\data\\logs\\gateway.log
+    %LOCALAPPDATA%\\U-Claw\\launcher-logs\\U-Claw-Launcher.log
+    %LOCALAPPDATA%\\U-Claw\\launcher-logs\\Windows-Start-App.log
 
 Edition:
   ${keyRule}
 
 Video chain:
-  U-Claw -> local adapter -> New API -> server adapter -> Jimeng
-  xai.baseUrl = http://127.0.0.1:18808/xai/v1
+  U-Claw -> server adapter -> New API -> Jimeng
+  xai.baseUrl = https://video-adapter.gmnlee.com/xai/v1
   xai.apiKey = uclaw-video-adapter
 
 Artifacts:
   u-claw-app-mac-arm64.tar.gz  sha256=${macArm64Hash}
   u-claw-app-mac-x64.tar.gz    sha256=${macX64Hash}
   u-claw-app-win-x64.zip       sha256=${winHash}
-`;
+
+Deploy rule:
+  app/, launchers, scripts, and package notes are replaced on update.
+  data/ is initialized only for a new disk and is never overwritten on update.
+  Existing chats, skills, memory, license, logs, and data/.openclaw/openclaw.json stay untouched.
+
+Launcher behavior:
+  Launchers show native progress only while copying, extracting, syncing, or closing.
+  Electron window stays hidden until Gateway ready/App ready, then opens directly to the main UI.
+  Runtime data uses a per-USB computer cache for speed, then syncs back to <USB>/U-Claw/data.
+  Runtime sync never overwrites USB data/.openclaw/openclaw.json.
+  Two USB disks use different cache IDs, so their data does not merge.
+  Clean same-machine restart reuses current app and data cache, skipping USB-to-runtime sync when markers match.
+  Close asks for confirmation first, then shows shutdown progress and stops this launch's services.
+  Immediate reopen during shutdown queues one relaunch instead of starting a second app/process.
+	`;
+}
+
+function buildMacLauncher(stageRoot) {
+  ensureFile(macLauncherSource, 'macOS launcher source');
+  ensureFile(macStartScript, 'macOS start script');
+  writeText(
+    macLauncherScriptInclude,
+    [
+      `static const char *kMacStartScript = ${JSON.stringify(fs.readFileSync(macStartScript, 'utf8'))};`,
+      `static const char *kMacArm64ArchiveHash = "${sha256(macArm64Archive)}";`,
+      `static const char *kMacX64ArchiveHash = "${sha256(macX64Archive)}";`,
+      ''
+    ].join('\n')
+  );
+  fs.mkdirSync(path.dirname(macLauncherBinary), { recursive: true });
+  run('clang', [
+    '-x',
+    'objective-c',
+    '-fobjc-arc',
+    '-fblocks',
+    '-arch',
+    'arm64',
+    '-arch',
+    'x86_64',
+    '-mmacosx-version-min=10.15',
+    '-framework',
+    'Cocoa',
+    '-o',
+    macLauncherBinary,
+    macLauncherSource
+  ]);
+  ensureFile(macLauncherBinary, 'macOS launcher executable');
+
+  const appBundle = path.join(stageRoot, 'U-Claw Launcher.app');
+  const contentsDir = path.join(appBundle, 'Contents');
+  const macOsDir = path.join(contentsDir, 'MacOS');
+  const executablePath = path.join(macOsDir, 'U-Claw Launcher');
+
+  fs.rmSync(appBundle, { recursive: true, force: true });
+  fs.mkdirSync(macOsDir, { recursive: true });
+  writeText(path.join(contentsDir, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>U-Claw Launcher</string>
+  <key>CFBundleIdentifier</key>
+  <string>org.u-claw.portable.launcher</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>U-Claw Launcher</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>${version}</string>
+  <key>CFBundleVersion</key>
+  <string>${version}</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>10.15</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+`);
+  fs.copyFileSync(macLauncherBinary, executablePath);
+  fs.chmodSync(executablePath, 0o755);
+  run('codesign', ['--force', '--deep', '--sign', '-', appBundle]);
+}
+
+function buildWindowsLauncher(stageRoot) {
+  ensureFile(path.join(winLauncherSourceDir, 'main.go'), 'Windows launcher source');
+  fs.mkdirSync(path.dirname(winLauncherBinary), { recursive: true });
+  run('go', ['build', '-trimpath', '-ldflags=-H windowsgui -s -w', '-o', winLauncherBinary, '.'], {
+    cwd: winLauncherSourceDir,
+    env: {
+      GOOS: 'windows',
+      GOARCH: 'amd64',
+      CGO_ENABLED: '0',
+      GO111MODULE: 'off'
+    }
+  });
+  ensureFile(winLauncherBinary, 'Windows GUI launcher');
+  fs.copyFileSync(winLauncherBinary, path.join(stageRoot, 'U-Claw Launcher.exe'));
 }
 
 function assembleStage(edition) {
@@ -268,6 +409,8 @@ function assembleStage(edition) {
   fs.copyFileSync(path.join(appDir, 'scripts', 'Mac-Start-App.command'), path.join(stageRoot, 'Mac-Start-App.command'));
   fs.copyFileSync(path.join(appDir, 'scripts', 'Windows-Start-App.bat'), path.join(stageRoot, 'Windows-Start-App.bat'));
   fs.chmodSync(path.join(stageRoot, 'Mac-Start-App.command'), 0o755);
+  buildMacLauncher(stageRoot);
+  buildWindowsLauncher(stageRoot);
   generateConfig(edition, configPath);
   writeText(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), packageNotes(edition, macArm64Hash, macX64Hash, winHash));
 
@@ -295,6 +438,13 @@ function backupIfExists(source, destination) {
   fs.copyFileSync(source, destination);
 }
 
+function backupDirIfExists(source, destination) {
+  if (!fs.existsSync(source) || !fs.statSync(source).isDirectory()) return;
+  fs.rmSync(destination, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.cpSync(source, destination, { recursive: true });
+}
+
 function deploy(stage, usbRoot) {
   const resolvedUsbRoot = path.resolve(usbRoot);
   if (!fs.existsSync(resolvedUsbRoot) || !fs.statSync(resolvedUsbRoot).isDirectory()) {
@@ -303,12 +453,11 @@ function deploy(stage, usbRoot) {
   const targetRoot = path.basename(resolvedUsbRoot).toLowerCase() === 'u-claw'
     ? resolvedUsbRoot
     : path.join(resolvedUsbRoot, 'U-Claw');
-  if (!fs.existsSync(targetRoot) || !fs.statSync(targetRoot).isDirectory()) {
-    throw new Error(`U-Claw package root does not exist: ${targetRoot}`);
-  }
+  fs.mkdirSync(targetRoot, { recursive: true });
 
   const backupRoot = path.join(targetRoot, `_backup-before-portable-deploy-${localTimestamp()}`);
   const relativeFiles = [
+    'U-Claw Launcher.exe',
     'Mac-Start-App.command',
     'Windows-Start-App.bat',
     'UCLAW-PACKAGE-NOTES.txt',
@@ -317,27 +466,46 @@ function deploy(stage, usbRoot) {
     'app/desktop-archive/u-claw-app-mac-x64.tar.gz',
     'app/desktop-archive/u-claw-app-mac-x64.tar.gz.sha256',
     'app/desktop-archive/u-claw-app-win-x64.zip',
-    'app/desktop-archive/u-claw-app-win-x64.zip.sha256',
-    'data/.openclaw/openclaw.json'
+    'app/desktop-archive/u-claw-app-win-x64.zip.sha256'
+  ];
+  const relativeDirs = [
+    'U-Claw Launcher.app'
   ];
   const legacyFiles = [
     `app/desktop-archive/U-Claw ${version}.exe`
+  ];
+  const legacyDirs = [
+    'U-Claw Launcher'
   ];
 
   for (const relativeFile of relativeFiles) {
     backupIfExists(path.join(targetRoot, relativeFile), path.join(backupRoot, relativeFile));
   }
+  for (const relativeDir of relativeDirs) {
+    backupDirIfExists(path.join(targetRoot, relativeDir), path.join(backupRoot, relativeDir));
+  }
   for (const relativeFile of legacyFiles) {
     backupIfExists(path.join(targetRoot, relativeFile), path.join(backupRoot, relativeFile));
+  }
+  for (const relativeDir of legacyDirs) {
+    backupDirIfExists(path.join(targetRoot, relativeDir), path.join(backupRoot, relativeDir));
   }
   for (const relativeFile of relativeFiles) {
     copyAtomic(path.join(stage.stageRoot, relativeFile), path.join(targetRoot, relativeFile));
   }
+  for (const relativeDir of relativeDirs) {
+    copyDirReplacing(path.join(stage.stageRoot, relativeDir), path.join(targetRoot, relativeDir));
+  }
+  const dataInitialized = copyDirIfMissing(path.join(stage.stageRoot, 'data'), path.join(targetRoot, 'data'));
   for (const relativeFile of legacyFiles) {
     const legacyPath = path.join(targetRoot, relativeFile);
     if (fs.existsSync(legacyPath)) fs.unlinkSync(legacyPath);
   }
+  for (const relativeDir of legacyDirs) {
+    fs.rmSync(path.join(targetRoot, relativeDir), { recursive: true, force: true });
+  }
   fs.chmodSync(path.join(targetRoot, 'Mac-Start-App.command'), 0o755);
+  fs.chmodSync(path.join(targetRoot, 'U-Claw Launcher.app', 'Contents', 'MacOS', 'U-Claw Launcher'), 0o755);
 
   const deployedMacArm64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macArm64Archive)));
   const deployedMacX64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macX64Archive)));
@@ -351,6 +519,7 @@ function deploy(stage, usbRoot) {
   }
 
   console.log(`[package:portable] deployed ${targetRoot}`);
+  console.log(`[package:portable] data ${dataInitialized ? 'initialized' : 'preserved'} ${path.join(targetRoot, 'data')}`);
   console.log(`[package:portable] rollback ${backupRoot}`);
 }
 
@@ -361,8 +530,10 @@ function main() {
     return;
   }
 
-  if (!options.skipBuild) buildApps();
-  buildArchives();
+  if (!options.skipBuild) {
+    buildApps();
+    buildArchives();
+  }
   const stage = assembleStage(options.edition);
   console.log(`[package:portable] staged ${stage.stageRoot}`);
   console.log(`[package:portable] Mac arm64 sha256 ${stage.macArm64Hash}`);

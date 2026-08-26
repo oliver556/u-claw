@@ -67,7 +67,7 @@
         ]
       },
       "xai": {
-        "baseUrl": "http://127.0.0.1:18808/xai/v1",
+        "baseUrl": "https://video-adapter.gmnlee.com/xai/v1",
         "apiKey": "uclaw-video-adapter",
         "api": "openai-completions",
         "models": [

@@ -116,7 +116,7 @@ npm run sync:config -- --customer --dest /absolute/path/openclaw.json
 ```txt
 custom.apiKey = 空
 litellm.apiKey = 空
-xai.baseUrl = http://127.0.0.1:18808/xai/v1
+xai.baseUrl = https://video-adapter.gmnlee.com/xai/v1
 xai.apiKey = uclaw-video-adapter
 ```
 
@@ -134,7 +134,7 @@ npm run sync:config -- --streamer --usb /Volumes/UCLAW-01
 ```txt
 custom.apiKey = 自动继承桌面 New API key
 litellm.apiKey = 自动继承桌面 New API key
-xai.baseUrl = http://127.0.0.1:18808/xai/v1
+xai.baseUrl = https://video-adapter.gmnlee.com/xai/v1
 xai.apiKey = uclaw-video-adapter
 ```
 
@@ -338,7 +338,7 @@ bash setup.sh
 禁止用默认 sync:config 生成客户空配置。
 禁止正式交付使用 --skip-build。
 禁止手工把真实 key 写进模板、文档或源码。
-禁止将 providers.xai.baseUrl 改成 New API 或公网 adapter。
+禁止将 providers.xai.baseUrl 改成 New API。
 禁止在桌面/便携版设置 UCLAW_VIDEO_PROVIDER=volcengine。
 ```
 

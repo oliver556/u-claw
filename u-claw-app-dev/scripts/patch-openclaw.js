@@ -631,6 +631,13 @@ function patchOpenAiCompatibleImageResponses() {
     throw new Error(`Missing web media runtime in ${openclawDistDir}`);
   }
   const webMediaImport = `import { r as loadWebMediaRaw } from "./${webMediaRuntimeName}";`;
+  const streamRuntimeName = fs
+    .readdirSync(openclawDistDir)
+    .find((name) => /^stream-.*\.js$/.test(name) && read(path.join(openclawDistDir, name)).includes("function resolveProviderTransportSsrFPolicy"));
+  if (!streamRuntimeName) {
+    throw new Error(`Missing provider transport SSRF policy runtime in ${openclawDistDir}`);
+  }
+  const transportPolicyImport = `import { s as resolveProviderTransportSsrFPolicy } from "./${streamRuntimeName}";`;
 
   for (const file of imageRuntimeFiles) {
     const before = read(file);
@@ -642,6 +649,20 @@ function patchOpenAiCompatibleImageResponses() {
         `$1\n${webMediaImport}`,
       );
     }
+    if (!after.includes(transportPolicyImport)) {
+      after = after.replace(
+        /(import \{ c as postJsonRequest,[^;]+ from "\.\/shared-[^"]+\.js";)/,
+        `$1\n${transportPolicyImport}`,
+      );
+    }
+    after = after.replace(
+      "p as resolveProviderHttpRequestConfig",
+      "m as resolveProviderHttpRequestConfigWithOriginTrust",
+    );
+    after = after.replace(
+      "const { baseUrl, allowPrivateNetwork: resolvedAllowPrivateNetwork, headers, dispatcherPolicy } = resolveProviderHttpRequestConfig({",
+      "const { baseUrl, allowPrivateNetwork: resolvedAllowPrivateNetwork, headers, dispatcherPolicy, trustConfiguredBaseUrlOrigin } = resolveProviderHttpRequestConfigWithOriginTrust({",
+    );
 
     if (!after.includes("async function materializeOpenAiCompatibleImageUrls")) {
       after = after.replace(
@@ -687,18 +708,51 @@ function parseOpenAiCompatibleImageResponse(payload, options = {}) {`,
 \t\t\t\t}), generatedMediaMaxBytes) });
 \t\t\t\tconst materializedPayload = await materializeOpenAiCompatibleImageUrls(payload, {
 \t\t\t\t\tmaxBytes: generatedMediaMaxBytes,
-\t\t\t\t\tssrfPolicy: req.ssrfPolicy,
+\t\t\t\t\tssrfPolicy: requestSsrFPolicy,
 \t\t\t\t\ttimeoutMs
 \t\t\t\t});
 \t\t\t\tconst images = parseOpenAiCompatibleImageResponse(materializedPayload, {`;
     if (!after.includes("const materializedPayload = await materializeOpenAiCompatibleImageUrls")) {
       after = after.replace(originalParse, patchedParse);
     }
+    if (!after.includes("const requestSsrFPolicy = resolveProviderTransportSsrFPolicy({")) {
+      after = after.replace(
+        "const { response, release } = await (requestBody.kind === \"multipart\" ? postMultipartRequest({\n\t\t\t\turl: appendImagesPath(baseUrl, mode),",
+        `const requestUrl = appendImagesPath(baseUrl, mode);
+\t\t\tconst requestSsrFPolicy = resolveProviderTransportSsrFPolicy({
+\t\t\t\turl: requestUrl,
+\t\t\t\tbaseUrl,
+\t\t\t\tallowPrivateNetwork: resolvedAllowPrivateNetwork,
+\t\t\t\ttrustConfiguredBaseUrlOrigin
+\t\t\t});
+\t\t\tconst { response, release } = await (requestBody.kind === "multipart" ? postMultipartRequest({
+\t\t\t\turl: requestUrl,`,
+      );
+      after = after.replace(
+        "})(),\n\t\t\t\tbody: requestBody.body,\n\t\t\t\ttimeoutMs,\n\t\t\t\tfetchFn: fetch,\n\t\t\t\tallowPrivateNetwork: resolvedAllowPrivateNetwork,\n\t\t\t\tssrfPolicy: req.ssrfPolicy,\n\t\t\t\tdispatcherPolicy",
+        "})(),\n\t\t\t\tbody: requestBody.body,\n\t\t\t\ttimeoutMs,\n\t\t\t\tfetchFn: fetch,\n\t\t\t\tallowPrivateNetwork: resolvedAllowPrivateNetwork,\n\t\t\t\tssrfPolicy: requestSsrFPolicy,\n\t\t\t\tdispatcherPolicy",
+      );
+      after = after.replace(
+        "url: appendImagesPath(baseUrl, mode),",
+        "url: requestUrl,",
+      );
+      after = after.replace(
+        "ssrfPolicy: req.ssrfPolicy,\n\t\t\t\tdispatcherPolicy\n\t\t\t}));",
+        "ssrfPolicy: requestSsrFPolicy,\n\t\t\t\tdispatcherPolicy\n\t\t\t}));",
+      );
+    }
+    after = after.replace(
+      "ssrfPolicy: req.ssrfPolicy,\n\t\t\t\t\ttimeoutMs\n\t\t\t\t});",
+      "ssrfPolicy: requestSsrFPolicy,\n\t\t\t\t\ttimeoutMs\n\t\t\t\t});",
+    );
 
     if (
       !after.includes("async function materializeOpenAiCompatibleImageUrls")
       || !after.includes("const materializedPayload = await materializeOpenAiCompatibleImageUrls")
       || !after.includes(webMediaImport)
+      || !after.includes(transportPolicyImport)
+      || !after.includes("resolveProviderHttpRequestConfigWithOriginTrust")
+      || !after.includes("const requestSsrFPolicy = resolveProviderTransportSsrFPolicy({")
     ) {
       throw new Error(`Could not patch OpenAI-compatible image URL responses in ${file}`);
     }
@@ -735,14 +789,91 @@ function parseOpenAiCompatibleImageResponse(payload, options = {}) {`,
 }
 
 /**
- * Allows the xAI video provider to call U-Claw's loopback-only adapter without
- * weakening SSRF protection for other providers, tools, or private addresses.
+ * Keeps U-Claw image generation on configured image models only. Agent-supplied
+ * overrides outside imageGenerationModel.primary/fallbacks are ignored.
+ */
+function patchConfiguredUclawImageGenerationModelsOnly() {
+  if (!fs.existsSync(openclawDistDir)) {
+    throw new Error(`Missing OpenClaw dist directory: ${openclawDistDir}`);
+  }
+
+  const files = fs
+    .readdirSync(openclawDistDir)
+    .filter((name) => /^openclaw-tools-.*\.js$/.test(name))
+    .map((name) => path.join(openclawDistDir, name))
+    .filter((file) => read(file).includes("const ImageGenerateToolSchema = Type.Object({"));
+  if (files.length === 0) {
+    throw new Error(`Missing image_generate tool runtime in ${openclawDistDir}`);
+  }
+
+  for (const file of files) {
+    const before = read(file);
+    let after = before;
+
+    after = after.replace(
+      'const UCLAW_FIXED_IMAGE_GENERATION_MODEL = "litellm/gpt-image-2";\n',
+      '',
+    );
+    after = after.replace(
+      'model: Type.Optional(Type.String({ description: "Provider/model override, e.g. openai/gpt-image-2; transparent OpenAI: openai/gpt-image-1.5." })),',
+      'model: Type.Optional(Type.String({ description: "Optional provider/model override; U-Claw accepts only models declared in imageGenerationModel config." })),',
+    );
+    after = after.replace(
+      'model: Type.Optional(Type.String({ description: "U-Claw ignores image model overrides and uses litellm/gpt-image-2." })),',
+      'model: Type.Optional(Type.String({ description: "Optional provider/model override; U-Claw accepts only models declared in imageGenerationModel config." })),',
+    );
+    after = after.replace(
+      'background: optionalStringEnum(SUPPORTED_BACKGROUNDS, { description: "OpenAI background: transparent, opaque, auto. Transparent needs png/webp; default model routes to gpt-image-1.5." }),',
+      'background: optionalStringEnum(SUPPORTED_BACKGROUNDS, { description: "OpenAI background: transparent, opaque, auto. Transparent needs png/webp." }),',
+    );
+    after = after.replace(
+      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\"; OpenAI also supports openai.background and routes default model to gpt-image-1.5. Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
+      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. U-Claw accepts only image models declared in imageGenerationModel config. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
+    );
+    after = after.replace(
+      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. U-Claw uses fixed image model litellm/gpt-image-2 and ignores model overrides. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
+      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. U-Claw accepts only image models declared in imageGenerationModel config. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
+    );
+    after = after.replace(
+      'const model = readStringParam(params, "model");',
+      'const configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);\n\t\t\tconst requestedModel = readStringParam(params, "model");\n\t\t\tconst configuredImageModelRefs = new Set([\n\t\t\t\tconfiguredImageGenerationModelConfig.primary,\n\t\t\t\t...configuredImageGenerationModelConfig.fallbacks ?? []\n\t\t\t].filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()));\n\t\t\tconst model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;',
+    );
+    after = after.replace(
+      'const requestedModel = readStringParam(params, "model");\n\t\t\tconst model = requestedModel?.trim() === UCLAW_FIXED_IMAGE_GENERATION_MODEL ? UCLAW_FIXED_IMAGE_GENERATION_MODEL : void 0;\n\t\t\tconst configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);',
+      'const configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);\n\t\t\tconst requestedModel = readStringParam(params, "model");\n\t\t\tconst configuredImageModelRefs = new Set([\n\t\t\t\tconfiguredImageGenerationModelConfig.primary,\n\t\t\t\t...configuredImageGenerationModelConfig.fallbacks ?? []\n\t\t\t].filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()));\n\t\t\tconst model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;',
+    );
+
+    if (
+      after.includes('const UCLAW_FIXED_IMAGE_GENERATION_MODEL = "litellm/gpt-image-2";')
+      || !after.includes("U-Claw accepts only image models declared in imageGenerationModel config")
+      || !after.includes("const configuredImageModelRefs = new Set([")
+      || !after.includes("const requestedModel = readStringParam(params, \"model\");")
+      || after.includes("routes default model to gpt-image-1.5")
+    ) {
+      throw new Error(`Could not patch configured-only U-Claw image models in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Allows the xAI video provider to call U-Claw's configured adapter origin
+ * with the same scoped SSRF trust used by text transports.
  */
 function patchXaiVideoLoopbackAccess() {
   if (!fs.existsSync(openclawDistDir)) {
     throw new Error(`Missing OpenClaw dist directory: ${openclawDistDir}`);
   }
 
+  const streamRuntimeName = fs
+    .readdirSync(openclawDistDir)
+    .find((name) => /^stream-.*\.js$/.test(name) && read(path.join(openclawDistDir, name)).includes("function resolveProviderTransportSsrFPolicy"));
+  if (!streamRuntimeName) {
+    throw new Error(`Missing provider transport SSRF policy runtime in ${openclawDistDir}`);
+  }
+  const transportPolicyImport = `import { s as resolveProviderTransportSsrFPolicy } from "./${streamRuntimeName}";`;
   const files = fs
     .readdirSync(openclawDistDir)
     .filter((name) => /^video-generation-provider-.*\.js$/.test(name))
@@ -755,21 +886,199 @@ function patchXaiVideoLoopbackAccess() {
     const before = read(file);
     if (!before.includes("//#region extensions/xai/video-generation-provider.ts")) continue;
     xaiProviderCount += 1;
+    let after = before;
 
-    if (before.includes(patchedPolicy)) continue;
-    const after = before.replace(
-      "allowPrivateNetwork: false,\n\t\t\t\tdefaultHeaders:",
-      `${patchedPolicy}\n\t\t\t\tdefaultHeaders:`,
+    after = after.replace(
+      /import \{ ([^}]+) \} from "(\.\/shared-[^"]+\.js)";/,
+      (match, imports, specifier) => {
+        let nextImports = imports
+          .replace("a as fetchProviderOperationResponse, ", "")
+          .replace("i as fetchProviderDownloadResponse, ", "")
+          .replace("p as resolveProviderHttpRequestConfig", "m as resolveProviderHttpRequestConfigWithOriginTrust");
+        if (!nextImports.includes("o as fetchWithTimeoutGuarded")) {
+          nextImports = nextImports.replace(
+            "n as createProviderOperationDeadline",
+            "n as createProviderOperationDeadline, o as fetchWithTimeoutGuarded",
+          );
+        }
+        return `import { ${nextImports} } from "${specifier}";`;
+      },
     );
-    if (after === before) {
-      throw new Error(`Could not patch xAI video loopback access in ${file}`);
+    if (!after.includes(transportPolicyImport)) {
+      after = after.replace(
+        /(import \{ d as toImageDataUrl \} from "\.\/image-generation-[^"]+\.js";)/,
+        `$1\n${transportPolicyImport}`,
+      );
     }
-    writeIfChanged(file, before, after);
-    console.log(`patched ${path.relative(root, file)}`);
+    if (!after.includes(patchedPolicy)) {
+      after = after.replace(
+        "allowPrivateNetwork: false,\n\t\t\t\tdefaultHeaders:",
+        `${patchedPolicy}\n\t\t\t\tdefaultHeaders:`,
+      );
+    }
+    after = after.replace(
+      "const { baseUrl, allowPrivateNetwork, headers, dispatcherPolicy } = resolveProviderHttpRequestConfig({",
+      "const { baseUrl, allowPrivateNetwork, headers, dispatcherPolicy, trustConfiguredBaseUrlOrigin } = resolveProviderHttpRequestConfigWithOriginTrust({",
+    );
+    if (!after.includes("const requestSsrFPolicy = resolveProviderTransportSsrFPolicy({")) {
+      after = after.replace(
+        "const submitHeaders = new Headers(headers);\n\t\t\tconst submitHeaders = new Headers(headers);",
+        "const submitHeaders = new Headers(headers);",
+      );
+      after = after.replace(
+        "const submitHeaders = new Headers(headers);\n\t\t\tsubmitHeaders.set(\"x-idempotency-key\", crypto.randomUUID());\n\t\t\tconst { response, release } = await postJsonRequest({\n\t\t\t\turl: `${baseUrl}${resolveCreateEndpoint(req)}`,",
+        `const submitHeaders = new Headers(headers);
+\t\t\tsubmitHeaders.set("x-idempotency-key", crypto.randomUUID());
+\t\t\tconst submitUrl = \`\${baseUrl}\${resolveCreateEndpoint(req)}\`;
+\t\t\tconst requestSsrFPolicy = resolveProviderTransportSsrFPolicy({
+\t\t\t\turl: submitUrl,
+\t\t\t\tbaseUrl,
+\t\t\t\tallowPrivateNetwork,
+\t\t\t\ttrustConfiguredBaseUrlOrigin
+\t\t\t});
+\t\t\tconst { response, release } = await postJsonRequest({
+\t\t\t\turl: submitUrl,`,
+      );
+      after = after.replace(
+        "fetchFn,\n\t\t\t\tallowPrivateNetwork,\n\t\t\t\tdispatcherPolicy",
+        "fetchFn,\n\t\t\t\tallowPrivateNetwork,\n\t\t\t\tssrfPolicy: requestSsrFPolicy,\n\t\t\t\tdispatcherPolicy",
+      );
+    }
+    if (!after.includes("const statusResult = await fetchWithTimeoutGuarded(statusUrl,")) {
+      after = after.replace(
+        "const statusUrl = `${params.baseUrl}/videos/${params.requestId}`;\n\tfor (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {\n\t\tconst payload = readXaiStatusResponse(await readXaiVideoJson(await fetchProviderOperationResponse({\n\t\t\tstage: \"poll\",\n\t\t\turl: statusUrl,\n\t\t\tinit: {\n\t\t\t\tmethod: \"GET\",\n\t\t\t\theaders: params.headers\n\t\t\t},\n\t\t\ttimeoutMs: createProviderOperationTimeoutResolver({\n\t\t\t\tdeadline,\n\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS\n\t\t\t}),\n\t\t\tfetchFn: params.fetchFn,\n\t\t\tprovider: \"xai\",\n\t\t\trequestFailedMessage: \"xAI video status request failed\"\n\t\t})));\n\t\tconst normalizedStatus = payload.status.toLowerCase();\n\t\tif (normalizedStatus === \"done\") return payload;\n\t\tif (XAI_VIDEO_TERMINAL_FAILURE_STATUSES.has(normalizedStatus)) throw new Error(normalizeOptionalString(payload.error?.message) ?? `xAI video generation ${normalizedStatus}`);",
+        `const statusUrl = \`\${params.baseUrl}/videos/\${params.requestId}\`;
+\tfor (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+\t\tconst statusResult = await fetchWithTimeoutGuarded(statusUrl, {
+\t\t\t\tmethod: "GET",
+\t\t\t\theaders: params.headers
+\t\t\t}, createProviderOperationTimeoutResolver({
+\t\t\t\tdeadline,
+\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS
+\t\t\t}), params.fetchFn, {
+\t\t\tssrfPolicy: params.ssrfPolicy,
+\t\t\tdispatcherPolicy: params.dispatcherPolicy
+\t\t});
+\t\ttry {
+\t\t\tawait assertOkOrThrowHttpError(statusResult.response, "xAI video status request failed");
+\t\t\tconst payload = readXaiStatusResponse(await readXaiVideoJson(statusResult.response));
+\t\t\tconst normalizedStatus = payload.status.toLowerCase();
+\t\t\tif (normalizedStatus === "done") return payload;
+\t\t\tif (XAI_VIDEO_TERMINAL_FAILURE_STATUSES.has(normalizedStatus)) throw new Error(normalizeOptionalString(payload.error?.message) ?? \`xAI video generation \${normalizedStatus}\`);
+\t\t} finally {
+\t\t\tawait statusResult.release();
+\t\t}`,
+      );
+    }
+    after = after.replace(
+      "baseUrl,\n\t\t\t\t\tfetchFn\n\t\t\t\t});",
+      "baseUrl,\n\t\t\t\t\tfetchFn,\n\t\t\t\t\tssrfPolicy: requestSsrFPolicy,\n\t\t\t\t\tdispatcherPolicy\n\t\t\t\t});",
+    );
+    if (
+      !after.includes(transportPolicyImport)
+      || !after.includes("resolveProviderHttpRequestConfigWithOriginTrust")
+      || !after.includes("const requestSsrFPolicy = resolveProviderTransportSsrFPolicy({")
+      || !after.includes("const statusResult = await fetchWithTimeoutGuarded(statusUrl,")
+      || !after.includes("ssrfPolicy: requestSsrFPolicy")
+    ) {
+      throw new Error(`Could not patch xAI video configured-origin trust in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
   }
 
   if (xaiProviderCount === 0) {
     throw new Error(`Missing xAI video provider in ${openclawDistDir}`);
+  }
+}
+
+/**
+ * Trust provider-returned media URLs only for their exact returned hostname,
+ * including fake-IP DNS compatibility. Keep private-network defaults strict.
+ */
+function patchConfiguredMediaResultDownloadTrust() {
+  if (!fs.existsSync(openclawDistDir)) {
+    throw new Error(`Missing OpenClaw dist directory: ${openclawDistDir}`);
+  }
+
+  const ssrfRuntimeName = fs
+    .readdirSync(openclawDistDir)
+    .find((name) => /^ssrf-.*\.js$/.test(name) && read(path.join(openclawDistDir, name)).includes("function ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist"));
+  if (!ssrfRuntimeName) {
+    throw new Error(`Missing SSRF policy runtime in ${openclawDistDir}`);
+  }
+  const resultPolicyImport = `import { m as mergeSsrFPolicies, x as ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist } from "./${ssrfRuntimeName}";`;
+
+  const imageFiles = fs
+    .readdirSync(openclawDistDir)
+    .filter((name) => /^image-generation-.*\.js$/.test(name))
+    .map((name) => path.join(openclawDistDir, name))
+    .filter((file) => read(file).includes("async function materializeOpenAiCompatibleImageUrls"));
+  if (imageFiles.length === 0) {
+    throw new Error(`Missing OpenAI-compatible image runtime in ${openclawDistDir}`);
+  }
+  for (const file of imageFiles) {
+    const before = read(file);
+    let after = before;
+    if (!after.includes(resultPolicyImport)) {
+      after = after.replace(
+        /(import \{ a as resolveApiKeyForProvider \} from "[^"]+\.js";)/,
+        `$1\n${resultPolicyImport}`,
+      );
+    }
+    after = after.replace(
+      "ssrfPolicy: options.ssrfPolicy,",
+      "ssrfPolicy: mergeSsrFPolicies(options.ssrfPolicy, ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist(url)),",
+    );
+    if (
+      !after.includes(resultPolicyImport)
+      || !after.includes("ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist(url)")
+    ) {
+      throw new Error(`Could not patch image result URL SSRF trust in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+
+  const videoFiles = fs
+    .readdirSync(openclawDistDir)
+    .filter((name) => /^video-generation-provider-.*\.js$/.test(name))
+    .map((name) => path.join(openclawDistDir, name))
+    .filter((file) => read(file).includes("//#region extensions/xai/video-generation-provider.ts"));
+  if (videoFiles.length === 0) {
+    throw new Error(`Missing xAI video runtime in ${openclawDistDir}`);
+  }
+  for (const file of videoFiles) {
+    const before = read(file);
+    let after = before;
+    if (!after.includes(resultPolicyImport)) {
+      after = after.replace(
+        /(import \{ s as resolveProviderTransportSsrFPolicy \} from "[^"]+\.js";)/,
+        `$1\n${resultPolicyImport}`,
+      );
+    }
+    if (!after.includes("const downloadSsrFPolicy = mergeSsrFPolicies(")) {
+      after = after.replace(
+        "async function downloadXaiVideo(params) {\n\tconst result = await fetchWithTimeoutGuarded(",
+        "async function downloadXaiVideo(params) {\n\tconst downloadSsrFPolicy = mergeSsrFPolicies(params.ssrfPolicy, ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist(params.url));\n\tconst result = await fetchWithTimeoutGuarded(",
+      );
+    }
+    after = after.replace(
+      "ssrfPolicy: params.ssrfPolicy,\n\t\tdispatcherPolicy",
+      "ssrfPolicy: downloadSsrFPolicy,\n\t\tdispatcherPolicy",
+    );
+    if (
+      !after.includes(resultPolicyImport)
+      || !after.includes("const downloadSsrFPolicy = mergeSsrFPolicies(")
+      || !after.includes("ssrfPolicy: downloadSsrFPolicy")
+    ) {
+      throw new Error(`Could not patch video result URL SSRF trust in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
   }
 }
 
@@ -5550,6 +5859,8 @@ patchControlUiTheme();
 patchControlCss();
 patchLocalMediaRoots();
 patchOpenAiCompatibleImageResponses();
+patchConfiguredUclawImageGenerationModelsOnly();
 patchXaiVideoLoopbackAccess();
+patchConfiguredMediaResultDownloadTrust();
 patchXaiVideoDownloadFallback();
 patchServiceWorker();
