@@ -20,6 +20,7 @@ const macLauncherScriptInclude = path.join(appDir, 'scripts', 'launcher', 'macos
 const macLauncherBinary = path.join(releaseDir, 'launcher', 'macos', 'U-Claw Launcher');
 const winLauncherSourceDir = path.join(appDir, 'scripts', 'launcher', 'windows');
 const winLauncherBinary = path.join(releaseDir, 'launcher', 'U-Claw Launcher.exe');
+const desktopAgentDir = path.join(process.env.HOME || '', 'Library', 'Application Support', 'U-Claw', '.openclaw', 'agents', 'main', 'agent');
 
 function usage() {
   console.log(`Usage:
@@ -230,6 +231,27 @@ function generateConfig(edition, destination) {
   }
 }
 
+function seedStreamerAuthStore(edition, stageRoot) {
+  if (edition !== 'streamer') return;
+  const sourceDb = path.join(desktopAgentDir, 'openclaw-agent.sqlite');
+  ensureFile(sourceDb, 'desktop streamer auth store');
+
+  const destinationDir = path.join(stageRoot, 'data', '.openclaw', 'agents', 'main', 'agent');
+  fs.mkdirSync(destinationDir, { recursive: true });
+  for (const name of [
+    'openclaw-agent.sqlite',
+    'openclaw-agent.sqlite-shm',
+    'openclaw-agent.sqlite-wal',
+    'models.json'
+  ]) {
+    const source = path.join(desktopAgentDir, name);
+    if (fs.existsSync(source) && fs.statSync(source).isFile()) {
+      fs.copyFileSync(source, path.join(destinationDir, name));
+    }
+  }
+  ensureFile(path.join(destinationDir, 'openclaw-agent.sqlite'), 'streamer package auth store');
+}
+
 function packageNotes(edition, macArm64Hash, macX64Hash, winHash) {
   const keyRule = edition === 'customer'
     ? 'New API key: empty; customer enters credentials after delivery.'
@@ -412,6 +434,7 @@ function assembleStage(edition) {
   buildMacLauncher(stageRoot);
   buildWindowsLauncher(stageRoot);
   generateConfig(edition, configPath);
+  seedStreamerAuthStore(edition, stageRoot);
   writeText(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), packageNotes(edition, macArm64Hash, macX64Hash, winHash));
 
   return { stageRoot, macArm64Hash, macX64Hash, winHash };
