@@ -232,6 +232,28 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, result)
 	})
+	mux.HandleFunc("GET /v1/recharge/orders", func(w http.ResponseWriter, r *http.Request) {
+		claims, err := verifyBearer(r, options.Auth)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Recharge == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("recharge service is not configured"))
+			return
+		}
+		userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, fmt.Errorf("token subject is invalid"))
+			return
+		}
+		orders, err := options.Recharge.ListOrders(r.Context(), userID, 20)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"orders": orders})
+	})
 	mux.HandleFunc("GET /v1/recharge/orders/{orderNo}", func(w http.ResponseWriter, r *http.Request) {
 		claims, err := verifyBearer(r, options.Auth)
 		if err != nil {

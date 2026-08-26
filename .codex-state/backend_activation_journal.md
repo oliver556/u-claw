@@ -141,3 +141,11 @@
 - Files changed: `u-claw-app-dev/src/main.js`, `src/preload.js`, `scripts/patch-openclaw.js`, `scripts/verify-cloud-model-usage-ui.js`。
 - Commands run: `node scripts/verify-cloud-model-usage-ui.js`, `go test ./...`, `go vet ./...`, `npm run patch-openclaw`, `node scripts/verify-model-usage-dashboard.js`, `node scripts/verify-activation-only-mode.js`。
 - Next: 做更高保真的充值套餐弹窗和充值记录 UI；真实支付接 Alipay/WeChat 官方下单与验签回调。
+
+## 2026-08-27 03:27
+
+- Did: 完成模型页充值套餐弹窗和充值记录 UI；新增云端订单列表查询 IPC，后端补 `GET /v1/recharge/orders` 列表接口与 PG/memory store 支持。
+- Result: 软件内“充值”先展示套餐并确认，虚拟回调后余额刷新；“记录”弹窗展示订单金额、quota、已到账状态和时间。E2E 截图在 `/tmp/uclaw-model-usage-ui.png`。
+- Files changed: `u-claw-app-dev/cloud/uclaw-cloud-api/internal/recharge/*`, `internal/postgres/recharge_store.go`, `internal/httpapi/server.go`, `deploy/scripts/activation-local-e2e.sh`, `src/main.js`, `src/preload.js`, `scripts/patch-openclaw.js`, `scripts/verify-cloud-model-usage-ui.js`。
+- Commands run: `npm run patch-openclaw`, `node --check ...`, `go test ./...`, `go vet ./...`, `./deploy/scripts/activation-local-e2e.sh`, `node scripts/verify-cloud-model-usage-ui.js`, `node scripts/verify-model-usage-dashboard.js`, `node scripts/verify-activation-only-mode.js`, `git diff --check`。
+- Next: 接 Alipay/WeChat 官方支付下单、客户端支付展示、验签回调、订单补偿 worker，并将虚拟 provider 保留为 dev/test only。

@@ -52,6 +52,32 @@ func (s *MemoryStore) CreateOrder(_ context.Context, order Order) (Order, error)
 	return order, nil
 }
 
+// ListOrdersForUser returns recent orders for one U-Claw user.
+func (s *MemoryStore) ListOrdersForUser(_ context.Context, userID int64, limit int) ([]Order, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if limit <= 0 {
+		limit = 20
+	}
+	orders := make([]Order, 0, len(s.orders))
+	for _, order := range s.orders {
+		if order.UClawUserID == userID {
+			orders = append(orders, order)
+		}
+	}
+	for i := 0; i < len(orders); i++ {
+		for j := i + 1; j < len(orders); j++ {
+			if orders[j].CreatedAt.After(orders[i].CreatedAt) {
+				orders[i], orders[j] = orders[j], orders[i]
+			}
+		}
+	}
+	if len(orders) > limit {
+		orders = orders[:limit]
+	}
+	return orders, nil
+}
+
 // GetOrderForUser returns one order only when it belongs to the requested user.
 func (s *MemoryStore) GetOrderForUser(_ context.Context, orderNo string, userID int64) (Order, error) {
 	s.mu.Lock()

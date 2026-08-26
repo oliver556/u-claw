@@ -606,6 +606,48 @@ async function getCloudModelUsageSummary() {
 }
 
 /**
+ * Fetches recharge plans from the U-Claw cloud service for the in-app top-up dialog.
+ */
+async function getCloudRechargePlans() {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured', plans: [] };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available', plans: [] };
+  }
+  try {
+    const result = await getActivationJSON('/v1/recharge/plans', { endpoint, accessToken });
+    return { ok: true, plans: Array.isArray(result.plans) ? result.plans : [] };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error), plans: [] };
+  }
+}
+
+/**
+ * Fetches recent recharge orders for the model page records dialog.
+ */
+async function getCloudRechargeOrders() {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured', orders: [] };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available', orders: [] };
+  }
+  try {
+    const result = await getActivationJSON('/v1/recharge/orders', { endpoint, accessToken });
+    return { ok: true, orders: Array.isArray(result.orders) ? result.orders : [] };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error), orders: [] };
+  }
+}
+
+/**
  * Creates a virtual recharge order and immediately simulates the local callback for UI validation.
  */
 async function rechargeCloudModelQuota(payload = {}) {
@@ -1759,6 +1801,8 @@ function setupIPC() {
 
   ipcMain.handle('open-config', () => loadConfigPage());
   ipcMain.handle('uclaw:get-model-usage-summary', () => getCloudModelUsageSummary());
+  ipcMain.handle('uclaw:get-recharge-plans', () => getCloudRechargePlans());
+  ipcMain.handle('uclaw:get-recharge-orders', () => getCloudRechargeOrders());
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
 }
 

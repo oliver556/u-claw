@@ -234,17 +234,37 @@ async function assertElectronModelUsageUI() {
     cdp.close();
     throw new Error(`model usage UI did not show initial cloud data:\n${bodyText.slice(0, 2000)}`);
   }
-  const recharged = await evalJS(`(() => {
+  const openedRecharge = await evalJS(`(() => {
     const button = [...document.querySelectorAll('button')]
       .find((node) => (node.textContent || '').trim() === '充值' && !node.disabled);
     if (!button) return false;
     button.click();
     return true;
   })()`);
-  if (!recharged) {
+  if (!openedRecharge) {
     const bodyText = await evalJS('document.body.innerText || ""');
     cdp.close();
     throw new Error(`model usage UI recharge button not clickable:\n${bodyText.slice(0, 2000)}`);
+  }
+  for (let i = 0; i < 60; i += 1) {
+    const ok = await evalJS(`(() => {
+      const text = document.body.innerText || '';
+      return text.includes('选择套餐') || text.includes('虚拟充值 10 元');
+    })()`);
+    if (ok) break;
+    await sleep(500);
+  }
+  const confirmedRecharge = await evalJS(`(() => {
+    const button = [...document.querySelectorAll('button')]
+      .find((node) => (node.textContent || '').trim() === '确认充值' && !node.disabled);
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`);
+  if (!confirmedRecharge) {
+    const bodyText = await evalJS('document.body.innerText || ""');
+    cdp.close();
+    throw new Error(`model usage UI recharge plan confirm not clickable:\n${bodyText.slice(0, 2000)}`);
   }
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`(() => {
@@ -252,6 +272,35 @@ async function assertElectronModelUsageUI() {
       return text.includes('150,000') && text.includes('虚拟充值成功');
     })()`);
     if (ok) {
+      const openedRecords = await evalJS(`(() => {
+        const button = [...document.querySelectorAll('button')]
+          .find((node) => (node.textContent || '').trim() === '记录' && !node.disabled);
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`);
+      if (!openedRecords) {
+        const bodyText = await evalJS('document.body.innerText || ""');
+        cdp.close();
+        throw new Error(`model usage UI recharge records button not clickable:\n${bodyText.slice(0, 2000)}`);
+      }
+      for (let j = 0; j < 80; j += 1) {
+        const recordsVisible = await evalJS(`(() => {
+          const text = document.body.innerText || '';
+          return text.includes('充值记录') && text.includes('已到账') && text.includes('50,000 quota');
+        })()`);
+        if (recordsVisible) break;
+        await sleep(500);
+      }
+      const recordsVisible = await evalJS(`(() => {
+        const text = document.body.innerText || '';
+        return text.includes('充值记录') && text.includes('已到账') && text.includes('50,000 quota');
+      })()`);
+      if (!recordsVisible) {
+        const bodyText = await evalJS('document.body.innerText || ""');
+        cdp.close();
+        throw new Error(`model usage UI recharge records did not render:\n${bodyText.slice(0, 2000)}`);
+      }
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
       fs.writeFileSync(screenshotPath, Buffer.from(shot.data, 'base64'));
       cdp.close();

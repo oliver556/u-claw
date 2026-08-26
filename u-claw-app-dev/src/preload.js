@@ -16,6 +16,8 @@ if (isActivationOnlyMode) {
     openDashboard: () => ipcRenderer.invoke('open-dashboard'),
     openConfig: () => ipcRenderer.invoke('open-config'),
     getModelUsageSummary: () => ipcRenderer.invoke('uclaw:get-model-usage-summary'),
+    getRechargePlans: () => ipcRenderer.invoke('uclaw:get-recharge-plans'),
+    getRechargeOrders: () => ipcRenderer.invoke('uclaw:get-recharge-orders'),
     rechargeModelQuota: (payload) => ipcRenderer.invoke('uclaw:recharge-model-quota', payload),
   });
 }

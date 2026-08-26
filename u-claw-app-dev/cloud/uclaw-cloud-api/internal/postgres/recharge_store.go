@@ -32,6 +32,35 @@ RETURNING id, order_no, uclaw_user_id, provider, amount_cents, quota_tokens, sta
 	return created, nil
 }
 
+// ListOrdersForUser returns recent recharge orders for the caller.
+func (s *Store) ListOrdersForUser(ctx context.Context, userID int64, limit int) ([]recharge.Order, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, order_no, uclaw_user_id, provider, amount_cents, quota_tokens, status,
+  provider_trade_no, paid_at, credited_at, last_error, created_at, updated_at
+FROM payment_orders
+WHERE uclaw_user_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2
+`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recharge orders: %w", err)
+	}
+	defer rows.Close()
+
+	var orders []recharge.Order
+	for rows.Next() {
+		order, err := scanRechargeOrder(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan recharge order: %w", err)
+		}
+		orders = append(orders, order)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recharge orders: %w", err)
+	}
+	return orders, nil
+}
+
 // GetOrderForUser returns a recharge order only if it belongs to the caller.
 func (s *Store) GetOrderForUser(ctx context.Context, orderNo string, userID int64) (recharge.Order, error) {
 	row := s.db.QueryRowContext(ctx, `

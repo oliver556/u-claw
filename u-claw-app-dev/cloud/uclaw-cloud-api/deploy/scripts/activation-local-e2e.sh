@@ -137,6 +137,11 @@ callback_json="$(curl -fsS -X POST "http://${API_ADDR}/v1/payments/virtual/notif
 printf '%s' "$callback_json" | node_get "if(!j.order||j.order.status!=='credited'){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'virtual_callback_e2e',orderNo:j.order.orderNo,status:j.order.status}))"
 echo
 
+orders_json="$(curl -fsS -X GET "http://${API_ADDR}/v1/recharge/orders" \
+  -H "Authorization: Bearer $access_token")"
+printf '%s' "$orders_json" | node_get "if(!Array.isArray(j.orders)||!j.orders.some(o=>o.orderNo==='$order_no'&&o.status==='credited')){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'recharge_orders_e2e',orders:j.orders.length}))"
+echo
+
 recharged_usage_json="$(curl -fsS -X GET "http://${API_ADDR}/v1/newapi/usage/summary" \
   -H "Authorization: Bearer $access_token")"
 printf '%s' "$recharged_usage_json" | node_get "if(j.status!=='ok'||j.accountBalance!==150000){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'recharged_usage_summary_e2e',accountBalance:j.accountBalance}))"

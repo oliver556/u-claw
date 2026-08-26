@@ -72,6 +72,7 @@ type Account struct {
 // Store is the persistence seam for order state and New API account lookup.
 type Store interface {
 	CreateOrder(ctx context.Context, order Order) (Order, error)
+	ListOrdersForUser(ctx context.Context, userID int64, limit int) ([]Order, error)
 	GetOrderForUser(ctx context.Context, orderNo string, userID int64) (Order, error)
 	GetOrder(ctx context.Context, orderNo string) (Order, error)
 	SaveCallback(ctx context.Context, callback Callback) error
@@ -188,6 +189,17 @@ func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (Orde
 		PayURL:             "virtual://uclaw/recharge/" + order.OrderNo,
 		VirtualCallbackURL: "/v1/payments/virtual/notify",
 	}, nil
+}
+
+// ListOrders returns recent recharge orders owned by the authenticated user.
+func (s *Service) ListOrders(ctx context.Context, userID int64, limit int) ([]Order, error) {
+	if userID <= 0 {
+		return nil, fmt.Errorf("user id is required")
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	return s.store.ListOrdersForUser(ctx, userID, limit)
 }
 
 // GetOrder returns one order owned by the authenticated user.

@@ -88,6 +88,14 @@ func TestVirtualCallbackCreditsNewAPIOnce(t *testing.T) {
 	if quota.calls[0].UserID != 42 || quota.calls[0].Quota != 50000 {
 		t.Fatalf("AddQuota request = %+v", quota.calls[0])
 	}
+
+	orders, err := service.ListOrders(context.Background(), 7, 20)
+	if err != nil {
+		t.Fatalf("ListOrders() error = %v", err)
+	}
+	if len(orders) != 1 || orders[0].Status != StatusCredited {
+		t.Fatalf("orders = %+v", orders)
+	}
 }
 
 func TestVirtualCallbackMarksCreditFailure(t *testing.T) {
