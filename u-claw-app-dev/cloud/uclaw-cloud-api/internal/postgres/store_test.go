@@ -10,6 +10,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
+	"uclaw-cloud-api/internal/activation"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/provisioning"
 )
@@ -138,6 +139,62 @@ func TestStoreBindFirstStartUpsertsUsernameAndBindsCode(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestStoreRecordFirstStartAttemptUpsertsServerBoundCheckpoint(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	at := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO activation_attempts")).
+		WithArgs("act_123", "UCLAW-BIANCHENG", "PREVIEW-ONLY", "server_bound", "pending_client_write", at).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := store.RecordFirstStartAttempt(context.Background(), activation.FirstStartAttempt{
+		ActivationID:          "act_123",
+		UsernameNormalized:    "UCLAW-BIANCHENG",
+		USBFingerprintSummary: "PREVIEW-ONLY",
+		Stage:                 "server_bound",
+		ArtifactStatus:        "pending_client_write",
+	}, at)
+	if err != nil {
+		t.Fatalf("RecordFirstStartAttempt() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestStoreCommitFirstStartAttemptRequiresMatchingAttempt(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	at := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE activation_attempts")).
+		WithArgs("act_123", "verified", at).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := store.CommitFirstStartAttempt(context.Background(), "act_123", "verified", at); err != nil {
+		t.Fatalf("CommitFirstStartAttempt() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestStoreCommitFirstStartAttemptRejectsMissingAttempt(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	at := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE activation_attempts")).
+		WithArgs("act_missing", "verified", at).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	err := store.CommitFirstStartAttempt(context.Background(), "act_missing", "verified", at)
+	if err == nil || !strings.Contains(err.Error(), "activation id is unknown") {
+		t.Fatalf("CommitFirstStartAttempt() error = %v, want unknown activation id", err)
 	}
 }
 

@@ -2,7 +2,9 @@ package activation
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestRedeemReturnsClientConfig(t *testing.T) {
@@ -174,4 +176,83 @@ func TestCommitFirstStartMarksClientWriteComplete(t *testing.T) {
 	if committed.ActivationID != activated.ActivationID {
 		t.Fatalf("activation id = %q, want %q", committed.ActivationID, activated.ActivationID)
 	}
+}
+
+func TestFirstStartAttemptStorePersistsServerBoundAndCommit(t *testing.T) {
+	store := newRecordingFirstStartStore()
+	service, err := NewService(store, Config{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	activated, err := service.ActivateFirstStart(context.Background(), FirstStartRequest{
+		Username:              "UCLAW-BIANCHENG",
+		ActivationCode:        "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
+		USBFingerprintSummary: "PREVIEW-ONLY",
+		IdempotencyKey:        "idem-static-1",
+	})
+	if err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+
+	if len(store.attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(store.attempts))
+	}
+	attempt := store.attempts[0]
+	if attempt.ActivationID != activated.ActivationID {
+		t.Fatalf("attempt activation id = %q, want %q", attempt.ActivationID, activated.ActivationID)
+	}
+	if attempt.Stage != "server_bound" || attempt.ArtifactStatus != "pending_client_write" {
+		t.Fatalf("attempt checkpoint = %+v", attempt)
+	}
+
+	restartedService, err := NewService(store, Config{})
+	if err != nil {
+		t.Fatalf("new restarted service: %v", err)
+	}
+	committed, err := restartedService.CommitFirstStart(context.Background(), CommitRequest{
+		ActivationID: activated.ActivationID,
+		WriteStatus:  "verified",
+	})
+	if err != nil {
+		t.Fatalf("commit after restart: %v", err)
+	}
+
+	if committed.Status != "committed" {
+		t.Fatalf("status = %q, want committed", committed.Status)
+	}
+	if store.commits[activated.ActivationID] != "verified" {
+		t.Fatalf("stored write status = %q, want verified", store.commits[activated.ActivationID])
+	}
+}
+
+type recordingFirstStartStore struct {
+	*MemoryStore
+	attempts []FirstStartAttempt
+	commits  map[string]string
+}
+
+// newRecordingFirstStartStore returns a memory store that also records first-start checkpoints.
+func newRecordingFirstStartStore() *recordingFirstStartStore {
+	return &recordingFirstStartStore{
+		MemoryStore: NewMemoryStore(true),
+		commits:     make(map[string]string),
+	}
+}
+
+// RecordFirstStartAttempt records the server-bound checkpoint for service tests.
+func (s *recordingFirstStartStore) RecordFirstStartAttempt(_ context.Context, attempt FirstStartAttempt, _ time.Time) error {
+	s.attempts = append(s.attempts, attempt)
+	return nil
+}
+
+// CommitFirstStartAttempt records the write-helper checkpoint for service tests.
+func (s *recordingFirstStartStore) CommitFirstStartAttempt(_ context.Context, activationID string, writeStatus string, _ time.Time) error {
+	for _, attempt := range s.attempts {
+		if attempt.ActivationID == activationID {
+			s.commits[activationID] = writeStatus
+			return nil
+		}
+	}
+	return fmt.Errorf("activation id is unknown")
 }

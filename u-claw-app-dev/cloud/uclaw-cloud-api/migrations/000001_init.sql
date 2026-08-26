@@ -32,6 +32,21 @@ CREATE TABLE IF NOT EXISTS activation_codes (
 CREATE INDEX IF NOT EXISTS idx_activation_codes_status ON activation_codes(status);
 CREATE INDEX IF NOT EXISTS idx_activation_codes_bound_user_id ON activation_codes(bound_user_id);
 
+CREATE TABLE IF NOT EXISTS activation_attempts (
+  activation_id TEXT PRIMARY KEY,
+  username_normalized TEXT NOT NULL,
+  usb_fingerprint_summary TEXT NOT NULL,
+  stage TEXT NOT NULL DEFAULT 'server_bound',
+  artifact_status TEXT NOT NULL DEFAULT 'pending_client_write',
+  write_status TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  committed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_activation_attempts_stage ON activation_attempts(stage);
+CREATE INDEX IF NOT EXISTS idx_activation_attempts_username ON activation_attempts(username_normalized);
+
 CREATE TABLE IF NOT EXISTS sms_codes (
   phone TEXT NOT NULL,
   purpose TEXT NOT NULL,

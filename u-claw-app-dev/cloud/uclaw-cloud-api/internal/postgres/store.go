@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"uclaw-cloud-api/internal/activation"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/provisioning"
 )
@@ -189,6 +190,71 @@ WHERE code_hash = $1
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit first-start activation: %w", err)
+	}
+	return nil
+}
+
+// RecordFirstStartAttempt stores the activation-only server-bound checkpoint.
+func (s *Store) RecordFirstStartAttempt(ctx context.Context, attempt activation.FirstStartAttempt, at time.Time) error {
+	stage := strings.TrimSpace(attempt.Stage)
+	if stage == "" {
+		stage = "server_bound"
+	}
+	artifactStatus := strings.TrimSpace(attempt.ArtifactStatus)
+	if artifactStatus == "" {
+		artifactStatus = "pending_client_write"
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO activation_attempts (
+  activation_id,
+  username_normalized,
+  usb_fingerprint_summary,
+  stage,
+  artifact_status,
+  write_status,
+  created_at,
+  updated_at
+) VALUES ($1, $2, $3, $4, $5, '', $6, $6)
+ON CONFLICT (activation_id) DO UPDATE SET
+  username_normalized = EXCLUDED.username_normalized,
+  usb_fingerprint_summary = EXCLUDED.usb_fingerprint_summary,
+  stage = CASE
+    WHEN activation_attempts.stage = 'committed' THEN activation_attempts.stage
+    ELSE EXCLUDED.stage
+  END,
+  artifact_status = CASE
+    WHEN activation_attempts.stage = 'committed' THEN activation_attempts.artifact_status
+    ELSE EXCLUDED.artifact_status
+  END,
+  updated_at = EXCLUDED.updated_at
+`, strings.TrimSpace(attempt.ActivationID), strings.TrimSpace(attempt.UsernameNormalized), strings.TrimSpace(attempt.USBFingerprintSummary), stage, artifactStatus, at)
+	if err != nil {
+		return fmt.Errorf("record first-start activation attempt: %w", err)
+	}
+	return nil
+}
+
+// CommitFirstStartAttempt stores the verified client write-helper checkpoint.
+func (s *Store) CommitFirstStartAttempt(ctx context.Context, activationID string, writeStatus string, at time.Time) error {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE activation_attempts
+SET stage = 'committed',
+  artifact_status = 'client_write_verified',
+  write_status = $2,
+  committed_at = COALESCE(committed_at, $3),
+  updated_at = $3
+WHERE activation_id = $1
+  AND stage IN ('server_bound', 'committed')
+`, strings.TrimSpace(activationID), strings.TrimSpace(writeStatus), at)
+	if err != nil {
+		return fmt.Errorf("commit first-start activation attempt: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("commit first-start activation attempt rows: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("activation id is unknown")
 	}
 	return nil
 }

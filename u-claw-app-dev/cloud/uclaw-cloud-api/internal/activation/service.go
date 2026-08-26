@@ -107,6 +107,21 @@ type FirstStartStore interface {
 	BindFirstStart(ctx context.Context, code string, username string, at time.Time) error
 }
 
+// FirstStartAttempt captures the server-side checkpoint for activation-only startup.
+type FirstStartAttempt struct {
+	ActivationID          string
+	UsernameNormalized    string
+	USBFingerprintSummary string
+	Stage                 string
+	ArtifactStatus        string
+}
+
+// FirstStartAttemptStore persists activation-only write-helper checkpoints.
+type FirstStartAttemptStore interface {
+	RecordFirstStartAttempt(ctx context.Context, attempt FirstStartAttempt, at time.Time) error
+	CommitFirstStartAttempt(ctx context.Context, activationID string, writeStatus string, at time.Time) error
+}
+
 // Config controls the activation redeem slice.
 type Config struct {
 	AllowAnyCode      bool
@@ -204,12 +219,13 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 	if !activationCodePattern.MatchString(code) {
 		return FirstStartResult{}, fmt.Errorf("activation code is invalid")
 	}
+	at := s.now()
 	if firstStartStore, ok := s.store.(FirstStartStore); ok {
-		if err := firstStartStore.BindFirstStart(ctx, code, username, s.now()); err != nil {
+		if err := firstStartStore.BindFirstStart(ctx, code, username, at); err != nil {
 			return FirstStartResult{}, err
 		}
 	} else {
-		if err := s.store.Redeem(ctx, code, syntheticUserID(username), username, s.now()); err != nil {
+		if err := s.store.Redeem(ctx, code, syntheticUserID(username), username, at); err != nil {
 			return FirstStartResult{}, err
 		}
 	}
@@ -218,6 +234,17 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 		return FirstStartResult{}, err
 	}
 	activationID := activationIDFor(username, code, usbSummary, req.IdempotencyKey)
+	if attemptStore, ok := s.store.(FirstStartAttemptStore); ok {
+		if err := attemptStore.RecordFirstStartAttempt(ctx, FirstStartAttempt{
+			ActivationID:          activationID,
+			UsernameNormalized:    username,
+			USBFingerprintSummary: usbSummary,
+			Stage:                 "server_bound",
+			ArtifactStatus:        "pending_client_write",
+		}, at); err != nil {
+			return FirstStartResult{}, err
+		}
+	}
 	s.mu.Lock()
 	s.commits[activationID] = "server_bound"
 	s.mu.Unlock()
@@ -238,7 +265,7 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 }
 
 // CommitFirstStart records that the desktop write helper verified local authorization files.
-func (s *Service) CommitFirstStart(_ context.Context, req CommitRequest) (CommitResult, error) {
+func (s *Service) CommitFirstStart(ctx context.Context, req CommitRequest) (CommitResult, error) {
 	activationID := strings.TrimSpace(req.ActivationID)
 	writeStatus := strings.TrimSpace(req.WriteStatus)
 	if activationID == "" {
@@ -247,19 +274,30 @@ func (s *Service) CommitFirstStart(_ context.Context, req CommitRequest) (Commit
 	if writeStatus != "verified" {
 		return CommitResult{}, fmt.Errorf("write status must be verified")
 	}
+	if attemptStore, ok := s.store.(FirstStartAttemptStore); ok {
+		if err := attemptStore.CommitFirstStartAttempt(ctx, activationID, writeStatus, s.now()); err != nil {
+			return CommitResult{}, err
+		}
+		return firstStartCommittedResult(activationID), nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.commits[activationID]; !ok {
 		return CommitResult{}, fmt.Errorf("activation id is unknown")
 	}
 	s.commits[activationID] = "committed"
+	return firstStartCommittedResult(activationID), nil
+}
+
+// firstStartCommittedResult keeps persistent and in-memory commit responses identical.
+func firstStartCommittedResult(activationID string) CommitResult {
 	return CommitResult{
 		OK:           true,
 		ActivationID: activationID,
 		Status:       "committed",
 		Stage:        "committed",
 		Message:      "Client write helper reported verified authorization files.",
-	}, nil
+	}
 }
 
 // provisionResult creates or restores New API credentials for an activated principal.
