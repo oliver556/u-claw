@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base32"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -57,7 +58,7 @@ func runActivation(args []string) {
 
 // runSpike handles external-system verification commands for Phase 0.
 func runSpike(args []string) {
-	if len(args) < 1 || args[0] != "newapi" {
+	if len(args) < 1 || args[0] != "newapi" || len(args) < 2 {
 		usage()
 		os.Exit(2)
 	}
@@ -69,24 +70,101 @@ func runSpike(args []string) {
 	if err != nil {
 		log.Fatalf("newapi client: %v", err)
 	}
-	username := requiredFlag(args[1:], "--username")
-	password := requiredFlag(args[1:], "--password")
-	quotaRaw := optionalFlag(args[1:], "--quota", "0")
+
+	command := args[1]
+	commandArgs := args[2:]
+	if strings.HasPrefix(command, "--") {
+		command = "full"
+		commandArgs = args[1:]
+	}
+
+	ctx := context.Background()
+	switch command {
+	case "create-user":
+		spikeCreateUser(ctx, client, commandArgs)
+	case "create-token":
+		spikeCreateToken(ctx, client, commandArgs)
+	case "add-quota":
+		spikeAddQuota(ctx, client, commandArgs)
+	case "full":
+		spikeFull(ctx, client, commandArgs)
+	default:
+		usage()
+		os.Exit(2)
+	}
+}
+
+// spikeCreateUser verifies New API user creation with the planned phone-as-username rule.
+func spikeCreateUser(ctx context.Context, client *newapi.Client, args []string) {
+	username := requiredFlag(args, "--username")
+	password := requiredFlag(args, "--password")
+	if err := client.CreateUser(ctx, newapi.CreateUserRequest{Username: username, Password: password, DisplayName: username}); err != nil {
+		log.Fatalf("create user: %v", err)
+	}
+	printJSON(map[string]any{"step": "create_user", "ok": true, "username": username})
+}
+
+// spikeCreateToken verifies whether New API token creation works through the configured admin route.
+func spikeCreateToken(ctx context.Context, client *newapi.Client, args []string) {
+	tokenName := optionalFlag(args, "--token-name", "uclaw-main")
+	var response newapi.CreateTokenResponse
+	if err := client.CreateToken(ctx, newapi.CreateTokenRequest{Name: tokenName}, &response); err != nil {
+		log.Fatalf("create token: %v", err)
+	}
+	printJSON(map[string]any{
+		"step":          "create_token",
+		"ok":            true,
+		"token_name":    tokenName,
+		"success":       response.Success,
+		"message":       response.Message,
+		"token_present": response.Token != "" || response.Key != "",
+	})
+}
+
+// spikeAddQuota verifies quota crediting through New API manage endpoint.
+func spikeAddQuota(ctx context.Context, client *newapi.Client, args []string) {
+	userID := parsePositiveIntFlag(args, "--user-id")
+	quota := parsePositiveIntFlag(args, "--quota")
+	if err := client.AddQuota(ctx, newapi.AddQuotaRequest{UserID: userID, Quota: quota}); err != nil {
+		log.Fatalf("add quota: %v", err)
+	}
+	printJSON(map[string]any{"step": "add_quota", "ok": true, "user_id": userID, "quota": quota})
+}
+
+// spikeFull preserves the original one-command flow for quick manual checks.
+func spikeFull(ctx context.Context, client *newapi.Client, args []string) {
+	username := requiredFlag(args, "--username")
+	password := requiredFlag(args, "--password")
+	tokenName := optionalFlag(args, "--token-name", "")
+	quotaRaw := optionalFlag(args, "--quota", "0")
 	quota, err := strconv.ParseInt(quotaRaw, 10, 64)
 	if err != nil {
 		log.Fatalf("invalid --quota %q", quotaRaw)
 	}
-	userIDRaw := optionalFlag(args[1:], "--user-id", "0")
+	userIDRaw := optionalFlag(args, "--user-id", "0")
 	userID, err := strconv.ParseInt(userIDRaw, 10, 64)
 	if err != nil {
 		log.Fatalf("invalid --user-id %q", userIDRaw)
 	}
 
-	ctx := context.Background()
 	if err := client.CreateUser(ctx, newapi.CreateUserRequest{Username: username, Password: password, DisplayName: username}); err != nil {
 		log.Fatalf("create user: %v", err)
 	}
-	fmt.Println("create_user ok")
+	printJSON(map[string]any{"step": "create_user", "ok": true, "username": username})
+	if tokenName != "" {
+		var response newapi.CreateTokenResponse
+		if err := client.CreateToken(ctx, newapi.CreateTokenRequest{Name: tokenName}, &response); err != nil {
+			log.Fatalf("create token: %v", err)
+		}
+		printJSON(map[string]any{
+			"step":          "create_token",
+			"ok":            true,
+			"token_name":    tokenName,
+			"success":       response.Success,
+			"message":       response.Message,
+			"token_present": response.Token != "" || response.Key != "",
+		})
+	}
 	if quota > 0 {
 		if userID <= 0 {
 			log.Fatal("--user-id is required when --quota is greater than 0")
@@ -94,7 +172,7 @@ func runSpike(args []string) {
 		if err := client.AddQuota(ctx, newapi.AddQuotaRequest{UserID: userID, Quota: quota}); err != nil {
 			log.Fatalf("add quota: %v", err)
 		}
-		fmt.Println("add_quota ok")
+		printJSON(map[string]any{"step": "add_quota", "ok": true, "user_id": userID, "quota": quota})
 	}
 }
 
@@ -117,6 +195,16 @@ func requiredFlag(args []string, name string) string {
 	return value
 }
 
+// parsePositiveIntFlag parses an int64 flag that must be greater than zero.
+func parsePositiveIntFlag(args []string, name string) int64 {
+	raw := requiredFlag(args, name)
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		log.Fatalf("%s must be a positive integer", name)
+	}
+	return value
+}
+
 // optionalFlag parses either "--name value" or "--name=value" without adding CLI dependencies.
 func optionalFlag(args []string, name string, fallback string) string {
 	prefix := name + "="
@@ -131,9 +219,21 @@ func optionalFlag(args []string, name string, fallback string) string {
 	return fallback
 }
 
+// printJSON writes machine-readable spike output without exposing raw token secrets.
+func printJSON(payload any) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		log.Fatalf("marshal output: %v", err)
+	}
+	fmt.Println(string(encoded))
+}
+
 // usage prints supported admin commands.
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl activation generate [count]")
-	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi --username <phone> --password <password> [--user-id <id> --quota <tokens>]")
+	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi create-user --username <phone> --password <password>")
+	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi create-token [--token-name <name>]")
+	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi add-quota --user-id <id> --quota <tokens>")
+	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi full --username <phone> --password <password> [--token-name <name>] [--user-id <id> --quota <tokens>]")
 }

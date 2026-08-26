@@ -10,7 +10,7 @@
 
 - [ ] `POST /api/user/` 创建同手机号 New API 用户。
 - [ ] 用 username 查询或登录拿到 New API user id。
-- [ ] `POST /api/token/` 创建用户 API token，并确认响应字段。
+- [ ] `POST /api/token/` 通过 `create-token` 创建用户 API token，并确认响应字段。
 - [ ] `POST /api/user/manage` 通过 `--user-id` 给用户 add quota。
 - [ ] 用普通用户 token 查询余额、用量、流水。
 - [ ] 香港 Nginx 管理路径只允许阿里云服务器 IP。
@@ -33,6 +33,24 @@ New API admin base URL:
 创建 token:
 add quota:
 查余额/流水:
+```
+
+## 建议命令
+
+```bash
+export NEWAPI_ADMIN_BASE_URL=
+export NEWAPI_ADMIN_TOKEN=
+
+go run ./cmd/adminctl spike newapi create-user \
+  --username <phone> \
+  --password <random-password>
+
+go run ./cmd/adminctl spike newapi create-token \
+  --token-name uclaw-main
+
+go run ./cmd/adminctl spike newapi add-quota \
+  --user-id <newapi-user-id> \
+  --quota <quota-tokens>
 ```
 
 ## 结论

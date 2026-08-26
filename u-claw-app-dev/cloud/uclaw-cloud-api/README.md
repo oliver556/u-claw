@@ -28,8 +28,10 @@ MVP 不强制部署 Redis/asynq。支付成功后的 New API add quota 先通过
 
 ```bash
 go test ./...
+go vet ./...
 go run ./cmd/api serve
 go run ./cmd/adminctl activation generate 5
+./deploy/scripts/smoke-local.sh
 ```
 
 ## New API Spike
@@ -42,9 +44,21 @@ go run ./cmd/adminctl spike newapi \
   --username 13800138000 \
   --password random-password
 
+go run ./cmd/adminctl spike newapi create-user \
+  --username 13800138000 \
+  --password random-password
+
+go run ./cmd/adminctl spike newapi create-token \
+  --token-name uclaw-main
+
+go run ./cmd/adminctl spike newapi add-quota \
+  --user-id 123 \
+  --quota 100000
+
 go run ./cmd/adminctl spike newapi \
   --username 13800138000 \
   --password random-password \
+  --token-name uclaw-main \
   --user-id 123 \
   --quota 100000
 ```

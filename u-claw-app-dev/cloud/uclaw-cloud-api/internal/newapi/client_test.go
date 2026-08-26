@@ -66,3 +66,40 @@ func TestAddQuotaReturnsStatusError(t *testing.T) {
 		t.Fatal("AddQuota() error = nil, want status error")
 	}
 }
+
+func TestCreateTokenDecodesTokenPresence(t *testing.T) {
+	var gotPath string
+	var gotPayload CreateTokenRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("Decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true,"token":"secret-token-value"}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	var response CreateTokenResponse
+	err = client.CreateToken(context.Background(), CreateTokenRequest{Name: "uclaw-main"}, &response)
+	if err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
+
+	if gotPath != "/api/token/" {
+		t.Fatalf("path = %q, want /api/token/", gotPath)
+	}
+	if gotPayload.Name != "uclaw-main" {
+		t.Fatalf("token name = %q", gotPayload.Name)
+	}
+	if !response.Success || response.Token == "" {
+		t.Fatalf("response = %+v", response)
+	}
+}
