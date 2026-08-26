@@ -58,6 +58,17 @@ type activationRedeemRequest struct {
 	DeviceSummary  string `json:"deviceSummary"`
 }
 
+type firstStartActivationRequest struct {
+	Username              string `json:"username"`
+	ActivationCode        string `json:"activationCode"`
+	USBFingerprintSummary string `json:"usbFingerprintSummary"`
+	IdempotencyKey        string `json:"idempotencyKey"`
+}
+
+type activationCommitRequest struct {
+	WriteStatus string `json:"writeStatus"`
+}
+
 type rechargeOrderRequest struct {
 	PlanCode string `json:"planCode"`
 	Provider string `json:"provider"`
@@ -104,6 +115,8 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 			"status":              "ok",
 			"database_configured": cfg.DatabaseURL != "",
 			"newapi_configured":   cfg.NewAPIAdminBaseURL != "" && cfg.NewAPIAdminToken != "",
+			"alipay_configured":   cfg.AlipayConfigured(),
+			"wechat_configured":   cfg.WeChatPayConfigured(),
 		})
 	})
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) {
@@ -163,6 +176,48 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, result)
 	})
+	mux.HandleFunc("POST /v1/activations", func(w http.ResponseWriter, r *http.Request) {
+		if options.Activation == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("activation service is not configured"))
+			return
+		}
+		var req firstStartActivationRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := options.Activation.ActivateFirstStart(r.Context(), activation.FirstStartRequest{
+			Username:              req.Username,
+			ActivationCode:        req.ActivationCode,
+			USBFingerprintSummary: req.USBFingerprintSummary,
+			IdempotencyKey:        req.IdempotencyKey,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
+	mux.HandleFunc("POST /v1/activations/{activationId}/commit", func(w http.ResponseWriter, r *http.Request) {
+		if options.Activation == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("activation service is not configured"))
+			return
+		}
+		var req activationCommitRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := options.Activation.CommitFirstStart(r.Context(), activation.CommitRequest{
+			ActivationID: r.PathValue("activationId"),
+			WriteStatus:  req.WriteStatus,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
 	mux.HandleFunc("GET /v1/newapi/usage/summary", func(w http.ResponseWriter, r *http.Request) {
 		claims, err := verifyBearer(r, options.Auth)
 		if err != nil {
@@ -199,6 +254,19 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"plans": options.Recharge.ListPlans(r.Context()),
+		})
+	})
+	mux.HandleFunc("GET /v1/recharge/providers", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := verifyBearer(r, options.Auth); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Recharge == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("recharge service is not configured"))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"providers": options.Recharge.ListProviders(r.Context()),
 		})
 	})
 	mux.HandleFunc("POST /v1/recharge/orders", func(w http.ResponseWriter, r *http.Request) {

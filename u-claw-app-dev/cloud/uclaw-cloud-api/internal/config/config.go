@@ -25,6 +25,14 @@ type Config struct {
 	DevSMSCode               string
 	SMSCodePepper            string
 	ActivationCodePepper     string
+	WeChatPayMchID           string
+	WeChatPayAppID           string
+	WeChatPayAPIV3Key        string
+	WeChatPayPrivateKeyPath  string
+	WeChatPayCertSerialNo    string
+	AlipayAppID              string
+	AlipayPrivateKeyPath     string
+	AlipayPublicCertPath     string
 }
 
 // Getter reads a configuration value from a backing store such as environment variables.
@@ -53,6 +61,14 @@ func Load(getenv Getter) (Config, error) {
 		DevSMSCode:               withDefault(getenv("DEV_SMS_CODE"), "123456"),
 		SMSCodePepper:            withDefault(getenv("SMS_CODE_PEPPER"), "uclaw-dev-sms-code-pepper"),
 		ActivationCodePepper:     withDefault(getenv("ACTIVATION_CODE_PEPPER"), "uclaw-dev-activation-code-pepper"),
+		WeChatPayMchID:           strings.TrimSpace(getenv("WECHAT_PAY_MCH_ID")),
+		WeChatPayAppID:           strings.TrimSpace(getenv("WECHAT_PAY_APP_ID")),
+		WeChatPayAPIV3Key:        strings.TrimSpace(getenv("WECHAT_PAY_API_V3_KEY")),
+		WeChatPayPrivateKeyPath:  strings.TrimSpace(getenv("WECHAT_PAY_PRIVATE_KEY_PATH")),
+		WeChatPayCertSerialNo:    strings.TrimSpace(getenv("WECHAT_PAY_CERT_SERIAL_NO")),
+		AlipayAppID:              strings.TrimSpace(getenv("ALIPAY_APP_ID")),
+		AlipayPrivateKeyPath:     strings.TrimSpace(getenv("ALIPAY_PRIVATE_KEY_PATH")),
+		AlipayPublicCertPath:     strings.TrimSpace(getenv("ALIPAY_PUBLIC_CERT_PATH")),
 	}
 
 	if raw := strings.TrimSpace(getenv("NEWAPI_HTTP_TIMEOUT")); raw != "" {
@@ -107,6 +123,22 @@ func (cfg Config) ValidateForServe() error {
 // IsProduction reports whether the process should enforce production-only guardrails.
 func (cfg Config) IsProduction() bool {
 	return strings.EqualFold(cfg.AppEnv, "production")
+}
+
+// WeChatPayConfigured reports whether all fields needed to initialize WeChat Pay are present.
+func (cfg Config) WeChatPayConfigured() bool {
+	return cfg.WeChatPayMchID != "" &&
+		cfg.WeChatPayAppID != "" &&
+		cfg.WeChatPayAPIV3Key != "" &&
+		cfg.WeChatPayPrivateKeyPath != "" &&
+		cfg.WeChatPayCertSerialNo != ""
+}
+
+// AlipayConfigured reports whether all fields needed to initialize Alipay are present.
+func (cfg Config) AlipayConfigured() bool {
+	return cfg.AlipayAppID != "" &&
+		cfg.AlipayPrivateKeyPath != "" &&
+		cfg.AlipayPublicCertPath != ""
 }
 
 // withDefault returns a trimmed value or fallback when value is empty.

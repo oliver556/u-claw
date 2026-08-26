@@ -19,6 +19,14 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"DEV_SMS_CODE":                "654321",
 		"SMS_CODE_PEPPER":             "sms-pepper",
 		"ACTIVATION_CODE_PEPPER":      "activation-pepper",
+		"WECHAT_PAY_MCH_ID":           " mch-1 ",
+		"WECHAT_PAY_APP_ID":           " app-1 ",
+		"WECHAT_PAY_API_V3_KEY":       " v3-key ",
+		"WECHAT_PAY_PRIVATE_KEY_PATH": " /secrets/wechat.pem ",
+		"WECHAT_PAY_CERT_SERIAL_NO":   " serial-1 ",
+		"ALIPAY_APP_ID":               " alipay-1 ",
+		"ALIPAY_PRIVATE_KEY_PATH":     " /secrets/alipay.pem ",
+		"ALIPAY_PUBLIC_CERT_PATH":     " /secrets/alipay-public.crt ",
 	}
 
 	cfg, err := Load(func(key string) string {
@@ -66,6 +74,15 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.ActivationCodePepper != "activation-pepper" {
 		t.Fatalf("ActivationCodePepper = %q", cfg.ActivationCodePepper)
+	}
+	if !cfg.WeChatPayConfigured() {
+		t.Fatalf("WeChatPayConfigured() = false for %+v", cfg)
+	}
+	if !cfg.AlipayConfigured() {
+		t.Fatalf("AlipayConfigured() = false for %+v", cfg)
+	}
+	if cfg.WeChatPayMchID != "mch-1" || cfg.AlipayAppID != "alipay-1" {
+		t.Fatalf("payment config not trimmed: %+v", cfg)
 	}
 }
 

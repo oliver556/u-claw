@@ -16,6 +16,13 @@ trap 'kill "$SERVER_PID" >/dev/null 2>&1 || true; wait "$SERVER_PID" >/dev/null 
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
     curl -fsS http://127.0.0.1:8080/readyz >/dev/null 2>&1
+    activation_json="$(curl -fsS -X POST http://127.0.0.1:8080/v1/activations \
+      -H 'Content-Type: application/json' \
+      -d '{"username":"UCLAW-BIANCHENG","activationCode":"ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","usbFingerprintSummary":"PREVIEW-ONLY","idempotencyKey":"smoke-local-1"}')"
+    activation_id="$(printf '%s' "$activation_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); if(!j.ok||j.status!=="server_bound"||!j.activationId) process.exit(1); process.stdout.write(j.activationId);});')"
+    curl -fsS -X POST "http://127.0.0.1:8080/v1/activations/${activation_id}/commit" \
+      -H 'Content-Type: application/json' \
+      -d '{"writeStatus":"verified"}' >/dev/null
     curl -fsS -X POST http://127.0.0.1:8080/v1/auth/sms/send \
       -H 'Content-Type: application/json' \
       -d '{"phone":"13800138000","purpose":"login"}' >/dev/null
@@ -23,6 +30,9 @@ for _ in $(seq 1 30); do
       -H 'Content-Type: application/json' \
       -d '{"phone":"13800138000","purpose":"login","code":"123456"}')"
     access_token="$(printf '%s' "$login_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); if(!j.accessToken) process.exit(1); process.stdout.write(j.accessToken);});')"
+    curl -fsS http://127.0.0.1:8080/v1/recharge/providers \
+      -H "Authorization: Bearer $access_token" \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); const v=j.providers&&j.providers.find(p=>p.code==="virtual"); if(!v||!v.enabled) process.exit(1);});'
     curl -fsS -X POST http://127.0.0.1:8080/v1/activation/redeem \
       -H 'Content-Type: application/json' \
       -H "Authorization: Bearer $access_token" \

@@ -14,10 +14,25 @@ type fakeQuotaClient struct {
 	err   error
 }
 
+type fakeCheckoutClient struct {
+	requests []CheckoutRequest
+	result   CheckoutResult
+	err      error
+}
+
 // AddQuota records quota calls so tests can assert idempotency.
 func (f *fakeQuotaClient) AddQuota(_ context.Context, req newapi.AddQuotaRequest) error {
 	f.calls = append(f.calls, req)
 	return f.err
+}
+
+// CreateCheckout records checkout calls and returns a deterministic payment hint.
+func (f *fakeCheckoutClient) CreateCheckout(_ context.Context, req CheckoutRequest) (CheckoutResult, error) {
+	f.requests = append(f.requests, req)
+	if f.err != nil {
+		return CheckoutResult{}, f.err
+	}
+	return f.result, nil
 }
 
 func TestCreateOrderUsesConfiguredPlan(t *testing.T) {
@@ -41,6 +56,95 @@ func TestCreateOrderUsesConfiguredPlan(t *testing.T) {
 	}
 	if result.PayURL == "" || result.VirtualCallbackURL == "" {
 		t.Fatalf("result missing virtual payment hints: %+v", result)
+	}
+}
+
+func TestCreateOrderRejectsUnconfiguredOfficialProvider(t *testing.T) {
+	store := NewMemoryStore()
+	service, err := NewService(store, &fakeQuotaClient{}, Config{AllowVirtualCallback: true})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	_, err = service.CreateOrder(context.Background(), CreateOrderRequest{
+		UserID:   7,
+		PlanCode: "dev_10",
+		Provider: ProviderAlipay,
+	})
+	if err == nil {
+		t.Fatal("CreateOrder() error = nil, want provider not configured")
+	}
+
+	orders, err := service.ListOrders(context.Background(), 7, 20)
+	if err != nil {
+		t.Fatalf("ListOrders() error = %v", err)
+	}
+	if len(orders) != 0 {
+		t.Fatalf("orders = %+v, want none", orders)
+	}
+}
+
+func TestCreateOrderUsesConfiguredCheckoutClient(t *testing.T) {
+	store := NewMemoryStore()
+	checkout := &fakeCheckoutClient{result: CheckoutResult{
+		PayURL:    "https://pay.example.com/order",
+		QRCodeURL: "https://pay.example.com/qr.png",
+	}}
+	service, err := NewService(store, &fakeQuotaClient{}, Config{
+		AllowVirtualCallback: true,
+		CheckoutClients: map[string]CheckoutClient{
+			ProviderAlipay: checkout,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	result, err := service.CreateOrder(context.Background(), CreateOrderRequest{
+		UserID:   7,
+		PlanCode: "dev_50",
+		Provider: ProviderAlipay,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder() error = %v", err)
+	}
+
+	if result.Order.Provider != ProviderAlipay || result.Order.AmountCents != 5000 || result.Order.Quota != 300000 {
+		t.Fatalf("order = %+v", result.Order)
+	}
+	if result.PayURL != "https://pay.example.com/order" || result.QRCodeURL != "https://pay.example.com/qr.png" {
+		t.Fatalf("checkout result = %+v", result)
+	}
+	if len(checkout.requests) != 1 {
+		t.Fatalf("checkout requests = %d, want 1", len(checkout.requests))
+	}
+	if checkout.requests[0].OrderNo != result.Order.OrderNo || checkout.requests[0].Provider != ProviderAlipay {
+		t.Fatalf("checkout request = %+v", checkout.requests[0])
+	}
+}
+
+func TestListProvidersReportsEnabledAdapters(t *testing.T) {
+	service, err := NewService(NewMemoryStore(), &fakeQuotaClient{}, Config{
+		AllowVirtualCallback: true,
+		CheckoutClients: map[string]CheckoutClient{
+			ProviderWeChat: &fakeCheckoutClient{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	providers := service.ListProviders(context.Background())
+	enabled := map[string]bool{}
+	for _, provider := range providers {
+		enabled[provider.Code] = provider.Enabled
+	}
+
+	if !enabled[ProviderVirtual] || !enabled[ProviderWeChat] {
+		t.Fatalf("providers = %+v", providers)
+	}
+	if enabled[ProviderAlipay] {
+		t.Fatalf("providers = %+v, alipay should be disabled", providers)
 	}
 }
 

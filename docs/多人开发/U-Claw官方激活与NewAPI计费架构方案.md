@@ -1288,6 +1288,7 @@ go run ./cmd/adminctl spike newapi add-quota \
 - 已完成 New API 自动创建同名用户、用户登录、创建 API token、通过 `POST /api/token/{id}/key` 取真实 key、初始 quota 发放、`newapi_accounts` 映射落库。
 - 已完成完整本地 E2E：临时 PostgreSQL + 本地 New API + U-Claw Cloud API + 激活码 seed + SMS/login/redeem，返回可用 `sk-` token。
 - 尚未完成余额/用量/流水查询 API 与充值支付回调；这是下一开发切片。
+- 已补首启 activation-only 服务端绑定接口 `/v1/activations` 与 commit 接口 `/v1/activations/{activationId}/commit`，用于软件第一次打开时不经手机号登录的交付卡激活。
 
 ### Phase 2: 客户端激活与配置写入
 
@@ -1321,6 +1322,13 @@ go run ./cmd/adminctl spike newapi add-quota \
 - New API 用户 quota 增加。
 - 重复回调不重复加 quota。
 - New API 故障时任务进入重试队列。
+
+当前实现进度：
+
+- 已完成充值套餐、订单创建、订单查询、虚拟回调、New API add quota 入账、重复回调幂等。
+- 已完成 `/v1/recharge/providers` 支付渠道目录，返回 `virtual`、`alipay`、`wechat` 及可用状态。
+- 已完成官方支付 checkout seam：`alipay`、`wechat` 未配置 adapter 时拒绝创建订单，不生成无效订单；配置 adapter 后返回 `payUrl` 或 `qrCodeUrl`。
+- 下一切片接入支付宝/微信官方 SDK：下单 adapter、支付二维码或跳转、验签回调、订单状态轮询与 PG outbox 补偿 worker。
 
 ### Phase 4: 模型页真实数据接入
 

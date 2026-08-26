@@ -20,11 +20,12 @@
 - [x] Add virtual recharge order and callback flow that credits New API quota
 - [x] Wire model page recharge button to virtual order callback and refreshed balance
 - [x] Add recharge plan picker and recharge records UI
+- [x] Add payment provider catalog and official checkout seam
 
 ### Current status
-- Current step: 充值套餐弹窗与充值记录 UI 完成
-- Last completed: 模型页“充值”已改为套餐选择弹窗，确认后走虚拟回调入账；“记录”按钮可拉取云端订单列表并展示已到账记录；Electron UI E2E 验证余额从 `100000` 到 `150000` 且记录显示 `50,000 quota`。
-- Next action: 接 Alipay/WeChat 官方支付下单、客户端支付跳转/二维码、验签回调与补偿 worker。
+- Current step: 官方支付 checkout seam 完成，等待真实 Alipay/WeChat SDK adapter
+- Last completed: 后端新增 `/v1/recharge/providers`，充值服务支持 `virtual`、`alipay`、`wechat` provider；官方 provider 未配置 adapter 时拒绝创建订单，配置后返回 `payUrl`/`qrCodeUrl`。
+- Next action: 接 Alipay/WeChat 官方 SDK 下单、客户端支付跳转/二维码、验签回调与补偿 worker。
 
 ### Notes
 - 阿里云 U-Claw 服务负责账号、激活、订单、支付回调、New API 管理编排。
@@ -55,3 +56,4 @@
 - 虚拟充值回调只在非 production 启用；`activation-local-e2e.sh` 已覆盖余额从 `100000` 增加到 `150000`。
 - 最新 UI 验证通过：`node scripts/verify-cloud-model-usage-ui.js` 点击模型页“充值”并断言 `150,000`；另通过 `go test ./...`、`go vet ./...`、`npm run patch-openclaw`、`node scripts/verify-model-usage-dashboard.js`、`node scripts/verify-activation-only-mode.js`。
 - 最新充值 UI 验证通过：`node scripts/verify-cloud-model-usage-ui.js` 已覆盖套餐弹窗、确认充值、记录弹窗；截图 `/tmp/uclaw-model-usage-ui.png`。
+- 官方支付 seam 覆盖：`GET /v1/recharge/providers` 需 Bearer；`alipay/wechat` 未配置时不可下单；checkout adapter seam 有单测保护。

@@ -74,6 +74,24 @@ curl -sS -X POST http://127.0.0.1:8080/v1/activation/redeem \
   -d '{"activationCode":"ABCD-EFGH-IJKL-MNOP","deviceSummary":"PREVIEW-ONLY"}'
 ```
 
+## 首启 activation-only 激活接口
+
+Electron 受限激活页不要求手机号登录，直接提交交付卡上的用户名和激活码：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/v1/activations \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"UCLAW-BIANCHENG","activationCode":"ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","usbFingerprintSummary":"PREVIEW-ONLY","idempotencyKey":"local-dev-1"}'
+```
+
+当前切片返回 `server_bound` 与 `pending_client_write`，表示服务端已接受绑定请求，但客户端写盘 helper 还没有上报授权材料写入完成。写盘 helper 验证后调用：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/v1/activations/<activationId>/commit \
+  -H 'Content-Type: application/json' \
+  -d '{"writeStatus":"verified"}'
+```
+
 ## New API 用量摘要
 
 模型页进入或手动刷新时，请求 U-Claw Cloud API 聚合 New API 余额、今日用量、近 7 天、累计用量和最近流水：
@@ -93,6 +111,9 @@ curl -sS http://127.0.0.1:8080/v1/newapi/usage/summary \
 curl -sS http://127.0.0.1:8080/v1/recharge/plans \
   -H "Authorization: Bearer <accessToken>"
 
+curl -sS http://127.0.0.1:8080/v1/recharge/providers \
+  -H "Authorization: Bearer <accessToken>"
+
 curl -sS -X POST http://127.0.0.1:8080/v1/recharge/orders \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer <accessToken>" \
@@ -104,6 +125,8 @@ curl -sS -X POST http://127.0.0.1:8080/v1/payments/virtual/notify \
 ```
 
 `virtual` 回调只在非 production 环境启用。正式 Alipay/WeChat 接入时复用 `payment_orders`、`payment_callbacks` 与订单幂等状态机，替换签名校验和 provider 回调解析。
+
+`/v1/recharge/providers` 返回 `virtual`、`alipay`、`wechat` 三类渠道及启用状态。当前后端已预留官方支付 checkout seam：当 `alipay` 或 `wechat` 未配置真实 adapter 时，创建订单会返回 `payment provider <provider> is not configured`，且不会落库生成无效订单。下一切片只需要接入官方 SDK 下单 adapter、支付跳转或二维码、验签回调和补偿 worker。
 
 ## New API Spike
 

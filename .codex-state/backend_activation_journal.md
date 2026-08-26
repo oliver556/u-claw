@@ -149,3 +149,11 @@
 - Files changed: `u-claw-app-dev/cloud/uclaw-cloud-api/internal/recharge/*`, `internal/postgres/recharge_store.go`, `internal/httpapi/server.go`, `deploy/scripts/activation-local-e2e.sh`, `src/main.js`, `src/preload.js`, `scripts/patch-openclaw.js`, `scripts/verify-cloud-model-usage-ui.js`。
 - Commands run: `npm run patch-openclaw`, `node --check ...`, `go test ./...`, `go vet ./...`, `./deploy/scripts/activation-local-e2e.sh`, `node scripts/verify-cloud-model-usage-ui.js`, `node scripts/verify-model-usage-dashboard.js`, `node scripts/verify-activation-only-mode.js`, `git diff --check`。
 - Next: 接 Alipay/WeChat 官方支付下单、客户端支付展示、验签回调、订单补偿 worker，并将虚拟 provider 保留为 dev/test only。
+
+## 2026-08-27 04:16
+
+- Did: 纳入首启 activation-only 服务端绑定接口与 PG `BindFirstStart` 遗留改动；新增充值支付 provider catalog 与官方 checkout seam，支持 `virtual`、`alipay`、`wechat`，并补 README/PRD。
+- Result: `/v1/recharge/providers` 返回渠道可用状态；`alipay/wechat` 未配置真实 adapter 时拒绝创建订单且不落无效订单；配置 adapter 后可返回 `payUrl`/`qrCodeUrl`。
+- Files changed: `.codex-state/backend_activation_progress.md`, `docs/多人开发/U-Claw官方激活与NewAPI计费架构方案.md`, `u-claw-app-dev/cloud/uclaw-cloud-api/*`。
+- Commands run: `gofmt`, `go test ./internal/activation ./internal/httpapi ./internal/recharge ./internal/config ./internal/postgres`, `go test ./...`, `go vet ./...`, `./deploy/scripts/smoke-local.sh`, `./deploy/scripts/activation-local-e2e.sh`, `git diff --check`。
+- Next: 接 Alipay/WeChat 官方 SDK adapter、验签回调、订单轮询和 PostgreSQL outbox 补偿 worker。

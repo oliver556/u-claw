@@ -2,6 +2,9 @@ package activation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,7 +12,8 @@ import (
 	"time"
 )
 
-var activationCodePattern = regexp.MustCompile(`^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}$`)
+var activationCodePattern = regexp.MustCompile(`^(?:[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}|[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}-[A-Z0-9]{6})$`)
+var usernamePattern = regexp.MustCompile(`^UCLAW-[A-Z0-9]{6,32}$`)
 
 // DefaultModels describes model ids the desktop client should write into OpenClaw config.
 type DefaultModels struct {
@@ -36,6 +40,45 @@ type RedeemResult struct {
 	DefaultModels DefaultModels `json:"defaultModels"`
 }
 
+// FirstStartRequest carries the activation-only username/code request before login exists.
+type FirstStartRequest struct {
+	Username              string
+	ActivationCode        string
+	USBFingerprintSummary string
+	IdempotencyKey        string
+}
+
+// FirstStartResult is the public activation envelope consumed by Electron activation-only mode.
+type FirstStartResult struct {
+	OK                    bool          `json:"ok"`
+	ActivationID          string        `json:"activationId"`
+	Status                string        `json:"status"`
+	Stage                 string        `json:"stage"`
+	UsernameMasked        string        `json:"usernameMasked"`
+	USBFingerprintSummary string        `json:"usbFingerprintSummary"`
+	ArtifactStatus        string        `json:"artifactStatus"`
+	Message               string        `json:"message"`
+	NewAPIBaseURL         string        `json:"newapiBaseUrl"`
+	NewAPIToken           string        `json:"newapiToken"`
+	TokenVersion          int           `json:"tokenVersion"`
+	DefaultModels         DefaultModels `json:"defaultModels"`
+}
+
+// CommitRequest records the client write-helper result for a server-bound activation.
+type CommitRequest struct {
+	ActivationID string
+	WriteStatus  string
+}
+
+// CommitResult reports whether the activation reached the committed checkpoint.
+type CommitResult struct {
+	OK           bool   `json:"ok"`
+	ActivationID string `json:"activationId"`
+	Status       string `json:"status"`
+	Stage        string `json:"stage"`
+	Message      string `json:"message"`
+}
+
 // ProvisionRequest identifies the U-Claw user that needs a New API account.
 type ProvisionRequest struct {
 	UserID int64
@@ -59,6 +102,11 @@ type Store interface {
 	Redeem(ctx context.Context, code string, userID int64, phone string, at time.Time) error
 }
 
+// FirstStartStore persists activation-only username/code binding without requiring SMS login.
+type FirstStartStore interface {
+	BindFirstStart(ctx context.Context, code string, username string, at time.Time) error
+}
+
 // Config controls the activation redeem slice.
 type Config struct {
 	AllowAnyCode      bool
@@ -72,9 +120,11 @@ type Config struct {
 
 // Service owns activation-code validation and the client-facing activation contract.
 type Service struct {
-	store Store
-	cfg   Config
-	now   func() time.Time
+	store   Store
+	cfg     Config
+	now     func() time.Time
+	mu      sync.Mutex
+	commits map[string]string
 }
 
 // NewService creates an activation service with conservative local defaults.
@@ -97,7 +147,7 @@ func NewService(store Store, cfg Config) (*Service, error) {
 	if strings.TrimSpace(cfg.DefaultVideoModel) == "" {
 		cfg.DefaultVideoModel = "xai/jimeng-video-3-720p"
 	}
-	return &Service{store: store, cfg: cfg, now: time.Now}, nil
+	return &Service{store: store, cfg: cfg, now: time.Now, commits: make(map[string]string)}, nil
 }
 
 // Redeem validates and binds one activation code, then returns client config.
@@ -120,6 +170,104 @@ func (s *Service) Redeem(ctx context.Context, req RedeemRequest) (RedeemResult, 
 	tokenVersion := 1
 	if s.cfg.Provisioner != nil {
 		result, err := s.cfg.Provisioner.ProvisionNewAPI(ctx, ProvisionRequest{UserID: req.UserID, Phone: phone})
+		if err != nil {
+			return RedeemResult{}, err
+		}
+		token = result.Token
+		tokenVersion = result.TokenVersion
+	}
+	return RedeemResult{
+		Status:        "activated",
+		PhoneMasked:   maskPhone(phone),
+		NewAPIBaseURL: strings.TrimRight(s.cfg.NewAPIBaseURL, "/"),
+		NewAPIToken:   token,
+		TokenVersion:  tokenVersion,
+		DefaultModels: DefaultModels{
+			Text:  s.cfg.DefaultTextModel,
+			Image: s.cfg.DefaultImageModel,
+			Video: s.cfg.DefaultVideoModel,
+		},
+	}, nil
+}
+
+// ActivateFirstStart validates username/code activation from the restricted startup UI.
+func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest) (FirstStartResult, error) {
+	username := strings.ToUpper(strings.TrimSpace(req.Username))
+	code := strings.ToUpper(strings.TrimSpace(req.ActivationCode))
+	usbSummary := strings.TrimSpace(req.USBFingerprintSummary)
+	if usbSummary == "" {
+		usbSummary = "UNAVAILABLE"
+	}
+	if !usernamePattern.MatchString(username) {
+		return FirstStartResult{}, fmt.Errorf("activation username is invalid")
+	}
+	if !activationCodePattern.MatchString(code) {
+		return FirstStartResult{}, fmt.Errorf("activation code is invalid")
+	}
+	if firstStartStore, ok := s.store.(FirstStartStore); ok {
+		if err := firstStartStore.BindFirstStart(ctx, code, username, s.now()); err != nil {
+			return FirstStartResult{}, err
+		}
+	} else {
+		if err := s.store.Redeem(ctx, code, syntheticUserID(username), username, s.now()); err != nil {
+			return FirstStartResult{}, err
+		}
+	}
+	result, err := s.provisionResult(ctx, syntheticUserID(username), username)
+	if err != nil {
+		return FirstStartResult{}, err
+	}
+	activationID := activationIDFor(username, code, usbSummary, req.IdempotencyKey)
+	s.mu.Lock()
+	s.commits[activationID] = "server_bound"
+	s.mu.Unlock()
+	return FirstStartResult{
+		OK:                    true,
+		ActivationID:          activationID,
+		Status:                "server_bound",
+		Stage:                 "server_bound",
+		UsernameMasked:        username,
+		USBFingerprintSummary: usbSummary,
+		ArtifactStatus:        "pending_client_write",
+		Message:               "Activation accepted; client write helper has not committed authorization files yet.",
+		NewAPIBaseURL:         result.NewAPIBaseURL,
+		NewAPIToken:           result.NewAPIToken,
+		TokenVersion:          result.TokenVersion,
+		DefaultModels:         result.DefaultModels,
+	}, nil
+}
+
+// CommitFirstStart records that the desktop write helper verified local authorization files.
+func (s *Service) CommitFirstStart(_ context.Context, req CommitRequest) (CommitResult, error) {
+	activationID := strings.TrimSpace(req.ActivationID)
+	writeStatus := strings.TrimSpace(req.WriteStatus)
+	if activationID == "" {
+		return CommitResult{}, fmt.Errorf("activation id is required")
+	}
+	if writeStatus != "verified" {
+		return CommitResult{}, fmt.Errorf("write status must be verified")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.commits[activationID]; !ok {
+		return CommitResult{}, fmt.Errorf("activation id is unknown")
+	}
+	s.commits[activationID] = "committed"
+	return CommitResult{
+		OK:           true,
+		ActivationID: activationID,
+		Status:       "committed",
+		Stage:        "committed",
+		Message:      "Client write helper reported verified authorization files.",
+	}, nil
+}
+
+// provisionResult creates or restores New API credentials for an activated principal.
+func (s *Service) provisionResult(ctx context.Context, userID int64, phone string) (RedeemResult, error) {
+	token := s.cfg.PreviewToken
+	tokenVersion := 1
+	if s.cfg.Provisioner != nil {
+		result, err := s.cfg.Provisioner.ProvisionNewAPI(ctx, ProvisionRequest{UserID: userID, Phone: phone})
 		if err != nil {
 			return RedeemResult{}, err
 		}
@@ -179,6 +327,11 @@ func (s *MemoryStore) Redeem(_ context.Context, code string, userID int64, phone
 	return nil
 }
 
+// BindFirstStart binds a startup activation code to a normalized username once.
+func (s *MemoryStore) BindFirstStart(ctx context.Context, code string, username string, at time.Time) error {
+	return s.Redeem(ctx, code, syntheticUserID(username), username, at)
+}
+
 // maskPhone returns the same phone display shape as auth without coupling packages.
 func maskPhone(phone string) string {
 	phone = strings.TrimSpace(phone)
@@ -186,4 +339,22 @@ func maskPhone(phone string) string {
 		return phone
 	}
 	return phone[:3] + "****" + phone[7:]
+}
+
+// syntheticUserID creates a stable positive id for first-start usernames before account tables exist.
+func syntheticUserID(username string) int64 {
+	sum := sha256.Sum256([]byte(strings.ToUpper(strings.TrimSpace(username))))
+	return int64(binary.BigEndian.Uint64(sum[:8]) & ((1 << 62) - 1))
+}
+
+// activationIDFor derives a stable idempotent id without exposing the activation code.
+func activationIDFor(username string, code string, usbSummary string, idempotencyKey string) string {
+	parts := strings.Join([]string{
+		strings.ToUpper(strings.TrimSpace(username)),
+		strings.ToUpper(strings.TrimSpace(code)),
+		strings.TrimSpace(usbSummary),
+		strings.TrimSpace(idempotencyKey),
+	}, "\x00")
+	sum := sha256.Sum256([]byte(parts))
+	return "act_" + hex.EncodeToString(sum[:])[:24]
 }

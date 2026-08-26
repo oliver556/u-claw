@@ -119,6 +119,28 @@ func TestStoreRedeemBindsUnusedActivationCode(t *testing.T) {
 	}
 }
 
+func TestStoreBindFirstStartUpsertsUsernameAndBindsCode(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	at := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO uclaw_users")).
+		WithArgs("UCLAW-BIANCHENG", at).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(77)))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE activation_codes")).
+		WithArgs(store.activationCodeHash("ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ"), int64(77), "UCLAW-BIANCHENG", at).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := store.BindFirstStart(context.Background(), "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ", "uclaw-biancheng", at); err != nil {
+		t.Fatalf("BindFirstStart() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestStoreSeedActivationCodeHashesPrintedCode(t *testing.T) {
 	store, mock, cleanup := newMockStore(t)
 	defer cleanup()

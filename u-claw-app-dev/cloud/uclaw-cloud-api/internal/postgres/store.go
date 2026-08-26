@@ -140,6 +140,59 @@ WHERE code_hash = $1
 	return nil
 }
 
+// BindFirstStart binds an activation code to a first-start username without requiring SMS login.
+func (s *Store) BindFirstStart(ctx context.Context, code string, username string, at time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin first-start activation: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	username = strings.ToUpper(strings.TrimSpace(username))
+	var userID int64
+	if err = tx.QueryRowContext(ctx, `
+INSERT INTO uclaw_users (phone, phone_verified_at, status, created_at, updated_at)
+VALUES ($1, $2, 'active', now(), now())
+ON CONFLICT (phone) DO UPDATE SET
+  phone_verified_at = COALESCE(uclaw_users.phone_verified_at, EXCLUDED.phone_verified_at),
+  updated_at = now()
+RETURNING id
+`, username, at).Scan(&userID); err != nil {
+		return fmt.Errorf("upsert first-start user: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx, `
+UPDATE activation_codes
+SET status = 'bound',
+  bound_user_id = $2,
+  bound_phone = $3,
+  bound_at = $4
+WHERE code_hash = $1
+  AND (
+    (status = 'unused' AND (expires_at IS NULL OR expires_at > $4))
+    OR (status = 'bound' AND bound_user_id = $2 AND bound_phone = $3)
+  )
+`, s.activationCodeHash(code), userID, username, at)
+	if err != nil {
+		return fmt.Errorf("bind first-start activation code: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("bind first-start activation code rows: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("activation code is invalid or already bound")
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit first-start activation: %w", err)
+	}
+	return nil
+}
+
 // SaveNewAPIAccount upserts the New API account mapping after successful provisioning.
 func (s *Store) SaveNewAPIAccount(ctx context.Context, account provisioning.Account) error {
 	_, err := s.db.ExecContext(ctx, `

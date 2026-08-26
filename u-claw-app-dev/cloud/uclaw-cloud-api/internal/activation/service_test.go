@@ -82,3 +82,96 @@ func TestRedeemRejectsUnconfiguredStore(t *testing.T) {
 		t.Fatal("redeem succeeded without configured activation store")
 	}
 }
+
+func TestActivateFirstStartReturnsServerBoundEnvelope(t *testing.T) {
+	service, err := NewService(NewMemoryStore(true), Config{
+		NewAPIBaseURL: "https://api.example.com/v1/",
+		PreviewToken:  "preview-token",
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	result, err := service.ActivateFirstStart(context.Background(), FirstStartRequest{
+		Username:              "uclaw-biancheng",
+		ActivationCode:        "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
+		USBFingerprintSummary: "PREVIEW-ONLY",
+		IdempotencyKey:        "idem-static-1",
+	})
+	if err != nil {
+		t.Fatalf("activate first start: %v", err)
+	}
+
+	if result.Status != "server_bound" {
+		t.Fatalf("status = %q, want server_bound", result.Status)
+	}
+	if result.ActivationID == "" {
+		t.Fatal("activation id is empty")
+	}
+	if result.UsernameMasked != "UCLAW-BIANCHENG" {
+		t.Fatalf("username masked = %q", result.UsernameMasked)
+	}
+	if result.ArtifactStatus != "pending_client_write" {
+		t.Fatalf("artifact status = %q", result.ArtifactStatus)
+	}
+	if result.NewAPIToken != "preview-token" {
+		t.Fatalf("token = %q", result.NewAPIToken)
+	}
+}
+
+func TestActivateFirstStartIsIdempotentForSameRequest(t *testing.T) {
+	service, err := NewService(NewMemoryStore(true), Config{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	req := FirstStartRequest{
+		Username:              "UCLAW-BIANCHENG",
+		ActivationCode:        "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
+		USBFingerprintSummary: "PREVIEW-ONLY",
+		IdempotencyKey:        "idem-static-1",
+	}
+
+	first, err := service.ActivateFirstStart(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first activate: %v", err)
+	}
+	second, err := service.ActivateFirstStart(context.Background(), req)
+	if err != nil {
+		t.Fatalf("second activate: %v", err)
+	}
+
+	if first.ActivationID != second.ActivationID {
+		t.Fatalf("activation ids differ: %q vs %q", first.ActivationID, second.ActivationID)
+	}
+}
+
+func TestCommitFirstStartMarksClientWriteComplete(t *testing.T) {
+	service, err := NewService(NewMemoryStore(true), Config{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	activated, err := service.ActivateFirstStart(context.Background(), FirstStartRequest{
+		Username:              "UCLAW-BIANCHENG",
+		ActivationCode:        "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
+		USBFingerprintSummary: "PREVIEW-ONLY",
+		IdempotencyKey:        "idem-static-1",
+	})
+	if err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+
+	committed, err := service.CommitFirstStart(context.Background(), CommitRequest{
+		ActivationID: activated.ActivationID,
+		WriteStatus:  "verified",
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	if committed.Status != "committed" {
+		t.Fatalf("status = %q, want committed", committed.Status)
+	}
+	if committed.ActivationID != activated.ActivationID {
+		t.Fatalf("activation id = %q, want %q", committed.ActivationID, activated.ActivationID)
+	}
+}

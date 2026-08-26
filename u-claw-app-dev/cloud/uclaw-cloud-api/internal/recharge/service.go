@@ -14,6 +14,10 @@ import (
 const (
 	// ProviderVirtual is the local-development payment provider used before official pay wiring.
 	ProviderVirtual = "virtual"
+	// ProviderAlipay is the official Alipay payment channel.
+	ProviderAlipay = "alipay"
+	// ProviderWeChat is the official WeChat Pay payment channel.
+	ProviderWeChat = "wechat"
 
 	// StatusCreated means an order exists but no payment callback has been accepted.
 	StatusCreated = "created"
@@ -34,6 +38,13 @@ type Plan struct {
 	AmountCents int64  `json:"amountCents"`
 	Quota       int64  `json:"quota"`
 	Currency    string `json:"currency"`
+}
+
+// ProviderInfo describes one payment provider available to the client UI.
+type ProviderInfo struct {
+	Code    string `json:"code"`
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
 }
 
 // Order is the persistent payment order that bridges U-Claw, payment callbacks, and New API quota.
@@ -88,10 +99,31 @@ type QuotaClient interface {
 	AddQuota(ctx context.Context, req newapi.AddQuotaRequest) error
 }
 
+// CheckoutRequest is the provider-neutral payload needed to create a payment session.
+type CheckoutRequest struct {
+	OrderNo     string
+	Provider    string
+	Name        string
+	AmountCents int64
+	Currency    string
+}
+
+// CheckoutResult is the provider-neutral checkout data returned to the client.
+type CheckoutResult struct {
+	PayURL    string `json:"payUrl,omitempty"`
+	QRCodeURL string `json:"qrCodeUrl,omitempty"`
+}
+
+// CheckoutClient creates provider-specific payment sessions after the order is persisted.
+type CheckoutClient interface {
+	CreateCheckout(ctx context.Context, req CheckoutRequest) (CheckoutResult, error)
+}
+
 // Config controls the recharge slice while official payment providers are still pending.
 type Config struct {
 	AllowVirtualCallback bool
 	Plans                []Plan
+	CheckoutClients      map[string]CheckoutClient
 }
 
 // Service owns recharge order creation, callback idempotency, and New API quota crediting.
@@ -113,6 +145,7 @@ type CreateOrderRequest struct {
 type OrderResult struct {
 	Order              Order  `json:"order"`
 	PayURL             string `json:"payUrl,omitempty"`
+	QRCodeURL          string `json:"qrCodeUrl,omitempty"`
 	VirtualCallbackURL string `json:"virtualCallbackUrl,omitempty"`
 }
 
@@ -154,17 +187,33 @@ func (s *Service) ListPlans(_ context.Context) []Plan {
 	return plans
 }
 
-// CreateOrder creates a virtual recharge order for the authenticated U-Claw user.
+// ListProviders returns the payment provider catalog and whether each provider has a checkout adapter.
+func (s *Service) ListProviders(_ context.Context) []ProviderInfo {
+	return []ProviderInfo{
+		{Code: ProviderVirtual, Name: "开发虚拟支付", Enabled: s.cfg.AllowVirtualCallback},
+		{Code: ProviderAlipay, Name: "支付宝", Enabled: s.checkoutClient(ProviderAlipay) != nil},
+		{Code: ProviderWeChat, Name: "微信支付", Enabled: s.checkoutClient(ProviderWeChat) != nil},
+	}
+}
+
+// CreateOrder creates a recharge order and delegates checkout creation to the selected provider.
 func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (OrderResult, error) {
 	if req.UserID <= 0 {
 		return OrderResult{}, fmt.Errorf("user id is required")
 	}
-	provider := strings.TrimSpace(req.Provider)
+	provider := normalizeProvider(req.Provider)
 	if provider == "" {
 		provider = ProviderVirtual
 	}
-	if provider != ProviderVirtual {
+	if !isSupportedProvider(provider) {
 		return OrderResult{}, fmt.Errorf("payment provider is unsupported")
+	}
+	if provider == ProviderVirtual && !s.cfg.AllowVirtualCallback {
+		return OrderResult{}, fmt.Errorf("virtual payment provider is disabled")
+	}
+	checkout := s.checkoutClient(provider)
+	if provider != ProviderVirtual && checkout == nil {
+		return OrderResult{}, fmt.Errorf("payment provider %s is not configured", provider)
 	}
 	plan, ok := s.findPlan(req.PlanCode)
 	if !ok {
@@ -184,11 +233,25 @@ func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (Orde
 	if err != nil {
 		return OrderResult{}, err
 	}
-	return OrderResult{
-		Order:              order,
-		PayURL:             "virtual://uclaw/recharge/" + order.OrderNo,
-		VirtualCallbackURL: "/v1/payments/virtual/notify",
-	}, nil
+	result := OrderResult{Order: order}
+	if provider == ProviderVirtual {
+		result.PayURL = "virtual://uclaw/recharge/" + order.OrderNo
+		result.VirtualCallbackURL = "/v1/payments/virtual/notify"
+		return result, nil
+	}
+	checkoutResult, err := checkout.CreateCheckout(ctx, CheckoutRequest{
+		OrderNo:     order.OrderNo,
+		Provider:    provider,
+		Name:        plan.Name,
+		AmountCents: plan.AmountCents,
+		Currency:    plan.Currency,
+	})
+	if err != nil {
+		return OrderResult{}, err
+	}
+	result.PayURL = checkoutResult.PayURL
+	result.QRCodeURL = checkoutResult.QRCodeURL
+	return result, nil
 }
 
 // ListOrders returns recent recharge orders owned by the authenticated user.
@@ -300,6 +363,33 @@ func (s *Service) findPlan(code string) (Plan, bool) {
 		}
 	}
 	return Plan{}, false
+}
+
+// checkoutClient returns a configured checkout adapter for one official provider.
+func (s *Service) checkoutClient(provider string) CheckoutClient {
+	if s.cfg.CheckoutClients == nil {
+		return nil
+	}
+	return s.cfg.CheckoutClients[normalizeProvider(provider)]
+}
+
+// normalizeProvider trims and folds provider aliases used by clients and docs.
+func normalizeProvider(provider string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "wechatpay" || provider == "weixin" {
+		return ProviderWeChat
+	}
+	return provider
+}
+
+// isSupportedProvider rejects unknown payment channels before any order is created.
+func isSupportedProvider(provider string) bool {
+	switch provider {
+	case ProviderVirtual, ProviderAlipay, ProviderWeChat:
+		return true
+	default:
+		return false
+	}
 }
 
 // validatePlan prevents zero-value SKUs from creating meaningless payment orders.
