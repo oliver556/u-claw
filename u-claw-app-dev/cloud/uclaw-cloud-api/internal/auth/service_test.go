@@ -2,9 +2,20 @@ package auth
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
+
+type captureSMSProvider struct {
+	delivery SMSDelivery
+}
+
+// SendCode captures the delivery so tests can log in without exposing dev codes.
+func (p *captureSMSProvider) SendCode(_ context.Context, delivery SMSDelivery) error {
+	p.delivery = delivery
+	return nil
+}
 
 func TestSMSLoginIssuesVerifiableToken(t *testing.T) {
 	manager, err := NewTokenManager("test-secret")
@@ -12,8 +23,9 @@ func TestSMSLoginIssuesVerifiableToken(t *testing.T) {
 		t.Fatalf("NewTokenManager() error = %v", err)
 	}
 	service, err := NewService(NewMemoryStore(), manager, ServiceConfig{
-		DevSMSCode:  "654321",
-		ExposeCodes: true,
+		DevSMSCode:    "654321",
+		ExposeCodes:   true,
+		UseDevSMSCode: true,
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
@@ -49,7 +61,7 @@ func TestSMSLoginRejectsConsumedCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTokenManager() error = %v", err)
 	}
-	service, err := NewService(NewMemoryStore(), manager, ServiceConfig{DevSMSCode: "123456"})
+	service, err := NewService(NewMemoryStore(), manager, ServiceConfig{DevSMSCode: "123456", UseDevSMSCode: true})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -62,6 +74,54 @@ func TestSMSLoginRejectsConsumedCode(t *testing.T) {
 	}
 	if _, err := service.Login(context.Background(), "13800138000", "login", "123456"); err == nil {
 		t.Fatal("second Login() error = nil, want consumed code error")
+	}
+}
+
+func TestSMSProviderReceivesGeneratedCodeWithoutExposingIt(t *testing.T) {
+	manager, err := NewTokenManager("test-secret")
+	if err != nil {
+		t.Fatalf("NewTokenManager() error = %v", err)
+	}
+	provider := &captureSMSProvider{}
+	service, err := NewService(NewMemoryStore(), manager, ServiceConfig{
+		Provider:    provider,
+		CodePepper:  "test-pepper",
+		ExposeCodes: false,
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	sendResult, err := service.SendSMS(context.Background(), "13800138000", "login")
+	if err != nil {
+		t.Fatalf("SendSMS() error = %v", err)
+	}
+	if sendResult.DevCode != "" {
+		t.Fatalf("DevCode = %q, want hidden", sendResult.DevCode)
+	}
+	if provider.delivery.Phone != "13800138000" || len(provider.delivery.Code) != 6 {
+		t.Fatalf("provider delivery = %+v", provider.delivery)
+	}
+	if _, err := service.Login(context.Background(), "13800138000", "login", provider.delivery.Code); err != nil {
+		t.Fatalf("Login() with provider code error = %v", err)
+	}
+}
+
+func TestReservedSMSProviderFailsClosed(t *testing.T) {
+	manager, err := NewTokenManager("test-secret")
+	if err != nil {
+		t.Fatalf("NewTokenManager() error = %v", err)
+	}
+	service, err := NewService(NewMemoryStore(), manager, ServiceConfig{
+		Provider: ReservedSMSProvider{Name: "aliyun"},
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	_, err = service.SendSMS(context.Background(), "13800138000", "login")
+	if err == nil || !strings.Contains(err.Error(), "reserved but not implemented") {
+		t.Fatalf("SendSMS() error = %v, want reserved provider failure", err)
 	}
 }
 

@@ -46,6 +46,7 @@ product/activation-server
 
 - `POST /v1/auth/sms/send`
 - `POST /v1/auth/sms/login`
+- 短信发送 provider seam：本地 development no-op；生产 `aliyun` adapter 预留且未实现时失败关闭
 - `POST /v1/activation/redeem`
 - 激活时自动创建同手机号 New API 账号和 token
 - `GET /v1/newapi/usage/summary`
@@ -109,6 +110,11 @@ NEWAPI_ADMIN_BASE_URL=https://...
 NEWAPI_ADMIN_TOKEN=...
 NEWAPI_CLIENT_BASE_URL=https://...
 NEWAPI_USER_PASSWORD_SECRET=...
+SMS_PROVIDER=aliyun
+ALIYUN_SMS_ACCESS_KEY_ID=...
+ALIYUN_SMS_ACCESS_KEY_SECRET=...
+ALIYUN_SMS_SIGN_NAME=...
+ALIYUN_SMS_TEMPLATE_CODE=...
 ```
 
 开发环境可使用：
@@ -121,6 +127,8 @@ NEWAPI_ACTIVATION_QUOTA=100000
 
 `virtual` 支付回调只允许非 production。
 
+当前不接真实 New API 线上信息，也不保存任何真实短信密钥。真实 New API 与阿里云短信参数到位后，替换对应环境变量和 Aliyun SMS adapter，再做 staging 写入型验收。
+
 ## 验收标准
 
 - 本地 `go test ./...` 通过。
@@ -130,6 +138,8 @@ NEWAPI_ACTIVATION_QUOTA=100000
 
 ## 后续待办
 
+- 接入真实 Aliyun SMS `SMSProvider` adapter，完成短信签名、模板变量、限流与错误码映射。
+- 等待真实 New API admin/client endpoint 与管理 token 后，做 staging 写入型开户、token、充值验证。
 - 接入官方 Alipay/WeChat 支付创建订单与签名回调。
 - 增加订单列表 UI 和充值记录 UI。
 - 增加失败订单补偿 worker 或 admin 命令。

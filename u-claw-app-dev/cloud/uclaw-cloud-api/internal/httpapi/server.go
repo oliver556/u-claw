@@ -382,15 +382,26 @@ func buildAuthService(cfg config.Config, store auth.Store) *auth.Service {
 		panic(fmt.Sprintf("build token manager: %v", err))
 	}
 	service, err := auth.NewService(store, manager, auth.ServiceConfig{
-		TokenTTL:    cfg.AuthTokenTTL,
-		DevSMSCode:  cfg.DevSMSCode,
-		CodePepper:  cfg.SMSCodePepper,
-		ExposeCodes: !cfg.IsProduction(),
+		TokenTTL:      cfg.AuthTokenTTL,
+		DevSMSCode:    cfg.DevSMSCode,
+		CodePepper:    cfg.SMSCodePepper,
+		ExposeCodes:   !cfg.IsProduction(),
+		UseDevSMSCode: !cfg.IsProduction(),
+		Provider:      buildSMSProvider(cfg),
 	})
 	if err != nil {
 		panic(fmt.Sprintf("build auth service: %v", err))
 	}
 	return service
+}
+
+// buildSMSProvider isolates the vendor seam so the real Aliyun implementation
+// can replace the reserved adapter without touching login or activation logic.
+func buildSMSProvider(cfg config.Config) auth.SMSProvider {
+	if strings.EqualFold(cfg.SMSProvider, "aliyun") {
+		return auth.ReservedSMSProvider{Name: cfg.SMSProvider}
+	}
+	return auth.DevelopmentSMSProvider{}
 }
 
 // buildActivationService creates activation dependencies, using memory only outside production.

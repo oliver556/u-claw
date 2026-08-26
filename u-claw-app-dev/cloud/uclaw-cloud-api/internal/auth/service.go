@@ -2,9 +2,11 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"regexp"
 	"strings"
 	"sync"
@@ -15,11 +17,13 @@ var phonePattern = regexp.MustCompile(`^1[3-9]\d{9}$`)
 
 // ServiceConfig controls SMS login behavior for local dev and production wiring.
 type ServiceConfig struct {
-	CodeTTL     time.Duration
-	TokenTTL    time.Duration
-	DevSMSCode  string
-	CodePepper  string
-	ExposeCodes bool
+	CodeTTL       time.Duration
+	TokenTTL      time.Duration
+	DevSMSCode    string
+	CodePepper    string
+	ExposeCodes   bool
+	UseDevSMSCode bool
+	Provider      SMSProvider
 }
 
 // User is the verified U-Claw account returned to API clients.
@@ -33,6 +37,40 @@ type SMSCode struct {
 	CodeHash  string
 	ExpiresAt time.Time
 	Consumed  bool
+}
+
+// SMSDelivery is the provider-neutral payload for real SMS adapters.
+type SMSDelivery struct {
+	Phone   string
+	Purpose string
+	Code    string
+}
+
+// SMSProvider sends verification codes through a concrete vendor.
+type SMSProvider interface {
+	SendCode(ctx context.Context, delivery SMSDelivery) error
+}
+
+// DevelopmentSMSProvider is the local no-op sender used by tests and dev runs.
+type DevelopmentSMSProvider struct{}
+
+// SendCode accepts the code without contacting an external SMS vendor.
+func (DevelopmentSMSProvider) SendCode(_ context.Context, _ SMSDelivery) error {
+	return nil
+}
+
+// ReservedSMSProvider keeps the production SMS seam explicit until the vendor SDK is wired.
+type ReservedSMSProvider struct {
+	Name string
+}
+
+// SendCode fails closed so production cannot silently pretend SMS was sent.
+func (p ReservedSMSProvider) SendCode(_ context.Context, _ SMSDelivery) error {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		name = "unknown"
+	}
+	return fmt.Errorf("sms provider %s is reserved but not implemented", name)
 }
 
 // Store is the persistence seam for phone login; PostgreSQL implementation can replace MemoryStore.
@@ -82,6 +120,9 @@ func NewService(store Store, tokens *TokenManager, cfg ServiceConfig) (*Service,
 	if strings.TrimSpace(cfg.CodePepper) == "" {
 		cfg.CodePepper = "uclaw-dev-code-pepper"
 	}
+	if cfg.Provider == nil {
+		cfg.Provider = DevelopmentSMSProvider{}
+	}
 	return &Service{store: store, tokens: tokens, cfg: cfg, now: time.Now}, nil
 }
 
@@ -92,12 +133,18 @@ func (s *Service) SendSMS(ctx context.Context, phone string, purpose string) (Se
 		return SendSMSResult{}, err
 	}
 
-	code := s.cfg.DevSMSCode
+	code, err := s.nextSMSCode()
+	if err != nil {
+		return SendSMSResult{}, err
+	}
 	record := SMSCode{
 		CodeHash:  s.hashCode(phone, purpose, code),
 		ExpiresAt: s.now().Add(s.cfg.CodeTTL),
 	}
 	if err := s.store.SaveSMSCode(ctx, phone, purpose, record); err != nil {
+		return SendSMSResult{}, err
+	}
+	if err := s.cfg.Provider.SendCode(ctx, SMSDelivery{Phone: phone, Purpose: purpose, Code: code}); err != nil {
 		return SendSMSResult{}, err
 	}
 
@@ -151,6 +198,19 @@ func MaskPhone(phone string) string {
 func (s *Service) hashCode(phone string, purpose string, code string) string {
 	sum := sha256.Sum256([]byte(phone + ":" + purpose + ":" + strings.TrimSpace(code) + ":" + s.cfg.CodePepper))
 	return hex.EncodeToString(sum[:])
+}
+
+// nextSMSCode returns a dev fixture code only when explicitly allowed; otherwise
+// it uses crypto/rand so production logins are not tied to a static code.
+func (s *Service) nextSMSCode() (string, error) {
+	if s.cfg.UseDevSMSCode {
+		return strings.TrimSpace(s.cfg.DevSMSCode), nil
+	}
+	value, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return "", fmt.Errorf("generate sms code: %w", err)
+	}
+	return fmt.Sprintf("%06d", value.Int64()), nil
 }
 
 // normalizeSMSInput enforces the current China mainland phone-login boundary.

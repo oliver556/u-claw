@@ -22,8 +22,13 @@ type Config struct {
 	NewAPITokenName          string
 	NewAPIUserPasswordSecret string
 	AuthTokenTTL             time.Duration
+	SMSProvider              string
 	DevSMSCode               string
 	SMSCodePepper            string
+	AliyunSMSAccessKeyID     string
+	AliyunSMSAccessKeySecret string
+	AliyunSMSSignName        string
+	AliyunSMSTemplateCode    string
 	ActivationCodePepper     string
 	LicenseSigningKeyID      string
 	LicenseSigningSeedHex    string
@@ -60,8 +65,13 @@ func Load(getenv Getter) (Config, error) {
 		NewAPITokenName:          withDefault(getenv("NEWAPI_TOKEN_NAME"), "uclaw-main"),
 		NewAPIUserPasswordSecret: withDefault(getenv("NEWAPI_USER_PASSWORD_SECRET"), "uclaw-dev-newapi-user-password-secret"),
 		AuthTokenTTL:             24 * time.Hour,
+		SMSProvider:              withDefault(getenv("SMS_PROVIDER"), "development"),
 		DevSMSCode:               withDefault(getenv("DEV_SMS_CODE"), "123456"),
 		SMSCodePepper:            withDefault(getenv("SMS_CODE_PEPPER"), "uclaw-dev-sms-code-pepper"),
+		AliyunSMSAccessKeyID:     strings.TrimSpace(getenv("ALIYUN_SMS_ACCESS_KEY_ID")),
+		AliyunSMSAccessKeySecret: strings.TrimSpace(getenv("ALIYUN_SMS_ACCESS_KEY_SECRET")),
+		AliyunSMSSignName:        strings.TrimSpace(getenv("ALIYUN_SMS_SIGN_NAME")),
+		AliyunSMSTemplateCode:    strings.TrimSpace(getenv("ALIYUN_SMS_TEMPLATE_CODE")),
 		ActivationCodePepper:     withDefault(getenv("ACTIVATION_CODE_PEPPER"), "uclaw-dev-activation-code-pepper"),
 		LicenseSigningKeyID:      strings.TrimSpace(getenv("LICENSE_SIGNING_KEY_ID")),
 		LicenseSigningSeedHex:    strings.TrimSpace(getenv("LICENSE_SIGNING_SEED_HEX")),
@@ -117,6 +127,28 @@ func (cfg Config) ValidateForServe() error {
 	}
 	if cfg.NewAPIUserPasswordSecret == "" {
 		missing = append(missing, "NEWAPI_USER_PASSWORD_SECRET")
+	}
+	if cfg.SMSProvider == "" {
+		missing = append(missing, "SMS_PROVIDER")
+	}
+	switch strings.ToLower(cfg.SMSProvider) {
+	case "development":
+		missing = append(missing, "SMS_PROVIDER(non-development)")
+	case "aliyun":
+		if cfg.AliyunSMSAccessKeyID == "" {
+			missing = append(missing, "ALIYUN_SMS_ACCESS_KEY_ID")
+		}
+		if cfg.AliyunSMSAccessKeySecret == "" {
+			missing = append(missing, "ALIYUN_SMS_ACCESS_KEY_SECRET")
+		}
+		if cfg.AliyunSMSSignName == "" {
+			missing = append(missing, "ALIYUN_SMS_SIGN_NAME")
+		}
+		if cfg.AliyunSMSTemplateCode == "" {
+			missing = append(missing, "ALIYUN_SMS_TEMPLATE_CODE")
+		}
+	default:
+		missing = append(missing, "SMS_PROVIDER(aliyun)")
 	}
 	if cfg.LicenseSigningKeyID == "" {
 		missing = append(missing, "LICENSE_SIGNING_KEY_ID")
