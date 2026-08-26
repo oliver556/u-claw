@@ -355,6 +355,8 @@ func runStatusWindow() error {
 		0,
 	)
 	procSetTimer.Call(windowHandle, 1, 500, 0)
+	procShowWindow.Call(windowHandle, swShow)
+	atomic.StoreInt32(&windowHidden, 0)
 	procUpdateWindow.Call(windowHandle)
 	updateStatusWindow()
 
