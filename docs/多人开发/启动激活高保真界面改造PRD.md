@@ -30,6 +30,104 @@
 
 将高保真设计稿转化为 U-Claw 正式首次激活流程：在 Launcher 授权 gate 前新增受限 activation-only 模式，页面采用四步向导：使用须知、设备检查、激活与配置、完成。UI 负责展示与收集，Launcher/Desktop 负责 USB 身份、写盘与 gate，Go 激活授权服务器负责激活码库存、绑定、许可证签发、状态和审计。现有 Config.html 继续承担模型高级配置，不与激活职责混淆。
 
+## Project Placement
+
+当前仓库根目录固定为：
+
+```txt
+/Users/biancheng/Documents/ChatGPT/U-CLAW
+```
+
+正式开发只放在：
+
+```txt
+/Users/biancheng/Documents/ChatGPT/U-CLAW/u-claw-app-dev
+```
+
+归档目录只读，不得修改：
+
+```txt
+/Users/biancheng/Documents/ChatGPT/U-CLAW/u-claw-app
+/Users/biancheng/Documents/ChatGPT/U-CLAW/product
+```
+
+放置规则：
+
+- PRD、能力矩阵、开发说明放在 `docs/多人开发/`。
+- Electron 启动壳、activation-only、窗口逻辑放在 `u-claw-app-dev/src/main.js`。
+- Renderer 安全暴露放在 `u-claw-app-dev/src/preload.js`。
+- 激活页静态 UI 放在 `u-claw-app-dev/src/activation.html`。
+- OpenClaw 主界面改造通过 `u-claw-app-dev/scripts/patch-openclaw.js` 落地，不直接手改 `node_modules/openclaw/dist/control-ui` 产物。
+- 验证脚本放在 `u-claw-app-dev/scripts/verify-*.js`。
+- 本地构建产物输出到 `u-claw-app-dev/release/`。
+- 最终交付给用户的便携目录放在 U 盘根目录下的 `U-Claw/`，由 release/package 产物复制生成，不在 U 盘上直接开发。
+
+推荐目录形态：
+
+```txt
+U-CLAW/
+├── docs/多人开发/                  # PRD、能力矩阵、开发说明
+├── u-claw-app/                     # 归档，只读
+├── product/                        # 旧工程，只读
+└── u-claw-app-dev/                 # 唯一正式开发目录
+    ├── src/                        # Electron 壳、激活页、preload
+    ├── scripts/                    # patch、verify、打包脚本
+    ├── resources/                  # 默认配置、runtime 资源
+    └── release/                    # 构建输出
+```
+
+## Packaging and Deployment Strategy
+
+本项目需要把“客户端打包”和“授权服务器部署”拆开处理。1 核 1G 阿里云服务器只承载激活授权服务，不承担 Electron/OpenClaw 客户端构建，不运行 OpenClaw Gateway，不存放开发源码。
+
+### Client Packaging
+
+客户端包在开发机或 CI 上构建，原因是 Electron、OpenClaw、Node runtime 和跨平台产物体积大，构建时 CPU、内存、磁盘 IO 都明显超过 1 核 1G 服务器的合理承载范围。
+
+推荐流程：
+
+1. 在 `u-claw-app-dev` 内执行 `npm run prepare-build`，确保 OpenClaw UI patch、lib sync、默认配置同步完成。
+2. 按平台执行 `npm run build:mac-arm64`、`npm run build:mac-x64`、`npm run build:win`，或执行便携版打包脚本 `npm run package:portable:customer`。
+3. 构建产物只从 `u-claw-app-dev/release/` 取。
+4. 发布时上传到 GitHub Releases、阿里云 OSS/CDN 或内部对象存储；1 核 1G 授权服务器只返回版本/下载元数据，不直接承担大文件分发压力。
+5. 客户端内置或配置生产激活 endpoint，例如 `https://activation.u-claw.org`；测试 endpoint 只能在显式 dev mode 下使用。
+
+### Activation Server Deployment
+
+1 核 1G 阿里云服务器适合部署轻量授权服务：
+
+- 提供 `POST /v1/activations`、`POST /v1/activations/{activationId}/commit`、license/status 查询和健康检查。
+- 保存激活码库存、USB 绑定关系、license 签发记录、commit 状态和审计日志。
+- 签发 license 与 startup credential，不处理 Electron 包构建、OpenClaw runtime、模型代理或大文件下载。
+
+推荐形态：
+
+- Server runtime：Go 单二进制优先；Node 也可，但必须避免构建步骤留在服务器上。
+- Process manager：`systemd` 管理进程，失败自动重启。
+- TLS/reverse proxy：Caddy 或 Nginx 终止 HTTPS。
+- Storage：低并发首版可用 SQLite WAL + 每日备份；若激活量增长，再迁移到 RDS MySQL/PostgreSQL。
+- Secrets：签名私钥、数据库路径、管理员 token 只放服务器 env 或受限配置文件，不进 repo，不进入客户端包。
+- Backup：数据库、签名公私钥、激活码库存导入记录必须定时备份到 OSS 或异地目录。
+- Logs：只记录 public error code、activationId、短 USB 摘要、版本与时间；不得记录激活码明文、完整 USB fingerprint、license secret、token、signature 或 raw server response。
+
+推荐交付包：
+
+```txt
+activation-server/
+├── uclaw-activation-server        # Go single binary
+├── migrations/                    # DB schema migrations
+├── config.example.env             # 无密钥模板
+├── systemd/uclaw-activation.service
+└── README.md                      # 部署、备份、回滚命令
+```
+
+1 核 1G 约束：
+
+- 不在服务器上执行 Electron build、`npm install`、`electron-builder` 或 OpenClaw patch。
+- 不运行多服务 Docker Compose。若使用 Docker，只允许单容器 + 外置持久目录，并保留 systemd/裸二进制备用方案。
+- 不把下载大包直接挂在 API 服务进程上；大文件走 OSS/CDN。
+- 健康检查与日志轮转必须轻量，避免磁盘被日志打满。
+
 ## User Stories
 
 1. As a new U-Claw user, I want to see a clear first-start screen, so that I know I am activating the product before entering the workspace.
@@ -204,4 +302,3 @@ Acceptance:
 - Titlebar, spacing, shadows, radius, typography, and blue/green/orange/red states follow the reference.
 - All visible text fits at 900px desktop and narrow viewport.
 - Activation-only mode cannot reach normal dashboard, Config.html, Gateway token, user workspace, or OpenClaw control routes.
-
