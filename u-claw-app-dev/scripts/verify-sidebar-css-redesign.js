@@ -50,7 +50,7 @@ const compactTokens = [
   ".nav-item.active,.nav-item--active{color:var(--uclaw-navy);background:color-mix(insrgb,var(--accent-subtle)38%,white62%);border-color:transparent!important;box-shadow:none!important;}",
   ".nav-item.active:before,.nav-item--active:before{content:none;}",
   ".sidebar-new-session{min-height:46px;border:1pxsolidcolor-mix(insrgb,var(--border)72%,transparent);border-radius:8px;background:rgba(255,255,255,0.5);box-shadow:none;gap:10px;padding:013px;font-size:15px;font-weight:680;",
-  ".sidebar-sessions>.sidebar-new-session,.sidebar-sessions>openclaw-tooltip>.sidebar-new-session{left:20px;right:72px;}",
+  ".sidebar-sessions>.sidebar-new-session,.sidebar-sessions>openclaw-tooltip>.sidebar-new-session{left:20px;right:72px;width:auto;}",
   ".sidebar-sessions>.sidebar-new-session-group{left:20px;right:20px;display:grid;grid-template-columns:minmax(0,1fr)46px;gap:8px;align-items:center;width:auto;}",
   ".sidebar-new-session--worktree{width:46px;min-height:46px;justify-content:center;padding:0;color:#8792a4;background:transparent;}",
   ".sidebar-new-session__icon,.sidebar-new-session__iconsvg{width:19px;height:19px;}",

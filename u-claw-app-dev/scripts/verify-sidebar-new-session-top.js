@@ -36,6 +36,7 @@ const requiredCssTokens = [
   ".sidebar-sessions>openclaw-tooltip>.sidebar-new-session",
   ".sidebar-sessions>.sidebar-new-session-group",
   "top:62px",
+  "width: auto",
   "z-index:12",
 ];
 

@@ -427,6 +427,10 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Applies U-Claw chat runtime patches that need to survive rebuilt OpenClaw
+ * assets, including media previews and attachment affordances.
+ */
 function patchChatPage() {
   const files = listAssetFiles(/^chat-page-.*\.js$/, "chat-page");
 
@@ -491,13 +495,38 @@ function patchChatPage() {
     const lightboxFunction = `function uClawEnsureMediaLightboxStyle(){if(document.getElementById(\`uclaw-media-lightbox-style\`))return;let e=document.createElement(\`style\`);e.id=\`uclaw-media-lightbox-style\`,e.textContent=[\`.uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:32px;outline:0}.uclaw-media-lightbox__viewer{max-width:96vw;max-height:92vh;display:flex;align-items:center;justify-content:center}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45)}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;min-width:38px;height:38px;padding:0 13px;display:inline-flex;align-items:center;justify-content:center;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button--close{font-size:20px;font-weight:500;padding-bottom:2px}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:88vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}}\`].join(\`\`),document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e==\`string\`?e.trim():\`\`;if(!n)return;uClawEnsureMediaLightboxStyle(),document.querySelector(\`.uclaw-media-lightbox\`)?.remove();let r=document.createElement(\`div\`);r.className=\`uclaw-media-lightbox\`,r.tabIndex=-1,r.setAttribute(\`role\`,\`dialog\`),r.setAttribute(\`aria-modal\`,\`true\`);let i=()=>{document.removeEventListener(\`keydown\`,a,!0),r.remove()},a=e=>{e.key===\`Escape\`&&(e.preventDefault(),i())};r.addEventListener(\`click\`,e=>{e.target===r&&i()});let o=document.createElement(\`div\`);o.className=\`uclaw-media-lightbox__toolbar\`;let s=document.createElement(\`a\`);s.className=\`uclaw-media-lightbox__button\`,s.href=n,s.target=\`_blank\`,s.rel=\`noreferrer\`,s.download=t.label||\`\`,s.textContent=\`下载\`;let c=document.createElement(\`button\`);c.className=\`uclaw-media-lightbox__button uclaw-media-lightbox__button--close\`,c.type=\`button\`,c.setAttribute(\`aria-label\`,\`关闭预览\`),c.textContent=\`×\`,c.addEventListener(\`click\`,i),o.append(s,c);let l=document.createElement(\`div\`);l.className=\`uclaw-media-lightbox__viewer\`;let u=(t.kind||\`\`).toLowerCase()===\`video\`||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(u?\`video\`:\`img\`);d.src=n,u?(d.controls=!0,d.autoplay=!0,d.playsInline=!0,d.preload=\`metadata\`):d.alt=t.label||\`Preview\`,d.addEventListener(\`click\`,e=>e.stopPropagation()),l.appendChild(d),r.append(o,l),document.body.appendChild(r),document.addEventListener(\`keydown\`,a,!0),requestAnimationFrame(()=>r.focus({preventScroll:!0}))}`;
     const lightboxFunctionV2 = `function uClawEnsureMediaLightboxStyle(){if(document.getElementById(\`uclaw-media-lightbox-style\`))return;let e=document.createElement(\`style\`);e.id=\`uclaw-media-lightbox-style\`,e.textContent=[\`.uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:32px 48px;outline:0;overflow:hidden}.uclaw-media-lightbox__viewer{max-width:96vw;max-height:90vh;display:flex;align-items:center;justify-content:center;overflow:hidden}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:90vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45);transform-origin:center center;transition:transform .14s ease}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__button--close{font-size:22px;font-weight:500;padding-bottom:2px}.uclaw-media-lightbox__zoom{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:1;display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:999px;background:rgba(20,20,20,.72);box-shadow:0 8px 28px rgba(0,0,0,.34);backdrop-filter:blur(10px)}.uclaw-media-lightbox__zoom-button{border:0;border-radius:999px;width:32px;height:32px;background:rgba(255,255,255,.9);color:#111;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font:600 14px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.uclaw-media-lightbox__zoom-button:hover{background:#fff}.uclaw-media-lightbox__zoom-button svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__zoom-value{min-width:48px;color:#fff;text-align:center;font:600 12px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:84vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}.uclaw-media-lightbox__zoom{bottom:12px}}\`].join(\`\`),document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e==\`string\`?e.trim():\`\`;if(!n)return;uClawEnsureMediaLightboxStyle(),document.querySelector(\`.uclaw-media-lightbox\`)?.remove();let r=document.createElement(\`div\`);r.className=\`uclaw-media-lightbox\`,r.tabIndex=-1,r.setAttribute(\`role\`,\`dialog\`),r.setAttribute(\`aria-modal\`,\`true\`);let i=1,a=()=>{d.style.transform=\`scale(\${i})\`,v.textContent=\`\${Math.round(i*100)}%\`},o=()=>{document.removeEventListener(\`keydown\`,s,!0),r.remove()},s=e=>{e.key===\`Escape\`&&(e.preventDefault(),o())};r.addEventListener(\`click\`,e=>{e.target===r&&o()});let c=document.createElement(\`div\`);c.className=\`uclaw-media-lightbox__toolbar\`;let l=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>\`,u=document.createElement(\`a\`);u.className=\`uclaw-media-lightbox__button\`,u.href=n,u.target=\`_blank\`,u.rel=\`noreferrer\`,u.download=t.label||\`\`,u.title=\`下载\`,u.setAttribute(\`aria-label\`,\`下载\`),u.innerHTML=l;let f=document.createElement(\`button\`);f.className=\`uclaw-media-lightbox__button uclaw-media-lightbox__button--close\`,f.type=\`button\`,f.setAttribute(\`aria-label\`,\`关闭预览\`),f.title=\`关闭\`,f.textContent=\`×\`,f.addEventListener(\`click\`,o),c.append(u,f);let p=document.createElement(\`div\`);p.className=\`uclaw-media-lightbox__viewer\`;let m=(t.kind||\`\`).toLowerCase()===\`video\`||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(m?\`video\`:\`img\`);d.src=n,m?(d.controls=!0,d.autoplay=!0,d.playsInline=!0,d.preload=\`metadata\`):d.alt=t.label||\`Preview\`,d.addEventListener(\`click\`,e=>e.stopPropagation()),p.appendChild(d);let h=document.createElement(\`div\`);h.className=\`uclaw-media-lightbox__zoom\`;let y=(e,t,n)=>{let r=document.createElement(\`button\`);return r.className=\`uclaw-media-lightbox__zoom-button\`,r.type=\`button\`,r.title=t,r.setAttribute(\`aria-label\`,t),r.innerHTML=e,r.addEventListener(\`click\`,e=>{e.preventDefault(),e.stopPropagation(),n()}),r},g=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>\`,b=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>\`,w=\`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M16 3h3a2 2 0 0 1 2 2v3"></path><path d="M8 21H5a2 2 0 0 1-2-2v-3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>\`,v=document.createElement(\`span\`);v.className=\`uclaw-media-lightbox__zoom-value\`,h.append(y(g,\`缩小\`,()=>{i=Math.max(.5,Math.round((i-.25)*100)/100),a()}),v,y(b,\`放大\`,()=>{i=Math.min(3,Math.round((i+.25)*100)/100),a()}),y(w,\`适配\`,()=>{i=1,a()})),r.append(c,p,h),document.body.appendChild(r),a(),document.addEventListener(\`keydown\`,s,!0),requestAnimationFrame(()=>r.focus({preventScroll:!0}))}`;
     const lightboxFunctionV3 = `function uClawEnsureMediaLightboxStyle(){let e=document.getElementById("uclaw-media-lightbox-style");e&&e.remove();e=document.createElement("style");e.id="uclaw-media-lightbox-style";e.textContent=".uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:42px 52px;outline:0;overflow:hidden}.uclaw-media-lightbox--full{padding:0}.uclaw-media-lightbox__viewer{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:90vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45);transform-origin:center center;transition:transform .14s ease,width .14s ease,height .14s ease,border-radius .14s ease}.uclaw-media-lightbox--full .uclaw-media-lightbox__viewer img,.uclaw-media-lightbox--full .uclaw-media-lightbox__viewer video{width:100vw;height:100vh;max-width:100vw;max-height:100vh;border-radius:0;box-shadow:none}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__button--close{font-size:22px;font-weight:500;padding-bottom:2px}.uclaw-media-lightbox__zoom{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:1;display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:999px;background:rgba(20,20,20,.74);box-shadow:0 8px 28px rgba(0,0,0,.34);backdrop-filter:blur(10px)}.uclaw-media-lightbox__zoom-button{border:0;border-radius:999px;width:32px;height:32px;background:rgba(255,255,255,.92);color:#111;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font:600 14px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.uclaw-media-lightbox__zoom-button:hover{background:#fff}.uclaw-media-lightbox__zoom-button svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.uclaw-media-lightbox__zoom-value{min-width:48px;color:#fff;text-align:center;font:600 12px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox--full{padding:0}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:84vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}.uclaw-media-lightbox__zoom{bottom:12px}}";document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e=="string"?e.trim():"";if(!n)return;uClawEnsureMediaLightboxStyle();document.querySelector(".uclaw-media-lightbox")?.remove();let r=document.createElement("div");r.className="uclaw-media-lightbox";r.tabIndex=-1;r.setAttribute("role","dialog");r.setAttribute("aria-modal","true");let i=1,a=false,o='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M16 3h3a2 2 0 0 1 2 2v3"></path><path d="M8 21H5a2 2 0 0 1-2-2v-3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>',s='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5H3"></path><path d="M16 3v5h5"></path><path d="M8 21v-5H3"></path><path d="M16 21v-5h5"></path></svg>',c=()=>{d.style.transform="scale("+i+")";v.textContent=Math.round(i*100)+"%";r.classList.toggle("uclaw-media-lightbox--full",a);w.innerHTML=a?s:o;w.title=a?"退出全屏":"全屏";w.setAttribute("aria-label",w.title)},l=()=>{document.removeEventListener("keydown",u,true);r.remove()},u=e=>{if(e.key==="Escape"){e.preventDefault();l()}else if(e.key==="+"||e.key==="="){e.preventDefault();i=Math.min(3,Math.round((i+.25)*100)/100);c()}else if(e.key==="-"||e.key==="_"){e.preventDefault();i=Math.max(.5,Math.round((i-.25)*100)/100);c()}else if(e.key==="0"){e.preventDefault();i=1;c()}else if(e.key.toLowerCase()==="f"){e.preventDefault();a=!a;i=1;c()}};r.addEventListener("click",e=>{e.target===r&&l()});let f=document.createElement("div");f.className="uclaw-media-lightbox__toolbar";let p='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>',m=document.createElement("a");m.className="uclaw-media-lightbox__button";m.href=n;m.target="_blank";m.rel="noreferrer";m.download=t.label||"";m.title="下载";m.setAttribute("aria-label","下载");m.innerHTML=p;let h=document.createElement("button");h.className="uclaw-media-lightbox__button uclaw-media-lightbox__button--close";h.type="button";h.setAttribute("aria-label","关闭预览");h.title="关闭";h.textContent="×";h.addEventListener("click",l);f.append(m,h);let y=document.createElement("div");y.className="uclaw-media-lightbox__viewer";let g=(t.kind||"").toLowerCase()==="video"||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(g?"video":"img");d.src=n;if(g){d.controls=true;d.autoplay=true;d.playsInline=true;d.preload="metadata"}else d.alt=t.label||"Preview";d.addEventListener("click",e=>e.stopPropagation());d.addEventListener("dblclick",e=>{e.preventDefault();a=!a;i=1;c()});y.appendChild(d);let b=document.createElement("div");b.className="uclaw-media-lightbox__zoom";let S=(e,t,n)=>{let r=document.createElement("button");r.className="uclaw-media-lightbox__zoom-button";r.type="button";r.title=t;r.setAttribute("aria-label",t);r.innerHTML=e;r.addEventListener("click",e=>{e.preventDefault();e.stopPropagation();n()});return r},C='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>',T='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>',v=document.createElement("span");v.className="uclaw-media-lightbox__zoom-value";let w=S(o,"全屏",()=>{a=!a;i=1;c()});b.append(S(C,"缩小",()=>{i=Math.max(.5,Math.round((i-.25)*100)/100);c()}),v,S(T,"放大",()=>{i=Math.min(3,Math.round((i+.25)*100)/100);c()}),w);r.append(f,y,b);document.body.appendChild(r);c();document.addEventListener("keydown",u,true);requestAnimationFrame(()=>r.focus({preventScroll:true}))}`;
+    const attachmentActionsFunction = `function uClawAttachmentActionUrl(e){let t=typeof e=="string"?e.trim():"";return t||""}function uClawOpenAttachment(e,t={}){let n=uClawAttachmentActionUrl(e);if(!n)return;let r=(t.kind||"").toLowerCase();r==="image"||r==="video"?uClawOpenMediaLightbox(n,t):window.open(n,"_blank","noopener,noreferrer")}function uClawDownloadAttachment(e,t={}){let n=uClawAttachmentActionUrl(e);if(!n)return;let r=document.createElement("a");r.href=n;r.target="_blank";r.rel="noreferrer";r.download=t.label||"";document.body.appendChild(r);r.click();r.remove()}function uClawSaveAttachmentAs(e,t={}){uClawDownloadAttachment(e,t)}function uClawStopAttachmentAction(e){e.preventDefault();e.stopPropagation()}function uClawAttachmentActions(e){let t=uClawAttachmentActionUrl(e?.url);return t?s\`
+      <div class="uclaw-attachment-actions">
+        <button
+          class="uclaw-attachment-action"
+          type="button"
+          title="打开"
+          @click=\${t=>{uClawStopAttachmentAction(t),uClawOpenAttachment(e.url,{kind:e.kind,label:e.label})}}
+        >打开</button>
+        <button
+          class="uclaw-attachment-action"
+          type="button"
+          title="保存"
+          @click=\${t=>{uClawStopAttachmentAction(t),uClawDownloadAttachment(e.url,{label:e.label})}}
+        >保存</button>
+        <button
+          class="uclaw-attachment-action"
+          type="button"
+          title="另存为"
+          @click=\${t=>{uClawStopAttachmentAction(t),uClawSaveAttachmentAs(e.url,{label:e.label})}}
+        >另存为</button>
+      </div>
+    \`:c}`;
     if (after.includes("function uClawEnsureMediaLightboxStyle()")) {
       after = after.replace(
         /function uClawEnsureMediaLightboxStyle\(\)\{[\s\S]*?\}function mS\(\)\{return s`/,
-        `${lightboxFunctionV3}function mS(){return s\``,
+        `${lightboxFunctionV3}${attachmentActionsFunction}function mS(){return s\``,
       );
     } else {
-      after = after.replace("function mS(){return s`", `${lightboxFunctionV3}function mS(){return s\``);
+      after = after.replace(
+        "function mS(){return s`",
+        `${lightboxFunctionV3}${attachmentActionsFunction}function mS(){return s\``,
+      );
     }
 
     const userImageBrowserOpen = "an(e,{allowDataImage:!0})";
@@ -511,6 +540,51 @@ function patchChatPage() {
       "@click=${()=>uClawOpenMediaLightbox(l,{kind:`image`,label:e.label})}";
     if (after.includes(assistantImageBrowserOpen)) {
       after = after.replace(assistantImageBrowserOpen, assistantImageLightboxOpen);
+    }
+
+    const blockedAttachmentCard =
+      "function YS(e){return s`\n    <div class=\"chat-assistant-attachment-card chat-assistant-attachment-card--blocked\">\n      <div class=\"chat-assistant-attachment-card__header\">\n        <span class=\"chat-assistant-attachment-card__icon\">${e.kind===`image`?z.image:e.kind===`audio`?z.mic:e.kind===`video`?z.monitor:z.paperclip}</span>\n        <span class=\"chat-assistant-attachment-card__title\">${e.label}</span>\n        <span class=\"chat-assistant-attachment-badge chat-assistant-attachment-badge--muted\"\n          >${e.badge}</span\n        >\n      </div>\n      ${e.reason?s`<div class=\"chat-assistant-attachment-card__reason\">${e.reason}</div>`:c}\n    </div>\n  `}";
+    const blockedAttachmentCardWithActions =
+      "function YS(e){return s`\n    <div class=\"chat-assistant-attachment-card chat-assistant-attachment-card--blocked\">\n      <div class=\"chat-assistant-attachment-card__header\">\n        <span class=\"chat-assistant-attachment-card__icon\">${e.kind===`image`?z.image:e.kind===`audio`?z.mic:e.kind===`video`?z.monitor:z.paperclip}</span>\n        <span class=\"chat-assistant-attachment-card__title\">${e.label}</span>\n        <span class=\"chat-assistant-attachment-badge chat-assistant-attachment-badge--muted\"\n          >${e.badge}</span\n        >\n      </div>\n      ${e.reason?s`<div class=\"chat-assistant-attachment-card__reason\">${e.reason}</div>`:c}\n      ${uClawAttachmentActions({url:e.url,kind:e.kind,label:e.label})}\n    </div>\n  `}";
+    if (!after.includes("uClawAttachmentActions({url:e.url,kind:e.kind,label:e.label})")) {
+      after = after.replace(blockedAttachmentCard, blockedAttachmentCardWithActions);
+    }
+
+    const imageAttachmentBare = `            <img
+              src=\${l}
+              alt=\${e.label}
+              class="chat-message-image"
+              @click=\${()=>uClawOpenMediaLightbox(l,{kind:\`image\`,label:e.label})}
+            />
+          `;
+    const imageAttachmentWithActions = `            <div class="uclaw-chat-image-attachment">
+              <img
+                src=\${l}
+                alt=\${e.label}
+                class="chat-message-image"
+                @click=\${()=>uClawOpenMediaLightbox(l,{kind:\`image\`,label:e.label})}
+              />
+              \${uClawAttachmentActions({url:l,kind:\`image\`,label:e.label})}
+            </div>
+          `;
+    if (!after.includes("uclaw-chat-image-attachment")) {
+      after = after.replace(imageAttachmentBare, imageAttachmentWithActions);
+    }
+
+    const unavailableImageNoUrl =
+      "YS({kind:`image`,label:e.label,badge:o.status===`checking`?`Checking...`:`Unavailable`,reason:o.status===`unavailable`?o.reason:void 0})";
+    const unavailableImageWithUrl =
+      "YS({kind:`image`,label:e.label,url:o.status===`unavailable`?e.url:void 0,badge:o.status===`checking`?`Checking...`:`Unavailable`,reason:o.status===`unavailable`?o.reason:void 0})";
+    if (after.includes(unavailableImageNoUrl)) {
+      after = after.replace(unavailableImageNoUrl, unavailableImageWithUrl);
+    }
+
+    if (
+      !after.includes("function uClawAttachmentActions(")
+      || !after.includes("uclaw-chat-image-attachment")
+      || !after.includes(unavailableImageWithUrl)
+    ) {
+      throw new Error(`Could not patch chat image attachment actions in ${file}`);
     }
 
     const inlineVideo =
@@ -576,16 +650,34 @@ function patchControlCss() {
     throw new Error(`Missing control-ui stylesheet in ${assetsDir}`);
   }
 
-  const css = [
+  const previewCss = [
     ".chat-assistant-attachment-card--video{position:relative}",
     ".uclaw-media-preview-button{position:absolute;top:8px;right:8px;z-index:1;border:0;border-radius:999px;background:rgba(0,0,0,.62);color:#fff;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;font-size:17px;line-height:1;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}",
     ".uclaw-media-preview-button:hover{background:rgba(0,0,0,.82)}",
   ].join("");
+  const attachmentCss = [
+    ".uclaw-chat-image-attachment{display:inline-flex;flex-direction:column;align-items:flex-start;gap:6px;max-width:min(100%,520px)}",
+    ".uclaw-chat-image-attachment>.chat-message-image{max-width:100%}",
+    ".uclaw-attachment-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}",
+    ".uclaw-chat-image-attachment>.uclaw-attachment-actions{margin-top:0}",
+    ".uclaw-attachment-action{border:1px solid rgba(148,163,184,.45);border-radius:6px;background:#fff;color:#334155;min-height:28px;padding:0 9px;font:500 12px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;cursor:pointer}",
+    ".uclaw-attachment-action:hover{border-color:#60a5fa;color:#1d4ed8;background:#eff6ff}",
+    ".chat-assistant-attachment-card--blocked .uclaw-attachment-actions{margin-top:10px}",
+  ].join("");
 
   for (const file of files) {
     const before = read(file);
-    if (before.includes(".uclaw-media-preview-button")) continue;
-    const after = `${before}\n${css}\n`;
+    let after = before;
+    if (!after.includes(".uclaw-media-preview-button")) {
+      after = `${after}\n${previewCss}\n`;
+    }
+    if (!after.includes(".uclaw-attachment-actions")) {
+      after = `${after}\n${attachmentCss}\n`;
+    }
+    after = after.replace(
+      new RegExp(`(${escapeRegExp(attachmentCss)})\\n{3,}`),
+      "$1\n\n",
+    );
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -929,8 +1021,203 @@ function patchXaiVideoDownloadFallback() {
 }
 
 /**
- * Bumps the embedded Control UI cache marker whenever visible patched assets
- * change, so the desktop shell does not keep stale CSS or copy.
+ * Migration stub: the model dashboard now belongs to config-page quick settings.
+ */
+function patchModelUsageDashboard() {}
+
+/**
+ * Migration stub: old /usage dashboard CSS is removed by removeWrongModelUsageDashboardCss().
+ */
+function patchModelUsageDashboardCss() {}
+
+/**
+ * Removes the earlier /usage-page dashboard injection so the model entry can target config again.
+ */
+function removeWrongModelUsageDashboard() {
+  for (const file of listAssetFiles(/^usage-page-.*\.js$/, "usage-page")) {
+    const before = read(file);
+    let after = before.replace(/function UcModelUsageDayKey[\s\S]*?(?=var yt=\[`channel`)/, "");
+    after = after.replace(
+      "this.context.agents.subscribe(()=>this.requestUpdate()),this.context.runtimeConfig.subscribe(()=>this.requestUpdate())],this.context.runtimeConfig.ensureLoaded?.(),this.applyGatewaySnapshot(this.context.gateway.snapshot,!0)",
+      "this.context.agents.subscribe(()=>this.requestUpdate())],this.applyGatewaySnapshot(this.context.gateway.snapshot,!0)",
+    );
+    after = after.replace(
+      "return a`\n      ${UcModelUsageDashboard(e,{config:this.context.runtimeConfig.state.configForm??this.context.runtimeConfig.state.configSnapshot?.config,onManageModels:()=>this.context.navigate(`ai-agents`,{search:`?section=models`})})}\n    `",
+      "return a`\n      <section class=\"content-header content-header--page\">\n        <div>\n          <div class=\"page-title\">${_(`usage`)}</div>\n          <div class=\"page-sub\">${g(`usage`)}</div>\n        </div>\n      </section>\n      ${vt(e)}\n    `",
+    );
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Removes CSS left behind by the earlier /usage-page dashboard patch.
+ */
+function removeWrongModelUsageDashboardCss() {
+  const markerStart = "/* uclaw-model-usage-dashboard-1:start */";
+  const markerEnd = "/* uclaw-model-usage-dashboard-1:end */";
+  for (const file of listAssetFiles(/^index-.*\.css$/, "index css")) {
+    const before = read(file);
+    const after = before.replace(
+      new RegExp(`${escapeRegExp(markerStart)}[\\s\\S]*?${escapeRegExp(markerEnd)}\\n?`),
+      "",
+    );
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Replaces the quick model settings page with a high-fidelity usage dashboard.
+ */
+function patchConfigModelUsageDashboard() {
+  const helper = `function UcQuickEmptyTotals(){return{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,totalCost:0,missingCostEntries:0}}function UcQuickAddTotals(e,t){let n=t??{};return{input:(e.input??0)+(n.input??0),output:(e.output??0)+(n.output??0),cacheRead:(e.cacheRead??0)+(n.cacheRead??0),cacheWrite:(e.cacheWrite??0)+(n.cacheWrite??0),totalTokens:(e.totalTokens??0)+(n.totalTokens??0),totalCost:(e.totalCost??0)+(n.totalCost??0),missingCostEntries:(e.missingCostEntries??0)+(n.missingCostEntries??0)}}function UcQuickDayKey(e=new Date){return\`\${e.getFullYear()}-\${String(e.getMonth()+1).padStart(2,\`0\`)}-\${String(e.getDate()).padStart(2,\`0\`)}\`}function UcQuickSessionTotals(e){return(e??[]).reduce((e,t)=>UcQuickAddTotals(e,t?.usage),UcQuickEmptyTotals())}function UcQuickSessionDaily(e){let t=new Map;for(let n of e??[]){let e=n?.updatedAt?new Date(n.updatedAt):null;if(!e||Number.isNaN(e.valueOf())||!n?.usage)continue;let r=UcQuickDayKey(e),i=t.get(r)??{date:r,...UcQuickEmptyTotals()};t.set(r,UcQuickAddTotals(i,n.usage))}return[...t.values()]}function UcQuickRangeTotals(e,t,n){let r=new Date,i=new Set;for(let e=0;e<t;e++){let t=new Date(r);t.setDate(r.getDate()-e),i.add(UcQuickDayKey(t))}let a=(e??[]).filter(e=>i.has(e.date)).reduce((e,t)=>UcQuickAddTotals(e,t),UcQuickEmptyTotals());return a.totalTokens>0||a.totalCost>0?a:n??a}function UcQuickFmtTokens(e){return Math.max(0,Math.round(Number(e)||0)).toLocaleString()}function UcQuickFmtCost(e){let t=Number(e)||0;return t>0?t<.01?\`$\`+t.toFixed(4):\`$\`+t.toFixed(2):\`--\`}function UcQuickFmtDate(e){if(!e)return\`--\`;let t=new Date(e);return Number.isNaN(t.valueOf())?\`--\`:t.toLocaleString(void 0,{month:\`2-digit\`,day:\`2-digit\`,hour:\`2-digit\`,minute:\`2-digit\`})}function UcQuickConfigValue(e,t){let n=e?.agents?.defaults??{};for(let e of t){let t=n?.[e];if(typeof t==\`string\`&&t.trim())return t.trim();if(t&&typeof t==\`object\`&&typeof t.primary==\`string\`&&t.primary.trim())return t.primary.trim()}return\`未配置\`}function UcQuickModelName(e){let t=String(e??\`\`).trim();return t?t.split(\`/\`).pop()||t:\`未配置\`}function UcQuickProviderName(e){let t=String(e??\`\`).trim();return t&&t.includes(\`/\`)?t.split(\`/\`)[0]:t||\`provider\`}function UcQuickProviderStatus(e){let t=(e??[]).find(e=>e&&(e.error||e.summary||e.billing?.length||e.windows?.length));return t?{ok:!t.error,label:t.error?\`账单异常\`:\`已连接\`,provider:t.displayName||t.provider||\`Provider\`,detail:String(t.error||t.summary||t.plan||\`Provider 已返回状态\`)}:{ok:!1,label:\`未接入\`,provider:\`--\`,detail:\`未发现真实余额接口，当前只展示本地用量与估算金额。\`}}function UcQuickModelCards(e){let t=UcQuickConfigValue(e,[\`model\`]),n=UcQuickConfigValue(e,[\`imageGenerationModel\`,\`imageModel\`]),r=UcQuickConfigValue(e,[\`videoGenerationModel\`]);return[{kind:\`text\`,tone:\`text\`,title:\`文字模型\`,sub:\`TEXT\`,model:t,status:t===\`未配置\`?\`未配置\`:\`正常\`,tags:[\`对话\`,\`写作\`,\`代码\`]},{kind:\`image\`,tone:\`image\`,title:\`图片模型\`,sub:\`IMAGE\`,model:n,status:n===\`未配置\`?\`未配置\`:\`已配置\`,tags:[\`文生图\`,\`图生图\`,\`编辑\`]},{kind:\`video\`,tone:\`video\`,title:\`视频模型\`,sub:\`VIDEO\`,model:r,status:r===\`未配置\`?\`未配置\`:r.includes(\`xai/\`)?\`经 adapter\`:\`已配置\`,tags:[\`文生视频\`,\`图生视频\`,\`短片\`]}]}function UcQuickChart(e){let t=new Map((e??[]).map(e=>[e.date,e])),n=0,r=[];for(let e=13;e>=0;e--){let i=new Date;i.setDate(i.getDate()-e);let a=UcQuickDayKey(i),o=t.get(a),s=o?.totalTokens??0;n=Math.max(n,s),r.push({label:e===0?\`今\`:String(i.getDate()),tokens:s,cost:o?.totalCost??0})}return r.map(e=>({...e,height:n>0?Math.max(5,Math.round(e.tokens/n*96)):5}))}function UcQuickRows(e){return[...(e??[])].filter(e=>e?.usage).sort((e,t)=>(Number(t.updatedAt)||0)-(Number(e.updatedAt)||0)).slice(0,7)}function UcQuickSessionModel(e){let t=e?.usage?.modelUsage?.[0];return t?.model?\`\${t.provider??e.modelProvider??\`provider\`}/\${t.model}\`:e?.model??e?.modelOverride??\`未知模型\`}function UcQuickModelDashboard(e){let t=e.usageData??{},n=t.result??{},r=t.costSummary??{},a=t.providerUsageSummary??{},o=n.sessions??[],s=UcQuickSessionTotals(o),c=n.totals??s,l=r.daily?.length?r.daily:UcQuickSessionDaily(o),u=UcQuickRangeTotals(l,1),d=UcQuickRangeTotals(l,7,c),f=UcQuickProviderStatus(a.providers),p=UcQuickModelCards(e.configObject),m=UcQuickChart(l),h=UcQuickRows(o),g=c.missingCostEntries>0||c.totalTokens>0&&c.totalCost===0,_=()=>e.onModelChange?.();return i\`
+    <div class="uclaw-config-model-dashboard" data-uclaw-config-model-dashboard>
+      <section class="uclaw-config-model-summary" aria-label="模型金额与用量">
+        <article class="uclaw-config-model-panel uclaw-config-model-balance">
+          <div class="uclaw-config-model-label"><span>账户余额</span><em class=\${f.ok?\`ok\`:\`muted\`}>\${f.label}</em></div>
+          <strong>\${f.ok?f.provider:\`--\`}</strong>
+          <p>\${f.detail}</p>
+          <div class="uclaw-config-model-actions"><button class="btn primary" type="button" disabled>充值</button><button class="btn" type="button" disabled>记录</button></div>
+        </article>
+        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>今日用量</span><strong>\${UcQuickFmtTokens(u.totalTokens)}</strong><small>\${UcQuickFmtCost(u.totalCost)}</small></article>
+        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>近 7 天</span><strong>\${UcQuickFmtTokens(d.totalTokens)}</strong><small>\${UcQuickFmtCost(d.totalCost)}</small></article>
+        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>累计流水</span><strong>\${UcQuickFmtTokens(c.totalTokens)}</strong><small>\${h.length} 条最近记录</small></article>
+      </section>
+      \${t.loading?i\`<div class="uclaw-config-model-callout">正在刷新模型用量...</div>\`:\`\`}
+      \${t.error?i\`<div class="uclaw-config-model-callout danger">用量加载失败：\${t.error}</div>\`:\`\`}
+      \${g?i\`<div class="uclaw-config-model-callout warn">部分模型缺少价格配置，金额可能只显示 token 或估算值。</div>\`:\`\`}
+      <section class="uclaw-config-model-main">
+        <div class="uclaw-config-model-panel uclaw-config-model-models">
+          <div class="uclaw-config-model-head"><div><h2>模型能力</h2><p>文字、图片、视频默认模型</p></div><button class="btn uclaw-config-model-advanced" type="button" @click=\${_}>高级配置</button></div>
+          <div class="uclaw-config-model-card-grid">\${p.map(t=>i\`<article class="uclaw-config-model-card tone-\${t.tone}">
+            <div><span>\${t.title}</span><span class="uclaw-config-model-card-tools"><em>\${t.status}</em><button class="uclaw-config-model-change" type="button" @click=\${()=>e.onModelChange?.(t.kind,t.model)}>更换</button></span></div>
+            <strong title=\${t.model}>\${UcQuickModelName(t.model)}</strong>
+            <small>\${UcQuickProviderName(t.model)} · \${t.sub}</small>
+            <p class="uclaw-config-model-tags">\${t.tags.map(e=>i\`<b>\${e}</b>\`)}</p>
+          </article>\`)}</div>
+        </div>
+        <div class="uclaw-config-model-panel uclaw-config-model-status">
+          <div class="uclaw-config-model-head"><div><h2>运行状态</h2><p>基于当前配置与 provider 状态</p></div><button class="btn primary" type="button" @click=\${e.onRefreshModelUsage} ?disabled=\${t.loading}>刷新</button></div>
+          \${p.map(e=>i\`<div class="uclaw-config-model-status-row"><span></span><div><strong>\${e.title}</strong><small>\${UcQuickProviderName(e.model)} / \${UcQuickModelName(e.model)}</small></div><em class=\${e.status===\`未配置\`?\`muted\`:e.status.includes(\`adapter\`)?\`warn\`:\`ok\`}>\${e.status}</em></div>\`)}
+        </div>
+      </section>
+      <section class="uclaw-config-model-main">
+        <div class="uclaw-config-model-panel uclaw-config-model-chart-wrap">
+          <div class="uclaw-config-model-head"><div><h2>每日消耗趋势</h2><p>近 14 天 · Tokens</p></div><span>usage.cost</span></div>
+          <div class="uclaw-config-model-chart">\${m.map((e,t)=>i\`<div><span class=\${t===m.length-1?\`today\`:e.tokens>0?\`hot\`:\`\`} style=\${\`height:\${e.height}px\`}></span><small>\${e.label}</small></div>\`)}</div>
+        </div>
+        <div class="uclaw-config-model-panel uclaw-config-model-ledger">
+          <div class="uclaw-config-model-head"><div><h2>使用流水</h2><p>最近会话消耗</p></div><span>sessions.usage</span></div>
+          <div class="uclaw-config-model-table"><table><thead><tr><th>时间</th><th>会话</th><th>模型</th><th>Token</th><th>金额</th></tr></thead><tbody>
+            \${h.length?h.map(e=>{let t=e.usage??UcQuickEmptyTotals(),n=UcQuickSessionModel(e);return i\`<tr><td>\${UcQuickFmtDate(e.updatedAt)}</td><td>\${e.label||e.key||\`未命名\`}</td><td>\${UcQuickModelName(n)}</td><td>\${UcQuickFmtTokens(t.totalTokens)}</td><td>\${UcQuickFmtCost(t.totalCost)}</td></tr>\`}):i\`<tr><td colspan="5">暂无用量流水，发起会话后会在这里出现。</td></tr>\`}
+          </tbody></table></div>
+        </div>
+      </section>
+    </div>
+  \`}`;
+  /**
+   * Runtime class methods for the model selector modal and config writeback.
+   */
+  const modelChangeMethod = `uclawModelCandidates(e,t){let n=this.context.runtimeConfig?.state?.configForm??this.context.runtimeConfig?.state?.configSnapshot?.config??{},r=[],i=new Set,a=(e,t,n,a)=>{let o=String(e??\`\`).trim();if(!o||i.has(o))return;i.add(o),r.push({id:o,name:t||o,provider:n||UcQuickProviderName(o),source:a||\`配置\`})},o=n?.agents?.defaults??{};a(t,\`当前模型\`,UcQuickProviderName(t),\`当前\`);for(let e of [o.model,o.imageGenerationModel,o.imageModel,o.videoGenerationModel])typeof e==\`string\`?a(e,\`默认模型\`,UcQuickProviderName(e),\`默认\`):e?.primary&&a(e.primary,\`默认模型\`,UcQuickProviderName(e.primary),\`默认\`);let s=n?.models?.providers??{};for(let[t,n]of Object.entries(s)){let r=Array.isArray(n?.models)?n.models:[];for(let n of r){let r=typeof n==\`string\`?n:String(n?.id??n?.name??\`\`).trim();if(!r)continue;let i=\`\${t}/\${r}\`,o=Array.isArray(n?.input)?n.input.map(e=>String(e).toLowerCase()):[],s=i.toLowerCase(),c=e===\`video\`?(o.includes(\`video\`)||/video|jimeng|kling|runway/.test(s)):e===\`image\`?(o.includes(\`image\`)||/image|gpt-image|dall|flux|midjourney/.test(s)):!(/video|jimeng|kling|runway|gpt-image/.test(s));c&&a(i,n?.name||r,t,n?.api||\`provider\`)}}return r}async uclawApplyModelChoice(e,t){let n={text:{paths:[[\`agents\`,\`defaults\`,\`model\`,\`primary\`]]},image:{paths:[[\`agents\`,\`defaults\`,\`imageGenerationModel\`,\`primary\`],[\`agents\`,\`defaults\`,\`imageModel\`,\`primary\`]]},video:{paths:[[\`agents\`,\`defaults\`,\`videoGenerationModel\`,\`primary\`]]}}[e],r=this.context.runtimeConfig,i=String(t??\`\`).trim();if(!n||!i||!r)return;try{await r.ensureLoaded?.();for(let e of n.paths)r.patchForm(e,i);let e=await r.save();if(e===!1)throw Error(r.state.lastError??\`保存失败\`);if(r.state.connected){let e=await r.apply?.();if(e===!1)throw Error(r.state.lastError??\`应用失败\`)}await r.refresh?.({discardPendingChanges:!0}),this.uclawReloadModelUsage(),this.requestUpdate()}catch(e){globalThis.alert?.(\`更换模型失败：\${e instanceof Error?e.message:String(e)}\`)}}uclawChangeModel(e,t){let n={text:\`文字模型\`,image:\`图片模型\`,video:\`视频模型\`}[e];if(!n)return;let r=String(t??\`\`).trim(),i=this.uclawModelCandidates(e,r),a=r&&r!==\`未配置\`?r:(i[0]?.id??\`\`),o=document.createElement(\`div\`);o.className=\`uclaw-model-picker\`,o.tabIndex=-1,o.innerHTML=\`<div class="uclaw-model-picker__panel" role="dialog" aria-modal="true" aria-label="\${n}选择器"><div class="uclaw-model-picker__head"><div><h2>更换\${n}</h2><p>选择已配置模型，或直接输入模型 id。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><input class="uclaw-model-picker__search" placeholder="搜索或输入模型 id" value="\${a.replace(/"/g,\`&quot;\`)}"><div class="uclaw-model-picker__list"></div><div class="uclaw-model-picker__foot"><button class="btn" type="button" data-cancel>取消</button><button class="btn primary" type="button" data-confirm>确认更换</button></div></div>\`;let s=o.querySelector(\`.uclaw-model-picker__search\`),c=o.querySelector(\`.uclaw-model-picker__list\`),l=()=>{let e=String(s.value??\`\`).toLowerCase().trim(),t=i.filter(t=>!e||t.id.toLowerCase().includes(e)||t.name.toLowerCase().includes(e)||t.provider.toLowerCase().includes(e));c.innerHTML=t.length?\`\`:\`<div class="uclaw-model-picker__empty">没有匹配项，可直接确认输入的模型 id。</div>\`;for(let e of t){let t=document.createElement(\`button\`);t.type=\`button\`,t.className=\`uclaw-model-picker__option \${e.id===s.value.trim()?\`is-selected\`:\`\`}\`,t.innerHTML=\`<strong></strong><span></span><em></em>\`,t.querySelector(\`strong\`).textContent=e.name,t.querySelector(\`span\`).textContent=e.id,t.querySelector(\`em\`).textContent=\`\${e.provider} · \${e.source}\`,t.addEventListener(\`click\`,()=>{s.value=e.id,l()}),c.appendChild(t)}};let u=()=>{document.removeEventListener(\`keydown\`,d,!0),o.remove()},d=t=>{t.key===\`Escape\`&&(t.preventDefault(),u()),t.key===\`Enter\`&&document.activeElement===s&&(t.preventDefault(),o.querySelector(\`[data-confirm]\`)?.click())};o.addEventListener(\`click\`,e=>{e.target===o&&u()}),o.querySelector(\`.uclaw-model-picker__close\`)?.addEventListener(\`click\`,u),o.querySelector(\`[data-cancel]\`)?.addEventListener(\`click\`,u),o.querySelector(\`[data-confirm]\`)?.addEventListener(\`click\`,async()=>{let t=String(s.value??\`\`).trim();if(!t)return;s.disabled=!0,o.querySelector(\`[data-confirm]\`).textContent=\`保存中...\`;await this.uclawApplyModelChoice(e,t),u()}),s.addEventListener(\`input\`,l),document.body.appendChild(o),document.addEventListener(\`keydown\`,d,!0),l(),requestAnimationFrame(()=>{o.focus({preventScroll:!0}),s.focus()})}`;
+  const openAdvancedModelMethod = `uclawOpenAdvancedModels(){this.settingsMode=\`advanced\`,this.selections={...this.selections,"ai-agents":{activeSection:\`models\`,activeSubsection:null}},this.navigate(\`ai-agents\`)}`;
+  const methods = `uclawUsageDayKey(e=new Date){return\`\${e.getFullYear()}-\${String(e.getMonth()+1).padStart(2,\`0\`)}-\${String(e.getDate()).padStart(2,\`0\`)}\`}uclawUsageTimeZone(){let e=-new Date().getTimezoneOffset(),t=e>=0?\`+\`:\`-\`,n=Math.abs(e),r=Math.floor(n/60),i=n%60;return{mode:\`specific\`,utcOffset:\`UTC\${t}\${String(r).padStart(2,\`0\`)}\${i?\`:\${String(i).padStart(2,\`0\`)}\`:\`\`}\`}}uclawModelUsageSnapshot(){return this.uclawModelUsage??{loading:!1,error:null,result:null,costSummary:null,providerUsageSummary:null,client:null,requestId:0}}uclawEnsureModelUsage(){let e=this.context.gateway.snapshot.client;if(!e)return;let t=this.uclawModelUsageSnapshot();t.client!==e&&(this.uclawModelUsage={loading:!1,error:null,result:null,costSummary:null,providerUsageSummary:null,client:e,requestId:t.requestId??0},t=this.uclawModelUsage),!t.loading&&!t.result&&!t.error&&this.uclawLoadModelUsage()}uclawLoadModelUsage(){let e=this.context.gateway.snapshot.client;if(!e)return;let t=++this.uclawModelUsage.requestId,n=new Date,r=new Date(n);r.setDate(n.getDate()-13);let i=this.uclawUsageDayKey(r),a=this.uclawUsageDayKey(n),o=this.uclawUsageTimeZone();this.uclawModelUsage={...this.uclawModelUsage,loading:!0,error:null,client:e},this.requestUpdate();let s={startDate:i,endDate:a,agentScope:\`all\`,mode:o.mode,utcOffset:o.utcOffset};Promise.all([e.request(\`sessions.usage\`,{...s,groupBy:\`family\`,includeHistorical:!0,limit:1e3,includeContextWeight:!0}),e.request(\`usage.cost\`,s).catch(()=>null),e.request(\`usage.status\`).catch(()=>null)]).then(([n,r,i])=>{this.uclawModelUsage.requestId===t&&(this.uclawModelUsage={...this.uclawModelUsage,loading:!1,result:n,costSummary:r,providerUsageSummary:i,error:null,client:e},this.requestUpdate())}).catch(n=>{this.uclawModelUsage.requestId===t&&(this.uclawModelUsage={...this.uclawModelUsage,loading:!1,error:n?.message??String(n),result:null,costSummary:null,providerUsageSummary:null,client:e},this.requestUpdate())})}uclawReloadModelUsage(){this.uclawModelUsage={...this.uclawModelUsage,result:null,error:null,costSummary:null,providerUsageSummary:null},this.uclawLoadModelUsage()}${openAdvancedModelMethod}${modelChangeMethod}`;
+  const originalQuick = "function Ze(e){return i`\n    <div class=\"qs-container\">\n      <div class=\"qs-grid\">\n        ${He(e)} ${Ue(e)} ${Ge(e)}\n        ${Ke(e)} ${qe(e)} ${Je(e)}\n        ${We(e)} ${Ye(e)}\n      </div>\n\n      ${Xe(e)}\n    </div>\n  `}";
+
+  for (const file of listAssetFiles(/^config-page-.*\.js$/, "config-page")) {
+    const before = read(file);
+    let after = before.replace(/function UcQuickEmptyTotals[\s\S]*?(?=function Ze\(e\)\{)/, "");
+    after = after.replaceAll('\\"ai-agents\\"', '"ai-agents"');
+    after = after.replaceAll("groupBy:`day`", "groupBy:`family`");
+    after = after.replace(
+      /uclawLoadModelUsage\(\)\{let e=this\.context\.gateway\.snapshot\.client;if\(!e\)return;let t=\+\+this\.uclawModelUsage\.requestId,n=this\.uclawUsageDayKey\(\),r=this\.uclawUsageTimeZone\(\);this\.uclawModelUsage=\{\.\.\.this\.uclawModelUsage,loading:!0,error:null,client:e\},this\.requestUpdate\(\);let i=\{startDate:n,endDate:n,agentScope:`all`,mode:r\.mode,utcOffset:r\.utcOffset\};Promise\.all\(\[e\.request\(`sessions\.usage`,\{\.\.\.i,groupBy:`family`,includeHistorical:!0,limit:1e3,includeContextWeight:!0\}\),e\.request\(`usage\.cost`,i\)\.catch\(\(\)=>null\),e\.request\(`usage\.status`\)\.catch\(\(\)=>null\)\]\)/,
+      "uclawLoadModelUsage(){let e=this.context.gateway.snapshot.client;if(!e)return;let t=++this.uclawModelUsage.requestId,n=new Date,r=new Date(n);r.setDate(n.getDate()-13);let i=this.uclawUsageDayKey(r),a=this.uclawUsageDayKey(n),o=this.uclawUsageTimeZone();this.uclawModelUsage={...this.uclawModelUsage,loading:!0,error:null,client:e},this.requestUpdate();let s={startDate:i,endDate:a,agentScope:`all`,mode:o.mode,utcOffset:o.utcOffset};Promise.all([e.request(`sessions.usage`,{...s,groupBy:`family`,includeHistorical:!0,limit:1e3,includeContextWeight:!0}),e.request(`usage.cost`,s).catch(()=>null),e.request(`usage.status`).catch(()=>null)])",
+    );
+    after = after.replace(originalQuick, () => `${helper}function Ze(e){return UcQuickModelDashboard(e)}`);
+    if (!after.includes("function UcQuickModelDashboard(")) {
+      after = after.replace(
+        "function Ze(e){return UcQuickModelDashboard(e)}",
+        () => `${helper}function Ze(e){return UcQuickModelDashboard(e)}`,
+      );
+    }
+    if (!after.includes("this.uclawModelUsage=")) {
+      after = after.replace(
+        "this.systemInfoRequestId=0,this.systemInfoPollInterval=null,this.stops=[]",
+        "this.systemInfoRequestId=0,this.systemInfoPollInterval=null,this.uclawModelUsage={loading:!1,error:null,result:null,costSummary:null,providerUsageSummary:null,client:null,requestId:0},this.stops=[]",
+      );
+    }
+    if (!after.includes("uclawLoadModelUsage(){")) {
+      after = after.replace("renderQuickConfig(e){", `${methods}renderQuickConfig(e){`);
+    }
+    if (!after.includes("uclawChangeModel(e,t)")) {
+      after = after.replace(
+        "renderQuickConfig(e){this.uclawEnsureModelUsage();",
+        `${modelChangeMethod}renderQuickConfig(e){this.uclawEnsureModelUsage();`,
+      );
+    }
+    after = after.replace(
+      new RegExp(`${escapeRegExp(openAdvancedModelMethod)}[\\s\\S]*?renderQuickConfig\\(e\\)\\{`),
+      `${openAdvancedModelMethod}${modelChangeMethod}renderQuickConfig(e){`,
+    );
+    after = after.replace(
+      "renderQuickConfig(e){let t=this.context.runtimeConfig",
+      "renderQuickConfig(e){this.uclawEnsureModelUsage();let UcUsage=this.uclawModelUsageSnapshot(),t=this.context.runtimeConfig",
+    );
+    after = after.replace(
+      "return Ze({currentModel:r,",
+      "return Ze({usageData:UcUsage,configObject:e,currentModel:r,",
+    );
+    after = after.replace(
+      "onModelChange:()=>{this.settingsMode=`advanced`,this.selections={...this.selections,\"ai-agents\":{activeSection:`models`,activeSubsection:null}},this.navigate(`ai-agents`)},",
+      "onModelChange:(e,t)=>this.uclawChangeModel(e,t),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),",
+    );
+    after = after.replace(
+      "onModelChange:()=>this.uclawOpenAdvancedModels(),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),",
+      "onModelChange:(e,t)=>this.uclawChangeModel(e,t),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),",
+    );
+    if (
+      !after.includes("data-uclaw-config-model-dashboard") ||
+      !after.includes("uclawLoadModelUsage(){") ||
+      !after.includes("sessions.usage") ||
+      !after.includes("usage.cost") ||
+      !after.includes("usage.status")
+    ) {
+      throw new Error(`Could not patch config model usage dashboard in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Adds scoped CSS for the config quick model usage dashboard.
+ */
+function patchConfigModelUsageDashboardCss() {
+  const markerStart = "/* uclaw-config-model-dashboard-1:start */";
+  const markerEnd = "/* uclaw-config-model-dashboard-1:end */";
+  const block = `${markerStart}
+.content:has(.uclaw-config-model-dashboard) .config-view-toggle,.content:has(.uclaw-config-model-dashboard) .config-view-toggle-row,.settings-workspace:has(.uclaw-config-model-dashboard)>.settings-section-nav,.uclaw-config-model-advanced{display:none!important}.uclaw-config-model-dashboard{display:grid;gap:14px;color:#172033}.uclaw-config-model-summary{display:grid;grid-template-columns:1.15fr repeat(3,minmax(150px,1fr));gap:14px}.uclaw-config-model-panel{border:1px solid #dfe7f3;border-radius:8px;background:#fff;box-shadow:0 10px 26px rgba(35,62,105,.06)}.uclaw-config-model-balance{min-height:142px;padding:18px;display:grid;gap:10px;align-content:space-between;background:linear-gradient(135deg,#f8fbff,#fff)}.uclaw-config-model-label,.uclaw-config-model-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.uclaw-config-model-label span,.uclaw-config-model-metric span{color:#64748b;font-size:12px;font-weight:650}.uclaw-config-model-label em,.uclaw-config-model-status-row em{padding:3px 8px;border-radius:999px;background:#eef2f7;color:#64748b;font-size:11px;font-style:normal}.uclaw-config-model-label em.ok,.uclaw-config-model-status-row em.ok{background:#e7f8ed;color:#16803a}.uclaw-config-model-status-row em.warn{background:#fff6db;color:#9a6500}.uclaw-config-model-status-row em.muted{background:#eef2f7;color:#64748b}.uclaw-config-model-balance strong{font-size:34px;line-height:1;font-variant-numeric:tabular-nums}.uclaw-config-model-balance p{margin:0;color:#64748b;font-size:12px;line-height:1.55}.uclaw-config-model-actions{display:flex;gap:8px}.uclaw-config-model-metric{min-height:142px;padding:18px;display:grid;align-content:space-between}.uclaw-config-model-metric strong{font-size:28px;line-height:1;font-variant-numeric:tabular-nums}.uclaw-config-model-metric small,.uclaw-config-model-head p{color:#64748b;font-size:12px}.uclaw-config-model-callout{padding:10px 12px;border:1px solid #b7d7ff;border-radius:8px;background:#f0f7ff;color:#0958d9;font-size:12px}.uclaw-config-model-callout.warn{border-color:#ffe0a3;background:#fff9e8;color:#9a6500}.uclaw-config-model-callout.danger{border-color:#ffccc7;background:#fff1f0;color:#cf1322}.uclaw-config-model-main{display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:14px}.uclaw-config-model-models,.uclaw-config-model-status,.uclaw-config-model-chart-wrap,.uclaw-config-model-ledger{padding:18px}.uclaw-config-model-head{margin-bottom:14px}.uclaw-config-model-head h2{margin:0;font-size:16px;font-weight:700}.uclaw-config-model-head p{margin:4px 0 0}.uclaw-config-model-head>span{padding:4px 8px;border-radius:6px;background:#f1f5f9;color:#64748b;font-size:11px}.uclaw-config-model-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:12px}.uclaw-config-model-card{min-height:150px;padding:14px;border:1px solid #dfe7f3;border-radius:8px;display:grid;gap:10px;background:#fbfdff}.uclaw-config-model-card.tone-image{background:#fffafd}.uclaw-config-model-card.tone-video{background:#fcfbff}.uclaw-config-model-card div{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px}.uclaw-config-model-card div>span:first-child{flex:0 0 auto;white-space:nowrap;font-weight:700}.uclaw-config-model-card div .uclaw-config-model-card-tools{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-weight:400}.uclaw-config-model-card div em{white-space:nowrap;font-size:11px;font-style:normal;color:#16803a}.uclaw-config-model-card strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 18px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;color:#0f172a}.uclaw-config-model-card small{color:#64748b;font-size:11px;text-transform:uppercase}.uclaw-config-model-tags{display:flex;flex-wrap:nowrap;gap:6px;margin:0;overflow-x:auto;white-space:nowrap;scrollbar-width:none}.uclaw-config-model-tags::-webkit-scrollbar{display:none}.uclaw-config-model-card b,.uclaw-config-model-change{flex:0 0 auto;white-space:nowrap}.uclaw-config-model-card b{padding:4px 7px;border-radius:5px;background:#eef6ff;color:#2563eb;font-size:11px;font-weight:650}.uclaw-config-model-change{padding:4px 7px;border:0;border-radius:5px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700;cursor:pointer}.uclaw-config-model-change:hover{background:#bfdbfe}.uclaw-model-picker{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:24px;background:rgba(15,23,42,.28);backdrop-filter:blur(8px)}.uclaw-model-picker__panel{width:min(520px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));display:grid;grid-template-rows:auto auto minmax(0,auto) auto;gap:10px;padding:16px;border:1px solid #dbe7f6;border-radius:8px;background:#fff;box-shadow:0 24px 72px rgba(15,23,42,.22);color:#172033}.uclaw-model-picker__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.uclaw-model-picker__head h2{margin:0;font-size:16px;font-weight:750}.uclaw-model-picker__head p{margin:4px 0 0;color:#64748b;font-size:12px}.uclaw-model-picker__close{width:28px;height:28px;border:0;border-radius:6px;background:#f1f5f9;color:#64748b;font-size:17px;line-height:1;cursor:pointer}.uclaw-model-picker__search{width:100%;height:36px;padding:0 10px;border:1px solid #dbe7f6;border-radius:7px;background:#f8fbff;color:#0f172a;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.uclaw-model-picker__list{max-height:260px;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px}.uclaw-model-picker__option{min-height:66px;border:1px solid #dfe7f3;border-radius:8px;background:#fff;text-align:left;padding:9px 11px;display:grid;grid-template-columns:minmax(0,1fr);align-content:center;gap:3px;cursor:pointer}.uclaw-model-picker__option:hover,.uclaw-model-picker__option.is-selected{border-color:#8ab9ff;background:#f0f7ff}.uclaw-model-picker__option strong{color:#0f172a;font:750 13px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-model-picker__option span{color:#334155;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-model-picker__option em{color:#64748b;font-size:11px;font-style:normal}.uclaw-model-picker__empty{padding:14px;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;text-align:center;font-size:12px}.uclaw-model-picker__foot{display:flex;justify-content:flex-end;gap:8px;margin-top:2px}.uclaw-config-model-status-row{min-height:62px;display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:12px;align-items:center;border-top:1px solid #eef2f7}.uclaw-config-model-status-row:first-of-type{border-top:0}.uclaw-config-model-status-row>span{width:9px;height:9px;border-radius:50%;background:#2f81f7}.uclaw-config-model-status-row strong{display:block;font-size:13px}.uclaw-config-model-status-row small{display:block;margin-top:3px;color:#64748b;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-config-model-chart{height:158px;display:grid;grid-template-columns:repeat(14,1fr);align-items:end;gap:8px;padding-top:12px;border-bottom:1px solid #eef2f7}.uclaw-config-model-chart div{display:grid;justify-items:center;gap:6px;color:#64748b;font-size:10px}.uclaw-config-model-chart span{width:100%;max-width:28px;min-height:5px;border-radius:5px 5px 0 0;background:#c9ddff}.uclaw-config-model-chart span.hot{background:linear-gradient(180deg,#2f81f7,#0f63d8)}.uclaw-config-model-chart span.today{background:#f6b73c}.uclaw-config-model-table{overflow:auto}.uclaw-config-model-table table{width:100%;border-collapse:collapse;font-size:12px}.uclaw-config-model-table th,.uclaw-config-model-table td{height:38px;padding:0 9px;border-top:1px solid #eef2f7;text-align:left;white-space:nowrap}.uclaw-config-model-table th{color:#64748b;background:#f8fafc;font-size:11px}.uclaw-config-model-table td{color:#334155}.uclaw-config-model-table td[colspan]{text-align:center;color:#64748b}
+@media (max-width:1420px){.uclaw-config-model-main{grid-template-columns:1fr}}@media (max-width:1180px){.uclaw-config-model-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:760px){.uclaw-config-model-summary,.uclaw-config-model-card-grid{grid-template-columns:1fr}.uclaw-config-model-table table{min-width:620px}.uclaw-model-picker{padding:12px}.uclaw-model-picker__panel{max-height:calc(100vh - 24px)}}
+${markerEnd}`;
+
+  for (const file of listAssetFiles(/^index-.*\.css$/, "index css")) {
+    const before = read(file);
+    const withoutOld = before.replace(
+      new RegExp(`${escapeRegExp(markerStart)}[\\s\\S]*?${escapeRegExp(markerEnd)}\\n?`),
+      "",
+    );
+    const after = `${withoutOld.trimEnd()}\n${block}\n`;
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Updates Control UI cache metadata so visible patched assets are refreshed.
  */
 function patchServiceWorker() {
   if (!fs.existsSync(swPath)) {
@@ -957,6 +1244,19 @@ function patchServiceWorker() {
   source = source.replace(
     /yanjian-logo-1(?!-chat-terminal-toolstream-clear-1)/,
     "yanjian-logo-1-chat-terminal-toolstream-clear-1",
+  );
+  source = source.replace(
+    /chat-terminal-toolstream-clear-1(?!-chat-attachment-actions-1)/,
+    "chat-terminal-toolstream-clear-1-chat-attachment-actions-1",
+  );
+  source = source.replace(/-model-usage-dashboard-1/g, "");
+  source = source.replace(
+    /chat-attachment-actions-1(?!-config-model-dashboard-1)/,
+    "chat-attachment-actions-1-config-model-dashboard-1",
+  );
+  source = source.replace(
+    /config-model-dashboard-1(?!-sidebar-new-session-width-1)/,
+    "config-model-dashboard-1-sidebar-new-session-width-1",
   );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
@@ -1229,6 +1529,14 @@ function patchIndexUiCopy() {
       "sidebarPinnedRoutes:[...new Set([...(Xe(c.sidebarPinnedRoutes)??r.sidebarPinnedRoutes),`agents`,`tasks`,`skills`,`config`])]",
       "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`config`]",
     ],
+    [
+      "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`config`]",
+      "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`config`]",
+    ],
+    [
+      "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`usage`]",
+      "sidebarPinnedRoutes:[`agents`,`tasks`,`skills`,`config`]",
+    ],
   ];
 
   for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
@@ -1294,11 +1602,27 @@ function patchPrimaryNavigationProjection() {
       "enabledRouteIds(){return[`agents`,`tasks`,`skills`,`config`]}",
     ],
     [
+      "enabledRouteIds(){return[`agents`,`tasks`,`skills`,`config`]}",
+      "enabledRouteIds(){return[`agents`,`tasks`,`skills`,`config`]}",
+    ],
+    [
+      "enabledRouteIds(){return[`agents`,`tasks`,`skills`,`usage`]}",
+      "enabledRouteIds(){return[`agents`,`tasks`,`skills`,`config`]}",
+    ],
+    [
       "config:{titleKey:`nav.settings`,subtitleKey:`subtitles.config`}",
       "config:{titleKey:`tabs.config`,subtitleKey:`subtitles.config`}",
     ],
     [
       "function Hc(){return[{id:`nav-overview`,label:D(`overview.palette.items.overview`),icon:`barChart`,category:`navigation`,action:`nav:overview`},{id:`nav-sessions`,label:D(`overview.palette.items.sessions`),icon:`fileText`,category:`navigation`,action:`nav:sessions`},{id:`nav-cron`,label:D(`overview.palette.items.scheduled`),icon:`scrollText`,category:`navigation`,action:`nav:cron`},{id:`nav-skills`,label:D(`overview.palette.items.skills`),icon:`zap`,category:`navigation`,action:`nav:skills`},{id:`nav-config`,label:D(`overview.palette.items.settings`),icon:`settings`,category:`navigation`,action:`nav:config`},{id:`nav-agents`,label:D(`overview.palette.items.agents`),icon:`folder`,category:`navigation`,action:`nav:agents`},{id:`slash:verbose`,label:`/verbose`,icon:`terminal`,category:`search`,action:`/verbose full`,description:`Toggle verbose mode.`}]}",
+      "function Hc(){return[{id:`nav-agents`,label:`智能体`,icon:`folder`,category:`navigation`,action:`nav:agents`},{id:`nav-workflows`,label:`工作流`,icon:`scrollText`,category:`navigation`,action:`nav:tasks`},{id:`nav-skills`,label:`技能库`,icon:`zap`,category:`navigation`,action:`nav:skills`},{id:`nav-models`,label:`模型`,icon:`settings`,category:`navigation`,action:`nav:config`},{id:`slash:verbose`,label:`/verbose`,icon:`terminal`,category:`search`,action:`/verbose full`,description:`Toggle verbose mode.`}]}",
+    ],
+    [
+      "function Hc(){return[{id:`nav-agents`,label:`智能体`,icon:`folder`,category:`navigation`,action:`nav:agents`},{id:`nav-workflows`,label:`工作流`,icon:`scrollText`,category:`navigation`,action:`nav:tasks`},{id:`nav-skills`,label:`技能库`,icon:`zap`,category:`navigation`,action:`nav:skills`},{id:`nav-models`,label:`模型`,icon:`settings`,category:`navigation`,action:`nav:config`},{id:`slash:verbose`,label:`/verbose`,icon:`terminal`,category:`search`,action:`/verbose full`,description:`Toggle verbose mode.`}]}",
+      "function Hc(){return[{id:`nav-agents`,label:`智能体`,icon:`folder`,category:`navigation`,action:`nav:agents`},{id:`nav-workflows`,label:`工作流`,icon:`scrollText`,category:`navigation`,action:`nav:tasks`},{id:`nav-skills`,label:`技能库`,icon:`zap`,category:`navigation`,action:`nav:skills`},{id:`nav-models`,label:`模型`,icon:`settings`,category:`navigation`,action:`nav:config`},{id:`slash:verbose`,label:`/verbose`,icon:`terminal`,category:`search`,action:`/verbose full`,description:`Toggle verbose mode.`}]}",
+    ],
+    [
+      "function Hc(){return[{id:`nav-agents`,label:`智能体`,icon:`folder`,category:`navigation`,action:`nav:agents`},{id:`nav-workflows`,label:`工作流`,icon:`scrollText`,category:`navigation`,action:`nav:tasks`},{id:`nav-skills`,label:`技能库`,icon:`zap`,category:`navigation`,action:`nav:skills`},{id:`nav-models`,label:`模型`,icon:`settings`,category:`navigation`,action:`nav:usage`},{id:`slash:verbose`,label:`/verbose`,icon:`terminal`,category:`search`,action:`/verbose full`,description:`Toggle verbose mode.`}]}",
       "function Hc(){return[{id:`nav-agents`,label:`智能体`,icon:`folder`,category:`navigation`,action:`nav:agents`},{id:`nav-workflows`,label:`工作流`,icon:`scrollText`,category:`navigation`,action:`nav:tasks`},{id:`nav-skills`,label:`技能库`,icon:`zap`,category:`navigation`,action:`nav:skills`},{id:`nav-models`,label:`模型`,icon:`settings`,category:`navigation`,action:`nav:config`},{id:`slash:verbose`,label:`/verbose`,icon:`terminal`,category:`search`,action:`/verbose full`,description:`Toggle verbose mode.`}]}",
     ],
   ];
@@ -5151,6 +5475,7 @@ openclaw-skills-page .skillhub-scene-icon svg {
 .sidebar-sessions>openclaw-tooltip>.sidebar-new-session {
   left: 20px;
   right: 72px;
+  width: auto;
 }
 
 .sidebar-sessions>.sidebar-new-session-group {
@@ -6606,9 +6931,13 @@ patchControlUiSkillHubProxy();
 patchIndexUiCopy();
 patchPrimaryNavigationProjection();
 patchFinalUiPolish();
+removeWrongModelUsageDashboard();
+patchConfigModelUsageDashboard();
 patchControlUiBrandAssets();
 patchControlUiTheme();
 patchControlCss();
+removeWrongModelUsageDashboardCss();
+patchConfigModelUsageDashboardCss();
 patchLocalMediaRoots();
 patchOpenAiCompatibleImageResponses();
 patchXaiVideoLoopbackAccess();
