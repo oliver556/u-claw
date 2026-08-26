@@ -85,6 +85,26 @@ curl -sS http://127.0.0.1:8080/v1/newapi/usage/summary \
 
 该接口实时登录同手机号 New API 账号读取 `/api/user/self` 与 `/api/log/self`，不在阿里云长期保存完整消费流水。
 
+## 虚拟充值回调
+
+当前切片先用 `virtual` provider 验证充值闭环：客户端创建订单后，本地或测试工具调用虚拟回调，U-Claw Cloud API 会把订单置为 paid，并通过 New API admin `/api/user/manage` 给同手机号 New API 账号加 quota。
+
+```bash
+curl -sS http://127.0.0.1:8080/v1/recharge/plans \
+  -H "Authorization: Bearer <accessToken>"
+
+curl -sS -X POST http://127.0.0.1:8080/v1/recharge/orders \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer <accessToken>" \
+  -d '{"planCode":"dev_10","provider":"virtual"}'
+
+curl -sS -X POST http://127.0.0.1:8080/v1/payments/virtual/notify \
+  -H 'Content-Type: application/json' \
+  -d '{"orderNo":"<orderNo>","providerEventId":"virtual-<orderNo>"}'
+```
+
+`virtual` 回调只在非 production 环境启用。正式 Alipay/WeChat 接入时复用 `payment_orders`、`payment_callbacks` 与订单幂等状态机，替换签名校验和 provider 回调解析。
+
 ## New API Spike
 
 可以先本地启动 New API 联调环境：

@@ -117,3 +117,27 @@ usage_json="$(curl -fsS -X GET "http://${API_ADDR}/v1/newapi/usage/summary" \
 
 printf '%s' "$usage_json" | node_get "if(j.status!=='ok'||j.accountBalance!==100000||!Array.isArray(j.records)){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'usage_summary_e2e',accountBalance:j.accountBalance,usedQuota:j.usedQuota,records:j.records.length}))"
 echo
+
+plans_json="$(curl -fsS -X GET "http://${API_ADDR}/v1/recharge/plans" \
+  -H "Authorization: Bearer $access_token")"
+printf '%s' "$plans_json" | node_get "if(!Array.isArray(j.plans)||!j.plans.some(p=>p.code==='dev_10')){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'recharge_plans_e2e',plans:j.plans.length}))"
+echo
+
+order_json="$(curl -fsS -X POST "http://${API_ADDR}/v1/recharge/orders" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $access_token" \
+  -d '{"planCode":"dev_10","provider":"virtual"}')"
+order_no="$(printf '%s' "$order_json" | node_get "if(!j.order||j.order.status!=='created'||j.order.quota!==50000){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(j.order.orderNo)")"
+printf '%s' "$order_json" | node_get "process.stdout.write(JSON.stringify({ok:true,step:'recharge_order_e2e',orderNo:j.order.orderNo,quota:j.order.quota,status:j.order.status}))"
+echo
+
+callback_json="$(curl -fsS -X POST "http://${API_ADDR}/v1/payments/virtual/notify" \
+  -H 'Content-Type: application/json' \
+  -d "{\"orderNo\":\"$order_no\",\"providerEventId\":\"virtual-$order_no\"}")"
+printf '%s' "$callback_json" | node_get "if(!j.order||j.order.status!=='credited'){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'virtual_callback_e2e',orderNo:j.order.orderNo,status:j.order.status}))"
+echo
+
+recharged_usage_json="$(curl -fsS -X GET "http://${API_ADDR}/v1/newapi/usage/summary" \
+  -H "Authorization: Bearer $access_token")"
+printf '%s' "$recharged_usage_json" | node_get "if(j.status!=='ok'||j.accountBalance!==150000){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'recharged_usage_summary_e2e',accountBalance:j.accountBalance}))"
+echo

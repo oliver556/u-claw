@@ -13,6 +13,7 @@ import (
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/newapi"
 	"uclaw-cloud-api/internal/provisioning"
+	"uclaw-cloud-api/internal/recharge"
 	"uclaw-cloud-api/internal/usage"
 )
 
@@ -30,6 +31,7 @@ type ServerOptions struct {
 	Auth       *auth.Service
 	Activation *activation.Service
 	Usage      *usage.Service
+	Recharge   *recharge.Service
 }
 
 // PersistentStore is the shared PostgreSQL seam for auth and activation slices.
@@ -37,6 +39,7 @@ type PersistentStore interface {
 	auth.Store
 	activation.Store
 	provisioning.Store
+	recharge.Store
 }
 
 type sendSMSRequest struct {
@@ -55,12 +58,23 @@ type activationRedeemRequest struct {
 	DeviceSummary  string `json:"deviceSummary"`
 }
 
+type rechargeOrderRequest struct {
+	PlanCode string `json:"planCode"`
+	Provider string `json:"provider"`
+}
+
+type virtualPaymentNotifyRequest struct {
+	OrderNo         string `json:"orderNo"`
+	ProviderEventID string `json:"providerEventId"`
+}
+
 // NewServer returns the HTTP interface for activation, payment, and health routes.
 func NewServer(cfg config.Config, build BuildInfo) http.Handler {
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, nil),
 		Activation: buildActivationService(cfg, nil),
 		Usage:      buildUsageService(cfg),
+		Recharge:   buildRechargeService(cfg, nil),
 	})
 }
 
@@ -70,6 +84,7 @@ func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStor
 		Auth:       buildAuthService(cfg, store),
 		Activation: buildActivationService(cfg, store),
 		Usage:      buildUsageService(cfg),
+		Recharge:   buildRechargeService(cfg, store),
 	})
 }
 
@@ -173,6 +188,92 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, result)
 	})
+	mux.HandleFunc("GET /v1/recharge/plans", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := verifyBearer(r, options.Auth); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Recharge == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("recharge service is not configured"))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"plans": options.Recharge.ListPlans(r.Context()),
+		})
+	})
+	mux.HandleFunc("POST /v1/recharge/orders", func(w http.ResponseWriter, r *http.Request) {
+		claims, err := verifyBearer(r, options.Auth)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Recharge == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("recharge service is not configured"))
+			return
+		}
+		var req rechargeOrderRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, fmt.Errorf("token subject is invalid"))
+			return
+		}
+		result, err := options.Recharge.CreateOrder(r.Context(), recharge.CreateOrderRequest{
+			UserID:   userID,
+			PlanCode: req.PlanCode,
+			Provider: req.Provider,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
+	mux.HandleFunc("GET /v1/recharge/orders/{orderNo}", func(w http.ResponseWriter, r *http.Request) {
+		claims, err := verifyBearer(r, options.Auth)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Recharge == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("recharge service is not configured"))
+			return
+		}
+		userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, fmt.Errorf("token subject is invalid"))
+			return
+		}
+		order, err := options.Recharge.GetOrder(r.Context(), r.PathValue("orderNo"), userID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"order": order})
+	})
+	mux.HandleFunc("POST /v1/payments/virtual/notify", func(w http.ResponseWriter, r *http.Request) {
+		if options.Recharge == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("recharge service is not configured"))
+			return
+		}
+		var req virtualPaymentNotifyRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		order, err := options.Recharge.HandleVirtualCallback(r.Context(), recharge.VirtualCallbackRequest{
+			OrderNo:         req.OrderNo,
+			ProviderEventID: req.ProviderEventID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"order": order})
+	})
 	return mux
 }
 
@@ -248,6 +349,28 @@ func buildUsageService(cfg config.Config) *usage.Service {
 	})
 	if err != nil {
 		panic(fmt.Sprintf("build usage service: %v", err))
+	}
+	return service
+}
+
+// buildRechargeService creates the order and virtual-callback service for local payment validation.
+func buildRechargeService(cfg config.Config, store recharge.Store) *recharge.Service {
+	if store == nil {
+		store = recharge.NewMemoryStore()
+	}
+	var quota recharge.QuotaClient
+	if cfg.NewAPIAdminBaseURL != "" && cfg.NewAPIAdminToken != "" {
+		admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout})
+		if err != nil {
+			panic(fmt.Sprintf("build newapi recharge client: %v", err))
+		}
+		quota = admin
+	}
+	service, err := recharge.NewService(store, quota, recharge.Config{
+		AllowVirtualCallback: !cfg.IsProduction(),
+	})
+	if err != nil {
+		panic(fmt.Sprintf("build recharge service: %v", err))
 	}
 	return service
 }

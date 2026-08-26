@@ -125,3 +125,11 @@
 - Files changed: `internal/usage/*`, `internal/newapi/client.go`, `internal/httpapi/server.go`, `src/main.js`, `src/preload.js`, `scripts/patch-openclaw.js`, `scripts/verify-cloud-model-usage-ui.js`, README/PRD/self-test scripts。
 - Commands run: `node scripts/verify-activation-only-mode.js`, `node scripts/verify-model-usage-dashboard.js`, `node scripts/verify-cloud-model-usage-ui.js`, `go test ./...`, `go vet ./...`, `./deploy/scripts/smoke-local.sh`, `./deploy/scripts/newapi-local-spike.sh`, `./deploy/scripts/activation-local-e2e.sh`, `VERSION=0.1.9-test ./deploy/scripts/release-linux-amd64.sh`, `git diff --check`。
 - Next: 实现微信/支付宝官方支付订单与回调验签，再由 outbox/worker 调 New API add quota，最后接模型页充值按钮。
+
+## 2026-08-27 02:21
+
+- Did: 新增 `internal/recharge` 虚拟充值订单服务、PostgreSQL 订单/回调状态机、HTTP endpoints `/v1/recharge/plans`、`/v1/recharge/orders`、`/v1/recharge/orders/{orderNo}`、`/v1/payments/virtual/notify`，并更新 PRD/README。
+- Result: 本地可先用 `virtual` provider 模拟支付回调；回调后订单从 `created` 到 `credited`，并幂等调用 New API `add_quota`，重复回调不会重复加额度。
+- Files changed: `u-claw-app-dev/cloud/uclaw-cloud-api/internal/recharge/*`, `internal/postgres/recharge_store.go`, `internal/httpapi/server.go`, `deploy/scripts/activation-local-e2e.sh`, `README.md`, `docs/activation-newapi-recharge-prd.md`。
+- Commands run: `go test ./...`, `go vet ./...`, `./deploy/scripts/activation-local-e2e.sh`。
+- Next: 接模型页充值按钮/记录 UI；随后接 Alipay/WeChat 官方下单、验签回调和补偿 worker。
