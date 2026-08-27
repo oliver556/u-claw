@@ -21,6 +21,8 @@
     "build:all": "npm run prepare-build && electron-builder --mac --win",
     "package:portable:customer": "node scripts/package-portable.js --edition customer",
     "package:portable:streamer": "node scripts/package-portable.js --edition streamer",
+    "hard-update:package": "node scripts/hard-update-package.js",
+    "hard-update:verify": "node scripts/verify-hard-update-mock.js",
     "postinstall": "electron-builder install-app-deps && npm run patch-openclaw"
   },
   "build": {
