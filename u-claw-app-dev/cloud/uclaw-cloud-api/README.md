@@ -19,10 +19,11 @@ u-claw-app/*
 ## 本轮 MVP 形态
 
 ```text
-Go static binary + systemd + Nginx + PostgreSQL
+U-Claw Cloud API: Go static binary + systemd + Nginx/Caddy + PostgreSQL
+New API / sub2api: 1Panel + Docker Compose + PostgreSQL + Redis
 ```
 
-MVP 不强制部署 Redis/asynq。支付成功后的 New API add quota 先通过 PostgreSQL `outbox_jobs` 低并发补偿。
+U-Claw Cloud API 仍保持低内存 systemd 形态，适合阿里云 1 核 1G。New API / sub2api 按用户要求用 1Panel 管理 Docker、PostgreSQL 与 Redis；Redis DB 0 给 New API，DB 1 给 sub2api。
 
 ## 生产服务器拓扑
 
@@ -97,7 +98,35 @@ curl -sS -X POST http://127.0.0.1:8080/v1/activation/redeem \
 - `ALIYUN_SMS_ENDPOINT` 默认 `dysmsapi.aliyuncs.com`；`ALIYUN_SMS_TEMPLATE_PARAM_NAME` 默认 `code`，对应模板变量 `${code}`。
 - `ALIYUN_SMS_HTTP_TIMEOUT` 默认 `3s`，SDK 自动重试关闭，避免验证码超时重试导致重复短信。
 
-真实 AccessKey 只放服务器受限 env 或部署密钥库，不写入 Git。上线前先用受控手机号做一次真实短信 smoke，确认签名、模板和模板变量匹配。
+真实 AccessKey 只放服务器受限 env 或部署密钥库，不写入 Git。当前真实 smoke 显示 `SendSms` 已被阿里云受理；送达回执为 `PORT_NOT_REGISTERED`，需等待短信签名/端口实名报备完成后复验。
+
+## 1Panel New API / sub2api 部署
+
+部署样板位于：
+
+```text
+deploy/1panel/
+```
+
+核心文件：
+
+- `newapi-sub2api.compose.yml`：源站业务容器，仅连接 1Panel 创建的 PostgreSQL 与 Redis。
+- `newapi-sub2api.env.example`：生产 `.env` 模板，真实密钥不得提交。
+- `newapi-front-nginx.conf`：前置反代参考配置，New API 管理路径仅允许阿里云 Cloud API 源 IP。
+
+部署顺序：
+
+```bash
+# 158.51.110.49 源站
+bash -c "$(curl -sSL https://resource.1panel.pro/v2/quick_start.sh)"
+mkdir -p /opt/uclaw-newapi-stack
+cd /opt/uclaw-newapi-stack
+cp newapi-sub2api.env.example .env
+docker compose --env-file .env -f newapi-sub2api.compose.yml config
+docker compose --env-file .env -f newapi-sub2api.compose.yml up -d
+```
+
+前置 `64.90.19.251` 只做 `newapi.yiyong.me`、`sub2api.yiyong.me` 的 TLS/反代/allowlist；源站 `3000/8080` 必须用安全组或防火墙限制只允许前置访问。
 
 ## 首启 activation-only 激活接口
 

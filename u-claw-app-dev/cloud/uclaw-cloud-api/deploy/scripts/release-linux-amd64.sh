@@ -19,6 +19,7 @@ cp -R "$ROOT_DIR/migrations/." "$OUT_DIR/migrations/"
 cp -R "$ROOT_DIR/deploy/systemd" "$OUT_DIR/deploy/"
 cp -R "$ROOT_DIR/deploy/nginx" "$OUT_DIR/deploy/"
 cp -R "$ROOT_DIR/deploy/env" "$OUT_DIR/deploy/"
+cp -R "$ROOT_DIR/deploy/1panel" "$OUT_DIR/deploy/"
 cp -R "$ROOT_DIR/deploy/scripts" "$OUT_DIR/deploy/"
 cp "$ROOT_DIR/README.md" "$OUT_DIR/README.md"
 

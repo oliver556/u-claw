@@ -63,7 +63,7 @@ product/activation-server
 
 - `POST /v1/auth/sms/send`
 - `POST /v1/auth/sms/login`
-- 短信发送 provider seam：本地 development no-op；生产 `aliyun` adapter 使用阿里云官方 Go SDK 调用 `SendSms`
+- 短信发送 provider seam：本地 development no-op；生产 `aliyun` adapter 使用阿里云官方 Go SDK 调用 `SendSms`；已补 `QuerySendDetails` smoke 用于查送达回执
 - `POST /v1/activation/redeem`
 - 激活时自动创建同手机号 New API 账号和 token
 - `GET /v1/newapi/usage/summary`
@@ -96,12 +96,13 @@ created -> paid -> crediting -> credit_failed -> crediting -> credited
 
 ## 打包与部署
 
-目标机器：阿里云 1 核 1G ECS。
+U-Claw Cloud API 目标机器：阿里云 1 核 1G ECS。New API / sub2api 不放在这台小机，放在独立本体 VPS。
 
-推荐形态：
+当前选型：
 
 ```text
-Go static binary + systemd + Nginx + PostgreSQL
+U-Claw Cloud API: Go static binary + systemd + Nginx/Caddy + PostgreSQL
+New API / sub2api: 1Panel + Docker Compose + PostgreSQL + Redis
 ```
 
 原因：
@@ -110,8 +111,18 @@ Go static binary + systemd + Nginx + PostgreSQL
 - U-Claw Cloud API 不承载模型推理流量，请求量和 CPU 压力远低于 New API。
 - PostgreSQL 保存激活、订单和回调，方便恢复 U 盘本地数据丢失的用户。
 - systemd 负责进程守护，Nginx 负责 TLS、限流和反代。
+- New API / sub2api 独立运行在本体 VPS，通过 1Panel 统一管理 Docker、PostgreSQL 和 Redis；Redis DB 0 给 New API，Redis DB 1 给 sub2api。
+- 前置 VPS 只做反代、TLS 与路径 allowlist；New API 管理路径只允许阿里云 U-Claw Cloud API 源 IP。
 
 MVP 暂不引入 Redis/asynq。真实支付上线后，`add_quota` 失败可先通过 PostgreSQL 状态 `credit_failed` 与后台补偿命令处理；订单量上升后再接 outbox worker。
+
+部署样板：
+
+```text
+deploy/1panel/newapi-sub2api.compose.yml
+deploy/1panel/newapi-sub2api.env.example
+deploy/1panel/newapi-front-nginx.conf
+```
 
 ## 配置项
 
@@ -156,9 +167,16 @@ NEWAPI_ACTIVATION_QUOTA=100000
 - `deploy/scripts/activation-local-e2e.sh` 可完成：短信登录、激活、创建 New API token、查询余额、创建虚拟充值订单、虚拟回调、余额增加。
 - U-Claw 客户端模型页进入时能看到 New API 余额、今日用量、近 7 天和流水。
 
+## 当前部署盘点
+
+- `121.41.89.103`：可登录；Docker、PostgreSQL、Caddy 与旧激活服务存在；1Panel/compose 未安装。
+- `64.90.19.251`：可登录；当前无 Docker/1Panel，80/443 未开放服务。
+- `158.51.110.49`：`14851` 端口可达，但当前密码登录失败，需复核 SSH 凭据后才能安装 1Panel 与业务栈。
+- Aliyun SMS：`SendSms` API 已受理；`QuerySendDetails` 回执 `PORT_NOT_REGISTERED`，需短信签名/端口实名报备完成后才会送达。
+
 ## 后续待办
 
-- 使用受控手机号做 Aliyun SMS smoke，确认签名、模板变量 `${code}` 与 `ALIYUN_SMS_TEMPLATE_PARAM_NAME` 匹配。
+- 复核 `158.51.110.49:14851` SSH 登录信息，安装 1Panel、PostgreSQL、Redis、New API 与 sub2api。
 - 等待真实 New API admin/client endpoint 与管理 token 后，做 staging 写入型开户、token、充值验证。
 - 接入官方 Alipay/WeChat 支付创建订单与签名回调。
 - 增加订单列表 UI 和充值记录 UI。

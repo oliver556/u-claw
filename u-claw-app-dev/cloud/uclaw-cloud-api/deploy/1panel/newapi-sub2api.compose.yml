@@ -1,0 +1,36 @@
+name: uclaw-newapi-stack
+
+services:
+  new-api:
+    image: ${NEWAPI_IMAGE:-calciumion/new-api:latest}
+    container_name: uclaw-new-api
+    restart: unless-stopped
+    command: --log-dir /app/logs
+    ports:
+      - "${NEWAPI_HOST_BIND:-0.0.0.0}:${NEWAPI_HTTP_PORT:-3000}:3000"
+    environment:
+      TZ: Asia/Shanghai
+      SQL_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${NEWAPI_DB}?sslmode=disable"
+      REDIS_CONN_STRING: "redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/${NEWAPI_REDIS_DB}"
+      SESSION_SECRET: ${NEWAPI_SESSION_SECRET}
+      CRYPTO_SECRET: ${NEWAPI_CRYPTO_SECRET}
+      MEMORY_CACHE_ENABLED: "true"
+    volumes:
+      - ./newapi/data:/data
+      - ./newapi/logs:/app/logs
+
+  sub2api:
+    image: ${SUB2API_IMAGE:-weishaw/sub2api:latest}
+    container_name: uclaw-sub2api
+    restart: unless-stopped
+    ports:
+      - "${SUB2API_HOST_BIND:-0.0.0.0}:${SUB2API_HTTP_PORT:-8080}:8080"
+    environment:
+      TZ: Asia/Shanghai
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${SUB2API_DB}?sslmode=disable"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/${SUB2API_REDIS_DB}"
+      AUTO_SETUP: "true"
+      JWT_SECRET: ${SUB2API_JWT_SECRET}
+      TOTP_ENCRYPTION_KEY: ${SUB2API_TOTP_ENCRYPTION_KEY}
+    volumes:
+      - ./sub2api/data:/app/data
