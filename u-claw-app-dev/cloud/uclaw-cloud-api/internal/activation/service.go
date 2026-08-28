@@ -107,7 +107,7 @@ type Store interface {
 
 // FirstStartStore persists activation-only username/code binding without requiring SMS login.
 type FirstStartStore interface {
-	BindFirstStart(ctx context.Context, code string, username string, at time.Time) error
+	BindFirstStart(ctx context.Context, code string, username string, at time.Time) (int64, error)
 }
 
 // FirstStartAttempt captures the server-side checkpoint for activation-only startup.
@@ -232,16 +232,19 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 		return FirstStartResult{}, fmt.Errorf("activation code is invalid")
 	}
 	at := s.now()
+	userID := syntheticUserID(username)
 	if firstStartStore, ok := s.store.(FirstStartStore); ok {
-		if err := firstStartStore.BindFirstStart(ctx, code, username, at); err != nil {
+		boundUserID, err := firstStartStore.BindFirstStart(ctx, code, username, at)
+		if err != nil {
 			return FirstStartResult{}, err
 		}
+		userID = boundUserID
 	} else {
 		if err := s.store.Redeem(ctx, code, syntheticUserID(username), username, at); err != nil {
 			return FirstStartResult{}, err
 		}
 	}
-	result, err := s.provisionResult(ctx, syntheticUserID(username), username)
+	result, err := s.provisionResult(ctx, userID, username)
 	if err != nil {
 		return FirstStartResult{}, err
 	}
@@ -395,8 +398,12 @@ func (s *MemoryStore) Redeem(_ context.Context, code string, userID int64, phone
 }
 
 // BindFirstStart binds a startup activation code to a normalized username once.
-func (s *MemoryStore) BindFirstStart(ctx context.Context, code string, username string, at time.Time) error {
-	return s.Redeem(ctx, code, syntheticUserID(username), username, at)
+func (s *MemoryStore) BindFirstStart(ctx context.Context, code string, username string, at time.Time) (int64, error) {
+	userID := syntheticUserID(username)
+	if err := s.Redeem(ctx, code, userID, username, at); err != nil {
+		return 0, err
+	}
+	return userID, nil
 }
 
 // maskPhone returns the same phone display shape as auth without coupling packages.

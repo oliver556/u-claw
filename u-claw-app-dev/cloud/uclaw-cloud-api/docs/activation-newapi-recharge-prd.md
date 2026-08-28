@@ -160,7 +160,7 @@ NEWAPI_ACTIVATION_QUOTA=100000
 
 `virtual` 支付回调只允许非 production。
 
-当前已完成 New API / sub2api 源站与前置反代部署，但尚未初始化 New API 管理员和真实 `NEWAPI_ADMIN_TOKEN`。真实 token 到位后，替换对应服务器环境变量，再做 staging 写入型验收。
+当前已完成 New API / sub2api 源站、前置反代、New API Root 管理员和 U-Claw Cloud API staging 部署；`NEWAPI_ADMIN_TOKEN` 已写入阿里云 staging 受限 env。
 
 ## 验收标准
 
@@ -171,15 +171,14 @@ NEWAPI_ACTIVATION_QUOTA=100000
 
 ## 当前部署盘点
 
-- `121.41.89.103`：可登录；Docker、PostgreSQL、Caddy 与旧激活服务存在；1Panel/compose 未安装。
+- `121.41.89.103`：旧 activation-server 仍在；新增 `uclaw-cloud-api-staging.service` 监听 `127.0.0.1:18180`，已通过首启激活真实链路验收。
 - `64.90.19.251`：已安装 Nginx/Certbot；`newapi.yiyong.me`、`sub2api.yiyong.me` HTTPS 证书有效；公网 `/v1` 可达，管理面非授权来源 `403`。
 - `158.51.110.49`：已安装 1Panel v2.2.5、Docker 与 Compose；New API、sub2api、PostgreSQL、Redis 均已启动，源站 `3000/8080` 已用 `DOCKER-USER` allowlist 限制只允许前置访问。
-- Aliyun SMS：`SendSms` API 已受理；`QuerySendDetails` 回执 `PORT_NOT_REGISTERED`，需短信签名/端口实名报备完成后才会送达。
+- Aliyun SMS：`SendSms` API 已受理；`QuerySendDetails` 回执 `PORT_NOT_REGISTERED`，待短信签名/端口实名报备审核完成后再复验，当前暂不阻塞主线。
 
 ## 后续待办
 
-- 初始化 New API 管理员，生成 `NEWAPI_ADMIN_TOKEN`，并写入 `121.41.89.103` 的受限 env。
-- 用 `https://newapi.yiyong.me` / `https://newapi.yiyong.me/v1` 做 staging 写入型开户、token、充值验证。
+- 将 `license.yiyong.me` 从旧 activation-server 切到 `uclaw-cloud-api-staging.service` 前，再做一次公网首启激活验收。
 - 接入官方 Alipay/WeChat 支付创建订单与签名回调。
 - 增加订单列表 UI 和充值记录 UI。
 - 增加失败订单补偿 worker 或 admin 命令。

@@ -239,6 +239,44 @@ func TestFirstStartAttemptStorePersistsServerBoundAndCommit(t *testing.T) {
 	}
 }
 
+func TestActivateFirstStartProvisionUsesPersistentUserID(t *testing.T) {
+	store := &persistentFirstStartStore{
+		MemoryStore:      NewMemoryStore(true),
+		persistentUserID: 91,
+	}
+	provisioner := &recordingProvisioner{
+		result: ProvisionResult{
+			NewAPIUserID: 18,
+			Token:        "sk-real-token",
+			TokenVersion: 1,
+		},
+	}
+	service, err := NewService(store, Config{Provisioner: provisioner})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	result, err := service.ActivateFirstStart(context.Background(), FirstStartRequest{
+		Username:              "UCLAW-STAGE01",
+		ActivationCode:        "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
+		USBFingerprintSummary: "PREVIEW-ONLY",
+		IdempotencyKey:        "idem-static-1",
+	})
+	if err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+
+	if !provisioner.called {
+		t.Fatal("provisioner was not called")
+	}
+	if provisioner.request.UserID != 91 {
+		t.Fatalf("provision user id = %d, want persistent id 91", provisioner.request.UserID)
+	}
+	if result.NewAPIToken != "sk-real-token" {
+		t.Fatalf("newapi token = %q", result.NewAPIToken)
+	}
+}
+
 type recordingFirstStartStore struct {
 	*MemoryStore
 	attempts []FirstStartAttempt
@@ -268,4 +306,30 @@ func (s *recordingFirstStartStore) CommitFirstStartAttempt(_ context.Context, ac
 		}
 	}
 	return fmt.Errorf("activation id is unknown")
+}
+
+type persistentFirstStartStore struct {
+	*MemoryStore
+	persistentUserID int64
+}
+
+// BindFirstStart records the activation but returns a database-style id for provisioning tests.
+func (s *persistentFirstStartStore) BindFirstStart(ctx context.Context, code string, username string, at time.Time) (int64, error) {
+	if _, err := s.MemoryStore.BindFirstStart(ctx, code, username, at); err != nil {
+		return 0, err
+	}
+	return s.persistentUserID, nil
+}
+
+type recordingProvisioner struct {
+	request ProvisionRequest
+	result  ProvisionResult
+	called  bool
+}
+
+// ProvisionNewAPI records the request received from activation.Service.
+func (p *recordingProvisioner) ProvisionNewAPI(_ context.Context, req ProvisionRequest) (ProvisionResult, error) {
+	p.called = true
+	p.request = req
+	return p.result, nil
 }

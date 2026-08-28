@@ -141,14 +141,15 @@ WHERE code_hash = $1
 	return nil
 }
 
-// BindFirstStart binds an activation code to a first-start username without requiring SMS login.
-func (s *Store) BindFirstStart(ctx context.Context, code string, username string, at time.Time) error {
+// BindFirstStart binds an activation code and returns the persistent U-Claw user id for provisioning.
+func (s *Store) BindFirstStart(ctx context.Context, code string, username string, at time.Time) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin first-start activation: %w", err)
+		return 0, fmt.Errorf("begin first-start activation: %w", err)
 	}
+	committed := false
 	defer func() {
-		if err != nil {
+		if !committed {
 			_ = tx.Rollback()
 		}
 	}()
@@ -163,7 +164,7 @@ ON CONFLICT (phone) DO UPDATE SET
   updated_at = now()
 RETURNING id
 `, username, at).Scan(&userID); err != nil {
-		return fmt.Errorf("upsert first-start user: %w", err)
+		return 0, fmt.Errorf("upsert first-start user: %w", err)
 	}
 
 	result, err := tx.ExecContext(ctx, `
@@ -179,19 +180,20 @@ WHERE code_hash = $1
   )
 `, s.activationCodeHash(code), userID, username, at)
 	if err != nil {
-		return fmt.Errorf("bind first-start activation code: %w", err)
+		return 0, fmt.Errorf("bind first-start activation code: %w", err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("bind first-start activation code rows: %w", err)
+		return 0, fmt.Errorf("bind first-start activation code rows: %w", err)
 	}
 	if rows != 1 {
-		return fmt.Errorf("activation code is invalid or already bound")
+		return 0, fmt.Errorf("activation code is invalid or already bound")
 	}
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("commit first-start activation: %w", err)
+		return 0, fmt.Errorf("commit first-start activation: %w", err)
 	}
-	return nil
+	committed = true
+	return userID, nil
 }
 
 // RecordFirstStartAttempt stores the activation-only server-bound checkpoint.

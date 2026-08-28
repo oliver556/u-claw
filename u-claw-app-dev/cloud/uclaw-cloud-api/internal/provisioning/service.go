@@ -92,7 +92,7 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 		}
 		return activation.ProvisionResult{}, fmt.Errorf("newapi user was not found after creation")
 	}
-	if createErr != nil && !strings.Contains(createErr.Error(), "users.username") {
+	if createErr != nil && !isDuplicateUsernameError(createErr) {
 		return activation.ProvisionResult{}, createErr
 	}
 
@@ -135,6 +135,17 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 		return activation.ProvisionResult{}, err
 	}
 	return activation.ProvisionResult{NewAPIUserID: user.ID, Token: key, TokenVersion: 1}, nil
+}
+
+// isDuplicateUsernameError tolerates New API retries after a prior partial activation created the user.
+func isDuplicateUsernameError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "users.username") ||
+		strings.Contains(message, "users_username") ||
+		strings.Contains(message, "duplicate key")
 }
 
 // DeriveUserPassword derives a retry-stable New API dashboard password without storing plaintext.

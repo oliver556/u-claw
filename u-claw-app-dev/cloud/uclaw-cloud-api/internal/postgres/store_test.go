@@ -134,8 +134,12 @@ func TestStoreBindFirstStartUpsertsUsernameAndBindsCode(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := store.BindFirstStart(context.Background(), "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ", "uclaw-biancheng", at); err != nil {
+	userID, err := store.BindFirstStart(context.Background(), "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ", "uclaw-biancheng", at)
+	if err != nil {
 		t.Fatalf("BindFirstStart() error = %v", err)
+	}
+	if userID != 77 {
+		t.Fatalf("user id = %d, want 77", userID)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
