@@ -92,10 +92,12 @@ curl -sS -X POST http://127.0.0.1:8080/v1/activation/redeem \
 短信发送已经通过 `auth.SMSProvider` 抽象隔离。当前状态：
 
 - `SMS_PROVIDER=development`：仅限本地开发和测试，不调用真实短信供应商；非 production 才会返回 `devCode`。
-- `SMS_PROVIDER=aliyun`：生产配置占位。真实阿里云短信 SDK 和签名模板信息未接入前，服务会失败关闭，避免线上误以为短信已发送。
+- `SMS_PROVIDER=aliyun`：使用阿里云官方 Go SDK 调用 `SendSms`。必须配置已审核通过的签名和模板。
 - production 启动校验要求 `SMS_PROVIDER=aliyun`，并要求 `ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE` 全部存在。
+- `ALIYUN_SMS_ENDPOINT` 默认 `dysmsapi.aliyuncs.com`；`ALIYUN_SMS_TEMPLATE_PARAM_NAME` 默认 `code`，对应模板变量 `${code}`。
+- `ALIYUN_SMS_HTTP_TIMEOUT` 默认 `3s`，SDK 自动重试关闭，避免验证码超时重试导致重复短信。
 
-后续拿到真实短信供应商信息后，只替换 `SMSProvider` 的 Aliyun adapter，不改登录、激活、New API 开户主流程。
+真实 AccessKey 只放服务器受限 env 或部署密钥库，不写入 Git。上线前先用受控手机号做一次真实短信 smoke，确认签名、模板和模板变量匹配。
 
 ## 首启 activation-only 激活接口
 

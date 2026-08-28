@@ -15,6 +15,7 @@ import (
 	"uclaw-cloud-api/internal/newapi"
 	"uclaw-cloud-api/internal/provisioning"
 	"uclaw-cloud-api/internal/recharge"
+	smsprovider "uclaw-cloud-api/internal/sms"
 	"uclaw-cloud-api/internal/usage"
 )
 
@@ -395,11 +396,22 @@ func buildAuthService(cfg config.Config, store auth.Store) *auth.Service {
 	return service
 }
 
-// buildSMSProvider isolates the vendor seam so the real Aliyun implementation
-// can replace the reserved adapter without touching login or activation logic.
+// buildSMSProvider isolates vendor wiring from login and activation logic.
 func buildSMSProvider(cfg config.Config) auth.SMSProvider {
 	if strings.EqualFold(cfg.SMSProvider, "aliyun") {
-		return auth.ReservedSMSProvider{Name: cfg.SMSProvider}
+		provider, err := smsprovider.NewAliyunProvider(smsprovider.AliyunProviderConfig{
+			AccessKeyID:       cfg.AliyunSMSAccessKeyID,
+			AccessKeySecret:   cfg.AliyunSMSAccessKeySecret,
+			SignName:          cfg.AliyunSMSSignName,
+			TemplateCode:      cfg.AliyunSMSTemplateCode,
+			Endpoint:          cfg.AliyunSMSEndpoint,
+			TemplateParamName: cfg.AliyunSMSTemplateParam,
+			Timeout:           cfg.AliyunSMSHTTPTimeout,
+		})
+		if err != nil {
+			panic(fmt.Sprintf("build aliyun sms provider: %v", err))
+		}
+		return provider
 	}
 	return auth.DevelopmentSMSProvider{}
 }

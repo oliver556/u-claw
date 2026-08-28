@@ -8,32 +8,35 @@ import (
 
 func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	values := map[string]string{
-		"NEWAPI_ADMIN_BASE_URL":        " https://newapi.example.com/ ",
-		"NEWAPI_CLIENT_BASE_URL":       " https://api.example.com/v1/ ",
-		"NEWAPI_PREVIEW_TOKEN":         "preview-token",
-		"NEWAPI_HTTP_TIMEOUT":          "3s",
-		"NEWAPI_ACTIVATION_QUOTA":      "100000",
-		"NEWAPI_TOKEN_NAME":            "uclaw-desktop",
-		"NEWAPI_USER_PASSWORD_SECRET":  "password-secret",
-		"AUTH_TOKEN_TTL":               "2h",
-		"SMS_PROVIDER":                 "aliyun",
-		"DEV_SMS_CODE":                 "654321",
-		"SMS_CODE_PEPPER":              "sms-pepper",
-		"ALIYUN_SMS_ACCESS_KEY_ID":     "aliyun-id",
-		"ALIYUN_SMS_ACCESS_KEY_SECRET": "aliyun-secret",
-		"ALIYUN_SMS_SIGN_NAME":         "U-Claw",
-		"ALIYUN_SMS_TEMPLATE_CODE":     "SMS_123",
-		"ACTIVATION_CODE_PEPPER":       "activation-pepper",
-		"LICENSE_SIGNING_KEY_ID":       " license-key-1 ",
-		"LICENSE_SIGNING_SEED_HEX":     strings.Repeat("11", 32),
-		"WECHAT_PAY_MCH_ID":            " mch-1 ",
-		"WECHAT_PAY_APP_ID":            " app-1 ",
-		"WECHAT_PAY_API_V3_KEY":        " v3-key ",
-		"WECHAT_PAY_PRIVATE_KEY_PATH":  " /secrets/wechat.pem ",
-		"WECHAT_PAY_CERT_SERIAL_NO":    " serial-1 ",
-		"ALIPAY_APP_ID":                " alipay-1 ",
-		"ALIPAY_PRIVATE_KEY_PATH":      " /secrets/alipay.pem ",
-		"ALIPAY_PUBLIC_CERT_PATH":      " /secrets/alipay-public.crt ",
+		"NEWAPI_ADMIN_BASE_URL":          " https://newapi.example.com/ ",
+		"NEWAPI_CLIENT_BASE_URL":         " https://api.example.com/v1/ ",
+		"NEWAPI_PREVIEW_TOKEN":           "preview-token",
+		"NEWAPI_HTTP_TIMEOUT":            "3s",
+		"NEWAPI_ACTIVATION_QUOTA":        "100000",
+		"NEWAPI_TOKEN_NAME":              "uclaw-desktop",
+		"NEWAPI_USER_PASSWORD_SECRET":    "password-secret",
+		"AUTH_TOKEN_TTL":                 "2h",
+		"SMS_PROVIDER":                   "aliyun",
+		"DEV_SMS_CODE":                   "654321",
+		"SMS_CODE_PEPPER":                "sms-pepper",
+		"ALIYUN_SMS_ACCESS_KEY_ID":       "aliyun-id",
+		"ALIYUN_SMS_ACCESS_KEY_SECRET":   "aliyun-secret",
+		"ALIYUN_SMS_SIGN_NAME":           "U-Claw",
+		"ALIYUN_SMS_TEMPLATE_CODE":       "SMS_123",
+		"ALIYUN_SMS_ENDPOINT":            " dysmsapi.aliyuncs.com ",
+		"ALIYUN_SMS_TEMPLATE_PARAM_NAME": " verify_code ",
+		"ALIYUN_SMS_HTTP_TIMEOUT":        "4s",
+		"ACTIVATION_CODE_PEPPER":         "activation-pepper",
+		"LICENSE_SIGNING_KEY_ID":         " license-key-1 ",
+		"LICENSE_SIGNING_SEED_HEX":       strings.Repeat("11", 32),
+		"WECHAT_PAY_MCH_ID":              " mch-1 ",
+		"WECHAT_PAY_APP_ID":              " app-1 ",
+		"WECHAT_PAY_API_V3_KEY":          " v3-key ",
+		"WECHAT_PAY_PRIVATE_KEY_PATH":    " /secrets/wechat.pem ",
+		"WECHAT_PAY_CERT_SERIAL_NO":      " serial-1 ",
+		"ALIPAY_APP_ID":                  " alipay-1 ",
+		"ALIPAY_PRIVATE_KEY_PATH":        " /secrets/alipay.pem ",
+		"ALIPAY_PUBLIC_CERT_PATH":        " /secrets/alipay-public.crt ",
 	}
 
 	cfg, err := Load(func(key string) string {
@@ -84,6 +87,12 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.AliyunSMSAccessKeyID != "aliyun-id" || cfg.AliyunSMSTemplateCode != "SMS_123" {
 		t.Fatalf("aliyun sms config not loaded: %+v", cfg)
+	}
+	if cfg.AliyunSMSEndpoint != "dysmsapi.aliyuncs.com" || cfg.AliyunSMSTemplateParam != "verify_code" {
+		t.Fatalf("aliyun sms optional config not loaded: %+v", cfg)
+	}
+	if cfg.AliyunSMSHTTPTimeout != 4*time.Second {
+		t.Fatalf("AliyunSMSHTTPTimeout = %v, want 4s", cfg.AliyunSMSHTTPTimeout)
 	}
 	if cfg.ActivationCodePepper != "activation-pepper" {
 		t.Fatalf("ActivationCodePepper = %q", cfg.ActivationCodePepper)

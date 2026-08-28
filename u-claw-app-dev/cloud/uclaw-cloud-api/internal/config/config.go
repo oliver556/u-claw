@@ -29,6 +29,9 @@ type Config struct {
 	AliyunSMSAccessKeySecret string
 	AliyunSMSSignName        string
 	AliyunSMSTemplateCode    string
+	AliyunSMSEndpoint        string
+	AliyunSMSTemplateParam   string
+	AliyunSMSHTTPTimeout     time.Duration
 	ActivationCodePepper     string
 	LicenseSigningKeyID      string
 	LicenseSigningSeedHex    string
@@ -72,6 +75,9 @@ func Load(getenv Getter) (Config, error) {
 		AliyunSMSAccessKeySecret: strings.TrimSpace(getenv("ALIYUN_SMS_ACCESS_KEY_SECRET")),
 		AliyunSMSSignName:        strings.TrimSpace(getenv("ALIYUN_SMS_SIGN_NAME")),
 		AliyunSMSTemplateCode:    strings.TrimSpace(getenv("ALIYUN_SMS_TEMPLATE_CODE")),
+		AliyunSMSEndpoint:        withDefault(getenv("ALIYUN_SMS_ENDPOINT"), "dysmsapi.aliyuncs.com"),
+		AliyunSMSTemplateParam:   withDefault(getenv("ALIYUN_SMS_TEMPLATE_PARAM_NAME"), "code"),
+		AliyunSMSHTTPTimeout:     3 * time.Second,
 		ActivationCodePepper:     withDefault(getenv("ACTIVATION_CODE_PEPPER"), "uclaw-dev-activation-code-pepper"),
 		LicenseSigningKeyID:      strings.TrimSpace(getenv("LICENSE_SIGNING_KEY_ID")),
 		LicenseSigningSeedHex:    strings.TrimSpace(getenv("LICENSE_SIGNING_SEED_HEX")),
@@ -105,6 +111,13 @@ func Load(getenv Getter) (Config, error) {
 			return Config{}, fmt.Errorf("parse AUTH_TOKEN_TTL: %w", err)
 		}
 		cfg.AuthTokenTTL = timeout
+	}
+	if raw := strings.TrimSpace(getenv("ALIYUN_SMS_HTTP_TIMEOUT")); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse ALIYUN_SMS_HTTP_TIMEOUT: %w", err)
+		}
+		cfg.AliyunSMSHTTPTimeout = timeout
 	}
 
 	return cfg, nil
