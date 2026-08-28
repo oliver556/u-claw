@@ -1,6 +1,6 @@
 # U-Claw 官方激活与 New API 计费架构方案
 
-更新时间：2026-08-26
+更新时间：2026-08-28
 
 ## 1. 背景
 
@@ -38,6 +38,32 @@ U-Claw 桌面客户端当前已具备模型页，可展示余额、用量、模�
 | 退款 | MVP 不做自动退款，只支持人工后台标记与人工处理 |
 | 技术栈 | Go + Gin/Echo + pgx/sqlc + PostgreSQL + Redis + asynq worker |
 | 管理后台 | 先做最小管理后台/API |
+
+### 2.1 生产服务器清单
+
+以下清单只记录开发和部署必需的服务器角色、IP、SSH 端口与登录用户。root 密码、支付私钥、New API admin token、数据库密码不得写入 Git 文档或代码库，只能放密码管理器、服务器 secret 文件或本机 ignored env 文件。
+
+| 角色 | 公网 IP | SSH 端口 | 初始用户 | 主要用途 | 不承担 |
+| --- | --- | --- | --- | --- | --- |
+| U-Claw 阿里云激活服务器 | `121.41.89.103` | `22` | `root` | 部署 U-Claw Cloud API、激活码、账号映射、支付下单/回调、必要的 PostgreSQL 或 RDS 连接 | 不部署 New API，不承载模型推理 |
+| New API 前置香港 VPS | `64.90.19.251` | `24851` | `root` | 部署 1Panel + Nginx，作为客户端 New API endpoint 与管理专用反代入口 | 不保存 U-Claw 激活数据，不跑支付回调 |
+| New API / sub2api 本体 OVH VPS | `158.51.110.49` | `14851` | `root` | 部署 New API + sub2api，承载 quota、余额、用量流水、模型调用与上游号池 | 不跑 U-Claw 激活服务 |
+
+SSH 连接方式：
+
+```bash
+ssh -p 22 root@121.41.89.103
+ssh -p 24851 root@64.90.19.251
+ssh -p 14851 root@158.51.110.49
+```
+
+生产加固要求：
+
+- 当前 root 密码已在开发对话中出现，正式上线前必须轮换三台服务器密码。
+- 建议创建 `uclaw-deploy` 用户，改用 SSH key 登录，并关闭 root password login。
+- 香港 Nginx 管理路径只允许阿里云服务器 IP `121.41.89.103` 访问。
+- OVH New API 源站只开放给香港前置与必要管理 IP，避免直接暴露管理面。
+- 服务器真实凭据统一记录到密码管理器；本仓库只保留脱敏拓扑。
 
 ## 3. 总体架构
 

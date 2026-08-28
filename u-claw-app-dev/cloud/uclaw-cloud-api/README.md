@@ -24,6 +24,16 @@ Go static binary + systemd + Nginx + PostgreSQL
 
 MVP 不强制部署 Redis/asynq。支付成功后的 New API add quota 先通过 PostgreSQL `outbox_jobs` 低并发补偿。
 
+## 生产服务器拓扑
+
+| 角色 | 公网 IP | SSH 端口 | 初始用户 | 说明 |
+| --- | --- | --- | --- | --- |
+| U-Claw 阿里云激活服务器 | `121.41.89.103` | `22` | `root` | 本服务部署目标，只承载激活、保存、订单与支付回调 |
+| New API 前置香港 VPS | `64.90.19.251` | `24851` | `root` | 1Panel + Nginx，反代客户端与管理路径 |
+| New API / sub2api 本体 OVH VPS | `158.51.110.49` | `14851` | `root` | New API + sub2api 源站 |
+
+密码、私钥、支付证书、New API admin token 不写入仓库。正式上线前必须轮换已共享的 root 密码，并优先改成 SSH key + `uclaw-deploy` 用户。
+
 ## 本地命令
 
 ```bash

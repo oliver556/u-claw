@@ -157,3 +157,11 @@
 - Files changed: `.codex-state/backend_activation_progress.md`, `docs/多人开发/U-Claw官方激活与NewAPI计费架构方案.md`, `u-claw-app-dev/cloud/uclaw-cloud-api/*`。
 - Commands run: `gofmt`, `go test ./internal/activation ./internal/httpapi ./internal/recharge ./internal/config ./internal/postgres`, `go test ./...`, `go vet ./...`, `./deploy/scripts/smoke-local.sh`, `./deploy/scripts/activation-local-e2e.sh`, `git diff --check`。
 - Next: 接 Alipay/WeChat 官方 SDK adapter、验签回调、订单轮询和 PostgreSQL outbox 补偿 worker。
+
+## 2026-08-28 16:05
+
+- Did: 将生产服务器拓扑写入 PRD 与 Cloud API README：阿里云激活服务器、香港 New API 前置 VPS、OVH New API/sub2api 本体 VPS。
+- Result: 文档记录 IP、SSH 端口、初始用户、职责边界和加固要求；root 密码不入库，要求上线前轮换并迁移到 SSH key。
+- Files changed: `docs/多人开发/U-Claw官方激活与NewAPI计费架构方案.md`, `u-claw-app-dev/cloud/uclaw-cloud-api/README.md`, `.codex-state/backend_activation_progress.md`。
+- Commands run: `rg` 文档定位与敏感词检查、`git diff --check`。
+- Next: 继续支付宝当面付接入：AppID、公钥/证书、私钥文件路径、`notify_url` 确认后实现 adapter。

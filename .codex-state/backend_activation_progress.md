@@ -57,3 +57,4 @@
 - 最新 UI 验证通过：`node scripts/verify-cloud-model-usage-ui.js` 点击模型页“充值”并断言 `150,000`；另通过 `go test ./...`、`go vet ./...`、`npm run patch-openclaw`、`node scripts/verify-model-usage-dashboard.js`、`node scripts/verify-activation-only-mode.js`。
 - 最新充值 UI 验证通过：`node scripts/verify-cloud-model-usage-ui.js` 已覆盖套餐弹窗、确认充值、记录弹窗；截图 `/tmp/uclaw-model-usage-ui.png`。
 - 官方支付 seam 覆盖：`GET /v1/recharge/providers` 需 Bearer；`alipay/wechat` 未配置时不可下单；checkout adapter seam 有单测保护。
+- 生产服务器拓扑已记录到 PRD/README：阿里云激活机、香港 New API 前置机、OVH New API/sub2api 源站；root 密码不入库，正式上线前必须轮换并改 SSH key。
