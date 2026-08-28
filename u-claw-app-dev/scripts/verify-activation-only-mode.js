@@ -36,6 +36,10 @@ requireText(main, "const activationStatePath = path.join(configDir, 'uclaw-activ
 requireText(main, 'function hasCompletedActivation()', 'activation completion checker');
 requireText(main, 'function shouldShowActivationOnStartup()', 'startup activation gate');
 requireText(main, 'function writeActivationState', 'activation state writer');
+requireText(main, "const activationLicensePath = path.join(configDir, 'license', 'license.json');", 'activation license path');
+requireText(main, "const builtinModelCredentialPath = path.join(configDir, 'builtin-model-credential.v1.json');", 'builtin model credential path');
+requireText(main, 'function writeActivationLicenseArtifact', 'activation license writer');
+requireText(main, 'function writeBuiltinModelCredential', 'builtin model credential writer');
 requireText(main, 'function canUseActivationStaticFallback()', 'activation static fallback guard');
 requireText(main, 'function createStaticActivationResult', 'activation static fallback result');
 requireText(main, 'async function postActivationJSON', 'activation cloud HTTP client');
@@ -43,8 +47,8 @@ requireText(main, 'async function getActivationJSON', 'activation cloud GET clie
 requireText(main, 'async function getCloudModelUsageSummary', 'cloud model usage summary client');
 requireText(main, 'function writeOpenClawActivationConfig', 'OpenClaw activation config writer');
 requireText(main, "postActivationJSON('/v1/auth/sms/send'", 'cloud SMS send');
-requireText(main, "postActivationJSON('/v1/auth/sms/login'", 'cloud SMS login');
-requireText(main, "postActivationJSON('/v1/activation/redeem'", 'cloud activation redeem');
+requireText(main, "postActivationJSON('/v1/activations'", 'first-start cloud activation');
+requireText(main, "postActivationJSON(`/v1/activations/${activationID}/commit`", 'first-start activation commit');
 requireText(main, 'ACTIVATION_CLOUD_COMPLETE', 'cloud activation completion code');
 requireText(main, 'UCLAW_ACTIVATION_REQUIRE_CLOUD', 'activation cloud required opt-out');
 requireText(main, 'activation cloud submit fallback', 'activation cloud submit fallback');
@@ -55,6 +59,7 @@ requireText(main, "mainWindow.loadFile(path.join(__dirname, 'activation.html'));
 requireText(main, 'Activation-only mode starting', 'activation lifecycle branch');
 requireText(main, 'Activation gate starting', 'activation startup gate branch');
 requireText(main, 'function createActivationMenu()', 'activation menu');
+requireText(main, 'if (activationWindowMode) {', 'activation menu gate uses runtime window mode');
 requireText(main, 'additionalArguments: activationWindowMode ? [ACTIVATION_ONLY_ARG] : [],', 'activation renderer argv');
 
 const lifecycleBranch = sliceBetween(main, 'Activation-only mode starting', '  // Setup');
@@ -87,6 +92,13 @@ for (const forbidden of ['get-gateway-status', 'open-dashboard', 'open-config'])
   }
 }
 
+const submitActivationSource = sliceBetween(main, 'async function submitActivation', '/**\n * Registers only the activation IPC surface.');
+for (const forbidden of ["postActivationJSON('/v1/auth/sms/login'", "postActivationJSON('/v1/activation/redeem'"]) {
+  if (submitActivationSource.includes(forbidden)) {
+    throw new Error(`Activation submit must use first-start API, not ${forbidden}`);
+  }
+}
+
 const preloadActivationBranch = sliceBetween(preload, 'if (isActivationOnlyMode)', '} else {');
 requireText(preloadActivationBranch, 'uclawActivation', 'activation preload namespace');
 for (const forbidden of ['getGatewayStatus', 'openDashboard', 'openConfig']) {
@@ -101,11 +113,10 @@ requireText(preloadNormalBranch, 'getModelUsageSummary', 'normal preload model u
 for (const required of [
   '首次启动激活',
   '受限模式不启动 OpenClaw Gateway',
-  '登录并绑定当前 U-Claw 产品盘',
-  'placeholder="请输入手机号"',
-  'placeholder="6 位验证码"',
-  'placeholder="XXXX-XXXX-XXXX-XXXX"',
-  'sendSMS',
+  '激活并绑定当前 U-Claw 产品盘',
+  'placeholder="UCLAW-XXXXXXXX"',
+  'placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX"',
+  'normalizeUsername',
   'finishPhone',
   'formatActivationCode',
   'escapeHtml',
@@ -114,14 +125,14 @@ for (const required of [
   '.button.primary:hover:not(:disabled) { border-color: var(--blue-hover); color: #fff;',
   '.button.text:hover:not(:disabled) { border-color: transparent; color: var(--text);',
   '.button.inline:hover:not(:disabled) { border-color: var(--blue); color: var(--blue);',
-  'U-Claw 首次登录完成',
-  'preview',
-  '等待云端激活兑换接入',
+  'U-Claw 首次激活完成',
+  '授权材料已写入',
+  '已完成云端绑定和本地授权写盘',
 ]) {
   requireText(activationHtml, required, `activation page marker ${required}`);
 }
 
-for (const forbidden of ['UCLAW-8F2K9M', '7K4P-9Q2M-X8RT-6W3N-A5LC', 'Gateway 在线', 'custom/gpt-5.5', '本地启动授权有效']) {
+for (const forbidden of ['UCLAW-8F2K9M', '7K4P-9Q2M-X8RT-6W3N-A5LC', 'Gateway 在线', 'custom/gpt-5.5', '本地启动授权有效', 'placeholder="请输入手机号"', 'placeholder="6 位验证码"']) {
   if (activationHtml.includes(forbidden)) {
     throw new Error(`Activation page must not keep demo value: ${forbidden}`);
   }

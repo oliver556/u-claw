@@ -71,6 +71,7 @@ product/activation-server
 - `POST /v1/recharge/orders`
 - `POST /v1/payments/virtual/notify`
 - `GET /v1/recharge/orders/{orderNo}`
+- Electron activation-only 首启客户端已切到 `POST /v1/activations`，不再依赖短信审核；客户端会写入本地授权材料与 OpenClaw New API 配置，读回验证成功后调用 `/v1/activations/{activationId}/commit`。
 
 本切片的充值先用 `virtual` provider。虚拟回调成功后立即触发 New API `POST /api/user/manage` 加 quota，并通过订单状态机保证同一订单不会重复加额度。
 
@@ -161,6 +162,7 @@ NEWAPI_ACTIVATION_QUOTA=100000
 `virtual` 支付回调只允许非 production。
 
 当前已完成 New API / sub2api 源站、前置反代、New API Root 管理员和 U-Claw Cloud API staging 部署；`NEWAPI_ADMIN_TOKEN` 已写入阿里云 staging 受限 env。`license.yiyong.me` 已把新激活相关路径切到 Cloud API staging，并完成公网首启激活验收。
+客户端侧已完成首启真实写盘闭环：用户名 + 激活码提交、`licenseArtifact` 写入、New API credential 写入、OpenClaw config 写入、读回验证和 commit。
 
 ## 验收标准
 
@@ -168,6 +170,7 @@ NEWAPI_ACTIVATION_QUOTA=100000
 - `deploy/scripts/newapi-local-up.sh` 可启动本地 New API lab。
 - `deploy/scripts/activation-local-e2e.sh` 可完成：短信登录、激活、创建 New API token、查询余额、创建虚拟充值订单、虚拟回调、余额增加。
 - U-Claw 客户端模型页进入时能看到 New API 余额、今日用量、近 7 天和流水。
+- activation-only 客户端提交用户名和激活码后，本地生成 `.openclaw/license/license.json`、`.openclaw/builtin-model-credential.v1.json`、`.openclaw/uclaw-activation.json`，并写入 `.openclaw/openclaw.json` 的 New API provider 配置。
 
 ## 当前部署盘点
 
@@ -175,10 +178,11 @@ NEWAPI_ACTIVATION_QUOTA=100000
 - `64.90.19.251`：已安装 Nginx/Certbot；`newapi.yiyong.me`、`sub2api.yiyong.me` HTTPS 证书有效；公网 `/v1` 可达，管理面非授权来源 `403`。
 - `158.51.110.49`：已安装 1Panel v2.2.5、Docker 与 Compose；New API、sub2api、PostgreSQL、Redis 均已启动，源站 `3000/8080` 已用 `DOCKER-USER` allowlist 限制只允许前置访问。
 - Aliyun SMS：`SendSms` API 已受理；`QuerySendDetails` 回执 `PORT_NOT_REGISTERED`，待短信签名/端口实名报备审核完成后再复验，当前暂不阻塞主线。
+- Electron activation-only：已通过本地 stub 驱动的真实页面写盘验收；短信待审核期间按交付卡用户名 + 激活码完成首启。
 
 ## 后续待办
 
-- 把 `uclaw-cloud-api-staging.service` 从 staging 命名整理为正式 service，并制定旧 activation-server 下线窗口。
+- 定稿生产客户端默认 endpoint/Launcher 环境注入，并制定旧 activation-server 下线窗口。
 - 接入官方 Alipay/WeChat 支付创建订单与签名回调。
 - 增加订单列表 UI 和充值记录 UI。
 - 增加失败订单补偿 worker 或 admin 命令。

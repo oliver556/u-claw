@@ -162,6 +162,7 @@ async function openCDP() {
 function writeActivatedClientState(accessToken, newAPIToken) {
   const configDir = path.join(devDataDir, '.openclaw');
   fs.mkdirSync(configDir, { recursive: true });
+  fs.mkdirSync(path.join(configDir, 'license'), { recursive: true });
   const config = JSON.parse(fs.readFileSync(path.join(appRoot, 'resources', 'default-openclaw.json'), 'utf8'));
   config.models = config.models || {};
   config.models.providers = config.models.providers || {};
@@ -177,6 +178,18 @@ function writeActivatedClientState(accessToken, newAPIToken) {
   config.agents.defaults.imageModel = { primary: 'litellm/gpt-image-2' };
   config.agents.defaults.videoGenerationModel = { primary: 'xai/jimeng-video-3-720p' };
   fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify(config, null, 2));
+  fs.writeFileSync(path.join(configDir, 'license', 'license.json'), JSON.stringify({
+    payload: {
+      schemaVersion: 'uclaw.license.v1',
+      activationId: 'ui-e2e-activation',
+      subject: 'ui-e2e',
+    },
+    signature: {
+      algorithm: 'Ed25519',
+      keyId: 'ui-e2e',
+      value: Buffer.from('ui-e2e-signature').toString('base64'),
+    },
+  }, null, 2));
   fs.writeFileSync(path.join(configDir, 'uclaw-activation.json'), JSON.stringify({
     schemaVersion: 1,
     status: 'activated',
@@ -253,6 +266,19 @@ async function assertElectronModelUsageUI() {
     })()`);
     if (ok) break;
     await sleep(500);
+  }
+  const selectedPlan = await evalJS(`(() => {
+    const plan = [...document.querySelectorAll('button,[role="button"],label,article,div')]
+      .find((node) => (node.textContent || '').includes('虚拟充值 10 元') && node.offsetParent !== null);
+    if (!plan) return false;
+    const clickable = plan.closest('button,[role="button"],label') || plan;
+    clickable.click();
+    return true;
+  })()`);
+  if (!selectedPlan) {
+    const bodyText = await evalJS('document.body.innerText || ""');
+    cdp.close();
+    throw new Error(`model usage UI recharge plan not selectable:\n${bodyText.slice(0, 2000)}`);
   }
   const confirmedRecharge = await evalJS(`(() => {
     const button = [...document.querySelectorAll('button')]

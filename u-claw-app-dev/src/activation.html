@@ -276,18 +276,14 @@
           <section class="screen" id="screen-activate">
             <header class="screen-head">
               <span class="status-kicker">首次激活</span>
-              <h1>登录并绑定当前 U-Claw 产品盘</h1>
-              <p>使用手机号验证码确认账号，再输入随 U 盘附带的激活码。完成后，授权和模型配置会保存在当前产品盘。</p>
+              <h1>激活并绑定当前 U-Claw 产品盘</h1>
+              <p>输入交付卡上的用户名和激活码。完成后，授权材料和模型配置会保存在当前产品盘。</p>
             </header>
             <div class="activate-grid">
               <form class="form-card" id="activationForm" novalidate>
-                <div class="field" id="phoneField"><label for="phone">手机号</label><input class="input" id="phone" inputmode="tel" autocomplete="tel" placeholder="请输入手机号"><small>手机号用于登录、找回授权和恢复 New API token。</small><small class="input-error">请输入有效的手机号。</small></div>
-                <div class="sms-row">
-                  <div class="field" id="smsField"><label for="smsCode">短信验证码</label><input class="input" id="smsCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码"><small class="input-error">请输入 6 位验证码。</small></div>
-                  <button class="button inline" id="sendSmsButton" type="button">发送验证码</button>
-                </div>
-                <div class="field" id="codeField"><label for="activationCode">U 盘激活码</label><input class="input" id="activationCode" autocomplete="one-time-code" placeholder="XXXX-XXXX-XXXX-XXXX"><small>激活码随 U 盘提供，首次使用后绑定当前手机号。</small><small class="input-error">激活码格式不正确。</small></div>
-                <p class="form-note">当前切片先完成首启登录界面与本地验证码闭环；真实云端激活会在下一步接入阿里云激活服务。</p>
+                <div class="field" id="usernameField"><label for="username">用户名</label><input class="input" id="username" autocomplete="username" placeholder="UCLAW-XXXXXXXX"><small>用户名随 U 盘交付卡提供，用于首次激活和售后识别。</small><small class="input-error">用户名格式不正确。</small></div>
+                <div class="field" id="codeField"><label for="activationCode">U 盘激活码</label><input class="input" id="activationCode" autocomplete="one-time-code" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX"><small>激活码随 U 盘提供，首次使用后绑定当前产品盘。</small><small class="input-error">激活码格式不正确。</small></div>
+                <p class="form-note">短信验证接口已预留；当前先按交付卡用户名完成首次绑定，避免短信审核阻塞首启。</p>
               </form>
               <aside class="side-card">
                 <h2>受限模式状态</h2>
@@ -297,20 +293,20 @@
                   <div><dt>Config.html</dt><dd><span class="dot orange"></span> 不开放</dd></div>
                   <div><dt>激活服务</dt><dd id="endpointState"><span class="dot orange"></span> 待接入</dd></div>
                 </dl>
-                <div class="api-state"><span class="dot orange"></span><span>登录验证成功后，将继续调用激活服务兑换 U 盘激活码。</span></div>
+                <div class="api-state"><span class="dot orange"></span><span>云端绑定成功后，将写入授权材料并提交 commit。</span></div>
               </aside>
             </div>
-            <div class="form-alert" id="formAlert" hidden>请确认手机号、短信验证码和激活码后继续。</div>
+            <div class="form-alert" id="formAlert" hidden>请确认用户名和激活码后继续。</div>
           </section>
 
           <section class="screen finish" id="screen-finish">
-            <div class="success-seal preview">✓</div>
-            <span class="status-kicker preview">静态流程完成</span>
-            <h1>U-Claw 首次登录完成</h1>
-            <p>账号验证和激活码表单已完成。云端激活服务接入后，此处会写入授权材料并进入主界面。</p>
-            <div class="ready-card preview">
-              <div class="ready-line"><span class="success-seal preview" style="width:34px;height:34px;margin:0;font-size:16px;box-shadow:none;">✓</span><span><strong>登录验证已完成</strong><small id="finishDetail">等待云端激活兑换接入。</small></span></div>
-              <dl><div><dt>登录账号</dt><dd id="finishPhone">--</dd></div><div><dt>产品盘</dt><dd id="finishDisk">静态预览</dd></div><div><dt>授权材料</dt><dd>待写入</dd></div></dl>
+            <div class="success-seal">✓</div>
+            <span class="status-kicker success">授权材料已写入</span>
+            <h1>U-Claw 首次激活完成</h1>
+            <p>已完成云端绑定和本地授权写盘。重新启动后，U-Claw 会执行完整授权检查并进入主界面。</p>
+            <div class="ready-card">
+              <div class="ready-line"><span class="success-seal" style="width:34px;height:34px;margin:0;font-size:16px;box-shadow:none;">✓</span><span><strong>激活验证已完成</strong><small id="finishDetail">已完成云端绑定和本地授权写盘。</small></span></div>
+              <dl><div><dt>激活账号</dt><dd id="finishPhone">--</dd></div><div><dt>产品盘</dt><dd id="finishDisk">静态预览</dd></div><div><dt>授权材料</dt><dd>已写入</dd></div></dl>
             </div>
           </section>
         </div>
@@ -437,41 +433,44 @@
     }
 
     /**
-     * Formats pasted U disk activation codes into 4-character groups.
+     * Formats pasted U disk activation codes into supported delivery-card groups.
      */
     function formatActivationCode(value) {
-      const clean = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
-      const groups = clean.match(/.{1,4}/g) || [];
-      return groups.join('-');
+      const clean = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 26);
+      if (clean.length > 24) {
+        return [clean.slice(0, 5), clean.slice(5, 10), clean.slice(10, 15), clean.slice(15, 20), clean.slice(20)]
+          .filter(Boolean)
+          .join('-');
+      }
+      return (clean.match(/.{1,4}/g) || []).join('-');
     }
 
     /**
-     * Keeps phone input numeric and capped to a mainland China mobile number.
+     * Keeps sales-issued usernames uppercase and bounded before submission.
      */
-    function normalizePhone(value) {
-      return String(value).replace(/\D/g, '').slice(0, 11);
+    function normalizeUsername(value) {
+      return String(value).toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 38);
     }
 
     /**
      * Validates first-login fields before submitting to the activation IPC seam.
      */
     function validateActivation() {
-      const phone = $('#phone').value.trim();
-      const smsCode = $('#smsCode').value.trim();
+      const username = $('#username').value.trim().toUpperCase();
       const code = $('#activationCode').value.trim().toUpperCase();
-      const phoneValid = /^1[3-9]\d{9}$/.test(phone);
-      const smsValid = /^\d{6}$/.test(smsCode);
-      const codeValid = /^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}$/.test(code);
-      $('#phoneField').classList.toggle('error', !phoneValid);
-      $('#smsField').classList.toggle('error', !smsValid);
+      const usernameValid = /^UCLAW-[A-Z0-9]{6,32}$/.test(username);
+      const codeValid = /^(?:[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}|[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}-[A-Z0-9]{6})$/.test(code);
+      $('#usernameField').classList.toggle('error', !usernameValid);
       $('#codeField').classList.toggle('error', !codeValid);
-      return phoneValid && smsValid && codeValid;
+      return usernameValid && codeValid;
     }
 
     /**
      * Requests an SMS code through the restricted activation IPC namespace.
      */
     async function sendSMS() {
+      const phoneInput = $('#phone');
+      if (!phoneInput) return;
       const phone = $('#phone').value.trim();
       $('#phoneField').classList.toggle('error', !/^1[3-9]\d{9}$/.test(phone));
       if ($('#phoneField').classList.contains('error')) {
@@ -515,9 +514,8 @@
       let result;
       try {
         result = await window.uclawActivation.submitActivation({
-        phone: $('#phone').value.trim(),
-        smsCode: $('#smsCode').value.trim(),
-        activationCode: $('#activationCode').value.trim().toUpperCase(),
+          username: $('#username').value.trim().toUpperCase(),
+          activationCode: $('#activationCode').value.trim().toUpperCase(),
         });
       } catch (error) {
         result = { ok: false, message: error.message || '激活服务调用失败' };
@@ -529,7 +527,7 @@
         return;
       }
       $('#finishDetail').textContent = `${result.code || 'ACTIVATION_PENDING'}：${result.message || '等待后续切片接入。'}`;
-      $('#finishPhone').textContent = result.phoneMasked || $('#phone').value.trim();
+      $('#finishPhone').textContent = result.usernameMasked || result.phoneMasked || $('#username').value.trim();
       $('#finishDisk').textContent = preflight?.usb?.label || '静态预览';
       setScreen('finish');
       showToast(result.message || '激活服务尚未接入', result.ok ? '' : 'error');
@@ -555,17 +553,12 @@
       $('#codeField').classList.remove('error');
       $('#formAlert').hidden = true;
     });
-    $('#phone').addEventListener('input', (event) => {
-      event.target.value = normalizePhone(event.target.value);
-      $('#phoneField').classList.remove('error');
+    $('#username').addEventListener('input', (event) => {
+      event.target.value = normalizeUsername(event.target.value);
+      $('#usernameField').classList.remove('error');
       $('#formAlert').hidden = true;
     });
-    $('#smsCode').addEventListener('input', (event) => {
-      event.target.value = String(event.target.value).replace(/\D/g, '').slice(0, 6);
-      $('#smsField').classList.remove('error');
-      $('#formAlert').hidden = true;
-    });
-    $('#sendSmsButton').addEventListener('click', sendSMS);
+    $('#sendSmsButton')?.addEventListener('click', sendSMS);
     $$('[data-window-action]').forEach((button) => {
       button.addEventListener('click', () => window.uclawActivation?.windowAction(button.dataset.windowAction));
     });

@@ -160,6 +160,8 @@ const dirtyMarkerPath = path.join(syncStateDir, 'dirty.json');
 const lastSyncPath = path.join(syncStateDir, 'last-sync.json');
 const uiStatePath = path.join(configDir, 'uclaw-ui-state.json');
 const activationStatePath = path.join(configDir, 'uclaw-activation.json');
+const activationLicensePath = path.join(configDir, 'license', 'license.json');
+const builtinModelCredentialPath = path.join(configDir, 'builtin-model-credential.v1.json');
 const logsDir = path.join(userDataPath, 'logs');
 
 try {
@@ -274,6 +276,60 @@ function safeWriteJson(filePath, value) {
   } catch (error) {
     console.warn(`[${APP_NAME}] Failed to write ${filePath}: ${error.message}`);
     return false;
+  }
+}
+
+/**
+ * Rejects unsafe activation targets before writing secret-bearing JSON. This is
+ * a local defense for portable media, where stale symlinks would be surprising.
+ */
+function assertSafeJsonTarget(filePath) {
+  const resolved = path.resolve(filePath);
+  const resolvedRoot = path.resolve(configDir);
+  if (resolved !== resolvedRoot && !resolved.startsWith(`${resolvedRoot}${path.sep}`)) {
+    throw new Error(`refusing to write outside activation data dir: ${resolved}`);
+  }
+  try {
+    const stat = fs.lstatSync(resolved);
+    if (stat.isSymbolicLink()) throw new Error('target is a symbolic link');
+    if (!stat.isFile()) throw new Error('target is not a regular file');
+    if (stat.nlink > 1) throw new Error('target has multiple hard links');
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+}
+
+/**
+ * Atomically writes bounded JSON and reads it back so activation only commits
+ * after local material is durably present.
+ */
+function atomicWriteJson(filePath, value) {
+  assertSafeJsonTarget(filePath);
+  const json = `${JSON.stringify(value, null, 2)}\n`;
+  if (Buffer.byteLength(json, 'utf8') > 1024 * 1024) {
+    throw new Error('activation material is too large');
+  }
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tempPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  let fd = null;
+  try {
+    fd = fs.openSync(tempPath, 'wx', 0o600);
+    fs.writeFileSync(fd, json, 'utf8');
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = null;
+    fs.renameSync(tempPath, filePath);
+    if (process.platform !== 'win32') fs.chmodSync(filePath, 0o600);
+    return readJsonFile(filePath);
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch {}
   }
 }
 
@@ -490,9 +546,16 @@ function readActiveSessionKey() {
 function hasCompletedActivation() {
   if (process.env.UCLAW_SKIP_ACTIVATION_GATE === '1') return true;
   const state = readJsonFile(activationStatePath);
+  const license = readJsonFile(activationLicensePath);
+  const hasAccountMarker = [state?.phoneMasked, state?.usernameMasked, state?.accountMasked]
+    .some((value) => typeof value === 'string' && value.trim());
   return state?.status === 'activated'
-    && typeof state.phoneMasked === 'string'
-    && typeof state.activatedAt === 'string';
+    && typeof state.activatedAt === 'string'
+    && hasAccountMarker
+    && license?.payload?.schemaVersion === 'uclaw.license.v1'
+    && license?.signature?.algorithm === 'Ed25519'
+    && typeof license?.signature?.value === 'string'
+    && license.signature.value.length > 0;
 }
 
 /**
@@ -509,13 +572,22 @@ function shouldShowActivationOnStartup() {
  */
 function writeActivationState(payload) {
   const phone = String(payload.phone || '').trim();
+  const username = String(payload.username || '').trim().toUpperCase();
   const activationCode = String(payload.activationCode || '').trim().toUpperCase();
   const token = String(payload.newapiToken || '').trim();
+  const accountMasked = payload.usernameMasked
+    || payload.phoneMasked
+    || (phone ? `${phone.slice(0, 3)}****${phone.slice(7)}` : username);
   const marker = {
     schemaVersion: 1,
-    status: 'activated',
+    status: payload.status || 'activated',
     source: payload.source || 'local-preview',
-    phoneMasked: payload.phoneMasked || `${phone.slice(0, 3)}****${phone.slice(7)}`,
+    phoneMasked: payload.phoneMasked || '',
+    usernameMasked: payload.usernameMasked || (username ? username.replace(/^UCLAW-([A-Z0-9]{2})[A-Z0-9]+([A-Z0-9]{2})$/, 'UCLAW-$1****$2') : ''),
+    accountMasked,
+    activationId: payload.activationId || '',
+    artifactStatus: payload.artifactStatus || '',
+    commitStatus: payload.commitStatus || '',
     activationCodeSuffix: activationCode.replace(/-/g, '').slice(-4),
     activationEndpoint: payload.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT,
     newapiBaseUrl: payload.newapiBaseUrl || '',
@@ -544,7 +616,7 @@ function canUseActivationStaticFallback() {
  * real cloud redeem + privileged write-helper slice is enabled.
  */
 function createStaticActivationResult(payload, message) {
-  const activationState = writeActivationState(payload);
+  const activationState = writeActivationState({ ...payload, status: 'preview' });
   return {
     ok: true,
     code: ACTIVATION_STATIC_PREVIEW_COMPLETE,
@@ -553,6 +625,28 @@ function createStaticActivationResult(payload, message) {
     activationPersisted: true,
     retryable: false,
   };
+}
+
+/**
+ * Normalizes the sales-issued first-start username before local validation and
+ * cloud submission.
+ */
+function normalizeActivationUsername(value) {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 38);
+}
+
+/**
+ * Creates a stable idempotency key so retrying the same first-start submission
+ * can recover from network loss without consuming another activation.
+ */
+function createActivationIdempotencyKey({ username, activationCode, usbSummary }) {
+  const source = [
+    'uclaw-first-start-v1',
+    username,
+    activationCode.replace(/-/g, ''),
+    usbSummary,
+  ].join(':');
+  return `electron-${crypto.createHash('sha256').update(source).digest('hex')}`;
 }
 
 /**
@@ -753,6 +847,56 @@ function writeOpenClawActivationConfig(result) {
     };
   }
   saveConfig(config);
+}
+
+/**
+ * Writes and verifies the signed startup license returned by U-Claw Cloud API.
+ */
+function writeActivationLicenseArtifact(result) {
+  const activationID = String(result.activationId || '').trim();
+  const artifact = result.licenseArtifact;
+  if (!activationID) throw new Error('activation response missing activationId');
+  if (artifact?.payload?.schemaVersion !== 'uclaw.license.v1') {
+    throw new Error('activation response missing license payload');
+  }
+  if (artifact.payload.activationId !== activationID) {
+    throw new Error('activation license activationId mismatch');
+  }
+  if (artifact?.signature?.algorithm !== 'Ed25519' || !artifact.signature.value) {
+    throw new Error('activation response missing license signature');
+  }
+  const written = atomicWriteJson(activationLicensePath, artifact);
+  if (written?.payload?.activationId !== activationID || written?.signature?.value !== artifact.signature.value) {
+    throw new Error('activation license readback verification failed');
+  }
+  writeDirtyMarker('activation-license');
+  return written;
+}
+
+/**
+ * Persists the client New API credential separately from OpenClaw config so
+ * support and later rotation code have a stable local contract.
+ */
+function writeBuiltinModelCredential(result) {
+  const baseUrl = String(result.newapiBaseUrl || '').replace(/\/+$/, '');
+  const token = String(result.newapiToken || '').trim();
+  if (!baseUrl || !token) throw new Error('activation response missing model credential');
+  const credential = {
+    schemaVersion: 'uclaw.builtin-model-credential.v1',
+    provider: 'newapi',
+    baseUrl,
+    token,
+    tokenVersion: Number(result.tokenVersion) || 1,
+    tokenFingerprint: crypto.createHash('sha256').update(token).digest('hex').slice(0, 16),
+    defaultModels: result.defaultModels || {},
+    issuedAt: new Date().toISOString(),
+  };
+  const written = atomicWriteJson(builtinModelCredentialPath, credential);
+  if (written?.tokenFingerprint !== credential.tokenFingerprint) {
+    throw new Error('builtin model credential readback verification failed');
+  }
+  writeDirtyMarker('builtin-model-credential');
+  return written;
 }
 
 function extractSessionKeyFromUrl(rawUrl) {
@@ -1460,58 +1604,66 @@ async function sendActivationSMS(payload = {}) {
 }
 
 /**
- * Handles activation submit attempts for the first-login slice. Real activation
- * will replace this with the HTTPS activation client and privileged write helper.
+ * Handles first-start activation. SMS login remains available for later account
+ * recovery, but initial USB binding now follows the username/code contract.
  */
 async function submitActivation(payload = {}) {
-  const phone = String(payload.phone || '').trim();
-  const smsCode = String(payload.smsCode || '').trim();
+  const username = normalizeActivationUsername(payload.username);
   const activationCode = String(payload.activationCode || '').trim().toUpperCase();
-  if (!/^1[3-9]\d{9}$/.test(phone)) {
-    return { ok: false, message: '手机号格式不正确。', retryable: true };
+  if (!/^UCLAW-[A-Z0-9]{6,32}$/.test(username)) {
+    return { ok: false, message: '用户名格式不正确。', retryable: true };
   }
-  if (!/^\d{6}$/.test(smsCode)) {
-    return { ok: false, message: '请输入 6 位短信验证码。', retryable: true };
-  }
-  if (isDev && smsCode !== '123456') {
-    return { ok: false, message: '开发环境验证码为 123456。', retryable: true };
-  }
-  if (!/^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}$/.test(activationCode)) {
+  if (!/^(?:[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}|[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}-[A-Z0-9]{6})$/.test(activationCode)) {
     return { ok: false, message: '激活码格式不正确。', retryable: true };
   }
   if (UCLAW_ACTIVATION_ENDPOINT) {
+    let serverBound = false;
     try {
-      const login = await postActivationJSON('/v1/auth/sms/login', { phone, purpose: 'login', code: smsCode });
-      const redeem = await postActivationJSON('/v1/activation/redeem', {
+      const usbSummary = process.env.UCLAW_USB_FINGERPRINT_SUMMARY || 'PREVIEW-ONLY';
+      const activationResult = await postActivationJSON('/v1/activations', {
+        username,
         activationCode,
-        deviceSummary: process.env.UCLAW_USB_FINGERPRINT_SUMMARY || 'PREVIEW-ONLY',
-      }, { accessToken: login.accessToken });
-      writeOpenClawActivationConfig(redeem);
+        usbFingerprintSummary: usbSummary,
+        idempotencyKey: createActivationIdempotencyKey({ username, activationCode, usbSummary }),
+      });
+      serverBound = true;
+      writeActivationLicenseArtifact(activationResult);
+      writeBuiltinModelCredential(activationResult);
+      writeOpenClawActivationConfig(activationResult);
+      const activationID = String(activationResult.activationId || '').trim();
+      const commitResult = await postActivationJSON(`/v1/activations/${activationID}/commit`, {
+        writeStatus: 'verified',
+      });
       const activationState = writeActivationState({
-        phone,
+        username,
         activationCode,
-        source: 'cloud',
-        phoneMasked: redeem.phoneMasked,
-        newapiBaseUrl: redeem.newapiBaseUrl,
-        newapiToken: redeem.newapiToken,
-        tokenVersion: redeem.tokenVersion,
-        uclawAccessToken: login.accessToken,
+        source: 'cloud-first-start',
+        usernameMasked: activationResult.usernameMasked,
+        activationId: activationID,
+        artifactStatus: activationResult.artifactStatus,
+        commitStatus: commitResult.status || 'committed',
+        newapiBaseUrl: activationResult.newapiBaseUrl,
+        newapiToken: activationResult.newapiToken,
+        tokenVersion: activationResult.tokenVersion,
       });
       return {
         ok: true,
         code: 'ACTIVATION_CLOUD_COMPLETE',
-        message: '激活完成，New API 配置已写入本地。',
-        phoneMasked: activationState.phoneMasked,
+        message: '激活完成，授权材料与 New API 配置已写入本地。',
+        phoneMasked: activationState.accountMasked,
+        usernameMasked: activationState.usernameMasked,
         activationPersisted: true,
+        activationId: activationID,
+        commitStatus: commitResult.status || 'committed',
         retryable: false,
       };
     } catch (error) {
-      if (!canUseActivationStaticFallback()) throw error;
+      if (serverBound || !canUseActivationStaticFallback()) throw error;
       logLifecycle(`activation cloud submit fallback: ${error.message}`);
-      return createStaticActivationResult({ phone, activationCode }, '激活服务未连通，已进入本地静态验收完成态。');
+      return createStaticActivationResult({ username, activationCode }, '激活服务未连通，已进入本地静态验收完成态。');
     }
   }
-  return createStaticActivationResult({ phone, activationCode });
+  return createStaticActivationResult({ username, activationCode });
 }
 
 /**
@@ -1725,7 +1877,7 @@ function createMenu() {
     return;
   }
 
-  if (isActivationOnlyMode) {
+  if (activationWindowMode) {
     createActivationMenu();
     return;
   }

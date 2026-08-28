@@ -319,3 +319,11 @@ Acceptance:
 - Titlebar, spacing, shadows, radius, typography, and blue/green/orange/red states follow the reference.
 - All visible text fits at 900px desktop and narrow viewport.
 - Activation-only mode cannot reach normal dashboard, Config.html, Gateway token, user workspace, or OpenClaw control routes.
+
+## Current Status
+
+- Cloud API staging 已通过 `license.yiyong.me` 公网首启激活和 commit 验收。
+- Electron activation-only 页面已改为第一版权威流程：交付卡用户名 + 激活码，不依赖手机号短信。
+- 客户端已完成真实写盘闭环：`POST /v1/activations`、原子写入授权材料、写入 OpenClaw New API config、读回验证、`POST /v1/activations/{activationId}/commit`。
+- 阿里云短信接口仍保留，当前运营商回执为 `PORT_NOT_REGISTERED`，待审核完成后复验；该问题不阻塞首启激活。
+- 支付和充值 UI 暂缓，不作为当前验收阻塞项。
