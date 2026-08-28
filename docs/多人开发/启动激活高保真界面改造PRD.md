@@ -1,6 +1,6 @@
 # 启动激活高保真界面改造 PRD
 
-更新时间：2026-08-26
+更新时间：2026-08-28
 
 ## 附件边界
 
@@ -109,6 +109,23 @@ U-CLAW/
 - Secrets：签名私钥、数据库路径、管理员 token 只放服务器 env 或受限配置文件，不进 repo，不进入客户端包。
 - Backup：数据库、签名公私钥、激活码库存导入记录必须定时备份到 OSS 或异地目录。
 - Logs：只记录 public error code、activationId、短 USB 摘要、版本与时间；不得记录激活码明文、完整 USB fingerprint、license secret、token、signature 或 raw server response。
+
+### Current Server Inventory
+
+当前开发和联调使用三台 VPS。以下为可提交的连接定位信息；SSH 密码、New API admin token、短信密钥、license 签名私钥不得写入 Git 文档、代码、`.env.example`、脚本或日志。
+
+| 节点 | 角色 | SSH 定位 | 用途 |
+| --- | --- | --- | --- |
+| `121.41.89.103` | 阿里云激活服务 VPS | `root@121.41.89.103:22` | 部署 U-Claw Cloud API，承载激活、账号、短信、订单、回调编排 |
+| `64.90.19.251` | New API 前置 VPS | `root@64.90.19.251:24851` | 承载 New API / sub2apii 前置反代、TLS、IP allowlist |
+| `158.51.110.49` | New API / sub2apii 本体 VPS | `root@158.51.110.49:14851` | 承载 New API 本体与 sub2apii，维护模型账号、token、quota |
+
+密钥处理：
+
+- 临时密码只通过安全通道交付，不落 repo。
+- 上线前改为 SSH key + deploy 用户；root 密码登录仅作应急通道。
+- New API admin 管理路径只允许阿里云激活服务来源访问。
+- 后续真实 New API endpoint、admin token、阿里云短信签名和模板信息到位后，只写入服务器受限 env 或部署密钥库。
 
 推荐交付包：
 

@@ -29,6 +29,23 @@ product/activation-server
 - 香港直连 Nginx：作为 New API 前置反代，不承载 U-Claw 激活业务。
 - U-Claw 客户端：首启激活；模型页主动查询余额/用量；本地也保存一份激活结果和 New API client endpoint。
 
+## 当前服务器拓扑
+
+以下信息用于开发、部署和联调定位。SSH 密码、New API admin token、短信密钥、签名私钥不得写入 Git 文档；只允许放在服务器受限 env 文件、CI/部署密钥库或一次性安全交付记录中。
+
+| 节点 | 角色 | SSH | 运行职责 |
+| --- | --- | --- | --- |
+| `121.41.89.103` | 阿里云 U-Claw Cloud API VPS | `root@121.41.89.103:22` | 激活、手机号登录、订单、支付回调、调用 New API admin |
+| `64.90.19.251` | New API 前置 VPS | `root@64.90.19.251:24851` | New API / sub2apii 前置反代、访问控制、TLS/路由 |
+| `158.51.110.49` | New API / sub2apii 本体 VPS | `root@158.51.110.49:14851` | New API 服务本体、sub2apii、模型账号和 quota 数据 |
+
+安全要求：
+
+- 禁止把 SSH 密码写入 repo、PRD、README、`.env.example`、脚本、测试日志或验收截图。
+- 首次部署可用临时密码登录，但上线前应迁移到 SSH key + 最小权限 deploy 用户，并关闭或限制 root 密码登录。
+- 阿里云 Cloud API 访问 New API admin 路径时，New API 前置层必须做来源 IP allowlist；公网客户端不得直连 admin 管理接口。
+- 文档中的 IP/端口可提交；任何 token/password/secret 只能以占位符呈现。
+
 ## 用户流程
 
 1. 用户首次打开 U-Claw，进入首启激活页。
