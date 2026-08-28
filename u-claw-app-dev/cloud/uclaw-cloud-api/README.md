@@ -110,9 +110,10 @@ deploy/1panel/
 
 核心文件：
 
-- `newapi-sub2api.compose.yml`：源站业务容器，仅连接 1Panel 创建的 PostgreSQL 与 Redis。
+- `newapi-sub2api.compose.yml`：源站自包含 stack，包含 PostgreSQL、Redis、New API 与 sub2api。
 - `newapi-sub2api.env.example`：生产 `.env` 模板，真实密钥不得提交。
 - `newapi-front-nginx.conf`：前置反代参考配置，New API 管理路径仅允许阿里云 Cloud API 源 IP。
+- `apply-origin-firewall.sh`：源站 `DOCKER-USER` 端口 allowlist，限制 `3000/8080` 只允许前置机访问。
 
 部署顺序：
 
@@ -124,6 +125,7 @@ cd /opt/uclaw-newapi-stack
 cp newapi-sub2api.env.example .env
 docker compose --env-file .env -f newapi-sub2api.compose.yml config
 docker compose --env-file .env -f newapi-sub2api.compose.yml up -d
+FRONT_IP=64.90.19.251 ./apply-origin-firewall.sh
 ```
 
 前置 `64.90.19.251` 只做 `newapi.yiyong.me`、`sub2api.yiyong.me` 的 TLS/反代/allowlist；源站 `3000/8080` 必须用安全组或防火墙限制只允许前置访问。

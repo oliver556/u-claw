@@ -111,7 +111,7 @@ New API / sub2api: 1Panel + Docker Compose + PostgreSQL + Redis
 - U-Claw Cloud API 不承载模型推理流量，请求量和 CPU 压力远低于 New API。
 - PostgreSQL 保存激活、订单和回调，方便恢复 U 盘本地数据丢失的用户。
 - systemd 负责进程守护，Nginx 负责 TLS、限流和反代。
-- New API / sub2api 独立运行在本体 VPS，通过 1Panel 统一管理 Docker、PostgreSQL 和 Redis；Redis DB 0 给 New API，Redis DB 1 给 sub2api。
+- New API / sub2api 独立运行在本体 VPS，通过 1Panel 统一管理 Docker stack；stack 内含 PostgreSQL 和 Redis，Redis DB 0 给 New API，Redis DB 1 给 sub2api。
 - 前置 VPS 只做反代、TLS 与路径 allowlist；New API 管理路径只允许阿里云 U-Claw Cloud API 源 IP。
 
 MVP 暂不引入 Redis/asynq。真实支付上线后，`add_quota` 失败可先通过 PostgreSQL 状态 `credit_failed` 与后台补偿命令处理；订单量上升后再接 outbox worker。
@@ -123,6 +123,8 @@ deploy/1panel/newapi-sub2api.compose.yml
 deploy/1panel/newapi-sub2api.env.example
 deploy/1panel/newapi-front-nginx.conf
 ```
+
+sub2api 注意事项：auto-setup 使用官方拆分环境变量 `DATABASE_HOST/DATABASE_USER/DATABASE_DBNAME` 与 `REDIS_HOST/REDIS_DB`，不可只配置 `DATABASE_URL`/`REDIS_URL`。
 
 ## 配置项
 
@@ -158,7 +160,7 @@ NEWAPI_ACTIVATION_QUOTA=100000
 
 `virtual` 支付回调只允许非 production。
 
-当前不接真实 New API 线上信息，也不保存任何真实短信密钥到 Git。真实 New API 参数到位后，替换对应服务器环境变量，再做 staging 写入型验收。
+当前已完成 New API / sub2api 源站与前置反代部署，但尚未初始化 New API 管理员和真实 `NEWAPI_ADMIN_TOKEN`。真实 token 到位后，替换对应服务器环境变量，再做 staging 写入型验收。
 
 ## 验收标准
 
@@ -170,15 +172,14 @@ NEWAPI_ACTIVATION_QUOTA=100000
 ## 当前部署盘点
 
 - `121.41.89.103`：可登录；Docker、PostgreSQL、Caddy 与旧激活服务存在；1Panel/compose 未安装。
-- `64.90.19.251`：可登录；当前无 Docker/1Panel，80/443 未开放服务。
-- `158.51.110.49`：`14851` 端口可达，但当前密码登录失败，需复核 SSH 凭据后才能安装 1Panel 与业务栈。
+- `64.90.19.251`：已安装 Nginx/Certbot；`newapi.yiyong.me`、`sub2api.yiyong.me` HTTPS 证书有效；公网 `/v1` 可达，管理面非授权来源 `403`。
+- `158.51.110.49`：已安装 1Panel v2.2.5、Docker 与 Compose；New API、sub2api、PostgreSQL、Redis 均已启动，源站 `3000/8080` 已用 `DOCKER-USER` allowlist 限制只允许前置访问。
 - Aliyun SMS：`SendSms` API 已受理；`QuerySendDetails` 回执 `PORT_NOT_REGISTERED`，需短信签名/端口实名报备完成后才会送达。
 
 ## 后续待办
 
-- 复核 `158.51.110.49:14851` SSH 登录信息，安装 1Panel、PostgreSQL、Redis、New API 与 sub2api。
-- 等待真实 New API admin/client endpoint 与管理 token 后，做 staging 写入型开户、token、充值验证。
+- 初始化 New API 管理员，生成 `NEWAPI_ADMIN_TOKEN`，并写入 `121.41.89.103` 的受限 env。
+- 用 `https://newapi.yiyong.me` / `https://newapi.yiyong.me/v1` 做 staging 写入型开户、token、充值验证。
 - 接入官方 Alipay/WeChat 支付创建订单与签名回调。
 - 增加订单列表 UI 和充值记录 UI。
 - 增加失败订单补偿 worker 或 admin 命令。
-- 对香港 Nginx 管理路径加 IP allowlist，仅允许阿里云 U-Claw Cloud API 调 New API admin。
