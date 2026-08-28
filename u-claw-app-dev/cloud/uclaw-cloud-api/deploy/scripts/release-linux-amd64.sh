@@ -18,6 +18,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o "$OUT_DIR/
 cp -R "$ROOT_DIR/migrations/." "$OUT_DIR/migrations/"
 cp -R "$ROOT_DIR/deploy/systemd" "$OUT_DIR/deploy/"
 cp -R "$ROOT_DIR/deploy/nginx" "$OUT_DIR/deploy/"
+cp -R "$ROOT_DIR/deploy/caddy" "$OUT_DIR/deploy/"
 cp -R "$ROOT_DIR/deploy/env" "$OUT_DIR/deploy/"
 cp -R "$ROOT_DIR/deploy/1panel" "$OUT_DIR/deploy/"
 cp -R "$ROOT_DIR/deploy/scripts" "$OUT_DIR/deploy/"

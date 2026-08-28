@@ -7,6 +7,7 @@
 - 服务器：`121.41.89.103`
 - 服务：`uclaw-cloud-api-staging.service`
 - 监听：`127.0.0.1:18180`
+- 公开域名：`https://license.yiyong.me`
 - New API：`https://newapi.yiyong.me`
 - 客户端 API：`https://newapi.yiyong.me/v1`
 
@@ -15,6 +16,11 @@
 - `uclaw-cloud-api-staging.service` 状态为 `active`。
 - `/healthz` 返回 `status=ok`、`env=production`。
 - `/readyz` 返回 DB 与 New API 已配置；Alipay/WeChat 尚未配置。
+- `license.yiyong.me` 已按渐进切换规则接入新 Cloud API：
+  - `https://license.yiyong.me/healthz` 返回 `status=ok`、`env=production`
+  - `https://license.yiyong.me/v1/version` 返回 `version=0.1.2`、`commit=feea95c7`
+  - 新激活、认证、New API、充值与支付路径转发到 `127.0.0.1:18180`
+  - 未迁移旧路径仍由旧 activation-server 兜底
 - New API Root 管理员已创建，管理员 token 已写入阿里云 staging env。
 - 首启激活 `POST /v1/activations` 通过：
   - `ok=true`
@@ -27,6 +33,7 @@
   - `status=committed`
 - U-Claw DB 中存在 committed activation attempt。
 - New API 中可查到本次 staging 用户。
+- 通过 `license.yiyong.me` 公开域名重跑首启激活与 commit，全链路通过。
 
 ## 修复项
 
@@ -45,3 +52,4 @@
 - 本记录不包含 New API token、管理员密码、短信密钥、数据库密码或激活码明文。
 - New API 管理员凭据仅存源站 `/root/uclaw-newapi-admin.env`。
 - 阿里云 Cloud API staging env 仅存 `/etc/uclaw-cloud-api/uclaw-cloud-api-staging.env`，权限为 `600`。
+- Caddy 切换前备份位于服务器 `/etc/caddy/Caddyfile.backup.20260828213000`。

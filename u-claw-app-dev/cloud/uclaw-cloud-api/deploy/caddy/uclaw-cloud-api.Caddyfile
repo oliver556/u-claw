@@ -1,0 +1,35 @@
+{
+	default_sni 121.41.89.103
+}
+
+(cloud_api_routes) {
+	@cloud_api path /healthz /readyz /v1/version /v1/activations* /v1/auth/* /v1/activation/* /v1/newapi/* /v1/recharge/* /v1/payments/*
+	handle @cloud_api {
+		reverse_proxy 127.0.0.1:18180
+	}
+}
+
+(legacy_activation_routes) {
+	@public path /v1/* /model-api/* /health/ready
+	handle @public {
+		reverse_proxy 127.0.0.1:18081 127.0.0.1:18082 {
+			lb_policy least_conn
+			fail_duration 10s
+			max_fails 3
+			lb_retries 1
+			lb_try_duration 2s
+			lb_try_interval 100ms
+			health_uri /health/ready
+			health_interval 1s
+			health_timeout 2s
+		}
+	}
+	handle {
+		respond 404
+	}
+}
+
+license.yiyong.me {
+	import cloud_api_routes
+	import legacy_activation_routes
+}

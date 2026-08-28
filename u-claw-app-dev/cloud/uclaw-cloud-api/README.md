@@ -25,6 +25,8 @@ New API / sub2api: 1Panel + Docker Compose + PostgreSQL + Redis
 
 U-Claw Cloud API 仍保持低内存 systemd 形态，适合阿里云 1 核 1G。New API / sub2api 按用户要求用 1Panel 管理 Docker、PostgreSQL 与 Redis；Redis DB 0 给 New API，DB 1 给 sub2api。
 
+`license.yiyong.me` 当前采用渐进切换：`/v1/activations*`、`/v1/auth/*`、`/v1/recharge/*` 等新 Cloud API 路径转发到 `127.0.0.1:18180`；旧 `/model-api/*` 与未迁移 `/v1/*` 仍保留旧 activation-server 兜底。参考配置见 `deploy/caddy/uclaw-cloud-api.Caddyfile`。
+
 ## 生产服务器拓扑
 
 | 角色 | 公网 IP | SSH 端口 | 初始用户 | 说明 |
