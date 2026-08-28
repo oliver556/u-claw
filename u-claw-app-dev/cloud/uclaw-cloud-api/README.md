@@ -142,7 +142,7 @@ curl -sS -X POST http://127.0.0.1:8080/v1/activations \
   -d '{"username":"UCLAW-BIANCHENG","activationCode":"ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","usbFingerprintSummary":"PREVIEW-ONLY","idempotencyKey":"local-dev-1"}'
 ```
 
-当前切片返回 `server_bound`、`pending_client_write` 与 `licenseArtifact`。`licenseArtifact` 是 `license.json` 可持久化授权材料，包含 canonical payload 和 Ed25519 signature；客户端写盘 helper 还没有上报授权材料写入完成。写盘 helper 验证后调用：
+当前切片返回 `server_bound`、`pending_client_write` 与 `licenseArtifact`。`licenseArtifact` 是 `license.json` 可持久化授权材料，包含 canonical payload 和 Ed25519 signature；客户端会写入授权材料、New API credential、OpenClaw config，读回验证后调用：
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8080/v1/activations/<activationId>/commit \
@@ -184,6 +184,8 @@ licenseSchema = uclaw.license.v1
 signatureAlgorithm = Ed25519
 signaturePresent = true
 ```
+
+Electron 验收脚本 `scripts/verify-activation-real-write.js` 会驱动真实 activation-only 页面，确认本地文件写入、commit 顺序、完成页“完成并重启”以及退出码 20 重启交接。
 
 ## New API 用量摘要
 

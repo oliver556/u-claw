@@ -16,23 +16,24 @@ import (
 )
 
 const (
-	cwUseDefault       = ^uintptr(0x7fffffff)
-	csHRedraw          = 0x0002
-	csVRedraw          = 0x0001
-	wsOverlappedWindow = 0x00cf0000
-	wsVisible          = 0x10000000
-	wsChild            = 0x40000000
-	wsVScroll          = 0x00200000
-	ssLeft             = 0x00000000
-	wmClose            = 0x0010
-	wmDestroy          = 0x0002
-	wmTimer            = 0x0113
-	swHide             = 0
-	swShow             = 5
-	mbOK               = 0x00000000
-	mbIconError        = 0x00000010
-	errorAlreadyExists = 183
-	errorClassExists   = 1410
+	cwUseDefault              = ^uintptr(0x7fffffff)
+	csHRedraw                 = 0x0002
+	csVRedraw                 = 0x0001
+	wsOverlappedWindow        = 0x00cf0000
+	wsVisible                 = 0x10000000
+	wsChild                   = 0x40000000
+	wsVScroll                 = 0x00200000
+	ssLeft                    = 0x00000000
+	wmClose                   = 0x0010
+	wmDestroy                 = 0x0002
+	wmTimer                   = 0x0113
+	swHide                    = 0
+	swShow                    = 5
+	mbOK                      = 0x00000000
+	mbIconError               = 0x00000010
+	errorAlreadyExists        = 183
+	errorClassExists          = 1410
+	activationRestartExitCode = 20
 )
 
 var (
@@ -99,6 +100,8 @@ type msg struct {
 	pt      point
 }
 
+// main runs the portable launcher loop and restarts once activation has written
+// local authorization material.
 func main() {
 	executable, err := os.Executable()
 	if err != nil {
@@ -150,6 +153,10 @@ func main() {
 			}
 		}
 		exitCode = int(atomic.LoadInt32(&processExitCode))
+		if exitCode == activationRestartExitCode {
+			appendLauncherLog("Activation completed; restarting through normal startup gate.")
+			continue
+		}
 		if exitCode != 0 {
 			break
 		}

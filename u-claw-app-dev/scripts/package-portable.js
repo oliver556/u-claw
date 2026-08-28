@@ -336,7 +336,7 @@ Launcher behavior:
   Launchers show native progress only while copying, extracting, syncing, or closing.
   Electron window stays hidden until Gateway ready/App ready, then opens directly to the main UI.
   Runtime data uses a per-USB computer cache for speed, then syncs back to <USB>/U-Claw/data.
-  Runtime sync never overwrites USB data/.openclaw/openclaw.json.
+  Runtime sync writes activated data/.openclaw/openclaw.json back to USB after first-start binding.
   Two USB disks use different cache IDs, so their data does not merge.
   Clean same-machine restart reuses current app and data cache, skipping USB-to-runtime sync when markers match.
   Close asks for confirmation first, then shows shutdown progress and stops this launch's services.

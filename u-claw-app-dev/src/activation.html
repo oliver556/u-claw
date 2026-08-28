@@ -329,6 +329,7 @@
     let current = 'notice';
     let checksDone = false;
     let preflight = null;
+    let restartReady = false;
     let toastTimer;
 
     const $ = (selector) => document.querySelector(selector);
@@ -365,7 +366,7 @@
       $$('.screen').forEach((screen) => screen.classList.toggle('active', screen.id === `screen-${name}`));
       updateSteps();
       $('#backButton').hidden = name === 'notice' || name === 'finish';
-      $('#nextButton').hidden = name === 'finish';
+      $('#nextButton').hidden = name === 'finish' && !restartReady;
       if (name === 'notice') {
         $('#nextButton').disabled = !$('#noticeAck').checked;
         $('#nextButton').innerHTML = '继续 <span class="arrow">→</span>';
@@ -379,6 +380,10 @@
       if (name === 'activate') {
         $('#nextButton').disabled = false;
         $('#nextButton').innerHTML = '激活并绑定 <span class="arrow">→</span>';
+      }
+      if (name === 'finish' && restartReady) {
+        $('#nextButton').disabled = false;
+        $('#nextButton').innerHTML = '完成并重启 <span class="arrow">→</span>';
       }
     }
 
@@ -529,8 +534,26 @@
       $('#finishDetail').textContent = `${result.code || 'ACTIVATION_PENDING'}：${result.message || '等待后续切片接入。'}`;
       $('#finishPhone').textContent = result.usernameMasked || result.phoneMasked || $('#username').value.trim();
       $('#finishDisk').textContent = preflight?.usb?.label || '静态预览';
+      restartReady = result.restartRequired === true;
       setScreen('finish');
       showToast(result.message || '激活服务尚未接入', result.ok ? '' : 'error');
+    }
+
+    /**
+     * Asks the trusted main process to exit with the activation restart code.
+     */
+    async function completeActivation() {
+      $('#nextButton').disabled = true;
+      $('#nextButton').textContent = '正在重启...';
+      try {
+        const result = await window.uclawActivation.completeActivation();
+        if (!result.ok) throw new Error(result.message || '重启交接失败');
+        showToast('正在重新进入 U-Claw');
+      } catch (error) {
+        $('#nextButton').disabled = false;
+        $('#nextButton').innerHTML = '完成并重启 <span class="arrow">→</span>';
+        showToast(error.message || '重启交接失败', 'error');
+      }
     }
 
     $('#noticeAck').addEventListener('change', (event) => {
@@ -543,6 +566,7 @@
         return runChecks();
       }
       if (current === 'activate') return submitActivation();
+      if (current === 'finish' && restartReady) return completeActivation();
     });
     $('#backButton').addEventListener('click', () => {
       const index = order.indexOf(current);

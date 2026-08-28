@@ -79,8 +79,6 @@ sync_dir() {
     --exclude '**/SingletonCookie' \
     --exclude '**/SingletonLock' \
     --exclude '**/SingletonSocket' \
-    --exclude '.openclaw/openclaw.json' \
-    --exclude '.openclaw/openclaw.json.last-good' \
     --exclude '.DS_Store' \
     --exclude '._*' \
     --exclude '.Spotlight-V100/' \
@@ -115,8 +113,6 @@ sync_dir_with_progress() {
     --exclude '**/SingletonCookie'
     --exclude '**/SingletonLock'
     --exclude '**/SingletonSocket'
-    --exclude '.openclaw/openclaw.json'
-    --exclude '.openclaw/openclaw.json.last-good'
     --exclude '.DS_Store'
     --exclude '._*'
     --exclude '.Spotlight-V100/'
@@ -369,6 +365,8 @@ export OPENCLAW_STATE_DIR="$RUN_DATA_DIR/.openclaw"
 export OPENCLAW_CONFIG_PATH="$RUN_DATA_DIR/.openclaw/openclaw.json"
 export OPENCLAW_DISABLE_BONJOUR=1
 export UCLAW_MEDIA_PREVIEW_ROOTS="$RUN_DATA_DIR/.openclaw/media"
+export UCLAW_ACTIVATION_ENDPOINT="${UCLAW_ACTIVATION_ENDPOINT:-https://license.yiyong.me}"
+export UCLAW_ACTIVATION_REQUIRE_CLOUD="${UCLAW_ACTIVATION_REQUIRE_CLOUD:-1}"
 
 echo "[U-Claw] App binary: $APP_BIN"
 echo "[U-Claw] Starting U-Claw..."

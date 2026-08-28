@@ -5,10 +5,22 @@ const root = path.resolve(__dirname, '..');
 const mainPath = path.join(root, 'src', 'main.js');
 const preloadPath = path.join(root, 'src', 'preload.js');
 const activationHtmlPath = path.join(root, 'src', 'activation.html');
+const macStartPath = path.join(root, 'scripts', 'Mac-Start-App.command');
+const windowsStartPath = path.join(root, 'scripts', 'Windows-Start-App.bat');
+const macLauncherPath = path.join(root, 'scripts', 'launcher', 'macos', 'main.c');
+const windowsLauncherPath = path.join(root, 'scripts', 'launcher', 'windows', 'main.go');
+const generatedMacScriptPath = path.join(root, 'scripts', 'launcher', 'macos', 'generated-start-script.inc');
+const packagePortablePath = path.join(root, 'scripts', 'package-portable.js');
 
 const main = fs.readFileSync(mainPath, 'utf8');
 const preload = fs.readFileSync(preloadPath, 'utf8');
 const activationHtml = fs.readFileSync(activationHtmlPath, 'utf8');
+const macStart = fs.readFileSync(macStartPath, 'utf8');
+const windowsStart = fs.readFileSync(windowsStartPath, 'utf8');
+const macLauncher = fs.readFileSync(macLauncherPath, 'utf8');
+const windowsLauncher = fs.readFileSync(windowsLauncherPath, 'utf8');
+const generatedMacScript = fs.readFileSync(generatedMacScriptPath, 'utf8');
+const packagePortable = fs.readFileSync(packagePortablePath, 'utf8');
 
 /**
  * Fails the verifier with a stable message when a contract is missing.
@@ -32,6 +44,7 @@ function sliceBetween(source, start, end) {
 
 requireText(main, "const ACTIVATION_ONLY_ARG = '--activation-only';", 'activation-only arg');
 requireText(main, 'ACTIVATION_STATIC_PREVIEW_COMPLETE', 'activation static preview code');
+requireText(main, 'ACTIVATION_RESTART_EXIT_CODE', 'activation restart exit code');
 requireText(main, "const activationStatePath = path.join(configDir, 'uclaw-activation.json');", 'activation state path');
 requireText(main, 'function hasCompletedActivation()', 'activation completion checker');
 requireText(main, 'function shouldShowActivationOnStartup()', 'startup activation gate');
@@ -50,6 +63,7 @@ requireText(main, "postActivationJSON('/v1/auth/sms/send'", 'cloud SMS send');
 requireText(main, "postActivationJSON('/v1/activations'", 'first-start cloud activation');
 requireText(main, "postActivationJSON(`/v1/activations/${activationID}/commit`", 'first-start activation commit');
 requireText(main, 'ACTIVATION_CLOUD_COMPLETE', 'cloud activation completion code');
+requireText(main, 'async function completeActivationAndRestart()', 'activation restart handoff');
 requireText(main, 'UCLAW_ACTIVATION_REQUIRE_CLOUD', 'activation cloud required opt-out');
 requireText(main, 'activation cloud submit fallback', 'activation cloud submit fallback');
 requireText(main, 'uclaw:get-model-usage-summary', 'normal usage summary IPC channel');
@@ -83,7 +97,7 @@ for (const forbidden of ['startConfigServer', 'startGateway', 'startVideoAdapter
 }
 
 const activationIpc = sliceBetween(main, 'function setupActivationIPC()', 'function loadActivationPage()');
-for (const channel of ['activation:get-preflight', 'activation:send-sms', 'activation:submit', 'activation:window-action']) {
+for (const channel of ['activation:get-preflight', 'activation:send-sms', 'activation:submit', 'activation:complete', 'activation:window-action']) {
   requireText(activationIpc, channel, `activation IPC channel ${channel}`);
 }
 for (const forbidden of ['get-gateway-status', 'open-dashboard', 'open-config']) {
@@ -101,6 +115,7 @@ for (const forbidden of ["postActivationJSON('/v1/auth/sms/login'", "postActivat
 
 const preloadActivationBranch = sliceBetween(preload, 'if (isActivationOnlyMode)', '} else {');
 requireText(preloadActivationBranch, 'uclawActivation', 'activation preload namespace');
+requireText(preloadActivationBranch, 'completeActivation', 'activation complete preload bridge');
 for (const forbidden of ['getGatewayStatus', 'openDashboard', 'openConfig']) {
   if (preloadActivationBranch.includes(forbidden)) {
     throw new Error(`Activation preload must not expose ${forbidden}`);
@@ -120,6 +135,8 @@ for (const required of [
   'finishPhone',
   'formatActivationCode',
   'escapeHtml',
+  'restartReady',
+  '完成并重启',
   '.step.done .step-number::after { content: ""; position: absolute;',
   'transform: translate(-50%, -58%) rotate(45deg);',
   '.button.primary:hover:not(:disabled) { border-color: var(--blue-hover); color: #fff;',
@@ -138,4 +155,23 @@ for (const forbidden of ['UCLAW-8F2K9M', '7K4P-9Q2M-X8RT-6W3N-A5LC', 'Gateway �
   }
 }
 
-console.log('verify-activation-only-mode passed');
+for (const source of [
+  ['macOS start script', macStart],
+  ['Windows start script', windowsStart],
+  ['generated macOS launcher script', generatedMacScript],
+]) {
+  requireText(source[1], 'UCLAW_ACTIVATION_ENDPOINT', `${source[0]} activation endpoint env`);
+  requireText(source[1], 'UCLAW_ACTIVATION_REQUIRE_CLOUD', `${source[0]} activation strict env`);
+  requireText(source[1], 'https://license.yiyong.me', `${source[0]} production activation endpoint`);
+  if (source[1].includes('openclaw.json.last-good') || source[1].includes("'.openclaw/openclaw.json'") || source[1].includes("'openclaw.json'")) {
+    throw new Error(`${source[0]} must sync activation OpenClaw config back to USB`);
+  }
+}
+requireText(macLauncher, 'kActivationRestartExitCode = 20', 'macOS activation restart exit code');
+requireText(macLauncher, 'Activation completed; restarting through normal startup gate.', 'macOS activation restart log');
+requireText(windowsLauncher, 'activationRestartExitCode = 20', 'Windows activation restart exit code');
+requireText(windowsLauncher, 'Activation completed; restarting through normal startup gate.', 'Windows activation restart log');
+requireText(windowsStart, 'if "%APP_EXIT%"=="20"', 'Windows direct script activation restart loop');
+requireText(packagePortable, 'writes activated data/.openclaw/openclaw.json back to USB', 'package notes activation config sync');
+
+console.log(JSON.stringify({ ok: true, step: 'activation_only_contracts' }));

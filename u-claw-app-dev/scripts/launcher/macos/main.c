@@ -15,6 +15,7 @@
 
 #include "generated-start-script.inc"
 
+static const int kActivationRestartExitCode = 20;
 static NSString *gLogPath;
 static NSString *gUsbLauncherLogPath;
 static NSString *gMainLogPath;
@@ -507,6 +508,15 @@ int main(void) {
     [app setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
     run_launcher_once(app, root, local_script, log_dir, log_path);
+    if (gExitCode == kActivationRestartExitCode) {
+      append_launcher_log(@"Activation completed; restarting through normal startup gate.");
+      if (gLockFd >= 0) {
+        close(gLockFd);
+        gLockFd = -1;
+      }
+      execl(resolved_executable, resolved_executable, NULL);
+      append_launcher_log(@"Failed to relaunch after activation restart request.");
+    }
     if (gExitCode == 0 && has_fresh_relaunch_request(root)) {
       append_launcher_log(@"Relaunch requested while U-Claw was closing; starting again.");
       if (gLockFd >= 0) {

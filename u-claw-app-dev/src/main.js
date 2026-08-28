@@ -36,6 +36,7 @@ const ACTIVATION_ONLY_ARG = '--activation-only';
 const isActivationOnlyMode = process.argv.includes(ACTIVATION_ONLY_ARG)
   || process.env.UCLAW_ACTIVATION_ONLY === '1';
 const ACTIVATION_STATIC_PREVIEW_COMPLETE = 'ACTIVATION_STATIC_PREVIEW_COMPLETE';
+const ACTIVATION_RESTART_EXIT_CODE = 20;
 const UCLAW_ACTIVATION_REQUIRE_CLOUD = process.env.UCLAW_ACTIVATION_REQUIRE_CLOUD === '1';
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
@@ -1655,6 +1656,7 @@ async function submitActivation(payload = {}) {
         activationPersisted: true,
         activationId: activationID,
         commitStatus: commitResult.status || 'committed',
+        restartRequired: true,
         retryable: false,
       };
     } catch (error) {
@@ -1667,6 +1669,22 @@ async function submitActivation(payload = {}) {
 }
 
 /**
+ * Exits with a launcher-owned restart code after activation files are verified.
+ * The launcher then reruns the normal startup gate so Gateway starts only after
+ * authorization has been persisted and synced.
+ */
+async function completeActivationAndRestart() {
+  if (!hasCompletedActivation()) {
+    return { ok: false, message: '授权材料尚未写入，请先完成激活。' };
+  }
+  appIsQuitting = true;
+  setTimeout(() => {
+    app.exit(ACTIVATION_RESTART_EXIT_CODE);
+  }, 60);
+  return { ok: true, exitCode: ACTIVATION_RESTART_EXIT_CODE };
+}
+
+/**
  * Registers only the activation IPC surface. Do not add normal dashboard,
  * config, Gateway, file, or OpenClaw handlers here.
  */
@@ -1674,6 +1692,7 @@ function setupActivationIPC() {
   ipcMain.handle('activation:get-preflight', () => getActivationPreflight());
   ipcMain.handle('activation:send-sms', (_event, payload) => sendActivationSMS(payload));
   ipcMain.handle('activation:submit', (_event, payload) => submitActivation(payload));
+  ipcMain.handle('activation:complete', () => completeActivationAndRestart());
   ipcMain.handle('activation:window-action', (_event, action) => {
     if (!mainWindow) return { ok: false };
     if (action === 'minimize') mainWindow.minimize();

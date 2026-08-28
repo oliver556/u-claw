@@ -166,6 +166,8 @@ set "OPENCLAW_STATE_DIR=%RUN_DATA_DIR%\.openclaw"
 set "OPENCLAW_CONFIG_PATH=%RUN_DATA_DIR%\.openclaw\openclaw.json"
 set "OPENCLAW_DISABLE_BONJOUR=1"
 set "UCLAW_MEDIA_PREVIEW_ROOTS=%RUN_DATA_DIR%\.openclaw\media"
+if "%UCLAW_ACTIVATION_ENDPOINT%"=="" set "UCLAW_ACTIVATION_ENDPOINT=https://license.yiyong.me"
+if "%UCLAW_ACTIVATION_REQUIRE_CLOUD%"=="" set "UCLAW_ACTIVATION_REQUIRE_CLOUD=1"
 set "UCLAW_PORTABLE_HOME=%RUN_DATA_DIR%\.home"
 set "HOME=%UCLAW_PORTABLE_HOME%"
 set "USERPROFILE=%UCLAW_PORTABLE_HOME%"
@@ -203,6 +205,10 @@ if not exist "%USB_DATA_DIR%\.uclaw-sync" mkdir "%USB_DATA_DIR%\.uclaw-sync" >nu
 copy /y "%LAST_SYNC_FILE%" "%USB_DATA_DIR%\.uclaw-sync\last-sync.json" >nul
 call :sync_launcher_logs
 
+if "%APP_EXIT%"=="20" (
+  echo [U-Claw] Activation completed; restarting through normal startup gate...
+  goto app_cache_ready
+)
 exit /b %APP_EXIT%
 
 :fatal
@@ -249,7 +255,7 @@ exit /b %ERRORLEVEL%
 :sync_impl
 set "SYNC_MODE=%~1"
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-  "$label=$env:SYNC_LABEL; $from=$env:SYNC_FROM; $to=$env:SYNC_TO; $timeout=[int]$env:DATA_SYNC_TIMEOUT_SECONDS; $mode=$env:SYNC_MODE; New-Item -ItemType Directory -Force -Path $to | Out-Null; $started=Get-Date; $job=Start-Job -ScriptBlock { param($from,$to,$mode) $xd=@((Join-Path $from '.cache\v8-compile-cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Code Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\GPUCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\DawnCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Crashpad')); $xf=@('.DS_Store','._*','Cookies','Cookies-journal','LOCK','SingletonCookie','SingletonLock','SingletonSocket','openclaw.json','openclaw.json.last-good'); if ($mode -eq 'MIR') { & robocopy $from $to /MIR /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null } else { & robocopy $from $to /E /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null }; if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE } exit 0 } -ArgumentList $from,$to,$mode; while (-not (Wait-Job -Job $job -Timeout 5)) { $elapsed=[int]((Get-Date)-$started).TotalSeconds; $items=@(Get-ChildItem -LiteralPath $to -Recurse -Force -File -ErrorAction SilentlyContinue); $files=$items.Count; $mb=[math]::Round((($items | Measure-Object -Property Length -Sum).Sum)/1MB,1); Write-Host ('[U-Claw] {0}... {1}s elapsed, {2} files, {3} MB.' -f $label,$elapsed,$files,$mb); if ($elapsed -ge $timeout) { Stop-Job -Job $job; Remove-Job -Job $job -Force; Write-Error ('{0} timed out after {1}s.' -f $label,$timeout); exit 1 } }; Receive-Job -Job $job; $ok=$job.State -eq 'Completed'; Remove-Job -Job $job; if (-not $ok) { exit 1 }"
+  "$label=$env:SYNC_LABEL; $from=$env:SYNC_FROM; $to=$env:SYNC_TO; $timeout=[int]$env:DATA_SYNC_TIMEOUT_SECONDS; $mode=$env:SYNC_MODE; New-Item -ItemType Directory -Force -Path $to | Out-Null; $started=Get-Date; $job=Start-Job -ScriptBlock { param($from,$to,$mode) $xd=@((Join-Path $from '.cache\v8-compile-cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Code Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\GPUCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\DawnCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Crashpad')); $xf=@('.DS_Store','._*','Cookies','Cookies-journal','LOCK','SingletonCookie','SingletonLock','SingletonSocket'); if ($mode -eq 'MIR') { & robocopy $from $to /MIR /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null } else { & robocopy $from $to /E /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null }; if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE } exit 0 } -ArgumentList $from,$to,$mode; while (-not (Wait-Job -Job $job -Timeout 5)) { $elapsed=[int]((Get-Date)-$started).TotalSeconds; $items=@(Get-ChildItem -LiteralPath $to -Recurse -Force -File -ErrorAction SilentlyContinue); $files=$items.Count; $mb=[math]::Round((($items | Measure-Object -Property Length -Sum).Sum)/1MB,1); Write-Host ('[U-Claw] {0}... {1}s elapsed, {2} files, {3} MB.' -f $label,$elapsed,$files,$mb); if ($elapsed -ge $timeout) { Stop-Job -Job $job; Remove-Job -Job $job -Force; Write-Error ('{0} timed out after {1}s.' -f $label,$timeout); exit 1 } }; Receive-Job -Job $job; $ok=$job.State -eq 'Completed'; Remove-Job -Job $job; if (-not $ok) { exit 1 }"
 exit /b %ERRORLEVEL%
 
 :runtime_cache_is_current

@@ -8,6 +8,7 @@ if (isActivationOnlyMode) {
     getPreflight: () => ipcRenderer.invoke('activation:get-preflight'),
     sendSMS: (payload) => ipcRenderer.invoke('activation:send-sms', payload),
     submitActivation: (payload) => ipcRenderer.invoke('activation:submit', payload),
+    completeActivation: () => ipcRenderer.invoke('activation:complete'),
     windowAction: (action) => ipcRenderer.invoke('activation:window-action', action),
   });
 } else {

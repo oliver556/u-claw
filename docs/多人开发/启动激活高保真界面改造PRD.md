@@ -90,7 +90,7 @@ U-CLAW/
 2. 按平台执行 `npm run build:mac-arm64`、`npm run build:mac-x64`、`npm run build:win`，或执行便携版打包脚本 `npm run package:portable:customer`。
 3. 构建产物只从 `u-claw-app-dev/release/` 取。
 4. 发布时上传到 GitHub Releases、阿里云 OSS/CDN 或内部对象存储；1 核 1G 授权服务器只返回版本/下载元数据，不直接承担大文件分发压力。
-5. 客户端内置或配置生产激活 endpoint，例如 `https://activation.u-claw.org`；测试 endpoint 只能在显式 dev mode 下使用。
+5. 客户端便携启动脚本默认注入生产激活 endpoint `https://license.yiyong.me`，并设置生产严格云端激活；测试 endpoint 只能在显式 dev mode 下覆盖。
 
 ### Activation Server Deployment
 
@@ -180,7 +180,8 @@ activation-server/
 - Successful activation response is handed to a privileged write helper. Renderer never writes license files directly.
 - Write helper atomically writes `.uclaw/license/.startup-credential.json`, `.uclaw/license/license.json`, and `.uclaw/builtin-model-credential.v1.json`, then reads back and verifies.
 - Client calls `POST /v1/activations/{activationId}/commit` only after all key files are written and verified.
-- After success, Electron activation-only window exits. Launcher restarts from `START` and performs full local/online gate before opening normal U-Claw.
+- After success, Electron activation-only window exits with `ACTIVATION_RESTART_EXIT_CODE=20`. Launcher syncs runtime data back to the product USB, restarts from the normal startup gate, then opens normal U-Claw.
+- Portable sync must include activated `.openclaw/openclaw.json`, `.openclaw/license/license.json`, `.openclaw/builtin-model-credential.v1.json`, and `.openclaw/uclaw-activation.json` so another computer can skip first activation.
 - Existing Config.html remains available after normal startup for model/provider configuration. Activation page may show model service status only when backed by real activation/New API status.
 - The “Gateway 与模型连接” item in the static design should be renamed or re-scoped in production to “Gateway 启动条件 / 内嵌模型服务状态”; it must not start Gateway before authorization.
 - Use Ant-like light tokens from the design: blue primary, green success, orange warning, red error, dense cards, max 8px inner card radius, responsive one-column layout below narrow widths.
@@ -325,5 +326,6 @@ Acceptance:
 - Cloud API staging 已通过 `license.yiyong.me` 公网首启激活和 commit 验收。
 - Electron activation-only 页面已改为第一版权威流程：交付卡用户名 + 激活码，不依赖手机号短信。
 - 客户端已完成真实写盘闭环：`POST /v1/activations`、原子写入授权材料、写入 OpenClaw New API config、读回验证、`POST /v1/activations/{activationId}/commit`。
+- 便携 Launcher 已定稿生产 endpoint 注入、退出码 20 重启交接和授权后 `openclaw.json` 回写 U 盘同步规则。
 - 阿里云短信接口仍保留，当前运营商回执为 `PORT_NOT_REGISTERED`，待审核完成后复验；该问题不阻塞首启激活。
 - 支付和充值 UI 暂缓，不作为当前验收阻塞项。
