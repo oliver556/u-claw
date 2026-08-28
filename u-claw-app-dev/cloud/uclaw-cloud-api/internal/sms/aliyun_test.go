@@ -2,6 +2,7 @@ package sms
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -88,5 +89,29 @@ func TestAliyunProviderRequiresConfig(t *testing.T) {
 		if !strings.Contains(err.Error(), name) {
 			t.Fatalf("error %q missing %s", err.Error(), name)
 		}
+	}
+}
+
+func TestAliyunProviderSmokeSendsRealSMS(t *testing.T) {
+	if os.Getenv("UCLAW_ALIYUN_SMS_SMOKE") != "1" {
+		t.Skip("set UCLAW_ALIYUN_SMS_SMOKE=1 to send one real Aliyun SMS")
+	}
+	provider, err := NewAliyunProvider(AliyunProviderConfig{
+		AccessKeyID:       os.Getenv("ALIYUN_SMS_ACCESS_KEY_ID"),
+		AccessKeySecret:   os.Getenv("ALIYUN_SMS_ACCESS_KEY_SECRET"),
+		SignName:          os.Getenv("ALIYUN_SMS_SIGN_NAME"),
+		TemplateCode:      os.Getenv("ALIYUN_SMS_TEMPLATE_CODE"),
+		Endpoint:          os.Getenv("ALIYUN_SMS_ENDPOINT"),
+		TemplateParamName: os.Getenv("ALIYUN_SMS_TEMPLATE_PARAM_NAME"),
+	})
+	if err != nil {
+		t.Fatalf("NewAliyunProvider() error = %v", err)
+	}
+	phone := os.Getenv("ALIYUN_SMS_SMOKE_PHONE")
+	if phone == "" {
+		t.Fatal("ALIYUN_SMS_SMOKE_PHONE is required")
+	}
+	if err := provider.SendCode(context.Background(), auth.SMSDelivery{Phone: phone, Purpose: "login", Code: "123456"}); err != nil {
+		t.Fatalf("SendCode() error = %v", err)
 	}
 }
