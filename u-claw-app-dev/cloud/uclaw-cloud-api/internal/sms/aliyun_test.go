@@ -5,6 +5,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	dysmsapi20170525 "github.com/alibabacloud-go/dysmsapi-20170525/v5/client"
+	"github.com/alibabacloud-go/tea/tea"
 
 	"uclaw-cloud-api/internal/auth"
 )
@@ -92,6 +96,7 @@ func TestAliyunProviderRequiresConfig(t *testing.T) {
 	}
 }
 
+// TestAliyunProviderSmokeSendsRealSMS sends one real SMS only when explicitly enabled.
 func TestAliyunProviderSmokeSendsRealSMS(t *testing.T) {
 	if os.Getenv("UCLAW_ALIYUN_SMS_SMOKE") != "1" {
 		t.Skip("set UCLAW_ALIYUN_SMS_SMOKE=1 to send one real Aliyun SMS")
@@ -114,4 +119,66 @@ func TestAliyunProviderSmokeSendsRealSMS(t *testing.T) {
 	if err := provider.SendCode(context.Background(), auth.SMSDelivery{Phone: phone, Purpose: "login", Code: "123456"}); err != nil {
 		t.Fatalf("SendCode() error = %v", err)
 	}
+}
+
+// TestAliyunProviderSmokeQueriesSendDetails checks carrier delivery receipts without sending SMS.
+func TestAliyunProviderSmokeQueriesSendDetails(t *testing.T) {
+	if os.Getenv("UCLAW_ALIYUN_SMS_QUERY") != "1" {
+		t.Skip("set UCLAW_ALIYUN_SMS_QUERY=1 to query Aliyun SMS delivery details")
+	}
+	sender, err := NewAliyunSDKSender(AliyunProviderConfig{
+		AccessKeyID:     os.Getenv("ALIYUN_SMS_ACCESS_KEY_ID"),
+		AccessKeySecret: os.Getenv("ALIYUN_SMS_ACCESS_KEY_SECRET"),
+		Endpoint:        os.Getenv("ALIYUN_SMS_ENDPOINT"),
+		SignName:        "query-only",
+		TemplateCode:    "query-only",
+	})
+	if err != nil {
+		t.Fatalf("NewAliyunSDKSender() error = %v", err)
+	}
+	phone := os.Getenv("ALIYUN_SMS_QUERY_PHONE")
+	if phone == "" {
+		t.Fatal("ALIYUN_SMS_QUERY_PHONE is required")
+	}
+	sendDate := os.Getenv("ALIYUN_SMS_QUERY_DATE")
+	if sendDate == "" {
+		sendDate = time.Now().Format("20060102")
+	}
+	response, err := sender.client.QuerySendDetailsWithOptions(&dysmsapi20170525.QuerySendDetailsRequest{
+		PhoneNumber: tea.String(phone),
+		SendDate:    tea.String(sendDate),
+		PageSize:    tea.Int64(10),
+		CurrentPage: tea.Int64(1),
+	}, sender.runtime)
+	if err != nil {
+		t.Fatalf("QuerySendDetailsWithOptions() error = %v", err)
+	}
+	if response == nil || response.Body == nil {
+		t.Fatal("QuerySendDetailsWithOptions() returned empty response")
+	}
+	t.Logf("query code=%s message=%s total=%s requestId=%s", stringValue(response.Body.Code), stringValue(response.Body.Message), stringValue(response.Body.TotalCount), stringValue(response.Body.RequestId))
+	if response.Body.SmsSendDetailDTOs == nil {
+		return
+	}
+	for i, detail := range response.Body.SmsSendDetailDTOs.SmsSendDetailDTO {
+		if detail == nil {
+			continue
+		}
+		t.Logf("detail[%d] status=%d errCode=%s template=%s sendDate=%s receiveDate=%s",
+			i,
+			int64Value(detail.SendStatus),
+			stringValue(detail.ErrCode),
+			stringValue(detail.TemplateCode),
+			stringValue(detail.SendDate),
+			stringValue(detail.ReceiveDate),
+		)
+	}
+}
+
+// int64Value safely unwraps optional SDK integer fields for diagnostic logs.
+func int64Value(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
