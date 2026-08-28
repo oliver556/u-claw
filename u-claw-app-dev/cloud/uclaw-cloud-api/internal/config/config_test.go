@@ -135,6 +135,20 @@ func TestValidateForServeRejectsDevelopmentSMSProvider(t *testing.T) {
 	}
 }
 
+func TestValidateForServeAllowsFixedSMSProviderForTemporaryRelease(t *testing.T) {
+	cfg := completeProductionConfig()
+	cfg.SMSProvider = "fixed"
+	cfg.DevSMSCode = "123456"
+	cfg.AliyunSMSAccessKeyID = ""
+	cfg.AliyunSMSAccessKeySecret = ""
+	cfg.AliyunSMSSignName = ""
+	cfg.AliyunSMSTemplateCode = ""
+
+	if err := cfg.ValidateForServe(); err != nil {
+		t.Fatalf("ValidateForServe() error = %v, want fixed sms allowed", err)
+	}
+}
+
 func TestValidateForServeRequiresAliyunSMSFields(t *testing.T) {
 	cfg := completeProductionConfig()
 	cfg.AliyunSMSAccessKeySecret = ""

@@ -16,10 +16,12 @@ const devDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uclaw-activation-write
 const screenshotPath = path.join(appRoot, '..', '.codex-state', 'screenshots', `activation-real-write-${Date.now()}.png`);
 const debugPort = 9350 + Math.floor(Math.random() * 100);
 const activationID = 'act_electron_write_001';
-const username = 'UCLAW-TESTER01';
+const phone = '13800138000';
+const smsCode = '123456';
 const activationCode = 'ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ';
 const activationRestartExitCode = 20;
 const newapiToken = 'electron-write-token';
+const accessToken = 'electron-access-token';
 const newapiBaseUrl = 'https://newapi.yiyong.me/v1';
 const requests = [];
 const children = [];
@@ -90,7 +92,9 @@ function startActivationStub() {
           activationId: activationID,
           status: 'server_bound',
           stage: 'server_bound',
-          usernameMasked: 'UCLAW-TE****01',
+          phoneMasked: '138****8000',
+          usernameMasked: '138****8000',
+          accessToken,
           usbFingerprintSummary: body.usbFingerprintSummary,
           artifactStatus: 'pending_client_write',
           message: 'Activation accepted.',
@@ -106,7 +110,7 @@ function startActivationStub() {
             payload: {
               schemaVersion: 'uclaw.license.v1',
               activationId: activationID,
-              subject: 'test',
+              subject: phone,
             },
             signature: {
               algorithm: 'Ed25519',
@@ -230,10 +234,13 @@ async function driveActivationPage() {
     await sleep(250);
   }
   await evalJS(`(() => {
-    const username = document.querySelector('#username');
+    const phone = document.querySelector('#phone');
+    const smsCode = document.querySelector('#smsCode');
     const code = document.querySelector('#activationCode');
-    username.value = ${JSON.stringify(username)};
-    username.dispatchEvent(new Event('input', { bubbles: true }));
+    phone.value = ${JSON.stringify(phone)};
+    phone.dispatchEvent(new Event('input', { bubbles: true }));
+    smsCode.value = ${JSON.stringify(smsCode)};
+    smsCode.dispatchEvent(new Event('input', { bubbles: true }));
     code.value = ${JSON.stringify(activationCode)};
     code.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('#nextButton').click();
@@ -280,13 +287,13 @@ function verifyLocalActivationMaterial() {
       throw new Error(`OpenClaw provider ${providerName} was not configured`);
     }
   }
-  if (activationState.status !== 'activated' || activationState.commitStatus !== 'committed') {
+  if (activationState.status !== 'activated' || activationState.commitStatus !== 'committed' || activationState.uclawAccessToken !== accessToken) {
     throw new Error('activation state did not reach committed status');
   }
   if (requests.length !== 2 || requests[0].url !== '/v1/activations' || requests[1].url !== `/v1/activations/${activationID}/commit`) {
     throw new Error(`unexpected activation request order: ${JSON.stringify(requests.map((request) => request.url))}`);
   }
-  if (requests[0].body.username !== username || !requests[0].body.idempotencyKey?.startsWith('electron-')) {
+  if (requests[0].body.phone !== phone || requests[0].body.smsCode !== smsCode || !requests[0].body.idempotencyKey?.startsWith('electron-')) {
     throw new Error('first-start request payload was not normalized');
   }
   if (requests[1].body.writeStatus !== 'verified') {

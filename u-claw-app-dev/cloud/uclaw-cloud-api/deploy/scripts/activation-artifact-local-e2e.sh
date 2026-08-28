@@ -6,7 +6,8 @@ cd "$ROOT_DIR"
 
 ADDR="${UCLAW_ACCEPTANCE_ADDR:-127.0.0.1:18081}"
 BASE_URL="http://${ADDR}"
-USERNAME="${UCLAW_ACCEPTANCE_USERNAME:-UCLAW-BIANCHENG}"
+PHONE="${UCLAW_ACCEPTANCE_PHONE:-13800138000}"
+SMS_CODE="${UCLAW_ACCEPTANCE_SMS_CODE:-123456}"
 ACTIVATION_CODE="${UCLAW_ACCEPTANCE_CODE:-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ}"
 USB_SUMMARY="${UCLAW_ACCEPTANCE_USB_SUMMARY:-PREVIEW-ONLY}"
 IDEMPOTENCY_KEY="${UCLAW_ACCEPTANCE_IDEMPOTENCY_KEY:-acceptance-local-$(date +%s)}"
@@ -34,10 +35,14 @@ done
 curl -fsS "${BASE_URL}/healthz" >/dev/null
 curl -fsS "${BASE_URL}/readyz" >/dev/null
 
+curl -fsS -X POST "${BASE_URL}/v1/auth/sms/send" \
+  -H 'Content-Type: application/json' \
+  -d "{\"phone\":\"${PHONE}\",\"purpose\":\"login\"}" >/dev/null
+
 activation_json="$(
   curl -fsS -X POST "${BASE_URL}/v1/activations" \
     -H 'Content-Type: application/json' \
-    -d "{\"username\":\"${USERNAME}\",\"activationCode\":\"${ACTIVATION_CODE}\",\"usbFingerprintSummary\":\"${USB_SUMMARY}\",\"idempotencyKey\":\"${IDEMPOTENCY_KEY}\"}"
+    -d "{\"phone\":\"${PHONE}\",\"smsCode\":\"${SMS_CODE}\",\"activationCode\":\"${ACTIVATION_CODE}\",\"usbFingerprintSummary\":\"${USB_SUMMARY}\",\"idempotencyKey\":\"${IDEMPOTENCY_KEY}\"}"
 )"
 
 activation_id="$(

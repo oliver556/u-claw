@@ -629,8 +629,8 @@ function createStaticActivationResult(payload, message) {
 }
 
 /**
- * Normalizes the sales-issued first-start username before local validation and
- * cloud submission.
+ * Normalizes the legacy sales-issued first-start username for compatibility
+ * with activation records created before phone login became the default.
  */
 function normalizeActivationUsername(value) {
   return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 38);
@@ -640,10 +640,10 @@ function normalizeActivationUsername(value) {
  * Creates a stable idempotency key so retrying the same first-start submission
  * can recover from network loss without consuming another activation.
  */
-function createActivationIdempotencyKey({ username, activationCode, usbSummary }) {
+function createActivationIdempotencyKey({ account, activationCode, usbSummary }) {
   const source = [
     'uclaw-first-start-v1',
-    username,
+    account,
     activationCode.replace(/-/g, ''),
     usbSummary,
   ].join(':');
@@ -1589,7 +1589,7 @@ async function sendActivationSMS(payload = {}) {
         ok: true,
         status: result.status || 'sent',
         devCode: result.devCode || '',
-        message: result.devCode ? `验证码已发送，开发环境验证码为 ${result.devCode}。` : '验证码已发送。',
+        message: result.devCode ? `验证码为 ${result.devCode}。` : '验证码已发送。',
       };
     } catch (error) {
       if (!canUseActivationStaticFallback()) throw error;
@@ -1605,14 +1605,22 @@ async function sendActivationSMS(payload = {}) {
 }
 
 /**
- * Handles first-start activation. SMS login remains available for later account
- * recovery, but initial USB binding now follows the username/code contract.
+ * Handles first-start activation. The current release uses a real phone number
+ * plus a fixed SMS code while Aliyun SMS delivery is pending approval.
  */
 async function submitActivation(payload = {}) {
+  const phone = String(payload.phone || '').trim();
+  const smsCode = String(payload.smsCode || '').trim();
   const username = normalizeActivationUsername(payload.username);
   const activationCode = String(payload.activationCode || '').trim().toUpperCase();
-  if (!/^UCLAW-[A-Z0-9]{6,32}$/.test(username)) {
-    return { ok: false, message: '用户名格式不正确。', retryable: true };
+  if (phone && !/^1[3-9]\d{9}$/.test(phone)) {
+    return { ok: false, message: '请输入有效的手机号。', retryable: true };
+  }
+  if (phone && !/^\d{6}$/.test(smsCode)) {
+    return { ok: false, message: '请输入 6 位验证码。', retryable: true };
+  }
+  if (!phone && !/^UCLAW-[A-Z0-9]{6,32}$/.test(username)) {
+    return { ok: false, message: '请输入手机号，或提供兼容用户名。', retryable: true };
   }
   if (!/^(?:[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}|[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}-[A-Z0-9]{6})$/.test(activationCode)) {
     return { ok: false, message: '激活码格式不正确。', retryable: true };
@@ -1621,11 +1629,14 @@ async function submitActivation(payload = {}) {
     let serverBound = false;
     try {
       const usbSummary = process.env.UCLAW_USB_FINGERPRINT_SUMMARY || 'PREVIEW-ONLY';
+      const activationAccount = phone || username;
       const activationResult = await postActivationJSON('/v1/activations', {
+        phone,
+        smsCode,
         username,
         activationCode,
         usbFingerprintSummary: usbSummary,
-        idempotencyKey: createActivationIdempotencyKey({ username, activationCode, usbSummary }),
+        idempotencyKey: createActivationIdempotencyKey({ account: activationAccount, activationCode, usbSummary }),
       });
       serverBound = true;
       writeActivationLicenseArtifact(activationResult);
@@ -1636,9 +1647,11 @@ async function submitActivation(payload = {}) {
         writeStatus: 'verified',
       });
       const activationState = writeActivationState({
+        phone,
         username,
         activationCode,
         source: 'cloud-first-start',
+        phoneMasked: activationResult.phoneMasked,
         usernameMasked: activationResult.usernameMasked,
         activationId: activationID,
         artifactStatus: activationResult.artifactStatus,
@@ -1646,12 +1659,13 @@ async function submitActivation(payload = {}) {
         newapiBaseUrl: activationResult.newapiBaseUrl,
         newapiToken: activationResult.newapiToken,
         tokenVersion: activationResult.tokenVersion,
+        uclawAccessToken: activationResult.accessToken,
       });
       return {
         ok: true,
         code: 'ACTIVATION_CLOUD_COMPLETE',
         message: '激活完成，授权材料与 New API 配置已写入本地。',
-        phoneMasked: activationState.accountMasked,
+        phoneMasked: activationState.phoneMasked || activationState.accountMasked,
         usernameMasked: activationState.usernameMasked,
         activationPersisted: true,
         activationId: activationID,
@@ -1662,10 +1676,10 @@ async function submitActivation(payload = {}) {
     } catch (error) {
       if (serverBound || !canUseActivationStaticFallback()) throw error;
       logLifecycle(`activation cloud submit fallback: ${error.message}`);
-      return createStaticActivationResult({ username, activationCode }, '激活服务未连通，已进入本地静态验收完成态。');
+      return createStaticActivationResult({ phone, username, activationCode }, '激活服务未连通，已进入本地静态验收完成态。');
     }
   }
-  return createStaticActivationResult({ username, activationCode });
+  return createStaticActivationResult({ phone, username, activationCode });
 }
 
 /**

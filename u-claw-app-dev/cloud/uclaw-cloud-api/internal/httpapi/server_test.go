@@ -234,6 +234,51 @@ func TestFirstStartActivationFlowDoesNotRequireBearerToken(t *testing.T) {
 	}
 }
 
+func TestFirstStartActivationAcceptsFixedPhoneCode(t *testing.T) {
+	server := NewServer(config.Config{
+		AppEnv:              "staging",
+		JWTSecret:           "test-secret",
+		DevSMSCode:          "123456",
+		SMSProvider:         "fixed",
+		SMSCodePepper:       "test-pepper",
+		NewAPIClientBaseURL: "https://api.example.com/v1",
+		NewAPIPreviewToken:  "preview-token",
+	}, BuildInfo{Version: "test"})
+
+	activateRec := httptest.NewRecorder()
+	activateReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/activations",
+		bytes.NewBufferString(`{"phone":"13800138000","smsCode":"123456","activationCode":"ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","usbFingerprintSummary":"PREVIEW-ONLY","idempotencyKey":"idem-phone-1"}`),
+	)
+	server.ServeHTTP(activateRec, activateReq)
+
+	if activateRec.Code != http.StatusOK {
+		t.Fatalf("activate status = %d body = %s", activateRec.Code, activateRec.Body.String())
+	}
+	var activatePayload struct {
+		OK              bool   `json:"ok"`
+		ActivationID    string `json:"activationId"`
+		PhoneMasked     string `json:"phoneMasked"`
+		AccessToken     string `json:"accessToken"`
+		ArtifactStatus  string `json:"artifactStatus"`
+		LicenseArtifact struct {
+			Payload struct {
+				Subject string `json:"subject"`
+			} `json:"payload"`
+		} `json:"licenseArtifact"`
+	}
+	if err := json.Unmarshal(activateRec.Body.Bytes(), &activatePayload); err != nil {
+		t.Fatalf("decode activation response: %v", err)
+	}
+	if !activatePayload.OK || activatePayload.PhoneMasked != "138****8000" || activatePayload.AccessToken == "" {
+		t.Fatalf("unexpected activation payload: %+v", activatePayload)
+	}
+	if activatePayload.ArtifactStatus != "pending_client_write" || activatePayload.LicenseArtifact.Payload.Subject != "13800138000" {
+		t.Fatalf("unexpected activation artifact payload: %+v", activatePayload)
+	}
+}
+
 func TestUsageSummaryReturnsNewAPICounters(t *testing.T) {
 	secret := "test-newapi-password-secret"
 	expectedPassword := provisioning.DeriveUserPassword(1, "13800138000", secret)

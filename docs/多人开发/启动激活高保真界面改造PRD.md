@@ -10,7 +10,7 @@
 
 ## Feasibility Assessment
 
-可以改造，且视觉上可高保真落地。设计稿与 `docs/第一版启动激活授权方案.md` 的方向一致：未激活时进入同一 Electron 客户端的受限 activation-only 模式，用户输入用户名和激活码，绑定当前 U 盘，服务端签发许可证，客户端原子写盘，随后退出并由 Launcher 重跑完整授权 gate。
+可以改造，且视觉上可高保真落地。设计稿与 `docs/第一版启动激活授权方案.md` 的方向一致：未激活时进入同一 Electron 客户端的受限 activation-only 模式，用户输入手机号、验证码和激活码，绑定当前 U 盘，服务端签发许可证，客户端原子写盘，随后退出并由 Launcher 重跑完整授权 gate。
 
 但当前代码状态不支持“直接替换页面即可上线”。`u-claw-app-dev/src/main.js` 现有首次流程主要是“Gateway 启动后，如果无模型配置则打开 Config.html”；它会启动 OpenClaw Gateway，并提供 `/api/config`、`/api/done` 等模型配置能力。正式激活页要求在授权 gate 前运行，未激活时不得启动 OpenClaw、不得加载普通工作台、不得开放普通 IPC。因此本次改造是启动授权流程开发，不是单纯 HTML/CSS 换肤。
 
@@ -24,7 +24,7 @@
 
 ## Problem Statement
 
-当前 U-Claw 首次启动体验仍偏“模型配置页/运行后配置”，不能清晰承载第一版商业授权流程。未激活用户需要一个可信、简洁、可解释的启动激活界面，明确告知使用边界，检查当前电脑与 U 盘，输入销售交付的用户名和激活码，并在成功后把当前 U 盘安全绑定到许可证。
+当前 U-Claw 首次启动体验仍偏“模型配置页/运行后配置”，不能清晰承载第一版商业授权流程。未激活用户需要一个可信、简洁、可解释的启动激活界面，明确告知使用边界，检查当前电脑与 U 盘，输入真实手机号、验证码和激活码，并在成功后把当前 U 盘安全绑定到许可证。
 
 ## Solution
 
@@ -176,6 +176,7 @@ activation-server/
 - Launcher owns preflight state: USB identity, product USB detection, writable data path, runtime manifest, authorization material classification, and activation-required decision.
 - Renderer receives only sanitized preflight data: OS/arch status, USB short summary, writable path status, and user-facing error codes. Full USB descriptor, full fingerprint, secret, token, signature, and raw server response never enter renderer.
 - Activation form fields are empty in production. Username is normalized to uppercase. Activation code supports paste, uppercasing, grouping, and bounded length.
+- Current acceptance version uses real phone number + fixed verification code `123456` while Aliyun SMS delivery is blocked. This must remain an explicit server config (`SMS_PROVIDER=fixed`) and be replaced by Aliyun SMS after approval.
 - Activation submit calls `POST /v1/activations` using the OpenAPI contract from the activation server. Production endpoint must be HTTPS; localhost/test endpoint requires explicit dev mode.
 - Successful activation response is handed to a privileged write helper. Renderer never writes license files directly.
 - Write helper atomically writes `.uclaw/license/.startup-credential.json`, `.uclaw/license/license.json`, and `.uclaw/builtin-model-credential.v1.json`, then reads back and verifies.
@@ -324,7 +325,7 @@ Acceptance:
 ## Current Status
 
 - Cloud API staging 已通过 `license.yiyong.me` 公网首启激活和 commit 验收。
-- Electron activation-only 页面已改为第一版权威流程：交付卡用户名 + 激活码，不依赖手机号短信。
+- Electron activation-only 页面已改为当前验收流程：真实手机号 + 固定验证码 `123456` + 激活码；阿里云短信审核完成后替换固定码 provider。
 - 客户端已完成真实写盘闭环：`POST /v1/activations`、原子写入授权材料、写入 OpenClaw New API config、读回验证、`POST /v1/activations/{activationId}/commit`。
 - 便携 Launcher 已定稿生产 endpoint 注入、退出码 20 重启交接和授权后 `openclaw.json` 回写 U 盘同步规则。
 - 阿里云短信接口仍保留，当前运营商回执为 `PORT_NOT_REGISTERED`，待审核完成后复验；该问题不阻塞首启激活。

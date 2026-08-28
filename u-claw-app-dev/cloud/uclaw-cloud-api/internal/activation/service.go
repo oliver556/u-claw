@@ -16,6 +16,7 @@ import (
 
 var activationCodePattern = regexp.MustCompile(`^(?:[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}|[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}-[A-Z0-9]{6})$`)
 var usernamePattern = regexp.MustCompile(`^UCLAW-[A-Z0-9]{6,32}$`)
+var phonePattern = regexp.MustCompile(`^1[3-9]\d{9}$`)
 
 // DefaultModels describes model ids the desktop client should write into OpenClaw config.
 type DefaultModels struct {
@@ -42,9 +43,11 @@ type RedeemResult struct {
 	DefaultModels DefaultModels `json:"defaultModels"`
 }
 
-// FirstStartRequest carries the activation-only username/code request before login exists.
+// FirstStartRequest carries the activation-only phone/code request, with legacy username compatibility.
 type FirstStartRequest struct {
 	Username              string
+	Phone                 string
+	UserID                int64
 	ActivationCode        string
 	USBFingerprintSummary string
 	IdempotencyKey        string
@@ -57,6 +60,8 @@ type FirstStartResult struct {
 	Status                string           `json:"status"`
 	Stage                 string           `json:"stage"`
 	UsernameMasked        string           `json:"usernameMasked"`
+	PhoneMasked           string           `json:"phoneMasked,omitempty"`
+	AccessToken           string           `json:"accessToken,omitempty"`
 	USBFingerprintSummary string           `json:"usbFingerprintSummary"`
 	ArtifactStatus        string           `json:"artifactStatus"`
 	Message               string           `json:"message"`
@@ -105,7 +110,7 @@ type Store interface {
 	Redeem(ctx context.Context, code string, userID int64, phone string, at time.Time) error
 }
 
-// FirstStartStore persists activation-only username/code binding without requiring SMS login.
+// FirstStartStore persists activation-only account/code binding after phone or legacy username validation.
 type FirstStartStore interface {
 	BindFirstStart(ctx context.Context, code string, username string, at time.Time) (int64, error)
 }
@@ -217,41 +222,55 @@ func (s *Service) Redeem(ctx context.Context, req RedeemRequest) (RedeemResult, 
 	}, nil
 }
 
-// ActivateFirstStart validates username/code activation from the restricted startup UI.
+// ActivateFirstStart validates phone/code activation from the restricted startup UI.
 func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest) (FirstStartResult, error) {
 	username := strings.ToUpper(strings.TrimSpace(req.Username))
+	phone := strings.TrimSpace(req.Phone)
 	code := strings.ToUpper(strings.TrimSpace(req.ActivationCode))
 	usbSummary := strings.TrimSpace(req.USBFingerprintSummary)
 	if usbSummary == "" {
 		usbSummary = "UNAVAILABLE"
 	}
-	if !usernamePattern.MatchString(username) {
+	principal := username
+	userID := syntheticUserID(username)
+	if phone != "" {
+		if !phonePattern.MatchString(phone) {
+			return FirstStartResult{}, fmt.Errorf("phone is invalid")
+		}
+		principal = phone
+		if req.UserID > 0 {
+			userID = req.UserID
+		} else {
+			userID = syntheticUserID(phone)
+		}
+	} else if !usernamePattern.MatchString(username) {
 		return FirstStartResult{}, fmt.Errorf("activation username is invalid")
 	}
 	if !activationCodePattern.MatchString(code) {
 		return FirstStartResult{}, fmt.Errorf("activation code is invalid")
 	}
 	at := s.now()
-	userID := syntheticUserID(username)
 	if firstStartStore, ok := s.store.(FirstStartStore); ok {
-		boundUserID, err := firstStartStore.BindFirstStart(ctx, code, username, at)
+		boundUserID, err := firstStartStore.BindFirstStart(ctx, code, principal, at)
 		if err != nil {
 			return FirstStartResult{}, err
 		}
-		userID = boundUserID
+		if req.UserID <= 0 {
+			userID = boundUserID
+		}
 	} else {
-		if err := s.store.Redeem(ctx, code, syntheticUserID(username), username, at); err != nil {
+		if err := s.store.Redeem(ctx, code, userID, principal, at); err != nil {
 			return FirstStartResult{}, err
 		}
 	}
-	result, err := s.provisionResult(ctx, userID, username)
+	result, err := s.provisionResult(ctx, userID, principal)
 	if err != nil {
 		return FirstStartResult{}, err
 	}
-	activationID := activationIDFor(username, code, usbSummary, req.IdempotencyKey)
+	activationID := activationIDFor(principal, code, usbSummary, req.IdempotencyKey)
 	licenseArtifact, err := s.cfg.LicenseSigner.Sign(license.Request{
 		ActivationID:          activationID,
-		Subject:               username,
+		Subject:               principal,
 		USBFingerprintSummary: usbSummary,
 		NewAPIBaseURL:         result.NewAPIBaseURL,
 		TokenVersion:          result.TokenVersion,
@@ -268,7 +287,7 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 	if attemptStore, ok := s.store.(FirstStartAttemptStore); ok {
 		if err := attemptStore.RecordFirstStartAttempt(ctx, FirstStartAttempt{
 			ActivationID:          activationID,
-			UsernameNormalized:    username,
+			UsernameNormalized:    principal,
 			USBFingerprintSummary: usbSummary,
 			Stage:                 "server_bound",
 			ArtifactStatus:        "pending_client_write",
@@ -284,7 +303,8 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 		ActivationID:          activationID,
 		Status:                "server_bound",
 		Stage:                 "server_bound",
-		UsernameMasked:        username,
+		UsernameMasked:        maskFirstStartPrincipal(principal),
+		PhoneMasked:           maskPhone(phone),
 		USBFingerprintSummary: usbSummary,
 		ArtifactStatus:        "pending_client_write",
 		Message:               "Activation accepted; client write helper has not committed authorization files yet.",
@@ -397,7 +417,7 @@ func (s *MemoryStore) Redeem(_ context.Context, code string, userID int64, phone
 	return nil
 }
 
-// BindFirstStart binds a startup activation code to a normalized username once.
+// BindFirstStart binds a startup activation code to a normalized account once.
 func (s *MemoryStore) BindFirstStart(ctx context.Context, code string, username string, at time.Time) (int64, error) {
 	userID := syntheticUserID(username)
 	if err := s.Redeem(ctx, code, userID, username, at); err != nil {
@@ -415,7 +435,15 @@ func maskPhone(phone string) string {
 	return phone[:3] + "****" + phone[7:]
 }
 
-// syntheticUserID creates a stable positive id for first-start usernames before account tables exist.
+// maskFirstStartPrincipal displays either a phone account or legacy username without exposing extra data.
+func maskFirstStartPrincipal(principal string) string {
+	if phonePattern.MatchString(strings.TrimSpace(principal)) {
+		return maskPhone(principal)
+	}
+	return strings.ToUpper(strings.TrimSpace(principal))
+}
+
+// syntheticUserID creates a stable positive id for first-start accounts before account tables exist.
 func syntheticUserID(username string) int64 {
 	sum := sha256.Sum256([]byte(strings.ToUpper(strings.TrimSpace(username))))
 	return int64(binary.BigEndian.Uint64(sum[:8]) & ((1 << 62) - 1))

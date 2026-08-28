@@ -49,15 +49,16 @@ product/activation-server
 ## 用户流程
 
 1. 用户首次打开 U-Claw，进入首启激活页。
-2. 用户输入交付卡上的 U-Claw 激活用户名。
+2. 用户输入真实手机号。
 3. 用户输入随 U 盘附带的激活码。
-4. 阿里云 U-Claw Cloud API 绑定用户名、激活码与当前 U 盘摘要。
-5. U-Claw Cloud API 使用激活用户名自动创建或恢复 New API 用户。
-6. U-Claw Cloud API 创建 New API token，返回给客户端写入本地 OpenClaw 配置；客户端写盘并验证后调用 commit。
-7. 客户端模型页进入时主动查询 U-Claw Cloud API，用于展示 New API 余额、今日用量、近 7 天、累计流水。
-8. 用户点击充值后创建订单；支付回调成功后，U-Claw Cloud API 调 New API `add_quota`。
+4. 当前验收版本验证码固定为 `123456`；阿里云短信审核完成后切回真实短信发送。
+5. 阿里云 U-Claw Cloud API 绑定手机号、激活码与当前 U 盘摘要。
+6. U-Claw Cloud API 使用手机号自动创建或恢复 New API 用户。
+7. U-Claw Cloud API 创建 New API token，返回给客户端写入本地 OpenClaw 配置；客户端写盘并验证后调用 commit。
+8. 客户端模型页进入时主动查询 U-Claw Cloud API，用于展示 New API 余额、今日用量、近 7 天、累计流水。
+9. 用户点击充值后创建订单；支付回调成功后，U-Claw Cloud API 调 New API `add_quota`。
 
-手机号短信登录保留为后续账号恢复、授权找回和 New API token 恢复入口；阿里云短信审核未完成时不阻塞首启激活。
+手机号短信登录保留为后续账号恢复、授权找回和 New API token 恢复入口；阿里云短信审核未完成时，本版本用 `SMS_PROVIDER=fixed` 和固定验证码 `123456` 验收。
 
 ## 当前开发切片
 
@@ -65,7 +66,7 @@ product/activation-server
 
 - `POST /v1/auth/sms/send`
 - `POST /v1/auth/sms/login`
-- 短信发送 provider seam：本地 development no-op；生产 `aliyun` adapter 使用阿里云官方 Go SDK 调用 `SendSms`；已补 `QuerySendDetails` smoke 用于查送达回执
+- 短信发送 provider seam：本地 development no-op；当前验收版 `fixed` provider 使用固定验证码 `123456`；生产 `aliyun` adapter 使用阿里云官方 Go SDK 调用 `SendSms`；已补 `QuerySendDetails` smoke 用于查送达回执
 - `POST /v1/activation/redeem`
 - 激活时自动创建同手机号 New API 账号和 token
 - `GET /v1/newapi/usage/summary`
@@ -73,7 +74,7 @@ product/activation-server
 - `POST /v1/recharge/orders`
 - `POST /v1/payments/virtual/notify`
 - `GET /v1/recharge/orders/{orderNo}`
-- Electron activation-only 首启客户端已切到 `POST /v1/activations`，不再依赖短信审核；客户端会写入本地授权材料与 OpenClaw New API 配置，读回验证成功后调用 `/v1/activations/{activationId}/commit`，随后以退出码 20 交给 Launcher 重启进入正常工作台。
+- Electron activation-only 首启客户端已切到 `POST /v1/activations`；当前提交手机号、固定验证码和激活码，客户端会写入本地授权材料与 OpenClaw New API 配置，读回验证成功后调用 `/v1/activations/{activationId}/commit`，随后以退出码 20 交给 Launcher 重启进入正常工作台。
 
 本切片的充值先用 `virtual` provider。虚拟回调成功后立即触发 New API `POST /api/user/manage` 加 quota，并通过订单状态机保证同一订单不会重复加额度。
 
@@ -161,10 +162,19 @@ DEV_SMS_CODE=123456
 NEWAPI_ACTIVATION_QUOTA=100000
 ```
 
+短信审核未完成时，当前验收版本可临时配置：
+
+```text
+SMS_PROVIDER=fixed
+DEV_SMS_CODE=123456
+```
+
+该配置不调用阿里云短信，允许输入真实手机号与固定验证码完成登录和首启绑定。阿里云短信审核通过后切回 `SMS_PROVIDER=aliyun`。
+
 `virtual` 支付回调只允许非 production。
 
 当前已完成 New API / sub2api 源站、前置反代、New API Root 管理员和 U-Claw Cloud API staging 部署；`NEWAPI_ADMIN_TOKEN` 已写入阿里云 staging 受限 env。`license.yiyong.me` 已把新激活相关路径切到 Cloud API staging，并完成公网首启激活验收。
-客户端侧已完成首启真实写盘闭环：用户名 + 激活码提交、`licenseArtifact` 写入、New API credential 写入、OpenClaw config 写入、读回验证、commit、完成页重启交接。便携启动脚本默认注入 `https://license.yiyong.me`，并允许授权后的 `openclaw.json` 同步回 U 盘。
+客户端侧已完成首启真实写盘闭环：手机号 + 固定验证码 + 激活码提交、`licenseArtifact` 写入、New API credential 写入、OpenClaw config 写入、读回验证、commit、完成页重启交接。便携启动脚本默认注入 `https://license.yiyong.me`，并允许授权后的 `openclaw.json` 同步回 U 盘。
 
 ## 验收标准
 
@@ -172,7 +182,7 @@ NEWAPI_ACTIVATION_QUOTA=100000
 - `deploy/scripts/newapi-local-up.sh` 可启动本地 New API lab。
 - `deploy/scripts/activation-local-e2e.sh` 可完成：短信登录、激活、创建 New API token、查询余额、创建虚拟充值订单、虚拟回调、余额增加。
 - U-Claw 客户端模型页进入时能看到 New API 余额、今日用量、近 7 天和流水。
-- activation-only 客户端提交用户名和激活码后，本地生成 `.openclaw/license/license.json`、`.openclaw/builtin-model-credential.v1.json`、`.openclaw/uclaw-activation.json`，并写入 `.openclaw/openclaw.json` 的 New API provider 配置。
+- activation-only 客户端提交手机号、固定验证码和激活码后，本地生成 `.openclaw/license/license.json`、`.openclaw/builtin-model-credential.v1.json`、`.openclaw/uclaw-activation.json`，并写入 `.openclaw/openclaw.json` 的 New API provider 配置。
 - 完成页点击“完成并重启”后，Electron 以退出码 20 退出；Launcher 完成 runtime-to-USB sync 后重新执行正常 startup gate。
 
 ## 当前部署盘点
@@ -181,7 +191,7 @@ NEWAPI_ACTIVATION_QUOTA=100000
 - `64.90.19.251`：已安装 Nginx/Certbot；`newapi.yiyong.me`、`sub2api.yiyong.me` HTTPS 证书有效；公网 `/v1` 可达，管理面非授权来源 `403`。
 - `158.51.110.49`：已安装 1Panel v2.2.5、Docker 与 Compose；New API、sub2api、PostgreSQL、Redis 均已启动，源站 `3000/8080` 已用 `DOCKER-USER` allowlist 限制只允许前置访问。
 - Aliyun SMS：`SendSms` API 已受理；`QuerySendDetails` 回执 `PORT_NOT_REGISTERED`，待短信签名/端口实名报备审核完成后再复验，当前暂不阻塞主线。
-- Electron activation-only：已通过本地 stub 驱动的真实页面写盘和退出码 20 重启交接验收；短信待审核期间按交付卡用户名 + 激活码完成首启。
+- Electron activation-only：已通过本地 stub 驱动的真实页面写盘和退出码 20 重启交接验收；短信待审核期间按真实手机号 + 固定验证码 `123456` + 激活码完成首启。
 
 ## 后续待办
 

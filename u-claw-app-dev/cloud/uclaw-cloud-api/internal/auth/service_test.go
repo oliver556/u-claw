@@ -77,6 +77,29 @@ func TestSMSLoginRejectsConsumedCode(t *testing.T) {
 	}
 }
 
+func TestFixedSMSLoginCanSkipSendForStaging(t *testing.T) {
+	manager, err := NewTokenManager("test-secret")
+	if err != nil {
+		t.Fatalf("NewTokenManager() error = %v", err)
+	}
+	service, err := NewService(NewMemoryStore(), manager, ServiceConfig{
+		DevSMSCode:                 "123456",
+		UseDevSMSCode:              true,
+		AllowFixedLoginWithoutSend: true,
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	loginResult, err := service.Login(context.Background(), "13800138000", "login", "123456")
+	if err != nil {
+		t.Fatalf("Login() with fixed code error = %v", err)
+	}
+	if loginResult.User.Phone != "138****8000" || loginResult.AccessToken == "" {
+		t.Fatalf("login result = %+v", loginResult)
+	}
+}
+
 func TestSMSProviderReceivesGeneratedCodeWithoutExposingIt(t *testing.T) {
 	manager, err := NewTokenManager("test-secret")
 	if err != nil {

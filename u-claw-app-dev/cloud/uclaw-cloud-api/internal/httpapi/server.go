@@ -62,6 +62,8 @@ type activationRedeemRequest struct {
 
 type firstStartActivationRequest struct {
 	Username              string `json:"username"`
+	Phone                 string `json:"phone"`
+	SMSCode               string `json:"smsCode"`
 	ActivationCode        string `json:"activationCode"`
 	USBFingerprintSummary string `json:"usbFingerprintSummary"`
 	IdempotencyKey        string `json:"idempotencyKey"`
@@ -188,8 +190,21 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
+		var userID int64
+		var accessToken string
+		if strings.TrimSpace(req.Phone) != "" || strings.TrimSpace(req.SMSCode) != "" {
+			login, err := options.Auth.Login(r.Context(), req.Phone, "login", req.SMSCode)
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, err)
+				return
+			}
+			userID = login.User.ID
+			accessToken = login.AccessToken
+		}
 		result, err := options.Activation.ActivateFirstStart(r.Context(), activation.FirstStartRequest{
 			Username:              req.Username,
+			Phone:                 req.Phone,
+			UserID:                userID,
 			ActivationCode:        req.ActivationCode,
 			USBFingerprintSummary: req.USBFingerprintSummary,
 			IdempotencyKey:        req.IdempotencyKey,
@@ -198,6 +213,7 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
+		result.AccessToken = accessToken
 		writeJSON(w, http.StatusOK, result)
 	})
 	mux.HandleFunc("POST /v1/activations/{activationId}/commit", func(w http.ResponseWriter, r *http.Request) {
@@ -383,12 +399,13 @@ func buildAuthService(cfg config.Config, store auth.Store) *auth.Service {
 		panic(fmt.Sprintf("build token manager: %v", err))
 	}
 	service, err := auth.NewService(store, manager, auth.ServiceConfig{
-		TokenTTL:      cfg.AuthTokenTTL,
-		DevSMSCode:    cfg.DevSMSCode,
-		CodePepper:    cfg.SMSCodePepper,
-		ExposeCodes:   !cfg.IsProduction(),
-		UseDevSMSCode: !cfg.IsProduction(),
-		Provider:      buildSMSProvider(cfg),
+		TokenTTL:                   cfg.AuthTokenTTL,
+		DevSMSCode:                 cfg.DevSMSCode,
+		CodePepper:                 cfg.SMSCodePepper,
+		ExposeCodes:                !cfg.IsProduction() || strings.EqualFold(cfg.SMSProvider, "fixed"),
+		UseDevSMSCode:              !cfg.IsProduction() || strings.EqualFold(cfg.SMSProvider, "fixed"),
+		AllowFixedLoginWithoutSend: strings.EqualFold(cfg.SMSProvider, "fixed"),
+		Provider:                   buildSMSProvider(cfg),
 	})
 	if err != nil {
 		panic(fmt.Sprintf("build auth service: %v", err))
@@ -412,6 +429,9 @@ func buildSMSProvider(cfg config.Config) auth.SMSProvider {
 			panic(fmt.Sprintf("build aliyun sms provider: %v", err))
 		}
 		return provider
+	}
+	if strings.EqualFold(cfg.SMSProvider, "fixed") {
+		return auth.DevelopmentSMSProvider{}
 	}
 	return auth.DevelopmentSMSProvider{}
 }

@@ -129,12 +129,15 @@ for (const required of [
   '首次启动激活',
   '受限模式不启动 OpenClaw Gateway',
   '激活并绑定当前 U-Claw 产品盘',
-  'placeholder="UCLAW-XXXXXXXX"',
+  'placeholder="请输入手机号"',
+  'placeholder="6 位验证码"',
   'placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX"',
-  'normalizeUsername',
+  'normalizePhone',
+  'sendSmsButton',
   'finishPhone',
   'formatActivationCode',
   'escapeHtml',
+  '固定验证码为 123456',
   'restartReady',
   '完成并重启',
   '.step.done .step-number::after { content: ""; position: absolute;',
@@ -149,7 +152,7 @@ for (const required of [
   requireText(activationHtml, required, `activation page marker ${required}`);
 }
 
-for (const forbidden of ['UCLAW-8F2K9M', '7K4P-9Q2M-X8RT-6W3N-A5LC', 'Gateway 在线', 'custom/gpt-5.5', '本地启动授权有效', 'placeholder="请输入手机号"', 'placeholder="6 位验证码"']) {
+for (const forbidden of ['UCLAW-8F2K9M', '7K4P-9Q2M-X8RT-6W3N-A5LC', 'Gateway 在线', 'custom/gpt-5.5', '本地启动授权有效', 'placeholder="UCLAW-XXXXXXXX"']) {
   if (activationHtml.includes(forbidden)) {
     throw new Error(`Activation page must not keep demo value: ${forbidden}`);
   }

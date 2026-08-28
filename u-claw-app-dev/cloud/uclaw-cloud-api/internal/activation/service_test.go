@@ -134,6 +134,30 @@ func TestActivateFirstStartReturnsServerBoundEnvelope(t *testing.T) {
 	}
 }
 
+func TestActivateFirstStartAcceptsVerifiedPhonePrincipal(t *testing.T) {
+	service, err := NewService(NewMemoryStore(true), Config{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	result, err := service.ActivateFirstStart(context.Background(), FirstStartRequest{
+		Phone:                 "13800138000",
+		UserID:                42,
+		ActivationCode:        "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
+		USBFingerprintSummary: "PREVIEW-ONLY",
+		IdempotencyKey:        "idem-phone-1",
+	})
+	if err != nil {
+		t.Fatalf("activate first start with phone: %v", err)
+	}
+	if result.PhoneMasked != "138****8000" || result.UsernameMasked != "138****8000" {
+		t.Fatalf("masked account = phone:%q username:%q", result.PhoneMasked, result.UsernameMasked)
+	}
+	if result.LicenseArtifact.Payload.Subject != "13800138000" {
+		t.Fatalf("license subject = %q, want phone", result.LicenseArtifact.Payload.Subject)
+	}
+}
+
 func TestActivateFirstStartIsIdempotentForSameRequest(t *testing.T) {
 	service, err := NewService(NewMemoryStore(true), Config{})
 	if err != nil {

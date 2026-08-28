@@ -17,13 +17,14 @@ var phonePattern = regexp.MustCompile(`^1[3-9]\d{9}$`)
 
 // ServiceConfig controls SMS login behavior for local dev and production wiring.
 type ServiceConfig struct {
-	CodeTTL       time.Duration
-	TokenTTL      time.Duration
-	DevSMSCode    string
-	CodePepper    string
-	ExposeCodes   bool
-	UseDevSMSCode bool
-	Provider      SMSProvider
+	CodeTTL                    time.Duration
+	TokenTTL                   time.Duration
+	DevSMSCode                 string
+	CodePepper                 string
+	ExposeCodes                bool
+	UseDevSMSCode              bool
+	AllowFixedLoginWithoutSend bool
+	Provider                   SMSProvider
 }
 
 // User is the verified U-Claw account returned to API clients.
@@ -167,7 +168,9 @@ func (s *Service) Login(ctx context.Context, phone string, purpose string, code 
 	}
 
 	if err := s.store.ConsumeSMSCode(ctx, phone, purpose, s.hashCode(phone, purpose, code), s.now()); err != nil {
-		return LoginResult{}, err
+		if !s.canUseFixedCodeWithoutSend(code) {
+			return LoginResult{}, err
+		}
 	}
 	user, err := s.store.UpsertUser(ctx, phone, s.now())
 	if err != nil {
@@ -178,6 +181,13 @@ func (s *Service) Login(ctx context.Context, phone string, purpose string, code 
 		return LoginResult{}, err
 	}
 	return LoginResult{AccessToken: token, User: User{ID: user.ID, Phone: MaskPhone(phone)}}, nil
+}
+
+// canUseFixedCodeWithoutSend enables temporary staging login while SMS delivery is unavailable.
+func (s *Service) canUseFixedCodeWithoutSend(code string) bool {
+	return s.cfg.AllowFixedLoginWithoutSend &&
+		s.cfg.UseDevSMSCode &&
+		strings.TrimSpace(code) == strings.TrimSpace(s.cfg.DevSMSCode)
 }
 
 // VerifyAccessToken validates a U-Claw access token for authenticated API calls.

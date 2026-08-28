@@ -147,6 +147,10 @@ func (cfg Config) ValidateForServe() error {
 	switch strings.ToLower(cfg.SMSProvider) {
 	case "development":
 		missing = append(missing, "SMS_PROVIDER(non-development)")
+	case "fixed":
+		if cfg.DevSMSCode == "" {
+			missing = append(missing, "DEV_SMS_CODE")
+		}
 	case "aliyun":
 		if cfg.AliyunSMSAccessKeyID == "" {
 			missing = append(missing, "ALIYUN_SMS_ACCESS_KEY_ID")

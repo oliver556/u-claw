@@ -69,7 +69,7 @@ go run ./cmd/adminctl activation seed --code ABCD-EFGH-IJKL-MNOP
 
 ## 本地手机号登录
 
-开发环境默认短信码为 `123456`，响应会返回 `devCode`，生产环境不会暴露。
+开发环境默认短信码为 `123456`，响应会返回 `devCode`。当前验收版本也可配置 `SMS_PROVIDER=fixed`，使用真实手机号 + 固定验证码 `123456`，不调用阿里云短信。
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8080/v1/auth/sms/send \
@@ -95,8 +95,9 @@ curl -sS -X POST http://127.0.0.1:8080/v1/activation/redeem \
 短信发送已经通过 `auth.SMSProvider` 抽象隔离。当前状态：
 
 - `SMS_PROVIDER=development`：仅限本地开发和测试，不调用真实短信供应商；非 production 才会返回 `devCode`。
+- `SMS_PROVIDER=fixed`：当前验收版本临时使用；不调用真实短信供应商，固定验证码来自 `DEV_SMS_CODE`，默认 `123456`。
 - `SMS_PROVIDER=aliyun`：使用阿里云官方 Go SDK 调用 `SendSms`。必须配置已审核通过的签名和模板。
-- production 启动校验要求 `SMS_PROVIDER=aliyun`，并要求 `ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE` 全部存在。
+- production 启动校验允许 `SMS_PROVIDER=fixed` 或 `SMS_PROVIDER=aliyun`；上线正式短信后应切回 `aliyun`，并要求 `ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE` 全部存在。
 - `ALIYUN_SMS_ENDPOINT` 默认 `dysmsapi.aliyuncs.com`；`ALIYUN_SMS_TEMPLATE_PARAM_NAME` 默认 `code`，对应模板变量 `${code}`。
 - `ALIYUN_SMS_HTTP_TIMEOUT` 默认 `3s`，SDK 自动重试关闭，避免验证码超时重试导致重复短信。
 
@@ -134,12 +135,12 @@ FRONT_IP=64.90.19.251 ./apply-origin-firewall.sh
 
 ## 首启 activation-only 激活接口
 
-Electron 受限激活页不要求手机号登录，直接提交交付卡上的用户名和激活码：
+Electron 受限激活页提交手机号、验证码和激活码。当前验收版验证码固定为 `123456`：
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8080/v1/activations \
   -H 'Content-Type: application/json' \
-  -d '{"username":"UCLAW-BIANCHENG","activationCode":"ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","usbFingerprintSummary":"PREVIEW-ONLY","idempotencyKey":"local-dev-1"}'
+  -d '{"phone":"13800138000","smsCode":"123456","activationCode":"ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","usbFingerprintSummary":"PREVIEW-ONLY","idempotencyKey":"local-dev-1"}'
 ```
 
 当前切片返回 `server_bound`、`pending_client_write` 与 `licenseArtifact`。`licenseArtifact` 是 `license.json` 可持久化授权材料，包含 canonical payload 和 Ed25519 signature；客户端会写入授权材料、New API credential、OpenClaw config，读回验证后调用：
