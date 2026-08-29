@@ -75,23 +75,34 @@ go run ./cmd/adminctl activation seed --code ABCD-EFGH-IJKL-MNOP
 https://license.yiyong.me/admin
 ```
 
-后台 API 使用 `ADMIN_TOKEN` Bearer 鉴权；生产环境必须配置 `ADMIN_TOKEN`，并建议在 Caddy/Nginx 再加办公室或 VPN IP allowlist。
+后台使用首次注册 + 登录 session。首次访问时，如果库中还没有管理员账号，页面会显示“首次注册”；生产环境首次注册必须同时填写 `ADMIN_TOKEN` 作为初始化令牌，注册完成后再用账号密码登录。`ADMIN_TOKEN` 仍保留为受限应急 Bearer token，生产环境必须配置，并建议在 Caddy/Nginx 再加办公室或 VPN IP allowlist。
 
 当前最小能力：
 
-- 生成激活码并写入 PostgreSQL 库存；明文只在生成或重发响应中出现一次。
+- 生成激活码并写入 PostgreSQL 库存；新生成和重发的激活码会用 `ADMIN_ENCRYPTION_KEY` 加密保存展示材料，可在后台列表查看和复制。
 - 查询激活码状态、绑定手机号、绑定的 U-Claw 用户 ID。
-- 查询 New API 用户映射、New API user id、base URL 与 token 轮换时间。
+- 查询 New API 用户映射、New API user id、base URL、token 轮换时间，以及最近一次首启激活状态。
 - 禁用未使用激活码。
 - 重发未使用或已禁用激活码：旧码标记为 `reissued`，新码写入同批次库存。
+
+历史手工 seed 的激活码只存 `code_hash`，无法反推明文；后台会显示“旧码不可见”或尾号提示。后续运营应尽量通过后台“生成/重发”创建激活码。
 
 接口：
 
 ```bash
-curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+curl -sS -X POST https://license.yiyong.me/internal/admin/v1/auth/register \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"uclawroot","password":"change-me-now"}'
+
+curl -sS -X POST https://license.yiyong.me/internal/admin/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"uclawroot","password":"change-me-now"}'
+
+curl -H "Authorization: Bearer $ADMIN_SESSION_TOKEN" \
   https://license.yiyong.me/internal/admin/v1/activation-codes
 
-curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+curl -X POST -H "Authorization: Bearer $ADMIN_SESSION_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"count":1,"batchName":"manual","createdBy":"operator"}' \
   https://license.yiyong.me/internal/admin/v1/activation-codes/generate

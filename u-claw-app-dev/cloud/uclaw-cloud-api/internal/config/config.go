@@ -14,6 +14,7 @@ type Config struct {
 	DatabaseURL              string
 	JWTSecret                string
 	AdminToken               string
+	AdminEncryptionKey       string
 	NewAPIAdminBaseURL       string
 	NewAPIAdminToken         string
 	NewAPIClientBaseURL      string
@@ -61,6 +62,7 @@ func Load(getenv Getter) (Config, error) {
 		DatabaseURL:              strings.TrimSpace(getenv("DATABASE_URL")),
 		JWTSecret:                strings.TrimSpace(getenv("JWT_SECRET")),
 		AdminToken:               strings.TrimSpace(getenv("ADMIN_TOKEN")),
+		AdminEncryptionKey:       strings.TrimSpace(getenv("ADMIN_ENCRYPTION_KEY")),
 		NewAPIAdminBaseURL:       strings.TrimRight(strings.TrimSpace(getenv("NEWAPI_ADMIN_BASE_URL")), "/"),
 		NewAPIAdminToken:         strings.TrimSpace(getenv("NEWAPI_ADMIN_TOKEN")),
 		NewAPIClientBaseURL:      strings.TrimRight(withDefault(getenv("NEWAPI_CLIENT_BASE_URL"), "https://api.gmnlee.com/v1"), "/"),
@@ -136,6 +138,9 @@ func (cfg Config) ValidateForServe() error {
 	}
 	if cfg.AdminToken == "" {
 		missing = append(missing, "ADMIN_TOKEN")
+	}
+	if cfg.AdminEncryptionKey == "" {
+		missing = append(missing, "ADMIN_ENCRYPTION_KEY")
 	}
 	if cfg.NewAPIAdminBaseURL == "" {
 		missing = append(missing, "NEWAPI_ADMIN_BASE_URL")

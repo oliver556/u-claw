@@ -11,6 +11,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"uclaw-cloud-api/internal/activation"
+	"uclaw-cloud-api/internal/admin"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/provisioning"
 )
@@ -219,6 +220,32 @@ func TestStoreSeedActivationCodeHashesPrintedCode(t *testing.T) {
 	}
 }
 
+func TestStoreCreateAdminUserLocksBeforeInsert(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	at := time.Date(2026, 8, 29, 8, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("LOCK TABLE admin_users IN EXCLUSIVE MODE")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO admin_users")).
+		WithArgs("uclawroot", "hash", at).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "password_hash", "status", "created_at"}).
+			AddRow(int64(1), "uclawroot", "hash", "active", at))
+	mock.ExpectCommit()
+
+	user, err := store.CreateAdminUser(context.Background(), "uclawroot", "hash", at)
+	if err != nil {
+		t.Fatalf("CreateAdminUser() error = %v", err)
+	}
+	if user.ID != 1 || user.Username != "uclawroot" || user.Status != "active" {
+		t.Fatalf("user = %+v", user)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestStoreSaveNewAPIAccountUpsertsMapping(t *testing.T) {
 	store, mock, cleanup := newMockStore(t)
 	defer cleanup()
@@ -238,6 +265,79 @@ func TestStoreSaveNewAPIAccountUpsertsMapping(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("SaveNewAPIAccount() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestStoreListActivationCodesReturnsCodeAndAccountMapping(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	createdAt := time.Date(2026, 8, 29, 8, 0, 0, 0, time.UTC)
+	boundAt := time.Date(2026, 8, 29, 8, 3, 0, 0, time.UTC)
+	rotatedAt := time.Date(2026, 8, 29, 8, 4, 0, 0, time.UTC)
+	committedAt := time.Date(2026, 8, 29, 8, 5, 0, 0, time.UTC)
+
+	rows := sqlmock.NewRows([]string{
+		"id",
+		"batch_id",
+		"name",
+		"status",
+		"bound_user_id",
+		"bound_phone",
+		"bound_at",
+		"created_at",
+		"expires_at",
+		"code_ciphertext",
+		"code_display_hint",
+		"newapi_user_id",
+		"newapi_username",
+		"newapi_base_url",
+		"token_rotated_at",
+		"activation_id",
+		"stage",
+		"committed_at",
+	}).AddRow(
+		int64(10),
+		int64(3),
+		"验收批次",
+		"bound",
+		int64(42),
+		"15067729715",
+		boundAt,
+		createdAt,
+		nil,
+		"v1:ciphertext",
+		"ABCD",
+		int64(77),
+		"15067729715",
+		"https://newapi.yiyong.me",
+		rotatedAt,
+		"act_123",
+		"committed",
+		committedAt,
+	)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT\n  ac.id")).
+		WithArgs("bound", 20).
+		WillReturnRows(rows)
+
+	codes, err := store.ListActivationCodes(context.Background(), admin.ActivationCodeFilter{Status: "bound", Limit: 20})
+	if err != nil {
+		t.Fatalf("ListActivationCodes() error = %v", err)
+	}
+	if len(codes) != 1 {
+		t.Fatalf("codes length = %d, want 1", len(codes))
+	}
+	code := codes[0]
+	if code.CodeCiphertext != "v1:ciphertext" || code.CodeDisplayHint != "ABCD" || code.BoundPhone != "15067729715" || code.NewAPIUsername != "15067729715" {
+		t.Fatalf("code mapping = %+v", code)
+	}
+	if code.BoundUserID == nil || *code.BoundUserID != 42 || code.NewAPIUserID == nil || *code.NewAPIUserID != 77 {
+		t.Fatalf("code ids = %+v", code)
+	}
+	if code.LatestActivationID != "act_123" || code.LatestActivationStage != "committed" || code.LatestActivationCommit == nil {
+		t.Fatalf("activation detail = %+v", code)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

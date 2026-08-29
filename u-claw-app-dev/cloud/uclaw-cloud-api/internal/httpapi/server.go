@@ -98,12 +98,17 @@ type adminDisableActivationCodeRequest struct {
 	Reason string `json:"reason"`
 }
 
+type adminAuthRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 // NewServer returns the HTTP interface for activation, payment, and health routes.
 func NewServer(cfg config.Config, build BuildInfo) http.Handler {
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, nil),
 		Activation: buildActivationService(cfg, nil),
-		Admin:      buildAdminService(nil),
+		Admin:      buildAdminService(cfg, nil),
 		Usage:      buildUsageService(cfg),
 		Recharge:   buildRechargeService(cfg, nil),
 	})
@@ -114,7 +119,7 @@ func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStor
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, store),
 		Activation: buildActivationService(cfg, store),
-		Admin:      buildAdminService(store),
+		Admin:      buildAdminService(cfg, store),
 		Usage:      buildUsageService(cfg),
 		Recharge:   buildRechargeService(cfg, store),
 	})
@@ -148,8 +153,58 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(adminConsoleHTML))
 	})
+	mux.HandleFunc("GET /internal/admin/v1/auth/setup", func(w http.ResponseWriter, r *http.Request) {
+		if options.Admin == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("admin service is not configured"))
+			return
+		}
+		status, err := options.Admin.SetupStatus(r.Context())
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
+	})
+	mux.HandleFunc("POST /internal/admin/v1/auth/register", func(w http.ResponseWriter, r *http.Request) {
+		if options.Admin == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("admin service is not configured"))
+			return
+		}
+		if err := verifyAdminBootstrap(r, cfg); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		var req adminAuthRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := options.Admin.Register(r.Context(), req.Username, req.Password)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, result)
+	})
+	mux.HandleFunc("POST /internal/admin/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		if options.Admin == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("admin service is not configured"))
+			return
+		}
+		var req adminAuthRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := options.Admin.Login(r.Context(), req.Username, req.Password)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
 	mux.HandleFunc("GET /internal/admin/v1/activation-codes", func(w http.ResponseWriter, r *http.Request) {
-		if err := verifyAdmin(r, cfg); err != nil {
+		if err := verifyAdmin(r, cfg, options.Admin); err != nil {
 			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
@@ -169,7 +224,7 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		writeJSON(w, http.StatusOK, map[string]any{"codes": codes})
 	})
 	mux.HandleFunc("POST /internal/admin/v1/activation-codes/generate", func(w http.ResponseWriter, r *http.Request) {
-		if err := verifyAdmin(r, cfg); err != nil {
+		if err := verifyAdmin(r, cfg, options.Admin); err != nil {
 			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
@@ -195,7 +250,7 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		writeJSON(w, http.StatusCreated, map[string]any{"codes": codes})
 	})
 	mux.HandleFunc("GET /internal/admin/v1/activation-codes/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if err := verifyAdmin(r, cfg); err != nil {
+		if err := verifyAdmin(r, cfg, options.Admin); err != nil {
 			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
@@ -216,7 +271,7 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		writeJSON(w, http.StatusOK, map[string]any{"code": code})
 	})
 	mux.HandleFunc("POST /internal/admin/v1/activation-codes/{id}/disable", func(w http.ResponseWriter, r *http.Request) {
-		if err := verifyAdmin(r, cfg); err != nil {
+		if err := verifyAdmin(r, cfg, options.Admin); err != nil {
 			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
@@ -241,7 +296,7 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("POST /internal/admin/v1/activation-codes/{id}/reissue", func(w http.ResponseWriter, r *http.Request) {
-		if err := verifyAdmin(r, cfg); err != nil {
+		if err := verifyAdmin(r, cfg, options.Admin); err != nil {
 			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
@@ -521,11 +576,11 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 }
 
 // buildAdminService creates the protected operational admin service.
-func buildAdminService(store admin.Store) *admin.Service {
+func buildAdminService(cfg config.Config, store admin.Store) *admin.Service {
 	if store == nil {
 		store = admin.NewMemoryStore()
 	}
-	service, err := admin.NewService(store)
+	service, err := admin.NewService(store, admin.Config{EncryptionKey: cfg.AdminEncryptionKey})
 	if err != nil {
 		panic(fmt.Sprintf("build admin service: %v", err))
 	}
@@ -665,20 +720,41 @@ func buildRechargeService(cfg config.Config, store recharge.Store) *recharge.Ser
 	return service
 }
 
-// verifyAdmin validates the admin console bearer token without logging secrets.
-func verifyAdmin(r *http.Request, cfg config.Config) error {
-	expected := strings.TrimSpace(cfg.AdminToken)
-	if expected == "" {
-		return fmt.Errorf("admin token is not configured")
-	}
+// verifyAdmin validates either a session bearer token or the legacy emergency token.
+func verifyAdmin(r *http.Request, cfg config.Config, service *admin.Service) error {
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {
 		return fmt.Errorf("authorization bearer token is required")
 	}
 	actual := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	expected := strings.TrimSpace(cfg.AdminToken)
+	if expected != "" && subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) == 1 {
+		return nil
+	}
+	if service == nil {
+		return fmt.Errorf("admin service is not configured")
+	}
+	if _, err := service.VerifySession(r.Context(), actual); err != nil {
+		return err
+	}
+	return nil
+}
+
+// verifyAdminBootstrap requires the legacy admin token before creating the first session when configured.
+func verifyAdminBootstrap(r *http.Request, cfg config.Config) error {
+	expected := strings.TrimSpace(cfg.AdminToken)
+	if expected == "" {
+		return nil
+	}
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return fmt.Errorf("admin bootstrap token is required")
+	}
+	actual := strings.TrimSpace(strings.TrimPrefix(header, prefix))
 	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
-		return fmt.Errorf("authorization bearer token is invalid")
+		return fmt.Errorf("admin bootstrap token is invalid")
 	}
 	return nil
 }

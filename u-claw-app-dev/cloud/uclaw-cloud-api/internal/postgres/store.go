@@ -302,6 +302,103 @@ ON CONFLICT (code_hash) DO NOTHING
 	return nil
 }
 
+// CountAdminUsers reports whether first-admin registration remains open.
+func (s *Store) CountAdminUsers(ctx context.Context) (int64, error) {
+	var count int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_users`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count admin users: %w", err)
+	}
+	return count, nil
+}
+
+// CreateAdminUser inserts an active operator account.
+func (s *Store) CreateAdminUser(ctx context.Context, username string, passwordHash string, at time.Time) (admin.AdminUser, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return admin.AdminUser{}, fmt.Errorf("begin create admin user: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.ExecContext(ctx, `LOCK TABLE admin_users IN EXCLUSIVE MODE`); err != nil {
+		return admin.AdminUser{}, fmt.Errorf("lock admin users: %w", err)
+	}
+
+	var user admin.AdminUser
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO admin_users (username, password_hash, status, created_at, updated_at)
+SELECT $1, $2, 'active', $3, $3
+WHERE NOT EXISTS (SELECT 1 FROM admin_users)
+RETURNING id, username, password_hash, status, created_at
+`, username, passwordHash, at).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Status, &user.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return admin.AdminUser{}, fmt.Errorf("admin registration is closed")
+		}
+		return admin.AdminUser{}, fmt.Errorf("create admin user: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return admin.AdminUser{}, fmt.Errorf("commit create admin user: %w", err)
+	}
+	committed = true
+	return user, nil
+}
+
+// GetAdminUserByUsername returns an operator account for password verification.
+func (s *Store) GetAdminUserByUsername(ctx context.Context, username string) (admin.AdminUser, error) {
+	var user admin.AdminUser
+	err := s.db.QueryRowContext(ctx, `
+SELECT id, username, password_hash, status, created_at
+FROM admin_users
+WHERE username = $1
+`, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Status, &user.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return admin.AdminUser{}, fmt.Errorf("admin user not found")
+		}
+		return admin.AdminUser{}, fmt.Errorf("get admin user: %w", err)
+	}
+	return user, nil
+}
+
+// CreateAdminSession stores a hashed operator session token.
+func (s *Store) CreateAdminSession(ctx context.Context, userID int64, tokenHash string, expiresAt time.Time, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO admin_sessions (admin_user_id, token_hash, expires_at, created_at, last_seen_at)
+VALUES ($1, $2, $3, $4, $4)
+`, userID, tokenHash, expiresAt, at)
+	if err != nil {
+		return fmt.Errorf("create admin session: %w", err)
+	}
+	return nil
+}
+
+// GetAdminSession returns a live operator session and touches last_seen_at.
+func (s *Store) GetAdminSession(ctx context.Context, tokenHash string, at time.Time) (admin.AdminSession, error) {
+	var session admin.AdminSession
+	err := s.db.QueryRowContext(ctx, `
+UPDATE admin_sessions s
+SET last_seen_at = $2
+FROM admin_users u
+WHERE s.admin_user_id = u.id
+  AND s.token_hash = $1
+  AND s.expires_at > $2
+  AND u.status = 'active'
+RETURNING s.admin_user_id, u.username, s.expires_at
+`, tokenHash, at).Scan(&session.UserID, &session.Username, &session.ExpiresAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return admin.AdminSession{}, fmt.Errorf("admin session is invalid")
+		}
+		return admin.AdminSession{}, fmt.Errorf("get admin session: %w", err)
+	}
+	return session, nil
+}
+
 // CreateActivationBatch creates a labeled group for operator-generated codes.
 func (s *Store) CreateActivationBatch(ctx context.Context, name string, note string, createdBy string) (int64, error) {
 	name = strings.TrimSpace(name)
@@ -321,13 +418,13 @@ RETURNING id
 }
 
 // CreateActivationCode inserts one generated code and returns its redacted row.
-func (s *Store) CreateActivationCode(ctx context.Context, code string, batchID sql.NullInt64, at time.Time) (admin.ActivationCode, error) {
+func (s *Store) CreateActivationCode(ctx context.Context, code admin.ActivationCodeSecret, batchID sql.NullInt64, at time.Time) (admin.ActivationCode, error) {
 	var row activationCodeRow
 	err := s.db.QueryRowContext(ctx, `
-INSERT INTO activation_codes (batch_id, code_hash, status, created_at)
-VALUES ($1, $2, 'unused', $3)
-RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at
-`, batchID, s.activationCodeHash(code), at).Scan(
+INSERT INTO activation_codes (batch_id, code_hash, code_ciphertext, code_display_hint, status, created_at)
+VALUES ($1, $2, $3, $4, 'unused', $5)
+RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at, code_ciphertext, code_display_hint
+`, batchID, s.activationCodeHash(code.Code), code.Ciphertext, code.DisplayHint, at).Scan(
 		&row.ID,
 		&row.BatchID,
 		&row.Status,
@@ -336,6 +433,8 @@ RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at
 		&row.BoundAt,
 		&row.CreatedAt,
 		&row.ExpiresAt,
+		&row.CodeCiphertext,
+		&row.CodeDisplayHint,
 	)
 	if err != nil {
 		return admin.ActivationCode{}, fmt.Errorf("create activation code: %w", err)
@@ -361,6 +460,8 @@ SELECT
   ac.bound_at,
   ac.created_at,
   ac.expires_at,
+  ac.code_ciphertext,
+  ac.code_display_hint,
   na.newapi_user_id,
   COALESCE(na.newapi_username, ''),
   COALESCE(na.newapi_base_url, ''),
@@ -415,6 +516,8 @@ SELECT
   ac.bound_at,
   ac.created_at,
   ac.expires_at,
+  ac.code_ciphertext,
+  ac.code_display_hint,
   na.newapi_user_id,
   COALESCE(na.newapi_username, ''),
   COALESCE(na.newapi_base_url, ''),
@@ -443,6 +546,8 @@ WHERE ac.id = $1
 		&row.BoundAt,
 		&row.CreatedAt,
 		&row.ExpiresAt,
+		&row.CodeCiphertext,
+		&row.CodeDisplayHint,
 		&row.NewAPIUserID,
 		&row.NewAPIUsername,
 		&row.NewAPIBaseURL,
@@ -482,7 +587,7 @@ WHERE id = $1 AND status IN ('unused', 'disabled')
 }
 
 // ReissueActivationCode atomically retires an unused code and creates a replacement.
-func (s *Store) ReissueActivationCode(ctx context.Context, id int64, replacementCode string, at time.Time) (admin.ActivationCode, error) {
+func (s *Store) ReissueActivationCode(ctx context.Context, id int64, replacementCode admin.ActivationCodeSecret, at time.Time) (admin.ActivationCode, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return admin.ActivationCode{}, fmt.Errorf("begin reissue activation code: %w", err)
@@ -510,10 +615,10 @@ RETURNING batch_id
 
 	var row activationCodeRow
 	err = tx.QueryRowContext(ctx, `
-INSERT INTO activation_codes (batch_id, code_hash, status, created_at)
-VALUES ($1, $2, 'unused', $3)
-RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at
-`, batchID, s.activationCodeHash(replacementCode), at).Scan(
+INSERT INTO activation_codes (batch_id, code_hash, code_ciphertext, code_display_hint, status, created_at)
+VALUES ($1, $2, $3, $4, 'unused', $5)
+RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at, code_ciphertext, code_display_hint
+`, batchID, s.activationCodeHash(replacementCode.Code), replacementCode.Ciphertext, replacementCode.DisplayHint, at).Scan(
 		&row.ID,
 		&row.BatchID,
 		&row.Status,
@@ -522,6 +627,8 @@ RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at
 		&row.BoundAt,
 		&row.CreatedAt,
 		&row.ExpiresAt,
+		&row.CodeCiphertext,
+		&row.CodeDisplayHint,
 	)
 	if err != nil {
 		return admin.ActivationCode{}, fmt.Errorf("insert replacement activation code: %w", err)
@@ -541,14 +648,16 @@ func (s *Store) activationCodeHash(code string) string {
 }
 
 type activationCodeRow struct {
-	ID          int64
-	BatchID     sql.NullInt64
-	Status      string
-	BoundUserID sql.NullInt64
-	BoundPhone  sql.NullString
-	BoundAt     sql.NullTime
-	CreatedAt   time.Time
-	ExpiresAt   sql.NullTime
+	ID              int64
+	BatchID         sql.NullInt64
+	Status          string
+	BoundUserID     sql.NullInt64
+	BoundPhone      sql.NullString
+	BoundAt         sql.NullTime
+	CreatedAt       time.Time
+	ExpiresAt       sql.NullTime
+	CodeCiphertext  sql.NullString
+	CodeDisplayHint sql.NullString
 }
 
 type activationCodeViewRow struct {
@@ -580,6 +689,8 @@ func scanActivationCodeView(scanner activationCodeRowScanner) (activationCodeVie
 		&row.BoundAt,
 		&row.CreatedAt,
 		&row.ExpiresAt,
+		&row.CodeCiphertext,
+		&row.CodeDisplayHint,
 		&row.NewAPIUserID,
 		&row.NewAPIUsername,
 		&row.NewAPIBaseURL,
@@ -615,6 +726,12 @@ func (row activationCodeRow) toAdminRecord() admin.ActivationCode {
 	}
 	if row.ExpiresAt.Valid {
 		record.ExpiresAt = &row.ExpiresAt.Time
+	}
+	if row.CodeCiphertext.Valid {
+		record.CodeCiphertext = row.CodeCiphertext.String
+	}
+	if row.CodeDisplayHint.Valid {
+		record.CodeDisplayHint = row.CodeDisplayHint.String
 	}
 	return record
 }
