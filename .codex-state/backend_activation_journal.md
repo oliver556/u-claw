@@ -165,3 +165,11 @@
 - Files changed: `docs/多人开发/U-Claw官方激活与NewAPI计费架构方案.md`, `u-claw-app-dev/cloud/uclaw-cloud-api/README.md`, `.codex-state/backend_activation_progress.md`。
 - Commands run: `rg` 文档定位与敏感词检查、`git diff --check`。
 - Next: 继续支付宝当面付接入：AppID、公钥/证书、私钥文件路径、`notify_url` 确认后实现 adapter。
+
+## 2026-08-29 22:25
+
+- Did: 修复模型页使用流水混入 New API 登录审计日志的问题，后端 `usage.buildSummary` 过滤认证/登录噪声，UI 验收脚本加入泄漏断言。
+- Result: `Logged in successfully via password` 不再进入 usage records，也不会计入今日/近 7 天用量；模型页 E2E 未再检出该文案。
+- Files changed: `u-claw-app-dev/cloud/uclaw-cloud-api/internal/usage/service.go`, `internal/usage/service_test.go`, `u-claw-app-dev/scripts/verify-cloud-model-usage-ui.js`, `.codex-state/backend_activation_progress.md`。
+- Commands run: `go test ./internal/usage`, `go test ./internal/usage ./internal/httpapi`, `go test ./...`, `node scripts/verify-cloud-model-usage-ui.js`, `git diff --check`。
+- Next: 继续支付宝当面付接入：实现官方下单 adapter、验签回调和订单查询补偿。

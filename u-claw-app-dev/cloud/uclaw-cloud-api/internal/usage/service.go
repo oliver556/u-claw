@@ -11,7 +11,7 @@ import (
 	"uclaw-cloud-api/internal/provisioning"
 )
 
-// Config controls how U-Claw reads user-facing New API balance and usage data.
+// Config controls how Bavi-box reads user-facing New API balance and usage data.
 type Config struct {
 	PasswordSecret string
 	PageSize       int
@@ -24,7 +24,7 @@ type Service struct {
 	now   func() time.Time
 }
 
-// SummaryRequest identifies the authenticated U-Claw user whose New API data should be read.
+// SummaryRequest identifies the authenticated Bavi-box user whose New API data should be read.
 type SummaryRequest struct {
 	UserID int64
 	Phone  string
@@ -125,6 +125,9 @@ func (s *Service) buildSummary(self newapi.SelfUser, items []newapi.LogItem) Sum
 	var last7DaysUsage int64
 	records := make([]Record, 0, len(items))
 	for _, item := range items {
+		if !isUserFacingUsageLog(item) {
+			continue
+		}
 		createdAt := time.Unix(item.CreatedAt, 0).In(now.Location())
 		if !createdAt.Before(dayStart) {
 			todayUsage += item.Quota
@@ -171,4 +174,32 @@ func (s *Service) buildSummary(self newapi.SelfUser, items []newapi.LogItem) Sum
 		RefreshedAt:           now.UTC().Format(time.RFC3339),
 		Unit:                  "quota",
 	}
+}
+
+// isUserFacingUsageLog keeps billable model activity and hides New API account noise.
+func isUserFacingUsageLog(item newapi.LogItem) bool {
+	if isAuthenticationLog(item) {
+		return false
+	}
+	return strings.TrimSpace(item.ModelName) != "" ||
+		strings.TrimSpace(item.TokenName) != "" ||
+		item.TokenID > 0 ||
+		item.Quota != 0 ||
+		item.PromptTokens != 0 ||
+		item.CompletionTokens != 0 ||
+		item.UseTime != 0
+}
+
+// isAuthenticationLog detects New API login events leaked through /api/log/self.
+func isAuthenticationLog(item newapi.LogItem) bool {
+	content := strings.ToLower(strings.TrimSpace(item.Content))
+	if content == "" {
+		return false
+	}
+	if !strings.Contains(content, "logged in successfully") && !strings.Contains(content, "login") {
+		return false
+	}
+	return strings.TrimSpace(item.ModelName) == "" &&
+		strings.TrimSpace(item.TokenName) == "" &&
+		item.TokenID == 0
 }

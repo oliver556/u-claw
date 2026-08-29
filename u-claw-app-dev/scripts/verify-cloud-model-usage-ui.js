@@ -250,6 +250,15 @@ async function assertElectronModelUsageUI(expectedInitialBalance, rechargeQuota)
     cdp.close();
     throw new Error(`model usage UI did not show initial cloud data:\n${bodyText.slice(0, 2000)}`);
   }
+  const leakedLoginLog = await evalJS(`(() => {
+    const text = document.body.innerText || '';
+    return text.includes('Logged in successfully via password');
+  })()`);
+  if (leakedLoginLog) {
+    const bodyText = await evalJS('document.body.innerText || ""');
+    cdp.close();
+    throw new Error(`New API login log leaked into usage UI:\n${bodyText.slice(0, 2000)}`);
+  }
   const openedRecharge = await evalJS(`(() => {
     const button = [...document.querySelectorAll('button')]
       .find((node) => (node.textContent || '').trim() === '充值' && !node.disabled);

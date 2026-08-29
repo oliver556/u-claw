@@ -21,10 +21,11 @@
 - [x] Wire model page recharge button to virtual order callback and refreshed balance
 - [x] Add recharge plan picker and recharge records UI
 - [x] Add payment provider catalog and official checkout seam
+- [x] Filter New API login audit rows from model usage ledger
 
 ### Current status
-- Current step: 官方支付 checkout seam 完成，等待真实 Alipay/WeChat SDK adapter
-- Last completed: 后端新增 `/v1/recharge/providers`，充值服务支持 `virtual`、`alipay`、`wechat` provider；官方 provider 未配置 adapter 时拒绝创建订单，配置后返回 `payUrl`/`qrCodeUrl`。
+- Current step: 模型页 usage ledger 噪声过滤完成，等待真实 Alipay/WeChat SDK adapter
+- Last completed: 后端过滤 New API `/api/log/self` 返回的登录/认证审计日志，避免 `Logged in successfully via password` 出现在使用流水。
 - Next action: 接 Alipay/WeChat 官方 SDK 下单、客户端支付跳转/二维码、验签回调与补偿 worker。
 
 ### Notes
@@ -58,3 +59,5 @@
 - 最新充值 UI 验证通过：`node scripts/verify-cloud-model-usage-ui.js` 已覆盖套餐弹窗、确认充值、记录弹窗；截图 `/tmp/uclaw-model-usage-ui.png`。
 - 官方支付 seam 覆盖：`GET /v1/recharge/providers` 需 Bearer；`alipay/wechat` 未配置时不可下单；checkout adapter seam 有单测保护。
 - 生产服务器拓扑已记录到 PRD/README：阿里云激活机、香港 New API 前置机、OVH New API/sub2api 源站；root 密码不入库，正式上线前必须轮换并改 SSH key。
+- New API usage ledger 仅展示用户可理解的模型消耗记录；登录认证审计行已在 `internal/usage` 过滤，不进入金额/用量统计。
+- 最新验证通过：`go test ./...`、`node scripts/verify-cloud-model-usage-ui.js`、`git diff --check`。

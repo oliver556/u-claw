@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,16 +43,17 @@ func TestGetSummaryLogsInAndAggregatesUsage(t *testing.T) {
 			_, _ = w.Write([]byte(`{"success":true,"data":{"id":9,"username":"13800138000","quota":100000,"used_quota":300,"request_count":12}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/log/self":
 			sawLogs = true
-			if r.URL.Query().Get("p") != "0" || r.URL.Query().Get("page_size") != "3" {
+			if r.URL.Query().Get("p") != "0" || r.URL.Query().Get("page_size") != "4" {
 				t.Fatalf("query = %q", r.URL.RawQuery)
 			}
 			today := now.Add(-1 * time.Hour).Unix()
 			recent := now.AddDate(0, 0, -3).Unix()
 			old := now.AddDate(0, 0, -9).Unix()
-			_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":3,"total":3,"items":[` +
+			_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":4,"total":4,"items":[` +
 				`{"id":1,"created_at":` + itoa(today) + `,"type":2,"content":"consume","model_name":"gpt-5.5","quota":100,"prompt_tokens":10,"completion_tokens":20,"request_id":"req_today"},` +
-				`{"id":2,"created_at":` + itoa(recent) + `,"type":2,"model_name":"gpt-image-2","quota":200},` +
-				`{"id":3,"created_at":` + itoa(old) + `,"type":7,"content":"login","quota":999}` +
+				`{"id":2,"created_at":` + itoa(today) + `,"type":1,"content":"Logged in successfully via password","quota":0},` +
+				`{"id":3,"created_at":` + itoa(recent) + `,"type":2,"model_name":"gpt-image-2","quota":200},` +
+				`{"id":4,"created_at":` + itoa(old) + `,"type":7,"content":"login","quota":999}` +
 				`]}}`))
 		default:
 			http.NotFound(w, r)
@@ -63,7 +65,7 @@ func TestGetSummaryLogsInAndAggregatesUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
-	service, err := NewService(admin, Config{PasswordSecret: secret, PageSize: 3})
+	service, err := NewService(admin, Config{PasswordSecret: secret, PageSize: 4})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -91,8 +93,13 @@ func TestGetSummaryLogsInAndAggregatesUsage(t *testing.T) {
 	if summary.NewAPIQuotaPerCNY != 500000 || summary.ComputeUnitsPerCNY != 60000000 {
 		t.Fatalf("summary conversion = %+v", summary)
 	}
-	if len(summary.Records) != 3 || summary.Records[0].RequestID != "req_today" {
+	if len(summary.Records) != 2 || summary.Records[0].RequestID != "req_today" {
 		t.Fatalf("records = %+v", summary.Records)
+	}
+	for _, record := range summary.Records {
+		if strings.Contains(record.Content, "Logged in successfully") || record.Content == "login" {
+			t.Fatalf("authentication log leaked into usage records: %+v", record)
+		}
 	}
 	if summary.Records[0].Compute != 12000 {
 		t.Fatalf("record compute = %+v", summary.Records[0])
