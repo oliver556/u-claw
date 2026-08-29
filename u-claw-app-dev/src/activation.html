@@ -304,7 +304,7 @@
             <div class="success-seal">✓</div>
             <span class="status-kicker success">授权材料已写入</span>
             <h1>U-Claw 首次激活完成</h1>
-            <p>已完成云端绑定和本地授权写盘。重新启动后，U-Claw 会执行完整授权检查并进入主界面。</p>
+            <p>已完成云端绑定和本地授权写盘。继续后，U-Claw 会启动本地服务并进入主界面。</p>
             <div class="ready-card">
               <div class="ready-line"><span class="success-seal" style="width:34px;height:34px;margin:0;font-size:16px;box-shadow:none;">✓</span><span><strong>激活验证已完成</strong><small id="finishDetail">已完成云端绑定和本地授权写盘。</small></span></div>
               <dl><div><dt>激活账号</dt><dd id="finishPhone">--</dd></div><div><dt>产品盘</dt><dd id="finishDisk">静态预览</dd></div><div><dt>授权材料</dt><dd>已写入</dd></div></dl>
@@ -330,7 +330,7 @@
     let current = 'notice';
     let checksDone = false;
     let preflight = null;
-    let restartReady = false;
+    let launchReady = false;
     let toastTimer;
 
     const $ = (selector) => document.querySelector(selector);
@@ -367,7 +367,7 @@
       $$('.screen').forEach((screen) => screen.classList.toggle('active', screen.id === `screen-${name}`));
       updateSteps();
       $('#backButton').hidden = name === 'notice' || name === 'finish';
-      $('#nextButton').hidden = name === 'finish' && !restartReady;
+      $('#nextButton').hidden = name === 'finish' && !launchReady;
       if (name === 'notice') {
         $('#nextButton').disabled = !$('#noticeAck').checked;
         $('#nextButton').innerHTML = '继续 <span class="arrow">→</span>';
@@ -382,9 +382,9 @@
         $('#nextButton').disabled = false;
         $('#nextButton').innerHTML = '激活并绑定 <span class="arrow">→</span>';
       }
-      if (name === 'finish' && restartReady) {
+      if (name === 'finish' && launchReady) {
         $('#nextButton').disabled = false;
-        $('#nextButton').innerHTML = '完成并重启 <span class="arrow">→</span>';
+        $('#nextButton').innerHTML = '进入 U-Claw <span class="arrow">→</span>';
       }
     }
 
@@ -539,25 +539,26 @@
       $('#finishDetail').textContent = `${result.code || 'ACTIVATION_PENDING'}：${result.message || '等待后续切片接入。'}`;
       $('#finishPhone').textContent = result.phoneMasked || result.usernameMasked || $('#phone').value.trim();
       $('#finishDisk').textContent = preflight?.usb?.label || '静态预览';
-      restartReady = result.restartRequired === true;
+      launchReady = result.launchReady === true || result.restartRequired === true;
       setScreen('finish');
       showToast(result.message || '激活服务尚未接入', result.ok ? '' : 'error');
     }
 
     /**
-     * Asks the trusted main process to exit with the activation restart code.
+     * Asks the trusted main process to start the normal U-Claw runtime.
      */
-    async function completeActivation() {
+    async function launchMain() {
       $('#nextButton').disabled = true;
-      $('#nextButton').textContent = '正在重启...';
+      $('#nextButton').textContent = '正在进入...';
       try {
-        const result = await window.uclawActivation.completeActivation();
-        if (!result.ok) throw new Error(result.message || '重启交接失败');
-        showToast('正在重新进入 U-Claw');
+        const launcher = window.uclawActivation.launchMain || window.uclawActivation.completeActivation;
+        const result = await launcher();
+        if (!result.ok) throw new Error(result.message || '进入主界面失败');
+        showToast('正在进入 U-Claw');
       } catch (error) {
         $('#nextButton').disabled = false;
-        $('#nextButton').innerHTML = '完成并重启 <span class="arrow">→</span>';
-        showToast(error.message || '重启交接失败', 'error');
+        $('#nextButton').innerHTML = '进入 U-Claw <span class="arrow">→</span>';
+        showToast(error.message || '进入主界面失败', 'error');
       }
     }
 
@@ -571,7 +572,7 @@
         return runChecks();
       }
       if (current === 'activate') return submitActivation();
-      if (current === 'finish' && restartReady) return completeActivation();
+      if (current === 'finish' && launchReady) return launchMain();
     });
     $('#backButton').addEventListener('click', () => {
       const index = order.indexOf(current);

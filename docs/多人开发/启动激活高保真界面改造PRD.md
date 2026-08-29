@@ -182,7 +182,7 @@ activation-server/
 - Successful activation response is handed to a privileged write helper. Renderer never writes license files directly.
 - Write helper atomically writes `.uclaw/license/.startup-credential.json`, `.uclaw/license/license.json`, and `.uclaw/builtin-model-credential.v1.json`, then reads back and verifies.
 - Client calls `POST /v1/activations/{activationId}/commit` only after all key files are written and verified.
-- After success, Electron activation-only window exits with `ACTIVATION_RESTART_EXIT_CODE=20`. Launcher syncs runtime data back to the product USB, restarts from the normal startup gate, then opens normal U-Claw.
+- After success, the activation window stays in the same Electron process, creates a normal U-Claw window, starts Config server / Video adapter / OpenClaw Gateway, and opens the normal workspace. Legacy launcher exit code `20` remains only for old-package compatibility.
 - Portable sync must include activated `.openclaw/openclaw.json`, `.openclaw/license/license.json`, `.openclaw/builtin-model-credential.v1.json`, and `.openclaw/uclaw-activation.json` so another computer can skip first activation.
 - Existing Config.html remains available after normal startup for model/provider configuration. Activation page may show model service status only when backed by real activation/New API status.
 - The “Gateway 与模型连接” item in the static design should be renamed or re-scoped in production to “Gateway 启动条件 / 内嵌模型服务状态”; it must not start Gateway before authorization.
@@ -218,7 +218,7 @@ Acceptance:
 ### Phase 2: Electron Restricted Mode and IPC
 
 - Add activation-only main process mode.
-- Register a minimal IPC allowlist: get preflight, run/retry preflight, submit activation, write-and-verify, commit result, close/restart.
+- Register a minimal IPC allowlist: get preflight, run/retry preflight, submit activation, write-and-verify, commit result, launch main workspace.
 - Disable or avoid normal IPC: `open-config`, dashboard load, Gateway startup, OpenClaw token, model config server, and arbitrary file access.
 - Add fixed user-facing error mapping.
 
@@ -328,6 +328,6 @@ Acceptance:
 - Cloud API staging 已通过 `license.yiyong.me` 公网首启激活和 commit 验收。
 - Electron activation-only 页面已改为当前验收流程：真实手机号 + 固定验证码 `123456` + 激活码；阿里云短信审核完成后替换固定码 provider。
 - 客户端已完成真实写盘闭环：`POST /v1/activations`、原子写入授权材料、写入 OpenClaw New API config、读回验证、`POST /v1/activations/{activationId}/commit`。
-- 便携 Launcher 已定稿生产 endpoint 注入、退出码 20 重启交接和授权后 `openclaw.json` 回写 U 盘同步规则。
+- 便携 Launcher 已定稿生产 endpoint 注入、授权后 `openclaw.json` 回写 U 盘同步规则；首启完成后客户端改为同进程进入主界面，退出码 20 仅保留旧包兼容。
 - 阿里云短信接口仍保留，当前运营商回执为 `PORT_NOT_REGISTERED`，待审核完成后复验；该问题不阻塞首启激活。
 - 支付和充值 UI 暂缓，不作为当前验收阻塞项。

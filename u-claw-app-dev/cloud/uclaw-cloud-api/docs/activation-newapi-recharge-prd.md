@@ -74,7 +74,7 @@ product/activation-server
 - `POST /v1/recharge/orders`
 - `POST /v1/payments/virtual/notify`
 - `GET /v1/recharge/orders/{orderNo}`
-- Electron activation-only 首启客户端已切到 `POST /v1/activations`；当前提交手机号、固定验证码和激活码，客户端会写入本地授权材料与 OpenClaw New API 配置，读回验证成功后调用 `/v1/activations/{activationId}/commit`，随后以退出码 20 交给 Launcher 重启进入正常工作台。
+- Electron activation-only 首启客户端已切到 `POST /v1/activations`；当前提交手机号、固定验证码和激活码，客户端会写入本地授权材料与 OpenClaw New API 配置，读回验证成功后调用 `/v1/activations/{activationId}/commit`，随后在同一 Electron 进程内启动正常 U-Claw 工作台，避免用户看到窗口关闭。
 
 本切片的充值先用 `virtual` provider。虚拟回调成功后立即触发 New API `POST /api/user/manage` 加 quota，并通过订单状态机保证同一订单不会重复加额度。
 
@@ -185,7 +185,7 @@ DEV_SMS_CODE=123456
 - 激活码展示：历史 seed 码只存 hash，不能反推明文；后台生成/重发的新码使用 `ADMIN_ENCRYPTION_KEY` 加密保存展示材料，列表可查看和复制。
 
 当前已完成 New API / sub2api 源站、前置反代、New API Root 管理员和 U-Claw Cloud API staging 部署；`NEWAPI_ADMIN_TOKEN` 与 `NEWAPI_ADMIN_USERNAME/PASSWORD` 已写入阿里云 staging 受限 env。New API admin token 过期时，Cloud API 使用管理员账号重新登录并在内存中刷新 token，然后重试原请求一次。`license.yiyong.me` 已把新激活相关路径切到 Cloud API staging，并完成公网首启激活验收。
-客户端侧已完成首启真实写盘闭环：手机号 + 固定验证码 + 激活码提交、`licenseArtifact` 写入、New API credential 写入、OpenClaw config 写入、读回验证、commit、完成页重启交接。便携启动脚本默认注入 `https://license.yiyong.me`，并允许授权后的 `openclaw.json` 同步回 U 盘。
+客户端侧已完成首启真实写盘闭环：手机号 + 固定验证码 + 激活码提交、`licenseArtifact` 写入、New API credential 写入、OpenClaw config 写入、读回验证、commit、完成页直接进入主界面。便携启动脚本默认注入 `https://license.yiyong.me`，并允许授权后的 `openclaw.json` 同步回 U 盘。
 
 ## 验收标准
 
@@ -194,7 +194,7 @@ DEV_SMS_CODE=123456
 - `deploy/scripts/activation-local-e2e.sh` 可完成：短信登录、激活、创建 New API token、查询余额、创建虚拟充值订单、虚拟回调、余额增加。
 - U-Claw 客户端模型页进入时能看到 New API 余额、今日用量、近 7 天和流水。
 - activation-only 客户端提交手机号、固定验证码和激活码后，本地生成 `.openclaw/license/license.json`、`.openclaw/builtin-model-credential.v1.json`、`.openclaw/uclaw-activation.json`，并写入 `.openclaw/openclaw.json` 的 New API provider 配置。
-- 完成页点击“完成并重启”后，Electron 以退出码 20 退出；Launcher 完成 runtime-to-USB sync 后重新执行正常 startup gate。
+- 完成页点击“进入 U-Claw”后，Electron 在同一进程内启动 Config server、Video adapter、OpenClaw Gateway，并加载正常工作台；退出码 20 仅保留为旧包兼容路径。
 
 ## 当前部署盘点
 
@@ -202,7 +202,7 @@ DEV_SMS_CODE=123456
 - `64.90.19.251`：已安装 Nginx/Certbot；`newapi.yiyong.me`、`sub2api.yiyong.me` HTTPS 证书有效；公网 `/v1` 可达，管理面非授权来源 `403`。
 - `158.51.110.49`：已安装 1Panel v2.2.5、Docker 与 Compose；New API、sub2api、PostgreSQL、Redis 均已启动，源站 `3000/8080` 已用 `DOCKER-USER` allowlist 限制只允许前置访问。
 - Aliyun SMS：`SendSms` API 已受理；`QuerySendDetails` 回执 `PORT_NOT_REGISTERED`，待短信签名/端口实名报备审核完成后再复验，当前暂不阻塞主线。
-- Electron activation-only：已通过本地 stub 驱动的真实页面写盘和退出码 20 重启交接验收；短信待审核期间按真实手机号 + 固定验证码 `123456` + 激活码完成首启。
+- Electron activation-only：已通过本地 stub 驱动的真实页面写盘和同进程进入主界面验收；短信待审核期间按真实手机号 + 固定验证码 `123456` + 激活码完成首启。
 
 ## 后续待办
 

@@ -19,7 +19,6 @@ const activationID = 'act_electron_write_001';
 const phone = '13800138000';
 const smsCode = '123456';
 const activationCode = 'ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ';
-const activationRestartExitCode = 20;
 const newapiToken = 'electron-write-token';
 const accessToken = 'electron-access-token';
 const newapiBaseUrl = 'https://newapi.yiyong.me/v1';
@@ -34,17 +33,13 @@ function sleep(ms) {
 }
 
 /**
- * Waits for the Electron child to hand control back to the launcher contract.
+ * Fails when Electron exits during the activation-to-main transition.
  */
-function waitForChildExit(child, timeoutMs = 10000) {
-  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Timed out waiting for activation restart exit')), timeoutMs);
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      resolve(code);
-    });
-  });
+async function assertChildStillRunning(child, timeoutMs = 1500) {
+  await sleep(timeoutMs);
+  if (child.exitCode !== null) {
+    throw new Error(`activation-to-main transition exited with ${child.exitCode}; app should stay open`);
+  }
 }
 
 /**
@@ -248,8 +243,8 @@ async function driveActivationPage() {
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`document.body.innerText.includes('U-Claw 首次激活完成') && document.body.innerText.includes('ACTIVATION_CLOUD_COMPLETE')`);
     if (ok) {
-      const restartButtonReady = await evalJS(`document.querySelector('#nextButton').textContent.includes('完成并重启') && !document.querySelector('#nextButton').hidden`);
-      if (!restartButtonReady) throw new Error('activation finish restart button is not ready');
+      const launchButtonReady = await evalJS(`document.querySelector('#nextButton').textContent.includes('进入 U-Claw') && !document.querySelector('#nextButton').hidden`);
+      if (!launchButtonReady) throw new Error('activation finish launch button is not ready');
       fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
       fs.writeFileSync(screenshotPath, Buffer.from(shot.data, 'base64'));
@@ -331,10 +326,7 @@ function cleanup(server) {
     });
     children.push(child);
     await driveActivationPage();
-    const exitCode = await waitForChildExit(child);
-    if (exitCode !== activationRestartExitCode) {
-      throw new Error(`activation handoff exited with ${exitCode}, expected ${activationRestartExitCode}`);
-    }
+    await assertChildStillRunning(child);
     verifyLocalActivationMaterial();
     console.log(JSON.stringify({ ok: true, step: 'activation_real_write', screenshot: screenshotPath }));
   } finally {

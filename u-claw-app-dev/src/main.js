@@ -36,7 +36,6 @@ const ACTIVATION_ONLY_ARG = '--activation-only';
 const isActivationOnlyMode = process.argv.includes(ACTIVATION_ONLY_ARG)
   || process.env.UCLAW_ACTIVATION_ONLY === '1';
 const ACTIVATION_STATIC_PREVIEW_COMPLETE = 'ACTIVATION_STATIC_PREVIEW_COMPLETE';
-const ACTIVATION_RESTART_EXIT_CODE = 20;
 const UCLAW_ACTIVATION_REQUIRE_CLOUD = process.env.UCLAW_ACTIVATION_REQUIRE_CLOUD === '1';
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
@@ -191,6 +190,9 @@ let portableSyncTimer = null;
 let portableSyncPromise = null;
 let portableFinalSyncDone = false;
 let shutdownPromise = null;
+let normalStartupPromise = null;
+let normalIPCRegistered = false;
+let suppressWindowAllClosedQuit = false;
 const holdMainWindowUntilReady = UCLAW_LAUNCHER_GUI && Boolean(UCLAW_PORTABLE_WORK_DATA_DIR || UCLAW_PORTABLE_DATA_DIR);
 let activationWindowMode = isActivationOnlyMode;
 
@@ -1670,7 +1672,7 @@ async function submitActivation(payload = {}) {
         activationPersisted: true,
         activationId: activationID,
         commitStatus: commitResult.status || 'committed',
-        restartRequired: true,
+        launchReady: true,
         retryable: false,
       };
     } catch (error) {
@@ -1683,19 +1685,21 @@ async function submitActivation(payload = {}) {
 }
 
 /**
- * Exits with a launcher-owned restart code after activation files are verified.
- * The launcher then reruns the normal startup gate so Gateway starts only after
- * authorization has been persisted and synced.
+ * Starts the normal U-Claw runtime after activation files are verified.
+ * Keeping the transition inside the same app avoids the visible close/reopen
+ * gap that made first activation look like a failed launch.
  */
-async function completeActivationAndRestart() {
+async function launchMainAfterActivation() {
   if (!hasCompletedActivation()) {
     return { ok: false, message: '授权材料尚未写入，请先完成激活。' };
   }
-  appIsQuitting = true;
-  setTimeout(() => {
-    app.exit(ACTIVATION_RESTART_EXIT_CODE);
-  }, 60);
-  return { ok: true, exitCode: ACTIVATION_RESTART_EXIT_CODE };
+  try {
+    await startNormalApplication({ replaceActivationWindow: true });
+    return { ok: true, status: 'launched' };
+  } catch (error) {
+    logLifecycle(`Activation launch-main failed: ${error.message}`);
+    return { ok: false, message: `进入主界面失败：${error.message}` };
+  }
 }
 
 /**
@@ -1706,7 +1710,8 @@ function setupActivationIPC() {
   ipcMain.handle('activation:get-preflight', () => getActivationPreflight());
   ipcMain.handle('activation:send-sms', (_event, payload) => sendActivationSMS(payload));
   ipcMain.handle('activation:submit', (_event, payload) => submitActivation(payload));
-  ipcMain.handle('activation:complete', () => completeActivationAndRestart());
+  ipcMain.handle('activation:launch-main', () => launchMainAfterActivation());
+  ipcMain.handle('activation:complete', () => launchMainAfterActivation());
   ipcMain.handle('activation:window-action', (_event, action) => {
     if (!mainWindow) return { ok: false };
     if (action === 'minimize') mainWindow.minimize();
@@ -2020,6 +2025,79 @@ function setupIPC() {
 }
 
 // ── App Lifecycle ──
+/**
+ * Boots the normal OpenClaw runtime and routes the window to dashboard/config.
+ * Activation mode uses this after local license material is written.
+ */
+async function startNormalApplication({ replaceActivationWindow = false } = {}) {
+  if (normalStartupPromise) return normalStartupPromise;
+
+  normalStartupPromise = (async () => {
+    activationWindowMode = false;
+    delete process.env.UCLAW_ACTIVATION_ONLY;
+
+    if (replaceActivationWindow && mainWindow && !mainWindow.isDestroyed()) {
+      const activationWindow = mainWindow;
+      mainWindow = null;
+      suppressWindowAllClosedQuit = true;
+      activationWindow.removeAllListeners('close');
+      activationWindow.once('closed', () => {
+        setImmediate(() => {
+          suppressWindowAllClosedQuit = false;
+        });
+      });
+      activationWindow.destroy();
+    }
+
+    ensureConfig();
+    startPortableSyncTimer();
+    syncDevNewApiCredentialsFromDesktop();
+    sanitizePortableStatePaths();
+    createMenu();
+    if (!normalIPCRegistered) {
+      setupIPC();
+      normalIPCRegistered = true;
+    }
+    createWindow();
+
+    await startConfigServer();
+
+    try {
+      const configuredVideoAdapterBaseUrl = UCLAW_VIDEO_ADAPTER_BASE_URL.trim();
+      if (configuredVideoAdapterBaseUrl) {
+        ensureVideoAdapterConfig(configuredVideoAdapterBaseUrl.replace(/\/+$/, ''));
+        console.log(`[${APP_NAME}] Using external video adapter ${configuredVideoAdapterBaseUrl}`);
+      } else {
+        const adapterPort = await findAvailablePort(DEFAULT_VIDEO_ADAPTER_PORT, MAX_VIDEO_ADAPTER_PORT);
+        await startVideoAdapter(adapterPort);
+        ensureRuntimeVideoAdapterConfig(`http://127.0.0.1:${adapterPort}/xai/v1`);
+      }
+
+      const port = await findAvailablePort();
+      await startGateway(port);
+
+      if (hasModelConfigured()) {
+        loadAppPage();
+      } else {
+        console.log(`[${APP_NAME}] No model configured, opening Config.html`);
+        loadConfigPage();
+      }
+    } catch (err) {
+      console.error(`[${APP_NAME}] Failed to start gateway:`, err);
+      dialog.showErrorBox(
+        `${APP_NAME} - Startup Error`,
+        `Failed to start OpenClaw gateway.\n\n${err.message}\n\nPlease check if Node.js is available and try again.`
+      );
+      throw err;
+    }
+  })().catch((error) => {
+    normalStartupPromise = null;
+    throw error;
+  });
+
+  return normalStartupPromise;
+}
+
 app.whenReady().then(async () => {
   logLifecycle(`v${app.getVersion()} starting...`);
 
@@ -2041,47 +2119,7 @@ app.whenReady().then(async () => {
     return;
   }
 
-  // Setup
-  ensureConfig();
-  startPortableSyncTimer();
-  syncDevNewApiCredentialsFromDesktop();
-  sanitizePortableStatePaths();
-  createMenu();
-  setupIPC();
-  createWindow();
-
-  // Start mini HTTP server for Config.html
-  await startConfigServer();
-
-  try {
-    const configuredVideoAdapterBaseUrl = UCLAW_VIDEO_ADAPTER_BASE_URL.trim();
-    if (configuredVideoAdapterBaseUrl) {
-      ensureVideoAdapterConfig(configuredVideoAdapterBaseUrl.replace(/\/+$/, ''));
-      console.log(`[${APP_NAME}] Using external video adapter ${configuredVideoAdapterBaseUrl}`);
-    } else {
-      const adapterPort = await findAvailablePort(DEFAULT_VIDEO_ADAPTER_PORT, MAX_VIDEO_ADAPTER_PORT);
-      await startVideoAdapter(adapterPort);
-      ensureRuntimeVideoAdapterConfig(`http://127.0.0.1:${adapterPort}/xai/v1`);
-    }
-
-    // Find port and start gateway
-    const port = await findAvailablePort();
-    await startGateway(port);
-
-    // Gateway is ready — if no model configured, show Config.html first
-    if (hasModelConfigured()) {
-      loadAppPage();
-    } else {
-      console.log(`[${APP_NAME}] No model configured, opening Config.html`);
-      loadConfigPage();
-    }
-  } catch (err) {
-    console.error(`[${APP_NAME}] Failed to start gateway:`, err);
-    dialog.showErrorBox(
-      `${APP_NAME} - Startup Error`,
-      `Failed to start OpenClaw gateway.\n\n${err.message}\n\nPlease check if Node.js is available and try again.`
-    );
-  }
+  await startNormalApplication();
 });
 
 function shutdownApp() {
@@ -2100,6 +2138,7 @@ function shutdownApp() {
 }
 
 app.on('window-all-closed', () => {
+  if (suppressWindowAllClosedQuit) return;
   app.quit();
 });
 

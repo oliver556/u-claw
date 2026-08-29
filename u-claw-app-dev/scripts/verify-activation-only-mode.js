@@ -44,7 +44,6 @@ function sliceBetween(source, start, end) {
 
 requireText(main, "const ACTIVATION_ONLY_ARG = '--activation-only';", 'activation-only arg');
 requireText(main, 'ACTIVATION_STATIC_PREVIEW_COMPLETE', 'activation static preview code');
-requireText(main, 'ACTIVATION_RESTART_EXIT_CODE', 'activation restart exit code');
 requireText(main, "const activationStatePath = path.join(configDir, 'uclaw-activation.json');", 'activation state path');
 requireText(main, 'function hasCompletedActivation()', 'activation completion checker');
 requireText(main, 'function shouldShowActivationOnStartup()', 'startup activation gate');
@@ -63,7 +62,8 @@ requireText(main, "postActivationJSON('/v1/auth/sms/send'", 'cloud SMS send');
 requireText(main, "postActivationJSON('/v1/activations'", 'first-start cloud activation');
 requireText(main, "postActivationJSON(`/v1/activations/${activationID}/commit`", 'first-start activation commit');
 requireText(main, 'ACTIVATION_CLOUD_COMPLETE', 'cloud activation completion code');
-requireText(main, 'async function completeActivationAndRestart()', 'activation restart handoff');
+requireText(main, 'async function launchMainAfterActivation()', 'activation launch handoff');
+requireText(main, 'async function startNormalApplication', 'normal startup launcher');
 requireText(main, 'UCLAW_ACTIVATION_REQUIRE_CLOUD', 'activation cloud required opt-out');
 requireText(main, 'activation cloud submit fallback', 'activation cloud submit fallback');
 requireText(main, 'uclaw:get-model-usage-summary', 'normal usage summary IPC channel');
@@ -76,12 +76,12 @@ requireText(main, 'function createActivationMenu()', 'activation menu');
 requireText(main, 'if (activationWindowMode) {', 'activation menu gate uses runtime window mode');
 requireText(main, 'additionalArguments: activationWindowMode ? [ACTIVATION_ONLY_ARG] : [],', 'activation renderer argv');
 
-const lifecycleBranch = sliceBetween(main, 'Activation-only mode starting', '  // Setup');
+const lifecycleBranch = sliceBetween(main, 'Activation-only mode starting', '  if (shouldShowActivationOnStartup())');
 for (const required of ['createMenu();', 'setupActivationIPC();', 'createWindow();', 'return;']) {
   requireText(lifecycleBranch, required, `activation early-return ${required}`);
 }
 
-const startupGateBranch = sliceBetween(main, 'Activation gate starting', '  // Setup');
+const startupGateBranch = sliceBetween(main, 'Activation gate starting', '  await startNormalApplication();');
 for (const required of ['activationWindowMode = true;', 'createMenu();', 'setupActivationIPC();', 'createWindow();', 'return;']) {
   requireText(startupGateBranch, required, `startup activation gate ${required}`);
 }
@@ -97,7 +97,7 @@ for (const forbidden of ['startConfigServer', 'startGateway', 'startVideoAdapter
 }
 
 const activationIpc = sliceBetween(main, 'function setupActivationIPC()', 'function loadActivationPage()');
-for (const channel of ['activation:get-preflight', 'activation:send-sms', 'activation:submit', 'activation:complete', 'activation:window-action']) {
+for (const channel of ['activation:get-preflight', 'activation:send-sms', 'activation:submit', 'activation:launch-main', 'activation:complete', 'activation:window-action']) {
   requireText(activationIpc, channel, `activation IPC channel ${channel}`);
 }
 for (const forbidden of ['get-gateway-status', 'open-dashboard', 'open-config']) {
@@ -115,6 +115,7 @@ for (const forbidden of ["postActivationJSON('/v1/auth/sms/login'", "postActivat
 
 const preloadActivationBranch = sliceBetween(preload, 'if (isActivationOnlyMode)', '} else {');
 requireText(preloadActivationBranch, 'uclawActivation', 'activation preload namespace');
+requireText(preloadActivationBranch, 'launchMain', 'activation launch-main preload bridge');
 requireText(preloadActivationBranch, 'completeActivation', 'activation complete preload bridge');
 for (const forbidden of ['getGatewayStatus', 'openDashboard', 'openConfig']) {
   if (preloadActivationBranch.includes(forbidden)) {
@@ -138,8 +139,8 @@ for (const required of [
   'formatActivationCode',
   'escapeHtml',
   '固定验证码为 123456',
-  'restartReady',
-  '完成并重启',
+  'launchReady',
+  '进入 U-Claw',
   '.step.done .step-number::after { content: ""; position: absolute;',
   'transform: translate(-50%, -58%) rotate(45deg);',
   '.button.primary:hover:not(:disabled) { border-color: var(--blue-hover); color: #fff;',
@@ -170,11 +171,9 @@ for (const source of [
     throw new Error(`${source[0]} must sync activation OpenClaw config back to USB`);
   }
 }
-requireText(macLauncher, 'kActivationRestartExitCode = 20', 'macOS activation restart exit code');
-requireText(macLauncher, 'Activation completed; restarting through normal startup gate.', 'macOS activation restart log');
-requireText(windowsLauncher, 'activationRestartExitCode = 20', 'Windows activation restart exit code');
-requireText(windowsLauncher, 'Activation completed; restarting through normal startup gate.', 'Windows activation restart log');
-requireText(windowsStart, 'if "%APP_EXIT%"=="20"', 'Windows direct script activation restart loop');
+requireText(macLauncher, 'kActivationRestartExitCode = 20', 'macOS legacy activation restart exit code');
+requireText(windowsLauncher, 'activationRestartExitCode = 20', 'Windows legacy activation restart exit code');
+requireText(windowsStart, 'if "%APP_EXIT%"=="20"', 'Windows legacy direct script activation restart loop');
 requireText(packagePortable, 'writes activated data/.openclaw/openclaw.json back to USB', 'package notes activation config sync');
 
 console.log(JSON.stringify({ ok: true, step: 'activation_only_contracts' }));
