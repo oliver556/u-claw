@@ -68,6 +68,16 @@ function start(command, args, options = {}) {
 }
 
 /**
+ * Keeps the local UI lab open until the developer stops this verifier.
+ */
+function waitForManualStop() {
+  return new Promise((resolve) => {
+    process.once('SIGINT', resolve);
+    process.once('SIGTERM', resolve);
+  });
+}
+
+/**
  * Waits until a URL returns an OK response.
  */
 async function waitForURL(url, timeoutMs = 30000) {
@@ -464,6 +474,15 @@ function cleanup() {
       step: 'electron_model_usage_ui',
       screenshot: screenshotPath,
     }));
+    if (process.env.UCLAW_UI_E2E_KEEPALIVE === '1') {
+      console.log(JSON.stringify({
+        ok: true,
+        step: 'manual_verification_ready',
+        gateway: 'http://127.0.0.1:18789/chat?session=main',
+        screenshot: screenshotPath,
+      }));
+      await waitForManualStop();
+    }
   } finally {
     cleanup();
   }

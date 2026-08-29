@@ -173,3 +173,11 @@
 - Files changed: `u-claw-app-dev/cloud/uclaw-cloud-api/internal/usage/service.go`, `internal/usage/service_test.go`, `u-claw-app-dev/scripts/verify-cloud-model-usage-ui.js`, `.codex-state/backend_activation_progress.md`。
 - Commands run: `go test ./internal/usage`, `go test ./internal/usage ./internal/httpapi`, `go test ./...`, `node scripts/verify-cloud-model-usage-ui.js`, `git diff --check`。
 - Next: 继续支付宝当面付接入：实现官方下单 adapter、验签回调和订单查询补偿。
+
+## 2026-08-29 22:30
+
+- Did: 为模型页云端 usage UI 验收脚本增加 `UCLAW_UI_E2E_KEEPALIVE=1` 手动验收模式。
+- Result: 自动完成本地 Cloud API/New API/Electron 验收后保持窗口不退出，便于用户人工查看 `http://127.0.0.1:18789/chat?session=main`。
+- Files changed: `u-claw-app-dev/scripts/verify-cloud-model-usage-ui.js`, `.codex-state/backend_activation_journal.md`。
+- Commands run: `node --check scripts/verify-cloud-model-usage-ui.js`, `git diff --check`, `UCLAW_UI_E2E_KEEPALIVE=1 node scripts/verify-cloud-model-usage-ui.js`, `curl http://127.0.0.1:18789/chat?session=main`。
+- Next: 用户验收当前模型页；通过后继续支付宝当面付 adapter。
