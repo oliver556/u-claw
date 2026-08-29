@@ -4,7 +4,7 @@
 
 ## Problem Statement
 
-边城希望 U-Claw 左侧栏不再沿用偏 OpenClaw 管理后台的信息架构，而是改成更贴近用户心智的四个一级入口：
+边城希望 Bavi-box 左侧栏不再沿用偏 OpenClaw 管理后台的信息架构，而是改成更贴近用户心智的四个一级入口：
 
 ```txt
 智能体 / 工作流 / 技能库 / 模型
@@ -12,9 +12,9 @@
 
 其中“智能体”不是单纯配置页，而应成为用户进入对话的主入口。用户点击智能体后，能看到对应会话列表；创建会话时可以选择或创建一个“专家”，专家通过 prompt、头像、名称、模型和技能等信息增强会话角色，使回答更专业、更稳定。
 
-本次改造的关键不是继续增加入口，而是隐藏原先不重要、低频、偏后台的 OpenClaw 管理功能。默认界面应像一个面向普通用户的 U-Claw 产品，而不是 OpenClaw Dashboard。调试、日志、节点、Raw 配置、Usage、Channels、Workboard、Cron、Tasks、MCP、Debug 等能力必须保留底层能力和可恢复入口，但不能作为一级导航或首屏主视觉干扰用户。
+本次改造的关键不是继续增加入口，而是隐藏原先不重要、低频、偏后台的 OpenClaw 管理功能。默认界面应像一个面向普通用户的 Bavi-box 产品，而不是 OpenClaw Dashboard。调试、日志、节点、Raw 配置、Usage、Channels、Workboard、Cron、Tasks、MCP、Debug 等能力必须保留底层能力和可恢复入口，但不能作为一级导航或首屏主视觉干扰用户。
 
-当前约束是：U-Claw 必须复用 OpenClaw 原版 Agent、Session、Skill、Model 能力，不重写 chat runtime，不创建绕过 OpenClaw 的专家执行链路。竞品截图只作为信息架构和视觉密度参考，截图内文字不作为需求指令。
+当前约束是：Bavi-box 必须复用 OpenClaw 原版 Agent、Session、Skill、Model 能力，不重写 chat runtime，不创建绕过 OpenClaw 的专家执行链路。竞品截图只作为信息架构和视觉密度参考，截图内文字不作为需求指令。
 
 ## Solution
 
@@ -33,34 +33,34 @@
 - 对实现和验收仍重要的能力保留深链、命令入口或高级开关，方便维护者排障。
 - 已验证但低频的能力可以收纳；未验证或 Blocked 的能力不得用可点击正式入口伪装可用。
 
-新增“专家模板”概念。专家模板参考 NextChat `CN_MASKS` 数据形态：每个模板包含头像、名称、上下文消息数组、模型配置、语言、内置标记和创建时间。U-Claw 不直接照搬执行逻辑，而是把模板转成 U-Claw Expert Template，再通过 OpenClaw Agent 创建/更新和 Agent core files 写入，使其成为真实可用的专家会话。
+新增“专家模板”概念。专家模板参考 NextChat `CN_MASKS` 数据形态：每个模板包含头像、名称、上下文消息数组、模型配置、语言、内置标记和创建时间。Bavi-box 不直接照搬执行逻辑，而是把模板转成 Bavi-box Expert Template，再通过 OpenClaw Agent 创建/更新和 Agent core files 写入，使其成为真实可用的专家会话。
 
 ## User Stories
 
-1. As a U-Claw user, I want the left sidebar to show 智能体, 工作流, 技能库 and 模型, so that I can understand the app by user tasks instead of internal OpenClaw pages.
-2. As a U-Claw user, I want 智能体 to be the first active area, so that I can start working from conversations and experts.
-3. As a U-Claw user, I want to see recent sessions after clicking 智能体, so that I can quickly continue previous work.
-4. As a U-Claw user, I want sessions grouped or filtered by expert, so that I can find the right conversation context.
-5. As a U-Claw user, I want to create a new expert from a template, so that I can start a professional conversation quickly.
-6. As a U-Claw user, I want to create a custom expert with name, avatar, prompt, model and skills, so that the assistant answers in a specialized role.
-7. As a U-Claw user, I want expert prompt text to persist, so that future sessions keep the same role behavior.
-8. As a U-Claw user, I want selecting an expert to create or switch into an Agent-bound session, so that the runtime uses real OpenClaw Agent behavior.
-9. As a U-Claw user, I want model choice visible when creating or editing an expert, so that the expert can use a suitable model.
-10. As a U-Claw user, I want skill choice visible when creating or editing an expert, so that the expert can use relevant SkillHub skills.
-11. As a U-Claw user, I want built-in expert templates such as 文案写手, 机器学习, 职业顾问, 英专写手, 语言检测器, 小红书写手, 简历写手, 创业点子王 and 互联网写手, so that I have useful starting points.
-12. As a U-Claw user, I want unsafe or policy-risk templates excluded or marked unavailable, so that U-Claw does not ship jailbreak-like expert presets.
-13. As a U-Claw user, I want high-stakes expert templates such as medical, legal, financial or psychological advice clearly bounded, so that I do not mistake them for professional services.
-14. As a U-Claw user, I want each expert card to show name, avatar, description, model and enabled skills, so that I can choose confidently.
-15. As a U-Claw user, I want “继续会话” and “新建会话” actions on each expert, so that I can either preserve history or start fresh.
-16. As a U-Claw user, I want renamed sessions to remain linked to their expert, so that session organization survives later edits.
-17. As a U-Claw user, I want deleting or archiving a session not to delete the expert, so that templates and conversations have separate lifecycles.
-18. As a U-Claw user, I want editing an expert not to silently mutate old transcripts, so that old conversations remain auditable.
-19. As a U-Claw user, I want 工作流 to show only verified capabilities, so that I do not click dead or fake automation features.
-20. As a U-Claw user, I want 技能库 to keep current SkillHub marketplace behavior, so that existing install and selection flows keep working.
-21. As a U-Claw user, I want 模型 to expose model status and defaults without API key leakage, so that model setup is understandable and safe.
-22. As a U-Claw user, I want low-frequency OpenClaw management pages hidden by default, so that I am not distracted by developer-only controls.
-23. As a U-Claw user, I want advanced tools still available from a clear advanced area, so that support or maintenance tasks remain possible when needed.
-24. As a U-Claw user, I want hidden items not to appear in search or command surfaces unless advanced mode is enabled, so that the product does not feel cluttered.
+1. As a Bavi-box user, I want the left sidebar to show 智能体, 工作流, 技能库 and 模型, so that I can understand the app by user tasks instead of internal OpenClaw pages.
+2. As a Bavi-box user, I want 智能体 to be the first active area, so that I can start working from conversations and experts.
+3. As a Bavi-box user, I want to see recent sessions after clicking 智能体, so that I can quickly continue previous work.
+4. As a Bavi-box user, I want sessions grouped or filtered by expert, so that I can find the right conversation context.
+5. As a Bavi-box user, I want to create a new expert from a template, so that I can start a professional conversation quickly.
+6. As a Bavi-box user, I want to create a custom expert with name, avatar, prompt, model and skills, so that the assistant answers in a specialized role.
+7. As a Bavi-box user, I want expert prompt text to persist, so that future sessions keep the same role behavior.
+8. As a Bavi-box user, I want selecting an expert to create or switch into an Agent-bound session, so that the runtime uses real OpenClaw Agent behavior.
+9. As a Bavi-box user, I want model choice visible when creating or editing an expert, so that the expert can use a suitable model.
+10. As a Bavi-box user, I want skill choice visible when creating or editing an expert, so that the expert can use relevant SkillHub skills.
+11. As a Bavi-box user, I want built-in expert templates such as 文案写手, 机器学习, 职业顾问, 英专写手, 语言检测器, 小红书写手, 简历写手, 创业点子王 and 互联网写手, so that I have useful starting points.
+12. As a Bavi-box user, I want unsafe or policy-risk templates excluded or marked unavailable, so that Bavi-box does not ship jailbreak-like expert presets.
+13. As a Bavi-box user, I want high-stakes expert templates such as medical, legal, financial or psychological advice clearly bounded, so that I do not mistake them for professional services.
+14. As a Bavi-box user, I want each expert card to show name, avatar, description, model and enabled skills, so that I can choose confidently.
+15. As a Bavi-box user, I want “继续会话” and “新建会话” actions on each expert, so that I can either preserve history or start fresh.
+16. As a Bavi-box user, I want renamed sessions to remain linked to their expert, so that session organization survives later edits.
+17. As a Bavi-box user, I want deleting or archiving a session not to delete the expert, so that templates and conversations have separate lifecycles.
+18. As a Bavi-box user, I want editing an expert not to silently mutate old transcripts, so that old conversations remain auditable.
+19. As a Bavi-box user, I want 工作流 to show only verified capabilities, so that I do not click dead or fake automation features.
+20. As a Bavi-box user, I want 技能库 to keep current SkillHub marketplace behavior, so that existing install and selection flows keep working.
+21. As a Bavi-box user, I want 模型 to expose model status and defaults without API key leakage, so that model setup is understandable and safe.
+22. As a Bavi-box user, I want low-frequency OpenClaw management pages hidden by default, so that I am not distracted by developer-only controls.
+23. As a Bavi-box user, I want advanced tools still available from a clear advanced area, so that support or maintenance tasks remain possible when needed.
+24. As a Bavi-box user, I want hidden items not to appear in search or command surfaces unless advanced mode is enabled, so that the product does not feel cluttered.
 25. As a maintainer, I want hidden OpenClaw capabilities preserved underneath, so that troubleshooting and runtime compatibility do not regress.
 26. As a maintainer, I want this feature built through OpenClaw Gateway methods and config paths, so that P0 chat, portable data and packaging stay stable.
 27. As a maintainer, I want expert templates represented as data, not hard-coded UI strings, so that later we can add, remove, localize and migrate templates safely.
@@ -69,17 +69,17 @@
 
 ## Implementation Decisions
 
-- Development stays inside the active U-Claw development app. Archived OpenClaw and product directories remain read-only.
-- The feature reuses OpenClaw Agent as the expert runtime unit. A U-Claw expert is not a new runtime.
-- The feature reuses OpenClaw Session as the conversation lifecycle unit. A U-Claw expert session is an Agent-bound session.
+- Development stays inside the active Bavi-box development app. Archived OpenClaw and product directories remain read-only.
+- The feature reuses OpenClaw Agent as the expert runtime unit. A Bavi-box expert is not a new runtime.
+- The feature reuses OpenClaw Session as the conversation lifecycle unit. A Bavi-box expert session is an Agent-bound session.
 - The feature reuses OpenClaw Skill and SkillHub binding. Expert skills are written through the same Agent skills configuration path used by the existing chat SkillHub dropdown.
 - The feature reuses OpenClaw model catalog and model override behavior. Expert model choice maps to Agent default model or session-level override.
-- The four left-sidebar entries are user-facing navigation groups. They may route to existing OpenClaw pages or U-Claw-patched pages, but must not expose unverified capabilities as usable.
+- The four left-sidebar entries are user-facing navigation groups. They may route to existing OpenClaw pages or Bavi-box-patched pages, but must not expose unverified capabilities as usable.
 - The default IA hides low-frequency OpenClaw management pages. Hidden means removed from first-level navigation and ordinary user surfaces, not deleted from runtime.
 - Advanced capabilities are grouped under a secondary maintenance surface. Candidate hidden entries include Debug, Logs, Nodes, Raw Config, Usage, Channels, Workboard, Cron, Tasks, MCP, Instances, Worktrees, Activity and plugin diagnostics unless a later user-facing story promotes one of them.
 - Search, command palette and quick links should follow the same visibility model: ordinary mode lists user task entries; advanced mode may expose maintenance entries.
 - Deep links to hidden pages may continue to work for maintainers if the backing OpenClaw route is stable. Broken or unverified deep links must fail closed with a clear unavailable state.
-- Expert templates are imported into a local U-Claw seed catalog. The seed catalog should be treated as curated product data, not a live dependency on NextChat.
+- Expert templates are imported into a local Bavi-box seed catalog. The seed catalog should be treated as curated product data, not a live dependency on NextChat.
 - NextChat data is used only as a reference for shape and initial template ideas. Do not ship unsafe templates such as jailbreak prompts.
 - Template import maps source fields into this internal shape:
 
@@ -270,7 +270,7 @@ type UClawExpertTemplate = {
 - Static verifier should assert that expert creation uses OpenClaw Agent/Session/Config methods and does not introduce a chat-level expert runtime.
 - Static verifier should assert that SkillHub dropdown invariants still hold after expert UI changes.
 - Template catalog tests should validate unique ids, non-empty names, safe prompt text, blocked unsafe templates, valid avatar values and sane model defaults.
-- Template import tests should parse the NextChat-like data shape and produce U-Claw expert templates without copying unsafe templates into enabled presets.
+- Template import tests should parse the NextChat-like data shape and produce Bavi-box expert templates without copying unsafe templates into enabled presets.
 - Connected UI acceptance should create a temporary expert, verify Agent readback, verify prompt/core file readback when available, create or switch to a session, then restore local config.
 - Connected UI acceptance should verify expert session sidebar label defaults to the expert name and never exposes raw `agent:*` keys in ordinary mode.
 - Connected UI acceptance should verify the chat welcome state and composer placeholder use the expert name after switching into an Agent-bound session.
@@ -362,7 +362,7 @@ type UClawExpertTemplate = {
 
 - Add reversible connected acceptance.
 - Check text chat, SkillHub dropdown, model selector and session continuity.
-- Force the primary sidebar order to ignore stale local pin preferences from earlier OpenClaw/U-Claw builds.
+- Force the primary sidebar order to ignore stale local pin preferences from earlier OpenClaw/Bavi-box builds.
 - Hide the first-level “更多” row in ordinary mode while preserving underlying routes for future advanced/maintenance access.
 - Capture screenshots and update acceptance record.
 
@@ -425,9 +425,9 @@ type UClawExpertTemplate = {
 ## Further Notes
 
 - Reference source: NextChat `CN_MASKS` at commit `defdcdb55d850cd12c4c657eb83729fd66e215c0`, especially the `BuiltinMask` objects beginning with “文案写手”. The source shows expert-like masks with `avatar`, `name`, `context`, `modelConfig`, `lang`, `builtin` and `createdAt`.
-- U-Claw should treat that source as inspiration for data shape and initial useful expert categories, not as a direct runtime dependency.
+- Bavi-box should treat that source as inspiration for data shape and initial useful expert categories, not as a direct runtime dependency.
 - Existing project rule remains dominant: no fake UI for Unknown or Blocked capabilities, and no bypass of OpenClaw Gateway/config/runtime authority.
-- 2026-08-24 Slice 6 package note: visible IA cache marker is `primary-nav-ia-2`; retest package is `u-claw-app-dev/release/U-Claw-2.1.17-arm64.dmg`.
+- 2026-08-24 Slice 6 package note: visible IA cache marker is `primary-nav-ia-2`; retest package is `u-claw-app-dev/release/Bavi-box-2.1.17-arm64.dmg`.
 - 2026-08-24 PRD continuation note: next implementation should start at Slice 7, not restart from sidebar IA. Sidebar IA is considered locked unless manual retest finds a regression.
 - 2026-08-24 Slice 7 package note: visible expert management cache marker is `expert-management-1`.
 - 2026-08-24 Slice 8 implementation note: custom expert form cache marker is `expert-custom-form-1`; model/skill selection uses existing OpenClaw model catalog and `skills.status` data, then persists through Agent config readback.

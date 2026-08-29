@@ -140,6 +140,30 @@ function startActivationStub() {
         }));
         return;
       }
+      if (req.method === 'GET' && req.url === '/v1/newapi/models/catalog') {
+        requests.push({ method: req.method, url: req.url, auth: req.headers.authorization || '' });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          status: 'ok',
+          source: 'newapi:/api/user/models',
+          provider: {
+            id: 'newapi',
+            baseUrl: newapiBaseUrl,
+            api: 'openai-completions',
+          },
+          models: [
+            { id: 'gpt-5.5', name: 'gpt-5.5', channels: ['1'], capabilities: ['text'] },
+            { id: 'gpt-image-2', name: 'gpt-image-2', channels: ['2'], capabilities: ['image'] },
+          ],
+          refreshedAt: new Date().toISOString(),
+          cache: {
+            hit: false,
+            stale: false,
+            ttlSeconds: 600,
+          },
+        }));
+        return;
+      }
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: { message: 'not found' } }));
     } catch (error) {
@@ -252,9 +276,9 @@ async function driveActivationPage() {
     document.querySelector('#nextButton').click();
   })()`);
   for (let i = 0; i < 120; i += 1) {
-    const ok = await evalJS(`document.body.innerText.includes('U-Claw 首次激活完成') && document.body.innerText.includes('ACTIVATION_CLOUD_COMPLETE')`);
+    const ok = await evalJS(`document.body.innerText.includes('Bavi-box 首次激活完成') && document.body.innerText.includes('ACTIVATION_CLOUD_COMPLETE')`);
     if (ok) {
-      const launchButtonReady = await evalJS(`document.querySelector('#nextButton').textContent.includes('进入 U-Claw') && !document.querySelector('#nextButton').hidden`);
+      const launchButtonReady = await evalJS(`document.querySelector('#nextButton').textContent.includes('进入 Bavi-box') && !document.querySelector('#nextButton').hidden`);
       if (!launchButtonReady) throw new Error('activation finish launch button is not ready');
       fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
@@ -303,14 +327,32 @@ function verifyLocalActivationMaterial() {
       throw new Error(`OpenClaw provider ${providerName} was not configured`);
     }
   }
+  const catalogProvider = openclaw.models?.providers?.newapi;
+  if (catalogProvider?.baseUrl !== newapiBaseUrl || catalogProvider?.apiKey !== newapiToken) {
+    throw new Error('OpenClaw newapi provider did not reuse activation credentials');
+  }
+  if (!Array.isArray(catalogProvider.models) || catalogProvider.models.length !== 2) {
+    throw new Error('OpenClaw newapi provider did not store cloud catalog models');
+  }
+  if (catalogProvider.models[0].id !== 'gpt-5.5' || catalogProvider.models[1].id !== 'gpt-image-2') {
+    throw new Error(`unexpected cloud catalog model order: ${JSON.stringify(catalogProvider.models)}`);
+  }
   if (activationState.status !== 'activated' || activationState.commitStatus !== 'committed' || activationState.uclawAccessToken !== accessToken) {
     throw new Error('activation state did not reach committed status');
   }
   if (activationState.updateCredentialStatus !== 'configured' || activationState.updateDeviceId !== updateDeviceId) {
     throw new Error('activation state did not record update credential status');
   }
-  if (requests.length !== 2 || requests[0].url !== '/v1/activations' || requests[1].url !== `/v1/activations/${activationID}/commit`) {
+  if (
+    requests.length !== 3 ||
+    requests[0].url !== '/v1/activations' ||
+    requests[1].url !== `/v1/activations/${activationID}/commit` ||
+    requests[2].url !== '/v1/newapi/models/catalog'
+  ) {
     throw new Error(`unexpected activation request order: ${JSON.stringify(requests.map((request) => request.url))}`);
+  }
+  if (requests[2].auth !== `Bearer ${accessToken}`) {
+    throw new Error('model catalog request did not use activation access token');
   }
   if (requests[0].body.phone !== phone || requests[0].body.smsCode !== smsCode || !requests[0].body.idempotencyKey?.startsWith('electron-')) {
     throw new Error('first-start request payload was not normalized');

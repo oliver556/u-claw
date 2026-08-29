@@ -8,8 +8,8 @@ const appDir = path.resolve(__dirname, '..');
 const releaseDir = path.join(appDir, 'release');
 const packageJson = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'));
 const version = packageJson.version;
-const macArm64AppDir = path.join(releaseDir, 'mac-arm64', 'U-Claw.app');
-const macX64AppDir = path.join(releaseDir, 'mac', 'U-Claw.app');
+const macArm64AppDir = path.join(releaseDir, 'mac-arm64', 'Bavi-box.app');
+const macX64AppDir = path.join(releaseDir, 'mac', 'Bavi-box.app');
 const winAppDir = path.join(releaseDir, 'win-unpacked');
 const macArm64Archive = path.join(releaseDir, 'u-claw-app-mac-arm64.tar.gz');
 const macX64Archive = path.join(releaseDir, 'u-claw-app-mac-x64.tar.gz');
@@ -17,10 +17,10 @@ const winArchive = path.join(releaseDir, 'u-claw-app-win-x64.zip');
 const macLauncherSource = path.join(appDir, 'scripts', 'launcher', 'macos', 'main.c');
 const macStartScript = path.join(appDir, 'scripts', 'Mac-Start-App.command');
 const macLauncherScriptInclude = path.join(appDir, 'scripts', 'launcher', 'macos', 'generated-start-script.inc');
-const macLauncherBinary = path.join(releaseDir, 'launcher', 'macos', 'U-Claw Launcher');
+const macLauncherBinary = path.join(releaseDir, 'launcher', 'macos', 'Bavi-box Launcher');
 const winLauncherSourceDir = path.join(appDir, 'scripts', 'launcher', 'windows');
-const winLauncherBinary = path.join(releaseDir, 'launcher', 'U-Claw Launcher.exe');
-const desktopAgentDir = path.join(process.env.HOME || '', 'Library', 'Application Support', 'U-Claw', '.openclaw', 'agents', 'main', 'agent');
+const winLauncherBinary = path.join(releaseDir, 'launcher', 'Bavi-box Launcher.exe');
+const desktopAgentDir = path.join(process.env.HOME || '', 'Library', 'Application Support', 'Bavi-box', '.openclaw', 'agents', 'main', 'agent');
 
 function usage() {
   console.log(`Usage:
@@ -31,7 +31,7 @@ function usage() {
 
 Options:
   --edition <customer|streamer>  Package edition. Added by the npm scripts.
-  --usb <mount>                  Deploy to <mount>/U-Claw after staging.
+  --usb <mount>                  Deploy to <mount>/Bavi-box after staging.
   --skip-build                   Reuse current release archives and rebuild only launcher/stage files.
 `);
 }
@@ -160,11 +160,11 @@ function keepPackagedRuntime(runtimeRoot, expectedName, label) {
 
 function buildArchives() {
   ensureDir(macArm64AppDir, 'Mac arm64 app');
-  ensureFile(path.join(macArm64AppDir, 'Contents', 'MacOS', 'U-Claw'), 'Mac arm64 executable');
+  ensureFile(path.join(macArm64AppDir, 'Contents', 'MacOS', 'Bavi-box'), 'Mac arm64 executable');
   ensureDir(macX64AppDir, 'Mac x64 app');
-  ensureFile(path.join(macX64AppDir, 'Contents', 'MacOS', 'U-Claw'), 'Mac x64 executable');
+  ensureFile(path.join(macX64AppDir, 'Contents', 'MacOS', 'Bavi-box'), 'Mac x64 executable');
   ensureDir(winAppDir, 'Windows x64 app');
-  ensureFile(path.join(winAppDir, 'U-Claw.exe'), 'Windows executable');
+  ensureFile(path.join(winAppDir, 'Bavi-box.exe'), 'Windows executable');
 
   keepPackagedRuntime(
     path.join(macArm64AppDir, 'Contents', 'Resources', 'resources', 'runtime'),
@@ -279,47 +279,47 @@ function packageNotes(edition, macArm64Hash, macX64Hash, winHash) {
   const keyRule = edition === 'customer'
     ? 'New API key: empty; customer enters credentials after delivery.'
     : 'New API key: inherited automatically from current desktop config.';
-  return `U-Claw portable package - ${edition} edition
+  return `Bavi-box portable package - ${edition} edition
 Version: ${version}
 Built: ${localDisplayTime()}
 
   Mac:
-  正式入口：双击 U-Claw Launcher.app
+  正式入口：双击 Bavi-box Launcher.app
   诊断入口：Mac-Start-App.command
   注意：不要把 Mac-Start-App.command 当作正式入口；oh-my-zsh 等 shell 启动提示可能抢占 .command 的首字符，导致 /Volumes/... 变成 Volumes/...。
-  App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-arm64
-  App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-x64
-  USB data: <USB>/U-Claw/data
-  Runtime data cache: ~/Library/Caches/U-Claw/usb-portable-<usb-id>/data
+  App cache: ~/Library/Caches/Bavi-box/u-claw-app-mac-arm64
+  App cache: ~/Library/Caches/Bavi-box/u-claw-app-mac-x64
+  USB data: <USB>/Bavi-box/data
+  Runtime data cache: ~/Library/Caches/Bavi-box/usb-portable-<usb-id>/data
   Logs to return:
-    <USB>/U-Claw/data/logs/U-Claw-Launcher.log
-    <USB>/U-Claw/data/logs/Mac-Start-App.log
-    <USB>/U-Claw/data/logs/main.log
-    <USB>/U-Claw/data/logs/gateway.log
-    ~/Library/Caches/U-Claw/launcher-logs/U-Claw-Launcher.log
-    ~/Library/Caches/U-Claw/launcher-logs/Mac-Start-App.log
+    <USB>/Bavi-box/data/logs/Bavi-box-Launcher.log
+    <USB>/Bavi-box/data/logs/Mac-Start-App.log
+    <USB>/Bavi-box/data/logs/main.log
+    <USB>/Bavi-box/data/logs/gateway.log
+    ~/Library/Caches/Bavi-box/launcher-logs/Bavi-box-Launcher.log
+    ~/Library/Caches/Bavi-box/launcher-logs/Mac-Start-App.log
 
   Windows:
-  Formal entry: double-click U-Claw Launcher.exe
+  Formal entry: double-click Bavi-box Launcher.exe
   Diagnostic entry: Windows-Start-App.bat
-  App cache: %LOCALAPPDATA%\\U-Claw\\usb-portable\\app-win-x64
-  USB data: <USB>\\U-Claw\\data
-  Runtime data cache: %LOCALAPPDATA%\\U-Claw\\usb-portable\\data-<usb-id>
+  App cache: %LOCALAPPDATA%\\Bavi-box\\usb-portable\\app-win-x64
+  USB data: <USB>\\Bavi-box\\data
+  Runtime data cache: %LOCALAPPDATA%\\Bavi-box\\usb-portable\\data-<usb-id>
   First launch: verify SHA-256, then extract with Windows tar.exe.
   Later launches: reuse the computer app cache without extracting again.
   Logs to return:
-    <USB>\\U-Claw\\data\\logs\\U-Claw-Launcher.log
-    <USB>\\U-Claw\\data\\logs\\Windows-Start-App.log
-    <USB>\\U-Claw\\data\\logs\\main.log
-    <USB>\\U-Claw\\data\\logs\\gateway.log
-    %LOCALAPPDATA%\\U-Claw\\launcher-logs\\U-Claw-Launcher.log
-    %LOCALAPPDATA%\\U-Claw\\launcher-logs\\Windows-Start-App.log
+    <USB>\\Bavi-box\\data\\logs\\Bavi-box-Launcher.log
+    <USB>\\Bavi-box\\data\\logs\\Windows-Start-App.log
+    <USB>\\Bavi-box\\data\\logs\\main.log
+    <USB>\\Bavi-box\\data\\logs\\gateway.log
+    %LOCALAPPDATA%\\Bavi-box\\launcher-logs\\Bavi-box-Launcher.log
+    %LOCALAPPDATA%\\Bavi-box\\launcher-logs\\Windows-Start-App.log
 
 Edition:
   ${keyRule}
 
 Video chain:
-  U-Claw -> server adapter -> New API -> Jimeng
+  Bavi-box -> server adapter -> New API -> Jimeng
   xai.baseUrl = https://video-adapter.gmnlee.com/xai/v1
   xai.apiKey = uclaw-video-adapter
 
@@ -336,7 +336,7 @@ Deploy rule:
 Launcher behavior:
   Launchers show native progress only while copying, extracting, syncing, or closing.
   Electron window stays hidden until Gateway ready/App ready, then opens directly to the main UI.
-  Runtime data uses a per-USB computer cache for speed, then syncs back to <USB>/U-Claw/data.
+  Runtime data uses a per-USB computer cache for speed, then syncs back to <USB>/Bavi-box/data.
   Runtime sync writes activated data/.openclaw/openclaw.json back to USB after first-start binding.
   Two USB disks use different cache IDs, so their data does not merge.
   Clean same-machine restart reuses current app and data cache, skipping USB-to-runtime sync when markers match.
@@ -376,10 +376,10 @@ function buildMacLauncher(stageRoot) {
   ]);
   ensureFile(macLauncherBinary, 'macOS launcher executable');
 
-  const appBundle = path.join(stageRoot, 'U-Claw Launcher.app');
+  const appBundle = path.join(stageRoot, 'Bavi-box Launcher.app');
   const contentsDir = path.join(appBundle, 'Contents');
   const macOsDir = path.join(contentsDir, 'MacOS');
-  const executablePath = path.join(macOsDir, 'U-Claw Launcher');
+  const executablePath = path.join(macOsDir, 'Bavi-box Launcher');
 
   fs.rmSync(appBundle, { recursive: true, force: true });
   fs.mkdirSync(macOsDir, { recursive: true });
@@ -390,13 +390,13 @@ function buildMacLauncher(stageRoot) {
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
-  <string>U-Claw Launcher</string>
+  <string>Bavi-box Launcher</string>
   <key>CFBundleIdentifier</key>
   <string>org.u-claw.portable.launcher</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>U-Claw Launcher</string>
+  <string>Bavi-box Launcher</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -428,7 +428,7 @@ function buildWindowsLauncher(stageRoot) {
     }
   });
   ensureFile(winLauncherBinary, 'Windows GUI launcher');
-  fs.copyFileSync(winLauncherBinary, path.join(stageRoot, 'U-Claw Launcher.exe'));
+  fs.copyFileSync(winLauncherBinary, path.join(stageRoot, 'Bavi-box Launcher.exe'));
 }
 
 function assembleStage(edition) {
@@ -438,7 +438,7 @@ function assembleStage(edition) {
   const macArm64Hash = sha256(macArm64Archive);
   const macX64Hash = sha256(macX64Archive);
   const winHash = sha256(winArchive);
-  const stageRoot = path.join(releaseDir, `portable-${edition}`, 'U-Claw');
+  const stageRoot = path.join(releaseDir, `portable-${edition}`, 'Bavi-box');
   const archiveDir = path.join(stageRoot, 'app', 'desktop-archive');
   const configPath = path.join(stageRoot, 'data', '.openclaw', 'openclaw.json');
 
@@ -499,12 +499,12 @@ function deploy(stage, usbRoot) {
   }
   const targetRoot = path.basename(resolvedUsbRoot).toLowerCase() === 'u-claw'
     ? resolvedUsbRoot
-    : path.join(resolvedUsbRoot, 'U-Claw');
+    : path.join(resolvedUsbRoot, 'Bavi-box');
   fs.mkdirSync(targetRoot, { recursive: true });
 
   const backupRoot = path.join(targetRoot, `_backup-before-portable-deploy-${localTimestamp()}`);
   const relativeFiles = [
-    'U-Claw Launcher.exe',
+    'Bavi-box Launcher.exe',
     'Mac-Start-App.command',
     'Windows-Start-App.bat',
     'UCLAW-PACKAGE-NOTES.txt',
@@ -516,13 +516,13 @@ function deploy(stage, usbRoot) {
     'app/desktop-archive/u-claw-app-win-x64.zip.sha256'
   ];
   const relativeDirs = [
-    'U-Claw Launcher.app'
+    'Bavi-box Launcher.app'
   ];
   const legacyFiles = [
-    `app/desktop-archive/U-Claw ${version}.exe`
+    `app/desktop-archive/Bavi-box ${version}.exe`
   ];
   const legacyDirs = [
-    'U-Claw Launcher'
+    'Bavi-box Launcher'
   ];
 
   for (const relativeFile of relativeFiles) {
@@ -552,7 +552,7 @@ function deploy(stage, usbRoot) {
     fs.rmSync(path.join(targetRoot, relativeDir), { recursive: true, force: true });
   }
   fs.chmodSync(path.join(targetRoot, 'Mac-Start-App.command'), 0o755);
-  fs.chmodSync(path.join(targetRoot, 'U-Claw Launcher.app', 'Contents', 'MacOS', 'U-Claw Launcher'), 0o755);
+  fs.chmodSync(path.join(targetRoot, 'Bavi-box Launcher.app', 'Contents', 'MacOS', 'Bavi-box Launcher'), 0o755);
 
   const deployedMacArm64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macArm64Archive)));
   const deployedMacX64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macX64Archive)));

@@ -27,7 +27,7 @@ type ServiceConfig struct {
 	Provider                   SMSProvider
 }
 
-// User is the verified U-Claw account returned to API clients.
+// User is the verified Bavi-box account returned to API clients.
 type User struct {
 	ID    int64  `json:"id"`
 	Phone string `json:"phone"`
@@ -190,7 +190,7 @@ func (s *Service) canUseFixedCodeWithoutSend(code string) bool {
 		strings.TrimSpace(code) == strings.TrimSpace(s.cfg.DevSMSCode)
 }
 
-// VerifyAccessToken validates a U-Claw access token for authenticated API calls.
+// VerifyAccessToken validates a Bavi-box access token for authenticated API calls.
 func (s *Service) VerifyAccessToken(token string) (TokenClaims, error) {
 	return s.tokens.VerifyAccessToken(token)
 }

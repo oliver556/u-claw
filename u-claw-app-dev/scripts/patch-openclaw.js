@@ -31,7 +31,7 @@ function writeIfChanged(file, before, after) {
 
 function copyFileIfChanged(source, target) {
   if (!fs.existsSync(source)) {
-    throw new Error(`Missing U-Claw brand asset: ${source}`);
+    throw new Error(`Missing Bavi-box brand asset: ${source}`);
   }
 
   const next = fs.readFileSync(source);
@@ -43,7 +43,7 @@ function copyFileIfChanged(source, target) {
 }
 
 /**
- * Replaces the Control UI browser and in-app fallback avatars with official U-Claw assets.
+ * Replaces the Control UI browser and in-app fallback avatars with official Bavi-box assets.
  */
 function patchControlUiBrandAssets() {
   const copies = [
@@ -428,7 +428,7 @@ function escapeRegExp(value) {
 }
 
 /**
- * Applies U-Claw chat runtime patches that need to survive rebuilt OpenClaw
+ * Applies Bavi-box chat runtime patches that need to survive rebuilt OpenClaw
  * assets, including media previews and attachment affordances.
  */
 function patchChatPage() {
@@ -754,7 +754,7 @@ function patchSessionTerminalReconcile() {
 
 /**
  * Applies deterministic Control UI CSS overrides that are not available through
- * OpenClaw configuration, including U-Claw media preview and composer polish.
+ * OpenClaw configuration, including Bavi-box media preview and composer polish.
  */
 function patchControlCss() {
   if (!fs.existsSync(assetsDir)) {
@@ -1025,7 +1025,7 @@ function parseOpenAiCompatibleImageResponse(payload, options = {}) {`,
 }
 
 /**
- * Keeps U-Claw image generation on configured image models only. Agent-supplied
+ * Keeps Bavi-box image generation on configured image models only. Agent-supplied
  * overrides outside imageGenerationModel.primary/fallbacks are ignored.
  */
 function patchConfiguredUclawImageGenerationModelsOnly() {
@@ -1052,11 +1052,11 @@ function patchConfiguredUclawImageGenerationModelsOnly() {
     );
     after = after.replace(
       'model: Type.Optional(Type.String({ description: "Provider/model override, e.g. openai/gpt-image-2; transparent OpenAI: openai/gpt-image-1.5." })),',
-      'model: Type.Optional(Type.String({ description: "Optional provider/model override; U-Claw accepts only models declared in imageGenerationModel config." })),',
+      'model: Type.Optional(Type.String({ description: "Optional provider/model override; Bavi-box accepts only models declared in imageGenerationModel config." })),',
     );
     after = after.replace(
-      'model: Type.Optional(Type.String({ description: "U-Claw ignores image model overrides and uses litellm/gpt-image-2." })),',
-      'model: Type.Optional(Type.String({ description: "Optional provider/model override; U-Claw accepts only models declared in imageGenerationModel config." })),',
+      'model: Type.Optional(Type.String({ description: "Bavi-box ignores image model overrides and uses litellm/gpt-image-2." })),',
+      'model: Type.Optional(Type.String({ description: "Optional provider/model override; Bavi-box accepts only models declared in imageGenerationModel config." })),',
     );
     after = after.replace(
       'background: optionalStringEnum(SUPPORTED_BACKGROUNDS, { description: "OpenAI background: transparent, opaque, auto. Transparent needs png/webp; default model routes to gpt-image-1.5." }),',
@@ -1064,11 +1064,11 @@ function patchConfiguredUclawImageGenerationModelsOnly() {
     );
     after = after.replace(
       'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\"; OpenAI also supports openai.background and routes default model to gpt-image-1.5. Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
-      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. U-Claw accepts only image models declared in imageGenerationModel config. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
+      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. Bavi-box accepts only image models declared in imageGenerationModel config. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
     );
     after = after.replace(
-      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. U-Claw uses fixed image model litellm/gpt-image-2 and ignores model overrides. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
-      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. U-Claw accepts only image models declared in imageGenerationModel config. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
+      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. Bavi-box uses fixed image model litellm/gpt-image-2 and ignores model overrides. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
+      'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. Bavi-box accepts only image models declared in imageGenerationModel config. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
     );
     after = after.replace(
       'const model = readStringParam(params, "model");',
@@ -1085,12 +1085,12 @@ function patchConfiguredUclawImageGenerationModelsOnly() {
 
     if (
       after.includes('const UCLAW_FIXED_IMAGE_GENERATION_MODEL = "litellm/gpt-image-2";')
-      || !after.includes("U-Claw accepts only image models declared in imageGenerationModel config")
+      || !after.includes("Bavi-box accepts only image models declared in imageGenerationModel config")
       || !after.includes("const configuredImageModelRefs = new Set([")
       || !after.includes("const requestedModel = readStringParam(params, \"model\");")
       || after.includes("routes default model to gpt-image-1.5")
     ) {
-      throw new Error(`Could not patch configured-only U-Claw image models in ${file}`);
+      throw new Error(`Could not patch configured-only Bavi-box image models in ${file}`);
     }
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
@@ -1099,7 +1099,7 @@ function patchConfiguredUclawImageGenerationModelsOnly() {
 }
 
 /**
- * Allows the xAI video provider to call U-Claw's configured adapter origin
+ * Allows the xAI video provider to call Bavi-box's configured adapter origin
  * with the same scoped SSRF trust used by text transports.
  */
 function patchXaiVideoLoopbackAccess() {
@@ -1436,7 +1436,7 @@ function patchXaiVideoDownloadFallback() {
 \t\t\t\t\t});
 \t\t\t\t} catch (error) {
 \t\t\t\t\tconst downloadError = error instanceof Error ? error.message : String(error);
-\t\t\t\t\tuClawDownloadWarning = \`\u539f\u89c6\u9891\u5df2\u751f\u6210\u6210\u529f\uff0c\u4f46 U-Claw \u8fde\u63a5\u539f\u89c6\u9891\u5730\u5740\u4e0b\u8f7d\u5931\u8d25\u3002\u751f\u6210\u94fe\u8def\u5df2\u7ecf\u5b8c\u6210\uff1b\u5931\u8d25\u53d1\u751f\u5728\u5f53\u524d\u8bbe\u5907\u4e0b\u8f7d\u539f\u89c6\u9891\u9636\u6bb5\uff0c\u5e38\u89c1\u539f\u56e0\u662f\u4ee3\u7406\u3001DNS \u6216\u7f51\u7edc\u9650\u5236\u3002\u8bf7\u590d\u5236\u4e0b\u65b9\u539f\u59cb\u89c6\u9891\u94fe\u63a5\u5230\u6d4f\u89c8\u5668\u6253\u5f00\u6216\u4e0b\u8f7d\u3002\\n\u4efb\u52a1 ID\uff1a\${requestId}\\n\u539f\u59cb\u89c6\u9891\u94fe\u63a5\uff1a\${videoUrl}\\n\u4e0b\u8f7d\u9519\u8bef\uff1a\${downloadError}\`;
+\t\t\t\t\tuClawDownloadWarning = \`\u539f\u89c6\u9891\u5df2\u751f\u6210\u6210\u529f\uff0c\u4f46 Bavi-box \u8fde\u63a5\u539f\u89c6\u9891\u5730\u5740\u4e0b\u8f7d\u5931\u8d25\u3002\u751f\u6210\u94fe\u8def\u5df2\u7ecf\u5b8c\u6210\uff1b\u5931\u8d25\u53d1\u751f\u5728\u5f53\u524d\u8bbe\u5907\u4e0b\u8f7d\u539f\u89c6\u9891\u9636\u6bb5\uff0c\u5e38\u89c1\u539f\u56e0\u662f\u4ee3\u7406\u3001DNS \u6216\u7f51\u7edc\u9650\u5236\u3002\u8bf7\u590d\u5236\u4e0b\u65b9\u539f\u59cb\u89c6\u9891\u94fe\u63a5\u5230\u6d4f\u89c8\u5668\u6253\u5f00\u6216\u4e0b\u8f7d\u3002\\n\u4efb\u52a1 ID\uff1a\${requestId}\\n\u539f\u59cb\u89c6\u9891\u94fe\u63a5\uff1a\${videoUrl}\\n\u4e0b\u8f7d\u9519\u8bef\uff1a\${downloadError}\`;
 \t\t\t\t\tdownloadedVideo = {
 \t\t\t\t\t\turl: videoUrl,
 \t\t\t\t\t\tmimeType: \"video/mp4\",
@@ -1459,7 +1459,13 @@ function patchXaiVideoDownloadFallback() {
     const before = read(file);
     if (!before.includes("//#region extensions/xai/video-generation-provider.ts")) continue;
     xaiProviderCount += 1;
-    if (before.includes("uClawDownloadWarning")) continue;
+    if (before.includes("uClawDownloadWarning")) {
+      const after = before.replaceAll(["U", "Claw"].join("-"), "Bavi-box");
+      if (writeIfChanged(file, before, after)) {
+        console.log(`patched ${path.relative(root, file)}`);
+      }
+      continue;
+    }
     const after = before.replace(downloadOriginal, downloadPatched);
     if (after === before) {
       throw new Error(`Could not patch xAI video download fallback in ${file}`);
@@ -1571,7 +1577,7 @@ function removeWrongModelUsageDashboardCss() {
  * Replaces the quick model settings page with a high-fidelity usage dashboard.
  */
 function patchConfigModelUsageDashboard() {
-  const helper = `function UcQuickEmptyTotals(){return{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,totalCost:0,missingCostEntries:0}}function UcQuickAddTotals(e,t){let n=t??{};return{input:(e.input??0)+(n.input??0),output:(e.output??0)+(n.output??0),cacheRead:(e.cacheRead??0)+(n.cacheRead??0),cacheWrite:(e.cacheWrite??0)+(n.cacheWrite??0),totalTokens:(e.totalTokens??0)+(n.totalTokens??0),totalCost:(e.totalCost??0)+(n.totalCost??0),missingCostEntries:(e.missingCostEntries??0)+(n.missingCostEntries??0)}}function UcQuickDayKey(e=new Date){return\`\${e.getFullYear()}-\${String(e.getMonth()+1).padStart(2,\`0\`)}-\${String(e.getDate()).padStart(2,\`0\`)}\`}function UcQuickSessionTotals(e){return(e??[]).reduce((e,t)=>UcQuickAddTotals(e,t?.usage),UcQuickEmptyTotals())}function UcQuickSessionDaily(e){let t=new Map;for(let n of e??[]){let e=n?.updatedAt?new Date(n.updatedAt):null;if(!e||Number.isNaN(e.valueOf())||!n?.usage)continue;let r=UcQuickDayKey(e),i=t.get(r)??{date:r,...UcQuickEmptyTotals()};t.set(r,UcQuickAddTotals(i,n.usage))}return[...t.values()]}function UcQuickRangeTotals(e,t,n){let r=new Date,i=new Set;for(let e=0;e<t;e++){let t=new Date(r);t.setDate(r.getDate()-e),i.add(UcQuickDayKey(t))}let a=(e??[]).filter(e=>i.has(e.date)).reduce((e,t)=>UcQuickAddTotals(e,t),UcQuickEmptyTotals());return a.totalTokens>0||a.totalCost>0?a:n??a}function UcQuickFmtTokens(e){return Math.max(0,Math.round(Number(e)||0)).toLocaleString()}function UcQuickQuotaToCompute(e,t){let n=Number(t?.computeUnitsPerCny)||6e7,r=Number(t?.newapiQuotaPerCny)||5e5;return Math.round((Number(e)||0)*n/r)}function UcQuickFmtCompute(e){return UcQuickFmtTokens(e)+\` 算力\`}function UcQuickFmtComputeYuan(e){let t=(Number(e)||0)/6e7;return t>0?t<.01?\`约 ¥\`+t.toFixed(4):\`约 ¥\`+t.toFixed(2):\`约 ¥0.00\`}function UcQuickFmtMs(e){let t=Number(e)||0;return t>0?t+\` ms\`:\`--\`}function UcQuickFmtCost(e){let t=Number(e)||0;return t>0?t<.01?\`$\`+t.toFixed(4):\`$\`+t.toFixed(2):\`--\`}function UcQuickFmtDate(e){if(!e)return\`--\`;let t=new Date(e);return Number.isNaN(t.valueOf())?\`--\`:t.toLocaleString(void 0,{month:\`2-digit\`,day:\`2-digit\`,hour:\`2-digit\`,minute:\`2-digit\`})}function UcQuickConfigValue(e,t){let n=e?.agents?.defaults??{};for(let e of t){let t=n?.[e];if(typeof t==\`string\`&&t.trim())return t.trim();if(t&&typeof t==\`object\`&&typeof t.primary==\`string\`&&t.primary.trim())return t.primary.trim()}return\`未配置\`}function UcQuickModelName(e){let t=String(e??\`\`).trim();return t?t.split(\`/\`).pop()||t:\`未配置\`}function UcQuickProviderName(e){let t=String(e??\`\`).trim();return t&&t.includes(\`/\`)?t.split(\`/\`)[0]:t||\`provider\`}function UcQuickProviderStatus(e){let t=(e??[]).find(e=>e&&(e.error||e.summary||e.billing?.length||e.windows?.length));return t?{ok:!t.error,label:t.error?\`账单异常\`:\`已连接\`,provider:t.displayName||t.provider||\`Provider\`,detail:String(t.error||t.summary||t.plan||\`Provider 已返回状态\`)}:{ok:!1,label:\`未接入\`,provider:\`--\`,detail:\`未发现真实余额接口，当前只展示本地用量与估算金额。\`}}function UcQuickModelCards(e){let t=UcQuickConfigValue(e,[\`model\`]),n=UcQuickConfigValue(e,[\`imageGenerationModel\`,\`imageModel\`]),r=UcQuickConfigValue(e,[\`videoGenerationModel\`]);return[{kind:\`text\`,tone:\`text\`,title:\`文字模型\`,sub:\`TEXT\`,model:t,status:t===\`未配置\`?\`未配置\`:\`正常\`,tags:[\`文本对话\`,\`长文理解\`,\`代码生成\`,\`工具调用\`]},{kind:\`image\`,tone:\`image\`,title:\`图片模型\`,sub:\`IMAGE\`,model:n,status:n===\`未配置\`?\`未配置\`:\`已配置\`,tags:[\`文生图\`,\`图生图\`,\`图片编辑\`,\`多尺寸\`]},{kind:\`video\`,tone:\`video\`,title:\`视频模型\`,sub:\`VIDEO\`,model:r,status:r===\`未配置\`?\`未配置\`:r.includes(\`xai/\`)?\`经 adapter\`:\`已配置\`,tags:[\`文生视频\`,\`图生视频\`,\`任务轮询\`,\`下载兜底\`]}]}function UcQuickChart(e){let t=new Map((e??[]).map(e=>[e.date,e])),n=0,r=[];for(let e=13;e>=0;e--){let i=new Date;i.setDate(i.getDate()-e);let a=UcQuickDayKey(i),o=t.get(a),s=o?.totalTokens??0;n=Math.max(n,s),r.push({label:e===0?\`今\`:String(i.getDate()),tokens:s,cost:o?.totalCost??0})}return r.map(e=>({...e,height:n>0?Math.max(5,Math.round(e.tokens/n*96)):5}))}function UcQuickCloudDaily(e,t){let n=new Map;for(let r of e??[]){let e=r?.createdAt?new Date(r.createdAt*1e3):null;if(!e||Number.isNaN(e.valueOf()))continue;let i=UcQuickDayKey(e),a=n.get(i)??{date:i,totalTokens:0,totalCost:0},o=Number(r?.compute??UcQuickQuotaToCompute(r?.quota,t))||0;a.totalTokens+=o,n.set(i,a)}return[...n.values()]}function UcQuickRows(e){return[...(e??[])].filter(e=>e?.usage).sort((e,t)=>(Number(t.updatedAt)||0)-(Number(e.updatedAt)||0)).slice(0,7)}function UcQuickSessionModel(e){let t=e?.usage?.modelUsage?.[0];return t?.model?\`\${t.provider??e.modelProvider??\`provider\`}/\${t.model}\`:e?.model??e?.modelOverride??\`未知模型\`}function UcQuickRecordSource(e){return e?.tokenName||e?.channelName||e?.content||e?.requestId||\`New API\`}function UcQuickModelDashboard(e){let t=e.usageData??{},n=t.result??{},r=t.costSummary??{},a=t.providerUsageSummary??{},o=n.sessions??[],s=UcQuickSessionTotals(o),c=n.totals??s,l=r.daily?.length?r.daily:UcQuickSessionDaily(o),u=UcQuickRangeTotals(l,1),d=UcQuickRangeTotals(l,7,c),f=UcQuickProviderStatus(a.providers),p=UcQuickModelCards(e.configObject),h=UcQuickRows(o),g=c.missingCostEntries>0||c.totalTokens>0&&c.totalCost===0,_=()=>e.onModelChange?.(),v=t.cloudSummary&&t.cloudSummary.status===\`ok\`,y=t.cloudSummary??{},b=Array.isArray(y.records)?y.records:[],m=UcQuickChart(v?UcQuickCloudDaily(b,y):l),x=v?{ok:!0,label:\`已接入\`,provider:\`New API\`,detail:\`实时余额 · U-Claw 算力 · \${y.newapiUsername??\`\`}\`}:f,C=v?Number(y.accountBalanceCompute??UcQuickQuotaToCompute(y.accountBalance,y))||0:null,S=v?Number(y.todayCompute??UcQuickQuotaToCompute(y.todayUsage,y))||0:u.totalTokens,w=v?Number(y.last7DaysCompute??UcQuickQuotaToCompute(y.last7DaysUsage,y))||0:d.totalTokens,T=v?Number(y.cumulativeCompute??UcQuickQuotaToCompute(y.cumulativeUsage,y))||0:c.totalTokens,N=v?Number(y.requestCount)||0:h.length,E=v?y.recentRecordText:\`\${h.length} 条最近记录\`,R=t.recharging,M=t.rechargeMessage,L=t.rechargeError;return i\`
+  const helper = `function UcQuickEmptyTotals(){return{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,totalCost:0,missingCostEntries:0}}function UcQuickAddTotals(e,t){let n=t??{};return{input:(e.input??0)+(n.input??0),output:(e.output??0)+(n.output??0),cacheRead:(e.cacheRead??0)+(n.cacheRead??0),cacheWrite:(e.cacheWrite??0)+(n.cacheWrite??0),totalTokens:(e.totalTokens??0)+(n.totalTokens??0),totalCost:(e.totalCost??0)+(n.totalCost??0),missingCostEntries:(e.missingCostEntries??0)+(n.missingCostEntries??0)}}function UcQuickDayKey(e=new Date){return\`\${e.getFullYear()}-\${String(e.getMonth()+1).padStart(2,\`0\`)}-\${String(e.getDate()).padStart(2,\`0\`)}\`}function UcQuickSessionTotals(e){return(e??[]).reduce((e,t)=>UcQuickAddTotals(e,t?.usage),UcQuickEmptyTotals())}function UcQuickSessionDaily(e){let t=new Map;for(let n of e??[]){let e=n?.updatedAt?new Date(n.updatedAt):null;if(!e||Number.isNaN(e.valueOf())||!n?.usage)continue;let r=UcQuickDayKey(e),i=t.get(r)??{date:r,...UcQuickEmptyTotals()};t.set(r,UcQuickAddTotals(i,n.usage))}return[...t.values()]}function UcQuickRangeTotals(e,t,n){let r=new Date,i=new Set;for(let e=0;e<t;e++){let t=new Date(r);t.setDate(r.getDate()-e),i.add(UcQuickDayKey(t))}let a=(e??[]).filter(e=>i.has(e.date)).reduce((e,t)=>UcQuickAddTotals(e,t),UcQuickEmptyTotals());return a.totalTokens>0||a.totalCost>0?a:n??a}function UcQuickFmtTokens(e){return Math.max(0,Math.round(Number(e)||0)).toLocaleString()}function UcQuickQuotaToCompute(e,t){let n=Number(t?.computeUnitsPerCny)||6e7,r=Number(t?.newapiQuotaPerCny)||5e5;return Math.round((Number(e)||0)*n/r)}function UcQuickFmtCompute(e){return UcQuickFmtTokens(e)+\` 算力\`}function UcQuickFmtComputeYuan(e){let t=(Number(e)||0)/6e7;return t>0?t<.01?\`约 ¥\`+t.toFixed(4):\`约 ¥\`+t.toFixed(2):\`约 ¥0.00\`}function UcQuickFmtMs(e){let t=Number(e)||0;return t>0?t+\` ms\`:\`--\`}function UcQuickFmtCost(e){let t=Number(e)||0;return t>0?t<.01?\`$\`+t.toFixed(4):\`$\`+t.toFixed(2):\`--\`}function UcQuickFmtDate(e){if(!e)return\`--\`;let t=new Date(e);return Number.isNaN(t.valueOf())?\`--\`:t.toLocaleString(void 0,{month:\`2-digit\`,day:\`2-digit\`,hour:\`2-digit\`,minute:\`2-digit\`})}function UcQuickConfigValue(e,t){let n=e?.agents?.defaults??{};for(let e of t){let t=n?.[e];if(typeof t==\`string\`&&t.trim())return t.trim();if(t&&typeof t==\`object\`&&typeof t.primary==\`string\`&&t.primary.trim())return t.primary.trim()}return\`未配置\`}function UcQuickModelName(e){let t=String(e??\`\`).trim();return t?t.split(\`/\`).pop()||t:\`未配置\`}function UcQuickProviderName(e){let t=String(e??\`\`).trim();return t&&t.includes(\`/\`)?t.split(\`/\`)[0]:t||\`provider\`}function UcQuickProviderStatus(e){let t=(e??[]).find(e=>e&&(e.error||e.summary||e.billing?.length||e.windows?.length));return t?{ok:!t.error,label:t.error?\`账单异常\`:\`已连接\`,provider:t.displayName||t.provider||\`Provider\`,detail:String(t.error||t.summary||t.plan||\`Provider 已返回状态\`)}:{ok:!1,label:\`未接入\`,provider:\`--\`,detail:\`未发现真实余额接口，当前只展示本地用量与估算金额。\`}}function UcQuickModelCards(e){let t=UcQuickConfigValue(e,[\`model\`]),n=UcQuickConfigValue(e,[\`imageGenerationModel\`,\`imageModel\`]),r=UcQuickConfigValue(e,[\`videoGenerationModel\`]);return[{kind:\`text\`,tone:\`text\`,title:\`文字模型\`,sub:\`TEXT\`,model:t,status:t===\`未配置\`?\`未配置\`:\`正常\`,tags:[\`文本对话\`,\`长文理解\`,\`代码生成\`,\`工具调用\`]},{kind:\`image\`,tone:\`image\`,title:\`图片模型\`,sub:\`IMAGE\`,model:n,status:n===\`未配置\`?\`未配置\`:\`已配置\`,tags:[\`文生图\`,\`图生图\`,\`图片编辑\`,\`多尺寸\`]},{kind:\`video\`,tone:\`video\`,title:\`视频模型\`,sub:\`VIDEO\`,model:r,status:r===\`未配置\`?\`未配置\`:r.includes(\`xai/\`)?\`经 adapter\`:\`已配置\`,tags:[\`文生视频\`,\`图生视频\`,\`任务轮询\`,\`下载兜底\`]}]}function UcQuickChart(e){let t=new Map((e??[]).map(e=>[e.date,e])),n=0,r=[];for(let e=13;e>=0;e--){let i=new Date;i.setDate(i.getDate()-e);let a=UcQuickDayKey(i),o=t.get(a),s=o?.totalTokens??0;n=Math.max(n,s),r.push({label:e===0?\`今\`:String(i.getDate()),tokens:s,cost:o?.totalCost??0})}return r.map(e=>({...e,height:n>0?Math.max(5,Math.round(e.tokens/n*96)):5}))}function UcQuickCloudDaily(e,t){let n=new Map;for(let r of e??[]){let e=r?.createdAt?new Date(r.createdAt*1e3):null;if(!e||Number.isNaN(e.valueOf()))continue;let i=UcQuickDayKey(e),a=n.get(i)??{date:i,totalTokens:0,totalCost:0},o=Number(r?.compute??UcQuickQuotaToCompute(r?.quota,t))||0;a.totalTokens+=o,n.set(i,a)}return[...n.values()]}function UcQuickRows(e){return[...(e??[])].filter(e=>e?.usage).sort((e,t)=>(Number(t.updatedAt)||0)-(Number(e.updatedAt)||0)).slice(0,7)}function UcQuickSessionModel(e){let t=e?.usage?.modelUsage?.[0];return t?.model?\`\${t.provider??e.modelProvider??\`provider\`}/\${t.model}\`:e?.model??e?.modelOverride??\`未知模型\`}function UcQuickRecordSource(e){return e?.tokenName||e?.channelName||e?.content||e?.requestId||\`New API\`}function UcQuickModelDashboard(e){let t=e.usageData??{},n=t.result??{},r=t.costSummary??{},a=t.providerUsageSummary??{},o=n.sessions??[],s=UcQuickSessionTotals(o),c=n.totals??s,l=r.daily?.length?r.daily:UcQuickSessionDaily(o),u=UcQuickRangeTotals(l,1),d=UcQuickRangeTotals(l,7,c),f=UcQuickProviderStatus(a.providers),p=UcQuickModelCards(e.configObject),h=UcQuickRows(o),g=c.missingCostEntries>0||c.totalTokens>0&&c.totalCost===0,_=()=>e.onModelChange?.(),v=t.cloudSummary&&t.cloudSummary.status===\`ok\`,y=t.cloudSummary??{},b=Array.isArray(y.records)?y.records:[],m=UcQuickChart(v?UcQuickCloudDaily(b,y):l),x=v?{ok:!0,label:\`已接入\`,provider:\`New API\`,detail:\`实时余额 · Bavi-box 算力 · \${y.newapiUsername??\`\`}\`}:f,C=v?Number(y.accountBalanceCompute??UcQuickQuotaToCompute(y.accountBalance,y))||0:null,S=v?Number(y.todayCompute??UcQuickQuotaToCompute(y.todayUsage,y))||0:u.totalTokens,w=v?Number(y.last7DaysCompute??UcQuickQuotaToCompute(y.last7DaysUsage,y))||0:d.totalTokens,T=v?Number(y.cumulativeCompute??UcQuickQuotaToCompute(y.cumulativeUsage,y))||0:c.totalTokens,N=v?Number(y.requestCount)||0:h.length,E=v?y.recentRecordText:\`\${h.length} 条最近记录\`,R=t.recharging,M=t.rechargeMessage,L=t.rechargeError;return i\`
     <div class="uclaw-config-model-dashboard" data-uclaw-config-model-dashboard>
       <section class="uclaw-config-model-summary" aria-label="模型金额与用量">
         <article class="uclaw-config-model-panel uclaw-config-model-balance">
@@ -1580,8 +1586,8 @@ function patchConfigModelUsageDashboard() {
           <p>\${v?\`\${x.detail} · New API quota \${UcQuickFmtTokens(y.accountBalance)} · \${UcQuickFmtComputeYuan(C)} · 1 元 = 6kw 算力\`:x.detail}</p>
           <div class="uclaw-config-model-actions"><button class="btn primary" type="button" @click=\${()=>e.onOpenRechargeDialog?.()} ?disabled=\${R}>\${R?\`充值中\`:\`充值\`}</button><button class="btn" type="button" @click=\${()=>e.onOpenRechargeRecords?.()}>记录</button></div>
         </article>
-        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>今日消耗</span><strong>\${UcQuickFmtTokens(S)}</strong><small>\${v?\`U-Claw 算力\`:UcQuickFmtCost(u.totalCost)}</small></article>
-        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>近 7 天</span><strong>\${UcQuickFmtTokens(w)}</strong><small>\${v?\`U-Claw 算力\`:UcQuickFmtCost(d.totalCost)}</small></article>
+        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>今日消耗</span><strong>\${UcQuickFmtTokens(S)}</strong><small>\${v?\`Bavi-box 算力\`:UcQuickFmtCost(u.totalCost)}</small></article>
+        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>近 7 天</span><strong>\${UcQuickFmtTokens(w)}</strong><small>\${v?\`Bavi-box 算力\`:UcQuickFmtCost(d.totalCost)}</small></article>
         <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>已消耗</span><strong>\${UcQuickFmtTokens(T)}</strong><small>\${v?\`New API used_quota\`:E}</small></article>
         <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>请求次数</span><strong>\${UcQuickFmtTokens(N)}</strong><small>\${v?\`New API request_count\`:\`本地会话\`}</small></article>
       </section>
@@ -1594,7 +1600,7 @@ function patchConfigModelUsageDashboard() {
       \${!v&&g?i\`<div class="uclaw-config-model-callout warn">部分模型缺少价格配置，金额可能只显示 token 或估算值。</div>\`:\`\`}
       <section class="uclaw-config-model-main">
         <div class="uclaw-config-model-panel uclaw-config-model-models">
-          <div class="uclaw-config-model-head"><div><h2>模型能力</h2><p>文字、图片、视频默认模型</p></div><button class="btn uclaw-config-model-advanced" type="button" @click=\${_}>高级配置</button></div>
+          <div class="uclaw-config-model-head"><div><h2>模型能力</h2><p>文字、图片、视频默认模型</p></div><div class="uclaw-config-model-head-actions"><button class="btn" type="button" @click=\${()=>e.onRefreshModelCatalog?.()}>同步模型</button><button class="btn uclaw-config-model-advanced" type="button" @click=\${_}>高级配置</button></div></div>
           <div class="uclaw-config-model-card-grid">\${p.map(t=>i\`<article class="uclaw-config-model-card tone-\${t.tone}">
             <div><span>\${t.title}</span><span class="uclaw-config-model-card-tools"><em>\${t.status}</em><button class="uclaw-config-model-change" type="button" @click=\${()=>e.onModelChange?.(t.kind,t.model)}>更换</button></span></div>
             <strong title=\${t.model}>\${UcQuickModelName(t.model)}</strong>
@@ -1624,8 +1630,8 @@ function patchConfigModelUsageDashboard() {
   /**
    * Runtime class methods for the model selector modal and config writeback.
    */
-  const modelChangeMethod = `uclawModelCandidates(e,t){let n=this.context.runtimeConfig?.state?.configForm??this.context.runtimeConfig?.state?.configSnapshot?.config??{},r=[],i=new Set,a=(e,t,n,a)=>{let o=String(e??\`\`).trim();if(!o||i.has(o))return;i.add(o),r.push({id:o,name:t||o,provider:n||UcQuickProviderName(o),source:a||\`配置\`})},o=n?.agents?.defaults??{};a(t,\`当前模型\`,UcQuickProviderName(t),\`当前\`);for(let e of [o.model,o.imageGenerationModel,o.imageModel,o.videoGenerationModel])typeof e==\`string\`?a(e,\`默认模型\`,UcQuickProviderName(e),\`默认\`):e?.primary&&a(e.primary,\`默认模型\`,UcQuickProviderName(e.primary),\`默认\`);let s=n?.models?.providers??{};for(let[t,n]of Object.entries(s)){let r=Array.isArray(n?.models)?n.models:[];for(let n of r){let r=typeof n==\`string\`?n:String(n?.id??n?.name??\`\`).trim();if(!r)continue;let i=\`\${t}/\${r}\`,o=Array.isArray(n?.input)?n.input.map(e=>String(e).toLowerCase()):[],s=i.toLowerCase(),c=e===\`video\`?(o.includes(\`video\`)||/video|jimeng|kling|runway/.test(s)):e===\`image\`?(o.includes(\`image\`)||/image|gpt-image|dall|flux|midjourney/.test(s)):!(/video|jimeng|kling|runway|gpt-image/.test(s));c&&a(i,n?.name||r,t,n?.api||\`provider\`)}}return r}async uclawApplyModelChoice(e,t){let n={text:{paths:[[\`agents\`,\`defaults\`,\`model\`,\`primary\`]]},image:{paths:[[\`agents\`,\`defaults\`,\`imageGenerationModel\`,\`primary\`],[\`agents\`,\`defaults\`,\`imageModel\`,\`primary\`]]},video:{paths:[[\`agents\`,\`defaults\`,\`videoGenerationModel\`,\`primary\`]]}}[e],r=this.context.runtimeConfig,i=String(t??\`\`).trim();if(!n||!i||!r)return;try{await r.ensureLoaded?.();for(let e of n.paths)r.patchForm(e,i);let e=await r.save();if(e===!1)throw Error(r.state.lastError??\`保存失败\`);if(r.state.connected){let e=await r.apply?.();if(e===!1)throw Error(r.state.lastError??\`应用失败\`)}await r.refresh?.({discardPendingChanges:!0}),this.uclawReloadModelUsage(),this.requestUpdate()}catch(e){globalThis.alert?.(\`更换模型失败：\${e instanceof Error?e.message:String(e)}\`)}}uclawChangeModel(e,t){let n={text:\`文字模型\`,image:\`图片模型\`,video:\`视频模型\`}[e];if(!n)return;let r=String(t??\`\`).trim(),i=this.uclawModelCandidates(e,r),a=r&&r!==\`未配置\`?r:(i[0]?.id??\`\`),o=document.createElement(\`div\`);o.className=\`uclaw-model-picker\`,o.tabIndex=-1,o.innerHTML=\`<div class="uclaw-model-picker__panel" role="dialog" aria-modal="true" aria-label="\${n}选择器"><div class="uclaw-model-picker__head"><div><h2>更换\${n}</h2><p>选择已配置模型，或直接输入模型 id。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><input class="uclaw-model-picker__search" placeholder="搜索或输入模型 id" value="\${a.replace(/"/g,\`&quot;\`)}"><div class="uclaw-model-picker__list"></div><div class="uclaw-model-picker__foot"><button class="btn" type="button" data-cancel>取消</button><button class="btn primary" type="button" data-confirm>确认更换</button></div></div>\`;let s=o.querySelector(\`.uclaw-model-picker__search\`),c=o.querySelector(\`.uclaw-model-picker__list\`),l=()=>{let e=String(s.value??\`\`).toLowerCase().trim(),t=i.filter(t=>!e||t.id.toLowerCase().includes(e)||t.name.toLowerCase().includes(e)||t.provider.toLowerCase().includes(e));c.innerHTML=t.length?\`\`:\`<div class="uclaw-model-picker__empty">没有匹配项，可直接确认输入的模型 id。</div>\`;for(let e of t){let t=document.createElement(\`button\`);t.type=\`button\`,t.className=\`uclaw-model-picker__option \${e.id===s.value.trim()?\`is-selected\`:\`\`}\`,t.innerHTML=\`<strong></strong><span></span><em></em>\`,t.querySelector(\`strong\`).textContent=e.name,t.querySelector(\`span\`).textContent=e.id,t.querySelector(\`em\`).textContent=\`\${e.provider} · \${e.source}\`,t.addEventListener(\`click\`,()=>{s.value=e.id,l()}),c.appendChild(t)}};let u=()=>{document.removeEventListener(\`keydown\`,d,!0),o.remove()},d=t=>{t.key===\`Escape\`&&(t.preventDefault(),u()),t.key===\`Enter\`&&document.activeElement===s&&(t.preventDefault(),o.querySelector(\`[data-confirm]\`)?.click())};o.addEventListener(\`click\`,e=>{e.target===o&&u()}),o.querySelector(\`.uclaw-model-picker__close\`)?.addEventListener(\`click\`,u),o.querySelector(\`[data-cancel]\`)?.addEventListener(\`click\`,u),o.querySelector(\`[data-confirm]\`)?.addEventListener(\`click\`,async()=>{let t=String(s.value??\`\`).trim();if(!t)return;s.disabled=!0,o.querySelector(\`[data-confirm]\`).textContent=\`保存中...\`;await this.uclawApplyModelChoice(e,t),u()}),s.addEventListener(\`input\`,l),document.body.appendChild(o),document.addEventListener(\`keydown\`,d,!0),l(),requestAnimationFrame(()=>{o.focus({preventScroll:!0}),s.focus()})}`;
-  const rechargeModelMethod = `uclawRechargeMoney(e){return"¥"+((Number(e)||0)/100).toFixed(2)}uclawRechargeCompute(e){return(Math.round((Number(e)||0)*120)).toLocaleString()+" 算力"}uclawRechargeDate(e){let t=e?new Date(e):null;return!t||Number.isNaN(t.valueOf())?"--":t.toLocaleString(void 0,{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}uclawRechargeStatusText(e){return{created:"待支付",paid:"已支付",crediting:"入账中",credited:"已到账",credit_failed:"入账失败"}[e]||e||"未知"}async uclawRechargeModelQuota(e="dev_10"){if(this.uclawModelUsage?.recharging)return!1;this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!0,rechargeMessage:null,rechargeError:null},this.requestUpdate();try{let t=globalThis.uclaw?.rechargeModelQuota?await globalThis.uclaw.rechargeModelQuota({planCode:e}):{ok:!1,message:"充值服务不可用"};if(!t?.ok)throw Error(t?.message||"充值失败");return this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!1,rechargeMessage:t.message||"虚拟充值成功",rechargeError:null,cloudSummary:t.usage?.status==="ok"?t.usage:this.uclawModelUsage?.cloudSummary},this.requestUpdate(),this.uclawReloadModelUsage(),!0}catch(e){return this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!1,rechargeMessage:null,rechargeError:e?.message??String(e)},this.requestUpdate(),!1}}async uclawOpenRechargeDialog(){if(this.uclawModelUsage?.recharging)return;let e=document.createElement("div");e.className="uclaw-model-picker",e.tabIndex=-1,e.innerHTML='<div class="uclaw-model-picker__panel uclaw-recharge-dialog" role="dialog" aria-modal="true" aria-label="充值套餐"><div class="uclaw-model-picker__head"><div><h2>充值</h2><p>1 元 = 6kw 算力，成功后额度会自动写入 New API。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><div class="uclaw-recharge-plan-grid" data-plans><div class="uclaw-model-picker__empty">正在加载套餐...</div></div><div class="uclaw-config-model-callout danger" data-error hidden></div><div class="uclaw-model-picker__foot"><button class="btn" type="button" data-cancel>取消</button><button class="btn primary" type="button" data-confirm disabled>确认充值</button></div></div>';let t=e.querySelector("[data-plans]"),n=e.querySelector("[data-confirm]"),r=e.querySelector("[data-error]"),i=[],a="",o=()=>{t.innerHTML="",n.disabled=!a;if(!i.length){let e=document.createElement("div");e.className="uclaw-model-picker__empty",e.textContent="暂无可用套餐",t.appendChild(e);return}for(let e of i){let r=document.createElement("button");r.type="button",r.className="uclaw-recharge-plan "+(e.code===a?"is-selected":""),r.innerHTML="<strong></strong><span></span><em></em>";let i=r.querySelector("strong"),o=r.querySelector("span"),s=r.querySelector("em");i.textContent=e.name||e.code,o.textContent=this.uclawRechargeMoney(e.amountCents),s.textContent=this.uclawRechargeCompute(e.quota),r.addEventListener("click",()=>{a=e.code,o()}),t.appendChild(r)}};let s=()=>{document.removeEventListener("keydown",c,!0),e.remove()},c=t=>{t.key==="Escape"&&(t.preventDefault(),s())};e.addEventListener("click",t=>{t.target===e&&s()}),e.querySelector(".uclaw-model-picker__close")?.addEventListener("click",s),e.querySelector("[data-cancel]")?.addEventListener("click",s),n.addEventListener("click",async()=>{if(!a)return;n.disabled=!0,n.textContent="充值中...";let e=await this.uclawRechargeModelQuota(a);e?s():(n.disabled=!1,n.textContent="确认充值",r.hidden=!1,r.textContent=this.uclawModelUsage?.rechargeError||"充值失败，请稍后重试")}),document.body.appendChild(e),document.addEventListener("keydown",c,!0);try{let e=globalThis.uclaw?.getRechargePlans?await globalThis.uclaw.getRechargePlans():{ok:!1,message:"充值服务不可用",plans:[]};if(!e?.ok)throw Error(e?.message||"套餐加载失败");i=Array.isArray(e.plans)?e.plans:[],a=i[0]?.code||"",o()}catch(e){t.innerHTML='<div class="uclaw-model-picker__empty">套餐加载失败</div>',r.hidden=!1,r.textContent=e?.message??String(e)}requestAnimationFrame(()=>e.focus({preventScroll:!0}))}async uclawOpenRechargeRecords(){let e=document.createElement("div");e.className="uclaw-model-picker",e.tabIndex=-1,e.innerHTML='<div class="uclaw-model-picker__panel uclaw-recharge-dialog" role="dialog" aria-modal="true" aria-label="充值记录"><div class="uclaw-model-picker__head"><div><h2>充值记录</h2><p>最近 20 条订单，到账以 U-Claw 算力为准（New API quota）。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><div class="uclaw-recharge-order-list" data-orders><div class="uclaw-model-picker__empty">正在加载记录...</div></div><div class="uclaw-model-picker__foot"><button class="btn primary" type="button" data-cancel>完成</button></div></div>';let t=e.querySelector("[data-orders]"),n=()=>{document.removeEventListener("keydown",r,!0),e.remove()},r=t=>{t.key==="Escape"&&(t.preventDefault(),n())};e.addEventListener("click",t=>{t.target===e&&n()}),e.querySelector(".uclaw-model-picker__close")?.addEventListener("click",n),e.querySelector("[data-cancel]")?.addEventListener("click",n),document.body.appendChild(e),document.addEventListener("keydown",r,!0);try{let e=globalThis.uclaw?.getRechargeOrders?await globalThis.uclaw.getRechargeOrders():{ok:!1,message:"充值记录服务不可用",orders:[]};if(!e?.ok)throw Error(e?.message||"记录加载失败");let n=Array.isArray(e.orders)?e.orders:[];if(!n.length){t.innerHTML='<div class="uclaw-model-picker__empty">暂无充值记录</div>'}else{t.innerHTML="";for(let e of n){let n=document.createElement("div");n.className="uclaw-recharge-order",n.innerHTML="<strong></strong><span></span><em></em><small></small>",n.querySelector("strong").textContent=this.uclawRechargeMoney(e.amountCents),n.querySelector("span").textContent=this.uclawRechargeCompute(e.quota),n.querySelector("em").textContent=this.uclawRechargeStatusText(e.status),n.querySelector("small").textContent=(e.orderNo||"订单")+" · "+this.uclawRechargeDate(e.creditedAt||e.paidAt||e.createdAt),t.appendChild(n)}}}catch(e){t.innerHTML='<div class="uclaw-model-picker__empty">记录加载失败：'+(e?.message??String(e))+"</div>"}requestAnimationFrame(()=>e.focus({preventScroll:!0}))}`;
+  const modelChangeMethod = `async uclawRefreshModelCatalog(){try{let e=globalThis.uclaw?.refreshModelCatalog?await globalThis.uclaw.refreshModelCatalog():{ok:!1,message:\`模型目录服务不可用\`};if(!e?.ok)throw Error(e?.message||\`同步失败\`);await this.context.runtimeConfig?.refresh?.({discardPendingChanges:!0}),this.requestUpdate(),globalThis.alert?.(e.message||\`模型目录已同步\`)}catch(e){globalThis.alert?.(\`同步模型失败：\${e instanceof Error?e.message:String(e)}\`)}}uclawModelCandidates(e,t){let n=this.context.runtimeConfig?.state?.configForm??this.context.runtimeConfig?.state?.configSnapshot?.config??{},r=[],i=new Set,a=(e,t,n,a)=>{let o=String(e??\`\`).trim();if(!o||i.has(o))return;i.add(o),r.push({id:o,name:t||o,provider:n||UcQuickProviderName(o),source:a||\`配置\`})},o=n?.agents?.defaults??{};a(t,\`当前模型\`,UcQuickProviderName(t),\`当前\`);for(let e of [o.model,o.imageGenerationModel,o.imageModel,o.videoGenerationModel])typeof e==\`string\`?a(e,\`默认模型\`,UcQuickProviderName(e),\`默认\`):e?.primary&&a(e.primary,\`默认模型\`,UcQuickProviderName(e.primary),\`默认\`);let s=n?.models?.providers??{};for(let[t,n]of Object.entries(s)){let r=Array.isArray(n?.models)?n.models:[];for(let n of r){let r=typeof n==\`string\`?n:String(n?.id??n?.name??\`\`).trim();if(!r)continue;let i=\`\${t}/\${r}\`,o=Array.isArray(n?.input)?n.input.map(e=>String(e).toLowerCase()):[],s=i.toLowerCase(),c=e===\`video\`?(o.includes(\`video\`)||/video|jimeng|kling|runway/.test(s)):e===\`image\`?(o.includes(\`image\`)||/image|gpt-image|dall|flux|midjourney/.test(s)):!(/video|jimeng|kling|runway|gpt-image/.test(s));c&&a(i,n?.name||r,t,n?.api||\`provider\`)}}return r}async uclawApplyModelChoice(e,t){let n={text:{paths:[[\`agents\`,\`defaults\`,\`model\`,\`primary\`]]},image:{paths:[[\`agents\`,\`defaults\`,\`imageGenerationModel\`,\`primary\`],[\`agents\`,\`defaults\`,\`imageModel\`,\`primary\`]]},video:{paths:[[\`agents\`,\`defaults\`,\`videoGenerationModel\`,\`primary\`]]}}[e],r=this.context.runtimeConfig,i=String(t??\`\`).trim();if(!n||!i||!r)return;try{await r.ensureLoaded?.();for(let e of n.paths)r.patchForm(e,i);let e=await r.save();if(e===!1)throw Error(r.state.lastError??\`保存失败\`);if(r.state.connected){let e=await r.apply?.();if(e===!1)throw Error(r.state.lastError??\`应用失败\`)}await r.refresh?.({discardPendingChanges:!0}),this.uclawReloadModelUsage(),this.requestUpdate()}catch(e){globalThis.alert?.(\`更换模型失败：\${e instanceof Error?e.message:String(e)}\`)}}uclawChangeModel(e,t){let n={text:\`文字模型\`,image:\`图片模型\`,video:\`视频模型\`}[e];if(!n)return;let r=String(t??\`\`).trim(),i=this.uclawModelCandidates(e,r),a=r&&r!==\`未配置\`?r:(i[0]?.id??\`\`),o=document.createElement(\`div\`);o.className=\`uclaw-model-picker\`,o.tabIndex=-1,o.innerHTML=\`<div class="uclaw-model-picker__panel" role="dialog" aria-modal="true" aria-label="\${n}选择器"><div class="uclaw-model-picker__head"><div><h2>更换\${n}</h2><p>选择已配置模型，或直接输入模型 id。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><input class="uclaw-model-picker__search" placeholder="搜索或输入模型 id" value="\${a.replace(/"/g,\`&quot;\`)}"><div class="uclaw-model-picker__list"></div><div class="uclaw-model-picker__foot"><button class="btn" type="button" data-cancel>取消</button><button class="btn primary" type="button" data-confirm>确认更换</button></div></div>\`;let s=o.querySelector(\`.uclaw-model-picker__search\`),c=o.querySelector(\`.uclaw-model-picker__list\`),l=()=>{let e=String(s.value??\`\`).toLowerCase().trim(),t=i.filter(t=>!e||t.id.toLowerCase().includes(e)||t.name.toLowerCase().includes(e)||t.provider.toLowerCase().includes(e));c.innerHTML=t.length?\`\`:\`<div class="uclaw-model-picker__empty">没有匹配项，可直接确认输入的模型 id。</div>\`;for(let e of t){let t=document.createElement(\`button\`);t.type=\`button\`,t.className=\`uclaw-model-picker__option \${e.id===s.value.trim()?\`is-selected\`:\`\`}\`,t.innerHTML=\`<strong></strong><span></span><em></em>\`,t.querySelector(\`strong\`).textContent=e.name,t.querySelector(\`span\`).textContent=e.id,t.querySelector(\`em\`).textContent=\`\${e.provider} · \${e.source}\`,t.addEventListener(\`click\`,()=>{s.value=e.id,l()}),c.appendChild(t)}};let u=()=>{document.removeEventListener(\`keydown\`,d,!0),o.remove()},d=t=>{t.key===\`Escape\`&&(t.preventDefault(),u()),t.key===\`Enter\`&&document.activeElement===s&&(t.preventDefault(),o.querySelector(\`[data-confirm]\`)?.click())};o.addEventListener(\`click\`,e=>{e.target===o&&u()}),o.querySelector(\`.uclaw-model-picker__close\`)?.addEventListener(\`click\`,u),o.querySelector(\`[data-cancel]\`)?.addEventListener(\`click\`,u),o.querySelector(\`[data-confirm]\`)?.addEventListener(\`click\`,async()=>{let t=String(s.value??\`\`).trim();if(!t)return;s.disabled=!0,o.querySelector(\`[data-confirm]\`).textContent=\`保存中...\`;await this.uclawApplyModelChoice(e,t),u()}),s.addEventListener(\`input\`,l),document.body.appendChild(o),document.addEventListener(\`keydown\`,d,!0),l(),requestAnimationFrame(()=>{o.focus({preventScroll:!0}),s.focus()})}`;
+  const rechargeModelMethod = `uclawRechargeMoney(e){return"¥"+((Number(e)||0)/100).toFixed(2)}uclawRechargeCompute(e){return(Math.round((Number(e)||0)*120)).toLocaleString()+" 算力"}uclawRechargeDate(e){let t=e?new Date(e):null;return!t||Number.isNaN(t.valueOf())?"--":t.toLocaleString(void 0,{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}uclawRechargeStatusText(e){return{created:"待支付",paid:"已支付",crediting:"入账中",credited:"已到账",credit_failed:"入账失败"}[e]||e||"未知"}async uclawRechargeModelQuota(e="dev_10"){if(this.uclawModelUsage?.recharging)return!1;this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!0,rechargeMessage:null,rechargeError:null},this.requestUpdate();try{let t=globalThis.uclaw?.rechargeModelQuota?await globalThis.uclaw.rechargeModelQuota({planCode:e}):{ok:!1,message:"充值服务不可用"};if(!t?.ok)throw Error(t?.message||"充值失败");return this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!1,rechargeMessage:t.message||"虚拟充值成功",rechargeError:null,cloudSummary:t.usage?.status==="ok"?t.usage:this.uclawModelUsage?.cloudSummary},this.requestUpdate(),this.uclawReloadModelUsage(),!0}catch(e){return this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!1,rechargeMessage:null,rechargeError:e?.message??String(e)},this.requestUpdate(),!1}}async uclawOpenRechargeDialog(){if(this.uclawModelUsage?.recharging)return;let e=document.createElement("div");e.className="uclaw-model-picker",e.tabIndex=-1,e.innerHTML='<div class="uclaw-model-picker__panel uclaw-recharge-dialog" role="dialog" aria-modal="true" aria-label="充值套餐"><div class="uclaw-model-picker__head"><div><h2>充值</h2><p>1 元 = 6kw 算力，成功后额度会自动写入 New API。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><div class="uclaw-recharge-plan-grid" data-plans><div class="uclaw-model-picker__empty">正在加载套餐...</div></div><div class="uclaw-config-model-callout danger" data-error hidden></div><div class="uclaw-model-picker__foot"><button class="btn" type="button" data-cancel>取消</button><button class="btn primary" type="button" data-confirm disabled>确认充值</button></div></div>';let t=e.querySelector("[data-plans]"),n=e.querySelector("[data-confirm]"),r=e.querySelector("[data-error]"),i=[],a="",o=()=>{t.innerHTML="",n.disabled=!a;if(!i.length){let e=document.createElement("div");e.className="uclaw-model-picker__empty",e.textContent="暂无可用套餐",t.appendChild(e);return}for(let e of i){let r=document.createElement("button");r.type="button",r.className="uclaw-recharge-plan "+(e.code===a?"is-selected":""),r.innerHTML="<strong></strong><span></span><em></em>";let i=r.querySelector("strong"),o=r.querySelector("span"),s=r.querySelector("em");i.textContent=e.name||e.code,o.textContent=this.uclawRechargeMoney(e.amountCents),s.textContent=this.uclawRechargeCompute(e.quota),r.addEventListener("click",()=>{a=e.code,o()}),t.appendChild(r)}};let s=()=>{document.removeEventListener("keydown",c,!0),e.remove()},c=t=>{t.key==="Escape"&&(t.preventDefault(),s())};e.addEventListener("click",t=>{t.target===e&&s()}),e.querySelector(".uclaw-model-picker__close")?.addEventListener("click",s),e.querySelector("[data-cancel]")?.addEventListener("click",s),n.addEventListener("click",async()=>{if(!a)return;n.disabled=!0,n.textContent="充值中...";let e=await this.uclawRechargeModelQuota(a);e?s():(n.disabled=!1,n.textContent="确认充值",r.hidden=!1,r.textContent=this.uclawModelUsage?.rechargeError||"充值失败，请稍后重试")}),document.body.appendChild(e),document.addEventListener("keydown",c,!0);try{let e=globalThis.uclaw?.getRechargePlans?await globalThis.uclaw.getRechargePlans():{ok:!1,message:"充值服务不可用",plans:[]};if(!e?.ok)throw Error(e?.message||"套餐加载失败");i=Array.isArray(e.plans)?e.plans:[],a=i[0]?.code||"",o()}catch(e){t.innerHTML='<div class="uclaw-model-picker__empty">套餐加载失败</div>',r.hidden=!1,r.textContent=e?.message??String(e)}requestAnimationFrame(()=>e.focus({preventScroll:!0}))}async uclawOpenRechargeRecords(){let e=document.createElement("div");e.className="uclaw-model-picker",e.tabIndex=-1,e.innerHTML='<div class="uclaw-model-picker__panel uclaw-recharge-dialog" role="dialog" aria-modal="true" aria-label="充值记录"><div class="uclaw-model-picker__head"><div><h2>充值记录</h2><p>最近 20 条订单，到账以 Bavi-box 算力为准（New API quota）。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><div class="uclaw-recharge-order-list" data-orders><div class="uclaw-model-picker__empty">正在加载记录...</div></div><div class="uclaw-model-picker__foot"><button class="btn primary" type="button" data-cancel>完成</button></div></div>';let t=e.querySelector("[data-orders]"),n=()=>{document.removeEventListener("keydown",r,!0),e.remove()},r=t=>{t.key==="Escape"&&(t.preventDefault(),n())};e.addEventListener("click",t=>{t.target===e&&n()}),e.querySelector(".uclaw-model-picker__close")?.addEventListener("click",n),e.querySelector("[data-cancel]")?.addEventListener("click",n),document.body.appendChild(e),document.addEventListener("keydown",r,!0);try{let e=globalThis.uclaw?.getRechargeOrders?await globalThis.uclaw.getRechargeOrders():{ok:!1,message:"充值记录服务不可用",orders:[]};if(!e?.ok)throw Error(e?.message||"记录加载失败");let n=Array.isArray(e.orders)?e.orders:[];if(!n.length){t.innerHTML='<div class="uclaw-model-picker__empty">暂无充值记录</div>'}else{t.innerHTML="";for(let e of n){let n=document.createElement("div");n.className="uclaw-recharge-order",n.innerHTML="<strong></strong><span></span><em></em><small></small>",n.querySelector("strong").textContent=this.uclawRechargeMoney(e.amountCents),n.querySelector("span").textContent=this.uclawRechargeCompute(e.quota),n.querySelector("em").textContent=this.uclawRechargeStatusText(e.status),n.querySelector("small").textContent=(e.orderNo||"订单")+" · "+this.uclawRechargeDate(e.creditedAt||e.paidAt||e.createdAt),t.appendChild(n)}}}catch(e){t.innerHTML='<div class="uclaw-model-picker__empty">记录加载失败：'+(e?.message??String(e))+"</div>"}requestAnimationFrame(()=>e.focus({preventScroll:!0}))}`;
   const openAdvancedModelMethod = `uclawOpenAdvancedModels(){this.settingsMode=\`advanced\`,this.selections={...this.selections,"ai-agents":{activeSection:\`models\`,activeSubsection:null}},this.navigate(\`ai-agents\`)}`;
   const methods = `uclawUsageDayKey(e=new Date){return\`\${e.getFullYear()}-\${String(e.getMonth()+1).padStart(2,\`0\`)}-\${String(e.getDate()).padStart(2,\`0\`)}\`}uclawUsageTimeZone(){let e=-new Date().getTimezoneOffset(),t=e>=0?\`+\`:\`-\`,n=Math.abs(e),r=Math.floor(n/60),i=n%60;return{mode:\`specific\`,utcOffset:\`UTC\${t}\${String(r).padStart(2,\`0\`)}\${i?\`:\${String(i).padStart(2,\`0\`)}\`:\`\`}\`}}uclawModelUsageSnapshot(){return this.uclawModelUsage??{loading:!1,error:null,result:null,costSummary:null,providerUsageSummary:null,cloudSummary:null,cloudError:null,recharging:!1,rechargeMessage:null,rechargeError:null,client:null,requestId:0}}uclawEnsureModelUsage(){let e=this.context.gateway.snapshot.client;if(!e)return;let t=this.uclawModelUsageSnapshot();t.client!==e&&(this.uclawModelUsage={loading:!1,error:null,result:null,costSummary:null,providerUsageSummary:null,cloudSummary:null,cloudError:null,recharging:!1,rechargeMessage:null,rechargeError:null,client:e,requestId:t.requestId??0},t=this.uclawModelUsage),!t.loading&&!t.result&&!t.error&&this.uclawLoadModelUsage()}uclawLoadModelUsage(){let e=this.context.gateway.snapshot.client;if(!e)return;let t=++this.uclawModelUsage.requestId,n=new Date,r=new Date(n);r.setDate(n.getDate()-13);let i=this.uclawUsageDayKey(r),a=this.uclawUsageDayKey(n),o=this.uclawUsageTimeZone();this.uclawModelUsage={...this.uclawModelUsage,loading:!0,error:null,cloudError:null,client:e},this.requestUpdate();let s={startDate:i,endDate:a,agentScope:\`all\`,mode:o.mode,utcOffset:o.utcOffset},c=globalThis.uclaw?.getModelUsageSummary?globalThis.uclaw.getModelUsageSummary().catch(e=>({ok:!1,message:e?.message??String(e)})):Promise.resolve(null);Promise.all([e.request(\`sessions.usage\`,{...s,groupBy:\`family\`,includeHistorical:!0,limit:1e3,includeContextWeight:!0}),e.request(\`usage.cost\`,s).catch(()=>null),e.request(\`usage.status\`).catch(()=>null),c]).then(([n,r,i,a])=>{this.uclawModelUsage.requestId===t&&(this.uclawModelUsage={...this.uclawModelUsage,loading:!1,result:n,costSummary:r,providerUsageSummary:i,cloudSummary:a?.status===\`ok\`?a:null,cloudError:a&&a.status!==\`ok\`?(a.message||a.error||\`New API 数据暂不可用\`):null,error:null,client:e},this.requestUpdate())}).catch(n=>{this.uclawModelUsage.requestId===t&&(this.uclawModelUsage={...this.uclawModelUsage,loading:!1,error:n?.message??String(n),result:null,costSummary:null,providerUsageSummary:null,cloudSummary:null,cloudError:null,client:e},this.requestUpdate())})}uclawReloadModelUsage(){this.uclawModelUsage={...this.uclawModelUsage,result:null,error:null,costSummary:null,providerUsageSummary:null,cloudSummary:null,cloudError:null},this.uclawLoadModelUsage()}${rechargeModelMethod}uclawOpenAdvancedModels(){this.settingsMode=\`advanced\`,this.selections={...this.selections,"ai-agents":{activeSection:\`models\`,activeSubsection:null}},this.navigate(\`ai-agents\`)}${modelChangeMethod}`;
   const originalQuick = "function Ze(e){return i`\n    <div class=\"qs-container\">\n      <div class=\"qs-grid\">\n        ${He(e)} ${Ue(e)} ${Ge(e)}\n        ${Ke(e)} ${qe(e)} ${Je(e)}\n        ${We(e)} ${Ye(e)}\n      </div>\n\n      ${Xe(e)}\n    </div>\n  `}";
@@ -1698,22 +1704,29 @@ function patchConfigModelUsageDashboard() {
     );
     after = after.replace(
       "onModelChange:()=>{this.settingsMode=`advanced`,this.selections={...this.selections,\"ai-agents\":{activeSection:`models`,activeSubsection:null}},this.navigate(`ai-agents`)},",
-      "onModelChange:(e,t)=>this.uclawChangeModel(e,t),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onOpenRechargeDialog:()=>this.uclawOpenRechargeDialog(),onOpenRechargeRecords:()=>this.uclawOpenRechargeRecords(),",
+      "onModelChange:(e,t)=>this.uclawChangeModel(e,t),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onRefreshModelCatalog:()=>this.uclawRefreshModelCatalog(),onOpenRechargeDialog:()=>this.uclawOpenRechargeDialog(),onOpenRechargeRecords:()=>this.uclawOpenRechargeRecords(),",
     );
     after = after.replace(
       "onModelChange:()=>this.uclawOpenAdvancedModels(),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),",
-      "onModelChange:(e,t)=>this.uclawChangeModel(e,t),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onOpenRechargeDialog:()=>this.uclawOpenRechargeDialog(),onOpenRechargeRecords:()=>this.uclawOpenRechargeRecords(),",
+      "onModelChange:(e,t)=>this.uclawChangeModel(e,t),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onRefreshModelCatalog:()=>this.uclawRefreshModelCatalog(),onOpenRechargeDialog:()=>this.uclawOpenRechargeDialog(),onOpenRechargeRecords:()=>this.uclawOpenRechargeRecords(),",
     );
     after = after.replace(
       "onRefreshModelUsage:()=>this.uclawReloadModelUsage(),setBorderRadius:",
+      "onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onRefreshModelCatalog:()=>this.uclawRefreshModelCatalog(),onOpenRechargeDialog:()=>this.uclawOpenRechargeDialog(),onOpenRechargeRecords:()=>this.uclawOpenRechargeRecords(),setBorderRadius:",
+    );
+    after = after.replace(
       "onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onOpenRechargeDialog:()=>this.uclawOpenRechargeDialog(),onOpenRechargeRecords:()=>this.uclawOpenRechargeRecords(),setBorderRadius:",
+      "onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onRefreshModelCatalog:()=>this.uclawRefreshModelCatalog(),onOpenRechargeDialog:()=>this.uclawOpenRechargeDialog(),onOpenRechargeRecords:()=>this.uclawOpenRechargeRecords(),setBorderRadius:",
     );
     after = after.replace(
       "onModelChange:(e,t)=>this.uclawChangeModel(e,t),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onRechargeModelQuota:()=>this.uclawRechargeModelQuota(),setBorderRadius:",
-      "onModelChange:(e,t)=>this.uclawChangeModel(e,t),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onOpenRechargeDialog:()=>this.uclawOpenRechargeDialog(),onOpenRechargeRecords:()=>this.uclawOpenRechargeRecords(),setBorderRadius:",
+      "onModelChange:(e,t)=>this.uclawChangeModel(e,t),onRefreshModelUsage:()=>this.uclawReloadModelUsage(),onRefreshModelCatalog:()=>this.uclawRefreshModelCatalog(),onOpenRechargeDialog:()=>this.uclawOpenRechargeDialog(),onOpenRechargeRecords:()=>this.uclawOpenRechargeRecords(),setBorderRadius:",
     );
     if (
       !after.includes("data-uclaw-config-model-dashboard") ||
+      !after.includes("同步模型") ||
+      !after.includes("refreshModelCatalog") ||
+      !after.includes("onRefreshModelCatalog:()=>this.uclawRefreshModelCatalog()") ||
       !after.includes("uclawLoadModelUsage(){") ||
       !after.includes("sessions.usage") ||
       !after.includes("usage.cost") ||
@@ -1734,7 +1747,7 @@ function patchConfigModelUsageDashboardCss() {
   const markerStart = "/* uclaw-config-model-dashboard-1:start */";
   const markerEnd = "/* uclaw-config-model-dashboard-1:end */";
   const block = `${markerStart}
-.content:has(.uclaw-config-model-dashboard) .config-view-toggle,.content:has(.uclaw-config-model-dashboard) .config-view-toggle-row,.settings-workspace:has(.uclaw-config-model-dashboard)>.settings-section-nav,.uclaw-config-model-advanced{display:none!important}.uclaw-config-model-dashboard{display:grid;gap:14px;color:#172033}.uclaw-config-model-summary{display:grid;grid-template-columns:1.15fr repeat(4,minmax(140px,1fr));gap:14px}.uclaw-config-model-panel{border:1px solid #dfe7f3;border-radius:8px;background:#fff;box-shadow:0 10px 26px rgba(35,62,105,.06)}.uclaw-config-model-balance{min-height:142px;padding:18px;display:grid;gap:10px;align-content:space-between;background:linear-gradient(135deg,#f8fbff,#fff)}.uclaw-config-model-label,.uclaw-config-model-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.uclaw-config-model-label span,.uclaw-config-model-metric span{color:#64748b;font-size:12px;font-weight:650}.uclaw-config-model-label em,.uclaw-config-model-status-row em{padding:3px 8px;border-radius:999px;background:#eef2f7;color:#64748b;font-size:11px;font-style:normal}.uclaw-config-model-label em.ok,.uclaw-config-model-status-row em.ok{background:#e7f8ed;color:#16803a}.uclaw-config-model-status-row em.warn{background:#fff6db;color:#9a6500}.uclaw-config-model-status-row em.muted{background:#eef2f7;color:#64748b}.uclaw-config-model-balance strong{font-size:34px;line-height:1;font-variant-numeric:tabular-nums}.uclaw-config-model-balance p{margin:0;color:#64748b;font-size:12px;line-height:1.55}.uclaw-config-model-actions{display:flex;gap:8px}.uclaw-config-model-metric{min-height:142px;padding:18px;display:grid;align-content:space-between}.uclaw-config-model-metric strong{font-size:28px;line-height:1;font-variant-numeric:tabular-nums}.uclaw-config-model-metric small,.uclaw-config-model-head p{color:#64748b;font-size:12px}.uclaw-config-model-callout{padding:10px 12px;border:1px solid #b7d7ff;border-radius:8px;background:#f0f7ff;color:#0958d9;font-size:12px}.uclaw-config-model-callout.ok{border-color:#b7ebc6;background:#f0fff4;color:#16803a}.uclaw-config-model-callout.warn{border-color:#ffe0a3;background:#fff9e8;color:#9a6500}.uclaw-config-model-callout.danger{border-color:#ffccc7;background:#fff1f0;color:#cf1322}.uclaw-config-model-main{display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:14px}.uclaw-config-model-models,.uclaw-config-model-status,.uclaw-config-model-chart-wrap,.uclaw-config-model-ledger{padding:18px}.uclaw-config-model-head{margin-bottom:14px}.uclaw-config-model-head h2{margin:0;font-size:16px;font-weight:700}.uclaw-config-model-head p{margin:4px 0 0}.uclaw-config-model-head>span{padding:4px 8px;border-radius:6px;background:#f1f5f9;color:#64748b;font-size:11px}.uclaw-config-model-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:12px}.uclaw-config-model-card{min-height:150px;padding:14px;border:1px solid #dfe7f3;border-radius:8px;display:grid;gap:10px;background:#fbfdff}.uclaw-config-model-card.tone-image{background:#fffafd}.uclaw-config-model-card.tone-video{background:#fcfbff}.uclaw-config-model-card div{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px}.uclaw-config-model-card div>span:first-child{flex:0 0 auto;white-space:nowrap;font-weight:700}.uclaw-config-model-card div .uclaw-config-model-card-tools{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-weight:400}.uclaw-config-model-card div em{white-space:nowrap;font-size:11px;font-style:normal;color:#16803a}.uclaw-config-model-card strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 18px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;color:#0f172a}.uclaw-config-model-card small{color:#64748b;font-size:11px;text-transform:uppercase}.uclaw-config-model-tags{display:flex;flex-wrap:nowrap;gap:6px;margin:0;overflow-x:auto;white-space:nowrap;scrollbar-width:none}.uclaw-config-model-tags::-webkit-scrollbar{display:none}.uclaw-config-model-card b,.uclaw-config-model-change{flex:0 0 auto;white-space:nowrap}.uclaw-config-model-card b{padding:4px 7px;border-radius:5px;background:#eef6ff;color:#2563eb;font-size:11px;font-weight:650}.uclaw-config-model-change{padding:4px 7px;border:0;border-radius:5px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700;cursor:pointer}.uclaw-config-model-change:hover{background:#bfdbfe}.uclaw-model-picker{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:24px;background:rgba(15,23,42,.28);backdrop-filter:blur(8px)}.uclaw-model-picker__panel{width:min(520px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));display:grid;grid-template-rows:auto auto minmax(0,auto) auto;gap:10px;padding:16px;border:1px solid #dbe7f6;border-radius:8px;background:#fff;box-shadow:0 24px 72px rgba(15,23,42,.22);color:#172033}.uclaw-model-picker__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.uclaw-model-picker__head h2{margin:0;font-size:16px;font-weight:750}.uclaw-model-picker__head p{margin:4px 0 0;color:#64748b;font-size:12px}.uclaw-model-picker__close{width:28px;height:28px;border:0;border-radius:6px;background:#f1f5f9;color:#64748b;font-size:17px;line-height:1;cursor:pointer}.uclaw-model-picker__search{width:100%;height:36px;padding:0 10px;border:1px solid #dbe7f6;border-radius:7px;background:#f8fbff;color:#0f172a;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.uclaw-model-picker__list{max-height:260px;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px}.uclaw-model-picker__option{min-height:66px;border:1px solid #dfe7f3;border-radius:8px;background:#fff;text-align:left;padding:9px 11px;display:grid;grid-template-columns:minmax(0,1fr);align-content:center;gap:3px;cursor:pointer}.uclaw-model-picker__option:hover,.uclaw-model-picker__option.is-selected{border-color:#8ab9ff;background:#f0f7ff}.uclaw-model-picker__option strong{color:#0f172a;font:750 13px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-model-picker__option span{color:#334155;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-model-picker__option em{color:#64748b;font-size:11px;font-style:normal}.uclaw-model-picker__empty{padding:14px;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;text-align:center;font-size:12px}.uclaw-model-picker__foot{display:flex;justify-content:flex-end;gap:8px;margin-top:2px}.uclaw-recharge-dialog{width:min(560px,calc(100vw - 32px))}.uclaw-recharge-plan-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.uclaw-recharge-plan{min-height:96px;padding:12px;border:1px solid #dfe7f3;border-radius:8px;background:#fff;text-align:left;display:grid;gap:6px;cursor:pointer}.uclaw-recharge-plan:hover,.uclaw-recharge-plan.is-selected{border-color:#7db2ff;background:#eef6ff}.uclaw-recharge-plan strong{font-size:13px;color:#0f172a}.uclaw-recharge-plan span{font-size:22px;font-weight:780;color:#0f172a}.uclaw-recharge-plan em{font-size:11px;font-style:normal;color:#64748b}.uclaw-recharge-order-list{max-height:340px;overflow:auto;display:grid;gap:8px}.uclaw-recharge-order{padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;display:grid;grid-template-columns:90px minmax(0,1fr) auto;gap:4px 10px;align-items:center}.uclaw-recharge-order strong{font-size:15px;color:#0f172a}.uclaw-recharge-order span{font-size:12px;color:#334155}.uclaw-recharge-order em{padding:3px 7px;border-radius:999px;background:#e7f8ed;color:#16803a;font-size:11px;font-style:normal;white-space:nowrap}.uclaw-recharge-order small{grid-column:1/-1;color:#64748b;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-config-model-status-row{min-height:62px;display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:12px;align-items:center;border-top:1px solid #eef2f7}.uclaw-config-model-status-row:first-of-type{border-top:0}.uclaw-config-model-status-row>span{width:9px;height:9px;border-radius:50%;background:#2f81f7}.uclaw-config-model-status-row strong{display:block;font-size:13px}.uclaw-config-model-status-row small{display:block;margin-top:3px;color:#64748b;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-config-model-chart{height:158px;display:grid;grid-template-columns:repeat(14,1fr);align-items:end;gap:8px;padding-top:12px;border-bottom:1px solid #eef2f7}.uclaw-config-model-chart div{display:grid;justify-items:center;gap:6px;color:#64748b;font-size:10px}.uclaw-config-model-chart span{width:100%;max-width:28px;min-height:5px;border-radius:5px 5px 0 0;background:#c9ddff}.uclaw-config-model-chart span.hot{background:linear-gradient(180deg,#2f81f7,#0f63d8)}.uclaw-config-model-chart span.today{background:#f6b73c}.uclaw-config-model-table{overflow:auto}.uclaw-config-model-table table{width:100%;border-collapse:collapse;font-size:12px}.uclaw-config-model-table th,.uclaw-config-model-table td{height:38px;padding:0 9px;border-top:1px solid #eef2f7;text-align:left;white-space:nowrap}.uclaw-config-model-table th{color:#64748b;background:#f8fafc;font-size:11px}.uclaw-config-model-table td{color:#334155}.uclaw-config-model-table td[colspan]{text-align:center;color:#64748b}
+.content:has(.uclaw-config-model-dashboard) .config-view-toggle,.content:has(.uclaw-config-model-dashboard) .config-view-toggle-row,.settings-workspace:has(.uclaw-config-model-dashboard)>.settings-section-nav,.uclaw-config-model-advanced{display:none!important}.uclaw-config-model-dashboard{display:grid;gap:14px;color:#172033}.uclaw-config-model-summary{display:grid;grid-template-columns:1.15fr repeat(4,minmax(140px,1fr));gap:14px}.uclaw-config-model-panel{border:1px solid #dfe7f3;border-radius:8px;background:#fff;box-shadow:0 10px 26px rgba(35,62,105,.06)}.uclaw-config-model-balance{min-height:142px;padding:18px;display:grid;gap:10px;align-content:space-between;background:linear-gradient(135deg,#f8fbff,#fff)}.uclaw-config-model-label,.uclaw-config-model-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.uclaw-config-model-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.uclaw-config-model-label span,.uclaw-config-model-metric span{color:#64748b;font-size:12px;font-weight:650}.uclaw-config-model-label em,.uclaw-config-model-status-row em{padding:3px 8px;border-radius:999px;background:#eef2f7;color:#64748b;font-size:11px;font-style:normal}.uclaw-config-model-label em.ok,.uclaw-config-model-status-row em.ok{background:#e7f8ed;color:#16803a}.uclaw-config-model-status-row em.warn{background:#fff6db;color:#9a6500}.uclaw-config-model-status-row em.muted{background:#eef2f7;color:#64748b}.uclaw-config-model-balance strong{font-size:34px;line-height:1;font-variant-numeric:tabular-nums}.uclaw-config-model-balance p{margin:0;color:#64748b;font-size:12px;line-height:1.55}.uclaw-config-model-actions{display:flex;gap:8px}.uclaw-config-model-metric{min-height:142px;padding:18px;display:grid;align-content:space-between}.uclaw-config-model-metric strong{font-size:28px;line-height:1;font-variant-numeric:tabular-nums}.uclaw-config-model-metric small,.uclaw-config-model-head p{color:#64748b;font-size:12px}.uclaw-config-model-callout{padding:10px 12px;border:1px solid #b7d7ff;border-radius:8px;background:#f0f7ff;color:#0958d9;font-size:12px}.uclaw-config-model-callout.ok{border-color:#b7ebc6;background:#f0fff4;color:#16803a}.uclaw-config-model-callout.warn{border-color:#ffe0a3;background:#fff9e8;color:#9a6500}.uclaw-config-model-callout.danger{border-color:#ffccc7;background:#fff1f0;color:#cf1322}.uclaw-config-model-main{display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:14px}.uclaw-config-model-models,.uclaw-config-model-status,.uclaw-config-model-chart-wrap,.uclaw-config-model-ledger{padding:18px}.uclaw-config-model-head{margin-bottom:14px}.uclaw-config-model-head h2{margin:0;font-size:16px;font-weight:700}.uclaw-config-model-head p{margin:4px 0 0}.uclaw-config-model-head>span{padding:4px 8px;border-radius:6px;background:#f1f5f9;color:#64748b;font-size:11px}.uclaw-config-model-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:12px}.uclaw-config-model-card{min-height:150px;padding:14px;border:1px solid #dfe7f3;border-radius:8px;display:grid;gap:10px;background:#fbfdff}.uclaw-config-model-card.tone-image{background:#fffafd}.uclaw-config-model-card.tone-video{background:#fcfbff}.uclaw-config-model-card div{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px}.uclaw-config-model-card div>span:first-child{flex:0 0 auto;white-space:nowrap;font-weight:700}.uclaw-config-model-card div .uclaw-config-model-card-tools{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-weight:400}.uclaw-config-model-card div em{white-space:nowrap;font-size:11px;font-style:normal;color:#16803a}.uclaw-config-model-card strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 18px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;color:#0f172a}.uclaw-config-model-card small{color:#64748b;font-size:11px;text-transform:uppercase}.uclaw-config-model-tags{display:flex;flex-wrap:nowrap;gap:6px;margin:0;overflow-x:auto;white-space:nowrap;scrollbar-width:none}.uclaw-config-model-tags::-webkit-scrollbar{display:none}.uclaw-config-model-card b,.uclaw-config-model-change{flex:0 0 auto;white-space:nowrap}.uclaw-config-model-card b{padding:4px 7px;border-radius:5px;background:#eef6ff;color:#2563eb;font-size:11px;font-weight:650}.uclaw-config-model-change{padding:4px 7px;border:0;border-radius:5px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700;cursor:pointer}.uclaw-config-model-change:hover{background:#bfdbfe}.uclaw-model-picker{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:24px;background:rgba(15,23,42,.28);backdrop-filter:blur(8px)}.uclaw-model-picker__panel{width:min(520px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));display:grid;grid-template-rows:auto auto minmax(0,auto) auto;gap:10px;padding:16px;border:1px solid #dbe7f6;border-radius:8px;background:#fff;box-shadow:0 24px 72px rgba(15,23,42,.22);color:#172033}.uclaw-model-picker__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.uclaw-model-picker__head h2{margin:0;font-size:16px;font-weight:750}.uclaw-model-picker__head p{margin:4px 0 0;color:#64748b;font-size:12px}.uclaw-model-picker__close{width:28px;height:28px;border:0;border-radius:6px;background:#f1f5f9;color:#64748b;font-size:17px;line-height:1;cursor:pointer}.uclaw-model-picker__search{width:100%;height:36px;padding:0 10px;border:1px solid #dbe7f6;border-radius:7px;background:#f8fbff;color:#0f172a;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.uclaw-model-picker__list{max-height:260px;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px}.uclaw-model-picker__option{min-height:66px;border:1px solid #dfe7f3;border-radius:8px;background:#fff;text-align:left;padding:9px 11px;display:grid;grid-template-columns:minmax(0,1fr);align-content:center;gap:3px;cursor:pointer}.uclaw-model-picker__option:hover,.uclaw-model-picker__option.is-selected{border-color:#8ab9ff;background:#f0f7ff}.uclaw-model-picker__option strong{color:#0f172a;font:750 13px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-model-picker__option span{color:#334155;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-model-picker__option em{color:#64748b;font-size:11px;font-style:normal}.uclaw-model-picker__empty{padding:14px;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;text-align:center;font-size:12px}.uclaw-model-picker__foot{display:flex;justify-content:flex-end;gap:8px;margin-top:2px}.uclaw-recharge-dialog{width:min(560px,calc(100vw - 32px))}.uclaw-recharge-plan-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.uclaw-recharge-plan{min-height:96px;padding:12px;border:1px solid #dfe7f3;border-radius:8px;background:#fff;text-align:left;display:grid;gap:6px;cursor:pointer}.uclaw-recharge-plan:hover,.uclaw-recharge-plan.is-selected{border-color:#7db2ff;background:#eef6ff}.uclaw-recharge-plan strong{font-size:13px;color:#0f172a}.uclaw-recharge-plan span{font-size:22px;font-weight:780;color:#0f172a}.uclaw-recharge-plan em{font-size:11px;font-style:normal;color:#64748b}.uclaw-recharge-order-list{max-height:340px;overflow:auto;display:grid;gap:8px}.uclaw-recharge-order{padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;display:grid;grid-template-columns:90px minmax(0,1fr) auto;gap:4px 10px;align-items:center}.uclaw-recharge-order strong{font-size:15px;color:#0f172a}.uclaw-recharge-order span{font-size:12px;color:#334155}.uclaw-recharge-order em{padding:3px 7px;border-radius:999px;background:#e7f8ed;color:#16803a;font-size:11px;font-style:normal;white-space:nowrap}.uclaw-recharge-order small{grid-column:1/-1;color:#64748b;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-config-model-status-row{min-height:62px;display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:12px;align-items:center;border-top:1px solid #eef2f7}.uclaw-config-model-status-row:first-of-type{border-top:0}.uclaw-config-model-status-row>span{width:9px;height:9px;border-radius:50%;background:#2f81f7}.uclaw-config-model-status-row strong{display:block;font-size:13px}.uclaw-config-model-status-row small{display:block;margin-top:3px;color:#64748b;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uclaw-config-model-chart{height:158px;display:grid;grid-template-columns:repeat(14,1fr);align-items:end;gap:8px;padding-top:12px;border-bottom:1px solid #eef2f7}.uclaw-config-model-chart div{display:grid;justify-items:center;gap:6px;color:#64748b;font-size:10px}.uclaw-config-model-chart span{width:100%;max-width:28px;min-height:5px;border-radius:5px 5px 0 0;background:#c9ddff}.uclaw-config-model-chart span.hot{background:linear-gradient(180deg,#2f81f7,#0f63d8)}.uclaw-config-model-chart span.today{background:#f6b73c}.uclaw-config-model-table{overflow:auto}.uclaw-config-model-table table{width:100%;border-collapse:collapse;font-size:12px}.uclaw-config-model-table th,.uclaw-config-model-table td{height:38px;padding:0 9px;border-top:1px solid #eef2f7;text-align:left;white-space:nowrap}.uclaw-config-model-table th{color:#64748b;background:#f8fafc;font-size:11px}.uclaw-config-model-table td{color:#334155}.uclaw-config-model-table td[colspan]{text-align:center;color:#64748b}
 @media (max-width:1420px){.uclaw-config-model-main{grid-template-columns:1fr}.uclaw-config-model-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}@media (max-width:1180px){.uclaw-config-model-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:760px){.uclaw-config-model-summary,.uclaw-config-model-card-grid,.uclaw-recharge-plan-grid{grid-template-columns:1fr}.uclaw-config-model-table table{min-width:760px}.uclaw-model-picker{padding:12px}.uclaw-model-picker__panel{max-height:calc(100vh - 24px)}.uclaw-recharge-order{grid-template-columns:1fr auto}.uclaw-recharge-order strong{grid-column:1/2}.uclaw-recharge-order span{grid-column:1/2}.uclaw-recharge-order em{grid-column:2/3;grid-row:1/3}}
 ${markerEnd}`;
 
@@ -1775,13 +1788,14 @@ function patchServiceWorker() {
     /expert-templates-108-1(?!-expert-custom-button-removed-1)/,
     "expert-templates-108-1-expert-custom-button-removed-1",
   );
+  source = source.replaceAll("yanjian-logo-1", "bavi-box-logo-1");
   source = source.replace(
-    /sidebar-command-shelf-3(?!-yanjian-logo-1)/,
-    "sidebar-command-shelf-3-yanjian-logo-1",
+    /sidebar-command-shelf-3(?!-bavi-box-logo-1)/,
+    "sidebar-command-shelf-3-bavi-box-logo-1",
   );
   source = source.replace(
-    /yanjian-logo-1(?!-chat-terminal-toolstream-clear-1)/,
-    "yanjian-logo-1-chat-terminal-toolstream-clear-1",
+    /(?:yanjian-logo-1|bavi-box-logo-1)(?!-chat-terminal-toolstream-clear-1)/,
+    "bavi-box-logo-1-chat-terminal-toolstream-clear-1",
   );
   source = source.replace(
     /chat-terminal-toolstream-clear-1(?!-chat-attachment-actions-1)/,
@@ -1814,9 +1828,9 @@ function patchServiceWorker() {
   );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
-    .replaceAll("// OpenClaw Control – Service Worker", "// U-Claw Control – Service Worker")
-    .replaceAll('title: "OpenClaw"', 'title: "U-Claw"')
-    .replaceAll('data.title || "OpenClaw"', 'data.title || "U-Claw"');
+    .replaceAll("// OpenClaw Control – Service Worker", "// Bavi-box Control – Service Worker")
+    .replaceAll('title: "OpenClaw"', 'title: "Bavi-box"')
+    .replaceAll('data.title || "OpenClaw"', 'data.title || "Bavi-box"');
 
   const fetchStart = source.indexOf('self.addEventListener("fetch", (event) => {');
   const webPushStart = source.indexOf("// --- Web Push ---");
@@ -1984,7 +1998,7 @@ function patchConfigFormUiCopy() {
  */
 function patchConfigPageUiCopy() {
   const pairs = [
-    ["label:`Personal Assistant`", "label:`U-Claw 助手`"],
+    ["label:`Personal Assistant`", "label:`Bavi-box 助手`"],
     ["description:`Balanced default for daily use.`", "description:`适合日常使用的均衡默认配置。`"],
     ["label:`Code Agent`", "label:`代码 Agent`"],
     ["description:`Highest context budget for repo work.`", "description:`面向代码仓库工作的高上下文预算配置。`"],
@@ -1992,9 +2006,9 @@ function patchConfigPageUiCopy() {
     ["description:`Lean follow-ups for shared bots.`", "description:`适合共享 Bot 的轻量后续对话配置。`"],
     ["label:`Minimal`", "label:`轻量`"],
     ["description:`Smallest context budget and lowest cost.`", "description:`最小上下文预算与最低成本配置。`"],
-    ["aria-label=\"Assistant identity\"", "aria-label=\"U-Claw 助手身份\""],
-    ["l(e.assistantName)??`Assistant`", "l(e.assistantName)??`U-Claw`"],
-    ["l(e.assistantName)??`Assistant`", "l(e.assistantName)??`U-Claw`"],
+    ["aria-label=\"Assistant identity\"", "aria-label=\"Bavi-box 助手身份\""],
+    ["l(e.assistantName)??`Assistant`", "l(e.assistantName)??`Bavi-box`"],
+    ["l(e.assistantName)??`Assistant`", "l(e.assistantName)??`Bavi-box`"],
     ["`Remote URLs are blocked by Control UI image policy`", "`远程 URL 被界面图片策略阻止`"],
     ["`File not found`", "`文件未找到`"],
     ["`Unsupported image type`", "`不支持的图片类型`"],
@@ -2010,7 +2024,7 @@ function patchConfigPageUiCopy() {
     ["No MCP servers configured.", "尚未配置 MCP servers。"],
     [
       "Choose how much workspace context OpenClaw injects into each run.",
-      "选择 U-Claw 每次运行注入多少工作区上下文。",
+      "选择 Bavi-box 每次运行注入多少工作区上下文。",
     ],
     ['<span class="qs-row__label">Model</span>', '<span class="qs-row__label">模型</span>'],
     ['<span class="qs-row__label">Thinking</span>', '<span class="qs-row__label">思考级别</span>'],
@@ -2147,7 +2161,7 @@ function patchIndexUiCopy() {
 }
 
 /**
- * Projects the first-level U-Claw navigation to four user-facing capability groups.
+ * Projects the first-level Bavi-box navigation to four user-facing capability groups.
  */
 function patchPrimaryNavigationProjection() {
   const pairs = [
@@ -2332,15 +2346,15 @@ function patchI18nUiCopy() {
     ["nip05Help:`Verifiable identifier (e.g., you@domain.com)`", "nip05Help:`可验证标识，例如 you@domain.com`"],
     ["lightningAddress:`Lightning Address`", "lightningAddress:`Lightning 地址`"],
     ["lightningHelp:`Lightning address for tips (LUD-16)`", "lightningHelp:`用于打赏的 Lightning 地址 (LUD-16)`"],
-    ["title:`OpenClaw mobile`", "title:`U-Claw 移动端`"],
-    ["title:`OpenClaw 移动版`", "title:`U-Claw 移动端`"],
-    ["qrAlt:`OpenClaw mobile pairing QR code`", "qrAlt:`U-Claw 移动端配对二维码`"],
-    ["qrAlt:`OpenClaw 移动版配对二维码`", "qrAlt:`U-Claw 移动端配对二维码`"],
-    ["waiting:`The official OpenClaw mobile app will connect automatically after scan.`", "waiting:`U-Claw 移动端扫码后会自动连接。`"],
-    ["waiting:`官方 OpenClaw 移动应用在扫描后会自动连接。`", "waiting:`U-Claw 移动端扫码后会自动连接。`"],
-    ["subtitle:`Isolated repository checkouts owned by OpenClaw.`", "subtitle:`由 U-Claw 管理的隔离代码库检出。`"],
-    ["subtitle:`由 OpenClaw 拥有的隔离代码库检出。`", "subtitle:`由 U-Claw 管理的隔离代码库检出。`"],
-    ["subtitle:`Gateway Dashboard`", "subtitle:`U-Claw Gateway`"],
+    ["title:`OpenClaw mobile`", "title:`Bavi-box 移动端`"],
+    ["title:`OpenClaw 移动版`", "title:`Bavi-box 移动端`"],
+    ["qrAlt:`OpenClaw mobile pairing QR code`", "qrAlt:`Bavi-box 移动端配对二维码`"],
+    ["qrAlt:`OpenClaw 移动版配对二维码`", "qrAlt:`Bavi-box 移动端配对二维码`"],
+    ["waiting:`The official OpenClaw mobile app will connect automatically after scan.`", "waiting:`Bavi-box 移动端扫码后会自动连接。`"],
+    ["waiting:`官方 OpenClaw 移动应用在扫描后会自动连接。`", "waiting:`Bavi-box 移动端扫码后会自动连接。`"],
+    ["subtitle:`Isolated repository checkouts owned by OpenClaw.`", "subtitle:`由 Bavi-box 管理的隔离代码库检出。`"],
+    ["subtitle:`由 OpenClaw 拥有的隔离代码库检出。`", "subtitle:`由 Bavi-box 管理的隔离代码库检出。`"],
+    ["subtitle:`Gateway Dashboard`", "subtitle:`Bavi-box Gateway`"],
     ["showToken:`Show token`", "showToken:`显示 token`"],
     ["hideToken:`Hide token`", "hideToken:`隐藏 token`"],
     ["toggleTokenVisibility:`Toggle token visibility`", "toggleTokenVisibility:`切换 token 可见性`"],
@@ -2348,7 +2362,7 @@ function patchI18nUiCopy() {
     ["hidePassword:`Hide password`", "hidePassword:`隐藏密码`"],
     ["togglePasswordVisibility:`Toggle password visibility`", "togglePasswordVisibility:`切换密码可见性`"],
     ["rawError:`Raw error`", "rawError:`原始错误`"],
-    ["docsAuth:`Control UI auth docs`", "docsAuth:`U-Claw 认证文档`"],
+    ["docsAuth:`Control UI auth docs`", "docsAuth:`Bavi-box 认证文档`"],
     ["docsPairing:`Device pairing docs`", "docsPairing:`设备配对文档`"],
     ["docsInsecure:`Insecure HTTP docs`", "docsInsecure:`HTTP 安全说明`"],
     ["title:`Auth required`", "title:`需要认证`"],
@@ -2398,7 +2412,7 @@ function patchI18nUiCopy() {
     ["metadataTitle:`Device refresh pending`", "metadataTitle:`设备信息更新待确认`"],
     [
       "summary:`This browser needs one-time approval from the Gateway host before it can use the Control UI.`",
-      "summary:`此浏览器需由 Gateway 主机一次性批准后才能使用 U-Claw 界面。`",
+      "summary:`此浏览器需由 Gateway 主机一次性批准后才能使用 Bavi-box 界面。`",
     ],
     ["stepList:`Run openclaw devices list on the Gateway host.`", "stepList:`在 Gateway 主机运行 openclaw devices list。`"],
     [
@@ -2464,7 +2478,7 @@ function patchSecondaryPagesI18nUiCopy() {
     ["errorTitle:`Panel failed to load`", "errorTitle:`面板加载失败`"],
     [
       "errorSubtitle:`Reload the page to load the latest Control UI bundle, or retry if the network request failed.`",
-      "errorSubtitle:`重新加载页面以获取最新 U-Claw 界面资源；若为网络失败，请重试。`",
+      "errorSubtitle:`重新加载页面以获取最新 Bavi-box 界面资源；若为网络失败，请重试。`",
     ],
     ["retry:`Retry`", "retry:`重试`"],
     ["unknownError:`Unknown module load error.`", "unknownError:`未知模块加载错误。`"],
@@ -2473,14 +2487,14 @@ function patchSecondaryPagesI18nUiCopy() {
       "adminRequired:`Administrator access is required to create setup codes.`",
       "adminRequired:`创建设置码需要管理员权限。`",
     ],
-    ["title:`OpenClaw mobile`", "title:`U-Claw 移动端`"],
+    ["title:`OpenClaw mobile`", "title:`Bavi-box 移动端`"],
     [
       "subtitle:`Scan this QR code in the mobile app to connect a new phone.`",
       "subtitle:`在移动端扫描此二维码以连接新手机。`",
     ],
     ["generating:`Creating a secure setup code…`", "generating:`正在创建安全设置码…`"],
     ["failed:`Could not create a setup code.`", "failed:`无法创建设置码。`"],
-    ["qrAlt:`OpenClaw mobile pairing QR code`", "qrAlt:`U-Claw 移动端配对二维码`"],
+    ["qrAlt:`OpenClaw mobile pairing QR code`", "qrAlt:`Bavi-box 移动端配对二维码`"],
     ["qrUnavailable:`QR unavailable. Copy the setup code instead.`", "qrUnavailable:`二维码不可用，请复制设置码。`"],
     ["copySetupCode:`Copy setup code`", "copySetupCode:`复制设置码`"],
     ["newCode:`New code`", "newCode:`新代码`"],
@@ -2489,7 +2503,7 @@ function patchSecondaryPagesI18nUiCopy() {
     ["review:`Review`", "review:`复核`"],
     [
       "waiting:`Official OpenClaw mobile apps connect automatically after scanning.`",
-      "waiting:`U-Claw 移动端扫码后会自动连接。`",
+      "waiting:`Bavi-box 移动端扫码后会自动连接。`",
     ],
     ["help:`Pairing help`", "help:`配对帮助`"],
     ["manageDevices:`Manage devices`", "manageDevices:`管理设备`"],
@@ -2511,8 +2525,8 @@ function patchSecondaryPagesI18nUiCopy() {
     ["worktrees:{title:`Managed Worktrees`", "worktrees:{title:`托管工作树`"],
     ["worktrees:{title:`托管 Worktrees`", "worktrees:{title:`托管工作树`"],
     ["worktrees:{title:`托管的 Worktrees`", "worktrees:{title:`托管工作树`"],
-    ["subtitle:`Isolated repository checkouts owned by OpenClaw.`", "subtitle:`U-Claw 托管的隔离仓库 checkout。`"],
-    ["subtitle:`由 U-Claw 管理的隔离代码库检出。`", "subtitle:`U-Claw 托管的隔离仓库 checkout。`"],
+    ["subtitle:`Isolated repository checkouts owned by OpenClaw.`", "subtitle:`Bavi-box 托管的隔离仓库 checkout。`"],
+    ["subtitle:`由 Bavi-box 管理的隔离代码库检出。`", "subtitle:`Bavi-box 托管的隔离仓库 checkout。`"],
     ["cleanNow:`Clean up now`", "cleanNow:`立即清理`"],
     ["repo:`Repository`", "repo:`仓库`"],
     ["branch:`Branch`", "branch:`分支`"],
@@ -3370,7 +3384,7 @@ function patchDeepAgentsChatI18nUiCopy() {
     ["sortSessions:`Sort sessions`", "sortSessions:`会话排序`"],
     ["sortUpdated:`Last updated`", "sortUpdated:`最近更新`"],
     ["sessionMenu:`Actions for {session}`", "sessionMenu:`{session} 操作`"],
-    ["welcome:{ready:`Ready to chat`", "welcome:{ready:`U-Claw 已就绪`"],
+    ["welcome:{ready:`Ready to chat`", "welcome:{ready:`Bavi-box 已就绪`"],
     ["hintBeforeShortcut:`Type a message below ·`", "hintBeforeShortcut:`在下方输入消息 ·`"],
     ["hintAfterShortcut:`for commands`", "hintAfterShortcut:`查看命令`"],
     ["whatCanYouDo:`What can you do?`", "whatCanYouDo:`你能做什么？`"],
@@ -3517,14 +3531,14 @@ function patchControlUiHtmlBranding() {
   }
 
   const pairs = [
-    ["<title>OpenClaw Control</title>", "<title>U-Claw Control</title>"],
-    ["OpenClaw Control UI", "U-Claw Control UI"],
-    ["Control UI did not start", "U-Claw 界面未启动"],
+    ["<title>OpenClaw Control</title>", "<title>Bavi-box Control</title>"],
+    ["OpenClaw Control UI", "Bavi-box Control UI"],
+    ["Control UI did not start", "Bavi-box 界面未启动"],
     [
       "The browser loaded the static page, but the app bundle did not start. The gateway may be\n          restarting, or this page may reference assets from a different OpenClaw version.",
       "浏览器已加载静态页面，但界面资源尚未启动。Gateway 可能正在重启，或页面仍引用旧版资源。",
     ],
-    ["OpenClaw will retry the current app bundle automatically.", "U-Claw 会自动重试当前界面资源。"],
+    ["OpenClaw will retry the current app bundle automatically.", "Bavi-box 会自动重试当前界面资源。"],
     ["If this persists, reload or try a clean browser profile.", "若持续出现，请刷新页面或使用干净的浏览器配置。"],
     ["Control UI troubleshooting", "界面故障排查"],
     ["\n            See\n            <a", "\n            查看\n            <a"],
@@ -3541,7 +3555,7 @@ function patchControlUiHtmlBranding() {
     ],
     [
       "The gateway is not reachable yet. OpenClaw will keep retrying while it restarts.",
-      "Gateway 暂不可达。U-Claw 会在重启期间持续重试。",
+      "Gateway 暂不可达。Bavi-box 会在重启期间持续重试。",
     ],
     [
       "A fresh page still could not start the Control UI. Try again, then check the troubleshooting guide if the problem persists.",
@@ -3558,7 +3572,7 @@ function patchControlUiHtmlBranding() {
 
 /**
  * Locks Control UI to light color mode and hides the temporary footer actions
- * that are not part of the current U-Claw public surface.
+ * that are not part of the current Bavi-box public surface.
  */
 function patchFixedLightModeAndFooterActions() {
   if (!fs.existsSync(indexHtmlPath)) {
@@ -3613,9 +3627,9 @@ function patchControlUiManifestBranding() {
 
   const before = read(manifestPath);
   const manifest = JSON.parse(before);
-  manifest.name = "U-Claw Control";
-  manifest.short_name = "U-Claw";
-  manifest.description = "U-Claw Control UI";
+  manifest.name = "Bavi-box Control";
+  manifest.short_name = "Bavi-box";
+  manifest.description = "Bavi-box Control UI";
   const after = `${JSON.stringify(manifest, null, 2)}\n`;
   if (writeIfChanged(manifestPath, before, after)) {
     console.log(`patched ${path.relative(root, manifestPath)}`);
@@ -3627,13 +3641,13 @@ function patchControlUiManifestBranding() {
  */
 function patchControlUiShellBranding() {
   const pairs = [
-    ["<span class=\"sidebar-brand__title\">OpenClaw</span>", "<span class=\"sidebar-brand__title\">U-Claw</span>"],
-    ["<span class=\"dashboard-header__breadcrumb-link\">OpenClaw</span>", "<span class=\"dashboard-header__breadcrumb-link\">U-Claw</span>"],
-    ["                  OpenClaw\n                </a>", "                  U-Claw\n                </a>"],
-    ["alt=\"OpenClaw\"", "alt=\"U-Claw\""],
-    ["aria-label=\"OpenClaw\"", "aria-label=\"U-Claw\""],
-    ["<span class=\"topbar-brand__title\">OpenClaw</span>", "<span class=\"topbar-brand__title\">U-Claw</span>"],
-    ["<div class=\"login-gate__title\">OpenClaw</div>", "<div class=\"login-gate__title\">U-Claw</div>"],
+    ["<span class=\"sidebar-brand__title\">OpenClaw</span>", "<span class=\"sidebar-brand__title\">Bavi-box</span>"],
+    ["<span class=\"dashboard-header__breadcrumb-link\">OpenClaw</span>", "<span class=\"dashboard-header__breadcrumb-link\">Bavi-box</span>"],
+    ["                  OpenClaw\n                </a>", "                  Bavi-box\n                </a>"],
+    ["alt=\"OpenClaw\"", "alt=\"Bavi-box\""],
+    ["aria-label=\"OpenClaw\"", "aria-label=\"Bavi-box\""],
+    ["<span class=\"topbar-brand__title\">OpenClaw</span>", "<span class=\"topbar-brand__title\">Bavi-box</span>"],
+    ["<div class=\"login-gate__title\">OpenClaw</div>", "<div class=\"login-gate__title\">Bavi-box</div>"],
   ];
 
   for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
@@ -3747,7 +3761,7 @@ function listSkillsPageAssets() {
 }
 
 /**
- * Applies U-Claw user-facing naming while preserving OpenClaw's ClawHub runtime calls.
+ * Applies Bavi-box user-facing naming while preserving OpenClaw's ClawHub runtime calls.
  */
 function patchSkillsPageBranding() {
   for (const file of listSkillsPageAssets()) {
@@ -3821,7 +3835,7 @@ function patchSkillsPageUiCopy() {
     ["`Install ${t.skill.displayName}`", "`安装 ${t.skill.displayName}`"],
     ["Skill not found.", "未找到技能。"],
     ["SkillHub 详情暂不可用。", "技能商店详情暂不可用。"],
-    ["兼容模式：请重启 U-Claw 以启用完整技能商店分页。", "兼容模式：请重启 U-Claw 以启用完整技能商店分页。"],
+    ["兼容模式：请重启 Bavi-box 以启用完整技能商店分页。", "兼容模式：请重启 Bavi-box 以启用完整技能商店分页。"],
     ["\n                          By\n", "\n                          作者：\n"],
     ["`${n} (default)`", "`${n} (默认)`"],
     ["placeholder=\"Filter installed skills\"", "placeholder=\"筛选已安装技能\""],
@@ -3881,8 +3895,8 @@ function patchSkillsPageStoreDiscovery() {
     "function UcSkillHubApiQuery(e){let t=e.clawhubQuery?.trim?.()||e.clawhubSearchQuery?.trim?.()||``,n=e.skillHubApiKeyFilter===`needs-key`?`api key configuration`:e.skillHubApiKeyFilter===`configured`?`verified official`:``;return[t,n].filter(Boolean).join(` `).trim()}",
     "function UcSkillHubApiCategory(e){let t=UcSkillHubNormalizeCategoryId(e.skillHubCategory||`all`);return t===`all`?``:UcSkillHubApiCategoryMap()[t]||t}",
     "function UcSkillHubApiUrl(e,t){let n=UcSkillHubApiSort(e.skillHubSort),r=new URL(`/__uclaw__/skillhub/skills`,window.location.origin);r.searchParams.set(`page`,String(Math.max(1,Number(t)||1))),r.searchParams.set(`pageSize`,String(e.skillHubPageSize||24)),r.searchParams.set(`sortBy`,n.sortBy),r.searchParams.set(`order`,n.order);let i=UcSkillHubApiQuery(e),s=UcSkillHubApiCategory(e);return i&&r.searchParams.set(`keyword`,i),s&&r.searchParams.set(`category`,s),e.skillHubApiKeyFilter&&r.searchParams.set(`apiKey`,e.skillHubApiKeyFilter),r.toString()}",
-    "async function UcSkillHubLoadApiSkills(e,t){let n=await fetch(UcSkillHubApiUrl(e,t),{headers:{Accept:`application/json`}}),r=await n.text(),i=n.headers.get(`content-type`)||``;if(!i.includes(`application/json`))throw Error(`技能商店 Gateway 代理未生效，请重启 U-Claw 后重试。`);let s=JSON.parse(r);if(!n.ok||s?.code&&s.code!==0)throw Error(s?.message||`技能商店 API ${n.status}`);let c=Array.isArray(s?.data?.skills)?s.data.skills:[],l=c.map(UcSkillHubNormalizeApiSkill);return{items:l,total:Math.max(0,Number(s?.data?.total)||l.length),message:l.length?`第 ${t} 页已加载`:t>1?`本页暂无数据，可返回上一页。`:`暂无匹配技能商店技能。`,compat:!1}}",
-    "async function UcSkillHubFallbackSkillsSearch(e,t,n){let r=e.client;if(!r?.request)throw n;let i=UcSkillHubApiQuery(e)||`agent`,s=Math.max(1,Number(e.skillHubPageSize)||24),c=Math.min(80,Math.max(s,t*s)),l=await r.request(`skills.search`,{query:i,limit:c}),u=Array.isArray(l?.results)?l.results:[],d=(t-1)*s,m=u.slice(d,d+s);if(!m.length&&t>1)throw n;return{items:m,total:u.length,message:`当前 Gateway 尚未启用技能商店分页代理，已使用兼容模式加载。重启 U-Claw 后可使用完整分页。`,compat:!0}}",
+    "async function UcSkillHubLoadApiSkills(e,t){let n=await fetch(UcSkillHubApiUrl(e,t),{headers:{Accept:`application/json`}}),r=await n.text(),i=n.headers.get(`content-type`)||``;if(!i.includes(`application/json`))throw Error(`技能商店 Gateway 代理未生效，请重启 Bavi-box 后重试。`);let s=JSON.parse(r);if(!n.ok||s?.code&&s.code!==0)throw Error(s?.message||`技能商店 API ${n.status}`);let c=Array.isArray(s?.data?.skills)?s.data.skills:[],l=c.map(UcSkillHubNormalizeApiSkill);return{items:l,total:Math.max(0,Number(s?.data?.total)||l.length),message:l.length?`第 ${t} 页已加载`:t>1?`本页暂无数据，可返回上一页。`:`暂无匹配技能商店技能。`,compat:!1}}",
+    "async function UcSkillHubFallbackSkillsSearch(e,t,n){let r=e.client;if(!r?.request)throw n;let i=UcSkillHubApiQuery(e)||`agent`,s=Math.max(1,Number(e.skillHubPageSize)||24),c=Math.min(80,Math.max(s,t*s)),l=await r.request(`skills.search`,{query:i,limit:c}),u=Array.isArray(l?.results)?l.results:[],d=(t-1)*s,m=u.slice(d,d+s);if(!m.length&&t>1)throw n;return{items:m,total:u.length,message:`当前 Gateway 尚未启用技能商店分页代理，已使用兼容模式加载。重启 Bavi-box 后可使用完整分页。`,compat:!0}}",
     "function UcSkillHubNormalizeApiSkill(e){let t=e?.namespace??{},n=t.handle||t.publicSlug||e?.ownerHandle||``,r=e?.slug||t.publicSlug||e?.name,i=t.canonicalName||(n&&r?`@${n}/${r}`:r),s=e?.labels??{},c=s.requires_api_key===!0||String(s.requires_api_key).toLowerCase()===`true`,l=e?.iconUrl||e?.icon_url||e?.iconURL||e?.logoUrl||e?.imageUrl||e?.avatarUrl||e?.publisher?.logoUrl||``;return{...e,id:i,slug:r,displayName:e?.name||r,summary:e?.description_zh||e?.description||``,description:e?.description_zh||e?.description||``,ownerHandle:n,owner:{handle:n,displayName:t.displayName||n},publisher:e?.publisher,iconUrl:l,logoUrl:e?.logoUrl||e?.publisher?.logoUrl,imageUrl:e?.imageUrl,avatarUrl:e?.avatarUrl,downloads:e?.downloads,stars:e?.stars,version:e?.version,categories:[e?.category,...(e?.subCategories??[]).map(e=>e?.key),...(e?.subCategories??[]).map(e=>e?.name)].filter(Boolean),topics:e?.tags??[],labels:{...s,requires_api_key:c},install:{reference:i},trust:{installability:`installable`},native:{skill:e}}}",
     "function UcSkillHubStoreTabs(e){let t=e.clawhubQuery?.trim()?`search`:e.skillHubTab||`recommended`,n=[{id:`recommended`,label:`推荐`},{id:`installable`,label:`可安装`},{id:`installed`,label:`已安装`},{id:`needs-setup`,label:`需配置`}];return e.clawhubQuery?.trim()?[{id:`search`,label:`搜索结果`},...n]:n}",
     "function UcSkillHubCategoryDefs(){return UcSkillHubCategoryList()}",
@@ -3901,7 +3915,7 @@ function patchSkillsPageStoreDiscovery() {
     "function UcSkillHubMatchesCategory(e,t){return!t||t===`all`?!0:UcSkillHubItemCategories(e).includes(t)}",
     "function UcSkillHubStats(e){let t=e.native?.skill?.stats??{},n=e.metrics??{};return{downloads:e.downloads??t.downloads??0,stars:e.stars??t.stars??0,installs:e.installs??t.installs??n.rolling60DayInstalls??null}}",
     "function UcSkillHubTrustLabel(e){let t=e.trust?.installability;return t===`installable`?`可安装`:t===`blocked`?`已阻止`:t===`review`?`需复核`:t===`unknown`?`待检测`:`技能商店校验`}",
-    "function UcSkillHubDisplayText(e){let t=String(e??``).trim();if(!t)return``;let n=t.replaceAll(`OpenClaw`,`U-Claw`).replaceAll(`ClawHub`,`技能商店`);if(/controlling web pages/i.test(n)&&/browser tool/i.test(n))return`用于控制网页、处理多步骤流程、登录检查、标签页管理与失败恢复。`;if(/connected .*node canvases/i.test(n)||/node canvases/i.test(n))return`在已连接的 U-Claw 节点画布上展示 HTML，支持导航、快照与调试。`;if(/^Use when\\b/i.test(n))return`适用：${n.replace(/^Use when\\s*/i,``)}`;if(/^Present\\b/i.test(n))return`用于展示：${n.replace(/^Present\\s*/i,``)}`;return n}",
+    "function UcSkillHubDisplayText(e){let t=String(e??``).trim();if(!t)return``;let n=t.replaceAll(`OpenClaw`,`Bavi-box`).replaceAll(`ClawHub`,`技能商店`);if(/controlling web pages/i.test(n)&&/browser tool/i.test(n))return`用于控制网页、处理多步骤流程、登录检查、标签页管理与失败恢复。`;if(/connected .*node canvases/i.test(n)||/node canvases/i.test(n))return`在已连接的 Bavi-box 节点画布上展示 HTML，支持导航、快照与调试。`;if(/^Use when\\b/i.test(n))return`适用：${n.replace(/^Use when\\s*/i,``)}`;if(/^Present\\b/i.test(n))return`用于展示：${n.replace(/^Present\\s*/i,``)}`;return n}",
     "function UcSkillHubInstallRef(e){return e.install?.reference||[e.ownerHandle||e.owner?.handle,e.slug].filter(Boolean).join(`/`)||e.slug}",
     "function UcSkillHubQualifiedRef(e){let t=e.ownerHandle||e.owner?.handle||e.publisher?.handle||e.native?.ownerHandle||e.native?.owner?.handle,n=e.slug;return t&&n?`@${t}/${n}`:UcSkillHubInstallRef(e)}",
     "function UcSkillHubDetailRef(e,t){let n=e?.owner?.handle||e?.native?.ownerHandle||e?.native?.owner?.handle,r=e?.skill?.slug||t;return typeof r==`string`&&r.startsWith(`@`)?r:n&&r?`@${n}/${r}`:r}",
@@ -3971,7 +3985,7 @@ function patchSkillsPageStoreDiscovery() {
     "                    <div class=\"callout\" style=\"display: grid; gap: 6px; border-color: var(--border); background: var(--panel-2);\">",
     "                      <div style=\"font-weight: 600;\">安装来源</div>",
     "                      <div class=\"muted\" style=\"font-size: 13px; overflow-wrap: anywhere;\">${d?.handle?`${d.handle}/`:``}${n.slug??e.clawhubDetailSlug}</div>",
-    "                      <div class=\"muted\" style=\"font-size: 12px;\">安装动作走 U-Claw 技能商店安装与信任检查链路。</div>",
+    "                      <div class=\"muted\" style=\"font-size: 12px;\">安装动作走 Bavi-box 技能商店安装与信任检查链路。</div>",
     "                    </div>",
     "                    <div style=\"font-size: 14px; line-height: 1.5;\">",
     "                      ${UcSkillHubDisplayText(n.summary)}",
@@ -3992,7 +4006,7 @@ function patchSkillsPageStoreDiscovery() {
     "                    ${t.metadata?.os?a`<div class=\"muted\" style=\"font-size: 12px;\">",
     "                          平台：${t.metadata.os.join(`, `)}",
     "                        </div>`:o}",
-    "                    ${u?a`<article class=\"sidebar-markdown\" style=\"max-width: 100%; overflow-wrap: anywhere; border-top: 1px solid var(--border); padding-top: 12px;\">${r(F(u))}</article>`:a`<div class=\"muted\" style=\"font-size: 12px;\">README 暂无；请以安装前 U-Claw 风险提示为准。</div>`}",
+    "                    ${u?a`<article class=\"sidebar-markdown\" style=\"max-width: 100%; overflow-wrap: anywhere; border-top: 1px solid var(--border); padding-top: 12px;\">${r(F(u))}</article>`:a`<div class=\"muted\" style=\"font-size: 12px;\">README 暂无；请以安装前 Bavi-box 风险提示为准。</div>`}",
     "                    <button",
     "                      type=\"button\"",
     "                      class=\"btn primary\"",
@@ -4269,7 +4283,7 @@ function patchSkillsPageStoreHomeState() {
   const legacyConstructorPatched =
     "this.clawhubSearchTimer=null,this.skillHubTab=`recommended`,this.skillHubCategory=`all`,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.loadSkillHubHome=async()=>{let e=this.client;if(!e||!this.connected||this.skillHubHomeLoading)return;this.skillHubHomeLoading=!0,this.skillHubHomeErrors=[],this.requestUpdate?.();let t=[];try{let n=await Promise.allSettled(UcSkillHubHomeSeeds().map(t=>e.request(`skills.search`,{query:t,limit:20}).then(e=>e?.results??[])));for(let[e,r]of n.entries())r.status===`fulfilled`?t.push(...r.value):this.skillHubHomeErrors=[...this.skillHubHomeErrors,UcSkillHubHomeSeeds()[e]];this.skillHubHomeResults=UcSkillHubMergeResults(t).slice(0,40),this.skillHubHomeLoaded=!0}catch(e){this.skillHubHomeErrors=[String(e)]}finally{this.skillHubHomeLoading=!1,this.requestUpdate?.()}},this.changeSkillHubTab=e=>{this.skillHubTab=e,this.requestUpdate?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.requestUpdate?.()}}createRenderRoot(){return this}";
   const constructorPatched =
-    "this.clawhubSearchTimer=null,this.skillHubTab=`recommended`,this.skillHubCategory=`all`,this.skillHubApiKeyFilter=`all`,this.skillHubSort=`recommended`,this.skillHubPage=1,this.skillHubPageSize=24,this.skillHubTotal=0,this.skillHubPageError=null,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.skillHubHomeRequestId=0,this.skillHubLoadMoreMessage=null,this.loadSkillHubPage=async(e=1)=>{let t=Math.max(1,Number(e)||1),n=(this.skillHubHomeRequestId||0)+1;this.skillHubHomeRequestId=n,this.skillHubPage=t,this.skillHubHomeLoading=!0,this.skillHubPageError=null,this.skillHubHomeErrors=[],this.skillHubLoadMoreMessage=`正在加载第 ${t} 页…`,this.requestUpdate?.(),UcSkillHubScrollTableTop(this);try{let e;try{e=await UcSkillHubLoadApiSkills(this,t)}catch(n){e=await UcSkillHubFallbackSkillsSearch(this,t,n)}if(this.skillHubHomeRequestId!==n)return;let r=e.items||[],i=this.skillHubSort===`name`?UcSkillHubApplySort(r,`name`):r;this.skillHubHomeResults=i,this.skillHubTotal=Math.max(0,Number(e.total)||i.length),this.skillHubHomeLoaded=!0,this.skillHubPageError=e.compat?`兼容模式：请重启 U-Claw 以启用完整技能商店分页。`:null,this.skillHubLoadMoreMessage=e.message}catch(e){this.skillHubHomeRequestId===n&&(this.skillHubPageError=String(e),this.skillHubHomeErrors=[String(e)],this.skillHubHomeResults=[],this.skillHubTotal=0,this.skillHubLoadMoreMessage=`第 ${t} 页加载失败，请稍后重试。`)}finally{this.skillHubHomeRequestId===n&&(this.skillHubHomeLoading=!1,this.requestUpdate?.(),UcSkillHubScrollTableTop(this))}},this.loadSkillHubHome=async(e=1)=>this.loadSkillHubPage?.(e),this.reloadSkillHubStore=()=>{this.skillHubPage=1,this.skillHubLoadMoreMessage=null,void this.loadSkillHubPage?.(1)},this.changeSkillHubTab=e=>{this.skillHubTab=e,this.skillHubPage=1,this.skillHubLoadMoreMessage=null,this.requestUpdate?.(),UcSkillHubScrollTableTop(this),(e===`recommended`||this.clawhubSearchQuery?.trim?.())&&this.reloadSkillHubStore?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubApiKeyFilter=e=>{this.skillHubApiKeyFilter=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubSort=e=>{this.skillHubSort=e||`recommended`,this.reloadSkillHubStore?.()},this.changeSkillHubPage=e=>{void this.loadSkillHubPage?.(e)}}createRenderRoot(){return this}";
+    "this.clawhubSearchTimer=null,this.skillHubTab=`recommended`,this.skillHubCategory=`all`,this.skillHubApiKeyFilter=`all`,this.skillHubSort=`recommended`,this.skillHubPage=1,this.skillHubPageSize=24,this.skillHubTotal=0,this.skillHubPageError=null,this.skillHubHomeResults=null,this.skillHubHomeLoading=!1,this.skillHubHomeErrors=[],this.skillHubHomeLoaded=!1,this.skillHubHomeRequestId=0,this.skillHubLoadMoreMessage=null,this.loadSkillHubPage=async(e=1)=>{let t=Math.max(1,Number(e)||1),n=(this.skillHubHomeRequestId||0)+1;this.skillHubHomeRequestId=n,this.skillHubPage=t,this.skillHubHomeLoading=!0,this.skillHubPageError=null,this.skillHubHomeErrors=[],this.skillHubLoadMoreMessage=`正在加载第 ${t} 页…`,this.requestUpdate?.(),UcSkillHubScrollTableTop(this);try{let e;try{e=await UcSkillHubLoadApiSkills(this,t)}catch(n){e=await UcSkillHubFallbackSkillsSearch(this,t,n)}if(this.skillHubHomeRequestId!==n)return;let r=e.items||[],i=this.skillHubSort===`name`?UcSkillHubApplySort(r,`name`):r;this.skillHubHomeResults=i,this.skillHubTotal=Math.max(0,Number(e.total)||i.length),this.skillHubHomeLoaded=!0,this.skillHubPageError=e.compat?`兼容模式：请重启 Bavi-box 以启用完整技能商店分页。`:null,this.skillHubLoadMoreMessage=e.message}catch(e){this.skillHubHomeRequestId===n&&(this.skillHubPageError=String(e),this.skillHubHomeErrors=[String(e)],this.skillHubHomeResults=[],this.skillHubTotal=0,this.skillHubLoadMoreMessage=`第 ${t} 页加载失败，请稍后重试。`)}finally{this.skillHubHomeRequestId===n&&(this.skillHubHomeLoading=!1,this.requestUpdate?.(),UcSkillHubScrollTableTop(this))}},this.loadSkillHubHome=async(e=1)=>this.loadSkillHubPage?.(e),this.reloadSkillHubStore=()=>{this.skillHubPage=1,this.skillHubLoadMoreMessage=null,void this.loadSkillHubPage?.(1)},this.changeSkillHubTab=e=>{this.skillHubTab=e,this.skillHubPage=1,this.skillHubLoadMoreMessage=null,this.requestUpdate?.(),UcSkillHubScrollTableTop(this),(e===`recommended`||this.clawhubSearchQuery?.trim?.())&&this.reloadSkillHubStore?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubApiKeyFilter=e=>{this.skillHubApiKeyFilter=e||`all`,this.reloadSkillHubStore?.()},this.changeSkillHubSort=e=>{this.skillHubSort=e||`recommended`,this.reloadSkillHubStore?.()},this.changeSkillHubPage=e=>{void this.loadSkillHubPage?.(e)}}createRenderRoot(){return this}";
   const legacyHandlerState =
     "this.changeSkillHubTab=e=>{this.skillHubTab=e,this.requestUpdate?.()},this.changeSkillHubCategory=e=>{this.skillHubCategory=e||`all`,this.requestUpdate?.()}";
   const oldHandlerState =
@@ -4442,7 +4456,7 @@ function patchSkillsPageSearchIdentityRequests() {
 }
 
 /**
- * Renames skill source groups for U-Claw users while preserving source keys.
+ * Renames skill source groups for Bavi-box users while preserving source keys.
  */
 function patchSkillsSharedUiCopy() {
   const pairs = [
@@ -4475,14 +4489,14 @@ function patchChatUiCopy() {
     ["Run status:", "运行状态："],
     ["Sending message...", "正在发送消息..."],
     [" is working...", " 正在处理..."],
-    ["`OpenClaw tool call failed`", "`U-Claw tool call failed`"],
-    ["`OpenClaw tool call timed out`", "`U-Claw tool call timed out`"],
-    ["`OpenClaw tool call aborted`", "`U-Claw tool call aborted`"],
-    ["`OpenClaw finished with no text.`", "`U-Claw 运行结束但未返回文本。`"],
-    ["`OpenClaw realtime tool call did not return a run id`", "`U-Claw realtime tool call did not return a run id`"],
+    ["`OpenClaw tool call failed`", "`Bavi-box tool call failed`"],
+    ["`OpenClaw tool call timed out`", "`Bavi-box tool call timed out`"],
+    ["`OpenClaw tool call aborted`", "`Bavi-box tool call aborted`"],
+    ["`OpenClaw finished with no text.`", "`Bavi-box 运行结束但未返回文本。`"],
+    ["`OpenClaw realtime tool call did not return a run id`", "`Bavi-box realtime tool call did not return a run id`"],
     [
       "`Tell the person briefly that you are checking, then wait for the final OpenClaw result before answering with the actual result.`",
-      "`简短告知用户正在检查，然后等待最终 U-Claw 结果再回答。`",
+      "`简短告知用户正在检查，然后等待最终 Bavi-box 结果再回答。`",
     ],
     ["New messages", "新消息"],
     ["Remove queued message", "移除排队消息"],
@@ -4490,11 +4504,11 @@ function patchChatUiCopy() {
     ["Not saved to chat history", "未保存到会话历史"],
     ["Replying to", "正在回复"],
     ["BTW side result", "临时结果"],
-    ["e.assistantName||`OpenClaw`", "e.assistantName||`U-Claw`"],
-    ["t?.name?.trim()||`Assistant`", "t?.name?.trim()||`U-Claw`"],
-    ["e.assistantName||`Assistant`", "e.assistantName&&e.assistantName!==`Assistant`?e.assistantName:`U-Claw`"],
-    ["assistantName:e.assistantName,assistantAvatar", "assistantName:e.assistantName===`Assistant`?`U-Claw`:e.assistantName,assistantAvatar"],
-    ["A(`chat.composer.placeholder`,{name:e.assistantName||`agent`})", "A(`chat.composer.placeholder`,{name:e.assistantName&&e.assistantName!==`Assistant`?e.assistantName:`U-Claw`})"],
+    ["e.assistantName||`OpenClaw`", "e.assistantName||`Bavi-box`"],
+    ["t?.name?.trim()||`Assistant`", "t?.name?.trim()||`Bavi-box`"],
+    ["e.assistantName||`Assistant`", "e.assistantName&&e.assistantName!==`Assistant`?e.assistantName:`Bavi-box`"],
+    ["assistantName:e.assistantName,assistantAvatar", "assistantName:e.assistantName===`Assistant`?`Bavi-box`:e.assistantName,assistantAvatar"],
+    ["A(`chat.composer.placeholder`,{name:e.assistantName||`agent`})", "A(`chat.composer.placeholder`,{name:e.assistantName&&e.assistantName!==`Assistant`?e.assistantName:`Bavi-box`})"],
     [
       "return l=fi(l),{role:n,content:l,timestamp:f",
       "return l=fi(l).map(e=>e&&e.type===`text`&&e.text===[`The agent run failed before`,`producing a reply.`].join(` `)?{...e,text:`Agent 运行在生成回复前失败。`}:e),{role:n,content:l,timestamp:f",
@@ -4503,7 +4517,7 @@ function patchChatUiCopy() {
       "return l=fi(l).map(e=>e&&e.type===`text`&&e.text===`The agent run failed before producing a reply.`?{...e,text:`Agent 运行在生成回复前失败。`}:e),{role:n,content:l,timestamp:f",
       "return l=fi(l).map(e=>e&&e.type===`text`&&e.text===[`The agent run failed before`,`producing a reply.`].join(` `)?{...e,text:`Agent 运行在生成回复前失败。`}:e),{role:n,content:l,timestamp:f",
     ],
-    ["Asking OpenClaw...", "正在询问 U-Claw..."],
+    ["Asking OpenClaw...", "正在询问 Bavi-box..."],
     ["Preparing model...", "正在准备模型..."],
     [" is responding...", " 正在回复..."],
     ["Connecting voice input...", "正在连接语音输入..."],
@@ -4539,7 +4553,7 @@ function patchChatUiCopy() {
       "TTS Actions:\n• On – Enable TTS for responses\n• Off – Disable TTS\n• Status – Show current settings\n• Provider – Show or set the voice provider\n• Limit – Set max characters for TTS\n• Summary – Toggle AI summary for long texts\n• Audio – Generate TTS from custom text\n• 帮助 - 显示使用指南",
       "TTS 动作：\n• On - 启用回复朗读\n• Off - 关闭朗读\n• Status - 查看当前设置\n• Provider - 查看或设置语音 provider\n• Limit - 设置 TTS 最大字符数\n• Summary - 切换长文本 AI 摘要\n• Audio - 从自定义文本生成 TTS\n• 帮助 - 显示使用指南",
     ],
-    ["description:`Restart OpenClaw.`", "description:`Restart U-Claw.`"],
+    ["description:`Restart OpenClaw.`", "description:`Restart Bavi-box.`"],
     ["description:`Clear chat history`", "description:`清空会话历史`"],
     ["description:`Abort and restart with a new message`", "description:`中止并用新消息重启`"],
     ["hp={steer:`Inject a message into the active run`}", "hp={steer:`向当前运行注入消息`}"],
@@ -4566,7 +4580,7 @@ function patchChatUiCopy() {
     ["description:`Show or set config values.`", "description:`查看或设置配置值。`"],
     ["description:`Config path`", "description:`配置路径`"],
     ["description:`Value for set`", "description:`要设置的值`"],
-    ["description:`Show or set OpenClaw MCP servers.`", "description:`查看或设置 U-Claw MCP servers。`"],
+    ["description:`Show or set OpenClaw MCP servers.`", "description:`查看或设置 Bavi-box MCP servers。`"],
     ["description:`MCP server name`", "description:`MCP server 名称`"],
     ["description:`JSON config for set`", "description:`要设置的 JSON 配置`"],
     ["description:`List, show, enable, or disable plugins.`", "description:`列出、查看、启用或停用插件。`"],
@@ -4576,7 +4590,7 @@ function patchChatUiCopy() {
     ["description:`Usage footer or cost summary.`", "description:`用量页脚或费用摘要。`"],
     ["description:`off, tokens, full, or cost`", "description:`off、tokens、full 或 cost`"],
     ["description:`Stop the current run.`", "description:`停止当前运行。`"],
-    ["description:`Restart U-Claw.`", "description:`重启 U-Claw。`"],
+    ["description:`Restart Bavi-box.`", "description:`重启 Bavi-box。`"],
     ["description:`Set group activation mode.`", "description:`设置群组激活模式。`"],
     ["description:`mention or always`", "description:`mention 或 always`"],
     ["description:`Set send policy.`", "description:`设置发送策略。`"],
@@ -4666,11 +4680,11 @@ function patchChatUiCopy() {
  */
 function patchAssistantIdentityUiCopy() {
   const pairs = [
-    ["Wm=`Assistant`", "Wm=`U-Claw`"],
-    ["var Wm=`Assistant`", "var Wm=`U-Claw`"],
+    ["Wm=`Assistant`", "Wm=`Bavi-box`"],
+    ["var Wm=`Assistant`", "var Wm=`Bavi-box`"],
     [
       "assistantIdentity:{agentId:null,name:`Assistant`,avatar:null,avatarSource:null,avatarStatus:null,avatarReason:null}",
-      "assistantIdentity:{agentId:null,name:`U-Claw`,avatar:null,avatarSource:null,avatarStatus:null,avatarReason:null}",
+      "assistantIdentity:{agentId:null,name:`Bavi-box`,avatar:null,avatarSource:null,avatarStatus:null,avatarReason:null}",
     ],
   ];
 
@@ -4702,7 +4716,7 @@ function patchChatSkillHubDropdown() {
       </button>
     </openclaw-tooltip>\`}`;
   const deepThinkingRender = `    \${UcDeepThinkingControl(e)}`;
-  const helper = `function UcSkillHubItems(e){return(e.report?.skills??[]).filter(e=>e&&typeof e.name==\`string\`&&e.name.trim()&&!(e?.source===\`openclaw-bundled\`||e?.bundled===!0))}function UcSkillHubHasCjk(e){return/[\\u3400-\\u9fff]/.test(String(e??\`\`))}function UcSkillHubTextCandidates(e){return e.flat(3).map(e=>String(e??\`\`).trim()).filter(Boolean)}function UcSkillHubPickChinese(e){let t=UcSkillHubTextCandidates(e);return t.find(UcSkillHubHasCjk)||t[0]||\`\`}function UcSkillHubChineseTitle(e){let t=UcSkillHubPickChinese([e.displayName,e.display_name,e.title,e.label,e.name_zh,e.nameZh,e.metadata?.displayName,e.metadata?.title,e.native?.skill?.displayName,e.native?.skill?.title,e.name,e.slug]);if(UcSkillHubHasCjk(t))return t;let n=UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description]);let r=String(n).split(/[：:。.!?；;\\n]/)[0]?.trim();return UcSkillHubHasCjk(r)&&r.length<=18?r:t}function UcSkillHubLabel(e){return UcSkillHubChineseTitle(e)||e.name}function UcSkillHubNormalizeText(e){let t=String(e??\`\`).trim();if(!t)return\`\`;let n=t.replaceAll(\`OpenClaw\`,\`U-Claw\`).replaceAll(\`ClawHub\`,\`SkillHub\`);if(/controlling web pages/i.test(n)&&/browser tool/i.test(n))return\`用于控制网页、处理多步骤流程、登录检查、标签页管理与失败恢复。\`;if(/connected .*node canvases/i.test(n)||/node canvases/i.test(n))return\`在已连接的 U-Claw 节点画布上展示 HTML，支持导航、快照与调试。\`;if(/^Use when\\b/i.test(n))return\`适用：\${n.replace(/^Use when\\s*/i,\`\`)}\`;return n}function UcSkillHubDescription(e){return UcSkillHubNormalizeText(UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description,e.source,\`技能商店技能\`]))}function UcSkillHubDropdown(e){let t=UcSkillHubItems(e),n=e.selectedSkill||\`\`,r=t.find(e=>e.name===n),i=!e.connected?\`技能暂不可用\`:e.loading?\`加载中…\`:r?UcSkillHubLabel(r):n||\`选择你的技能\`,a=!e.connected||e.saving,o=e.error||e.notice;return s\`
+  const helper = `function UcSkillHubItems(e){return(e.report?.skills??[]).filter(e=>e&&typeof e.name==\`string\`&&e.name.trim()&&!(e?.source===\`openclaw-bundled\`||e?.bundled===!0))}function UcSkillHubHasCjk(e){return/[\\u3400-\\u9fff]/.test(String(e??\`\`))}function UcSkillHubTextCandidates(e){return e.flat(3).map(e=>String(e??\`\`).trim()).filter(Boolean)}function UcSkillHubPickChinese(e){let t=UcSkillHubTextCandidates(e);return t.find(UcSkillHubHasCjk)||t[0]||\`\`}function UcSkillHubChineseTitle(e){let t=UcSkillHubPickChinese([e.displayName,e.display_name,e.title,e.label,e.name_zh,e.nameZh,e.metadata?.displayName,e.metadata?.title,e.native?.skill?.displayName,e.native?.skill?.title,e.name,e.slug]);if(UcSkillHubHasCjk(t))return t;let n=UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description]);let r=String(n).split(/[：:。.!?；;\\n]/)[0]?.trim();return UcSkillHubHasCjk(r)&&r.length<=18?r:t}function UcSkillHubLabel(e){return UcSkillHubChineseTitle(e)||e.name}function UcSkillHubNormalizeText(e){let t=String(e??\`\`).trim();if(!t)return\`\`;let n=t.replaceAll(\`OpenClaw\`,\`Bavi-box\`).replaceAll(\`ClawHub\`,\`SkillHub\`);if(/controlling web pages/i.test(n)&&/browser tool/i.test(n))return\`用于控制网页、处理多步骤流程、登录检查、标签页管理与失败恢复。\`;if(/connected .*node canvases/i.test(n)||/node canvases/i.test(n))return\`在已连接的 Bavi-box 节点画布上展示 HTML，支持导航、快照与调试。\`;if(/^Use when\\b/i.test(n))return\`适用：\${n.replace(/^Use when\\s*/i,\`\`)}\`;return n}function UcSkillHubDescription(e){return UcSkillHubNormalizeText(UcSkillHubPickChinese([e.description_zh,e.summary_zh,e.descriptionZh,e.summaryZh,e.metadata?.description_zh,e.metadata?.summary_zh,e.native?.skill?.description_zh,e.native?.skill?.summary_zh,e.description,e.summary,e.metadata?.description,e.native?.skill?.description,e.source,\`技能商店技能\`]))}function UcSkillHubDropdown(e){let t=UcSkillHubItems(e),n=e.selectedSkill||\`\`,r=t.find(e=>e.name===n),i=!e.connected?\`技能暂不可用\`:e.loading?\`加载中…\`:r?UcSkillHubLabel(r):n||\`选择你的技能\`,a=!e.connected||e.saving,o=e.error||e.notice;return s\`
     <details
       class="chat-controls__session chat-controls__inline-select chat-controls__skillhub"
       @toggle=\${t=>{t.currentTarget.open&&e.onOpen?.()}}
@@ -5118,11 +5132,11 @@ function patchAgentsPageUiCopy() {
       "function UcExpertDefaultAgentId(e){return e.agentsList?.defaultId??`main`}",
       "function UcExpertPersonaStore(){try{let e=JSON.parse(globalThis.localStorage?.getItem(`uclaw.expertPersonas.v1`)||`{}`);return e&&typeof e==`object`&&!Array.isArray(e)?e:{}}catch{return{}}}",
       "function UcSetExpertPersona(e,t){try{if(!e)return;let n=UcExpertPersonaStore();n[e]=t,globalThis.localStorage?.setItem(`uclaw.expertPersonas.v1`,JSON.stringify(n))}catch{}}",
-      "function UcExpertPrompt(e){return[`# ${e.name}`,``,e.prompt,``,`## 回答原则`,`- 默认使用中文，除非用户要求其他语言。`,`- 先识别用户目标和约束，再给出专业建议。`,`- 不确定时说明假设，并给出可验证的下一步。`,``,`## U-Claw Expert Metadata`,`- Template: ${e.id}` ,`- Category: ${e.category}`,`- Model: ${e.model}`,`- Skills: ${Array.isArray(e.skills)&&e.skills.length?e.skills.join(`, `):`默认继承`}`].join(`\\n`)}",
+      "function UcExpertPrompt(e){return[`# ${e.name}`,``,e.prompt,``,`## 回答原则`,`- 默认使用中文，除非用户要求其他语言。`,`- 先识别用户目标和约束，再给出专业建议。`,`- 不确定时说明假设，并给出可验证的下一步。`,``,`## Bavi-box Expert Metadata`,`- Template: ${e.id}` ,`- Category: ${e.category}`,`- Model: ${e.model}`,`- Skills: ${Array.isArray(e.skills)&&e.skills.length?e.skills.join(`, `):`默认继承`}`].join(`\\n`)}",
       "function UcCustomExpertDefaults(){return{name:``,avatar:`专`,description:``,prompt:``,model:``,skills:[]}}",
       "function UcExpertSlug(e){return(e||`custom`).toLowerCase().replace(/[^a-z0-9\\u4e00-\\u9fa5]+/g,`-`).replace(/^-+|-+$/g,``).slice(0,48)||`custom`}",
       "function UcCustomExpertAgentId(e){return`uclaw-expert-custom-${UcExpertSlug(e)}`}",
-      "function UcCustomExpertPrompt(e,t){let n=Array.isArray(e.skills)&&e.skills.length?e.skills.join(`, `):`默认继承`;return[`# ${e.name}`,``,e.description?`> ${e.description}`:``,e.description?``:``,e.prompt,``,`## 回答原则`,`- 默认使用中文，除非用户要求其他语言。`,`- 按专家角色给出更专业、可执行的回答。`,`- 不确定时说明假设，并给出可验证的下一步。`,``,`## U-Claw Expert Metadata`,`- Custom Expert: ${t}`,`- Model: ${e.model||`默认继承`}`,`- Skills: ${n}`].filter(e=>e!==``).join(`\\n`)}",
+      "function UcCustomExpertPrompt(e,t){let n=Array.isArray(e.skills)&&e.skills.length?e.skills.join(`, `):`默认继承`;return[`# ${e.name}`,``,e.description?`> ${e.description}`:``,e.description?``:``,e.prompt,``,`## 回答原则`,`- 默认使用中文，除非用户要求其他语言。`,`- 按专家角色给出更专业、可执行的回答。`,`- 不确定时说明假设，并给出可验证的下一步。`,``,`## Bavi-box Expert Metadata`,`- Custom Expert: ${t}`,`- Model: ${e.model||`默认继承`}`,`- Skills: ${n}`].filter(e=>e!==``).join(`\\n`)}",
       "function UcExpertAvailableSkills(e){return(e.agentSkills?.report?.skills??[]).filter(e=>e&&typeof e.name==`string`&&e.name.trim()).map(e=>({name:e.name.trim(),description:String(e.description||e.summary||``)}))}",
       "function UcExpertConfigEntry(e,t){return(e.config?.form?.agents?.list??[]).find(e=>e?.id===t)??null}",
       "function UcExpertCategories(){return[{id:`all`,label:`全部`,icon:`layers`},{id:`content`,label:`内容创作`,icon:`pen`},{id:`career`,label:`职场成长`,icon:`briefcase`},{id:`product`,label:`产品运营`,icon:`chart`},{id:`tech`,label:`技术研发`,icon:`code`},{id:`office`,label:`办公效率`,icon:`calendar`},{id:`business`,label:`法务商务`,icon:`contract`}]}",
@@ -5540,7 +5554,7 @@ function patchFinalUiPolish() {
       pattern: /^sessions-page-.*\.js$/,
       label: "sessions-page",
       pairs: [
-        ["C=c(x?.name)??``", "C=(c(x?.name)??``).replace(/^Assistant$/,`U-Claw`)"],
+        ["C=c(x?.name)??``", "C=(c(x?.name)??``).replace(/^Assistant$/,`Bavi-box`)"],
         ["T=C&&y?`${S?`${S} `:``}${C} (${y.channel})`:null", "T=C&&y?`${S?`${S} `:``}${C}（${y.channel===`dashboard`?`控制台`:y.channel}）`:null"],
         ["of ${o} row${o===1?``:`s`}", "共 ${o} 行"],
         ["${se.map(e=>i`<option value=${e}>${e} per page</option>`)}", "${se.map(e=>i`<option value=${e}>每页 ${e} 条</option>`)}"],
@@ -5561,11 +5575,11 @@ function patchFinalUiPolish() {
 }
 
 /**
- * Appends U-Claw product UI tokens and layout polish to generated CSS assets.
+ * Appends Bavi-box product UI tokens and layout polish to generated CSS assets.
  */
 function patchControlUiTheme() {
-  const markerStart = "/* U-Claw UI polish v1 */";
-  const markerEnd = "/* End U-Claw UI polish v1 */";
+  const markerStart = "/* Bavi-box UI polish v1 */";
+  const markerEnd = "/* End Bavi-box UI polish v1 */";
   const block = `${markerStart}
 :root,
 :root[data-theme-mode="light"] {

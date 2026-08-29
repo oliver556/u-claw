@@ -5,9 +5,10 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const { createVideoAdapterServer } = require('./video-adapter');
+const { mergeModelCatalogIntoConfig } = require('./model-catalog');
 
 // ── Constants ──
-const APP_NAME = 'U-Claw';
+const APP_NAME = 'Bavi-box';
 const DEFAULT_PORT = 18789;
 const MAX_PORT = 18799;
 const DEFAULT_VIDEO_ADAPTER_PORT = 18808;
@@ -659,7 +660,7 @@ function createActivationIdempotencyKey({ account, activationCode, usbSummary })
 }
 
 /**
- * Posts JSON to the U-Claw activation service from the trusted main process.
+ * Posts JSON to the Bavi-box activation service from the trusted main process.
  */
 async function postActivationJSON(pathname, payload, options = {}) {
   const endpoint = String(options.endpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
@@ -689,7 +690,7 @@ async function postActivationJSON(pathname, payload, options = {}) {
 }
 
 /**
- * Reads authenticated JSON from the U-Claw cloud service through Electron main.
+ * Reads authenticated JSON from the Bavi-box cloud service through Electron main.
  */
 async function getActivationJSON(pathname, options = {}) {
   const endpoint = String(options.endpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
@@ -718,7 +719,7 @@ async function getActivationJSON(pathname, options = {}) {
 }
 
 /**
- * Fetches New API usage summary via U-Claw cloud using the local activation token.
+ * Fetches New API usage summary via Bavi-box cloud using the local activation token.
  */
 async function getCloudModelUsageSummary() {
   const state = readJsonFile(activationStatePath);
@@ -734,7 +735,64 @@ async function getCloudModelUsageSummary() {
 }
 
 /**
- * Fetches recharge plans from the U-Claw cloud service for the in-app top-up dialog.
+ * Fetches the New API model catalog via Bavi-box cloud using the activation token.
+ */
+async function getCloudModelCatalog() {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured', models: [] };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available', models: [] };
+  }
+  try {
+    const catalog = await getActivationJSON('/v1/newapi/models/catalog', { endpoint, accessToken });
+    return { ok: true, ...catalog, models: Array.isArray(catalog.models) ? catalog.models : [] };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error), models: [] };
+  }
+}
+
+/**
+ * Refreshes local OpenClaw provider config from the cloud model catalog.
+ */
+async function refreshCloudModelCatalog() {
+  const catalog = await getCloudModelCatalog();
+  if (!catalog.ok) return catalog;
+  const currentConfig = fs.existsSync(configPath) ? getConfig() : applyRuntimeConfigEnv(loadBundledDefaultConfig());
+  const merged = mergeModelCatalogIntoConfig(currentConfig, catalog);
+  if (merged.changed) {
+    saveConfig(merged.config);
+  }
+  return {
+    ...catalog,
+    merged: merged.changed,
+    modelCount: merged.count,
+    message: merged.count > 0 ? `已同步 ${merged.count} 个 New API 模型。` : 'New API 未返回可用模型。',
+  };
+}
+
+/**
+ * Best-effort model catalog sync after activation has persisted its access token.
+ */
+async function syncModelCatalogAfterActivation() {
+  try {
+    const result = await refreshCloudModelCatalog();
+    if (!result.ok) {
+      logLifecycle(`activation model catalog sync skipped: ${result.message || 'unknown error'}`);
+      return { ok: false, message: result.message || '模型目录同步未完成' };
+    }
+    return { ok: true, modelCount: result.modelCount || 0, status: result.status || 'ok' };
+  } catch (error) {
+    logLifecycle(`activation model catalog sync failed: ${error.message}`);
+    return { ok: false, message: error?.message || String(error) };
+  }
+}
+
+/**
+ * Fetches recharge plans from the Bavi-box cloud service for the in-app top-up dialog.
  */
 async function getCloudRechargePlans() {
   const state = readJsonFile(activationStatePath);
@@ -859,7 +917,7 @@ function writeOpenClawActivationConfig(result) {
 }
 
 /**
- * Writes and verifies the signed startup license returned by U-Claw Cloud API.
+ * Writes and verifies the signed startup license returned by Bavi-box Cloud API.
  */
 function writeActivationLicenseArtifact(result) {
   const activationID = String(result.activationId || '').trim();
@@ -961,8 +1019,8 @@ function dashboardUrl() {
 function normalizePortableDataPathString(value) {
   if (!portablePath || typeof value !== 'string') return value;
   return value
-    .replace(/~[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable[\\/]data/g, userDataPath)
-    .replace(/(?:[A-Za-z]:)?[\\/](?:Users|home)[^"'\r\n]*?[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable[\\/]data/g, userDataPath);
+    .replace(/~[\\/]Library[\\/]Caches[\\/]Bavi-box[\\/]usb-portable[\\/]data/g, userDataPath)
+    .replace(/(?:[A-Za-z]:)?[\\/](?:Users|home)[^"'\r\n]*?[\\/]Library[\\/]Caches[\\/]Bavi-box[\\/]usb-portable[\\/]data/g, userDataPath);
 }
 
 function normalizePortableDataPathsInJson(value, stats) {
@@ -1706,15 +1764,19 @@ async function submitActivation(payload = {}) {
         updateDeviceToken: updateCredential?.deviceToken,
         uclawAccessToken: activationResult.accessToken,
       });
+      const modelCatalogSync = await syncModelCatalogAfterActivation();
       return {
         ok: true,
         code: 'ACTIVATION_CLOUD_COMPLETE',
-        message: '激活完成，授权材料与 New API 配置已写入本地。',
+        message: modelCatalogSync.ok
+          ? '激活完成，授权材料、New API 配置与模型目录已写入本地。'
+          : '激活完成，授权材料与 New API 配置已写入本地；模型目录可稍后在模型页同步。',
         phoneMasked: activationState.phoneMasked || activationState.accountMasked,
         usernameMasked: activationState.usernameMasked,
         activationPersisted: true,
         activationId: activationID,
         commitStatus: commitResult.status || 'committed',
+        modelCatalogSync,
         launchReady: true,
         retryable: false,
       };
@@ -1728,7 +1790,7 @@ async function submitActivation(payload = {}) {
 }
 
 /**
- * Starts the normal U-Claw runtime after activation files are verified.
+ * Starts the normal Bavi-box runtime after activation files are verified.
  * Keeping the transition inside the same app avoids the visible close/reopen
  * gap that made first activation look like a failed launch.
  */
@@ -2065,6 +2127,8 @@ function setupIPC() {
 
   ipcMain.handle('open-config', () => loadConfigPage());
   ipcMain.handle('uclaw:get-model-usage-summary', () => getCloudModelUsageSummary());
+  ipcMain.handle('uclaw:get-model-catalog', () => getCloudModelCatalog());
+  ipcMain.handle('uclaw:refresh-model-catalog', () => refreshCloudModelCatalog());
   ipcMain.handle('uclaw:get-recharge-plans', () => getCloudRechargePlans());
   ipcMain.handle('uclaw:get-recharge-orders', () => getCloudRechargeOrders());
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));

@@ -28,7 +28,7 @@ chmod 700 /usr/local/sbin/uclaw-origin-firewall.sh
 
 cat >/etc/systemd/system/uclaw-origin-firewall.service <<SERVICE
 [Unit]
-Description=U-Claw origin Docker port allowlist
+Description=Bavi-box origin Docker port allowlist
 After=docker.service
 Requires=docker.service
 

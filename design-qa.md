@@ -9,7 +9,7 @@
 - macOS app window, window capture, 2624x1824 source capture scaled by viewer.
 
 ### state
-- U-Claw chat route with left sidebar expanded, light mode, recent sessions visible, composer visible.
+- Bavi-box chat route with left sidebar expanded, light mode, recent sessions visible, composer visible.
 
 ### full-view comparison evidence
 - The earlier implementation had an oversized top gap and a heavy blue new-session control that touched the divider.

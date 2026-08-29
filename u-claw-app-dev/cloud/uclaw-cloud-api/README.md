@@ -1,6 +1,6 @@
-# U-Claw Cloud API
+# Bavi-box Cloud API
 
-U-Claw Cloud API 是阿里云 1 核 1G ECS 上运行的激活与商业化后端。它只负责账号、激活码、订单、支付回调、New API 管理编排，不承载模型推理流量。
+Bavi-box Cloud API 是阿里云 1 核 1G ECS 上运行的激活与商业化后端。它只负责账号、激活码、订单、支付回调、New API 管理编排，不承载模型推理流量。
 
 ## 位置
 
@@ -19,11 +19,11 @@ u-claw-app/*
 ## 本轮 MVP 形态
 
 ```text
-U-Claw Cloud API: Go static binary + systemd + Nginx/Caddy + PostgreSQL
+Bavi-box Cloud API: Go static binary + systemd + Nginx/Caddy + PostgreSQL
 New API / sub2api: 1Panel + Docker Compose + PostgreSQL + Redis
 ```
 
-U-Claw Cloud API 仍保持低内存 systemd 形态，适合阿里云 1 核 1G。New API / sub2api 按用户要求用 1Panel 管理 Docker、PostgreSQL 与 Redis；Redis DB 0 给 New API，DB 1 给 sub2api。
+Bavi-box Cloud API 仍保持低内存 systemd 形态，适合阿里云 1 核 1G。New API / sub2api 按用户要求用 1Panel 管理 Docker、PostgreSQL 与 Redis；Redis DB 0 给 New API，DB 1 给 sub2api。
 
 `license.yiyong.me` 当前采用渐进切换：`/v1/activations*`、`/v1/auth/*`、`/v1/recharge/*` 等新 Cloud API 路径转发到 `127.0.0.1:18180`；旧 `/model-api/*` 与未迁移 `/v1/*` 仍保留旧 activation-server 兜底。参考配置见 `deploy/caddy/uclaw-cloud-api.Caddyfile`。
 
@@ -31,7 +31,7 @@ U-Claw Cloud API 仍保持低内存 systemd 形态，适合阿里云 1 核 1G。
 
 | 角色 | 公网 IP | SSH 端口 | 初始用户 | 说明 |
 | --- | --- | --- | --- | --- |
-| U-Claw 阿里云激活服务器 | `121.41.89.103` | `22` | `root` | 本服务部署目标，只承载激活、保存、订单与支付回调 |
+| Bavi-box 阿里云激活服务器 | `121.41.89.103` | `22` | `root` | 本服务部署目标，只承载激活、保存、订单与支付回调 |
 | New API 前置香港 VPS | `64.90.19.251` | `24851` | `root` | 1Panel + Nginx，反代客户端与管理路径 |
 | New API / sub2api 本体 OVH VPS | `158.51.110.49` | `14851` | `root` | New API + sub2api 源站 |
 
@@ -80,7 +80,7 @@ https://license.yiyong.me/admin
 当前最小能力：
 
 - 生成激活码并写入 PostgreSQL 库存；新生成和重发的激活码会用 `ADMIN_ENCRYPTION_KEY` 加密保存展示材料，可在后台列表查看和复制。
-- 查询激活码状态、绑定手机号、绑定的 U-Claw 用户 ID。
+- 查询激活码状态、绑定手机号、绑定的 Bavi-box 用户 ID。
 - 查询 New API 用户映射、New API user id、base URL、token 轮换时间，以及最近一次首启激活状态。
 - 禁用未使用激活码。
 - 重发未使用或已禁用激活码：旧码标记为 `reissued`，新码写入同批次库存。
@@ -248,7 +248,7 @@ Electron 验收脚本 `scripts/verify-activation-real-write.js` 会驱动真实 
 
 ## New API 用量摘要
 
-模型页进入或手动刷新时，请求 U-Claw Cloud API 聚合 New API 余额、今日用量、近 7 天、累计用量和最近流水：
+模型页进入或手动刷新时，请求 Bavi-box Cloud API 聚合 New API 余额、今日用量、近 7 天、累计用量和最近流水：
 
 ```bash
 curl -sS http://127.0.0.1:8080/v1/newapi/usage/summary \
@@ -257,9 +257,20 @@ curl -sS http://127.0.0.1:8080/v1/newapi/usage/summary \
 
 该接口实时登录同手机号 New API 账号读取 `/api/user/self` 与 `/api/log/self`，不在阿里云长期保存完整消费流水。
 
+## New API 模型目录
+
+模型页点击“同步模型”时，请求 Bavi-box Cloud API 读取当前用户在 New API 后台可用的模型权限，并写入本地 OpenClaw `models.providers.newapi.models`：
+
+```bash
+curl -sS http://127.0.0.1:8080/v1/newapi/models/catalog \
+  -H "Authorization: Bearer <accessToken>"
+```
+
+该接口实时登录同手机号 New API 账号读取 `/api/user/models`，只返回模型 id、channel id、能力分类和 provider 元数据；Cloud API 不把 New API API key 下发到该接口响应，也不在前端暴露 admin token。若 New API 临时失败且服务内存中已有上次成功目录，会返回 `status: "stale"` 和 warning，客户端可继续使用本地已保存配置。
+
 ## 虚拟充值回调
 
-当前切片先用 `virtual` provider 验证充值闭环：客户端创建订单后，本地或测试工具调用虚拟回调，U-Claw Cloud API 会把订单置为 paid，并通过 New API admin `/api/user/manage` 给同手机号 New API 账号加 quota。
+当前切片先用 `virtual` provider 验证充值闭环：客户端创建订单后，本地或测试工具调用虚拟回调，Bavi-box Cloud API 会把订单置为 paid，并通过 New API admin `/api/user/manage` 给同手机号 New API 账号加 quota。
 
 ```bash
 curl -sS http://127.0.0.1:8080/v1/recharge/plans \
@@ -320,6 +331,10 @@ go run ./cmd/adminctl spike newapi provision \
   --username 13800138000 \
   --quota 100000
 
+go run ./cmd/adminctl spike newapi user-models \
+  --username 13800138000 \
+  --password random-password
+
 go run ./cmd/adminctl spike newapi \
   --username 13800138000 \
   --password random-password \
@@ -333,6 +348,8 @@ Spike 结果填写到：
 ```text
 docs/spike-results.md
 ```
+
+`user-models` 会用用户身份读取 `/api/user/models`，只输出 channel 到模型名的映射和去重模型数，用于上线前确认 New API 实例响应结构。
 
 `provision` 会执行生产同构链路：创建同名 New API 用户、用户登录、创建 API token、调用 `/api/token/{id}/key` 取真实 key、admin add quota，并只输出 `token_present=true`，不打印明文 key。
 

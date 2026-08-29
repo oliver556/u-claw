@@ -1,4 +1,4 @@
--- U-Claw Cloud API initial schema for activation, account mapping, payment, and job/outbox.
+-- Bavi-box Cloud API initial schema for activation, account mapping, payment, and job/outbox.
 
 CREATE TABLE IF NOT EXISTS uclaw_users (
   id BIGSERIAL PRIMARY KEY,

@@ -1,4 +1,4 @@
-# U-Claw 启动、打包与 Gateway 链路第三版重构需求
+# Bavi-box 启动、打包与 Gateway 链路第三版重构需求
 
 - 日期：2026-08-20
 - 文档版本：V3
@@ -83,9 +83,9 @@
 目标链路：
 
 ```text
-U-Claw UI
+Bavi-box UI
 → OpenClaw session/chat/tool/history
-→ U-Claw 商业中转 Provider
+→ Bavi-box 商业中转 Provider
 → 服务端模型中转
 ```
 
@@ -522,7 +522,7 @@ U 盘 app/releases/<release-id>/
 ```text
 U 盘 runtime.pkg + data/
 → 首次在该电脑完整验证并安装到：
-%LOCALAPPDATA%/U-Claw/runtimes/<sequence>-<tree-digest>/
+%LOCALAPPDATA%/Bavi-box/runtimes/<sequence>-<tree-digest>/
 → 后续直接从本机运行
 ```
 
@@ -546,7 +546,7 @@ U 盘 runtime.pkg + data/
 ```text
 U 盘保留 runtime.pkg、业务数据和授权身份
 → Bootstrap 在新电脑首次使用时完整验签
-→ 安装到 %LOCALAPPDATA%/U-Claw/runtimes/<sequence>-<tree-digest>/
+→ 安装到 %LOCALAPPDATA%/Bavi-box/runtimes/<sequence>-<tree-digest>/
 → 后续 warm startup 从本机 SSD 直接运行
 ```
 
@@ -755,14 +755,14 @@ product/
 → 唯一商业产品源码
 → 唯一 runtime 组装输入
 → 唯一 Bootstrap/Launcher 输入
-→ 唯一正式 U-Claw Windows 发布来源
+→ 唯一正式 Bavi-box Windows 发布来源
 ```
 
 根目录旧 `portable/`：
 
 - 退出正式商业发行。
 - 不作为新 `runtime.pkg`、Bootstrap、制盘包或在线更新输入。
-- 不再由 `.github/workflows/release.yml` 以“正式 U-Claw”身份发布。
+- 不再由 `.github/workflows/release.yml` 以“正式 Bavi-box”身份发布。
 - 新商业流水线验收完成前只作历史对照；验收完成后归档或删除。
 
 归档 `u-claw-app/`：
@@ -828,7 +828,7 @@ Bootstrap 自更新尚未定案，但必须满足：
 
 ### 16.2 两支 U 盘
 
-已确认：同一台电脑不允许同时运行两支 U-Claw 商业 U 盘。
+已确认：同一台电脑不允许同时运行两支 Bavi-box 商业 U 盘。
 
 - Bootstrap 使用宿主机级全局单实例锁，不以盘符或 U 盘身份拆分锁。
 - 第一支 U 盘已运行时，第二支 U 盘只显示稳定提示，不进入版本、License、Shell 或 Gateway 流程。

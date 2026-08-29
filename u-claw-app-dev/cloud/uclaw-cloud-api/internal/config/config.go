@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Config is the runtime interface for U-Claw Cloud API process configuration.
+// Config is the runtime interface for Bavi-box Cloud API process configuration.
 type Config struct {
 	AppEnv                   string
 	HTTPAddr                 string

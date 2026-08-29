@@ -1,10 +1,10 @@
-# U-Claw Cloud API Phase 0 Spike Results
+# Bavi-box Cloud API Phase 0 Spike Results
 
 更新时间：2026-08-27 05:09
 
 ## 目标
 
-用计划部署的 New API Docker tag 实测 U-Claw 后端需要的管理动作。
+用计划部署的 New API Docker tag 实测 Bavi-box 后端需要的管理动作。
 
 ## 待验证动作
 
@@ -34,7 +34,7 @@ New API admin base URL: http://127.0.0.1:3000
 查询 user id: OK，GET /api/user/search?keyword=13987754323 返回 user_id=6
 创建 token: OK，POST /api/token/ 成功；响应不返回明文 token，但 tokens 表已创建 user_id=6 的 key
 add quota: OK，POST /api/user/manage 使用 {id, action:"add_quota", mode:"add", value} 成功，users.quota=100000
-查余额/流水: OK，`activation-local-e2e.sh` 通过 U-Claw Cloud API 以普通用户身份读取 New API `/api/user/self` 和 `/api/log/self`，accountBalance=100000，records=2
+查余额/流水: OK，`activation-local-e2e.sh` 通过 Bavi-box Cloud API 以普通用户身份读取 New API `/api/user/self` 和 `/api/log/self`，accountBalance=100000，records=2
 虚拟充值后余额: OK，虚拟回调 credited 后再次查询，accountBalance=150000
 ```
 

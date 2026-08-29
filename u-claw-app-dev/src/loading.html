@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>U-Claw - Loading</title>
+<title>Bavi-box - Loading</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -34,7 +34,7 @@ body {
 .logo img {
   display: block;
   border-radius: 24px;
-  box-shadow: 0 0 0 1px rgba(22, 119, 255, 0.3), 0 16px 44px rgba(22, 119, 255, 0.26);
+  box-shadow: 0 0 0 1px rgba(0, 185, 197, 0.3), 0 16px 44px rgba(0, 185, 197, 0.24);
 }
 @keyframes pulse {
   0%, 100% { transform: scale(1); opacity: 1; }
@@ -45,7 +45,7 @@ h1 {
   margin-bottom: 8px;
   font-weight: 600;
 }
-h1 span { color: #1677ff; }
+h1 span { color: #00b9c5; }
 .subtitle {
   color: #9ca3af;
   font-size: 1.1em;
@@ -62,7 +62,7 @@ h1 span { color: #1677ff; }
 .loader-bar {
   height: 100%;
   width: 40%;
-  background: linear-gradient(90deg, #1677ff, #69b1ff);
+  background: linear-gradient(90deg, #00b9c5, #4b5563);
   border-radius: 3px;
   animation: loading 1.5s ease-in-out infinite;
 }
@@ -88,18 +88,18 @@ h1 span { color: #1677ff; }
 <body>
 <div class="container">
   <div class="logo">
-    <img src="../assets/icon.svg" alt="U-Claw" />
+    <img src="../assets/icon.svg" alt="Bavi-box" />
   </div>
-  <h1><span>U-Claw</span></h1>
-  <p class="subtitle">U-Claw AI 工作空间</p>
+  <h1><span>Bavi-box</span></h1>
+  <p class="subtitle">Bavi-box AI 工作空间</p>
   <div class="loader"><div class="loader-bar"></div></div>
-  <p class="status" id="status">正在启动 U-Claw 工作空间...</p>
+  <p class="status" id="status">正在启动 Bavi-box 工作空间...</p>
 </div>
 
 <script>
 const messages = [
-  '正在启动 U-Claw 工作空间...',
-  '正在启动 U-Claw 引擎...',
+  '正在启动 Bavi-box 工作空间...',
+  '正在启动 Bavi-box 引擎...',
   '检查配置文件...',
   '正在连接 Gateway...',
   '正在初始化 AI 网关...',
@@ -118,7 +118,7 @@ async function checkReady() {
     if (window.uclaw) {
       const status = await window.uclaw.getGatewayStatus();
       if (status.ready) {
-        document.getElementById('status').textContent = 'U-Claw 已就绪';
+        document.getElementById('status').textContent = 'Bavi-box 已就绪';
         await window.uclaw.openDashboard();
         return;
       }

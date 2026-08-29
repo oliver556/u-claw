@@ -52,7 +52,7 @@ func (s *MemoryStore) CreateOrder(_ context.Context, order Order) (Order, error)
 	return order, nil
 }
 
-// ListOrdersForUser returns recent orders for one U-Claw user.
+// ListOrdersForUser returns recent orders for one Bavi-box user.
 func (s *MemoryStore) ListOrdersForUser(_ context.Context, userID int64, limit int) ([]Order, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -178,7 +178,7 @@ func (s *MemoryStore) MarkCreditFailed(_ context.Context, orderNo string, lastEr
 	return order, nil
 }
 
-// GetNewAPIAccount returns the mapped New API user for a U-Claw user.
+// GetNewAPIAccount returns the mapped New API user for a Bavi-box user.
 func (s *MemoryStore) GetNewAPIAccount(_ context.Context, userID int64) (Account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

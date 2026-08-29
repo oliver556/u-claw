@@ -125,7 +125,7 @@ const requiredUiPolishTexts = {
   chat: [
     "正在加载会话",
     "运行状态：",
-    "U-Claw 运行结束但未返回文本。",
+    "Bavi-box 运行结束但未返回文本。",
     "新消息",
     "正在准备模型...",
     "正在连接语音输入...",
@@ -299,14 +299,14 @@ const requiredUiPolishTexts = {
     "不支持的 schema，请使用 Raw。",
   ],
   configPage: [
-    "U-Claw 助手",
+    "Bavi-box 助手",
     "适合日常使用的均衡默认配置。",
     "代码 Agent",
-    "U-Claw 助手身份",
+    "Bavi-box 助手身份",
     "`备用 Logo`",
     "保存并发布",
     "尚未配置 MCP servers。",
-    "选择 U-Claw 每次运行注入多少工作区上下文。",
+    "选择 Bavi-box 每次运行注入多少工作区上下文。",
   ],
   overview: [
     "title:`Gateway 错误`",
@@ -333,8 +333,8 @@ const requiredUiPolishTexts = {
     "config:{titleKey:`tabs.config`,subtitleKey:`subtitles.config`}",
     "id:`nav-workflows`,label:`工作流`,icon:`scrollText`,category:`navigation`,action:`nav:tasks`",
     "id:`nav-models`,label:`模型`,icon:`settings`,category:`navigation`,action:`nav:config`",
-    "Wm=`U-Claw`",
-    "assistantIdentity:{agentId:null,name:`U-Claw`,avatar:null,avatarSource:null,avatarStatus:null,avatarReason:null}",
+    "Wm=`Bavi-box`",
+    "assistantIdentity:{agentId:null,name:`Bavi-box`,avatar:null,avatarSource:null,avatarStatus:null,avatarReason:null}",
   ],
   i18n: [
     "agents:`智能体`",
@@ -345,7 +345,7 @@ const requiredUiPolishTexts = {
     "tasks:`自动任务、子智能体与运行记录。`",
     "skills:`技能库、安装与本地技能管理。`",
     "config:`模型、供应商与默认参数。`",
-    "subtitle:`U-Claw Gateway`",
+    "subtitle:`Bavi-box Gateway`",
     "title:`如何连接`",
     "step1:`在主机启动 Gateway：`",
     "stepPaste:`粘贴 openclaw dashboard --no-open 输出的 token",
@@ -356,7 +356,7 @@ const requiredUiPolishTexts = {
   ],
   secondaryI18n: [
     "loadingTitle:`正在加载面板`",
-    "title:`U-Claw 移动端`",
+    "title:`Bavi-box 移动端`",
     "instances:{title:`已连接实例`",
     "worktrees:{title:`托管工作树`",
     "sessionsView:{title:`会话`",
@@ -426,7 +426,7 @@ const requiredUiPolishTexts = {
   secondaryInlineInstances: ["暂无实例。", "暂无 presence payload。"],
   secondaryInlineLogs: ["u-claw-logs-${t}-${a}.log"],
   finalSessionsPage: [
-    "C=(c(x?.name)??``).replace(/^Assistant$/,`U-Claw`)",
+    "C=(c(x?.name)??``).replace(/^Assistant$/,`Bavi-box`)",
     "控制台",
     "共 ${o} 行",
     "每页 ${e} 条",
@@ -434,9 +434,9 @@ const requiredUiPolishTexts = {
   ],
   tertiaryI18n: [
     "skills:`技能库、安装与本地技能管理。`",
-    "title:`U-Claw 移动端`",
-    "qrAlt:`U-Claw 移动端配对二维码`",
-    "waiting:`U-Claw 移动端扫码后会自动连接。`",
+    "title:`Bavi-box 移动端`",
+    "qrAlt:`Bavi-box 移动端配对二维码`",
+    "waiting:`Bavi-box 移动端扫码后会自动连接。`",
     "debug:{snapshotsTitle:`快照`",
     "manualRpcTitle:`手动 RPC`",
     "execApprovalNeeded:`需要 Exec 审批`",
@@ -474,14 +474,14 @@ const requiredUiPolishTexts = {
     "files:{emptyDraft:`空草稿`",
     "chat:{disconnected:`Gateway 已断开。`",
     "sidebar:{allSessions:`全部会话`",
-    "welcome:{ready:`U-Claw 已就绪`",
+    "welcome:{ready:`Bavi-box 已就绪`",
     "runControls:{newSession:`新会话`",
     "composer:{placeholder:`给 {name} 发消息`",
     "selectors:{agentFilter:`按 Agent 筛选会话`",
     "workspaceFiles:{label:`会话工作区`",
   ],
   css: [
-    "/* U-Claw UI polish v1 */",
+    "/* Bavi-box UI polish v1 */",
     "--uclaw-navy: #10162b",
     "--uclaw-claw: #69b1ff",
     "--accent: #1677ff",
@@ -647,8 +647,8 @@ function verifyControlUiBranding(errors) {
   }
 
   const html = readUtf8(indexHtmlPath);
-  assertContains(errors, indexHtmlPath, html, "<title>U-Claw Control</title>", "U-Claw document title");
-  assertContains(errors, indexHtmlPath, html, "U-Claw Control UI", "U-Claw fallback title");
+  assertContains(errors, indexHtmlPath, html, "<title>Bavi-box Control</title>", "Bavi-box document title");
+  assertContains(errors, indexHtmlPath, html, "Bavi-box Control UI", "Bavi-box fallback title");
 
   for (const file of listAssets(/^index-.*\.js$/, "index js")) {
     const source = readUtf8(file);
@@ -656,25 +656,25 @@ function verifyControlUiBranding(errors) {
       errors,
       file,
       source,
-      '<span class="sidebar-brand__title">U-Claw</span>',
-      "U-Claw sidebar brand",
+      '<span class="sidebar-brand__title">Bavi-box</span>',
+      "Bavi-box sidebar brand",
     );
     assertContains(
       errors,
       file,
       source,
-      '<span class="topbar-brand__title">U-Claw</span>',
-      "U-Claw topbar brand",
+      '<span class="topbar-brand__title">Bavi-box</span>',
+      "Bavi-box topbar brand",
     );
-    assertContains(errors, file, source, "                  U-Claw\n                </a>", "U-Claw breadcrumb link");
-    assertContains(errors, file, source, 'aria-label="U-Claw"', "U-Claw accessible brand");
-    assertContains(errors, file, source, 'alt="U-Claw"', "U-Claw logo alt text");
+    assertContains(errors, file, source, "                  Bavi-box\n                </a>", "Bavi-box breadcrumb link");
+    assertContains(errors, file, source, 'aria-label="Bavi-box"', "Bavi-box accessible brand");
+    assertContains(errors, file, source, 'alt="Bavi-box"', "Bavi-box logo alt text");
     assertContains(
       errors,
       file,
       source,
-      '<div class="login-gate__title">U-Claw</div>',
-      "U-Claw login brand",
+      '<div class="login-gate__title">Bavi-box</div>',
+      "Bavi-box login brand",
     );
   }
 }
@@ -697,11 +697,11 @@ function verifyControlUiManifest(errors) {
     return;
   }
 
-  if (manifest.name !== "U-Claw Control") {
-    errors.push(`${path.relative(root, manifestPath)} name is not U-Claw Control`);
+  if (manifest.name !== "Bavi-box Control") {
+    errors.push(`${path.relative(root, manifestPath)} name is not Bavi-box Control`);
   }
-  if (manifest.short_name !== "U-Claw") {
-    errors.push(`${path.relative(root, manifestPath)} short_name is not U-Claw`);
+  if (manifest.short_name !== "Bavi-box") {
+    errors.push(`${path.relative(root, manifestPath)} short_name is not Bavi-box`);
   }
   if (source.includes("OpenClaw Control") || source.includes('"OpenClaw"')) {
     errors.push(`${path.relative(root, manifestPath)} still contains OpenClaw product metadata`);
@@ -1091,12 +1091,12 @@ function verifyServiceWorker(errors) {
     );
   }
 
-  assertContains(errors, swPath, source, 'title: "U-Claw"', "U-Claw push fallback title");
-  assertContains(errors, swPath, source, 'data.title || "U-Claw"', "U-Claw push default title");
+  assertContains(errors, swPath, source, 'title: "Bavi-box"', "Bavi-box push fallback title");
+  assertContains(errors, swPath, source, 'data.title || "Bavi-box"', "Bavi-box push default title");
 }
 
 /**
- * Verifies official U-Claw logo assets replaced the default Control UI icons.
+ * Verifies the official product logo assets replaced the default Control UI icons.
  */
 function verifyBrandAssets(errors) {
   assertSameFile(errors, officialIconSvgPath, path.join(controlUiDir, "favicon.svg"), "favicon.svg");
@@ -1105,20 +1105,20 @@ function verifyBrandAssets(errors) {
   assertSameFile(errors, officialIconIcoPath, path.join(controlUiDir, "favicon.ico"), "favicon.ico");
 
   const svg = readUtf8(officialIconSvgPath);
-  for (const token of ["#1677ff", "#69b1ff", "#0958d9"]) {
+  for (const token of ["Bavi-box logo", "data:image/png;base64"]) {
     if (!svg.includes(token)) {
-      errors.push(`${path.relative(root, officialIconSvgPath)} missing blue logo token: ${token}`);
+      errors.push(`${path.relative(root, officialIconSvgPath)} missing product logo token: ${token}`);
     }
   }
-  for (const token of ["#ff6b35", "#ff8f65", "#e95420", "#ff7a45", "#ffb088"]) {
-    if (svg.toLowerCase().includes(token)) {
-      errors.push(`${path.relative(root, officialIconSvgPath)} contains orange logo token: ${token}`);
+  for (const token of ["YanJian Tech logo", "#ff6b35", "#ff8f65", "#e95420", "#ff7a45", "#ffb088"]) {
+    if (svg.toLowerCase().includes(token.toLowerCase())) {
+      errors.push(`${path.relative(root, officialIconSvgPath)} contains old logo token: ${token}`);
     }
   }
 }
 
 /**
- * Verifies the Electron startup loading page uses U-Claw assets and blue primary color.
+ * Verifies the Electron startup loading page uses Bavi-box assets and brand color.
  */
 function verifyStartupLoadingBranding(errors) {
   if (!fs.existsSync(loadingHtmlPath)) {
@@ -1129,14 +1129,14 @@ function verifyStartupLoadingBranding(errors) {
   const source = readUtf8(loadingHtmlPath);
   const requiredTokens = [
     "../assets/icon.svg",
-    "#1677ff",
-    "#69b1ff",
-    "U-Claw AI 工作空间",
-    "正在启动 U-Claw 工作空间...",
-    "U-Claw 已就绪",
+    "#00b9c5",
+    "#4b5563",
+    "Bavi-box AI 工作空间",
+    "正在启动 Bavi-box 工作空间...",
+    "Bavi-box 已就绪",
   ];
   for (const token of requiredTokens) {
-    assertContains(errors, loadingHtmlPath, source, token, "startup loading U-Claw branding");
+    assertContains(errors, loadingHtmlPath, source, token, "startup loading Bavi-box branding");
   }
 
   const forbiddenTokens = [
@@ -1232,7 +1232,7 @@ function verifyPrimaryNavigationProjection(errors) {
 }
 
 /**
- * Verifies first-pass U-Claw UI polish survived in generated UI assets.
+ * Verifies first-pass Bavi-box UI polish survived in generated UI assets.
  */
 function verifyUiPolish(errors) {
   const checks = [
@@ -1265,7 +1265,7 @@ function verifyUiPolish(errors) {
     for (const file of check.files) {
       const source = readUtf8(file);
       for (const token of requiredUiPolishTexts[check.label]) {
-        assertContains(errors, file, source, token, "U-Claw UI polish text");
+        assertContains(errors, file, source, token, "Bavi-box UI polish text");
       }
       if (check.label === "agents") {
         assertNotContains(errors, file, source, "自定义创建已关闭", "custom expert disabled button must be removed");
@@ -1286,7 +1286,7 @@ function verifyUiPolish(errors) {
 }
 
 /**
- * Verifies the chat microphone button is locked to the U-Claw primary blue system.
+ * Verifies the chat microphone button is locked to the Bavi-box primary blue system.
  */
 function verifyChatVoiceButtonBlue(errors) {
   for (const file of listAssets(/^index-.*\.css$/, "index css")) {
@@ -1314,7 +1314,7 @@ function verifyChatVoiceButtonBlue(errors) {
 }
 
 /**
- * Blocks exact high-risk residual English copy in pages already covered by U-Claw polish.
+ * Blocks exact high-risk residual English copy in pages already covered by Bavi-box polish.
  */
 function verifyHighRiskResiduals(errors) {
   const checks = [
@@ -1614,11 +1614,11 @@ function verifyChatSkillHubDropdown(errors) {
     for (const token of chatSkillHubTokens) {
       assertContains(errors, file, source, token, "chat SkillHub dropdown token");
     }
-    assertContains(errors, file, source, "e.assistantName&&e.assistantName!==`Assistant`?e.assistantName:`U-Claw`", "U-Claw composer assistant name");
-    assertContains(errors, file, source, "t?.name?.trim()||`U-Claw`", "U-Claw message assistant name");
+    assertContains(errors, file, source, "e.assistantName&&e.assistantName!==`Assistant`?e.assistantName:`Bavi-box`", "Bavi-box composer assistant name");
+    assertContains(errors, file, source, "t?.name?.trim()||`Bavi-box`", "Bavi-box message assistant name");
     assertContains(errors, file, source, "Agent 运行在生成回复前失败。", "localized failed run fallback");
-    assertContains(errors, file, source, "正在询问 U-Claw...", "U-Claw voice status");
-    assertContains(errors, file, source, " 正在回复...", "U-Claw streaming status");
+    assertContains(errors, file, source, "正在询问 Bavi-box...", "Bavi-box voice status");
+    assertContains(errors, file, source, " 正在回复...", "Bavi-box streaming status");
     assertContains(errors, file, source, "未知命令：", "localized unknown command text");
     for (const token of ["选择 SkillHub", "SkillHub 暂不可用", "SkillHub 配置服务不可用", "保存 SkillHub 选择失败"]) {
       if (source.includes(token)) {

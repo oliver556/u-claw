@@ -1,8 +1,8 @@
-# 第16节 U-Claw 全界面可见面审计
+# 第16节 Bavi-box 全界面可见面审计
 
 更新时间：2026-08-23
 
-来源 PRD：`docs/多人开发/第16节U-Claw全界面改造PRD.md`
+来源 PRD：`docs/多人开发/第16节Bavi-box全界面改造PRD.md`
 
 ## 审计结论
 
@@ -35,7 +35,7 @@
 6. Skills 页 `确认风险并安装` 需避免越界解读。
    - 证据：能力矩阵 #13 `High-risk permission confirmation = Blocked`。
    - 归属：Task 4 / Task 8。
-   - 处置：后续文案应说明是 OpenClaw 原安装风险确认，不宣称 U-Claw 事务级权限系统完成。
+   - 处置：后续文案应说明是 OpenClaw 原安装风险确认，不宣称 Bavi-box 事务级权限系统完成。
 
 7. Agents / Tools tab 英文残留明显。
    - 证据：`agents-page-*.js` 中 `Load the gateway config...`、`Tool`、`Enabled Tool`、`Disable`、`Enable`。
@@ -48,18 +48,18 @@
 9. Channels 默认展示多个渠道入口，需另补能力矩阵。
    - 证据：`channels-page-*.js` 默认含 `whatsapp/telegram/discord/googlechat/slack/signal/imessage/nostr`。
    - 归属：Task 5。
-   - 风险：当前 SkillHub 能力矩阵未覆盖 Channels；不得把未验证渠道宣称为 U-Claw 已完成能力。
+   - 风险：当前 SkillHub 能力矩阵未覆盖 Channels；不得把未验证渠道宣称为 Bavi-box 已完成能力。
 
 10. 独立 `tools-page-*.js` 不存在。
     - 证据：active assets 无 `tools-page` bundle；Tools 入口在 Agents page 内。
     - 归属：Task 5 / Task 8。
 
-11. 当前 verifier 只验证应出现的 U-Claw 文案，不足以覆盖残留扫描。
+11. 当前 verifier 只验证应出现的 Bavi-box 文案，不足以覆盖残留扫描。
     - 证据：`verify-skillhub-branding.js` 的 `requiredUiPolishTexts` 为正向断言。
     - 归属：Task 8。
 
 12. 截图显示 Brand Visual System 不成立。
-    - 证据：logo 仍像临时红色图标，聊天头像复用该图标；U-Claw 主色应为 `#1677ff`，但背景、侧栏、选中态、按钮、链接、麦克风、SkillHub 下拉缺少统一的 `#1677ff` 品牌系统。
+    - 证据：logo 仍像临时红色图标，聊天头像复用该图标；Bavi-box 主色应为 `#1677ff`，但背景、侧栏、选中态、按钮、链接、麦克风、SkillHub 下拉缺少统一的 `#1677ff` 品牌系统。
     - 归属：Task 7。
     - 处置：优先修 logo/头像 asset 与 CSS token，再继续深层 i18n。
     - 2026-08-23 续审：Overview 右侧 workspace 原 light theme 暖灰 `--bg-content:#f4f1ec` 会造成肤色感；处置为冷灰 `--bg-content:#f7f9fc`，卡片保持白色。
@@ -73,8 +73,8 @@
 
 本轮先修复最小、高信号、低风险项：
 
-- `sw.js` 默认通知标题改为 U-Claw，并 bump cache marker。
-- Config form 分类标签与描述改为中文/U-Claw 语义。
+- `sw.js` 默认通知标题改为 Bavi-box，并 bump cache marker。
+- Config form 分类标签与描述改为中文/Bavi-box 语义。
 - Config page quick settings/MCP 空态改为中文。
 - Overview 注意项英文标题改为中文。
 - Agents/Tools/Skills 中已定位的高频英文按钮与提示改为中文。

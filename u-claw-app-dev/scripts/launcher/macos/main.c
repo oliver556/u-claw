@@ -43,7 +43,7 @@ static void mkdir_p(const char *path) {
 }
 
 static void append_launcher_log(NSString *message) {
-  NSString *line = [NSString stringWithFormat:@"[%@] [U-Claw] %@\n", [[NSDate date] descriptionWithLocale:nil], message];
+  NSString *line = [NSString stringWithFormat:@"[%@] [Bavi-box] %@\n", [[NSDate date] descriptionWithLocale:nil], message];
   int fd = open(gLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644);
   if (fd < 0) return;
   const char *bytes = line.UTF8String;
@@ -205,7 +205,7 @@ static BOOL is_shutdown_status(NSString *status) {
 }
 
 static NSString *initial_status_text(void) {
-  return @"U-Claw 正在启动...\n\n首次启动需要复制和解压程序缓存，可能需要几十秒。\n后续同版本启动会复用缓存。";
+  return @"Bavi-box 正在启动...\n\n首次启动需要复制和解压程序缓存，可能需要几十秒。\n后续同版本启动会复用缓存。";
 }
 
 static NSString *status_text(void) {
@@ -219,14 +219,14 @@ static NSString *status_text(void) {
   if (lines.count == 0) return initial_status_text();
 
   NSString *body = [lines componentsJoinedByString:@"\n"];
-  NSString *title = is_shutdown_status(body) ? @"U-Claw 正在关闭..." : @"U-Claw 正在启动...";
+  NSString *title = is_shutdown_status(body) ? @"Bavi-box 正在关闭..." : @"Bavi-box 正在启动...";
   return [NSString stringWithFormat:@"%@\n\n%@", title, body];
 }
 
 static BOOL should_show_status_window(NSString *status) {
   if (is_shutdown_status(status)) return YES;
   if ([[NSDate date] timeIntervalSinceDate:gLauncherStarted] < 1.2) return NO;
-  if (has_text(status, @"Starting U-Claw")) return NO;
+  if (has_text(status, @"Starting Bavi-box")) return NO;
   return has_text(status, @"Installing updated app cache") ||
     has_text(status, @"Copying Mac archive") ||
     has_text(status, @"Decompressing Mac app") ||
@@ -256,7 +256,7 @@ static void update_status_window(void) {
   if (gWindowHidden && should_show_status_window(status)) {
     show_window();
   }
-  if (!gWindowHidden && has_text(status, @"Starting U-Claw") && !is_shutdown_status(status)) {
+  if (!gWindowHidden && has_text(status, @"Starting Bavi-box") && !is_shutdown_status(status)) {
     hide_window();
   }
 }
@@ -295,7 +295,7 @@ static void update_status_window(void) {
     styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable)
     backing:NSBackingStoreBuffered
     defer:NO];
-  [gWindow setTitle:@"U-Claw Launcher"];
+  [gWindow setTitle:@"Bavi-box Launcher"];
   [gWindow setBackgroundColor:[NSColor colorWithCalibratedWhite:0.04 alpha:1.0]];
 
   NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(18, 18, 644, 394)];
@@ -342,7 +342,7 @@ static void update_status_window(void) {
     [gTask launch];
   } @catch (NSException *exception) {
     gExitCode = 1;
-    NSString *message = [NSString stringWithFormat:@"U-Claw Launcher: failed to launch script: %@\n", exception.reason ?: @""];
+    NSString *message = [NSString stringWithFormat:@"Bavi-box Launcher: failed to launch script: %@\n", exception.reason ?: @""];
     [message writeToFile:gLogPath atomically:NO encoding:NSUTF8StringEncoding error:nil];
     return;
   }
@@ -423,7 +423,7 @@ static BOOL existing_launch_is_closing(void) {
 static BOOL acquire_single_instance_lock(const char *root) {
   char lock_path[4096];
   char lock_dir[4096];
-  snprintf(lock_dir, sizeof(lock_dir), "%s/Library/Caches/U-Claw/launcher-locks", getenv("HOME") ?: "/tmp");
+  snprintf(lock_dir, sizeof(lock_dir), "%s/Library/Caches/Bavi-box/launcher-locks", getenv("HOME") ?: "/tmp");
   mkdir_p(lock_dir);
   snprintf(lock_path, sizeof(lock_path), "%s/%016llx.lock", lock_dir, (unsigned long long)fnv1a64(root));
   gLockFd = open(lock_path, O_WRONLY | O_CREAT, 0644);
@@ -464,20 +464,20 @@ int main(void) {
     char resolved_executable[4096];
     uint32_t executable_size = sizeof(executable);
     if (_NSGetExecutablePath(executable, &executable_size) != 0) {
-      fprintf(stderr, "U-Claw Launcher: _NSGetExecutablePath failed\n");
+      fprintf(stderr, "Bavi-box Launcher: _NSGetExecutablePath failed\n");
       return 1;
     }
     if (realpath(executable, resolved_executable) == NULL) {
-      fprintf(stderr, "U-Claw Launcher: realpath failed for %s\n", executable);
+      fprintf(stderr, "Bavi-box Launcher: realpath failed for %s\n", executable);
       return 1;
     }
 
     char root[4096];
     strncpy(root, resolved_executable, sizeof(root) - 1);
     root[sizeof(root) - 1] = '\0';
-    char *bundle_suffix = strstr(root, "/U-Claw Launcher.app/Contents/MacOS/");
+    char *bundle_suffix = strstr(root, "/Bavi-box Launcher.app/Contents/MacOS/");
     if (bundle_suffix == NULL) {
-      fprintf(stderr, "U-Claw Launcher: bundle suffix missing for %s\n", root);
+      fprintf(stderr, "Bavi-box Launcher: bundle suffix missing for %s\n", root);
       return 1;
     }
     *bundle_suffix = '\0';
@@ -487,16 +487,16 @@ int main(void) {
     char log_dir[4096];
     char log_path[4096];
     char usb_log_path[4096];
-    snprintf(local_script_dir, sizeof(local_script_dir), "%s/Library/Caches/U-Claw/launcher-bin", getenv("HOME") ?: "/tmp");
+    snprintf(local_script_dir, sizeof(local_script_dir), "%s/Library/Caches/Bavi-box/launcher-bin", getenv("HOME") ?: "/tmp");
     mkdir_p(local_script_dir);
     snprintf(local_script, sizeof(local_script), "%s/Mac-Start-App.command", local_script_dir);
     if (!write_file_c(local_script, kMacStartScript)) {
-      fprintf(stderr, "U-Claw Launcher: failed to write launch script to local cache\n");
+      fprintf(stderr, "Bavi-box Launcher: failed to write launch script to local cache\n");
       return 1;
     }
-    snprintf(log_dir, sizeof(log_dir), "%s/Library/Caches/U-Claw/launcher-logs", getenv("HOME") ?: "/tmp");
-    snprintf(log_path, sizeof(log_path), "%s/U-Claw-Launcher.log", log_dir);
-    snprintf(usb_log_path, sizeof(usb_log_path), "%s/data/logs/U-Claw-Launcher.log", root);
+    snprintf(log_dir, sizeof(log_dir), "%s/Library/Caches/Bavi-box/launcher-logs", getenv("HOME") ?: "/tmp");
+    snprintf(log_path, sizeof(log_path), "%s/Bavi-box-Launcher.log", log_dir);
+    snprintf(usb_log_path, sizeof(usb_log_path), "%s/data/logs/Bavi-box-Launcher.log", root);
     mkdir_p(log_dir);
     gLogPath = [NSString stringWithUTF8String:log_path];
     gUsbLauncherLogPath = [NSString stringWithUTF8String:usb_log_path];
@@ -518,7 +518,7 @@ int main(void) {
       append_launcher_log(@"Failed to relaunch after activation restart request.");
     }
     if (gExitCode == 0 && has_fresh_relaunch_request(root)) {
-      append_launcher_log(@"Relaunch requested while U-Claw was closing; starting again.");
+      append_launcher_log(@"Relaunch requested while Bavi-box was closing; starting again.");
       if (gLockFd >= 0) {
         close(gLockFd);
         gLockFd = -1;

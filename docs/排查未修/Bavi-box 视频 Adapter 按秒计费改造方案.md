@@ -1,4 +1,4 @@
-# U-Claw 视频 Adapter 按秒计费改造方案
+# Bavi-box 视频 Adapter 按秒计费改造方案
 
 ## 1. 文档状态
 

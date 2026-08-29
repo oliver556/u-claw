@@ -7,7 +7,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const templatePath = path.join(repoRoot, 'resources', 'default-openclaw.json');
 const openclawPackagePath = path.join(repoRoot, 'node_modules', 'openclaw', 'package.json');
 const appSupportPath = path.join(os.homedir(), 'Library', 'Application Support');
-const appDataNames = ['u-claw', 'U-Claw'];
+const appDataNames = ['u-claw', 'Bavi-box'];
 const desktopConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, '.openclaw', 'openclaw.json'));
 const portableCacheConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, 'usb-portable', 'data', '.openclaw', 'openclaw.json'));
 const DEFAULT_NEW_API_BASE_URL = 'https://api.yiyong.me/v1';
@@ -28,13 +28,13 @@ function usage() {
 Options:
   --source <path>        Read existing key from another openclaw.json.
   --new-api-key <key>    Override New API key for custom/litellm.
-  --video-base-url <url> Override xai video base URL. Defaults to local U-Claw adapter.
+  --video-base-url <url> Override xai video base URL. Defaults to local Bavi-box adapter.
   --video-api-key <key>  Override xai video adapter token.
   --customer            Generate a clean customer config with empty New API keys.
   --streamer            Require a real New API key inherited from desktop config.
-  --desktop             Write desktop config only. Writes both u-claw and U-Claw app data dirs.
-  --portable-cache      Write local portable cache config only. Writes both u-claw and U-Claw app data dirs.
-  --usb <mount>         Write <mount>/U-Claw/data/.openclaw/openclaw.json.
+  --desktop             Write desktop config only. Writes both u-claw and Bavi-box app data dirs.
+  --portable-cache      Write local portable cache config only. Writes both u-claw and Bavi-box app data dirs.
+  --usb <mount>         Write <mount>/Bavi-box/data/.openclaw/openclaw.json.
   --dest <path>         Write an exact openclaw.json path.
 `);
 }
@@ -290,7 +290,7 @@ function usbConfigPath(root) {
   const resolved = path.resolve(expandHome(root));
   const uClawRoot = path.basename(resolved).toLowerCase() === 'u-claw'
     ? resolved
-    : path.join(resolved, 'U-Claw');
+    : path.join(resolved, 'Bavi-box');
   return path.join(uClawRoot, 'data', '.openclaw', 'openclaw.json');
 }
 

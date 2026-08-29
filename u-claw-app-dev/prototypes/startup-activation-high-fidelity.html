@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
-    <title>U-Claw 首次启动</title>
+    <title>Bavi-box 首次启动</title>
     <style>
       :root {
         color-scheme: light;
@@ -227,7 +227,7 @@
   <body>
     <div class="desktop">
       <header class="titlebar">
-        <div class="brand"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span><strong>U-Claw</strong><small>首次启动设置</small></div>
+        <div class="brand"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span><strong>Bavi-box</strong><small>首次启动设置</small></div>
         <div class="window-controls" aria-label="窗口控制">
           <button type="button" aria-label="最小化"><span class="minimize"></span></button>
           <button type="button" aria-label="最大化"><span class="maximize"></span></button>
@@ -236,7 +236,7 @@
       </header>
 
       <main class="stage">
-        <section class="setup-shell" aria-label="U-Claw 首次启动设置">
+        <section class="setup-shell" aria-label="Bavi-box 首次启动设置">
           <nav class="setup-steps" aria-label="设置进度">
             <div class="step active" data-step="notice"><span class="step-number">1</span><strong>使用须知</strong></div>
             <div class="step" data-step="check"><span class="step-number">2</span><strong>设备检查</strong></div>
@@ -248,19 +248,19 @@
             <section class="screen active" id="screen-notice">
               <header class="screen-head">
                 <span class="status-kicker">首次启动</span>
-                <h1>欢迎使用 U-Claw</h1>
-                <p>开始前，请了解 AI 工作空间的运行边界。确认后，U-Claw 会检查当前电脑与 U 盘是否满足运行条件。</p>
+                <h1>欢迎使用 Bavi-box</h1>
+                <p>开始前，请了解 AI 工作空间的运行边界。确认后，Bavi-box 会检查当前电脑与 U 盘是否满足运行条件。</p>
               </header>
               <div class="notice-card">
                 <div class="notice-card-head"><span class="notice-icon warn">!</span><strong>使用须知与责任说明</strong></div>
                 <div class="notice-list">
                   <article class="notice-item"><span class="notice-icon warn">!</span><div><strong>AI 输出不确定</strong><p>AI 生成的内容可能不准确、不完整或存在错误。重要决定前，请复核建议和结果。</p><small>不要把 AI 输出作为唯一决策依据。</small></div></article>
-                  <article class="notice-item"><span class="notice-icon">▤</span><div><strong>文件操作需确认</strong><p>U-Claw 可能读取、创建或修改 U 盘工作区中的文件。重要操作前会提示确认。</p><small>建议保留重要数据的独立备份。</small></div></article>
+                  <article class="notice-item"><span class="notice-icon">▤</span><div><strong>文件操作需确认</strong><p>Bavi-box 可能读取、创建或修改 U 盘工作区中的文件。重要操作前会提示确认。</p><small>建议保留重要数据的独立备份。</small></div></article>
                   <article class="notice-item"><span class="notice-icon">›_</span><div><strong>命令执行有风险</strong><p>部分能力可能建议或执行终端命令。涉及删除、安装或系统级修改时，请先检查对象和范围。</p><small>默认保持受控运行，不自动执行高风险操作。</small></div></article>
                   <article class="notice-item"><span class="notice-icon">◆</span><div><strong>数据与隐私</strong><p>对话、配置、记忆和授权材料优先保存在 U 盘。发送给第三方模型前，请不要输入敏感信息。</p><small>模型服务商的处理规则以实际服务协议为准。</small></div></article>
                 </div>
               </div>
-              <label class="acknowledge"><input id="noticeAck" type="checkbox"><span class="check-box"></span><span>我已阅读并理解以上使用须知，知道 U-Claw 可能产生的风险。</span></label>
+              <label class="acknowledge"><input id="noticeAck" type="checkbox"><span class="check-box"></span><span>我已阅读并理解以上使用须知，知道 Bavi-box 可能产生的风险。</span></label>
               <p class="hint">这一步只需确认一次，之后可在“系统”中再次查看。</p>
             </section>
 
@@ -273,7 +273,7 @@
               <div class="check-card">
                 <div class="check-row" data-check="os"><span class="check-icon">OS</span><div><strong>操作系统与架构</strong><small>Windows 11 · x64 · 支持便携启动</small></div><span class="check-state">等待</span></div>
                 <div class="check-row" data-check="resource"><span class="check-icon">▥</span><div><strong>CPU、内存与磁盘</strong><small>当前电脑资源满足桌面客户端运行要求</small></div><span class="check-state">等待</span></div>
-                <div class="check-row" data-check="usb"><span class="check-icon">USB</span><div><strong>U 盘身份与数据目录</strong><small>U-Claw 产品盘 · E: · data 目录可写</small></div><span class="check-state">等待</span></div>
+                <div class="check-row" data-check="usb"><span class="check-icon">USB</span><div><strong>U 盘身份与数据目录</strong><small>Bavi-box 产品盘 · E: · data 目录可写</small></div><span class="check-state">等待</span></div>
                 <div class="check-row" data-check="gateway"><span class="check-icon">↯</span><div><strong>本地 Gateway 与模型连接</strong><small>启动后会通过配置的 adapter 连接模型服务</small></div><span class="check-state">等待</span></div>
               </div>
               <div class="check-summary" id="checkSummary"><span class="summary-dot"></span><div><strong>准备开始检查</strong><small>点击“开始检查”后逐项读取状态。</small></div></div>
@@ -282,14 +282,14 @@
             <section class="screen" id="screen-activate">
               <header class="screen-head">
                 <span class="status-kicker">首次配置</span>
-                <h1>激活并连接 U-Claw</h1>
+                <h1>激活并连接 Bavi-box</h1>
                 <p>激活码用于绑定当前 U 盘；模型服务配置用于让文字、图片和视频能力真正可用。</p>
               </header>
               <div class="activate-grid">
                 <form class="form-card" id="activationForm" novalidate>
                   <div class="field" id="userField"><label for="username">激活用户名</label><input class="input" id="username" value="UCLAW-8F2K9M" autocomplete="username"><small>来自产品随附的激活卡或管理员分配。</small><small class="input-error">请输入有效的激活用户名。</small></div>
                   <div class="field" id="codeField"><label for="activationCode">激活码</label><input class="input" id="activationCode" value="7K4P-9Q2M-X8RT-6W3N-A5LC" autocomplete="one-time-code"><small>激活码首次使用后绑定当前 U 盘，换电脑不影响使用。</small><small class="input-error">激活码格式不正确。</small></div>
-                  <div class="bind-card"><span class="usb" aria-hidden="true"></span><span class="bind-copy"><strong>即将绑定：U-Claw · E:</strong><small>设备标识摘要 ···· 2F8C</small></span><span class="bind-state">可绑定</span></div>
+                  <div class="bind-card"><span class="usb" aria-hidden="true"></span><span class="bind-copy"><strong>即将绑定：Bavi-box · E:</strong><small>设备标识摘要 ···· 2F8C</small></span><span class="bind-state">可绑定</span></div>
                   <p class="form-note">模型 API Key 不写入界面。正式版本从 U 盘配置中心或统一配置文件读取。</p>
                 </form>
                 <aside class="side-card">
@@ -309,17 +309,17 @@
             <section class="screen finish" id="screen-finish">
               <div class="success-seal">✓</div>
               <span class="status-kicker success">准备完成</span>
-              <h1>U-Claw 已准备好</h1>
+              <h1>Bavi-box 已准备好</h1>
               <p>授权、运行环境和模型连接已完成检查。以后插入这只 U 盘，即可继续使用当前工作空间。</p>
               <div class="ready-card">
                 <div class="ready-line"><span class="success-seal" style="width: 34px;height:34px;margin:0;font-size:16px;box-shadow:none;">✓</span><span><strong>本地启动授权有效</strong><small>关键状态已写入 U 盘 data，并完成本地验证。</small></span></div>
-                <dl><div><dt>当前产品盘</dt><dd>U-Claw · E:</dd></div><div><dt>Gateway</dt><dd><span class="dot green"></span> 在线</dd></div><div><dt>默认模型</dt><dd>custom/gpt-5.5</dd></div></dl>
+                <dl><div><dt>当前产品盘</dt><dd>Bavi-box · E:</dd></div><div><dt>Gateway</dt><dd><span class="dot green"></span> 在线</dd></div><div><dt>默认模型</dt><dd>custom/gpt-5.5</dd></div></dl>
               </div>
             </section>
           </div>
 
           <footer class="setup-footer">
-            <span class="footer-note">U-Claw 首次启动设置 · 所有关键数据保存在 U 盘</span>
+            <span class="footer-note">Bavi-box 首次启动设置 · 所有关键数据保存在 U 盘</span>
             <div class="footer-actions">
               <button class="button text" id="backButton" type="button" hidden>上一步</button>
               <button class="button primary" id="nextButton" type="button" disabled>继续 <span class="arrow">→</span></button>

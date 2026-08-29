@@ -48,7 +48,7 @@ type ProviderInfo struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// Order is the persistent payment order that bridges U-Claw, payment callbacks, and New API quota.
+// Order is the persistent payment order that bridges Bavi-box, payment callbacks, and New API quota.
 type Order struct {
 	ID              int64      `json:"-"`
 	OrderNo         string     `json:"orderNo"`
@@ -172,7 +172,7 @@ func NewService(store Store, quota QuotaClient, cfg Config) (*Service, error) {
 	return &Service{store: store, quota: quota, cfg: cfg, now: time.Now}, nil
 }
 
-// DefaultPlans returns development SKUs using the U-Claw 1 CNY = 6kw compute conversion.
+// DefaultPlans returns development SKUs using the Bavi-box 1 CNY = 6kw compute conversion.
 func DefaultPlans() []Plan {
 	return []Plan{
 		{Code: "dev_10", Name: "虚拟充值 10 元", AmountCents: 1000, Quota: billing.NewAPIQuotaFromCNY(10), Currency: "CNY"},

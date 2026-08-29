@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
-# U-Claw - OpenClaw Doctor (官方完整体检, 进阶, 英文)
-# 注意：先启动 U-Claw 再跑本工具，否则 doctor 会卡在探测未启动的 gateway 上。
+# Bavi-box - OpenClaw Doctor (官方完整体检, 进阶, 英文)
+# 注意：先启动 Bavi-box 再跑本工具，否则 doctor 会卡在探测未启动的 gateway 上。
 # 只读：故意不传 --fix/--repair/--force。卡住可按 Ctrl+C 安全中断。
 # ============================================================
 
@@ -41,7 +41,7 @@ echo ""
 echo "  ========================================"
 echo "    OpenClaw Doctor (官方体检, 英文, 较慢)"
 echo "  ========================================"
-echo "  请确保 U-Claw 已经在运行。卡住可 Ctrl+C 中断（只读，安全）。"
+echo "  请确保 Bavi-box 已经在运行。卡住可 Ctrl+C 中断（只读，安全）。"
 echo "  想要快速的中文体检请改用 Mac-IntranetFix.command。"
 echo ""
 read -p "  按回车开始..."

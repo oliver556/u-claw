@@ -377,6 +377,100 @@ func TestUsageSummaryRequiresNewAPIConfig(t *testing.T) {
 	}
 }
 
+func TestModelCatalogReturnsNewAPIModels(t *testing.T) {
+	secret := "test-newapi-password-secret"
+	expectedPassword := provisioning.DeriveUserPassword(1, "13800138000", secret)
+	newAPIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			var req map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode login request: %v", err)
+			}
+			if req["username"] != "13800138000" || req["password"] != expectedPassword {
+				t.Fatalf("login request = %+v", req)
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"user-access-token"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/models":
+			if r.Header.Get("Authorization") != "Bearer user-access-token" {
+				t.Fatalf("models Authorization = %q", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"1":["gpt-5.5"],"2":["gpt-image-2"]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer newAPIServer.Close()
+
+	server := NewServer(config.Config{
+		AppEnv:                   "development",
+		JWTSecret:                "test-secret",
+		DevSMSCode:               "654321",
+		NewAPIAdminBaseURL:       newAPIServer.URL,
+		NewAPIAdminToken:         "admin-token",
+		NewAPIClientBaseURL:      "https://api.example.com/v1",
+		NewAPIUserPasswordSecret: secret,
+	}, BuildInfo{Version: "test"})
+
+	accessToken := loginForTest(t, server, "13800138000", "654321")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/newapi/models/catalog", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Status   string `json:"status"`
+		Source   string `json:"source"`
+		Provider struct {
+			ID      string `json:"id"`
+			BaseURL string `json:"baseUrl"`
+			API     string `json:"api"`
+		} `json:"provider"`
+		Models []struct {
+			ID           string   `json:"id"`
+			Channels     []string `json:"channels"`
+			Capabilities []string `json:"capabilities"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode catalog response: %v", err)
+	}
+	if payload.Status != "ok" || payload.Source != "newapi:/api/user/models" {
+		t.Fatalf("payload status/source = %+v", payload)
+	}
+	if payload.Provider.ID != "newapi" || payload.Provider.BaseURL != "https://api.example.com/v1" || payload.Provider.API != "openai-completions" {
+		t.Fatalf("provider = %+v", payload.Provider)
+	}
+	if len(payload.Models) != 2 || payload.Models[0].ID != "gpt-5.5" || payload.Models[0].Channels[0] != "1" {
+		t.Fatalf("models = %+v", payload.Models)
+	}
+	if payload.Models[1].ID != "gpt-image-2" || payload.Models[1].Capabilities[0] != "image" {
+		t.Fatalf("image model = %+v", payload.Models[1])
+	}
+}
+
+func TestModelCatalogRequiresNewAPIConfig(t *testing.T) {
+	server := NewServer(config.Config{
+		AppEnv:     "development",
+		JWTSecret:  "test-secret",
+		DevSMSCode: "654321",
+	}, BuildInfo{Version: "test"})
+	accessToken := loginForTest(t, server, "13800138000", "654321")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/newapi/models/catalog", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestRechargeProvidersRequiresBearerAndReturnsCatalog(t *testing.T) {
 	server := NewServer(config.Config{
 		AppEnv:     "development",
@@ -453,7 +547,7 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	pageRec := httptest.NewRecorder()
 	pageReq := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	server.ServeHTTP(pageRec, pageReq)
-	if pageRec.Code != http.StatusOK || !strings.Contains(pageRec.Body.String(), "U-Claw 运营后台") {
+	if pageRec.Code != http.StatusOK || !strings.Contains(pageRec.Body.String(), "Bavi-box 运营后台") {
 		t.Fatalf("admin page status = %d body = %s", pageRec.Code, pageRec.Body.String())
 	}
 	if !strings.Contains(pageRec.Body.String(), `item.status !== "unused" && item.status !== "disabled"`) {

@@ -16,7 +16,7 @@ if [ "$(sysctl -in hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then
 elif [ "$HOST_ARCH" = "x86_64" ]; then
   MAC_ARCH="x64"
 else
-  echo "[U-Claw] Unsupported Mac architecture: $HOST_ARCH"
+  echo "[Bavi-box] Unsupported Mac architecture: $HOST_ARCH"
   wait_before_exit
   exit 1
 fi
@@ -29,12 +29,12 @@ else
   ARCHIVE_SHA_ENV_NAME="UCLAW_MAC_X64_ARCHIVE_SHA256"
 fi
 USB_DATA_DIR="$ROOT/data"
-CACHE_ROOT="$HOME/Library/Caches/U-Claw"
+CACHE_ROOT="$HOME/Library/Caches/Bavi-box"
 ROOT_ID="$(printf '%s' "$ROOT" | shasum -a 256 | awk '{print substr($1,1,16)}')"
 ARCHIVE_CACHE_DIR="$CACHE_ROOT/archive-cache"
 APP_CACHE_DIR="$CACHE_ROOT/u-claw-app-mac-$MAC_ARCH"
 RUN_DATA_DIR="$CACHE_ROOT/usb-portable-$ROOT_ID/data"
-APP_BIN="$APP_CACHE_DIR/U-Claw.app/Contents/MacOS/U-Claw"
+APP_BIN="$APP_CACHE_DIR/Bavi-box.app/Contents/MacOS/Bavi-box"
 STAMP_FILE="$APP_CACHE_DIR/.u-claw-archive.sha256"
 LOCAL_ARCHIVE="$ARCHIVE_CACHE_DIR/u-claw-app-mac-$MAC_ARCH.tar.gz"
 LOCAL_ARCHIVE_STAMP="$LOCAL_ARCHIVE.sha256"
@@ -43,7 +43,7 @@ LOCAL_LOG_DIR="$CACHE_ROOT/launcher-logs"
 LOG_FILE="$LOCAL_LOG_DIR/Mac-Start-App.log"
 USB_MAC_START_LOG="$USB_LOG_DIR/Mac-Start-App.log"
 LAUNCHER_LOCAL_LOG="${UCLAW_LAUNCHER_LOCAL_LOG:-}"
-USB_LAUNCHER_LOG="${UCLAW_USB_LAUNCHER_LOG:-$USB_LOG_DIR/U-Claw-Launcher.log}"
+USB_LAUNCHER_LOG="${UCLAW_USB_LAUNCHER_LOG:-$USB_LOG_DIR/Bavi-box-Launcher.log}"
 SYNC_STATE_DIR="$RUN_DATA_DIR/.uclaw-sync"
 DIRTY_FILE="$SYNC_STATE_DIR/dirty.json"
 USB_DIRTY_FILE="$USB_DATA_DIR/.uclaw-sync/dirty.json"
@@ -137,7 +137,7 @@ sync_dir_with_progress() {
     if kill -0 "$sync_pid" 2>/dev/null; then
       file_count="$(find "$to_dir" -type f 2>/dev/null | wc -l | tr -d '[:space:]' || echo 0)"
       megabytes="$(du -sm "$to_dir" 2>/dev/null | awk '{print $1}' || echo 0)"
-      echo "[U-Claw] ${label}... ${elapsed}s elapsed, ${file_count}/${source_file_count} files, ${megabytes}/${source_megabytes} MB."
+      echo "[Bavi-box] ${label}... ${elapsed}s elapsed, ${file_count}/${source_file_count} files, ${megabytes}/${source_megabytes} MB."
     fi
     if [ "$elapsed" -ge "$timeout_seconds" ]; then
       pkill -TERM -P "$sync_pid" 2>/dev/null || true
@@ -146,7 +146,7 @@ sync_dir_with_progress() {
       pkill -KILL -P "$sync_pid" 2>/dev/null || true
       kill -KILL "$sync_pid" 2>/dev/null || true
       wait "$sync_pid" 2>/dev/null || true
-      echo "[U-Claw] ${label} timed out after ${timeout_seconds}s."
+      echo "[Bavi-box] ${label} timed out after ${timeout_seconds}s."
       return 1
     fi
   done
@@ -182,44 +182,44 @@ runtime_cache_is_current() {
 
 sync_back() {
   local status=$?
-  echo "[U-Claw] Syncing runtime data back to USB..."
+  echo "[Bavi-box] Syncing runtime data back to USB..."
   if ! sync_dir_with_progress "Syncing runtime data back to USB" "$RUN_DATA_DIR" "$USB_DATA_DIR" 300 "keep"; then
     status=1
   fi
   clear_dirty
   sync_launcher_log
-  echo "[U-Claw] Exit status: $status"
+  echo "[Bavi-box] Exit status: $status"
   exit "$status"
 }
 
-echo "[U-Claw] $(date '+%Y-%m-%d %H:%M:%S')"
-echo "[U-Claw] USB root: $ROOT"
-echo "[U-Claw] Mac architecture: $MAC_ARCH"
-echo "[U-Claw] USB data dir: $USB_DATA_DIR"
-echo "[U-Claw] Runtime data dir: $RUN_DATA_DIR"
+echo "[Bavi-box] $(date '+%Y-%m-%d %H:%M:%S')"
+echo "[Bavi-box] USB root: $ROOT"
+echo "[Bavi-box] Mac architecture: $MAC_ARCH"
+echo "[Bavi-box] USB data dir: $USB_DATA_DIR"
+echo "[Bavi-box] Runtime data dir: $RUN_DATA_DIR"
 
 if [ ! -f "$ARCHIVE" ]; then
-  echo "[U-Claw] Missing Mac archive:"
+  echo "[Bavi-box] Missing Mac archive:"
   echo "$ARCHIVE"
   wait_before_exit
   exit 1
 fi
 
 if [ -z "${!ARCHIVE_SHA_ENV_NAME:-}" ] && [ ! -f "$ARCHIVE_SHA_FILE" ]; then
-  echo "[U-Claw] Missing Mac archive manifest:"
+  echo "[Bavi-box] Missing Mac archive manifest:"
   echo "$ARCHIVE_SHA_FILE"
   wait_before_exit
   exit 1
 fi
 
 if [ ! -f "$USB_DATA_DIR/.openclaw/openclaw.json" ]; then
-  echo "[U-Claw] Missing config:"
+  echo "[Bavi-box] Missing config:"
   echo "$USB_DATA_DIR/.openclaw/openclaw.json"
   wait_before_exit
   exit 1
 fi
 
-echo "[U-Claw] Checking Mac archive..."
+echo "[Bavi-box] Checking Mac archive..."
 CURRENT_STAMP="${!ARCHIVE_SHA_ENV_NAME:-}"
 if [ -z "$CURRENT_STAMP" ]; then
   CURRENT_STAMP="$(tr -d '[:space:]' < "$ARCHIVE_SHA_FILE")"
@@ -242,7 +242,7 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
     TMP_ARCHIVE="$LOCAL_ARCHIVE.tmp.$$"
     COPY_STARTED_AT="$(date +%s)"
     COPY_TIMEOUT_SECONDS=1800
-    echo "[U-Claw] Copying Mac archive to local cache..."
+    echo "[Bavi-box] Copying Mac archive to local cache..."
     rm -f "$TMP_ARCHIVE"
     cp "$ARCHIVE" "$TMP_ARCHIVE" &
     COPY_PID=$!
@@ -256,30 +256,25 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
           ARCHIVE_MB="$((ARCHIVE_BYTES / 1048576))"
           COPIED_MB="$((COPIED_BYTES / 1048576))"
           PERCENT="$(awk -v copied="$COPIED_BYTES" -v total="$ARCHIVE_BYTES" 'BEGIN { printf "%.1f", (copied * 100) / total }')"
-          echo "[U-Claw] Copying Mac archive... ${COPIED_MB}/${ARCHIVE_MB} MB (${PERCENT}%), ${ELAPSED}s elapsed."
+          echo "[Bavi-box] Copying Mac archive... ${COPIED_MB}/${ARCHIVE_MB} MB (${PERCENT}%), ${ELAPSED}s elapsed."
           if [ "$ELAPSED" -ge 60 ] && [ "$COPIED_BYTES" -eq 0 ]; then
-            kill "$COPY_PID" 2>/dev/null || true
-            wait "$COPY_PID" 2>/dev/null || true
-            rm -f "$TMP_ARCHIVE"
-            echo "[U-Claw] Local archive copy made no progress; decompressing directly from USB archive."
-            USE_DIRECT_ARCHIVE=1
-            break
+            echo "[Bavi-box] USB read has not reported byte progress yet; continuing local archive cache copy."
           fi
         else
-          echo "[U-Claw] Copying Mac archive... ${ELAPSED}s elapsed."
+          echo "[Bavi-box] Copying Mac archive... ${ELAPSED}s elapsed."
         fi
       fi
       if [ "$ELAPSED" -ge "$COPY_TIMEOUT_SECONDS" ]; then
         kill "$COPY_PID" 2>/dev/null || true
         wait "$COPY_PID" 2>/dev/null || true
         rm -f "$TMP_ARCHIVE"
-        echo "[U-Claw] Failed to copy Mac archive within ${COPY_TIMEOUT_SECONDS}s."
+        echo "[Bavi-box] Failed to copy Mac archive within ${COPY_TIMEOUT_SECONDS}s."
         if [ -x "$APP_BIN" ]; then
-          echo "[U-Claw] Existing app cache is available; starting cached app instead."
+          echo "[Bavi-box] Existing app cache is available; starting cached app instead."
           USE_EXISTING_APP_CACHE=1
           break
         else
-          echo "[U-Claw] Please reconnect the USB disk or copy the U-Claw folder to a healthier disk."
+          echo "[Bavi-box] Please reconnect the USB disk or copy the Bavi-box folder to a healthier disk."
           wait_before_exit
           exit 1
         fi
@@ -287,9 +282,9 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
     done
     if [ "$USE_EXISTING_APP_CACHE" != "1" ] && [ "$USE_DIRECT_ARCHIVE" != "1" ] && ! wait "$COPY_PID"; then
       rm -f "$TMP_ARCHIVE"
-      echo "[U-Claw] Failed to copy Mac archive."
+      echo "[Bavi-box] Failed to copy Mac archive."
       if [ -x "$APP_BIN" ]; then
-        echo "[U-Claw] Existing app cache is available; starting cached app instead."
+        echo "[Bavi-box] Existing app cache is available; starting cached app instead."
         USE_EXISTING_APP_CACHE=1
       else
         wait_before_exit
@@ -299,18 +294,18 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
     if [ "$USE_EXISTING_APP_CACHE" != "1" ] && [ "$USE_DIRECT_ARCHIVE" != "1" ]; then
       mv "$TMP_ARCHIVE" "$LOCAL_ARCHIVE"
       printf '%s\n' "$CURRENT_STAMP" > "$LOCAL_ARCHIVE_STAMP"
-      echo "[U-Claw] Mac archive copied in $(($(date +%s) - COPY_STARTED_AT))s."
+      echo "[Bavi-box] Mac archive copied in $(($(date +%s) - COPY_STARTED_AT))s."
     fi
   else
-    echo "[U-Claw] Reusing local Mac archive cache."
+    echo "[Bavi-box] Reusing local Mac archive cache."
   fi
   if [ "$USE_EXISTING_APP_CACHE" != "1" ]; then
     EXTRACT_ARCHIVE="$LOCAL_ARCHIVE"
     if [ "$USE_DIRECT_ARCHIVE" = "1" ]; then
       EXTRACT_ARCHIVE="$ARCHIVE"
     fi
-    echo "[U-Claw] Installing updated app cache..."
-    echo "[U-Claw] This runs once per package version; later starts reuse the computer cache."
+    echo "[Bavi-box] Installing updated app cache..."
+    echo "[Bavi-box] This runs once per package version; later starts reuse the computer cache."
     rm -rf "$TMP_CACHE_DIR"
     mkdir -p "$TMP_CACHE_DIR"
     COPYFILE_DISABLE=1 tar -xzf "$EXTRACT_ARCHIVE" -C "$TMP_CACHE_DIR" &
@@ -319,7 +314,7 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
       while kill -0 "$EXTRACT_PID" 2>/dev/null; do
         sleep 5
         if kill -0 "$EXTRACT_PID" 2>/dev/null; then
-          echo "[U-Claw] Decompressing Mac app... $(($(date +%s) - INSTALL_STARTED_AT))s elapsed."
+          echo "[Bavi-box] Decompressing Mac app... $(($(date +%s) - INSTALL_STARTED_AT))s elapsed."
         fi
       done
     ) &
@@ -330,13 +325,13 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
     else
       kill "$PROGRESS_PID" 2>/dev/null || true
       wait "$PROGRESS_PID" 2>/dev/null || true
-      echo "[U-Claw] Failed to decompress Mac archive."
+      echo "[Bavi-box] Failed to decompress Mac archive."
       rm -rf "$TMP_CACHE_DIR"
       wait_before_exit
       exit 1
     fi
-    if [ ! -x "$TMP_CACHE_DIR/U-Claw.app/Contents/MacOS/U-Claw" ]; then
-      echo "[U-Claw] Invalid archive: U-Claw.app binary missing."
+    if [ ! -x "$TMP_CACHE_DIR/Bavi-box.app/Contents/MacOS/Bavi-box" ]; then
+      echo "[Bavi-box] Invalid archive: Bavi-box.app binary missing."
       rm -rf "$TMP_CACHE_DIR"
       wait_before_exit
       exit 1
@@ -344,24 +339,24 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
     rm -rf "$APP_CACHE_DIR"
     mv "$TMP_CACHE_DIR" "$APP_CACHE_DIR"
     echo "$CURRENT_STAMP" > "$STAMP_FILE"
-    echo "[U-Claw] App cache installed in $(($(date +%s) - INSTALL_STARTED_AT))s."
+    echo "[Bavi-box] App cache installed in $(($(date +%s) - INSTALL_STARTED_AT))s."
   fi
 else
-  echo "[U-Claw] Reusing app cache: $APP_CACHE_DIR"
+  echo "[Bavi-box] Reusing app cache: $APP_CACHE_DIR"
 fi
 
-echo "[U-Claw] Preparing runtime data cache..."
+echo "[Bavi-box] Preparing runtime data cache..."
 mkdir -p "$RUN_DATA_DIR" "$USB_DATA_DIR"
 if [ -f "$DIRTY_FILE" ]; then
-  echo "[U-Claw] Runtime data has unsynced changes; syncing runtime cache back to USB before startup..."
+  echo "[Bavi-box] Runtime data has unsynced changes; syncing runtime cache back to USB before startup..."
   sync_dir_with_progress "Syncing runtime cache back to USB" "$RUN_DATA_DIR" "$USB_DATA_DIR" 300 "keep" || true
 fi
 if runtime_cache_is_current; then
-  echo "[U-Claw] Runtime data cache is current; USB data sync skipped."
+  echo "[Bavi-box] Runtime data cache is current; USB data sync skipped."
 else
-  echo "[U-Claw] Syncing USB data to runtime cache..."
+  echo "[Bavi-box] Syncing USB data to runtime cache..."
   if ! sync_dir_with_progress "Syncing USB data to runtime cache" "$USB_DATA_DIR" "$RUN_DATA_DIR" 300 "delete"; then
-    echo "[U-Claw] Failed to prepare runtime data cache."
+    echo "[Bavi-box] Failed to prepare runtime data cache."
     wait_before_exit
     exit 1
   fi
@@ -381,6 +376,6 @@ export UCLAW_MEDIA_PREVIEW_ROOTS="$RUN_DATA_DIR/.openclaw/media"
 export UCLAW_ACTIVATION_ENDPOINT="${UCLAW_ACTIVATION_ENDPOINT:-https://license.yiyong.me}"
 export UCLAW_ACTIVATION_REQUIRE_CLOUD="${UCLAW_ACTIVATION_REQUIRE_CLOUD:-1}"
 
-echo "[U-Claw] App binary: $APP_BIN"
-echo "[U-Claw] Starting U-Claw..."
+echo "[Bavi-box] App binary: $APP_BIN"
+echo "[Bavi-box] Starting Bavi-box..."
 "$APP_BIN"

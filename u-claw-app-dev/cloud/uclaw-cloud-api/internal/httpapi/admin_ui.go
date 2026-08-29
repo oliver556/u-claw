@@ -5,7 +5,7 @@ const adminConsoleHTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>U-Claw Admin</title>
+  <title>Bavi-box Admin</title>
   <style>
     :root {
       --blue: #1677ff;
@@ -162,7 +162,7 @@ const adminConsoleHTML = `<!doctype html>
 </head>
 <body>
   <header>
-    <h1>U-Claw 运营后台</h1>
+    <h1>Bavi-box 运营后台</h1>
     <div>
       <span id="userLabel">未登录</span>
       <button class="secondary hidden" id="logout">退出</button>
@@ -405,7 +405,7 @@ const adminConsoleHTML = `<!doctype html>
           "<td>" + esc(item.id) + "</td>" +
           '<td class="mono"><span class="' + codeClass + '" title="' + esc(codeText) + '">' + esc(codeText) + "</span></td>" +
           '<td><span class="badge ' + esc(item.status) + '">' + esc(statusLabel(item.status)) + "</span></td>" +
-          "<td>" + mainSub(item.boundPhone, item.boundUserId ? "U-Claw #" + item.boundUserId : "") + "</td>" +
+          "<td>" + mainSub(item.boundPhone, item.boundUserId ? "Bavi-box #" + item.boundUserId : "") + "</td>" +
           '<td title="' + esc((item.newapiUsername || "-") + (newapiSub ? " · " + newapiSub : "")) + '">' + mainSub(item.newapiUsername, newapiSub) + "</td>" +
           '<td class="batch-cell" title="' + esc(batchText || "-") + '">' + (batchText ? esc(batchText) : empty()) + "</td>" +
           '<td class="activation-cell" title="' + esc((item.latestActivationId || "-") + (activationSub ? " · " + activationSub : "")) + '">' + mainSub(item.latestActivationId, activationSub) + "</td>" +

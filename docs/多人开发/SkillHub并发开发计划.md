@@ -12,7 +12,7 @@
 
 当前结论：
 
-1. SkillHub 是 U-Claw 用户侧 skill 来源。
+1. SkillHub 是 Bavi-box 用户侧 skill 来源。
 2. OpenClaw bundled skills 可保留在底层，但不作为用户侧 SkillHub 选项展示。
 3. 不自造 skill executor，不绕过 OpenClaw skill runtime。
 4. SkillHub skill 必须进入 OpenClaw 可识别的安装/绑定链路。
@@ -300,7 +300,7 @@ git restore -- docs/多人开发/Skill下拉接入设计.md .codex-state/skill_d
 目标：
 
 - 基于 Slice 5 的定位结果，实现输入框附近 Skill 下拉。
-- 只展示 U-Claw 筛选后的 SkillHub skills，不展示 bundled skills。
+- 只展示 Bavi-box 筛选后的 SkillHub skills，不展示 bundled skills。
 - 选择后复用 `runtimeConfig.patchForm(["agents","list",i,"skills"], ...)` 与 `runtimeConfig.save()` 链路。
 
 允许修改文件：

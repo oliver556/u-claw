@@ -109,13 +109,13 @@ type CommitResult struct {
 	Message      string `json:"message"`
 }
 
-// ProvisionRequest identifies the U-Claw user that needs a New API account.
+// ProvisionRequest identifies the Bavi-box user that needs a New API account.
 type ProvisionRequest struct {
 	UserID int64
 	Phone  string
 }
 
-// ProvisionResult carries the New API client credential returned to U-Claw desktop.
+// ProvisionResult carries the New API client credential returned to Bavi-box desktop.
 type ProvisionResult struct {
 	NewAPIUserID int64
 	Token        string

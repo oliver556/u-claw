@@ -1,4 +1,4 @@
-# U-Claw Cloud API staging 真实链路验收
+# Bavi-box Cloud API staging 真实链路验收
 
 时间：2026-08-28
 
@@ -31,7 +31,7 @@
 - 写盘确认 `POST /v1/activations/{activationId}/commit` 通过：
   - `ok=true`
   - `status=committed`
-- U-Claw DB 中存在 committed activation attempt。
+- Bavi-box DB 中存在 committed activation attempt。
 - New API 中可查到本次 staging 用户。
 - 通过 `license.yiyong.me` 公开域名重跑首启激活与 commit，全链路通过。
 
@@ -39,7 +39,7 @@
 
 真实 staging 验收暴露两个后端缺口，已修复：
 
-- PostgreSQL `BindFirstStart` 现在返回真实 U-Claw user id，避免 New API account mapping 使用 synthetic id 触发外键问题。
+- PostgreSQL `BindFirstStart` 现在返回真实 Bavi-box user id，避免 New API account mapping 使用 synthetic id 触发外键问题。
 - New API 用户已存在时，provisioning 会搜索并复用已存在用户，避免重试时因唯一键冲突中断。
 
 ## 暂放项

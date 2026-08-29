@@ -1,5 +1,5 @@
 [Unit]
-Description=U-Claw Cloud API
+Description=Bavi-box Cloud API
 After=network-online.target
 Wants=network-online.target
 

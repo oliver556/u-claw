@@ -385,3 +385,33 @@ func TestListSelfLogsReturnsPagedItems(t *testing.T) {
 		t.Fatalf("page = %+v", page)
 	}
 }
+
+func TestListUserModelsParsesChannelMap(t *testing.T) {
+	var gotAuth string
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"1":["gpt-5.5","gpt-5.5",""],"2":["gpt-image-2"]}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "user-access-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	models, err := client.ListUserModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListUserModels() error = %v", err)
+	}
+	if gotPath != "/api/user/models" {
+		t.Fatalf("path = %q, want /api/user/models", gotPath)
+	}
+	if gotAuth != "Bearer user-access-token" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if len(models["1"]) != 1 || models["1"][0] != "gpt-5.5" || len(models["2"]) != 1 || models["2"][0] != "gpt-image-2" {
+		t.Fatalf("models = %+v", models)
+	}
+}

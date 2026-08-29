@@ -30,7 +30,7 @@ func TestAliyunProviderSendsCodeWithTemplateJSON(t *testing.T) {
 	provider, err := NewAliyunProviderWithSender(AliyunProviderConfig{
 		AccessKeyID:       "id",
 		AccessKeySecret:   "secret",
-		SignName:          "U-Claw",
+		SignName:          "Bavi-box",
 		TemplateCode:      "SMS_123456789",
 		TemplateParamName: "code",
 	}, sender)
@@ -49,7 +49,7 @@ func TestAliyunProviderSendsCodeWithTemplateJSON(t *testing.T) {
 	if sender.request.PhoneNumbers != "13800138000" {
 		t.Fatalf("PhoneNumbers = %q", sender.request.PhoneNumbers)
 	}
-	if sender.request.SignName != "U-Claw" || sender.request.TemplateCode != "SMS_123456789" {
+	if sender.request.SignName != "Bavi-box" || sender.request.TemplateCode != "SMS_123456789" {
 		t.Fatalf("sender request = %+v", sender.request)
 	}
 	if sender.request.TemplateParam != `{"code":"123456"}` {
@@ -62,7 +62,7 @@ func TestAliyunProviderReturnsBusinessErrorWithoutSecrets(t *testing.T) {
 	provider, err := NewAliyunProviderWithSender(AliyunProviderConfig{
 		AccessKeyID:     "id",
 		AccessKeySecret: "secret",
-		SignName:        "U-Claw",
+		SignName:        "Bavi-box",
 		TemplateCode:    "SMS_123456789",
 	}, sender)
 	if err != nil {

@@ -1,6 +1,6 @@
-# 贡献指南 / Contributing to U-Claw
+# 贡献指南 / Contributing to Bavi-box
 
-感谢有兴趣参与 U-Claw 开发！这份文档会告诉你怎么开始、怎么提 issue、怎么提 PR。
+感谢有兴趣参与 Bavi-box 开发！这份文档会告诉你怎么开始、怎么提 issue、怎么提 PR。
 
 ## TL;DR
 

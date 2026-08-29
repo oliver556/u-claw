@@ -19,7 +19,7 @@ type TokenManager struct {
 	now    func() time.Time
 }
 
-// TokenClaims is the small authenticated identity payload used by U-Claw API handlers.
+// TokenClaims is the small authenticated identity payload used by Bavi-box API handlers.
 type TokenClaims struct {
 	Subject   string `json:"sub"`
 	Phone     string `json:"phone"`

@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul 2>&1
-title U-Claw Portable Setup
+title Bavi-box Portable Setup
 
 set "SCRIPT_DIR=%~dp0"
 set "APP_DIR=%SCRIPT_DIR%app"
@@ -15,7 +15,7 @@ if "%~1"=="--all-platforms" set "ALL_PLATFORMS=true"
 
 echo.
 echo   ========================================
-echo     U-Claw Portable Setup
+echo     Bavi-box Portable Setup
 echo   ========================================
 echo.
 

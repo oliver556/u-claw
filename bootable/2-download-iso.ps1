@@ -1,5 +1,5 @@
 # ============================================================
-#  U-Claw Bootable USB - Step 2: Download Ubuntu 24.04 ISO
+#  Bavi-box Bootable USB - Step 2: Download Ubuntu 24.04 ISO
 #  Downloads and verifies Ubuntu desktop ISO
 # ============================================================
 
@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  U-Claw Bootable USB - Step 2: Ubuntu ISO" -ForegroundColor Cyan
+Write-Host "  Bavi-box Bootable USB - Step 2: Ubuntu ISO" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 

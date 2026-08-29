@@ -1,17 +1,17 @@
-# U-Claw 官方激活与 New API 计费架构方案
+# Bavi-box 官方激活与 New API 计费架构方案
 
 更新时间：2026-08-28
 
 ## 1. 背景
 
-U-Claw 桌面客户端当前已具备模型页，可展示余额、用量、模型能力、运行状态、趋势和流水。下一步需要把这些数据接入真实的商业化后端体系。
+Bavi-box 桌面客户端当前已具备模型页，可展示余额、用量、模型能力、运行状态、趋势和流水。下一步需要把这些数据接入真实的商业化后端体系。
 
 本方案目标是定义：
 
-- U-Claw 官方激活服务如何管理手机号账号、短信登录、激活码和 U 盘权益。
-- U-Claw 激活服务如何自动创建 New API 用户、生成/轮换 token、发放初始额度。
-- U-Claw 充值按钮如何接微信/支付宝官方支付，并在支付成功后自动给 New API 用户加 quota。
-- U-Claw 客户端如何保存 New API token，并直接请求 New API endpoint。
+- Bavi-box 官方激活服务如何管理手机号账号、短信登录、激活码和 U 盘权益。
+- Bavi-box 激活服务如何自动创建 New API 用户、生成/轮换 token、发放初始额度。
+- Bavi-box 充值按钮如何接微信/支付宝官方支付，并在支付成功后自动给 New API 用户加 quota。
+- Bavi-box 客户端如何保存 New API token，并直接请求 New API endpoint。
 - 模型页余额、充值记录、使用流水如何以 New API 为准展示。
 
 本文为方案评审与后续开发分期文档，不直接修改现有 OpenClaw runtime。
@@ -20,19 +20,19 @@ U-Claw 桌面客户端当前已具备模型页，可展示余额、用量、模�
 
 | 领域 | 决策 |
 | --- | --- |
-| U-Claw 官方服务 | 阿里云服务器，只承载账号、激活、订单、支付回调、New API 管理编排 |
+| Bavi-box 官方服务 | 阿里云服务器，只承载账号、激活、订单、支付回调、New API 管理编排 |
 | New API 服务 | OVH 高配服务器，部署 New API + sub2api，承载模型调用、quota、余额、消费流水 |
 | 网络入口 | 香港直连服务器部署 1Panel + Nginx，作为 New API 前置反代 |
-| 客户端模型调用 | U-Claw 本地 OpenClaw 直接请求香港 New API endpoint |
+| 客户端模型调用 | Bavi-box 本地 OpenClaw 直接请求香港 New API endpoint |
 | 用户身份 | 手机号 + 阿里云短信验证码 |
 | 激活码 | 阿里云后端批量生成，随 U 盘发放，一次性绑定首个手机号 |
-| New API username | 使用手机号，与 U-Claw 账号同名 |
+| New API username | 使用手机号，与 Bavi-box 账号同名 |
 | New API password | 强随机生成，用户不可见 |
 | New API token | 阿里云不长期保存；客户端 U 盘本地加密保存 |
 | token 恢复 | 手机号验证码登录后，阿里云调用 New API 重新生成 token，旧 token 作废 |
 | token 数量 | 一个手机号账号共用一个 New API token |
 | 初始额度 | 激活码开通后赠送小额 New API quota |
-| 充值 | U-Claw 阿里云后端创建微信/支付宝订单，支付回调后异步调用 New API 加 quota |
+| 充值 | Bavi-box 阿里云后端创建微信/支付宝订单，支付回调后异步调用 New API 加 quota |
 | 使用流水 | 不在阿里云保存完整副本，以 New API 为准；阿里云最多保存短期缓存/快照 |
 | 充值记录 | 阿里云保存支付订单和回调审计；New API 保存 quota 变动与消费口径 |
 | 退款 | MVP 不做自动退款，只支持人工后台标记与人工处理 |
@@ -45,9 +45,9 @@ U-Claw 桌面客户端当前已具备模型页，可展示余额、用量、模�
 
 | 角色 | 公网 IP | SSH 端口 | 初始用户 | 主要用途 | 不承担 |
 | --- | --- | --- | --- | --- | --- |
-| U-Claw 阿里云激活服务器 | `121.41.89.103` | `22` | `root` | 部署 U-Claw Cloud API、激活码、账号映射、支付下单/回调、必要的 PostgreSQL 或 RDS 连接 | 不部署 New API，不承载模型推理 |
-| New API 前置香港 VPS | `64.90.19.251` | `24851` | `root` | 部署 1Panel + Nginx，作为客户端 New API endpoint 与管理专用反代入口 | 不保存 U-Claw 激活数据，不跑支付回调 |
-| New API / sub2api 本体 OVH VPS | `158.51.110.49` | `14851` | `root` | 部署 New API + sub2api，承载 quota、余额、用量流水、模型调用与上游号池 | 不跑 U-Claw 激活服务 |
+| Bavi-box 阿里云激活服务器 | `121.41.89.103` | `22` | `root` | 部署 Bavi-box Cloud API、激活码、账号映射、支付下单/回调、必要的 PostgreSQL 或 RDS 连接 | 不部署 New API，不承载模型推理 |
+| New API 前置香港 VPS | `64.90.19.251` | `24851` | `root` | 部署 1Panel + Nginx，作为客户端 New API endpoint 与管理专用反代入口 | 不保存 Bavi-box 激活数据，不跑支付回调 |
+| New API / sub2api 本体 OVH VPS | `158.51.110.49` | `14851` | `root` | 部署 New API + sub2api，承载 quota、余额、用量流水、模型调用与上游号池 | 不跑 Bavi-box 激活服务 |
 
 SSH 连接方式：
 
@@ -68,17 +68,17 @@ ssh -p 14851 root@158.51.110.49
 ## 3. 总体架构
 
 ```text
-U-Claw Client
+Bavi-box Client
   ├─ 本地 OpenClaw 模型请求
   │    └─ HTTPS -> 香港 Nginx -> OVH New API -> sub2api / 上游渠道
   │
   ├─ 激活 / 登录 / 恢复 / 充值下单 / 订单状态
-  │    └─ HTTPS -> 阿里云 U-Claw Cloud API
+  │    └─ HTTPS -> 阿里云 Bavi-box Cloud API
   │
   └─ 余额 / 用量 / 流水展示
        └─ HTTPS -> 香港 Nginx -> OVH New API
 
-阿里云 U-Claw Cloud API
+阿里云 Bavi-box Cloud API
   ├─ PostgreSQL：用户、激活码、New API 映射、支付订单、回调、审计
   ├─ Redis：短信验证码、限流、异步任务队列
   ├─ Worker：New API 创建用户、生成 token、加 quota、轮换 token、补偿重试
@@ -113,7 +113,7 @@ OVH New API
 - `product` 是旧版本产品工程，当前不作为本轮开发对象，禁止继续在里面开发。
 - `u-claw-app-dev` 是本轮正式开发目录。
 
-因此，U-Claw 官方激活与 New API 计费后端的新代码应放在：
+因此，Bavi-box 官方激活与 New API 计费后端的新代码应放在：
 
 ```text
 <repo>/u-claw-app-dev/cloud/uclaw-cloud-api
@@ -131,7 +131,7 @@ OVH New API
 
 - 遵守当前多人开发硬性边界。
 - 避免把新阿里云后端写进已归档或旧产品目录。
-- 让 U-Claw 客户端、Control UI patch、云端后端都收口在 `u-claw-app-dev` 这一本轮工作目录下。
+- 让 Bavi-box 客户端、Control UI patch、云端后端都收口在 `u-claw-app-dev` 这一本轮工作目录下。
 - 后续打包或部署时，可明确区分客户端工程与云端服务工程。
 
 建议新建目录结构：
@@ -174,7 +174,7 @@ u-claw-app-dev/
 
 | 路径 | 职责 |
 | --- | --- |
-| `cmd/api` | 阿里云 U-Claw Cloud API HTTP 服务 |
+| `cmd/api` | 阿里云 Bavi-box Cloud API HTTP 服务 |
 | `cmd/worker` | 异步任务：创建 New API 用户、创建/轮换 token、加 quota、补偿重试 |
 | `cmd/adminctl` | 激活码批量生成、导出、P0 Spike 命令行工具 |
 | `internal/auth` | 手机号、短信验证码、JWT 登录态 |
@@ -208,7 +208,7 @@ u-claw-app-dev/src/*
 
 ### 3.2 阿里云 1 核 1G 打包与部署策略
 
-阿里云 U-Claw Cloud API 会单独部署到一台 1 核 1G ECS。该机器只承载激活、账号、订单、支付回调、New API 管理编排，不承载模型请求、不部署 New API、不部署 sub2api。
+阿里云 Bavi-box Cloud API 会单独部署到一台 1 核 1G ECS。该机器只承载激活、账号、订单、支付回调、New API 管理编排，不承载模型请求、不部署 New API、不部署 sub2api。
 
 #### 3.2.1 代码位置与部署位置
 
@@ -269,7 +269,7 @@ Docker Compose 同机部署 Go API + PostgreSQL + Redis + Admin UI
 
 - 1G 内存下，Docker daemon、PostgreSQL、Redis、Nginx、Go API 同机运行余量很小。
 - 支付回调与激活链路要求稳定，不能因内存抖动导致进程被 OOM kill。
-- U-Claw Cloud API 的主要负载是短请求和少量补偿任务，Go binary + systemd 足够。
+- Bavi-box Cloud API 的主要负载是短请求和少量补偿任务，Go binary + systemd 足够。
 
 #### 3.2.3 数据库与队列取舍
 
@@ -440,7 +440,7 @@ Phase 0 开发时必须同步产出：
 
 ## 4. 服务边界
 
-### 4.1 阿里云 U-Claw Cloud API
+### 4.1 阿里云 Bavi-box Cloud API
 
 负责：
 
@@ -448,7 +448,7 @@ Phase 0 开发时必须同步产出：
 - 激活码校验、绑定、作废、批次管理。
 - 自动创建 New API 用户。
 - 自动创建 / 轮换 New API token。
-- 保存 U-Claw 用户与 New API 用户映射。
+- 保存 Bavi-box 用户与 New API 用户映射。
 - 生成微信/支付宝支付订单。
 - 验证支付回调，保存回调审计。
 - 异步调用 New API 给用户加 quota。
@@ -495,7 +495,7 @@ Phase 0 开发时必须同步产出：
 ### 5.1 首次激活
 
 ```text
-1. 用户打开 U-Claw 客户端。
+1. 用户打开 Bavi-box 客户端。
 2. 输入手机号，请求短信验证码。
 3. 阿里云发送验证码，并做频率限制。
 4. 用户输入验证码 + 激活码。
@@ -579,14 +579,14 @@ Phase 0 开发时必须同步产出：
 
 ```text
 1. 客户端进入模型页。
-2. 客户端携带 U-Claw access token 请求阿里云 U-Claw Cloud API。
+2. 客户端携带 Bavi-box access token 请求阿里云 Bavi-box Cloud API。
 3. 阿里云用手机号同名 New API 账号临时登录 New API dashboard。
 4. 阿里云实时读取 New API：
    - 余额 / quota。
    - 使用流水。
    - 充值或 quota 变动记录，如 New API 支持。
 5. 阿里云聚合今日用量、近 7 天、累计用量和最近记录。
-6. U-Claw 页面按 New API 原生 quota 展示。
+6. Bavi-box 页面按 New API 原生 quota 展示。
 7. 可辅助显示约人民币 / 约 token，但不作为对账口径。
 ```
 
@@ -1110,7 +1110,7 @@ POST /v1/payments/alipay/notify
 
 ### 12.0 本地 New API 联调实验室
 
-可以先在开发机本地启动一个 New API 实例，用于验证 U-Claw Cloud API 的管理调用形态。
+可以先在开发机本地启动一个 New API 实例，用于验证 Bavi-box Cloud API 的管理调用形态。
 
 本地联调代码位置：
 
@@ -1312,7 +1312,7 @@ go run ./cmd/adminctl spike newapi add-quota \
 - 已完成 PostgreSQL store 第一刀：`sms_codes`、`uclaw_users`、`activation_codes` 持久化；`DATABASE_URL` 配置后服务使用 PG，否则本地 smoke 使用内存 store。
 - 已新增 `adminctl activation seed --code <code>`，可把随 U 盘发放的激活码 seed 到 PostgreSQL。
 - 已完成 New API 自动创建同名用户、用户登录、创建 API token、通过 `POST /api/token/{id}/key` 取真实 key、初始 quota 发放、`newapi_accounts` 映射落库。
-- 已完成完整本地 E2E：临时 PostgreSQL + 本地 New API + U-Claw Cloud API + 激活码 seed + SMS/login/redeem，返回可用 `sk-` token。
+- 已完成完整本地 E2E：临时 PostgreSQL + 本地 New API + Bavi-box Cloud API + 激活码 seed + SMS/login/redeem，返回可用 `sk-` token。
 - 尚未完成余额/用量/流水查询 API 与充值支付回调；这是下一开发切片。
 - 已补首启 activation-only 服务端绑定接口 `/v1/activations` 与 commit 接口 `/v1/activations/{activationId}/commit`，用于软件第一次打开时不经手机号登录的交付卡激活。
 
@@ -1320,7 +1320,7 @@ go run ./cmd/adminctl spike newapi add-quota \
 
 范围：
 
-- U-Claw 激活 UI。
+- Bavi-box 激活 UI。
 - 自动写入 OpenClaw 配置。
 - 本地 token 加密保存。
 - 激活状态处理。
@@ -1438,8 +1438,8 @@ go run ./cmd/adminctl spike newapi add-quota \
 
 方案可推进。
 
-Go 后端适合承担阿里云 U-Claw Cloud API：账号、激活码、支付订单、支付回调、New API 管理编排、补偿任务。不要让阿里云服务承载模型推理，也不要复制完整 New API 消费账本。
+Go 后端适合承担阿里云 Bavi-box Cloud API：账号、激活码、支付订单、支付回调、New API 管理编排、补偿任务。不要让阿里云服务承载模型推理，也不要复制完整 New API 消费账本。
 
-New API 继续作为余额、quota、消费流水的 source of truth。U-Claw 客户端本地 OpenClaw 直接请求香港反代后的 New API endpoint。充值资金链路由阿里云创建订单和验签，到账动作由 worker 幂等调用 New API add quota。
+New API 继续作为余额、quota、消费流水的 source of truth。Bavi-box 客户端本地 OpenClaw 直接请求香港反代后的 New API endpoint。充值资金链路由阿里云创建订单和验签，到账动作由 worker 幂等调用 New API add quota。
 
 正式开工前必须先完成 P0 Spike，尤其验证 New API Docker tag 下的创建用户、查询 user id、创建 token、add quota、查余额/流水能力。

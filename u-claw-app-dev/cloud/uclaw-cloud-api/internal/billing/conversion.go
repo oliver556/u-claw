@@ -3,11 +3,11 @@ package billing
 const (
 	// NewAPIQuotaPerCNY is the New API raw quota amount treated as one CNY.
 	NewAPIQuotaPerCNY int64 = 500000
-	// ComputeUnitsPerCNY is the U-Claw user-facing compute amount sold for one CNY.
+	// ComputeUnitsPerCNY is the Bavi-box user-facing compute amount sold for one CNY.
 	ComputeUnitsPerCNY int64 = 60000000
 )
 
-// ComputeFromNewAPIQuota converts New API raw quota into U-Claw compute units.
+// ComputeFromNewAPIQuota converts New API raw quota into Bavi-box compute units.
 func ComputeFromNewAPIQuota(quota int64) int64 {
 	return quota/NewAPIQuotaPerCNY*ComputeUnitsPerCNY + quota%NewAPIQuotaPerCNY*ComputeUnitsPerCNY/NewAPIQuotaPerCNY
 }

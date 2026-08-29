@@ -19,7 +19,7 @@ type Store interface {
 	SaveNewAPIAccount(ctx context.Context, account Account) error
 }
 
-// Account describes the stable mapping between a U-Claw user and a New API user.
+// Account describes the stable mapping between a Bavi-box user and a New API user.
 type Account struct {
 	UClawUserID      int64
 	NewAPIBaseURL    string
@@ -37,7 +37,7 @@ type Config struct {
 	PasswordSecret string
 }
 
-// Service provisions New API user/token/quota for a U-Claw activation.
+// Service provisions New API user/token/quota for a Bavi-box activation.
 type Service struct {
 	admin *newapi.Client
 	store Store

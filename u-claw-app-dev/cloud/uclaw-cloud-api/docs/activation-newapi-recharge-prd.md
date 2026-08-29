@@ -1,8 +1,8 @@
-# U-Claw 激活与 New API 充值 PRD
+# Bavi-box 激活与 New API 充值 PRD
 
 ## 目标
 
-在 U-Claw 官方云端体系中，阿里云 1 核 1G 服务器只承载轻量激活、账号映射、订单记录与回调编排；模型推理、余额、用量和充值额度最终以 OVH New API 为准，并展示到 U-Claw 客户端模型界面。
+在 Bavi-box 官方云端体系中，阿里云 1 核 1G 服务器只承载轻量激活、账号映射、订单记录与回调编排；模型推理、余额、用量和充值额度最终以 OVH New API 为准，并展示到 Bavi-box 客户端模型界面。
 
 ## 项目位置
 
@@ -24,10 +24,10 @@ product/activation-server
 
 ## 架构边界
 
-- 阿里云 U-Claw Cloud API：手机号登录、短信验证码、U 盘激活码绑定、本地与云端授权数据保存、订单创建、支付回调接收、调用 New API 管理接口。
+- 阿里云 Bavi-box Cloud API：手机号登录、短信验证码、U 盘激活码绑定、本地与云端授权数据保存、订单创建、支付回调接收、调用 New API 管理接口。
 - OVH New API：模型账号、API token、余额 quota、充值加额度、用量流水。
-- 香港直连 Nginx：作为 New API 前置反代，不承载 U-Claw 激活业务。
-- U-Claw 客户端：首启激活；模型页主动查询余额/用量；本地也保存一份激活结果和 New API client endpoint。
+- 香港直连 Nginx：作为 New API 前置反代，不承载 Bavi-box 激活业务。
+- Bavi-box 客户端：首启激活；模型页主动查询余额/用量；本地也保存一份激活结果和 New API client endpoint。
 
 ## 当前服务器拓扑
 
@@ -35,7 +35,7 @@ product/activation-server
 
 | 节点 | 角色 | SSH | 运行职责 |
 | --- | --- | --- | --- |
-| `121.41.89.103` | 阿里云 U-Claw Cloud API VPS | `root@121.41.89.103:22` | 激活、手机号登录、订单、支付回调、调用 New API admin |
+| `121.41.89.103` | 阿里云 Bavi-box Cloud API VPS | `root@121.41.89.103:22` | 激活、手机号登录、订单、支付回调、调用 New API admin |
 | `64.90.19.251` | New API 前置 VPS | `root@64.90.19.251:24851` | New API / sub2apii 前置反代、访问控制、TLS/路由 |
 | `158.51.110.49` | New API / sub2apii 本体 VPS | `root@158.51.110.49:14851` | New API 服务本体、sub2apii、模型账号和 quota 数据 |
 
@@ -48,15 +48,15 @@ product/activation-server
 
 ## 用户流程
 
-1. 用户首次打开 U-Claw，进入首启激活页。
+1. 用户首次打开 Bavi-box，进入首启激活页。
 2. 用户输入真实手机号。
 3. 用户输入随 U 盘附带的激活码。
 4. 当前验收版本验证码固定为 `123456`；阿里云短信审核完成后切回真实短信发送。
-5. 阿里云 U-Claw Cloud API 绑定手机号、激活码与当前 U 盘摘要。
-6. U-Claw Cloud API 使用手机号自动创建或恢复 New API 用户。
-7. U-Claw Cloud API 创建 New API token，返回给客户端写入本地 OpenClaw 配置；客户端写盘并验证后调用 commit。
-8. 客户端模型页进入时主动查询 U-Claw Cloud API，用于展示 New API 余额、今日用量、近 7 天、累计流水。
-9. 用户点击充值后创建订单；支付回调成功后，U-Claw Cloud API 调 New API `add_quota`。
+5. 阿里云 Bavi-box Cloud API 绑定手机号、激活码与当前 U 盘摘要。
+6. Bavi-box Cloud API 使用手机号自动创建或恢复 New API 用户。
+7. Bavi-box Cloud API 创建 New API token，返回给客户端写入本地 OpenClaw 配置；客户端写盘并验证后调用 commit。
+8. 客户端模型页进入时主动查询 Bavi-box Cloud API，用于展示 New API 余额、今日用量、近 7 天、累计流水。
+9. 用户点击充值后创建订单；支付回调成功后，Bavi-box Cloud API 调 New API `add_quota`。
 
 手机号短信登录保留为后续账号恢复、授权找回和 New API token 恢复入口；阿里云短信审核未完成时，本版本用 `SMS_PROVIDER=fixed` 和固定验证码 `123456` 验收。
 
@@ -74,7 +74,7 @@ product/activation-server
 - `POST /v1/recharge/orders`
 - `POST /v1/payments/virtual/notify`
 - `GET /v1/recharge/orders/{orderNo}`
-- Electron activation-only 首启客户端已切到 `POST /v1/activations`；当前提交手机号、固定验证码和激活码，客户端会写入本地授权材料与 OpenClaw New API 配置，读回验证成功后调用 `/v1/activations/{activationId}/commit`，随后在同一 Electron 进程内启动正常 U-Claw 工作台，避免用户看到窗口关闭。
+- Electron activation-only 首启客户端已切到 `POST /v1/activations`；当前提交手机号、固定验证码和激活码，客户端会写入本地授权材料与 OpenClaw New API 配置，读回验证成功后调用 `/v1/activations/{activationId}/commit`，随后在同一 Electron 进程内启动正常 Bavi-box 工作台，避免用户看到窗口关闭。
 
 本切片的充值先用 `virtual` provider。虚拟回调成功后立即触发 New API `POST /api/user/manage` 加 quota，并通过订单状态机保证同一订单不会重复加额度。
 
@@ -84,7 +84,7 @@ PostgreSQL 表：
 
 - `uclaw_users`：手机号用户。
 - `activation_codes`：U 盘激活码哈希与绑定关系。
-- `newapi_accounts`：U-Claw 用户到 New API user id/username/baseUrl/token fingerprint 的映射。
+- `newapi_accounts`：Bavi-box 用户到 New API user id/username/baseUrl/token fingerprint 的映射。
 - `payment_orders`：订单、金额、quota、状态、provider trade no。
 - `payment_callbacks`：支付回调事件与去重。
 - `outbox_jobs`：后续真实支付和补偿任务预留。
@@ -100,23 +100,23 @@ created -> paid -> crediting -> credit_failed -> crediting -> credited
 
 ## 打包与部署
 
-U-Claw Cloud API 目标机器：阿里云 1 核 1G ECS。New API / sub2api 不放在这台小机，放在独立本体 VPS。
+Bavi-box Cloud API 目标机器：阿里云 1 核 1G ECS。New API / sub2api 不放在这台小机，放在独立本体 VPS。
 
 当前选型：
 
 ```text
-U-Claw Cloud API: Go static binary + systemd + Nginx/Caddy + PostgreSQL
+Bavi-box Cloud API: Go static binary + systemd + Nginx/Caddy + PostgreSQL
 New API / sub2api: 1Panel + Docker Compose + PostgreSQL + Redis
 ```
 
 原因：
 
 - Go 单文件部署内存占用低，适合 1 核 1G。
-- U-Claw Cloud API 不承载模型推理流量，请求量和 CPU 压力远低于 New API。
+- Bavi-box Cloud API 不承载模型推理流量，请求量和 CPU 压力远低于 New API。
 - PostgreSQL 保存激活、订单和回调，方便恢复 U 盘本地数据丢失的用户。
 - systemd 负责进程守护，Nginx 负责 TLS、限流和反代。
 - New API / sub2api 独立运行在本体 VPS，通过 1Panel 统一管理 Docker stack；stack 内含 PostgreSQL 和 Redis，Redis DB 0 给 New API，Redis DB 1 给 sub2api。
-- 前置 VPS 只做反代、TLS 与路径 allowlist；New API 管理路径只允许阿里云 U-Claw Cloud API 源 IP。
+- 前置 VPS 只做反代、TLS 与路径 allowlist；New API 管理路径只允许阿里云 Bavi-box Cloud API 源 IP。
 
 MVP 暂不引入 Redis/asynq。真实支付上线后，`add_quota` 失败可先通过 PostgreSQL 状态 `credit_failed` 与后台补偿命令处理；订单量上升后再接 outbox worker。
 
@@ -181,10 +181,10 @@ DEV_SMS_CODE=123456
 
 - 入口：`https://license.yiyong.me/admin`。
 - 鉴权：首次注册管理员账号，生产环境注册必须带 `ADMIN_TOKEN` 初始化令牌；之后登录获取 session；`ADMIN_TOKEN` 只作为受限应急 token 保留。
-- 列表：必须展示激活码状态、可见激活码或旧码不可见提示、绑定手机号、U-Claw 用户 ID、New API user id、New API username、New API base URL、最近一次首启激活阶段。
+- 列表：必须展示激活码状态、可见激活码或旧码不可见提示、绑定手机号、Bavi-box 用户 ID、New API user id、New API username、New API base URL、最近一次首启激活阶段。
 - 激活码展示：历史 seed 码只存 hash，不能反推明文；后台生成/重发的新码使用 `ADMIN_ENCRYPTION_KEY` 加密保存展示材料，列表可查看和复制。
 
-当前已完成 New API / sub2api 源站、前置反代、New API Root 管理员和 U-Claw Cloud API staging 部署；`NEWAPI_ADMIN_TOKEN` 与 `NEWAPI_ADMIN_USERNAME/PASSWORD` 已写入阿里云 staging 受限 env。New API admin token 过期时，Cloud API 使用管理员账号重新登录并在内存中刷新 token，然后重试原请求一次。`license.yiyong.me` 已把新激活相关路径切到 Cloud API staging，并完成公网首启激活验收。
+当前已完成 New API / sub2api 源站、前置反代、New API Root 管理员和 Bavi-box Cloud API staging 部署；`NEWAPI_ADMIN_TOKEN` 与 `NEWAPI_ADMIN_USERNAME/PASSWORD` 已写入阿里云 staging 受限 env。New API admin token 过期时，Cloud API 使用管理员账号重新登录并在内存中刷新 token，然后重试原请求一次。`license.yiyong.me` 已把新激活相关路径切到 Cloud API staging，并完成公网首启激活验收。
 客户端侧已完成首启真实写盘闭环：手机号 + 固定验证码 + 激活码提交、`licenseArtifact` 写入、New API credential 写入、OpenClaw config 写入、读回验证、commit、完成页直接进入主界面。便携启动脚本默认注入 `https://license.yiyong.me`，并允许授权后的 `openclaw.json` 同步回 U 盘。
 
 ## 验收标准
@@ -192,9 +192,9 @@ DEV_SMS_CODE=123456
 - 本地 `go test ./...` 通过。
 - `deploy/scripts/newapi-local-up.sh` 可启动本地 New API lab。
 - `deploy/scripts/activation-local-e2e.sh` 可完成：短信登录、激活、创建 New API token、查询余额、创建虚拟充值订单、虚拟回调、余额增加。
-- U-Claw 客户端模型页进入时能看到 New API 余额、今日用量、近 7 天和流水。
+- Bavi-box 客户端模型页进入时能看到 New API 余额、今日用量、近 7 天和流水。
 - activation-only 客户端提交手机号、固定验证码和激活码后，本地生成 `.openclaw/license/license.json`、`.openclaw/builtin-model-credential.v1.json`、`.openclaw/uclaw-activation.json`，并写入 `.openclaw/openclaw.json` 的 New API provider 配置。
-- 完成页点击“进入 U-Claw”后，Electron 在同一进程内启动 Config server、Video adapter、OpenClaw Gateway，并加载正常工作台；退出码 20 仅保留为旧包兼容路径。
+- 完成页点击“进入 Bavi-box”后，Electron 在同一进程内启动 Config server、Video adapter、OpenClaw Gateway，并加载正常工作台；退出码 20 仅保留为旧包兼容路径。
 
 ## 当前部署盘点
 

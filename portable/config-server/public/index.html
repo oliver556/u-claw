@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>U-Claw 配置中心</title>
+<title>Bavi-box 配置中心</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; }
@@ -159,7 +159,7 @@ input:focus { border-color: #ff6b35; }
 </head>
 <body>
 <div class="container">
-    <h1><span class="lobster">🦞</span> U-Claw 配置中心</h1>
+    <h1><span class="lobster">🦞</span> Bavi-box 配置中心</h1>
     <p class="subtitle">选择模型，填入 API Key，一键启动</p>
 
     <!-- Connection status -->
@@ -419,7 +419,7 @@ input:focus { border-color: #ff6b35; }
 
     <div class="section active skills-section" style="display:block; margin-top: 8px;">
         <h2>🐛 反馈 / 报 Bug</h2>
-        <p class="desc">U-Claw 是开源项目。遇到问题欢迎到 GitHub 提 Issue —— 我们不会自动收集或上传你的任何数据。</p>
+        <p class="desc">Bavi-box 是开源项目。遇到问题欢迎到 GitHub 提 Issue —— 我们不会自动收集或上传你的任何数据。</p>
         <div class="btn-row">
             <a class="btn btn-primary" href="https://github.com/dongsheng123132/u-claw/issues/new" target="_blank">→ 在 GitHub 提交 Issue</a>
         </div>
@@ -640,9 +640,9 @@ async function pollWeChatStatus() {
             // 显示「插件未安装」只会和「连接成功」自相矛盾、吓到客户。
             statusDiv.innerHTML = '<span style="color:#4caf50;font-weight:600;">✅ 微信连接成功！</span>' +
                 '<br><span style="font-size:0.8em;color:#888;">账号 ' + (data.accountId || '') + ' 已绑定</span>' +
-                '<br><span style="font-size:0.85em;color:#ff9800;font-weight:600;">最后一步：重启 U-Claw（关闭后重新打开）即可在微信里使用</span>';
+                '<br><span style="font-size:0.85em;color:#ff9800;font-weight:600;">最后一步：重启 Bavi-box（关闭后重新打开）即可在微信里使用</span>';
             statusDiv.style.color = '#4caf50';
-            showToast('微信连接成功！重启 U-Claw 后生效');
+            showToast('微信连接成功！重启 Bavi-box 后生效');
             return;
         }
 

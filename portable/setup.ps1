@@ -184,7 +184,7 @@ function Ensure-QQPluginBuild {
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  U-Claw Portable Setup" -ForegroundColor Cyan
+Write-Host "  Bavi-box Portable Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host ("  System: {0}" -f [System.Runtime.InteropServices.RuntimeInformation]::OSDescription) -ForegroundColor Green

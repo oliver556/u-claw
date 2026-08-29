@@ -113,10 +113,10 @@ func main() {
 	if hostLocalAppData == "" {
 		hostLocalAppData = os.TempDir()
 	}
-	localLogDir := filepath.Join(hostLocalAppData, "U-Claw", "launcher-logs")
-	logPath = filepath.Join(localLogDir, "U-Claw-Launcher.log")
+	localLogDir := filepath.Join(hostLocalAppData, "Bavi-box", "launcher-logs")
+	logPath = filepath.Join(localLogDir, "Bavi-box-Launcher.log")
 	startLogPath = filepath.Join(localLogDir, "Windows-Start-App.log")
-	usbLogPath = filepath.Join(root, "data", "logs", "U-Claw-Launcher.log")
+	usbLogPath = filepath.Join(root, "data", "logs", "Bavi-box-Launcher.log")
 	usbStartLogPath = filepath.Join(root, "data", "logs", "Windows-Start-App.log")
 	mainLogPath = filepath.Join(root, "data", "logs", "main.log")
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
@@ -163,7 +163,7 @@ func main() {
 		if !hasFreshRelaunchRequest(root, 2*time.Minute) {
 			break
 		}
-		appendLauncherLog("Relaunch requested while U-Claw was closing; starting again.")
+		appendLauncherLog("Relaunch requested while Bavi-box was closing; starting again.")
 	}
 
 	os.Exit(exitCode)
@@ -240,7 +240,7 @@ func appendLauncherLog(message string) {
 		return
 	}
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
-	line := "[" + time.Now().Format(time.RFC3339Nano) + "] [U-Claw] " + message + "\r\n"
+	line := "[" + time.Now().Format(time.RFC3339Nano) + "] [Bavi-box] " + message + "\r\n"
 	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return
@@ -273,8 +273,8 @@ func syncLauncherLogs() {
 }
 
 func showStartupError() {
-	message := syscall.StringToUTF16Ptr("U-Claw 启动失败。请查看 U-Claw\\data\\logs\\U-Claw-Launcher.log。")
-	title := syscall.StringToUTF16Ptr("U-Claw Launcher")
+	message := syscall.StringToUTF16Ptr("Bavi-box 启动失败。请查看 Bavi-box\\data\\logs\\Bavi-box-Launcher.log。")
+	title := syscall.StringToUTF16Ptr("Bavi-box Launcher")
 	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(message)), uintptr(unsafe.Pointer(title)), mbOK|mbIconError)
 }
 
@@ -310,7 +310,7 @@ func runScript(root string, script string, logPath string) int {
 
 func runStatusWindow() error {
 	className := syscall.StringToUTF16Ptr("UClawPortableLauncherWindow")
-	title := syscall.StringToUTF16Ptr("U-Claw Launcher")
+	title := syscall.StringToUTF16Ptr("Bavi-box Launcher")
 	instance, _, err := procGetModuleHandleW.Call(0)
 	if instance == 0 {
 		return err
@@ -415,8 +415,8 @@ func updateStatusWindow() {
 		if atomic.LoadInt32(&processExitCode) != 0 {
 			procShowWindow.Call(windowHandle, swShow)
 			atomic.StoreInt32(&windowHidden, 0)
-			message := syscall.StringToUTF16Ptr("U-Claw 启动失败。请查看 U-Claw\\data\\logs\\U-Claw-Launcher.log。")
-			title := syscall.StringToUTF16Ptr("U-Claw Launcher")
+			message := syscall.StringToUTF16Ptr("Bavi-box 启动失败。请查看 Bavi-box\\data\\logs\\Bavi-box-Launcher.log。")
+			title := syscall.StringToUTF16Ptr("Bavi-box Launcher")
 			procMessageBoxW.Call(windowHandle, uintptr(unsafe.Pointer(message)), uintptr(unsafe.Pointer(title)), mbOK|mbIconError)
 		}
 		procPostQuitMessage.Call(0)
@@ -448,13 +448,13 @@ func shouldShowStatusWindow(status string) bool {
 		strings.Contains(status, "Copying Windows archive") ||
 		strings.Contains(status, "Verifying cached Windows archive") ||
 		strings.Contains(status, "Extracting") ||
-		strings.Contains(status, "Another U-Claw startup") ||
+		strings.Contains(status, "Another Bavi-box startup") ||
 		strings.Contains(status, "Syncing USB data to computer cache") ||
 		strings.Contains(status, "Runtime data has unsynced changes")
 }
 
 func initialStatusText() string {
-	return "U-Claw 正在启动...\r\n\r\n首次启动需要准备程序缓存，可能需要几分钟。\r\n后续同版本启动会更快。"
+	return "Bavi-box 正在启动...\r\n\r\n首次启动需要准备程序缓存，可能需要几分钟。\r\n后续同版本启动会更快。"
 }
 
 func rawStatusText() string {
@@ -475,16 +475,16 @@ func displayStatusText(raw string) string {
 		return initialStatusText()
 	}
 
-	title := "U-Claw 正在启动..."
+	title := "Bavi-box 正在启动..."
 	stage := "正在准备运行环境。"
 	detail := "请稍候。首次启动可能需要几分钟。"
 
 	if isShutdownStatus(raw) {
-		title = "U-Claw 正在关闭..."
+		title = "Bavi-box 正在关闭..."
 		stage = "正在停止服务并同步数据。"
 		detail = "完成后会自动退出。"
 	}
-	if strings.Contains(raw, "Another U-Claw startup") {
+	if strings.Contains(raw, "Another Bavi-box startup") {
 		stage = "已有启动任务正在准备程序缓存。"
 		detail = "正在等待它完成，避免双进程。"
 	}

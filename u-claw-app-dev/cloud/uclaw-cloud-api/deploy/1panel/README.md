@@ -4,7 +4,7 @@
 
 - `158.51.110.49:14851`：New API / sub2api 源站，安装 1Panel、Docker、PostgreSQL、Redis 和业务容器。
 - `64.90.19.251:24851`：前置反代，只开放 `api.yiyong.me`、`sub2api.yiyong.me`，并限制管理路径来源。
-- `121.41.89.103:22`：U-Claw Cloud API，只允许它访问 New API 管理接口。
+- `121.41.89.103:22`：Bavi-box Cloud API，只允许它访问 New API 管理接口。
 
 ## 1Panel 基础安装
 
@@ -83,7 +83,7 @@ TLS 证书由 1Panel/OpenResty 或 Caddy 自动签发；不要把证书私钥放
 - `https://sub2api.yiyong.me/`：非授权来源返回 `403`；从 `121.41.89.103` 返回 `200`。
 - `http://158.51.110.49:3000/` 与 `http://158.51.110.49:8080/`：非前置来源超时，代表源站直连已收口。
 
-## U-Claw Cloud API 对接值
+## Bavi-box Cloud API 对接值
 
 `121.41.89.103` 的 `uclaw-cloud-api.env` 中应使用：
 

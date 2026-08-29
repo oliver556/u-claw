@@ -19,7 +19,7 @@
 ## 3. 设计原则
 
 1. 用户侧展示 `SkillHub`，技术侧仍复用 OpenClaw `skills.*` 与 Agent config。
-2. 下拉只展示 U-Claw 筛选后的 SkillHub skills，过滤 `source === "openclaw-bundled"` 或 `bundled === true`。
+2. 下拉只展示 Bavi-box 筛选后的 SkillHub skills，过滤 `source === "openclaw-bundled"` 或 `bundled === true`。
 3. 选择项使用用户可读名称、分类/来源和用途描述；底层写入 runtime 识别的 `skill.name`。
 4. 下拉必须放在聊天输入框工具栏，靠近模型选择控件，表示“本次对话运行配置”。
 5. 不直接请求远端 SkillHub API；数据来自本地 Gateway / OpenClaw 状态。
@@ -220,4 +220,4 @@ curl -sS -o /tmp/uclaw_skillhub_dropdown.out -w '%{http_code}\n' http://127.0.0.
 
 - `npm start` 会打开 Electron，但当前环境内 Electron 子进程启动 Gateway 时失败于 `spawn node ENOENT`。
 - 因 `u-claw-app-dev/src/main.js` 属硬性要求默认禁改底座，本切片未修改该文件。
-- 为恢复本地验证，使用本机 Node 直接启动 Gateway，并沿用 U-Claw data/config 路径。
+- 为恢复本地验证，使用本机 Node 直接启动 Gateway，并沿用 Bavi-box data/config 路径。

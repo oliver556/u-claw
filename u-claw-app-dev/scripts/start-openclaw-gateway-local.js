@@ -75,7 +75,7 @@ function parsePort(value) {
 }
 
 /**
- * Builds OpenClaw's local data environment from macOS U-Claw userData defaults.
+ * Builds OpenClaw's local data environment from macOS Bavi-box userData defaults.
  */
 function buildEnv() {
   const openclawHome = process.env.OPENCLAW_HOME || DEFAULT_OPENCLAW_HOME;
@@ -88,7 +88,7 @@ function buildEnv() {
     OPENCLAW_HOME: openclawHome,
     OPENCLAW_STATE_DIR: openclawStateDir,
     OPENCLAW_CONFIG_PATH: openclawConfigPath,
-    OPENCLAW_EMBEDDED_IN: process.env.OPENCLAW_EMBEDDED_IN || "U-Claw",
+    OPENCLAW_EMBEDDED_IN: process.env.OPENCLAW_EMBEDDED_IN || "Bavi-box",
     NODE_COMPILE_CACHE: nodeCompileCache,
   };
 
@@ -165,7 +165,7 @@ Defaults:
   port=${DEFAULT_PORT}
 
 Environment:
-  OPENCLAW_HOME may override the local U-Claw data directory.
+  OPENCLAW_HOME may override the local Bavi-box data directory.
 
 Flags:
   --port <port>       Gateway port. Default: ${DEFAULT_PORT}

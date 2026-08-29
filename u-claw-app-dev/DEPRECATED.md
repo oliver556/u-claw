@@ -1,11 +1,11 @@
 # ⚠️ 已归档：Electron 桌面版不再发布（2026-06-19 起）
 
-`u-claw-app/`（Electron 打包的桌面版，产出 `U-Claw Setup *.exe` 安装版、`U-Claw *.exe` 绿色版、`U-Claw-*.dmg`）**已停止发布**。代码保留在仓库中仅作存档，CI 不再构建它。
+`u-claw-app/`（Electron 打包的桌面版，产出 `Bavi-box Setup *.exe` 安装版、`Bavi-box *.exe` 绿色版、`Bavi-box-*.dmg`）**已停止发布**。代码保留在仓库中仅作存档，CI 不再构建它。
 
 ## 为什么停发
 
 1. **是商业版 ClawX 已做得更好的事的劣化版**——桌面体验打磨不过专门做这件事的 ClawX。
-2. **与产品定位相悖**——U-Claw 的本质是「插上 U 盘就能用」（`portable/` 的 `.bat`/`.command`），Electron 桌面版是跑偏的妥协。
+2. **与产品定位相悖**——Bavi-box 的本质是「插上 U 盘就能用」（`portable/` 的 `.bat`/`.command`），Electron 桌面版是跑偏的妥协。
 3. **启动坑多**。实测（2026-06-19）：
    - OpenClaw 首次冷启动要建 V8 编译缓存，可达 30–60s+；旧版 `main.js` 写死 `GATEWAY_STARTUP_TIMEOUT=30000`（30s 硬超时）→ **冷启动必弹「Gateway startup timeout」错误框**。
    - **绿色版**（electron-builder portable target）每次双击都自解压 837MB 到随机临时目录 → **永远冷启动**，且热重启易因解压目录冲突卡死。

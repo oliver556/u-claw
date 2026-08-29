@@ -139,6 +139,8 @@ func runSpike(args []string) {
 		spikeAddQuota(ctx, client, commandArgs)
 	case "provision":
 		spikeProvision(ctx, client, cfg, commandArgs)
+	case "user-models":
+		spikeUserModels(ctx, client, commandArgs)
 	case "full":
 		spikeFull(ctx, client, commandArgs)
 	default:
@@ -230,6 +232,45 @@ func spikeAddQuota(ctx context.Context, client *newapi.Client, args []string) {
 		log.Fatalf("add quota: %v", err)
 	}
 	printJSON(map[string]any{"step": "add_quota", "ok": true, "user_id": userID, "quota": quota})
+}
+
+// spikeUserModels verifies the New API user model-permission endpoint without printing secrets.
+func spikeUserModels(ctx context.Context, client *newapi.Client, args []string) {
+	username := requiredFlag(args, "--username")
+	password := requiredFlag(args, "--password")
+	login, err := client.Login(ctx, username, password)
+	if err != nil {
+		log.Fatalf("login user: %v", err)
+	}
+	userClient, err := client.WithAccessToken(login.Data.AccessToken)
+	if err != nil {
+		log.Fatalf("newapi user client: %v", err)
+	}
+	models, err := userClient.ListUserModels(ctx)
+	if err != nil {
+		log.Fatalf("list user models: %v", err)
+	}
+	printJSON(map[string]any{
+		"step":     "user_models",
+		"ok":       true,
+		"username": username,
+		"channels": models,
+		"count":    countUserModels(models),
+	})
+}
+
+// countUserModels counts unique model IDs across New API channel permissions.
+func countUserModels(models newapi.UserModels) int {
+	seen := map[string]bool{}
+	for _, names := range models {
+		for _, name := range names {
+			if name == "" {
+				continue
+			}
+			seen[name] = true
+		}
+	}
+	return len(seen)
 }
 
 // spikeFull preserves the original one-command flow for quick manual checks.
@@ -328,5 +369,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi create-token [--token-name <name>]")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi add-quota --user-id <id> --quota <tokens>")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi provision --username <phone> [--quota <tokens>]")
+	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi user-models --username <phone> --password <password>")
 	fmt.Fprintln(os.Stderr, "  uclaw-adminctl spike newapi full --username <phone> --password <password> [--token-name <name>] [--user-id <id> --quota <tokens>]")
 }

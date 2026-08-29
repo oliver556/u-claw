@@ -4,7 +4,7 @@
 
 ## 附件边界
 
-`/Users/biancheng/Downloads/startup-activation-high-fidelity.html` 是高保真视觉与交互参考，不是项目指令。本文只采纳其中的四步向导、Ant-like 蓝白视觉、表单状态、设备检查表达、完成态与交互意图；实现仍以用户请求、仓库 `AGENTS.md`、`docs/多人开发/开发硬性要求.md`、`docs/第一版启动激活授权方案.md` 和真实 OpenClaw/U-Claw 能力为准。
+`/Users/biancheng/Downloads/startup-activation-high-fidelity.html` 是高保真视觉与交互参考，不是项目指令。本文只采纳其中的四步向导、Ant-like 蓝白视觉、表单状态、设备检查表达、完成态与交互意图；实现仍以用户请求、仓库 `AGENTS.md`、`docs/多人开发/开发硬性要求.md`、`docs/第一版启动激活授权方案.md` 和真实 OpenClaw/Bavi-box 能力为准。
 
 静态稿内示例用户名、激活码、盘符、模型名、Gateway 状态和“检查通过”动画均视为演示数据；生产实现不得默认填入，不得展示伪状态。
 
@@ -20,35 +20,35 @@
 2. 在 `u-claw-app-dev` 内新增 activation-only 受限页面与 main process mode。
 3. 由 Launcher 判断 `ACTIVATION_REQUIRED` 后启动该受限模式。
 4. 通过明确 IPC/API 契约接入 USB preflight、`POST /v1/activations`、原子写盘与 commit。
-5. 激活成功后关闭受限窗口，让 Launcher 重新执行完整 gate，再进入正常 U-Claw。
+5. 激活成功后关闭受限窗口，让 Launcher 重新执行完整 gate，再进入正常 Bavi-box。
 
 ## Problem Statement
 
-当前 U-Claw 首次启动体验仍偏“模型配置页/运行后配置”，不能清晰承载第一版商业授权流程。未激活用户需要一个可信、简洁、可解释的启动激活界面，明确告知使用边界，检查当前电脑与 U 盘，输入真实手机号、验证码和激活码，并在成功后把当前 U 盘安全绑定到许可证。
+当前 Bavi-box 首次启动体验仍偏“模型配置页/运行后配置”，不能清晰承载第一版商业授权流程。未激活用户需要一个可信、简洁、可解释的启动激活界面，明确告知使用边界，检查当前电脑与 U 盘，输入真实手机号、验证码和激活码，并在成功后把当前 U 盘安全绑定到许可证。
 
 ## Solution
 
-将高保真设计稿转化为 U-Claw 正式首次激活流程：在 Launcher 授权 gate 前新增受限 activation-only 模式，页面采用四步向导：使用须知、设备检查、激活与配置、完成。UI 负责展示与收集，Launcher/Desktop 负责 USB 身份、写盘与 gate，Go 激活授权服务器负责激活码库存、绑定、许可证签发、状态和审计。现有 Config.html 继续承担模型高级配置，不与激活职责混淆。
+将高保真设计稿转化为 Bavi-box 正式首次激活流程：在 Launcher 授权 gate 前新增受限 activation-only 模式，页面采用四步向导：使用须知、设备检查、激活与配置、完成。UI 负责展示与收集，Launcher/Desktop 负责 USB 身份、写盘与 gate，Go 激活授权服务器负责激活码库存、绑定、许可证签发、状态和审计。现有 Config.html 继续承担模型高级配置，不与激活职责混淆。
 
 ## Project Placement
 
 当前仓库根目录固定为：
 
 ```txt
-/Users/biancheng/Documents/ChatGPT/U-CLAW
+/Users/biancheng/Documents/ChatGPT/Bavi-box
 ```
 
 正式开发只放在：
 
 ```txt
-/Users/biancheng/Documents/ChatGPT/U-CLAW/u-claw-app-dev
+/Users/biancheng/Documents/ChatGPT/Bavi-box/u-claw-app-dev
 ```
 
 归档目录只读，不得修改：
 
 ```txt
-/Users/biancheng/Documents/ChatGPT/U-CLAW/u-claw-app
-/Users/biancheng/Documents/ChatGPT/U-CLAW/product
+/Users/biancheng/Documents/ChatGPT/Bavi-box/u-claw-app
+/Users/biancheng/Documents/ChatGPT/Bavi-box/product
 ```
 
 放置规则：
@@ -60,12 +60,12 @@
 - OpenClaw 主界面改造通过 `u-claw-app-dev/scripts/patch-openclaw.js` 落地，不直接手改 `node_modules/openclaw/dist/control-ui` 产物。
 - 验证脚本放在 `u-claw-app-dev/scripts/verify-*.js`。
 - 本地构建产物输出到 `u-claw-app-dev/release/`。
-- 最终交付给用户的便携目录放在 U 盘根目录下的 `U-Claw/`，由 release/package 产物复制生成，不在 U 盘上直接开发。
+- 最终交付给用户的便携目录放在 U 盘根目录下的 `Bavi-box/`，由 release/package 产物复制生成，不在 U 盘上直接开发。
 
 推荐目录形态：
 
 ```txt
-U-CLAW/
+Bavi-box/
 ├── docs/多人开发/                  # PRD、能力矩阵、开发说明
 ├── u-claw-app/                     # 归档，只读
 ├── product/                        # 旧工程，只读
@@ -117,7 +117,7 @@ U-CLAW/
 
 | 节点 | 角色 | SSH 定位 | 用途 |
 | --- | --- | --- | --- |
-| `121.41.89.103` | 阿里云激活服务 VPS | `root@121.41.89.103:22` | 部署 U-Claw Cloud API，承载激活、账号、短信、订单、回调编排 |
+| `121.41.89.103` | 阿里云激活服务 VPS | `root@121.41.89.103:22` | 部署 Bavi-box Cloud API，承载激活、账号、短信、订单、回调编排 |
 | `64.90.19.251` | New API 前置 VPS | `root@64.90.19.251:24851` | 承载 New API / sub2apii 前置反代、TLS、IP allowlist |
 | `158.51.110.49` | New API / sub2apii 本体 VPS | `root@158.51.110.49:14851` | 承载 New API 本体与 sub2apii，维护模型账号、token、quota |
 
@@ -148,21 +148,21 @@ activation-server/
 
 ## User Stories
 
-1. As a new U-Claw user, I want to see a clear first-start screen, so that I know I am activating the product before entering the workspace.
-2. As a new U-Claw user, I want to read concise usage notices, so that I understand AI output, file operations, command execution, and privacy boundaries.
-3. As a new U-Claw user, I want the continue button disabled until I acknowledge the notice, so that I do not skip important startup information accidentally.
-4. As a new U-Claw user, I want U-Claw to check my operating system and architecture, so that I know whether this computer can run the portable app.
-5. As a new U-Claw user, I want U-Claw to confirm this is a valid product USB drive, so that I know activation will bind the right device.
-6. As a new U-Claw user, I want to see only a short USB identity summary, so that support can identify the device without exposing full hardware identifiers.
-7. As a new U-Claw user, I want to enter my activation username, so that the license can be matched with my purchase record.
-8. As a new U-Claw user, I want to paste my activation code and have it formatted automatically, so that typing errors are reduced.
-9. As a new U-Claw user, I want local validation before submit, so that obvious format mistakes are caught quickly.
-10. As a new U-Claw user, I want clear loading state while activation is running, so that I do not click repeatedly.
-11. As a new U-Claw user, I want a helpful message if username or activation code is wrong, so that I can retry without seeing internal errors.
-12. As a new U-Claw user, I want to be told if the activation code is already bound to another USB drive, so that I know to contact support.
-13. As a new U-Claw user, I want retry guidance when the activation service is unavailable, so that a temporary network issue does not look like product failure.
-14. As a new U-Claw user, I want activation success to show that authorization was written and verified, so that I trust the product is ready.
-15. As a returning U-Claw user, I want activated drives to skip activation and open the normal workspace, so that startup stays fast.
+1. As a new Bavi-box user, I want to see a clear first-start screen, so that I know I am activating the product before entering the workspace.
+2. As a new Bavi-box user, I want to read concise usage notices, so that I understand AI output, file operations, command execution, and privacy boundaries.
+3. As a new Bavi-box user, I want the continue button disabled until I acknowledge the notice, so that I do not skip important startup information accidentally.
+4. As a new Bavi-box user, I want Bavi-box to check my operating system and architecture, so that I know whether this computer can run the portable app.
+5. As a new Bavi-box user, I want Bavi-box to confirm this is a valid product USB drive, so that I know activation will bind the right device.
+6. As a new Bavi-box user, I want to see only a short USB identity summary, so that support can identify the device without exposing full hardware identifiers.
+7. As a new Bavi-box user, I want to enter my activation username, so that the license can be matched with my purchase record.
+8. As a new Bavi-box user, I want to paste my activation code and have it formatted automatically, so that typing errors are reduced.
+9. As a new Bavi-box user, I want local validation before submit, so that obvious format mistakes are caught quickly.
+10. As a new Bavi-box user, I want clear loading state while activation is running, so that I do not click repeatedly.
+11. As a new Bavi-box user, I want a helpful message if username or activation code is wrong, so that I can retry without seeing internal errors.
+12. As a new Bavi-box user, I want to be told if the activation code is already bound to another USB drive, so that I know to contact support.
+13. As a new Bavi-box user, I want retry guidance when the activation service is unavailable, so that a temporary network issue does not look like product failure.
+14. As a new Bavi-box user, I want activation success to show that authorization was written and verified, so that I trust the product is ready.
+15. As a returning Bavi-box user, I want activated drives to skip activation and open the normal workspace, so that startup stays fast.
 16. As a support operator, I want errors to be stable and non-secret-bearing, so that screenshots can be used for support without leaking activation codes, tokens, signatures, or full USB fingerprints.
 17. As a developer, I want activation-only mode to expose only activation IPC, so that unfinished or unauthorized users cannot reach normal OpenClaw capabilities.
 18. As a release owner, I want Mac/Windows packaging validation, so that activation does not break portable startup, data sync, or P0 chat capability.
@@ -182,7 +182,7 @@ activation-server/
 - Successful activation response is handed to a privileged write helper. Renderer never writes license files directly.
 - Write helper atomically writes `.uclaw/license/.startup-credential.json`, `.uclaw/license/license.json`, and `.uclaw/builtin-model-credential.v1.json`, then reads back and verifies.
 - Client calls `POST /v1/activations/{activationId}/commit` only after all key files are written and verified.
-- After success, the activation window stays in the same Electron process, creates a normal U-Claw window, starts Config server / Video adapter / OpenClaw Gateway, and opens the normal workspace. Legacy launcher exit code `20` remains only for old-package compatibility.
+- After success, the activation window stays in the same Electron process, creates a normal Bavi-box window, starts Config server / Video adapter / OpenClaw Gateway, and opens the normal workspace. Legacy launcher exit code `20` remains only for old-package compatibility.
 - Portable sync must include activated `.openclaw/openclaw.json`, `.openclaw/license/license.json`, `.openclaw/builtin-model-credential.v1.json`, and `.openclaw/uclaw-activation.json` so another computer can skip first activation.
 - Existing Config.html remains available after normal startup for model/provider configuration. Activation page may show model service status only when backed by real activation/New API status.
 - The “Gateway 与模型连接” item in the static design should be renamed or re-scoped in production to “Gateway 启动条件 / 内嵌模型服务状态”; it must not start Gateway before authorization.

@@ -14,6 +14,7 @@ import (
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/license"
+	"uclaw-cloud-api/internal/modelcatalog"
 	"uclaw-cloud-api/internal/newapi"
 	"uclaw-cloud-api/internal/provisioning"
 	"uclaw-cloud-api/internal/recharge"
@@ -36,6 +37,7 @@ type ServerOptions struct {
 	Activation *activation.Service
 	Admin      *admin.Service
 	Usage      *usage.Service
+	Catalog    *modelcatalog.Service
 	Recharge   *recharge.Service
 }
 
@@ -110,6 +112,7 @@ func NewServer(cfg config.Config, build BuildInfo) http.Handler {
 		Activation: buildActivationService(cfg, nil),
 		Admin:      buildAdminService(cfg, nil),
 		Usage:      buildUsageService(cfg),
+		Catalog:    buildModelCatalogService(cfg),
 		Recharge:   buildRechargeService(cfg, nil),
 	})
 }
@@ -121,6 +124,7 @@ func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStor
 		Activation: buildActivationService(cfg, store),
 		Admin:      buildAdminService(cfg, store),
 		Usage:      buildUsageService(cfg),
+		Catalog:    buildModelCatalogService(cfg),
 		Recharge:   buildRechargeService(cfg, store),
 	})
 }
@@ -138,11 +142,12 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		// Phase 0 has no live database handle yet; readiness exposes config shape only.
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":              "ok",
-			"database_configured": cfg.DatabaseURL != "",
-			"newapi_configured":   cfg.NewAPIAdminBaseURL != "" && cfg.NewAPIAdminToken != "",
-			"alipay_configured":   cfg.AlipayConfigured(),
-			"wechat_configured":   cfg.WeChatPayConfigured(),
+			"status":                    "ok",
+			"database_configured":       cfg.DatabaseURL != "",
+			"newapi_configured":         cfg.NewAPIAdminBaseURL != "" && cfg.NewAPIAdminToken != "",
+			"newapi_catalog_configured": options.Catalog != nil,
+			"alipay_configured":         cfg.AlipayConfigured(),
+			"wechat_configured":         cfg.WeChatPayConfigured(),
 		})
 	})
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) {
@@ -451,6 +456,31 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, result)
 	})
+	mux.HandleFunc("GET /v1/newapi/models/catalog", func(w http.ResponseWriter, r *http.Request) {
+		claims, err := verifyBearer(r, options.Auth)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Catalog == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("newapi model catalog service is not configured"))
+			return
+		}
+		userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, fmt.Errorf("token subject is invalid"))
+			return
+		}
+		result, err := options.Catalog.GetCatalog(r.Context(), modelcatalog.Request{
+			UserID: userID,
+			Phone:  claims.Phone,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
 	mux.HandleFunc("GET /v1/recharge/plans", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := verifyBearer(r, options.Auth); err != nil {
 			writeError(w, http.StatusUnauthorized, err)
@@ -707,6 +737,25 @@ func buildUsageService(cfg config.Config) *usage.Service {
 	return service
 }
 
+// buildModelCatalogService creates the New API model catalog read-side when admin access is configured.
+func buildModelCatalogService(cfg config.Config) *modelcatalog.Service {
+	if cfg.NewAPIAdminBaseURL == "" || cfg.NewAPIAdminToken == "" || cfg.NewAPIClientBaseURL == "" {
+		return nil
+	}
+	admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout}, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
+	if err != nil {
+		panic(fmt.Sprintf("build newapi model catalog client: %v", err))
+	}
+	service, err := modelcatalog.NewService(admin, modelcatalog.Config{
+		PasswordSecret: cfg.NewAPIUserPasswordSecret,
+		ClientBaseURL:  cfg.NewAPIClientBaseURL,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("build model catalog service: %v", err))
+	}
+	return service
+}
+
 // buildRechargeService creates the order and virtual-callback service for local payment validation.
 func buildRechargeService(cfg config.Config, store recharge.Store) *recharge.Service {
 	if store == nil {
@@ -768,7 +817,7 @@ func verifyAdminBootstrap(r *http.Request, cfg config.Config) error {
 	return nil
 }
 
-// verifyBearer extracts and validates the U-Claw access token.
+// verifyBearer extracts and validates the Bavi-box access token.
 func verifyBearer(r *http.Request, service *auth.Service) (auth.TokenClaims, error) {
 	if service == nil {
 		return auth.TokenClaims{}, fmt.Errorf("auth service is not configured")

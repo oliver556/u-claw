@@ -2,7 +2,7 @@
 
 ## 结论
 
-- 当前 U 盘已补入硬更新凭据文件：`/Volumes/U-claw-1/U-Claw/data/.openclaw/update-credential.v1.json`。
+- 当前 U 盘已补入硬更新凭据文件：`/Volumes/U-claw-1/Bavi-box/data/.openclaw/update-credential.v1.json`。
 - 该凭据文件可驱动公网 `https://updates.yiyong.me/uclaw/update/check` 真实查库成功。
 - Cloud API 已发布 `0.1.10`，支持 activation 响应可选返回 `updateCredential`。
 - 未在本文档写入任何密码、DATABASE_URL、New API key、R2 secret 或 device token。

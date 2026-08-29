@@ -1,6 +1,6 @@
 # Local New API Lab
 
-本目录用于在本机启动一个 New API 实例，服务 U-Claw Cloud API Phase 0 联调。
+本目录用于在本机启动一个 New API 实例，服务 Bavi-box Cloud API Phase 0 联调。
 
 ## 启动
 
@@ -37,7 +37,7 @@ export NEWAPI_ADMIN_BASE_URL=http://127.0.0.1:3000
 export NEWAPI_ADMIN_TOKEN=<new-api-admin-token>
 ```
 
-4. 执行 U-Claw spike：
+4. 执行 Bavi-box spike：
 
 ```bash
 go run ./cmd/adminctl spike newapi create-user \

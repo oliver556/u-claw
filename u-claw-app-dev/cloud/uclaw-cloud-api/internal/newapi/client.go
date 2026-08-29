@@ -18,7 +18,7 @@ type HTTPDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// Client wraps New API admin endpoints needed by the U-Claw activation flow.
+// Client wraps New API admin endpoints needed by the Bavi-box activation flow.
 type Client struct {
 	baseURL              string
 	adminToken           string
@@ -197,6 +197,19 @@ func (c *Client) ListSelfLogs(ctx context.Context, page int, pageSize int) (Self
 		return SelfLogsPage{}, err
 	}
 	return response.Data, nil
+}
+
+// ListUserModels returns the model permissions visible to the authenticated New API user.
+func (c *Client) ListUserModels(ctx context.Context) (UserModels, error) {
+	var response userModelsResponse
+	if err := c.getJSON(ctx, "/api/user/models", &response); err != nil {
+		return UserModels{}, err
+	}
+	models, err := response.UserModels()
+	if err != nil {
+		return UserModels{}, err
+	}
+	return models, nil
 }
 
 // postJSON sends a JSON admin request and decodes the optional JSON response.
@@ -389,6 +402,8 @@ func apiStatus(out any) (apiStatusFields, bool) {
 		return apiStatusFields{success: value.Success, message: value.Message}, true
 	case *selfLogsResponse:
 		return apiStatusFields{success: value.Success, message: value.Message}, true
+	case *userModelsResponse:
+		return apiStatusFields{success: value.Success, message: value.Message}, true
 	default:
 		return apiStatusFields{}, false
 	}
@@ -429,7 +444,7 @@ type CreateTokenResponse struct {
 	Key     string `json:"key,omitempty"`
 }
 
-// User is the subset of New API user records needed by U-Claw provisioning.
+// User is the subset of New API user records needed by Bavi-box provisioning.
 type User struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
@@ -450,7 +465,7 @@ type Token struct {
 	Name string `json:"name"`
 }
 
-// SelfUser is the subset of /api/user/self used by U-Claw usage cards.
+// SelfUser is the subset of /api/user/self used by Bavi-box usage cards.
 type SelfUser struct {
 	ID           int64  `json:"id"`
 	Username     string `json:"username"`
@@ -488,6 +503,9 @@ type SelfLogsPage struct {
 	Items    []LogItem `json:"items"`
 }
 
+// UserModels maps New API channel IDs to the model names granted to the user.
+type UserModels map[string][]string
+
 type searchUsersResponse struct {
 	Data struct {
 		Items []User `json:"items"`
@@ -522,6 +540,59 @@ type selfLogsResponse struct {
 	Data    SelfLogsPage `json:"data"`
 	Success bool         `json:"success"`
 	Message string       `json:"message,omitempty"`
+}
+
+type userModelsResponse struct {
+	Data    json.RawMessage `json:"data"`
+	Success bool            `json:"success"`
+	Message string          `json:"message,omitempty"`
+}
+
+// UserModels decodes New API's model-permission envelope while tolerating common deployments.
+func (r userModelsResponse) UserModels() (UserModels, error) {
+	if len(bytes.TrimSpace(r.Data)) == 0 || string(bytes.TrimSpace(r.Data)) == "null" {
+		return UserModels{}, nil
+	}
+
+	var channelMap map[string][]string
+	if err := json.Unmarshal(r.Data, &channelMap); err == nil {
+		return normalizeUserModels(channelMap), nil
+	}
+
+	var flatList []string
+	if err := json.Unmarshal(r.Data, &flatList); err == nil {
+		return normalizeUserModels(map[string][]string{"": flatList}), nil
+	}
+
+	var wrapped struct {
+		Models []string `json:"models"`
+	}
+	if err := json.Unmarshal(r.Data, &wrapped); err == nil && wrapped.Models != nil {
+		return normalizeUserModels(map[string][]string{"": wrapped.Models}), nil
+	}
+
+	return UserModels{}, fmt.Errorf("decode newapi user models: unsupported data shape")
+}
+
+// normalizeUserModels trims duplicate model names without inventing channel permissions.
+func normalizeUserModels(input map[string][]string) UserModels {
+	output := UserModels{}
+	for channelID, models := range input {
+		channel := strings.TrimSpace(channelID)
+		seen := map[string]bool{}
+		for _, model := range models {
+			name := strings.TrimSpace(model)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			output[channel] = append(output[channel], name)
+		}
+		if len(output[channel]) == 0 {
+			delete(output, channel)
+		}
+	}
+	return output
 }
 
 type apiStatusResponse struct {

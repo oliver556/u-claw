@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul 2>&1
-title U-Claw Interactive CLI
+title Bavi-box Interactive CLI
 
 REM 进阶用户：打开一个已配置好环境变量的命令行，可直接敲 openclaw 命令。
 REM 复用与 Windows-Start.bat 一致的便携环境（盘内 Node + 盘内数据）。
@@ -36,7 +36,7 @@ if not exist "%CORE_DIR%\node_modules\.bin\openclaw.cmd" (
 
 echo.
 echo   ========================================
-echo     U-Claw Interactive CLI
+echo     Bavi-box Interactive CLI
 echo   ========================================
 echo.
 echo   You can now run the 'openclaw' command directly. Examples:

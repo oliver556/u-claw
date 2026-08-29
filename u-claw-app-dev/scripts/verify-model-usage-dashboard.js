@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Verifies that U-Claw's model usage dashboard is patched into the Config quick page.
+ * Verifies that Bavi-box's model usage dashboard is patched into the Config quick page.
  */
 const fs = require("fs");
 const path = require("path");
@@ -41,7 +41,7 @@ const checks = [
   [configSource, "todayCompute", "New API today compute field"],
   [configSource, "last7DaysCompute", "New API 7-day compute field"],
   [configSource, "cumulativeCompute", "New API cumulative compute field"],
-  [configSource, "computeUnitsPerCny", "U-Claw compute conversion ratio"],
+  [configSource, "computeUnitsPerCny", "Bavi-box compute conversion ratio"],
   [configSource, "newapiQuotaPerCny", "New API quota conversion ratio"],
   [configSource, "function UcQuickQuotaToCompute(", "New API quota to compute helper"],
   [configSource, "function UcQuickCloudDaily(", "New API daily compute chart helper"],
@@ -56,7 +56,7 @@ const checks = [
   [configSource, "cloudSummary", "cloud usage summary state"],
   [configSource, "New API 数据暂不可用", "cloud usage fallback message"],
   [configSource, "1 元 = 6kw 算力", "cloud compute conversion label"],
-  [configSource, "U-Claw 算力", "cloud compute metric label"],
+  [configSource, "Bavi-box 算力", "cloud compute metric label"],
   [configSource, "文本对话", "specific text capability tag"],
   [configSource, "图片编辑", "specific image capability tag"],
   [configSource, "任务轮询", "specific video capability tag"],
@@ -64,6 +64,10 @@ const checks = [
   [configSource, "setDate(n.getDate()-13)", "14-day usage window"],
   [configSource, "function UcQuickSessionDaily(", "session daily fallback"],
   [configSource, "onRefreshModelUsage", "refresh callback"],
+  [configSource, "同步模型", "cloud catalog sync button"],
+  [configSource, "refreshModelCatalog", "cloud catalog refresh bridge"],
+  [configSource, "onRefreshModelCatalog:()=>this.uclawRefreshModelCatalog()", "cloud catalog sync callback"],
+  [cssSource, ".uclaw-config-model-head-actions{display:flex", "cloud catalog action group CSS"],
   [configSource, "kind:`image`", "model card kind marker"],
   [configSource, "uclawChangeModel(e,t)", "direct model change method"],
   [configSource, "onModelChange:(e,t)=>this.uclawChangeModel(e,t)", "model card change callback"],

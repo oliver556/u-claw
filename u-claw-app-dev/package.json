@@ -1,9 +1,9 @@
 {
   "name": "u-claw",
   "version": "2.1.17",
-  "description": "U-Claw - AI 助手桌面版，插上 U 盘就能用",
+  "description": "Bavi-box - AI 助手桌面版，插上 U 盘就能用",
   "main": "src/main.js",
-  "author": "U-Claw <hello@u-claw.org> (https://u-claw.org)",
+  "author": "Bavi-box <hello@u-claw.org> (https://u-claw.org)",
   "license": "MIT",
   "homepage": "https://u-claw.org",
   "scripts": {
@@ -25,8 +25,8 @@
   },
   "build": {
     "appId": "org.u-claw.desktop",
-    "productName": "U-Claw",
-    "copyright": "Copyright © 2026 U-Claw",
+    "productName": "Bavi-box",
+    "copyright": "Copyright © 2026 Bavi-box",
     "directories": {
       "output": "release"
     },
@@ -81,7 +81,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "title": "U-Claw",
+      "title": "Bavi-box",
       "icon": "assets/icon.icns",
       "contents": [
         {
@@ -122,7 +122,7 @@
       "installerHeaderIcon": "assets/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "U-Claw"
+      "shortcutName": "Bavi-box"
     },
     "linux": {
       "target": [

@@ -97,7 +97,7 @@ WHERE phone = $1 AND purpose = $2 AND code_hash = $3 AND consumed = false AND ex
 	return nil
 }
 
-// UpsertUser creates or updates a verified U-Claw phone user.
+// UpsertUser creates or updates a verified Bavi-box phone user.
 func (s *Store) UpsertUser(ctx context.Context, phone string, verifiedAt time.Time) (auth.User, error) {
 	var user auth.User
 	err := s.db.QueryRowContext(ctx, `
@@ -142,7 +142,7 @@ WHERE code_hash = $1
 	return nil
 }
 
-// BindFirstStart binds an activation code and returns the persistent U-Claw user id for provisioning.
+// BindFirstStart binds an activation code and returns the persistent Bavi-box user id for provisioning.
 func (s *Store) BindFirstStart(ctx context.Context, code string, username string, at time.Time) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
