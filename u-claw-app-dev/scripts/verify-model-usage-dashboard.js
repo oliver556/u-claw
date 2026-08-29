@@ -80,6 +80,8 @@ const checks = [
   [configSource, "[`agents`,`defaults`,`imageModel`,`primary`]", "image model config path"],
   [configSource, "[`agents`,`defaults`,`videoGenerationModel`,`primary`]", "video model config path"],
   [configSource, "uclawModelCandidates(e,t)", "model candidate builder"],
+  [configSource, "let c={text:[o.model],image:[o.imageGenerationModel,o.imageModel],video:[o.videoGenerationModel]}[e]??[]", "model picker uses kind-specific defaults"],
+  [configSource, "o.includes(`text`)&&!o.includes(`image`)&&!o.includes(`video`)", "text picker excludes image and video capabilities"],
   [configSource, "uclawApplyModelChoice(e,t)", "model selector save method"],
   [configSource, "o.className=`uclaw-model-picker`", "model selector modal root"],
   [configSource, "placeholder=\"搜索或输入模型 id（当前", "model selector search input keeps current as hint"],

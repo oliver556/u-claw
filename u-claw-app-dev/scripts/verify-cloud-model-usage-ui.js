@@ -224,9 +224,9 @@ function writeActivatedClientState(accessToken, newAPIToken) {
     apiKey: newAPIToken,
     api: 'openai-completions',
     models: [
-      { id: 'gpt-5.5', name: 'gpt-5.5', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 },
-      { id: 'gpt-image-2', name: 'gpt-image-2', reasoning: false, input: ['text', 'image'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 },
-      { id: 'jimeng-video-3-720p', name: 'jimeng-video-3-720p', reasoning: false, input: ['text', 'image'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 },
+      { id: 'gpt-5.5', name: 'gpt-5.5', capabilities: ['text'], input: ['text'] },
+      { id: 'gpt-image-2', name: 'gpt-image-2', capabilities: ['image'], input: ['text', 'image'] },
+      { id: 'jimeng-video-3-720p', name: 'jimeng-video-3-720p', capabilities: ['video'], input: ['text', 'image'] },
     ],
   };
   config.agents = config.agents || {};
@@ -310,8 +310,8 @@ async function assertModelChangeLoadsCloudCatalog(evalJS, cdp) {
   let sawCloudCatalog = false;
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`(() => {
-      const text = document.body.innerText || '';
-      return text.includes('更换文字模型') && text.includes('newapi/gpt-5.5');
+      const text = document.querySelector('.uclaw-model-picker')?.innerText || '';
+      return text.includes('更换文字模型') && text.includes('newapi/gpt-5.5') && !text.includes('gpt-image-2') && !text.includes('jimeng-video-3-720p');
     })()`);
     if (ok) {
       sawCloudCatalog = true;

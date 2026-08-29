@@ -13,12 +13,12 @@ const {
 function verifyNormalizeCatalogModel() {
   const textModel = normalizeCatalogModel({ id: 'gpt-5.5', capabilities: ['text'] });
   assert.deepEqual(textModel.input, ['text']);
-  assert.equal(Object.hasOwn(textModel, 'capabilities'), false);
+  assert.deepEqual(textModel.capabilities, ['text']);
   assert.equal(textModel.contextWindow, 128000);
 
   const imageModel = normalizeCatalogModel({ id: 'gpt-image-2', capabilities: ['image'] });
   assert.deepEqual(imageModel.input, ['text', 'image']);
-  assert.equal(Object.hasOwn(imageModel, 'capabilities'), false);
+  assert.deepEqual(imageModel.capabilities, ['image']);
 }
 
 /**
@@ -64,7 +64,7 @@ function verifyMergeModelCatalogIntoConfig() {
   assert.equal(result.config.models.providers.newapi.apiKey, 'sk-existing');
   assert.equal(result.config.models.providers.newapi.models[0].id, 'gpt-5.5');
   assert.deepEqual(result.config.models.providers.newapi.models[1].input, ['text', 'image']);
-  assert.equal(Object.hasOwn(result.config.models.providers.newapi.models[1], 'capabilities'), false);
+  assert.deepEqual(result.config.models.providers.newapi.models[1].capabilities, ['image']);
 }
 
 verifyNormalizeCatalogModel();
