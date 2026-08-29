@@ -157,7 +157,9 @@ function serveStatic(root) {
 async function verifyHardUpdateFlow(tmp) {
   const stage = path.join(tmp, 'stage-customer', 'U-Claw');
   const releaseRoot = path.join(tmp, 'local-hard-update-release');
-  run(process.execPath, ['scripts/hard-update-package.js', 'create', '--stage', stage, '--out', releaseRoot, '--version', '9.9.9']);
+  const mockEnvPath = path.join(tmp, 'mock-release.env');
+  writeFile(mockEnvPath, '');
+  run(process.execPath, ['scripts/hard-update-package.js', 'create', '--stage', stage, '--out', releaseRoot, '--version', '9.9.9', '--env', mockEnvPath]);
   run(process.execPath, ['scripts/hard-update-package.js', 'verify', '--release', releaseRoot]);
   assertNoForbiddenReleaseFiles(releaseRoot);
 
@@ -188,7 +190,9 @@ async function verifyHardUpdateFlow(tmp) {
       '--version',
       '9.9.9',
       '--base-url',
-      `http://127.0.0.1:${port}/releases`
+      `http://127.0.0.1:${port}/releases`,
+      '--env',
+      mockEnvPath
     ]);
     const httpUsbRoot = path.join(tmp, 'http-usb', 'U-Claw');
     writeJson(path.join(httpUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
@@ -224,6 +228,24 @@ async function verifyHardUpdateFlow(tmp) {
     assert(startupBefore === startupAfter, 'startup update changed openclaw.json');
     assert(readJson(path.join(startupUsbRoot, 'app', 'version.json')).version === '9.9.9', 'startup version.json not updated');
     assert(readJson(path.join(startupUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'startup transaction not complete');
+
+    const crossPlatformUsbRoot = path.join(tmp, 'cross-platform-usb', 'U-Claw');
+    writeJson(path.join(crossPlatformUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
+    writeJson(path.join(crossPlatformUsbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me-cross-platform' });
+    await require('./hard-update-client').mockUpdate({
+      usb: crossPlatformUsbRoot,
+      productionUrl: `http://127.0.0.1:${port}/releases/production.json`,
+      platform: 'darwin-arm64'
+    });
+    assert(
+      fs.existsSync(path.join(crossPlatformUsbRoot, 'app', 'desktop-archive', 'u-claw-app-win-x64.zip')),
+      'darwin update removed Windows archive'
+    );
+    assert(fs.existsSync(path.join(crossPlatformUsbRoot, 'U-Claw Launcher.exe')), 'darwin update removed Windows launcher');
+    assert(
+      fs.existsSync(path.join(crossPlatformUsbRoot, 'app', 'desktop-archive', 'u-claw-app-mac-x64.tar.gz')),
+      'darwin-arm64 update removed Mac x64 archive'
+    );
 
     const controlPlaneServer = createControlPlaneServer({
       port: 0,
@@ -279,8 +301,10 @@ function verifyControlPlaneProdBaseUrl(tmp) {
 function verifyBadDataPackageFails(tmp) {
   const stage = path.join(tmp, 'bad-stage', 'U-Claw');
   const releaseRoot = path.join(tmp, 'bad-release');
+  const mockEnvPath = path.join(tmp, 'bad-release.env');
+  writeFile(mockEnvPath, '');
   createMockStage(stage, 'customer');
-  run(process.execPath, ['scripts/hard-update-package.js', 'create', '--stage', stage, '--out', releaseRoot, '--version', '9.9.10']);
+  run(process.execPath, ['scripts/hard-update-package.js', 'create', '--stage', stage, '--out', releaseRoot, '--version', '9.9.10', '--env', mockEnvPath]);
   const tamperDir = path.join(tmp, 'tamper');
   writeFile(path.join(tamperDir, 'data', 'bad.txt'), 'must fail\n');
   run('zip', ['-qry', path.join(releaseRoot, 'packages', 'v9.9.10', 'win32-x64', 'runtime.pkg'), 'data'], { cwd: tamperDir });
@@ -375,8 +399,10 @@ async function verifySignatureAndPathFixtures(tmp) {
 
   const failedUsb = path.join(tmp, 'failed-usb', 'U-Claw');
   const failedRelease = path.join(tmp, 'failed-release');
+  const mockEnvPath = path.join(tmp, 'failed-release.env');
+  writeFile(mockEnvPath, '');
   createMockStage(path.join(tmp, 'failed-stage'), 'customer');
-  run(process.execPath, ['scripts/hard-update-package.js', 'create', '--stage', path.join(tmp, 'failed-stage'), '--out', failedRelease, '--version', '9.9.11']);
+  run(process.execPath, ['scripts/hard-update-package.js', 'create', '--stage', path.join(tmp, 'failed-stage'), '--out', failedRelease, '--version', '9.9.11', '--env', mockEnvPath]);
   const failedPackage = path.join(failedRelease, 'packages', 'v9.9.11', 'win32-x64', 'runtime.pkg');
   fs.appendFileSync(failedPackage, 'tampered');
   let updateFailed = false;

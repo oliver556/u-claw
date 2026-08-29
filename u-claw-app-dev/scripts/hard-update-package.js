@@ -98,11 +98,8 @@ function stageForPlatform(commonStageRoot, platformKey, destination) {
   copyDirFiltered(commonStageRoot, destination, (source, entry) => {
     const relative = path.relative(commonStageRoot, source).split(path.sep).join('/');
     if (!relative) return true;
-    if (entry.isDirectory()) return true;
-    if (platformKey === 'win32-x64') return !relative.includes('u-claw-app-mac-') && relative !== 'U-Claw Launcher.app/Contents/MacOS/U-Claw Launcher';
-    if (platformKey === 'darwin-arm64') return !relative.includes('u-claw-app-win-x64') && !relative.includes('u-claw-app-mac-x64');
-    if (platformKey === 'darwin-x64') return !relative.includes('u-claw-app-win-x64') && !relative.includes('u-claw-app-mac-arm64');
-    return false;
+    assertSafeRelativePath(relative);
+    return true;
   });
 }
 
