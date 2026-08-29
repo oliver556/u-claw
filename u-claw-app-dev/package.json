@@ -22,6 +22,11 @@
     "package:portable:customer": "node scripts/package-portable.js --edition customer",
     "package:portable:streamer": "node scripts/package-portable.js --edition streamer",
     "hard-update:package": "node scripts/hard-update-package.js",
+    "hard-update:key": "node scripts/hard-update-release-key.js",
+    "hard-update:upload:r2": "node scripts/hard-update-upload-r2.js",
+    "hard-update:check:mock": "node scripts/hard-update-check-mock.js",
+    "hard-update:server": "node scripts/hard-update-control-plane-server.js",
+    "hard-update:publish": "node scripts/publish-hard-update-release.js",
     "hard-update:verify": "node scripts/verify-hard-update-mock.js",
     "postinstall": "electron-builder install-app-deps && npm run patch-openclaw"
   },
@@ -35,6 +40,9 @@
     "files": [
       "src/**/*",
       "assets/**/*",
+      "scripts/hard-update-client.js",
+      "scripts/lib/hard-update-utils.js",
+      "scripts/lib/release-signing.js",
       "node_modules/**/*",
       "!node_modules/**/*.md",
       "node_modules/openclaw/**/*.md",

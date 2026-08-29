@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { sha256File, readJson, unzipTo } = require('./lib/hard-update-utils');
 const { generateKeyPair, signPayload, verifyPayload } = require('./lib/release-signing');
+const { createServer: createControlPlaneServer } = require('./hard-update-control-plane-server');
 
 const appDir = path.resolve(__dirname, '..');
 const releaseDir = path.join(appDir, 'release');
@@ -117,9 +119,43 @@ function verifyPackagePolicy(tmp) {
   assert(before === after, 'old disk openclaw.json hash changed');
 }
 
-function verifyHardUpdateFlow(tmp) {
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+  });
+}
+
+function closeServer(server) {
+  return new Promise(resolve => server.close(resolve));
+}
+
+function serveStatic(root) {
+  return http.createServer((request, response) => {
+    const url = new URL(request.url, 'http://127.0.0.1');
+    const relative = url.pathname.replace(/^\/+/, '');
+    let safeRelative;
+    try {
+      safeRelative = require('./lib/hard-update-utils').assertSafeRelativePath(relative);
+    } catch (error) {
+      response.writeHead(400);
+      response.end(error.message);
+      return;
+    }
+    const filePath = path.join(root, safeRelative);
+    if (!filePath.startsWith(root) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      response.writeHead(404);
+      response.end('not found');
+      return;
+    }
+    response.writeHead(200);
+    fs.createReadStream(filePath).pipe(response);
+  });
+}
+
+async function verifyHardUpdateFlow(tmp) {
   const stage = path.join(tmp, 'stage-customer', 'U-Claw');
-  const releaseRoot = path.join(releaseDir, 'mock-hard-update');
+  const releaseRoot = path.join(tmp, 'local-hard-update-release');
   run(process.execPath, ['scripts/hard-update-package.js', 'create', '--stage', stage, '--out', releaseRoot, '--version', '9.9.9']);
   run(process.execPath, ['scripts/hard-update-package.js', 'verify', '--release', releaseRoot]);
   assertNoForbiddenReleaseFiles(releaseRoot);
@@ -136,6 +172,107 @@ function verifyHardUpdateFlow(tmp) {
   assert(!fs.existsSync(stamp), 'cache stamp was not invalidated');
   assert(readJson(path.join(usbRoot, 'app', 'version.json')).version === '9.9.9', 'version.json not updated');
   assert(readJson(path.join(usbRoot, 'app', 'update-transaction.json')).state === 'complete', 'transaction not complete');
+
+  const httpRoot = path.join(tmp, 'http-release');
+  const server = serveStatic(httpRoot);
+  const port = await listen(server);
+  try {
+    run(process.execPath, [
+      'scripts/hard-update-package.js',
+      'create',
+      '--stage',
+      stage,
+      '--out',
+      path.join(httpRoot, 'releases'),
+      '--version',
+      '9.9.9',
+      '--base-url',
+      `http://127.0.0.1:${port}/releases`
+    ]);
+    const httpUsbRoot = path.join(tmp, 'http-usb', 'U-Claw');
+    writeJson(path.join(httpUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
+    writeJson(path.join(httpUsbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me-http' });
+    const httpBefore = sha256File(path.join(httpUsbRoot, 'data', '.openclaw', 'openclaw.json'));
+    await require('./hard-update-client').mockUpdate({
+      usb: httpUsbRoot,
+      productionUrl: `http://127.0.0.1:${port}/releases/production.json`,
+      platform: 'win32-x64'
+    });
+    const httpAfter = sha256File(path.join(httpUsbRoot, 'data', '.openclaw', 'openclaw.json'));
+    assert(httpBefore === httpAfter, 'HTTP mock update changed openclaw.json');
+    assert(readJson(path.join(httpUsbRoot, 'app', 'version.json')).version === '9.9.9', 'HTTP version.json not updated');
+  assert(readJson(path.join(httpUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'HTTP transaction not complete');
+
+    const startupUsbRoot = path.join(tmp, 'startup-usb', 'U-Claw');
+    writeJson(path.join(startupUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
+    writeJson(path.join(startupUsbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me-startup' });
+    writeFile(path.join(startupUsbRoot, 'data', '.uclaw', 'activation-builtin-credential.v1.json'), '{bad activation json');
+    const startupBefore = sha256File(path.join(startupUsbRoot, 'data', '.openclaw', 'openclaw.json'));
+    const startupResult = await require('./hard-update-client').startupUpdate({
+      usb: startupUsbRoot,
+      productionUrl: `http://127.0.0.1:${port}/releases/production.json`,
+      platform: 'win32-x64'
+    });
+    assert(startupResult.staged, 'startup update should stage a transaction');
+    assert(readJson(path.join(startupUsbRoot, 'app', 'update-transaction.json')).state === 'staged', 'startup update transaction not staged');
+    await require('./hard-update-client').applyStartupUpdate({
+      usb: startupUsbRoot,
+      transaction: path.join(startupUsbRoot, 'app', 'update-transaction.json')
+    });
+    const startupAfter = sha256File(path.join(startupUsbRoot, 'data', '.openclaw', 'openclaw.json'));
+    assert(startupBefore === startupAfter, 'startup update changed openclaw.json');
+    assert(readJson(path.join(startupUsbRoot, 'app', 'version.json')).version === '9.9.9', 'startup version.json not updated');
+    assert(readJson(path.join(startupUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'startup transaction not complete');
+
+    const controlPlaneServer = createControlPlaneServer({
+      port: 0,
+      releaseRoot: path.join(httpRoot, 'releases'),
+      publicBaseUrl: `http://127.0.0.1:${port}/releases`,
+      authMode: 'permissive',
+      databaseUrl: '',
+      shortTokenSecret: 'mock-short-token-secret',
+      shortTokenTtlSeconds: 21600,
+      videoAdapterBaseUrl: 'https://video-adapter.gmnlee.com/xai/v1'
+    });
+    const controlPort = await listen(controlPlaneServer);
+    try {
+      const checkResult = await require('./hard-update-client').check({
+        usb: path.join(tmp, 'control-plane-usb', 'U-Claw'),
+        updateCheckUrl: `http://127.0.0.1:${controlPort}/uclaw/update/check`,
+        platform: 'win32-x64',
+        device: '22222222-2222-4222-8222-222222222222',
+        deviceToken: 'mock-device-token'
+      });
+      assert(checkResult.updateRequired, 'control-plane update check should require update');
+      let denied = false;
+      try {
+        await require('./hard-update-client').check({
+          usb: path.join(tmp, 'control-plane-denied-usb', 'U-Claw'),
+          updateCheckUrl: `http://127.0.0.1:${controlPort}/uclaw/update/check`,
+          platform: 'win32-x64',
+          device: ''
+        });
+      } catch (error) {
+        denied = /Update check denied/.test(error.message);
+      }
+      assert(denied, 'control-plane update check without device must be denied');
+    } finally {
+      await closeServer(controlPlaneServer);
+    }
+  } finally {
+    await closeServer(server);
+  }
+}
+
+function verifyControlPlaneProdBaseUrl(tmp) {
+  const envPath = path.join(tmp, 'control-plane-prod.env');
+  writeFile(envPath, 'UCLAW_UPDATE_PUBLIC_BASE_URL=https://pub-4f24fbbe718b4c75955440700c70bdeb.r2.dev/releases\n');
+  const { loadConfig } = require('./hard-update-control-plane-server');
+  const config = loadConfig({ env: envPath, release: path.join(tmp, 'prod-release') });
+  assert(
+    config.publicBaseUrl === 'https://pub-4f24fbbe718b4c75955440700c70bdeb.r2.dev/releases',
+    'control-plane prod public base URL env was not honored'
+  );
 }
 
 function verifyBadDataPackageFails(tmp) {
@@ -155,7 +292,38 @@ function verifyBadDataPackageFails(tmp) {
   assert(failed, 'update package containing data/ must fail');
 }
 
-function verifySignatureAndPathFixtures(tmp) {
+function verifyPortableMetadataHandling(tmp) {
+  const { isPortableMetadataPath, prunePortableMetadata, treeDigest } = require('./lib/hard-update-utils');
+  assert(isPortableMetadataPath('._UCLAW-PACKAGE-NOTES.txt'), 'AppleDouble metadata path must be recognized');
+  assert(isPortableMetadataPath('U-Claw Launcher.app/Contents/._Info.plist'), 'nested AppleDouble metadata path must be recognized');
+  assert(isPortableMetadataPath('__MACOSX/anything'), '__MACOSX metadata path must be recognized');
+  assert(!isPortableMetadataPath('Mac-Start-App.command'), 'normal package path must not be treated as metadata');
+
+  const clean = path.join(tmp, 'metadata-clean');
+  const dirty = path.join(tmp, 'metadata-dirty');
+  writeFile(path.join(clean, 'Mac-Start-App.command'), '#!/bin/bash\necho ok\n');
+  writeFile(path.join(clean, 'U-Claw Launcher.app', 'Contents', 'Info.plist'), '<plist />\n');
+  fs.cpSync(clean, dirty, { recursive: true });
+  writeFile(path.join(dirty, '._Mac-Start-App.command'), 'appledouble\n');
+  writeFile(path.join(dirty, 'U-Claw Launcher.app', 'Contents', '._Info.plist'), 'appledouble\n');
+  writeFile(path.join(dirty, '__MACOSX', 'ignored'), 'metadata\n');
+  prunePortableMetadata(dirty);
+  assert(treeDigest(clean) === treeDigest(dirty), 'portable metadata pruning must preserve real tree digest');
+
+  const metadataZipRoot = path.join(tmp, 'metadata-zip-root');
+  writeFile(path.join(metadataZipRoot, '._bad'), 'appledouble\n');
+  const metadataZip = path.join(tmp, 'metadata.zip');
+  run('zip', ['-qry', metadataZip, '._bad'], { cwd: metadataZipRoot });
+  let failed = false;
+  try {
+    require('./lib/hard-update-utils').unzipTo(metadataZip, path.join(tmp, 'metadata-extract'));
+  } catch (error) {
+    failed = /Forbidden package metadata path/.test(error.message);
+  }
+  assert(failed, 'runtime package containing AppleDouble metadata must fail before extract');
+}
+
+async function verifySignatureAndPathFixtures(tmp) {
   const keyPair = generateKeyPair();
   const key = { keyId: 'fixture-key', alg: 'Ed25519', ...keyPair };
   const payload = signPayload({ schemaVersion: 1, releaseId: 'v-fixture' }, key);
@@ -212,7 +380,7 @@ function verifySignatureAndPathFixtures(tmp) {
   fs.appendFileSync(failedPackage, 'tampered');
   let updateFailed = false;
   try {
-    require('./hard-update-client').mockUpdate({ usb: failedUsb, release: failedRelease, platform: 'win32-x64' });
+    await require('./hard-update-client').mockUpdate({ usb: failedUsb, release: failedRelease, platform: 'win32-x64' });
   } catch (error) {
     updateFailed = /sha256|treeDigest/.test(error.message);
   }
@@ -221,13 +389,15 @@ function verifySignatureAndPathFixtures(tmp) {
   assert(packagePath && absolutePath, 'path fixtures were not created');
 }
 
-function main() {
+async function main() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'uclaw-hard-update-'));
   try {
     verifyPackagePolicy(tmp);
-    verifyHardUpdateFlow(tmp);
+    verifyControlPlaneProdBaseUrl(tmp);
+    await verifyHardUpdateFlow(tmp);
     verifyBadDataPackageFails(tmp);
-    verifySignatureAndPathFixtures(tmp);
+    verifyPortableMetadataHandling(tmp);
+    await verifySignatureAndPathFixtures(tmp);
     console.log('[verify-hard-update-mock] all mock checks passed');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -235,7 +405,10 @@ function main() {
 }
 
 try {
-  main();
+  main().catch(error => {
+  console.error(`[verify-hard-update-mock] ${error.message}`);
+  process.exit(1);
+  });
 } catch (error) {
   console.error(`[verify-hard-update-mock] ${error.message}`);
   process.exit(1);

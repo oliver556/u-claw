@@ -925,6 +925,13 @@ function patchConfiguredUclawImageGenerationModelsOnly() {
   for (const file of files) {
     const before = read(file);
     let after = before;
+    const alreadyPatched =
+      after.includes('const configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);')
+      && after.includes('const configuredImageModelRefs = new Set([')
+      && after.includes('const model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;')
+      && after.includes('U-Claw accepts only image models declared in imageGenerationModel config')
+      && !after.includes('const UCLAW_FIXED_IMAGE_GENERATION_MODEL = "litellm/gpt-image-2";');
+    if (alreadyPatched) continue;
 
     after = after.replace(
       'const UCLAW_FIXED_IMAGE_GENERATION_MODEL = "litellm/gpt-image-2";\n',
@@ -951,8 +958,8 @@ function patchConfiguredUclawImageGenerationModelsOnly() {
       'description: "Create/edit images. Session chats: background task; do not call image_generate again for same request; wait completion, then report through the current visible-reply contract with generated media attached using structured media fields. U-Claw accepts only image models declared in imageGenerationModel config. Transparent: outputFormat=\\"png\\" or \\"webp\\" + background=\\"transparent\\". Use action=\\"list\\" for providers/models/readiness/auth, \\"status\\" for active task.",',
     );
     after = after.replace(
-      'const model = readStringParam(params, "model");',
-      'const configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);\n\t\t\tconst requestedModel = readStringParam(params, "model");\n\t\t\tconst configuredImageModelRefs = new Set([\n\t\t\t\tconfiguredImageGenerationModelConfig.primary,\n\t\t\t\t...configuredImageGenerationModelConfig.fallbacks ?? []\n\t\t\t].filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()));\n\t\t\tconst model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;',
+      'if (action === "status") return createImageGenerateStatusActionResult(options?.agentSessionKey);\n\t\t\tconst model = readStringParam(params, "model");',
+      'if (action === "status") return createImageGenerateStatusActionResult(options?.agentSessionKey);\n\t\t\tconst configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);\n\t\t\tconst requestedModel = readStringParam(params, "model");\n\t\t\tconst configuredImageModelRefs = new Set([\n\t\t\t\tconfiguredImageGenerationModelConfig.primary,\n\t\t\t\t...configuredImageGenerationModelConfig.fallbacks ?? []\n\t\t\t].filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()));\n\t\t\tconst model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;',
     );
     after = after.replace(
       'const requestedModel = readStringParam(params, "model");\n\t\t\tconst model = requestedModel?.trim() === UCLAW_FIXED_IMAGE_GENERATION_MODEL ? UCLAW_FIXED_IMAGE_GENERATION_MODEL : void 0;\n\t\t\tconst configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);',
@@ -1041,9 +1048,9 @@ function patchXaiVideoLoopbackAccess() {
         "const submitHeaders = new Headers(headers);\n\t\t\tconst submitHeaders = new Headers(headers);",
         "const submitHeaders = new Headers(headers);",
       );
-      after = after.replace(
-        "const submitHeaders = new Headers(headers);\n\t\t\tsubmitHeaders.set(\"x-idempotency-key\", crypto.randomUUID());\n\t\t\tconst { response, release } = await postJsonRequest({\n\t\t\t\turl: `${baseUrl}${resolveCreateEndpoint(req)}`,",
-        `const submitHeaders = new Headers(headers);
+      const submitRequestBefore =
+        "const submitHeaders = new Headers(headers);\n\t\t\tsubmitHeaders.set(\"x-idempotency-key\", crypto.randomUUID());\n\t\t\tconst { response, release } = await postJsonRequest({\n\t\t\t\turl: `${baseUrl}${resolveCreateEndpoint(req)}`,";
+      const submitRequestAfter = `const submitHeaders = new Headers(headers);
 \t\t\tsubmitHeaders.set("x-idempotency-key", crypto.randomUUID());
 \t\t\tconst submitUrl = \`\${baseUrl}\${resolveCreateEndpoint(req)}\`;
 \t\t\tconst requestSsrFPolicy = resolveProviderTransportSsrFPolicy({
@@ -1053,8 +1060,8 @@ function patchXaiVideoLoopbackAccess() {
 \t\t\t\ttrustConfiguredBaseUrlOrigin
 \t\t\t});
 \t\t\tconst { response, release } = await postJsonRequest({
-\t\t\t\turl: submitUrl,`,
-      );
+\t\t\t\turl: submitUrl,`;
+      after = after.replace(submitRequestBefore, submitRequestAfter);
       after = after.replace(
         "fetchFn,\n\t\t\t\tallowPrivateNetwork,\n\t\t\t\tdispatcherPolicy",
         "fetchFn,\n\t\t\t\tallowPrivateNetwork,\n\t\t\t\tssrfPolicy: requestSsrFPolicy,\n\t\t\t\tdispatcherPolicy",
@@ -1062,7 +1069,7 @@ function patchXaiVideoLoopbackAccess() {
     }
     if (!after.includes("const statusResult = await fetchWithTimeoutGuarded(statusUrl,")) {
       after = after.replace(
-        "const statusUrl = `${params.baseUrl}/videos/${params.requestId}`;\n\tfor (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {\n\t\tconst payload = readXaiStatusResponse(await readXaiVideoJson(await fetchProviderOperationResponse({\n\t\t\tstage: \"poll\",\n\t\t\turl: statusUrl,\n\t\t\tinit: {\n\t\t\t\tmethod: \"GET\",\n\t\t\t\theaders: params.headers\n\t\t\t},\n\t\t\ttimeoutMs: createProviderOperationTimeoutResolver({\n\t\t\t\tdeadline,\n\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS\n\t\t\t}),\n\t\t\tfetchFn: params.fetchFn,\n\t\t\tprovider: \"xai\",\n\t\t\trequestFailedMessage: \"xAI video status request failed\"\n\t\t})));\n\t\tconst normalizedStatus = payload.status.toLowerCase();\n\t\tif (normalizedStatus === \"done\") return payload;\n\t\tif (XAI_VIDEO_TERMINAL_FAILURE_STATUSES.has(normalizedStatus)) throw new Error(normalizeOptionalString(payload.error?.message) ?? `xAI video generation ${normalizedStatus}`);",
+        /(?:const statusUrl = `\$\{params\.baseUrl\}\/videos\/\$\{params\.requestId\}`;\n\t)?for \(let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt \+= 1\) \{\n\t\tconst payload = readXaiStatusResponse\(await readXaiVideoJson\(await fetchProviderOperationResponse\(\{\n\t\t\tstage: "poll",\n\t\t\turl: (?:statusUrl|`\$\{params\.baseUrl\}\/videos\/\$\{params\.requestId\}`),\n\t\t\tinit: \{\n\t\t\t\tmethod: "GET",\n\t\t\t\theaders: params\.headers\n\t\t\t\},\n\t\t\ttimeoutMs: createProviderOperationTimeoutResolver\(\{\n\t\t\t\tdeadline,\n\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS\n\t\t\t\}\),\n\t\t\tfetchFn: params\.fetchFn,\n\t\t\tprovider: "xai",\n\t\t\trequestFailedMessage: "xAI video status request failed"\n\t\t\}\)\)\);\n\t\tconst normalizedStatus = payload\.status\.toLowerCase\(\);\n\t\tif \(normalizedStatus === "done"\) return payload;\n\t\tif \(XAI_VIDEO_TERMINAL_FAILURE_STATUSES\.has\(normalizedStatus\)\) throw new Error\(normalizeOptionalString\(payload\.error\?\.message\) \?\? `xAI video generation \$\{normalizedStatus\}`\);/,
         `const statusUrl = \`\${params.baseUrl}/videos/\${params.requestId}\`;
 \tfor (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
 \t\tconst statusResult = await fetchWithTimeoutGuarded(statusUrl, {
@@ -1179,6 +1186,22 @@ function patchConfiguredMediaResultDownloadTrust() {
       after = after.replace(
         "async function downloadXaiVideo(params) {\n\tconst result = await fetchWithTimeoutGuarded(",
         "async function downloadXaiVideo(params) {\n\tconst downloadSsrFPolicy = mergeSsrFPolicies(params.ssrfPolicy, ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist(params.url));\n\tconst result = await fetchWithTimeoutGuarded(",
+      );
+      after = after.replace(
+        "async function downloadXaiVideo(params) {\n\tconst response = await fetchProviderDownloadResponse({\n\t\turl: params.url,\n\t\tinit: { method: \"GET\" },\n\t\ttimeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,\n\t\tfetchFn: params.fetchFn,\n\t\tprovider: \"xai\",\n\t\trequestFailedMessage: \"xAI generated video download failed\"\n\t});",
+        `async function downloadXaiVideo(params) {
+\tconst downloadSsrFPolicy = mergeSsrFPolicies(params.ssrfPolicy, ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist(params.url));
+\tconst downloadResult = await fetchWithTimeoutGuarded(params.url, { method: "GET" }, params.timeoutMs ?? DEFAULT_TIMEOUT_MS, params.fetchFn, {
+\t\tssrfPolicy: downloadSsrFPolicy,
+\t\tdispatcherPolicy: params.dispatcherPolicy
+\t});
+\ttry {
+\t\tawait assertOkOrThrowHttpError(downloadResult.response, "xAI generated video download failed");
+\t\tconst response = downloadResult.response;`,
+      );
+      after = after.replace(
+        "\treturn {\n\t\tbuffer: await readResponseWithLimit(response, params.maxBytes, { onOverflow: ({ maxBytes }) => /* @__PURE__ */ new Error(`xAI generated video download exceeds ${maxBytes} bytes`) }),\n\t\tmimeType,\n\t\tfileName: `video-1.${extensionForMime(mimeType)?.slice(1) ?? \"mp4\"}`\n\t};\n}",
+        "\t\treturn {\n\t\t\tbuffer: await readResponseWithLimit(response, params.maxBytes, { onOverflow: ({ maxBytes }) => /* @__PURE__ */ new Error(`xAI generated video download exceeds ${maxBytes} bytes`) }),\n\t\t\tmimeType,\n\t\t\tfileName: `video-1.${extensionForMime(mimeType)?.slice(1) ?? \"mp4\"}`\n\t\t};\n\t} finally {\n\t\tawait downloadResult.release();\n\t}\n}",
       );
     }
     after = after.replace(

@@ -5,6 +5,7 @@ const {
   assertSafeRelativePath,
   copyDirFiltered,
   copyFile,
+  isPortableMetadataPath,
   platformParts,
   readJson,
   sha256File,
@@ -15,6 +16,7 @@ const {
   zipDirectory
 } = require('./lib/hard-update-utils');
 const { loadOrCreateMockKey, signPayload, verifyPayload } = require('./lib/release-signing');
+const { firstEnv, parseEnvFile } = require('./lib/local-env');
 
 const appDir = path.resolve(__dirname, '..');
 const releaseDir = path.join(appDir, 'release');
@@ -34,13 +36,14 @@ Options:
   --release <dir>      Existing release directory for verify mode.
   --version <version>  Product version. Defaults to package.json version.
   --base-url <url>     Public releases base URL. Defaults to ${defaultBaseUrl}
-  --key-file <path>    Mock private key path. Defaults to release/.mock-release-keys/release-key.json.
+  --env <file>         Local env file. Defaults to .env.
+  --key-file <path>    Private key path. Defaults to UCLAW_RELEASE_PRIVATE_KEY_PATH, then mock key.
 `);
 }
 
 function parseArgs(argv) {
   const command = argv.shift();
-  const options = { command, version: packageJson.version, baseUrl: defaultBaseUrl };
+  const options = { command, version: packageJson.version, baseUrl: defaultBaseUrl, env: path.join(appDir, '.env') };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const readValue = () => {
@@ -54,6 +57,7 @@ function parseArgs(argv) {
     else if (arg === '--release') options.release = readValue();
     else if (arg === '--version') options.version = readValue();
     else if (arg === '--base-url') options.baseUrl = readValue().replace(/\/+$/, '');
+    else if (arg === '--env') options.env = readValue();
     else if (arg === '--key-file') options.keyFile = readValue();
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -62,6 +66,7 @@ function parseArgs(argv) {
 
 function shouldCopyProgramLayer(relative) {
   const normalized = relative.replace(/\\/g, '/');
+  if (isPortableMetadataPath(normalized)) return false;
   if (normalized === 'data' || normalized.startsWith('data/')) return false;
   if (normalized === '.openclaw' || normalized.startsWith('.openclaw/')) return false;
   if (normalized.includes('/.openclaw/') || normalized.endsWith('/.openclaw')) return false;
@@ -126,6 +131,21 @@ function publicKeysFromKey(key) {
   }];
 }
 
+function loadSigningKey(options) {
+  const env = parseEnvFile(path.resolve(options.env));
+  const configuredKeyFile = options.keyFile || firstEnv(env, ['UCLAW_RELEASE_PRIVATE_KEY_PATH']);
+  if (configuredKeyFile) {
+    const key = readJson(path.resolve(configuredKeyFile));
+    const expectedKeyId = firstEnv(env, ['UCLAW_RELEASE_KEY_ID']);
+    if (expectedKeyId && key.keyId !== expectedKeyId) {
+      throw new Error(`Release key id mismatch: expected ${expectedKeyId}, got ${key.keyId}`);
+    }
+    return { key, keyFile: path.resolve(configuredKeyFile), mock: false };
+  }
+  const keyFile = path.resolve(path.join(releaseDir, '.mock-release-keys', 'release-key.json'));
+  return { key: loadOrCreateMockKey(keyFile), keyFile, mock: true };
+}
+
 function create(options) {
   if (!options.stage) throw new Error('--stage is required');
   const stageRoot = path.resolve(options.stage);
@@ -133,8 +153,8 @@ function create(options) {
     throw new Error(`Stage not found: ${stageRoot}`);
   }
   const outRoot = path.resolve(options.out || path.join(releaseDir, 'mock-hard-update'));
-  const keyFile = path.resolve(options.keyFile || path.join(releaseDir, '.mock-release-keys', 'release-key.json'));
-  const key = loadOrCreateMockKey(keyFile);
+  const signingKey = loadSigningKey(options);
+  const key = signingKey.key;
   const releaseId = `v${options.version}`;
   const packageRoot = path.join(outRoot, 'packages', releaseId);
   const commonStageRoot = path.join(outRoot, '.work', 'program-layer');
@@ -213,11 +233,14 @@ function create(options) {
     schemaVersion: 1,
     productionUrl: defaultProductionUrl,
     r2: {
-      accountId: '${CLOUDFLARE_ACCOUNT_ID}',
-      bucket: '${UCLAW_R2_BUCKET}',
-      endpoint: '${UCLAW_R2_ENDPOINT}',
-      accessKeyId: '${UCLAW_R2_ACCESS_KEY_ID}',
-      secretAccessKey: '${UCLAW_R2_SECRET_ACCESS_KEY}'
+      accountId: '${R2_ACCOUNT_ID}',
+      endpoint: '${R2_ENDPOINT}',
+      accessKeyId: '${R2_ACCESS_KEY_ID}',
+      secretAccessKey: '${R2_SECRET_ACCESS_KEY}',
+      stagingBucket: '${R2_STAGING_BUCKET}',
+      stagingPublicUrl: '${R2_STAGING_PUBLIC_URL}',
+      prodBucket: '${R2_PROD_BUCKET}',
+      prodPublicUrl: '${R2_PROD_PUBLIC_URL}'
     },
     routes: {
       productionJson: '/uclaw/releases/production.json',
@@ -230,7 +253,8 @@ function create(options) {
   });
   fs.rmSync(path.join(outRoot, '.work'), { recursive: true, force: true });
   console.log(`[hard-update-package] production ${path.join(outRoot, 'production.json')}`);
-  console.log(`[hard-update-package] mock private key ${keyFile}`);
+  console.log(`[hard-update-package] signing key ${signingKey.keyFile}`);
+  if (signingKey.mock) console.log('[hard-update-package] using mock signing key');
 }
 
 function verify(options) {

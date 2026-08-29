@@ -281,6 +281,7 @@ func runScript(root string, script string, logPath string) int {
 	cmd.Dir = os.TempDir()
 	cmd.Env = append(os.Environ(),
 		"UCLAW_LAUNCHER_GUI=1",
+		fmt.Sprintf("UCLAW_LAUNCHER_PID=%d", os.Getpid()),
 		"UCLAW_LAUNCHER_LOCAL_LOG="+logPath,
 		"UCLAW_WINDOWS_START_LOCAL_LOG="+startLogPath,
 		"UCLAW_USB_LAUNCHER_LOG="+usbLogPath,
@@ -441,6 +442,9 @@ func shouldShowStatusWindow(status string) bool {
 		strings.Contains(status, "Copying Windows archive") ||
 		strings.Contains(status, "Verifying cached Windows archive") ||
 		strings.Contains(status, "Extracting") ||
+		strings.Contains(status, "Checking mandatory hard update") ||
+		strings.Contains(status, "Hard update staged") ||
+		strings.Contains(status, "[hard-update-client]") ||
 		strings.Contains(status, "Another U-Claw startup") ||
 		strings.Contains(status, "Syncing USB data to computer cache") ||
 		strings.Contains(status, "Runtime data has unsynced changes")
@@ -492,6 +496,18 @@ func displayStatusText(raw string) string {
 	if strings.Contains(raw, "Verifying cached Windows archive") {
 		stage = "正在校验程序缓存。"
 		detail = "正在确认文件完整性。"
+	}
+	if strings.Contains(raw, "Checking mandatory hard update") {
+		stage = "正在检查强制更新。"
+		detail = "正在向发布控制面确认当前版本。"
+	}
+	if strings.Contains(raw, "\"staged\": true") || strings.Contains(raw, "Hard update staged") {
+		stage = "正在应用强制更新。"
+		detail = "更新包已校验通过，正在替换程序层并重新启动。"
+	}
+	if strings.Contains(raw, "[hard-update-client]") {
+		stage = "强制更新失败。"
+		detail = "请检查网络、激活状态或联系管理员。"
 	}
 	if strings.Contains(raw, "Extracting Windows app") || strings.Contains(raw, "Extracting with Windows tar") || strings.Contains(raw, "Windows tar unavailable") {
 		stage = "正在解压程序。"

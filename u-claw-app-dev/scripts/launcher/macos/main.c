@@ -230,6 +230,9 @@ static BOOL should_show_status_window(NSString *status) {
     has_text(status, @"Copying Mac archive") ||
     has_text(status, @"Decompressing Mac app") ||
     has_text(status, @"Checking Mac archive") ||
+    has_text(status, @"Checking mandatory hard update") ||
+    has_text(status, @"Hard update staged") ||
+    has_text(status, @"[hard-update-client]") ||
     has_text(status, @"Syncing USB data to runtime cache") ||
     has_text(status, @"Runtime data has unsynced changes");
 }
@@ -325,6 +328,7 @@ static void update_status_window(void) {
   [gTask setArguments:@[self.script]];
   NSMutableDictionary *env = [[[NSProcessInfo processInfo] environment] mutableCopy];
   env[@"UCLAW_LAUNCHER_GUI"] = @"1";
+  env[@"UCLAW_LAUNCHER_PID"] = [NSString stringWithFormat:@"%d", getpid()];
   if (self.root) env[@"UCLAW_PORTABLE_ROOT"] = self.root;
   if (gLogPath) env[@"UCLAW_LAUNCHER_LOCAL_LOG"] = gLogPath;
   if (self.usbLogPath) env[@"UCLAW_USB_LAUNCHER_LOG"] = self.usbLogPath;

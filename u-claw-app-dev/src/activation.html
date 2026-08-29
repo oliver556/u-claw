@@ -296,6 +296,7 @@
               <aside class="side-card">
                 <h2>受限模式状态</h2>
                 <dl>
+                  <div><dt>客户端版本</dt><dd id="appVersion">读取中</dd></div>
                   <div><dt>客户端模式</dt><dd><span class="dot green"></span> activation-only</dd></div>
                   <div><dt>Gateway</dt><dd><span class="dot orange"></span> 未启动</dd></div>
                   <div><dt>Config.html</dt><dd><span class="dot orange"></span> 不开放</dd></div>
@@ -419,6 +420,7 @@
       renderChecks(preflight.checks || []);
       $('#usbLabel').textContent = preflight.usb?.label || '等待 Launcher 提供产品盘信息';
       $('#usbSummary').textContent = `设备标识摘要：${preflight.usb?.summary || '待接入'}`;
+      $('#appVersion').textContent = preflight.appVersion ? `v${String(preflight.appVersion).replace(/^v/, '')}` : '未知';
       const usbStatus = preflight.usb?.status || 'preview';
       $('#bindCard').classList.toggle('pending', usbStatus === 'pending');
       $('#bindCard').classList.toggle('preview', usbStatus === 'preview');

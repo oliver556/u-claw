@@ -142,6 +142,9 @@ goto app_cache_ready
 
 :app_cache_ready
 echo [U-Claw] Reusing app cache: %APP_CACHE_DIR%
+call :run_startup_hard_update
+if errorlevel 20 exit /b 0
+if errorlevel 1 goto fatal
 echo [U-Claw] Preparing runtime data cache...
 if not exist "%RUN_DATA_DIR%" mkdir "%RUN_DATA_DIR%" >nul 2>&1
 if exist "%DIRTY_FILE%" (
@@ -226,6 +229,43 @@ if not exist "%LOCK_DIR%" exit /b 0
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$lock=$env:LOCK_DIR; if (-not (Test-Path -LiteralPath $lock)) { exit 0 }; $now=Get-Date; $lockAge=(New-TimeSpan -Start (Get-Item -LiteralPath $lock).LastWriteTime -End $now).TotalSeconds; $pidFile=Join-Path $lock 'owner.pid'; $ownerAlive=$false; if (Test-Path -LiteralPath $pidFile) { $ownerText=(Get-Content -LiteralPath $pidFile -TotalCount 1 -ErrorAction SilentlyContinue); $ownerPid=0; if ([int]::TryParse($ownerText,[ref]$ownerPid) -and $ownerPid -gt 0) { $ownerAlive=[bool](Get-Process -Id $ownerPid -ErrorAction SilentlyContinue) } }; $active=$ownerAlive; $copy=$env:LOCAL_ARCHIVE_TMP; if ((-not $active) -and (Test-Path -LiteralPath $copy)) { $copyAge=(New-TimeSpan -Start (Get-Item -LiteralPath $copy).LastWriteTime -End $now).TotalSeconds; if ($copyAge -lt [int]$env:STALE_LOCK_SECONDS) { $active=$true } }; $cache=$env:CACHE_ROOT; if ((-not $active) -and (Test-Path -LiteralPath $cache)) { $tmpDirs=@(Get-ChildItem -LiteralPath $cache -Directory -Filter 'app-win-x64.tmp-*' -ErrorAction SilentlyContinue); foreach ($dir in $tmpDirs) { $dirAge=(New-TimeSpan -Start $dir.LastWriteTime -End $now).TotalSeconds; if ($dirAge -lt [int]$env:STALE_LOCK_SECONDS) { $active=$true } } }; if (($lockAge -ge [int]$env:STALE_LOCK_SECONDS) -or (-not $active)) { Remove-Item -LiteralPath $lock -Recurse -Force -ErrorAction SilentlyContinue; Write-Host ('[U-Claw] Removed stale app cache install lock after {0:N0}s.' -f $lockAge) }"
 exit /b 0
 
+:run_startup_hard_update
+if "%UCLAW_DISABLE_STARTUP_HARD_UPDATE%"=="1" (
+  echo [U-Claw] Startup hard update disabled by environment.
+  exit /b 0
+)
+set "HARD_UPDATE_NODE=%APP_CACHE_DIR%\resources\resources\runtime\node-win32-x64\node.exe"
+set "HARD_UPDATE_CLIENT=%APP_CACHE_DIR%\resources\app\scripts\hard-update-client.js"
+if not exist "%HARD_UPDATE_NODE%" (
+  echo [U-Claw] Missing bundled Node runtime for startup hard update:
+  echo %HARD_UPDATE_NODE%
+  exit /b 1
+)
+if not exist "%HARD_UPDATE_CLIENT%" (
+  echo [U-Claw] Missing startup hard update client:
+  echo %HARD_UPDATE_CLIENT%
+  exit /b 1
+)
+echo [U-Claw] Checking mandatory hard update...
+"%HARD_UPDATE_NODE%" "%HARD_UPDATE_CLIENT%" startup-update --usb "%ROOT%" --platform win32-x64
+set "HARD_UPDATE_EXIT=%ERRORLEVEL%"
+if "%HARD_UPDATE_EXIT%"=="20" (
+  echo [U-Claw] Hard update staged; applying update and relaunching.
+  set "HARD_UPDATE_APPLY_LOG=%LOCAL_LOG_DIR%\Windows-Hard-Update-Apply.log"
+  start "" /b "%HARD_UPDATE_NODE%" "%HARD_UPDATE_CLIENT%" apply-startup-update --usb "%ROOT%" --transaction "%ROOT%\app\update-transaction.json" --wait-pid "%UCLAW_LAUNCHER_PID%" --launch-after "%ROOT%\U-Claw Launcher.exe" --stamp-file "%STAMP_FILE%" >> "%HARD_UPDATE_APPLY_LOG%" 2>&1
+  exit /b 20
+)
+if not "%HARD_UPDATE_EXIT%"=="0" exit /b 1
+set "POST_UPDATE_STAMP="
+if exist "%ARCHIVE_SHA_FILE%" set /p "POST_UPDATE_STAMP="<"%ARCHIVE_SHA_FILE%"
+if not "%POST_UPDATE_STAMP%"=="" if not "%POST_UPDATE_STAMP%"=="%CURRENT_STAMP%" (
+  echo [U-Claw] Hard update changed the Windows archive; reinstalling app cache before launch.
+  set "CURRENT_STAMP=%POST_UPDATE_STAMP%"
+  set "CACHED_STAMP="
+  exit /b 2
+)
+exit /b 0
+
 :sync_launcher_logs
 if not exist "%USB_LOG_DIR%" mkdir "%USB_LOG_DIR%" >nul 2>&1
 if exist "%LOCAL_START_LOG%" copy /y "%LOCAL_START_LOG%" "%USB_START_LOG%" >nul 2>&1
@@ -249,7 +289,7 @@ exit /b %ERRORLEVEL%
 :sync_impl
 set "SYNC_MODE=%~1"
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-  "$label=$env:SYNC_LABEL; $from=$env:SYNC_FROM; $to=$env:SYNC_TO; $timeout=[int]$env:DATA_SYNC_TIMEOUT_SECONDS; $mode=$env:SYNC_MODE; New-Item -ItemType Directory -Force -Path $to | Out-Null; $started=Get-Date; $job=Start-Job -ScriptBlock { param($from,$to,$mode) $xd=@((Join-Path $from '.cache\v8-compile-cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Code Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\GPUCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\DawnCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Crashpad')); $xf=@('.DS_Store','._*','Cookies','Cookies-journal','LOCK','SingletonCookie','SingletonLock','SingletonSocket','openclaw.json','openclaw.json.last-good'); if ($mode -eq 'MIR') { & robocopy $from $to /MIR /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null } else { & robocopy $from $to /E /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null }; if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE } exit 0 } -ArgumentList $from,$to,$mode; while (-not (Wait-Job -Job $job -Timeout 5)) { $elapsed=[int]((Get-Date)-$started).TotalSeconds; $items=@(Get-ChildItem -LiteralPath $to -Recurse -Force -File -ErrorAction SilentlyContinue); $files=$items.Count; $mb=[math]::Round((($items | Measure-Object -Property Length -Sum).Sum)/1MB,1); Write-Host ('[U-Claw] {0}... {1}s elapsed, {2} files, {3} MB.' -f $label,$elapsed,$files,$mb); if ($elapsed -ge $timeout) { Stop-Job -Job $job; Remove-Job -Job $job -Force; Write-Error ('{0} timed out after {1}s.' -f $label,$timeout); exit 1 } }; Receive-Job -Job $job; $ok=$job.State -eq 'Completed'; Remove-Job -Job $job; if (-not $ok) { exit 1 }"
+  "$label=$env:SYNC_LABEL; $from=$env:SYNC_FROM; $to=$env:SYNC_TO; $timeout=[int]$env:DATA_SYNC_TIMEOUT_SECONDS; $mode=$env:SYNC_MODE; New-Item -ItemType Directory -Force -Path $to | Out-Null; $started=Get-Date; $job=Start-Job -ScriptBlock { param($from,$to,$mode) $xd=@((Join-Path $from '.cache\v8-compile-cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Code Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\GPUCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\DawnCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Crashpad')); $xf=@('.DS_Store','._*','Cookies','Cookies-journal','LOCK','SingletonCookie','SingletonLock','SingletonSocket'); if ($mode -ne 'MIR') { $xf += @('openclaw.json','openclaw.json.last-good') }; if ($mode -eq 'MIR') { & robocopy $from $to /MIR /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null } else { & robocopy $from $to /E /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null }; if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE } exit 0 } -ArgumentList $from,$to,$mode; while (-not (Wait-Job -Job $job -Timeout 5)) { $elapsed=[int]((Get-Date)-$started).TotalSeconds; $items=@(Get-ChildItem -LiteralPath $to -Recurse -Force -File -ErrorAction SilentlyContinue); $files=$items.Count; $mb=[math]::Round((($items | Measure-Object -Property Length -Sum).Sum)/1MB,1); Write-Host ('[U-Claw] {0}... {1}s elapsed, {2} files, {3} MB.' -f $label,$elapsed,$files,$mb); if ($elapsed -ge $timeout) { Stop-Job -Job $job; Remove-Job -Job $job -Force; Write-Error ('{0} timed out after {1}s.' -f $label,$timeout); exit 1 } }; Receive-Job -Job $job; $ok=$job.State -eq 'Completed'; Remove-Job -Job $job; if (-not $ok) { exit 1 }"
 exit /b %ERRORLEVEL%
 
 :runtime_cache_is_current

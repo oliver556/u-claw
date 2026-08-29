@@ -74,6 +74,7 @@ function normalizeZipPath(relativePath) {
 
 function assertSafeRelativePath(relativePath) {
   const normalized = normalizeZipPath(relativePath);
+  if (isPortableMetadataPath(normalized)) throw new Error(`Forbidden package metadata path: ${normalized}`);
   const parts = normalized.split('/').filter(Boolean);
   for (const part of parts) {
     if (forbiddenSegments.has(part)) throw new Error(`Forbidden package path: ${normalized}`);
@@ -82,6 +83,26 @@ function assertSafeRelativePath(relativePath) {
     throw new Error(`Forbidden package file: ${normalized}`);
   }
   return normalized;
+}
+
+function isPortableMetadataPath(relativePath) {
+  const normalized = String(relativePath || '').replace(/\\/g, '/');
+  return normalized
+    .split('/')
+    .filter(Boolean)
+    .some(part => part === '__MACOSX' || part === '.DS_Store' || part.startsWith('._'));
+}
+
+function prunePortableMetadata(root) {
+  if (!fs.existsSync(root)) return;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const absolute = path.join(root, entry.name);
+    if (entry.name === '__MACOSX' || entry.name === '.DS_Store' || entry.name.startsWith('._')) {
+      fs.rmSync(absolute, { recursive: true, force: true });
+      continue;
+    }
+    if (entry.isDirectory()) prunePortableMetadata(absolute);
+  }
 }
 
 function walkFiles(root, visitor, prefix = '') {
@@ -154,6 +175,7 @@ function unzipTo(runtimePkg, destinationDir) {
     assertSafeRelativePath(entry.replace(/\/$/, ''));
   }
   run('unzip', ['-q', runtimePkg, '-d', destinationDir]);
+  prunePortableMetadata(destinationDir);
   walkFiles(destinationDir, () => {});
 }
 
@@ -167,11 +189,14 @@ module.exports = {
   assertSafeRelativePath,
   copyDirFiltered,
   copyFile,
+  isPortableMetadataPath,
   listZipEntries,
   platformParts,
+  prunePortableMetadata,
   readJson,
   run,
   sha256File,
+  sha256Bytes,
   treeDigest,
   unzipTo,
   walkFiles,

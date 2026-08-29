@@ -49,7 +49,13 @@ h1 span { color: #1677ff; }
 .subtitle {
   color: #9ca3af;
   font-size: 1.1em;
-  margin-bottom: 32px;
+  margin-bottom: 8px;
+}
+.version {
+  color: #6b7280;
+  font-size: 0.9em;
+  margin-bottom: 28px;
+  font-variant-numeric: tabular-nums;
 }
 .loader {
   width: 200px;
@@ -92,11 +98,29 @@ h1 span { color: #1677ff; }
   </div>
   <h1><span>U-Claw</span></h1>
   <p class="subtitle">U-Claw AI 工作空间</p>
+  <p class="version" id="version">版本读取中...</p>
   <div class="loader"><div class="loader-bar"></div></div>
   <p class="status" id="status">正在启动 U-Claw 工作空间...</p>
 </div>
 
 <script>
+function formatVersion(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.startsWith('v') ? text : `v${text}`;
+}
+
+async function renderVersion() {
+  try {
+    if (!window.uclaw) return;
+    const status = await window.uclaw.getGatewayStatus();
+    const label = formatVersion(status?.appVersion);
+    if (!label) return;
+    document.getElementById('version').textContent = label;
+    document.title = `U-Claw ${label}`;
+  } catch(e) {}
+}
+
 const messages = [
   '正在启动 U-Claw 工作空间...',
   '正在启动 U-Claw 引擎...',
@@ -127,6 +151,7 @@ async function checkReady() {
   setTimeout(checkReady, 1000);
 }
 checkReady();
+renderVersion();
 </script>
 </body>
 </html>

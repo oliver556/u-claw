@@ -157,6 +157,33 @@ const dirtyMarkerPath = path.join(syncStateDir, 'dirty.json');
 const lastSyncPath = path.join(syncStateDir, 'last-sync.json');
 const uiStatePath = path.join(configDir, 'uclaw-ui-state.json');
 const logsDir = path.join(userDataPath, 'logs');
+const portableInstallRoot = UCLAW_USB_DATA_DIR ? path.resolve(UCLAW_USB_DATA_DIR, '..') : (portablePath ? path.dirname(userDataPath) : null);
+
+function readInstalledReleaseInfo() {
+  const fallbackVersion = app.getVersion();
+  if (!portableInstallRoot) {
+    return { version: fallbackVersion, releaseId: null };
+  }
+  const versionFile = path.join(portableInstallRoot, 'app', 'version.json');
+  try {
+    if (!fs.existsSync(versionFile)) {
+      return { version: fallbackVersion, releaseId: null };
+    }
+    const payload = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+    const version = typeof payload.version === 'string' && payload.version.trim() ? payload.version.trim() : fallbackVersion;
+    const releaseId = typeof payload.releaseId === 'string' && payload.releaseId.trim() ? payload.releaseId.trim() : null;
+    return { version, releaseId };
+  } catch {
+    return { version: fallbackVersion, releaseId: null };
+  }
+}
+
+const installedReleaseInfo = readInstalledReleaseInfo();
+
+function visibleAppVersion() {
+  const version = String(installedReleaseInfo.version || app.getVersion()).trim().replace(/^v/i, '');
+  return `v${version}`;
+}
 
 try {
   fs.mkdirSync(userDataPath, { recursive: true });
@@ -1113,7 +1140,8 @@ function getActivationPreflight() {
 
   return {
     mode: 'activation-only',
-    appVersion: app.getVersion(),
+    appVersion: installedReleaseInfo.version,
+    appReleaseId: installedReleaseInfo.releaseId,
     platform: process.platform,
     arch: process.arch,
     activationEndpointConfigured: Boolean(activationEndpoint),
@@ -1199,6 +1227,41 @@ function persistMainWindowSession() {
   if (sessionKey) persistActiveSessionKey(sessionKey);
 }
 
+function injectAppVersionBadge() {
+  if (!mainWindow || mainWindow.isDestroyed() || isActivationOnlyMode) return;
+  const label = visibleAppVersion();
+  const releaseTitle = `${APP_NAME} Control ${label}`;
+  mainWindow.setTitle(releaseTitle);
+  mainWindow.webContents.executeJavaScript(`
+    (() => {
+      const label = ${JSON.stringify(label)};
+      document.title = ${JSON.stringify(releaseTitle)};
+      let badge = document.getElementById('uclaw-version-badge');
+      if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'uclaw-version-badge';
+        document.body.appendChild(badge);
+      }
+      badge.textContent = label;
+      Object.assign(badge.style, {
+        position: 'fixed',
+        left: '74px',
+        bottom: '18px',
+        zIndex: '2147483647',
+        padding: '2px 6px',
+        border: '1px solid rgba(148, 163, 184, 0.35)',
+        borderRadius: '4px',
+        color: '#64748b',
+        background: 'rgba(248, 250, 252, 0.86)',
+        font: '11px/16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontVariantNumeric: 'tabular-nums',
+        pointerEvents: 'none',
+        userSelect: 'none'
+      });
+    })();
+  `).catch(error => logLifecycle(`Failed to inject app version badge: ${error.message}`));
+}
+
 /**
  * Creates the main Electron window. In activation-only mode it uses frameless
  * chrome so the high-fidelity startup page owns its titlebar controls.
@@ -1209,7 +1272,7 @@ function createWindow() {
     height: isActivationOnlyMode ? 760 : 800,
     minWidth: isActivationOnlyMode ? 720 : 800,
     minHeight: isActivationOnlyMode ? 620 : 600,
-    title: APP_NAME,
+    title: `${APP_NAME} ${installedReleaseInfo.version}`,
     icon: path.join(__dirname, '..', 'assets', 'icon.png'),
     frame: !isActivationOnlyMode,
     webPreferences: {
@@ -1238,6 +1301,7 @@ function createWindow() {
 
   mainWindow.webContents.on('did-navigate', persistMainWindowSession);
   mainWindow.webContents.on('did-navigate-in-page', persistMainWindowSession);
+  mainWindow.webContents.on('did-finish-load', injectAppVersionBadge);
 
   mainWindow.on('close', (event) => {
     if (appIsQuitting) return;
@@ -1467,6 +1531,8 @@ function setupIPC() {
     token: getToken(),
     hasModel: hasModelConfigured(),
     videoAdapterPort,
+    appVersion: installedReleaseInfo.version,
+    appReleaseId: installedReleaseInfo.releaseId,
   }));
 
   ipcMain.handle('open-dashboard', () => {
@@ -1480,7 +1546,7 @@ function setupIPC() {
 
 // ── App Lifecycle ──
 app.whenReady().then(async () => {
-  logLifecycle(`v${app.getVersion()} starting...`);
+  logLifecycle(`v${installedReleaseInfo.version} starting...`);
 
   if (isActivationOnlyMode) {
     console.log(`[${APP_NAME}] Activation-only mode starting...`);

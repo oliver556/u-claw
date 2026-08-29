@@ -94,6 +94,7 @@ sync_dir_with_progress() {
   local to_dir="$3"
   local timeout_seconds="${4:-300}"
   local delete_mode="${5:-keep}"
+  local config_mode="${6:-preserve-config}"
   local started_at
   local sync_pid
   local elapsed
@@ -115,8 +116,6 @@ sync_dir_with_progress() {
     --exclude '**/SingletonCookie'
     --exclude '**/SingletonLock'
     --exclude '**/SingletonSocket'
-    --exclude '.openclaw/openclaw.json'
-    --exclude '.openclaw/openclaw.json.last-good'
     --exclude '.DS_Store'
     --exclude '._*'
     --exclude '.Spotlight-V100/'
@@ -125,6 +124,12 @@ sync_dir_with_progress() {
 
   if [ "$delete_mode" = "delete" ]; then
     rsync_args+=(--delete)
+  fi
+  if [ "$config_mode" != "copy-config" ]; then
+    rsync_args+=(
+      --exclude '.openclaw/openclaw.json'
+      --exclude '.openclaw/openclaw.json.last-good'
+    )
   fi
 
   mkdir -p "$to_dir"
@@ -187,13 +192,35 @@ runtime_cache_is_current() {
 sync_back() {
   local status=$?
   echo "[U-Claw] Syncing runtime data back to USB..."
-  if ! sync_dir_with_progress "Syncing runtime data back to USB" "$RUN_DATA_DIR" "$USB_DATA_DIR" 300 "keep"; then
+  if ! sync_dir_with_progress "Syncing runtime data back to USB" "$RUN_DATA_DIR" "$USB_DATA_DIR" 300 "keep" "preserve-config"; then
     status=1
   fi
   clear_dirty
   sync_launcher_log
   echo "[U-Claw] Exit status: $status"
   exit "$status"
+}
+
+run_startup_hard_update() {
+  if [ "${UCLAW_DISABLE_STARTUP_HARD_UPDATE:-0}" = "1" ]; then
+    echo "[U-Claw] Startup hard update disabled by environment."
+    return 0
+  fi
+  local hard_update_node="$APP_CACHE_DIR/U-Claw.app/Contents/Resources/resources/runtime/node-darwin-$MAC_ARCH/bin/node"
+  local hard_update_client="$APP_CACHE_DIR/U-Claw.app/Contents/Resources/app/scripts/hard-update-client.js"
+  if [ ! -x "$hard_update_node" ]; then
+    echo "[U-Claw] Missing bundled Node runtime for startup hard update:"
+    echo "$hard_update_node"
+    return 1
+  fi
+  if [ ! -f "$hard_update_client" ]; then
+    echo "[U-Claw] Missing startup hard update client:"
+    echo "$hard_update_client"
+    return 1
+  fi
+  echo "[U-Claw] Checking mandatory hard update..."
+  "$hard_update_node" "$hard_update_client" startup-update --usb "$ROOT" --platform "darwin-$MAC_ARCH"
+  return $?
 }
 
 echo "[U-Claw] $(date '+%Y-%m-%d %H:%M:%S')"
@@ -341,17 +368,46 @@ else
   echo "[U-Claw] Reusing app cache: $APP_CACHE_DIR"
 fi
 
+set +e
+run_startup_hard_update
+HARD_UPDATE_STATUS=$?
+set -e
+if [ "$HARD_UPDATE_STATUS" -eq 2 ]; then
+  unset UCLAW_MAC_ARM64_ARCHIVE_SHA256
+  unset UCLAW_MAC_X64_ARCHIVE_SHA256
+  export UCLAW_PORTABLE_ROOT="$ROOT"
+  exec /bin/bash "$0"
+fi
+if [ "$HARD_UPDATE_STATUS" -eq 20 ]; then
+  echo "[U-Claw] Hard update staged; applying update and relaunching."
+  HARD_UPDATE_NODE="$APP_CACHE_DIR/U-Claw.app/Contents/Resources/resources/runtime/node-darwin-$MAC_ARCH/bin/node"
+  HARD_UPDATE_CLIENT="$APP_CACHE_DIR/U-Claw.app/Contents/Resources/app/scripts/hard-update-client.js"
+  HARD_UPDATE_APPLY_LOG="$LOCAL_LOG_DIR/Mac-Hard-Update-Apply.log"
+  nohup "$HARD_UPDATE_NODE" "$HARD_UPDATE_CLIENT" apply-startup-update \
+    --usb "$ROOT" \
+    --transaction "$ROOT/app/update-transaction.json" \
+    --wait-pid "${UCLAW_LAUNCHER_PID:-}" \
+    --launch-after "$ROOT/U-Claw Launcher.app" \
+    --stamp-file "$STAMP_FILE" >> "$HARD_UPDATE_APPLY_LOG" 2>&1 &
+  exit 0
+fi
+if [ "$HARD_UPDATE_STATUS" -ne 0 ]; then
+  echo "[U-Claw] Startup hard update failed."
+  wait_before_exit
+  exit 1
+fi
+
 echo "[U-Claw] Preparing runtime data cache..."
 mkdir -p "$RUN_DATA_DIR" "$USB_DATA_DIR"
 if [ -f "$DIRTY_FILE" ]; then
   echo "[U-Claw] Runtime data has unsynced changes; syncing runtime cache back to USB before startup..."
-  sync_dir_with_progress "Syncing runtime cache back to USB" "$RUN_DATA_DIR" "$USB_DATA_DIR" 300 "keep" || true
+  sync_dir_with_progress "Syncing runtime cache back to USB" "$RUN_DATA_DIR" "$USB_DATA_DIR" 300 "keep" "preserve-config" || true
 fi
 if runtime_cache_is_current; then
   echo "[U-Claw] Runtime data cache is current; USB data sync skipped."
 else
   echo "[U-Claw] Syncing USB data to runtime cache..."
-  if ! sync_dir_with_progress "Syncing USB data to runtime cache" "$USB_DATA_DIR" "$RUN_DATA_DIR" 300 "delete"; then
+  if ! sync_dir_with_progress "Syncing USB data to runtime cache" "$USB_DATA_DIR" "$RUN_DATA_DIR" 300 "delete" "copy-config"; then
     echo "[U-Claw] Failed to prepare runtime data cache."
     wait_before_exit
     exit 1
