@@ -10,6 +10,7 @@ const adminConsoleHTML = `<!doctype html>
     :root {
       --blue: #1677ff;
       --blue-dark: #0958d9;
+      --blue-soft: #eaf3ff;
       --green: #23a455;
       --red: #d92d20;
       --text: #1f2937;
@@ -25,6 +26,7 @@ const adminConsoleHTML = `<!doctype html>
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 14px;
+      line-height: 1.45;
     }
     header {
       height: 64px;
@@ -34,9 +36,12 @@ const adminConsoleHTML = `<!doctype html>
       padding: 0 28px;
       background: rgba(255,255,255,.94);
       border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 10;
     }
     h1 { margin: 0; font-size: 20px; }
-    main { max-width: 1380px; margin: 22px auto; padding: 0 18px 32px; }
+    main { max-width: 1500px; margin: 22px auto; padding: 0 18px 32px; }
     section {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -64,8 +69,12 @@ const adminConsoleHTML = `<!doctype html>
       font: inherit;
       font-weight: 700;
       cursor: pointer;
+      white-space: nowrap;
+      transition: background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease;
     }
+    button:hover { box-shadow: 0 1px 4px rgba(21, 72, 130, .12); }
     button:disabled { cursor: not-allowed; opacity: .48; }
+    button:disabled:hover { box-shadow: none; }
     button.primary { background: var(--blue); color: #fff; }
     button.primary:hover { background: var(--blue-dark); color: #fff; }
     button.secondary { background: #f4f8ff; color: var(--blue); border-color: #9ec9ff; }
@@ -83,6 +92,9 @@ const adminConsoleHTML = `<!doctype html>
     .toolbar { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
     .auth-panel { max-width: 520px; margin: 80px auto; }
     .hidden { display: none !important; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .section-head h2 { margin: 0; }
+    .section-head .notice { margin: 0; }
     .notice { margin-top: 12px; color: var(--muted); white-space: pre-wrap; }
     .notice.error { color: var(--red); }
     .codes { display: grid; gap: 8px; margin-top: 12px; }
@@ -90,22 +102,61 @@ const adminConsoleHTML = `<!doctype html>
     .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
     .metric { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #fbfdff; }
     .metric strong { display: block; font-size: 22px; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-    th { color: var(--muted); font-size: 12px; }
-    .badge { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 999px; background: #edf4ff; color: var(--blue); font-weight: 700; }
+    .table-toolbar { align-items: end; margin-bottom: 10px; }
+    .table-wrap {
+      max-height: calc(100vh - 360px);
+      min-height: 360px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      min-width: 1260px;
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: fixed;
+    }
+    th, td {
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      background: #f8fbff;
+      white-space: nowrap;
+    }
+    tbody tr:hover { background: #f7fbff; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 999px; background: #edf4ff; color: var(--blue); font-weight: 700; white-space: nowrap; }
     .badge.bound { background: #ecfdf3; color: var(--green); }
     .badge.disabled, .badge.reissued { background: #fff1f0; color: var(--red); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .muted { color: var(--muted); }
-    .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .cell-main { display: block; color: var(--text); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cell-sub { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .empty-mark { color: #98a2b3; }
+    .code-pill { display: inline-flex; max-width: 100%; padding: 4px 8px; border-radius: 6px; background: var(--blue-soft); color: #175cd3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .legacy-code { background: #f2f4f7; color: #667085; }
+    .batch-cell, .activation-cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .time-cell { color: #344054; white-space: nowrap; }
+    .row-actions { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
+    .row-actions button { min-height: 32px; padding: 0 10px; font-size: 13px; }
     .empty { padding: 24px; color: var(--muted); text-align: center; }
     @media (max-width: 980px) {
       header { padding: 0 16px; }
       .span-2, .span-3, .span-4, .span-5, .span-6, .span-8 { grid-column: span 12; }
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      table { min-width: 1180px; }
-      .table-wrap { overflow-x: auto; }
+      main { padding: 0 10px 28px; }
+      .table-wrap { max-height: calc(100vh - 340px); }
     }
   </style>
 </head>
@@ -171,8 +222,11 @@ const adminConsoleHTML = `<!doctype html>
       </section>
 
       <section>
-        <h2>激活码列表</h2>
-        <div class="grid">
+        <div class="section-head">
+          <h2>激活码列表</h2>
+          <p id="message" class="notice"></p>
+        </div>
+        <div class="grid table-toolbar">
           <label class="span-3">状态
             <select id="statusFilter">
               <option value="">全部</option>
@@ -189,21 +243,30 @@ const adminConsoleHTML = `<!doctype html>
             <button class="primary" id="load">查询</button>
           </div>
         </div>
-        <p id="message" class="notice"></p>
         <div class="table-wrap">
           <table>
+            <colgroup>
+              <col style="width:52px">
+              <col style="width:180px">
+              <col style="width:92px">
+              <col style="width:140px">
+              <col style="width:180px">
+              <col style="width:170px">
+              <col style="width:170px">
+              <col style="width:140px">
+              <col style="width:156px">
+            </colgroup>
             <thead>
               <tr>
-                <th style="width:70px">ID</th>
-                <th style="width:180px">激活码</th>
-                <th style="width:105px">状态</th>
-                <th style="width:150px">激活账号</th>
-                <th style="width:160px">New API 账号</th>
-                <th>New API Base URL</th>
-                <th style="width:155px">批次</th>
-                <th style="width:165px">激活流程</th>
-                <th style="width:170px">创建时间</th>
-                <th style="width:160px">操作</th>
+                <th>ID</th>
+                <th>激活码</th>
+                <th>状态</th>
+                <th>激活账号</th>
+                <th>New API 账号</th>
+                <th>批次</th>
+                <th>激活流程</th>
+                <th>创建时间</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody id="rows"></tbody>
@@ -302,6 +365,21 @@ const adminConsoleHTML = `<!doctype html>
       if (!value) return "-";
       return new Date(value).toLocaleString();
     }
+    function statusLabel(status) {
+      return ({
+        unused: "未激活",
+        bound: "已绑定",
+        disabled: "已禁用",
+        reissued: "已重发"
+      })[status] || status || "-";
+    }
+    function empty() {
+      return '<span class="empty-mark">-</span>';
+    }
+    function mainSub(main, sub) {
+      if (!main) return empty();
+      return '<span class="cell-main">' + esc(main) + '</span>' + (sub ? '<span class="cell-sub">' + esc(sub) + '</span>' : "");
+    }
     function renderRows(codes) {
       $("mAll").textContent = codes.length;
       $("mUnused").textContent = codes.filter((x) => x.status === "unused").length;
@@ -310,32 +388,35 @@ const adminConsoleHTML = `<!doctype html>
       const body = $("rows");
       body.innerHTML = "";
       if (!codes.length) {
-        body.innerHTML = '<tr><td colspan="10" class="empty">暂无记录</td></tr>';
+        body.innerHTML = '<tr><td colspan="9" class="empty">暂无记录</td></tr>';
         return;
       }
       for (const item of codes) {
         const tr = document.createElement("tr");
-        const newapi = item.newapiUsername ? item.newapiUsername + (item.newapiUserId ? " #" + item.newapiUserId : "") : "-";
+        const newapiParts = [];
+        if (item.newapiUserId) newapiParts.push("New API #" + item.newapiUserId);
+        if (item.newapiBaseUrl) newapiParts.push(item.newapiBaseUrl);
+        const newapiSub = newapiParts.join(" · ");
         const codeText = item.codeVisible && item.code ? item.code : (item.codeHint ? "****-" + item.codeHint : "旧码不可见");
-        const activationText = item.latestActivationId ? item.latestActivationId : "-";
-        const activationMeta = item.latestActivationStage ? '<div class="muted">' + esc(item.latestActivationStage) + (item.latestActivationCommit ? " · " + esc(fmtTime(item.latestActivationCommit)) : "") + "</div>" : "";
+        const codeClass = item.codeVisible && item.code ? "code-pill" : "code-pill legacy-code";
+        const activationSub = item.latestActivationStage ? item.latestActivationStage + (item.latestActivationCommit ? " · " + fmtTime(item.latestActivationCommit) : "") : "";
+        const batchText = item.batchName || (item.batchId ? "批次 #" + item.batchId : "");
         tr.innerHTML =
           "<td>" + esc(item.id) + "</td>" +
-          '<td class="mono">' + esc(codeText) + "</td>" +
-          '<td><span class="badge ' + esc(item.status) + '">' + esc(item.status) + "</span></td>" +
-          "<td>" + esc(item.boundPhone || "-") + (item.boundUserId ? '<div class="muted">U-Claw #' + esc(item.boundUserId) + "</div>" : "") + "</td>" +
-          "<td>" + esc(newapi) + "</td>" +
-          "<td>" + esc(item.newapiBaseUrl || "-") + "</td>" +
-          "<td>" + esc(item.batchName || item.batchId || "-") + "</td>" +
-          '<td><span class="mono">' + esc(activationText) + "</span>" + activationMeta + "</td>" +
-          "<td>" + esc(fmtTime(item.createdAt)) + "</td>" +
+          '<td class="mono"><span class="' + codeClass + '" title="' + esc(codeText) + '">' + esc(codeText) + "</span></td>" +
+          '<td><span class="badge ' + esc(item.status) + '">' + esc(statusLabel(item.status)) + "</span></td>" +
+          "<td>" + mainSub(item.boundPhone, item.boundUserId ? "U-Claw #" + item.boundUserId : "") + "</td>" +
+          '<td title="' + esc((item.newapiUsername || "-") + (newapiSub ? " · " + newapiSub : "")) + '">' + mainSub(item.newapiUsername, newapiSub) + "</td>" +
+          '<td class="batch-cell" title="' + esc(batchText || "-") + '">' + (batchText ? esc(batchText) : empty()) + "</td>" +
+          '<td class="activation-cell" title="' + esc((item.latestActivationId || "-") + (activationSub ? " · " + activationSub : "")) + '">' + mainSub(item.latestActivationId, activationSub) + "</td>" +
+          '<td class="time-cell">' + esc(fmtTime(item.createdAt)) + "</td>" +
           '<td><div class="row-actions"></div></td>';
         const actions = tr.querySelector(".row-actions");
         const copy = document.createElement("button");
         copy.className = "secondary";
         copy.textContent = "复制";
         copy.disabled = !item.code;
-        copy.onclick = () => navigator.clipboard.writeText(item.code);
+        copy.onclick = () => navigator.clipboard.writeText(item.code).then(() => showMessage("已复制激活码 #" + item.id));
         const disable = document.createElement("button");
         disable.className = "danger";
         disable.textContent = "禁用";
