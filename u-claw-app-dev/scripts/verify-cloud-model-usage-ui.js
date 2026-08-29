@@ -23,6 +23,7 @@ const pgContainer = `uclaw-ui-e2e-pg-${pgPort}-${process.pid}`;
 const apiAddr = `127.0.0.1:${apiPort}`;
 const activationCode = 'UIE2-E2E2-TEST-0001';
 const phone = `138${String(Date.now()).slice(-8)}`;
+const newAPIE2EChannelID = '910001';
 const children = [];
 
 /**
@@ -35,6 +36,43 @@ function readLocalNewAPIAdminToken() {
   const dbPath = path.join(cloudRoot, 'deploy', 'newapi-local', 'data', 'one-api.db');
   if (!fs.existsSync(dbPath)) return '';
   return run('sqlite3', [dbPath, "select access_token from users where username='root' limit 1;"]).trim();
+}
+
+/**
+ * Seeds a local-only New API channel so user model permissions are deterministic in E2E.
+ */
+function seedLocalNewAPIModelCatalog() {
+  if (!newAPIBaseURL.startsWith('http://127.0.0.1:3000') && !newAPIBaseURL.startsWith('http://localhost:3000')) {
+    return;
+  }
+  const dbPath = path.join(cloudRoot, 'deploy', 'newapi-local', 'data', 'one-api.db');
+  if (!fs.existsSync(dbPath)) return;
+  run('sqlite3', [dbPath, `
+    insert or replace into channels (
+      id, type, key, status, name, weight, created_time, test_time, response_time,
+      base_url, models, "group", used_quota, model_mapping, status_code_mapping,
+      priority, auto_ban, settings
+    ) values (
+      ${newAPIE2EChannelID}, 1, 'sk-uclaw-ui-e2e-placeholder', 1, 'uclaw-ui-e2e-catalog',
+      0, strftime('%s','now'), 0, 0, 'http://127.0.0.1:65535',
+      'gpt-5.5,gpt-image-2,jimeng-video-3-720p', 'default', 0, '', '',
+      0, 0, '{}'
+    );
+  `]);
+}
+
+/**
+ * Removes the local-only New API channel inserted by this verifier.
+ */
+function cleanupLocalNewAPIModelCatalog() {
+  if (!newAPIBaseURL.startsWith('http://127.0.0.1:3000') && !newAPIBaseURL.startsWith('http://localhost:3000')) {
+    return;
+  }
+  const dbPath = path.join(cloudRoot, 'deploy', 'newapi-local', 'data', 'one-api.db');
+  if (!fs.existsSync(dbPath)) return;
+  try {
+    run('sqlite3', [dbPath, `delete from channels where id = ${newAPIE2EChannelID} and name = 'uclaw-ui-e2e-catalog';`]);
+  } catch {}
 }
 
 /**
@@ -181,6 +219,16 @@ function writeActivatedClientState(accessToken, newAPIToken) {
     config.models.providers[name].baseUrl = `${newAPIBaseURL}/v1`;
     config.models.providers[name].apiKey = newAPIToken;
   }
+  config.models.providers.newapi = {
+    baseUrl: `${newAPIBaseURL}/v1`,
+    apiKey: newAPIToken,
+    api: 'openai-completions',
+    models: [
+      { id: 'gpt-5.5', name: 'gpt-5.5', capabilities: ['text'], input: ['text'] },
+      { id: 'gpt-image-2', name: 'gpt-image-2', capabilities: ['image'], input: ['text', 'image'] },
+      { id: 'jimeng-video-3-720p', name: 'jimeng-video-3-720p', capabilities: ['video'], input: ['text', 'image'] },
+    ],
+  };
   config.agents = config.agents || {};
   config.agents.defaults = config.agents.defaults || {};
   config.agents.defaults.model = { primary: 'custom/gpt-5.5' };
@@ -215,27 +263,13 @@ function writeActivatedClientState(accessToken, newAPIToken) {
 }
 
 /**
- * Drives the visible Electron page and asserts cloud usage data rendered.
+ * Navigates to the exact model page before asserting model dashboard controls.
  */
-async function assertElectronModelUsageUI(expectedInitialBalance, rechargeQuota) {
-  const cdp = await openCDP();
-  await cdp.send('Runtime.enable');
-  await cdp.send('Page.enable');
-  const evalJS = (expression) => cdp
-    .send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
-    .then((result) => result.result.value);
-  const expectedInitialText = Number(expectedInitialBalance).toLocaleString();
-  const expectedRechargeText = Number(rechargeQuota).toLocaleString();
-  const expectedFinalText = Number(expectedInitialBalance + rechargeQuota).toLocaleString();
-
-  for (let i = 0; i < 120; i += 1) {
-    if (await evalJS('document.readyState') === 'complete') break;
-    await sleep(500);
-  }
-  for (let i = 0; i < 80; i += 1) {
+async function openModelPage(evalJS, cdp) {
+  for (let i = 0; i < 180; i += 1) {
     const clicked = await evalJS(`(() => {
       const el = [...document.querySelectorAll('a,button,[role="button"]')]
-        .find((node) => /模型/.test(node.textContent || ''));
+        .find((node) => (node.textContent || '').trim() === '模型' && node.offsetParent !== null);
       if (!el) return false;
       el.click();
       return true;
@@ -243,6 +277,86 @@ async function assertElectronModelUsageUI(expectedInitialBalance, rechargeQuota)
     if (clicked) break;
     await sleep(500);
   }
+  for (let i = 0; i < 180; i += 1) {
+    const ok = await evalJS(`(() => {
+      const text = document.body.innerText || '';
+      return text.includes('账户算力') && text.includes('模型能力') && text.includes('同步模型');
+    })()`);
+    if (ok) return;
+    await sleep(500);
+  }
+  const bodyText = await evalJS('document.body.innerText || ""');
+  cdp.close();
+  throw new Error(`model page did not open:\n${bodyText.slice(0, 2000)}`);
+}
+
+/**
+ * Opens the model picker and verifies the change action refreshes cloud catalog data.
+ */
+async function assertModelChangeLoadsCloudCatalog(evalJS, cdp) {
+  const clicked = await evalJS(`(() => {
+    const button = [...document.querySelectorAll('.uclaw-config-model-change')]
+      .find((node) => (node.textContent || '').trim() === '更换' && !node.disabled && node.offsetParent !== null);
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`);
+  if (!clicked) {
+    const bodyText = await evalJS('document.body.innerText || ""');
+    cdp.close();
+    throw new Error(`model change button not clickable:\n${bodyText.slice(0, 2000)}`);
+  }
+
+  let sawCloudCatalog = false;
+  for (let i = 0; i < 120; i += 1) {
+    const ok = await evalJS(`(() => {
+      const text = document.body.innerText || '';
+      return text.includes('更换文字模型') && text.includes('newapi/gpt-5.5');
+    })()`);
+    if (ok) {
+      sawCloudCatalog = true;
+      break;
+    }
+    await sleep(500);
+  }
+  if (!sawCloudCatalog) {
+    const bodyText = await evalJS('document.body.innerText || ""');
+    cdp.close();
+    throw new Error(`model picker did not load cloud catalog:\n${bodyText.slice(0, 2000)}`);
+  }
+
+  await evalJS(`(() => {
+    const close = document.querySelector('.uclaw-model-picker__close');
+    if (close) close.click();
+  })()`);
+  for (let i = 0; i < 40; i += 1) {
+    const closed = await evalJS('!document.querySelector(".uclaw-model-picker")');
+    if (closed) return;
+    await sleep(250);
+  }
+  throw new Error('model picker did not close after cloud catalog assertion');
+}
+
+/**
+ * Drives the visible Electron page and asserts cloud usage data rendered.
+ */
+async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
+  const cdp = await openCDP();
+  await cdp.send('Runtime.enable');
+  await cdp.send('Page.enable');
+  const evalJS = (expression) => cdp
+    .send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+    .then((result) => result.result.value);
+  const computePerQuota = 120;
+  const expectedInitialText = Number(expectedInitialQuota * computePerQuota).toLocaleString();
+  const expectedFinalText = Number((expectedInitialQuota + rechargeQuota) * computePerQuota).toLocaleString();
+  const expectedRechargeComputeText = `${Number(rechargeQuota * computePerQuota).toLocaleString()} 算力`;
+
+  for (let i = 0; i < 120; i += 1) {
+    if (await evalJS('document.readyState') === 'complete') break;
+    await sleep(500);
+  }
+  await openModelPage(evalJS, cdp);
   let sawInitialUsage = false;
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`(() => {
@@ -269,6 +383,7 @@ async function assertElectronModelUsageUI(expectedInitialBalance, rechargeQuota)
     cdp.close();
     throw new Error(`New API login log leaked into usage UI:\n${bodyText.slice(0, 2000)}`);
   }
+  await assertModelChangeLoadsCloudCatalog(evalJS, cdp);
   const openedRecharge = await evalJS(`(() => {
     const button = [...document.querySelectorAll('button')]
       .find((node) => (node.textContent || '').trim() === '充值' && !node.disabled);
@@ -335,14 +450,14 @@ async function assertElectronModelUsageUI(expectedInitialBalance, rechargeQuota)
       for (let j = 0; j < 80; j += 1) {
         const recordsVisible = await evalJS(`(() => {
           const text = document.body.innerText || '';
-          return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(`${expectedRechargeText} 算力`)});
+          return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(expectedRechargeComputeText)});
         })()`);
         if (recordsVisible) break;
         await sleep(500);
       }
       const recordsVisible = await evalJS(`(() => {
         const text = document.body.innerText || '';
-        return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(`${expectedRechargeText} 算力`)});
+        return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(expectedRechargeComputeText)});
       })()`);
       if (!recordsVisible) {
         const bodyText = await evalJS('document.body.innerText || ""');
@@ -365,6 +480,7 @@ async function assertElectronModelUsageUI(expectedInitialBalance, rechargeQuota)
  * Stops local processes and PostgreSQL container after verification.
  */
 function cleanup() {
+  cleanupLocalNewAPIModelCatalog();
   for (const child of children.reverse()) {
     try {
       child.kill('SIGTERM');
@@ -409,6 +525,7 @@ function cleanup() {
     });
 
     await sleep(3000);
+    seedLocalNewAPIModelCatalog();
     const localAdminToken = readLocalNewAPIAdminToken();
     const adminLogin = localAdminToken ? { data: { access_token: localAdminToken } } : await requestJSONWithRetry('newapi admin login', () => fetch(`${newAPIBaseURL}/api/user/login`, {
       method: 'POST',
@@ -457,7 +574,6 @@ function cleanup() {
       headers: { Authorization: `Bearer ${login.accessToken}` },
     }));
     const initialBalance = Number(initialUsage.accountBalance) || 0;
-    const initialBalanceCompute = Number(initialUsage.accountBalanceCompute) || Math.round(initialBalance * 120);
     writeActivatedClientState(login.accessToken, redeem.newapiToken);
 
     start(path.join(appRoot, 'node_modules/.bin/electron'), ['.', '--dev', `--remote-debugging-port=${debugPort}`], {
@@ -468,7 +584,7 @@ function cleanup() {
       },
     });
     await sleep(3000);
-    await assertElectronModelUsageUI(initialBalanceCompute, 600000000);
+    await assertElectronModelUsageUI(initialBalance, 5000000);
     console.log(JSON.stringify({
       ok: true,
       step: 'electron_model_usage_ui',

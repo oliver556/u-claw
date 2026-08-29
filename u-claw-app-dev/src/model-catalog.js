@@ -1,5 +1,5 @@
 /**
- * Normalizes model IDs into OpenClaw model entries while preserving user labels.
+ * Normalizes model IDs into OpenClaw-compatible model entries while preserving user labels.
  */
 function normalizeCatalogModel(model) {
   const id = String(model?.id || model?.name || '').trim();
@@ -10,6 +10,7 @@ function normalizeCatalogModel(model) {
   return {
     id,
     name: String(model?.name || id).trim() || id,
+    capabilities,
     reasoning: Boolean(model?.reasoning),
     input: capabilitiesToInput(capabilities),
     cost: model?.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
