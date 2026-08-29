@@ -24,6 +24,7 @@ Existing USB disk must preserve:
 - memory
 - license
 - logs
+- generated image/video/audio/file artifacts
 - `data/.openclaw/openclaw.json`
 
 Packaging script prints:
@@ -44,17 +45,22 @@ Startup:
 - Clean same-machine restart reuses app cache.
 - `<USB>/U-Claw/data` is the preserved USB data master.
 - Runtime uses a per-USB computer data cache for speed.
+- Electron Control UI profile uses local per-USB/per-platform storage outside `<USB>/U-Claw/data`, so device identity is never shared between macOS and Windows.
 - Startup syncs USB `data/` to the per-USB runtime cache only when the cache is missing, dirty, or not marked current.
 - Clean same-machine restart skips USB-to-runtime data sync and opens from the runtime cache.
 - Running app syncs runtime cache back to USB periodically and during shutdown.
 - Runtime sync never writes runtime-only `data/.openclaw/openclaw.json` or `openclaw.json.last-good` back to USB master data.
 - Two USB disks use different cache IDs, so their data does not merge.
+- Generated image/video/audio/file artifacts may be produced in local cache first, but must be copied back to USB `data/` and referenced by a portable artifact identity before the result is considered preserved.
+- Generated artifact preview accepts both runtime cache media and USB media roots. If an older transcript contains another machine's absolute cache path under `.openclaw/media`, the backend remaps it to the same relative media path under the current runtime/USB media root before serving.
+- Packaging/deploy must remove macOS AppleDouble metadata files such as `._U-Claw Launcher.exe`, because Windows can expose them as confusing fake entry files.
 
 Shutdown:
 
 - Closing main window shows confirmation first.
 - After confirmation, app shows shutdown progress.
-- Shutdown stops gateway, stops video adapter, stops config server, records clean markers, then exits.
+- Shutdown progress comes from app shutdown page, not launcher popup.
+- Launcher stays hidden during shutdown, then stops gateway, stops video adapter, stops config server, records clean markers, and exits.
 - Launcher monitors `Shutdown complete`.
 - If user opens launcher again during shutdown, launcher records one relaunch request and does not start a second instance.
 - After shutdown, queued relaunch starts once.
@@ -79,6 +85,7 @@ USB deployment:
   - `<USB>/U-Claw/U-Claw Launcher.app/Contents/MacOS/U-Claw Launcher`
 - Both Windows zip hashes match.
 - Existing `<USB>/U-Claw/data/.openclaw/openclaw.json` hash is unchanged by deployment.
+- No `._*.exe`, `._*.bat`, or `._*.command` AppleDouble metadata files remain beside Windows-visible entry files.
 
 Mac runtime:
 
@@ -91,6 +98,7 @@ Mac runtime:
 - Logs contain `Shutdown complete`.
 - No remaining U-Claw launcher, Electron, `Mac-Start-App.command`, or `openclaw.mjs gateway run` process from this launch.
 - Immediate reopen after close does not create double process, double popup, or stuck loading.
+- Existing generated image/video/audio/file artifacts from another computer still render after moving the USB disk, as long as the file exists under `<USB>/U-Claw/data/.openclaw/media`.
 
 Windows runtime:
 
@@ -100,7 +108,7 @@ Windows runtime:
 - Native progress appears during first copy/extract/sync.
 - App enters main UI after Gateway ready/App ready.
 - Closing asks confirmation.
-- Confirmed close shows shutdown progress.
+- Confirmed close shows shutdown progress in app, with no launcher popup.
 - Immediate reopen after close does not create double process, double popup, or stuck loading.
 
 ## Logs To Return

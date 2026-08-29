@@ -925,8 +925,12 @@ function patchConfiguredUclawImageGenerationModelsOnly() {
   for (const file of files) {
     const before = read(file);
     let after = before;
+    const configuredModelConfigLine =
+      'const configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);';
+    const configuredModelSelectionBlock =
+      `${configuredModelConfigLine}\n\t\t\tconst requestedModel = readStringParam(params, "model");\n\t\t\tconst configuredImageModelRefs = new Set([\n\t\t\t\tconfiguredImageGenerationModelConfig.primary,\n\t\t\t\t...configuredImageGenerationModelConfig.fallbacks ?? []\n\t\t\t].filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()));\n\t\t\tconst model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;`;
     const alreadyPatched =
-      after.includes('const configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);')
+      after.includes(configuredModelConfigLine)
       && after.includes('const configuredImageModelRefs = new Set([')
       && after.includes('const model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;')
       && after.includes('U-Claw accepts only image models declared in imageGenerationModel config')
@@ -959,11 +963,23 @@ function patchConfiguredUclawImageGenerationModelsOnly() {
     );
     after = after.replace(
       'if (action === "status") return createImageGenerateStatusActionResult(options?.agentSessionKey);\n\t\t\tconst model = readStringParam(params, "model");',
-      'if (action === "status") return createImageGenerateStatusActionResult(options?.agentSessionKey);\n\t\t\tconst configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);\n\t\t\tconst requestedModel = readStringParam(params, "model");\n\t\t\tconst configuredImageModelRefs = new Set([\n\t\t\t\tconfiguredImageGenerationModelConfig.primary,\n\t\t\t\t...configuredImageGenerationModelConfig.fallbacks ?? []\n\t\t\t].filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()));\n\t\t\tconst model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;',
+      `if (action === "status") return createImageGenerateStatusActionResult(options?.agentSessionKey);\n\t\t\t${configuredModelSelectionBlock}`,
+    );
+    after = after.replace(
+      `const model = readStringParam(params, "model");\n\t\t\t${configuredModelConfigLine}`,
+      configuredModelSelectionBlock,
+    );
+    after = after.replace(
+      'const model = readStringParam(params, "model");',
+      configuredModelSelectionBlock,
     );
     after = after.replace(
       'const requestedModel = readStringParam(params, "model");\n\t\t\tconst model = requestedModel?.trim() === UCLAW_FIXED_IMAGE_GENERATION_MODEL ? UCLAW_FIXED_IMAGE_GENERATION_MODEL : void 0;\n\t\t\tconst configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);',
-      'const configuredImageGenerationModelConfig = coerceToolModelConfig(cfg.agents?.defaults?.imageGenerationModel);\n\t\t\tconst requestedModel = readStringParam(params, "model");\n\t\t\tconst configuredImageModelRefs = new Set([\n\t\t\t\tconfiguredImageGenerationModelConfig.primary,\n\t\t\t\t...configuredImageGenerationModelConfig.fallbacks ?? []\n\t\t\t].filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()));\n\t\t\tconst model = requestedModel && configuredImageModelRefs.has(requestedModel.trim()) ? requestedModel.trim() : void 0;',
+      configuredModelSelectionBlock,
+    );
+    after = after.replace(
+      `${configuredModelSelectionBlock}\n\t\t\t${configuredModelConfigLine}`,
+      configuredModelSelectionBlock,
     );
 
     if (
@@ -1070,6 +1086,30 @@ function patchXaiVideoLoopbackAccess() {
     if (!after.includes("const statusResult = await fetchWithTimeoutGuarded(statusUrl,")) {
       after = after.replace(
         /(?:const statusUrl = `\$\{params\.baseUrl\}\/videos\/\$\{params\.requestId\}`;\n\t)?for \(let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt \+= 1\) \{\n\t\tconst payload = readXaiStatusResponse\(await readXaiVideoJson\(await fetchProviderOperationResponse\(\{\n\t\t\tstage: "poll",\n\t\t\turl: (?:statusUrl|`\$\{params\.baseUrl\}\/videos\/\$\{params\.requestId\}`),\n\t\t\tinit: \{\n\t\t\t\tmethod: "GET",\n\t\t\t\theaders: params\.headers\n\t\t\t\},\n\t\t\ttimeoutMs: createProviderOperationTimeoutResolver\(\{\n\t\t\t\tdeadline,\n\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS\n\t\t\t\}\),\n\t\t\tfetchFn: params\.fetchFn,\n\t\t\tprovider: "xai",\n\t\t\trequestFailedMessage: "xAI video status request failed"\n\t\t\}\)\)\);\n\t\tconst normalizedStatus = payload\.status\.toLowerCase\(\);\n\t\tif \(normalizedStatus === "done"\) return payload;\n\t\tif \(XAI_VIDEO_TERMINAL_FAILURE_STATUSES\.has\(normalizedStatus\)\) throw new Error\(normalizeOptionalString\(payload\.error\?\.message\) \?\? `xAI video generation \$\{normalizedStatus\}`\);/,
+        `const statusUrl = \`\${params.baseUrl}/videos/\${params.requestId}\`;
+\tfor (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+\t\tconst statusResult = await fetchWithTimeoutGuarded(statusUrl, {
+\t\t\t\tmethod: "GET",
+\t\t\t\theaders: params.headers
+\t\t\t}, createProviderOperationTimeoutResolver({
+\t\t\t\tdeadline,
+\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS
+\t\t\t}), params.fetchFn, {
+\t\t\tssrfPolicy: params.ssrfPolicy,
+\t\t\tdispatcherPolicy: params.dispatcherPolicy
+\t\t});
+\t\ttry {
+\t\t\tawait assertOkOrThrowHttpError(statusResult.response, "xAI video status request failed");
+\t\t\tconst payload = readXaiStatusResponse(await readXaiVideoJson(statusResult.response));
+\t\t\tconst normalizedStatus = payload.status.toLowerCase();
+\t\t\tif (normalizedStatus === "done") return payload;
+\t\t\tif (XAI_VIDEO_TERMINAL_FAILURE_STATUSES.has(normalizedStatus)) throw new Error(normalizeOptionalString(payload.error?.message) ?? \`xAI video generation \${normalizedStatus}\`);
+\t\t} finally {
+\t\t\tawait statusResult.release();
+\t\t}`,
+      );
+      after = after.replace(
+        "for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {\n\t\tconst payload = readXaiStatusResponse(await readXaiVideoJson(await fetchProviderOperationResponse({\n\t\t\tstage: \"poll\",\n\t\t\turl: `${params.baseUrl}/videos/${params.requestId}`,\n\t\t\tinit: {\n\t\t\t\tmethod: \"GET\",\n\t\t\t\theaders: params.headers\n\t\t\t},\n\t\t\ttimeoutMs: createProviderOperationTimeoutResolver({\n\t\t\t\tdeadline,\n\t\t\t\tdefaultTimeoutMs: DEFAULT_TIMEOUT_MS\n\t\t\t}),\n\t\t\tfetchFn: params.fetchFn,\n\t\t\tprovider: \"xai\",\n\t\t\trequestFailedMessage: \"xAI video status request failed\"\n\t\t})));\n\t\tconst normalizedStatus = payload.status.toLowerCase();\n\t\tif (normalizedStatus === \"done\") return payload;\n\t\tif (XAI_VIDEO_TERMINAL_FAILURE_STATUSES.has(normalizedStatus)) throw new Error(normalizeOptionalString(payload.error?.message) ?? `xAI video generation ${normalizedStatus}`);",
         `const statusUrl = \`\${params.baseUrl}/videos/\${params.requestId}\`;
 \tfor (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
 \t\tconst statusResult = await fetchWithTimeoutGuarded(statusUrl, {
@@ -3510,6 +3550,66 @@ async function handleUcSkillHubSkillsProxyRequest(req, res) {
 
   if (!after.includes("UCLAW_SKILLHUB_PROXY_PATH") || !after.includes("https://api.skillhub.cn")) {
     throw new Error(`Could not patch SkillHub proxy in ${controlUiGatewayPath}`);
+  }
+
+  if (writeIfChanged(controlUiGatewayPath, before, after)) {
+    console.log(`patched ${path.relative(root, controlUiGatewayPath)}`);
+  }
+}
+
+/**
+ * Remaps portable media paths recorded on another machine back to this USB/runtime data root.
+ */
+function patchControlUiPortableMediaRemap() {
+  if (!fs.existsSync(controlUiGatewayPath)) {
+    throw new Error(`Missing Control UI gateway asset: ${controlUiGatewayPath}`);
+  }
+
+  const before = read(controlUiGatewayPath);
+  let after = before;
+  const helper = `function normalizeUClawPortablePathForCompare(value) {
+\treturn value.replace(/\\\\/g, "/").replace(/\\/+$/, "");
+}
+function resolveUClawPortableAssistantMediaPath(localPath, localRoots) {
+\tconst normalized = normalizeUClawPortablePathForCompare(localPath);
+\tconst marker = "/.openclaw/media/";
+\tconst markerIndex = normalized.indexOf(marker);
+\tif (markerIndex < 0) return localPath;
+\tconst relativeMediaPath = normalized.slice(markerIndex + marker.length);
+\tif (!relativeMediaPath || relativeMediaPath.includes("\\0") || path.isAbsolute(relativeMediaPath) || relativeMediaPath.split("/").includes("..")) return localPath;
+\tfor (const root of localRoots ?? []) {
+\t\tconst normalizedRoot = normalizeUClawPortablePathForCompare(String(root));
+\t\tif (!normalizedRoot.endsWith("/.openclaw/media")) continue;
+\t\tconst candidate = path.join(String(root), ...relativeMediaPath.split("/"));
+\t\ttry {
+\t\t\tif (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+\t\t} catch {}
+\t}
+\treturn localPath;
+}
+`;
+
+  if (!after.includes("function resolveUClawPortableAssistantMediaPath")) {
+    after = after.replace(
+      "function resolveAssistantMediaRoutePath(basePath) {",
+      `${helper}function resolveAssistantMediaRoutePath(basePath) {`,
+    );
+  }
+  after = after.replace(
+    "const localPath = await resolveMediaReferenceLocalPath(source);",
+    "const localPath = resolveUClawPortableAssistantMediaPath(await resolveMediaReferenceLocalPath(source), localRoots);",
+  );
+  after = after.replace(
+    "localPath = resolvedReference.path;",
+    "localPath = resolveUClawPortableAssistantMediaPath(resolvedReference.path, localRoots);",
+  );
+
+  if (
+    !after.includes("function resolveUClawPortableAssistantMediaPath")
+    || !after.includes("resolveUClawPortableAssistantMediaPath(await resolveMediaReferenceLocalPath(source), localRoots)")
+    || !after.includes("resolveUClawPortableAssistantMediaPath(resolvedReference.path, localRoots)")
+  ) {
+    throw new Error(`Could not patch portable media remap in ${controlUiGatewayPath}`);
   }
 
   if (writeIfChanged(controlUiGatewayPath, before, after)) {
@@ -7260,6 +7360,7 @@ patchFixedLightModeAndFooterActions();
 patchControlUiManifestBranding();
 patchControlUiShellBranding();
 patchControlUiSkillHubProxy();
+patchControlUiPortableMediaRemap();
 patchIndexUiCopy();
 patchPrimaryNavigationProjection();
 patchFinalUiPolish();

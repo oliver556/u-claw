@@ -117,10 +117,20 @@ func main() {
 	usbStartLogPath = filepath.Join(root, "data", "logs", "Windows-Start-App.log")
 	mainLogPath = filepath.Join(root, "data", "logs", "main.log")
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
+	appendLauncherLog("Launcher process entered. root=" + root)
+	syncLauncherLogs()
+	if _, err := os.Stat(script); err != nil {
+		appendLauncherLog("Missing Windows start script: " + script + " (" + err.Error() + ")")
+		syncLauncherLogs()
+		showStartupError()
+		os.Exit(1)
+	}
 
 	mutex, alreadyRunning := acquireSingleInstanceMutex(root)
 	if alreadyRunning {
+		appendLauncherLog("Another launcher instance is already running; queued relaunch request.")
 		writeRelaunchRequest(root)
+		syncLauncherLogs()
 		os.Exit(0)
 	}
 	if mutex != 0 {
@@ -145,6 +155,7 @@ func main() {
 		}()
 		if err := runStatusWindow(); err != nil {
 			appendLauncherLog("Status window failed: " + err.Error())
+			syncLauncherLogs()
 			for atomic.LoadInt32(&processDone) == 0 {
 				time.Sleep(200 * time.Millisecond)
 			}
@@ -157,6 +168,7 @@ func main() {
 			break
 		}
 		appendLauncherLog("Relaunch requested while U-Claw was closing; starting again.")
+		syncLauncherLogs()
 	}
 
 	os.Exit(exitCode)
@@ -262,7 +274,9 @@ func copyFileBestEffort(source string, destination string) {
 
 func syncLauncherLogs() {
 	copyFileBestEffort(logPath, usbLogPath)
-	copyFileBestEffort(startLogPath, usbStartLogPath)
+	if startLogPath != usbLogPath {
+		copyFileBestEffort(startLogPath, usbStartLogPath)
+	}
 }
 
 func showStartupError() {
@@ -399,9 +413,9 @@ func updateStatusWindow() {
 		procSetWindowTextW.Call(textHandle, uintptr(unsafe.Pointer(text)))
 	}
 
-	if atomic.LoadInt32(&windowHidden) == 1 && isShutdownStatus(rawStatus) {
-		procShowWindow.Call(windowHandle, swShow)
-		atomic.StoreInt32(&windowHidden, 0)
+	if atomic.LoadInt32(&windowHidden) == 0 && isShutdownStatus(rawStatus) {
+		procShowWindow.Call(windowHandle, swHide)
+		atomic.StoreInt32(&windowHidden, 1)
 	}
 
 	if atomic.LoadInt32(&processDone) == 1 {
@@ -421,16 +435,11 @@ func updateStatusWindow() {
 		procShowWindow.Call(windowHandle, swShow)
 		atomic.StoreInt32(&windowHidden, 0)
 	}
-
-	if atomic.LoadInt32(&windowHidden) == 0 && strings.Contains(rawStatus, "Starting Windows desktop app") && !isShutdownStatus(rawStatus) {
-		procShowWindow.Call(windowHandle, swHide)
-		atomic.StoreInt32(&windowHidden, 1)
-	}
 }
 
 func shouldShowStatusWindow(status string) bool {
 	if isShutdownStatus(status) {
-		return true
+		return false
 	}
 	if time.Since(launcherStarted) < 1200*time.Millisecond {
 		return false
@@ -528,6 +537,14 @@ func displayStatusText(raw string) string {
 	if strings.Contains(raw, "Runtime data has unsynced changes") {
 		stage = "检测到上次数据未同步完成。"
 		detail = "正在先回写 U 盘，避免数据丢失。"
+	}
+	if strings.Contains(raw, "Starting Windows desktop app") {
+		stage = "正在启动主程序。"
+		detail = "Gateway ready / App ready 后会自动进入主界面。"
+	}
+	if strings.Contains(raw, "Gateway ready on port") {
+		stage = "Gateway 已就绪。"
+		detail = "正在打开主界面。"
 	}
 	if strings.Contains(raw, "Shutdown complete") {
 		stage = "关闭完成。"

@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const crypto = require('crypto');
 const { createVideoAdapterServer } = require('./video-adapter');
 
 // ── Constants ──
@@ -18,6 +19,12 @@ const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '
 const UCLAW_PORTABLE_DATA_DIR = process.env.UCLAW_PORTABLE_DATA_DIR?.trim() || '';
 const UCLAW_PORTABLE_WORK_DATA_DIR = process.env.UCLAW_PORTABLE_WORK_DATA_DIR?.trim() || '';
 const UCLAW_USB_DATA_DIR = (process.env.UCLAW_USB_DATA_DIR?.trim() || UCLAW_PORTABLE_DATA_DIR);
+const UCLAW_PORTABLE_ROOT = process.env.UCLAW_PORTABLE_ROOT?.trim() || '';
+const UCLAW_CACHE_ROOT = process.env.UCLAW_CACHE_ROOT?.trim() || '';
+const UCLAW_APP_CACHE_DIR = process.env.UCLAW_APP_CACHE_DIR?.trim() || '';
+const UCLAW_ARCHIVE_CACHE = process.env.UCLAW_ARCHIVE_CACHE?.trim() || '';
+const UCLAW_APP_CACHE_STAMP = process.env.UCLAW_APP_CACHE_STAMP?.trim() || '';
+const UCLAW_ELECTRON_PROFILE_DIR = process.env.UCLAW_ELECTRON_PROFILE_DIR?.trim() || '';
 const UCLAW_LAUNCHER_GUI = process.env.UCLAW_LAUNCHER_GUI === '1';
 const UCLAW_INHERIT_SYSTEM_PROXY = process.env.UCLAW_INHERIT_SYSTEM_PROXY === '1';
 const SYSTEM_PROXY_ENV_KEYS = [
@@ -152,6 +159,15 @@ const userDataPath = portablePath || getDesktopUserDataPath();
 const configDir = path.join(userDataPath, '.openclaw');
 const configPath = path.join(configDir, 'openclaw.json');
 const usbDataPath = UCLAW_USB_DATA_DIR ? path.resolve(UCLAW_USB_DATA_DIR) : null;
+const portableRootPath = UCLAW_PORTABLE_ROOT
+  ? path.resolve(UCLAW_PORTABLE_ROOT)
+  : usbDataPath
+    ? path.dirname(usbDataPath)
+    : null;
+const runtimeProtocolDir = portableRootPath ? path.join(portableRootPath, 'app', '.runtime') : null;
+const updateShutdownRequestPath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'update-shutdown-request.json') : null;
+const shutdownCompletePath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'shutdown-complete.json') : null;
+const runStatePath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'run-state.json') : null;
 const syncStateDir = path.join(userDataPath, '.uclaw-sync');
 const dirtyMarkerPath = path.join(syncStateDir, 'dirty.json');
 const lastSyncPath = path.join(syncStateDir, 'last-sync.json');
@@ -185,11 +201,34 @@ function visibleAppVersion() {
   return `v${version}`;
 }
 
+function getElectronProfilePath() {
+  if (UCLAW_ELECTRON_PROFILE_DIR) return path.resolve(UCLAW_ELECTRON_PROFILE_DIR);
+  if (!portablePath) return getDesktopUserDataPath();
+
+  // Control UI device identity lives in Electron storage. Keep it local to this
+  // computer, USB root, and OS instead of syncing it with OpenClaw business data.
+  const profileKey = crypto
+    .createHash('sha256')
+    .update(`${process.platform}:${portableRootPath || portablePath}`)
+    .digest('hex')
+    .slice(0, 16);
+  const cacheRoot = UCLAW_CACHE_ROOT || path.join(app.getPath('appData'), APP_NAME);
+  return path.join(cacheRoot, 'electron-profile', `${process.platform}-${profileKey}`);
+}
+
+const electronProfilePath = getElectronProfilePath();
 try {
   fs.mkdirSync(userDataPath, { recursive: true });
-  app.setPath('userData', userDataPath);
+  fs.mkdirSync(electronProfilePath, { recursive: true });
+  app.setPath('userData', electronProfilePath);
+  console.log(`[${APP_NAME}] Electron profile: ${electronProfilePath}`);
 } catch (error) {
-  console.warn(`[${APP_NAME}] Failed to set Electron userData path: ${error.message}`);
+  console.warn(`[${APP_NAME}] Failed to set Electron profile path: ${error.message}`);
+}
+const singleInstanceLock = app.requestSingleInstanceLock({ portableRootPath, userDataPath });
+if (!singleInstanceLock) {
+  console.log(`[${APP_NAME}] Another instance is already running for this portable profile.`);
+  app.exit(0);
 }
 
 // ── State ──
@@ -211,7 +250,16 @@ let portableSyncTimer = null;
 let portableSyncPromise = null;
 let portableFinalSyncDone = false;
 let shutdownPromise = null;
+let updateShutdownRequest = null;
+let updateShutdownWatcher = null;
 const holdMainWindowUntilReady = UCLAW_LAUNCHER_GUI && Boolean(UCLAW_PORTABLE_WORK_DATA_DIR || UCLAW_PORTABLE_DATA_DIR);
+
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) mainWindow.show();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+});
 
 // ── Config Management ──
 function loadBundledDefaultConfig() {
@@ -261,8 +309,16 @@ function ensureConfig() {
 
   if (!fs.existsSync(configPath)) {
     const defaultConfig = applyRuntimeConfigEnv(loadBundledDefaultConfig());
+    applyPortableLocalDesktopConfig(defaultConfig);
     fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
     console.log(`[${APP_NAME}] Created default config at ${configPath}`);
+    return;
+  }
+
+  const config = getConfig();
+  if (applyPortableLocalDesktopConfig(config)) {
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    console.log(`[${APP_NAME}] Updated portable local desktop gateway config`);
   }
 }
 
@@ -278,14 +334,33 @@ function getConfig() {
     }
     return config;
   } catch {
-    return { gateway: { mode: 'local', auth: { token: 'uclaw' } } };
+    const fallback = { gateway: { mode: 'local', auth: { token: 'uclaw' } } };
+    applyPortableLocalDesktopConfig(fallback);
+    return fallback;
   }
 }
 
 function saveConfig(config) {
+  applyPortableLocalDesktopConfig(config);
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   writeDirtyMarker('config');
+}
+
+function applyPortableLocalDesktopConfig(config) {
+  if (!portablePath || !config || typeof config !== 'object') return false;
+  config.gateway = config.gateway || {};
+  config.gateway.controlUi = config.gateway.controlUi || {};
+  let changed = false;
+  if (config.gateway.controlUi.allowInsecureAuth !== true) {
+    config.gateway.controlUi.allowInsecureAuth = true;
+    changed = true;
+  }
+  if (config.gateway.controlUi.dangerouslyDisableDeviceAuth !== true) {
+    config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
+    changed = true;
+  }
+  return changed;
 }
 
 function safeWriteJson(filePath, value) {
@@ -297,6 +372,11 @@ function safeWriteJson(filePath, value) {
     console.warn(`[${APP_NAME}] Failed to write ${filePath}: ${error.message}`);
     return false;
   }
+}
+
+function writeRuntimeJson(filePath, value) {
+  if (!filePath) return false;
+  return safeWriteJson(filePath, value);
 }
 
 function readJsonFile(filePath) {
@@ -327,8 +407,70 @@ function logLifecycle(message) {
   appendLogFile('main.log', message);
 }
 
+function writeRunState(state = 'running') {
+  if (!runStatePath) return;
+  writeRuntimeJson(runStatePath, {
+    schemaVersion: 1,
+    state,
+    launcherPid: Number(process.env.UCLAW_LAUNCHER_PID || 0) || null,
+    appPid: process.pid,
+    gatewayPid: gatewayProcess?.pid || null,
+    configServerPid: null,
+    configServerPort,
+    videoAdapterPid: null,
+    videoAdapterPort,
+    startedAt: new Date().toISOString(),
+    cacheRoot: UCLAW_CACHE_ROOT || null,
+    appCacheDir: UCLAW_APP_CACHE_DIR || null,
+    archiveCache: UCLAW_ARCHIVE_CACHE || null,
+    stampFile: UCLAW_APP_CACHE_STAMP || null
+  });
+}
+
+function readUpdateShutdownRequest() {
+  const payload = readJsonFile(updateShutdownRequestPath);
+  if (payload?.schemaVersion !== 1) return null;
+  if (payload.reason !== 'update') return null;
+  if (typeof payload.transactionId !== 'string' || !payload.transactionId.trim()) return null;
+  return payload;
+}
+
+function writeShutdownComplete() {
+  if (!shutdownCompletePath || !updateShutdownRequest) return;
+  writeRuntimeJson(shutdownCompletePath, {
+    schemaVersion: 1,
+    reason: 'update',
+    transactionId: updateShutdownRequest.transactionId,
+    completedAt: new Date().toISOString()
+  });
+}
+
+function startUpdateShutdownWatcher() {
+  if (!updateShutdownRequestPath || updateShutdownWatcher) return;
+  updateShutdownWatcher = setInterval(() => {
+    if (appIsQuitting || shutdownPromise) return;
+    const request = readUpdateShutdownRequest();
+    if (!request) return;
+    updateShutdownRequest = request;
+    logLifecycle(`Update shutdown requested transaction=${request.transactionId}`);
+    requestAppQuit({ confirm: false, reason: 'update' })
+      .catch(error => logLifecycle(`Update shutdown request error: ${error.message}`));
+  }, 1000);
+}
+
+function stopUpdateShutdownWatcher() {
+  if (!updateShutdownWatcher) return;
+  clearInterval(updateShutdownWatcher);
+  updateShutdownWatcher = null;
+}
+
 function portableUsbSyncEnabled() {
-  return Boolean(usbDataPath && portablePath && path.resolve(usbDataPath) !== path.resolve(userDataPath));
+  return Boolean(
+    usbDataPath &&
+    portablePath &&
+    path.resolve(usbDataPath) !== path.resolve(userDataPath) &&
+    fs.existsSync(usbDataPath)
+  );
 }
 
 function writeDirtyMarker(reason) {
@@ -397,8 +539,38 @@ function portableSyncExcludeArgs() {
         path.join(userDataPath, '.home', 'AppData', 'Roaming', 'u-claw', 'GPUCache'),
         path.join(userDataPath, '.home', 'AppData', 'Roaming', 'u-claw', 'DawnCache'),
         path.join(userDataPath, '.home', 'AppData', 'Roaming', 'u-claw', 'Crashpad'),
+        path.join(userDataPath, 'Cache'),
+        path.join(userDataPath, 'Code Cache'),
+        path.join(userDataPath, 'GPUCache'),
+        path.join(userDataPath, 'DawnGraphiteCache'),
+        path.join(userDataPath, 'DawnWebGPUCache'),
+        path.join(userDataPath, 'Network'),
+        path.join(userDataPath, 'Local Storage'),
+        path.join(userDataPath, 'Session Storage'),
+        path.join(userDataPath, 'Service Worker'),
+        path.join(userDataPath, 'WebStorage'),
+        path.join(userDataPath, 'Shared Dictionary'),
+        path.join(userDataPath, 'Dictionaries'),
+        path.join(userDataPath, 'blob_storage'),
       ],
-      files: ['Cookies', 'Cookies-journal', 'LOCK', 'SingletonCookie', 'SingletonLock', 'SingletonSocket']
+      files: [
+        'Cookies',
+        'Cookies-journal',
+        'DIPS',
+        'DIPS-shm',
+        'DIPS-wal',
+        'Local State',
+        'Network Persistent State',
+        'Preferences',
+        'SharedStorage',
+        'SharedStorage-wal',
+        'Trust Tokens',
+        'Trust Tokens-journal',
+        'LOCK',
+        'SingletonCookie',
+        'SingletonLock',
+        'SingletonSocket'
+      ]
     };
   }
 
@@ -415,6 +587,31 @@ function portableSyncExcludeArgs() {
     '--exclude', '**/SingletonCookie',
     '--exclude', '**/SingletonLock',
     '--exclude', '**/SingletonSocket',
+    '--exclude', '/Cookies',
+    '--exclude', '/Cookies-journal',
+    '--exclude', '/DIPS',
+    '--exclude', '/DIPS-shm',
+    '--exclude', '/DIPS-wal',
+    '--exclude', '/Local State',
+    '--exclude', '/Network Persistent State',
+    '--exclude', '/Preferences',
+    '--exclude', '/SharedStorage',
+    '--exclude', '/SharedStorage-wal',
+    '--exclude', '/Trust Tokens',
+    '--exclude', '/Trust Tokens-journal',
+    '--exclude', '/Cache/',
+    '--exclude', '/Code Cache/',
+    '--exclude', '/GPUCache/',
+    '--exclude', '/DawnGraphiteCache/',
+    '--exclude', '/DawnWebGPUCache/',
+    '--exclude', '/Network/',
+    '--exclude', '/Local Storage/',
+    '--exclude', '/Session Storage/',
+    '--exclude', '/Service Worker/',
+    '--exclude', '/WebStorage/',
+    '--exclude', '/Shared Dictionary/',
+    '--exclude', '/Dictionaries/',
+    '--exclude', '/blob_storage/',
     '--exclude', '.openclaw/openclaw.json',
     '--exclude', '.openclaw/openclaw.json.last-good',
   ];
@@ -788,6 +985,7 @@ function startVideoAdapter(port) {
       videoAdapterServer = server;
       videoAdapterPort = port;
       console.log(`[${APP_NAME}] Video adapter ready on http://127.0.0.1:${port}/xai/v1`);
+      writeRunState('video-adapter-ready');
       resolve(port);
     });
   });
@@ -800,6 +998,7 @@ function stopVideoAdapter() {
   videoAdapterServer = null;
   videoAdapterPort = null;
   logLifecycle('Stopping video adapter...');
+  writeRunState('stopping-video-adapter');
   return new Promise((resolve) => {
     let settled = false;
     const finish = () => {
@@ -877,6 +1076,7 @@ function startConfigServer() {
       configServer = server;
       configServerPort = server.address().port;
       console.log(`[${APP_NAME}] Config server on http://127.0.0.1:${configServerPort}`);
+      writeRunState('config-server-ready');
       resolve(configServerPort);
     });
   });
@@ -889,6 +1089,7 @@ function stopConfigServer() {
   configServer = null;
   configServerPort = null;
   logLifecycle('Stopping config server...');
+  writeRunState('stopping-config-server');
   return new Promise((resolve) => {
     let settled = false;
     const finish = () => {
@@ -979,6 +1180,7 @@ function startGateway(port) {
     const mediaPreviewRoots = [
       process.env.UCLAW_MEDIA_PREVIEW_ROOTS,
       path.join(configDir, 'media'),
+      usbDataPath ? path.join(usbDataPath, '.openclaw', 'media') : '',
     ].filter(Boolean).join(path.delimiter);
 
     const env = stripSystemProxyEnv(portableChildHomeEnv({
@@ -1007,6 +1209,7 @@ function startGateway(port) {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    writeRunState('gateway-starting');
 
     gatewayProcess.stdout.on('data', (data) => {
       const msg = data.toString().trim();
@@ -1033,6 +1236,7 @@ function startGateway(port) {
       logLifecycle(`Gateway exited with code ${code ?? 'null'} signal ${signal ?? 'null'}`);
       gatewayProcess = null;
       gatewayReady = false;
+      writeRunState('gateway-exited');
       if (!gatewayStopping && !appIsQuitting) {
         scheduleGatewayRestart(`exit code=${code ?? 'null'} signal=${signal ?? 'null'}`);
       }
@@ -1059,6 +1263,7 @@ function startGateway(port) {
         gatewayPort = port;
         gatewayRestartAttempts = 0;
         logLifecycle(`Gateway ready on port ${port}`);
+        writeRunState('gateway-ready');
         res.resume();
         resolve(port);
       });
@@ -1386,12 +1591,12 @@ async function confirmAppQuit() {
   }
 }
 
-async function requestAppQuit({ confirm = true } = {}) {
+async function requestAppQuit({ confirm = true, reason = 'user' } = {}) {
   if (shutdownPromise) return shutdownPromise;
   if (confirm && !(await confirmAppQuit())) return null;
 
   appIsQuitting = true;
-  logLifecycle('Shutdown requested');
+  logLifecycle(reason === 'update' ? 'Shutdown requested by update' : 'Shutdown requested');
   persistMainWindowSession();
   await loadShutdownPage();
   await new Promise(resolve => setTimeout(resolve, 150));
@@ -1559,6 +1764,8 @@ app.whenReady().then(async () => {
   // Setup
   ensureConfig();
   startPortableSyncTimer();
+  writeRunState('starting');
+  startUpdateShutdownWatcher();
   syncDevNewApiCredentialsFromDesktop();
   sanitizePortableStatePaths();
   createMenu();
@@ -1604,11 +1811,15 @@ function shutdownApp() {
   appIsQuitting = true;
   shutdownPromise = (async () => {
     logLifecycle('Shutdown started');
+    writeRunState('shutdown-started');
+    stopUpdateShutdownWatcher();
     await finalPortableDataSync('before-stop');
     await stopGateway();
     await stopVideoAdapter();
     await stopConfigServer();
     await finalPortableDataSync('after-stop');
+    writeShutdownComplete();
+    writeRunState('shutdown-complete');
     logLifecycle('Shutdown complete');
   })();
   return shutdownPromise;

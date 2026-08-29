@@ -223,7 +223,7 @@ static NSString *status_text(void) {
 }
 
 static BOOL should_show_status_window(NSString *status) {
-  if (is_shutdown_status(status)) return YES;
+  if (is_shutdown_status(status)) return NO;
   if ([[NSDate date] timeIntervalSinceDate:gLauncherStarted] < 1.2) return NO;
   if (has_text(status, @"Starting U-Claw")) return NO;
   return has_text(status, @"Installing updated app cache") ||
@@ -258,7 +258,9 @@ static void update_status_window(void) {
   if (gWindowHidden && should_show_status_window(status)) {
     show_window();
   }
-  if (!gWindowHidden && has_text(status, @"Starting U-Claw") && !is_shutdown_status(status)) {
+  if (!gWindowHidden && is_shutdown_status(status)) {
+    hide_window();
+  } else if (!gWindowHidden && has_text(status, @"Starting U-Claw")) {
     hide_window();
   }
 }

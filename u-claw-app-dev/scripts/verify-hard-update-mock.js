@@ -40,6 +40,7 @@ function createMockStage(stageRoot, edition) {
   fs.rmSync(stageRoot, { recursive: true, force: true });
   writeFile(path.join(stageRoot, 'Mac-Start-App.command'), '#!/bin/bash\necho U-Claw\n');
   writeFile(path.join(stageRoot, 'Windows-Start-App.bat'), '@echo off\r\necho U-Claw\r\n');
+  writeFile(path.join(stageRoot, 'Windows-Sync-Data.ps1'), "Write-Host 'U-Claw sync'\n");
   writeFile(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), `${edition} mock\n`);
   writeFile(path.join(stageRoot, 'U-Claw Launcher.exe'), 'mock windows launcher\n');
   writeFile(path.join(stageRoot, 'U-Claw Launcher.app', 'Contents', 'MacOS', 'U-Claw Launcher'), 'mock mac launcher\n');

@@ -28,6 +28,7 @@
     "hard-update:server": "node scripts/hard-update-control-plane-server.js",
     "hard-update:publish": "node scripts/publish-hard-update-release.js",
     "hard-update:verify": "node scripts/verify-hard-update-mock.js",
+    "launcher-hotfix:verify": "node scripts/verify-launcher-hotfix-protocol.js",
     "postinstall": "electron-builder install-app-deps && npm run patch-openclaw"
   },
   "build": {

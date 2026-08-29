@@ -20,6 +20,7 @@ const macLauncherScriptInclude = path.join(appDir, 'scripts', 'launcher', 'macos
 const macLauncherBinary = path.join(releaseDir, 'launcher', 'macos', 'U-Claw Launcher');
 const winLauncherSourceDir = path.join(appDir, 'scripts', 'launcher', 'windows');
 const winLauncherBinary = path.join(releaseDir, 'launcher', 'U-Claw Launcher.exe');
+const winSyncScript = path.join(appDir, 'scripts', 'Windows-Sync-Data.ps1');
 const desktopAgentDir = path.join(process.env.HOME || '', 'Library', 'Application Support', 'U-Claw', '.openclaw', 'agents', 'main', 'agent');
 
 function usage() {
@@ -60,7 +61,8 @@ function parseArgs(argv) {
 }
 
 function run(command, args, options = {}) {
-  console.log(`[package:portable] ${command} ${args.join(' ')}`);
+  const commandText = options.logArgs === false ? `${command} [args redacted]` : `${command} ${args.join(' ')}`;
+  console.log(`[package:portable] ${commandText}`);
   const result = spawnSync(command, args, {
     cwd: options.cwd || appDir,
     env: { ...process.env, ...(options.env || {}) },
@@ -127,6 +129,21 @@ function copyDirIfMissing(source, destination) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.cpSync(source, destination, { recursive: true });
   return true;
+}
+
+function removeAppleDoubleFiles(root) {
+  if (!fs.existsSync(root)) return 0;
+  let removed = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const fullPath = path.join(root, entry.name);
+    if (entry.name.startsWith('._')) {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+      removed += 1;
+      continue;
+    }
+    if (entry.isDirectory()) removed += removeAppleDoubleFiles(fullPath);
+  }
+  return removed;
 }
 
 function ensureSourceRuntime(name) {
@@ -272,7 +289,7 @@ function seedStreamerAuthStore(edition, stageRoot) {
     'CREATE TABLE IF NOT EXISTS auth_profile_state (state_key TEXT PRIMARY KEY NOT NULL, state_json TEXT NOT NULL, updated_at INTEGER NOT NULL);',
     `INSERT INTO auth_profile_store(store_key, store_json, updated_at) VALUES('primary', json('${JSON.stringify(store).replace(/'/g, "''")}'), ${now});`,
     `INSERT INTO auth_profile_state(state_key, state_json, updated_at) VALUES('primary', json('${JSON.stringify(state).replace(/'/g, "''")}'), ${now});`
-  ].join(' ')]);
+  ].join(' ')], { logArgs: false });
 }
 
 function packageNotes(edition, macArm64Hash, macX64Hash, winHash) {
@@ -301,6 +318,7 @@ Built: ${localDisplayTime()}
   Windows:
   Formal entry: double-click U-Claw Launcher.exe
   Diagnostic entry: Windows-Start-App.bat
+  Sync helper: Windows-Sync-Data.ps1
   App cache: %LOCALAPPDATA%\\U-Claw\\usb-portable\\app-win-x64
   USB data: <USB>\\U-Claw\\data
   Runtime data cache: %LOCALAPPDATA%\\U-Claw\\usb-portable\\data-<usb-id>
@@ -336,10 +354,13 @@ Launcher behavior:
   Launchers show native progress only while copying, extracting, syncing, or closing.
   Electron window stays hidden until Gateway ready/App ready, then opens directly to the main UI.
   Runtime data uses a per-USB computer cache for speed, then syncs back to <USB>/U-Claw/data.
+  Electron Control UI profile uses local per-USB/per-platform storage and is never synced with data/.
   Runtime sync never overwrites USB data/.openclaw/openclaw.json.
+  USB-to-runtime startup sync copies data/.openclaw/openclaw.json so new computers get the disk config.
+  OpenClaw device pairing state stays in each computer runtime cache and is not synced between Mac/Windows.
   Two USB disks use different cache IDs, so their data does not merge.
   Clean same-machine restart reuses current app and data cache, skipping USB-to-runtime sync when markers match.
-  Close asks for confirmation first, then shows shutdown progress and stops this launch's services.
+  Close asks for confirmation first, then shows shutdown progress in app while launcher stays hidden.
   Immediate reopen during shutdown queues one relaunch instead of starting a second app/process.
 	`;
 }
@@ -453,12 +474,14 @@ function assembleStage(edition) {
   writeText(path.join(archiveDir, `${path.basename(winArchive)}.sha256`), `${winHash}\n`);
   fs.copyFileSync(path.join(appDir, 'scripts', 'Mac-Start-App.command'), path.join(stageRoot, 'Mac-Start-App.command'));
   fs.copyFileSync(path.join(appDir, 'scripts', 'Windows-Start-App.bat'), path.join(stageRoot, 'Windows-Start-App.bat'));
+  fs.copyFileSync(winSyncScript, path.join(stageRoot, 'Windows-Sync-Data.ps1'));
   fs.chmodSync(path.join(stageRoot, 'Mac-Start-App.command'), 0o755);
   buildMacLauncher(stageRoot);
   buildWindowsLauncher(stageRoot);
   generateConfig(edition, configPath);
   seedStreamerAuthStore(edition, stageRoot);
   writeText(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), packageNotes(edition, macArm64Hash, macX64Hash, winHash));
+  removeAppleDoubleFiles(stageRoot);
 
   return { stageRoot, macArm64Hash, macX64Hash, winHash };
 }
@@ -506,6 +529,7 @@ function deploy(stage, usbRoot) {
     'U-Claw Launcher.exe',
     'Mac-Start-App.command',
     'Windows-Start-App.bat',
+    'Windows-Sync-Data.ps1',
     'UCLAW-PACKAGE-NOTES.txt',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz.sha256',
@@ -552,6 +576,7 @@ function deploy(stage, usbRoot) {
   }
   fs.chmodSync(path.join(targetRoot, 'Mac-Start-App.command'), 0o755);
   fs.chmodSync(path.join(targetRoot, 'U-Claw Launcher.app', 'Contents', 'MacOS', 'U-Claw Launcher'), 0o755);
+  const appleDoubleRemoved = removeAppleDoubleFiles(targetRoot);
 
   const deployedMacArm64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macArm64Archive)));
   const deployedMacX64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macX64Archive)));
@@ -566,6 +591,7 @@ function deploy(stage, usbRoot) {
 
   console.log(`[package:portable] deployed ${targetRoot}`);
   console.log(`[package:portable] data ${dataInitialized ? 'initialized' : 'preserved'} ${path.join(targetRoot, 'data')}`);
+  console.log(`[package:portable] removed AppleDouble metadata files ${appleDoubleRemoved}`);
   console.log(`[package:portable] rollback ${backupRoot}`);
 }
 

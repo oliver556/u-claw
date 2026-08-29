@@ -15,11 +15,13 @@ set "USB_START_LOG=%UCLAW_USB_WINDOWS_START_LOG%"
 if "%USB_START_LOG%"=="" set "USB_START_LOG=%USB_LOG_DIR%\Windows-Start-App.log"
 set "ARCHIVE=%ROOT%\app\desktop-archive\u-claw-app-win-x64.zip"
 set "ARCHIVE_SHA_FILE=%ARCHIVE%.sha256"
+set "SYNC_SCRIPT=%ROOT%\Windows-Sync-Data.ps1"
 for /f %%H in ('powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$bytes=[Text.Encoding]::UTF8.GetBytes($env:ROOT.ToLowerInvariant()); $hash=[Security.Cryptography.SHA256]::Create().ComputeHash($bytes); ([BitConverter]::ToString($hash)).Replace('-','').Substring(0,16).ToLowerInvariant()"') do set "ROOT_ID=%%H"
 if "%ROOT_ID%"=="" set "ROOT_ID=default"
 set "CACHE_ROOT=%HOST_LOCALAPPDATA%\U-Claw\usb-portable"
 set "APP_CACHE_DIR=%CACHE_ROOT%\app-win-x64"
 set "RUN_DATA_DIR=%CACHE_ROOT%\data-%ROOT_ID%"
+set "ELECTRON_PROFILE_DIR=%CACHE_ROOT%\electron-profile-win32-%ROOT_ID%"
 set "SYNC_STATE_DIR=%RUN_DATA_DIR%\.uclaw-sync"
 set "DIRTY_FILE=%SYNC_STATE_DIR%\dirty.json"
 set "USB_DIRTY_FILE=%USB_DATA_DIR%\.uclaw-sync\dirty.json"
@@ -52,6 +54,21 @@ if not exist "%ARCHIVE_SHA_FILE%" (
 if not exist "%USB_DATA_DIR%\.openclaw\openclaw.json" (
   echo [U-Claw] Missing config:
   echo %USB_DATA_DIR%\.openclaw\openclaw.json
+  call :pause_if_interactive
+  exit /b 1
+)
+
+if not exist "%SYNC_SCRIPT%" (
+  echo [U-Claw] Missing Windows sync helper:
+  echo %SYNC_SCRIPT%
+  call :pause_if_interactive
+  exit /b 1
+)
+
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$dir=$env:USB_DATA_DIR; if (-not (Test-Path -LiteralPath $dir -PathType Container)) { Write-Error ('USB data dir unavailable: {0}' -f $dir); exit 1 }; $probe=Join-Path $dir '.uclaw-write-test'; try { New-Item -ItemType Directory -Force -Path (Split-Path -Parent $probe) | Out-Null; Set-Content -LiteralPath $probe -Value 'ok' -Encoding ASCII; Remove-Item -LiteralPath $probe -Force; exit 0 } catch { Write-Error ('USB data dir is not writable: {0}: {1}' -f $dir,$_.Exception.Message); exit 1 }"
+if errorlevel 1 (
+  echo [U-Claw] USB data dir is unavailable or not writable:
+  echo %USB_DATA_DIR%
   call :pause_if_interactive
   exit /b 1
 )
@@ -133,7 +150,25 @@ if not exist "%TMP_APP_DIR%\U-Claw.exe" (
   echo [U-Claw] Invalid archive: U-Claw.exe missing.
   goto fatal
 )
+if not exist "%TMP_APP_DIR%\resources\resources\runtime\node-win32-x64\node.exe" (
+  echo [U-Claw] Invalid archive: bundled node.exe missing.
+  goto fatal
+)
+if not exist "%TMP_APP_DIR%\resources\app\node_modules\openclaw\dist\entry.mjs" if not exist "%TMP_APP_DIR%\resources\app\node_modules\openclaw\dist\entry.js" (
+  echo [U-Claw] Invalid archive: openclaw dist entry missing.
+  goto fatal
+)
+if not exist "%TMP_APP_DIR%\resources\app\node_modules\chokidar" (
+  echo [U-Claw] Invalid archive: chokidar package missing.
+  goto fatal
+)
+call :stop_existing_app_cache_processes
 if exist "%APP_CACHE_DIR%" rmdir /s /q "%APP_CACHE_DIR%"
+if exist "%APP_CACHE_DIR%" (
+  echo [U-Claw] Existing app cache is still locked by another U-Claw process.
+  echo [U-Claw] Please close U-Claw from Task Manager, then start again.
+  goto fatal
+)
 move "%TMP_APP_DIR%" "%APP_CACHE_DIR%" >nul
 >"%STAMP_FILE%" echo %CURRENT_STAMP%
 if defined INSTALL_LOCK_HELD rmdir "%LOCK_DIR%" >nul 2>&1
@@ -143,8 +178,10 @@ goto app_cache_ready
 :app_cache_ready
 echo [U-Claw] Reusing app cache: %APP_CACHE_DIR%
 call :run_startup_hard_update
-if errorlevel 20 exit /b 0
-if errorlevel 1 goto fatal
+set "HARD_UPDATE_STATUS=%ERRORLEVEL%"
+if "%HARD_UPDATE_STATUS%"=="20" exit /b 0
+if "%HARD_UPDATE_STATUS%"=="2" goto install_app_cache
+if not "%HARD_UPDATE_STATUS%"=="0" goto fatal
 echo [U-Claw] Preparing runtime data cache...
 if not exist "%RUN_DATA_DIR%" mkdir "%RUN_DATA_DIR%" >nul 2>&1
 if exist "%DIRTY_FILE%" (
@@ -164,11 +201,17 @@ if not errorlevel 1 (
 set "UCLAW_PORTABLE_DATA_DIR=%USB_DATA_DIR%"
 set "UCLAW_PORTABLE_WORK_DATA_DIR=%RUN_DATA_DIR%"
 set "UCLAW_USB_DATA_DIR=%USB_DATA_DIR%"
+set "UCLAW_PORTABLE_ROOT=%ROOT%"
+set "UCLAW_CACHE_ROOT=%CACHE_ROOT%"
+set "UCLAW_APP_CACHE_DIR=%APP_CACHE_DIR%"
+set "UCLAW_ARCHIVE_CACHE=%LOCAL_ARCHIVE%"
+set "UCLAW_APP_CACHE_STAMP=%STAMP_FILE%"
+set "UCLAW_ELECTRON_PROFILE_DIR=%ELECTRON_PROFILE_DIR%"
 set "OPENCLAW_HOME=%RUN_DATA_DIR%"
 set "OPENCLAW_STATE_DIR=%RUN_DATA_DIR%\.openclaw"
 set "OPENCLAW_CONFIG_PATH=%RUN_DATA_DIR%\.openclaw\openclaw.json"
 set "OPENCLAW_DISABLE_BONJOUR=1"
-set "UCLAW_MEDIA_PREVIEW_ROOTS=%RUN_DATA_DIR%\.openclaw\media"
+set "UCLAW_MEDIA_PREVIEW_ROOTS=%RUN_DATA_DIR%\.openclaw\media;%USB_DATA_DIR%\.openclaw\media"
 set "UCLAW_PORTABLE_HOME=%RUN_DATA_DIR%\.home"
 set "HOME=%UCLAW_PORTABLE_HOME%"
 set "USERPROFILE=%UCLAW_PORTABLE_HOME%"
@@ -189,11 +232,13 @@ echo [U-Claw] USB root: %ROOT%
 echo [U-Claw] USB data dir: %USB_DATA_DIR%
 echo [U-Claw] Runtime data dir: %RUN_DATA_DIR%
 echo [U-Claw] App binary: %APP_BIN%
+call :stop_existing_app_cache_processes
 echo [U-Claw] Starting Windows desktop app...
 echo.
 
-"%APP_BIN%"
+start "" /wait "%APP_BIN%"
 set "APP_EXIT=%ERRORLEVEL%"
+echo [U-Claw] Windows desktop app exited with code %APP_EXIT%.
 
 echo [U-Claw] Syncing runtime data back to USB...
 call :sync_e "Syncing runtime data back to USB" "%RUN_DATA_DIR%" "%USB_DATA_DIR%"
@@ -266,6 +311,11 @@ if not "%POST_UPDATE_STAMP%"=="" if not "%POST_UPDATE_STAMP%"=="%CURRENT_STAMP%"
 )
 exit /b 0
 
+:stop_existing_app_cache_processes
+if not exist "%APP_CACHE_DIR%" exit /b 0
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$cache=[IO.Path]::GetFullPath($env:APP_CACHE_DIR).TrimEnd('\')+'\'; $current=$PID; $matches=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessId -ne $current -and (($_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($cache,[StringComparison]::OrdinalIgnoreCase)) -or ($_.CommandLine -and $_.CommandLine.IndexOf($cache,[StringComparison]::OrdinalIgnoreCase) -ge 0)) }); if ($matches.Count -eq 0) { exit 0 }; Write-Host ('[U-Claw] Stopping {0} old U-Claw cache process(es) before app cache update...' -f $matches.Count); foreach ($p in $matches) { Stop-Process -Id $p.ProcessId -ErrorAction SilentlyContinue }; $deadline=(Get-Date).AddSeconds(8); do { Start-Sleep -Milliseconds 250; $alive=@($matches | Where-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }) } while ($alive.Count -gt 0 -and (Get-Date) -lt $deadline); foreach ($p in $alive) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500"
+exit /b 0
+
 :sync_launcher_logs
 if not exist "%USB_LOG_DIR%" mkdir "%USB_LOG_DIR%" >nul 2>&1
 if exist "%LOCAL_START_LOG%" copy /y "%LOCAL_START_LOG%" "%USB_START_LOG%" >nul 2>&1
@@ -276,6 +326,7 @@ exit /b 0
 set "SYNC_LABEL=%~1"
 set "SYNC_FROM=%~2"
 set "SYNC_TO=%~3"
+set "SYNC_PRESERVE_CONFIG=1"
 call :sync_impl E
 exit /b %ERRORLEVEL%
 
@@ -283,13 +334,13 @@ exit /b %ERRORLEVEL%
 set "SYNC_LABEL=%~1"
 set "SYNC_FROM=%~2"
 set "SYNC_TO=%~3"
+set "SYNC_PRESERVE_CONFIG=0"
 call :sync_impl MIR
 exit /b %ERRORLEVEL%
 
 :sync_impl
 set "SYNC_MODE=%~1"
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-  "$label=$env:SYNC_LABEL; $from=$env:SYNC_FROM; $to=$env:SYNC_TO; $timeout=[int]$env:DATA_SYNC_TIMEOUT_SECONDS; $mode=$env:SYNC_MODE; New-Item -ItemType Directory -Force -Path $to | Out-Null; $started=Get-Date; $job=Start-Job -ScriptBlock { param($from,$to,$mode) $xd=@((Join-Path $from '.cache\v8-compile-cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Code Cache'),(Join-Path $from '.home\AppData\Roaming\u-claw\GPUCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\DawnCache'),(Join-Path $from '.home\AppData\Roaming\u-claw\Crashpad')); $xf=@('.DS_Store','._*','Cookies','Cookies-journal','LOCK','SingletonCookie','SingletonLock','SingletonSocket'); if ($mode -ne 'MIR') { $xf += @('openclaw.json','openclaw.json.last-good') }; if ($mode -eq 'MIR') { & robocopy $from $to /MIR /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null } else { & robocopy $from $to /E /XD $xd /XF $xf /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null }; if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE } exit 0 } -ArgumentList $from,$to,$mode; while (-not (Wait-Job -Job $job -Timeout 5)) { $elapsed=[int]((Get-Date)-$started).TotalSeconds; $items=@(Get-ChildItem -LiteralPath $to -Recurse -Force -File -ErrorAction SilentlyContinue); $files=$items.Count; $mb=[math]::Round((($items | Measure-Object -Property Length -Sum).Sum)/1MB,1); Write-Host ('[U-Claw] {0}... {1}s elapsed, {2} files, {3} MB.' -f $label,$elapsed,$files,$mb); if ($elapsed -ge $timeout) { Stop-Job -Job $job; Remove-Job -Job $job -Force; Write-Error ('{0} timed out after {1}s.' -f $label,$timeout); exit 1 } }; Receive-Job -Job $job; $ok=$job.State -eq 'Completed'; Remove-Job -Job $job; if (-not $ok) { exit 1 }"
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SYNC_SCRIPT%"
 exit /b %ERRORLEVEL%
 
 :runtime_cache_is_current

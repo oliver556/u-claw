@@ -502,6 +502,7 @@ function installFromStaging(usbRoot, stagingDir) {
     'U-Claw Launcher.app',
     'Mac-Start-App.command',
     'Windows-Start-App.bat',
+    'Windows-Sync-Data.ps1',
     'UCLAW-PACKAGE-NOTES.txt'
   ]);
   for (const entry of fs.readdirSync(stagingDir, { withFileTypes: true })) {
