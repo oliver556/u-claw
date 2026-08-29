@@ -73,10 +73,10 @@ function runShell(command, args, extraEnv = {}) {
 function baseUrlFor(options) {
   const env = parseEnvFile(path.resolve(options.env));
   if (options.channel === 'staging') {
-    return `${firstEnv(env, ['R2_STAGING_PUBLIC_URL']).replace(/\/+$/, '')}/releases`;
+    return `${firstEnv(env, ['DOWNLOAD_STAGING_PUBLIC_URL', 'R2_STAGING_PUBLIC_URL']).replace(/\/+$/, '')}/uclaw/releases`;
   }
   if (options.channel === 'prod') {
-    return `${firstEnv(env, ['R2_PROD_PUBLIC_URL']).replace(/\/+$/, '')}/releases`;
+    return `${firstEnv(env, ['DOWNLOAD_PROD_PUBLIC_URL', 'R2_PROD_PUBLIC_URL']).replace(/\/+$/, '')}/uclaw/releases`;
   }
   throw new Error('--channel must be staging or prod');
 }

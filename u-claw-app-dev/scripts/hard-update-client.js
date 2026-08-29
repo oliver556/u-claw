@@ -15,7 +15,8 @@ const {
 const { verifyPayload } = require('./lib/release-signing');
 
 const productionUrl = 'https://yiyong.me/uclaw/releases/production.json';
-const stagingProductionUrl = 'https://pub-8289f643846848528b61bfd5dbf17e43.r2.dev/releases/production.json';
+const stagingProductionUrl = 'https://download.yiyong.me/uclaw/releases/production.json';
+const legacyR2StagingProductionUrl = 'https://pub-8289f643846848528b61bfd5dbf17e43.r2.dev/releases/production.json';
 const defaultUpdateCheckUrl = 'https://updates.yiyong.me/uclaw/update/check';
 const transactionStates = [
   'checking',
@@ -46,6 +47,9 @@ function usage() {
 
 Direct R2 mode is used when --release, --production-url, and --update-check-url are omitted. Default staging URL:
   ${stagingProductionUrl}
+
+Legacy R2 staging URL:
+  ${legacyR2StagingProductionUrl}
 
 Explicit update check mode:
   ${defaultUpdateCheckUrl}
