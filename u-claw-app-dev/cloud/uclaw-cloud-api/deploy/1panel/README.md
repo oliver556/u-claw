@@ -3,7 +3,7 @@
 ## 目标拓扑
 
 - `158.51.110.49:14851`：New API / sub2api 源站，安装 1Panel、Docker、PostgreSQL、Redis 和业务容器。
-- `64.90.19.251:24851`：前置反代，只开放 `newapi.yiyong.me`、`sub2api.yiyong.me`，并限制管理路径来源。
+- `64.90.19.251:24851`：前置反代，只开放 `api.yiyong.me`、`sub2api.yiyong.me`，并限制管理路径来源。
 - `121.41.89.103:22`：U-Claw Cloud API，只允许它访问 New API 管理接口。
 
 ## 1Panel 基础安装
@@ -70,16 +70,16 @@ FRONT_IP=64.90.19.251 ./apply-origin-firewall.sh
 
 在前置 `64.90.19.251` 安装 Nginx/OpenResty 或使用 1Panel 网站反代，参考 `newapi-front-nginx.conf`：
 
-- `newapi.yiyong.me/v1/`：公网模型 API。
-- `newapi.yiyong.me/api/user/*`、`/api/token/*`、`/api/log/*`：仅允许 `121.41.89.103`。
+- `api.yiyong.me/v1/`：公网模型 API。
+- `api.yiyong.me/api/user/*`、`/api/token/*`、`/api/log/*`：仅允许 `121.41.89.103`。
 - `sub2api.yiyong.me/`：默认仅允许 `121.41.89.103`，需要浏览器管理时临时加办公室/VPN IP。
 
 TLS 证书由 1Panel/OpenResty 或 Caddy 自动签发；不要把证书私钥放入 repo。
 
 当前验收状态：
 
-- `https://newapi.yiyong.me/v1/models`：公网返回 `401`，代表 New API 客户端 API 已经走通，等待真实 token。
-- `https://newapi.yiyong.me/`：非授权来源返回 `403`；从 `121.41.89.103` 返回 `200`。
+- `https://api.yiyong.me/v1/models`：公网可达，代表 New API 客户端 API 已经走通，等待真实 token。
+- `https://api.yiyong.me/`：非授权来源返回 `403`；从 `121.41.89.103` 返回 `200`。
 - `https://sub2api.yiyong.me/`：非授权来源返回 `403`；从 `121.41.89.103` 返回 `200`。
 - `http://158.51.110.49:3000/` 与 `http://158.51.110.49:8080/`：非前置来源超时，代表源站直连已收口。
 
@@ -88,8 +88,8 @@ TLS 证书由 1Panel/OpenResty 或 Caddy 自动签发；不要把证书私钥放
 `121.41.89.103` 的 `uclaw-cloud-api.env` 中应使用：
 
 ```text
-NEWAPI_ADMIN_BASE_URL=https://newapi.yiyong.me
-NEWAPI_CLIENT_BASE_URL=https://newapi.yiyong.me/v1
+NEWAPI_ADMIN_BASE_URL=https://api.yiyong.me
+NEWAPI_CLIENT_BASE_URL=https://api.yiyong.me/v1
 ```
 
 `NEWAPI_ADMIN_TOKEN` 只放服务器受限 env。短信当前代码链路已受理，但阿里云回执 `PORT_NOT_REGISTERED`，需等签名/端口实名报备生效后再做送达验收。

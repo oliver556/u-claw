@@ -172,7 +172,7 @@ docker compose --env-file .env -f newapi-sub2api.compose.yml up -d
 FRONT_IP=64.90.19.251 ./apply-origin-firewall.sh
 ```
 
-前置 `64.90.19.251` 只做 `newapi.yiyong.me`、`sub2api.yiyong.me` 的 TLS/反代/allowlist；源站 `3000/8080` 必须用安全组或防火墙限制只允许前置访问。
+前置 `64.90.19.251` 只做 `api.yiyong.me`、`sub2api.yiyong.me` 的 TLS/反代/allowlist；源站 `3000/8080` 必须用安全组或防火墙限制只允许前置访问。
 
 ## 首启 activation-only 激活接口
 

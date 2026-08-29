@@ -193,7 +193,7 @@ func NewService(store Store, cfg Config) (*Service, error) {
 		return nil, fmt.Errorf("activation store is required")
 	}
 	if strings.TrimSpace(cfg.NewAPIBaseURL) == "" {
-		cfg.NewAPIBaseURL = "https://api.gmnlee.com/v1"
+		cfg.NewAPIBaseURL = "https://api.yiyong.me/v1"
 	}
 	if strings.TrimSpace(cfg.PreviewToken) == "" {
 		cfg.PreviewToken = "uclaw-preview-newapi-token"

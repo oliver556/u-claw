@@ -199,7 +199,7 @@ DEV_SMS_CODE=123456
 ## 当前部署盘点
 
 - `121.41.89.103`：旧 activation-server 仍在；新增 `uclaw-cloud-api-staging.service` 监听 `127.0.0.1:18180`；`license.yiyong.me` 新激活路径已转发到该服务，公网首启激活真实链路验收通过。
-- `64.90.19.251`：已安装 Nginx/Certbot；`newapi.yiyong.me`、`sub2api.yiyong.me` HTTPS 证书有效；公网 `/v1` 可达，管理面非授权来源 `403`。
+- `64.90.19.251`：已安装 Nginx/Certbot；`api.yiyong.me`、`sub2api.yiyong.me` HTTPS 证书有效；公网 `/v1` 可达，管理面非授权来源 `403`。
 - `158.51.110.49`：已安装 1Panel v2.2.5、Docker 与 Compose；New API、sub2api、PostgreSQL、Redis 均已启动，源站 `3000/8080` 已用 `DOCKER-USER` allowlist 限制只允许前置访问。
 - Aliyun SMS：`SendSms` API 已受理；`QuerySendDetails` 回执 `PORT_NOT_REGISTERED`，待短信签名/端口实名报备审核完成后再复验，当前暂不阻塞主线。
 - Electron activation-only：已通过本地 stub 驱动的真实页面写盘和同进程进入主界面验收；短信待审核期间按真实手机号 + 固定验证码 `123456` + 激活码完成首启。

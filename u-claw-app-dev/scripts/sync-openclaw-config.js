@@ -10,7 +10,7 @@ const appSupportPath = path.join(os.homedir(), 'Library', 'Application Support')
 const appDataNames = ['u-claw', 'U-Claw'];
 const desktopConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, '.openclaw', 'openclaw.json'));
 const portableCacheConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, 'usb-portable', 'data', '.openclaw', 'openclaw.json'));
-const DEFAULT_NEW_API_BASE_URL = 'https://api.gmnlee.com/v1';
+const DEFAULT_NEW_API_BASE_URL = 'https://api.yiyong.me/v1';
 const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://video-adapter.gmnlee.com/xai/v1';
 const DEFAULT_VIDEO_ADAPTER_API_KEY = 'uclaw-video-adapter';
 

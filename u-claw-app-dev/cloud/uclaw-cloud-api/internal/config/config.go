@@ -70,7 +70,7 @@ func Load(getenv Getter) (Config, error) {
 		NewAPIAdminToken:         strings.TrimSpace(getenv("NEWAPI_ADMIN_TOKEN")),
 		NewAPIAdminUsername:      strings.TrimSpace(getenv("NEWAPI_ADMIN_USERNAME")),
 		NewAPIAdminPassword:      strings.TrimSpace(getenv("NEWAPI_ADMIN_PASSWORD")),
-		NewAPIClientBaseURL:      strings.TrimRight(withDefault(getenv("NEWAPI_CLIENT_BASE_URL"), "https://api.gmnlee.com/v1"), "/"),
+		NewAPIClientBaseURL:      strings.TrimRight(withDefault(getenv("NEWAPI_CLIENT_BASE_URL"), "https://api.yiyong.me/v1"), "/"),
 		NewAPIPreviewToken:       withDefault(getenv("NEWAPI_PREVIEW_TOKEN"), "uclaw-preview-newapi-token"),
 		NewAPIHTTPTimeout:        10 * time.Second,
 		NewAPIActivationQuota:    0,

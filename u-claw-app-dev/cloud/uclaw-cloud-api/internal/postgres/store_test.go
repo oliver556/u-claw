@@ -312,7 +312,7 @@ func TestStoreListActivationCodesReturnsCodeAndAccountMapping(t *testing.T) {
 		"ABCD",
 		int64(77),
 		"15067729715",
-		"https://newapi.yiyong.me",
+		"https://api.yiyong.me",
 		rotatedAt,
 		"act_123",
 		"committed",
