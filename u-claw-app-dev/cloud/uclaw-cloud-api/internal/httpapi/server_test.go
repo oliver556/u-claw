@@ -441,6 +441,9 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	if pageRec.Code != http.StatusOK || !strings.Contains(pageRec.Body.String(), "U-Claw 运营后台") {
 		t.Fatalf("admin page status = %d body = %s", pageRec.Code, pageRec.Body.String())
 	}
+	if !strings.Contains(pageRec.Body.String(), `item.status !== "unused" && item.status !== "disabled"`) {
+		t.Fatalf("admin page must disable reissue outside unused/disabled states")
+	}
 
 	unauthorizedRec := httptest.NewRecorder()
 	unauthorizedReq := httptest.NewRequest(http.MethodGet, "/internal/admin/v1/activation-codes", nil)
@@ -536,6 +539,18 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	server.ServeHTTP(reissueRec, reissueReq)
 	if reissueRec.Code != http.StatusCreated {
 		t.Fatalf("reissue status = %d body = %s", reissueRec.Code, reissueRec.Body.String())
+	}
+
+	reissueAgainRec := httptest.NewRecorder()
+	reissueAgainReq := httptest.NewRequest(
+		http.MethodPost,
+		"/internal/admin/v1/activation-codes/"+strconv.FormatInt(generated.Codes[0].ID, 10)+"/reissue",
+		bytes.NewBufferString(`{}`),
+	)
+	reissueAgainReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+	server.ServeHTTP(reissueAgainRec, reissueAgainReq)
+	if reissueAgainRec.Code != http.StatusBadRequest {
+		t.Fatalf("reissue again status = %d body = %s", reissueAgainRec.Code, reissueAgainRec.Body.String())
 	}
 
 	listRec := httptest.NewRecorder()

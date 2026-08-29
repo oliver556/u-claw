@@ -622,8 +622,8 @@ func (s *MemoryStore) ReissueActivationCode(_ context.Context, id int64, secret 
 	if !ok {
 		return ActivationCode{}, fmt.Errorf("activation code not found")
 	}
-	if old.Status == "bound" {
-		return ActivationCode{}, fmt.Errorf("bound activation code cannot be reissued")
+	if old.Status != "unused" && old.Status != "disabled" {
+		return ActivationCode{}, fmt.Errorf("activation code is not reissueable")
 	}
 	old.Status = "reissued"
 	s.codes[id] = old

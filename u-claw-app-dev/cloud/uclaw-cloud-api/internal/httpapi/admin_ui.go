@@ -421,11 +421,13 @@ const adminConsoleHTML = `<!doctype html>
         disable.className = "danger";
         disable.textContent = "禁用";
         disable.disabled = item.status !== "unused";
+        disable.title = disable.disabled ? "只有未激活激活码可以禁用" : "";
         disable.onclick = () => disableCode(item.id);
         const reissue = document.createElement("button");
         reissue.className = "secondary";
         reissue.textContent = "重发";
-        reissue.disabled = item.status === "bound";
+        reissue.disabled = item.status !== "unused" && item.status !== "disabled";
+        reissue.title = reissue.disabled ? "只有未激活或已禁用激活码可以重发" : "";
         reissue.onclick = () => reissueCode(item.id);
         actions.append(copy, disable, reissue);
         body.appendChild(tr);
