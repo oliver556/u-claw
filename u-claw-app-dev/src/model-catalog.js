@@ -61,14 +61,14 @@ function catalogModelMatchesKind(model, kind) {
     ? model.capabilities.map((value) => String(value).toLowerCase()).filter(Boolean)
     : [];
   if (kind === 'video') {
-    return capabilities.includes('video') || (!capabilities.length && /video|jimeng|kling|runway/.test(id));
+    return capabilities.includes('video') || (!capabilities.length && /video|jimeng|kling|runway|seedance/.test(id));
   }
   if (kind === 'image') {
     return capabilities.includes('image') || (!capabilities.length && /image|gpt-image|dall|flux|midjourney/.test(id));
   }
   if (kind === 'text') {
     if (capabilities.length) return capabilities.includes('text') && !capabilities.includes('image') && !capabilities.includes('video');
-    return !(/video|jimeng|kling|runway|gpt-image|image|dall|flux|midjourney/.test(id));
+    return !(/video|jimeng|kling|runway|seedance|gpt-image|image|dall|flux|midjourney/.test(id));
   }
   return false;
 }

@@ -73,6 +73,8 @@ const checks = [
   [configSource, "async uclawChangeModel(e,t)", "direct model change method"],
   [configSource, "uclawRefreshModelCatalog({silent:!0})", "model change refreshes cloud catalog"],
   [configSource, "n?.capabilities", "model candidates use cloud capabilities"],
+  [configSource, "video|jimeng|kling|runway|seedance", "model candidates classify seedance as video"],
+  [configSource, "runway|seedance|gpt-image", "text picker excludes seedance video models"],
   [configSource, "e?.silent", "silent cloud catalog refresh mode"],
   [configSource, "onModelChange:(e,t)=>this.uclawChangeModel(e,t)", "model card change callback"],
   [configSource, "[`agents`,`defaults`,`model`,`primary`]", "text model config path"],

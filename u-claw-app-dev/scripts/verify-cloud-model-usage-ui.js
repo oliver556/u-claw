@@ -55,7 +55,7 @@ function seedLocalNewAPIModelCatalog() {
     ) values (
       ${newAPIE2EChannelID}, 1, 'sk-uclaw-ui-e2e-placeholder', 1, 'uclaw-ui-e2e-catalog',
       0, strftime('%s','now'), 0, 0, 'http://127.0.0.1:65535',
-      'gpt-5.5,gpt-image-2,jimeng-video-3-720p', 'default', 0, '', '',
+      'gpt-5.5,gpt-image-2,jimeng-video-3-720p,seedance-1.5-pro-1080p-10s', 'default', 0, '', '',
       0, 0, '{}'
     );
   `]);
@@ -227,6 +227,7 @@ function writeActivatedClientState(accessToken, newAPIToken) {
       { id: 'gpt-5.5', name: 'gpt-5.5', capabilities: ['text'], input: ['text'] },
       { id: 'gpt-image-2', name: 'gpt-image-2', capabilities: ['image'], input: ['text', 'image'] },
       { id: 'jimeng-video-3-720p', name: 'jimeng-video-3-720p', capabilities: ['video'], input: ['text', 'image'] },
+      { id: 'seedance-1.5-pro-1080p-10s', name: 'seedance-1.5-pro-1080p-10s', capabilities: ['video'], input: ['text', 'image'] },
     ],
   };
   config.agents = config.agents || {};
@@ -311,7 +312,7 @@ async function assertModelChangeLoadsCloudCatalog(evalJS, cdp) {
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`(() => {
       const text = document.querySelector('.uclaw-model-picker')?.innerText || '';
-      return text.includes('更换文字模型') && text.includes('newapi/gpt-5.5') && !text.includes('gpt-image-2') && !text.includes('jimeng-video-3-720p');
+      return text.includes('更换文字模型') && text.includes('newapi/gpt-5.5') && !text.includes('gpt-image-2') && !text.includes('jimeng-video-3-720p') && !text.includes('seedance-1.5-pro-1080p-10s');
     })()`);
     if (ok) {
       sawCloudCatalog = true;
