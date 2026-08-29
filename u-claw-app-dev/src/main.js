@@ -660,6 +660,22 @@ function createActivationIdempotencyKey({ account, activationCode, usbSummary })
 }
 
 /**
+ * Parses Cloud API JSON and preserves enough HTTP context when a proxy or old
+ * service returns plain text instead of the expected JSON envelope.
+ */
+function parseActivationResponseJSON(text, options = {}) {
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const pathname = options.pathname || 'request';
+    const status = options.status ? `HTTP ${options.status}` : 'HTTP unknown';
+    const preview = String(text).replace(/\s+/g, ' ').trim().slice(0, 160) || 'empty response';
+    throw new Error(`Cloud API ${pathname} 返回非 JSON 响应（${status}）：${preview}`);
+  }
+}
+
+/**
  * Posts JSON to the Bavi-box activation service from the trusted main process.
  */
 async function postActivationJSON(pathname, payload, options = {}) {
@@ -679,7 +695,7 @@ async function postActivationJSON(pathname, payload, options = {}) {
       signal: controller.signal,
     });
     const text = await response.text();
-    const data = text ? JSON.parse(text) : {};
+    const data = parseActivationResponseJSON(text, { pathname, status: response.status });
     if (!response.ok) {
       throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
     }
@@ -708,7 +724,7 @@ async function getActivationJSON(pathname, options = {}) {
       signal: controller.signal,
     });
     const text = await response.text();
-    const data = text ? JSON.parse(text) : {};
+    const data = parseActivationResponseJSON(text, { pathname, status: response.status });
     if (!response.ok) {
       throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
     }
