@@ -109,8 +109,11 @@ const checks = [
   [cssSource, "@media (max-width:1420px){.uclaw-config-model-main{grid-template-columns:1fr}.uclaw-config-model-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}", "small screen stacks model sections"],
   [cssSource, ".uclaw-model-picker{position:fixed;inset:0", "model selector modal CSS"],
   [cssSource, ".uclaw-model-picker__option:hover,.uclaw-model-picker__option.is-selected", "model selector selected state CSS"],
-  [cssSource, ".uclaw-model-picker__list{max-height:260px;min-height:0;overflow:auto;display:flex;flex-direction:column", "compact model selector list"],
-  [cssSource, ".uclaw-model-picker__option{min-height:66px", "compact model selector option"],
+  [cssSource, ".uclaw-model-picker__list{max-height:390px;min-height:0;overflow:auto;display:flex;flex-direction:column", "roomy model selector list"],
+  [cssSource, ".uclaw-model-picker__option{min-height:86px", "three-line model selector option"],
+  [cssSource, ".uclaw-model-picker__option strong{display:block", "model selector title display"],
+  [cssSource, ".uclaw-model-picker__option span{display:block", "model selector id display"],
+  [cssSource, ".uclaw-model-picker__option em{display:block", "model selector source display"],
   [swSource, "config-model-dashboard-1", "service worker cache marker"],
 ];
 
@@ -140,6 +143,7 @@ const forbiddenByFile = [
   [cssSource, ".uclaw-config-model-card p{display:flex;flex-wrap:wrap", "wrapping model tags"],
   [cssSource, ".uclaw-config-model-card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))", "fixed squeezed model card grid"],
   [cssSource, ".uclaw-model-picker__list{min-height:180px;overflow:auto;display:grid", "stretched model selector list"],
+  [cssSource, ".uclaw-model-picker__option{min-height:66px", "clipped model selector option"],
 ];
 
 for (const [source, needle, label] of forbiddenByFile) {
