@@ -224,9 +224,9 @@ function writeActivatedClientState(accessToken, newAPIToken) {
     apiKey: newAPIToken,
     api: 'openai-completions',
     models: [
-      { id: 'gpt-5.5', name: 'gpt-5.5', capabilities: ['text'], input: ['text'] },
-      { id: 'gpt-image-2', name: 'gpt-image-2', capabilities: ['image'], input: ['text', 'image'] },
-      { id: 'jimeng-video-3-720p', name: 'jimeng-video-3-720p', capabilities: ['video'], input: ['text', 'image'] },
+      { id: 'gpt-5.5', name: 'gpt-5.5', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 },
+      { id: 'gpt-image-2', name: 'gpt-image-2', reasoning: false, input: ['text', 'image'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 },
+      { id: 'jimeng-video-3-720p', name: 'jimeng-video-3-720p', reasoning: false, input: ['text', 'image'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 },
     ],
   };
   config.agents = config.agents || {};
@@ -280,7 +280,7 @@ async function openModelPage(evalJS, cdp) {
   for (let i = 0; i < 180; i += 1) {
     const ok = await evalJS(`(() => {
       const text = document.body.innerText || '';
-      return text.includes('账户算力') && text.includes('模型能力') && text.includes('同步模型');
+      return text.includes('账户余额') && text.includes('模型能力') && text.includes('同步模型');
     })()`);
     if (ok) return;
     await sleep(500);
@@ -347,10 +347,11 @@ async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
   const evalJS = (expression) => cdp
     .send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     .then((result) => result.result.value);
-  const computePerQuota = 120;
-  const expectedInitialText = Number(expectedInitialQuota * computePerQuota).toLocaleString();
-  const expectedFinalText = Number((expectedInitialQuota + rechargeQuota) * computePerQuota).toLocaleString();
-  const expectedRechargeComputeText = `${Number(rechargeQuota * computePerQuota).toLocaleString()} 算力`;
+  const quotaPerCNY = 500000;
+  const computePerQuota = 12;
+  const expectedInitialText = `¥${(Number(expectedInitialQuota) / quotaPerCNY).toFixed(2)}`;
+  const expectedFinalText = `¥${(Number(expectedInitialQuota + rechargeQuota) / quotaPerCNY).toFixed(2)}`;
+  const expectedRechargeComputeText = `${((Number(rechargeQuota) * computePerQuota) / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 })}w 算力`;
 
   for (let i = 0; i < 120; i += 1) {
     if (await evalJS('document.readyState') === 'complete') break;
@@ -361,7 +362,7 @@ async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`(() => {
       const text = document.body.innerText || '';
-      return text.includes('账户算力') && text.includes('已消耗') && text.includes('请求次数') && text.includes(${JSON.stringify(expectedInitialText)}) && text.includes('1 元 = 6kw 算力') && text.includes('New API');
+      return text.includes('账户余额') && text.includes('已消耗') && text.includes('请求次数') && text.includes(${JSON.stringify(expectedInitialText)}) && text.includes('1 元 = 600w 算力') && text.includes('New API');
     })()`);
     if (ok) {
       sawInitialUsage = true;
