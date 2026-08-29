@@ -25,6 +25,7 @@ type Client struct {
 	adminRefreshUsername string
 	adminRefreshPassword string
 	httpClient           HTTPDoer
+	userID               int64
 	tokenMu              sync.RWMutex
 	refreshMu            sync.Mutex
 }
@@ -37,6 +38,13 @@ func WithAdminCredentials(username string, password string) Option {
 	return func(c *Client) {
 		c.adminRefreshUsername = strings.TrimSpace(username)
 		c.adminRefreshPassword = strings.TrimSpace(password)
+	}
+}
+
+// WithUserID adds New API's dashboard user header for user-scoped token APIs.
+func WithUserID(userID int64) Option {
+	return func(c *Client) {
+		c.userID = userID
 	}
 }
 
@@ -66,8 +74,12 @@ func NewClient(baseURL string, adminToken string, httpClient HTTPDoer, options .
 }
 
 // WithAccessToken reuses the same New API management base URL with a different dashboard token.
-func (c *Client) WithAccessToken(accessToken string) (*Client, error) {
-	return NewClient(c.baseURL, accessToken, c.httpClient)
+func (c *Client) WithAccessToken(accessToken string, userID ...int64) (*Client, error) {
+	var options []Option
+	if len(userID) > 0 && userID[0] > 0 {
+		options = append(options, WithUserID(userID[0]))
+	}
+	return NewClient(c.baseURL, accessToken, c.httpClient, options...)
 }
 
 // CreateUser requests a New API user creation. The exact response shape must be verified in Phase 0.
@@ -310,6 +322,9 @@ func (c *Client) cloneRequest(httpReq *http.Request, bodyBytes []byte, attachAut
 		usedToken = c.adminTokenSnapshot()
 		req.Header.Set("Authorization", "Bearer "+usedToken)
 	}
+	if c.userID > 0 {
+		req.Header.Set("New-Api-User", fmt.Sprintf("%d", c.userID))
+	}
 	return req, usedToken, nil
 }
 
@@ -397,8 +412,13 @@ type AddQuotaRequest struct {
 
 // CreateTokenRequest is the assumed Phase 0 payload for POST /api/token/.
 type CreateTokenRequest struct {
-	Name      string `json:"name"`
-	ExpiresAt int64  `json:"expired_time,omitempty"`
+	Name                 string `json:"name"`
+	ExpiresAt            int64  `json:"expired_time,omitempty"`
+	RemainQuota          int64  `json:"remain_quota,omitempty"`
+	UnlimitedQuota       bool   `json:"unlimited_quota"`
+	ModelLimitsEnabled   bool   `json:"model_limits_enabled"`
+	CrossGroupRetry      bool   `json:"cross_group_retry"`
+	SkipModelNameMapping bool   `json:"skip_model_name_mapping"`
 }
 
 // CreateTokenResponse captures likely New API token response fields for spike verification.

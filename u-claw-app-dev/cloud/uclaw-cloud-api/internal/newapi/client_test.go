@@ -113,10 +113,12 @@ func TestAddQuotaSendsManageActionPayload(t *testing.T) {
 
 func TestCreateTokenDecodesTokenPresence(t *testing.T) {
 	var gotPath string
+	var gotUser string
 	var gotPayload CreateTokenRequest
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotUser = r.Header.Get("New-Api-User")
 		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
 			t.Fatalf("Decode request body: %v", err)
 		}
@@ -126,13 +128,13 @@ func TestCreateTokenDecodesTokenPresence(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin-token", server.Client())
+	client, err := NewClient(server.URL, "admin-token", server.Client(), WithUserID(9))
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	var response CreateTokenResponse
-	err = client.CreateToken(context.Background(), CreateTokenRequest{Name: "uclaw-main"}, &response)
+	err = client.CreateToken(context.Background(), CreateTokenRequest{Name: "uclaw-main", ExpiresAt: -1, UnlimitedQuota: true}, &response)
 	if err != nil {
 		t.Fatalf("CreateToken() error = %v", err)
 	}
@@ -142,6 +144,12 @@ func TestCreateTokenDecodesTokenPresence(t *testing.T) {
 	}
 	if gotPayload.Name != "uclaw-main" {
 		t.Fatalf("token name = %q", gotPayload.Name)
+	}
+	if gotUser != "9" {
+		t.Fatalf("New-Api-User = %q, want 9", gotUser)
+	}
+	if gotPayload.ExpiresAt != -1 || !gotPayload.UnlimitedQuota {
+		t.Fatalf("token lifetime/quota payload = %+v", gotPayload)
 	}
 	if !response.Success || response.Token == "" {
 		t.Fatalf("response = %+v", response)
@@ -278,13 +286,15 @@ func TestLoginReturnsAccessTokenWithoutBearer(t *testing.T) {
 }
 
 func TestSearchTokenByNameFindsNewestExactName(t *testing.T) {
+	var gotUser string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser = r.Header.Get("New-Api-User")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":3,"name":"uclaw-main"},{"id":4,"name":"other"},{"id":5,"name":"uclaw-main"}]}}`))
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "user-token", server.Client())
+	client, err := NewClient(server.URL, "user-token", server.Client(), WithUserID(9))
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
@@ -294,6 +304,9 @@ func TestSearchTokenByNameFindsNewestExactName(t *testing.T) {
 	}
 	if !ok || token.ID != 5 {
 		t.Fatalf("token = %+v ok = %t", token, ok)
+	}
+	if gotUser != "9" {
+		t.Fatalf("New-Api-User = %q, want 9", gotUser)
 	}
 }
 

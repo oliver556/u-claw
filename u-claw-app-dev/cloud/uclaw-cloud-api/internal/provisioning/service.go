@@ -100,11 +100,15 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 	if err != nil {
 		return activation.ProvisionResult{}, err
 	}
-	userClient, err := s.admin.WithAccessToken(login.Data.AccessToken)
+	userClient, err := s.admin.WithAccessToken(login.Data.AccessToken, user.ID)
 	if err != nil {
 		return activation.ProvisionResult{}, err
 	}
-	if err := userClient.CreateToken(ctx, newapi.CreateTokenRequest{Name: s.cfg.TokenName}, nil); err != nil {
+	if err := userClient.CreateToken(ctx, newapi.CreateTokenRequest{
+		Name:           s.cfg.TokenName,
+		ExpiresAt:      -1,
+		UnlimitedQuota: true,
+	}, nil); err != nil {
 		return activation.ProvisionResult{}, err
 	}
 	token, ok, err := userClient.SearchTokenByName(ctx, s.cfg.TokenName)

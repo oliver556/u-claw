@@ -28,6 +28,8 @@ func TestProvisionNewAPICreatesTokenAddsQuotaAndSavesMapping(t *testing.T) {
 	var createdUser bool
 	var createdToken bool
 	var addedQuota bool
+	var tokenUser string
+	var tokenPayload newapi.CreateTokenRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -47,6 +49,10 @@ func TestProvisionNewAPICreatesTokenAddsQuotaAndSavesMapping(t *testing.T) {
 			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"user-access-token"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/token/":
 			createdToken = true
+			tokenUser = r.Header.Get("New-Api-User")
+			if err := json.NewDecoder(r.Body).Decode(&tokenPayload); err != nil {
+				t.Fatalf("decode create token: %v", err)
+			}
 			_, _ = w.Write([]byte(`{"success":true}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/token/search":
 			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":12,"name":"uclaw-main"}]}}`))
@@ -90,6 +96,9 @@ func TestProvisionNewAPICreatesTokenAddsQuotaAndSavesMapping(t *testing.T) {
 	}
 	if !createdUser || !createdToken || !addedQuota {
 		t.Fatalf("createdUser=%t createdToken=%t addedQuota=%t", createdUser, createdToken, addedQuota)
+	}
+	if tokenUser != "9" || tokenPayload.ExpiresAt != -1 || !tokenPayload.UnlimitedQuota {
+		t.Fatalf("token user/header payload = %q %+v", tokenUser, tokenPayload)
 	}
 	if result.NewAPIUserID != 9 || result.Token != "sk-real-key-value" || result.TokenVersion != 1 {
 		t.Fatalf("result = %+v", result)
