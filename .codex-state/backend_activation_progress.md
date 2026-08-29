@@ -24,9 +24,9 @@
 - [x] Filter New API login audit rows from model usage ledger
 
 ### Current status
-- Current step: 模型页 usage ledger 噪声过滤完成，等待真实 Alipay/WeChat SDK adapter
-- Last completed: 后端过滤 New API `/api/log/self` 返回的登录/认证审计日志，避免 `Logged in successfully via password` 出现在使用流水。
-- Next action: 接 Alipay/WeChat 官方 SDK 下单、客户端支付跳转/二维码、验签回调与补偿 worker。
+- Current step: 模型页余额金额展示与 600w 价格口径已完成，等待用户视觉验收。
+- Last completed: 将账户余额卡主数字改为人民币金额，统一 `1 元 = 600w 算力` 文案，并修复 E2E 临时 New API provider config 不兼容问题。
+- Next action: 用户验收当前界面；通过后继续接 Alipay 官方支付下单、验签回调与补偿 worker。
 
 ### Notes
 - 阿里云 U-Claw 服务负责账号、激活、订单、支付回调、New API 管理编排。
@@ -61,3 +61,5 @@
 - 生产服务器拓扑已记录到 PRD/README：阿里云激活机、香港 New API 前置机、OVH New API/sub2api 源站；root 密码不入库，正式上线前必须轮换并改 SSH key。
 - New API usage ledger 仅展示用户可理解的模型消耗记录；登录认证审计行已在 `internal/usage` 过滤，不进入金额/用量统计。
 - 最新验证通过：`go test ./...`、`node scripts/verify-cloud-model-usage-ui.js`、`git diff --check`。
+- 价格口径确认：`1 CNY = 500000 New API quota = 600w Bavi-box 算力`；模型页“账户余额”主数字按剩余 New API quota 折算人民币展示，不展示账户算力大数字。
+- 最新验证通过：`npm run patch-openclaw`、`node scripts/verify-model-usage-dashboard.js`、`node scripts/verify-newapi-model-catalog.js`、`go test ./...`、`./deploy/scripts/activation-local-e2e.sh`、`node scripts/verify-cloud-model-usage-ui.js`。

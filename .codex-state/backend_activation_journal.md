@@ -181,3 +181,11 @@
 - Files changed: `u-claw-app-dev/scripts/verify-cloud-model-usage-ui.js`, `.codex-state/backend_activation_journal.md`。
 - Commands run: `node --check scripts/verify-cloud-model-usage-ui.js`, `git diff --check`, `UCLAW_UI_E2E_KEEPALIVE=1 node scripts/verify-cloud-model-usage-ui.js`, `curl http://127.0.0.1:18789/chat?session=main`。
 - Next: 用户验收当前模型页；通过后继续支付宝当面付 adapter。
+
+## 2026-08-30 04:20
+
+- Did: 按用户确认的价格口径调整模型页展示：`1 元 = 600w 算力`，账户余额主数字从算力大数改为剩余金额；同时修复 UI E2E 临时 New API provider config 不兼容 OpenClaw schema。
+- Result: 后端换算、前端注入模板、模型目录兼容测试与 Electron UI 验收均通过；keepalive 验收环境已打开在 `http://127.0.0.1:18789/chat?session=main`。
+- Files changed: `u-claw-app-dev/scripts/patch-openclaw.js`, `scripts/verify-model-usage-dashboard.js`, `scripts/verify-cloud-model-usage-ui.js`, `scripts/verify-newapi-model-catalog.js`, `src/model-catalog.js`, `.codex-state/backend_activation_progress.md`, `.codex-state/backend_activation_journal.md`。
+- Commands run: `npm run patch-openclaw`, `node scripts/verify-model-usage-dashboard.js`, `node scripts/verify-newapi-model-catalog.js`, `go test ./...`, `./deploy/scripts/activation-local-e2e.sh`, `node scripts/verify-cloud-model-usage-ui.js`, `UCLAW_UI_E2E_KEEPALIVE=1 node scripts/verify-cloud-model-usage-ui.js`。
+- Next: 用户验收当前金额展示；确认后继续支付宝官方支付 adapter 与回调补偿。
