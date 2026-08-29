@@ -207,13 +207,16 @@ function writeActivatedClientState(accessToken, newAPIToken) {
 /**
  * Drives the visible Electron page and asserts cloud usage data rendered.
  */
-async function assertElectronModelUsageUI() {
+async function assertElectronModelUsageUI(expectedInitialBalance, rechargeQuota) {
   const cdp = await openCDP();
   await cdp.send('Runtime.enable');
   await cdp.send('Page.enable');
   const evalJS = (expression) => cdp
     .send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     .then((result) => result.result.value);
+  const expectedInitialText = Number(expectedInitialBalance).toLocaleString();
+  const expectedRechargeText = Number(rechargeQuota).toLocaleString();
+  const expectedFinalText = Number(expectedInitialBalance + rechargeQuota).toLocaleString();
 
   for (let i = 0; i < 120; i += 1) {
     if (await evalJS('document.readyState') === 'complete') break;
@@ -234,7 +237,7 @@ async function assertElectronModelUsageUI() {
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`(() => {
       const text = document.body.innerText || '';
-      return text.includes('账户余额') && text.includes('100,000') && text.includes('New API');
+      return text.includes('账户算力') && text.includes(${JSON.stringify(expectedInitialText)}) && text.includes('1 元 = 6kw 算力') && text.includes('New API');
     })()`);
     if (ok) {
       sawInitialUsage = true;
@@ -295,7 +298,7 @@ async function assertElectronModelUsageUI() {
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`(() => {
       const text = document.body.innerText || '';
-      return text.includes('150,000') && text.includes('虚拟充值成功');
+      return text.includes(${JSON.stringify(expectedFinalText)}) && text.includes('虚拟充值成功');
     })()`);
     if (ok) {
       const openedRecords = await evalJS(`(() => {
@@ -313,14 +316,14 @@ async function assertElectronModelUsageUI() {
       for (let j = 0; j < 80; j += 1) {
         const recordsVisible = await evalJS(`(() => {
           const text = document.body.innerText || '';
-          return text.includes('充值记录') && text.includes('已到账') && text.includes('50,000 quota');
+          return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(`${expectedRechargeText} 算力`)});
         })()`);
         if (recordsVisible) break;
         await sleep(500);
       }
       const recordsVisible = await evalJS(`(() => {
         const text = document.body.innerText || '';
-        return text.includes('充值记录') && text.includes('已到账') && text.includes('50,000 quota');
+        return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(`${expectedRechargeText} 算力`)});
       })()`);
       if (!recordsVisible) {
         const bodyText = await evalJS('document.body.innerText || ""');
@@ -431,6 +434,10 @@ function cleanup() {
       body: JSON.stringify({ activationCode, deviceSummary: 'UI-E2E' }),
     }));
     if (!redeem.newapiToken) throw new Error('activation did not return New API token');
+    const initialUsage = await requestJSONWithRetry('uclaw initial usage summary', () => fetch(`http://${apiAddr}/v1/newapi/usage/summary`, {
+      headers: { Authorization: `Bearer ${login.accessToken}` },
+    }));
+    const initialBalance = Number(initialUsage.accountBalance) || 0;
     writeActivatedClientState(login.accessToken, redeem.newapiToken);
 
     start(path.join(appRoot, 'node_modules/.bin/electron'), ['.', '--dev', `--remote-debugging-port=${debugPort}`], {
@@ -441,7 +448,7 @@ function cleanup() {
       },
     });
     await sleep(3000);
-    await assertElectronModelUsageUI();
+    await assertElectronModelUsageUI(initialBalance, 600000000);
     console.log(JSON.stringify({
       ok: true,
       step: 'electron_model_usage_ui',
