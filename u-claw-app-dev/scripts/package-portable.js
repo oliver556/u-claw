@@ -33,12 +33,13 @@ function usage() {
 Options:
   --edition <customer|streamer>  Package edition. Added by the npm scripts.
   --usb <mount>                  Deploy to <mount>/U-Claw after staging.
+  --platform <key>               Rebuild only one platform app archive. Supports win32-x64.
   --skip-build                   Reuse current release archives and rebuild only launcher/stage files.
 `);
 }
 
 function parseArgs(argv) {
-  const options = { edition: '', usb: '', skipBuild: false };
+  const options = { edition: '', usb: '', platform: '', skipBuild: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const readValue = () => {
@@ -50,12 +51,16 @@ function parseArgs(argv) {
     if (arg === '--help' || arg === '-h') options.help = true;
     else if (arg === '--edition') options.edition = readValue();
     else if (arg === '--usb') options.usb = readValue();
+    else if (arg === '--platform') options.platform = readValue();
     else if (arg === '--skip-build') options.skipBuild = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
   if (!options.help && !['customer', 'streamer'].includes(options.edition)) {
     throw new Error('--edition must be customer or streamer');
+  }
+  if (options.platform && options.platform !== 'win32-x64') {
+    throw new Error('--platform currently supports win32-x64 only');
   }
   return options;
 }
@@ -166,6 +171,14 @@ function buildApps() {
   run('npx', ['electron-builder', '--win', '--x64', '--dir', '-c.npmRebuild=false']);
 }
 
+function buildWindowsAppOnly() {
+  ensureDir(path.join(appDir, 'node_modules', 'electron-builder'), 'electron-builder dependency');
+  ensureSourceRuntime('node-win32-x64');
+  run('npm', ['run', 'patch-openclaw']);
+  run('npm', ['run', 'sync-lib']);
+  run('npx', ['electron-builder', '--win', '--x64', '--dir', '-c.npmRebuild=false']);
+}
+
 function keepPackagedRuntime(runtimeRoot, expectedName, label) {
   const expectedPath = path.join(runtimeRoot, expectedName);
   ensureDir(expectedPath, `${label} ${expectedName} runtime`);
@@ -219,6 +232,24 @@ function buildArchives() {
 
   fs.renameSync(macArm64Temporary, macArm64Archive);
   fs.renameSync(macX64Temporary, macX64Archive);
+  fs.renameSync(winTemporary, winArchive);
+}
+
+function buildWindowsArchiveOnly() {
+  ensureDir(winAppDir, 'Windows x64 app');
+  ensureFile(path.join(winAppDir, 'U-Claw.exe'), 'Windows executable');
+  keepPackagedRuntime(
+    path.join(winAppDir, 'resources', 'resources', 'runtime'),
+    'node-win32-x64',
+    'Windows'
+  );
+
+  const winTemporary = path.join(releaseDir, 'u-claw-app-win-x64.new.zip');
+  fs.rmSync(winTemporary, { force: true });
+  run('zip', ['-qry', winTemporary, '.'], {
+    cwd: winAppDir,
+    env: { COPYFILE_DISABLE: '1' }
+  });
   fs.renameSync(winTemporary, winArchive);
 }
 
@@ -631,8 +662,13 @@ function main() {
   }
 
   if (!options.skipBuild) {
-    buildApps();
-    buildArchives();
+    if (options.platform === 'win32-x64') {
+      buildWindowsAppOnly();
+      buildWindowsArchiveOnly();
+    } else {
+      buildApps();
+      buildArchives();
+    }
   }
   const stage = assembleStage(options.edition);
   console.log(`[package:portable] staged ${stage.stageRoot}`);
