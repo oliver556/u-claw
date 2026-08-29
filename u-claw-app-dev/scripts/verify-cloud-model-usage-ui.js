@@ -237,7 +237,7 @@ async function assertElectronModelUsageUI(expectedInitialBalance, rechargeQuota)
   for (let i = 0; i < 120; i += 1) {
     const ok = await evalJS(`(() => {
       const text = document.body.innerText || '';
-      return text.includes('账户算力') && text.includes(${JSON.stringify(expectedInitialText)}) && text.includes('1 元 = 6kw 算力') && text.includes('New API');
+      return text.includes('账户算力') && text.includes('已消耗') && text.includes('请求次数') && text.includes(${JSON.stringify(expectedInitialText)}) && text.includes('1 元 = 6kw 算力') && text.includes('New API');
     })()`);
     if (ok) {
       sawInitialUsage = true;
