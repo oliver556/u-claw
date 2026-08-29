@@ -19,6 +19,7 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"NEWAPI_ACTIVATION_QUOTA":        "100000",
 		"NEWAPI_TOKEN_NAME":              "uclaw-desktop",
 		"NEWAPI_USER_PASSWORD_SECRET":    "password-secret",
+		"UPDATE_CREDENTIAL_FILE":         " /run/uclaw/update-credential.json ",
 		"AUTH_TOKEN_TTL":                 "2h",
 		"SMS_PROVIDER":                   "aliyun",
 		"DEV_SMS_CODE":                   "654321",
@@ -85,6 +86,9 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.NewAPIUserPasswordSecret != "password-secret" {
 		t.Fatalf("NewAPIUserPasswordSecret = %q", cfg.NewAPIUserPasswordSecret)
+	}
+	if cfg.UpdateCredentialFile != "/run/uclaw/update-credential.json" {
+		t.Fatalf("UpdateCredentialFile = %q", cfg.UpdateCredentialFile)
 	}
 	if cfg.AuthTokenTTL != 2*time.Hour {
 		t.Fatalf("AuthTokenTTL = %v, want 2h", cfg.AuthTokenTTL)

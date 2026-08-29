@@ -3,6 +3,8 @@ package activation
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -131,6 +133,137 @@ func TestActivateFirstStartReturnsServerBoundEnvelope(t *testing.T) {
 	}
 	if err := license.Verify(result.LicenseArtifact, signer.PublicKeyHex()); err != nil {
 		t.Fatalf("license verify: %v", err)
+	}
+}
+
+func TestActivateFirstStartReturnsUpdateCredentialWhenIssuerMatches(t *testing.T) {
+	issuer := updateCredentialIssuerFunc(func(_ context.Context, req UpdateCredentialRequest) (UpdateCredential, error) {
+		if req.Principal != "13800138000" || req.ActivationID == "" {
+			t.Fatalf("unexpected update credential request: %+v", req)
+		}
+		return UpdateCredential{
+			SchemaVersion:  "uclaw.update-credential.v1",
+			UpdateCheckURL: "https://updates.example.com/uclaw/update/check",
+			DeviceID:       "51f85535-c3fe-4608-bcdd-402a2e58f097",
+			DeviceToken:    "uclaw_dt_test_token",
+			PlatformKeys:   []string{"win32-x64"},
+			IssuedAt:       req.IssuedAt.UTC().Format(time.RFC3339),
+		}, nil
+	})
+	service, err := NewService(NewMemoryStore(true), Config{UpdateCredentialIssuer: issuer})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	result, err := service.ActivateFirstStart(context.Background(), FirstStartRequest{
+		Phone:                 "13800138000",
+		UserID:                42,
+		ActivationCode:        "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
+		USBFingerprintSummary: "TEST-USB-SUMMARY",
+		IdempotencyKey:        "idem-update-credential-1",
+	})
+	if err != nil {
+		t.Fatalf("activate first start: %v", err)
+	}
+
+	if result.UpdateCredential == nil {
+		t.Fatal("update credential missing")
+	}
+	if result.UpdateCredential.DeviceID != "51f85535-c3fe-4608-bcdd-402a2e58f097" {
+		t.Fatalf("device id = %q", result.UpdateCredential.DeviceID)
+	}
+	if result.UpdateCredential.DeviceToken != "uclaw_dt_test_token" {
+		t.Fatal("device token missing")
+	}
+}
+
+func TestActivateFirstStartOmitsUnavailableUpdateCredential(t *testing.T) {
+	service, err := NewService(NewMemoryStore(true), Config{
+		UpdateCredentialIssuer: updateCredentialIssuerFunc(func(context.Context, UpdateCredentialRequest) (UpdateCredential, error) {
+			return UpdateCredential{}, ErrUpdateCredentialNotAvailable
+		}),
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	result, err := service.ActivateFirstStart(context.Background(), FirstStartRequest{
+		Phone:                 "13800138000",
+		UserID:                42,
+		ActivationCode:        "ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
+		USBFingerprintSummary: "TEST-USB-SUMMARY",
+		IdempotencyKey:        "idem-update-credential-2",
+	})
+	if err != nil {
+		t.Fatalf("activate first start: %v", err)
+	}
+	if result.UpdateCredential != nil {
+		t.Fatalf("update credential = %+v, want nil", result.UpdateCredential)
+	}
+}
+
+func TestUpdateCredentialFileIssuerRequiresAndMatchesBinding(t *testing.T) {
+	now := time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "update-credential.json")
+	if err := os.WriteFile(path, []byte(`{
+  "updateCheckUrl": "https://updates.example.com/uclaw/update/check",
+  "deviceId": "51f85535-c3fe-4608-bcdd-402a2e58f097",
+  "deviceToken": "uclaw_dt_test_token",
+  "platformKeys": ["win32-x64", "win32-x64", "darwin-arm64"],
+  "allowedPrincipals": ["13800138000"],
+  "allowedUsbFingerprintSummaries": ["TEST-USB-SUMMARY"],
+  "expiresAt": "2026-08-30T00:00:00Z"
+}`), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	issuer, err := NewUpdateCredentialFileIssuer(path)
+	if err != nil {
+		t.Fatalf("new issuer: %v", err)
+	}
+
+	credential, err := issuer.IssueUpdateCredential(context.Background(), UpdateCredentialRequest{
+		Principal:             "13800138000",
+		USBFingerprintSummary: "TEST-USB-SUMMARY",
+		IssuedAt:              now,
+	})
+	if err != nil {
+		t.Fatalf("issue credential: %v", err)
+	}
+	if credential.SchemaVersion != "uclaw.update-credential.v1" {
+		t.Fatalf("schema = %q", credential.SchemaVersion)
+	}
+	if len(credential.PlatformKeys) != 2 {
+		t.Fatalf("platform keys = %#v", credential.PlatformKeys)
+	}
+	if credential.DeviceToken != "uclaw_dt_test_token" {
+		t.Fatal("device token missing")
+	}
+
+	_, err = issuer.IssueUpdateCredential(context.Background(), UpdateCredentialRequest{
+		Principal:             "13900139000",
+		USBFingerprintSummary: "TEST-USB-SUMMARY",
+		IssuedAt:              now,
+	})
+	if err != ErrUpdateCredentialNotAvailable {
+		t.Fatalf("mismatch error = %v, want ErrUpdateCredentialNotAvailable", err)
+	}
+}
+
+func TestUpdateCredentialFileIssuerRejectsUnboundFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "update-credential.json")
+	if err := os.WriteFile(path, []byte(`{
+  "updateCheckUrl": "https://updates.example.com/uclaw/update/check",
+  "deviceId": "51f85535-c3fe-4608-bcdd-402a2e58f097",
+  "deviceToken": "uclaw_dt_test_token"
+}`), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	issuer, err := NewUpdateCredentialFileIssuer(path)
+	if err != nil {
+		t.Fatalf("new issuer: %v", err)
+	}
+	if _, err := issuer.IssueUpdateCredential(context.Background(), UpdateCredentialRequest{IssuedAt: time.Now()}); err == nil {
+		t.Fatal("unbound credential file succeeded, want error")
 	}
 }
 
@@ -356,4 +489,11 @@ func (p *recordingProvisioner) ProvisionNewAPI(_ context.Context, req ProvisionR
 	p.called = true
 	p.request = req
 	return p.result, nil
+}
+
+type updateCredentialIssuerFunc func(context.Context, UpdateCredentialRequest) (UpdateCredential, error)
+
+// IssueUpdateCredential adapts a function for activation update-credential tests.
+func (f updateCredentialIssuerFunc) IssueUpdateCredential(ctx context.Context, req UpdateCredentialRequest) (UpdateCredential, error) {
+	return f(ctx, req)
 }

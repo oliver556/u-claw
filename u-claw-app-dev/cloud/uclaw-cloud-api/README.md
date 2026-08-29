@@ -184,7 +184,7 @@ curl -sS -X POST http://127.0.0.1:8080/v1/activations \
   -d '{"phone":"13800138000","smsCode":"123456","activationCode":"ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","usbFingerprintSummary":"PREVIEW-ONLY","idempotencyKey":"local-dev-1"}'
 ```
 
-当前切片返回 `server_bound`、`pending_client_write` 与 `licenseArtifact`。`licenseArtifact` 是 `license.json` 可持久化授权材料，包含 canonical payload 和 Ed25519 signature；客户端会写入授权材料、New API credential、OpenClaw config，读回验证后调用：
+当前切片返回 `server_bound`、`pending_client_write` 与 `licenseArtifact`。`licenseArtifact` 是 `license.json` 可持久化授权材料，包含 canonical payload 和 Ed25519 signature；客户端会写入授权材料、New API credential、OpenClaw config，若响应含 `updateCredential` 还会写入硬更新凭据，读回验证后调用：
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8080/v1/activations/<activationId>/commit \
@@ -201,6 +201,21 @@ licenseArtifact.signature.algorithm = Ed25519
 licenseArtifact.signature.value = <base64 signature>
 ```
 
+硬更新凭据只在受控验收或服务端 issuer 命中时返回：
+
+```json
+{
+  "schemaVersion": "uclaw.update-credential.v1",
+  "updateCheckUrl": "https://updates.yiyong.me/uclaw/update/check",
+  "deviceId": "<devices.device_id>",
+  "deviceToken": "<one-time-device-token>",
+  "platformKeys": ["win32-x64", "darwin-arm64", "darwin-x64"],
+  "issuedAt": "2026-08-29T10:00:00Z"
+}
+```
+
+部署可用 `UPDATE_CREDENTIAL_FILE=/path/to/root-only-update-credential.json` 启用文件型 issuer。该 JSON 必须包含 `allowedActivationIds`、`allowedPrincipals` 或 `allowedUsbFingerprintSummaries` 至少一类绑定条件，避免把同一 token 发给不相关激活请求。文件权限应为 `root:root 0600`；`deviceToken` 不写文档、不进 Git、不截图。
+
 也可以运行一键验收脚本：
 
 ```bash
@@ -214,6 +229,8 @@ dist/activation-acceptance/latest-summary.json
 dist/activation-acceptance/license-artifact.json
 dist/activation-acceptance/activation-response.json
 ```
+
+`activation-response.json` 会自动脱敏 `accessToken`、`newapiToken` 与 `updateCredential.deviceToken`，只保留 token 存在性和短 fingerprint。
 
 验收通过时摘要中应看到：
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -55,21 +56,42 @@ type FirstStartRequest struct {
 
 // FirstStartResult is the public activation envelope consumed by Electron activation-only mode.
 type FirstStartResult struct {
-	OK                    bool             `json:"ok"`
-	ActivationID          string           `json:"activationId"`
-	Status                string           `json:"status"`
-	Stage                 string           `json:"stage"`
-	UsernameMasked        string           `json:"usernameMasked"`
-	PhoneMasked           string           `json:"phoneMasked,omitempty"`
-	AccessToken           string           `json:"accessToken,omitempty"`
-	USBFingerprintSummary string           `json:"usbFingerprintSummary"`
-	ArtifactStatus        string           `json:"artifactStatus"`
-	Message               string           `json:"message"`
-	NewAPIBaseURL         string           `json:"newapiBaseUrl"`
-	NewAPIToken           string           `json:"newapiToken"`
-	TokenVersion          int              `json:"tokenVersion"`
-	DefaultModels         DefaultModels    `json:"defaultModels"`
-	LicenseArtifact       license.Artifact `json:"licenseArtifact"`
+	OK                    bool              `json:"ok"`
+	ActivationID          string            `json:"activationId"`
+	Status                string            `json:"status"`
+	Stage                 string            `json:"stage"`
+	UsernameMasked        string            `json:"usernameMasked"`
+	PhoneMasked           string            `json:"phoneMasked,omitempty"`
+	AccessToken           string            `json:"accessToken,omitempty"`
+	USBFingerprintSummary string            `json:"usbFingerprintSummary"`
+	ArtifactStatus        string            `json:"artifactStatus"`
+	Message               string            `json:"message"`
+	NewAPIBaseURL         string            `json:"newapiBaseUrl"`
+	NewAPIToken           string            `json:"newapiToken"`
+	TokenVersion          int               `json:"tokenVersion"`
+	DefaultModels         DefaultModels     `json:"defaultModels"`
+	LicenseArtifact       license.Artifact  `json:"licenseArtifact"`
+	UpdateCredential      *UpdateCredential `json:"updateCredential,omitempty"`
+}
+
+// UpdateCredential is the one-time hard-update credential returned to the trusted Electron main process.
+type UpdateCredential struct {
+	SchemaVersion  string   `json:"schemaVersion"`
+	UpdateCheckURL string   `json:"updateCheckUrl"`
+	DeviceID       string   `json:"deviceId"`
+	DeviceToken    string   `json:"deviceToken"`
+	PlatformKeys   []string `json:"platformKeys,omitempty"`
+	IssuedAt       string   `json:"issuedAt"`
+}
+
+// UpdateCredentialRequest binds hard-update token issuance to the accepted activation.
+type UpdateCredentialRequest struct {
+	ActivationID          string
+	UserID                int64
+	Principal             string
+	ActivationCode        string
+	USBFingerprintSummary string
+	IssuedAt              time.Time
 }
 
 // CommitRequest records the client write-helper result for a server-bound activation.
@@ -135,16 +157,25 @@ type LicenseSigner interface {
 	Sign(req license.Request) (license.Artifact, error)
 }
 
+// UpdateCredentialIssuer returns a device token for startup hard-update checks.
+type UpdateCredentialIssuer interface {
+	IssueUpdateCredential(ctx context.Context, req UpdateCredentialRequest) (UpdateCredential, error)
+}
+
+// ErrUpdateCredentialNotAvailable lets constrained issuers skip unrelated activation requests.
+var ErrUpdateCredentialNotAvailable = errors.New("update credential is not available for this activation")
+
 // Config controls the activation redeem slice.
 type Config struct {
-	AllowAnyCode      bool
-	NewAPIBaseURL     string
-	PreviewToken      string
-	DefaultTextModel  string
-	DefaultImageModel string
-	DefaultVideoModel string
-	Provisioner       NewAPIProvisioner
-	LicenseSigner     LicenseSigner
+	AllowAnyCode           bool
+	NewAPIBaseURL          string
+	PreviewToken           string
+	DefaultTextModel       string
+	DefaultImageModel      string
+	DefaultVideoModel      string
+	Provisioner            NewAPIProvisioner
+	LicenseSigner          LicenseSigner
+	UpdateCredentialIssuer UpdateCredentialIssuer
 }
 
 // Service owns activation-code validation and the client-facing activation contract.
@@ -284,6 +315,23 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 	if err != nil {
 		return FirstStartResult{}, err
 	}
+	var updateCredential *UpdateCredential
+	if s.cfg.UpdateCredentialIssuer != nil {
+		credential, err := s.cfg.UpdateCredentialIssuer.IssueUpdateCredential(ctx, UpdateCredentialRequest{
+			ActivationID:          activationID,
+			UserID:                userID,
+			Principal:             principal,
+			ActivationCode:        code,
+			USBFingerprintSummary: usbSummary,
+			IssuedAt:              at,
+		})
+		if err != nil && !errors.Is(err, ErrUpdateCredentialNotAvailable) {
+			return FirstStartResult{}, err
+		}
+		if err == nil {
+			updateCredential = &credential
+		}
+	}
 	if attemptStore, ok := s.store.(FirstStartAttemptStore); ok {
 		if err := attemptStore.RecordFirstStartAttempt(ctx, FirstStartAttempt{
 			ActivationID:          activationID,
@@ -313,6 +361,7 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 		TokenVersion:          result.TokenVersion,
 		DefaultModels:         result.DefaultModels,
 		LicenseArtifact:       licenseArtifact,
+		UpdateCredential:      updateCredential,
 	}, nil
 }
 

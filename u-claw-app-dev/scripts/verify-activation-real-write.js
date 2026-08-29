@@ -22,6 +22,9 @@ const activationCode = 'ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ';
 const newapiToken = 'electron-write-token';
 const accessToken = 'electron-access-token';
 const newapiBaseUrl = 'https://newapi.yiyong.me/v1';
+const updateCheckUrl = 'https://updates.yiyong.me/uclaw/update/check';
+const updateDeviceId = '51f85535-c3fe-4608-bcdd-402a2e58f097';
+const updateDeviceToken = 'uclaw_dt_electron_update_token';
 const requests = [];
 const children = [];
 
@@ -112,6 +115,14 @@ function startActivationStub() {
               keyId: 'test-key',
               value: Buffer.from('test-signature').toString('base64'),
             },
+          },
+          updateCredential: {
+            schemaVersion: 'uclaw.update-credential.v1',
+            updateCheckUrl,
+            deviceId: updateDeviceId,
+            deviceToken: updateDeviceToken,
+            platformKeys: ['win32-x64', 'darwin-arm64', 'darwin-x64'],
+            issuedAt: new Date().toISOString(),
           },
         }));
         return;
@@ -266,6 +277,7 @@ function verifyLocalActivationMaterial() {
   const configDir = path.join(devDataDir, '.openclaw');
   const license = JSON.parse(fs.readFileSync(path.join(configDir, 'license', 'license.json'), 'utf8'));
   const modelCredential = JSON.parse(fs.readFileSync(path.join(configDir, 'builtin-model-credential.v1.json'), 'utf8'));
+  const updateCredential = JSON.parse(fs.readFileSync(path.join(configDir, 'update-credential.v1.json'), 'utf8'));
   const activationState = JSON.parse(fs.readFileSync(path.join(configDir, 'uclaw-activation.json'), 'utf8'));
   const openclaw = JSON.parse(fs.readFileSync(path.join(configDir, 'openclaw.json'), 'utf8'));
 
@@ -276,6 +288,15 @@ function verifyLocalActivationMaterial() {
   if (modelCredential.tokenFingerprint !== tokenFingerprint || modelCredential.baseUrl !== newapiBaseUrl) {
     throw new Error('builtin model credential was not written correctly');
   }
+  const updateTokenFingerprint = crypto.createHash('sha256').update(updateDeviceToken).digest('hex').slice(0, 16);
+  if (
+    updateCredential.schemaVersion !== 'uclaw.update-credential.v1' ||
+    updateCredential.updateCheckUrl !== updateCheckUrl ||
+    updateCredential.deviceId !== updateDeviceId ||
+    updateCredential.tokenFingerprint !== updateTokenFingerprint
+  ) {
+    throw new Error('update credential was not written correctly');
+  }
   for (const providerName of ['custom', 'litellm']) {
     const provider = openclaw.models?.providers?.[providerName];
     if (provider?.baseUrl !== newapiBaseUrl || provider?.apiKey !== newapiToken) {
@@ -284,6 +305,9 @@ function verifyLocalActivationMaterial() {
   }
   if (activationState.status !== 'activated' || activationState.commitStatus !== 'committed' || activationState.uclawAccessToken !== accessToken) {
     throw new Error('activation state did not reach committed status');
+  }
+  if (activationState.updateCredentialStatus !== 'configured' || activationState.updateDeviceId !== updateDeviceId) {
+    throw new Error('activation state did not record update credential status');
   }
   if (requests.length !== 2 || requests[0].url !== '/v1/activations' || requests[1].url !== `/v1/activations/${activationID}/commit`) {
     throw new Error(`unexpected activation request order: ${JSON.stringify(requests.map((request) => request.url))}`);

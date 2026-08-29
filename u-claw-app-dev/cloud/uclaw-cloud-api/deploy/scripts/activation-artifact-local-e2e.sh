@@ -48,6 +48,7 @@ activation_json="$(
 activation_id="$(
   ACTIVATION_JSON="$activation_json" OUT_DIR="$OUT_DIR" node - <<'NODE'
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const outDir = process.env.OUT_DIR;
 const payload = JSON.parse(process.env.ACTIVATION_JSON);
 const artifact = payload.licenseArtifact;
@@ -66,7 +67,23 @@ if (failures.length > 0) {
   console.error(failures.join('\n'));
   process.exit(1);
 }
-fs.writeFileSync(`${outDir}/activation-response.json`, JSON.stringify(payload, null, 2));
+const redacted = JSON.parse(JSON.stringify(payload));
+if (redacted.newapiToken) {
+  redacted.newapiToken = '[redacted]';
+}
+if (redacted.accessToken) {
+  redacted.accessToken = '[redacted]';
+}
+if (redacted.updateCredential?.deviceToken) {
+  redacted.updateCredential.deviceToken = '[redacted]';
+  redacted.updateCredential.tokenPresent = true;
+  redacted.updateCredential.tokenFingerprint = crypto
+    .createHash('sha256')
+    .update(payload.updateCredential.deviceToken)
+    .digest('hex')
+    .slice(0, 16);
+}
+fs.writeFileSync(`${outDir}/activation-response.json`, JSON.stringify(redacted, null, 2));
 fs.writeFileSync(`${outDir}/license-artifact.json`, JSON.stringify(artifact, null, 2));
 process.stdout.write(payload.activationId);
 NODE

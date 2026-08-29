@@ -162,6 +162,7 @@ const uiStatePath = path.join(configDir, 'uclaw-ui-state.json');
 const activationStatePath = path.join(configDir, 'uclaw-activation.json');
 const activationLicensePath = path.join(configDir, 'license', 'license.json');
 const builtinModelCredentialPath = path.join(configDir, 'builtin-model-credential.v1.json');
+const updateCredentialPath = path.join(configDir, 'update-credential.v1.json');
 const logsDir = path.join(userDataPath, 'logs');
 
 try {
@@ -578,6 +579,7 @@ function writeActivationState(payload) {
   const username = String(payload.username || '').trim().toUpperCase();
   const activationCode = String(payload.activationCode || '').trim().toUpperCase();
   const token = String(payload.newapiToken || '').trim();
+  const updateToken = String(payload.updateDeviceToken || '').trim();
   const accountMasked = payload.usernameMasked
     || payload.phoneMasked
     || (phone ? `${phone.slice(0, 3)}****${phone.slice(7)}` : username);
@@ -597,6 +599,10 @@ function writeActivationState(payload) {
     tokenVersion: Number(payload.tokenVersion) || 1,
     tokenStatus: token ? 'configured' : 'pending_cloud_activation',
     tokenFingerprint: token ? crypto.createHash('sha256').update(token).digest('hex').slice(0, 16) : '',
+    updateCredentialStatus: updateToken ? 'configured' : 'missing',
+    updateCheckUrl: String(payload.updateCheckUrl || '').trim(),
+    updateDeviceId: String(payload.updateDeviceId || '').trim(),
+    updateTokenFingerprint: updateToken ? crypto.createHash('sha256').update(updateToken).digest('hex').slice(0, 16) : '',
     uclawAccessToken: String(payload.uclawAccessToken || '').trim(),
     activatedAt: new Date().toISOString(),
   };
@@ -899,6 +905,39 @@ function writeBuiltinModelCredential(result) {
     throw new Error('builtin model credential readback verification failed');
   }
   writeDirtyMarker('builtin-model-credential');
+  return written;
+}
+
+/**
+ * Persists the hard-update credential used by launcher/bootstrap update checks.
+ */
+function writeUpdateCredential(result) {
+  const source = result.updateCredential;
+  if (!source) return null;
+  const schemaVersion = String(source.schemaVersion || '').trim();
+  const updateCheckUrl = String(source.updateCheckUrl || '').trim().replace(/\/+$/, '');
+  const deviceId = String(source.deviceId || '').trim();
+  const deviceToken = String(source.deviceToken || '').trim();
+  if (schemaVersion !== 'uclaw.update-credential.v1') {
+    throw new Error('activation response has invalid update credential schema');
+  }
+  if (!updateCheckUrl || !deviceId || !deviceToken) {
+    throw new Error('activation response missing update credential');
+  }
+  const credential = {
+    schemaVersion,
+    updateCheckUrl,
+    deviceId,
+    deviceToken,
+    platformKeys: Array.isArray(source.platformKeys) ? source.platformKeys.filter(Boolean) : [],
+    tokenFingerprint: crypto.createHash('sha256').update(deviceToken).digest('hex').slice(0, 16),
+    issuedAt: source.issuedAt || new Date().toISOString(),
+  };
+  const written = atomicWriteJson(updateCredentialPath, credential);
+  if (written?.tokenFingerprint !== credential.tokenFingerprint || written?.deviceId !== deviceId) {
+    throw new Error('update credential readback verification failed');
+  }
+  writeDirtyMarker('update-credential');
   return written;
 }
 
@@ -1643,6 +1682,7 @@ async function submitActivation(payload = {}) {
       serverBound = true;
       writeActivationLicenseArtifact(activationResult);
       writeBuiltinModelCredential(activationResult);
+      const updateCredential = writeUpdateCredential(activationResult);
       writeOpenClawActivationConfig(activationResult);
       const activationID = String(activationResult.activationId || '').trim();
       const commitResult = await postActivationJSON(`/v1/activations/${activationID}/commit`, {
@@ -1661,6 +1701,9 @@ async function submitActivation(payload = {}) {
         newapiBaseUrl: activationResult.newapiBaseUrl,
         newapiToken: activationResult.newapiToken,
         tokenVersion: activationResult.tokenVersion,
+        updateCheckUrl: updateCredential?.updateCheckUrl,
+        updateDeviceId: updateCredential?.deviceId,
+        updateDeviceToken: updateCredential?.deviceToken,
         uclawAccessToken: activationResult.accessToken,
       });
       return {

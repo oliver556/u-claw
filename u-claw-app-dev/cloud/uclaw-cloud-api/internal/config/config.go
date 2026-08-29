@@ -25,6 +25,7 @@ type Config struct {
 	NewAPIActivationQuota    int64
 	NewAPITokenName          string
 	NewAPIUserPasswordSecret string
+	UpdateCredentialFile     string
 	AuthTokenTTL             time.Duration
 	SMSProvider              string
 	DevSMSCode               string
@@ -75,6 +76,7 @@ func Load(getenv Getter) (Config, error) {
 		NewAPIActivationQuota:    0,
 		NewAPITokenName:          withDefault(getenv("NEWAPI_TOKEN_NAME"), "uclaw-main"),
 		NewAPIUserPasswordSecret: withDefault(getenv("NEWAPI_USER_PASSWORD_SECRET"), "uclaw-dev-newapi-user-password-secret"),
+		UpdateCredentialFile:     strings.TrimSpace(getenv("UPDATE_CREDENTIAL_FILE")),
 		AuthTokenTTL:             24 * time.Hour,
 		SMSProvider:              withDefault(getenv("SMS_PROVIDER"), "development"),
 		DevSMSCode:               withDefault(getenv("DEV_SMS_CODE"), "123456"),

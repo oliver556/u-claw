@@ -667,12 +667,21 @@ func buildActivationService(cfg config.Config, store activation.Store) *activati
 		}
 		licenseSigner = signer
 	}
+	var updateCredentialIssuer activation.UpdateCredentialIssuer
+	if strings.TrimSpace(cfg.UpdateCredentialFile) != "" {
+		issuer, err := activation.NewUpdateCredentialFileIssuer(cfg.UpdateCredentialFile)
+		if err != nil {
+			panic(fmt.Sprintf("build update credential issuer: %v", err))
+		}
+		updateCredentialIssuer = issuer
+	}
 	service, err := activation.NewService(store, activation.Config{
-		AllowAnyCode:  !cfg.IsProduction(),
-		NewAPIBaseURL: cfg.NewAPIClientBaseURL,
-		PreviewToken:  cfg.NewAPIPreviewToken,
-		Provisioner:   provisioner,
-		LicenseSigner: licenseSigner,
+		AllowAnyCode:           !cfg.IsProduction(),
+		NewAPIBaseURL:          cfg.NewAPIClientBaseURL,
+		PreviewToken:           cfg.NewAPIPreviewToken,
+		Provisioner:            provisioner,
+		LicenseSigner:          licenseSigner,
+		UpdateCredentialIssuer: updateCredentialIssuer,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("build activation service: %v", err))

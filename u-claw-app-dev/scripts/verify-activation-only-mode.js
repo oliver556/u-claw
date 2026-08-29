@@ -50,8 +50,10 @@ requireText(main, 'function shouldShowActivationOnStartup()', 'startup activatio
 requireText(main, 'function writeActivationState', 'activation state writer');
 requireText(main, "const activationLicensePath = path.join(configDir, 'license', 'license.json');", 'activation license path');
 requireText(main, "const builtinModelCredentialPath = path.join(configDir, 'builtin-model-credential.v1.json');", 'builtin model credential path');
+requireText(main, "const updateCredentialPath = path.join(configDir, 'update-credential.v1.json');", 'hard update credential path');
 requireText(main, 'function writeActivationLicenseArtifact', 'activation license writer');
 requireText(main, 'function writeBuiltinModelCredential', 'builtin model credential writer');
+requireText(main, 'function writeUpdateCredential', 'hard update credential writer');
 requireText(main, 'function canUseActivationStaticFallback()', 'activation static fallback guard');
 requireText(main, 'function createStaticActivationResult', 'activation static fallback result');
 requireText(main, 'async function postActivationJSON', 'activation cloud HTTP client');
