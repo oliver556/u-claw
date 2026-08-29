@@ -497,11 +497,17 @@ function patchChatPage() {
     const sessionRefreshWithStatusPollingV1 =
       "function ph(e){return e.sessions.refresh({...fh(e),...Me(e,e.sessionKey),force:!0})}function uClawStopChatStatusPoll(e){let t=e?.uClawChatStatusPollTimer;t!=null&&(globalThis.clearTimeout(t),e.uClawChatStatusPollTimer=null)}function uClawScheduleChatStatusPoll(e){if(!e||!e.connected||!e.client||!e.chatRunId&&e.chatStream==null||e.uClawChatStatusPollTimer!=null)return;let t=0,n=20,r=()=>{e.uClawChatStatusPollTimer=null;if(!e.connected||!e.client||!e.chatRunId&&e.chatStream==null){uClawStopChatStatusPoll(e);return}let i=e.sessionKey;Promise.resolve(ph(e)).then(()=>{e.sessionKey===i&&yc(e,{publishRunStatus:!0})}).catch(()=>{}).finally(()=>{if(!e.connected||e.sessionKey!==i||!e.chatRunId&&e.chatStream==null){uClawStopChatStatusPoll(e);return}t+=1,t<n?e.uClawChatStatusPollTimer=globalThis.setTimeout(r,1500):uClawStopChatStatusPoll(e)})};e.uClawChatStatusPollTimer=globalThis.setTimeout(r,1200)}function mh(e,t){";
     const sessionRefreshWithStatusPolling =
-      "function ph(e){return e.sessions.refresh({...fh(e),...Me(e,e.sessionKey),force:!0})}function uClawStopChatStatusPoll(e){let t=e?.uClawChatStatusPollTimer;t!=null&&(globalThis.clearTimeout(t),e.uClawChatStatusPollTimer=null)}function uClawRefreshChatStatusNow(e){if(!e||!e.connected||!e.client)return Promise.resolve();let t=e.sessionKey;return Promise.resolve(ph(e)).then(()=>{e.sessionKey===t&&(yc(e,{publishRunStatus:!0}),e.requestUpdate?.())}).catch(()=>{})}function uClawScheduleChatStatusPoll(e){if(!e||!e.connected||!e.client||!e.chatRunId&&e.chatStream==null||e.uClawChatStatusPollTimer!=null)return;let t=0,n=20,r=()=>{e.uClawChatStatusPollTimer=null;if(!e.connected||!e.client||!e.chatRunId&&e.chatStream==null){uClawStopChatStatusPoll(e);return}let i=e.sessionKey;Promise.resolve(ph(e)).then(()=>{e.sessionKey===i&&yc(e,{publishRunStatus:!0})}).catch(()=>{}).finally(()=>{if(!e.connected||e.sessionKey!==i||!e.chatRunId&&e.chatStream==null){uClawStopChatStatusPoll(e);return}t+=1,t<n?e.uClawChatStatusPollTimer=globalThis.setTimeout(r,1500):uClawStopChatStatusPoll(e)})};e.uClawChatStatusPollTimer=globalThis.setTimeout(r,1200)}function mh(e,t){";
-    if (!after.includes("function uClawRefreshChatStatusNow(")) {
+      "function ph(e){return e.sessions.refresh({...fh(e),...Me(e,e.sessionKey),force:!0})}function uClawChatStatusPolls(e){return e.uClawChatStatusPollTimers instanceof Map?e.uClawChatStatusPollTimers:e.uClawChatStatusPollTimers=new Map}function uClawStopChatStatusPoll(e,t){let n=e?.uClawChatStatusPollTimer;n!=null&&(globalThis.clearTimeout(n),e.uClawChatStatusPollTimer=null);let r=e?.uClawChatStatusPollTimers;if(!(r instanceof Map))return;if(t){let e=String(t);for(let[t,n]of r)t===e||t.startsWith(`${e}\0`)?(globalThis.clearTimeout(n),r.delete(t)):null;return}for(let e of r.values())globalThis.clearTimeout(e);r.clear()}function uClawRefreshChatStatusNow(e,t={}){if(!e||!e.connected||!e.client)return Promise.resolve();let n=nc(t.sessionKey)??e.sessionKey,r=t.runId??e.chatRunId??null,i=t.status??null,a=t.outcome??(i===`done`?`done`:i?`interrupted`:null),o=e.sessionKey,s={sessionKey:n,...t.agentId?{agentId:t.agentId}:{}};return Promise.resolve(n===e.sessionKey?ph(e):mh(e,s)).then(()=>{a&&hc(e,{outcome:a,sessionStatus:i??(a===`done`?`done`:`killed`),sessionKey:n,runId:r},Date.now()),n===e.sessionKey&&e.sessionKey===o&&yc(e,{publishRunStatus:!0}),e.requestUpdate?.()}).catch(()=>{})}function uClawScheduleChatStatusPoll(e,t={}){if(!e||!e.connected||!e.client)return;let n=nc(t.sessionKey)??e.sessionKey,r=t.runId??e.chatRunId??null;if(!n||!r&&e.chatStream==null)return;let i=`${n}\0${r??``}`,a=uClawChatStatusPolls(e);if(a.has(i))return;let o=0,s=20,c=()=>{a.delete(i);if(!e.connected||!e.client)return;let t=!1;Promise.resolve(mh(e,{sessionKey:n})).then(()=>{let i=e.sessionsResult?.sessions.find(e=>se(e.key,n));if(i&&i.hasActiveRun!==!0&&!Je(i)&&!(i.hasActiveRun!==!1&&i.status===`running`)){let a=i.status===`done`?`done`:`interrupted`;hc(e,{outcome:a,sessionStatus:i.status===`running`||i.status===void 0?`killed`:i.status,runId:r,sessionKey:n,sessionKeys:[i.key]},Date.now()),n===e.sessionKey&&yc(e,{publishRunStatus:!0}),e.requestUpdate?.(),t=!0}}).catch(()=>{}).finally(()=>{if(t||!e.connected)return uClawStopChatStatusPoll(e,i);o+=1,o<s?a.set(i,globalThis.setTimeout(c,1500)):uClawStopChatStatusPoll(e,i)})};a.set(i,globalThis.setTimeout(c,1200))}function uClawHandleBackgroundSessionTerminal(e,t){if(!t?.sessionKey)return!1;let n=t.state===`final`?`done`:t.state===`aborted`?`killed`:t.state===`error`?`failed`:null;if(!n)return!1;let r=n===`done`?`done`:`interrupted`;return hc(e,{outcome:r,sessionStatus:n,runId:t.runId??null,sessionKey:t.sessionKey,sessionKeys:[t.sessionKey]},Date.now()),uClawRefreshChatStatusNow(e,{sessionKey:t.sessionKey,runId:t.runId,status:n,outcome:r,agentId:t.agentId}),globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e,{sessionKey:t.sessionKey,runId:t.runId,status:n,outcome:r,agentId:t.agentId}),900),!0}function mh(e,t){";
+    // chatBackgroundSessionStatus: keep background chat rows from staying in running state after switching sessions.
+    if (!after.includes("uClawChatStatusPollTimers")) {
       if (after.includes(sessionRefreshWithStatusPollingV1)) {
         after = after.replace(sessionRefreshWithStatusPollingV1, sessionRefreshWithStatusPolling);
-      } else if (!after.includes("function uClawScheduleChatStatusPoll(")) {
+      } else if (after.includes("function uClawScheduleChatStatusPoll(")) {
+        after = after.replace(
+          /function ph\(e\)\{return e\.sessions\.refresh\(\{\.\.\.fh\(e\),\.\.\.Me\(e,e\.sessionKey\),force:!0\}\)\}function uClawStopChatStatusPoll[\s\S]*?function mh\(e,t\)\{/,
+          sessionRefreshWithStatusPolling,
+        );
+      } else {
         after = after.replace(sessionRefreshAnchor, sessionRefreshWithStatusPolling);
       }
     }
@@ -509,26 +515,39 @@ function patchChatPage() {
     const terminalStatusPublish =
       "t.publishRunStatus!==!1&&(e.chatRunStatus=a,fc(e,a))";
     const terminalStatusPublishWithFinalRefresh =
-      "t.publishRunStatus!==!1&&(e.chatRunStatus=a,fc(e,a)),uClawRefreshChatStatusNow(e),globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e),900)";
+      "t.publishRunStatus!==!1&&(e.chatRunStatus=a,fc(e,a)),uClawRefreshChatStatusNow(e,{sessionKey:i,runId:r,status:t.sessionStatus,outcome:t.outcome}),globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e,{sessionKey:i,runId:r,status:t.sessionStatus,outcome:t.outcome}),900)";
     if (
       after.includes(terminalStatusPublish)
-      && !after.includes("globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e),900)")
+      && !after.includes("globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e,{sessionKey:i,runId:r,status:t.sessionStatus,outcome:t.outcome}),900)")
     ) {
       after = after.replace(terminalStatusPublish, terminalStatusPublishWithFinalRefresh);
     }
 
+    const legacyTerminalStatusRefresh =
+      ",uClawRefreshChatStatusNow(e),globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e),900)";
+    if (
+      after.includes("globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e,{sessionKey:i,runId:r,status:t.sessionStatus,outcome:t.outcome}),900)")
+      && after.includes(legacyTerminalStatusRefresh)
+    ) {
+      after = after.replace(legacyTerminalStatusRefresh, "");
+    }
+
     if (
       !after.includes("function uClawRefreshChatStatusNow(")
-      || !after.includes("globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e),900)")
+      || !after.includes("globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e,{sessionKey:i,runId:r,status:t.sessionStatus,outcome:t.outcome}),900)")
     ) {
       after = after.replace(sessionRefreshAnchor, sessionRefreshWithStatusPolling);
     }
 
     const localRunClear =
       "t.clearLocalRun&&(e.chatRunId=null),t.clearSideResultTerminalRuns";
-    const localRunClearWithPollStop =
+    const localRunClearWithLegacyPollStop =
       "t.clearLocalRun&&(e.chatRunId=null,uClawStopChatStatusPoll(e)),t.clearSideResultTerminalRuns";
-    if (after.includes(localRunClear)) {
+    const localRunClearWithPollStop =
+      "t.clearLocalRun&&(e.chatRunId=null,t.outcome&&uClawStopChatStatusPoll(e,i)),t.clearSideResultTerminalRuns";
+    if (after.includes(localRunClearWithLegacyPollStop)) {
+      after = after.replace(localRunClearWithLegacyPollStop, localRunClearWithPollStop);
+    } else if (after.includes(localRunClear)) {
       after = after.replace(localRunClear, localRunClearWithPollStop);
     }
 
@@ -542,18 +561,34 @@ function patchChatPage() {
 
     const sendRunStarted =
       "e.chatRunId=r.runId,t||(e.chatStream=``,e.chatStreamStartedAt=d)";
-    const sendRunStartedWithPoll =
+    const sendRunStartedWithLegacyPoll =
       "e.chatRunId=r.runId,uClawScheduleChatStatusPoll(e),t||(e.chatStream=``,e.chatStreamStartedAt=d)";
-    if (after.includes(sendRunStarted)) {
+    const sendRunStartedWithPoll =
+      "e.chatRunId=r.runId,uClawScheduleChatStatusPoll(e,{sessionKey:l,runId:r.runId,agentId:a.agentId}),t||(e.chatStream=``,e.chatStreamStartedAt=d)";
+    if (after.includes(sendRunStartedWithLegacyPoll)) {
+      after = after.replace(sendRunStartedWithLegacyPoll, sendRunStartedWithPoll);
+    } else if (after.includes(sendRunStarted)) {
       after = after.replace(sendRunStarted, sendRunStartedWithPoll);
     }
 
     const eventRunStarted =
       "e.chatRunId=t.runId,e.chatStreamStartedAt??=Date.now()";
-    const eventRunStartedWithPoll =
+    const eventRunStartedWithLegacyPoll =
       "e.chatRunId=t.runId,uClawScheduleChatStatusPoll(e),e.chatStreamStartedAt??=Date.now()";
-    if (after.includes(eventRunStarted)) {
+    const eventRunStartedWithPoll =
+      "e.chatRunId=t.runId,uClawScheduleChatStatusPoll(e,{sessionKey:t.sessionKey,runId:t.runId,agentId:t.agentId}),e.chatStreamStartedAt??=Date.now()";
+    if (after.includes(eventRunStartedWithLegacyPoll)) {
+      after = after.replace(eventRunStartedWithLegacyPoll, eventRunStartedWithPoll);
+    } else if (after.includes(eventRunStarted)) {
       after = after.replace(eventRunStarted, eventRunStartedWithPoll);
+    }
+
+    const backgroundTerminalIgnore =
+      "if(!r&&!i){if(t.state===`final`){let n=kg(t.message);if(n&&!zl(n)){let r=P(t.sessionKey)?t.agentId??fe(e):t.agentId;jg(e,t.sessionKey,n,r)}}return null}";
+    const backgroundTerminalRefresh =
+      "if(!r&&!i){if(t.state===`final`){let n=kg(t.message);if(n&&!zl(n)){let r=P(t.sessionKey)?t.agentId??fe(e):t.agentId;jg(e,t.sessionKey,n,r)}}uClawHandleBackgroundSessionTerminal(e,t);return null}";
+    if (after.includes(backgroundTerminalIgnore)) {
+      after = after.replace(backgroundTerminalIgnore, backgroundTerminalRefresh);
     }
 
     const disconnectReset =
@@ -572,16 +607,22 @@ function patchChatPage() {
       after = after.replace(paneDisconnect, paneDisconnectWithPollStop);
     }
 
-    if (
-      !after.includes("function uClawScheduleChatStatusPoll(")
-      || !after.includes("function uClawRefreshChatStatusNow(")
-      || !after.includes("Promise.resolve(ph(e))")
-      || !after.includes("yc(e,{publishRunStatus:!0})")
-      || !after.includes("uClawScheduleChatStatusPoll(e)")
-      || !after.includes("uClawStopChatStatusPoll(e)")
-      || !after.includes("globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e),900)")
-    ) {
-      throw new Error(`Could not patch chat status polling in ${file}`);
+    const chatStatusChecks = [
+      ["function uClawScheduleChatStatusPoll(", "schedule function"],
+      ["function uClawRefreshChatStatusNow(", "refresh function"],
+      ["function uClawHandleBackgroundSessionTerminal(", "background terminal function"],
+      ["uClawChatStatusPollTimers", "per-session timer map"],
+      ["n===e.sessionKey?ph(e):mh(e,s)", "current or target session refresh"],
+      ["Promise.resolve(mh(e,{sessionKey:n", "target session refresh"],
+      ["yc(e,{publishRunStatus:!0})", "terminal reconcile"],
+      ["uClawScheduleChatStatusPoll(e)", "legacy schedule call"],
+      ["function uClawStopChatStatusPoll(e,t)", "targeted stop function"],
+      ["globalThis.setTimeout(()=>uClawRefreshChatStatusNow(e,{sessionKey:i,runId:r,status:t.sessionStatus,outcome:t.outcome}),900)", "targeted final refresh"],
+      ["uClawHandleBackgroundSessionTerminal(e,t);return null", "background terminal hook"],
+    ];
+    const missingChatStatusChecks = chatStatusChecks.filter(([needle]) => !after.includes(needle));
+    if (missingChatStatusChecks.length > 0) {
+      throw new Error(`Could not patch chat status polling in ${file}: ${missingChatStatusChecks.map(([, label]) => label).join(", ")}`);
     }
 
     const lightboxFunction = `function uClawEnsureMediaLightboxStyle(){if(document.getElementById(\`uclaw-media-lightbox-style\`))return;let e=document.createElement(\`style\`);e.id=\`uclaw-media-lightbox-style\`,e.textContent=[\`.uclaw-media-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.84);display:flex;align-items:center;justify-content:center;padding:32px;outline:0}.uclaw-media-lightbox__viewer{max-width:96vw;max-height:92vh;display:flex;align-items:center;justify-content:center}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;background:#000;box-shadow:0 20px 80px rgba(0,0,0,.45)}.uclaw-media-lightbox__toolbar{position:fixed;top:16px;right:16px;display:flex;gap:10px;z-index:1}.uclaw-media-lightbox__button{border:0;border-radius:999px;background:rgba(255,255,255,.92);color:#111;min-width:38px;height:38px;padding:0 13px;display:inline-flex;align-items:center;justify-content:center;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-decoration:none;box-shadow:0 6px 22px rgba(0,0,0,.28);cursor:pointer}.uclaw-media-lightbox__button:hover{background:#fff}.uclaw-media-lightbox__button--close{font-size:20px;font-weight:500;padding-bottom:2px}@media (max-width:720px){.uclaw-media-lightbox{padding:14px}.uclaw-media-lightbox__viewer img,.uclaw-media-lightbox__viewer video{max-width:96vw;max-height:88vh}.uclaw-media-lightbox__toolbar{top:12px;right:12px}}\`].join(\`\`),document.head.appendChild(e)}function uClawOpenMediaLightbox(e,t={}){let n=typeof e==\`string\`?e.trim():\`\`;if(!n)return;uClawEnsureMediaLightboxStyle(),document.querySelector(\`.uclaw-media-lightbox\`)?.remove();let r=document.createElement(\`div\`);r.className=\`uclaw-media-lightbox\`,r.tabIndex=-1,r.setAttribute(\`role\`,\`dialog\`),r.setAttribute(\`aria-modal\`,\`true\`);let i=()=>{document.removeEventListener(\`keydown\`,a,!0),r.remove()},a=e=>{e.key===\`Escape\`&&(e.preventDefault(),i())};r.addEventListener(\`click\`,e=>{e.target===r&&i()});let o=document.createElement(\`div\`);o.className=\`uclaw-media-lightbox__toolbar\`;let s=document.createElement(\`a\`);s.className=\`uclaw-media-lightbox__button\`,s.href=n,s.target=\`_blank\`,s.rel=\`noreferrer\`,s.download=t.label||\`\`,s.textContent=\`下载\`;let c=document.createElement(\`button\`);c.className=\`uclaw-media-lightbox__button uclaw-media-lightbox__button--close\`,c.type=\`button\`,c.setAttribute(\`aria-label\`,\`关闭预览\`),c.textContent=\`×\`,c.addEventListener(\`click\`,i),o.append(s,c);let l=document.createElement(\`div\`);l.className=\`uclaw-media-lightbox__viewer\`;let u=(t.kind||\`\`).toLowerCase()===\`video\`||/\\.(?:m4v|mov|mp4|webm)(?:[?#].*)?$/i.test(n),d=document.createElement(u?\`video\`:\`img\`);d.src=n,u?(d.controls=!0,d.autoplay=!0,d.playsInline=!0,d.preload=\`metadata\`):d.alt=t.label||\`Preview\`,d.addEventListener(\`click\`,e=>e.stopPropagation()),l.appendChild(d),r.append(o,l),document.body.appendChild(r),document.addEventListener(\`keydown\`,a,!0),requestAnimationFrame(()=>r.focus({preventScroll:!0}))}`;
@@ -1825,6 +1866,10 @@ function patchServiceWorker() {
   source = source.replace(
     /session-reconcile-missing-runids-1(?!-chat-terminal-final-refresh-1)/,
     "session-reconcile-missing-runids-1-chat-terminal-final-refresh-1",
+  );
+  source = source.replace(
+    /chat-terminal-final-refresh-1(?!-chat-background-session-status-1)/,
+    "chat-terminal-final-refresh-1-chat-background-session-status-1",
   );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
