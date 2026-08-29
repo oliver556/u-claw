@@ -224,10 +224,10 @@ function writeActivatedClientState(accessToken, newAPIToken) {
     apiKey: newAPIToken,
     api: 'openai-completions',
     models: [
-      { id: 'gpt-5.5', name: 'gpt-5.5', capabilities: ['text'], input: ['text'] },
-      { id: 'gpt-image-2', name: 'gpt-image-2', capabilities: ['image'], input: ['text', 'image'] },
-      { id: 'jimeng-video-3-720p', name: 'jimeng-video-3-720p', capabilities: ['video'], input: ['text', 'image'] },
-      { id: 'seedance-1.5-pro-1080p-10s', name: 'seedance-1.5-pro-1080p-10s', capabilities: ['video'], input: ['text', 'image'] },
+      { id: 'gpt-5.5', name: 'gpt-5.5', reasoning: false, input: ['text'], cost: {}, contextWindow: 128000, maxTokens: 8192 },
+      { id: 'gpt-image-2', name: 'gpt-image-2', reasoning: false, input: ['text', 'image'], cost: {}, contextWindow: 128000, maxTokens: 8192 },
+      { id: 'jimeng-video-3-720p', name: 'jimeng-video-3-720p', reasoning: false, input: ['text', 'image'], cost: {}, contextWindow: 128000, maxTokens: 8192 },
+      { id: 'seedance-1.5-pro-1080p-10s', name: 'seedance-1.5-pro-1080p-10s', reasoning: false, input: ['text', 'image'], cost: {}, contextWindow: 128000, maxTokens: 8192 },
     ],
   };
   config.agents = config.agents || {};
@@ -339,6 +339,39 @@ async function assertModelChangeLoadsCloudCatalog(evalJS, cdp) {
 }
 
 /**
+ * Verifies the lower analytics area keeps the high-fidelity proportions.
+ */
+async function assertAnalyticsLayout(evalJS, cdp) {
+  const layout = await evalJS(`(() => {
+    const chart = document.querySelector('.uclaw-config-model-chart-wrap');
+    const ledger = document.querySelector('.uclaw-config-model-ledger');
+    const table = document.querySelector('.uclaw-config-model-ledger .uclaw-config-model-table');
+    if (!chart || !ledger || !table) return null;
+    chart.scrollIntoView({ block: 'center' });
+    const chartRect = chart.getBoundingClientRect();
+    const ledgerRect = ledger.getBoundingClientRect();
+    const tableRect = table.getBoundingClientRect();
+    return {
+      chartHeight: Math.round(chartRect.height),
+      chartWidth: Math.round(chartRect.width),
+      ledgerWidth: Math.round(ledgerRect.width),
+      ledgerBelowChart: ledgerRect.top >= chartRect.bottom + 8,
+      tableClientWidth: Math.round(table.clientWidth || tableRect.width),
+      tableScrollWidth: Math.round(table.scrollWidth || tableRect.width)
+    };
+  })()`);
+  if (!layout) {
+    const bodyText = await evalJS('document.body.innerText || ""');
+    cdp.close();
+    throw new Error(`model usage analytics layout not found:\n${bodyText.slice(0, 2000)}`);
+  }
+  if (!layout.ledgerBelowChart || layout.chartHeight > 330 || layout.ledgerWidth < Math.min(760, layout.chartWidth)) {
+    cdp.close();
+    throw new Error(`model usage analytics layout is distorted: ${JSON.stringify(layout)}`);
+  }
+}
+
+/**
  * Drives the visible Electron page and asserts cloud usage data rendered.
  */
 async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
@@ -385,6 +418,7 @@ async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
     cdp.close();
     throw new Error(`New API login log leaked into usage UI:\n${bodyText.slice(0, 2000)}`);
   }
+  await assertAnalyticsLayout(evalJS, cdp);
   await assertModelChangeLoadsCloudCatalog(evalJS, cdp);
   const openedRecharge = await evalJS(`(() => {
     const button = [...document.querySelectorAll('button')]
@@ -466,6 +500,13 @@ async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
         cdp.close();
         throw new Error(`model usage UI recharge records did not render:\n${bodyText.slice(0, 2000)}`);
       }
+      await evalJS(`(() => {
+        const button = [...document.querySelectorAll('button')]
+          .find((node) => ['完成', '关闭'].includes((node.textContent || '').trim()) && node.offsetParent !== null);
+        if (button) button.click();
+        document.querySelector('.uclaw-config-model-chart-wrap')?.scrollIntoView({ block: 'start' });
+      })()`);
+      await sleep(500);
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
       fs.writeFileSync(screenshotPath, Buffer.from(shot.data, 'base64'));
       cdp.close();
