@@ -67,6 +67,36 @@ go run ./cmd/adminctl activation seed --code ABCD-EFGH-IJKL-MNOP
 
 `activation generate` 输出的码形如 `ABCD-EFGH-IJKL-MNOP`，与客户端激活页输入格式一致。
 
+## 最小运营后台
+
+部署后访问：
+
+```text
+https://license.yiyong.me/admin
+```
+
+后台 API 使用 `ADMIN_TOKEN` Bearer 鉴权；生产环境必须配置 `ADMIN_TOKEN`，并建议在 Caddy/Nginx 再加办公室或 VPN IP allowlist。
+
+当前最小能力：
+
+- 生成激活码并写入 PostgreSQL 库存；明文只在生成或重发响应中出现一次。
+- 查询激活码状态、绑定手机号、绑定的 U-Claw 用户 ID。
+- 查询 New API 用户映射、New API user id、base URL 与 token 轮换时间。
+- 禁用未使用激活码。
+- 重发未使用或已禁用激活码：旧码标记为 `reissued`，新码写入同批次库存。
+
+接口：
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://license.yiyong.me/internal/admin/v1/activation-codes
+
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"count":1,"batchName":"manual","createdBy":"operator"}' \
+  https://license.yiyong.me/internal/admin/v1/activation-codes/generate
+```
+
 ## 本地手机号登录
 
 开发环境默认短信码为 `123456`，响应会返回 `devCode`。当前验收版本也可配置 `SMS_PROVIDER=fixed`，使用真实手机号 + 固定验证码 `123456`，不调用阿里云短信。

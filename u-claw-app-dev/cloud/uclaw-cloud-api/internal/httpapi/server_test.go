@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -423,6 +424,88 @@ func TestRechargeOrderRejectsUnconfiguredOfficialProvider(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "payment provider alipay is not configured") {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestAdminConsoleRequiresTokenAndManagesActivationCodes(t *testing.T) {
+	server := NewServer(config.Config{
+		AppEnv:     "development",
+		JWTSecret:  "test-secret",
+		AdminToken: "admin-token",
+	}, BuildInfo{Version: "test"})
+
+	pageRec := httptest.NewRecorder()
+	pageReq := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	server.ServeHTTP(pageRec, pageReq)
+	if pageRec.Code != http.StatusOK || !strings.Contains(pageRec.Body.String(), "U-Claw 运营后台") {
+		t.Fatalf("admin page status = %d body = %s", pageRec.Code, pageRec.Body.String())
+	}
+
+	unauthorizedRec := httptest.NewRecorder()
+	unauthorizedReq := httptest.NewRequest(http.MethodGet, "/internal/admin/v1/activation-codes", nil)
+	server.ServeHTTP(unauthorizedRec, unauthorizedReq)
+	if unauthorizedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d, want 401", unauthorizedRec.Code)
+	}
+
+	generateRec := httptest.NewRecorder()
+	generateReq := httptest.NewRequest(
+		http.MethodPost,
+		"/internal/admin/v1/activation-codes/generate",
+		bytes.NewBufferString(`{"count":2,"batchName":"验收批次","createdBy":"tester"}`),
+	)
+	generateReq.Header.Set("Authorization", "Bearer admin-token")
+	server.ServeHTTP(generateRec, generateReq)
+	if generateRec.Code != http.StatusCreated {
+		t.Fatalf("generate status = %d body = %s", generateRec.Code, generateRec.Body.String())
+	}
+	var generated struct {
+		Codes []struct {
+			ID     int64  `json:"id"`
+			Code   string `json:"code"`
+			Status string `json:"status"`
+		} `json:"codes"`
+	}
+	if err := json.Unmarshal(generateRec.Body.Bytes(), &generated); err != nil {
+		t.Fatalf("decode generate response: %v", err)
+	}
+	if len(generated.Codes) != 2 || generated.Codes[0].Code == "" || generated.Codes[0].Status != "unused" {
+		t.Fatalf("generated codes = %+v", generated.Codes)
+	}
+
+	disableRec := httptest.NewRecorder()
+	disableReq := httptest.NewRequest(
+		http.MethodPost,
+		"/internal/admin/v1/activation-codes/"+strconv.FormatInt(generated.Codes[0].ID, 10)+"/disable",
+		bytes.NewBufferString(`{"reason":"test"}`),
+	)
+	disableReq.Header.Set("Authorization", "Bearer admin-token")
+	server.ServeHTTP(disableRec, disableReq)
+	if disableRec.Code != http.StatusOK {
+		t.Fatalf("disable status = %d body = %s", disableRec.Code, disableRec.Body.String())
+	}
+
+	reissueRec := httptest.NewRecorder()
+	reissueReq := httptest.NewRequest(
+		http.MethodPost,
+		"/internal/admin/v1/activation-codes/"+strconv.FormatInt(generated.Codes[0].ID, 10)+"/reissue",
+		bytes.NewBufferString(`{}`),
+	)
+	reissueReq.Header.Set("Authorization", "Bearer admin-token")
+	server.ServeHTTP(reissueRec, reissueReq)
+	if reissueRec.Code != http.StatusCreated {
+		t.Fatalf("reissue status = %d body = %s", reissueRec.Code, reissueRec.Body.String())
+	}
+
+	listRec := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/internal/admin/v1/activation-codes?limit=10", nil)
+	listReq.Header.Set("Authorization", "Bearer admin-token")
+	server.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body = %s", listRec.Code, listRec.Body.String())
+	}
+	if !strings.Contains(listRec.Body.String(), `"status":"reissued"`) {
+		t.Fatalf("list body missing reissued code: %s", listRec.Body.String())
 	}
 }
 

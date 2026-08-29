@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,6 +12,7 @@ import (
 	"time"
 
 	"uclaw-cloud-api/internal/activation"
+	"uclaw-cloud-api/internal/admin"
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/newapi"
 	"uclaw-cloud-api/internal/postgres"
@@ -66,7 +65,7 @@ func runActivationGenerate(args []string) {
 		count = parsed
 	}
 	for i := 0; i < count; i++ {
-		code, err := generateActivationCode()
+		code, err := admin.GenerateActivationCode()
 		if err != nil {
 			log.Fatalf("generate activation code: %v", err)
 		}
@@ -276,16 +275,6 @@ func spikeFull(ctx context.Context, client *newapi.Client, args []string) {
 		}
 		printJSON(map[string]any{"step": "add_quota", "ok": true, "user_id": userID, "quota": quota})
 	}
-}
-
-// generateActivationCode creates a human-readable one-time code for USB card printing.
-func generateActivationCode() (string, error) {
-	buf := make([]byte, 10)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf)
-	return encoded[:4] + "-" + encoded[4:8] + "-" + encoded[8:12] + "-" + encoded[12:16], nil
 }
 
 // requiredFlag returns a flag value or exits because admin commands must fail loudly.

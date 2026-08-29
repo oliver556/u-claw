@@ -13,6 +13,7 @@ type Config struct {
 	HTTPAddr                 string
 	DatabaseURL              string
 	JWTSecret                string
+	AdminToken               string
 	NewAPIAdminBaseURL       string
 	NewAPIAdminToken         string
 	NewAPIClientBaseURL      string
@@ -59,6 +60,7 @@ func Load(getenv Getter) (Config, error) {
 		HTTPAddr:                 withDefault(getenv("UCLAW_HTTP_ADDR"), ":8080"),
 		DatabaseURL:              strings.TrimSpace(getenv("DATABASE_URL")),
 		JWTSecret:                strings.TrimSpace(getenv("JWT_SECRET")),
+		AdminToken:               strings.TrimSpace(getenv("ADMIN_TOKEN")),
 		NewAPIAdminBaseURL:       strings.TrimRight(strings.TrimSpace(getenv("NEWAPI_ADMIN_BASE_URL")), "/"),
 		NewAPIAdminToken:         strings.TrimSpace(getenv("NEWAPI_ADMIN_TOKEN")),
 		NewAPIClientBaseURL:      strings.TrimRight(withDefault(getenv("NEWAPI_CLIENT_BASE_URL"), "https://api.gmnlee.com/v1"), "/"),
@@ -131,6 +133,9 @@ func (cfg Config) ValidateForServe() error {
 	}
 	if cfg.JWTSecret == "" {
 		missing = append(missing, "JWT_SECRET")
+	}
+	if cfg.AdminToken == "" {
+		missing = append(missing, "ADMIN_TOKEN")
 	}
 	if cfg.NewAPIAdminBaseURL == "" {
 		missing = append(missing, "NEWAPI_ADMIN_BASE_URL")

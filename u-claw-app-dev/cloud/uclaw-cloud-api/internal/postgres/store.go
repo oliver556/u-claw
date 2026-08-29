@@ -12,6 +12,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"uclaw-cloud-api/internal/activation"
+	"uclaw-cloud-api/internal/admin"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/provisioning"
 )
@@ -301,9 +302,339 @@ ON CONFLICT (code_hash) DO NOTHING
 	return nil
 }
 
+// CreateActivationBatch creates a labeled group for operator-generated codes.
+func (s *Store) CreateActivationBatch(ctx context.Context, name string, note string, createdBy string) (int64, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "manual"
+	}
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+INSERT INTO activation_batches (name, note, created_by, created_at)
+VALUES ($1, $2, $3, now())
+RETURNING id
+`, name, strings.TrimSpace(note), strings.TrimSpace(createdBy)).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("create activation batch: %w", err)
+	}
+	return id, nil
+}
+
+// CreateActivationCode inserts one generated code and returns its redacted row.
+func (s *Store) CreateActivationCode(ctx context.Context, code string, batchID sql.NullInt64, at time.Time) (admin.ActivationCode, error) {
+	var row activationCodeRow
+	err := s.db.QueryRowContext(ctx, `
+INSERT INTO activation_codes (batch_id, code_hash, status, created_at)
+VALUES ($1, $2, 'unused', $3)
+RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at
+`, batchID, s.activationCodeHash(code), at).Scan(
+		&row.ID,
+		&row.BatchID,
+		&row.Status,
+		&row.BoundUserID,
+		&row.BoundPhone,
+		&row.BoundAt,
+		&row.CreatedAt,
+		&row.ExpiresAt,
+	)
+	if err != nil {
+		return admin.ActivationCode{}, fmt.Errorf("create activation code: %w", err)
+	}
+	return row.toAdminRecord(), nil
+}
+
+// ListActivationCodes returns recent activation inventory for the admin console.
+func (s *Store) ListActivationCodes(ctx context.Context, filter admin.ActivationCodeFilter) ([]admin.ActivationCode, error) {
+	status := strings.ToLower(strings.TrimSpace(filter.Status))
+	limit := filter.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+  ac.id,
+  ac.batch_id,
+  COALESCE(ab.name, ''),
+  ac.status,
+  ac.bound_user_id,
+  ac.bound_phone,
+  ac.bound_at,
+  ac.created_at,
+  ac.expires_at,
+  na.newapi_user_id,
+  COALESCE(na.newapi_username, ''),
+  COALESCE(na.newapi_base_url, ''),
+  na.token_rotated_at,
+  COALESCE(aa.activation_id, ''),
+  COALESCE(aa.stage, ''),
+  aa.committed_at
+FROM activation_codes ac
+LEFT JOIN activation_batches ab ON ab.id = ac.batch_id
+LEFT JOIN newapi_accounts na ON na.uclaw_user_id = ac.bound_user_id
+LEFT JOIN LATERAL (
+  SELECT activation_id, stage, committed_at
+  FROM activation_attempts
+  WHERE username_normalized = ac.bound_phone
+  ORDER BY created_at DESC
+  LIMIT 1
+) aa ON true
+WHERE ($1 = '' OR ac.status = $1)
+ORDER BY ac.created_at DESC, ac.id DESC
+LIMIT $2
+`, status, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list activation codes: %w", err)
+	}
+	defer rows.Close()
+
+	var records []admin.ActivationCode
+	for rows.Next() {
+		row, err := scanActivationCodeView(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, row.toAdminRecord())
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list activation codes rows: %w", err)
+	}
+	return records, nil
+}
+
+// GetActivationCode returns one activation inventory row.
+func (s *Store) GetActivationCode(ctx context.Context, id int64) (admin.ActivationCode, error) {
+	row := activationCodeViewRow{}
+	err := s.db.QueryRowContext(ctx, `
+SELECT
+  ac.id,
+  ac.batch_id,
+  COALESCE(ab.name, ''),
+  ac.status,
+  ac.bound_user_id,
+  ac.bound_phone,
+  ac.bound_at,
+  ac.created_at,
+  ac.expires_at,
+  na.newapi_user_id,
+  COALESCE(na.newapi_username, ''),
+  COALESCE(na.newapi_base_url, ''),
+  na.token_rotated_at,
+  COALESCE(aa.activation_id, ''),
+  COALESCE(aa.stage, ''),
+  aa.committed_at
+FROM activation_codes ac
+LEFT JOIN activation_batches ab ON ab.id = ac.batch_id
+LEFT JOIN newapi_accounts na ON na.uclaw_user_id = ac.bound_user_id
+LEFT JOIN LATERAL (
+  SELECT activation_id, stage, committed_at
+  FROM activation_attempts
+  WHERE username_normalized = ac.bound_phone
+  ORDER BY created_at DESC
+  LIMIT 1
+) aa ON true
+WHERE ac.id = $1
+`, id).Scan(
+		&row.ID,
+		&row.BatchID,
+		&row.BatchName,
+		&row.Status,
+		&row.BoundUserID,
+		&row.BoundPhone,
+		&row.BoundAt,
+		&row.CreatedAt,
+		&row.ExpiresAt,
+		&row.NewAPIUserID,
+		&row.NewAPIUsername,
+		&row.NewAPIBaseURL,
+		&row.NewAPITokenRotatedAt,
+		&row.LatestActivationID,
+		&row.LatestActivationStage,
+		&row.LatestActivationCommit,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return admin.ActivationCode{}, fmt.Errorf("activation code not found")
+		}
+		return admin.ActivationCode{}, fmt.Errorf("get activation code: %w", err)
+	}
+	return row.toAdminRecord(), nil
+}
+
+// DisableActivationCode prevents future first-use binding of an inventory row.
+func (s *Store) DisableActivationCode(ctx context.Context, id int64, _ string, at time.Time) error {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE activation_codes
+SET status = 'disabled'
+WHERE id = $1 AND status IN ('unused', 'disabled')
+  AND (expires_at IS NULL OR expires_at > $2)
+`, id, at)
+	if err != nil {
+		return fmt.Errorf("disable activation code: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("disable activation code rows: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("activation code is not disableable")
+	}
+	return nil
+}
+
+// ReissueActivationCode atomically retires an unused code and creates a replacement.
+func (s *Store) ReissueActivationCode(ctx context.Context, id int64, replacementCode string, at time.Time) (admin.ActivationCode, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return admin.ActivationCode{}, fmt.Errorf("begin reissue activation code: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var batchID sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+UPDATE activation_codes
+SET status = 'reissued'
+WHERE id = $1 AND status IN ('unused', 'disabled')
+RETURNING batch_id
+`, id).Scan(&batchID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return admin.ActivationCode{}, fmt.Errorf("activation code is not reissueable")
+		}
+		return admin.ActivationCode{}, fmt.Errorf("reissue activation code: %w", err)
+	}
+
+	var row activationCodeRow
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO activation_codes (batch_id, code_hash, status, created_at)
+VALUES ($1, $2, 'unused', $3)
+RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at
+`, batchID, s.activationCodeHash(replacementCode), at).Scan(
+		&row.ID,
+		&row.BatchID,
+		&row.Status,
+		&row.BoundUserID,
+		&row.BoundPhone,
+		&row.BoundAt,
+		&row.CreatedAt,
+		&row.ExpiresAt,
+	)
+	if err != nil {
+		return admin.ActivationCode{}, fmt.Errorf("insert replacement activation code: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return admin.ActivationCode{}, fmt.Errorf("commit reissue activation code: %w", err)
+	}
+	committed = true
+	return row.toAdminRecord(), nil
+}
+
 // activationCodeHash hashes printed codes before they enter PostgreSQL.
 func (s *Store) activationCodeHash(code string) string {
 	normalized := strings.ToUpper(strings.TrimSpace(code))
 	sum := sha256.Sum256([]byte(normalized + ":" + s.activationPepper))
 	return hex.EncodeToString(sum[:])
+}
+
+type activationCodeRow struct {
+	ID          int64
+	BatchID     sql.NullInt64
+	Status      string
+	BoundUserID sql.NullInt64
+	BoundPhone  sql.NullString
+	BoundAt     sql.NullTime
+	CreatedAt   time.Time
+	ExpiresAt   sql.NullTime
+}
+
+type activationCodeViewRow struct {
+	activationCodeRow
+	BatchName              string
+	NewAPIUserID           sql.NullInt64
+	NewAPIUsername         string
+	NewAPIBaseURL          string
+	NewAPITokenRotatedAt   sql.NullTime
+	LatestActivationID     string
+	LatestActivationStage  string
+	LatestActivationCommit sql.NullTime
+}
+
+type activationCodeRowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanActivationCodeView keeps list and detail scans aligned.
+func scanActivationCodeView(scanner activationCodeRowScanner) (activationCodeViewRow, error) {
+	var row activationCodeViewRow
+	err := scanner.Scan(
+		&row.ID,
+		&row.BatchID,
+		&row.BatchName,
+		&row.Status,
+		&row.BoundUserID,
+		&row.BoundPhone,
+		&row.BoundAt,
+		&row.CreatedAt,
+		&row.ExpiresAt,
+		&row.NewAPIUserID,
+		&row.NewAPIUsername,
+		&row.NewAPIBaseURL,
+		&row.NewAPITokenRotatedAt,
+		&row.LatestActivationID,
+		&row.LatestActivationStage,
+		&row.LatestActivationCommit,
+	)
+	if err != nil {
+		return activationCodeViewRow{}, fmt.Errorf("scan activation code view: %w", err)
+	}
+	return row, nil
+}
+
+// toAdminRecord converts nullable DB columns into JSON-friendly pointers.
+func (row activationCodeRow) toAdminRecord() admin.ActivationCode {
+	record := admin.ActivationCode{
+		ID:        row.ID,
+		Status:    row.Status,
+		CreatedAt: row.CreatedAt,
+	}
+	if row.BatchID.Valid {
+		record.BatchID = &row.BatchID.Int64
+	}
+	if row.BoundUserID.Valid {
+		record.BoundUserID = &row.BoundUserID.Int64
+	}
+	if row.BoundPhone.Valid {
+		record.BoundPhone = row.BoundPhone.String
+	}
+	if row.BoundAt.Valid {
+		record.BoundAt = &row.BoundAt.Time
+	}
+	if row.ExpiresAt.Valid {
+		record.ExpiresAt = &row.ExpiresAt.Time
+	}
+	return record
+}
+
+// toAdminRecord converts joined DB columns into JSON-friendly pointers.
+func (row activationCodeViewRow) toAdminRecord() admin.ActivationCode {
+	record := row.activationCodeRow.toAdminRecord()
+	record.BatchName = row.BatchName
+	if row.NewAPIUserID.Valid {
+		record.NewAPIUserID = &row.NewAPIUserID.Int64
+	}
+	record.NewAPIUsername = row.NewAPIUsername
+	record.NewAPIBaseURL = row.NewAPIBaseURL
+	if row.NewAPITokenRotatedAt.Valid {
+		record.NewAPITokenRotatedAt = &row.NewAPITokenRotatedAt.Time
+	}
+	record.LatestActivationID = row.LatestActivationID
+	record.LatestActivationStage = row.LatestActivationStage
+	if row.LatestActivationCommit.Valid {
+		record.LatestActivationCommit = &row.LatestActivationCommit.Time
+	}
+	return record
 }

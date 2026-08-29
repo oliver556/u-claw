@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"uclaw-cloud-api/internal/activation"
+	"uclaw-cloud-api/internal/admin"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/license"
@@ -32,6 +34,7 @@ type BuildInfo struct {
 type ServerOptions struct {
 	Auth       *auth.Service
 	Activation *activation.Service
+	Admin      *admin.Service
 	Usage      *usage.Service
 	Recharge   *recharge.Service
 }
@@ -40,6 +43,7 @@ type ServerOptions struct {
 type PersistentStore interface {
 	auth.Store
 	activation.Store
+	admin.Store
 	provisioning.Store
 	recharge.Store
 }
@@ -83,11 +87,23 @@ type virtualPaymentNotifyRequest struct {
 	ProviderEventID string `json:"providerEventId"`
 }
 
+type adminGenerateActivationCodesRequest struct {
+	Count     int    `json:"count"`
+	BatchName string `json:"batchName"`
+	Note      string `json:"note"`
+	CreatedBy string `json:"createdBy"`
+}
+
+type adminDisableActivationCodeRequest struct {
+	Reason string `json:"reason"`
+}
+
 // NewServer returns the HTTP interface for activation, payment, and health routes.
 func NewServer(cfg config.Config, build BuildInfo) http.Handler {
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, nil),
 		Activation: buildActivationService(cfg, nil),
+		Admin:      buildAdminService(nil),
 		Usage:      buildUsageService(cfg),
 		Recharge:   buildRechargeService(cfg, nil),
 	})
@@ -98,6 +114,7 @@ func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStor
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, store),
 		Activation: buildActivationService(cfg, store),
+		Admin:      buildAdminService(store),
 		Usage:      buildUsageService(cfg),
 		Recharge:   buildRechargeService(cfg, store),
 	})
@@ -125,6 +142,124 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 	})
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, build)
+	})
+	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(adminConsoleHTML))
+	})
+	mux.HandleFunc("GET /internal/admin/v1/activation-codes", func(w http.ResponseWriter, r *http.Request) {
+		if err := verifyAdmin(r, cfg); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Admin == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("admin service is not configured"))
+			return
+		}
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		codes, err := options.Admin.ListActivationCodes(r.Context(), admin.ActivationCodeFilter{
+			Status: r.URL.Query().Get("status"),
+			Limit:  limit,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"codes": codes})
+	})
+	mux.HandleFunc("POST /internal/admin/v1/activation-codes/generate", func(w http.ResponseWriter, r *http.Request) {
+		if err := verifyAdmin(r, cfg); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Admin == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("admin service is not configured"))
+			return
+		}
+		var req adminGenerateActivationCodesRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		codes, err := options.Admin.GenerateActivationCodes(r.Context(), admin.GenerateRequest{
+			Count:     req.Count,
+			BatchName: req.BatchName,
+			Note:      req.Note,
+			CreatedBy: req.CreatedBy,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"codes": codes})
+	})
+	mux.HandleFunc("GET /internal/admin/v1/activation-codes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if err := verifyAdmin(r, cfg); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Admin == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("admin service is not configured"))
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("activation code id is invalid"))
+			return
+		}
+		code, err := options.Admin.GetActivationCode(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"code": code})
+	})
+	mux.HandleFunc("POST /internal/admin/v1/activation-codes/{id}/disable", func(w http.ResponseWriter, r *http.Request) {
+		if err := verifyAdmin(r, cfg); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Admin == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("admin service is not configured"))
+			return
+		}
+		var req adminDisableActivationCodeRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("activation code id is invalid"))
+			return
+		}
+		if err := options.Admin.DisableActivationCode(r.Context(), id, req.Reason); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("POST /internal/admin/v1/activation-codes/{id}/reissue", func(w http.ResponseWriter, r *http.Request) {
+		if err := verifyAdmin(r, cfg); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Admin == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("admin service is not configured"))
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("activation code id is invalid"))
+			return
+		}
+		code, err := options.Admin.ReissueActivationCode(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"code": code})
 	})
 	mux.HandleFunc("POST /v1/auth/sms/send", func(w http.ResponseWriter, r *http.Request) {
 		var req sendSMSRequest
@@ -385,6 +520,18 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 	return mux
 }
 
+// buildAdminService creates the protected operational admin service.
+func buildAdminService(store admin.Store) *admin.Service {
+	if store == nil {
+		store = admin.NewMemoryStore()
+	}
+	service, err := admin.NewService(store)
+	if err != nil {
+		panic(fmt.Sprintf("build admin service: %v", err))
+	}
+	return service
+}
+
 // buildAuthService creates auth dependencies, defaulting to memory storage for local smoke tests.
 func buildAuthService(cfg config.Config, store auth.Store) *auth.Service {
 	if store == nil {
@@ -516,6 +663,24 @@ func buildRechargeService(cfg config.Config, store recharge.Store) *recharge.Ser
 		panic(fmt.Sprintf("build recharge service: %v", err))
 	}
 	return service
+}
+
+// verifyAdmin validates the admin console bearer token without logging secrets.
+func verifyAdmin(r *http.Request, cfg config.Config) error {
+	expected := strings.TrimSpace(cfg.AdminToken)
+	if expected == "" {
+		return fmt.Errorf("admin token is not configured")
+	}
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return fmt.Errorf("authorization bearer token is required")
+	}
+	actual := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
+		return fmt.Errorf("authorization bearer token is invalid")
+	}
+	return nil
 }
 
 // verifyBearer extracts and validates the U-Claw access token.
