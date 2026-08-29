@@ -284,8 +284,9 @@ Version: ${version}
 Built: ${localDisplayTime()}
 
   Mac:
-  Formal entry: double-click U-Claw Launcher.app
-  Diagnostic entry: Mac-Start-App.command
+  正式入口：双击 U-Claw Launcher.app
+  诊断入口：Mac-Start-App.command
+  注意：不要把 Mac-Start-App.command 当作正式入口；oh-my-zsh 等 shell 启动提示可能抢占 .command 的首字符，导致 /Volumes/... 变成 Volumes/...。
   App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-arm64
   App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-x64
   USB data: <USB>/U-Claw/data
