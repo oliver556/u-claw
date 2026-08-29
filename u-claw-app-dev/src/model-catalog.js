@@ -25,7 +25,7 @@ function normalizeCatalogModel(model) {
  */
 function inferCapabilitiesFromModelID(modelID) {
   const lower = String(modelID || '').toLowerCase();
-  if (/video|jimeng|kling|runway/.test(lower)) return ['video'];
+  if (/video|jimeng|kling|runway|seedance/.test(lower)) return ['video'];
   if (/image|gpt-image|dall|flux|midjourney/.test(lower)) return ['image'];
   return ['text'];
 }
@@ -71,6 +71,21 @@ function catalogModelMatchesKind(model, kind) {
     return !(/video|jimeng|kling|runway|gpt-image|image|dall|flux|midjourney/.test(id));
   }
   return false;
+}
+
+/**
+ * Removes Bavi-box-only catalog metadata before writing OpenClaw config.
+ */
+function toOpenClawModelConfig(model) {
+  return {
+    id: model.id,
+    name: model.name,
+    reasoning: model.reasoning,
+    input: model.input,
+    cost: model.cost,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+  };
 }
 
 /**
@@ -182,7 +197,7 @@ function mergeModelCatalogIntoConfig(config, catalog, options = {}) {
     ...existingProvider,
     baseUrl: baseURL,
     api: catalog.provider?.api || existingProvider.api || 'openai-completions',
-    models: mergedModels,
+    models: mergedModels.map(toOpenClawModelConfig),
   };
   if (apiKey) {
     nextConfig.models.providers[providerID].apiKey = apiKey;
@@ -204,4 +219,5 @@ module.exports = {
   normalizeCatalogModel,
   rebaseDefaultModelsToCatalog,
   splitQualifiedModelID,
+  toOpenClawModelConfig,
 };

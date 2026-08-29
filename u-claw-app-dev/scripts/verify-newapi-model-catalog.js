@@ -64,7 +64,7 @@ function verifyMergeModelCatalogIntoConfig() {
   assert.equal(result.config.models.providers.newapi.apiKey, 'sk-existing');
   assert.equal(result.config.models.providers.newapi.models[0].id, 'gpt-5.5');
   assert.deepEqual(result.config.models.providers.newapi.models[1].input, ['text', 'image']);
-  assert.deepEqual(result.config.models.providers.newapi.models[1].capabilities, ['image']);
+  assert.equal(Object.hasOwn(result.config.models.providers.newapi.models[1], 'capabilities'), false);
 }
 
 /**
