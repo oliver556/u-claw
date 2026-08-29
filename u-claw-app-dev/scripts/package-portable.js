@@ -365,6 +365,32 @@ Launcher behavior:
 	`;
 }
 
+function packageVersionJson(macArm64Hash, macX64Hash, winHash) {
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    version,
+    releaseId: `v${version}`,
+    installedAt: new Date().toISOString(),
+    platforms: {
+      'darwin-arm64': {
+        archiveSha256: macArm64Hash,
+        launcherSha256: null,
+        treeDigest: null
+      },
+      'darwin-x64': {
+        archiveSha256: macX64Hash,
+        launcherSha256: null,
+        treeDigest: null
+      },
+      'win32-x64': {
+        archiveSha256: winHash,
+        launcherSha256: null,
+        treeDigest: null
+      }
+    }
+  }, null, 2)}\n`;
+}
+
 function buildMacLauncher(stageRoot) {
   ensureFile(macLauncherSource, 'macOS launcher source');
   ensureFile(macStartScript, 'macOS start script');
@@ -472,6 +498,7 @@ function assembleStage(edition) {
   writeText(path.join(archiveDir, `${path.basename(macArm64Archive)}.sha256`), `${macArm64Hash}\n`);
   writeText(path.join(archiveDir, `${path.basename(macX64Archive)}.sha256`), `${macX64Hash}\n`);
   writeText(path.join(archiveDir, `${path.basename(winArchive)}.sha256`), `${winHash}\n`);
+  writeText(path.join(stageRoot, 'app', 'version.json'), packageVersionJson(macArm64Hash, macX64Hash, winHash));
   fs.copyFileSync(path.join(appDir, 'scripts', 'Mac-Start-App.command'), path.join(stageRoot, 'Mac-Start-App.command'));
   fs.copyFileSync(path.join(appDir, 'scripts', 'Windows-Start-App.bat'), path.join(stageRoot, 'Windows-Start-App.bat'));
   fs.copyFileSync(winSyncScript, path.join(stageRoot, 'Windows-Sync-Data.ps1'));
@@ -531,6 +558,7 @@ function deploy(stage, usbRoot) {
     'Windows-Start-App.bat',
     'Windows-Sync-Data.ps1',
     'UCLAW-PACKAGE-NOTES.txt',
+    'app/version.json',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz.sha256',
     'app/desktop-archive/u-claw-app-mac-x64.tar.gz',
