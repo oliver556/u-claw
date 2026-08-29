@@ -67,7 +67,47 @@ function verifyMergeModelCatalogIntoConfig() {
   assert.deepEqual(result.config.models.providers.newapi.models[1].capabilities, ['image']);
 }
 
+/**
+ * Verifies synced catalog models become the active cloud defaults without
+ * bypassing the dedicated video adapter default.
+ */
+function verifyMergeRebasesCloudManagedDefaults() {
+  const config = {
+    agents: {
+      defaults: {
+        model: { primary: 'custom/gpt-5.5' },
+        imageGenerationModel: { primary: 'litellm/gpt-image-2', timeoutMs: 180000 },
+        imageModel: { primary: 'litellm/gpt-image-2', timeoutMs: 180000 },
+        videoGenerationModel: { primary: 'xai/jimeng-video-3-720p', timeoutMs: 600000 },
+      },
+    },
+    models: {
+      providers: {
+        custom: { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-existing' },
+        litellm: { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-existing' },
+        xai: { baseUrl: 'http://127.0.0.1:18808/xai/v1', apiKey: 'adapter' },
+      },
+    },
+  };
+  const catalog = {
+    provider: { id: 'newapi', baseUrl: 'https://api.example.com/v1/', api: 'openai-completions' },
+    models: [
+      { id: 'gpt-5.5', capabilities: ['text'] },
+      { id: 'gpt-image-2', capabilities: ['image'] },
+      { id: 'jimeng-video-3-720p', capabilities: ['video'] },
+    ],
+  };
+
+  const result = mergeModelCatalogIntoConfig(config, catalog);
+
+  assert.equal(result.config.agents.defaults.model.primary, 'newapi/gpt-5.5');
+  assert.equal(result.config.agents.defaults.imageGenerationModel.primary, 'newapi/gpt-image-2');
+  assert.equal(result.config.agents.defaults.imageModel.primary, 'newapi/gpt-image-2');
+  assert.equal(result.config.agents.defaults.videoGenerationModel.primary, 'xai/jimeng-video-3-720p');
+}
+
 verifyNormalizeCatalogModel();
 verifyReusableApiKey();
 verifyMergeModelCatalogIntoConfig();
+verifyMergeRebasesCloudManagedDefaults();
 console.log('newapi model catalog verifier passed');

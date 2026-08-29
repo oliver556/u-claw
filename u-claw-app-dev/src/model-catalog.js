@@ -6,17 +6,28 @@ function normalizeCatalogModel(model) {
   if (!id) return null;
   const capabilities = Array.isArray(model.capabilities)
     ? model.capabilities.map((value) => String(value).toLowerCase()).filter(Boolean)
-    : ['text'];
+    : [];
+  const normalizedCapabilities = capabilities.length ? capabilities : inferCapabilitiesFromModelID(id);
   return {
     id,
     name: String(model?.name || id).trim() || id,
-    capabilities,
+    capabilities: normalizedCapabilities,
     reasoning: Boolean(model?.reasoning),
-    input: capabilitiesToInput(capabilities),
+    input: capabilitiesToInput(normalizedCapabilities),
     cost: model?.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: Number(model?.contextWindow) || 128000,
     maxTokens: Number(model?.maxTokens) || 8192,
   };
+}
+
+/**
+ * Infers broad Bavi-box capability buckets from model naming conventions.
+ */
+function inferCapabilitiesFromModelID(modelID) {
+  const lower = String(modelID || '').toLowerCase();
+  if (/video|jimeng|kling|runway/.test(lower)) return ['video'];
+  if (/image|gpt-image|dall|flux|midjourney/.test(lower)) return ['image'];
+  return ['text'];
 }
 
 /**
@@ -26,6 +37,97 @@ function capabilitiesToInput(capabilities) {
   if (capabilities.includes('video')) return ['text', 'image'];
   if (capabilities.includes('image')) return ['text', 'image'];
   return ['text'];
+}
+
+/**
+ * Returns the provider and bare model id from an OpenClaw qualified model id.
+ */
+function splitQualifiedModelID(value) {
+  const text = String(value || '').trim();
+  const slash = text.indexOf('/');
+  if (slash <= 0) return { provider: '', id: text };
+  return {
+    provider: text.slice(0, slash),
+    id: text.slice(slash + 1),
+  };
+}
+
+/**
+ * Checks whether a normalized catalog model belongs to the requested Bavi-box slot.
+ */
+function catalogModelMatchesKind(model, kind) {
+  const id = String(model?.id || '').toLowerCase();
+  const capabilities = Array.isArray(model?.capabilities)
+    ? model.capabilities.map((value) => String(value).toLowerCase()).filter(Boolean)
+    : [];
+  if (kind === 'video') {
+    return capabilities.includes('video') || (!capabilities.length && /video|jimeng|kling|runway/.test(id));
+  }
+  if (kind === 'image') {
+    return capabilities.includes('image') || (!capabilities.length && /image|gpt-image|dall|flux|midjourney/.test(id));
+  }
+  if (kind === 'text') {
+    if (capabilities.length) return capabilities.includes('text') && !capabilities.includes('image') && !capabilities.includes('video');
+    return !(/video|jimeng|kling|runway|gpt-image|image|dall|flux|midjourney/.test(id));
+  }
+  return false;
+}
+
+/**
+ * Moves cloud-managed default model selections onto the synced New API provider.
+ */
+function rebaseDefaultModelsToCatalog(config, providerID, models) {
+  const defaults = config?.agents?.defaults;
+  if (!defaults || !providerID || !Array.isArray(models) || models.length === 0) return false;
+
+  let changed = false;
+  const pickModelID = (currentValue, kind) => {
+    const current = splitQualifiedModelID(currentValue);
+    const candidates = models.filter((model) => catalogModelMatchesKind(model, kind));
+    const exact = candidates.find((model) => model.id === current.id);
+    if (exact) return exact.id;
+    const managedProviders = new Set(['', 'custom', 'litellm', providerID]);
+    if (managedProviders.has(current.provider) && candidates.length > 0) return candidates[0].id;
+    return '';
+  };
+  const patchPrimary = (container, key, kind) => {
+    const current = String(container?.[key] || '').trim();
+    const picked = pickModelID(current, kind);
+    if (!picked) return;
+    const next = `${providerID}/${picked}`;
+    if (current !== next) {
+      container[key] = next;
+      changed = true;
+    }
+  };
+
+  if (defaults.model && typeof defaults.model === 'object') {
+    patchPrimary(defaults.model, 'primary', 'text');
+  } else if (typeof defaults.model === 'string') {
+    const picked = pickModelID(defaults.model, 'text');
+    if (picked) {
+      const next = `${providerID}/${picked}`;
+      if (defaults.model !== next) {
+        defaults.model = next;
+        changed = true;
+      }
+    }
+  }
+  for (const key of ['imageGenerationModel', 'imageModel']) {
+    if (defaults[key] && typeof defaults[key] === 'object') {
+      patchPrimary(defaults[key], 'primary', 'image');
+    } else if (typeof defaults[key] === 'string') {
+      const picked = pickModelID(defaults[key], 'image');
+      if (picked) {
+        const next = `${providerID}/${picked}`;
+        if (defaults[key] !== next) {
+          defaults[key] = next;
+          changed = true;
+        }
+      }
+    }
+  }
+  return changed;
 }
 
 /**
@@ -85,14 +187,21 @@ function mergeModelCatalogIntoConfig(config, catalog, options = {}) {
   if (apiKey) {
     nextConfig.models.providers[providerID].apiKey = apiKey;
   }
+  nextConfig.agents = nextConfig.agents || {};
+  nextConfig.agents.defaults = nextConfig.agents.defaults || {};
+  rebaseDefaultModelsToCatalog(nextConfig, providerID, mergedModels);
 
   const changed = JSON.stringify(config || {}) !== JSON.stringify(nextConfig);
   return { config: nextConfig, changed, count: mergedModels.length };
 }
 
 module.exports = {
+  catalogModelMatchesKind,
   capabilitiesToInput,
   findReusableApiKey,
+  inferCapabilitiesFromModelID,
   mergeModelCatalogIntoConfig,
   normalizeCatalogModel,
+  rebaseDefaultModelsToCatalog,
+  splitQualifiedModelID,
 };
