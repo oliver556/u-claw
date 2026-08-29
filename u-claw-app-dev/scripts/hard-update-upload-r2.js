@@ -5,6 +5,7 @@ const https = require('https');
 const path = require('path');
 const { readJson, sha256File } = require('./lib/hard-update-utils');
 const { firstEnv, parseEnvFile } = require('./lib/local-env');
+const { signPayload, verifyPayload } = require('./lib/release-signing');
 
 const appDir = path.resolve(__dirname, '..');
 const defaultReleaseRoot = path.join(appDir, 'release', 'mock-hard-update');
@@ -18,6 +19,7 @@ Options:
   --release <dir>   Release root from hard-update-package.js. Defaults to release/mock-hard-update.
   --env <file>      Local env file. Defaults to .env.
   --channel <name>  staging or prod. Defaults to staging.
+  --platform <key>  Upload one platform only, preserving other production.json platform entries.
   --dry-run         Print planned object keys only.
   --skip-production Upload immutable release objects only; do not replace releases/production.json.
   --only-production Upload releases/production.json only. Use after control plane is on the same release.
@@ -57,6 +59,7 @@ function parseArgs(argv) {
     else if (arg === '--release') options.release = readValue();
     else if (arg === '--env') options.env = readValue();
     else if (arg === '--channel') options.channel = readValue();
+    else if (arg === '--platform') options.platform = readValue();
     else if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--skip-production') options.skipProduction = true;
     else if (arg === '--only-production') options.onlyProduction = true;
@@ -86,6 +89,13 @@ function loadR2Config(options) {
   return config;
 }
 
+function loadSigningKey(envPath) {
+  const env = parseEnvFile(path.resolve(envPath));
+  const keyFile = firstEnv(env, ['UCLAW_RELEASE_PRIVATE_KEY_PATH']);
+  if (!keyFile) return null;
+  return readJson(path.resolve(keyFile));
+}
+
 function contentTypeFor(filePath) {
   if (filePath.endsWith('.json')) return 'application/json; charset=utf-8';
   if (filePath.endsWith('.sha256')) return 'text/plain; charset=utf-8';
@@ -97,6 +107,12 @@ function cacheControlFor(objectKey) {
   if (objectKey.endsWith('/production.json')) return 'no-cache, max-age=60';
   if (objectKey.endsWith('/manifest.json')) return 'public, max-age=300';
   return 'public, max-age=31536000, immutable';
+}
+
+function filterPlatformEntries(production, platformKey) {
+  if (!platformKey) return Object.keys(production.platforms || {}).sort();
+  if (!production.platforms?.[platformKey]) throw new Error(`Release missing platform: ${platformKey}`);
+  return [platformKey];
 }
 
 function releaseObjects(releaseRoot, options = {}) {
@@ -111,7 +127,7 @@ function releaseObjects(releaseRoot, options = {}) {
     filePath: path.join(releaseRoot, 'bootstrap', 'release-public-keys.json'),
     objectKey: 'releases/bootstrap/release-public-keys.json'
   }];
-  for (const platformKey of Object.keys(production.platforms || {}).sort()) {
+  for (const platformKey of filterPlatformEntries(production, options.platform)) {
     const dir = path.join(releaseRoot, 'packages', production.releaseId, platformKey);
     objects.push(
       { filePath: path.join(dir, 'runtime.pkg'), objectKey: `releases/packages/${production.releaseId}/${platformKey}/runtime.pkg` },
@@ -127,6 +143,51 @@ function releaseObjects(releaseRoot, options = {}) {
     if (!fs.existsSync(object.filePath)) throw new Error(`Missing release file: ${object.filePath}`);
   }
   return objects;
+}
+
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { 'user-agent': 'u-claw-hard-update-upload-r2/1' } }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        fetchJson(new URL(response.headers.location, url).toString()).then(resolve, reject);
+        return;
+      }
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`HTTP ${response.statusCode} for ${url}`));
+          return;
+        }
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      });
+    }).on('error', reject);
+  });
+}
+
+async function prepareSinglePlatformProduction(releaseRoot, config, options) {
+  if (!options.platform || options.skipProduction || options.onlyProduction) return null;
+  if (!config.publicUrl) throw new Error('--platform requires R2 publicUrl for production.json merge');
+  const releaseProductionPath = path.join(releaseRoot, 'production.json');
+  const nextProduction = readJson(releaseProductionPath);
+  const signingKey = loadSigningKey(options.env);
+  if (!signingKey) throw new Error('--platform requires UCLAW_RELEASE_PRIVATE_KEY_PATH for merged production signing');
+  const keys = readJson(path.join(releaseRoot, 'bootstrap', 'release-public-keys.json')).keys;
+  const currentProductionUrl = `${config.publicUrl.replace(/\/+$/, '')}/releases/production.json`;
+  const currentProduction = await fetchJson(currentProductionUrl);
+  verifyPayload(currentProduction, keys);
+  verifyPayload(nextProduction, keys);
+  const merged = {
+    ...nextProduction,
+    platforms: {
+      ...(currentProduction.platforms || {}),
+      [options.platform]: nextProduction.platforms[options.platform]
+    }
+  };
+  const original = fs.readFileSync(releaseProductionPath);
+  fs.writeFileSync(releaseProductionPath, JSON.stringify(signPayload(merged, signingKey), null, 2) + '\n');
+  return () => fs.writeFileSync(releaseProductionPath, original);
 }
 
 function hmac(key, value, encoding) {
@@ -236,24 +297,29 @@ async function main() {
   }
   const releaseRoot = path.resolve(options.release);
   const config = loadR2Config(options);
-  const objects = releaseObjects(releaseRoot, options);
-  for (const object of objects) {
-    if (options.dryRun) {
-      console.log(`[hard-update-upload-r2] dry-run ${config.bucket}/${object.objectKey}`);
-      continue;
+  const restoreProduction = await prepareSinglePlatformProduction(releaseRoot, config, options);
+  try {
+    const objects = releaseObjects(releaseRoot, options);
+    for (const object of objects) {
+      if (options.dryRun) {
+        console.log(`[hard-update-upload-r2] dry-run ${config.bucket}/${object.objectKey}`);
+        continue;
+      }
+      await putObject(config, object);
+      console.log(`[hard-update-upload-r2] uploaded ${config.bucket}/${object.objectKey}`);
     }
-    await putObject(config, object);
-    console.log(`[hard-update-upload-r2] uploaded ${config.bucket}/${object.objectKey}`);
-  }
-  if (config.publicUrl) {
-    const productionUrl = `${config.publicUrl.replace(/\/+$/, '')}/releases/production.json`;
-    if (options.skipProduction) {
-      console.log(`[hard-update-upload-r2] production unchanged ${productionUrl}`);
-    } else if (options.onlyProduction) {
-      console.log(`[hard-update-upload-r2] production published ${productionUrl}`);
-    } else {
-      console.log(`[hard-update-upload-r2] production ${productionUrl}`);
+    if (config.publicUrl) {
+      const productionUrl = `${config.publicUrl.replace(/\/+$/, '')}/releases/production.json`;
+      if (options.skipProduction) {
+        console.log(`[hard-update-upload-r2] production unchanged ${productionUrl}`);
+      } else if (options.onlyProduction) {
+        console.log(`[hard-update-upload-r2] production published ${productionUrl}`);
+      } else {
+        console.log(`[hard-update-upload-r2] production ${productionUrl}`);
+      }
     }
+  } finally {
+    if (restoreProduction) restoreProduction();
   }
 }
 

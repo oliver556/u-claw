@@ -36,6 +36,7 @@ Options:
   --release <dir>      Existing release directory for verify mode.
   --version <version>  Product version. Defaults to package.json version.
   --base-url <url>     Public releases base URL. Defaults to ${defaultBaseUrl}
+  --platform <key>     Build one platform package only.
   --env <file>         Local env file. Defaults to .env.
   --key-file <path>    Private key path. Defaults to UCLAW_RELEASE_PRIVATE_KEY_PATH, then mock key.
 `);
@@ -57,6 +58,7 @@ function parseArgs(argv) {
     else if (arg === '--release') options.release = readValue();
     else if (arg === '--version') options.version = readValue();
     else if (arg === '--base-url') options.baseUrl = readValue().replace(/\/+$/, '');
+    else if (arg === '--platform') options.platform = readValue();
     else if (arg === '--env') options.env = readValue();
     else if (arg === '--key-file') options.keyFile = readValue();
     else throw new Error(`Unknown argument: ${arg}`);
@@ -171,7 +173,9 @@ function create(options) {
     platforms: {}
   };
 
-  for (const platformKey of platforms) {
+  const targetPlatforms = options.platform ? [options.platform] : platforms;
+  for (const platformKey of targetPlatforms) {
+    if (!platforms.includes(platformKey)) throw new Error(`Unsupported platform key: ${platformKey}`);
     const { platform, arch } = platformParts(platformKey);
     const platformDir = path.join(packageRoot, platformKey);
     const platformStage = path.join(outRoot, '.work', platformKey);

@@ -222,10 +222,13 @@ function extractZipTo(runtimePkg, destinationDir) {
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
-      "$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force",
-      runtimePkg,
-      destinationDir
-    ]);
+      "$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath $env:UCLAW_RUNTIME_PKG -DestinationPath $env:UCLAW_RUNTIME_DEST -Force"
+    ], {
+      env: {
+        UCLAW_RUNTIME_PKG: runtimePkg,
+        UCLAW_RUNTIME_DEST: destinationDir
+      }
+    });
     return;
   }
   run('unzip', ['-q', runtimePkg, '-d', destinationDir]);

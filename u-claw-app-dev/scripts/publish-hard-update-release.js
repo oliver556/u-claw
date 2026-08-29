@@ -17,6 +17,7 @@ Options:
   --stage <dir>       Portable stage root containing U-Claw files.
   --version <version> Release version.
   --channel <name>    staging or prod. Defaults to staging.
+  --platform <key>    Build/upload one platform only.
   --env <file>        Local env file. Defaults to .env.
   --out <dir>         Release output dir. Defaults to release/mock-hard-update.
   --confirm-prod      Required for prod upload.
@@ -37,6 +38,7 @@ function parseArgs(argv) {
     else if (arg === '--stage') options.stage = readValue();
     else if (arg === '--version') options.version = readValue();
     else if (arg === '--channel') options.channel = readValue();
+    else if (arg === '--platform') options.platform = readValue();
     else if (arg === '--env') options.env = readValue();
     else if (arg === '--out') options.out = readValue();
     else if (arg === '--confirm-prod') options.confirmProd = true;
@@ -108,7 +110,7 @@ function main() {
     baseUrl,
     '--env',
     options.env
-  ]);
+  ].concat(options.platform ? ['--platform', options.platform] : []));
   run(['scripts/hard-update-package.js', 'verify', '--release', options.out]);
   if (options.deployControl) {
     run([
@@ -120,7 +122,7 @@ function main() {
       '--channel',
       options.channel,
       '--skip-production'
-    ]);
+    ].concat(options.platform ? ['--platform', options.platform] : []));
     runShell('bash', ['scripts/deploy-hard-update-control-plane.sh'], {
       UCLAW_UPDATE_RELEASE_SOURCE: path.resolve(options.out)
     });
@@ -136,7 +138,15 @@ function main() {
     ]);
     return;
   }
-  run(['scripts/hard-update-upload-r2.js', '--release', options.out, '--env', options.env, '--channel', options.channel]);
+  run([
+    'scripts/hard-update-upload-r2.js',
+    '--release',
+    options.out,
+    '--env',
+    options.env,
+    '--channel',
+    options.channel
+  ].concat(options.platform ? ['--platform', options.platform] : []));
 }
 
 try {

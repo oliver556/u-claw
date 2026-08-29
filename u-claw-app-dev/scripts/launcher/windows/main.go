@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -68,6 +69,8 @@ var (
 	logStartOffset      int64
 	startLogStartOffset int64
 	launcherStarted     = time.Now()
+	statusMu            sync.RWMutex
+	cachedRawStatus     string
 )
 
 type wndClassEx struct {
@@ -147,6 +150,8 @@ func main() {
 		atomic.StoreInt32(&processDone, 0)
 		atomic.StoreInt32(&processExitCode, 0)
 		atomic.StoreInt32(&windowHidden, 1)
+		setCachedRawStatus("")
+		stopStatusSampler := startStatusSampler()
 		go func() {
 			code := runScript(root, script, startLogPath)
 			syncLauncherLogs()
@@ -160,6 +165,7 @@ func main() {
 				time.Sleep(200 * time.Millisecond)
 			}
 		}
+		stopStatusSampler()
 		exitCode = int(atomic.LoadInt32(&processExitCode))
 		if exitCode != 0 {
 			break
@@ -387,6 +393,40 @@ func runStatusWindow() error {
 	return nil
 }
 
+func startStatusSampler() func() {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			setCachedRawStatus(rawStatusTextFromDisk())
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	var stopped int32
+	return func() {
+		if atomic.CompareAndSwapInt32(&stopped, 0, 1) {
+			close(done)
+		}
+	}
+}
+
+func setCachedRawStatus(status string) {
+	statusMu.Lock()
+	cachedRawStatus = status
+	statusMu.Unlock()
+}
+
+func getCachedRawStatus() string {
+	statusMu.RLock()
+	defer statusMu.RUnlock()
+	return cachedRawStatus
+}
+
 func windowProc(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) uintptr {
 	switch message {
 	case wmTimer:
@@ -464,6 +504,10 @@ func initialStatusText() string {
 }
 
 func rawStatusText() string {
+	return getCachedRawStatus()
+}
+
+func rawStatusTextFromDisk() string {
 	lines := tailLinesFromOffset(logPath, logStartOffset, 6)
 	lines = append(lines, tailLinesFromOffset(startLogPath, startLogStartOffset, 14)...)
 	lines = append(lines, tailLinesSince(mainLogPath, 8, launcherStarted.Add(-2*time.Second))...)
