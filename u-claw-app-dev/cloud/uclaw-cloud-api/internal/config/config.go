@@ -17,6 +17,8 @@ type Config struct {
 	AdminEncryptionKey       string
 	NewAPIAdminBaseURL       string
 	NewAPIAdminToken         string
+	NewAPIAdminUsername      string
+	NewAPIAdminPassword      string
 	NewAPIClientBaseURL      string
 	NewAPIPreviewToken       string
 	NewAPIHTTPTimeout        time.Duration
@@ -65,6 +67,8 @@ func Load(getenv Getter) (Config, error) {
 		AdminEncryptionKey:       strings.TrimSpace(getenv("ADMIN_ENCRYPTION_KEY")),
 		NewAPIAdminBaseURL:       strings.TrimRight(strings.TrimSpace(getenv("NEWAPI_ADMIN_BASE_URL")), "/"),
 		NewAPIAdminToken:         strings.TrimSpace(getenv("NEWAPI_ADMIN_TOKEN")),
+		NewAPIAdminUsername:      strings.TrimSpace(getenv("NEWAPI_ADMIN_USERNAME")),
+		NewAPIAdminPassword:      strings.TrimSpace(getenv("NEWAPI_ADMIN_PASSWORD")),
 		NewAPIClientBaseURL:      strings.TrimRight(withDefault(getenv("NEWAPI_CLIENT_BASE_URL"), "https://api.gmnlee.com/v1"), "/"),
 		NewAPIPreviewToken:       withDefault(getenv("NEWAPI_PREVIEW_TOKEN"), "uclaw-preview-newapi-token"),
 		NewAPIHTTPTimeout:        10 * time.Second,
@@ -147,6 +151,12 @@ func (cfg Config) ValidateForServe() error {
 	}
 	if cfg.NewAPIAdminToken == "" {
 		missing = append(missing, "NEWAPI_ADMIN_TOKEN")
+	}
+	if cfg.NewAPIAdminUsername == "" {
+		missing = append(missing, "NEWAPI_ADMIN_USERNAME")
+	}
+	if cfg.NewAPIAdminPassword == "" {
+		missing = append(missing, "NEWAPI_ADMIN_PASSWORD")
 	}
 	if cfg.NewAPIUserPasswordSecret == "" {
 		missing = append(missing, "NEWAPI_USER_PASSWORD_SECRET")

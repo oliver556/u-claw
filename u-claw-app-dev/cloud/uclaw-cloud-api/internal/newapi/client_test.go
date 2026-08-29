@@ -173,6 +173,85 @@ func TestSearchUserByUsernameFindsExactMatch(t *testing.T) {
 	}
 }
 
+func TestAdminRequestRefreshesTokenAndRetriesOnce(t *testing.T) {
+	var loginCalls int
+	var searchCalls int
+	var searchAuth []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			searchCalls++
+			searchAuth = append(searchAuth, r.Header.Get("Authorization"))
+			w.Header().Set("Content-Type", "application/json")
+			if searchCalls == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code":"AUTH_TOKEN_EXPIRED","message":"Unauthorized","success":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":7,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			loginCalls++
+			if gotAuth := r.Header.Get("Authorization"); gotAuth != "" {
+				t.Fatalf("login Authorization = %q, want empty", gotAuth)
+			}
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("Decode login request body: %v", err)
+			}
+			if payload["username"] != "admin" || payload["password"] != "password" {
+				t.Fatalf("login payload = %+v", payload)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"fresh-token"}}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "expired-token", server.Client(), WithAdminCredentials("admin", "password"))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	user, ok, err := client.SearchUserByUsername(context.Background(), "13800138000")
+	if err != nil {
+		t.Fatalf("SearchUserByUsername() error = %v", err)
+	}
+	if !ok || user.ID != 7 {
+		t.Fatalf("user = %+v ok = %t", user, ok)
+	}
+	if loginCalls != 1 || searchCalls != 2 {
+		t.Fatalf("loginCalls = %d searchCalls = %d", loginCalls, searchCalls)
+	}
+	if searchAuth[0] != "Bearer expired-token" || searchAuth[1] != "Bearer fresh-token" {
+		t.Fatalf("search auth = %+v", searchAuth)
+	}
+}
+
+func TestAdminRequestKeepsUnauthorizedErrorWithoutRefreshCredentials(t *testing.T) {
+	var searchCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		searchCalls++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code":"AUTH_TOKEN_EXPIRED","message":"Unauthorized","success":false}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "expired-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	_, _, err = client.SearchUserByUsername(context.Background(), "13800138000")
+	if err == nil {
+		t.Fatal("SearchUserByUsername() error = nil, want unauthorized")
+	}
+	if searchCalls != 1 {
+		t.Fatalf("searchCalls = %d, want 1", searchCalls)
+	}
+}
+
 func TestLoginReturnsAccessTokenWithoutBearer(t *testing.T) {
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

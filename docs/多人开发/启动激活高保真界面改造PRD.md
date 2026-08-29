@@ -109,6 +109,7 @@ U-CLAW/
 - Secrets：签名私钥、数据库路径、管理员 token 只放服务器 env 或受限配置文件，不进 repo，不进入客户端包。
 - Backup：数据库、签名公私钥、激活码库存导入记录必须定时备份到 OSS 或异地目录。
 - Logs：只记录 public error code、activationId、短 USB 摘要、版本与时间；不得记录激活码明文、完整 USB fingerprint、license secret、token、signature 或 raw server response。
+- New API admin token 自愈：Cloud API 服务端保存受限 `NEWAPI_ADMIN_USERNAME/PASSWORD`；遇到 New API admin 请求 `401` 时，先登录刷新内存 token，再重试原请求一次。刷新凭据只放服务器 env，不写入 repo、客户端包或日志。
 
 ### Current Server Inventory
 

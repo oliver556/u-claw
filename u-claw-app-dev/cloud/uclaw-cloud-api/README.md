@@ -281,6 +281,8 @@ curl -sS -X POST http://127.0.0.1:8080/v1/payments/virtual/notify \
 ```bash
 export NEWAPI_ADMIN_BASE_URL=https://newapi-admin.example.com
 export NEWAPI_ADMIN_TOKEN=change-me
+export NEWAPI_ADMIN_USERNAME=change-me
+export NEWAPI_ADMIN_PASSWORD=change-me
 
 go run ./cmd/adminctl spike newapi \
   --username 13800138000 \

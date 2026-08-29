@@ -645,7 +645,7 @@ func buildActivationService(cfg config.Config, store activation.Store) *activati
 	}
 	var provisioner activation.NewAPIProvisioner
 	if persistentStore, ok := store.(provisioning.Store); ok && cfg.NewAPIAdminBaseURL != "" && cfg.NewAPIAdminToken != "" {
-		admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout})
+		admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout}, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
 		if err != nil {
 			panic(fmt.Sprintf("build newapi admin client: %v", err))
 		}
@@ -685,7 +685,7 @@ func buildUsageService(cfg config.Config) *usage.Service {
 	if cfg.NewAPIAdminBaseURL == "" || cfg.NewAPIAdminToken == "" {
 		return nil
 	}
-	admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout})
+	admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout}, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
 	if err != nil {
 		panic(fmt.Sprintf("build newapi usage client: %v", err))
 	}
@@ -705,7 +705,7 @@ func buildRechargeService(cfg config.Config, store recharge.Store) *recharge.Ser
 	}
 	var quota recharge.QuotaClient
 	if cfg.NewAPIAdminBaseURL != "" && cfg.NewAPIAdminToken != "" {
-		admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout})
+		admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout}, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
 		if err != nil {
 			panic(fmt.Sprintf("build newapi recharge client: %v", err))
 		}

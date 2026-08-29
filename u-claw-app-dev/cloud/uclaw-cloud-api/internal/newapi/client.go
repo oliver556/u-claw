@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,13 +20,28 @@ type HTTPDoer interface {
 
 // Client wraps New API admin endpoints needed by the U-Claw activation flow.
 type Client struct {
-	baseURL    string
-	adminToken string
-	httpClient HTTPDoer
+	baseURL              string
+	adminToken           string
+	adminRefreshUsername string
+	adminRefreshPassword string
+	httpClient           HTTPDoer
+	tokenMu              sync.RWMutex
+	refreshMu            sync.Mutex
+}
+
+// Option customizes New API client behavior without changing existing call sites.
+type Option func(*Client)
+
+// WithAdminCredentials enables one-shot admin token refresh after a 401 response.
+func WithAdminCredentials(username string, password string) Option {
+	return func(c *Client) {
+		c.adminRefreshUsername = strings.TrimSpace(username)
+		c.adminRefreshPassword = strings.TrimSpace(password)
+	}
 }
 
 // NewClient creates a New API admin client with conservative timeout defaults.
-func NewClient(baseURL string, adminToken string, httpClient HTTPDoer) (*Client, error) {
+func NewClient(baseURL string, adminToken string, httpClient HTTPDoer, options ...Option) (*Client, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		return nil, fmt.Errorf("newapi baseURL is required")
@@ -36,11 +52,17 @@ func NewClient(baseURL string, adminToken string, httpClient HTTPDoer) (*Client,
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &Client{
+	client := &Client{
 		baseURL:    baseURL,
 		adminToken: strings.TrimSpace(adminToken),
 		httpClient: httpClient,
-	}, nil
+	}
+	for _, option := range options {
+		if option != nil {
+			option(client)
+		}
+	}
+	return client, nil
 }
 
 // WithAccessToken reuses the same New API management base URL with a different dashboard token.
@@ -184,10 +206,10 @@ func (c *Client) postJSONWithAuth(ctx context.Context, path string, body any, ou
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
 	if attachAuth {
-		httpReq.Header.Set("Authorization", "Bearer "+c.adminToken)
+		httpReq.Header.Set("Authorization", "Bearer "+c.adminTokenSnapshot())
 	}
 
-	return c.doJSON(httpReq, path, out)
+	return c.doJSON(httpReq, path, out, attachAuth)
 }
 
 // getJSON sends an authenticated GET request and decodes the JSON response.
@@ -197,12 +219,39 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 		return fmt.Errorf("build newapi request: %w", err)
 	}
 	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.adminToken)
-	return c.doJSON(httpReq, path, out)
+	httpReq.Header.Set("Authorization", "Bearer "+c.adminTokenSnapshot())
+	return c.doJSON(httpReq, path, out, true)
 }
 
 // doJSON executes a New API request and decodes the optional response body.
-func (c *Client) doJSON(httpReq *http.Request, path string, out any) error {
+func (c *Client) doJSON(httpReq *http.Request, path string, out any, attachAuth bool) error {
+	bodyBytes, err := drainRequestBody(httpReq)
+	if err != nil {
+		return err
+	}
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		req, usedToken, err := c.cloneRequest(httpReq, bodyBytes, attachAuth)
+		if err != nil {
+			return err
+		}
+		err = c.doJSONOnce(req, path, out)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isUnauthorizedNewAPIError(err) || !attachAuth || attempt > 0 || !c.canRefreshAdminToken() {
+			return err
+		}
+		if refreshErr := c.refreshAdminToken(httpReq.Context(), usedToken); refreshErr != nil {
+			return refreshErr
+		}
+	}
+	return lastErr
+}
+
+// doJSONOnce sends a single HTTP request and decodes its response.
+func (c *Client) doJSONOnce(httpReq *http.Request, path string, out any) error {
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("send newapi request: %w", err)
@@ -229,6 +278,78 @@ func (c *Client) doJSON(httpReq *http.Request, path string, out any) error {
 		return fmt.Errorf("newapi %s failed: %s", path, strings.TrimSpace(status.message))
 	}
 	return nil
+}
+
+// drainRequestBody snapshots the request body so a refreshed-token retry can resend it.
+func drainRequestBody(httpReq *http.Request) ([]byte, error) {
+	if httpReq.Body == nil {
+		return nil, nil
+	}
+	bodyBytes, err := io.ReadAll(httpReq.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read newapi request body: %w", err)
+	}
+	_ = httpReq.Body.Close()
+	httpReq.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	return bodyBytes, nil
+}
+
+// cloneRequest recreates a request and attaches the latest token under lock.
+func (c *Client) cloneRequest(httpReq *http.Request, bodyBytes []byte, attachAuth bool) (*http.Request, string, error) {
+	var body io.Reader
+	if bodyBytes != nil {
+		body = bytes.NewReader(bodyBytes)
+	}
+	req, err := http.NewRequestWithContext(httpReq.Context(), httpReq.Method, httpReq.URL.String(), body)
+	if err != nil {
+		return nil, "", fmt.Errorf("build newapi request: %w", err)
+	}
+	req.Header = httpReq.Header.Clone()
+	usedToken := ""
+	if attachAuth {
+		usedToken = c.adminTokenSnapshot()
+		req.Header.Set("Authorization", "Bearer "+usedToken)
+	}
+	return req, usedToken, nil
+}
+
+// adminTokenSnapshot returns the current token without exposing mutation races.
+func (c *Client) adminTokenSnapshot() string {
+	c.tokenMu.RLock()
+	defer c.tokenMu.RUnlock()
+	return c.adminToken
+}
+
+// canRefreshAdminToken reports whether refresh credentials were configured.
+func (c *Client) canRefreshAdminToken() bool {
+	return c.adminRefreshUsername != "" && c.adminRefreshPassword != ""
+}
+
+// refreshAdminToken logs in once and swaps the in-memory admin token before retrying.
+func (c *Client) refreshAdminToken(ctx context.Context, staleToken string) error {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+
+	if current := c.adminTokenSnapshot(); current != staleToken {
+		return nil
+	}
+	login, err := c.Login(ctx, c.adminRefreshUsername, c.adminRefreshPassword)
+	if err != nil {
+		return fmt.Errorf("refresh newapi admin token: %w", err)
+	}
+	token := strings.TrimSpace(login.Data.AccessToken)
+	if token == "" {
+		return fmt.Errorf("refresh newapi admin token: empty access token")
+	}
+	c.tokenMu.Lock()
+	c.adminToken = token
+	c.tokenMu.Unlock()
+	return nil
+}
+
+// isUnauthorizedNewAPIError identifies responses where refreshing the admin token is useful.
+func isUnauthorizedNewAPIError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), " returned 401:")
 }
 
 type apiStatusFields struct {

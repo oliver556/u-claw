@@ -117,7 +117,7 @@ func runSpike(args []string) {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
-	client, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, nil)
+	client, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, nil, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
 	if err != nil {
 		log.Fatalf("newapi client: %v", err)
 	}

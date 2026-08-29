@@ -12,6 +12,8 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"ADMIN_TOKEN":                    " admin-token ",
 		"ADMIN_ENCRYPTION_KEY":           " admin-encryption-key-at-least-32-bytes ",
 		"NEWAPI_CLIENT_BASE_URL":         " https://api.example.com/v1/ ",
+		"NEWAPI_ADMIN_USERNAME":          " admin-user ",
+		"NEWAPI_ADMIN_PASSWORD":          " admin-password ",
 		"NEWAPI_PREVIEW_TOKEN":           "preview-token",
 		"NEWAPI_HTTP_TIMEOUT":            "3s",
 		"NEWAPI_ACTIVATION_QUOTA":        "100000",
@@ -65,6 +67,9 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.NewAPIClientBaseURL != "https://api.example.com/v1" {
 		t.Fatalf("NewAPIClientBaseURL = %q", cfg.NewAPIClientBaseURL)
+	}
+	if cfg.NewAPIAdminUsername != "admin-user" || cfg.NewAPIAdminPassword != "admin-password" {
+		t.Fatalf("NewAPI admin refresh credentials not loaded: %+v", cfg)
 	}
 	if cfg.NewAPIPreviewToken != "preview-token" {
 		t.Fatalf("NewAPIPreviewToken = %q", cfg.NewAPIPreviewToken)
@@ -126,7 +131,7 @@ func TestValidateForServeReportsMissingFields(t *testing.T) {
 	}
 
 	message := err.Error()
-	for _, name := range []string{"DATABASE_URL", "JWT_SECRET", "ADMIN_TOKEN", "ADMIN_ENCRYPTION_KEY", "NEWAPI_ADMIN_BASE_URL", "NEWAPI_ADMIN_TOKEN", "NEWAPI_USER_PASSWORD_SECRET", "SMS_PROVIDER", "LICENSE_SIGNING_KEY_ID", "LICENSE_SIGNING_SEED_HEX"} {
+	for _, name := range []string{"DATABASE_URL", "JWT_SECRET", "ADMIN_TOKEN", "ADMIN_ENCRYPTION_KEY", "NEWAPI_ADMIN_BASE_URL", "NEWAPI_ADMIN_TOKEN", "NEWAPI_ADMIN_USERNAME", "NEWAPI_ADMIN_PASSWORD", "NEWAPI_USER_PASSWORD_SECRET", "SMS_PROVIDER", "LICENSE_SIGNING_KEY_ID", "LICENSE_SIGNING_SEED_HEX"} {
 		if !strings.Contains(message, name) {
 			t.Fatalf("ValidateForServe() error %q missing %s", message, name)
 		}
@@ -183,6 +188,8 @@ func completeProductionConfig() Config {
 		AdminEncryptionKey:       "admin-encryption-key-at-least-32-bytes",
 		NewAPIAdminBaseURL:       "https://newapi.example.com",
 		NewAPIAdminToken:         "newapi-admin-token",
+		NewAPIAdminUsername:      "admin-user",
+		NewAPIAdminPassword:      "admin-password",
 		NewAPIUserPasswordSecret: "password-secret-at-least-32-bytes",
 		SMSProvider:              "aliyun",
 		AliyunSMSAccessKeyID:     "aliyun-id",
