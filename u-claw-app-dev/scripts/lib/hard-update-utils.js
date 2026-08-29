@@ -161,11 +161,74 @@ function zipDirectory(sourceDir, destinationZip) {
 }
 
 function listZipEntries(runtimePkg) {
-  const result = run('unzip', ['-Z1', runtimePkg]);
-  return result.stdout
-    .split(/\r?\n/)
-    .map(entry => entry.trim())
-    .filter(Boolean);
+  const fd = fs.openSync(runtimePkg, 'r');
+  try {
+    const stat = fs.fstatSync(fd);
+    const eocdMax = Math.min(stat.size, 22 + 65535);
+    const tail = Buffer.alloc(eocdMax);
+    fs.readSync(fd, tail, 0, eocdMax, stat.size - eocdMax);
+    let eocdOffset = -1;
+    for (let index = tail.length - 22; index >= 0; index -= 1) {
+      if (tail.readUInt32LE(index) === 0x06054b50) {
+        eocdOffset = index;
+        break;
+      }
+    }
+    if (eocdOffset < 0) throw new Error(`ZIP end of central directory not found: ${runtimePkg}`);
+    const diskNumber = tail.readUInt16LE(eocdOffset + 4);
+    const centralDirDisk = tail.readUInt16LE(eocdOffset + 6);
+    const entryCount = tail.readUInt16LE(eocdOffset + 10);
+    const centralDirSize = tail.readUInt32LE(eocdOffset + 12);
+    const centralDirOffset = tail.readUInt32LE(eocdOffset + 16);
+    if (diskNumber !== 0 || centralDirDisk !== 0) throw new Error('Multi-disk ZIP packages are not supported');
+    if (entryCount === 0xffff || centralDirSize === 0xffffffff || centralDirOffset === 0xffffffff) {
+      throw new Error('ZIP64 runtime packages are not supported');
+    }
+    if (centralDirSize > 128 * 1024 * 1024) throw new Error('ZIP central directory too large');
+    const centralDir = Buffer.alloc(centralDirSize);
+    fs.readSync(fd, centralDir, 0, centralDirSize, centralDirOffset);
+    const entries = [];
+    let offset = 0;
+    while (offset < centralDir.length) {
+      if (centralDir.readUInt32LE(offset) !== 0x02014b50) throw new Error('Invalid ZIP central directory');
+      const fileNameLength = centralDir.readUInt16LE(offset + 28);
+      const extraLength = centralDir.readUInt16LE(offset + 30);
+      const commentLength = centralDir.readUInt16LE(offset + 32);
+      const nameStart = offset + 46;
+      const nameEnd = nameStart + fileNameLength;
+      if (nameEnd > centralDir.length) throw new Error('Invalid ZIP file name length');
+      const name = centralDir.subarray(nameStart, nameEnd).toString('utf8').trim();
+      if (name) entries.push(name);
+      offset = nameEnd + extraLength + commentLength;
+    }
+    return entries;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function windowsPowerShellCommand() {
+  const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  const windowsPowerShell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  if (fs.existsSync(windowsPowerShell)) return windowsPowerShell;
+  return 'powershell.exe';
+}
+
+function extractZipTo(runtimePkg, destinationDir) {
+  if (process.platform === 'win32') {
+    run(windowsPowerShellCommand(), [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      "$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force",
+      runtimePkg,
+      destinationDir
+    ]);
+    return;
+  }
+  run('unzip', ['-q', runtimePkg, '-d', destinationDir]);
 }
 
 function unzipTo(runtimePkg, destinationDir) {
@@ -174,7 +237,7 @@ function unzipTo(runtimePkg, destinationDir) {
   for (const entry of listZipEntries(runtimePkg)) {
     assertSafeRelativePath(entry.replace(/\/$/, ''));
   }
-  run('unzip', ['-q', runtimePkg, '-d', destinationDir]);
+  extractZipTo(runtimePkg, destinationDir);
   prunePortableMetadata(destinationDir);
   walkFiles(destinationDir, () => {});
 }
@@ -190,6 +253,7 @@ module.exports = {
   copyDirFiltered,
   copyFile,
   isPortableMetadataPath,
+  extractZipTo,
   listZipEntries,
   platformParts,
   prunePortableMetadata,

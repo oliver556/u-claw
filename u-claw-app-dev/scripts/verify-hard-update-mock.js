@@ -318,7 +318,7 @@ function verifyBadDataPackageFails(tmp) {
 }
 
 function verifyPortableMetadataHandling(tmp) {
-  const { isPortableMetadataPath, prunePortableMetadata, treeDigest } = require('./lib/hard-update-utils');
+  const { isPortableMetadataPath, listZipEntries, prunePortableMetadata, treeDigest } = require('./lib/hard-update-utils');
   assert(isPortableMetadataPath('._UCLAW-PACKAGE-NOTES.txt'), 'AppleDouble metadata path must be recognized');
   assert(isPortableMetadataPath('U-Claw Launcher.app/Contents/._Info.plist'), 'nested AppleDouble metadata path must be recognized');
   assert(isPortableMetadataPath('__MACOSX/anything'), '__MACOSX metadata path must be recognized');
@@ -339,6 +339,7 @@ function verifyPortableMetadataHandling(tmp) {
   writeFile(path.join(metadataZipRoot, '._bad'), 'appledouble\n');
   const metadataZip = path.join(tmp, 'metadata.zip');
   run('zip', ['-qry', metadataZip, '._bad'], { cwd: metadataZipRoot });
+  assert(listZipEntries(metadataZip).includes('._bad'), 'Node ZIP entry reader must read central directory without unzip');
   let failed = false;
   try {
     require('./lib/hard-update-utils').unzipTo(metadataZip, path.join(tmp, 'metadata-extract'));
