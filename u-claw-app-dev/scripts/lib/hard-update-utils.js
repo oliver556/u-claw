@@ -216,16 +216,24 @@ function windowsPowerShellCommand() {
 
 function extractZipTo(runtimePkg, destinationDir) {
   if (process.platform === 'win32') {
+    try {
+      run('tar.exe', ['-xf', runtimePkg, '-C', destinationDir]);
+      return;
+    } catch (error) {
+      // Some Windows environments miss tar.exe; Expand-Archive is the fallback.
+    }
+    const powerShellZip = `${runtimePkg}.zip`;
+    fs.copyFileSync(runtimePkg, powerShellZip);
     run(windowsPowerShellCommand(), [
       '-NoProfile',
       '-NonInteractive',
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
-      "$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath $env:UCLAW_RUNTIME_PKG -DestinationPath $env:UCLAW_RUNTIME_DEST -Force"
+      "$ErrorActionPreference = 'Stop'; try { Expand-Archive -LiteralPath $env:UCLAW_RUNTIME_PKG -DestinationPath $env:UCLAW_RUNTIME_DEST -Force } finally { Remove-Item -LiteralPath $env:UCLAW_RUNTIME_PKG -Force -ErrorAction SilentlyContinue }"
     ], {
       env: {
-        UCLAW_RUNTIME_PKG: runtimePkg,
+        UCLAW_RUNTIME_PKG: powerShellZip,
         UCLAW_RUNTIME_DEST: destinationDir
       }
     });
