@@ -4,19 +4,12 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
-const { createVideoAdapterServer } = require('./video-adapter');
 const { mergeModelCatalogIntoConfig } = require('./model-catalog');
 
 // ── Constants ──
 const APP_NAME = 'Bavi-box';
 const DEFAULT_PORT = 18789;
 const MAX_PORT = 18799;
-const DEFAULT_VIDEO_ADAPTER_PORT = 18808;
-const MAX_VIDEO_ADAPTER_PORT = 18818;
-const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://video-adapter.gmnlee.com/xai/v1';
-const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'jimeng-video-3-720p';
-const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
-const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
 const UCLAW_ACTIVATION_ENDPOINT = (process.env.UCLAW_ACTIVATION_ENDPOINT || '').trim().replace(/\/+$/, '');
 const UCLAW_PORTABLE_DATA_DIR = process.env.UCLAW_PORTABLE_DATA_DIR?.trim() || '';
 const UCLAW_PORTABLE_WORK_DATA_DIR = process.env.UCLAW_PORTABLE_WORK_DATA_DIR?.trim() || '';
@@ -181,8 +174,6 @@ let gatewayPort = DEFAULT_PORT;
 let gatewayReady = false;
 let configServer = null;
 let configServerPort = null; // mini HTTP server for Config.html
-let videoAdapterServer = null;
-let videoAdapterPort = null;
 let appIsQuitting = false;
 let quitConfirmationOpen = false;
 let gatewayStopping = false;
@@ -221,19 +212,11 @@ function applyRuntimeConfigEnv(config) {
   const nextConfig = JSON.parse(JSON.stringify(config));
   const newApiKey = process.env.UCLAW_NEW_API_KEY || '';
   const newApiBaseUrl = process.env.UCLAW_NEW_API_BASE_URL || '';
-  const videoAdapterBaseUrl = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
-  const videoAdapterApiKey = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
 
-  const providers = nextConfig.models?.providers || {};
-  for (const providerName of ['custom', 'litellm']) {
-    if (!providers[providerName]) continue;
-    if (newApiKey) providers[providerName].apiKey = newApiKey;
-    if (newApiBaseUrl) providers[providerName].baseUrl = newApiBaseUrl;
-  }
-
-  if (providers.xai) {
-    if (videoAdapterBaseUrl) providers.xai.baseUrl = videoAdapterBaseUrl.replace(/\/+$/, '');
-    if (videoAdapterApiKey) providers.xai.apiKey = videoAdapterApiKey;
+  const provider = nextConfig.models?.providers?.newapi;
+  if (provider) {
+    if (newApiKey) provider.apiKey = newApiKey;
+    if (newApiBaseUrl) provider.baseUrl = newApiBaseUrl;
   }
 
   return nextConfig;
@@ -253,15 +236,7 @@ function ensureConfig() {
 
 function getConfig() {
   try {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    const runtimeVideoAdapterBaseUrl = process.env.UCLAW_RUNTIME_VIDEO_ADAPTER_BASE_URL || '';
-    if (runtimeVideoAdapterBaseUrl && config.models?.providers?.xai) {
-      config.models.providers.xai = {
-        ...config.models.providers.xai,
-        baseUrl: runtimeVideoAdapterBaseUrl
-      };
-    }
-    return config;
+    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch {
     return { gateway: { mode: 'local', auth: { token: 'uclaw' } } };
   }
@@ -903,11 +878,19 @@ function writeOpenClawActivationConfig(result) {
   const config = fs.existsSync(configPath) ? getConfig() : applyRuntimeConfigEnv(loadBundledDefaultConfig());
   config.models = config.models || {};
   config.models.providers = config.models.providers || {};
-  for (const providerName of ['custom', 'litellm']) {
-    config.models.providers[providerName] = config.models.providers[providerName] || {};
-    config.models.providers[providerName].baseUrl = baseUrl;
-    config.models.providers[providerName].apiKey = token;
+  const templateModels = loadBundledDefaultConfig().models?.providers?.newapi?.models || [];
+  for (const providerName of ['custom', 'litellm', 'xai']) {
+    delete config.models.providers[providerName];
   }
+  config.models.providers.newapi = {
+    ...(config.models.providers.newapi || {}),
+    baseUrl,
+    apiKey: token,
+    api: 'openai-completions',
+    models: Array.isArray(config.models.providers.newapi?.models) && config.models.providers.newapi.models.length
+      ? config.models.providers.newapi.models
+      : templateModels,
+  };
   config.agents = config.agents || {};
   config.agents.defaults = config.agents.defaults || {};
   if (result.defaultModels?.text) {
@@ -923,11 +906,13 @@ function writeOpenClawActivationConfig(result) {
       primary: result.defaultModels.image,
     };
   }
-  if (result.defaultModels?.video) {
+  if (String(result.defaultModels?.video || '').startsWith('newapi/')) {
     config.agents.defaults.videoGenerationModel = {
       ...(config.agents.defaults.videoGenerationModel || {}),
       primary: result.defaultModels.video,
     };
+  } else if (String(config.agents.defaults.videoGenerationModel?.primary || '').startsWith('xai/')) {
+    delete config.agents.defaults.videoGenerationModel;
   }
   saveConfig(config);
 }
@@ -1099,6 +1084,13 @@ function getProviderValue(provider, keys) {
   return '';
 }
 
+/**
+ * Detects NewAPI-compatible Bavi-box cloud endpoints used across old configs.
+ */
+function isKnownNewApiBaseUrl(baseUrl) {
+  return /(?:api\.gmnlee\.com|api\.yiyong\.me)/i.test(String(baseUrl || ''));
+}
+
 function findNewApiCredentials(config) {
   const env = config.env || {};
   const envBaseUrl = process.env.UCLAW_NEW_API_BASE_URL || env.UCLAW_NEW_API_BASE_URL;
@@ -1108,11 +1100,11 @@ function findNewApiCredentials(config) {
   }
 
   const providers = config.models?.providers || {};
-  for (const provider of Object.values(providers)) {
+  for (const [providerName, provider] of Object.entries(providers)) {
     if (!provider || typeof provider !== 'object') continue;
     const baseUrl = getProviderValue(provider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url']);
     const apiKey = getProviderValue(provider, ['apiKey', 'api_key', 'key']);
-    if (baseUrl && apiKey && /api\.gmnlee\.com/i.test(baseUrl)) {
+    if (baseUrl && apiKey && (providerName === 'newapi' || isKnownNewApiBaseUrl(baseUrl))) {
       return { newApiBaseUrl: baseUrl, newApiKey: apiKey };
     }
   }
@@ -1141,23 +1133,19 @@ function syncDevNewApiCredentialsFromDesktop() {
   if (!sourceConfig) return;
 
   const targetConfig = getConfig();
-  const sourceProviders = sourceConfig.models?.providers || {};
   const targetProviders = targetConfig.models?.providers || {};
   let changed = false;
-
-  for (const providerName of ['custom', 'litellm']) {
-    const sourceProvider = sourceProviders[providerName];
-    const targetProvider = targetProviders[providerName];
-    if (!sourceProvider || !targetProvider) continue;
-
-    const sourceApiKey = getProviderValue(sourceProvider, ['apiKey', 'api_key', 'key']);
-    const sourceBaseUrl = getProviderValue(sourceProvider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url']);
-    if (sourceApiKey && !getProviderValue(targetProvider, ['apiKey', 'api_key', 'key'])) {
-      targetProvider.apiKey = sourceApiKey;
+  const sourceNewApi = findNewApiCredentials(sourceConfig);
+  if (sourceNewApi.newApiKey || sourceNewApi.newApiBaseUrl) {
+    targetConfig.models = targetConfig.models || {};
+    targetConfig.models.providers = targetConfig.models.providers || {};
+    targetConfig.models.providers.newapi = targetProviders.newapi || {};
+    if (sourceNewApi.newApiKey && !getProviderValue(targetConfig.models.providers.newapi, ['apiKey', 'api_key', 'key'])) {
+      targetConfig.models.providers.newapi.apiKey = sourceNewApi.newApiKey;
       changed = true;
     }
-    if (sourceBaseUrl && !getProviderValue(targetProvider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url'])) {
-      targetProvider.baseUrl = sourceBaseUrl;
+    if (sourceNewApi.newApiBaseUrl && !getProviderValue(targetConfig.models.providers.newapi, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url'])) {
+      targetConfig.models.providers.newapi.baseUrl = sourceNewApi.newApiBaseUrl;
       changed = true;
     }
   }
@@ -1168,91 +1156,44 @@ function syncDevNewApiCredentialsFromDesktop() {
   }
 }
 
-function getVideoAdapterOptions() {
-  const config = getConfig();
-  const env = config.env || {};
-  const newApiCredentials = findNewApiCredentials(config);
-  return {
-    defaultModel: UCLAW_VIDEO_MODEL,
-    newApiBaseUrl: newApiCredentials.newApiBaseUrl,
-    newApiKey: newApiCredentials.newApiKey,
-    videoProvider: process.env.UCLAW_VIDEO_PROVIDER || env.UCLAW_VIDEO_PROVIDER || ''
-  };
-}
-
-function ensureVideoAdapterConfig(adapterBaseUrl) {
+/**
+ * Migrates legacy local model provider aliases into the single NewAPI provider.
+ */
+function pruneLegacyVideoAdapterConfig() {
   const config = getConfig();
   const before = JSON.stringify(config);
-  const existingLitellm = config.models?.providers?.litellm;
-  if (existingLitellm && !Array.isArray(existingLitellm.models)) {
-    existingLitellm.models = [{
-      id: 'gpt-image-2',
-      name: 'gpt-image-2',
-      reasoning: false,
-      input: ['text', 'image'],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128000,
-      maxTokens: 8192
-    }];
-  }
-
-  const existingXai = config.models?.providers?.xai || {};
-  const newApiCredentials = findNewApiCredentials(config);
-  const adapterApiKey = UCLAW_VIDEO_ADAPTER_API_KEY
-    || (UCLAW_VIDEO_ADAPTER_BASE_URL ? newApiCredentials.newApiKey : '')
-    || existingXai.apiKey
-    || 'uclaw-video-adapter';
-  const existingModels = Array.isArray(existingXai.models) ? existingXai.models : [];
-  const hasVideoModel = existingModels.some(model => model && model.id === UCLAW_VIDEO_MODEL);
-
-  const xaiModels = hasVideoModel ? existingModels : [
-    ...existingModels,
-    {
-      id: UCLAW_VIDEO_MODEL,
-      name: UCLAW_VIDEO_MODEL,
-      reasoning: false,
-      input: ['text', 'image'],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128000,
-      maxTokens: 8192
-    }
-  ];
-
   config.models = config.models || {};
-  config.models.mode = config.models.mode || 'merge';
   config.models.providers = config.models.providers || {};
-  config.models.providers.xai = {
-    ...existingXai,
-    baseUrl: adapterBaseUrl,
-    apiKey: adapterApiKey,
-    api: existingXai.api || 'openai-completions',
-    models: xaiModels
-  };
-
-  config.agents = config.agents || {};
-  config.agents.defaults = config.agents.defaults || {};
-  config.agents.defaults.videoGenerationModel = {
-    ...(config.agents.defaults.videoGenerationModel || {}),
-    primary: `xai/${UCLAW_VIDEO_MODEL}`,
-    timeoutMs: Math.max(Number(config.agents.defaults.videoGenerationModel?.timeoutMs) || 0, 600000)
-  };
-  if (!config.agents.defaults.imageModel && config.agents.defaults.imageGenerationModel?.primary) {
-    config.agents.defaults.imageModel = {
-      primary: config.agents.defaults.imageGenerationModel.primary,
-      timeoutMs: config.agents.defaults.imageGenerationModel.timeoutMs || 180000
+  const providers = config.models.providers;
+  const newApiCredentials = findNewApiCredentials(config);
+  if (newApiCredentials.newApiKey || newApiCredentials.newApiBaseUrl || providers.newapi) {
+    const templateModels = loadBundledDefaultConfig().models?.providers?.newapi?.models || [];
+    providers.newapi = {
+      ...(providers.newapi || {}),
+      api: providers.newapi?.api || 'openai-completions',
+      models: Array.isArray(providers.newapi?.models) && providers.newapi.models.length
+        ? providers.newapi.models
+        : templateModels,
     };
+    if (newApiCredentials.newApiBaseUrl && !providers.newapi.baseUrl) {
+      providers.newapi.baseUrl = newApiCredentials.newApiBaseUrl;
+    }
+    if (newApiCredentials.newApiKey && !providers.newapi.apiKey) {
+      providers.newapi.apiKey = newApiCredentials.newApiKey;
+    }
   }
-  config.agents.defaults.mediaMaxMb = Math.max(Number(config.agents.defaults.mediaMaxMb) || 0, 256);
-
+  for (const providerName of ['custom', 'litellm', 'xai']) {
+    delete providers[providerName];
+  }
+  const defaults = config.agents?.defaults;
+  const videoPrimary = String(defaults?.videoGenerationModel?.primary || defaults?.videoGenerationModel || '').trim();
+  if (videoPrimary.startsWith('xai/')) {
+    delete defaults.videoGenerationModel;
+  }
   if (JSON.stringify(config) !== before) {
     saveConfig(config);
-    console.log(`[${APP_NAME}] Video adapter config set to ${adapterBaseUrl}`);
+    console.log(`[${APP_NAME}] Removed legacy xai video adapter config`);
   }
-}
-
-function ensureRuntimeVideoAdapterConfig(adapterBaseUrl) {
-  process.env.UCLAW_RUNTIME_VIDEO_ADAPTER_BASE_URL = adapterBaseUrl;
-  console.log(`[${APP_NAME}] Runtime video adapter set to ${adapterBaseUrl}`);
 }
 
 function hasModelConfigured() {
@@ -1289,38 +1230,6 @@ async function findAvailablePort(start = DEFAULT_PORT, end = MAX_PORT) {
     if (await isPortAvailable(port)) return port;
   }
   throw new Error(`No available port in range ${start}-${end}`);
-}
-
-function startVideoAdapter(port) {
-  return new Promise((resolve, reject) => {
-    const server = createVideoAdapterServer(getVideoAdapterOptions());
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
-      videoAdapterServer = server;
-      videoAdapterPort = port;
-      console.log(`[${APP_NAME}] Video adapter ready on http://127.0.0.1:${port}/xai/v1`);
-      resolve(port);
-    });
-  });
-}
-
-function stopVideoAdapter() {
-  if (!videoAdapterServer) return Promise.resolve();
-
-  const serverToStop = videoAdapterServer;
-  videoAdapterServer = null;
-  videoAdapterPort = null;
-  logLifecycle('Stopping video adapter...');
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    serverToStop.close(finish);
-    setTimeout(finish, 2000);
-  });
 }
 
 // ── Mini HTTP Server for Config.html ──
@@ -2132,7 +2041,6 @@ function setupIPC() {
     port: gatewayPort,
     token: getToken(),
     hasModel: hasModelConfigured(),
-    videoAdapterPort,
   }));
 
   ipcMain.handle('open-dashboard', () => {
@@ -2189,15 +2097,7 @@ async function startNormalApplication({ replaceActivationWindow = false } = {}) 
     await startConfigServer();
 
     try {
-      const configuredVideoAdapterBaseUrl = UCLAW_VIDEO_ADAPTER_BASE_URL.trim();
-      if (configuredVideoAdapterBaseUrl) {
-        ensureVideoAdapterConfig(configuredVideoAdapterBaseUrl.replace(/\/+$/, ''));
-        console.log(`[${APP_NAME}] Using external video adapter ${configuredVideoAdapterBaseUrl}`);
-      } else {
-        const adapterPort = await findAvailablePort(DEFAULT_VIDEO_ADAPTER_PORT, MAX_VIDEO_ADAPTER_PORT);
-        await startVideoAdapter(adapterPort);
-        ensureRuntimeVideoAdapterConfig(`http://127.0.0.1:${adapterPort}/xai/v1`);
-      }
+      pruneLegacyVideoAdapterConfig();
 
       const port = await findAvailablePort();
       await startGateway(port);
@@ -2255,7 +2155,6 @@ function shutdownApp() {
     logLifecycle('Shutdown started');
     await finalPortableDataSync('before-stop');
     await stopGateway();
-    await stopVideoAdapter();
     await stopConfigServer();
     await finalPortableDataSync('after-stop');
     logLifecycle('Shutdown complete');

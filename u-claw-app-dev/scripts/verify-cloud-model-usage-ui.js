@@ -232,10 +232,10 @@ function writeActivatedClientState(accessToken, newAPIToken) {
   };
   config.agents = config.agents || {};
   config.agents.defaults = config.agents.defaults || {};
-  config.agents.defaults.model = { primary: 'custom/gpt-5.5' };
-  config.agents.defaults.imageGenerationModel = { primary: 'litellm/gpt-image-2' };
-  config.agents.defaults.imageModel = { primary: 'litellm/gpt-image-2' };
-  config.agents.defaults.videoGenerationModel = { primary: 'xai/jimeng-video-3-720p' };
+  config.agents.defaults.model = { primary: 'newapi/gpt-5.5' };
+  config.agents.defaults.imageGenerationModel = { primary: 'newapi/gpt-image-2' };
+  config.agents.defaults.imageModel = { primary: 'newapi/gpt-image-2' };
+  config.agents.defaults.videoGenerationModel = { primary: 'newapi/seedance-1.5-pro-1080p-10s' };
   fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify(config, null, 2));
   fs.writeFileSync(path.join(configDir, 'license', 'license.json'), JSON.stringify({
     payload: {

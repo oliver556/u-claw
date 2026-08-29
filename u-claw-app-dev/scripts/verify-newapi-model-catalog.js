@@ -36,7 +36,7 @@ function verifyReusableApiKey() {
 }
 
 /**
- * Verifies cloud catalog merge is scoped to models.providers.newapi.
+ * Verifies cloud catalog merge consolidates legacy aliases into models.providers.newapi.
  */
 function verifyMergeModelCatalogIntoConfig() {
   const config = {
@@ -58,8 +58,8 @@ function verifyMergeModelCatalogIntoConfig() {
 
   assert.equal(result.changed, true);
   assert.equal(result.count, 2);
-  assert.equal(result.config.models.providers.custom.models[0].id, 'local');
-  assert.equal(result.config.models.providers.xai.apiKey, 'adapter');
+  assert.equal(result.config.models.providers.custom, undefined);
+  assert.equal(result.config.models.providers.xai, undefined);
   assert.equal(result.config.models.providers.newapi.baseUrl, 'https://api.example.com/v1');
   assert.equal(result.config.models.providers.newapi.apiKey, 'sk-existing');
   assert.equal(result.config.models.providers.newapi.models[0].id, 'gpt-5.5');
@@ -68,8 +68,7 @@ function verifyMergeModelCatalogIntoConfig() {
 }
 
 /**
- * Verifies synced catalog models become the active cloud defaults without
- * bypassing the dedicated video adapter default.
+ * Verifies synced catalog models become the active cloud defaults.
  */
 function verifyMergeRebasesCloudManagedDefaults() {
   const config = {
@@ -103,7 +102,8 @@ function verifyMergeRebasesCloudManagedDefaults() {
   assert.equal(result.config.agents.defaults.model.primary, 'newapi/gpt-5.5');
   assert.equal(result.config.agents.defaults.imageGenerationModel.primary, 'newapi/gpt-image-2');
   assert.equal(result.config.agents.defaults.imageModel.primary, 'newapi/gpt-image-2');
-  assert.equal(result.config.agents.defaults.videoGenerationModel.primary, 'xai/jimeng-video-3-720p');
+  assert.equal(result.config.agents.defaults.videoGenerationModel.primary, 'newapi/jimeng-video-3-720p');
+  assert.equal(result.config.models.providers.xai, undefined);
 }
 
 verifyNormalizeCatalogModel();

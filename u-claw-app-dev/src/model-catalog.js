@@ -74,6 +74,22 @@ function catalogModelMatchesKind(model, kind) {
 }
 
 /**
+ * Removes legacy local model providers after their New API key has been reused.
+ */
+function scrubLegacyModelProviders(config) {
+  const providers = config?.models?.providers;
+  if (!providers) return false;
+  let changed = false;
+  for (const providerID of ['custom', 'litellm', 'xai']) {
+    if (providers[providerID]) {
+      delete providers[providerID];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
  * Removes Bavi-box-only catalog metadata before writing OpenClaw config.
  */
 function toOpenClawModelConfig(model) {
@@ -96,12 +112,12 @@ function rebaseDefaultModelsToCatalog(config, providerID, models) {
   if (!defaults || !providerID || !Array.isArray(models) || models.length === 0) return false;
 
   let changed = false;
+  const managedProviders = new Set(['', 'custom', 'litellm', 'xai', providerID]);
   const pickModelID = (currentValue, kind) => {
     const current = splitQualifiedModelID(currentValue);
     const candidates = models.filter((model) => catalogModelMatchesKind(model, kind));
     const exact = candidates.find((model) => model.id === current.id);
     if (exact) return exact.id;
-    const managedProviders = new Set(['', 'custom', 'litellm', providerID]);
     if (managedProviders.has(current.provider) && candidates.length > 0) return candidates[0].id;
     return '';
   };
@@ -112,6 +128,13 @@ function rebaseDefaultModelsToCatalog(config, providerID, models) {
     const next = `${providerID}/${picked}`;
     if (current !== next) {
       container[key] = next;
+      changed = true;
+    }
+  };
+  const clearManagedVideoPrimary = (container, key) => {
+    const current = splitQualifiedModelID(container?.[key]);
+    if (managedProviders.has(current.provider) && container?.[key]) {
+      delete container[key];
       changed = true;
     }
   };
@@ -140,6 +163,29 @@ function rebaseDefaultModelsToCatalog(config, providerID, models) {
           changed = true;
         }
       }
+    }
+  }
+  if (defaults.videoGenerationModel && typeof defaults.videoGenerationModel === 'object') {
+    const before = defaults.videoGenerationModel.primary;
+    patchPrimary(defaults.videoGenerationModel, 'primary', 'video');
+    if (defaults.videoGenerationModel.primary === before) {
+      clearManagedVideoPrimary(defaults.videoGenerationModel, 'primary');
+    }
+    if (!defaults.videoGenerationModel.primary) {
+      delete defaults.videoGenerationModel;
+      changed = true;
+    }
+  } else if (typeof defaults.videoGenerationModel === 'string') {
+    const picked = pickModelID(defaults.videoGenerationModel, 'video');
+    if (picked) {
+      const next = `${providerID}/${picked}`;
+      if (defaults.videoGenerationModel !== next) {
+        defaults.videoGenerationModel = next;
+        changed = true;
+      }
+    } else if (managedProviders.has(splitQualifiedModelID(defaults.videoGenerationModel).provider)) {
+      delete defaults.videoGenerationModel;
+      changed = true;
     }
   }
   return changed;
@@ -181,8 +227,6 @@ function mergeModelCatalogIntoConfig(config, catalog, options = {}) {
   nextConfig.models = nextConfig.models || {};
   nextConfig.models.mode = nextConfig.models.mode || 'merge';
   nextConfig.models.providers = nextConfig.models.providers || {};
-
-  const existingProvider = nextConfig.models.providers[providerID] || {};
   const normalizedModels = catalog.models
     .map(normalizeCatalogModel)
     .filter(Boolean);
@@ -192,7 +236,9 @@ function mergeModelCatalogIntoConfig(config, catalog, options = {}) {
   }
   const mergedModels = [...byID.values()].sort((left, right) => left.id.localeCompare(right.id));
   const apiKey = findReusableApiKey(nextConfig, providerID, baseURL) || String(options.apiKey || '').trim();
+  scrubLegacyModelProviders(nextConfig);
 
+  const existingProvider = nextConfig.models.providers[providerID] || {};
   nextConfig.models.providers[providerID] = {
     ...existingProvider,
     baseUrl: baseURL,
@@ -218,6 +264,7 @@ module.exports = {
   mergeModelCatalogIntoConfig,
   normalizeCatalogModel,
   rebaseDefaultModelsToCatalog,
+  scrubLegacyModelProviders,
   splitQualifiedModelID,
   toOpenClawModelConfig,
 };

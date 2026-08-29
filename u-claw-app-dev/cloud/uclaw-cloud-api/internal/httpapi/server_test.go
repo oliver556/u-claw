@@ -139,7 +139,7 @@ func TestActivationRedeemReturnsClientConfig(t *testing.T) {
 	if payload.NewAPIBaseURL != "https://api.example.com/v1" || payload.NewAPIToken != "preview-token" {
 		t.Fatalf("unexpected New API config: %+v", payload)
 	}
-	if payload.DefaultModels.Text != "custom/gpt-5.5" {
+	if payload.DefaultModels.Text != "newapi/gpt-5.5" {
 		t.Fatalf("text model = %q", payload.DefaultModels.Text)
 	}
 }

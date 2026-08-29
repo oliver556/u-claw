@@ -23,9 +23,9 @@ func TestEd25519SignerSignsVerifiableArtifact(t *testing.T) {
 		NewAPIBaseURL:         "https://api.example.com/v1/",
 		TokenVersion:          2,
 		DefaultModels: DefaultModels{
-			Text:  "custom/gpt-5.5",
-			Image: "litellm/gpt-image-2",
-			Video: "xai/jimeng-video-3-720p",
+			Text:  "newapi/gpt-5.5",
+			Image: "newapi/gpt-image-2",
+			Video: "newapi/seedance-1.5-pro-1080p-10s",
 		},
 	})
 	if err != nil {

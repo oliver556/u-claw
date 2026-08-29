@@ -18,7 +18,7 @@
   "models": {
     "mode": "merge",
     "providers": {
-      "custom": {
+      "newapi": {
         "baseUrl": "https://api.gmnlee.com/v1",
         "apiKey": "",
         "api": "openai-completions",
@@ -39,41 +39,10 @@
             },
             "contextWindow": 128000,
             "maxTokens": 8192
-          }
-        ]
-      },
-      "litellm": {
-        "baseUrl": "https://api.gmnlee.com/v1",
-        "apiKey": "",
-        "api": "openai-completions",
-        "models": [
+          },
           {
             "id": "gpt-image-2",
             "name": "gpt-image-2",
-            "reasoning": false,
-            "input": [
-              "text",
-              "image"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "contextWindow": 128000,
-            "maxTokens": 8192
-          }
-        ]
-      },
-      "xai": {
-        "baseUrl": "https://video-adapter.gmnlee.com/xai/v1",
-        "apiKey": "uclaw-video-adapter",
-        "api": "openai-completions",
-        "models": [
-          {
-            "id": "jimeng-video-3-720p",
-            "name": "jimeng-video-3-720p",
             "reasoning": false,
             "input": [
               "text",
@@ -95,19 +64,15 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "custom/gpt-5.5"
+        "primary": "newapi/gpt-5.5"
       },
       "imageGenerationModel": {
-        "primary": "litellm/gpt-image-2",
+        "primary": "newapi/gpt-image-2",
         "timeoutMs": 180000
       },
       "imageModel": {
-        "primary": "litellm/gpt-image-2",
+        "primary": "newapi/gpt-image-2",
         "timeoutMs": 180000
-      },
-      "videoGenerationModel": {
-        "primary": "xai/jimeng-video-3-720p",
-        "timeoutMs": 600000
       },
       "mediaMaxMb": 256
     }

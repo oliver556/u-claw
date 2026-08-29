@@ -100,9 +100,8 @@ function startActivationStub() {
           newapiToken,
           tokenVersion: 1,
           defaultModels: {
-            text: 'custom/gpt-5.5',
-            image: 'litellm/gpt-image-2',
-            video: 'xai/jimeng-video-3-720p',
+            text: 'newapi/gpt-5.5',
+            image: 'newapi/gpt-image-2',
           },
           licenseArtifact: {
             payload: {
@@ -321,10 +320,9 @@ function verifyLocalActivationMaterial() {
   ) {
     throw new Error('update credential was not written correctly');
   }
-  for (const providerName of ['custom', 'litellm']) {
-    const provider = openclaw.models?.providers?.[providerName];
-    if (provider?.baseUrl !== newapiBaseUrl || provider?.apiKey !== newapiToken) {
-      throw new Error(`OpenClaw provider ${providerName} was not configured`);
+  for (const providerName of ['custom', 'litellm', 'xai']) {
+    if (openclaw.models?.providers?.[providerName]) {
+      throw new Error(`OpenClaw provider ${providerName} should not be configured`);
     }
   }
   const catalogProvider = openclaw.models?.providers?.newapi;

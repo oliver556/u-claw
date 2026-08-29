@@ -216,18 +216,15 @@ function generateConfig(edition, destination) {
 
   const config = JSON.parse(fs.readFileSync(destination, 'utf8'));
   const providers = config.models?.providers || {};
-  const hasNewApiKey = Boolean(providers.custom?.apiKey && providers.litellm?.apiKey);
+  const hasNewApiKey = Boolean(providers.newapi?.apiKey);
   if (edition === 'customer' && hasNewApiKey) {
     throw new Error('Customer package contains a New API key');
   }
   if (edition === 'streamer' && !hasNewApiKey) {
     throw new Error('Streamer package is missing the New API key');
   }
-  if (providers.xai?.baseUrl !== 'https://video-adapter.gmnlee.com/xai/v1') {
-    throw new Error(`Wrong xai base URL: ${providers.xai?.baseUrl || '(empty)'}`);
-  }
-  if (providers.xai?.apiKey !== 'uclaw-video-adapter') {
-    throw new Error('Wrong xai adapter token');
+  if (providers.xai) {
+    throw new Error('Portable package contains legacy xai video adapter provider');
   }
 }
 
@@ -236,29 +233,24 @@ function seedStreamerAuthStore(edition, stageRoot) {
   const configPath = path.join(stageRoot, 'data', '.openclaw', 'openclaw.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   const providers = config.models?.providers || {};
-  const customKey = providers.custom?.apiKey;
-  const litellmKey = providers.litellm?.apiKey || customKey;
-  if (!customKey || !litellmKey) throw new Error('Streamer auth store requires custom/litellm API keys');
+  const newApiKey = providers.newapi?.apiKey;
+  if (!newApiKey) throw new Error('Streamer auth store requires a newapi API key');
 
   const now = Date.now();
   const store = {
     profiles: {
-      'custom:manual': { type: 'api_key', provider: 'custom', key: customKey },
-      'litellm:manual': { type: 'api_key', provider: 'litellm', key: litellmKey }
+      'newapi:manual': { type: 'api_key', provider: 'newapi', key: newApiKey }
     },
     order: {
-      custom: ['custom:manual'],
-      litellm: ['litellm:manual']
+      newapi: ['newapi:manual']
     },
     lastGood: {
-      custom: 'custom:manual',
-      litellm: 'litellm:manual'
+      newapi: 'newapi:manual'
     }
   };
   const state = {
     providers: {
-      custom: { lastGoodProfileId: 'custom:manual' },
-      litellm: { lastGoodProfileId: 'litellm:manual' }
+      newapi: { lastGoodProfileId: 'newapi:manual' }
     }
   };
   const destinationDir = path.join(stageRoot, 'data', '.openclaw', 'agents', 'main', 'agent');
@@ -318,10 +310,8 @@ Built: ${localDisplayTime()}
 Edition:
   ${keyRule}
 
-Video chain:
-  Bavi-box -> server adapter -> New API -> Jimeng
-  xai.baseUrl = https://video-adapter.gmnlee.com/xai/v1
-  xai.apiKey = uclaw-video-adapter
+Model chain:
+  Bavi-box -> New API
 
 Artifacts:
   u-claw-app-mac-arm64.tar.gz  sha256=${macArm64Hash}
