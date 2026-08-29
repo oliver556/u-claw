@@ -72,6 +72,8 @@ requireText(main, 'uclaw:get-model-usage-summary', 'normal usage summary IPC cha
 requireText(main, 'function setupActivationIPC()', 'activation IPC setup');
 requireText(main, 'function loadActivationPage()', 'activation page loader');
 requireText(main, "mainWindow.loadFile(path.join(__dirname, 'activation.html'));", 'activation local loadFile');
+requireText(main, 'Failed to load activation page', 'activation page load error log');
+requireText(main, 'activationWindowMode || !holdMainWindowUntilReady || gatewayReady || appIsQuitting', 'activation window bypasses portable hold');
 requireText(main, 'Activation-only mode starting', 'activation lifecycle branch');
 requireText(main, 'Activation gate starting', 'activation startup gate branch');
 requireText(main, 'function createActivationMenu()', 'activation menu');
@@ -173,6 +175,8 @@ for (const source of [
     throw new Error(`${source[0]} must sync activation OpenClaw config back to USB`);
   }
 }
+requireText(macStart, 'decompressing directly from USB archive', 'macOS start script direct archive fallback');
+requireText(generatedMacScript, 'decompressing directly from USB archive', 'generated macOS launcher direct archive fallback');
 requireText(macLauncher, 'kActivationRestartExitCode = 20', 'macOS legacy activation restart exit code');
 requireText(windowsLauncher, 'activationRestartExitCode = 20', 'Windows legacy activation restart exit code');
 requireText(windowsStart, 'if "%APP_EXIT%"=="20"', 'Windows legacy direct script activation restart loop');

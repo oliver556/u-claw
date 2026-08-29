@@ -1773,7 +1773,10 @@ function setupActivationIPC() {
  */
 function loadActivationPage() {
   if (!mainWindow) return;
-  mainWindow.loadFile(path.join(__dirname, 'activation.html'));
+  const load = mainWindow.loadFile(path.join(__dirname, 'activation.html'));
+  Promise.resolve(load)
+    .then(() => revealMainWindow())
+    .catch(error => logLifecycle(`Failed to load activation page: ${error.message}`));
 }
 
 // ── Window Management ──
@@ -1812,7 +1815,7 @@ function createWindow() {
   }
 
   mainWindow.once('ready-to-show', () => {
-    if (!holdMainWindowUntilReady || gatewayReady || appIsQuitting) {
+    if (activationWindowMode || !holdMainWindowUntilReady || gatewayReady || appIsQuitting) {
       mainWindow.show();
     }
   });

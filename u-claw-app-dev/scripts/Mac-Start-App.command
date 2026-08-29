@@ -229,6 +229,7 @@ if [ -f "$STAMP_FILE" ]; then
   CACHED_STAMP="$(cat "$STAMP_FILE" || true)"
 fi
 USE_EXISTING_APP_CACHE=0
+USE_DIRECT_ARCHIVE=0
 
 if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
   TMP_CACHE_DIR="$APP_CACHE_DIR.tmp.$$"
@@ -256,6 +257,14 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
           COPIED_MB="$((COPIED_BYTES / 1048576))"
           PERCENT="$(awk -v copied="$COPIED_BYTES" -v total="$ARCHIVE_BYTES" 'BEGIN { printf "%.1f", (copied * 100) / total }')"
           echo "[U-Claw] Copying Mac archive... ${COPIED_MB}/${ARCHIVE_MB} MB (${PERCENT}%), ${ELAPSED}s elapsed."
+          if [ "$ELAPSED" -ge 60 ] && [ "$COPIED_BYTES" -eq 0 ]; then
+            kill "$COPY_PID" 2>/dev/null || true
+            wait "$COPY_PID" 2>/dev/null || true
+            rm -f "$TMP_ARCHIVE"
+            echo "[U-Claw] Local archive copy made no progress; decompressing directly from USB archive."
+            USE_DIRECT_ARCHIVE=1
+            break
+          fi
         else
           echo "[U-Claw] Copying Mac archive... ${ELAPSED}s elapsed."
         fi
@@ -276,7 +285,7 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
         fi
       fi
     done
-    if [ "$USE_EXISTING_APP_CACHE" != "1" ] && ! wait "$COPY_PID"; then
+    if [ "$USE_EXISTING_APP_CACHE" != "1" ] && [ "$USE_DIRECT_ARCHIVE" != "1" ] && ! wait "$COPY_PID"; then
       rm -f "$TMP_ARCHIVE"
       echo "[U-Claw] Failed to copy Mac archive."
       if [ -x "$APP_BIN" ]; then
@@ -287,7 +296,7 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
         exit 1
       fi
     fi
-    if [ "$USE_EXISTING_APP_CACHE" != "1" ]; then
+    if [ "$USE_EXISTING_APP_CACHE" != "1" ] && [ "$USE_DIRECT_ARCHIVE" != "1" ]; then
       mv "$TMP_ARCHIVE" "$LOCAL_ARCHIVE"
       printf '%s\n' "$CURRENT_STAMP" > "$LOCAL_ARCHIVE_STAMP"
       echo "[U-Claw] Mac archive copied in $(($(date +%s) - COPY_STARTED_AT))s."
@@ -296,11 +305,15 @@ if [ ! -x "$APP_BIN" ] || [ "$CURRENT_STAMP" != "$CACHED_STAMP" ]; then
     echo "[U-Claw] Reusing local Mac archive cache."
   fi
   if [ "$USE_EXISTING_APP_CACHE" != "1" ]; then
-    echo "[U-Claw] Installing updated app cache from local archive..."
+    EXTRACT_ARCHIVE="$LOCAL_ARCHIVE"
+    if [ "$USE_DIRECT_ARCHIVE" = "1" ]; then
+      EXTRACT_ARCHIVE="$ARCHIVE"
+    fi
+    echo "[U-Claw] Installing updated app cache..."
     echo "[U-Claw] This runs once per package version; later starts reuse the computer cache."
     rm -rf "$TMP_CACHE_DIR"
     mkdir -p "$TMP_CACHE_DIR"
-    COPYFILE_DISABLE=1 tar -xzf "$LOCAL_ARCHIVE" -C "$TMP_CACHE_DIR" &
+    COPYFILE_DISABLE=1 tar -xzf "$EXTRACT_ARCHIVE" -C "$TMP_CACHE_DIR" &
     EXTRACT_PID=$!
     (
       while kill -0 "$EXTRACT_PID" 2>/dev/null; do
