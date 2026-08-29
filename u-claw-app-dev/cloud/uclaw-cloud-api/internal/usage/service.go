@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"uclaw-cloud-api/internal/billing"
 	"uclaw-cloud-api/internal/newapi"
 	"uclaw-cloud-api/internal/provisioning"
 )
@@ -31,19 +32,26 @@ type SummaryRequest struct {
 
 // Summary is the model page payload for balance, quota usage, and recent records.
 type Summary struct {
-	Status           string   `json:"status"`
-	NewAPIUserID     int64    `json:"newapiUserId"`
-	NewAPIUsername   string   `json:"newapiUsername"`
-	AccountBalance   int64    `json:"accountBalance"`
-	UsedQuota        int64    `json:"usedQuota"`
-	RequestCount     int64    `json:"requestCount"`
-	TodayUsage       int64    `json:"todayUsage"`
-	Last7DaysUsage   int64    `json:"last7DaysUsage"`
-	CumulativeUsage  int64    `json:"cumulativeUsage"`
-	RecentRecordText string   `json:"recentRecordText"`
-	Records          []Record `json:"records"`
-	RefreshedAt      string   `json:"refreshedAt"`
-	Unit             string   `json:"unit"`
+	Status                string   `json:"status"`
+	NewAPIUserID          int64    `json:"newapiUserId"`
+	NewAPIUsername        string   `json:"newapiUsername"`
+	AccountBalance        int64    `json:"accountBalance"`
+	UsedQuota             int64    `json:"usedQuota"`
+	AccountBalanceCompute int64    `json:"accountBalanceCompute"`
+	UsedCompute           int64    `json:"usedCompute"`
+	RequestCount          int64    `json:"requestCount"`
+	TodayUsage            int64    `json:"todayUsage"`
+	Last7DaysUsage        int64    `json:"last7DaysUsage"`
+	CumulativeUsage       int64    `json:"cumulativeUsage"`
+	TodayCompute          int64    `json:"todayCompute"`
+	Last7DaysCompute      int64    `json:"last7DaysCompute"`
+	CumulativeCompute     int64    `json:"cumulativeCompute"`
+	NewAPIQuotaPerCNY     int64    `json:"newapiQuotaPerCny"`
+	ComputeUnitsPerCNY    int64    `json:"computeUnitsPerCny"`
+	RecentRecordText      string   `json:"recentRecordText"`
+	Records               []Record `json:"records"`
+	RefreshedAt           string   `json:"refreshedAt"`
+	Unit                  string   `json:"unit"`
 }
 
 // Record is one recent New API usage or account log row normalized for clients.
@@ -55,6 +63,7 @@ type Record struct {
 	ModelName        string `json:"modelName"`
 	TokenName        string `json:"tokenName"`
 	Quota            int64  `json:"quota"`
+	Compute          int64  `json:"compute"`
 	PromptTokens     int64  `json:"promptTokens"`
 	CompletionTokens int64  `json:"completionTokens"`
 	UseTime          int64  `json:"useTime"`
@@ -131,6 +140,7 @@ func (s *Service) buildSummary(self newapi.SelfUser, items []newapi.LogItem) Sum
 			ModelName:        item.ModelName,
 			TokenName:        item.TokenName,
 			Quota:            item.Quota,
+			Compute:          billing.ComputeFromNewAPIQuota(item.Quota),
 			PromptTokens:     item.PromptTokens,
 			CompletionTokens: item.CompletionTokens,
 			UseTime:          item.UseTime,
@@ -140,18 +150,25 @@ func (s *Service) buildSummary(self newapi.SelfUser, items []newapi.LogItem) Sum
 	}
 
 	return Summary{
-		Status:           "ok",
-		NewAPIUserID:     self.ID,
-		NewAPIUsername:   self.Username,
-		AccountBalance:   self.Quota,
-		UsedQuota:        self.UsedQuota,
-		RequestCount:     self.RequestCount,
-		TodayUsage:       todayUsage,
-		Last7DaysUsage:   last7DaysUsage,
-		CumulativeUsage:  self.UsedQuota,
-		RecentRecordText: fmt.Sprintf("%d 条最近记录", len(records)),
-		Records:          records,
-		RefreshedAt:      now.UTC().Format(time.RFC3339),
-		Unit:             "quota",
+		Status:                "ok",
+		NewAPIUserID:          self.ID,
+		NewAPIUsername:        self.Username,
+		AccountBalance:        self.Quota,
+		UsedQuota:             self.UsedQuota,
+		AccountBalanceCompute: billing.ComputeFromNewAPIQuota(self.Quota),
+		UsedCompute:           billing.ComputeFromNewAPIQuota(self.UsedQuota),
+		RequestCount:          self.RequestCount,
+		TodayUsage:            todayUsage,
+		Last7DaysUsage:        last7DaysUsage,
+		CumulativeUsage:       self.UsedQuota,
+		TodayCompute:          billing.ComputeFromNewAPIQuota(todayUsage),
+		Last7DaysCompute:      billing.ComputeFromNewAPIQuota(last7DaysUsage),
+		CumulativeCompute:     billing.ComputeFromNewAPIQuota(self.UsedQuota),
+		NewAPIQuotaPerCNY:     billing.NewAPIQuotaPerCNY,
+		ComputeUnitsPerCNY:    billing.ComputeUnitsPerCNY,
+		RecentRecordText:      fmt.Sprintf("%d 条最近记录", len(records)),
+		Records:               records,
+		RefreshedAt:           now.UTC().Format(time.RFC3339),
+		Unit:                  "quota",
 	}
 }

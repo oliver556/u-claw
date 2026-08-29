@@ -438,6 +438,7 @@ function cleanup() {
       headers: { Authorization: `Bearer ${login.accessToken}` },
     }));
     const initialBalance = Number(initialUsage.accountBalance) || 0;
+    const initialBalanceCompute = Number(initialUsage.accountBalanceCompute) || Math.round(initialBalance * 120);
     writeActivatedClientState(login.accessToken, redeem.newapiToken);
 
     start(path.join(appRoot, 'node_modules/.bin/electron'), ['.', '--dev', `--remote-debugging-port=${debugPort}`], {
@@ -448,7 +449,7 @@ function cleanup() {
       },
     });
     await sleep(3000);
-    await assertElectronModelUsageUI(initialBalance, 600000000);
+    await assertElectronModelUsageUI(initialBalanceCompute, 600000000);
     console.log(JSON.stringify({
       ok: true,
       step: 'electron_model_usage_ui',

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"uclaw-cloud-api/internal/billing"
 	"uclaw-cloud-api/internal/newapi"
 )
 
@@ -29,9 +30,6 @@ const (
 	StatusCredited = "credited"
 	// StatusCreditFailed means payment was accepted but New API crediting failed.
 	StatusCreditFailed = "credit_failed"
-
-	// ComputeUnitsPerCNY is the U-Claw display-and-credit conversion: 1 CNY buys 6kw compute.
-	ComputeUnitsPerCNY int64 = 60000000
 )
 
 // Plan is a recharge SKU shown to the client before a payment order is created.
@@ -177,9 +175,9 @@ func NewService(store Store, quota QuotaClient, cfg Config) (*Service, error) {
 // DefaultPlans returns development SKUs using the U-Claw 1 CNY = 6kw compute conversion.
 func DefaultPlans() []Plan {
 	return []Plan{
-		{Code: "dev_10", Name: "虚拟充值 10 元", AmountCents: 1000, Quota: 10 * ComputeUnitsPerCNY, Currency: "CNY"},
-		{Code: "dev_50", Name: "虚拟充值 50 元", AmountCents: 5000, Quota: 50 * ComputeUnitsPerCNY, Currency: "CNY"},
-		{Code: "dev_100", Name: "虚拟充值 100 元", AmountCents: 10000, Quota: 100 * ComputeUnitsPerCNY, Currency: "CNY"},
+		{Code: "dev_10", Name: "虚拟充值 10 元", AmountCents: 1000, Quota: billing.NewAPIQuotaFromCNY(10), Currency: "CNY"},
+		{Code: "dev_50", Name: "虚拟充值 50 元", AmountCents: 5000, Quota: billing.NewAPIQuotaFromCNY(50), Currency: "CNY"},
+		{Code: "dev_100", Name: "虚拟充值 100 元", AmountCents: 10000, Quota: billing.NewAPIQuotaFromCNY(100), Currency: "CNY"},
 	}
 }
 

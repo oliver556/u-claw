@@ -127,7 +127,7 @@ order_json="$(curl -fsS -X POST "http://${API_ADDR}/v1/recharge/orders" \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $access_token" \
   -d '{"planCode":"dev_10","provider":"virtual"}')"
-order_no="$(printf '%s' "$order_json" | node_get "if(!j.order||j.order.status!=='created'||j.order.quota!==600000000){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(j.order.orderNo)")"
+order_no="$(printf '%s' "$order_json" | node_get "if(!j.order||j.order.status!=='created'||j.order.quota!==5000000){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(j.order.orderNo)")"
 printf '%s' "$order_json" | node_get "process.stdout.write(JSON.stringify({ok:true,step:'recharge_order_e2e',orderNo:j.order.orderNo,quota:j.order.quota,status:j.order.status}))"
 echo
 
@@ -144,5 +144,5 @@ echo
 
 recharged_usage_json="$(curl -fsS -X GET "http://${API_ADDR}/v1/newapi/usage/summary" \
   -H "Authorization: Bearer $access_token")"
-printf '%s' "$recharged_usage_json" | node_get "if(j.status!=='ok'||j.accountBalance!==600100000){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'recharged_usage_summary_e2e',accountBalance:j.accountBalance}))"
+printf '%s' "$recharged_usage_json" | node_get "if(j.status!=='ok'||j.accountBalance!==5100000||j.accountBalanceCompute!==612000000){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'recharged_usage_summary_e2e',accountBalance:j.accountBalance,accountBalanceCompute:j.accountBalanceCompute}))"
 echo

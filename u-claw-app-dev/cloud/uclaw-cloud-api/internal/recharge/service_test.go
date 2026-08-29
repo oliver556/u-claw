@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"uclaw-cloud-api/internal/billing"
 	"uclaw-cloud-api/internal/newapi"
 )
 
@@ -51,7 +52,7 @@ func TestCreateOrderUsesConfiguredPlan(t *testing.T) {
 		t.Fatalf("CreateOrder() error = %v", err)
 	}
 
-	if result.Order.Status != StatusCreated || result.Order.AmountCents != 1000 || result.Order.Quota != 10*ComputeUnitsPerCNY {
+	if result.Order.Status != StatusCreated || result.Order.AmountCents != 1000 || result.Order.Quota != billing.NewAPIQuotaFromCNY(10) {
 		t.Fatalf("order = %+v", result.Order)
 	}
 	if result.PayURL == "" || result.VirtualCallbackURL == "" {
@@ -109,7 +110,7 @@ func TestCreateOrderUsesConfiguredCheckoutClient(t *testing.T) {
 		t.Fatalf("CreateOrder() error = %v", err)
 	}
 
-	if result.Order.Provider != ProviderAlipay || result.Order.AmountCents != 5000 || result.Order.Quota != 50*ComputeUnitsPerCNY {
+	if result.Order.Provider != ProviderAlipay || result.Order.AmountCents != 5000 || result.Order.Quota != billing.NewAPIQuotaFromCNY(50) {
 		t.Fatalf("order = %+v", result.Order)
 	}
 	if result.PayURL != "https://pay.example.com/order" || result.QRCodeURL != "https://pay.example.com/qr.png" {
@@ -189,7 +190,7 @@ func TestVirtualCallbackCreditsNewAPIOnce(t *testing.T) {
 	if len(quota.calls) != 1 {
 		t.Fatalf("AddQuota calls = %d, want 1", len(quota.calls))
 	}
-	if quota.calls[0].UserID != 42 || quota.calls[0].Quota != 10*ComputeUnitsPerCNY {
+	if quota.calls[0].UserID != 42 || quota.calls[0].Quota != billing.NewAPIQuotaFromCNY(10) {
 		t.Fatalf("AddQuota request = %+v", quota.calls[0])
 	}
 

@@ -324,13 +324,19 @@ func TestUsageSummaryReturnsNewAPICounters(t *testing.T) {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Status          string `json:"status"`
-		AccountBalance  int64  `json:"accountBalance"`
-		UsedQuota       int64  `json:"usedQuota"`
-		CumulativeUsage int64  `json:"cumulativeUsage"`
-		Records         []struct {
+		Status                string `json:"status"`
+		AccountBalance        int64  `json:"accountBalance"`
+		UsedQuota             int64  `json:"usedQuota"`
+		AccountBalanceCompute int64  `json:"accountBalanceCompute"`
+		UsedCompute           int64  `json:"usedCompute"`
+		CumulativeUsage       int64  `json:"cumulativeUsage"`
+		CumulativeCompute     int64  `json:"cumulativeCompute"`
+		NewAPIQuotaPerCNY     int64  `json:"newapiQuotaPerCny"`
+		ComputeUnitsPerCNY    int64  `json:"computeUnitsPerCny"`
+		Records               []struct {
 			ModelName string `json:"modelName"`
 			Quota     int64  `json:"quota"`
+			Compute   int64  `json:"compute"`
 		} `json:"records"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
@@ -339,8 +345,17 @@ func TestUsageSummaryReturnsNewAPICounters(t *testing.T) {
 	if payload.Status != "ok" || payload.AccountBalance != 100000 || payload.UsedQuota != 24171 || payload.CumulativeUsage != 24171 {
 		t.Fatalf("payload = %+v", payload)
 	}
+	if payload.AccountBalanceCompute != 12000000 || payload.UsedCompute != 2900520 || payload.CumulativeCompute != 2900520 {
+		t.Fatalf("payload compute = %+v", payload)
+	}
+	if payload.NewAPIQuotaPerCNY != 500000 || payload.ComputeUnitsPerCNY != 60000000 {
+		t.Fatalf("payload conversion = %+v", payload)
+	}
 	if len(payload.Records) != 1 || payload.Records[0].ModelName != "gpt-5.5" {
 		t.Fatalf("records = %+v", payload.Records)
+	}
+	if payload.Records[0].Quota != 24171 || payload.Records[0].Compute != 2900520 {
+		t.Fatalf("record conversion = %+v", payload.Records)
 	}
 }
 

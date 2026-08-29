@@ -79,11 +79,23 @@ func TestGetSummaryLogsInAndAggregatesUsage(t *testing.T) {
 	if summary.AccountBalance != 100000 || summary.UsedQuota != 300 || summary.RequestCount != 12 {
 		t.Fatalf("summary counters = %+v", summary)
 	}
+	if summary.AccountBalanceCompute != 12000000 || summary.UsedCompute != 36000 {
+		t.Fatalf("summary compute counters = %+v", summary)
+	}
 	if summary.TodayUsage != 100 || summary.Last7DaysUsage != 300 || summary.CumulativeUsage != 300 {
 		t.Fatalf("summary usage = %+v", summary)
 	}
+	if summary.TodayCompute != 12000 || summary.Last7DaysCompute != 36000 || summary.CumulativeCompute != 36000 {
+		t.Fatalf("summary compute usage = %+v", summary)
+	}
+	if summary.NewAPIQuotaPerCNY != 500000 || summary.ComputeUnitsPerCNY != 60000000 {
+		t.Fatalf("summary conversion = %+v", summary)
+	}
 	if len(summary.Records) != 3 || summary.Records[0].RequestID != "req_today" {
 		t.Fatalf("records = %+v", summary.Records)
+	}
+	if summary.Records[0].Compute != 12000 {
+		t.Fatalf("record compute = %+v", summary.Records[0])
 	}
 }
 
