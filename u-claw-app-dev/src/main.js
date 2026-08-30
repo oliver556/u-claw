@@ -4,7 +4,11 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
-const { mergeModelCatalogIntoConfig } = require('./model-catalog');
+const {
+  mergeModelCatalogIntoConfig,
+  normalizeCatalogModel,
+  toOpenClawModelConfig,
+} = require('./model-catalog');
 
 // ── Constants ──
 const APP_NAME = 'Bavi-box';
@@ -760,8 +764,14 @@ async function refreshCloudModelCatalog() {
   return {
     ...catalog,
     merged: merged.changed,
-    modelCount: merged.count,
-    message: merged.count > 0 ? `已同步 ${merged.count} 个 New API 模型。` : 'New API 未返回可用模型。',
+    modelCount: merged.availableCount,
+    syncedModelCount: merged.count,
+    usedLocalCatalog: merged.usedLocalCatalog,
+    message: merged.count > 0
+      ? `已同步 ${merged.count} 个 New API 模型。`
+      : merged.availableCount > 0
+        ? `New API 本次未返回新模型，已保留本地 ${merged.availableCount} 个模型。`
+        : 'New API 未返回可用模型。',
   };
 }
 
@@ -1157,6 +1167,21 @@ function syncDevNewApiCredentialsFromDesktop() {
 }
 
 /**
+ * Normalizes persisted NewAPI model metadata after cloud classifier changes.
+ */
+function normalizeLocalNewApiModels(provider) {
+  if (!provider || !Array.isArray(provider.models) || provider.models.length === 0) return false;
+  const normalizedModels = provider.models
+    .map(normalizeCatalogModel)
+    .filter(Boolean)
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map(toOpenClawModelConfig);
+  if (JSON.stringify(provider.models) === JSON.stringify(normalizedModels)) return false;
+  provider.models = normalizedModels;
+  return true;
+}
+
+/**
  * Migrates legacy local model provider aliases into the single NewAPI provider.
  */
 function pruneLegacyVideoAdapterConfig() {
@@ -1181,6 +1206,7 @@ function pruneLegacyVideoAdapterConfig() {
     if (newApiCredentials.newApiKey && !providers.newapi.apiKey) {
       providers.newapi.apiKey = newApiCredentials.newApiKey;
     }
+    normalizeLocalNewApiModels(providers.newapi);
   }
   for (const providerName of ['custom', 'litellm', 'xai']) {
     delete providers[providerName];

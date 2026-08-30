@@ -19,6 +19,10 @@ function verifyNormalizeCatalogModel() {
   const imageModel = normalizeCatalogModel({ id: 'gpt-image-2', capabilities: ['image'] });
   assert.deepEqual(imageModel.input, ['text', 'image']);
   assert.deepEqual(imageModel.capabilities, ['image']);
+
+  const videoModel = normalizeCatalogModel({ id: 'seedance-1.5-pro-1080p-10s', capabilities: ['text'] });
+  assert.deepEqual(videoModel.input, ['text', 'image']);
+  assert.deepEqual(videoModel.capabilities, ['video']);
 }
 
 /**
@@ -106,8 +110,46 @@ function verifyMergeRebasesCloudManagedDefaults() {
   assert.equal(result.config.models.providers.xai, undefined);
 }
 
+/**
+ * Verifies an empty cloud catalog keeps the last local New API model list.
+ */
+function verifyMergeKeepsLocalCatalogWhenCloudEmpty() {
+  const config = {
+    agents: {
+      defaults: {
+        model: { primary: 'newapi/gpt-5.5' },
+      },
+    },
+    models: {
+      providers: {
+        newapi: {
+          baseUrl: 'https://api.example.com/v1',
+          apiKey: 'sk-existing',
+          models: [
+            { id: 'gpt-5.5', input: ['text'] },
+            { id: 'seedance-1.5-pro-1080p-10s', input: ['text'] },
+          ],
+        },
+      },
+    },
+  };
+  const catalog = {
+    provider: { id: 'newapi', baseUrl: 'https://api.example.com/v1/', api: 'openai-completions' },
+    models: [],
+  };
+
+  const result = mergeModelCatalogIntoConfig(config, catalog);
+
+  assert.equal(result.count, 0);
+  assert.equal(result.availableCount, 2);
+  assert.equal(result.usedLocalCatalog, true);
+  assert.equal(result.config.models.providers.newapi.models.length, 2);
+  assert.deepEqual(result.config.models.providers.newapi.models[1].input, ['text', 'image']);
+}
+
 verifyNormalizeCatalogModel();
 verifyReusableApiKey();
 verifyMergeModelCatalogIntoConfig();
 verifyMergeRebasesCloudManagedDefaults();
+verifyMergeKeepsLocalCatalogWhenCloudEmpty();
 console.log('newapi model catalog verifier passed');

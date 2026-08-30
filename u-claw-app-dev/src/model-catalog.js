@@ -7,7 +7,13 @@ function normalizeCatalogModel(model) {
   const capabilities = Array.isArray(model.capabilities)
     ? model.capabilities.map((value) => String(value).toLowerCase()).filter(Boolean)
     : [];
-  const normalizedCapabilities = capabilities.length ? capabilities : inferCapabilitiesFromModelID(id);
+  const inferredCapabilities = inferCapabilitiesFromModelID(id);
+  let normalizedCapabilities = capabilities.length ? capabilities : inferredCapabilities;
+  if (inferredCapabilities.includes('video') && !normalizedCapabilities.includes('video')) {
+    normalizedCapabilities = inferredCapabilities;
+  } else if (inferredCapabilities.includes('image') && !normalizedCapabilities.includes('image') && !normalizedCapabilities.includes('video')) {
+    normalizedCapabilities = inferredCapabilities;
+  }
   return {
     id,
     name: String(model?.name || id).trim() || id,
@@ -214,13 +220,13 @@ function findReusableApiKey(config, providerID, baseURL) {
  */
 function mergeModelCatalogIntoConfig(config, catalog, options = {}) {
   if (!catalog || !Array.isArray(catalog.models)) {
-    return { config, changed: false, count: 0 };
+    return { config, changed: false, count: 0, availableCount: 0, usedLocalCatalog: false };
   }
 
   const providerID = String(catalog.provider?.id || options.providerID || 'newapi').trim();
   const baseURL = String(catalog.provider?.baseUrl || options.baseURL || '').replace(/\/+$/, '');
   if (!providerID || !baseURL) {
-    return { config, changed: false, count: 0 };
+    return { config, changed: false, count: 0, availableCount: 0, usedLocalCatalog: false };
   }
 
   const nextConfig = JSON.parse(JSON.stringify(config || {}));
@@ -236,14 +242,18 @@ function mergeModelCatalogIntoConfig(config, catalog, options = {}) {
   }
   const mergedModels = [...byID.values()].sort((left, right) => left.id.localeCompare(right.id));
   const apiKey = findReusableApiKey(nextConfig, providerID, baseURL) || String(options.apiKey || '').trim();
+  const existingProvider = nextConfig.models.providers[providerID] || {};
+  const existingModels = Array.isArray(existingProvider.models)
+    ? existingProvider.models.map(normalizeCatalogModel).filter(Boolean)
+    : [];
+  const effectiveModels = mergedModels.length > 0 ? mergedModels : existingModels;
   scrubLegacyModelProviders(nextConfig);
 
-  const existingProvider = nextConfig.models.providers[providerID] || {};
   nextConfig.models.providers[providerID] = {
     ...existingProvider,
     baseUrl: baseURL,
     api: catalog.provider?.api || existingProvider.api || 'openai-completions',
-    models: mergedModels.map(toOpenClawModelConfig),
+    models: effectiveModels.map(toOpenClawModelConfig),
   };
   if (apiKey) {
     nextConfig.models.providers[providerID].apiKey = apiKey;
@@ -253,7 +263,13 @@ function mergeModelCatalogIntoConfig(config, catalog, options = {}) {
   rebaseDefaultModelsToCatalog(nextConfig, providerID, mergedModels);
 
   const changed = JSON.stringify(config || {}) !== JSON.stringify(nextConfig);
-  return { config: nextConfig, changed, count: mergedModels.length };
+  return {
+    config: nextConfig,
+    changed,
+    count: mergedModels.length,
+    availableCount: effectiveModels.length,
+    usedLocalCatalog: mergedModels.length === 0 && effectiveModels.length > 0,
+  };
 }
 
 module.exports = {
