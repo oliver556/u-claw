@@ -7,9 +7,9 @@
 //
 // 方案（移植自 v2 u-clawx 4.0 的 portable-session-data.ts 思路）：
 //   把这两类"可重建、不需便携"的缓存重定向到本机硬盘的固定位置：
-//     Windows: %LOCALAPPDATA%\U-Claw\...
-//     macOS:   ~/Library/Caches/U-Claw/...
-//     Linux:   $XDG_CACHE_HOME/U-Claw 或 ~/.cache/U-Claw
+//     Windows: %LOCALAPPDATA%\Bavi-box\...
+//     macOS:   ~/Library/Caches/Bavi-box/...
+//     Linux:   $XDG_CACHE_HOME/Bavi-box 或 ~/.cache/Bavi-box
 //   业务数据（openclaw.json、memory、账号）仍留在 U 盘 data/，便携性不变。
 //
 // 浏览器 user-data 的重定向手法：
@@ -84,7 +84,7 @@ export function resolvePortableCache({
 
   let root;
   try {
-    root = join(systemCacheRoot(platform, env), 'U-Claw', slot);
+    root = join(systemCacheRoot(platform, env), 'Bavi-box', slot);
     mkdirSync(root, { recursive: true });
   } catch {
     // 本机缓存根不可写 → 整体回退到 U 盘内（保证不报错，只是没加速）

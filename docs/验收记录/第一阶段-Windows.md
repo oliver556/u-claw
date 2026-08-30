@@ -1,4 +1,4 @@
-# U-Claw 第一阶段 Windows 会合验收
+# Bavi-box 第一阶段 Windows 会合验收
 
 > Task：`P1-T23`
 > 记录日期：2026-08-09

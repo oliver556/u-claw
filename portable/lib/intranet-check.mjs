@@ -126,7 +126,7 @@ function requestText(rawUrl, { method = 'GET', headers = {}, body, timeoutMs }) 
 async function main() {
   const configPath = process.argv[2] || process.env.OPENCLAW_CONFIG_PATH;
   line('========================================');
-  line('  U-Claw 内网体检 / Intranet Check');
+  line('  Bavi-box 内网体检 / Intranet Check');
   line(`  Node ${process.version}`);
   line('========================================');
   line('');

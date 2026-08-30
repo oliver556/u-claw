@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# U-Claw Desktop App - One-click Setup (Mac/Linux)
+# Bavi-box Desktop App - One-click Setup (Mac/Linux)
 # 克隆后运行此脚本，自动配置开发环境
 # ============================================================
 
@@ -22,7 +22,7 @@ clear
 echo ""
 echo -e "${CYAN}${BOLD}"
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║   U-Claw Desktop App Setup           ║"
+echo "  ║   Bavi-box Desktop App Setup           ║"
 echo "  ║   一键安装开发环境                    ║"
 echo "  ╚══════════════════════════════════════╝"
 echo -e "${NC}"
@@ -172,7 +172,7 @@ if [ -t 0 ]; then
     echo ""
     if [ "$RUN" = "y" ] || [ "$RUN" = "Y" ]; then
         echo ""
-        echo -e "  ${CYAN}启动 U-Claw...${NC}"
+        echo -e "  ${CYAN}启动 Bavi-box...${NC}"
         npm run dev
     fi
 fi

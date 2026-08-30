@@ -552,7 +552,7 @@ function listenWithFallback(port) {
     process.exit(1);
   });
   server.listen(port, '127.0.0.1', () => {
-    console.log(`\n🦞 U-Claw Config Center`);
+    console.log(`\n🦞 Bavi-box Config Center`);
     console.log(`   http://127.0.0.1:${port}`);
     console.log(`\n   Config file: ${CONFIG_PATH}\n`);
     // Persist the live port so Config.html / launchers can discover it after restarts.

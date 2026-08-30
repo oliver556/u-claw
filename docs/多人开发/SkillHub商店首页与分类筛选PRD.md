@@ -25,26 +25,26 @@
 
 分类筛选第一版为 UI 层筛选：优先使用 SkillHub 返回的 `categories/topics/tags`；字段缺失时使用关键词映射派生 `uiCategory`，并在实现注释和 PRD 中明确它不是服务端分类能力。
 
-视觉上沿用 U-Claw 蓝色主色，不使用橙色作为主 CTA 或主状态色。页面应像工具商店，不像调试面板：顶部有推荐入口、tab、分类筛选、搜索框；结果区可独立滚动；无数据时给出重试、换关键词、查看已安装技能等可行动路径。
+视觉上沿用 Bavi-box 蓝色主色，不使用橙色作为主 CTA 或主状态色。页面应像工具商店，不像调试面板：顶部有推荐入口、tab、分类筛选、搜索框；结果区可独立滚动；无数据时给出重试、换关键词、查看已安装技能等可行动路径。
 
 ## User Stories
 
-1. As a U-Claw user, I want to see recommended SkillHub skills when opening the store, so that I can browse without knowing search keywords.
-2. As a U-Claw user, I want the store to show real remote results, so that installed skills are not based on fake catalog data.
-3. As a U-Claw user, I want a 推荐 tab, so that I can start from curated useful skills.
-4. As a U-Claw user, I want a 可安装 tab, so that blocked or untrusted results do not mix with normal install choices.
-5. As a U-Claw user, I want an 已安装 tab, so that I can see local SkillHub skills separately from the online catalog.
-6. As a U-Claw user, I want a 需配置 tab, so that I can find skills that need env, bins, config, or agent changes before use.
-7. As a U-Claw user, I want category chips in Chinese, so that I can filter by purpose instead of reading every card.
-8. As a U-Claw user, I want category filters to work even when upstream has partial metadata, so that browsing still feels useful.
-9. As a U-Claw user, I want search results to be separate from the homepage recommendation state, so that clearing search returns me to the store homepage.
-10. As a U-Claw user, I want duplicate skills from different recommendation queries to merge by exact `@owner/slug`, so that the page does not show repeated cards.
-11. As a U-Claw user, I want same-slug different-owner skills to remain distinct, so that I do not inspect or install the wrong package.
-12. As a U-Claw user, I want loading states per section, so that slow recommendation queries do not make the entire page look broken.
-13. As a U-Claw user, I want partial failures to be visible but non-blocking, so that one failed keyword does not erase all homepage content.
-14. As a U-Claw user, I want blocked or review-required skills marked clearly, so that installation risk is visible before clicking.
-15. As a U-Claw user, I want empty states with retry and suggested keywords, so that “拉不到数据” has a next step.
-16. As a developer, I want implementation to stay on OpenClaw Gateway methods, so that U-Claw does not fork the skill runtime.
+1. As a Bavi-box user, I want to see recommended SkillHub skills when opening the store, so that I can browse without knowing search keywords.
+2. As a Bavi-box user, I want the store to show real remote results, so that installed skills are not based on fake catalog data.
+3. As a Bavi-box user, I want a 推荐 tab, so that I can start from curated useful skills.
+4. As a Bavi-box user, I want a 可安装 tab, so that blocked or untrusted results do not mix with normal install choices.
+5. As a Bavi-box user, I want an 已安装 tab, so that I can see local SkillHub skills separately from the online catalog.
+6. As a Bavi-box user, I want a 需配置 tab, so that I can find skills that need env, bins, config, or agent changes before use.
+7. As a Bavi-box user, I want category chips in Chinese, so that I can filter by purpose instead of reading every card.
+8. As a Bavi-box user, I want category filters to work even when upstream has partial metadata, so that browsing still feels useful.
+9. As a Bavi-box user, I want search results to be separate from the homepage recommendation state, so that clearing search returns me to the store homepage.
+10. As a Bavi-box user, I want duplicate skills from different recommendation queries to merge by exact `@owner/slug`, so that the page does not show repeated cards.
+11. As a Bavi-box user, I want same-slug different-owner skills to remain distinct, so that I do not inspect or install the wrong package.
+12. As a Bavi-box user, I want loading states per section, so that slow recommendation queries do not make the entire page look broken.
+13. As a Bavi-box user, I want partial failures to be visible but non-blocking, so that one failed keyword does not erase all homepage content.
+14. As a Bavi-box user, I want blocked or review-required skills marked clearly, so that installation risk is visible before clicking.
+15. As a Bavi-box user, I want empty states with retry and suggested keywords, so that “拉不到数据” has a next step.
+16. As a developer, I want implementation to stay on OpenClaw Gateway methods, so that Bavi-box does not fork the skill runtime.
 17. As a developer, I want the PRD to separate real backend ability from UI-derived grouping, so that future agents do not build fake category APIs.
 
 ## Implementation Decisions

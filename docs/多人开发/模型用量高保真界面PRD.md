@@ -28,21 +28,21 @@
 
 ## User Stories
 
-1. As a U-Claw user, I want to see account balance on the model page, so that I know whether I need to recharge before using paid models.
-2. As a U-Claw user, I want to see today's consumption, so that I can notice abnormal usage quickly.
-3. As a U-Claw user, I want to see 7-day consumption, so that I can understand recent cost trend.
-4. As a U-Claw user, I want to see estimated remaining days, so that I can plan recharge timing.
-5. As a U-Claw user, I want to see current text/image/video model cards, so that I know each capability is configured correctly.
-6. As a U-Claw user, I want to switch default text model from the model card, so that chat sessions use the chosen model.
-7. As a U-Claw user, I want to switch default image generation model, so that image tasks use the chosen model.
-8. As a U-Claw user, I want to switch default video generation model, so that video tasks use the adapter-backed model.
-9. As a U-Claw user, I want model status chips, so that I can tell whether a capability is normal, unconfigured, or routed through adapter.
-10. As a U-Claw user, I want a 14-day daily usage chart, so that spikes are visible without opening a separate analytics page.
-11. As a U-Claw user, I want a current chain status panel, so that I can see New API/direct/adapter connection state.
-12. As a U-Claw user, I want a usage ledger with time, session, model, input, output, cache, duration, and cost, so that I can audit specific consumption.
-13. As a U-Claw user, I want export for ledger data, so that I can keep or share usage records.
-14. As a U-Claw user, I want clear empty/error/loading states, so that I know whether data is unavailable, loading, or unconfigured.
-15. As a U-Claw user, I want the page to remain usable on small windows, so that desktop resizing does not break the UI.
+1. As a Bavi-box user, I want to see account balance on the model page, so that I know whether I need to recharge before using paid models.
+2. As a Bavi-box user, I want to see today's consumption, so that I can notice abnormal usage quickly.
+3. As a Bavi-box user, I want to see 7-day consumption, so that I can understand recent cost trend.
+4. As a Bavi-box user, I want to see estimated remaining days, so that I can plan recharge timing.
+5. As a Bavi-box user, I want to see current text/image/video model cards, so that I know each capability is configured correctly.
+6. As a Bavi-box user, I want to switch default text model from the model card, so that chat sessions use the chosen model.
+7. As a Bavi-box user, I want to switch default image generation model, so that image tasks use the chosen model.
+8. As a Bavi-box user, I want to switch default video generation model, so that video tasks use the adapter-backed model.
+9. As a Bavi-box user, I want model status chips, so that I can tell whether a capability is normal, unconfigured, or routed through adapter.
+10. As a Bavi-box user, I want a 14-day daily usage chart, so that spikes are visible without opening a separate analytics page.
+11. As a Bavi-box user, I want a current chain status panel, so that I can see New API/direct/adapter connection state.
+12. As a Bavi-box user, I want a usage ledger with time, session, model, input, output, cache, duration, and cost, so that I can audit specific consumption.
+13. As a Bavi-box user, I want export for ledger data, so that I can keep or share usage records.
+14. As a Bavi-box user, I want clear empty/error/loading states, so that I know whether data is unavailable, loading, or unconfigured.
+15. As a Bavi-box user, I want the page to remain usable on small windows, so that desktop resizing does not break the UI.
 
 ## Implementation Decisions
 
@@ -50,9 +50,9 @@
 - Use `u-claw-app-dev/scripts/patch-openclaw.js` as source of truth for deterministic Control UI changes; generated assets under `node_modules/openclaw/dist/control-ui` remain patch outputs.
 - Reuse OpenClaw `/usage` contracts instead of creating fake local stores: `usage.cost` for daily totals, `usage.status` for provider billing snapshot, existing usage session result for ledger rows.
 - Reuse `runtimeConfig` and existing model catalog/config mechanisms for reading and saving model defaults.
-- Create a U-Claw model dashboard route/entry by repurposing the visible “模型” navigation target. It may compose usage data and config data in one page, while keeping the original advanced config reachable through “模型管理”.
+- Create a Bavi-box model dashboard route/entry by repurposing the visible “模型” navigation target. It may compose usage data and config data in one page, while keeping the original advanced config reachable through “模型管理”.
 - Model capability cards map to three config paths: text uses `agents.defaults.model.primary`, image uses `agents.defaults.imageGenerationModel.primary` or `imageModel.primary`, video uses `agents.defaults.videoGenerationModel.primary`.
-- Balance card data source priority: provider billing snapshot from `usage.status`; optional U-Claw/New API billing adapter; fallback to local estimate unavailable state.
+- Balance card data source priority: provider billing snapshot from `usage.status`; optional Bavi-box/New API billing adapter; fallback to local estimate unavailable state.
 - Amount display must label unit exactly: `词元` for token balance, `¥` or `$` only when real currency source is verified, `本地估算` when derived from usage cost config.
 - The high-fidelity visual target includes: 48px titlebar, 72px rail, 70px content header, Ant-like light palette, 8px max card radius, dense cards, tabular numerals, bordered ledger table, modal model selector, responsive single-column layout below 860px.
 - Keep recharge and recharge-record actions disabled or routed to configured billing URL until real account API exists.
@@ -63,7 +63,7 @@
 ### Phase 0: Capability Matrix and Data Proof
 
 - Verify `usage.cost`, `usage.status`, and existing usage result payloads on a real running Gateway.
-- Document which fields are real for local usage, provider billing, and U-Claw/New API balance.
+- Document which fields are real for local usage, provider billing, and Bavi-box/New API balance.
 - Add/update capability matrix row for “模型用量工作台”: OpenClaw usage/config source, current status, validation command, risk.
 
 Acceptance:
@@ -86,7 +86,7 @@ Acceptance:
 ### Phase 2: Static High-Fidelity Layout Slice
 
 - Implement the visual layout matching the HTML reference: title/header alignment, summary cards, model cards, chart/status panels, ledger, modal.
-- Use existing Control UI theme tokens where possible, then append U-Claw-specific CSS only where needed.
+- Use existing Control UI theme tokens where possible, then append Bavi-box-specific CSS only where needed.
 - Ensure text does not overflow in long model names, provider names, and session labels.
 
 Acceptance:
@@ -122,7 +122,7 @@ Acceptance:
 
 ### Phase 5: Billing and Recharge Slice
 
-- If provider/U-Claw billing API exists, connect balance, recharge URL, and recharge records.
+- If provider/Bavi-box billing API exists, connect balance, recharge URL, and recharge records.
 - If absent, keep visual card but show “账单未接入” with disabled recharge actions.
 - Ensure no account secret, API key, or billing token appears in UI or exported ledger.
 

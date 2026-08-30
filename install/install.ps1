@@ -1,5 +1,5 @@
 # ============================================================
-# U-Claw Installer (Windows PowerShell)
+# Bavi-box Installer (Windows PowerShell)
 # Usage: irm https://u-claw.org/install.ps1 | iex
 #    or: powershell -ExecutionPolicy Bypass -File install.ps1
 # ============================================================
@@ -38,7 +38,7 @@ function Write-Red($msg) { Write-Host $msg -ForegroundColor Red }
 Clear-Host
 Write-Host ""
 Write-Cyan "  ==========================================="
-Write-Cyan "    U-Claw - AI Assistant Installer (Windows)"
+Write-Cyan "    Bavi-box - AI Assistant Installer (Windows)"
 Write-Cyan "  ==========================================="
 Write-Host ""
 
@@ -587,7 +587,7 @@ $startBat = @'
 @echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul 2>&1
-title U-Claw
+title Bavi-box
 
 set "DIR=%~dp0"
 set "NODE_BIN=%DIR%runtime\node-win-x64\node.exe"
@@ -623,10 +623,10 @@ Write-Green "  [OK] start.bat generated"
 $remoteBat = @'
 @echo off
 chcp 65001 >nul 2>&1
-title U-Claw Remote Help
+title Bavi-box Remote Help
 echo.
 echo   ==========================================
-echo   U-Claw Remote Help
+echo   Bavi-box Remote Help
 echo   ==========================================
 echo.
 echo   Connecting...
@@ -639,10 +639,10 @@ pause
 $uninstallBat = @'
 @echo off
 chcp 65001 >nul 2>&1
-title U-Claw Uninstall
+title Bavi-box Uninstall
 echo.
 echo   ==========================================
-echo   U-Claw Uninstall
+echo   Bavi-box Uninstall
 echo   ==========================================
 echo.
 echo   Will delete: %USERPROFILE%\.uclaw
@@ -702,7 +702,7 @@ $installSize = "{0:N0} MB" -f ((Get-ChildItem -Recurse $UCLAW_DIR -ErrorAction S
 
 Write-Host ""
 Write-Green "  ==========================================="
-Write-Green "    U-Claw installed successfully!"
+Write-Green "    Bavi-box installed successfully!"
 Write-Green "  ==========================================="
 Write-Host ""
 Write-Host "  Location: $UCLAW_DIR" -ForegroundColor White

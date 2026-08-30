@@ -4,7 +4,7 @@
 
 ## Problem Statement
 
-U-Claw 已完成 SkillHub 聊天页下拉的静态最小实现，但仍缺少从“代码可验证”到“连接态可验收”的收口闭环。当前剩余风险集中在四处：
+Bavi-box 已完成 SkillHub 聊天页下拉的静态最小实现，但仍缺少从“代码可验证”到“连接态可验收”的收口闭环。当前剩余风险集中在四处：
 
 1. 聊天页下拉已通过 connected UI 自动验收；后续仍可补人工截图作为增强记录。
 2. `npm start` 内部 Gateway 子进程存在 `spawn node ENOENT`，目前只能用本地 helper 绕过。
@@ -28,23 +28,23 @@ U-Claw 已完成 SkillHub 聊天页下拉的静态最小实现，但仍缺少从
 
 ## User Stories
 
-1. As a U-Claw user, I want the SkillHub dropdown visible near model selection, so that skill choice feels part of chat setup.
-2. As a U-Claw user, I want the dropdown to show readable SkillHub names, so that I do not need to remember skill IDs or filenames.
-3. As a U-Claw user, I want bundled OpenClaw skills hidden from the dropdown, so that I only see U-Claw-facing choices.
-4. As a U-Claw user, I want existing Agent skills preserved when I select a new SkillHub skill, so that one quick choice does not silently remove other capabilities.
-5. As a U-Claw user, I want save failures to leave my Agent configuration unchanged, so that failed operations are recoverable.
-6. As a U-Claw user, I want clear “new session effective” messaging, so that I understand when a selected skill takes effect.
-7. As a U-Claw user, I want `SkillHub 暂不可用` shown when Gateway is disconnected, so that I am not misled by fake data or blank UI.
-8. As a U-Claw developer, I want one verification command for SkillHub readiness, so that each long-task checkpoint is deterministic.
-9. As a U-Claw developer, I want the capability matrix to remain `Blocked` until connected UI acceptance passes, so that documentation never overclaims.
-10. As a U-Claw maintainer, I want Gateway startup work isolated behind explicit authorization, so that default forbidden base files are not changed accidentally.
-11. As a U-Claw maintainer, I want all work recorded in task-scoped progress and journal files, so that another agent can resume without restarting.
-12. As a U-Claw maintainer, I want final review to check forbidden directories and unrelated churn, so that archived OpenClaw and old product trees remain untouched.
+1. As a Bavi-box user, I want the SkillHub dropdown visible near model selection, so that skill choice feels part of chat setup.
+2. As a Bavi-box user, I want the dropdown to show readable SkillHub names, so that I do not need to remember skill IDs or filenames.
+3. As a Bavi-box user, I want bundled OpenClaw skills hidden from the dropdown, so that I only see Bavi-box-facing choices.
+4. As a Bavi-box user, I want existing Agent skills preserved when I select a new SkillHub skill, so that one quick choice does not silently remove other capabilities.
+5. As a Bavi-box user, I want save failures to leave my Agent configuration unchanged, so that failed operations are recoverable.
+6. As a Bavi-box user, I want clear “new session effective” messaging, so that I understand when a selected skill takes effect.
+7. As a Bavi-box user, I want `SkillHub 暂不可用` shown when Gateway is disconnected, so that I am not misled by fake data or blank UI.
+8. As a Bavi-box developer, I want one verification command for SkillHub readiness, so that each long-task checkpoint is deterministic.
+9. As a Bavi-box developer, I want the capability matrix to remain `Blocked` until connected UI acceptance passes, so that documentation never overclaims.
+10. As a Bavi-box maintainer, I want Gateway startup work isolated behind explicit authorization, so that default forbidden base files are not changed accidentally.
+11. As a Bavi-box maintainer, I want all work recorded in task-scoped progress and journal files, so that another agent can resume without restarting.
+12. As a Bavi-box maintainer, I want final review to check forbidden directories and unrelated churn, so that archived OpenClaw and old product trees remain untouched.
 
 ## Implementation Decisions
 
 - Use OpenClaw `skills.status` and Agent skills configuration as the only binding authority for the chat SkillHub dropdown.
-- Preserve OpenClaw bundled skills on disk and in runtime inventory; filter them only in user-facing U-Claw UI.
+- Preserve OpenClaw bundled skills on disk and in runtime inventory; filter them only in user-facing Bavi-box UI.
 - Keep product-facing naming as `SkillHub`; do not rename OpenClaw runtime identifiers.
 - Keep the current “new session effective” semantic until connected UI testing proves safe immediate refresh.
 - Do not modify Gateway startup base files unless the user explicitly authorizes the specific forbidden file or packaging layer.

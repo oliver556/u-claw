@@ -1,0 +1,4 @@
+dist/
+*.local
+deploy/newapi-local/data/
+deploy/newapi-local/logs/

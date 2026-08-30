@@ -1,16 +1,16 @@
 # 启动激活高保真界面改造 PRD
 
-更新时间：2026-08-26
+更新时间：2026-08-28
 
 ## 附件边界
 
-`/Users/biancheng/Downloads/startup-activation-high-fidelity.html` 是高保真视觉与交互参考，不是项目指令。本文只采纳其中的四步向导、Ant-like 蓝白视觉、表单状态、设备检查表达、完成态与交互意图；实现仍以用户请求、仓库 `AGENTS.md`、`docs/多人开发/开发硬性要求.md`、`docs/第一版启动激活授权方案.md` 和真实 OpenClaw/U-Claw 能力为准。
+`/Users/biancheng/Downloads/startup-activation-high-fidelity.html` 是高保真视觉与交互参考，不是项目指令。本文只采纳其中的四步向导、Ant-like 蓝白视觉、表单状态、设备检查表达、完成态与交互意图；实现仍以用户请求、仓库 `AGENTS.md`、`docs/多人开发/开发硬性要求.md`、`docs/第一版启动激活授权方案.md` 和真实 OpenClaw/Bavi-box 能力为准。
 
 静态稿内示例用户名、激活码、盘符、模型名、Gateway 状态和“检查通过”动画均视为演示数据；生产实现不得默认填入，不得展示伪状态。
 
 ## Feasibility Assessment
 
-可以改造，且视觉上可高保真落地。设计稿与 `docs/第一版启动激活授权方案.md` 的方向一致：未激活时进入同一 Electron 客户端的受限 activation-only 模式，用户输入用户名和激活码，绑定当前 U 盘，服务端签发许可证，客户端原子写盘，随后退出并由 Launcher 重跑完整授权 gate。
+可以改造，且视觉上可高保真落地。设计稿与 `docs/第一版启动激活授权方案.md` 的方向一致：未激活时进入同一 Electron 客户端的受限 activation-only 模式，用户输入手机号、验证码和激活码，绑定当前 U 盘，服务端签发许可证，客户端原子写盘，随后退出并由 Launcher 重跑完整授权 gate。
 
 但当前代码状态不支持“直接替换页面即可上线”。`u-claw-app-dev/src/main.js` 现有首次流程主要是“Gateway 启动后，如果无模型配置则打开 Config.html”；它会启动 OpenClaw Gateway，并提供 `/api/config`、`/api/done` 等模型配置能力。正式激活页要求在授权 gate 前运行，未激活时不得启动 OpenClaw、不得加载普通工作台、不得开放普通 IPC。因此本次改造是启动授权流程开发，不是单纯 HTML/CSS 换肤。
 
@@ -20,33 +20,149 @@
 2. 在 `u-claw-app-dev` 内新增 activation-only 受限页面与 main process mode。
 3. 由 Launcher 判断 `ACTIVATION_REQUIRED` 后启动该受限模式。
 4. 通过明确 IPC/API 契约接入 USB preflight、`POST /v1/activations`、原子写盘与 commit。
-5. 激活成功后关闭受限窗口，让 Launcher 重新执行完整 gate，再进入正常 U-Claw。
+5. 激活成功后关闭受限窗口，让 Launcher 重新执行完整 gate，再进入正常 Bavi-box。
 
 ## Problem Statement
 
-当前 U-Claw 首次启动体验仍偏“模型配置页/运行后配置”，不能清晰承载第一版商业授权流程。未激活用户需要一个可信、简洁、可解释的启动激活界面，明确告知使用边界，检查当前电脑与 U 盘，输入销售交付的用户名和激活码，并在成功后把当前 U 盘安全绑定到许可证。
+当前 Bavi-box 首次启动体验仍偏“模型配置页/运行后配置”，不能清晰承载第一版商业授权流程。未激活用户需要一个可信、简洁、可解释的启动激活界面，明确告知使用边界，检查当前电脑与 U 盘，输入真实手机号、验证码和激活码，并在成功后把当前 U 盘安全绑定到许可证。
 
 ## Solution
 
-将高保真设计稿转化为 U-Claw 正式首次激活流程：在 Launcher 授权 gate 前新增受限 activation-only 模式，页面采用四步向导：使用须知、设备检查、激活与配置、完成。UI 负责展示与收集，Launcher/Desktop 负责 USB 身份、写盘与 gate，Go 激活授权服务器负责激活码库存、绑定、许可证签发、状态和审计。现有 Config.html 继续承担模型高级配置，不与激活职责混淆。
+将高保真设计稿转化为 Bavi-box 正式首次激活流程：在 Launcher 授权 gate 前新增受限 activation-only 模式，页面采用四步向导：使用须知、设备检查、激活与配置、完成。UI 负责展示与收集，Launcher/Desktop 负责 USB 身份、写盘与 gate，Go 激活授权服务器负责激活码库存、绑定、许可证签发、状态和审计。现有 Config.html 继续承担模型高级配置，不与激活职责混淆。
+
+## Project Placement
+
+当前仓库根目录固定为：
+
+```txt
+/Users/biancheng/Documents/ChatGPT/Bavi-box
+```
+
+正式开发只放在：
+
+```txt
+/Users/biancheng/Documents/ChatGPT/Bavi-box/u-claw-app-dev
+```
+
+归档目录只读，不得修改：
+
+```txt
+/Users/biancheng/Documents/ChatGPT/Bavi-box/u-claw-app
+/Users/biancheng/Documents/ChatGPT/Bavi-box/product
+```
+
+放置规则：
+
+- PRD、能力矩阵、开发说明放在 `docs/多人开发/`。
+- Electron 启动壳、activation-only、窗口逻辑放在 `u-claw-app-dev/src/main.js`。
+- Renderer 安全暴露放在 `u-claw-app-dev/src/preload.js`。
+- 激活页静态 UI 放在 `u-claw-app-dev/src/activation.html`。
+- OpenClaw 主界面改造通过 `u-claw-app-dev/scripts/patch-openclaw.js` 落地，不直接手改 `node_modules/openclaw/dist/control-ui` 产物。
+- 验证脚本放在 `u-claw-app-dev/scripts/verify-*.js`。
+- 本地构建产物输出到 `u-claw-app-dev/release/`。
+- 最终交付给用户的便携目录放在 U 盘根目录下的 `Bavi-box/`，由 release/package 产物复制生成，不在 U 盘上直接开发。
+
+推荐目录形态：
+
+```txt
+Bavi-box/
+├── docs/多人开发/                  # PRD、能力矩阵、开发说明
+├── u-claw-app/                     # 归档，只读
+├── product/                        # 旧工程，只读
+└── u-claw-app-dev/                 # 唯一正式开发目录
+    ├── src/                        # Electron 壳、激活页、preload
+    ├── scripts/                    # patch、verify、打包脚本
+    ├── resources/                  # 默认配置、runtime 资源
+    └── release/                    # 构建输出
+```
+
+## Packaging and Deployment Strategy
+
+本项目需要把“客户端打包”和“授权服务器部署”拆开处理。1 核 1G 阿里云服务器只承载激活授权服务，不承担 Electron/OpenClaw 客户端构建，不运行 OpenClaw Gateway，不存放开发源码。
+
+### Client Packaging
+
+客户端包在开发机或 CI 上构建，原因是 Electron、OpenClaw、Node runtime 和跨平台产物体积大，构建时 CPU、内存、磁盘 IO 都明显超过 1 核 1G 服务器的合理承载范围。
+
+推荐流程：
+
+1. 在 `u-claw-app-dev` 内执行 `npm run prepare-build`，确保 OpenClaw UI patch、lib sync、默认配置同步完成。
+2. 按平台执行 `npm run build:mac-arm64`、`npm run build:mac-x64`、`npm run build:win`，或执行便携版打包脚本 `npm run package:portable:customer`。
+3. 构建产物只从 `u-claw-app-dev/release/` 取。
+4. 发布时上传到 GitHub Releases、阿里云 OSS/CDN 或内部对象存储；1 核 1G 授权服务器只返回版本/下载元数据，不直接承担大文件分发压力。
+5. 客户端便携启动脚本默认注入生产激活 endpoint `https://license.yiyong.me`，并设置生产严格云端激活；测试 endpoint 只能在显式 dev mode 下覆盖。
+
+### Activation Server Deployment
+
+1 核 1G 阿里云服务器适合部署轻量授权服务：
+
+- 提供 `POST /v1/activations`、`POST /v1/activations/{activationId}/commit`、license/status 查询和健康检查。
+- 保存激活码库存、USB 绑定关系、license 签发记录、commit 状态和审计日志。
+- 签发 license 与 startup credential，不处理 Electron 包构建、OpenClaw runtime、模型代理或大文件下载。
+
+推荐形态：
+
+- Server runtime：Go 单二进制优先；Node 也可，但必须避免构建步骤留在服务器上。
+- Process manager：`systemd` 管理进程，失败自动重启。
+- TLS/reverse proxy：Caddy 或 Nginx 终止 HTTPS。
+- Storage：低并发首版可用 SQLite WAL + 每日备份；若激活量增长，再迁移到 RDS MySQL/PostgreSQL。
+- Secrets：签名私钥、数据库路径、管理员 token 只放服务器 env 或受限配置文件，不进 repo，不进入客户端包。
+- Backup：数据库、签名公私钥、激活码库存导入记录必须定时备份到 OSS 或异地目录。
+- Logs：只记录 public error code、activationId、短 USB 摘要、版本与时间；不得记录激活码明文、完整 USB fingerprint、license secret、token、signature 或 raw server response。
+- New API admin token 自愈：Cloud API 服务端保存受限 `NEWAPI_ADMIN_USERNAME/PASSWORD`；遇到 New API admin 请求 `401` 时，先登录刷新内存 token，再重试原请求一次。刷新凭据只放服务器 env，不写入 repo、客户端包或日志。
+
+### Current Server Inventory
+
+当前开发和联调使用三台 VPS。以下为可提交的连接定位信息；SSH 密码、New API admin token、短信密钥、license 签名私钥不得写入 Git 文档、代码、`.env.example`、脚本或日志。
+
+| 节点 | 角色 | SSH 定位 | 用途 |
+| --- | --- | --- | --- |
+| `121.41.89.103` | 阿里云激活服务 VPS | `root@121.41.89.103:22` | 部署 Bavi-box Cloud API，承载激活、账号、短信、订单、回调编排 |
+| `64.90.19.251` | New API 前置 VPS | `root@64.90.19.251:24851` | 承载 New API / sub2apii 前置反代、TLS、IP allowlist |
+| `158.51.110.49` | New API / sub2apii 本体 VPS | `root@158.51.110.49:14851` | 承载 New API 本体与 sub2apii，维护模型账号、token、quota |
+
+密钥处理：
+
+- 临时密码只通过安全通道交付，不落 repo。
+- 上线前改为 SSH key + deploy 用户；root 密码登录仅作应急通道。
+- New API admin 管理路径只允许阿里云激活服务来源访问。
+- 后续真实 New API endpoint、admin token、阿里云短信签名和模板信息到位后，只写入服务器受限 env 或部署密钥库。
+
+推荐交付包：
+
+```txt
+activation-server/
+├── uclaw-activation-server        # Go single binary
+├── migrations/                    # DB schema migrations
+├── config.example.env             # 无密钥模板
+├── systemd/uclaw-activation.service
+└── README.md                      # 部署、备份、回滚命令
+```
+
+1 核 1G 约束：
+
+- 不在服务器上执行 Electron build、`npm install`、`electron-builder` 或 OpenClaw patch。
+- 不运行多服务 Docker Compose。若使用 Docker，只允许单容器 + 外置持久目录，并保留 systemd/裸二进制备用方案。
+- 不把下载大包直接挂在 API 服务进程上；大文件走 OSS/CDN。
+- 健康检查与日志轮转必须轻量，避免磁盘被日志打满。
 
 ## User Stories
 
-1. As a new U-Claw user, I want to see a clear first-start screen, so that I know I am activating the product before entering the workspace.
-2. As a new U-Claw user, I want to read concise usage notices, so that I understand AI output, file operations, command execution, and privacy boundaries.
-3. As a new U-Claw user, I want the continue button disabled until I acknowledge the notice, so that I do not skip important startup information accidentally.
-4. As a new U-Claw user, I want U-Claw to check my operating system and architecture, so that I know whether this computer can run the portable app.
-5. As a new U-Claw user, I want U-Claw to confirm this is a valid product USB drive, so that I know activation will bind the right device.
-6. As a new U-Claw user, I want to see only a short USB identity summary, so that support can identify the device without exposing full hardware identifiers.
-7. As a new U-Claw user, I want to enter my activation username, so that the license can be matched with my purchase record.
-8. As a new U-Claw user, I want to paste my activation code and have it formatted automatically, so that typing errors are reduced.
-9. As a new U-Claw user, I want local validation before submit, so that obvious format mistakes are caught quickly.
-10. As a new U-Claw user, I want clear loading state while activation is running, so that I do not click repeatedly.
-11. As a new U-Claw user, I want a helpful message if username or activation code is wrong, so that I can retry without seeing internal errors.
-12. As a new U-Claw user, I want to be told if the activation code is already bound to another USB drive, so that I know to contact support.
-13. As a new U-Claw user, I want retry guidance when the activation service is unavailable, so that a temporary network issue does not look like product failure.
-14. As a new U-Claw user, I want activation success to show that authorization was written and verified, so that I trust the product is ready.
-15. As a returning U-Claw user, I want activated drives to skip activation and open the normal workspace, so that startup stays fast.
+1. As a new Bavi-box user, I want to see a clear first-start screen, so that I know I am activating the product before entering the workspace.
+2. As a new Bavi-box user, I want to read concise usage notices, so that I understand AI output, file operations, command execution, and privacy boundaries.
+3. As a new Bavi-box user, I want the continue button disabled until I acknowledge the notice, so that I do not skip important startup information accidentally.
+4. As a new Bavi-box user, I want Bavi-box to check my operating system and architecture, so that I know whether this computer can run the portable app.
+5. As a new Bavi-box user, I want Bavi-box to confirm this is a valid product USB drive, so that I know activation will bind the right device.
+6. As a new Bavi-box user, I want to see only a short USB identity summary, so that support can identify the device without exposing full hardware identifiers.
+7. As a new Bavi-box user, I want to enter my activation username, so that the license can be matched with my purchase record.
+8. As a new Bavi-box user, I want to paste my activation code and have it formatted automatically, so that typing errors are reduced.
+9. As a new Bavi-box user, I want local validation before submit, so that obvious format mistakes are caught quickly.
+10. As a new Bavi-box user, I want clear loading state while activation is running, so that I do not click repeatedly.
+11. As a new Bavi-box user, I want a helpful message if username or activation code is wrong, so that I can retry without seeing internal errors.
+12. As a new Bavi-box user, I want to be told if the activation code is already bound to another USB drive, so that I know to contact support.
+13. As a new Bavi-box user, I want retry guidance when the activation service is unavailable, so that a temporary network issue does not look like product failure.
+14. As a new Bavi-box user, I want activation success to show that authorization was written and verified, so that I trust the product is ready.
+15. As a returning Bavi-box user, I want activated drives to skip activation and open the normal workspace, so that startup stays fast.
 16. As a support operator, I want errors to be stable and non-secret-bearing, so that screenshots can be used for support without leaking activation codes, tokens, signatures, or full USB fingerprints.
 17. As a developer, I want activation-only mode to expose only activation IPC, so that unfinished or unauthorized users cannot reach normal OpenClaw capabilities.
 18. As a release owner, I want Mac/Windows packaging validation, so that activation does not break portable startup, data sync, or P0 chat capability.
@@ -61,11 +177,13 @@
 - Launcher owns preflight state: USB identity, product USB detection, writable data path, runtime manifest, authorization material classification, and activation-required decision.
 - Renderer receives only sanitized preflight data: OS/arch status, USB short summary, writable path status, and user-facing error codes. Full USB descriptor, full fingerprint, secret, token, signature, and raw server response never enter renderer.
 - Activation form fields are empty in production. Username is normalized to uppercase. Activation code supports paste, uppercasing, grouping, and bounded length.
+- Current acceptance version uses real phone number + fixed verification code `123456` while Aliyun SMS delivery is blocked. This must remain an explicit server config (`SMS_PROVIDER=fixed`) and be replaced by Aliyun SMS after approval.
 - Activation submit calls `POST /v1/activations` using the OpenAPI contract from the activation server. Production endpoint must be HTTPS; localhost/test endpoint requires explicit dev mode.
 - Successful activation response is handed to a privileged write helper. Renderer never writes license files directly.
 - Write helper atomically writes `.uclaw/license/.startup-credential.json`, `.uclaw/license/license.json`, and `.uclaw/builtin-model-credential.v1.json`, then reads back and verifies.
 - Client calls `POST /v1/activations/{activationId}/commit` only after all key files are written and verified.
-- After success, Electron activation-only window exits. Launcher restarts from `START` and performs full local/online gate before opening normal U-Claw.
+- After success, the activation window stays in the same Electron process, creates a normal Bavi-box window, starts Config server / Video adapter / OpenClaw Gateway, and opens the normal workspace. Legacy launcher exit code `20` remains only for old-package compatibility.
+- Portable sync must include activated `.openclaw/openclaw.json`, `.openclaw/license/license.json`, `.openclaw/builtin-model-credential.v1.json`, and `.openclaw/uclaw-activation.json` so another computer can skip first activation.
 - Existing Config.html remains available after normal startup for model/provider configuration. Activation page may show model service status only when backed by real activation/New API status.
 - The “Gateway 与模型连接” item in the static design should be renamed or re-scoped in production to “Gateway 启动条件 / 内嵌模型服务状态”; it must not start Gateway before authorization.
 - Use Ant-like light tokens from the design: blue primary, green success, orange warning, red error, dense cards, max 8px inner card radius, responsive one-column layout below narrow widths.
@@ -100,7 +218,7 @@ Acceptance:
 ### Phase 2: Electron Restricted Mode and IPC
 
 - Add activation-only main process mode.
-- Register a minimal IPC allowlist: get preflight, run/retry preflight, submit activation, write-and-verify, commit result, close/restart.
+- Register a minimal IPC allowlist: get preflight, run/retry preflight, submit activation, write-and-verify, commit result, launch main workspace.
 - Disable or avoid normal IPC: `open-config`, dashboard load, Gateway startup, OpenClaw token, model config server, and arbitrary file access.
 - Add fixed user-facing error mapping.
 
@@ -205,3 +323,11 @@ Acceptance:
 - All visible text fits at 900px desktop and narrow viewport.
 - Activation-only mode cannot reach normal dashboard, Config.html, Gateway token, user workspace, or OpenClaw control routes.
 
+## Current Status
+
+- Cloud API staging 已通过 `license.yiyong.me` 公网首启激活和 commit 验收。
+- Electron activation-only 页面已改为当前验收流程：真实手机号 + 固定验证码 `123456` + 激活码；阿里云短信审核完成后替换固定码 provider。
+- 客户端已完成真实写盘闭环：`POST /v1/activations`、原子写入授权材料、写入 OpenClaw New API config、读回验证、`POST /v1/activations/{activationId}/commit`。
+- 便携 Launcher 已定稿生产 endpoint 注入、授权后 `openclaw.json` 回写 U 盘同步规则；首启完成后客户端改为同进程进入主界面，退出码 20 仅保留旧包兼容。
+- 阿里云短信接口仍保留，当前运营商回执为 `PORT_NOT_REGISTERED`，待审核完成后复验；该问题不阻塞首启激活。
+- 支付和充值 UI 暂缓，不作为当前验收阻塞项。

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/readme/hero.svg" alt="U-Claw：随身携带的 AI 工作空间" width="100%" />
+  <img src="assets/readme/hero.svg" alt="Bavi-box：随身携带的 AI 工作空间" width="100%" />
 </p>
 
-<h1 align="center">U-Claw（虾盘）</h1>
+<h1 align="center">Bavi-box（虾盘）</h1>
 
 <p align="center"><strong>把 AI 工作空间装进 U 盘：插上任意电脑，配置、记忆和工具都跟着走。</strong></p>
 
@@ -40,7 +40,7 @@
 >
 > **免费下载：[www.u-king.org](https://www.u-king.org)**（国内镜像 [cloud.u-claw.org/uking](https://cloud.u-claw.org/uking/)）
 >
-> *U-Claw 让 AI 住进 U 盘；U-King 帮你把全套 AI 编程神器装进电脑。*
+> *Bavi-box 让 AI 住进 U 盘；U-King 帮你把全套 AI 编程神器装进电脑。*
 > *EN: U-King — one-click installer for Claude Code / Codex / OpenClaw, with one API key for 24+ global models → [u-king.org](https://www.u-king.org)*
 
 ---
@@ -51,7 +51,7 @@
 
 ### 这是什么
 
-U-Claw（虾盘）是一个**制作教程 + 全套源代码**，教你把 [OpenClaw](https://github.com/openclaw/openclaw)（开源 AI 助手框架）做成 U 盘——插上任意电脑，双击就能用 AI。为什么叫虾盘？U-Claw = USB + Claw（虾钳），U 盘 + AI = 虾盘。
+Bavi-box（虾盘）是一个**制作教程 + 全套源代码**，教你把 [OpenClaw](https://github.com/openclaw/openclaw)（开源 AI 助手框架）做成 U 盘——插上任意电脑，双击就能用 AI。为什么叫虾盘？Bavi-box = USB + Claw（虾钳），U 盘 + AI = 虾盘。
 
 代码库本身就是 U 盘的文件骨架，运行 `setup.sh` 补齐大依赖后，整个 `portable/` 目录直接拷贝到 U 盘即可。
 
@@ -59,7 +59,7 @@ U-Claw（虾盘）是一个**制作教程 + 全套源代码**，教你把 [OpenC
 
 ### 🧩 模型随便选：国内外大模型都能用
 
-U-Claw 是纯开源工具，**不绑定设备、不打指纹、不上传任何数据**。首次启动会自动打开 Config 页面，选一个模型、填入自己的 API Key 即可一键启动：
+Bavi-box 是纯开源工具，**不绑定设备、不打指纹、不上传任何数据**。首次启动会自动打开 Config 页面，选一个模型、填入自己的 API Key 即可一键启动：
 
 - **虾盘云（首选 · 中转站）**：一个 Key 调用 DeepSeek / Claude / GPT / 通义 等国内外全部大模型，无需翻墙。注册并充值：[u-claw.org/cloud.html](https://u-claw.org/cloud.html)
 - **各家官方 Key 也行**：DeepSeek、通义千问、Kimi、智谱 GLM、豆包、MiniMax（国内）/ OpenAI、Claude、Groq（国外）/ 硅基流动、任意 OpenAI 兼容地址（自定义）
@@ -91,7 +91,7 @@ git clone https://github.com/dongsheng123132/u-claw.git
 cd u-claw/portable && bash setup.sh
 
 # 3. 拷贝到 U 盘
-cp -R portable/ /Volumes/你的U盘/U-Claw/   # Mac
+cp -R portable/ /Volumes/你的U盘/Bavi-box/   # Mac
 # 或 Windows 资源管理器直接拖过去
 ```
 
@@ -109,7 +109,7 @@ cp -R portable/ /Volumes/你的U盘/U-Claw/   # Mac
 ### U 盘文件结构
 
 ```
-U-Claw/                          ← 整个拷到 U 盘
+Bavi-box/                          ← 整个拷到 U 盘
 ├── Mac-Start.command             Mac 免安装运行
 ├── Mac-Menu.command              Mac 功能菜单
 ├── Mac-Install.command           安装到 Mac
@@ -139,7 +139,7 @@ U-Claw/                          ← 整个拷到 U 盘
 
 基于 Ventoy + Ubuntu 24.04 LTS + 持久化存储，在 Windows 上运行 4 步 PowerShell 脚本即可制作。详见 [`bootable/README.md`](bootable/README.md)。
 
-> **关于桌面安装版（Electron）**：`u-claw-app/` 的 Electron 桌面版（`.exe` 安装版 / 绿色版 / `.dmg`）**已于 2026-06-19 停止发布并归档**，原因见 [`u-claw-app/DEPRECATED.md`](u-claw-app/DEPRECATED.md)。U-Claw 现在只发布「便携 U 盘版」——这才是产品的本质：插上 U 盘、解压即用。
+> **关于桌面安装版（Electron）**：`u-claw-app/` 的 Electron 桌面版（`.exe` 安装版 / 绿色版 / `.dmg`）**已于 2026-06-19 停止发布并归档**，原因见 [`u-claw-app/DEPRECATED.md`](u-claw-app/DEPRECATED.md)。Bavi-box 现在只发布「便携 U 盘版」——这才是产品的本质：插上 U 盘、解压即用。
 
 ### 直接下载发行版
 
@@ -207,7 +207,7 @@ bash Mac-Start.command   # Mac 测试
 
 ### 🦞 寻找技术伙伴
 
-U-Claw 是一个快速成长的开源项目，目前已有不少商业合作机会。
+Bavi-box 是一个快速成长的开源项目，目前已有不少商业合作机会。
 
 我们正在寻找：
 - **技术伙伴** — 全栈 / Node.js / Electron / 脚本自动化
@@ -269,7 +269,7 @@ bash setup.sh
 **Q: 从 Ubuntu 向 U 盘复制时符号链接丢失？**
 `node_modules/.bin/` 下有大量符号链接，FAT32/exFAT 在直接 `cp -R` 时会跳过。用 `rsync -aL` 可将符号链接展开为真实文件：
 ```bash
-rsync -aL --progress portable/ /media/YOUR_USB/U-Claw/
+rsync -aL --progress portable/ /media/YOUR_USB/Bavi-box/
 ```
 
 **Q: QQbot 报错 `Unknown channel: qqbot`？**
@@ -310,7 +310,7 @@ npm install && npm run build
 
 ### What is this
 
-U-Claw (aka "虾盘" / "Xia Pan" in Chinese, meaning "Claw Drive") is a **tutorial + complete source code** for building an [OpenClaw](https://github.com/openclaw/openclaw) (open-source AI assistant framework) USB drive — plug it into any computer, double-click, and start using AI.
+Bavi-box (aka "虾盘" / "Xia Pan" in Chinese, meaning "Claw Drive") is a **tutorial + complete source code** for building an [OpenClaw](https://github.com/openclaw/openclaw) (open-source AI assistant framework) USB drive — plug it into any computer, double-click, and start using AI.
 
 The codebase itself is the USB file skeleton. Run `setup.sh` to download large dependencies, then copy the entire `portable/` directory to a USB drive.
 
@@ -342,7 +342,7 @@ git clone https://github.com/dongsheng123132/u-claw.git
 cd u-claw/portable && bash setup.sh
 
 # 3. Copy to USB drive
-cp -R portable/ /Volumes/YOUR_USB/U-Claw/   # Mac
+cp -R portable/ /Volumes/YOUR_USB/Bavi-box/   # Mac
 # Or drag & drop on Windows
 ```
 
@@ -360,7 +360,7 @@ cp -R portable/ /Volumes/YOUR_USB/U-Claw/   # Mac
 ### File Structure
 
 ```
-U-Claw/                          ← Copy entire folder to USB
+Bavi-box/                          ← Copy entire folder to USB
 ├── Mac-Start.command             Mac launcher
 ├── Mac-Menu.command              Mac menu
 ├── Mac-Install.command           Install to Mac
@@ -390,7 +390,7 @@ No operating system? No problem. Boot any computer from USB into Ubuntu + AI:
 
 Based on Ventoy + Ubuntu 24.04 LTS + persistence. 4-step PowerShell scripts on Windows. See [`bootable/README.md`](bootable/README.md) for details.
 
-> **About the Electron desktop app**: `u-claw-app/` (the `.exe` installer / portable / `.dmg` builds) was **deprecated and is no longer published as of 2026-06-19** — see [`u-claw-app/DEPRECATED.md`](u-claw-app/DEPRECATED.md). U-Claw now ships only the portable USB build, which is the product's essence: plug in the USB and run.
+> **About the Electron desktop app**: `u-claw-app/` (the `.exe` installer / portable / `.dmg` builds) was **deprecated and is no longer published as of 2026-06-19** — see [`u-claw-app/DEPRECATED.md`](u-claw-app/DEPRECATED.md). Bavi-box now ships only the portable USB build, which is the product's essence: plug in the USB and run.
 
 ### Supported AI Models
 
@@ -469,13 +469,13 @@ curl -fsSL https://u-claw.org/remote.sh | bash
 irm https://u-claw.org/remote.ps1 | iex
 ```
 
-WeChat: **hecare888** (备注「U-Claw 远程」优先处理)
+WeChat: **hecare888** (备注「Bavi-box 远程」优先处理)
 
 👉 [View full service details / 查看完整服务详情](https://u-claw.org/guide.html#remote-support)
 
 ### 🦞 Looking for Partners
 
-U-Claw is a fast-growing open-source project with real commercial opportunities.
+Bavi-box is a fast-growing open-source project with real commercial opportunities.
 
 We're looking for:
 - **Technical partners** — Full-stack / Node.js / Electron / scripting
@@ -537,7 +537,7 @@ Two possibilities: ① The USB drive has a physical write-protect switch on the 
 **Q: Symlinks missing when copying from Ubuntu to USB?**
 `node_modules/.bin/` contains many symlinks that get skipped during direct `cp -R`. Use `rsync -aL` to expand symlinks into real files:
 ```bash
-rsync -aL --progress portable/ /media/YOUR_USB/U-Claw/
+rsync -aL --progress portable/ /media/YOUR_USB/Bavi-box/
 ```
 
 **Q: QQbot error: `Unknown channel: qqbot`?**
@@ -561,7 +561,7 @@ This is fixed in the latest [Release](https://github.com/dongsheng123132/u-claw/
 
 **🤝 Reseller / Affiliate Program**
 
-U-Claw 3.0 delivers excellent user experience with very low return rates. We handle all after-sales support — you focus on selling:
+Bavi-box 3.0 delivers excellent user experience with very low return rates. We handle all after-sales support — you focus on selling:
 
 - **Live commerce / TikTok shop**: Top commission rates, proven conversion in live streams
 - **Reseller / distribution**: Revenue share or wholesale, custom branded versions available

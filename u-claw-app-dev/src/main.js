@@ -5,6 +5,7 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const { createVideoAdapterServer } = require('./video-adapter');
+const { mergeModelCatalogIntoConfig } = require('./model-catalog');
 
 // ── Constants ──
 const APP_NAME = 'U-Claw';
@@ -16,6 +17,7 @@ const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://api.yiyong.me/v1';
 const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'jimeng-video-3-720p';
 const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
 const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
+const UCLAW_ACTIVATION_ENDPOINT = (process.env.UCLAW_ACTIVATION_ENDPOINT || '').trim().replace(/\/+$/, '');
 const UCLAW_PORTABLE_DATA_DIR = process.env.UCLAW_PORTABLE_DATA_DIR?.trim() || '';
 const UCLAW_PORTABLE_WORK_DATA_DIR = process.env.UCLAW_PORTABLE_WORK_DATA_DIR?.trim() || '';
 const UCLAW_USB_DATA_DIR = (process.env.UCLAW_USB_DATA_DIR?.trim() || UCLAW_PORTABLE_DATA_DIR);
@@ -41,6 +43,7 @@ const ACTIVATION_ONLY_ARG = '--activation-only';
 const isActivationOnlyMode = process.argv.includes(ACTIVATION_ONLY_ARG)
   || process.env.UCLAW_ACTIVATION_ONLY === '1';
 const ACTIVATION_STATIC_PREVIEW_COMPLETE = 'ACTIVATION_STATIC_PREVIEW_COMPLETE';
+const UCLAW_ACTIVATION_REQUIRE_CLOUD = process.env.UCLAW_ACTIVATION_REQUIRE_CLOUD === '1';
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
 // room so we never hard-fail with a scary dialog before the engine is up. The
@@ -173,6 +176,10 @@ const syncStateDir = path.join(userDataPath, '.uclaw-sync');
 const dirtyMarkerPath = path.join(syncStateDir, 'dirty.json');
 const lastSyncPath = path.join(syncStateDir, 'last-sync.json');
 const uiStatePath = path.join(configDir, 'uclaw-ui-state.json');
+const activationStatePath = path.join(configDir, 'uclaw-activation.json');
+const activationLicensePath = path.join(configDir, 'license', 'license.json');
+const builtinModelCredentialPath = path.join(configDir, 'builtin-model-credential.v1.json');
+const updateCredentialPath = path.join(configDir, 'update-credential.v1.json');
 const logsDir = path.join(userDataPath, 'logs');
 const portableInstallRoot = UCLAW_USB_DATA_DIR ? path.resolve(UCLAW_USB_DATA_DIR, '..') : (portablePath ? path.dirname(userDataPath) : null);
 
@@ -218,6 +225,7 @@ function getElectronProfilePath() {
 }
 
 const electronProfilePath = getElectronProfilePath();
+
 try {
   fs.mkdirSync(userDataPath, { recursive: true });
   fs.mkdirSync(electronProfilePath, { recursive: true });
@@ -253,7 +261,11 @@ let portableFinalSyncDone = false;
 let shutdownPromise = null;
 let updateShutdownRequest = null;
 let updateShutdownWatcher = null;
+let normalStartupPromise = null;
+let normalIPCRegistered = false;
+let suppressWindowAllClosedQuit = false;
 const holdMainWindowUntilReady = UCLAW_LAUNCHER_GUI && Boolean(UCLAW_PORTABLE_WORK_DATA_DIR || UCLAW_PORTABLE_DATA_DIR);
+let activationWindowMode = isActivationOnlyMode;
 
 app.on('second-instance', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -381,6 +393,60 @@ function safeWriteJson(filePath, value) {
 function writeRuntimeJson(filePath, value) {
   if (!filePath) return false;
   return safeWriteJson(filePath, value);
+}
+
+/**
+ * Rejects unsafe activation targets before writing secret-bearing JSON. This is
+ * a local defense for portable media, where stale symlinks would be surprising.
+ */
+function assertSafeJsonTarget(filePath) {
+  const resolved = path.resolve(filePath);
+  const resolvedRoot = path.resolve(configDir);
+  if (resolved !== resolvedRoot && !resolved.startsWith(`${resolvedRoot}${path.sep}`)) {
+    throw new Error(`refusing to write outside activation data dir: ${resolved}`);
+  }
+  try {
+    const stat = fs.lstatSync(resolved);
+    if (stat.isSymbolicLink()) throw new Error('target is a symbolic link');
+    if (!stat.isFile()) throw new Error('target is not a regular file');
+    if (stat.nlink > 1) throw new Error('target has multiple hard links');
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+}
+
+/**
+ * Atomically writes bounded JSON and reads it back so activation only commits
+ * after local material is durably present.
+ */
+function atomicWriteJson(filePath, value) {
+  assertSafeJsonTarget(filePath);
+  const json = `${JSON.stringify(value, null, 2)}\n`;
+  if (Buffer.byteLength(json, 'utf8') > 1024 * 1024) {
+    throw new Error('activation material is too large');
+  }
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tempPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  let fd = null;
+  try {
+    fd = fs.openSync(tempPath, 'wx', 0o600);
+    fs.writeFileSync(fd, json, 'utf8');
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = null;
+    fs.renameSync(tempPath, filePath);
+    if (process.platform !== 'win32') fs.chmodSync(filePath, 0o600);
+    return readJsonFile(filePath);
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch {}
+  }
 }
 
 function readJsonFile(filePath) {
@@ -715,6 +781,478 @@ function readActiveSessionKey() {
     : '';
 }
 
+/**
+ * Returns true when local activation material exists. The current preview marker
+ * is intentionally minimal; real cloud activation will replace it with signed
+ * license metadata and encrypted New API token state.
+ */
+function hasCompletedActivation() {
+  if (process.env.UCLAW_SKIP_ACTIVATION_GATE === '1') return true;
+  const state = readJsonFile(activationStatePath);
+  const license = readJsonFile(activationLicensePath);
+  const hasAccountMarker = [state?.phoneMasked, state?.usernameMasked, state?.accountMasked]
+    .some((value) => typeof value === 'string' && value.trim());
+  return state?.status === 'activated'
+    && typeof state.activatedAt === 'string'
+    && hasAccountMarker
+    && license?.payload?.schemaVersion === 'uclaw.license.v1'
+    && license?.signature?.algorithm === 'Ed25519'
+    && typeof license?.signature?.value === 'string'
+    && license.signature.value.length > 0;
+}
+
+/**
+ * Decides whether normal startup must stop at the first-login activation page.
+ */
+function shouldShowActivationOnStartup() {
+  if (isActivationOnlyMode) return true;
+  return !hasCompletedActivation();
+}
+
+/**
+ * Persists the preview activation marker used to avoid showing first-login UI on
+ * every launch. Later slices will store signed cloud license data here.
+ */
+function writeActivationState(payload) {
+  const phone = String(payload.phone || '').trim();
+  const username = String(payload.username || '').trim().toUpperCase();
+  const activationCode = String(payload.activationCode || '').trim().toUpperCase();
+  const token = String(payload.newapiToken || '').trim();
+  const updateToken = String(payload.updateDeviceToken || '').trim();
+  const accountMasked = payload.usernameMasked
+    || payload.phoneMasked
+    || (phone ? `${phone.slice(0, 3)}****${phone.slice(7)}` : username);
+  const marker = {
+    schemaVersion: 1,
+    status: payload.status || 'activated',
+    source: payload.source || 'local-preview',
+    phoneMasked: payload.phoneMasked || '',
+    usernameMasked: payload.usernameMasked || (username ? username.replace(/^UCLAW-([A-Z0-9]{2})[A-Z0-9]+([A-Z0-9]{2})$/, 'UCLAW-$1****$2') : ''),
+    accountMasked,
+    activationId: payload.activationId || '',
+    artifactStatus: payload.artifactStatus || '',
+    commitStatus: payload.commitStatus || '',
+    activationCodeSuffix: activationCode.replace(/-/g, '').slice(-4),
+    activationEndpoint: payload.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT,
+    newapiBaseUrl: payload.newapiBaseUrl || '',
+    tokenVersion: Number(payload.tokenVersion) || 1,
+    tokenStatus: token ? 'configured' : 'pending_cloud_activation',
+    tokenFingerprint: token ? crypto.createHash('sha256').update(token).digest('hex').slice(0, 16) : '',
+    updateCredentialStatus: updateToken ? 'configured' : 'missing',
+    updateCheckUrl: String(payload.updateCheckUrl || '').trim(),
+    updateDeviceId: String(payload.updateDeviceId || '').trim(),
+    updateTokenFingerprint: updateToken ? crypto.createHash('sha256').update(updateToken).digest('hex').slice(0, 16) : '',
+    uclawAccessToken: String(payload.uclawAccessToken || '').trim(),
+    activatedAt: new Date().toISOString(),
+  };
+  fs.mkdirSync(configDir, { recursive: true });
+  safeWriteJson(activationStatePath, marker);
+  writeDirtyMarker('activation');
+  return marker;
+}
+
+/**
+ * Allows local UI acceptance to proceed when an optional cloud endpoint is set
+ * but not reachable. Production can opt out with UCLAW_ACTIVATION_REQUIRE_CLOUD.
+ */
+function canUseActivationStaticFallback() {
+  return isDev && !UCLAW_ACTIVATION_REQUIRE_CLOUD;
+}
+
+/**
+ * Persists and returns the static activation preview result used before the
+ * real cloud redeem + privileged write-helper slice is enabled.
+ */
+function createStaticActivationResult(payload, message) {
+  const activationState = writeActivationState({ ...payload, status: 'preview' });
+  return {
+    ok: true,
+    code: ACTIVATION_STATIC_PREVIEW_COMPLETE,
+    message: message || '首启登录流程已通过本地验证；真实激活服务接入后会写入授权材料。',
+    phoneMasked: activationState.phoneMasked,
+    activationPersisted: true,
+    retryable: false,
+  };
+}
+
+/**
+ * Normalizes the legacy sales-issued first-start username for compatibility
+ * with activation records created before phone login became the default.
+ */
+function normalizeActivationUsername(value) {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 38);
+}
+
+/**
+ * Creates a stable idempotency key so retrying the same first-start submission
+ * can recover from network loss without consuming another activation.
+ */
+function createActivationIdempotencyKey({ account, activationCode, usbSummary }) {
+  const source = [
+    'uclaw-first-start-v1',
+    account,
+    activationCode.replace(/-/g, ''),
+    usbSummary,
+  ].join(':');
+  return `electron-${crypto.createHash('sha256').update(source).digest('hex')}`;
+}
+
+/**
+ * Parses Cloud API JSON and preserves enough HTTP context when a proxy or old
+ * service returns plain text instead of the expected JSON envelope.
+ */
+function parseActivationResponseJSON(text, options = {}) {
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const pathname = options.pathname || 'request';
+    const status = options.status ? `HTTP ${options.status}` : 'HTTP unknown';
+    const preview = String(text).replace(/\s+/g, ' ').trim().slice(0, 160) || 'empty response';
+    throw new Error(`Cloud API ${pathname} 返回非 JSON 响应（${status}）：${preview}`);
+  }
+}
+
+/**
+ * Posts JSON to the U-Claw activation service from the trusted main process.
+ */
+async function postActivationJSON(pathname, payload, options = {}) {
+  const endpoint = String(options.endpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  if (!endpoint) {
+    throw new Error('activation endpoint is not configured');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 12000);
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
+    const response = await fetch(`${endpoint}${pathname}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload || {}),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    const data = parseActivationResponseJSON(text, { pathname, status: response.status });
+    if (!response.ok) {
+      throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Reads authenticated JSON from the U-Claw cloud service through Electron main.
+ */
+async function getActivationJSON(pathname, options = {}) {
+  const endpoint = String(options.endpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  if (!endpoint) {
+    throw new Error('activation endpoint is not configured');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 12000);
+  try {
+    const headers = {};
+    if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
+    const response = await fetch(`${endpoint}${pathname}`, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    const data = parseActivationResponseJSON(text, { pathname, status: response.status });
+    if (!response.ok) {
+      throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fetches New API usage summary via U-Claw cloud using the local activation token.
+ */
+async function getCloudModelUsageSummary() {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured' };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available' };
+  }
+  return getActivationJSON('/v1/newapi/usage/summary', { endpoint, accessToken });
+}
+
+/**
+ * Fetches the New API model catalog via U-Claw cloud using the activation token.
+ */
+async function getCloudModelCatalog() {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured', models: [] };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available', models: [] };
+  }
+  try {
+    const catalog = await getActivationJSON('/v1/newapi/models/catalog', { endpoint, accessToken });
+    return { ok: true, ...catalog, models: Array.isArray(catalog.models) ? catalog.models : [] };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error), models: [] };
+  }
+}
+
+/**
+ * Refreshes local OpenClaw provider config from the cloud model catalog.
+ */
+async function refreshCloudModelCatalog() {
+  const catalog = await getCloudModelCatalog();
+  if (!catalog.ok) return catalog;
+  const currentConfig = fs.existsSync(configPath) ? getConfig() : applyRuntimeConfigEnv(loadBundledDefaultConfig());
+  const merged = mergeModelCatalogIntoConfig(currentConfig, catalog);
+  if (merged.changed) {
+    saveConfig(merged.config);
+  }
+  return {
+    ...catalog,
+    merged: merged.changed,
+    modelCount: merged.count,
+    message: merged.count > 0 ? `已同步 ${merged.count} 个 New API 模型。` : 'New API 未返回可用模型。',
+  };
+}
+
+/**
+ * Best-effort model catalog sync after activation has persisted its access token.
+ */
+async function syncModelCatalogAfterActivation() {
+  try {
+    const result = await refreshCloudModelCatalog();
+    if (!result.ok) {
+      logLifecycle(`activation model catalog sync skipped: ${result.message || 'unknown error'}`);
+      return { ok: false, message: result.message || '模型目录同步未完成' };
+    }
+    return { ok: true, modelCount: result.modelCount || 0, status: result.status || 'ok' };
+  } catch (error) {
+    logLifecycle(`activation model catalog sync failed: ${error.message}`);
+    return { ok: false, message: error?.message || String(error) };
+  }
+}
+
+/**
+ * Fetches recharge plans from the U-Claw cloud service for the in-app top-up dialog.
+ */
+async function getCloudRechargePlans() {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured', plans: [] };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available', plans: [] };
+  }
+  try {
+    const result = await getActivationJSON('/v1/recharge/plans', { endpoint, accessToken });
+    return { ok: true, plans: Array.isArray(result.plans) ? result.plans : [] };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error), plans: [] };
+  }
+}
+
+/**
+ * Fetches recent recharge orders for the model page records dialog.
+ */
+async function getCloudRechargeOrders() {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured', orders: [] };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available', orders: [] };
+  }
+  try {
+    const result = await getActivationJSON('/v1/recharge/orders', { endpoint, accessToken });
+    return { ok: true, orders: Array.isArray(result.orders) ? result.orders : [] };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error), orders: [] };
+  }
+}
+
+/**
+ * Creates a virtual recharge order and immediately simulates the local callback for UI validation.
+ */
+async function rechargeCloudModelQuota(payload = {}) {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  const planCode = String(payload.planCode || 'dev_10').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured' };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available' };
+  }
+  if (!planCode) {
+    return { ok: false, message: 'recharge plan is required' };
+  }
+  try {
+    const created = await postActivationJSON('/v1/recharge/orders', {
+      planCode,
+      provider: 'virtual',
+    }, { endpoint, accessToken });
+    const orderNo = String(created?.order?.orderNo || '').trim();
+    if (!orderNo) {
+      throw new Error('recharge order response missing orderNo');
+    }
+    const callback = await postActivationJSON('/v1/payments/virtual/notify', {
+      orderNo,
+      providerEventId: `electron-${orderNo}-${Date.now()}`,
+    }, { endpoint });
+    const usage = await getCloudModelUsageSummary();
+    return {
+      ok: true,
+      order: callback.order || created.order,
+      usage,
+      message: '虚拟充值成功，余额已刷新。',
+    };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error) };
+  }
+}
+
+/**
+ * Writes New API credentials and default model selections into OpenClaw config.
+ */
+function writeOpenClawActivationConfig(result) {
+  const baseUrl = String(result.newapiBaseUrl || '').replace(/\/+$/, '');
+  const token = String(result.newapiToken || '').trim();
+  if (!baseUrl || !token) {
+    throw new Error('activation response missing New API config');
+  }
+  const config = fs.existsSync(configPath) ? getConfig() : applyRuntimeConfigEnv(loadBundledDefaultConfig());
+  config.models = config.models || {};
+  config.models.providers = config.models.providers || {};
+  for (const providerName of ['custom', 'litellm']) {
+    config.models.providers[providerName] = config.models.providers[providerName] || {};
+    config.models.providers[providerName].baseUrl = baseUrl;
+    config.models.providers[providerName].apiKey = token;
+  }
+  config.agents = config.agents || {};
+  config.agents.defaults = config.agents.defaults || {};
+  if (result.defaultModels?.text) {
+    config.agents.defaults.model = { ...(config.agents.defaults.model || {}), primary: result.defaultModels.text };
+  }
+  if (result.defaultModels?.image) {
+    config.agents.defaults.imageGenerationModel = {
+      ...(config.agents.defaults.imageGenerationModel || {}),
+      primary: result.defaultModels.image,
+    };
+    config.agents.defaults.imageModel = {
+      ...(config.agents.defaults.imageModel || {}),
+      primary: result.defaultModels.image,
+    };
+  }
+  if (result.defaultModels?.video) {
+    config.agents.defaults.videoGenerationModel = {
+      ...(config.agents.defaults.videoGenerationModel || {}),
+      primary: result.defaultModels.video,
+    };
+  }
+  saveConfig(config);
+}
+
+/**
+ * Writes and verifies the signed startup license returned by U-Claw Cloud API.
+ */
+function writeActivationLicenseArtifact(result) {
+  const activationID = String(result.activationId || '').trim();
+  const artifact = result.licenseArtifact;
+  if (!activationID) throw new Error('activation response missing activationId');
+  if (artifact?.payload?.schemaVersion !== 'uclaw.license.v1') {
+    throw new Error('activation response missing license payload');
+  }
+  if (artifact.payload.activationId !== activationID) {
+    throw new Error('activation license activationId mismatch');
+  }
+  if (artifact?.signature?.algorithm !== 'Ed25519' || !artifact.signature.value) {
+    throw new Error('activation response missing license signature');
+  }
+  const written = atomicWriteJson(activationLicensePath, artifact);
+  if (written?.payload?.activationId !== activationID || written?.signature?.value !== artifact.signature.value) {
+    throw new Error('activation license readback verification failed');
+  }
+  writeDirtyMarker('activation-license');
+  return written;
+}
+
+/**
+ * Persists the client New API credential separately from OpenClaw config so
+ * support and later rotation code have a stable local contract.
+ */
+function writeBuiltinModelCredential(result) {
+  const baseUrl = String(result.newapiBaseUrl || '').replace(/\/+$/, '');
+  const token = String(result.newapiToken || '').trim();
+  if (!baseUrl || !token) throw new Error('activation response missing model credential');
+  const credential = {
+    schemaVersion: 'uclaw.builtin-model-credential.v1',
+    provider: 'newapi',
+    baseUrl,
+    token,
+    tokenVersion: Number(result.tokenVersion) || 1,
+    tokenFingerprint: crypto.createHash('sha256').update(token).digest('hex').slice(0, 16),
+    defaultModels: result.defaultModels || {},
+    issuedAt: new Date().toISOString(),
+  };
+  const written = atomicWriteJson(builtinModelCredentialPath, credential);
+  if (written?.tokenFingerprint !== credential.tokenFingerprint) {
+    throw new Error('builtin model credential readback verification failed');
+  }
+  writeDirtyMarker('builtin-model-credential');
+  return written;
+}
+
+/**
+ * Persists the hard-update credential used by launcher/bootstrap update checks.
+ */
+function writeUpdateCredential(result) {
+  const source = result.updateCredential;
+  if (!source) return null;
+  const schemaVersion = String(source.schemaVersion || '').trim();
+  const updateCheckUrl = String(source.updateCheckUrl || '').trim().replace(/\/+$/, '');
+  const deviceId = String(source.deviceId || '').trim();
+  const deviceToken = String(source.deviceToken || '').trim();
+  if (schemaVersion !== 'uclaw.update-credential.v1') {
+    throw new Error('activation response has invalid update credential schema');
+  }
+  if (!updateCheckUrl || !deviceId || !deviceToken) {
+    throw new Error('activation response missing update credential');
+  }
+  const credential = {
+    schemaVersion,
+    updateCheckUrl,
+    deviceId,
+    deviceToken,
+    platformKeys: Array.isArray(source.platformKeys) ? source.platformKeys.filter(Boolean) : [],
+    tokenFingerprint: crypto.createHash('sha256').update(deviceToken).digest('hex').slice(0, 16),
+    issuedAt: source.issuedAt || new Date().toISOString(),
+  };
+  const written = atomicWriteJson(updateCredentialPath, credential);
+  if (written?.tokenFingerprint !== credential.tokenFingerprint || written?.deviceId !== deviceId) {
+    throw new Error('update credential readback verification failed');
+  }
+  writeDirtyMarker('update-credential');
+  return written;
+}
+
 function extractSessionKeyFromUrl(rawUrl) {
   try {
     const url = new URL(rawUrl);
@@ -736,8 +1274,11 @@ function normalizePortableDataPathString(value) {
   if (!portablePath || typeof value !== 'string') return value;
   return value
     .replace(/~[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable[\\/]data/g, userDataPath)
+    .replace(/~[\\/]Library[\\/]Caches[\\/]Bavi-box[\\/]usb-portable[\\/]data/g, userDataPath)
     .replace(/(?:[A-Za-z]:)?[\\/](?:Users|home)[^"'\r\n]*?[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable(?:-[^\\/:"'\r\n]+)?[\\/]data/g, userDataPath)
-    .replace(/[A-Za-z]:[\\/](?:Users|home)[^"'\r\n]*?[\\/]AppData[\\/]Local[\\/]U-Claw[\\/]usb-portable[\\/]data-[^\\/:"'\r\n]+/g, userDataPath);
+    .replace(/(?:[A-Za-z]:)?[\\/](?:Users|home)[^"'\r\n]*?[\\/]Library[\\/]Caches[\\/]Bavi-box[\\/]usb-portable(?:-[^\\/:"'\r\n]+)?[\\/]data/g, userDataPath)
+    .replace(/[A-Za-z]:[\\/](?:Users|home)[^"'\r\n]*?[\\/]AppData[\\/]Local[\\/]U-Claw[\\/]usb-portable[\\/]data-[^\\/:"'\r\n]+/g, userDataPath)
+    .replace(/[A-Za-z]:[\\/](?:Users|home)[^"'\r\n]*?[\\/]AppData[\\/]Local[\\/]Bavi-box[\\/]usb-portable[\\/]data-[^\\/:"'\r\n]+/g, userDataPath);
 }
 
 function normalizePortableDataPathsInJson(value, stats) {
@@ -769,7 +1310,7 @@ function listJsonFiles(dirPath) {
 }
 
 function extractPortableSessionId(value) {
-  const match = String(value || '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  const match = String(value || '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   return match ? match[0] : '';
 }
 
@@ -1128,7 +1669,6 @@ function startVideoAdapter(port) {
       videoAdapterServer = server;
       videoAdapterPort = port;
       console.log(`[${APP_NAME}] Video adapter ready on http://127.0.0.1:${port}/xai/v1`);
-      writeRunState('video-adapter-ready');
       resolve(port);
     });
   });
@@ -1141,7 +1681,6 @@ function stopVideoAdapter() {
   videoAdapterServer = null;
   videoAdapterPort = null;
   logLifecycle('Stopping video adapter...');
-  writeRunState('stopping-video-adapter');
   return new Promise((resolve) => {
     let settled = false;
     const finish = () => {
@@ -1219,7 +1758,6 @@ function startConfigServer() {
       configServer = server;
       configServerPort = server.address().port;
       console.log(`[${APP_NAME}] Config server on http://127.0.0.1:${configServerPort}`);
-      writeRunState('config-server-ready');
       resolve(configServerPort);
     });
   });
@@ -1232,7 +1770,6 @@ function stopConfigServer() {
   configServer = null;
   configServerPort = null;
   logLifecycle('Stopping config server...');
-  writeRunState('stopping-config-server');
   return new Promise((resolve) => {
     let settled = false;
     const finish = () => {
@@ -1352,7 +1889,6 @@ function startGateway(port) {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
-    writeRunState('gateway-starting');
 
     gatewayProcess.stdout.on('data', (data) => {
       const msg = data.toString().trim();
@@ -1379,7 +1915,6 @@ function startGateway(port) {
       logLifecycle(`Gateway exited with code ${code ?? 'null'} signal ${signal ?? 'null'}`);
       gatewayProcess = null;
       gatewayReady = false;
-      writeRunState('gateway-exited');
       if (!gatewayStopping && !appIsQuitting) {
         scheduleGatewayRestart(`exit code=${code ?? 'null'} signal=${signal ?? 'null'}`);
       }
@@ -1406,7 +1941,6 @@ function startGateway(port) {
         gatewayPort = port;
         gatewayRestartAttempts = 0;
         logLifecycle(`Gateway ready on port ${port}`);
-        writeRunState('gateway-ready');
         res.resume();
         resolve(port);
       });
@@ -1483,7 +2017,6 @@ function stopGateway() {
 function getActivationPreflight() {
   const usbSummary = (process.env.UCLAW_USB_FINGERPRINT_SUMMARY || '').trim();
   const usbLabel = (process.env.UCLAW_USB_LABEL || '').trim();
-  const activationEndpoint = (process.env.UCLAW_ACTIVATION_ENDPOINT || '').trim();
   const usbStatus = usbSummary ? 'pass' : 'preview';
 
   return {
@@ -1492,7 +2025,7 @@ function getActivationPreflight() {
     appReleaseId: installedReleaseInfo.releaseId,
     platform: process.platform,
     arch: process.arch,
-    activationEndpointConfigured: Boolean(activationEndpoint),
+    activationEndpointConfigured: Boolean(UCLAW_ACTIVATION_ENDPOINT),
     usb: {
       label: usbLabel || '静态预览产品盘（未读取真实 U 盘）',
       summary: usbSummary || 'PREVIEW-ONLY',
@@ -1528,16 +2061,138 @@ function getActivationPreflight() {
 }
 
 /**
- * Handles activation submit attempts for the first slice. Real activation will
- * replace this with the HTTPS activation client and privileged write helper.
+ * Handles SMS requests for the first-login activation page. The local dev code
+ * keeps the renderer flow testable until Aliyun SMS is wired behind this seam.
  */
-function submitActivation() {
+async function sendActivationSMS(payload = {}) {
+  const phone = String(payload.phone || '').trim();
+  if (!/^1[3-9]\d{9}$/.test(phone)) {
+    return { ok: false, message: '请输入有效的手机号。', retryable: true };
+  }
+  if (UCLAW_ACTIVATION_ENDPOINT) {
+    try {
+      const result = await postActivationJSON('/v1/auth/sms/send', { phone, purpose: 'login' });
+      return {
+        ok: true,
+        status: result.status || 'sent',
+        devCode: result.devCode || '',
+        message: result.devCode ? `验证码为 ${result.devCode}。` : '验证码已发送。',
+      };
+    } catch (error) {
+      if (!canUseActivationStaticFallback()) throw error;
+      logLifecycle(`activation cloud sms fallback: ${error.message}`);
+    }
+  }
   return {
     ok: true,
-    code: ACTIVATION_STATIC_PREVIEW_COMPLETE,
-    message: '静态预览完成：未联网、未写入授权材料，也未完成真实激活。',
-    retryable: false,
+    status: 'sent',
+    devCode: isDev ? '123456' : '',
+    message: isDev ? '验证码已发送，开发环境验证码为 123456。' : '验证码已发送。',
   };
+}
+
+/**
+ * Handles first-start activation. The current release uses a real phone number
+ * plus a fixed SMS code while Aliyun SMS delivery is pending approval.
+ */
+async function submitActivation(payload = {}) {
+  const phone = String(payload.phone || '').trim();
+  const smsCode = String(payload.smsCode || '').trim();
+  const username = normalizeActivationUsername(payload.username);
+  const activationCode = String(payload.activationCode || '').trim().toUpperCase();
+  if (phone && !/^1[3-9]\d{9}$/.test(phone)) {
+    return { ok: false, message: '请输入有效的手机号。', retryable: true };
+  }
+  if (phone && !/^\d{6}$/.test(smsCode)) {
+    return { ok: false, message: '请输入 6 位验证码。', retryable: true };
+  }
+  if (!phone && !/^UCLAW-[A-Z0-9]{6,32}$/.test(username)) {
+    return { ok: false, message: '请输入手机号，或提供兼容用户名。', retryable: true };
+  }
+  if (!/^(?:[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2,5}|[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}-[A-Z0-9]{6})$/.test(activationCode)) {
+    return { ok: false, message: '激活码格式不正确。', retryable: true };
+  }
+  if (UCLAW_ACTIVATION_ENDPOINT) {
+    let serverBound = false;
+    try {
+      const usbSummary = process.env.UCLAW_USB_FINGERPRINT_SUMMARY || 'PREVIEW-ONLY';
+      const activationAccount = phone || username;
+      const activationResult = await postActivationJSON('/v1/activations', {
+        phone,
+        smsCode,
+        username,
+        activationCode,
+        usbFingerprintSummary: usbSummary,
+        idempotencyKey: createActivationIdempotencyKey({ account: activationAccount, activationCode, usbSummary }),
+      });
+      serverBound = true;
+      writeActivationLicenseArtifact(activationResult);
+      writeBuiltinModelCredential(activationResult);
+      const updateCredential = writeUpdateCredential(activationResult);
+      writeOpenClawActivationConfig(activationResult);
+      const activationID = String(activationResult.activationId || '').trim();
+      const commitResult = await postActivationJSON(`/v1/activations/${activationID}/commit`, {
+        writeStatus: 'verified',
+      });
+      const activationState = writeActivationState({
+        phone,
+        username,
+        activationCode,
+        source: 'cloud-first-start',
+        phoneMasked: activationResult.phoneMasked,
+        usernameMasked: activationResult.usernameMasked,
+        activationId: activationID,
+        artifactStatus: activationResult.artifactStatus,
+        commitStatus: commitResult.status || 'committed',
+        newapiBaseUrl: activationResult.newapiBaseUrl,
+        newapiToken: activationResult.newapiToken,
+        tokenVersion: activationResult.tokenVersion,
+        updateCheckUrl: updateCredential?.updateCheckUrl,
+        updateDeviceId: updateCredential?.deviceId,
+        updateDeviceToken: updateCredential?.deviceToken,
+        uclawAccessToken: activationResult.accessToken,
+      });
+      const modelCatalogSync = await syncModelCatalogAfterActivation();
+      return {
+        ok: true,
+        code: 'ACTIVATION_CLOUD_COMPLETE',
+        message: modelCatalogSync.ok
+          ? '激活完成，授权材料、New API 配置与模型目录已写入本地。'
+          : '激活完成，授权材料与 New API 配置已写入本地；模型目录可稍后在模型页同步。',
+        phoneMasked: activationState.phoneMasked || activationState.accountMasked,
+        usernameMasked: activationState.usernameMasked,
+        activationPersisted: true,
+        activationId: activationID,
+        commitStatus: commitResult.status || 'committed',
+        modelCatalogSync,
+        launchReady: true,
+        retryable: false,
+      };
+    } catch (error) {
+      if (serverBound || !canUseActivationStaticFallback()) throw error;
+      logLifecycle(`activation cloud submit fallback: ${error.message}`);
+      return createStaticActivationResult({ phone, username, activationCode }, '激活服务未连通，已进入本地静态验收完成态。');
+    }
+  }
+  return createStaticActivationResult({ phone, username, activationCode });
+}
+
+/**
+ * Starts the normal U-Claw runtime after activation files are verified.
+ * Keeping the transition inside the same app avoids the visible close/reopen
+ * gap that made first activation look like a failed launch.
+ */
+async function launchMainAfterActivation() {
+  if (!hasCompletedActivation()) {
+    return { ok: false, message: '授权材料尚未写入，请先完成激活。' };
+  }
+  try {
+    await startNormalApplication({ replaceActivationWindow: true });
+    return { ok: true, status: 'launched' };
+  } catch (error) {
+    logLifecycle(`Activation launch-main failed: ${error.message}`);
+    return { ok: false, message: `进入主界面失败：${error.message}` };
+  }
 }
 
 /**
@@ -1546,7 +2201,10 @@ function submitActivation() {
  */
 function setupActivationIPC() {
   ipcMain.handle('activation:get-preflight', () => getActivationPreflight());
-  ipcMain.handle('activation:submit', () => submitActivation());
+  ipcMain.handle('activation:send-sms', (_event, payload) => sendActivationSMS(payload));
+  ipcMain.handle('activation:submit', (_event, payload) => submitActivation(payload));
+  ipcMain.handle('activation:launch-main', () => launchMainAfterActivation());
+  ipcMain.handle('activation:complete', () => launchMainAfterActivation());
   ipcMain.handle('activation:window-action', (_event, action) => {
     if (!mainWindow) return { ok: false };
     if (action === 'minimize') mainWindow.minimize();
@@ -1565,7 +2223,10 @@ function setupActivationIPC() {
  */
 function loadActivationPage() {
   if (!mainWindow) return;
-  mainWindow.loadFile(path.join(__dirname, 'activation.html'));
+  const load = mainWindow.loadFile(path.join(__dirname, 'activation.html'));
+  Promise.resolve(load)
+    .then(() => revealMainWindow())
+    .catch(error => logLifecycle(`Failed to load activation page: ${error.message}`));
 }
 
 // ── Window Management ──
@@ -1575,61 +2236,27 @@ function persistMainWindowSession() {
   if (sessionKey) persistActiveSessionKey(sessionKey);
 }
 
-function injectAppVersionBadge() {
-  if (!mainWindow || mainWindow.isDestroyed() || isActivationOnlyMode) return;
-  const label = visibleAppVersion();
-  const releaseTitle = `${APP_NAME} Control ${label}`;
-  mainWindow.setTitle(releaseTitle);
-  mainWindow.webContents.executeJavaScript(`
-    (() => {
-      const label = ${JSON.stringify(label)};
-      document.title = ${JSON.stringify(releaseTitle)};
-      let badge = document.getElementById('uclaw-version-badge');
-      if (!badge) {
-        badge = document.createElement('div');
-        badge.id = 'uclaw-version-badge';
-        document.body.appendChild(badge);
-      }
-      badge.textContent = label;
-      Object.assign(badge.style, {
-        position: 'fixed',
-        left: '74px',
-        bottom: '18px',
-        zIndex: '2147483647',
-        padding: '2px 6px',
-        border: '1px solid rgba(148, 163, 184, 0.35)',
-        borderRadius: '4px',
-        color: '#64748b',
-        background: 'rgba(248, 250, 252, 0.86)',
-        font: '11px/16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        fontVariantNumeric: 'tabular-nums',
-        pointerEvents: 'none',
-        userSelect: 'none'
-      });
-    })();
-  `).catch(error => logLifecycle(`Failed to inject app version badge: ${error.message}`));
-}
-
 /**
  * Creates the main Electron window. In activation-only mode it uses frameless
  * chrome so the high-fidelity startup page owns its titlebar controls.
  */
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: isActivationOnlyMode ? 960 : 1200,
-    height: isActivationOnlyMode ? 760 : 800,
-    minWidth: isActivationOnlyMode ? 720 : 800,
-    minHeight: isActivationOnlyMode ? 620 : 600,
-    title: `${APP_NAME} ${installedReleaseInfo.version}`,
+    width: activationWindowMode ? 960 : 1200,
+    height: activationWindowMode ? 760 : 800,
+    minWidth: activationWindowMode ? 720 : 800,
+    minHeight: activationWindowMode ? 620 : 600,
+    title: `${APP_NAME} ${visibleAppVersion()}`,
     icon: path.join(__dirname, '..', 'assets', 'icon.png'),
-    frame: !isActivationOnlyMode,
+    frame: !activationWindowMode,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: activationWindowMode ? [ACTIVATION_ONLY_ARG] : [],
     },
     show: false,
-    backgroundColor: isActivationOnlyMode ? '#f1f5f9' : '#0a0a0a',
+    backgroundColor: activationWindowMode ? '#f1f5f9' : '#0a0a0a',
   });
 
   if (process.platform === 'win32') {
@@ -1638,7 +2265,7 @@ function createWindow() {
   }
 
   mainWindow.once('ready-to-show', () => {
-    if (!holdMainWindowUntilReady || gatewayReady || appIsQuitting) {
+    if (activationWindowMode || !holdMainWindowUntilReady || gatewayReady || appIsQuitting) {
       mainWindow.show();
     }
   });
@@ -1649,7 +2276,6 @@ function createWindow() {
 
   mainWindow.webContents.on('did-navigate', persistMainWindowSession);
   mainWindow.webContents.on('did-navigate-in-page', persistMainWindowSession);
-  mainWindow.webContents.on('did-finish-load', injectAppVersionBadge);
 
   mainWindow.on('close', (event) => {
     if (appIsQuitting) return;
@@ -1663,7 +2289,7 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  if (isActivationOnlyMode) {
+  if (activationWindowMode) {
     loadActivationPage();
   } else {
     loadAppPage();
@@ -1734,12 +2360,12 @@ async function confirmAppQuit() {
   }
 }
 
-async function requestAppQuit({ confirm = true, reason = 'user' } = {}) {
+async function requestAppQuit({ confirm = true } = {}) {
   if (shutdownPromise) return shutdownPromise;
   if (confirm && !(await confirmAppQuit())) return null;
 
   appIsQuitting = true;
-  logLifecycle(reason === 'update' ? 'Shutdown requested by update' : 'Shutdown requested');
+  logLifecycle('Shutdown requested');
   persistMainWindowSession();
   await loadShutdownPage();
   await new Promise(resolve => setTimeout(resolve, 150));
@@ -1785,7 +2411,7 @@ function createMenu() {
     return;
   }
 
-  if (isActivationOnlyMode) {
+  if (activationWindowMode) {
     createActivationMenu();
     return;
   }
@@ -1890,63 +2516,113 @@ function setupIPC() {
   });
 
   ipcMain.handle('open-config', () => loadConfigPage());
+  ipcMain.handle('uclaw:get-model-usage-summary', () => getCloudModelUsageSummary());
+  ipcMain.handle('uclaw:get-model-catalog', () => getCloudModelCatalog());
+  ipcMain.handle('uclaw:refresh-model-catalog', () => refreshCloudModelCatalog());
+  ipcMain.handle('uclaw:get-recharge-plans', () => getCloudRechargePlans());
+  ipcMain.handle('uclaw:get-recharge-orders', () => getCloudRechargeOrders());
+  ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
 }
 
 // ── App Lifecycle ──
+/**
+ * Boots the normal OpenClaw runtime and routes the window to dashboard/config.
+ * Activation mode uses this after local license material is written.
+ */
+async function startNormalApplication({ replaceActivationWindow = false } = {}) {
+  if (normalStartupPromise) return normalStartupPromise;
+
+  normalStartupPromise = (async () => {
+    activationWindowMode = false;
+    delete process.env.UCLAW_ACTIVATION_ONLY;
+
+    if (replaceActivationWindow && mainWindow && !mainWindow.isDestroyed()) {
+      const activationWindow = mainWindow;
+      mainWindow = null;
+      suppressWindowAllClosedQuit = true;
+      activationWindow.removeAllListeners('close');
+      activationWindow.once('closed', () => {
+        setImmediate(() => {
+          suppressWindowAllClosedQuit = false;
+        });
+      });
+      activationWindow.destroy();
+    }
+
+    ensureConfig();
+    startPortableSyncTimer();
+    syncDevNewApiCredentialsFromDesktop();
+    sanitizePortableStatePaths();
+    startUpdateShutdownWatcher();
+    writeRunState('starting');
+    createMenu();
+    if (!normalIPCRegistered) {
+      setupIPC();
+      normalIPCRegistered = true;
+    }
+    createWindow();
+
+    await startConfigServer();
+
+    try {
+      const configuredVideoAdapterBaseUrl = UCLAW_VIDEO_ADAPTER_BASE_URL.trim();
+      if (configuredVideoAdapterBaseUrl) {
+        ensureVideoAdapterConfig(configuredVideoAdapterBaseUrl.replace(/\/+$/, ''));
+        console.log(`[${APP_NAME}] Using external video adapter ${configuredVideoAdapterBaseUrl}`);
+      } else {
+        const adapterPort = await findAvailablePort(DEFAULT_VIDEO_ADAPTER_PORT, MAX_VIDEO_ADAPTER_PORT);
+        await startVideoAdapter(adapterPort);
+        ensureRuntimeVideoAdapterConfig(`http://127.0.0.1:${adapterPort}/xai/v1`);
+      }
+
+      const port = await findAvailablePort();
+      await startGateway(port);
+      writeRunState('gateway-ready');
+
+      if (hasModelConfigured()) {
+        loadAppPage();
+      } else {
+        console.log(`[${APP_NAME}] No model configured, opening Config.html`);
+        loadConfigPage();
+      }
+    } catch (err) {
+      console.error(`[${APP_NAME}] Failed to start gateway:`, err);
+      dialog.showErrorBox(
+        `${APP_NAME} - Startup Error`,
+        `Failed to start OpenClaw gateway.\n\n${err.message}\n\nPlease check if Node.js is available and try again.`
+      );
+      throw err;
+    }
+  })().catch((error) => {
+    normalStartupPromise = null;
+    throw error;
+  });
+
+  return normalStartupPromise;
+}
+
 app.whenReady().then(async () => {
-  logLifecycle(`v${installedReleaseInfo.version} starting...`);
+  logLifecycle(`v${app.getVersion()} starting...`);
 
   if (isActivationOnlyMode) {
     console.log(`[${APP_NAME}] Activation-only mode starting...`);
+    activationWindowMode = true;
     createMenu();
     setupActivationIPC();
     createWindow();
     return;
   }
 
-  // Setup
-  ensureConfig();
-  startPortableSyncTimer();
-  writeRunState('starting');
-  startUpdateShutdownWatcher();
-  syncDevNewApiCredentialsFromDesktop();
-  sanitizePortableStatePaths();
-  createMenu();
-  setupIPC();
-  createWindow();
-
-  // Start mini HTTP server for Config.html
-  await startConfigServer();
-
-  try {
-    const configuredVideoAdapterBaseUrl = UCLAW_VIDEO_ADAPTER_BASE_URL.trim();
-    if (configuredVideoAdapterBaseUrl) {
-      ensureVideoAdapterConfig(configuredVideoAdapterBaseUrl.replace(/\/+$/, ''));
-      console.log(`[${APP_NAME}] Using external video adapter ${configuredVideoAdapterBaseUrl}`);
-    } else {
-      const adapterPort = await findAvailablePort(DEFAULT_VIDEO_ADAPTER_PORT, MAX_VIDEO_ADAPTER_PORT);
-      await startVideoAdapter(adapterPort);
-      ensureRuntimeVideoAdapterConfig(`http://127.0.0.1:${adapterPort}/xai/v1`);
-    }
-
-    // Find port and start gateway
-    const port = await findAvailablePort();
-    await startGateway(port);
-
-    // Gateway is ready — if no model configured, show Config.html first
-    if (hasModelConfigured()) {
-      loadAppPage();
-    } else {
-      console.log(`[${APP_NAME}] No model configured, opening Config.html`);
-      loadConfigPage();
-    }
-  } catch (err) {
-    console.error(`[${APP_NAME}] Failed to start gateway:`, err);
-    dialog.showErrorBox(
-      `${APP_NAME} - Startup Error`,
-      `Failed to start OpenClaw gateway.\n\n${err.message}\n\nPlease check if Node.js is available and try again.`
-    );
+  if (shouldShowActivationOnStartup()) {
+    console.log(`[${APP_NAME}] Activation gate starting...`);
+    activationWindowMode = true;
+    createMenu();
+    setupActivationIPC();
+    createWindow();
+    return;
   }
+
+  await startNormalApplication();
 });
 
 function shutdownApp() {
@@ -1954,8 +2630,8 @@ function shutdownApp() {
   appIsQuitting = true;
   shutdownPromise = (async () => {
     logLifecycle('Shutdown started');
-    writeRunState('shutdown-started');
     stopUpdateShutdownWatcher();
+    writeRunState('stopping');
     await finalPortableDataSync('before-stop');
     await stopGateway();
     await stopVideoAdapter();
@@ -1969,6 +2645,7 @@ function shutdownApp() {
 }
 
 app.on('window-all-closed', () => {
+  if (suppressWindowAllClosedQuit) return;
   app.quit();
 });
 

@@ -1,5 +1,5 @@
 # ============================================================
-#  U-Claw Bootable USB - Step 1: Prepare USB with Ventoy
+#  Bavi-box Bootable USB - Step 1: Prepare USB with Ventoy
 #  Downloads Ventoy and launches its installer
 # ============================================================
 
@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  U-Claw Bootable USB - Step 1: Ventoy" -ForegroundColor Cyan
+Write-Host "  Bavi-box Bootable USB - Step 1: Ventoy" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 

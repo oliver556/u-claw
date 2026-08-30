@@ -24,20 +24,20 @@
 
 ## User Stories
 
-1. As a U-Claw user, I want SkillHub to look like a real skill library, so that I can browse many skills without excessive scrolling.
-2. As a U-Claw user, I want each skill row to keep its icon, so that I can identify tools by visual memory.
-3. As a U-Claw user, I want only one clear SkillHub page identity, so that repeated headings do not distract me.
-4. As a U-Claw user, I want the existing app/sidebar frame to stay unchanged, so that the SkillHub redesign does not move the product shell.
-5. As a U-Claw user, I want 我的技能 to appear as a compact content-area filter, so that installed skills feel part of the same library without adding another sidebar.
-6. As a U-Claw user, I want category and tab noise reduced, so that browsing does not feel nested or repetitive.
-7. As a U-Claw user, I want search, API Key filter, and sort controls in one compact toolbar, so that filtering feels direct.
-8. As a U-Claw user, I want list columns for 场景、下载、收藏、操作, so that I can compare skills quickly.
-9. As a U-Claw user, I want installed skills and installable skills in the same visual grammar, so that switching between them does not feel like a different product.
-10. As a U-Claw user, I want 安装 and 卸载 actions to sit in a fixed right-side column, so that repeated operations are easy.
-11. As a U-Claw user, I want long summaries to truncate cleanly, so that one skill cannot stretch the row height.
-12. As a U-Claw user, I want trusted/API-key-required/risk states to show as compact badges, so that safety information is visible but does not dominate browsing.
-13. As a U-Claw user, I want search results to reuse the same dense list, so that search does not create a second nested UI.
-14. As a U-Claw user, I want empty/loading/error states to occupy the list area only, so that the navigation and toolbar remain stable.
+1. As a Bavi-box user, I want SkillHub to look like a real skill library, so that I can browse many skills without excessive scrolling.
+2. As a Bavi-box user, I want each skill row to keep its icon, so that I can identify tools by visual memory.
+3. As a Bavi-box user, I want only one clear SkillHub page identity, so that repeated headings do not distract me.
+4. As a Bavi-box user, I want the existing app/sidebar frame to stay unchanged, so that the SkillHub redesign does not move the product shell.
+5. As a Bavi-box user, I want 我的技能 to appear as a compact content-area filter, so that installed skills feel part of the same library without adding another sidebar.
+6. As a Bavi-box user, I want category and tab noise reduced, so that browsing does not feel nested or repetitive.
+7. As a Bavi-box user, I want search, API Key filter, and sort controls in one compact toolbar, so that filtering feels direct.
+8. As a Bavi-box user, I want list columns for 场景、下载、收藏、操作, so that I can compare skills quickly.
+9. As a Bavi-box user, I want installed skills and installable skills in the same visual grammar, so that switching between them does not feel like a different product.
+10. As a Bavi-box user, I want 安装 and 卸载 actions to sit in a fixed right-side column, so that repeated operations are easy.
+11. As a Bavi-box user, I want long summaries to truncate cleanly, so that one skill cannot stretch the row height.
+12. As a Bavi-box user, I want trusted/API-key-required/risk states to show as compact badges, so that safety information is visible but does not dominate browsing.
+13. As a Bavi-box user, I want search results to reuse the same dense list, so that search does not create a second nested UI.
+14. As a Bavi-box user, I want empty/loading/error states to occupy the list area only, so that the navigation and toolbar remain stable.
 15. As a developer, I want repeated render branches collapsed into view-model helpers, so that future SkillHub UI changes are easier and less error-prone.
 16. As a developer, I want icon mapping and metadata mapping centralized, so that remote and local skills display consistently.
 17. As a developer, I want UI density verified by visual smoke tests, so that regressions do not silently return to oversized cards.
@@ -79,7 +79,7 @@
 - Do not create new backend APIs for category, sort, pagination, recommendation, uninstall, favorites, or icon caching.
 - Do not modify archived directories.
 - Do not change model chain, chat execution path, Gateway startup contract, or portable packaging baseline.
-- Do not implement real收藏 persistence unless a verified OpenClaw or U-Claw persistence contract is separately designed.
+- Do not implement real收藏 persistence unless a verified OpenClaw or Bavi-box persistence contract is separately designed.
 - Do not make a marketing landing page or oversized hero section for SkillHub.
 - Do not hide safety/risk states; only compress them into the correct browsing surface.
 

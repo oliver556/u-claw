@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# U-Claw - 内网/本地模型一键配置 (macOS)
+# Bavi-box - 内网/本地模型一键配置 (macOS)
 # 双击运行：命令行配 Ollama / newapi 并当场实测（不碰网页设置）
 # ============================================================
 
@@ -16,7 +16,7 @@ case "$ARCH" in
 esac
 if [ ! -x "$NODE_BIN" ]; then NODE_BIN="$(command -v node)"; fi
 if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
-    echo "  [错误] 找不到 Node 运行环境。请先正常启动一次 U-Claw。"
+    echo "  [错误] 找不到 Node 运行环境。请先正常启动一次 Bavi-box。"
     read -p "  按回车关闭..."
     exit 1
 fi

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Verifies that the U-Claw session rename menu uses the in-app dialog.
+ * Verifies that the Bavi-box session rename menu uses the in-app dialog.
  * Native `window.prompt` is unreliable inside packaged Electron windows.
  */
 const fs = require("fs");

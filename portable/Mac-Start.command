@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# U-Claw - Portable AI Agent (macOS)
+# Bavi-box - Portable AI Agent (macOS)
 # Double-click to start / 双击启动
 # ============================================================
 
@@ -25,7 +25,7 @@ NC='\033[0m'
 echo ""
 echo -e "${CYAN}"
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║     🦞 U-Claw v1.1                  ║"
+echo "  ║     🦞 Bavi-box v1.1                  ║"
 echo "  ║     Portable AI Agent               ║"
 echo "  ╚══════════════════════════════════════╝"
 echo -e "${NC}"
@@ -71,7 +71,7 @@ echo ""
 mkdir -p "$STATE_DIR" "$DATA_DIR/memory" "$DATA_DIR/backups" "$DATA_DIR/logs"
 
 # ---- 4b. 加速：把"重 IO、可重建"的缓存从 U 盘搬到本机硬盘 ----
-# portable-cache.mjs 算出本机缓存目录(~/Library/Caches/U-Claw/slot，UUID 隔离，
+# portable-cache.mjs 算出本机缓存目录(~/Library/Caches/Bavi-box/slot，UUID 隔离，
 # 换盘符仍复用)，并把 .openclaw/browser 做成 symlink 指向本机盘。
 # 浏览器 user-data(几百 MB 随机小写)和 V8 编译缓存因此落本机盘，不再拖慢 U 盘。
 # 静默失败：取不到就跳过，缓存留 U 盘，照常启动。
@@ -108,7 +108,7 @@ fi
 export OPENCLAW_HOME="$DATA_DIR"
 export OPENCLAW_STATE_DIR="$STATE_DIR"
 export OPENCLAW_CONFIG_PATH="$CONFIG_FILE"
-# U-Claw opens the local dashboard directly; disable mDNS/Bonjour discovery.
+# Bavi-box opens the local dashboard directly; disable mDNS/Bonjour discovery.
 # On macOS the bonjour plugin auto-starts and advertises the gateway on the LAN
 # (_openclaw-gw._tcp.local), which is unnecessary for local use and triggers
 # "no IPv4 address available on utunN" warnings on machines with VPN/Tailscale.
@@ -205,7 +205,7 @@ open "http://127.0.0.1:18788/" 2>/dev/null || true
 ) &
 
 echo -e "  ${GREEN}════════════════════════════════${NC}"
-echo -e "  ${GREEN}🦞 U-Claw is running!${NC}"
+echo -e "  ${GREEN}🦞 Bavi-box is running!${NC}"
 echo -e "  ${GREEN}   Dashboard:     http://127.0.0.1:$PORT/#token=uclaw${NC}"
 echo -e "  ${GREEN}   Config Center: http://127.0.0.1:18788/${NC}"
 echo ""
@@ -218,7 +218,7 @@ cleanup() {
     kill $GW_PID 2>/dev/null
     kill $CONFIG_PID 2>/dev/null
     echo ""
-    echo -e "  🦞 U-Claw stopped."
+    echo -e "  🦞 Bavi-box stopped."
     exit 0
 }
 trap cleanup INT TERM
@@ -232,4 +232,4 @@ if [ "$GW_EXIT" -ne 0 ]; then
 fi
 kill $CONFIG_PID 2>/dev/null
 echo ""
-echo -e "  🦞 U-Claw stopped."
+echo -e "  🦞 Bavi-box stopped."

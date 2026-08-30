@@ -17,7 +17,7 @@
 1. 当前验收目录为仓库根目录：
 
 ```bash
-cd /Users/biancheng/Documents/ChatGPT/U-CLAW
+cd /Users/biancheng/Documents/ChatGPT/Bavi-box
 ```
 
 2. Gateway 已连接且桌面窗口可进入聊天页。若需确认 Gateway 存活：
@@ -35,7 +35,7 @@ curl -sS -o /tmp/uclaw_skillhub_acceptance_gateway.out -w '%{http_code}\n' http:
 3. 已执行并通过本地静态验证：
 
 ```bash
-cd /Users/biancheng/Documents/ChatGPT/U-CLAW/u-claw-app-dev
+cd /Users/biancheng/Documents/ChatGPT/Bavi-box/u-claw-app-dev
 npm run patch-openclaw
 node scripts/verify-skillhub-branding.js
 node scripts/verify-skillhub-chat-dropdown.js
@@ -61,7 +61,7 @@ OK SkillHub connected UI acceptance verified
 
 ### 3.1 入口可见
 
-1. 打开 U-Claw 桌面窗口。
+1. 打开 Bavi-box 桌面窗口。
 2. 进入任一可用聊天会话。
 3. 观察聊天输入框工具栏，重点查看模型选择控件附近。
 

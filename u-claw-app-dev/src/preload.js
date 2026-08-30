@@ -6,7 +6,10 @@ const isActivationOnlyMode = process.argv.includes('--activation-only')
 if (isActivationOnlyMode) {
   contextBridge.exposeInMainWorld('uclawActivation', {
     getPreflight: () => ipcRenderer.invoke('activation:get-preflight'),
+    sendSMS: (payload) => ipcRenderer.invoke('activation:send-sms', payload),
     submitActivation: (payload) => ipcRenderer.invoke('activation:submit', payload),
+    launchMain: () => ipcRenderer.invoke('activation:launch-main'),
+    completeActivation: () => ipcRenderer.invoke('activation:complete'),
     windowAction: (action) => ipcRenderer.invoke('activation:window-action', action),
   });
 } else {
@@ -14,5 +17,11 @@ if (isActivationOnlyMode) {
     getGatewayStatus: () => ipcRenderer.invoke('get-gateway-status'),
     openDashboard: () => ipcRenderer.invoke('open-dashboard'),
     openConfig: () => ipcRenderer.invoke('open-config'),
+    getModelUsageSummary: () => ipcRenderer.invoke('uclaw:get-model-usage-summary'),
+    getModelCatalog: () => ipcRenderer.invoke('uclaw:get-model-catalog'),
+    refreshModelCatalog: () => ipcRenderer.invoke('uclaw:refresh-model-catalog'),
+    getRechargePlans: () => ipcRenderer.invoke('uclaw:get-recharge-plans'),
+    getRechargeOrders: () => ipcRenderer.invoke('uclaw:get-recharge-orders'),
+    rechargeModelQuota: (payload) => ipcRenderer.invoke('uclaw:recharge-model-quota', payload),
   });
 }

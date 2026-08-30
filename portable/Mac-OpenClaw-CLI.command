@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# U-Claw - Interactive CLI (macOS)
+# Bavi-box - Interactive CLI (macOS)
 # 进阶用户：双击打开一个配置好环境的终端，可直接敲 openclaw 命令。
 # 复用与 Mac-Start.command 一致的便携环境（盘内 Node + 盘内数据）。
 # ============================================================
@@ -45,7 +45,7 @@ export PATH="$NODE_DIR/bin:$CORE_DIR/node_modules/.bin:$PATH"
 
 echo ""
 echo -e "${CYAN}========================================${NC}"
-echo -e "${CYAN}   U-Claw Interactive CLI${NC}"
+echo -e "${CYAN}   Bavi-box Interactive CLI${NC}"
 echo -e "${CYAN}========================================${NC}"
 echo ""
 echo "  You can now run the 'openclaw' command directly. Examples:"

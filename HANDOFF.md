@@ -1,4 +1,4 @@
-# Handoff Document — U-Claw Linux Remote Access
+# Handoff Document — Bavi-box Linux Remote Access
 
 ## Current Status
 

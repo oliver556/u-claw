@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" role="img" aria-labelledby="title desc">
-  <title id="title">U-Claw portable AI workspace</title>
+  <title id="title">Bavi-box portable AI workspace</title>
   <desc id="desc">A USB drive carries a local AI workspace across Windows, macOS, and Linux.</desc>
   <rect width="1280" height="560" fill="#09121e"/>
   <path d="M0 430C196 362 286 473 491 400s300-37 486-87 207-36 303-11v258H0Z" fill="#0e2632"/>
@@ -19,7 +19,7 @@
     <path d="M44 260v38h198v-38" fill="#b9dfd5"/>
   </g>
   <g fill="#b8f4e8">
-    <text x="84" y="151" font-family="Arial, sans-serif" font-size="62" font-weight="700">U-CLAW</text>
+    <text x="84" y="151" font-family="Arial, sans-serif" font-size="62" font-weight="700">Bavi-box</text>
     <text x="88" y="202" font-family="Arial, sans-serif" font-size="25" letter-spacing="3">AI THAT TRAVELS WITH YOU</text>
   </g>
   <g font-family="Arial, sans-serif" font-size="22" fill="#d8f2e9">

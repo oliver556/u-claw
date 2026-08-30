@@ -114,7 +114,7 @@ async function main() {
   if (!configPath) { line('用法: node setup-local-model.mjs <CONFIG_PATH>'); process.exitCode = 2; return; }
 
   line('========================================');
-  line('  U-Claw 内网/本地模型 一键配置');
+  line('  Bavi-box 内网/本地模型 一键配置');
   line('========================================');
   line('');
 

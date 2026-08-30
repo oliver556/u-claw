@@ -10,7 +10,7 @@
 
 在不依赖当前 macOS 会话直接操作 Windows 实机的前提下，用 GitHub Hosted Windows Runner 构建和执行两个等价的一次性启动器小样，生成可审计 JSON 报告，为 Task 9 正式实现选定唯一技术。
 
-本步骤不生成正式 `U-Claw.exe`，不验收 U 盘拔出、Defender 真实拦截、Win10/Win11 实机兼容性，也不并行维护两套正式 Launcher。
+本步骤不生成正式 `Bavi-box.exe`，不验收 U 盘拔出、Defender 真实拦截、Win10/Win11 实机兼容性，也不并行维护两套正式 Launcher。
 
 ## 2. 方案选择
 

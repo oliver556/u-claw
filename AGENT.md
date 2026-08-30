@@ -1,4 +1,4 @@
-# U-Claw Agent Entry
+# Bavi-box Agent Entry
 
 Read `AGENTS.md` first.
 
