@@ -37,14 +37,14 @@ const transactionStates = [
 
 function usage() {
   console.log(`Usage:
-  node scripts/hard-update-client.js mock-update --usb <U-Claw root> --release <release root> --platform win32-x64
-  node scripts/hard-update-client.js mock-update --usb <U-Claw root> --update-check-url ${defaultUpdateCheckUrl} --platform win32-x64 --device <device_id> --device-token <token>
-  node scripts/hard-update-client.js mock-update --usb <U-Claw root> --production-url ${stagingProductionUrl} --platform win32-x64
-  node scripts/hard-update-client.js startup-update --usb <U-Claw root> --platform win32-x64 [--production-url <release.json>]
-  node scripts/hard-update-client.js apply-startup-update --usb <U-Claw root> --transaction <app/update-transaction.json> --wait-pid <pid> --launch-after <entrypoint>
-  node scripts/hard-update-client.js check --usb <U-Claw root> --release <release root> --platform darwin-arm64
-  node scripts/hard-update-client.js check --usb <U-Claw root> --update-check-url ${defaultUpdateCheckUrl} --platform darwin-arm64 --device <device_id> --device-token <token>
-  node scripts/hard-update-client.js check --usb <U-Claw root> --production-url ${stagingProductionUrl} --platform darwin-arm64
+  node scripts/hard-update-client.js mock-update --usb <Bavi-box root> --release <release root> --platform win32-x64
+  node scripts/hard-update-client.js mock-update --usb <Bavi-box root> --update-check-url ${defaultUpdateCheckUrl} --platform win32-x64 --device <device_id> --device-token <token>
+  node scripts/hard-update-client.js mock-update --usb <Bavi-box root> --production-url ${stagingProductionUrl} --platform win32-x64
+  node scripts/hard-update-client.js startup-update --usb <Bavi-box root> --platform win32-x64 [--production-url <release.json>]
+  node scripts/hard-update-client.js apply-startup-update --usb <Bavi-box root> --transaction <app/update-transaction.json> --wait-pid <pid> --launch-after <entrypoint>
+  node scripts/hard-update-client.js check --usb <Bavi-box root> --release <release root> --platform darwin-arm64
+  node scripts/hard-update-client.js check --usb <Bavi-box root> --update-check-url ${defaultUpdateCheckUrl} --platform darwin-arm64 --device <device_id> --device-token <token>
+  node scripts/hard-update-client.js check --usb <Bavi-box root> --production-url ${stagingProductionUrl} --platform darwin-arm64
 
 Direct R2 mode is used when --release, --production-url, and --update-check-url are omitted. Default staging URL:
   ${stagingProductionUrl}
@@ -503,8 +503,8 @@ function installFromStaging(usbRoot, stagingDir) {
   const allowed = new Set([
     'app',
     'bootstrap',
-    'U-Claw.exe',
-    'U-Claw.app',
+    'Bavi-box.exe',
+    'Bavi-box.app',
     'U-Claw Launcher.exe',
     'U-Claw Launcher.app',
     'UCLAW-PACKAGE-NOTES.txt'

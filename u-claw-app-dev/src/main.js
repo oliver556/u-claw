@@ -8,7 +8,7 @@ const { createVideoAdapterServer } = require('./video-adapter');
 const { mergeModelCatalogIntoConfig } = require('./model-catalog');
 
 // ── Constants ──
-const APP_NAME = 'U-Claw';
+const APP_NAME = 'Bavi-box';
 const DEFAULT_PORT = 18789;
 const MAX_PORT = 18799;
 const DEFAULT_VIDEO_ADAPTER_PORT = 18808;
@@ -43,13 +43,14 @@ const ACTIVATION_ONLY_ARG = '--activation-only';
 const isActivationOnlyMode = process.argv.includes(ACTIVATION_ONLY_ARG)
   || process.env.UCLAW_ACTIVATION_ONLY === '1';
 const ACTIVATION_STATIC_PREVIEW_COMPLETE = 'ACTIVATION_STATIC_PREVIEW_COMPLETE';
+const ACTIVATION_RESTART_EXIT_CODE = 20;
 const UCLAW_ACTIVATION_REQUIRE_CLOUD = process.env.UCLAW_ACTIVATION_REQUIRE_CLOUD === '1';
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
 // room so we never hard-fail with a scary dialog before the engine is up. The
 // loading.html splash polls and the window navigates as soon as the gateway is
 // ready, so a long ceiling only matters on a genuinely stuck start.
-const GATEWAY_STARTUP_TIMEOUT = 180000;
+const GATEWAY_STARTUP_TIMEOUT = 300000;
 
 // ── Paths ──
 const isDev = process.argv.includes('--dev') || process.defaultApp || !app.isPackaged;
@@ -264,6 +265,7 @@ let updateShutdownWatcher = null;
 let normalStartupPromise = null;
 let normalIPCRegistered = false;
 let suppressWindowAllClosedQuit = false;
+let requestedExitCode = 0;
 const holdMainWindowUntilReady = UCLAW_LAUNCHER_GUI && Boolean(UCLAW_PORTABLE_WORK_DATA_DIR || UCLAW_PORTABLE_DATA_DIR);
 let activationWindowMode = isActivationOnlyMode;
 
@@ -764,6 +766,34 @@ async function finalPortableDataSync(reason) {
   return success;
 }
 
+function syncActivationMaterialToUsb() {
+  if (!portableUsbSyncEnabled()) return true;
+
+  const relativeFiles = [
+    path.join('.openclaw', 'openclaw.json'),
+    path.join('.openclaw', 'uclaw-activation.json'),
+    path.join('.openclaw', 'builtin-model-credential.v1.json'),
+    path.join('.openclaw', 'update-credential.v1.json'),
+    path.join('.openclaw', 'license', 'license.json'),
+  ];
+
+  let success = true;
+  for (const relativeFile of relativeFiles) {
+    const source = path.join(userDataPath, relativeFile);
+    if (!fs.existsSync(source)) continue;
+    const destination = path.join(usbDataPath, relativeFile);
+    try {
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(source, destination);
+    } catch (error) {
+      success = false;
+      logLifecycle(`activation material sync failed for ${relativeFile}: ${error.message}`);
+    }
+  }
+  if (success) logLifecycle('activation material synced to USB');
+  return success;
+}
+
 function persistActiveSessionKey(sessionKey) {
   const key = typeof sessionKey === 'string' ? sessionKey.trim() : '';
   if (!key || key.toLowerCase() === 'unknown') return;
@@ -914,7 +944,7 @@ function parseActivationResponseJSON(text, options = {}) {
 }
 
 /**
- * Posts JSON to the U-Claw activation service from the trusted main process.
+ * Posts JSON to the Bavi-box activation service from the trusted main process.
  */
 async function postActivationJSON(pathname, payload, options = {}) {
   const endpoint = String(options.endpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
@@ -944,7 +974,7 @@ async function postActivationJSON(pathname, payload, options = {}) {
 }
 
 /**
- * Reads authenticated JSON from the U-Claw cloud service through Electron main.
+ * Reads authenticated JSON from the Bavi-box cloud service through Electron main.
  */
 async function getActivationJSON(pathname, options = {}) {
   const endpoint = String(options.endpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
@@ -973,7 +1003,7 @@ async function getActivationJSON(pathname, options = {}) {
 }
 
 /**
- * Fetches New API usage summary via U-Claw cloud using the local activation token.
+ * Fetches New API usage summary via Bavi-box cloud using the local activation token.
  */
 async function getCloudModelUsageSummary() {
   const state = readJsonFile(activationStatePath);
@@ -989,7 +1019,7 @@ async function getCloudModelUsageSummary() {
 }
 
 /**
- * Fetches the New API model catalog via U-Claw cloud using the activation token.
+ * Fetches the New API model catalog via Bavi-box cloud using the activation token.
  */
 async function getCloudModelCatalog() {
   const state = readJsonFile(activationStatePath);
@@ -1046,7 +1076,7 @@ async function syncModelCatalogAfterActivation() {
 }
 
 /**
- * Fetches recharge plans from the U-Claw cloud service for the in-app top-up dialog.
+ * Fetches recharge plans from the Bavi-box cloud service for the in-app top-up dialog.
  */
 async function getCloudRechargePlans() {
   const state = readJsonFile(activationStatePath);
@@ -1171,7 +1201,7 @@ function writeOpenClawActivationConfig(result) {
 }
 
 /**
- * Writes and verifies the signed startup license returned by U-Claw Cloud API.
+ * Writes and verifies the signed startup license returned by Bavi-box Cloud API.
  */
 function writeActivationLicenseArtifact(result) {
   const activationID = String(result.activationId || '').trim();
@@ -1278,7 +1308,7 @@ function normalizePortableDataPathString(value) {
     .replace(/(?:[A-Za-z]:)?[\\/](?:Users|home)[^"'\r\n]*?[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable(?:-[^\\/:"'\r\n]+)?[\\/]data/g, userDataPath)
     .replace(/(?:[A-Za-z]:)?[\\/](?:Users|home)[^"'\r\n]*?[\\/]Library[\\/]Caches[\\/]Bavi-box[\\/]usb-portable(?:-[^\\/:"'\r\n]+)?[\\/]data/g, userDataPath)
     .replace(/[A-Za-z]:[\\/](?:Users|home)[^"'\r\n]*?[\\/]AppData[\\/]Local[\\/]U-Claw[\\/]usb-portable[\\/]data-[^\\/:"'\r\n]+/g, userDataPath)
-    .replace(/[A-Za-z]:[\\/](?:Users|home)[^"'\r\n]*?[\\/]AppData[\\/]Local[\\/]Bavi-box[\\/]usb-portable[\\/]data-[^\\/:"'\r\n]+/g, userDataPath);
+    .replace(/[A-Za-z]:[\\/](?:Users|home)[^"'\r\n]*?[\\/]AppData[\\/]Local[\\/]Bavi-box[\\/]usb-portable[\\/]data-[^\\/:"'\r\n]+/g, userDataPath)
 }
 
 function normalizePortableDataPathsInJson(value, stats) {
@@ -1831,6 +1861,13 @@ function stripSystemProxyEnv(baseEnv) {
 }
 
 // ── Gateway Management ──
+function parseGatewayStartupRetryAt(message) {
+  const match = String(message || '').match(/startup migrations are already running[\s\S]*?\bafter\s+([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z)/i);
+  if (!match) return null;
+  const retryAt = Date.parse(match[1]);
+  return Number.isFinite(retryAt) ? retryAt : null;
+}
+
 function taskkillProcessTree(pid, force = false) {
   if (process.platform !== 'win32' || !pid) return;
   const args = ['/PID', String(pid), '/T'];
@@ -1847,6 +1884,9 @@ function startGateway(port) {
   return new Promise((resolve, reject) => {
     gatewayStopping = false;
     logLifecycle(`Starting OpenClaw gateway on port ${port}...`);
+    const startTime = Date.now();
+    let settled = false;
+    let migrationRetryAt = null;
 
     const nodeBin = getNodeBin();
     logLifecycle(`Using Node.js: ${nodeBin}`);
@@ -1877,7 +1917,7 @@ function startGateway(port) {
       env.OPENCLAW_DISABLE_BONJOUR = '1';
     }
 
-    gatewayProcess = spawn(nodeBin, [
+    const processToStart = spawn(nodeBin, [
       openclawEntry,
       'gateway', 'run',
       '--allow-unconfigured',
@@ -1889,8 +1929,9 @@ function startGateway(port) {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    gatewayProcess = processToStart;
 
-    gatewayProcess.stdout.on('data', (data) => {
+    processToStart.stdout.on('data', (data) => {
       const msg = data.toString().trim();
       if (msg) {
         console.log(`[OpenClaw] ${msg}`);
@@ -1898,38 +1939,56 @@ function startGateway(port) {
       }
     });
 
-    gatewayProcess.stderr.on('data', (data) => {
+    processToStart.stderr.on('data', (data) => {
       const msg = data.toString().trim();
       if (msg) {
         console.error(`[OpenClaw:err] ${msg}`);
         appendLogFile('gateway.log', `ERR ${msg}`);
+        const retryAt = parseGatewayStartupRetryAt(msg);
+        if (retryAt) migrationRetryAt = Math.max(migrationRetryAt || 0, retryAt);
       }
     });
 
-    gatewayProcess.on('error', (err) => {
+    processToStart.on('error', (err) => {
       logLifecycle(`Gateway process error: ${err.message}`);
       reject(err);
     });
 
-    gatewayProcess.on('exit', (code, signal) => {
+    processToStart.on('exit', (code, signal) => {
       logLifecycle(`Gateway exited with code ${code ?? 'null'} signal ${signal ?? 'null'}`);
-      gatewayProcess = null;
+      if (gatewayProcess === processToStart) gatewayProcess = null;
       gatewayReady = false;
+      if (!settled && migrationRetryAt && !gatewayStopping && !appIsQuitting) {
+        settled = true;
+        const delay = Math.max(1000, migrationRetryAt - Date.now() + 2000);
+        logLifecycle(`Gateway startup migration lock active; retrying in ${Math.ceil(delay / 1000)}s.`);
+        setTimeout(() => {
+          if (appIsQuitting) {
+            reject(new Error('Gateway startup cancelled'));
+            return;
+          }
+          startGateway(port).then(resolve, reject);
+        }, delay);
+        return;
+      }
       if (!gatewayStopping && !appIsQuitting) {
         scheduleGatewayRestart(`exit code=${code ?? 'null'} signal=${signal ?? 'null'}`);
       }
     });
 
     // Poll for gateway readiness
-    const startTime = Date.now();
-    let settled = false;
     const checkReady = () => {
       if (settled) return;
+      if (gatewayReady) {
+        settled = true;
+        resolve(gatewayPort);
+        return;
+      }
 
       if (Date.now() - startTime > GATEWAY_STARTUP_TIMEOUT) {
         settled = true;
         gatewayStopping = true;
-        if (gatewayProcess) gatewayProcess.kill('SIGTERM');
+        if (gatewayProcess === processToStart) processToStart.kill('SIGTERM');
         reject(new Error('Gateway startup timeout'));
         return;
       }
@@ -2153,6 +2212,11 @@ async function submitActivation(payload = {}) {
         uclawAccessToken: activationResult.accessToken,
       });
       const modelCatalogSync = await syncModelCatalogAfterActivation();
+      const activationUsbSync = syncActivationMaterialToUsb();
+      setTimeout(() => {
+        requestAppQuit({ confirm: false, exitCode: ACTIVATION_RESTART_EXIT_CODE, showShutdownPage: false })
+          .catch(error => logLifecycle(`Activation restart request failed: ${error.message}`));
+      }, 250);
       return {
         ok: true,
         code: 'ACTIVATION_CLOUD_COMPLETE',
@@ -2165,7 +2229,9 @@ async function submitActivation(payload = {}) {
         activationId: activationID,
         commitStatus: commitResult.status || 'committed',
         modelCatalogSync,
-        launchReady: true,
+        activationUsbSync,
+        restartRequired: true,
+        launchReady: false,
         retryable: false,
       };
     } catch (error) {
@@ -2178,7 +2244,7 @@ async function submitActivation(payload = {}) {
 }
 
 /**
- * Starts the normal U-Claw runtime after activation files are verified.
+ * Starts the normal Bavi-box runtime after activation files are verified.
  * Keeping the transition inside the same app avoids the visible close/reopen
  * gap that made first activation look like a failed launch.
  */
@@ -2305,9 +2371,19 @@ function loadAppPage() {
       .then(() => revealMainWindow())
       .catch(error => logLifecycle(`Failed to load dashboard: ${error.message}`));
   } else {
-    if (holdMainWindowUntilReady) return;
     const loadingHtml = path.join(__dirname, 'loading.html');
-    mainWindow.loadFile(loadingHtml);
+    const load = mainWindow.loadFile(loadingHtml);
+    Promise.resolve(load)
+      .then(() => {
+        if (!holdMainWindowUntilReady) {
+          revealMainWindow();
+          return;
+        }
+        setTimeout(() => {
+          if (!gatewayReady && !appIsQuitting) revealMainWindow();
+        }, 2000);
+      })
+      .catch(error => logLifecycle(`Failed to load loading page: ${error.message}`));
   }
 }
 
@@ -2360,19 +2436,22 @@ async function confirmAppQuit() {
   }
 }
 
-async function requestAppQuit({ confirm = true } = {}) {
+async function requestAppQuit({ confirm = true, exitCode = 0, showShutdownPage = true } = {}) {
   if (shutdownPromise) return shutdownPromise;
   if (confirm && !(await confirmAppQuit())) return null;
 
+  requestedExitCode = exitCode;
   appIsQuitting = true;
   logLifecycle('Shutdown requested');
   persistMainWindowSession();
-  await loadShutdownPage();
-  await new Promise(resolve => setTimeout(resolve, 150));
+  if (showShutdownPage) {
+    await loadShutdownPage();
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
 
   return shutdownApp()
     .catch(error => logLifecycle(`Shutdown error: ${error.message}`))
-    .finally(() => app.exit(0));
+    .finally(() => app.exit(requestedExitCode));
 }
 
 // ── Menu ──
@@ -2652,7 +2731,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', (event) => {
   if (appIsQuitting && portableFinalSyncDone) return;
   event.preventDefault();
-  requestAppQuit({ confirm: false })
+  requestAppQuit({ confirm: false, exitCode: requestedExitCode })
     .catch(error => logLifecycle(`Quit request error: ${error.message}`));
 });
 

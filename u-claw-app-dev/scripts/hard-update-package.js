@@ -27,11 +27,11 @@ const platforms = ['win32-x64', 'darwin-arm64', 'darwin-x64'];
 
 function usage() {
   console.log(`Usage:
-  node scripts/hard-update-package.js create --stage release/portable-customer/U-Claw --out release/mock-hard-update --version 2.1.18
+  node scripts/hard-update-package.js create --stage release/portable-customer/Bavi-box --out release/mock-hard-update --version 2.1.18
   node scripts/hard-update-package.js verify --release release/mock-hard-update
 
 Options:
-  --stage <dir>        Portable stage root containing U-Claw files.
+  --stage <dir>        Portable stage root containing Bavi-box files.
   --out <dir>          Output release directory.
   --release <dir>      Existing release directory for verify mode.
   --version <version>  Product version. Defaults to package.json version.
@@ -76,8 +76,8 @@ function shouldCopyProgramLayer(relative) {
   const allowedRoots = [
     'app',
     'bootstrap',
-    'U-Claw.exe',
-    'U-Claw.app',
+    'Bavi-box.exe',
+    'Bavi-box.app',
     'U-Claw Launcher.exe',
     'U-Claw Launcher.app',
     'UCLAW-PACKAGE-NOTES.txt'
@@ -113,7 +113,7 @@ function sbomFor(root, version, platformKey) {
   files.sort((a, b) => a.path.localeCompare(b.path));
   return {
     schemaVersion: 1,
-    product: 'U-Claw',
+    product: 'Bavi-box',
     version,
     platform: platformKey,
     generatedAt: new Date().toISOString(),
@@ -201,15 +201,15 @@ function create(options) {
       install: {
         replace: [
           'app/',
-          'U-Claw.exe',
-          'U-Claw.app',
+          'Bavi-box.exe',
+          'Bavi-box.app',
           'U-Claw Launcher.exe',
           'U-Claw Launcher.app',
           'UCLAW-PACKAGE-NOTES.txt',
           'bootstrap/'
         ],
         preserve: ['data/'],
-        entrypoint: platform === 'win32' ? 'U-Claw.exe' : 'U-Claw.app'
+        entrypoint: platform === 'win32' ? 'Bavi-box.exe' : 'Bavi-box.app'
       },
       runtime: {
         productVersion: options.version,

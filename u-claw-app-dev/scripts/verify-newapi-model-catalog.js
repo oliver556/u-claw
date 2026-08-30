@@ -68,8 +68,8 @@ function verifyMergeModelCatalogIntoConfig() {
 }
 
 /**
- * Verifies synced catalog models become the active cloud defaults without
- * bypassing the dedicated video adapter default.
+ * Verifies synced catalog models become the active cloud text default without
+ * bypassing the dedicated image provider or video adapter defaults.
  */
 function verifyMergeRebasesCloudManagedDefaults() {
   const config = {
@@ -101,8 +101,8 @@ function verifyMergeRebasesCloudManagedDefaults() {
   const result = mergeModelCatalogIntoConfig(config, catalog);
 
   assert.equal(result.config.agents.defaults.model.primary, 'newapi/gpt-5.5');
-  assert.equal(result.config.agents.defaults.imageGenerationModel.primary, 'newapi/gpt-image-2');
-  assert.equal(result.config.agents.defaults.imageModel.primary, 'newapi/gpt-image-2');
+  assert.equal(result.config.agents.defaults.imageGenerationModel.primary, 'litellm/gpt-image-2');
+  assert.equal(result.config.agents.defaults.imageModel.primary, 'litellm/gpt-image-2');
   assert.equal(result.config.agents.defaults.videoGenerationModel.primary, 'xai/jimeng-video-3-720p');
 }
 

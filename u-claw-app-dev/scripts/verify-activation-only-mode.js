@@ -171,15 +171,16 @@ for (const source of [
   requireText(source[1], 'UCLAW_ACTIVATION_ENDPOINT', `${source[0]} activation endpoint env`);
   requireText(source[1], 'UCLAW_ACTIVATION_REQUIRE_CLOUD', `${source[0]} activation strict env`);
   requireText(source[1], 'https://license.yiyong.me', `${source[0]} production activation endpoint`);
-  if (source[1].includes('openclaw.json.last-good') || source[1].includes("'.openclaw/openclaw.json'") || source[1].includes("'openclaw.json'")) {
-    throw new Error(`${source[0]} must sync activation OpenClaw config back to USB`);
-  }
 }
-requireText(macStart, 'decompressing directly from USB archive', 'macOS start script direct archive fallback');
-requireText(generatedMacScript, 'decompressing directly from USB archive', 'generated macOS launcher direct archive fallback');
+requireText(main, 'syncActivationMaterialToUsb', 'activation material USB sync helper');
+requireText(main, "path.join('.openclaw', 'openclaw.json')", 'activation OpenClaw config USB sync whitelist');
+requireText(main, 'ACTIVATION_RESTART_EXIT_CODE = 20', 'activation restart exit code');
+requireText(main, 'restartRequired: true', 'activation restart result marker');
+requireText(macStart, 'Installing updated app cache from USB archive', 'macOS start script direct archive fallback');
+requireText(generatedMacScript, 'Installing updated app cache from USB archive', 'generated macOS launcher direct archive fallback');
 requireText(macLauncher, 'kActivationRestartExitCode = 20', 'macOS legacy activation restart exit code');
 requireText(windowsLauncher, 'activationRestartExitCode = 20', 'Windows legacy activation restart exit code');
 requireText(windowsStart, 'if "%APP_EXIT%"=="20"', 'Windows legacy direct script activation restart loop');
-requireText(packagePortable, 'writes activated data/.openclaw/openclaw.json back to USB', 'package notes activation config sync');
+requireText(packagePortable, 'Activation writes approved license and model credential files back to USB', 'package notes activation material sync');
 
 console.log(JSON.stringify({ ok: true, step: 'activation_only_contracts' }));

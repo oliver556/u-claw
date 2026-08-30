@@ -107,6 +107,7 @@ function rebaseDefaultModelsToCatalog(config, providerID, models) {
   };
   const patchPrimary = (container, key, kind) => {
     const current = String(container?.[key] || '').trim();
+    if (kind === 'image' && splitQualifiedModelID(current).provider === 'litellm') return;
     const picked = pickModelID(current, kind);
     if (!picked) return;
     const next = `${providerID}/${picked}`;

@@ -38,12 +38,12 @@ function writeFile(filePath, value) {
 
 function createMockStage(stageRoot, edition) {
   fs.rmSync(stageRoot, { recursive: true, force: true });
-  writeFile(path.join(stageRoot, 'app', 'scripts', 'Mac-Start-App.command'), '#!/bin/bash\necho U-Claw\n');
-  writeFile(path.join(stageRoot, 'app', 'scripts', 'Windows-Start-App.bat'), '@echo off\r\necho U-Claw\r\n');
-  writeFile(path.join(stageRoot, 'app', 'scripts', 'Windows-Sync-Data.ps1'), "Write-Host 'U-Claw sync'\n");
+  writeFile(path.join(stageRoot, 'app', 'scripts', 'Mac-Start-App.command'), '#!/bin/bash\necho Bavi-box\n');
+  writeFile(path.join(stageRoot, 'app', 'scripts', 'Windows-Start-App.bat'), '@echo off\r\necho Bavi-box\r\n');
+  writeFile(path.join(stageRoot, 'app', 'scripts', 'Windows-Sync-Data.ps1'), "Write-Host 'Bavi-box sync'\n");
   writeFile(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), `${edition} mock\n`);
-  writeFile(path.join(stageRoot, 'U-Claw.exe'), 'mock windows launcher\n');
-  writeFile(path.join(stageRoot, 'U-Claw.app', 'Contents', 'MacOS', 'U-Claw'), 'mock mac launcher\n');
+  writeFile(path.join(stageRoot, 'Bavi-box.exe'), 'mock windows launcher\n');
+  writeFile(path.join(stageRoot, 'Bavi-box.app', 'Contents', 'MacOS', 'Bavi-box'), 'mock mac launcher\n');
   writeFile(path.join(stageRoot, 'bootstrap', 'README.txt'), 'mock bootstrap placeholder\n');
   for (const name of ['u-claw-app-mac-arm64.tar.gz', 'u-claw-app-mac-x64.tar.gz', 'u-claw-app-win-x64.zip']) {
     const archive = path.join(stageRoot, 'app', 'desktop-archive', name);
@@ -97,8 +97,8 @@ function assertNoForbiddenReleaseFiles(releaseRoot) {
 }
 
 function verifyPackagePolicy(tmp) {
-  const customerStage = path.join(tmp, 'stage-customer', 'U-Claw');
-  const streamerStage = path.join(tmp, 'stage-streamer', 'U-Claw');
+  const customerStage = path.join(tmp, 'stage-customer', 'Bavi-box');
+  const streamerStage = path.join(tmp, 'stage-streamer', 'Bavi-box');
   createMockStage(customerStage, 'customer');
   createMockStage(streamerStage, 'streamer');
   const customerConfig = readJson(path.join(customerStage, 'data', '.openclaw', 'openclaw.json'));
@@ -108,7 +108,7 @@ function verifyPackagePolicy(tmp) {
   assert(streamerConfig.models.providers.custom.apiKey === 'mock-streamer-key', 'streamer stage key missing');
   assert(fs.existsSync(path.join(streamerStage, 'data', '.openclaw', 'agents', 'main', 'agent', 'openclaw-agent.sqlite')), 'streamer auth store missing');
 
-  const oldDisk = path.join(tmp, 'old-disk', 'U-Claw');
+  const oldDisk = path.join(tmp, 'old-disk', 'Bavi-box');
   writeJson(path.join(oldDisk, 'data', '.openclaw', 'openclaw.json'), {
     preserved: true,
     models: { providers: { custom: { apiKey: '' }, litellm: { apiKey: '' } } }
@@ -155,7 +155,7 @@ function serveStatic(root) {
 }
 
 async function verifyHardUpdateFlow(tmp) {
-  const stage = path.join(tmp, 'stage-customer', 'U-Claw');
+  const stage = path.join(tmp, 'stage-customer', 'Bavi-box');
   const releaseRoot = path.join(tmp, 'local-hard-update-release');
   const mockEnvPath = path.join(tmp, 'mock-release.env');
   writeFile(mockEnvPath, '');
@@ -163,7 +163,7 @@ async function verifyHardUpdateFlow(tmp) {
   run(process.execPath, ['scripts/hard-update-package.js', 'verify', '--release', releaseRoot]);
   assertNoForbiddenReleaseFiles(releaseRoot);
 
-  const usbRoot = path.join(tmp, 'usb', 'U-Claw');
+  const usbRoot = path.join(tmp, 'usb', 'Bavi-box');
   writeJson(path.join(usbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
   writeJson(path.join(usbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me' });
   const stamp = path.join(usbRoot, '.mock-cache', 'app', '.u-claw-archive.sha256');
@@ -194,7 +194,7 @@ async function verifyHardUpdateFlow(tmp) {
       '--env',
       mockEnvPath
     ]);
-    const httpUsbRoot = path.join(tmp, 'http-usb', 'U-Claw');
+    const httpUsbRoot = path.join(tmp, 'http-usb', 'Bavi-box');
     writeJson(path.join(httpUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
     writeJson(path.join(httpUsbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me-http' });
     const httpBefore = sha256File(path.join(httpUsbRoot, 'data', '.openclaw', 'openclaw.json'));
@@ -208,7 +208,7 @@ async function verifyHardUpdateFlow(tmp) {
     assert(readJson(path.join(httpUsbRoot, 'app', 'version.json')).version === '9.9.9', 'HTTP version.json not updated');
   assert(readJson(path.join(httpUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'HTTP transaction not complete');
 
-    const startupUsbRoot = path.join(tmp, 'startup-usb', 'U-Claw');
+    const startupUsbRoot = path.join(tmp, 'startup-usb', 'Bavi-box');
     writeJson(path.join(startupUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
     writeJson(path.join(startupUsbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me-startup' });
     writeFile(path.join(startupUsbRoot, 'data', '.uclaw', 'activation-builtin-credential.v1.json'), '{bad activation json');
@@ -229,7 +229,7 @@ async function verifyHardUpdateFlow(tmp) {
     assert(readJson(path.join(startupUsbRoot, 'app', 'version.json')).version === '9.9.9', 'startup version.json not updated');
     assert(readJson(path.join(startupUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'startup transaction not complete');
 
-    const crossPlatformUsbRoot = path.join(tmp, 'cross-platform-usb', 'U-Claw');
+    const crossPlatformUsbRoot = path.join(tmp, 'cross-platform-usb', 'Bavi-box');
     writeJson(path.join(crossPlatformUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
     writeJson(path.join(crossPlatformUsbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me-cross-platform' });
     await require('./hard-update-client').mockUpdate({
@@ -241,7 +241,7 @@ async function verifyHardUpdateFlow(tmp) {
       fs.existsSync(path.join(crossPlatformUsbRoot, 'app', 'desktop-archive', 'u-claw-app-win-x64.zip')),
       'darwin update removed Windows archive'
     );
-    assert(fs.existsSync(path.join(crossPlatformUsbRoot, 'U-Claw.exe')), 'darwin update removed Windows launcher');
+    assert(fs.existsSync(path.join(crossPlatformUsbRoot, 'Bavi-box.exe')), 'darwin update removed Windows launcher');
     assert(
       fs.existsSync(path.join(crossPlatformUsbRoot, 'app', 'desktop-archive', 'u-claw-app-mac-x64.tar.gz')),
       'darwin-arm64 update removed Mac x64 archive'
@@ -260,7 +260,7 @@ async function verifyHardUpdateFlow(tmp) {
     const controlPort = await listen(controlPlaneServer);
     try {
       const checkResult = await require('./hard-update-client').check({
-        usb: path.join(tmp, 'control-plane-usb', 'U-Claw'),
+        usb: path.join(tmp, 'control-plane-usb', 'Bavi-box'),
         updateCheckUrl: `http://127.0.0.1:${controlPort}/uclaw/update/check`,
         platform: 'win32-x64',
         device: '22222222-2222-4222-8222-222222222222',
@@ -270,7 +270,7 @@ async function verifyHardUpdateFlow(tmp) {
       let denied = false;
       try {
         await require('./hard-update-client').check({
-          usb: path.join(tmp, 'control-plane-denied-usb', 'U-Claw'),
+          usb: path.join(tmp, 'control-plane-denied-usb', 'Bavi-box'),
           updateCheckUrl: `http://127.0.0.1:${controlPort}/uclaw/update/check`,
           platform: 'win32-x64',
           device: ''
@@ -299,7 +299,7 @@ function verifyControlPlaneProdBaseUrl(tmp) {
 }
 
 function verifyBadDataPackageFails(tmp) {
-  const stage = path.join(tmp, 'bad-stage', 'U-Claw');
+  const stage = path.join(tmp, 'bad-stage', 'Bavi-box');
   const releaseRoot = path.join(tmp, 'bad-release');
   const mockEnvPath = path.join(tmp, 'bad-release.env');
   writeFile(mockEnvPath, '');
@@ -320,17 +320,17 @@ function verifyBadDataPackageFails(tmp) {
 function verifyPortableMetadataHandling(tmp) {
   const { isPortableMetadataPath, listZipEntries, prunePortableMetadata, treeDigest } = require('./lib/hard-update-utils');
   assert(isPortableMetadataPath('._UCLAW-PACKAGE-NOTES.txt'), 'AppleDouble metadata path must be recognized');
-  assert(isPortableMetadataPath('U-Claw.app/Contents/._Info.plist'), 'nested AppleDouble metadata path must be recognized');
+  assert(isPortableMetadataPath('Bavi-box.app/Contents/._Info.plist'), 'nested AppleDouble metadata path must be recognized');
   assert(isPortableMetadataPath('__MACOSX/anything'), '__MACOSX metadata path must be recognized');
   assert(!isPortableMetadataPath('app/scripts/Mac-Start-App.command'), 'normal package path must not be treated as metadata');
 
   const clean = path.join(tmp, 'metadata-clean');
   const dirty = path.join(tmp, 'metadata-dirty');
   writeFile(path.join(clean, 'app', 'scripts', 'Mac-Start-App.command'), '#!/bin/bash\necho ok\n');
-  writeFile(path.join(clean, 'U-Claw.app', 'Contents', 'Info.plist'), '<plist />\n');
+  writeFile(path.join(clean, 'Bavi-box.app', 'Contents', 'Info.plist'), '<plist />\n');
   fs.cpSync(clean, dirty, { recursive: true });
   writeFile(path.join(dirty, 'app', 'scripts', '._Mac-Start-App.command'), 'appledouble\n');
-  writeFile(path.join(dirty, 'U-Claw.app', 'Contents', '._Info.plist'), 'appledouble\n');
+  writeFile(path.join(dirty, 'Bavi-box.app', 'Contents', '._Info.plist'), 'appledouble\n');
   writeFile(path.join(dirty, '__MACOSX', 'ignored'), 'metadata\n');
   prunePortableMetadata(dirty);
   assert(treeDigest(clean) === treeDigest(dirty), 'portable metadata pruning must preserve real tree digest');
@@ -398,7 +398,7 @@ async function verifySignatureAndPathFixtures(tmp) {
   }
   assert(symlinkFailed, 'symlink package entry must fail');
 
-  const failedUsb = path.join(tmp, 'failed-usb', 'U-Claw');
+  const failedUsb = path.join(tmp, 'failed-usb', 'Bavi-box');
   const failedRelease = path.join(tmp, 'failed-release');
   const mockEnvPath = path.join(tmp, 'failed-release.env');
   writeFile(mockEnvPath, '');
