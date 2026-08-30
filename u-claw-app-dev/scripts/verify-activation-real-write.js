@@ -100,9 +100,8 @@ function startActivationStub() {
           newapiToken,
           tokenVersion: 1,
           defaultModels: {
-            text: 'custom/gpt-5.5',
-            image: 'litellm/gpt-image-2',
-            video: 'xai/jimeng-video-3-720p',
+            text: 'newapi/gpt-5.5',
+            image: 'newapi/gpt-image-2',
           },
           licenseArtifact: {
             payload: {
@@ -321,21 +320,25 @@ function verifyLocalActivationMaterial() {
   ) {
     throw new Error('update credential was not written correctly');
   }
-  for (const providerName of ['custom', 'litellm']) {
+  if (openclaw.models?.providers?.newapi) {
+    throw new Error('OpenClaw newapi provider should not be configured as a send route');
+  }
+  for (const providerName of ['custom', 'litellm', 'xai']) {
     const provider = openclaw.models?.providers?.[providerName];
     if (provider?.baseUrl !== newapiBaseUrl || provider?.apiKey !== newapiToken) {
-      throw new Error(`OpenClaw provider ${providerName} was not configured`);
+      throw new Error(`OpenClaw provider ${providerName} did not reuse activation credentials`);
     }
   }
-  const catalogProvider = openclaw.models?.providers?.newapi;
-  if (catalogProvider?.baseUrl !== newapiBaseUrl || catalogProvider?.apiKey !== newapiToken) {
-    throw new Error('OpenClaw newapi provider did not reuse activation credentials');
+  if (openclaw.agents?.defaults?.model?.primary !== 'custom/gpt-5.5') {
+    throw new Error(`unexpected text model route: ${openclaw.agents?.defaults?.model?.primary}`);
   }
-  if (!Array.isArray(catalogProvider.models) || catalogProvider.models.length !== 2) {
-    throw new Error('OpenClaw newapi provider did not store cloud catalog models');
+  if (openclaw.agents?.defaults?.imageGenerationModel?.primary !== 'litellm/gpt-image-2') {
+    throw new Error(`unexpected image model route: ${openclaw.agents?.defaults?.imageGenerationModel?.primary}`);
   }
-  if (catalogProvider.models[0].id !== 'gpt-5.5' || catalogProvider.models[1].id !== 'gpt-image-2') {
-    throw new Error(`unexpected cloud catalog model order: ${JSON.stringify(catalogProvider.models)}`);
+  const customModels = openclaw.models?.providers?.custom?.models || [];
+  const imageModels = openclaw.models?.providers?.litellm?.models || [];
+  if (customModels[0]?.id !== 'gpt-5.5' || imageModels[0]?.id !== 'gpt-image-2') {
+    throw new Error(`unexpected routed cloud catalog models: ${JSON.stringify({ customModels, imageModels })}`);
   }
   if (activationState.status !== 'activated' || activationState.commitStatus !== 'committed' || activationState.uclawAccessToken !== accessToken) {
     throw new Error('activation state did not reach committed status');

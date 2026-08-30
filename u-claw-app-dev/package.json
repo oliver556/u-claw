@@ -6,6 +6,9 @@
   "author": "Bavi-box <hello@u-claw.org> (https://u-claw.org)",
   "license": "MIT",
   "homepage": "https://u-claw.org",
+  "_scriptNotes": {
+    "dev:skip-activation": "Development-only shortcut. Starts npm run dev with UCLAW_SKIP_ACTIVATION_GATE=1, so the app skips the first-start activation gate. It does not create cloud activation license, New API credential, or shipment USB activation material."
+  },
   "scripts": {
     "sync-lib": "node scripts/sync-lib.js",
     "sync:config": "node scripts/sync-openclaw-config.js",
@@ -14,6 +17,7 @@
     "patch-openclaw": "node scripts/patch-openclaw.js",
     "start": "npm run patch-openclaw && npm run sync-lib && electron .",
     "dev": "npm run patch-openclaw && npm run sync-lib && electron . --dev",
+    "dev:skip-activation": "UCLAW_SKIP_ACTIVATION_GATE=1 npm run dev",
     "dev:env": "node scripts/with-local-env.js npm run dev",
     "dev:video": "npm run dev",
     "build:mac": "npm run prepare-build && electron-builder --mac",

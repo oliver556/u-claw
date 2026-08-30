@@ -41,7 +41,7 @@ func TestRedeemReturnsClientConfig(t *testing.T) {
 	if result.NewAPIToken != "preview-token" {
 		t.Fatal("missing preview token")
 	}
-	if result.DefaultModels.Text != "custom/gpt-5.5" {
+	if result.DefaultModels.Text != "newapi/gpt-5.5" {
 		t.Fatalf("text model = %q", result.DefaultModels.Text)
 	}
 }

@@ -19,6 +19,10 @@ function verifyNormalizeCatalogModel() {
   const imageModel = normalizeCatalogModel({ id: 'gpt-image-2', capabilities: ['image'] });
   assert.deepEqual(imageModel.input, ['text', 'image']);
   assert.deepEqual(imageModel.capabilities, ['image']);
+
+  const videoModel = normalizeCatalogModel({ id: 'seedance-1.5-pro-1080p-10s', capabilities: ['text'] });
+  assert.deepEqual(videoModel.input, ['text', 'image']);
+  assert.deepEqual(videoModel.capabilities, ['video']);
 }
 
 /**
@@ -36,13 +40,14 @@ function verifyReusableApiKey() {
 }
 
 /**
- * Verifies cloud catalog merge is scoped to models.providers.newapi.
+ * Verifies cloud catalog model names sync into routed OpenClaw providers.
  */
 function verifyMergeModelCatalogIntoConfig() {
   const config = {
     models: {
       providers: {
         custom: { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-existing', models: [{ id: 'local' }] },
+        litellm: { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-existing', models: [] },
         xai: { baseUrl: 'http://127.0.0.1:18808/xai/v1', apiKey: 'adapter' },
       },
     },
@@ -58,18 +63,17 @@ function verifyMergeModelCatalogIntoConfig() {
 
   assert.equal(result.changed, true);
   assert.equal(result.count, 2);
-  assert.equal(result.config.models.providers.custom.models[0].id, 'local');
-  assert.equal(result.config.models.providers.xai.apiKey, 'adapter');
-  assert.equal(result.config.models.providers.newapi.baseUrl, 'https://api.example.com/v1');
-  assert.equal(result.config.models.providers.newapi.apiKey, 'sk-existing');
-  assert.equal(result.config.models.providers.newapi.models[0].id, 'gpt-5.5');
-  assert.deepEqual(result.config.models.providers.newapi.models[1].input, ['text', 'image']);
-  assert.equal(Object.hasOwn(result.config.models.providers.newapi.models[1], 'capabilities'), false);
+  assert.equal(result.config.models.providers.newapi, undefined);
+  assert.equal(result.config.models.providers.custom.baseUrl, 'https://api.example.com/v1');
+  assert.equal(result.config.models.providers.custom.apiKey, 'sk-existing');
+  assert.equal(result.config.models.providers.custom.models[0].id, 'gpt-5.5');
+  assert.equal(result.config.models.providers.litellm.models[0].id, 'gpt-image-2');
+  assert.equal(Object.hasOwn(result.config.models.providers.litellm.models[0], 'capabilities'), false);
+  assert.equal(result.config.models.providers.xai.apiKey, 'sk-existing');
 }
 
 /**
- * Verifies synced catalog models become the active cloud text default without
- * bypassing the dedicated image provider or video adapter defaults.
+ * Verifies synced catalog models keep OpenClaw's routed providers.
  */
 function verifyMergeRebasesCloudManagedDefaults() {
   const config = {
@@ -100,14 +104,59 @@ function verifyMergeRebasesCloudManagedDefaults() {
 
   const result = mergeModelCatalogIntoConfig(config, catalog);
 
-  assert.equal(result.config.agents.defaults.model.primary, 'newapi/gpt-5.5');
+  assert.equal(result.config.agents.defaults.model.primary, 'custom/gpt-5.5');
   assert.equal(result.config.agents.defaults.imageGenerationModel.primary, 'litellm/gpt-image-2');
   assert.equal(result.config.agents.defaults.imageModel.primary, 'litellm/gpt-image-2');
   assert.equal(result.config.agents.defaults.videoGenerationModel.primary, 'xai/jimeng-video-3-720p');
+}
+
+/**
+ * Verifies an empty cloud catalog keeps the last local routed model lists.
+ */
+function verifyMergeKeepsLocalCatalogWhenCloudEmpty() {
+  const config = {
+    agents: {
+      defaults: {
+        model: { primary: 'custom/gpt-5.5' },
+      },
+    },
+    models: {
+      providers: {
+        custom: {
+          baseUrl: 'https://api.example.com/v1',
+          apiKey: 'sk-existing',
+          models: [
+            { id: 'gpt-5.5', input: ['text'] },
+          ],
+        },
+        xai: {
+          baseUrl: 'https://api.example.com/v1',
+          apiKey: 'sk-existing',
+          models: [
+            { id: 'seedance-1.5-pro-1080p-10s', input: ['text'] },
+          ],
+        },
+      },
+    },
+  };
+  const catalog = {
+    provider: { id: 'newapi', baseUrl: 'https://api.example.com/v1/', api: 'openai-completions' },
+    models: [],
+  };
+
+  const result = mergeModelCatalogIntoConfig(config, catalog);
+
+  assert.equal(result.count, 0);
+  assert.equal(result.availableCount, 2);
+  assert.equal(result.usedLocalCatalog, true);
+  assert.equal(result.config.models.providers.custom.models.length, 1);
+  assert.equal(result.config.models.providers.xai.models.length, 1);
+  assert.deepEqual(result.config.models.providers.xai.models[0].input, ['text', 'image']);
 }
 
 verifyNormalizeCatalogModel();
 verifyReusableApiKey();
 verifyMergeModelCatalogIntoConfig();
 verifyMergeRebasesCloudManagedDefaults();
+verifyMergeKeepsLocalCatalogWhenCloudEmpty();
 console.log('newapi model catalog verifier passed');

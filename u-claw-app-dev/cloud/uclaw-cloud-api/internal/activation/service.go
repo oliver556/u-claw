@@ -199,13 +199,10 @@ func NewService(store Store, cfg Config) (*Service, error) {
 		cfg.PreviewToken = "uclaw-preview-newapi-token"
 	}
 	if strings.TrimSpace(cfg.DefaultTextModel) == "" {
-		cfg.DefaultTextModel = "custom/gpt-5.5"
+		cfg.DefaultTextModel = "newapi/gpt-5.5"
 	}
 	if strings.TrimSpace(cfg.DefaultImageModel) == "" {
-		cfg.DefaultImageModel = "litellm/gpt-image-2"
-	}
-	if strings.TrimSpace(cfg.DefaultVideoModel) == "" {
-		cfg.DefaultVideoModel = "xai/jimeng-video-3-720p"
+		cfg.DefaultImageModel = "newapi/gpt-image-2"
 	}
 	if cfg.LicenseSigner == nil {
 		cfg.LicenseSigner = license.NewDevelopmentSigner()

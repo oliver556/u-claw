@@ -251,7 +251,7 @@ func (s *Service) remember(key string, catalog Catalog) {
 func classifyCapabilities(model string) []string {
 	lower := strings.ToLower(model)
 	switch {
-	case strings.Contains(lower, "video") || strings.Contains(lower, "jimeng") || strings.Contains(lower, "kling") || strings.Contains(lower, "runway"):
+	case strings.Contains(lower, "video") || strings.Contains(lower, "jimeng") || strings.Contains(lower, "kling") || strings.Contains(lower, "runway") || strings.Contains(lower, "seedance"):
 		return []string{"video"}
 	case strings.Contains(lower, "image") || strings.Contains(lower, "dall") || strings.Contains(lower, "flux") || strings.Contains(lower, "midjourney"):
 		return []string{"image"}

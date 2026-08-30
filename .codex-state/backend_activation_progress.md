@@ -24,9 +24,9 @@
 - [x] Filter New API login audit rows from model usage ledger
 
 ### Current status
-- Current step: 模型页余额金额展示与 600w 价格口径已完成，等待用户视觉验收。
-- Last completed: 将账户余额卡主数字改为人民币金额，统一 `1 元 = 600w 算力` 文案，并修复 E2E 临时 New API provider config 不兼容问题。
-- Next action: 用户验收当前界面；通过后继续接 Alipay 官方支付下单、验签回调与补偿 worker。
+- Current step: 模型页底部趋势图/流水展示比例已修复，等待用户视觉验收。
+- Last completed: 将趋势图与使用流水改回接近高保真设计的上下全宽分析区，收紧趋势图高度，并补充 Electron 布局断言。
+- Next action: 用户验收当前模型页；通过后继续接 Alipay 官方支付下单、验签回调与补偿 worker。
 
 ### Notes
 - 阿里云 U-Claw 服务负责账号、激活、订单、支付回调、New API 管理编排。
@@ -63,3 +63,4 @@
 - 最新验证通过：`go test ./...`、`node scripts/verify-cloud-model-usage-ui.js`、`git diff --check`。
 - 价格口径确认：`1 CNY = 500000 New API quota = 600w Bavi-box 算力`；模型页“账户余额”主数字按剩余 New API quota 折算人民币展示，不展示账户算力大数字。
 - 最新验证通过：`npm run patch-openclaw`、`node scripts/verify-model-usage-dashboard.js`、`node scripts/verify-newapi-model-catalog.js`、`go test ./...`、`./deploy/scripts/activation-local-e2e.sh`、`node scripts/verify-cloud-model-usage-ui.js`。
+- 模型页底部布局确认：趋势图与使用流水不再同排挤压；趋势图卡约 229px 高，流水卡全宽约 904px，E2E 已断言上下排列与表格宽度。

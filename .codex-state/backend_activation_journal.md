@@ -189,3 +189,11 @@
 - Files changed: `u-claw-app-dev/scripts/patch-openclaw.js`, `scripts/verify-model-usage-dashboard.js`, `scripts/verify-cloud-model-usage-ui.js`, `scripts/verify-newapi-model-catalog.js`, `src/model-catalog.js`, `.codex-state/backend_activation_progress.md`, `.codex-state/backend_activation_journal.md`。
 - Commands run: `npm run patch-openclaw`, `node scripts/verify-model-usage-dashboard.js`, `node scripts/verify-newapi-model-catalog.js`, `go test ./...`, `./deploy/scripts/activation-local-e2e.sh`, `node scripts/verify-cloud-model-usage-ui.js`, `UCLAW_UI_E2E_KEEPALIVE=1 node scripts/verify-cloud-model-usage-ui.js`。
 - Next: 用户验收当前金额展示；确认后继续支付宝官方支付 adapter 与回调补偿。
+
+## 2026-08-30 06:01
+
+- Did: 按用户截图反馈修复模型页底部展示比例，将趋势图/使用流水从同排挤压改为上下全宽展示，并收紧趋势图高度。
+- Result: 静态 dashboard 检查与 Electron E2E 均通过；keepalive 验收环境已打开在 `http://127.0.0.1:18789/chat?session=main`，截图 `/tmp/uclaw-model-usage-ui.png`。
+- Files changed: `u-claw-app-dev/scripts/patch-openclaw.js`, `u-claw-app-dev/scripts/verify-model-usage-dashboard.js`, `u-claw-app-dev/scripts/verify-cloud-model-usage-ui.js`, `.codex-state/backend_activation_progress.md`, `.codex-state/backend_activation_journal.md`。
+- Commands run: `npm run patch-openclaw`, `node scripts/verify-model-usage-dashboard.js`, `node scripts/verify-newapi-model-catalog.js`, `node scripts/verify-cloud-model-usage-ui.js`, `UCLAW_UI_E2E_KEEPALIVE=1 node scripts/verify-cloud-model-usage-ui.js`, `curl http://127.0.0.1:18789/health`。
+- Next: 用户验收当前模型页；确认后继续支付宝官方支付 adapter 与回调补偿。

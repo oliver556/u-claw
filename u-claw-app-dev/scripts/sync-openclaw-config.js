@@ -70,10 +70,6 @@ function parseArgs(argv) {
       options.newApiKey = readValue();
     } else if (arg === '--new-api-base-url') {
       options.newApiBaseUrl = readValue();
-    } else if (arg === '--video-base-url') {
-      options.videoBaseUrl = readValue();
-    } else if (arg === '--video-api-key') {
-      options.videoApiKey = readValue();
     } else if (arg === '--customer') {
       options.customer = true;
     } else if (arg === '--streamer') {
@@ -135,6 +131,10 @@ function providerValue(provider, keys) {
   return '';
 }
 
+function isNewApiBaseUrl(baseUrl) {
+  return /(?:api\.gmnlee\.com|api\.yiyong\.me)/i.test(String(baseUrl || ''));
+}
+
 function findNewApiKey(configs) {
   for (const config of configs) {
     if (!config) continue;
@@ -146,12 +146,12 @@ function findNewApiKey(configs) {
     }
 
     const providers = config.models?.providers || {};
-    for (const provider of Object.values(providers)) {
+    for (const [providerName, provider] of Object.entries(providers)) {
       const baseUrl = providerValue(provider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl']);
       const apiKey = providerValue(provider, ['apiKey', 'api_key', 'key']);
       if (apiKey
         && apiKey !== LEGACY_VIDEO_ADAPTER_API_KEY
-        && /api\.(gmnlee|yiyong)\.me/i.test(baseUrl)) {
+        && (providerName === 'newapi' || isNewApiBaseUrl(baseUrl))) {
         return apiKey;
       }
     }
@@ -244,6 +244,8 @@ function buildConfig(options, sourceConfigs) {
   providers.xai.api = 'openai-completions';
   providers.xai.models = templateProviders.xai.models;
 
+  delete providers.newapi;
+
   mergedConfig.agents.defaults.model = { primary: 'custom/gpt-5.5' };
   mergedConfig.agents.defaults.imageGenerationModel = {
     primary: 'litellm/gpt-image-2',
@@ -265,7 +267,6 @@ function buildConfig(options, sourceConfigs) {
 function validateConfig(config, options, newApiKey) {
   const providers = config.models?.providers || {};
   const videoBaseUrl = normalizeBaseUrl(providers.xai?.baseUrl);
-  const newApiBaseUrl = normalizeBaseUrl(options.newApiBaseUrl);
 
   if (options.streamer
     && (!newApiKey || newApiKey === LEGACY_VIDEO_ADAPTER_API_KEY)) {
@@ -329,7 +330,6 @@ function main() {
   const mode = options.customer ? 'customer' : options.streamer ? 'streamer/internal' : 'standard';
   console.log(`[sync:config] mode: ${mode}`);
   console.log(`[sync:config] New API key: ${describeKey(newApiKey)}`);
-  console.log(`[sync:config] video base: ${config.models.providers.xai.baseUrl}`);
   for (const destination of destinations) writeConfig(destination, config);
 }
 
