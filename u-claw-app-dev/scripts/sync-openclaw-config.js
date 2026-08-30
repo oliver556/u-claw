@@ -10,9 +10,9 @@ const appSupportPath = path.join(os.homedir(), 'Library', 'Application Support')
 const appDataNames = ['u-claw', 'U-Claw'];
 const desktopConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, '.openclaw', 'openclaw.json'));
 const portableCacheConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, 'usb-portable', 'data', '.openclaw', 'openclaw.json'));
-const DEFAULT_NEW_API_BASE_URL = 'https://api.gmnlee.com/v1';
-const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://video-adapter.gmnlee.com/xai/v1';
-const DEFAULT_VIDEO_ADAPTER_API_KEY = 'uclaw-video-adapter';
+const DEFAULT_NEW_API_BASE_URL = 'https://api.yiyong.me/v1';
+const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://api.yiyong.me/v1';
+const LEGACY_VIDEO_ADAPTER_API_KEY = 'uclaw-video-adapter';
 
 function usage() {
   console.log(`Usage:
@@ -51,7 +51,7 @@ function parseArgs(argv) {
     newApiKey: process.env.UCLAW_NEW_API_KEY || '',
     newApiBaseUrl: process.env.UCLAW_NEW_API_BASE_URL || DEFAULT_NEW_API_BASE_URL,
     videoBaseUrl: process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || DEFAULT_VIDEO_ADAPTER_BASE_URL,
-    videoApiKey: process.env.UCLAW_VIDEO_ADAPTER_API_KEY || DEFAULT_VIDEO_ADAPTER_API_KEY
+    videoApiKey: process.env.UCLAW_VIDEO_ADAPTER_API_KEY || ''
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -141,7 +141,7 @@ function findNewApiKey(configs) {
     const envKey = config.env?.UCLAW_NEW_API_KEY;
     if (typeof envKey === 'string'
       && envKey.trim()
-      && envKey.trim() !== DEFAULT_VIDEO_ADAPTER_API_KEY) {
+      && envKey.trim() !== LEGACY_VIDEO_ADAPTER_API_KEY) {
       return envKey.trim();
     }
 
@@ -150,8 +150,8 @@ function findNewApiKey(configs) {
       const baseUrl = providerValue(provider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl']);
       const apiKey = providerValue(provider, ['apiKey', 'api_key', 'key']);
       if (apiKey
-        && apiKey !== DEFAULT_VIDEO_ADAPTER_API_KEY
-        && /api\.gmnlee\.com/i.test(baseUrl)) {
+        && apiKey !== LEGACY_VIDEO_ADAPTER_API_KEY
+        && /api\.(gmnlee|yiyong)\.me/i.test(baseUrl)) {
         return apiKey;
       }
     }
@@ -212,7 +212,7 @@ function buildConfig(options, sourceConfigs) {
   const requestedNewApiKey = String(options.newApiKey || '').trim();
   const newApiKey = options.customer
     ? ''
-    : requestedNewApiKey && requestedNewApiKey !== DEFAULT_VIDEO_ADAPTER_API_KEY
+    : requestedNewApiKey && requestedNewApiKey !== LEGACY_VIDEO_ADAPTER_API_KEY
       ? requestedNewApiKey
       : findNewApiKey(sourceConfigs);
   mergedConfig.models = mergedConfig.models || {};
@@ -240,7 +240,7 @@ function buildConfig(options, sourceConfigs) {
     ...(providers.xai || {})
   };
   providers.xai.baseUrl = normalizeBaseUrl(options.videoBaseUrl || DEFAULT_VIDEO_ADAPTER_BASE_URL);
-  providers.xai.apiKey = options.videoApiKey || DEFAULT_VIDEO_ADAPTER_API_KEY;
+  providers.xai.apiKey = options.customer ? '' : (options.videoApiKey || newApiKey || '');
   providers.xai.api = 'openai-completions';
   providers.xai.models = templateProviders.xai.models;
 
@@ -268,7 +268,7 @@ function validateConfig(config, options, newApiKey) {
   const newApiBaseUrl = normalizeBaseUrl(options.newApiBaseUrl);
 
   if (options.streamer
-    && (!newApiKey || newApiKey === DEFAULT_VIDEO_ADAPTER_API_KEY)) {
+    && (!newApiKey || newApiKey === LEGACY_VIDEO_ADAPTER_API_KEY)) {
     throw new Error('streamer config requires a real New API key in desktop config or UCLAW_NEW_API_KEY');
   }
   if (options.customer
@@ -278,10 +278,10 @@ function validateConfig(config, options, newApiKey) {
   if (!videoBaseUrl) {
     throw new Error('xai video adapter base URL is empty');
   }
-  if (videoBaseUrl === newApiBaseUrl || /api\.gmnlee\.com/i.test(videoBaseUrl)) {
-    throw new Error('xai video provider must point to the video adapter, not directly to New API');
+  if (/gmnlee\.com/i.test(videoBaseUrl)) {
+    throw new Error('xai video provider must not use legacy gmnlee domains');
   }
-  if (!providers.xai?.apiKey) {
+  if (!options.customer && !providers.xai?.apiKey) {
     throw new Error('xai video adapter token is empty');
   }
 }

@@ -226,3 +226,19 @@ U-Claw Launcher.app
 update check 控制面只用于显式回归；prod 默认入口仍需上线前切换确认。
 Windows 当前在 macOS 上只能做脚本与 mock 验证；真机双击需回 Windows 验收。
 ```
+
+## 2026-08-30 域名收口待办
+
+```text
+用户确认：
+- api.gmnlee.com 必须全量清除。
+- video-adapter.gmnlee.com 也必须全量清除。
+- 视频链路已有独立 worktree 处理，目标部署到 64 前置机 VPS。
+- 当前硬更新 worktree 已将文本/图片默认 New API 指向 https://api.yiyong.me/v1。
+- 当前仍有旧 gmnlee 域名残留，包含历史文档、mock 测试、视频 adapter 默认值等。
+
+后续冻结/合并前要求：
+- 统一替换运行代码、默认配置、mock、打包脚本中的 api.gmnlee.com / video-adapter.gmnlee.com。
+- 文档中如保留历史记录，必须明确标注为旧域名，不得作为当前配置。
+- 合并视频 worktree 后，以 64 前置机上的新视频 adapter 域名/路径为准。
+```

@@ -9,10 +9,12 @@
   "scripts": {
     "sync-lib": "node scripts/sync-lib.js",
     "sync:config": "node scripts/sync-openclaw-config.js",
+    "sync:config:env": "node scripts/with-local-env.js npm run sync:config --",
     "prepare-build": "npm run patch-openclaw && npm run sync-lib && npm run sync:config",
     "patch-openclaw": "node scripts/patch-openclaw.js",
     "start": "npm run patch-openclaw && npm run sync-lib && electron .",
     "dev": "npm run patch-openclaw && npm run sync-lib && electron . --dev",
+    "dev:env": "node scripts/with-local-env.js npm run dev",
     "dev:video": "npm run dev",
     "build:mac": "npm run prepare-build && electron-builder --mac",
     "build:mac-arm64": "npm run prepare-build && electron-builder --mac --arm64",

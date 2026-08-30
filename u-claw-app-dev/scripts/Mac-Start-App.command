@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT="${UCLAW_PORTABLE_ROOT:-$(cd "$(dirname "$0")" && pwd)}"
+if [ ! -d "$ROOT/app/desktop-archive" ] && [ -d "$ROOT/../desktop-archive" ]; then
+  ROOT="$(cd "$ROOT/../.." && pwd)"
+fi
 
 wait_before_exit() {
   if [ "${UCLAW_LAUNCHER_GUI:-0}" = "1" ]; then
@@ -257,7 +260,7 @@ sync_back() {
 }
 
 run_startup_hard_update() {
-  if [ "${UCLAW_DISABLE_STARTUP_HARD_UPDATE:-0}" = "1" ]; then
+  if [ "${UCLAW_ENABLE_STARTUP_HARD_UPDATE:-0}" != "1" ]; then
     echo "[U-Claw] Startup hard update disabled by environment."
     return 0
   fi
@@ -387,7 +390,7 @@ if [ "$HARD_UPDATE_STATUS" -eq 20 ]; then
     --usb "$ROOT" \
     --transaction "$ROOT/app/update-transaction.json" \
     --wait-pid "${UCLAW_LAUNCHER_PID:-}" \
-    --launch-after "$ROOT/U-Claw Launcher.app" \
+    --launch-after "$ROOT/U-Claw.app" \
     --stamp-file "$STAMP_FILE" >> "$HARD_UPDATE_APPLY_LOG" 2>&1 &
   exit 0
 fi

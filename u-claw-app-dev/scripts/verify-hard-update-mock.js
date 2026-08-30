@@ -38,12 +38,12 @@ function writeFile(filePath, value) {
 
 function createMockStage(stageRoot, edition) {
   fs.rmSync(stageRoot, { recursive: true, force: true });
-  writeFile(path.join(stageRoot, 'Mac-Start-App.command'), '#!/bin/bash\necho U-Claw\n');
-  writeFile(path.join(stageRoot, 'Windows-Start-App.bat'), '@echo off\r\necho U-Claw\r\n');
-  writeFile(path.join(stageRoot, 'Windows-Sync-Data.ps1'), "Write-Host 'U-Claw sync'\n");
+  writeFile(path.join(stageRoot, 'app', 'scripts', 'Mac-Start-App.command'), '#!/bin/bash\necho U-Claw\n');
+  writeFile(path.join(stageRoot, 'app', 'scripts', 'Windows-Start-App.bat'), '@echo off\r\necho U-Claw\r\n');
+  writeFile(path.join(stageRoot, 'app', 'scripts', 'Windows-Sync-Data.ps1'), "Write-Host 'U-Claw sync'\n");
   writeFile(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), `${edition} mock\n`);
-  writeFile(path.join(stageRoot, 'U-Claw Launcher.exe'), 'mock windows launcher\n');
-  writeFile(path.join(stageRoot, 'U-Claw Launcher.app', 'Contents', 'MacOS', 'U-Claw Launcher'), 'mock mac launcher\n');
+  writeFile(path.join(stageRoot, 'U-Claw.exe'), 'mock windows launcher\n');
+  writeFile(path.join(stageRoot, 'U-Claw.app', 'Contents', 'MacOS', 'U-Claw'), 'mock mac launcher\n');
   writeFile(path.join(stageRoot, 'bootstrap', 'README.txt'), 'mock bootstrap placeholder\n');
   for (const name of ['u-claw-app-mac-arm64.tar.gz', 'u-claw-app-mac-x64.tar.gz', 'u-claw-app-win-x64.zip']) {
     const archive = path.join(stageRoot, 'app', 'desktop-archive', name);
@@ -58,9 +58,9 @@ function createMockStage(stageRoot, edition) {
   writeJson(path.join(stageRoot, 'data', '.openclaw', 'openclaw.json'), {
     models: {
       providers: {
-        custom: { baseUrl: 'https://api.gmnlee.com/v1', apiKey: edition === 'streamer' ? 'mock-streamer-key' : '' },
-        litellm: { baseUrl: 'https://api.gmnlee.com/v1', apiKey: edition === 'streamer' ? 'mock-streamer-key' : '' },
-        xai: { baseUrl: 'https://video-adapter.gmnlee.com/xai/v1', apiKey: 'uclaw-video-adapter' }
+        custom: { baseUrl: 'https://api.yiyong.me/v1', apiKey: edition === 'streamer' ? 'mock-streamer-key' : '' },
+        litellm: { baseUrl: 'https://api.yiyong.me/v1', apiKey: edition === 'streamer' ? 'mock-streamer-key' : '' },
+        xai: { baseUrl: 'https://api.yiyong.me/v1', apiKey: edition === 'streamer' ? 'mock-streamer-key' : '' }
       }
     }
   });
@@ -241,7 +241,7 @@ async function verifyHardUpdateFlow(tmp) {
       fs.existsSync(path.join(crossPlatformUsbRoot, 'app', 'desktop-archive', 'u-claw-app-win-x64.zip')),
       'darwin update removed Windows archive'
     );
-    assert(fs.existsSync(path.join(crossPlatformUsbRoot, 'U-Claw Launcher.exe')), 'darwin update removed Windows launcher');
+    assert(fs.existsSync(path.join(crossPlatformUsbRoot, 'U-Claw.exe')), 'darwin update removed Windows launcher');
     assert(
       fs.existsSync(path.join(crossPlatformUsbRoot, 'app', 'desktop-archive', 'u-claw-app-mac-x64.tar.gz')),
       'darwin-arm64 update removed Mac x64 archive'
@@ -255,7 +255,7 @@ async function verifyHardUpdateFlow(tmp) {
       databaseUrl: '',
       shortTokenSecret: 'mock-short-token-secret',
       shortTokenTtlSeconds: 21600,
-      videoAdapterBaseUrl: 'https://video-adapter.gmnlee.com/xai/v1'
+      videoAdapterBaseUrl: 'https://api.yiyong.me/v1'
     });
     const controlPort = await listen(controlPlaneServer);
     try {
@@ -320,17 +320,17 @@ function verifyBadDataPackageFails(tmp) {
 function verifyPortableMetadataHandling(tmp) {
   const { isPortableMetadataPath, listZipEntries, prunePortableMetadata, treeDigest } = require('./lib/hard-update-utils');
   assert(isPortableMetadataPath('._UCLAW-PACKAGE-NOTES.txt'), 'AppleDouble metadata path must be recognized');
-  assert(isPortableMetadataPath('U-Claw Launcher.app/Contents/._Info.plist'), 'nested AppleDouble metadata path must be recognized');
+  assert(isPortableMetadataPath('U-Claw.app/Contents/._Info.plist'), 'nested AppleDouble metadata path must be recognized');
   assert(isPortableMetadataPath('__MACOSX/anything'), '__MACOSX metadata path must be recognized');
-  assert(!isPortableMetadataPath('Mac-Start-App.command'), 'normal package path must not be treated as metadata');
+  assert(!isPortableMetadataPath('app/scripts/Mac-Start-App.command'), 'normal package path must not be treated as metadata');
 
   const clean = path.join(tmp, 'metadata-clean');
   const dirty = path.join(tmp, 'metadata-dirty');
-  writeFile(path.join(clean, 'Mac-Start-App.command'), '#!/bin/bash\necho ok\n');
-  writeFile(path.join(clean, 'U-Claw Launcher.app', 'Contents', 'Info.plist'), '<plist />\n');
+  writeFile(path.join(clean, 'app', 'scripts', 'Mac-Start-App.command'), '#!/bin/bash\necho ok\n');
+  writeFile(path.join(clean, 'U-Claw.app', 'Contents', 'Info.plist'), '<plist />\n');
   fs.cpSync(clean, dirty, { recursive: true });
-  writeFile(path.join(dirty, '._Mac-Start-App.command'), 'appledouble\n');
-  writeFile(path.join(dirty, 'U-Claw Launcher.app', 'Contents', '._Info.plist'), 'appledouble\n');
+  writeFile(path.join(dirty, 'app', 'scripts', '._Mac-Start-App.command'), 'appledouble\n');
+  writeFile(path.join(dirty, 'U-Claw.app', 'Contents', '._Info.plist'), 'appledouble\n');
   writeFile(path.join(dirty, '__MACOSX', 'ignored'), 'metadata\n');
   prunePortableMetadata(dirty);
   assert(treeDigest(clean) === treeDigest(dirty), 'portable metadata pruning must preserve real tree digest');

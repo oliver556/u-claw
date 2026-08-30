@@ -76,10 +76,10 @@ function shouldCopyProgramLayer(relative) {
   const allowedRoots = [
     'app',
     'bootstrap',
+    'U-Claw.exe',
+    'U-Claw.app',
     'U-Claw Launcher.exe',
     'U-Claw Launcher.app',
-    'Mac-Start-App.command',
-    'Windows-Start-App.bat',
     'UCLAW-PACKAGE-NOTES.txt'
   ];
   return allowedRoots.some(root => normalized === root || normalized.startsWith(`${root}/`));
@@ -201,15 +201,15 @@ function create(options) {
       install: {
         replace: [
           'app/',
+          'U-Claw.exe',
+          'U-Claw.app',
           'U-Claw Launcher.exe',
           'U-Claw Launcher.app',
-          'Mac-Start-App.command',
-          'Windows-Start-App.bat',
           'UCLAW-PACKAGE-NOTES.txt',
           'bootstrap/'
         ],
         preserve: ['data/'],
-        entrypoint: platform === 'win32' ? 'U-Claw Launcher.exe' : 'U-Claw Launcher.app'
+        entrypoint: platform === 'win32' ? 'U-Claw.exe' : 'U-Claw.app'
       },
       runtime: {
         productVersion: options.version,

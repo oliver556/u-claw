@@ -108,7 +108,7 @@ func main() {
 		os.Exit(1)
 	}
 	root := filepath.Dir(executable)
-	script := filepath.Join(root, "Windows-Start-App.bat")
+	script := filepath.Join(root, "app", "scripts", "Windows-Start-App.bat")
 	hostLocalAppData := os.Getenv("LOCALAPPDATA")
 	if hostLocalAppData == "" {
 		hostLocalAppData = os.TempDir()
@@ -287,7 +287,7 @@ func syncLauncherLogs() {
 
 func showStartupError() {
 	message := syscall.StringToUTF16Ptr("U-Claw 启动失败。请查看 U-Claw\\data\\logs\\U-Claw-Launcher.log。")
-	title := syscall.StringToUTF16Ptr("U-Claw Launcher")
+	title := syscall.StringToUTF16Ptr("U-Claw")
 	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(message)), uintptr(unsafe.Pointer(title)), mbOK|mbIconError)
 }
 
@@ -302,6 +302,7 @@ func runScript(root string, script string, logPath string) int {
 	cmd.Env = append(os.Environ(),
 		"UCLAW_LAUNCHER_GUI=1",
 		fmt.Sprintf("UCLAW_LAUNCHER_PID=%d", os.Getpid()),
+		"UCLAW_PORTABLE_ROOT="+root,
 		"UCLAW_LAUNCHER_LOCAL_LOG="+logPath,
 		"UCLAW_WINDOWS_START_LOCAL_LOG="+startLogPath,
 		"UCLAW_USB_LAUNCHER_LOG="+usbLogPath,
@@ -324,7 +325,7 @@ func runScript(root string, script string, logPath string) int {
 
 func runStatusWindow() error {
 	className := syscall.StringToUTF16Ptr("UClawPortableLauncherWindow")
-	title := syscall.StringToUTF16Ptr("U-Claw Launcher")
+	title := syscall.StringToUTF16Ptr("U-Claw")
 	instance, _, err := procGetModuleHandleW.Call(0)
 	if instance == 0 {
 		return err
@@ -464,7 +465,7 @@ func updateStatusWindow() {
 			procShowWindow.Call(windowHandle, swShow)
 			atomic.StoreInt32(&windowHidden, 0)
 			message := syscall.StringToUTF16Ptr("U-Claw 启动失败。请查看 U-Claw\\data\\logs\\U-Claw-Launcher.log。")
-			title := syscall.StringToUTF16Ptr("U-Claw Launcher")
+			title := syscall.StringToUTF16Ptr("U-Claw")
 			procMessageBoxW.Call(windowHandle, uintptr(unsafe.Pointer(message)), uintptr(unsafe.Pointer(title)), mbOK|mbIconError)
 		}
 		procPostQuitMessage.Call(0)

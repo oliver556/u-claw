@@ -10,7 +10,8 @@ const {
   sha256File,
   treeDigest,
   unzipTo,
-  writeJson
+  writeJson,
+  rmSyncBestEffort
 } = require('./lib/hard-update-utils');
 const { verifyPayload } = require('./lib/release-signing');
 
@@ -326,7 +327,7 @@ function postJson(url, payload, options = {}) {
 
 function downloadFile(url, destination, expectedSize) {
   const client = url.startsWith('https:') ? require('https') : require('http');
-  fs.rmSync(destination, { force: true });
+  rmSyncBestEffort(destination, { force: true });
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(destination, { flags: 'wx' });
@@ -334,14 +335,14 @@ function downloadFile(url, destination, expectedSize) {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         file.destroy();
         response.resume();
-        fs.rmSync(destination, { force: true });
+        rmSyncBestEffort(destination, { force: true });
         downloadFile(new URL(response.headers.location, url).toString(), destination, expectedSize).then(resolve, reject);
         return;
       }
       if (response.statusCode !== 200) {
         file.destroy();
         response.resume();
-        fs.rmSync(destination, { force: true });
+        rmSyncBestEffort(destination, { force: true });
         reject(new Error(`HTTP ${response.statusCode} for ${url}`));
         return;
       }
@@ -369,12 +370,12 @@ function downloadFile(url, destination, expectedSize) {
       file.on('finish', () => file.close(() => resolve(destination)));
     });
     file.on('error', error => {
-      fs.rmSync(destination, { force: true });
+      rmSyncBestEffort(destination, { force: true });
       reject(error);
     });
     req.on('error', error => {
       file.destroy();
-      fs.rmSync(destination, { force: true });
+      rmSyncBestEffort(destination, { force: true });
       reject(error);
     });
     req.setTimeout(120000, () => req.destroy(new Error(`HTTP timeout: ${url}`)));
@@ -502,11 +503,10 @@ function installFromStaging(usbRoot, stagingDir) {
   const allowed = new Set([
     'app',
     'bootstrap',
+    'U-Claw.exe',
+    'U-Claw.app',
     'U-Claw Launcher.exe',
     'U-Claw Launcher.app',
-    'Mac-Start-App.command',
-    'Windows-Start-App.bat',
-    'Windows-Sync-Data.ps1',
     'UCLAW-PACKAGE-NOTES.txt'
   ]);
   for (const entry of fs.readdirSync(stagingDir, { withFileTypes: true })) {
@@ -651,6 +651,27 @@ function failTransaction(usbRoot, baseTx, error) {
   });
 }
 
+function readPendingStagedTransaction(usbRoot, production, platformKey) {
+  const txPath = transactionPath(usbRoot);
+  if (!fs.existsSync(txPath)) return null;
+  let tx;
+  try {
+    tx = readJson(txPath);
+  } catch (_) {
+    return null;
+  }
+  if (tx.schemaVersion !== 1) return null;
+  if (tx.state !== 'staged' && tx.state !== 'waiting-for-app-exit') return null;
+  if (tx.targetVersion !== production.requiredVersion) return null;
+  if (tx.releaseId !== production.releaseId) return null;
+  const expected = platformParts(platformKey);
+  if (tx.platform !== expected.platform || tx.arch !== expected.arch) return null;
+  const stagingDir = safeJoin(usbRoot, tx.stagingDir || '');
+  if (!fs.existsSync(stagingDir)) return null;
+  assertInstallTreeSafe(stagingDir);
+  return tx;
+}
+
 async function check(options) {
   if (!options.usb) throw new Error('--usb is required');
   const usbRoot = path.resolve(options.usb);
@@ -758,6 +779,18 @@ async function startupUpdate(options) {
   if (local?.version === production.requiredVersion) {
     console.log(JSON.stringify({ updateRequired: false, requiredVersion: production.requiredVersion }, null, 2));
     return { updateRequired: false, requiredVersion: production.requiredVersion };
+  }
+  const pendingTx = readPendingStagedTransaction(usbRoot, production, options.platform);
+  if (pendingTx) {
+    const result = {
+      updateRequired: true,
+      staged: true,
+      transaction: transactionPath(usbRoot),
+      version: production.requiredVersion,
+      reusedStaging: true
+    };
+    console.log(JSON.stringify(result, null, 2));
+    return result;
   }
   const manifestResult = await loadManifestFromSource(source, production, options.platform, keys);
   const manifest = manifestResult.payload;

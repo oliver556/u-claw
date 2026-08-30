@@ -299,7 +299,7 @@ static void update_status_window(void) {
     styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable)
     backing:NSBackingStoreBuffered
     defer:NO];
-  [gWindow setTitle:@"U-Claw Launcher"];
+  [gWindow setTitle:@"U-Claw"];
   [gWindow setBackgroundColor:[NSColor colorWithCalibratedWhite:0.04 alpha:1.0]];
 
   NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(18, 18, 644, 394)];
@@ -347,7 +347,7 @@ static void update_status_window(void) {
     [gTask launch];
   } @catch (NSException *exception) {
     gExitCode = 1;
-    NSString *message = [NSString stringWithFormat:@"U-Claw Launcher: failed to launch script: %@\n", exception.reason ?: @""];
+    NSString *message = [NSString stringWithFormat:@"U-Claw: failed to launch script: %@\n", exception.reason ?: @""];
     [message writeToFile:gLogPath atomically:NO encoding:NSUTF8StringEncoding error:nil];
     return;
   }
@@ -469,20 +469,20 @@ int main(void) {
     char resolved_executable[4096];
     uint32_t executable_size = sizeof(executable);
     if (_NSGetExecutablePath(executable, &executable_size) != 0) {
-      fprintf(stderr, "U-Claw Launcher: _NSGetExecutablePath failed\n");
+      fprintf(stderr, "U-Claw: _NSGetExecutablePath failed\n");
       return 1;
     }
     if (realpath(executable, resolved_executable) == NULL) {
-      fprintf(stderr, "U-Claw Launcher: realpath failed for %s\n", executable);
+      fprintf(stderr, "U-Claw: realpath failed for %s\n", executable);
       return 1;
     }
 
     char root[4096];
     strncpy(root, resolved_executable, sizeof(root) - 1);
     root[sizeof(root) - 1] = '\0';
-    char *bundle_suffix = strstr(root, "/U-Claw Launcher.app/Contents/MacOS/");
+    char *bundle_suffix = strstr(root, "/U-Claw.app/Contents/MacOS/");
     if (bundle_suffix == NULL) {
-      fprintf(stderr, "U-Claw Launcher: bundle suffix missing for %s\n", root);
+      fprintf(stderr, "U-Claw: bundle suffix missing for %s\n", root);
       return 1;
     }
     *bundle_suffix = '\0';
@@ -496,7 +496,7 @@ int main(void) {
     mkdir_p(local_script_dir);
     snprintf(local_script, sizeof(local_script), "%s/Mac-Start-App.command", local_script_dir);
     if (!write_file_c(local_script, kMacStartScript)) {
-      fprintf(stderr, "U-Claw Launcher: failed to write launch script to local cache\n");
+      fprintf(stderr, "U-Claw: failed to write launch script to local cache\n");
       return 1;
     }
     snprintf(log_dir, sizeof(log_dir), "%s/Library/Caches/U-Claw/launcher-logs", getenv("HOME") ?: "/tmp");

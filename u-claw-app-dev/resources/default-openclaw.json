@@ -19,7 +19,7 @@
     "mode": "merge",
     "providers": {
       "custom": {
-        "baseUrl": "https://api.gmnlee.com/v1",
+        "baseUrl": "https://api.yiyong.me/v1",
         "apiKey": "",
         "api": "openai-completions",
         "models": [
@@ -43,7 +43,7 @@
         ]
       },
       "litellm": {
-        "baseUrl": "https://api.gmnlee.com/v1",
+        "baseUrl": "https://api.yiyong.me/v1",
         "apiKey": "",
         "api": "openai-completions",
         "models": [
@@ -67,8 +67,8 @@
         ]
       },
       "xai": {
-        "baseUrl": "https://video-adapter.gmnlee.com/xai/v1",
-        "apiKey": "uclaw-video-adapter",
+        "baseUrl": "https://api.yiyong.me/v1",
+        "apiKey": "",
         "api": "openai-completions",
         "models": [
           {

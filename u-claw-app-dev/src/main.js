@@ -12,7 +12,7 @@ const DEFAULT_PORT = 18789;
 const MAX_PORT = 18799;
 const DEFAULT_VIDEO_ADAPTER_PORT = 18808;
 const MAX_VIDEO_ADAPTER_PORT = 18818;
-const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://video-adapter.gmnlee.com/xai/v1';
+const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://api.yiyong.me/v1';
 const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'jimeng-video-3-720p';
 const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
 const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
@@ -168,6 +168,7 @@ const runtimeProtocolDir = portableRootPath ? path.join(portableRootPath, 'app',
 const updateShutdownRequestPath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'update-shutdown-request.json') : null;
 const shutdownCompletePath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'shutdown-complete.json') : null;
 const runStatePath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'run-state.json') : null;
+const updateTransactionPath = portableRootPath ? path.join(portableRootPath, 'app', 'update-transaction.json') : null;
 const syncStateDir = path.join(userDataPath, '.uclaw-sync');
 const dirtyMarkerPath = path.join(syncStateDir, 'dirty.json');
 const lastSyncPath = path.join(syncStateDir, 'last-sync.json');
@@ -316,9 +317,12 @@ function ensureConfig() {
   }
 
   const config = getConfig();
-  if (applyPortableLocalDesktopConfig(config)) {
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    console.log(`[${APP_NAME}] Updated portable local desktop gateway config`);
+  const nextConfig = applyRuntimeConfigEnv(config);
+  const changedPortableConfig = applyPortableLocalDesktopConfig(nextConfig);
+  const changedRuntimeConfig = JSON.stringify(nextConfig) !== JSON.stringify(config);
+  if (changedPortableConfig || changedRuntimeConfig) {
+    fs.writeFileSync(configPath, JSON.stringify(nextConfig, null, 2));
+    console.log(`[${APP_NAME}] Updated runtime config`);
   }
 }
 
@@ -432,6 +436,16 @@ function readUpdateShutdownRequest() {
   if (payload?.schemaVersion !== 1) return null;
   if (payload.reason !== 'update') return null;
   if (typeof payload.transactionId !== 'string' || !payload.transactionId.trim()) return null;
+  const transaction = readJsonFile(updateTransactionPath);
+  const currentTransactionId = typeof transaction?.id === 'string' ? transaction.id.trim() : '';
+  if (transaction?.state !== 'staged' || currentTransactionId !== payload.transactionId.trim()) {
+    try {
+      fs.rmSync(updateShutdownRequestPath, { force: true });
+      if (shutdownCompletePath) fs.rmSync(shutdownCompletePath, { force: true });
+    } catch {}
+    logLifecycle(`Ignored stale update shutdown request transaction=${payload.transactionId}`);
+    return null;
+  }
   return payload;
 }
 
@@ -722,7 +736,8 @@ function normalizePortableDataPathString(value) {
   if (!portablePath || typeof value !== 'string') return value;
   return value
     .replace(/~[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable[\\/]data/g, userDataPath)
-    .replace(/(?:[A-Za-z]:)?[\\/](?:Users|home)[^"'\r\n]*?[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable[\\/]data/g, userDataPath);
+    .replace(/(?:[A-Za-z]:)?[\\/](?:Users|home)[^"'\r\n]*?[\\/]Library[\\/]Caches[\\/]U-Claw[\\/]usb-portable(?:-[^\\/:"'\r\n]+)?[\\/]data/g, userDataPath)
+    .replace(/[A-Za-z]:[\\/](?:Users|home)[^"'\r\n]*?[\\/]AppData[\\/]Local[\\/]U-Claw[\\/]usb-portable[\\/]data-[^\\/:"'\r\n]+/g, userDataPath);
 }
 
 function normalizePortableDataPathsInJson(value, stats) {
@@ -753,6 +768,132 @@ function listJsonFiles(dirPath) {
   return files;
 }
 
+function extractPortableSessionId(value) {
+  const match = String(value || '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return match ? match[0] : '';
+}
+
+function portableSessionArtifactSuffix(fileName) {
+  const value = String(fileName || '');
+  if (/\.trajectory-path\.json$/i.test(value)) return '.trajectory-path.json';
+  if (/\.trajectory\.jsonl$/i.test(value)) return '.trajectory.jsonl';
+  if (/\.jsonl(?:\.bak-\d+-\d+)?$/i.test(value)) return '.jsonl';
+  return '';
+}
+
+function isPollutedPortableSessionFileName(fileName) {
+  const value = String(fileName || '');
+  return /[A-Za-z]:\\/.test(value) || value.includes('\\.openclaw\\') || value.includes('\\agents\\');
+}
+
+function mergeJsonlFile(targetPath, sourcePath) {
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  if (!source.trim()) return false;
+
+  if (!fs.existsSync(targetPath) || fs.statSync(targetPath).size === 0) {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, source.endsWith('\n') ? source : `${source}\n`);
+    return true;
+  }
+
+  const existingLines = new Set(fs.readFileSync(targetPath, 'utf8').split(/\r?\n/).filter(Boolean));
+  const missingLines = source.split(/\r?\n/).filter(line => line && !existingLines.has(line));
+  if (missingLines.length === 0) return false;
+  fs.appendFileSync(targetPath, `${missingLines.join('\n')}\n`);
+  return true;
+}
+
+function writePortableTrajectoryPointer(sessionsDir, sessionId) {
+  const pointerPath = path.join(sessionsDir, `${sessionId}.trajectory-path.json`);
+  const runtimeFile = path.join(sessionsDir, `${sessionId}.trajectory.jsonl`);
+  const nextPointer = {
+    traceSchema: 'openclaw-trajectory-pointer',
+    schemaVersion: 1,
+    sessionId,
+    runtimeFile
+  };
+  const current = readJsonFile(pointerPath);
+  if (JSON.stringify(current) === JSON.stringify(nextPointer)) return false;
+  safeWriteJson(pointerPath, nextPointer);
+  return true;
+}
+
+function migratePortableSessionArtifacts(sessionsDir, sessionId) {
+  if (!sessionId || !fs.existsSync(sessionsDir)) return { changed: false, removed: 0 };
+
+  let changed = false;
+  let removed = 0;
+  const entries = fs.readdirSync(sessionsDir, { withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .map(entry => entry.name);
+
+  for (const fileName of entries) {
+    if (!isPollutedPortableSessionFileName(fileName)) continue;
+    if (extractPortableSessionId(fileName) !== sessionId) continue;
+    const suffix = portableSessionArtifactSuffix(fileName);
+    if (!suffix) continue;
+
+    const sourcePath = path.join(sessionsDir, fileName);
+    const targetPath = path.join(sessionsDir, `${sessionId}${suffix}`);
+    try {
+      if (suffix.endsWith('.jsonl')) changed = mergeJsonlFile(targetPath, sourcePath) || changed;
+      if (suffix === '.trajectory-path.json') changed = writePortableTrajectoryPointer(sessionsDir, sessionId) || changed;
+      if (fs.existsSync(targetPath)) {
+        fs.rmSync(sourcePath, { force: true });
+        removed += 1;
+      }
+    } catch (error) {
+      console.warn(`[${APP_NAME}] Failed to migrate portable session artifact ${sourcePath}: ${error.message}`);
+    }
+  }
+
+  changed = writePortableTrajectoryPointer(sessionsDir, sessionId) || changed;
+  return { changed, removed };
+}
+
+function sanitizePortableSessionsIndex() {
+  const agentsDir = path.join(configDir, 'agents');
+  if (!fs.existsSync(agentsDir)) return { changedFiles: 0, removedFiles: 0 };
+
+  let changedFiles = 0;
+  let removedFiles = 0;
+  for (const agentEntry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
+    if (!agentEntry.isDirectory()) continue;
+    const sessionsDir = path.join(agentsDir, agentEntry.name, 'sessions');
+    const sessionsIndexPath = path.join(sessionsDir, 'sessions.json');
+    const sessions = readJsonFile(sessionsIndexPath);
+    if (!sessions || typeof sessions !== 'object' || Array.isArray(sessions)) continue;
+
+    let changed = false;
+    for (const [sessionKey, session] of Object.entries(sessions)) {
+      if (!session || typeof session !== 'object') continue;
+      const sessionId = extractPortableSessionId(session.sessionId) || extractPortableSessionId(session.sessionFile);
+      if (!sessionId) continue;
+
+      const artifactStats = migratePortableSessionArtifacts(sessionsDir, sessionId);
+      changed = artifactStats.changed || artifactStats.removed > 0 || changed;
+      removedFiles += artifactStats.removed;
+
+      const canonicalSessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+      if (session.sessionFile !== canonicalSessionFile) {
+        session.sessionFile = canonicalSessionFile;
+        changed = true;
+      }
+
+      if (sessionKey.startsWith('agent:') && sessionKey.split(':')[1] !== agentEntry.name) {
+        continue;
+      }
+    }
+
+    if (changed) {
+      safeWriteJson(sessionsIndexPath, sessions);
+      changedFiles += 1;
+    }
+  }
+
+  return { changedFiles, removedFiles };
+}
+
 function sanitizePortableStatePaths() {
   if (!portablePath) return;
   const agentsDir = path.join(configDir, 'agents');
@@ -771,8 +912,10 @@ function sanitizePortableStatePaths() {
       console.warn(`[${APP_NAME}] Skipped portable state path migration for ${filePath}: ${error.message}`);
     }
   }
+  const sessionsStats = sanitizePortableSessionsIndex();
+  changedFiles += sessionsStats.changedFiles;
   if (changedFiles > 0) {
-    console.log(`[${APP_NAME}] Migrated portable state paths in ${changedFiles} file(s)`);
+    console.log(`[${APP_NAME}] Migrated portable state paths in ${changedFiles} file(s), removed ${sessionsStats.removedFiles} polluted session artifact(s)`);
   }
 }
 
@@ -798,7 +941,7 @@ function findNewApiCredentials(config) {
     if (!provider || typeof provider !== 'object') continue;
     const baseUrl = getProviderValue(provider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url']);
     const apiKey = getProviderValue(provider, ['apiKey', 'api_key', 'key']);
-    if (baseUrl && apiKey && /api\.gmnlee\.com/i.test(baseUrl)) {
+    if (baseUrl && apiKey && /api\.(gmnlee|yiyong)\.me/i.test(baseUrl)) {
       return { newApiBaseUrl: baseUrl, newApiKey: apiKey };
     }
   }

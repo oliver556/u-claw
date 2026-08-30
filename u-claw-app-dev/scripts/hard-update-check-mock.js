@@ -99,7 +99,7 @@ function buildContract(options) {
       manifestUrl,
       packageUrl: `${options.baseUrl}/packages/${releaseId}/${options.platform}/runtime.pkg`,
       shortConfig: {
-        videoAdapterBaseUrl: 'https://video-adapter.gmnlee.com/xai/v1',
+        videoAdapterBaseUrl: 'https://api.yiyong.me/v1',
         aliyunControlPlane: true,
         r2StaticDownloads: true,
         containsSecret: false

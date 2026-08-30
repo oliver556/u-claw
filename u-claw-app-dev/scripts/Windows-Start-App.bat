@@ -2,8 +2,10 @@
 chcp 65001 >nul 2>&1
 setlocal EnableExtensions EnableDelayedExpansion
 
-set "ROOT=%~dp0"
+set "ROOT=%UCLAW_PORTABLE_ROOT%"
+if "%ROOT%"=="" set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+if not exist "%ROOT%\app\desktop-archive" if exist "%ROOT%\..\desktop-archive" for %%R in ("%ROOT%\..\..") do set "ROOT=%%~fR"
 
 set "HOST_LOCALAPPDATA=%LOCALAPPDATA%"
 set "USB_DATA_DIR=%ROOT%\data"
@@ -15,7 +17,7 @@ set "USB_START_LOG=%UCLAW_USB_WINDOWS_START_LOG%"
 if "%USB_START_LOG%"=="" set "USB_START_LOG=%USB_LOG_DIR%\Windows-Start-App.log"
 set "ARCHIVE=%ROOT%\app\desktop-archive\u-claw-app-win-x64.zip"
 set "ARCHIVE_SHA_FILE=%ARCHIVE%.sha256"
-set "SYNC_SCRIPT=%ROOT%\Windows-Sync-Data.ps1"
+set "SYNC_SCRIPT=%ROOT%\app\scripts\Windows-Sync-Data.ps1"
 for /f %%H in ('powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$bytes=[Text.Encoding]::UTF8.GetBytes($env:ROOT.ToLowerInvariant()); $hash=[Security.Cryptography.SHA256]::Create().ComputeHash($bytes); ([BitConverter]::ToString($hash)).Replace('-','').Substring(0,16).ToLowerInvariant()"') do set "ROOT_ID=%%H"
 if "%ROOT_ID%"=="" set "ROOT_ID=default"
 set "CACHE_ROOT=%HOST_LOCALAPPDATA%\U-Claw\usb-portable"
@@ -275,7 +277,7 @@ powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$lock=$e
 exit /b 0
 
 :run_startup_hard_update
-if "%UCLAW_DISABLE_STARTUP_HARD_UPDATE%"=="1" (
+if not "%UCLAW_ENABLE_STARTUP_HARD_UPDATE%"=="1" (
   echo [U-Claw] Startup hard update disabled by environment.
   exit /b 0
 )
@@ -297,7 +299,11 @@ set "HARD_UPDATE_EXIT=%ERRORLEVEL%"
 if "%HARD_UPDATE_EXIT%"=="20" (
   echo [U-Claw] Hard update staged; applying update and relaunching.
   set "HARD_UPDATE_APPLY_LOG=%LOCAL_LOG_DIR%\Windows-Hard-Update-Apply.log"
-  start "" /b "%HARD_UPDATE_NODE%" "%HARD_UPDATE_CLIENT%" apply-startup-update --usb "%ROOT%" --transaction "%ROOT%\app\update-transaction.json" --wait-pid "%UCLAW_LAUNCHER_PID%" --launch-after "%ROOT%\U-Claw Launcher.exe" --stamp-file "%STAMP_FILE%" >> "%HARD_UPDATE_APPLY_LOG%" 2>&1
+  set "HARD_UPDATE_APPLY_CMD=%LOCAL_LOG_DIR%\Windows-Hard-Update-Apply.cmd"
+  >"%HARD_UPDATE_APPLY_CMD%" echo @echo off
+  >>"%HARD_UPDATE_APPLY_CMD%" echo chcp 65001 ^>nul 2^>^&1
+  >>"%HARD_UPDATE_APPLY_CMD%" echo "%HARD_UPDATE_NODE%" "%HARD_UPDATE_CLIENT%" apply-startup-update --usb "%ROOT%" --transaction "%ROOT%\app\update-transaction.json" --wait-pid "%UCLAW_LAUNCHER_PID%" --launch-after "%ROOT%\U-Claw.exe" --stamp-file "%STAMP_FILE%" ^>^> "%HARD_UPDATE_APPLY_LOG%" 2^>^&1
+  start "" /min "%HARD_UPDATE_APPLY_CMD%"
   exit /b 20
 )
 if not "%HARD_UPDATE_EXIT%"=="0" exit /b 1

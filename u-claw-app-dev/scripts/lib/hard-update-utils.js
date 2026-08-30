@@ -242,6 +242,19 @@ function extractZipTo(runtimePkg, destinationDir) {
   run('unzip', ['-q', runtimePkg, '-d', destinationDir]);
 }
 
+function rmSyncBestEffort(targetPath, options = {}) {
+  try {
+    fs.rmSync(targetPath, options);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    try {
+      fs.rmSync(targetPath, { ...options, force: true });
+    } catch (_) {
+      // USB/FAT/exFAT can transiently fail lstat/unlink on Windows.
+    }
+  }
+}
+
 function unzipTo(runtimePkg, destinationDir) {
   fs.rmSync(destinationDir, { recursive: true, force: true });
   fs.mkdirSync(destinationDir, { recursive: true });
@@ -270,6 +283,7 @@ module.exports = {
   prunePortableMetadata,
   readJson,
   run,
+  rmSyncBestEffort,
   sha256File,
   sha256Bytes,
   treeDigest,

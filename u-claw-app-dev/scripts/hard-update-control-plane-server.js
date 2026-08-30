@@ -50,7 +50,7 @@ function loadConfig(options) {
     psqlHost: firstEnv(env, ['UCLAW_UPDATE_PSQL_HOST']),
     psqlPort: firstEnv(env, ['UCLAW_UPDATE_PSQL_PORT']),
     shortTokenSecret: firstEnv(env, ['UCLAW_SHORT_TOKEN_SECRET']),
-    videoAdapterBaseUrl: firstEnv(env, ['UCLAW_VIDEO_ADAPTER_BASE_URL']) || 'https://video-adapter.gmnlee.com/xai/v1'
+    videoAdapterBaseUrl: firstEnv(env, ['UCLAW_VIDEO_ADAPTER_BASE_URL']) || 'https://api.yiyong.me/v1'
   };
 }
 

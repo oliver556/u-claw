@@ -16,10 +16,10 @@ import (
 var allowedRoots = map[string]bool{
 	"app":                     true,
 	"bootstrap":               true,
+	"U-Claw.exe":              true,
+	"U-Claw.app":              true,
 	"U-Claw Launcher.exe":     true,
 	"U-Claw Launcher.app":     true,
-	"Mac-Start-App.command":   true,
-	"Windows-Start-App.bat":   true,
 	"UCLAW-PACKAGE-NOTES.txt": true,
 }
 
