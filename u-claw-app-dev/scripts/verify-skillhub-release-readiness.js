@@ -193,6 +193,7 @@ function verifyStaticSuite(errors) {
   runStep("syntax SkillHub branding verifier", process.execPath, ["--check", "scripts/verify-skillhub-branding.js"], errors);
   runStep("syntax SkillHub chat dropdown verifier", process.execPath, ["--check", "scripts/verify-skillhub-chat-dropdown.js"], errors);
   runStep("syntax ecommerce workflow verifier", process.execPath, ["--check", "scripts/verify-ecommerce-workflow.js"], errors);
+  runStep("syntax ecommerce workbench UI verifier", process.execPath, ["--check", "scripts/verify-ecommerce-workbench-ui.js"], errors);
   runStep("syntax Gateway helper", process.execPath, ["--check", "scripts/start-openclaw-gateway-local.js"], errors);
   runStep("syntax release readiness verifier", process.execPath, ["--check", __filename], errors);
 

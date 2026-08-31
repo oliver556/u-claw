@@ -7637,6 +7637,18 @@ openclaw-tasks-page .uclaw-ecommerce-textarea {
   resize: vertical;
 }
 
+openclaw-tasks-page .uclaw-ecommerce-workbench .row {
+  flex-wrap: wrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .btn {
+  white-space: nowrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .btn.primary {
+  min-width: 96px;
+}
+
 openclaw-tasks-page .uclaw-ecommerce-file-input {
   display: none;
 }
@@ -7667,11 +7679,16 @@ openclaw-tasks-page .uclaw-ecommerce-empty {
   text-align: center;
 }
 
-openclaw-tasks-page .uclaw-ecommerce-file-grid,
+openclaw-tasks-page .uclaw-ecommerce-file-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 180px));
+}
+
 openclaw-tasks-page .uclaw-ecommerce-output-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
 openclaw-tasks-page .uclaw-ecommerce-file,
@@ -7749,6 +7766,10 @@ openclaw-tasks-page .uclaw-ecommerce-qa {
   openclaw-tasks-page .uclaw-ecommerce-grid,
   openclaw-tasks-page .uclaw-ecommerce-rules {
     grid-template-columns: 1fr;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-file-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

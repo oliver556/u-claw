@@ -7,6 +7,7 @@ This directory contains repository-owned helper scripts for the active `u-claw-a
 - `patch-openclaw.js` is the source of truth for deterministic Bavi-box UI patches applied to generated OpenClaw Control UI assets.
 - `verify-skillhub-branding.js` checks that patched assets still contain required Bavi-box / SkillHub tokens and do not regress high-risk visible copy.
 - `verify-ecommerce-workflow.js` checks the ecommerce image workbench contract, platform preset tokens, bundled Skill policy, and generated Workflows page tokens.
+- `verify-ecommerce-workbench-ui.js` runs connected browser acceptance for the ecommerce image workbench upload, platform selection, manifest generation, and screenshot.
 - `verify-skillhub-store-connected-ui.js` runs read-only browser acceptance for the SkillHub store homepage, tabs, category chips, and search reset.
 - Runtime asset files under `node_modules/openclaw/dist/control-ui` are patch outputs, not permanent source.
 
