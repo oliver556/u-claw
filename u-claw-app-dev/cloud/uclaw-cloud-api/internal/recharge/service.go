@@ -30,6 +30,8 @@ const (
 	StatusCredited = "credited"
 	// StatusCreditFailed means payment was accepted but New API crediting failed.
 	StatusCreditFailed = "credit_failed"
+	// StatusExpired means the provider checkout timed out before a valid payment callback.
+	StatusExpired = "expired"
 )
 
 // Plan is a recharge SKU shown to the client before a payment order is created.
@@ -480,6 +482,16 @@ func normalizeProvider(provider string) string {
 func isSupportedProvider(provider string) bool {
 	switch provider {
 	case ProviderVirtual, ProviderAlipay, ProviderWeChat:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsUserVisibleOrderStatus keeps unpaid noise out of client-facing recharge history.
+func IsUserVisibleOrderStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case StatusPaid, StatusCrediting, StatusCredited, StatusCreditFailed:
 		return true
 	default:
 		return false

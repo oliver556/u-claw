@@ -61,7 +61,7 @@ func (s *MemoryStore) ListOrdersForUser(_ context.Context, userID int64, limit i
 	}
 	orders := make([]Order, 0, len(s.orders))
 	for _, order := range s.orders {
-		if order.UClawUserID == userID {
+		if order.UClawUserID == userID && IsUserVisibleOrderStatus(order.Status) {
 			orders = append(orders, order)
 		}
 	}

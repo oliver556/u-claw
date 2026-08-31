@@ -184,6 +184,39 @@ func TestListProvidersReportsEnabledAdapters(t *testing.T) {
 	}
 }
 
+func TestListOrdersHidesUnpaidAndExpiredOrders(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	orders := []Order{
+		{OrderNo: "UC-CREATED", UClawUserID: 7, Provider: ProviderAlipay, AmountCents: 1000, Quota: 1, Status: StatusCreated, CreatedAt: now.Add(3 * time.Minute), UpdatedAt: now.Add(3 * time.Minute)},
+		{OrderNo: "UC-EXPIRED", UClawUserID: 7, Provider: ProviderAlipay, AmountCents: 1000, Quota: 1, Status: StatusExpired, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute)},
+		{OrderNo: "UC-CREDITED", UClawUserID: 7, Provider: ProviderAlipay, AmountCents: 1000, Quota: 1, Status: StatusCredited, CreatedAt: now.Add(1 * time.Minute), UpdatedAt: now.Add(1 * time.Minute)},
+		{OrderNo: "UC-FAILED", UClawUserID: 7, Provider: ProviderAlipay, AmountCents: 1000, Quota: 1, Status: StatusCreditFailed, CreatedAt: now, UpdatedAt: now},
+	}
+	for _, order := range orders {
+		if _, err := store.CreateOrder(context.Background(), order); err != nil {
+			t.Fatalf("CreateOrder(%s) error = %v", order.OrderNo, err)
+		}
+	}
+	service, err := NewService(store, &fakeQuotaClient{}, Config{AllowVirtualCallback: true})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	visible, err := service.ListOrders(context.Background(), 7, 20)
+	if err != nil {
+		t.Fatalf("ListOrders() error = %v", err)
+	}
+	if len(visible) != 2 {
+		t.Fatalf("visible orders = %+v", visible)
+	}
+	for _, order := range visible {
+		if order.Status == StatusCreated || order.Status == StatusExpired {
+			t.Fatalf("unpaid order leaked to user list: %+v", order)
+		}
+	}
+}
+
 func TestVirtualCallbackCreditsNewAPIOnce(t *testing.T) {
 	store := NewMemoryStore()
 	store.SaveAccount(Account{UClawUserID: 7, NewAPIUserID: 42})
