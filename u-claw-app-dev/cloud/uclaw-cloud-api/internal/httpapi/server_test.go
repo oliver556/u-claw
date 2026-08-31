@@ -2,15 +2,22 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 
 	"uclaw-cloud-api/internal/config"
+	"uclaw-cloud-api/internal/newapi"
+	alipaypay "uclaw-cloud-api/internal/payment/alipay"
 	"uclaw-cloud-api/internal/provisioning"
+	"uclaw-cloud-api/internal/recharge"
 )
 
 func TestHealthzReturnsOK(t *testing.T) {
@@ -345,16 +352,16 @@ func TestUsageSummaryReturnsNewAPICounters(t *testing.T) {
 	if payload.Status != "ok" || payload.AccountBalance != 100000 || payload.UsedQuota != 24171 || payload.CumulativeUsage != 24171 {
 		t.Fatalf("payload = %+v", payload)
 	}
-	if payload.AccountBalanceCompute != 12000000 || payload.UsedCompute != 2900520 || payload.CumulativeCompute != 2900520 {
+	if payload.AccountBalanceCompute != 1200000 || payload.UsedCompute != 290052 || payload.CumulativeCompute != 290052 {
 		t.Fatalf("payload compute = %+v", payload)
 	}
-	if payload.NewAPIQuotaPerCNY != 500000 || payload.ComputeUnitsPerCNY != 60000000 {
+	if payload.NewAPIQuotaPerCNY != 500000 || payload.ComputeUnitsPerCNY != 6000000 {
 		t.Fatalf("payload conversion = %+v", payload)
 	}
 	if len(payload.Records) != 1 || payload.Records[0].ModelName != "gpt-5.5" {
 		t.Fatalf("records = %+v", payload.Records)
 	}
-	if payload.Records[0].Quota != 24171 || payload.Records[0].Compute != 2900520 {
+	if payload.Records[0].Quota != 24171 || payload.Records[0].Compute != 290052 {
 		t.Fatalf("record conversion = %+v", payload.Records)
 	}
 }
@@ -534,6 +541,102 @@ func TestRechargeOrderRejectsUnconfiguredOfficialProvider(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "payment provider alipay is not configured") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
+}
+
+func TestAlipayNotifyCreditsRechargeOrder(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	store := recharge.NewMemoryStore()
+	store.SaveAccount(recharge.Account{UClawUserID: 7, NewAPIUserID: 42})
+	quota := &recordingQuotaClient{}
+	service, err := recharge.NewService(store, quota, recharge.Config{
+		CheckoutClients: map[string]recharge.CheckoutClient{
+			recharge.ProviderAlipay: staticCheckoutClient{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new recharge service: %v", err)
+	}
+	result, err := service.CreateOrder(context.Background(), recharge.CreateOrderRequest{
+		UserID:   7,
+		PlanCode: "dev_10",
+		Provider: recharge.ProviderAlipay,
+	})
+	if err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+	server := NewServerWithOptions(
+		config.Config{AppEnv: "test", AlipaySellerID: "seller-1"},
+		BuildInfo{Version: "test"},
+		ServerOptions{
+			Recharge:  service,
+			AlipayPay: alipaypay.NewClient(alipaypay.Config{AppID: "app-1", PublicKey: &privateKey.PublicKey}),
+		},
+	)
+
+	form := map[string]string{
+		"app_id":       "app-1",
+		"out_trade_no": result.Order.OrderNo,
+		"trade_no":     "20260831220010001",
+		"total_amount": "10.00",
+		"trade_status": "TRADE_SUCCESS",
+		"seller_id":    "seller-1",
+		"gmt_payment":  "2026-08-31 15:20:00",
+	}
+	sign, err := alipaypay.SignForm(form, privateKey)
+	if err != nil {
+		t.Fatalf("sign notify: %v", err)
+	}
+	form["sign"] = sign
+	form["sign_type"] = "RSA2"
+	body := valuesFromStringMap(form).Encode()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/payments/alipay/notify", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "success" {
+		t.Fatalf("notify status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	order, err := service.GetOrder(context.Background(), result.Order.OrderNo, 7)
+	if err != nil {
+		t.Fatalf("get order: %v", err)
+	}
+	if order.Status != recharge.StatusCredited || order.ProviderTradeNo != "20260831220010001" {
+		t.Fatalf("order = %+v", order)
+	}
+	if len(quota.calls) != 1 || quota.calls[0].UserID != 42 || quota.calls[0].Quota != 5000000 {
+		t.Fatalf("quota calls = %+v", quota.calls)
+	}
+}
+
+type staticCheckoutClient struct{}
+
+// CreateCheckout returns deterministic QR data while HTTP tests focus on webhook behavior.
+func (staticCheckoutClient) CreateCheckout(context.Context, recharge.CheckoutRequest) (recharge.CheckoutResult, error) {
+	return recharge.CheckoutResult{QRCodeURL: "https://qr.alipay.com/test"}, nil
+}
+
+type recordingQuotaClient struct {
+	calls []newapi.AddQuotaRequest
+}
+
+// AddQuota records New API quota credit requests accepted by the recharge state machine.
+func (c *recordingQuotaClient) AddQuota(_ context.Context, req newapi.AddQuotaRequest) error {
+	c.calls = append(c.calls, req)
+	return nil
+}
+
+// valuesFromStringMap builds form data for provider callback tests.
+func valuesFromStringMap(input map[string]string) url.Values {
+	values := make(url.Values, len(input))
+	for key, value := range input {
+		values.Set(key, value)
+	}
+	return values
 }
 
 func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {

@@ -26,12 +26,18 @@
 - `newapi.Client.AddQuota` 已验证，真实调用形态为 `{id, action:"add_quota", mode:"add", value}`。
 - `POST /v1/recharge/orders` 已有 provider seam；`alipay` 未配置 adapter 时会拒绝创建订单。
 - 支付宝 SPI onboarding 已接入并上线：`/isv/spi/service`，仅用于支付宝控制台接入校验，不是客户端真实充值。
+- `ComputeUnitsPerCNY` 已按 `1 CNY = 600w 算力` 修正为 `6000000`。
+- `internal/payment/alipay` 已接入 `alipay.trade.precreate`、RSA2 签名、同步响应验签、异步通知验签。
+- `/v1/payments/alipay/notify` 已接入：验签、校验 `app_id/seller_id/amount/status` 后进入 recharge 状态机，并复用 New API add quota 入账。
+- 客户端模型页已新增支付宝扫码弹窗：创建订单后展示本地生成二维码、轮询单笔订单、到账后刷新余额。
+- 本地 UI 验收保留 virtual fallback：仅用于开发环境未配置支付宝时验证充值入口闭环，production 仍禁用 virtual。
 
-必须修正：
+仍待实现或真实环境验证：
 
-- 计费口径按用户确认：`1 CNY = 600w 算力`。
-- 当前 `internal/billing/conversion.go` 中 `ComputeUnitsPerCNY` 是 `60000000`，上线真实支付前应改为 `6000000`，并更新 Go/JS 验收断言。
-- 客户端账户余额展示金额，不展示大额算力数字；金额换算继续用 `NewAPIQuotaPerCNY` 作为 New API raw quota 和 CNY 的折算比。
+- `alipay.trade.query` 补查接口和后台 retry-credit 操作。
+- `provider_checkout/expires_at/closed_at` 增量 migration。
+- `ALIPAY_ONE_CENT_TEST_ENABLED` 对 `test_001` SKU 的开关化。
+- 阿里云 staging 使用真实支付宝扫码 `0.01` 回测。
 
 ## 3. 真实支付架构
 
@@ -94,8 +100,9 @@ ALIPAY_ONE_CENT_TEST_ENABLED=false
 
 - `ALIPAY_PRIVATE_KEY_PATH` 使用应用私钥，只放服务器文件系统，权限建议 `root:uclaw 0640`。
 - `ALIPAY_PUBLIC_KEY_PATH` 使用支付宝公钥，用于验签同步响应和异步通知。
+- `ALIPAY_PUBLIC_CERT_PATH` 也已支持，可在证书模式下提取证书内 RSA 公钥验签。
 - 不把应用私钥、AES key、New API admin token、服务器密码写入 Git、README 或测试输出。
-- 当前 `ALIPAY_PUBLIC_CERT_PATH` 名称容易和证书模式混淆；真实支付建议新增 `ALIPAY_PUBLIC_KEY_PATH`，不要复用证书字段。
+- 若使用支付宝“公钥模式”，优先填 `ALIPAY_PUBLIC_KEY_PATH`；若使用“证书模式”，填 `ALIPAY_PUBLIC_CERT_PATH`。
 
 ### 5.2 支付宝 client
 

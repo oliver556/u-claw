@@ -17,6 +17,7 @@ import (
 	"uclaw-cloud-api/internal/license"
 	"uclaw-cloud-api/internal/modelcatalog"
 	"uclaw-cloud-api/internal/newapi"
+	alipaypay "uclaw-cloud-api/internal/payment/alipay"
 	"uclaw-cloud-api/internal/provisioning"
 	"uclaw-cloud-api/internal/recharge"
 	smsprovider "uclaw-cloud-api/internal/sms"
@@ -40,6 +41,7 @@ type ServerOptions struct {
 	Usage      *usage.Service
 	Catalog    *modelcatalog.Service
 	Recharge   *recharge.Service
+	AlipayPay  *alipaypay.Client
 	AlipaySPI  *alipayspi.Service
 }
 
@@ -109,26 +111,30 @@ type adminAuthRequest struct {
 
 // NewServer returns the HTTP interface for activation, payment, and health routes.
 func NewServer(cfg config.Config, build BuildInfo) http.Handler {
+	alipayPay := buildAlipayPaymentService(cfg)
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, nil),
 		Activation: buildActivationService(cfg, nil),
 		Admin:      buildAdminService(cfg, nil),
 		Usage:      buildUsageService(cfg),
 		Catalog:    buildModelCatalogService(cfg),
-		Recharge:   buildRechargeService(cfg, nil),
+		Recharge:   buildRechargeService(cfg, nil, alipayPay),
+		AlipayPay:  alipayPay,
 		AlipaySPI:  buildAlipaySPIService(cfg),
 	})
 }
 
 // NewServerWithStore returns the HTTP interface backed by persistent storage.
 func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStore) http.Handler {
+	alipayPay := buildAlipayPaymentService(cfg)
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, store),
 		Activation: buildActivationService(cfg, store),
 		Admin:      buildAdminService(cfg, store),
 		Usage:      buildUsageService(cfg),
 		Catalog:    buildModelCatalogService(cfg),
-		Recharge:   buildRechargeService(cfg, store),
+		Recharge:   buildRechargeService(cfg, store, alipayPay),
+		AlipayPay:  alipayPay,
 		AlipaySPI:  buildAlipaySPIService(cfg),
 	})
 }
@@ -606,6 +612,30 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"order": order})
 	})
+	mux.HandleFunc("POST /v1/payments/alipay/notify", func(w http.ResponseWriter, r *http.Request) {
+		if options.Recharge == nil || options.AlipayPay == nil {
+			writePlain(w, http.StatusOK, "failure")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writePlain(w, http.StatusOK, "failure")
+			return
+		}
+		notify, err := options.AlipayPay.ParseAndVerifyNotify(r.PostForm)
+		if err != nil {
+			writePlain(w, http.StatusOK, "failure")
+			return
+		}
+		if cfg.AlipaySellerID != "" && notify.ProviderSellerID != "" && notify.ProviderSellerID != cfg.AlipaySellerID {
+			writePlain(w, http.StatusOK, "failure")
+			return
+		}
+		if _, err := options.Recharge.HandleProviderPayment(r.Context(), notify); err != nil {
+			writePlain(w, http.StatusOK, "failure")
+			return
+		}
+		writePlain(w, http.StatusOK, "success")
+	})
 	mux.HandleFunc("/v1/payments/alipay/spi", func(w http.ResponseWriter, r *http.Request) {
 		if options.AlipaySPI == nil {
 			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("alipay spi service is not configured"))
@@ -651,6 +681,24 @@ func buildAlipaySPIService(cfg config.Config) *alipayspi.Service {
 		ServiceAddress: cfg.AlipaySPIServiceAddress,
 		PrivateKeyPath: privateKeyPath,
 		AESKey:         cfg.AlipaySPIAESKey,
+	})
+}
+
+// buildAlipayPaymentService creates the official scan-code payment client when keys are configured.
+func buildAlipayPaymentService(cfg config.Config) *alipaypay.Client {
+	if !cfg.AlipayConfigured() {
+		return nil
+	}
+	return alipaypay.NewClient(alipaypay.Config{
+		AppID:          cfg.AlipayAppID,
+		GatewayURL:     cfg.AlipayGatewayURL,
+		NotifyURL:      cfg.AlipayNotifyURL,
+		SignType:       cfg.AlipaySignType,
+		SellerID:       cfg.AlipaySellerID,
+		PrivateKeyPath: cfg.AlipayPrivateKeyPath,
+		PublicKeyPath:  cfg.AlipayPublicKeyPath,
+		PublicCertPath: cfg.AlipayPublicCertPath,
+		HTTPClient:     &http.Client{Timeout: cfg.AlipayHTTPTimeout},
 	})
 }
 
@@ -805,8 +853,8 @@ func buildModelCatalogService(cfg config.Config) *modelcatalog.Service {
 	return service
 }
 
-// buildRechargeService creates the order and virtual-callback service for local payment validation.
-func buildRechargeService(cfg config.Config, store recharge.Store) *recharge.Service {
+// buildRechargeService creates recharge orders and wires official checkout adapters.
+func buildRechargeService(cfg config.Config, store recharge.Store, alipayPay *alipaypay.Client) *recharge.Service {
 	if store == nil {
 		store = recharge.NewMemoryStore()
 	}
@@ -818,8 +866,13 @@ func buildRechargeService(cfg config.Config, store recharge.Store) *recharge.Ser
 		}
 		quota = admin
 	}
+	checkoutClients := map[string]recharge.CheckoutClient{}
+	if alipayPay != nil {
+		checkoutClients[recharge.ProviderAlipay] = alipayPay
+	}
 	service, err := recharge.NewService(store, quota, recharge.Config{
 		AllowVirtualCallback: !cfg.IsProduction(),
+		CheckoutClients:      checkoutClients,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("build recharge service: %v", err))
@@ -897,6 +950,13 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// writePlain writes provider webhook acknowledgements that require exact text bodies.
+func writePlain(w http.ResponseWriter, status int, payload string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(payload))
 }
 
 // writeError serializes API errors without leaking internals such as tokens.

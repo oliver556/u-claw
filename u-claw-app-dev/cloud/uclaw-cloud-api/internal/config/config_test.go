@@ -39,9 +39,16 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"WECHAT_PAY_API_V3_KEY":          " v3-key ",
 		"WECHAT_PAY_PRIVATE_KEY_PATH":    " /secrets/wechat.pem ",
 		"WECHAT_PAY_CERT_SERIAL_NO":      " serial-1 ",
+		"ALIPAY_GATEWAY_URL":             " https://openapi-sandbox.dl.alipaydev.com/gateway.do/ ",
 		"ALIPAY_APP_ID":                  " alipay-1 ",
 		"ALIPAY_PRIVATE_KEY_PATH":        " /secrets/alipay.pem ",
+		"ALIPAY_PUBLIC_KEY_PATH":         " /secrets/alipay-public.txt ",
 		"ALIPAY_PUBLIC_CERT_PATH":        " /secrets/alipay-public.crt ",
+		"ALIPAY_NOTIFY_URL":              " https://license.yiyong.me/v1/payments/alipay/notify ",
+		"ALIPAY_SIGN_TYPE":               " RSA2 ",
+		"ALIPAY_SELLER_ID":               " 2088seller ",
+		"ALIPAY_HTTP_TIMEOUT":            "5s",
+		"ALIPAY_ONE_CENT_TEST_ENABLED":   " true ",
 		"ALIPAY_SPI_MERCHANT_ID":         " 2088123456789012 ",
 		"ALIPAY_SPI_MERCHANT_NAME":       " Bavi-box ",
 		"ALIPAY_SPI_MERCHANT_SHORT":      " Bavi ",
@@ -133,6 +140,15 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	if cfg.WeChatPayMchID != "mch-1" || cfg.AlipayAppID != "alipay-1" {
 		t.Fatalf("payment config not trimmed: %+v", cfg)
 	}
+	if cfg.AlipayGatewayURL != "https://openapi-sandbox.dl.alipaydev.com/gateway.do" ||
+		cfg.AlipayPublicKeyPath != "/secrets/alipay-public.txt" ||
+		cfg.AlipayNotifyURL != "https://license.yiyong.me/v1/payments/alipay/notify" ||
+		cfg.AlipaySignType != "RSA2" ||
+		cfg.AlipaySellerID != "2088seller" ||
+		cfg.AlipayHTTPTimeout != 5*time.Second ||
+		!cfg.AlipayOneCentTestEnabled {
+		t.Fatalf("alipay payment config not trimmed: %+v", cfg)
+	}
 	if cfg.AlipaySPIMerchantID != "2088123456789012" ||
 		cfg.AlipaySPIMerchantName != "Bavi-box" ||
 		cfg.AlipaySPIMerchantShort != "Bavi" ||
@@ -216,6 +232,10 @@ func completeProductionConfig() Config {
 		AliyunSMSAccessKeySecret: "aliyun-secret",
 		AliyunSMSSignName:        "Bavi-box",
 		AliyunSMSTemplateCode:    "SMS_123",
+		AlipayAppID:              "alipay-app",
+		AlipayPrivateKeyPath:     "/secrets/alipay-private.txt",
+		AlipayPublicKeyPath:      "/secrets/alipay-public.txt",
+		AlipayNotifyURL:          "https://license.yiyong.me/v1/payments/alipay/notify",
 		LicenseSigningKeyID:      "license-key",
 		LicenseSigningSeedHex:    strings.Repeat("11", 32),
 	}

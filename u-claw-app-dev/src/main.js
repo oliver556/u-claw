@@ -814,6 +814,27 @@ async function getCloudRechargePlans() {
 }
 
 /**
+ * Fetches enabled payment providers so local smoke tests can use virtual pay while production uses Alipay.
+ */
+async function getCloudRechargeProviders() {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured', providers: [] };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available', providers: [] };
+  }
+  try {
+    const result = await getActivationJSON('/v1/recharge/providers', { endpoint, accessToken });
+    return { ok: true, providers: Array.isArray(result.providers) ? result.providers : [] };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error), providers: [] };
+  }
+}
+
+/**
  * Fetches recent recharge orders for the model page records dialog.
  */
 async function getCloudRechargeOrders() {
@@ -835,13 +856,55 @@ async function getCloudRechargeOrders() {
 }
 
 /**
- * Creates a virtual recharge order and immediately simulates the local callback for UI validation.
+ * Fetches one recharge order status so the QR dialog can poll until credited.
+ */
+async function getCloudRechargeOrder(orderNo) {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  const normalizedOrderNo = String(orderNo || '').trim();
+  if (!endpoint) {
+    return { ok: false, message: 'activation endpoint is not configured' };
+  }
+  if (!accessToken) {
+    return { ok: false, message: 'uclaw access token is not available' };
+  }
+  if (!normalizedOrderNo) {
+    return { ok: false, message: 'orderNo is required' };
+  }
+  try {
+    const result = await getActivationJSON(`/v1/recharge/orders/${encodeURIComponent(normalizedOrderNo)}`, { endpoint, accessToken });
+    return { ok: true, order: result.order };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error) };
+  }
+}
+
+/**
+ * Renders a QR payload locally so the web UI never depends on third-party image services.
+ */
+async function renderQRCodeDataURL(value) {
+  const payload = String(value || '').trim();
+  if (!payload) return '';
+  const qrcodePath = path.join(openclawPath, 'node_modules', 'qrcode');
+  const qrcode = require(qrcodePath);
+  return qrcode.toDataURL(payload, {
+    errorCorrectionLevel: 'M',
+    margin: 1,
+    width: 224,
+    color: { dark: '#0f172a', light: '#ffffff' },
+  });
+}
+
+/**
+ * Creates a recharge order; official providers return QR data, virtual remains a dev fallback.
  */
 async function rechargeCloudModelQuota(payload = {}) {
   const state = readJsonFile(activationStatePath);
   const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
   const accessToken = String(state?.uclawAccessToken || '').trim();
   const planCode = String(payload.planCode || 'dev_10').trim();
+  const provider = String(payload.provider || 'alipay').trim().toLowerCase();
   if (!endpoint) {
     return { ok: false, message: 'activation endpoint is not configured' };
   }
@@ -852,13 +915,36 @@ async function rechargeCloudModelQuota(payload = {}) {
     return { ok: false, message: 'recharge plan is required' };
   }
   try {
-    const created = await postActivationJSON('/v1/recharge/orders', {
-      planCode,
-      provider: 'virtual',
-    }, { endpoint, accessToken });
+    let actualProvider = provider;
+    let created;
+    try {
+      created = await postActivationJSON('/v1/recharge/orders', {
+        planCode,
+        provider: actualProvider,
+      }, { endpoint, accessToken });
+    } catch (error) {
+      if (actualProvider !== 'alipay' || !String(error?.message || error).includes('payment provider alipay is not configured')) {
+        throw error;
+      }
+      actualProvider = 'virtual';
+      created = await postActivationJSON('/v1/recharge/orders', {
+        planCode,
+        provider: actualProvider,
+      }, { endpoint, accessToken });
+    }
     const orderNo = String(created?.order?.orderNo || '').trim();
     if (!orderNo) {
       throw new Error('recharge order response missing orderNo');
+    }
+    const qrCodeUrl = String(created.qrCodeUrl || created.payUrl || '').trim();
+    if (actualProvider !== 'virtual') {
+      return {
+        ok: true,
+        order: created.order,
+        qrCodeUrl,
+        qrCodeDataUrl: await renderQRCodeDataURL(qrCodeUrl),
+        message: '请使用支付宝扫码支付。',
+      };
     }
     const callback = await postActivationJSON('/v1/payments/virtual/notify', {
       orderNo,
@@ -2080,7 +2166,9 @@ function setupIPC() {
   ipcMain.handle('uclaw:get-model-catalog', () => getCloudModelCatalog());
   ipcMain.handle('uclaw:refresh-model-catalog', () => refreshCloudModelCatalog());
   ipcMain.handle('uclaw:get-recharge-plans', () => getCloudRechargePlans());
+  ipcMain.handle('uclaw:get-recharge-providers', () => getCloudRechargeProviders());
   ipcMain.handle('uclaw:get-recharge-orders', () => getCloudRechargeOrders());
+  ipcMain.handle('uclaw:get-recharge-order', (_event, orderNo) => getCloudRechargeOrder(orderNo));
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
 }
 

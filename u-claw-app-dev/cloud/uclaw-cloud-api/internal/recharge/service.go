@@ -156,6 +156,21 @@ type VirtualCallbackRequest struct {
 	ProviderEventID string
 }
 
+// PaymentCallbackRequest carries one verified provider payment notification into the recharge state machine.
+type PaymentCallbackRequest struct {
+	Provider         string
+	OrderNo          string
+	ProviderEventID  string
+	ProviderTradeNo  string
+	AmountCents      int64
+	Paid             bool
+	PaidAt           time.Time
+	SignatureValid   bool
+	PayloadRedacted  string
+	ProviderStatus   string
+	ProviderSellerID string
+}
+
 // NewService creates the recharge service with a static plan catalog and strict provider defaults.
 func NewService(store Store, quota QuotaClient, cfg Config) (*Service, error) {
 	if store == nil {
@@ -315,6 +330,73 @@ func (s *Service) HandleVirtualCallback(ctx context.Context, req VirtualCallback
 	}
 	if order.Status == StatusCredited {
 		return order, nil
+	}
+	return s.CreditPaidOrder(ctx, orderNo)
+}
+
+// HandleProviderPayment accepts a verified official-provider callback and credits New API once.
+func (s *Service) HandleProviderPayment(ctx context.Context, req PaymentCallbackRequest) (Order, error) {
+	provider := normalizeProvider(req.Provider)
+	if provider == "" || provider == ProviderVirtual {
+		return Order{}, fmt.Errorf("official payment provider is required")
+	}
+	orderNo := strings.TrimSpace(req.OrderNo)
+	if orderNo == "" {
+		return Order{}, fmt.Errorf("order no is required")
+	}
+	if !req.Paid {
+		return Order{}, fmt.Errorf("payment status is not paid")
+	}
+	if !req.SignatureValid {
+		return Order{}, fmt.Errorf("payment signature is invalid")
+	}
+	eventID := strings.TrimSpace(req.ProviderEventID)
+	if eventID == "" {
+		eventID = provider + "-" + orderNo
+	}
+	order, err := s.store.GetOrder(ctx, orderNo)
+	if err != nil {
+		return Order{}, err
+	}
+	if order.Provider != provider {
+		return Order{}, fmt.Errorf("order provider mismatch")
+	}
+	if req.AmountCents != order.AmountCents {
+		return Order{}, fmt.Errorf("payment amount mismatch")
+	}
+	paidAt := req.PaidAt
+	if paidAt.IsZero() {
+		paidAt = s.now()
+	}
+	payload := strings.TrimSpace(req.PayloadRedacted)
+	if payload == "" {
+		payload = fmt.Sprintf(`{"provider":%q}`, provider)
+	}
+	if err := s.store.SaveCallback(ctx, Callback{
+		OrderID:         order.ID,
+		Provider:        provider,
+		ProviderEventID: eventID,
+		SignatureValid:  true,
+		PayloadRedacted: payload,
+		ReceivedAt:      s.now(),
+	}); err != nil {
+		return Order{}, err
+	}
+	paid, err := s.store.MarkPaid(ctx, orderNo, strings.TrimSpace(req.ProviderTradeNo), paidAt)
+	if err != nil {
+		return Order{}, err
+	}
+	if paid.Status == StatusCredited {
+		return paid, nil
+	}
+	return s.CreditPaidOrder(ctx, orderNo)
+}
+
+// CreditPaidOrder atomically credits New API quota for a paid recharge order.
+func (s *Service) CreditPaidOrder(ctx context.Context, orderNo string) (Order, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	if orderNo == "" {
+		return Order{}, fmt.Errorf("order no is required")
 	}
 	creditOrder, locked, err := s.store.BeginCredit(ctx, orderNo)
 	if err != nil {
