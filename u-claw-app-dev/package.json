@@ -19,7 +19,6 @@
     "dev": "npm run patch-openclaw && npm run sync-lib && electron . --dev",
     "dev:skip-activation": "UCLAW_SKIP_ACTIVATION_GATE=1 npm run dev",
     "dev:env": "node scripts/with-local-env.js npm run dev",
-    "dev:video": "npm run dev",
     "build:mac": "npm run prepare-build && electron-builder --mac",
     "build:mac-arm64": "npm run prepare-build && electron-builder --mac --arm64",
     "build:mac-x64": "npm run prepare-build && electron-builder --mac --x64",

@@ -12,9 +12,6 @@ cd /Users/jamison/Document/300_学习/320_code/390_ai_agent/u-claw/u-claw-app-de
 # 日常开发
 npm run dev
 
-# 视频链路调试（与 npm run dev 相同，保留专用入口）
-npm run dev:video
-
 # 正式客户便携版 + 部署 U 盘
 npm run package:portable:customer -- --usb /Volumes/UCLAW-01
 
@@ -29,7 +26,6 @@ npm run package:portable:streamer -- --usb /Volumes/UCLAW-01
 | 命令 | 用途 | 会不会交付 U 盘 |
 |---|---|---|
 | `npm run dev` | 启动开发桌面端 | 不会 |
-| `npm run dev:video` | 启动开发桌面端，用于视频链路调试 | 不会 |
 | `npm run start` | 不带 `--dev` 标记启动本地 Electron | 不会 |
 | `npm run sync:config` | 同步桌面/便携配置 | 只有指定 `--usb` 才会 |
 | `npm run package:portable:customer` | 生成客户便携版 | 指定 `--usb` 才会 |
@@ -117,20 +113,6 @@ patch-openclaw
 ```
 
 用于日常开发。会启动本机 video adapter，默认从 `127.0.0.1:18808` 开始选端口。
-
-### `npm run dev:video`
-
-```txt
-dev:video -> npm run dev
-```
-
-这是为了保留明确的视频调试入口。它不会注入公网 adapter，不会设置 `UCLAW_VIDEO_PROVIDER=volcengine`。
-
-正确视频链路：
-
-```txt
-OpenClaw -> 本机 adapter -> New API -> 服务器 adapter -> 即梦
-```
 
 ### `npm run start`
 
@@ -376,7 +358,7 @@ bash setup.sh
   -> npm run dev
 
 我要测试视频
-  -> npm run dev:video
+  -> npm run dev
 
 我要交付给客户
   -> npm run package:portable:customer -- --usb <U盘根目录>

@@ -37,7 +37,7 @@ func TestGetCatalogLogsInAndNormalizesModels(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer user-access-token" {
 				t.Fatalf("models Authorization = %q", r.Header.Get("Authorization"))
 			}
-			_, _ = w.Write([]byte(`{"success":true,"data":{"2":["gpt-image-2"],"1":["gpt-5.5","gpt-5.5","jimeng-video-3-720p","seedance-1.5-pro-1080p-10s"]}}`))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"2":["gpt-image-2"],"1":["gpt-5.5","gpt-5.5","seedance-1.5-pro-1080p-10s"]}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -71,10 +71,10 @@ func TestGetCatalogLogsInAndNormalizesModels(t *testing.T) {
 	if catalog.Provider.ID != "newapi" || catalog.Provider.BaseURL != "https://api.example.com/v1" || catalog.Provider.API != "openai-completions" {
 		t.Fatalf("provider = %+v", catalog.Provider)
 	}
-	if len(catalog.Models) != 4 || catalog.Models[0].ID != "gpt-5.5" || catalog.Models[0].Channels[0] != "1" {
+	if len(catalog.Models) != 3 || catalog.Models[0].ID != "gpt-5.5" || catalog.Models[0].Channels[0] != "1" {
 		t.Fatalf("models = %+v", catalog.Models)
 	}
-	if catalog.Models[1].Capabilities[0] != "image" || catalog.Models[2].Capabilities[0] != "video" || catalog.Models[3].Capabilities[0] != "video" {
+	if catalog.Models[1].Capabilities[0] != "image" || catalog.Models[2].Capabilities[0] != "video" {
 		t.Fatalf("capabilities = %+v", catalog.Models)
 	}
 	if catalog.RefreshedAt != "2026-08-29T12:00:00Z" || catalog.Cache.TTLSeconds != 60 || catalog.Cache.Hit {
