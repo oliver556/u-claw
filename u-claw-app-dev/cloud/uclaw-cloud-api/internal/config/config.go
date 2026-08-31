@@ -54,6 +54,7 @@ type Config struct {
 	AlipaySPIServicePhone    string
 	AlipaySPIServiceAddress  string
 	AlipaySPIPrivateKeyPath  string
+	AlipaySPIAESKey          string
 }
 
 // Getter reads a configuration value from a backing store such as environment variables.
@@ -111,6 +112,7 @@ func Load(getenv Getter) (Config, error) {
 		AlipaySPIServicePhone:    strings.TrimSpace(getenv("ALIPAY_SPI_SERVICE_PHONE")),
 		AlipaySPIServiceAddress:  strings.TrimSpace(getenv("ALIPAY_SPI_SERVICE_ADDRESS")),
 		AlipaySPIPrivateKeyPath:  strings.TrimSpace(getenv("ALIPAY_SPI_PRIVATE_KEY_PATH")),
+		AlipaySPIAESKey:          strings.TrimSpace(getenv("ALIPAY_SPI_AES_KEY")),
 	}
 
 	if raw := strings.TrimSpace(getenv("NEWAPI_HTTP_TIMEOUT")); raw != "" {

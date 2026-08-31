@@ -650,6 +650,7 @@ func buildAlipaySPIService(cfg config.Config) *alipayspi.Service {
 		ServicePhone:   cfg.AlipaySPIServicePhone,
 		ServiceAddress: cfg.AlipaySPIServiceAddress,
 		PrivateKeyPath: privateKeyPath,
+		AESKey:         cfg.AlipaySPIAESKey,
 	})
 }
 

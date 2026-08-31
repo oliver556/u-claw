@@ -166,6 +166,50 @@ func TestStandardAggrePayOrderCreateReturnsBillEnvelope(t *testing.T) {
 	}
 }
 
+func TestStandardAggrePayOrderCreateEncryptsResponseWhenAESKeyIsConfigured(t *testing.T) {
+	rawAESKey := "MDEyMzQ1Njc4OWFiY2RlZg=="
+	service := NewService(Config{
+		MerchantName: "Bavi-box",
+		AESKey:       rawAESKey,
+	})
+	service.now = func() time.Time { return time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC) }
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/isv/spi/service",
+		strings.NewReader(`method=spi.alipay.pay.standardaggrepay.order.create&qr_code_id=https%3A%2F%2Fqr.isv.com%2Ftest%2F1&ua=watch`),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	service.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Response    string `json:"response"`
+		EncryptType string `json:"encrypt_type"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode encrypted response: %v", err)
+	}
+	if payload.Response == "" || strings.HasPrefix(payload.Response, "{") || payload.EncryptType != "AES" {
+		t.Fatalf("payload is not encrypted: %+v", payload)
+	}
+	key, err := decodeAESKey(rawAESKey)
+	if err != nil {
+		t.Fatalf("decode aes key: %v", err)
+	}
+	plain, err := decryptAESCBCPKCS7(payload.Response, key)
+	if err != nil {
+		t.Fatalf("decrypt response: %v", err)
+	}
+	response := decodeResponseString(t, plain)
+	if response["code"] != "10000" || response["qr_code_id"] != "https://qr.isv.com/test/1" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
 func TestMerchantInfoQuerySignsResponseWhenPrivateKeyIsMounted(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -229,7 +273,7 @@ func TestMerchantInfoQueryRejectsUnsupportedMethod(t *testing.T) {
 	}
 }
 
-func decodeResponseString(t *testing.T, raw json.RawMessage) map[string]any {
+func decodeResponseString(t *testing.T, raw []byte) map[string]any {
 	t.Helper()
 	var response map[string]any
 	if err := json.Unmarshal(raw, &response); err != nil {

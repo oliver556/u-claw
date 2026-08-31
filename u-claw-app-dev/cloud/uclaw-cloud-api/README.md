@@ -310,7 +310,7 @@ spi.alipay.pay.standardaggrepay.order.create
 ```text
 后端服务正式地址: https://license.yiyong.me/isv/spi/service
 后端服务测试地址: https://license.yiyong.me/isv/spi/service
-响应是否加密: 否
+响应是否加密: 是
 请求编码: UTF-8
 ```
 
@@ -331,9 +331,10 @@ ALIPAY_SPI_MERCHANT_SHORT=Bavi
 ALIPAY_SPI_SERVICE_PHONE=0571-00000000
 ALIPAY_SPI_SERVICE_ADDRESS=https://license.yiyong.me
 ALIPAY_SPI_PRIVATE_KEY_PATH=/etc/uclaw-cloud-api/alipay_private_key.pem
+ALIPAY_SPI_AES_KEY=<支付宝开放平台生成的 Base64 AES 密钥>
 ```
 
-`ALIPAY_SPI_PRIVATE_KEY_PATH` 可省略；省略时复用 `ALIPAY_PRIVATE_KEY_PATH`。若支付宝控制台仍返回 `UGW_TARGET_SYSTEM_ERROR`，先确认“响应是否加密”为“否”，再检查服务日志中 `alipay_spi ... sign_enabled=true`。应用私钥只放服务器 root-only 文件，不粘贴到聊天、不提交 Git。
+`ALIPAY_SPI_PRIVATE_KEY_PATH` 可省略；省略时复用 `ALIPAY_PRIVATE_KEY_PATH`。`ALIPAY_SPI_AES_KEY` 是支付宝开放平台生成的 AES 密钥，用于 `AES/CBC/PKCS5Padding` 内容加密；控制台强制“响应是否加密=是”时必须配置。应用私钥和 AES key 只放服务器受限 env 或 root-only 文件，不粘贴到聊天、不提交 Git。
 
 本地验收：
 
