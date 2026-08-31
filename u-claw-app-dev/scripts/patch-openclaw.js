@@ -1858,7 +1858,7 @@ function patchServiceWorker() {
   let source = read(swPath);
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-workbench-1-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3";',
   );
   source = source.replace(
     /skillhub-scene-picker-2(?!-skillhub-scene-font-color-1)/,
@@ -2293,43 +2293,67 @@ function patchPrimaryNavigationProjection() {
 }
 
 /**
- * Adds the Bavi-box ecommerce image workflow entry to the user-facing Workflows page.
+ * Adds the Bavi-box ecommerce image workbench to the user-facing Workflows page.
  */
 function patchTasksPageEcommerceWorkflow() {
-  const helper =
-    "function UcEcommerceWorkflowPrompt(){return[`# 电商主图/详情图 工作流`,``,`你正在运行 Bavi-box 的 Prompt-only 电商主图/详情图工作流。`,``,`请先收集商品类目、平台、目标人群、SKU 规格、商品图、资质证据、卖点、视觉参考和禁用表达。缺失信息必须标为待补充，不得编造证书、专利、检测报告、销量、评论或医疗健康功效。`,``,`按 Intake Brief、Compliance Gate、Conversion Driver、Campaign Style Lock、Main Image Storyboard、Detail Page Storyboard、Prompt Pack、Human Review Gate 推进。每个确认门暂停等待用户确认。`,``,`V0 边界：不直接出图，不读取独立 API key，不绕过 Bavi-box 已配置图片模型。用户确认 Prompt Pack 后，才建议走现有图片生成能力。`].join(`\\n`)}function UcEcommerceWorkflowStore(e){try{if(!e)return;let t=JSON.parse(globalThis.localStorage?.getItem(`uclaw.ecommerceWorkflowSessions.v1`)||`{}`);(!t||typeof t!=`object`||Array.isArray(t))&&(t={}),t[e]={name:`电商主图/详情图`,mode:`Prompt-only`,skill:`ecommerce-main-detail-workflow`,prompt:UcEcommerceWorkflowPrompt(),createdAt:Date.now()},globalThis.localStorage?.setItem(`uclaw.ecommerceWorkflowSessions.v1`,JSON.stringify(t))}catch{}}function UcEcommerceWorkflowView(e){let t=!!e.ecommerceWorkflowStarting,n=!e.connected||t;return i`<section class=\"card stack uclaw-ecommerce-workflow\" data-uclaw-ecommerce-workflow=\"prompt-only\"><div><div class=\"card-title\">电商主图/详情图</div><div class=\"card-sub\">Prompt-only 工作流：商品资料、合规边界、Campaign Style Lock、主图/详情页 Storyboard 与 Prompt Pack。</div></div><div class=\"chip-row\"><span class=\"chip chip-ok\">Skill: ecommerce-main-detail-workflow</span><span class=\"chip\">不直接出图</span><span class=\"chip\">人工确认门</span></div><div class=\"row\"><button class=\"btn primary\" type=\"button\" ?disabled=${n} @click=${()=>void e.startEcommerceWorkflow?.()}>${t?`创建中...`:`开始工作流`}</button><span class=\"muted\">创建普通 main 会话并保留 workflow metadata。</span></div></section>`}";
+  const helper = [
+    "function UcEcommercePlatformPresets(){return[{id:`douyin`,label:`抖音电商`,source_type:`official_seed`,confidence:`high`,needs_backend_confirmation:!1,main:`主图建议不低于 600x600，优先 1:1；服饰等可使用 3:4 素材图`,detail:`详情页建议宽 1125px，单屏高度不超过 2000px，总高度不超过 20000px`,qa:[`商品主体清晰`,`不拼接低质边框`,`功效/资质表达需证据`]},{id:`taobao_tmall`,label:`淘宝/天猫`,source_type:`public_summary`,confidence:`medium`,needs_backend_confirmation:!1,main:`常用 800x800 或以上 1:1 主图；移动端需保证主体占比和文字可读`,detail:`详情长图常用宽 750px；切片高度按店铺后台限制确认`,qa:[`首图避免牛皮癣`,`SKU 与实物一致`,`价格/销量不可编造`]},{id:`jd`,label:`京东`,source_type:`official_and_public_summary`,confidence:`medium`,needs_backend_confirmation:!1,main:`主图常用 800x800 或以上 1:1；白底/场景要求按类目确认`,detail:`详情页素材按京东商详装修限制切片`,qa:[`品牌授权需证据`,`参数图与详情一致`,`禁用绝对化表述`]},{id:`pdd`,label:`拼多多`,source_type:`public_summary`,confidence:`low`,needs_backend_confirmation:!0,main:`常用方图主图；具体尺寸、白底、轮播张数需后台二次确认`,detail:`详情图按商家后台实时限制确认`,qa:[`不夸大低价权益`,`活动信息需可核验`,`规则低置信需复核`]},{id:`kuaishou`,label:`快手小店`,source_type:`official_and_public_summary`,confidence:`medium`,needs_backend_confirmation:!1,main:`常用 1:1 主图，部分类目需符合平台发布规范`,detail:`详情页建议按后台装修限制分屏`,qa:[`短视频货架识别优先`,`功效表达保守`,`售后/赠品信息需证据`]},{id:`xiaohongshu`,label:`小红书`,source_type:`public_summary`,confidence:`low`,needs_backend_confirmation:!0,main:`常用 3:4 或 1:1 封面/商品图，需按店铺后台确认`,detail:`详情图需兼顾社区审美和商品信息密度`,qa:[`避免医疗化承诺`,`种草文案不冒充用户评价`,`规则低置信需复核`]},{id:`amazon`,label:`Amazon`,source_type:`official_seed`,confidence:`high`,needs_backend_confirmation:!1,main:`最长边建议 1600px 以上；主图纯白背景，商品占画面 85% 左右`,detail:`A+ / listing images 按站点模块尺寸确认`,qa:[`主图无水印/促销字`,`商品准确对应 ASIN`,`合规声明按站点确认`]},{id:`shopee`,label:`Shopee`,source_type:`official_seed`,confidence:`high`,needs_backend_confirmation:!1,main:`常用 1:1 商品图；部分市场支持 3:4 图片展示`,detail:`商品描述图建议按卖家中心限制压缩与切片`,qa:[`首图不拥挤`,`多语言文案可读`,`市场规则需确认`]},{id:`alibaba`,label:`Alibaba 国际站`,source_type:`official_seed`,confidence:`high`,needs_backend_confirmation:!1,main:`建议 800x800 以上清晰方图；B2B 场景突出产品、规格和应用`,detail:`详情页按国际站详情装修模块输出`,qa:[`参数/认证需证据`,`外贸单位统一`,`工厂/资质不编造`]}]}",
+    "function UcEcommerceDefaultForm(){let e=`douyin`;try{e=globalThis.localStorage?.getItem(`uclaw.ecommerceWorkbench.platform.v1`)||e}catch{}return{platform:e,productName:``,category:``,sellingPoints:``,audience:``,files:[]}}",
+    "function UcEcommerceFormatFileSize(e){return !Number.isFinite(e)?``:e>=1048576?`${(e/1048576).toFixed(1)} MB`:`${Math.max(1,Math.round(e/1024))} KB`}",
+    "function UcEcommerceSelectedPreset(e){return UcEcommercePlatformPresets().find(t=>t.id===e)||UcEcommercePlatformPresets()[0]}",
+    "function UcEcommerceMissing(e){let t=[];return e?.files?.length||t.push(`商品图片`),(e?.productName?.trim()||e?.sellingPoints?.trim())||t.push(`商品名称或卖点`),t}",
+    "function UcEcommerceBuildManifest(e){let t=UcEcommerceSelectedPreset(e.platform),n=(e.sellingPoints||``).split(/\\n|，|,|；|;/).map(e=>e.trim()).filter(Boolean).slice(0,5),r=e.files||[];return{id:`ecom-${Date.now()}`,name:e.productName?.trim()||`未命名商品`,platform:t.id,platform_label:t.label,source_type:t.source_type,confidence:t.confidence,needs_backend_confirmation:t.needs_backend_confirmation,generated_at:new Date().toISOString(),input:{category:e.category?.trim()||`待补充`,audience:e.audience?.trim()||`默认电商购物人群`,image_count:r.length,selling_points:n},outputs:[{type:`main_image`,title:`主图输出预案`,size_rule:t.main,asset_strategy:`以第 1 张商品图为主体识别图，先做抠图/主体增强，再按平台规格生成 1:1 KV 与可选场景图。`,prompt_brief:`清晰商品主体，干净货架级构图，3 个以内核心信息层级，避免虚构资质和销量。`},{type:`detail_image`,title:`详情图输出预案`,size_rule:t.detail,asset_strategy:`将卖点拆成 5-7 屏详情叙事：痛点、核心功能、材质/规格、场景、信任证据、下单理由。`,prompt_brief:`同一 Campaign Style Lock，图文层级可读，证据不足项标为待确认。`}],qa:[...t.qa,`低置信平台需后台规则复核`,`图片生成完成后必须人工审查文字和事实`]}}",
+    "function UcEcommerceWorkbenchView(e){let t=e.ecommerceForm??UcEcommerceDefaultForm(),n=UcEcommercePlatformPresets(),r=UcEcommerceSelectedPreset(t.platform),a=UcEcommerceMissing(t),o=e.ecommerceResult;return i`<section class=\"card stack uclaw-ecommerce-workbench\" data-uclaw-ecommerce-workbench=\"direct-output\" data-uclaw-ecommerce-platform=${t.platform}><div class=\"uclaw-ecommerce-head\"><div><div class=\"card-title\">电商主图/详情图</div><div class=\"card-sub\">选择平台，上传商品图，补少量商品信息，先生成平台化输出预案和 QA 清单。</div></div><span class=\"chip chip-ok\">${r.label}</span></div><div class=\"uclaw-ecommerce-grid\"><label class=\"field\"><span>平台</span><select class=\"input\" .value=${t.platform} @change=${n=>e.onEcommerceField?.(`platform`,n.target.value)}>${n.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class=\"field\"><span>商品名称</span><input class=\"input\" placeholder=\"如：便携榨汁杯\" .value=${t.productName} @input=${t=>e.onEcommerceField?.(`productName`,t.target.value)}></label><label class=\"field\"><span>类目</span><input class=\"input\" placeholder=\"如：厨房小电\" .value=${t.category} @input=${t=>e.onEcommerceField?.(`category`,t.target.value)}></label><label class=\"field\"><span>目标人群</span><input class=\"input\" placeholder=\"默认可不填\" .value=${t.audience} @input=${t=>e.onEcommerceField?.(`audience`,t.target.value)}></label></div><label class=\"field\"><span>核心卖点</span><textarea class=\"input uclaw-ecommerce-textarea\" placeholder=\"每行一个卖点；没有名称时至少填写这里\" .value=${t.sellingPoints} @input=${t=>e.onEcommerceField?.(`sellingPoints`,t.target.value)}></textarea></label><div class=\"uclaw-ecommerce-upload\"><div class=\"uclaw-ecommerce-upload-head\"><div><strong>商品图片</strong><span>${t.files.length?`${t.files.length} 张已选择`:`上传实拍图、包装图或细节图`}</span></div><label class=\"btn\"><input class=\"uclaw-ecommerce-file-input\" type=\"file\" accept=\"image/*\" multiple @change=${t=>e.onEcommerceFiles?.(t.target.files)}>选择图片</label></div>${t.files.length?i`<div class=\"uclaw-ecommerce-file-grid\">${t.files.map((t,n)=>i`<figure class=\"uclaw-ecommerce-file\"><img src=${t.url} alt=${t.name}><figcaption><span>${t.name}</span><small>${UcEcommerceFormatFileSize(t.size)}</small></figcaption><button class=\"btn ghost\" type=\"button\" @click=${()=>e.removeEcommerceFile?.(n)}>移除</button></figure>`)}</div>`:i`<div class=\"uclaw-ecommerce-empty\">还没有图片。首版会读取本地预览和文件信息，用于生成规格预案。</div>`}</div><div class=\"uclaw-ecommerce-rules\"><div><strong>主图规格</strong><span>${r.main}</span></div><div><strong>详情图规格</strong><span>${r.detail}</span></div><div><strong>规则来源</strong><span>${r.source_type} / ${r.confidence}</span></div></div><div class=\"row\"><button class=\"btn primary\" type=\"button\" ?disabled=${a.length>0} @click=${()=>e.generateEcommercePreflight?.()}>生成预案</button>${a.length?i`<span class=\"muted\">还需：${a.join(`、`)}</span>`:i`<span class=\"muted\">生成平台规格、输出结构和 QA manifest。</span>`}</div>${o?.error?i`<div class=\"banner banner-error\">${o.error}</div>`:o?i`<div class=\"uclaw-ecommerce-result\"><div class=\"uclaw-ecommerce-result-head\"><div><strong>${o.platform_label} 输出预案</strong><span>${o.name} · ${o.input.image_count} 张素材</span></div><button class=\"btn\" type=\"button\" @click=${()=>e.copyEcommerceManifest?.()}>复制 Manifest</button></div><div class=\"uclaw-ecommerce-output-grid\">${o.outputs.map(e=>i`<article><strong>${e.title}</strong><span>${e.size_rule}</span><p>${e.asset_strategy}</p><small>${e.prompt_brief}</small></article>`)}</div><div class=\"uclaw-ecommerce-qa\">${o.qa.map(e=>i`<span>${e}</span>`)}</div></div>`:``}</section>`}",
+  ].join("");
 
   for (const file of listAssetFiles(/^tasks-page-.*\.js$/, "tasks-page")) {
     const before = read(file);
     let after = before;
 
-    if (!after.includes("function UcEcommerceWorkflowPrompt()")) {
+    after = after.replace(
+      /function UcEcommerceWorkflowPrompt\(\)\{[\s\S]*?\}function B\(e\)\{/,
+      `${helper}function B(e){`,
+    );
+
+    if (!after.includes("function UcEcommercePlatformPresets()")) {
       after = after.replace("function B(e){", `${helper}function B(e){`);
     }
 
     after = after.replace(
-      "this.client=null,this.loadGeneration=0}",
-      "this.client=null,this.loadGeneration=0,this.ecommerceWorkflowStarting=!1}",
+      /this\.client=null,this\.loadGeneration=0(?:,this\.ecommerceWorkflowStarting=!1|,this\.ecommerceForm=UcEcommerceDefaultForm\(\),this\.ecommerceResult=null)?\}/,
+      "this.client=null,this.loadGeneration=0,this.ecommerceForm=UcEcommerceDefaultForm(),this.ecommerceResult=null}",
     );
 
-    if (!after.includes("async startEcommerceWorkflow()")) {
+    after = after.replace(
+      "disconnectedCallback(){this.loadGeneration+=1,",
+      "disconnectedCallback(){this.cleanupEcommerceFileUrls?.(),this.loadGeneration+=1,",
+    );
+
+    after = after.replace(
+      /openEcommerceWorkflowSession\(e\)\{[\s\S]*?\}async startEcommerceWorkflow\(\)\{[\s\S]*?\}(?=render\(\)\{return i`)/,
+      "",
+    );
+
+    if (!after.includes("generateEcommercePreflight()")) {
       after = after.replace(
         "}render(){return i`",
-        "}openEcommerceWorkflowSession(e){e&&(this.context.gateway.setSessionKey(e),this.context.navigate(`chat`,{search:u(e)}))}async startEcommerceWorkflow(){let e=this.client;if(!this.connected||!e||this.ecommerceWorkflowStarting)return;this.ecommerceWorkflowStarting=!0,this.error=null,this.requestUpdate();try{let t=await e.request(`sessions.create`,{agentId:`main`,label:`电商主图/详情图`});if(!t?.key)throw new Error(`sessions.create returned no key`);UcEcommerceWorkflowStore(t.key),this.openEcommerceWorkflowSession(t.key)}catch(e){this.error=`创建电商主图/详情图工作流失败：${e instanceof Error?e.message:String(e)}`}finally{this.ecommerceWorkflowStarting=!1,this.requestUpdate()}}render(){return i`",
+        "}cleanupEcommerceFileUrls(){for(let e of this.ecommerceForm?.files||[])try{e.url&&URL.revokeObjectURL(e.url)}catch{}}onEcommerceField(e,t){this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),[e]:t},e===`platform`&&(()=>{try{globalThis.localStorage?.setItem(`uclaw.ecommerceWorkbench.platform.v1`,t)}catch{}})(),this.ecommerceResult=null,this.requestUpdate()}onEcommerceFiles(e){let t=Array.from(e||[]).filter(e=>e?.type?.startsWith(`image/`)).slice(0,12).map(e=>({name:e.name,type:e.type,size:e.size,url:URL.createObjectURL(e)}));this.cleanupEcommerceFileUrls(),this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),files:t},this.ecommerceResult=null,this.requestUpdate()}removeEcommerceFile(e){let t=[...(this.ecommerceForm?.files||[])],n=t.splice(e,1)[0];try{n?.url&&URL.revokeObjectURL(n.url)}catch{}this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),files:t},this.ecommerceResult=null,this.requestUpdate()}generateEcommercePreflight(){let e=this.ecommerceForm??UcEcommerceDefaultForm(),t=UcEcommerceMissing(e);if(t.length){this.ecommerceResult={error:`请先补充：${t.join(`、`)}`},this.requestUpdate();return}this.ecommerceResult=UcEcommerceBuildManifest(e),this.requestUpdate()}async copyEcommerceManifest(){if(!this.ecommerceResult)return;try{await navigator.clipboard?.writeText(JSON.stringify(this.ecommerceResult,null,2))}catch{}}render(){return i`",
       );
     }
 
-    while (after.includes("${UcEcommerceWorkflowView(this)}${UcEcommerceWorkflowView(this)}")) {
+    after = after.replaceAll("${UcEcommerceWorkflowView(this)}", "${UcEcommerceWorkbenchView(this)}");
+
+    while (after.includes("${UcEcommerceWorkbenchView(this)}${UcEcommerceWorkbenchView(this)}")) {
       after = after.replace(
-        "${UcEcommerceWorkflowView(this)}${UcEcommerceWorkflowView(this)}",
-        "${UcEcommerceWorkflowView(this)}",
+        "${UcEcommerceWorkbenchView(this)}${UcEcommerceWorkbenchView(this)}",
+        "${UcEcommerceWorkbenchView(this)}",
       );
     }
 
-    if (!after.includes("${UcEcommerceWorkflowView(this)}${B({basePath:this.context.basePath")) {
+    if (!after.includes("${UcEcommerceWorkbenchView(this)}${B({basePath:this.context.basePath")) {
       after = after.replace(
         "${B({basePath:this.context.basePath,connected:this.connected",
-        "${UcEcommerceWorkflowView(this)}${B({basePath:this.context.basePath,connected:this.connected",
+        "${UcEcommerceWorkbenchView(this)}${B({basePath:this.context.basePath,connected:this.connected",
       );
     }
 
@@ -7581,6 +7605,153 @@ openclaw-config-page .card {
 }
 
 /* chat-composer-attachment-float-1 */
+openclaw-tasks-page .uclaw-ecommerce-workbench {
+  gap: 16px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-head,
+openclaw-tasks-page .uclaw-ecommerce-upload-head,
+openclaw-tasks-page .uclaw-ecommerce-result-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-head > div,
+openclaw-tasks-page .uclaw-ecommerce-upload-head > div,
+openclaw-tasks-page .uclaw-ecommerce-result-head > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+openclaw-tasks-page .uclaw-ecommerce-textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file-input {
+  display: none;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-upload,
+openclaw-tasks-page .uclaw-ecommerce-result {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-upload span,
+openclaw-tasks-page .uclaw-ecommerce-result span,
+openclaw-tasks-page .uclaw-ecommerce-output-grid small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-empty {
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file-grid,
+openclaw-tasks-page .uclaw-ecommerce-output-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file,
+openclaw-tasks-page .uclaw-ecommerce-output-grid article {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file figcaption {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file figcaption span {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-rules {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+openclaw-tasks-page .uclaw-ecommerce-rules > div,
+openclaw-tasks-page .uclaw-ecommerce-qa span {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-rules span,
+openclaw-tasks-page .uclaw-ecommerce-output-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-qa {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 720px) {
+  openclaw-tasks-page .uclaw-ecommerce-head,
+  openclaw-tasks-page .uclaw-ecommerce-upload-head,
+  openclaw-tasks-page .uclaw-ecommerce-result-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-grid,
+  openclaw-tasks-page .uclaw-ecommerce-rules {
+    grid-template-columns: 1fr;
+  }
+}
+
 .chat-attachments-preview {
   position: absolute;
   left: var(--chat-box-inset);

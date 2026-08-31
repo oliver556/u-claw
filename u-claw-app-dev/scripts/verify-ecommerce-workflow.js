@@ -58,62 +58,71 @@ function requireToken(errors, label, content, token) {
 }
 
 /**
- * Ensures the repository-owned patch source contains the workflow contract.
+ * Ensures the repository-owned patch source contains the workbench contract.
  */
 function verifyPatchSource(errors) {
   const content = readFile(patchScript);
   const requiredTokens = [
     "patchTasksPageEcommerceWorkflow",
-    "data-uclaw-ecommerce-workflow",
-    "ecommerce-main-detail-workflow",
-    "uclaw.ecommerceWorkflowSessions.v1",
-    "Prompt-only",
-    "sessions.create",
+    "data-uclaw-ecommerce-workbench",
+    "UcEcommercePlatformPresets",
+    "UcEcommerceBuildManifest",
+    "generateEcommercePreflight",
+    "uclaw.ecommerceWorkbench.platform.v1",
+    "official_seed",
+    "public_summary",
+    "needs_backend_confirmation",
   ];
 
   for (const token of requiredTokens) {
     requireToken(errors, "patch-openclaw.js", content, token);
   }
 
-  requireToken(errors, "patch-openclaw.js", content, "ecommerce-workflow-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-workbench-1");
 }
 
 /**
- * Ensures the generated Control UI tasks page exposes the workflow entry only as V0.
+ * Ensures the generated Control UI tasks page exposes the direct workbench shell.
  */
 function verifyGeneratedTasksPage(errors) {
   for (const file of listTasksPageAssets()) {
     const content = readFile(file);
     const label = path.relative(root, file);
     const requiredTokens = [
-      "data-uclaw-ecommerce-workflow",
+      "data-uclaw-ecommerce-workbench",
+      "data-uclaw-ecommerce-platform",
       "电商主图/详情图",
-      "Prompt-only",
-      "ecommerce-main-detail-workflow",
-      "uclaw.ecommerceWorkflowSessions.v1",
-      "sessions.create",
-      "startEcommerceWorkflow",
+      "生成预案",
+      "选择图片",
+      "UcEcommercePlatformPresets",
+      "UcEcommerceBuildManifest",
+      "generateEcommercePreflight",
+      "source_type",
+      "抖音电商",
+      "Amazon",
+      "Shopee",
     ];
 
     for (const token of requiredTokens) {
       requireToken(errors, label, content, token);
     }
 
-    if (/workflow builder|拖拽编排器|一键出图|自动出图/.test(content)) {
+    if (/workflow builder|拖拽编排器|一键出图|自动出图|sessions\.create|Prompt-only/.test(content)) {
       errors.push(`${label} contains blocked fake workflow wording`);
     }
   }
 }
 
 /**
- * Ensures the bundled skill stays prompt-only and contains the ecommerce planning stages.
+ * Ensures the bundled skill describes the hidden planning and QA policy for the workbench.
  */
 function verifyBundledSkill(errors) {
   const content = readFile(skillFile);
   const requiredTokens = [
     "name: ecommerce-main-detail-workflow",
-    "Prompt-only",
-    "不直接出图",
+    "Workbench-first",
+    "平台 preset",
+    "不暴露聊天",
     "Campaign Style Lock",
     "Main Image Storyboard",
     "Detail Page Storyboard",
