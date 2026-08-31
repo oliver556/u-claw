@@ -44,13 +44,22 @@ const ECOMMERCE_IMAGE_DIRECT_TARGETS = [
     type: 'main_image',
     title: '主图',
     size: '1024x1024',
-    instruction: '生成 1 张货架主图。商品主体必须清晰、干净、可直接用于平台主图初稿，避免促销夸张字和无法验证的资质。',
+    template: '01-hero-image / hero-image',
+    instruction: '生成 1 张货架主图。参考 hero-image / packshot 模板：商品居中，主体占比 60%-80%，顶部和角落保留平台叠加空间；优先白底或干净纯色底，避免促销夸张字和无法验证的资质。',
   },
   {
     type: 'detail_image',
     title: '详情图首屏',
-    size: '1024x1024',
-    instruction: '生成 1 张详情页首屏方向图。保留商品真实外观，突出 3 个以内核心卖点，文字简短可读，不能编造参数、销量或认证。',
+    size: '1024x1536',
+    template: '11-infographic + 13-size-spec / detail module',
+    instruction: '生成 1 张详情页首屏方向图。参考 infographic / size-spec 模板：上方强钩子，中部商品和 3 个以内卖点 callout，下方规格或使用理由；文字简短可读，不能编造参数、销量或认证。',
+  },
+  {
+    type: 'model_image',
+    title: '模特图',
+    size: '1024x1536',
+    template: '08-model-showcase + 16-try-on-virtual + 18-ghost-mannequin',
+    instruction: '生成 1 张模特/场景展示图。按品类选择 model-showcase、try-on-virtual 或 ghost-mannequin：服饰优先试穿或隐形模特，美妆/配饰优先真人局部使用，普通商品优先自然生活场景；人物真实自然，保留商品外观，不做医疗或效果承诺。',
   },
 ];
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
@@ -425,6 +434,22 @@ function normalizeEcommerceInputImages(images) {
 }
 
 /**
+ * Resolves user-selected output types into executable image targets. Missing
+ * selection keeps the old low-friction default: main image plus detail image.
+ */
+function resolveEcommerceImageTargets(outputTypes) {
+  const requested = Array.isArray(outputTypes)
+    ? outputTypes.map(value => String(value || '').trim()).filter(Boolean)
+    : [];
+  const defaultTypes = requested.length > 0 ? requested : ['main_image', 'detail_image'];
+  const selected = ECOMMERCE_IMAGE_DIRECT_TARGETS.filter(target => defaultTypes.includes(target.type));
+  if (selected.length === 0) {
+    throw new Error('请至少选择一种生成类型。');
+  }
+  return selected;
+}
+
+/**
  * Builds a compact image prompt from the workbench manifest. Platform rules are
  * passed in so users do not need to copy dimensions or compliance notes by hand.
  */
@@ -439,6 +464,7 @@ function buildEcommerceImagePrompt(manifest, target) {
   return [
     '你是 Bavi-box 电商图片生成器。基于参考商品图片和用户填写的信息，直接生成成品图，不要输出方案。',
     target.instruction,
+    `模板参考：${target.template}`,
     `平台：${manifest?.platform_label || manifest?.platform || '未指定平台'}`,
     `商品名称：${manifest?.name || '未命名商品'}`,
     `类目：${input.category || '待补充'}`,
@@ -548,10 +574,11 @@ async function generateEcommerceImagesDirect(payload = {}) {
   if (!manifest) throw new Error('缺少生成 manifest。');
   const credential = resolveEcommerceImageCredential();
   const images = normalizeEcommerceInputImages(payload.images);
+  const targets = resolveEcommerceImageTargets(payload.outputTypes || manifest.output_types);
   const generated = [];
   const warnings = [];
 
-  for (const target of ECOMMERCE_IMAGE_DIRECT_TARGETS) {
+  for (const target of targets) {
     try {
       generated.push(await requestEcommerceImage({ credential, manifest, target, images }));
     } catch (error) {

@@ -1,10 +1,10 @@
 # 电商主图/详情图直出工作台 PRD
 
-更新时间：2026-08-31
+更新时间：2026-09-01
 
 ## Problem Statement
 
-用户真正想要的不是学习 Bavi-box / OpenClaw 的聊天、Skill、Agent 或任务机制，而是把商品图片和少量商品信息交给系统，直接得到尽量可用、尽量好看的电商主图和详情图结果。
+用户真正想要的不是学习 Bavi-box / OpenClaw 的聊天、Skill、Agent 或任务机制，而是把商品图片和少量商品信息交给系统，直接得到尽量可用、尽量好看的电商主图、详情图或模特图结果。
 
 因此“电商主图/详情图”不应表现为 OpenClaw 原生工作流，也不应要求用户在聊天里逐轮描述。它应是一个独立产品工作台：用户选择平台，上传商品图，填写最少必要信息，点击生成，系统自动套用平台规格、合规红线、图片质量检查、构图策略和输出格式，最后给出可下载的图片与文案结果。
 
@@ -17,8 +17,9 @@
 1. 选择平台：淘宝/天猫、京东、拼多多、抖音电商、快手小店、小红书、Amazon、Shopee、Alibaba 国际站。
 2. 上传素材：商品主图、包装图、细节图、场景参考图、资质/检测/授权图。
 3. 填最少信息：商品名、类目、核心卖点、规格、禁用词；其他字段自动推断或作为高级选项折叠。
-4. 点击生成：系统自动选择平台规格、输出张数、图片比例、详情页宽度、是否需要白底图、是否允许文字、是否要合规保守模式。
-5. 查看结果：主图组、详情页模块、图内文案、平台合规提示、失败原因、重新生成按钮和下载包。
+4. 选择生成类型：默认勾选主图和详情图，用户可改为只生成主图、只生成详情图、只生成模特图，或三种同时生成。
+5. 点击生成：系统自动选择平台规格、输出张数、图片比例、详情页宽度、是否需要白底图、是否允许文字、是否要合规保守模式。
+6. 查看结果：主图、详情图、模特图、图内文案、平台合规提示、失败原因、重新生成按钮和下载包。
 
 默认目标是“少操作直出”：用户只要完成平台选择、上传至少 1 张商品图、填写商品名或卖点之一，即可开始。信息不足时，系统先出保守版并标注缺口，而不是阻断。
 
@@ -32,15 +33,17 @@
 6. As a seller, I want the system to generate platform-sized images, so that I do not need to crop or resize manually.
 7. As a seller, I want multiple main-image variants, so that I can pick the best first image for click-through.
 8. As a seller, I want a detail-page sequence, so that buyers can understand selling points, specs, evidence and use cases.
-9. As a seller, I want text on images to be readable and short, so that the image is usable on mobile search and feed pages.
-10. As a seller, I want product-accuracy checks, so that the generated result does not change packaging, color, shape, logo or included accessories.
-11. As a seller, I want unsupported claims blocked or softened, so that the output is less likely to violate platform or advertising rules.
-12. As a seller, I want failed images to explain why they failed, so that I can regenerate only the broken image.
-13. As a seller, I want one-click export by platform, so that I can upload files to the merchant backend with minimal rework.
-14. As a maintainer, I want platform presets to be data-driven, so that rule updates do not require rewriting UI logic.
-15. As a maintainer, I want official-source confidence recorded per preset, so that we know which rules need merchant-backend confirmation.
-16. As a maintainer, I want all generation to use Bavi-box image model configuration, so that API keys, billing and model routing remain centralized.
-17. As a maintainer, I want workbench-owned generation records, so that results can be resumed and audited without creating chat sessions.
+9. As a seller, I want to select main image, detail image, or model image output types, so that I only generate the assets I need.
+10. As a seller, I want model-image generation for try-on,真人展示, invisible mannequin or lifestyle scenes, so that apparel, beauty and accessories have selling images beyond plain packshots.
+11. As a seller, I want text on images to be readable and short, so that the image is usable on mobile search and feed pages.
+12. As a seller, I want product-accuracy checks, so that the generated result does not change packaging, color, shape, logo or included accessories.
+13. As a seller, I want unsupported claims blocked or softened, so that the output is less likely to violate platform or advertising rules.
+14. As a seller, I want failed images to explain why they failed, so that I can regenerate only the broken image.
+15. As a seller, I want one-click export by platform, so that I can upload files to the merchant backend with minimal rework.
+16. As a maintainer, I want platform presets to be data-driven, so that rule updates do not require rewriting UI logic.
+17. As a maintainer, I want official-source confidence recorded per preset, so that we know which rules need merchant-backend confirmation.
+18. As a maintainer, I want all generation to use Bavi-box image model configuration, so that API keys, billing and model routing remain centralized.
+19. As a maintainer, I want workbench-owned generation records, so that results can be resumed and audited without creating chat sessions.
 
 ## Product Flow
 
@@ -48,26 +51,29 @@
 
 1. User opens left-side 工作流 -> 电商主图/详情图.
 2. User selects platform. Default to last-used platform; if none, default to 抖音电商 for domestic content-commerce users.
-3. User uploads at least one product image.
-4. User fills either 商品名 or 核心卖点. Optional: 类目、规格、品牌、价格带、参考风格、禁用词、资质。
-5. System runs preflight:
+3. User chooses output type: 主图、详情图、模特图. Default is 主图 + 详情图.
+4. User uploads at least one product image.
+5. User fills either 商品名 or 核心卖点. Optional: 类目、规格、品牌、价格带、参考风格、禁用词、资质。
+6. System runs preflight:
    - image quality: resolution, blur, overexposure, background, subject crop;
    - product consistency: main subject, package text, color, SKU count;
    - platform preset: ratio, size, file type, count, white-background requirement;
    - compliance risk: ordinary goods, ordinary food, health food, medical/health, cosmetics, baby products, electronics, sports/body-management.
-6. System generates:
+7. System generates selected output types:
    - main image set;
    - detail image modules;
+   - model image / try-on / ghost mannequin / lifestyle scene;
    - image copy and selling-point text;
    - compliance notes;
    - export package.
-7. User can accept, regenerate selected image, adjust style, or export.
+8. User can accept, regenerate selected image, adjust style, or export.
 
 ### Minimal Inputs
 
 | Field | Required | Default / Auto Behavior |
 | --- | --- | --- |
 | 平台 | Yes | Last-used; otherwise 抖音电商 |
+| 生成类型 | Yes | Default 主图 + 详情图; optional 模特图 |
 | 商品图片 | Yes | At least 1 image; more images improve consistency |
 | 商品名 | Conditional | Required if no selling point text |
 | 核心卖点 | Conditional | Required if no product name |
@@ -119,6 +125,7 @@ The result should be structured data first, UI second:
     "missingEvidence": ["string"]
   },
   "outputs": {
+    "selectedTypes": ["main_image", "detail_image", "model_image"],
     "mainImages": [
       {
         "slot": "KV1",
@@ -135,6 +142,16 @@ The result should be structured data first, UI second:
         "module": "M1",
         "purpose": "hook|benefit|proof|spec|usage|trust|cta",
         "size": { "width": 750, "height": 1200 },
+        "imageUrl": "string",
+        "copy": ["string"],
+        "qa": ["string"]
+      }
+    ],
+    "modelImages": [
+      {
+        "slot": "MODEL1",
+        "purpose": "try_on|model_showcase|ghost_mannequin|lifestyle",
+        "size": { "width": 1024, "height": 1536 },
         "imageUrl": "string",
         "copy": ["string"],
         "qa": ["string"]
@@ -157,6 +174,7 @@ The result should be structured data first, UI second:
 
 - The visible product must be a task-specific workbench, not a chat-first OpenClaw page.
 - The workbench stores its own generation records for history, retry and audit; it must not create OpenClaw chat sessions for this feature.
+- The workbench must expose output-type selection before generation: 主图、详情图、模特图.
 - Platform presets must be data, not hard-coded UI strings. Each preset needs source and freshness metadata.
 - The generation chain must use existing Bavi-box image model configuration from the trusted desktop process; no frontend API key and no second `IMG_API_KEY` path.
 - The first production slice should generate one platform end-to-end before broadening. Recommended first platform: 抖音电商, because official rules are publicly available and 1:1 / 3:4 both matter.
@@ -193,6 +211,7 @@ The result should be structured data first, UI second:
 - The first screen is a production workbench with upload/form/results, not chat.
 - Platform preset metadata is visible in result details and export manifest.
 - The system generates platform-sized main images and detail modules.
+- User can choose 主图、详情图、模特图 independently, and the selected types are present in the direct image payload and generation record.
 - Results include QA status for product accuracy, text readability, platform size and compliance risk.
 - High-risk claims without evidence are blocked, softened or marked for human review.
 - Direct image generation uses existing Bavi-box image model configuration.
@@ -204,5 +223,10 @@ The result should be structured data first, UI second:
 This PRD intentionally replaces the earlier “workflow launcher + Prompt-only session” user experience with a direct-output product workbench. The earlier implementation can still serve as a temporary technical spike, but it is not the desired user-facing shape.
 
 Current implementation note: the workbench now covers platform selector, upload area, minimal form, direct Bavi-box image API submit, in-page generated image display, and local generation records.
+
+Reference skill repositories retained locally and usable for future prompt expansion:
+
+- `ecommerce-visual-copywriting-skill`: https://github.com/feichanggege/ecommerce-visual-copywriting-skill
+- `ecom-details-image`: https://github.com/liangdabiao/ecom-details-image
 
 Next implementation recommendation: add per-image regenerate, platform-specific export packaging, and provider-level failure reasons without exposing API keys.

@@ -285,11 +285,23 @@ async function installDirectImageApiStub(page) {
         window.uclaw = {
           ...(window.uclaw || {}),
           generateEcommerceImages: async (payload) => {
+            const outputTypes =
+              Array.isArray(payload?.outputTypes) && payload.outputTypes.length
+                ? payload.outputTypes
+                : Array.isArray(payload?.manifest?.output_types) && payload.manifest.output_types.length
+                  ? payload.manifest.output_types
+                  : ["main_image", "detail_image"];
+            const titles = {
+              main_image: "主图",
+              detail_image: "详情图首屏",
+              model_image: "模特图",
+            };
             window.__uclawEcommerceRequests.push({
               method: "uclaw:ecommerce-generate-images",
               payload: {
                 platform: payload?.manifest?.platform,
                 productName: payload?.manifest?.name,
+                outputTypes,
                 imageCount: Array.isArray(payload?.images) ? payload.images.length : 0,
                 fileNames: Array.isArray(payload?.images) ? payload.images.map((item) => item?.fileName) : [],
               },
@@ -300,10 +312,14 @@ async function installDirectImageApiStub(page) {
               model: "gpt-image-2",
               generatedAt: new Date().toISOString(),
               warnings: [],
-              images: [
-                { id: "main-fixture", type: "main_image", title: "主图", model: "gpt-image-2", mimeType: "image/png", dataUrl: png },
-                { id: "detail-fixture", type: "detail_image", title: "详情图首屏", model: "gpt-image-2", mimeType: "image/png", dataUrl: png },
-              ],
+              images: outputTypes.map((type) => ({
+                id: `${type}-fixture`,
+                type,
+                title: titles[type] || type,
+                model: "gpt-image-2",
+                mimeType: "image/png",
+                dataUrl: png,
+              })),
             };
           },
         };
@@ -343,6 +359,7 @@ async function exerciseWorkbench(page, imagePath) {
   await page.locator("openclaw-tasks-page input[placeholder='如：厨房小电']").fill("厨房小电");
   await page.locator("openclaw-tasks-page input[placeholder='默认可不填']").fill("通勤白领");
   await page.locator("openclaw-tasks-page textarea").fill("一杯鲜榨\n可拆洗杯体\nUSB-C 充电");
+  await page.locator("openclaw-tasks-page .uclaw-ecommerce-type").filter({ hasText: "模特图" }).click();
   await page.locator("openclaw-tasks-page input[type='file']").setInputFiles(imagePath);
   await waitForText(page, "1 张已选择", 10000);
   await page.waitForFunction(() => {
@@ -353,6 +370,7 @@ async function exerciseWorkbench(page, imagePath) {
   });
   await page.locator("openclaw-tasks-page button").filter({ hasText: "生成图片" }).click();
   await waitForText(page, "Amazon 已生成图片", 10000);
+  await waitForText(page, "3 张结果", 10000);
   await waitForText(page, "查看结果", 10000);
 
   return evaluateInDom(
@@ -364,6 +382,10 @@ async function exerciseWorkbench(page, imagePath) {
       const generatedImages = allNodes().filter((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-generated"));
       const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
       const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+      const typeCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type"));
+      const activeTypes = typeCards
+        .filter((node) => node.classList.contains("is-active"))
+        .map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
       const generateButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("生成图片"));
       const manifestButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("复制 Manifest"));
       const openSessionButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开会话"));
@@ -377,6 +399,8 @@ async function exerciseWorkbench(page, imagePath) {
         generatedImageCount: generatedImages.length,
         qaCount: qaChips.length,
         recordCount: recordRows.length,
+        typeCardCount: typeCards.length,
+        activeTypes,
         generateDisabled: Boolean(generateButton?.disabled),
         hasManifestButton: Boolean(manifestButton),
         hasOpenSessionButton: Boolean(openSessionButton),
@@ -428,8 +452,12 @@ async function runAcceptance(options) {
       if (!state.hasWorkbench) throw new Error(`${viewport.name}: Workbench host missing`);
       if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);
       if (state.fileCount !== 1) throw new Error(`${viewport.name}: Expected one uploaded preview, got ${state.fileCount}`);
-      if (state.generatedCount < 2) throw new Error(`${viewport.name}: Expected generated image cards, got ${state.generatedCount}`);
-      if (state.generatedImageCount < 2) {
+      if (state.typeCardCount !== 3) throw new Error(`${viewport.name}: Expected three output type cards, got ${state.typeCardCount}`);
+      if (!state.activeTypes.some((item) => item.includes("模特图"))) {
+        throw new Error(`${viewport.name}: Model image type was not selected`);
+      }
+      if (state.generatedCount < 3) throw new Error(`${viewport.name}: Expected generated image cards, got ${state.generatedCount}`);
+      if (state.generatedImageCount < 3) {
         throw new Error(`${viewport.name}: Expected generated image previews, got ${state.generatedImageCount}`);
       }
       if (state.qaCount < 4) throw new Error(`${viewport.name}: Expected QA chips, got ${state.qaCount}`);
@@ -443,7 +471,11 @@ async function runAcceptance(options) {
       if (state.request?.payload?.imageCount !== 1) {
         throw new Error(`${viewport.name}: Expected one direct image payload, got ${state.request?.payload?.imageCount}`);
       }
+      if (!state.request?.payload?.outputTypes?.includes("model_image")) {
+        throw new Error(`${viewport.name}: Expected direct payload to request model_image`);
+      }
       if (!state.text.includes("最长边建议 1600px")) throw new Error(`${viewport.name}: Amazon preset text missing`);
+      if (!state.text.includes("模特图")) throw new Error(`${viewport.name}: Model image text missing`);
       if (state.scrollWidth > state.viewportWidth + 4) {
         throw new Error(`${viewport.name}: horizontal overflow ${state.scrollWidth} > ${state.viewportWidth}`);
       }

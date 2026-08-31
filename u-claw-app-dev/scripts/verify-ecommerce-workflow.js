@@ -67,8 +67,11 @@ function verifyDirectDesktopApi(errors) {
   const preloadContent = readFile(preloadFile);
   const mainTokens = [
     "resolveEcommerceImageCredential",
+    "resolveEcommerceImageTargets",
     "generateEcommerceImagesDirect",
     "requestEcommerceImage",
+    "model_image",
+    "08-model-showcase",
     "/images/edits",
     "uclaw:ecommerce-generate-images",
   ];
@@ -94,11 +97,14 @@ function verifyPatchSource(errors) {
     "patchTasksPageEcommerceWorkflow",
     "data-uclaw-ecommerce-workbench",
     "UcEcommercePlatformPresets",
+    "UcEcommerceImageTargets",
     "UcEcommerceBuildManifest",
     "UcEcommerceBuildDirectPayload",
     "UcEcommerceFileToPayload",
+    "onEcommerceOutputType",
     "startEcommerceImageGeneration",
     "generateEcommerceImages",
+    "model_image",
     "uclaw.ecommerceImageRecords.v1",
     "uclaw.ecommerceWorkbench.platform.v1",
     "official_seed",
@@ -110,7 +116,7 @@ function verifyPatchSource(errors) {
     requireToken(errors, "patch-openclaw.js", content, token);
   }
 
-  requireToken(errors, "patch-openclaw.js", content, "ecommerce-direct-image-api-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-output-types-1");
   if (content.includes("UcEcommerceBuildGenerationPrompt")) {
     errors.push("patch-openclaw.js still contains the old ecommerce chat prompt builder");
   }
@@ -130,12 +136,16 @@ function verifyGeneratedTasksPage(errors) {
       "data-uclaw-ecommerce-workbench",
       "data-uclaw-ecommerce-platform",
       "电商主图/详情图",
+      "生成类型",
+      "模特图",
       "生成图片",
       "生成记录",
       "选择图片",
       "UcEcommercePlatformPresets",
+      "UcEcommerceImageTargets",
       "UcEcommerceBuildManifest",
       "UcEcommerceBuildDirectPayload",
+      "model_image",
       "startEcommerceImageGeneration",
       "generateEcommerceImages",
       "uclaw.ecommerceImageRecords.v1",
@@ -171,6 +181,7 @@ function verifyBundledSkill(errors) {
     "Campaign Style Lock",
     "Main Image Storyboard",
     "Detail Page Storyboard",
+    "Model Image Target",
     "Prompt Pack",
     "Human Review Gate",
   ];
