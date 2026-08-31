@@ -639,12 +639,17 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 
 // buildAlipaySPIService creates Alipay-originated SPI endpoints for aggregate-pay onboarding.
 func buildAlipaySPIService(cfg config.Config) *alipayspi.Service {
+	privateKeyPath := cfg.AlipaySPIPrivateKeyPath
+	if privateKeyPath == "" {
+		privateKeyPath = cfg.AlipayPrivateKeyPath
+	}
 	return alipayspi.NewService(alipayspi.Config{
 		MerchantID:     cfg.AlipaySPIMerchantID,
 		MerchantName:   cfg.AlipaySPIMerchantName,
 		MerchantShort:  cfg.AlipaySPIMerchantShort,
 		ServicePhone:   cfg.AlipaySPIServicePhone,
 		ServiceAddress: cfg.AlipaySPIServiceAddress,
+		PrivateKeyPath: privateKeyPath,
 	})
 }
 

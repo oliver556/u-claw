@@ -697,14 +697,14 @@ func TestAlipaySPIMerchantInfoRouteReturnsSuccessEnvelope(t *testing.T) {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Response string `json:"response"`
+		Response json.RawMessage `json:"response"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	var response map[string]any
-	if err := json.Unmarshal([]byte(payload.Response), &response); err != nil {
-		t.Fatalf("decode response string: %v", err)
+	if err := json.Unmarshal(payload.Response, &response); err != nil {
+		t.Fatalf("decode response object: %v", err)
 	}
 	if response["code"] != "10000" || response["merchant_name"] != "Bavi-box" {
 		t.Fatalf("response = %+v", response)
@@ -730,14 +730,14 @@ func TestAlipaySPIMerchantInfoSupportsISVDemoPath(t *testing.T) {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Response string `json:"response"`
+		Response json.RawMessage `json:"response"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	var response map[string]any
-	if err := json.Unmarshal([]byte(payload.Response), &response); err != nil {
-		t.Fatalf("decode response string: %v", err)
+	if err := json.Unmarshal(payload.Response, &response); err != nil {
+		t.Fatalf("decode response object: %v", err)
 	}
 	if response["code"] != "10000" {
 		t.Fatalf("response = %+v", response)

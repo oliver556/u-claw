@@ -47,6 +47,7 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"ALIPAY_SPI_MERCHANT_SHORT":      " Bavi ",
 		"ALIPAY_SPI_SERVICE_PHONE":       " 0571-00000000 ",
 		"ALIPAY_SPI_SERVICE_ADDRESS":     " https://license.yiyong.me ",
+		"ALIPAY_SPI_PRIVATE_KEY_PATH":    " /secrets/alipay-spi.pem ",
 	}
 
 	cfg, err := Load(func(key string) string {
@@ -135,7 +136,8 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		cfg.AlipaySPIMerchantName != "Bavi-box" ||
 		cfg.AlipaySPIMerchantShort != "Bavi" ||
 		cfg.AlipaySPIServicePhone != "0571-00000000" ||
-		cfg.AlipaySPIServiceAddress != "https://license.yiyong.me" {
+		cfg.AlipaySPIServiceAddress != "https://license.yiyong.me" ||
+		cfg.AlipaySPIPrivateKeyPath != "/secrets/alipay-spi.pem" {
 		t.Fatalf("alipay spi config not trimmed: %+v", cfg)
 	}
 }

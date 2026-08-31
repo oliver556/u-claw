@@ -326,7 +326,10 @@ ALIPAY_SPI_MERCHANT_NAME=Bavi-box
 ALIPAY_SPI_MERCHANT_SHORT=Bavi
 ALIPAY_SPI_SERVICE_PHONE=0571-00000000
 ALIPAY_SPI_SERVICE_ADDRESS=https://license.yiyong.me
+ALIPAY_SPI_PRIVATE_KEY_PATH=/etc/uclaw-cloud-api/alipay_private_key.pem
 ```
+
+`ALIPAY_SPI_PRIVATE_KEY_PATH` 可省略；省略时复用 `ALIPAY_PRIVATE_KEY_PATH`。若支付宝控制台仍返回 `UGW_TARGET_SYSTEM_ERROR`，先确认“响应是否加密”为“否”，再检查服务日志中 `alipay_spi ... sign_enabled=true`。应用私钥只放服务器 root-only 文件，不粘贴到聊天、不提交 Git。
 
 本地验收：
 
