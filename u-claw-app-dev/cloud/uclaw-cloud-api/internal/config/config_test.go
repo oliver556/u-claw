@@ -42,6 +42,11 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"ALIPAY_APP_ID":                  " alipay-1 ",
 		"ALIPAY_PRIVATE_KEY_PATH":        " /secrets/alipay.pem ",
 		"ALIPAY_PUBLIC_CERT_PATH":        " /secrets/alipay-public.crt ",
+		"ALIPAY_SPI_MERCHANT_ID":         " 2088123456789012 ",
+		"ALIPAY_SPI_MERCHANT_NAME":       " Bavi-box ",
+		"ALIPAY_SPI_MERCHANT_SHORT":      " Bavi ",
+		"ALIPAY_SPI_SERVICE_PHONE":       " 0571-00000000 ",
+		"ALIPAY_SPI_SERVICE_ADDRESS":     " https://license.yiyong.me ",
 	}
 
 	cfg, err := Load(func(key string) string {
@@ -125,6 +130,13 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.WeChatPayMchID != "mch-1" || cfg.AlipayAppID != "alipay-1" {
 		t.Fatalf("payment config not trimmed: %+v", cfg)
+	}
+	if cfg.AlipaySPIMerchantID != "2088123456789012" ||
+		cfg.AlipaySPIMerchantName != "Bavi-box" ||
+		cfg.AlipaySPIMerchantShort != "Bavi" ||
+		cfg.AlipaySPIServicePhone != "0571-00000000" ||
+		cfg.AlipaySPIServiceAddress != "https://license.yiyong.me" {
+		t.Fatalf("alipay spi config not trimmed: %+v", cfg)
 	}
 }
 

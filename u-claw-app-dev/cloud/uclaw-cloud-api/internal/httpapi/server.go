@@ -11,6 +11,7 @@ import (
 
 	"uclaw-cloud-api/internal/activation"
 	"uclaw-cloud-api/internal/admin"
+	"uclaw-cloud-api/internal/alipayspi"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/license"
@@ -39,6 +40,7 @@ type ServerOptions struct {
 	Usage      *usage.Service
 	Catalog    *modelcatalog.Service
 	Recharge   *recharge.Service
+	AlipaySPI  *alipayspi.Service
 }
 
 // PersistentStore is the shared PostgreSQL seam for auth and activation slices.
@@ -114,6 +116,7 @@ func NewServer(cfg config.Config, build BuildInfo) http.Handler {
 		Usage:      buildUsageService(cfg),
 		Catalog:    buildModelCatalogService(cfg),
 		Recharge:   buildRechargeService(cfg, nil),
+		AlipaySPI:  buildAlipaySPIService(cfg),
 	})
 }
 
@@ -126,6 +129,7 @@ func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStor
 		Usage:      buildUsageService(cfg),
 		Catalog:    buildModelCatalogService(cfg),
 		Recharge:   buildRechargeService(cfg, store),
+		AlipaySPI:  buildAlipaySPIService(cfg),
 	})
 }
 
@@ -602,7 +606,32 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"order": order})
 	})
+	mux.HandleFunc("/v1/payments/alipay/spi", func(w http.ResponseWriter, r *http.Request) {
+		if options.AlipaySPI == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("alipay spi service is not configured"))
+			return
+		}
+		options.AlipaySPI.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("/v1/payments/alipay/spi/merchantinfo/query", func(w http.ResponseWriter, r *http.Request) {
+		if options.AlipaySPI == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("alipay spi service is not configured"))
+			return
+		}
+		options.AlipaySPI.ServeHTTP(w, r)
+	})
 	return mux
+}
+
+// buildAlipaySPIService creates Alipay-originated SPI endpoints for aggregate-pay onboarding.
+func buildAlipaySPIService(cfg config.Config) *alipayspi.Service {
+	return alipayspi.NewService(alipayspi.Config{
+		MerchantID:     cfg.AlipaySPIMerchantID,
+		MerchantName:   cfg.AlipaySPIMerchantName,
+		MerchantShort:  cfg.AlipaySPIMerchantShort,
+		ServicePhone:   cfg.AlipaySPIServicePhone,
+		ServiceAddress: cfg.AlipaySPIServiceAddress,
+	})
 }
 
 // buildAdminService creates the protected operational admin service.

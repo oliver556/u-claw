@@ -674,6 +674,39 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	}
 }
 
+func TestAlipaySPIMerchantInfoRouteReturnsSuccessEnvelope(t *testing.T) {
+	server := NewServer(config.Config{
+		AppEnv:                  "test",
+		AlipaySPIMerchantID:     "2088123456789012",
+		AlipaySPIMerchantName:   "Bavi-box",
+		AlipaySPIMerchantShort:  "Bavi",
+		AlipaySPIServicePhone:   "0571-00000000",
+		AlipaySPIServiceAddress: "https://license.yiyong.me",
+	}, BuildInfo{Version: "test"})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/payments/alipay/spi/merchantinfo/query",
+		bytes.NewBufferString(`{"bizContent":{"outTradeNo":"UC1"}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Response map[string]any `json:"response"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Response["code"] != "10000" || payload.Response["merchant_name"] != "Bavi-box" {
+		t.Fatalf("response = %+v", payload.Response)
+	}
+}
+
 func loginForTest(t *testing.T, server http.Handler, phone string, code string) string {
 	t.Helper()
 	sendRec := httptest.NewRecorder()

@@ -293,6 +293,63 @@ curl -sS -X POST http://127.0.0.1:8080/v1/payments/virtual/notify \
 
 `/v1/recharge/providers` 返回 `virtual`、`alipay`、`wechat` 三类渠道及启用状态。当前后端已预留官方支付 checkout seam：当 `alipay` 或 `wechat` 未配置真实 adapter 时，创建订单会返回 `payment provider <provider> is not configured`，且不会落库生成无效订单。下一切片只需要接入官方 SDK 下单 adapter、支付跳转或二维码、验签回调和补偿 worker。
 
+## 支付宝聚合收钱码 SPI 接入
+
+支付宝控制台“聚合收钱码”要求 API 全部接入后才允许申请上线。截图中的 `spi.alipay.pay.*` 是支付宝调用 Bavi-box Cloud API 的 SPI，不是客户端充值下单 API。当前已先接入第一个接口：
+
+```text
+spi.alipay.pay.aggpay.merchantinfo.query
+```
+
+控制台“服务配置基础”建议填写：
+
+```text
+后端服务正式地址: https://license.yiyong.me/v1/payments/alipay/spi
+后端服务测试地址: https://license.yiyong.me/v1/payments/alipay/spi
+响应是否加密: 否
+请求编码: UTF-8
+```
+
+如果控制台允许每个 API 单独填写地址，第一个接口也可以填专用地址：
+
+```text
+https://license.yiyong.me/v1/payments/alipay/spi/merchantinfo/query
+```
+
+生产环境可通过 env 覆盖商户展示信息：
+
+```bash
+ALIPAY_SPI_MERCHANT_ID=2088xxxxxxxxxxxx
+ALIPAY_SPI_MERCHANT_NAME=Bavi-box
+ALIPAY_SPI_MERCHANT_SHORT=Bavi
+ALIPAY_SPI_SERVICE_PHONE=0571-00000000
+ALIPAY_SPI_SERVICE_ADDRESS=https://license.yiyong.me
+```
+
+本地验收：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'method=spi.alipay.pay.aggpay.merchantinfo.query' \
+  --data-urlencode 'biz_content={"out_trade_no":"UC-SPI-SMOKE"}'
+```
+
+期望响应：
+
+```json
+{
+  "response": {
+    "code": "10000",
+    "msg": "Success",
+    "merchant_id": "2088xxxxxxxxxxxx",
+    "merchant_name": "Bavi-box"
+  }
+}
+```
+
+当前按“响应是否加密=否”实现；后续若控制台强制响应加签或加密，再基于已挂载的支付宝应用私钥增加 `sign` 字段与 AES 加密。
+
 ## New API Spike
 
 可以先本地启动 New API 联调环境：
