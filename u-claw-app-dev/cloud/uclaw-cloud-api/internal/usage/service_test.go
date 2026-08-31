@@ -106,6 +106,51 @@ func TestGetSummaryLogsInAndAggregatesUsage(t *testing.T) {
 	}
 }
 
+func TestGetSummaryReusesCachedNewAPIToken(t *testing.T) {
+	secret := "test-password-secret"
+	var loginCount int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			loginCount++
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"cached-user-access-token"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/self":
+			if r.Header.Get("Authorization") != "Bearer cached-user-access-token" {
+				t.Fatalf("self Authorization = %q", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":9,"username":"13800138000","quota":100000,"used_quota":300,"request_count":12}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/log/self":
+			if r.Header.Get("Authorization") != "Bearer cached-user-access-token" {
+				t.Fatalf("logs Authorization = %q", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":50,"total":0,"items":[]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	admin, err := newapi.NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	service, err := NewService(admin, Config{PasswordSecret: secret, UserTokenTTL: time.Hour})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if _, err := service.GetSummary(context.Background(), SummaryRequest{UserID: 5, Phone: "13800138000"}); err != nil {
+			t.Fatalf("GetSummary() call %d error = %v", i+1, err)
+		}
+	}
+	if loginCount != 1 {
+		t.Fatalf("login count = %d, want 1", loginCount)
+	}
+}
+
 func TestNewServiceRejectsMissingPasswordSecret(t *testing.T) {
 	admin, err := newapi.NewClient("http://127.0.0.1:3000", "admin-token", nil)
 	if err != nil {
