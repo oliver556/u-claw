@@ -78,7 +78,7 @@ function verifyPatchSource(errors) {
     requireToken(errors, "patch-openclaw.js", content, token);
   }
 
-  requireToken(errors, "patch-openclaw.js", content, "ecommerce-workbench-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-workbench-2");
 }
 
 /**

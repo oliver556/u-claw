@@ -1858,7 +1858,7 @@ function patchServiceWorker() {
   let source = read(swPath);
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-workbench-1-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-workbench-2-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3";',
   );
   source = source.replace(
     /skillhub-scene-picker-2(?!-skillhub-scene-font-color-1)/,
@@ -7607,6 +7607,9 @@ openclaw-config-page .card {
 /* chat-composer-attachment-float-1 */
 openclaw-tasks-page .uclaw-ecommerce-workbench {
   gap: 16px;
+  border: 1px solid #cbd7e6 !important;
+  background: #ffffff !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.07);
 }
 
 openclaw-tasks-page .uclaw-ecommerce-head,
@@ -7616,6 +7619,11 @@ openclaw-tasks-page .uclaw-ecommerce-result-head {
   gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #dbe4ef;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-head > div,
@@ -7632,8 +7640,40 @@ openclaw-tasks-page .uclaw-ecommerce-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+openclaw-tasks-page .uclaw-ecommerce-workbench .field {
+  gap: 7px;
+  margin: 0;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .field > span {
+  color: #53647a;
+  font-size: 12.5px;
+  font-weight: 680;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .input,
+openclaw-tasks-page .uclaw-ecommerce-workbench input,
+openclaw-tasks-page .uclaw-ecommerce-workbench select,
+openclaw-tasks-page .uclaw-ecommerce-workbench textarea {
+  min-height: 44px;
+  border: 1px solid #cbd7e6 !important;
+  border-radius: 8px;
+  background: #ffffff !important;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.035);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .input:focus,
+openclaw-tasks-page .uclaw-ecommerce-workbench input:focus,
+openclaw-tasks-page .uclaw-ecommerce-workbench select:focus,
+openclaw-tasks-page .uclaw-ecommerce-workbench textarea:focus {
+  border-color: #93b9f6 !important;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12), inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
 openclaw-tasks-page .uclaw-ecommerce-textarea {
-  min-height: 92px;
+  min-height: 128px;
+  padding-top: 12px;
   resize: vertical;
 }
 
@@ -7657,10 +7697,11 @@ openclaw-tasks-page .uclaw-ecommerce-upload,
 openclaw-tasks-page .uclaw-ecommerce-result {
   display: grid;
   gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
+  padding: 14px 16px;
+  border: 1px solid #c5d3e3;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  background: #f8fbff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
 }
 
 openclaw-tasks-page .uclaw-ecommerce-upload span,
@@ -7673,9 +7714,10 @@ openclaw-tasks-page .uclaw-ecommerce-output-grid small {
 
 openclaw-tasks-page .uclaw-ecommerce-empty {
   padding: 18px;
-  border: 1px dashed var(--border);
+  border: 1px dashed #bdd0e7;
   border-radius: 8px;
-  color: var(--muted);
+  color: #64748b;
+  background: #ffffff;
   text-align: center;
 }
 
@@ -7698,9 +7740,9 @@ openclaw-tasks-page .uclaw-ecommerce-output-grid article {
   gap: 8px;
   margin: 0;
   padding: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid #cbd7e6;
   border-radius: 8px;
-  background: var(--surface);
+  background: #ffffff;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-file img {
@@ -7735,10 +7777,11 @@ openclaw-tasks-page .uclaw-ecommerce-qa span {
   display: grid;
   min-width: 0;
   gap: 4px;
-  padding: 10px;
-  border: 1px solid var(--border);
+  padding: 12px;
+  border: 1px solid #cbd7e6;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  background: #fbfdff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 openclaw-tasks-page .uclaw-ecommerce-rules span,
