@@ -3,7 +3,7 @@
 }
 
 (cloud_api_routes) {
-	@cloud_api path /healthz /readyz /admin /internal/admin/* /v1/version /v1/activations* /v1/auth/* /v1/activation/* /v1/newapi/* /v1/recharge/* /v1/payments/*
+	@cloud_api path /healthz /readyz /admin /internal/admin/* /isv/spi/* /v1/version /v1/activations* /v1/auth/* /v1/activation/* /v1/newapi/* /v1/recharge/* /v1/payments/*
 	handle @cloud_api {
 		reverse_proxy 127.0.0.1:18180
 	}

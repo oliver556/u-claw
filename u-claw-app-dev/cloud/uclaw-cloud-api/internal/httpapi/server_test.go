@@ -707,6 +707,29 @@ func TestAlipaySPIMerchantInfoRouteReturnsSuccessEnvelope(t *testing.T) {
 	}
 }
 
+func TestAlipaySPIMerchantInfoSupportsISVDemoPath(t *testing.T) {
+	server := NewServer(config.Config{
+		AppEnv:                "test",
+		AlipaySPIMerchantName: "Bavi-box",
+	}, BuildInfo{Version: "test"})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/isv/spi/service",
+		bytes.NewBufferString(`method=spi.alipay.pay.aggpay.merchantinfo.query`),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"10000"`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
 func loginForTest(t *testing.T, server http.Handler, phone string, code string) string {
 	t.Helper()
 	sendRec := httptest.NewRecorder()

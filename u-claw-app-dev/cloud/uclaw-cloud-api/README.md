@@ -304,8 +304,8 @@ spi.alipay.pay.aggpay.merchantinfo.query
 控制台“服务配置基础”建议填写：
 
 ```text
-后端服务正式地址: https://license.yiyong.me/v1/payments/alipay/spi
-后端服务测试地址: https://license.yiyong.me/v1/payments/alipay/spi
+后端服务正式地址: https://license.yiyong.me/isv/spi/service
+后端服务测试地址: https://license.yiyong.me/isv/spi/service
 响应是否加密: 否
 请求编码: UTF-8
 ```
@@ -315,6 +315,8 @@ spi.alipay.pay.aggpay.merchantinfo.query
 ```text
 https://license.yiyong.me/v1/payments/alipay/spi/merchantinfo/query
 ```
+
+`/v1/payments/alipay/spi` 仍保留给客户端支付模块内部使用；支付宝 SPI 控制台优先使用 `/isv/spi/service`，该路径与支付宝官方 demo 的 SPI service path 更接近，避免控制台校验误判业务 API path。
 
 生产环境可通过 env 覆盖商户展示信息：
 

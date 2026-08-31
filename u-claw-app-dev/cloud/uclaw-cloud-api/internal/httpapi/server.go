@@ -620,6 +620,20 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		options.AlipaySPI.ServeHTTP(w, r)
 	})
+	mux.HandleFunc("/isv/spi/service", func(w http.ResponseWriter, r *http.Request) {
+		if options.AlipaySPI == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("alipay spi service is not configured"))
+			return
+		}
+		options.AlipaySPI.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("/isv/spi/service/", func(w http.ResponseWriter, r *http.Request) {
+		if options.AlipaySPI == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("alipay spi service is not configured"))
+			return
+		}
+		options.AlipaySPI.ServeHTTP(w, r)
+	})
 	return mux
 }
 
