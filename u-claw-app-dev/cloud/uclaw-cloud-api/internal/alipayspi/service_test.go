@@ -5,10 +5,13 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -318,6 +321,26 @@ func TestMerchantInfoQuerySignsResponseWhenPrivateKeyIsMounted(t *testing.T) {
 	sum := sha256.Sum256(payload.Response)
 	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, sum[:], signature); err != nil {
 		t.Fatalf("verify sign: %v", err)
+	}
+}
+
+func TestNewServiceLoadsRawBase64PrivateKeyFromAlipayKeyTool(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal private key: %v", err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "alipay_private_key.txt")
+	if err := os.WriteFile(keyPath, []byte(base64.StdEncoding.EncodeToString(der)), 0o600); err != nil {
+		t.Fatalf("write private key: %v", err)
+	}
+
+	service := NewService(Config{MerchantName: "Bavi-box", PrivateKeyPath: keyPath})
+	if service.signErr != nil || service.signer == nil {
+		t.Fatalf("signer not loaded: signer=%v signErr=%v", service.signer != nil, service.signErr)
 	}
 }
 
