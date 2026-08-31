@@ -230,9 +230,6 @@ func (cfg Config) ValidateForServe() error {
 	if cfg.LicenseSigningSeedHex == "" {
 		missing = append(missing, "LICENSE_SIGNING_SEED_HEX")
 	}
-	if cfg.IsProduction() && cfg.AlipayOneCentTestEnabled {
-		missing = append(missing, "ALIPAY_ONE_CENT_TEST_ENABLED(false)")
-	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
 	}

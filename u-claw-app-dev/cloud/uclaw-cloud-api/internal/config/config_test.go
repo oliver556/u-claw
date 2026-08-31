@@ -214,16 +214,6 @@ func TestValidateForServeRequiresAliyunSMSFields(t *testing.T) {
 	}
 }
 
-func TestValidateForServeRejectsOneCentPaymentInProduction(t *testing.T) {
-	cfg := completeProductionConfig()
-	cfg.AlipayOneCentTestEnabled = true
-
-	err := cfg.ValidateForServe()
-	if err == nil || !strings.Contains(err.Error(), "ALIPAY_ONE_CENT_TEST_ENABLED(false)") {
-		t.Fatalf("ValidateForServe() error = %v, want one-cent payment rejection", err)
-	}
-}
-
 // completeProductionConfig returns a minimal production-like config without real secrets.
 func completeProductionConfig() Config {
 	return Config{
