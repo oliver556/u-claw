@@ -187,12 +187,12 @@ func NewService(store Store, quota QuotaClient, cfg Config) (*Service, error) {
 	return &Service{store: store, quota: quota, cfg: cfg, now: time.Now}, nil
 }
 
-// DefaultPlans returns development SKUs using the Bavi-box 1 CNY = 6kw compute conversion.
+// DefaultPlans returns recharge SKUs using the Bavi-box 1 CNY = 6kw compute conversion.
 func DefaultPlans() []Plan {
 	return []Plan{
-		{Code: "dev_10", Name: "虚拟充值 10 元", AmountCents: 1000, Quota: billing.NewAPIQuotaFromCNY(10), Currency: "CNY"},
-		{Code: "dev_50", Name: "虚拟充值 50 元", AmountCents: 5000, Quota: billing.NewAPIQuotaFromCNY(50), Currency: "CNY"},
-		{Code: "dev_100", Name: "虚拟充值 100 元", AmountCents: 10000, Quota: billing.NewAPIQuotaFromCNY(100), Currency: "CNY"},
+		{Code: "dev_10", Name: "充值 10 元", AmountCents: 1000, Quota: billing.NewAPIQuotaFromCNY(10), Currency: "CNY"},
+		{Code: "dev_50", Name: "充值 50 元", AmountCents: 5000, Quota: billing.NewAPIQuotaFromCNY(50), Currency: "CNY"},
+		{Code: "dev_100", Name: "充值 100 元", AmountCents: 10000, Quota: billing.NewAPIQuotaFromCNY(100), Currency: "CNY"},
 	}
 }
 

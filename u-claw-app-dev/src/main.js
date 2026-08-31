@@ -955,7 +955,7 @@ async function rechargeCloudModelQuota(payload = {}) {
       ok: true,
       order: callback.order || created.order,
       usage,
-      message: '虚拟充值成功，余额已刷新。',
+      message: '测试充值成功，余额已刷新。',
     };
   } catch (error) {
     return { ok: false, message: error?.message || String(error) };
