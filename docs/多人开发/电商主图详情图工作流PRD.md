@@ -19,7 +19,7 @@
 3. 填最少信息：商品名、类目、核心卖点、规格、禁用词；其他字段自动推断或作为高级选项折叠。
 4. 选择生成类型和数量：默认主图 3 张、详情图 5 屏；用户可改为只生成主图、详情图、模特图，或三种同时生成。
 5. 点击生成：系统自动选择平台规格、输出张数、图片比例、详情页宽度、是否需要白底图、是否允许文字、是否要合规保守模式。
-6. 查看结果：主图、详情图、模特图、图内文案、平台合规提示、失败原因、重新生成按钮和下载包。
+6. 查看结果：主图、详情图、模特图、图内文案、平台合规提示、失败原因、横向轮播预览、单图下载和一键打包下载。
 
 默认目标是“少操作直出”：用户只要完成平台选择、上传至少 1 张商品图、填写商品名或卖点之一，即可开始。信息不足时，系统先出保守版并标注缺口，而不是阻断。
 
@@ -66,7 +66,7 @@
    - image copy and selling-point text;
    - compliance notes;
    - export package.
-8. User can accept, regenerate selected image, adjust style, or export.
+8. User can accept, horizontally review the generated series, download a single image, or export the whole package.
 
 ### Minimal Inputs
 
@@ -200,6 +200,7 @@ The result should be structured data first, UI second:
 - High-risk categories must force human review before export.
 - Regeneration should be per image slot, not all-or-nothing.
 - Export should include final images, manifest JSON, platform preset version, input summary and compliance notes.
+- Generated results should render as a horizontal scroll / carousel strip, so 8-12 results do not become an oversized vertical grid.
 
 ## Testing Decisions
 
@@ -208,7 +209,7 @@ The result should be structured data first, UI second:
 - Generation acceptance should use a fixture SKU and verify returned media exists, has expected dimensions, and contains a manifest entry.
 - Product consistency tests should compare generated result metadata against source image/SKU facts and flag drift.
 - Compliance tests should cover ordinary goods, ordinary food, health food, cosmetics and sports/body-management claims.
-- UI tests should use desktop and mobile viewport screenshots; the first screen must show the workbench, not a landing page or chat page.
+- UI tests should use desktop and mobile viewport screenshots; the first screen must show the workbench, not a landing page or chat page. Result tests must verify the generated image list scrolls horizontally and the package download produces a ZIP.
 - Source freshness tests should fail or warn when a platform preset is older than the configured refresh interval.
 
 ## Out of Scope
@@ -229,6 +230,8 @@ The result should be structured data first, UI second:
 - Platform preset metadata is visible in result details and export manifest.
 - The system generates platform-sized main images and detail modules.
 - User can choose 主图、详情图、模特图 independently, adjust their counts, and the selected types/counts are present in the direct image payload and generation record.
+- Generated images are displayed in a horizontal scroll / carousel strip with stable card width on desktop and mobile.
+- User can click `打包下载` to download a ZIP containing generated images and `manifest.json`, while still keeping single-image download links.
 - Results include QA status for product accuracy, text readability, platform size and compliance risk.
 - High-risk claims without evidence are blocked, softened or marked for human review.
 - Direct image generation uses existing Bavi-box image model configuration.
@@ -239,11 +242,11 @@ The result should be structured data first, UI second:
 
 This PRD intentionally replaces the earlier “workflow launcher + Prompt-only session” user experience with a direct-output product workbench. The earlier implementation can still serve as a temporary technical spike, but it is not the desired user-facing shape.
 
-Current implementation note: the workbench now covers platform selector, upload area, minimal form, direct Bavi-box image API submit, in-page generated image display, and local generation records.
+Current implementation note: the workbench now covers platform selector, upload area, minimal form, direct Bavi-box image API submit, horizontal generated-image preview, single-image download, one-click ZIP export, and local generation records.
 
 Reference skill repositories retained locally and usable for future prompt expansion:
 
 - `ecommerce-visual-copywriting-skill`: https://github.com/feichanggege/ecommerce-visual-copywriting-skill
 - `ecom-details-image`: https://github.com/liangdabiao/ecom-details-image
 
-Next implementation recommendation: add per-image regenerate, platform-specific export packaging, and provider-level failure reasons without exposing API keys.
+Next implementation recommendation: add per-image regenerate, platform-specific naming presets, and provider-level failure reasons without exposing API keys.

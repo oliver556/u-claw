@@ -51,6 +51,22 @@ function listTasksPageAssets() {
 }
 
 /**
+ * Lists generated CSS bundles so visual shell tokens are verified in the right
+ * artifact instead of the tasks-page JavaScript bundle.
+ */
+function listCssAssets() {
+  if (!fs.existsSync(assetsDir)) {
+    throw new Error(`Missing assets directory: ${path.relative(root, assetsDir)}`);
+  }
+
+  return fs
+    .readdirSync(assetsDir)
+    .filter((name) => /^index-.*\.css$/.test(name))
+    .sort()
+    .map((name) => path.join(assetsDir, name));
+}
+
+/**
  * Records a missing token without stopping the remaining checks.
  */
 function requireToken(errors, label, content, token) {
@@ -122,7 +138,7 @@ function verifyPatchSource(errors) {
     requireToken(errors, "patch-openclaw.js", content, token);
   }
 
-  requireToken(errors, "patch-openclaw.js", content, "ecommerce-count-rules-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");
   if (content.includes("UcEcommerceBuildGenerationPrompt")) {
     errors.push("patch-openclaw.js still contains the old ecommerce chat prompt builder");
   }
@@ -147,6 +163,7 @@ function verifyGeneratedTasksPage(errors) {
       "模特图",
       "详情图系列",
       "生成图片",
+      "打包下载",
       "生成记录",
       "选择图片",
       "UcEcommercePlatformPresets",
@@ -154,6 +171,8 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceOutputCountRules",
       "UcEcommerceBuildManifest",
       "UcEcommerceBuildDirectPayload",
+      "UcEcommerceBuildExportPackage",
+      "downloadEcommercePackage",
       "model_image",
       "outputCounts",
       "startEcommerceImageGeneration",
@@ -174,6 +193,30 @@ function verifyGeneratedTasksPage(errors) {
     }
     if (/UcEcommerceBuildGenerationPrompt|openEcommerceGenerationRecord|打开会话|chat\.send|sessions\.create/.test(content)) {
       errors.push(`${label} still contains old ecommerce session-generation wiring`);
+    }
+  }
+}
+
+/**
+ * Ensures generated CSS keeps ecommerce results as a horizontal carousel.
+ */
+function verifyGeneratedCss(errors) {
+  const cssFiles = listCssAssets();
+  if (cssFiles.length === 0) {
+    errors.push("Missing generated CSS asset");
+    return;
+  }
+
+  for (const file of cssFiles) {
+    const content = readFile(file);
+    const label = path.relative(root, file);
+    for (const token of [
+      ".uclaw-ecommerce-generated-grid",
+      "scroll-snap-type",
+      "overscroll-behavior-x",
+      ".uclaw-ecommerce-result-actions",
+    ]) {
+      requireToken(errors, label, content, token);
     }
   }
 }
@@ -218,6 +261,7 @@ function main() {
     verifyDirectDesktopApi(errors);
     verifyPatchSource(errors);
     verifyGeneratedTasksPage(errors);
+    verifyGeneratedCss(errors);
     verifyBundledSkill(errors);
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));

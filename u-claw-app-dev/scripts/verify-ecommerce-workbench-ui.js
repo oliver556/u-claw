@@ -150,23 +150,33 @@ function toGatewayWebSocketUrl(value) {
  * Traverses light DOM plus open shadow roots for generated Control UI widgets.
  */
 async function evaluateInDom(page, expression, arg) {
-  return page.evaluate(
-    ({ source, value }) => {
-      const allNodes = (root = document) => {
-        const nodes = [];
-        const visit = (node) => {
-          nodes.push(node);
-          if (node.shadowRoot) visit(node.shadowRoot);
-          for (const child of node.children || []) visit(child);
-        };
-        visit(root);
-        return nodes;
-      };
-      const fn = new Function("allNodes", "value", source);
-      return fn(allNodes, value);
-    },
-    { source: expression, value: arg },
-  );
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await page.evaluate(
+        ({ source, value }) => {
+          const allNodes = (root = document) => {
+            const nodes = [];
+            const visit = (node) => {
+              nodes.push(node);
+              if (node.shadowRoot) visit(node.shadowRoot);
+              for (const child of node.children || []) visit(child);
+            };
+            visit(root);
+            return nodes;
+          };
+          const fn = new Function("allNodes", "value", source);
+          return fn(allNodes, value);
+        },
+        { source: expression, value: arg },
+      );
+    } catch (error) {
+      if (!String(error?.message || error).includes("Execution context was destroyed") || attempt === 2) throw error;
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  }
+
+  throw new Error("Unable to evaluate DOM state");
 }
 
 /**
@@ -408,7 +418,10 @@ async function exerciseWorkbench(page, imagePath) {
         .map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
       const generateButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("生成图片"));
       const manifestButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("复制 Manifest"));
+      const packageButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打包下载"));
       const openSessionButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开会话"));
+      const carousel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated-grid"));
+      const carouselStyle = carousel ? getComputedStyle(carousel) : null;
       const request = window.__uclawEcommerceRequests?.[0] || null;
       const rect = workbench?.getBoundingClientRect();
       return {
@@ -423,7 +436,13 @@ async function exerciseWorkbench(page, imagePath) {
         activeTypes,
         generateDisabled: Boolean(generateButton?.disabled),
         hasManifestButton: Boolean(manifestButton),
+        hasPackageButton: Boolean(packageButton),
         hasOpenSessionButton: Boolean(openSessionButton),
+        carouselDisplay: carouselStyle?.display || "",
+        carouselOverflowX: carouselStyle?.overflowX || "",
+        carouselSnapType: carouselStyle?.scrollSnapType || "",
+        carouselClientWidth: carousel?.clientWidth || 0,
+        carouselScrollWidth: carousel?.scrollWidth || 0,
         request,
         viewportWidth: window.innerWidth,
         scrollWidth: document.documentElement.scrollWidth,
@@ -484,7 +503,18 @@ async function runAcceptance(options) {
       if (state.recordCount < 1) throw new Error(`${viewport.name}: Expected one generation record, got ${state.recordCount}`);
       if (state.generateDisabled) throw new Error(`${viewport.name}: Generate button stayed disabled after valid input`);
       if (!state.hasManifestButton) throw new Error(`${viewport.name}: Manifest copy button missing after generation`);
+      if (!state.hasPackageButton) throw new Error(`${viewport.name}: Package download button missing after generation`);
       if (state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button must not appear`);
+      if (state.carouselDisplay !== "flex") throw new Error(`${viewport.name}: Generated list should be flex carousel`);
+      if (!["auto", "scroll"].includes(state.carouselOverflowX)) {
+        throw new Error(`${viewport.name}: Generated list should scroll horizontally, got ${state.carouselOverflowX}`);
+      }
+      if (!state.carouselSnapType.includes("x")) {
+        throw new Error(`${viewport.name}: Generated list should use x scroll snap, got ${state.carouselSnapType}`);
+      }
+      if (state.carouselScrollWidth <= state.carouselClientWidth) {
+        throw new Error(`${viewport.name}: Generated carousel should overflow inside its own scroller`);
+      }
       if (state.request?.method !== "uclaw:ecommerce-generate-images") {
         throw new Error(`${viewport.name}: direct ecommerce image IPC was not called`);
       }
@@ -509,6 +539,16 @@ async function runAcceptance(options) {
       if (state.scrollWidth > state.viewportWidth + 4) {
         throw new Error(`${viewport.name}: horizontal overflow ${state.scrollWidth} > ${state.viewportWidth}`);
       }
+
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 10000 }),
+        page.locator("openclaw-tasks-page button").filter({ hasText: "打包下载" }).click(),
+      ]);
+      const suggestedFilename = download.suggestedFilename();
+      if (!suggestedFilename.endsWith(".zip")) {
+        throw new Error(`${viewport.name}: Expected ecommerce zip download, got ${suggestedFilename}`);
+      }
+      await download.cancel().catch(() => {});
 
       fs.mkdirSync(screenshotsDir, { recursive: true });
       const screenshot = path.join(screenshotsDir, `ecommerce-workbench-ui-${viewport.name}.png`);
