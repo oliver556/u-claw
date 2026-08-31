@@ -8,7 +8,7 @@
 
 因此“电商主图/详情图”不应表现为 OpenClaw 原生工作流，也不应要求用户在聊天里逐轮描述。它应是一个独立产品工作台：用户选择平台，上传商品图，填写最少必要信息，点击生成，系统自动套用平台规格、合规红线、图片质量检查、构图策略和输出格式，最后给出可下载的图片与文案结果。
 
-底层仍可复用 Bavi-box 已验证能力：图片模型配置、媒体上传/回传、Session 留痕、Skill 规则、Gateway 调用和用量链路。但这些不应成为用户操作心智。
+底层仍可复用 Bavi-box 已验证能力：图片模型配置、媒体上传/回传、Skill 规则和用量链路。但本工作台不创建 OpenClaw 会话，不把聊天或 Agent 作为生成路径暴露给用户。
 
 ## Solution
 
@@ -40,7 +40,7 @@
 14. As a maintainer, I want platform presets to be data-driven, so that rule updates do not require rewriting UI logic.
 15. As a maintainer, I want official-source confidence recorded per preset, so that we know which rules need merchant-backend confirmation.
 16. As a maintainer, I want all generation to use Bavi-box image model configuration, so that API keys, billing and model routing remain centralized.
-17. As a maintainer, I want Session records hidden but preserved, so that work can be resumed and audited without turning the feature into a chat-first flow.
+17. As a maintainer, I want workbench-owned generation records, so that results can be resumed and audited without creating chat sessions.
 
 ## Product Flow
 
@@ -156,9 +156,9 @@ The result should be structured data first, UI second:
 ## Implementation Decisions
 
 - The visible product must be a task-specific workbench, not a chat-first OpenClaw page.
-- The workbench may store an internal Session for history, retry and audit, but user-facing controls should be upload, form, generate, regenerate and export.
+- The workbench stores its own generation records for history, retry and audit; it must not create OpenClaw chat sessions for this feature.
 - Platform presets must be data, not hard-coded UI strings. Each preset needs source and freshness metadata.
-- The generation chain must use existing Bavi-box/OpenClaw image model configuration and media handling; no second `IMG_API_KEY` path.
+- The generation chain must use existing Bavi-box image model configuration from the trusted desktop process; no frontend API key and no second `IMG_API_KEY` path.
 - The first production slice should generate one platform end-to-end before broadening. Recommended first platform: 抖音电商, because official rules are publicly available and 1:1 / 3:4 both matter.
 - The UI should not ask the user to choose image dimensions directly unless they open advanced settings.
 - If source product image quality is too poor, the system should still offer a conservative output plan, but mark final image generation as low confidence.
@@ -203,6 +203,6 @@ The result should be structured data first, UI second:
 
 This PRD intentionally replaces the earlier “workflow launcher + Prompt-only session” user experience with a direct-output product workbench. The earlier implementation can still serve as a temporary technical spike, but it is not the desired user-facing shape.
 
-Current implementation note: the workbench now covers platform selector, upload area, minimal form, image-generation submit through the existing OpenClaw chat/tool chain, and local generation records.
+Current implementation note: the workbench now covers platform selector, upload area, minimal form, direct Bavi-box image API submit, in-page generated image display, and local generation records.
 
-Next implementation recommendation: capture generated image artifacts back into the workbench result area, add download/export packaging, and add provider-level failure reasons without exposing API keys.
+Next implementation recommendation: add per-image regenerate, platform-specific export packaging, and provider-level failure reasons without exposing API keys.

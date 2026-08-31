@@ -25,5 +25,6 @@ if (isActivationOnlyMode) {
     getRechargeOrders: () => ipcRenderer.invoke('uclaw:get-recharge-orders'),
     getRechargeOrder: (orderNo) => ipcRenderer.invoke('uclaw:get-recharge-order', orderNo),
     rechargeModelQuota: (payload) => ipcRenderer.invoke('uclaw:recharge-model-quota', payload),
+    generateEcommerceImages: (payload) => ipcRenderer.invoke('uclaw:ecommerce-generate-images', payload),
   });
 }

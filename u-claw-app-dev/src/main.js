@@ -35,6 +35,24 @@ const isActivationOnlyMode = process.argv.includes(ACTIVATION_ONLY_ARG)
   || process.env.UCLAW_ACTIVATION_ONLY === '1';
 const ACTIVATION_STATIC_PREVIEW_COMPLETE = 'ACTIVATION_STATIC_PREVIEW_COMPLETE';
 const UCLAW_ACTIVATION_REQUIRE_CLOUD = process.env.UCLAW_ACTIVATION_REQUIRE_CLOUD === '1';
+const ECOMMERCE_IMAGE_DIRECT_MAX_IMAGES = 6;
+const ECOMMERCE_IMAGE_DIRECT_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+const ECOMMERCE_IMAGE_DIRECT_TOTAL_IMAGE_BYTES = 36 * 1024 * 1024;
+const ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS = 180000;
+const ECOMMERCE_IMAGE_DIRECT_TARGETS = [
+  {
+    type: 'main_image',
+    title: '主图',
+    size: '1024x1024',
+    instruction: '生成 1 张货架主图。商品主体必须清晰、干净、可直接用于平台主图初稿，避免促销夸张字和无法验证的资质。',
+  },
+  {
+    type: 'detail_image',
+    title: '详情图首屏',
+    size: '1024x1024',
+    instruction: '生成 1 张详情页首屏方向图。保留商品真实外观，突出 3 个以内核心卖点，文字简短可读，不能编造参数、销量或认证。',
+  },
+];
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
 // fresh machine / freshly-extracted portable exe this can take 30–60s+. Give it
 // room so we never hard-fail with a scary dialog before the engine is up. The
@@ -343,6 +361,216 @@ function appendLogFile(fileName, message) {
 function logLifecycle(message) {
   console.log(`[${APP_NAME}] ${message}`);
   appendLogFile('main.log', message);
+}
+
+/**
+ * Reads the locally persisted NewAPI credential without exposing the token to
+ * the renderer. The ecommerce workbench is a Bavi-box feature, so it should call
+ * the model provider from the trusted main process instead of opening a chat.
+ */
+function resolveEcommerceImageCredential() {
+  const config = fs.existsSync(configPath) ? getConfig() : applyRuntimeConfigEnv(loadBundledDefaultConfig());
+  const provider = config.models?.providers?.newapi || {};
+  const credential = readJsonFile(builtinModelCredentialPath) || {};
+  const baseUrl = String(credential.baseUrl || provider.baseUrl || '').trim().replace(/\/+$/, '');
+  const token = String(credential.token || provider.apiKey || '').trim();
+  const configuredModel = String(
+    credential.defaultModels?.image
+      || config.agents?.defaults?.imageGenerationModel?.primary
+      || config.agents?.defaults?.imageModel?.primary
+      || 'newapi/gpt-image-2',
+  ).trim();
+  const model = configuredModel.includes('/') ? configuredModel.split('/').pop() : configuredModel;
+
+  if (!baseUrl) throw new Error('图片接口 baseUrl 未配置，请先完成模型配置或激活。');
+  if (!token) throw new Error('图片接口 token 未配置，请先完成模型配置或激活。');
+  if (!model) throw new Error('图片模型未配置。');
+
+  return { provider: 'newapi', baseUrl, token, model };
+}
+
+/**
+ * Converts renderer-uploaded base64 images into bounded buffers for direct API
+ * calls. The limits prevent a single upload from overwhelming Electron IPC.
+ */
+function normalizeEcommerceInputImages(images) {
+  if (!Array.isArray(images) || images.length === 0) {
+    throw new Error('请先上传商品图片。');
+  }
+
+  let totalBytes = 0;
+  return images.slice(0, ECOMMERCE_IMAGE_DIRECT_MAX_IMAGES).map((image, index) => {
+    const rawContent = String(image?.content || '').trim();
+    const dataUrlMatch = /^data:([^;]+);base64,(.+)$/i.exec(rawContent);
+    const mimeType = String(image?.mimeType || dataUrlMatch?.[1] || 'image/png').trim();
+    const base64 = dataUrlMatch?.[2] || rawContent;
+    if (!/^image\/(png|jpe?g|webp)$/i.test(mimeType)) {
+      throw new Error(`暂不支持的图片格式：${mimeType || 'unknown'}`);
+    }
+    const buffer = Buffer.from(base64, 'base64');
+    if (!buffer.length) throw new Error(`图片数据为空：${image?.fileName || index + 1}`);
+    if (buffer.length > ECOMMERCE_IMAGE_DIRECT_MAX_IMAGE_BYTES) {
+      throw new Error(`单张图片不能超过 ${Math.round(ECOMMERCE_IMAGE_DIRECT_MAX_IMAGE_BYTES / 1024 / 1024)}MB。`);
+    }
+    totalBytes += buffer.length;
+    if (totalBytes > ECOMMERCE_IMAGE_DIRECT_TOTAL_IMAGE_BYTES) {
+      throw new Error(`图片总大小不能超过 ${Math.round(ECOMMERCE_IMAGE_DIRECT_TOTAL_IMAGE_BYTES / 1024 / 1024)}MB。`);
+    }
+    return {
+      fileName: String(image?.fileName || `product-${index + 1}.png`).replace(/[^\w.\-\u4e00-\u9fa5]/g, '_'),
+      mimeType,
+      buffer,
+    };
+  });
+}
+
+/**
+ * Builds a compact image prompt from the workbench manifest. Platform rules are
+ * passed in so users do not need to copy dimensions or compliance notes by hand.
+ */
+function buildEcommerceImagePrompt(manifest, target) {
+  const input = manifest?.input || {};
+  const outputs = Array.isArray(manifest?.outputs) ? manifest.outputs : [];
+  const output = outputs.find(item => item?.type === target.type) || {};
+  const sellingPoints = Array.isArray(input.selling_points) && input.selling_points.length
+    ? input.selling_points.join('；')
+    : '请从参考图识别，并只使用能从图片或用户信息确认的卖点';
+
+  return [
+    '你是 Bavi-box 电商图片生成器。基于参考商品图片和用户填写的信息，直接生成成品图，不要输出方案。',
+    target.instruction,
+    `平台：${manifest?.platform_label || manifest?.platform || '未指定平台'}`,
+    `商品名称：${manifest?.name || '未命名商品'}`,
+    `类目：${input.category || '待补充'}`,
+    `目标人群：${input.audience || '默认电商购物人群'}`,
+    `核心卖点：${sellingPoints}`,
+    `规格约束：${output.size_rule || '优先 1:1 清晰商品图'}`,
+    `合规检查：${Array.isArray(manifest?.qa) ? manifest.qa.join('；') : '文字和事实需人工复核'}`,
+    '视觉要求：真实商品外观优先，背景干净，构图有层次，中文文字少而清晰，禁止编造品牌授权、销量、资质、功效承诺。',
+  ].join('\n');
+}
+
+/**
+ * Extracts a safe message from model-provider errors without logging credentials.
+ */
+function summarizeImageApiError(body) {
+  const text = String(body || '').trim();
+  try {
+    const parsed = JSON.parse(text);
+    return String(parsed?.error?.message || parsed?.message || text).slice(0, 260);
+  } catch {}
+  return text.slice(0, 260);
+}
+
+/**
+ * Normalizes OpenAI-compatible image responses into image objects the workbench
+ * can render and persist locally.
+ */
+function normalizeImageApiResult(payload, target, model) {
+  const first = Array.isArray(payload?.data) ? payload.data[0] : null;
+  const base64 = String(first?.b64_json || '').trim();
+  const url = String(first?.url || '').trim();
+  if (!base64 && !url) {
+    throw new Error('图片接口未返回图片数据。');
+  }
+  return {
+    id: crypto.randomUUID(),
+    type: target.type,
+    title: target.title,
+    model,
+    mimeType: 'image/png',
+    dataUrl: base64 ? `data:image/png;base64,${base64}` : '',
+    url,
+  };
+}
+
+/**
+ * Calls the configured NewAPI image endpoint directly from the trusted process.
+ */
+async function requestEcommerceImage({ credential, manifest, target, images }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS);
+  const prompt = buildEcommerceImagePrompt(manifest, target);
+  const endpoint = images.length ? '/images/edits' : '/images/generations';
+  const url = `${credential.baseUrl}${endpoint}`;
+
+  try {
+    let response;
+    if (images.length) {
+      const form = new FormData();
+      form.append('model', credential.model);
+      form.append('prompt', prompt);
+      form.append('size', target.size);
+      form.append('response_format', 'b64_json');
+      images.forEach((image) => {
+        form.append('image', new Blob([image.buffer], { type: image.mimeType }), image.fileName);
+      });
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${credential.token}` },
+        body: form,
+        signal: controller.signal,
+      });
+    } else {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${credential.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: credential.model,
+          prompt,
+          size: target.size,
+          n: 1,
+          response_format: 'b64_json',
+        }),
+        signal: controller.signal,
+      });
+    }
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`图片接口失败 ${response.status}: ${summarizeImageApiError(text)}`);
+    }
+    return normalizeImageApiResult(JSON.parse(text), target, credential.model);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Public IPC handler for the ecommerce workbench. It returns generated images
+ * in-place and never creates OpenClaw sessions or sends chat messages.
+ */
+async function generateEcommerceImagesDirect(payload = {}) {
+  const manifest = payload.manifest && typeof payload.manifest === 'object' ? payload.manifest : null;
+  if (!manifest) throw new Error('缺少生成 manifest。');
+  const credential = resolveEcommerceImageCredential();
+  const images = normalizeEcommerceInputImages(payload.images);
+  const generated = [];
+  const warnings = [];
+
+  for (const target of ECOMMERCE_IMAGE_DIRECT_TARGETS) {
+    try {
+      generated.push(await requestEcommerceImage({ credential, manifest, target, images }));
+    } catch (error) {
+      warnings.push(`${target.title}: ${error?.message || String(error)}`);
+    }
+  }
+
+  if (generated.length === 0) {
+    throw new Error(warnings[0] || '图片生成失败。');
+  }
+
+  return {
+    ok: true,
+    provider: credential.provider,
+    model: credential.model,
+    generatedAt: new Date().toISOString(),
+    images: generated,
+    warnings,
+  };
 }
 
 function portableUsbSyncEnabled() {
@@ -2170,6 +2398,7 @@ function setupIPC() {
   ipcMain.handle('uclaw:get-recharge-orders', () => getCloudRechargeOrders());
   ipcMain.handle('uclaw:get-recharge-order', (_event, orderNo) => getCloudRechargeOrder(orderNo));
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
+  ipcMain.handle('uclaw:ecommerce-generate-images', (_event, payload) => generateEcommerceImagesDirect(payload));
 }
 
 // ── App Lifecycle ──

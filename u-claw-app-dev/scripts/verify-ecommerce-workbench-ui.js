@@ -198,7 +198,14 @@ async function waitForText(page, text, timeout = 30000) {
   let lastText = "";
 
   while (Date.now() < deadline) {
-    lastText = await getVisibleText(page);
+    try {
+      lastText = await getVisibleText(page);
+    } catch (error) {
+      if (!String(error?.message || error).includes("Execution context was destroyed")) throw error;
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(300);
+      continue;
+    }
     if (lastText.includes(text)) return;
     await page.waitForTimeout(200);
   }
@@ -261,6 +268,56 @@ async function waitForTasksRouteSettled(page) {
 }
 
 /**
+ * Installs a fake desktop image API after route redirects settle, so the UI
+ * acceptance can verify the direct workbench contract without spending quota.
+ */
+async function installDirectImageApiStub(page) {
+  await page.waitForFunction(
+    () => Boolean(document.querySelector("openclaw-tasks-page")),
+    null,
+    { timeout: 15000 },
+  );
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.evaluate(() => {
+        window.__uclawEcommerceRequests = [];
+        const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC";
+        window.uclaw = {
+          ...(window.uclaw || {}),
+          generateEcommerceImages: async (payload) => {
+            window.__uclawEcommerceRequests.push({
+              method: "uclaw:ecommerce-generate-images",
+              payload: {
+                platform: payload?.manifest?.platform,
+                productName: payload?.manifest?.name,
+                imageCount: Array.isArray(payload?.images) ? payload.images.length : 0,
+                fileNames: Array.isArray(payload?.images) ? payload.images.map((item) => item?.fileName) : [],
+              },
+            });
+            return {
+              ok: true,
+              provider: "newapi",
+              model: "gpt-image-2",
+              generatedAt: new Date().toISOString(),
+              warnings: [],
+              images: [
+                { id: "main-fixture", type: "main_image", title: "主图", model: "gpt-image-2", mimeType: "image/png", dataUrl: png },
+                { id: "detail-fixture", type: "detail_image", title: "详情图首屏", model: "gpt-image-2", mimeType: "image/png", dataUrl: png },
+              ],
+            };
+          },
+        };
+      });
+      return;
+    } catch (error) {
+      if (!String(error?.message || error).includes("Execution context was destroyed") || attempt === 2) throw error;
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  }
+}
+
+/**
  * Writes a small local PNG fixture for upload interaction.
  */
 function writeImageFixture() {
@@ -279,32 +336,7 @@ function writeImageFixture() {
 async function exerciseWorkbench(page, imagePath) {
   await waitForText(page, "生成图片", 30000);
   await waitForTasksRouteSettled(page);
-  await page.evaluate(() => {
-    window.__uclawEcommerceRequests = [];
-    const host = document.querySelector("openclaw-tasks-page");
-    if (!host?.client?.request) return;
-    const originalRequest = host.client.request.bind(host.client);
-    if (host.context?.sessions) {
-      host.context.sessions.create = async () => "agent:main:ecommerce-test-session";
-    }
-    host.client.request = async (method, payload) => {
-      if (method === "chat.send") {
-        window.__uclawEcommerceRequests.push({
-          method,
-          payload: {
-            sessionKey: payload?.sessionKey,
-            message: String(payload?.message || ""),
-            attachmentCount: Array.isArray(payload?.attachments) ? payload.attachments.length : 0,
-            attachmentTypes: Array.isArray(payload?.attachments) ? payload.attachments.map((item) => item?.type) : [],
-            fileNames: Array.isArray(payload?.attachments) ? payload.attachments.map((item) => item?.fileName) : [],
-            deliver: payload?.deliver,
-          },
-        });
-        return { status: "started", runId: "ecommerce-test-run" };
-      }
-      return originalRequest(method, payload);
-    };
-  });
+  await installDirectImageApiStub(page);
 
   await page.locator("openclaw-tasks-page select").first().selectOption("amazon");
   await page.locator("openclaw-tasks-page input[placeholder='如：便携榨汁杯']").fill("便携榨汁杯");
@@ -320,15 +352,16 @@ async function exerciseWorkbench(page, imagePath) {
     return button instanceof HTMLButtonElement && !button.disabled;
   });
   await page.locator("openclaw-tasks-page button").filter({ hasText: "生成图片" }).click();
-  await waitForText(page, "Amazon 已发起生成", 10000);
-  await waitForText(page, "打开会话", 10000);
+  await waitForText(page, "Amazon 已生成图片", 10000);
+  await waitForText(page, "查看结果", 10000);
 
   return evaluateInDom(
     page,
     `
       const workbench = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-uclaw-ecommerce-workbench") === "direct-output");
       const files = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-file"));
-      const outputCards = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-output-grid article"));
+      const generatedCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated"));
+      const generatedImages = allNodes().filter((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-generated"));
       const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
       const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
       const generateButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("生成图片"));
@@ -340,7 +373,8 @@ async function exerciseWorkbench(page, imagePath) {
         hasWorkbench: Boolean(workbench),
         platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
         fileCount: files.length,
-        outputCount: outputCards.length,
+        generatedCount: generatedCards.length,
+        generatedImageCount: generatedImages.length,
         qaCount: qaChips.length,
         recordCount: recordRows.length,
         generateDisabled: Boolean(generateButton?.disabled),
@@ -394,18 +428,20 @@ async function runAcceptance(options) {
       if (!state.hasWorkbench) throw new Error(`${viewport.name}: Workbench host missing`);
       if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);
       if (state.fileCount !== 1) throw new Error(`${viewport.name}: Expected one uploaded preview, got ${state.fileCount}`);
-      if (state.outputCount < 2) throw new Error(`${viewport.name}: Expected output manifest cards, got ${state.outputCount}`);
+      if (state.generatedCount < 2) throw new Error(`${viewport.name}: Expected generated image cards, got ${state.generatedCount}`);
+      if (state.generatedImageCount < 2) {
+        throw new Error(`${viewport.name}: Expected generated image previews, got ${state.generatedImageCount}`);
+      }
       if (state.qaCount < 4) throw new Error(`${viewport.name}: Expected QA chips, got ${state.qaCount}`);
       if (state.recordCount < 1) throw new Error(`${viewport.name}: Expected one generation record, got ${state.recordCount}`);
       if (state.generateDisabled) throw new Error(`${viewport.name}: Generate button stayed disabled after valid input`);
       if (!state.hasManifestButton) throw new Error(`${viewport.name}: Manifest copy button missing after generation`);
-      if (!state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button missing after generation`);
-      if (state.request?.method !== "chat.send") throw new Error(`${viewport.name}: chat.send was not called`);
-      if (state.request?.payload?.attachmentCount !== 1) {
-        throw new Error(`${viewport.name}: Expected one image attachment, got ${state.request?.payload?.attachmentCount}`);
+      if (state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button must not appear`);
+      if (state.request?.method !== "uclaw:ecommerce-generate-images") {
+        throw new Error(`${viewport.name}: direct ecommerce image IPC was not called`);
       }
-      if (!state.request?.payload?.message?.includes("必须优先调用可用的图片生成工具")) {
-        throw new Error(`${viewport.name}: Image-generation prompt contract missing`);
+      if (state.request?.payload?.imageCount !== 1) {
+        throw new Error(`${viewport.name}: Expected one direct image payload, got ${state.request?.payload?.imageCount}`);
       }
       if (!state.text.includes("最长边建议 1600px")) throw new Error(`${viewport.name}: Amazon preset text missing`);
       if (state.scrollWidth > state.viewportWidth + 4) {

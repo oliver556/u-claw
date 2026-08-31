@@ -7,6 +7,8 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const assetsDir = path.join(root, "node_modules", "openclaw", "dist", "control-ui", "assets");
 const patchScript = path.join(root, "scripts", "patch-openclaw.js");
+const mainProcessFile = path.join(root, "src", "main.js");
+const preloadFile = path.join(root, "src", "preload.js");
 const skillFile = path.join(
   root,
   "node_modules",
@@ -58,6 +60,32 @@ function requireToken(errors, label, content, token) {
 }
 
 /**
+ * Ensures the desktop-owned image API exists outside the OpenClaw chat/session path.
+ */
+function verifyDirectDesktopApi(errors) {
+  const mainContent = readFile(mainProcessFile);
+  const preloadContent = readFile(preloadFile);
+  const mainTokens = [
+    "resolveEcommerceImageCredential",
+    "generateEcommerceImagesDirect",
+    "requestEcommerceImage",
+    "/images/edits",
+    "uclaw:ecommerce-generate-images",
+  ];
+  const preloadTokens = [
+    "generateEcommerceImages",
+    "uclaw:ecommerce-generate-images",
+  ];
+
+  for (const token of mainTokens) {
+    requireToken(errors, "src/main.js", mainContent, token);
+  }
+  for (const token of preloadTokens) {
+    requireToken(errors, "src/preload.js", preloadContent, token);
+  }
+}
+
+/**
  * Ensures the repository-owned patch source contains the workbench contract.
  */
 function verifyPatchSource(errors) {
@@ -67,9 +95,10 @@ function verifyPatchSource(errors) {
     "data-uclaw-ecommerce-workbench",
     "UcEcommercePlatformPresets",
     "UcEcommerceBuildManifest",
-    "UcEcommerceBuildGenerationPrompt",
+    "UcEcommerceBuildDirectPayload",
+    "UcEcommerceFileToPayload",
     "startEcommerceImageGeneration",
-    "chat.send",
+    "generateEcommerceImages",
     "uclaw.ecommerceImageRecords.v1",
     "uclaw.ecommerceWorkbench.platform.v1",
     "official_seed",
@@ -81,7 +110,13 @@ function verifyPatchSource(errors) {
     requireToken(errors, "patch-openclaw.js", content, token);
   }
 
-  requireToken(errors, "patch-openclaw.js", content, "ecommerce-generation-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-direct-image-api-1");
+  if (content.includes("UcEcommerceBuildGenerationPrompt")) {
+    errors.push("patch-openclaw.js still contains the old ecommerce chat prompt builder");
+  }
+  if (content.includes("openEcommerceGenerationRecord")) {
+    errors.push("patch-openclaw.js still contains the old ecommerce session opener");
+  }
 }
 
 /**
@@ -100,9 +135,9 @@ function verifyGeneratedTasksPage(errors) {
       "选择图片",
       "UcEcommercePlatformPresets",
       "UcEcommerceBuildManifest",
-      "UcEcommerceBuildGenerationPrompt",
+      "UcEcommerceBuildDirectPayload",
       "startEcommerceImageGeneration",
-      "chat.send",
+      "generateEcommerceImages",
       "uclaw.ecommerceImageRecords.v1",
       "source_type",
       "抖音电商",
@@ -117,6 +152,9 @@ function verifyGeneratedTasksPage(errors) {
     if (/workflow builder|拖拽编排器|一键出图|自动出图|Prompt-only/.test(content)) {
       errors.push(`${label} contains blocked fake workflow wording`);
     }
+    if (/UcEcommerceBuildGenerationPrompt|openEcommerceGenerationRecord|打开会话|chat\.send|sessions\.create/.test(content)) {
+      errors.push(`${label} still contains old ecommerce session-generation wiring`);
+    }
   }
 }
 
@@ -129,7 +167,7 @@ function verifyBundledSkill(errors) {
     "name: ecommerce-main-detail-workflow",
     "Workbench-first",
     "平台 preset",
-    "投递图片生成任务",
+    "直接调用 Bavi-box 图片接口",
     "Campaign Style Lock",
     "Main Image Storyboard",
     "Detail Page Storyboard",
@@ -155,6 +193,7 @@ function main() {
   const errors = [];
 
   try {
+    verifyDirectDesktopApi(errors);
     verifyPatchSource(errors);
     verifyGeneratedTasksPage(errors);
     verifyBundledSkill(errors);
