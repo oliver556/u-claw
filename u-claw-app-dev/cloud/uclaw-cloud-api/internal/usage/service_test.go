@@ -106,6 +106,67 @@ func TestGetSummaryLogsInAndAggregatesUsage(t *testing.T) {
 	}
 }
 
+func TestGetSummaryUsesAdminEndpointsBeforeUserLogin(t *testing.T) {
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	var sawSearch bool
+	var sawUser bool
+	var sawLogs bool
+	var sawLogin bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			sawSearch = true
+			if r.URL.Query().Get("keyword") != "13800138000" {
+				t.Fatalf("search query = %q", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/9":
+			sawUser = true
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":9,"username":"13800138000","quota":100000,"used_quota":300,"request_count":12}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/log/":
+			sawLogs = true
+			if r.URL.Query().Get("username") != "13800138000" || r.URL.Query().Get("page_size") != "4" {
+				t.Fatalf("log query = %q", r.URL.RawQuery)
+			}
+			today := now.Add(-1 * time.Hour).Unix()
+			recent := now.AddDate(0, 0, -3).Unix()
+			_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":4,"total":2,"items":[` +
+				`{"id":1,"username":"13800138000","created_at":` + itoa(today) + `,"type":2,"content":"consume","model_name":"gpt-5.5","quota":100,"request_id":"req_today"},` +
+				`{"id":2,"username":"13800138000","created_at":` + itoa(recent) + `,"type":2,"model_name":"gpt-image-2","quota":200}` +
+				`]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			sawLogin = true
+			http.Error(w, "login should not be called", http.StatusConflict)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	admin, err := newapi.NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	service, err := NewService(admin, Config{PasswordSecret: "test-password-secret", PageSize: 4})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	service.now = func() time.Time { return now }
+
+	summary, err := service.GetSummary(context.Background(), SummaryRequest{UserID: 5, Phone: "13800138000"})
+	if err != nil {
+		t.Fatalf("GetSummary() error = %v", err)
+	}
+	if !sawSearch || !sawUser || !sawLogs || sawLogin {
+		t.Fatalf("sawSearch=%t sawUser=%t sawLogs=%t sawLogin=%t", sawSearch, sawUser, sawLogs, sawLogin)
+	}
+	if summary.NewAPIUserID != 9 || summary.AccountBalance != 100000 || summary.UsedQuota != 300 || summary.Last7DaysUsage != 300 {
+		t.Fatalf("summary = %+v", summary)
+	}
+}
+
 func TestGetSummaryReusesCachedNewAPIToken(t *testing.T) {
 	secret := "test-password-secret"
 	var loginCount int

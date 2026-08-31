@@ -111,6 +111,21 @@ func (c *Client) SearchUserByUsername(ctx context.Context, username string) (Use
 	return User{}, false, nil
 }
 
+// GetUser returns a New API user record through the admin detail endpoint.
+func (c *Client) GetUser(ctx context.Context, userID int64) (SelfUser, error) {
+	if userID <= 0 {
+		return SelfUser{}, fmt.Errorf("newapi user id is required")
+	}
+	var response selfUserResponse
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/user/%d", userID), &response); err != nil {
+		return SelfUser{}, err
+	}
+	if response.Data.ID <= 0 {
+		return SelfUser{}, fmt.Errorf("newapi user response has no user id")
+	}
+	return response.Data, nil
+}
+
 // Login authenticates a New API user and returns a dashboard access token.
 func (c *Client) Login(ctx context.Context, username string, password string) (LoginResponse, error) {
 	var response LoginResponse
@@ -179,6 +194,26 @@ func (c *Client) GetSelf(ctx context.Context) (SelfUser, error) {
 	}
 	if response.Data.ID <= 0 {
 		return SelfUser{}, fmt.Errorf("newapi self response has no user id")
+	}
+	return response.Data, nil
+}
+
+// ListLogsByUsername returns recent New API logs for one user through the admin log endpoint.
+func (c *Client) ListLogsByUsername(ctx context.Context, username string, page int, pageSize int) (SelfLogsPage, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return SelfLogsPage{}, fmt.Errorf("newapi username is required")
+	}
+	if page < 0 {
+		page = 0
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	var response selfLogsResponse
+	path := fmt.Sprintf("/api/log/?p=%d&page_size=%d&username=%s", page, pageSize, url.QueryEscape(username))
+	if err := c.getJSON(ctx, path, &response); err != nil {
+		return SelfLogsPage{}, err
 	}
 	return response.Data, nil
 }

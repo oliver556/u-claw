@@ -97,7 +97,7 @@ func NewService(admin *newapi.Client, cfg Config) (*Service, error) {
 	return &Service{admin: admin, cfg: cfg, now: time.Now, sessions: make(map[string]cachedUserToken)}, nil
 }
 
-// GetSummary logs in as the same-phone New API user and summarizes recent quota data.
+// GetSummary reads the same-phone New API account and summarizes recent quota data.
 func (s *Service) GetSummary(ctx context.Context, req SummaryRequest) (Summary, error) {
 	phone := strings.TrimSpace(req.Phone)
 	if req.UserID <= 0 {
@@ -107,11 +107,16 @@ func (s *Service) GetSummary(ctx context.Context, req SummaryRequest) (Summary, 
 		return Summary{}, fmt.Errorf("phone is required")
 	}
 
+	self, logs, err := s.adminSummaryData(ctx, phone)
+	if err == nil {
+		return s.buildSummary(self, logs.Items), nil
+	}
+
 	userClient, fromCache, err := s.userClient(ctx, req.UserID, phone)
 	if err != nil {
 		return Summary{}, err
 	}
-	self, err := userClient.GetSelf(ctx)
+	self, err = userClient.GetSelf(ctx)
 	if err != nil {
 		if !fromCache || !isNewAPIAuthError(err) {
 			return Summary{}, err
@@ -126,7 +131,7 @@ func (s *Service) GetSummary(ctx context.Context, req SummaryRequest) (Summary, 
 			return Summary{}, err
 		}
 	}
-	logs, err := userClient.ListSelfLogs(ctx, 0, s.cfg.PageSize)
+	logs, err = userClient.ListSelfLogs(ctx, 0, s.cfg.PageSize)
 	if err != nil {
 		if !isNewAPIAuthError(err) {
 			return Summary{}, err
@@ -142,6 +147,26 @@ func (s *Service) GetSummary(ctx context.Context, req SummaryRequest) (Summary, 
 		}
 	}
 	return s.buildSummary(self, logs.Items), nil
+}
+
+// adminSummaryData avoids New API user-login session limits by using admin read endpoints first.
+func (s *Service) adminSummaryData(ctx context.Context, phone string) (newapi.SelfUser, newapi.SelfLogsPage, error) {
+	user, ok, err := s.admin.SearchUserByUsername(ctx, phone)
+	if err != nil {
+		return newapi.SelfUser{}, newapi.SelfLogsPage{}, err
+	}
+	if !ok {
+		return newapi.SelfUser{}, newapi.SelfLogsPage{}, fmt.Errorf("newapi user %q not found", phone)
+	}
+	self, err := s.admin.GetUser(ctx, user.ID)
+	if err != nil {
+		return newapi.SelfUser{}, newapi.SelfLogsPage{}, err
+	}
+	logs, err := s.admin.ListLogsByUsername(ctx, phone, 0, s.cfg.PageSize)
+	if err != nil {
+		return newapi.SelfUser{}, newapi.SelfLogsPage{}, err
+	}
+	return self, logs, nil
 }
 
 // userClient reuses New API dashboard tokens to avoid exhausting per-user login-session limits.

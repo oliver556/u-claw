@@ -181,6 +181,36 @@ func TestSearchUserByUsernameFindsExactMatch(t *testing.T) {
 	}
 }
 
+func TestGetUserReturnsAdminQuotaCounters(t *testing.T) {
+	var gotAuth string
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"id":9,"username":"13800138000","quota":12345,"used_quota":678,"request_count":9}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	user, err := client.GetUser(context.Background(), 9)
+	if err != nil {
+		t.Fatalf("GetUser() error = %v", err)
+	}
+	if gotAuth != "Bearer admin-token" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotPath != "/api/user/9" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if user.ID != 9 || user.Quota != 12345 || user.UsedQuota != 678 || user.RequestCount != 9 {
+		t.Fatalf("user = %+v", user)
+	}
+}
+
 func TestAdminRequestRefreshesTokenAndRetriesOnce(t *testing.T) {
 	var loginCalls int
 	var searchCalls int
@@ -382,6 +412,36 @@ func TestListSelfLogsReturnsPagedItems(t *testing.T) {
 		t.Fatalf("url = %q", gotURL)
 	}
 	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Quota != 42 {
+		t.Fatalf("page = %+v", page)
+	}
+}
+
+func TestListLogsByUsernameReturnsAdminPagedItems(t *testing.T) {
+	var gotURL string
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":2,"total":1,"items":[{"id":1,"username":"13800138000","created_at":1787762761,"model_name":"gpt-5.5","quota":42,"request_id":"req_1"}]}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	page, err := client.ListLogsByUsername(context.Background(), "13800138000", 0, 2)
+	if err != nil {
+		t.Fatalf("ListLogsByUsername() error = %v", err)
+	}
+	if gotURL != "/api/log/?p=0&page_size=2&username=13800138000" {
+		t.Fatalf("url = %q", gotURL)
+	}
+	if gotAuth != "Bearer admin-token" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Username != "13800138000" {
 		t.Fatalf("page = %+v", page)
 	}
 }
