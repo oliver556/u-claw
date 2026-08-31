@@ -7,12 +7,12 @@ const repoRoot = path.resolve(__dirname, '..');
 const templatePath = path.join(repoRoot, 'resources', 'default-openclaw.json');
 const openclawPackagePath = path.join(repoRoot, 'node_modules', 'openclaw', 'package.json');
 const appSupportPath = path.join(os.homedir(), 'Library', 'Application Support');
-const appDataNames = ['u-claw', 'U-Claw'];
+const appDataNames = ['u-claw', 'Bavi-box'];
 const desktopConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, '.openclaw', 'openclaw.json'));
 const portableCacheConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, 'usb-portable', 'data', '.openclaw', 'openclaw.json'));
 const DEFAULT_NEW_API_BASE_URL = 'https://api.yiyong.me/v1';
-const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'http://127.0.0.1:18808/xai/v1';
-const DEFAULT_VIDEO_ADAPTER_API_KEY = 'uclaw-video-adapter';
+const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://api.yiyong.me/v1';
+const LEGACY_VIDEO_ADAPTER_API_KEY = 'uclaw-video-adapter';
 
 function usage() {
   console.log(`Usage:
@@ -28,13 +28,13 @@ function usage() {
 Options:
   --source <path>        Read existing key from another openclaw.json.
   --new-api-key <key>    Override New API key for custom/litellm.
-  --video-base-url <url> Override xai video base URL. Defaults to local U-Claw adapter.
+  --video-base-url <url> Override xai video base URL. Defaults to Bavi-box cloud.
   --video-api-key <key>  Override xai video adapter token.
   --customer            Generate a clean customer config with empty New API keys.
   --streamer            Require a real New API key inherited from desktop config.
-  --desktop             Write desktop config only. Writes both u-claw and U-Claw app data dirs.
-  --portable-cache      Write local portable cache config only. Writes both u-claw and U-Claw app data dirs.
-  --usb <mount>         Write <mount>/U-Claw/data/.openclaw/openclaw.json.
+  --desktop             Write desktop config only. Writes both u-claw and Bavi-box app data dirs.
+  --portable-cache      Write local portable cache config only. Writes both u-claw and Bavi-box app data dirs.
+  --usb <mount>         Write <mount>/Bavi-box/data/.openclaw/openclaw.json.
   --dest <path>         Write an exact openclaw.json path.
 `);
 }
@@ -51,7 +51,7 @@ function parseArgs(argv) {
     newApiKey: process.env.UCLAW_NEW_API_KEY || '',
     newApiBaseUrl: process.env.UCLAW_NEW_API_BASE_URL || DEFAULT_NEW_API_BASE_URL,
     videoBaseUrl: process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || DEFAULT_VIDEO_ADAPTER_BASE_URL,
-    videoApiKey: process.env.UCLAW_VIDEO_ADAPTER_API_KEY || DEFAULT_VIDEO_ADAPTER_API_KEY
+    videoApiKey: process.env.UCLAW_VIDEO_ADAPTER_API_KEY || ''
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -70,10 +70,6 @@ function parseArgs(argv) {
       options.newApiKey = readValue();
     } else if (arg === '--new-api-base-url') {
       options.newApiBaseUrl = readValue();
-    } else if (arg === '--video-base-url') {
-      options.videoBaseUrl = readValue();
-    } else if (arg === '--video-api-key') {
-      options.videoApiKey = readValue();
     } else if (arg === '--customer') {
       options.customer = true;
     } else if (arg === '--streamer') {
@@ -135,23 +131,27 @@ function providerValue(provider, keys) {
   return '';
 }
 
+function isNewApiBaseUrl(baseUrl) {
+  return /(?:api\.gmnlee\.com|api\.yiyong\.me)/i.test(String(baseUrl || ''));
+}
+
 function findNewApiKey(configs) {
   for (const config of configs) {
     if (!config) continue;
     const envKey = config.env?.UCLAW_NEW_API_KEY;
     if (typeof envKey === 'string'
       && envKey.trim()
-      && envKey.trim() !== DEFAULT_VIDEO_ADAPTER_API_KEY) {
+      && envKey.trim() !== LEGACY_VIDEO_ADAPTER_API_KEY) {
       return envKey.trim();
     }
 
     const providers = config.models?.providers || {};
-    for (const provider of Object.values(providers)) {
+    for (const [providerName, provider] of Object.entries(providers)) {
       const baseUrl = providerValue(provider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl']);
       const apiKey = providerValue(provider, ['apiKey', 'api_key', 'key']);
       if (apiKey
-        && apiKey !== DEFAULT_VIDEO_ADAPTER_API_KEY
-        && /api\.(gmnlee|yiyong)\.com|api\.yiyong\.me/i.test(baseUrl)) {
+        && apiKey !== LEGACY_VIDEO_ADAPTER_API_KEY
+        && (providerName === 'newapi' || isNewApiBaseUrl(baseUrl))) {
         return apiKey;
       }
     }
@@ -212,7 +212,7 @@ function buildConfig(options, sourceConfigs) {
   const requestedNewApiKey = String(options.newApiKey || '').trim();
   const newApiKey = options.customer
     ? ''
-    : requestedNewApiKey && requestedNewApiKey !== DEFAULT_VIDEO_ADAPTER_API_KEY
+    : requestedNewApiKey && requestedNewApiKey !== LEGACY_VIDEO_ADAPTER_API_KEY
       ? requestedNewApiKey
       : findNewApiKey(sourceConfigs);
   mergedConfig.models = mergedConfig.models || {};
@@ -240,9 +240,11 @@ function buildConfig(options, sourceConfigs) {
     ...(providers.xai || {})
   };
   providers.xai.baseUrl = normalizeBaseUrl(options.videoBaseUrl || DEFAULT_VIDEO_ADAPTER_BASE_URL);
-  providers.xai.apiKey = options.videoApiKey || DEFAULT_VIDEO_ADAPTER_API_KEY;
+  providers.xai.apiKey = options.customer ? '' : (options.videoApiKey || newApiKey || '');
   providers.xai.api = 'openai-completions';
   providers.xai.models = templateProviders.xai.models;
+
+  delete providers.newapi;
 
   mergedConfig.agents.defaults.model = { primary: 'custom/gpt-5.5' };
   mergedConfig.agents.defaults.imageGenerationModel = {
@@ -265,10 +267,9 @@ function buildConfig(options, sourceConfigs) {
 function validateConfig(config, options, newApiKey) {
   const providers = config.models?.providers || {};
   const videoBaseUrl = normalizeBaseUrl(providers.xai?.baseUrl);
-  const newApiBaseUrl = normalizeBaseUrl(options.newApiBaseUrl);
 
   if (options.streamer
-    && (!newApiKey || newApiKey === DEFAULT_VIDEO_ADAPTER_API_KEY)) {
+    && (!newApiKey || newApiKey === LEGACY_VIDEO_ADAPTER_API_KEY)) {
     throw new Error('streamer config requires a real New API key in desktop config or UCLAW_NEW_API_KEY');
   }
   if (options.customer
@@ -278,10 +279,10 @@ function validateConfig(config, options, newApiKey) {
   if (!videoBaseUrl) {
     throw new Error('xai video adapter base URL is empty');
   }
-  if (videoBaseUrl === newApiBaseUrl || /api\.(gmnlee|yiyong)\.com|api\.yiyong\.me/i.test(videoBaseUrl)) {
-    throw new Error('xai video provider must point to the video adapter, not directly to New API');
+  if (/gmnlee\.com/i.test(videoBaseUrl)) {
+    throw new Error('xai video provider must not use legacy gmnlee domains');
   }
-  if (!providers.xai?.apiKey) {
+  if (!options.customer && !providers.xai?.apiKey) {
     throw new Error('xai video adapter token is empty');
   }
 }
@@ -290,7 +291,7 @@ function usbConfigPath(root) {
   const resolved = path.resolve(expandHome(root));
   const uClawRoot = path.basename(resolved).toLowerCase() === 'u-claw'
     ? resolved
-    : path.join(resolved, 'U-Claw');
+    : path.join(resolved, 'Bavi-box');
   return path.join(uClawRoot, 'data', '.openclaw', 'openclaw.json');
 }
 
@@ -329,7 +330,6 @@ function main() {
   const mode = options.customer ? 'customer' : options.streamer ? 'streamer/internal' : 'standard';
   console.log(`[sync:config] mode: ${mode}`);
   console.log(`[sync:config] New API key: ${describeKey(newApiKey)}`);
-  console.log(`[sync:config] video base: ${config.models.providers.xai.baseUrl}`);
   for (const destination of destinations) writeConfig(destination, config);
 }
 

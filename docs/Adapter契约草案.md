@@ -1,4 +1,4 @@
-# U-Claw Adapter v1 契约草案
+# Bavi-box Adapter v1 契约草案
 
 > 文档状态：草案，已回填 OpenClaw `2026.7.1-2` 核心协议审计
 >
@@ -10,23 +10,23 @@
 
 ## 1. 目的与边界
 
-本契约定义 React 前端可长期依赖的 U-Claw 领域语义。它不是 OpenClaw Gateway 协议说明，也不承诺 OpenClaw 存在同名字段、路由或事件。
+本契约定义 React 前端可长期依赖的 Bavi-box 领域语义。它不是 OpenClaw Gateway 协议说明，也不承诺 OpenClaw 存在同名字段、路由或事件。
 
 ```text
 React UI
   -> UClawClient（本文稳定契约）
   -> Adapter（映射、兼容、脱敏、重连）
-  -> OpenClaw Gateway / U-Claw 本地服务 / Electron IPC
+  -> OpenClaw Gateway / Bavi-box 本地服务 / Electron IPC
 ```
 
 约束：
 
 - 前端不得认识 OpenClaw 路由、WebSocket 事件名、认证 token 或原始配置结构。
 - Adapter 不向 renderer 返回 API Key、token、请求头、绝对敏感路径或未经脱敏的原始错误。
-- 本文 `v1` 类型属于 U-Claw 自有契约，字段语义确定；已确认映射以《OpenClaw协议审计》为证据。
+- 本文 `v1` 类型属于 Bavi-box 自有契约，字段语义确定；已确认映射以《OpenClaw协议审计》为证据。
 - 未由真实协议证实的上游参数或数据形状，继续标注 **待协议审计映射**。
 - 无法映射的能力必须通过能力协商关闭，不能伪造成功或返回空数据冒充支持。
-- U-Claw 自有数据操作必须受 U 盘数据根目录约束；前端只使用资源 ID 和受控相对路径。
+- Bavi-box 自有数据操作必须受 U 盘数据根目录约束；前端只使用资源 ID 和受控相对路径。
 
 ## 2. 当前证据与审计状态
 
@@ -116,7 +116,7 @@ Client req: connect { minProtocol: 4, maxProtocol: 4, client, role, scopes, auth
   -> Gateway res payload: hello-ok { server, features, snapshot, auth, policy }
 ```
 
-U-Claw 使用自己的 `client.id`（目标值 `u-claw-desktop`），不得伪装 `openclaw-control-ui`。主路径使用 Electron 管理的 Gateway token；password、device token 和配对状态由 Adapter/Electron 保存，均不进入 renderer。
+Bavi-box 使用自己的 `client.id`（目标值 `u-claw-desktop`），不得伪装 `openclaw-control-ui`。主路径使用 Electron 管理的 Gateway token；password、device token 和配对状态由 Adapter/Electron 保存，均不进入 renderer。
 
 所需 scope 按最小权限申请：读、写和审批分开。只有真实使用管理功能时才申请 admin；配对和 talk secrets 也不得默认扩大。
 
@@ -153,7 +153,7 @@ type ConfigReadValue = string | number | boolean | string[] | null;
 type ConfigWriteValue = ConfigReadValue | SecretInput;
 
 interface ConfigurationField {
-  key: string; // U-Claw 字段 ID，不等于 OpenClaw 配置键
+  key: string; // Bavi-box 字段 ID，不等于 OpenClaw 配置键
   label: string;
   kind: "text" | "secret" | "url" | "number" | "boolean" | "select" | "multi-select";
   required: boolean;
@@ -239,7 +239,7 @@ available/degraded -> stopping -> stopped
 - `available`：WS v4 完成 `hello-ok`，且首屏所需方法出现在 `features.methods`。
 - `/health` 或 `/healthz` 只证明 `status: "live"`，不能代替 ready 或 WS 协商。
 
-`status`、`health` RPC 和 `hello-ok.snapshot` 可补充业务状态，但前端仍只消费上述 U-Claw 三层语义。
+`status`、`health` RPC 和 `hello-ok.snapshot` 可补充业务状态，但前端仍只消费上述 Bavi-box 三层语义。
 
 ## 6. Session 与 Message
 
@@ -316,7 +316,7 @@ type ContentBlock =
 - 发送使用 `chat.send`：`clientRequestId -> idempotencyKey`，服务器返回 `runId` 后替换本地临时 RunId。
 - 取消使用 `chat.abort` 并传指定 `runId`。
 - Session 列表、新建、修改、删除和订阅映射 `sessions.list/create/patch/delete/subscribe`；消息订阅映射 `sessions.messages.subscribe`。
-- 重命名和模型覆盖已由锁定版本真实 fixture 固定为 `sessions.patch`；重复 label 返回 `INVALID_REQUEST`。当前锁定版本未证明置顶、分组和归档参数可用，Adapter 不得透传这些字段。第二阶段的置顶和分组由 Electron 主进程通过版本化 U-Claw 元数据契约保存在 U 盘，React 只使用白名单领域 IPC。
+- 重命名和模型覆盖已由锁定版本真实 fixture 固定为 `sessions.patch`；重复 label 返回 `INVALID_REQUEST`。当前锁定版本未证明置顶、分组和归档参数可用，Adapter 不得透传这些字段。第二阶段的置顶和分组由 Electron 主进程通过版本化 Bavi-box 元数据契约保存在 U 盘，React 只使用白名单领域 IPC。
 - `openclaw@2026.7.1-2` 的 `sessions.patch` 不支持 `baseHash`，传入时返回 `INVALID_REQUEST: unexpected property 'baseHash'`。因此会话写入不得宣称具有 revision/baseHash CAS 保护；Adapter 需串行化本地写入并在写后重拉权威状态。
 - 分叉与恢复使用 `sessions.compaction.branch/restore`；普通发送不得使用 `chat.inject`。
 
@@ -379,7 +379,7 @@ interface EventEnvelope<TType extends string, TPayload> {
   eventId: string; // 上游广播通常由 connectionId + sourceSequence 合成
   connectionId: string;
   streamId: string; // 对话流使用 runId；其他流由 Adapter 分配
-  sequence: number; // U-Claw 单 stream 单调序号
+  sequence: number; // Bavi-box 单 stream 单调序号
   sourceSequence?: number; // OpenClaw event frame 的连接级 seq
   occurredAt: ISODateTime;
   type: TType;
@@ -404,7 +404,7 @@ type MessageEvent =
 
 流式规则：
 
-- `sequence` 在 U-Claw 单个 `streamId` 内严格递增；`sourceSequence` 对应 OpenClaw 当前连接的 event `seq`。
+- `sequence` 在 Bavi-box 单个 `streamId` 内严格递增；`sourceSequence` 对应 OpenClaw 当前连接的 event `seq`。
 - `chat state=delta` 映射为 `message.text.delta`；上游 `replace=true` 映射 `mode=replace`，否则为 `append`。
 - `chat state=final/aborted/error` 分别收敛为 `run.completed/run.cancelled/run.failed`。
 - `session.message/session.operation/session.tool` 分别映射消息、Operation 和 ToolCall 变更；必须先订阅对应 session。
@@ -492,7 +492,7 @@ pending -> cancelled
 - Exec 审批使用 `exec.approval.list/get/resolve` 和 `exec.approval.requested/resolved`。
 - Plugin 审批使用独立 `plugin.approval.list/resolve` 和 `plugin.approval.requested/resolved`；禁止误用 Exec resolve。
 - 重连后必须主动 list/get 恢复待批项，不能只依赖实时 event。
-- OpenClaw resolve 决策值和 U-Claw `allow-once/allow-session/deny` 的精确转换仍需 schema fixture，属于 **待协议审计映射**。
+- OpenClaw resolve 决策值和 Bavi-box `allow-once/allow-session/deny` 的精确转换仍需 schema fixture，属于 **待协议审计映射**。
 
 ## 10. 管理领域模型
 
@@ -524,7 +524,7 @@ interface ProviderSummary {
 
 模型目录映射 `models.list(view?)`，认证状态映射 `models.authStatus/authLogout`，会话选模映射 `sessions.patch`。Provider 配置使用 `config.get/schema/schema.lookup/patch`，不假设存在独立 Provider CRUD RPC。常规写入必须携带 base hash 并优先 patch；renderer 只接收打码后配置。具体 Provider schema key 由 `ConfigurationField` 转换器固定，不能直通 React。
 
-本地 Ollama/LM Studio 发现可复用 U-Claw 受控探测服务，但不直接调用旧 Config Server 路由，也不把 `/v1/models` 误认为原始 Provider 模型目录。
+本地 Ollama/LM Studio 发现可复用 Bavi-box 受控探测服务，但不直接调用旧 Config Server 路由，也不把 `/v1/models` 误认为原始 Provider 模型目录。
 
 ### 10.2 技能、插件与 MCP
 
@@ -698,7 +698,7 @@ interface Operation<T = unknown> {
 
 日志读取映射 `logs.tail`，常用诊断映射 `health/status/system.info/diagnostics.stability/audit.list`。`audit.list` 只是 metadata-only 账本，不得伪装成完整工具参数和结果审计。
 
-完整诊断导出和部分 Doctor 修复走受控 CLI。更新状态和执行映射 `update.status/run`，但 Adapter 必须额外执行 U-Claw 版本兼容、签名、原子切换和回滚，不能直接把 OpenClaw update 成功等同产品更新成功。Doctor、备份、恢复、清理、插件 CLI 和更新统一包装为 `Operation`。
+完整诊断导出和部分 Doctor 修复走受控 CLI。更新状态和执行映射 `update.status/run`，但 Adapter 必须额外执行 Bavi-box 版本兼容、签名、原子切换和回滚，不能直接把 OpenClaw update 成功等同产品更新成功。Doctor、备份、恢复、清理、插件 CLI 和更新统一包装为 `Operation`。
 
 ## 11. UClawClient 模块边界
 
@@ -845,7 +845,7 @@ interface UpdatesApi {
 - `SystemApi` 的窗口和目录动作由 Electron 主进程执行；Adapter 只暴露结果，不暴露 `shell`。
 - `MessagesApi.watch()` 组合 `sessions.subscribe`、`sessions.messages.subscribe` 以及 `chat/session.message/session.operation/session.tool` events；`send()` 仍负责单次 run 的收敛视图。
 - `ToolsApi.listPendingAuthorizations()` 分别调用 exec/plugin list，归一后合并；resolve 必须按请求 `family` 路由到对应方法族。
-- Provider、Channel 和 MCP 使用 Adapter 提供的 schema-driven `ConfigurationField`。字段 `key` 属于 U-Claw，Adapter 负责映射上游配置键；具体字段集合：**待协议审计映射**。
+- Provider、Channel 和 MCP 使用 Adapter 提供的 schema-driven `ConfigurationField`。字段 `key` 属于 Bavi-box，Adapter 负责映射上游配置键；具体字段集合：**待协议审计映射**。
 - 所有凭据只允许通过 `SecretInput` 写入；读取仅返回 `SecretState` 和不可逆 `hint`。
 - Plugin 完整生命周期以及 MCP `probe/reload` 的 API 语义稳定，但当前实现边界是 Electron 受控 CLI，不得声称来自 WS RPC。
 - 破坏性操作必须先经 `system.createConfirmation()` 获取一次性 token；`confirmation` 不得由前端自行构造。
@@ -1014,17 +1014,17 @@ Mock 约束：
 核心 WS、Chat、Session、审批、模型和配置入口已经确认。以下缺口仍需通过 schema fixture、锁定 CLI 或 Windows 实测补齐：
 
 1. `chat.send.attachments: unknown[]` 的真实元素、MIME、大小限制、引用和产物生命周期。
-2. Exec/Plugin `resolve` 决策枚举与 U-Claw `allow-once/allow-session/deny` 的精确转换。
-3. `sessions.patch` 中置顶、分组和归档的参数 schema 与冲突行为。重命名、模型覆盖/readback 和重复 label 冲突已锁定；当前版本明确不支持 `baseHash`。在上游能力完成真实 fixture 前，置顶和分组使用 U-Claw 的 U 盘元数据，不进入 Adapter RPC；归档保持关闭。
+2. Exec/Plugin `resolve` 决策枚举与 Bavi-box `allow-once/allow-session/deny` 的精确转换。
+3. `sessions.patch` 中置顶、分组和归档的参数 schema 与冲突行为。重命名、模型覆盖/readback 和重复 label 冲突已锁定；当前版本明确不支持 `baseHash`。在上游能力完成真实 fixture 前，置顶和分组使用 Bavi-box 的 U 盘元数据，不进入 Adapter RPC；归档保持关闭。
 4. `chat.history`、`chat.message.get` 和 `session.*` payload 到 ContentBlock/ToolCall 的完整 fixture。
 5. Provider 和 Channel 的 `config.schema.lookup` 字段映射、base hash、`replacePaths` 和 restart/reload plan。
 6. MCP `doctor --probe`、reload 的受控 CLI 输出 schema；Plugin 搜索、安装、更新、卸载和 Doctor 的受控 CLI 命令白名单。
 7. workspace/session/artifact 的写入边界；记忆真实格式、索引、编辑冲突和 OpenClaw 刷新方式。
 8. 完整诊断导出、Doctor 修复、备份、恢复和清理的 CLI/本地服务边界。
-9. `update.run` 与 U-Claw runtime 签名、版本兼容、原子切换和失败回滚的组合验收。
+9. `update.run` 与 Bavi-box runtime 签名、版本兼容、原子切换和失败回滚的组合验收。
 10. Windows 上 device identity/token 的安全持久化、配对撤销和换机行为。
 
-审计结果应形成“OpenClaw 原始协议 -> U-Claw v1”映射测试。不得把原始协议字段直接扩散到 React 组件。
+审计结果应形成“OpenClaw 原始协议 -> Bavi-box v1”映射测试。不得把原始协议字段直接扩散到 React 组件。
 
 ## 17. v1 冻结条件
 

@@ -67,8 +67,8 @@
         ]
       },
       "xai": {
-        "baseUrl": "http://127.0.0.1:18808/xai/v1",
-        "apiKey": "uclaw-video-adapter",
+        "baseUrl": "https://api.yiyong.me/v1",
+        "apiKey": "",
         "api": "openai-completions",
         "models": [
           {

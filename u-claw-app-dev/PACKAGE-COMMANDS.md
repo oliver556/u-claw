@@ -1,4 +1,4 @@
-# U-Claw `package.json` 命令说明
+# Bavi-box `package.json` 命令说明
 
 > 适用目录：`u-claw-app-dev`  
 > 正式开发、构建和打包只能在该目录执行。  
@@ -149,7 +149,7 @@ xai.apiKey = uclaw-video-adapter
 --video-base-url <url>   手工覆盖视频 adapter 地址
 --video-api-key <key>    手工覆盖视频 adapter token
 --dest <path>            写入指定配置文件
---usb <mount>            写入 <mount>/U-Claw/data/.openclaw/openclaw.json
+--usb <mount>            写入 <mount>/Bavi-box/data/.openclaw/openclaw.json
 ```
 
 正常打包不要手工使用 `--new-api-*` 或 `--video-*`。正式版本由 `package:portable:*` 固定地址和 key 职责。
@@ -172,7 +172,7 @@ npm run package:portable:customer -- --usb /Volumes/UCLAW-01
 生成 Mac x64 tar.gz + SHA-256 manifest
 生成 Windows zip + SHA-256 manifest
 生成 New API key 为空的客户 openclaw.json
-生成 release/portable-customer/U-Claw
+生成 release/portable-customer/Bavi-box
 备份 U 盘旧官方文件
 写入 U 盘并校验 SHA-256
 ```
@@ -196,15 +196,15 @@ x86_64 -> u-claw-app-mac-x64.tar.gz
 两套 Mac App 缓存必须分开：
 
 ```txt
-~/Library/Caches/U-Claw/u-claw-app-mac-arm64
-~/Library/Caches/U-Claw/u-claw-app-mac-x64
+~/Library/Caches/Bavi-box/u-claw-app-mac-arm64
+~/Library/Caches/Bavi-box/u-claw-app-mac-x64
 ```
 
 Windows 首次启动：
 
 ```txt
 校验 Windows zip SHA-256
-优先用系统 tar.exe 解压到 %LOCALAPPDATA%\U-Claw\usb-portable\app-win-x64
+优先用系统 tar.exe 解压到 %LOCALAPPDATA%\Bavi-box\usb-portable\app-win-x64
 每 5 秒输出一次已用时间
 仅首次或包版本变化时解压；后续直接复用电脑缓存
 ```
@@ -231,8 +231,8 @@ npm run package:portable:streamer
 输出：
 
 ```txt
-release/portable-customer/U-Claw
-release/portable-streamer/U-Claw
+release/portable-customer/Bavi-box
+release/portable-streamer/Bavi-box
 ```
 
 ### `--skip-build`

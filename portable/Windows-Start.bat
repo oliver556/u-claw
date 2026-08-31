@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul 2>&1
-title U-Claw - Portable AI Agent
+title Bavi-box - Portable AI Agent
 
 echo.
 echo   ========================================
-echo     U-Claw v1.1 - Portable AI Agent
+echo     Bavi-box v1.1 - Portable AI Agent
 echo   ========================================
 echo.
 
@@ -24,7 +24,7 @@ set "NPM_BIN=%NODE_DIR%\npm.cmd"
 set "OPENCLAW_HOME=%DATA_DIR%"
 set "OPENCLAW_STATE_DIR=%STATE_DIR%"
 set "OPENCLAW_CONFIG_PATH=%STATE_DIR%\openclaw.json"
-REM U-Claw opens the local dashboard directly; disable mDNS discovery on Windows
+REM Bavi-box opens the local dashboard directly; disable mDNS discovery on Windows
 REM to avoid OpenClaw/@homebridge ciao crashes during bonjour re-advertise.
 set "OPENCLAW_DISABLE_BONJOUR=1"
 
@@ -190,7 +190,7 @@ echo   Starting OpenClaw Gateway on port %PORT%...
 echo   First run on a USB drive may take 30-90 seconds
 echo   (unpacking bundled components). Please wait;
 echo   Config Center is open for model, key, recharge, and channel setup.
-echo   DO NOT close this window while using U-Claw!
+echo   DO NOT close this window while using Bavi-box!
 echo   ========================================
 echo.
 

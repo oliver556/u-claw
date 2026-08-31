@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>U-Claw - Loading</title>
+<title>Bavi-box - Loading</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -49,7 +49,13 @@ h1 span { color: #1677ff; }
 .subtitle {
   color: #9ca3af;
   font-size: 1.1em;
-  margin-bottom: 32px;
+  margin-bottom: 8px;
+}
+.version {
+  color: #6b7280;
+  font-size: 0.9em;
+  margin-bottom: 28px;
+  font-variant-numeric: tabular-nums;
 }
 .loader {
   width: 200px;
@@ -88,18 +94,36 @@ h1 span { color: #1677ff; }
 <body>
 <div class="container">
   <div class="logo">
-    <img src="../assets/icon.svg" alt="U-Claw" />
+    <img src="../assets/icon.svg" alt="Bavi-box" />
   </div>
-  <h1><span>U-Claw</span></h1>
-  <p class="subtitle">U-Claw AI 工作空间</p>
+  <h1><span>Bavi-box</span></h1>
+  <p class="subtitle">Bavi-box AI 工作空间</p>
+  <p class="version" id="version">版本读取中...</p>
   <div class="loader"><div class="loader-bar"></div></div>
-  <p class="status" id="status">正在启动 U-Claw 工作空间...</p>
+  <p class="status" id="status">正在启动 Bavi-box 工作空间...</p>
 </div>
 
 <script>
+function formatVersion(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.startsWith('v') ? text : `v${text}`;
+}
+
+async function renderVersion() {
+  try {
+    if (!window.uclaw) return;
+    const status = await window.uclaw.getGatewayStatus();
+    const label = formatVersion(status?.appVersion);
+    if (!label) return;
+    document.getElementById('version').textContent = label;
+    document.title = `Bavi-box ${label}`;
+  } catch(e) {}
+}
+
 const messages = [
-  '正在启动 U-Claw 工作空间...',
-  '正在启动 U-Claw 引擎...',
+  '正在启动 Bavi-box 工作空间...',
+  '正在启动 Bavi-box 引擎...',
   '检查配置文件...',
   '正在连接 Gateway...',
   '正在初始化 AI 网关...',
@@ -118,7 +142,7 @@ async function checkReady() {
     if (window.uclaw) {
       const status = await window.uclaw.getGatewayStatus();
       if (status.ready) {
-        document.getElementById('status').textContent = 'U-Claw 已就绪';
+        document.getElementById('status').textContent = 'Bavi-box 已就绪';
         await window.uclaw.openDashboard();
         return;
       }
@@ -127,6 +151,7 @@ async function checkReady() {
   setTimeout(checkReady, 1000);
 }
 checkReady();
+renderVersion();
 </script>
 </body>
 </html>

@@ -160,7 +160,7 @@ jobs:
               go run github.com/akavel/rsrc@v0.10.2 -manifest app.manifest -arch amd64 -o rsrc_windows_amd64.syso
               if ($LASTEXITCODE -ne 0) { throw 'Launcher manifest generation failed' }
               $ldflags = "-s -w -H windowsgui -X 'main.trustedRuntimeKeys=$trustedKeysJson' -X 'main.trustedStartupLicenseKeys=$licenseKeysJson' -X 'main.trustedLicenseStatusKeys=$licenseStatusKeysJson' -X 'main.licenseStatusEndpoint=$licenseStatusEndpoint' -X 'main.revokedRuntimeKeyIDs=$revokedKeyIDsJson' -X 'main.releaseFeedBaseURL=$releaseBaseURL' -X 'main.activationServiceEndpoint=$activationEndpoint'"
-              go build -trimpath -ldflags $ldflags -o (Join-Path $outputRoot 'U-Claw.exe') .
+              go build -trimpath -ldflags $ldflags -o (Join-Path $outputRoot 'Bavi-box.exe') .
               if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed' }
             }
             finally {
@@ -179,7 +179,7 @@ jobs:
         shell: powershell
         run: |
           .\product\tests\windows\launcher-e2e.ps1 `
-            -LauncherExe product\.portable-launcher\bin\U-Claw.exe `
+            -LauncherExe product\.portable-launcher\bin\Bavi-box.exe `
             -FixtureExe product\.portable-launcher\bin\portable-runtime.exe `
             -DiagnosticsPath product\.portable-launcher\diagnostics\windows-powershell-5.json `
             -CaseName windows-powershell-5
@@ -188,7 +188,7 @@ jobs:
         shell: pwsh
         run: |
           .\product\tests\windows\launcher-e2e.ps1 `
-            -LauncherExe product\.portable-launcher\bin\U-Claw.exe `
+            -LauncherExe product\.portable-launcher\bin\Bavi-box.exe `
             -FixtureExe product\.portable-launcher\bin\portable-runtime.exe `
             -DiagnosticsPath product\.portable-launcher\diagnostics\powershell-7.json `
             -CaseName powershell-7

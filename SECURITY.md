@@ -1,12 +1,12 @@
 # 安全策略 / Security Policy
 
-感谢你关注 U-Claw 的安全性。本文档说明如何向我们报告安全漏洞，以及我们当前支持的版本。
+感谢你关注 Bavi-box 的安全性。本文档说明如何向我们报告安全漏洞，以及我们当前支持的版本。
 
 ## 报告漏洞 / Reporting a Vulnerability
 
 **请不要在公开 issue 里发布安全漏洞细节。**
 
-如果你发现了 U-Claw 的安全问题，请通过以下任一渠道私下联系：
+如果你发现了 Bavi-box 的安全问题，请通过以下任一渠道私下联系：
 
 - 邮件：`hefangsheng@u-claw.org`（建议附 PoC、影响范围、复现步骤）
 - GitHub 私密漏洞报告：在 [u-claw 仓库](https://github.com/dongsheng123132/u-claw) 的 Security 标签页 → "Report a vulnerability"
@@ -37,7 +37,7 @@
 
 ### 在范围内（请报告）
 
-- U-Claw 自身脚本中的命令注入、路径穿越、任意写入、代码执行
+- Bavi-box 自身脚本中的命令注入、路径穿越、任意写入、代码执行
 - `data/.openclaw/openclaw.json` 配置加载/写入逻辑中的注入
 - 启动脚本（`Mac-Start.command` / `Windows-Start.bat` / `start.sh`）
   在恶意目录名/环境变量下被劫持的可能

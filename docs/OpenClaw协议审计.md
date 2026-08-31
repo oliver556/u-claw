@@ -2,17 +2,17 @@
 
 ## 1. 审计结论
 
-U-Claw 新客户端可以不影响 OpenClaw Agent 和本地能力，但前端不应直接绑定 Dashboard 的 Lit 组件或构建产物。正式集成面是同一 Gateway 端口上的 WebSocket v4 协议和有文档的 HTTP API。
+Bavi-box 新客户端可以不影响 OpenClaw Agent 和本地能力，但前端不应直接绑定 Dashboard 的 Lit 组件或构建产物。正式集成面是同一 Gateway 端口上的 WebSocket v4 协议和有文档的 HTTP API。
 
-必须通过 U-Claw Adapter 隔离三类能力：
+必须通过 Bavi-box Adapter 隔离三类能力：
 
-| 类型 | 结论 | U-Claw 策略 |
+| 类型 | 结论 | Bavi-box 策略 |
 |---|---|---|
 | 对外可用 | Gateway WS/RPC、`/health`、`/ready`、`/tools/invoke`、可选 `/v1/*` | Adapter 直接封装，锁定 OpenClaw 版本并做契约测试 |
-| Dashboard 内部 | `controlUi.githubPreview`、Dashboard 本地偏好、Activity 内存投影、内置主题 | 不作为稳定产品契约；U-Claw 自行实现 |
+| Dashboard 内部 | `controlUi.githubPreview`、Dashboard 本地偏好、Activity 内存投影、内置主题 | 不作为稳定产品契约；Bavi-box 自行实现 |
 | CLI-only | MCP 运行探测/重载、完整插件安装生命周期、部分 doctor/诊断导出 | Electron 主进程执行锁定 CLI，或后续为 Adapter 增加受控命令层 |
 
-OpenClaw 官方文档明确说明：当前没有可公开安装的 npm 客户端包。U-Claw 不应虚构 `openclaw-client` 依赖，应在 `product/adapter` 内实现最小 WS 客户端。
+OpenClaw 官方文档明确说明：当前没有可公开安装的 npm 客户端包。Bavi-box 不应虚构 `openclaw-client` 依赖，应在 `product/adapter` 内实现最小 WS 客户端。
 
 ## 2. 审计对象与可复现性
 
@@ -55,7 +55,7 @@ Gateway 在同一端口复用 HTTP 和 WebSocket，默认端口为 `18789`。
 | `/__openclaw__/assistant-media/...` | Dashboard 内部 | Assistant 媒体展示 | `dist/control-ui-CuoxgbYo.js` |
 | `/api/chat/media/outgoing/...` | 内部媒体路由 | 受管输出图片 | `dist/server.impl-qYPVZMND.js` |
 
-U-Claw 桌面客户端应以 WS/RPC 为主。`/v1/chat/completions` 不能替代 WS，因为它不覆盖会话管理、审批、渠道、配置和 Gateway 事件。
+Bavi-box 桌面客户端应以 WS/RPC 为主。`/v1/chat/completions` 不能替代 WS，因为它不覆盖会话管理、审批、渠道、配置和 Gateway 事件。
 
 ## 4. WebSocket 握手、鉴权和重连
 
@@ -87,13 +87,13 @@ Dashboard 的当前真实参数：
 - 请求协议范围固定为 `4..4`
 - 默认请求 scopes：`operator.admin/read/write/approvals/pairing`
 
-U-Claw 应使用自己的 client id，例如 `u-claw-desktop`，不应伪装 Dashboard。
+Bavi-box 应使用自己的 client id，例如 `u-claw-desktop`，不应伪装 Dashboard。
 
 ### 4.3 鉴权方式
 
 | 方式 | WS connect 字段 | 备注 |
 |---|---|---|
-| Gateway token | `auth.token` | U-Claw 本机启动的主路径 |
+| Gateway token | `auth.token` | Bavi-box 本机启动的主路径 |
 | Gateway password | `auth.password` | Dashboard 不持久化 password |
 | Device token | `auth.deviceToken` | 首次配对后由 `hello-ok.auth.deviceToken` 发放 |
 | Tailscale Serve | 可依赖受信头 | 需 `gateway.auth.allowTailscale` |
@@ -101,7 +101,7 @@ U-Claw 应使用自己的 client id，例如 `u-claw-desktop`，不应伪装 Das
 
 Operator scope 闭集：`operator.read`、`operator.write`、`operator.admin`、`operator.approvals`、`operator.pairing`、`operator.talk.secrets`。`config.*`、`exec.approvals.*`、`wizard.*`、`update.*` 保留为 admin 方法族。
 
-本地 loopback Dashboard 可自动通过设备配对；LAN/远程浏览器通常需要一次性审批。U-Claw 仍应保留 device identity，不要依赖“loopback 永远放行”作为安全设计。
+本地 loopback Dashboard 可自动通过设备配对；LAN/远程浏览器通常需要一次性审批。Bavi-box 仍应保留 device identity，不要依赖“loopback 永远放行”作为安全设计。
 
 ### 4.4 重连
 
@@ -180,7 +180,7 @@ Gateway 发布了完整 `sessions.*` 方法族：
 
 `list`、`cleanup`、`subscribe`、`unsubscribe`、`messages.subscribe`、`messages.unsubscribe`、`preview`、`describe`、`resolve`、`create`、`send`、`steer`、`abort`、`patch`、`pluginPatch`、`reset`、`delete`、`get`、`compact`、`compaction.list/get/branch/restore`。
 
-U-Claw 的“新会话、重命名、置顶、分组、归档、删除、模型覆盖、分叉和恢复”都应映射到这一方法族，而不是只保存在 React 本地状态。
+Bavi-box 的“新会话、重命名、置顶、分组、归档、删除、模型覆盖、分叉和恢复”都应映射到这一方法族，而不是只保存在 React 本地状态。
 
 ## 6. 工具调用、授权和附件
 
@@ -224,7 +224,7 @@ type UClawAttachment = {
 
 ## 7. 功能域映射
 
-| 功能域 | Gateway 可用面 | Dashboard 实际使用/限制 | U-Claw 实现结论 |
+| 功能域 | Gateway 可用面 | Dashboard 实际使用/限制 | Bavi-box 实现结论 |
 |---|---|---|---|
 | Agent | `agent`, `agent.wait`, `agent.identity.get`, `agents.*` | 有 Agent 列表、身份、workspace 文件 | 直接接入 |
 | Model | `models.list(view?)`, `models.authStatus/authLogout`, `sessions.patch` | picker 通常用 configured/default view；all 用于诊断 | 直接接入；Key 不进 renderer |
@@ -238,7 +238,7 @@ type UClawAttachment = {
 | Usage | `usage.status/cost`, `sessions.usage*` | Dashboard 有细分和时序 | 直接接入 |
 | Task | `tasks.list/get/cancel`, `task` event | 后台 subagent/cron/CLI/ACP 任务 | 直接接入 |
 | File/artifact | `agents.workspace.list/get`, `sessions.files.list/get`, `artifacts.list/get/download` | workspace RPC 仅读，限制在 realpath workspace root | 直接接入读取；写入只用明确 RPC/IPC |
-| Update | `update.status/run` | admin 面，成功后可计划重启 | 后续接入，必须加 U-Claw 版本验证与回滚 |
+| Update | `update.status/run` | admin 面，成功后可计划重启 | 后续接入，必须加 Bavi-box 版本验证与回滚 |
 
 ### 7.1 MCP 特别说明
 
@@ -256,7 +256,7 @@ type UClawAttachment = {
 
 `config.get` 在服务端调用 `redactConfigSnapshot`，`config.patch/apply` 的返回也使用 `redactConfigObject`。写入时会恢复原有被打码值，并用 base hash 防止并发覆盖。
 
-U-Claw 必须遵守：
+Bavi-box 必须遵守：
 
 - renderer 只获取打码后配置和“是否已配置”状态。
 - 新 Key 由受限 IPC 一次性传到 Electron/Adapter，不进 Redux/Pinia/localStorage/日志。
@@ -317,7 +317,7 @@ U-Claw 必须遵守：
 
 OpenClaw 当前提供的是“可用且有文档的外部 Gateway 协议”，但不是已发布独立 client SDK 的强语义版本化 API。官方建议也是锁定已测版本，升级时重新检查 RPC 参考。
 
-U-Claw 每次升级必须：
+Bavi-box 每次升级必须：
 
 1. 只更改 `OPENCLAW_VERSION` 锁定值，不使用 `latest` 直接进入正式包。
 2. 对比 `features.methods/events`、协议版本、schema 和 Dashboard 实际请求。

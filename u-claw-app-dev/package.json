@@ -1,18 +1,24 @@
 {
   "name": "u-claw",
   "version": "2.1.17",
-  "description": "U-Claw - AI 助手桌面版，插上 U 盘就能用",
+  "description": "Bavi-box - AI 助手桌面版，插上 U 盘就能用",
   "main": "src/main.js",
-  "author": "U-Claw <hello@u-claw.org> (https://u-claw.org)",
+  "author": "Bavi-box <hello@u-claw.org> (https://u-claw.org)",
   "license": "MIT",
   "homepage": "https://u-claw.org",
+  "_scriptNotes": {
+    "dev:skip-activation": "Development-only shortcut. Starts npm run dev with UCLAW_SKIP_ACTIVATION_GATE=1, so the app skips the first-start activation gate. It does not create cloud activation license, New API credential, or shipment USB activation material."
+  },
   "scripts": {
     "sync-lib": "node scripts/sync-lib.js",
     "sync:config": "node scripts/sync-openclaw-config.js",
+    "sync:config:env": "node scripts/with-local-env.js npm run sync:config --",
     "prepare-build": "npm run patch-openclaw && npm run sync-lib && npm run sync:config",
     "patch-openclaw": "node scripts/patch-openclaw.js",
     "start": "npm run patch-openclaw && npm run sync-lib && electron .",
     "dev": "npm run patch-openclaw && npm run sync-lib && electron . --dev",
+    "dev:skip-activation": "UCLAW_SKIP_ACTIVATION_GATE=1 npm run dev",
+    "dev:env": "node scripts/with-local-env.js npm run dev",
     "dev:video": "npm run dev",
     "build:mac": "npm run prepare-build && electron-builder --mac",
     "build:mac-arm64": "npm run prepare-build && electron-builder --mac --arm64",
@@ -21,18 +27,29 @@
     "build:all": "npm run prepare-build && electron-builder --mac --win",
     "package:portable:customer": "node scripts/package-portable.js --edition customer",
     "package:portable:streamer": "node scripts/package-portable.js --edition streamer",
+    "hard-update:package": "node scripts/hard-update-package.js",
+    "hard-update:key": "node scripts/hard-update-release-key.js",
+    "hard-update:upload:r2": "node scripts/hard-update-upload-r2.js",
+    "hard-update:check:mock": "node scripts/hard-update-check-mock.js",
+    "hard-update:server": "node scripts/hard-update-control-plane-server.js",
+    "hard-update:publish": "node scripts/publish-hard-update-release.js",
+    "hard-update:verify": "node scripts/verify-hard-update-mock.js",
+    "launcher-hotfix:verify": "node scripts/verify-launcher-hotfix-protocol.js",
     "postinstall": "electron-builder install-app-deps && npm run patch-openclaw"
   },
   "build": {
     "appId": "org.u-claw.desktop",
-    "productName": "U-Claw",
-    "copyright": "Copyright © 2026 U-Claw",
+    "productName": "Bavi-box",
+    "copyright": "Copyright © 2026 Bavi-box",
     "directories": {
       "output": "release"
     },
     "files": [
       "src/**/*",
       "assets/**/*",
+      "scripts/hard-update-client.js",
+      "scripts/lib/hard-update-utils.js",
+      "scripts/lib/release-signing.js",
       "node_modules/**/*",
       "!node_modules/**/*.md",
       "node_modules/openclaw/**/*.md",
@@ -81,7 +98,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "title": "U-Claw",
+      "title": "Bavi-box",
       "icon": "assets/icon.icns",
       "contents": [
         {
@@ -122,7 +139,7 @@
       "installerHeaderIcon": "assets/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "U-Claw"
+      "shortcutName": "Bavi-box"
     },
     "linux": {
       "target": [

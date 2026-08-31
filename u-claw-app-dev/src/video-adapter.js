@@ -906,7 +906,7 @@ async function handleXai(req, res, url, config) {
     return;
   }
 
-  sendJson(res, 404, { error: { message: `U-Claw video adapter route not found: ${req.method} ${url.pathname}` } });
+  sendJson(res, 404, { error: { message: `Bavi-box video adapter route not found: ${req.method} ${url.pathname}` } });
 }
 
 function createVideoAdapterServer(options = {}) {
@@ -945,7 +945,7 @@ if (require.main === module) {
   const port = Number(process.env.PORT || 18808);
   const host = process.env.HOST || '127.0.0.1';
   createVideoAdapterServer().listen(port, host, () => {
-    console.log(`U-Claw video adapter listening on http://${host}:${port}`);
+    console.log(`Bavi-box video adapter listening on http://${host}:${port}`);
   });
 }
 

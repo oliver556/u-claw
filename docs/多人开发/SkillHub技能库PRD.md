@@ -4,13 +4,13 @@
 
 ## Problem Statement
 
-U-Claw 需要把 Skill 作为用户可理解、可选择、可安装、可启停的产品能力，而不是暴露 OpenClaw 底层 bundled skills、skill ID 或 runtime 细节。
+Bavi-box 需要把 Skill 作为用户可理解、可选择、可安装、可启停的产品能力，而不是暴露 OpenClaw 底层 bundled skills、skill ID 或 runtime 细节。
 
 当前约束是：用户侧 Skill 来源以 SkillHub 为准，但执行链路必须复用 OpenClaw 原版 skill runtime。若只迁 UI，会遗漏本地代理、安全校验、安装事务、runtime 读回、缓存/限流、权限确认、错误分类与异步状态，最终形成“看起来能点、实际不可用或不安全”的残缺功能。
 
 ## Solution
 
-建设 U-Claw 技能库模块，包含“技能商城”和“我的技能”两个入口。
+建设 Bavi-box 技能库模块，包含“技能商城”和“我的技能”两个入口。
 
 技能商城展示 SkillHub 在线目录，支持搜索、分类、排序、分页、详情、README 预览和安全安装。我的技能展示本地已安装 Skill，支持详情、导入 ZIP、启用、禁用、卸载和后续更新。
 
@@ -20,31 +20,31 @@ U-Claw 需要把 Skill 作为用户可理解、可选择、可安装、可启停
 
 ## User Stories
 
-1. As a U-Claw user, I want to browse SkillHub skills in Chinese-friendly cards, so that I can understand what each skill does without knowing skill IDs.
-2. As a U-Claw user, I want to search SkillHub skills with debounce, so that typing does not trigger excessive remote requests.
-3. As a U-Claw user, I want to filter by Chinese category labels, so that I can find relevant skills quickly.
-4. As a U-Claw user, I want category keys to remain compatible with SkillHub upstream, so that filtering returns accurate results.
-5. As a U-Claw user, I want recommended sort by default, so that useful skills appear first.
-6. As a U-Claw user, I want pagination with stable catalog identity, so that cached and live results do not mix into wrong installs.
-7. As a U-Claw user, I want skill cards to show logo, name, version, description, category, downloads, stars and install state, so that I can compare options.
-8. As a U-Claw user, I want missing logos to fall back gracefully, so that the marketplace still looks usable when SkillHub has no icon.
-9. As a U-Claw user, I want to open a detail drawer from the card body, so that detail reading is easy on desktop.
-10. As a U-Claw user, I want detail README rendered safely, so that I can inspect a skill before installing it.
-11. As a U-Claw user, I want install actions to show immediate loading, so that I know my click was accepted.
-12. As a U-Claw user, I want duplicate install/enable/disable clicks blocked, so that I do not create conflicting operations.
-13. As a U-Claw user, I want install progress shown as queued/running/succeeded/failed, so that long operations are understandable.
-14. As a U-Claw user, I want failed operations to show precise domain errors, so that I know whether retry, re-confirmation or upstream wait is needed.
-15. As a U-Claw user, I want high-risk skills to require explicit permission confirmation, so that risky local access is intentional.
-16. As a U-Claw user, I want re-enabling a high-risk skill to ask again, so that old consent is not reused silently.
-17. As a U-Claw user, I want installed skills to appear in “我的技能”, so that I can manage local capabilities.
-18. As a U-Claw user, I want to enable and disable installed skills, so that I can control what OpenClaw loads.
-19. As a U-Claw user, I want to uninstall workspace-installed skills, so that I can clean up local capabilities.
-20. As a U-Claw user, I want bundled OpenClaw skills hidden from user-facing marketplace and dropdowns, so that choices stay U-Claw curated.
-21. As a U-Claw runtime maintainer, I want bundled skills preserved underneath, so that OpenClaw dependencies are not broken by UI filtering.
-22. As a U-Claw user, I want to import a local Skill ZIP, so that I can install skills outside the online catalog when supported.
-23. As a U-Claw user, I want interrupted installs recovered after restart, so that local skill state is not left half-written.
-24. As a U-Claw user, I want stale cached marketplace data only when upstream is transiently unavailable, so that offline use is possible but unsafe drift is not hidden.
-25. As a U-Claw user, I want identity conflicts, paid drift and invalid payloads to fail closed, so that I do not install the wrong skill.
+1. As a Bavi-box user, I want to browse SkillHub skills in Chinese-friendly cards, so that I can understand what each skill does without knowing skill IDs.
+2. As a Bavi-box user, I want to search SkillHub skills with debounce, so that typing does not trigger excessive remote requests.
+3. As a Bavi-box user, I want to filter by Chinese category labels, so that I can find relevant skills quickly.
+4. As a Bavi-box user, I want category keys to remain compatible with SkillHub upstream, so that filtering returns accurate results.
+5. As a Bavi-box user, I want recommended sort by default, so that useful skills appear first.
+6. As a Bavi-box user, I want pagination with stable catalog identity, so that cached and live results do not mix into wrong installs.
+7. As a Bavi-box user, I want skill cards to show logo, name, version, description, category, downloads, stars and install state, so that I can compare options.
+8. As a Bavi-box user, I want missing logos to fall back gracefully, so that the marketplace still looks usable when SkillHub has no icon.
+9. As a Bavi-box user, I want to open a detail drawer from the card body, so that detail reading is easy on desktop.
+10. As a Bavi-box user, I want detail README rendered safely, so that I can inspect a skill before installing it.
+11. As a Bavi-box user, I want install actions to show immediate loading, so that I know my click was accepted.
+12. As a Bavi-box user, I want duplicate install/enable/disable clicks blocked, so that I do not create conflicting operations.
+13. As a Bavi-box user, I want install progress shown as queued/running/succeeded/failed, so that long operations are understandable.
+14. As a Bavi-box user, I want failed operations to show precise domain errors, so that I know whether retry, re-confirmation or upstream wait is needed.
+15. As a Bavi-box user, I want high-risk skills to require explicit permission confirmation, so that risky local access is intentional.
+16. As a Bavi-box user, I want re-enabling a high-risk skill to ask again, so that old consent is not reused silently.
+17. As a Bavi-box user, I want installed skills to appear in “我的技能”, so that I can manage local capabilities.
+18. As a Bavi-box user, I want to enable and disable installed skills, so that I can control what OpenClaw loads.
+19. As a Bavi-box user, I want to uninstall workspace-installed skills, so that I can clean up local capabilities.
+20. As a Bavi-box user, I want bundled OpenClaw skills hidden from user-facing marketplace and dropdowns, so that choices stay Bavi-box curated.
+21. As a Bavi-box runtime maintainer, I want bundled skills preserved underneath, so that OpenClaw dependencies are not broken by UI filtering.
+22. As a Bavi-box user, I want to import a local Skill ZIP, so that I can install skills outside the online catalog when supported.
+23. As a Bavi-box user, I want interrupted installs recovered after restart, so that local skill state is not left half-written.
+24. As a Bavi-box user, I want stale cached marketplace data only when upstream is transiently unavailable, so that offline use is possible but unsafe drift is not hidden.
+25. As a Bavi-box user, I want identity conflicts, paid drift and invalid payloads to fail closed, so that I do not install the wrong skill.
 26. As a chat user, I want a Skill dropdown near model selection, so that model and skill feel like conversation runtime choices.
 27. As a chat user, I want the dropdown to show readable skill names, categories and purposes, so that I do not need to memorize file names.
 28. As a chat user, I want selecting a Skill to bind through Agent skills configuration, so that OpenClaw runtime remains the execution authority.
@@ -53,7 +53,7 @@ U-Claw 需要把 Skill 作为用户可理解、可选择、可安装、可启停
 
 ## Implementation Decisions
 
-- User-facing skill source is SkillHub. OpenClaw bundled skills may remain installed for runtime dependency safety, but must not appear in U-Claw marketplace or user-facing dropdowns.
+- User-facing skill source is SkillHub. OpenClaw bundled skills may remain installed for runtime dependency safety, but must not appear in Bavi-box marketplace or user-facing dropdowns.
 - Do not implement a custom skill executor. All installed or selected skills must resolve through OpenClaw-recognized skill installation and Agent skills binding.
 - Split the module into four stable layers: frontend skill experience, shared capability contracts, desktop SkillHub service, and OpenClaw runtime adapter.
 - Frontend calls only local API / IPC. Remote SkillHub access, API Key handling, downloads, cache, validation and install transactions stay in desktop service.
@@ -84,7 +84,7 @@ U-Claw 需要把 Skill 作为用户可理解、可选择、可安装、可启停
 - Bundle validator tests cover YAML block scalar parsing, bad record isolation, path/hash/size/symlink/reserved-name rejection and `_meta.json` transport drift.
 - Skill service tests cover install transaction journal, restart recovery, staging/backup/replace/verify flow, update enabled-state preservation and uninstall workspace-only behavior.
 - Runtime adapter tests cover slug/runtimeName/directoryKey alias readback, bundled namesake rejection, `skills.update` bounded polling and stale status handling.
-- Chat dropdown tests cover displaying only U-Claw SkillHub skills, excluding bundled skills, binding through Agent skills config and messaging when new session is required.
+- Chat dropdown tests cover displaying only Bavi-box SkillHub skills, excluding bundled skills, binding through Agent skills config and messaging when new session is required.
 - Visual/manual acceptance must cover: marketplace default load, search/filter/sort/page, detail README, install confirmation, install progress, installed list refresh, enable/disable, high-risk re-enable and restart recovery.
 
 ## Out of Scope
@@ -121,7 +121,7 @@ U-Claw 需要把 Skill 作为用户可理解、可选择、可安装、可启停
 - 离线、429、5xx 等 transient 场景可显示 stale cache，并明确标记。
 - identity conflict、paid drift、invalid payload 不使用 stale cache 掩盖。
 - 重启后可恢复 queued/running 安装任务或事务。
-- 用户侧 Skill 下拉只展示 U-Claw 筛选后的 SkillHub skills，不展示 bundled skills。
+- 用户侧 Skill 下拉只展示 Bavi-box 筛选后的 SkillHub skills，不展示 bundled skills。
 - Skill 下拉通过 Agent skills 配置绑定；不能绕过 OpenClaw runtime。
 - 若 Skill 需新会话生效，UI 必须明确提示或自动创建/切换对应会话。
 

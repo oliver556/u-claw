@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -16,23 +17,24 @@ import (
 )
 
 const (
-	cwUseDefault       = ^uintptr(0x7fffffff)
-	csHRedraw          = 0x0002
-	csVRedraw          = 0x0001
-	wsOverlappedWindow = 0x00cf0000
-	wsVisible          = 0x10000000
-	wsChild            = 0x40000000
-	wsVScroll          = 0x00200000
-	ssLeft             = 0x00000000
-	wmClose            = 0x0010
-	wmDestroy          = 0x0002
-	wmTimer            = 0x0113
-	swHide             = 0
-	swShow             = 5
-	mbOK               = 0x00000000
-	mbIconError        = 0x00000010
-	errorAlreadyExists = 183
-	errorClassExists   = 1410
+	cwUseDefault              = ^uintptr(0x7fffffff)
+	csHRedraw                 = 0x0002
+	csVRedraw                 = 0x0001
+	wsOverlappedWindow        = 0x00cf0000
+	wsVisible                 = 0x10000000
+	wsChild                   = 0x40000000
+	wsVScroll                 = 0x00200000
+	ssLeft                    = 0x00000000
+	wmClose                   = 0x0010
+	wmDestroy                 = 0x0002
+	wmTimer                   = 0x0113
+	swHide                    = 0
+	swShow                    = 5
+	mbOK                      = 0x00000000
+	mbIconError               = 0x00000010
+	errorAlreadyExists        = 183
+	errorClassExists          = 1410
+	activationRestartExitCode = 20
 )
 
 var (
@@ -68,6 +70,8 @@ var (
 	logStartOffset      int64
 	startLogStartOffset int64
 	launcherStarted     = time.Now()
+	statusMu            sync.RWMutex
+	cachedRawStatus     string
 )
 
 type wndClassEx struct {
@@ -105,22 +109,32 @@ func main() {
 		os.Exit(1)
 	}
 	root := filepath.Dir(executable)
-	script := filepath.Join(root, "Windows-Start-App.bat")
+	script := filepath.Join(root, "app", "scripts", "Windows-Start-App.bat")
 	hostLocalAppData := os.Getenv("LOCALAPPDATA")
 	if hostLocalAppData == "" {
 		hostLocalAppData = os.TempDir()
 	}
-	localLogDir := filepath.Join(hostLocalAppData, "U-Claw", "launcher-logs")
-	logPath = filepath.Join(localLogDir, "U-Claw-Launcher.log")
+	localLogDir := filepath.Join(hostLocalAppData, "Bavi-box", "launcher-logs")
+	logPath = filepath.Join(localLogDir, "Bavi-box-Launcher.log")
 	startLogPath = filepath.Join(localLogDir, "Windows-Start-App.log")
-	usbLogPath = filepath.Join(root, "data", "logs", "U-Claw-Launcher.log")
+	usbLogPath = filepath.Join(root, "data", "logs", "Bavi-box-Launcher.log")
 	usbStartLogPath = filepath.Join(root, "data", "logs", "Windows-Start-App.log")
 	mainLogPath = filepath.Join(root, "data", "logs", "main.log")
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
+	appendLauncherLog("Launcher process entered. root=" + root)
+	syncLauncherLogs()
+	if _, err := os.Stat(script); err != nil {
+		appendLauncherLog("Missing Windows start script: " + script + " (" + err.Error() + ")")
+		syncLauncherLogs()
+		showStartupError()
+		os.Exit(1)
+	}
 
 	mutex, alreadyRunning := acquireSingleInstanceMutex(root)
 	if alreadyRunning {
+		appendLauncherLog("Another launcher instance is already running; queued relaunch request.")
 		writeRelaunchRequest(root)
+		syncLauncherLogs()
 		os.Exit(0)
 	}
 	if mutex != 0 {
@@ -137,6 +151,8 @@ func main() {
 		atomic.StoreInt32(&processDone, 0)
 		atomic.StoreInt32(&processExitCode, 0)
 		atomic.StoreInt32(&windowHidden, 1)
+		setCachedRawStatus("")
+		stopStatusSampler := startStatusSampler()
 		go func() {
 			code := runScript(root, script, startLogPath)
 			syncLauncherLogs()
@@ -145,18 +161,26 @@ func main() {
 		}()
 		if err := runStatusWindow(); err != nil {
 			appendLauncherLog("Status window failed: " + err.Error())
+			syncLauncherLogs()
 			for atomic.LoadInt32(&processDone) == 0 {
 				time.Sleep(200 * time.Millisecond)
 			}
 		}
+		stopStatusSampler()
 		exitCode = int(atomic.LoadInt32(&processExitCode))
+		if exitCode == activationRestartExitCode {
+			appendLauncherLog("Activation completed; restarting through normal startup gate.")
+			syncLauncherLogs()
+			continue
+		}
 		if exitCode != 0 {
 			break
 		}
 		if !hasFreshRelaunchRequest(root, 2*time.Minute) {
 			break
 		}
-		appendLauncherLog("Relaunch requested while U-Claw was closing; starting again.")
+		appendLauncherLog("Relaunch requested while Bavi-box was closing; starting again.")
+		syncLauncherLogs()
 	}
 
 	os.Exit(exitCode)
@@ -233,7 +257,7 @@ func appendLauncherLog(message string) {
 		return
 	}
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
-	line := "[" + time.Now().Format(time.RFC3339Nano) + "] [U-Claw] " + message + "\r\n"
+	line := "[" + time.Now().Format(time.RFC3339Nano) + "] [Bavi-box] " + message + "\r\n"
 	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return
@@ -262,12 +286,14 @@ func copyFileBestEffort(source string, destination string) {
 
 func syncLauncherLogs() {
 	copyFileBestEffort(logPath, usbLogPath)
-	copyFileBestEffort(startLogPath, usbStartLogPath)
+	if startLogPath != usbLogPath {
+		copyFileBestEffort(startLogPath, usbStartLogPath)
+	}
 }
 
 func showStartupError() {
-	message := syscall.StringToUTF16Ptr("U-Claw 启动失败。请查看 U-Claw\\data\\logs\\U-Claw-Launcher.log。")
-	title := syscall.StringToUTF16Ptr("U-Claw Launcher")
+	message := syscall.StringToUTF16Ptr("Bavi-box 启动失败。请查看 Bavi-box\\data\\logs\\Bavi-box-Launcher.log。")
+	title := syscall.StringToUTF16Ptr("Bavi-box")
 	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(message)), uintptr(unsafe.Pointer(title)), mbOK|mbIconError)
 }
 
@@ -281,6 +307,8 @@ func runScript(root string, script string, logPath string) int {
 	cmd.Dir = os.TempDir()
 	cmd.Env = append(os.Environ(),
 		"UCLAW_LAUNCHER_GUI=1",
+		fmt.Sprintf("UCLAW_LAUNCHER_PID=%d", os.Getpid()),
+		"UCLAW_PORTABLE_ROOT="+root,
 		"UCLAW_LAUNCHER_LOCAL_LOG="+logPath,
 		"UCLAW_WINDOWS_START_LOCAL_LOG="+startLogPath,
 		"UCLAW_USB_LAUNCHER_LOG="+usbLogPath,
@@ -303,7 +331,7 @@ func runScript(root string, script string, logPath string) int {
 
 func runStatusWindow() error {
 	className := syscall.StringToUTF16Ptr("UClawPortableLauncherWindow")
-	title := syscall.StringToUTF16Ptr("U-Claw Launcher")
+	title := syscall.StringToUTF16Ptr("Bavi-box")
 	instance, _, err := procGetModuleHandleW.Call(0)
 	if instance == 0 {
 		return err
@@ -372,6 +400,40 @@ func runStatusWindow() error {
 	return nil
 }
 
+func startStatusSampler() func() {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			setCachedRawStatus(rawStatusTextFromDisk())
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	var stopped int32
+	return func() {
+		if atomic.CompareAndSwapInt32(&stopped, 0, 1) {
+			close(done)
+		}
+	}
+}
+
+func setCachedRawStatus(status string) {
+	statusMu.Lock()
+	cachedRawStatus = status
+	statusMu.Unlock()
+}
+
+func getCachedRawStatus() string {
+	statusMu.RLock()
+	defer statusMu.RUnlock()
+	return cachedRawStatus
+}
+
 func windowProc(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) uintptr {
 	switch message {
 	case wmTimer:
@@ -398,9 +460,9 @@ func updateStatusWindow() {
 		procSetWindowTextW.Call(textHandle, uintptr(unsafe.Pointer(text)))
 	}
 
-	if atomic.LoadInt32(&windowHidden) == 1 && isShutdownStatus(rawStatus) {
-		procShowWindow.Call(windowHandle, swShow)
-		atomic.StoreInt32(&windowHidden, 0)
+	if atomic.LoadInt32(&windowHidden) == 0 && isShutdownStatus(rawStatus) {
+		procShowWindow.Call(windowHandle, swHide)
+		atomic.StoreInt32(&windowHidden, 1)
 	}
 
 	if atomic.LoadInt32(&processDone) == 1 {
@@ -408,8 +470,8 @@ func updateStatusWindow() {
 		if atomic.LoadInt32(&processExitCode) != 0 {
 			procShowWindow.Call(windowHandle, swShow)
 			atomic.StoreInt32(&windowHidden, 0)
-			message := syscall.StringToUTF16Ptr("U-Claw 启动失败。请查看 U-Claw\\data\\logs\\U-Claw-Launcher.log。")
-			title := syscall.StringToUTF16Ptr("U-Claw Launcher")
+			message := syscall.StringToUTF16Ptr("Bavi-box 启动失败。请查看 Bavi-box\\data\\logs\\Bavi-box-Launcher.log。")
+			title := syscall.StringToUTF16Ptr("Bavi-box")
 			procMessageBoxW.Call(windowHandle, uintptr(unsafe.Pointer(message)), uintptr(unsafe.Pointer(title)), mbOK|mbIconError)
 		}
 		procPostQuitMessage.Call(0)
@@ -420,16 +482,11 @@ func updateStatusWindow() {
 		procShowWindow.Call(windowHandle, swShow)
 		atomic.StoreInt32(&windowHidden, 0)
 	}
-
-	if atomic.LoadInt32(&windowHidden) == 0 && strings.Contains(rawStatus, "Starting Windows desktop app") && !isShutdownStatus(rawStatus) {
-		procShowWindow.Call(windowHandle, swHide)
-		atomic.StoreInt32(&windowHidden, 1)
-	}
 }
 
 func shouldShowStatusWindow(status string) bool {
 	if isShutdownStatus(status) {
-		return true
+		return false
 	}
 	if time.Since(launcherStarted) < 1200*time.Millisecond {
 		return false
@@ -441,16 +498,23 @@ func shouldShowStatusWindow(status string) bool {
 		strings.Contains(status, "Copying Windows archive") ||
 		strings.Contains(status, "Verifying cached Windows archive") ||
 		strings.Contains(status, "Extracting") ||
-		strings.Contains(status, "Another U-Claw startup") ||
+		strings.Contains(status, "Checking mandatory hard update") ||
+		strings.Contains(status, "Hard update staged") ||
+		strings.Contains(status, "[hard-update-client]") ||
+		strings.Contains(status, "Another Bavi-box startup") ||
 		strings.Contains(status, "Syncing USB data to computer cache") ||
 		strings.Contains(status, "Runtime data has unsynced changes")
 }
 
 func initialStatusText() string {
-	return "U-Claw 正在启动...\r\n\r\n首次启动需要准备程序缓存，可能需要几分钟。\r\n后续同版本启动会更快。"
+	return "Bavi-box 正在启动...\r\n\r\n首次启动需要准备程序缓存，可能需要几分钟。\r\n后续同版本启动会更快。"
 }
 
 func rawStatusText() string {
+	return getCachedRawStatus()
+}
+
+func rawStatusTextFromDisk() string {
 	lines := tailLinesFromOffset(logPath, logStartOffset, 6)
 	lines = append(lines, tailLinesFromOffset(startLogPath, startLogStartOffset, 14)...)
 	lines = append(lines, tailLinesSince(mainLogPath, 8, launcherStarted.Add(-2*time.Second))...)
@@ -468,16 +532,16 @@ func displayStatusText(raw string) string {
 		return initialStatusText()
 	}
 
-	title := "U-Claw 正在启动..."
+	title := "Bavi-box 正在启动..."
 	stage := "正在准备运行环境。"
 	detail := "请稍候。首次启动可能需要几分钟。"
 
 	if isShutdownStatus(raw) {
-		title = "U-Claw 正在关闭..."
+		title = "Bavi-box 正在关闭..."
 		stage = "正在停止服务并同步数据。"
 		detail = "完成后会自动退出。"
 	}
-	if strings.Contains(raw, "Another U-Claw startup") {
+	if strings.Contains(raw, "Another Bavi-box startup") {
 		stage = "已有启动任务正在准备程序缓存。"
 		detail = "正在等待它完成，避免双进程。"
 	}
@@ -492,6 +556,18 @@ func displayStatusText(raw string) string {
 	if strings.Contains(raw, "Verifying cached Windows archive") {
 		stage = "正在校验程序缓存。"
 		detail = "正在确认文件完整性。"
+	}
+	if strings.Contains(raw, "Checking mandatory hard update") {
+		stage = "正在检查强制更新。"
+		detail = "正在向发布控制面确认当前版本。"
+	}
+	if strings.Contains(raw, "\"staged\": true") || strings.Contains(raw, "Hard update staged") {
+		stage = "正在应用强制更新。"
+		detail = "更新包已校验通过，正在替换程序层并重新启动。"
+	}
+	if strings.Contains(raw, "[hard-update-client]") {
+		stage = "强制更新失败。"
+		detail = "请检查网络、激活状态或联系管理员。"
 	}
 	if strings.Contains(raw, "Extracting Windows app") || strings.Contains(raw, "Extracting with Windows tar") || strings.Contains(raw, "Windows tar unavailable") {
 		stage = "正在解压程序。"
@@ -512,6 +588,14 @@ func displayStatusText(raw string) string {
 	if strings.Contains(raw, "Runtime data has unsynced changes") {
 		stage = "检测到上次数据未同步完成。"
 		detail = "正在先回写 U 盘，避免数据丢失。"
+	}
+	if strings.Contains(raw, "Starting Windows desktop app") {
+		stage = "正在启动主程序。"
+		detail = "Gateway ready / App ready 后会自动进入主界面。"
+	}
+	if strings.Contains(raw, "Gateway ready on port") {
+		stage = "Gateway 已就绪。"
+		detail = "正在打开主界面。"
 	}
 	if strings.Contains(raw, "Shutdown complete") {
 		stage = "关闭完成。"

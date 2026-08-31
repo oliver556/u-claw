@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>U-Claw Pro — 模型配置</title>
+<title>Bavi-box Pro — 模型配置</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; }
@@ -148,7 +148,7 @@ input:focus { border-color: #ff6b35; }
 </head>
 <body>
 <div class="container">
-    <h1><span class="lobster">🦞</span> U-Claw Pro</h1>
+    <h1><span class="lobster">🦞</span> Bavi-box Pro</h1>
     <p class="subtitle">便携版 — 选择模型，填入 API Key，一键启动</p>
 
     <!-- Steps -->
@@ -531,32 +531,8 @@ function buildOpenClawConfig(provider, base, model, apiKey) {
         }
     };
 
-    const usesNewApi = /(^|\.)api\.gmnlee\.com\/v1\/?$/i.test(base.replace(/^https?:\/\//i, ''));
-    if (usesNewApi) {
-        providers.xai = {
-            baseUrl: base,
-            apiKey: apiKey,
-            api: 'openai-completions',
-            models: [{
-                id: 'jimeng-video-3-720p',
-                name: 'jimeng-video-3-720p',
-                reasoning: false,
-                input: ['text', 'image'],
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                contextWindow: 128000,
-                maxTokens: 8192
-            }]
-        };
-    }
-
     const defaults = { model: { primary: providerName + '/' + model } };
-    if (usesNewApi) {
-        defaults.videoGenerationModel = {
-            primary: 'xai/jimeng-video-3-720p',
-            timeoutMs: 600000
-        };
-        defaults.mediaMaxMb = 256;
-    }
+    defaults.mediaMaxMb = 256;
 
     return {
         ...baseConfig,
@@ -769,7 +745,7 @@ async function launchOpenClaw() {
     }
 
     // 3. Launch
-    showToast('配置已保存！请关闭此页面，回到启动窗口使用 U-Claw');
+    showToast('配置已保存！请关闭此页面，回到启动窗口使用 Bavi-box');
     try { await fetch('/api/done', { method: 'POST' }); } catch(e) {}
 }
 </script>

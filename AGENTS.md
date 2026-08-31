@@ -1,4 +1,4 @@
-# U-Claw Agent Instructions
+# Bavi-box Agent Instructions
 
 ## 1. Mandatory Project Rules
 

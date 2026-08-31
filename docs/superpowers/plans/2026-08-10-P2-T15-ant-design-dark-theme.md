@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add persistent `light`, `dark`, and `system` themes across the full U-Claw Electron renderer without first-frame white flash or light-mode regressions.
+**Goal:** Add persistent `light`, `dark`, and `system` themes across the full Bavi-box Electron renderer without first-frame white flash or light-mode regressions.
 
-**Architecture:** A focused theme module owns preference parsing, U-Claw settings persistence, system resolution, Ant Design algorithm selection, semantic CSS variables, and document metadata. `AppProviders` exposes this through one context. The system center renders the only preference control. `index.html` applies the persisted effective mode before the renderer bundle runs, while Electron uses a neutral dark-aware window background.
+**Architecture:** A focused theme module owns preference parsing, Bavi-box settings persistence, system resolution, Ant Design algorithm selection, semantic CSS variables, and document metadata. `AppProviders` exposes this through one context. The system center renders the only preference control. `index.html` applies the persisted effective mode before the renderer bundle runs, while Electron uses a neutral dark-aware window background.
 
 **Tech Stack:** React 19, TypeScript, Ant Design 5 `ConfigProvider`, CSS custom properties, Vitest/Testing Library, Playwright, Electron.
 
@@ -33,7 +33,7 @@
 
 - [x] Write failing tests proving bootstrap runs before React and Electron no longer forces a light-only background.
 - [x] Run focused frontend and desktop tests; confirm expected failure.
-- [x] Add a small synchronous head bootstrap that reads the U-Claw preference, resolves `system`, and sets `data-theme`, `color-scheme`, and initial background before module load.
+- [x] Add a small synchronous head bootstrap that reads the Bavi-box preference, resolves `system`, and sets `data-theme`, `color-scheme`, and initial background before module load.
 - [x] Make Electron window background compatible with the restored surface while retaining custom native controls.
 - [x] Re-run focused tests and confirm pass.
 

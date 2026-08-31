@@ -16,7 +16,7 @@ const CLEANABLE_KINDS = new Set(['appdata', 'localappdata', 'temp', 'fixed-drive
 const BUSINESS_DATA_PATTERN = /(^|[\\/])([^\\/]*(account|credential|token|session|message|chat|contact)[^\\/]*|openclaw\.json|memory|workspace)([\\/]|$)/i;
 const EXPECTED_MARKER = Object.freeze({
   schemaVersion: 1,
-  owner: 'U-Claw',
+  owner: 'Bavi-box',
   component: 'personal-wechat',
   dataClass: 'rebuildable-cache',
 });
@@ -47,11 +47,11 @@ export function buildWindowsWechatCandidates({ env = {}, fixedDriveRoots = [] } 
     ['TEMP', 'temp'],
   ]) {
     if (env[name]) {
-      addCandidate(candidates, seen, kind, win32.join(env[name], 'U-Claw', 'openclaw-weixin'));
+      addCandidate(candidates, seen, kind, win32.join(env[name], 'Bavi-box', 'openclaw-weixin'));
     }
   }
   for (const root of fixedDriveRoots) {
-    addCandidate(candidates, seen, 'fixed-drive', win32.join(root, 'U-Claw', 'openclaw-weixin'));
+    addCandidate(candidates, seen, 'fixed-drive', win32.join(root, 'Bavi-box', 'openclaw-weixin'));
   }
   return candidates;
 }

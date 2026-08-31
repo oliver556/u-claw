@@ -1,5 +1,5 @@
 #!/bin/bash
-# U-Claw Menu - Portable AI Agent
+# Bavi-box Menu - Portable AI Agent
 # macOS version
 
 UCLAW_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -65,7 +65,7 @@ show_menu() {
 
     echo ""
     echo -e "  ${CYAN}${BOLD}╔══════════════════════════════════════╗"
-    echo -e "  ║   U-Claw 虾盘 v1.1                   ║"
+    echo -e "  ║   Bavi-box 虾盘 v1.1                   ║"
     echo -e "  ║   Portable AI Agent                   ║"
     echo -e "  ╚══════════════════════════════════════╝${NC}"
     echo ""

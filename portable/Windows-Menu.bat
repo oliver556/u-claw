@@ -1,7 +1,7 @@
 ﻿@echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul 2>&1
-title U-Claw Menu
+title Bavi-box Menu
 
 set "UCLAW_DIR=%~dp0"
 set "APP_DIR=%UCLAW_DIR%app"
@@ -19,7 +19,7 @@ set "NPM_BIN=%NODE_DIR%\npm.cmd"
 set "OPENCLAW_HOME=%DATA_DIR%"
 set "OPENCLAW_STATE_DIR=%STATE_DIR%"
 set "OPENCLAW_CONFIG_PATH=%STATE_DIR%\openclaw.json"
-REM U-Claw opens the local dashboard directly; disable mDNS discovery on Windows
+REM Bavi-box opens the local dashboard directly; disable mDNS discovery on Windows
 REM to avoid OpenClaw/@homebridge ciao crashes during bonjour re-advertise.
 set "OPENCLAW_DISABLE_BONJOUR=1"
 set "PATH=%NODE_DIR%;%PATH%"
@@ -37,7 +37,7 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 cls
 echo.
 echo   ========================================
-echo     U-Claw v1.1 - Menu
+echo     Bavi-box v1.1 - Menu
 echo     Portable AI Agent
 echo   ========================================
 echo.
@@ -436,7 +436,7 @@ goto :menu
 
 :uninstall
 echo.
-echo   === Uninstall U-Claw ===
+echo   === Uninstall Bavi-box ===
 echo.
 if exist "%USERPROFILE%\.uclaw" (
     echo   Found installed version: %USERPROFILE%\.uclaw
@@ -455,7 +455,7 @@ if exist "%USERPROFILE%\.uclaw" (
     echo   Path: %UCLAW_DIR%
     echo.
     echo   For Electron desktop app:
-    echo     Open Settings - Apps - find U-Claw - Uninstall
+    echo     Open Settings - Apps - find Bavi-box - Uninstall
 )
 pause
 goto :menu

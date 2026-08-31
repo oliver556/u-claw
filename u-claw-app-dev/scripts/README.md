@@ -1,11 +1,11 @@
-# U-Claw Scripts
+# Bavi-box Scripts
 
 This directory contains repository-owned helper scripts for the active `u-claw-app-dev` tree.
 
 ## Scope
 
-- `patch-openclaw.js` is the source of truth for deterministic U-Claw UI patches applied to generated OpenClaw Control UI assets.
-- `verify-skillhub-branding.js` checks that patched assets still contain required U-Claw / SkillHub tokens and do not regress high-risk visible copy.
+- `patch-openclaw.js` is the source of truth for deterministic Bavi-box UI patches applied to generated OpenClaw Control UI assets.
+- `verify-skillhub-branding.js` checks that patched assets still contain required Bavi-box / SkillHub tokens and do not regress high-risk visible copy.
 - `verify-skillhub-store-connected-ui.js` runs read-only browser acceptance for the SkillHub store homepage, tabs, category chips, and search reset.
 - Runtime asset files under `node_modules/openclaw/dist/control-ui` are patch outputs, not permanent source.
 

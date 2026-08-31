@@ -6,7 +6,7 @@
 
 可以开始实现，但第一阶段不应直接移植旧 `product` 技能库 UI。
 
-当前 `u-claw-app-dev` 是 Electron 壳 + OpenClaw 打包控制台，不是旧 `product` 的 React/TypeScript 前端工程。OpenClaw 原版控制台已经内置 Skills 页面、ClawHub 搜索、详情、安装、启停和 Agent skill toggle 入口。U-Claw 应优先复用这些 OpenClaw Gateway 方法和控制台能力，再做 U-Claw 筛选、中文化、品牌化和聊天下拉快捷入口。
+当前 `u-claw-app-dev` 是 Electron 壳 + OpenClaw 打包控制台，不是旧 `product` 的 React/TypeScript 前端工程。OpenClaw 原版控制台已经内置 Skills 页面、ClawHub 搜索、详情、安装、启停和 Agent skill toggle 入口。Bavi-box 应优先复用这些 OpenClaw Gateway 方法和控制台能力，再做 Bavi-box 筛选、中文化、品牌化和聊天下拉快捷入口。
 
 ## 2. 名称映射
 
@@ -23,7 +23,7 @@
 - `skills.status`
 - `skills.update`
 
-实现中应把 `ClawHub` 视为 OpenClaw upstream 技术名，把 `SkillHub` 作为 U-Claw 用户可见名。
+实现中应把 `ClawHub` 视为 OpenClaw upstream 技术名，把 `SkillHub` 作为 Bavi-box 用户可见名。
 
 ## 3. OpenClaw Skill 包结构
 
@@ -71,7 +71,7 @@ bundled skills
 skills.load.extraDirs
 ```
 
-在 U-Claw 本地开发启动环境中，使用 `OPENCLAW_HOME` 后，实际工作目录为：
+在 Bavi-box 本地开发启动环境中，使用 `OPENCLAW_HOME` 后，实际工作目录为：
 
 ```text
 /Users/biancheng/Library/Application Support/u-claw/.openclaw/workspace
@@ -204,12 +204,12 @@ node u-claw-app-dev/node_modules/openclaw/openclaw.mjs skills search weather --j
 
 ## 10. 首个可实现切片
 
-首切片目标：U-Claw 化原版 Skills 页面，不改 OpenClaw runtime。
+首切片目标：Bavi-box 化原版 Skills 页面，不改 OpenClaw runtime。
 
 范围：
 
 1. 将用户可见 `ClawHub` 文案改为 `SkillHub` / `技能商城`。已完成。
-2. 在 Skills 页面增加 U-Claw 说明和中文空态/错误文案。已完成基础文案。
+2. 在 Skills 页面增加 Bavi-box 说明和中文空态/错误文案。已完成基础文案。
 3. 隐藏或弱化 bundled skills 作为用户侧选择项，但不删除底层目录。已完成用户侧 list 过滤。
 4. 保留原版 `skills.search/detail/install/status/update` 调用。
 5. 记录所有 control-ui patch 的来源、目标、回滚方式。
@@ -239,7 +239,7 @@ u-claw-app-dev/scripts/patch-openclaw.js
 
 已实施：
 
-- `patchSkillsPageBranding()`：仅替换用户可见文案，将原版 `ClawHub` 展示为 U-Claw 用户侧 `SkillHub`。
+- `patchSkillsPageBranding()`：仅替换用户可见文案，将原版 `ClawHub` 展示为 Bavi-box 用户侧 `SkillHub`。
 - `patchSkillsPageBundledVisibility()`：仅过滤 Skills 页面 list 渲染中的 `source === "openclaw-bundled"` 或 `bundled === true` 项；Gateway 数据、底层 bundled skill 目录、OpenClaw runtime 均不变。
 - service worker `EMBEDDED_CACHE_VERSION` 已追加 `skillhub-branding-1-bundled-filter-1`，避免旧缓存遮盖 UI 补丁。
 

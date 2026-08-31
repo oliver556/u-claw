@@ -33,7 +33,7 @@ cd portable && bash setup.sh    # Downloads Node.js v22 + OpenClaw + WeChat/QQ p
 bash Mac-Start.command          # Launch (Mac ARM64). Windows: Windows-Start.bat
 
 # Copy to USB drive
-cp -R portable/ /Volumes/YOUR_USB/U-Claw/
+cp -R portable/ /Volumes/YOUR_USB/Bavi-box/
 
 # Electron desktop app
 cd u-claw-app && bash setup.sh  # One-click: Node.js + Electron + deps (China mirrors)
@@ -83,7 +83,7 @@ portable/           THE USB content (= repo + setup.sh downloads)
                     {Mac,Windows}-Install  — copy USB → computer (~/.uclaw/ or %USERPROFILE%)
                     {Mac,Windows}-Diagnose — health check / collect logs for bug reports
                     {Mac-OpenClaw-CLI,OpenClaw-CLI.bat} — drop into raw `openclaw` CLI
-                    *.html (Welcome, Config, U-Claw, SkillHub) — local UI pages
+                    *.html (Welcome, Config, Bavi-box, SkillHub) — local UI pages
                     config-server/server.js — local HTTP server (port 18788-18798) backing
                         Config.html: writes openclaw.json, WeChat QR login, update-status API
                     lib/                   — Node helpers (see "lib/ helpers" below)
@@ -137,7 +137,7 @@ Pure-Node, zero-dependency `.mjs` modules (use `fetch` + `node:zlib` only). All 
 | File | Purpose |
 |------|---------|
 | `check-update.mjs` / `publish-latest.mjs` | Portable self-update: check installed vs latest `OPENCLAW_VERSION`; publish helper. |
-| `portable-cache.mjs` | **启动加速核心**：把"重 IO、可重建"的缓存从 U 盘搬到本机硬盘。算出本机缓存根（win `%LOCALAPPDATA%\U-Claw\<slot>` / mac `~/Library/Caches/U-Claw` / linux `$XDG_CACHE_HOME`，UUID 隔离让换盘符仍复用），输出 `NODE_COMPILE_CACHE` 路径，并把 `data/.openclaw/browser` 做成 junction(win)/symlink(mac) 指向本机盘——浏览器 user-data 的海量随机小写不再砸 U 盘。CLI 打印 `KEY=VALUE` 供启动脚本 source。静默失败：取不到就缓存留 U 盘照常启动。 |
+| `portable-cache.mjs` | **启动加速核心**：把"重 IO、可重建"的缓存从 U 盘搬到本机硬盘。算出本机缓存根（win `%LOCALAPPDATA%\Bavi-box\<slot>` / mac `~/Library/Caches/Bavi-box` / linux `$XDG_CACHE_HOME`，UUID 隔离让换盘符仍复用），输出 `NODE_COMPILE_CACHE` 路径，并把 `data/.openclaw/browser` 做成 junction(win)/symlink(mac) 指向本机盘——浏览器 user-data 的海量随机小写不再砸 U 盘。CLI 打印 `KEY=VALUE` 供启动脚本 source。静默失败：取不到就缓存留 U 盘照常启动。 |
 | `prewarm.mjs` | gateway 首轮预热：端口就绪后后台静默 GET `/ready`→`/status`→`/models`（带 `x-openclaw-token`），把 config/model 子系统在 runtime 内存里热起来，用户首次点发送不再等。零依赖、短超时、后台 detach。 |
 | `loading.html` | 启动首屏（splash）：双击启动后立刻打开，给即时反馈消除"黑窗假死"。本页每秒 fetch `/ready`，gateway 真就绪后自动 `location.replace` 跳 Dashboard——天然规避"gateway 没起就开 Dashboard 拒连"(issue #46/#48)。端口经 `?port=` 传入。 |
 | `wait-gateway.bat` | Windows 兜底：现由 `loading.html` 首屏轮询并自动跳转；本脚本退居兜底——万一首屏 `file://` fetch 被浏览器拦，仍轮询端口、就绪后开 Dashboard。 |
@@ -155,7 +155,7 @@ Pure-Node, zero-dependency `.mjs` modules (use `fetch` + `node:zlib` only). All 
 
 > 注：OpenClaw 自身的临时/lock/chrome-mcp 文件已走 `os.tmpdir()`（系统 temp，**不在 U 盘**），无需处理；真正落 U 盘的只有 `OPENCLAW_HOME=data/` 下的内容。
 
-> **纯开源,无追踪**: 这个开源版**不含**设备指纹 (`fingerprint.mjs`)、自动开户 (`bootstrap-xiapan.mjs`/`xiapan-client.mjs`)、崩溃上报 (`report-bug.mjs`) 等商业版逻辑——这些已在 2026-06-17 移除。U-Claw 不绑定设备、不打指纹、不向 `api.u-claw.org` 上传任何数据。
+> **纯开源,无追踪**: 这个开源版**不含**设备指纹 (`fingerprint.mjs`)、自动开户 (`bootstrap-xiapan.mjs`/`xiapan-client.mjs`)、崩溃上报 (`report-bug.mjs`) 等商业版逻辑——这些已在 2026-06-17 移除。Bavi-box 不绑定设备、不打指纹、不向 `api.u-claw.org` 上传任何数据。
 
 ### 模型配置 ("选模型填 Key")
 

@@ -633,7 +633,7 @@ async function installSkillInstallRequestProbe(page) {
           if (params?.force === true) {
             return { message: "验证覆盖重装已触发" };
           }
-          throw new Error("failed to install skill: Error: EPERM: operation not permitted, rename 'C:\\\\Users\\\\EDY\\\\AppData\\\\Local\\\\U-Claw\\\\usb-portable\\\\data\\\\.openclaw\\\\workspace\\\\skills\\\\.fs-safe-move-1584-test.tmp' -> 'C:\\\\Users\\\\EDY\\\\AppData\\\\Local\\\\U-Claw\\\\usb-portable\\\\data\\\\.openclaw\\\\workspace\\\\skills\\\\tencent-docs'");
+          throw new Error("failed to install skill: Error: EPERM: operation not permitted, rename 'C:\\\\Users\\\\EDY\\\\AppData\\\\Local\\\\Bavi-box\\\\usb-portable\\\\data\\\\.openclaw\\\\workspace\\\\skills\\\\.fs-safe-move-1584-test.tmp' -> 'C:\\\\Users\\\\EDY\\\\AppData\\\\Local\\\\Bavi-box\\\\usb-portable\\\\data\\\\.openclaw\\\\workspace\\\\skills\\\\tencent-docs'");
         }
         return original(method, params, ...rest);
       };

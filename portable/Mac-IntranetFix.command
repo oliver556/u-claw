@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# U-Claw - 内网体检 / Intranet Check (macOS)
+# Bavi-box - 内网体检 / Intranet Check (macOS)
 # 双击运行：代理env + 直连可达 + 真发一条对话
 # ============================================================
 
@@ -17,7 +17,7 @@ esac
 # 退而求其次：用系统 node
 if [ ! -x "$NODE_BIN" ]; then NODE_BIN="$(command -v node)"; fi
 if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
-    echo "  [错误] 找不到 Node 运行环境。请先正常启动一次 U-Claw。"
+    echo "  [错误] 找不到 Node 运行环境。请先正常启动一次 Bavi-box。"
     read -p "  按回车关闭..."
     exit 1
 fi

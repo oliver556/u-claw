@@ -29,7 +29,7 @@
 - `wr()`
 - `Xn()`
 
-U-Claw 当前补丁没有修改这些状态处理逻辑。
+Bavi-box 当前补丁没有修改这些状态处理逻辑。
 
 该问题不代表：
 
@@ -251,7 +251,7 @@ u-claw-app-dev/scripts/patch-openclaw.js
 ```txt
 u-claw-app
 U 盘运行目录
-~/Library/Caches/U-Claw
+~/Library/Caches/Bavi-box
 Windows 本机运行缓存
 ```
 

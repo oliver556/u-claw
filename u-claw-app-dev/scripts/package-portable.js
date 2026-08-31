@@ -8,8 +8,8 @@ const appDir = path.resolve(__dirname, '..');
 const releaseDir = path.join(appDir, 'release');
 const packageJson = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'));
 const version = packageJson.version;
-const macArm64AppDir = path.join(releaseDir, 'mac-arm64', 'U-Claw.app');
-const macX64AppDir = path.join(releaseDir, 'mac', 'U-Claw.app');
+const macArm64AppDir = path.join(releaseDir, 'mac-arm64', 'Bavi-box.app');
+const macX64AppDir = path.join(releaseDir, 'mac', 'Bavi-box.app');
 const winAppDir = path.join(releaseDir, 'win-unpacked');
 const macArm64Archive = path.join(releaseDir, 'u-claw-app-mac-arm64.tar.gz');
 const macX64Archive = path.join(releaseDir, 'u-claw-app-mac-x64.tar.gz');
@@ -17,10 +17,11 @@ const winArchive = path.join(releaseDir, 'u-claw-app-win-x64.zip');
 const macLauncherSource = path.join(appDir, 'scripts', 'launcher', 'macos', 'main.c');
 const macStartScript = path.join(appDir, 'scripts', 'Mac-Start-App.command');
 const macLauncherScriptInclude = path.join(appDir, 'scripts', 'launcher', 'macos', 'generated-start-script.inc');
-const macLauncherBinary = path.join(releaseDir, 'launcher', 'macos', 'U-Claw Launcher');
+const macLauncherBinary = path.join(releaseDir, 'launcher', 'macos', 'Bavi-box');
 const winLauncherSourceDir = path.join(appDir, 'scripts', 'launcher', 'windows');
-const winLauncherBinary = path.join(releaseDir, 'launcher', 'U-Claw Launcher.exe');
-const desktopAgentDir = path.join(process.env.HOME || '', 'Library', 'Application Support', 'U-Claw', '.openclaw', 'agents', 'main', 'agent');
+const winLauncherBinary = path.join(releaseDir, 'launcher', 'Bavi-box.exe');
+const winSyncScript = path.join(appDir, 'scripts', 'Windows-Sync-Data.ps1');
+const desktopAgentDir = path.join(process.env.HOME || '', 'Library', 'Application Support', 'Bavi-box', '.openclaw', 'agents', 'main', 'agent');
 
 function usage() {
   console.log(`Usage:
@@ -31,13 +32,14 @@ function usage() {
 
 Options:
   --edition <customer|streamer>  Package edition. Added by the npm scripts.
-  --usb <mount>                  Deploy to <mount>/U-Claw after staging.
+  --usb <mount>                  Deploy to <mount>/Bavi-box after staging.
+  --platform <key>               Rebuild only one platform app archive. Supports win32-x64.
   --skip-build                   Reuse current release archives and rebuild only launcher/stage files.
 `);
 }
 
 function parseArgs(argv) {
-  const options = { edition: '', usb: '', skipBuild: false };
+  const options = { edition: '', usb: '', platform: '', skipBuild: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const readValue = () => {
@@ -49,6 +51,7 @@ function parseArgs(argv) {
     if (arg === '--help' || arg === '-h') options.help = true;
     else if (arg === '--edition') options.edition = readValue();
     else if (arg === '--usb') options.usb = readValue();
+    else if (arg === '--platform') options.platform = readValue();
     else if (arg === '--skip-build') options.skipBuild = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -56,11 +59,15 @@ function parseArgs(argv) {
   if (!options.help && !['customer', 'streamer'].includes(options.edition)) {
     throw new Error('--edition must be customer or streamer');
   }
+  if (options.platform && options.platform !== 'win32-x64') {
+    throw new Error('--platform currently supports win32-x64 only');
+  }
   return options;
 }
 
 function run(command, args, options = {}) {
-  console.log(`[package:portable] ${command} ${args.join(' ')}`);
+  const commandText = options.logArgs === false ? `${command} [args redacted]` : `${command} ${args.join(' ')}`;
+  console.log(`[package:portable] ${commandText}`);
   const result = spawnSync(command, args, {
     cwd: options.cwd || appDir,
     env: { ...process.env, ...(options.env || {}) },
@@ -129,6 +136,21 @@ function copyDirIfMissing(source, destination) {
   return true;
 }
 
+function removeAppleDoubleFiles(root) {
+  if (!fs.existsSync(root)) return 0;
+  let removed = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const fullPath = path.join(root, entry.name);
+    if (entry.name.startsWith('._')) {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+      removed += 1;
+      continue;
+    }
+    if (entry.isDirectory()) removed += removeAppleDoubleFiles(fullPath);
+  }
+  return removed;
+}
+
 function ensureSourceRuntime(name) {
   const runtimeDir = path.join(appDir, 'resources', 'runtime', name);
   const nodeBin = name.startsWith('node-win32-')
@@ -149,6 +171,14 @@ function buildApps() {
   run('npx', ['electron-builder', '--win', '--x64', '--dir', '-c.npmRebuild=false']);
 }
 
+function buildWindowsAppOnly() {
+  ensureDir(path.join(appDir, 'node_modules', 'electron-builder'), 'electron-builder dependency');
+  ensureSourceRuntime('node-win32-x64');
+  run('npm', ['run', 'patch-openclaw']);
+  run('npm', ['run', 'sync-lib']);
+  run('npx', ['electron-builder', '--win', '--x64', '--dir', '-c.npmRebuild=false']);
+}
+
 function keepPackagedRuntime(runtimeRoot, expectedName, label) {
   const expectedPath = path.join(runtimeRoot, expectedName);
   ensureDir(expectedPath, `${label} ${expectedName} runtime`);
@@ -160,11 +190,11 @@ function keepPackagedRuntime(runtimeRoot, expectedName, label) {
 
 function buildArchives() {
   ensureDir(macArm64AppDir, 'Mac arm64 app');
-  ensureFile(path.join(macArm64AppDir, 'Contents', 'MacOS', 'U-Claw'), 'Mac arm64 executable');
+  ensureFile(path.join(macArm64AppDir, 'Contents', 'MacOS', 'Bavi-box'), 'Mac arm64 executable');
   ensureDir(macX64AppDir, 'Mac x64 app');
-  ensureFile(path.join(macX64AppDir, 'Contents', 'MacOS', 'U-Claw'), 'Mac x64 executable');
+  ensureFile(path.join(macX64AppDir, 'Contents', 'MacOS', 'Bavi-box'), 'Mac x64 executable');
   ensureDir(winAppDir, 'Windows x64 app');
-  ensureFile(path.join(winAppDir, 'U-Claw.exe'), 'Windows executable');
+  ensureFile(path.join(winAppDir, 'Bavi-box.exe'), 'Windows executable');
 
   keepPackagedRuntime(
     path.join(macArm64AppDir, 'Contents', 'Resources', 'resources', 'runtime'),
@@ -205,6 +235,24 @@ function buildArchives() {
   fs.renameSync(winTemporary, winArchive);
 }
 
+function buildWindowsArchiveOnly() {
+  ensureDir(winAppDir, 'Windows x64 app');
+  ensureFile(path.join(winAppDir, 'Bavi-box.exe'), 'Windows executable');
+  keepPackagedRuntime(
+    path.join(winAppDir, 'resources', 'resources', 'runtime'),
+    'node-win32-x64',
+    'Windows'
+  );
+
+  const winTemporary = path.join(releaseDir, 'u-claw-app-win-x64.new.zip');
+  fs.rmSync(winTemporary, { force: true });
+  run('zip', ['-qry', winTemporary, '.'], {
+    cwd: winAppDir,
+    env: { COPYFILE_DISABLE: '1' }
+  });
+  fs.renameSync(winTemporary, winArchive);
+}
+
 function generateConfig(edition, destination) {
   const editionArg = edition === 'customer' ? '--customer' : '--streamer';
   run(process.execPath, [
@@ -223,11 +271,14 @@ function generateConfig(edition, destination) {
   if (edition === 'streamer' && !hasNewApiKey) {
     throw new Error('Streamer package is missing the New API key');
   }
-  if (providers.xai?.baseUrl !== 'http://127.0.0.1:18808/xai/v1') {
+  if (providers.xai?.baseUrl !== 'https://api.yiyong.me/v1') {
     throw new Error(`Wrong xai base URL: ${providers.xai?.baseUrl || '(empty)'}`);
   }
-  if (providers.xai?.apiKey !== 'uclaw-video-adapter') {
-    throw new Error('Wrong xai adapter token');
+  if (edition === 'streamer' && providers.xai?.apiKey !== providers.custom?.apiKey) {
+    throw new Error('Wrong xai API key');
+  }
+  if (edition === 'customer' && providers.xai?.apiKey) {
+    throw new Error('Customer package contains an xai API key');
   }
 }
 
@@ -272,55 +323,56 @@ function seedStreamerAuthStore(edition, stageRoot) {
     'CREATE TABLE IF NOT EXISTS auth_profile_state (state_key TEXT PRIMARY KEY NOT NULL, state_json TEXT NOT NULL, updated_at INTEGER NOT NULL);',
     `INSERT INTO auth_profile_store(store_key, store_json, updated_at) VALUES('primary', json('${JSON.stringify(store).replace(/'/g, "''")}'), ${now});`,
     `INSERT INTO auth_profile_state(state_key, state_json, updated_at) VALUES('primary', json('${JSON.stringify(state).replace(/'/g, "''")}'), ${now});`
-  ].join(' ')]);
+  ].join(' ')], { logArgs: false });
 }
 
 function packageNotes(edition, macArm64Hash, macX64Hash, winHash) {
   const keyRule = edition === 'customer'
     ? 'New API key: empty; customer enters credentials after delivery.'
     : 'New API key: inherited automatically from current desktop config.';
-  return `U-Claw portable package - ${edition} edition
+  return `Bavi-box portable package - ${edition} edition
 Version: ${version}
 Built: ${localDisplayTime()}
 
   Mac:
-  Formal entry: double-click U-Claw Launcher.app
-  Diagnostic entry: Mac-Start-App.command
-  App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-arm64
-  App cache: ~/Library/Caches/U-Claw/u-claw-app-mac-x64
-  USB data: <USB>/U-Claw/data
-  Runtime data cache: ~/Library/Caches/U-Claw/usb-portable-<usb-id>/data
+  Formal entry: double-click Bavi-box.app
+  Diagnostic entry: app/scripts/Mac-Start-App.command
+  App cache: ~/Library/Caches/Bavi-box/u-claw-app-mac-arm64
+  App cache: ~/Library/Caches/Bavi-box/u-claw-app-mac-x64
+  USB data: <USB>/Bavi-box/data
+  Runtime data cache: ~/Library/Caches/Bavi-box/usb-portable-<usb-id>/data
   Logs to return:
-    <USB>/U-Claw/data/logs/U-Claw-Launcher.log
-    <USB>/U-Claw/data/logs/Mac-Start-App.log
-    <USB>/U-Claw/data/logs/main.log
-    <USB>/U-Claw/data/logs/gateway.log
-    ~/Library/Caches/U-Claw/launcher-logs/U-Claw-Launcher.log
-    ~/Library/Caches/U-Claw/launcher-logs/Mac-Start-App.log
+    <USB>/Bavi-box/data/logs/Bavi-box-Launcher.log
+    <USB>/Bavi-box/data/logs/Mac-Start-App.log
+    <USB>/Bavi-box/data/logs/main.log
+    <USB>/Bavi-box/data/logs/gateway.log
+    ~/Library/Caches/Bavi-box/launcher-logs/Bavi-box-Launcher.log
+    ~/Library/Caches/Bavi-box/launcher-logs/Mac-Start-App.log
 
   Windows:
-  Formal entry: double-click U-Claw Launcher.exe
-  Diagnostic entry: Windows-Start-App.bat
-  App cache: %LOCALAPPDATA%\\U-Claw\\usb-portable\\app-win-x64
-  USB data: <USB>\\U-Claw\\data
-  Runtime data cache: %LOCALAPPDATA%\\U-Claw\\usb-portable\\data-<usb-id>
+  Formal entry: double-click Bavi-box.exe
+  Diagnostic entry: app/scripts/Windows-Start-App.bat
+  Sync helper: app/scripts/Windows-Sync-Data.ps1
+  App cache: %LOCALAPPDATA%\\Bavi-box\\usb-portable\\app-win-x64
+  USB data: <USB>\\Bavi-box\\data
+  Runtime data cache: %LOCALAPPDATA%\\Bavi-box\\usb-portable\\data-<usb-id>
   First launch: verify SHA-256, then extract with Windows tar.exe.
   Later launches: reuse the computer app cache without extracting again.
   Logs to return:
-    <USB>\\U-Claw\\data\\logs\\U-Claw-Launcher.log
-    <USB>\\U-Claw\\data\\logs\\Windows-Start-App.log
-    <USB>\\U-Claw\\data\\logs\\main.log
-    <USB>\\U-Claw\\data\\logs\\gateway.log
-    %LOCALAPPDATA%\\U-Claw\\launcher-logs\\U-Claw-Launcher.log
-    %LOCALAPPDATA%\\U-Claw\\launcher-logs\\Windows-Start-App.log
+    <USB>\\Bavi-box\\data\\logs\\Bavi-box-Launcher.log
+    <USB>\\Bavi-box\\data\\logs\\Windows-Start-App.log
+    <USB>\\Bavi-box\\data\\logs\\main.log
+    <USB>\\Bavi-box\\data\\logs\\gateway.log
+    %LOCALAPPDATA%\\Bavi-box\\launcher-logs\\Bavi-box-Launcher.log
+    %LOCALAPPDATA%\\Bavi-box\\launcher-logs\\Windows-Start-App.log
 
 Edition:
   ${keyRule}
 
 Video chain:
-  U-Claw -> local adapter -> New API -> server adapter -> Flash/Seedance
-  xai.baseUrl = http://127.0.0.1:18808/xai/v1
-  xai.apiKey = uclaw-video-adapter
+  Bavi-box -> New API -> server adapter -> Flash/Seedance
+  xai.baseUrl = https://api.yiyong.me/v1
+  xai.apiKey = ${edition === 'streamer' ? 'same as custom/litellm New API key' : 'empty'}
 
 Artifacts:
   u-claw-app-mac-arm64.tar.gz  sha256=${macArm64Hash}
@@ -328,20 +380,50 @@ Artifacts:
   u-claw-app-win-x64.zip       sha256=${winHash}
 
 Deploy rule:
-  app/, launchers, scripts, and package notes are replaced on update.
+  app/, launchers, and package notes are replaced on update.
   data/ is initialized only for a new disk and is never overwritten on update.
   Existing chats, skills, memory, license, logs, and data/.openclaw/openclaw.json stay untouched.
 
 Launcher behavior:
   Launchers show native progress only while copying, extracting, syncing, or closing.
   Electron window stays hidden until Gateway ready/App ready, then opens directly to the main UI.
-  Runtime data uses a per-USB computer cache for speed, then syncs back to <USB>/U-Claw/data.
+  Runtime data uses a per-USB computer cache for speed, then syncs back to <USB>/Bavi-box/data.
+  Electron Control UI profile uses local per-USB/per-platform storage and is never synced with data/.
   Runtime sync never overwrites USB data/.openclaw/openclaw.json.
+  Activation writes approved license and model credential files back to USB before launcher restart.
+  USB-to-runtime startup sync copies data/.openclaw/openclaw.json so new computers get the disk config.
+  OpenClaw device pairing state stays in each computer runtime cache and is not synced between Mac/Windows.
   Two USB disks use different cache IDs, so their data does not merge.
   Clean same-machine restart reuses current app and data cache, skipping USB-to-runtime sync when markers match.
-  Close asks for confirmation first, then shows shutdown progress and stops this launch's services.
+  Close asks for confirmation first, then shows shutdown progress in app while launcher stays hidden.
   Immediate reopen during shutdown queues one relaunch instead of starting a second app/process.
 	`;
+}
+
+function packageVersionJson(macArm64Hash, macX64Hash, winHash) {
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    version,
+    releaseId: `v${version}`,
+    installedAt: new Date().toISOString(),
+    platforms: {
+      'darwin-arm64': {
+        archiveSha256: macArm64Hash,
+        launcherSha256: null,
+        treeDigest: null
+      },
+      'darwin-x64': {
+        archiveSha256: macX64Hash,
+        launcherSha256: null,
+        treeDigest: null
+      },
+      'win32-x64': {
+        archiveSha256: winHash,
+        launcherSha256: null,
+        treeDigest: null
+      }
+    }
+  }, null, 2)}\n`;
 }
 
 function buildMacLauncher(stageRoot) {
@@ -375,10 +457,10 @@ function buildMacLauncher(stageRoot) {
   ]);
   ensureFile(macLauncherBinary, 'macOS launcher executable');
 
-  const appBundle = path.join(stageRoot, 'U-Claw Launcher.app');
+  const appBundle = path.join(stageRoot, 'Bavi-box.app');
   const contentsDir = path.join(appBundle, 'Contents');
   const macOsDir = path.join(contentsDir, 'MacOS');
-  const executablePath = path.join(macOsDir, 'U-Claw Launcher');
+  const executablePath = path.join(macOsDir, 'Bavi-box');
 
   fs.rmSync(appBundle, { recursive: true, force: true });
   fs.mkdirSync(macOsDir, { recursive: true });
@@ -389,13 +471,13 @@ function buildMacLauncher(stageRoot) {
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
-  <string>U-Claw Launcher</string>
+  <string>Bavi-box</string>
   <key>CFBundleIdentifier</key>
   <string>org.u-claw.portable.launcher</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>U-Claw Launcher</string>
+  <string>Bavi-box</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -427,7 +509,7 @@ function buildWindowsLauncher(stageRoot) {
     }
   });
   ensureFile(winLauncherBinary, 'Windows GUI launcher');
-  fs.copyFileSync(winLauncherBinary, path.join(stageRoot, 'U-Claw Launcher.exe'));
+  fs.copyFileSync(winLauncherBinary, path.join(stageRoot, 'Bavi-box.exe'));
 }
 
 function assembleStage(edition) {
@@ -437,7 +519,7 @@ function assembleStage(edition) {
   const macArm64Hash = sha256(macArm64Archive);
   const macX64Hash = sha256(macX64Archive);
   const winHash = sha256(winArchive);
-  const stageRoot = path.join(releaseDir, `portable-${edition}`, 'U-Claw');
+  const stageRoot = path.join(releaseDir, `portable-${edition}`, 'Bavi-box');
   const archiveDir = path.join(stageRoot, 'app', 'desktop-archive');
   const configPath = path.join(stageRoot, 'data', '.openclaw', 'openclaw.json');
 
@@ -451,14 +533,19 @@ function assembleStage(edition) {
   writeText(path.join(archiveDir, `${path.basename(macArm64Archive)}.sha256`), `${macArm64Hash}\n`);
   writeText(path.join(archiveDir, `${path.basename(macX64Archive)}.sha256`), `${macX64Hash}\n`);
   writeText(path.join(archiveDir, `${path.basename(winArchive)}.sha256`), `${winHash}\n`);
-  fs.copyFileSync(path.join(appDir, 'scripts', 'Mac-Start-App.command'), path.join(stageRoot, 'Mac-Start-App.command'));
-  fs.copyFileSync(path.join(appDir, 'scripts', 'Windows-Start-App.bat'), path.join(stageRoot, 'Windows-Start-App.bat'));
-  fs.chmodSync(path.join(stageRoot, 'Mac-Start-App.command'), 0o755);
+  writeText(path.join(stageRoot, 'app', 'version.json'), packageVersionJson(macArm64Hash, macX64Hash, winHash));
+  const portableScriptsDir = path.join(stageRoot, 'app', 'scripts');
+  fs.mkdirSync(portableScriptsDir, { recursive: true });
+  fs.copyFileSync(path.join(appDir, 'scripts', 'Mac-Start-App.command'), path.join(portableScriptsDir, 'Mac-Start-App.command'));
+  fs.copyFileSync(path.join(appDir, 'scripts', 'Windows-Start-App.bat'), path.join(portableScriptsDir, 'Windows-Start-App.bat'));
+  fs.copyFileSync(winSyncScript, path.join(portableScriptsDir, 'Windows-Sync-Data.ps1'));
+  fs.chmodSync(path.join(portableScriptsDir, 'Mac-Start-App.command'), 0o755);
   buildMacLauncher(stageRoot);
   buildWindowsLauncher(stageRoot);
   generateConfig(edition, configPath);
   seedStreamerAuthStore(edition, stageRoot);
   writeText(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), packageNotes(edition, macArm64Hash, macX64Hash, winHash));
+  removeAppleDoubleFiles(stageRoot);
 
   return { stageRoot, macArm64Hash, macX64Hash, winHash };
 }
@@ -496,17 +583,20 @@ function deploy(stage, usbRoot) {
   if (!fs.existsSync(resolvedUsbRoot) || !fs.statSync(resolvedUsbRoot).isDirectory()) {
     throw new Error(`USB mount does not exist: ${resolvedUsbRoot}`);
   }
-  const targetRoot = path.basename(resolvedUsbRoot).toLowerCase() === 'u-claw'
+  const rootName = path.basename(resolvedUsbRoot).toLowerCase();
+  const targetRoot = rootName === 'bavi-box' || rootName === 'u-claw'
     ? resolvedUsbRoot
-    : path.join(resolvedUsbRoot, 'U-Claw');
+    : path.join(resolvedUsbRoot, 'Bavi-box');
   fs.mkdirSync(targetRoot, { recursive: true });
 
   const backupRoot = path.join(targetRoot, `_backup-before-portable-deploy-${localTimestamp()}`);
   const relativeFiles = [
-    'U-Claw Launcher.exe',
-    'Mac-Start-App.command',
-    'Windows-Start-App.bat',
+    'Bavi-box.exe',
     'UCLAW-PACKAGE-NOTES.txt',
+    'app/version.json',
+    'app/scripts/Mac-Start-App.command',
+    'app/scripts/Windows-Start-App.bat',
+    'app/scripts/Windows-Sync-Data.ps1',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz.sha256',
     'app/desktop-archive/u-claw-app-mac-x64.tar.gz',
@@ -515,13 +605,24 @@ function deploy(stage, usbRoot) {
     'app/desktop-archive/u-claw-app-win-x64.zip.sha256'
   ];
   const relativeDirs = [
-    'U-Claw Launcher.app'
+    'Bavi-box.app'
   ];
   const legacyFiles = [
-    `app/desktop-archive/U-Claw ${version}.exe`
+    'U-Claw.exe',
+    'U-Claw Launcher.exe',
+    'Bavi-box Launcher.exe',
+    'Mac-Start-App.command',
+    'Windows-Start-App.bat',
+    'Windows-Sync-Data.ps1',
+    `app/desktop-archive/U-Claw ${version}.exe`,
+    `app/desktop-archive/Bavi-box ${version}.exe`
   ];
   const legacyDirs = [
-    'U-Claw Launcher'
+    'U-Claw.app',
+    'U-Claw Launcher.app',
+    'U-Claw Launcher',
+    'Bavi-box Launcher.app',
+    'Bavi-box Launcher'
   ];
 
   for (const relativeFile of relativeFiles) {
@@ -550,8 +651,9 @@ function deploy(stage, usbRoot) {
   for (const relativeDir of legacyDirs) {
     fs.rmSync(path.join(targetRoot, relativeDir), { recursive: true, force: true });
   }
-  fs.chmodSync(path.join(targetRoot, 'Mac-Start-App.command'), 0o755);
-  fs.chmodSync(path.join(targetRoot, 'U-Claw Launcher.app', 'Contents', 'MacOS', 'U-Claw Launcher'), 0o755);
+  fs.chmodSync(path.join(targetRoot, 'app', 'scripts', 'Mac-Start-App.command'), 0o755);
+  fs.chmodSync(path.join(targetRoot, 'Bavi-box.app', 'Contents', 'MacOS', 'Bavi-box'), 0o755);
+  const appleDoubleRemoved = removeAppleDoubleFiles(targetRoot);
 
   const deployedMacArm64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macArm64Archive)));
   const deployedMacX64Hash = sha256(path.join(targetRoot, 'app', 'desktop-archive', path.basename(macX64Archive)));
@@ -566,6 +668,7 @@ function deploy(stage, usbRoot) {
 
   console.log(`[package:portable] deployed ${targetRoot}`);
   console.log(`[package:portable] data ${dataInitialized ? 'initialized' : 'preserved'} ${path.join(targetRoot, 'data')}`);
+  console.log(`[package:portable] removed AppleDouble metadata files ${appleDoubleRemoved}`);
   console.log(`[package:portable] rollback ${backupRoot}`);
 }
 
@@ -577,8 +680,13 @@ function main() {
   }
 
   if (!options.skipBuild) {
-    buildApps();
-    buildArchives();
+    if (options.platform === 'win32-x64') {
+      buildWindowsAppOnly();
+      buildWindowsArchiveOnly();
+    } else {
+      buildApps();
+      buildArchives();
+    }
   }
   const stage = assembleStage(options.edition);
   console.log(`[package:portable] staged ${stage.stageRoot}`);

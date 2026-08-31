@@ -122,7 +122,7 @@ export async function checkUpdate({
   try {
     remote = await fetchLatest(manifestUrl, timeoutMs);
   } catch (err) {
-    // 静默失败 — 网络坏不能影响用户用 U-Claw
+    // 静默失败 — 网络坏不能影响用户用 Bavi-box
     log('error', `fetch ${manifestUrl} failed: ${err.message}`);
     return { ok: false, reason: 'fetch-failed', error: err.message };
   }
