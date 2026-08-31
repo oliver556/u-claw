@@ -69,6 +69,41 @@ func TestCreateCheckoutPrecreatesSignedAlipayQRCode(t *testing.T) {
 	}
 }
 
+func TestSignFormIncludesSignTypeForOpenAPIRequests(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	params := map[string]string{
+		"app_id":        "app-1",
+		"biz_content":   `{"out_trade_no":"UC1","total_amount":"0.01"}`,
+		"charset":       "utf-8",
+		"format":        "JSON",
+		"method":        "alipay.trade.precreate",
+		"sign_type":     "RSA2",
+		"timestamp":     "2026-08-31 15:50:48",
+		"version":       "1.0",
+		"empty_ignored": " ",
+	}
+
+	signature, err := SignForm(params, privateKey)
+	if err != nil {
+		t.Fatalf("SignForm() error = %v", err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(signature)
+	if err != nil {
+		t.Fatalf("decode signature: %v", err)
+	}
+	sum := sha256.Sum256([]byte(canonicalRequestSignContent(params)))
+	if err := rsa.VerifyPKCS1v15(&privateKey.PublicKey, crypto.SHA256, sum[:], decoded); err != nil {
+		t.Fatalf("signature should verify with sign_type included: %v", err)
+	}
+	legacySum := sha256.Sum256([]byte(canonicalNotifySignContent(params)))
+	if err := rsa.VerifyPKCS1v15(&privateKey.PublicKey, crypto.SHA256, legacySum[:], decoded); err == nil {
+		t.Fatalf("request signature unexpectedly verified when sign_type was excluded")
+	}
+}
+
 func TestCreateCheckoutVerifiesSignedPrecreateResponse(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

@@ -199,7 +199,7 @@ func (c *Client) ParseAndVerifyNotify(form url.Values) (recharge.PaymentCallback
 	if appID := strings.TrimSpace(form.Get("app_id")); c.cfg.AppID != "" && appID != c.cfg.AppID {
 		return recharge.PaymentCallbackRequest{}, fmt.Errorf("alipay app_id mismatch")
 	}
-	if err := c.verify([]byte(canonicalSignContent(valuesToMap(form))), form.Get("sign")); err != nil {
+	if err := c.verify([]byte(canonicalNotifySignContent(valuesToMap(form))), form.Get("sign")); err != nil {
 		return recharge.PaymentCallbackRequest{}, err
 	}
 	amountCents, err := parseAmountCents(form.Get("total_amount"))
@@ -232,7 +232,7 @@ func SignForm(params map[string]string, key *rsa.PrivateKey) (string, error) {
 	if key == nil {
 		return "", fmt.Errorf("alipay private key is required")
 	}
-	sum := sha256.Sum256([]byte(canonicalSignContent(params)))
+	sum := sha256.Sum256([]byte(canonicalRequestSignContent(params)))
 	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
 	if err != nil {
 		return "", fmt.Errorf("sign alipay request: %w", err)
@@ -274,11 +274,21 @@ func (c *Client) verify(content []byte, signature string) error {
 	return nil
 }
 
-// canonicalSignContent formats sorted key-value pairs for Alipay RSA2 signing.
-func canonicalSignContent(params map[string]string) string {
+// canonicalRequestSignContent formats sorted key-value pairs for Alipay OpenAPI request signing.
+func canonicalRequestSignContent(params map[string]string) string {
+	return canonicalSignContent(params, map[string]bool{"sign": true})
+}
+
+// canonicalNotifySignContent formats sorted key-value pairs for Alipay notify verification.
+func canonicalNotifySignContent(params map[string]string) string {
+	return canonicalSignContent(params, map[string]bool{"sign": true, "sign_type": true})
+}
+
+// canonicalSignContent formats sorted key-value pairs with caller-specific ignored fields.
+func canonicalSignContent(params map[string]string, ignores map[string]bool) string {
 	keys := make([]string, 0, len(params))
 	for key, value := range params {
-		if key == "sign" || key == "sign_type" || strings.TrimSpace(value) == "" {
+		if ignores[key] || strings.TrimSpace(value) == "" {
 			continue
 		}
 		keys = append(keys, key)
