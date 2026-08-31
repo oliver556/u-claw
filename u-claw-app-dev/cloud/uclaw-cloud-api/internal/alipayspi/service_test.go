@@ -32,16 +32,17 @@ func TestMerchantInfoQueryAcceptsFormEncodedAlipayPayload(t *testing.T) {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Response map[string]any `json:"response"`
+		Response string `json:"response"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Response["code"] != "10000" || payload.Response["merchant_id"] != "2088123456789012" {
-		t.Fatalf("response = %+v", payload.Response)
+	response := decodeResponseString(t, payload.Response)
+	if response["code"] != "10000" || response["merchant_id"] != "2088123456789012" {
+		t.Fatalf("response = %+v", response)
 	}
-	if payload.Response["out_trade_no"] != "UC1" || payload.Response["query_time"] != "2026-08-31T10:00:00Z" {
-		t.Fatalf("response missing request echo/time: %+v", payload.Response)
+	if response["out_trade_no"] != "UC1" || response["query_time"] != "2026-08-31T10:00:00Z" {
+		t.Fatalf("response missing request echo/time: %+v", response)
 	}
 }
 
@@ -56,8 +57,42 @@ func TestMerchantInfoQueryDefaultsToFirstMethodForDedicatedPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"merchant_name":"Bavi-box"`) || !strings.Contains(rec.Body.String(), `"code":"10000"`) {
-		t.Fatalf("body = %s", rec.Body.String())
+	var payload struct {
+		Response string `json:"response"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	response := decodeResponseString(t, payload.Response)
+	if response["merchant_name"] != "Bavi-box" || response["code"] != "10000" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestMerchantInfoQueryUsesDirectJSONBodyAsBusinessPayload(t *testing.T) {
+	service := NewService(Config{MerchantName: "Bavi-box"})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/isv/spi/service",
+		strings.NewReader(`{"qr_code_id":"https://qr.isv.com/test/1","ua":"watch"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	service.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Response string `json:"response"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	response := decodeResponseString(t, payload.Response)
+	if response["qr_code_id"] != "https://qr.isv.com/test/1" {
+		t.Fatalf("response = %+v", response)
 	}
 }
 
@@ -72,7 +107,23 @@ func TestMerchantInfoQueryRejectsUnsupportedMethod(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"code":"40004"`) {
-		t.Fatalf("body = %s", rec.Body.String())
+	var payload struct {
+		Response string `json:"response"`
 	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	response := decodeResponseString(t, payload.Response)
+	if response["code"] != "40004" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func decodeResponseString(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	var response map[string]any
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		t.Fatalf("decode response string: %v raw = %s", err, raw)
+	}
+	return response
 }

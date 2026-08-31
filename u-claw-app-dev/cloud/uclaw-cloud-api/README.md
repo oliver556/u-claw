@@ -341,12 +341,7 @@ curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
 
 ```json
 {
-  "response": {
-    "code": "10000",
-    "msg": "Success",
-    "merchant_id": "2088xxxxxxxxxxxx",
-    "merchant_name": "Bavi-box"
-  }
+  "response": "{\"code\":\"10000\",\"msg\":\"Success\",\"merchant_id\":\"2088xxxxxxxxxxxx\",\"merchant_name\":\"Bavi-box\"}"
 }
 ```
 

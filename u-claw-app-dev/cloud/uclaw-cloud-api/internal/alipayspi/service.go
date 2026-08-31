@@ -112,12 +112,20 @@ func parseJSONRequest(body io.Reader) (request, error) {
 	if biz, ok := payload["bizContent"].(map[string]any); ok {
 		req.BizContent = biz
 	}
+	if len(req.BizContent) == 0 {
+		for key, value := range payload {
+			if key != "method" && key != "biz_content" && key != "bizContent" {
+				req.BizContent[key] = value
+			}
+		}
+	}
 	return req, nil
 }
 
 // merchantInfoResponse returns enough stable merchant facts for Alipay aggregate-pay onboarding probes.
 func (s *Service) merchantInfoResponse(req request) map[string]any {
 	outTradeNo := firstString(req.BizContent, "out_trade_no", "outTradeNo", "merchant_order_no", "merchantOrderNo")
+	qrCodeID := firstString(req.BizContent, "qr_code_id", "qrCodeId")
 	return map[string]any{
 		"code":                  "10000",
 		"msg":                   "Success",
@@ -127,27 +135,36 @@ func (s *Service) merchantInfoResponse(req request) map[string]any {
 		"service_phone":         s.cfg.ServicePhone,
 		"service_address":       s.cfg.ServiceAddress,
 		"out_trade_no":          outTradeNo,
+		"qr_code_id":            qrCodeID,
 		"query_time":            s.now().UTC().Format(time.RFC3339),
 		"support_aggregate_pay": true,
 	}
 }
 
-// writeSPIResponse follows Alipay SPI's JSON envelope; response signing can be added after keys are mounted.
+// writeSPIResponse follows Alipay SPI's string response envelope; signing can be added after keys are mounted.
 func writeSPIResponse(w http.ResponseWriter, response map[string]any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{"response": response})
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"response": `{"code":"40004","msg":"Business Failed","sub_code":"ENCODE_RESPONSE_FAILED"}`,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"response": string(responseJSON)})
 }
 
 // writeSPIError uses Alipay-style code/msg inside the SPI response envelope.
 func writeSPIError(w http.ResponseWriter, httpStatus int, code string, msg string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(httpStatus)
+	responseJSON, _ := json.Marshal(map[string]any{
+		"code": code,
+		"msg":  msg,
+	})
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"response": map[string]any{
-			"code": code,
-			"msg":  msg,
-		},
+		"response": string(responseJSON),
 	})
 }
 
