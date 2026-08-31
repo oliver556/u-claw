@@ -14,8 +14,8 @@ const DEFAULT_PORT = 18789;
 const MAX_PORT = 18799;
 const DEFAULT_VIDEO_ADAPTER_PORT = 18808;
 const MAX_VIDEO_ADAPTER_PORT = 18818;
+const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'seedance-1.5-pro-1080p-5s';
 const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://api.yiyong.me/v1';
-const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'jimeng-video-3-720p';
 const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
 const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
 const UCLAW_ACTIVATION_ENDPOINT = (process.env.UCLAW_ACTIVATION_ENDPOINT || '').trim().replace(/\/+$/, '');
@@ -1035,6 +1035,62 @@ async function getActivationJSON(pathname, options = {}) {
 }
 
 /**
+ * Fetches model names directly from the configured New API endpoint.
+ */
+async function fetchDirectNewApiModelCatalog(config) {
+  const providers = config?.models?.providers || {};
+  const provider = providers.custom || providers.litellm || providers.xai || {};
+  const baseUrl = String(provider.baseUrl || DEFAULT_VIDEO_ADAPTER_BASE_URL).trim().replace(/\/+$/, '');
+  const apiKey = String(
+    provider.apiKey
+    || providers.litellm?.apiKey
+    || providers.xai?.apiKey
+    || process.env.UCLAW_NEW_API_KEY
+    || ''
+  ).trim();
+
+  if (!baseUrl) {
+    return { ok: false, message: 'New API baseUrl 未配置', models: [] };
+  }
+  if (!apiKey) {
+    return { ok: false, message: 'New API key 未配置', models: [] };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text || '{}');
+    } catch {
+      throw new Error(`New API /v1/models 返回非 JSON 响应（HTTP ${response.status}）`);
+    }
+    if (!response.ok) {
+      throw new Error(data?.error?.message || data?.message || `New API models request failed: ${response.status}`);
+    }
+    const rawModels = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
+    return {
+      ok: true,
+      provider: { id: 'newapi', baseUrl, api: 'openai-completions' },
+      models: rawModels
+        .map((model) => ({ id: model?.id || model?.name || model, name: model?.name || model?.id || model }))
+        .filter((model) => String(model.id || '').trim()),
+      source: 'direct-newapi',
+    };
+  } catch (error) {
+    return { ok: false, message: error?.message || String(error), models: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Fetches New API usage summary via Bavi-box cloud using the local activation token.
  */
 async function getCloudModelUsageSummary() {
@@ -1057,11 +1113,14 @@ async function getCloudModelCatalog() {
   const state = readJsonFile(activationStatePath);
   const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
   const accessToken = String(state?.uclawAccessToken || '').trim();
+  const currentConfig = fs.existsSync(configPath) ? getConfig() : applyRuntimeConfigEnv(loadBundledDefaultConfig());
+  const directCatalog = await fetchDirectNewApiModelCatalog(currentConfig);
+  if (directCatalog.ok) return directCatalog;
   if (!endpoint) {
-    return { ok: false, message: 'activation endpoint is not configured', models: [] };
+    return directCatalog;
   }
   if (!accessToken) {
-    return { ok: false, message: 'uclaw access token is not available', models: [] };
+    return directCatalog;
   }
   try {
     const catalog = await getActivationJSON('/v1/newapi/models/catalog', { endpoint, accessToken });

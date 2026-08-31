@@ -256,7 +256,7 @@ function buildConfig(options, sourceConfigs) {
     timeoutMs: 180000
   };
   mergedConfig.agents.defaults.videoGenerationModel = {
-    primary: 'xai/jimeng-video-3-720p',
+    primary: 'xai/seedance-1.5-pro-1080p-5s',
     timeoutMs: 600000
   };
   mergedConfig.agents.defaults.mediaMaxMb = Math.max(Number(mergedConfig.agents.defaults.mediaMaxMb) || 0, 256);

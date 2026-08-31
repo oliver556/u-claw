@@ -1068,6 +1068,31 @@ function parseOpenAiCompatibleImageResponse(payload, options = {}) {`,
 }
 
 /**
+ * Restores the original composer model-picker semantics for Bavi-box: the chat
+ * composer chooses only chat/text models. Image and video defaults are changed
+ * from the Models page, not from the per-message chat override.
+ */
+function patchChatComposerTextModelsOnly() {
+  const files = listAssetFiles(/^chat-page-.*\.js$/, "chat-page");
+  const original =
+    "function em(e){let t=e.chatModelCatalog??[],n=at(t.filter(e=>e.available!==!1)),r=Qp(Jp(e),t,n),i=Qp(Yp(e),t,n),a=De(i,n),o=Zp(t,n);return{currentOverride:r,defaultSelectable:!i||!o.has(Xp(i)),defaultModel:i,defaultDisplay:a,defaultLabel:i?`Default (${a})`:`Default model`,options:$p(t,n,r,i)}}";
+  const patched =
+    "function UcChatPickerModelId(e,t){let n=String(e?.id??e?.model??e?.name??e?.value??``).trim(),r=String(e?.provider??``).trim();return r&&n&&!n.includes(`/`)?`${r}/${n}`:n||String(t??``).trim()}function UcChatPickerTextCatalog(e){return(e??[]).filter(e=>{let t=[...Array.isArray(e?.capabilities)?e.capabilities:[],...Array.isArray(e?.input)?e.input:[]].map(e=>String(e).toLowerCase()),n=UcChatPickerModelId(e).toLowerCase();if(t.includes(`video`)||/video|seedance|jimeng|kling|runway|pika|hailuo|sora/.test(n))return!1;if(t.includes(`image_generation`)||t.includes(`image-generation`)||/gpt-image|image-|dall|flux|midjourney|stable-diffusion/.test(n))return!1;return!0})}function em(e){let t=UcChatPickerTextCatalog(e.chatModelCatalog??[]),n=at(t.filter(e=>e.available!==!1)),r=Qp(Jp({...e,chatModelCatalog:t}),t,n),i=Qp(Yp({...e,chatModelCatalog:t}),t,n),a=De(i,n),o=Zp(t,n);return{currentOverride:r,defaultSelectable:!i||!o.has(Xp(i)),defaultModel:i,defaultDisplay:a,defaultLabel:i?`Default (${a})`:`Default model`,options:$p(t,n,r,i)}}";
+
+  for (const file of files) {
+    const before = read(file);
+    if (before.includes("function UcChatPickerTextCatalog(")) continue;
+    const after = before.replace(original, patched);
+    if (after === before) {
+      throw new Error(`Could not patch chat composer text-only model picker in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
  * Keeps Bavi-box image generation on configured image models only. Agent-supplied
  * overrides outside imageGenerationModel.primary/fallbacks are ignored.
  */
@@ -7793,6 +7818,7 @@ patchSkillsUninstallGateway();
 patchSkillHubInstallGateway();
 patchWindowsInstallPublishFallback();
 patchChatPage();
+patchChatComposerTextModelsOnly();
 patchSessionTerminalReconcile();
 patchChatUiCopy();
 patchAssistantIdentityUiCopy();

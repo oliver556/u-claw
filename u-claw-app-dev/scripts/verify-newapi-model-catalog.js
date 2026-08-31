@@ -82,7 +82,7 @@ function verifyMergeRebasesCloudManagedDefaults() {
         model: { primary: 'custom/gpt-5.5' },
         imageGenerationModel: { primary: 'litellm/gpt-image-2', timeoutMs: 180000 },
         imageModel: { primary: 'litellm/gpt-image-2', timeoutMs: 180000 },
-        videoGenerationModel: { primary: 'xai/jimeng-video-3-720p', timeoutMs: 600000 },
+        videoGenerationModel: { primary: 'xai/seedance-1.5-pro-1080p-5s', timeoutMs: 600000 },
       },
     },
     models: {
@@ -98,7 +98,7 @@ function verifyMergeRebasesCloudManagedDefaults() {
     models: [
       { id: 'gpt-5.5', capabilities: ['text'] },
       { id: 'gpt-image-2', capabilities: ['image'] },
-      { id: 'jimeng-video-3-720p', capabilities: ['video'] },
+      { id: 'seedance-1.5-pro-1080p-10s', capabilities: ['video'] },
     ],
   };
 
@@ -107,7 +107,7 @@ function verifyMergeRebasesCloudManagedDefaults() {
   assert.equal(result.config.agents.defaults.model.primary, 'custom/gpt-5.5');
   assert.equal(result.config.agents.defaults.imageGenerationModel.primary, 'litellm/gpt-image-2');
   assert.equal(result.config.agents.defaults.imageModel.primary, 'litellm/gpt-image-2');
-  assert.equal(result.config.agents.defaults.videoGenerationModel.primary, 'xai/jimeng-video-3-720p');
+  assert.equal(result.config.agents.defaults.videoGenerationModel.primary, 'xai/seedance-1.5-pro-1080p-10s');
 }
 
 /**

@@ -72,8 +72,25 @@
         "api": "openai-completions",
         "models": [
           {
-            "id": "jimeng-video-3-720p",
-            "name": "jimeng-video-3-720p",
+            "id": "seedance-1.5-pro-1080p-5s",
+            "name": "seedance-1.5-pro-1080p-5s",
+            "reasoning": false,
+            "input": [
+              "text",
+              "image"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 128000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "seedance-1.5-pro-1080p-10s",
+            "name": "seedance-1.5-pro-1080p-10s",
             "reasoning": false,
             "input": [
               "text",
@@ -106,7 +123,7 @@
         "timeoutMs": 180000
       },
       "videoGenerationModel": {
-        "primary": "xai/jimeng-video-3-720p",
+        "primary": "xai/seedance-1.5-pro-1080p-5s",
         "timeoutMs": 600000
       },
       "mediaMaxMb": 256

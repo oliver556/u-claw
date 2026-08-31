@@ -375,7 +375,7 @@ Edition:
   ${keyRule}
 
 Video chain:
-  Bavi-box -> server adapter -> New API -> Jimeng
+  Bavi-box -> New API -> server adapter -> Flash/Seedance
   xai.baseUrl = https://api.yiyong.me/v1
   xai.apiKey = ${edition === 'streamer' ? 'same as custom/litellm New API key' : 'empty'}
 

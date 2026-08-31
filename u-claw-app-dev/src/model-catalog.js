@@ -129,6 +129,7 @@ function rebaseDefaultModelsToCatalog(config, providerRoutes, models) {
   } else if (typeof defaults.model === 'string') {
     const picked = pickModelID(defaults.model, 'text');
     if (picked) {
+      const providerID = providerRoutes.text;
       const next = `${providerID}/${picked}`;
       if (defaults.model !== next) {
         defaults.model = next;
@@ -142,6 +143,7 @@ function rebaseDefaultModelsToCatalog(config, providerRoutes, models) {
     } else if (typeof defaults[key] === 'string') {
       const picked = pickModelID(defaults[key], 'image');
       if (picked) {
+        const providerID = providerRoutes.image;
         const next = `${providerID}/${picked}`;
         if (defaults[key] !== next) {
           defaults[key] = next;
