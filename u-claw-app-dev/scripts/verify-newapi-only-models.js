@@ -28,7 +28,7 @@ const packagePortableSource = fs.readFileSync(packagePortablePath, 'utf8');
 assert.equal(defaultConfig.agents?.defaults?.model?.primary, 'custom/gpt-5.5');
 assert.equal(defaultConfig.agents?.defaults?.imageGenerationModel?.primary, 'litellm/gpt-image-2');
 assert.equal(defaultConfig.agents?.defaults?.imageModel?.primary, 'litellm/gpt-image-2');
-assert.equal(defaultConfig.agents?.defaults?.videoGenerationModel?.primary, 'xai/jimeng-video-3-720p');
+assert.equal(defaultConfig.agents?.defaults?.videoGenerationModel?.primary, 'xai/seedance-1.5-pro-1080p-5s');
 
 for (const [label, source] of [
   ['Config.html', configHtml],
@@ -37,7 +37,7 @@ for (const [label, source] of [
   ['package-portable.js', packagePortableSource],
 ]) {
   assert.equal(source.includes('newapi/gpt-image-2'), false, `${label} must not route image generation through newapi`);
-  assert.equal(source.includes('newapi/jimeng-video-3-720p'), false, `${label} must not route video generation through newapi`);
+  assert.equal(source.includes('newapi/seedance-1.5-pro-1080p-5s'), false, `${label} must not route video generation through newapi`);
 }
 
 assert.equal(mainSource.includes('delete config.models.providers.newapi'), true, 'activation config must not keep newapi as send route');
@@ -49,7 +49,7 @@ const result = mergeModelCatalogIntoConfig({
       model: { primary: 'custom/gpt-5.5' },
       imageGenerationModel: { primary: 'litellm/gpt-image-2' },
       imageModel: { primary: 'litellm/gpt-image-2' },
-      videoGenerationModel: { primary: 'xai/jimeng-video-3-720p', timeoutMs: 600000 },
+      videoGenerationModel: { primary: 'xai/seedance-1.5-pro-1080p-5s', timeoutMs: 600000 },
     },
   },
   models: {
@@ -59,7 +59,7 @@ const result = mergeModelCatalogIntoConfig({
       xai: {
         baseUrl: 'http://127.0.0.1:18808/xai/v1',
         apiKey: 'uclaw-video-adapter',
-        models: [{ id: 'jimeng-video-3-720p' }],
+        models: [{ id: 'seedance-1.5-pro-1080p-5s' }],
       },
     },
   },

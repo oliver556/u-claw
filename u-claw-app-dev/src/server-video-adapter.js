@@ -6,14 +6,24 @@ const path = require('path');
 const DEFAULT_CONFIG_PATH = '/opt/uclaw-video-adapter/config.json';
 const DEFAULT_TASK_STORE_PATH = '/opt/uclaw-video-adapter/tasks.json';
 const DEFAULT_FLASH_BASE_URL = 'https://flash.duoyuanx.net';
+const DEFAULT_NEW_API_UPSTREAM_BASE_URL = 'http://158.51.110.49:3000';
 const JSON_LIMIT_BYTES = 8 * 1024 * 1024;
 const TASK_MODEL_TTL_MS = 24 * 60 * 60 * 1000;
+const RECENT_UPSTREAM_CREATE_TTL_MS = 5 * 60 * 1000;
+const RECENT_UPSTREAM_CREATES = [];
 
 const DEFAULT_MODELS = {
   'seedance-1.5-pro-1080p-5s': {
     provider: 'flash',
     upstreamModel: 'doubao-seedance-1-5-pro_1080p',
     seconds: '5',
+    size: '4:3',
+    enabled: true,
+  },
+  'seedance-1.5-pro-1080p-4s-test': {
+    provider: 'flash',
+    upstreamModel: 'doubao-seedance-1-5-pro_1080p',
+    seconds: '4',
     size: '4:3',
     enabled: true,
   },
@@ -42,6 +52,12 @@ function normalizeBaseUrl(value) {
 function bearerToken(value) {
   const match = String(value || '').match(/^Bearer\s+(.+)$/i);
   return match ? match[1].trim() : '';
+}
+
+function authorizationHeader(value) {
+  const token = String(value || '').trim();
+  if (!token) return '';
+  return /^Bearer\s+/i.test(token) ? token : `Bearer ${token}`;
 }
 
 function splitTokens(value) {
@@ -100,6 +116,12 @@ function createConfig(options = {}) {
     providers,
     flashBaseUrl: providers.flash.baseUrl,
     flashApiKey: providers.flash.apiKey,
+    newApiUpstreamBaseUrl: normalizeBaseUrl(
+      options.newApiUpstreamBaseUrl
+      || process.env.UCLAW_NEW_API_UPSTREAM_BASE_URL
+      || fileConfig.newApiUpstreamBaseUrl
+      || DEFAULT_NEW_API_UPSTREAM_BASE_URL,
+    ),
     adapterTokens: [
       ...splitTokens(options.adapterTokens || process.env.UCLAW_ADAPTER_API_KEYS || process.env.UCLAW_ADAPTER_API_KEY),
       ...splitTokens(security.adapterTokens),
@@ -294,21 +316,84 @@ function writeTaskStore(config, store) {
   fs.writeFileSync(config.taskStorePath, `${JSON.stringify(store, null, 2)}\n`);
 }
 
-function rememberTaskModel(config, taskId, model) {
-  if (!taskId || !model) return;
+function rememberTaskRecord(config, taskId, record) {
+  if (!taskId) return;
   const now = Date.now();
   const store = readTaskStore(config);
-  for (const [id, record] of Object.entries(store)) {
-    if (!record || record.expiresAt < now) delete store[id];
+  for (const [id, item] of Object.entries(store)) {
+    if (!item || item.expiresAt < now) delete store[id];
   }
-  store[taskId] = { model, expiresAt: now + TASK_MODEL_TTL_MS };
+  store[taskId] = {
+    ...(store[taskId] || {}),
+    ...record,
+    expiresAt: now + TASK_MODEL_TTL_MS,
+  };
   writeTaskStore(config, store);
 }
 
-function findTaskModel(config, taskId) {
+function rememberTaskModel(config, taskId, model, protocol = 'openai') {
+  if (!taskId || !model) return;
+  rememberTaskRecord(config, taskId, { model, protocol });
+}
+
+function rememberNewApiTaskAlias(config, newApiTaskId, upstreamTaskId, model, protocol = 'xai-newapi') {
+  if (!newApiTaskId || !upstreamTaskId || !model) return;
+  rememberTaskRecord(config, newApiTaskId, {
+    model,
+    protocol,
+    upstreamTaskId,
+  });
+}
+
+function rememberRecentUpstreamCreate(taskId, body, requestedModel) {
+  if (!taskId) return;
+  const now = Date.now();
+  while (RECENT_UPSTREAM_CREATES.length && now - RECENT_UPSTREAM_CREATES[0].createdAt > RECENT_UPSTREAM_CREATE_TTL_MS) {
+    RECENT_UPSTREAM_CREATES.shift();
+  }
+  RECENT_UPSTREAM_CREATES.push({
+    taskId,
+    model: requestedModel,
+    prompt: String(body.prompt || ''),
+    createdAt: now,
+    claimed: false,
+  });
+}
+
+function takeRecentUpstreamCreate(model, prompt) {
+  const now = Date.now();
+  const requestedModel = String(model || '');
+  const requestedPrompt = String(prompt || '');
+  for (let index = RECENT_UPSTREAM_CREATES.length - 1; index >= 0; index -= 1) {
+    const record = RECENT_UPSTREAM_CREATES[index];
+    if (!record || now - record.createdAt > RECENT_UPSTREAM_CREATE_TTL_MS) {
+      RECENT_UPSTREAM_CREATES.splice(index, 1);
+      continue;
+    }
+    if (!record.claimed && record.model === requestedModel && record.prompt === requestedPrompt) {
+      record.claimed = true;
+      return record;
+    }
+  }
+  return null;
+}
+
+function findTaskRecord(config, taskId) {
   const record = readTaskStore(config)[taskId];
-  if (!record || record.expiresAt < Date.now()) return '';
-  return record.model;
+  if (!record || record.expiresAt < Date.now()) return {};
+  return record;
+}
+
+function findTaskModel(config, taskId) {
+  return findTaskRecord(config, taskId).model || '';
+}
+
+function findTaskProtocol(config, taskId) {
+  return findTaskRecord(config, taskId).protocol || 'openai';
+}
+
+function findUpstreamTaskId(config, taskId) {
+  return findTaskRecord(config, taskId).upstreamTaskId || taskId;
 }
 
 function mapStatusResponse(payload, taskId, config) {
@@ -330,7 +415,130 @@ function mapStatusResponse(payload, taskId, config) {
   };
 }
 
-async function createVideo(body, config) {
+function toXaiStatus(status, creating = false) {
+  const normalized = normalizeStatus(status);
+  if (normalized === 'completed') return 'done';
+  if (normalized === 'queued') return creating ? 'pending' : 'processing';
+  return normalized;
+}
+
+function mapXaiCreateResponse(payload, requestedModel) {
+  const mapped = mapCreateResponse(payload, requestedModel);
+  return {
+    ...mapped,
+    request_id: mapped.task_id || mapped.id,
+    status: toXaiStatus(mapped.status, true),
+  };
+}
+
+function mapXaiStatusResponse(payload, taskId, config) {
+  const mapped = mapStatusResponse(payload, taskId, config);
+  const requestId = mapped.task_id || mapped.id || taskId;
+  const videoUrl = mapped.video_url || getVideoUrl(mapped);
+  return {
+    ...mapped,
+    request_id: requestId,
+    status: toXaiStatus(mapped.status),
+    ...(videoUrl ? { video: { url: videoUrl } } : {}),
+    ...(mapped.status === 'failed' && !mapped.error ? { error: { message: 'Video generation failed' } } : {}),
+  };
+}
+
+function mapNewApiVideoCreateToXai(payload, requestedModel) {
+  const mapped = mapCreateResponse(payload, requestedModel);
+  return {
+    request_id: mapped.task_id || mapped.id,
+    status: toXaiStatus(mapped.status, true),
+    error: mapped.error || null,
+  };
+}
+
+function mapNewApiVideoStatusToXai(payload, taskId, config, fallbackPayload) {
+  const mapped = mapStatusResponse(payload, taskId, config);
+  const fallback = fallbackPayload ? mapStatusResponse(fallbackPayload, taskId, config) : null;
+  const requestId = mapped.task_id || mapped.id || fallback?.task_id || fallback?.id || taskId;
+  const videoUrl = mapped.video_url || getVideoUrl(mapped) || fallback?.video_url || getVideoUrl(fallback);
+  return {
+    request_id: requestId,
+    status: toXaiStatus(mapped.status),
+    ...(videoUrl ? { video: { url: videoUrl } } : {}),
+    ...(mapped.error ? { error: mapped.error } : {}),
+  };
+}
+
+function newApiVideoCreateBody(body, config) {
+  const model = String(body.model || '').trim();
+  const modelConfig = config.models[model] || {};
+  const seconds = modelConfig.fixedParams?.seconds || modelConfig.seconds || body.seconds || body.duration;
+  const size = String(body.size || body.resolution || '').trim();
+  const allowedNewApiSizes = new Set(['720x1280', '1280x720', '1792x1024', '1024x1792']);
+  const nextBody = {
+    model,
+    prompt: body.prompt,
+    ...(seconds ? { seconds: String(seconds), duration: String(seconds) } : {}),
+  };
+  if (allowedNewApiSizes.has(size)) nextBody.size = size;
+  return nextBody;
+}
+
+async function forwardNewApiJson(config, req, pathName, body) {
+  const authorization = String(req.headers.authorization || '').trim();
+  if (!authorization) {
+    const error = new Error('Missing New API authorization');
+    error.statusCode = 401;
+    throw error;
+  }
+  const result = await upstreamJson(`${config.newApiUpstreamBaseUrl}${pathName}`, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: {
+      Authorization: authorization,
+      Accept: 'application/json',
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  return result;
+}
+
+async function handleNewApiXaiCompat(req, res, videoPath, config) {
+  if (req.method === 'POST' && videoPath === '/v1/videos/generations') {
+    const body = await readFlexibleBody(req);
+    const requestedModel = String(body.model || '').trim();
+    const result = await forwardNewApiJson(config, req, '/v1/videos', newApiVideoCreateBody(body, config));
+    const payload = result.response.ok ? mapNewApiVideoCreateToXai(result.payload, requestedModel) : result.payload;
+    if (result.response.ok && payload.request_id) {
+      const upstreamCreate = takeRecentUpstreamCreate(requestedModel, body.prompt);
+      if (upstreamCreate?.taskId) {
+        rememberNewApiTaskAlias(config, payload.request_id, upstreamCreate.taskId, requestedModel, 'xai-newapi');
+      } else {
+        rememberTaskModel(config, payload.request_id, requestedModel, 'xai-newapi');
+      }
+    }
+    sendJson(res, result.response.status, payload);
+    return true;
+  }
+
+  const statusMatch = videoPath.match(/^\/v1\/videos\/([^/]+)$/);
+  if (req.method === 'GET' && statusMatch) {
+    const taskId = decodeURIComponent(statusMatch[1]);
+    const result = await forwardNewApiJson(config, req, `/v1/videos/${encodeURIComponent(taskId)}`);
+    let fallbackPayload = null;
+    if (result.response.ok && !getVideoUrl(result.payload)) {
+      try {
+        const upstreamTaskId = findUpstreamTaskId(config, taskId);
+        const fallback = await queryVideo(upstreamTaskId, config);
+        if (fallback.response.ok) fallbackPayload = fallback.payload;
+      } catch {}
+    }
+    const payload = result.response.ok ? mapNewApiVideoStatusToXai(result.payload, taskId, config, fallbackPayload) : result.payload;
+    sendJson(res, result.response.status, payload);
+    return true;
+  }
+
+  return false;
+}
+
+async function createVideo(body, config, options = {}) {
   const { modelConfig } = getModelConfig(config, body.model);
   const { provider } = getProviderConfig(config, modelConfig.provider);
 
@@ -347,11 +555,14 @@ async function createVideo(body, config) {
   const { form, requested } = buildFlashCreateForm(body, config);
   const result = await upstreamJson(`${provider.baseUrl}/v1/videos`, {
     method: 'POST',
-    headers: { Authorization: provider.apiKey },
+    headers: { Authorization: authorizationHeader(provider.apiKey) },
     body: form,
   });
-  const payload = result.response.ok ? mapCreateResponse(result.payload, requested) : result.payload;
-  if (result.response.ok && payload.task_id) rememberTaskModel(config, payload.task_id, requested);
+  const payload = result.response.ok
+    ? options.protocol === 'xai' ? mapXaiCreateResponse(result.payload, requested) : mapCreateResponse(result.payload, requested)
+    : result.payload;
+  if (result.response.ok && payload.task_id) rememberTaskModel(config, payload.task_id, requested, options.protocol || 'openai');
+  if (result.response.ok && payload.task_id) rememberRecentUpstreamCreate(payload.task_id, body, requested);
   return {
     response: result.response,
     payload,
@@ -374,7 +585,7 @@ async function queryVideo(taskId, config) {
   }
   const result = await upstreamJson(`${provider.baseUrl}/v1/videos/${encodeURIComponent(taskId)}`, {
     method: 'GET',
-    headers: { Authorization: provider.apiKey, Accept: 'application/json' },
+    headers: { Authorization: authorizationHeader(provider.apiKey), Accept: 'application/json' },
   });
   return {
     response: result.response,
@@ -657,6 +868,16 @@ async function handleAdmin(req, res, url, getConfig, reloadConfig) {
   sendJson(res, 404, { error: { message: `Admin route not found: ${req.method} ${url.pathname}` } });
 }
 
+function normalizeAdapterPath(pathname) {
+  return pathname
+    .replace(/^\/openai\/v1(?=\/|$)/, '/v1')
+    .replace(/^\/videos(?=\/|$)/, '/v1/videos');
+}
+
+function isNewApiXaiCompatRequest(req) {
+  return String(req.headers['x-uclaw-newapi-compat'] || '').trim() === '1';
+}
+
 function createServer(options = {}) {
   let config = createConfig(options);
   const getConfig = () => config;
@@ -668,7 +889,7 @@ function createServer(options = {}) {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
-      const videoPath = url.pathname.replace(/^\/openai\/v1/, '/v1');
+      const videoPath = normalizeAdapterPath(url.pathname);
       const statusMatch = videoPath.match(/^\/v1\/videos\/([^/]+)$/);
 
       if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
@@ -677,7 +898,15 @@ function createServer(options = {}) {
       }
 
       if (req.method === 'GET' && url.pathname === '/health') {
-        sendJson(res, 200, { ok: true, ...publicConfig(getConfig()), routes: ['/v1/videos', '/openai/v1/videos', '/admin'] });
+        sendJson(res, 200, {
+          ok: true,
+          ...publicConfig(getConfig()),
+          routes: ['/v1/videos', '/v1/videos/generations', '/openai/v1/videos', '/openai/v1/videos/generations', '/videos/generations', '/admin'],
+        });
+        return;
+      }
+
+      if (isNewApiXaiCompatRequest(req) && await handleNewApiXaiCompat(req, res, videoPath, getConfig())) {
         return;
       }
 
@@ -692,13 +921,25 @@ function createServer(options = {}) {
         return;
       }
 
+      if (req.method === 'POST' && videoPath === '/v1/videos/generations') {
+        if (!validateAdapterToken(req, getConfig())) {
+          sendJson(res, 401, { error: { message: 'Invalid video adapter token' } });
+          return;
+        }
+        const body = await readFlexibleBody(req);
+        const { response, payload } = await createVideo(body, getConfig(), { protocol: 'xai' });
+        sendJson(res, response.status, payload);
+        return;
+      }
+
       if (req.method === 'GET' && statusMatch) {
         if (!validateAdapterToken(req, getConfig())) {
           sendJson(res, 401, { error: { message: 'Invalid video adapter token' } });
           return;
         }
-        const { response, payload } = await queryVideo(decodeURIComponent(statusMatch[1]), getConfig());
-        sendJson(res, response.status, payload);
+        const taskId = decodeURIComponent(statusMatch[1]);
+        const { response, payload } = await queryVideo(taskId, getConfig());
+        sendJson(res, response.status, findTaskProtocol(getConfig(), taskId) === 'xai' && response.ok ? mapXaiStatusResponse(payload, taskId, getConfig()) : payload);
         return;
       }
 
