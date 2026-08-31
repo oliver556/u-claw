@@ -301,6 +301,8 @@ curl -sS -X POST http://127.0.0.1:8080/v1/payments/virtual/notify \
 spi.alipay.pay.aggpay.merchantinfo.query
 ```
 
+支付宝在线调试器实际回调中也可能发送 `spi.alipay.pay.aggrepay.merchantinfo.query`；服务端已兼容该拼写，并会把 form body 中的 `qr_code_id`、`ua` 等非系统字段作为业务参数处理。
+
 控制台“服务配置基础”建议填写：
 
 ```text

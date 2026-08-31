@@ -51,6 +51,33 @@ func TestMerchantInfoQueryAcceptsFormEncodedAlipayPayload(t *testing.T) {
 	}
 }
 
+func TestMerchantInfoQueryAcceptsAlipayTesterAggrePayMethodAndDirectFormBusinessFields(t *testing.T) {
+	service := NewService(Config{MerchantName: "Bavi-box"})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/isv/spi/service",
+		strings.NewReader(`method=spi.alipay.pay.aggrepay.merchantinfo.query&qr_code_id=https%3A%2F%2Fqr.isv.com%2Ftest%2F1&ua=watch`),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	service.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Response json.RawMessage `json:"response"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	response := decodeResponseString(t, payload.Response)
+	if response["code"] != "10000" || response["qr_code_id"] != "https://qr.isv.com/test/1" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
 func TestMerchantInfoQueryDefaultsToFirstMethodForDedicatedPath(t *testing.T) {
 	service := NewService(Config{MerchantName: "Bavi-box"})
 
