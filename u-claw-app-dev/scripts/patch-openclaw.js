@@ -1735,6 +1735,7 @@ async uclawOpenRechargeRecords(){let e=document.createElement("div");e.className
       rechargeModelMethod,
     );
     after = after.replaceAll(`${rechargeModelMethod}${rechargeModelMethod}`, rechargeModelMethod);
+    after = after.replace(/\n{2,}(?=uclawRechargeMoney\(e\)\{)/g, "\n");
     if (!after.includes("uclawLoadModelUsage(){")) {
       after = after.replace("renderQuickConfig(e){", `${methods}renderQuickConfig(e){`);
     }
@@ -1857,7 +1858,7 @@ function patchServiceWorker() {
   let source = read(swPath);
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3";',
   );
   source = source.replace(
     /skillhub-scene-picker-2(?!-skillhub-scene-font-color-1)/,
@@ -2285,6 +2286,53 @@ function patchPrimaryNavigationProjection() {
   for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
     const before = read(file);
     const after = replacePairs(before, pairs);
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Adds the Bavi-box ecommerce image workflow entry to the user-facing Workflows page.
+ */
+function patchTasksPageEcommerceWorkflow() {
+  const helper =
+    "function UcEcommerceWorkflowPrompt(){return[`# 电商主图/详情图 工作流`,``,`你正在运行 Bavi-box 的 Prompt-only 电商主图/详情图工作流。`,``,`请先收集商品类目、平台、目标人群、SKU 规格、商品图、资质证据、卖点、视觉参考和禁用表达。缺失信息必须标为待补充，不得编造证书、专利、检测报告、销量、评论或医疗健康功效。`,``,`按 Intake Brief、Compliance Gate、Conversion Driver、Campaign Style Lock、Main Image Storyboard、Detail Page Storyboard、Prompt Pack、Human Review Gate 推进。每个确认门暂停等待用户确认。`,``,`V0 边界：不直接出图，不读取独立 API key，不绕过 Bavi-box 已配置图片模型。用户确认 Prompt Pack 后，才建议走现有图片生成能力。`].join(`\\n`)}function UcEcommerceWorkflowStore(e){try{if(!e)return;let t=JSON.parse(globalThis.localStorage?.getItem(`uclaw.ecommerceWorkflowSessions.v1`)||`{}`);(!t||typeof t!=`object`||Array.isArray(t))&&(t={}),t[e]={name:`电商主图/详情图`,mode:`Prompt-only`,skill:`ecommerce-main-detail-workflow`,prompt:UcEcommerceWorkflowPrompt(),createdAt:Date.now()},globalThis.localStorage?.setItem(`uclaw.ecommerceWorkflowSessions.v1`,JSON.stringify(t))}catch{}}function UcEcommerceWorkflowView(e){let t=!!e.ecommerceWorkflowStarting,n=!e.connected||t;return i`<section class=\"card stack uclaw-ecommerce-workflow\" data-uclaw-ecommerce-workflow=\"prompt-only\"><div><div class=\"card-title\">电商主图/详情图</div><div class=\"card-sub\">Prompt-only 工作流：商品资料、合规边界、Campaign Style Lock、主图/详情页 Storyboard 与 Prompt Pack。</div></div><div class=\"chip-row\"><span class=\"chip chip-ok\">Skill: ecommerce-main-detail-workflow</span><span class=\"chip\">不直接出图</span><span class=\"chip\">人工确认门</span></div><div class=\"row\"><button class=\"btn primary\" type=\"button\" ?disabled=${n} @click=${()=>void e.startEcommerceWorkflow?.()}>${t?`创建中...`:`开始工作流`}</button><span class=\"muted\">创建普通 main 会话并保留 workflow metadata。</span></div></section>`}";
+
+  for (const file of listAssetFiles(/^tasks-page-.*\.js$/, "tasks-page")) {
+    const before = read(file);
+    let after = before;
+
+    if (!after.includes("function UcEcommerceWorkflowPrompt()")) {
+      after = after.replace("function B(e){", `${helper}function B(e){`);
+    }
+
+    after = after.replace(
+      "this.client=null,this.loadGeneration=0}",
+      "this.client=null,this.loadGeneration=0,this.ecommerceWorkflowStarting=!1}",
+    );
+
+    if (!after.includes("async startEcommerceWorkflow()")) {
+      after = after.replace(
+        "}render(){return i`",
+        "}openEcommerceWorkflowSession(e){e&&(this.context.gateway.setSessionKey(e),this.context.navigate(`chat`,{search:u(e)}))}async startEcommerceWorkflow(){let e=this.client;if(!this.connected||!e||this.ecommerceWorkflowStarting)return;this.ecommerceWorkflowStarting=!0,this.error=null,this.requestUpdate();try{let t=await e.request(`sessions.create`,{agentId:`main`,label:`电商主图/详情图`});if(!t?.key)throw new Error(`sessions.create returned no key`);UcEcommerceWorkflowStore(t.key),this.openEcommerceWorkflowSession(t.key)}catch(e){this.error=`创建电商主图/详情图工作流失败：${e instanceof Error?e.message:String(e)}`}finally{this.ecommerceWorkflowStarting=!1,this.requestUpdate()}}render(){return i`",
+      );
+    }
+
+    while (after.includes("${UcEcommerceWorkflowView(this)}${UcEcommerceWorkflowView(this)}")) {
+      after = after.replace(
+        "${UcEcommerceWorkflowView(this)}${UcEcommerceWorkflowView(this)}",
+        "${UcEcommerceWorkflowView(this)}",
+      );
+    }
+
+    if (!after.includes("${UcEcommerceWorkflowView(this)}${B({basePath:this.context.basePath")) {
+      after = after.replace(
+        "${B({basePath:this.context.basePath,connected:this.connected",
+        "${UcEcommerceWorkflowView(this)}${B({basePath:this.context.basePath,connected:this.connected",
+      );
+    }
+
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -7625,6 +7673,7 @@ patchControlUiShellBranding();
 patchControlUiSkillHubProxy();
 patchIndexUiCopy();
 patchPrimaryNavigationProjection();
+patchTasksPageEcommerceWorkflow();
 patchFinalUiPolish();
 removeWrongModelUsageDashboard();
 patchConfigModelUsageDashboard();
