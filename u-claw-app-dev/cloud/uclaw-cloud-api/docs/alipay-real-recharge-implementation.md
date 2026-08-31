@@ -251,28 +251,58 @@ pro_100   100.00 CNY
 - staging 可开启，正式上线后关闭。
 - 0.01 对应 New API raw quota 应为 `NewAPIQuotaPerCNY / 100`，当前为 `500000 / 100 = 5000`。
 
-### 5.9 客户端 UI
+### 5.9 客户端 UI 与扫码支付界面
 
-修改 `u-claw-app-dev/scripts/patch-openclaw.js` 中模型页充值流程：
+当前前端充值弹窗只适合 `virtual` provider：用户选套餐后直接调用 `window.uclaw.rechargeModelQuota`，主进程创建虚拟订单并立刻模拟回调，页面没有“待扫码支付”阶段。真实支付宝接入必须新增扫码支付界面，不能沿用“点击确认后立即成功”的交互。
 
-- 点击“充值”调用 `window.uclaw.rechargeModelQuota`。
-- 获取 `/v1/recharge/providers`，只展示 enabled provider。
-- 创建订单：`POST /v1/recharge/orders {"planCode":"basic_10","provider":"alipay"}`。
-- 弹窗展示：
-  - 金额
-  - 订单号
-  - 支付宝二维码
-  - 订单状态
-  - 手动刷新按钮
-- 每 2 秒轮询 `GET /v1/recharge/orders/{orderNo}`，最多 5 分钟。
-- 状态到 `credited` 后关闭二维码或显示成功，并立即刷新 `/v1/newapi/usage/summary`。
-- 状态到 `credit_failed` 时显示“支付已成功，额度同步中”，保留手动刷新，不提示用户重复支付。
+需要修改：
 
-二维码生成：
+- `u-claw-app-dev/src/preload.js`
+  - 保留 `getRechargePlans`、`getRechargeOrders`。
+  - 新增或调整 IPC：`createRechargeOrder(payload)`、`getRechargeOrder(orderNo)`、`refreshModelUsageSummary()`。
+- `u-claw-app-dev/src/main.js`
+  - 把 `rechargeCloudModelQuota` 从“创建订单 + virtual notify + 刷余额”拆成真实下单和状态查询。
+  - `provider=alipay` 时只创建订单并返回 `orderNo`、`amountCents`、`qrCode`、`expiresAt`，不触发任何本地模拟回调。
+  - 新增单笔订单查询，代理调用 `GET /v1/recharge/orders/{orderNo}`。
+- `u-claw-app-dev/scripts/patch-openclaw.js`
+  - 模型页“充值”弹窗改为两步：选择套餐 -> 展示支付宝扫码支付。
+  - 生成 OpenClaw patch 后再验证生成产物，不直接改归档目录。
 
-- 支付宝 `qr_code` 是二维码内容 URL。
-- 客户端应本地生成二维码 bitmap/canvas。
-- 不建议依赖第三方公网二维码生成服务。
+扫码支付弹窗必须展示：
+
+- 标题：`支付宝扫码支付`
+- 金额：如 `¥0.01`、`¥10.00`
+- 订单号：`UC...`
+- 二维码：由支付宝 `qr_code` 内容本地生成
+- 有效期倒计时：基于 `expiresAt`
+- 状态区：`待支付`、`支付确认中`、`额度同步中`、`已到账`、`支付超时`
+- 操作按钮：`我已支付，刷新状态`、`取消`、`查看订单记录`
+
+二维码生成要求：
+
+- 支付宝 `qr_code` 是二维码内容 URL，不是图片 URL。
+- 客户端必须本地生成二维码 bitmap/canvas。
+- 推荐依赖轻量二维码库，例如 `qrcode`；若不想新增生产依赖，可在 renderer 注入纯 JS QR encoder。
+- 禁止把 `qr_code` 发送到第三方二维码生成服务。
+- 二维码区域保持固定比例，建议 `220px x 220px`，小屏用 `min(220px, 60vw)`。
+- 二维码下方只展示短提示，不放长说明，避免弹窗过高。
+
+状态轮询：
+
+- 创建订单成功后立即进入扫码页。
+- 每 2 秒调用 `GET /v1/recharge/orders/{orderNo}`。
+- 最多轮询 5 分钟；超过后进入 `支付超时`，但保留手动刷新。
+- 状态到 `paid` 或 `crediting`：显示 `支付成功，额度同步中`。
+- 状态到 `credited`：显示 `已到账`，停止轮询，刷新 `/v1/newapi/usage/summary`。
+- 状态到 `credit_failed`：显示 `支付已成功，额度同步中`，停止自动轮询，保留手动刷新；不要让用户重复支付。
+
+布局验收：
+
+- 桌面宽屏：弹窗宽度约 `520px-600px`，二维码居中，金额是第一视觉重点。
+- 小屏：弹窗最大宽度 `calc(100vw - 24px)`，二维码不溢出，按钮不换行导致撑破。
+- 遮罩层只遮住主界面，不影响 Electron 窗口标题栏。
+- 弹窗内文字不可遮挡二维码、按钮或状态。
+- 支付成功态必须有明确绿色状态，但不使用大面积营销风格布局。
 
 ## 6. 回测清单
 
@@ -368,7 +398,11 @@ deploy/scripts/alipay-local-e2e.sh
 必须回测：
 
 - 模型页充值按钮可打开支付宝充值弹窗。
-- 二维码区域比例正常，小屏不溢出。
+- 选择套餐后出现扫码支付界面，而不是直接显示充值成功。
+- 支付宝 `qr_code` 本地生成二维码，二维码内容与后端返回一致。
+- 二维码区域比例正常，桌面和小屏都不溢出、不变形。
+- 倒计时、订单号、金额、状态四块信息清晰可见。
+- `我已支付，刷新状态` 能立即重新查询单笔订单。
 - 支付中状态轮询不阻塞模型页其他展示。
 - 支付成功后余额卡片刷新为金额。
 - `credit_failed` 显示“额度同步中”，不让用户误以为没付款。
