@@ -24,6 +24,10 @@ const (
 	MethodAggPayMerchantInfoQuery = "spi.alipay.pay.aggpay.merchantinfo.query"
 	// MethodAggrePayMerchantInfoQuery is the method name Alipay currently posts from the online SPI tester.
 	MethodAggrePayMerchantInfoQuery = "spi.alipay.pay.aggrepay.merchantinfo.query"
+	// MethodStandardAggrePayOrderCreate creates a standardized aggregate-pay bill for Alipay SPI onboarding.
+	MethodStandardAggrePayOrderCreate = "spi.alipay.pay.standardaggrepay.order.create"
+	// MethodStandardAggPayOrderCreate is kept for console variants that omit "re" in aggregate-pay method names.
+	MethodStandardAggPayOrderCreate = "spi.alipay.pay.standardaggpay.order.create"
 )
 
 // Config contains the non-secret merchant facts returned to Alipay SPI checks.
@@ -84,6 +88,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch req.Method {
 	case MethodAggPayMerchantInfoQuery, MethodAggrePayMerchantInfoQuery:
 		writeSPIResponse(w, s.merchantInfoResponse(req), s.signer)
+	case MethodStandardAggrePayOrderCreate, MethodStandardAggPayOrderCreate:
+		writeSPIResponse(w, s.orderCreateResponse(req), s.signer)
 	default:
 		writeSPIError(w, http.StatusBadRequest, "40004", "Unsupported SPI method")
 	}
@@ -172,6 +178,42 @@ func (s *Service) merchantInfoResponse(req request) map[string]any {
 		"out_trade_no":          outTradeNo,
 		"qr_code_id":            qrCodeID,
 		"query_time":            s.now().UTC().Format(time.RFC3339),
+		"support_aggregate_pay": true,
+	}
+}
+
+// orderCreateResponse returns a non-settling aggregate-pay bill for Alipay onboarding probes.
+func (s *Service) orderCreateResponse(req request) map[string]any {
+	now := s.now().UTC()
+	qrCodeID := firstString(req.BizContent, "qr_code_id", "qrCodeId")
+	outTradeNo := firstString(req.BizContent, "out_trade_no", "outTradeNo", "out_order_no", "outOrderNo", "merchant_order_no", "merchantOrderNo")
+	if outTradeNo == "" {
+		outTradeNo = "UCLAW-SPI-" + now.Format("20060102150405")
+	}
+	totalAmount := firstString(req.BizContent, "total_amount", "totalAmount", "amount", "order_amount", "orderAmount")
+	if totalAmount == "" {
+		totalAmount = "0.01"
+	}
+	subject := firstString(req.BizContent, "subject", "order_title", "orderTitle", "goods_name", "goodsName")
+	if subject == "" {
+		subject = s.cfg.MerchantShort + " 聚合收钱单"
+	}
+	return map[string]any{
+		"code":                  "10000",
+		"msg":                   "Success",
+		"merchant_id":           s.cfg.MerchantID,
+		"merchant_name":         s.cfg.MerchantName,
+		"out_trade_no":          outTradeNo,
+		"order_no":              outTradeNo,
+		"aggregate_order_no":    outTradeNo,
+		"qr_code_id":            qrCodeID,
+		"subject":               subject,
+		"total_amount":          totalAmount,
+		"currency":              "CNY",
+		"order_status":          "WAIT_BUYER_PAY",
+		"trade_status":          "WAIT_BUYER_PAY",
+		"create_time":           now.Format("2006-01-02 15:04:05"),
+		"expire_time":           now.Add(30 * time.Minute).Format("2006-01-02 15:04:05"),
 		"support_aggregate_pay": true,
 	}
 }
