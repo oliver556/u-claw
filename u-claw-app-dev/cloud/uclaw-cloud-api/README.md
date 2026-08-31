@@ -82,6 +82,7 @@ https://license.yiyong.me/admin
 - 生成激活码并写入 PostgreSQL 库存；新生成和重发的激活码会用 `ADMIN_ENCRYPTION_KEY` 加密保存展示材料，可在后台列表查看和复制。
 - 查询激活码状态、绑定手机号、绑定的 Bavi-box 用户 ID。
 - 查询 New API 用户映射、New API user id、base URL、token 轮换时间，以及最近一次首启激活状态。
+- 查询充值订单、支付宝交易号、金额、回调次数、New API 入账状态和失败原因；这里的数据来自阿里云 PostgreSQL，是支付与入账排障的审计入口。
 - 禁用未使用激活码。
 - 重发未使用或已禁用激活码：旧码标记为 `reissued`，新码写入同批次库存。
 
@@ -101,6 +102,9 @@ curl -sS -X POST https://license.yiyong.me/internal/admin/v1/auth/login \
 
 curl -H "Authorization: Bearer $ADMIN_SESSION_TOKEN" \
   https://license.yiyong.me/internal/admin/v1/activation-codes
+
+curl -H "Authorization: Bearer $ADMIN_SESSION_TOKEN" \
+  "https://license.yiyong.me/internal/admin/v1/recharge-orders?status=credited&provider=alipay&limit=50"
 
 curl -X POST -H "Authorization: Bearer $ADMIN_SESSION_TOKEN" \
   -H 'Content-Type: application/json' \

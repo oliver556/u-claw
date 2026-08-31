@@ -238,6 +238,29 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"codes": codes})
 	})
+	mux.HandleFunc("GET /internal/admin/v1/recharge-orders", func(w http.ResponseWriter, r *http.Request) {
+		if err := verifyAdmin(r, cfg, options.Admin); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Admin == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("admin service is not configured"))
+			return
+		}
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		orders, err := options.Admin.ListRechargeOrders(r.Context(), admin.RechargeOrderFilter{
+			Status:   r.URL.Query().Get("status"),
+			Provider: r.URL.Query().Get("provider"),
+			Phone:    r.URL.Query().Get("phone"),
+			OrderNo:  r.URL.Query().Get("orderNo"),
+			Limit:    limit,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"orders": orders})
+	})
 	mux.HandleFunc("POST /internal/admin/v1/activation-codes/generate", func(w http.ResponseWriter, r *http.Request) {
 		if err := verifyAdmin(r, cfg, options.Admin); err != nil {
 			writeError(w, http.StatusUnauthorized, err)

@@ -139,8 +139,13 @@ const adminConsoleHTML = `<!doctype html>
     .badge { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 999px; background: #edf4ff; color: var(--blue); font-weight: 700; white-space: nowrap; }
     .badge.bound { background: #ecfdf3; color: var(--green); }
     .badge.disabled, .badge.reissued { background: #fff1f0; color: var(--red); }
+    .badge.created { background: #f2f4f7; color: #667085; }
+    .badge.paid, .badge.crediting { background: #fff7e6; color: #b54708; }
+    .badge.credited { background: #ecfdf3; color: var(--green); }
+    .badge.credit_failed { background: #fff1f0; color: var(--red); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .muted { color: var(--muted); }
+    .money { font-weight: 800; color: #101828; white-space: nowrap; }
     .cell-main { display: block; color: var(--text); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cell-sub { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .empty-mark { color: #98a2b3; }
@@ -151,6 +156,7 @@ const adminConsoleHTML = `<!doctype html>
     .row-actions { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
     .row-actions button { min-height: 32px; padding: 0 10px; font-size: 13px; }
     .empty { padding: 24px; color: var(--muted); text-align: center; }
+    .recharge-table { min-width: 1540px; }
     @media (max-width: 980px) {
       header { padding: 0 16px; }
       .span-2, .span-3, .span-4, .span-5, .span-6, .span-8 { grid-column: span 12; }
@@ -196,6 +202,77 @@ const adminConsoleHTML = `<!doctype html>
           <div class="metric"><span class="muted">未激活</span><strong id="mUnused">0</strong></div>
           <div class="metric"><span class="muted">已绑定</span><strong id="mBound">0</strong></div>
           <div class="metric"><span class="muted">不可用</span><strong id="mClosed">0</strong></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>充值记录</h2>
+          <p id="rechargeMessage" class="notice"></p>
+        </div>
+        <div class="grid table-toolbar">
+          <label class="span-2">状态
+            <select id="rechargeStatusFilter">
+              <option value="">全部</option>
+              <option value="created">created</option>
+              <option value="paid">paid</option>
+              <option value="crediting">crediting</option>
+              <option value="credited">credited</option>
+              <option value="credit_failed">credit_failed</option>
+            </select>
+          </label>
+          <label class="span-2">支付
+            <select id="rechargeProviderFilter">
+              <option value="">全部</option>
+              <option value="alipay">alipay</option>
+              <option value="virtual">virtual</option>
+            </select>
+          </label>
+          <label class="span-3">手机号 / New API 账号
+            <input id="rechargePhoneFilter" placeholder="精确查询">
+          </label>
+          <label class="span-3">订单号 / 支付宝交易号
+            <input id="rechargeOrderFilter" placeholder="支持模糊查询">
+          </label>
+          <label class="span-2">条数
+            <input id="rechargeLimit" type="number" min="1" max="200" value="50">
+          </label>
+          <div class="span-12 toolbar">
+            <button class="primary" id="loadRecharge">查询充值记录</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="recharge-table">
+            <colgroup>
+              <col style="width:190px">
+              <col style="width:150px">
+              <col style="width:92px">
+              <col style="width:110px">
+              <col style="width:120px">
+              <col style="width:170px">
+              <col style="width:220px">
+              <col style="width:110px">
+              <col style="width:160px">
+              <col style="width:220px">
+              <col style="width:196px">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>订单</th>
+                <th>用户</th>
+                <th>支付</th>
+                <th>金额</th>
+                <th>状态</th>
+                <th>New API</th>
+                <th>支付宝交易号</th>
+                <th>回调</th>
+                <th>创建时间</th>
+                <th>支付 / 入账时间</th>
+                <th>错误</th>
+              </tr>
+            </thead>
+            <tbody id="rechargeRows"></tbody>
+          </table>
         </div>
       </section>
 
@@ -308,6 +385,10 @@ const adminConsoleHTML = `<!doctype html>
       $("message").textContent = text || "";
       $("message").classList.toggle("error", Boolean(isError));
     }
+    function showRechargeMessage(text, isError) {
+      $("rechargeMessage").textContent = text || "";
+      $("rechargeMessage").classList.toggle("error", Boolean(isError));
+    }
     async function request(path, options) {
       const res = await fetch(path, options || {});
       const data = await res.json().catch(() => ({}));
@@ -337,7 +418,7 @@ const adminConsoleHTML = `<!doctype html>
       $("authTitle").textContent = setup.registrationOpen ? "首次注册管理员" : "管理员登录";
       if (sessionToken) {
         setLoggedIn(username || "admin");
-        await loadCodes().catch((err) => {
+        await refreshAdminData().catch((err) => {
           setLoggedOut();
           showAuth(err.message, true);
         });
@@ -359,7 +440,7 @@ const adminConsoleHTML = `<!doctype html>
       localStorage.setItem("uclaw_admin_session", sessionToken);
       localStorage.setItem("uclaw_admin_username", username);
       setLoggedIn(username);
-      await loadCodes();
+      await refreshAdminData();
     }
     function fmtTime(value) {
       if (!value) return "-";
@@ -373,12 +454,71 @@ const adminConsoleHTML = `<!doctype html>
         reissued: "已重发"
       })[status] || status || "-";
     }
+    function rechargeStatusLabel(status) {
+      return ({
+        created: "待支付",
+        paid: "已支付",
+        crediting: "入账中",
+        credited: "已入账",
+        credit_failed: "入账失败"
+      })[status] || status || "-";
+    }
+    function money(cents) {
+      const value = Number(cents || 0) / 100;
+      return "¥" + value.toFixed(2);
+    }
     function empty() {
       return '<span class="empty-mark">-</span>';
     }
     function mainSub(main, sub) {
       if (!main) return empty();
       return '<span class="cell-main">' + esc(main) + '</span>' + (sub ? '<span class="cell-sub">' + esc(sub) + '</span>' : "");
+    }
+    async function refreshAdminData() {
+      await Promise.all([loadCodes(), loadRechargeOrders()]);
+    }
+    function renderRechargeRows(orders) {
+      const body = $("rechargeRows");
+      body.innerHTML = "";
+      if (!orders.length) {
+        body.innerHTML = '<tr><td colspan="11" class="empty">暂无充值记录</td></tr>';
+        return;
+      }
+      for (const item of orders) {
+        const tr = document.createElement("tr");
+        const userSub = item.uclawUserId ? "Bavi-box #" + item.uclawUserId : "";
+        const newapiSub = item.newapiUserId ? "New API #" + item.newapiUserId : "";
+        const callbackSub = item.lastCallbackAt ? fmtTime(item.lastCallbackAt) : "";
+        const paidCredited = [
+          item.paidAt ? "支付 " + fmtTime(item.paidAt) : "",
+          item.creditedAt ? "入账 " + fmtTime(item.creditedAt) : ""
+        ].filter(Boolean).join(" · ");
+        tr.innerHTML =
+          '<td title="' + esc(item.orderNo || "-") + '">' + mainSub(item.orderNo, "订单 #" + item.id) + "</td>" +
+          '<td title="' + esc(item.phone || "-") + '">' + mainSub(item.phone, userSub) + "</td>" +
+          "<td>" + esc(item.provider || "-") + "</td>" +
+          '<td><span class="money">' + esc(money(item.amountCents)) + "</span></td>" +
+          '<td><span class="badge ' + esc(item.status) + '">' + esc(rechargeStatusLabel(item.status)) + "</span></td>" +
+          '<td title="' + esc((item.newapiUsername || "-") + (newapiSub ? " · " + newapiSub : "")) + '">' + mainSub(item.newapiUsername, newapiSub) + "</td>" +
+          '<td class="mono" title="' + esc(item.providerTradeNo || "-") + '">' + (item.providerTradeNo ? esc(item.providerTradeNo) : empty()) + "</td>" +
+          "<td>" + mainSub(String(item.callbackCount || 0), callbackSub) + "</td>" +
+          '<td class="time-cell">' + esc(fmtTime(item.createdAt)) + "</td>" +
+          '<td title="' + esc(paidCredited || "-") + '">' + (paidCredited ? esc(paidCredited) : empty()) + "</td>" +
+          '<td title="' + esc(item.lastError || "-") + '">' + (item.lastError ? esc(item.lastError) : empty()) + "</td>";
+        body.appendChild(tr);
+      }
+    }
+    async function loadRechargeOrders() {
+      showRechargeMessage("");
+      const params = new URLSearchParams();
+      if ($("rechargeStatusFilter").value) params.set("status", $("rechargeStatusFilter").value);
+      if ($("rechargeProviderFilter").value) params.set("provider", $("rechargeProviderFilter").value);
+      if ($("rechargePhoneFilter").value) params.set("phone", $("rechargePhoneFilter").value);
+      if ($("rechargeOrderFilter").value) params.set("orderNo", $("rechargeOrderFilter").value);
+      params.set("limit", $("rechargeLimit").value || "50");
+      const data = await api("/internal/admin/v1/recharge-orders?" + params.toString());
+      renderRechargeRows(data.orders || []);
+      showRechargeMessage("已加载 " + (data.orders || []).length + " 条");
     }
     function renderRows(codes) {
       $("mAll").textContent = codes.length;
@@ -484,6 +624,7 @@ const adminConsoleHTML = `<!doctype html>
     $("register").onclick = () => loginOrRegister("/internal/admin/v1/auth/register").catch((err) => showAuth(err.message, true));
     $("logout").onclick = setLoggedOut;
     $("load").onclick = () => loadCodes().catch((err) => showMessage(err.message, true));
+    $("loadRecharge").onclick = () => loadRechargeOrders().catch((err) => showRechargeMessage(err.message, true));
     $("generate").onclick = () => generateCodes().catch((err) => showMessage(err.message, true));
     init().catch((err) => showAuth(err.message, true));
   </script>

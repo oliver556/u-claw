@@ -653,6 +653,9 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	if pageRec.Code != http.StatusOK || !strings.Contains(pageRec.Body.String(), "Bavi-box 运营后台") {
 		t.Fatalf("admin page status = %d body = %s", pageRec.Code, pageRec.Body.String())
 	}
+	if !strings.Contains(pageRec.Body.String(), "充值记录") || !strings.Contains(pageRec.Body.String(), "/internal/admin/v1/recharge-orders") {
+		t.Fatalf("admin page must include recharge order management")
+	}
 	if !strings.Contains(pageRec.Body.String(), `item.status !== "unused" && item.status !== "disabled"`) {
 		t.Fatalf("admin page must disable reissue outside unused/disabled states")
 	}
@@ -774,6 +777,14 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	}
 	if !strings.Contains(listRec.Body.String(), `"status":"reissued"`) || !strings.Contains(listRec.Body.String(), `"codeVisible":true`) {
 		t.Fatalf("list body missing expected code details: %s", listRec.Body.String())
+	}
+
+	rechargeRec := httptest.NewRecorder()
+	rechargeReq := httptest.NewRequest(http.MethodGet, "/internal/admin/v1/recharge-orders?status=credited&provider=alipay&limit=10", nil)
+	rechargeReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+	server.ServeHTTP(rechargeRec, rechargeReq)
+	if rechargeRec.Code != http.StatusOK || !strings.Contains(rechargeRec.Body.String(), `"orders":[]`) {
+		t.Fatalf("recharge list status = %d body = %s", rechargeRec.Code, rechargeRec.Body.String())
 	}
 }
 
