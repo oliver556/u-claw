@@ -20,7 +20,10 @@ const macLauncherScriptInclude = path.join(appDir, 'scripts', 'launcher', 'macos
 const macLauncherBinary = path.join(releaseDir, 'launcher', 'macos', 'Bavi-box');
 const winLauncherSourceDir = path.join(appDir, 'scripts', 'launcher', 'windows');
 const winLauncherBinary = path.join(releaseDir, 'launcher', 'Bavi-box.exe');
+const winUpdaterSourceDir = path.join(appDir, 'scripts', 'updater', 'windows-entry');
+const winUpdaterBinary = path.join(releaseDir, 'launcher', 'Bavi-box Win Update.exe');
 const winSyncScript = path.join(appDir, 'scripts', 'Windows-Sync-Data.ps1');
+const macIndependentUpdateScript = path.join(appDir, 'scripts', 'Bavi-box Mac Update.command');
 const desktopAgentDir = path.join(process.env.HOME || '', 'Library', 'Application Support', 'Bavi-box', '.openclaw', 'agents', 'main', 'agent');
 
 function usage() {
@@ -336,6 +339,7 @@ Built: ${localDisplayTime()}
 
   Mac:
   Formal entry: double-click Bavi-box.app
+  Independent updater: double-click Bavi-box Mac Update.command
   Diagnostic entry: app/scripts/Mac-Start-App.command
   App cache: ~/Library/Caches/Bavi-box/u-claw-app-mac-arm64
   App cache: ~/Library/Caches/Bavi-box/u-claw-app-mac-x64
@@ -351,6 +355,7 @@ Built: ${localDisplayTime()}
 
   Windows:
   Formal entry: double-click Bavi-box.exe
+  Independent updater: double-click Bavi-box Win Update.exe
   Diagnostic entry: app/scripts/Windows-Start-App.bat
   Sync helper: app/scripts/Windows-Sync-Data.ps1
   App cache: %LOCALAPPDATA%\\Bavi-box\\usb-portable\\app-win-x64
@@ -397,6 +402,7 @@ Launcher behavior:
   Clean same-machine restart reuses current app and data cache, skipping USB-to-runtime sync when markers match.
   Close asks for confirmation first, then shows shutdown progress in app while launcher stays hidden.
   Immediate reopen during shutdown queues one relaunch instead of starting a second app/process.
+  Independent updater downloads, verifies, stages, replaces program layer, and launches Bavi-box.app/Bavi-box.exe after completion.
 	`;
 }
 
@@ -512,6 +518,57 @@ function buildWindowsLauncher(stageRoot) {
   fs.copyFileSync(winLauncherBinary, path.join(stageRoot, 'Bavi-box.exe'));
 }
 
+function buildWindowsUpdater(stageRoot) {
+  ensureFile(path.join(winUpdaterSourceDir, 'main.go'), 'Windows updater source');
+  fs.mkdirSync(path.dirname(winUpdaterBinary), { recursive: true });
+  run('go', ['build', '-trimpath', '-ldflags=-s -w', '-o', winUpdaterBinary, '.'], {
+    cwd: winUpdaterSourceDir,
+    env: {
+      GOOS: 'windows',
+      GOARCH: 'amd64',
+      CGO_ENABLED: '0',
+      GO111MODULE: 'off'
+    }
+  });
+  ensureFile(winUpdaterBinary, 'Windows updater executable');
+  fs.copyFileSync(winUpdaterBinary, path.join(stageRoot, 'Bavi-box Win Update.exe'));
+}
+
+function copyUpdateRuntime(stageRoot) {
+  const destination = path.join(stageRoot, 'app', 'update-runtime');
+  fs.rmSync(destination, { recursive: true, force: true });
+  const runtimes = [
+    ['node-darwin-arm64', path.join('bin', 'node'), 'tar.gz'],
+    ['node-darwin-x64', path.join('bin', 'node'), 'tar.gz'],
+    ['node-win32-x64', 'node.exe', 'zip']
+  ];
+  const temporaryRoot = fs.mkdtempSync(path.join(releaseDir, 'updater-runtime-'));
+  try {
+    for (const [runtimeName, executableRelativePath, archiveType] of runtimes) {
+      const source = path.join(appDir, 'resources', 'runtime', runtimeName, executableRelativePath);
+      ensureFile(source, `updater runtime ${runtimeName}`);
+      const sourceRoot = path.join(temporaryRoot, runtimeName);
+      const stagedExecutable = path.join(sourceRoot, executableRelativePath);
+      fs.mkdirSync(path.dirname(stagedExecutable), { recursive: true });
+      fs.copyFileSync(source, stagedExecutable);
+      if (archiveType === 'tar.gz') {
+        fs.mkdirSync(destination, { recursive: true });
+        run('tar', ['-czf', path.join(destination, `${runtimeName}.tar.gz`), '-C', sourceRoot, '.'], {
+          env: { COPYFILE_DISABLE: '1' }
+        });
+      } else {
+        fs.mkdirSync(destination, { recursive: true });
+        run('zip', ['-qry', path.join(destination, `${runtimeName}.zip`), '.'], {
+          cwd: sourceRoot,
+          env: { COPYFILE_DISABLE: '1' }
+        });
+      }
+    }
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
 function assembleStage(edition) {
   ensureFile(macArm64Archive, 'Mac arm64 archive');
   ensureFile(macX64Archive, 'Mac x64 archive');
@@ -539,9 +596,15 @@ function assembleStage(edition) {
   fs.copyFileSync(path.join(appDir, 'scripts', 'Mac-Start-App.command'), path.join(portableScriptsDir, 'Mac-Start-App.command'));
   fs.copyFileSync(path.join(appDir, 'scripts', 'Windows-Start-App.bat'), path.join(portableScriptsDir, 'Windows-Start-App.bat'));
   fs.copyFileSync(winSyncScript, path.join(portableScriptsDir, 'Windows-Sync-Data.ps1'));
+  fs.copyFileSync(path.join(appDir, 'scripts', 'hard-update-client.js'), path.join(portableScriptsDir, 'hard-update-client.js'));
+  fs.cpSync(path.join(appDir, 'scripts', 'lib'), path.join(portableScriptsDir, 'lib'), { recursive: true });
+  fs.copyFileSync(macIndependentUpdateScript, path.join(stageRoot, 'Bavi-box Mac Update.command'));
   fs.chmodSync(path.join(portableScriptsDir, 'Mac-Start-App.command'), 0o755);
+  fs.chmodSync(path.join(stageRoot, 'Bavi-box Mac Update.command'), 0o755);
+  copyUpdateRuntime(stageRoot);
   buildMacLauncher(stageRoot);
   buildWindowsLauncher(stageRoot);
+  buildWindowsUpdater(stageRoot);
   generateConfig(edition, configPath);
   seedStreamerAuthStore(edition, stageRoot);
   writeText(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), packageNotes(edition, macArm64Hash, macX64Hash, winHash));
@@ -592,11 +655,14 @@ function deploy(stage, usbRoot) {
   const backupRoot = path.join(targetRoot, `_backup-before-portable-deploy-${localTimestamp()}`);
   const relativeFiles = [
     'Bavi-box.exe',
+    'Bavi-box Win Update.exe',
+    'Bavi-box Mac Update.command',
     'UCLAW-PACKAGE-NOTES.txt',
     'app/version.json',
     'app/scripts/Mac-Start-App.command',
     'app/scripts/Windows-Start-App.bat',
     'app/scripts/Windows-Sync-Data.ps1',
+    'app/scripts/hard-update-client.js',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz',
     'app/desktop-archive/u-claw-app-mac-arm64.tar.gz.sha256',
     'app/desktop-archive/u-claw-app-mac-x64.tar.gz',
@@ -605,7 +671,9 @@ function deploy(stage, usbRoot) {
     'app/desktop-archive/u-claw-app-win-x64.zip.sha256'
   ];
   const relativeDirs = [
-    'Bavi-box.app'
+    'Bavi-box.app',
+    'app/scripts/lib',
+    'app/update-runtime'
   ];
   const legacyFiles = [
     'U-Claw.exe',
@@ -614,6 +682,8 @@ function deploy(stage, usbRoot) {
     'Mac-Start-App.command',
     'Windows-Start-App.bat',
     'Windows-Sync-Data.ps1',
+    'Bavi-box Win 更新.exe',
+    'Bavi-box Mac 更新.command',
     `app/desktop-archive/U-Claw ${version}.exe`,
     `app/desktop-archive/Bavi-box ${version}.exe`
   ];
@@ -652,6 +722,7 @@ function deploy(stage, usbRoot) {
     fs.rmSync(path.join(targetRoot, relativeDir), { recursive: true, force: true });
   }
   fs.chmodSync(path.join(targetRoot, 'app', 'scripts', 'Mac-Start-App.command'), 0o755);
+  fs.chmodSync(path.join(targetRoot, 'Bavi-box Mac Update.command'), 0o755);
   fs.chmodSync(path.join(targetRoot, 'Bavi-box.app', 'Contents', 'MacOS', 'Bavi-box'), 0o755);
   const appleDoubleRemoved = removeAppleDoubleFiles(targetRoot);
 

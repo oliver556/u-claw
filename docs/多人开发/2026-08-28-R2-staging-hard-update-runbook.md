@@ -2,7 +2,14 @@
 
 - 日期：2026-08-28
 - 范围：方案 C / Phase 1 staging
-- 状态：真实 staging 鉴权、R2 上传、HTTP 下载验证
+- 状态：历史归档；2026-08-31 起不再作为正式发布入口
+
+> 2026-08-31 更新：R2 发布链路已废弃。正式发布改用 64 前置机静态目录：
+> `64.90.19.251:24851`、`/srv/uclaw-updates/releases`、
+> `https://download.yiyong.me/uclaw/releases/production.json`。
+> 当前正式脚本为 `scripts/hard-update-upload-front64.js` 和
+> `scripts/publish-hard-update-release.js`。
+> 本文只保留历史验收记录，不再用于发版。
 
 ## 1. 职责
 

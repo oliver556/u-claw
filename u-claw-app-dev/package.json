@@ -1,6 +1,6 @@
 {
   "name": "u-claw",
-  "version": "2.1.17",
+  "version": "1.0.1",
   "description": "Bavi-box - AI 助手桌面版，插上 U 盘就能用",
   "main": "src/main.js",
   "author": "Bavi-box <hello@u-claw.org> (https://u-claw.org)",
@@ -29,7 +29,7 @@
     "package:portable:streamer": "node scripts/package-portable.js --edition streamer",
     "hard-update:package": "node scripts/hard-update-package.js",
     "hard-update:key": "node scripts/hard-update-release-key.js",
-    "hard-update:upload:r2": "node scripts/hard-update-upload-r2.js",
+    "hard-update:publish:admin-usb": "node scripts/publish-hard-update-release.js --channel prod --confirm-prod --env /Volumes/发布管理员U盘/U-Claw-Release-Secrets/oss-publish.env",
     "hard-update:check:mock": "node scripts/hard-update-check-mock.js",
     "hard-update:server": "node scripts/hard-update-control-plane-server.js",
     "hard-update:publish": "node scripts/publish-hard-update-release.js",

@@ -15,9 +15,8 @@ const {
 } = require('./lib/hard-update-utils');
 const { verifyPayload } = require('./lib/release-signing');
 
-const productionUrl = 'https://yiyong.me/uclaw/releases/production.json';
-const stagingProductionUrl = 'https://download.yiyong.me/uclaw/releases/production.json';
-const legacyR2StagingProductionUrl = 'https://pub-8289f643846848528b61bfd5dbf17e43.r2.dev/releases/production.json';
+const productionUrl = 'https://oss-download.yiyong.me/bavi-box/releases/production.json';
+const stagingProductionUrl = 'https://oss-download.yiyong.me/bavi-box/releases/production.json';
 const defaultUpdateCheckUrl = 'https://updates.yiyong.me/uclaw/update/check';
 const transactionStates = [
   'checking',
@@ -34,23 +33,81 @@ const transactionStates = [
   'complete',
   'failed'
 ];
+const safeNamePattern = /[^A-Za-z0-9._-]/g;
+
+function bytesToMb(bytes) {
+  return (bytes / 1024 / 1024).toFixed(1);
+}
+
+function dirSizeBytes(root) {
+  if (!fs.existsSync(root)) return 0;
+  let total = 0;
+  const stack = [root];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (_) {
+      continue;
+    }
+    for (const entry of entries) {
+      const absolute = path.join(current, entry.name);
+      let stat;
+      try {
+        stat = fs.lstatSync(absolute);
+      } catch (_) {
+        continue;
+      }
+      if (stat.isDirectory()) stack.push(absolute);
+      else if (stat.isFile()) total += stat.size;
+    }
+  }
+  return total;
+}
+
+function runWithDirectoryProgress(label, directory, totalBytes, operation) {
+  const startedAt = Date.now();
+  console.log(`[hard-update-client] ${label}...`);
+  const interval = setInterval(() => {
+    const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+    const currentBytes = dirSizeBytes(directory);
+    if (totalBytes > 0) {
+      const pct = Math.min(99.9, (currentBytes / totalBytes) * 100).toFixed(1);
+      console.log(`[hard-update-client] ${label}... ${bytesToMb(currentBytes)}/${bytesToMb(totalBytes)} MB (${pct}%), ${elapsed}s elapsed.`);
+    } else {
+      console.log(`[hard-update-client] ${label}... ${bytesToMb(currentBytes)} MB, ${elapsed}s elapsed.`);
+    }
+  }, 5000);
+  try {
+    const result = operation();
+    const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+    const finalBytes = dirSizeBytes(directory);
+    if (totalBytes > 0) {
+      console.log(`[hard-update-client] ${label} finished: ${bytesToMb(finalBytes)}/${bytesToMb(totalBytes)} MB, ${elapsed}s elapsed.`);
+    } else {
+      console.log(`[hard-update-client] ${label} finished: ${bytesToMb(finalBytes)} MB, ${elapsed}s elapsed.`);
+    }
+    return result;
+  } finally {
+    clearInterval(interval);
+  }
+}
 
 function usage() {
   console.log(`Usage:
   node scripts/hard-update-client.js mock-update --usb <Bavi-box root> --release <release root> --platform win32-x64
   node scripts/hard-update-client.js mock-update --usb <Bavi-box root> --update-check-url ${defaultUpdateCheckUrl} --platform win32-x64 --device <device_id> --device-token <token>
   node scripts/hard-update-client.js mock-update --usb <Bavi-box root> --production-url ${stagingProductionUrl} --platform win32-x64
+  node scripts/hard-update-client.js independent-update --usb <Bavi-box root> --platform win32-x64 --launch-after <entrypoint>
   node scripts/hard-update-client.js startup-update --usb <Bavi-box root> --platform win32-x64 [--production-url <release.json>]
   node scripts/hard-update-client.js apply-startup-update --usb <Bavi-box root> --transaction <app/update-transaction.json> --wait-pid <pid> --launch-after <entrypoint>
   node scripts/hard-update-client.js check --usb <Bavi-box root> --release <release root> --platform darwin-arm64
   node scripts/hard-update-client.js check --usb <Bavi-box root> --update-check-url ${defaultUpdateCheckUrl} --platform darwin-arm64 --device <device_id> --device-token <token>
   node scripts/hard-update-client.js check --usb <Bavi-box root> --production-url ${stagingProductionUrl} --platform darwin-arm64
 
-Direct R2 mode is used when --release, --production-url, and --update-check-url are omitted. Default staging URL:
+Direct production mode is used when --release, --production-url, and --update-check-url are omitted. Default URL:
   ${stagingProductionUrl}
-
-Legacy R2 staging URL:
-  ${legacyR2StagingProductionUrl}
 
 Explicit update check mode:
   ${defaultUpdateCheckUrl}
@@ -79,6 +136,7 @@ function parseArgs(argv) {
     else if (arg === '--public-keys-url') options.publicKeysUrl = readValue();
     else if (arg === '--transaction') options.transaction = readValue();
     else if (arg === '--wait-pid') options.waitPid = readValue();
+    else if (arg === '--wait-shutdown-ms') options.waitShutdownMs = readValue();
     else if (arg === '--launch-after') options.launchAfter = readValue();
     else if (arg === '--stamp-file') options.stampFile = readValue();
     else if (arg === '--platform') options.platform = readValue();
@@ -121,6 +179,40 @@ function writeShutdownCompleteMock(usbRoot, transactionId) {
     reason: 'update',
     transactionId,
     completedAt: new Date().toISOString()
+  });
+}
+
+function shutdownCompletePath(usbRoot) {
+  return path.join(runtimeDir(usbRoot), 'shutdown-complete.json');
+}
+
+function removeShutdownComplete(usbRoot) {
+  fs.rmSync(shutdownCompletePath(usbRoot), { force: true });
+}
+
+function waitForShutdownComplete(usbRoot, transactionId, timeoutMs) {
+  const filePath = shutdownCompletePath(usbRoot);
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const tick = () => {
+      try {
+        if (fs.existsSync(filePath)) {
+          const payload = readJson(filePath);
+          if (payload?.schemaVersion === 1 && payload.reason === 'update' && payload.transactionId === transactionId) {
+            resolve();
+            return;
+          }
+        }
+      } catch (_) {
+        // Keep waiting while the app is still writing shutdown-complete.json.
+      }
+      if (Date.now() - started >= timeoutMs) {
+        reject(new Error(`Timed out waiting for Bavi-box to close for update transaction ${transactionId}`));
+        return;
+      }
+      setTimeout(tick, 1000);
+    };
+    tick();
   });
 }
 
@@ -193,7 +285,6 @@ function validateTransactionPath(usbRoot, transactionFile) {
 function resolveStartupProductionUrl(options) {
   return firstString([
     options.productionUrl,
-    process.env.R2_STAGING_PUBLIC_URL ? `${process.env.R2_STAGING_PUBLIC_URL.replace(/\/+$/, '')}/releases/production.json` : '',
     stagingProductionUrl
   ]);
 }
@@ -243,6 +334,24 @@ function publicKeysUrlForProduction(value) {
 
 function resolveHttpUrl(value, baseUrl) {
   return new URL(value, baseUrl).toString();
+}
+
+function safeCacheSegment(value, fallback) {
+  const segment = String(value || fallback || 'cache').replace(safeNamePattern, '-');
+  return segment || fallback || 'cache';
+}
+
+function downloadDirForRuntimePackage(stagingDir, manifest, platformKey) {
+  const usbRoot = path.dirname(path.dirname(stagingDir));
+  const rootId = sha256Bytes(Buffer.from(usbRoot, 'utf8')).slice(0, 16);
+  const packageKey = manifest?.package?.sha256 || 'runtime.pkg';
+  return path.join(
+    require('os').tmpdir(),
+    'bavi-box-update-downloads',
+    rootId,
+    safeCacheSegment(platformKey, 'platform'),
+    safeCacheSegment(packageKey, 'runtime.pkg')
+  );
 }
 
 function fetchBuffer(url, maxBytes = 20 * 1024 * 1024) {
@@ -325,7 +434,172 @@ function postJson(url, payload, options = {}) {
   });
 }
 
-function downloadFile(url, destination, expectedSize) {
+function requestBuffer(url, options = {}, maxBytes = 1024 * 1024) {
+  const client = url.startsWith('https:') ? require('https') : require('http');
+  return new Promise((resolve, reject) => {
+    const req = client.request(url, {
+      method: options.method || 'GET',
+      headers: {
+        'user-agent': 'u-claw-hard-update-mock/1',
+        ...(options.headers || {})
+      }
+    }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        requestBuffer(new URL(response.headers.location, url).toString(), options, maxBytes).then(resolve, reject);
+        return;
+      }
+      const chunks = [];
+      let size = 0;
+      response.on('data', chunk => {
+        size += chunk.length;
+        if (size > maxBytes) {
+          req.destroy(new Error(`HTTP response too large: ${url}`));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('end', () => resolve({
+        statusCode: response.statusCode,
+        headers: response.headers,
+        body: Buffer.concat(chunks)
+      }));
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error(`HTTP timeout: ${url}`)));
+    if (options.body) req.end(options.body);
+    else req.end();
+  });
+}
+
+async function probeRangeSupport(url) {
+  const result = await requestBuffer(url, { headers: { range: 'bytes=0-0' } }, 1024);
+  const contentRange = String(result.headers['content-range'] || '');
+  return result.statusCode === 206 && /^bytes 0-0\/\d+$/.test(contentRange);
+}
+
+function logDownloadProgress(downloaded, expectedSize, startedAt, lastLogRef) {
+  const now = Date.now();
+  if (now - lastLogRef.value < 5000 && downloaded < expectedSize) return;
+  const copiedMb = (downloaded / 1024 / 1024).toFixed(1);
+  const elapsed = Math.round((now - startedAt) / 1000);
+  if (expectedSize) {
+    const totalMb = (expectedSize / 1024 / 1024).toFixed(1);
+    const pct = ((downloaded * 100) / expectedSize).toFixed(1);
+    console.log(`[hard-update-client] Downloading runtime.pkg... ${copiedMb}/${totalMb} MB (${pct}%), ${elapsed}s elapsed.`);
+  } else {
+    console.log(`[hard-update-client] Downloading runtime.pkg... ${copiedMb} MB, ${elapsed}s elapsed.`);
+  }
+  lastLogRef.value = now;
+}
+
+function downloadRange(url, destination, start, end, state) {
+  const client = url.startsWith('https:') ? require('https') : require('http');
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destination, { flags: 'w' });
+    const req = client.get(url, {
+      headers: {
+        'user-agent': 'u-claw-hard-update-mock/1',
+        range: `bytes=${start}-${end}`
+      }
+    }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        file.destroy();
+        response.resume();
+        downloadRange(new URL(response.headers.location, url).toString(), destination, start, end, state).then(resolve, reject);
+        return;
+      }
+      if (response.statusCode !== 206) {
+        file.destroy();
+        response.resume();
+        reject(new Error(`HTTP ${response.statusCode} for range ${start}-${end} from ${url}`));
+        return;
+      }
+      response.on('data', chunk => {
+        state.downloaded += chunk.length;
+        logDownloadProgress(state.downloaded, state.expectedSize, state.startedAt, state.lastLogRef);
+      });
+      response.pipe(file);
+      file.on('finish', () => file.close(() => resolve(destination)));
+    });
+    file.on('error', error => {
+      reject(error);
+    });
+    req.on('error', error => {
+      file.destroy();
+      reject(error);
+    });
+    req.setTimeout(120000, () => req.destroy(new Error(`HTTP timeout: ${url}`)));
+  });
+}
+
+async function downloadFileMultipart(url, destination, expectedSize) {
+  const clientPartsDir = `${destination}.parts`;
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.mkdirSync(clientPartsDir, { recursive: true });
+  rmSyncBestEffort(destination, { force: true });
+  const partCount = Math.min(8, Math.max(2, Math.ceil(expectedSize / (64 * 1024 * 1024))));
+  const chunkSize = Math.ceil(expectedSize / partCount);
+  const segments = [];
+  for (let index = 0; index < partCount; index += 1) {
+    const start = index * chunkSize;
+    const end = Math.min(expectedSize - 1, ((index + 1) * chunkSize) - 1);
+    if (start <= end) segments.push({ index, start, end, partPath: path.join(clientPartsDir, `${String(index).padStart(3, '0')}.part`) });
+  }
+  const state = {
+    downloaded: 0,
+    expectedSize,
+    startedAt: Date.now(),
+    lastLogRef: { value: Date.now() }
+  };
+  console.log(`[hard-update-client] Using multipart downloader: ${Math.min(4, segments.length)} connections, resume cache enabled.`);
+  for (const segment of segments) {
+    if (fs.existsSync(segment.partPath)) {
+      const stat = fs.statSync(segment.partPath);
+      const expectedLength = segment.end - segment.start + 1;
+      if (stat.size === expectedLength) state.downloaded += stat.size;
+      else rmSyncBestEffort(segment.partPath, { force: true });
+    }
+  }
+  logDownloadProgress(state.downloaded, expectedSize, state.startedAt, state.lastLogRef);
+  let cursor = 0;
+  const concurrency = Math.min(4, segments.length);
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (cursor < segments.length) {
+      const segment = segments[cursor];
+      cursor += 1;
+      const expectedLength = segment.end - segment.start + 1;
+      if (fs.existsSync(segment.partPath) && fs.statSync(segment.partPath).size === expectedLength) continue;
+      rmSyncBestEffort(segment.partPath, { force: true });
+      await downloadRange(url, segment.partPath, segment.start, segment.end, state);
+    }
+  });
+  await Promise.all(workers);
+  const output = fs.createWriteStream(destination, { flags: 'wx' });
+  try {
+    for (const segment of segments) {
+      await new Promise((resolve, reject) => {
+        const input = fs.createReadStream(segment.partPath);
+        input.on('error', reject);
+        output.on('error', reject);
+        input.on('end', resolve);
+        input.pipe(output, { end: false });
+      });
+    }
+    output.end();
+    await new Promise((resolve, reject) => {
+      output.on('finish', resolve);
+      output.on('error', reject);
+    });
+  } catch (error) {
+    output.destroy();
+    throw error;
+  }
+  rmSyncBestEffort(clientPartsDir, { recursive: true, force: true });
+  return destination;
+}
+
+async function downloadFileSequential(url, destination, expectedSize) {
   const client = url.startsWith('https:') ? require('https') : require('http');
   rmSyncBestEffort(destination, { force: true });
   fs.mkdirSync(path.dirname(destination), { recursive: true });
@@ -352,18 +626,9 @@ function downloadFile(url, destination, expectedSize) {
       response.on('data', chunk => {
         size += chunk.length;
         if (expectedSize && size > expectedSize) req.destroy(new Error(`runtime.pkg larger than manifest size: ${url}`));
-        const now = Date.now();
-        if (now - lastLog >= 5000) {
-          const copiedMb = (size / 1024 / 1024).toFixed(1);
-          const elapsed = Math.round((now - startedAt) / 1000);
-          if (expectedSize) {
-            const totalMb = (expectedSize / 1024 / 1024).toFixed(1);
-            const pct = ((size * 100) / expectedSize).toFixed(1);
-            console.log(`[hard-update-client] Downloading runtime.pkg... ${copiedMb}/${totalMb} MB (${pct}%), ${elapsed}s elapsed.`);
-          } else {
-            console.log(`[hard-update-client] Downloading runtime.pkg... ${copiedMb} MB, ${elapsed}s elapsed.`);
-          }
-          lastLog = now;
+        if (Date.now() - lastLog >= 5000) {
+          logDownloadProgress(size, expectedSize, startedAt, { value: lastLog });
+          lastLog = Date.now();
         }
       });
       response.pipe(file);
@@ -380,6 +645,19 @@ function downloadFile(url, destination, expectedSize) {
     });
     req.setTimeout(120000, () => req.destroy(new Error(`HTTP timeout: ${url}`)));
   });
+}
+
+async function downloadFile(url, destination, expectedSize) {
+  if (expectedSize && expectedSize >= 64 * 1024 * 1024) {
+    try {
+      if (await probeRangeSupport(url)) {
+        return downloadFileMultipart(url, destination, expectedSize);
+      }
+    } catch (_) {
+      // fall back to sequential download below
+    }
+  }
+  return downloadFileSequential(url, destination, expectedSize);
 }
 
 async function readHttpJson(url) {
@@ -471,15 +749,24 @@ async function loadManifestFromSource(source, production, platformKey, keys) {
 
 async function verifyRuntimePackageFromSource(source, production, platformKey, manifest, stagingDir) {
   if (source.type === 'local') return verifyRuntimePackage(source.releaseRoot, production, platformKey, manifest, stagingDir);
-  const downloadDir = path.join(path.dirname(stagingDir), `${path.basename(stagingDir)}.download`);
+  const downloadDir = downloadDirForRuntimePackage(stagingDir, manifest, platformKey);
   const runtimePkg = path.join(downloadDir, 'runtime.pkg');
-  fs.rmSync(downloadDir, { recursive: true, force: true });
+  console.log(`[hard-update-client] Download cache: ${downloadDir}`);
   await downloadFile(resolveHttpUrl(manifest.package.url, source.productionUrl), runtimePkg, manifest.package.size);
-  if (sha256File(runtimePkg) !== manifest.package.sha256) throw new Error('runtime.pkg sha256 mismatch');
-  if (fs.statSync(runtimePkg).size !== manifest.package.size) throw new Error('runtime.pkg size mismatch');
-  unzipTo(runtimePkg, stagingDir);
-  const digest = treeDigest(stagingDir);
-  if (digest !== manifest.package.treeDigest) throw new Error('runtime.pkg treeDigest mismatch');
+  try {
+    if (sha256File(runtimePkg) !== manifest.package.sha256) throw new Error('runtime.pkg sha256 mismatch');
+    if (fs.statSync(runtimePkg).size !== manifest.package.size) throw new Error('runtime.pkg size mismatch');
+    runWithDirectoryProgress('Extracting update to USB staging', stagingDir, manifest.package.size, () => {
+      unzipTo(runtimePkg, stagingDir);
+    });
+    console.log('[hard-update-client] Verifying extracted update tree...');
+    const digest = treeDigest(stagingDir);
+    if (digest !== manifest.package.treeDigest) throw new Error('runtime.pkg treeDigest mismatch');
+  } catch (error) {
+    rmSyncBestEffort(downloadDir, { recursive: true, force: true });
+    throw error;
+  }
+  rmSyncBestEffort(downloadDir, { recursive: true, force: true });
   return runtimePkg;
 }
 
@@ -505,27 +792,32 @@ function installFromStaging(usbRoot, stagingDir) {
     'bootstrap',
     'Bavi-box.exe',
     'Bavi-box.app',
+    'Bavi-box Win Update.exe',
+    'Bavi-box Mac Update.command',
     'U-Claw Launcher.exe',
     'U-Claw Launcher.app',
     'UCLAW-PACKAGE-NOTES.txt'
   ]);
-  for (const entry of fs.readdirSync(stagingDir, { withFileTypes: true })) {
-    if (!allowed.has(entry.name)) throw new Error(`Installer refused unexpected root: ${entry.name}`);
-    const source = path.join(stagingDir, entry.name);
-    const destination = path.join(usbRoot, entry.name);
-    if (entry.name === 'data') throw new Error('Installer refused data/');
-    if (entry.name === 'app') {
-      installAppSubtree(source, destination);
-      continue;
+  runWithDirectoryProgress('Copying update to USB app', path.join(usbRoot, 'app'), dirSizeBytes(path.join(stagingDir, 'app')), () => {
+    for (const entry of fs.readdirSync(stagingDir, { withFileTypes: true })) {
+      if (!allowed.has(entry.name)) throw new Error(`Installer refused unexpected root: ${entry.name}`);
+      const source = path.join(stagingDir, entry.name);
+      const destination = path.join(usbRoot, entry.name);
+      console.log(`[hard-update-client] Replacing ${entry.name}...`);
+      if (entry.name === 'data') throw new Error('Installer refused data/');
+      if (entry.name === 'app') {
+        installAppSubtree(source, destination);
+        continue;
+      }
+      if (entry.isDirectory()) {
+        fs.rmSync(destination, { recursive: true, force: true });
+        copyDirFiltered(source, destination, () => true);
+      } else if (entry.isFile()) {
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        fs.copyFileSync(source, destination);
+      }
     }
-    if (entry.isDirectory()) {
-      fs.rmSync(destination, { recursive: true, force: true });
-      copyDirFiltered(source, destination, () => true);
-    } else if (entry.isFile()) {
-      fs.mkdirSync(path.dirname(destination), { recursive: true });
-      fs.copyFileSync(source, destination);
-    }
-  }
+  });
 }
 
 function installAppSubtree(sourceAppDir, destinationAppDir) {
@@ -554,9 +846,41 @@ function invalidateCacheStamp(usbRoot) {
   const runState = readJson(runStatePath);
   if (runState.stampFile) {
     fs.rmSync(runState.stampFile, { force: true });
-    return runState.stampFile;
   }
-  return null;
+  invalidateElectronProfileCache(runState);
+  return runState.stampFile || null;
+}
+
+function safeRemoveProfileChild(profileDir, childName) {
+  if (!profileDir || !childName) return;
+  const root = path.resolve(profileDir);
+  const target = path.resolve(root, childName);
+  if (!target.startsWith(`${root}${path.sep}`)) return;
+  fs.rmSync(target, { recursive: true, force: true });
+}
+
+function inferElectronProfileDir(runState) {
+  if (typeof runState.electronProfileDir === 'string' && runState.electronProfileDir.trim()) {
+    return runState.electronProfileDir.trim();
+  }
+  return '';
+}
+
+function invalidateElectronProfileCache(runState) {
+  const profileDir = inferElectronProfileDir(runState);
+  if (!profileDir || !fs.existsSync(profileDir)) return null;
+  for (const child of [
+    'Cache',
+    'Code Cache',
+    'GPUCache',
+    'DawnCache',
+    'DawnGraphiteCache',
+    'DawnWebGPUCache',
+    'Service Worker'
+  ]) {
+    safeRemoveProfileChild(profileDir, child);
+  }
+  return profileDir;
 }
 
 function writeVersion(usbRoot, production, platformKey, manifest) {
@@ -618,6 +942,32 @@ function waitForPidExit(pid, timeoutMs) {
     };
     tick();
   });
+}
+
+function isPidRunning(pid) {
+  const numericPid = Number(pid);
+  if (!Number.isInteger(numericPid) || numericPid <= 0) return false;
+  try {
+    process.kill(numericPid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+function readRunState(usbRoot) {
+  const filePath = path.join(runtimeDir(usbRoot), 'run-state.json');
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return readJson(filePath);
+  } catch (_) {
+    return null;
+  }
+}
+
+function hasRunningPortableApp(usbRoot) {
+  const runState = readRunState(usbRoot);
+  return isPidRunning(runState?.appPid);
 }
 
 function launchAfterUpdate(entrypoint) {
@@ -710,7 +1060,6 @@ async function mockUpdate(options) {
   const manifest = manifestResult.payload;
   const transactionId = `update-${Date.now()}-${production.releaseId}`;
   const stagingDir = path.join(usbRoot, 'app', '.update-staging', transactionId);
-  const downloadDir = path.join(path.dirname(stagingDir), `${path.basename(stagingDir)}.download`);
   const baseTx = {
     id: transactionId,
     targetVersion: production.requiredVersion,
@@ -752,12 +1101,9 @@ async function mockUpdate(options) {
     writeTransaction(usbRoot, { ...baseTx, state: 'restarting' });
     writeTransaction(usbRoot, { ...baseTx, state: 'complete' });
     fs.rmSync(stagingDir, { recursive: true, force: true });
-    fs.rmSync(downloadDir, { recursive: true, force: true });
   } catch (error) {
     failTransaction(usbRoot, baseTx, error);
     throw error;
-  } finally {
-    fs.rmSync(downloadDir, { recursive: true, force: true });
   }
   const finalResult = { updateRequired: true, updated: true, version: production.requiredVersion };
   console.log(JSON.stringify(finalResult, null, 2));
@@ -796,7 +1142,6 @@ async function startupUpdate(options) {
   const manifest = manifestResult.payload;
   const transactionId = `update-${Date.now()}-${production.releaseId}`;
   const stagingDir = path.join(usbRoot, 'app', '.update-staging', transactionId);
-  const downloadDir = path.join(path.dirname(stagingDir), `${path.basename(stagingDir)}.download`);
   const baseTx = {
     id: transactionId,
     targetVersion: production.requiredVersion,
@@ -827,8 +1172,6 @@ async function startupUpdate(options) {
   } catch (error) {
     failTransaction(usbRoot, baseTx, error);
     throw error;
-  } finally {
-    fs.rmSync(downloadDir, { recursive: true, force: true });
   }
 
   const result = {
@@ -854,8 +1197,10 @@ async function applyStartupUpdate(options) {
   const stagingDir = safeJoin(usbRoot, tx.stagingDir);
   assertInstallTreeSafe(stagingDir);
   writeTransaction(usbRoot, { ...tx, state: 'waiting-for-app-exit' });
+  console.log('[hard-update-client] Waiting for Bavi-box to exit before switching files...');
   await waitForPidExit(options.waitPid, 60000);
   writeTransaction(usbRoot, { ...tx, state: 'switching' });
+  console.log('[hard-update-client] Switching USB files to new version...');
   installFromStaging(usbRoot, stagingDir);
   writeTransaction(usbRoot, { ...tx, state: 'switched' });
   invalidateCacheStamp(usbRoot);
@@ -868,6 +1213,34 @@ async function applyStartupUpdate(options) {
   console.log(JSON.stringify({ applied: true, version: tx.targetVersion }, null, 2));
 }
 
+async function independentUpdate(options) {
+  if (!options.usb) throw new Error('--usb is required');
+  const usbRoot = path.resolve(options.usb);
+  const stageResult = await startupUpdate({
+    ...options,
+    productionUrl: options.productionUrl || process.env.UCLAW_UPDATE_PRODUCTION_URL || productionUrl
+  });
+  if (!stageResult.updateRequired) {
+    if (options.launchAfter) launchAfterUpdate(options.launchAfter);
+    return stageResult;
+  }
+  if (!stageResult.staged) throw new Error('Independent update did not stage a transaction');
+  const txPath = transactionPath(usbRoot);
+  const tx = readJson(txPath);
+  if (hasRunningPortableApp(usbRoot)) {
+    removeShutdownComplete(usbRoot);
+    requestUpdateShutdown(usbRoot, tx.id);
+    const timeoutMs = Number(options.waitShutdownMs || 120000);
+    await waitForShutdownComplete(usbRoot, tx.id, Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000);
+  }
+  await applyStartupUpdate({
+    ...options,
+    usb: usbRoot,
+    transaction: txPath
+  });
+  return { updateRequired: true, updated: true, version: tx.targetVersion };
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help || !options.command) {
@@ -876,6 +1249,7 @@ async function main() {
   }
   if (options.command === 'check') console.log(JSON.stringify(await check(options), null, 2));
   else if (options.command === 'mock-update') await mockUpdate(options);
+  else if (options.command === 'independent-update') await independentUpdate(options);
   else if (options.command === 'startup-update') {
     const result = await startupUpdate(options);
     if (result.updateRequired && result.staged) process.exitCode = 20;
@@ -895,6 +1269,7 @@ module.exports = {
   check,
   invalidateCacheStamp,
   mockUpdate,
+  independentUpdate,
   startupUpdate,
   applyStartupUpdate,
   requestUpdateShutdown,

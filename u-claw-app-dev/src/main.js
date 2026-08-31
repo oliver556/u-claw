@@ -228,9 +228,48 @@ function getElectronProfilePath() {
 
 const electronProfilePath = getElectronProfilePath();
 
+function removeElectronProfileCacheChild(childName) {
+  const root = path.resolve(electronProfilePath);
+  const target = path.resolve(root, childName);
+  if (!target.startsWith(`${root}${path.sep}`)) return;
+  fs.rmSync(target, { recursive: true, force: true });
+}
+
+function invalidateControlUiCacheOnVersionChange() {
+  const markerPath = path.join(electronProfilePath, 'bavi-box-ui-cache-version.json');
+  const currentVersion = String(installedReleaseInfo.version || app.getVersion()).trim();
+  let previousVersion = '';
+  try {
+    if (fs.existsSync(markerPath)) {
+      const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+      previousVersion = typeof marker.version === 'string' ? marker.version.trim() : '';
+    }
+  } catch {}
+  if (previousVersion === currentVersion) return;
+  for (const child of [
+    'Cache',
+    'Code Cache',
+    'GPUCache',
+    'DawnCache',
+    'DawnGraphiteCache',
+    'DawnWebGPUCache',
+    'Service Worker'
+  ]) {
+    removeElectronProfileCacheChild(child);
+  }
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  fs.writeFileSync(markerPath, JSON.stringify({
+    schemaVersion: 1,
+    version: currentVersion,
+    updatedAt: new Date().toISOString()
+  }, null, 2) + '\n');
+  console.log(`[${APP_NAME}] Control UI cache invalidated for version ${currentVersion}`);
+}
+
 try {
   fs.mkdirSync(userDataPath, { recursive: true });
   fs.mkdirSync(electronProfilePath, { recursive: true });
+  invalidateControlUiCacheOnVersionChange();
   app.setPath('userData', electronProfilePath);
   console.log(`[${APP_NAME}] Electron profile: ${electronProfilePath}`);
 } catch (error) {
@@ -487,7 +526,8 @@ function writeRunState(state = 'running') {
     cacheRoot: UCLAW_CACHE_ROOT || null,
     appCacheDir: UCLAW_APP_CACHE_DIR || null,
     archiveCache: UCLAW_ARCHIVE_CACHE || null,
-    stampFile: UCLAW_APP_CACHE_STAMP || null
+    stampFile: UCLAW_APP_CACHE_STAMP || null,
+    electronProfileDir: electronProfilePath || null
   });
 }
 

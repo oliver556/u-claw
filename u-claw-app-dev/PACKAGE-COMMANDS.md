@@ -34,6 +34,7 @@ npm run package:portable:streamer -- --usb /Volumes/UCLAW-01
 | `npm run sync:config` | 同步桌面/便携配置 | 只有指定 `--usb` 才会 |
 | `npm run package:portable:customer` | 生成客户便携版 | 指定 `--usb` 才会 |
 | `npm run package:portable:streamer` | 生成主播/内部便携版 | 指定 `--usb` 才会 |
+| `npm run hard-update:publish:admin-usb` | 使用“发布管理员 U 盘”里的签名私钥和 OSS 凭证发布 | 会改 OSS 发布目录 |
 | `npm run build:mac-arm64` | 只做 Mac Apple Silicon 构建排查 | 不会 |
 | `npm run build:mac-x64` | 只做 Mac Intel 构建排查 | 不会 |
 | `npm run build:win` | 只做 Windows 构建排查 | 不会 |
@@ -42,6 +43,66 @@ npm run package:portable:streamer -- --usb /Volumes/UCLAW-01
 | `npm run sync-lib` | 同步共享 UI/资源到桌面开发目录 | 不会 |
 | `npm run prepare-build` | 旧 `build:*` 的构建前准备 | 不会 |
 | `npm run postinstall` | npm 安装依赖后的自动步骤 | 不会 |
+
+## 2.1 独立更新包发布命令
+
+正式更新包发布到 OSS，不再走 64 前置机，也不走 R2。
+日常只用一个命令：`hard-update:publish:admin-usb`。
+
+```bash
+cd /Users/jamison/Document/300_学习/320_code/390_ai_agent/u-claw/u-claw-app-dev
+
+npm run hard-update:publish:admin-usb -- \
+  --stage release/portable-customer/Bavi-box \
+  --version 1.0.1
+```
+
+执行链路：
+
+```text
+hard-update-package create
+-> hard-update-package verify
+-> hard-update-upload-oss
+```
+
+远端目标：
+
+```text
+OSS Bucket：uclaw-updates-prod
+OSS Prefix：bavi-box/releases
+公开入口：https://oss-download.yiyong.me/bavi-box/releases/production.json
+```
+
+保留策略：
+
+```text
+默认只保留最近 3 个 packages/<releaseId>。
+需要临时保留更多版本时，加 --keep 5。
+```
+
+R2 上传入口已废弃：
+
+```bash
+node scripts/hard-update-upload-r2.js
+```
+
+直接执行 `scripts/hard-update-upload-r2.js` 会失败并提示改用
+`scripts/hard-update-upload-oss.js`。底层 OSS 上传脚本保留给排查用，不放进
+`package.json` 的日常入口。
+
+发布管理员 U 盘内文件：
+
+```text
+/Volumes/发布管理员U盘/U-Claw-Release-Secrets/release-signing-key.json
+/Volumes/发布管理员U盘/U-Claw-Release-Secrets/oss-publish.env
+```
+
+`release-signing-key.json` 是更新包签名私钥，用来签名 `production.json` 和各平台
+`manifest.json`。客户端会用打进包里的公钥验签。没有这个私钥，无法发布客户端信任的
+正式更新；私钥泄露后，必须轮换发布公钥/私钥。
+
+`oss-publish.env` 是 OSS 发布环境配置，包含 Bucket、Prefix、公开 URL 和 OSS 写入凭证。
+该文件只放发布管理员 U 盘，不进 git。
 
 ## 3. 开发启动命令
 

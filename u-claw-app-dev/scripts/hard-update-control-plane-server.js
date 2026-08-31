@@ -10,7 +10,7 @@ const { firstEnv, parseEnvFile } = require('./lib/local-env');
 const appDir = path.resolve(__dirname, '..');
 const defaultEnvPath = path.join(appDir, '.env');
 const defaultReleaseRoot = path.join(appDir, 'release', 'mock-hard-update');
-const defaultPublicBaseUrl = 'https://pub-8289f643846848528b61bfd5dbf17e43.r2.dev/releases';
+const defaultPublicBaseUrl = 'https://oss-download.yiyong.me/bavi-box/releases';
 const defaultPort = 18080;
 
 function parseArgs(argv) {
@@ -40,8 +40,8 @@ function loadConfig(options) {
     port: options.port || Number(firstEnv(env, ['UCLAW_UPDATE_CHECK_PORT'])) || defaultPort,
     releaseRoot: path.resolve(options.release || firstEnv(env, ['UCLAW_UPDATE_RELEASE_ROOT']) || defaultReleaseRoot),
     publicBaseUrl: options.publicBaseUrl
-      || firstEnv(env, ['UCLAW_UPDATE_PUBLIC_BASE_URL', 'R2_RELEASES_BASE_URL', 'R2_STAGING_RELEASES_BASE_URL'])
-      || `${firstEnv(env, ['R2_STAGING_PUBLIC_URL']) || defaultPublicBaseUrl.replace(/\/releases$/, '')}/releases`,
+      || firstEnv(env, ['UCLAW_UPDATE_PUBLIC_BASE_URL', 'UCLAW_FRONT64_PUBLIC_BASE_URL', 'UCLAW_RELEASES_BASE_URL'])
+      || defaultPublicBaseUrl,
     authMode,
     databaseUrl,
     psqlDatabase: firstEnv(env, ['UCLAW_UPDATE_PSQL_DATABASE']),

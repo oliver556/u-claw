@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
 const root = path.resolve(__dirname, "..");
 const controlUiDir = path.join(root, "node_modules", "openclaw", "dist", "control-ui");
@@ -1091,6 +1092,18 @@ function verifyServiceWorker(errors) {
     );
   }
 
+  if (!match[1].includes("hide-openclaw-update-banner-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing hide-openclaw-update-banner-1: ${match[1]}`,
+    );
+  }
+
+  if (!match[1].includes("footer-product-version-1")) {
+    errors.push(
+      `${path.relative(root, swPath)} EMBEDDED_CACHE_VERSION missing footer-product-version-1: ${match[1]}`,
+    );
+  }
+
   assertContains(errors, swPath, source, 'title: "Bavi-box"', "Bavi-box push fallback title");
   assertContains(errors, swPath, source, 'data.title || "Bavi-box"', "Bavi-box push default title");
 }
@@ -1228,6 +1241,59 @@ function verifyPrimaryNavigationProjection(errors) {
         errors.push(`${path.relative(root, file)} command palette still exposes low-priority route: ${token}`);
       }
     }
+  }
+}
+
+/**
+ * Verifies Bavi-box does not expose OpenClaw's upstream self-update prompt.
+ */
+function verifyOpenClawUpdateBannerHidden(errors) {
+  for (const file of listAssets(/^index-.*\.js$/, "index js")) {
+    const source = readUtf8(file);
+    assertContains(
+      errors,
+      file,
+      source,
+      "render(){let e=this.props;if(!e)return l;let t=null;return c`",
+      "disabled OpenClaw update banner render path",
+    );
+    assertNotContains(
+      errors,
+      file,
+      source,
+      "render(){let e=this.props;if(!e)return l;let t=e.updateAvailable;return c`",
+      "active OpenClaw update banner render path",
+    );
+  }
+}
+
+/**
+ * Verifies the customer shell exposes Bavi-box product release, not OpenClaw.
+ */
+function verifyFooterProductVersion(errors) {
+  for (const file of listAssets(/^index-.*\.js$/, "index js")) {
+    const source = readUtf8(file);
+    assertContains(
+      errors,
+      file,
+      source,
+      "this.loadBaviBoxVersion=async()=>",
+      "Bavi-box footer version loader",
+    );
+    assertContains(
+      errors,
+      file,
+      source,
+      "sidebar-footer-version",
+      "Bavi-box footer version node",
+    );
+    assertContains(
+      errors,
+      file,
+      source,
+      "Bavi-box ${this.baviBoxVersion}",
+      "Bavi-box footer version label",
+    );
   }
 }
 
@@ -1629,6 +1695,22 @@ function verifyChatSkillHubDropdown(errors) {
 }
 
 /**
+ * Verifies patched Control UI bundles remain valid JavaScript.
+ */
+function verifyControlUiJavaScriptSyntax(errors) {
+  for (const file of listAssets(/\.js$/, "control-ui js")) {
+    const result = spawnSync(process.execPath, ["--check", file], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (result.status !== 0) {
+      const detail = (result.stderr || result.stdout || "").split("\n").find((line) => line.trim()) || "node --check failed";
+      errors.push(`${path.relative(root, file)} has invalid JavaScript syntax: ${detail}`);
+    }
+  }
+}
+
+/**
  * Runs all SkillHub branding checks and exits non-zero when any patch invariant fails.
  */
 function main() {
@@ -1645,10 +1727,13 @@ function main() {
     verifyStartupLoadingBranding(errors);
     verifySkillHubNavigation(errors);
     verifyPrimaryNavigationProjection(errors);
+    verifyOpenClawUpdateBannerHidden(errors);
+    verifyFooterProductVersion(errors);
     verifyUiPolish(errors);
     verifyChatVoiceButtonBlue(errors);
     verifyChatSkillHubDropdown(errors);
     verifyHighRiskResiduals(errors);
+    verifyControlUiJavaScriptSyntax(errors);
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
   }

@@ -7,26 +7,26 @@ const { firstEnv, parseEnvFile } = require('./lib/local-env');
 const appDir = path.resolve(__dirname, '..');
 const defaultEnvPath = path.join(appDir, '.env');
 const defaultReleaseRoot = path.join(appDir, 'release', 'mock-hard-update');
+const defaultReleasesBaseUrl = 'https://oss-download.yiyong.me/bavi-box/releases';
 
 function usage() {
   console.log(`Usage:
-  node scripts/publish-hard-update-release.js --stage release/portable-customer/U-Claw --version 1.0.0 --channel staging
-  node scripts/publish-hard-update-release.js --stage release/portable-customer/U-Claw --version 1.0.0 --channel prod --confirm-prod
+  node scripts/publish-hard-update-release.js --stage release/portable-customer/Bavi-box --version 1.0.1 --channel prod --confirm-prod
 
 Options:
-  --stage <dir>       Portable stage root containing U-Claw files.
+  --stage <dir>       Portable stage root containing Bavi-box files.
   --version <version> Release version.
   --channel <name>    staging or prod. Defaults to staging.
-  --platform <key>    Build/upload one platform only.
   --env <file>        Local env file. Defaults to .env.
   --out <dir>         Release output dir. Defaults to release/mock-hard-update.
   --confirm-prod      Required for prod upload.
-  --deploy-control    Deploy update check service after upload.
+  --keep <count>      Keep newest N package versions on OSS. Defaults to 3.
+  --base-url <url>    Public OSS releases base URL. Defaults to ${defaultReleasesBaseUrl}.
 `);
 }
 
 function parseArgs(argv) {
-  const options = { channel: 'staging', env: defaultEnvPath, out: defaultReleaseRoot, deployControl: false };
+  const options = { channel: 'staging', env: defaultEnvPath, out: defaultReleaseRoot };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const readValue = () => {
@@ -41,8 +41,10 @@ function parseArgs(argv) {
     else if (arg === '--platform') options.platform = readValue();
     else if (arg === '--env') options.env = readValue();
     else if (arg === '--out') options.out = readValue();
+    else if (arg === '--keep') options.keep = readValue();
+    else if (arg === '--base-url') options.baseUrl = readValue();
     else if (arg === '--confirm-prod') options.confirmProd = true;
-    else if (arg === '--deploy-control') options.deployControl = true;
+    else if (arg === '--deploy-control') throw new Error('--deploy-control is deprecated for static OSS releases');
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return options;
@@ -59,33 +61,30 @@ function run(args, extraEnv = {}) {
   if (result.status !== 0) throw new Error(`${args.join(' ')} failed`);
 }
 
-function runShell(command, args, extraEnv = {}) {
-  const result = spawnSync(command, args, {
-    cwd: appDir,
-    env: { ...process.env, ...extraEnv },
-    encoding: 'utf8',
-    stdio: 'inherit'
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed`);
-}
-
 function baseUrlFor(options) {
   const env = parseEnvFile(path.resolve(options.env));
-  if (options.channel === 'staging') {
-    return `${firstEnv(env, ['DOWNLOAD_STAGING_PUBLIC_URL', 'R2_STAGING_PUBLIC_URL']).replace(/\/+$/, '')}/uclaw/releases`;
-  }
-  if (options.channel === 'prod') {
-    return `${firstEnv(env, ['DOWNLOAD_PROD_PUBLIC_URL', 'R2_PROD_PUBLIC_URL']).replace(/\/+$/, '')}/uclaw/releases`;
-  }
-  throw new Error('--channel must be staging or prod');
+  const channel = options.channel.toLowerCase();
+  const channelPrefix = channel === 'staging' ? 'STAGING' : 'PROD';
+  if (channel !== 'staging' && channel !== 'prod') throw new Error('--channel must be staging or prod');
+  if (options.baseUrl) return options.baseUrl.replace(/\/+$/, '');
+  const baseUrl = firstEnv(env, [
+    `DOWNLOAD_${channelPrefix}_OSS_RELEASES_BASE_URL`,
+    `DOWNLOAD_${channelPrefix}_RELEASES_BASE_URL`,
+    'UCLAW_OSS_RELEASES_BASE_URL',
+    'UCLAW_RELEASES_BASE_URL'
+  ]);
+  if (baseUrl) return baseUrl.replace(/\/+$/, '');
+  const publicRoot = firstEnv(env, [`DOWNLOAD_${channelPrefix}_OSS_PUBLIC_URL`, 'DOWNLOAD_OSS_PUBLIC_URL']);
+  if (publicRoot) return `${publicRoot.replace(/\/+$/, '')}/bavi-box/releases`;
+  return defaultReleasesBaseUrl;
 }
 
 function assertOptions(options) {
   if (options.help) return;
   if (!options.stage) throw new Error('--stage is required');
   if (!options.version) throw new Error('--version is required');
-  if (options.channel === 'prod' && !options.confirmProd) throw new Error('--confirm-prod is required for prod');
+  if (!options.confirmProd) throw new Error('--confirm-prod is required for OSS publish');
+  if (options.platform) throw new Error('--platform is disabled for OSS publish; publish full Mac/Win release together');
   if (!fs.existsSync(path.resolve(options.stage))) throw new Error(`Stage not found: ${path.resolve(options.stage)}`);
 }
 
@@ -112,41 +111,15 @@ function main() {
     options.env
   ].concat(options.platform ? ['--platform', options.platform] : []));
   run(['scripts/hard-update-package.js', 'verify', '--release', options.out]);
-  if (options.deployControl) {
-    run([
-      'scripts/hard-update-upload-r2.js',
-      '--release',
-      options.out,
-      '--env',
-      options.env,
-      '--channel',
-      options.channel,
-      '--skip-production'
-    ].concat(options.platform ? ['--platform', options.platform] : []));
-    runShell('bash', ['scripts/deploy-hard-update-control-plane.sh'], {
-      UCLAW_UPDATE_RELEASE_SOURCE: path.resolve(options.out)
-    });
-    run([
-      'scripts/hard-update-upload-r2.js',
-      '--release',
-      options.out,
-      '--env',
-      options.env,
-      '--channel',
-      options.channel,
-      '--only-production'
-    ]);
-    return;
-  }
   run([
-    'scripts/hard-update-upload-r2.js',
+    'scripts/hard-update-upload-oss.js',
     '--release',
     options.out,
     '--env',
     options.env,
-    '--channel',
-    options.channel
-  ].concat(options.platform ? ['--platform', options.platform] : []));
+    '--base-url',
+    baseUrl
+  ].concat(options.keep ? ['--keep', options.keep] : []));
 }
 
 try {

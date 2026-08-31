@@ -21,8 +21,8 @@ const { firstEnv, parseEnvFile } = require('./lib/local-env');
 const appDir = path.resolve(__dirname, '..');
 const releaseDir = path.join(appDir, 'release');
 const packageJson = readJson(path.join(appDir, 'package.json'));
-const defaultProductionUrl = 'https://yiyong.me/uclaw/releases/production.json';
-const defaultBaseUrl = 'https://yiyong.me/uclaw/releases';
+const defaultProductionUrl = 'https://oss-download.yiyong.me/bavi-box/releases/production.json';
+const defaultBaseUrl = 'https://oss-download.yiyong.me/bavi-box/releases';
 const platforms = ['win32-x64', 'darwin-arm64', 'darwin-x64'];
 
 function usage() {
@@ -43,7 +43,11 @@ Options:
 }
 
 function parseArgs(argv) {
-  const command = argv.shift();
+  let command = argv.shift();
+  if (command === '--help' || command === '-h') {
+    command = '';
+    argv.unshift('--help');
+  }
   const options = { command, version: packageJson.version, baseUrl: defaultBaseUrl, env: path.join(appDir, '.env') };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -78,6 +82,8 @@ function shouldCopyProgramLayer(relative) {
     'bootstrap',
     'Bavi-box.exe',
     'Bavi-box.app',
+    'Bavi-box Win Update.exe',
+    'Bavi-box Mac Update.command',
     'U-Claw Launcher.exe',
     'U-Claw Launcher.app',
     'UCLAW-PACKAGE-NOTES.txt'
@@ -233,23 +239,20 @@ function create(options) {
   writeJson(path.join(outRoot, 'deploy-config.template.json'), {
     schemaVersion: 1,
     productionUrl: defaultProductionUrl,
-    r2: {
-      accountId: '${R2_ACCOUNT_ID}',
-      endpoint: '${R2_ENDPOINT}',
-      accessKeyId: '${R2_ACCESS_KEY_ID}',
-      secretAccessKey: '${R2_SECRET_ACCESS_KEY}',
-      stagingBucket: '${R2_STAGING_BUCKET}',
-      stagingPublicUrl: '${R2_STAGING_PUBLIC_URL}',
-      prodBucket: '${R2_PROD_BUCKET}',
-      prodPublicUrl: '${R2_PROD_PUBLIC_URL}'
+    oss: {
+      bucket: '${UCLAW_OSS_BUCKET}',
+      endpoint: '${UCLAW_OSS_ENDPOINT}',
+      releasePrefix: '${UCLAW_OSS_RELEASE_PREFIX}',
+      publicBaseUrl: '${UCLAW_OSS_RELEASES_BASE_URL}',
+      keepReleases: '${UCLAW_OSS_KEEP_RELEASES}'
     },
     routes: {
-      productionJson: '/uclaw/releases/production.json',
-      packagesPrefix: '/uclaw/releases/packages/'
+      productionJson: '/bavi-box/releases/production.json',
+      packagesPrefix: '/bavi-box/releases/packages/'
     },
     notes: [
-      'No real R2 secret, server password, DNS token, or signing private key belongs in this file.',
-      'Client production URL remains https://yiyong.me/uclaw/releases/production.json.'
+      'No OSS access key, DNS token, or signing private key belongs in this file.',
+      `Client production URL remains ${defaultProductionUrl}.`
     ]
   });
   fs.rmSync(path.join(outRoot, '.work'), { recursive: true, force: true });

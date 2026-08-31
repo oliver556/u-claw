@@ -2,7 +2,7 @@
 const path = require('path');
 const { readJson } = require('./lib/hard-update-utils');
 
-const stagingBaseUrl = 'https://pub-8289f643846848528b61bfd5dbf17e43.r2.dev/releases';
+const stagingBaseUrl = 'https://oss-download.yiyong.me/bavi-box/releases';
 
 function usage() {
   console.log(`Usage:
@@ -13,7 +13,7 @@ Options:
   --platform <key>         win32-x64, darwin-arm64, darwin-x64. Defaults to current platform.
   --device <id>            devices.device_id.
   --installed-version <v>  Client installed version. Defaults to 0.0.0.
-  --base-url <url>         R2/public releases base URL. Defaults to staging R2.
+  --base-url <url>         Public releases base URL. Defaults to OSS.
 `);
 }
 
@@ -68,7 +68,7 @@ function buildContract(options) {
     schemaVersion: 1,
     service: 'aliyun-update-check-mock',
     controlPlaneOnly: true,
-    downloadPlane: 'cloudflare-r2',
+    downloadPlane: 'oss-static',
     request: {
       authorization: 'Bearer <device_token>',
       deviceId: options.device,
@@ -101,15 +101,15 @@ function buildContract(options) {
       shortConfig: {
         videoAdapterBaseUrl: 'https://api.yiyong.me/v1',
         aliyunControlPlane: true,
-        r2StaticDownloads: true,
+        ossStaticDownloads: true,
         containsSecret: false
       }
     },
     notes: [
-      'Mock only. Does not connect to Aliyun or R2.',
+      'Mock only. Does not connect to Aliyun or OSS.',
       'Aliyun control plane decides license/device/version/gray/forceUpdate.',
-      'R2 serves runtime.pkg and static release metadata; Aliyun does not proxy large package downloads.',
-      'No VPS password, R2 secret, Cloudflare token, New API key, or client secret belongs in this contract.'
+      'OSS serves runtime.pkg and static release metadata; Aliyun control plane does not proxy large package downloads.',
+      'No VPS password, New API key, or client secret belongs in this contract.'
     ]
   };
 }

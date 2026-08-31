@@ -162,6 +162,34 @@ scripts/publish-hard-update-release.js
   可选 --deploy-control 部署 update check 控制面。
 ```
 
+### 2026-08-31 Front64 正式发布替代
+
+上面 R2 发布说明只作为历史记录保留。当前正式发布链路已废弃 R2。
+
+当前正式发布入口：
+
+```text
+scripts/hard-update-upload-front64.js
+scripts/publish-hard-update-release.js
+```
+
+当前正式发布目标：
+
+```text
+64 前置机：64.90.19.251:24851
+远端目录：/srv/uclaw-updates/releases
+公开入口：https://download.yiyong.me/uclaw/releases/production.json
+```
+
+`scripts/hard-update-upload-r2.js` 已改为失败保护入口，不再上传。
+
+服务器保留策略：
+
+```text
+默认只保留最新 3 个 packages/<releaseId> 目录。
+发布新版本后，超过 3 个的最旧 vX.Y.Z 目录自动删除。
+```
+
 新增 runbook：
 
 ```text

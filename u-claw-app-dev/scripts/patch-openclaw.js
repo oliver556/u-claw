@@ -1903,13 +1903,25 @@ function patchServiceWorker() {
     "bavi-box-logo-1-chat-terminal-toolstream-clear-1",
   );
   source = source.replace(
-    /chat-terminal-toolstream-clear-1(?!-chat-attachment-actions-1)/,
-    "chat-terminal-toolstream-clear-1-chat-attachment-actions-1",
+    /chat-terminal-toolstream-clear-1(?!-hide-openclaw-update-banner-1)/,
+    "chat-terminal-toolstream-clear-1-hide-openclaw-update-banner-1",
+  );
+  source = source.replace(
+    /hide-openclaw-update-banner-1(?!-chat-attachment-actions-1)/,
+    "hide-openclaw-update-banner-1-chat-attachment-actions-1",
+  );
+  source = source.replace(
+    /chat-attachment-actions-1(?!-footer-product-version-1)/,
+    "chat-attachment-actions-1-footer-product-version-1",
+  );
+  source = source.replace(
+    /footer-product-version-1(?!-visible-product-name-fallback-1)/,
+    "footer-product-version-1-visible-product-name-fallback-1",
   );
   source = source.replace(/-model-usage-dashboard-1/g, "");
   source = source.replace(
-    /chat-attachment-actions-1(?!-config-model-dashboard-1)/,
-    "chat-attachment-actions-1-config-model-dashboard-1",
+    /visible-product-name-fallback-1(?!-config-model-dashboard-1)/,
+    "visible-product-name-fallback-1-config-model-dashboard-1",
   );
   source = source.replace(
     /config-model-dashboard-1(?!-sidebar-new-session-width-1)/,
@@ -3641,13 +3653,16 @@ function patchControlUiHtmlBranding() {
 
   const pairs = [
     ["<title>OpenClaw Control</title>", "<title>Bavi-box Control</title>"],
+    ["<title>U-Claw Control</title>", "<title>Bavi-box Control</title>"],
     ["OpenClaw Control UI", "Bavi-box Control UI"],
+    ["U-Claw Control UI", "Bavi-box Control UI"],
     ["Control UI did not start", "Bavi-box 界面未启动"],
     [
       "The browser loaded the static page, but the app bundle did not start. The gateway may be\n          restarting, or this page may reference assets from a different OpenClaw version.",
       "浏览器已加载静态页面，但界面资源尚未启动。Gateway 可能正在重启，或页面仍引用旧版资源。",
     ],
     ["OpenClaw will retry the current app bundle automatically.", "Bavi-box 会自动重试当前界面资源。"],
+    ["U-Claw 会自动重试当前界面资源。", "Bavi-box 会自动重试当前界面资源。"],
     ["If this persists, reload or try a clean browser profile.", "若持续出现，请刷新页面或使用干净的浏览器配置。"],
     ["Control UI troubleshooting", "界面故障排查"],
     ["\n            See\n            <a", "\n            查看\n            <a"],
@@ -3727,6 +3742,30 @@ function patchFixedLightModeAndFooterActions() {
 }
 
 /**
+ * Hides OpenClaw's upstream self-update banner from the Bavi-box customer UI.
+ *
+ * Bavi-box portable releases are updated by the external U-disk updater. Showing
+ * the OpenClaw gateway/npm update prompt exposes the wrong version channel and
+ * can make users update the embedded base outside Bavi-box packaging.
+ */
+function patchOpenClawUpdateBanner() {
+  for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
+    const before = read(file);
+    const renderNeedle =
+      "render(){let e=this.props;if(!e)return l;let t=e.updateAvailable;return c`";
+    const renderReplacement =
+      "render(){let e=this.props;if(!e)return l;let t=null;return c`";
+    let after = before.replace(renderNeedle, renderReplacement);
+    if (!after.includes(renderReplacement)) {
+      throw new Error(`Could not disable OpenClaw update banner in ${file}`);
+    }
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
  * Rebrands PWA/install metadata without touching Gateway runtime names.
  */
 function patchControlUiManifestBranding() {
@@ -3751,17 +3790,96 @@ function patchControlUiManifestBranding() {
 function patchControlUiShellBranding() {
   const pairs = [
     ["<span class=\"sidebar-brand__title\">OpenClaw</span>", "<span class=\"sidebar-brand__title\">Bavi-box</span>"],
+    ["<span class=\"sidebar-brand__title\">U-Claw</span>", "<span class=\"sidebar-brand__title\">Bavi-box</span>"],
     ["<span class=\"dashboard-header__breadcrumb-link\">OpenClaw</span>", "<span class=\"dashboard-header__breadcrumb-link\">Bavi-box</span>"],
+    ["<span class=\"dashboard-header__breadcrumb-link\">U-Claw</span>", "<span class=\"dashboard-header__breadcrumb-link\">Bavi-box</span>"],
     ["                  OpenClaw\n                </a>", "                  Bavi-box\n                </a>"],
+    ["                  U-Claw\n                </a>", "                  Bavi-box\n                </a>"],
     ["alt=\"OpenClaw\"", "alt=\"Bavi-box\""],
+    ["alt=\"U-Claw\"", "alt=\"Bavi-box\""],
     ["aria-label=\"OpenClaw\"", "aria-label=\"Bavi-box\""],
+    ["aria-label=\"U-Claw\"", "aria-label=\"Bavi-box\""],
     ["<span class=\"topbar-brand__title\">OpenClaw</span>", "<span class=\"topbar-brand__title\">Bavi-box</span>"],
+    ["<span class=\"topbar-brand__title\">U-Claw</span>", "<span class=\"topbar-brand__title\">Bavi-box</span>"],
     ["<div class=\"login-gate__title\">OpenClaw</div>", "<div class=\"login-gate__title\">Bavi-box</div>"],
+    ["<div class=\"login-gate__title\">U-Claw</div>", "<div class=\"login-gate__title\">Bavi-box</div>"],
   ];
 
   for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
     const before = read(file);
     const after = replacePairs(before, pairs);
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Shows the Bavi-box product release in the Control UI footer.
+ *
+ * The value comes from Electron main's portable app/version.json reader via
+ * preload IPC. Do not show OpenClaw's embedded npm/gateway version here.
+ */
+function patchControlUiFooterProductVersion() {
+  for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
+    const before = read(file);
+    let after = before;
+
+    if (!after.includes("this.loadBaviBoxVersion=async()=>")) {
+      after = after.replace(
+        "this.gatewayClient=null,this.routePreloadTimers=new Map,",
+        "this.gatewayClient=null,this.routePreloadTimers=new Map,this.baviBoxVersion=null,this.loadBaviBoxVersion=async()=>{try{let e=await window.uclaw?.getGatewayStatus?.(),t=String(e?.appVersion||``).trim().replace(/^v/i,``);t&&(this.baviBoxVersion=`v${t}`,this.requestUpdate?.())}catch{}},",
+      );
+    }
+
+    after = after.replace(
+      "connectedCallback(){super.connectedCallback(),this.style.display=`contents`,this.startSubscriptions()}",
+      "connectedCallback(){super.connectedCallback(),this.style.display=`contents`,this.startSubscriptions(),this.loadBaviBoxVersion?.()}",
+    );
+
+    if (!after.includes("sidebar-footer-version")) {
+      after = after.replace(
+        "              </openclaw-tooltip>\n              <span class=\"sidebar-footer-bar__spacer\"></span>",
+        "              </openclaw-tooltip>\n              ${this.collapsed?l:c`<span class=\"sidebar-footer-version\">${this.baviBoxVersion?`Bavi-box ${this.baviBoxVersion}`:`Bavi-box`}</span>`}\n              <span class=\"sidebar-footer-bar__spacer\"></span>",
+      );
+    }
+
+    if (
+      !after.includes("this.loadBaviBoxVersion=async()=>")
+      || !after.includes("this.loadBaviBoxVersion?.()")
+      || !after.includes("sidebar-footer-version")
+      || !after.includes("Bavi-box ${this.baviBoxVersion}")
+    ) {
+      throw new Error(`Could not patch Bavi-box footer product version in ${file}`);
+    }
+
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Final idempotent visible-name fallback for bundles that were already patched
+ * from OpenClaw to the previous U-Claw product name before Bavi-box rename.
+ *
+ * Keep lowercase `openclaw` runtime identifiers and `UCLAW_*` env names intact.
+ */
+function patchVisibleProductNameFallback() {
+  const files = [
+    indexHtmlPath,
+    swPath,
+    ...listAssetFiles(/\.js$/, "control-ui js"),
+  ];
+
+  for (const file of files) {
+    if (!fs.existsSync(file)) continue;
+    const before = read(file);
+    const after = before
+      .replaceAll("U-Claw Control", "Bavi-box Control")
+      .replaceAll("OpenClaw Control", "Bavi-box Control")
+      .replaceAll("U-Claw", "Bavi-box")
+      .replaceAll("includeInBavi-boxGroup", "includeInOpenClawGroup");
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -7702,8 +7820,11 @@ patchDeepAgentsChatI18nUiCopy();
 patchOverviewPageUiCopy();
 patchControlUiHtmlBranding();
 patchFixedLightModeAndFooterActions();
+patchOpenClawUpdateBanner();
 patchControlUiManifestBranding();
 patchControlUiShellBranding();
+patchControlUiFooterProductVersion();
+patchVisibleProductNameFallback();
 patchControlUiSkillHubProxy();
 patchControlUiPortableMediaRemap();
 patchIndexUiCopy();

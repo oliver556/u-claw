@@ -41,8 +41,15 @@ function createMockStage(stageRoot, edition) {
   writeFile(path.join(stageRoot, 'app', 'scripts', 'Mac-Start-App.command'), '#!/bin/bash\necho Bavi-box\n');
   writeFile(path.join(stageRoot, 'app', 'scripts', 'Windows-Start-App.bat'), '@echo off\r\necho Bavi-box\r\n');
   writeFile(path.join(stageRoot, 'app', 'scripts', 'Windows-Sync-Data.ps1'), "Write-Host 'Bavi-box sync'\n");
+  writeFile(path.join(stageRoot, 'app', 'scripts', 'hard-update-client.js'), '#!/usr/bin/env node\n');
+  writeFile(path.join(stageRoot, 'app', 'scripts', 'lib', 'hard-update-utils.js'), 'module.exports = {}\n');
+  writeFile(path.join(stageRoot, 'app', 'update-runtime', 'node-win32-x64', 'node.exe'), 'mock win updater node\n');
+  writeFile(path.join(stageRoot, 'app', 'update-runtime', 'node-darwin-arm64', 'bin', 'node'), 'mock mac arm64 updater node\n');
+  writeFile(path.join(stageRoot, 'app', 'update-runtime', 'node-darwin-x64', 'bin', 'node'), 'mock mac x64 updater node\n');
   writeFile(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), `${edition} mock\n`);
   writeFile(path.join(stageRoot, 'Bavi-box.exe'), 'mock windows launcher\n');
+  writeFile(path.join(stageRoot, 'Bavi-box Win Update.exe'), 'mock windows updater\n');
+  writeFile(path.join(stageRoot, 'Bavi-box Mac Update.command'), '#!/bin/bash\necho update\n');
   writeFile(path.join(stageRoot, 'Bavi-box.app', 'Contents', 'MacOS', 'Bavi-box'), 'mock mac launcher\n');
   writeFile(path.join(stageRoot, 'bootstrap', 'README.txt'), 'mock bootstrap placeholder\n');
   for (const name of ['u-claw-app-mac-arm64.tar.gz', 'u-claw-app-mac-x64.tar.gz', 'u-claw-app-win-x64.zip']) {
@@ -149,7 +156,44 @@ function serveStatic(root) {
       response.end('not found');
       return;
     }
-    response.writeHead(200);
+    const stat = fs.statSync(filePath);
+    const range = request.headers.range;
+    if (range) {
+      const match = /^bytes=(\d+)-(\d*)$/.exec(range);
+      if (!match) {
+        response.writeHead(416, { 'content-range': `bytes */${stat.size}` });
+        response.end();
+        return;
+      }
+      const start = Number(match[1]);
+      const end = match[2] ? Number(match[2]) : stat.size - 1;
+      if (start >= stat.size || end < start) {
+        response.writeHead(416, { 'content-range': `bytes */${stat.size}` });
+        response.end();
+        return;
+      }
+      response.writeHead(206, {
+        'content-type': 'application/octet-stream',
+        'content-length': end - start + 1,
+        'content-range': `bytes ${start}-${end}/${stat.size}`,
+        'accept-ranges': 'bytes'
+      });
+      if (request.method === 'HEAD') {
+        response.end();
+        return;
+      }
+      fs.createReadStream(filePath, { start, end }).pipe(response);
+      return;
+    }
+    response.writeHead(200, {
+      'content-type': 'application/octet-stream',
+      'content-length': stat.size,
+      'accept-ranges': 'bytes'
+    });
+    if (request.method === 'HEAD') {
+      response.end();
+      return;
+    }
     fs.createReadStream(filePath).pipe(response);
   });
 }
@@ -229,6 +273,20 @@ async function verifyHardUpdateFlow(tmp) {
     assert(readJson(path.join(startupUsbRoot, 'app', 'version.json')).version === '9.9.9', 'startup version.json not updated');
     assert(readJson(path.join(startupUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'startup transaction not complete');
 
+    const independentUsbRoot = path.join(tmp, 'independent-usb', 'Bavi-box');
+    writeJson(path.join(independentUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
+    writeJson(path.join(independentUsbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me-independent' });
+    const independentBefore = sha256File(path.join(independentUsbRoot, 'data', '.openclaw', 'openclaw.json'));
+    await require('./hard-update-client').independentUpdate({
+      usb: independentUsbRoot,
+      productionUrl: `http://127.0.0.1:${port}/releases/production.json`,
+      platform: 'win32-x64'
+    });
+    const independentAfter = sha256File(path.join(independentUsbRoot, 'data', '.openclaw', 'openclaw.json'));
+    assert(independentBefore === independentAfter, 'independent update changed openclaw.json');
+    assert(readJson(path.join(independentUsbRoot, 'app', 'version.json')).version === '9.9.9', 'independent version.json not updated');
+    assert(readJson(path.join(independentUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'independent transaction not complete');
+
     const crossPlatformUsbRoot = path.join(tmp, 'cross-platform-usb', 'Bavi-box');
     writeJson(path.join(crossPlatformUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
     writeJson(path.join(crossPlatformUsbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me-cross-platform' });
@@ -242,6 +300,16 @@ async function verifyHardUpdateFlow(tmp) {
       'darwin update removed Windows archive'
     );
     assert(fs.existsSync(path.join(crossPlatformUsbRoot, 'Bavi-box.exe')), 'darwin update removed Windows launcher');
+    assert(fs.existsSync(path.join(crossPlatformUsbRoot, 'Bavi-box Win Update.exe')), 'darwin update removed Windows updater');
+    assert(fs.existsSync(path.join(crossPlatformUsbRoot, 'Bavi-box Mac Update.command')), 'darwin update removed Mac updater');
+    assert(
+      fs.existsSync(path.join(crossPlatformUsbRoot, 'app', 'update-runtime', 'node-win32-x64', 'node.exe')),
+      'darwin update removed Windows updater node runtime',
+    );
+    assert(
+      fs.existsSync(path.join(crossPlatformUsbRoot, 'app', 'scripts', 'hard-update-client.js')),
+      'darwin update removed hard update client',
+    );
     assert(
       fs.existsSync(path.join(crossPlatformUsbRoot, 'app', 'desktop-archive', 'u-claw-app-mac-x64.tar.gz')),
       'darwin-arm64 update removed Mac x64 archive'
@@ -289,11 +357,11 @@ async function verifyHardUpdateFlow(tmp) {
 
 function verifyControlPlaneProdBaseUrl(tmp) {
   const envPath = path.join(tmp, 'control-plane-prod.env');
-  writeFile(envPath, 'UCLAW_UPDATE_PUBLIC_BASE_URL=https://pub-4f24fbbe718b4c75955440700c70bdeb.r2.dev/releases\n');
+  writeFile(envPath, 'UCLAW_UPDATE_PUBLIC_BASE_URL=https://oss-download.yiyong.me/bavi-box/releases\n');
   const { loadConfig } = require('./hard-update-control-plane-server');
   const config = loadConfig({ env: envPath, release: path.join(tmp, 'prod-release') });
   assert(
-    config.publicBaseUrl === 'https://pub-4f24fbbe718b4c75955440700c70bdeb.r2.dev/releases',
+    config.publicBaseUrl === 'https://oss-download.yiyong.me/bavi-box/releases',
     'control-plane prod public base URL env was not honored'
   );
 }
