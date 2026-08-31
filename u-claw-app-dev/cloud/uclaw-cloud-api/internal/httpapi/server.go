@@ -872,6 +872,7 @@ func buildRechargeService(cfg config.Config, store recharge.Store, alipayPay *al
 	}
 	service, err := recharge.NewService(store, quota, recharge.Config{
 		AllowVirtualCallback: !cfg.IsProduction(),
+		OneCentTestEnabled:   cfg.AlipayOneCentTestEnabled,
 		CheckoutClients:      checkoutClients,
 	})
 	if err != nil {

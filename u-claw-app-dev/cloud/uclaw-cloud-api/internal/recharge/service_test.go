@@ -124,6 +124,41 @@ func TestCreateOrderUsesConfiguredCheckoutClient(t *testing.T) {
 	}
 }
 
+func TestCreateOrderUsesOneCentCheckoutAmountWhenEnabled(t *testing.T) {
+	store := NewMemoryStore()
+	checkout := &fakeCheckoutClient{result: CheckoutResult{QRCodeURL: "https://pay.example.com/qr.png"}}
+	service, err := NewService(store, &fakeQuotaClient{}, Config{
+		OneCentTestEnabled: true,
+		CheckoutClients: map[string]CheckoutClient{
+			ProviderAlipay: checkout,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	plans := service.ListPlans(context.Background())
+	if plans[0].AmountCents != 1000 || plans[0].CheckoutAmountCents != 1 {
+		t.Fatalf("plans[0] = %+v", plans[0])
+	}
+
+	result, err := service.CreateOrder(context.Background(), CreateOrderRequest{
+		UserID:   7,
+		PlanCode: "dev_10",
+		Provider: ProviderAlipay,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder() error = %v", err)
+	}
+
+	if result.Order.AmountCents != 1 || result.Order.Quota != billing.NewAPIQuotaFromCNY(10) {
+		t.Fatalf("order = %+v", result.Order)
+	}
+	if len(checkout.requests) != 1 || checkout.requests[0].AmountCents != 1 {
+		t.Fatalf("checkout requests = %+v", checkout.requests)
+	}
+}
+
 func TestListProvidersReportsEnabledAdapters(t *testing.T) {
 	service, err := NewService(NewMemoryStore(), &fakeQuotaClient{}, Config{
 		AllowVirtualCallback: true,

@@ -36,7 +36,7 @@
 
 - `alipay.trade.query` 补查接口和后台 retry-credit 操作。
 - `provider_checkout/expires_at/closed_at` 增量 migration。
-- `ALIPAY_ONE_CENT_TEST_ENABLED` 对 `test_001` SKU 的开关化。
+- `ALIPAY_ONE_CENT_TEST_ENABLED` 已接入：开发联调时同一套餐实付 `0.01`，正式打包/生产关闭后按套餐实价支付。
 - 阿里云 staging 使用真实支付宝扫码 `0.01` 回测。
 
 ## 3. 真实支付架构
@@ -239,7 +239,7 @@ POST /internal/admin/v1/recharge/orders/{orderNo}/retry-credit
 
 后续订单量上升后，再把这两个动作挂到 `outbox_jobs` worker。
 
-### 5.8 套餐和 0.01 测试单
+### 5.8 套餐和 0.01 测试金额
 
 生产套餐建议仍从固定配置或 DB 读取，客户端只提交 `planCode`，不让客户端自由传金额。
 
@@ -253,10 +253,11 @@ pro_100   100.00 CNY
 
 0.01 元测试：
 
-- 增加 `test_001` 计划，`amount_cents=1`。
-- 只在 `ALIPAY_ONE_CENT_TEST_ENABLED=true` 时返回给客户端或允许创建。
-- staging 可开启，正式上线后关闭。
-- 0.01 对应 New API raw quota 应为 `NewAPIQuotaPerCNY / 100`，当前为 `500000 / 100 = 5000`。
+- 不新增单独 `test_001` SKU，避免用户误选测试商品。
+- `ALIPAY_ONE_CENT_TEST_ENABLED=true` 时，`/v1/recharge/plans` 保留套餐原价 `amountCents`，额外返回 `checkoutAmountCents=1`。
+- 创建支付宝订单时，订单实付金额与支付宝 `total_amount` 使用 `0.01`；套餐对应 New API quota 仍按原套餐入账，便于完整回测回调与入账。
+- staging/开发可开启，正式打包或 production 必须关闭。
+- 客户端应显示：主支付金额用 `checkoutAmountCents || amountCents`，到账模型额度用 `amountCents`。
 
 ### 5.9 客户端 UI 与扫码支付界面
 
@@ -363,7 +364,7 @@ deploy/scripts/alipay-local-e2e.sh
 1. 启动本地 Cloud API + PostgreSQL + New API lab。
 2. 登录手机号测试用户。
 3. 激活或确认已有 New API 映射。
-4. 创建 `test_001` 支付宝订单。
+4. 开启 `ALIPAY_ONE_CENT_TEST_ENABLED=true` 后创建任一支付宝套餐订单。
 5. 用测试私钥构造 `TRADE_SUCCESS` notify form。
 6. 调 `/v1/payments/alipay/notify`。
 7. 查询订单状态必须为 `credited`。
@@ -378,14 +379,14 @@ deploy/scripts/alipay-local-e2e.sh
 2. 确认 `ALIPAY_*` env 已配置，不打印密钥。
 3. 开启 `ALIPAY_ONE_CENT_TEST_ENABLED=true`。
 4. 用真实手机号登录。
-5. 创建 `test_001` 支付宝订单。
+5. 创建任一支付宝套餐订单。
 6. 客户端弹出二维码。
 7. 支付宝扫码支付 `0.01`。
 8. `journalctl` 确认 notify 验签成功。
 9. `GET /v1/recharge/orders/{orderNo}` 返回 `credited`。
-10. 模型页余额增加 `¥0.01`，不展示大额算力数字。
+10. 模型页余额按套餐额度增加，不展示大额算力数字。
 11. New API 后台确认同手机号用户 quota 增加。
-12. 关闭 `ALIPAY_ONE_CENT_TEST_ENABLED` 或限制测试计划只对管理员可见。
+12. 正式打包或生产发布前关闭 `ALIPAY_ONE_CENT_TEST_ENABLED`，确认订单金额恢复套餐实价。
 
 ### 6.4 Failure regression
 
@@ -432,7 +433,7 @@ cd u-claw-app-dev/cloud/uclaw-cloud-api
 6. 重启 `uclaw-cloud-api-staging.service`。
 7. `curl /healthz` 和 `/v1/recharge/providers` 检查 `alipay.enabled=true`。
 8. 做 0.01 staging real pay。
-9. 通过后再部署正式服务名，关闭或限制 `test_001`。
+9. 通过后再部署正式服务名，关闭 `ALIPAY_ONE_CENT_TEST_ENABLED`。
 
 ## 8. 交付标准
 

@@ -34,11 +34,12 @@ const (
 
 // Plan is a recharge SKU shown to the client before a payment order is created.
 type Plan struct {
-	Code        string `json:"code"`
-	Name        string `json:"name"`
-	AmountCents int64  `json:"amountCents"`
-	Quota       int64  `json:"quota"`
-	Currency    string `json:"currency"`
+	Code                string `json:"code"`
+	Name                string `json:"name"`
+	AmountCents         int64  `json:"amountCents"`
+	CheckoutAmountCents int64  `json:"checkoutAmountCents,omitempty"`
+	Quota               int64  `json:"quota"`
+	Currency            string `json:"currency"`
 }
 
 // ProviderInfo describes one payment provider available to the client UI.
@@ -123,6 +124,7 @@ type CheckoutClient interface {
 // Config controls the recharge slice while official payment providers are still pending.
 type Config struct {
 	AllowVirtualCallback bool
+	OneCentTestEnabled   bool
 	Plans                []Plan
 	CheckoutClients      map[string]CheckoutClient
 }
@@ -200,6 +202,11 @@ func DefaultPlans() []Plan {
 func (s *Service) ListPlans(_ context.Context) []Plan {
 	plans := make([]Plan, len(s.cfg.Plans))
 	copy(plans, s.cfg.Plans)
+	if s.cfg.OneCentTestEnabled {
+		for index := range plans {
+			plans[index].CheckoutAmountCents = 1
+		}
+	}
 	return plans
 }
 
@@ -235,12 +242,16 @@ func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (Orde
 	if !ok {
 		return OrderResult{}, fmt.Errorf("recharge plan is invalid")
 	}
+	amountCents := plan.AmountCents
+	if provider != ProviderVirtual && s.cfg.OneCentTestEnabled {
+		amountCents = 1
+	}
 	now := s.now()
 	order, err := s.store.CreateOrder(ctx, Order{
 		OrderNo:     newOrderNo(now),
 		UClawUserID: req.UserID,
 		Provider:    provider,
-		AmountCents: plan.AmountCents,
+		AmountCents: amountCents,
 		Quota:       plan.Quota,
 		Status:      StatusCreated,
 		CreatedAt:   now,
@@ -259,7 +270,7 @@ func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (Orde
 		OrderNo:     order.OrderNo,
 		Provider:    provider,
 		Name:        plan.Name,
-		AmountCents: plan.AmountCents,
+		AmountCents: amountCents,
 		Currency:    plan.Currency,
 	})
 	if err != nil {
