@@ -21,7 +21,10 @@ if (isActivationOnlyMode) {
     getModelCatalog: () => ipcRenderer.invoke('uclaw:get-model-catalog'),
     refreshModelCatalog: () => ipcRenderer.invoke('uclaw:refresh-model-catalog'),
     getRechargePlans: () => ipcRenderer.invoke('uclaw:get-recharge-plans'),
+    getRechargeProviders: () => ipcRenderer.invoke('uclaw:get-recharge-providers'),
     getRechargeOrders: () => ipcRenderer.invoke('uclaw:get-recharge-orders'),
+    getRechargeOrder: (orderNo) => ipcRenderer.invoke('uclaw:get-recharge-order', orderNo),
     rechargeModelQuota: (payload) => ipcRenderer.invoke('uclaw:recharge-model-quota', payload),
+    generateEcommerceImages: (payload) => ipcRenderer.invoke('uclaw:ecommerce-generate-images', payload),
   });
 }

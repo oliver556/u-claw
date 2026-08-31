@@ -144,5 +144,5 @@ echo
 
 recharged_usage_json="$(curl -fsS -X GET "http://${API_ADDR}/v1/newapi/usage/summary" \
   -H "Authorization: Bearer $access_token")"
-printf '%s' "$recharged_usage_json" | node_get "if(j.status!=='ok'||j.accountBalance!==5100000||j.accountBalanceCompute!==612000000){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'recharged_usage_summary_e2e',accountBalance:j.accountBalance,accountBalanceCompute:j.accountBalanceCompute}))"
+printf '%s' "$recharged_usage_json" | node_get "if(j.status!=='ok'||j.accountBalance!==5100000||j.accountBalanceCompute!==61200000){console.error(JSON.stringify(j));process.exit(1)}process.stdout.write(JSON.stringify({ok:true,step:'recharged_usage_summary_e2e',accountBalance:j.accountBalance,accountBalanceCompute:j.accountBalanceCompute}))"
 echo

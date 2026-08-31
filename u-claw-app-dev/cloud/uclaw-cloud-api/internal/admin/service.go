@@ -39,6 +39,7 @@ type Store interface {
 	GetActivationCode(ctx context.Context, id int64) (ActivationCode, error)
 	DisableActivationCode(ctx context.Context, id int64, reason string, at time.Time) error
 	ReissueActivationCode(ctx context.Context, id int64, replacementCode ActivationCodeSecret, at time.Time) (ActivationCode, error)
+	ListRechargeOrders(ctx context.Context, filter RechargeOrderFilter) ([]RechargeOrder, error)
 }
 
 // Config carries admin console security settings.
@@ -81,6 +82,15 @@ type ActivationCodeFilter struct {
 	Limit  int
 }
 
+// RechargeOrderFilter limits payment-order queries for the admin console.
+type RechargeOrderFilter struct {
+	Status   string
+	Provider string
+	Phone    string
+	OrderNo  string
+	Limit    int
+}
+
 // ActivationCodeSecret carries plaintext plus encrypted display material.
 type ActivationCodeSecret struct {
 	Code        string
@@ -110,6 +120,28 @@ type ActivationCode struct {
 	LatestActivationStage  string     `json:"latestActivationStage,omitempty"`
 	LatestActivationCommit *time.Time `json:"latestActivationCommit,omitempty"`
 	PlainCode              string     `json:"code,omitempty"`
+}
+
+// RechargeOrder is a redacted operational view of one payment order.
+type RechargeOrder struct {
+	ID              int64      `json:"id"`
+	OrderNo         string     `json:"orderNo"`
+	UClawUserID     int64      `json:"uclawUserId"`
+	Phone           string     `json:"phone,omitempty"`
+	Provider        string     `json:"provider"`
+	AmountCents     int64      `json:"amountCents"`
+	QuotaTokens     int64      `json:"quotaTokens"`
+	Status          string     `json:"status"`
+	ProviderTradeNo string     `json:"providerTradeNo,omitempty"`
+	PaidAt          *time.Time `json:"paidAt,omitempty"`
+	CreditedAt      *time.Time `json:"creditedAt,omitempty"`
+	LastError       string     `json:"lastError,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+	NewAPIUserID    *int64     `json:"newapiUserId,omitempty"`
+	NewAPIUsername  string     `json:"newapiUsername,omitempty"`
+	CallbackCount   int64      `json:"callbackCount"`
+	LastCallbackAt  *time.Time `json:"lastCallbackAt,omitempty"`
 }
 
 // GenerateRequest describes a batch of codes to create and show.
@@ -247,6 +279,18 @@ func (s *Service) ListActivationCodes(ctx context.Context, filter ActivationCode
 		s.attachPlainCode(&records[i])
 	}
 	return records, nil
+}
+
+// ListRechargeOrders returns recent payment orders with user and New API mapping.
+func (s *Service) ListRechargeOrders(ctx context.Context, filter RechargeOrderFilter) ([]RechargeOrder, error) {
+	if filter.Limit <= 0 || filter.Limit > 200 {
+		filter.Limit = 50
+	}
+	filter.Status = strings.ToLower(strings.TrimSpace(filter.Status))
+	filter.Provider = strings.ToLower(strings.TrimSpace(filter.Provider))
+	filter.Phone = strings.TrimSpace(filter.Phone)
+	filter.OrderNo = strings.TrimSpace(filter.OrderNo)
+	return s.store.ListRechargeOrders(ctx, filter)
 }
 
 // GetActivationCode returns one inventory row and its current mapping.
@@ -588,6 +632,11 @@ func (s *MemoryStore) ListActivationCodes(_ context.Context, filter ActivationCo
 		}
 	}
 	return records, nil
+}
+
+// ListRechargeOrders returns an empty local payment-order view for dev smoke tests.
+func (s *MemoryStore) ListRechargeOrders(_ context.Context, _ RechargeOrderFilter) ([]RechargeOrder, error) {
+	return []RechargeOrder{}, nil
 }
 
 // GetActivationCode returns a local activation code by id.

@@ -30,15 +30,18 @@ const (
 	StatusCredited = "credited"
 	// StatusCreditFailed means payment was accepted but New API crediting failed.
 	StatusCreditFailed = "credit_failed"
+	// StatusExpired means the provider checkout timed out before a valid payment callback.
+	StatusExpired = "expired"
 )
 
 // Plan is a recharge SKU shown to the client before a payment order is created.
 type Plan struct {
-	Code        string `json:"code"`
-	Name        string `json:"name"`
-	AmountCents int64  `json:"amountCents"`
-	Quota       int64  `json:"quota"`
-	Currency    string `json:"currency"`
+	Code                string `json:"code"`
+	Name                string `json:"name"`
+	AmountCents         int64  `json:"amountCents"`
+	CheckoutAmountCents int64  `json:"checkoutAmountCents,omitempty"`
+	Quota               int64  `json:"quota"`
+	Currency            string `json:"currency"`
 }
 
 // ProviderInfo describes one payment provider available to the client UI.
@@ -123,6 +126,7 @@ type CheckoutClient interface {
 // Config controls the recharge slice while official payment providers are still pending.
 type Config struct {
 	AllowVirtualCallback bool
+	OneCentTestEnabled   bool
 	Plans                []Plan
 	CheckoutClients      map[string]CheckoutClient
 }
@@ -156,6 +160,21 @@ type VirtualCallbackRequest struct {
 	ProviderEventID string
 }
 
+// PaymentCallbackRequest carries one verified provider payment notification into the recharge state machine.
+type PaymentCallbackRequest struct {
+	Provider         string
+	OrderNo          string
+	ProviderEventID  string
+	ProviderTradeNo  string
+	AmountCents      int64
+	Paid             bool
+	PaidAt           time.Time
+	SignatureValid   bool
+	PayloadRedacted  string
+	ProviderStatus   string
+	ProviderSellerID string
+}
+
 // NewService creates the recharge service with a static plan catalog and strict provider defaults.
 func NewService(store Store, quota QuotaClient, cfg Config) (*Service, error) {
 	if store == nil {
@@ -172,12 +191,12 @@ func NewService(store Store, quota QuotaClient, cfg Config) (*Service, error) {
 	return &Service{store: store, quota: quota, cfg: cfg, now: time.Now}, nil
 }
 
-// DefaultPlans returns development SKUs using the Bavi-box 1 CNY = 6kw compute conversion.
+// DefaultPlans returns recharge SKUs using the Bavi-box 1 CNY = 6kw compute conversion.
 func DefaultPlans() []Plan {
 	return []Plan{
-		{Code: "dev_10", Name: "虚拟充值 10 元", AmountCents: 1000, Quota: billing.NewAPIQuotaFromCNY(10), Currency: "CNY"},
-		{Code: "dev_50", Name: "虚拟充值 50 元", AmountCents: 5000, Quota: billing.NewAPIQuotaFromCNY(50), Currency: "CNY"},
-		{Code: "dev_100", Name: "虚拟充值 100 元", AmountCents: 10000, Quota: billing.NewAPIQuotaFromCNY(100), Currency: "CNY"},
+		{Code: "dev_10", Name: "充值 10 元", AmountCents: 1000, Quota: billing.NewAPIQuotaFromCNY(10), Currency: "CNY"},
+		{Code: "dev_50", Name: "充值 50 元", AmountCents: 5000, Quota: billing.NewAPIQuotaFromCNY(50), Currency: "CNY"},
+		{Code: "dev_100", Name: "充值 100 元", AmountCents: 10000, Quota: billing.NewAPIQuotaFromCNY(100), Currency: "CNY"},
 	}
 }
 
@@ -185,6 +204,11 @@ func DefaultPlans() []Plan {
 func (s *Service) ListPlans(_ context.Context) []Plan {
 	plans := make([]Plan, len(s.cfg.Plans))
 	copy(plans, s.cfg.Plans)
+	if s.cfg.OneCentTestEnabled {
+		for index := range plans {
+			plans[index].CheckoutAmountCents = 1
+		}
+	}
 	return plans
 }
 
@@ -220,12 +244,16 @@ func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (Orde
 	if !ok {
 		return OrderResult{}, fmt.Errorf("recharge plan is invalid")
 	}
+	amountCents := plan.AmountCents
+	if provider != ProviderVirtual && s.cfg.OneCentTestEnabled {
+		amountCents = 1
+	}
 	now := s.now()
 	order, err := s.store.CreateOrder(ctx, Order{
 		OrderNo:     newOrderNo(now),
 		UClawUserID: req.UserID,
 		Provider:    provider,
-		AmountCents: plan.AmountCents,
+		AmountCents: amountCents,
 		Quota:       plan.Quota,
 		Status:      StatusCreated,
 		CreatedAt:   now,
@@ -244,7 +272,7 @@ func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (Orde
 		OrderNo:     order.OrderNo,
 		Provider:    provider,
 		Name:        plan.Name,
-		AmountCents: plan.AmountCents,
+		AmountCents: amountCents,
 		Currency:    plan.Currency,
 	})
 	if err != nil {
@@ -315,6 +343,73 @@ func (s *Service) HandleVirtualCallback(ctx context.Context, req VirtualCallback
 	}
 	if order.Status == StatusCredited {
 		return order, nil
+	}
+	return s.CreditPaidOrder(ctx, orderNo)
+}
+
+// HandleProviderPayment accepts a verified official-provider callback and credits New API once.
+func (s *Service) HandleProviderPayment(ctx context.Context, req PaymentCallbackRequest) (Order, error) {
+	provider := normalizeProvider(req.Provider)
+	if provider == "" || provider == ProviderVirtual {
+		return Order{}, fmt.Errorf("official payment provider is required")
+	}
+	orderNo := strings.TrimSpace(req.OrderNo)
+	if orderNo == "" {
+		return Order{}, fmt.Errorf("order no is required")
+	}
+	if !req.Paid {
+		return Order{}, fmt.Errorf("payment status is not paid")
+	}
+	if !req.SignatureValid {
+		return Order{}, fmt.Errorf("payment signature is invalid")
+	}
+	eventID := strings.TrimSpace(req.ProviderEventID)
+	if eventID == "" {
+		eventID = provider + "-" + orderNo
+	}
+	order, err := s.store.GetOrder(ctx, orderNo)
+	if err != nil {
+		return Order{}, err
+	}
+	if order.Provider != provider {
+		return Order{}, fmt.Errorf("order provider mismatch")
+	}
+	if req.AmountCents != order.AmountCents {
+		return Order{}, fmt.Errorf("payment amount mismatch")
+	}
+	paidAt := req.PaidAt
+	if paidAt.IsZero() {
+		paidAt = s.now()
+	}
+	payload := strings.TrimSpace(req.PayloadRedacted)
+	if payload == "" {
+		payload = fmt.Sprintf(`{"provider":%q}`, provider)
+	}
+	if err := s.store.SaveCallback(ctx, Callback{
+		OrderID:         order.ID,
+		Provider:        provider,
+		ProviderEventID: eventID,
+		SignatureValid:  true,
+		PayloadRedacted: payload,
+		ReceivedAt:      s.now(),
+	}); err != nil {
+		return Order{}, err
+	}
+	paid, err := s.store.MarkPaid(ctx, orderNo, strings.TrimSpace(req.ProviderTradeNo), paidAt)
+	if err != nil {
+		return Order{}, err
+	}
+	if paid.Status == StatusCredited {
+		return paid, nil
+	}
+	return s.CreditPaidOrder(ctx, orderNo)
+}
+
+// CreditPaidOrder atomically credits New API quota for a paid recharge order.
+func (s *Service) CreditPaidOrder(ctx context.Context, orderNo string) (Order, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	if orderNo == "" {
+		return Order{}, fmt.Errorf("order no is required")
 	}
 	creditOrder, locked, err := s.store.BeginCredit(ctx, orderNo)
 	if err != nil {
@@ -387,6 +482,16 @@ func normalizeProvider(provider string) string {
 func isSupportedProvider(provider string) bool {
 	switch provider {
 	case ProviderVirtual, ProviderAlipay, ProviderWeChat:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsUserVisibleOrderStatus keeps unpaid noise out of client-facing recharge history.
+func IsUserVisibleOrderStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case StatusPaid, StatusCrediting, StatusCredited, StatusCreditFailed:
 		return true
 	default:
 		return false

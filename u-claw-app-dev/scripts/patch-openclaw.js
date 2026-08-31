@@ -1714,16 +1714,16 @@ function patchConfigModelUsageDashboard() {
         <article class="uclaw-config-model-panel uclaw-config-model-balance">
           <div class="uclaw-config-model-label"><span>账户余额</span><em class=\${x.ok?\`ok\`:\`muted\`}>\${x.label}</em></div>
           <strong>\${v?UcQuickFmtQuotaYuan(y.accountBalance,y):x.ok?x.provider:\`--\`}</strong>
-          <p>\${v?\`\${x.detail} · New API quota \${UcQuickFmtTokens(y.accountBalance)} · \${UcQuickFmtQuotaYuan(y.accountBalance,y)} · 1 元 = 600w 算力\`:x.detail}</p>
+          <p>\${v?\`\${x.detail} · 按 1 元 = 600w 算力换算\`:x.detail}</p>
           <div class="uclaw-config-model-actions"><button class="btn primary" type="button" @click=\${()=>e.onOpenRechargeDialog?.()} ?disabled=\${R}>\${R?\`充值中\`:\`充值\`}</button><button class="btn" type="button" @click=\${()=>e.onOpenRechargeRecords?.()}>记录</button></div>
         </article>
-        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>今日消耗</span><strong>\${UcQuickFmtTokens(S)}</strong><small>\${v?\`Bavi-box 算力\`:UcQuickFmtCost(u.totalCost)}</small></article>
-        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>近 7 天</span><strong>\${UcQuickFmtTokens(w)}</strong><small>\${v?\`Bavi-box 算力\`:UcQuickFmtCost(d.totalCost)}</small></article>
-        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>已消耗</span><strong>\${UcQuickFmtTokens(T)}</strong><small>\${v?\`New API used_quota\`:E}</small></article>
+        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>今日消耗</span><strong>\${v?UcQuickFmtQuotaYuan(y.todayUsage,y):UcQuickFmtTokens(S)}</strong><small>\${v?\`估算金额\`:UcQuickFmtCost(u.totalCost)}</small></article>
+        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>近 7 天</span><strong>\${v?UcQuickFmtQuotaYuan(y.last7DaysUsage,y):UcQuickFmtTokens(w)}</strong><small>\${v?\`估算金额\`:UcQuickFmtCost(d.totalCost)}</small></article>
+        <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>已消耗</span><strong>\${v?UcQuickFmtQuotaYuan(y.cumulativeUsage,y):UcQuickFmtTokens(T)}</strong><small>\${v?\`累计估算金额\`:E}</small></article>
         <article class="uclaw-config-model-panel uclaw-config-model-metric"><span>请求次数</span><strong>\${UcQuickFmtTokens(N)}</strong><small>\${v?\`New API request_count\`:\`本地会话\`}</small></article>
       </section>
       \${t.loading?i\`<div class="uclaw-config-model-callout">正在刷新模型用量...</div>\`:\`\`}
-      \${R?i\`<div class="uclaw-config-model-callout">正在创建虚拟充值订单...</div>\`:\`\`}
+      \${R?i\`<div class="uclaw-config-model-callout">正在创建充值订单...</div>\`:\`\`}
       \${M?i\`<div class="uclaw-config-model-callout ok">\${M}</div>\`:\`\`}
       \${L?i\`<div class="uclaw-config-model-callout danger">充值失败：\${L}</div>\`:\`\`}
       \${t.error?i\`<div class="uclaw-config-model-callout danger">用量加载失败：\${t.error}</div>\`:\`\`}
@@ -1751,8 +1751,8 @@ function patchConfigModelUsageDashboard() {
         </div>
         <div class="uclaw-config-model-panel uclaw-config-model-ledger">
           <div class="uclaw-config-model-head"><div><h2>使用流水</h2><p>最近会话消耗</p></div><span>\${v?\`New API\`:\`sessions.usage\`}</span></div>
-          <div class="uclaw-config-model-table"><table><thead><tr><th>时间</th><th>\${v?\`来源\`:\`会话\`}</th><th>模型</th><th>Token</th><th>\${v?\`算力\`:\`金额\`}</th><th>耗时</th></tr></thead><tbody>
-            \${v?b.length?b.map(e=>i\`<tr><td>\${UcQuickFmtDate(e.createdAt?e.createdAt*1e3:null)}</td><td>\${UcQuickRecordSource(e)}</td><td>\${UcQuickModelName(e.modelName)}</td><td>\${UcQuickFmtTokens((Number(e.promptTokens)||0)+(Number(e.completionTokens)||0))}</td><td>\${UcQuickFmtCompute(e.compute??UcQuickQuotaToCompute(e.quota,y))}</td><td>\${UcQuickFmtMs(e.useTime)}</td></tr>\`):i\`<tr><td colspan="6">暂无 New API 流水。</td></tr>\`:h.length?h.map(e=>{let t=e.usage??UcQuickEmptyTotals(),n=UcQuickSessionModel(e);return i\`<tr><td>\${UcQuickFmtDate(e.updatedAt)}</td><td>\${e.label||e.key||\`未命名\`}</td><td>\${UcQuickModelName(n)}</td><td>\${UcQuickFmtTokens(t.totalTokens)}</td><td>\${UcQuickFmtCost(t.totalCost)}</td><td>--</td></tr>\`}):i\`<tr><td colspan="6">暂无用量流水，发起会话后会在这里出现。</td></tr>\`}
+          <div class="uclaw-config-model-table"><table><thead><tr><th>时间</th><th>\${v?\`来源\`:\`会话\`}</th><th>模型</th><th>Token</th><th>金额</th><th>耗时</th></tr></thead><tbody>
+            \${v?b.length?b.map(e=>i\`<tr><td>\${UcQuickFmtDate(e.createdAt?e.createdAt*1e3:null)}</td><td>\${UcQuickRecordSource(e)}</td><td>\${UcQuickModelName(e.modelName)}</td><td>\${UcQuickFmtTokens((Number(e.promptTokens)||0)+(Number(e.completionTokens)||0))}</td><td>\${UcQuickFmtQuotaYuan(e.quota,y)}</td><td>\${UcQuickFmtMs(e.useTime)}</td></tr>\`):i\`<tr><td colspan="6">暂无 New API 流水。</td></tr>\`:h.length?h.map(e=>{let t=e.usage??UcQuickEmptyTotals(),n=UcQuickSessionModel(e);return i\`<tr><td>\${UcQuickFmtDate(e.updatedAt)}</td><td>\${e.label||e.key||\`未命名\`}</td><td>\${UcQuickModelName(n)}</td><td>\${UcQuickFmtTokens(t.totalTokens)}</td><td>\${UcQuickFmtCost(t.totalCost)}</td><td>--</td></tr>\`}):i\`<tr><td colspan="6">暂无用量流水，发起会话后会在这里出现。</td></tr>\`}
           </tbody></table></div>
         </div>
       </section>
@@ -1762,7 +1762,16 @@ function patchConfigModelUsageDashboard() {
    * Runtime class methods for the model selector modal and config writeback.
    */
   const modelChangeMethod = `async uclawRefreshModelCatalog(e={}){try{let t=globalThis.uclaw?.refreshModelCatalog?await globalThis.uclaw.refreshModelCatalog():{ok:!1,message:\`模型目录服务不可用\`};if(!t?.ok)throw Error(t?.message||\`同步失败\`);await this.context.runtimeConfig?.refresh?.({discardPendingChanges:!0}),this.requestUpdate(),e?.silent||globalThis.alert?.(t.message||\`模型目录已同步\`);return t}catch(t){let n=t instanceof Error?t.message:String(t);return e?.silent?{ok:!1,message:n}:(globalThis.alert?.(\`同步模型失败：\${n}\`),{ok:!1,message:n})}}uclawModelCandidates(e,t){let n=this.context.runtimeConfig?.state?.configForm??this.context.runtimeConfig?.state?.configSnapshot?.config??{},r=[],i=new Set,a=(e,t,n,a)=>{let o=String(e??\`\`).trim();if(!o||i.has(o))return;i.add(o),r.push({id:o,name:t||o,provider:n||UcQuickProviderName(o),source:a||\`配置\`})},o=n?.agents?.defaults??{};a(t,\`当前模型\`,UcQuickProviderName(t),\`当前\`);let c={text:[o.model],image:[o.imageGenerationModel,o.imageModel],video:[o.videoGenerationModel]}[e]??[];for(let e of c)typeof e==\`string\`?a(e,\`默认模型\`,UcQuickProviderName(e),\`默认\`):e?.primary&&a(e.primary,\`默认模型\`,UcQuickProviderName(e.primary),\`默认\`);let s=n?.models?.providers??{};for(let[t,n]of Object.entries(s)){let r=Array.isArray(n?.models)?n.models:[];for(let n of r){let r=typeof n==\`string\`?n:String(n?.id??n?.name??\`\`).trim();if(!r)continue;let i=\`\${t}/\${r}\`,o=Array.isArray(n?.capabilities)?n.capabilities.map(e=>String(e).toLowerCase()):[],s=i.toLowerCase(),c=e===\`video\`?(o.includes(\`video\`)||!o.length&&/video|jimeng|kling|runway|seedance/.test(s)):e===\`image\`?(o.includes(\`image\`)||!o.length&&/image|gpt-image|dall|flux|midjourney/.test(s)):o.length?o.includes(\`text\`)&&!o.includes(\`image\`)&&!o.includes(\`video\`):!(/video|jimeng|kling|runway|seedance|gpt-image|image|dall|flux|midjourney/.test(s));c&&a(i,n?.name||r,t,n?.api||\`provider\`)}}return r}async uclawApplyModelChoice(e,t){let n={text:{paths:[[\`agents\`,\`defaults\`,\`model\`,\`primary\`]]},image:{paths:[[\`agents\`,\`defaults\`,\`imageGenerationModel\`,\`primary\`],[\`agents\`,\`defaults\`,\`imageModel\`,\`primary\`]]},video:{paths:[[\`agents\`,\`defaults\`,\`videoGenerationModel\`,\`primary\`]]}}[e],r=this.context.runtimeConfig,i=String(t??\`\`).trim();if(!n||!i||!r)return;try{await r.ensureLoaded?.();for(let e of n.paths)r.patchForm(e,i);let e=await r.save();if(e===!1)throw Error(r.state.lastError??\`保存失败\`);if(r.state.connected){let e=await r.apply?.();if(e===!1)throw Error(r.state.lastError??\`应用失败\`)}await r.refresh?.({discardPendingChanges:!0}),this.uclawReloadModelUsage(),this.requestUpdate()}catch(e){globalThis.alert?.(\`更换模型失败：\${e instanceof Error?e.message:String(e)}\`)}}async uclawChangeModel(e,t){let n={text:\`文字模型\`,image:\`图片模型\`,video:\`视频模型\`}[e];if(!n)return;let r=String(t??\`\`).trim(),i=this.uclawModelCandidates(e,r);void this.uclawRefreshModelCatalog({silent:!0}).then(()=>{i=this.uclawModelCandidates(e,r),l?.()});let a=r&&r!==\`未配置\`?r:(i[0]?.id??\`\`),o=document.createElement(\`div\`);o.className=\`uclaw-model-picker\`,o.tabIndex=-1,o.innerHTML=\`<div class="uclaw-model-picker__panel" role="dialog" aria-modal="true" aria-label="\${n}选择器"><div class="uclaw-model-picker__head"><div><h2>更换\${n}</h2><p>选择已配置模型，或直接输入模型 id。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><input class="uclaw-model-picker__search" placeholder="搜索或输入模型 id（当前 \${a.replace(/"/g,\`&quot;\`)}）" value=""><div class="uclaw-model-picker__list"></div><div class="uclaw-model-picker__foot"><button class="btn" type="button" data-cancel>取消</button><button class="btn primary" type="button" data-confirm>确认更换</button></div></div>\`;let s=o.querySelector(\`.uclaw-model-picker__search\`),c=o.querySelector(\`.uclaw-model-picker__list\`),l=()=>{let e=String(s.value??\`\`).toLowerCase().trim(),t=i.filter(t=>!e||t.id.toLowerCase().includes(e)||t.name.toLowerCase().includes(e)||t.provider.toLowerCase().includes(e));c.innerHTML=t.length?\`\`:\`<div class="uclaw-model-picker__empty">没有匹配项，可直接确认输入的模型 id。</div>\`;for(let e of t){let t=document.createElement(\`button\`);t.type=\`button\`,t.className=\`uclaw-model-picker__option \${e.id===s.value.trim()?\`is-selected\`:\`\`}\`,t.innerHTML=\`<strong></strong><span></span><em></em>\`,t.querySelector(\`strong\`).textContent=e.name,t.querySelector(\`span\`).textContent=e.id,t.querySelector(\`em\`).textContent=\`\${e.provider} · \${e.source}\`,t.addEventListener(\`click\`,()=>{s.value=e.id,l()}),c.appendChild(t)}};let u=()=>{document.removeEventListener(\`keydown\`,d,!0),o.remove()},d=t=>{t.key===\`Escape\`&&(t.preventDefault(),u()),t.key===\`Enter\`&&document.activeElement===s&&(t.preventDefault(),o.querySelector(\`[data-confirm]\`)?.click())};o.addEventListener(\`click\`,e=>{e.target===o&&u()}),o.querySelector(\`.uclaw-model-picker__close\`)?.addEventListener(\`click\`,u),o.querySelector(\`[data-cancel]\`)?.addEventListener(\`click\`,u),o.querySelector(\`[data-confirm]\`)?.addEventListener(\`click\`,async()=>{let t=String(s.value??\`\`).trim();if(!t)return;s.disabled=!0,o.querySelector(\`[data-confirm]\`).textContent=\`保存中...\`;await this.uclawApplyModelChoice(e,t),u()}),s.addEventListener(\`input\`,l),document.body.appendChild(o),document.addEventListener(\`keydown\`,d,!0),l(),requestAnimationFrame(()=>{o.focus({preventScroll:!0}),s.focus()})}`;
-  const rechargeModelMethod = `uclawRechargeMoney(e){return"¥"+((Number(e)||0)/100).toFixed(2)}uclawRechargeCompute(e){return (()=>{let t=Math.round((Number(e)||0)*12);return t>=10000?(t/10000).toLocaleString(void 0,{maximumFractionDigits:2})+"w 算力":t.toLocaleString()+" 算力"})()}uclawRechargeDate(e){let t=e?new Date(e):null;return!t||Number.isNaN(t.valueOf())?"--":t.toLocaleString(void 0,{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}uclawRechargeStatusText(e){return{created:"待支付",paid:"已支付",crediting:"入账中",credited:"已到账",credit_failed:"入账失败"}[e]||e||"未知"}async uclawRechargeModelQuota(e="dev_10"){if(this.uclawModelUsage?.recharging)return!1;this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!0,rechargeMessage:null,rechargeError:null},this.requestUpdate();try{let t=globalThis.uclaw?.rechargeModelQuota?await globalThis.uclaw.rechargeModelQuota({planCode:e}):{ok:!1,message:"充值服务不可用"};if(!t?.ok)throw Error(t?.message||"充值失败");return this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!1,rechargeMessage:t.message||"虚拟充值成功",rechargeError:null,cloudSummary:t.usage?.status==="ok"?t.usage:this.uclawModelUsage?.cloudSummary},this.requestUpdate(),this.uclawReloadModelUsage(),!0}catch(e){return this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!1,rechargeMessage:null,rechargeError:e?.message??String(e)},this.requestUpdate(),!1}}async uclawOpenRechargeDialog(){if(this.uclawModelUsage?.recharging)return;let e=document.createElement("div");e.className="uclaw-model-picker",e.tabIndex=-1,e.innerHTML='<div class="uclaw-model-picker__panel uclaw-recharge-dialog" role="dialog" aria-modal="true" aria-label="充值套餐"><div class="uclaw-model-picker__head"><div><h2>充值</h2><p>1 元 = 600w 算力，成功后额度会自动写入 New API。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><div class="uclaw-recharge-plan-grid" data-plans><div class="uclaw-model-picker__empty">正在加载套餐...</div></div><div class="uclaw-config-model-callout danger" data-error hidden></div><div class="uclaw-model-picker__foot"><button class="btn" type="button" data-cancel>取消</button><button class="btn primary" type="button" data-confirm disabled>确认充值</button></div></div>';let t=e.querySelector("[data-plans]"),n=e.querySelector("[data-confirm]"),r=e.querySelector("[data-error]"),i=[],a="",o=()=>{t.innerHTML="",n.disabled=!a;if(!i.length){let e=document.createElement("div");e.className="uclaw-model-picker__empty",e.textContent="暂无可用套餐",t.appendChild(e);return}for(let e of i){let r=document.createElement("button");r.type="button",r.className="uclaw-recharge-plan "+(e.code===a?"is-selected":""),r.innerHTML="<strong></strong><span></span><em></em>";let i=r.querySelector("strong"),o=r.querySelector("span"),s=r.querySelector("em");i.textContent=e.name||e.code,o.textContent=this.uclawRechargeMoney(e.amountCents),s.textContent=this.uclawRechargeCompute(e.quota),r.addEventListener("click",()=>{a=e.code,o()}),t.appendChild(r)}};let s=()=>{document.removeEventListener("keydown",c,!0),e.remove()},c=t=>{t.key==="Escape"&&(t.preventDefault(),s())};e.addEventListener("click",t=>{t.target===e&&s()}),e.querySelector(".uclaw-model-picker__close")?.addEventListener("click",s),e.querySelector("[data-cancel]")?.addEventListener("click",s),n.addEventListener("click",async()=>{if(!a)return;n.disabled=!0,n.textContent="充值中...";let e=await this.uclawRechargeModelQuota(a);e?s():(n.disabled=!1,n.textContent="确认充值",r.hidden=!1,r.textContent=this.uclawModelUsage?.rechargeError||"充值失败，请稍后重试")}),document.body.appendChild(e),document.addEventListener("keydown",c,!0);try{let e=globalThis.uclaw?.getRechargePlans?await globalThis.uclaw.getRechargePlans():{ok:!1,message:"充值服务不可用",plans:[]};if(!e?.ok)throw Error(e?.message||"套餐加载失败");i=Array.isArray(e.plans)?e.plans:[],a=i[0]?.code||"",o()}catch(e){t.innerHTML='<div class="uclaw-model-picker__empty">套餐加载失败</div>',r.hidden=!1,r.textContent=e?.message??String(e)}requestAnimationFrame(()=>e.focus({preventScroll:!0}))}async uclawOpenRechargeRecords(){let e=document.createElement("div");e.className="uclaw-model-picker",e.tabIndex=-1,e.innerHTML='<div class="uclaw-model-picker__panel uclaw-recharge-dialog" role="dialog" aria-modal="true" aria-label="充值记录"><div class="uclaw-model-picker__head"><div><h2>充值记录</h2><p>最近 20 条订单，到账以 Bavi-box 算力为准（New API quota）。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><div class="uclaw-recharge-order-list" data-orders><div class="uclaw-model-picker__empty">正在加载记录...</div></div><div class="uclaw-model-picker__foot"><button class="btn primary" type="button" data-cancel>完成</button></div></div>';let t=e.querySelector("[data-orders]"),n=()=>{document.removeEventListener("keydown",r,!0),e.remove()},r=t=>{t.key==="Escape"&&(t.preventDefault(),n())};e.addEventListener("click",t=>{t.target===e&&n()}),e.querySelector(".uclaw-model-picker__close")?.addEventListener("click",n),e.querySelector("[data-cancel]")?.addEventListener("click",n),document.body.appendChild(e),document.addEventListener("keydown",r,!0);try{let e=globalThis.uclaw?.getRechargeOrders?await globalThis.uclaw.getRechargeOrders():{ok:!1,message:"充值记录服务不可用",orders:[]};if(!e?.ok)throw Error(e?.message||"记录加载失败");let n=Array.isArray(e.orders)?e.orders:[];if(!n.length){t.innerHTML='<div class="uclaw-model-picker__empty">暂无充值记录</div>'}else{t.innerHTML="";for(let e of n){let n=document.createElement("div");n.className="uclaw-recharge-order",n.innerHTML="<strong></strong><span></span><em></em><small></small>",n.querySelector("strong").textContent=this.uclawRechargeMoney(e.amountCents),n.querySelector("span").textContent=this.uclawRechargeCompute(e.quota),n.querySelector("em").textContent=this.uclawRechargeStatusText(e.status),n.querySelector("small").textContent=(e.orderNo||"订单")+" · "+this.uclawRechargeDate(e.creditedAt||e.paidAt||e.createdAt),t.appendChild(n)}}}catch(e){t.innerHTML='<div class="uclaw-model-picker__empty">记录加载失败：'+(e?.message??String(e))+"</div>"}requestAnimationFrame(()=>e.focus({preventScroll:!0}))}`;
+  const rechargeModelMethod = `
+uclawRechargeMoney(e){return "¥"+((Number(e)||0)/100).toFixed(2)}
+uclawRechargeCompute(e){let t=Math.round((Number(e)||0)*12);return t>=10000?(t/10000).toLocaleString(void 0,{maximumFractionDigits:2})+"w 算力":t.toLocaleString()+" 算力"}
+uclawRechargeDate(e){let t=e?new Date(e):null;return !t||Number.isNaN(t.valueOf())?"--":t.toLocaleString(void 0,{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}
+uclawRechargeStatusText(e){return {created:"待支付",paid:"已支付",crediting:"入账中",credited:"已到账",credit_failed:"入账失败"}[e]||e||"未知"}
+async uclawCreateRechargeOrder(e="dev_10",t="alipay"){if(this.uclawModelUsage?.recharging)return{ok:!1,message:"已有充值进行中"};this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!0,rechargeMessage:null,rechargeError:null},this.requestUpdate();try{let n=globalThis.uclaw?.rechargeModelQuota?await globalThis.uclaw.rechargeModelQuota({planCode:e,provider:t}):{ok:!1,message:"充值服务不可用"};if(!n?.ok)throw Error(n?.message||"创建订单失败");this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!1,rechargeMessage:n.message||"订单已创建",rechargeError:null},this.requestUpdate();return n}catch(e){return this.uclawModelUsage={...this.uclawModelUsageSnapshot(),recharging:!1,rechargeMessage:null,rechargeError:e?.message??String(e)},this.requestUpdate(),{ok:!1,message:e?.message??String(e)}}}
+async uclawRefreshRechargeOrder(e){let t=String(e||"").trim();if(!t)return{ok:!1,message:"订单号为空"};try{let e=globalThis.uclaw?.getRechargeOrder?await globalThis.uclaw.getRechargeOrder(t):{ok:!1,message:"订单查询服务不可用"};if(e?.ok&&e.order?.status==="credited"){this.uclawModelUsage={...this.uclawModelUsageSnapshot(),rechargeMessage:"充值已到账，余额已刷新。",rechargeError:null},this.requestUpdate(),this.uclawReloadModelUsage()}return e}catch(e){return{ok:!1,message:e?.message??String(e)}}}
+async uclawOpenRechargeDialog(){if(this.uclawModelUsage?.recharging)return;let e=document.createElement("div");e.className="uclaw-model-picker uclaw-recharge-pay",e.tabIndex=-1,e.innerHTML='<div class="uclaw-model-picker__panel uclaw-recharge-dialog" role="dialog" aria-modal="true" aria-label="支付宝充值"><div class="uclaw-model-picker__head"><div><h2>支付宝充值</h2><p>选择套餐后使用手机支付宝扫码支付。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><div class="uclaw-recharge-plan-grid" data-plans><div class="uclaw-model-picker__empty">正在加载套餐...</div></div><section class="uclaw-recharge-qr" data-qr hidden><div class="uclaw-recharge-qr__box"><img alt="支付宝支付二维码" data-qr-img></div><div class="uclaw-recharge-qr__meta"><strong data-qr-title>等待支付</strong><span data-qr-money></span><small data-qr-order></small><p data-qr-status>请在 5 分钟内扫码完成支付。</p></div></section><div class="uclaw-config-model-callout danger" data-error hidden></div><div class="uclaw-model-picker__foot"><button class="btn" type="button" data-cancel>取消</button><button class="btn" type="button" data-refresh hidden>刷新状态</button><button class="btn primary" type="button" data-confirm disabled>生成二维码</button></div></div>';let t=e.querySelector("[data-plans]"),n=e.querySelector("[data-confirm]"),r=e.querySelector("[data-refresh]"),a=e.querySelector("[data-error]"),o=e.querySelector("[data-qr]"),s=e.querySelector("[data-qr-img]"),c=e.querySelector("[data-qr-title]"),l=e.querySelector("[data-qr-money]"),u=e.querySelector("[data-qr-order]"),d=e.querySelector("[data-qr-status]"),p=[],h="",g="",P="alipay",f=null,y=!1,m=()=>{a.hidden=!0,a.textContent=""},v=()=>{t.innerHTML="",n.disabled=!h;if(!p.length){let e=document.createElement("div");e.className="uclaw-model-picker__empty",e.textContent="暂无可用套餐",t.appendChild(e);return}for(let e of p){let r=document.createElement("button");r.type="button",r.className="uclaw-recharge-plan "+(e.code===h?"is-selected":""),r.innerHTML="<strong></strong><span></span><em></em>";r.querySelector("strong").textContent=e.name||e.code,r.querySelector("span").textContent=this.uclawRechargeMoney(e.checkoutAmountCents||e.amountCents),r.querySelector("em").textContent="到账模型额度 "+this.uclawRechargeMoney(e.amountCents),r.addEventListener("click",()=>{m(),h=e.code,v()}),t.appendChild(r)}};let b=async()=>{if(!g)return;let e=await this.uclawRefreshRechargeOrder(g);if(!e?.ok){d.textContent=e?.message||"状态刷新失败";return}let t=e.order?.status||"created";c.textContent=this.uclawRechargeStatusText(t),d.textContent=t==="credited"?"支付成功，额度已到账。":t==="credit_failed"?"支付成功，但额度入账失败，请联系客服处理。":"等待支付宝支付完成。";if(t==="credited"){r.hidden=!0,n.textContent="完成",n.disabled=!1}};let w=()=>{if(f)clearInterval(f),f=null};let C=()=>{y=!0,w(),document.removeEventListener("keydown",S,!0),e.remove()};let S=t=>{t.key==="Escape"&&(t.preventDefault(),C())};e.addEventListener("click",t=>{t.target===e&&C()}),e.querySelector(".uclaw-model-picker__close")?.addEventListener("click",C),e.querySelector("[data-cancel]")?.addEventListener("click",C),r.addEventListener("click",b),n.addEventListener("click",async()=>{m();if(g){C();return}if(!h)return;n.disabled=!0,n.textContent=P==="virtual"?"充值中...":"创建订单...";let e=await this.uclawCreateRechargeOrder(h,P);if(!e?.ok){n.disabled=!1,n.textContent="生成二维码",a.hidden=!1,a.textContent=e?.message||"创建订单失败";return}g=String(e.order?.orderNo||"").trim();let p=String(e.qrCodeDataUrl||"").trim(),v=String(e.qrCodeUrl||"").trim();if((P==="virtual"||e.order?.provider==="virtual")&&e.order?.status==="credited"){this.uclawModelUsage={...this.uclawModelUsageSnapshot(),rechargeMessage:e.message||"充值已到账，余额已刷新。",rechargeError:null,cloudSummary:e.usage?.status==="ok"?e.usage:this.uclawModelUsage?.cloudSummary},this.requestUpdate(),this.uclawReloadModelUsage(),C();return}if(!g||!p&&!v){n.disabled=!1,n.textContent="生成二维码",a.hidden=!1,a.textContent="订单缺少支付二维码";return}t.hidden=!0,o.hidden=!1,s.src=p||v,l.textContent=this.uclawRechargeMoney(e.order?.amountCents),u.textContent=g,c.textContent="待支付",d.textContent="请在 5 分钟内扫码完成支付。",r.hidden=!1,n.disabled=!1,n.textContent="完成",w(),f=setInterval(()=>{y||b()},3000),b()});document.body.appendChild(e),document.addEventListener("keydown",S,!0);try{let[e,n]=await Promise.all([globalThis.uclaw?.getRechargePlans?globalThis.uclaw.getRechargePlans():{ok:!1,message:"充值服务不可用",plans:[]},globalThis.uclaw?.getRechargeProviders?globalThis.uclaw.getRechargeProviders():{ok:!1,providers:[]}]);if(!e?.ok)throw Error(e?.message||"套餐加载失败");let r=Array.isArray(n.providers)?n.providers:[];P=r.some(e=>e.code==="alipay"&&e.enabled)?"alipay":r.some(e=>e.code==="virtual"&&e.enabled)?"virtual":"alipay";p=Array.isArray(e.plans)?e.plans:[],h=p[0]?.code||"",v()}catch(e){t.innerHTML='<div class="uclaw-model-picker__empty">套餐加载失败</div>',a.hidden=!1,a.textContent=e?.message??String(e)}requestAnimationFrame(()=>e.focus({preventScroll:!0}))}
+async uclawOpenRechargeRecords(){let e=document.createElement("div");e.className="uclaw-model-picker",e.tabIndex=-1,e.innerHTML='<div class="uclaw-model-picker__panel uclaw-recharge-dialog" role="dialog" aria-modal="true" aria-label="充值记录"><div class="uclaw-model-picker__head"><div><h2>充值记录</h2><p>最近 20 条已支付订单，到账以 New API 额度为准。</p></div><button class="uclaw-model-picker__close" type="button" aria-label="关闭">×</button></div><div class="uclaw-recharge-order-list" data-orders><div class="uclaw-model-picker__empty">正在加载记录...</div></div><div class="uclaw-model-picker__foot"><button class="btn primary" type="button" data-cancel>完成</button></div></div>';let t=e.querySelector("[data-orders]"),n=()=>{document.removeEventListener("keydown",r,!0),e.remove()},r=t=>{t.key==="Escape"&&(t.preventDefault(),n())};e.addEventListener("click",t=>{t.target===e&&n()}),e.querySelector(".uclaw-model-picker__close")?.addEventListener("click",n),e.querySelector("[data-cancel]")?.addEventListener("click",n),document.body.appendChild(e),document.addEventListener("keydown",r,!0);try{let e=globalThis.uclaw?.getRechargeOrders?await globalThis.uclaw.getRechargeOrders():{ok:!1,message:"充值记录服务不可用",orders:[]};if(!e?.ok)throw Error(e?.message||"记录加载失败");let n=Array.isArray(e.orders)?e.orders:[];if(!n.length){t.innerHTML='<div class="uclaw-model-picker__empty">暂无充值记录</div>'}else{t.innerHTML="";for(let e of n){let n=document.createElement("div");n.className="uclaw-recharge-order",n.innerHTML="<strong></strong><span></span><em></em><small></small>",n.querySelector("strong").textContent=this.uclawRechargeMoney(e.amountCents),n.querySelector("span").textContent=e.provider||"alipay",n.querySelector("em").textContent=this.uclawRechargeStatusText(e.status),n.querySelector("small").textContent=(e.orderNo||"订单")+" · "+this.uclawRechargeDate(e.creditedAt||e.paidAt||e.createdAt),t.appendChild(n)}}}catch(e){t.innerHTML='<div class="uclaw-model-picker__empty">记录加载失败：'+(e?.message??String(e))+"</div>"}requestAnimationFrame(()=>e.focus({preventScroll:!0}))}
+`;
   const openAdvancedModelMethod = `uclawOpenAdvancedModels(){this.settingsMode=\`advanced\`,this.selections={...this.selections,"ai-agents":{activeSection:\`models\`,activeSubsection:null}},this.navigate(\`ai-agents\`)}`;
   const methods = `uclawUsageDayKey(e=new Date){return\`\${e.getFullYear()}-\${String(e.getMonth()+1).padStart(2,\`0\`)}-\${String(e.getDate()).padStart(2,\`0\`)}\`}uclawUsageTimeZone(){let e=-new Date().getTimezoneOffset(),t=e>=0?\`+\`:\`-\`,n=Math.abs(e),r=Math.floor(n/60),i=n%60;return{mode:\`specific\`,utcOffset:\`UTC\${t}\${String(r).padStart(2,\`0\`)}\${i?\`:\${String(i).padStart(2,\`0\`)}\`:\`\`}\`}}uclawModelUsageSnapshot(){return this.uclawModelUsage??{loading:!1,error:null,result:null,costSummary:null,providerUsageSummary:null,cloudSummary:null,cloudError:null,recharging:!1,rechargeMessage:null,rechargeError:null,client:null,requestId:0}}uclawEnsureModelUsage(){let e=this.context.gateway.snapshot.client;if(!e)return;let t=this.uclawModelUsageSnapshot();t.client!==e&&(this.uclawModelUsage={loading:!1,error:null,result:null,costSummary:null,providerUsageSummary:null,cloudSummary:null,cloudError:null,recharging:!1,rechargeMessage:null,rechargeError:null,client:e,requestId:t.requestId??0},t=this.uclawModelUsage),!t.loading&&!t.result&&!t.error&&this.uclawLoadModelUsage()}uclawLoadModelUsage(){let e=this.context.gateway.snapshot.client;if(!e)return;let t=++this.uclawModelUsage.requestId,n=new Date,r=new Date(n);r.setDate(n.getDate()-13);let i=this.uclawUsageDayKey(r),a=this.uclawUsageDayKey(n),o=this.uclawUsageTimeZone();this.uclawModelUsage={...this.uclawModelUsage,loading:!0,error:null,cloudError:null,client:e},this.requestUpdate();let s={startDate:i,endDate:a,agentScope:\`all\`,mode:o.mode,utcOffset:o.utcOffset},c=globalThis.uclaw?.getModelUsageSummary?globalThis.uclaw.getModelUsageSummary().catch(e=>({ok:!1,message:e?.message??String(e)})):Promise.resolve(null);Promise.all([e.request(\`sessions.usage\`,{...s,groupBy:\`family\`,includeHistorical:!0,limit:1e3,includeContextWeight:!0}),e.request(\`usage.cost\`,s).catch(()=>null),e.request(\`usage.status\`).catch(()=>null),c]).then(([n,r,i,a])=>{this.uclawModelUsage.requestId===t&&(this.uclawModelUsage={...this.uclawModelUsage,loading:!1,result:n,costSummary:r,providerUsageSummary:i,cloudSummary:a?.status===\`ok\`?a:null,cloudError:a&&a.status!==\`ok\`?(a.message||a.error||\`New API 数据暂不可用\`):null,error:null,client:e},this.requestUpdate())}).catch(n=>{this.uclawModelUsage.requestId===t&&(this.uclawModelUsage={...this.uclawModelUsage,loading:!1,error:n?.message??String(n),result:null,costSummary:null,providerUsageSummary:null,cloudSummary:null,cloudError:null,client:e},this.requestUpdate())})}uclawReloadModelUsage(){this.uclawModelUsage={...this.uclawModelUsage,result:null,error:null,costSummary:null,providerUsageSummary:null,cloudSummary:null,cloudError:null},this.uclawLoadModelUsage()}${rechargeModelMethod}uclawOpenAdvancedModels(){this.settingsMode=\`advanced\`,this.selections={...this.selections,"ai-agents":{activeSection:\`models\`,activeSubsection:null}},this.navigate(\`ai-agents\`)}${modelChangeMethod}`;
   const originalQuick = "function Ze(e){return i`\n    <div class=\"qs-container\">\n      <div class=\"qs-grid\">\n        ${He(e)} ${Ue(e)} ${Ge(e)}\n        ${Ke(e)} ${qe(e)} ${Je(e)}\n        ${We(e)} ${Ye(e)}\n      </div>\n\n      ${Xe(e)}\n    </div>\n  `}";
@@ -1811,7 +1820,12 @@ function patchConfigModelUsageDashboard() {
       /uclawRechargeMoney\(e\)\{[\s\S]*?requestAnimationFrame\(\(\)=>e\.focus\(\{preventScroll:!0\}\)\)\}(?=uclawOpenAdvancedModels\(\))/,
       rechargeModelMethod,
     );
+    after = after.replace(
+      /uclawRechargeMoney\(e\)\{return\s*"¥"\+\(\(Number\(e\)\|\|0\)\/100\)\.toFixed\(2\)\}[\s\S]*?(?=uclawOpenAdvancedModels\(\)\{)/,
+      rechargeModelMethod,
+    );
     after = after.replaceAll(`${rechargeModelMethod}${rechargeModelMethod}`, rechargeModelMethod);
+    after = after.replace(/\n{2,}(?=uclawRechargeMoney\(e\)\{)/g, "\n");
     if (!after.includes("uclawLoadModelUsage(){")) {
       after = after.replace("renderQuickConfig(e){", `${methods}renderQuickConfig(e){`);
     }
@@ -1898,6 +1912,32 @@ ${markerEnd}`;
 }
 
 /**
+ * Adds scoped CSS for the Alipay QR recharge dialog.
+ */
+function patchRechargeQrDialogCss() {
+  const markerStart = "/* uclaw-recharge-qr-dialog-1:start */";
+  const markerEnd = "/* uclaw-recharge-qr-dialog-1:end */";
+  const block = `${markerStart}
+.uclaw-recharge-pay .uclaw-recharge-dialog{width:min(520px,calc(100vw - 32px));grid-template-rows:auto auto auto auto}.uclaw-recharge-pay .uclaw-recharge-plan-grid[hidden]{display:none}.uclaw-recharge-qr{display:grid;grid-template-columns:184px minmax(0,1fr);gap:16px;align-items:center;padding:14px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.uclaw-recharge-qr[hidden]{display:none}.uclaw-recharge-qr__box{width:184px;height:184px;display:grid;place-items:center;border:1px solid #dbe7f6;border-radius:8px;background:#fff}.uclaw-recharge-qr__box img{width:160px;height:160px;object-fit:contain}.uclaw-recharge-qr__meta{min-width:0;display:grid;gap:8px}.uclaw-recharge-qr__meta strong{font-size:17px;color:#0f172a}.uclaw-recharge-qr__meta span{font-size:28px;font-weight:780;color:#0f172a;font-variant-numeric:tabular-nums}.uclaw-recharge-qr__meta small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b;font-size:11px}.uclaw-recharge-qr__meta p{margin:0;color:#334155;font-size:12px;line-height:1.45}.uclaw-recharge-pay .uclaw-model-picker__foot{align-items:center}@media (max-width:560px){.uclaw-recharge-qr{grid-template-columns:1fr;justify-items:center;text-align:center}.uclaw-recharge-qr__meta{justify-items:center}.uclaw-recharge-qr__meta small{max-width:100%}}
+${markerEnd}`;
+
+  for (const file of listAssetFiles(/^index-.*\.css$/, "index css")) {
+    const before = read(file);
+    if (before.includes(block)) {
+      continue;
+    }
+    const withoutOld = before.replace(
+      new RegExp(`${escapeRegExp(markerStart)}[\\s\\S]*?${escapeRegExp(markerEnd)}\\n?`),
+      "",
+    );
+    const after = `${withoutOld.trimEnd()}\n${block}\n`;
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
  * Updates Control UI cache metadata so visible patched assets are refreshed.
  */
 function patchServiceWorker() {
@@ -1908,7 +1948,7 @@ function patchServiceWorker() {
   let source = read(swPath);
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-carousel-export-1-ecommerce-type-card-polish-1-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3";',
   );
   source = source.replace(
     /skillhub-scene-picker-2(?!-skillhub-scene-font-color-1)/,
@@ -1971,6 +2011,10 @@ function patchServiceWorker() {
   source = source.replace(
     /chat-terminal-final-refresh-1(?!-chat-background-session-status-1)/,
     "chat-terminal-final-refresh-1-chat-background-session-status-1",
+  );
+  source = source.replace(
+    /chat-background-session-status-1(?!-alipay-recharge-qr-1)/,
+    "chat-background-session-status-1-alipay-recharge-qr-1",
   );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
@@ -2344,6 +2388,109 @@ function patchPrimaryNavigationProjection() {
   for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
     const before = read(file);
     const after = replacePairs(before, pairs);
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Adds the Bavi-box ecommerce image workbench to the user-facing Workflows page.
+ */
+function patchTasksPageEcommerceWorkflow() {
+  const helper = [
+    "function UcEcommercePlatformPresets(){return[{id:`douyin`,label:`抖音电商`,source_type:`official_seed`,confidence:`high`,needs_backend_confirmation:!1,main:`主图建议不低于 600x600，优先 1:1；服饰等可使用 3:4 素材图`,detail:`详情页建议宽 1125px，单屏高度不超过 2000px，总高度不超过 20000px`,qa:[`商品主体清晰`,`不拼接低质边框`,`功效/资质表达需证据`]},{id:`taobao_tmall`,label:`淘宝/天猫`,source_type:`public_summary`,confidence:`medium`,needs_backend_confirmation:!1,main:`常用 800x800 或以上 1:1 主图；移动端需保证主体占比和文字可读`,detail:`详情长图常用宽 750px；切片高度按店铺后台限制确认`,qa:[`首图避免牛皮癣`,`SKU 与实物一致`,`价格/销量不可编造`]},{id:`jd`,label:`京东`,source_type:`official_and_public_summary`,confidence:`medium`,needs_backend_confirmation:!1,main:`主图常用 800x800 或以上 1:1；白底/场景要求按类目确认`,detail:`详情页素材按京东商详装修限制切片`,qa:[`品牌授权需证据`,`参数图与详情一致`,`禁用绝对化表述`]},{id:`pdd`,label:`拼多多`,source_type:`public_summary`,confidence:`low`,needs_backend_confirmation:!0,main:`常用方图主图；具体尺寸、白底、轮播张数需后台二次确认`,detail:`详情图按商家后台实时限制确认`,qa:[`不夸大低价权益`,`活动信息需可核验`,`规则低置信需复核`]},{id:`kuaishou`,label:`快手小店`,source_type:`official_and_public_summary`,confidence:`medium`,needs_backend_confirmation:!1,main:`常用 1:1 主图，部分类目需符合平台发布规范`,detail:`详情页建议按后台装修限制分屏`,qa:[`短视频货架识别优先`,`功效表达保守`,`售后/赠品信息需证据`]},{id:`xiaohongshu`,label:`小红书`,source_type:`public_summary`,confidence:`low`,needs_backend_confirmation:!0,main:`常用 3:4 或 1:1 封面/商品图，需按店铺后台确认`,detail:`详情图需兼顾社区审美和商品信息密度`,qa:[`避免医疗化承诺`,`种草文案不冒充用户评价`,`规则低置信需复核`]},{id:`amazon`,label:`Amazon`,source_type:`official_seed`,confidence:`high`,needs_backend_confirmation:!1,main:`最长边建议 1600px 以上；主图纯白背景，商品占画面 85% 左右`,detail:`A+ / listing images 按站点模块尺寸确认`,qa:[`主图无水印/促销字`,`商品准确对应 ASIN`,`合规声明按站点确认`]},{id:`shopee`,label:`Shopee`,source_type:`official_seed`,confidence:`high`,needs_backend_confirmation:!1,main:`常用 1:1 商品图；部分市场支持 3:4 图片展示`,detail:`商品描述图建议按卖家中心限制压缩与切片`,qa:[`首图不拥挤`,`多语言文案可读`,`市场规则需确认`]},{id:`alibaba`,label:`Alibaba 国际站`,source_type:`official_seed`,confidence:`high`,needs_backend_confirmation:!1,main:`建议 800x800 以上清晰方图；B2B 场景突出产品、规格和应用`,detail:`详情页按国际站详情装修模块输出`,qa:[`参数/认证需证据`,`外贸单位统一`,`工厂/资质不编造`]}]}",
+    "function UcEcommerceDefaultForm(){let e=`douyin`;try{e=globalThis.localStorage?.getItem(`uclaw.ecommerceWorkbench.platform.v1`)||e}catch{}return{platform:e,productName:``,category:``,sellingPoints:``,audience:``,outputTypes:[`main_image`,`detail_image`],outputCounts:{main_image:3,detail_image:5,model_image:1},files:[]}}",
+    "function UcEcommerceId(e=`ecom`){return`${e}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`}",
+    "function UcEcommerceFormatFileSize(e){return !Number.isFinite(e)?``:e>=1048576?`${(e/1048576).toFixed(1)} MB`:`${Math.max(1,Math.round(e/1024))} KB`}",
+    "function UcEcommerceSelectedPreset(e){return UcEcommercePlatformPresets().find(t=>t.id===e)||UcEcommercePlatformPresets()[0]}",
+    "function UcEcommerceImageTargets(){return[{type:`main_image`,label:`主图`,description:`货架首图、白底或清爽场景主图`,size:`1:1`},{type:`detail_image`,label:`详情图`,description:`卖点详情首屏、信息图或规格图`,size:`竖版详情`},{type:`model_image`,label:`模特图`,description:`真人展示、试穿、隐形模特或生活场景`,size:`竖版场景`}]}",
+    "function UcEcommerceOutputCountRules(e){let t=UcEcommerceSelectedPreset(e?.platform),n=t.id;return{main_image:{min:1,max:n===`kuaishou`?9:n===`amazon`?7:5,defaultValue:3,unit:`张`,rule:n===`amazon`?`至少 1 张，建议主图+辅助图 6 张以上。`:n===`kuaishou`?`建议 3-9 张覆盖白底、角度和场景。`:`建议 3-5 张覆盖白底、角度和场景。`},detail_image:{min:3,max:n===`kuaishou`||n===`shopee`?12:9,defaultValue:5,unit:`屏`,rule:n===`shopee`?`商品描述图按最多 12 张控制。`:n===`kuaishou`?`详情图可多张，首版每次最多 12 屏。`:`详情图按 5-9 屏系列拆卖点。`},model_image:{min:1,max:3,defaultValue:1,unit:`张`,rule:`服饰/美妆/配饰建议 1-3 张；首图禁真人类目需复核。`}}}",
+    "function UcEcommerceClampOutputCount(e,t,n){let r=n?.[t]||{},a=Number.parseInt(String(e??``),10),o=Number.isFinite(a)?a:r.defaultValue??1;return Math.min(r.max??1,Math.max(r.min??1,o))}",
+    "function UcEcommerceResolvedOutputCounts(e){let t=UcEcommerceOutputCountRules(e),n=e?.outputCounts||{};return Object.fromEntries(Object.keys(t).map(r=>[r,UcEcommerceClampOutputCount(n[r],r,t)]))}",
+    "function UcEcommerceSetOutputCount(e,t,n){let r=UcEcommerceOutputCountRules(e),a=UcEcommerceResolvedOutputCounts(e);return{...a,[t]:UcEcommerceClampOutputCount(n,t,r)}}",
+    "function UcEcommerceMaxOutputs(){return 12}",
+    "function UcEcommerceSelectedOutputTotal(e){let t=UcEcommerceSelectedOutputTypes(e),n=UcEcommerceResolvedOutputCounts(e);return t.reduce((e,t)=>e+(n[t]||0),0)}",
+    "function UcEcommerceSelectedOutputTypes(e){let t=Array.isArray(e?.outputTypes)?e.outputTypes:[`main_image`,`detail_image`],n=UcEcommerceImageTargets().map(e=>e.type);return t.filter(e=>n.includes(e))}",
+    "function UcEcommerceToggleOutputType(e,t,n){let r=new Set(UcEcommerceSelectedOutputTypes(e));return n?r.add(t):r.delete(t),r.size?[...r]:[t]}",
+    "function UcEcommerceMissing(e){let t=[];return e?.files?.length||t.push(`商品图片`),UcEcommerceSelectedOutputTypes(e).length||t.push(`生成类型`),UcEcommerceSelectedOutputTotal(e)>UcEcommerceMaxOutputs()&&t.push(`单次最多 ${UcEcommerceMaxOutputs()} 张/屏`),(e?.productName?.trim()||e?.sellingPoints?.trim())||t.push(`商品名称或卖点`),t}",
+    "function UcEcommerceBuildManifest(e){let t=UcEcommerceSelectedPreset(e.platform),n=(e.sellingPoints||``).split(/\\n|，|,|；|;/).map(e=>e.trim()).filter(Boolean).slice(0,5),r=e.files||[],a=UcEcommerceSelectedOutputTypes(e),l=UcEcommerceResolvedOutputCounts(e),o=[{type:`main_image`,title:`主图系列`,count:l.main_image,unit:`张`,size_rule:t.main,asset_strategy:`参考 hero-image / packshot 模板，以第 1 张商品图为主体识别图，主体占比 60%-80%，留出平台叠加区。`,prompt_brief:`清晰商品主体，干净货架级构图，每张承担不同任务：白底、角度、场景、细节或信任。`},{type:`detail_image`,title:`详情图系列`,count:l.detail_image,unit:`屏`,size_rule:t.detail,asset_strategy:`参考 infographic / size-spec 模板，按钩子、核心功能、规格/材质、场景、信任证据、下单理由拆屏。`,prompt_brief:`同一 Campaign Style Lock，图文层级可读，证据不足项标为待确认。`},{type:`model_image`,title:`模特图系列`,count:l.model_image,unit:`张`,size_rule:`按平台主图/内容流规格优先竖版；服饰可用试穿/隐形模特，配饰/美妆可用真人局部展示。`,asset_strategy:`参考 model-showcase / try-on-virtual / ghost-mannequin 模板，把商品自然放到人物或生活场景里，保留真实外观。`,prompt_brief:`人物自然真实，产品清晰可识别，不编造使用效果、医疗功效或品牌背书。`}];return{id:UcEcommerceId(),name:e.productName?.trim()||`未命名商品`,platform:t.id,platform_label:t.label,source_type:t.source_type,confidence:t.confidence,needs_backend_confirmation:t.needs_backend_confirmation,output_types:a,output_counts:l,generated_at:new Date().toISOString(),input:{category:e.category?.trim()||`待补充`,audience:e.audience?.trim()||`默认电商购物人群`,image_count:r.length,selling_points:n,files:r.map(e=>({name:e.name,type:e.type,size:e.size}))},outputs:o.filter(e=>a.includes(e.type)),qa:[...t.qa,`低置信平台需后台规则复核`,`图片生成完成后必须人工审查文字和事实`]}}",
+    "function UcEcommerceReadRecords(){try{let e=JSON.parse(globalThis.localStorage?.getItem(`uclaw.ecommerceImageRecords.v1`)||`[]`);return Array.isArray(e)?e.filter(e=>e&&typeof e===`object`).slice(0,30):[]}catch{return[]}}",
+    "function UcEcommerceSaveRecords(e){try{globalThis.localStorage?.setItem(`uclaw.ecommerceImageRecords.v1`,JSON.stringify((e||[]).slice(0,30)))}catch{}}",
+    "function UcEcommerceRecordStatusText(e){return e===`completed`?`已生成`:e===`generating`?`生成中`:e===`failed`?`失败`:e===`draft`?`已记录`:`处理中`}",
+    "function UcEcommerceStatusChip(e){return e===`failed`?`chip-danger`:e===`completed`?`chip-ok`:`chip-warn`}",
+    "function UcEcommerceSafeFileName(e){return String(e||`ecommerce`).trim().replace(/[\\\\/:*?\"<>|]+/g,`-`).replace(/\\s+/g,`-`).replace(/-+/g,`-`).replace(/^-|-$/g,``).slice(0,80)||`ecommerce`}",
+    "function UcEcommerceBase64ToBytes(e){let t=atob(String(e||``)),n=new Uint8Array(t.length);for(let r=0;r<t.length;r+=1)n[r]=t.charCodeAt(r);return n}",
+    "function UcEcommerceStringToBytes(e){return new TextEncoder().encode(String(e??``))}",
+    "function UcEcommerceCrc32Table(){if(globalThis.__uclawEcommerceCrc32Table)return globalThis.__uclawEcommerceCrc32Table;let e=new Uint32Array(256);for(let t=0;t<256;t+=1){let n=t;for(let r=0;r<8;r+=1)n=n&1?3988292384^n>>>1:n>>>1;e[t]=n>>>0}return globalThis.__uclawEcommerceCrc32Table=e,e}",
+    "function UcEcommerceCrc32(e){let t=UcEcommerceCrc32Table(),n=4294967295;for(let r=0;r<e.length;r+=1)n=t[(n^e[r])&255]^n>>>8;return(n^4294967295)>>>0}",
+    "function UcEcommerceWriteZipNumber(e,t,n,r){for(let i=0;i<r;i+=1)e[t+i]=n>>>8*i&255}",
+    "function UcEcommerceDosDateTime(e=new Date){let t=e.getFullYear(),n=Math.max(1980,Math.min(2107,t)),r=(n-1980<<9|e.getMonth()+1<<5|e.getDate())&65535,i=(e.getHours()<<11|e.getMinutes()<<5|Math.floor(e.getSeconds()/2))&65535;return{date:r,time:i}}",
+    "function UcEcommerceZip(e){let t=[],n=[],r=0,i=UcEcommerceDosDateTime();for(let a of e){let e=UcEcommerceStringToBytes(a.name),o=a.bytes instanceof Uint8Array?a.bytes:new Uint8Array(a.bytes||[]),s=UcEcommerceCrc32(o),c=new Uint8Array(30+e.length);UcEcommerceWriteZipNumber(c,0,67324752,4),UcEcommerceWriteZipNumber(c,4,20,2),UcEcommerceWriteZipNumber(c,10,i.time,2),UcEcommerceWriteZipNumber(c,12,i.date,2),UcEcommerceWriteZipNumber(c,14,s,4),UcEcommerceWriteZipNumber(c,18,o.length,4),UcEcommerceWriteZipNumber(c,22,o.length,4),UcEcommerceWriteZipNumber(c,26,e.length,2),c.set(e,30),t.push(c,o);let l=new Uint8Array(46+e.length);UcEcommerceWriteZipNumber(l,0,33639248,4),UcEcommerceWriteZipNumber(l,4,20,2),UcEcommerceWriteZipNumber(l,6,20,2),UcEcommerceWriteZipNumber(l,12,i.time,2),UcEcommerceWriteZipNumber(l,14,i.date,2),UcEcommerceWriteZipNumber(l,16,s,4),UcEcommerceWriteZipNumber(l,20,o.length,4),UcEcommerceWriteZipNumber(l,24,o.length,4),UcEcommerceWriteZipNumber(l,28,e.length,2),UcEcommerceWriteZipNumber(l,42,r,4),l.set(e,46),n.push(l),r+=c.length+o.length}let a=n.reduce((e,t)=>e+t.length,0),o=new Uint8Array(22);UcEcommerceWriteZipNumber(o,0,101010256,4),UcEcommerceWriteZipNumber(o,8,e.length,2),UcEcommerceWriteZipNumber(o,10,e.length,2),UcEcommerceWriteZipNumber(o,12,a,4),UcEcommerceWriteZipNumber(o,16,r,4);return new Blob([...t,...n,o],{type:`application/zip`})}",
+    "function UcEcommerceImageExtension(e){let t=String(e?.mimeType||``),n=/^data:([^;]+);base64,/i.exec(String(e?.dataUrl||``));t=t||n?.[1]||``;return /jpe?g/i.test(t)?`jpg`:/webp/i.test(t)?`webp`:`png`}",
+    "async function UcEcommerceImageBytes(e){let t=String(e?.dataUrl||``),n=/^data:([^;]+);base64,(.+)$/i.exec(t);if(n)return UcEcommerceBase64ToBytes(n[2]);let r=String(e?.url||``);if(r){let e=await fetch(r),t=new Uint8Array(await e.arrayBuffer());if(!e.ok||!t.length)throw Error(`图片下载失败：${e.status}`);return t}throw Error(`图片数据不存在`)}",
+    "function UcEcommerceDownloadBlob(e,t){let n=URL.createObjectURL(e),r=document.createElement(`a`);r.href=n,r.download=t,document.body.appendChild(r),r.click(),r.remove(),setTimeout(()=>URL.revokeObjectURL(n),2500)}",
+    "async function UcEcommerceBuildExportPackage(e){let t=Array.isArray(e?.images)?e.images:[],n=UcEcommerceSafeFileName(`${e?.platform_label||e?.platform||`platform`}-${e?.name||`商品`}`),r=[],i=[];for(let a=0;a<t.length;a+=1){let o=t[a],s=UcEcommerceImageExtension(o),c=`${String(a+1).padStart(2,`0`)}-${UcEcommerceSafeFileName(o?.type||`image`)}-${UcEcommerceSafeFileName(o?.title||`生成图`)}.${s}`,l=await UcEcommerceImageBytes(o);r.push({name:c,bytes:l}),i.push({file:c,title:o?.title||`生成图`,type:o?.type||`image`,model:o?.model||e?.model||``,mimeType:o?.mimeType||`image/${s===`jpg`?`jpeg`:s}`})}let a={...e,images:i,exported_at:new Date().toISOString(),export_note:`本包包含 manifest.json 与生成图片；图片仍需人工复核商品一致性、文字和平台规则。`};r.unshift({name:`manifest.json`,bytes:UcEcommerceStringToBytes(JSON.stringify(a,null,2))});return{blob:UcEcommerceZip(r),fileName:`${n}-电商图片包.zip`}}",
+    "function UcEcommerceFileToPayload(e){return new Promise((t,n)=>{let r=e.file;if(!r)return n(Error(`图片数据不可用：${e.name||`未命名图片`}`));let i=new FileReader;i.onerror=()=>n(Error(`读取图片失败：${e.name||r.name}`)),i.onload=()=>{let o=String(i.result||``),a=/^data:([^;]+);base64,(.+)$/i.exec(o);a?t({mimeType:a[1],fileName:e.name||r.name,content:a[2],size:e.size||r.size||0}):n(Error(`图片格式无法发送：${e.name||r.name}`))},i.readAsDataURL(r)})}",
+    "async function UcEcommerceBuildDirectPayload(e,t){let n=await Promise.all((t||[]).map(UcEcommerceFileToPayload));return{manifest:e,images:n,outputTypes:e.output_types||[],outputCounts:e.output_counts||{}}}",
+    "function UcEcommerceWorkbenchView(e){let t=e.ecommerceForm??UcEcommerceDefaultForm(),n=UcEcommercePlatformPresets(),r=UcEcommerceSelectedPreset(t.platform),a=UcEcommerceMissing(t),o=e.ecommerceResult,l=e.ecommerceRecords??[],u=e.ecommerceGenerating===!0,s=o&&Array.isArray(o.images)?o.images:[],c=UcEcommerceImageTargets(),d=UcEcommerceSelectedOutputTypes(t),m=UcEcommerceOutputCountRules(t),p=UcEcommerceResolvedOutputCounts(t),g=d.reduce((e,t)=>e+(p[t]||0),0);return i`<section class=\"card stack uclaw-ecommerce-workbench\" data-uclaw-ecommerce-workbench=\"direct-output\" data-uclaw-ecommerce-platform=${t.platform}><div class=\"uclaw-ecommerce-head\"><div><div class=\"card-title\">电商主图/详情图</div><div class=\"card-sub\">选择平台、生成类型和数量，上传商品图后直接生成并保留记录。</div></div><span class=\"chip chip-ok\">${r.label}</span></div><div class=\"uclaw-ecommerce-grid\"><label class=\"field\"><span>平台</span><select class=\"input\" .value=${t.platform} @change=${n=>e.onEcommerceField?.(`platform`,n.target.value)}>${n.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class=\"field\"><span>商品名称</span><input class=\"input\" placeholder=\"如：便携榨汁杯\" .value=${t.productName} @input=${t=>e.onEcommerceField?.(`productName`,t.target.value)}></label><label class=\"field\"><span>类目</span><input class=\"input\" placeholder=\"如：厨房小电\" .value=${t.category} @input=${t=>e.onEcommerceField?.(`category`,t.target.value)}></label><label class=\"field\"><span>目标人群</span><input class=\"input\" placeholder=\"默认可不填\" .value=${t.audience} @input=${t=>e.onEcommerceField?.(`audience`,t.target.value)}></label></div><label class=\"field\"><span>核心卖点</span><textarea class=\"input uclaw-ecommerce-textarea\" placeholder=\"每行一个卖点；没有名称时至少填写这里\" .value=${t.sellingPoints} @input=${t=>e.onEcommerceField?.(`sellingPoints`,t.target.value)}></textarea></label><div class=\"uclaw-ecommerce-types\"><strong>生成类型与数量</strong><div class=\"uclaw-ecommerce-type-grid\">${c.map(n=>{let r=m[n.type],a=p[n.type],o=d.includes(n.type);return i`<label class=\"uclaw-ecommerce-type ${o?`is-active`:``}\"><span class=\"uclaw-ecommerce-type-check\"><input type=\"checkbox\" .checked=${o} @change=${t=>e.onEcommerceOutputType?.(n.type,t.target.checked)}><b>${n.label}</b></span><small>${n.description}</small><span class=\"uclaw-ecommerce-count\" @click=${e=>e.stopPropagation()}><span>数量</span><input class=\"input\" type=\"number\" min=${r.min} max=${r.max} .value=${String(a)} ?disabled=${!o} @input=${t=>e.onEcommerceOutputCount?.(n.type,t.target.value)}><em>${r.unit}</em></span><em>${r.rule}</em></label>`})}</div></div><div class=\"uclaw-ecommerce-upload\"><div class=\"uclaw-ecommerce-upload-head\"><div><strong>商品图片</strong><span>${t.files.length?`${t.files.length} 张已选择`:`上传实拍图、包装图或细节图`}</span></div><label class=\"btn\"><input class=\"uclaw-ecommerce-file-input\" type=\"file\" accept=\"image/*\" multiple @change=${t=>e.onEcommerceFiles?.(t.target.files)}>选择图片</label></div>${t.files.length?i`<div class=\"uclaw-ecommerce-file-grid\">${t.files.map((t,n)=>i`<figure class=\"uclaw-ecommerce-file\"><img src=${t.url} alt=${t.name}><figcaption><span>${t.name}</span><small>${UcEcommerceFormatFileSize(t.size)}</small></figcaption><button class=\"btn ghost\" type=\"button\" @click=${()=>e.removeEcommerceFile?.(n)}>移除</button></figure>`)}</div>`:i`<div class=\"uclaw-ecommerce-empty\">还没有图片。请选择商品实拍图后发起生成。</div>`}</div><div class=\"uclaw-ecommerce-rules\"><div><strong>主图规格</strong><span>${r.main}</span></div><div><strong>详情图规格</strong><span>${r.detail}</span></div><div><strong>规则来源</strong><span>${r.source_type} / ${r.confidence}</span></div></div><div class=\"row\"><button class=\"btn primary\" type=\"button\" ?disabled=${a.length>0||u} @click=${()=>e.startEcommerceImageGeneration?.()}>${u?`生成中`:`生成图片`}</button>${a.length?i`<span class=\"muted\">还需：${a.join(`、`)}</span>`:i`<span class=\"muted\">将生成 ${g} 张/屏：${d.map(e=>`${c.find(t=>t.type===e)?.label||e}${p[e]||0}${m[e]?.unit||`张`}`).join(`、`)}，结果显示在本页。</span>`}</div>${o?.error?i`<div class=\"banner banner-error\">${o.error}</div>`:s.length?i`<div class=\"uclaw-ecommerce-result\"><div class=\"uclaw-ecommerce-result-head\"><div><strong>${o.platform_label} 已生成图片</strong><span>${o.name} · ${s.length} 张结果 · ${o.model||`默认图片模型`}</span></div><div class=\"uclaw-ecommerce-result-actions\"><button class=\"btn primary\" type=\"button\" @click=${()=>e.downloadEcommercePackage?.()}>打包下载</button><button class=\"btn\" type=\"button\" @click=${()=>e.copyEcommerceManifest?.()}>复制 Manifest</button></div></div><div class=\"uclaw-ecommerce-generated-grid\" aria-label=\"生成结果横向列表\">${s.map((t,n)=>i`<figure class=\"uclaw-ecommerce-generated\"><img src=${t.dataUrl||t.url} alt=${t.title||`生成图`}><figcaption><strong>${t.title||`生成图`}</strong><span>${t.type||`image`} · ${t.model||o.model||``}</span><a class=\"btn\" href=${t.dataUrl||t.url} download=${`${String(n+1).padStart(2,`0`)}-${UcEcommerceSafeFileName(o.name||`ecommerce`)}-${UcEcommerceSafeFileName(t.title||t.type||`image`)}.${UcEcommerceImageExtension(t)}`} target=\"_blank\" rel=\"noreferrer\">下载</a></figcaption></figure>`)}</div>${o.warnings?.length?i`<div class=\"banner banner-warn\">${o.warnings.join(`；`)}</div>`:``}<div class=\"uclaw-ecommerce-qa\">${o.qa.map(e=>i`<span>${e}</span>`)}</div></div>`:``}<section class=\"uclaw-ecommerce-records\"><div class=\"uclaw-ecommerce-result-head\"><div><strong>生成记录</strong><span>${l.length?`${l.length} 条记录`:`暂无记录`}</span></div><button class=\"btn ghost\" type=\"button\" ?disabled=${l.length===0} @click=${()=>e.clearEcommerceRecords?.()}>清空</button></div>${l.length?i`<div class=\"uclaw-ecommerce-record-list\">${l.map(t=>i`<article class=\"uclaw-ecommerce-record\"><div><strong>${t.productName||`未命名商品`}</strong><span>${t.platformLabel} · ${new Date(t.createdAt).toLocaleString()}</span><small>${t.outputLabels||`默认类型`} · ${t.imageCount} 张素材 · ${t.requestedOutputCount||t.generatedImageCount||0} 张/屏计划 · ${t.generatedImageCount||0} 张结果 · ${t.model||`默认图片模型`}</small></div><div class=\"uclaw-ecommerce-record-actions\"><span class=\"chip ${UcEcommerceStatusChip(t.status)}\">${UcEcommerceRecordStatusText(t.status)}</span>${t.result?i`<button class=\"btn\" type=\"button\" @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button>`:``}</div></article>`)}</div>`:i`<div class=\"uclaw-ecommerce-empty\">生成后会在这里保留平台、商品、生成类型、计划数量、素材数量和图片结果。</div>`}</section></section>`}",
+  ].join("");
+  const methods = "cleanupEcommerceFileUrls(){for(let e of this.ecommerceForm?.files||[])try{e.url&&URL.revokeObjectURL(e.url)}catch{}}saveEcommerceRecords(){UcEcommerceSaveRecords(this.ecommerceRecords)}upsertEcommerceRecord(e){let t=[e,...(this.ecommerceRecords||[]).filter(t=>t.id!==e.id)].slice(0,30);this.ecommerceRecords=t,this.saveEcommerceRecords(),this.requestUpdate()}onEcommerceField(e,t){this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),[e]:t},e===`platform`&&(()=>{try{globalThis.localStorage?.setItem(`uclaw.ecommerceWorkbench.platform.v1`,t)}catch{}})(),this.ecommerceResult=null,this.requestUpdate()}onEcommerceOutputType(e,t){this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),outputTypes:UcEcommerceToggleOutputType(this.ecommerceForm??UcEcommerceDefaultForm(),e,t)},this.ecommerceResult=null,this.requestUpdate()}onEcommerceOutputCount(e,t){this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),outputCounts:UcEcommerceSetOutputCount(this.ecommerceForm??UcEcommerceDefaultForm(),e,t)},this.ecommerceResult=null,this.requestUpdate()}onEcommerceFiles(e){let t=Array.from(e||[]).filter(e=>e?.type?.startsWith(`image/`)).slice(0,12).map(e=>({name:e.name,type:e.type,size:e.size,url:URL.createObjectURL(e),file:e}));this.cleanupEcommerceFileUrls(),this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),files:t},this.ecommerceResult=null,this.requestUpdate()}removeEcommerceFile(e){let t=[...(this.ecommerceForm?.files||[])],n=t.splice(e,1)[0];try{n?.url&&URL.revokeObjectURL(n.url)}catch{}this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),files:t},this.ecommerceResult=null,this.requestUpdate()}async startEcommerceImageGeneration(){let e=this.ecommerceForm??UcEcommerceDefaultForm(),t=UcEcommerceMissing(e);if(t.length){this.ecommerceResult={error:`请先补充：${t.join(`、`)}`},this.requestUpdate();return}if(!globalThis.uclaw?.generateEcommerceImages){this.ecommerceResult={error:`当前需要在 Bavi-box 桌面端运行，浏览器预览不能直接出图。`},this.requestUpdate();return}let n=UcEcommerceBuildManifest(e),r=UcEcommerceImageTargets(),a=UcEcommerceOutputCountRules(e),l=n.output_counts||{},u=(n.output_types||[]).reduce((e,t)=>e+(l[t]||0),0),o=(n.output_types||[]).map(e=>`${r.find(t=>t.type===e)?.label||e}${l[e]||0}${a[e]?.unit||`张`}`).join(`、`),s={id:n.id,createdAt:Date.now(),updatedAt:Date.now(),status:`generating`,platform:n.platform,platformLabel:n.platform_label,productName:n.name,imageCount:n.input.image_count,outputTypes:n.output_types||[],outputCounts:l,outputLabels:o,requestedOutputCount:u,manifest:n};this.ecommerceGenerating=!0,this.ecommerceResult=null,this.upsertEcommerceRecord(s);try{let e=await UcEcommerceBuildDirectPayload(n,this.ecommerceForm?.files||[]),t=await globalThis.uclaw.generateEcommerceImages(e),i={...n,provider:t?.provider||`newapi`,model:t?.model||``,completed_at:t?.generatedAt||new Date().toISOString(),images:Array.isArray(t?.images)?t.images:[],warnings:Array.isArray(t?.warnings)?t.warnings:[]};if(!i.images.length)throw Error(`图片接口未返回图片结果。`);this.ecommerceResult=i,this.upsertEcommerceRecord({...s,status:`completed`,updatedAt:Date.now(),generatedImageCount:i.images.length,provider:i.provider,model:i.model,result:i})}catch(e){this.ecommerceResult={...n,error:`生成失败：${e instanceof Error?e.message:String(e)}`},this.upsertEcommerceRecord({...s,status:`failed`,updatedAt:Date.now(),error:e instanceof Error?e.message:String(e)})}finally{this.ecommerceGenerating=!1,this.requestUpdate()}}clearEcommerceRecords(){this.ecommerceRecords=[],this.saveEcommerceRecords(),this.requestUpdate()}showEcommerceRecord(e){this.ecommerceResult=e?.result||e?.manifest||null,this.requestUpdate()}async downloadEcommercePackage(){if(!this.ecommerceResult?.images?.length)return;try{let e=await UcEcommerceBuildExportPackage(this.ecommerceResult);UcEcommerceDownloadBlob(e.blob,e.fileName)}catch(e){this.ecommerceResult={...this.ecommerceResult,error:`打包失败：${e instanceof Error?e.message:String(e)}`},this.requestUpdate()}}async copyEcommerceManifest(){if(!this.ecommerceResult)return;try{await navigator.clipboard?.writeText(JSON.stringify(this.ecommerceResult,null,2))}catch{}}";
+
+  for (const file of listAssetFiles(/^tasks-page-.*\.js$/, "tasks-page")) {
+    const before = read(file);
+    let after = before;
+
+    after = after.replace(
+      /function UcEcommerceWorkflowPrompt\(\)\{[\s\S]*?\}function B\(e\)\{/,
+      `${helper}function B(e){`,
+    );
+    after = after.replace(
+      /function UcEcommercePlatformPresets\(\)\{[\s\S]*?\}function B\(e\)\{/,
+      `${helper}function B(e){`,
+    );
+
+    if (!after.includes("function UcEcommercePlatformPresets()")) {
+      after = after.replace("function B(e){", `${helper}function B(e){`);
+    }
+
+    after = after.replace(
+      /this\.client=null,this\.loadGeneration=0(?:,this\.ecommerceWorkflowStarting=!1|,this\.ecommerceForm=UcEcommerceDefaultForm\(\),this\.ecommerceResult=null(?:,this\.ecommerceGenerating=!1,this\.ecommerceRecords=UcEcommerceReadRecords\(\))?)?\}/,
+      "this.client=null,this.loadGeneration=0,this.ecommerceForm=UcEcommerceDefaultForm(),this.ecommerceResult=null,this.ecommerceGenerating=!1,this.ecommerceRecords=UcEcommerceReadRecords()}",
+    );
+
+    after = after.replace(
+      "disconnectedCallback(){this.loadGeneration+=1,",
+      "disconnectedCallback(){this.cleanupEcommerceFileUrls?.(),this.loadGeneration+=1,",
+    );
+
+    after = after.replace(
+      /openEcommerceWorkflowSession\(e\)\{[\s\S]*?\}async startEcommerceWorkflow\(\)\{[\s\S]*?\}(?=render\(\)\{return i`)/,
+      "",
+    );
+
+    if (/cleanupEcommerceFileUrls\(\)\{[\s\S]*?\}render\(\)\{return i`/.test(after)) {
+      after = after.replace(/cleanupEcommerceFileUrls\(\)\{[\s\S]*?\}render\(\)\{return i`/, `${methods}render(){return i\``);
+    } else {
+      after = after.replace("}render(){return i`", `}${methods}render(){return i\``);
+    }
+
+    after = after.replaceAll("${UcEcommerceWorkflowView(this)}", "${UcEcommerceWorkbenchView(this)}");
+
+    while (after.includes("${UcEcommerceWorkbenchView(this)}${UcEcommerceWorkbenchView(this)}")) {
+      after = after.replace(
+        "${UcEcommerceWorkbenchView(this)}${UcEcommerceWorkbenchView(this)}",
+        "${UcEcommerceWorkbenchView(this)}",
+      );
+    }
+
+    if (!after.includes("${UcEcommerceWorkbenchView(this)}${B({basePath:this.context.basePath")) {
+      after = after.replace(
+        "${B({basePath:this.context.basePath,connected:this.connected",
+        "${UcEcommerceWorkbenchView(this)}${B({basePath:this.context.basePath,connected:this.connected",
+      );
+    }
+
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -7758,6 +7905,460 @@ openclaw-config-page .card {
 }
 
 /* chat-composer-attachment-float-1 */
+openclaw-tasks-page .uclaw-ecommerce-workbench {
+  gap: 16px;
+  border: 1px solid #cbd7e6 !important;
+  background: #ffffff !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.07);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-head,
+openclaw-tasks-page .uclaw-ecommerce-upload-head,
+openclaw-tasks-page .uclaw-ecommerce-result-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #dbe4ef;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-head > div,
+openclaw-tasks-page .uclaw-ecommerce-upload-head > div,
+openclaw-tasks-page .uclaw-ecommerce-result-head > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .field {
+  gap: 7px;
+  margin: 0;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .field > span {
+  color: #53647a;
+  font-size: 12.5px;
+  font-weight: 680;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .input,
+openclaw-tasks-page .uclaw-ecommerce-workbench input,
+openclaw-tasks-page .uclaw-ecommerce-workbench select,
+openclaw-tasks-page .uclaw-ecommerce-workbench textarea {
+  min-height: 44px;
+  border: 1px solid #cbd7e6 !important;
+  border-radius: 8px;
+  background: #ffffff !important;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.035);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .input:focus,
+openclaw-tasks-page .uclaw-ecommerce-workbench input:focus,
+openclaw-tasks-page .uclaw-ecommerce-workbench select:focus,
+openclaw-tasks-page .uclaw-ecommerce-workbench textarea:focus {
+  border-color: #93b9f6 !important;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12), inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-textarea {
+  min-height: 128px;
+  padding-top: 12px;
+  resize: vertical;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .row {
+  flex-wrap: wrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .btn {
+  white-space: nowrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-workbench .btn.primary {
+  min-width: 96px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file-input {
+  display: none;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-upload,
+openclaw-tasks-page .uclaw-ecommerce-result,
+openclaw-tasks-page .uclaw-ecommerce-records {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #c5d3e3;
+  border-radius: 8px;
+  background: #f8fbff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-types {
+  display: grid;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid #c5d3e3;
+  border-radius: 8px;
+  background: #fbfdff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-types > strong {
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 740;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 112px;
+  gap: 6px 14px;
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  grid-template-rows: auto auto 1fr;
+  padding: 13px 14px 12px 16px;
+  border: 1px solid #d7e1ed;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+  transition: border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type:hover {
+  border-color: #9dbbef;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type::before {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+  content: "";
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type.is-active {
+  border-color: #5b9cff;
+  background: linear-gradient(180deg, #f7fbff 0%, #ffffff 100%);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.1), 0 8px 18px rgba(37, 99, 235, 0.07);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type.is-active::before {
+  background: #2f81f7;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type-check {
+  display: flex;
+  min-width: 0;
+  gap: 10px;
+  align-items: center;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type-check input {
+  width: 16px !important;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: #2563eb;
+  box-shadow: none;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type-check b {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-count {
+  display: grid;
+  min-width: 0;
+  width: 112px;
+  gap: 6px 8px;
+  align-items: center;
+  align-self: center;
+  justify-self: end;
+  grid-column: 2;
+  grid-row: 1 / 4;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 8px;
+  border: 1px solid #e0e8f2;
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-count span {
+  grid-column: 1 / -1;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-count span,
+openclaw-tasks-page .uclaw-ecommerce-count em {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-count input {
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 8px;
+  text-align: center;
+  font-weight: 700;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-count input:disabled {
+  color: #94a3b8;
+  background: #eef3f8 !important;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type small,
+openclaw-tasks-page .uclaw-ecommerce-type em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type > small,
+openclaw-tasks-page .uclaw-ecommerce-type > em {
+  grid-column: 1;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-type > em {
+  margin-top: 4px;
+  color: #64748b;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-upload span,
+openclaw-tasks-page .uclaw-ecommerce-result span,
+openclaw-tasks-page .uclaw-ecommerce-records span,
+openclaw-tasks-page .uclaw-ecommerce-record small,
+openclaw-tasks-page .uclaw-ecommerce-output-grid small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-empty {
+  padding: 18px;
+  border: 1px dashed #bdd0e7;
+  border-radius: 8px;
+  color: #64748b;
+  background: #ffffff;
+  text-align: center;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 180px));
+}
+
+openclaw-tasks-page .uclaw-ecommerce-output-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+openclaw-tasks-page .uclaw-ecommerce-result-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-generated-grid {
+  display: flex;
+  min-width: 0;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 10px;
+  scroll-padding-inline: 2px;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file,
+openclaw-tasks-page .uclaw-ecommerce-output-grid article,
+openclaw-tasks-page .uclaw-ecommerce-generated {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #cbd7e6;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-generated {
+  flex: 0 0 clamp(220px, 28vw, 340px);
+  scroll-snap-align: start;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file img,
+openclaw-tasks-page .uclaw-ecommerce-generated img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file figcaption,
+openclaw-tasks-page .uclaw-ecommerce-generated figcaption {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-file figcaption span,
+openclaw-tasks-page .uclaw-ecommerce-generated figcaption span {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-generated .btn {
+  justify-self: start;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-rules {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+openclaw-tasks-page .uclaw-ecommerce-rules > div,
+openclaw-tasks-page .uclaw-ecommerce-qa span {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #cbd7e6;
+  border-radius: 8px;
+  background: #fbfdff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-rules span,
+openclaw-tasks-page .uclaw-ecommerce-output-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-qa {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record-list {
+  display: grid;
+  gap: 10px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record {
+  display: flex;
+  min-width: 0;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid #cbd7e6;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record > div:first-child strong,
+openclaw-tasks-page .uclaw-ecommerce-record > div:first-child span,
+openclaw-tasks-page .uclaw-ecommerce-record > div:first-child small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  openclaw-tasks-page .uclaw-ecommerce-head,
+  openclaw-tasks-page .uclaw-ecommerce-upload-head,
+  openclaw-tasks-page .uclaw-ecommerce-result-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-grid,
+  openclaw-tasks-page .uclaw-ecommerce-type-grid,
+  openclaw-tasks-page .uclaw-ecommerce-rules {
+    grid-template-columns: 1fr;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-file-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-result-actions {
+    justify-content: flex-start;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-generated {
+    flex-basis: min(82vw, 320px);
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-record {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-record-actions {
+    justify-content: space-between;
+  }
+}
+
 .chat-attachments-preview {
   position: absolute;
   left: var(--chat-box-inset);
@@ -7855,6 +8456,7 @@ patchControlUiSkillHubProxy();
 patchControlUiPortableMediaRemap();
 patchIndexUiCopy();
 patchPrimaryNavigationProjection();
+patchTasksPageEcommerceWorkflow();
 patchFinalUiPolish();
 removeWrongModelUsageDashboard();
 patchConfigModelUsageDashboard();
@@ -7863,6 +8465,7 @@ patchControlUiTheme();
 patchControlCss();
 removeWrongModelUsageDashboardCss();
 patchConfigModelUsageDashboardCss();
+patchRechargeQrDialogCss();
 patchLocalMediaRoots();
 patchOpenAiCompatibleImageResponses();
 patchConfiguredUclawImageGenerationModelsOnly();

@@ -343,3 +343,86 @@ func TestStoreListActivationCodesReturnsCodeAndAccountMapping(t *testing.T) {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
+
+func TestStoreListRechargeOrdersReturnsPaymentAndAccountMapping(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	createdAt := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 8, 31, 8, 1, 0, 0, time.UTC)
+	paidAt := time.Date(2026, 8, 31, 8, 2, 0, 0, time.UTC)
+	creditedAt := time.Date(2026, 8, 31, 8, 3, 0, 0, time.UTC)
+	callbackAt := time.Date(2026, 8, 31, 8, 4, 0, 0, time.UTC)
+
+	rows := sqlmock.NewRows([]string{
+		"id",
+		"order_no",
+		"uclaw_user_id",
+		"phone",
+		"provider",
+		"amount_cents",
+		"quota_tokens",
+		"status",
+		"provider_trade_no",
+		"paid_at",
+		"credited_at",
+		"last_error",
+		"created_at",
+		"updated_at",
+		"newapi_user_id",
+		"newapi_username",
+		"callback_count",
+		"last_callback_at",
+	}).AddRow(
+		int64(9),
+		"UC202608310001",
+		int64(42),
+		"15067729715",
+		"alipay",
+		int64(1000),
+		int64(60000000),
+		"credited",
+		"2026083122001234",
+		paidAt,
+		creditedAt,
+		"",
+		createdAt,
+		updatedAt,
+		int64(77),
+		"15067729715",
+		int64(2),
+		callbackAt,
+	)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT\n  po.id")).
+		WithArgs("credited", "alipay", "15067729715", "UC20260831", 20).
+		WillReturnRows(rows)
+
+	orders, err := store.ListRechargeOrders(context.Background(), admin.RechargeOrderFilter{
+		Status:   "credited",
+		Provider: "alipay",
+		Phone:    "15067729715",
+		OrderNo:  "UC20260831",
+		Limit:    20,
+	})
+	if err != nil {
+		t.Fatalf("ListRechargeOrders() error = %v", err)
+	}
+	if len(orders) != 1 {
+		t.Fatalf("orders length = %d, want 1", len(orders))
+	}
+	order := orders[0]
+	if order.OrderNo != "UC202608310001" || order.Phone != "15067729715" || order.ProviderTradeNo != "2026083122001234" {
+		t.Fatalf("order identifiers = %+v", order)
+	}
+	if order.AmountCents != 1000 || order.QuotaTokens != 60000000 || order.Status != "credited" || order.CallbackCount != 2 {
+		t.Fatalf("order accounting = %+v", order)
+	}
+	if order.NewAPIUserID == nil || *order.NewAPIUserID != 77 || order.NewAPIUsername != "15067729715" {
+		t.Fatalf("newapi mapping = %+v", order)
+	}
+	if order.PaidAt == nil || order.CreditedAt == nil || order.LastCallbackAt == nil {
+		t.Fatalf("nullable times not set = %+v", order)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}

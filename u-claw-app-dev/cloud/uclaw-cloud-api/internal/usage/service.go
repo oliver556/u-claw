@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"uclaw-cloud-api/internal/billing"
@@ -15,13 +16,21 @@ import (
 type Config struct {
 	PasswordSecret string
 	PageSize       int
+	UserTokenTTL   time.Duration
 }
 
 // Service reads New API as the activated user and returns dashboard-ready usage data.
 type Service struct {
-	admin *newapi.Client
-	cfg   Config
-	now   func() time.Time
+	admin    *newapi.Client
+	cfg      Config
+	now      func() time.Time
+	tokenMu  sync.Mutex
+	sessions map[string]cachedUserToken
+}
+
+type cachedUserToken struct {
+	AccessToken string
+	ExpiresAt   time.Time
 }
 
 // SummaryRequest identifies the authenticated Bavi-box user whose New API data should be read.
@@ -82,10 +91,13 @@ func NewService(admin *newapi.Client, cfg Config) (*Service, error) {
 	if cfg.PageSize <= 0 {
 		cfg.PageSize = 50
 	}
-	return &Service{admin: admin, cfg: cfg, now: time.Now}, nil
+	if cfg.UserTokenTTL <= 0 {
+		cfg.UserTokenTTL = 6 * time.Hour
+	}
+	return &Service{admin: admin, cfg: cfg, now: time.Now, sessions: make(map[string]cachedUserToken)}, nil
 }
 
-// GetSummary logs in as the same-phone New API user and summarizes recent quota data.
+// GetSummary reads the same-phone New API account and summarizes recent quota data.
 func (s *Service) GetSummary(ctx context.Context, req SummaryRequest) (Summary, error) {
 	phone := strings.TrimSpace(req.Phone)
 	if req.UserID <= 0 {
@@ -95,24 +107,116 @@ func (s *Service) GetSummary(ctx context.Context, req SummaryRequest) (Summary, 
 		return Summary{}, fmt.Errorf("phone is required")
 	}
 
-	password := provisioning.DeriveUserPassword(req.UserID, phone, s.cfg.PasswordSecret)
-	login, err := s.admin.Login(ctx, phone, password)
+	self, logs, err := s.adminSummaryData(ctx, phone)
+	if err == nil {
+		return s.buildSummary(self, logs.Items), nil
+	}
+
+	userClient, fromCache, err := s.userClient(ctx, req.UserID, phone)
 	if err != nil {
 		return Summary{}, err
 	}
-	userClient, err := s.admin.WithAccessToken(login.Data.AccessToken)
+	self, err = userClient.GetSelf(ctx)
 	if err != nil {
-		return Summary{}, err
+		if !fromCache || !isNewAPIAuthError(err) {
+			return Summary{}, err
+		}
+		s.forgetUserToken(req.UserID, phone)
+		userClient, _, err = s.userClient(ctx, req.UserID, phone)
+		if err != nil {
+			return Summary{}, err
+		}
+		self, err = userClient.GetSelf(ctx)
+		if err != nil {
+			return Summary{}, err
+		}
 	}
-	self, err := userClient.GetSelf(ctx)
+	logs, err = userClient.ListSelfLogs(ctx, 0, s.cfg.PageSize)
 	if err != nil {
-		return Summary{}, err
-	}
-	logs, err := userClient.ListSelfLogs(ctx, 0, s.cfg.PageSize)
-	if err != nil {
-		return Summary{}, err
+		if !isNewAPIAuthError(err) {
+			return Summary{}, err
+		}
+		s.forgetUserToken(req.UserID, phone)
+		userClient, _, err = s.userClient(ctx, req.UserID, phone)
+		if err != nil {
+			return Summary{}, err
+		}
+		logs, err = userClient.ListSelfLogs(ctx, 0, s.cfg.PageSize)
+		if err != nil {
+			return Summary{}, err
+		}
 	}
 	return s.buildSummary(self, logs.Items), nil
+}
+
+// adminSummaryData avoids New API user-login session limits by using admin read endpoints first.
+func (s *Service) adminSummaryData(ctx context.Context, phone string) (newapi.SelfUser, newapi.SelfLogsPage, error) {
+	user, ok, err := s.admin.SearchUserByUsername(ctx, phone)
+	if err != nil {
+		return newapi.SelfUser{}, newapi.SelfLogsPage{}, err
+	}
+	if !ok {
+		return newapi.SelfUser{}, newapi.SelfLogsPage{}, fmt.Errorf("newapi user %q not found", phone)
+	}
+	self, err := s.admin.GetUser(ctx, user.ID)
+	if err != nil {
+		return newapi.SelfUser{}, newapi.SelfLogsPage{}, err
+	}
+	logs, err := s.admin.ListLogsByUsername(ctx, phone, 0, s.cfg.PageSize)
+	if err != nil {
+		return newapi.SelfUser{}, newapi.SelfLogsPage{}, err
+	}
+	return self, logs, nil
+}
+
+// userClient reuses New API dashboard tokens to avoid exhausting per-user login-session limits.
+func (s *Service) userClient(ctx context.Context, userID int64, phone string) (*newapi.Client, bool, error) {
+	key := userTokenCacheKey(userID, phone)
+	now := s.now()
+	s.tokenMu.Lock()
+	cached := s.sessions[key]
+	if cached.AccessToken != "" && cached.ExpiresAt.After(now.Add(30*time.Second)) {
+		s.tokenMu.Unlock()
+		client, err := s.admin.WithAccessToken(cached.AccessToken)
+		return client, true, err
+	}
+	s.tokenMu.Unlock()
+
+	password := provisioning.DeriveUserPassword(userID, phone, s.cfg.PasswordSecret)
+	login, err := s.admin.Login(ctx, phone, password)
+	if err != nil {
+		return nil, false, err
+	}
+	token := strings.TrimSpace(login.Data.AccessToken)
+	if token == "" {
+		return nil, false, fmt.Errorf("newapi login returned empty access token")
+	}
+	s.tokenMu.Lock()
+	s.sessions[key] = cachedUserToken{AccessToken: token, ExpiresAt: now.Add(s.cfg.UserTokenTTL)}
+	s.tokenMu.Unlock()
+	client, err := s.admin.WithAccessToken(token)
+	return client, false, err
+}
+
+// forgetUserToken removes a stale cached token so the next request can refresh it once.
+func (s *Service) forgetUserToken(userID int64, phone string) {
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	delete(s.sessions, userTokenCacheKey(userID, phone))
+}
+
+func userTokenCacheKey(userID int64, phone string) string {
+	return fmt.Sprintf("%d:%s", userID, strings.TrimSpace(phone))
+}
+
+func isNewAPIAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, " returned 401:") ||
+		strings.Contains(message, "AUTH_TOKEN_EXPIRED") ||
+		strings.Contains(message, "Unauthorized")
 }
 
 // buildSummary folds New API self/log responses into stable client fields.

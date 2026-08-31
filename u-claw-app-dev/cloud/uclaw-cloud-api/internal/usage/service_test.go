@@ -81,16 +81,16 @@ func TestGetSummaryLogsInAndAggregatesUsage(t *testing.T) {
 	if summary.AccountBalance != 100000 || summary.UsedQuota != 300 || summary.RequestCount != 12 {
 		t.Fatalf("summary counters = %+v", summary)
 	}
-	if summary.AccountBalanceCompute != 12000000 || summary.UsedCompute != 36000 {
+	if summary.AccountBalanceCompute != 1200000 || summary.UsedCompute != 3600 {
 		t.Fatalf("summary compute counters = %+v", summary)
 	}
 	if summary.TodayUsage != 100 || summary.Last7DaysUsage != 300 || summary.CumulativeUsage != 300 {
 		t.Fatalf("summary usage = %+v", summary)
 	}
-	if summary.TodayCompute != 12000 || summary.Last7DaysCompute != 36000 || summary.CumulativeCompute != 36000 {
+	if summary.TodayCompute != 1200 || summary.Last7DaysCompute != 3600 || summary.CumulativeCompute != 3600 {
 		t.Fatalf("summary compute usage = %+v", summary)
 	}
-	if summary.NewAPIQuotaPerCNY != 500000 || summary.ComputeUnitsPerCNY != 60000000 {
+	if summary.NewAPIQuotaPerCNY != 500000 || summary.ComputeUnitsPerCNY != 6000000 {
 		t.Fatalf("summary conversion = %+v", summary)
 	}
 	if len(summary.Records) != 2 || summary.Records[0].RequestID != "req_today" {
@@ -101,8 +101,114 @@ func TestGetSummaryLogsInAndAggregatesUsage(t *testing.T) {
 			t.Fatalf("authentication log leaked into usage records: %+v", record)
 		}
 	}
-	if summary.Records[0].Compute != 12000 {
+	if summary.Records[0].Compute != 1200 {
 		t.Fatalf("record compute = %+v", summary.Records[0])
+	}
+}
+
+func TestGetSummaryUsesAdminEndpointsBeforeUserLogin(t *testing.T) {
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	var sawSearch bool
+	var sawUser bool
+	var sawLogs bool
+	var sawLogin bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			sawSearch = true
+			if r.URL.Query().Get("keyword") != "13800138000" {
+				t.Fatalf("search query = %q", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/9":
+			sawUser = true
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":9,"username":"13800138000","quota":100000,"used_quota":300,"request_count":12}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/log/":
+			sawLogs = true
+			if r.URL.Query().Get("username") != "13800138000" || r.URL.Query().Get("page_size") != "4" {
+				t.Fatalf("log query = %q", r.URL.RawQuery)
+			}
+			today := now.Add(-1 * time.Hour).Unix()
+			recent := now.AddDate(0, 0, -3).Unix()
+			_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":4,"total":2,"items":[` +
+				`{"id":1,"username":"13800138000","created_at":` + itoa(today) + `,"type":2,"content":"consume","model_name":"gpt-5.5","quota":100,"request_id":"req_today"},` +
+				`{"id":2,"username":"13800138000","created_at":` + itoa(recent) + `,"type":2,"model_name":"gpt-image-2","quota":200}` +
+				`]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			sawLogin = true
+			http.Error(w, "login should not be called", http.StatusConflict)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	admin, err := newapi.NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	service, err := NewService(admin, Config{PasswordSecret: "test-password-secret", PageSize: 4})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	service.now = func() time.Time { return now }
+
+	summary, err := service.GetSummary(context.Background(), SummaryRequest{UserID: 5, Phone: "13800138000"})
+	if err != nil {
+		t.Fatalf("GetSummary() error = %v", err)
+	}
+	if !sawSearch || !sawUser || !sawLogs || sawLogin {
+		t.Fatalf("sawSearch=%t sawUser=%t sawLogs=%t sawLogin=%t", sawSearch, sawUser, sawLogs, sawLogin)
+	}
+	if summary.NewAPIUserID != 9 || summary.AccountBalance != 100000 || summary.UsedQuota != 300 || summary.Last7DaysUsage != 300 {
+		t.Fatalf("summary = %+v", summary)
+	}
+}
+
+func TestGetSummaryReusesCachedNewAPIToken(t *testing.T) {
+	secret := "test-password-secret"
+	var loginCount int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			loginCount++
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"cached-user-access-token"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/self":
+			if r.Header.Get("Authorization") != "Bearer cached-user-access-token" {
+				t.Fatalf("self Authorization = %q", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":9,"username":"13800138000","quota":100000,"used_quota":300,"request_count":12}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/log/self":
+			if r.Header.Get("Authorization") != "Bearer cached-user-access-token" {
+				t.Fatalf("logs Authorization = %q", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":50,"total":0,"items":[]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	admin, err := newapi.NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	service, err := NewService(admin, Config{PasswordSecret: secret, UserTokenTTL: time.Hour})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if _, err := service.GetSummary(context.Background(), SummaryRequest{UserID: 5, Phone: "13800138000"}); err != nil {
+			t.Fatalf("GetSummary() call %d error = %v", i+1, err)
+		}
+	}
+	if loginCount != 1 {
+		t.Fatalf("login count = %d, want 1", loginCount)
 	}
 }
 

@@ -2,15 +2,22 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 
 	"uclaw-cloud-api/internal/config"
+	"uclaw-cloud-api/internal/newapi"
+	alipaypay "uclaw-cloud-api/internal/payment/alipay"
 	"uclaw-cloud-api/internal/provisioning"
+	"uclaw-cloud-api/internal/recharge"
 )
 
 func TestHealthzReturnsOK(t *testing.T) {
@@ -345,16 +352,16 @@ func TestUsageSummaryReturnsNewAPICounters(t *testing.T) {
 	if payload.Status != "ok" || payload.AccountBalance != 100000 || payload.UsedQuota != 24171 || payload.CumulativeUsage != 24171 {
 		t.Fatalf("payload = %+v", payload)
 	}
-	if payload.AccountBalanceCompute != 12000000 || payload.UsedCompute != 2900520 || payload.CumulativeCompute != 2900520 {
+	if payload.AccountBalanceCompute != 1200000 || payload.UsedCompute != 290052 || payload.CumulativeCompute != 290052 {
 		t.Fatalf("payload compute = %+v", payload)
 	}
-	if payload.NewAPIQuotaPerCNY != 500000 || payload.ComputeUnitsPerCNY != 60000000 {
+	if payload.NewAPIQuotaPerCNY != 500000 || payload.ComputeUnitsPerCNY != 6000000 {
 		t.Fatalf("payload conversion = %+v", payload)
 	}
 	if len(payload.Records) != 1 || payload.Records[0].ModelName != "gpt-5.5" {
 		t.Fatalf("records = %+v", payload.Records)
 	}
-	if payload.Records[0].Quota != 24171 || payload.Records[0].Compute != 2900520 {
+	if payload.Records[0].Quota != 24171 || payload.Records[0].Compute != 290052 {
 		t.Fatalf("record conversion = %+v", payload.Records)
 	}
 }
@@ -536,6 +543,102 @@ func TestRechargeOrderRejectsUnconfiguredOfficialProvider(t *testing.T) {
 	}
 }
 
+func TestAlipayNotifyCreditsRechargeOrder(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	store := recharge.NewMemoryStore()
+	store.SaveAccount(recharge.Account{UClawUserID: 7, NewAPIUserID: 42})
+	quota := &recordingQuotaClient{}
+	service, err := recharge.NewService(store, quota, recharge.Config{
+		CheckoutClients: map[string]recharge.CheckoutClient{
+			recharge.ProviderAlipay: staticCheckoutClient{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new recharge service: %v", err)
+	}
+	result, err := service.CreateOrder(context.Background(), recharge.CreateOrderRequest{
+		UserID:   7,
+		PlanCode: "dev_10",
+		Provider: recharge.ProviderAlipay,
+	})
+	if err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+	server := NewServerWithOptions(
+		config.Config{AppEnv: "test", AlipaySellerID: "seller-1"},
+		BuildInfo{Version: "test"},
+		ServerOptions{
+			Recharge:  service,
+			AlipayPay: alipaypay.NewClient(alipaypay.Config{AppID: "app-1", PublicKey: &privateKey.PublicKey}),
+		},
+	)
+
+	form := map[string]string{
+		"app_id":       "app-1",
+		"out_trade_no": result.Order.OrderNo,
+		"trade_no":     "20260831220010001",
+		"total_amount": "10.00",
+		"trade_status": "TRADE_SUCCESS",
+		"seller_id":    "seller-1",
+		"gmt_payment":  "2026-08-31 15:20:00",
+	}
+	sign, err := alipaypay.SignForm(form, privateKey)
+	if err != nil {
+		t.Fatalf("sign notify: %v", err)
+	}
+	form["sign"] = sign
+	form["sign_type"] = "RSA2"
+	body := valuesFromStringMap(form).Encode()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/payments/alipay/notify", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "success" {
+		t.Fatalf("notify status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	order, err := service.GetOrder(context.Background(), result.Order.OrderNo, 7)
+	if err != nil {
+		t.Fatalf("get order: %v", err)
+	}
+	if order.Status != recharge.StatusCredited || order.ProviderTradeNo != "20260831220010001" {
+		t.Fatalf("order = %+v", order)
+	}
+	if len(quota.calls) != 1 || quota.calls[0].UserID != 42 || quota.calls[0].Quota != 5000000 {
+		t.Fatalf("quota calls = %+v", quota.calls)
+	}
+}
+
+type staticCheckoutClient struct{}
+
+// CreateCheckout returns deterministic QR data while HTTP tests focus on webhook behavior.
+func (staticCheckoutClient) CreateCheckout(context.Context, recharge.CheckoutRequest) (recharge.CheckoutResult, error) {
+	return recharge.CheckoutResult{QRCodeURL: "https://qr.alipay.com/test"}, nil
+}
+
+type recordingQuotaClient struct {
+	calls []newapi.AddQuotaRequest
+}
+
+// AddQuota records New API quota credit requests accepted by the recharge state machine.
+func (c *recordingQuotaClient) AddQuota(_ context.Context, req newapi.AddQuotaRequest) error {
+	c.calls = append(c.calls, req)
+	return nil
+}
+
+// valuesFromStringMap builds form data for provider callback tests.
+func valuesFromStringMap(input map[string]string) url.Values {
+	values := make(url.Values, len(input))
+	for key, value := range input {
+		values.Set(key, value)
+	}
+	return values
+}
+
 func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	server := NewServer(config.Config{
 		AppEnv:             "development",
@@ -549,6 +652,9 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	server.ServeHTTP(pageRec, pageReq)
 	if pageRec.Code != http.StatusOK || !strings.Contains(pageRec.Body.String(), "Bavi-box 运营后台") {
 		t.Fatalf("admin page status = %d body = %s", pageRec.Code, pageRec.Body.String())
+	}
+	if !strings.Contains(pageRec.Body.String(), "充值记录") || !strings.Contains(pageRec.Body.String(), "/internal/admin/v1/recharge-orders") {
+		t.Fatalf("admin page must include recharge order management")
 	}
 	if !strings.Contains(pageRec.Body.String(), `item.status !== "unused" && item.status !== "disabled"`) {
 		t.Fatalf("admin page must disable reissue outside unused/disabled states")
@@ -671,6 +777,84 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	}
 	if !strings.Contains(listRec.Body.String(), `"status":"reissued"`) || !strings.Contains(listRec.Body.String(), `"codeVisible":true`) {
 		t.Fatalf("list body missing expected code details: %s", listRec.Body.String())
+	}
+
+	rechargeRec := httptest.NewRecorder()
+	rechargeReq := httptest.NewRequest(http.MethodGet, "/internal/admin/v1/recharge-orders?status=credited&provider=alipay&limit=10", nil)
+	rechargeReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+	server.ServeHTTP(rechargeRec, rechargeReq)
+	if rechargeRec.Code != http.StatusOK || !strings.Contains(rechargeRec.Body.String(), `"orders":[]`) {
+		t.Fatalf("recharge list status = %d body = %s", rechargeRec.Code, rechargeRec.Body.String())
+	}
+}
+
+func TestAlipaySPIMerchantInfoRouteReturnsSuccessEnvelope(t *testing.T) {
+	server := NewServer(config.Config{
+		AppEnv:                  "test",
+		AlipaySPIMerchantID:     "2088123456789012",
+		AlipaySPIMerchantName:   "Bavi-box",
+		AlipaySPIMerchantShort:  "Bavi",
+		AlipaySPIServicePhone:   "0571-00000000",
+		AlipaySPIServiceAddress: "https://license.yiyong.me",
+	}, BuildInfo{Version: "test"})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/payments/alipay/spi/merchantinfo/query",
+		bytes.NewBufferString(`{"bizContent":{"outTradeNo":"UC1"}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Response json.RawMessage `json:"response"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(payload.Response, &response); err != nil {
+		t.Fatalf("decode response object: %v", err)
+	}
+	if response["code"] != "10000" || response["merchant_name"] != "Bavi-box" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestAlipaySPIMerchantInfoSupportsISVDemoPath(t *testing.T) {
+	server := NewServer(config.Config{
+		AppEnv:                "test",
+		AlipaySPIMerchantName: "Bavi-box",
+	}, BuildInfo{Version: "test"})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/isv/spi/service",
+		bytes.NewBufferString(`method=spi.alipay.pay.aggpay.merchantinfo.query`),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Response json.RawMessage `json:"response"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(payload.Response, &response); err != nil {
+		t.Fatalf("decode response object: %v", err)
+	}
+	if response["code"] != "10000" {
+		t.Fatalf("response = %+v", response)
 	}
 }
 

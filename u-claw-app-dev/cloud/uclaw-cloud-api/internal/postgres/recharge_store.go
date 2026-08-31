@@ -39,6 +39,7 @@ SELECT id, order_no, uclaw_user_id, provider, amount_cents, quota_tokens, status
   provider_trade_no, paid_at, credited_at, last_error, created_at, updated_at
 FROM payment_orders
 WHERE uclaw_user_id = $1
+  AND status IN ('paid', 'crediting', 'credited', 'credit_failed')
 ORDER BY created_at DESC, id DESC
 LIMIT $2
 `, userID, limit)

@@ -82,6 +82,7 @@ https://license.yiyong.me/admin
 - 生成激活码并写入 PostgreSQL 库存；新生成和重发的激活码会用 `ADMIN_ENCRYPTION_KEY` 加密保存展示材料，可在后台列表查看和复制。
 - 查询激活码状态、绑定手机号、绑定的 Bavi-box 用户 ID。
 - 查询 New API 用户映射、New API user id、base URL、token 轮换时间，以及最近一次首启激活状态。
+- 查询充值订单、支付宝交易号、金额、回调次数、New API 入账状态和失败原因；这里的数据来自阿里云 PostgreSQL，是支付与入账排障的审计入口。
 - 禁用未使用激活码。
 - 重发未使用或已禁用激活码：旧码标记为 `reissued`，新码写入同批次库存。
 
@@ -101,6 +102,9 @@ curl -sS -X POST https://license.yiyong.me/internal/admin/v1/auth/login \
 
 curl -H "Authorization: Bearer $ADMIN_SESSION_TOKEN" \
   https://license.yiyong.me/internal/admin/v1/activation-codes
+
+curl -H "Authorization: Bearer $ADMIN_SESSION_TOKEN" \
+  "https://license.yiyong.me/internal/admin/v1/recharge-orders?status=credited&provider=alipay&limit=50"
 
 curl -X POST -H "Authorization: Bearer $ADMIN_SESSION_TOKEN" \
   -H 'Content-Type: application/json' \
@@ -292,6 +296,89 @@ curl -sS -X POST http://127.0.0.1:8080/v1/payments/virtual/notify \
 `virtual` 回调只在非 production 环境启用。正式 Alipay/WeChat 接入时复用 `payment_orders`、`payment_callbacks` 与订单幂等状态机，替换签名校验和 provider 回调解析。
 
 `/v1/recharge/providers` 返回 `virtual`、`alipay`、`wechat` 三类渠道及启用状态。当前后端已预留官方支付 checkout seam：当 `alipay` 或 `wechat` 未配置真实 adapter 时，创建订单会返回 `payment provider <provider> is not configured`，且不会落库生成无效订单。下一切片只需要接入官方 SDK 下单 adapter、支付跳转或二维码、验签回调和补偿 worker。
+
+## 支付宝聚合收钱码 SPI 接入
+
+支付宝控制台“聚合收钱码”要求 API 全部接入后才允许申请上线。截图中的 `spi.alipay.pay.*` 是支付宝调用 Bavi-box Cloud API 的 SPI，不是客户端充值下单 API。当前已接入：
+
+```text
+spi.alipay.pay.aggpay.merchantinfo.query
+spi.alipay.pay.standardaggrepay.merchantinfo.query
+spi.alipay.pay.standardaggrepay.order.create
+spi.alipay.pay.aggrepay.order.create
+```
+
+支付宝在线调试器实际回调中也可能发送 `spi.alipay.pay.aggrepay.merchantinfo.query`；服务端已兼容该拼写，并会把 form body 中的 `qr_code_id`、`ua` 等非系统字段作为业务参数处理。
+`standardaggrepay.merchantinfo.query` 复用同一商户信息响应，用于标准化聚合收钱码商户信息校验。
+`spi.alipay.pay.standardaggrepay.order.create` 与 `spi.alipay.pay.aggrepay.order.create` 当前返回非结算 mock 聚合收钱单，仅用于支付宝 SPI 接入校验；正式 U-Claw 充值仍走后续官方支付下单与异步通知回调。
+
+控制台“服务配置基础”建议填写：
+
+```text
+后端服务正式地址: https://license.yiyong.me/isv/spi/service
+后端服务测试地址: https://license.yiyong.me/isv/spi/service
+响应是否加密: 是
+请求编码: UTF-8
+```
+
+如果控制台允许每个 API 单独填写地址，第一个接口也可以填专用地址：
+
+```text
+https://license.yiyong.me/v1/payments/alipay/spi/merchantinfo/query
+```
+
+`/v1/payments/alipay/spi` 仍保留给客户端支付模块内部使用；支付宝 SPI 控制台优先使用 `/isv/spi/service`，该路径与支付宝官方 demo 的 SPI service path 更接近，避免控制台校验误判业务 API path。
+
+生产环境可通过 env 覆盖商户展示信息：
+
+```bash
+ALIPAY_SPI_MERCHANT_ID=2088xxxxxxxxxxxx
+ALIPAY_SPI_MERCHANT_NAME=Bavi-box
+ALIPAY_SPI_MERCHANT_SHORT=Bavi
+ALIPAY_SPI_SERVICE_PHONE=0571-00000000
+ALIPAY_SPI_SERVICE_ADDRESS=https://license.yiyong.me
+ALIPAY_SPI_PRIVATE_KEY_PATH=/etc/uclaw-cloud-api/alipay_private_key.pem
+ALIPAY_SPI_AES_KEY=<支付宝开放平台生成的 Base64 AES 密钥>
+```
+
+`ALIPAY_SPI_PRIVATE_KEY_PATH` 可省略；省略时复用 `ALIPAY_PRIVATE_KEY_PATH`。`ALIPAY_SPI_AES_KEY` 是支付宝开放平台生成的 AES 密钥，用于 `AES/CBC/PKCS5Padding` 内容加密；控制台强制“响应是否加密=是”时必须配置。应用私钥和 AES key 只放服务器受限 env 或 root-only 文件，不粘贴到聊天、不提交 Git。
+
+本地验收：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'method=spi.alipay.pay.aggpay.merchantinfo.query' \
+  --data-urlencode 'biz_content={"out_trade_no":"UC-SPI-SMOKE"}'
+
+curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'method=spi.alipay.pay.standardaggrepay.merchantinfo.query' \
+  --data-urlencode 'qr_code_id=https://qr.isv.com/test/1' \
+  --data-urlencode 'ua=watch'
+
+curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'method=spi.alipay.pay.standardaggrepay.order.create' \
+  --data-urlencode 'qr_code_id=https://qr.isv.com/test/1' \
+  --data-urlencode 'ua=watch'
+
+curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'method=spi.alipay.pay.aggrepay.order.create' \
+  --data-urlencode 'qr_code_id=https://qr.isv.com/test/1' \
+  --data-urlencode 'ua=watch'
+```
+
+期望响应：
+
+```json
+{
+  "response": "{\"code\":\"10000\",\"msg\":\"Success\",\"merchant_id\":\"2088xxxxxxxxxxxx\",\"merchant_name\":\"Bavi-box\"}"
+}
+```
+
+当前按“响应是否加密=否”实现；后续若控制台强制响应加签或加密，再基于已挂载的支付宝应用私钥增加 `sign` 字段与 AES 加密。
 
 ## New API Spike
 

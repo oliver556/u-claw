@@ -1,0 +1,587 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const DEFAULT_GATEWAY_URL = process.env.ECOMMERCE_VERIFY_GATEWAY_URL || "http://127.0.0.1:18789/";
+const DEFAULT_CONFIG_PATH =
+  process.env.OPENCLAW_CONFIG_PATH || "/Users/biancheng/Library/Application Support/u-claw/.openclaw/openclaw.json";
+const DEFAULT_CHROME_PATH = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const screenshotsDir = path.resolve(__dirname, "..", "..", ".codex-state", "screenshots");
+
+/**
+ * Parses optional flags for the ecommerce workbench connected UI verifier.
+ */
+function parseArgs(argv) {
+  const options = {
+    gatewayUrl: DEFAULT_GATEWAY_URL,
+    configPath: DEFAULT_CONFIG_PATH,
+    chromePath: DEFAULT_CHROME_PATH,
+    headful: false,
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
+    if (arg === "--headful") {
+      options.headful = true;
+      continue;
+    }
+
+    if (arg === "--gateway-url") {
+      index += 1;
+      if (index >= argv.length) throw new Error("--gateway-url requires a value");
+      options.gatewayUrl = argv[index];
+      continue;
+    }
+
+    if (arg.startsWith("--gateway-url=")) {
+      options.gatewayUrl = arg.slice("--gateway-url=".length);
+      continue;
+    }
+
+    if (arg === "--config") {
+      index += 1;
+      if (index >= argv.length) throw new Error("--config requires a value");
+      options.configPath = argv[index];
+      continue;
+    }
+
+    if (arg.startsWith("--config=")) {
+      options.configPath = arg.slice("--config=".length);
+      continue;
+    }
+
+    if (arg === "--chrome") {
+      index += 1;
+      if (index >= argv.length) throw new Error("--chrome requires a value");
+      options.chromePath = argv[index];
+      continue;
+    }
+
+    if (arg.startsWith("--chrome=")) {
+      options.chromePath = arg.slice("--chrome=".length);
+      continue;
+    }
+
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  return options;
+}
+
+/**
+ * Prints usage for manual connected UI checks.
+ */
+function printUsage() {
+  console.log(`Usage: node scripts/verify-ecommerce-workbench-ui.js [--gateway-url <url>] [--config <path>] [--chrome <path>] [--headful]
+
+Runs connected browser acceptance for the ecommerce image workbench on the Workflows page.
+
+Requires playwright-core on NODE_PATH, for example:
+  NODE_PATH=/Users/biancheng/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules node scripts/verify-ecommerce-workbench-ui.js`);
+}
+
+/**
+ * Loads playwright-core late so static syntax checks do not need browser deps.
+ */
+function loadPlaywright() {
+  try {
+    return require("playwright-core");
+  } catch (error) {
+    throw new Error(`playwright-core not found. Set NODE_PATH to Codex bundled node_modules. ${error.message}`);
+  }
+}
+
+/**
+ * Reads OpenClaw config and returns parsed JSON without printing secrets.
+ */
+function readConfig(configPath) {
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`OpenClaw config not found: ${configPath}`);
+  }
+
+  return JSON.parse(fs.readFileSync(configPath, "utf8"));
+}
+
+/**
+ * Extracts the Gateway token without logging secret material.
+ */
+function getGatewayToken(config) {
+  const token = config?.gateway?.auth?.token || config?.gateway?.remote?.token;
+  if (typeof token !== "string" || !token.trim()) {
+    throw new Error("Gateway token missing in OpenClaw config");
+  }
+
+  return token;
+}
+
+/**
+ * Normalizes Gateway URL so route construction is stable.
+ */
+function normalizeGatewayUrl(value) {
+  const url = new URL(value);
+  if (!url.pathname.endsWith("/")) {
+    url.pathname = `${url.pathname}/`;
+  }
+  return url.toString();
+}
+
+/**
+ * Converts dashboard URL into the WebSocket URL expected by login gate.
+ */
+function toGatewayWebSocketUrl(value) {
+  const url = new URL(value);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+/**
+ * Traverses light DOM plus open shadow roots for generated Control UI widgets.
+ */
+async function evaluateInDom(page, expression, arg) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await page.evaluate(
+        ({ source, value }) => {
+          const allNodes = (root = document) => {
+            const nodes = [];
+            const visit = (node) => {
+              nodes.push(node);
+              if (node.shadowRoot) visit(node.shadowRoot);
+              for (const child of node.children || []) visit(child);
+            };
+            visit(root);
+            return nodes;
+          };
+          const fn = new Function("allNodes", "value", source);
+          return fn(allNodes, value);
+        },
+        { source: expression, value: arg },
+      );
+    } catch (error) {
+      if (!String(error?.message || error).includes("Execution context was destroyed") || attempt === 2) throw error;
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  }
+
+  throw new Error("Unable to evaluate DOM state");
+}
+
+/**
+ * Reads visible text through generated custom elements.
+ */
+async function getVisibleText(page) {
+  return evaluateInDom(
+    page,
+    `
+      const isVisibleElement = (node) => {
+        if (!(node instanceof HTMLElement)) return false;
+        if (["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.tagName)) return false;
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      return allNodes()
+        .filter(isVisibleElement)
+        .map((node) => node.innerText || node.textContent || "")
+        .join("\\n");
+    `,
+  );
+}
+
+/**
+ * Waits until visible text contains a marker.
+ */
+async function waitForText(page, text, timeout = 30000) {
+  const deadline = Date.now() + timeout;
+  let lastText = "";
+
+  while (Date.now() < deadline) {
+    try {
+      lastText = await getVisibleText(page);
+    } catch (error) {
+      if (!String(error?.message || error).includes("Execution context was destroyed")) throw error;
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(300);
+      continue;
+    }
+    if (lastText.includes(text)) return;
+    await page.waitForTimeout(200);
+  }
+
+  throw new Error(`Text not found: ${text}; tail=${JSON.stringify(lastText.slice(-800))}`);
+}
+
+/**
+ * Connects through token hash first, falling back to login gate form.
+ */
+async function ensureConnected(page, dashboardUrl, gatewayWebSocketUrl, token) {
+  const routeUrl = new URL("tasks", dashboardUrl);
+  routeUrl.hash = new URLSearchParams({ token }).toString();
+
+  await page.goto(routeUrl.toString(), { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("body", { timeout: 15000 });
+
+  const hasWorkbench = async () => (await getVisibleText(page)).includes("电商主图/详情图");
+  if (await hasWorkbench()) return;
+
+  const loginGate = page.locator("openclaw-login-gate");
+  if ((await loginGate.count()) === 0) {
+    await waitForText(page, "电商主图/详情图", 30000);
+    return;
+  }
+
+  await page.locator("openclaw-login-gate input").nth(0).fill(gatewayWebSocketUrl);
+  await page.locator("openclaw-login-gate input").nth(1).fill(token);
+  await page.evaluate(
+    ({ gatewayWebSocketUrl: url, token: authToken }) => {
+      const inputs = document.querySelectorAll("openclaw-login-gate input");
+      const urlInput = inputs[0];
+      const tokenInput = inputs[1];
+      if (urlInput instanceof HTMLInputElement) {
+        urlInput.value = url;
+        urlInput.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+      }
+      if (tokenInput instanceof HTMLInputElement) {
+        tokenInput.value = authToken;
+        tokenInput.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+      }
+    },
+    { gatewayWebSocketUrl, token },
+  );
+
+  await page.locator("openclaw-login-gate button").first().click();
+  await waitForText(page, "电商主图/详情图", 30000);
+}
+
+/**
+ * Waits for the app router to settle after token-hash login rewrites the URL.
+ */
+async function waitForTasksRouteSettled(page) {
+  await page.waitForFunction(
+    () => window.location.pathname.endsWith("/tasks") && window.location.hash === "",
+    null,
+    { timeout: 10000 },
+  ).catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+/**
+ * Installs a fake desktop image API after route redirects settle, so the UI
+ * acceptance can verify the direct workbench contract without spending quota.
+ */
+async function installDirectImageApiStub(page) {
+  await page.waitForFunction(
+    () => Boolean(document.querySelector("openclaw-tasks-page")),
+    null,
+    { timeout: 15000 },
+  );
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.evaluate(() => {
+        window.__uclawEcommerceRequests = [];
+        const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC";
+        window.uclaw = {
+          ...(window.uclaw || {}),
+          generateEcommerceImages: async (payload) => {
+            const outputTypes =
+              Array.isArray(payload?.outputTypes) && payload.outputTypes.length
+                ? payload.outputTypes
+                : Array.isArray(payload?.manifest?.output_types) && payload.manifest.output_types.length
+                  ? payload.manifest.output_types
+                  : ["main_image", "detail_image"];
+            const outputCounts = payload?.outputCounts || payload?.manifest?.output_counts || {};
+            const titles = {
+              main_image: "主图",
+              detail_image: "详情图",
+              model_image: "模特图",
+            };
+            const units = {
+              main_image: "张",
+              detail_image: "屏",
+              model_image: "张",
+            };
+            const images = outputTypes.flatMap((type) => {
+              const count = Number.parseInt(String(outputCounts[type] || 1), 10);
+              return Array.from({ length: Number.isFinite(count) ? count : 1 }, (_value, index) => ({
+                id: `${type}-${index + 1}-fixture`,
+                type,
+                title: `${titles[type] || type}${index + 1}${units[type] || "张"}`,
+                model: "gpt-image-2",
+                mimeType: "image/png",
+                dataUrl: png,
+              }));
+            });
+            window.__uclawEcommerceRequests.push({
+              method: "uclaw:ecommerce-generate-images",
+              payload: {
+                platform: payload?.manifest?.platform,
+                productName: payload?.manifest?.name,
+                outputTypes,
+                outputCounts,
+                imageCount: Array.isArray(payload?.images) ? payload.images.length : 0,
+                fileNames: Array.isArray(payload?.images) ? payload.images.map((item) => item?.fileName) : [],
+              },
+            });
+            return {
+              ok: true,
+              provider: "newapi",
+              model: "gpt-image-2",
+              generatedAt: new Date().toISOString(),
+              warnings: [],
+              images,
+            };
+          },
+        };
+      });
+      return;
+    } catch (error) {
+      if (!String(error?.message || error).includes("Execution context was destroyed") || attempt === 2) throw error;
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  }
+}
+
+/**
+ * Writes a small local PNG fixture for upload interaction.
+ */
+function writeImageFixture() {
+  const file = path.join(os.tmpdir(), `uclaw-ecommerce-fixture-${process.pid}.png`);
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC",
+    "base64",
+  );
+  fs.writeFileSync(file, png);
+  return file;
+}
+
+/**
+ * Fills workbench controls and returns resulting DOM state.
+ */
+async function exerciseWorkbench(page, imagePath) {
+  await waitForText(page, "生成图片", 30000);
+  await waitForTasksRouteSettled(page);
+  await installDirectImageApiStub(page);
+
+  await page.locator("openclaw-tasks-page select").first().selectOption("amazon");
+  await page.locator("openclaw-tasks-page input[placeholder='如：便携榨汁杯']").fill("便携榨汁杯");
+  await page.locator("openclaw-tasks-page input[placeholder='如：厨房小电']").fill("厨房小电");
+  await page.locator("openclaw-tasks-page input[placeholder='默认可不填']").fill("通勤白领");
+  await page.locator("openclaw-tasks-page textarea").fill("一杯鲜榨\n可拆洗杯体\nUSB-C 充电");
+  await page
+    .locator("openclaw-tasks-page .uclaw-ecommerce-type")
+    .filter({ hasText: "模特图" })
+    .locator("input[type='checkbox']")
+    .check();
+  await page
+    .locator("openclaw-tasks-page .uclaw-ecommerce-type")
+    .filter({ hasText: "详情图" })
+    .locator("input[type='number']")
+    .fill("6");
+  await page.locator("openclaw-tasks-page input[type='file']").setInputFiles(imagePath);
+  await waitForText(page, "1 张已选择", 10000);
+  await page.waitForFunction(() => {
+    const button = [...document.querySelectorAll("openclaw-tasks-page button")].find((node) =>
+      (node.innerText || node.textContent || "").includes("生成图片"),
+    );
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  await page.locator("openclaw-tasks-page button").filter({ hasText: "生成图片" }).click();
+  await waitForText(page, "Amazon 已生成图片", 10000);
+  await waitForText(page, "10 张结果", 10000);
+  await waitForText(page, "查看结果", 10000);
+
+  return evaluateInDom(
+    page,
+    `
+      const workbench = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-uclaw-ecommerce-workbench") === "direct-output");
+      const files = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-file"));
+      const generatedCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated"));
+      const generatedImages = allNodes().filter((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-generated"));
+      const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
+      const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+      const typeCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type"));
+      const activeTypes = typeCards
+        .filter((node) => node.classList.contains("is-active"))
+        .map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
+      const generateButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("生成图片"));
+      const manifestButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("复制 Manifest"));
+      const packageButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打包下载"));
+      const openSessionButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开会话"));
+      const carousel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated-grid"));
+      const carouselStyle = carousel ? getComputedStyle(carousel) : null;
+      const request = window.__uclawEcommerceRequests?.[0] || null;
+      const rect = workbench?.getBoundingClientRect();
+      return {
+        hasWorkbench: Boolean(workbench),
+        platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
+        fileCount: files.length,
+        generatedCount: generatedCards.length,
+        generatedImageCount: generatedImages.length,
+        qaCount: qaChips.length,
+        recordCount: recordRows.length,
+        typeCardCount: typeCards.length,
+        activeTypes,
+        generateDisabled: Boolean(generateButton?.disabled),
+        hasManifestButton: Boolean(manifestButton),
+        hasPackageButton: Boolean(packageButton),
+        hasOpenSessionButton: Boolean(openSessionButton),
+        carouselDisplay: carouselStyle?.display || "",
+        carouselOverflowX: carouselStyle?.overflowX || "",
+        carouselSnapType: carouselStyle?.scrollSnapType || "",
+        carouselClientWidth: carousel?.clientWidth || 0,
+        carouselScrollWidth: carousel?.scrollWidth || 0,
+        request,
+        viewportWidth: window.innerWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        width: rect?.width || 0,
+        height: rect?.height || 0,
+        text: (workbench?.innerText || workbench?.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 800),
+      };
+    `,
+  );
+}
+
+/**
+ * Runs connected browser acceptance against a live Gateway dashboard.
+ */
+async function runAcceptance(options) {
+  const { chromium } = loadPlaywright();
+  const gatewayUrl = normalizeGatewayUrl(options.gatewayUrl);
+  const gatewayWebSocketUrl = toGatewayWebSocketUrl(gatewayUrl);
+  const token = getGatewayToken(readConfig(options.configPath));
+  const imagePath = writeImageFixture();
+  const errors = [];
+  const viewports = [
+    { name: "desktop", width: 1280, height: 980 },
+    { name: "mobile", width: 390, height: 844 },
+  ];
+  const results = [];
+
+  let browser;
+
+  try {
+    browser = await chromium.launch({
+      headless: !options.headful,
+      executablePath: fs.existsSync(options.chromePath) ? options.chromePath : undefined,
+    });
+
+    for (const viewport of viewports) {
+      const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
+      page.on("console", (message) => {
+        if (message.type() === "error") errors.push(`${viewport.name}: ${message.text()}`);
+      });
+      page.on("pageerror", (error) => errors.push(`${viewport.name}: ${error.message}`));
+
+      await ensureConnected(page, gatewayUrl, gatewayWebSocketUrl, token);
+      const state = await exerciseWorkbench(page, imagePath);
+
+      if (!state.hasWorkbench) throw new Error(`${viewport.name}: Workbench host missing`);
+      if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);
+      if (state.fileCount !== 1) throw new Error(`${viewport.name}: Expected one uploaded preview, got ${state.fileCount}`);
+      if (state.typeCardCount !== 3) throw new Error(`${viewport.name}: Expected three output type cards, got ${state.typeCardCount}`);
+      if (!state.activeTypes.some((item) => item.includes("模特图"))) {
+        throw new Error(`${viewport.name}: Model image type was not selected`);
+      }
+      if (state.generatedCount < 10) throw new Error(`${viewport.name}: Expected generated image cards, got ${state.generatedCount}`);
+      if (state.generatedImageCount < 10) {
+        throw new Error(`${viewport.name}: Expected generated image previews, got ${state.generatedImageCount}`);
+      }
+      if (state.qaCount < 4) throw new Error(`${viewport.name}: Expected QA chips, got ${state.qaCount}`);
+      if (state.recordCount < 1) throw new Error(`${viewport.name}: Expected one generation record, got ${state.recordCount}`);
+      if (state.generateDisabled) throw new Error(`${viewport.name}: Generate button stayed disabled after valid input`);
+      if (!state.hasManifestButton) throw new Error(`${viewport.name}: Manifest copy button missing after generation`);
+      if (!state.hasPackageButton) throw new Error(`${viewport.name}: Package download button missing after generation`);
+      if (state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button must not appear`);
+      if (state.carouselDisplay !== "flex") throw new Error(`${viewport.name}: Generated list should be flex carousel`);
+      if (!["auto", "scroll"].includes(state.carouselOverflowX)) {
+        throw new Error(`${viewport.name}: Generated list should scroll horizontally, got ${state.carouselOverflowX}`);
+      }
+      if (!state.carouselSnapType.includes("x")) {
+        throw new Error(`${viewport.name}: Generated list should use x scroll snap, got ${state.carouselSnapType}`);
+      }
+      if (state.carouselScrollWidth <= state.carouselClientWidth) {
+        throw new Error(`${viewport.name}: Generated carousel should overflow inside its own scroller`);
+      }
+      if (state.request?.method !== "uclaw:ecommerce-generate-images") {
+        throw new Error(`${viewport.name}: direct ecommerce image IPC was not called`);
+      }
+      if (state.request?.payload?.imageCount !== 1) {
+        throw new Error(`${viewport.name}: Expected one direct image payload, got ${state.request?.payload?.imageCount}`);
+      }
+      if (!state.request?.payload?.outputTypes?.includes("model_image")) {
+        throw new Error(`${viewport.name}: Expected direct payload to request model_image`);
+      }
+      if (state.request?.payload?.outputCounts?.main_image !== 3) {
+        throw new Error(`${viewport.name}: Expected main_image count 3`);
+      }
+      if (state.request?.payload?.outputCounts?.detail_image !== 6) {
+        throw new Error(`${viewport.name}: Expected detail_image count 6`);
+      }
+      if (state.request?.payload?.outputCounts?.model_image !== 1) {
+        throw new Error(`${viewport.name}: Expected model_image count 1`);
+      }
+      if (!state.text.includes("最长边建议 1600px")) throw new Error(`${viewport.name}: Amazon preset text missing`);
+      if (!state.text.includes("模特图")) throw new Error(`${viewport.name}: Model image text missing`);
+      if (!state.text.includes("详情图6屏")) throw new Error(`${viewport.name}: Detail series count text missing`);
+      if (state.scrollWidth > state.viewportWidth + 4) {
+        throw new Error(`${viewport.name}: horizontal overflow ${state.scrollWidth} > ${state.viewportWidth}`);
+      }
+
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 10000 }),
+        page.locator("openclaw-tasks-page button").filter({ hasText: "打包下载" }).click(),
+      ]);
+      const suggestedFilename = download.suggestedFilename();
+      if (!suggestedFilename.endsWith(".zip")) {
+        throw new Error(`${viewport.name}: Expected ecommerce zip download, got ${suggestedFilename}`);
+      }
+      await download.cancel().catch(() => {});
+
+      fs.mkdirSync(screenshotsDir, { recursive: true });
+      const screenshot = path.join(screenshotsDir, `ecommerce-workbench-ui-${viewport.name}.png`);
+      await page.screenshot({ path: screenshot, fullPage: true });
+      await page.close();
+      results.push({ viewport: viewport.name, screenshot, state });
+    }
+
+    if (errors.length > 0) throw new Error(`Browser errors: ${errors.join(" | ")}`);
+
+    console.log(JSON.stringify({ ok: true, step: "ecommerce_workbench_ui", results }, null, 2));
+  } finally {
+    try {
+      fs.unlinkSync(imagePath);
+    } catch {}
+    await browser?.close();
+  }
+}
+
+/**
+ * CLI entrypoint.
+ */
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    printUsage();
+    return;
+  }
+
+  await runAcceptance(options);
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

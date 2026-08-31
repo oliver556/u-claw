@@ -45,9 +45,23 @@ type Config struct {
 	WeChatPayAPIV3Key        string
 	WeChatPayPrivateKeyPath  string
 	WeChatPayCertSerialNo    string
+	AlipayGatewayURL         string
 	AlipayAppID              string
 	AlipayPrivateKeyPath     string
+	AlipayPublicKeyPath      string
 	AlipayPublicCertPath     string
+	AlipayNotifyURL          string
+	AlipaySignType           string
+	AlipaySellerID           string
+	AlipayHTTPTimeout        time.Duration
+	AlipayOneCentTestEnabled bool
+	AlipaySPIMerchantID      string
+	AlipaySPIMerchantName    string
+	AlipaySPIMerchantShort   string
+	AlipaySPIServicePhone    string
+	AlipaySPIServiceAddress  string
+	AlipaySPIPrivateKeyPath  string
+	AlipaySPIAESKey          string
 }
 
 // Getter reads a configuration value from a backing store such as environment variables.
@@ -96,9 +110,23 @@ func Load(getenv Getter) (Config, error) {
 		WeChatPayAPIV3Key:        strings.TrimSpace(getenv("WECHAT_PAY_API_V3_KEY")),
 		WeChatPayPrivateKeyPath:  strings.TrimSpace(getenv("WECHAT_PAY_PRIVATE_KEY_PATH")),
 		WeChatPayCertSerialNo:    strings.TrimSpace(getenv("WECHAT_PAY_CERT_SERIAL_NO")),
+		AlipayGatewayURL:         strings.TrimRight(withDefault(getenv("ALIPAY_GATEWAY_URL"), "https://openapi.alipay.com/gateway.do"), "/"),
 		AlipayAppID:              strings.TrimSpace(getenv("ALIPAY_APP_ID")),
 		AlipayPrivateKeyPath:     strings.TrimSpace(getenv("ALIPAY_PRIVATE_KEY_PATH")),
+		AlipayPublicKeyPath:      strings.TrimSpace(getenv("ALIPAY_PUBLIC_KEY_PATH")),
 		AlipayPublicCertPath:     strings.TrimSpace(getenv("ALIPAY_PUBLIC_CERT_PATH")),
+		AlipayNotifyURL:          strings.TrimSpace(getenv("ALIPAY_NOTIFY_URL")),
+		AlipaySignType:           withDefault(getenv("ALIPAY_SIGN_TYPE"), "RSA2"),
+		AlipaySellerID:           strings.TrimSpace(getenv("ALIPAY_SELLER_ID")),
+		AlipayHTTPTimeout:        10 * time.Second,
+		AlipayOneCentTestEnabled: parseBool(getenv("ALIPAY_ONE_CENT_TEST_ENABLED")),
+		AlipaySPIMerchantID:      strings.TrimSpace(getenv("ALIPAY_SPI_MERCHANT_ID")),
+		AlipaySPIMerchantName:    strings.TrimSpace(getenv("ALIPAY_SPI_MERCHANT_NAME")),
+		AlipaySPIMerchantShort:   strings.TrimSpace(getenv("ALIPAY_SPI_MERCHANT_SHORT")),
+		AlipaySPIServicePhone:    strings.TrimSpace(getenv("ALIPAY_SPI_SERVICE_PHONE")),
+		AlipaySPIServiceAddress:  strings.TrimSpace(getenv("ALIPAY_SPI_SERVICE_ADDRESS")),
+		AlipaySPIPrivateKeyPath:  strings.TrimSpace(getenv("ALIPAY_SPI_PRIVATE_KEY_PATH")),
+		AlipaySPIAESKey:          strings.TrimSpace(getenv("ALIPAY_SPI_AES_KEY")),
 	}
 
 	if raw := strings.TrimSpace(getenv("NEWAPI_HTTP_TIMEOUT")); raw != "" {
@@ -128,6 +156,13 @@ func Load(getenv Getter) (Config, error) {
 			return Config{}, fmt.Errorf("parse ALIYUN_SMS_HTTP_TIMEOUT: %w", err)
 		}
 		cfg.AliyunSMSHTTPTimeout = timeout
+	}
+	if raw := strings.TrimSpace(getenv("ALIPAY_HTTP_TIMEOUT")); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse ALIPAY_HTTP_TIMEOUT: %w", err)
+		}
+		cfg.AlipayHTTPTimeout = timeout
 	}
 
 	return cfg, nil
@@ -219,7 +254,8 @@ func (cfg Config) WeChatPayConfigured() bool {
 func (cfg Config) AlipayConfigured() bool {
 	return cfg.AlipayAppID != "" &&
 		cfg.AlipayPrivateKeyPath != "" &&
-		cfg.AlipayPublicCertPath != ""
+		(cfg.AlipayPublicKeyPath != "" || cfg.AlipayPublicCertPath != "") &&
+		cfg.AlipayNotifyURL != ""
 }
 
 // withDefault returns a trimmed value or fallback when value is empty.
@@ -241,4 +277,14 @@ func parseNonNegativeInt64(raw string) (int64, error) {
 		value = value*10 + int64(ch-'0')
 	}
 	return value, nil
+}
+
+// parseBool treats common truthy strings as true for feature flags.
+func parseBool(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }

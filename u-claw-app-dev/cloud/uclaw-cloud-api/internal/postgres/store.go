@@ -640,6 +640,110 @@ RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at
 	return row.toAdminRecord(), nil
 }
 
+// ListRechargeOrders returns recent payment orders with callback and New API context for operations.
+func (s *Store) ListRechargeOrders(ctx context.Context, filter admin.RechargeOrderFilter) ([]admin.RechargeOrder, error) {
+	status := strings.ToLower(strings.TrimSpace(filter.Status))
+	provider := strings.ToLower(strings.TrimSpace(filter.Provider))
+	phone := strings.TrimSpace(filter.Phone)
+	orderNo := strings.TrimSpace(filter.OrderNo)
+	limit := filter.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+  po.id,
+  po.order_no,
+  po.uclaw_user_id,
+  COALESCE(u.phone, ''),
+  po.provider,
+  po.amount_cents,
+  po.quota_tokens,
+  po.status,
+  COALESCE(po.provider_trade_no, ''),
+  po.paid_at,
+  po.credited_at,
+  COALESCE(po.last_error, ''),
+  po.created_at,
+  po.updated_at,
+  na.newapi_user_id,
+  COALESCE(na.newapi_username, ''),
+  COALESCE(cb.callback_count, 0),
+  cb.last_callback_at
+FROM payment_orders po
+LEFT JOIN uclaw_users u ON u.id = po.uclaw_user_id
+LEFT JOIN newapi_accounts na ON na.uclaw_user_id = po.uclaw_user_id
+LEFT JOIN LATERAL (
+  SELECT COUNT(*)::BIGINT AS callback_count, MAX(received_at) AS last_callback_at
+  FROM payment_callbacks
+  WHERE payment_order_id = po.id
+) cb ON true
+WHERE ($1 = '' OR po.status = $1)
+  AND ($2 = '' OR po.provider = $2)
+  AND ($3 = '' OR u.phone = $3 OR na.newapi_username = $3)
+  AND ($4 = '' OR po.order_no ILIKE '%' || $4 || '%' OR COALESCE(po.provider_trade_no, '') ILIKE '%' || $4 || '%')
+ORDER BY po.created_at DESC, po.id DESC
+LIMIT $5
+`, status, provider, phone, orderNo, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recharge orders: %w", err)
+	}
+	defer rows.Close()
+
+	var records []admin.RechargeOrder
+	for rows.Next() {
+		var record admin.RechargeOrder
+		var paidAt sql.NullTime
+		var creditedAt sql.NullTime
+		var newapiUserID sql.NullInt64
+		var lastCallbackAt sql.NullTime
+		if err := rows.Scan(
+			&record.ID,
+			&record.OrderNo,
+			&record.UClawUserID,
+			&record.Phone,
+			&record.Provider,
+			&record.AmountCents,
+			&record.QuotaTokens,
+			&record.Status,
+			&record.ProviderTradeNo,
+			&paidAt,
+			&creditedAt,
+			&record.LastError,
+			&record.CreatedAt,
+			&record.UpdatedAt,
+			&newapiUserID,
+			&record.NewAPIUsername,
+			&record.CallbackCount,
+			&lastCallbackAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan recharge order view: %w", err)
+		}
+		if paidAt.Valid {
+			value := paidAt.Time
+			record.PaidAt = &value
+		}
+		if creditedAt.Valid {
+			value := creditedAt.Time
+			record.CreditedAt = &value
+		}
+		if newapiUserID.Valid {
+			value := newapiUserID.Int64
+			record.NewAPIUserID = &value
+		}
+		if lastCallbackAt.Valid {
+			value := lastCallbackAt.Time
+			record.LastCallbackAt = &value
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list recharge orders rows: %w", err)
+	}
+	return records, nil
+}
+
 // activationCodeHash hashes printed codes before they enter PostgreSQL.
 func (s *Store) activationCodeHash(code string) string {
 	normalized := strings.ToUpper(strings.TrimSpace(code))

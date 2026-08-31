@@ -374,10 +374,9 @@ async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
     .send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     .then((result) => result.result.value);
   const quotaPerCNY = 500000;
-  const computePerQuota = 12;
   const expectedInitialText = `¥${(Number(expectedInitialQuota) / quotaPerCNY).toFixed(2)}`;
   const expectedFinalText = `¥${(Number(expectedInitialQuota + rechargeQuota) / quotaPerCNY).toFixed(2)}`;
-  const expectedRechargeComputeText = `${((Number(rechargeQuota) * computePerQuota) / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 })}w 算力`;
+  const expectedRechargeMoneyText = `¥${(Number(rechargeQuota) / quotaPerCNY).toFixed(2)}`;
 
   for (let i = 0; i < 120; i += 1) {
     if (await evalJS('document.readyState') === 'complete') break;
@@ -426,17 +425,17 @@ async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
   }
   for (let i = 0; i < 60; i += 1) {
     const ok = await evalJS(`(() => {
-      const text = document.body.innerText || '';
-      return text.includes('选择套餐') || text.includes('虚拟充值 10 元');
+      return [...document.querySelectorAll('.uclaw-recharge-plan,button,[role="button"]')]
+        .some((node) => (node.textContent || '').includes('¥10.00') && node.offsetParent !== null);
     })()`);
     if (ok) break;
     await sleep(500);
   }
   const selectedPlan = await evalJS(`(() => {
-    const plan = [...document.querySelectorAll('button,[role="button"],label,article,div')]
-      .find((node) => (node.textContent || '').includes('虚拟充值 10 元') && node.offsetParent !== null);
+    const plan = [...document.querySelectorAll('.uclaw-recharge-plan,button,[role="button"]')]
+      .find((node) => (node.textContent || '').includes('¥10.00') && node.offsetParent !== null);
     if (!plan) return false;
-    const clickable = plan.closest('button,[role="button"],label') || plan;
+    const clickable = plan.closest('button,[role="button"]') || plan;
     clickable.click();
     return true;
   })()`);
@@ -447,7 +446,7 @@ async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
   }
   const confirmedRecharge = await evalJS(`(() => {
     const button = [...document.querySelectorAll('button')]
-      .find((node) => (node.textContent || '').trim() === '确认充值' && !node.disabled);
+      .find((node) => ['生成二维码', '确认充值'].includes((node.textContent || '').trim()) && !node.disabled);
     if (!button) return false;
     button.click();
     return true;
@@ -478,14 +477,14 @@ async function assertElectronModelUsageUI(expectedInitialQuota, rechargeQuota) {
       for (let j = 0; j < 80; j += 1) {
         const recordsVisible = await evalJS(`(() => {
           const text = document.body.innerText || '';
-          return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(expectedRechargeComputeText)});
+          return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(expectedRechargeMoneyText)});
         })()`);
         if (recordsVisible) break;
         await sleep(500);
       }
       const recordsVisible = await evalJS(`(() => {
         const text = document.body.innerText || '';
-        return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(expectedRechargeComputeText)});
+        return text.includes('充值记录') && text.includes('已到账') && text.includes(${JSON.stringify(expectedRechargeMoneyText)});
       })()`);
       if (!recordsVisible) {
         const bodyText = await evalJS('document.body.innerText || ""');
