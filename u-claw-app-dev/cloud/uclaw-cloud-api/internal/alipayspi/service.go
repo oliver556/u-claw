@@ -34,6 +34,10 @@ const (
 	MethodStandardAggrePayOrderCreate = "spi.alipay.pay.standardaggrepay.order.create"
 	// MethodStandardAggPayOrderCreate is kept for console variants that omit "re" in aggregate-pay method names.
 	MethodStandardAggPayOrderCreate = "spi.alipay.pay.standardaggpay.order.create"
+	// MethodStandardAggrePayMerchantInfoQuery queries standardized aggregate-pay merchant facts.
+	MethodStandardAggrePayMerchantInfoQuery = "spi.alipay.pay.standardaggrepay.merchantinfo.query"
+	// MethodStandardAggPayMerchantInfoQuery is kept for console variants that omit "re" in aggregate-pay method names.
+	MethodStandardAggPayMerchantInfoQuery = "spi.alipay.pay.standardaggpay.merchantinfo.query"
 )
 
 // Config contains the non-secret merchant facts returned to Alipay SPI checks.
@@ -100,7 +104,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.aesErr != nil,
 	)
 	switch req.Method {
-	case MethodAggPayMerchantInfoQuery, MethodAggrePayMerchantInfoQuery:
+	case MethodAggPayMerchantInfoQuery, MethodAggrePayMerchantInfoQuery, MethodStandardAggrePayMerchantInfoQuery, MethodStandardAggPayMerchantInfoQuery:
 		writeSPIResponse(w, s.merchantInfoResponse(req), s.signer, s.aesKey)
 	case MethodAggrePayOrderCreate, MethodAggPayOrderCreate, MethodStandardAggrePayOrderCreate, MethodStandardAggPayOrderCreate:
 		writeSPIResponse(w, s.orderCreateResponse(req), s.signer, s.aesKey)
