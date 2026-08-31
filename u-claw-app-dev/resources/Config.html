@@ -531,15 +531,15 @@ function buildOpenClawConfig(provider, base, model, apiKey) {
         }
     };
 
-    const usesNewApi = /(^|\.)api\.gmnlee\.com\/v1\/?$/i.test(base.replace(/^https?:\/\//i, ''));
+    const usesNewApi = /(^|\.)api\.(gmnlee|yiyong)\.com\/v1\/?$|^api\.yiyong\.me\/v1\/?$/i.test(base.replace(/^https?:\/\//i, ''));
     if (usesNewApi) {
         providers.xai = {
             baseUrl: base,
             apiKey: apiKey,
             api: 'openai-completions',
             models: [{
-                id: 'jimeng-video-3-720p',
-                name: 'jimeng-video-3-720p',
+                id: 'seedance-1.5-pro-1080p-5s',
+                name: 'seedance-1.5-pro-1080p-5s',
                 reasoning: false,
                 input: ['text', 'image'],
                 cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -552,7 +552,7 @@ function buildOpenClawConfig(provider, base, model, apiKey) {
     const defaults = { model: { primary: providerName + '/' + model } };
     if (usesNewApi) {
         defaults.videoGenerationModel = {
-            primary: 'xai/jimeng-video-3-720p',
+            primary: 'xai/seedance-1.5-pro-1080p-5s',
             timeoutMs: 600000
         };
         defaults.mediaMaxMb = 256;

@@ -19,7 +19,7 @@
     "mode": "merge",
     "providers": {
       "custom": {
-        "baseUrl": "https://api.gmnlee.com/v1",
+        "baseUrl": "https://api.yiyong.me/v1",
         "apiKey": "",
         "api": "openai-completions",
         "models": [
@@ -43,7 +43,7 @@
         ]
       },
       "litellm": {
-        "baseUrl": "https://api.gmnlee.com/v1",
+        "baseUrl": "https://api.yiyong.me/v1",
         "apiKey": "",
         "api": "openai-completions",
         "models": [
@@ -67,13 +67,13 @@
         ]
       },
       "xai": {
-        "baseUrl": "https://video-adapter.gmnlee.com/xai/v1",
+        "baseUrl": "http://127.0.0.1:18808/xai/v1",
         "apiKey": "uclaw-video-adapter",
         "api": "openai-completions",
         "models": [
           {
-            "id": "jimeng-video-3-720p",
-            "name": "jimeng-video-3-720p",
+            "id": "seedance-1.5-pro-1080p-5s",
+            "name": "seedance-1.5-pro-1080p-5s",
             "reasoning": false,
             "input": [
               "text",
@@ -106,7 +106,7 @@
         "timeoutMs": 180000
       },
       "videoGenerationModel": {
-        "primary": "xai/jimeng-video-3-720p",
+        "primary": "xai/seedance-1.5-pro-1080p-5s",
         "timeoutMs": 600000
       },
       "mediaMaxMb": 256

@@ -10,8 +10,8 @@ const appSupportPath = path.join(os.homedir(), 'Library', 'Application Support')
 const appDataNames = ['u-claw', 'U-Claw'];
 const desktopConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, '.openclaw', 'openclaw.json'));
 const portableCacheConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, 'usb-portable', 'data', '.openclaw', 'openclaw.json'));
-const DEFAULT_NEW_API_BASE_URL = 'https://api.gmnlee.com/v1';
-const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://video-adapter.gmnlee.com/xai/v1';
+const DEFAULT_NEW_API_BASE_URL = 'https://api.yiyong.me/v1';
+const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'http://127.0.0.1:18808/xai/v1';
 const DEFAULT_VIDEO_ADAPTER_API_KEY = 'uclaw-video-adapter';
 
 function usage() {
@@ -151,7 +151,7 @@ function findNewApiKey(configs) {
       const apiKey = providerValue(provider, ['apiKey', 'api_key', 'key']);
       if (apiKey
         && apiKey !== DEFAULT_VIDEO_ADAPTER_API_KEY
-        && /api\.gmnlee\.com/i.test(baseUrl)) {
+        && /api\.(gmnlee|yiyong)\.com|api\.yiyong\.me/i.test(baseUrl)) {
         return apiKey;
       }
     }
@@ -254,7 +254,7 @@ function buildConfig(options, sourceConfigs) {
     timeoutMs: 180000
   };
   mergedConfig.agents.defaults.videoGenerationModel = {
-    primary: 'xai/jimeng-video-3-720p',
+    primary: 'xai/seedance-1.5-pro-1080p-5s',
     timeoutMs: 600000
   };
   mergedConfig.agents.defaults.mediaMaxMb = Math.max(Number(mergedConfig.agents.defaults.mediaMaxMb) || 0, 256);
@@ -278,7 +278,7 @@ function validateConfig(config, options, newApiKey) {
   if (!videoBaseUrl) {
     throw new Error('xai video adapter base URL is empty');
   }
-  if (videoBaseUrl === newApiBaseUrl || /api\.gmnlee\.com/i.test(videoBaseUrl)) {
+  if (videoBaseUrl === newApiBaseUrl || /api\.(gmnlee|yiyong)\.com|api\.yiyong\.me/i.test(videoBaseUrl)) {
     throw new Error('xai video provider must point to the video adapter, not directly to New API');
   }
   if (!providers.xai?.apiKey) {

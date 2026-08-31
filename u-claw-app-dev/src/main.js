@@ -11,8 +11,8 @@ const DEFAULT_PORT = 18789;
 const MAX_PORT = 18799;
 const DEFAULT_VIDEO_ADAPTER_PORT = 18808;
 const MAX_VIDEO_ADAPTER_PORT = 18818;
-const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'https://video-adapter.gmnlee.com/xai/v1';
-const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'jimeng-video-3-720p';
+const DEFAULT_VIDEO_ADAPTER_BASE_URL = 'http://127.0.0.1:18808/xai/v1';
+const UCLAW_VIDEO_MODEL = process.env.UCLAW_VIDEO_MODEL || 'seedance-1.5-pro-1080p-5s';
 const UCLAW_VIDEO_ADAPTER_BASE_URL = process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '';
 const UCLAW_VIDEO_ADAPTER_API_KEY = process.env.UCLAW_VIDEO_ADAPTER_API_KEY || '';
 const UCLAW_PORTABLE_DATA_DIR = process.env.UCLAW_PORTABLE_DATA_DIR?.trim() || '';
@@ -574,7 +574,7 @@ function findNewApiCredentials(config) {
     if (!provider || typeof provider !== 'object') continue;
     const baseUrl = getProviderValue(provider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url']);
     const apiKey = getProviderValue(provider, ['apiKey', 'api_key', 'key']);
-    if (baseUrl && apiKey && /api\.gmnlee\.com/i.test(baseUrl)) {
+    if (baseUrl && apiKey && /api\.(gmnlee|yiyong)\.com|api\.yiyong\.me/i.test(baseUrl)) {
       return { newApiBaseUrl: baseUrl, newApiKey: apiKey };
     }
   }

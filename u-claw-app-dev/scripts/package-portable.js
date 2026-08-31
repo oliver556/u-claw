@@ -223,7 +223,7 @@ function generateConfig(edition, destination) {
   if (edition === 'streamer' && !hasNewApiKey) {
     throw new Error('Streamer package is missing the New API key');
   }
-  if (providers.xai?.baseUrl !== 'https://video-adapter.gmnlee.com/xai/v1') {
+  if (providers.xai?.baseUrl !== 'http://127.0.0.1:18808/xai/v1') {
     throw new Error(`Wrong xai base URL: ${providers.xai?.baseUrl || '(empty)'}`);
   }
   if (providers.xai?.apiKey !== 'uclaw-video-adapter') {
@@ -318,8 +318,8 @@ Edition:
   ${keyRule}
 
 Video chain:
-  U-Claw -> server adapter -> New API -> Jimeng
-  xai.baseUrl = https://video-adapter.gmnlee.com/xai/v1
+  U-Claw -> local adapter -> New API -> server adapter -> Flash/Seedance
+  xai.baseUrl = http://127.0.0.1:18808/xai/v1
   xai.apiKey = uclaw-video-adapter
 
 Artifacts:
