@@ -203,4 +203,6 @@ The result should be structured data first, UI second:
 
 This PRD intentionally replaces the earlier “workflow launcher + Prompt-only session” user experience with a direct-output product workbench. The earlier implementation can still serve as a temporary technical spike, but it is not the desired user-facing shape.
 
-Next implementation recommendation: build a frontend prototype for 抖音电商 first, with platform selector, upload area, minimal form, generated-result placeholder contract, and preset verifier. After that, wire the existing image generation chain.
+Current implementation note: the workbench now covers platform selector, upload area, minimal form, image-generation submit through the existing OpenClaw chat/tool chain, and local generation records.
+
+Next implementation recommendation: capture generated image artifacts back into the workbench result area, add download/export packaging, and add provider-level failure reasons without exposing API keys.

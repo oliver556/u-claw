@@ -277,8 +277,34 @@ function writeImageFixture() {
  * Fills workbench controls and returns resulting DOM state.
  */
 async function exerciseWorkbench(page, imagePath) {
-  await waitForText(page, "生成预案", 30000);
+  await waitForText(page, "生成图片", 30000);
   await waitForTasksRouteSettled(page);
+  await page.evaluate(() => {
+    window.__uclawEcommerceRequests = [];
+    const host = document.querySelector("openclaw-tasks-page");
+    if (!host?.client?.request) return;
+    const originalRequest = host.client.request.bind(host.client);
+    if (host.context?.sessions) {
+      host.context.sessions.create = async () => "agent:main:ecommerce-test-session";
+    }
+    host.client.request = async (method, payload) => {
+      if (method === "chat.send") {
+        window.__uclawEcommerceRequests.push({
+          method,
+          payload: {
+            sessionKey: payload?.sessionKey,
+            message: String(payload?.message || ""),
+            attachmentCount: Array.isArray(payload?.attachments) ? payload.attachments.length : 0,
+            attachmentTypes: Array.isArray(payload?.attachments) ? payload.attachments.map((item) => item?.type) : [],
+            fileNames: Array.isArray(payload?.attachments) ? payload.attachments.map((item) => item?.fileName) : [],
+            deliver: payload?.deliver,
+          },
+        });
+        return { status: "started", runId: "ecommerce-test-run" };
+      }
+      return originalRequest(method, payload);
+    };
+  });
 
   await page.locator("openclaw-tasks-page select").first().selectOption("amazon");
   await page.locator("openclaw-tasks-page input[placeholder='如：便携榨汁杯']").fill("便携榨汁杯");
@@ -289,12 +315,13 @@ async function exerciseWorkbench(page, imagePath) {
   await waitForText(page, "1 张已选择", 10000);
   await page.waitForFunction(() => {
     const button = [...document.querySelectorAll("openclaw-tasks-page button")].find((node) =>
-      (node.innerText || node.textContent || "").includes("生成预案"),
+      (node.innerText || node.textContent || "").includes("生成图片"),
     );
     return button instanceof HTMLButtonElement && !button.disabled;
   });
-  await page.locator("openclaw-tasks-page button").filter({ hasText: "生成预案" }).click();
-  await waitForText(page, "Amazon 输出预案", 10000);
+  await page.locator("openclaw-tasks-page button").filter({ hasText: "生成图片" }).click();
+  await waitForText(page, "Amazon 已发起生成", 10000);
+  await waitForText(page, "打开会话", 10000);
 
   return evaluateInDom(
     page,
@@ -303,8 +330,11 @@ async function exerciseWorkbench(page, imagePath) {
       const files = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-file"));
       const outputCards = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-output-grid article"));
       const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
-      const generateButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("生成预案"));
+      const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+      const generateButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("生成图片"));
       const manifestButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("复制 Manifest"));
+      const openSessionButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开会话"));
+      const request = window.__uclawEcommerceRequests?.[0] || null;
       const rect = workbench?.getBoundingClientRect();
       return {
         hasWorkbench: Boolean(workbench),
@@ -312,8 +342,11 @@ async function exerciseWorkbench(page, imagePath) {
         fileCount: files.length,
         outputCount: outputCards.length,
         qaCount: qaChips.length,
+        recordCount: recordRows.length,
         generateDisabled: Boolean(generateButton?.disabled),
         hasManifestButton: Boolean(manifestButton),
+        hasOpenSessionButton: Boolean(openSessionButton),
+        request,
         viewportWidth: window.innerWidth,
         scrollWidth: document.documentElement.scrollWidth,
         width: rect?.width || 0,
@@ -363,8 +396,17 @@ async function runAcceptance(options) {
       if (state.fileCount !== 1) throw new Error(`${viewport.name}: Expected one uploaded preview, got ${state.fileCount}`);
       if (state.outputCount < 2) throw new Error(`${viewport.name}: Expected output manifest cards, got ${state.outputCount}`);
       if (state.qaCount < 4) throw new Error(`${viewport.name}: Expected QA chips, got ${state.qaCount}`);
+      if (state.recordCount < 1) throw new Error(`${viewport.name}: Expected one generation record, got ${state.recordCount}`);
       if (state.generateDisabled) throw new Error(`${viewport.name}: Generate button stayed disabled after valid input`);
       if (!state.hasManifestButton) throw new Error(`${viewport.name}: Manifest copy button missing after generation`);
+      if (!state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button missing after generation`);
+      if (state.request?.method !== "chat.send") throw new Error(`${viewport.name}: chat.send was not called`);
+      if (state.request?.payload?.attachmentCount !== 1) {
+        throw new Error(`${viewport.name}: Expected one image attachment, got ${state.request?.payload?.attachmentCount}`);
+      }
+      if (!state.request?.payload?.message?.includes("必须优先调用可用的图片生成工具")) {
+        throw new Error(`${viewport.name}: Image-generation prompt contract missing`);
+      }
       if (!state.text.includes("最长边建议 1600px")) throw new Error(`${viewport.name}: Amazon preset text missing`);
       if (state.scrollWidth > state.viewportWidth + 4) {
         throw new Error(`${viewport.name}: horizontal overflow ${state.scrollWidth} > ${state.viewportWidth}`);

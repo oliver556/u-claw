@@ -67,7 +67,10 @@ function verifyPatchSource(errors) {
     "data-uclaw-ecommerce-workbench",
     "UcEcommercePlatformPresets",
     "UcEcommerceBuildManifest",
-    "generateEcommercePreflight",
+    "UcEcommerceBuildGenerationPrompt",
+    "startEcommerceImageGeneration",
+    "chat.send",
+    "uclaw.ecommerceImageRecords.v1",
     "uclaw.ecommerceWorkbench.platform.v1",
     "official_seed",
     "public_summary",
@@ -78,7 +81,7 @@ function verifyPatchSource(errors) {
     requireToken(errors, "patch-openclaw.js", content, token);
   }
 
-  requireToken(errors, "patch-openclaw.js", content, "ecommerce-workbench-2");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-generation-1");
 }
 
 /**
@@ -92,11 +95,15 @@ function verifyGeneratedTasksPage(errors) {
       "data-uclaw-ecommerce-workbench",
       "data-uclaw-ecommerce-platform",
       "电商主图/详情图",
-      "生成预案",
+      "生成图片",
+      "生成记录",
       "选择图片",
       "UcEcommercePlatformPresets",
       "UcEcommerceBuildManifest",
-      "generateEcommercePreflight",
+      "UcEcommerceBuildGenerationPrompt",
+      "startEcommerceImageGeneration",
+      "chat.send",
+      "uclaw.ecommerceImageRecords.v1",
       "source_type",
       "抖音电商",
       "Amazon",
@@ -107,7 +114,7 @@ function verifyGeneratedTasksPage(errors) {
       requireToken(errors, label, content, token);
     }
 
-    if (/workflow builder|拖拽编排器|一键出图|自动出图|sessions\.create|Prompt-only/.test(content)) {
+    if (/workflow builder|拖拽编排器|一键出图|自动出图|Prompt-only/.test(content)) {
       errors.push(`${label} contains blocked fake workflow wording`);
     }
   }
@@ -122,7 +129,7 @@ function verifyBundledSkill(errors) {
     "name: ecommerce-main-detail-workflow",
     "Workbench-first",
     "平台 preset",
-    "不暴露聊天",
+    "投递图片生成任务",
     "Campaign Style Lock",
     "Main Image Storyboard",
     "Detail Page Storyboard",
