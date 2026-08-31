@@ -291,17 +291,35 @@ async function installDirectImageApiStub(page) {
                 : Array.isArray(payload?.manifest?.output_types) && payload.manifest.output_types.length
                   ? payload.manifest.output_types
                   : ["main_image", "detail_image"];
+            const outputCounts = payload?.outputCounts || payload?.manifest?.output_counts || {};
             const titles = {
               main_image: "主图",
-              detail_image: "详情图首屏",
+              detail_image: "详情图",
               model_image: "模特图",
             };
+            const units = {
+              main_image: "张",
+              detail_image: "屏",
+              model_image: "张",
+            };
+            const images = outputTypes.flatMap((type) => {
+              const count = Number.parseInt(String(outputCounts[type] || 1), 10);
+              return Array.from({ length: Number.isFinite(count) ? count : 1 }, (_value, index) => ({
+                id: `${type}-${index + 1}-fixture`,
+                type,
+                title: `${titles[type] || type}${index + 1}${units[type] || "张"}`,
+                model: "gpt-image-2",
+                mimeType: "image/png",
+                dataUrl: png,
+              }));
+            });
             window.__uclawEcommerceRequests.push({
               method: "uclaw:ecommerce-generate-images",
               payload: {
                 platform: payload?.manifest?.platform,
                 productName: payload?.manifest?.name,
                 outputTypes,
+                outputCounts,
                 imageCount: Array.isArray(payload?.images) ? payload.images.length : 0,
                 fileNames: Array.isArray(payload?.images) ? payload.images.map((item) => item?.fileName) : [],
               },
@@ -312,14 +330,7 @@ async function installDirectImageApiStub(page) {
               model: "gpt-image-2",
               generatedAt: new Date().toISOString(),
               warnings: [],
-              images: outputTypes.map((type) => ({
-                id: `${type}-fixture`,
-                type,
-                title: titles[type] || type,
-                model: "gpt-image-2",
-                mimeType: "image/png",
-                dataUrl: png,
-              })),
+              images,
             };
           },
         };
@@ -359,7 +370,16 @@ async function exerciseWorkbench(page, imagePath) {
   await page.locator("openclaw-tasks-page input[placeholder='如：厨房小电']").fill("厨房小电");
   await page.locator("openclaw-tasks-page input[placeholder='默认可不填']").fill("通勤白领");
   await page.locator("openclaw-tasks-page textarea").fill("一杯鲜榨\n可拆洗杯体\nUSB-C 充电");
-  await page.locator("openclaw-tasks-page .uclaw-ecommerce-type").filter({ hasText: "模特图" }).click();
+  await page
+    .locator("openclaw-tasks-page .uclaw-ecommerce-type")
+    .filter({ hasText: "模特图" })
+    .locator("input[type='checkbox']")
+    .check();
+  await page
+    .locator("openclaw-tasks-page .uclaw-ecommerce-type")
+    .filter({ hasText: "详情图" })
+    .locator("input[type='number']")
+    .fill("6");
   await page.locator("openclaw-tasks-page input[type='file']").setInputFiles(imagePath);
   await waitForText(page, "1 张已选择", 10000);
   await page.waitForFunction(() => {
@@ -370,7 +390,7 @@ async function exerciseWorkbench(page, imagePath) {
   });
   await page.locator("openclaw-tasks-page button").filter({ hasText: "生成图片" }).click();
   await waitForText(page, "Amazon 已生成图片", 10000);
-  await waitForText(page, "3 张结果", 10000);
+  await waitForText(page, "10 张结果", 10000);
   await waitForText(page, "查看结果", 10000);
 
   return evaluateInDom(
@@ -456,8 +476,8 @@ async function runAcceptance(options) {
       if (!state.activeTypes.some((item) => item.includes("模特图"))) {
         throw new Error(`${viewport.name}: Model image type was not selected`);
       }
-      if (state.generatedCount < 3) throw new Error(`${viewport.name}: Expected generated image cards, got ${state.generatedCount}`);
-      if (state.generatedImageCount < 3) {
+      if (state.generatedCount < 10) throw new Error(`${viewport.name}: Expected generated image cards, got ${state.generatedCount}`);
+      if (state.generatedImageCount < 10) {
         throw new Error(`${viewport.name}: Expected generated image previews, got ${state.generatedImageCount}`);
       }
       if (state.qaCount < 4) throw new Error(`${viewport.name}: Expected QA chips, got ${state.qaCount}`);
@@ -474,8 +494,18 @@ async function runAcceptance(options) {
       if (!state.request?.payload?.outputTypes?.includes("model_image")) {
         throw new Error(`${viewport.name}: Expected direct payload to request model_image`);
       }
+      if (state.request?.payload?.outputCounts?.main_image !== 3) {
+        throw new Error(`${viewport.name}: Expected main_image count 3`);
+      }
+      if (state.request?.payload?.outputCounts?.detail_image !== 6) {
+        throw new Error(`${viewport.name}: Expected detail_image count 6`);
+      }
+      if (state.request?.payload?.outputCounts?.model_image !== 1) {
+        throw new Error(`${viewport.name}: Expected model_image count 1`);
+      }
       if (!state.text.includes("最长边建议 1600px")) throw new Error(`${viewport.name}: Amazon preset text missing`);
       if (!state.text.includes("模特图")) throw new Error(`${viewport.name}: Model image text missing`);
+      if (!state.text.includes("详情图6屏")) throw new Error(`${viewport.name}: Detail series count text missing`);
       if (state.scrollWidth > state.viewportWidth + 4) {
         throw new Error(`${viewport.name}: horizontal overflow ${state.scrollWidth} > ${state.viewportWidth}`);
       }

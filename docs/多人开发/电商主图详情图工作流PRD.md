@@ -17,7 +17,7 @@
 1. 选择平台：淘宝/天猫、京东、拼多多、抖音电商、快手小店、小红书、Amazon、Shopee、Alibaba 国际站。
 2. 上传素材：商品主图、包装图、细节图、场景参考图、资质/检测/授权图。
 3. 填最少信息：商品名、类目、核心卖点、规格、禁用词；其他字段自动推断或作为高级选项折叠。
-4. 选择生成类型：默认勾选主图和详情图，用户可改为只生成主图、只生成详情图、只生成模特图，或三种同时生成。
+4. 选择生成类型和数量：默认主图 3 张、详情图 5 屏；用户可改为只生成主图、详情图、模特图，或三种同时生成。
 5. 点击生成：系统自动选择平台规格、输出张数、图片比例、详情页宽度、是否需要白底图、是否允许文字、是否要合规保守模式。
 6. 查看结果：主图、详情图、模特图、图内文案、平台合规提示、失败原因、重新生成按钮和下载包。
 
@@ -51,7 +51,7 @@
 
 1. User opens left-side 工作流 -> 电商主图/详情图.
 2. User selects platform. Default to last-used platform; if none, default to 抖音电商 for domestic content-commerce users.
-3. User chooses output type: 主图、详情图、模特图. Default is 主图 + 详情图.
+3. User chooses output type and count: 主图、详情图、模特图. Default is 主图 3 张 + 详情图 5 屏.
 4. User uploads at least one product image.
 5. User fills either 商品名 or 核心卖点. Optional: 类目、规格、品牌、价格带、参考风格、禁用词、资质。
 6. System runs preflight:
@@ -74,6 +74,7 @@
 | --- | --- | --- |
 | 平台 | Yes | Last-used; otherwise 抖音电商 |
 | 生成类型 | Yes | Default 主图 + 详情图; optional 模特图 |
+| 生成数量 | Yes | Default 主图 3 张、详情图 5 屏、模特图 1 张；平台规则自动限制上下限 |
 | 商品图片 | Yes | At least 1 image; more images improve consistency |
 | 商品名 | Conditional | Required if no selling point text |
 | 核心卖点 | Conditional | Required if no product name |
@@ -110,6 +111,16 @@ Platform rules change frequently and some official pages require login or JavaSc
 - Alibaba 国际站 official seed: [Alibaba 商品图片规范公告](https://activity.alibaba.com/page/04cb5e7a.html).
 - 拼多多、小红书 seed: public summaries only; must be marked `needs_backend_confirmation=true` until we can confirm from merchant backend/rule center.
 
+## Output Count Rules
+
+首版以“生成足够成套，但不一次消耗过大”为原则。前端显示平台建议，主进程强制单次总生成不超过 12 张/屏。
+
+| Output Type | Default | Frontend Range | Rule Basis |
+| --- | --- | --- | --- |
+| 主图 | 3 张 | 常规平台 1-5；Amazon 可到 7；快手可到 9 | Amazon requires at least one image and recommends six additional images; 快手公开教程常见 3-9 张商品图口径；国内平台普遍用多张轮播覆盖白底、角度、场景 |
+| 详情图 | 5 屏 | 常规平台 3-9；Shopee/快手可到 12 | 详情图本质是系列叙事；Shopee product description image upload supports up to 12 images；快手详情图公开教程支持多张，平台上限更高但首版控量 |
+| 模特图 | 1 张 | 1-3 张 | 模特/试穿/隐形模特是辅助展示，过多容易增加合规和商品一致性风险 |
+
 ## Output Contract
 
 The result should be structured data first, UI second:
@@ -126,6 +137,11 @@ The result should be structured data first, UI second:
   },
   "outputs": {
     "selectedTypes": ["main_image", "detail_image", "model_image"],
+    "selectedCounts": {
+      "main_image": 3,
+      "detail_image": 5,
+      "model_image": 1
+    },
     "mainImages": [
       {
         "slot": "KV1",
@@ -175,6 +191,7 @@ The result should be structured data first, UI second:
 - The visible product must be a task-specific workbench, not a chat-first OpenClaw page.
 - The workbench stores its own generation records for history, retry and audit; it must not create OpenClaw chat sessions for this feature.
 - The workbench must expose output-type selection before generation: 主图、详情图、模特图.
+- The workbench must expose count controls for each selected type, with platform-derived defaults and a trusted-process hard cap.
 - Platform presets must be data, not hard-coded UI strings. Each preset needs source and freshness metadata.
 - The generation chain must use existing Bavi-box image model configuration from the trusted desktop process; no frontend API key and no second `IMG_API_KEY` path.
 - The first production slice should generate one platform end-to-end before broadening. Recommended first platform: 抖音电商, because official rules are publicly available and 1:1 / 3:4 both matter.
@@ -211,7 +228,7 @@ The result should be structured data first, UI second:
 - The first screen is a production workbench with upload/form/results, not chat.
 - Platform preset metadata is visible in result details and export manifest.
 - The system generates platform-sized main images and detail modules.
-- User can choose 主图、详情图、模特图 independently, and the selected types are present in the direct image payload and generation record.
+- User can choose 主图、详情图、模特图 independently, adjust their counts, and the selected types/counts are present in the direct image payload and generation record.
 - Results include QA status for product accuracy, text readability, platform size and compliance risk.
 - High-risk claims without evidence are blocked, softened or marked for human review.
 - Direct image generation uses existing Bavi-box image model configuration.

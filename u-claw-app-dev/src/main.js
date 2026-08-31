@@ -38,28 +38,41 @@ const UCLAW_ACTIVATION_REQUIRE_CLOUD = process.env.UCLAW_ACTIVATION_REQUIRE_CLOU
 const ECOMMERCE_IMAGE_DIRECT_MAX_IMAGES = 6;
 const ECOMMERCE_IMAGE_DIRECT_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const ECOMMERCE_IMAGE_DIRECT_TOTAL_IMAGE_BYTES = 36 * 1024 * 1024;
+const ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS = 12;
 const ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS = 180000;
 const ECOMMERCE_IMAGE_DIRECT_TARGETS = [
   {
     type: 'main_image',
     title: '主图',
     size: '1024x1024',
+    defaultCount: 3,
+    minCount: 1,
+    maxCount: 7,
+    unit: '张',
     template: '01-hero-image / hero-image',
-    instruction: '生成 1 张货架主图。参考 hero-image / packshot 模板：商品居中，主体占比 60%-80%，顶部和角落保留平台叠加空间；优先白底或干净纯色底，避免促销夸张字和无法验证的资质。',
+    instruction: '生成货架主图系列。参考 hero-image / packshot 模板：商品居中，主体占比 60%-80%，顶部和角落保留平台叠加空间；优先白底、干净纯色底或清爽场景，避免促销夸张字和无法验证的资质。',
   },
   {
     type: 'detail_image',
-    title: '详情图首屏',
+    title: '详情图',
     size: '1024x1536',
+    defaultCount: 5,
+    minCount: 3,
+    maxCount: 12,
+    unit: '屏',
     template: '11-infographic + 13-size-spec / detail module',
-    instruction: '生成 1 张详情页首屏方向图。参考 infographic / size-spec 模板：上方强钩子，中部商品和 3 个以内卖点 callout，下方规格或使用理由；文字简短可读，不能编造参数、销量或认证。',
+    instruction: '生成详情页系列图。参考 infographic / size-spec 模板：按钩子、卖点、规格、场景、信任证据、下单理由拆屏；每屏文字简短可读，不能编造参数、销量或认证。',
   },
   {
     type: 'model_image',
     title: '模特图',
     size: '1024x1536',
+    defaultCount: 1,
+    minCount: 1,
+    maxCount: 3,
+    unit: '张',
     template: '08-model-showcase + 16-try-on-virtual + 18-ghost-mannequin',
-    instruction: '生成 1 张模特/场景展示图。按品类选择 model-showcase、try-on-virtual 或 ghost-mannequin：服饰优先试穿或隐形模特，美妆/配饰优先真人局部使用，普通商品优先自然生活场景；人物真实自然，保留商品外观，不做医疗或效果承诺。',
+    instruction: '生成模特/场景展示图。按品类选择 model-showcase、try-on-virtual 或 ghost-mannequin：服饰优先试穿或隐形模特，美妆/配饰优先真人局部使用，普通商品优先自然生活场景；人物真实自然，保留商品外观，不做医疗或效果承诺。',
   },
 ];
 // First cold start builds the V8 compile cache for OpenClaw (a large app) — on a
@@ -434,10 +447,24 @@ function normalizeEcommerceInputImages(images) {
 }
 
 /**
- * Resolves user-selected output types into executable image targets. Missing
- * selection keeps the old low-friction default: main image plus detail image.
+ * Normalizes a requested output count against the target's conservative bounds.
+ * This keeps accidental or manipulated renderer payloads from creating huge
+ * image batches in the trusted process.
  */
-function resolveEcommerceImageTargets(outputTypes) {
+function normalizeEcommerceOutputCount(value, target) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const fallback = Number.isFinite(target.defaultCount) ? target.defaultCount : 1;
+  const min = Number.isFinite(target.minCount) ? target.minCount : 1;
+  const max = Number.isFinite(target.maxCount) ? target.maxCount : 1;
+  const count = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(max, Math.max(min, count));
+}
+
+/**
+ * Resolves user-selected output types and counts into executable image slots.
+ * Missing selection keeps the old low-friction default: main plus detail series.
+ */
+function resolveEcommerceImageTargets(outputTypes, outputCounts) {
   const requested = Array.isArray(outputTypes)
     ? outputTypes.map(value => String(value || '').trim()).filter(Boolean)
     : [];
@@ -446,7 +473,21 @@ function resolveEcommerceImageTargets(outputTypes) {
   if (selected.length === 0) {
     throw new Error('请至少选择一种生成类型。');
   }
-  return selected;
+  const slots = selected.flatMap((target) => {
+    const count = normalizeEcommerceOutputCount(outputCounts?.[target.type], target);
+    return Array.from({ length: count }, (_value, index) => ({
+      ...target,
+      slotIndex: index + 1,
+      slotCount: count,
+      title: count > 1 ? `${target.title}${index + 1}` : target.title,
+    }));
+  });
+
+  if (slots.length > ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS) {
+    throw new Error(`单次最多生成 ${ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS} 张/屏，请降低生成数量。`);
+  }
+
+  return slots;
 }
 
 /**
@@ -464,6 +505,7 @@ function buildEcommerceImagePrompt(manifest, target) {
   return [
     '你是 Bavi-box 电商图片生成器。基于参考商品图片和用户填写的信息，直接生成成品图，不要输出方案。',
     target.instruction,
+    `当前输出：${target.title}，序号 ${target.slotIndex || 1}/${target.slotCount || 1}，单位：${target.unit || '张'}`,
     `模板参考：${target.template}`,
     `平台：${manifest?.platform_label || manifest?.platform || '未指定平台'}`,
     `商品名称：${manifest?.name || '未命名商品'}`,
@@ -574,7 +616,10 @@ async function generateEcommerceImagesDirect(payload = {}) {
   if (!manifest) throw new Error('缺少生成 manifest。');
   const credential = resolveEcommerceImageCredential();
   const images = normalizeEcommerceInputImages(payload.images);
-  const targets = resolveEcommerceImageTargets(payload.outputTypes || manifest.output_types);
+  const targets = resolveEcommerceImageTargets(
+    payload.outputTypes || manifest.output_types,
+    payload.outputCounts || manifest.output_counts,
+  );
   const generated = [];
   const warnings = [];
 
