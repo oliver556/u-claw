@@ -300,10 +300,11 @@ curl -sS -X POST http://127.0.0.1:8080/v1/payments/virtual/notify \
 ```text
 spi.alipay.pay.aggpay.merchantinfo.query
 spi.alipay.pay.standardaggrepay.order.create
+spi.alipay.pay.aggrepay.order.create
 ```
 
 支付宝在线调试器实际回调中也可能发送 `spi.alipay.pay.aggrepay.merchantinfo.query`；服务端已兼容该拼写，并会把 form body 中的 `qr_code_id`、`ua` 等非系统字段作为业务参数处理。
-`spi.alipay.pay.standardaggrepay.order.create` 当前返回非结算 mock 聚合收钱单，仅用于支付宝 SPI 接入校验；正式 U-Claw 充值仍走后续官方支付下单与异步通知回调。
+`spi.alipay.pay.standardaggrepay.order.create` 与 `spi.alipay.pay.aggrepay.order.create` 当前返回非结算 mock 聚合收钱单，仅用于支付宝 SPI 接入校验；正式 U-Claw 充值仍走后续官方支付下单与异步通知回调。
 
 控制台“服务配置基础”建议填写：
 
@@ -347,6 +348,12 @@ curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
 curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode 'method=spi.alipay.pay.standardaggrepay.order.create' \
+  --data-urlencode 'qr_code_id=https://qr.isv.com/test/1' \
+  --data-urlencode 'ua=watch'
+
+curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'method=spi.alipay.pay.aggrepay.order.create' \
   --data-urlencode 'qr_code_id=https://qr.isv.com/test/1' \
   --data-urlencode 'ua=watch'
 ```

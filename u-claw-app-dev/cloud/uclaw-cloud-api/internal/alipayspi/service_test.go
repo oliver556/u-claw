@@ -166,6 +166,41 @@ func TestStandardAggrePayOrderCreateReturnsBillEnvelope(t *testing.T) {
 	}
 }
 
+func TestAggrePayOrderCreateReturnsBillEnvelope(t *testing.T) {
+	service := NewService(Config{
+		MerchantID:    "2088123456789012",
+		MerchantName:  "Bavi-box",
+		MerchantShort: "Bavi",
+	})
+	service.now = func() time.Time { return time.Date(2026, 8, 31, 12, 5, 0, 0, time.UTC) }
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/isv/spi/service",
+		strings.NewReader(`method=spi.alipay.pay.aggrepay.order.create&qr_code_id=https%3A%2F%2Fqr.isv.com%2Ftest%2F1&ua=watch`),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	service.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Response json.RawMessage `json:"response"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	response := decodeResponseString(t, payload.Response)
+	if response["code"] != "10000" || response["out_trade_no"] != "UCLAW-SPI-20260831120500" {
+		t.Fatalf("response = %+v", response)
+	}
+	if response["qr_code_id"] != "https://qr.isv.com/test/1" || response["trade_status"] != "WAIT_BUYER_PAY" {
+		t.Fatalf("response missing aggregate order facts: %+v", response)
+	}
+}
+
 func TestStandardAggrePayOrderCreateEncryptsResponseWhenAESKeyIsConfigured(t *testing.T) {
 	rawAESKey := "MDEyMzQ1Njc4OWFiY2RlZg=="
 	service := NewService(Config{

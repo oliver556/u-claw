@@ -26,6 +26,10 @@ const (
 	MethodAggPayMerchantInfoQuery = "spi.alipay.pay.aggpay.merchantinfo.query"
 	// MethodAggrePayMerchantInfoQuery is the method name Alipay currently posts from the online SPI tester.
 	MethodAggrePayMerchantInfoQuery = "spi.alipay.pay.aggrepay.merchantinfo.query"
+	// MethodAggrePayOrderCreate creates an aggregate-pay bill for Alipay SPI onboarding.
+	MethodAggrePayOrderCreate = "spi.alipay.pay.aggrepay.order.create"
+	// MethodAggPayOrderCreate is kept for console variants that omit "re" in aggregate-pay method names.
+	MethodAggPayOrderCreate = "spi.alipay.pay.aggpay.order.create"
 	// MethodStandardAggrePayOrderCreate creates a standardized aggregate-pay bill for Alipay SPI onboarding.
 	MethodStandardAggrePayOrderCreate = "spi.alipay.pay.standardaggrepay.order.create"
 	// MethodStandardAggPayOrderCreate is kept for console variants that omit "re" in aggregate-pay method names.
@@ -98,7 +102,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch req.Method {
 	case MethodAggPayMerchantInfoQuery, MethodAggrePayMerchantInfoQuery:
 		writeSPIResponse(w, s.merchantInfoResponse(req), s.signer, s.aesKey)
-	case MethodStandardAggrePayOrderCreate, MethodStandardAggPayOrderCreate:
+	case MethodAggrePayOrderCreate, MethodAggPayOrderCreate, MethodStandardAggrePayOrderCreate, MethodStandardAggPayOrderCreate:
 		writeSPIResponse(w, s.orderCreateResponse(req), s.signer, s.aesKey)
 	default:
 		writeSPIError(w, http.StatusBadRequest, "40004", "Unsupported SPI method")
