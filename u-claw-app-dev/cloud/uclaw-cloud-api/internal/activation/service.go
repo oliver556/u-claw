@@ -113,6 +113,7 @@ type CommitResult struct {
 type ProvisionRequest struct {
 	UserID int64
 	Phone  string
+	Group  string
 }
 
 // ProvisionResult carries the New API client credential returned to Bavi-box desktop.
@@ -130,6 +131,11 @@ type NewAPIProvisioner interface {
 // Store persists activation-code binding decisions.
 type Store interface {
 	Redeem(ctx context.Context, code string, userID int64, phone string, at time.Time) error
+}
+
+// ActivationCodeMetadataStore returns optional per-code provisioning metadata.
+type ActivationCodeMetadataStore interface {
+	ActivationCodeNewAPIGroup(ctx context.Context, code string) (string, error)
 }
 
 // FirstStartStore persists activation-only account/code binding after phone or legacy username validation.
@@ -229,7 +235,11 @@ func (s *Service) Redeem(ctx context.Context, req RedeemRequest) (RedeemResult, 
 	token := s.cfg.PreviewToken
 	tokenVersion := 1
 	if s.cfg.Provisioner != nil {
-		result, err := s.cfg.Provisioner.ProvisionNewAPI(ctx, ProvisionRequest{UserID: req.UserID, Phone: phone})
+		group, err := s.activationCodeNewAPIGroup(ctx, code)
+		if err != nil {
+			return RedeemResult{}, err
+		}
+		result, err := s.cfg.Provisioner.ProvisionNewAPI(ctx, ProvisionRequest{UserID: req.UserID, Phone: phone, Group: group})
 		if err != nil {
 			return RedeemResult{}, err
 		}
@@ -291,7 +301,11 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 			return FirstStartResult{}, err
 		}
 	}
-	result, err := s.provisionResult(ctx, userID, principal)
+	group, err := s.activationCodeNewAPIGroup(ctx, code)
+	if err != nil {
+		return FirstStartResult{}, err
+	}
+	result, err := s.provisionResult(ctx, userID, principal, group)
 	if err != nil {
 		return FirstStartResult{}, err
 	}
@@ -399,11 +413,11 @@ func firstStartCommittedResult(activationID string) CommitResult {
 }
 
 // provisionResult creates or restores New API credentials for an activated principal.
-func (s *Service) provisionResult(ctx context.Context, userID int64, phone string) (RedeemResult, error) {
+func (s *Service) provisionResult(ctx context.Context, userID int64, phone string, group string) (RedeemResult, error) {
 	token := s.cfg.PreviewToken
 	tokenVersion := 1
 	if s.cfg.Provisioner != nil {
-		result, err := s.cfg.Provisioner.ProvisionNewAPI(ctx, ProvisionRequest{UserID: userID, Phone: phone})
+		result, err := s.cfg.Provisioner.ProvisionNewAPI(ctx, ProvisionRequest{UserID: userID, Phone: phone, Group: group})
 		if err != nil {
 			return RedeemResult{}, err
 		}
@@ -422,6 +436,18 @@ func (s *Service) provisionResult(ctx context.Context, userID int64, phone strin
 			Video: s.cfg.DefaultVideoModel,
 		},
 	}, nil
+}
+
+func (s *Service) activationCodeNewAPIGroup(ctx context.Context, code string) (string, error) {
+	metadataStore, ok := s.store.(ActivationCodeMetadataStore)
+	if !ok {
+		return "", nil
+	}
+	group, err := metadataStore.ActivationCodeNewAPIGroup(ctx, code)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(group), nil
 }
 
 // MemoryStore is a local-development activation store before PostgreSQL wiring.

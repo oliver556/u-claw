@@ -290,16 +290,33 @@ ON CONFLICT (uclaw_user_id) DO UPDATE SET
 }
 
 // SeedActivationCode inserts an unused code hash for printed-card operations.
-func (s *Store) SeedActivationCode(ctx context.Context, code string, batchID sql.NullInt64) error {
+func (s *Store) SeedActivationCode(ctx context.Context, code string, batchID sql.NullInt64, newAPIUserGroup string) error {
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO activation_codes (batch_id, code_hash, status, created_at)
-VALUES ($1, $2, 'unused', now())
+INSERT INTO activation_codes (batch_id, code_hash, newapi_user_group, status, created_at)
+VALUES ($1, $2, $3, 'unused', now())
 ON CONFLICT (code_hash) DO NOTHING
-`, batchID, s.activationCodeHash(code))
+`, batchID, s.activationCodeHash(code), strings.TrimSpace(newAPIUserGroup))
 	if err != nil {
 		return fmt.Errorf("seed activation code: %w", err)
 	}
 	return nil
+}
+
+// ActivationCodeNewAPIGroup returns optional per-code New API provisioning group.
+func (s *Store) ActivationCodeNewAPIGroup(ctx context.Context, code string) (string, error) {
+	var group string
+	err := s.db.QueryRowContext(ctx, `
+SELECT COALESCE(newapi_user_group, '')
+FROM activation_codes
+WHERE code_hash = $1
+`, s.activationCodeHash(code)).Scan(&group)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("activation code is invalid")
+		}
+		return "", fmt.Errorf("read activation code newapi group: %w", err)
+	}
+	return strings.TrimSpace(group), nil
 }
 
 // CountAdminUsers reports whether first-admin registration remains open.
@@ -418,13 +435,13 @@ RETURNING id
 }
 
 // CreateActivationCode inserts one generated code and returns its redacted row.
-func (s *Store) CreateActivationCode(ctx context.Context, code admin.ActivationCodeSecret, batchID sql.NullInt64, at time.Time) (admin.ActivationCode, error) {
+func (s *Store) CreateActivationCode(ctx context.Context, code admin.ActivationCodeSecret, batchID sql.NullInt64, newAPIUserGroup string, at time.Time) (admin.ActivationCode, error) {
 	var row activationCodeRow
 	err := s.db.QueryRowContext(ctx, `
-INSERT INTO activation_codes (batch_id, code_hash, code_ciphertext, code_display_hint, status, created_at)
-VALUES ($1, $2, $3, $4, 'unused', $5)
-RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at, code_ciphertext, code_display_hint
-`, batchID, s.activationCodeHash(code.Code), code.Ciphertext, code.DisplayHint, at).Scan(
+INSERT INTO activation_codes (batch_id, code_hash, code_ciphertext, code_display_hint, newapi_user_group, status, created_at)
+VALUES ($1, $2, $3, $4, $5, 'unused', $6)
+RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at, code_ciphertext, code_display_hint, newapi_user_group
+`, batchID, s.activationCodeHash(code.Code), code.Ciphertext, code.DisplayHint, strings.TrimSpace(newAPIUserGroup), at).Scan(
 		&row.ID,
 		&row.BatchID,
 		&row.Status,
@@ -435,6 +452,7 @@ RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at
 		&row.ExpiresAt,
 		&row.CodeCiphertext,
 		&row.CodeDisplayHint,
+		&row.NewAPIUserGroup,
 	)
 	if err != nil {
 		return admin.ActivationCode{}, fmt.Errorf("create activation code: %w", err)
@@ -462,6 +480,7 @@ SELECT
   ac.expires_at,
   ac.code_ciphertext,
   ac.code_display_hint,
+  COALESCE(ac.newapi_user_group, ''),
   na.newapi_user_id,
   COALESCE(na.newapi_username, ''),
   COALESCE(na.newapi_base_url, ''),
@@ -518,6 +537,7 @@ SELECT
   ac.expires_at,
   ac.code_ciphertext,
   ac.code_display_hint,
+  COALESCE(ac.newapi_user_group, ''),
   na.newapi_user_id,
   COALESCE(na.newapi_username, ''),
   COALESCE(na.newapi_base_url, ''),
@@ -600,12 +620,13 @@ func (s *Store) ReissueActivationCode(ctx context.Context, id int64, replacement
 	}()
 
 	var batchID sql.NullInt64
+	var newAPIUserGroup string
 	err = tx.QueryRowContext(ctx, `
 UPDATE activation_codes
 SET status = 'reissued'
 WHERE id = $1 AND status IN ('unused', 'disabled')
-RETURNING batch_id
-`, id).Scan(&batchID)
+RETURNING batch_id, COALESCE(newapi_user_group, '')
+`, id).Scan(&batchID, &newAPIUserGroup)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return admin.ActivationCode{}, fmt.Errorf("activation code is not reissueable")
@@ -615,10 +636,10 @@ RETURNING batch_id
 
 	var row activationCodeRow
 	err = tx.QueryRowContext(ctx, `
-INSERT INTO activation_codes (batch_id, code_hash, code_ciphertext, code_display_hint, status, created_at)
-VALUES ($1, $2, $3, $4, 'unused', $5)
-RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at, code_ciphertext, code_display_hint
-`, batchID, s.activationCodeHash(replacementCode.Code), replacementCode.Ciphertext, replacementCode.DisplayHint, at).Scan(
+INSERT INTO activation_codes (batch_id, code_hash, code_ciphertext, code_display_hint, newapi_user_group, status, created_at)
+VALUES ($1, $2, $3, $4, $5, 'unused', $6)
+RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at, expires_at, code_ciphertext, code_display_hint, newapi_user_group
+`, batchID, s.activationCodeHash(replacementCode.Code), replacementCode.Ciphertext, replacementCode.DisplayHint, newAPIUserGroup, at).Scan(
 		&row.ID,
 		&row.BatchID,
 		&row.Status,
@@ -629,6 +650,7 @@ RETURNING id, batch_id, status, bound_user_id, bound_phone, bound_at, created_at
 		&row.ExpiresAt,
 		&row.CodeCiphertext,
 		&row.CodeDisplayHint,
+		&row.NewAPIUserGroup,
 	)
 	if err != nil {
 		return admin.ActivationCode{}, fmt.Errorf("insert replacement activation code: %w", err)
@@ -762,6 +784,7 @@ type activationCodeRow struct {
 	ExpiresAt       sql.NullTime
 	CodeCiphertext  sql.NullString
 	CodeDisplayHint sql.NullString
+	NewAPIUserGroup string
 }
 
 type activationCodeViewRow struct {
@@ -795,6 +818,7 @@ func scanActivationCodeView(scanner activationCodeRowScanner) (activationCodeVie
 		&row.ExpiresAt,
 		&row.CodeCiphertext,
 		&row.CodeDisplayHint,
+		&row.NewAPIUserGroup,
 		&row.NewAPIUserID,
 		&row.NewAPIUsername,
 		&row.NewAPIBaseURL,
@@ -837,6 +861,7 @@ func (row activationCodeRow) toAdminRecord() admin.ActivationCode {
 	if row.CodeDisplayHint.Valid {
 		record.CodeDisplayHint = row.CodeDisplayHint.String
 	}
+	record.NewAPIUserGroup = strings.TrimSpace(row.NewAPIUserGroup)
 	return record
 }
 

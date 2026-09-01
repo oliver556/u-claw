@@ -76,6 +76,7 @@ func runActivationGenerate(args []string) {
 // runActivationSeed persists an already printed activation code into PostgreSQL.
 func runActivationSeed(args []string) {
 	code := requiredFlag(args, "--code")
+	group := optionalFlag(args, "--group", "")
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
@@ -101,10 +102,10 @@ func runActivationSeed(args []string) {
 		}
 		batchID = sql.NullInt64{Int64: parsed, Valid: true}
 	}
-	if err := store.SeedActivationCode(context.Background(), code, batchID); err != nil {
+	if err := store.SeedActivationCode(context.Background(), code, batchID, group); err != nil {
 		log.Fatalf("seed activation code: %v", err)
 	}
-	printJSON(map[string]any{"step": "activation_seed", "ok": true})
+	printJSON(map[string]any{"step": "activation_seed", "ok": true, "newapi_user_group": group})
 }
 
 // runSpike handles external-system verification commands for Phase 0.
@@ -177,6 +178,7 @@ func spikeProvision(ctx context.Context, client *newapi.Client, cfg config.Confi
 		TokenName:      cfg.NewAPITokenName,
 		InitialQuota:   quota,
 		PasswordSecret: cfg.NewAPIUserPasswordSecret,
+		UserGroup:      optionalFlag(args, "--group", cfg.NewAPIUserGroup),
 	})
 	if err != nil {
 		log.Fatalf("provision service: %v", err)
@@ -201,7 +203,12 @@ func spikeProvision(ctx context.Context, client *newapi.Client, cfg config.Confi
 func spikeCreateUser(ctx context.Context, client *newapi.Client, args []string) {
 	username := requiredFlag(args, "--username")
 	password := requiredFlag(args, "--password")
-	if err := client.CreateUser(ctx, newapi.CreateUserRequest{Username: username, Password: password, DisplayName: username}); err != nil {
+	if err := client.CreateUser(ctx, newapi.CreateUserRequest{
+		Username:    username,
+		Password:    password,
+		DisplayName: username,
+		Group:       optionalFlag(args, "--group", ""),
+	}); err != nil {
 		log.Fatalf("create user: %v", err)
 	}
 	printJSON(map[string]any{"step": "create_user", "ok": true, "username": username})
@@ -289,7 +296,12 @@ func spikeFull(ctx context.Context, client *newapi.Client, args []string) {
 		log.Fatalf("invalid --user-id %q", userIDRaw)
 	}
 
-	if err := client.CreateUser(ctx, newapi.CreateUserRequest{Username: username, Password: password, DisplayName: username}); err != nil {
+	if err := client.CreateUser(ctx, newapi.CreateUserRequest{
+		Username:    username,
+		Password:    password,
+		DisplayName: username,
+		Group:       optionalFlag(args, "--group", ""),
+	}); err != nil {
 		log.Fatalf("create user: %v", err)
 	}
 	printJSON(map[string]any{"step": "create_user", "ok": true, "username": username})

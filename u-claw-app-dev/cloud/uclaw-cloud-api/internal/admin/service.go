@@ -34,7 +34,7 @@ type Store interface {
 	CreateAdminSession(ctx context.Context, userID int64, tokenHash string, expiresAt time.Time, at time.Time) error
 	GetAdminSession(ctx context.Context, tokenHash string, at time.Time) (AdminSession, error)
 	CreateActivationBatch(ctx context.Context, name string, note string, createdBy string) (int64, error)
-	CreateActivationCode(ctx context.Context, code ActivationCodeSecret, batchID sql.NullInt64, at time.Time) (ActivationCode, error)
+	CreateActivationCode(ctx context.Context, code ActivationCodeSecret, batchID sql.NullInt64, newAPIUserGroup string, at time.Time) (ActivationCode, error)
 	ListActivationCodes(ctx context.Context, filter ActivationCodeFilter) ([]ActivationCode, error)
 	GetActivationCode(ctx context.Context, id int64) (ActivationCode, error)
 	DisableActivationCode(ctx context.Context, id int64, reason string, at time.Time) error
@@ -112,6 +112,7 @@ type ActivationCode struct {
 	CodeDisplayHint        string     `json:"codeHint,omitempty"`
 	CodeCiphertext         string     `json:"-"`
 	CodeVisible            bool       `json:"codeVisible"`
+	NewAPIUserGroup        string     `json:"newapiUserGroup,omitempty"`
 	NewAPIUserID           *int64     `json:"newapiUserId,omitempty"`
 	NewAPIUsername         string     `json:"newapiUsername,omitempty"`
 	NewAPIBaseURL          string     `json:"newapiBaseUrl,omitempty"`
@@ -146,10 +147,11 @@ type RechargeOrder struct {
 
 // GenerateRequest describes a batch of codes to create and show.
 type GenerateRequest struct {
-	Count     int    `json:"count"`
-	BatchName string `json:"batchName"`
-	Note      string `json:"note"`
-	CreatedBy string `json:"createdBy"`
+	Count           int    `json:"count"`
+	BatchName       string `json:"batchName"`
+	Note            string `json:"note"`
+	CreatedBy       string `json:"createdBy"`
+	NewAPIUserGroup string `json:"newapiUserGroup"`
 }
 
 // Service owns admin auth and activation inventory workflows.
@@ -254,7 +256,7 @@ func (s *Service) GenerateActivationCodes(ctx context.Context, req GenerateReque
 		if err != nil {
 			return nil, err
 		}
-		record, err := s.store.CreateActivationCode(ctx, secret, batchID, s.now().UTC())
+		record, err := s.store.CreateActivationCode(ctx, secret, batchID, strings.TrimSpace(req.NewAPIUserGroup), s.now().UTC())
 		if err != nil {
 			return nil, err
 		}
@@ -603,12 +605,12 @@ func (s *MemoryStore) CreateActivationBatch(_ context.Context, name string, _ st
 }
 
 // CreateActivationCode inserts a local activation code row.
-func (s *MemoryStore) CreateActivationCode(_ context.Context, secret ActivationCodeSecret, batchID sql.NullInt64, at time.Time) (ActivationCode, error) {
+func (s *MemoryStore) CreateActivationCode(_ context.Context, secret ActivationCodeSecret, batchID sql.NullInt64, newAPIUserGroup string, at time.Time) (ActivationCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := s.nextID
 	s.nextID++
-	record := ActivationCode{ID: id, Status: "unused", CreatedAt: at, CodeCiphertext: secret.Ciphertext, CodeDisplayHint: secret.DisplayHint}
+	record := ActivationCode{ID: id, Status: "unused", CreatedAt: at, CodeCiphertext: secret.Ciphertext, CodeDisplayHint: secret.DisplayHint, NewAPIUserGroup: strings.TrimSpace(newAPIUserGroup)}
 	if batchID.Valid {
 		record.BatchID = &batchID.Int64
 		record.BatchName = s.batches[batchID.Int64]

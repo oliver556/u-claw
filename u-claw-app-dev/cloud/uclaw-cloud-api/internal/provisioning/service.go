@@ -35,6 +35,7 @@ type Config struct {
 	TokenName      string
 	InitialQuota   int64
 	PasswordSecret string
+	UserGroup      string
 }
 
 // Service provisions New API user/token/quota for a Bavi-box activation.
@@ -63,6 +64,7 @@ func NewService(admin *newapi.Client, store Store, cfg Config) (*Service, error)
 	if strings.TrimSpace(cfg.PasswordSecret) == "" {
 		return nil, fmt.Errorf("newapi user password secret is required")
 	}
+	cfg.UserGroup = strings.TrimSpace(cfg.UserGroup)
 	return &Service{admin: admin, store: store, cfg: cfg, now: time.Now}, nil
 }
 
@@ -81,6 +83,7 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 		Username:    phone,
 		Password:    password,
 		DisplayName: phone,
+		Group:       firstNonEmpty(req.Group, s.cfg.UserGroup),
 	})
 	user, ok, err := s.admin.SearchUserByUsername(ctx, phone)
 	if err != nil {
@@ -164,4 +167,13 @@ func DeriveUserPassword(userID int64, phone string, secret string) string {
 func tokenFingerprint(token string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
 	return hex.EncodeToString(sum[:])
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

@@ -24,6 +24,7 @@ type Config struct {
 	NewAPIHTTPTimeout        time.Duration
 	NewAPIActivationQuota    int64
 	NewAPITokenName          string
+	NewAPIUserGroup          string
 	NewAPIUserPasswordSecret string
 	UpdateCredentialFile     string
 	AuthTokenTTL             time.Duration
@@ -89,6 +90,7 @@ func Load(getenv Getter) (Config, error) {
 		NewAPIHTTPTimeout:        10 * time.Second,
 		NewAPIActivationQuota:    0,
 		NewAPITokenName:          withDefault(getenv("NEWAPI_TOKEN_NAME"), "uclaw-main"),
+		NewAPIUserGroup:          strings.TrimSpace(getenv("NEWAPI_USER_GROUP")),
 		NewAPIUserPasswordSecret: withDefault(getenv("NEWAPI_USER_PASSWORD_SECRET"), "uclaw-dev-newapi-user-password-secret"),
 		UpdateCredentialFile:     strings.TrimSpace(getenv("UPDATE_CREDENTIAL_FILE")),
 		AuthTokenTTL:             24 * time.Hour,

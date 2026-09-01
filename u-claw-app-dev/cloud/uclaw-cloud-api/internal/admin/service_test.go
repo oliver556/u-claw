@@ -78,16 +78,19 @@ func TestServiceListsEncryptedNewCodesAndHidesLegacyHashOnlyCodes(t *testing.T) 
 	legacy, err := store.CreateActivationCode(context.Background(), ActivationCodeSecret{
 		Code:        "OLD1-OLD2-OLD3-OLD4",
 		DisplayHint: "OLD4",
-	}, sql.NullInt64{}, time.Date(2026, 8, 29, 1, 0, 0, 0, time.UTC))
+	}, sql.NullInt64{}, "", time.Date(2026, 8, 29, 1, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("CreateActivationCode() legacy error = %v", err)
 	}
-	generated, err := service.GenerateActivationCodes(context.Background(), GenerateRequest{Count: 1, BatchName: "验收批次"})
+	generated, err := service.GenerateActivationCodes(context.Background(), GenerateRequest{Count: 1, BatchName: "验收批次", NewAPIUserGroup: "streamer"})
 	if err != nil {
 		t.Fatalf("GenerateActivationCodes() error = %v", err)
 	}
 	if generated[0].PlainCode == "" || !generated[0].CodeVisible {
 		t.Fatalf("generated code should be returned once: %+v", generated[0])
+	}
+	if generated[0].NewAPIUserGroup != "streamer" {
+		t.Fatalf("generated newapi group = %q, want streamer", generated[0].NewAPIUserGroup)
 	}
 
 	list, err := service.ListActivationCodes(context.Background(), ActivationCodeFilter{Limit: 10})

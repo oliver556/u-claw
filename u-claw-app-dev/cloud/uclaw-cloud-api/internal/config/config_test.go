@@ -18,6 +18,7 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"NEWAPI_HTTP_TIMEOUT":            "3s",
 		"NEWAPI_ACTIVATION_QUOTA":        "100000",
 		"NEWAPI_TOKEN_NAME":              "uclaw-desktop",
+		"NEWAPI_USER_GROUP":              " streamer ",
 		"NEWAPI_USER_PASSWORD_SECRET":    "password-secret",
 		"UPDATE_CREDENTIAL_FILE":         " /run/uclaw/update-credential.json ",
 		"AUTH_TOKEN_TTL":                 "2h",
@@ -97,6 +98,9 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.NewAPITokenName != "uclaw-desktop" {
 		t.Fatalf("NewAPITokenName = %q", cfg.NewAPITokenName)
+	}
+	if cfg.NewAPIUserGroup != "streamer" {
+		t.Fatalf("NewAPIUserGroup = %q, want streamer", cfg.NewAPIUserGroup)
 	}
 	if cfg.NewAPIUserPasswordSecret != "password-secret" {
 		t.Fatalf("NewAPIUserPasswordSecret = %q", cfg.NewAPIUserPasswordSecret)

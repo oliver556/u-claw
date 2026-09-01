@@ -723,6 +723,7 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 			Code    string `json:"code"`
 			Status  string `json:"status"`
 			Visible bool   `json:"codeVisible"`
+			Group   string `json:"newapiUserGroup"`
 		} `json:"codes"`
 	}
 	if err := json.Unmarshal(generateRec.Body.Bytes(), &generated); err != nil {
@@ -730,6 +731,9 @@ func TestAdminConsoleRegistersLogsInAndManagesActivationCodes(t *testing.T) {
 	}
 	if len(generated.Codes) != 2 || generated.Codes[0].Code == "" || generated.Codes[0].Status != "unused" || !generated.Codes[0].Visible {
 		t.Fatalf("generated codes = %+v", generated.Codes)
+	}
+	if generated.Codes[0].Group != "" {
+		t.Fatalf("generated web group = %q, want empty default", generated.Codes[0].Group)
 	}
 
 	disableRec := httptest.NewRecorder()

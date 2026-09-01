@@ -94,10 +94,11 @@ type virtualPaymentNotifyRequest struct {
 }
 
 type adminGenerateActivationCodesRequest struct {
-	Count     int    `json:"count"`
-	BatchName string `json:"batchName"`
-	Note      string `json:"note"`
-	CreatedBy string `json:"createdBy"`
+	Count           int    `json:"count"`
+	BatchName       string `json:"batchName"`
+	Note            string `json:"note"`
+	CreatedBy       string `json:"createdBy"`
+	NewAPIUserGroup string `json:"newapiUserGroup"`
 }
 
 type adminDisableActivationCodeRequest struct {
@@ -276,10 +277,11 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 			return
 		}
 		codes, err := options.Admin.GenerateActivationCodes(r.Context(), admin.GenerateRequest{
-			Count:     req.Count,
-			BatchName: req.BatchName,
-			Note:      req.Note,
-			CreatedBy: req.CreatedBy,
+			Count:           req.Count,
+			BatchName:       req.BatchName,
+			Note:            req.Note,
+			CreatedBy:       req.CreatedBy,
+			NewAPIUserGroup: req.NewAPIUserGroup,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
@@ -804,6 +806,7 @@ func buildActivationService(cfg config.Config, store activation.Store) *activati
 			TokenName:      cfg.NewAPITokenName,
 			InitialQuota:   cfg.NewAPIActivationQuota,
 			PasswordSecret: cfg.NewAPIUserPasswordSecret,
+			UserGroup:      cfg.NewAPIUserGroup,
 		})
 		if err != nil {
 			panic(fmt.Sprintf("build newapi provisioner: %v", err))

@@ -209,11 +209,31 @@ func TestStoreSeedActivationCodeHashesPrintedCode(t *testing.T) {
 	batchID := sql.NullInt64{Int64: 7, Valid: true}
 
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO activation_codes")).
-		WithArgs(batchID, store.activationCodeHash("ABCD-EFGH-IJKL-MNOP")).
+		WithArgs(batchID, store.activationCodeHash("ABCD-EFGH-IJKL-MNOP"), "streamer").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if err := store.SeedActivationCode(context.Background(), "ABCD-EFGH-IJKL-MNOP", batchID); err != nil {
+	if err := store.SeedActivationCode(context.Background(), "ABCD-EFGH-IJKL-MNOP", batchID, " streamer "); err != nil {
 		t.Fatalf("SeedActivationCode() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestStoreActivationCodeNewAPIGroupReturnsTrimmedGroup(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(newapi_user_group, '')")).
+		WithArgs(store.activationCodeHash("ABCD-EFGH-IJKL-MNOP")).
+		WillReturnRows(sqlmock.NewRows([]string{"newapi_user_group"}).AddRow(" streamer "))
+
+	group, err := store.ActivationCodeNewAPIGroup(context.Background(), "ABCD-EFGH-IJKL-MNOP")
+	if err != nil {
+		t.Fatalf("ActivationCodeNewAPIGroup() error = %v", err)
+	}
+	if group != "streamer" {
+		t.Fatalf("group = %q, want streamer", group)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -291,6 +311,7 @@ func TestStoreListActivationCodesReturnsCodeAndAccountMapping(t *testing.T) {
 		"expires_at",
 		"code_ciphertext",
 		"code_display_hint",
+		"newapi_user_group",
 		"newapi_user_id",
 		"newapi_username",
 		"newapi_base_url",
@@ -310,6 +331,7 @@ func TestStoreListActivationCodesReturnsCodeAndAccountMapping(t *testing.T) {
 		nil,
 		"v1:ciphertext",
 		"ABCD",
+		"streamer",
 		int64(77),
 		"15067729715",
 		"https://api.yiyong.me",
@@ -330,7 +352,7 @@ func TestStoreListActivationCodesReturnsCodeAndAccountMapping(t *testing.T) {
 		t.Fatalf("codes length = %d, want 1", len(codes))
 	}
 	code := codes[0]
-	if code.CodeCiphertext != "v1:ciphertext" || code.CodeDisplayHint != "ABCD" || code.BoundPhone != "15067729715" || code.NewAPIUsername != "15067729715" {
+	if code.CodeCiphertext != "v1:ciphertext" || code.CodeDisplayHint != "ABCD" || code.BoundPhone != "15067729715" || code.NewAPIUsername != "15067729715" || code.NewAPIUserGroup != "streamer" {
 		t.Fatalf("code mapping = %+v", code)
 	}
 	if code.BoundUserID == nil || *code.BoundUserID != 42 || code.NewAPIUserID == nil || *code.NewAPIUserID != 77 {

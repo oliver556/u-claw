@@ -42,6 +42,9 @@ func TestProvisionNewAPICreatesTokenAddsQuotaAndSavesMapping(t *testing.T) {
 			if req.Username != "13800138000" || req.Password == "" {
 				t.Fatalf("create user payload = %+v", req)
 			}
+			if req.Group != "streamer" {
+				t.Fatalf("create user group = %q, want streamer", req.Group)
+			}
 			_, _ = w.Write([]byte(`{"success":true}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
 			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
@@ -84,6 +87,7 @@ func TestProvisionNewAPICreatesTokenAddsQuotaAndSavesMapping(t *testing.T) {
 		TokenName:      "uclaw-main",
 		InitialQuota:   100000,
 		PasswordSecret: "test-password-secret",
+		UserGroup:      "streamer",
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)

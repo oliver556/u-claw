@@ -34,6 +34,7 @@ func TestCreateUserSendsAdminJSONRequest(t *testing.T) {
 		Username:    "13800138000",
 		Password:    "random-password",
 		DisplayName: "13800138000",
+		Group:       "streamer",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
@@ -47,6 +48,9 @@ func TestCreateUserSendsAdminJSONRequest(t *testing.T) {
 	}
 	if gotPayload.Username != "13800138000" || gotPayload.Password != "random-password" {
 		t.Fatalf("payload = %+v", gotPayload)
+	}
+	if gotPayload.Group != "streamer" {
+		t.Fatalf("group = %q, want streamer", gotPayload.Group)
 	}
 }
 

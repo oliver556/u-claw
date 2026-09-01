@@ -449,6 +449,7 @@ type CreateUserRequest struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"`
 	DisplayName string `json:"display_name,omitempty"`
+	Group       string `json:"group,omitempty"`
 }
 
 // AddQuotaRequest is the verified Phase 0 payload for POST /api/user/manage.
