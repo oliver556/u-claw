@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
+const dns = require('dns').promises;
 const {
   mergeModelCatalogIntoConfig,
   normalizeCatalogModel,
@@ -40,6 +41,8 @@ const ECOMMERCE_IMAGE_DIRECT_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const ECOMMERCE_IMAGE_DIRECT_TOTAL_IMAGE_BYTES = 36 * 1024 * 1024;
 const ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS = 12;
 const ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS = 180000;
+const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_TIMEOUT_MS = 60000;
+const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES = 20 * 1024 * 1024;
 const ECOMMERCE_IMAGE_DIRECT_TARGETS = [
   {
     type: 'main_image',
@@ -543,6 +546,8 @@ function buildEcommerceImagePrompt(manifest, target) {
   const input = manifest?.input || {};
   const outputs = Array.isArray(manifest?.outputs) ? manifest.outputs : [];
   const output = outputs.find(item => item?.type === target.type) || {};
+  const language = manifest?.language && typeof manifest.language === 'object' ? manifest.language : {};
+  const outputLanguage = String(language.prompt || language.label || '简体中文').trim();
   const sellingPoints = Array.isArray(input.selling_points) && input.selling_points.length
     ? input.selling_points.join('；')
     : '请从参考图识别，并只使用能从图片或用户信息确认的卖点';
@@ -557,9 +562,10 @@ function buildEcommerceImagePrompt(manifest, target) {
     `类目：${input.category || '待补充'}`,
     `目标人群：${input.audience || '默认电商购物人群'}`,
     `核心卖点：${sellingPoints}`,
+    `图片内文字语言：${outputLanguage}`,
     `规格约束：${output.size_rule || '优先 1:1 清晰商品图'}`,
     `合规检查：${Array.isArray(manifest?.qa) ? manifest.qa.join('；') : '文字和事实需人工复核'}`,
-    '视觉要求：真实商品外观优先，背景干净，构图有层次，中文文字少而清晰，禁止编造品牌授权、销量、资质、功效承诺。',
+    `视觉要求：真实商品外观优先，背景干净，构图有层次，图片内文字使用 ${outputLanguage}，少而清晰，禁止编造品牌授权、销量、资质、功效承诺。`,
   ].join('\n');
 }
 
@@ -594,6 +600,119 @@ function normalizeImageApiResult(payload, target, model) {
     mimeType: 'image/png',
     dataUrl: base64 ? `data:image/png;base64,${base64}` : '',
     url,
+  };
+}
+
+/**
+ * Blocks private-network image URLs before the renderer can ask the main
+ * process to materialize old URL-only ecommerce records.
+ */
+function isPrivateNetworkAddress(address) {
+  const value = String(address || '').trim().toLowerCase();
+  if (!value) return true;
+  if (value === 'localhost' || value === '::1' || value === '0:0:0:0:0:0:0:1') return true;
+  if (value === '0.0.0.0' || value.startsWith('127.')) return true;
+  if (/^10\./.test(value)) return true;
+  if (/^192\.168\./.test(value)) return true;
+  const ipv4 = /^172\.(\d{1,3})\./.exec(value);
+  if (ipv4) {
+    const second = Number.parseInt(ipv4[1], 10);
+    if (second >= 16 && second <= 31) return true;
+  }
+  if (/^169\.254\./.test(value)) return true;
+  if (value === '::' || value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe80:')) return true;
+  return false;
+}
+
+/**
+ * Resolves a host and rejects private network targets to avoid turning the
+ * ecommerce download helper into a generic local-network fetch primitive.
+ */
+async function assertPublicEcommerceImageUrl(parsedUrl) {
+  const hostname = String(parsedUrl?.hostname || '').trim().toLowerCase();
+  if (isPrivateNetworkAddress(hostname)) {
+    throw new Error('远端图片地址不允许指向本机或内网。');
+  }
+  const addresses = await dns.lookup(hostname, { all: true, verbatim: true }).catch((error) => {
+    throw new Error(`远端图片地址解析失败：${error?.code || error?.message || 'DNS_ERROR'}`);
+  });
+  if (!addresses.length || addresses.some(item => isPrivateNetworkAddress(item.address))) {
+    throw new Error('远端图片地址解析到本机或内网，已拒绝下载。');
+  }
+}
+
+/**
+ * Downloads URL-only image API results in the main process so renderer exports
+ * can package offline bytes without hitting CORS or short-lived provider URLs.
+ */
+async function materializeEcommerceImageUrl(image) {
+  const remoteUrl = String(image?.url || '').trim();
+  if (image?.dataUrl || !remoteUrl) return image;
+
+  let parsed;
+  try {
+    parsed = new URL(remoteUrl);
+  } catch {
+    throw new Error('图片接口返回了不可用的远端图片地址。');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('图片接口返回了不支持的远端图片协议。');
+  }
+  await assertPublicEcommerceImageUrl(parsed);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_TIMEOUT_MS);
+  try {
+    const response = await fetch(remoteUrl, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`远端图片下载失败 ${response.status}`);
+    }
+
+    const contentLength = Number.parseInt(response.headers.get('content-length') || '', 10);
+    if (Number.isFinite(contentLength) && contentLength > ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES) {
+      throw new Error('远端图片超过可打包大小限制。');
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) throw new Error('远端图片数据为空。');
+    if (arrayBuffer.byteLength > ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES) {
+      throw new Error('远端图片超过可打包大小限制。');
+    }
+
+    const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() || image.mimeType || 'image/png';
+    if (!/^image\/(png|jpe?g|webp)$/i.test(mimeType)) {
+      throw new Error(`远端图片格式不支持：${mimeType}`);
+    }
+
+    return {
+      ...image,
+      mimeType,
+      dataUrl: `data:${mimeType};base64,${Buffer.from(arrayBuffer).toString('base64')}`,
+      url: remoteUrl,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Public IPC helper for old local ecommerce records whose image API result only
+ * stored a remote URL before data URL materialization existed.
+ */
+async function materializeEcommerceImageForRenderer(payload = {}) {
+  const image = payload && typeof payload === 'object' ? payload : {};
+  const materialized = await materializeEcommerceImageUrl({
+    id: String(image.id || ''),
+    type: String(image.type || 'image'),
+    title: String(image.title || '生成图'),
+    model: String(image.model || ''),
+    mimeType: String(image.mimeType || 'image/png'),
+    dataUrl: String(image.dataUrl || ''),
+    url: String(image.url || ''),
+  });
+  return {
+    ok: true,
+    image: materialized,
   };
 }
 
@@ -645,7 +764,7 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
     if (!response.ok) {
       throw new Error(`图片接口失败 ${response.status}: ${summarizeImageApiError(text)}`);
     }
-    return normalizeImageApiResult(JSON.parse(text), target, credential.model);
+    return await materializeEcommerceImageUrl(normalizeImageApiResult(JSON.parse(text), target, credential.model));
   } finally {
     clearTimeout(timeout);
   }
@@ -2521,6 +2640,7 @@ function setupIPC() {
   ipcMain.handle('uclaw:get-recharge-order', (_event, orderNo) => getCloudRechargeOrder(orderNo));
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
   ipcMain.handle('uclaw:ecommerce-generate-images', (_event, payload) => generateEcommerceImagesDirect(payload));
+  ipcMain.handle('uclaw:ecommerce-materialize-image', (_event, payload) => materializeEcommerceImageForRenderer(payload));
 }
 
 // ── App Lifecycle ──

@@ -328,6 +328,7 @@ async function installDirectImageApiStub(page) {
               payload: {
                 platform: payload?.manifest?.platform,
                 productName: payload?.manifest?.name,
+                language: payload?.manifest?.language,
                 outputTypes,
                 outputCounts,
                 imageCount: Array.isArray(payload?.images) ? payload.images.length : 0,
@@ -343,6 +344,7 @@ async function installDirectImageApiStub(page) {
               images,
             };
           },
+          materializeEcommerceImage: async (payload) => ({ ok: true, image: payload }),
         };
       });
       return;
@@ -461,6 +463,7 @@ async function exerciseWorkbench(page, imagePath) {
       return {
         hasWorkbench: Boolean(workbench),
         platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
+        language: workbench?.getAttribute("data-uclaw-ecommerce-language") || "",
         workbenchRect: elementRect(workbench),
         layoutRect: elementRect(layout),
         panelRect: elementRect(panel),
@@ -557,6 +560,7 @@ async function runAcceptance(options) {
         }
       }
       if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);
+      if (state.language !== "en") throw new Error(`${viewport.name}: Amazon should default image language to English, got ${state.language}`);
       if (state.fileCount !== 1) throw new Error(`${viewport.name}: Expected one uploaded preview, got ${state.fileCount}`);
       if (!state.dropRect) throw new Error(`${viewport.name}: Upload drop target missing`);
       if (viewport.name === "design") {
@@ -609,6 +613,9 @@ async function runAcceptance(options) {
       if (state.request?.payload?.imageCount !== 1) {
         throw new Error(`${viewport.name}: Expected one direct image payload, got ${state.request?.payload?.imageCount}`);
       }
+      if (state.request?.payload?.language?.id !== "en") {
+        throw new Error(`${viewport.name}: Expected direct payload language en, got ${JSON.stringify(state.request?.payload?.language)}`);
+      }
       if (!state.request?.payload?.outputTypes?.includes("model_image")) {
         throw new Error(`${viewport.name}: Expected direct payload to request model_image`);
       }
@@ -623,6 +630,9 @@ async function runAcceptance(options) {
       }
       if (!state.text.includes("最长边建议 1600px")) throw new Error(`${viewport.name}: Amazon preset text missing`);
       if (!state.text.includes("模特图")) throw new Error(`${viewport.name}: Model image text missing`);
+      if (!state.text.includes("图片语言")) throw new Error(`${viewport.name}: Image language selector text missing`);
+      if (!state.text.includes("English")) throw new Error(`${viewport.name}: English language text missing`);
+      if (!state.text.includes("点击下载")) throw new Error(`${viewport.name}: Thumbnail download affordance missing`);
       if (!state.text.includes("详情图6屏")) throw new Error(`${viewport.name}: Detail series count text missing`);
       if (state.scrollWidth > state.viewportWidth + 4) {
         throw new Error(`${viewport.name}: horizontal overflow ${state.scrollWidth} > ${state.viewportWidth}`);
@@ -637,6 +647,15 @@ async function runAcceptance(options) {
         throw new Error(`${viewport.name}: Expected ecommerce zip download, got ${suggestedFilename}`);
       }
       await download.cancel().catch(() => {});
+      const [thumbnailDownload] = await Promise.all([
+        page.waitForEvent("download", { timeout: 10000 }),
+        page.locator("openclaw-tasks-page .uclaw-ecommerce-generated").nth(1).click(),
+      ]);
+      const thumbnailFilename = thumbnailDownload.suggestedFilename();
+      if (!/\.(png|jpg|jpeg|webp)$/i.test(thumbnailFilename)) {
+        throw new Error(`${viewport.name}: Expected thumbnail image download, got ${thumbnailFilename}`);
+      }
+      await thumbnailDownload.cancel().catch(() => {});
       await page
         .evaluate(() => {
           window.scrollTo({ top: 0, left: 0, behavior: "auto" });
