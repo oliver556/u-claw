@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ var phonePattern = regexp.MustCompile(`^1[3-9]\d{9}$`)
 type ServiceConfig struct {
 	CodeTTL                    time.Duration
 	TokenTTL                   time.Duration
+	TokenRefreshGraceTTL       time.Duration
 	DevSMSCode                 string
 	CodePepper                 string
 	ExposeCodes                bool
@@ -95,6 +97,13 @@ type LoginResult struct {
 	User        User   `json:"user"`
 }
 
+// TokenRefreshResult is returned when a signed local token is renewed for an
+// already activated client without forcing SMS login again.
+type TokenRefreshResult struct {
+	AccessToken string `json:"accessToken"`
+	User        User   `json:"user"`
+}
+
 // SendSMSResult is returned by POST /v1/auth/sms/send; DevCode is only exposed outside production.
 type SendSMSResult struct {
 	Status  string `json:"status"`
@@ -114,6 +123,9 @@ func NewService(store Store, tokens *TokenManager, cfg ServiceConfig) (*Service,
 	}
 	if cfg.TokenTTL <= 0 {
 		cfg.TokenTTL = 24 * time.Hour
+	}
+	if cfg.TokenRefreshGraceTTL <= 0 {
+		cfg.TokenRefreshGraceTTL = 180 * 24 * time.Hour
 	}
 	if strings.TrimSpace(cfg.DevSMSCode) == "" {
 		cfg.DevSMSCode = "123456"
@@ -181,6 +193,29 @@ func (s *Service) Login(ctx context.Context, phone string, purpose string, code 
 		return LoginResult{}, err
 	}
 	return LoginResult{AccessToken: token, User: User{ID: user.ID, Phone: MaskPhone(phone)}}, nil
+}
+
+// RefreshAccessToken renews a signed Bavi-box access token after expiry. It
+// does not authenticate New API; it only keeps the activated U-Claw cloud
+// session usable for balance, order, and usage endpoints.
+func (s *Service) RefreshAccessToken(expiredToken string) (TokenRefreshResult, error) {
+	claims, err := s.tokens.VerifyExpiredAccessToken(strings.TrimSpace(expiredToken), s.cfg.TokenRefreshGraceTTL)
+	if err != nil {
+		return TokenRefreshResult{}, err
+	}
+	userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+	if err != nil || userID <= 0 {
+		return TokenRefreshResult{}, fmt.Errorf("token subject is invalid")
+	}
+	phone := strings.TrimSpace(claims.Phone)
+	if !phonePattern.MatchString(phone) {
+		return TokenRefreshResult{}, fmt.Errorf("token phone is invalid")
+	}
+	token, err := s.tokens.IssueAccessToken(userID, phone, s.cfg.TokenTTL)
+	if err != nil {
+		return TokenRefreshResult{}, err
+	}
+	return TokenRefreshResult{AccessToken: token, User: User{ID: userID, Phone: MaskPhone(phone)}}, nil
 }
 
 // canUseFixedCodeWithoutSend enables temporary staging login while SMS delivery is unavailable.

@@ -58,6 +58,34 @@ func (m *TokenManager) IssueAccessToken(userID int64, phone string, ttl time.Dur
 
 // VerifyAccessToken validates signature and expiry, then returns trusted claims.
 func (m *TokenManager) VerifyAccessToken(token string) (TokenClaims, error) {
+	claims, err := m.verify(token)
+	if err != nil {
+		return TokenClaims{}, err
+	}
+	if claims.ExpiresAt <= m.now().Unix() {
+		return TokenClaims{}, fmt.Errorf("token is expired")
+	}
+	return claims, nil
+}
+
+// VerifyExpiredAccessToken validates signature and identity while allowing
+// expired tokens inside a bounded grace window for local activated clients.
+func (m *TokenManager) VerifyExpiredAccessToken(token string, grace time.Duration) (TokenClaims, error) {
+	if grace <= 0 {
+		return TokenClaims{}, fmt.Errorf("refresh grace ttl must be positive")
+	}
+	claims, err := m.verify(token)
+	if err != nil {
+		return TokenClaims{}, err
+	}
+	if claims.ExpiresAt <= 0 || m.now().Unix() > time.Unix(claims.ExpiresAt, 0).Add(grace).Unix() {
+		return TokenClaims{}, fmt.Errorf("token refresh window is expired")
+	}
+	return claims, nil
+}
+
+// verify validates token shape and signature, then returns claims before expiry checks.
+func (m *TokenManager) verify(token string) (TokenClaims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return TokenClaims{}, fmt.Errorf("token must have three parts")
@@ -75,9 +103,6 @@ func (m *TokenManager) VerifyAccessToken(token string) (TokenClaims, error) {
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return TokenClaims{}, fmt.Errorf("decode token claims: %w", err)
-	}
-	if claims.ExpiresAt <= m.now().Unix() {
-		return TokenClaims{}, fmt.Errorf("token is expired")
 	}
 	return claims, nil
 }

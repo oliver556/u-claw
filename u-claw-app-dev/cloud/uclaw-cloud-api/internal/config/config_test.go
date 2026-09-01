@@ -22,6 +22,7 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 		"NEWAPI_USER_PASSWORD_SECRET":    "password-secret",
 		"UPDATE_CREDENTIAL_FILE":         " /run/uclaw/update-credential.json ",
 		"AUTH_TOKEN_TTL":                 "2h",
+		"AUTH_TOKEN_REFRESH_GRACE_TTL":   "720h",
 		"SMS_PROVIDER":                   "aliyun",
 		"DEV_SMS_CODE":                   "654321",
 		"SMS_CODE_PEPPER":                "sms-pepper",
@@ -110,6 +111,9 @@ func TestLoadAppliesDefaultsAndTrimsNewAPIBaseURL(t *testing.T) {
 	}
 	if cfg.AuthTokenTTL != 2*time.Hour {
 		t.Fatalf("AuthTokenTTL = %v, want 2h", cfg.AuthTokenTTL)
+	}
+	if cfg.AuthTokenRefreshGraceTTL != 720*time.Hour {
+		t.Fatalf("AuthTokenRefreshGraceTTL = %v, want 720h", cfg.AuthTokenRefreshGraceTTL)
 	}
 	if cfg.DevSMSCode != "654321" {
 		t.Fatalf("DevSMSCode = %q, want 654321", cfg.DevSMSCode)

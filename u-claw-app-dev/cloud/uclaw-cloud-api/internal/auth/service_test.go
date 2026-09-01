@@ -100,6 +100,67 @@ func TestFixedSMSLoginCanSkipSendForStaging(t *testing.T) {
 	}
 }
 
+func TestRefreshAccessTokenRenewsExpiredSignedToken(t *testing.T) {
+	manager, err := NewTokenManager("test-secret")
+	if err != nil {
+		t.Fatalf("NewTokenManager() error = %v", err)
+	}
+	now := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return now }
+	service, err := NewService(NewMemoryStore(), manager, ServiceConfig{
+		TokenTTL:             time.Hour,
+		TokenRefreshGraceTTL: 30 * 24 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	expired, err := manager.IssueAccessToken(9, "13800138000", time.Second)
+	if err != nil {
+		t.Fatalf("IssueAccessToken() error = %v", err)
+	}
+
+	now = now.Add(2 * time.Second)
+	refreshed, err := service.RefreshAccessToken(expired)
+	if err != nil {
+		t.Fatalf("RefreshAccessToken() error = %v", err)
+	}
+	if refreshed.AccessToken == "" || refreshed.User.ID != 9 || refreshed.User.Phone != "138****8000" {
+		t.Fatalf("refresh result = %+v", refreshed)
+	}
+	claims, err := manager.VerifyAccessToken(refreshed.AccessToken)
+	if err != nil {
+		t.Fatalf("VerifyAccessToken(refreshed) error = %v", err)
+	}
+	if claims.Subject != "9" || claims.Phone != "13800138000" {
+		t.Fatalf("claims = %+v", claims)
+	}
+}
+
+func TestRefreshAccessTokenRejectsExpiredRefreshWindow(t *testing.T) {
+	manager, err := NewTokenManager("test-secret")
+	if err != nil {
+		t.Fatalf("NewTokenManager() error = %v", err)
+	}
+	now := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return now }
+	service, err := NewService(NewMemoryStore(), manager, ServiceConfig{
+		TokenTTL:             time.Hour,
+		TokenRefreshGraceTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	expired, err := manager.IssueAccessToken(9, "13800138000", time.Second)
+	if err != nil {
+		t.Fatalf("IssueAccessToken() error = %v", err)
+	}
+
+	now = now.Add(2 * time.Minute)
+	if _, err := service.RefreshAccessToken(expired); err == nil {
+		t.Fatal("RefreshAccessToken() error = nil, want expired refresh window")
+	}
+}
+
 func TestSMSProviderReceivesGeneratedCodeWithoutExposingIt(t *testing.T) {
 	manager, err := NewTokenManager("test-secret")
 	if err != nil {

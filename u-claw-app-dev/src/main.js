@@ -1588,6 +1588,89 @@ async function getActivationJSON(pathname, options = {}) {
 }
 
 /**
+ * Detects expired Bavi-box cloud access-token failures without exposing the raw token path.
+ */
+function isCloudAccessTokenExpiredError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('token is expired')
+    || message.includes('access token expired')
+    || (message.includes('expired') && message.includes('token'));
+}
+
+/**
+ * Refreshes the Bavi-box cloud access token so activated clients do not appear
+ * logged out when users enter recharge or usage pages after a few idle days.
+ */
+async function refreshCloudAccessToken({ endpoint, accessToken, state }) {
+  const currentToken = String(accessToken || '').trim();
+  if (!currentToken) {
+    throw new Error('uclaw access token is not available');
+  }
+  const result = await postActivationJSON('/v1/auth/token/refresh', {
+    accessToken: currentToken,
+  }, { endpoint, timeoutMs: 12000 });
+  const nextToken = String(result?.accessToken || '').trim();
+  if (!nextToken) {
+    throw new Error('cloud token refresh response missing accessToken');
+  }
+  const nextState = {
+    ...(state || {}),
+    uclawAccessToken: nextToken,
+    tokenRefreshedAt: new Date().toISOString(),
+  };
+  const maskedPhone = String(result?.user?.phone || '').trim();
+  if (maskedPhone) {
+    nextState.phoneMasked = maskedPhone;
+    nextState.accountMasked = maskedPhone;
+  }
+  atomicWriteJson(activationStatePath, nextState);
+  writeDirtyMarker('activation-token-refresh');
+  return nextToken;
+}
+
+/**
+ * Reads cloud JSON and retries once after renewing an expired local U-Claw token.
+ */
+async function getActivationJSONWithTokenRefresh(pathname, options = {}) {
+  try {
+    return await getActivationJSON(pathname, options);
+  } catch (error) {
+    if (!isCloudAccessTokenExpiredError(error) || options.skipTokenRefresh) {
+      throw error;
+    }
+    const state = options.state || readJsonFile(activationStatePath) || {};
+    const endpoint = String(options.endpoint || state.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+    const refreshedToken = await refreshCloudAccessToken({
+      endpoint,
+      accessToken: options.accessToken || state.uclawAccessToken,
+      state,
+    });
+    return getActivationJSON(pathname, { ...options, endpoint, accessToken: refreshedToken, skipTokenRefresh: true });
+  }
+}
+
+/**
+ * Posts cloud JSON and retries once after renewing an expired local U-Claw token.
+ */
+async function postActivationJSONWithTokenRefresh(pathname, payload, options = {}) {
+  try {
+    return await postActivationJSON(pathname, payload, options);
+  } catch (error) {
+    if (!isCloudAccessTokenExpiredError(error) || options.skipTokenRefresh) {
+      throw error;
+    }
+    const state = options.state || readJsonFile(activationStatePath) || {};
+    const endpoint = String(options.endpoint || state.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+    const refreshedToken = await refreshCloudAccessToken({
+      endpoint,
+      accessToken: options.accessToken || state.uclawAccessToken,
+      state,
+    });
+    return postActivationJSON(pathname, payload, { ...options, endpoint, accessToken: refreshedToken, skipTokenRefresh: true });
+  }
+}
+
+/**
  * Fetches model names directly from the configured New API endpoint.
  */
 async function fetchDirectNewApiModelCatalog(config) {
@@ -1656,7 +1739,7 @@ async function getCloudModelUsageSummary() {
   if (!accessToken) {
     return { ok: false, message: 'uclaw access token is not available' };
   }
-  return getActivationJSON('/v1/newapi/usage/summary', { endpoint, accessToken });
+  return getActivationJSONWithTokenRefresh('/v1/newapi/usage/summary', { endpoint, accessToken, state });
 }
 
 /**
@@ -1674,7 +1757,7 @@ async function recordEcommerceImageUsage({ manifest, credential, generated }) {
   const quotaPerImage = Number.isFinite(ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE) && ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE > 0
     ? ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE
     : 50000;
-  return postActivationJSON('/v1/newapi/usage/ecommerce-image', {
+  return postActivationJSONWithTokenRefresh('/v1/newapi/usage/ecommerce-image', {
     requestId,
     model: credential.requestModel || credential.model,
     tokenName: 'uclaw-main',
@@ -1682,7 +1765,7 @@ async function recordEcommerceImageUsage({ manifest, credential, generated }) {
     outputTypes: Array.isArray(manifest?.output_types) ? manifest.output_types : [],
     imageCount: generated.length,
     quotaPerImage,
-  }, { endpoint, accessToken, timeoutMs: 15000 });
+  }, { endpoint, accessToken, state, timeoutMs: 15000 });
 }
 
 /**
@@ -1702,7 +1785,7 @@ async function getCloudModelCatalog() {
     return directCatalog;
   }
   try {
-    const catalog = await getActivationJSON('/v1/newapi/models/catalog', { endpoint, accessToken });
+    const catalog = await getActivationJSONWithTokenRefresh('/v1/newapi/models/catalog', { endpoint, accessToken, state });
     return { ok: true, ...catalog, models: Array.isArray(catalog.models) ? catalog.models : [] };
   } catch (error) {
     return { ok: false, message: error?.message || String(error), models: [] };
@@ -1765,7 +1848,7 @@ async function getCloudRechargePlans() {
     return { ok: false, message: 'uclaw access token is not available', plans: [] };
   }
   try {
-    const result = await getActivationJSON('/v1/recharge/plans', { endpoint, accessToken });
+    const result = await getActivationJSONWithTokenRefresh('/v1/recharge/plans', { endpoint, accessToken, state });
     return { ok: true, plans: Array.isArray(result.plans) ? result.plans : [] };
   } catch (error) {
     return { ok: false, message: error?.message || String(error), plans: [] };
@@ -1786,7 +1869,7 @@ async function getCloudRechargeProviders() {
     return { ok: false, message: 'uclaw access token is not available', providers: [] };
   }
   try {
-    const result = await getActivationJSON('/v1/recharge/providers', { endpoint, accessToken });
+    const result = await getActivationJSONWithTokenRefresh('/v1/recharge/providers', { endpoint, accessToken, state });
     return { ok: true, providers: Array.isArray(result.providers) ? result.providers : [] };
   } catch (error) {
     return { ok: false, message: error?.message || String(error), providers: [] };
@@ -1807,7 +1890,7 @@ async function getCloudRechargeOrders() {
     return { ok: false, message: 'uclaw access token is not available', orders: [] };
   }
   try {
-    const result = await getActivationJSON('/v1/recharge/orders', { endpoint, accessToken });
+    const result = await getActivationJSONWithTokenRefresh('/v1/recharge/orders', { endpoint, accessToken, state });
     return { ok: true, orders: Array.isArray(result.orders) ? result.orders : [] };
   } catch (error) {
     return { ok: false, message: error?.message || String(error), orders: [] };
@@ -1832,7 +1915,7 @@ async function getCloudRechargeOrder(orderNo) {
     return { ok: false, message: 'orderNo is required' };
   }
   try {
-    const result = await getActivationJSON(`/v1/recharge/orders/${encodeURIComponent(normalizedOrderNo)}`, { endpoint, accessToken });
+    const result = await getActivationJSONWithTokenRefresh(`/v1/recharge/orders/${encodeURIComponent(normalizedOrderNo)}`, { endpoint, accessToken, state });
     return { ok: true, order: result.order };
   } catch (error) {
     return { ok: false, message: error?.message || String(error) };
@@ -1877,19 +1960,19 @@ async function rechargeCloudModelQuota(payload = {}) {
     let actualProvider = provider;
     let created;
     try {
-      created = await postActivationJSON('/v1/recharge/orders', {
+      created = await postActivationJSONWithTokenRefresh('/v1/recharge/orders', {
         planCode,
         provider: actualProvider,
-      }, { endpoint, accessToken });
+      }, { endpoint, accessToken, state });
     } catch (error) {
       if (actualProvider !== 'alipay' || !String(error?.message || error).includes('payment provider alipay is not configured')) {
         throw error;
       }
       actualProvider = 'virtual';
-      created = await postActivationJSON('/v1/recharge/orders', {
+      created = await postActivationJSONWithTokenRefresh('/v1/recharge/orders', {
         planCode,
         provider: actualProvider,
-      }, { endpoint, accessToken });
+      }, { endpoint, accessToken, state });
     }
     const orderNo = String(created?.order?.orderNo || '').trim();
     if (!orderNo) {

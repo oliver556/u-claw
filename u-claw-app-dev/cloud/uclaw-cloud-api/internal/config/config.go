@@ -28,6 +28,7 @@ type Config struct {
 	NewAPIUserPasswordSecret string
 	UpdateCredentialFile     string
 	AuthTokenTTL             time.Duration
+	AuthTokenRefreshGraceTTL time.Duration
 	SMSProvider              string
 	DevSMSCode               string
 	SMSCodePepper            string
@@ -94,6 +95,7 @@ func Load(getenv Getter) (Config, error) {
 		NewAPIUserPasswordSecret: withDefault(getenv("NEWAPI_USER_PASSWORD_SECRET"), "uclaw-dev-newapi-user-password-secret"),
 		UpdateCredentialFile:     strings.TrimSpace(getenv("UPDATE_CREDENTIAL_FILE")),
 		AuthTokenTTL:             24 * time.Hour,
+		AuthTokenRefreshGraceTTL: 180 * 24 * time.Hour,
 		SMSProvider:              withDefault(getenv("SMS_PROVIDER"), "development"),
 		DevSMSCode:               withDefault(getenv("DEV_SMS_CODE"), "123456"),
 		SMSCodePepper:            withDefault(getenv("SMS_CODE_PEPPER"), "uclaw-dev-sms-code-pepper"),
@@ -151,6 +153,13 @@ func Load(getenv Getter) (Config, error) {
 			return Config{}, fmt.Errorf("parse AUTH_TOKEN_TTL: %w", err)
 		}
 		cfg.AuthTokenTTL = timeout
+	}
+	if raw := strings.TrimSpace(getenv("AUTH_TOKEN_REFRESH_GRACE_TTL")); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse AUTH_TOKEN_REFRESH_GRACE_TTL: %w", err)
+		}
+		cfg.AuthTokenRefreshGraceTTL = timeout
 	}
 	if raw := strings.TrimSpace(getenv("ALIYUN_SMS_HTTP_TIMEOUT")); raw != "" {
 		timeout, err := time.ParseDuration(raw)

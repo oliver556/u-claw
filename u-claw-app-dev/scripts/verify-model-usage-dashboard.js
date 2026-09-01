@@ -13,6 +13,7 @@ const usageFile = fs.readdirSync(assetsDir).find((name) => /^usage-page-.*\.js$/
 const indexFile = fs.readdirSync(assetsDir).find((name) => /^index-.*\.js$/.test(name));
 const cssFile = fs.readdirSync(assetsDir).find((name) => /^index-.*\.css$/.test(name));
 const swPath = path.join(root, "node_modules/openclaw/dist/control-ui/sw.js");
+const mainPath = path.join(root, "src/main.js");
 const configHtmlPath = path.join(root, "resources/Config.html");
 const portableConfigPath = path.join(root, "../portable/config-server/public/index.html");
 
@@ -25,6 +26,7 @@ const usageSource = fs.readFileSync(path.join(assetsDir, usageFile), "utf8");
 const indexSource = fs.readFileSync(path.join(assetsDir, indexFile), "utf8");
 const cssSource = fs.readFileSync(path.join(assetsDir, cssFile), "utf8");
 const swSource = fs.readFileSync(swPath, "utf8");
+const mainSource = fs.readFileSync(mainPath, "utf8");
 const configHtmlSource = fs.readFileSync(configHtmlPath, "utf8");
 const portableConfigSource = fs.readFileSync(portableConfigPath, "utf8");
 
@@ -36,7 +38,8 @@ const checks = [
   [configSource, "已消耗", "used quota metric"],
   [configSource, "请求次数", "request count metric"],
   [configSource, "requestCount", "New API request count field"],
-  [configSource, "used_quota", "New API used quota label"],
+  [configSource, "cumulativeUsage", "New API cumulative usage field"],
+  [configSource, "e.quota", "New API ledger quota field"],
   [configSource, "accountBalanceCompute", "New API account balance compute field"],
   [configSource, "function UcQuickFmtQuotaYuan(", "quota to CNY helper"],
   [configSource, "todayCompute", "New API today compute field"],
@@ -55,7 +58,8 @@ const checks = [
   [configSource, "usage.status", "provider status RPC"],
   [configSource, "getModelUsageSummary", "cloud New API usage bridge"],
   [configSource, "cloudSummary", "cloud usage summary state"],
-  [configSource, "New API 数据暂不可用", "cloud usage fallback message"],
+  [configSource, "function UcQuickCloudUsageNotice(", "cloud usage notice normalizer"],
+  [configSource, "云端余额同步暂未恢复，请点击刷新重试。", "friendly cloud refresh retry copy"],
   [configSource, "1 元 = 600w 算力", "cloud compute conversion label"],
   [configSource, "账户余额", "cloud money metric label"],
   [configSource, "文本对话", "specific text capability tag"],
@@ -120,6 +124,12 @@ const checks = [
   [cssSource, ".uclaw-model-picker__option span{display:block", "model selector id display"],
   [cssSource, ".uclaw-model-picker__option em{display:block", "model selector source display"],
   [swSource, "config-model-dashboard-1", "service worker cache marker"],
+  [swSource, "config-cloud-token-refresh-1", "service worker cache marker for token refresh"],
+  [mainSource, "function isCloudAccessTokenExpiredError(", "main-process token expiry detector"],
+  [mainSource, "function refreshCloudAccessToken(", "main-process cloud token refresher"],
+  [mainSource, "function getActivationJSONWithTokenRefresh(", "GET cloud token refresh retry wrapper"],
+  [mainSource, "function postActivationJSONWithTokenRefresh(", "POST cloud token refresh retry wrapper"],
+  [mainSource, "/v1/auth/token/refresh", "cloud token refresh endpoint"],
 ];
 
 for (const [source, needle, label] of checks) {
@@ -145,6 +155,9 @@ const forbiddenByFile = [
   [configSource, "groupBy:`day`", "invalid sessions.usage grouping"],
   [configSource, "let i={startDate:n,endDate:n", "today-only usage window"],
   [configSource, "globalThis.prompt?.", "browser prompt model selector"],
+  [configSource, "Error invoking remote method", "raw Electron IPC error surfaced in model usage"],
+  [configSource, "登录状态已过期", "login-expired copy on recharge account screen"],
+  [configSource, "auth_expired", "auth-expired state on recharge account screen"],
   [cssSource, ".uclaw-config-model-card p{display:flex;flex-wrap:wrap", "wrapping model tags"],
   [cssSource, ".uclaw-config-model-card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))", "fixed squeezed model card grid"],
   [cssSource, ".uclaw-model-picker__list{min-height:180px;overflow:auto;display:grid", "stretched model selector list"],
