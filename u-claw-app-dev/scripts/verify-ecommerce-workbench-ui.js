@@ -529,6 +529,8 @@ async function exerciseWorkbench(page, imagePath) {
       const generatedImages = allNodes().filter((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-generated"));
       const featured = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-featured"));
       const featuredImage = allNodes().find((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-featured"));
+      const featuredTitle = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-featured strong"));
+      const selectedGenerated = generatedCards.find((node) => node.classList.contains("is-selected"));
       const resultBody = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-result-body"));
       const resultStrip = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-result-strip"));
       const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
@@ -597,6 +599,11 @@ async function exerciseWorkbench(page, imagePath) {
         generatedImageCount: generatedImages.length,
         featuredRect: elementRect(featured),
         featuredImageRect: elementRect(featuredImage),
+        featuredTitle: (featuredTitle?.innerText || featuredTitle?.textContent || "").trim(),
+        selectedGeneratedIndex: selectedGenerated ? generatedCards.indexOf(selectedGenerated) : -1,
+        selectedGeneratedTitle: selectedGenerated
+          ? (selectedGenerated.querySelector("strong")?.innerText || selectedGenerated.querySelector("strong")?.textContent || "").trim()
+          : "",
         resultBodyRect: elementRect(resultBody),
         resultStripRect: elementRect(resultStrip),
         qaCount: qaChips.length,
@@ -765,7 +772,7 @@ async function runAcceptance(options) {
       if (!state.text.includes("模特图")) throw new Error(`${viewport.name}: Model image text missing`);
       if (!state.text.includes("图片语言")) throw new Error(`${viewport.name}: Image language selector text missing`);
       if (!state.text.includes("English")) throw new Error(`${viewport.name}: English language text missing`);
-      if (!state.text.includes("点击下载")) throw new Error(`${viewport.name}: Thumbnail download affordance missing`);
+      if (!state.text.includes("点击预览")) throw new Error(`${viewport.name}: Thumbnail preview affordance missing`);
       if (!state.fullTextIncludesUploadShortcuts) throw new Error(`${viewport.name}: Drag and paste upload affordance missing`);
       if (!state.fullTextIncludesIncrementalProgress && !state.sawIncrementalResult) {
         throw new Error(`${viewport.name}: Incremental progress text missing`);
@@ -784,15 +791,40 @@ async function runAcceptance(options) {
         throw new Error(`${viewport.name}: Expected ecommerce zip download, got ${suggestedFilename}`);
       }
       await download.cancel().catch(() => {});
-      const [thumbnailDownload] = await Promise.all([
-        page.waitForEvent("download", { timeout: 10000 }),
-        page.locator("openclaw-tasks-page .uclaw-ecommerce-generated").nth(1).click(),
-      ]);
-      const thumbnailFilename = thumbnailDownload.suggestedFilename();
-      if (!/\.(png|jpg|jpeg|webp)$/i.test(thumbnailFilename)) {
-        throw new Error(`${viewport.name}: Expected thumbnail image download, got ${thumbnailFilename}`);
+      const downloadEvents = [];
+      page.on("download", (download) => downloadEvents.push(download.suggestedFilename()));
+      await page.locator("openclaw-tasks-page .uclaw-ecommerce-generated").nth(1).click();
+      await waitForText(page, "主图2张", 5000);
+      const previewState = await evaluateInDom(
+        page,
+        `
+          const cards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated"));
+          const selected = cards.find((node) => node.classList.contains("is-selected"));
+          const featuredTitle = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-featured strong"));
+          return {
+            selectedIndex: selected ? cards.indexOf(selected) : -1,
+            selectedTitle: selected ? (selected.querySelector("strong")?.innerText || selected.querySelector("strong")?.textContent || "").trim() : "",
+            featuredTitle: (featuredTitle?.innerText || featuredTitle?.textContent || "").trim(),
+          };
+        `,
+      );
+      await page.waitForTimeout(500);
+      if (previewState.selectedIndex !== 1 || previewState.featuredTitle !== "主图2张") {
+        throw new Error(`${viewport.name}: Thumbnail click should select featured preview, got ${JSON.stringify(previewState)}`);
       }
-      await thumbnailDownload.cancel().catch(() => {});
+      const imageDownloads = downloadEvents.filter((name) => /\.(png|jpg|jpeg|webp|svg)$/i.test(name));
+      if (imageDownloads.length > 0) {
+        throw new Error(`${viewport.name}: Thumbnail click must not download images, got ${imageDownloads.join(", ")}`);
+      }
+      const [featuredDownload] = await Promise.all([
+        page.waitForEvent("download", { timeout: 10000 }),
+        page.locator("openclaw-tasks-page .uclaw-ecommerce-featured a[download]").click(),
+      ]);
+      const featuredFilename = featuredDownload.suggestedFilename();
+      if (!/02-.*\.(png|jpg|jpeg|webp)$/i.test(featuredFilename)) {
+        throw new Error(`${viewport.name}: Expected selected featured image download, got ${featuredFilename}`);
+      }
+      await featuredDownload.cancel().catch(() => {});
       await page
         .evaluate(() => {
           window.scrollTo({ top: 0, left: 0, behavior: "auto" });
