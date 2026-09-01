@@ -19,7 +19,8 @@
 3. 填最少信息：商品名、类目、核心卖点、规格、禁用词；其他字段自动推断或作为高级选项折叠。
 4. 选择生成类型和数量：默认主图 3 张、详情图 5 屏；用户可改为只生成主图、详情图、模特图，或三种同时生成。
 5. 点击生成：系统自动选择平台规格、输出张数、图片比例、详情页宽度、是否需要白底图、是否允许文字、是否要合规保守模式。
-6. 查看结果：主图、详情图、模特图、图内文案、平台合规提示、失败原因、横向轮播预览、单图下载和一键打包下载。
+6. 生成成功后写入消耗：桌面端把本次图片数量、模型、平台和 requestId 上报 Bavi-box Cloud；Cloud 以 activation token 对应用户扣 NewAPI quota，并在模型用量页合并展示图片消耗流水。
+7. 查看结果：主图、详情图、模特图、图内文案、平台合规提示、失败原因、横向轮播预览、单图下载和一键打包下载。
 
 默认目标是“少操作直出”：用户只要完成平台选择、上传至少 1 张商品图、填写商品名或卖点之一，即可开始。信息不足时，系统先出保守版并标注缺口，而不是阻断。
 
@@ -67,6 +68,7 @@
    - compliance notes;
    - export package.
 8. User can accept, horizontally review the generated series, download a single image, or export the whole package.
+9. System records image-generation consumption in Bavi-box Cloud after successful media return; failed generations are not charged by the fallback billing path.
 
 ### Minimal Inputs
 
@@ -194,6 +196,8 @@ The result should be structured data first, UI second:
 - The workbench must expose count controls for each selected type, with platform-derived defaults and a trusted-process hard cap.
 - Platform presets must be data, not hard-coded UI strings. Each preset needs source and freshness metadata.
 - The generation chain must use existing Bavi-box image model configuration from the trusted desktop process; no frontend API key and no second `IMG_API_KEY` path.
+- Direct ecommerce image generation must enter consumption: successful calls are reported to `/v1/newapi/usage/ecommerce-image` with an idempotent requestId, Cloud debits the same-phone NewAPI user quota, and `/v1/newapi/usage/summary` merges the image usage record for the model page.
+- The fallback image billing rate is server/desktop configurable; the first default is `50000` raw NewAPI quota per generated image or detail screen until model-price based calculation is wired.
 - The first production slice should generate one platform end-to-end before broadening. Recommended first platform: 抖音电商, because official rules are publicly available and 1:1 / 3:4 both matter.
 - The UI should not ask the user to choose image dimensions directly unless they open advanced settings.
 - If source product image quality is too poor, the system should still offer a conservative output plan, but mark final image generation as low confidence.
@@ -210,6 +214,7 @@ The result should be structured data first, UI second:
 - Product consistency tests should compare generated result metadata against source image/SKU facts and flag drift.
 - Compliance tests should cover ordinary goods, ordinary food, health food, cosmetics and sports/body-management claims.
 - UI tests should use desktop and mobile viewport screenshots; the first screen must show the workbench, not a landing page or chat page. Result tests must verify the generated image list scrolls horizontally and the package download produces a ZIP.
+- Billing tests must prove one successful ecommerce generation request debits NewAPI quota exactly once and appears in usage summary with `modelName=gpt-image-2`.
 - Source freshness tests should fail or warn when a platform preset is older than the configured refresh interval.
 
 ## Out of Scope

@@ -97,6 +97,14 @@ func (c *Client) AddQuota(ctx context.Context, req AddQuotaRequest) error {
 	return c.postJSON(ctx, "/api/user/manage", req, nil)
 }
 
+// SubtractQuota debits quota from a New API user through the admin manage endpoint.
+func (c *Client) SubtractQuota(ctx context.Context, req AddQuotaRequest) error {
+	req.Action = "add_quota"
+	req.Mode = "subtract"
+	req.Value = req.Quota
+	return c.postJSON(ctx, "/api/user/manage", req, nil)
+}
+
 // SearchUserByUsername finds an exact New API user by username through the admin search route.
 func (c *Client) SearchUserByUsername(ctx context.Context, username string) (User, bool, error) {
 	var response searchUsersResponse

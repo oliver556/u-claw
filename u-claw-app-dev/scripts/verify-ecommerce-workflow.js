@@ -145,6 +145,10 @@ function verifyDirectDesktopApi(errors) {
     "assertPublicEcommerceImageUrl",
     "isPrivateNetworkAddress",
     "ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES",
+    "recordEcommerceImageUsage",
+    "/v1/newapi/usage/ecommerce-image",
+    "ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE",
+    "billing",
     "uclaw:ecommerce-generate-images",
     "uclaw:ecommerce-materialize-image",
   ];
@@ -167,6 +171,9 @@ function verifyDirectDesktopApi(errors) {
   }
   if (/const endpoint = images\.length \? '\/images\/edits' : '\/images\/generations';/.test(mainContent)) {
     errors.push("src/main.js must normalize NewAPI baseUrl before appending image endpoints");
+  }
+  if (!/recordEcommerceImageUsage\(\{ manifest, credential, generated \}\)/.test(mainContent)) {
+    errors.push("src/main.js must report successful ecommerce image generation for NewAPI consumption");
   }
 }
 

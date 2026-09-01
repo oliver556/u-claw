@@ -43,6 +43,7 @@ const ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS = 12;
 const ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS = 180000;
 const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_TIMEOUT_MS = 60000;
 const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES = 20 * 1024 * 1024;
+const ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE = Number.parseInt(process.env.UCLAW_ECOMMERCE_IMAGE_QUOTA || '50000', 10);
 const ECOMMERCE_IMAGE_DIRECT_TARGETS = [
   {
     type: 'main_image',
@@ -798,6 +799,13 @@ async function generateEcommerceImagesDirect(payload = {}) {
     throw new Error(warnings[0] || '图片生成失败。');
   }
 
+  const billing = await recordEcommerceImageUsage({ manifest, credential, generated }).catch(error => ({
+    ok: false,
+    message: error?.message || String(error),
+  }));
+  if (billing?.status !== 'ok') {
+    warnings.push(`用量同步失败：${billing?.message || '未能写入 NewAPI 消耗'}`);
+  }
   const usage = await getCloudModelUsageSummary().catch(error => ({
     ok: false,
     message: error?.message || String(error),
@@ -810,6 +818,7 @@ async function generateEcommerceImagesDirect(payload = {}) {
     generatedAt: new Date().toISOString(),
     images: generated,
     warnings,
+    billing,
     usage,
   };
 }
@@ -1196,6 +1205,32 @@ async function getCloudModelUsageSummary() {
     return { ok: false, message: 'uclaw access token is not available' };
   }
   return getActivationJSON('/v1/newapi/usage/summary', { endpoint, accessToken });
+}
+
+/**
+ * Reports successful direct ecommerce image generation to Bavi-box Cloud so it
+ * debits NewAPI quota even when the OpenAI-compatible image endpoint omits logs.
+ */
+async function recordEcommerceImageUsage({ manifest, credential, generated }) {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint || !accessToken || !Array.isArray(generated) || generated.length === 0) {
+    return { ok: false, message: 'cloud usage billing is not available' };
+  }
+  const requestId = String(manifest?.id || crypto.randomUUID()).trim();
+  const quotaPerImage = Number.isFinite(ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE) && ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE > 0
+    ? ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE
+    : 50000;
+  return postActivationJSON('/v1/newapi/usage/ecommerce-image', {
+    requestId,
+    model: credential.requestModel || credential.model,
+    tokenName: 'uclaw-main',
+    platform: manifest?.platform || '',
+    outputTypes: Array.isArray(manifest?.output_types) ? manifest.output_types : [],
+    imageCount: generated.length,
+    quotaPerImage,
+  }, { endpoint, accessToken, timeoutMs: 15000 });
 }
 
 /**

@@ -22,6 +22,8 @@ type Config struct {
 // Service reads New API as the activated user and returns dashboard-ready usage data.
 type Service struct {
 	admin    *newapi.Client
+	quota    QuotaClient
+	store    EcommerceUsageStore
 	cfg      Config
 	now      func() time.Time
 	tokenMu  sync.Mutex
@@ -81,7 +83,7 @@ type Record struct {
 }
 
 // NewService creates a usage service backed by New API dashboard endpoints.
-func NewService(admin *newapi.Client, cfg Config) (*Service, error) {
+func NewService(admin *newapi.Client, cfg Config, store ...EcommerceUsageStore) (*Service, error) {
 	if admin == nil {
 		return nil, fmt.Errorf("newapi client is required")
 	}
@@ -94,7 +96,11 @@ func NewService(admin *newapi.Client, cfg Config) (*Service, error) {
 	if cfg.UserTokenTTL <= 0 {
 		cfg.UserTokenTTL = 6 * time.Hour
 	}
-	return &Service{admin: admin, cfg: cfg, now: time.Now, sessions: make(map[string]cachedUserToken)}, nil
+	var usageStore EcommerceUsageStore
+	if len(store) > 0 {
+		usageStore = store[0]
+	}
+	return &Service{admin: admin, quota: admin, store: usageStore, cfg: cfg, now: time.Now, sessions: make(map[string]cachedUserToken)}, nil
 }
 
 // GetSummary reads the same-phone New API account and summarizes recent quota data.
@@ -109,7 +115,7 @@ func (s *Service) GetSummary(ctx context.Context, req SummaryRequest) (Summary, 
 
 	self, logs, err := s.adminSummaryData(ctx, phone)
 	if err == nil {
-		return s.buildSummary(self, logs.Items), nil
+		return s.buildSummary(ctx, req.UserID, self, logs.Items), nil
 	}
 
 	userClient, fromCache, err := s.userClient(ctx, req.UserID, phone)
@@ -146,7 +152,7 @@ func (s *Service) GetSummary(ctx context.Context, req SummaryRequest) (Summary, 
 			return Summary{}, err
 		}
 	}
-	return s.buildSummary(self, logs.Items), nil
+	return s.buildSummary(ctx, req.UserID, self, logs.Items), nil
 }
 
 // adminSummaryData avoids New API user-login session limits by using admin read endpoints first.
@@ -220,7 +226,7 @@ func isNewAPIAuthError(err error) bool {
 }
 
 // buildSummary folds New API self/log responses into stable client fields.
-func (s *Service) buildSummary(self newapi.SelfUser, items []newapi.LogItem) Summary {
+func (s *Service) buildSummary(ctx context.Context, userID int64, self newapi.SelfUser, items []newapi.LogItem) Summary {
 	now := s.now()
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	last7Start := now.AddDate(0, 0, -7)
@@ -255,6 +261,28 @@ func (s *Service) buildSummary(self newapi.SelfUser, items []newapi.LogItem) Sum
 			RequestID:        item.RequestID,
 		})
 	}
+	ecommerceEvents, _ := s.listEcommerceUsageEvents(ctx, userID)
+	for _, event := range ecommerceEvents {
+		createdAt := event.CreatedAt.In(now.Location())
+		if !createdAt.Before(dayStart) {
+			todayUsage += event.Quota
+		}
+		if !createdAt.Before(last7Start) {
+			last7DaysUsage += event.Quota
+		}
+		records = append(records, Record{
+			ID:          -event.ID,
+			CreatedAt:   event.CreatedAt.Unix(),
+			Type:        2,
+			Content:     ecommerceUsageContent(event),
+			ModelName:   event.Model,
+			TokenName:   event.TokenName,
+			Quota:       event.Quota,
+			Compute:     billing.ComputeFromNewAPIQuota(event.Quota),
+			ChannelName: "Bavi-box 电商工作台",
+			RequestID:   event.RequestID,
+		})
+	}
 
 	return Summary{
 		Status:                "ok",
@@ -267,10 +295,10 @@ func (s *Service) buildSummary(self newapi.SelfUser, items []newapi.LogItem) Sum
 		RequestCount:          self.RequestCount,
 		TodayUsage:            todayUsage,
 		Last7DaysUsage:        last7DaysUsage,
-		CumulativeUsage:       self.UsedQuota,
+		CumulativeUsage:       self.UsedQuota + sumEcommerceQuota(ecommerceEvents),
 		TodayCompute:          billing.ComputeFromNewAPIQuota(todayUsage),
 		Last7DaysCompute:      billing.ComputeFromNewAPIQuota(last7DaysUsage),
-		CumulativeCompute:     billing.ComputeFromNewAPIQuota(self.UsedQuota),
+		CumulativeCompute:     billing.ComputeFromNewAPIQuota(self.UsedQuota + sumEcommerceQuota(ecommerceEvents)),
 		NewAPIQuotaPerCNY:     billing.NewAPIQuotaPerCNY,
 		ComputeUnitsPerCNY:    billing.ComputeUnitsPerCNY,
 		RecentRecordText:      fmt.Sprintf("%d 条最近记录", len(records)),
@@ -278,6 +306,29 @@ func (s *Service) buildSummary(self newapi.SelfUser, items []newapi.LogItem) Sum
 		RefreshedAt:           now.UTC().Format(time.RFC3339),
 		Unit:                  "quota",
 	}
+}
+
+func (s *Service) listEcommerceUsageEvents(ctx context.Context, userID int64) ([]EcommerceImageUsageEvent, error) {
+	if s.store == nil || userID <= 0 {
+		return nil, nil
+	}
+	return s.store.ListEcommerceImageUsage(ctx, userID, s.cfg.PageSize)
+}
+
+func sumEcommerceQuota(events []EcommerceImageUsageEvent) int64 {
+	var total int64
+	for _, event := range events {
+		total += event.Quota
+	}
+	return total
+}
+
+func ecommerceUsageContent(event EcommerceImageUsageEvent) string {
+	types := strings.Join(event.OutputTypes, "、")
+	if types == "" {
+		types = "电商图片"
+	}
+	return fmt.Sprintf("电商图片生成：%s，%d 张/屏", types, event.ImageCount)
 }
 
 // isUserFacingUsageLog keeps billable model activity and hides New API account noise.
