@@ -76,6 +76,52 @@ function requireToken(errors, label, content, token) {
 }
 
 /**
+ * Evaluates one top-level helper from main.js in isolation for behavior checks.
+ */
+function evaluateMainHelper(content, name) {
+  const start = content.indexOf(`function ${name}(`);
+  if (start === -1) throw new Error(`Missing helper: ${name}`);
+  const nextFunction = content.indexOf("\nfunction ", start + 1);
+  const source = content.slice(start, nextFunction === -1 ? content.length : nextFunction);
+  return Function(`${source}; return ${name};`)();
+}
+
+/**
+ * Verifies direct NewAPI calls use the billable /v1 image surface and safe model ids.
+ */
+function verifyDirectNewApiRouting(errors) {
+  try {
+    const mainContent = readFile(mainProcessFile);
+    const normalizeBaseUrl = evaluateMainHelper(mainContent, "normalizeNewApiImageBaseUrl");
+    const normalizeModel = evaluateMainHelper(mainContent, "normalizeEcommerceNewApiModel");
+
+    const cases = [
+      ["https://api.example.com", "https://api.example.com/v1"],
+      ["https://api.example.com/v1", "https://api.example.com/v1"],
+      ["https://api.example.com/v1/", "https://api.example.com/v1"],
+      ["https://api.example.com/proxy", "https://api.example.com/proxy/v1"],
+    ];
+    for (const [input, expected] of cases) {
+      const actual = normalizeBaseUrl(input);
+      if (actual !== expected) {
+        errors.push(`normalizeNewApiImageBaseUrl(${input}) = ${actual}, expected ${expected}`);
+      }
+    }
+
+    const routed = normalizeModel("newapi/gpt-image-2");
+    if (routed.modelRef !== "newapi/gpt-image-2" || routed.requestModel !== "gpt-image-2") {
+      errors.push("normalizeEcommerceNewApiModel must keep modelRef and send bare NewAPI model id");
+    }
+    const bare = normalizeModel("gpt-image-2");
+    if (bare.modelRef !== "gpt-image-2" || bare.requestModel !== "gpt-image-2") {
+      errors.push("normalizeEcommerceNewApiModel must preserve bare image model ids");
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
  * Ensures the desktop-owned image API exists outside the OpenClaw chat/session path.
  */
 function verifyDirectDesktopApi(errors) {
@@ -83,6 +129,8 @@ function verifyDirectDesktopApi(errors) {
   const preloadContent = readFile(preloadFile);
   const mainTokens = [
     "resolveEcommerceImageCredential",
+    "normalizeNewApiImageBaseUrl",
+    "normalizeEcommerceNewApiModel",
     "resolveEcommerceImageTargets",
     "generateEcommerceImagesDirect",
     "requestEcommerceImage",
@@ -90,7 +138,8 @@ function verifyDirectDesktopApi(errors) {
     "08-model-showcase",
     "ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS",
     "outputCounts",
-    "/images/edits",
+    "/images/${images.length ? 'edits' : 'generations'}",
+    "requestModel",
     "uclaw:ecommerce-generate-images",
   ];
   const preloadTokens = [
@@ -103,6 +152,13 @@ function verifyDirectDesktopApi(errors) {
   }
   for (const token of preloadTokens) {
     requireToken(errors, "src/preload.js", preloadContent, token);
+  }
+
+  if (/configuredModel\.includes\('\/'\)\s*\?\s*configuredModel\.split\('\/'\)\.pop\(\)/.test(mainContent)) {
+    errors.push("src/main.js must not blindly strip provider prefixes from ecommerce image model refs");
+  }
+  if (/const endpoint = images\.length \? '\/images\/edits' : '\/images\/generations';/.test(mainContent)) {
+    errors.push("src/main.js must normalize NewAPI baseUrl before appending image endpoints");
   }
 }
 
@@ -291,6 +347,7 @@ function main() {
 
   try {
     verifyDirectDesktopApi(errors);
+    verifyDirectNewApiRouting(errors);
     verifyPatchSource(errors);
     verifyGeneratedTasksPage(errors);
     verifyGeneratedCss(errors);

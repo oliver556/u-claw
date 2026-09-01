@@ -386,29 +386,74 @@ function logLifecycle(message) {
 }
 
 /**
+ * Normalizes a NewAPI client base URL so direct image calls hit the same
+ * OpenAI-compatible /v1 surface that NewAPI records for billing.
+ */
+function normalizeNewApiImageBaseUrl(rawBaseUrl) {
+  const baseUrl = String(rawBaseUrl || '').trim().replace(/\/+$/, '');
+  if (!baseUrl) return '';
+
+  try {
+    const parsed = new URL(baseUrl);
+    const pathname = parsed.pathname.replace(/\/+$/, '');
+    if (!/\/v\d+$/i.test(pathname)) {
+      parsed.pathname = `${pathname || ''}/v1`;
+    }
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/+$/, '');
+  } catch {
+    return /\/v\d+$/i.test(baseUrl) ? baseUrl : `${baseUrl}/v1`;
+  }
+}
+
+/**
+ * Splits the OpenClaw provider/model ref from the model id sent to NewAPI.
+ * NewAPI receives the bare model id while Bavi-box keeps the full ref for UI.
+ */
+function normalizeEcommerceNewApiModel(rawModel) {
+  const modelRef = String(rawModel || '').trim();
+  if (!modelRef) return { modelRef: '', requestModel: '' };
+
+  const slashIndex = modelRef.indexOf('/');
+  if (slashIndex > 0) {
+    const provider = modelRef.slice(0, slashIndex).toLowerCase();
+    const model = modelRef.slice(slashIndex + 1).trim();
+    if (['newapi', 'litellm', 'custom'].includes(provider) && model) {
+      return { modelRef, requestModel: model };
+    }
+  }
+
+  return { modelRef, requestModel: modelRef };
+}
+
+/**
  * Reads the locally persisted NewAPI credential without exposing the token to
  * the renderer. The ecommerce workbench is a Bavi-box feature, so it should call
  * the model provider from the trusted main process instead of opening a chat.
  */
 function resolveEcommerceImageCredential() {
-  const config = fs.existsSync(configPath) ? getConfig() : applyRuntimeConfigEnv(loadBundledDefaultConfig());
+  const rawConfig = fs.existsSync(configPath) ? getConfig() : loadBundledDefaultConfig();
+  const config = applyRuntimeConfigEnv(rawConfig);
   const provider = config.models?.providers?.newapi || {};
   const credential = readJsonFile(builtinModelCredentialPath) || {};
-  const baseUrl = String(credential.baseUrl || provider.baseUrl || '').trim().replace(/\/+$/, '');
-  const token = String(credential.token || provider.apiKey || '').trim();
+  const envBaseUrl = String(process.env.UCLAW_NEW_API_BASE_URL || '').trim();
+  const envToken = String(process.env.UCLAW_NEW_API_KEY || '').trim();
+  const baseUrl = normalizeNewApiImageBaseUrl(envBaseUrl || credential.baseUrl || provider.baseUrl || '');
+  const token = String(envToken || credential.token || provider.apiKey || '').trim();
   const configuredModel = String(
     credential.defaultModels?.image
       || config.agents?.defaults?.imageGenerationModel?.primary
       || config.agents?.defaults?.imageModel?.primary
       || 'newapi/gpt-image-2',
   ).trim();
-  const model = configuredModel.includes('/') ? configuredModel.split('/').pop() : configuredModel;
+  const { modelRef, requestModel } = normalizeEcommerceNewApiModel(configuredModel);
 
   if (!baseUrl) throw new Error('图片接口 baseUrl 未配置，请先完成模型配置或激活。');
   if (!token) throw new Error('图片接口 token 未配置，请先完成模型配置或激活。');
-  if (!model) throw new Error('图片模型未配置。');
+  if (!requestModel) throw new Error('图片模型未配置。');
 
-  return { provider: 'newapi', baseUrl, token, model };
+  return { provider: 'newapi', baseUrl, token, model: modelRef || requestModel, requestModel };
 }
 
 /**
@@ -559,14 +604,13 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS);
   const prompt = buildEcommerceImagePrompt(manifest, target);
-  const endpoint = images.length ? '/images/edits' : '/images/generations';
-  const url = `${credential.baseUrl}${endpoint}`;
+  const url = `${credential.baseUrl}/images/${images.length ? 'edits' : 'generations'}`;
 
   try {
     let response;
     if (images.length) {
       const form = new FormData();
-      form.append('model', credential.model);
+      form.append('model', credential.requestModel);
       form.append('prompt', prompt);
       form.append('size', target.size);
       form.append('response_format', 'b64_json');
@@ -587,7 +631,7 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: credential.model,
+          model: credential.requestModel,
           prompt,
           size: target.size,
           n: 1,
@@ -635,6 +679,11 @@ async function generateEcommerceImagesDirect(payload = {}) {
     throw new Error(warnings[0] || '图片生成失败。');
   }
 
+  const usage = await getCloudModelUsageSummary().catch(error => ({
+    ok: false,
+    message: error?.message || String(error),
+  }));
+
   return {
     ok: true,
     provider: credential.provider,
@@ -642,6 +691,7 @@ async function generateEcommerceImagesDirect(payload = {}) {
     generatedAt: new Date().toISOString(),
     images: generated,
     warnings,
+    usage,
   };
 }
 
