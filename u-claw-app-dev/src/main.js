@@ -772,10 +772,22 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
 }
 
 /**
+ * Emits per-image ecommerce progress to the requesting renderer only. The event
+ * carries generated image bytes but never provider credentials.
+ */
+function emitEcommerceImageProgress(sender, payload) {
+  if (!sender || sender.isDestroyed?.()) return;
+  sender.send('uclaw:ecommerce-image-progress', {
+    ...payload,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/**
  * Public IPC handler for the ecommerce workbench. It returns generated images
  * in-place and never creates OpenClaw sessions or sends chat messages.
  */
-async function generateEcommerceImagesDirect(payload = {}) {
+async function generateEcommerceImagesDirect(payload = {}, sender = null) {
   const manifest = payload.manifest && typeof payload.manifest === 'object' ? payload.manifest : null;
   if (!manifest) throw new Error('缺少生成 manifest。');
   const credential = resolveEcommerceImageCredential();
@@ -786,12 +798,56 @@ async function generateEcommerceImagesDirect(payload = {}) {
   );
   const generated = [];
   const warnings = [];
+  const requestId = String(manifest.id || payload.requestId || crypto.randomUUID()).trim();
 
-  for (const target of targets) {
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
+    emitEcommerceImageProgress(sender, {
+      requestId,
+      index,
+      total: targets.length,
+      status: 'started',
+      target: {
+        type: target.type,
+        title: target.title,
+        slotIndex: target.slotIndex,
+        slotCount: target.slotCount,
+      },
+    });
     try {
-      generated.push(await requestEcommerceImage({ credential, manifest, target, images }));
+      const image = await requestEcommerceImage({ credential, manifest, target, images });
+      generated.push(image);
+      emitEcommerceImageProgress(sender, {
+        requestId,
+        index,
+        total: targets.length,
+        status: 'completed',
+        image,
+        generatedCount: generated.length,
+        target: {
+          type: target.type,
+          title: target.title,
+          slotIndex: target.slotIndex,
+          slotCount: target.slotCount,
+        },
+      });
     } catch (error) {
-      warnings.push(`${target.title}: ${error?.message || String(error)}`);
+      const warning = `${target.title}: ${error?.message || String(error)}`;
+      warnings.push(warning);
+      emitEcommerceImageProgress(sender, {
+        requestId,
+        index,
+        total: targets.length,
+        status: 'failed',
+        warning,
+        generatedCount: generated.length,
+        target: {
+          type: target.type,
+          title: target.title,
+          slotIndex: target.slotIndex,
+          slotCount: target.slotCount,
+        },
+      });
     }
   }
 
@@ -810,9 +866,18 @@ async function generateEcommerceImagesDirect(payload = {}) {
     ok: false,
     message: error?.message || String(error),
   }));
+  emitEcommerceImageProgress(sender, {
+    requestId,
+    index: targets.length,
+    total: targets.length,
+    status: 'settled',
+    generatedCount: generated.length,
+    billing,
+  });
 
   return {
     ok: true,
+    requestId,
     provider: credential.provider,
     model: credential.model,
     generatedAt: new Date().toISOString(),
@@ -2674,7 +2739,7 @@ function setupIPC() {
   ipcMain.handle('uclaw:get-recharge-orders', () => getCloudRechargeOrders());
   ipcMain.handle('uclaw:get-recharge-order', (_event, orderNo) => getCloudRechargeOrder(orderNo));
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
-  ipcMain.handle('uclaw:ecommerce-generate-images', (_event, payload) => generateEcommerceImagesDirect(payload));
+  ipcMain.handle('uclaw:ecommerce-generate-images', (event, payload) => generateEcommerceImagesDirect(payload, event.sender));
   ipcMain.handle('uclaw:ecommerce-materialize-image', (_event, payload) => materializeEcommerceImageForRenderer(payload));
 }
 

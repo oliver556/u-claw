@@ -291,7 +291,13 @@ async function installDirectImageApiStub(page) {
     try {
       await page.evaluate(() => {
         window.__uclawEcommerceRequests = [];
+        window.__uclawEcommerceProgressEvents = [];
+        window.__uclawEcommerceProgressListeners = [];
         const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC";
+        const emitProgress = (payload) => {
+          window.__uclawEcommerceProgressEvents.push(payload);
+          for (const listener of window.__uclawEcommerceProgressListeners) listener(payload);
+        };
         window.uclaw = {
           ...(window.uclaw || {}),
           generateEcommerceImages: async (payload) => {
@@ -335,13 +341,35 @@ async function installDirectImageApiStub(page) {
                 fileNames: Array.isArray(payload?.images) ? payload.images.map((item) => item?.fileName) : [],
               },
             });
+            const requestId = payload?.manifest?.id || "fixture-request";
+            for (let index = 0; index < images.length; index += 1) {
+              await new Promise((resolve) => setTimeout(resolve, index === 0 ? 30 : 80));
+              emitProgress({
+                requestId,
+                index,
+                total: images.length,
+                status: "completed",
+                image: images[index],
+                generatedCount: index + 1,
+                target: { type: images[index].type, title: images[index].title },
+              });
+            }
             return {
               ok: true,
+              requestId,
               provider: "newapi",
               model: "gpt-image-2",
               generatedAt: new Date().toISOString(),
               warnings: [],
               images,
+            };
+          },
+          onEcommerceImageProgress: (callback) => {
+            window.__uclawEcommerceProgressListeners.push(callback);
+            return () => {
+              window.__uclawEcommerceProgressListeners = window.__uclawEcommerceProgressListeners.filter(
+                (listener) => listener !== callback,
+              );
             };
           },
           materializeEcommerceImage: async (payload) => ({ ok: true, image: payload }),
@@ -394,6 +422,15 @@ async function exerciseWorkbench(page, imagePath) {
     .fill("6");
   await page.locator("openclaw-tasks-page input[type='file']").setInputFiles(imagePath);
   await waitForText(page, "1 张已选择", 10000);
+  await page.evaluate(() => {
+    const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC"), (char) => char.charCodeAt(0));
+    const file = new File([bytes], "pasted-product.png", { type: "image/png" });
+    const item = { kind: "file", type: "image/png", getAsFile: () => file };
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { items: [item] } });
+    window.dispatchEvent(event);
+  });
+  await waitForText(page, "2 张已选择", 10000);
   await page.waitForFunction(() => {
     const button = [...document.querySelectorAll("openclaw-tasks-page button")].find((node) =>
       (node.innerText || node.textContent || "").includes("生成图片"),
@@ -401,6 +438,14 @@ async function exerciseWorkbench(page, imagePath) {
     return button instanceof HTMLButtonElement && !button.disabled;
   });
   await page.locator("openclaw-tasks-page button").filter({ hasText: "生成图片" }).click();
+  await waitForText(page, "出一张显示一张", 10000);
+  await page.waitForFunction(() => {
+    const cards = [...document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-generated")];
+    return cards.length >= 1 && cards.length < 10;
+  });
+  await page.evaluate(() => {
+    window.__uclawEcommerceSawIncrementalResult = true;
+  });
   await waitForText(page, "Amazon 已生成图片", 10000);
   await waitForText(page, "10 张结果", 10000);
   await waitForText(page, "查看结果", 10000);
@@ -426,6 +471,7 @@ async function exerciseWorkbench(page, imagePath) {
       const side = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-side"));
       const assetRow = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-asset-row"));
       const drop = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-drop"));
+      const progress = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-progress"));
       const updateBanners = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("update-banner"));
       const activeTypes = typeCards
         .filter((node) => node.classList.contains("is-active"))
@@ -437,6 +483,7 @@ async function exerciseWorkbench(page, imagePath) {
       const carousel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated-grid"));
       const carouselStyle = carousel ? getComputedStyle(carousel) : null;
       const request = window.__uclawEcommerceRequests?.[0] || null;
+      const progressEvents = window.__uclawEcommerceProgressEvents || [];
       const rect = workbench?.getBoundingClientRect();
       const countRects = countControls.map((node) => {
         const rect = node.getBoundingClientRect();
@@ -470,6 +517,7 @@ async function exerciseWorkbench(page, imagePath) {
         sideRect: elementRect(side),
         assetRowRect: elementRect(assetRow),
         dropRect: elementRect(drop),
+        progressRect: elementRect(progress),
         assetRowColumns: assetRow ? getComputedStyle(assetRow).gridTemplateColumns : "",
         layoutColumns: layout ? getComputedStyle(layout).gridTemplateColumns : "",
         visibleStatCount: visibleStats.length,
@@ -497,6 +545,12 @@ async function exerciseWorkbench(page, imagePath) {
         carouselClientWidth: carousel?.clientWidth || 0,
         carouselScrollWidth: carousel?.scrollWidth || 0,
         request,
+        progressEventCount: progressEvents.length,
+        firstProgressStatus: progressEvents[0]?.status || "",
+        progressListenerCount: window.__uclawEcommerceProgressListeners?.length ?? -1,
+        sawIncrementalResult: Boolean(window.__uclawEcommerceSawIncrementalResult),
+        fullTextIncludesUploadShortcuts: (workbench?.innerText || workbench?.textContent || "").includes("选择/拖拽/粘贴图片"),
+        fullTextIncludesIncrementalProgress: (workbench?.innerText || workbench?.textContent || "").includes("出一张显示一张"),
         viewportWidth: window.innerWidth,
         scrollWidth: document.documentElement.scrollWidth,
         width: rect?.width || 0,
@@ -561,7 +615,7 @@ async function runAcceptance(options) {
       }
       if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);
       if (state.language !== "en") throw new Error(`${viewport.name}: Amazon should default image language to English, got ${state.language}`);
-      if (state.fileCount !== 1) throw new Error(`${viewport.name}: Expected one uploaded preview, got ${state.fileCount}`);
+      if (state.fileCount !== 2) throw new Error(`${viewport.name}: Expected file picker plus pasted preview, got ${state.fileCount}`);
       if (!state.dropRect) throw new Error(`${viewport.name}: Upload drop target missing`);
       if (viewport.name === "design") {
         if (state.dropRect.width < 160 || state.dropRect.width > 180) {
@@ -589,6 +643,9 @@ async function runAcceptance(options) {
       if (!state.resultBodyRect || !state.resultStripRect) {
         throw new Error(`${viewport.name}: Result preview should be split into featured and carousel sections`);
       }
+      if (!state.sawIncrementalResult) {
+        throw new Error(`${viewport.name}: First generated image should render before final batch resolves`);
+      }
       if (viewport.name === "design" && state.featuredImageRect.height < 250) {
         throw new Error(`${viewport.name}: Featured result image should be near design height, got ${JSON.stringify(state.featuredImageRect)}`);
       }
@@ -610,8 +667,14 @@ async function runAcceptance(options) {
       if (state.request?.method !== "uclaw:ecommerce-generate-images") {
         throw new Error(`${viewport.name}: direct ecommerce image IPC was not called`);
       }
-      if (state.request?.payload?.imageCount !== 1) {
-        throw new Error(`${viewport.name}: Expected one direct image payload, got ${state.request?.payload?.imageCount}`);
+      if (state.progressEventCount < 10 || state.firstProgressStatus !== "completed") {
+        throw new Error(`${viewport.name}: incremental image progress did not fire correctly`);
+      }
+      if (state.progressListenerCount !== 0) {
+        throw new Error(`${viewport.name}: ecommerce progress listener should be cleaned up, got ${state.progressListenerCount}`);
+      }
+      if (state.request?.payload?.imageCount !== 2) {
+        throw new Error(`${viewport.name}: Expected two direct image payloads after paste, got ${state.request?.payload?.imageCount}`);
       }
       if (state.request?.payload?.language?.id !== "en") {
         throw new Error(`${viewport.name}: Expected direct payload language en, got ${JSON.stringify(state.request?.payload?.language)}`);
@@ -633,6 +696,10 @@ async function runAcceptance(options) {
       if (!state.text.includes("图片语言")) throw new Error(`${viewport.name}: Image language selector text missing`);
       if (!state.text.includes("English")) throw new Error(`${viewport.name}: English language text missing`);
       if (!state.text.includes("点击下载")) throw new Error(`${viewport.name}: Thumbnail download affordance missing`);
+      if (!state.fullTextIncludesUploadShortcuts) throw new Error(`${viewport.name}: Drag and paste upload affordance missing`);
+      if (!state.fullTextIncludesIncrementalProgress && !state.sawIncrementalResult) {
+        throw new Error(`${viewport.name}: Incremental progress text missing`);
+      }
       if (!state.text.includes("详情图6屏")) throw new Error(`${viewport.name}: Detail series count text missing`);
       if (state.scrollWidth > state.viewportWidth + 4) {
         throw new Error(`${viewport.name}: horizontal overflow ${state.scrollWidth} > ${state.viewportWidth}`);
