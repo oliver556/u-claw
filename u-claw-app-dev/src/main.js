@@ -550,6 +550,16 @@ function logLifecycle(message) {
   appendLogFile('main.log', message);
 }
 
+function appendDebuggerLog(payload) {
+  const entry = {
+    ts: new Date().toISOString(),
+    source: 'control-ui',
+    ...(payload && typeof payload === 'object' ? payload : { message: String(payload ?? '') }),
+  };
+  appendLogFile('input-debug.log', JSON.stringify(entry));
+  return { ok: true };
+}
+
 function writeRunState(state = 'running') {
   if (!runStatePath) return;
   writeRuntimeJson(runStatePath, {
@@ -3011,6 +3021,7 @@ function setupIPC() {
   ipcMain.handle('uclaw:get-recharge-order', (_event, orderNo) => getCloudRechargeOrder(orderNo));
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
   ipcMain.handle('uclaw:ecommerce-generate-images', (_event, payload) => generateEcommerceImagesDirect(payload));
+  ipcMain.handle('uclaw:write-debugger-log', (_event, payload) => appendDebuggerLog(payload));
 }
 
 // ── App Lifecycle ──

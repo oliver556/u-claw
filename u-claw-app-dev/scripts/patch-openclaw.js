@@ -761,6 +761,65 @@ function patchChatPage() {
       after = after.replace(videoAttachmentFilenameLink, "");
     }
 
+    const inputDebugHelper =
+      "function uClawInputDebugEnabled(){try{return globalThis.localStorage?.getItem(`uclaw.inputDebug.enabled`)===`1`}catch{return!1}}function uClawInputDebug(e,t={}){if(!uClawInputDebugEnabled())return;try{let n=document.activeElement,r=document.querySelector(`.agent-chat__composer-combobox > textarea`),i=r?.getBoundingClientRect?.(),a=i?document.elementFromPoint(i.left+i.width/2,i.top+i.height/2):null,o=[...document.querySelectorAll(`.sw-handoff-veil,.uclaw-model-picker,.uclaw-session-rename,.uclaw-media-lightbox`)].map(e=>{let t=getComputedStyle(e);return{className:String(e.className||``),hidden:e.hidden,display:t.display,pointerEvents:t.pointerEvents,opacity:t.opacity,zIndex:t.zIndex}});globalThis.uclaw?.writeDebuggerLog?.({type:`chat-input`,phase:e,sessionKey:t.sessionKey,connected:t.connected,canSend:t.canSend,disabled:t.disabled,activeTag:n?.tagName,activeClass:String(n?.className||``),hitTag:a?.tagName,hitClass:String(a?.className||``),overlays:o})}catch{}}";
+    if (!after.includes("function uClawInputDebugEnabled()")) {
+      after = after.replace("function Ty(e){", `${inputDebugHelper}function Ty(e){`);
+    }
+
+    after = after.replace(
+      "function Ty(e){let t=ov(e.paneId),n=e.connected&&e.canSend,",
+      "function Ty(e){let t=ov(e.paneId),n=e.canSend,",
+    );
+    after = after.replace(
+      "canSend:e.connected&&!r,disabledReason:i",
+      "canSend:!r,disabledReason:i",
+    );
+    after = after.replace(
+      "@click=${e=>Sv(e,n)}",
+      "@click=${t=>{uClawInputDebug(`shell-click`,{sessionKey:e.sessionKey,connected:e.connected,canSend:n,disabled:v?.disabled});Sv(t,!0)}}",
+    );
+    after = after.replace(
+      "?disabled=${!n}\n              aria-autocomplete=\"list\"",
+      "?disabled=${!1}\n              aria-autocomplete=\"list\"",
+    );
+    after = after.replace(
+      "@keydown=${O}",
+      "@keydown=${t=>{uClawInputDebug(`keydown`,{sessionKey:e.sessionKey,connected:e.connected,canSend:n,disabled:t.target?.disabled});O(t)}}",
+    );
+    after = after.replace(
+      "@input=${j}",
+      "@input=${t=>{uClawInputDebug(`input`,{sessionKey:e.sessionKey,connected:e.connected,canSend:n,disabled:t.target?.disabled});j(t)}}",
+    );
+    after = after.replace(
+      "@paste=${t=>{n&&sy(t,e)}}",
+      "@paste=${t=>{uClawInputDebug(`paste`,{sessionKey:e.sessionKey,connected:e.connected,canSend:n,disabled:t.target?.disabled});n&&sy(t,e)}}",
+    );
+    after = after.replaceAll(
+      "?disabled=${e.sending}",
+      "?disabled=${!e.connected||e.sending}",
+    );
+    after = after.replace(
+      "?disabled=${e.sending||e.isBusy}",
+      "?disabled=${!e.connected||e.sending||e.isBusy}",
+    );
+
+    const inputFocusChecks = [
+      "function uClawInputDebugEnabled()",
+      "function Ty(e){let t=ov(e.paneId),n=e.canSend,",
+      "canSend:!r,disabledReason:i",
+      "@click=${t=>{uClawInputDebug(`shell-click`",
+      "?disabled=${!1}",
+      "@keydown=${t=>{uClawInputDebug(`keydown`",
+      "@input=${t=>{uClawInputDebug(`input`",
+      "?disabled=${!e.connected||e.sending}",
+      "?disabled=${!e.connected||e.sending||e.isBusy}",
+    ];
+    const missingInputFocusChecks = inputFocusChecks.filter((needle) => !after.includes(needle));
+    if (missingInputFocusChecks.length > 0) {
+      throw new Error(`Could not patch chat input focus diagnostics in ${file}: ${missingInputFocusChecks.join(", ")}`);
+    }
+
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -827,6 +886,9 @@ function patchControlCss() {
     ".uclaw-attachment-action:hover{border-color:#60a5fa;color:#1d4ed8;background:#eff6ff}",
     ".chat-assistant-attachment-card--blocked .uclaw-attachment-actions{margin-top:10px}",
   ].join("");
+  const focusSafetyCss = [
+    ".sw-handoff-veil--landing,.sw-handoff-veil[hidden],.sw-handoff-veil.is-hidden{pointer-events:none!important}",
+  ].join("");
 
   for (const file of files) {
     const before = read(file);
@@ -837,10 +899,66 @@ function patchControlCss() {
     if (!after.includes(".uclaw-attachment-actions")) {
       after = `${after}\n${attachmentCss}\n`;
     }
+    if (!after.includes(".sw-handoff-veil--landing,.sw-handoff-veil[hidden],.sw-handoff-veil.is-hidden")) {
+      after = `${after}\n${focusSafetyCss}\n`;
+    }
     after = after.replace(
       new RegExp(`(${escapeRegExp(attachmentCss)})\\n{3,}`),
       "$1\n\n",
     );
+    if (writeIfChanged(file, before, after)) {
+      console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Adds a persisted Debug-page switch for chat input focus diagnostics.
+ * The chat page reads this localStorage flag before writing input-debug.log.
+ */
+function patchDebugPageInputDiagnostics() {
+  for (const file of listAssetFiles(/^debug-page-.*\.js$/, "debug page")) {
+    const before = read(file);
+    let after = before;
+    const helper =
+      "function uClawDebugInputEnabled(){try{return globalThis.localStorage?.getItem(`uclaw.inputDebug.enabled`)===`1`}catch{return!1}}function uClawSetDebugInputEnabled(e){try{globalThis.localStorage?.setItem(`uclaw.inputDebug.enabled`,e?`1`:`0`),globalThis.uclaw?.writeDebuggerLog?.({type:`chat-input`,phase:`debug-toggle`,enabled:e})}catch{}}";
+    if (!after.includes("function uClawDebugInputEnabled()")) {
+      after = after.replace("function m(e){", `${helper}function m(e){`);
+    }
+
+    const diagnosticsCard = [
+      "    <section class=\"card\" style=\"margin-top: 18px;\">",
+      "      <div class=\"card-title\">输入诊断日志</div>",
+      "      <div class=\"card-sub\">记录聊天输入框焦点、禁用态、命中元素和遮罩状态到 input-debug.log。</div>",
+      "      <label class=\"row\" style=\"justify-content: flex-start; gap: 10px; margin-top: 12px;\">",
+      "        <input",
+      "          type=\"checkbox\"",
+      "          .checked=${uClawDebugInputEnabled()}",
+      "          @change=${e=>uClawSetDebugInputEnabled(!!e.target.checked)}",
+      "        />",
+      "        <span>开启输入诊断日志</span>",
+      "      </label>",
+      "    </section>",
+      "",
+    ].join("\n");
+    const debugCardAnchor =
+      "    <section class=\"card\" style=\"margin-top: 18px;\">\n      <div class=\"card-title\">${s(`debug.modelsTitle`)}</div>";
+    if (!after.includes("输入诊断日志")) {
+      after = after.replace(debugCardAnchor, `${diagnosticsCard}${debugCardAnchor}`);
+    }
+
+    const checks = [
+      "function uClawDebugInputEnabled()",
+      "function uClawSetDebugInputEnabled(e)",
+      "uclaw.inputDebug.enabled",
+      "输入诊断日志",
+      "input-debug.log",
+    ];
+    const missing = checks.filter((needle) => !after.includes(needle));
+    if (missing.length > 0) {
+      throw new Error(`Could not patch input diagnostics toggle in ${file}: ${missing.join(", ")}`);
+    }
+
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -2301,7 +2419,7 @@ function patchIndexUiCopy() {
     const before = read(file);
     let after = replacePairs(before, pairs);
     const sessionRenameDialogHelper =
-      "function UcEnsureSessionRenameDialogStyle(){if(document.getElementById(`uclaw-session-rename-style`))return;let e=document.createElement(`style`);e.id=`uclaw-session-rename-style`;e.textContent=`.uclaw-session-rename{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.28);display:flex;align-items:center;justify-content:center;padding:24px}.uclaw-session-rename__panel{width:min(420px,calc(100vw - 48px));border:1px solid rgba(148,163,184,.35);border-radius:8px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.22);padding:18px}.uclaw-session-rename__title{font:600 16px/1.4 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;color:#111827;margin-bottom:12px}.uclaw-session-rename__input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:10px 12px;font:14px/1.4 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;color:#111827;outline:none}.uclaw-session-rename__input:focus{border-color:#1677ff;box-shadow:0 0 0 3px rgba(22,119,255,.16)}.uclaw-session-rename__actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.uclaw-session-rename__button{border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#1f2937;padding:8px 14px;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer}.uclaw-session-rename__button--primary{border-color:#1677ff;background:#1677ff;color:#fff}`;document.head.appendChild(e)}function UcPromptSessionName(e,t){return new Promise(n=>{if(typeof document===`undefined`){n(typeof window!==`undefined`?window.prompt(e,t):null);return}UcEnsureSessionRenameDialogStyle();let r=!1,i=()=>{r||(r=!0,document.removeEventListener(`keydown`,u,!0),a.remove())},o=e=>{i(),n(e)},a=document.createElement(`div`);a.className=`uclaw-session-rename`,a.setAttribute(`role`,`dialog`),a.setAttribute(`aria-modal`,`true`);let s=document.createElement(`div`);s.className=`uclaw-session-rename__panel`;let c=document.createElement(`div`);c.className=`uclaw-session-rename__title`,c.textContent=e||`重命名会话`;let l=document.createElement(`input`);l.className=`uclaw-session-rename__input`,l.type=`text`,l.value=typeof t===`string`?t:``,l.maxLength=120,l.setAttribute(`aria-label`,c.textContent);let d=document.createElement(`div`);d.className=`uclaw-session-rename__actions`;let h=document.createElement(`button`);h.type=`button`,h.className=`uclaw-session-rename__button`,h.textContent=`取消`;let m=document.createElement(`button`);m.type=`button`,m.className=`uclaw-session-rename__button uclaw-session-rename__button--primary`,m.textContent=`保存`,h.addEventListener(`click`,()=>o(null)),m.addEventListener(`click`,()=>o(l.value)),a.addEventListener(`click`,e=>{e.target===a&&o(null)});let u=e=>{e.key===`Escape`?(e.preventDefault(),o(null)):e.key===`Enter`&&(e.preventDefault(),o(l.value))};document.addEventListener(`keydown`,u,!0),d.append(h,m),s.append(c,l,d),a.append(s),document.body.appendChild(a),requestAnimationFrame(()=>{l.focus({preventScroll:!0}),l.select()})})}";
+      "function UcEnsureSessionRenameDialogStyle(){if(document.getElementById(`uclaw-session-rename-style`))return;let e=document.createElement(`style`);e.id=`uclaw-session-rename-style`;e.textContent=`.uclaw-session-rename{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.28);display:flex;align-items:center;justify-content:center;padding:24px}.uclaw-session-rename__panel{width:min(420px,calc(100vw - 48px));border:1px solid rgba(148,163,184,.35);border-radius:8px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.22);padding:18px}.uclaw-session-rename__title{font:600 16px/1.4 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;color:#111827;margin-bottom:12px}.uclaw-session-rename__input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:10px 12px;font:14px/1.4 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;color:#111827;outline:none}.uclaw-session-rename__input:focus{border-color:#1677ff;box-shadow:0 0 0 3px rgba(22,119,255,.16)}.uclaw-session-rename__actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.uclaw-session-rename__button{border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#1f2937;padding:8px 14px;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer}.uclaw-session-rename__button--primary{border-color:#1677ff;background:#1677ff;color:#fff}`;document.head.appendChild(e)}function UcPromptSessionName(e,t){return new Promise(n=>{if(typeof document===`undefined`){n(typeof window!==`undefined`?window.prompt(e,t):null);return}UcEnsureSessionRenameDialogStyle();let r=!1,i=()=>{r||(r=!0,document.removeEventListener(`keydown`,u,!0),a.remove())},o=e=>{i(),n(e)},a=document.createElement(`div`);a.className=`uclaw-session-rename`,a.setAttribute(`role`,`dialog`),a.setAttribute(`aria-modal`,`true`);let s=document.createElement(`div`);s.className=`uclaw-session-rename__panel`;let c=document.createElement(`div`);c.className=`uclaw-session-rename__title`,c.textContent=e||`重命名会话`;let l=document.createElement(`input`);l.className=`uclaw-session-rename__input`,l.type=`text`,l.value=typeof t===`string`?t:``,l.maxLength=120,l.setAttribute(`aria-label`,c.textContent);let d=document.createElement(`div`);d.className=`uclaw-session-rename__actions`;let h=document.createElement(`button`);h.type=`button`,h.className=`uclaw-session-rename__button`,h.textContent=`取消`;let m=document.createElement(`button`);m.type=`button`,m.className=`uclaw-session-rename__button uclaw-session-rename__button--primary`,m.textContent=`保存`,h.addEventListener(`click`,()=>o(null)),m.addEventListener(`click`,()=>o(l.value)),a.addEventListener(`click`,e=>{e.target===a&&o(null)});let u=e=>{if(e.key===`Escape`){e.preventDefault(),o(null);return}if(e.key===`Tab`){let t=[l,h,m],n=t.indexOf(document.activeElement);n<0&&(n=0),e.preventDefault(),t[(n+(e.shiftKey?-1:1)+t.length)%t.length].focus({preventScroll:!0});return}if(e.key===`Enter`){if(e.isComposing||e.keyCode===229)return;e.preventDefault(),o(l.value)}};document.addEventListener(`keydown`,u,!0),d.append(h,m),s.append(c,l,d),a.append(s),document.body.appendChild(a);let f=()=>{l.focus({preventScroll:!0}),l.select()};requestAnimationFrame(f),setTimeout(f,80)})}";
     const sidebarSessionNameHelper =
       "function UcIsVisibleSessionAgentId(e){let t=j(e??``);return!!t&&!t.startsWith(`uclaw-expert-`)}function UcSidebarSessionName(e,t){let n=Ae(t.key,t),r=A(t.key)?.agentId;if(!r||n!==t.key)return n;let i=e.context?.agentIdentity?.get?.(r),a=w(i?.name)??w(i?.identity?.name)??``;if(!a){let t=e.context?.agents.state.agentsList?.agents?.find(e=>j(e.id)===j(r));a=w(t?.identity?.name)??w(t?.name)??``}if(!a){let e={\"uclaw-expert-copywriter\":`文案写手`,\"uclaw-expert-xiaohongshu\":`小红书写手`,\"uclaw-expert-career\":`职业顾问`,\"uclaw-expert-machine-learning\":`机器学习`,\"uclaw-expert-resume\":`简历写手`,\"uclaw-expert-startup-ideas\":`创业点子王`};a=e[j(r)]??``}return a&&a!==r?a:n}";
     if (after.includes("function UcIsVisibleSessionAgentId(e)")) {
@@ -8463,6 +8581,7 @@ patchConfigModelUsageDashboard();
 patchControlUiBrandAssets();
 patchControlUiTheme();
 patchControlCss();
+patchDebugPageInputDiagnostics();
 removeWrongModelUsageDashboardCss();
 patchConfigModelUsageDashboardCss();
 patchRechargeQrDialogCss();
