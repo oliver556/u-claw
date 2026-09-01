@@ -202,6 +202,8 @@ function verifyPatchSource(errors) {
     "UcEcommerceSelectedLanguage",
     "UcEcommerceEnsureDataUrl",
     "UcEcommerceDownloadImage",
+    "UcEcommerceNormalizeRecord",
+    "UcEcommerceStaleGeneratingMs",
     "onEcommerceOutputType",
     "onEcommerceOutputCount",
     "downloadEcommerceImage",
@@ -228,12 +230,20 @@ function verifyPatchSource(errors) {
     "outputCounts",
     "uclaw.ecommerceImageRecords.v1",
     "uclaw.ecommerceWorkbench.platform.v1",
+    "uclaw.ecommerceWorkbench.draft.v1",
+    "UcEcommerceReadDraft",
+    "UcEcommerceWriteDraft",
+    "UcEcommerceRememberDraftFiles",
+    "UcEcommerceReadDraftFiles",
+    "saveEcommerceDraft",
     "defaultLanguage",
     "data-uclaw-ecommerce-language",
     "图片语言",
     "点击下载",
     "选择/拖拽/粘贴图片",
     "出一张显示一张",
+    "已中断",
+    "生成已中断",
     "official_seed",
     "public_summary",
     "needs_backend_confirmation",
@@ -280,6 +290,8 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceBuildExportPackage",
       "UcEcommerceLanguageOptions",
       "UcEcommerceDownloadImage",
+      "UcEcommerceNormalizeRecord",
+      "UcEcommerceStaleGeneratingMs",
       "downloadEcommercePackage",
       "downloadEcommerceImage",
       "onEcommerceImageProgress",
@@ -292,6 +304,8 @@ function verifyGeneratedTasksPage(errors) {
       "data-uclaw-ecommerce-language",
       "图片语言",
       "点击下载",
+      "已中断",
+      "生成已中断",
       "startEcommerceImageGeneration",
       "generateEcommerceImages",
       "uclaw-ecommerce-hero",
@@ -308,6 +322,11 @@ function verifyGeneratedTasksPage(errors) {
       "uclaw-ecommerce-progress",
       "出一张显示一张",
       "uclaw.ecommerceImageRecords.v1",
+      "uclaw.ecommerceWorkbench.draft.v1",
+      "UcEcommerceReadDraft",
+      "UcEcommerceWriteDraft",
+      "UcEcommerceRememberDraftFiles",
+      "saveEcommerceDraft",
       "source_type",
       "抖音电商",
       "Amazon",
@@ -323,6 +342,9 @@ function verifyGeneratedTasksPage(errors) {
     }
     if (/UcEcommerceBuildGenerationPrompt|openEcommerceGenerationRecord|打开会话|chat\.send|sessions\.create/.test(content)) {
       errors.push(`${label} still contains old ecommerce session-generation wiring`);
+    }
+    if (/disconnectedCallback\(\)\{this\.cleanupEcommerceFileUrls\?\.\(\)/.test(content)) {
+      errors.push(`${label} still revokes ecommerce draft files during route switch`);
     }
   }
 }

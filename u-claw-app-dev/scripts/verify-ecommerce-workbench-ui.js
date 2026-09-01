@@ -385,6 +385,74 @@ async function installDirectImageApiStub(page) {
 }
 
 /**
+ * Simulates leaving Workflows for Models and coming back, then verifies draft
+ * cache restores user input without forcing a generation first.
+ */
+async function verifyDraftSurvivesRouteSwitch(page) {
+  await page.evaluate(() => {
+    window.__uclawEcommerceDraftBeforeRouteSwitch = JSON.parse(
+      localStorage.getItem("uclaw.ecommerceWorkbench.draft.v1") || "null",
+    );
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "电商主图/详情图", 10000);
+  await waitForText(page, "2 张已选择", 10000);
+
+  const draftState = await evaluateInDom(
+    page,
+    `
+      const workbench = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-uclaw-ecommerce-workbench") === "direct-output");
+      const inputs = allNodes().filter((node) => node instanceof HTMLInputElement);
+      const selects = allNodes().filter((node) => node instanceof HTMLSelectElement);
+      const textarea = allNodes().find((node) => node instanceof HTMLTextAreaElement);
+      const files = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-file"));
+      const modelCard = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type") && (node.innerText || node.textContent || "").includes("模特图"));
+      const detailCard = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type") && (node.innerText || node.textContent || "").includes("详情图"));
+      return {
+        platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
+        language: workbench?.getAttribute("data-uclaw-ecommerce-language") || "",
+        productName: inputs.find((node) => node.placeholder === "如：便携榨汁杯")?.value || "",
+        category: inputs.find((node) => node.placeholder === "如：厨房小电")?.value || "",
+        audience: inputs.find((node) => node.placeholder === "默认可不填")?.value || "",
+        sellingPoints: textarea?.value || "",
+        fileCount: files.length,
+        draftFileCount: Array.isArray(window.__uclawEcommerceDraftFiles) ? window.__uclawEcommerceDraftFiles.length : -1,
+        draftBefore: window.__uclawEcommerceDraftBeforeRouteSwitch,
+        draftAfter: JSON.parse(localStorage.getItem("uclaw.ecommerceWorkbench.draft.v1") || "null"),
+        selectValues: selects.map((node) => node.value),
+        modelSelected: Boolean(modelCard?.classList.contains("is-active")),
+        detailCount: detailCard?.querySelector("input[type='number']")?.value || "",
+      };
+    `,
+  );
+
+  if (draftState.platform !== "amazon" || draftState.language !== "en") {
+    throw new Error(`Draft route switch lost platform/language: ${JSON.stringify(draftState)}`);
+  }
+  if (draftState.productName !== "便携榨汁杯" || draftState.category !== "厨房小电" || draftState.audience !== "通勤白领") {
+    throw new Error(`Draft route switch lost product fields: ${JSON.stringify(draftState)}`);
+  }
+  if (!draftState.sellingPoints.includes("USB-C 充电")) {
+    throw new Error(`Draft route switch lost selling points: ${JSON.stringify(draftState)}`);
+  }
+  if (draftState.fileCount !== 2 || draftState.draftFileCount !== 2) {
+    throw new Error(`Draft route switch lost image files: ${JSON.stringify(draftState)}`);
+  }
+  if (!draftState.modelSelected || draftState.detailCount !== "6") {
+    throw new Error(`Draft route switch lost output selection: ${JSON.stringify(draftState)}`);
+  }
+  if (draftState.draftAfter?.productName !== "便携榨汁杯" || draftState.draftAfter?.outputCounts?.detail_image !== 6) {
+    throw new Error(`Draft localStorage payload invalid: ${JSON.stringify(draftState)}`);
+  }
+}
+
+/**
  * Writes a small local PNG fixture for upload interaction.
  */
 function writeImageFixture() {
@@ -431,6 +499,8 @@ async function exerciseWorkbench(page, imagePath) {
     window.dispatchEvent(event);
   });
   await waitForText(page, "2 张已选择", 10000);
+  await verifyDraftSurvivesRouteSwitch(page);
+  await installDirectImageApiStub(page);
   await page.waitForFunction(() => {
     const button = [...document.querySelectorAll("openclaw-tasks-page button")].find((node) =>
       (node.innerText || node.textContent || "").includes("生成图片"),
