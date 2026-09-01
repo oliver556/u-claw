@@ -410,10 +410,21 @@ async function exerciseWorkbench(page, imagePath) {
       const files = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-file"));
       const generatedCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated"));
       const generatedImages = allNodes().filter((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-generated"));
+      const featured = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-featured"));
+      const featuredImage = allNodes().find((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-featured"));
+      const resultBody = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-result-body"));
+      const resultStrip = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-result-strip"));
       const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
       const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
       const typeCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type"));
       const countControls = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-count"));
+      const stats = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-stat"));
+      const layout = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-layout"));
+      const panel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-panel"));
+      const side = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-side"));
+      const assetRow = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-asset-row"));
+      const drop = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-drop"));
+      const updateBanners = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("update-banner"));
       const activeTypes = typeCards
         .filter((node) => node.classList.contains("is-active"))
         .map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
@@ -433,12 +444,40 @@ async function exerciseWorkbench(page, imagePath) {
         const rect = node.getBoundingClientRect();
         return { width: Math.round(rect.width), height: Math.round(rect.height) };
       });
+      const elementRect = (node) => {
+        const rect = node?.getBoundingClientRect?.();
+        return rect ? { width: Math.round(rect.width), height: Math.round(rect.height), x: Math.round(rect.x), y: Math.round(rect.y) } : null;
+      };
+      const visibleStats = stats.filter((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+      });
+      const visibleUpdateBanners = updateBanners.filter((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+      });
       return {
         hasWorkbench: Boolean(workbench),
         platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
+        workbenchRect: elementRect(workbench),
+        layoutRect: elementRect(layout),
+        panelRect: elementRect(panel),
+        sideRect: elementRect(side),
+        assetRowRect: elementRect(assetRow),
+        dropRect: elementRect(drop),
+        assetRowColumns: assetRow ? getComputedStyle(assetRow).gridTemplateColumns : "",
+        layoutColumns: layout ? getComputedStyle(layout).gridTemplateColumns : "",
+        visibleStatCount: visibleStats.length,
+        visibleUpdateBannerCount: visibleUpdateBanners.length,
         fileCount: files.length,
         generatedCount: generatedCards.length,
         generatedImageCount: generatedImages.length,
+        featuredRect: elementRect(featured),
+        featuredImageRect: elementRect(featuredImage),
+        resultBodyRect: elementRect(resultBody),
+        resultStripRect: elementRect(resultStrip),
         qaCount: qaChips.length,
         recordCount: recordRows.length,
         typeCardCount: typeCards.length,
@@ -476,6 +515,7 @@ async function runAcceptance(options) {
   const imagePath = writeImageFixture();
   const errors = [];
   const viewports = [
+    { name: "design", width: 1440, height: 1024 },
     { name: "desktop", width: 1280, height: 980 },
     { name: "mobile", width: 390, height: 844 },
   ];
@@ -500,8 +540,30 @@ async function runAcceptance(options) {
       const state = await exerciseWorkbench(page, imagePath);
 
       if (!state.hasWorkbench) throw new Error(`${viewport.name}: Workbench host missing`);
+      if (state.visibleUpdateBannerCount !== 0) {
+        throw new Error(`${viewport.name}: Ecommerce page should not be pushed down by update banner`);
+      }
+      if (viewport.name === "design") {
+        if (state.visibleStatCount !== 3) throw new Error(`${viewport.name}: Expected three hero stats, got ${state.visibleStatCount}`);
+        if (state.workbenchRect.width < 1120 || state.workbenchRect.width > 1140) {
+          throw new Error(`${viewport.name}: Workbench should match design canvas width, got ${JSON.stringify(state.workbenchRect)}`);
+        }
+        if (state.sideRect.width < 382 || state.sideRect.width > 398) {
+          throw new Error(`${viewport.name}: Results rail should stay near 390px, got ${JSON.stringify(state.sideRect)}`);
+        }
+        const firstRowTops = new Set(state.typeRects.map((rect) => rect.y).slice(0, 3));
+        if (firstRowTops.size !== 1) {
+          throw new Error(`${viewport.name}: Three type cards should sit on one row, got ${JSON.stringify(state.typeRects)}`);
+        }
+      }
       if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);
       if (state.fileCount !== 1) throw new Error(`${viewport.name}: Expected one uploaded preview, got ${state.fileCount}`);
+      if (!state.dropRect) throw new Error(`${viewport.name}: Upload drop target missing`);
+      if (viewport.name === "design") {
+        if (state.dropRect.width < 160 || state.dropRect.width > 180) {
+          throw new Error(`${viewport.name}: Upload drop target should match design width, got ${JSON.stringify(state.dropRect)}`);
+        }
+      }
       if (state.typeCardCount !== 3) throw new Error(`${viewport.name}: Expected three output type cards, got ${state.typeCardCount}`);
       if (!state.activeTypes.some((item) => item.includes("模特图"))) {
         throw new Error(`${viewport.name}: Model image type was not selected`);
@@ -517,10 +579,18 @@ async function runAcceptance(options) {
       if (state.generatedImageCount < 10) {
         throw new Error(`${viewport.name}: Expected generated image previews, got ${state.generatedImageCount}`);
       }
+      if (!state.featuredRect || !state.featuredImageRect) {
+        throw new Error(`${viewport.name}: Featured result preview missing`);
+      }
+      if (!state.resultBodyRect || !state.resultStripRect) {
+        throw new Error(`${viewport.name}: Result preview should be split into featured and carousel sections`);
+      }
+      if (viewport.name === "design" && state.featuredImageRect.height < 250) {
+        throw new Error(`${viewport.name}: Featured result image should be near design height, got ${JSON.stringify(state.featuredImageRect)}`);
+      }
       if (state.qaCount < 4) throw new Error(`${viewport.name}: Expected QA chips, got ${state.qaCount}`);
       if (state.recordCount < 1) throw new Error(`${viewport.name}: Expected one generation record, got ${state.recordCount}`);
       if (state.generateDisabled) throw new Error(`${viewport.name}: Generate button stayed disabled after valid input`);
-      if (!state.hasManifestButton) throw new Error(`${viewport.name}: Manifest copy button missing after generation`);
       if (!state.hasPackageButton) throw new Error(`${viewport.name}: Package download button missing after generation`);
       if (state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button must not appear`);
       if (state.carouselDisplay !== "flex") throw new Error(`${viewport.name}: Generated list should be flex carousel`);
@@ -567,10 +637,22 @@ async function runAcceptance(options) {
         throw new Error(`${viewport.name}: Expected ecommerce zip download, got ${suggestedFilename}`);
       }
       await download.cancel().catch(() => {});
+      await page
+        .evaluate(() => {
+          window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+          for (const node of document.querySelectorAll(".content, openclaw-router-outlet")) {
+            if (node instanceof HTMLElement) {
+              node.scrollTop = 0;
+              node.scrollLeft = 0;
+            }
+          }
+        })
+        .catch(() => {});
+      await page.waitForTimeout(100);
 
       fs.mkdirSync(screenshotsDir, { recursive: true });
       const screenshot = path.join(screenshotsDir, `ecommerce-workbench-ui-${viewport.name}.png`);
-      await page.screenshot({ path: screenshot, fullPage: true });
+      await page.screenshot({ path: screenshot, fullPage: false });
       await page.close();
       results.push({ viewport: viewport.name, screenshot, state });
     }

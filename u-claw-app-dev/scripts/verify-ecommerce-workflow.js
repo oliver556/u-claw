@@ -125,6 +125,17 @@ function verifyPatchSource(errors) {
     "onEcommerceOutputCount",
     "startEcommerceImageGeneration",
     "generateEcommerceImages",
+    "uclaw-ecommerce-hero",
+    "uclaw-ecommerce-stats",
+    "uclaw-ecommerce-layout",
+    "uclaw-ecommerce-panel",
+    "uclaw-ecommerce-side",
+    "uclaw-ecommerce-drop",
+    "uclaw-ecommerce-asset-row",
+    "uclaw-ecommerce-featured",
+    "uclaw-ecommerce-result-body",
+    "uclaw-ecommerce-result-strip",
+    "uclaw-ecommerce-stepper",
     "model_image",
     "outputCounts",
     "uclaw.ecommerceImageRecords.v1",
@@ -139,6 +150,7 @@ function verifyPatchSource(errors) {
   }
 
   requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-design-layout-3");
   if (content.includes("UcEcommerceBuildGenerationPrompt")) {
     errors.push("patch-openclaw.js still contains the old ecommerce chat prompt builder");
   }
@@ -177,6 +189,17 @@ function verifyGeneratedTasksPage(errors) {
       "outputCounts",
       "startEcommerceImageGeneration",
       "generateEcommerceImages",
+      "uclaw-ecommerce-hero",
+      "uclaw-ecommerce-stats",
+      "uclaw-ecommerce-layout",
+      "uclaw-ecommerce-panel",
+      "uclaw-ecommerce-side",
+      "uclaw-ecommerce-drop",
+      "uclaw-ecommerce-asset-row",
+      "uclaw-ecommerce-featured",
+      "uclaw-ecommerce-result-body",
+      "uclaw-ecommerce-result-strip",
+      "uclaw-ecommerce-stepper",
       "uclaw.ecommerceImageRecords.v1",
       "source_type",
       "抖音电商",
@@ -215,6 +238,15 @@ function verifyGeneratedCss(errors) {
       "scroll-snap-type",
       "overscroll-behavior-x",
       ".uclaw-ecommerce-result-actions",
+      ".uclaw-ecommerce-featured",
+      ".uclaw-ecommerce-result-body",
+      ".uclaw-ecommerce-result-strip",
+      ".uclaw-ecommerce-layout",
+      "grid-template-columns: minmax(0, 1fr) 390px",
+      ".uclaw-ecommerce-asset-row",
+      ".uclaw-ecommerce-drop",
+      ".update-banner",
+      "ecommerce-design-layout-3",
     ]) {
       requireToken(errors, label, content, token);
     }
