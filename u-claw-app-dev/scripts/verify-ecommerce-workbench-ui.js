@@ -413,6 +413,7 @@ async function exerciseWorkbench(page, imagePath) {
       const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
       const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
       const typeCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type"));
+      const countControls = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-count"));
       const activeTypes = typeCards
         .filter((node) => node.classList.contains("is-active"))
         .map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
@@ -424,6 +425,14 @@ async function exerciseWorkbench(page, imagePath) {
       const carouselStyle = carousel ? getComputedStyle(carousel) : null;
       const request = window.__uclawEcommerceRequests?.[0] || null;
       const rect = workbench?.getBoundingClientRect();
+      const countRects = countControls.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { width: Math.round(rect.width), height: Math.round(rect.height) };
+      });
+      const typeRects = typeCards.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { width: Math.round(rect.width), height: Math.round(rect.height) };
+      });
       return {
         hasWorkbench: Boolean(workbench),
         platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
@@ -433,6 +442,8 @@ async function exerciseWorkbench(page, imagePath) {
         qaCount: qaChips.length,
         recordCount: recordRows.length,
         typeCardCount: typeCards.length,
+        countRects,
+        typeRects,
         activeTypes,
         generateDisabled: Boolean(generateButton?.disabled),
         hasManifestButton: Boolean(manifestButton),
@@ -494,6 +505,13 @@ async function runAcceptance(options) {
       if (state.typeCardCount !== 3) throw new Error(`${viewport.name}: Expected three output type cards, got ${state.typeCardCount}`);
       if (!state.activeTypes.some((item) => item.includes("模特图"))) {
         throw new Error(`${viewport.name}: Model image type was not selected`);
+      }
+      const countMaxWidth = viewport.name === "mobile" ? 74 : 82;
+      if (!state.countRects?.length || state.countRects.some((rect) => rect.width > countMaxWidth)) {
+        throw new Error(`${viewport.name}: Count selector should stay compact, got ${JSON.stringify(state.countRects)}`);
+      }
+      if (viewport.name === "mobile" && state.typeRects?.some((rect) => rect.width > viewport.width - 48)) {
+        throw new Error(`${viewport.name}: Type cards should fit mobile viewport, got ${JSON.stringify(state.typeRects)}`);
       }
       if (state.generatedCount < 10) throw new Error(`${viewport.name}: Expected generated image cards, got ${state.generatedCount}`);
       if (state.generatedImageCount < 10) {
