@@ -724,14 +724,14 @@ async function runAcceptance(options) {
             tasksPage: state.tasksPageRect,
           })}`);
         }
-        if (state.workbenchRect.width < 2140 || state.layoutRect.width < 2140) {
-          throw new Error(`${viewport.name}: Workbench should use ultrawide canvas, got ${JSON.stringify({
+        if (state.workbenchRect.width < 1740 || state.workbenchRect.width > 1900 || state.layoutRect.width < 1740 || state.layoutRect.width > 1900) {
+          throw new Error(`${viewport.name}: Workbench should stay dense on ultrawide screens, got ${JSON.stringify({
             workbench: state.workbenchRect,
             layout: state.layoutRect,
           })}`);
         }
-        if (state.sideRect.width < 720) {
-          throw new Error(`${viewport.name}: Result rail should grow on ultrawide screens, got ${JSON.stringify(state.sideRect)}`);
+        if (state.sideRect.width < 620 || state.sideRect.width > 760) {
+          throw new Error(`${viewport.name}: Result rail should grow without oversized zoom feel, got ${JSON.stringify(state.sideRect)}`);
         }
       }
       if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);

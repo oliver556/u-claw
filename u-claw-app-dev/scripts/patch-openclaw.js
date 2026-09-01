@@ -2084,7 +2084,7 @@ function patchServiceWorker() {
   let source = read(swPath);
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-carousel-export-1-ecommerce-type-card-polish-1-ecommerce-count-compact-1-ecommerce-design-layout-3-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3-ecommerce-draft-cache-1-ecommerce-stale-records-1";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-carousel-export-1-ecommerce-type-card-polish-1-ecommerce-count-compact-1-ecommerce-design-layout-4-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3-ecommerce-draft-cache-1-ecommerce-stale-records-1";',
   );
   source = source.replace(
     /skillhub-scene-picker-2(?!-skillhub-scene-font-color-1)/,
@@ -2161,24 +2161,32 @@ function patchServiceWorker() {
     "ecommerce-stale-records-1-ecommerce-preview-select-1",
   );
   source = source.replace(
-    /ecommerce-preview-select-1(?!-ecommerce-large-screen-layout-1)/,
-    "ecommerce-preview-select-1-ecommerce-large-screen-layout-1",
+    /ecommerce-preview-select-1(?!-ecommerce-large-screen-layout-2)/,
+    "ecommerce-preview-select-1-ecommerce-large-screen-layout-2",
   );
   source = source.replace(
-    /ecommerce-large-screen-layout-1(?!-ecommerce-download-filename-1)/,
-    "ecommerce-large-screen-layout-1-ecommerce-download-filename-1",
+    /ecommerce-large-screen-layout-1/g,
+    "ecommerce-large-screen-layout-2",
+  );
+  source = source.replace(
+    /ecommerce-large-screen-layout-2(?!-ecommerce-download-filename-1)/,
+    "ecommerce-large-screen-layout-2-ecommerce-download-filename-1",
   );
   source = source.replace(
     /ecommerce-download-filename-1(?!-ecommerce-status-complete-1)/,
     "ecommerce-download-filename-1-ecommerce-status-complete-1",
   );
   source = source.replace(
-    /ecommerce-status-complete-1(?!-ecommerce-ultrawide-layout-1)/,
-    "ecommerce-status-complete-1-ecommerce-ultrawide-layout-1",
+    /ecommerce-status-complete-1(?!-ecommerce-ultrawide-layout-2)/,
+    "ecommerce-status-complete-1-ecommerce-ultrawide-layout-2",
   );
   source = source.replace(
-    /ecommerce-ultrawide-layout-1(?!-ecommerce-swiper-preview-1)/,
-    "ecommerce-ultrawide-layout-1-ecommerce-swiper-preview-1",
+    /ecommerce-ultrawide-layout-1/g,
+    "ecommerce-ultrawide-layout-2",
+  );
+  source = source.replace(
+    /ecommerce-ultrawide-layout-2(?!-ecommerce-swiper-preview-1)/,
+    "ecommerce-ultrawide-layout-2-ecommerce-swiper-preview-1",
   );
   source = source.replace(
     /ecommerce-swiper-preview-1(?!-ecommerce-style-ratio-presets-1)/,
@@ -8134,13 +8142,12 @@ openclaw-config-page .card {
   min-height: 38px;
 }
 
-/* ecommerce-design-layout-3 ecommerce-large-screen-layout-1 ecommerce-ultrawide-layout-1 */
+/* ecommerce-design-layout-4 ecommerce-large-screen-layout-2 ecommerce-ultrawide-layout-2 */
 body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) {
   --bg-content: #f4f7fb;
 }
 
 body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) .content:not(.content--chat):not(.content--workboard) {
-  padding: 24px 30px 34px;
   background: #f4f7fb;
   background-image: none;
 }
@@ -8156,33 +8163,15 @@ body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) openclaw-tasks-page {
   align-self: stretch;
 }
 
-body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) .topbar {
-  min-height: 54px;
-  border-bottom-color: #d8e2ef;
-  background: rgba(255, 255, 255, 0.78);
-}
-
-body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) .sidebar {
-  background: #f9fbfe;
-  box-shadow: inset -1px 0 #d8e2ef;
-}
-
-body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) .sidebar-shell {
-  padding: 22px 18px 14px;
-}
-
-body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) .nav-item {
-  min-height: 40px;
-  font-size: 14px;
-}
-
 openclaw-tasks-page .uclaw-ecommerce-workbench {
   display: grid;
   width: 100%;
-  max-width: 100%;
+  max-width: 1132px;
   min-width: 0;
   gap: 18px;
+  margin-right: auto;
   margin-bottom: 22px;
+  margin-left: auto;
 }
 
 body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) openclaw-update-banner .update-banner {
@@ -9071,17 +9060,13 @@ openclaw-tasks-page .uclaw-ecommerce-record-actions {
 }
 
 @media (min-width: 1680px) {
-  body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) .content:not(.content--chat):not(.content--workboard) {
-    padding-right: 40px;
-    padding-left: 40px;
-  }
-
   openclaw-tasks-page .uclaw-ecommerce-workbench {
     width: 100%;
+    max-width: 1880px;
   }
 
   openclaw-tasks-page .uclaw-ecommerce-layout {
-    grid-template-columns: minmax(900px, 1.45fr) minmax(580px, 0.95fr);
+    grid-template-columns: minmax(0, 1.42fr) minmax(520px, 0.9fr);
   }
 
   openclaw-tasks-page .uclaw-ecommerce-grid {
@@ -9090,18 +9075,13 @@ openclaw-tasks-page .uclaw-ecommerce-record-actions {
 }
 
 @media (min-width: 2200px) {
-  body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) .content:not(.content--chat):not(.content--workboard) {
-    padding-right: 56px;
-    padding-left: 56px;
-  }
-
   openclaw-tasks-page .uclaw-ecommerce-workbench {
     gap: 22px;
   }
 
   openclaw-tasks-page .uclaw-ecommerce-layout {
     gap: 22px;
-    grid-template-columns: minmax(1320px, 1.75fr) minmax(760px, 1fr);
+    grid-template-columns: minmax(0, 1.46fr) minmax(640px, 0.92fr);
   }
 
   openclaw-tasks-page .uclaw-ecommerce-grid {

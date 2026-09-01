@@ -282,9 +282,12 @@ function verifyPatchSource(errors) {
   }
 
     requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");
-    requireToken(errors, "patch-openclaw.js", content, "ecommerce-design-layout-3");
-    requireToken(errors, "patch-openclaw.js", content, "ecommerce-ultrawide-layout-1");
+    requireToken(errors, "patch-openclaw.js", content, "ecommerce-design-layout-4");
+    requireToken(errors, "patch-openclaw.js", content, "ecommerce-ultrawide-layout-2");
     requireToken(errors, "patch-openclaw.js", content, "ecommerce-swiper-preview-1");
+  if (/body:has\(openclaw-tasks-page \.uclaw-ecommerce-workbench\) \.(topbar|sidebar|sidebar-shell|nav-item)/.test(content)) {
+    errors.push("patch-openclaw.js must not scale global shell chrome on ecommerce route");
+  }
   if (content.includes("UcEcommerceBuildGenerationPrompt")) {
     errors.push("patch-openclaw.js still contains the old ecommerce chat prompt builder");
   }
@@ -432,21 +435,25 @@ function verifyGeneratedCss(errors) {
       ".uclaw-ecommerce-result-body",
       ".uclaw-ecommerce-result-strip",
       ".uclaw-ecommerce-layout",
-      "max-width: 100%",
+      "max-width: 1132px",
       "grid-template-columns: minmax(720px, 1.5fr) minmax(420px, 0.85fr)",
       "@media (min-width: 1680px)",
-      "grid-template-columns: minmax(900px, 1.45fr) minmax(580px, 0.95fr)",
-      "ecommerce-large-screen-layout-1",
-      "ecommerce-ultrawide-layout-1",
+      "max-width: 1880px",
+      "grid-template-columns: minmax(0, 1.42fr) minmax(520px, 0.9fr)",
+      "ecommerce-large-screen-layout-2",
+      "ecommerce-ultrawide-layout-2",
       "@media (min-width: 2200px)",
-      "grid-template-columns: minmax(1320px, 1.75fr) minmax(760px, 1fr)",
+      "grid-template-columns: minmax(0, 1.46fr) minmax(640px, 0.92fr)",
       "body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) .content > openclaw-router-outlet",
       ".uclaw-ecommerce-asset-row",
       ".uclaw-ecommerce-drop",
       ".update-banner",
-      "ecommerce-design-layout-3",
+      "ecommerce-design-layout-4",
     ]) {
       requireToken(errors, label, content, token);
+    }
+    if (/body:has\(openclaw-tasks-page \.uclaw-ecommerce-workbench\) \.(topbar|sidebar|sidebar-shell|nav-item)/.test(content)) {
+      errors.push(`${label} must not scale global shell chrome on ecommerce route`);
     }
   }
 }
@@ -458,7 +465,7 @@ function verifyServiceWorker(errors) {
   const content = readFile(path.join(path.dirname(assetsDir), "sw.js"));
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-download-filename-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-status-complete-1");
-  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-ultrawide-layout-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-ultrawide-layout-2");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-swiper-preview-1");
 }
 
