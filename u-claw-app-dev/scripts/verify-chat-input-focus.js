@@ -35,7 +35,7 @@ check(chat.includes('?disabled=${!1}'), 'chat textarea remains enabled');
 check(chat.includes('@click=${t=>{uClawInputDebug(`shell-click`'), 'composer shell click logs and focuses');
 check(chat.includes('@keydown=${t=>{uClawInputDebug(`keydown`'), 'chat keydown diagnostics');
 check(chat.includes('@input=${t=>{uClawInputDebug(`input`'), 'chat input diagnostics');
-check(chat.includes('?disabled=${!e.connected||e.sending}'), 'send button still disables when session cannot send');
+check(chat.includes('?disabled=${!e.connected||e.sending||!t}'), 'send button disables when session cannot send or composer is empty');
 check(!chat.includes('function Ty(e){let t=ov(e.paneId),n=e.connected&&e.canSend,'), 'transport connection no longer disables composer');
 check(!chat.includes('?disabled=${!n}\n              aria-autocomplete="list"'), 'textarea no longer uses canSend disabled binding');
 

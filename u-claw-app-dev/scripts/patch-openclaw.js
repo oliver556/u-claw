@@ -761,6 +761,122 @@ function patchChatPage() {
       after = after.replace(videoAttachmentFilenameLink, "");
     }
 
+    const draftPersistenceOriginal =
+      "function Ju(e){if(!e||typeof e!=`object`||Array.isArray(e))return null;let t=e,n=typeof t.draft==`string`?t.draft:void 0,r=Array.isArray(t.queue)?t.queue.slice(0,Nu).map(qu).filter(e=>e!==null):void 0;return!n&&(!r||r.length===0)?null:{...n?{draft:n}:{},...r&&r.length>0?{queue:r}:{},updatedAt:typeof t.updatedAt==`number`&&Number.isFinite(t.updatedAt)?t.updatedAt:Date.now()}}function Yu(e,t){let n=j();if(!n)return null;try{let r=Iu(e.settings?.gatewayUrl),i=zu(e,t),a=Ju(Bu(n,r).sessions[i]);return a?{draft:a.draft??``,queue:a.queue??[]}:null}catch{return null}}function Xu(e,t=e.sessionKey){let n=j();if(!(!n||!t.trim()))try{let r=Iu(e.settings?.gatewayUrl),i=Bu(n,r),a=zu(e,t),o=e.chatMessage,s=e.chatQueue.slice(0,Nu).map(Ku).filter(e=>e!==null);!o&&s.length===0?delete i.sessions[a]:i.sessions[a]={...o?{draft:o}:{},...s.length>0?{queue:s}:{},updatedAt:Date.now()},Vu(n,r,i)}catch{}}function Zu";
+    const draftPersistencePatched =
+      "function UcSerializeDraftAttachments(e=[]){let t=[],n=0;for(let r of e){let e=Wu(r);if(!e)continue;let i=typeof e.dataUrl==`string`?e.dataUrl.length:0;if(i>2e6||n+i>4e6)continue;n+=i,t.push(e);if(t.length>=8)break}return t}function Ju(e){if(!e||typeof e!=`object`||Array.isArray(e))return null;let t=e,n=typeof t.draft==`string`?t.draft:void 0,r=Array.isArray(t.queue)?t.queue.slice(0,Nu).map(qu).filter(e=>e!==null):void 0,i=Array.isArray(t.attachments)?t.attachments.map(Uu).filter(e=>e!==null):void 0;return!n&&(!r||r.length===0)&&(!i||i.length===0)?null:{...n?{draft:n}:{},...r&&r.length>0?{queue:r}:{},...i&&i.length>0?{attachments:i}:{},updatedAt:typeof t.updatedAt==`number`&&Number.isFinite(t.updatedAt)?t.updatedAt:Date.now()}}function Yu(e,t){let n=j();if(!n)return null;try{let r=Iu(e.settings?.gatewayUrl),i=zu(e,t),a=Ju(Bu(n,r).sessions[i]);return a?{draft:a.draft??``,queue:a.queue??[],attachments:a.attachments??[]}:null}catch{return null}}function Xu(e,t=e.sessionKey){let n=j();if(!(!n||!t.trim()))try{let r=Iu(e.settings?.gatewayUrl),i=Bu(n,r),a=zu(e,t),o=e.chatMessage,s=e.chatQueue.slice(0,Nu).map(Ku).filter(e=>e!==null),c=UcSerializeDraftAttachments(e.chatAttachments??[]);!o&&s.length===0&&c.length===0?delete i.sessions[a]:i.sessions[a]={...o?{draft:o}:{},...s.length>0?{queue:s}:{},...c.length>0?{attachments:c}:{},updatedAt:Date.now()},Vu(n,r,i)}catch{}}function Zu";
+    if (!after.includes("function UcSerializeDraftAttachments(")) {
+      after = after.replace(draftPersistenceOriginal, draftPersistencePatched);
+    }
+    after = after.replace(
+      "function $u(e,t={}){let n=Yu(e,t.sessionKey??e.sessionKey);return n?((!t.preserveCurrent||!e.chatMessage)&&(e.chatMessage=n.draft),(!t.preserveCurrent&&n.queue.length>0||e.chatQueue.length===0)&&(e.chatQueue=n.queue),!0):!1}",
+      "function $u(e,t={}){let n=Yu(e,t.sessionKey??e.sessionKey);if(!n)return!1;let r=n.attachments??[];return(!t.preserveCurrent||!e.chatMessage)&&(e.chatMessage=n.draft),(!t.preserveCurrent&&n.queue.length>0||e.chatQueue.length===0)&&(e.chatQueue=n.queue),r.length>0&&(!t.preserveCurrent||e.chatAttachments.length===0)&&(e.chatAttachments=r),!0}",
+    );
+    after = after.replace(
+      "persistChangedState(){let e=this.getState();this.lastPersisted?.chatQueue!==e?.chatQueue&&this.persistNow()}",
+      "persistChangedState(){let e=this.getState();(this.lastPersisted?.chatQueue!==e?.chatQueue||this.lastPersisted?.chatAttachments!==e?.chatAttachments)&&this.persistNow()}",
+    );
+    after = after.replace(
+      "isUnchanged(e){let t=this.lastPersisted;return!!(t&&t.sessionKey===e.sessionKey&&t.chatMessage===e.chatMessage&&t.chatQueue===e.chatQueue)}snapshot(e){return{sessionKey:e.sessionKey,chatMessage:e.chatMessage,chatQueue:e.chatQueue}}",
+      "isUnchanged(e){let t=this.lastPersisted;return!!(t&&t.sessionKey===e.sessionKey&&t.chatMessage===e.chatMessage&&t.chatQueue===e.chatQueue&&t.chatAttachments===e.chatAttachments)}snapshot(e){return{sessionKey:e.sessionKey,chatMessage:e.chatMessage,chatQueue:e.chatQueue,chatAttachments:e.chatAttachments}}",
+    );
+    after = after.replace(
+      "function h_(e,t){return[...e.chatQueueBySession[t]??[]]}function g_(e,t){",
+      "function h_(e,t){return[...e.chatQueueBySession[t]??[]]}function uClawSaveComposerAttachments(e,t){let n={...e.chatAttachmentsBySession};e.chatAttachments?.length?n[t]=e.chatAttachments:delete n[t],e.chatAttachmentsBySession=n}function uClawRestoreComposerAttachments(e,t){return[...e.chatAttachmentsBySession?.[t]??[]]}function g_(e,t){",
+    );
+    after = after.replace(
+      "Xu(e,n),m_(e,n),g_(e,n),e.sessionKey=t",
+      "Xu(e,n),m_(e,n),uClawSaveComposerAttachments(e,n),g_(e,n),e.sessionKey=t",
+    );
+    after = after.replace(
+      "e.chatMessage=``,e.chatAttachments=[],e.chatReplyTarget=null",
+      "e.chatMessage=``,e.chatAttachments=uClawRestoreComposerAttachments(e,t),e.chatReplyTarget=null",
+    );
+    after = after.replace(
+      "chatAttachments:[],chatRunId:null",
+      "chatAttachments:[],chatAttachmentsBySession:{},chatRunId:null",
+    );
+
+    const draftAttachmentChecks = [
+      "function UcSerializeDraftAttachments(",
+      "attachments:a.attachments??[]",
+      "c=UcSerializeDraftAttachments(e.chatAttachments??[])",
+      "function uClawSaveComposerAttachments(e,t)",
+      "function uClawRestoreComposerAttachments(e,t)",
+      "uClawSaveComposerAttachments(e,n)",
+      "e.chatAttachments=uClawRestoreComposerAttachments(e,t)",
+      "chatAttachmentsBySession:{}",
+      "chatAttachments:e.chatAttachments",
+      "lastPersisted?.chatAttachments!==e?.chatAttachments",
+    ];
+    const missingDraftAttachmentChecks = draftAttachmentChecks.filter((needle) => !after.includes(needle));
+    if (missingDraftAttachmentChecks.length > 0) {
+      throw new Error(`Could not patch composer draft attachments in ${file}: ${missingDraftAttachmentChecks.join(", ")}`);
+    }
+
+    const composerActionsFunction = [
+      'function wy(e){let t=!!(e.draft.trim()||e.hasAttachments),n=()=>{e.draft.trim()&&e.onStoreDraft(e.draft),e.onSend()},r=s`<svg class="uclaw-chat-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>`,i=s`<span class="uclaw-chat-stop-dot" aria-hidden="true"></span>`;',
+      'return s`',
+      '    ${t?s`',
+      '          <openclaw-tooltip .content=${e.canAbort||e.isBusy?A(`chat.runControls.queue`):A(`chat.runControls.send`)}>',
+      '            <button',
+      '              class="chat-send-btn uclaw-chat-action-btn uclaw-chat-action-btn--send"',
+      '              @click=${n}',
+      '              ?disabled=${!e.connected||e.sending||!t}',
+      '              aria-label=${e.canAbort||e.isBusy?A(`chat.runControls.queueMessage`):A(`chat.runControls.sendMessage`)}',
+      '            >',
+      '              ${r}',
+      '              <span class="agent-chat__control-label"',
+      '                >${e.canAbort||e.isBusy?A(`chat.runControls.queue`):A(`chat.runControls.send`)}</span',
+      '              >',
+      '            </button>',
+      '          </openclaw-tooltip>',
+      '        `:e.canAbort?c:s`',
+      '          <openclaw-tooltip .content=${A(`chat.runControls.send`)}>',
+      '            <button',
+      '              class="chat-send-btn uclaw-chat-action-btn uclaw-chat-action-btn--send"',
+      '              @click=${n}',
+      '              ?disabled=${!e.connected||e.sending||!t}',
+      '              aria-label=${A(`chat.runControls.sendMessage`)}',
+      '            >',
+      '              ${r}',
+      '              <span class="agent-chat__control-label">${A(`chat.runControls.send`)}</span>',
+      '            </button>',
+      '          </openclaw-tooltip>',
+      '        `}',
+      '    ${e.canAbort?s`',
+      '          <openclaw-tooltip .content=${A(`chat.runControls.stop`)}>',
+      '            <button',
+      '              class="chat-send-btn uclaw-chat-action-btn uclaw-chat-action-btn--stop"',
+      '              @click=${e.onAbort}',
+      '              aria-label=${A(`chat.runControls.stopGenerating`)}',
+      '            >',
+      '              ${i}',
+      '              <span class="agent-chat__control-label">${A(`chat.runControls.stop`)}</span>',
+      '            </button>',
+      '          </openclaw-tooltip>',
+      '        `:c}',
+      '  `}',
+    ].join("");
+    if (!after.includes("uclaw-chat-action-btn--send")) {
+      after = after.replace(
+        /function wy\(e\)\{[\s\S]*?\}(function (?:uClawInputDebugEnabled|Ty)\()/,
+        `${composerActionsFunction}$1`,
+      );
+    }
+
+    const composerActionChecks = [
+      "uclaw-chat-action-btn--send",
+      "uclaw-chat-action-btn--stop",
+      "?disabled=${!e.connected||e.sending||!t}",
+      "e.canAbort||e.isBusy?A(`chat.runControls.queue`)",
+      "function wy(e)",
+    ];
+    const missingComposerActionChecks = composerActionChecks.filter((needle) => !after.includes(needle));
+    if (missingComposerActionChecks.length > 0) {
+      throw new Error(`Could not patch composer action buttons in ${file}: ${missingComposerActionChecks.join(", ")}`);
+    }
+
     const inputDebugHelper =
       "function uClawInputDebugEnabled(){try{return globalThis.localStorage?.getItem(`uclaw.inputDebug.enabled`)===`1`}catch{return!1}}function uClawInputDebug(e,t={}){if(!uClawInputDebugEnabled())return;try{let n=document.activeElement,r=document.querySelector(`.agent-chat__composer-combobox > textarea`),i=r?.getBoundingClientRect?.(),a=i?document.elementFromPoint(i.left+i.width/2,i.top+i.height/2):null,o=[...document.querySelectorAll(`.sw-handoff-veil,.uclaw-model-picker,.uclaw-session-rename,.uclaw-media-lightbox`)].map(e=>{let t=getComputedStyle(e);return{className:String(e.className||``),hidden:e.hidden,display:t.display,pointerEvents:t.pointerEvents,opacity:t.opacity,zIndex:t.zIndex}});globalThis.uclaw?.writeDebuggerLog?.({type:`chat-input`,phase:e,sessionKey:t.sessionKey,connected:t.connected,canSend:t.canSend,disabled:t.disabled,activeTag:n?.tagName,activeClass:String(n?.className||``),hitTag:a?.tagName,hitClass:String(a?.className||``),overlays:o})}catch{}}";
     if (!after.includes("function uClawInputDebugEnabled()")) {
@@ -812,8 +928,7 @@ function patchChatPage() {
       "?disabled=${!1}",
       "@keydown=${t=>{uClawInputDebug(`keydown`",
       "@input=${t=>{uClawInputDebug(`input`",
-      "?disabled=${!e.connected||e.sending}",
-      "?disabled=${!e.connected||e.sending||e.isBusy}",
+      "?disabled=${!e.connected||e.sending||!t}",
     ];
     const missingInputFocusChecks = inputFocusChecks.filter((needle) => !after.includes(needle));
     if (missingInputFocusChecks.length > 0) {
@@ -889,6 +1004,41 @@ function patchControlCss() {
   const focusSafetyCss = [
     ".sw-handoff-veil--landing,.sw-handoff-veil[hidden],.sw-handoff-veil.is-hidden{pointer-events:none!important}",
   ].join("");
+  const composerAttachmentCss = [
+    ".agent-chat__composer-shell .chat-attachments-preview{display:flex;flex-wrap:nowrap;gap:8px;max-width:100%;margin:0 0 8px;padding:0 2px 2px;overflow-x:auto;overflow-y:hidden}",
+    ".agent-chat__composer-shell .agent-chat__input>.chat-attachments-preview{margin:0 0 8px;padding:0 0 2px}",
+    ".agent-chat__composer-shell .chat-attachment-thumb{position:relative;flex:0 0 auto;width:58px;height:58px;border:1px solid color-mix(in srgb,var(--border,#e5e7eb) 86%,transparent);border-radius:8px;background:var(--bg-elevated,#fff);display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:none}",
+    ".agent-chat__composer-shell .chat-attachment-thumb img{width:100%;height:100%;object-fit:cover;display:block}",
+    ".agent-chat__composer-shell .chat-attachment-thumb--file{width:148px;padding:8px;justify-content:flex-start}",
+    ".agent-chat__composer-shell .chat-attachment-file{min-width:0;display:flex;align-items:center;gap:6px}",
+    ".agent-chat__composer-shell .chat-attachment-file__name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}",
+    ".agent-chat__composer-shell .chat-attachment-remove{position:absolute;top:3px;right:3px;width:18px;height:18px;border:0;border-radius:999px;background:rgba(17,24,39,.78);color:#fff;display:flex;align-items:center;justify-content:center;padding:0;font-size:14px;line-height:1;cursor:pointer}",
+    ".agent-chat__composer-shell .chat-attachment-remove:hover{background:rgba(17,24,39,.94)}",
+  ].join("");
+  const composerActionCss = [
+    ".agent-chat__composer-actions{align-items:flex-end}",
+    ".agent-chat__composer-actions .uclaw-chat-action-btn{width:40px;height:40px;min-width:40px;min-height:40px;padding:0;border:0;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;transition:background .16s ease,color .16s ease,opacity .16s ease,box-shadow .16s ease,transform .1s ease}",
+    ".agent-chat__composer-actions .uclaw-chat-action-btn:active:not(:disabled){transform:translateY(1px)}",
+    ".agent-chat__composer-actions .uclaw-chat-action-btn--send{background:var(--accent,#2563eb);color:var(--accent-foreground,#fff);box-shadow:0 8px 20px color-mix(in srgb,var(--accent,#2563eb) 24%,transparent)}",
+    ".agent-chat__composer-actions .uclaw-chat-action-btn--send:hover:not(:disabled),.agent-chat__composer-actions .uclaw-chat-action-btn--send:focus-visible{background:var(--accent-hover,var(--accent,#2563eb));color:var(--accent-foreground,#fff)}",
+    ".agent-chat__composer-actions .uclaw-chat-action-btn--send:disabled{background:color-mix(in srgb,var(--accent,#2563eb) 13%,var(--bg-muted,#f1f5f9));color:color-mix(in srgb,var(--accent,#2563eb) 42%,var(--muted,#94a3b8));box-shadow:none;opacity:1;cursor:not-allowed}",
+    ".agent-chat__composer-actions .uclaw-chat-action-btn--stop{background:color-mix(in srgb,var(--accent,#2563eb) 14%,var(--bg-elevated,#fff));color:var(--accent,#2563eb);border:1px solid color-mix(in srgb,var(--accent,#2563eb) 28%,transparent);box-shadow:none}",
+    ".agent-chat__composer-actions .uclaw-chat-action-btn--stop:hover:not(:disabled),.agent-chat__composer-actions .uclaw-chat-action-btn--stop:focus-visible{background:color-mix(in srgb,var(--accent,#2563eb) 22%,var(--bg-elevated,#fff));color:var(--accent-hover,var(--accent,#2563eb))}",
+    ".agent-chat__composer-actions .uclaw-chat-action-icon{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2.35px;stroke-linecap:round;stroke-linejoin:round}",
+    ".agent-chat__composer-actions .uclaw-chat-stop-dot{width:12px;height:12px;border-radius:4px;background:currentColor;display:block}",
+    ".agent-chat__composer-actions .uclaw-chat-action-btn .agent-chat__control-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}",
+  ].join("");
+  const composerAttachmentInsideCss = [
+    "/* uclaw-composer-attachments-inside-2 */",
+    ".agent-chat__composer-shell .agent-chat__input{max-height:none!important;overflow:visible!important}",
+    ".agent-chat__composer-shell .agent-chat__input>.chat-attachments-preview{position:static!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;z-index:auto!important;display:flex!important;flex-wrap:nowrap;gap:8px;width:100%;max-width:100%;max-height:none;margin:0 0 8px!important;padding:8px var(--chat-box-inset,8px) 0!important;overflow-x:auto;overflow-y:hidden;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}",
+    ".agent-chat__composer-shell .agent-chat__input>.chat-attachments-preview .chat-attachment-thumb{flex:0 0 auto;width:58px;height:58px}",
+    ".agent-chat__composer-shell .agent-chat__input>.chat-attachments-preview .chat-attachment-thumb--file{width:148px}",
+  ].join("");
+  const composerNeutralFocusCss = [
+    "/* uclaw-composer-neutral-focus-1 */",
+    ".agent-chat__composer-shell .agent-chat__input:focus-within{border-color:#d0d7e2!important;outline:none!important;box-shadow:0 10px 28px rgba(16,22,43,.08)!important}",
+  ].join("");
 
   for (const file of files) {
     const before = read(file);
@@ -902,10 +1052,29 @@ function patchControlCss() {
     if (!after.includes(".sw-handoff-veil--landing,.sw-handoff-veil[hidden],.sw-handoff-veil.is-hidden")) {
       after = `${after}\n${focusSafetyCss}\n`;
     }
+    if (!after.includes(".agent-chat__composer-shell .chat-attachments-preview")) {
+      after = `${after}\n${composerAttachmentCss}\n`;
+    }
+    if (!after.includes(".uclaw-chat-action-btn--send")) {
+      after = `${after}\n${composerActionCss}\n`;
+    }
+    after = after.replace(/\/\* uclaw-composer-attachments-inside-1 \*\/\.agent-chat__composer-shell \.agent-chat__input>\.chat-attachments-preview\{[\s\S]*?\.agent-chat__composer-shell \.agent-chat__input>\.chat-attachments-preview \.chat-attachment-thumb--file\{width:148px\}/g, "");
+    if (!after.includes("uclaw-composer-attachments-inside-2")) {
+      after = `${after}\n${composerAttachmentInsideCss}\n`;
+    }
+    if (!after.includes("uclaw-composer-neutral-focus-1")) {
+      after = `${after}\n${composerNeutralFocusCss}\n`;
+    }
     after = after.replace(
       new RegExp(`(${escapeRegExp(attachmentCss)})\\n{3,}`),
       "$1\n\n",
     );
+    if (!after.includes(".agent-chat__composer-shell .agent-chat__input>.chat-attachments-preview")) {
+      after = after.replace(
+        ".agent-chat__composer-shell .chat-attachments-preview{display:flex;flex-wrap:nowrap;gap:8px;max-width:100%;margin:0 0 8px;padding:0 2px 2px;overflow-x:auto;overflow-y:hidden}",
+        ".agent-chat__composer-shell .chat-attachments-preview{display:flex;flex-wrap:nowrap;gap:8px;max-width:100%;margin:0 0 8px;padding:0 2px 2px;overflow-x:auto;overflow-y:hidden}.agent-chat__composer-shell .agent-chat__input>.chat-attachments-preview{margin:0 0 8px;padding:0 0 2px}",
+      );
+    }
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
     }
@@ -6876,7 +7045,6 @@ openclaw-skills-page .skillhub-scene-icon svg {
   color: var(--uclaw-navy);
 }
 
-.agent-chat__input:focus-within,
 .chat-controls__inline-select-trigger:focus-visible,
 .agent-tab:focus-visible,
 .btn:focus-visible {
@@ -6910,15 +7078,11 @@ pre,
   word-break: break-word;
 }
 
-.agent-chat__input {
-  min-height: 52px;
-  max-height: 150px;
-  border-radius: 8px;
-}
-
 /* chat-composer-controls-polish-3 */
 .agent-chat__input:focus-within {
-  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12), 0 14px 36px rgba(16, 22, 43, 0.08);
+  border-color: #d0d7e2 !important;
+  outline: none !important;
+  box-shadow: 0 10px 28px rgba(16, 22, 43, 0.08) !important;
 }
 
 .chat-send-btn {
@@ -6928,7 +7092,6 @@ pre,
   border-radius: 8px;
 }
 
-.agent-chat__input:focus-within,
 .chat-controls__inline-select-trigger:focus-visible,
 .agent-tab:focus-visible,
 .btn:focus-visible {
@@ -8056,16 +8219,16 @@ openclaw-config-page .card {
   min-height: 52px;
   max-height: 152px;
   border: 1px solid #d8e2ef !important;
-  border-radius: 8px;
+  border-radius: 16px;
   background: #ffffff;
   overflow: visible;
   box-shadow: 0 10px 28px rgba(16, 22, 43, 0.08) !important;
 }
 
 .agent-chat__input:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 34%, #d8e2ef) !important;
+  border-color: #d0d7e2 !important;
   outline: none !important;
-  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.16), 0 12px 30px rgba(16, 22, 43, 0.1) !important;
+  box-shadow: 0 10px 28px rgba(16, 22, 43, 0.08) !important;
 }
 
 .agent-chat__composer-footer {
