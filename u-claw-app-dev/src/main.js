@@ -783,6 +783,17 @@ function resolveEcommerceImageTargets(outputTypes, outputCounts) {
 }
 
 /**
+ * Resolves the final OpenAI-compatible image size for one ecommerce slot. The
+ * UI default remains platform/type driven; explicit ratio presets override it.
+ */
+function resolveEcommerceTargetSize(manifest, target) {
+  const ratioSize = typeof manifest?.aspect_ratio?.size === 'string'
+    ? manifest.aspect_ratio.size.trim()
+    : '';
+  return ratioSize || target.size || '1024x1024';
+}
+
+/**
  * Builds a compact image prompt from the workbench manifest. Platform rules are
  * passed in so users do not need to copy dimensions or compliance notes by hand.
  */
@@ -791,10 +802,13 @@ function buildEcommerceImagePrompt(manifest, target) {
   const outputs = Array.isArray(manifest?.outputs) ? manifest.outputs : [];
   const output = outputs.find(item => item?.type === target.type) || {};
   const language = manifest?.language && typeof manifest.language === 'object' ? manifest.language : {};
+  const visualStyle = manifest?.visual_style && typeof manifest.visual_style === 'object' ? manifest.visual_style : {};
+  const aspectRatio = manifest?.aspect_ratio && typeof manifest.aspect_ratio === 'object' ? manifest.aspect_ratio : {};
   const outputLanguage = String(language.prompt || language.label || '简体中文').trim();
   const sellingPoints = Array.isArray(input.selling_points) && input.selling_points.length
     ? input.selling_points.join('；')
     : '请从参考图识别，并只使用能从图片或用户信息确认的卖点';
+  const targetSize = resolveEcommerceTargetSize(manifest, target);
 
   return [
     '你是 Bavi-box 电商图片生成器。基于参考商品图片和用户填写的信息，直接生成成品图，不要输出方案。',
@@ -808,6 +822,8 @@ function buildEcommerceImagePrompt(manifest, target) {
     `核心卖点：${sellingPoints}`,
     `图片内文字语言：${outputLanguage}`,
     `规格约束：${output.size_rule || '优先 1:1 清晰商品图'}`,
+    `图片风格：${visualStyle.label || '平台自动'}；模板：${visualStyle.template || target.template}；风格要求：${visualStyle.prompt || '同一套图保持 Campaign Style Lock，不随机漂移。'}`,
+    `图片比例：${aspectRatio.label || '平台自动'}；目标尺寸：${targetSize}；比例要求：${aspectRatio.prompt || '按平台和生成类型自动选择比例。'}`,
     `合规检查：${Array.isArray(manifest?.qa) ? manifest.qa.join('；') : '文字和事实需人工复核'}`,
     `视觉要求：真实商品外观优先，背景干净，构图有层次，图片内文字使用 ${outputLanguage}，少而清晰，禁止编造品牌授权、销量、资质、功效承诺。`,
   ].join('\n');
@@ -967,6 +983,7 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS);
   const prompt = buildEcommerceImagePrompt(manifest, target);
+  const targetSize = resolveEcommerceTargetSize(manifest, target);
   const url = `${credential.baseUrl}/images/${images.length ? 'edits' : 'generations'}`;
 
   try {
@@ -975,7 +992,7 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
       const form = new FormData();
       form.append('model', credential.requestModel);
       form.append('prompt', prompt);
-      form.append('size', target.size);
+      form.append('size', targetSize);
       form.append('response_format', 'b64_json');
       images.forEach((image) => {
         form.append('image', new Blob([image.buffer], { type: image.mimeType }), image.fileName);
@@ -996,7 +1013,7 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
         body: JSON.stringify({
           model: credential.requestModel,
           prompt,
-          size: target.size,
+          size: targetSize,
           n: 1,
           response_format: 'b64_json',
         }),

@@ -134,6 +134,10 @@ function verifyDirectDesktopApi(errors) {
     "resolveEcommerceImageTargets",
     "generateEcommerceImagesDirect",
     "requestEcommerceImage",
+    "resolveEcommerceTargetSize",
+    "图片风格：",
+    "图片比例：",
+    "目标尺寸：",
     "model_image",
     "08-model-showcase",
     "ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS",
@@ -200,11 +204,22 @@ function verifyPatchSource(errors) {
     "UcEcommerceFileToPayload",
     "UcEcommerceLanguageOptions",
     "UcEcommerceSelectedLanguage",
+    "UcEcommerceVisualStylePresets",
+    "UcEcommerceSelectedVisualStyle",
+    "UcEcommerceAspectRatioPresets",
+    "UcEcommerceSelectedAspectRatio",
     "UcEcommerceEnsureDataUrl",
     "UcEcommerceDownloadImage",
+    "UcEcommerceDownloadFileName",
+    "ecommerce-download-filename-1",
+    "ecommerce-status-complete-1",
+    "ecommerce-swiper-preview-1",
     "UcEcommerceNormalizeRecord",
     "UcEcommerceStaleGeneratingMs",
+    "UcEcommerceProgressState",
     "selectEcommercePreview",
+    "openEcommerceSwiper",
+    "stepEcommerceSwiper",
     "ecommercePreviewIndex",
     "onEcommerceOutputType",
     "onEcommerceOutputCount",
@@ -225,11 +240,15 @@ function verifyPatchSource(errors) {
     "uclaw-ecommerce-drop",
     "uclaw-ecommerce-asset-row",
     "uclaw-ecommerce-featured",
+    "uclaw-ecommerce-featured-preview",
+    "uclaw-ecommerce-swiper",
     "uclaw-ecommerce-result-body",
     "uclaw-ecommerce-result-strip",
     "uclaw-ecommerce-stepper",
     "model_image",
     "outputCounts",
+    "visualStyle",
+    "aspectRatio",
     "uclaw.ecommerceImageRecords.v1",
     "uclaw.ecommerceWorkbench.platform.v1",
     "uclaw.ecommerceWorkbench.draft.v1",
@@ -240,7 +259,14 @@ function verifyPatchSource(errors) {
     "saveEcommerceDraft",
     "defaultLanguage",
     "data-uclaw-ecommerce-language",
+    "data-uclaw-ecommerce-visual-style",
+    "data-uclaw-ecommerce-aspect-ratio",
     "图片语言",
+    "图片风格",
+    "图片比例",
+    "Campaign Style Lock",
+    "white_packshot",
+    "detail_vertical",
     "点击预览",
     "选择/拖拽/粘贴图片",
     "出一张显示一张",
@@ -255,8 +281,10 @@ function verifyPatchSource(errors) {
     requireToken(errors, "patch-openclaw.js", content, token);
   }
 
-  requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");
-  requireToken(errors, "patch-openclaw.js", content, "ecommerce-design-layout-3");
+    requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");
+    requireToken(errors, "patch-openclaw.js", content, "ecommerce-design-layout-3");
+    requireToken(errors, "patch-openclaw.js", content, "ecommerce-ultrawide-layout-1");
+    requireToken(errors, "patch-openclaw.js", content, "ecommerce-swiper-preview-1");
   if (content.includes("UcEcommerceBuildGenerationPrompt")) {
     errors.push("patch-openclaw.js still contains the old ecommerce chat prompt builder");
   }
@@ -291,22 +319,39 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceBuildDirectPayload",
       "UcEcommerceBuildExportPackage",
       "UcEcommerceLanguageOptions",
+      "UcEcommerceVisualStylePresets",
+      "UcEcommerceAspectRatioPresets",
       "UcEcommerceDownloadImage",
+      "UcEcommerceDownloadFileName",
       "UcEcommerceNormalizeRecord",
       "UcEcommerceStaleGeneratingMs",
+      "UcEcommerceProgressState",
       "selectEcommercePreview",
+      "openEcommerceSwiper",
+      "stepEcommerceSwiper",
       "ecommercePreviewIndex",
       "downloadEcommercePackage",
       "downloadEcommerceImage",
+      "UcEcommerceDownloadBlob(a,t||`ecommerce-image.",
+      "@click=${()=>e.downloadEcommerceImage?.(f,w)}",
       "onEcommerceImageProgress",
       "onEcommerceDrop",
       "onEcommercePaste",
       "setEcommerceFiles",
       "model_image",
       "outputCounts",
+      "visualStyle",
+      "aspectRatio",
       "defaultLanguage",
       "data-uclaw-ecommerce-language",
+      "data-uclaw-ecommerce-visual-style",
+      "data-uclaw-ecommerce-aspect-ratio",
       "图片语言",
+      "图片风格",
+      "图片比例",
+      "Campaign Style Lock",
+      "white_packshot",
+      "detail_vertical",
       "点击预览",
       "已中断",
       "生成已中断",
@@ -320,6 +365,8 @@ function verifyGeneratedTasksPage(errors) {
       "uclaw-ecommerce-drop",
       "uclaw-ecommerce-asset-row",
       "uclaw-ecommerce-featured",
+      "uclaw-ecommerce-featured-preview",
+      "uclaw-ecommerce-swiper",
       "uclaw-ecommerce-result-body",
       "uclaw-ecommerce-result-strip",
       "is-selected",
@@ -351,6 +398,12 @@ function verifyGeneratedTasksPage(errors) {
     if (/disconnectedCallback\(\)\{this\.cleanupEcommerceFileUrls\?\.\(\)/.test(content)) {
       errors.push(`${label} still revokes ecommerce draft files during route switch`);
     }
+    if (content.includes("this.ecommerceActiveRecord&&this.upsertEcommerceRecord({...this.ecommerceActiveRecord,status:`generating`")) {
+      errors.push(`${label} still forces active ecommerce records back to generating`);
+    }
+    if (content.includes("<strong>${u?`正在生成`:o.platform_label+` 已生成图片`}</strong>")) {
+      errors.push(`${label} still derives result header from raw ecommerceGenerating`);
+    }
   }
 }
 
@@ -373,10 +426,21 @@ function verifyGeneratedCss(errors) {
       "overscroll-behavior-x",
       ".uclaw-ecommerce-result-actions",
       ".uclaw-ecommerce-featured",
+      ".uclaw-ecommerce-featured-preview",
+      ".uclaw-ecommerce-swiper",
+      ".uclaw-ecommerce-swiper-stage",
       ".uclaw-ecommerce-result-body",
       ".uclaw-ecommerce-result-strip",
       ".uclaw-ecommerce-layout",
-      "grid-template-columns: minmax(0, 1fr) 390px",
+      "max-width: 100%",
+      "grid-template-columns: minmax(720px, 1.5fr) minmax(420px, 0.85fr)",
+      "@media (min-width: 1680px)",
+      "grid-template-columns: minmax(900px, 1.45fr) minmax(580px, 0.95fr)",
+      "ecommerce-large-screen-layout-1",
+      "ecommerce-ultrawide-layout-1",
+      "@media (min-width: 2200px)",
+      "grid-template-columns: minmax(1320px, 1.75fr) minmax(760px, 1fr)",
+      "body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) .content > openclaw-router-outlet",
       ".uclaw-ecommerce-asset-row",
       ".uclaw-ecommerce-drop",
       ".update-banner",
@@ -385,6 +449,17 @@ function verifyGeneratedCss(errors) {
       requireToken(errors, label, content, token);
     }
   }
+}
+
+/**
+ * Ensures visible ecommerce workbench changes advance the Service Worker cache marker.
+ */
+function verifyServiceWorker(errors) {
+  const content = readFile(path.join(path.dirname(assetsDir), "sw.js"));
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-download-filename-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-status-complete-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-ultrawide-layout-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-swiper-preview-1");
 }
 
 /**
@@ -429,6 +504,7 @@ function main() {
     verifyPatchSource(errors);
     verifyGeneratedTasksPage(errors);
     verifyGeneratedCss(errors);
+    verifyServiceWorker(errors);
     verifyBundledSkill(errors);
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
