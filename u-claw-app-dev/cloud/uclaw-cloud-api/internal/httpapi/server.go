@@ -66,6 +66,10 @@ type smsLoginRequest struct {
 	Code    string `json:"code"`
 }
 
+type tokenRefreshRequest struct {
+	AccessToken string `json:"accessToken"`
+}
+
 type activationRedeemRequest struct {
 	ActivationCode string `json:"activationCode"`
 	DeviceSummary  string `json:"deviceSummary"`
@@ -387,6 +391,23 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 			return
 		}
 		result, err := options.Auth.Login(r.Context(), req.Phone, req.Purpose, req.Code)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
+	mux.HandleFunc("POST /v1/auth/token/refresh", func(w http.ResponseWriter, r *http.Request) {
+		if options.Auth == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("auth service is not configured"))
+			return
+		}
+		var req tokenRefreshRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := options.Auth.RefreshAccessToken(req.AccessToken)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, err)
 			return
@@ -802,6 +823,7 @@ func buildAuthService(cfg config.Config, store auth.Store) *auth.Service {
 	}
 	service, err := auth.NewService(store, manager, auth.ServiceConfig{
 		TokenTTL:                   cfg.AuthTokenTTL,
+		TokenRefreshGraceTTL:       cfg.AuthTokenRefreshGraceTTL,
 		DevSMSCode:                 cfg.DevSMSCode,
 		CodePepper:                 cfg.SMSCodePepper,
 		ExposeCodes:                !cfg.IsProduction() || strings.EqualFold(cfg.SMSProvider, "fixed"),

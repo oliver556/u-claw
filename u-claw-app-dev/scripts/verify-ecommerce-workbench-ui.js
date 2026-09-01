@@ -335,6 +335,8 @@ async function installDirectImageApiStub(page) {
                 platform: payload?.manifest?.platform,
                 productName: payload?.manifest?.name,
                 language: payload?.manifest?.language,
+                visualStyle: payload?.manifest?.visual_style,
+                aspectRatio: payload?.manifest?.aspect_ratio,
                 outputTypes,
                 outputCounts,
                 imageCount: Array.isArray(payload?.images) ? payload.images.length : 0,
@@ -417,6 +419,8 @@ async function verifyDraftSurvivesRouteSwitch(page) {
       return {
         platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
         language: workbench?.getAttribute("data-uclaw-ecommerce-language") || "",
+        visualStyle: workbench?.getAttribute("data-uclaw-ecommerce-visual-style") || "",
+        aspectRatio: workbench?.getAttribute("data-uclaw-ecommerce-aspect-ratio") || "",
         productName: inputs.find((node) => node.placeholder === "如：便携榨汁杯")?.value || "",
         category: inputs.find((node) => node.placeholder === "如：厨房小电")?.value || "",
         audience: inputs.find((node) => node.placeholder === "默认可不填")?.value || "",
@@ -435,6 +439,9 @@ async function verifyDraftSurvivesRouteSwitch(page) {
   if (draftState.platform !== "amazon" || draftState.language !== "en") {
     throw new Error(`Draft route switch lost platform/language: ${JSON.stringify(draftState)}`);
   }
+  if (draftState.visualStyle !== "lifestyle_scene" || draftState.aspectRatio !== "ratio_3_4") {
+    throw new Error(`Draft route switch lost style/ratio presets: ${JSON.stringify(draftState)}`);
+  }
   if (draftState.productName !== "便携榨汁杯" || draftState.category !== "厨房小电" || draftState.audience !== "通勤白领") {
     throw new Error(`Draft route switch lost product fields: ${JSON.stringify(draftState)}`);
   }
@@ -449,6 +456,9 @@ async function verifyDraftSurvivesRouteSwitch(page) {
   }
   if (draftState.draftAfter?.productName !== "便携榨汁杯" || draftState.draftAfter?.outputCounts?.detail_image !== 6) {
     throw new Error(`Draft localStorage payload invalid: ${JSON.stringify(draftState)}`);
+  }
+  if (draftState.draftAfter?.visualStyle !== "lifestyle_scene" || draftState.draftAfter?.aspectRatio !== "ratio_3_4") {
+    throw new Error(`Draft localStorage style/ratio invalid: ${JSON.stringify(draftState)}`);
   }
 }
 
@@ -474,6 +484,8 @@ async function exerciseWorkbench(page, imagePath) {
   await installDirectImageApiStub(page);
 
   await page.locator("openclaw-tasks-page select").first().selectOption("amazon");
+  await page.locator("openclaw-tasks-page select").nth(2).selectOption("lifestyle_scene");
+  await page.locator("openclaw-tasks-page select").nth(3).selectOption("ratio_3_4");
   await page.locator("openclaw-tasks-page input[placeholder='如：便携榨汁杯']").fill("便携榨汁杯");
   await page.locator("openclaw-tasks-page input[placeholder='如：厨房小电']").fill("厨房小电");
   await page.locator("openclaw-tasks-page input[placeholder='默认可不填']").fill("通勤白领");
@@ -518,6 +530,7 @@ async function exerciseWorkbench(page, imagePath) {
   });
   await waitForText(page, "Amazon 已生成图片", 10000);
   await waitForText(page, "10 张结果", 10000);
+  await page.waitForFunction(() => document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-generated").length >= 10);
   await waitForText(page, "查看结果", 10000);
 
   return evaluateInDom(
@@ -528,6 +541,7 @@ async function exerciseWorkbench(page, imagePath) {
       const generatedCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated"));
       const generatedImages = allNodes().filter((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-generated"));
       const featured = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-featured"));
+      const featuredPreview = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-featured-preview"));
       const featuredImage = allNodes().find((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-featured"));
       const featuredTitle = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-featured strong"));
       const selectedGenerated = generatedCards.find((node) => node.classList.contains("is-selected"));
@@ -541,6 +555,9 @@ async function exerciseWorkbench(page, imagePath) {
       const layout = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-layout"));
       const panel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-panel"));
       const side = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-side"));
+      const content = document.querySelector(".content");
+      const outlet = document.querySelector(".content > openclaw-router-outlet");
+      const tasksPage = document.querySelector("openclaw-tasks-page");
       const assetRow = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-asset-row"));
       const drop = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-drop"));
       const progress = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-progress"));
@@ -583,7 +600,12 @@ async function exerciseWorkbench(page, imagePath) {
         hasWorkbench: Boolean(workbench),
         platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
         language: workbench?.getAttribute("data-uclaw-ecommerce-language") || "",
+        visualStyle: workbench?.getAttribute("data-uclaw-ecommerce-visual-style") || "",
+        aspectRatio: workbench?.getAttribute("data-uclaw-ecommerce-aspect-ratio") || "",
         workbenchRect: elementRect(workbench),
+        contentRect: elementRect(content),
+        outletRect: elementRect(outlet),
+        tasksPageRect: elementRect(tasksPage),
         layoutRect: elementRect(layout),
         panelRect: elementRect(panel),
         sideRect: elementRect(side),
@@ -598,6 +620,7 @@ async function exerciseWorkbench(page, imagePath) {
         generatedCount: generatedCards.length,
         generatedImageCount: generatedImages.length,
         featuredRect: elementRect(featured),
+        featuredPreviewRect: elementRect(featuredPreview),
         featuredImageRect: elementRect(featuredImage),
         featuredTitle: (featuredTitle?.innerText || featuredTitle?.textContent || "").trim(),
         selectedGeneratedIndex: selectedGenerated ? generatedCards.indexOf(selectedGenerated) : -1,
@@ -628,6 +651,8 @@ async function exerciseWorkbench(page, imagePath) {
         sawIncrementalResult: Boolean(window.__uclawEcommerceSawIncrementalResult),
         fullTextIncludesUploadShortcuts: (workbench?.innerText || workbench?.textContent || "").includes("选择/拖拽/粘贴图片"),
         fullTextIncludesIncrementalProgress: (workbench?.innerText || workbench?.textContent || "").includes("出一张显示一张"),
+        fullTextIncludesThumbnailPreview: (workbench?.innerText || workbench?.textContent || "").includes("点击预览"),
+        finalTextIncludesGeneratingStatus: /正在生成|生成中/.test(workbench?.innerText || workbench?.textContent || ""),
         viewportWidth: window.innerWidth,
         scrollWidth: document.documentElement.scrollWidth,
         width: rect?.width || 0,
@@ -649,6 +674,7 @@ async function runAcceptance(options) {
   const imagePath = writeImageFixture();
   const errors = [];
   const viewports = [
+    { name: "ultrawide", width: 2560, height: 1410 },
     { name: "design", width: 1440, height: 1024 },
     { name: "desktop", width: 1280, height: 980 },
     { name: "mobile", width: 390, height: 844 },
@@ -682,16 +708,36 @@ async function runAcceptance(options) {
         if (state.workbenchRect.width < 1120 || state.workbenchRect.width > 1140) {
           throw new Error(`${viewport.name}: Workbench should match design canvas width, got ${JSON.stringify(state.workbenchRect)}`);
         }
-        if (state.sideRect.width < 382 || state.sideRect.width > 398) {
-          throw new Error(`${viewport.name}: Results rail should stay near 390px, got ${JSON.stringify(state.sideRect)}`);
+        if (state.sideRect.width < 410 || state.sideRect.width > 430) {
+          throw new Error(`${viewport.name}: Results rail should stay near the large-screen grid width, got ${JSON.stringify(state.sideRect)}`);
         }
         const firstRowTops = new Set(state.typeRects.map((rect) => rect.y).slice(0, 3));
         if (firstRowTops.size !== 1) {
           throw new Error(`${viewport.name}: Three type cards should sit on one row, got ${JSON.stringify(state.typeRects)}`);
         }
       }
+      if (viewport.name === "ultrawide") {
+        if (state.contentRect.width < 2300 || state.outletRect.width < 2140 || state.tasksPageRect.width < 2140) {
+          throw new Error(`${viewport.name}: Route hosts should stretch across large screen, got ${JSON.stringify({
+            content: state.contentRect,
+            outlet: state.outletRect,
+            tasksPage: state.tasksPageRect,
+          })}`);
+        }
+        if (state.workbenchRect.width < 1740 || state.workbenchRect.width > 1900 || state.layoutRect.width < 1740 || state.layoutRect.width > 1900) {
+          throw new Error(`${viewport.name}: Workbench should stay dense on ultrawide screens, got ${JSON.stringify({
+            workbench: state.workbenchRect,
+            layout: state.layoutRect,
+          })}`);
+        }
+        if (state.sideRect.width < 620 || state.sideRect.width > 760) {
+          throw new Error(`${viewport.name}: Result rail should grow without oversized zoom feel, got ${JSON.stringify(state.sideRect)}`);
+        }
+      }
       if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);
       if (state.language !== "en") throw new Error(`${viewport.name}: Amazon should default image language to English, got ${state.language}`);
+      if (state.visualStyle !== "lifestyle_scene") throw new Error(`${viewport.name}: Visual style did not switch, got ${state.visualStyle}`);
+      if (state.aspectRatio !== "ratio_3_4") throw new Error(`${viewport.name}: Aspect ratio did not switch, got ${state.aspectRatio}`);
       if (state.fileCount !== 2) throw new Error(`${viewport.name}: Expected file picker plus pasted preview, got ${state.fileCount}`);
       if (!state.dropRect) throw new Error(`${viewport.name}: Upload drop target missing`);
       if (viewport.name === "design") {
@@ -716,6 +762,9 @@ async function runAcceptance(options) {
       }
       if (!state.featuredRect || !state.featuredImageRect) {
         throw new Error(`${viewport.name}: Featured result preview missing`);
+      }
+      if (!state.featuredPreviewRect) {
+        throw new Error(`${viewport.name}: Featured image should expose clickable zoom preview`);
       }
       if (!state.resultBodyRect || !state.resultStripRect) {
         throw new Error(`${viewport.name}: Result preview should be split into featured and carousel sections`);
@@ -750,11 +799,20 @@ async function runAcceptance(options) {
       if (state.progressListenerCount !== 0) {
         throw new Error(`${viewport.name}: ecommerce progress listener should be cleaned up, got ${state.progressListenerCount}`);
       }
+      if (state.finalTextIncludesGeneratingStatus) {
+        throw new Error(`${viewport.name}: Finished ecommerce result must not keep generating status`);
+      }
       if (state.request?.payload?.imageCount !== 2) {
         throw new Error(`${viewport.name}: Expected two direct image payloads after paste, got ${state.request?.payload?.imageCount}`);
       }
       if (state.request?.payload?.language?.id !== "en") {
         throw new Error(`${viewport.name}: Expected direct payload language en, got ${JSON.stringify(state.request?.payload?.language)}`);
+      }
+      if (state.request?.payload?.visualStyle?.id !== "lifestyle_scene") {
+        throw new Error(`${viewport.name}: Expected direct payload visual style lifestyle_scene, got ${JSON.stringify(state.request?.payload?.visualStyle)}`);
+      }
+      if (state.request?.payload?.aspectRatio?.id !== "ratio_3_4") {
+        throw new Error(`${viewport.name}: Expected direct payload aspect ratio ratio_3_4, got ${JSON.stringify(state.request?.payload?.aspectRatio)}`);
       }
       if (!state.request?.payload?.outputTypes?.includes("model_image")) {
         throw new Error(`${viewport.name}: Expected direct payload to request model_image`);
@@ -772,7 +830,11 @@ async function runAcceptance(options) {
       if (!state.text.includes("模特图")) throw new Error(`${viewport.name}: Model image text missing`);
       if (!state.text.includes("图片语言")) throw new Error(`${viewport.name}: Image language selector text missing`);
       if (!state.text.includes("English")) throw new Error(`${viewport.name}: English language text missing`);
-      if (!state.text.includes("点击预览")) throw new Error(`${viewport.name}: Thumbnail preview affordance missing`);
+      if (!state.text.includes("图片风格")) throw new Error(`${viewport.name}: Image style selector text missing`);
+      if (!state.text.includes("生活方式")) throw new Error(`${viewport.name}: Lifestyle style text missing`);
+      if (!state.text.includes("图片比例")) throw new Error(`${viewport.name}: Image ratio selector text missing`);
+      if (!state.text.includes("3:4 竖图")) throw new Error(`${viewport.name}: 3:4 ratio text missing`);
+      if (!state.fullTextIncludesThumbnailPreview) throw new Error(`${viewport.name}: Thumbnail preview affordance missing`);
       if (!state.fullTextIncludesUploadShortcuts) throw new Error(`${viewport.name}: Drag and paste upload affordance missing`);
       if (!state.fullTextIncludesIncrementalProgress && !state.sawIncrementalResult) {
         throw new Error(`${viewport.name}: Incremental progress text missing`);
@@ -816,12 +878,53 @@ async function runAcceptance(options) {
       if (imageDownloads.length > 0) {
         throw new Error(`${viewport.name}: Thumbnail click must not download images, got ${imageDownloads.join(", ")}`);
       }
+      await page.locator("openclaw-tasks-page .uclaw-ecommerce-featured-preview").click();
+      await page.waitForSelector("openclaw-tasks-page .uclaw-ecommerce-swiper", { timeout: 5000 });
+      let swiperState = await evaluateInDom(
+        page,
+        `
+          const swiper = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-swiper"));
+          const title = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-swiper-stage figure strong"));
+          const selectedThumb = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-swiper-strip .is-selected"));
+          return {
+            open: Boolean(swiper),
+            title: (title?.innerText || title?.textContent || "").trim(),
+            selectedIndex: selectedThumb ? [...selectedThumb.parentElement.children].indexOf(selectedThumb) : -1,
+          };
+        `,
+      );
+      if (!swiperState.open || swiperState.title !== "主图2张" || swiperState.selectedIndex !== 1) {
+        throw new Error(`${viewport.name}: Featured click should open swiper preview at selected image, got ${JSON.stringify(swiperState)}`);
+      }
+      await page.locator("openclaw-tasks-page .uclaw-ecommerce-swiper-nav.is-next").click();
+      await waitForText(page, "主图3张", 5000);
+      swiperState = await evaluateInDom(
+        page,
+        `
+          const title = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-swiper-stage figure strong"));
+          const selectedThumb = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-swiper-strip .is-selected"));
+          return {
+            title: (title?.innerText || title?.textContent || "").trim(),
+            selectedIndex: selectedThumb ? [...selectedThumb.parentElement.children].indexOf(selectedThumb) : -1,
+          };
+        `,
+      );
+      if (swiperState.title !== "主图3张" || swiperState.selectedIndex !== 2) {
+        throw new Error(`${viewport.name}: Swiper next should move to next image, got ${JSON.stringify(swiperState)}`);
+      }
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page .uclaw-ecommerce-swiper"), null, {
+        timeout: 5000,
+      });
+      if (downloadEvents.filter((name) => /\.(png|jpg|jpeg|webp|svg)$/i.test(name)).length > 0) {
+        throw new Error(`${viewport.name}: Opening swiper must not download images`);
+      }
       const [featuredDownload] = await Promise.all([
         page.waitForEvent("download", { timeout: 10000 }),
-        page.locator("openclaw-tasks-page .uclaw-ecommerce-featured a[download]").click(),
+        page.locator("openclaw-tasks-page .uclaw-ecommerce-featured button").filter({ hasText: "下载" }).click(),
       ]);
       const featuredFilename = featuredDownload.suggestedFilename();
-      if (!/02-.*\.(png|jpg|jpeg|webp)$/i.test(featuredFilename)) {
+      if (!/03-.*\.(png|jpg|jpeg|webp)$/i.test(featuredFilename)) {
         throw new Error(`${viewport.name}: Expected selected featured image download, got ${featuredFilename}`);
       }
       await featuredDownload.cancel().catch(() => {});

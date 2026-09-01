@@ -783,6 +783,17 @@ function resolveEcommerceImageTargets(outputTypes, outputCounts) {
 }
 
 /**
+ * Resolves the final OpenAI-compatible image size for one ecommerce slot. The
+ * UI default remains platform/type driven; explicit ratio presets override it.
+ */
+function resolveEcommerceTargetSize(manifest, target) {
+  const ratioSize = typeof manifest?.aspect_ratio?.size === 'string'
+    ? manifest.aspect_ratio.size.trim()
+    : '';
+  return ratioSize || target.size || '1024x1024';
+}
+
+/**
  * Builds a compact image prompt from the workbench manifest. Platform rules are
  * passed in so users do not need to copy dimensions or compliance notes by hand.
  */
@@ -791,10 +802,13 @@ function buildEcommerceImagePrompt(manifest, target) {
   const outputs = Array.isArray(manifest?.outputs) ? manifest.outputs : [];
   const output = outputs.find(item => item?.type === target.type) || {};
   const language = manifest?.language && typeof manifest.language === 'object' ? manifest.language : {};
+  const visualStyle = manifest?.visual_style && typeof manifest.visual_style === 'object' ? manifest.visual_style : {};
+  const aspectRatio = manifest?.aspect_ratio && typeof manifest.aspect_ratio === 'object' ? manifest.aspect_ratio : {};
   const outputLanguage = String(language.prompt || language.label || '简体中文').trim();
   const sellingPoints = Array.isArray(input.selling_points) && input.selling_points.length
     ? input.selling_points.join('；')
     : '请从参考图识别，并只使用能从图片或用户信息确认的卖点';
+  const targetSize = resolveEcommerceTargetSize(manifest, target);
 
   return [
     '你是 Bavi-box 电商图片生成器。基于参考商品图片和用户填写的信息，直接生成成品图，不要输出方案。',
@@ -808,6 +822,8 @@ function buildEcommerceImagePrompt(manifest, target) {
     `核心卖点：${sellingPoints}`,
     `图片内文字语言：${outputLanguage}`,
     `规格约束：${output.size_rule || '优先 1:1 清晰商品图'}`,
+    `图片风格：${visualStyle.label || '平台自动'}；模板：${visualStyle.template || target.template}；风格要求：${visualStyle.prompt || '同一套图保持 Campaign Style Lock，不随机漂移。'}`,
+    `图片比例：${aspectRatio.label || '平台自动'}；目标尺寸：${targetSize}；比例要求：${aspectRatio.prompt || '按平台和生成类型自动选择比例。'}`,
     `合规检查：${Array.isArray(manifest?.qa) ? manifest.qa.join('；') : '文字和事实需人工复核'}`,
     `视觉要求：真实商品外观优先，背景干净，构图有层次，图片内文字使用 ${outputLanguage}，少而清晰，禁止编造品牌授权、销量、资质、功效承诺。`,
   ].join('\n');
@@ -967,6 +983,7 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS);
   const prompt = buildEcommerceImagePrompt(manifest, target);
+  const targetSize = resolveEcommerceTargetSize(manifest, target);
   const url = `${credential.baseUrl}/images/${images.length ? 'edits' : 'generations'}`;
 
   try {
@@ -975,7 +992,7 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
       const form = new FormData();
       form.append('model', credential.requestModel);
       form.append('prompt', prompt);
-      form.append('size', target.size);
+      form.append('size', targetSize);
       form.append('response_format', 'b64_json');
       images.forEach((image) => {
         form.append('image', new Blob([image.buffer], { type: image.mimeType }), image.fileName);
@@ -996,7 +1013,7 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
         body: JSON.stringify({
           model: credential.requestModel,
           prompt,
-          size: target.size,
+          size: targetSize,
           n: 1,
           response_format: 'b64_json',
         }),
@@ -1588,6 +1605,89 @@ async function getActivationJSON(pathname, options = {}) {
 }
 
 /**
+ * Detects expired Bavi-box cloud access-token failures without exposing the raw token path.
+ */
+function isCloudAccessTokenExpiredError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('token is expired')
+    || message.includes('access token expired')
+    || (message.includes('expired') && message.includes('token'));
+}
+
+/**
+ * Refreshes the Bavi-box cloud access token so activated clients do not appear
+ * logged out when users enter recharge or usage pages after a few idle days.
+ */
+async function refreshCloudAccessToken({ endpoint, accessToken, state }) {
+  const currentToken = String(accessToken || '').trim();
+  if (!currentToken) {
+    throw new Error('uclaw access token is not available');
+  }
+  const result = await postActivationJSON('/v1/auth/token/refresh', {
+    accessToken: currentToken,
+  }, { endpoint, timeoutMs: 12000 });
+  const nextToken = String(result?.accessToken || '').trim();
+  if (!nextToken) {
+    throw new Error('cloud token refresh response missing accessToken');
+  }
+  const nextState = {
+    ...(state || {}),
+    uclawAccessToken: nextToken,
+    tokenRefreshedAt: new Date().toISOString(),
+  };
+  const maskedPhone = String(result?.user?.phone || '').trim();
+  if (maskedPhone) {
+    nextState.phoneMasked = maskedPhone;
+    nextState.accountMasked = maskedPhone;
+  }
+  atomicWriteJson(activationStatePath, nextState);
+  writeDirtyMarker('activation-token-refresh');
+  return nextToken;
+}
+
+/**
+ * Reads cloud JSON and retries once after renewing an expired local U-Claw token.
+ */
+async function getActivationJSONWithTokenRefresh(pathname, options = {}) {
+  try {
+    return await getActivationJSON(pathname, options);
+  } catch (error) {
+    if (!isCloudAccessTokenExpiredError(error) || options.skipTokenRefresh) {
+      throw error;
+    }
+    const state = options.state || readJsonFile(activationStatePath) || {};
+    const endpoint = String(options.endpoint || state.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+    const refreshedToken = await refreshCloudAccessToken({
+      endpoint,
+      accessToken: options.accessToken || state.uclawAccessToken,
+      state,
+    });
+    return getActivationJSON(pathname, { ...options, endpoint, accessToken: refreshedToken, skipTokenRefresh: true });
+  }
+}
+
+/**
+ * Posts cloud JSON and retries once after renewing an expired local U-Claw token.
+ */
+async function postActivationJSONWithTokenRefresh(pathname, payload, options = {}) {
+  try {
+    return await postActivationJSON(pathname, payload, options);
+  } catch (error) {
+    if (!isCloudAccessTokenExpiredError(error) || options.skipTokenRefresh) {
+      throw error;
+    }
+    const state = options.state || readJsonFile(activationStatePath) || {};
+    const endpoint = String(options.endpoint || state.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+    const refreshedToken = await refreshCloudAccessToken({
+      endpoint,
+      accessToken: options.accessToken || state.uclawAccessToken,
+      state,
+    });
+    return postActivationJSON(pathname, payload, { ...options, endpoint, accessToken: refreshedToken, skipTokenRefresh: true });
+  }
+}
+
+/**
  * Fetches model names directly from the configured New API endpoint.
  */
 async function fetchDirectNewApiModelCatalog(config) {
@@ -1656,7 +1756,7 @@ async function getCloudModelUsageSummary() {
   if (!accessToken) {
     return { ok: false, message: 'uclaw access token is not available' };
   }
-  return getActivationJSON('/v1/newapi/usage/summary', { endpoint, accessToken });
+  return getActivationJSONWithTokenRefresh('/v1/newapi/usage/summary', { endpoint, accessToken, state });
 }
 
 /**
@@ -1674,7 +1774,7 @@ async function recordEcommerceImageUsage({ manifest, credential, generated }) {
   const quotaPerImage = Number.isFinite(ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE) && ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE > 0
     ? ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE
     : 50000;
-  return postActivationJSON('/v1/newapi/usage/ecommerce-image', {
+  return postActivationJSONWithTokenRefresh('/v1/newapi/usage/ecommerce-image', {
     requestId,
     model: credential.requestModel || credential.model,
     tokenName: 'uclaw-main',
@@ -1682,7 +1782,7 @@ async function recordEcommerceImageUsage({ manifest, credential, generated }) {
     outputTypes: Array.isArray(manifest?.output_types) ? manifest.output_types : [],
     imageCount: generated.length,
     quotaPerImage,
-  }, { endpoint, accessToken, timeoutMs: 15000 });
+  }, { endpoint, accessToken, state, timeoutMs: 15000 });
 }
 
 /**
@@ -1702,7 +1802,7 @@ async function getCloudModelCatalog() {
     return directCatalog;
   }
   try {
-    const catalog = await getActivationJSON('/v1/newapi/models/catalog', { endpoint, accessToken });
+    const catalog = await getActivationJSONWithTokenRefresh('/v1/newapi/models/catalog', { endpoint, accessToken, state });
     return { ok: true, ...catalog, models: Array.isArray(catalog.models) ? catalog.models : [] };
   } catch (error) {
     return { ok: false, message: error?.message || String(error), models: [] };
@@ -1765,7 +1865,7 @@ async function getCloudRechargePlans() {
     return { ok: false, message: 'uclaw access token is not available', plans: [] };
   }
   try {
-    const result = await getActivationJSON('/v1/recharge/plans', { endpoint, accessToken });
+    const result = await getActivationJSONWithTokenRefresh('/v1/recharge/plans', { endpoint, accessToken, state });
     return { ok: true, plans: Array.isArray(result.plans) ? result.plans : [] };
   } catch (error) {
     return { ok: false, message: error?.message || String(error), plans: [] };
@@ -1786,7 +1886,7 @@ async function getCloudRechargeProviders() {
     return { ok: false, message: 'uclaw access token is not available', providers: [] };
   }
   try {
-    const result = await getActivationJSON('/v1/recharge/providers', { endpoint, accessToken });
+    const result = await getActivationJSONWithTokenRefresh('/v1/recharge/providers', { endpoint, accessToken, state });
     return { ok: true, providers: Array.isArray(result.providers) ? result.providers : [] };
   } catch (error) {
     return { ok: false, message: error?.message || String(error), providers: [] };
@@ -1807,7 +1907,7 @@ async function getCloudRechargeOrders() {
     return { ok: false, message: 'uclaw access token is not available', orders: [] };
   }
   try {
-    const result = await getActivationJSON('/v1/recharge/orders', { endpoint, accessToken });
+    const result = await getActivationJSONWithTokenRefresh('/v1/recharge/orders', { endpoint, accessToken, state });
     return { ok: true, orders: Array.isArray(result.orders) ? result.orders : [] };
   } catch (error) {
     return { ok: false, message: error?.message || String(error), orders: [] };
@@ -1832,7 +1932,7 @@ async function getCloudRechargeOrder(orderNo) {
     return { ok: false, message: 'orderNo is required' };
   }
   try {
-    const result = await getActivationJSON(`/v1/recharge/orders/${encodeURIComponent(normalizedOrderNo)}`, { endpoint, accessToken });
+    const result = await getActivationJSONWithTokenRefresh(`/v1/recharge/orders/${encodeURIComponent(normalizedOrderNo)}`, { endpoint, accessToken, state });
     return { ok: true, order: result.order };
   } catch (error) {
     return { ok: false, message: error?.message || String(error) };
@@ -1877,19 +1977,19 @@ async function rechargeCloudModelQuota(payload = {}) {
     let actualProvider = provider;
     let created;
     try {
-      created = await postActivationJSON('/v1/recharge/orders', {
+      created = await postActivationJSONWithTokenRefresh('/v1/recharge/orders', {
         planCode,
         provider: actualProvider,
-      }, { endpoint, accessToken });
+      }, { endpoint, accessToken, state });
     } catch (error) {
       if (actualProvider !== 'alipay' || !String(error?.message || error).includes('payment provider alipay is not configured')) {
         throw error;
       }
       actualProvider = 'virtual';
-      created = await postActivationJSON('/v1/recharge/orders', {
+      created = await postActivationJSONWithTokenRefresh('/v1/recharge/orders', {
         planCode,
         provider: actualProvider,
-      }, { endpoint, accessToken });
+      }, { endpoint, accessToken, state });
     }
     const orderNo = String(created?.order?.orderNo || '').trim();
     if (!orderNo) {

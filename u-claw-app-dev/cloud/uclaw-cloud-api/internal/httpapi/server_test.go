@@ -105,6 +105,58 @@ func TestSMSLoginRejectsInvalidCode(t *testing.T) {
 	}
 }
 
+func TestTokenRefreshEndpointReturnsUsableCloudAccessToken(t *testing.T) {
+	server := NewServer(config.Config{
+		AppEnv:     "development",
+		JWTSecret:  "test-secret",
+		DevSMSCode: "654321",
+	}, BuildInfo{Version: "test"})
+	accessToken := loginForTest(t, server, "13800138000", "654321")
+
+	refreshRec := httptest.NewRecorder()
+	refreshReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/auth/token/refresh",
+		bytes.NewBufferString(`{"accessToken":"`+accessToken+`"}`),
+	)
+	server.ServeHTTP(refreshRec, refreshReq)
+	if refreshRec.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d body = %s", refreshRec.Code, refreshRec.Body.String())
+	}
+	var refreshPayload struct {
+		AccessToken string `json:"accessToken"`
+		User        struct {
+			ID    int64  `json:"id"`
+			Phone string `json:"phone"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(refreshRec.Body.Bytes(), &refreshPayload); err != nil {
+		t.Fatalf("decode refresh response: %v", err)
+	}
+	if refreshPayload.AccessToken == "" || refreshPayload.User.Phone != "138****8000" {
+		t.Fatalf("refresh payload = %+v", refreshPayload)
+	}
+
+	okRec := httptest.NewRecorder()
+	okReq := httptest.NewRequest(http.MethodGet, "/v1/recharge/plans", nil)
+	okReq.Header.Set("Authorization", "Bearer "+refreshPayload.AccessToken)
+	server.ServeHTTP(okRec, okReq)
+	if okRec.Code != http.StatusOK {
+		t.Fatalf("refreshed status = %d body = %s", okRec.Code, okRec.Body.String())
+	}
+
+	badRec := httptest.NewRecorder()
+	badReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/auth/token/refresh",
+		bytes.NewBufferString(`{"accessToken":"not-a-token"}`),
+	)
+	server.ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusUnauthorized {
+		t.Fatalf("bad refresh status = %d body = %s", badRec.Code, badRec.Body.String())
+	}
+}
+
 func TestActivationRedeemReturnsClientConfig(t *testing.T) {
 	server := NewServer(config.Config{
 		AppEnv:              "development",
