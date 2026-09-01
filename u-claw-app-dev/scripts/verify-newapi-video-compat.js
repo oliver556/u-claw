@@ -186,6 +186,38 @@ async function main() {
       duration: '4',
     });
 
+    const imageCompatCreate = await fetch(`http://127.0.0.1:${adapterPort}/v1/videos/generations`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer newapi-key',
+        'Content-Type': 'application/json',
+        'X-UClaw-NewAPI-Compat': '1',
+      },
+      body: JSON.stringify({
+        model: 'seedance-1.5-pro-1080p-5s',
+        prompt: 'image loop',
+        image: { url: 'https://example.test/first.png' },
+        reference_images: [{ url: 'https://example.test/last.png' }],
+        seconds: '99',
+      }),
+    });
+    assert.equal(imageCompatCreate.status, 200);
+    assert.deepEqual(await imageCompatCreate.json(), {
+      request_id: 'task_newapi_4',
+      status: 'processing',
+      error: null,
+    });
+    assert.deepEqual(seenNewApi, {
+      model: 'seedance-1.5-pro-1080p-5s',
+      prompt: 'image loop',
+      seconds: '5',
+      duration: '5',
+      image: { url: 'https://example.test/first.png' },
+      reference_images: [{ url: 'https://example.test/last.png' }],
+    });
+    assert.match(seenFlashCreate, /name="first_frame_image"\r\n\r\nhttps:\/\/example\.test\/first\.png\r\n/);
+    assert.match(seenFlashCreate, /name="last_frame_image"\r\n\r\nhttps:\/\/example\.test\/last\.png\r\n/);
+
     const fullCompatStatus = await fetch(`http://127.0.0.1:${adapterPort}/v1/videos/task_newapi_3`, {
       headers: {
         Authorization: 'Bearer newapi-key',

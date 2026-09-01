@@ -243,6 +243,58 @@ function addFormField(form, key, value) {
   form.append(key, String(value));
 }
 
+function mediaUrl(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value !== 'object') return String(value).trim();
+  return mediaUrl(
+    value.url
+    || value.image_url?.url
+    || value.image_url
+    || value.video_url?.url
+    || value.video_url
+    || value.audio_url?.url
+    || value.audio_url,
+  );
+}
+
+function mediaUrls(value) {
+  if (value === undefined || value === null || value === '') return [];
+  if (Array.isArray(value)) return value.flatMap(item => mediaUrls(item));
+  const url = mediaUrl(value);
+  return url ? [url] : [];
+}
+
+function collectImageUrls(body) {
+  return [
+    ...mediaUrls(body.image),
+    ...mediaUrls(body.images),
+    ...mediaUrls(body.input_reference),
+    ...mediaUrls(body.input_references),
+    ...mediaUrls(body.reference_images),
+  ];
+}
+
+function appendFlashMediaFields(form, body) {
+  const firstFrameImage = mediaUrl(body.first_frame_image || body.firstFrameImage);
+  const lastFrameImage = mediaUrl(
+    body.last_frame_image
+    || body.lastFrameImage
+    || body.metadata?.last_frame_url
+    || body.metadata?.lastFrameUrl,
+  );
+  const imageUrls = collectImageUrls(body);
+
+  if (firstFrameImage) addFormField(form, 'first_frame_image', firstFrameImage);
+  if (lastFrameImage) addFormField(form, 'last_frame_image', lastFrameImage);
+  if (!firstFrameImage && imageUrls[0]) addFormField(form, 'first_frame_image', imageUrls[0]);
+  if (!lastFrameImage && imageUrls[1]) addFormField(form, 'last_frame_image', imageUrls[1]);
+
+  addFormField(form, 'image', mediaUrl(body.image) || firstFrameImage || imageUrls[0]);
+  addFormField(form, 'images', imageUrls);
+  addFormField(form, 'input_reference', mediaUrls(body.input_reference || body.input_references || body.reference_images));
+}
+
 function buildFlashCreateForm(body, config) {
   const { requested, modelConfig } = getModelConfig(config, body.model);
   const form = new FormData();
@@ -253,6 +305,7 @@ function buildFlashCreateForm(body, config) {
   addFormField(form, 'prompt', body.prompt);
   addFormField(form, 'size', size);
   addFormField(form, 'seconds', seconds);
+  appendFlashMediaFields(form, body);
   return { form, requested, modelConfig };
 }
 
@@ -478,6 +531,18 @@ function newApiVideoCreateBody(body, config) {
     ...(seconds ? { seconds: String(seconds), duration: String(seconds) } : {}),
   };
   if (allowedNewApiSizes.has(size)) nextBody.size = size;
+  for (const key of [
+    'image',
+    'images',
+    'input_reference',
+    'input_references',
+    'reference_images',
+    'first_frame_image',
+    'last_frame_image',
+    'metadata',
+  ]) {
+    if (body[key] !== undefined && body[key] !== null && body[key] !== '') nextBody[key] = body[key];
+  }
   return nextBody;
 }
 
