@@ -291,7 +291,13 @@ async function installDirectImageApiStub(page) {
     try {
       await page.evaluate(() => {
         window.__uclawEcommerceRequests = [];
+        window.__uclawEcommerceProgressEvents = [];
+        window.__uclawEcommerceProgressListeners = [];
         const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC";
+        const emitProgress = (payload) => {
+          window.__uclawEcommerceProgressEvents.push(payload);
+          for (const listener of window.__uclawEcommerceProgressListeners) listener(payload);
+        };
         window.uclaw = {
           ...(window.uclaw || {}),
           generateEcommerceImages: async (payload) => {
@@ -328,14 +334,29 @@ async function installDirectImageApiStub(page) {
               payload: {
                 platform: payload?.manifest?.platform,
                 productName: payload?.manifest?.name,
+                language: payload?.manifest?.language,
                 outputTypes,
                 outputCounts,
                 imageCount: Array.isArray(payload?.images) ? payload.images.length : 0,
                 fileNames: Array.isArray(payload?.images) ? payload.images.map((item) => item?.fileName) : [],
               },
             });
+            const requestId = payload?.manifest?.id || "fixture-request";
+            for (let index = 0; index < images.length; index += 1) {
+              await new Promise((resolve) => setTimeout(resolve, index === 0 ? 30 : 80));
+              emitProgress({
+                requestId,
+                index,
+                total: images.length,
+                status: "completed",
+                image: images[index],
+                generatedCount: index + 1,
+                target: { type: images[index].type, title: images[index].title },
+              });
+            }
             return {
               ok: true,
+              requestId,
               provider: "newapi",
               model: "gpt-image-2",
               generatedAt: new Date().toISOString(),
@@ -343,6 +364,15 @@ async function installDirectImageApiStub(page) {
               images,
             };
           },
+          onEcommerceImageProgress: (callback) => {
+            window.__uclawEcommerceProgressListeners.push(callback);
+            return () => {
+              window.__uclawEcommerceProgressListeners = window.__uclawEcommerceProgressListeners.filter(
+                (listener) => listener !== callback,
+              );
+            };
+          },
+          materializeEcommerceImage: async (payload) => ({ ok: true, image: payload }),
         };
       });
       return;
@@ -351,6 +381,74 @@ async function installDirectImageApiStub(page) {
       await page.waitForLoadState("domcontentloaded").catch(() => {});
       await page.waitForTimeout(500);
     }
+  }
+}
+
+/**
+ * Simulates leaving Workflows for Models and coming back, then verifies draft
+ * cache restores user input without forcing a generation first.
+ */
+async function verifyDraftSurvivesRouteSwitch(page) {
+  await page.evaluate(() => {
+    window.__uclawEcommerceDraftBeforeRouteSwitch = JSON.parse(
+      localStorage.getItem("uclaw.ecommerceWorkbench.draft.v1") || "null",
+    );
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "电商主图/详情图", 10000);
+  await waitForText(page, "2 张已选择", 10000);
+
+  const draftState = await evaluateInDom(
+    page,
+    `
+      const workbench = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-uclaw-ecommerce-workbench") === "direct-output");
+      const inputs = allNodes().filter((node) => node instanceof HTMLInputElement);
+      const selects = allNodes().filter((node) => node instanceof HTMLSelectElement);
+      const textarea = allNodes().find((node) => node instanceof HTMLTextAreaElement);
+      const files = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-file"));
+      const modelCard = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type") && (node.innerText || node.textContent || "").includes("模特图"));
+      const detailCard = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type") && (node.innerText || node.textContent || "").includes("详情图"));
+      return {
+        platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
+        language: workbench?.getAttribute("data-uclaw-ecommerce-language") || "",
+        productName: inputs.find((node) => node.placeholder === "如：便携榨汁杯")?.value || "",
+        category: inputs.find((node) => node.placeholder === "如：厨房小电")?.value || "",
+        audience: inputs.find((node) => node.placeholder === "默认可不填")?.value || "",
+        sellingPoints: textarea?.value || "",
+        fileCount: files.length,
+        draftFileCount: Array.isArray(window.__uclawEcommerceDraftFiles) ? window.__uclawEcommerceDraftFiles.length : -1,
+        draftBefore: window.__uclawEcommerceDraftBeforeRouteSwitch,
+        draftAfter: JSON.parse(localStorage.getItem("uclaw.ecommerceWorkbench.draft.v1") || "null"),
+        selectValues: selects.map((node) => node.value),
+        modelSelected: Boolean(modelCard?.classList.contains("is-active")),
+        detailCount: detailCard?.querySelector("input[type='number']")?.value || "",
+      };
+    `,
+  );
+
+  if (draftState.platform !== "amazon" || draftState.language !== "en") {
+    throw new Error(`Draft route switch lost platform/language: ${JSON.stringify(draftState)}`);
+  }
+  if (draftState.productName !== "便携榨汁杯" || draftState.category !== "厨房小电" || draftState.audience !== "通勤白领") {
+    throw new Error(`Draft route switch lost product fields: ${JSON.stringify(draftState)}`);
+  }
+  if (!draftState.sellingPoints.includes("USB-C 充电")) {
+    throw new Error(`Draft route switch lost selling points: ${JSON.stringify(draftState)}`);
+  }
+  if (draftState.fileCount !== 2 || draftState.draftFileCount !== 2) {
+    throw new Error(`Draft route switch lost image files: ${JSON.stringify(draftState)}`);
+  }
+  if (!draftState.modelSelected || draftState.detailCount !== "6") {
+    throw new Error(`Draft route switch lost output selection: ${JSON.stringify(draftState)}`);
+  }
+  if (draftState.draftAfter?.productName !== "便携榨汁杯" || draftState.draftAfter?.outputCounts?.detail_image !== 6) {
+    throw new Error(`Draft localStorage payload invalid: ${JSON.stringify(draftState)}`);
   }
 }
 
@@ -392,6 +490,17 @@ async function exerciseWorkbench(page, imagePath) {
     .fill("6");
   await page.locator("openclaw-tasks-page input[type='file']").setInputFiles(imagePath);
   await waitForText(page, "1 张已选择", 10000);
+  await page.evaluate(() => {
+    const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC"), (char) => char.charCodeAt(0));
+    const file = new File([bytes], "pasted-product.png", { type: "image/png" });
+    const item = { kind: "file", type: "image/png", getAsFile: () => file };
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { items: [item] } });
+    window.dispatchEvent(event);
+  });
+  await waitForText(page, "2 张已选择", 10000);
+  await verifyDraftSurvivesRouteSwitch(page);
+  await installDirectImageApiStub(page);
   await page.waitForFunction(() => {
     const button = [...document.querySelectorAll("openclaw-tasks-page button")].find((node) =>
       (node.innerText || node.textContent || "").includes("生成图片"),
@@ -399,6 +508,14 @@ async function exerciseWorkbench(page, imagePath) {
     return button instanceof HTMLButtonElement && !button.disabled;
   });
   await page.locator("openclaw-tasks-page button").filter({ hasText: "生成图片" }).click();
+  await waitForText(page, "出一张显示一张", 10000);
+  await page.waitForFunction(() => {
+    const cards = [...document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-generated")];
+    return cards.length >= 1 && cards.length < 10;
+  });
+  await page.evaluate(() => {
+    window.__uclawEcommerceSawIncrementalResult = true;
+  });
   await waitForText(page, "Amazon 已生成图片", 10000);
   await waitForText(page, "10 张结果", 10000);
   await waitForText(page, "查看结果", 10000);
@@ -410,9 +527,24 @@ async function exerciseWorkbench(page, imagePath) {
       const files = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-file"));
       const generatedCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated"));
       const generatedImages = allNodes().filter((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-generated"));
+      const featured = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-featured"));
+      const featuredImage = allNodes().find((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-featured"));
+      const featuredTitle = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-featured strong"));
+      const selectedGenerated = generatedCards.find((node) => node.classList.contains("is-selected"));
+      const resultBody = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-result-body"));
+      const resultStrip = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-result-strip"));
       const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
       const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
       const typeCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type"));
+      const countControls = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-count"));
+      const stats = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-stat"));
+      const layout = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-layout"));
+      const panel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-panel"));
+      const side = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-side"));
+      const assetRow = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-asset-row"));
+      const drop = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-drop"));
+      const progress = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-progress"));
+      const updateBanners = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("update-banner"));
       const activeTypes = typeCards
         .filter((node) => node.classList.contains("is-active"))
         .map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
@@ -423,16 +555,62 @@ async function exerciseWorkbench(page, imagePath) {
       const carousel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated-grid"));
       const carouselStyle = carousel ? getComputedStyle(carousel) : null;
       const request = window.__uclawEcommerceRequests?.[0] || null;
+      const progressEvents = window.__uclawEcommerceProgressEvents || [];
       const rect = workbench?.getBoundingClientRect();
+      const countRects = countControls.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { width: Math.round(rect.width), height: Math.round(rect.height) };
+      });
+      const typeRects = typeCards.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { width: Math.round(rect.width), height: Math.round(rect.height) };
+      });
+      const elementRect = (node) => {
+        const rect = node?.getBoundingClientRect?.();
+        return rect ? { width: Math.round(rect.width), height: Math.round(rect.height), x: Math.round(rect.x), y: Math.round(rect.y) } : null;
+      };
+      const visibleStats = stats.filter((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+      });
+      const visibleUpdateBanners = updateBanners.filter((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+      });
       return {
         hasWorkbench: Boolean(workbench),
         platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
+        language: workbench?.getAttribute("data-uclaw-ecommerce-language") || "",
+        workbenchRect: elementRect(workbench),
+        layoutRect: elementRect(layout),
+        panelRect: elementRect(panel),
+        sideRect: elementRect(side),
+        assetRowRect: elementRect(assetRow),
+        dropRect: elementRect(drop),
+        progressRect: elementRect(progress),
+        assetRowColumns: assetRow ? getComputedStyle(assetRow).gridTemplateColumns : "",
+        layoutColumns: layout ? getComputedStyle(layout).gridTemplateColumns : "",
+        visibleStatCount: visibleStats.length,
+        visibleUpdateBannerCount: visibleUpdateBanners.length,
         fileCount: files.length,
         generatedCount: generatedCards.length,
         generatedImageCount: generatedImages.length,
+        featuredRect: elementRect(featured),
+        featuredImageRect: elementRect(featuredImage),
+        featuredTitle: (featuredTitle?.innerText || featuredTitle?.textContent || "").trim(),
+        selectedGeneratedIndex: selectedGenerated ? generatedCards.indexOf(selectedGenerated) : -1,
+        selectedGeneratedTitle: selectedGenerated
+          ? (selectedGenerated.querySelector("strong")?.innerText || selectedGenerated.querySelector("strong")?.textContent || "").trim()
+          : "",
+        resultBodyRect: elementRect(resultBody),
+        resultStripRect: elementRect(resultStrip),
         qaCount: qaChips.length,
         recordCount: recordRows.length,
         typeCardCount: typeCards.length,
+        countRects,
+        typeRects,
         activeTypes,
         generateDisabled: Boolean(generateButton?.disabled),
         hasManifestButton: Boolean(manifestButton),
@@ -444,6 +622,12 @@ async function exerciseWorkbench(page, imagePath) {
         carouselClientWidth: carousel?.clientWidth || 0,
         carouselScrollWidth: carousel?.scrollWidth || 0,
         request,
+        progressEventCount: progressEvents.length,
+        firstProgressStatus: progressEvents[0]?.status || "",
+        progressListenerCount: window.__uclawEcommerceProgressListeners?.length ?? -1,
+        sawIncrementalResult: Boolean(window.__uclawEcommerceSawIncrementalResult),
+        fullTextIncludesUploadShortcuts: (workbench?.innerText || workbench?.textContent || "").includes("选择/拖拽/粘贴图片"),
+        fullTextIncludesIncrementalProgress: (workbench?.innerText || workbench?.textContent || "").includes("出一张显示一张"),
         viewportWidth: window.innerWidth,
         scrollWidth: document.documentElement.scrollWidth,
         width: rect?.width || 0,
@@ -465,6 +649,7 @@ async function runAcceptance(options) {
   const imagePath = writeImageFixture();
   const errors = [];
   const viewports = [
+    { name: "design", width: 1440, height: 1024 },
     { name: "desktop", width: 1280, height: 980 },
     { name: "mobile", width: 390, height: 844 },
   ];
@@ -489,20 +674,61 @@ async function runAcceptance(options) {
       const state = await exerciseWorkbench(page, imagePath);
 
       if (!state.hasWorkbench) throw new Error(`${viewport.name}: Workbench host missing`);
+      if (state.visibleUpdateBannerCount !== 0) {
+        throw new Error(`${viewport.name}: Ecommerce page should not be pushed down by update banner`);
+      }
+      if (viewport.name === "design") {
+        if (state.visibleStatCount !== 3) throw new Error(`${viewport.name}: Expected three hero stats, got ${state.visibleStatCount}`);
+        if (state.workbenchRect.width < 1120 || state.workbenchRect.width > 1140) {
+          throw new Error(`${viewport.name}: Workbench should match design canvas width, got ${JSON.stringify(state.workbenchRect)}`);
+        }
+        if (state.sideRect.width < 382 || state.sideRect.width > 398) {
+          throw new Error(`${viewport.name}: Results rail should stay near 390px, got ${JSON.stringify(state.sideRect)}`);
+        }
+        const firstRowTops = new Set(state.typeRects.map((rect) => rect.y).slice(0, 3));
+        if (firstRowTops.size !== 1) {
+          throw new Error(`${viewport.name}: Three type cards should sit on one row, got ${JSON.stringify(state.typeRects)}`);
+        }
+      }
       if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);
-      if (state.fileCount !== 1) throw new Error(`${viewport.name}: Expected one uploaded preview, got ${state.fileCount}`);
+      if (state.language !== "en") throw new Error(`${viewport.name}: Amazon should default image language to English, got ${state.language}`);
+      if (state.fileCount !== 2) throw new Error(`${viewport.name}: Expected file picker plus pasted preview, got ${state.fileCount}`);
+      if (!state.dropRect) throw new Error(`${viewport.name}: Upload drop target missing`);
+      if (viewport.name === "design") {
+        if (state.dropRect.width < 160 || state.dropRect.width > 180) {
+          throw new Error(`${viewport.name}: Upload drop target should match design width, got ${JSON.stringify(state.dropRect)}`);
+        }
+      }
       if (state.typeCardCount !== 3) throw new Error(`${viewport.name}: Expected three output type cards, got ${state.typeCardCount}`);
       if (!state.activeTypes.some((item) => item.includes("模特图"))) {
         throw new Error(`${viewport.name}: Model image type was not selected`);
+      }
+      const countMaxWidth = viewport.name === "mobile" ? 74 : 82;
+      if (!state.countRects?.length || state.countRects.some((rect) => rect.width > countMaxWidth)) {
+        throw new Error(`${viewport.name}: Count selector should stay compact, got ${JSON.stringify(state.countRects)}`);
+      }
+      if (viewport.name === "mobile" && state.typeRects?.some((rect) => rect.width > viewport.width - 48)) {
+        throw new Error(`${viewport.name}: Type cards should fit mobile viewport, got ${JSON.stringify(state.typeRects)}`);
       }
       if (state.generatedCount < 10) throw new Error(`${viewport.name}: Expected generated image cards, got ${state.generatedCount}`);
       if (state.generatedImageCount < 10) {
         throw new Error(`${viewport.name}: Expected generated image previews, got ${state.generatedImageCount}`);
       }
+      if (!state.featuredRect || !state.featuredImageRect) {
+        throw new Error(`${viewport.name}: Featured result preview missing`);
+      }
+      if (!state.resultBodyRect || !state.resultStripRect) {
+        throw new Error(`${viewport.name}: Result preview should be split into featured and carousel sections`);
+      }
+      if (!state.sawIncrementalResult) {
+        throw new Error(`${viewport.name}: First generated image should render before final batch resolves`);
+      }
+      if (viewport.name === "design" && state.featuredImageRect.height < 250) {
+        throw new Error(`${viewport.name}: Featured result image should be near design height, got ${JSON.stringify(state.featuredImageRect)}`);
+      }
       if (state.qaCount < 4) throw new Error(`${viewport.name}: Expected QA chips, got ${state.qaCount}`);
       if (state.recordCount < 1) throw new Error(`${viewport.name}: Expected one generation record, got ${state.recordCount}`);
       if (state.generateDisabled) throw new Error(`${viewport.name}: Generate button stayed disabled after valid input`);
-      if (!state.hasManifestButton) throw new Error(`${viewport.name}: Manifest copy button missing after generation`);
       if (!state.hasPackageButton) throw new Error(`${viewport.name}: Package download button missing after generation`);
       if (state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button must not appear`);
       if (state.carouselDisplay !== "flex") throw new Error(`${viewport.name}: Generated list should be flex carousel`);
@@ -518,8 +744,17 @@ async function runAcceptance(options) {
       if (state.request?.method !== "uclaw:ecommerce-generate-images") {
         throw new Error(`${viewport.name}: direct ecommerce image IPC was not called`);
       }
-      if (state.request?.payload?.imageCount !== 1) {
-        throw new Error(`${viewport.name}: Expected one direct image payload, got ${state.request?.payload?.imageCount}`);
+      if (state.progressEventCount < 10 || state.firstProgressStatus !== "completed") {
+        throw new Error(`${viewport.name}: incremental image progress did not fire correctly`);
+      }
+      if (state.progressListenerCount !== 0) {
+        throw new Error(`${viewport.name}: ecommerce progress listener should be cleaned up, got ${state.progressListenerCount}`);
+      }
+      if (state.request?.payload?.imageCount !== 2) {
+        throw new Error(`${viewport.name}: Expected two direct image payloads after paste, got ${state.request?.payload?.imageCount}`);
+      }
+      if (state.request?.payload?.language?.id !== "en") {
+        throw new Error(`${viewport.name}: Expected direct payload language en, got ${JSON.stringify(state.request?.payload?.language)}`);
       }
       if (!state.request?.payload?.outputTypes?.includes("model_image")) {
         throw new Error(`${viewport.name}: Expected direct payload to request model_image`);
@@ -535,6 +770,13 @@ async function runAcceptance(options) {
       }
       if (!state.text.includes("最长边建议 1600px")) throw new Error(`${viewport.name}: Amazon preset text missing`);
       if (!state.text.includes("模特图")) throw new Error(`${viewport.name}: Model image text missing`);
+      if (!state.text.includes("图片语言")) throw new Error(`${viewport.name}: Image language selector text missing`);
+      if (!state.text.includes("English")) throw new Error(`${viewport.name}: English language text missing`);
+      if (!state.text.includes("点击预览")) throw new Error(`${viewport.name}: Thumbnail preview affordance missing`);
+      if (!state.fullTextIncludesUploadShortcuts) throw new Error(`${viewport.name}: Drag and paste upload affordance missing`);
+      if (!state.fullTextIncludesIncrementalProgress && !state.sawIncrementalResult) {
+        throw new Error(`${viewport.name}: Incremental progress text missing`);
+      }
       if (!state.text.includes("详情图6屏")) throw new Error(`${viewport.name}: Detail series count text missing`);
       if (state.scrollWidth > state.viewportWidth + 4) {
         throw new Error(`${viewport.name}: horizontal overflow ${state.scrollWidth} > ${state.viewportWidth}`);
@@ -549,10 +791,56 @@ async function runAcceptance(options) {
         throw new Error(`${viewport.name}: Expected ecommerce zip download, got ${suggestedFilename}`);
       }
       await download.cancel().catch(() => {});
+      const downloadEvents = [];
+      page.on("download", (download) => downloadEvents.push(download.suggestedFilename()));
+      await page.locator("openclaw-tasks-page .uclaw-ecommerce-generated").nth(1).click();
+      await waitForText(page, "主图2张", 5000);
+      const previewState = await evaluateInDom(
+        page,
+        `
+          const cards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated"));
+          const selected = cards.find((node) => node.classList.contains("is-selected"));
+          const featuredTitle = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-featured strong"));
+          return {
+            selectedIndex: selected ? cards.indexOf(selected) : -1,
+            selectedTitle: selected ? (selected.querySelector("strong")?.innerText || selected.querySelector("strong")?.textContent || "").trim() : "",
+            featuredTitle: (featuredTitle?.innerText || featuredTitle?.textContent || "").trim(),
+          };
+        `,
+      );
+      await page.waitForTimeout(500);
+      if (previewState.selectedIndex !== 1 || previewState.featuredTitle !== "主图2张") {
+        throw new Error(`${viewport.name}: Thumbnail click should select featured preview, got ${JSON.stringify(previewState)}`);
+      }
+      const imageDownloads = downloadEvents.filter((name) => /\.(png|jpg|jpeg|webp|svg)$/i.test(name));
+      if (imageDownloads.length > 0) {
+        throw new Error(`${viewport.name}: Thumbnail click must not download images, got ${imageDownloads.join(", ")}`);
+      }
+      const [featuredDownload] = await Promise.all([
+        page.waitForEvent("download", { timeout: 10000 }),
+        page.locator("openclaw-tasks-page .uclaw-ecommerce-featured a[download]").click(),
+      ]);
+      const featuredFilename = featuredDownload.suggestedFilename();
+      if (!/02-.*\.(png|jpg|jpeg|webp)$/i.test(featuredFilename)) {
+        throw new Error(`${viewport.name}: Expected selected featured image download, got ${featuredFilename}`);
+      }
+      await featuredDownload.cancel().catch(() => {});
+      await page
+        .evaluate(() => {
+          window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+          for (const node of document.querySelectorAll(".content, openclaw-router-outlet")) {
+            if (node instanceof HTMLElement) {
+              node.scrollTop = 0;
+              node.scrollLeft = 0;
+            }
+          }
+        })
+        .catch(() => {});
+      await page.waitForTimeout(100);
 
       fs.mkdirSync(screenshotsDir, { recursive: true });
       const screenshot = path.join(screenshotsDir, `ecommerce-workbench-ui-${viewport.name}.png`);
-      await page.screenshot({ path: screenshot, fullPage: true });
+      await page.screenshot({ path: screenshot, fullPage: false });
       await page.close();
       results.push({ viewport: viewport.name, screenshot, state });
     }

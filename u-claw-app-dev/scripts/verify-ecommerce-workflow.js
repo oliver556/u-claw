@@ -76,6 +76,52 @@ function requireToken(errors, label, content, token) {
 }
 
 /**
+ * Evaluates one top-level helper from main.js in isolation for behavior checks.
+ */
+function evaluateMainHelper(content, name) {
+  const start = content.indexOf(`function ${name}(`);
+  if (start === -1) throw new Error(`Missing helper: ${name}`);
+  const nextFunction = content.indexOf("\nfunction ", start + 1);
+  const source = content.slice(start, nextFunction === -1 ? content.length : nextFunction);
+  return Function(`${source}; return ${name};`)();
+}
+
+/**
+ * Verifies direct NewAPI calls use the billable /v1 image surface and safe model ids.
+ */
+function verifyDirectNewApiRouting(errors) {
+  try {
+    const mainContent = readFile(mainProcessFile);
+    const normalizeBaseUrl = evaluateMainHelper(mainContent, "normalizeNewApiImageBaseUrl");
+    const normalizeModel = evaluateMainHelper(mainContent, "normalizeEcommerceNewApiModel");
+
+    const cases = [
+      ["https://api.example.com", "https://api.example.com/v1"],
+      ["https://api.example.com/v1", "https://api.example.com/v1"],
+      ["https://api.example.com/v1/", "https://api.example.com/v1"],
+      ["https://api.example.com/proxy", "https://api.example.com/proxy/v1"],
+    ];
+    for (const [input, expected] of cases) {
+      const actual = normalizeBaseUrl(input);
+      if (actual !== expected) {
+        errors.push(`normalizeNewApiImageBaseUrl(${input}) = ${actual}, expected ${expected}`);
+      }
+    }
+
+    const routed = normalizeModel("newapi/gpt-image-2");
+    if (routed.modelRef !== "newapi/gpt-image-2" || routed.requestModel !== "gpt-image-2") {
+      errors.push("normalizeEcommerceNewApiModel must keep modelRef and send bare NewAPI model id");
+    }
+    const bare = normalizeModel("gpt-image-2");
+    if (bare.modelRef !== "gpt-image-2" || bare.requestModel !== "gpt-image-2") {
+      errors.push("normalizeEcommerceNewApiModel must preserve bare image model ids");
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
  * Ensures the desktop-owned image API exists outside the OpenClaw chat/session path.
  */
 function verifyDirectDesktopApi(errors) {
@@ -83,6 +129,8 @@ function verifyDirectDesktopApi(errors) {
   const preloadContent = readFile(preloadFile);
   const mainTokens = [
     "resolveEcommerceImageCredential",
+    "normalizeNewApiImageBaseUrl",
+    "normalizeEcommerceNewApiModel",
     "resolveEcommerceImageTargets",
     "generateEcommerceImagesDirect",
     "requestEcommerceImage",
@@ -90,12 +138,31 @@ function verifyDirectDesktopApi(errors) {
     "08-model-showcase",
     "ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS",
     "outputCounts",
-    "/images/edits",
+    "/images/${images.length ? 'edits' : 'generations'}",
+    "requestModel",
+    "materializeEcommerceImageUrl",
+    "materializeEcommerceImageForRenderer",
+    "assertPublicEcommerceImageUrl",
+    "isPrivateNetworkAddress",
+    "ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES",
+    "recordEcommerceImageUsage",
+    "/v1/newapi/usage/ecommerce-image",
+    "ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE",
+    "billing",
     "uclaw:ecommerce-generate-images",
+    "uclaw:ecommerce-image-progress",
+    "emitEcommerceImageProgress",
+    "status: 'completed'",
+    "status: 'settled'",
+    "uclaw:ecommerce-materialize-image",
   ];
   const preloadTokens = [
     "generateEcommerceImages",
     "uclaw:ecommerce-generate-images",
+    "onEcommerceImageProgress",
+    "uclaw:ecommerce-image-progress",
+    "materializeEcommerceImage",
+    "uclaw:ecommerce-materialize-image",
   ];
 
   for (const token of mainTokens) {
@@ -103,6 +170,16 @@ function verifyDirectDesktopApi(errors) {
   }
   for (const token of preloadTokens) {
     requireToken(errors, "src/preload.js", preloadContent, token);
+  }
+
+  if (/configuredModel\.includes\('\/'\)\s*\?\s*configuredModel\.split\('\/'\)\.pop\(\)/.test(mainContent)) {
+    errors.push("src/main.js must not blindly strip provider prefixes from ecommerce image model refs");
+  }
+  if (/const endpoint = images\.length \? '\/images\/edits' : '\/images\/generations';/.test(mainContent)) {
+    errors.push("src/main.js must normalize NewAPI baseUrl before appending image endpoints");
+  }
+  if (!/recordEcommerceImageUsage\(\{ manifest, credential, generated \}\)/.test(mainContent)) {
+    errors.push("src/main.js must report successful ecommerce image generation for NewAPI consumption");
   }
 }
 
@@ -121,14 +198,54 @@ function verifyPatchSource(errors) {
     "UcEcommerceBuildManifest",
     "UcEcommerceBuildDirectPayload",
     "UcEcommerceFileToPayload",
+    "UcEcommerceLanguageOptions",
+    "UcEcommerceSelectedLanguage",
+    "UcEcommerceEnsureDataUrl",
+    "UcEcommerceDownloadImage",
+    "UcEcommerceNormalizeRecord",
+    "UcEcommerceStaleGeneratingMs",
+    "selectEcommercePreview",
+    "ecommercePreviewIndex",
     "onEcommerceOutputType",
     "onEcommerceOutputCount",
+    "downloadEcommerceImage",
+    "onEcommerceImageProgress",
+    "onEcommerceDrop",
+    "onEcommercePaste",
+    "setEcommerceFiles",
     "startEcommerceImageGeneration",
+    "onEcommerceImageProgress",
     "generateEcommerceImages",
+    "uclaw-ecommerce-progress",
+    "uclaw-ecommerce-hero",
+    "uclaw-ecommerce-stats",
+    "uclaw-ecommerce-layout",
+    "uclaw-ecommerce-panel",
+    "uclaw-ecommerce-side",
+    "uclaw-ecommerce-drop",
+    "uclaw-ecommerce-asset-row",
+    "uclaw-ecommerce-featured",
+    "uclaw-ecommerce-result-body",
+    "uclaw-ecommerce-result-strip",
+    "uclaw-ecommerce-stepper",
     "model_image",
     "outputCounts",
     "uclaw.ecommerceImageRecords.v1",
     "uclaw.ecommerceWorkbench.platform.v1",
+    "uclaw.ecommerceWorkbench.draft.v1",
+    "UcEcommerceReadDraft",
+    "UcEcommerceWriteDraft",
+    "UcEcommerceRememberDraftFiles",
+    "UcEcommerceReadDraftFiles",
+    "saveEcommerceDraft",
+    "defaultLanguage",
+    "data-uclaw-ecommerce-language",
+    "图片语言",
+    "点击预览",
+    "选择/拖拽/粘贴图片",
+    "出一张显示一张",
+    "已中断",
+    "生成已中断",
     "official_seed",
     "public_summary",
     "needs_backend_confirmation",
@@ -139,6 +256,7 @@ function verifyPatchSource(errors) {
   }
 
   requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-design-layout-3");
   if (content.includes("UcEcommerceBuildGenerationPrompt")) {
     errors.push("patch-openclaw.js still contains the old ecommerce chat prompt builder");
   }
@@ -165,19 +283,55 @@ function verifyGeneratedTasksPage(errors) {
       "生成图片",
       "打包下载",
       "生成记录",
-      "选择图片",
+      "选择/拖拽/粘贴图片",
       "UcEcommercePlatformPresets",
       "UcEcommerceImageTargets",
       "UcEcommerceOutputCountRules",
       "UcEcommerceBuildManifest",
       "UcEcommerceBuildDirectPayload",
       "UcEcommerceBuildExportPackage",
+      "UcEcommerceLanguageOptions",
+      "UcEcommerceDownloadImage",
+      "UcEcommerceNormalizeRecord",
+      "UcEcommerceStaleGeneratingMs",
+      "selectEcommercePreview",
+      "ecommercePreviewIndex",
       "downloadEcommercePackage",
+      "downloadEcommerceImage",
+      "onEcommerceImageProgress",
+      "onEcommerceDrop",
+      "onEcommercePaste",
+      "setEcommerceFiles",
       "model_image",
       "outputCounts",
+      "defaultLanguage",
+      "data-uclaw-ecommerce-language",
+      "图片语言",
+      "点击预览",
+      "已中断",
+      "生成已中断",
       "startEcommerceImageGeneration",
       "generateEcommerceImages",
+      "uclaw-ecommerce-hero",
+      "uclaw-ecommerce-stats",
+      "uclaw-ecommerce-layout",
+      "uclaw-ecommerce-panel",
+      "uclaw-ecommerce-side",
+      "uclaw-ecommerce-drop",
+      "uclaw-ecommerce-asset-row",
+      "uclaw-ecommerce-featured",
+      "uclaw-ecommerce-result-body",
+      "uclaw-ecommerce-result-strip",
+      "is-selected",
+      "uclaw-ecommerce-stepper",
+      "uclaw-ecommerce-progress",
+      "出一张显示一张",
       "uclaw.ecommerceImageRecords.v1",
+      "uclaw.ecommerceWorkbench.draft.v1",
+      "UcEcommerceReadDraft",
+      "UcEcommerceWriteDraft",
+      "UcEcommerceRememberDraftFiles",
+      "saveEcommerceDraft",
       "source_type",
       "抖音电商",
       "Amazon",
@@ -193,6 +347,9 @@ function verifyGeneratedTasksPage(errors) {
     }
     if (/UcEcommerceBuildGenerationPrompt|openEcommerceGenerationRecord|打开会话|chat\.send|sessions\.create/.test(content)) {
       errors.push(`${label} still contains old ecommerce session-generation wiring`);
+    }
+    if (/disconnectedCallback\(\)\{this\.cleanupEcommerceFileUrls\?\.\(\)/.test(content)) {
+      errors.push(`${label} still revokes ecommerce draft files during route switch`);
     }
   }
 }
@@ -215,6 +372,15 @@ function verifyGeneratedCss(errors) {
       "scroll-snap-type",
       "overscroll-behavior-x",
       ".uclaw-ecommerce-result-actions",
+      ".uclaw-ecommerce-featured",
+      ".uclaw-ecommerce-result-body",
+      ".uclaw-ecommerce-result-strip",
+      ".uclaw-ecommerce-layout",
+      "grid-template-columns: minmax(0, 1fr) 390px",
+      ".uclaw-ecommerce-asset-row",
+      ".uclaw-ecommerce-drop",
+      ".update-banner",
+      "ecommerce-design-layout-3",
     ]) {
       requireToken(errors, label, content, token);
     }
@@ -259,6 +425,7 @@ function main() {
 
   try {
     verifyDirectDesktopApi(errors);
+    verifyDirectNewApiRouting(errors);
     verifyPatchSource(errors);
     verifyGeneratedTasksPage(errors);
     verifyGeneratedCss(errors);

@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
+const dns = require('dns').promises;
 const {
   mergeModelCatalogIntoConfig,
 } = require('./model-catalog');
@@ -51,6 +52,9 @@ const ECOMMERCE_IMAGE_DIRECT_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const ECOMMERCE_IMAGE_DIRECT_TOTAL_IMAGE_BYTES = 36 * 1024 * 1024;
 const ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS = 12;
 const ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS = 180000;
+const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_TIMEOUT_MS = 60000;
+const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES = 20 * 1024 * 1024;
+const ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE = Number.parseInt(process.env.UCLAW_ECOMMERCE_IMAGE_QUOTA || '50000', 10);
 const ECOMMERCE_IMAGE_DIRECT_TARGETS = [
   {
     type: 'main_image',
@@ -629,29 +633,74 @@ function stopUpdateShutdownWatcher() {
 }
 
 /**
+ * Normalizes a NewAPI client base URL so direct image calls hit the same
+ * OpenAI-compatible /v1 surface that NewAPI records for billing.
+ */
+function normalizeNewApiImageBaseUrl(rawBaseUrl) {
+  const baseUrl = String(rawBaseUrl || '').trim().replace(/\/+$/, '');
+  if (!baseUrl) return '';
+
+  try {
+    const parsed = new URL(baseUrl);
+    const pathname = parsed.pathname.replace(/\/+$/, '');
+    if (!/\/v\d+$/i.test(pathname)) {
+      parsed.pathname = `${pathname || ''}/v1`;
+    }
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/+$/, '');
+  } catch {
+    return /\/v\d+$/i.test(baseUrl) ? baseUrl : `${baseUrl}/v1`;
+  }
+}
+
+/**
+ * Splits the OpenClaw provider/model ref from the model id sent to NewAPI.
+ * NewAPI receives the bare model id while Bavi-box keeps the full ref for UI.
+ */
+function normalizeEcommerceNewApiModel(rawModel) {
+  const modelRef = String(rawModel || '').trim();
+  if (!modelRef) return { modelRef: '', requestModel: '' };
+
+  const slashIndex = modelRef.indexOf('/');
+  if (slashIndex > 0) {
+    const provider = modelRef.slice(0, slashIndex).toLowerCase();
+    const model = modelRef.slice(slashIndex + 1).trim();
+    if (['newapi', 'litellm', 'custom'].includes(provider) && model) {
+      return { modelRef, requestModel: model };
+    }
+  }
+
+  return { modelRef, requestModel: modelRef };
+}
+
+/**
  * Reads the locally persisted NewAPI credential without exposing the token to
  * the renderer. The ecommerce workbench is a Bavi-box feature, so it should call
  * the model provider from the trusted main process instead of opening a chat.
  */
 function resolveEcommerceImageCredential() {
-  const config = fs.existsSync(configPath) ? getConfig() : applyRuntimeConfigEnv(loadBundledDefaultConfig());
+  const rawConfig = fs.existsSync(configPath) ? getConfig() : loadBundledDefaultConfig();
+  const config = applyRuntimeConfigEnv(rawConfig);
   const provider = config.models?.providers?.newapi || {};
   const credential = readJsonFile(builtinModelCredentialPath) || {};
-  const baseUrl = String(credential.baseUrl || provider.baseUrl || '').trim().replace(/\/+$/, '');
-  const token = String(credential.token || provider.apiKey || '').trim();
+  const envBaseUrl = String(process.env.UCLAW_NEW_API_BASE_URL || '').trim();
+  const envToken = String(process.env.UCLAW_NEW_API_KEY || '').trim();
+  const baseUrl = normalizeNewApiImageBaseUrl(envBaseUrl || credential.baseUrl || provider.baseUrl || '');
+  const token = String(envToken || credential.token || provider.apiKey || '').trim();
   const configuredModel = String(
     credential.defaultModels?.image
       || config.agents?.defaults?.imageGenerationModel?.primary
       || config.agents?.defaults?.imageModel?.primary
       || 'newapi/gpt-image-2',
   ).trim();
-  const model = configuredModel.includes('/') ? configuredModel.split('/').pop() : configuredModel;
+  const { modelRef, requestModel } = normalizeEcommerceNewApiModel(configuredModel);
 
   if (!baseUrl) throw new Error('图片接口 baseUrl 未配置，请先完成模型配置或激活。');
   if (!token) throw new Error('图片接口 token 未配置，请先完成模型配置或激活。');
-  if (!model) throw new Error('图片模型未配置。');
+  if (!requestModel) throw new Error('图片模型未配置。');
 
-  return { provider: 'newapi', baseUrl, token, model };
+  return { provider: 'newapi', baseUrl, token, model: modelRef || requestModel, requestModel };
 }
 
 /**
@@ -741,6 +790,8 @@ function buildEcommerceImagePrompt(manifest, target) {
   const input = manifest?.input || {};
   const outputs = Array.isArray(manifest?.outputs) ? manifest.outputs : [];
   const output = outputs.find(item => item?.type === target.type) || {};
+  const language = manifest?.language && typeof manifest.language === 'object' ? manifest.language : {};
+  const outputLanguage = String(language.prompt || language.label || '简体中文').trim();
   const sellingPoints = Array.isArray(input.selling_points) && input.selling_points.length
     ? input.selling_points.join('；')
     : '请从参考图识别，并只使用能从图片或用户信息确认的卖点';
@@ -755,9 +806,10 @@ function buildEcommerceImagePrompt(manifest, target) {
     `类目：${input.category || '待补充'}`,
     `目标人群：${input.audience || '默认电商购物人群'}`,
     `核心卖点：${sellingPoints}`,
+    `图片内文字语言：${outputLanguage}`,
     `规格约束：${output.size_rule || '优先 1:1 清晰商品图'}`,
     `合规检查：${Array.isArray(manifest?.qa) ? manifest.qa.join('；') : '文字和事实需人工复核'}`,
-    '视觉要求：真实商品外观优先，背景干净，构图有层次，中文文字少而清晰，禁止编造品牌授权、销量、资质、功效承诺。',
+    `视觉要求：真实商品外观优先，背景干净，构图有层次，图片内文字使用 ${outputLanguage}，少而清晰，禁止编造品牌授权、销量、资质、功效承诺。`,
   ].join('\n');
 }
 
@@ -796,20 +848,132 @@ function normalizeImageApiResult(payload, target, model) {
 }
 
 /**
+ * Blocks private-network image URLs before the renderer can ask the main
+ * process to materialize old URL-only ecommerce records.
+ */
+function isPrivateNetworkAddress(address) {
+  const value = String(address || '').trim().toLowerCase();
+  if (!value) return true;
+  if (value === 'localhost' || value === '::1' || value === '0:0:0:0:0:0:0:1') return true;
+  if (value === '0.0.0.0' || value.startsWith('127.')) return true;
+  if (/^10\./.test(value)) return true;
+  if (/^192\.168\./.test(value)) return true;
+  const ipv4 = /^172\.(\d{1,3})\./.exec(value);
+  if (ipv4) {
+    const second = Number.parseInt(ipv4[1], 10);
+    if (second >= 16 && second <= 31) return true;
+  }
+  if (/^169\.254\./.test(value)) return true;
+  if (value === '::' || value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe80:')) return true;
+  return false;
+}
+
+/**
+ * Resolves a host and rejects private network targets to avoid turning the
+ * ecommerce download helper into a generic local-network fetch primitive.
+ */
+async function assertPublicEcommerceImageUrl(parsedUrl) {
+  const hostname = String(parsedUrl?.hostname || '').trim().toLowerCase();
+  if (isPrivateNetworkAddress(hostname)) {
+    throw new Error('远端图片地址不允许指向本机或内网。');
+  }
+  const addresses = await dns.lookup(hostname, { all: true, verbatim: true }).catch((error) => {
+    throw new Error(`远端图片地址解析失败：${error?.code || error?.message || 'DNS_ERROR'}`);
+  });
+  if (!addresses.length || addresses.some(item => isPrivateNetworkAddress(item.address))) {
+    throw new Error('远端图片地址解析到本机或内网，已拒绝下载。');
+  }
+}
+
+/**
+ * Downloads URL-only image API results in the main process so renderer exports
+ * can package offline bytes without hitting CORS or short-lived provider URLs.
+ */
+async function materializeEcommerceImageUrl(image) {
+  const remoteUrl = String(image?.url || '').trim();
+  if (image?.dataUrl || !remoteUrl) return image;
+
+  let parsed;
+  try {
+    parsed = new URL(remoteUrl);
+  } catch {
+    throw new Error('图片接口返回了不可用的远端图片地址。');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('图片接口返回了不支持的远端图片协议。');
+  }
+  await assertPublicEcommerceImageUrl(parsed);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_TIMEOUT_MS);
+  try {
+    const response = await fetch(remoteUrl, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`远端图片下载失败 ${response.status}`);
+    }
+
+    const contentLength = Number.parseInt(response.headers.get('content-length') || '', 10);
+    if (Number.isFinite(contentLength) && contentLength > ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES) {
+      throw new Error('远端图片超过可打包大小限制。');
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) throw new Error('远端图片数据为空。');
+    if (arrayBuffer.byteLength > ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES) {
+      throw new Error('远端图片超过可打包大小限制。');
+    }
+
+    const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() || image.mimeType || 'image/png';
+    if (!/^image\/(png|jpe?g|webp)$/i.test(mimeType)) {
+      throw new Error(`远端图片格式不支持：${mimeType}`);
+    }
+
+    return {
+      ...image,
+      mimeType,
+      dataUrl: `data:${mimeType};base64,${Buffer.from(arrayBuffer).toString('base64')}`,
+      url: remoteUrl,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Public IPC helper for old local ecommerce records whose image API result only
+ * stored a remote URL before data URL materialization existed.
+ */
+async function materializeEcommerceImageForRenderer(payload = {}) {
+  const image = payload && typeof payload === 'object' ? payload : {};
+  const materialized = await materializeEcommerceImageUrl({
+    id: String(image.id || ''),
+    type: String(image.type || 'image'),
+    title: String(image.title || '生成图'),
+    model: String(image.model || ''),
+    mimeType: String(image.mimeType || 'image/png'),
+    dataUrl: String(image.dataUrl || ''),
+    url: String(image.url || ''),
+  });
+  return {
+    ok: true,
+    image: materialized,
+  };
+}
+
+/**
  * Calls the configured NewAPI image endpoint directly from the trusted process.
  */
 async function requestEcommerceImage({ credential, manifest, target, images }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS);
   const prompt = buildEcommerceImagePrompt(manifest, target);
-  const endpoint = images.length ? '/images/edits' : '/images/generations';
-  const url = `${credential.baseUrl}${endpoint}`;
+  const url = `${credential.baseUrl}/images/${images.length ? 'edits' : 'generations'}`;
 
   try {
     let response;
     if (images.length) {
       const form = new FormData();
-      form.append('model', credential.model);
+      form.append('model', credential.requestModel);
       form.append('prompt', prompt);
       form.append('size', target.size);
       form.append('response_format', 'b64_json');
@@ -830,7 +994,7 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: credential.model,
+          model: credential.requestModel,
           prompt,
           size: target.size,
           n: 1,
@@ -844,17 +1008,29 @@ async function requestEcommerceImage({ credential, manifest, target, images }) {
     if (!response.ok) {
       throw new Error(`图片接口失败 ${response.status}: ${summarizeImageApiError(text)}`);
     }
-    return normalizeImageApiResult(JSON.parse(text), target, credential.model);
+    return await materializeEcommerceImageUrl(normalizeImageApiResult(JSON.parse(text), target, credential.model));
   } finally {
     clearTimeout(timeout);
   }
 }
 
 /**
+ * Emits per-image ecommerce progress to the requesting renderer only. The event
+ * carries generated image bytes but never provider credentials.
+ */
+function emitEcommerceImageProgress(sender, payload) {
+  if (!sender || sender.isDestroyed?.()) return;
+  sender.send('uclaw:ecommerce-image-progress', {
+    ...payload,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/**
  * Public IPC handler for the ecommerce workbench. It returns generated images
  * in-place and never creates OpenClaw sessions or sends chat messages.
  */
-async function generateEcommerceImagesDirect(payload = {}) {
+async function generateEcommerceImagesDirect(payload = {}, sender = null) {
   const manifest = payload.manifest && typeof payload.manifest === 'object' ? payload.manifest : null;
   if (!manifest) throw new Error('缺少生成 manifest。');
   const credential = resolveEcommerceImageCredential();
@@ -865,12 +1041,56 @@ async function generateEcommerceImagesDirect(payload = {}) {
   );
   const generated = [];
   const warnings = [];
+  const requestId = String(manifest.id || payload.requestId || crypto.randomUUID()).trim();
 
-  for (const target of targets) {
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
+    emitEcommerceImageProgress(sender, {
+      requestId,
+      index,
+      total: targets.length,
+      status: 'started',
+      target: {
+        type: target.type,
+        title: target.title,
+        slotIndex: target.slotIndex,
+        slotCount: target.slotCount,
+      },
+    });
     try {
-      generated.push(await requestEcommerceImage({ credential, manifest, target, images }));
+      const image = await requestEcommerceImage({ credential, manifest, target, images });
+      generated.push(image);
+      emitEcommerceImageProgress(sender, {
+        requestId,
+        index,
+        total: targets.length,
+        status: 'completed',
+        image,
+        generatedCount: generated.length,
+        target: {
+          type: target.type,
+          title: target.title,
+          slotIndex: target.slotIndex,
+          slotCount: target.slotCount,
+        },
+      });
     } catch (error) {
-      warnings.push(`${target.title}: ${error?.message || String(error)}`);
+      const warning = `${target.title}: ${error?.message || String(error)}`;
+      warnings.push(warning);
+      emitEcommerceImageProgress(sender, {
+        requestId,
+        index,
+        total: targets.length,
+        status: 'failed',
+        warning,
+        generatedCount: generated.length,
+        target: {
+          type: target.type,
+          title: target.title,
+          slotIndex: target.slotIndex,
+          slotCount: target.slotCount,
+        },
+      });
     }
   }
 
@@ -878,13 +1098,36 @@ async function generateEcommerceImagesDirect(payload = {}) {
     throw new Error(warnings[0] || '图片生成失败。');
   }
 
+  const billing = await recordEcommerceImageUsage({ manifest, credential, generated }).catch(error => ({
+    ok: false,
+    message: error?.message || String(error),
+  }));
+  if (billing?.status !== 'ok') {
+    warnings.push(`用量同步失败：${billing?.message || '未能写入 NewAPI 消耗'}`);
+  }
+  const usage = await getCloudModelUsageSummary().catch(error => ({
+    ok: false,
+    message: error?.message || String(error),
+  }));
+  emitEcommerceImageProgress(sender, {
+    requestId,
+    index: targets.length,
+    total: targets.length,
+    status: 'settled',
+    generatedCount: generated.length,
+    billing,
+  });
+
   return {
     ok: true,
+    requestId,
     provider: credential.provider,
     model: credential.model,
     generatedAt: new Date().toISOString(),
     images: generated,
     warnings,
+    billing,
+    usage,
   };
 }
 
@@ -1414,6 +1657,32 @@ async function getCloudModelUsageSummary() {
     return { ok: false, message: 'uclaw access token is not available' };
   }
   return getActivationJSON('/v1/newapi/usage/summary', { endpoint, accessToken });
+}
+
+/**
+ * Reports successful direct ecommerce image generation to Bavi-box Cloud so it
+ * debits NewAPI quota even when the OpenAI-compatible image endpoint omits logs.
+ */
+async function recordEcommerceImageUsage({ manifest, credential, generated }) {
+  const state = readJsonFile(activationStatePath);
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint || !accessToken || !Array.isArray(generated) || generated.length === 0) {
+    return { ok: false, message: 'cloud usage billing is not available' };
+  }
+  const requestId = String(manifest?.id || crypto.randomUUID()).trim();
+  const quotaPerImage = Number.isFinite(ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE) && ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE > 0
+    ? ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE
+    : 50000;
+  return postActivationJSON('/v1/newapi/usage/ecommerce-image', {
+    requestId,
+    model: credential.requestModel || credential.model,
+    tokenName: 'uclaw-main',
+    platform: manifest?.platform || '',
+    outputTypes: Array.isArray(manifest?.output_types) ? manifest.output_types : [],
+    imageCount: generated.length,
+    quotaPerImage,
+  }, { endpoint, accessToken, timeoutMs: 15000 });
 }
 
 /**
@@ -3020,7 +3289,8 @@ function setupIPC() {
   ipcMain.handle('uclaw:get-recharge-orders', () => getCloudRechargeOrders());
   ipcMain.handle('uclaw:get-recharge-order', (_event, orderNo) => getCloudRechargeOrder(orderNo));
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
-  ipcMain.handle('uclaw:ecommerce-generate-images', (_event, payload) => generateEcommerceImagesDirect(payload));
+  ipcMain.handle('uclaw:ecommerce-generate-images', (event, payload) => generateEcommerceImagesDirect(payload, event.sender));
+  ipcMain.handle('uclaw:ecommerce-materialize-image', (_event, payload) => materializeEcommerceImageForRenderer(payload));
   ipcMain.handle('uclaw:write-debugger-log', (_event, payload) => appendDebuggerLog(payload));
 }
 

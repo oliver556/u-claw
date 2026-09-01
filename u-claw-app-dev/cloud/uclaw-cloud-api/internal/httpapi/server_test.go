@@ -18,6 +18,7 @@ import (
 	alipaypay "uclaw-cloud-api/internal/payment/alipay"
 	"uclaw-cloud-api/internal/provisioning"
 	"uclaw-cloud-api/internal/recharge"
+	"uclaw-cloud-api/internal/usage"
 )
 
 func TestHealthzReturnsOK(t *testing.T) {
@@ -381,6 +382,111 @@ func TestUsageSummaryRequiresNewAPIConfig(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503 body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEcommerceImageUsageDebitsNewAPIQuotaAndAppearsInSummary(t *testing.T) {
+	secret := "test-newapi-password-secret"
+	expectedPassword := provisioning.DeriveUserPassword(1, "13800138000", secret)
+	var manageCalls []newapi.AddQuotaRequest
+	newAPIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/manage":
+			var req newapi.AddQuotaRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode manage request: %v", err)
+			}
+			manageCalls = append(manageCalls, req)
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			var req map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode login request: %v", err)
+			}
+			if req["username"] != "13800138000" || req["password"] != expectedPassword {
+				t.Fatalf("login request = %+v", req)
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"user-access-token"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":9,"username":"13800138000","quota":50000,"used_quota":0,"request_count":0}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/log/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":50,"total":0,"items":[]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer newAPIServer.Close()
+
+	cfg := config.Config{
+		AppEnv:                   "development",
+		JWTSecret:                "test-secret",
+		DevSMSCode:               "654321",
+		NewAPIAdminBaseURL:       newAPIServer.URL,
+		NewAPIAdminToken:         "admin-token",
+		NewAPIUserPasswordSecret: secret,
+	}
+	adminClient, err := newapi.NewClient(newAPIServer.URL, "admin-token", newAPIServer.Client())
+	if err != nil {
+		t.Fatalf("newapi client: %v", err)
+	}
+	usageStore := usage.NewMemoryStore()
+	usageService, err := usage.NewService(adminClient, usage.Config{PasswordSecret: secret}, usageStore)
+	if err != nil {
+		t.Fatalf("usage service: %v", err)
+	}
+	server := NewServerWithOptions(cfg, BuildInfo{Version: "test"}, ServerOptions{
+		Auth:  buildAuthService(cfg, nil),
+		Usage: usageService,
+	})
+
+	accessToken := loginForTest(t, server, "13800138000", "654321")
+	body := `{"requestId":"ecom-run-1","model":"newapi/gpt-image-2","tokenName":"uclaw-main","platform":"amazon","outputTypes":["main_image","detail_image"],"imageCount":3,"quotaPerImage":50000}`
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/newapi/usage/ecommerce-image", bytes.NewBufferString(body))
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("record status = %d body = %s", rec.Code, rec.Body.String())
+		}
+	}
+	if len(manageCalls) != 1 {
+		t.Fatalf("manage calls = %+v", manageCalls)
+	}
+	if manageCalls[0].UserID != 9 || manageCalls[0].Mode != "subtract" || manageCalls[0].Value != 150000 {
+		t.Fatalf("manage request = %+v", manageCalls[0])
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/newapi/usage/summary", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("summary status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var summary struct {
+		CumulativeUsage int64 `json:"cumulativeUsage"`
+		Records         []struct {
+			ModelName string `json:"modelName"`
+			TokenName string `json:"tokenName"`
+			Quota     int64  `json:"quota"`
+			RequestID string `json:"requestId"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+	if summary.CumulativeUsage != 150000 {
+		t.Fatalf("cumulative usage = %d, want 150000", summary.CumulativeUsage)
+	}
+	if len(summary.Records) != 1 || summary.Records[0].ModelName != "gpt-image-2" || summary.Records[0].TokenName != "uclaw-main" {
+		t.Fatalf("records = %+v", summary.Records)
+	}
+	if summary.Records[0].Quota != 150000 || summary.Records[0].RequestID != "ecom-run-1" {
+		t.Fatalf("record usage = %+v", summary.Records[0])
 	}
 }
 

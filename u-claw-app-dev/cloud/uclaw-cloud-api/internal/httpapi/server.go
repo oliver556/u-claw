@@ -52,6 +52,7 @@ type PersistentStore interface {
 	admin.Store
 	provisioning.Store
 	recharge.Store
+	usage.EcommerceUsageStore
 }
 
 type sendSMSRequest struct {
@@ -81,6 +82,16 @@ type firstStartActivationRequest struct {
 
 type activationCommitRequest struct {
 	WriteStatus string `json:"writeStatus"`
+}
+
+type ecommerceImageUsageRequest struct {
+	RequestID     string   `json:"requestId"`
+	Model         string   `json:"model"`
+	TokenName     string   `json:"tokenName"`
+	Platform      string   `json:"platform"`
+	OutputTypes   []string `json:"outputTypes"`
+	ImageCount    int      `json:"imageCount"`
+	QuotaPerImage int64    `json:"quotaPerImage,omitempty"`
 }
 
 type rechargeOrderRequest struct {
@@ -132,7 +143,7 @@ func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStor
 		Auth:       buildAuthService(cfg, store),
 		Activation: buildActivationService(cfg, store),
 		Admin:      buildAdminService(cfg, store),
-		Usage:      buildUsageService(cfg),
+		Usage:      buildUsageService(cfg, store),
 		Catalog:    buildModelCatalogService(cfg),
 		Recharge:   buildRechargeService(cfg, store, alipayPay),
 		AlipayPay:  alipayPay,
@@ -484,6 +495,43 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		result, err := options.Usage.GetSummary(r.Context(), usage.SummaryRequest{
 			UserID: userID,
 			Phone:  claims.Phone,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
+	mux.HandleFunc("POST /v1/newapi/usage/ecommerce-image", func(w http.ResponseWriter, r *http.Request) {
+		claims, err := verifyBearer(r, options.Auth)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Usage == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("newapi usage service is not configured"))
+			return
+		}
+		var req ecommerceImageUsageRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, fmt.Errorf("token subject is invalid"))
+			return
+		}
+		result, err := options.Usage.RecordEcommerceImageUsage(r.Context(), usage.EcommerceImageUsageRequest{
+			UserID:        userID,
+			Phone:         claims.Phone,
+			RequestID:     req.RequestID,
+			Model:         req.Model,
+			TokenName:     req.TokenName,
+			Platform:      req.Platform,
+			OutputTypes:   req.OutputTypes,
+			ImageCount:    req.ImageCount,
+			QuotaPerImage: req.QuotaPerImage,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err)
@@ -843,7 +891,7 @@ func buildActivationService(cfg config.Config, store activation.Store) *activati
 }
 
 // buildUsageService creates the New API read-side service when admin access is configured.
-func buildUsageService(cfg config.Config) *usage.Service {
+func buildUsageService(cfg config.Config, store ...usage.EcommerceUsageStore) *usage.Service {
 	if cfg.NewAPIAdminBaseURL == "" || cfg.NewAPIAdminToken == "" {
 		return nil
 	}
@@ -853,7 +901,7 @@ func buildUsageService(cfg config.Config) *usage.Service {
 	}
 	service, err := usage.NewService(admin, usage.Config{
 		PasswordSecret: cfg.NewAPIUserPasswordSecret,
-	})
+	}, store...)
 	if err != nil {
 		panic(fmt.Sprintf("build usage service: %v", err))
 	}

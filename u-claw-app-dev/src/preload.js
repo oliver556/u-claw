@@ -27,5 +27,12 @@ if (isActivationOnlyMode) {
     rechargeModelQuota: (payload) => ipcRenderer.invoke('uclaw:recharge-model-quota', payload),
     generateEcommerceImages: (payload) => ipcRenderer.invoke('uclaw:ecommerce-generate-images', payload),
     writeDebuggerLog: (payload) => ipcRenderer.invoke('uclaw:write-debugger-log', payload),
+    onEcommerceImageProgress: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('uclaw:ecommerce-image-progress', listener);
+      return () => ipcRenderer.removeListener('uclaw:ecommerce-image-progress', listener);
+    },
+    materializeEcommerceImage: (payload) => ipcRenderer.invoke('uclaw:ecommerce-materialize-image', payload),
   });
 }
