@@ -2382,12 +2382,12 @@ function patchServiceWorker() {
     "ecommerce-task-recreate-1-ecommerce-log-bubble-1",
   );
   source = source.replace(
-    /ecommerce-log-bubble-1(?:-ecommerce-compact-actions-[12])?(?!-ecommerce-compact-actions-3)/,
-    "ecommerce-log-bubble-1-ecommerce-compact-actions-3",
+    /ecommerce-log-bubble-1(?:-ecommerce-compact-actions-[123])?(?!-ecommerce-compact-actions-4)/,
+    "ecommerce-log-bubble-1-ecommerce-compact-actions-4",
   );
   source = source.replace(
-    /ecommerce-compact-actions-[123](?!-ecommerce-local-manifest-import-1)/,
-    "ecommerce-compact-actions-3-ecommerce-local-manifest-import-1",
+    /ecommerce-compact-actions-[1234](?!-ecommerce-local-manifest-import-1)/,
+    "ecommerce-compact-actions-4-ecommerce-local-manifest-import-1",
   );
   source = source.replace(
     /ecommerce-local-manifest-import-1(?!-ecommerce-record-pagination-1)/,
@@ -2914,6 +2914,14 @@ function patchTasksPageEcommerceWorkflow() {
     .replace(
       "${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button>`:``}</div></article>",
       "${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button><button class='btn' type='button' @click=${n=>{n.stopPropagation(),e.exportEcommerceLog?.(t.result)}}>导出日志</button>`:``}${a?i`<button class='btn' type='button' ?disabled=${e.ecommerceUsageSyncing===!0} @click=${n=>{n.stopPropagation(),e.retryEcommerceUsageSync?.(t)}}>${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`}</button>`:``}${t.localDir||t.result?.localDir?i`<button class='btn' type='button' @click=${()=>e.openEcommerceLocalPath?.({path:t.localDir||t.result?.localDir})}>打开文件夹</button>`:``}<button class='btn ghost uclaw-ecommerce-record-delete' type='button' @click=${n=>{n.stopPropagation(),e.deleteEcommerceRecord?.(t.id)}}>删除</button></div></article>",
+    )
+    .replace(
+      "<button class='btn ghost' type='button' ?disabled=${l.length===0} @click=${()=>e.clearEcommerceRecords?.()}>清空</button>",
+      "<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-clear' type='button' title='清空记录' aria-label='清空记录' ?disabled=${l.length===0} @click=${()=>e.clearEcommerceRecords?.()}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-clear' aria-hidden='true'></span></button>",
+    )
+    .replace(
+      "${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button><button class='btn' type='button' @click=${n=>{n.stopPropagation(),e.exportEcommerceLog?.(t.result)}}>导出日志</button>`:``}${a?i`<button class='btn' type='button' ?disabled=${e.ecommerceUsageSyncing===!0} @click=${n=>{n.stopPropagation(),e.retryEcommerceUsageSync?.(t)}}>${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`}</button>`:``}${t.localDir||t.result?.localDir?i`<button class='btn' type='button' @click=${()=>e.openEcommerceLocalPath?.({path:t.localDir||t.result?.localDir})}>打开文件夹</button>`:``}<button class='btn ghost uclaw-ecommerce-record-delete' type='button' @click=${n=>{n.stopPropagation(),e.deleteEcommerceRecord?.(t.id)}}>删除</button></div></article>",
+      "${t.result?i`<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-view' type='button' title='查看结果' aria-label='查看结果' @click=${n=>{n.stopPropagation(),e.showEcommerceRecord?.(t)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-view' aria-hidden='true'></span></button><button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-log' type='button' title='导出日志' aria-label='导出日志' @click=${n=>{n.stopPropagation(),e.exportEcommerceLog?.(t.result)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-log' aria-hidden='true'></span></button>`:``}${a?i`<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-sync' type='button' title=${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`} aria-label=${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`} ?disabled=${e.ecommerceUsageSyncing===!0} @click=${n=>{n.stopPropagation(),e.retryEcommerceUsageSync?.(t)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-sync' aria-hidden='true'></span></button>`:``}${t.localDir||t.result?.localDir?i`<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-folder' type='button' title='打开文件夹' aria-label='打开文件夹' @click=${n=>{n.stopPropagation(),e.openEcommerceLocalPath?.({path:t.localDir||t.result?.localDir})}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-folder' aria-hidden='true'></span></button>`:``}<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-delete' type='button' title='删除记录' aria-label='删除记录' @click=${n=>{n.stopPropagation(),e.deleteEcommerceRecord?.(t.id)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-delete' aria-hidden='true'></span></button></div></article>",
     );
   const ecommerceHelper = helper.replace(/function UcEcommerceWorkbenchView\(e\)\{[\s\S]*\}$/, redesignedWorkbenchView);
 
@@ -9065,6 +9073,147 @@ openclaw-tasks-page .uclaw-ecommerce-log-button-icon::before {
   content: "";
 }
 
+openclaw-tasks-page .uclaw-ecommerce-icon-button {
+  position: relative;
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  place-items: center;
+  padding: 0;
+  border-color: #d7e3f2;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #36516d;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-button:hover {
+  border-color: #8bb8ff;
+  background: #f7fbff;
+  color: #0f5ed7;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record-clear {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record-delete:hover {
+  border-color: #fecaca;
+  background: #fff5f5;
+  color: #dc2626;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon {
+  position: relative;
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon::before,
+openclaw-tasks-page .uclaw-ecommerce-icon::after {
+  position: absolute;
+  box-sizing: border-box;
+  content: "";
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-view::before {
+  inset: 3px 1px;
+  border: 1.7px solid currentColor;
+  border-radius: 999px / 75%;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-view::after {
+  top: 5px;
+  left: 5px;
+  width: 5px;
+  height: 5px;
+  border: 1.7px solid currentColor;
+  border-radius: 999px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-log::before {
+  inset: 0 2px 0 3px;
+  border: 1.7px solid currentColor;
+  border-radius: 3px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-log::after {
+  top: 4px;
+  left: 6px;
+  width: 5px;
+  height: 1.7px;
+  background: currentColor;
+  box-shadow: 0 4px 0 currentColor, 0 8px 0 currentColor;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-sync::before {
+  inset: 2px;
+  border: 1.7px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-sync::after {
+  top: 1px;
+  right: 0;
+  width: 6px;
+  height: 6px;
+  border-top: 1.7px solid currentColor;
+  border-right: 1.7px solid currentColor;
+  transform: rotate(42deg);
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-folder::before {
+  right: 1px;
+  bottom: 2px;
+  left: 1px;
+  height: 10px;
+  border: 1.7px solid currentColor;
+  border-radius: 3px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-folder::after {
+  top: 2px;
+  left: 2px;
+  width: 7px;
+  height: 4px;
+  border: 1.7px solid currentColor;
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-delete::before,
+openclaw-tasks-page .uclaw-ecommerce-icon-clear::before {
+  top: 4px;
+  left: 4px;
+  width: 8px;
+  height: 10px;
+  border: 1.7px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 2px 2px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-icon-delete::after,
+openclaw-tasks-page .uclaw-ecommerce-icon-clear::after {
+  top: 1px;
+  left: 3px;
+  width: 10px;
+  height: 3px;
+  border-top: 1.7px solid currentColor;
+  border-bottom: 1.7px solid currentColor;
+}
+
 openclaw-tasks-page .uclaw-ecommerce-log-path {
   min-width: 0;
   max-width: calc(100% - 32px);
@@ -9459,8 +9608,14 @@ openclaw-tasks-page .uclaw-ecommerce-record > div:first-child small {
 openclaw-tasks-page .uclaw-ecommerce-record-actions {
   display: flex;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record-actions .chip {
+  min-width: 54px;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-record-pagination {
@@ -9627,7 +9782,9 @@ openclaw-tasks-page .uclaw-ecommerce-record-pagination span {
   }
 
   openclaw-tasks-page .uclaw-ecommerce-record-actions {
-    justify-content: space-between;
+    justify-content: flex-end;
+    overflow-x: auto;
+    padding-bottom: 2px;
   }
 }
 

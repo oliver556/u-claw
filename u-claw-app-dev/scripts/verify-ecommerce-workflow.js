@@ -88,6 +88,27 @@ function evaluateMainHelper(content, name) {
 }
 
 /**
+ * Evaluates several dependent main-process helpers with a tiny mocked Electron
+ * environment so OS-specific path behavior can be tested on macOS.
+ */
+function evaluateMainHelpers(content, names, setup = "") {
+  const sources = names.map((name) => {
+    const start = content.indexOf(`function ${name}(`);
+    if (start === -1) throw new Error(`Missing helper: ${name}`);
+    const nextFunction = content.indexOf("\nfunction ", start + 1);
+    return content.slice(start, nextFunction === -1 ? content.length : nextFunction);
+  }).join("\n\n");
+  return Function(
+    "path",
+    `
+      ${setup}
+      ${sources}
+      return { ${names.join(", ")} };
+    `,
+  )(path.win32);
+}
+
+/**
  * Evaluates one generated Control UI helper string from patch-openclaw.js.
  */
 function evaluatePatchHelper(content, name) {
@@ -145,6 +166,70 @@ function verifyDirectNewApiRouting(errors) {
 }
 
 /**
+ * Reproduces the Windows portable root drift that caused saved ecommerce images
+ * to show as broken after the local record was reloaded.
+ */
+function verifyWindowsEcommerceLocalPathTrust(errors) {
+  try {
+    const mainContent = readFile(mainProcessFile);
+    const helpers = evaluateMainHelpers(
+      mainContent,
+      [
+        "safeGetElectronPath",
+        "resolveEcommerceLocalLibraryRoot",
+        "resolveEcommerceLocalLibraryRoots",
+        "pathsEqual",
+        "isPathInsideRoot",
+        "resolveTrustedEcommerceLocalPath",
+      ],
+      `
+        const APP_NAME = "Bavi-box";
+        const ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME = "电商图片";
+        const userDataPath = "C:\\\\Users\\\\operator\\\\AppData\\\\Local\\\\Bavi-box\\\\usb-portable\\\\electron-profile";
+        const app = {
+          getPath(name) {
+            if (name === "downloads") return "C:\\\\Users\\\\operator\\\\AppData\\\\Local\\\\Bavi-box\\\\usb-portable\\\\data-abc\\\\.home\\\\Downloads";
+            if (name === "home") return "C:\\\\Users\\\\operator\\\\AppData\\\\Local\\\\Bavi-box\\\\usb-portable\\\\data-abc\\\\.home";
+            return "";
+          }
+        };
+        const process = {
+          platform: "win32",
+          env: {
+            USERPROFILE: "C:\\\\Users\\\\operator\\\\AppData\\\\Local\\\\Bavi-box\\\\usb-portable\\\\data-abc\\\\.home",
+            UCLAW_HOST_USERPROFILE: "C:\\\\Users\\\\operator"
+          }
+        };
+      `,
+    );
+    const trustedHostImage = helpers.resolveTrustedEcommerceLocalPath(
+      "C:\\Users\\operator\\Downloads\\Bavi-box\\电商图片\\抖音电商-短袖\\01-主图.png",
+    );
+    if (!trustedHostImage) {
+      errors.push("Windows ecommerce localPath trust must accept images saved under host Downloads");
+    }
+    const trustedPortableImage = helpers.resolveTrustedEcommerceLocalPath(
+      "C:\\Users\\operator\\AppData\\Local\\Bavi-box\\usb-portable\\data-abc\\.home\\Downloads\\Bavi-box\\电商图片\\抖音电商-短袖\\01-主图.png",
+    );
+    if (!trustedPortableImage) {
+      errors.push("Windows ecommerce localPath trust must accept images saved under portable Downloads");
+    }
+    const escaped = helpers.resolveTrustedEcommerceLocalPath(
+      "C:\\Users\\operator\\Pictures\\not-ecommerce\\01.png",
+    );
+    if (escaped) {
+      errors.push("Windows ecommerce localPath trust must reject paths outside ecommerce image libraries");
+    }
+    const roots = helpers.resolveEcommerceLocalLibraryRoots();
+    if (!roots.some((root) => /C:\\Users\\operator\\Downloads\\Bavi-box\\电商图片/i.test(root))) {
+      errors.push(`Windows ecommerce library roots missing host Downloads: ${JSON.stringify(roots)}`);
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
  * Ensures the desktop-owned image API exists outside the OpenClaw chat/session path.
  */
 function verifyDirectDesktopApi(errors) {
@@ -192,6 +277,9 @@ function verifyDirectDesktopApi(errors) {
     "UCLAW_HOST_USERPROFILE",
     "hostDownloads",
     "resolveEcommerceLocalLibraryRoot",
+    "resolveEcommerceLocalLibraryRoots",
+    "pathsEqual",
+    "isPathInsideRoot",
     "countEcommerceManifestOutputs",
     "formatEcommerceManifestOutputLabels",
     "ecommerceRecordFromLocalManifest",
@@ -272,6 +360,18 @@ function verifyDirectDesktopApi(errors) {
   }
   if (!/const base = downloads \|\| hostDownloads \|\| homeDownloads \|\| fallbackDownloads \|\| path\.join\(userDataPath, 'Downloads'\);/.test(mainContent)) {
     errors.push("src/main.js must prefer host Downloads before portable cache Downloads");
+  }
+  if (!/resolveEcommerceLocalLibraryRoots\(\)\.some\(root => isPathInsideRoot\(resolvedTarget, root\)\)/.test(mainContent)) {
+    errors.push("src/main.js must trust every known ecommerce library root when opening or materializing Windows local images");
+  }
+  if (!/const relative = path\.relative\(resolvedRoot, resolvedTarget\);/.test(mainContent)) {
+    errors.push("src/main.js must use path.relative for ecommerce local library containment instead of brittle string prefixes");
+  }
+  if (/const libraryRoot = path\.resolve\(resolveEcommerceLocalLibraryRoot\(\)\);\s+const resolvedTarget = path\.resolve\(targetPath\);\s+if \(resolvedTarget !== libraryRoot && !resolvedTarget\.startsWith/.test(mainContent)) {
+    errors.push("src/main.js still uses single-root prefix matching for ecommerce local paths");
+  }
+  if (!/for \(const root of roots\) \{/.test(mainContent) || !/return \{ ok: true, root: roots\[0\] \|\| '', roots, records: records\.slice\(0, 30\) \};/.test(mainContent)) {
+    errors.push("src/main.js must scan all possible ecommerce library roots when importing local manifests");
   }
   if (!/ensurePortableHomeShellDirs\(\);\s+invalidateControlUiCacheOnVersionChange\(\);/.test(mainContent)) {
     errors.push("src/main.js must create portable Windows shell folders before Electron cache setup continues");
@@ -414,7 +514,12 @@ function verifyPatchSource(errors) {
     "localManifestPath",
     "ecommerce-local-library-1",
     "ecommerce-log-bubble-1",
-    "ecommerce-compact-actions-3",
+    "ecommerce-compact-actions-4",
+    "uclaw-ecommerce-icon-button",
+    "uclaw-ecommerce-record-view",
+    "uclaw-ecommerce-record-log",
+    "uclaw-ecommerce-record-sync",
+    "uclaw-ecommerce-record-folder",
     "ecommerce-record-pagination-1",
     "ecommerce-log-diagnostic-1",
     "UcEcommerceLogDiagnosticMarker",
@@ -587,7 +692,14 @@ function verifyGeneratedTasksPage(errors) {
       "重试同步用量",
       "导出日志",
       "uclaw-ecommerce-log-button",
+      "uclaw-ecommerce-icon-button",
+      "uclaw-ecommerce-record-view",
+      "uclaw-ecommerce-record-log",
+      "uclaw-ecommerce-record-sync",
+      "uclaw-ecommerce-record-folder",
       "aria-label='导出日志'",
+      "aria-label='查看结果'",
+      "aria-label='打开文件夹'",
       "uclaw-ecommerce-warning-bubble",
       "deleteEcommerceRecord",
       "uclaw-ecommerce-record-delete",
@@ -881,6 +993,7 @@ function main() {
   try {
     verifyDirectDesktopApi(errors);
     verifyDirectNewApiRouting(errors);
+    verifyWindowsEcommerceLocalPathTrust(errors);
     verifyPatchSource(errors);
     verifyGeneratedTasksPage(errors);
     verifyEcommerceLogDiagnosticPayload(errors);

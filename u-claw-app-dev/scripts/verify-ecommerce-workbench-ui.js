@@ -527,8 +527,7 @@ async function verifyUsageSyncRetry(page) {
   await page
     .locator("openclaw-tasks-page .uclaw-ecommerce-record")
     .filter({ hasText: "短袖" })
-    .locator("button")
-    .filter({ hasText: "重试同步用量" })
+    .locator("button[aria-label='重试同步用量']")
     .click();
   await page.waitForFunction(() => {
     const text = document.querySelector("openclaw-tasks-page")?.innerText || "";
@@ -537,8 +536,7 @@ async function verifyUsageSyncRetry(page) {
   await page
     .locator("openclaw-tasks-page .uclaw-ecommerce-record")
     .filter({ hasText: "短袖" })
-    .locator("button")
-    .filter({ hasText: "查看结果" })
+    .locator("button[aria-label='查看结果']")
     .click();
   await waitForText(page, "抖音电商 已生成图片", 10000);
 
@@ -924,7 +922,7 @@ async function verifyLocalPathOnlyRecordHydration(page) {
   });
   await waitForText(page, "空气墨盒", 10000);
   await installDirectImageApiStub(page);
-  await page.locator("openclaw-tasks-page .uclaw-ecommerce-record").filter({ hasText: "空气墨盒" }).locator("button").filter({ hasText: "查看结果" }).click();
+  await page.locator("openclaw-tasks-page .uclaw-ecommerce-record").filter({ hasText: "空气墨盒" }).locator("button[aria-label='查看结果']").click();
   await page.waitForFunction(() => {
     const image = [...document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-featured img")][0];
     return image instanceof HTMLImageElement && image.src.startsWith("data:image/");
@@ -1247,8 +1245,7 @@ async function verifyGeneratedRecordPersistsViaLocalPath(page, viewportName) {
   await page
     .locator("openclaw-tasks-page .uclaw-ecommerce-record")
     .filter({ hasText: "便携榨汁杯" })
-    .locator("button")
-    .filter({ hasText: "查看结果" })
+    .locator("button[aria-label='查看结果']")
     .first()
     .click();
   await page.waitForFunction(() => {
@@ -1369,7 +1366,7 @@ async function exerciseWorkbench(page, imagePath) {
   await waitForText(page, "Amazon 已生成图片", 10000);
   await waitForText(page, "10 张结果", 10000);
   await page.waitForFunction(() => document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-generated").length >= 10);
-  await waitForText(page, "查看结果", 10000);
+  await page.locator("openclaw-tasks-page .uclaw-ecommerce-record button[aria-label='查看结果']").first().waitFor({ timeout: 10000 });
 
   return evaluateInDom(
     page,
@@ -1413,8 +1410,9 @@ async function exerciseWorkbench(page, imagePath) {
       );
       const logExportButton = allNodes().find((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-log-button"));
       const packageButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打包下载"));
-      const openLocalButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开文件夹"));
+      const openLocalButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && node.getAttribute("aria-label") === "打开文件夹");
       const deleteRecordButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-delete"));
+      const recordIconButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-icon-button"));
       const openSessionButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开会话"));
       const carousel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated-grid"));
       const warningBubble = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-warning-bubble"));
@@ -1429,6 +1427,15 @@ async function exerciseWorkbench(page, imagePath) {
       const typeRects = typeCards.map((node) => {
         const rect = node.getBoundingClientRect();
         return { width: Math.round(rect.width), height: Math.round(rect.height) };
+      });
+      const recordIconButtonRects = recordIconButtons.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          label: node.getAttribute("aria-label") || "",
+          title: node.getAttribute("title") || "",
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
       });
       const elementRect = (node) => {
         const rect = node?.getBoundingClientRect?.();
@@ -1501,6 +1508,7 @@ async function exerciseWorkbench(page, imagePath) {
         warningBubbleTitle: warningBubble?.getAttribute("title") || "",
         openLocalButtonCount: openLocalButtons.length,
         deleteRecordButtonCount: deleteRecordButtons.length,
+        recordIconButtonRects,
         openLocalPathCalls: window.__uclawEcommerceOpenLocalPathCalls || [],
         hasOpenSessionButton: Boolean(openSessionButton),
         carouselDisplay: carouselStyle?.display || "",
@@ -1699,6 +1707,14 @@ async function runAcceptance(options) {
       if (state.openLocalButtonCount < 1) throw new Error(`${viewport.name}: Open local folder button missing after generation`);
       if (!state.fullTextIncludesLocalSaved) throw new Error(`${viewport.name}: Local saved state missing`);
       if (state.deleteRecordButtonCount < 1) throw new Error(`${viewport.name}: Delete record button missing`);
+      if (!state.recordIconButtonRects?.length || state.recordIconButtonRects.some((rect) => rect.width > 38 || rect.height > 38)) {
+        throw new Error(`${viewport.name}: Record actions should render as compact icon buttons, got ${JSON.stringify(state.recordIconButtonRects)}`);
+      }
+      for (const label of ["查看结果", "导出日志", "打开文件夹", "删除记录"]) {
+        if (!state.recordIconButtonRects.some((rect) => rect.label === label && rect.title === label)) {
+          throw new Error(`${viewport.name}: Missing compact record action ${label}, got ${JSON.stringify(state.recordIconButtonRects)}`);
+        }
+      }
       if (state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button must not appear`);
       if (state.carouselDisplay !== "flex") throw new Error(`${viewport.name}: Generated list should be flex carousel`);
       if (!["auto", "scroll"].includes(state.carouselOverflowX)) {
@@ -1876,7 +1892,7 @@ async function runAcceptance(options) {
       await evaluateInDom(
         page,
         `
-          const buttons = allNodes().filter((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开文件夹"));
+          const buttons = allNodes().filter((node) => node instanceof HTMLButtonElement && node.getAttribute("aria-label") === "打开文件夹");
           const visible = buttons.find((node) => {
             const rect = node.getBoundingClientRect();
             const style = getComputedStyle(node);
