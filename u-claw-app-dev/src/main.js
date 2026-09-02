@@ -1050,6 +1050,57 @@ async function openEcommerceLocalPath(payload = {}) {
 }
 
 /**
+ * Checks whether a renderer-provided local path stays inside the trusted
+ * ecommerce image library. This keeps preview materialization from becoming a
+ * general local-file read primitive.
+ */
+function resolveTrustedEcommerceLocalPath(rawPath) {
+  const targetPath = String(rawPath || '').trim();
+  if (!targetPath || !path.isAbsolute(targetPath)) {
+    return '';
+  }
+  const libraryRoot = path.resolve(resolveEcommerceLocalLibraryRoot());
+  const resolvedTarget = path.resolve(targetPath);
+  if (resolvedTarget !== libraryRoot && !resolvedTarget.startsWith(`${libraryRoot}${path.sep}`)) {
+    return '';
+  }
+  return resolvedTarget;
+}
+
+/**
+ * Reads a saved ecommerce image back into a data URL for records that only kept
+ * `localPath`. This makes previews survive provider URL expiry and app reloads.
+ */
+async function materializeEcommerceLocalImage(image) {
+  const localPath = resolveTrustedEcommerceLocalPath(image?.localPath);
+  if (!localPath) return null;
+  const stat = await fs.promises.stat(localPath).catch(() => null);
+  if (!stat?.isFile()) return null;
+  if (stat.size <= 0) throw new Error('本地图片数据为空。');
+  if (stat.size > ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES) {
+    throw new Error('本地图片超过可预览大小限制。');
+  }
+  const extension = path.extname(localPath).toLowerCase();
+  const mimeType = extension === '.jpg' || extension === '.jpeg'
+    ? 'image/jpeg'
+    : extension === '.webp'
+      ? 'image/webp'
+      : 'image/png';
+  if (!/^image\/(png|jpe?g|webp)$/i.test(mimeType)) {
+    throw new Error(`本地图片格式不支持：${mimeType}`);
+  }
+  const bytes = await fs.promises.readFile(localPath);
+  return {
+    ...image,
+    mimeType,
+    dataUrl: `data:${mimeType};base64,${bytes.toString('base64')}`,
+    localPath,
+    localDir: image?.localDir || path.dirname(localPath),
+    localFileName: image?.localFileName || path.basename(localPath),
+  };
+}
+
+/**
  * Blocks private-network image URLs before the renderer can ask the main
  * process to materialize old URL-only ecommerce records.
  */
@@ -1147,6 +1198,16 @@ async function materializeEcommerceImageUrl(image) {
  */
 async function materializeEcommerceImageForRenderer(payload = {}) {
   const image = payload && typeof payload === 'object' ? payload : {};
+  if (String(image.dataUrl || '').trim()) {
+    return { ok: true, image };
+  }
+  const localImage = await materializeEcommerceLocalImage(image);
+  if (localImage) {
+    return { ok: true, image: localImage };
+  }
+  if (!String(image.url || '').trim()) {
+    throw new Error('本地图片不存在或不在允许的电商图片目录内。');
+  }
   const materialized = await materializeEcommerceImageUrl({
     id: String(image.id || ''),
     type: String(image.type || 'image'),
@@ -1155,6 +1216,9 @@ async function materializeEcommerceImageForRenderer(payload = {}) {
     mimeType: String(image.mimeType || 'image/png'),
     dataUrl: String(image.dataUrl || ''),
     url: String(image.url || ''),
+    localPath: String(image.localPath || ''),
+    localDir: String(image.localDir || ''),
+    localFileName: String(image.localFileName || ''),
   });
   return {
     ok: true,

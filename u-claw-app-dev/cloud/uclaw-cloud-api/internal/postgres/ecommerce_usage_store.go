@@ -10,6 +10,40 @@ import (
 	"uclaw-cloud-api/internal/usage"
 )
 
+const ecommerceImageUsageSchemaSQL = `
+CREATE TABLE IF NOT EXISTS ecommerce_image_usage_events (
+  id BIGSERIAL PRIMARY KEY,
+  uclaw_user_id BIGINT NOT NULL REFERENCES uclaw_users(id),
+  newapi_user_id BIGINT NOT NULL,
+  phone TEXT NOT NULL,
+  request_id TEXT NOT NULL UNIQUE,
+  model_name TEXT NOT NULL,
+  token_name TEXT NOT NULL DEFAULT '',
+  platform TEXT NOT NULL DEFAULT '',
+  output_types JSONB NOT NULL DEFAULT '[]'::jsonb,
+  image_count INTEGER NOT NULL,
+  quota_tokens BIGINT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'recorded',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ecommerce_image_usage_user_created
+  ON ecommerce_image_usage_events(uclaw_user_id, created_at DESC);
+`
+
+// EnsureEcommerceImageUsageSchema creates the direct image billing table during
+// startup so older production deployments do not lose ecommerce usage charges
+// when a numbered SQL migration was missed.
+func (s *Store) EnsureEcommerceImageUsageSchema(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store is not initialized")
+	}
+	if _, err := s.db.ExecContext(ctx, ecommerceImageUsageSchemaSQL); err != nil {
+		return fmt.Errorf("ensure ecommerce image usage schema: %w", err)
+	}
+	return nil
+}
+
 // ClaimEcommerceImageUsage inserts one idempotent ecommerce image billing event.
 func (s *Store) ClaimEcommerceImageUsage(ctx context.Context, event usage.EcommerceImageUsageEvent) (usage.EcommerceImageUsageEvent, bool, error) {
 	outputTypes, err := json.Marshal(event.OutputTypes)
