@@ -88,6 +88,20 @@ function evaluateMainHelper(content, name) {
 }
 
 /**
+ * Evaluates one generated Control UI helper string from patch-openclaw.js.
+ */
+function evaluatePatchHelper(content, name) {
+  const startToken = `"function ${name}(e){`;
+  const start = content.indexOf(startToken);
+  if (start === -1) throw new Error(`Missing patch helper: ${name}`);
+  const bodyStart = start + 1;
+  const next = content.indexOf('",\n    "function ', bodyStart);
+  if (next === -1) throw new Error(`Unable to isolate patch helper: ${name}`);
+  const source = content.slice(bodyStart, next);
+  return Function(`${source}; return ${name};`)();
+}
+
+/**
  * Verifies direct NewAPI calls use the billable /v1 image surface and safe model ids.
  */
 function verifyDirectNewApiRouting(errors) {
@@ -401,10 +415,22 @@ function verifyPatchSource(errors) {
     "ecommerce-local-library-1",
     "ecommerce-log-bubble-1",
     "ecommerce-compact-actions-3",
+    "ecommerce-record-pagination-1",
+    "ecommerce-log-diagnostic-1",
+    "UcEcommerceLogDiagnosticMarker",
+    "diagnostic_status",
+    "missing_fields",
+    "当前日志为进行中快照",
     "selectEcommercePreview",
     "openEcommerceSwiper",
     "stepEcommerceSwiper",
     "ecommercePreviewIndex",
+    "UcEcommerceRecordPageSize",
+    "UcEcommerceClampRecordPage",
+    "setEcommerceRecordsPage",
+    "uclaw-ecommerce-record-pagination",
+    "上一页",
+    "下一页",
     "onEcommerceOutputType",
     "onEcommerceOutputCount",
     "downloadEcommerceImage",
@@ -573,10 +599,19 @@ function verifyGeneratedTasksPage(errors) {
       "localPath",
       "localDir",
       "localManifestPath",
+      "ecommerce-record-pagination-1",
+      "ecommerce-log-diagnostic-1",
+      "diagnostic_status",
+      "missing_fields",
+      "当前日志为进行中快照",
       "selectEcommercePreview",
       "openEcommerceSwiper",
       "stepEcommerceSwiper",
       "ecommercePreviewIndex",
+      "setEcommerceRecordsPage",
+      "uclaw-ecommerce-record-pagination",
+      "上一页",
+      "下一页",
       "downloadEcommercePackage",
       "downloadEcommerceImage",
       "exportEcommerceLog",
@@ -700,6 +735,51 @@ function verifyGeneratedTasksPage(errors) {
 }
 
 /**
+ * Replays the attached bad-log shape against the export helper. A running
+ * snapshot with zero images must be labeled as in-flight diagnostic data.
+ */
+function verifyEcommerceLogDiagnosticPayload(errors) {
+  try {
+    const content = readFile(patchScript);
+    const exportPayload = evaluatePatchHelper(content, "UcEcommerceLogExportPayload");
+    const payload = exportPayload({
+      id: "ecom-1788359466115-gi682v",
+      name: "羽绒服",
+      platform: "xiaohongshu",
+      platform_label: "小红书",
+      output_types: ["main_image", "detail_image", "model_image"],
+      output_counts: { main_image: 1, detail_image: 3, model_image: 1 },
+      generated_at: "2026-09-02T14:31:06.115Z",
+      completed_at: "",
+      images: [],
+      warnings: [],
+      billing: null,
+      localDir: "",
+      localManifestPath: "",
+      model: "",
+      progress: { done: 0, total: 5, current: "主图", status: "started" },
+    });
+    const missingFields = Array.isArray(payload?.diagnostic?.missing_fields) ? payload.diagnostic.missing_fields : [];
+    if (payload.diagnostic_status !== "running" || payload?.diagnostic?.status !== "running") {
+      errors.push("UcEcommerceLogExportPayload must label started zero-image logs as running");
+    }
+    if (payload?.diagnostic?.planned_count !== 5 || payload?.diagnostic?.generated_count !== 0) {
+      errors.push("UcEcommerceLogExportPayload must include planned/generated counts");
+    }
+    for (const field of ["images", "model", "billing", "localDir", "localManifestPath"]) {
+      if (!missingFields.includes(field)) {
+        errors.push(`UcEcommerceLogExportPayload missing diagnostic field: ${field}`);
+      }
+    }
+    if (!String(payload.export_note || "").includes("当前日志为进行中快照")) {
+      errors.push("UcEcommerceLogExportPayload must explain running snapshots in export_note");
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
  * Ensures generated CSS keeps ecommerce results as a horizontal carousel.
  */
 function verifyGeneratedCss(errors) {
@@ -803,6 +883,7 @@ function main() {
     verifyDirectNewApiRouting(errors);
     verifyPatchSource(errors);
     verifyGeneratedTasksPage(errors);
+    verifyEcommerceLogDiagnosticPayload(errors);
     verifyGeneratedCss(errors);
     verifyServiceWorker(errors);
     verifyBundledSkill(errors);
