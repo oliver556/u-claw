@@ -599,6 +599,75 @@ func TestEcommerceImageUsageDebitsNewAPIQuotaAndAppearsInSummary(t *testing.T) {
 	}
 }
 
+func TestBuildUsageServiceSharesRefreshedNewAPIAdminClient(t *testing.T) {
+	var loginCalls int
+	var manageAuth string
+
+	newAPIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			if r.Header.Get("Authorization") == "Bearer expired-admin-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code":"AUTH_TOKEN_EXPIRED","message":"Unauthorized","success":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			loginCalls++
+			if loginCalls > 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"code":"AUTH_SESSION_LIMIT","message":"Conflict","success":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"fresh-admin-token"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/manage":
+			manageAuth = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer newAPIServer.Close()
+
+	cfg := config.Config{
+		AppEnv:                   "development",
+		NewAPIAdminBaseURL:       newAPIServer.URL,
+		NewAPIAdminToken:         "expired-admin-token",
+		NewAPIAdminUsername:      "admin",
+		NewAPIAdminPassword:      "password",
+		NewAPIUserPasswordSecret: "test-newapi-password-secret",
+	}
+	adminClient := buildNewAPIAdminClient(cfg, "test")
+	if adminClient == nil {
+		t.Fatal("buildNewAPIAdminClient() = nil")
+	}
+	if _, _, err := adminClient.SearchUserByUsername(context.Background(), "13800138000"); err != nil {
+		t.Fatalf("SearchUserByUsername() refresh error = %v", err)
+	}
+	service := buildUsageService(cfg, adminClient, usage.NewMemoryStore())
+	if service == nil {
+		t.Fatal("buildUsageService() = nil")
+	}
+	_, err := service.RecordEcommerceImageUsage(context.Background(), usage.EcommerceImageUsageRequest{
+		UserID:        1,
+		Phone:         "13800138000",
+		RequestID:     "ecom-run-shared-admin",
+		Model:         "gpt-image-2",
+		ImageCount:    1,
+		QuotaPerImage: 50000,
+	})
+	if err != nil {
+		t.Fatalf("RecordEcommerceImageUsage() error = %v", err)
+	}
+	if loginCalls != 1 {
+		t.Fatalf("loginCalls = %d, want only the initial shared admin refresh", loginCalls)
+	}
+	if manageAuth != "Bearer fresh-admin-token" {
+		t.Fatalf("manage Authorization = %q, want fresh admin token", manageAuth)
+	}
+}
+
 func TestModelCatalogReturnsNewAPIModels(t *testing.T) {
 	secret := "test-newapi-password-secret"
 	expectedPassword := provisioning.DeriveUserPassword(1, "13800138000", secret)
