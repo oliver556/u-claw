@@ -1917,6 +1917,22 @@ function parseActivationResponseJSON(text, options = {}) {
 }
 
 /**
+ * Normalizes Cloud API errors into operator-actionable copy while retaining
+ * enough upstream code context to debug billing and credential refresh issues.
+ */
+function formatCloudAPIErrorMessage(data, fallback) {
+  const message = String(data?.error?.message || data?.message || fallback || '').trim();
+  if (!message) return 'Cloud API request failed';
+  if (message.includes('AUTH_SESSION_LIMIT')) {
+    return 'NewAPI 管理员登录会话已达上限，Cloud 无法刷新扣费 token；请在 NewAPI 后台撤销旧会话或部署共享 admin token 版本后重试。';
+  }
+  if (message.includes('AUTH_SESSION_ISSUANCE_LIMIT')) {
+    return 'NewAPI 管理员登录签发过于频繁，Cloud 暂时无法刷新扣费 token；请稍后重试或检查 Cloud 是否重复登录。';
+  }
+  return message;
+}
+
+/**
  * Posts JSON to the Bavi-box activation service from the trusted main process.
  */
 async function postActivationJSON(pathname, payload, options = {}) {
@@ -1938,7 +1954,7 @@ async function postActivationJSON(pathname, payload, options = {}) {
     const text = await response.text();
     const data = parseActivationResponseJSON(text, { pathname, status: response.status });
     if (!response.ok) {
-      throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
+      throw new Error(formatCloudAPIErrorMessage(data, `activation request failed: ${response.status}`));
     }
     return data;
   } finally {
@@ -1967,7 +1983,7 @@ async function getActivationJSON(pathname, options = {}) {
     const text = await response.text();
     const data = parseActivationResponseJSON(text, { pathname, status: response.status });
     if (!response.ok) {
-      throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
+      throw new Error(formatCloudAPIErrorMessage(data, `activation request failed: ${response.status}`));
     }
     return data;
   } finally {

@@ -216,6 +216,73 @@ func TestWithAdminUserKeepsAdminAuthAndAddsUserHeader(t *testing.T) {
 	}
 }
 
+func TestWithAdminUserSharesRefreshedAdminToken(t *testing.T) {
+	var searchCalls int
+	var loginCalls int
+	var tokenAuth string
+	var tokenUser string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			searchCalls++
+			if r.Header.Get("Authorization") == "Bearer expired-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code":"AUTH_TOKEN_EXPIRED","message":"Unauthorized","success":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			loginCalls++
+			if loginCalls > 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"code":"AUTH_SESSION_LIMIT","message":"Conflict","success":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"fresh-token"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/token/":
+			tokenAuth = r.Header.Get("Authorization")
+			tokenUser = r.Header.Get("New-Api-User")
+			if tokenAuth == "Bearer expired-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code":"AUTH_TOKEN_EXPIRED","message":"Unauthorized","success":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"token":"fresh-key"}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	admin, err := NewClient(server.URL, "expired-token", server.Client(), WithAdminCredentials("admin", "password"))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	client, err := admin.WithAdminUser(9)
+	if err != nil {
+		t.Fatalf("WithAdminUser() error = %v", err)
+	}
+	if _, _, err := admin.SearchUserByUsername(context.Background(), "13800138000"); err != nil {
+		t.Fatalf("SearchUserByUsername() error = %v", err)
+	}
+	var response CreateTokenResponse
+	if err := client.CreateToken(context.Background(), CreateTokenRequest{Name: "uclaw-main"}, &response); err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
+
+	if searchCalls != 2 {
+		t.Fatalf("searchCalls = %d, want initial 401 + retry", searchCalls)
+	}
+	if loginCalls != 1 {
+		t.Fatalf("loginCalls = %d, want one shared admin refresh", loginCalls)
+	}
+	if tokenAuth != "Bearer fresh-token" || tokenUser != "9" {
+		t.Fatalf("token auth=%q user=%q", tokenAuth, tokenUser)
+	}
+}
+
 func TestSearchUserByUsernameFindsExactMatch(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

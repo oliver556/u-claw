@@ -687,6 +687,84 @@ async function verifyLocalPathOnlyRecordHydration(page) {
 }
 
 /**
+ * Verifies real generation saves only lightweight local file references, then
+ * hydrates those local files after the Workflows route is remounted.
+ */
+async function verifyGeneratedRecordPersistsViaLocalPath(page, viewportName) {
+  const storedState = await page.evaluate(() => {
+    const raw = localStorage.getItem("uclaw.ecommerceImageRecords.v1") || "";
+    const records = JSON.parse(raw || "[]");
+    const record = records.find((item) => item?.productName === "便携榨汁杯") || records[0] || null;
+    const images = Array.isArray(record?.result?.images) ? record.result.images : [];
+    return {
+      rawLength: raw.length,
+      rawHasDataUrl: raw.includes("data:image/"),
+      rawHasRemoteUrl: /https?:\/\//.test(raw),
+      imageCount: images.length,
+      localPathCount: images.filter((image) => typeof image?.localPath === "string" && image.localPath.length > 0).length,
+      dataUrlCount: images.filter((image) => typeof image?.dataUrl === "string" && image.dataUrl.length > 0).length,
+      urlCount: images.filter((image) => typeof image?.url === "string" && image.url.length > 0).length,
+      recordText: record ? `${record.productName || ""} ${record.status || ""}` : "",
+    };
+  });
+
+  if (storedState.rawLength <= 0 || storedState.rawLength > 250000) {
+    throw new Error(`${viewportName}: Stored ecommerce record should be small localPath index, got ${JSON.stringify(storedState)}`);
+  }
+  if (storedState.rawHasDataUrl || storedState.rawHasRemoteUrl || storedState.dataUrlCount > 0 || storedState.urlCount > 0) {
+    throw new Error(`${viewportName}: Stored ecommerce record must not persist image bytes or remote URLs, got ${JSON.stringify(storedState)}`);
+  }
+  if (storedState.imageCount < 10 || storedState.localPathCount !== storedState.imageCount) {
+    throw new Error(`${viewportName}: Stored ecommerce record must keep every generated localPath, got ${JSON.stringify(storedState)}`);
+  }
+
+  await evaluateWithRetry(page, () => {
+    window.__uclawEcommerceMaterializeCalls = [];
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "便携榨汁杯", 10000);
+  await installDirectImageApiStub(page);
+  await page
+    .locator("openclaw-tasks-page .uclaw-ecommerce-record")
+    .filter({ hasText: "便携榨汁杯" })
+    .locator("button")
+    .filter({ hasText: "查看结果" })
+    .first()
+    .click();
+  await page.waitForFunction(() => {
+    const image = [...document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-featured img")][0];
+    return image instanceof HTMLImageElement && image.src.startsWith("data:image/");
+  }, null, { timeout: 10000 });
+
+  const hydratedState = await evaluateInDom(
+    page,
+    `
+      const featuredImage = allNodes().find((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-featured"));
+      const stripImages = allNodes().filter((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-generated"));
+      return {
+        featuredSrc: featuredImage?.src || "",
+        stripCount: stripImages.length,
+        stripDataUrlCount: stripImages.filter((node) => (node.src || "").startsWith("data:image/")).length,
+        materializeCount: window.__uclawEcommerceMaterializeCalls?.length || 0,
+      };
+    `,
+  );
+
+  if (!hydratedState.featuredSrc.startsWith("data:image/") || hydratedState.stripCount < 10 || hydratedState.stripDataUrlCount < 10) {
+    throw new Error(`${viewportName}: Remounted localPath record did not hydrate into previews, got ${JSON.stringify(hydratedState)}`);
+  }
+  if (hydratedState.materializeCount < 10) {
+    throw new Error(`${viewportName}: Remounted localPath record should materialize each generated image, got ${JSON.stringify(hydratedState)}`);
+  }
+}
+
+/**
  * Writes a small local PNG fixture for upload interaction.
  */
 function writeImageFixture() {
@@ -747,6 +825,25 @@ async function exerciseWorkbench(page, imagePath) {
     window.__uclawEcommerceReturnPartialImages = true;
   });
   await page.locator("openclaw-tasks-page button").filter({ hasText: "生成图片" }).click();
+  await page.waitForFunction(() => {
+    const visit = (root = document, out = []) => {
+      for (const child of root.children || []) {
+        out.push(child);
+        if (child.shadowRoot) visit(child.shadowRoot, out);
+        visit(child, out);
+      }
+      return out;
+    };
+    const workbench = visit().find((node) => node instanceof HTMLElement && node.getAttribute("data-uclaw-ecommerce-workbench") === "direct-output");
+    const button = visit().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("任务已创建"));
+    const record = visit().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+    return (
+      button instanceof HTMLButtonElement &&
+      button.disabled &&
+      (workbench?.innerText || workbench?.textContent || "").includes("待图片接口激活") &&
+      (record?.innerText || record?.textContent || "").includes("生成中")
+    );
+  });
   await waitForText(page, "出一张显示一张", 10000);
   await page.waitForFunction(() => {
     const cards = [...document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-generated")];
@@ -793,7 +890,11 @@ async function exerciseWorkbench(page, imagePath) {
       const activeTypes = typeCards
         .filter((node) => node.classList.contains("is-active"))
         .map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
-      const generateButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("生成图片"));
+      const primaryActionButton = allNodes().find(
+        (node) =>
+          node instanceof HTMLButtonElement &&
+          ["生成图片", "任务已创建", "重新创建任务"].some((text) => (node.innerText || node.textContent || "").includes(text)),
+      );
       const manifestButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("复制 Manifest"));
       const packageButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打包下载"));
       const openLocalButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开文件夹"));
@@ -866,7 +967,8 @@ async function exerciseWorkbench(page, imagePath) {
         countRects,
         typeRects,
         activeTypes,
-        generateDisabled: Boolean(generateButton?.disabled),
+        primaryActionLabel: (primaryActionButton?.innerText || primaryActionButton?.textContent || "").trim(),
+        primaryActionDisabled: Boolean(primaryActionButton?.disabled),
         hasManifestButton: Boolean(manifestButton),
         hasPackageButton: Boolean(packageButton),
         openLocalButtonCount: openLocalButtons.length,
@@ -879,6 +981,7 @@ async function exerciseWorkbench(page, imagePath) {
         carouselClientWidth: carousel?.clientWidth || 0,
         carouselScrollWidth: carousel?.scrollWidth || 0,
         request,
+        requestCount: window.__uclawEcommerceRequests?.length || 0,
         progressEventCount: progressEvents.length,
         firstProgressStatus: progressEvents[0]?.status || "",
         progressListenerCount: window.__uclawEcommerceProgressListeners?.length ?? -1,
@@ -887,6 +990,7 @@ async function exerciseWorkbench(page, imagePath) {
         fullTextIncludesIncrementalProgress: (workbench?.innerText || workbench?.textContent || "").includes("出一张显示一张"),
         fullTextIncludesThumbnailPreview: (workbench?.innerText || workbench?.textContent || "").includes("点击预览"),
         fullTextIncludesLocalSaved: (workbench?.innerText || workbench?.textContent || "").includes("已保存本地"),
+        fullTextIncludesDetailSeriesCount: (workbench?.innerText || workbench?.textContent || "").includes("详情图6屏"),
         finalTextIncludesGeneratingStatus: /正在生成|生成中/.test(workbench?.innerText || workbench?.textContent || ""),
         viewportWidth: window.innerWidth,
         scrollWidth: document.documentElement.scrollWidth,
@@ -1021,7 +1125,12 @@ async function runAcceptance(options) {
       if (!state.recordTexts.some((text) => text.includes("计划 10 张/屏") && text.includes("已出 10 张"))) {
         throw new Error(`${viewport.name}: Generation record should separate planned and generated counts, got ${JSON.stringify(state.recordTexts)}`);
       }
-      if (state.generateDisabled) throw new Error(`${viewport.name}: Generate button stayed disabled after valid input`);
+      if (state.primaryActionDisabled || state.primaryActionLabel !== "重新创建任务") {
+        throw new Error(`${viewport.name}: Finished task should expose enabled recreate action, got ${JSON.stringify({
+          label: state.primaryActionLabel,
+          disabled: state.primaryActionDisabled,
+        })}`);
+      }
       if (!state.hasPackageButton) throw new Error(`${viewport.name}: Package download button missing after generation`);
       if (state.openLocalButtonCount < 1) throw new Error(`${viewport.name}: Open local folder button missing after generation`);
       if (!state.fullTextIncludesLocalSaved) throw new Error(`${viewport.name}: Local saved state missing`);
@@ -1073,6 +1182,20 @@ async function runAcceptance(options) {
       if (state.request?.payload?.outputCounts?.model_image !== 1) {
         throw new Error(`${viewport.name}: Expected model_image count 1`);
       }
+      await page.locator("openclaw-tasks-page button").filter({ hasText: "重新创建任务" }).click();
+      await page.waitForFunction(() => {
+        const visit = (root = document, out = []) => {
+          for (const child of root.children || []) {
+            out.push(child);
+            if (child.shadowRoot) visit(child.shadowRoot, out);
+            visit(child, out);
+          }
+          return out;
+        };
+        const button = visit().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("任务已创建"));
+        return (window.__uclawEcommerceRequests?.length || 0) >= 2 && button instanceof HTMLButtonElement && button.disabled;
+      });
+      await waitForText(page, "重新创建任务", 10000);
       if (!state.text.includes("最长边建议 1600px")) throw new Error(`${viewport.name}: Amazon preset text missing`);
       if (!state.text.includes("模特图")) throw new Error(`${viewport.name}: Model image text missing`);
       if (!state.text.includes("图片语言")) throw new Error(`${viewport.name}: Image language selector text missing`);
@@ -1086,10 +1209,12 @@ async function runAcceptance(options) {
       if (!state.fullTextIncludesIncrementalProgress && !state.sawIncrementalResult) {
         throw new Error(`${viewport.name}: Incremental progress text missing`);
       }
-      if (!state.text.includes("详情图6屏")) throw new Error(`${viewport.name}: Detail series count text missing`);
+      if (!state.fullTextIncludesDetailSeriesCount) throw new Error(`${viewport.name}: Detail series count text missing`);
       if (state.scrollWidth > state.viewportWidth + 4) {
         throw new Error(`${viewport.name}: horizontal overflow ${state.scrollWidth} > ${state.viewportWidth}`);
       }
+
+      await verifyGeneratedRecordPersistsViaLocalPath(page, viewport.name);
 
       const [download] = await Promise.all([
         page.waitForEvent("download", { timeout: 10000 }),
@@ -1196,11 +1321,10 @@ async function runAcceptance(options) {
       await evaluateInDom(
         page,
         `
-          const before = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record")).length;
-          const button = allNodes().find((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-delete"));
-          if (!button) throw new Error("No delete record button");
-          button.click();
-          return before;
+          const buttons = allNodes().filter((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-delete"));
+          if (!buttons.length) throw new Error("No delete record button");
+          for (const button of buttons) button.click();
+          return buttons.length;
         `,
       );
       await page.waitForFunction(() => {

@@ -128,13 +128,14 @@ type adminAuthRequest struct {
 // NewServer returns the HTTP interface for activation, payment, and health routes.
 func NewServer(cfg config.Config, build BuildInfo) http.Handler {
 	alipayPay := buildAlipayPaymentService(cfg)
+	newAPIAdmin := buildNewAPIAdminClient(cfg, "shared")
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, nil),
-		Activation: buildActivationService(cfg, nil),
+		Activation: buildActivationService(cfg, nil, newAPIAdmin),
 		Admin:      buildAdminService(cfg, nil),
-		Usage:      buildUsageService(cfg),
-		Catalog:    buildModelCatalogService(cfg),
-		Recharge:   buildRechargeService(cfg, nil, alipayPay),
+		Usage:      buildUsageService(cfg, newAPIAdmin),
+		Catalog:    buildModelCatalogService(cfg, newAPIAdmin),
+		Recharge:   buildRechargeService(cfg, nil, alipayPay, newAPIAdmin),
 		AlipayPay:  alipayPay,
 		AlipaySPI:  buildAlipaySPIService(cfg),
 	})
@@ -143,13 +144,14 @@ func NewServer(cfg config.Config, build BuildInfo) http.Handler {
 // NewServerWithStore returns the HTTP interface backed by persistent storage.
 func NewServerWithStore(cfg config.Config, build BuildInfo, store PersistentStore) http.Handler {
 	alipayPay := buildAlipayPaymentService(cfg)
+	newAPIAdmin := buildNewAPIAdminClient(cfg, "shared")
 	return NewServerWithOptions(cfg, build, ServerOptions{
 		Auth:       buildAuthService(cfg, store),
-		Activation: buildActivationService(cfg, store),
+		Activation: buildActivationService(cfg, store, newAPIAdmin),
 		Admin:      buildAdminService(cfg, store),
-		Usage:      buildUsageService(cfg, store),
-		Catalog:    buildModelCatalogService(cfg),
-		Recharge:   buildRechargeService(cfg, store, alipayPay),
+		Usage:      buildUsageService(cfg, newAPIAdmin, store),
+		Catalog:    buildModelCatalogService(cfg, newAPIAdmin),
+		Recharge:   buildRechargeService(cfg, store, alipayPay, newAPIAdmin),
 		AlipayPay:  alipayPay,
 		AlipaySPI:  buildAlipaySPIService(cfg),
 	})
@@ -885,17 +887,27 @@ func buildSMSProvider(cfg config.Config) auth.SMSProvider {
 	return auth.DevelopmentSMSProvider{}
 }
 
+// buildNewAPIAdminClient creates the single admin client shared by all New API
+// call paths in one Cloud API process, so token refresh is process-wide.
+func buildNewAPIAdminClient(cfg config.Config, purpose string) *newapi.Client {
+	if cfg.NewAPIAdminBaseURL == "" || cfg.NewAPIAdminToken == "" {
+		return nil
+	}
+	admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout}, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
+	if err != nil {
+		panic(fmt.Sprintf("build newapi %s client: %v", purpose, err))
+	}
+	return admin
+}
+
 // buildActivationService creates activation dependencies, using memory only outside production.
-func buildActivationService(cfg config.Config, store activation.Store) *activation.Service {
+func buildActivationService(cfg config.Config, store activation.Store, admin *newapi.Client) *activation.Service {
 	if store == nil {
 		store = activation.NewMemoryStore(!cfg.IsProduction())
 	}
 	var provisioner activation.NewAPIProvisioner
-	if persistentStore, ok := store.(provisioning.Store); ok && cfg.NewAPIAdminBaseURL != "" && cfg.NewAPIAdminToken != "" {
-		admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout}, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
-		if err != nil {
-			panic(fmt.Sprintf("build newapi admin client: %v", err))
-		}
+	if persistentStore, ok := store.(provisioning.Store); ok && admin != nil {
+		var err error
 		provisioner, err = provisioning.NewService(admin, persistentStore, provisioning.Config{
 			ClientBaseURL:  cfg.NewAPIClientBaseURL,
 			TokenName:      cfg.NewAPITokenName,
@@ -938,13 +950,9 @@ func buildActivationService(cfg config.Config, store activation.Store) *activati
 }
 
 // buildUsageService creates the New API read-side service when admin access is configured.
-func buildUsageService(cfg config.Config, store ...usage.EcommerceUsageStore) *usage.Service {
-	if cfg.NewAPIAdminBaseURL == "" || cfg.NewAPIAdminToken == "" {
+func buildUsageService(cfg config.Config, admin *newapi.Client, store ...usage.EcommerceUsageStore) *usage.Service {
+	if admin == nil {
 		return nil
-	}
-	admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout}, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
-	if err != nil {
-		panic(fmt.Sprintf("build newapi usage client: %v", err))
 	}
 	service, err := usage.NewService(admin, usage.Config{
 		PasswordSecret: cfg.NewAPIUserPasswordSecret,
@@ -956,13 +964,9 @@ func buildUsageService(cfg config.Config, store ...usage.EcommerceUsageStore) *u
 }
 
 // buildModelCatalogService creates the New API model catalog read-side when admin access is configured.
-func buildModelCatalogService(cfg config.Config) *modelcatalog.Service {
-	if cfg.NewAPIAdminBaseURL == "" || cfg.NewAPIAdminToken == "" || cfg.NewAPIClientBaseURL == "" {
+func buildModelCatalogService(cfg config.Config, admin *newapi.Client) *modelcatalog.Service {
+	if admin == nil || cfg.NewAPIClientBaseURL == "" {
 		return nil
-	}
-	admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout}, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
-	if err != nil {
-		panic(fmt.Sprintf("build newapi model catalog client: %v", err))
 	}
 	service, err := modelcatalog.NewService(admin, modelcatalog.Config{
 		PasswordSecret: cfg.NewAPIUserPasswordSecret,
@@ -975,16 +979,12 @@ func buildModelCatalogService(cfg config.Config) *modelcatalog.Service {
 }
 
 // buildRechargeService creates recharge orders and wires official checkout adapters.
-func buildRechargeService(cfg config.Config, store recharge.Store, alipayPay *alipaypay.Client) *recharge.Service {
+func buildRechargeService(cfg config.Config, store recharge.Store, alipayPay *alipaypay.Client, admin *newapi.Client) *recharge.Service {
 	if store == nil {
 		store = recharge.NewMemoryStore()
 	}
 	var quota recharge.QuotaClient
-	if cfg.NewAPIAdminBaseURL != "" && cfg.NewAPIAdminToken != "" {
-		admin, err := newapi.NewClient(cfg.NewAPIAdminBaseURL, cfg.NewAPIAdminToken, &http.Client{Timeout: cfg.NewAPIHTTPTimeout}, newapi.WithAdminCredentials(cfg.NewAPIAdminUsername, cfg.NewAPIAdminPassword))
-		if err != nil {
-			panic(fmt.Sprintf("build newapi recharge client: %v", err))
-		}
+	if admin != nil {
 		quota = admin
 	}
 	checkoutClients := map[string]recharge.CheckoutClient{}

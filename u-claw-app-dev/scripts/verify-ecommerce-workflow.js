@@ -186,6 +186,8 @@ function verifyDirectDesktopApi(errors) {
     "recordEcommerceImageUsage",
     "/v1/newapi/usage/ecommerce-image",
     "ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE",
+    "formatCloudAPIErrorMessage",
+    "NewAPI 管理员登录会话已达上限",
     "summarizeEcommerceImageRequestError",
     "该张被上游图片接口拒绝 400，其他已成功图片已保留",
     "billing",
@@ -228,9 +230,16 @@ function verifyDirectDesktopApi(errors) {
   }
   const activationService = readFile("cloud/uclaw-cloud-api/internal/activation/service.go");
   const provisioningService = readFile("cloud/uclaw-cloud-api/internal/provisioning/service.go");
+  const newapiClient = readFile("cloud/uclaw-cloud-api/internal/newapi/client.go");
+  const httpapiServer = readFile("cloud/uclaw-cloud-api/internal/httpapi/server.go");
   requireToken(errors, "activation/service.go", activationService, "ForceRotateToken");
   requireToken(errors, "provisioning/service.go", provisioningService, "tokenName(req.ForceRotateToken)");
   requireToken(errors, "provisioning/service.go", provisioningService, "createdToken.APIKey()");
+  requireToken(errors, "newapi/client.go", newapiClient, "type tokenState struct");
+  requireToken(errors, "newapi/client.go", newapiClient, "withSharedTokenState(c.tokens)");
+  requireToken(errors, "httpapi/server.go", httpapiServer, "buildNewAPIAdminClient");
+  requireToken(errors, "httpapi/server.go", httpapiServer, "newAPIAdmin := buildNewAPIAdminClient");
+  requireToken(errors, "httpapi/server.go", httpapiServer, "buildUsageService(cfg, newAPIAdmin");
   const postgresStore = readFile("cloud/uclaw-cloud-api/internal/postgres/store.go");
   const postgresEcommerceStore = readFile("cloud/uclaw-cloud-api/internal/postgres/ecommerce_usage_store.go");
   requireToken(errors, "postgres/store.go", postgresStore, "EnsureEcommerceImageUsageSchema(ctx)");
@@ -316,10 +325,17 @@ function verifyPatchSource(errors) {
     "ecommerce-status-complete-1",
     "ecommerce-swiper-preview-1",
     "UcEcommerceNormalizeRecord",
+    "UcEcommerceStripImagePayload",
+    "UcEcommerceStripResultPayload",
+    "UcEcommerceStripRecordPayload",
     "UcEcommerceRecordPlannedCount",
     "UcEcommerceRecordGeneratedCount",
     "UcEcommerceRecordHasBillingError",
     "UcEcommerceRecordEffectiveStatus",
+    "UcEcommercePrimaryActionState",
+    "任务已创建",
+    "重新创建任务",
+    "待图片接口激活",
     "UcEcommerceStaleGeneratingMs",
     "UcEcommerceProgressState",
     "UcEcommerceImageKey",
@@ -423,6 +439,9 @@ function verifyPatchSource(errors) {
   if (content.includes("r.done??(Array.isArray(t)?t.length:0)")) {
     errors.push("patch-openclaw.js progress display must prefer real image count over optimistic progress.done");
   }
+  if (content.includes("?disabled=${a.length>0||u}") || content.includes("${u?`生成中`:`生成图片`}")) {
+    errors.push("patch-openclaw.js must derive ecommerce primary action from task state, not raw ecommerceGenerating");
+  }
 }
 
 /**
@@ -457,10 +476,17 @@ function verifyGeneratedTasksPage(errors) {
       "hydrateEcommerceResultImages",
       "UcEcommerceDownloadFileName",
       "UcEcommerceNormalizeRecord",
+      "UcEcommerceStripImagePayload",
+      "UcEcommerceStripResultPayload",
+      "UcEcommerceStripRecordPayload",
       "UcEcommerceRecordEffectiveStatus",
       "UcEcommerceRecordPlannedCount",
       "UcEcommerceRecordGeneratedCount",
       "UcEcommerceRecordHasBillingError",
+      "UcEcommercePrimaryActionState",
+      "任务已创建",
+      "重新创建任务",
+      "待图片接口激活",
       "UcEcommerceStaleGeneratingMs",
       "UcEcommerceProgressState",
       "UcEcommerceImageKey",
@@ -564,6 +590,9 @@ function verifyGeneratedTasksPage(errors) {
     if (content.includes("r.done??(Array.isArray(t)?t.length:0)")) {
       errors.push(`${label} progress display must prefer real image count over optimistic progress.done`);
     }
+    if (content.includes("?disabled=${a.length>0||u}") || content.includes("${u?`生成中`:`生成图片`}")) {
+      errors.push(`${label} must derive ecommerce primary action from task state, not raw ecommerceGenerating`);
+    }
     if (content.includes("<strong>${u?`正在生成`:o.platform_label+` 已生成图片`}</strong>")) {
       errors.push(`${label} still derives result header from raw ecommerceGenerating`);
     }
@@ -572,6 +601,12 @@ function verifyGeneratedTasksPage(errors) {
     }
     if (!/UcEcommerceMergeImages\(m,Array\.isArray\(t\?\.images\)\?t\.images:\[\]\)/.test(content)) {
       errors.push(`${label} must merge final ecommerce images with progress-delivered images`);
+    }
+    if (/JSON\.stringify\(\(e\|\|\[\]\)\.slice\(0,30\)\)/.test(content)) {
+      errors.push(`${label} must not persist full ecommerce image records with dataUrl payloads`);
+    }
+    if (!/delete t\.dataUrl;t\.localPath\|\|delete t\.url/.test(content)) {
+      errors.push(`${label} must strip image bytes and localPath-backed remote URLs before record persistence`);
     }
   }
 }
@@ -635,6 +670,7 @@ function verifyServiceWorker(errors) {
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-swiper-preview-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-local-library-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-delete-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-task-recreate-1");
 }
 
 /**

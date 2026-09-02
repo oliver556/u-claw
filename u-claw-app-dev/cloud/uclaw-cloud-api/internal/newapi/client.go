@@ -21,13 +21,17 @@ type HTTPDoer interface {
 // Client wraps New API admin endpoints needed by the Bavi-box activation flow.
 type Client struct {
 	baseURL              string
-	adminToken           string
+	tokens               *tokenState
 	adminRefreshUsername string
 	adminRefreshPassword string
 	httpClient           HTTPDoer
 	userID               int64
-	tokenMu              sync.RWMutex
 	refreshMu            sync.Mutex
+}
+
+type tokenState struct {
+	mu    sync.RWMutex
+	token string
 }
 
 // Option customizes New API client behavior without changing existing call sites.
@@ -62,7 +66,7 @@ func NewClient(baseURL string, adminToken string, httpClient HTTPDoer, options .
 	}
 	client := &Client{
 		baseURL:    baseURL,
-		adminToken: strings.TrimSpace(adminToken),
+		tokens:     &tokenState{token: strings.TrimSpace(adminToken)},
 		httpClient: httpClient,
 	}
 	for _, option := range options {
@@ -92,9 +96,20 @@ func (c *Client) WithAdminUser(userID int64) (*Client, error) {
 		c.baseURL,
 		c.adminTokenSnapshot(),
 		c.httpClient,
+		withSharedTokenState(c.tokens),
 		WithUserID(userID),
 		WithAdminCredentials(c.adminRefreshUsername, c.adminRefreshPassword),
 	)
+}
+
+// withSharedTokenState lets derived clients observe admin token refreshes made
+// by the root New API client instead of freezing a stale bearer token.
+func withSharedTokenState(tokens *tokenState) Option {
+	return func(c *Client) {
+		if tokens != nil {
+			c.tokens = tokens
+		}
+	}
 }
 
 // CreateUser requests a New API user creation. The exact response shape must be verified in Phase 0.
@@ -446,9 +461,9 @@ func (c *Client) cloneRequest(httpReq *http.Request, bodyBytes []byte, attachAut
 
 // adminTokenSnapshot returns the current token without exposing mutation races.
 func (c *Client) adminTokenSnapshot() string {
-	c.tokenMu.RLock()
-	defer c.tokenMu.RUnlock()
-	return c.adminToken
+	c.tokens.mu.RLock()
+	defer c.tokens.mu.RUnlock()
+	return c.tokens.token
 }
 
 // canRefreshAdminToken reports whether refresh credentials were configured.
@@ -472,9 +487,9 @@ func (c *Client) refreshAdminToken(ctx context.Context, staleToken string) error
 	if token == "" {
 		return fmt.Errorf("refresh newapi admin token: empty access token")
 	}
-	c.tokenMu.Lock()
-	c.adminToken = token
-	c.tokenMu.Unlock()
+	c.tokens.mu.Lock()
+	c.tokens.token = token
+	c.tokens.mu.Unlock()
 	return nil
 }
 
