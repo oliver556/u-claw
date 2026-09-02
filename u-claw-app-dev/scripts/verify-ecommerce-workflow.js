@@ -94,6 +94,8 @@ function verifyDirectNewApiRouting(errors) {
     const mainContent = readFile(mainProcessFile);
     const normalizeBaseUrl = evaluateMainHelper(mainContent, "normalizeNewApiImageBaseUrl");
     const normalizeModel = evaluateMainHelper(mainContent, "normalizeEcommerceNewApiModel");
+    const firstNonBlankString = evaluateMainHelper(mainContent, "firstNonBlankString");
+    const providerName = evaluateMainHelper(mainContent, "getEcommerceModelProviderName");
 
     const cases = [
       ["https://api.example.com", "https://api.example.com/v1"],
@@ -116,6 +118,12 @@ function verifyDirectNewApiRouting(errors) {
     if (bare.modelRef !== "gpt-image-2" || bare.requestModel !== "gpt-image-2") {
       errors.push("normalizeEcommerceNewApiModel must preserve bare image model ids");
     }
+    if (providerName("newapi/gpt-image-2") !== "newapi") {
+      errors.push("getEcommerceModelProviderName must detect NewAPI model refs");
+    }
+    if (firstNonBlankString("", "   ", "https://api.example.com/v1") !== "https://api.example.com/v1") {
+      errors.push("firstNonBlankString must skip blank credential values before fallback");
+    }
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
@@ -131,6 +139,10 @@ function verifyDirectDesktopApi(errors) {
     "resolveEcommerceImageCredential",
     "normalizeNewApiImageBaseUrl",
     "normalizeEcommerceNewApiModel",
+    "getEcommerceModelProviderName",
+    "firstNonBlankString",
+    "findNewApiCredentials(config)",
+    "getProviderValue(modelProvider",
     "resolveEcommerceImageTargets",
     "generateEcommerceImagesDirect",
     "requestEcommerceImage",
@@ -146,6 +158,12 @@ function verifyDirectDesktopApi(errors) {
     "requestModel",
     "materializeEcommerceImageUrl",
     "materializeEcommerceImageForRenderer",
+    "isInvalidEcommerceImageTokenError",
+    "refreshEcommerceImageCredential",
+    "verifyEcommerceImageCredential",
+    "图片接口 token 已刷新，但 NewAPI 校验失败",
+    "/v1/newapi/credentials/refresh",
+    "云端刷新接口未上线",
     "assertPublicEcommerceImageUrl",
     "isPrivateNetworkAddress",
     "ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES",
@@ -190,12 +208,22 @@ function verifyDirectDesktopApi(errors) {
   if (/configuredModel\.includes\('\/'\)\s*\?\s*configuredModel\.split\('\/'\)\.pop\(\)/.test(mainContent)) {
     errors.push("src/main.js must not blindly strip provider prefixes from ecommerce image model refs");
   }
+  if (/config\.models\?\.providers\?\.newapi\s*\|\|\s*\{\}/.test(mainContent)) {
+    errors.push("src/main.js must not require providers.newapi for ecommerce image credentials");
+  }
   if (/const endpoint = images\.length \? '\/images\/edits' : '\/images\/generations';/.test(mainContent)) {
     errors.push("src/main.js must normalize NewAPI baseUrl before appending image endpoints");
   }
   if (!/recordEcommerceImageUsage\(\{ manifest, credential, generated \}\)/.test(mainContent)) {
     errors.push("src/main.js must report successful ecommerce image generation for NewAPI consumption");
   }
+  const activationService = readFile("cloud/uclaw-cloud-api/internal/activation/service.go");
+  const provisioningService = readFile("cloud/uclaw-cloud-api/internal/provisioning/service.go");
+  requireToken(errors, "activation/service.go", activationService, "ForceRotateToken");
+  requireToken(errors, "provisioning/service.go", provisioningService, "tokenName(req.ForceRotateToken)");
+  requireToken(errors, "provisioning/service.go", provisioningService, "createdToken.APIKey()");
+  requireToken(errors, "provisioning/service.go", provisioningService, "isSessionLimitError");
+  requireToken(errors, "provisioning/service.go", provisioningService, "WithAdminUser");
 }
 
 /**
@@ -232,6 +260,8 @@ function verifyPatchSource(errors) {
     "UcEcommerceMergeImages",
     "UcEcommerceMergeWarnings",
     "openEcommerceLocalPath",
+    "deleteEcommerceRecord",
+    "uclaw-ecommerce-record-delete",
     "已保存本地",
     "打开文件夹",
     "localPath",
@@ -354,6 +384,8 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceMergeImages",
       "UcEcommerceMergeWarnings",
       "openEcommerceLocalPath",
+      "deleteEcommerceRecord",
+      "uclaw-ecommerce-record-delete",
       "已保存本地",
       "打开文件夹",
       "localPath",
@@ -504,6 +536,7 @@ function verifyServiceWorker(errors) {
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-ultrawide-layout-2");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-swiper-preview-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-local-library-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-delete-1");
 }
 
 /**

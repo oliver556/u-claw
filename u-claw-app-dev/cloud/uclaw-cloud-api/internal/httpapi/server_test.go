@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"uclaw-cloud-api/internal/activation"
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/newapi"
 	alipaypay "uclaw-cloud-api/internal/payment/alipay"
@@ -213,6 +214,62 @@ func TestActivationRedeemRequiresBearerToken(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestNewAPICredentialRefreshReturnsClientConfig(t *testing.T) {
+	provisioner := &httpRecordingProvisioner{
+		result: activation.ProvisionResult{
+			NewAPIUserID: 18,
+			Token:        "sk-refreshed-token",
+			TokenVersion: 2,
+		},
+	}
+	activationService, err := activation.NewService(activation.NewMemoryStore(true), activation.Config{
+		NewAPIBaseURL: "https://api.example.com/v1",
+		Provisioner:   provisioner,
+	})
+	if err != nil {
+		t.Fatalf("activation service: %v", err)
+	}
+	server := NewServerWithOptions(config.Config{
+		AppEnv:     "development",
+		JWTSecret:  "test-secret",
+		DevSMSCode: "654321",
+	}, BuildInfo{Version: "test"}, ServerOptions{
+		Auth:       buildAuthService(config.Config{AppEnv: "development", JWTSecret: "test-secret", DevSMSCode: "654321"}, nil),
+		Activation: activationService,
+	})
+	accessToken := loginForTest(t, server, "13800138000", "654321")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/newapi/credentials/refresh", bytes.NewBufferString(`{}`))
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		NewAPIBaseURL string `json:"newapiBaseUrl"`
+		NewAPIToken   string `json:"newapiToken"`
+		TokenVersion  int    `json:"tokenVersion"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode refresh response: %v", err)
+	}
+	if payload.NewAPIBaseURL != "https://api.example.com/v1" || payload.NewAPIToken != "sk-refreshed-token" || payload.TokenVersion != 2 {
+		t.Fatalf("refresh payload = %+v", payload)
+	}
+	if !provisioner.called || provisioner.request.Phone != "13800138000" {
+		t.Fatalf("provision request = %+v called=%v", provisioner.request, provisioner.called)
+	}
+
+	unauthorizedRec := httptest.NewRecorder()
+	unauthorizedReq := httptest.NewRequest(http.MethodPost, "/v1/newapi/credentials/refresh", bytes.NewBufferString(`{}`))
+	server.ServeHTTP(unauthorizedRec, unauthorizedReq)
+	if unauthorizedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d, want 401", unauthorizedRec.Code)
 	}
 }
 
@@ -1045,4 +1102,17 @@ func loginForTest(t *testing.T, server http.Handler, phone string, code string) 
 		t.Fatal("access token is empty")
 	}
 	return loginPayload.AccessToken
+}
+
+type httpRecordingProvisioner struct {
+	request activation.ProvisionRequest
+	result  activation.ProvisionResult
+	called  bool
+}
+
+// ProvisionNewAPI records refresh requests while keeping HTTP tests local.
+func (p *httpRecordingProvisioner) ProvisionNewAPI(_ context.Context, req activation.ProvisionRequest) (activation.ProvisionResult, error) {
+	p.called = true
+	p.request = req
+	return p.result, nil
 }
