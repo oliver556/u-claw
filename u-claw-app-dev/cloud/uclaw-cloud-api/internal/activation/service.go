@@ -111,9 +111,17 @@ type CommitResult struct {
 
 // ProvisionRequest identifies the Bavi-box user that needs a New API account.
 type ProvisionRequest struct {
+	UserID           int64
+	Phone            string
+	Group            string
+	ForceRotateToken bool
+}
+
+// RefreshCredentialRequest identifies an authenticated user needing a fresh
+// New API token after the desktop detects an upstream 401.
+type RefreshCredentialRequest struct {
 	UserID int64
 	Phone  string
-	Group  string
 }
 
 // ProvisionResult carries the New API client credential returned to Bavi-box desktop.
@@ -305,7 +313,7 @@ func (s *Service) ActivateFirstStart(ctx context.Context, req FirstStartRequest)
 	if err != nil {
 		return FirstStartResult{}, err
 	}
-	result, err := s.provisionResult(ctx, userID, principal, group)
+	result, err := s.provisionResult(ctx, userID, principal, group, false)
 	if err != nil {
 		return FirstStartResult{}, err
 	}
@@ -413,11 +421,16 @@ func firstStartCommittedResult(activationID string) CommitResult {
 }
 
 // provisionResult creates or restores New API credentials for an activated principal.
-func (s *Service) provisionResult(ctx context.Context, userID int64, phone string, group string) (RedeemResult, error) {
+func (s *Service) provisionResult(ctx context.Context, userID int64, phone string, group string, forceRotateToken bool) (RedeemResult, error) {
 	token := s.cfg.PreviewToken
 	tokenVersion := 1
 	if s.cfg.Provisioner != nil {
-		result, err := s.cfg.Provisioner.ProvisionNewAPI(ctx, ProvisionRequest{UserID: userID, Phone: phone, Group: group})
+		result, err := s.cfg.Provisioner.ProvisionNewAPI(ctx, ProvisionRequest{
+			UserID:           userID,
+			Phone:            phone,
+			Group:            group,
+			ForceRotateToken: forceRotateToken,
+		})
 		if err != nil {
 			return RedeemResult{}, err
 		}
@@ -436,6 +449,26 @@ func (s *Service) provisionResult(ctx context.Context, userID int64, phone strin
 			Video: s.cfg.DefaultVideoModel,
 		},
 	}, nil
+}
+
+// RefreshNewAPICredential recreates/restores the user's New API token without
+// requiring the customer to re-enter the activation code.
+func (s *Service) RefreshNewAPICredential(ctx context.Context, req RefreshCredentialRequest) (RedeemResult, error) {
+	if req.UserID <= 0 {
+		return RedeemResult{}, fmt.Errorf("user id is required")
+	}
+	phone := strings.TrimSpace(req.Phone)
+	if phone == "" {
+		return RedeemResult{}, fmt.Errorf("phone is required")
+	}
+	result, err := s.provisionResult(ctx, req.UserID, phone, "", true)
+	if err != nil {
+		return RedeemResult{}, err
+	}
+	if result.TokenVersion <= 1 {
+		result.TokenVersion = 2
+	}
+	return result, nil
 }
 
 func (s *Service) activationCodeNewAPIGroup(ctx context.Context, code string) (string, error) {

@@ -187,6 +187,35 @@ func TestCreateTokenDecodesTokenPresence(t *testing.T) {
 	}
 }
 
+func TestWithAdminUserKeepsAdminAuthAndAddsUserHeader(t *testing.T) {
+	var gotAuth string
+	var gotUser string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotUser = r.Header.Get("New-Api-User")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"token":"fresh-key"}`))
+	}))
+	defer server.Close()
+
+	admin, err := NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	client, err := admin.WithAdminUser(9)
+	if err != nil {
+		t.Fatalf("WithAdminUser() error = %v", err)
+	}
+	var response CreateTokenResponse
+	if err := client.CreateToken(context.Background(), CreateTokenRequest{Name: "uclaw-main"}, &response); err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
+
+	if gotAuth != "Bearer admin-token" || gotUser != "9" {
+		t.Fatalf("auth=%q user=%q", gotAuth, gotUser)
+	}
+}
+
 func TestSearchUserByUsernameFindsExactMatch(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -346,6 +375,33 @@ func TestLoginReturnsAccessTokenWithoutBearer(t *testing.T) {
 	}
 }
 
+func TestLoginRetriesRateLimit(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"message":"rate limited"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"fresh-login-token"}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	result, err := client.Login(context.Background(), "13800138000", "password")
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if calls != 2 || result.Data.AccessToken != "fresh-login-token" {
+		t.Fatalf("calls=%d result=%+v", calls, result)
+	}
+}
+
 func TestSearchTokenByNameFindsNewestExactName(t *testing.T) {
 	var gotUser string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -391,6 +447,33 @@ func TestFetchTokenKeyAddsOpenAIStylePrefix(t *testing.T) {
 	}
 	if key != "sk-real-key-value" {
 		t.Fatalf("key = %q", key)
+	}
+}
+
+func TestFetchTokenKeyRetriesRateLimit(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"message":"rate limited"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"data":{"key":"fresh-key-value"}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "user-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	key, err := client.FetchTokenKey(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("FetchTokenKey() error = %v", err)
+	}
+	if calls != 2 || key != "sk-fresh-key-value" {
+		t.Fatalf("calls=%d key=%q", calls, key)
 	}
 }
 

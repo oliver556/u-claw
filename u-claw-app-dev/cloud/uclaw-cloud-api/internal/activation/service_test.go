@@ -434,6 +434,38 @@ func TestActivateFirstStartProvisionUsesPersistentUserID(t *testing.T) {
 	}
 }
 
+func TestRefreshNewAPICredentialUsesAuthenticatedUser(t *testing.T) {
+	provisioner := &recordingProvisioner{
+		result: ProvisionResult{
+			NewAPIUserID: 18,
+			Token:        "sk-refreshed-token",
+			TokenVersion: 2,
+		},
+	}
+	service, err := NewService(NewMemoryStore(true), Config{
+		NewAPIBaseURL: "https://api.example.com/v1/",
+		Provisioner:   provisioner,
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	result, err := service.RefreshNewAPICredential(context.Background(), RefreshCredentialRequest{
+		UserID: 91,
+		Phone:  "13800138000",
+	})
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	if !provisioner.called || provisioner.request.UserID != 91 || provisioner.request.Phone != "13800138000" || !provisioner.request.ForceRotateToken {
+		t.Fatalf("provision request = %+v called=%v", provisioner.request, provisioner.called)
+	}
+	if result.NewAPIToken != "sk-refreshed-token" || result.TokenVersion != 2 {
+		t.Fatalf("refresh result = %+v", result)
+	}
+}
+
 type recordingFirstStartStore struct {
 	*MemoryStore
 	attempts []FirstStartAttempt

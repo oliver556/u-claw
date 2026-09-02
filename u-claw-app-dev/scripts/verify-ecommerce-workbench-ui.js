@@ -585,6 +585,7 @@ async function exerciseWorkbench(page, imagePath) {
       const manifestButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("复制 Manifest"));
       const packageButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打包下载"));
       const openLocalButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开文件夹"));
+      const deleteRecordButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-delete"));
       const openSessionButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开会话"));
       const carousel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated-grid"));
       const carouselStyle = carousel ? getComputedStyle(carousel) : null;
@@ -656,6 +657,7 @@ async function exerciseWorkbench(page, imagePath) {
         hasManifestButton: Boolean(manifestButton),
         hasPackageButton: Boolean(packageButton),
         openLocalButtonCount: openLocalButtons.length,
+        deleteRecordButtonCount: deleteRecordButtons.length,
         openLocalPathCalls: window.__uclawEcommerceOpenLocalPathCalls || [],
         hasOpenSessionButton: Boolean(openSessionButton),
         carouselDisplay: carouselStyle?.display || "",
@@ -801,6 +803,7 @@ async function runAcceptance(options) {
       if (!state.hasPackageButton) throw new Error(`${viewport.name}: Package download button missing after generation`);
       if (state.openLocalButtonCount < 1) throw new Error(`${viewport.name}: Open local folder button missing after generation`);
       if (!state.fullTextIncludesLocalSaved) throw new Error(`${viewport.name}: Local saved state missing`);
+      if (state.deleteRecordButtonCount < 1) throw new Error(`${viewport.name}: Delete record button missing`);
       if (state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button must not appear`);
       if (state.carouselDisplay !== "flex") throw new Error(`${viewport.name}: Generated list should be flex carousel`);
       if (!["auto", "scroll"].includes(state.carouselOverflowX)) {
@@ -968,6 +971,27 @@ async function runAcceptance(options) {
       if (!openLocalState.some((payload) => String(payload?.path || "").includes("/tmp/uclaw-ecommerce-fixture"))) {
         throw new Error(`${viewport.name}: Open local folder did not call desktop API, got ${JSON.stringify(openLocalState)}`);
       }
+      await evaluateInDom(
+        page,
+        `
+          const before = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record")).length;
+          const button = allNodes().find((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-delete"));
+          if (!button) throw new Error("No delete record button");
+          button.click();
+          return before;
+        `,
+      );
+      await page.waitForFunction(() => {
+        const visit = (root = document, out = []) => {
+          for (const child of root.children || []) {
+            out.push(child);
+            if (child.shadowRoot) visit(child.shadowRoot, out);
+            visit(child, out);
+          }
+          return out;
+        };
+        return visit().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record")).length === 0;
+      }, null, { timeout: 5000 });
       await page
         .evaluate(() => {
           window.scrollTo({ top: 0, left: 0, behavior: "auto" });

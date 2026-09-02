@@ -676,6 +676,18 @@ function normalizeEcommerceNewApiModel(rawModel) {
 }
 
 /**
+ * Resolves the provider id embedded in an OpenClaw model ref so routed defaults
+ * like `litellm/gpt-image-2` can reuse the activation-written NewAPI adapter.
+ */
+function getEcommerceModelProviderName(modelRef) {
+  const value = String(modelRef || '').trim();
+  const slashIndex = value.indexOf('/');
+  if (slashIndex <= 0) return '';
+  const providerName = value.slice(0, slashIndex).trim().toLowerCase();
+  return ['newapi', 'litellm', 'custom', 'xai'].includes(providerName) ? providerName : '';
+}
+
+/**
  * Reads the locally persisted NewAPI credential without exposing the token to
  * the renderer. The ecommerce workbench is a Bavi-box feature, so it should call
  * the model provider from the trusted main process instead of opening a chat.
@@ -683,12 +695,7 @@ function normalizeEcommerceNewApiModel(rawModel) {
 function resolveEcommerceImageCredential() {
   const rawConfig = fs.existsSync(configPath) ? getConfig() : loadBundledDefaultConfig();
   const config = applyRuntimeConfigEnv(rawConfig);
-  const provider = config.models?.providers?.newapi || {};
   const credential = readJsonFile(builtinModelCredentialPath) || {};
-  const envBaseUrl = String(process.env.UCLAW_NEW_API_BASE_URL || '').trim();
-  const envToken = String(process.env.UCLAW_NEW_API_KEY || '').trim();
-  const baseUrl = normalizeNewApiImageBaseUrl(envBaseUrl || credential.baseUrl || provider.baseUrl || '');
-  const token = String(envToken || credential.token || provider.apiKey || '').trim();
   const configuredModel = String(
     credential.defaultModels?.image
       || config.agents?.defaults?.imageGenerationModel?.primary
@@ -696,6 +703,22 @@ function resolveEcommerceImageCredential() {
       || 'newapi/gpt-image-2',
   ).trim();
   const { modelRef, requestModel } = normalizeEcommerceNewApiModel(configuredModel);
+  const providers = config.models?.providers || {};
+  const modelProvider = providers[getEcommerceModelProviderName(modelRef)] || {};
+  const fallbackNewApi = findNewApiCredentials(config);
+  const baseUrl = normalizeNewApiImageBaseUrl(firstNonBlankString(
+    process.env.UCLAW_NEW_API_BASE_URL,
+    credential.baseUrl,
+    getProviderValue(modelProvider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url']),
+    fallbackNewApi.newApiBaseUrl,
+  ));
+  const token = firstNonBlankString(
+    process.env.UCLAW_NEW_API_KEY,
+    credential.token,
+    credential.apiKey,
+    getProviderValue(modelProvider, ['apiKey', 'api_key', 'key']),
+    fallbackNewApi.newApiKey,
+  );
 
   if (!baseUrl) throw new Error('图片接口 baseUrl 未配置，请先完成模型配置或激活。');
   if (!token) throw new Error('图片接口 token 未配置，请先完成模型配置或激活。');
@@ -1095,6 +1118,86 @@ async function materializeEcommerceImageForRenderer(payload = {}) {
 }
 
 /**
+ * Detects invalid image API token responses so the trusted process can refresh
+ * local NewAPI credentials and retry exactly once.
+ */
+function isInvalidEcommerceImageTokenError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('图片接口失败 401')
+    || (message.includes('401') && message.includes('invalid token'));
+}
+
+/**
+ * Refreshes the locally persisted NewAPI key from Bavi-box Cloud when an
+ * activated desktop has an expired or revoked image token.
+ */
+async function refreshEcommerceImageCredential() {
+  const state = readJsonFile(activationStatePath) || {};
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint || !accessToken) {
+    throw new Error('图片接口 token 已失效，请重新激活或刷新模型配置。');
+  }
+  let result;
+  try {
+    result = await postActivationJSONWithTokenRefresh('/v1/newapi/credentials/refresh', {}, {
+      endpoint,
+      accessToken,
+      state,
+      timeoutMs: 20000,
+    });
+  } catch (error) {
+    const message = String(error?.message || error || '');
+    if (message.includes('/v1/newapi/credentials/refresh') && (message.includes('HTTP 404') || message.includes('404'))) {
+      throw new Error('图片接口 token 已失效；云端刷新接口未上线，请部署最新版 Cloud API 后重试，或在激活页重新激活刷新模型凭据。');
+    }
+    throw new Error(`图片接口 token 已失效，自动刷新失败：${message}`);
+  }
+  writeBuiltinModelCredential(result);
+  writeOpenClawActivationConfig(result);
+  writeActivationState({
+    ...state,
+    source: state.source || 'cloud-token-refresh',
+    newapiBaseUrl: result.newapiBaseUrl,
+    newapiToken: result.newapiToken,
+    tokenVersion: result.tokenVersion,
+    uclawAccessToken: state.uclawAccessToken,
+  });
+  syncActivationMaterialToUsb();
+  const refreshed = resolveEcommerceImageCredential();
+  await verifyEcommerceImageCredential(refreshed);
+  return refreshed;
+}
+
+/**
+ * Proves a freshly rotated image token works before the generation retry burns
+ * another slow image request. This distinguishes local stale-token recovery from
+ * upstream image-channel failures.
+ */
+async function verifyEcommerceImageCredential(credential) {
+  const baseUrl = normalizeNewApiImageBaseUrl(credential?.baseUrl || '');
+  const token = String(credential?.token || '').trim();
+  if (!baseUrl || !token) {
+    throw new Error('图片接口 token 已刷新，但本地凭据写入不完整。');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`图片接口 token 已刷新，但 NewAPI 校验失败 ${response.status}: ${summarizeImageApiError(text)}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Calls the configured NewAPI image endpoint directly from the trusted process.
  */
 async function requestEcommerceImage({ credential, manifest, target, images }) {
@@ -1168,7 +1271,7 @@ function emitEcommerceImageProgress(sender, payload) {
 async function generateEcommerceImagesDirect(payload = {}, sender = null) {
   const manifest = payload.manifest && typeof payload.manifest === 'object' ? payload.manifest : null;
   if (!manifest) throw new Error('缺少生成 manifest。');
-  const credential = resolveEcommerceImageCredential();
+  let credential = resolveEcommerceImageCredential();
   const images = normalizeEcommerceInputImages(payload.images);
   const targets = resolveEcommerceImageTargets(
     payload.outputTypes || manifest.output_types,
@@ -1194,7 +1297,16 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
       },
     });
     try {
-      const image = await requestEcommerceImage({ credential, manifest, target, images });
+      let image;
+      try {
+        image = await requestEcommerceImage({ credential, manifest, target, images });
+      } catch (requestError) {
+        if (!isInvalidEcommerceImageTokenError(requestError)) {
+          throw requestError;
+        }
+        credential = await refreshEcommerceImageCredential();
+        image = await requestEcommerceImage({ credential, manifest, target, images });
+      }
       try {
         const savedImage = await saveEcommerceImageToLocalLibrary({
           image,
@@ -2518,6 +2630,19 @@ function getProviderValue(provider, keys) {
     if (typeof provider[key] === 'string' && provider[key].trim()) {
       return provider[key].trim();
     }
+  }
+  return '';
+}
+
+/**
+ * Returns the first non-blank string, so empty persisted env/credential values
+ * cannot block a later provider fallback.
+ */
+function firstNonBlankString(...values) {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
   }
   return '';
 }

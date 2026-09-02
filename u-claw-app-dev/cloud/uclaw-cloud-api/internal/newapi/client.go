@@ -82,6 +82,21 @@ func (c *Client) WithAccessToken(accessToken string, userID ...int64) (*Client, 
 	return NewClient(c.baseURL, accessToken, c.httpClient, options...)
 }
 
+// WithAdminUser keeps the admin bearer token and scopes token APIs with
+// New-Api-User, avoiding extra dashboard login sessions for the end user.
+func (c *Client) WithAdminUser(userID int64) (*Client, error) {
+	if userID <= 0 {
+		return nil, fmt.Errorf("newapi user id is required")
+	}
+	return NewClient(
+		c.baseURL,
+		c.adminTokenSnapshot(),
+		c.httpClient,
+		WithUserID(userID),
+		WithAdminCredentials(c.adminRefreshUsername, c.adminRefreshPassword),
+	)
+}
+
 // CreateUser requests a New API user creation. The exact response shape must be verified in Phase 0.
 func (c *Client) CreateUser(ctx context.Context, req CreateUserRequest) error {
 	return c.postJSON(ctx, "/api/user/", req, nil)
@@ -137,12 +152,23 @@ func (c *Client) GetUser(ctx context.Context, userID int64) (SelfUser, error) {
 // Login authenticates a New API user and returns a dashboard access token.
 func (c *Client) Login(ctx context.Context, username string, password string) (LoginResponse, error) {
 	var response LoginResponse
-	err := c.postJSONWithAuth(ctx, "/api/user/login", map[string]string{
+	payload := map[string]string{
 		"username": username,
 		"password": password,
-	}, &response, false)
-	if err != nil {
-		return LoginResponse{}, err
+	}
+	var err error
+	for attempt := 0; attempt < 4; attempt++ {
+		response = LoginResponse{}
+		err = c.postJSONWithAuth(ctx, "/api/user/login", payload, &response, false)
+		if err == nil {
+			break
+		}
+		if !isRateLimitedNewAPIError(err) || attempt == 3 {
+			return LoginResponse{}, err
+		}
+		if sleepErr := sleepWithContext(ctx, time.Duration(attempt+1)*time.Second); sleepErr != nil {
+			return LoginResponse{}, sleepErr
+		}
 	}
 	if !response.Success || response.Data.AccessToken == "" {
 		return LoginResponse{}, fmt.Errorf("newapi login failed: %s", strings.TrimSpace(response.Message))
@@ -181,8 +207,20 @@ func (c *Client) SearchTokenByName(ctx context.Context, name string) (Token, boo
 // FetchTokenKey retrieves the full API key for a token owned by the authenticated New API user.
 func (c *Client) FetchTokenKey(ctx context.Context, tokenID int64) (string, error) {
 	var response tokenKeyResponse
-	if err := c.postJSON(ctx, fmt.Sprintf("/api/token/%d/key", tokenID), map[string]any{}, &response); err != nil {
-		return "", err
+	path := fmt.Sprintf("/api/token/%d/key", tokenID)
+	var err error
+	for attempt := 0; attempt < 4; attempt++ {
+		response = tokenKeyResponse{}
+		err = c.postJSON(ctx, path, map[string]any{}, &response)
+		if err == nil {
+			break
+		}
+		if !isRateLimitedNewAPIError(err) || attempt == 3 {
+			return "", err
+		}
+		if sleepErr := sleepWithContext(ctx, time.Duration(attempt+1)*time.Second); sleepErr != nil {
+			return "", sleepErr
+		}
 	}
 	key := strings.TrimSpace(response.Data.Key)
 	if key == "" {
@@ -192,6 +230,28 @@ func (c *Client) FetchTokenKey(ctx context.Context, tokenID int64) (string, erro
 		key = "sk-" + key
 	}
 	return key, nil
+}
+
+// isRateLimitedNewAPIError identifies transient New API throttling when a fresh
+// token key is revealed immediately after creation.
+func isRateLimitedNewAPIError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, " returned 429:")
+}
+
+// sleepWithContext keeps retry backoff cancellable by the incoming HTTP request.
+func sleepWithContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // GetSelf returns the authenticated New API dashboard user profile and quota counters.
@@ -488,6 +548,19 @@ type CreateTokenResponse struct {
 	Key     string `json:"key,omitempty"`
 }
 
+// APIKey returns the OpenAI-compatible token key from the token creation
+// response when New API exposes it directly.
+func (r CreateTokenResponse) APIKey() string {
+	key := strings.TrimSpace(firstNonEmpty(r.Token, r.Key))
+	if key == "" {
+		return ""
+	}
+	if !strings.HasPrefix(key, "sk-") {
+		key = "sk-" + key
+	}
+	return key
+}
+
 // User is the subset of New API user records needed by Bavi-box provisioning.
 type User struct {
 	ID       int64  `json:"id"`
@@ -637,6 +710,15 @@ func normalizeUserModels(input map[string][]string) UserModels {
 		}
 	}
 	return output
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 type apiStatusResponse struct {

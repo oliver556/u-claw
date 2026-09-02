@@ -498,6 +498,31 @@ func NewServerWithOptions(cfg config.Config, build BuildInfo, options ServerOpti
 		}
 		writeJSON(w, http.StatusOK, result)
 	})
+	mux.HandleFunc("POST /v1/newapi/credentials/refresh", func(w http.ResponseWriter, r *http.Request) {
+		claims, err := verifyBearer(r, options.Auth)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if options.Activation == nil {
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("activation service is not configured"))
+			return
+		}
+		userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, fmt.Errorf("token subject is invalid"))
+			return
+		}
+		result, err := options.Activation.RefreshNewAPICredential(r.Context(), activation.RefreshCredentialRequest{
+			UserID: userID,
+			Phone:  claims.Phone,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
 	mux.HandleFunc("GET /v1/newapi/usage/summary", func(w http.ResponseWriter, r *http.Request) {
 		claims, err := verifyBearer(r, options.Auth)
 		if err != nil {
