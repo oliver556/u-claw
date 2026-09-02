@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"uclaw-cloud-api/internal/admin"
 	"uclaw-cloud-api/internal/auth"
 	"uclaw-cloud-api/internal/provisioning"
+	"uclaw-cloud-api/internal/usage"
 )
 
 // newMockStore creates a PostgreSQL store with sqlmock so store behavior is testable without a live DB.
@@ -40,6 +42,45 @@ func TestStoreEnsureEcommerceImageUsageSchemaCreatesMissingTable(t *testing.T) {
 
 	if err := store.EnsureEcommerceImageUsageSchema(context.Background()); err != nil {
 		t.Fatalf("EnsureEcommerceImageUsageSchema() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestStoreClaimEcommerceImageUsageCreatesSchemaAfterMissingTable(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	createdAt := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO ecommerce_image_usage_events")).
+		WithArgs(int64(7), int64(9), "13800138000", "ecom-run-42", "gpt-image-2", "uclaw-main", "amazon", `["detail_image"]`, 1, int64(50000), "pending", createdAt).
+		WillReturnError(fmt.Errorf(`ERROR: relation "ecommerce_image_usage_events" does not exist (SQLSTATE 42P01)`))
+	mock.ExpectExec(regexp.QuoteMeta("CREATE TABLE IF NOT EXISTS ecommerce_image_usage_events")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO ecommerce_image_usage_events")).
+		WithArgs(int64(7), int64(9), "13800138000", "ecom-run-42", "gpt-image-2", "uclaw-main", "amazon", `["detail_image"]`, 1, int64(50000), "pending", createdAt).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(88), createdAt))
+
+	event, claimed, err := store.ClaimEcommerceImageUsage(context.Background(), usage.EcommerceImageUsageEvent{
+		UserID:       7,
+		NewAPIUserID: 9,
+		Phone:        "13800138000",
+		RequestID:    "ecom-run-42",
+		Model:        "gpt-image-2",
+		TokenName:    "uclaw-main",
+		Platform:     "amazon",
+		OutputTypes:  []string{"detail_image"},
+		ImageCount:   1,
+		Quota:        50000,
+		Status:       "pending",
+		CreatedAt:    createdAt,
+	})
+	if err != nil {
+		t.Fatalf("ClaimEcommerceImageUsage() error = %v", err)
+	}
+	if !claimed || event.ID != 88 {
+		t.Fatalf("event=%+v claimed=%v", event, claimed)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
