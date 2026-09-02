@@ -26,6 +26,7 @@ if (isActivationOnlyMode) {
     getRechargeOrder: (orderNo) => ipcRenderer.invoke('uclaw:get-recharge-order', orderNo),
     rechargeModelQuota: (payload) => ipcRenderer.invoke('uclaw:recharge-model-quota', payload),
     generateEcommerceImages: (payload) => ipcRenderer.invoke('uclaw:ecommerce-generate-images', payload),
+    openEcommerceLocalPath: (payload) => ipcRenderer.invoke('uclaw:ecommerce-open-local-path', payload),
     writeDebuggerLog: (payload) => ipcRenderer.invoke('uclaw:write-debugger-log', payload),
     onEcommerceImageProgress: (callback) => {
       if (typeof callback !== 'function') return () => {};

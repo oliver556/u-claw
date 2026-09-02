@@ -149,6 +149,15 @@ function verifyDirectDesktopApi(errors) {
     "assertPublicEcommerceImageUrl",
     "isPrivateNetworkAddress",
     "ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES",
+    "ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME",
+    "resolveEcommerceLocalLibraryDir",
+    "saveEcommerceImageToLocalLibrary",
+    "saveEcommerceLocalManifest",
+    "openEcommerceLocalPath",
+    "uclaw:ecommerce-open-local-path",
+    "localPath",
+    "localDir",
+    "localManifestPath",
     "recordEcommerceImageUsage",
     "/v1/newapi/usage/ecommerce-image",
     "ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE",
@@ -167,6 +176,8 @@ function verifyDirectDesktopApi(errors) {
     "uclaw:ecommerce-image-progress",
     "materializeEcommerceImage",
     "uclaw:ecommerce-materialize-image",
+    "openEcommerceLocalPath",
+    "uclaw:ecommerce-open-local-path",
   ];
 
   for (const token of mainTokens) {
@@ -217,6 +228,16 @@ function verifyPatchSource(errors) {
     "UcEcommerceNormalizeRecord",
     "UcEcommerceStaleGeneratingMs",
     "UcEcommerceProgressState",
+    "UcEcommerceImageKey",
+    "UcEcommerceMergeImages",
+    "UcEcommerceMergeWarnings",
+    "openEcommerceLocalPath",
+    "已保存本地",
+    "打开文件夹",
+    "localPath",
+    "localDir",
+    "localManifestPath",
+    "ecommerce-local-library-1",
     "selectEcommercePreview",
     "openEcommerceSwiper",
     "stepEcommerceSwiper",
@@ -329,6 +350,15 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceNormalizeRecord",
       "UcEcommerceStaleGeneratingMs",
       "UcEcommerceProgressState",
+      "UcEcommerceImageKey",
+      "UcEcommerceMergeImages",
+      "UcEcommerceMergeWarnings",
+      "openEcommerceLocalPath",
+      "已保存本地",
+      "打开文件夹",
+      "localPath",
+      "localDir",
+      "localManifestPath",
       "selectEcommercePreview",
       "openEcommerceSwiper",
       "stepEcommerceSwiper",
@@ -407,6 +437,12 @@ function verifyGeneratedTasksPage(errors) {
     if (content.includes("<strong>${u?`正在生成`:o.platform_label+` 已生成图片`}</strong>")) {
       errors.push(`${label} still derives result header from raw ecommerceGenerating`);
     }
+    if (content.includes("images:Array.isArray(t?.images)?t.images:[]")) {
+      errors.push(`${label} still lets final ecommerce image response overwrite progress images`);
+    }
+    if (!/UcEcommerceMergeImages\(m,Array\.isArray\(t\?\.images\)\?t\.images:\[\]\)/.test(content)) {
+      errors.push(`${label} must merge final ecommerce images with progress-delivered images`);
+    }
   }
 }
 
@@ -467,6 +503,7 @@ function verifyServiceWorker(errors) {
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-status-complete-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-ultrawide-layout-2");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-swiper-preview-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-local-library-1");
 }
 
 /**

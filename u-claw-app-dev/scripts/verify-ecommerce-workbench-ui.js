@@ -293,7 +293,9 @@ async function installDirectImageApiStub(page) {
         window.__uclawEcommerceRequests = [];
         window.__uclawEcommerceProgressEvents = [];
         window.__uclawEcommerceProgressListeners = [];
+        window.__uclawEcommerceOpenLocalPathCalls = [];
         const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC";
+        const localDir = "/tmp/uclaw-ecommerce-fixture";
         const emitProgress = (payload) => {
           window.__uclawEcommerceProgressEvents.push(payload);
           for (const listener of window.__uclawEcommerceProgressListeners) listener(payload);
@@ -327,6 +329,10 @@ async function installDirectImageApiStub(page) {
                 model: "gpt-image-2",
                 mimeType: "image/png",
                 dataUrl: png,
+                localPath: `${localDir}/${String(index + 1).padStart(2, "0")}-${type}.png`,
+                localDir,
+                localFileName: `${String(index + 1).padStart(2, "0")}-${type}.png`,
+                savedAt: new Date().toISOString(),
               }));
             });
             window.__uclawEcommerceRequests.push({
@@ -356,14 +362,17 @@ async function installDirectImageApiStub(page) {
                 target: { type: images[index].type, title: images[index].title },
               });
             }
+            const finalImages = window.__uclawEcommerceReturnPartialImages ? images.slice(0, 1) : images;
             return {
               ok: true,
               requestId,
               provider: "newapi",
               model: "gpt-image-2",
               generatedAt: new Date().toISOString(),
-              warnings: [],
-              images,
+              warnings: finalImages.length < images.length ? ["fixture final response intentionally partial"] : [],
+              images: finalImages,
+              localDir,
+              localManifestPath: `${localDir}/manifest.json`,
             };
           },
           onEcommerceImageProgress: (callback) => {
@@ -375,6 +384,10 @@ async function installDirectImageApiStub(page) {
             };
           },
           materializeEcommerceImage: async (payload) => ({ ok: true, image: payload }),
+          openEcommerceLocalPath: async (payload) => {
+            window.__uclawEcommerceOpenLocalPathCalls.push(payload);
+            return { ok: true, path: payload?.path || payload?.localPath || payload?.localDir || "" };
+          },
         };
       });
       return;
@@ -519,6 +532,9 @@ async function exerciseWorkbench(page, imagePath) {
     );
     return button instanceof HTMLButtonElement && !button.disabled;
   });
+  await page.evaluate(() => {
+    window.__uclawEcommerceReturnPartialImages = true;
+  });
   await page.locator("openclaw-tasks-page button").filter({ hasText: "生成图片" }).click();
   await waitForText(page, "出一张显示一张", 10000);
   await page.waitForFunction(() => {
@@ -568,6 +584,7 @@ async function exerciseWorkbench(page, imagePath) {
       const generateButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("生成图片"));
       const manifestButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("复制 Manifest"));
       const packageButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打包下载"));
+      const openLocalButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开文件夹"));
       const openSessionButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开会话"));
       const carousel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated-grid"));
       const carouselStyle = carousel ? getComputedStyle(carousel) : null;
@@ -638,6 +655,8 @@ async function exerciseWorkbench(page, imagePath) {
         generateDisabled: Boolean(generateButton?.disabled),
         hasManifestButton: Boolean(manifestButton),
         hasPackageButton: Boolean(packageButton),
+        openLocalButtonCount: openLocalButtons.length,
+        openLocalPathCalls: window.__uclawEcommerceOpenLocalPathCalls || [],
         hasOpenSessionButton: Boolean(openSessionButton),
         carouselDisplay: carouselStyle?.display || "",
         carouselOverflowX: carouselStyle?.overflowX || "",
@@ -652,6 +671,7 @@ async function exerciseWorkbench(page, imagePath) {
         fullTextIncludesUploadShortcuts: (workbench?.innerText || workbench?.textContent || "").includes("选择/拖拽/粘贴图片"),
         fullTextIncludesIncrementalProgress: (workbench?.innerText || workbench?.textContent || "").includes("出一张显示一张"),
         fullTextIncludesThumbnailPreview: (workbench?.innerText || workbench?.textContent || "").includes("点击预览"),
+        fullTextIncludesLocalSaved: (workbench?.innerText || workbench?.textContent || "").includes("已保存本地"),
         finalTextIncludesGeneratingStatus: /正在生成|生成中/.test(workbench?.innerText || workbench?.textContent || ""),
         viewportWidth: window.innerWidth,
         scrollWidth: document.documentElement.scrollWidth,
@@ -756,7 +776,7 @@ async function runAcceptance(options) {
       if (viewport.name === "mobile" && state.typeRects?.some((rect) => rect.width > viewport.width - 48)) {
         throw new Error(`${viewport.name}: Type cards should fit mobile viewport, got ${JSON.stringify(state.typeRects)}`);
       }
-      if (state.generatedCount < 10) throw new Error(`${viewport.name}: Expected generated image cards, got ${state.generatedCount}`);
+      if (state.generatedCount < 10) throw new Error(`${viewport.name}: Progress images must survive final response merge, got ${state.generatedCount}`);
       if (state.generatedImageCount < 10) {
         throw new Error(`${viewport.name}: Expected generated image previews, got ${state.generatedImageCount}`);
       }
@@ -779,6 +799,8 @@ async function runAcceptance(options) {
       if (state.recordCount < 1) throw new Error(`${viewport.name}: Expected one generation record, got ${state.recordCount}`);
       if (state.generateDisabled) throw new Error(`${viewport.name}: Generate button stayed disabled after valid input`);
       if (!state.hasPackageButton) throw new Error(`${viewport.name}: Package download button missing after generation`);
+      if (state.openLocalButtonCount < 1) throw new Error(`${viewport.name}: Open local folder button missing after generation`);
+      if (!state.fullTextIncludesLocalSaved) throw new Error(`${viewport.name}: Local saved state missing`);
       if (state.hasOpenSessionButton) throw new Error(`${viewport.name}: Open session button must not appear`);
       if (state.carouselDisplay !== "flex") throw new Error(`${viewport.name}: Generated list should be flex carousel`);
       if (!["auto", "scroll"].includes(state.carouselOverflowX)) {
@@ -928,6 +950,24 @@ async function runAcceptance(options) {
         throw new Error(`${viewport.name}: Expected selected featured image download, got ${featuredFilename}`);
       }
       await featuredDownload.cancel().catch(() => {});
+      await evaluateInDom(
+        page,
+        `
+          const buttons = allNodes().filter((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开文件夹"));
+          const visible = buttons.find((node) => {
+            const rect = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+          });
+          if (!visible) throw new Error("No visible open-local button");
+          visible.click();
+          return true;
+        `,
+      );
+      const openLocalState = await page.evaluate(() => window.__uclawEcommerceOpenLocalPathCalls || []);
+      if (!openLocalState.some((payload) => String(payload?.path || "").includes("/tmp/uclaw-ecommerce-fixture"))) {
+        throw new Error(`${viewport.name}: Open local folder did not call desktop API, got ${JSON.stringify(openLocalState)}`);
+      }
       await page
         .evaluate(() => {
           window.scrollTo({ top: 0, left: 0, behavior: "auto" });

@@ -127,6 +127,7 @@ const checks = [
   [swSource, "config-cloud-token-refresh-1", "service worker cache marker for token refresh"],
   [mainSource, "function isCloudAccessTokenExpiredError(", "main-process token expiry detector"],
   [mainSource, "function refreshCloudAccessToken(", "main-process cloud token refresher"],
+  [mainSource, "writeDirtyMarker('activation-token-refresh');\n  syncActivationMaterialToUsb();", "refreshed token immediate USB sync"],
   [mainSource, "function getActivationJSONWithTokenRefresh(", "GET cloud token refresh retry wrapper"],
   [mainSource, "function postActivationJSONWithTokenRefresh(", "POST cloud token refresh retry wrapper"],
   [mainSource, "/v1/auth/token/refresh", "cloud token refresh endpoint"],
