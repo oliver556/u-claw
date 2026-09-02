@@ -759,6 +759,114 @@ async function verifyPartialRecordStatus(page) {
 }
 
 /**
+ * Verifies generation records render through compact pagination when local
+ * history grows beyond the visible page size.
+ */
+async function verifyRecordPagination(page) {
+  await evaluateWithRetry(page, () => {
+    const now = Date.now();
+    const records = Array.from({ length: 11 }, (_value, index) => {
+      const display = String(index + 1).padStart(2, "0");
+      return {
+        id: `pagination-record-${display}`,
+        createdAt: now - index * 1000,
+        updatedAt: now - index * 1000,
+        status: "completed",
+        platformLabel: "抖音电商",
+        productName: `分页商品${display}`,
+        languageLabel: "中文",
+        styleLabel: "平台自动",
+        ratioLabel: "1:1 方图",
+        imageCount: 1,
+        outputLabels: "主图1张",
+        requestedOutputCount: 1,
+        generatedImageCount: 1,
+        model: "gpt-image-2",
+        result: {
+          id: `pagination-record-${display}`,
+          platform_label: "抖音电商",
+          name: `分页商品${display}`,
+          model: "gpt-image-2",
+          images: [],
+          warnings: [],
+          billing: { status: "ok" },
+          progress: { done: 1, total: 1, status: "completed" },
+          qa: ["人工复核"],
+        },
+      };
+    });
+    localStorage.setItem("uclaw.ecommerceImageRecords.v1", JSON.stringify(records));
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "分页商品01", 10000);
+  await waitForText(page, "共 11 条 · 第 1/2 页", 10000);
+
+  const firstPage = await evaluateInDom(
+    page,
+    `
+      const rows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+      const pager = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record-pagination"));
+      const buttons = pager ? [...pager.querySelectorAll("button")] : [];
+      return {
+        rowCount: rows.length,
+        rowTexts: rows.map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim()),
+        pagerText: (pager?.innerText || pager?.textContent || "").replace(/\\s+/g, " ").trim(),
+        prevDisabled: Boolean(buttons[0]?.disabled),
+        nextDisabled: Boolean(buttons[1]?.disabled),
+      };
+    `,
+  );
+  if (firstPage.rowCount !== 10 || !firstPage.prevDisabled || firstPage.nextDisabled) {
+    throw new Error(`Record pagination first page invalid: ${JSON.stringify(firstPage)}`);
+  }
+  if (!firstPage.rowTexts[0]?.includes("分页商品01") || firstPage.rowTexts.some((text) => text.includes("分页商品11"))) {
+    throw new Error(`Record pagination first page should show newest 10 only: ${JSON.stringify(firstPage)}`);
+  }
+
+  await page.locator("openclaw-tasks-page .uclaw-ecommerce-record-pagination button").filter({ hasText: "下一页" }).click();
+  await waitForText(page, "共 11 条 · 第 2/2 页", 10000);
+  const secondPage = await evaluateInDom(
+    page,
+    `
+      const rows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+      const pager = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record-pagination"));
+      const buttons = pager ? [...pager.querySelectorAll("button")] : [];
+      return {
+        rowCount: rows.length,
+        rowTexts: rows.map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim()),
+        pagerText: (pager?.innerText || pager?.textContent || "").replace(/\\s+/g, " ").trim(),
+        prevDisabled: Boolean(buttons[0]?.disabled),
+        nextDisabled: Boolean(buttons[1]?.disabled),
+      };
+    `,
+  );
+  if (secondPage.rowCount !== 1 || secondPage.prevDisabled || !secondPage.nextDisabled) {
+    throw new Error(`Record pagination second page invalid: ${JSON.stringify(secondPage)}`);
+  }
+  if (!secondPage.rowTexts[0]?.includes("分页商品11")) {
+    throw new Error(`Record pagination second page should show last record: ${JSON.stringify(secondPage)}`);
+  }
+
+  await evaluateWithRetry(page, () => {
+    localStorage.removeItem("uclaw.ecommerceImageRecords.v1");
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "创建生成任务", 10000);
+}
+
+/**
  * Verifies historical records that only retained trusted localPath values can
  * hydrate back into previewable data URLs when the user opens the record.
  */
@@ -1457,6 +1565,8 @@ async function runAcceptance(options) {
 
       await ensureConnected(page, gatewayUrl, gatewayWebSocketUrl, token);
       await verifyPartialRecordStatus(page);
+      await installDirectImageApiStub(page);
+      await verifyRecordPagination(page);
       await installDirectImageApiStub(page);
       await verifyLocalManifestAutoImport(page);
       await installDirectImageApiStub(page);
