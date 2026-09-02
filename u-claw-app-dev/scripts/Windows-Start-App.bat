@@ -8,6 +8,7 @@ if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 if not exist "%ROOT%\app\desktop-archive" if exist "%ROOT%\..\desktop-archive" for %%R in ("%ROOT%\..\..") do set "ROOT=%%~fR"
 
 set "HOST_LOCALAPPDATA=%LOCALAPPDATA%"
+set "HOST_USERPROFILE=%USERPROFILE%"
 set "USB_DATA_DIR=%ROOT%\data"
 set "USB_LOG_DIR=%USB_DATA_DIR%\logs"
 set "LOCAL_LOG_DIR=%HOST_LOCALAPPDATA%\Bavi-box\launcher-logs"
@@ -222,8 +223,13 @@ set "USERPROFILE=%UCLAW_PORTABLE_HOME%"
 set "APPDATA=%UCLAW_PORTABLE_HOME%\AppData\Roaming"
 set "LOCALAPPDATA=%UCLAW_PORTABLE_HOME%\AppData\Local"
 set "UCLAW_HOST_LOCALAPPDATA=%HOST_LOCALAPPDATA%"
+set "UCLAW_HOST_USERPROFILE=%HOST_USERPROFILE%"
 set "CODEX_HOME=%RUN_DATA_DIR%\.codex"
 if not exist "%HOME%" mkdir "%HOME%" >nul 2>&1
+if not exist "%HOME%\Desktop" mkdir "%HOME%\Desktop" >nul 2>&1
+if not exist "%HOME%\Downloads" mkdir "%HOME%\Downloads" >nul 2>&1
+if not exist "%HOME%\Documents" mkdir "%HOME%\Documents" >nul 2>&1
+if not exist "%HOME%\Pictures" mkdir "%HOME%\Pictures" >nul 2>&1
 if not exist "%APPDATA%" mkdir "%APPDATA%" >nul 2>&1
 if not exist "%LOCALAPPDATA%" mkdir "%LOCALAPPDATA%" >nul 2>&1
 if not exist "%CODEX_HOME%" mkdir "%CODEX_HOME%" >nul 2>&1

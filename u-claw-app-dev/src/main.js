@@ -314,6 +314,7 @@ function invalidateControlUiCacheOnVersionChange() {
 try {
   fs.mkdirSync(userDataPath, { recursive: true });
   fs.mkdirSync(electronProfilePath, { recursive: true });
+  ensurePortableHomeShellDirs();
   invalidateControlUiCacheOnVersionChange();
   app.setPath('userData', electronProfilePath);
   console.log(`[${APP_NAME}] Electron profile: ${electronProfilePath}`);
@@ -867,15 +868,15 @@ function summarizeImageApiError(body) {
 
 /**
  * Converts upstream image-generation failures into operator-readable slot
- * warnings. A 400 can be a single prompt/image policy rejection while other
+ * warnings. A 400/403 can be a single prompt/image policy rejection while other
  * ecommerce slots are still valid and should stay visible.
  */
 function summarizeEcommerceImageRequestError(error) {
   const message = String(error?.message || error || '').trim();
-  if (/图片接口失败\s+400/i.test(message)) {
+  if (/图片接口失败\s+(400|403)/i.test(message)) {
     return message.replace(
-      /图片接口失败\s+400:\s*/i,
-      '该张被上游图片接口拒绝 400，其他已成功图片已保留。原因：',
+      /图片接口失败\s+(400|403):\s*/i,
+      (_match, status) => `该张被上游图片接口拒绝 ${status}，其他已成功图片已保留。原因：`,
     );
   }
   return message;
@@ -931,19 +932,35 @@ function safeGetElectronPath(name) {
 }
 
 /**
+ * Creates basic Windows shell folders inside the portable HOME. Native dialogs
+ * may query Desktop/Downloads even when Bavi-box stores user data in a cache.
+ */
+function ensurePortableHomeShellDirs() {
+  if (!portablePath || process.platform !== 'win32') return;
+  const portableHome = process.env.USERPROFILE || process.env.HOME || path.join(userDataPath, '.home');
+  if (!portableHome) return;
+  for (const child of ['Desktop', 'Downloads', 'Documents', 'Pictures']) {
+    try { fs.mkdirSync(path.join(portableHome, child), { recursive: true }); } catch {}
+  }
+}
+
+/**
  * Resolves the root local library for generated ecommerce assets. Downloads is
  * preferred so users can find files outside Bavi-box; Windows falls back to
- * USERPROFILE/Downloads when Electron cannot resolve the known folder.
+ * host USERPROFILE/Downloads before the portable HOME cache path.
  */
 function resolveEcommerceLocalLibraryRoot() {
   const downloads = safeGetElectronPath('downloads');
+  const hostDownloads = process.platform === 'win32' && process.env.UCLAW_HOST_USERPROFILE
+    ? path.join(process.env.UCLAW_HOST_USERPROFILE, 'Downloads')
+    : '';
   const homeDownloads = process.platform === 'win32' && process.env.USERPROFILE
     ? path.join(process.env.USERPROFILE, 'Downloads')
     : '';
   const fallbackDownloads = safeGetElectronPath('home')
     ? path.join(safeGetElectronPath('home'), 'Downloads')
     : '';
-  const base = downloads || homeDownloads || fallbackDownloads || path.join(userDataPath, 'Downloads');
+  const base = downloads || hostDownloads || homeDownloads || fallbackDownloads || path.join(userDataPath, 'Downloads');
   return path.join(base, APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME);
 }
 
@@ -1025,6 +1042,36 @@ function saveEcommerceLocalManifest({ manifest, requestId, images, warnings, bil
     saved_at: new Date().toISOString(),
   });
   return manifestPath;
+}
+
+/**
+ * Removes stale usage-sync errors before writing a repaired ecommerce manifest.
+ */
+function removeEcommerceUsageSyncWarnings(warnings) {
+  return [...new Set((Array.isArray(warnings) ? warnings : []).filter((warning) => {
+    const text = String(warning || '').trim();
+    return text && !text.startsWith('用量同步失败：');
+  }))];
+}
+
+/**
+ * Updates an existing trusted ecommerce manifest after a billing retry. This is
+ * intentionally scoped to the local ecommerce image library, not arbitrary disk.
+ */
+function updateEcommerceLocalManifestBilling({ localManifestPath, billing, usage, warnings }) {
+  const trustedPath = resolveTrustedEcommerceLocalPath(localManifestPath);
+  if (!trustedPath || path.basename(trustedPath) !== 'manifest.json') {
+    return '';
+  }
+  const existing = readJsonFile(trustedPath) || {};
+  safeWriteJson(trustedPath, {
+    ...existing,
+    warnings,
+    billing,
+    usage,
+    usage_synced_at: new Date().toISOString(),
+  });
+  return trustedPath;
 }
 
 /**
@@ -2174,6 +2221,79 @@ async function recordEcommerceImageUsage({ manifest, credential, generated }) {
 }
 
 /**
+ * Retries billing for an already generated ecommerce batch without regenerating
+ * images. Cloud uses `requestId` as an idempotency key, so repeat clicks cannot
+ * double-charge a settled batch.
+ */
+async function syncEcommerceImageUsage(payload = {}) {
+  const result = payload?.result && typeof payload.result === 'object' ? payload.result : {};
+  const manifest = payload?.manifest && typeof payload.manifest === 'object' ? payload.manifest : result;
+  const images = Array.isArray(payload?.images) && payload.images.length
+    ? payload.images
+    : Array.isArray(result.images)
+      ? result.images
+      : Array.isArray(manifest.images)
+        ? manifest.images
+        : [];
+  const requestId = String(payload?.requestId || result.requestId || manifest.requestId || result.id || manifest.id || '').trim();
+  if (!requestId) throw new Error('缺少电商图片 requestId，无法同步用量。');
+  if (!images.length) throw new Error('没有已生成图片，无法同步用量。');
+
+  let credential;
+  try {
+    credential = resolveEcommerceImageCredential();
+  } catch {
+    credential = {};
+  }
+  const model = String(payload?.model || result.model || manifest.model || images.find(image => image?.model)?.model || credential.requestModel || credential.model || '').trim();
+  if (!model) throw new Error('缺少图片模型信息，无法同步用量。');
+
+  const billingManifest = {
+    ...manifest,
+    id: requestId,
+    platform: manifest.platform || result.platform || '',
+    output_types: Array.isArray(manifest.output_types) ? manifest.output_types : Array.isArray(result.output_types) ? result.output_types : [],
+  };
+  const billing = await recordEcommerceImageUsage({
+    manifest: billingManifest,
+    credential: { requestModel: model, model },
+    generated: images,
+  });
+  const usage = await getCloudModelUsageSummary().catch(error => ({
+    ok: false,
+    message: error?.message || String(error),
+  }));
+  const warnings = removeEcommerceUsageSyncWarnings(result.warnings || manifest.warnings);
+  const localManifestPath = updateEcommerceLocalManifestBilling({
+    localManifestPath: payload?.localManifestPath || result.localManifestPath || manifest.localManifestPath,
+    billing,
+    usage,
+    warnings,
+  }) || result.localManifestPath || manifest.localManifestPath || '';
+
+  return {
+    ok: true,
+    requestId,
+    billing,
+    usage,
+    warnings,
+    localManifestPath,
+    result: {
+      ...manifest,
+      ...result,
+      id: requestId,
+      requestId,
+      model,
+      images,
+      warnings,
+      billing,
+      usage,
+      localManifestPath,
+    },
+  };
+}
+
+/**
  * Fetches the New API model catalog via Bavi-box cloud using the activation token.
  */
 async function getCloudModelCatalog() {
@@ -3011,7 +3131,16 @@ function portableChildHomeEnv(baseEnv) {
   const codexHome = path.join(userDataPath, '.codex');
   const appData = path.join(portableHome, 'AppData', 'Roaming');
   const localAppData = path.join(portableHome, 'AppData', 'Local');
-  for (const dir of [portableHome, codexHome, appData, localAppData]) {
+  for (const dir of [
+    portableHome,
+    path.join(portableHome, 'Desktop'),
+    path.join(portableHome, 'Downloads'),
+    path.join(portableHome, 'Documents'),
+    path.join(portableHome, 'Pictures'),
+    codexHome,
+    appData,
+    localAppData,
+  ]) {
     try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   }
 
@@ -3791,6 +3920,7 @@ function setupIPC() {
   ipcMain.handle('uclaw:get-recharge-order', (_event, orderNo) => getCloudRechargeOrder(orderNo));
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
   ipcMain.handle('uclaw:ecommerce-generate-images', (event, payload) => generateEcommerceImagesDirect(payload, event.sender));
+  ipcMain.handle('uclaw:ecommerce-sync-image-usage', (_event, payload) => syncEcommerceImageUsage(payload));
   ipcMain.handle('uclaw:ecommerce-materialize-image', (_event, payload) => materializeEcommerceImageForRenderer(payload));
   ipcMain.handle('uclaw:ecommerce-open-local-path', (_event, payload) => openEcommerceLocalPath(payload));
   ipcMain.handle('uclaw:write-debugger-log', (_event, payload) => appendDebuggerLog(payload));

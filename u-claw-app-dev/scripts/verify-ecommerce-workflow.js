@@ -136,6 +136,7 @@ function verifyDirectNewApiRouting(errors) {
 function verifyDirectDesktopApi(errors) {
   const mainContent = readFile(mainProcessFile);
   const preloadContent = readFile(preloadFile);
+  const windowsStartContent = readFile(path.join(root, "scripts", "Windows-Start-App.bat"));
   const mainTokens = [
     "resolveEcommerceImageCredential",
     "normalizeNewApiImageBaseUrl",
@@ -173,6 +174,9 @@ function verifyDirectDesktopApi(errors) {
     "ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES",
     "ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME",
     "safeGetElectronPath",
+    "ensurePortableHomeShellDirs",
+    "UCLAW_HOST_USERPROFILE",
+    "hostDownloads",
     "resolveEcommerceLocalLibraryRoot",
     "USERPROFILE",
     "resolveEcommerceLocalLibraryDir",
@@ -184,14 +188,19 @@ function verifyDirectDesktopApi(errors) {
     "localDir",
     "localManifestPath",
     "recordEcommerceImageUsage",
+    "syncEcommerceImageUsage",
+    "removeEcommerceUsageSyncWarnings",
+    "updateEcommerceLocalManifestBilling",
     "/v1/newapi/usage/ecommerce-image",
     "ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE",
     "formatCloudAPIErrorMessage",
     "NewAPI 管理员登录会话已达上限",
     "summarizeEcommerceImageRequestError",
-    "该张被上游图片接口拒绝 400，其他已成功图片已保留",
+    "图片接口失败\\s+(400|403)",
+    "该张被上游图片接口拒绝 ${status}，其他已成功图片已保留",
     "billing",
     "uclaw:ecommerce-generate-images",
+    "uclaw:ecommerce-sync-image-usage",
     "uclaw:ecommerce-image-progress",
     "emitEcommerceImageProgress",
     "status: 'completed'",
@@ -201,6 +210,8 @@ function verifyDirectDesktopApi(errors) {
   const preloadTokens = [
     "generateEcommerceImages",
     "uclaw:ecommerce-generate-images",
+    "syncEcommerceImageUsage",
+    "uclaw:ecommerce-sync-image-usage",
     "onEcommerceImageProgress",
     "uclaw:ecommerce-image-progress",
     "materializeEcommerceImage",
@@ -215,6 +226,16 @@ function verifyDirectDesktopApi(errors) {
   for (const token of preloadTokens) {
     requireToken(errors, "src/preload.js", preloadContent, token);
   }
+  for (const token of [
+    "set \"HOST_USERPROFILE=%USERPROFILE%\"",
+    "set \"UCLAW_HOST_USERPROFILE=%HOST_USERPROFILE%\"",
+    "if not exist \"%HOME%\\Desktop\" mkdir \"%HOME%\\Desktop\"",
+    "if not exist \"%HOME%\\Downloads\" mkdir \"%HOME%\\Downloads\"",
+    "if not exist \"%HOME%\\Documents\" mkdir \"%HOME%\\Documents\"",
+    "if not exist \"%HOME%\\Pictures\" mkdir \"%HOME%\\Pictures\"",
+  ]) {
+    requireToken(errors, "scripts/Windows-Start-App.bat", windowsStartContent, token);
+  }
 
   if (/configuredModel\.includes\('\/'\)\s*\?\s*configuredModel\.split\('\/'\)\.pop\(\)/.test(mainContent)) {
     errors.push("src/main.js must not blindly strip provider prefixes from ecommerce image model refs");
@@ -227,6 +248,12 @@ function verifyDirectDesktopApi(errors) {
   }
   if (!/recordEcommerceImageUsage\(\{ manifest, credential, generated \}\)/.test(mainContent)) {
     errors.push("src/main.js must report successful ecommerce image generation for NewAPI consumption");
+  }
+  if (!/const base = downloads \|\| hostDownloads \|\| homeDownloads \|\| fallbackDownloads \|\| path\.join\(userDataPath, 'Downloads'\);/.test(mainContent)) {
+    errors.push("src/main.js must prefer host Downloads before portable cache Downloads");
+  }
+  if (!/ensurePortableHomeShellDirs\(\);\s+invalidateControlUiCacheOnVersionChange\(\);/.test(mainContent)) {
+    errors.push("src/main.js must create portable Windows shell folders before Electron cache setup continues");
   }
   const activationService = readFile("cloud/uclaw-cloud-api/internal/activation/service.go");
   const provisioningService = readFile("cloud/uclaw-cloud-api/internal/provisioning/service.go");
@@ -246,6 +273,9 @@ function verifyDirectDesktopApi(errors) {
   requireToken(errors, "postgres/ecommerce_usage_store.go", postgresEcommerceStore, "ecommerceImageUsageSchemaSQL");
   requireToken(errors, "postgres/ecommerce_usage_store.go", postgresEcommerceStore, "CREATE TABLE IF NOT EXISTS ecommerce_image_usage_events");
   requireToken(errors, "postgres/ecommerce_usage_store.go", postgresEcommerceStore, "idx_ecommerce_image_usage_user_created");
+  requireToken(errors, "postgres/ecommerce_usage_store.go", postgresEcommerceStore, "isUndefinedTableError");
+  requireToken(errors, "postgres/ecommerce_usage_store.go", postgresEcommerceStore, "ensureEcommerceImageUsageSchemaAfterUndefinedTable");
+  requireToken(errors, "postgres/ecommerce_usage_store.go", postgresEcommerceStore, "sqlstate 42p01");
   requireToken(errors, "provisioning/service.go", provisioningService, "isSessionLimitError");
   requireToken(errors, "provisioning/service.go", provisioningService, "WithAdminUser");
 }
@@ -331,10 +361,17 @@ function verifyPatchSource(errors) {
     "UcEcommerceRecordPlannedCount",
     "UcEcommerceRecordGeneratedCount",
     "UcEcommerceRecordHasBillingError",
+    "UcEcommerceUsageSyncWarnings",
+    "UcEcommerceBuildUsageSyncPayload",
     "UcEcommerceRecordEffectiveStatus",
     "UcEcommercePrimaryActionState",
+    "UcEcommerceFormSignature",
+    "ecommerceUsageSyncing",
+    "ecommerceLastSubmittedSignature",
+    "创建生成任务",
     "任务已创建",
-    "重新创建任务",
+    "重新创建此任务",
+    "创建新任务",
     "待图片接口激活",
     "UcEcommerceStaleGeneratingMs",
     "UcEcommerceProgressState",
@@ -343,6 +380,8 @@ function verifyPatchSource(errors) {
     "UcEcommerceMergeWarnings",
     "openEcommerceLocalPath",
     "deleteEcommerceRecord",
+    "retryEcommerceUsageSync",
+    "重试同步用量",
     "uclaw-ecommerce-record-delete",
     "已保存本地",
     "部分生成",
@@ -390,9 +429,11 @@ function verifyPatchSource(errors) {
     "uclaw.ecommerceWorkbench.draft.v1",
     "UcEcommerceReadDraft",
     "UcEcommerceWriteDraft",
+    "UcEcommerceClearDraft",
     "UcEcommerceRememberDraftFiles",
     "UcEcommerceReadDraftFiles",
     "saveEcommerceDraft",
+    "resetEcommerceFormAfterTaskCreated",
     "defaultLanguage",
     "data-uclaw-ecommerce-language",
     "data-uclaw-ecommerce-visual-style",
@@ -459,7 +500,7 @@ function verifyGeneratedTasksPage(errors) {
       "生成类型与数量",
       "模特图",
       "详情图系列",
-      "生成图片",
+      "创建生成任务",
       "打包下载",
       "生成记录",
       "选择/拖拽/粘贴图片",
@@ -483,9 +524,16 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceRecordPlannedCount",
       "UcEcommerceRecordGeneratedCount",
       "UcEcommerceRecordHasBillingError",
+      "UcEcommerceUsageSyncWarnings",
+      "UcEcommerceBuildUsageSyncPayload",
       "UcEcommercePrimaryActionState",
+      "ecommerceUsageSyncing",
+      "UcEcommerceFormSignature",
+      "ecommerceLastSubmittedSignature",
+      "创建生成任务",
       "任务已创建",
-      "重新创建任务",
+      "重新创建此任务",
+      "创建新任务",
       "待图片接口激活",
       "UcEcommerceStaleGeneratingMs",
       "UcEcommerceProgressState",
@@ -493,6 +541,8 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceMergeImages",
       "UcEcommerceMergeWarnings",
       "openEcommerceLocalPath",
+      "retryEcommerceUsageSync",
+      "重试同步用量",
       "deleteEcommerceRecord",
       "uclaw-ecommerce-record-delete",
       "已保存本地",
@@ -552,10 +602,12 @@ function verifyGeneratedTasksPage(errors) {
       "出一张显示一张",
       "uclaw.ecommerceImageRecords.v1",
       "uclaw.ecommerceWorkbench.draft.v1",
-      "UcEcommerceReadDraft",
-      "UcEcommerceWriteDraft",
-      "UcEcommerceRememberDraftFiles",
-      "saveEcommerceDraft",
+    "UcEcommerceReadDraft",
+    "UcEcommerceWriteDraft",
+    "UcEcommerceClearDraft",
+    "UcEcommerceRememberDraftFiles",
+    "saveEcommerceDraft",
+    "resetEcommerceFormAfterTaskCreated",
       "source_type",
       "抖音电商",
       "Amazon",
@@ -601,6 +653,9 @@ function verifyGeneratedTasksPage(errors) {
     }
     if (!/UcEcommerceMergeImages\(m,Array\.isArray\(t\?\.images\)\?t\.images:\[\]\)/.test(content)) {
       errors.push(`${label} must merge final ecommerce images with progress-delivered images`);
+    }
+    if (!/UcEcommerceBuildDirectPayload\(n,c\)/.test(content)) {
+      errors.push(`${label} must build ecommerce image payload from the submitted file snapshot after clearing the form`);
     }
     if (/JSON\.stringify\(\(e\|\|\[\]\)\.slice\(0,30\)\)/.test(content)) {
       errors.push(`${label} must not persist full ecommerce image records with dataUrl payloads`);
