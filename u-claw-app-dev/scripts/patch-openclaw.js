@@ -2377,6 +2377,18 @@ function patchServiceWorker() {
     /ecommerce-local-hydrate-1(?!-ecommerce-task-recreate-1)/,
     "ecommerce-local-hydrate-1-ecommerce-task-recreate-1",
   );
+  source = source.replace(
+    /ecommerce-task-recreate-1(?!-ecommerce-log-bubble-1)/,
+    "ecommerce-task-recreate-1-ecommerce-log-bubble-1",
+  );
+  source = source.replace(
+    /ecommerce-log-bubble-1(?:-ecommerce-compact-actions-[12])?(?!-ecommerce-compact-actions-3)/,
+    "ecommerce-log-bubble-1-ecommerce-compact-actions-3",
+  );
+  source = source.replace(
+    /ecommerce-compact-actions-[123](?!-ecommerce-local-manifest-import-1)/,
+    "ecommerce-compact-actions-3-ecommerce-local-manifest-import-1",
+  );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
     .replaceAll("// OpenClaw Control – Service Worker", "// Bavi-box Control – Service Worker")
@@ -2796,6 +2808,8 @@ function patchTasksPageEcommerceWorkflow() {
     "function UcEcommerceStripResultPayload(e){if(!e||typeof e!==`object`)return e;let t={...e};return Array.isArray(t.images)&&(t.images=t.images.map(UcEcommerceStripImagePayload)),t}",
     "function UcEcommerceStripRecordPayload(e){if(!e||typeof e!==`object`)return e;let t={...e};return t.result&&(t.result=UcEcommerceStripResultPayload(t.result)),t}",
     "function UcEcommerceSaveRecords(e){try{let t=(e||[]).slice(0,30).map(UcEcommerceStripRecordPayload);globalThis.localStorage?.setItem(`uclaw.ecommerceImageRecords.v1`,JSON.stringify(t))}catch{}}",
+    "function UcEcommerceMergeRecords(...e){let t=[],n=new Set;for(let r of e)for(let e of Array.isArray(r)?r:[]){let r=UcEcommerceNormalizeRecord(e);if(!r)continue;let a=String(r.id||r.result?.requestId||r.result?.id||r.localManifestPath||``);if(!a||n.has(a))continue;n.add(a),t.push(r)}return t.sort((e,t)=>Number(t.createdAt||0)-Number(e.createdAt||0)).slice(0,30)}",
+    "function UcEcommerceLocalManifestImportMarker(){return`ecommerce-local-manifest-import-1`}",
     "function UcEcommerceRecordPlannedCount(e){let t=Number(e?.requestedOutputCount||e?.result?.progress?.total||0);if(!t&&e?.manifest?.output_counts&&Array.isArray(e?.manifest?.output_types))t=e.manifest.output_types.reduce((t,n)=>t+(Number(e.manifest.output_counts[n])||0),0);return Number.isFinite(t)?t:0}",
     "function UcEcommerceRecordGeneratedCount(e){let t=Array.isArray(e?.result?.images)?e.result.images.length:null,n=Number(e?.generatedImageCount||0);return t!==null?t:Number.isFinite(n)?n:0}",
     "function UcEcommerceRecordHasBillingError(e){let t=e?.result?.billing||e?.billing,n=Array.isArray(e?.result?.warnings)?e.result.warnings:[];return Boolean(t&&(t.status&&t.status!==`ok`||t.ok===!1)||n.some(e=>String(e||``).includes(`用量同步失败`)))}",
@@ -2809,7 +2823,10 @@ function patchTasksPageEcommerceWorkflow() {
     "function UcEcommerceImageKey(e){return String(e?.id||e?.url||e?.dataUrl||[e?.type,e?.title,e?.model,e?.mimeType].filter(Boolean).join(`|`)||``)}",
     "function UcEcommerceMergeImages(...e){let t=[],n=new Map,r=0;for(let a of e)for(let e of Array.isArray(a)?a:[]){let a=UcEcommerceImageKey(e)||`__index_${r++}`,o=n.has(a)?n.get(a):-1;o>=0?t[o]={...t[o],...e}:(n.set(a,t.length),t.push(e))}return t}",
     "function UcEcommerceMergeWarnings(...e){return[...new Set(e.flatMap(e=>Array.isArray(e)?e:[]).filter(Boolean))]}",
+    "function UcEcommerceWarningSummary(e){let t=(Array.isArray(e)?e:[]).filter(Boolean),n=t.filter(e=>/上游图片接口拒绝|图片接口失败\\s+(400|403)|This operation was aborted|openai_error/i.test(String(e||``))).length,r=t.filter(e=>String(e||``).startsWith(`用量同步失败：`)).length,a=t.length-n-r,o=[];return n&&o.push(`${n} 张被上游拒绝，成功图片已保留`),r&&o.push(`用量同步待处理`),a&&o.push(`${a} 条提示`),o.join(`；`)||`生成有提示`}",
     "function UcEcommerceSafeFileName(e){return String(e||`ecommerce`).trim().replace(/[\\\\/:*?\"<>|]+/g,`-`).replace(/\\s+/g,`-`).replace(/-+/g,`-`).replace(/^-|-$/g,``).slice(0,80)||`ecommerce`}",
+    "function UcEcommerceExportLogName(e){return `${UcEcommerceSafeFileName(e?.name||`ecommerce`)}-${UcEcommerceSafeFileName(e?.requestId||e?.id||`log`)}-生成日志.json`}",
+    "function UcEcommerceLogExportPayload(e){let t=Array.isArray(e?.images)?e.images.map(e=>({id:e?.id||``,type:e?.type||``,title:e?.title||``,model:e?.model||``,mimeType:e?.mimeType||``,localPath:e?.localPath||``,localFileName:e?.localFileName||``,savedAt:e?.savedAt||``})):[];return{...e,images:t,exported_at:new Date().toISOString(),export_note:`本文件为生成排障日志，包含 manifest、warnings、billing、usage 与本地文件索引，不含图片二进制。`}}",
     "function UcEcommerceBase64ToBytes(e){let t=atob(String(e||``)),n=new Uint8Array(t.length);for(let r=0;r<t.length;r+=1)n[r]=t.charCodeAt(r);return n}",
     "function UcEcommerceStringToBytes(e){return new TextEncoder().encode(String(e??``))}",
     "function UcEcommerceCrc32Table(){if(globalThis.__uclawEcommerceCrc32Table)return globalThis.__uclawEcommerceCrc32Table;let e=new Uint32Array(256);for(let t=0;t<256;t+=1){let n=t;for(let r=0;r<8;r+=1)n=n&1?3988292384^n>>>1:n>>>1;e[t]=n>>>0}return globalThis.__uclawEcommerceCrc32Table=e,e}",
@@ -2840,11 +2857,11 @@ function patchTasksPageEcommerceWorkflow() {
   redesignedWorkbenchView = redesignedWorkbenchView
     .replace(
       "let q=o?.progress||null,x=A.total?Math.min(100,Math.round((A.done||0)*100/A.total)):0,y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>生成结果</strong><span>生成后在此预览、单图下载和打包。</span></div></div><div class='uclaw-ecommerce-empty'>上传商品图并点击生成后，结果会直接显示在这里。</div></section>`;",
-      "let q=o?.progress||null,x=A.total?Math.min(100,Math.round((A.done||0)*100/A.total)):0,L=o?.localDir||s.find(e=>e?.localDir)?.localDir||``,M=o?.localManifestPath||``,y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>生成结果</strong><span>生成后自动保存到电脑本地，也可在此预览、单图下载和打包。</span></div></div><div class='uclaw-ecommerce-empty'>上传商品图并点击生成后，结果会直接显示在这里。</div></section>`;",
+      "let q=o?.progress||null,x=A.total?Math.min(100,Math.round((A.done||0)*100/A.total)):0,L=o?.localDir||s.find(e=>e?.localDir)?.localDir||``,M=o?.localManifestPath||``,y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>生成结果</strong><span>生成后自动保存到电脑本地，也可在此预览和单图下载。</span></div></div><div class='uclaw-ecommerce-empty'>上传商品图并点击生成后，结果会直接显示在这里。</div></section>`;",
     )
     .replace(
       "<div class='uclaw-ecommerce-result-actions'><button class='btn primary' type='button' ?disabled=${E} @click=${()=>e.downloadEcommercePackage?.()}>打包下载</button><button class='btn' type='button' @click=${()=>e.copyEcommerceManifest?.()}>复制 Manifest</button></div>",
-      "<div class='uclaw-ecommerce-result-actions'>${L?i`<span class='chip chip-ok'>已保存本地</span><button class='btn' type='button' @click=${()=>e.openEcommerceLocalPath?.({path:L})}>打开文件夹</button>`:``}${I?i`<button class='btn' type='button' ?disabled=${O} @click=${()=>e.retryEcommerceUsageSync?.()} >${O?`同步中...`:`重试同步用量`}</button>`:``}<button class='btn primary' type='button' ?disabled=${E} @click=${()=>e.downloadEcommercePackage?.()}>打包下载</button><button class='btn' type='button' @click=${()=>e.copyEcommerceManifest?.()}>复制 Manifest</button></div>",
+      "<div class='uclaw-ecommerce-result-actions'>${L?i`<span class='chip chip-ok'>已保存本地</span><button class='btn' type='button' @click=${()=>e.openEcommerceLocalPath?.({path:L})}>打开文件夹</button>`:``}${I?i`<button class='btn' type='button' ?disabled=${O} @click=${()=>e.retryEcommerceUsageSync?.()} >${O?`同步中...`:`重试同步用量`}</button>`:``}<button class='btn ghost uclaw-ecommerce-log-button' type='button' title='导出日志' aria-label='导出日志' @click=${()=>e.exportEcommerceLog?.()}><span class='uclaw-ecommerce-log-button-icon' aria-hidden='true'></span></button></div>",
     )
     .replace(
       "<span>${f.type||`image`} · ${f.model||o.model||``}</span>",
@@ -2856,7 +2873,7 @@ function patchTasksPageEcommerceWorkflow() {
     )
     .replace(
       "${o.warnings?.length?i`<div class='banner banner-warn'>${o.warnings.join(`；`)}</div>`:``}<div class='uclaw-ecommerce-qa'>",
-      "${M?i`<div class='muted'>Manifest 已保存：${M}</div>`:``}${o.warnings?.length?i`<div class='banner banner-warn'>${o.warnings.join(`；`)}</div>`:``}<div class='uclaw-ecommerce-qa'>",
+      "${M?i`<div class='muted uclaw-ecommerce-log-path'>日志已保存：${M}</div>`:``}${o.warnings?.length?i`<div class='uclaw-ecommerce-warning-bubble' title=${o.warnings.join(`；`)}>${UcEcommerceWarningSummary(o.warnings)}</div>`:``}<div class='uclaw-ecommerce-qa'>",
     )
     .replace(
       "· ${t.imageCount} 张素材 · ${t.requestedOutputCount||t.generatedImageCount||0} 张/屏计划 · ${t.generatedImageCount||0} 张结果 · ${t.model||`默认图片模型`}</small>",
@@ -2864,7 +2881,7 @@ function patchTasksPageEcommerceWorkflow() {
     )
     .replace(
       "${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button>`:``}</div></article>",
-      "${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button>`:``}${a?i`<button class='btn' type='button' ?disabled=${e.ecommerceUsageSyncing===!0} @click=${n=>{n.stopPropagation(),e.retryEcommerceUsageSync?.(t)}}>${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`}</button>`:``}${t.localDir||t.result?.localDir?i`<button class='btn' type='button' @click=${()=>e.openEcommerceLocalPath?.({path:t.localDir||t.result?.localDir})}>打开文件夹</button>`:``}<button class='btn ghost uclaw-ecommerce-record-delete' type='button' @click=${n=>{n.stopPropagation(),e.deleteEcommerceRecord?.(t.id)}}>删除</button></div></article>",
+      "${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button><button class='btn' type='button' @click=${n=>{n.stopPropagation(),e.exportEcommerceLog?.(t.result)}}>导出日志</button>`:``}${a?i`<button class='btn' type='button' ?disabled=${e.ecommerceUsageSyncing===!0} @click=${n=>{n.stopPropagation(),e.retryEcommerceUsageSync?.(t)}}>${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`}</button>`:``}${t.localDir||t.result?.localDir?i`<button class='btn' type='button' @click=${()=>e.openEcommerceLocalPath?.({path:t.localDir||t.result?.localDir})}>打开文件夹</button>`:``}<button class='btn ghost uclaw-ecommerce-record-delete' type='button' @click=${n=>{n.stopPropagation(),e.deleteEcommerceRecord?.(t.id)}}>删除</button></div></article>",
     );
   const ecommerceHelper = helper.replace(/function UcEcommerceWorkbenchView\(e\)\{[\s\S]*\}$/, redesignedWorkbenchView);
 
@@ -2884,14 +2901,28 @@ function patchTasksPageEcommerceWorkflow() {
   if (!methods.includes("hydrateEcommerceResultImages(){")) {
     throw new Error("Could not locate hydrateEcommerceResultImages ecommerce method");
   }
+  methods = methods.replace(
+    "async importEcommerceLocalManifests(){let e=globalThis.uclaw?.listEcommerceLocalManifests;if(!e)return;try{let t=await e();let n=Array.isArray(t?.records)?t.records:[];if(!n.length)return;let r=UcEcommerceMergeRecords(n,this.ecommerceRecords||[]);this.ecommerceRecords=r,this.saveEcommerceRecords();if(!this.ecommerceResult&&r[0]?.result){this.ecommerceResult={...r[0].result,id:r[0].id||r[0].result.id},this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.hydrateEcommerceResultImages?.()}this.requestUpdate()}catch{}}",
+    "async importEcommerceLocalManifests(){let e=globalThis.uclaw?.listEcommerceLocalManifests;if(!e)return;try{let t=await e(),n=Array.isArray(t?.records)?t.records:[];if(!n.length)return;let r=UcEcommerceMergeRecords(n,this.ecommerceRecords||[]),a=String(this.ecommerceResult?.requestId||this.ecommerceResult?.id||``),o=a?r.find(e=>String(e?.id||e?.result?.requestId||e?.result?.id||``)===a):r[0];this.ecommerceRecords=r;if(o?.result){this.ecommerceResult={...o.result,id:o.id||o.result.id},this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.hydrateEcommerceResultImages?.()}this.saveEcommerceRecords(),this.requestUpdate()}catch{}}",
+  );
   if (!methods.includes("resetEcommerceFormAfterTaskCreated(){")) {
     methods = methods.replace(
       "saveEcommerceDraft(){UcEcommerceWriteDraft(this.ecommerceForm??UcEcommerceDefaultForm()),UcEcommerceRememberDraftFiles(this.ecommerceForm?.files||[])}",
       "saveEcommerceDraft(){UcEcommerceWriteDraft(this.ecommerceForm??UcEcommerceDefaultForm()),UcEcommerceRememberDraftFiles(this.ecommerceForm?.files||[])}resetEcommerceFormAfterTaskCreated(){this.cleanupEcommerceFileUrls(),UcEcommerceClearDraft(),this.ecommerceForm=UcEcommerceDefaultForm(),this.ecommerceLastSubmittedSignature=null,this.requestUpdate()}",
     );
   }
+  if (!methods.includes("importEcommerceLocalManifests(){")) {
+    methods = methods.replace(
+      "saveEcommerceDraft(){UcEcommerceWriteDraft(this.ecommerceForm??UcEcommerceDefaultForm()),UcEcommerceRememberDraftFiles(this.ecommerceForm?.files||[])}",
+      "saveEcommerceDraft(){UcEcommerceWriteDraft(this.ecommerceForm??UcEcommerceDefaultForm()),UcEcommerceRememberDraftFiles(this.ecommerceForm?.files||[])}async importEcommerceLocalManifests(){let e=globalThis.uclaw?.listEcommerceLocalManifests;if(!e)return;try{let t=await e(),n=Array.isArray(t?.records)?t.records:[];if(!n.length)return;let r=UcEcommerceMergeRecords(n,this.ecommerceRecords||[]),a=String(this.ecommerceResult?.requestId||this.ecommerceResult?.id||``),o=a?r.find(e=>String(e?.id||e?.result?.requestId||e?.result?.id||``)===a):r[0];this.ecommerceRecords=r;if(o?.result){this.ecommerceResult={...o.result,id:o.id||o.result.id},this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.hydrateEcommerceResultImages?.()}this.saveEcommerceRecords(),this.requestUpdate()}catch{}}",
+    );
+  }
 
   const enhancedMethods = methods
+    .replace(
+      "async hydrateEcommerceResultImages(){let e=this.ecommerceResult,t=Array.isArray(e?.images)?e.images:[];if(!e||!t.some(e=>e&&!e.dataUrl&&!e.url&&e.localPath))return;try{let n=await Promise.all(t.map(e=>e&&!e.dataUrl&&!e.url&&e.localPath?UcEcommerceEnsureDataUrl(e):e));this.ecommerceResult===e&&(this.ecommerceResult={...e,images:n},this.ecommerceRecords=(this.ecommerceRecords||[]).map(t=>t?.id&&t.id===e.id?{...t,result:this.ecommerceResult}:t),this.saveEcommerceRecords(),this.requestUpdate())}catch(t){this.ecommerceResult===e&&(this.ecommerceResult={...e,error:`本地图片读取失败：${t instanceof Error?t.message:String(t)}`},this.requestUpdate())}}",
+      "async hydrateEcommerceResultImages(){let e=this.ecommerceResult,t=Array.isArray(e?.images)?e.images:[];if(!e||!t.some(e=>e&&!e.dataUrl&&e.localPath))return;try{let n=await Promise.all(t.map(e=>e&&!e.dataUrl&&e.localPath?UcEcommerceEnsureDataUrl(e):e));this.ecommerceResult===e&&(this.ecommerceResult={...e,images:n},this.ecommerceRecords=(this.ecommerceRecords||[]).map(t=>t?.id&&t.id===e.id?{...t,result:this.ecommerceResult}:t),this.saveEcommerceRecords(),this.requestUpdate())}catch(t){this.ecommerceResult===e&&(this.ecommerceResult={...e,error:`本地图片读取失败：${t instanceof Error?t.message:String(t)}`},this.requestUpdate())}}",
+    )
     .replace(
       "onEcommerceFiles(e){let t=Array.from(e||[]).filter(e=>e?.type?.startsWith(`image/`)).slice(0,12).map(e=>({name:e.name,type:e.type,size:e.size,url:URL.createObjectURL(e),file:e}));this.cleanupEcommerceFileUrls(),this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),files:t},this.ecommerceResult=null,this.requestUpdate()}",
       "setEcommerceFiles(e,t=!1){let n=Array.from(e||[]).filter(e=>e?.type?.startsWith(`image/`)),r=t?[...(this.ecommerceForm?.files||[])]:[],a=Math.max(0,12-r.length),o=n.slice(0,a).map(e=>({name:e.name||`clipboard-image.png`,type:e.type||`image/png`,size:e.size||0,url:URL.createObjectURL(e),file:e}));t||this.cleanupEcommerceFileUrls(),this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),files:[...r,...o]},this.ecommerceResult=null,this.saveEcommerceDraft(),this.requestUpdate()}onEcommerceFiles(e){this.setEcommerceFiles(e,!1)}onEcommerceDrop(e){e.preventDefault(),this.setEcommerceFiles(e.dataTransfer?.files,!0)}onEcommercePaste(e){let t=Array.from(e.clipboardData?.items||[]).map(e=>e?.kind===`file`?e.getAsFile():null).filter(e=>e?.type?.startsWith(`image/`));t.length&&(e.preventDefault(),e.stopPropagation?.(),this.setEcommerceFiles(t,!0))}",
@@ -2923,6 +2954,14 @@ function patchTasksPageEcommerceWorkflow() {
     .replace(
       "this.ecommerceResult={...n,provider:`newapi`,model:``,images:[],warnings:[],progress:{done:0,total:u,current:`等待开始`,status:`generating`}},this.upsertEcommerceRecord({...s,result:this.ecommerceResult});try{let e=await UcEcommerceBuildDirectPayload(n,c),t=await globalThis.uclaw.generateEcommerceImages(e)",
       "this.ecommerceResult={...n,provider:`newapi`,model:``,images:[],warnings:[],progress:{done:0,total:u,current:`等待开始`,status:`generating`}},this.upsertEcommerceRecord({...s,result:this.ecommerceResult});let c=e.files||[];this.resetEcommerceFormAfterTaskCreated?.();try{let e=await UcEcommerceBuildDirectPayload(n,c),t=await globalThis.uclaw.generateEcommerceImages(e)",
+    )
+    .replace(
+      "this.upsertEcommerceRecord({...s,status:d,updatedAt:Date.now(),completedAt:Date.now(),generatedImageCount:i.images.length,billing:i.billing,provider:i.provider,model:i.model,localDir:i.localDir||``,localManifestPath:i.localManifestPath||``,result:i})",
+      "this.upsertEcommerceRecord({...s,status:d,updatedAt:Date.now(),completedAt:Date.now(),generatedImageCount:i.images.length,billing:i.billing,provider:i.provider,model:i.model,localDir:i.localDir||``,localManifestPath:i.localManifestPath||``,result:i}),await this.importEcommerceLocalManifests?.()",
+    )
+    .replace(
+      "async copyEcommerceManifest(){if(!this.ecommerceResult)return;try{await navigator.clipboard?.writeText(JSON.stringify(this.ecommerceResult,null,2))}catch{}}",
+      "async exportEcommerceLog(e=this.ecommerceResult){if(!e)return;try{let t=UcEcommerceLogExportPayload(e),n=new Blob([JSON.stringify(t,null,2)],{type:`application/json;charset=utf-8`});UcEcommerceDownloadBlob(n,UcEcommerceExportLogName(t))}catch(e){this.ecommerceResult={...(this.ecommerceResult||{}),error:`导出日志失败：${e instanceof Error?e.message:String(e)}`},this.requestUpdate()}}async copyEcommerceManifest(){return this.exportEcommerceLog?.()}",
     );
 
   for (const file of listAssetFiles(/^tasks-page-.*\.js$/, "tasks-page")) {
@@ -2949,7 +2988,11 @@ function patchTasksPageEcommerceWorkflow() {
 
     after = after.replace(
       "connectedCallback(){super.connectedCallback(),this.syncGatewayState(),",
+      "connectedCallback(){super.connectedCallback(),this.ecommercePasteHandler=e=>this.onEcommercePaste?.(e),window.addEventListener(`paste`,this.ecommercePasteHandler),this.importEcommerceLocalManifests?.(),this.syncGatewayState(),",
+    );
+    after = after.replace(
       "connectedCallback(){super.connectedCallback(),this.ecommercePasteHandler=e=>this.onEcommercePaste?.(e),window.addEventListener(`paste`,this.ecommercePasteHandler),this.syncGatewayState(),",
+      "connectedCallback(){super.connectedCallback(),this.ecommercePasteHandler=e=>this.onEcommercePaste?.(e),window.addEventListener(`paste`,this.ecommercePasteHandler),this.importEcommerceLocalManifests?.(),this.syncGatewayState(),",
     );
 
     after = after.replace(
@@ -8459,6 +8502,7 @@ openclaw-tasks-page .uclaw-ecommerce-upload-head > div,
 openclaw-tasks-page .uclaw-ecommerce-panel-head > div,
 openclaw-tasks-page .uclaw-ecommerce-result-head > div {
   display: grid;
+  flex: 1 1 auto;
   min-width: 0;
   gap: 4px;
 }
@@ -8635,10 +8679,6 @@ openclaw-tasks-page .uclaw-ecommerce-result-head {
   min-height: 64px;
   padding: 14px 16px;
   border-bottom: 1px solid #edf2f7;
-}
-
-openclaw-tasks-page .uclaw-ecommerce-result-head .btn:not(.primary) {
-  display: none;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-result-body,
@@ -8941,7 +8981,74 @@ openclaw-tasks-page .uclaw-ecommerce-result-actions {
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: max-content;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-result-actions .chip {
+  height: 32px;
+  align-items: center;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-log-button {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+  border-color: #d8e3f3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-log-button:hover {
+  border-color: #0f6fff;
+  background: #f8fbff;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-log-button-icon {
+  position: relative;
+  display: inline-block;
+  width: 14px;
+  height: 18px;
+  border: 1.6px solid #315272;
+  border-radius: 3px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-log-button-icon::before {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 6px;
+  height: 1.6px;
+  background: #315272;
+  box-shadow: 0 4px 0 #315272, 0 8px 0 #315272;
+  content: "";
+}
+
+openclaw-tasks-page .uclaw-ecommerce-log-path {
+  min-width: 0;
+  max-width: calc(100% - 32px);
+  margin: 0 16px 10px;
+  overflow: hidden;
+  color: #6b7280;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-warning-bubble {
+  justify-self: end;
+  max-width: calc(100% - 32px);
+  margin: 0 16px 12px;
+  padding: 8px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1.35;
+  box-shadow: 0 10px 24px rgba(146, 64, 14, 0.12);
 }
 
 openclaw-tasks-page .uclaw-ecommerce-progress {
@@ -9367,10 +9474,14 @@ openclaw-tasks-page .uclaw-ecommerce-record-actions {
 @media (max-width: 720px) {
   openclaw-tasks-page .uclaw-ecommerce-hero,
   openclaw-tasks-page .uclaw-ecommerce-upload-head,
-  openclaw-tasks-page .uclaw-ecommerce-panel-head,
-  openclaw-tasks-page .uclaw-ecommerce-result-head {
+  openclaw-tasks-page .uclaw-ecommerce-panel-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-result-head {
+    align-items: center;
+    flex-direction: row;
   }
 
   openclaw-tasks-page .uclaw-ecommerce-stats {
@@ -9412,7 +9523,7 @@ openclaw-tasks-page .uclaw-ecommerce-record-actions {
   }
 
   openclaw-tasks-page .uclaw-ecommerce-result-actions {
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 
   openclaw-tasks-page .uclaw-ecommerce-generated {

@@ -1115,6 +1115,160 @@ function resolveTrustedEcommerceLocalPath(rawPath) {
 }
 
 /**
+ * Counts planned ecommerce outputs from a saved manifest so imported local
+ * records keep the same planned/generated numbers as live records.
+ */
+function countEcommerceManifestOutputs(manifest) {
+  const outputTypes = Array.isArray(manifest?.output_types) ? manifest.output_types : [];
+  const outputCounts = manifest?.output_counts && typeof manifest.output_counts === 'object'
+    ? manifest.output_counts
+    : {};
+  return outputTypes.reduce((sum, type) => sum + (Number(outputCounts[type]) || 0), 0);
+}
+
+/**
+ * Rebuilds the compact output label used by the frontend history from a saved
+ * manifest, without depending on browser localStorage.
+ */
+function formatEcommerceManifestOutputLabels(manifest) {
+  const outputTypes = Array.isArray(manifest?.output_types) ? manifest.output_types : [];
+  const outputCounts = manifest?.output_counts && typeof manifest.output_counts === 'object'
+    ? manifest.output_counts
+    : {};
+  const labels = {
+    main_image: ['主图', '张'],
+    detail_image: ['详情图', '屏'],
+    model_image: ['模特图', '张'],
+  };
+  return outputTypes
+    .map((type) => {
+      const [label, unit] = labels[type] || [type, '张'];
+      return `${label}${Number(outputCounts[type]) || 0}${unit}`;
+    })
+    .filter(Boolean)
+    .join('、');
+}
+
+/**
+ * Converts a trusted local manifest into the frontend ecommerce record shape.
+ * This repairs successful generations whose browser record index was lost.
+ */
+function ecommerceRecordFromLocalManifest(manifestPath, manifest, stat) {
+  const localManifestPath = resolveTrustedEcommerceLocalPath(manifestPath);
+  if (!localManifestPath || path.basename(localManifestPath) !== 'manifest.json') return null;
+  const localDir = path.dirname(localManifestPath);
+  const requestId = String(manifest?.requestId || manifest?.id || path.basename(localDir)).trim();
+  if (!requestId) return null;
+  const images = (Array.isArray(manifest?.images) ? manifest.images : [])
+    .map((image, index) => {
+      const localFileName = String(image?.localFileName || '').trim();
+      const rawLocalPath = String(image?.localPath || '').trim();
+      const fallbackPath = localFileName ? path.join(localDir, localFileName) : '';
+      const trustedLocalPath = resolveTrustedEcommerceLocalPath(rawLocalPath)
+        || resolveTrustedEcommerceLocalPath(fallbackPath);
+      if (!trustedLocalPath) return null;
+      return {
+        id: String(image?.id || `${requestId}-${index + 1}`),
+        type: String(image?.type || 'image'),
+        title: String(image?.title || `生成图${index + 1}`),
+        model: String(image?.model || manifest?.model || ''),
+        mimeType: String(image?.mimeType || 'image/png'),
+        localPath: trustedLocalPath,
+        localDir,
+        localFileName: path.basename(trustedLocalPath),
+        savedAt: String(image?.savedAt || manifest?.saved_at || ''),
+      };
+    })
+    .filter(Boolean);
+  if (!images.length) return null;
+
+  const createdAt = Date.parse(manifest?.saved_at || manifest?.generated_at || images[0]?.savedAt || '')
+    || Number(stat?.mtimeMs || Date.now());
+  const warnings = Array.isArray(manifest?.warnings) ? manifest.warnings.filter(Boolean) : [];
+  const plannedCount = countEcommerceManifestOutputs(manifest);
+  const hasBillingError = Boolean(
+    manifest?.billing
+    && ((manifest.billing.status && manifest.billing.status !== 'ok') || manifest.billing.ok === false)
+  ) || warnings.some((warning) => String(warning || '').includes('用量同步失败'));
+  const status = plannedCount > 0 && images.length < plannedCount
+    ? 'partial'
+    : hasBillingError
+      ? 'billing_error'
+      : 'completed';
+  const result = {
+    ...manifest,
+    id: requestId,
+    requestId,
+    name: manifest?.name || '未命名商品',
+    platform_label: manifest?.platform_label || manifest?.platform || '',
+    model: manifest?.model || images.find((image) => image.model)?.model || '',
+    images,
+    warnings,
+    billing: manifest?.billing || null,
+    usage: manifest?.usage || null,
+    localDir,
+    localManifestPath,
+    progress: {
+      done: images.length,
+      total: plannedCount || images.length,
+      current: '',
+      status,
+    },
+    qa: Array.isArray(manifest?.qa) ? manifest.qa : ['图片生成完成后必须人工审查文字和事实'],
+  };
+  return {
+    id: requestId,
+    createdAt,
+    updatedAt: createdAt,
+    completedAt: createdAt,
+    status,
+    platform: manifest?.platform || '',
+    platformLabel: manifest?.platform_label || manifest?.platform || '',
+    productName: manifest?.name || '未命名商品',
+    languageLabel: manifest?.language?.label || '',
+    styleLabel: manifest?.visual_style?.label || '',
+    ratioLabel: manifest?.aspect_ratio?.label || '',
+    imageCount: Number(manifest?.input?.image_count || 0),
+    outputTypes: Array.isArray(manifest?.output_types) ? manifest.output_types : [],
+    outputCounts: manifest?.output_counts || {},
+    outputLabels: formatEcommerceManifestOutputLabels(manifest),
+    requestedOutputCount: plannedCount || images.length,
+    generatedImageCount: images.length,
+    model: result.model,
+    localDir,
+    localManifestPath,
+    billing: manifest?.billing || null,
+    manifest,
+    result,
+  };
+}
+
+/**
+ * Lists trusted local ecommerce manifests so the workbench can recover records
+ * even when browser localStorage did not preserve the frontend index.
+ */
+function listEcommerceLocalManifests() {
+  const root = resolveEcommerceLocalLibraryRoot();
+  const records = [];
+  const rootStat = fs.existsSync(root) ? fs.statSync(root) : null;
+  if (!rootStat?.isDirectory()) return { ok: true, root, records };
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const manifestPath = path.join(root, entry.name, 'manifest.json');
+    const trustedPath = resolveTrustedEcommerceLocalPath(manifestPath);
+    if (!trustedPath || !fs.existsSync(trustedPath)) continue;
+    const stat = fs.statSync(trustedPath);
+    if (!stat.isFile() || stat.size <= 0 || stat.size > 1024 * 1024) continue;
+    const manifest = readJsonFile(trustedPath);
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) continue;
+    const record = ecommerceRecordFromLocalManifest(trustedPath, manifest, stat);
+    if (record) records.push(record);
+  }
+  records.sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+  return { ok: true, root, records: records.slice(0, 30) };
+}
+
+/**
  * Reads a saved ecommerce image back into a data URL for records that only kept
  * `localPath`. This makes previews survive provider URL expiry and app reloads.
  */
@@ -3921,6 +4075,7 @@ function setupIPC() {
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
   ipcMain.handle('uclaw:ecommerce-generate-images', (event, payload) => generateEcommerceImagesDirect(payload, event.sender));
   ipcMain.handle('uclaw:ecommerce-sync-image-usage', (_event, payload) => syncEcommerceImageUsage(payload));
+  ipcMain.handle('uclaw:ecommerce-list-local-manifests', () => listEcommerceLocalManifests());
   ipcMain.handle('uclaw:ecommerce-materialize-image', (_event, payload) => materializeEcommerceImageForRenderer(payload));
   ipcMain.handle('uclaw:ecommerce-open-local-path', (_event, payload) => openEcommerceLocalPath(payload));
   ipcMain.handle('uclaw:write-debugger-log', (_event, payload) => appendDebuggerLog(payload));
