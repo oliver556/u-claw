@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul 2>&1
 setlocal EnableExtensions EnableDelayedExpansion
+echo [Bavi-box] Launcher started; checking portable package...
 
 set "ROOT=%UCLAW_PORTABLE_ROOT%"
 if "%ROOT%"=="" set "ROOT=%~dp0"
@@ -34,10 +35,15 @@ set "STAMP_FILE=%APP_CACHE_DIR%\.u-claw-archive.sha256"
 set "LOCK_DIR=%CACHE_ROOT%\app-win-x64.lock"
 set "LOCAL_ARCHIVE=%CACHE_ROOT%\u-claw-app-win-x64.zip"
 set "LOCAL_ARCHIVE_TMP=%CACHE_ROOT%\u-claw-app-win-x64.zip.copying"
+set "RUNTIME_PROTOCOL_DIR=%ROOT%\app\.runtime"
+set "HANDOFF_FILE=%RUNTIME_PROTOCOL_DIR%\launcher-handoff.json"
+set "RUN_STATE_FILE=%RUNTIME_PROTOCOL_DIR%\run-state.json"
+set "APP_LAUNCH_ENV_FILE=%RUNTIME_PROTOCOL_DIR%\windows-app-launch.env"
 set "EXTRACT_TIMEOUT_SECONDS=1800"
 set "DATA_SYNC_TIMEOUT_SECONDS=300"
 set "STALE_LOCK_SECONDS=120"
 
+echo [Bavi-box] Checking Windows app package...
 if not exist "%ARCHIVE%" (
   echo [Bavi-box] Missing Windows archive:
   echo %ARCHIVE%
@@ -75,7 +81,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [Bavi-box] Checking local runtime cache...
 if not exist "%CACHE_ROOT%" mkdir "%CACHE_ROOT%" >nul 2>&1
+if not exist "%CACHE_ROOT%" (
+  echo [Bavi-box] Cannot create local runtime cache:
+  echo %CACHE_ROOT%
+  call :pause_if_interactive
+  exit /b 1
+)
 if not exist "%LOCAL_LOG_DIR%" mkdir "%LOCAL_LOG_DIR%" >nul 2>&1
 if not "%UCLAW_LAUNCHER_GUI%"=="1" if not "%UCLAW_SCRIPT_LOG_ACTIVE%"=="1" (
   set "UCLAW_SCRIPT_LOG_ACTIVE=1"
@@ -185,7 +198,25 @@ if "%HARD_UPDATE_STATUS%"=="20" exit /b 0
 if "%HARD_UPDATE_STATUS%"=="2" goto install_app_cache
 if not "%HARD_UPDATE_STATUS%"=="0" goto fatal
 echo [Bavi-box] Preparing runtime data cache...
-if not exist "%RUN_DATA_DIR%" mkdir "%RUN_DATA_DIR%" >nul 2>&1
+if not exist "%RUN_DATA_DIR%" (
+  echo [Bavi-box] Creating runtime data cache...
+  set "RUNTIME_DATA_CREATE_ATTEMPTS=0"
+:create_runtime_data_cache
+  if exist "%RUN_DATA_DIR%" goto runtime_data_cache_ready
+  mkdir "%RUN_DATA_DIR%" >nul 2>&1
+  if exist "%RUN_DATA_DIR%" goto runtime_data_cache_ready
+  set /a RUNTIME_DATA_CREATE_ATTEMPTS+=1
+  if !RUNTIME_DATA_CREATE_ATTEMPTS! GEQ 5 (
+    echo [Bavi-box] Cannot create runtime data cache after 5 attempts:
+    echo %RUN_DATA_DIR%
+    echo [Bavi-box] Check LOCALAPPDATA permissions and available disk space.
+    goto fatal
+  )
+  echo [Bavi-box] Runtime cache is temporarily unavailable; retrying... !RUNTIME_DATA_CREATE_ATTEMPTS!/5
+  call :sleep_seconds 2
+  goto create_runtime_data_cache
+)
+:runtime_data_cache_ready
 if exist "%DIRTY_FILE%" (
   echo [Bavi-box] Runtime data has unsynced changes; syncing runtime cache back to USB before startup...
   call :sync_e "Syncing runtime cache back to USB" "%RUN_DATA_DIR%" "%USB_DATA_DIR%"
@@ -239,22 +270,15 @@ echo [Bavi-box] App binary: %APP_BIN%
 call :stop_existing_app_cache_processes
 echo [Bavi-box] Starting Windows desktop app...
 echo.
-
-start "" /wait "%APP_BIN%"
+if not exist "%RUNTIME_PROTOCOL_DIR%" mkdir "%RUNTIME_PROTOCOL_DIR%" >nul 2>&1
+if exist "%HANDOFF_FILE%" del /q "%HANDOFF_FILE%" >nul 2>&1
+if exist "%RUN_STATE_FILE%" del /q "%RUN_STATE_FILE%" >nul 2>&1
+call :write_app_launch_env
+call :start_detached_app
+if errorlevel 1 goto fatal
+call :wait_for_launcher_handoff
 set "APP_EXIT=%ERRORLEVEL%"
-echo [Bavi-box] Windows desktop app exited with code %APP_EXIT%.
-
-echo [Bavi-box] Syncing runtime data back to USB...
-call :sync_e "Syncing runtime data back to USB" "%RUN_DATA_DIR%" "%USB_DATA_DIR%"
-if errorlevel 1 set "APP_EXIT=1"
-if exist "%DIRTY_FILE%" del /q "%DIRTY_FILE%" >nul 2>&1
-if exist "%USB_DATA_DIR%\.uclaw-sync\dirty.json" del /q "%USB_DATA_DIR%\.uclaw-sync\dirty.json" >nul 2>&1
-if not exist "%SYNC_STATE_DIR%" mkdir "%SYNC_STATE_DIR%" >nul 2>&1
-if not exist "%USB_DATA_DIR%\.uclaw-sync" mkdir "%USB_DATA_DIR%\.uclaw-sync" >nul 2>&1
->"%LAST_SYNC_FILE%" echo {"success":true,"reason":"launcher-final-sync"}
-copy /y "%LAST_SYNC_FILE%" "%USB_DATA_DIR%\.uclaw-sync\last-sync.json" >nul
 call :sync_launcher_logs
-
 if "%APP_EXIT%"=="20" (
   echo [Bavi-box] Activation completed; restarting through normal startup gate...
   goto app_cache_ready
@@ -268,7 +292,7 @@ call :pause_if_interactive
 exit /b 1
 
 :pause_if_interactive
-if "%UCLAW_LAUNCHER_GUI%"=="1" exit /b 0
+echo [Bavi-box] Startup failed. This window will stay open so the error can be read.
 pause
 exit /b 0
 
@@ -328,6 +352,14 @@ if not exist "%APP_CACHE_DIR%" exit /b 0
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$cache=[IO.Path]::GetFullPath($env:APP_CACHE_DIR).TrimEnd('\')+'\'; $current=$PID; $matches=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessId -ne $current -and (($_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($cache,[StringComparison]::OrdinalIgnoreCase)) -or ($_.CommandLine -and $_.CommandLine.IndexOf($cache,[StringComparison]::OrdinalIgnoreCase) -ge 0)) }); if ($matches.Count -eq 0) { exit 0 }; Write-Host ('[Bavi-box] Stopping {0} old Bavi-box cache process(es) before app cache update...' -f $matches.Count); foreach ($p in $matches) { Stop-Process -Id $p.ProcessId -ErrorAction SilentlyContinue }; $deadline=(Get-Date).AddSeconds(8); do { Start-Sleep -Milliseconds 250; $alive=@($matches | Where-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }) } while ($alive.Count -gt 0 -and (Get-Date) -lt $deadline); foreach ($p in $alive) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500"
 exit /b 0
 
+:write_app_launch_env
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$envFile=$env:APP_LAUNCH_ENV_FILE; $lines=@('UCLAW_PORTABLE_DATA_DIR='+$env:UCLAW_PORTABLE_DATA_DIR,'UCLAW_PORTABLE_WORK_DATA_DIR='+$env:UCLAW_PORTABLE_WORK_DATA_DIR,'UCLAW_USB_DATA_DIR='+$env:UCLAW_USB_DATA_DIR,'UCLAW_PORTABLE_ROOT='+$env:UCLAW_PORTABLE_ROOT,'UCLAW_CACHE_ROOT='+$env:UCLAW_CACHE_ROOT,'UCLAW_APP_CACHE_DIR='+$env:UCLAW_APP_CACHE_DIR,'UCLAW_ARCHIVE_CACHE='+$env:UCLAW_ARCHIVE_CACHE,'UCLAW_APP_CACHE_STAMP='+$env:UCLAW_APP_CACHE_STAMP,'UCLAW_ELECTRON_PROFILE_DIR='+$env:UCLAW_ELECTRON_PROFILE_DIR,'OPENCLAW_HOME='+$env:OPENCLAW_HOME,'OPENCLAW_STATE_DIR='+$env:OPENCLAW_STATE_DIR,'OPENCLAW_CONFIG_PATH='+$env:OPENCLAW_CONFIG_PATH,'OPENCLAW_DISABLE_BONJOUR='+$env:OPENCLAW_DISABLE_BONJOUR,'UCLAW_ACTIVATION_ENDPOINT='+$env:UCLAW_ACTIVATION_ENDPOINT,'UCLAW_ACTIVATION_REQUIRE_CLOUD='+$env:UCLAW_ACTIVATION_REQUIRE_CLOUD,'UCLAW_MEDIA_PREVIEW_ROOTS='+$env:UCLAW_MEDIA_PREVIEW_ROOTS,'UCLAW_PORTABLE_HOME='+$env:UCLAW_PORTABLE_HOME,'HOME='+$env:HOME,'USERPROFILE='+$env:USERPROFILE,'APPDATA='+$env:APPDATA,'LOCALAPPDATA='+$env:LOCALAPPDATA,'UCLAW_HOST_LOCALAPPDATA='+$env:UCLAW_HOST_LOCALAPPDATA,'CODEX_HOME='+$env:CODEX_HOME,'UCLAW_LAUNCHER_PID='+$env:UCLAW_LAUNCHER_PID); [IO.File]::WriteAllLines($envFile,$lines,[Text.UTF8Encoding]::new($false)); Write-Host ('[Bavi-box] Launch env written: {0}' -f $envFile)"
+exit /b 0
+
+:start_detached_app
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$envFile=$env:APP_LAUNCH_ENV_FILE; if (-not (Test-Path -LiteralPath $envFile)) { Write-Error ('Missing launch env file: {0}' -f $envFile); exit 1 }; foreach ($line in [IO.File]::ReadAllLines($envFile,[Text.UTF8Encoding]::new($false))) { if (-not $line -or $line.StartsWith('#')) { continue }; $idx=$line.IndexOf('='); if ($idx -lt 1) { continue }; [Environment]::SetEnvironmentVariable($line.Substring(0,$idx), $line.Substring($idx+1), 'Process') }; Write-Host ('[Bavi-box] Launch env loaded. work data: {0}' -f $env:UCLAW_PORTABLE_WORK_DATA_DIR); $p=Start-Process -FilePath $env:APP_BIN -WorkingDirectory (Split-Path -Parent $env:APP_BIN) -WindowStyle Normal -PassThru; Write-Host ('[Bavi-box] Windows desktop app process started: {0}' -f $p.Id)"
+exit /b %ERRORLEVEL%
+
 :sync_launcher_logs
 if not exist "%USB_LOG_DIR%" mkdir "%USB_LOG_DIR%" >nul 2>&1
 if exist "%LOCAL_START_LOG%" copy /y "%LOCAL_START_LOG%" "%USB_START_LOG%" >nul 2>&1
@@ -361,6 +393,34 @@ if not exist "%LAST_SYNC_FILE%" exit /b 1
 if not exist "%USB_LAST_SYNC_FILE%" exit /b 1
 fc /b "%LAST_SYNC_FILE%" "%USB_LAST_SYNC_FILE%" >nul 2>&1
 exit /b %ERRORLEVEL%
+
+:wait_for_launcher_handoff
+set "HANDOFF_WAIT_SECONDS=0"
+:wait_for_launcher_handoff_loop
+set /a HANDOFF_WAIT_REMAINDER=HANDOFF_WAIT_SECONDS %% 5
+if %HANDOFF_WAIT_SECONDS% GTR 0 if %HANDOFF_WAIT_REMAINDER% EQU 0 echo [Bavi-box] Starting desktop app... %HANDOFF_WAIT_SECONDS%s elapsed.
+if exist "%HANDOFF_FILE%" (
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$file=$env:HANDOFF_FILE; $launcherPid=$env:UCLAW_LAUNCHER_PID; try { $payload=Get-Content -LiteralPath $file -Raw | ConvertFrom-Json; if ($payload.schemaVersion -eq 1 -and [string]$payload.state -eq 'gateway-ready' -and [string]$payload.launcherPid -eq [string]$launcherPid) { exit 0 } } catch {}; exit 1"
+  if not errorlevel 1 (
+    echo [Bavi-box] Windows desktop app is ready; startup terminal will close.
+    exit /b 0
+  )
+)
+if exist "%RUN_STATE_FILE%" (
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$file=$env:RUN_STATE_FILE; $launcherPid=$env:UCLAW_LAUNCHER_PID; try { $payload=Get-Content -LiteralPath $file -Raw | ConvertFrom-Json; if ($payload.schemaVersion -eq 1 -and [string]$payload.state -eq 'gateway-ready' -and [string]$payload.launcherPid -eq [string]$launcherPid) { exit 0 } } catch {}; exit 1"
+  if not errorlevel 1 (
+    echo [Bavi-box] Windows desktop app is ready; startup terminal will close.
+    exit /b 0
+  )
+)
+if %HANDOFF_WAIT_SECONDS% GEQ 180 (
+  echo [Bavi-box] Windows desktop app did not become ready within 180 seconds.
+  echo [Bavi-box] Please keep this window open and check logs if the app does not appear.
+  exit /b 1
+)
+call :sleep_seconds 1
+set /a HANDOFF_WAIT_SECONDS+=1
+goto wait_for_launcher_handoff_loop
 
 :mark_sync_current
 if not exist "%SYNC_STATE_DIR%" mkdir "%SYNC_STATE_DIR%" >nul 2>&1

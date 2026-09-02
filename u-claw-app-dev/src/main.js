@@ -176,6 +176,7 @@ function getPortableDataPath() {
         throw new Error('path is not a directory');
       }
     } catch (error) {
+      appendEarlyPortableLog(`Invalid portable data dir ${resolvedPortableDir}: ${error.message}`);
       throw new Error(`Invalid portable data dir ${resolvedPortableDir}: ${error.message}`);
     }
     console.log(`[${APP_NAME}] Portable mode: data in ${resolvedPortableDir}`);
@@ -193,6 +194,21 @@ function getPortableDataPath() {
     return portableDir;
   }
   return null;
+}
+
+function appendEarlyPortableLog(message) {
+  const usbDataDir = (process.env.UCLAW_USB_DATA_DIR || process.env.UCLAW_PORTABLE_DATA_DIR || '').trim();
+  const portableRoot = (process.env.UCLAW_PORTABLE_ROOT || '').trim();
+  const candidates = [];
+  if (usbDataDir) candidates.push(path.join(path.resolve(usbDataDir), 'logs', 'main.log'));
+  if (portableRoot) candidates.push(path.join(path.resolve(portableRoot), 'data', 'logs', 'main.log'));
+  for (const candidate of candidates) {
+    try {
+      fs.mkdirSync(path.dirname(candidate), { recursive: true });
+      fs.appendFileSync(candidate, `[${new Date().toISOString()}] [${APP_NAME}] ${message}\n`);
+      return;
+    } catch {}
+  }
 }
 
 function getDesktopUserDataPath() {
@@ -217,6 +233,7 @@ const runtimeProtocolDir = portableRootPath ? path.join(portableRootPath, 'app',
 const updateShutdownRequestPath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'update-shutdown-request.json') : null;
 const shutdownCompletePath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'shutdown-complete.json') : null;
 const runStatePath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'run-state.json') : null;
+const launcherHandoffPath = runtimeProtocolDir ? path.join(runtimeProtocolDir, 'launcher-handoff.json') : null;
 const updateTransactionPath = portableRootPath ? path.join(portableRootPath, 'app', 'update-transaction.json') : null;
 const syncStateDir = path.join(userDataPath, '.uclaw-sync');
 const dirtyMarkerPath = path.join(syncStateDir, 'dirty.json');
@@ -3000,10 +3017,6 @@ async function submitActivation(payload = {}) {
       });
       const modelCatalogSync = await syncModelCatalogAfterActivation();
       const activationUsbSync = syncActivationMaterialToUsb();
-      setTimeout(() => {
-        requestAppQuit({ confirm: false, exitCode: ACTIVATION_RESTART_EXIT_CODE, showShutdownPage: false })
-          .catch(error => logLifecycle(`Activation restart request failed: ${error.message}`));
-      }, 250);
       return {
         ok: true,
         code: 'ACTIVATION_CLOUD_COMPLETE',
@@ -3017,8 +3030,8 @@ async function submitActivation(payload = {}) {
         commitStatus: commitResult.status || 'committed',
         modelCatalogSync,
         activationUsbSync,
-        restartRequired: true,
-        launchReady: false,
+        restartRequired: false,
+        launchReady: true,
         retryable: false,
       };
     } catch (error) {
@@ -3185,7 +3198,27 @@ function loadConfigPage() {
 function revealMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (!mainWindow.isVisible()) mainWindow.show();
+  if (launcherHandoffPath && gatewayReady) {
+    writeRuntimeJson(launcherHandoffPath, {
+      schemaVersion: 1,
+      launcherPid: Number(process.env.UCLAW_LAUNCHER_PID || 0) || null,
+      appPid: process.pid,
+      state: 'gateway-ready',
+      readyAt: new Date().toISOString(),
+    });
+  }
   mainWindow.focus();
+}
+
+function writeLauncherHandoffReady() {
+  if (!launcherHandoffPath) return;
+  writeRuntimeJson(launcherHandoffPath, {
+    schemaVersion: 1,
+    launcherPid: Number(process.env.UCLAW_LAUNCHER_PID || 0) || null,
+    appPid: process.pid,
+    state: 'gateway-ready',
+    readyAt: new Date().toISOString(),
+  });
 }
 
 async function loadShutdownPage() {
@@ -3440,6 +3473,7 @@ async function startNormalApplication({ replaceActivationWindow = false } = {}) 
       const port = await findAvailablePort();
       await startGateway(port);
       writeRunState('gateway-ready');
+      writeLauncherHandoffReady();
 
       if (hasModelConfigured()) {
         loadAppPage();
