@@ -1,4 +1,5 @@
 -- Direct ecommerce image generation usage events.
+-- Keep this as 000004 because 000003 is already used by activation-code NewAPI group.
 
 CREATE TABLE IF NOT EXISTS ecommerce_image_usage_events (
   id BIGSERIAL PRIMARY KEY,
@@ -18,4 +19,3 @@ CREATE TABLE IF NOT EXISTS ecommerce_image_usage_events (
 
 CREATE INDEX IF NOT EXISTS idx_ecommerce_image_usage_user_created
   ON ecommerce_image_usage_events(uclaw_user_id, created_at DESC);
-

@@ -866,6 +866,22 @@ function summarizeImageApiError(body) {
 }
 
 /**
+ * Converts upstream image-generation failures into operator-readable slot
+ * warnings. A 400 can be a single prompt/image policy rejection while other
+ * ecommerce slots are still valid and should stay visible.
+ */
+function summarizeEcommerceImageRequestError(error) {
+  const message = String(error?.message || error || '').trim();
+  if (/图片接口失败\s+400/i.test(message)) {
+    return message.replace(
+      /图片接口失败\s+400:\s*/i,
+      '该张被上游图片接口拒绝 400，其他已成功图片已保留。原因：',
+    );
+  }
+  return message;
+}
+
+/**
  * Normalizes OpenAI-compatible image responses into image objects the workbench
  * can render and persist locally.
  */
@@ -1370,7 +1386,7 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
         },
       });
     } catch (error) {
-      const warning = `${target.title}: ${error?.message || String(error)}`;
+      const warning = `${target.title}: ${summarizeEcommerceImageRequestError(error)}`;
       warnings.push(warning);
       emitEcommerceImageProgress(sender, {
         requestId,
