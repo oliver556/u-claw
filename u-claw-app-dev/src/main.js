@@ -55,6 +55,7 @@ const ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS = 180000;
 const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_TIMEOUT_MS = 60000;
 const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES = 20 * 1024 * 1024;
 const ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE = Number.parseInt(process.env.UCLAW_ECOMMERCE_IMAGE_QUOTA || '50000', 10);
+const ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME = '电商图片';
 const ECOMMERCE_IMAGE_DIRECT_TARGETS = [
   {
     type: 'main_image',
@@ -864,6 +865,123 @@ function normalizeImageApiResult(payload, target, model) {
 }
 
 /**
+ * Produces filesystem-safe names for ecommerce image auto-saves while keeping
+ * Chinese product names readable in Finder/Explorer.
+ */
+function sanitizeEcommerceLocalFileName(value, fallback = 'ecommerce') {
+  return String(value || fallback)
+    .trim()
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || fallback;
+}
+
+/**
+ * Resolves the default local library for generated ecommerce assets. Downloads
+ * is intentionally used so users can find files outside Bavi-box at any time.
+ */
+function resolveEcommerceLocalLibraryDir(manifest, requestId) {
+  const downloads = app.getPath('downloads');
+  const platform = sanitizeEcommerceLocalFileName(manifest?.platform_label || manifest?.platform || 'platform');
+  const product = sanitizeEcommerceLocalFileName(manifest?.name || '商品');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const shortRequestId = sanitizeEcommerceLocalFileName(String(requestId || '').slice(0, 18), 'run');
+  return path.join(downloads, APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME, `${platform}-${product}-${stamp}-${shortRequestId}`);
+}
+
+/**
+ * Converts generated image data into bytes before saving. URL-only results are
+ * materialized first so the local copy survives provider URL expiry.
+ */
+async function ecommerceImageBuffer(image) {
+  const materialized = await materializeEcommerceImageUrl(image);
+  const dataUrl = String(materialized?.dataUrl || '');
+  const match = /^data:([^;]+);base64,(.+)$/i.exec(dataUrl);
+  if (!match) throw new Error('图片数据不存在，无法保存到本地。');
+  return {
+    image: materialized,
+    mimeType: match[1] || materialized.mimeType || 'image/png',
+    buffer: Buffer.from(match[2], 'base64'),
+  };
+}
+
+/**
+ * Saves one generated ecommerce image immediately after it returns, before the
+ * rest of the batch finishes. This prevents later upstream or billing failures
+ * from making already generated images disappear.
+ */
+async function saveEcommerceImageToLocalLibrary({ image, manifest, requestId, index, target, dir }) {
+  const outputDir = dir || resolveEcommerceLocalLibraryDir(manifest, requestId);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const material = await ecommerceImageBuffer(image);
+  const extension = /jpe?g/i.test(material.mimeType) ? 'jpg' : /webp/i.test(material.mimeType) ? 'webp' : 'png';
+  const order = String((Number(index) || 0) + 1).padStart(2, '0');
+  const title = sanitizeEcommerceLocalFileName(image?.title || target?.title || '生成图');
+  const filePath = path.join(outputDir, `${order}-${title}.${extension}`);
+  fs.writeFileSync(filePath, material.buffer);
+  return {
+    ...material.image,
+    mimeType: material.mimeType,
+    localPath: filePath,
+    localDir: outputDir,
+    localFileName: path.basename(filePath),
+    savedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Writes a manifest next to generated images so local folders remain useful even
+ * if the app record or remote provider state disappears later.
+ */
+function saveEcommerceLocalManifest({ manifest, requestId, images, warnings, billing, usage, outputDir }) {
+  if (!outputDir) return null;
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  safeWriteJson(manifestPath, {
+    ...manifest,
+    requestId,
+    images: images.map(image => ({
+      id: image.id,
+      type: image.type,
+      title: image.title,
+      model: image.model,
+      mimeType: image.mimeType,
+      localPath: image.localPath,
+      localFileName: image.localFileName,
+      savedAt: image.savedAt,
+    })),
+    warnings,
+    billing,
+    usage,
+    saved_at: new Date().toISOString(),
+  });
+  return manifestPath;
+}
+
+/**
+ * Opens a saved ecommerce image folder or selects a saved file from the trusted
+ * main process; renderer never receives broad filesystem write permission.
+ */
+async function openEcommerceLocalPath(payload = {}) {
+  const targetPath = String(payload?.path || payload?.localPath || payload?.localDir || '').trim();
+  if (!targetPath) throw new Error('本地文件路径为空。');
+  if (!path.isAbsolute(targetPath)) throw new Error('本地文件路径无效。');
+  const libraryRoot = path.resolve(app.getPath('downloads'), APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME);
+  const resolvedTarget = path.resolve(targetPath);
+  if (resolvedTarget !== libraryRoot && !resolvedTarget.startsWith(`${libraryRoot}${path.sep}`)) {
+    throw new Error('只能打开电商图片本地保存目录。');
+  }
+  if (fs.existsSync(resolvedTarget) && fs.statSync(resolvedTarget).isFile()) {
+    shell.showItemInFolder(resolvedTarget);
+    return { ok: true, path: resolvedTarget, action: 'showItemInFolder' };
+  }
+  const error = await shell.openPath(resolvedTarget);
+  if (error) throw new Error(error);
+  return { ok: true, path: resolvedTarget, action: 'openPath' };
+}
+
+/**
  * Blocks private-network image URLs before the renderer can ask the main
  * process to materialize old URL-only ecommerce records.
  */
@@ -1059,6 +1177,7 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
   const generated = [];
   const warnings = [];
   const requestId = String(manifest.id || payload.requestId || crypto.randomUUID()).trim();
+  const localDir = resolveEcommerceLocalLibraryDir(manifest, requestId);
 
   for (let index = 0; index < targets.length; index += 1) {
     const target = targets[index];
@@ -1076,6 +1195,24 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
     });
     try {
       const image = await requestEcommerceImage({ credential, manifest, target, images });
+      try {
+        const savedImage = await saveEcommerceImageToLocalLibrary({
+          image,
+          manifest,
+          requestId,
+          index,
+          target,
+          dir: localDir,
+        });
+        image.localPath = savedImage.localPath;
+        image.localDir = savedImage.localDir;
+        image.localFileName = savedImage.localFileName;
+        image.savedAt = savedImage.savedAt;
+        image.dataUrl = savedImage.dataUrl || image.dataUrl;
+        image.mimeType = savedImage.mimeType || image.mimeType;
+      } catch (saveError) {
+        warnings.push(`${target.title}: 本地保存失败：${saveError?.message || String(saveError)}`);
+      }
       generated.push(image);
       emitEcommerceImageProgress(sender, {
         requestId,
@@ -1126,6 +1263,15 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
     ok: false,
     message: error?.message || String(error),
   }));
+  const localManifestPath = saveEcommerceLocalManifest({
+    manifest,
+    requestId,
+    images: generated,
+    warnings,
+    billing,
+    usage,
+    outputDir: localDir,
+  });
   emitEcommerceImageProgress(sender, {
     requestId,
     index: targets.length,
@@ -1133,6 +1279,8 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
     status: 'settled',
     generatedCount: generated.length,
     billing,
+    localDir,
+    localManifestPath,
   });
 
   return {
@@ -1145,6 +1293,8 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
     warnings,
     billing,
     usage,
+    localDir,
+    localManifestPath,
   };
 }
 
@@ -1642,6 +1792,7 @@ async function refreshCloudAccessToken({ endpoint, accessToken, state }) {
   }
   atomicWriteJson(activationStatePath, nextState);
   writeDirtyMarker('activation-token-refresh');
+  syncActivationMaterialToUsb();
   return nextToken;
 }
 
@@ -3391,6 +3542,7 @@ function setupIPC() {
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
   ipcMain.handle('uclaw:ecommerce-generate-images', (event, payload) => generateEcommerceImagesDirect(payload, event.sender));
   ipcMain.handle('uclaw:ecommerce-materialize-image', (_event, payload) => materializeEcommerceImageForRenderer(payload));
+  ipcMain.handle('uclaw:ecommerce-open-local-path', (_event, payload) => openEcommerceLocalPath(payload));
   ipcMain.handle('uclaw:write-debugger-log', (_event, payload) => appendDebuggerLog(payload));
 }
 
