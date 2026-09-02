@@ -178,6 +178,10 @@ function verifyDirectDesktopApi(errors) {
     "UCLAW_HOST_USERPROFILE",
     "hostDownloads",
     "resolveEcommerceLocalLibraryRoot",
+    "countEcommerceManifestOutputs",
+    "formatEcommerceManifestOutputLabels",
+    "ecommerceRecordFromLocalManifest",
+    "listEcommerceLocalManifests",
     "USERPROFILE",
     "resolveEcommerceLocalLibraryDir",
     "saveEcommerceImageToLocalLibrary",
@@ -201,6 +205,7 @@ function verifyDirectDesktopApi(errors) {
     "billing",
     "uclaw:ecommerce-generate-images",
     "uclaw:ecommerce-sync-image-usage",
+    "uclaw:ecommerce-list-local-manifests",
     "uclaw:ecommerce-image-progress",
     "emitEcommerceImageProgress",
     "status: 'completed'",
@@ -218,6 +223,8 @@ function verifyDirectDesktopApi(errors) {
     "uclaw:ecommerce-materialize-image",
     "openEcommerceLocalPath",
     "uclaw:ecommerce-open-local-path",
+    "listEcommerceLocalManifests",
+    "uclaw:ecommerce-list-local-manifests",
   ];
 
   for (const token of mainTokens) {
@@ -392,6 +399,8 @@ function verifyPatchSource(errors) {
     "localDir",
     "localManifestPath",
     "ecommerce-local-library-1",
+    "ecommerce-log-bubble-1",
+    "ecommerce-compact-actions-3",
     "selectEcommercePreview",
     "openEcommerceSwiper",
     "stepEcommerceSwiper",
@@ -501,7 +510,7 @@ function verifyGeneratedTasksPage(errors) {
       "模特图",
       "详情图系列",
       "创建生成任务",
-      "打包下载",
+      "导出日志",
       "生成记录",
       "选择/拖拽/粘贴图片",
       "UcEcommercePlatformPresets",
@@ -520,6 +529,10 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceStripImagePayload",
       "UcEcommerceStripResultPayload",
       "UcEcommerceStripRecordPayload",
+      "UcEcommerceMergeRecords",
+      "importEcommerceLocalManifests",
+      "listEcommerceLocalManifests",
+      "ecommerce-local-manifest-import-1",
       "UcEcommerceRecordEffectiveStatus",
       "UcEcommerceRecordPlannedCount",
       "UcEcommerceRecordGeneratedCount",
@@ -540,9 +553,16 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceImageKey",
       "UcEcommerceMergeImages",
       "UcEcommerceMergeWarnings",
+      "UcEcommerceWarningSummary",
+      "UcEcommerceLogExportPayload",
+      "UcEcommerceExportLogName",
       "openEcommerceLocalPath",
       "retryEcommerceUsageSync",
       "重试同步用量",
+      "导出日志",
+      "uclaw-ecommerce-log-button",
+      "aria-label='导出日志'",
+      "uclaw-ecommerce-warning-bubble",
       "deleteEcommerceRecord",
       "uclaw-ecommerce-record-delete",
       "已保存本地",
@@ -559,6 +579,7 @@ function verifyGeneratedTasksPage(errors) {
       "ecommercePreviewIndex",
       "downloadEcommercePackage",
       "downloadEcommerceImage",
+      "exportEcommerceLog",
       "UcEcommerceDownloadBlob(a,t||`ecommerce-image.",
       "@click=${()=>e.downloadEcommerceImage?.(f,w)}",
       "onEcommerceImageProgress",
@@ -657,6 +678,18 @@ function verifyGeneratedTasksPage(errors) {
     if (!/UcEcommerceBuildDirectPayload\(n,c\)/.test(content)) {
       errors.push(`${label} must build ecommerce image payload from the submitted file snapshot after clearing the form`);
     }
+    if (!content.includes("this.importEcommerceLocalManifests?.(),this.syncGatewayState()")) {
+      errors.push(`${label} must import saved ecommerce manifests when the tasks page mounts`);
+    }
+    if (content.includes("!e.dataUrl&&!e.url&&e.localPath")) {
+      errors.push(`${label} must hydrate localPath images even when stale remote URLs are present`);
+    }
+    if (content.includes("if(!this.ecommerceResult&&r[0]?.result)")) {
+      errors.push(`${label} must let local manifests replace stale current ecommerce results for the same request`);
+    }
+    if (!content.includes("await this.importEcommerceLocalManifests?.()")) {
+      errors.push(`${label} must refresh from saved manifests after direct generation settles`);
+    }
     if (/JSON\.stringify\(\(e\|\|\[\]\)\.slice\(0,30\)\)/.test(content)) {
       errors.push(`${label} must not persist full ecommerce image records with dataUrl payloads`);
     }
@@ -724,6 +757,7 @@ function verifyServiceWorker(errors) {
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-ultrawide-layout-2");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-swiper-preview-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-local-library-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-local-manifest-import-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-delete-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-task-recreate-1");
 }

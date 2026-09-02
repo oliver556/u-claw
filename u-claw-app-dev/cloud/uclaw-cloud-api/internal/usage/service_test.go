@@ -167,6 +167,74 @@ func TestGetSummaryUsesAdminEndpointsBeforeUserLogin(t *testing.T) {
 	}
 }
 
+func TestGetSummaryShowsNewestEcommerceImageRecordFirst(t *testing.T) {
+	now := time.Date(2026, 9, 2, 18, 30, 0, 0, time.UTC)
+	store := NewMemoryStore()
+	event, claimed, err := store.ClaimEcommerceImageUsage(context.Background(), EcommerceImageUsageEvent{
+		UserID:      5,
+		Phone:       "13800138000",
+		RequestID:   "image-request-new",
+		Model:       "gpt-image-2",
+		TokenName:   "uclaw-main",
+		OutputTypes: []string{"主图"},
+		ImageCount:  1,
+		Quota:       50000,
+		Status:      "pending",
+		CreatedAt:   now.Add(-10 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("ClaimEcommerceImageUsage() error = %v", err)
+	}
+	if !claimed {
+		t.Fatal("ClaimEcommerceImageUsage() claimed = false, want true")
+	}
+	if _, err := store.MarkEcommerceImageUsageSettled(context.Background(), event.RequestID); err != nil {
+		t.Fatalf("MarkEcommerceImageUsageSettled() error = %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/9":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":9,"username":"13800138000","quota":150000,"used_quota":100000,"request_count":25}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/log/":
+			old := now.AddDate(0, 0, -3).Unix()
+			_, _ = w.Write([]byte(`{"success":true,"data":{"page":1,"page_size":1,"total":1,"items":[` +
+				`{"id":100,"username":"13800138000","created_at":` + itoa(old) + `,"type":2,"content":"consume","model_name":"gpt-5.5","quota":100000,"request_id":"text-request-old"}` +
+				`]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	admin, err := newapi.NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	service, err := NewService(admin, Config{PasswordSecret: "test-password-secret", PageSize: 1}, store)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	service.now = func() time.Time { return now }
+
+	summary, err := service.GetSummary(context.Background(), SummaryRequest{UserID: 5, Phone: "13800138000"})
+	if err != nil {
+		t.Fatalf("GetSummary() error = %v", err)
+	}
+	if len(summary.Records) != 1 {
+		t.Fatalf("records length = %d, want 1: %+v", len(summary.Records), summary.Records)
+	}
+	if summary.Records[0].RequestID != "image-request-new" || summary.Records[0].ModelName != "gpt-image-2" {
+		t.Fatalf("first record = %+v, want newest image usage", summary.Records[0])
+	}
+	if summary.TodayUsage != 50000 || summary.Last7DaysUsage != 150000 || summary.CumulativeUsage != 150000 {
+		t.Fatalf("summary usage = %+v", summary)
+	}
+}
+
 func TestGetSummaryReusesCachedNewAPIToken(t *testing.T) {
 	secret := "test-password-secret"
 	var loginCount int
