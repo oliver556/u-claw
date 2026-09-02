@@ -967,6 +967,17 @@ function ensurePortableHomeShellDirs() {
  * host USERPROFILE/Downloads before the portable HOME cache path.
  */
 function resolveEcommerceLocalLibraryRoot() {
+  const candidates = resolveEcommerceLocalLibraryRoots();
+  return candidates[0] || path.join(userDataPath, 'Downloads', APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME);
+}
+
+/**
+ * Returns every local ecommerce library root Bavi-box may have used. Windows
+ * portable launches can report different Downloads roots between save and
+ * preview phases, so read/open trust must include all expected roots.
+ */
+function resolveEcommerceLocalLibraryRoots() {
+  const home = safeGetElectronPath('home');
   const downloads = safeGetElectronPath('downloads');
   const hostDownloads = process.platform === 'win32' && process.env.UCLAW_HOST_USERPROFILE
     ? path.join(process.env.UCLAW_HOST_USERPROFILE, 'Downloads')
@@ -974,11 +985,40 @@ function resolveEcommerceLocalLibraryRoot() {
   const homeDownloads = process.platform === 'win32' && process.env.USERPROFILE
     ? path.join(process.env.USERPROFILE, 'Downloads')
     : '';
-  const fallbackDownloads = safeGetElectronPath('home')
-    ? path.join(safeGetElectronPath('home'), 'Downloads')
-    : '';
+  const fallbackDownloads = home ? path.join(home, 'Downloads') : '';
   const base = downloads || hostDownloads || homeDownloads || fallbackDownloads || path.join(userDataPath, 'Downloads');
-  return path.join(base, APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME);
+  return [
+    base,
+    downloads,
+    hostDownloads,
+    homeDownloads,
+    fallbackDownloads,
+    path.join(userDataPath, 'Downloads'),
+  ]
+    .filter(Boolean)
+    .map(basePath => path.resolve(basePath, APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME))
+    .filter((libraryRoot, index, roots) => roots.findIndex(root => pathsEqual(root, libraryRoot)) === index);
+}
+
+/**
+ * Compares local paths with Windows case-insensitivity preserved.
+ */
+function pathsEqual(left, right) {
+  const normalize = (value) => String(value || '').replace(/[\\/]+$/g, '');
+  return process.platform === 'win32'
+    ? normalize(left).toLowerCase() === normalize(right).toLowerCase()
+    : normalize(left) === normalize(right);
+}
+
+/**
+ * Checks whether `target` is equal to or nested under `root`.
+ */
+function isPathInsideRoot(target, root) {
+  const resolvedTarget = path.resolve(target);
+  const resolvedRoot = path.resolve(root);
+  if (pathsEqual(resolvedTarget, resolvedRoot)) return true;
+  const relative = path.relative(resolvedRoot, resolvedTarget);
+  return Boolean(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 /**
@@ -1099,9 +1139,8 @@ async function openEcommerceLocalPath(payload = {}) {
   const targetPath = String(payload?.path || payload?.localPath || payload?.localDir || '').trim();
   if (!targetPath) throw new Error('本地文件路径为空。');
   if (!path.isAbsolute(targetPath)) throw new Error('本地文件路径无效。');
-  const libraryRoot = path.resolve(resolveEcommerceLocalLibraryRoot());
   const resolvedTarget = path.resolve(targetPath);
-  if (resolvedTarget !== libraryRoot && !resolvedTarget.startsWith(`${libraryRoot}${path.sep}`)) {
+  if (!resolveEcommerceLocalLibraryRoots().some(root => isPathInsideRoot(resolvedTarget, root))) {
     throw new Error('只能打开电商图片本地保存目录。');
   }
   if (fs.existsSync(resolvedTarget) && fs.statSync(resolvedTarget).isFile()) {
@@ -1123,9 +1162,8 @@ function resolveTrustedEcommerceLocalPath(rawPath) {
   if (!targetPath || !path.isAbsolute(targetPath)) {
     return '';
   }
-  const libraryRoot = path.resolve(resolveEcommerceLocalLibraryRoot());
   const resolvedTarget = path.resolve(targetPath);
-  if (resolvedTarget !== libraryRoot && !resolvedTarget.startsWith(`${libraryRoot}${path.sep}`)) {
+  if (!resolveEcommerceLocalLibraryRoots().some(root => isPathInsideRoot(resolvedTarget, root))) {
     return '';
   }
   return resolvedTarget;
@@ -1265,24 +1303,30 @@ function ecommerceRecordFromLocalManifest(manifestPath, manifest, stat) {
  * even when browser localStorage did not preserve the frontend index.
  */
 function listEcommerceLocalManifests() {
-  const root = resolveEcommerceLocalLibraryRoot();
   const records = [];
-  const rootStat = fs.existsSync(root) ? fs.statSync(root) : null;
-  if (!rootStat?.isDirectory()) return { ok: true, root, records };
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const manifestPath = path.join(root, entry.name, 'manifest.json');
-    const trustedPath = resolveTrustedEcommerceLocalPath(manifestPath);
-    if (!trustedPath || !fs.existsSync(trustedPath)) continue;
-    const stat = fs.statSync(trustedPath);
-    if (!stat.isFile() || stat.size <= 0 || stat.size > 1024 * 1024) continue;
-    const manifest = readJsonFile(trustedPath);
-    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) continue;
-    const record = ecommerceRecordFromLocalManifest(trustedPath, manifest, stat);
-    if (record) records.push(record);
+  const roots = resolveEcommerceLocalLibraryRoots();
+  const seen = new Set();
+  for (const root of roots) {
+    const rootStat = fs.existsSync(root) ? fs.statSync(root) : null;
+    if (!rootStat?.isDirectory()) continue;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const manifestPath = path.join(root, entry.name, 'manifest.json');
+      const trustedPath = resolveTrustedEcommerceLocalPath(manifestPath);
+      if (!trustedPath || !fs.existsSync(trustedPath)) continue;
+      const seenKey = process.platform === 'win32' ? trustedPath.toLowerCase() : trustedPath;
+      if (seen.has(seenKey)) continue;
+      seen.add(seenKey);
+      const stat = fs.statSync(trustedPath);
+      if (!stat.isFile() || stat.size <= 0 || stat.size > 1024 * 1024) continue;
+      const manifest = readJsonFile(trustedPath);
+      if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) continue;
+      const record = ecommerceRecordFromLocalManifest(trustedPath, manifest, stat);
+      if (record) records.push(record);
+    }
   }
   records.sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
-  return { ok: true, root, records: records.slice(0, 30) };
+  return { ok: true, root: roots[0] || '', roots, records: records.slice(0, 30) };
 }
 
 /**
