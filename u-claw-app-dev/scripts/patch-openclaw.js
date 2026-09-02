@@ -14,6 +14,15 @@ const skillsGatewayPath = path.join(openclawDistDir, "skills-ieKSTXPw.js");
 const schemaPath = path.join(openclawDistDir, "schema-BuOFpc7K.js");
 const serverMethodsPath = path.join(openclawDistDir, "server-methods-NpEcZnvp.js");
 const coreDescriptorsPath = path.join(openclawDistDir, "core-descriptors-DRUtdasO.js");
+const ecommerceWorkflowSkillSourcePath = path.join(__dirname, "ecommerce-main-detail-workflow.SKILL.md");
+const ecommerceWorkflowSkillTargetPath = path.join(
+  root,
+  "node_modules",
+  "openclaw",
+  "skills",
+  "ecommerce-main-detail-workflow",
+  "SKILL.md",
+);
 const officialIconSvgPath = path.join(root, "assets", "icon.svg");
 const officialIconPngPath = path.join(root, "assets", "icon.png");
 const officialIconIcoPath = path.join(root, "assets", "icon.ico");
@@ -40,6 +49,16 @@ function copyFileIfChanged(source, target) {
 
   fs.copyFileSync(source, target);
   return true;
+}
+
+/**
+ * Restores the Bavi-box bundled ecommerce workflow skill after a clean npm install.
+ */
+function patchBundledEcommerceWorkflowSkill() {
+  fs.mkdirSync(path.dirname(ecommerceWorkflowSkillTargetPath), { recursive: true });
+  if (copyFileIfChanged(ecommerceWorkflowSkillSourcePath, ecommerceWorkflowSkillTargetPath)) {
+    console.log(`patched ${path.relative(root, ecommerceWorkflowSkillTargetPath)}`);
+  }
 }
 
 /**
@@ -2839,6 +2858,8 @@ function patchTasksPageEcommerceWorkflow() {
     "function UcEcommerceExportLogName(e){return `${UcEcommerceSafeFileName(e?.name||`ecommerce`)}-${UcEcommerceSafeFileName(e?.requestId||e?.id||`log`)}-生成日志.json`}",
     "function UcEcommerceLogDiagnosticMarker(){return`ecommerce-log-diagnostic-1`}",
     "function UcEcommerceLogExportPayload(e){let t=Array.isArray(e?.images)?e.images.map(e=>({id:e?.id||``,type:e?.type||``,title:e?.title||``,model:e?.model||``,mimeType:e?.mimeType||``,localPath:e?.localPath||``,localFileName:e?.localFileName||``,savedAt:e?.savedAt||``})):[],n=Number(e?.progress?.total||0);!n&&Array.isArray(e?.output_types)&&e?.output_counts&&(n=e.output_types.reduce((t,n)=>t+(Number(e.output_counts[n])||0),0));let r=t.length,a=String(e?.progress?.status||e?.status||``),o=Date.parse(e?.generated_at||e?.createdAt||``),s=Number.isFinite(o)?Date.now()-o:null,c=[];r||c.push(`images`),(e?.model||t.find(e=>e.model))||c.push(`model`),e?.billing||c.push(`billing`),e?.localDir||c.push(`localDir`),e?.localManifestPath||c.push(`localManifestPath`);let l=a===`failed`&&!r?`failed`:a===`interrupted`?`interrupted`:(a===`started`||a===`generating`||a===`processing`)&&(!n||r<n)?`running`:r>0&&n>0&&r<n?`partial`:r>0&&(a===`completed`||a===`settled`||!n||r>=n)?`completed`:a||`unknown`,u=l===`running`?`当前日志为进行中快照，字段为空表示任务尚未产出或尚未收尾，不代表已完成生成 0 张。`:`本文件为生成排障日志，包含 manifest、warnings、billing、usage 与本地文件索引，不含图片二进制。`;return{...e,images:t,diagnostic_status:l,diagnostic:{status:l,raw_status:a,progress_status:String(e?.progress?.status||``),planned_count:Number.isFinite(n)?n:0,generated_count:r,elapsed_ms:s,missing_fields:c},exported_at:new Date().toISOString(),export_note:u}}",
+    "function UcEcommerceRecordInitial(e){let t=String(e?.productName||e?.result?.name||`商`).trim();return (Array.from(t)[0]||`商`).toUpperCase()}",
+    "function UcEcommerceRecordProgressPercent(e,t){let n=Number(e)||0,r=Number(t)||0;return r>0?Math.max(0,Math.min(100,Math.round(n*100/r))):n>0?100:0}",
     "function UcEcommerceBase64ToBytes(e){let t=atob(String(e||``)),n=new Uint8Array(t.length);for(let r=0;r<t.length;r+=1)n[r]=t.charCodeAt(r);return n}",
     "function UcEcommerceStringToBytes(e){return new TextEncoder().encode(String(e??``))}",
     "function UcEcommerceCrc32Table(){if(globalThis.__uclawEcommerceCrc32Table)return globalThis.__uclawEcommerceCrc32Table;let e=new Uint32Array(256);for(let t=0;t<256;t+=1){let n=t;for(let r=0;r<8;r+=1)n=n&1?3988292384^n>>>1:n>>>1;e[t]=n>>>0}return globalThis.__uclawEcommerceCrc32Table=e,e}",
@@ -2908,54 +2929,37 @@ function patchTasksPageEcommerceWorkflow() {
       "${M?i`<div class='muted uclaw-ecommerce-log-path'>日志已保存：${M}</div>`:``}${o.warnings?.length?i`<div class='uclaw-ecommerce-warning-bubble' title=${o.warnings.join(`；`)}>${UcEcommerceWarningSummary(o.warnings)}</div>`:``}<div class='uclaw-ecommerce-qa'>",
     )
     .replace(
-      "· ${t.imageCount} 张素材 · ${t.requestedOutputCount||t.generatedImageCount||0} 张/屏计划 · ${t.generatedImageCount||0} 张结果 · ${t.model||`默认图片模型`}</small>",
-      "· ${t.imageCount} 张素材 · ${t.requestedOutputCount||t.generatedImageCount||0} 张/屏计划 · ${t.generatedImageCount||0} 张结果 · ${t.model||`默认图片模型`}${t.localDir||t.result?.localDir?` · 已保存本地`:``}</small>",
-    )
-    .replace(
-      "${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button>`:``}</div></article>",
-      "${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button><button class='btn' type='button' @click=${n=>{n.stopPropagation(),e.exportEcommerceLog?.(t.result)}}>导出日志</button>`:``}${a?i`<button class='btn' type='button' ?disabled=${e.ecommerceUsageSyncing===!0} @click=${n=>{n.stopPropagation(),e.retryEcommerceUsageSync?.(t)}}>${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`}</button>`:``}${t.localDir||t.result?.localDir?i`<button class='btn' type='button' @click=${()=>e.openEcommerceLocalPath?.({path:t.localDir||t.result?.localDir})}>打开文件夹</button>`:``}<button class='btn ghost uclaw-ecommerce-record-delete' type='button' @click=${n=>{n.stopPropagation(),e.deleteEcommerceRecord?.(t.id)}}>删除</button></div></article>",
-    )
-    .replace(
       "<button class='btn ghost' type='button' ?disabled=${l.length===0} @click=${()=>e.clearEcommerceRecords?.()}>清空</button>",
       "<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-clear' type='button' title='清空记录' aria-label='清空记录' ?disabled=${l.length===0} @click=${()=>e.clearEcommerceRecords?.()}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-clear' aria-hidden='true'></span></button>",
     )
     .replace(
-      "${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button><button class='btn' type='button' @click=${n=>{n.stopPropagation(),e.exportEcommerceLog?.(t.result)}}>导出日志</button>`:``}${a?i`<button class='btn' type='button' ?disabled=${e.ecommerceUsageSyncing===!0} @click=${n=>{n.stopPropagation(),e.retryEcommerceUsageSync?.(t)}}>${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`}</button>`:``}${t.localDir||t.result?.localDir?i`<button class='btn' type='button' @click=${()=>e.openEcommerceLocalPath?.({path:t.localDir||t.result?.localDir})}>打开文件夹</button>`:``}<button class='btn ghost uclaw-ecommerce-record-delete' type='button' @click=${n=>{n.stopPropagation(),e.deleteEcommerceRecord?.(t.id)}}>删除</button></div></article>",
-      "${t.result?i`<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-view' type='button' title='查看结果' aria-label='查看结果' @click=${n=>{n.stopPropagation(),e.showEcommerceRecord?.(t)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-view' aria-hidden='true'></span></button>`:``}${a?i`<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-sync' type='button' title=${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`} aria-label=${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`} ?disabled=${e.ecommerceUsageSyncing===!0} @click=${n=>{n.stopPropagation(),e.retryEcommerceUsageSync?.(t)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-sync' aria-hidden='true'></span></button>`:``}${t.localDir||t.result?.localDir?i`<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-folder' type='button' title='打开文件夹' aria-label='打开文件夹' @click=${n=>{n.stopPropagation(),e.openEcommerceLocalPath?.({path:t.localDir||t.result?.localDir})}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-folder' aria-hidden='true'></span></button>`:``}<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-delete' type='button' title='删除记录' aria-label='删除记录' @click=${n=>{n.stopPropagation(),e.deleteEcommerceRecord?.(t.id)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-delete' aria-hidden='true'></span></button></div></article>",
+      "<article class='uclaw-ecommerce-record'><div><strong>${t.productName||`未命名商品`}</strong><span>${t.platformLabel} · ${new Date(t.createdAt).toLocaleString()}</span><small>${t.outputLabels||`默认类型`} · ${t.languageLabel||t.result?.language?.label||``} · ${t.styleLabel||t.result?.visual_style?.label||``} · ${t.ratioLabel||t.result?.aspect_ratio?.label||``} · ${t.imageCount} 张素材 · 计划 ${n||0} 张/屏 · 已出 ${r||0} 张${a?` · 扣费异常`:``} · ${t.model||`默认图片模型`}</small></div><div class='uclaw-ecommerce-record-actions'><span class='chip ${UcEcommerceStatusChip(t)}'>${UcEcommerceRecordStatusText(t)}</span>${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button>`:``}</div></article>",
+      "<article class='uclaw-ecommerce-record'><span class='uclaw-ecommerce-record-mark'>${UcEcommerceRecordInitial(t)}</span><div class='uclaw-ecommerce-record-main'><strong>${t.productName||`未命名商品`}</strong><span>${t.platformLabel} · ${new Date(t.createdAt).toLocaleString()} · ${t.model||`默认图片模型`}</span><small>${t.outputLabels||`默认类型`} · ${t.languageLabel||t.result?.language?.label||``} · 计划 ${n||0} 张/屏 · 已出 ${r||0} 张${t.localDir||t.result?.localDir?` · 已保存本地`:``}${a?` · 扣费异常`:``}</small></div><span class='chip ${UcEcommerceStatusChip(t)} uclaw-ecommerce-record-status'>${UcEcommerceRecordStatusText(t)}</span><div class='uclaw-ecommerce-record-progress' aria-label=${`生成进度 ${r||0}/${n||0}`}><span>${r||0}/${n||0}</span><div><b style=${`width:${UcEcommerceRecordProgressPercent(r,n)}%`}></b></div></div><div class='uclaw-ecommerce-record-actions'>${t.result?i`<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-view' type='button' title='查看结果' aria-label='查看结果' @click=${n=>{n.stopPropagation(),e.showEcommerceRecord?.(t)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-view' aria-hidden='true'></span></button>`:``}${a?i`<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-sync' type='button' title=${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`} aria-label=${e.ecommerceUsageSyncing===!0?`同步中...`:`重试同步用量`} ?disabled=${e.ecommerceUsageSyncing===!0} @click=${n=>{n.stopPropagation(),e.retryEcommerceUsageSync?.(t)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-sync' aria-hidden='true'></span></button>`:``}${t.localDir||t.result?.localDir?i`<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-folder' type='button' title='打开文件夹' aria-label='打开文件夹' @click=${n=>{n.stopPropagation(),e.openEcommerceLocalPath?.({path:t.localDir||t.result?.localDir})}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-folder' aria-hidden='true'></span></button>`:``}<button class='btn ghost uclaw-ecommerce-icon-button uclaw-ecommerce-record-delete' type='button' title='删除记录' aria-label='删除记录' @click=${n=>{n.stopPropagation(),e.deleteEcommerceRecord?.(t.id)}}><span class='uclaw-ecommerce-icon uclaw-ecommerce-icon-delete' aria-hidden='true'></span></button></div></article>",
     );
   const ecommerceHelper = helper.replace(/function UcEcommerceWorkbenchView\(e\)\{[\s\S]*\}$/, redesignedWorkbenchView);
 
-  let methods = "";
-  for (const file of listAssetFiles(/^tasks-page-.*\.js$/, "tasks-page")) {
-    const content = read(file);
-    const start = content.indexOf("cleanupEcommerceFileUrls(");
-    const end = content.indexOf("render(){return i`", start);
-    if (start >= 0 && end > start) {
-      methods = content.slice(start, end);
-      break;
+  const ecommerceTaskPageMethodsSource =
+    "cleanupEcommerceFileUrls(e=this.ecommerceForm?.files||[]){for(let t of e||[])try{t.url&&URL.revokeObjectURL(t.url)}catch{}}saveEcommerceRecords(){UcEcommerceSaveRecords(this.ecommerceRecords)}saveEcommerceDraft(){UcEcommerceWriteDraft(this.ecommerceForm??UcEcommerceDefaultForm()),UcEcommerceRememberDraftFiles(this.ecommerceForm?.files||[])}async importEcommerceLocalManifests(){let e=globalThis.uclaw?.listEcommerceLocalManifests;if(!e)return;try{let t=await e(),n=Array.isArray(t?.records)?t.records:[];if(!n.length)return;let r=UcEcommerceMergeRecords(n,this.ecommerceRecords||[]),a=String(this.ecommerceResult?.requestId||this.ecommerceResult?.id||``),o=a?r.find(e=>String(e?.id||e?.result?.requestId||e?.result?.id||``)===a):r[0];this.ecommerceRecords=r;if(o?.result){this.ecommerceResult={...o.result,id:o.id||o.result.id},this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.hydrateEcommerceResultImages?.()}this.saveEcommerceRecords(),this.requestUpdate()}catch{}}resetEcommerceFormAfterTaskCreated(){this.cleanupEcommerceFileUrls(),UcEcommerceClearDraft(),this.ecommerceForm=UcEcommerceDefaultForm(),this.ecommerceLastSubmittedSignature=null,this.requestUpdate()}setEcommerceRecordsPage(e){this.ecommerceRecordsPage=UcEcommerceClampRecordPage(e,(this.ecommerceRecords||[]).length),this.requestUpdate()}upsertEcommerceRecord(e){let t=[e,...(this.ecommerceRecords||[]).filter(t=>t.id!==e.id)].slice(0,30);this.ecommerceRecords=t,this.ecommerceRecordsPage=1,this.saveEcommerceRecords(),this.requestUpdate()}deleteEcommerceRecord(e){let t=String(e||``);this.ecommerceRecords=(this.ecommerceRecords||[]).filter(e=>String(e?.id||``)!==t),this.ecommerceRecordsPage=UcEcommerceClampRecordPage(this.ecommerceRecordsPage,this.ecommerceRecords.length),this.ecommerceActiveRecord&&String(this.ecommerceActiveRecord.id||``)===t&&(this.ecommerceActiveRecord=null),this.ecommerceResult&&String(this.ecommerceResult.id||``)===t&&(this.ecommerceResult=null,this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1),this.saveEcommerceRecords(),this.requestUpdate()}async hydrateEcommerceResultImages(){let e=this.ecommerceResult,t=Array.isArray(e?.images)?e.images:[];if(!e||!t.some(e=>e&&!e.dataUrl&&e.localPath))return;try{let n=await Promise.all(t.map(e=>e&&!e.dataUrl&&e.localPath?UcEcommerceEnsureDataUrl(e):e));this.ecommerceResult===e&&(this.ecommerceResult={...e,images:n},this.ecommerceRecords=(this.ecommerceRecords||[]).map(t=>t?.id&&t.id===e.id?{...t,result:this.ecommerceResult}:t),this.saveEcommerceRecords(),this.requestUpdate())}catch(t){this.ecommerceResult===e&&(this.ecommerceResult={...e,error:`本地图片读取失败：${t instanceof Error?t.message:String(t)}`},this.requestUpdate())}}selectEcommercePreview(e){let t=Array.isArray(this.ecommerceResult?.images)?this.ecommerceResult.images.length:0;this.ecommercePreviewIndex=Math.max(0,Math.min(Number(e)||0,Math.max(0,t-1))),this.requestUpdate()}openEcommerceSwiper(e=this.ecommercePreviewIndex){this.selectEcommercePreview(e),this.ecommerceSwiperOpen=!0,this.requestUpdate(),setTimeout(()=>this.querySelector?.(`.uclaw-ecommerce-swiper`)?.focus?.(),0)}closeEcommerceSwiper(){this.ecommerceSwiperOpen=!1,this.requestUpdate()}stepEcommerceSwiper(e){let t=Array.isArray(this.ecommerceResult?.images)?this.ecommerceResult.images.length:0;if(!t)return;this.ecommercePreviewIndex=(this.ecommercePreviewIndex+e+t)%t,this.requestUpdate()}onEcommerceSwiperKey(e){if(e.key===`Escape`)return e.preventDefault(),this.closeEcommerceSwiper();if(e.key===`ArrowLeft`)return e.preventDefault(),this.stepEcommerceSwiper(-1);if(e.key===`ArrowRight`)return e.preventDefault(),this.stepEcommerceSwiper(1)}onEcommerceField(e,t){let n=this.ecommerceForm??UcEcommerceDefaultForm(),r={...n,[e]:t};if(e===`platform`){let e=UcEcommerceSelectedPreset(t);r.language=e.defaultLanguage||r.language||`zh-CN`;try{globalThis.localStorage?.setItem(`uclaw.ecommerceWorkbench.platform.v1`,t)}catch{}}this.ecommerceForm=r,this.ecommerceResult=null,this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.saveEcommerceDraft(),this.requestUpdate()}onEcommerceOutputType(e,t){this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),outputTypes:UcEcommerceToggleOutputType(this.ecommerceForm??UcEcommerceDefaultForm(),e,t)},this.ecommerceResult=null,this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.saveEcommerceDraft(),this.requestUpdate()}onEcommerceOutputCount(e,t){this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),outputCounts:UcEcommerceSetOutputCount(this.ecommerceForm??UcEcommerceDefaultForm(),e,t)},this.ecommerceResult=null,this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.saveEcommerceDraft(),this.requestUpdate()}setEcommerceFiles(e,t=!1){let n=Array.from(e||[]).filter(e=>e?.type?.startsWith(`image/`)),r=t?[...(this.ecommerceForm?.files||[])]:[],a=Math.max(0,12-r.length),o=n.slice(0,a).map(e=>({name:e.name||`clipboard-image.png`,type:e.type||`image/png`,size:e.size||0,url:URL.createObjectURL(e),file:e}));t||this.cleanupEcommerceFileUrls(),this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),files:[...r,...o]},this.ecommerceResult=null,this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.saveEcommerceDraft(),this.requestUpdate()}onEcommerceFiles(e){this.setEcommerceFiles(e,!1)}onEcommerceDrop(e){e.preventDefault(),this.setEcommerceFiles(e.dataTransfer?.files,!0)}onEcommercePaste(e){let t=Array.from(e.clipboardData?.items||[]).map(e=>e?.kind===`file`?e.getAsFile():null).filter(e=>e?.type?.startsWith(`image/`));t.length&&(e.preventDefault(),e.stopPropagation?.(),this.setEcommerceFiles(t,!0))}removeEcommerceFile(e){let t=[...(this.ecommerceForm?.files||[])],n=t.splice(e,1)[0];this.cleanupEcommerceFileUrls([n]),this.ecommerceForm={...(this.ecommerceForm??UcEcommerceDefaultForm()),files:t},this.ecommerceResult=null,this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.saveEcommerceDraft(),this.requestUpdate()}onEcommerceImageProgress(e){if(!e||e.requestId!==this.ecommerceActiveRequestId)return;let t=this.ecommerceActiveManifest||this.ecommerceResult||{},n=Array.isArray(this.ecommerceResult?.images)?this.ecommerceResult.images:[],r=Array.isArray(this.ecommerceResult?.warnings)?[...this.ecommerceResult.warnings]:[],a=Number.isFinite(e.total)?e.total:this.ecommerceActiveRecord?.requestedOutputCount||n.length;e.status===`completed`&&e.image&&(n=UcEcommerceMergeImages(n,[e.image]));if(e.status===`failed`&&e.warning&&!r.includes(e.warning))r.push(e.warning);let s=e.generatedCount??n.length,c=e.status===`settled`||a>0&&s>=a,l=c?`completed`:e.status||`generating`,d=c?this.ecommerceResult?.completed_at||new Date().toISOString():this.ecommerceResult?.completed_at||``,o={...t,provider:this.ecommerceResult?.provider||`newapi`,model:this.ecommerceResult?.model||``,completed_at:d,images:n,warnings:r,billing:e.billing||this.ecommerceResult?.billing||null,localDir:e.localDir||this.ecommerceResult?.localDir||n.find(e=>e?.localDir)?.localDir||``,localManifestPath:e.localManifestPath||this.ecommerceResult?.localManifestPath||``,progress:{done:Math.max(s,n.length),total:a,current:e.target?.title||``,status:l}};this.ecommerceResult=o,this.ecommerceActiveRecord&&this.upsertEcommerceRecord({...this.ecommerceActiveRecord,status:l,updatedAt:Date.now(),completedAt:c?Date.now():this.ecommerceActiveRecord.completedAt,generatedImageCount:n.length,billing:o.billing||this.ecommerceActiveRecord.billing||null,localDir:o.localDir||this.ecommerceActiveRecord.localDir||``,localManifestPath:o.localManifestPath||this.ecommerceActiveRecord.localManifestPath||``,result:o}),this.requestUpdate()}async startEcommerceImageGeneration(){let e=this.ecommerceForm??UcEcommerceDefaultForm(),t=UcEcommerceMissing(e);if(t.length){this.ecommerceResult={error:`请先补充：${t.join(`、`)}`},this.requestUpdate();return}if(!globalThis.uclaw?.generateEcommerceImages){this.ecommerceResult={error:`当前需要在 Bavi-box 桌面端运行，浏览器预览不能直接出图。`},this.requestUpdate();return}let n=UcEcommerceBuildManifest(e),r=UcEcommerceImageTargets(),a=UcEcommerceOutputCountRules(e),l=n.output_counts||{},u=(n.output_types||[]).reduce((e,t)=>e+(l[t]||0),0),o=(n.output_types||[]).map(e=>`${r.find(t=>t.type===e)?.label||e}${l[e]||0}${a[e]?.unit||`张`}`).join(`、`),s={id:n.id,createdAt:Date.now(),updatedAt:Date.now(),status:`generating`,platform:n.platform,platformLabel:n.platform_label,productName:n.name,languageLabel:n.language?.label||``,styleLabel:n.visual_style?.label||``,ratioLabel:n.aspect_ratio?.label||``,imageCount:n.input.image_count,outputTypes:n.output_types||[],outputCounts:l,outputLabels:o,requestedOutputCount:u,manifest:n};this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.ecommerceGenerating=!0,this.ecommerceLastSubmittedSignature=UcEcommerceFormSignature(e),this.ecommerceActiveRequestId=n.id,this.ecommerceActiveManifest=n,this.ecommerceActiveRecord=s,this.ecommerceProgressStop?.(),this.ecommerceProgressStop=globalThis.uclaw?.onEcommerceImageProgress?.(t=>this.onEcommerceImageProgress?.(t))||null,this.ecommerceResult={...n,provider:`newapi`,model:``,images:[],warnings:[],progress:{done:0,total:u,current:`等待开始`,status:`generating`}},this.upsertEcommerceRecord({...s,result:this.ecommerceResult});let c=e.files||[];this.resetEcommerceFormAfterTaskCreated?.();try{let e=await UcEcommerceBuildDirectPayload(n,c),t=await globalThis.uclaw.generateEcommerceImages(e),m=Array.isArray(this.ecommerceResult?.images)?this.ecommerceResult.images:[],p=UcEcommerceMergeImages(m,Array.isArray(t?.images)?t.images:[]),g=UcEcommerceMergeWarnings(this.ecommerceResult?.warnings,Array.isArray(t?.warnings)?t.warnings:[]),i={...n,provider:t?.provider||`newapi`,model:t?.model||this.ecommerceResult?.model||``,completed_at:t?.generatedAt||new Date().toISOString(),images:p,warnings:g,billing:t?.billing||this.ecommerceResult?.billing||null,usage:t?.usage||null,localDir:t?.localDir||this.ecommerceResult?.localDir||p.find(e=>e?.localDir)?.localDir||``,localManifestPath:t?.localManifestPath||this.ecommerceResult?.localManifestPath||``,progress:{done:p.length,total:u,current:``,status:p.length>=u?`completed`:`partial`}};if(!i.images.length)throw Error(`图片接口未返回图片结果。`);this.ecommerceResult=i;let d=i.images.length>=u?`completed`:`partial`;this.upsertEcommerceRecord({...s,status:d,updatedAt:Date.now(),completedAt:Date.now(),generatedImageCount:i.images.length,billing:i.billing,provider:i.provider,model:i.model,localDir:i.localDir||``,localManifestPath:i.localManifestPath||``,result:i}),await this.importEcommerceLocalManifests?.()}catch(e){let t=e instanceof Error?e.message:String(e),r=Array.isArray(this.ecommerceResult?.images)?this.ecommerceResult.images:[],a=UcEcommerceMergeWarnings(this.ecommerceResult?.warnings,[`生成失败：${t}`]);this.ecommerceResult={...n,...(this.ecommerceResult||{}),images:r,warnings:a,error:r.length?``:`生成失败：${t}`,progress:{...(this.ecommerceResult?.progress||{}),done:r.length,total:u,status:r.length?`partial`:`failed`}},this.upsertEcommerceRecord({...s,status:r.length?`partial`:`failed`,updatedAt:Date.now(),completedAt:r.length?Date.now():s.completedAt,generatedImageCount:r.length,error:t,billing:this.ecommerceResult?.billing||null,localDir:this.ecommerceResult?.localDir||r.find(e=>e?.localDir)?.localDir||``,localManifestPath:this.ecommerceResult?.localManifestPath||``,result:r.length?this.ecommerceResult:void 0})}finally{this.ecommerceGenerating=!1,this.ecommerceProgressStop?.(),this.ecommerceProgressStop=null,this.ecommerceActiveRequestId=null,this.ecommerceActiveManifest=null,this.ecommerceActiveRecord=null,this.requestUpdate()}}async retryEcommerceUsageSync(e=null){if(this.ecommerceUsageSyncing)return;if(!globalThis.uclaw?.syncEcommerceImageUsage){this.ecommerceResult={...(this.ecommerceResult||{}),error:`当前版本缺少用量同步接口，请重启 Bavi-box 后重试。`},this.requestUpdate();return}let t=e||{id:this.ecommerceResult?.id,result:this.ecommerceResult},n=UcEcommerceBuildUsageSyncPayload(t);this.ecommerceUsageSyncing=!0,this.requestUpdate();try{let r=await globalThis.uclaw.syncEcommerceImageUsage(n);if(!r?.ok)throw Error(r?.message||`用量同步失败`);let a=r.result||{...(t.result||this.ecommerceResult||{}),billing:r.billing,usage:r.usage,warnings:r.warnings||UcEcommerceUsageSyncWarnings(t.result?.warnings||this.ecommerceResult?.warnings),localManifestPath:r.localManifestPath||t.result?.localManifestPath||this.ecommerceResult?.localManifestPath||``};this.ecommerceResult=this.ecommerceResult&&String(this.ecommerceResult.id||this.ecommerceResult.requestId||``)===String(n.requestId||``)?a:this.ecommerceResult;this.ecommerceRecords=(this.ecommerceRecords||[]).map(e=>String(e?.id||e?.result?.requestId||``)===String(t?.id||n.requestId||``)||String(e?.result?.requestId||e?.result?.id||``)===String(n.requestId||``)?{...e,status:UcEcommerceRecordGeneratedCount({...e,result:a})>=UcEcommerceRecordPlannedCount({...e,result:a})?`completed`:`partial`,updatedAt:Date.now(),billing:r.billing,localManifestPath:a.localManifestPath||e.localManifestPath||``,result:a}:e);this.saveEcommerceRecords(),this.requestUpdate()}catch(r){let a=r instanceof Error?r.message:String(r);this.ecommerceResult={...(this.ecommerceResult||t.result||{}),error:`用量同步失败：${a}`},this.requestUpdate()}finally{this.ecommerceUsageSyncing=!1,this.requestUpdate()}}clearEcommerceRecords(){this.ecommerceRecords=[],this.ecommerceRecordsPage=1,this.saveEcommerceRecords(),this.requestUpdate()}showEcommerceRecord(e){let t=e?.result||e?.manifest||null;this.ecommerceResult=t?{...t,id:e?.id||t.id}:null,this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.requestUpdate(),this.hydrateEcommerceResultImages?.()}async downloadEcommercePackage(){if(!this.ecommerceResult?.images?.length)return;try{let e=await UcEcommerceBuildExportPackage(this.ecommerceResult);UcEcommerceDownloadBlob(e.blob,e.fileName)}catch(e){this.ecommerceResult={...this.ecommerceResult,error:`打包失败：${e instanceof Error?e.message:String(e)}`},this.requestUpdate()}}async downloadEcommerceImage(e,t){try{await UcEcommerceDownloadImage(e,t)}catch(e){this.ecommerceResult={...this.ecommerceResult,error:`下载失败：${e instanceof Error?e.message:String(e)}`},this.requestUpdate()}}async openEcommerceLocalPath(e){try{await globalThis.uclaw?.openEcommerceLocalPath?.(e)}catch(e){this.ecommerceResult={...this.ecommerceResult,error:`打开本地文件失败：${e instanceof Error?e.message:String(e)}`},this.requestUpdate()}}async exportEcommerceLog(e=this.ecommerceResult){if(!e)return;try{let t=UcEcommerceLogExportPayload(e),n=new Blob([JSON.stringify(t,null,2)],{type:`application/json;charset=utf-8`});UcEcommerceDownloadBlob(n,UcEcommerceExportLogName(t))}catch(e){this.ecommerceResult={...(this.ecommerceResult||{}),error:`导出日志失败：${e instanceof Error?e.message:String(e)}`},this.requestUpdate()}}async copyEcommerceManifest(){return this.exportEcommerceLog?.()}";
+  let methods = ecommerceTaskPageMethodsSource;
+  for (const required of [
+    "cleanupEcommerceFileUrls",
+    "hydrateEcommerceResultImages",
+    "importEcommerceLocalManifests",
+    "resetEcommerceFormAfterTaskCreated",
+    "setEcommerceRecordsPage",
+    "upsertEcommerceRecord",
+    "deleteEcommerceRecord",
+    "startEcommerceImageGeneration",
+    "retryEcommerceUsageSync",
+    "downloadEcommercePackage",
+    "downloadEcommerceImage",
+    "openEcommerceLocalPath",
+    "exportEcommerceLog",
+    "copyEcommerceManifest",
+  ]) {
+    if (!methods.includes(`${required}(`)) {
+      throw new Error(`Could not locate ${required} ecommerce task page method source`);
     }
-  }
-  if (!methods) {
-    throw new Error("Could not locate ecommerce task page methods");
-  }
-  if (!methods.includes("hydrateEcommerceResultImages(){")) {
-    throw new Error("Could not locate hydrateEcommerceResultImages ecommerce method");
-  }
-  methods = methods.replace(
-    "async importEcommerceLocalManifests(){let e=globalThis.uclaw?.listEcommerceLocalManifests;if(!e)return;try{let t=await e();let n=Array.isArray(t?.records)?t.records:[];if(!n.length)return;let r=UcEcommerceMergeRecords(n,this.ecommerceRecords||[]);this.ecommerceRecords=r,this.saveEcommerceRecords();if(!this.ecommerceResult&&r[0]?.result){this.ecommerceResult={...r[0].result,id:r[0].id||r[0].result.id},this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.hydrateEcommerceResultImages?.()}this.requestUpdate()}catch{}}",
-    "async importEcommerceLocalManifests(){let e=globalThis.uclaw?.listEcommerceLocalManifests;if(!e)return;try{let t=await e(),n=Array.isArray(t?.records)?t.records:[];if(!n.length)return;let r=UcEcommerceMergeRecords(n,this.ecommerceRecords||[]),a=String(this.ecommerceResult?.requestId||this.ecommerceResult?.id||``),o=a?r.find(e=>String(e?.id||e?.result?.requestId||e?.result?.id||``)===a):r[0];this.ecommerceRecords=r;if(o?.result){this.ecommerceResult={...o.result,id:o.id||o.result.id},this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.hydrateEcommerceResultImages?.()}this.saveEcommerceRecords(),this.requestUpdate()}catch{}}",
-  );
-  if (!methods.includes("resetEcommerceFormAfterTaskCreated(){")) {
-    methods = methods.replace(
-      "saveEcommerceDraft(){UcEcommerceWriteDraft(this.ecommerceForm??UcEcommerceDefaultForm()),UcEcommerceRememberDraftFiles(this.ecommerceForm?.files||[])}",
-      "saveEcommerceDraft(){UcEcommerceWriteDraft(this.ecommerceForm??UcEcommerceDefaultForm()),UcEcommerceRememberDraftFiles(this.ecommerceForm?.files||[])}resetEcommerceFormAfterTaskCreated(){this.cleanupEcommerceFileUrls(),UcEcommerceClearDraft(),this.ecommerceForm=UcEcommerceDefaultForm(),this.ecommerceLastSubmittedSignature=null,this.requestUpdate()}",
-    );
-  }
-  if (!methods.includes("importEcommerceLocalManifests(){")) {
-    methods = methods.replace(
-      "saveEcommerceDraft(){UcEcommerceWriteDraft(this.ecommerceForm??UcEcommerceDefaultForm()),UcEcommerceRememberDraftFiles(this.ecommerceForm?.files||[])}",
-      "saveEcommerceDraft(){UcEcommerceWriteDraft(this.ecommerceForm??UcEcommerceDefaultForm()),UcEcommerceRememberDraftFiles(this.ecommerceForm?.files||[])}async importEcommerceLocalManifests(){let e=globalThis.uclaw?.listEcommerceLocalManifests;if(!e)return;try{let t=await e(),n=Array.isArray(t?.records)?t.records:[];if(!n.length)return;let r=UcEcommerceMergeRecords(n,this.ecommerceRecords||[]),a=String(this.ecommerceResult?.requestId||this.ecommerceResult?.id||``),o=a?r.find(e=>String(e?.id||e?.result?.requestId||e?.result?.id||``)===a):r[0];this.ecommerceRecords=r;if(o?.result){this.ecommerceResult={...o.result,id:o.id||o.result.id},this.ecommercePreviewIndex=0,this.ecommerceSwiperOpen=!1,this.hydrateEcommerceResultImages?.()}this.saveEcommerceRecords(),this.requestUpdate()}catch{}}",
-    );
   }
 
   const enhancedMethods = methods
@@ -4158,6 +4162,7 @@ function patchSkillWorkshopPageUiCopy() {
       .replaceAll("暂无 SkillHub 工坊提案", "暂无技能商店工坊提案")
       .replaceAll("SkillHub 工坊", "技能商店工坊")
       .replaceAll("当前 Agent 尚未起草任何 SkillHub 提案。", "当前 Agent 尚未起草任何技能商店提案。")
+      .replaceAll("当前 Agent 尚未起草任何 技能商店提案。", "当前 Agent 尚未起草任何技能商店提案。")
       .replaceAll("无法准备 SkillHub 工坊会话。", "无法准备技能商店工坊会话。");
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
@@ -5179,6 +5184,10 @@ function patchSkillsPageStoreDiscovery() {
       '<section class="card" data-skillhub-single-layer="true" data-skillhub-scroll-shell="true" data-skillhub-flex-fill="true" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">',
     );
     after = after.replace(
+      'return a`\n    <section class="card">',
+      'return a`\n    <section class="card" data-skillhub-single-layer="true" data-skillhub-scroll-shell="true" data-skillhub-flex-fill="true" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">',
+    );
+    after = after.replace(
       /<div style="margin-top: 16px; border-top: 1px solid var\(--border\); padding-top: 16px;">[\s\S]*?\$\{q\(e\)\}\s*<\/div>/,
       "${q(e)}",
     );
@@ -5474,6 +5483,10 @@ function patchSkillsPageSearchIdentityRequests() {
     after = after.replace(installPatchedNoRefreshPrevious, installPatched);
     after = after.replace(installPatchedRefreshBlockingPrevious, installPatched);
     after = after.replace(installPatchedSlugDisplayPrevious, installPatched);
+    after = after.replace(
+      /async function yc\(e,t,n=!1,r\)\{if\(!e\.client\|\|!e\.connected\)return;[\s\S]*?\}function bc\(e\)\{/,
+      `${installPatched}function bc(e){`,
+    );
     after = after.replaceAll(refPartsOriginal, refPartsPatched);
     after = after.replace(
       /function UcSkillHubRefParts\(e\)\{let t=typeof e==`string`\?e\.trim\(\):``;if\(t\.startsWith\(`@`\)\)\{let e=t\.slice\(1\)\.split\(`\/`\);if\(e\.length===2&&e\[0\]&&e\[1\]\)return\{display:t,slug:e\[1\],ownerHandle:e\[0\]\}\}return\{display:t,slug:t\}\}/g,
@@ -8596,6 +8609,7 @@ openclaw-tasks-page .uclaw-ecommerce-layout {
 
 openclaw-tasks-page .uclaw-ecommerce-side {
   display: grid;
+  container-type: inline-size;
   min-width: 0;
   gap: 14px;
 }
@@ -9592,11 +9606,15 @@ openclaw-tasks-page .uclaw-ecommerce-record-list {
 openclaw-tasks-page .uclaw-ecommerce-record {
   display: grid;
   min-width: 0;
-  gap: 10px;
+  column-gap: 10px;
+  row-gap: 8px;
   align-items: center;
-  grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 52px;
-  padding: 10px 12px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "mark main status"
+    ". progress actions";
+  min-height: 72px;
+  padding: 12px 14px;
   border: 0;
   border-bottom: 1px solid #eef3f8;
   border-radius: 0;
@@ -9607,31 +9625,95 @@ openclaw-tasks-page .uclaw-ecommerce-record:last-child {
   border-bottom: 0;
 }
 
-openclaw-tasks-page .uclaw-ecommerce-record > div:first-child {
+openclaw-tasks-page .uclaw-ecommerce-record-mark {
+  display: inline-flex;
+  grid-area: mark;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c8daf2;
+  border-radius: 8px;
+  background: #f7fbff;
+  color: #234e83;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record-main {
   display: grid;
+  grid-area: main;
   min-width: 0;
   gap: 3px;
 }
 
-openclaw-tasks-page .uclaw-ecommerce-record > div:first-child strong,
-openclaw-tasks-page .uclaw-ecommerce-record > div:first-child span,
-openclaw-tasks-page .uclaw-ecommerce-record > div:first-child small {
+openclaw-tasks-page .uclaw-ecommerce-record-main strong,
+openclaw-tasks-page .uclaw-ecommerce-record-main span,
+openclaw-tasks-page .uclaw-ecommerce-record-main small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+openclaw-tasks-page .uclaw-ecommerce-record-status {
+  grid-area: status;
+  min-width: 64px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record-progress {
+  display: grid;
+  grid-area: progress;
+  min-width: 0;
+  max-width: 112px;
+  grid-template-columns: auto minmax(42px, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: #2f527b;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record-progress > div {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7edf5;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-record-progress b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2db985;
+}
+
 openclaw-tasks-page .uclaw-ecommerce-record-actions {
   display: flex;
+  grid-area: actions;
   flex: 0 0 auto;
   gap: 6px;
   align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  white-space: nowrap;
 }
 
-openclaw-tasks-page .uclaw-ecommerce-record-actions .chip {
-  min-width: 54px;
-  justify-content: center;
-  white-space: nowrap;
+@container (min-width: 560px) {
+  openclaw-tasks-page .uclaw-ecommerce-record {
+    grid-template-columns: 30px minmax(0, 1fr) auto minmax(74px, 92px) auto;
+    grid-template-areas: "mark main status progress actions";
+    min-height: 62px;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-record-progress {
+    max-width: none;
+  }
 }
 
 openclaw-tasks-page .uclaw-ecommerce-record-pagination {
@@ -9793,14 +9875,19 @@ openclaw-tasks-page .uclaw-ecommerce-record-pagination span {
   }
 
   openclaw-tasks-page .uclaw-ecommerce-record {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "mark main status"
+      ". progress actions";
+    padding: 10px 12px;
   }
 
   openclaw-tasks-page .uclaw-ecommerce-record-actions {
     justify-content: flex-end;
-    overflow-x: auto;
-    padding-bottom: 2px;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-record-progress {
+    max-width: 104px;
   }
 }
 
@@ -9860,6 +9947,7 @@ ${markerEnd}`;
   }
 }
 
+patchBundledEcommerceWorkflowSkill();
 patchSkillsUninstallGateway();
 patchSkillHubInstallGateway();
 patchWindowsInstallPublishFallback();
