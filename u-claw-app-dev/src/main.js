@@ -55,6 +55,7 @@ const ECOMMERCE_IMAGE_DIRECT_TIMEOUT_MS = 180000;
 const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_TIMEOUT_MS = 60000;
 const ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES = 20 * 1024 * 1024;
 const ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE = Number.parseInt(process.env.UCLAW_ECOMMERCE_IMAGE_QUOTA || '50000', 10);
+const ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME = '电商图片';
 const ECOMMERCE_IMAGE_DIRECT_TARGETS = [
   {
     type: 'main_image',
@@ -330,6 +331,7 @@ function invalidateControlUiCacheOnVersionChange() {
 try {
   fs.mkdirSync(userDataPath, { recursive: true });
   fs.mkdirSync(electronProfilePath, { recursive: true });
+  ensurePortableHomeShellDirs();
   invalidateControlUiCacheOnVersionChange();
   app.setPath('userData', electronProfilePath);
   console.log(`[${APP_NAME}] Electron profile: ${electronProfilePath}`);
@@ -692,6 +694,18 @@ function normalizeEcommerceNewApiModel(rawModel) {
 }
 
 /**
+ * Resolves the provider id embedded in an OpenClaw model ref so routed defaults
+ * like `litellm/gpt-image-2` can reuse the activation-written NewAPI adapter.
+ */
+function getEcommerceModelProviderName(modelRef) {
+  const value = String(modelRef || '').trim();
+  const slashIndex = value.indexOf('/');
+  if (slashIndex <= 0) return '';
+  const providerName = value.slice(0, slashIndex).trim().toLowerCase();
+  return ['newapi', 'litellm', 'custom', 'xai'].includes(providerName) ? providerName : '';
+}
+
+/**
  * Reads the locally persisted NewAPI credential without exposing the token to
  * the renderer. The ecommerce workbench is a Bavi-box feature, so it should call
  * the model provider from the trusted main process instead of opening a chat.
@@ -699,12 +713,7 @@ function normalizeEcommerceNewApiModel(rawModel) {
 function resolveEcommerceImageCredential() {
   const rawConfig = fs.existsSync(configPath) ? getConfig() : loadBundledDefaultConfig();
   const config = applyRuntimeConfigEnv(rawConfig);
-  const provider = config.models?.providers?.newapi || {};
   const credential = readJsonFile(builtinModelCredentialPath) || {};
-  const envBaseUrl = String(process.env.UCLAW_NEW_API_BASE_URL || '').trim();
-  const envToken = String(process.env.UCLAW_NEW_API_KEY || '').trim();
-  const baseUrl = normalizeNewApiImageBaseUrl(envBaseUrl || credential.baseUrl || provider.baseUrl || '');
-  const token = String(envToken || credential.token || provider.apiKey || '').trim();
   const configuredModel = String(
     credential.defaultModels?.image
       || config.agents?.defaults?.imageGenerationModel?.primary
@@ -712,6 +721,22 @@ function resolveEcommerceImageCredential() {
       || 'newapi/gpt-image-2',
   ).trim();
   const { modelRef, requestModel } = normalizeEcommerceNewApiModel(configuredModel);
+  const providers = config.models?.providers || {};
+  const modelProvider = providers[getEcommerceModelProviderName(modelRef)] || {};
+  const fallbackNewApi = findNewApiCredentials(config);
+  const baseUrl = normalizeNewApiImageBaseUrl(firstNonBlankString(
+    process.env.UCLAW_NEW_API_BASE_URL,
+    credential.baseUrl,
+    getProviderValue(modelProvider, ['baseUrl', 'baseURL', 'base_url', 'apiBaseUrl', 'api_base_url']),
+    fallbackNewApi.newApiBaseUrl,
+  ));
+  const token = firstNonBlankString(
+    process.env.UCLAW_NEW_API_KEY,
+    credential.token,
+    credential.apiKey,
+    getProviderValue(modelProvider, ['apiKey', 'api_key', 'key']),
+    fallbackNewApi.newApiKey,
+  );
 
   if (!baseUrl) throw new Error('图片接口 baseUrl 未配置，请先完成模型配置或激活。');
   if (!token) throw new Error('图片接口 token 未配置，请先完成模型配置或激活。');
@@ -859,6 +884,22 @@ function summarizeImageApiError(body) {
 }
 
 /**
+ * Converts upstream image-generation failures into operator-readable slot
+ * warnings. A 400/403 can be a single prompt/image policy rejection while other
+ * ecommerce slots are still valid and should stay visible.
+ */
+function summarizeEcommerceImageRequestError(error) {
+  const message = String(error?.message || error || '').trim();
+  if (/图片接口失败\s+(400|403)/i.test(message)) {
+    return message.replace(
+      /图片接口失败\s+(400|403):\s*/i,
+      (_match, status) => `该张被上游图片接口拒绝 ${status}，其他已成功图片已保留。原因：`,
+    );
+  }
+  return message;
+}
+
+/**
  * Normalizes OpenAI-compatible image responses into image objects the workbench
  * can render and persist locally.
  */
@@ -877,6 +918,403 @@ function normalizeImageApiResult(payload, target, model) {
     mimeType: 'image/png',
     dataUrl: base64 ? `data:image/png;base64,${base64}` : '',
     url,
+  };
+}
+
+/**
+ * Produces filesystem-safe names for ecommerce image auto-saves while keeping
+ * Chinese product names readable in Finder/Explorer.
+ */
+function sanitizeEcommerceLocalFileName(value, fallback = 'ecommerce') {
+  return String(value || fallback)
+    .trim()
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || fallback;
+}
+
+/**
+ * Reads Electron special paths defensively. Some Windows portable runtimes can
+ * fail `downloads`, so ecommerce generation must keep working with a fallback.
+ */
+function safeGetElectronPath(name) {
+  try {
+    const value = app.getPath(name);
+    return typeof value === 'string' && value.trim() ? value : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Creates basic Windows shell folders inside the portable HOME. Native dialogs
+ * may query Desktop/Downloads even when Bavi-box stores user data in a cache.
+ */
+function ensurePortableHomeShellDirs() {
+  if (!portablePath || process.platform !== 'win32') return;
+  const portableHome = process.env.USERPROFILE || process.env.HOME || path.join(userDataPath, '.home');
+  if (!portableHome) return;
+  for (const child of ['Desktop', 'Downloads', 'Documents', 'Pictures']) {
+    try { fs.mkdirSync(path.join(portableHome, child), { recursive: true }); } catch {}
+  }
+}
+
+/**
+ * Resolves the root local library for generated ecommerce assets. Downloads is
+ * preferred so users can find files outside Bavi-box; Windows falls back to
+ * host USERPROFILE/Downloads before the portable HOME cache path.
+ */
+function resolveEcommerceLocalLibraryRoot() {
+  const downloads = safeGetElectronPath('downloads');
+  const hostDownloads = process.platform === 'win32' && process.env.UCLAW_HOST_USERPROFILE
+    ? path.join(process.env.UCLAW_HOST_USERPROFILE, 'Downloads')
+    : '';
+  const homeDownloads = process.platform === 'win32' && process.env.USERPROFILE
+    ? path.join(process.env.USERPROFILE, 'Downloads')
+    : '';
+  const fallbackDownloads = safeGetElectronPath('home')
+    ? path.join(safeGetElectronPath('home'), 'Downloads')
+    : '';
+  const base = downloads || hostDownloads || homeDownloads || fallbackDownloads || path.join(userDataPath, 'Downloads');
+  return path.join(base, APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME);
+}
+
+/**
+ * Resolves the default local library run directory for generated ecommerce
+ * assets. Directory naming stays stable across Mac and Windows.
+ */
+function resolveEcommerceLocalLibraryDir(manifest, requestId) {
+  const platform = sanitizeEcommerceLocalFileName(manifest?.platform_label || manifest?.platform || 'platform');
+  const product = sanitizeEcommerceLocalFileName(manifest?.name || '商品');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const shortRequestId = sanitizeEcommerceLocalFileName(String(requestId || '').slice(0, 18), 'run');
+  return path.join(resolveEcommerceLocalLibraryRoot(), `${platform}-${product}-${stamp}-${shortRequestId}`);
+}
+
+/**
+ * Converts generated image data into bytes before saving. URL-only results are
+ * materialized first so the local copy survives provider URL expiry.
+ */
+async function ecommerceImageBuffer(image) {
+  const materialized = await materializeEcommerceImageUrl(image);
+  const dataUrl = String(materialized?.dataUrl || '');
+  const match = /^data:([^;]+);base64,(.+)$/i.exec(dataUrl);
+  if (!match) throw new Error('图片数据不存在，无法保存到本地。');
+  return {
+    image: materialized,
+    mimeType: match[1] || materialized.mimeType || 'image/png',
+    buffer: Buffer.from(match[2], 'base64'),
+  };
+}
+
+/**
+ * Saves one generated ecommerce image immediately after it returns, before the
+ * rest of the batch finishes. This prevents later upstream or billing failures
+ * from making already generated images disappear.
+ */
+async function saveEcommerceImageToLocalLibrary({ image, manifest, requestId, index, target, dir }) {
+  const outputDir = dir || resolveEcommerceLocalLibraryDir(manifest, requestId);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const material = await ecommerceImageBuffer(image);
+  const extension = /jpe?g/i.test(material.mimeType) ? 'jpg' : /webp/i.test(material.mimeType) ? 'webp' : 'png';
+  const order = String((Number(index) || 0) + 1).padStart(2, '0');
+  const title = sanitizeEcommerceLocalFileName(image?.title || target?.title || '生成图');
+  const filePath = path.join(outputDir, `${order}-${title}.${extension}`);
+  fs.writeFileSync(filePath, material.buffer);
+  return {
+    ...material.image,
+    mimeType: material.mimeType,
+    localPath: filePath,
+    localDir: outputDir,
+    localFileName: path.basename(filePath),
+    savedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Writes a manifest next to generated images so local folders remain useful even
+ * if the app record or remote provider state disappears later.
+ */
+function saveEcommerceLocalManifest({ manifest, requestId, images, warnings, billing, usage, outputDir }) {
+  if (!outputDir) return null;
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  safeWriteJson(manifestPath, {
+    ...manifest,
+    requestId,
+    images: images.map(image => ({
+      id: image.id,
+      type: image.type,
+      title: image.title,
+      model: image.model,
+      mimeType: image.mimeType,
+      localPath: image.localPath,
+      localFileName: image.localFileName,
+      savedAt: image.savedAt,
+    })),
+    warnings,
+    billing,
+    usage,
+    saved_at: new Date().toISOString(),
+  });
+  return manifestPath;
+}
+
+/**
+ * Removes stale usage-sync errors before writing a repaired ecommerce manifest.
+ */
+function removeEcommerceUsageSyncWarnings(warnings) {
+  return [...new Set((Array.isArray(warnings) ? warnings : []).filter((warning) => {
+    const text = String(warning || '').trim();
+    return text && !text.startsWith('用量同步失败：');
+  }))];
+}
+
+/**
+ * Updates an existing trusted ecommerce manifest after a billing retry. This is
+ * intentionally scoped to the local ecommerce image library, not arbitrary disk.
+ */
+function updateEcommerceLocalManifestBilling({ localManifestPath, billing, usage, warnings }) {
+  const trustedPath = resolveTrustedEcommerceLocalPath(localManifestPath);
+  if (!trustedPath || path.basename(trustedPath) !== 'manifest.json') {
+    return '';
+  }
+  const existing = readJsonFile(trustedPath) || {};
+  safeWriteJson(trustedPath, {
+    ...existing,
+    warnings,
+    billing,
+    usage,
+    usage_synced_at: new Date().toISOString(),
+  });
+  return trustedPath;
+}
+
+/**
+ * Opens a saved ecommerce image folder or selects a saved file from the trusted
+ * main process; renderer never receives broad filesystem write permission.
+ */
+async function openEcommerceLocalPath(payload = {}) {
+  const targetPath = String(payload?.path || payload?.localPath || payload?.localDir || '').trim();
+  if (!targetPath) throw new Error('本地文件路径为空。');
+  if (!path.isAbsolute(targetPath)) throw new Error('本地文件路径无效。');
+  const libraryRoot = path.resolve(resolveEcommerceLocalLibraryRoot());
+  const resolvedTarget = path.resolve(targetPath);
+  if (resolvedTarget !== libraryRoot && !resolvedTarget.startsWith(`${libraryRoot}${path.sep}`)) {
+    throw new Error('只能打开电商图片本地保存目录。');
+  }
+  if (fs.existsSync(resolvedTarget) && fs.statSync(resolvedTarget).isFile()) {
+    shell.showItemInFolder(resolvedTarget);
+    return { ok: true, path: resolvedTarget, action: 'showItemInFolder' };
+  }
+  const error = await shell.openPath(resolvedTarget);
+  if (error) throw new Error(error);
+  return { ok: true, path: resolvedTarget, action: 'openPath' };
+}
+
+/**
+ * Checks whether a renderer-provided local path stays inside the trusted
+ * ecommerce image library. This keeps preview materialization from becoming a
+ * general local-file read primitive.
+ */
+function resolveTrustedEcommerceLocalPath(rawPath) {
+  const targetPath = String(rawPath || '').trim();
+  if (!targetPath || !path.isAbsolute(targetPath)) {
+    return '';
+  }
+  const libraryRoot = path.resolve(resolveEcommerceLocalLibraryRoot());
+  const resolvedTarget = path.resolve(targetPath);
+  if (resolvedTarget !== libraryRoot && !resolvedTarget.startsWith(`${libraryRoot}${path.sep}`)) {
+    return '';
+  }
+  return resolvedTarget;
+}
+
+/**
+ * Counts planned ecommerce outputs from a saved manifest so imported local
+ * records keep the same planned/generated numbers as live records.
+ */
+function countEcommerceManifestOutputs(manifest) {
+  const outputTypes = Array.isArray(manifest?.output_types) ? manifest.output_types : [];
+  const outputCounts = manifest?.output_counts && typeof manifest.output_counts === 'object'
+    ? manifest.output_counts
+    : {};
+  return outputTypes.reduce((sum, type) => sum + (Number(outputCounts[type]) || 0), 0);
+}
+
+/**
+ * Rebuilds the compact output label used by the frontend history from a saved
+ * manifest, without depending on browser localStorage.
+ */
+function formatEcommerceManifestOutputLabels(manifest) {
+  const outputTypes = Array.isArray(manifest?.output_types) ? manifest.output_types : [];
+  const outputCounts = manifest?.output_counts && typeof manifest.output_counts === 'object'
+    ? manifest.output_counts
+    : {};
+  const labels = {
+    main_image: ['主图', '张'],
+    detail_image: ['详情图', '屏'],
+    model_image: ['模特图', '张'],
+  };
+  return outputTypes
+    .map((type) => {
+      const [label, unit] = labels[type] || [type, '张'];
+      return `${label}${Number(outputCounts[type]) || 0}${unit}`;
+    })
+    .filter(Boolean)
+    .join('、');
+}
+
+/**
+ * Converts a trusted local manifest into the frontend ecommerce record shape.
+ * This repairs successful generations whose browser record index was lost.
+ */
+function ecommerceRecordFromLocalManifest(manifestPath, manifest, stat) {
+  const localManifestPath = resolveTrustedEcommerceLocalPath(manifestPath);
+  if (!localManifestPath || path.basename(localManifestPath) !== 'manifest.json') return null;
+  const localDir = path.dirname(localManifestPath);
+  const requestId = String(manifest?.requestId || manifest?.id || path.basename(localDir)).trim();
+  if (!requestId) return null;
+  const images = (Array.isArray(manifest?.images) ? manifest.images : [])
+    .map((image, index) => {
+      const localFileName = String(image?.localFileName || '').trim();
+      const rawLocalPath = String(image?.localPath || '').trim();
+      const fallbackPath = localFileName ? path.join(localDir, localFileName) : '';
+      const trustedLocalPath = resolveTrustedEcommerceLocalPath(rawLocalPath)
+        || resolveTrustedEcommerceLocalPath(fallbackPath);
+      if (!trustedLocalPath) return null;
+      return {
+        id: String(image?.id || `${requestId}-${index + 1}`),
+        type: String(image?.type || 'image'),
+        title: String(image?.title || `生成图${index + 1}`),
+        model: String(image?.model || manifest?.model || ''),
+        mimeType: String(image?.mimeType || 'image/png'),
+        localPath: trustedLocalPath,
+        localDir,
+        localFileName: path.basename(trustedLocalPath),
+        savedAt: String(image?.savedAt || manifest?.saved_at || ''),
+      };
+    })
+    .filter(Boolean);
+  if (!images.length) return null;
+
+  const createdAt = Date.parse(manifest?.saved_at || manifest?.generated_at || images[0]?.savedAt || '')
+    || Number(stat?.mtimeMs || Date.now());
+  const warnings = Array.isArray(manifest?.warnings) ? manifest.warnings.filter(Boolean) : [];
+  const plannedCount = countEcommerceManifestOutputs(manifest);
+  const hasBillingError = Boolean(
+    manifest?.billing
+    && ((manifest.billing.status && manifest.billing.status !== 'ok') || manifest.billing.ok === false)
+  ) || warnings.some((warning) => String(warning || '').includes('用量同步失败'));
+  const status = plannedCount > 0 && images.length < plannedCount
+    ? 'partial'
+    : hasBillingError
+      ? 'billing_error'
+      : 'completed';
+  const result = {
+    ...manifest,
+    id: requestId,
+    requestId,
+    name: manifest?.name || '未命名商品',
+    platform_label: manifest?.platform_label || manifest?.platform || '',
+    model: manifest?.model || images.find((image) => image.model)?.model || '',
+    images,
+    warnings,
+    billing: manifest?.billing || null,
+    usage: manifest?.usage || null,
+    localDir,
+    localManifestPath,
+    progress: {
+      done: images.length,
+      total: plannedCount || images.length,
+      current: '',
+      status,
+    },
+    qa: Array.isArray(manifest?.qa) ? manifest.qa : ['图片生成完成后必须人工审查文字和事实'],
+  };
+  return {
+    id: requestId,
+    createdAt,
+    updatedAt: createdAt,
+    completedAt: createdAt,
+    status,
+    platform: manifest?.platform || '',
+    platformLabel: manifest?.platform_label || manifest?.platform || '',
+    productName: manifest?.name || '未命名商品',
+    languageLabel: manifest?.language?.label || '',
+    styleLabel: manifest?.visual_style?.label || '',
+    ratioLabel: manifest?.aspect_ratio?.label || '',
+    imageCount: Number(manifest?.input?.image_count || 0),
+    outputTypes: Array.isArray(manifest?.output_types) ? manifest.output_types : [],
+    outputCounts: manifest?.output_counts || {},
+    outputLabels: formatEcommerceManifestOutputLabels(manifest),
+    requestedOutputCount: plannedCount || images.length,
+    generatedImageCount: images.length,
+    model: result.model,
+    localDir,
+    localManifestPath,
+    billing: manifest?.billing || null,
+    manifest,
+    result,
+  };
+}
+
+/**
+ * Lists trusted local ecommerce manifests so the workbench can recover records
+ * even when browser localStorage did not preserve the frontend index.
+ */
+function listEcommerceLocalManifests() {
+  const root = resolveEcommerceLocalLibraryRoot();
+  const records = [];
+  const rootStat = fs.existsSync(root) ? fs.statSync(root) : null;
+  if (!rootStat?.isDirectory()) return { ok: true, root, records };
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const manifestPath = path.join(root, entry.name, 'manifest.json');
+    const trustedPath = resolveTrustedEcommerceLocalPath(manifestPath);
+    if (!trustedPath || !fs.existsSync(trustedPath)) continue;
+    const stat = fs.statSync(trustedPath);
+    if (!stat.isFile() || stat.size <= 0 || stat.size > 1024 * 1024) continue;
+    const manifest = readJsonFile(trustedPath);
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) continue;
+    const record = ecommerceRecordFromLocalManifest(trustedPath, manifest, stat);
+    if (record) records.push(record);
+  }
+  records.sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+  return { ok: true, root, records: records.slice(0, 30) };
+}
+
+/**
+ * Reads a saved ecommerce image back into a data URL for records that only kept
+ * `localPath`. This makes previews survive provider URL expiry and app reloads.
+ */
+async function materializeEcommerceLocalImage(image) {
+  const localPath = resolveTrustedEcommerceLocalPath(image?.localPath);
+  if (!localPath) return null;
+  const stat = await fs.promises.stat(localPath).catch(() => null);
+  if (!stat?.isFile()) return null;
+  if (stat.size <= 0) throw new Error('本地图片数据为空。');
+  if (stat.size > ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES) {
+    throw new Error('本地图片超过可预览大小限制。');
+  }
+  const extension = path.extname(localPath).toLowerCase();
+  const mimeType = extension === '.jpg' || extension === '.jpeg'
+    ? 'image/jpeg'
+    : extension === '.webp'
+      ? 'image/webp'
+      : 'image/png';
+  if (!/^image\/(png|jpe?g|webp)$/i.test(mimeType)) {
+    throw new Error(`本地图片格式不支持：${mimeType}`);
+  }
+  const bytes = await fs.promises.readFile(localPath);
+  return {
+    ...image,
+    mimeType,
+    dataUrl: `data:${mimeType};base64,${bytes.toString('base64')}`,
+    localPath,
+    localDir: image?.localDir || path.dirname(localPath),
+    localFileName: image?.localFileName || path.basename(localPath),
   };
 }
 
@@ -978,6 +1416,16 @@ async function materializeEcommerceImageUrl(image) {
  */
 async function materializeEcommerceImageForRenderer(payload = {}) {
   const image = payload && typeof payload === 'object' ? payload : {};
+  if (String(image.dataUrl || '').trim()) {
+    return { ok: true, image };
+  }
+  const localImage = await materializeEcommerceLocalImage(image);
+  if (localImage) {
+    return { ok: true, image: localImage };
+  }
+  if (!String(image.url || '').trim()) {
+    throw new Error('本地图片不存在或不在允许的电商图片目录内。');
+  }
   const materialized = await materializeEcommerceImageUrl({
     id: String(image.id || ''),
     type: String(image.type || 'image'),
@@ -986,11 +1434,94 @@ async function materializeEcommerceImageForRenderer(payload = {}) {
     mimeType: String(image.mimeType || 'image/png'),
     dataUrl: String(image.dataUrl || ''),
     url: String(image.url || ''),
+    localPath: String(image.localPath || ''),
+    localDir: String(image.localDir || ''),
+    localFileName: String(image.localFileName || ''),
   });
   return {
     ok: true,
     image: materialized,
   };
+}
+
+/**
+ * Detects invalid image API token responses so the trusted process can refresh
+ * local NewAPI credentials and retry exactly once.
+ */
+function isInvalidEcommerceImageTokenError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('图片接口失败 401')
+    || (message.includes('401') && message.includes('invalid token'));
+}
+
+/**
+ * Refreshes the locally persisted NewAPI key from Bavi-box Cloud when an
+ * activated desktop has an expired or revoked image token.
+ */
+async function refreshEcommerceImageCredential() {
+  const state = readJsonFile(activationStatePath) || {};
+  const endpoint = String(state?.activationEndpoint || UCLAW_ACTIVATION_ENDPOINT).trim().replace(/\/+$/, '');
+  const accessToken = String(state?.uclawAccessToken || '').trim();
+  if (!endpoint || !accessToken) {
+    throw new Error('图片接口 token 已失效，请重新激活或刷新模型配置。');
+  }
+  let result;
+  try {
+    result = await postActivationJSONWithTokenRefresh('/v1/newapi/credentials/refresh', {}, {
+      endpoint,
+      accessToken,
+      state,
+      timeoutMs: 20000,
+    });
+  } catch (error) {
+    const message = String(error?.message || error || '');
+    if (message.includes('/v1/newapi/credentials/refresh') && (message.includes('HTTP 404') || message.includes('404'))) {
+      throw new Error('图片接口 token 已失效；云端刷新接口未上线，请部署最新版 Cloud API 后重试，或在激活页重新激活刷新模型凭据。');
+    }
+    throw new Error(`图片接口 token 已失效，自动刷新失败：${message}`);
+  }
+  writeBuiltinModelCredential(result);
+  writeOpenClawActivationConfig(result);
+  writeActivationState({
+    ...state,
+    source: state.source || 'cloud-token-refresh',
+    newapiBaseUrl: result.newapiBaseUrl,
+    newapiToken: result.newapiToken,
+    tokenVersion: result.tokenVersion,
+    uclawAccessToken: state.uclawAccessToken,
+  });
+  syncActivationMaterialToUsb();
+  const refreshed = resolveEcommerceImageCredential();
+  await verifyEcommerceImageCredential(refreshed);
+  return refreshed;
+}
+
+/**
+ * Proves a freshly rotated image token works before the generation retry burns
+ * another slow image request. This distinguishes local stale-token recovery from
+ * upstream image-channel failures.
+ */
+async function verifyEcommerceImageCredential(credential) {
+  const baseUrl = normalizeNewApiImageBaseUrl(credential?.baseUrl || '');
+  const token = String(credential?.token || '').trim();
+  if (!baseUrl || !token) {
+    throw new Error('图片接口 token 已刷新，但本地凭据写入不完整。');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`图片接口 token 已刷新，但 NewAPI 校验失败 ${response.status}: ${summarizeImageApiError(text)}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -1067,7 +1598,7 @@ function emitEcommerceImageProgress(sender, payload) {
 async function generateEcommerceImagesDirect(payload = {}, sender = null) {
   const manifest = payload.manifest && typeof payload.manifest === 'object' ? payload.manifest : null;
   if (!manifest) throw new Error('缺少生成 manifest。');
-  const credential = resolveEcommerceImageCredential();
+  let credential = resolveEcommerceImageCredential();
   const images = normalizeEcommerceInputImages(payload.images);
   const targets = resolveEcommerceImageTargets(
     payload.outputTypes || manifest.output_types,
@@ -1076,6 +1607,7 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
   const generated = [];
   const warnings = [];
   const requestId = String(manifest.id || payload.requestId || crypto.randomUUID()).trim();
+  const localDir = resolveEcommerceLocalLibraryDir(manifest, requestId);
 
   for (let index = 0; index < targets.length; index += 1) {
     const target = targets[index];
@@ -1092,7 +1624,34 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
       },
     });
     try {
-      const image = await requestEcommerceImage({ credential, manifest, target, images });
+      let image;
+      try {
+        image = await requestEcommerceImage({ credential, manifest, target, images });
+      } catch (requestError) {
+        if (!isInvalidEcommerceImageTokenError(requestError)) {
+          throw requestError;
+        }
+        credential = await refreshEcommerceImageCredential();
+        image = await requestEcommerceImage({ credential, manifest, target, images });
+      }
+      try {
+        const savedImage = await saveEcommerceImageToLocalLibrary({
+          image,
+          manifest,
+          requestId,
+          index,
+          target,
+          dir: localDir,
+        });
+        image.localPath = savedImage.localPath;
+        image.localDir = savedImage.localDir;
+        image.localFileName = savedImage.localFileName;
+        image.savedAt = savedImage.savedAt;
+        image.dataUrl = savedImage.dataUrl || image.dataUrl;
+        image.mimeType = savedImage.mimeType || image.mimeType;
+      } catch (saveError) {
+        warnings.push(`${target.title}: 本地保存失败：${saveError?.message || String(saveError)}`);
+      }
       generated.push(image);
       emitEcommerceImageProgress(sender, {
         requestId,
@@ -1109,7 +1668,7 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
         },
       });
     } catch (error) {
-      const warning = `${target.title}: ${error?.message || String(error)}`;
+      const warning = `${target.title}: ${summarizeEcommerceImageRequestError(error)}`;
       warnings.push(warning);
       emitEcommerceImageProgress(sender, {
         requestId,
@@ -1143,6 +1702,15 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
     ok: false,
     message: error?.message || String(error),
   }));
+  const localManifestPath = saveEcommerceLocalManifest({
+    manifest,
+    requestId,
+    images: generated,
+    warnings,
+    billing,
+    usage,
+    outputDir: localDir,
+  });
   emitEcommerceImageProgress(sender, {
     requestId,
     index: targets.length,
@@ -1150,6 +1718,8 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
     status: 'settled',
     generatedCount: generated.length,
     billing,
+    localDir,
+    localManifestPath,
   });
 
   return {
@@ -1162,6 +1732,8 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
     warnings,
     billing,
     usage,
+    localDir,
+    localManifestPath,
   };
 }
 
@@ -1563,6 +2135,22 @@ function parseActivationResponseJSON(text, options = {}) {
 }
 
 /**
+ * Normalizes Cloud API errors into operator-actionable copy while retaining
+ * enough upstream code context to debug billing and credential refresh issues.
+ */
+function formatCloudAPIErrorMessage(data, fallback) {
+  const message = String(data?.error?.message || data?.message || fallback || '').trim();
+  if (!message) return 'Cloud API request failed';
+  if (message.includes('AUTH_SESSION_LIMIT')) {
+    return 'NewAPI 管理员登录会话已达上限，Cloud 无法刷新扣费 token；请在 NewAPI 后台撤销旧会话或部署共享 admin token 版本后重试。';
+  }
+  if (message.includes('AUTH_SESSION_ISSUANCE_LIMIT')) {
+    return 'NewAPI 管理员登录签发过于频繁，Cloud 暂时无法刷新扣费 token；请稍后重试或检查 Cloud 是否重复登录。';
+  }
+  return message;
+}
+
+/**
  * Posts JSON to the Bavi-box activation service from the trusted main process.
  */
 async function postActivationJSON(pathname, payload, options = {}) {
@@ -1584,7 +2172,7 @@ async function postActivationJSON(pathname, payload, options = {}) {
     const text = await response.text();
     const data = parseActivationResponseJSON(text, { pathname, status: response.status });
     if (!response.ok) {
-      throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
+      throw new Error(formatCloudAPIErrorMessage(data, `activation request failed: ${response.status}`));
     }
     return data;
   } finally {
@@ -1613,7 +2201,7 @@ async function getActivationJSON(pathname, options = {}) {
     const text = await response.text();
     const data = parseActivationResponseJSON(text, { pathname, status: response.status });
     if (!response.ok) {
-      throw new Error(data?.error?.message || data?.message || `activation request failed: ${response.status}`);
+      throw new Error(formatCloudAPIErrorMessage(data, `activation request failed: ${response.status}`));
     }
     return data;
   } finally {
@@ -1659,6 +2247,7 @@ async function refreshCloudAccessToken({ endpoint, accessToken, state }) {
   }
   atomicWriteJson(activationStatePath, nextState);
   writeDirtyMarker('activation-token-refresh');
+  syncActivationMaterialToUsb();
   return nextToken;
 }
 
@@ -1800,6 +2389,79 @@ async function recordEcommerceImageUsage({ manifest, credential, generated }) {
     imageCount: generated.length,
     quotaPerImage,
   }, { endpoint, accessToken, state, timeoutMs: 15000 });
+}
+
+/**
+ * Retries billing for an already generated ecommerce batch without regenerating
+ * images. Cloud uses `requestId` as an idempotency key, so repeat clicks cannot
+ * double-charge a settled batch.
+ */
+async function syncEcommerceImageUsage(payload = {}) {
+  const result = payload?.result && typeof payload.result === 'object' ? payload.result : {};
+  const manifest = payload?.manifest && typeof payload.manifest === 'object' ? payload.manifest : result;
+  const images = Array.isArray(payload?.images) && payload.images.length
+    ? payload.images
+    : Array.isArray(result.images)
+      ? result.images
+      : Array.isArray(manifest.images)
+        ? manifest.images
+        : [];
+  const requestId = String(payload?.requestId || result.requestId || manifest.requestId || result.id || manifest.id || '').trim();
+  if (!requestId) throw new Error('缺少电商图片 requestId，无法同步用量。');
+  if (!images.length) throw new Error('没有已生成图片，无法同步用量。');
+
+  let credential;
+  try {
+    credential = resolveEcommerceImageCredential();
+  } catch {
+    credential = {};
+  }
+  const model = String(payload?.model || result.model || manifest.model || images.find(image => image?.model)?.model || credential.requestModel || credential.model || '').trim();
+  if (!model) throw new Error('缺少图片模型信息，无法同步用量。');
+
+  const billingManifest = {
+    ...manifest,
+    id: requestId,
+    platform: manifest.platform || result.platform || '',
+    output_types: Array.isArray(manifest.output_types) ? manifest.output_types : Array.isArray(result.output_types) ? result.output_types : [],
+  };
+  const billing = await recordEcommerceImageUsage({
+    manifest: billingManifest,
+    credential: { requestModel: model, model },
+    generated: images,
+  });
+  const usage = await getCloudModelUsageSummary().catch(error => ({
+    ok: false,
+    message: error?.message || String(error),
+  }));
+  const warnings = removeEcommerceUsageSyncWarnings(result.warnings || manifest.warnings);
+  const localManifestPath = updateEcommerceLocalManifestBilling({
+    localManifestPath: payload?.localManifestPath || result.localManifestPath || manifest.localManifestPath,
+    billing,
+    usage,
+    warnings,
+  }) || result.localManifestPath || manifest.localManifestPath || '';
+
+  return {
+    ok: true,
+    requestId,
+    billing,
+    usage,
+    warnings,
+    localManifestPath,
+    result: {
+      ...manifest,
+      ...result,
+      id: requestId,
+      requestId,
+      model,
+      images,
+      warnings,
+      billing,
+      usage,
+      localManifestPath,
+    },
+  };
 }
 
 /**
@@ -2389,6 +3051,19 @@ function getProviderValue(provider, keys) {
 }
 
 /**
+ * Returns the first non-blank string, so empty persisted env/credential values
+ * cannot block a later provider fallback.
+ */
+function firstNonBlankString(...values) {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
+}
+
+/**
  * Detects NewAPI-compatible Bavi-box cloud endpoints used across old configs.
  */
 function isKnownNewApiBaseUrl(baseUrl) {
@@ -2627,7 +3302,16 @@ function portableChildHomeEnv(baseEnv) {
   const codexHome = path.join(userDataPath, '.codex');
   const appData = path.join(portableHome, 'AppData', 'Roaming');
   const localAppData = path.join(portableHome, 'AppData', 'Local');
-  for (const dir of [portableHome, codexHome, appData, localAppData]) {
+  for (const dir of [
+    portableHome,
+    path.join(portableHome, 'Desktop'),
+    path.join(portableHome, 'Downloads'),
+    path.join(portableHome, 'Documents'),
+    path.join(portableHome, 'Pictures'),
+    codexHome,
+    appData,
+    localAppData,
+  ]) {
     try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   }
 
@@ -3423,7 +4107,10 @@ function setupIPC() {
   ipcMain.handle('uclaw:get-recharge-order', (_event, orderNo) => getCloudRechargeOrder(orderNo));
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
   ipcMain.handle('uclaw:ecommerce-generate-images', (event, payload) => generateEcommerceImagesDirect(payload, event.sender));
+  ipcMain.handle('uclaw:ecommerce-sync-image-usage', (_event, payload) => syncEcommerceImageUsage(payload));
+  ipcMain.handle('uclaw:ecommerce-list-local-manifests', () => listEcommerceLocalManifests());
   ipcMain.handle('uclaw:ecommerce-materialize-image', (_event, payload) => materializeEcommerceImageForRenderer(payload));
+  ipcMain.handle('uclaw:ecommerce-open-local-path', (_event, payload) => openEcommerceLocalPath(payload));
   ipcMain.handle('uclaw:write-debugger-log', (_event, payload) => appendDebuggerLog(payload));
 }
 

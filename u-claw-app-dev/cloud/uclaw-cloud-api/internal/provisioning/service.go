@@ -99,31 +99,32 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 		return activation.ProvisionResult{}, createErr
 	}
 
-	login, err := s.admin.Login(ctx, phone, password)
+	userClient, err := s.userTokenClient(ctx, user.ID, phone, password, req.ForceRotateToken)
 	if err != nil {
 		return activation.ProvisionResult{}, err
 	}
-	userClient, err := s.admin.WithAccessToken(login.Data.AccessToken, user.ID)
-	if err != nil {
-		return activation.ProvisionResult{}, err
-	}
+	tokenName := s.tokenName(req.ForceRotateToken)
+	var createdToken newapi.CreateTokenResponse
 	if err := userClient.CreateToken(ctx, newapi.CreateTokenRequest{
-		Name:           s.cfg.TokenName,
+		Name:           tokenName,
 		ExpiresAt:      -1,
 		UnlimitedQuota: true,
-	}, nil); err != nil {
+	}, &createdToken); err != nil {
 		return activation.ProvisionResult{}, err
 	}
-	token, ok, err := userClient.SearchTokenByName(ctx, s.cfg.TokenName)
-	if err != nil {
-		return activation.ProvisionResult{}, err
-	}
-	if !ok || token.ID <= 0 {
-		return activation.ProvisionResult{}, fmt.Errorf("newapi token was not found after creation")
-	}
-	key, err := userClient.FetchTokenKey(ctx, token.ID)
-	if err != nil {
-		return activation.ProvisionResult{}, err
+	key := createdToken.APIKey()
+	if key == "" {
+		token, ok, err := userClient.SearchTokenByName(ctx, tokenName)
+		if err != nil {
+			return activation.ProvisionResult{}, err
+		}
+		if !ok || token.ID <= 0 {
+			return activation.ProvisionResult{}, fmt.Errorf("newapi token was not found after creation")
+		}
+		key, err = userClient.FetchTokenKey(ctx, token.ID)
+		if err != nil {
+			return activation.ProvisionResult{}, err
+		}
 	}
 
 	if s.cfg.InitialQuota > 0 {
@@ -141,7 +142,42 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 	}); err != nil {
 		return activation.ProvisionResult{}, err
 	}
-	return activation.ProvisionResult{NewAPIUserID: user.ID, Token: key, TokenVersion: 1}, nil
+	tokenVersion := 1
+	if req.ForceRotateToken {
+		tokenVersion = int(s.now().Unix())
+	}
+	return activation.ProvisionResult{NewAPIUserID: user.ID, Token: key, TokenVersion: tokenVersion}, nil
+}
+
+// tokenName keeps first activation stable but gives refresh requests a unique
+// token name so New API search/fetch cannot return a revoked older key.
+func (s *Service) tokenName(forceRotate bool) string {
+	if !forceRotate {
+		return s.cfg.TokenName
+	}
+	return fmt.Sprintf("%s-%s", s.cfg.TokenName, s.now().UTC().Format("20060102150405"))
+}
+
+// userTokenClient normally uses the user's dashboard token because key reveal
+// endpoints require user scope. Refresh can fall back to admin user scope when
+// New API rejects another dashboard login due to session limits.
+func (s *Service) userTokenClient(ctx context.Context, userID int64, phone string, password string, allowAdminFallback bool) (*newapi.Client, error) {
+	login, err := s.admin.Login(ctx, phone, password)
+	if err != nil {
+		if allowAdminFallback && isSessionLimitError(err) {
+			return s.admin.WithAdminUser(userID)
+		}
+		return nil, err
+	}
+	return s.admin.WithAccessToken(login.Data.AccessToken, userID)
+}
+
+func isSessionLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToUpper(err.Error())
+	return strings.Contains(message, "AUTH_SESSION_LIMIT")
 }
 
 // isDuplicateUsernameError tolerates New API retries after a prior partial activation created the user.

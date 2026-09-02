@@ -391,7 +391,7 @@ curl -sS -X POST http://127.0.0.1:8080/v1/payments/alipay/spi \
 
 一键脚本会自动初始化本地 root、创建测试用户、查询 user id、加 quota，并用测试用户身份创建 token。
 
-如需手动联调，再打开 `http://127.0.0.1:3000` 完成初始化，并在 New API 后台获取管理 token。
+如需手动联调，再打开 `http://127.0.0.1:3000` 完成初始化，并在 New API 后台获取管理 token。`NEWAPI_ADMIN_TOKEN` 必须使用 New API 后台 `GET /api/user/self/token` 生成的管理员 Access Token（PAT），不要填网页登录返回的 session JWT。session JWT 会过期且受 `AUTH_SESSION_LIMIT` 限制，Cloud 扣费、余额和模型目录会在刷新 token 时失败。
 
 ```bash
 export NEWAPI_ADMIN_BASE_URL=https://newapi-admin.example.com

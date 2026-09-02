@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -283,6 +284,7 @@ func (s *Service) buildSummary(ctx context.Context, userID int64, self newapi.Se
 			RequestID:   event.RequestID,
 		})
 	}
+	records = latestUsageRecords(records, s.cfg.PageSize)
 
 	return Summary{
 		Status:                "ok",
@@ -306,6 +308,21 @@ func (s *Service) buildSummary(ctx context.Context, userID int64, self newapi.Se
 		RefreshedAt:           now.UTC().Format(time.RFC3339),
 		Unit:                  "quota",
 	}
+}
+
+// latestUsageRecords keeps the mixed New API and direct image billing stream in
+// newest-first order so generated images are visible in the model-page ledger.
+func latestUsageRecords(records []Record, limit int) []Record {
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].CreatedAt == records[j].CreatedAt {
+			return records[i].ID > records[j].ID
+		}
+		return records[i].CreatedAt > records[j].CreatedAt
+	})
+	if limit > 0 && len(records) > limit {
+		return records[:limit]
+	}
+	return records
 }
 
 func (s *Service) listEcommerceUsageEvents(ctx context.Context, userID int64) ([]EcommerceImageUsageEvent, error) {

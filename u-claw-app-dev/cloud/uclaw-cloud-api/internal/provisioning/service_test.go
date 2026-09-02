@@ -166,3 +166,118 @@ func TestProvisionNewAPIContinuesWhenUserAlreadyExists(t *testing.T) {
 		t.Fatal("mapping was not saved")
 	}
 }
+
+func TestProvisionNewAPIForceRotateUsesFreshTokenNameAndResponseKey(t *testing.T) {
+	var searchedToken bool
+	var tokenPayload newapi.CreateTokenRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/":
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"user-access-token"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/token/":
+			if err := json.NewDecoder(r.Body).Decode(&tokenPayload); err != nil {
+				t.Fatalf("decode create token: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"success":true,"token":"fresh-key-value"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/token/search":
+			searchedToken = true
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":12,"name":"uclaw-main"}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	admin, err := newapi.NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	store := &memoryAccountStore{}
+	service, err := NewService(admin, store, Config{
+		ClientBaseURL:  server.URL + "/v1",
+		TokenName:      "uclaw-main",
+		PasswordSecret: "test-password-secret",
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	service.now = func() time.Time { return time.Date(2026, 9, 2, 8, 30, 0, 0, time.UTC) }
+
+	result, err := service.ProvisionNewAPI(context.Background(), activation.ProvisionRequest{
+		UserID:           5,
+		Phone:            "13800138000",
+		ForceRotateToken: true,
+	})
+	if err != nil {
+		t.Fatalf("ProvisionNewAPI() error = %v", err)
+	}
+	if tokenPayload.Name != "uclaw-main-20260902083000" {
+		t.Fatalf("token name = %q", tokenPayload.Name)
+	}
+	if searchedToken {
+		t.Fatal("fresh create-token response key should avoid searching old tokens")
+	}
+	if result.Token != "sk-fresh-key-value" || result.TokenVersion <= 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if !store.saved || store.account.TokenFingerprint == "" {
+		t.Fatalf("stored account = %+v saved=%t", store.account, store.saved)
+	}
+}
+
+func TestProvisionNewAPIForceRotateFallsBackToAdminUserWhenSessionLimit(t *testing.T) {
+	var tokenAuth string
+	var tokenUser string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/":
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"code":"AUTH_SESSION_LIMIT","message":"Conflict","success":false}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/token/":
+			tokenAuth = r.Header.Get("Authorization")
+			tokenUser = r.Header.Get("New-Api-User")
+			_, _ = w.Write([]byte(`{"success":true,"token":"admin-created-key"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	admin, err := newapi.NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	service, err := NewService(admin, &memoryAccountStore{}, Config{
+		ClientBaseURL:  server.URL + "/v1",
+		TokenName:      "uclaw-main",
+		PasswordSecret: "test-password-secret",
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	result, err := service.ProvisionNewAPI(context.Background(), activation.ProvisionRequest{
+		UserID:           5,
+		Phone:            "13800138000",
+		ForceRotateToken: true,
+	})
+	if err != nil {
+		t.Fatalf("ProvisionNewAPI() error = %v", err)
+	}
+	if tokenAuth != "Bearer admin-token" || tokenUser != "9" {
+		t.Fatalf("token auth=%q user=%q", tokenAuth, tokenUser)
+	}
+	if result.Token != "sk-admin-created-key" {
+		t.Fatalf("result = %+v", result)
+	}
+}

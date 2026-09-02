@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"uclaw-cloud-api/internal/activation"
 	"uclaw-cloud-api/internal/config"
 	"uclaw-cloud-api/internal/newapi"
 	alipaypay "uclaw-cloud-api/internal/payment/alipay"
@@ -213,6 +214,62 @@ func TestActivationRedeemRequiresBearerToken(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestNewAPICredentialRefreshReturnsClientConfig(t *testing.T) {
+	provisioner := &httpRecordingProvisioner{
+		result: activation.ProvisionResult{
+			NewAPIUserID: 18,
+			Token:        "sk-refreshed-token",
+			TokenVersion: 2,
+		},
+	}
+	activationService, err := activation.NewService(activation.NewMemoryStore(true), activation.Config{
+		NewAPIBaseURL: "https://api.example.com/v1",
+		Provisioner:   provisioner,
+	})
+	if err != nil {
+		t.Fatalf("activation service: %v", err)
+	}
+	server := NewServerWithOptions(config.Config{
+		AppEnv:     "development",
+		JWTSecret:  "test-secret",
+		DevSMSCode: "654321",
+	}, BuildInfo{Version: "test"}, ServerOptions{
+		Auth:       buildAuthService(config.Config{AppEnv: "development", JWTSecret: "test-secret", DevSMSCode: "654321"}, nil),
+		Activation: activationService,
+	})
+	accessToken := loginForTest(t, server, "13800138000", "654321")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/newapi/credentials/refresh", bytes.NewBufferString(`{}`))
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		NewAPIBaseURL string `json:"newapiBaseUrl"`
+		NewAPIToken   string `json:"newapiToken"`
+		TokenVersion  int    `json:"tokenVersion"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode refresh response: %v", err)
+	}
+	if payload.NewAPIBaseURL != "https://api.example.com/v1" || payload.NewAPIToken != "sk-refreshed-token" || payload.TokenVersion != 2 {
+		t.Fatalf("refresh payload = %+v", payload)
+	}
+	if !provisioner.called || provisioner.request.Phone != "13800138000" {
+		t.Fatalf("provision request = %+v called=%v", provisioner.request, provisioner.called)
+	}
+
+	unauthorizedRec := httptest.NewRecorder()
+	unauthorizedReq := httptest.NewRequest(http.MethodPost, "/v1/newapi/credentials/refresh", bytes.NewBufferString(`{}`))
+	server.ServeHTTP(unauthorizedRec, unauthorizedReq)
+	if unauthorizedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d, want 401", unauthorizedRec.Code)
 	}
 }
 
@@ -539,6 +596,75 @@ func TestEcommerceImageUsageDebitsNewAPIQuotaAndAppearsInSummary(t *testing.T) {
 	}
 	if summary.Records[0].Quota != 150000 || summary.Records[0].RequestID != "ecom-run-1" {
 		t.Fatalf("record usage = %+v", summary.Records[0])
+	}
+}
+
+func TestBuildUsageServiceSharesRefreshedNewAPIAdminClient(t *testing.T) {
+	var loginCalls int
+	var manageAuth string
+
+	newAPIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			if r.Header.Get("Authorization") == "Bearer expired-admin-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code":"AUTH_TOKEN_EXPIRED","message":"Unauthorized","success":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			loginCalls++
+			if loginCalls > 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"code":"AUTH_SESSION_LIMIT","message":"Conflict","success":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"fresh-admin-token"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/manage":
+			manageAuth = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer newAPIServer.Close()
+
+	cfg := config.Config{
+		AppEnv:                   "development",
+		NewAPIAdminBaseURL:       newAPIServer.URL,
+		NewAPIAdminToken:         "expired-admin-token",
+		NewAPIAdminUsername:      "admin",
+		NewAPIAdminPassword:      "password",
+		NewAPIUserPasswordSecret: "test-newapi-password-secret",
+	}
+	adminClient := buildNewAPIAdminClient(cfg, "test")
+	if adminClient == nil {
+		t.Fatal("buildNewAPIAdminClient() = nil")
+	}
+	if _, _, err := adminClient.SearchUserByUsername(context.Background(), "13800138000"); err != nil {
+		t.Fatalf("SearchUserByUsername() refresh error = %v", err)
+	}
+	service := buildUsageService(cfg, adminClient, usage.NewMemoryStore())
+	if service == nil {
+		t.Fatal("buildUsageService() = nil")
+	}
+	_, err := service.RecordEcommerceImageUsage(context.Background(), usage.EcommerceImageUsageRequest{
+		UserID:        1,
+		Phone:         "13800138000",
+		RequestID:     "ecom-run-shared-admin",
+		Model:         "gpt-image-2",
+		ImageCount:    1,
+		QuotaPerImage: 50000,
+	})
+	if err != nil {
+		t.Fatalf("RecordEcommerceImageUsage() error = %v", err)
+	}
+	if loginCalls != 1 {
+		t.Fatalf("loginCalls = %d, want only the initial shared admin refresh", loginCalls)
+	}
+	if manageAuth != "Bearer fresh-admin-token" {
+		t.Fatalf("manage Authorization = %q, want fresh admin token", manageAuth)
 	}
 }
 
@@ -1045,4 +1171,17 @@ func loginForTest(t *testing.T, server http.Handler, phone string, code string) 
 		t.Fatal("access token is empty")
 	}
 	return loginPayload.AccessToken
+}
+
+type httpRecordingProvisioner struct {
+	request activation.ProvisionRequest
+	result  activation.ProvisionResult
+	called  bool
+}
+
+// ProvisionNewAPI records refresh requests while keeping HTTP tests local.
+func (p *httpRecordingProvisioner) ProvisionNewAPI(_ context.Context, req activation.ProvisionRequest) (activation.ProvisionResult, error) {
+	p.called = true
+	p.request = req
+	return p.result, nil
 }
