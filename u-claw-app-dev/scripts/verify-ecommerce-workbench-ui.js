@@ -865,6 +865,116 @@ async function verifyRecordPagination(page) {
 }
 
 /**
+ * Verifies generation records keep their compact task-flow layout inside a
+ * narrower right rail than the main design canvas usually provides.
+ */
+async function verifyCompactRecordRail(page) {
+  await evaluateWithRetry(page, () => {
+    const now = Date.now();
+    const localDir = "/Users/test/Downloads/Bavi-box/电商图片/compact";
+    const record = {
+      id: "compact-record-narrow-1",
+      createdAt: now,
+      updatedAt: now,
+      status: "partial",
+      platformLabel: "抖音电商",
+      productName: "极长名称测试短袖主图详情图模特图一体化生成记录",
+      languageLabel: "中文",
+      styleLabel: "平台自动",
+      ratioLabel: "1:1 方图",
+      imageCount: 3,
+      outputLabels: "主图1张、详情图3屏、模特图1张",
+      requestedOutputCount: 5,
+      generatedImageCount: 3,
+      model: "newapi/gpt-image-2",
+      localDir,
+      result: {
+        id: "compact-record-narrow-1",
+        platform_label: "抖音电商",
+        name: "极长名称测试短袖主图详情图模特图一体化生成记录",
+        model: "newapi/gpt-image-2",
+        localDir,
+        images: [
+          { id: "compact-image-1", type: "main_image", localPath: `${localDir}/01.png`, localDir },
+          { id: "compact-image-2", type: "detail_image", localPath: `${localDir}/02.png`, localDir },
+          { id: "compact-image-3", type: "model_image", localPath: `${localDir}/03.png`, localDir },
+        ],
+        warnings: [],
+        billing: { status: "usage_sync_failed" },
+        progress: { done: 3, total: 5, status: "partial" },
+        qa: ["人工复核"],
+      },
+    };
+    localStorage.setItem("uclaw.ecommerceImageRecords.v1", JSON.stringify([record]));
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "极长名称测试短袖", 10000);
+  const state = await evaluateInDom(
+    page,
+    `
+      const side = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-side"));
+      if (side) {
+        side.style.width = "360px";
+        side.style.maxWidth = "360px";
+      }
+      const record = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+      const main = record?.querySelector(".uclaw-ecommerce-record-main");
+      const progress = record?.querySelector(".uclaw-ecommerce-record-progress");
+      const status = record?.querySelector(".uclaw-ecommerce-record-status");
+      const actions = record?.querySelector(".uclaw-ecommerce-record-actions");
+      const mark = record?.querySelector(".uclaw-ecommerce-record-mark");
+      const rowRect = record?.getBoundingClientRect();
+      const style = record ? getComputedStyle(record) : null;
+      return {
+        rowText: (record?.innerText || record?.textContent || "").replace(/\\s+/g, " ").trim(),
+        rowWidth: Math.round(rowRect?.width || 0),
+        rowHeight: Math.round(rowRect?.height || 0),
+        rowScrollWidth: record?.scrollWidth || 0,
+        rowClientWidth: record?.clientWidth || 0,
+        mainWidth: Math.round(main?.getBoundingClientRect?.().width || 0),
+        progressWidth: Math.round(progress?.getBoundingClientRect?.().width || 0),
+        progressText: (progress?.innerText || progress?.textContent || "").replace(/\\s+/g, " ").trim(),
+        progressAria: progress?.getAttribute("aria-label") || "",
+        actionsWidth: Math.round(actions?.getBoundingClientRect?.().width || 0),
+        statusWidth: Math.round(status?.getBoundingClientRect?.().width || 0),
+        markWidth: Math.round(mark?.getBoundingClientRect?.().width || 0),
+        gridTemplateAreas: style?.gridTemplateAreas || "",
+        gridTemplateColumns: style?.gridTemplateColumns || "",
+        actionButtonCount: actions ? actions.querySelectorAll("button").length : 0,
+      };
+    `,
+  );
+  if (!state.rowText.includes("3/5") || !state.progressAria.includes("3/5")) {
+    throw new Error(`Compact record progress missing count: ${JSON.stringify(state)}`);
+  }
+  if (state.rowClientWidth <= 0 || state.rowScrollWidth > state.rowClientWidth + 1) {
+    throw new Error(`Compact record should not horizontally overflow at 360px rail: ${JSON.stringify(state)}`);
+  }
+  if (!state.gridTemplateAreas.includes("mark main status") || !state.gridTemplateAreas.includes("progress actions")) {
+    throw new Error(`Compact record should use two-line task-flow grid in narrow rail: ${JSON.stringify(state)}`);
+  }
+  if (state.markWidth < 24 || state.statusWidth < 54 || state.progressWidth < 70 || state.actionButtonCount < 3) {
+    throw new Error(`Compact record areas are missing or collapsed: ${JSON.stringify(state)}`);
+  }
+  await evaluateWithRetry(page, () => {
+    localStorage.removeItem("uclaw.ecommerceImageRecords.v1");
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+}
+
+/**
  * Verifies historical records that only retained trusted localPath values can
  * hydrate back into previewable data URLs when the user opens the record.
  */
@@ -1385,6 +1495,9 @@ async function exerciseWorkbench(page, imagePath) {
       const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
       const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
       const recordTexts = recordRows.map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
+      const recordProgressNodes = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record-progress"));
+      const recordStatusNodes = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record-status"));
+      const recordMarkNodes = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record-mark"));
       const typeCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type"));
       const countControls = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-count"));
       const stats = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-stat"));
@@ -1437,6 +1550,40 @@ async function exerciseWorkbench(page, imagePath) {
           height: Math.round(rect.height),
           color: style.color,
           borderColor: style.borderColor,
+        };
+      });
+      const recordRects = recordRows.map((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          scrollWidth: node.scrollWidth,
+          clientWidth: node.clientWidth,
+          gridTemplateAreas: style.gridTemplateAreas,
+          gridTemplateColumns: style.gridTemplateColumns,
+        };
+      });
+      const recordProgressRects = recordProgressNodes.map((node) => {
+        const rect = node.getBoundingClientRect();
+        const bar = node.querySelector("div");
+        const text = (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim();
+        return {
+          text,
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          barWidth: Math.round(bar?.getBoundingClientRect?.().width || 0),
+          ariaLabel: node.getAttribute("aria-label") || "",
+        };
+      });
+      const recordStatusRects = recordStatusNodes.map((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          text: (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim(),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          whiteSpace: style.whiteSpace,
         };
       });
       const resultFolderButtonRect = resultFolderButton ? (() => {
@@ -1523,6 +1670,10 @@ async function exerciseWorkbench(page, imagePath) {
         qaCount: qaChips.length,
         recordCount: recordRows.length,
         recordTexts,
+        recordRects,
+        recordProgressRects,
+        recordStatusRects,
+        recordMarkCount: recordMarkNodes.length,
         typeCardCount: typeCards.length,
         countRects,
         typeRects,
@@ -1607,6 +1758,8 @@ async function runAcceptance(options) {
       await verifyPartialRecordStatus(page);
       await installDirectImageApiStub(page);
       await verifyRecordPagination(page);
+      await installDirectImageApiStub(page);
+      await verifyCompactRecordRail(page);
       await installDirectImageApiStub(page);
       await verifyLocalManifestAutoImport(page);
       await installDirectImageApiStub(page);

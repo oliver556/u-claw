@@ -1,0 +1,93 @@
+---
+name: ecommerce-main-detail-workflow
+description: "Bavi-box Workbench-first capability for ecommerce main images, detail images, and model images, covering platform preset, output-type selection, intake, compliance boundary, Campaign Style Lock, prompt pack, direct image generation, carousel preview, package export, records, and QA."
+metadata:
+  {
+    "openclaw":
+      {
+        "emoji": "电",
+        "os": ["darwin", "linux", "win32"],
+        "categories": ["workflow", "ecommerce", "image"],
+      },
+  }
+---
+
+# 电商主图/详情图工作台能力
+
+## 边界
+
+这是 Bavi-box 的 Workbench-first 能力。前台不要求用户理解 OpenClaw session；用户只需要选择平台、选择生成类型、上传商品图片、填写少量商品信息，再由工作台直接调用 Bavi-box 图片接口生成图片、横向预览结果、打包下载并保留记录。
+
+当前边界：不绕过现有图片模型配置、不读取独立 API key、不替代人工合规审查。前台只调用桌面端暴露的直出接口；API token 留在主进程侧。生成结果视为待审素材，不能承诺一次生成即可合规上架。
+
+## 参考 Skill
+
+- `ecommerce-visual-copywriting-skill`：https://github.com/feichanggege/ecommerce-visual-copywriting-skill
+- `ecom-details-image`：https://github.com/liangdabiao/ecom-details-image
+
+## 适用场景
+
+当用户要为电商商品制作主图、详情页长图、平台首图、卖点图、对比图、模特图、试穿图、隐形模特图、场景图或整套商品视觉方案时使用本技能。
+
+## 平台 preset
+
+前台必须让用户直接选择平台，并使用平台 preset 自动带出主图/详情图规格、合规提示、置信度和来源类型。
+
+- `official_seed`：来自平台官方规则页或卖家中心公开文档，可作为默认规格。
+- `public_summary`：来自第三方公开汇总，只能作为低/中置信提示。
+- `needs_backend_confirmation`：拼多多、小红书等规则来源不足或后台限制变化快的平台，必须提示用户复核后台实时规则。
+
+## 必要输入
+
+工作台先收集以下信息，缺失项必须标为待补充，不得编造：
+
+- 商品类目、平台、生成类型、目标人群、价格带、SKU 规格和包装信息。
+- 商品实拍、包装图、资质文件、检测报告、专利证据、品牌规范和竞品参考。
+- 平台尺寸、禁用词、广告合规约束、是否普通商品/食品/保健食品/医疗健康/运动器材等高风险品类。
+- 用户偏好的视觉方向、必须出现或不得出现的元素。
+
+## 生成类型
+
+工作台默认勾选“主图”和“详情图”，用户可以改成只生成某一种，或同时勾选三种。每种类型必须有数量规则，前端给建议值，主进程再做总量和上下限校验。
+
+- Main Image Target：默认 3 张，按平台收窄为 1-5 张，Amazon/快手可放宽；参考 `01-hero-image / hero-image`，用于货架首图、白底图、角度图、清爽场景主图。
+- Detail Image Target：默认 5 屏，按平台收窄为 3-9 屏，Shopee/快手可放宽到 12 屏；参考 `11-infographic` 和 `13-size-spec`，按钩子、卖点、规格、场景、信任证据拆成系列。
+- Model Image Target：默认 1 张，最多 3 张；参考 `08-model-showcase`、`16-try-on-virtual`、`18-ghost-mannequin`，用于真人展示、试穿、隐形模特或生活方式场景。
+
+## 隐藏工作阶段
+
+1. Intake Brief：整理商品事实、目标、约束、缺口和风险等级。
+2. Compliance Gate：检查功效、资质、认证、销量、评论、医疗健康、绝对化用语等风险表达。
+3. Conversion Driver：提炼 3-5 个转化驱动力，并给每个驱动力配证据来源。
+4. Campaign Style Lock：确认统一色板、光影、镜头、材质、字体、构图、品牌元素和禁止漂移项。
+5. Main Image Storyboard：按用户选择输出主图方向，每张必须有独立任务、画面结构、文案层级、证据点和风险备注。
+6. Detail Page Storyboard：按用户选择输出详情图叙事，覆盖吸引、解释、证明、对比、使用场景、信任和行动。
+7. Model Image Target：按用户选择输出模特图方向，并根据类目在真人展示、试穿、隐形模特或生活方式场景之间选择。
+8. Prompt Pack：为每张图输出生成 prompt、negative prompt、尺寸、构图、文字建议、素材要求和 QA checklist。
+9. Image Generation：通过 Bavi-box 桌面端直连图片 API，按勾选类型和数量生成主图、详情图系列或模特图，不创建聊天会话。
+10. Human Review Gate：提示用户确认事实、合规和视觉一致性，再进入单图下载、打包下载、重试或交付。
+
+## 输出格式
+
+默认按以下结构输出：
+
+- 项目摘要：商品、平台、目标人群、核心卖点、风险等级。
+- 生成类型：主图、详情图、模特图，以及每种类型的模板参考、数量和单位。
+- 平台规格：主图尺寸、详情图尺寸、来源类型、置信度、是否需要后台复核。
+- 信息缺口：必须补充、建议补充、可暂缓。
+- 合规边界：允许表达、禁止表达、需证据表达。
+- Campaign Style Lock：色彩、光影、镜头、材质、字体、构图、统一元素、禁止漂移项。
+- 主图 Storyboard：KV1-KV5。
+- 详情页 Storyboard：M1-M9，按实际需要裁剪。
+- Prompt Pack：逐图 prompt / negative prompt / size / asset notes / QA。
+- 图片生成结果：横向轮播预览、单图下载、ZIP 打包下载、`manifest.json`。
+- 图片生成记录：平台、商品、生成类型、计划数量、素材数量、生成图片数量、模型、状态、错误信息和可查看结果。
+- 交付 QA：事实、合规、品牌一致、平台尺寸、文案可读、商品可识别。
+
+## 质量规则
+
+- 不发明证书、专利、检测报告、销量、评论、价格优势、医疗或健康功效。
+- 高风险品类默认保守表达，使用“待资质确认”而不是确定性结论。
+- 同一套图必须维持 Campaign Style Lock，不允许每张图风格随机漂移。
+- 主图负责快速识别和点击理由，详情页负责解释、证明和转化，不要让两者信息重复堆叠。
+- Prompt Pack 必须足够让图片模型执行，但不能承诺生成结果一定合规或一次成功。
