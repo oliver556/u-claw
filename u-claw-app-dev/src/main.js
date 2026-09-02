@@ -866,6 +866,22 @@ function summarizeImageApiError(body) {
 }
 
 /**
+ * Converts upstream image-generation failures into operator-readable slot
+ * warnings. A 400 can be a single prompt/image policy rejection while other
+ * ecommerce slots are still valid and should stay visible.
+ */
+function summarizeEcommerceImageRequestError(error) {
+  const message = String(error?.message || error || '').trim();
+  if (/图片接口失败\s+400/i.test(message)) {
+    return message.replace(
+      /图片接口失败\s+400:\s*/i,
+      '该张被上游图片接口拒绝 400，其他已成功图片已保留。原因：',
+    );
+  }
+  return message;
+}
+
+/**
  * Normalizes OpenAI-compatible image responses into image objects the workbench
  * can render and persist locally.
  */
@@ -902,16 +918,45 @@ function sanitizeEcommerceLocalFileName(value, fallback = 'ecommerce') {
 }
 
 /**
- * Resolves the default local library for generated ecommerce assets. Downloads
- * is intentionally used so users can find files outside Bavi-box at any time.
+ * Reads Electron special paths defensively. Some Windows portable runtimes can
+ * fail `downloads`, so ecommerce generation must keep working with a fallback.
+ */
+function safeGetElectronPath(name) {
+  try {
+    const value = app.getPath(name);
+    return typeof value === 'string' && value.trim() ? value : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Resolves the root local library for generated ecommerce assets. Downloads is
+ * preferred so users can find files outside Bavi-box; Windows falls back to
+ * USERPROFILE/Downloads when Electron cannot resolve the known folder.
+ */
+function resolveEcommerceLocalLibraryRoot() {
+  const downloads = safeGetElectronPath('downloads');
+  const homeDownloads = process.platform === 'win32' && process.env.USERPROFILE
+    ? path.join(process.env.USERPROFILE, 'Downloads')
+    : '';
+  const fallbackDownloads = safeGetElectronPath('home')
+    ? path.join(safeGetElectronPath('home'), 'Downloads')
+    : '';
+  const base = downloads || homeDownloads || fallbackDownloads || path.join(userDataPath, 'Downloads');
+  return path.join(base, APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME);
+}
+
+/**
+ * Resolves the default local library run directory for generated ecommerce
+ * assets. Directory naming stays stable across Mac and Windows.
  */
 function resolveEcommerceLocalLibraryDir(manifest, requestId) {
-  const downloads = app.getPath('downloads');
   const platform = sanitizeEcommerceLocalFileName(manifest?.platform_label || manifest?.platform || 'platform');
   const product = sanitizeEcommerceLocalFileName(manifest?.name || '商品');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const shortRequestId = sanitizeEcommerceLocalFileName(String(requestId || '').slice(0, 18), 'run');
-  return path.join(downloads, APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME, `${platform}-${product}-${stamp}-${shortRequestId}`);
+  return path.join(resolveEcommerceLocalLibraryRoot(), `${platform}-${product}-${stamp}-${shortRequestId}`);
 }
 
 /**
@@ -990,7 +1035,7 @@ async function openEcommerceLocalPath(payload = {}) {
   const targetPath = String(payload?.path || payload?.localPath || payload?.localDir || '').trim();
   if (!targetPath) throw new Error('本地文件路径为空。');
   if (!path.isAbsolute(targetPath)) throw new Error('本地文件路径无效。');
-  const libraryRoot = path.resolve(app.getPath('downloads'), APP_NAME, ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME);
+  const libraryRoot = path.resolve(resolveEcommerceLocalLibraryRoot());
   const resolvedTarget = path.resolve(targetPath);
   if (resolvedTarget !== libraryRoot && !resolvedTarget.startsWith(`${libraryRoot}${path.sep}`)) {
     throw new Error('只能打开电商图片本地保存目录。');
@@ -1341,7 +1386,7 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
         },
       });
     } catch (error) {
-      const warning = `${target.title}: ${error?.message || String(error)}`;
+      const warning = `${target.title}: ${summarizeEcommerceImageRequestError(error)}`;
       warnings.push(warning);
       emitEcommerceImageProgress(sender, {
         requestId,

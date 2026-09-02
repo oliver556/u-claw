@@ -9,6 +9,7 @@ const assetsDir = path.join(root, "node_modules", "openclaw", "dist", "control-u
 const patchScript = path.join(root, "scripts", "patch-openclaw.js");
 const mainProcessFile = path.join(root, "src", "main.js");
 const preloadFile = path.join(root, "src", "preload.js");
+const cloudMigrationDir = path.join(root, "cloud", "uclaw-cloud-api", "migrations");
 const skillFile = path.join(
   root,
   "node_modules",
@@ -168,6 +169,9 @@ function verifyDirectDesktopApi(errors) {
     "isPrivateNetworkAddress",
     "ECOMMERCE_IMAGE_REMOTE_MATERIALIZE_MAX_BYTES",
     "ECOMMERCE_IMAGE_LOCAL_LIBRARY_NAME",
+    "safeGetElectronPath",
+    "resolveEcommerceLocalLibraryRoot",
+    "USERPROFILE",
     "resolveEcommerceLocalLibraryDir",
     "saveEcommerceImageToLocalLibrary",
     "saveEcommerceLocalManifest",
@@ -179,6 +183,8 @@ function verifyDirectDesktopApi(errors) {
     "recordEcommerceImageUsage",
     "/v1/newapi/usage/ecommerce-image",
     "ECOMMERCE_IMAGE_USAGE_QUOTA_PER_IMAGE",
+    "summarizeEcommerceImageRequestError",
+    "该张被上游图片接口拒绝 400，其他已成功图片已保留",
     "billing",
     "uclaw:ecommerce-generate-images",
     "uclaw:ecommerce-image-progress",
@@ -227,6 +233,52 @@ function verifyDirectDesktopApi(errors) {
 }
 
 /**
+ * Verifies Cloud API migration ordering for ecommerce billing. Production
+ * applies these files as numbered deployment steps, so duplicate numbers can
+ * leave the usage table absent while the desktop still reports successful
+ * image generation.
+ */
+function verifyCloudEcommerceUsageMigration(errors) {
+  if (!fs.existsSync(cloudMigrationDir)) {
+    errors.push(`Missing Cloud API migrations directory: ${path.relative(root, cloudMigrationDir)}`);
+    return;
+  }
+
+  const migrationFiles = fs
+    .readdirSync(cloudMigrationDir)
+    .filter((name) => /^\d{6}_.+\.sql$/.test(name))
+    .sort();
+  const byVersion = new Map();
+  for (const fileName of migrationFiles) {
+    const version = fileName.slice(0, 6);
+    byVersion.set(version, [...(byVersion.get(version) || []), fileName]);
+  }
+  for (const [version, files] of byVersion) {
+    if (files.length > 1) {
+      errors.push(`Duplicate Cloud API migration version ${version}: ${files.join(", ")}`);
+    }
+  }
+
+  const ecommerceMigration = migrationFiles.find((name) => name.includes("ecommerce_image_usage"));
+  if (!ecommerceMigration) {
+    errors.push("Missing ecommerce image usage migration");
+    return;
+  }
+  if (!ecommerceMigration.startsWith("000004_")) {
+    errors.push(`Ecommerce image usage migration must be 000004 or later, got ${ecommerceMigration}`);
+  }
+  const content = readFile(path.join(cloudMigrationDir, ecommerceMigration));
+  for (const token of [
+    "CREATE TABLE IF NOT EXISTS ecommerce_image_usage_events",
+    "request_id TEXT NOT NULL UNIQUE",
+    "status TEXT NOT NULL DEFAULT 'recorded'",
+    "idx_ecommerce_image_usage_user_created",
+  ]) {
+    requireToken(errors, ecommerceMigration, content, token);
+  }
+}
+
+/**
  * Ensures the repository-owned patch source contains the workbench contract.
  */
 function verifyPatchSource(errors) {
@@ -254,6 +306,10 @@ function verifyPatchSource(errors) {
     "ecommerce-status-complete-1",
     "ecommerce-swiper-preview-1",
     "UcEcommerceNormalizeRecord",
+    "UcEcommerceRecordPlannedCount",
+    "UcEcommerceRecordGeneratedCount",
+    "UcEcommerceRecordHasBillingError",
+    "UcEcommerceRecordEffectiveStatus",
     "UcEcommerceStaleGeneratingMs",
     "UcEcommerceProgressState",
     "UcEcommerceImageKey",
@@ -263,6 +319,9 @@ function verifyPatchSource(errors) {
     "deleteEcommerceRecord",
     "uclaw-ecommerce-record-delete",
     "已保存本地",
+    "部分生成",
+    "扣费异常",
+    "计划 ${n||0} 张/屏 · 已出 ${r||0} 张",
     "打开文件夹",
     "localPath",
     "localDir",
@@ -332,10 +391,10 @@ function verifyPatchSource(errors) {
     requireToken(errors, "patch-openclaw.js", content, token);
   }
 
-    requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");
-    requireToken(errors, "patch-openclaw.js", content, "ecommerce-design-layout-4");
-    requireToken(errors, "patch-openclaw.js", content, "ecommerce-ultrawide-layout-2");
-    requireToken(errors, "patch-openclaw.js", content, "ecommerce-swiper-preview-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-design-layout-4");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-ultrawide-layout-2");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-swiper-preview-1");
   if (/body:has\(openclaw-tasks-page \.uclaw-ecommerce-workbench\) \.(topbar|sidebar|sidebar-shell|nav-item)/.test(content)) {
     errors.push("patch-openclaw.js must not scale global shell chrome on ecommerce route");
   }
@@ -344,6 +403,15 @@ function verifyPatchSource(errors) {
   }
   if (content.includes("openEcommerceGenerationRecord")) {
     errors.push("patch-openclaw.js still contains the old ecommerce session opener");
+  }
+  if (content.includes("e?.status===`completed`||r.status===`completed`")) {
+    errors.push("patch-openclaw.js must not mark partial ecommerce results complete from status alone");
+  }
+  if (content.includes("Math.max(Number.isFinite(t)?t:0,n)")) {
+    errors.push("patch-openclaw.js must not count optimistic generatedImageCount over real result.images length");
+  }
+  if (content.includes("r.done??(Array.isArray(t)?t.length:0)")) {
+    errors.push("patch-openclaw.js progress display must prefer real image count over optimistic progress.done");
   }
 }
 
@@ -378,6 +446,10 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceDownloadImage",
       "UcEcommerceDownloadFileName",
       "UcEcommerceNormalizeRecord",
+      "UcEcommerceRecordEffectiveStatus",
+      "UcEcommerceRecordPlannedCount",
+      "UcEcommerceRecordGeneratedCount",
+      "UcEcommerceRecordHasBillingError",
       "UcEcommerceStaleGeneratingMs",
       "UcEcommerceProgressState",
       "UcEcommerceImageKey",
@@ -387,6 +459,9 @@ function verifyGeneratedTasksPage(errors) {
       "deleteEcommerceRecord",
       "uclaw-ecommerce-record-delete",
       "已保存本地",
+      "部分生成",
+      "扣费异常",
+      "计划 ${n||0} 张/屏 · 已出 ${r||0} 张",
       "打开文件夹",
       "localPath",
       "localDir",
@@ -465,6 +540,18 @@ function verifyGeneratedTasksPage(errors) {
     }
     if (content.includes("this.ecommerceActiveRecord&&this.upsertEcommerceRecord({...this.ecommerceActiveRecord,status:`generating`")) {
       errors.push(`${label} still forces active ecommerce records back to generating`);
+    }
+    if (content.includes("UcEcommerceRecordStatusText(t.status)") || content.includes("UcEcommerceStatusChip(t.status)")) {
+      errors.push(`${label} must derive ecommerce record status from full record data`);
+    }
+    if (content.includes("e?.status===`completed`||r.status===`completed`")) {
+      errors.push(`${label} must not mark partial ecommerce results complete from status alone`);
+    }
+    if (content.includes("Math.max(Number.isFinite(t)?t:0,n)")) {
+      errors.push(`${label} must not count optimistic generatedImageCount over real result.images length`);
+    }
+    if (content.includes("r.done??(Array.isArray(t)?t.length:0)")) {
+      errors.push(`${label} progress display must prefer real image count over optimistic progress.done`);
     }
     if (content.includes("<strong>${u?`正在生成`:o.platform_label+` 已生成图片`}</strong>")) {
       errors.push(`${label} still derives result header from raw ecommerceGenerating`);
@@ -583,6 +670,7 @@ function main() {
     verifyGeneratedCss(errors);
     verifyServiceWorker(errors);
     verifyBundledSkill(errors);
+    verifyCloudEcommerceUsageMigration(errors);
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
   }

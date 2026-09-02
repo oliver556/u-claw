@@ -369,8 +369,12 @@ async function installDirectImageApiStub(page) {
               provider: "newapi",
               model: "gpt-image-2",
               generatedAt: new Date().toISOString(),
-              warnings: finalImages.length < images.length ? ["fixture final response intentionally partial"] : [],
+              warnings: [
+                ...(finalImages.length < images.length ? ["fixture final response intentionally partial"] : []),
+                "用量同步失败：fixture billing failed",
+              ],
               images: finalImages,
+              billing: { ok: false, message: "fixture billing failed" },
               localDir,
               localManifestPath: `${localDir}/manifest.json`,
             };
@@ -476,6 +480,96 @@ async function verifyDraftSurvivesRouteSwitch(page) {
 }
 
 /**
+ * Verifies records prefer real result images over optimistic progress counters.
+ */
+async function verifyPartialRecordStatus(page) {
+  await page.evaluate(() => {
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC";
+    const images = Array.from({ length: 5 }, (_value, index) => ({
+      id: `partial-record-${index + 1}`,
+      type: index === 0 ? "main_image" : "detail_image",
+      title: index === 0 ? "主图" : `详情图${index}`,
+      model: "gpt-image-2",
+      mimeType: "image/png",
+      dataUrl: png,
+    }));
+    const record = {
+      id: "partial-record-fixture",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      status: "completed",
+      platformLabel: "淘宝/天猫",
+      productName: "青花陶瓷碗",
+      languageLabel: "中文",
+      styleLabel: "平台自动",
+      ratioLabel: "1:1 方图",
+      imageCount: 1,
+      outputLabels: "主图1张、详情图4屏、模特图1张",
+      requestedOutputCount: 6,
+      generatedImageCount: 6,
+      model: "gpt-image-2",
+      billing: { ok: false, message: "fixture billing failed" },
+      result: {
+        platform_label: "淘宝/天猫",
+        name: "青花陶瓷碗",
+        model: "gpt-image-2",
+        images,
+        warnings: ["用量同步失败：fixture billing failed"],
+        billing: { ok: false, message: "fixture billing failed" },
+        progress: { done: 6, total: 6, status: "completed" },
+        qa: ["人工复核"],
+      },
+    };
+    localStorage.setItem("uclaw.ecommerceImageRecords.v1", JSON.stringify([record]));
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "青花陶瓷碗", 10000);
+
+  const state = await evaluateInDom(
+    page,
+    `
+      const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+      const recordTexts = recordRows.map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
+      const target = recordTexts.find((text) => text.includes("青花陶瓷碗")) || "";
+      const chip = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-record .chip"));
+      return {
+        target,
+        chipText: (chip?.innerText || chip?.textContent || "").trim(),
+        chipClass: chip?.className || "",
+      };
+    `,
+  );
+
+  if (!state.target.includes("计划 6 张/屏") || !state.target.includes("已出 5 张")) {
+    throw new Error(`Partial record should show real generated image count, got ${JSON.stringify(state)}`);
+  }
+  if (state.chipText !== "部分生成" || state.chipClass.includes("chip-ok")) {
+    throw new Error(`Partial record should not be marked completed, got ${JSON.stringify(state)}`);
+  }
+  if (!state.target.includes("扣费异常")) {
+    throw new Error(`Partial billing error should stay visible, got ${JSON.stringify(state)}`);
+  }
+
+  await page.evaluate(() => {
+    localStorage.removeItem("uclaw.ecommerceImageRecords.v1");
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "生成图片", 10000);
+}
+
+/**
  * Writes a small local PNG fixture for upload interaction.
  */
 function writeImageFixture() {
@@ -565,6 +659,7 @@ async function exerciseWorkbench(page, imagePath) {
       const resultStrip = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-result-strip"));
       const qaChips = allNodes().filter((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-qa span"));
       const recordRows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+      const recordTexts = recordRows.map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim());
       const typeCards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-type"));
       const countControls = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-count"));
       const stats = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-stat"));
@@ -649,6 +744,7 @@ async function exerciseWorkbench(page, imagePath) {
         resultStripRect: elementRect(resultStrip),
         qaCount: qaChips.length,
         recordCount: recordRows.length,
+        recordTexts,
         typeCardCount: typeCards.length,
         countRects,
         typeRects,
@@ -719,6 +815,7 @@ async function runAcceptance(options) {
       page.on("pageerror", (error) => errors.push(`${viewport.name}: ${error.message}`));
 
       await ensureConnected(page, gatewayUrl, gatewayWebSocketUrl, token);
+      await verifyPartialRecordStatus(page);
       const state = await exerciseWorkbench(page, imagePath);
 
       if (!state.hasWorkbench) throw new Error(`${viewport.name}: Workbench host missing`);
@@ -799,6 +896,12 @@ async function runAcceptance(options) {
       }
       if (state.qaCount < 4) throw new Error(`${viewport.name}: Expected QA chips, got ${state.qaCount}`);
       if (state.recordCount < 1) throw new Error(`${viewport.name}: Expected one generation record, got ${state.recordCount}`);
+      if (!state.recordTexts.some((text) => text.includes("扣费异常"))) {
+        throw new Error(`${viewport.name}: Billing failure should be visible in generation record, got ${JSON.stringify(state.recordTexts)}`);
+      }
+      if (!state.recordTexts.some((text) => text.includes("计划 10 张/屏") && text.includes("已出 10 张"))) {
+        throw new Error(`${viewport.name}: Generation record should separate planned and generated counts, got ${JSON.stringify(state.recordTexts)}`);
+      }
       if (state.generateDisabled) throw new Error(`${viewport.name}: Generate button stayed disabled after valid input`);
       if (!state.hasPackageButton) throw new Error(`${viewport.name}: Package download button missing after generation`);
       if (state.openLocalButtonCount < 1) throw new Error(`${viewport.name}: Open local folder button missing after generation`);
