@@ -31,6 +31,21 @@ func newMockStore(t *testing.T) (*Store, sqlmock.Sqlmock, func()) {
 	}
 }
 
+func TestStoreEnsureEcommerceImageUsageSchemaCreatesMissingTable(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+
+	mock.ExpectExec(regexp.QuoteMeta("CREATE TABLE IF NOT EXISTS ecommerce_image_usage_events")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	if err := store.EnsureEcommerceImageUsageSchema(context.Background()); err != nil {
+		t.Fatalf("EnsureEcommerceImageUsageSchema() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestStoreSaveSMSCodeUpsertsLatestCode(t *testing.T) {
 	store, mock, cleanup := newMockStore(t)
 	defer cleanup()

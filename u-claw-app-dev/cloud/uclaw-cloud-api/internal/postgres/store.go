@@ -23,7 +23,8 @@ type Store struct {
 	activationPepper string
 }
 
-// Open connects to PostgreSQL and verifies the database is reachable.
+// Open connects to PostgreSQL, verifies reachability, and applies small
+// runtime schema guards for tables introduced after early production deploys.
 func Open(ctx context.Context, databaseURL string, activationPepper string) (*Store, error) {
 	databaseURL = strings.TrimSpace(databaseURL)
 	if databaseURL == "" {
@@ -40,7 +41,12 @@ func Open(ctx context.Context, databaseURL string, activationPepper string) (*St
 		_ = db.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
-	return NewStore(db, activationPepper), nil
+	store := NewStore(db, activationPepper)
+	if err := store.EnsureEcommerceImageUsageSchema(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
 }
 
 // NewStore wraps an existing sql.DB for tests or custom process wiring.

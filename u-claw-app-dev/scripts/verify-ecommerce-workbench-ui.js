@@ -180,6 +180,24 @@ async function evaluateInDom(page, expression, arg) {
 }
 
 /**
+ * Runs a small browser evaluation with retry because route-switch checks can
+ * intentionally destroy the current execution context while the SPA reloads.
+ */
+async function evaluateWithRetry(page, callback) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await page.evaluate(callback);
+    } catch (error) {
+      if (!String(error?.message || error).includes("Execution context was destroyed") || attempt === 2) throw error;
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  }
+
+  throw new Error("Unable to evaluate page callback");
+}
+
+/**
  * Reads visible text through generated custom elements.
  */
 async function getVisibleText(page) {
@@ -387,7 +405,10 @@ async function installDirectImageApiStub(page) {
               );
             };
           },
-          materializeEcommerceImage: async (payload) => ({ ok: true, image: payload }),
+          materializeEcommerceImage: async (payload) => {
+            window.__uclawEcommerceMaterializeCalls = [...(window.__uclawEcommerceMaterializeCalls || []), payload];
+            return { ok: true, image: { ...payload, dataUrl: png, mimeType: payload?.mimeType || "image/png" } };
+          },
           openEcommerceLocalPath: async (payload) => {
             window.__uclawEcommerceOpenLocalPathCalls.push(payload);
             return { ok: true, path: payload?.path || payload?.localPath || payload?.localDir || "" };
@@ -408,7 +429,7 @@ async function installDirectImageApiStub(page) {
  * cache restores user input without forcing a generation first.
  */
 async function verifyDraftSurvivesRouteSwitch(page) {
-  await page.evaluate(() => {
+  await evaluateWithRetry(page, () => {
     window.__uclawEcommerceDraftBeforeRouteSwitch = JSON.parse(
       localStorage.getItem("uclaw.ecommerceWorkbench.draft.v1") || "null",
     );
@@ -416,7 +437,7 @@ async function verifyDraftSurvivesRouteSwitch(page) {
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
   await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
-  await page.evaluate(() => {
+  await evaluateWithRetry(page, () => {
     window.history.pushState({}, "", "/tasks");
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
@@ -483,7 +504,7 @@ async function verifyDraftSurvivesRouteSwitch(page) {
  * Verifies records prefer real result images over optimistic progress counters.
  */
 async function verifyPartialRecordStatus(page) {
-  await page.evaluate(() => {
+  await evaluateWithRetry(page, () => {
     const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAA7klEQVR4nO3RAQ0AAAjDMO5fNCCDkC5z0F0l2wFghBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBCEEIQQhBD+BjNRAAHIph80AAAAAElFTkSuQmCC";
     const images = Array.from({ length: 5 }, (_value, index) => ({
       id: `partial-record-${index + 1}`,
@@ -525,7 +546,7 @@ async function verifyPartialRecordStatus(page) {
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
   await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
-  await page.evaluate(() => {
+  await evaluateWithRetry(page, () => {
     window.history.pushState({}, "", "/tasks");
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
@@ -556,13 +577,109 @@ async function verifyPartialRecordStatus(page) {
     throw new Error(`Partial billing error should stay visible, got ${JSON.stringify(state)}`);
   }
 
-  await page.evaluate(() => {
+  await evaluateWithRetry(page, () => {
     localStorage.removeItem("uclaw.ecommerceImageRecords.v1");
     window.history.pushState({}, "", "/settings/ai-agents");
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
   await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
-  await page.evaluate(() => {
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "生成图片", 10000);
+}
+
+/**
+ * Verifies historical records that only retained trusted localPath values can
+ * hydrate back into previewable data URLs when the user opens the record.
+ */
+async function verifyLocalPathOnlyRecordHydration(page) {
+  await evaluateWithRetry(page, () => {
+    const localDir = "/tmp/uclaw-ecommerce-fixture";
+    const images = Array.from({ length: 2 }, (_value, index) => ({
+      id: `local-only-${index + 1}`,
+      type: index === 0 ? "main_image" : "detail_image",
+      title: index === 0 ? "主图" : "详情图1",
+      model: "gpt-image-2",
+      mimeType: "image/png",
+      localPath: `${localDir}/${String(index + 1).padStart(2, "0")}-local-only.png`,
+      localDir,
+      localFileName: `${String(index + 1).padStart(2, "0")}-local-only.png`,
+    }));
+    const record = {
+      id: "local-path-only-record",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      status: "completed",
+      platformLabel: "抖音电商",
+      productName: "空气墨盒",
+      languageLabel: "中文",
+      styleLabel: "白底主图",
+      ratioLabel: "1:1 方图",
+      imageCount: 1,
+      outputLabels: "主图1张、详情图1屏",
+      requestedOutputCount: 2,
+      generatedImageCount: 2,
+      model: "gpt-image-2",
+      localDir,
+      result: {
+        id: "local-path-only-record",
+        platform_label: "抖音电商",
+        name: "空气墨盒",
+        model: "gpt-image-2",
+        localDir,
+        images,
+        warnings: [],
+        billing: { status: "ok" },
+        progress: { done: 2, total: 2, status: "completed" },
+        qa: ["人工复核"],
+      },
+    };
+    localStorage.setItem("uclaw.ecommerceImageRecords.v1", JSON.stringify([record]));
+    window.__uclawEcommerceMaterializeCalls = [];
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "空气墨盒", 10000);
+  await installDirectImageApiStub(page);
+  await page.locator("openclaw-tasks-page .uclaw-ecommerce-record").filter({ hasText: "空气墨盒" }).locator("button").filter({ hasText: "查看结果" }).click();
+  await page.waitForFunction(() => {
+    const image = [...document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-featured img")][0];
+    return image instanceof HTMLImageElement && image.src.startsWith("data:image/");
+  }, null, { timeout: 10000 });
+
+  const state = await evaluateInDom(
+    page,
+    `
+      const featuredImage = allNodes().find((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-featured"));
+      const stripImages = allNodes().filter((node) => node instanceof HTMLImageElement && node.closest(".uclaw-ecommerce-generated"));
+      return {
+        featuredSrc: featuredImage?.src || "",
+        stripSrcs: stripImages.map((node) => node.src || ""),
+        materializeCount: window.__uclawEcommerceMaterializeCalls?.length || 0,
+      };
+    `,
+  );
+  if (!state.featuredSrc.startsWith("data:image/") || state.stripSrcs.some((src) => !src.startsWith("data:image/"))) {
+    throw new Error(`LocalPath-only record did not hydrate into previewable images: ${JSON.stringify(state)}`);
+  }
+  if (state.materializeCount < 2) {
+    throw new Error(`Expected localPath-only record to call materialize IPC for each image, got ${JSON.stringify(state)}`);
+  }
+
+  await evaluateWithRetry(page, () => {
+    localStorage.removeItem("uclaw.ecommerceImageRecords.v1");
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await evaluateWithRetry(page, () => {
     window.history.pushState({}, "", "/tasks");
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
@@ -816,6 +933,8 @@ async function runAcceptance(options) {
 
       await ensureConnected(page, gatewayUrl, gatewayWebSocketUrl, token);
       await verifyPartialRecordStatus(page);
+      await installDirectImageApiStub(page);
+      await verifyLocalPathOnlyRecordHydration(page);
       const state = await exerciseWorkbench(page, imagePath);
 
       if (!state.hasWorkbench) throw new Error(`${viewport.name}: Workbench host missing`);

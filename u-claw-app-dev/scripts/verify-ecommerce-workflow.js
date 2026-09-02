@@ -158,6 +158,9 @@ function verifyDirectDesktopApi(errors) {
     "/images/${images.length ? 'edits' : 'generations'}",
     "requestModel",
     "materializeEcommerceImageUrl",
+    "materializeEcommerceLocalImage",
+    "resolveTrustedEcommerceLocalPath",
+    "本地图片不存在或不在允许的电商图片目录内",
     "materializeEcommerceImageForRenderer",
     "isInvalidEcommerceImageTokenError",
     "refreshEcommerceImageCredential",
@@ -228,6 +231,12 @@ function verifyDirectDesktopApi(errors) {
   requireToken(errors, "activation/service.go", activationService, "ForceRotateToken");
   requireToken(errors, "provisioning/service.go", provisioningService, "tokenName(req.ForceRotateToken)");
   requireToken(errors, "provisioning/service.go", provisioningService, "createdToken.APIKey()");
+  const postgresStore = readFile("cloud/uclaw-cloud-api/internal/postgres/store.go");
+  const postgresEcommerceStore = readFile("cloud/uclaw-cloud-api/internal/postgres/ecommerce_usage_store.go");
+  requireToken(errors, "postgres/store.go", postgresStore, "EnsureEcommerceImageUsageSchema(ctx)");
+  requireToken(errors, "postgres/ecommerce_usage_store.go", postgresEcommerceStore, "ecommerceImageUsageSchemaSQL");
+  requireToken(errors, "postgres/ecommerce_usage_store.go", postgresEcommerceStore, "CREATE TABLE IF NOT EXISTS ecommerce_image_usage_events");
+  requireToken(errors, "postgres/ecommerce_usage_store.go", postgresEcommerceStore, "idx_ecommerce_image_usage_user_created");
   requireToken(errors, "provisioning/service.go", provisioningService, "isSessionLimitError");
   requireToken(errors, "provisioning/service.go", provisioningService, "WithAdminUser");
 }
@@ -300,6 +309,7 @@ function verifyPatchSource(errors) {
     "UcEcommerceAspectRatioPresets",
     "UcEcommerceSelectedAspectRatio",
     "UcEcommerceEnsureDataUrl",
+    "hydrateEcommerceResultImages",
     "UcEcommerceDownloadImage",
     "UcEcommerceDownloadFileName",
     "ecommerce-download-filename-1",
@@ -444,6 +454,7 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceVisualStylePresets",
       "UcEcommerceAspectRatioPresets",
       "UcEcommerceDownloadImage",
+      "hydrateEcommerceResultImages",
       "UcEcommerceDownloadFileName",
       "UcEcommerceNormalizeRecord",
       "UcEcommerceRecordEffectiveStatus",
