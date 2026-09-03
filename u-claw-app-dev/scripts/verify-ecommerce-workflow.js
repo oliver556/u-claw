@@ -7,6 +7,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const assetsDir = path.join(root, "node_modules", "openclaw", "dist", "control-ui", "assets");
 const patchScript = path.join(root, "scripts", "patch-openclaw.js");
+const ecommerceTaskPageMethodsSource = path.join(root, "scripts", "ecommerce-task-page-methods.source.txt");
 const mainProcessFile = path.join(root, "src", "main.js");
 const preloadFile = path.join(root, "src", "preload.js");
 const cloudMigrationDir = path.join(root, "cloud", "uclaw-cloud-api", "migrations");
@@ -452,6 +453,7 @@ function verifyCloudEcommerceUsageMigration(errors) {
  */
 function verifyPatchSource(errors) {
   const content = readFile(patchScript);
+  const methodsSource = readFile(ecommerceTaskPageMethodsSource);
   const requiredTokens = [
     "patchTasksPageEcommerceWorkflow",
     "data-uclaw-ecommerce-workbench",
@@ -555,6 +557,9 @@ function verifyPatchSource(errors) {
     "UcEcommerceRememberDeletedRecords",
     "UcEcommerceRecordIsDeleted",
     "uclaw.ecommerceImageRecordDeletes.v1",
+    "ecommerceTaskPageMethodsSourcePath",
+    "readCanonicalEcommerceTaskPageMethods",
+    "Missing canonical ecommerce task page method source",
     "diagnostic_status",
     "missing_fields",
     "当前日志为进行中快照",
@@ -628,6 +633,21 @@ function verifyPatchSource(errors) {
 
   for (const token of requiredTokens) {
     requireToken(errors, "patch-openclaw.js", content, token);
+  }
+
+  for (const token of [
+    "cleanupEcommerceFileUrls",
+    "importEcommerceLocalManifests",
+    "startEcommerceImageGeneration",
+    "retryEcommerceUsageSync",
+    "deleteEcommerceRecord",
+    "UcEcommerceRememberDeletedRecords",
+  ]) {
+    requireToken(errors, "ecommerce-task-page-methods.source.txt", methodsSource, token);
+  }
+
+  if (!content.includes("readCanonicalEcommerceTaskPageMethods() ||")) {
+    errors.push("patch-openclaw.js must use the checked-in ecommerce task methods source before falling back to generated assets");
   }
 
   requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");

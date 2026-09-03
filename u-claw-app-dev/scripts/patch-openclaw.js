@@ -15,6 +15,7 @@ const schemaPath = path.join(openclawDistDir, "schema-BuOFpc7K.js");
 const serverMethodsPath = path.join(openclawDistDir, "server-methods-NpEcZnvp.js");
 const coreDescriptorsPath = path.join(openclawDistDir, "core-descriptors-DRUtdasO.js");
 const ecommerceWorkflowSkillSourcePath = path.join(__dirname, "ecommerce-main-detail-workflow.SKILL.md");
+const ecommerceTaskPageMethodsSourcePath = path.join(__dirname, "ecommerce-task-page-methods.source.txt");
 const ecommerceWorkflowSkillTargetPath = path.join(
   root,
   "node_modules",
@@ -49,6 +50,15 @@ function copyFileIfChanged(source, target) {
 
   fs.copyFileSync(source, target);
   return true;
+}
+
+/**
+ * Reads the canonical ecommerce task-page methods instead of relying on an
+ * already-patched node_modules tree during clean npm installs.
+ */
+function readCanonicalEcommerceTaskPageMethods() {
+  if (!fs.existsSync(ecommerceTaskPageMethodsSourcePath)) return "";
+  return read(ecommerceTaskPageMethodsSourcePath).trim();
 }
 
 /**
@@ -2969,14 +2979,14 @@ function patchTasksPageEcommerceWorkflow() {
   redesignedWorkbenchView = redesignedWorkbenchView.replace(recordClearButtonTemplate, recordClearConfirmTemplate);
   const ecommerceHelper = helper.replace(/function UcEcommerceWorkbenchView\(e\)\{[\s\S]*\}$/, redesignedWorkbenchView);
 
-  const ecommerceTaskPageMethodsSource = (() => {
+  const ecommerceTaskPageMethodsSource = readCanonicalEcommerceTaskPageMethods() || (() => {
     for (const file of listAssetFiles(/^tasks-page-.*\.js$/, "tasks-page")) {
       const source = read(file);
       const start = source.indexOf("cleanupEcommerceFileUrls(");
       const end = source.indexOf("render(){return i`", start);
       if (start >= 0 && end > start) return source.slice(start, end);
     }
-    throw new Error("Could not extract ecommerce task page method source");
+    throw new Error(`Missing canonical ecommerce task page method source: ${ecommerceTaskPageMethodsSourcePath}`);
   })();
   let methods = ecommerceTaskPageMethodsSource;
   for (const required of [
